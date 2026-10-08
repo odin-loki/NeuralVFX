@@ -46,6 +46,8 @@ endif()
 # deterministic and identical across machines with the same compiler.
 add_library(neuralfx_core STATIC
   src/core/clip.cpp
+  src/core/metrics.cpp
+  src/core/flipbook.cpp
   src/sim/sim.cpp)
 target_include_directories(neuralfx_core PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include")
 neuralfx_defaults(neuralfx_core)
@@ -74,7 +76,7 @@ endif()
 if(NEURALFX_BUILD_TESTS)
   find_package(GTest CONFIG REQUIRED)
   include(GoogleTest)
-  add_executable(neuralfx_tests tests/test_proto.cpp tests/test_sim.cpp)
+  add_executable(neuralfx_tests tests/test_proto.cpp tests/test_sim.cpp tests/test_baselines.cpp)
   target_link_libraries(neuralfx_tests PRIVATE neuralfx_proto neuralfx_io GTest::gtest_main)
   neuralfx_defaults(neuralfx_tests)
   gtest_discover_tests(neuralfx_tests TEST_PREFIX "neuralfx." DISCOVERY_MODE PRE_TEST PROPERTIES LABELS neuralfx)
