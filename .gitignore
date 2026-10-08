@@ -1,0 +1,37 @@
+# Builds
+build/
+build-*/
+out/
+*.o
+*.a
+*.so
+perf.data*
+callgrind.out.*
+
+# Data, frames, videos and weights never enter git (keep them under NEURALVFX_DATA)
+data/
+cache/
+*.mp4
+*.mov
+*.mkv
+*.avi
+*.webm
+*.gif
+*.exr
+*.png
+*.jpg
+*.jpeg
+*.tga
+*.dds
+*.ktx
+*.ktx2
+*.npy
+*.npz
+*.pt
+*.pth
+*.onnx
+*.bin
+*.nfx
+*.safetensors
+!docs/**/*.png
+!docs/**/*.svg
