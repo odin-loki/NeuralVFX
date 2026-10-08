@@ -42,6 +42,29 @@ if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
   target_compile_options(neuralfx_proto PRIVATE -ffp-contract=fast -Wno-psabi)
 endif()
 
+# Core: clips, the simulation (and later metrics and baselines). Baseline ISA, no contraction: the simulation is
+# deterministic and identical across machines with the same compiler.
+add_library(neuralfx_core STATIC
+  src/core/clip.cpp
+  src/sim/sim.cpp)
+target_include_directories(neuralfx_core PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include")
+neuralfx_defaults(neuralfx_core)
+
+# Images and videos (PNG via zlib, mp4 via an ffmpeg pipe) for previews, figures and comparisons.
+find_package(ZLIB REQUIRED)
+add_library(neuralfx_io STATIC src/core/image_io.cpp)
+target_link_libraries(neuralfx_io PUBLIC neuralfx_core PRIVATE ZLIB::ZLIB)
+neuralfx_defaults(neuralfx_io)
+
+option(NEURALFX_BUILD_TOOLS "Build the command-line tools" ON)
+if(NEURALFX_BUILD_TOOLS)
+  foreach(tool nvfx_sim)
+    add_executable(${tool} tools/${tool}.cpp)
+    target_link_libraries(${tool} PRIVATE neuralfx_io)
+    neuralfx_defaults(${tool})
+  endforeach()
+endif()
+
 if(NEURALFX_BUILD_BENCH)
   add_executable(neuralfx_arch_bench bench/arch_bench.cpp)
   target_link_libraries(neuralfx_arch_bench PRIVATE neuralfx_proto)
@@ -51,8 +74,8 @@ endif()
 if(NEURALFX_BUILD_TESTS)
   find_package(GTest CONFIG REQUIRED)
   include(GoogleTest)
-  add_executable(neuralfx_tests tests/test_proto.cpp)
-  target_link_libraries(neuralfx_tests PRIVATE neuralfx_proto GTest::gtest_main)
+  add_executable(neuralfx_tests tests/test_proto.cpp tests/test_sim.cpp)
+  target_link_libraries(neuralfx_tests PRIVATE neuralfx_proto neuralfx_io GTest::gtest_main)
   neuralfx_defaults(neuralfx_tests)
   gtest_discover_tests(neuralfx_tests TEST_PREFIX "neuralfx." DISCOVERY_MODE PRE_TEST PROPERTIES LABELS neuralfx)
 endif()
