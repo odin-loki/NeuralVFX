@@ -59,6 +59,9 @@ generation to compression (§3, G3).
 | G5a | shard critic: a frozen binary mixer picks the most real-looking of a few rolled-ahead seeds | S8 | endless statistics improve on validation, then on test |
 | G5b | a mixer over the stepper's update and a cheap solver's update | S8 | smoke tracks better after a few seconds |
 | G6 | one DCM-fine for every effect (the effect is a context) | S8 | as G1 |
+| H1 | **computing on compressed data:** feature volumes, weight tables and stored fields kept LZ78- or grammar-compressed (RePair), with products and blends computed on the compressed form (a phrase's partial sum is built from its parent's), so the cost follows the compressed size | S9 | it is faster than the dense SIMD code it replaces at the same result (bit-exact or within the parity tests), on a quiet machine |
+| H2 | **run-aware fields:** the mostly empty fine fields kept as runs, so the detail step, the shader and compositing touch only material | S9 | as H1; the fireball's frame time falls |
+| H3 | **LZ inside the coder:** a match model and LZ tokens in the context-mixing coder, for faster decoding at a small cost in size, and decoding of single slices without the whole file | S9 | load or decode time falls by more than the size grows |
 
 When a design does not pass, it is reported as a null result with its numbers, as CameraDetector reported its own.
 
@@ -108,6 +111,12 @@ What could repeat CameraDetector's outcome, and how we find out fast:
 | S6 | meet in the middle: v2 rollout effects (every part that passed, in the runtime with parity and zero-allocation tests); the fireball re-rendered with v2 and compared with v1 | main agent | v2, and the fireball v1 against v2 |
 | S7 | a second optimisation round; the final 30 fps video | agents | final profile and video |
 | S8 | extras on idle cores: G5a, G4a, G6, G5b | agents | one-line decisions |
+| S9 | study H, the owner's addition: compute on LZ- and grammar-compressed data (H1-H3), measured against the dense code it would replace | an agent, after S1 | H1-H3 decided |
+
+Study H is honest about where it can win. Small dense products in AVX2 registers are hard to beat, and published
+speed-ups from grammar-compressed products are mostly over sparse formats on large, repetitive matrices. The likely
+wins here are the large blended feature volumes of the frame models, the mostly empty fine fields (H2) and decoding
+(H3).
 
 The core is S1, S2, S3 and S6. If time runs short, the cuts are S8, then S5's extension beyond fire, then G3b, then
 S7's speed targets (the final video stays).
