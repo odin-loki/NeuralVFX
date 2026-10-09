@@ -31,6 +31,9 @@ struct ClipScores {
 // (for example the held-out odd frames); empty = all.
 ClipScores score(const Clip& ref, const Clip& test, std::span<const int> frames = {});
 
+// Only the active-region PSNR over all frames (cheap: no SSIM), for nearest-clip searches.
+double active_psnr(const Clip& ref, const Clip& test);
+
 // Distribution statistics of a clip, for comparing generated variations with real clips when pixels cannot match
 // (different seeds): where it covers, how bright, how fine its detail, how fast it changes.
 struct ClipStats {

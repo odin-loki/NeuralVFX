@@ -1,6 +1,6 @@
 # Neural visual effects on one CPU core: plan
 
-Status: **current** (Phase 0 done on 8 October 2026; Phases 1–5 not started). Audience: new, dev, research.
+Status: **current** (Phases 0–5 carried out 8–9 October 2026; results in [REPORT.md](REPORT.md)). Audience: new, dev, research.
 
 Code: [README.md](../README.md). Phase 0 evidence: [results/phase0/](../results/phase0/).
 
@@ -273,10 +273,30 @@ or int8 could); no engine around the code (cache effects of a real game frame ar
 | Video licences | licence register before any use; nothing raw in git |
 | Engine integration cost | C API, no dependencies, engine-owned threading; target engine chosen by the owner |
 
-## 10. Questions for the owner
+## 10. Decisions
 
-1. Run-time generation, offline authoring, or both?
-2. Which effects first, at what sprite resolution, and with what budget (ms per effect, how many on screen)?
-3. Where do the training videos come from, and under what licences?
-4. Which engine: Unreal, Unity, Godot or custom?
-5. Is Python allowed for offline training and tooling (never shipped)?
+The owner was asked five questions and answered (8 October 2026): "You pick all. Do all. Be comprehensive." The
+answers below were chosen on that instruction; each can be revisited.
+
+1. **Run-time generation, offline authoring, or both?** Both. The default is run-time evaluation through the C API
+   (`nvfx_render`), and `nvfx_bake` expands an effect into an ordinary flipbook at load time for engines or platforms
+   that prefer textures (it saves download size rather than memory).
+2. **Effects, resolution and budget.** Fire and smoke (looping) and explosions (one-shot) first, because the simulator
+   makes unlimited labelled data for them; sparks and magic follow once owner footage exists. Native size 128 x 128,
+   with 64 and 256 as levels of detail. Budget: at most 0.5 ms per 128 x 128 evaluation on one AVX2 core, effects
+   evaluated at 30 Hz and shared between instances with equal controls, so 16 distinct live effects cost about
+   8 ms of one core per 33 ms. Memory target: at most 128 KB per effect, one eighth of a 1 MB BC7/BC3 flipbook (the
+   ratio NVIDIA claims for Neural Texture Compression).
+3. **Training videos and licences.** None were supplied, so training uses the project's own simulation (no
+   licence question). Owner footage enters through `nvfx_ingest`, which accepts own footage, CC0, CC-BY (author
+   recorded), CC-BY-SA (flagged) and commercial footage whose agreement allows ML training, refuses NonCommercial,
+   NoDerivatives and unknown licences, and records every clip in a licence register ([DATA.md](DATA.md)).
+4. **Engine.** Engine-neutral: a C API with no dependencies (`include/neuralfx/nvfx.h`), a static and a shared
+   library, a plain-C example host, and integration notes for Unreal, Unity and Godot ([ENGINES.md](ENGINES.md)).
+   No engine plugin is built here (none can be tested in this environment).
+5. **Python.** No. Training is C++23 with hand-written gradients (no LibTorch, no Python), checked against finite
+   differences; the repository keeps its "no Python" rule.
+
+Language: C++23 throughout (owner's instruction, 8 October 2026): `std::print`, `std::expected`, `std::span`, ranges
+and views, multidimensional `operator[]`, `std::float16_t`, `std::byteswap`, `std::ispanstream`, `std::jthread`. The
+engine-facing header is C so that every engine can call it.

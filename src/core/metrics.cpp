@@ -266,3 +266,23 @@ Interval paired_bootstrap(std::span<const double> a, std::span<const double> b, 
 }
 
 }  // namespace nfx::metrics
+
+namespace nfx::metrics {
+
+double active_psnr(const Clip& ref, const Clip& test) {
+  if (ref.size != test.size || ref.frames != test.frames) throw std::invalid_argument("active_psnr: clips differ in shape");
+  double sum = 0, n = 0;
+  for (std::size_t i = 0; i < ref.rgba.size(); i += 4) {
+    const std::uint8_t* r = ref.rgba.data() + i;
+    const std::uint8_t* t = test.rgba.data() + i;
+    if (std::max({r[0], r[1], r[2], r[3]}) <= 4 && std::max({t[0], t[1], t[2], t[3]}) <= 4) continue;
+    n += 4;
+    for (int c = 0; c < 4; ++c) {
+      const double d = (double(r[c]) - double(t[c])) * kInv255;
+      sum += d * d;
+    }
+  }
+  return n > 0 ? psnr_from_mse(sum / n) : kPsnrCap;
+}
+
+}  // namespace nfx::metrics

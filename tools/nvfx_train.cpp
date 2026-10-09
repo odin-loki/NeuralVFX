@@ -13,6 +13,7 @@
 
 #include <neuralfx/metrics.hpp>
 #include <neuralfx/model.hpp>
+#include <neuralfx/sim.hpp>
 #include <neuralfx/train.hpp>
 
 #include <algorithm>
@@ -92,6 +93,9 @@ int main(int argc, char** argv) try {
   r.model.effect = first.effect;
   r.model.fps = first.fps;
   r.model.feature_bits = a.i("bits", 16);
+  if (first.source == "sim" && h.n_controls == sim::kControls) {
+    r.model.control_names.assign(sim::kControlNames.begin(), sim::kControlNames.end());
+  }
   const auto out = a.need("out");
   if (auto s = save_model(out, r.model); !s) throw std::runtime_error(s.error());
   auto m = load_model(out);

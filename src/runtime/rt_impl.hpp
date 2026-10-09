@@ -93,21 +93,52 @@ void blend_slice(const Model& m, float t, std::span<const float> w, std::span<fl
 }
 
 // Premultiplied RGBA floats (planar rows r, g, b, a of n pixels) to RGBA8, with the optional colour matrix.
+// One channel of a grid row expanded to full width: d[x] = lerp(r[xi[x]], r[xi[x] + 1], xf[x]). Kept out of line so its
+// registers are its own (inlined into render() it reloaded every pointer from the stack per pixel).
+[[gnu::noinline]] void expand_row(const float* __restrict r, const int* __restrict xi, const float* __restrict xf,
+                                  float* __restrict d, int n) {
+  for (int x = 0; x < n; ++x) {
+    const float a = r[xi[x]], b = r[xi[x] + 1];
+    d[x] = a + xf[x] * (b - a);
+  }
+}
+
+// Planar rows are processed in chunks of 16: the colour matrix and the clamp-and-round vectorise as plain loops; only
+// the final interleave into RGBA bytes is per pixel.
 inline void write_pixels(const float* r, const float* g, const float* b, const float* a, int n, const FrameInput& in,
                          std::uint8_t* out) {
-  for (int k = 0; k < n; ++k) {
-    float cr = r[k], cg = g[k], cb = b[k];
+  for (int k0 = 0; k0 < n; k0 += kB) {
+    const int m = std::min(kB, n - k0);
+    float q[4][kB];
+    for (int k = 0; k < m; ++k) {
+      q[0][k] = r[k0 + k];
+      q[1][k] = g[k0 + k];
+      q[2][k] = b[k0 + k];
+      q[3][k] = a[k0 + k];
+    }
     if (in.apply_colour) {
       const auto& M = in.colour;
-      const float nr = M[0] * cr + M[1] * cg + M[2] * cb, ng = M[3] * cr + M[4] * cg + M[5] * cb, nb = M[6] * cr + M[7] * cg + M[8] * cb;
-      cr = nr;
-      cg = ng;
-      cb = nb;
+      for (int k = 0; k < m; ++k) {
+        const float cr = q[0][k], cg = q[1][k], cb = q[2][k];
+        q[0][k] = M[0] * cr + M[1] * cg + M[2] * cb;
+        q[1][k] = M[3] * cr + M[4] * cg + M[5] * cb;
+        q[2][k] = M[6] * cr + M[7] * cg + M[8] * cb;
+      }
     }
-    out[4 * k] = to_u8(cr);
-    out[4 * k + 1] = to_u8(cg);
-    out[4 * k + 2] = to_u8(cb);
-    out[4 * k + 3] = to_u8(a[k]);
+    std::uint8_t u[4][kB];
+    for (int c = 0; c < 4; ++c) {
+      for (int k = 0; k < m; ++k) {
+        const float v = q[c][k] < 0.f ? 0.f : (q[c][k] > 1.f ? 1.f : q[c][k]);
+        u[c][k] = static_cast<std::uint8_t>(static_cast<int>(v * 255.f + 0.5f));
+      }
+    }
+    std::uint8_t* o = out + 4 * static_cast<std::size_t>(k0);
+    for (int k = 0; k < m; ++k) {
+      o[4 * k] = u[0][k];
+      o[4 * k + 1] = u[1][k];
+      o[4 * k + 2] = u[2][k];
+      o[4 * k + 3] = u[3][k];
+    }
   }
 }
 
@@ -157,11 +188,7 @@ class GridRenderer final : public Renderer {
         const float* a = slice_.data() + (static_cast<std::size_t>(c) * G + y0) * G;
         float* r = rowg_.data() + static_cast<std::size_t>(c) * G;
         for (int gx = 0; gx < G; ++gx) r[gx] = a[gx] + fy * (a[gx + G] - a[gx]);
-        float* d = rowf_.data() + static_cast<std::size_t>(c) * S_;
-        for (int x = 0; x < S_; ++x) {
-          const int x0 = x0_[static_cast<std::size_t>(x)];
-          d[x] = r[x0] + fx_[static_cast<std::size_t>(x)] * (r[x0 + 1] - r[x0]);
-        }
+        expand_row(r, x0_.data(), fx_.data(), rowf_.data() + static_cast<std::size_t>(c) * S_, S_);
       }
       std::uint8_t* row = rgba + stride * static_cast<std::size_t>(y);
       for (int x0 = 0; x0 < S_; x0 += kB) {
