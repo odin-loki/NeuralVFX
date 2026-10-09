@@ -102,6 +102,12 @@ neuralfx_defaults(neuralfx_compose)
 add_library(neuralfx_dcm STATIC src/dcm/mixer.cpp src/dcm/compact.cpp src/dcm/search.cpp src/dcm/roc.cpp src/dcm/kmeans.cpp)
 target_include_directories(neuralfx_dcm PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include")
 neuralfx_defaults(neuralfx_dcm)
+# The denoiser on coarse states of rollout effects (docs/DCM.md, stage S5): forward and backward passes written by hand,
+# AVX2 + FMA kernels (the trainer's requirement).
+add_library(neuralfx_ddpm STATIC src/dcm/ddpm.cpp)
+target_link_libraries(neuralfx_ddpm PUBLIC neuralfx_dcm neuralfx_train)
+neuralfx_defaults(neuralfx_ddpm)
+neuralfx_simd(neuralfx_ddpm)
 
 if(NEURALFX_BUILD_TOOLS)
   foreach(tool nvfx_sim nvfx_train nvfx_eval nvfx_experiment nvfx_ingest)
@@ -111,10 +117,10 @@ if(NEURALFX_BUILD_TOOLS)
   endforeach()
   target_sources(nvfx_experiment PRIVATE tools/experiment_d.cpp)  # study D: start points and learned dynamics
   target_sources(nvfx_experiment PRIVATE tools/experiment_g.cpp)  # study G: diffusion-context mixing (docs/DCM.md)
-  target_link_libraries(nvfx_experiment PRIVATE neuralfx_dcm)
-  # DCM: the mixer search on synthetic problems and version stamps of released mixers.
+  target_link_libraries(nvfx_experiment PRIVATE neuralfx_dcm neuralfx_ddpm)
+  # DCM: the mixer search on synthetic problems, version stamps of released mixers, the coarse-state denoiser.
   add_executable(nvfx_dcm tools/nvfx_dcm.cpp)
-  target_link_libraries(nvfx_dcm PRIVATE neuralfx_dcm)
+  target_link_libraries(nvfx_dcm PRIVATE neuralfx_dcm neuralfx_ddpm)
   neuralfx_defaults(nvfx_dcm)
   # The engine-side example: plain C against the shared library's API.
   add_executable(nvfx_c_host examples/c_host.c)
@@ -148,8 +154,8 @@ if(NEURALFX_BUILD_TESTS)
   include(GoogleTest)
   add_executable(neuralfx_tests tests/test_proto.cpp tests/test_sim.cpp tests/test_baselines.cpp tests/test_train.cpp
                                 tests/test_runtime.cpp tests/test_ingest.cpp tests/test_rollout.cpp tests/test_compose.cpp
-                                tests/test_dcm.cpp)
-  target_link_libraries(neuralfx_tests PRIVATE neuralfx_proto neuralfx_io neuralfx_train nvfx neuralfx_compose neuralfx_dcm
+                                tests/test_dcm.cpp tests/test_dcm_ddpm.cpp)
+  target_link_libraries(neuralfx_tests PRIVATE neuralfx_proto neuralfx_io neuralfx_train nvfx neuralfx_compose neuralfx_dcm neuralfx_ddpm
                                                GTest::gtest_main)
   neuralfx_defaults(neuralfx_tests)
   gtest_discover_tests(neuralfx_tests TEST_PREFIX "neuralfx." DISCOVERY_MODE PRE_TEST PROPERTIES LABELS neuralfx)

@@ -111,3 +111,71 @@ What could repeat CameraDetector's outcome, and how we find out fast:
 
 The core is S1, S2, S3 and S6. If time runs short, the cuts are S8, then S5's extension beyond fire, then G3b, then
 S7's speed targets (the final video stays).
+
+## G2. Diffusion for the macro features (stage S5)
+
+Status: **rules fixed before any result** (9 October 2026); results follow in G2.4 to G2.7 as each part finishes.
+
+### G2.1 The denoiser
+
+`include/neuralfx/dcm/ddpm.hpp`, `src/dcm/ddpm.cpp`, `src/dcm/ddpm_kernels.hpp` (library `neuralfx_ddpm`). The owner's
+denoiser (CameraDetector, `cabinlab/src/diffusion/denoiser.cpp`) is a LibTorch UNet; this one is written out by hand,
+forward and backward, because this project uses no LibTorch.
+
+- **What it models:** the 32 x 32 coarse state of a rollout effect (velocity, heat, soot), each channel divided by the
+  stepper's channel scale (`rollout::Model::scale`), plus two position channels as inputs.
+- **The network:** an epsilon-prediction UNet with levels 32 x 32 (32 channels), 16 x 16 (64) and 8 x 8 (64): a 3 x 3
+  stem, two residual blocks per level (one on the way down and one on the way up at 32 and 16, two at 8), 2 x 2
+  average pooling and nearest upsampling with 1 x 1 convolutions, additive skips, and a 3 x 3 output layer. A block is
+  `x + conv3(SiLU(FiLM(conv3(SiLU(x)))))`. FiLM comes from one two-layer MLP over the sinusoidal embedding of the noise
+  level and the controls (and the age, for one-shot effects). No attention and no GroupNorm: the second convolution of
+  every block and the output layer start at zero, gradients are clipped and the learning rate warms up instead.
+- **Size and cost:** 391,748 parameters and 89.5 million multiply-adds per pass. The brief asked for about 0.25 M and
+  60 M; with the brief's widths (32/64/64) and two blocks per level, the 64-wide blocks alone hold 295,000 weights, so
+  the brief's widths were kept and the numbers are reported as they are.
+- **Kept from the owner's version:** the cosine schedule with its beta clip (T = 1000), epsilon prediction, identity
+  start of every block, Adam with a linear warm-up then cosine decay to 10%, gradient clipping, an EMA copy (0.99 for
+  500 steps, then 0.999), and features read at a fixed noise level with one fixed noise image per level and seed.
+- **Sampling:** deterministic DDIM (eta = 0) on a 25-step grid; SDEdit noises a state to t0 and runs the same grid down.
+- **Tests** (`tests/test_dcm_ddpm.cpp`): the fast AVX2 kernels equal the plain convolution patterns copied from
+  `rollout_train.cpp`; the hand-written gradient matches finite differences on an 8 x 8 toy for every part of the network;
+  training lowers the held-out loss on a toy set; ten repeats of a short training give one SHA-256 of the weights, for
+  one or two threads; `features_at()` is bit-identical for a seed; Tweedie's denoise and the predicted noise recompose
+  x_t; DDIM is deterministic and stays in range; serialisation round-trips.
+
+### G2.2 Data and training
+
+- **States:** study D's training recipe for fire (`record_runs`, salt 1, 160 runs of 240 frames, as `d-train`), every
+  second coarse state after the effect's 1 s warm-up (frames 30 to 238): 16,800 states. Validation states: 16 runs of
+  salt 3, the same frames (1,680 states). Under `NEURALVFX_DATA/g/diff/`, never in git.
+- **Training:** `nvfx_dcm ddpm-train`: batch 32, Adam (learning rate 5e-4, 500 warm-up steps), clip 1, EMA 0.999, two
+  threads at `nice 10`; the number of steps is set from a timed probe to fit about 3 to 4 CPU-hours. The EMA loss at
+  t = 50, 200, 500 and 800 on 256 validation states (fixed noise) is logged every 500 steps
+  (`results/experiments/g_diff_train.csv`).
+
+### G2.3 Rules, fixed before any result
+
+- **Validation:** salt-3 runs and 10 validation settings: `std::mt19937_64 rng(2027)`, each control uniform in
+  [0.05, 0.95], off study B's training grid like B's own held-out settings (at least 0.05 from 0, 0.5 and 1 for intensity
+  and turbulence, from 0, 0.25, 0.5, 0.75 and 1 for wind) and at least 0.05 (Euclidean distance in control space) from
+  every one of B's 10 held-out settings (`results/experiments/g_diff_settings.csv`). Every choice below is made on
+  validation.
+- **Test, once, only for a use that passes validation:** B's 10 held-out settings with new seeds (and the salt-2 runs),
+  as `d-eval` (`nvfx_experiment g-diff-test`, which refuses to run a use that did not pass).
+- **Intervals:** 95% paired bootstrap, 10,000 resamples; an interval covering zero is a tie.
+- **Score of generated frames:** the detail score of study D's calibration: detail spectrum distance + |ln motion
+  ratio| + |ln emission ratio| + |ln coverage ratio| against a real run at the same setting (lower is better).
+  Spectrum, motion, coverage and mean-frame PSNR are reported beside it.
+- **Timing** only on a quiet machine (load below 1.5), one pinned core; otherwise the number is reported as an upper
+  bound and marked unmeasured.
+
+| use | alternative without diffusion | how it is chosen and scored | kept only if |
+|---|---|---|---|
+| **G2a** contexts: denoiser features at t = 400 and 600 from the 16 x 16 and 8 x 8 levels (blocks e1, m1, d1), averaged per 8 x 8 region, standardised, PCA-16, k-means (K = 4, 8, 16), fitted on training states | hand-made contexts: heat level (empty, then terciles), height band (4), flow speed (terciles), control bins (each control below or above 0.5); and plain coarse-statistics contexts (the same PCA and k-means on the region's raw coarse values) as the floor | check 1 on validation states: normalised mutual information, and the share of the diffusion contexts' entropy that the joint hand-made context explains, I(D; H) / H(D) | check 1: **redundant, stop**, if at every K the joint hand-made context explains at least 80% of the diffusion contexts' entropy. Otherwise the nested search of stage S2 decides: they must beat the hand-made contexts beyond the search's own seed noise (§3) |
+| **G2b** prior against drift: every N frames, Tweedie's one-step denoise at a small t, x0_hat = x - sqrt((1 - abar) / abar) eps_hat(sqrt(abar) x, t), blended with weight beta into the coarse state (no noise added) | the same continuous rollout without the prior; the runtime's 6 s shards as a reference | N in {4, 8, 16}, t in {20, 50, 100}, beta in {0.25, 0.5, 1}, chosen by the mean detail score of the six 10 s windows of one continuous 60 s rollout at validation settings 1 and 2 (tuning seeds). The decision uses fresh seeds at the same two settings, paired over the 12 (setting, window) pairs | the interval of (prior - none) lies below zero, and the prior costs at most 0.5 ms per frame (one pass every N frames) |
+| **G2c** start points: a fresh DDIM sample at the requested controls, or SDEdit of the nearest stored start from t0 in {300, 400, 500} | the nearest stored start rolled ahead 0.5 s at the requested controls (the stored start as it is, as a reference) | every start plays as fire does (a 1 s warm-up that grows the fine fields) and its first 2 s are scored against a real run, at the 10 validation settings. The variant is chosen on tuning seeds (2 per setting); the decision uses 2 fresh seeds per setting, paired over the 10 settings. Diversity: mean pairwise distance between 8 generated starts against 8 real states at a setting | the interval of (variant - rolled start) lies below zero, and generating costs at most 100 ms per shard (DDIM passes x one pass) |
+
+What would repeat CameraDetector's outcome here: the denoiser's clusters follow what the hand-made contexts already
+say (how hot a region is, how high, which controls), as CameraDetector's followed camera and light; the prior pulls
+the state towards an average fire and takes the flicker with it; generated starts are softer and less varied than
+real states, the usual failure of a small diffusion model trained briefly.
