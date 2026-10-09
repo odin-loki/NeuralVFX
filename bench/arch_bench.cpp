@@ -15,7 +15,7 @@
 #include <cstring>
 #include <format>
 #include <fstream>
-#include <iostream>
+#include <print>
 #include <sstream>
 #include <string>
 #include <vector>
@@ -117,14 +117,14 @@ int main(int argc, char** argv) {
     const std::string a = argv[i];
     const auto next = [&]() -> std::string {
       if (i + 1 >= argc) {
-        std::cerr << a << " needs a value\n";
+        std::println(stderr, "{} needs a value", a);
         std::exit(2);
       }
       return argv[++i];
     };
     if (a == "--isa") {
       if (!nfx::proto::parse_isa(next(), isa)) {
-        std::cerr << "--isa: base, avx2 or avx512\n";
+        std::println(stderr, "--isa: base, avx2 or avx512");
         return 2;
       }
     } else if (a == "--sizes") {
@@ -136,13 +136,12 @@ int main(int argc, char** argv) {
     } else if (a == "--csv") {
       csv = next();
     } else {
-      std::cerr << "usage: neuralfx_arch_bench [--isa base|avx2|avx512] [--sizes 64,128] [--frames N] [--core K] "
-                   "[--csv FILE]\n";
+      std::println(stderr, "usage: neuralfx_arch_bench [--isa base|avx2|avx512] [--sizes 64,128] [--frames N] [--core K] [--csv FILE]");
       return 2;
     }
   }
   if (!nfx::proto::isa_supported(isa)) {
-    std::cerr << "this CPU cannot run " << nfx::proto::isa_name(isa) << "\n";
+    std::println(stderr, "this CPU cannot run {}", nfx::proto::isa_name(isa));
     return 2;
   }
 #if defined(__linux__)
@@ -150,7 +149,7 @@ int main(int argc, char** argv) {
     cpu_set_t set;
     CPU_ZERO(&set);
     CPU_SET(core, &set);
-    if (sched_setaffinity(0, sizeof(set), &set) != 0) std::cerr << "warning: could not pin to core " << core << "\n";
+    if (sched_setaffinity(0, sizeof(set), &set) != 0) std::println(stderr, "warning: could not pin to core {}", core);
   }
 #endif
 #if defined(__x86_64__)
@@ -162,13 +161,13 @@ int main(int argc, char** argv) {
     out.open(csv);
     out << "isa,size,model,params,kb_fp16,macs_per_px,median_ms,p90_ms,gmac_s\n";
   }
-  std::cout << std::format("ISA {}, {} frames per model, pinned to core {}\n", nfx::proto::isa_name(isa), frames, core);
+  std::println("ISA {}, {} frames per model, pinned to core {}", nfx::proto::isa_name(isa), frames, core);
   for (const int size : sizes) {
-    std::cout << std::format("\n### {0}x{0}\n\n", size);
-    std::cout << "| Model | Params | KB fp16 | MAC/px | ms median | ms p90 | GMAC/s |\n";
-    std::cout << "|---|---:|---:|---:|---:|---:|---:|\n";
+    std::print("\n### {0}x{0}\n\n", size);
+    std::println("| Model | Params | KB fp16 | MAC/px | ms median | ms p90 | GMAC/s |");
+    std::println("|---|---:|---:|---:|---:|---:|---:|");
     const Timing fb = flipbook(size, frames);
-    std::cout << std::format("| flipbook 64 frames RGBA8, blended (reference) | - | {} | - | {:.3f} | {:.3f} | - |\n",
+    std::println("| flipbook 64 frames RGBA8, blended (reference) | - | {} | - | {:.3f} | {:.3f} | - |",
                              size * size * 4 * 64 / 1024, fb.median_ms, fb.p90_ms);
     for (const Spec& s : sweep(size)) {
       auto m = nfx::proto::make_model(s, isa);
@@ -181,9 +180,9 @@ int main(int argc, char** argv) {
       });
       const double kb = static_cast<double>(m->param_count()) * 2.0 / 1024.0;
       const double gmac = m->macs_per_pixel() * size * size / (t.median_ms * 1e6);
-      std::cout << std::format("| {} | {} | {:.1f} | {:.0f} | {:.3f} | {:.3f} | {:.1f} |\n", s.describe(), m->param_count(), kb,
+      std::println("| {} | {} | {:.1f} | {:.0f} | {:.3f} | {:.3f} | {:.1f} |", s.describe(), m->param_count(), kb,
                                m->macs_per_pixel(), t.median_ms, t.p90_ms, gmac);
-      std::cout.flush();
+      std::fflush(stdout);
       if (out) {
         out << std::format("{},{},{},{},{:.1f},{:.0f},{:.4f},{:.4f},{:.2f}\n", nfx::proto::isa_name(isa), size, s.describe(),
                            m->param_count(), kb, m->macs_per_pixel(), t.median_ms, t.p90_ms, gmac);

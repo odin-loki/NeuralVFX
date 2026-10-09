@@ -492,92 +492,107 @@ void step_b(const Ctx& c) {
 
 // --- Task C -----------------------------------------------------------------------------------------------------
 
+const std::vector<std::string> kCCols = {"effect", "config", "kind", "a", "b", "coverage_l1", "emission_l1", "spectrum_l1",
+                                         "mean_frame_psnr", "motion_ratio", "active_psnr"};
+
 void step_c(const Ctx& c) {
-  Csv csv(c.results / "c_stats.csv", {"effect", "kind", "a", "b", "coverage_l1", "emission_l1", "spectrum_l1", "mean_frame_psnr", "motion_ratio", "active_psnr"});
+  Csv csv(c.results / "c_stats.csv", kCCols);
+  struct CConfig {
+    std::string name;
+    int bases;
+  };
+  // k8: eight shared feature volumes (about 1 MB at 8 bits); k24: one volume per training seed (about 3 MB), which can
+  // reproduce every training variation and morph between them.
+  const CConfig configs[] = {{"k8", 8}, {"k24", 24}};
   for (const auto e : sim::kEffects) {
     const std::string effect = ename(e);
-    if (csv.has("effect", effect)) continue;
     std::vector<Clip> train_clips, test_clips;
     for (int k = 0; k < kCTrain + kCTest; ++k) {
       Clip cl = get_clip(c, "c", std::format("{}_seed{}", effect, 1000 + k),
                          params(e, kCControls[0], kCControls[1], kCControls[2], 1000 + static_cast<std::uint64_t>(k)));
       (k < kCTrain ? train_clips : test_clips).push_back(std::move(cl));
     }
-    Hyper h;
-    h.arch = Arch::grid;
-    h.size = kSize;
-    h.frames = kFrames;
-    h.loop = sim::effect_loops(e);
-    h.n_latent = 8;
-    h.bases = 8;
-    h.grid = 32;
-    h.channels = 8;
-    h.hidden = 32;
-    h.layers = 2;
-    h.grid_t = 16;
-    std::vector<train::Example> data;
-    for (const Clip& cl : train_clips) data.push_back({&cl, {}});
-    train::Options o;
-    o.iterations = c.iters(12000);
-    o.threads = c.threads;
-    o.log_every = 0;
-    auto r = train::train(h, data, o);
-    Model m = r.model;
-    m.effect = effect;
-    m.feature_bits = 8;
-    quantise_like_storage(m);
-    m.pack_features();
-    save_model(c.data / "models" / "c" / std::format("{}_variation.nvfx", effect), m);
-    std::vector<Clip> gen, recon;
-    for (int s = 0; s < kCTest; ++s) gen.push_back(runtime_clip(m, {}, -1, 5000 + static_cast<std::uint64_t>(s)));
-    for (int k = 0; k < kCTrain; ++k) recon.push_back(runtime_clip(m, {}, k, 0));
     std::map<const Clip*, metrics::ClipStats> stats_cache;  // each clip's statistics computed once
     const auto stats_of = [&](const Clip& cl) -> const metrics::ClipStats& {
       auto it = stats_cache.find(&cl);
       if (it == stats_cache.end()) it = stats_cache.emplace(&cl, metrics::stats(cl)).first;
       return it->second;
     };
-    const auto add = [&](std::string kind, std::size_t a, std::size_t b, const Clip& ref, const Clip& test) {
+    const auto add = [&](const std::string& config, std::string kind, std::size_t a, std::size_t b, const Clip& ref, const Clip& test) {
       const auto d = metrics::distance(stats_of(ref), stats_of(test));
       Row row;
-      row.v = {{"effect", effect}, {"kind", kind}, {"a", std::to_string(a)}, {"b", std::to_string(b)},
+      row.v = {{"effect", effect}, {"config", config}, {"kind", kind}, {"a", std::to_string(a)}, {"b", std::to_string(b)},
                {"coverage_l1", std::format("{:.5f}", d.coverage_l1)}, {"emission_l1", std::format("{:.5f}", d.emission_l1)},
                {"spectrum_l1", std::format("{:.5f}", d.spectrum_l1)}, {"mean_frame_psnr", std::format("{:.4f}", d.mean_frame_psnr)},
                {"motion_ratio", std::format("{:.4f}", d.motion_ratio)}, {"active_psnr", std::format("{:.4f}", metrics::active_psnr(ref, test))}};
       csv.add(row);
     };
-    for (std::size_t a = 0; a < test_clips.size(); ++a) {
-      for (std::size_t b = 0; b < gen.size(); ++b) add("generated_vs_heldout", a, b, test_clips[a], gen[b]);
-      for (std::size_t b = 0; b < train_clips.size(); b += 3) add("training_vs_heldout", a, b, test_clips[a], train_clips[b]);
-      for (std::size_t b = a + 1; b < test_clips.size(); ++b) add("heldout_vs_heldout", a, b, test_clips[a], test_clips[b]);
-    }
-    for (std::size_t a = 0; a < gen.size(); ++a) {
-      for (std::size_t b = a + 1; b < gen.size(); ++b) add("generated_vs_generated", a, b, gen[a], gen[b]);
-      double nearest = -1;  // copying check: the closest training clip to a generated sample
+    const auto nearest_training = [&](const Clip& x) {
+      double best = -1;
       std::size_t nk = 0;
       for (std::size_t k = 0; k < train_clips.size(); ++k) {
-        const double p = metrics::active_psnr(train_clips[k], gen[a]);
-        if (p > nearest) {
-          nearest = p;
+        const double p = metrics::active_psnr(train_clips[k], x);
+        if (p > best) {
+          best = p;
           nk = k;
         }
       }
-      add("generated_nearest_training", a, nk, train_clips[nk], gen[a]);
-    }
-    for (std::size_t a = 0; a < test_clips.size(); ++a) {
-      double nearest = -1;
-      std::size_t nk = 0;
-      for (std::size_t k = 0; k < train_clips.size(); ++k) {
-        const double p = metrics::active_psnr(train_clips[k], test_clips[a]);
-        if (p > nearest) {
-          nearest = p;
-          nk = k;
-        }
+      return nk;
+    };
+    // The natural spread between real seeds, once per effect.
+    if (!csv.has("config", effect + "|real")) {
+      for (std::size_t a = 0; a < test_clips.size(); ++a) {
+        for (std::size_t b = 0; b < train_clips.size(); b += 3) add(effect + "|real", "training_vs_heldout", a, b, test_clips[a], train_clips[b]);
+        for (std::size_t b = a + 1; b < test_clips.size(); ++b) add(effect + "|real", "heldout_vs_heldout", a, b, test_clips[a], test_clips[b]);
+        const std::size_t nk = nearest_training(test_clips[a]);
+        add(effect + "|real", "heldout_nearest_training", a, nk, train_clips[nk], test_clips[a]);
       }
-      add("heldout_nearest_training", a, nk, train_clips[nk], test_clips[a]);
     }
-    for (std::size_t k = 0; k < train_clips.size(); ++k) add("reconstruction", k, k, train_clips[k], recon[k]);
-    std::println("C {}: trained {:.1f} s ({} KB)", effect, r.seconds, m.storage_bytes() / 1024);
+    for (const CConfig& cc : configs) {
+      const std::string key = effect + "|" + cc.name;
+      if (csv.has("config", key)) continue;
+      Hyper h;
+      h.arch = Arch::grid;
+      h.size = kSize;
+      h.frames = kFrames;
+      h.loop = sim::effect_loops(e);
+      h.n_latent = 8;
+      h.bases = cc.bases;
+      h.grid = 32;
+      h.channels = 8;
+      h.hidden = 32;
+      h.layers = 2;
+      h.grid_t = 16;
+      std::vector<train::Example> data;
+      for (const Clip& cl : train_clips) data.push_back({&cl, {}});
+      train::Options o;
+      o.iterations = c.iters(12000);
+      o.threads = c.threads;
+      o.log_every = 0;
+      auto r = train::train(h, data, o);
+      Model m = r.model;
+      m.effect = effect;
+      m.feature_bits = 8;
+      quantise_like_storage(m);
+      m.pack_features();
+      save_model(c.data / "models" / "c" / std::format("{}_variation_{}.nvfx", effect, cc.name), m);
+      std::vector<Clip> gen, recon;
+      for (int s = 0; s < kCTest; ++s) gen.push_back(runtime_clip(m, {}, -1, 5000 + static_cast<std::uint64_t>(s)));
+      for (int k = 0; k < kCTrain; ++k) recon.push_back(runtime_clip(m, {}, k, 0));
+      for (std::size_t a = 0; a < test_clips.size(); ++a) {
+        for (std::size_t b = 0; b < gen.size(); ++b) add(key, "generated_vs_heldout", a, b, test_clips[a], gen[b]);
+      }
+      for (std::size_t a = 0; a < gen.size(); ++a) {
+        for (std::size_t b = a + 1; b < gen.size(); ++b) add(key, "generated_vs_generated", a, b, gen[a], gen[b]);
+        const std::size_t nk = nearest_training(gen[a]);  // copying check
+        add(key, "generated_nearest_training", a, nk, train_clips[nk], gen[a]);
+      }
+      for (std::size_t k = 0; k < train_clips.size(); ++k) add(key, "reconstruction", k, k, train_clips[k], recon[k]);
+      Row info;
+      info.v = {{"effect", effect}, {"config", key}, {"kind", "model"}, {"a", std::to_string(m.storage_bytes())}, {"b", std::format("{:.1f}", r.seconds)}};
+      csv.add(info);
+      std::println("C {} {}: trained {:.1f} s ({} KB)", effect, cc.name, r.seconds, m.storage_bytes() / 1024);
+    }
   }
 }
 
@@ -679,17 +694,76 @@ void step_timing(const Ctx& c) {
 
 void step_media(const Ctx& c) {
   const fs::path media = c.data / "media";
+  const auto bg_of = [](sim::Effect e) { return e == sim::Effect::fire ? Background::black : Background::grey; };
+  // A: reference, the neural model (8-bit, about 132 KB) and the two best flipbook layouts at about that memory.
   for (const auto& [name, p] : a_clips()) {
     if (!name.ends_with("_0")) continue;
     const Clip ref = get_clip(c, "a", name, p);
     auto m = load_model(c.data / "models" / "a" / std::format("{}_grid_m8.nvfx", name));
     if (!m) continue;
     const Clip neural = runtime_clip(*m, {}, 0, 0);
-    const Clip fb = flipbook::play(flipbook::build(ref, {16, kSize, flipbook::Codec::bc3, 0}));  // about the same memory class
-    const Clip* rows[] = {&ref, &neural, &fb};
-    const Background bg = p.effect == sim::Effect::fire ? Background::black : Background::grey;
-    write_png(media / std::format("a_{}_compare.png", name), comparison_sheet(rows, 6, bg, 1));
-    write_comparison_video(media / std::format("a_{}_compare.mp4", name), rows, bg, 2, 3);
+    const Clip low_res = flipbook::play(flipbook::build(ref, {32, kSize / 2, flipbook::Codec::bc3, 0}));      // 128 KB
+    const Clip few = flipbook::play(flipbook::build(ref, {8, kSize, flipbook::Codec::bc3, kSize / 4}));       // 144 KB
+    const Clip* rows[] = {&ref, &neural, &low_res, &few};
+    write_png(media / std::format("a_{}_compare.png", name), comparison_sheet(rows, 6, bg_of(p.effect), 1));
+    write_comparison_video(media / std::format("a_{}_compare.mp4", name), rows, bg_of(p.effect), 2, 3);
+  }
+  // B: a held-out control setting: the simulation's truth, the neural model, the nearest training flipbook.
+  const auto train_s = b_train_settings();
+  const auto test_s = b_test_settings();
+  for (const auto e : sim::kEffects) {
+    auto m = load_model(c.data / "models" / "b" / std::format("{}_grid_k8.nvfx", ename(e)));
+    if (!m) continue;
+    for (const std::size_t t : {std::size_t{0}, std::size_t{1}}) {
+      const auto& s = test_s[t];
+      const Clip truth = get_clip(c, "b", std::format("{}_test_{:.2f}_{:.2f}_{:.2f}", ename(e), s[0], s[1], s[2]), params(e, s[0], s[1], s[2], 1));
+      const Clip neural = runtime_clip(*m, s, -1, 0);
+      std::size_t best = 0;
+      float bd = 1e9f;
+      for (std::size_t k = 0; k < train_s.size(); ++k) {
+        float d = 0;
+        for (std::size_t j = 0; j < 3; ++j) d += (s[j] - train_s[k][j]) * (s[j] - train_s[k][j]);
+        if (d < bd) {
+          bd = d;
+          best = k;
+        }
+      }
+      const auto& n = train_s[best];
+      const Clip near = flipbook::play(flipbook::build(
+          get_clip(c, "b", std::format("{}_train_{:.2f}_{:.2f}_{:.2f}", ename(e), n[0], n[1], n[2]), params(e, n[0], n[1], n[2], 1)),
+          {kFrames, kSize, flipbook::Codec::bc3, 0}));
+      const Clip* rows[] = {&truth, &neural, &near};
+      write_png(media / std::format("b_{}_test{}.png", ename(e), t), comparison_sheet(rows, 6, bg_of(e), 1));
+      write_comparison_video(media / std::format("b_{}_test{}.mp4", ename(e), t), rows, bg_of(e), 2, 3);
+    }
+  }
+  // C: held-out real seeds against generated variations (k8, then k24), and a long drifting run (endless variation).
+  for (const auto e : sim::kEffects) {
+    auto m8 = load_model(c.data / "models" / "c" / std::format("{}_variation_k8.nvfx", ename(e)));
+    auto m = load_model(c.data / "models" / "c" / std::format("{}_variation_k24.nvfx", ename(e)));
+    if (!m || !m8) continue;
+    std::vector<Clip> clips;
+    for (int k = kCTrain; k < kCTrain + 3; ++k) {
+      clips.push_back(get_clip(c, "c", std::format("{}_seed{}", ename(e), 1000 + k), params(e, kCControls[0], kCControls[1], kCControls[2], 1000 + static_cast<std::uint64_t>(k))));
+    }
+    for (int s = 0; s < 3; ++s) clips.push_back(runtime_clip(*m8, {}, -1, 5000 + static_cast<std::uint64_t>(s)));
+    for (int s = 0; s < 3; ++s) clips.push_back(runtime_clip(*m, {}, -1, 5000 + static_cast<std::uint64_t>(s)));
+    std::vector<const Clip*> rows;
+    for (const Clip& cl : clips) rows.push_back(&cl);
+    write_png(media / std::format("c_{}_variations.png", ename(e)), comparison_sheet(rows, 6, bg_of(e), 1));
+    if (e == sim::Effect::explosion) continue;  // drifting only makes sense for looping effects
+    RtEffect fx(*m);
+    nvfx_instance* in = nullptr;
+    nvfx_instance_create(fx.e, kSize, &in);
+    nvfx_instance_set_seed(in, 77);
+    nvfx_instance_set_drift(in, 3.f);
+    Clip drift;
+    drift.allocate(kSize, 30 * 20);  // 20 seconds
+    drift.fps = 30;
+    for (int f = 0; f < drift.frames; ++f) nvfx_render(in, f / 30.0, drift.frame(f).data(), kSize * 4);
+    nvfx_instance_free(in);
+    const Clip* one[] = {&drift};
+    write_comparison_video(media / std::format("c_{}_drift_20s.mp4", ename(e)), one, bg_of(e), 2, 1);
   }
   std::println("media written to {}", media.string());
 }
@@ -927,29 +1001,38 @@ void step_report(const Ctx& c) {
   }
   // ---- C
   if (fs::exists(c.results / "c_stats.csv")) {
-    Csv cs(c.results / "c_stats.csv", {"effect", "kind", "a", "b", "coverage_l1", "emission_l1", "spectrum_l1", "mean_frame_psnr", "motion_ratio", "active_psnr"});
-    md << "\n## C. Variation: new seeds against held-out real clips\n\nOne model per effect with 8-dimensional variation codes, trained on 24 seeds "
-          "(fixed controls). 8 new seeds are generated through the runtime and compared with 8 held-out simulated seeds. Distances are means over pairs; "
-          "smaller is closer. \"real vs real\" is the natural spread between two simulated seeds: a generator cannot be expected to beat it.\n\n";
-    md << "| effect | pairs | coverage L1 | emission L1 | spectrum L1 | mean-frame PSNR | motion ratio | active PSNR |\n|---|---|---:|---:|---:|---:|---:|---:|\n";
+    Csv cs(c.results / "c_stats.csv", kCCols);
+    md << "\n## C. Variation: new seeds against held-out real clips\n\nPer effect: models with 8-dimensional variation codes trained on 24 "
+          "simulated seeds at fixed controls; k8 shares 8 feature volumes, k24 has one per training seed. 8 new seeds are generated through the "
+          "runtime (each a random point between two training codes) and compared with 8 held-out simulated seeds. Distances are means over "
+          "pairs; smaller is closer. The \"real\" rows are the natural spread between simulated seeds: a generator should match them, not beat "
+          "them. Spectrum = |log power difference| (blur raises it); motion = frame-to-frame change relative to the first clip of the pair; "
+          "reconstruction = a training seed replayed from its own code.\n\n";
+    md << "| effect | model | pairs | coverage L1 | spectrum L1 | mean-frame PSNR | motion ratio | active PSNR |\n|---|---|---|---:|---:|---:|---:|---:|\n";
     for (const auto e : sim::kEffects) {
-      for (const std::string kind : {"heldout_vs_heldout", "training_vs_heldout", "generated_vs_heldout", "generated_vs_generated", "heldout_nearest_training",
-                                     "generated_nearest_training", "reconstruction"}) {
-        double cov = 0, emi = 0, spe = 0, mfp = 0, mot = 0, act = 0;
-        int n = 0;
-        for (const Row& r : cs.rows()) {
-          if (r.s("effect") != ename(e) || r.s("kind") != kind) continue;
-          cov += r.d("coverage_l1");
-          emi += r.d("emission_l1");
-          spe += r.d("spectrum_l1");
-          mfp += r.d("mean_frame_psnr");
-          mot += r.d("motion_ratio");
-          act += r.d("active_psnr");
-          ++n;
+      for (const std::string cfg : {"real", "k8", "k24"}) {
+        const std::string key = ename(e) + "|" + cfg;
+        for (const std::string kind : {"heldout_vs_heldout", "training_vs_heldout", "heldout_nearest_training", "generated_vs_heldout",
+                                       "generated_vs_generated", "generated_nearest_training", "reconstruction"}) {
+          double cov = 0, spe = 0, mfp = 0, mot = 0, act = 0;
+          int n = 0;
+          for (const Row& r : cs.rows()) {
+            if (r.s("config") != key || r.s("kind") != kind) continue;
+            cov += r.d("coverage_l1");
+            spe += r.d("spectrum_l1");
+            mfp += r.d("mean_frame_psnr");
+            mot += r.d("motion_ratio");
+            act += r.d("active_psnr");
+            ++n;
+          }
+          if (!n) continue;
+          md << std::format("| {} | {} | {} | {:.4f} | {:.3f} | {:.2f} | {:.2f} | {:.2f} |\n", ename(e), cfg, kind, cov / n, spe / n, mfp / n, mot / n, act / n);
         }
-        if (!n) continue;
-        md << std::format("| {} | {} | {:.4f} | {:.4f} | {:.3f} | {:.2f} | {:.2f} | {:.2f} |\n", ename(e), kind, cov / n, emi / n, spe / n, mfp / n, mot / n, act / n);
       }
+    }
+    md << "\n| effect | model | KB stored | training s |\n|---|---|---:|---:|\n";
+    for (const Row& r : cs.rows()) {
+      if (r.s("kind") == "model") md << std::format("| {} | {} | {:.0f} | {} |\n", r.s("effect"), r.s("config"), r.d("a") / 1024.0, r.s("b"));
     }
   }
   // ---- timing
