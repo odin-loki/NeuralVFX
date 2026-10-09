@@ -40,3 +40,4 @@ cache/
 *.pgm
 *.nfxclip
 *.nvfx
+results/experiments/quick/
