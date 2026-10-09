@@ -137,6 +137,9 @@ forward and backward, because this project uses no LibTorch.
   start of every block, Adam with a linear warm-up then cosine decay to 10%, gradient clipping, an EMA copy (0.99 for
   500 steps, then 0.999), and features read at a fixed noise level with one fixed noise image per level and seed.
 - **Sampling:** deterministic DDIM (eta = 0) on a 25-step grid; SDEdit noises a state to t0 and runs the same grid down.
+  A fresh sample starts at t = 961, the first point of DDIM's grid, not at T: there the clipped schedule leaves
+  alpha_bar at about 2e-9 and the first estimate of x0 is pure error. Found by a sanity check of the samples' channel
+  statistics after training (samples started at T were several times too hot and too spread), before any G2c run.
 - **Tests** (`tests/test_dcm_ddpm.cpp`): the fast AVX2 kernels equal the plain convolution patterns copied from
   `rollout_train.cpp`; the hand-written gradient matches finite differences on an 8 x 8 toy for every part of the network;
   training lowers the held-out loss on a toy set; ten repeats of a short training give one SHA-256 of the weights, for

@@ -124,10 +124,14 @@ void tweedie(const Denoiser& d, std::span<const float> xt, int t, std::span<cons
 // No noise is added. The result is kept inside [lo, hi].
 void prior_step(const Denoiser& d, std::span<float> x, int t, float beta, std::span<const float> cond);
 
-// Deterministic DDIM (eta = 0) on the grid t = T, T - T / steps, ..., T / steps: from x at level t_start (a grid
-// point, or T) down to x0, written back into x. x0_hat is kept inside [lo, hi] at every step.
+// Deterministic DDIM (eta = 0) with stride T / steps: from x at level t_start down to x0 (t_start, t_start - stride, ...,
+// then 0), written back into x. x0_hat is kept inside [lo, hi] at every step.
 void ddim(const Denoiser& d, std::span<float> x, int t_start, int steps, std::span<const float> cond);
-// A fresh sample: x_T from gaussian(seed), then ddim from T.
+// Where a fresh sample starts: T - T / steps + 1, the first point of DDIM's grid (Song et al. 2021). Not T itself: there
+// the cosine schedule's clipped alpha_bar is about 2e-9, so the first x0 estimate is pure error (samples started at T
+// came out several times too hot and too spread).
+[[nodiscard]] int sample_start(const Config& c, int steps);
+// A fresh sample: gaussian(seed) taken as x at sample_start, then ddim (`steps` passes).
 void sample(const Denoiser& d, std::span<const float> cond, int steps, std::uint64_t seed, std::span<float> out);
 // SDEdit (Meng et al. 2022): x0 noised to level t0 (rounded to the grid) with gaussian(seed), then ddim under `cond`.
 void sdedit(const Denoiser& d, std::span<const float> x0, int t0, int steps, std::span<const float> cond, std::uint64_t seed,

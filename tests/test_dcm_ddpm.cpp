@@ -307,6 +307,8 @@ TEST(Ddpm, SamplingIsDeterministicAndInRange) {
   EXPECT_EQ(ddim_passes(c, 100, 10), 10);
   EXPECT_EQ(ddim_passes(c, 40, 10), 4);
   EXPECT_EQ(ddim_passes(Config{}, 400, 25), 10);
+  EXPECT_EQ(sample_start(Config{}, 25), 961);
+  EXPECT_EQ(ddim_passes(Config{}, sample_start(Config{}, 25), 25), 25);
 }
 
 TEST(Ddpm, ContextPlanes) {

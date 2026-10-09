@@ -681,7 +681,7 @@ void step_diff(const Ctx& c) {
     for (std::size_t k = 1; k < cands.size(); ++k) {
       const StartMethod& m = cands[k];
       const metrics::Interval iv = metrics::paired_bootstrap(v.at(m.name()), v.at("rolled"), 10000, 1);
-      const int passes = m.kind == "fresh" ? dd::ddim_passes(L.d.cfg, L.d.cfg.timesteps, kDdimSteps)
+      const int passes = m.kind == "fresh" ? dd::ddim_passes(L.d.cfg, dd::sample_start(L.d.cfg, kDdimSteps), kDdimSteps)
                                            : dd::ddim_passes(L.d.cfg, std::clamp((m.t0 + 20) / 40 * 40, 40, L.d.cfg.timesteps), kDdimSteps);
       const double cost = passes * ms;
       const bool pass = iv.hi < 0 && cost <= 100.0;

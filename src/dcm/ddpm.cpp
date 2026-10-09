@@ -695,9 +695,11 @@ void ddim(const Denoiser& d, std::span<float> x, int t_start, int steps, std::sp
   }
 }
 
+int sample_start(const Config& c, int steps) { return c.timesteps - std::max(1, c.timesteps / std::max(1, steps)) + 1; }
+
 void sample(const Denoiser& d, std::span<const float> cond, int steps, std::uint64_t seed, std::span<float> out) {
   gaussian(mix(seed, 0x5A4D), out);
-  ddim(d, out, d.cfg.timesteps, steps, cond);
+  ddim(d, out, sample_start(d.cfg, steps), steps, cond);
 }
 
 void sdedit(const Denoiser& d, std::span<const float> x0, int t0, int steps, std::span<const float> cond, std::uint64_t seed,
