@@ -48,9 +48,19 @@ add_library(neuralfx_core STATIC
   src/core/clip.cpp
   src/core/metrics.cpp
   src/core/flipbook.cpp
+  src/core/model.cpp
   src/sim/sim.cpp)
 target_include_directories(neuralfx_core PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include")
 neuralfx_defaults(neuralfx_core)
+
+# Trainer: hand-written gradients; its hot loops switch on AVX2 + FMA with #pragma GCC target after the standard
+# headers (train() checks the CPU), so no AVX code leaks into shared inline library functions.
+add_library(neuralfx_train STATIC src/train/net.cpp src/train/train.cpp)
+target_link_libraries(neuralfx_train PUBLIC neuralfx_core)
+neuralfx_defaults(neuralfx_train)
+if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+  target_compile_options(neuralfx_train PRIVATE -ffp-contract=fast -Wno-psabi)
+endif()
 
 # Images and videos (PNG via zlib, mp4 via an ffmpeg pipe) for previews, figures and comparisons.
 find_package(ZLIB REQUIRED)
@@ -76,8 +86,8 @@ endif()
 if(NEURALFX_BUILD_TESTS)
   find_package(GTest CONFIG REQUIRED)
   include(GoogleTest)
-  add_executable(neuralfx_tests tests/test_proto.cpp tests/test_sim.cpp tests/test_baselines.cpp)
-  target_link_libraries(neuralfx_tests PRIVATE neuralfx_proto neuralfx_io GTest::gtest_main)
+  add_executable(neuralfx_tests tests/test_proto.cpp tests/test_sim.cpp tests/test_baselines.cpp tests/test_train.cpp)
+  target_link_libraries(neuralfx_tests PRIVATE neuralfx_proto neuralfx_io neuralfx_train GTest::gtest_main)
   neuralfx_defaults(neuralfx_tests)
   gtest_discover_tests(neuralfx_tests TEST_PREFIX "neuralfx." DISCOVERY_MODE PRE_TEST PROPERTIES LABELS neuralfx)
 endif()
