@@ -75,6 +75,10 @@ struct SearchProblem {
   std::vector<std::vector<double>> z;
   // laplace_bits only: the width of the bin a target is coded in (its quantisation step), > 0.
   double delta = 1.0;
+  // Value objectives only: the input column of a hand-made rule, or -1. A configuration whose groups include that
+  // column starts its ValueNet as the rule (ValueNet::set_rule: weight 1 on it, 0 elsewhere) instead of averaging its
+  // inputs, so training starts from the rule it is meant to improve. Ignored under auc.
+  int value_rule = -1;
 };
 
 // The grids the learning settings are drawn from (a configuration stores indices into them).

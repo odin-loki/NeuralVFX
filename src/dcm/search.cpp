@@ -213,6 +213,7 @@ struct View {
   MixerNetSpec spec;
   ValueNetSpec vspec;
   int epochs = 1;
+  int rule = -1;          // value objectives: the position of the problem's value_rule among the inputs, or -1
   [[nodiscard]] std::span<const double> row(std::size_t i) const { return {x.data() + i * inputs, inputs}; }
   [[nodiscard]] std::span<const int> contexts(std::size_t i) const { return {ctx.data() + i * slots, slots}; }
   [[nodiscard]] std::span<const double> zrow(std::size_t i) const { return {z.data() + i * nz, nz}; }
@@ -237,6 +238,10 @@ View compile(const SearchProblem& p, const SearchSpace& s, const SearchConfig& c
   const std::size_t n = p.y.size();
   const std::size_t layer1 = c.mixer_contexts.size() + 1;
   v.inputs = cols.size();
+  if (v.value && p.value_rule >= 0) {
+    const auto at = std::ranges::find(cols, p.value_rule);
+    if (at != cols.end()) v.rule = static_cast<int>(at - cols.begin());
+  }
   v.slots = v.value ? layer1 + 3 : layer1 + 2;
   v.x.resize(n * v.inputs);
   v.ctx.assign(n * v.slots, 0);
@@ -296,6 +301,7 @@ ValueNet train_value_view(const View& v, std::span<const double> y, std::vector<
     spec.log_b_init = std::clamp(std::log(std::max(dev, 1e-6)), spec.log_b_min, spec.log_b_max);
   }
   ValueNet net(static_cast<int>(v.inputs), static_cast<int>(v.nz), spec);
+  if (v.rule >= 0) net.set_rule(v.rule);
   std::mt19937_64 rng(seed);
   for (int e = 0; e < v.epochs; ++e) {
     std::shuffle(rows.begin(), rows.end(), rng);
@@ -700,6 +706,9 @@ void validate(const SearchProblem& p, Objective objective) {
     }
     if (objective == Objective::laplace_bits && !(p.delta > 0.0 && std::isfinite(p.delta))) {
       throw std::invalid_argument("dcm: search problem: laplace_bits needs a finite delta > 0");
+    }
+    if (p.value_rule < -1 || p.value_rule >= static_cast<int>(k)) {
+      throw std::invalid_argument("dcm: search problem: value_rule is -1 or an input column");
     }
   }
   for (std::size_t i = 0; i < n; ++i) {

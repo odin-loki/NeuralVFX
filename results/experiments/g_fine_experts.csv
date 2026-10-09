@@ -1,0 +1,17 @@
+effect,kind,name,value,sq_err
+fire,expert_alone,A,3.0396,0.00128
+fire,expert_alone,A_sl,3.1406,0.00133
+fire,expert_alone,L,3.4460,0.00090
+fire,expert_alone,rA,3.2775,0.00100
+fire,expert_alone,C_up,4.8889,0.00375
+fire,expert_alone,prev,4.0844,0.00260
+fire,nmi,macro4~lvl,0.1847,
+fire,nmi,macro4~ratio,0.0554,
+fire,nmi,macro4~flow,0.1946,
+fire,nmi,macro4~height,0.0777,
+fire,nmi,macro4~ctrl,0.0297,
+fire,nmi,macro8~lvl,0.1998,
+fire,nmi,macro8~ratio,0.0581,
+fire,nmi,macro8~flow,0.1930,
+fire,nmi,macro8~height,0.1113,
+fire,nmi,macro8~ctrl,0.0323,

@@ -23,6 +23,7 @@ void step_pilot(const Ctx& c);   // g-pilot   the default mixer against the hand
 void step_search(const Ctx& c);  // g-search  the nested leave-one-control-bin-out mixer search, held-out bits per pixel
 void step_eval(const Ctx& c);    // g-eval    G1 and G1c on held-out settings through the runtime
 void step_timing(const Ctx& c);  // g-timing  milliseconds per frame (quiet machine)
+void step_fine(const Ctx& c);    // g-fine    design G1 (DCM-fine) end to end: rows, pilot, cost, search, generation, test
 void report(const Ctx& c, std::ostream& md);  // the G section of SUMMARY.md (nothing yet)
 
 }  // namespace nfx::study_g
