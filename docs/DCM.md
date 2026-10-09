@@ -185,8 +185,8 @@ Two amendments, made before the trained denoiser was run on any of these compari
 test the pipeline):
 - **Two candidates per use.** One pass of this network took 6 to 10 ms on one core of the (busy) machine, and its
   89.5 million multiply-adds need about 4.5 ms even at the kernels' best speed (20 GMAC/s), so N = 4 and N = 8 cannot
-  meet 0.5 ms per frame, and a fresh 25-step sample cannot meet 100 ms per shard. Choosing only the best
-  score could therefore stop a use for its cost while an affordable setting works. So two candidates go from tuning to
+  meet 0.5 ms per frame, and a fresh 25-step sample cannot meet 100 ms per shard. Choosing only the best score
+  could therefore stop a use for its cost while an affordable setting works. So two candidates go from tuning to
   the decision: the best overall, and the best that can meet the bound (N = 16 for G2b; the best SDEdit for G2c). A
   use is kept when a candidate passes both the interval and the cost bound. These are two looks at the validation
   seeds, and are reported as such; a test, if one is earned, uses the cheaper passing candidate.
@@ -218,15 +218,14 @@ about 2.1 CPU-hours. The probe ran at 0.59 s per step on a machine loaded by oth
 
 The curve is flat over the last 2,000 steps (the learning rate has decayed to 10%). CameraDetector's denoiser ended
 at 0.436 / 0.400 / 0.388 / 0.394 on its canvases; the data differ, so this is no ranking, but coarse fire states leave
-much less noise unexplained at middle and high noise levels. The released denoiser is `NEURALVFX_DATA/g/diff/fire.ddpm`, version
-`1152045db43ea534ff5b80099d538c1c0be555d3cb6c5e6aef701a933d8bf56a`.
+much less noise unexplained at middle and high noise levels. The released denoiser is
+`NEURALVFX_DATA/g/diff/fire.ddpm`, version `1152045db43ea534ff5b80099d538c1c0be555d3cb6c5e6aef701a933d8bf56a`.
 
 What its samples look like (`nvfx_dcm ddpm-sample`, network units, at controls 0.5 / 0.5 / 0.5): fresh 25-step DDIM
 samples have heat mean 0.06 and spread 0.25 where real states near those controls have 0.16 and 0.70. They are colder
 and smoother than real states, and hardly change with the controls (heat mean 0.08 at 0.9 / 0.2 / 0.8, real 0.34). A
 1000-step ancestral sampler (a scratch check, not used) lands nearer in mean (0.20) but over-spreads (1.0), and costs
-1000 passes. SDEdit from t0 = 400 returns almost its
-input (channel means within 0.01 of the stored state's).
+1000 passes. SDEdit from t0 = 400 returns almost its input (channel means within 0.01 of the stored state's).
 
 ### G2.5 G2a: contexts, check 1 (mutual information)
 
@@ -258,7 +257,7 @@ entropy explained by the hand-made contexts, I(D; H) / H(D), and NMI (`results/e
   is ready for it: `dcm::ddpm::context_planes()` gives, from one coarse state and its condition, an 8 x 8 plane of
   cluster ids per K, and `nvfx_dcm contexts` writes every validation region's diffusion, plain and hand-made contexts
   to `NEURALVFX_DATA/g/diff/fire_contexts.csv`. The rule stays §3's: kept only if they beat the hand-made contexts
-  beyond the search's own seed noise. Cost: two passes per frame (t = 400 and 600), 12 to 20 ms on one core; the
+  beyond the search's own seed noise. Cost: two passes per frame (t = 400 and 600), about 12 ms on one core; the
   contexts could be refreshed every few frames.
 
 ### G2.6 G2b: the prior against drift
@@ -281,13 +280,13 @@ to 4.3 against 1.70); only the strongest t = 50 prior (every 4 frames, beta 1) c
 deterministically every few frames, a small bias in the predicted noise at low noise levels is a drift of its own. The
 best settings sit at the edge of the grid (the largest t and beta); larger t was not tried.
 
-Decision (fresh seeds, paired over the 12 (setting, window) pairs; cost = one pass / N on one core, measured on a busy
-machine, so an upper bound):
+Decision (fresh seeds, paired over the 12 (setting, window) pairs; cost = one pass / N on one core; the run measured
+the pass on the busy machine at 5.8 ms, and a quiet measurement later gave 5.8 to 6.5 ms):
 
 | candidate | minus no prior | minus shards | ms per frame | decision |
 |---|---|---|---:|---|
-| best: N = 8, t = 100, beta = 1 | −1.655 [−3.015, −0.506] | −0.069 [−0.276, +0.116] (tie) | 0.72 | stop: cost above 0.5 ms |
-| best with N = 16: t = 100, beta = 1 | **−1.564 [−2.916, −0.396]** | +0.022 [−0.224, +0.287] (tie) | **0.36** | **keep** |
+| best: N = 8, t = 100, beta = 1 | −1.655 [−3.015, −0.506] | −0.069 [−0.276, +0.116] (tie) | 0.72 to 0.81 | stop: cost above 0.5 ms |
+| best with N = 16: t = 100, beta = 1 | **−1.564 [−2.916, −0.396]** | +0.022 [−0.224, +0.287] (tie) | **0.36 to 0.40** | **keep** |
 
 **Test, once** (study B's held-out settings 1 and 2, new seeds), N = 16, t = 100, beta = 1:
 
@@ -300,8 +299,8 @@ machine, so an upper bound):
 Without the prior, the test's first setting froze from 20 s to 50 s (motion ratio 0.006 to 0.03, spectrum distance up
 to 3.9: REPORT §6.6's failure), and the second slowed to a motion ratio of 0.06 to 0.24 in its last 30 s. With the
 prior, both kept a motion ratio of 0.64 to 0.95 for the whole minute (mean-frame PSNR 32 to 41 dB). Cost: one pass
-every 16 frames, 5.8 to 6.4 ms on a busy core, **0.36 to 0.40 ms per frame** (an upper bound; no quiet moment came for
-a measurement). Its weights add 1.5 MB as float32 (0.8 MB as fp16) to an 82 KB effect.
+every 16 frames; one pass takes 5.8 to 6.5 ms (median, one pinned core, quiet machine, four cores tried), so **0.36 to
+0.40 ms per frame**. Its weights add 1.5 MB as float32 (0.8 MB as fp16) to an 82 KB effect.
 
 What it means: the prior does what shards do (the test ties them on every statistic) without restarts, crossfades or
 stored states, so a single rollout can play for a minute. It does not beat shards. Shards are free per frame and need
@@ -348,7 +347,7 @@ to 0.52; SDEdit of the stored start 0.16 to 0.20 (`results/experiments/g_diff_di
 | G2b and G2c on validation (`g-diff`) | 21 minutes on two threads |
 | G2b test (`g-diff-test`) | 1.4 minutes on two threads |
 | all of stage S5 on fire, including probes and smoke tests | about 3.4 CPU-hours (budget 5) |
-| one denoiser pass | 5.8 to 6.4 ms on one core of a busy machine (89.5 M multiply-adds; 14 to 15 GMAC/s); a quiet measurement was never possible (load stayed above 1.5) |
+| one denoiser pass (`nvfx_dcm ddpm-time`) | median 5.8 to 6.5 ms, p90 6.6 to 8.1 ms on one pinned core of a quiet machine (load 0.9 to 1.0), cores 0 to 3; 14 to 16 GMAC/s. The decisions' own measurements on the busy machine (5.8 and 6.4 ms) agree: the kernels are compute-bound and the pinned core was free |
 | denoiser size | 391,748 weights: 1.5 MB float32 |
 
 ### G2.9 Decision
@@ -360,11 +359,11 @@ The rule for each use was fixed in G2.3 before any result.
 | G2a contexts | check 1: redundant if the hand-made contexts explain at least 80% of their entropy at every K | 47% to 65%; they follow heat and flow, not the controls (unlike CameraDetector's camera and light) | **not redundant** |
 | G2a contexts | they beat the hand-made contexts in the nested search beyond its seed noise | not run: stage S2's search is not on main | **pending** |
 | G2b prior | the drift (detail score per 10 s window of a 60 s rollout) falls, interval below zero, on validation | −1.56 [−2.92, −0.40] (N = 16, t = 100, beta = 1) | **yes** |
-| G2b prior | within 0.5 ms per frame | 0.36 to 0.40 ms (upper bound, busy machine) | **yes** |
+| G2b prior | within 0.5 ms per frame | 0.36 to 0.40 ms (median pass, quiet machine) | **yes** |
 | G2b prior | the same on test, once | −5.28 [−9.01, −2.05] | **yes** |
 | G2b prior | (reference) better than the runtime's shards | tie on every statistic, validation and test | no |
 | G2c start points | better than the nearest stored start rolled ahead, interval below zero | SDEdit t0 = 300: −0.079 [−0.216, +0.038], a tie; fresh samples worse in tuning (1.88 against 1.55) | **no** |
-| G2c start points | within 100 ms per shard | SDEdit 46 ms yes; a fresh sample 25 passes, about 150 ms, no | partly |
+| G2c start points | within 100 ms per shard | SDEdit 8 passes, 46 to 52 ms, yes; a fresh sample 25 passes, 144 to 161 ms, no | partly |
 
 **Decision for fire: keep the denoiser as a prior against drift (G2b); stop diffusion start points (G2c); G2a waits
 for the nested search.** This is not CameraDetector's outcome: there no diffusion use survived, here one does, and the
