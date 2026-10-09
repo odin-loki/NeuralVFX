@@ -200,7 +200,8 @@ Result train(const Hyper& h_in, std::span<const Example> data, const Options& o)
 
   const std::size_t tail = std::max<std::size_t>(1, losses.size() / 20);
   res.final_loss = std::accumulate(losses.end() - static_cast<std::ptrdiff_t>(tail), losses.end(), 0.0) / static_cast<double>(tail);
-  m.z_train = codes;
+  if (Z > 0) m.z_train = codes;  // no codes to keep without a variation dimension
+  else m.z_train.clear();
   m.z_mean.assign(static_cast<std::size_t>(Z), 0.f);
   m.z_std.assign(static_cast<std::size_t>(Z), 0.f);
   for (const auto& z : codes) {

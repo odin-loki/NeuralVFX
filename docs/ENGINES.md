@@ -31,7 +31,7 @@ smoke (colour at most alpha).
 
 - `nvfx_render` is single-threaded and touches only the instance's own scratch memory; run different instances on
   different worker threads freely. One instance must not be rendered from two threads at once.
-- Cost scales with pixels: measured costs per configuration are in [REPORT.md](REPORT.md) §5 (about 1 ms per
+- Cost scales with pixels: measured costs per configuration are in [REPORT.md](REPORT.md) §6 (about 1 ms per
   128 x 128 frame for the default grid model on one AVX2 core, a quarter of that at 64 x 64).
 - Evaluate effects at their own rate (20-30 Hz is plenty for fire and smoke) and blend the last two results in the
   shader if needed; share one instance between all copies of an effect that use the same controls and seed; use

@@ -187,7 +187,7 @@ nvfx_status nvfx_effect_get_info(const nvfx_effect* e, nvfx_effect_info* info) {
   info->fps = m.fps;
   info->loops = m.h.loop ? 1 : 0;
   info->n_controls = m.h.n_controls;
-  info->n_variations = static_cast<int>(m.z_train.size());
+  info->n_variations = m.h.n_latent > 0 ? static_cast<int>(m.z_train.size()) : 0;
   info->stored_bytes = e->e.stored_bytes;
   info->resident_bytes = e->e.resident_bytes;
   std::strncpy(info->name, m.effect.c_str(), sizeof(info->name) - 1);
@@ -252,7 +252,10 @@ nvfx_status nvfx_instance_set_seed(nvfx_instance* in, uint64_t seed) {
 }
 
 nvfx_status nvfx_instance_set_variation(nvfx_instance* in, int index) {
-  if (!in || index < -1 || index >= static_cast<int>(in->effect->e.m.z_train.size())) return NVFX_ERROR_ARGUMENT;
+  if (!in) return NVFX_ERROR_ARGUMENT;
+  const nfx::Model& m = in->effect->e.m;
+  const int n = m.h.n_latent > 0 ? static_cast<int>(m.z_train.size()) : 0;
+  if (index < -1 || index >= n) return NVFX_ERROR_ARGUMENT;
   in->variation = index;
   return NVFX_OK;
 }

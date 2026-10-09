@@ -912,18 +912,22 @@ void step_report(const Ctx& c) {
     }
     // interpolation
     std::map<std::string, std::vector<double>> interp;
+    std::map<std::string, double> interp_kb;
     std::map<std::string, std::vector<std::string>> interp_clip;
     for (const Row& r : a.rows()) {
       if (r.s("task") != "a_interp") continue;
       const std::string k = r.s("method").substr(r.s("method").rfind('|') + 1);
       interp[k].push_back(r.d("active_psnr"));
+      interp_kb[k] = r.d("bytes") / 1024.0;
     }
     if (!interp.empty()) {
-      md << "\n### Frame interpolation (only even frames available; odd frames scored)\n\n| method | mean active PSNR on odd frames | delta vs neural |\n|---|---:|---:|\n";
+      md << "\n### Frame interpolation (only even frames available; odd frames scored)\n\n| method | KB | mean active PSNR on odd frames | method minus neural |\n|---|---:|---:|---:|\n";
       const auto& nv = interp["grid_m"];
       for (const auto& [k, v] : interp) {
         const double mean = std::ranges::fold_left(v, 0.0, std::plus{}) / static_cast<double>(v.size());
-        md << std::format("| {} | {:.2f} | {} |\n", k, mean, k == "grid_m" || v.size() != nv.size() ? "-" : fmt_iv(metrics::paired_bootstrap(nv, v)));
+        std::string label = k == "grid_m" ? std::string("grid_m 8-bit (trained on the even frames)") : k;
+        if (const auto at = label.find(" 0f "); at != std::string::npos) label.replace(at, 4, " even frames, ");  // explicit keep list
+        md << std::format("| {} | {:.0f} | {:.2f} | {} |\n", label, interp_kb[k], mean, k == "grid_m" || v.size() != nv.size() ? "-" : fmt_iv(metrics::paired_bootstrap(v, nv)));
       }
     }
   }

@@ -211,6 +211,11 @@ The habits of [ROADSIDE_STUDY.md](https://github.com/odin-loki/CameraDetector/bl
 | 4. Runtime | C API library, zero allocation per frame, SIMD, viewer with sliders | meets the ms budget with the cache; tests for determinism and ISA parity |
 | 5. Report | quality against memory and ms, against flipbooks and against NVIDIA's published claims; honest limits | owner review |
 
+Status on 9 October 2026: every phase delivered (the code map is in the README). Phase 1b is built and tested but has
+no owner footage yet; Phase 3's continuation rule is met ([REPORT.md](REPORT.md) §1); Phase 4 meets the 0.5 ms budget
+with the small grid model only. Two names in the table changed in the build: the simulator tool is `nvfx_sim`, and
+the flipbook baseline uses a BC3-layout encoder (BC1 + BC4) rather than BC7 or ASTC sizes.
+
 Phases 0, 1a, 2 and the runtime skeleton do not depend on the owner's answers below; 1b and the choice of effects,
 sizes and budgets do.
 

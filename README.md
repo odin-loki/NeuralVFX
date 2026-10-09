@@ -15,7 +15,23 @@ C++23, no third-party runtime dependencies, a C API for engines, no Python.
 - **Data and licences:** [docs/DATA.md](docs/DATA.md).
 - **Viewer:** [docs/VIEWER.md](docs/VIEWER.md).
 
-![The viewer: a neural fire next to its reference clip and a flipbook of the same memory](docs/figures/viewer.png)
+## Results in brief
+
+From [docs/REPORT.md](docs/REPORT.md), measured on simulated fire, smoke and explosions at 128 x 128 on one AVX2 core:
+
+- **Memory:** for equal quality, a network per effect clip needs **3.6 to 7.4 times less memory** than a flipbook;
+  at equal memory it scores +2.8 to +7.0 dB higher (every 95% interval above zero). NVIDIA claims "up to 8x" for
+  Neural Texture Compression; our flipbooks use our own BC3-layout encoder, so the ratio against BC7 would be lower.
+- **Controls:** one 1 MB model per effect plays unseen settings better than a 45 MB flipbook library
+  (+1.0 to +2.5 dB), but its unseen-setting flames look softer than the real simulation.
+- **Variation:** endless non-repeating playback by drifting between learned variations; variations are softer than
+  real ones and are blends of the training seeds.
+- **Cost:** 0.38 ms (73 KB model) to 1.1 ms (132 KB model) per 128 x 128 frame; 0.1-0.3 ms at 64 x 64; 8-30 times
+  cheaper than simulating, 50-150 times dearer than playing a flipbook.
+
+![A: rows are the reference smoke clip, the 132 KB network, a 128 KB flipbook at 64 px, and a 144 KB flipbook with 8 frames and motion vectors](docs/figures/a_smoke_compare.png)
+
+![The viewer: the 1 MB fire control model (one model for every setting) next to the reference clip of one setting and a 1 MB flipbook of that one setting](docs/figures/viewer.png)
 
 ## How it works
 

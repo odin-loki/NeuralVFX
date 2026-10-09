@@ -6,7 +6,7 @@ Status: **current**. Audience: dev, artists.
 clip, a flipbook of that clip at the effect's memory, and the fluid simulation running at the same controls, each
 with its cost per frame. It renders through the same runtime a game uses.
 
-![The viewer: a fire model next to its reference clip and a BC3 flipbook of the same memory](figures/viewer.png)
+![The viewer: the 1 MB fire control model (one model for every setting) next to the reference clip of one setting and a 1 MB BC3 flipbook of that one setting](figures/viewer.png)
 
 ## Build and run
 
