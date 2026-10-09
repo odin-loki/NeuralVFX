@@ -1,7 +1,7 @@
 /* nvfx_c_host: how an engine uses the runtime, in plain C (docs/ENGINES.md).
  *
- *   nvfx_c_host effect.nvfx [size] [seconds]     play the effect for `seconds` at 30 Hz, print the cost per frame and
- *                                                write the last frame to effect_frame.pam
+ *   nvfx_c_host effect.nvfx [size] [seconds] [frame.pam]   play the effect for `seconds` at 30 Hz, print the cost per
+ *                                                         frame, and optionally write the last frame
  *   nvfx_c_host --self-test                      check the error paths of the API (no model needed)
  */
 #include <neuralfx/nvfx.h>
@@ -51,7 +51,7 @@ static void write_pam(const char* path, const uint8_t* rgba, int size) {
 int main(int argc, char** argv) {
   if (argc >= 2 && strcmp(argv[1], "--self-test") == 0) return self_test();
   if (argc < 2) {
-    fprintf(stderr, "usage: nvfx_c_host effect.nvfx [size] [seconds] | --self-test\n");
+    fprintf(stderr, "usage: nvfx_c_host effect.nvfx [size] [seconds] [frame.pam] | --self-test\n");
     return 2;
   }
   nvfx_effect* effect = NULL;
@@ -90,7 +90,7 @@ int main(int argc, char** argv) {
   }
   printf("%d frames at %dx%d: %.3f ms mean, %.3f ms worst, %.0f MAC/px, %zu bytes scratch\n", frames, size, size,
          total / frames, worst, nvfx_instance_macs_per_pixel(inst), nvfx_instance_scratch_bytes(inst));
-  write_pam("effect_frame.pam", rgba, size);
+  if (argc >= 5) write_pam(argv[4], rgba, size);
   free(rgba);
   nvfx_instance_free(inst);
   nvfx_effect_free(effect);

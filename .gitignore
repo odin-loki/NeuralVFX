@@ -35,3 +35,8 @@ cache/
 *.safetensors
 !docs/**/*.png
 !docs/**/*.svg
+*.pam
+*.ppm
+*.pgm
+*.nfxclip
+*.nvfx
