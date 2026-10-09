@@ -4,7 +4,14 @@
 //   - FiLM is folded into the stepper's convolution weights once per frame;
 //   - the procedural noise on fixed points (coarse cells, swirl lattice) is value noise, which is a blend of two 2D
 //     slices in its third coordinate; the slices are cached and recomputed only when time crosses a lattice step;
-//   - the renderer runs on blocks of 16 pixels with the shared dense kernel.
+//   - the detail layer runs on blocks of kW pixels (one native vector). Bilinear upsampling (from the coarse grid, the
+//     swirl lattice and the flicker noise lattices) is separable: each source row is expanded along x once per frame
+//     and a fine row only blends two expanded rows. The flicker noise's two time slices are blended once per frame,
+//     so a sample is one bilinear interpolation per octave. The MacCormack samples read heat and soot interleaved, so
+//     the two corners of a row come with one 16-byte load per pixel, transposed into vectors in registers. The stages
+//     run row by row a few rows apart (see detail_step), so their intermediate rows stay in cache;
+//   - the renderer's first layer is linear in features that are themselves interpolated from the coarse grid, so its
+//     coarse part is evaluated per coarse cell; the rest runs on blocks of 16 pixels with the shared dense kernel.
 // Every buffer is allocated in the constructor.
 
 using rollout::kDirSteps;
@@ -12,6 +19,176 @@ using rollout::kDirs;
 using rollout::kNoise;
 using rollout::kPhys;
 using rollout::kRenderIn;
+
+// --- lanes ----------------------------------------------------------------------------------------------------------
+// The detail layer's kernels are written once, as templates on the lane type: vf for a block of kW pixels, float for
+// the pixels left at the end of a row when the size is not a multiple of kW.
+
+typedef std::int32_t vi __attribute__((vector_size(kW * 4)));
+typedef float v4 __attribute__((vector_size(16)));
+typedef float v4u __attribute__((vector_size(16), aligned(4)));
+
+template <class V>
+inline constexpr bool kOne = std::is_same_v<V, float>;
+template <class V>
+using IntOf = std::conditional_t<kOne<V>, std::int32_t, vi>;
+
+template <class V>
+inline V ld(const float* p) {
+  if constexpr (kOne<V>) return *p;
+  else return load(p);
+}
+template <class V>
+inline void st(float* p, V v) {
+  if constexpr (kOne<V>) *p = v;
+  else store(p, v);
+}
+template <class V>
+inline V bc(float x) {  // x in every lane (written so that it compiles to one broadcast)
+  if constexpr (kOne<V>) return x;
+  else return x - V{};
+}
+template <class V>
+inline V vmin(V a, V b) {
+  return a < b ? a : b;
+}
+template <class V>
+inline V vmax(V a, V b) {
+  return a > b ? a : b;
+}
+template <class V>
+inline IntOf<V> to_int(V v) {  // truncation, for coordinates that are not negative
+  if constexpr (kOne<V>) return static_cast<std::int32_t>(v);
+  else return __builtin_convertvector(v, vi);
+}
+template <class V>
+inline V to_float(IntOf<V> v) {
+  if constexpr (kOne<V>) return static_cast<float>(v);
+  else return __builtin_convertvector(v, vf);
+}
+template <class V>
+inline V lane_index() {  // 0, 1, 2, ...
+  V v{};
+  if constexpr (!kOne<V>) {
+    for (int k = 0; k < kW; ++k) v[k] = static_cast<float>(k);
+  }
+  return v;
+}
+
+// Within every group of four lanes, lane s takes element P[s] of the group: 0-3 from a, 4-7 from b.
+template <int P0, int P1, int P2, int P3, std::size_t... L>
+inline vf shuffle4_(vf a, vf b, std::index_sequence<L...>) {
+  constexpr int P[4] = {P0, P1, P2, P3};
+  return __builtin_shufflevector(a, b, (static_cast<int>(L / 4 * 4) + (P[L % 4] < 4 ? P[L % 4] : kW + P[L % 4] - 4))...);
+}
+template <int P0, int P1, int P2, int P3>
+inline vf shuffle4(vf a, vf b) {
+  return shuffle4_<P0, P1, P2, P3>(a, b, std::make_index_sequence<kW>{});
+}
+
+// Half H of the lanes of a and b interleaved (a0, b0, a1, b1, ...).
+template <int H, std::size_t... L>
+inline vf zip_(vf a, vf b, std::index_sequence<L...>) {
+  return __builtin_shufflevector(a, b, (H * kW / 2 + static_cast<int>(L / 2) + (L % 2 ? kW : 0))...);
+}
+
+// p[2 j] = a[j], p[2 j + 1] = b[j].
+template <class V>
+inline void st_pairs(float* p, V a, V b) {
+  if constexpr (kOne<V>) {
+    p[0] = a;
+    p[1] = b;
+  } else {
+    store(p, zip_<0>(a, b, std::make_index_sequence<kW>{}));
+    store(p + kW, zip_<1>(a, b, std::make_index_sequence<kW>{}));
+  }
+}
+
+inline v4 load4(const float* p) { return *reinterpret_cast<const v4u*>(p); }
+
+// Lanes 4 g to 4 g + 3 hold the four floats at p + o[j + 4 g].
+inline vf quad_lanes(const float* p, const std::int32_t* o, int j) {
+#if NFX_VW == 4
+  return load4(p + o[j]);
+#elif NFX_VW == 8
+  return __builtin_shufflevector(load4(p + o[j]), load4(p + o[j + 4]), 0, 1, 2, 3, 4, 5, 6, 7);
+#else
+  typedef float v8 __attribute__((vector_size(32)));
+  const v8 a = __builtin_shufflevector(load4(p + o[j]), load4(p + o[j + 4]), 0, 1, 2, 3, 4, 5, 6, 7);
+  const v8 b = __builtin_shufflevector(load4(p + o[j + 8]), load4(p + o[j + 12]), 0, 1, 2, 3, 4, 5, 6, 7);
+  return __builtin_shufflevector(a, b, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15);
+#endif
+}
+
+// q[c] = lane c of every group of four lanes of a0 to a3, in the order of the a's: a 4 x 4 transpose within each group.
+inline void transpose4(vf a0, vf a1, vf a2, vf a3, vf (&q)[4]) {
+  const vf t0 = shuffle4<0, 4, 1, 5>(a0, a1), t1 = shuffle4<2, 6, 3, 7>(a0, a1);
+  const vf t2 = shuffle4<0, 4, 1, 5>(a2, a3), t3 = shuffle4<2, 6, 3, 7>(a2, a3);
+  q[0] = shuffle4<0, 1, 4, 5>(t0, t2);
+  q[1] = shuffle4<2, 3, 6, 7>(t0, t2);
+  q[2] = shuffle4<0, 1, 4, 5>(t1, t3);
+  q[3] = shuffle4<2, 3, 6, 7>(t1, t3);
+}
+
+// The two rows of bilinear stencils, for every lane j: a[c] = p[off[j] + c] and b[c] = p[off[j] + row + c], c = 0 to 3
+// (one 16-byte load per lane and row, transposed in registers).
+template <class V>
+inline void quads2(const float* p, const std::int32_t* off, int row, V (&a)[4], V (&b)[4]) {
+  if constexpr (kOne<V>) {
+    for (int c = 0; c < 4; ++c) {
+      a[c] = p[off[0] + c];
+      b[c] = p[off[0] + row + c];
+    }
+  } else {
+    const float* q = p + row;
+    transpose4(quad_lanes(p, off, 0), quad_lanes(p, off, 1), quad_lanes(p, off, 2), quad_lanes(p, off, 3), a);
+    transpose4(quad_lanes(q, off, 0), quad_lanes(q, off, 1), quad_lanes(q, off, 2), quad_lanes(q, off, 3), b);
+  }
+}
+
+template <class V>
+inline void st_int(std::int32_t* p, IntOf<V> v) {
+  if constexpr (kOne<V>) *p = v;
+  else std::memcpy(p, &v, sizeof v);
+}
+
+// tanh as in Cephes' tanhf, on lanes: x + x^3 P(x^2) for |x| < 0.625, else 1 - 2 / (exp(2 |x|) + 1) with the sign of x,
+// and exp by reduction to [-ln 2 / 2, ln 2 / 2], a polynomial and a power of two built from its exponent bits. Within
+// about 3e-7 of std::tanh (a few units in the last place), and no library call per value.
+template <class V>
+inline V vtanh(V x) {
+  const V a = vmin<V>(vmax<V>(x, -x), bc<V>(9.f));  // |x|; past 9, tanh is 1 in float
+  const V t = a + a;
+  const IntOf<V> n = to_int<V>(t * 1.44269504088896341f + 0.5f);  // nearest integer to t / ln 2 (t is not negative)
+  const V fn = to_float<V>(n);
+  const V r = (t - fn * 0.693359375f) - fn * -2.12194440e-4f;  // t - n ln 2, in two parts
+  V p = 1.9875691500e-4f * r + 1.3981999507e-3f;
+  p = p * r + 8.3334519073e-3f;
+  p = p * r + 4.1665795894e-2f;
+  p = p * r + 1.6666665459e-1f;
+  p = p * r + 5.0000001201e-1f;
+  p = p * (r * r) + r + 1.f;
+  const V e = p * __builtin_bit_cast(V, (n + 127) << 23);  // exp(t) = exp(r) 2^n
+  const V big = 1.f - 2.f / (e + 1.f);
+  const V z = x * x;
+  V q = -5.70498872745e-3f * z + 2.06390887954e-2f;
+  q = q * z - 5.37397155531e-2f;
+  q = q * z + 1.33314422036e-1f;
+  q = q * z - 3.33332819422e-1f;
+  const V small = q * z * x + x;
+  return a < 0.625f ? small : (x < 0.f ? -big : big);
+}
+
+// f.template operator()<vf>(x) for the whole blocks of a row of `width` pixels, f.template operator()<float>(x) for the
+// pixels left over.
+template <class F>
+inline void each_block(int width, F&& f) {
+  int x = 0;
+  for (; x + kW <= width; x += kW) f.template operator()<vf>(x);
+  for (; x < width; ++x) f.template operator()<float>(x);
+}
+
+// --- noise and interpolation ------------------------------------------------------------------------------------------
 
 // Value noise at fixed 2D points, as a function of the third coordinate z. value_noise(x, y, z) is
 // lerp(slice(floor z), slice(floor z + 1), smooth5(frac z)); the two slices are kept per point.
@@ -66,16 +243,26 @@ class SliceNoise {
   float tz_ = 0.f;
 };
 
-// Fractal value noise (fbm of value_noise) at arbitrary 2D points in a fixed rectangle, as a function of time: each
-// octave's lattice corner values for the two time slices around z are cached and refreshed when z crosses a lattice
-// step, so a sample is interpolation only. The same corners and interpolation as value_noise, hence the same values.
+// Fractal value noise (fbm of value_noise) in a fixed square, as a function of time. Each octave's lattice corner values
+// for the two time slices around z are cached and refreshed when z crosses a lattice step, and at() blends them for the
+// current time: a sample is then the bilinear interpolation of one lattice with value_noise's smooth5 weights (the same
+// corners and weights as value_noise, so the same values up to rounding).
 class LatticeFbm {
  public:
+  struct Octave {
+    std::uint64_t seed = 0;
+    int i0 = 0, n = 0;           // the lattice: n x n corners from (i0, i0)
+    std::vector<float> a, b, c;  // corner values of the slices below and above z, and their blend at z
+    std::int64_t iz = 0;
+    float amp = 1.f;  // weight in the sum
+  };
+
   void init(float freq, float rate, int octaves, std::uint64_t seed, float lo, float hi) {
     freq_ = freq;
     rate_ = rate;
+    norm_ = 0.f;
     oct_.resize(static_cast<std::size_t>(octaves));
-    float f = freq;
+    float f = freq, amp = 1.f;
     for (int o = 0; o < octaves; ++o) {
       Octave& q = oct_[static_cast<std::size_t>(o)];
       q.seed = seed + static_cast<std::uint64_t>(o) * 0x9e3779b97f4a7c15ULL;
@@ -83,7 +270,11 @@ class LatticeFbm {
       q.n = static_cast<int>(std::floor(hi * f)) - q.i0 + 3;
       q.a.assign(static_cast<std::size_t>(q.n) * static_cast<std::size_t>(q.n), 0.f);
       q.b.assign(q.a.size(), 0.f);
+      q.c.assign(q.a.size(), 0.f);
       q.iz = std::numeric_limits<std::int64_t>::min();
+      q.amp = amp;
+      norm_ += amp;
+      amp *= 0.5f;
       f *= 2.f;
     }
   }
@@ -92,7 +283,6 @@ class LatticeFbm {
     for (Octave& q : oct_) {
       const float fz = std::floor(z);
       const auto iz = static_cast<std::int64_t>(fz);
-      q.tz = smooth5(z - fz);
       if (iz != q.iz) {
         if (iz == q.iz + 1) {
           q.a.swap(q.b);
@@ -103,48 +293,83 @@ class LatticeFbm {
         }
         q.iz = iz;
       }
+      const float tz = smooth5(z - fz);
+      for (std::size_t i = 0; i < q.c.size(); ++i) q.c[i] = q.a[i] + tz * (q.b[i] - q.a[i]);
       z *= 2.f;
     }
   }
-  float value(float X, float Y) const {
-    float sum = 0.f, amp = 1.f, norm = 0.f, x = X * freq_, y = Y * freq_;
-    for (const Octave& q : oct_) {
-      const float fx = std::floor(x), fy = std::floor(y);
-      const int ix = static_cast<int>(fx) - q.i0, iy = static_cast<int>(fy) - q.i0;
-      const float tx = smooth5(x - fx), ty = smooth5(y - fy);
-      const std::size_t k = static_cast<std::size_t>(iy) * static_cast<std::size_t>(q.n) + static_cast<std::size_t>(ix), n = static_cast<std::size_t>(q.n);
-      const auto lerp = [](float a, float b, float t) { return a + t * (b - a); };
-      const float a0 = lerp(lerp(q.a[k], q.a[k + 1], tx), lerp(q.a[k + n], q.a[k + n + 1], tx), ty);
-      const float a1 = lerp(lerp(q.b[k], q.b[k + 1], tx), lerp(q.b[k + n], q.b[k + n + 1], tx), ty);
-      sum += amp * lerp(a0, a1, q.tz);
-      norm += amp;
-      amp *= 0.5f;
-      x *= 2.f;
-      y *= 2.f;
-    }
-    return sum / norm;
-  }
+  const std::vector<Octave>& octaves() const { return oct_; }
+  float freq() const { return freq_; }
+  float norm() const { return norm_; }  // the sum of the octaves' weights
   std::size_t bytes() const {
     std::size_t n = 0;
-    for (const Octave& q : oct_) n += 4 * (q.a.size() + q.b.size());
+    for (const Octave& q : oct_) n += 4 * (q.a.size() + q.b.size() + q.c.size());
     return n;
   }
 
  private:
-  struct Octave {
-    std::uint64_t seed = 0;
-    int i0 = 0, n = 0;
-    std::vector<float> a, b;
-    std::int64_t iz = 0;
-    float tz = 0.f;
-  };
   static void fill(const Octave& q, std::vector<float>& s, std::int32_t iz) {
     for (int j = 0; j < q.n; ++j) {
       for (int i = 0; i < q.n; ++i) s[static_cast<std::size_t>(j) * static_cast<std::size_t>(q.n) + static_cast<std::size_t>(i)] = cell_value(q.i0 + i, q.i0 + j, iz, q.seed);
     }
   }
-  float freq_ = 1.f, rate_ = 1.f;
+  float freq_ = 1.f, rate_ = 1.f, norm_ = 1.f;
   std::vector<Octave> oct_;
+};
+
+// Interpolation weights from a grid to fine pixel centres along one axis: pixel p reads grid cells i[p] and i[p] + 1,
+// with weight w[p] on the second.
+struct Axis {
+  std::vector<int> i;
+  std::vector<float> w;
+};
+
+// Rows of a small grid (n columns of Q interleaved values; Q = 0: as many as init() says) expanded to the fine width
+// along x, kept for two grid rows at a time. Fine rows interpolate between grid rows j and j + 1 and walk down the grid
+// in order, so each grid row is expanded about once per frame and a fine row only blends two expanded rows.
+template <int Q = 0>
+class RowPair {
+ public:
+  // Planes of `stride` floats, of which the first `width` are written (the rest stay zero).
+  void init(int width, int planes = Q, int stride = 0) {
+    w_ = static_cast<std::size_t>(width);
+    q_ = static_cast<std::size_t>(planes);
+    stride_ = static_cast<std::size_t>(std::max(width, stride));
+    for (auto& r : rows_) r.assign(q_ * stride_, 0.f);
+    reset();
+  }
+  void reset() { key_ = {-1, -1}; }  // the grid changed
+  // Rows j and j + 1 of the grid: Q planes of `stride` floats each.
+  std::array<const float*, 2> get(const float* grid, int n, const Axis& ax, int j) {
+    int s0 = slot(j), s1 = slot(j + 1);
+    if (s0 < 0) {
+      s0 = s1 == 0 ? 1 : 0;
+      expand(grid, n, ax, j, s0);
+    }
+    if (s1 < 0) {
+      s1 = 1 - s0;
+      expand(grid, n, ax, j + 1, s1);
+    }
+    return {rows_[static_cast<std::size_t>(s0)].data(), rows_[static_cast<std::size_t>(s1)].data()};
+  }
+  std::size_t bytes() const { return 4 * (rows_[0].size() + rows_[1].size()); }
+
+ private:
+  int slot(int j) const { return key_[0] == j ? 0 : key_[1] == j ? 1 : -1; }
+  void expand(const float* grid, int n, const Axis& ax, int j, int s) {
+    const std::size_t nq = Q > 0 ? static_cast<std::size_t>(Q) : q_;
+    const float* g = grid + static_cast<std::size_t>(j) * static_cast<std::size_t>(n) * nq;
+    float* out = rows_[static_cast<std::size_t>(s)].data();
+    for (std::size_t x = 0; x < w_; ++x) {
+      const float* a = g + static_cast<std::size_t>(ax.i[x]) * nq;
+      const float w = ax.w[x];
+      for (std::size_t q = 0; q < nq; ++q) out[q * stride_ + x] = a[q] + w * (a[q + nq] - a[q]);
+    }
+    key_[static_cast<std::size_t>(s)] = j;
+  }
+  std::size_t w_ = 0, q_ = 0, stride_ = 0;
+  std::array<std::vector<float>, 2> rows_;
+  std::array<int, 2> key_{-1, -1};
 };
 
 class Rollout final : public RolloutRunner {
@@ -176,60 +401,74 @@ class Rollout final : public RolloutRunner {
     coarse_.resize(z(N_) * z(C_));
     flow_.resize(z(N_) * 2);
     div_.resize(z(N_));
-    p_.resize(z(N_));
-    tmp_.resize(z(N_));
+    p_.assign(z(R_ + 2) * z(R_ + 2), 0.f);  // pressure with a zero border (written inside only)
+    tmp_.assign(p_.size(), 0.f);
+    wot_.resize(z(O_) * z(H_));  // the output layer's weights [out][in], for the dense kernel
+    for (int j = 0; j < H_; ++j) {
+      for (int k = 0; k < O_; ++k) wot_[z(k) * z(H_) + z(j)] = m_.step_w[L.wo + z(j) * z(O_) + z(k)];
+    }
     noise_.resize(z(N_) * kNoise);
     dirsum_.resize(z(N_) * kDirs);
-    B_.resize(z(N_));
-    rr_.resize(z(N_));
-    aa_.resize(z(N_));
+    soot_.assign(z(R_ + 2 * kDirSteps) * z(R_ + 2 * kDirSteps), 0.f);  // zero border, written inside only
+    fac_.resize(z(N_) * 4);
+    any_.resize(z(R_));
     const std::size_t S2 = z(S_) * z(S_);
     ft_.resize(S2);
     fd_.resize(S2);
-    ux_.resize(S2);
-    vy_.resize(S2);
-    const std::size_t P2 = z(S_ + 3) * z(S_ + 3);
-    fa_.assign(P2, 0.f);  // padded: zero border, interior written each step
-    ga_.assign(P2, 0.f);
-    tp_.assign(P2, 0.f);
-    dp_.assign(P2, 0.f);
-    fb_.resize(S2);
-    gb_.resize(S2);
-    lo_t_.resize(S2);
-    hi_t_.resize(S2);
-    lo_d_.resize(S2);
-    hi_d_.resize(S2);
-    feat_.resize(kRenderIn * kB);
+    rec_.resize(z(S_) * z(record_stride()));  // as many rows as the largest lag can need
+    // Rings of padded rows (zero border columns, written inside only): enough slots for every padded row of the frame,
+    // a power of two, and one more for a copy of slot 0 (the row above the last slot).
+    slots_ = static_cast<int>(std::bit_ceil(z(S_ + 3)));
+    td_.assign(z(slots_ + 1) * z(S_ + 3) * 2, 0.f);
+    fg_.assign(td_.size(), 0.f);
+    cs_t_.assign(z(S_), 0.f);
+    cs_d_.assign(z(S_), 0.f);
+    off_.assign(z(S_), 0);
+    wx_.assign(z(S_), 0.f);
+    wy_.assign(z(S_), 0.f);
     r1_.resize(z(h_.render_hidden) * kB);
     r2_.resize(z(h_.render_hidden) * kB);
     out_.resize(4 * kB);
-    row_.resize(4 * z(S_) * kB);
-    // Render weights split into the dense kernel's [out][in] blocks.
     const RenderLayout RL = render_layout(h_);
     RL_ = RL;
     // Noise on fixed points: coarse cell centres (curl stream function; flicker octaves), the swirl lattice.
-    const float k = 128.f / static_cast<float>(R_);
     curl_.init(z(N_), 0);
     flicker_.resize(z(m_.noise.flicker_octaves));
     for (auto& f : flicker_) f.init(z(N_), 0);
     sw_spacing_ = 0.5f * m_.detail.swirl_scale;
     sw_n_ = static_cast<int>(std::ceil(130.f / sw_spacing_)) + 3;
     swirl_.init(z(sw_n_) * z(sw_n_), 0);
-    swu_.resize(z(sw_n_) * z(sw_n_));
-    swv_.resize(z(sw_n_) * z(sw_n_));
+    swl_.resize(z(sw_n_) * z(sw_n_) * 2);
     ax_ = axis(S_, R_, static_cast<float>(R_) / static_cast<float>(S_), -0.5f);
-    rowa_.resize(z(std::max(2 * R_, sw_n_)));
-    rowb_.resize(rowa_.size());
-    rowc_.resize(rowa_.size());
-    rowd_.resize(rowa_.size());
-    B2_.resize(z(N_));
-    crow_.resize(z(R_) * (2 + kDirs));
-    frow_.resize(z(kRenderIn) * z(S_));
-    rr2_.resize(z(N_));
-    aa2_.resize(z(N_));
     sx_ = axis(S_, sw_n_, 128.f / static_cast<float>(S_) / sw_spacing_, 0.5f / sw_spacing_ + 1.f);
+    const int Sb = (S_ + kB - 1) / kB * kB;  // a row padded to whole blocks of 16 pixels
+    frow_.assign(2 * z(Sb), 0.f);
+    g1_.resize(z(N_) * z(h_.render_hidden));
+    render_rows_.init(S_, h_.render_hidden, Sb);
+    flow_rows_.init(S_);
+    swirl_rows_.init(S_);
+    fac_rows_.init(S_);
+    noise_rows_.resize(z(m_.noise.flicker_octaves));
+    for (auto& r : noise_rows_) r.init(S_);
     reseed(0);  // sizes every noise cache now, so a later begin() with another seed allocates nothing
-    (void)k;
+    // The flicker lattices along x and y (the same for both): fine pixel p is at X = (p + 0.5) / px128 + 0.5 in a
+    // 128-pixel frame, octave o at X * freq * 2^o, as in noise_flicker.
+    const float px128 = static_cast<float>(S_) / 128.f;
+    const auto& oct = fine_flicker_.octaves();
+    nax_.resize(oct.size());
+    for (auto& a : nax_) {
+      a.i.resize(z(S_));
+      a.w.resize(z(S_));
+    }
+    for (int p = 0; p < S_; ++p) {
+      float x = ((static_cast<float>(p) + 0.5f) / px128 + 0.5f) * fine_flicker_.freq();
+      for (std::size_t o = 0; o < oct.size(); ++o) {
+        const float fx = std::floor(x);
+        nax_[o].i[z(p)] = static_cast<int>(fx) - oct[o].i0;
+        nax_[o].w[z(p)] = smooth5(x - fx);
+        x *= 2.f;
+      }
+    }
   }
 
   void start(int index, std::span<const float> controls, std::uint64_t seed) override {
@@ -277,74 +516,125 @@ class Rollout final : public RolloutRunner {
 
   void render(const FrameInput& in, std::uint8_t* rgba, std::size_t stride) override {
     using namespace rollout;
-    // directional soot sums on the coarse grid
+    // directional soot sums on the coarse grid, planar [direction][cell], from the soot with a zero border as wide as
+    // the sums are long (zero outside, as the reference)
     static constexpr int dirs[kDirs][2] = {{1, 0}, {1, 1}, {0, 1}, {-1, 1}, {-1, 0}, {-1, -1}, {0, -1}, {1, -1}};
+    const int Ps = R_ + 2 * kDirSteps;
     for (int y = 0; y < R_; ++y) {
-      for (int x = 0; x < R_; ++x) {
-        for (int j = 0; j < kDirs; ++j) {
-          float s = 0.f;
-          for (int st = 1; st <= kDirSteps; ++st) {
-            const int xx = x + st * dirs[j][0], yy = y + st * dirs[j][1];
-            if (xx >= 0 && yy >= 0 && xx < R_ && yy < R_) s += coarse_[(z(yy) * z(R_) + z(xx)) * z(C_) + 3];
-          }
-          dirsum_[(z(y) * z(R_) + z(x)) * kDirs + z(j)] = s;
+      for (int x = 0; x < R_; ++x) soot_[z(y + kDirSteps) * z(Ps) + z(x + kDirSteps)] = coarse_[(z(y) * z(R_) + z(x)) * z(C_) + 3];
+    }
+    for (int j = 0; j < kDirs; ++j) {
+      for (int y = 0; y < R_; ++y) {
+        float* __restrict o = dirsum_.data() + z(j) * z(N_) + z(y) * z(R_);
+        std::fill_n(o, R_, 0.f);
+        for (int st = 1; st <= kDirSteps; ++st) {
+          const float* __restrict a = soot_.data() + z(y + kDirSteps + st * dirs[j][1]) * z(Ps) + z(kDirSteps + st * dirs[j][0]);
+          for (int x = 0; x < R_; ++x) o[x] += a[x];
         }
       }
     }
     const int RH = h_.render_hidden;
     const float* w = m_.render_w.data();
     const float it = 1.f / m_.render_scale[0], id = 1.f / m_.render_scale[1];
-    constexpr int kc = 2 + kDirs;  // coarse features: heat, soot, directional sums
-    const std::size_t S = z(S_);
-    for (int y = 0; y < S_; ++y) {
-      // one row of the coarse features, interpolated in y and normalised
-      const float wy = ax_.w[z(y)];
-      const std::size_t r0 = z(ax_.i[z(y)]) * z(R_), r1 = r0 + z(R_);
-      for (int i = 0; i < R_; ++i) {
-        float* o = crow_.data() + z(i) * kc;
-        const std::size_t a = r0 + z(i), b = r1 + z(i);
-        o[0] = (coarse_[a * z(C_) + 2] + wy * (coarse_[b * z(C_) + 2] - coarse_[a * z(C_) + 2])) * it;
-        o[1] = (coarse_[a * z(C_) + 3] + wy * (coarse_[b * z(C_) + 3] - coarse_[a * z(C_) + 3])) * id;
-        for (int j = 0; j < kDirs; ++j) o[2 + j] = (dirsum_[a * kDirs + z(j)] + wy * (dirsum_[b * kDirs + z(j)] - dirsum_[a * kDirs + z(j)])) * id;
+    // The first layer is linear and the coarse features (heat, soot, directional sums) reach a pixel by bilinear
+    // interpolation, so the layer's coarse part and its bias are evaluated per coarse cell and interpolated instead:
+    // g1[cell][j]. Per pixel only the two fine features are left.
+    for (int i = 0; i < N_; ++i) {
+      std::array<float, 2 + kDirs> f{};
+      f[0] = coarse_[z(i) * z(C_) + 2] * it;
+      f[1] = coarse_[z(i) * z(C_) + 3] * id;
+      for (int j = 0; j < kDirs; ++j) f[z(2 + j)] = dirsum_[z(j) * z(N_) + z(i)] * id;
+      for (int j = 0; j < RH; ++j) {
+        const float* wj = w + RL_.w1 + z(j) * kRenderIn + 2;
+        float s = w[RL_.b1 + z(j)];
+        for (std::size_t q = 0; q < f.size(); ++q) s += wj[q] * f[q];
+        g1_[z(i) * z(RH) + z(j)] = s;
       }
-      // the row's features as full-width planes [feature][S]: the dense kernel reads blocks of them in place
-      float* F = frow_.data();
+    }
+    render_rows_.reset();
+    const std::size_t S = z(S_), Sb = frow_.size() / 2;  // a row, and a row padded to whole blocks
+    float* ftn = frow_.data();  // the row's normalised fine features (zero past the end of the row)
+    float* fdn = frow_.data() + Sb;
+    float* h1 = r1_.data();
+    for (int y = 0; y < S_; ++y) {
+      const auto g = render_rows_.get(g1_.data(), R_, ax_, ax_.i[z(y)]);
+      const float wy = ax_.w[z(y)];
       const float* tf = ft_.data() + z(y) * S;
       const float* df = fd_.data() + z(y) * S;
       for (std::size_t x = 0; x < S; ++x) {
-        F[x] = tf[x] * it;
-        F[S + x] = df[x] * id;
-      }
-      for (int j = 0; j < kc; ++j) {
-        float* row = F + z(2 + j) * S;
-        for (std::size_t x = 0; x < S; ++x) {
-          const float* ca = crow_.data() + z(ax_.i[x]) * kc + z(j);
-          row[x] = ca[0] + ax_.w[x] * (ca[kc] - ca[0]);
-        }
+        ftn[x] = tf[x] * it;
+        fdn[x] = df[x] * id;
       }
       std::uint8_t* out_row = rgba + stride * z(S_ - 1 - y);
-      for (int x0 = 0; x0 < S_; x0 += kB) {  // S_ is a multiple of 32, so blocks of 16 are whole
-        dense(w + RL_.w1, w + RL_.b1, F + x0, S_, r1_.data(), kB, kRenderIn, RH, true);
-        dense(w + RL_.w2, w + RL_.b2, r1_.data(), kB, r2_.data(), kB, RH, RH, true);
-        dense(w + RL_.wo, w + RL_.bo, r2_.data(), kB, out_.data(), kB, RH, 4, false);
-        for (int q = 0; q < kB; ++q) {
-          const float g = rollout::render_gate(F[z(x0 + q)], F[S + z(x0 + q)]);
-          for (int ch = 0; ch < 4; ++ch) out_[z(ch) * kB + z(q)] *= g;
+      for (int x0 = 0; x0 < S_; x0 += kB) {  // blocks of 16 pixels (the last one maybe in part)
+        vf tv[kV], dv[kV];
+        for (int v = 0; v < kV; ++v) {
+          tv[v] = load(ftn + x0 + v * kW);
+          dv[v] = load(fdn + x0 + v * kW);
         }
-        write_pixels(out_.data(), out_.data() + kB, out_.data() + 2 * kB, out_.data() + 3 * kB, kB, in, out_row + 4 * z(x0));
+        for (int j = 0; j < RH; ++j) {
+          const float w0 = w[RL_.w1 + z(j) * kRenderIn], w1 = w[RL_.w1 + z(j) * kRenderIn + 1];
+          const float* g0 = g[0] + z(j) * Sb + z(x0);
+          const float* g1 = g[1] + z(j) * Sb + z(x0);
+          for (int v = 0; v < kV; ++v) {
+            const vf a = load(g0 + v * kW);
+            store(h1 + j * kB + v * kW, relu(a + wy * (load(g1 + v * kW) - a) + w0 * tv[v] + w1 * dv[v]));
+          }
+        }
+        render_layers(w, h1);
+        for (int v = 0; v < kV; ++v) {  // the material gate (render_gate)
+          const vf m = 50.f * (vmax<vf>(tv[v], vf{}) + vmax<vf>(dv[v], vf{}));
+          const vf gate = vmin<vf>(m, bc<vf>(1.f));
+          for (int ch = 0; ch < 4; ++ch) store(out_.data() + ch * kB + v * kW, load(out_.data() + ch * kB + v * kW) * gate);
+        }
+        rgba_block(out_.data(), std::min(kB, S_ - x0), in, out_row + 4 * z(x0));
       }
     }
+  }
+
+  // Premultiplied RGBA floats of a block (planes r, g, b, a of 16) to RGBA8 for its first n pixels, with the optional
+  // colour matrix: as write_pixels, on vectors, the four bytes of a pixel assembled in one 32-bit lane.
+  static void rgba_block(const float* q, int n, const FrameInput& in, std::uint8_t* out) {
+    for (int v = 0; v < kV && v * kW < n; ++v) {
+      vf c[4];
+      for (int ch = 0; ch < 4; ++ch) c[ch] = load(q + ch * kB + v * kW);
+      if (in.apply_colour) {
+        const auto& M = in.colour;
+        const vf r = c[0], g = c[1], b = c[2];
+        c[0] = M[0] * r + M[1] * g + M[2] * b;
+        c[1] = M[3] * r + M[4] * g + M[5] * b;
+        c[2] = M[6] * r + M[7] * g + M[8] * b;
+      }
+      vi px{};
+      for (int ch = 0; ch < 4; ++ch) {
+        const vf u = vmin<vf>(vmax<vf>(c[ch], vf{}), bc<vf>(1.f));
+        px |= __builtin_convertvector(u * 255.f + 0.5f, vi) << (8 * ch);
+      }
+      if (n - v * kW >= kW) std::memcpy(out + 4 * v * kW, &px, sizeof px);
+      else std::memcpy(out + 4 * v * kW, &px, 4 * static_cast<std::size_t>(n - v * kW));
+    }
+  }
+
+  // The renderer's second layer and output layer on one block of 16 pixels (from r1_ into out_), with the shared dense
+  // kernel inlined: called once per block, its calls cost about as much as its arithmetic.
+  [[gnu::flatten]] void render_layers(const float* w, const float* h1) {
+    const int RH = h_.render_hidden;
+    dense(w + RL_.w2, w + RL_.b2, h1, kB, r2_.data(), kB, RH, RH, true);
+    dense(w + RL_.wo, w + RL_.bo, r2_.data(), kB, out_.data(), kB, RH, 4, false);
   }
 
   std::size_t scratch_bytes() const override {
     std::size_t n = 0;
     for (const auto* v : {&w1_, &b1_, &w2_, &b2_, &cond_, &folded_cond_, &X_, &h1p_, &h1_, &h2_, &d_, &mid_, &next_, &coarse_, &flow_, &div_, &p_,
-                          &tmp_, &noise_, &dirsum_, &B_, &rr_, &aa_, &ft_, &fd_, &ux_, &vy_, &fa_, &fb_, &ga_, &gb_, &tp_, &dp_, &lo_t_, &hi_t_, &lo_d_, &hi_d_, &rowa_, &rowb_, &rowc_, &rowd_, &B2_, &rr2_, &aa2_, &crow_, &frow_, &feat_, &r1_, &r2_, &out_,
-                          &row_, &swu_, &swv_}) {
+                          &tmp_, &wot_, &noise_, &dirsum_, &soot_, &fac_, &ft_, &fd_, &rec_, &td_, &fg_,
+                          &cs_t_, &cs_d_, &wx_, &wy_, &swl_, &g1_, &frow_, &r1_, &r2_, &out_}) {
       n += v->size() * 4;
     }
+    n += any_.size() + 4 * off_.size();
     n += curl_.bytes() + swirl_.bytes() + fine_flicker_.bytes();
     for (const auto& f : flicker_) n += f.bytes();
+    n += flow_rows_.bytes() + swirl_rows_.bytes() + fac_rows_.bytes() + render_rows_.bytes();
+    for (const auto& r : noise_rows_) n += r.bytes();
     return n;
   }
 
@@ -470,26 +760,31 @@ class Rollout final : public RolloutRunner {
         X_[z(C_ + 3) * plane + q] = (static_cast<float>(y) + 0.5f) / static_cast<float>(R_) * 2.f - 1.f;
       }
     }
-    conv3x3(X_.data(), w1_.data(), b1_.data(), h1_.data(), I_, H_, R_, R_, true);
+    conv(X_.data(), w1_.data(), b1_.data(), h1_.data(), I_, H_);
     for (int c = 0; c < H_; ++c) {  // into a zero-bordered buffer for the second convolution
       for (int y = 0; y < R_; ++y) {
         std::copy_n(h1_.data() + (z(c) * z(R_) + z(y)) * z(R_), R_, h1p_.data() + (z(c) * z(Pw) + z(y + 1)) * z(Pw) + 1);
       }
     }
-    conv3x3(h1p_.data(), w2_.data(), b2_.data(), h2_.data(), H_, H_, R_, R_, true);
-    // the 1x1 output layer, planar: d[k][cell]
-    for (int k = 0; k < O_; ++k) {
-      float* __restrict o = d_.data() + z(k) * z(N_);
-      std::fill_n(o, N_, w[L_.bo + z(k)]);
-      for (int j = 0; j < H_; ++j) {
-        const float wk = w[L_.wo + z(j) * z(O_) + z(k)];
-        const float* __restrict a = h2_.data() + z(j) * z(N_);
-        for (int i = 0; i < N_; ++i) o[i] += wk * a[i];
+    conv(h1p_.data(), w2_.data(), b2_.data(), h2_.data(), H_, H_);
+    // the 1x1 output layer, planar: d[k][cell], blocks of 16 cells with the dense kernel, then the cells left over
+    int i0 = 0;
+    for (; i0 + kB <= N_; i0 += kB) dense(wot_.data(), w + L_.bo, h2_.data() + i0, N_, d_.data() + i0, N_, H_, O_, false);
+    for (; i0 < N_; ++i0) {
+      for (int k = 0; k < O_; ++k) {
+        float s = w[L_.bo + z(k)];
+        for (int j = 0; j < H_; ++j) s += wot_[z(k) * z(H_) + z(j)] * h2_[z(j) * z(N_) + z(i0)];
+        d_[z(k) * z(N_) + z(i0)] = s;
       }
     }
     for (int i = 0; i < N_; ++i) {
       for (int k = 0; k < kPhys; ++k) mid_[z(i) * z(C_) + z(k)] = coarse_[z(i) * z(C_) + z(k)] + m_.scale[z(k)] * d_[z(k) * z(N_) + z(i)];
-      for (int k = kPhys; k < C_; ++k) mid_[z(i) * z(C_) + z(k)] = std::tanh(coarse_[z(i) * z(C_) + z(k)] + d_[z(k) * z(N_) + z(i)]);
+      for (int k = kPhys; k < C_; ++k) d_[z(k) * z(N_) + z(i)] += coarse_[z(i) * z(C_) + z(k)];
+    }
+    for (int k = kPhys; k < C_; ++k) {  // the memory channels, bounded by tanh
+      float* q = d_.data() + z(k) * z(N_);
+      each_block(N_, [&]<class V>(int i) { st<V>(q + i, vtanh<V>(ld<V>(q + i))); });
+      for (int i = 0; i < N_; ++i) mid_[z(i) * z(C_) + z(k)] = q[i];
     }
     const auto U = [&](int x, int y, int c) { return mid_[(z(std::clamp(y, 0, R_ - 1)) * z(R_) + z(std::clamp(x, 0, R_ - 1))) * z(C_) + z(c)]; };
     for (int y = 0; y < R_; ++y) {
@@ -497,21 +792,17 @@ class Rollout final : public RolloutRunner {
         div_[z(y) * z(R_) + z(x)] = -0.5f * (U(x + 1, y, 0) - U(x - 1, y, 0) + U(x, y + 1, 1) - U(x, y - 1, 1)) + m_.qscale * d_[z(C_) * z(N_) + z(y) * z(R_) + z(x)];
       }
     }
+    const int Pr = R_ + 2;  // pressure rows, with the zero border
     for (int it = 0; it < h_.jacobi; ++it) {
       for (int y = 0; y < R_; ++y) {
-        const float* up = y + 1 < R_ ? p_.data() + z(y + 1) * z(R_) : nullptr;
-        const float* dn = y > 0 ? p_.data() + z(y - 1) * z(R_) : nullptr;
-        const float* row = p_.data() + z(y) * z(R_);
-        float* t = tmp_.data() + z(y) * z(R_);
-        const float* dv = div_.data() + z(y) * z(R_);
-        for (int x = 0; x < R_; ++x) {
-          const float s = (x > 0 ? row[x - 1] : 0.f) + (x + 1 < R_ ? row[x + 1] : 0.f) + (dn ? dn[x] : 0.f) + (up ? up[x] : 0.f);
-          t[x] = 0.25f * (dv[x] + s);
-        }
+        const float* __restrict row = p_.data() + z(y + 1) * z(Pr) + 1;
+        float* __restrict t = tmp_.data() + z(y + 1) * z(Pr) + 1;
+        const float* __restrict dv = div_.data() + z(y) * z(R_);
+        for (int x = 0; x < R_; ++x) t[x] = 0.25f * (dv[x] + (row[x - 1] + row[x + 1] + row[x - Pr] + row[x + Pr]));
       }
       p_.swap(tmp_);
     }
-    const auto P = [&](int x, int y) { return (x < 0 || y < 0 || x >= R_ || y >= R_) ? 0.f : p_[z(y) * z(R_) + z(x)]; };
+    const auto P = [&](int x, int y) { return p_[z(y + 1) * z(Pr) + z(x + 1)]; };  // zero outside
     for (int y = 0; y < R_; ++y) {
       for (int x = 0; x < R_; ++x) {
         const std::size_t i = z(y) * z(R_) + z(x);
@@ -543,16 +834,17 @@ class Rollout final : public RolloutRunner {
     coarse_.swap(next_);
   }
 
-  static float smoothstep01(float t) {
-    t = std::clamp(t, 0.f, 1.f);
-    return t * t * (3.f - 2.f * t);
+  // The stepper's 3x3 convolutions (with ReLU) on the coarse grid: the shared kernel, with six output channels per
+  // register tile on AVX2 (twelve accumulators of its sixteen registers) and the shared tile elsewhere.
+  void conv(const float* in, const float* W, const float* b, float* out, int ci, int co) const {
+    constexpr int T = kW == 8 ? 6 : NFX_TILE;
+    int o = 0;
+    for (; o + T <= co; o += T) conv_tile<T>(in, W, b, out, ci, R_, R_, o, true);
+    for (; o + 2 <= co; o += 2) conv_tile<2>(in, W, b, out, ci, R_, R_, o, true);
+    for (; o < co; ++o) conv_tile<1>(in, W, b, out, ci, R_, R_, o, true);
   }
 
   // Bilinear weights from the coarse grid (or the swirl lattice) to fine pixel centres: they depend on x or y alone.
-  struct Axis {
-    std::vector<int> i;
-    std::vector<float> w;
-  };
   static Axis axis(int S, int n, float scale, float offset) {  // coordinate = (p + 0.5) * scale + offset, clamped
     Axis a;
     a.i.resize(z(S));
@@ -566,178 +858,320 @@ class Rollout final : public RolloutRunner {
     return a;
   }
 
-  // f (n x n, `channels` interleaved, channel c) at fine pixel (x, y) through precomputed axes.
-  static float up(const float* f, int n, int channels, int c, const Axis& ax, const Axis& ay, int x, int y) {
-    const std::size_t i = (z(ay.i[z(y)]) * z(n) + z(ax.i[z(x)])) * z(channels) + z(c);
-    const float fx = ax.w[z(x)], fy = ay.w[z(y)];
-    const float a = f[i] + fx * (f[i + z(channels)] - f[i]);
-    const float b = f[i + z(n) * z(channels)] + fx * (f[i + z(n + 1) * z(channels)] - f[i + z(n) * z(channels)]);
-    return a + fy * (b - a);
+  // Where a bilinear sample of a ring of padded, interleaved rows (heat and soot of a pixel side by side, rows of Pw
+  // pixels, the frame starting at (1, 1), padded row p in slot p & mask) at frame coordinates (px, py) reads: the offset
+  // of its lower left corner and its weights. Coordinates are clamped to [-1, size], so that a sample outside the frame
+  // reads the zero border. Kept apart from the sampling, so that each loop is short and the loads of one block overlap
+  // the arithmetic of others.
+  template <class V>
+  static void stencil(V px, V py, int Pw, int mask, float edge, std::int32_t* off, float* wx, float* wy) {
+    px = vmin<V>(vmax<V>(px, bc<V>(-1.f)), bc<V>(edge)) + 1.f;  // padded coordinates in [0, size + 1]
+    py = vmin<V>(vmax<V>(py, bc<V>(-1.f)), bc<V>(edge)) + 1.f;
+    const IntOf<V> xi = to_int<V>(px), yi = to_int<V>(py);
+    st<V>(wx, px - to_float<V>(xi));
+    st<V>(wy, py - to_float<V>(yi));
+    st_int<V>(off, ((yi & mask) * Pw + xi) * 2);
   }
 
+  // Slot of padded row p in a ring; after writing slot 0, mirror() copies it above the last slot, so that the row above
+  // any slot is the next one in memory.
+  float* ring_row(std::vector<float>& ring, int p) { return ring.data() + z(p & (ring_rows_ - 1)) * z(S_ + 3) * 2; }
+  void mirror(std::vector<float>& ring, int p) {
+    if ((p & (ring_rows_ - 1)) == 0) std::copy_n(ring.data(), z(S_ + 3) * 2, ring.data() + z(ring_rows_) * z(S_ + 3) * 2);
+  }
+  void zero_row(std::vector<float>& ring, int p) {
+    std::fill_n(ring_row(ring, p), z(S_ + 3) * 2, 0.f);
+    mirror(ring, p);
+  }
+
+  // Bilinear samples of both fields at stencils from stencil() (rows `row` floats apart), with the range of the four
+  // corners when Range is set.
+  template <class V, bool Range>
+  static void sample2(const float* src, int row, const std::int32_t* off, V fx, V fy, V& a, V& b, V* lo, V* hi) {
+    V r0[4], r1[4];  // a and b at the two corners of the lower row, then of the upper row
+    quads2<V>(src, off, row, r0, r1);
+    const V a0 = r0[0] + fx * (r0[2] - r0[0]), a1 = r1[0] + fx * (r1[2] - r1[0]);
+    const V b0 = r0[1] + fx * (r0[3] - r0[1]), b1 = r1[1] + fx * (r1[3] - r1[1]);
+    a = a0 + fy * (a1 - a0);
+    b = b0 + fy * (b1 - b0);
+    if constexpr (Range) {
+      lo[0] = vmin<V>(vmin<V>(r0[0], r0[2]), vmin<V>(r1[0], r1[2]));
+      hi[0] = vmax<V>(vmax<V>(r0[0], r0[2]), vmax<V>(r1[0], r1[2]));
+      lo[1] = vmin<V>(vmin<V>(r0[1], r0[3]), vmin<V>(r1[1], r1[3]));
+      hi[1] = vmax<V>(vmax<V>(r0[1], r0[3]), vmax<V>(r1[1], r1[3]));
+    }
+  }
+
+  // The detail layer: MacCormack advection of heat and soot together, zero outside the frame (clamped to the forward
+  // step's stencil, as in the simulation), then the lock to the coarse state. It runs in four stages, row by row, each
+  // a few rows behind the stage whose output it reads, so that output is still in cache:
+  //   copy     the fields, interleaved, into a ring of zero-bordered rows, ahead of the forward samples by as many rows
+  //            as they reach up;
+  //   forward  the fine velocity, the forward samples (also into a ring of interleaved, zero-bordered rows, for the
+  //            round trip) and the range of their stencils;
+  //   back     the round trip and the correction, behind the forward samples by as many rows as it reaches down, and
+  //            column sums of the result; when a row of coarse cells is complete, its block sums and lock factors;
+  //   lock     scale and new material, behind by the rows of coarse cells that a fine row interpolates.
   void detail_step(std::span<const float> controls) {
     using namespace rollout;
     const DetailSpec& dt = m_.detail;
-    const float k = static_cast<float>(S_) / static_cast<float>(R_), px128 = static_cast<float>(S_) / 128.f, t = time_ + 0.5f / m_.fps;
+    const float t = time_ + 0.5f / m_.fps, px128 = static_cast<float>(S_) / 128.f;
     float amp = dt.swirl * px128;
     if (dt.swirl_control >= 0 && z(dt.swirl_control) < controls.size()) amp *= 0.3f + controls[z(dt.swirl_control)];
     if (dt.swirl_ramp > 0.f) amp *= std::min(1.f, since_start_ / dt.swirl_ramp);
+    amp_ = amp;
+    if (amp > 0.f) swirl_lattice(t * dt.swirl_rate);
+    if (dt.contrast > 0.f) fine_flicker_.at(t);
+    flow_rows_.reset();
+    swirl_rows_.reset();
+    fac_rows_.reset();
+    for (auto& r : noise_rows_) r.reset();
+    std::fill(cs_t_.begin(), cs_t_.end(), 0.f);
+    std::fill(cs_d_.begin(), cs_d_.end(), 0.f);
+    // How far the samples reach up and down: from the range of the vertical velocity (interpolation stays within the
+    // range of what it interpolates, and the margin covers rounding).
+    const float k = static_cast<float>(S_) / static_cast<float>(R_), edge = static_cast<float>(S_);
+    float flo = 0.f, fhi = 0.f, slo = 0.f, shi = 0.f;
+    for (int i = 0; i < N_; ++i) {
+      flo = std::min(flo, flow_[z(i) * 2 + 1]);
+      fhi = std::max(fhi, flow_[z(i) * 2 + 1]);
+    }
     if (amp > 0.f) {
-      swirl_.at(t * dt.swirl_rate);
-      const int n = sw_n_;
-      std::fill(swu_.begin(), swu_.end(), 0.f);
-      std::fill(swv_.begin(), swv_.end(), 0.f);
-      for (int j = 1; j < n - 1; ++j) {
-        for (int i = 1; i < n - 1; ++i) {
-          const std::size_t q = z(j) * z(n) + z(i);
-          swu_[q] = swirl_.value(q + z(n)) - swirl_.value(q - z(n));
-          swv_[q] = swirl_.value(q - 1) - swirl_.value(q + 1);
+      for (std::size_t q = 1; q < swl_.size(); q += 2) {
+        slo = std::min(slo, swl_[q]);
+        shi = std::max(shi, swl_[q]);
+      }
+    }
+    const int lead = static_cast<int>(std::min(edge, std::max(0.f, -(k * flo + amp * slo)))) + 3;
+    const int lag = static_cast<int>(std::min(edge, std::max(0.f, k * fhi + amp * shi))) + 3;
+    ring_ = std::min(S_, lag + 1);  // a row's record lives from its forward samples until its round trip, lag rows later
+    // The rings of padded rows hold every row from the oldest a sample still reads to the newest written ahead of it,
+    // and the zero rows below and above the frame.
+    ring_rows_ = std::min(slots_, static_cast<int>(std::bit_ceil(z(lead + lag + 2))));
+    zero_row(td_, 0);
+    zero_row(fg_, 0);
+    const int kk = S_ / R_;
+    int copied = 0, back = 0, locked = 0;
+    for (int r = 0; r < S_; ++r) {
+      for (; copied < std::min(S_, r + lead); ++copied) {
+        copy_row(copied);
+        if (copied + 1 == S_) {
+          zero_row(td_, S_ + 1);
+          zero_row(td_, S_ + 2);
         }
       }
-    }
-    // fine velocity: the coarse flow (and the swirl), interpolated separably (a row of the grid, then along x)
-    for (int y = 0; y < S_; ++y) {
-      const float wy = ax_.w[z(y)];
-      const float* r0 = flow_.data() + z(ax_.i[z(y)]) * z(R_) * 2;
-      const float* r1 = r0 + z(R_) * 2;
-      for (int i = 0; i < 2 * R_; ++i) rowa_[z(i)] = (r0[i] + wy * (r1[i] - r0[i])) * k;
-      float* uo = ux_.data() + z(y) * z(S_);
-      float* vo = vy_.data() + z(y) * z(S_);
-      for (int x = 0; x < S_; ++x) {
-        const std::size_t i = z(ax_.i[z(x)]) * 2;
-        const float wx = ax_.w[z(x)];
-        uo[x] = rowa_[i] + wx * (rowa_[i + 2] - rowa_[i]);
-        vo[x] = rowa_[i + 1] + wx * (rowa_[i + 3] - rowa_[i + 1]);
+      forward_row(r);
+      const bool last = r + 1 == S_;
+      if (last) {
+        zero_row(fg_, S_ + 1);
+        zero_row(fg_, S_ + 2);
       }
-      if (amp > 0.f) {
-        const float sy = sx_.w[z(y)];
-        const float* su0 = swu_.data() + z(sx_.i[z(y)]) * z(sw_n_);
-        const float* sv0 = swv_.data() + z(sx_.i[z(y)]) * z(sw_n_);
-        for (int i = 0; i < sw_n_; ++i) {
-          rowb_[z(i)] = amp * (su0[i] + sy * (su0[i + sw_n_] - su0[i]));
-          rowc_[z(i)] = amp * (sv0[i] + sy * (sv0[i + sw_n_] - sv0[i]));
-        }
-        for (int x = 0; x < S_; ++x) {
-          const std::size_t i = z(sx_.i[z(x)]);
-          const float wx = sx_.w[z(x)];
-          uo[x] += rowb_[i] + wx * (rowb_[i + 1] - rowb_[i]);
-          vo[x] += rowc_[i] + wx * (rowc_[i + 1] - rowc_[i]);
-        }
+      for (; back < S_ && (last || back + lag <= r + 1); ++back) {
+        back_row(back);
+        if ((back + 1) % kk == 0) lock_factors(back / kk);
+      }
+      for (; locked < S_ && (back == S_ || back / kk >= ax_.i[z(locked)] + 2); ++locked) lock_row(locked);
+    }
+  }
+
+  // The sub-grid swirl on its lattice: the curl of the stream function by central differences, (u, v) interleaved.
+  void swirl_lattice(float zt) {
+    swirl_.at(zt);
+    const int n = sw_n_;
+    std::fill(swl_.begin(), swl_.end(), 0.f);
+    for (int j = 1; j < n - 1; ++j) {
+      for (int i = 1; i < n - 1; ++i) {
+        const std::size_t q = z(j) * z(n) + z(i);
+        swl_[2 * q] = swirl_.value(q + z(n)) - swirl_.value(q - z(n));
+        swl_[2 * q + 1] = swirl_.value(q - 1) - swirl_.value(q + 1);
       }
     }
-    // MacCormack for heat and soot together, zero outside the frame. The fields are copied into buffers with a zero
-    // border, so a backtrace clamped to [-1, size] reads zeros outside without a branch: the forward samples and the
-    // clamp range in one pass, the round trip in a second, the correction in a third.
-    const int Pw = S_ + 3;  // one zero column and row before, two after (a clamped backtrace at the far edge reads two zeros)
-    for (int y = 0; y < S_; ++y) {
-      std::copy_n(ft_.data() + z(y) * z(S_), S_, tp_.data() + z(y + 1) * z(Pw) + 1);
-      std::copy_n(fd_.data() + z(y) * z(S_), S_, dp_.data() + z(y + 1) * z(Pw) + 1);
+  }
+
+  // Row y of the fields, interleaved, into the ring of zero-bordered rows.
+  void copy_row(int y) {
+    const std::size_t S = z(S_);
+    float* o = ring_row(td_, y + 1) + 2;
+    const float* a = ft_.data() + z(y) * S;
+    const float* b = fd_.data() + z(y) * S;
+    each_block(S_, [&]<class V>(int x) { st_pairs<V>(o + 2 * x, ld<V>(a + x), ld<V>(b + x)); });
+    mirror(td_, y + 1);
+  }
+
+  // Row y of the fine velocity (the coarse flow and the swirl, interpolated), the forward samples and their range.
+  void forward_row(int y) {
+    const std::size_t S = z(S_);
+    const int Pw = S_ + 3;
+    const float k = static_cast<float>(S_) / static_cast<float>(R_), edge = static_cast<float>(S_), yf = static_cast<float>(y);
+    const auto f = flow_rows_.get(flow_.data(), R_, ax_, ax_.i[z(y)]);
+    const float wy0 = ax_.w[z(y)];
+    const float *u0 = f[0], *v0 = f[0] + S, *u1 = f[1], *v1 = f[1] + S;
+    const bool swirl = amp_ > 0.f;
+    const float amp = amp_;
+    const float *su0 = u0, *sv0 = u0, *su1 = u0, *sv1 = u0;
+    float sy = 0.f;
+    if (swirl) {
+      const auto s = swirl_rows_.get(swl_.data(), sw_n_, sx_, sx_.i[z(y)]);
+      sy = sx_.w[z(y)];
+      su0 = s[0];
+      sv0 = s[0] + S;
+      su1 = s[1];
+      sv1 = s[1] + S;
     }
-    const float hi_lim = static_cast<float>(S_);
-    const auto backtrace = [&](float px, float py, std::size_t& a, float& fx, float& fy) {
-      px = std::clamp(px, -1.f, hi_lim) + 1.f;  // padded coordinates in [0, size + 1]
-      py = std::clamp(py, -1.f, hi_lim) + 1.f;
-      const int x0 = static_cast<int>(px), y0 = static_cast<int>(py);  // up to size + 1
-      fx = px - static_cast<float>(x0);
-      fy = py - static_cast<float>(y0);
-      a = z(y0) * z(Pw) + z(x0);
-    };
-    for (int y = 0; y < S_; ++y) {
-      for (int x = 0; x < S_; ++x) {
-        const std::size_t i = z(y) * z(S_) + z(x);
-        std::size_t a;
-        float fx, fy;
-        backtrace(static_cast<float>(x) - ux_[i], static_cast<float>(y) - vy_[i], a, fx, fy);
-        const std::size_t c = a + z(Pw);
-        const float t00 = tp_[a], t10 = tp_[a + 1], t01 = tp_[c], t11 = tp_[c + 1];
-        const float d00 = dp_[a], d10 = dp_[a + 1], d01 = dp_[c], d11 = dp_[c + 1];
-        const float ta = t00 + fx * (t10 - t00), tb = t01 + fx * (t11 - t01);
-        const float da = d00 + fx * (d10 - d00), db = d01 + fx * (d11 - d01);
-        const std::size_t o = z(y + 1) * z(Pw) + z(x + 1);
-        fa_[o] = ta + fy * (tb - ta);
-        ga_[o] = da + fy * (db - da);
-        lo_t_[i] = std::min(std::min(t00, t10), std::min(t01, t11));
-        hi_t_[i] = std::max(std::max(t00, t10), std::max(t01, t11));
-        lo_d_[i] = std::min(std::min(d00, d10), std::min(d01, d11));
-        hi_d_[i] = std::max(std::max(d00, d10), std::max(d01, d11));
+    float* rec = row_record(y);
+    const float* td = td_.data();
+    float* o = ring_row(fg_, y + 1) + 2;
+    const int mask = ring_rows_ - 1;
+    std::int32_t* off = off_.data();
+    float *wx = wx_.data(), *wy = wy_.data();
+    each_block(S_, [&]<class V>(int x) {  // the velocity and the stencils
+      const V a = ld<V>(u0 + x), b = ld<V>(v0 + x);
+      V u = (a + wy0 * (ld<V>(u1 + x) - a)) * k, v = (b + wy0 * (ld<V>(v1 + x) - b)) * k;
+      if (swirl) {
+        const V c = ld<V>(su0 + x), d = ld<V>(sv0 + x);
+        u += amp * (c + sy * (ld<V>(su1 + x) - c));
+        v += amp * (d + sy * (ld<V>(sv1 + x) - d));
       }
-    }
-    for (int y = 0; y < S_; ++y) {
-      for (int x = 0; x < S_; ++x) {
-        const std::size_t i = z(y) * z(S_) + z(x);
-        std::size_t a;
-        float fx, fy;
-        backtrace(static_cast<float>(x) + ux_[i], static_cast<float>(y) + vy_[i], a, fx, fy);
-        const std::size_t c = a + z(Pw);
-        const float ta = fa_[a] + fx * (fa_[a + 1] - fa_[a]), tb = fa_[c] + fx * (fa_[c + 1] - fa_[c]);
-        const float da = ga_[a] + fx * (ga_[a + 1] - ga_[a]), db = ga_[c] + fx * (ga_[c + 1] - ga_[c]);
-        fb_[i] = ta + fy * (tb - ta);
-        gb_[i] = da + fy * (db - da);
-      }
-    }
-    for (int y = 0; y < S_; ++y) {
-      const std::size_t o = z(y + 1) * z(Pw) + 1;
-      for (int x = 0; x < S_; ++x) {
-        const std::size_t i = z(y) * z(S_) + z(x);
-        ft_[i] = std::max(0.f, std::clamp(fa_[o + z(x)] + 0.5f * (ft_[i] - fb_[i]), lo_t_[i], hi_t_[i]));
-        fd_[i] = std::max(0.f, std::clamp(ga_[o + z(x)] + 0.5f * (fd_[i] - gb_[i]), lo_d_[i], hi_d_[i]));
-      }
-    }
-    // lock to the coarse state (as the reference), heat and soot together so the flicker is evaluated once per pixel
+      float* r = in_record<V>(rec, x);
+      st<V>(r, u);
+      st<V>(r + kW, v);
+      stencil<V>(bc<V>(static_cast<float>(x)) + lane_index<V>() - u, bc<V>(yf) - v, Pw, mask, edge, off + x, wx + x, wy + x);
+    });
+    each_block(S_, [&]<class V>(int x) {  // the samples and their range
+      V sa, sb, lo[2], hi[2];
+      sample2<V, true>(td, 2 * Pw, off + x, ld<V>(wx + x), ld<V>(wy + x), sa, sb, lo, hi);
+      st_pairs<V>(o + 2 * x, sa, sb);
+      float* r = in_record<V>(rec, x);
+      st<V>(r + 2 * kW, sa);
+      st<V>(r + 3 * kW, sb);
+      st<V>(r + 4 * kW, lo[0]);
+      st<V>(r + 5 * kW, hi[0]);
+      st<V>(r + 6 * kW, lo[1]);
+      st<V>(r + 7 * kW, hi[1]);
+    });
+    mirror(fg_, y + 1);
+  }
+
+  // Row y of the round trip and the correction, and its column sums.
+  void back_row(int y) {
+    const std::size_t i = z(y) * z(S_);
+    const int Pw = S_ + 3;
+    const float edge = static_cast<float>(S_), yf = static_cast<float>(y);
+    const float* rec = row_record(y);
+    const float* fg = fg_.data();
+    const int mask = ring_rows_ - 1;
+    float *ft = ft_.data() + i, *fd = fd_.data() + i, *cst = cs_t_.data(), *csd = cs_d_.data();
+    std::int32_t* off = off_.data();
+    float *wx = wx_.data(), *wy = wy_.data();
+    each_block(S_, [&]<class V>(int x) {
+      const float* r = in_record<V>(rec, x);
+      stencil<V>(bc<V>(static_cast<float>(x)) + lane_index<V>() + ld<V>(r), bc<V>(yf) + ld<V>(r + kW), Pw, mask, edge, off + x, wx + x, wy + x);
+    });
+    each_block(S_, [&]<class V>(int x) {
+      V a, b;
+      sample2<V, false>(fg, 2 * Pw, off + x, ld<V>(wx + x), ld<V>(wy + x), a, b, nullptr, nullptr);
+      const float* r = in_record<V>(rec, x);
+      const V tn = vmax<V>(vmin<V>(vmax<V>(ld<V>(r + 2 * kW) + 0.5f * (ld<V>(ft + x) - a), ld<V>(r + 4 * kW)), ld<V>(r + 5 * kW)), V{});
+      const V dn = vmax<V>(vmin<V>(vmax<V>(ld<V>(r + 3 * kW) + 0.5f * (ld<V>(fd + x) - b), ld<V>(r + 6 * kW)), ld<V>(r + 7 * kW)), V{});
+      st<V>(ft + x, tn);
+      st<V>(fd + x, dn);
+      st<V>(cst + x, ld<V>(cst + x) + tn);
+      st<V>(csd + x, ld<V>(csd + x) + dn);
+    });
+  }
+
+  // The record of fine row y in the ring that carries it from the forward samples to the round trip: in blocks of kW
+  // pixels, kRec planes of kW floats each (velocity u, v; forward samples of heat and soot; their ranges: heat low,
+  // high, soot low, high), so that one pointer reaches all of a block.
+  float* row_record(int y) { return rec_.data() + z(y % ring_) * z(record_stride()); }
+  int record_stride() const { return (S_ + kW - 1) / kW * kW * kRec; }  // whole blocks, the last one maybe in part
+  template <class V, class T>
+  static T* in_record(T* row, int x) {
+    if constexpr (kOne<V>) return row + (x / kW) * (kW * kRec) + x % kW;
+    else return row + x * kRec;
+  }
+
+  // Row c of coarse cells is complete: its block sums (from the column sums, which start again) and the lock's factors
+  // (as the reference): where the fine field holds more than the coarse cell, scale it down; where it holds less, scale
+  // it up to `grow` and add the rest as new material.
+  void lock_factors(int c) {
+    const rollout::DetailSpec& dt = m_.detail;
     const int kk = S_ / R_;
     const float inv = 1.f / static_cast<float>(kk * kk);
-    std::fill(B_.begin(), B_.end(), 0.f);
-    std::fill(B2_.begin(), B2_.end(), 0.f);
-    for (int y = 0; y < S_; ++y) {
-      float* bt = B_.data() + z(y / kk) * z(R_);
-      float* bd = B2_.data() + z(y / kk) * z(R_);
-      const float* qt = ft_.data() + z(y) * z(S_);
-      const float* qd = fd_.data() + z(y) * z(S_);
-      for (int x = 0; x < S_; ++x) {
-        bt[x / kk] += qt[x];
-        bd[x / kk] += qd[x];
-      }
-    }
     constexpr float eps = 1e-4f;
-    for (int i = 0; i < N_; ++i) {
-      const float bt = B_[z(i)] * inv, tt = coarse_[z(i) * z(C_) + 2];
-      const float bd = B2_[z(i)] * inv, td = coarse_[z(i) * z(C_) + 3];
+    any_[z(c)] = 0;
+    for (int x = 0; x < R_; ++x) {
+      float st = 0.f, sd = 0.f;
+      for (int p = x * kk; p < (x + 1) * kk; ++p) {
+        st += cs_t_[z(p)];
+        sd += cs_d_[z(p)];
+      }
+      const std::size_t i = z(c) * z(R_) + z(x);
+      const float bt = st * inv, tt = coarse_[i * z(C_) + 2];
+      const float bd = sd * inv, td = coarse_[i * z(C_) + 3];
       const float rt = (tt + eps) / (bt + eps), rd = (td + eps) / (bd + eps);
-      rr_[z(i)] = rt <= 1.f ? rt : std::min(rt, dt.grow);
-      aa_[z(i)] = std::max(0.f, tt - bt * rr_[z(i)]);
-      rr2_[z(i)] = rd <= 1.f ? rd : std::min(rd, dt.grow);
-      aa2_[z(i)] = std::max(0.f, td - bd * rr2_[z(i)]);
+      float* f = fac_.data() + i * 4;  // new heat, heat scale, new soot, soot scale
+      f[1] = rt <= 1.f ? rt : std::min(rt, dt.grow);
+      f[0] = std::max(0.f, tt - bt * f[1]);
+      f[3] = rd <= 1.f ? rd : std::min(rd, dt.grow);
+      f[2] = std::max(0.f, td - bd * f[3]);
+      if (f[0] > 0.f || f[2] > 0.f) any_[z(c)] = 1;
     }
-    const float span = 1.f / (dt.edge1 - dt.edge0);
-    if (dt.contrast > 0.f) fine_flicker_.at(t);
-    for (int y = 0; y < S_; ++y) {
-      const float wy = ax_.w[z(y)];
-      const std::size_t r0 = z(ax_.i[z(y)]) * z(R_), r1 = r0 + z(R_);
-      for (int i = 0; i < R_; ++i) {
-        rowa_[z(i)] = aa_[r0 + z(i)] + wy * (aa_[r1 + z(i)] - aa_[r0 + z(i)]);
-        rowb_[z(i)] = rr_[r0 + z(i)] + wy * (rr_[r1 + z(i)] - rr_[r0 + z(i)]);
-        rowc_[z(i)] = aa2_[r0 + z(i)] + wy * (aa2_[r1 + z(i)] - aa2_[r0 + z(i)]);
-        rowd_[z(i)] = rr2_[r0 + z(i)] + wy * (rr2_[r1 + z(i)] - rr2_[r0 + z(i)]);
+    std::fill(cs_t_.begin(), cs_t_.end(), 0.f);
+    std::fill(cs_d_.begin(), cs_d_.end(), 0.f);
+  }
+
+  // Row y of the lock, heat and soot together: the factors interpolated from the coarse cells, new material broken up by
+  // the flicker noise (tongues, not a smear). The noise is evaluated only on rows that receive new material.
+  void lock_row(int y) {
+    const rollout::DetailSpec& dt = m_.detail;
+    const std::size_t S = z(S_);
+    const int c = ax_.i[z(y)];
+    const float wy = ax_.w[z(y)];
+    const auto f = fac_rows_.get(fac_.data(), R_, ax_, c);
+    const float *at0 = f[0], *rt0 = f[0] + S, *ad0 = f[0] + 2 * S, *rd0 = f[0] + 3 * S;
+    const float *at1 = f[1], *rt1 = f[1] + S, *ad1 = f[1] + 2 * S, *rd1 = f[1] + 3 * S;
+    const bool noisy = dt.contrast > 0.f && (any_[z(c)] || any_[z(c + 1)]);
+    const auto& oct = fine_flicker_.octaves();
+    const std::size_t no = oct.size();
+    std::array<const float*, 8> n0{}, n1{};
+    std::array<float, 8> ty{}, amp{};
+    if (noisy) {
+      for (std::size_t o = 0; o < no; ++o) {
+        const Axis& a = nax_[o];
+        const auto r = noise_rows_[o].get(oct[o].c.data(), oct[o].n, a, a.i[z(y)]);
+        n0[o] = r[0];
+        n1[o] = r[1];
+        ty[o] = a.w[z(y)];
+        amp[o] = oct[o].amp;
       }
-      float* qt = ft_.data() + z(y) * z(S_);
-      float* qd = fd_.data() + z(y) * z(S_);
-      const float Y = (static_cast<float>(y) + 0.5f) / px128 + 0.5f;
-      for (int x = 0; x < S_; ++x) {
-        const std::size_t i = z(ax_.i[z(x)]);
-        const float wx = ax_.w[z(x)];
-        float at = rowa_[i] + wx * (rowa_[i + 1] - rowa_[i]);
-        float ad = rowc_[i] + wx * (rowc_[i + 1] - rowc_[i]);
-        if ((at > 0.f || ad > 0.f) && dt.contrast > 0.f) {
-          const float X = (static_cast<float>(x) + 0.5f) / px128 + 0.5f;
-          const float phi = fine_flicker_.value(X, Y);
-          const float g = (1.f - dt.contrast) + dt.contrast * dt.kappa * smoothstep01((phi - dt.edge0) * span);
-          at *= g;
-          ad *= g;
+    }
+    // the contrast curve's argument (phi - edge0) / (edge1 - edge0) as one multiply-add of the octaves' weighted sum
+    const float span = 1.f / (dt.edge1 - dt.edge0), scale = span / fine_flicker_.norm(), shift = -dt.edge0 * span;
+    const float keep = 1.f - dt.contrast, ck = dt.contrast * dt.kappa;
+    float* qt = ft_.data() + z(y) * S;
+    float* qd = fd_.data() + z(y) * S;
+    each_block(S_, [&]<class V>(int x) {
+      V at = ld<V>(at0 + x), ad = ld<V>(ad0 + x), rt = ld<V>(rt0 + x), rd = ld<V>(rd0 + x);
+      at = at + wy * (ld<V>(at1 + x) - at);
+      rt = rt + wy * (ld<V>(rt1 + x) - rt);
+      ad = ad + wy * (ld<V>(ad1 + x) - ad);
+      rd = rd + wy * (ld<V>(rd1 + x) - rd);
+      if (noisy) {
+        V sum{};
+        for (std::size_t o = 0; o < no; ++o) {
+          const V a = ld<V>(n0[o] + x);
+          sum += amp[o] * (a + ty[o] * (ld<V>(n1[o] + x) - a));
         }
-        qt[x] = qt[x] * (rowb_[i] + wx * (rowb_[i + 1] - rowb_[i])) + at;
-        qd[x] = qd[x] * (rowd_[i] + wx * (rowd_[i + 1] - rowd_[i])) + ad;
+        V s = sum * scale + shift;
+        s = vmin<V>(vmax<V>(s, V{}), bc<V>(1.f));
+        const V g = keep + ck * (s * s * (3.f - 2.f * s));
+        at *= g;
+        ad *= g;
       }
-    }
+      st<V>(qt + x, ld<V>(qt + x) * rt + at);
+      st<V>(qd + x, ld<V>(qd + x) * rd + ad);
+    });
   }
 
   const rollout::Model& m_;
@@ -746,17 +1180,33 @@ class Rollout final : public RolloutRunner {
   rollout::StepLayout L_{};
   rollout::RenderLayout RL_{};
   std::vector<float> w1_, b1_, w2_, b2_, cond_, folded_cond_;
-  std::vector<float> X_, h1p_, h1_, h2_, d_, mid_, next_, coarse_, flow_, div_, p_, tmp_, noise_, dirsum_, B_, rr_, aa_;
-  std::vector<float> ft_, fd_, ux_, vy_, fa_, fb_, ga_, gb_, tp_, dp_, lo_t_, hi_t_, lo_d_, hi_d_, feat_, r1_, r2_, out_, row_, swu_, swv_;
-  Axis ax_, sx_;  // fine pixel -> coarse cell, fine pixel -> swirl lattice
-  std::vector<float> rowa_, rowb_, rowc_, rowd_;  // one interpolated row of a coarse field or of the swirl lattice
-  std::vector<float> B2_, rr2_, aa2_;             // the lock's block sums and factors for soot (B_, rr_, aa_: heat)
-  std::vector<float> crow_;                       // one row of the renderer's coarse features
-  std::vector<float> frow_;                       // one row of all renderer features, planar [feature][size]
+  std::vector<float> X_, h1p_, h1_, h2_, d_, mid_, next_, coarse_, flow_, div_, p_, tmp_, wot_, noise_, dirsum_, soot_;
+  std::vector<float> ft_, fd_;  // the fine fields
+  std::vector<float> td_, fg_;  // rings of padded rows: the fine fields and the forward samples, interleaved
+  int slots_ = 1, ring_rows_ = 1;  // slots of the rings, and those in use in this frame (powers of two)
+  static constexpr int kRec = 8;                            // planes of a row record (see row_record)
+  std::vector<float> rec_;                                  // the ring of row records
+  int ring_ = 1;                                            // rows in the ring in this frame
+  std::vector<float> cs_t_, cs_d_;                          // column sums of the row of coarse cells being summed
+  std::vector<std::int32_t> off_;                           // one row of sample stencils: offsets of the lower left
+  std::vector<float> wx_, wy_;                              // corners, and the weights
+  std::vector<float> fac_;                                  // the lock's factors per coarse cell: add, scale (heat, soot)
+  std::vector<std::uint8_t> any_;                           // a row of coarse cells receives new material
+  std::vector<float> swl_;                                  // the swirl lattice's velocity, (u, v) interleaved
+  std::vector<float> r1_, r2_, out_;                        // the renderer's activations for one block
+  Axis ax_, sx_;                     // fine pixel -> coarse cell, fine pixel -> swirl lattice
+  std::vector<Axis> nax_;            // fine pixel -> flicker lattice, per octave (smooth5 weights)
+  RowPair<2> flow_rows_, swirl_rows_;  // expanded rows of the flow and of the swirl
+  RowPair<4> fac_rows_;                // expanded rows of the lock's factors
+  std::vector<RowPair<1>> noise_rows_;  // expanded rows of the flicker lattices, per octave
+  RowPair<> render_rows_;              // expanded rows of the renderer's first layer (its coarse part)
+  std::vector<float> g1_;              // the renderer's first layer per coarse cell: bias and coarse part [cell][unit]
+  std::vector<float> frow_;            // one row of the renderer's fine features, planar [feature][padded size]
   SliceNoise curl_, swirl_;
   LatticeFbm fine_flicker_;
   std::vector<SliceNoise> flicker_;
   float sw_spacing_ = 1.f;
+  float amp_ = 0.f;  // the swirl's amplitude in this frame
   int sw_n_ = 0;
   std::uint64_t seed_ = 0;
   bool seeded_ = false;
