@@ -1,0 +1,841 @@
+// nvfx_experiment: the Phase 3 evaluation (docs/PLAN.md §6, docs/REPORT.md), end to end and cached.
+//
+//   nvfx_experiment data | a | b | c | report | all   [--root DIR] [--threads 4] [--quick]
+//
+//   data    simulate every clip (fire, smoke, explosion at 128 px, 64 frames)
+//   a       compression: one model per clip, a ladder of model sizes against the flipbook ladder at matched memory,
+//           plus the frame-interpolation test (only even frames available)
+//   b       controls: one model per effect trained on a 3 x 5 x 3 grid of control settings, scored on held-out
+//           settings against nearest-setting and two-setting-blend flipbook libraries
+//   c       variation: one model per effect trained on 24 seeds with learned variation codes; new seeds against
+//           held-out real clips by distribution statistics, diversity and copying checks
+//   report  bootstrap intervals and tables: results/experiments/SUMMARY.md (generated)
+//
+// Everything trained is scored through the shipping runtime (nvfx.h) at its stored precision. Clips, models,
+// sheets and videos go under the data root (never git); CSVs and the summary go under results/experiments.
+#include "args.hpp"
+
+#include <neuralfx/flipbook.hpp>
+#include <neuralfx/image_io.hpp>
+#include <neuralfx/metrics.hpp>
+#include <neuralfx/model.hpp>
+#include <neuralfx/nvfx.h>
+#include <neuralfx/sim.hpp>
+#include <neuralfx/train.hpp>
+
+#include <algorithm>
+#include <chrono>
+#include <cmath>
+#include <filesystem>
+#include <format>
+#include <fstream>
+#include <map>
+#include <print>
+#include <random>
+#include <ranges>
+#include <sched.h>
+#include <sstream>
+
+namespace fs = std::filesystem;
+using namespace nfx;
+
+namespace {
+
+struct Ctx {
+  fs::path data;     // clips, models, videos (outside git)
+  fs::path results;  // CSVs and the summary (in git)
+  int threads = 4;
+  bool quick = false;
+  int iters(int full) const { return quick ? std::max(100, full / 10) : full; }
+};
+
+constexpr int kSize = 128, kFrames = 64;
+
+// --- data -----------------------------------------------------------------------------------------------------------
+
+fs::path clip_path(const Ctx& c, std::string_view group, std::string_view name) { return c.data / "clips" / group / std::format("{}.nfxclip", name); }
+
+Clip get_clip(const Ctx& c, std::string_view group, std::string_view name, const sim::Params& p) {
+  const fs::path path = clip_path(c, group, name);
+  if (fs::exists(path)) {
+    if (auto r = read_clip(path)) return *r;
+  }
+  Clip clip = sim::simulate(p);
+  if (auto r = write_clip(path, clip); !r) throw std::runtime_error(r.error());
+  return clip;
+}
+
+sim::Params params(sim::Effect e, float i, float w, float t, std::uint64_t seed) {
+  sim::Params p;
+  p.effect = e;
+  p.intensity = i;
+  p.wind = w;
+  p.turbulence = t;
+  p.seed = seed;
+  p.size = kSize;
+  p.frames = kFrames;
+  return p;
+}
+
+std::string ename(sim::Effect e) { return std::string(sim::effect_name(e)); }
+
+// Task A clips: four per effect with different controls and seeds.
+std::vector<std::pair<std::string, sim::Params>> a_clips() {
+  std::vector<std::pair<std::string, sim::Params>> v;
+  const std::array<std::array<float, 3>, 4> s = {{{0.5f, 0.5f, 0.5f}, {0.9f, 0.3f, 0.7f}, {0.2f, 0.7f, 0.2f}, {0.7f, 0.6f, 1.0f}}};
+  for (const auto e : sim::kEffects) {
+    for (std::size_t k = 0; k < s.size(); ++k) {
+      v.emplace_back(std::format("{}_{}", ename(e), k), params(e, s[k][0], s[k][1], s[k][2], 101 + k));
+    }
+  }
+  return v;
+}
+
+// Task B: the training grid and the held-out settings (off-grid, fixed seed list).
+std::vector<std::array<float, 3>> b_train_settings() {
+  std::vector<std::array<float, 3>> v;
+  for (const float i : {0.f, 0.5f, 1.f}) {
+    for (const float w : {0.f, 0.25f, 0.5f, 0.75f, 1.f}) {
+      for (const float t : {0.f, 0.5f, 1.f}) v.push_back({i, w, t});
+    }
+  }
+  return v;
+}
+std::vector<std::array<float, 3>> b_test_settings() {
+  std::mt19937_64 rng(2026);
+  std::uniform_real_distribution<float> u(0.05f, 0.95f);
+  std::vector<std::array<float, 3>> v;
+  while (v.size() < 10) {
+    const std::array<float, 3> s{u(rng), u(rng), u(rng)};
+    // off the grid in every coordinate (at least 0.05 from a training value)
+    const auto off = [](float x, std::initializer_list<float> g) {
+      return std::ranges::all_of(g, [x](float y) { return std::abs(x - y) >= 0.05f; });
+    };
+    if (off(s[0], {0.f, 0.5f, 1.f}) && off(s[1], {0.f, 0.25f, 0.5f, 0.75f, 1.f}) && off(s[2], {0.f, 0.5f, 1.f})) v.push_back(s);
+  }
+  return v;
+}
+
+constexpr std::array<float, 3> kCControls = {0.6f, 0.5f, 0.6f};
+constexpr int kCTrain = 24, kCTest = 8;
+
+void step_data(const Ctx& c) {
+  int n = 0;
+  for (const auto& [name, p] : a_clips()) {
+    get_clip(c, "a", name, p);
+    ++n;
+  }
+  for (const auto e : sim::kEffects) {
+    for (const auto& s : b_train_settings()) get_clip(c, "b", std::format("{}_train_{:.2f}_{:.2f}_{:.2f}", ename(e), s[0], s[1], s[2]), params(e, s[0], s[1], s[2], 1));
+    for (const auto& s : b_test_settings()) get_clip(c, "b", std::format("{}_test_{:.2f}_{:.2f}_{:.2f}", ename(e), s[0], s[1], s[2]), params(e, s[0], s[1], s[2], 1));
+    for (int k = 0; k < kCTrain + kCTest; ++k) {
+      get_clip(c, "c", std::format("{}_seed{}", ename(e), 1000 + k), params(e, kCControls[0], kCControls[1], kCControls[2], 1000 + static_cast<std::uint64_t>(k)));
+    }
+    n += 55 + kCTrain + kCTest;
+    std::println("data: {} done ({} clips so far)", ename(e), n);
+  }
+}
+
+// --- runtime evaluation ---------------------------------------------------------------------------------------------
+
+struct RtEffect {
+  nvfx_effect* e = nullptr;
+  explicit RtEffect(const Model& m) {
+    std::ostringstream os;
+    if (auto r = save_model(os, m); !r) throw std::runtime_error(r.error());
+    const std::string b = os.str();
+    if (nvfx_effect_load_memory(b.data(), b.size(), &e) != NVFX_OK) throw std::runtime_error("runtime load failed");
+  }
+  ~RtEffect() { nvfx_effect_free(e); }
+  RtEffect(const RtEffect&) = delete;
+  RtEffect& operator=(const RtEffect&) = delete;
+};
+
+// Render a clip through the runtime: controls, then a training variation (>= 0) or a seed (drift off).
+Clip runtime_clip(const Model& m, std::span<const float> controls, int variation, std::uint64_t seed) {
+  RtEffect fx(m);
+  nvfx_instance* in = nullptr;
+  if (nvfx_instance_create(fx.e, kSize, &in) != NVFX_OK) throw std::runtime_error("runtime instance failed");
+  nvfx_instance_set_controls(in, controls.data(), static_cast<int>(controls.size()));
+  nvfx_instance_set_drift(in, 0.f);
+  if (variation >= 0) nvfx_instance_set_variation(in, variation);
+  else nvfx_instance_set_seed(in, seed);
+  Clip clip;
+  clip.allocate(kSize, kFrames);
+  clip.loop = m.h.loop;
+  clip.fps = m.fps;
+  for (int f = 0; f < kFrames; ++f) nvfx_render(in, f / static_cast<double>(m.fps), clip.frame(f).data(), kSize * 4);
+  nvfx_instance_free(in);
+  return clip;
+}
+
+// Median milliseconds per 128x128 frame on one pinned core.
+double runtime_ms(const Model& m) {
+  cpu_set_t old, one;
+  sched_getaffinity(0, sizeof(old), &old);
+  CPU_ZERO(&one);
+  CPU_SET(3, &one);
+  sched_setaffinity(0, sizeof(one), &one);
+  RtEffect fx(m);
+  nvfx_instance* in = nullptr;
+  nvfx_instance_create(fx.e, kSize, &in);
+  std::vector<std::uint8_t> buf(kSize * kSize * 4);
+  std::vector<double> ms;
+  for (int f = 0; f < 140; ++f) {
+    const auto t0 = std::chrono::steady_clock::now();
+    nvfx_render(in, f / 30.0, buf.data(), kSize * 4);
+    if (f >= 20) ms.push_back(std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count());
+  }
+  nvfx_instance_free(in);
+  sched_setaffinity(0, sizeof(old), &old);
+  std::ranges::sort(ms);
+  return ms[ms.size() / 2];
+}
+
+// --- CSV --------------------------------------------------------------------------------------------------------
+
+struct Row {
+  std::map<std::string, std::string> v;
+  std::string s(const std::string& k) const { return v.at(k); }
+  double d(const std::string& k) const { return std::stod(v.at(k)); }
+};
+
+class Csv {
+ public:
+  Csv(fs::path path, std::vector<std::string> cols) : path_(std::move(path)), cols_(std::move(cols)) {
+    if (fs::exists(path_)) {
+      std::ifstream in(path_);
+      std::string line;
+      std::getline(in, line);
+      while (std::getline(in, line)) {
+        if (line.empty()) continue;
+        Row r;
+        std::size_t k = 0;
+        for (const auto part : std::views::split(line, ',')) {
+          if (k < cols_.size()) r.v[cols_[k++]] = std::string(std::string_view(part));
+        }
+        rows_.push_back(std::move(r));
+      }
+    }
+  }
+  bool has(const std::string& key_col, const std::string& key) const {
+    return std::ranges::any_of(rows_, [&](const Row& r) { return r.v.contains(key_col) && r.v.at(key_col) == key; });
+  }
+  void add(Row r) {
+    rows_.push_back(std::move(r));
+    save();
+  }
+  const std::vector<Row>& rows() const { return rows_; }
+
+ private:
+  void save() const {
+    fs::create_directories(path_.parent_path());
+    std::ofstream out(path_);
+    for (std::size_t i = 0; i < cols_.size(); ++i) out << cols_[i] << (i + 1 < cols_.size() ? "," : "\n");
+    for (const Row& r : rows_) {
+      for (std::size_t i = 0; i < cols_.size(); ++i) out << (r.v.contains(cols_[i]) ? r.v.at(cols_[i]) : "") << (i + 1 < cols_.size() ? "," : "\n");
+    }
+  }
+  fs::path path_;
+  std::vector<std::string> cols_;
+  std::vector<Row> rows_;
+};
+
+const std::vector<std::string> kScoreCols = {"task", "effect", "clip", "method", "family", "config", "bytes", "psnr",
+                                             "active_psnr", "ssim", "tpsnr", "flicker", "ms", "train_s"};
+
+Row score_row(std::string task, std::string effect, std::string clip, std::string method, std::string family, std::string config,
+              std::size_t bytes, const metrics::ClipScores& s, double ms, double train_s) {
+  Row r;
+  r.v = {{"task", task}, {"effect", effect}, {"clip", clip}, {"method", method}, {"family", family}, {"config", config},
+         {"bytes", std::to_string(bytes)}, {"psnr", std::format("{:.4f}", s.psnr)}, {"active_psnr", std::format("{:.4f}", s.active_psnr)},
+         {"ssim", std::format("{:.5f}", s.ssim)}, {"tpsnr", std::format("{:.4f}", s.temporal_psnr)}, {"flicker", std::format("{:.4f}", s.flicker)},
+         {"ms", std::format("{:.4f}", ms)}, {"train_s", std::format("{:.1f}", train_s)}};
+  return r;
+}
+
+// --- Task A -----------------------------------------------------------------------------------------------------
+
+struct Config {
+  std::string name;
+  Hyper h;
+  std::vector<int> bits;  // storage precisions to score from one training
+  int iters;
+};
+
+std::vector<Config> a_configs(const Ctx& c) {
+  const auto grid = [](int G, int C, int H, int L, int T) {
+    Hyper h;
+    h.arch = Arch::grid;
+    h.size = kSize;
+    h.frames = kFrames;
+    h.grid = G;
+    h.channels = C;
+    h.hidden = H;
+    h.layers = L;
+    h.grid_t = T;
+    return h;
+  };
+  const auto conv = [](int c0, int c1, int c2, int T) {
+    Hyper h;
+    h.arch = Arch::conv;
+    h.latent = kSize / 8;
+    h.size = kSize;
+    h.frames = kFrames;
+    h.c0 = c0;
+    h.c1 = c1;
+    h.c2 = c2;
+    h.grid_t = T;
+    return h;
+  };
+  return {
+      {"grid_s", grid(24, 8, 16, 1, 16), {16, 8}, c.iters(2000)},
+      {"grid_m", grid(32, 8, 32, 2, 16), {16, 8}, c.iters(2000)},
+      {"grid_l", grid(48, 8, 32, 2, 16), {16, 8}, c.iters(2000)},
+      {"grid_mt", grid(32, 8, 32, 2, 32), {16, 8}, c.iters(2000)},
+      {"conv_s", conv(16, 8, 8, 16), {16, 8}, c.iters(1500)},
+      {"conv_m", conv(32, 16, 8, 16), {16, 8}, c.iters(1500)},
+  };
+}
+
+void step_a(const Ctx& c) {
+  Csv csv(c.results / "a_scores.csv", kScoreCols);
+  const auto configs = a_configs(c);
+  std::map<std::string, double> ms_cache;
+  for (const auto& [name, p] : a_clips()) {
+    const Clip ref = get_clip(c, "a", name, p);
+    const std::string effect = ename(p.effect);
+    // baselines
+    if (!csv.has("clip", name)) {
+      for (const auto& spec : flipbook::ladder(kSize, kFrames)) {
+        const auto fb = flipbook::build(ref, spec);
+        csv.add(score_row("a", effect, name, "flipbook", spec.flow_res > 0 ? "flipbook_mv" : spec.codec == flipbook::Codec::raw ? "flipbook_raw" : "flipbook_bc3",
+                          spec.describe(), fb.bytes, metrics::score(ref, flipbook::play(fb)), 0, 0));
+      }
+    }
+    // models
+    for (const Config& cfg : configs) {
+      const std::string key = std::format("{}|{}", name, cfg.name);
+      if (csv.has("method", key + "|16")) continue;
+      train::Options o;
+      o.iterations = cfg.iters;
+      o.threads = c.threads;
+      o.log_every = 0;
+      const train::Example ex{&ref, {}};
+      Hyper h = cfg.h;
+      h.loop = ref.loop;
+      auto r = train::train(h, std::span(&ex, 1), o);
+      r.model.effect = effect;
+      for (const int bits : cfg.bits) {
+        Model m = r.model;
+        m.feature_bits = bits;
+        quantise_like_storage(m);
+        m.pack_features();
+        const std::string mk = std::format("{}|{}", cfg.name, bits);
+        if (!ms_cache.contains(mk)) ms_cache[mk] = runtime_ms(m);
+        const Clip out = runtime_clip(m, {}, 0, 0);
+        csv.add(score_row("a", effect, name, key + std::format("|{}", bits), cfg.h.arch == Arch::grid ? "neural_grid" : "neural_conv",
+                          std::format("{} {}-bit", h.describe(), bits), m.storage_bytes(), metrics::score(ref, out), ms_cache[mk], r.seconds));
+        if (cfg.name == "grid_m" && bits == 8) {  // keep one model per clip for videos and the viewer
+          save_model(c.data / "models" / "a" / std::format("{}_grid_m8.nvfx", name), m);
+        }
+      }
+      std::println("A {} {}: {:.1f} s", name, cfg.name, r.seconds);
+    }
+    // frame interpolation: only even frames available to both
+    const std::string ikey = std::format("{}|interp", name);
+    if (!csv.has("method", ikey + "|grid_m")) {
+      std::vector<int> even, odd;
+      for (int f = 0; f < kFrames; ++f) (f % 2 ? odd : even).push_back(f);
+      for (const auto& spec : {flipbook::Spec{0, 128, flipbook::Codec::bc3, 0}, flipbook::Spec{0, 128, flipbook::Codec::bc3, 32},
+                               flipbook::Spec{0, 128, flipbook::Codec::raw, 0}}) {
+        const auto fb = flipbook::build(ref, spec, even);
+        csv.add(score_row("a_interp", effect, name, ikey + "|" + spec.describe(), spec.flow_res > 0 ? "flipbook_mv" : "flipbook", spec.describe(),
+                          fb.bytes, metrics::score(ref, flipbook::play(fb), odd), 0, 0));
+      }
+      train::Options o;
+      o.iterations = c.iters(2000);
+      o.threads = c.threads;
+      o.log_every = 0;
+      o.frames = even;
+      const train::Example ex{&ref, {}};
+      Hyper h = configs[1].h;
+      h.loop = ref.loop;
+      auto r = train::train(h, std::span(&ex, 1), o);
+      Model m = r.model;
+      m.feature_bits = 8;
+      quantise_like_storage(m);
+      m.pack_features();
+      csv.add(score_row("a_interp", effect, name, ikey + "|grid_m", "neural_grid", h.describe() + " 8-bit", m.storage_bytes(),
+                        metrics::score(ref, runtime_clip(m, {}, 0, 0), odd), 0, r.seconds));
+    }
+  }
+}
+
+// --- Task B -----------------------------------------------------------------------------------------------------
+
+void step_b(const Ctx& c) {
+  Csv csv(c.results / "b_scores.csv", kScoreCols);
+  for (const auto e : sim::kEffects) {
+    const std::string effect = ename(e);
+    std::vector<Clip> train_clips;
+    std::vector<std::array<float, 3>> train_s = b_train_settings();
+    for (const auto& s : train_s) {
+      train_clips.push_back(get_clip(c, "b", std::format("{}_train_{:.2f}_{:.2f}_{:.2f}", effect, s[0], s[1], s[2]), params(e, s[0], s[1], s[2], 1)));
+    }
+    const auto test_s = b_test_settings();
+    std::vector<Clip> test_clips;
+    for (const auto& s : test_s) {
+      test_clips.push_back(get_clip(c, "b", std::format("{}_test_{:.2f}_{:.2f}_{:.2f}", effect, s[0], s[1], s[2]), params(e, s[0], s[1], s[2], 1)));
+    }
+    // Baselines: libraries of flipbooks at the training settings (BC3, all frames, full size: the best per-setting
+    // quality; memory = 45 such flipbooks), played at the nearest setting or blended from the two nearest.
+    const std::size_t lib_bytes = train_clips.size() * static_cast<std::size_t>(kSize) * kSize * kFrames;
+    if (!csv.has("method", effect + "|nearest")) {
+      for (std::size_t t = 0; t < test_s.size(); ++t) {
+        std::vector<std::pair<float, std::size_t>> d;
+        for (std::size_t k = 0; k < train_s.size(); ++k) {
+          float s = 0;
+          for (int j = 0; j < 3; ++j) s += (test_s[t][static_cast<std::size_t>(j)] - train_s[k][static_cast<std::size_t>(j)]) * (test_s[t][static_cast<std::size_t>(j)] - train_s[k][static_cast<std::size_t>(j)]);
+          d.emplace_back(std::sqrt(s), k);
+        }
+        std::ranges::sort(d);
+        const Clip nearest = flipbook::play(flipbook::build(train_clips[d[0].second], {kFrames, kSize, flipbook::Codec::bc3, 0}));
+        const Clip second = flipbook::play(flipbook::build(train_clips[d[1].second], {kFrames, kSize, flipbook::Codec::bc3, 0}));
+        Clip blend = nearest;
+        const float wa = d[1].first / std::max(1e-6f, d[0].first + d[1].first);
+        for (std::size_t i = 0; i < blend.rgba.size(); ++i) {
+          blend.rgba[i] = static_cast<std::uint8_t>(std::lround(wa * nearest.rgba[i] + (1.f - wa) * second.rgba[i]));
+        }
+        const std::string cl = std::format("{}_test{}", effect, t);
+        csv.add(score_row("b", effect, cl, effect + "|nearest", "flipbook_library", "nearest of 45 BC3", lib_bytes, metrics::score(test_clips[t], nearest), 0, 0));
+        csv.add(score_row("b", effect, cl, effect + "|blend2", "flipbook_library", "blend of 2 nearest BC3", lib_bytes, metrics::score(test_clips[t], blend), 0, 0));
+        // How close is any training clip? (the oracle library pick, an upper bound for a library)
+        double best = -1;
+        for (const Clip& tc : train_clips) best = std::max(best, metrics::score(test_clips[t], tc).active_psnr);
+        Row r = score_row("b", effect, cl, effect + "|oracle", "flipbook_library", "best of 45 raw (oracle)", lib_bytes * 4, metrics::score(test_clips[t], test_clips[t]), 0, 0);
+        r.v["active_psnr"] = std::format("{:.4f}", best);
+        r.v["psnr"] = "";
+        r.v["ssim"] = "";
+        csv.add(r);
+      }
+    }
+    struct BConfig {
+      std::string name;
+      int bases, hidden, layers, grid;
+    };
+    for (const BConfig& bc : {BConfig{"grid_k8", 8, 32, 2, 32}, BConfig{"grid_k16", 16, 48, 2, 32}}) {
+      const std::string key = effect + "|" + bc.name;
+      if (csv.has("method", key)) continue;
+      Hyper h;
+      h.arch = Arch::grid;
+      h.size = kSize;
+      h.frames = kFrames;
+      h.loop = sim::effect_loops(e);
+      h.n_controls = 3;
+      h.bases = bc.bases;
+      h.grid = bc.grid;
+      h.channels = 8;
+      h.hidden = bc.hidden;
+      h.layers = bc.layers;
+      h.grid_t = 16;
+      std::vector<train::Example> data;
+      for (std::size_t k = 0; k < train_clips.size(); ++k) data.push_back({&train_clips[k], {train_s[k][0], train_s[k][1], train_s[k][2]}});
+      train::Options o;
+      o.iterations = c.iters(8000);
+      o.threads = c.threads;
+      o.log_every = 0;
+      auto r = train::train(h, data, o);
+      Model m = r.model;
+      m.effect = effect;
+      m.control_names = {"intensity", "wind", "turbulence"};
+      m.feature_bits = 8;
+      quantise_like_storage(m);
+      m.pack_features();
+      save_model(c.data / "models" / "b" / std::format("{}_{}.nvfx", effect, bc.name), m);
+      const double ms = runtime_ms(m);
+      for (std::size_t t = 0; t < test_s.size(); ++t) {
+        const Clip out = runtime_clip(m, test_s[t], -1, 0);
+        csv.add(score_row("b", effect, std::format("{}_test{}", effect, t), key, "neural_grid", h.describe() + " 8-bit", m.storage_bytes(),
+                          metrics::score(test_clips[t], out), ms, r.seconds));
+      }
+      // Training-setting reconstruction (how well it fits what it saw)
+      double fit = 0;
+      for (std::size_t k = 0; k < train_clips.size(); k += 4) fit += metrics::score(train_clips[k], runtime_clip(m, train_s[k], -1, 0)).active_psnr;
+      std::println("B {} {}: {:.1f} s, train-setting active PSNR {:.2f}", effect, bc.name, r.seconds, fit / std::ceil(static_cast<double>(train_clips.size()) / 4.0));
+      Row fr = score_row("b_fit", effect, effect + "_train", key + "|fit", "neural_grid", h.describe(), m.storage_bytes(), metrics::ClipScores{}, ms, r.seconds);
+      fr.v["active_psnr"] = std::format("{:.4f}", fit / std::ceil(static_cast<double>(train_clips.size()) / 4.0));
+      csv.add(fr);
+    }
+  }
+}
+
+// --- Task C -----------------------------------------------------------------------------------------------------
+
+void step_c(const Ctx& c) {
+  Csv csv(c.results / "c_stats.csv", {"effect", "kind", "a", "b", "coverage_l1", "emission_l1", "spectrum_l1", "mean_frame_psnr", "motion_ratio", "active_psnr"});
+  for (const auto e : sim::kEffects) {
+    const std::string effect = ename(e);
+    if (csv.has("effect", effect)) continue;
+    std::vector<Clip> train_clips, test_clips;
+    for (int k = 0; k < kCTrain + kCTest; ++k) {
+      Clip cl = get_clip(c, "c", std::format("{}_seed{}", effect, 1000 + k),
+                         params(e, kCControls[0], kCControls[1], kCControls[2], 1000 + static_cast<std::uint64_t>(k)));
+      (k < kCTrain ? train_clips : test_clips).push_back(std::move(cl));
+    }
+    Hyper h;
+    h.arch = Arch::grid;
+    h.size = kSize;
+    h.frames = kFrames;
+    h.loop = sim::effect_loops(e);
+    h.n_latent = 8;
+    h.bases = 8;
+    h.grid = 32;
+    h.channels = 8;
+    h.hidden = 32;
+    h.layers = 2;
+    h.grid_t = 16;
+    std::vector<train::Example> data;
+    for (const Clip& cl : train_clips) data.push_back({&cl, {}});
+    train::Options o;
+    o.iterations = c.iters(8000);
+    o.threads = c.threads;
+    o.log_every = 0;
+    auto r = train::train(h, data, o);
+    Model m = r.model;
+    m.effect = effect;
+    m.feature_bits = 8;
+    quantise_like_storage(m);
+    m.pack_features();
+    save_model(c.data / "models" / "c" / std::format("{}_variation.nvfx", effect), m);
+    std::vector<Clip> gen, recon;
+    for (int s = 0; s < kCTest; ++s) gen.push_back(runtime_clip(m, {}, -1, 5000 + static_cast<std::uint64_t>(s)));
+    for (int k = 0; k < kCTrain; ++k) recon.push_back(runtime_clip(m, {}, k, 0));
+    const auto add = [&](std::string kind, std::size_t a, std::size_t b, const Clip& ref, const Clip& test) {
+      const auto d = metrics::distance(metrics::stats(ref), metrics::stats(test));
+      Row row;
+      row.v = {{"effect", effect}, {"kind", kind}, {"a", std::to_string(a)}, {"b", std::to_string(b)},
+               {"coverage_l1", std::format("{:.5f}", d.coverage_l1)}, {"emission_l1", std::format("{:.5f}", d.emission_l1)},
+               {"spectrum_l1", std::format("{:.5f}", d.spectrum_l1)}, {"mean_frame_psnr", std::format("{:.4f}", d.mean_frame_psnr)},
+               {"motion_ratio", std::format("{:.4f}", d.motion_ratio)}, {"active_psnr", std::format("{:.4f}", metrics::score(ref, test).active_psnr)}};
+      csv.add(row);
+    };
+    for (std::size_t a = 0; a < test_clips.size(); ++a) {
+      for (std::size_t b = 0; b < gen.size(); ++b) add("generated_vs_heldout", a, b, test_clips[a], gen[b]);
+      for (std::size_t b = 0; b < train_clips.size(); b += 3) add("training_vs_heldout", a, b, test_clips[a], train_clips[b]);
+      for (std::size_t b = a + 1; b < test_clips.size(); ++b) add("heldout_vs_heldout", a, b, test_clips[a], test_clips[b]);
+    }
+    for (std::size_t a = 0; a < gen.size(); ++a) {
+      for (std::size_t b = a + 1; b < gen.size(); ++b) add("generated_vs_generated", a, b, gen[a], gen[b]);
+      double nearest = -1;  // copying check: the closest training clip to a generated sample
+      std::size_t nk = 0;
+      for (std::size_t k = 0; k < train_clips.size(); ++k) {
+        const double p = metrics::score(train_clips[k], gen[a]).active_psnr;
+        if (p > nearest) {
+          nearest = p;
+          nk = k;
+        }
+      }
+      add("generated_nearest_training", a, nk, train_clips[nk], gen[a]);
+    }
+    for (std::size_t a = 0; a < test_clips.size(); ++a) {
+      double nearest = -1;
+      std::size_t nk = 0;
+      for (std::size_t k = 0; k < train_clips.size(); ++k) {
+        const double p = metrics::score(train_clips[k], test_clips[a]).active_psnr;
+        if (p > nearest) {
+          nearest = p;
+          nk = k;
+        }
+      }
+      add("heldout_nearest_training", a, nk, train_clips[nk], test_clips[a]);
+    }
+    for (std::size_t k = 0; k < train_clips.size(); ++k) add("reconstruction", k, k, train_clips[k], recon[k]);
+    std::println("C {}: trained {:.1f} s ({} KB)", effect, r.seconds, m.storage_bytes() / 1024);
+  }
+}
+
+// --- figures and videos -----------------------------------------------------------------------------------------
+
+void step_media(const Ctx& c) {
+  const fs::path media = c.data / "media";
+  for (const auto& [name, p] : a_clips()) {
+    if (!name.ends_with("_0")) continue;
+    const Clip ref = get_clip(c, "a", name, p);
+    auto m = load_model(c.data / "models" / "a" / std::format("{}_grid_m8.nvfx", name));
+    if (!m) continue;
+    const Clip neural = runtime_clip(*m, {}, 0, 0);
+    const Clip fb = flipbook::play(flipbook::build(ref, {16, kSize, flipbook::Codec::bc3, 0}));  // about the same memory class
+    const Clip* rows[] = {&ref, &neural, &fb};
+    const Background bg = p.effect == sim::Effect::fire ? Background::black : Background::grey;
+    write_png(media / std::format("a_{}_compare.png", name), comparison_sheet(rows, 6, bg, 1));
+    write_comparison_video(media / std::format("a_{}_compare.mp4", name), rows, bg, 2, 3);
+  }
+  std::println("media written to {}", media.string());
+}
+
+// --- report -----------------------------------------------------------------------------------------------------
+
+std::string fmt_iv(const metrics::Interval& iv, int prec = 2) {
+  return std::format("{:+.{}f} [{:+.{}f}, {:+.{}f}]{}", iv.mean, prec, iv.lo, prec, iv.hi, prec, iv.covers_zero() ? " (tie)" : "");
+}
+
+void step_report(const Ctx& c) {
+  std::ostringstream md;
+  md << "# Experiment summary (generated)\n\nStatus: **generated** by `nvfx_experiment report` from the CSVs in this folder; rerun it rather "
+        "than editing. 95% paired bootstrap intervals in square brackets (10,000 resamples over clips); an interval "
+        "covering zero is reported as a tie. PSNR in dB; \"active\" = PSNR over pixels visible in either clip.\n\n";
+  // ---- A
+  if (fs::exists(c.results / "a_scores.csv")) {
+    Csv a(c.results / "a_scores.csv", kScoreCols);
+    std::map<std::string, std::vector<const Row*>> by_cfg;  // config key -> rows (one per clip)
+    for (const Row& r : a.rows()) {
+      if (r.s("task") != "a") continue;
+      const std::string key = r.s("family").starts_with("flipbook") ? r.s("config") : r.s("method").substr(r.s("method").find('|') + 1);
+      by_cfg[key].push_back(&r);
+    }
+    struct Agg {
+      std::string key, family;
+      double kb, psnr, active, ssim, tpsnr, flicker, ms;
+      std::size_t n;
+    };
+    std::vector<Agg> aggs;
+    for (const auto& [k, rows] : by_cfg) {
+      Agg g{k, rows[0]->s("family"), 0, 0, 0, 0, 0, 0, 0, rows.size()};
+      for (const Row* r : rows) {
+        g.kb += r->d("bytes") / 1024.0 / static_cast<double>(rows.size());
+        g.psnr += r->d("psnr") / static_cast<double>(rows.size());
+        g.active += r->d("active_psnr") / static_cast<double>(rows.size());
+        g.ssim += r->d("ssim") / static_cast<double>(rows.size());
+        g.tpsnr += r->d("tpsnr") / static_cast<double>(rows.size());
+        g.flicker += r->d("flicker") / static_cast<double>(rows.size());
+        g.ms += r->d("ms") / static_cast<double>(rows.size());
+      }
+      aggs.push_back(g);
+    }
+    std::ranges::sort(aggs, {}, &Agg::kb);
+    md << "## A. Compression: one model per clip against flipbooks of the same clip\n\n";
+    md << std::format("Means over {} clips (fire, smoke, explosion; 128 x 128, 64 frames). ms = median per frame through the runtime, one AVX2 core.\n\n", by_cfg.begin()->second.size());
+    md << "| method | family | KB | PSNR | active PSNR | SSIM | temporal PSNR | flicker | ms |\n|---|---|---:|---:|---:|---:|---:|---:|---:|\n";
+    for (const Agg& g : aggs) {
+      md << std::format("| {} | {} | {:.1f} | {:.2f} | {:.2f} | {:.4f} | {:.2f} | {:.2f} | {} |\n", g.key, g.family, g.kb, g.psnr, g.active, g.ssim,
+                        g.tpsnr, g.flicker, g.family.starts_with("neural") ? std::format("{:.3f}", g.ms) : "-");
+    }
+    // Matched-memory comparison: the best neural and the best flipbook configuration (by mean active PSNR) within
+    // each budget, paired over clips.
+    md << "\n### Matched memory\n\nWithin each budget, the neural configuration and the flipbook configuration with the best mean active PSNR "
+          "(chosen on the same clips they are scored on, which favours neither), compared clip by clip.\n\n";
+    md << "| budget | neural | KB | flipbook | KB | delta active PSNR | delta PSNR | delta SSIM |\n|---|---|---:|---|---:|---:|---:|---:|\n";
+    for (const double budget : {64.0, 128.0, 160.0, 256.0, 320.0, 512.0}) {
+      const Agg* bn = nullptr;
+      const Agg* bf = nullptr;
+      for (const Agg& g : aggs) {
+        if (g.kb > budget * 1.02) continue;
+        auto& slot = g.family.starts_with("neural") ? bn : bf;
+        if (!slot || g.active > slot->active) slot = &g;
+      }
+      if (!bn || !bf) continue;
+      std::vector<double> na, fa, np, fp, ns, fs2;
+      for (const Row* r : by_cfg[bn->key]) {
+        for (const Row* q : by_cfg[bf->key]) {
+          if (q->s("clip") != r->s("clip")) continue;
+          na.push_back(r->d("active_psnr"));
+          fa.push_back(q->d("active_psnr"));
+          np.push_back(r->d("psnr"));
+          fp.push_back(q->d("psnr"));
+          ns.push_back(r->d("ssim"));
+          fs2.push_back(q->d("ssim"));
+        }
+      }
+      md << std::format("| {:.0f} KB | {} | {:.0f} | {} | {:.0f} | {} | {} | {} |\n", budget, bn->key, bn->kb, bf->key, bf->kb,
+                        fmt_iv(metrics::paired_bootstrap(na, fa)), fmt_iv(metrics::paired_bootstrap(np, fp)), fmt_iv(metrics::paired_bootstrap(ns, fs2), 4));
+    }
+    // Memory ratio at equal quality: flipbook envelope (best active PSNR at or below each size), log-interpolated.
+    std::vector<std::pair<double, double>> env;  // (kb, best active psnr at <= kb)
+    for (const Agg& g : aggs) {
+      if (!g.family.starts_with("flipbook")) continue;
+      const double best = env.empty() ? g.active : std::max(env.back().second, g.active);
+      env.emplace_back(g.kb, best);
+    }
+    md << "\n### Memory at equal quality\n\nFor each neural configuration: the flipbook memory needed for the same mean active PSNR "
+          "(log-linear interpolation along the best-flipbook-at-each-size envelope; \">\" when no flipbook up to 1 MB reaches it).\n\n";
+    md << "| neural | KB | active PSNR | flipbook KB for equal quality | ratio |\n|---|---:|---:|---:|---:|\n";
+    for (const Agg& g : aggs) {
+      if (!g.family.starts_with("neural")) continue;
+      std::string fkb = std::format("> {:.0f}", env.back().first), ratio = std::format("> {:.1f}x", env.back().first / g.kb);
+      for (std::size_t i = 1; i < env.size(); ++i) {
+        if (env[i].second >= g.active && env[i - 1].second < g.active) {
+          const double u = (g.active - env[i - 1].second) / (env[i].second - env[i - 1].second);
+          const double kb = std::exp(std::log(env[i - 1].first) + u * (std::log(env[i].first) - std::log(env[i - 1].first)));
+          fkb = std::format("{:.0f}", kb);
+          ratio = std::format("{:.1f}x", kb / g.kb);
+          break;
+        }
+        if (i == 1 && env[0].second >= g.active) {
+          fkb = std::format("< {:.0f}", env[0].first);
+          ratio = std::format("< {:.1f}x", env[0].first / g.kb);
+          break;
+        }
+      }
+      md << std::format("| {} | {:.0f} | {:.2f} | {} | {} |\n", g.key, g.kb, g.active, fkb, ratio);
+    }
+    // per effect for the headline configs
+    md << "\n### By effect (grid_m 8-bit against BC3 16 frames 128 px and BC3 all frames)\n\n| effect | grid_m 8-bit active | bc3 16f 128px active | bc3 64f 128px active |\n|---|---:|---:|---:|\n";
+    for (const auto e : sim::kEffects) {
+      const auto mean_of = [&](const std::string& key) {
+        double s = 0;
+        int n = 0;
+        for (const Row* r : by_cfg[key]) {
+          if (r->s("effect") == ename(e)) {
+            s += r->d("active_psnr");
+            ++n;
+          }
+        }
+        return n ? s / n : 0.0;
+      };
+      md << std::format("| {} | {:.2f} | {:.2f} | {:.2f} |\n", ename(e), mean_of("grid_m|8"), mean_of("bc3 16f 128px"), mean_of("bc3 64f 128px"));
+    }
+    // interpolation
+    std::map<std::string, std::vector<double>> interp;
+    std::map<std::string, std::vector<std::string>> interp_clip;
+    for (const Row& r : a.rows()) {
+      if (r.s("task") != "a_interp") continue;
+      const std::string k = r.s("method").substr(r.s("method").rfind('|') + 1);
+      interp[k].push_back(r.d("active_psnr"));
+    }
+    if (!interp.empty()) {
+      md << "\n### Frame interpolation (only even frames available; odd frames scored)\n\n| method | mean active PSNR on odd frames | delta vs neural |\n|---|---:|---:|\n";
+      const auto& nv = interp["grid_m"];
+      for (const auto& [k, v] : interp) {
+        const double mean = std::ranges::fold_left(v, 0.0, std::plus{}) / static_cast<double>(v.size());
+        md << std::format("| {} | {:.2f} | {} |\n", k, mean, k == "grid_m" || v.size() != nv.size() ? "-" : fmt_iv(metrics::paired_bootstrap(nv, v)));
+      }
+    }
+  }
+  // ---- B
+  if (fs::exists(c.results / "b_scores.csv")) {
+    Csv b(c.results / "b_scores.csv", kScoreCols);
+    md << "\n## B. Controls: held-out control settings\n\nOne model per effect trained on 45 settings (3 intensity x 5 wind x 3 turbulence, seed 1); "
+          "scored on 10 off-grid settings per effect. Baselines are libraries of 45 BC3 flipbooks (one per training setting).\n\n";
+    std::map<std::string, std::map<std::string, std::pair<double, std::string>>> v;  // method -> clip -> (active, effect)
+    std::map<std::string, std::map<std::string, double>> vs, vp;
+    std::map<std::string, double> kb, ms;
+    for (const Row& r : b.rows()) {
+      if (r.s("task") != "b") continue;
+      const std::string k = r.s("method").substr(r.s("method").find('|') + 1);
+      v[k][r.s("clip")] = {r.d("active_psnr"), r.s("effect")};
+      if (!r.s("ssim").empty()) vs[k][r.s("clip")] = r.d("ssim");
+      if (!r.s("psnr").empty()) vp[k][r.s("clip")] = r.d("psnr");
+      kb[k] = r.d("bytes") / 1024.0 / 3.0;  // per effect
+      ms[k] = r.d("ms");
+    }
+    md << "| method | KB per effect | mean active PSNR | mean PSNR | mean SSIM | ms |\n|---|---:|---:|---:|---:|---:|\n";
+    for (const auto& [k, clips] : v) {
+      double sa = 0, sp = 0, ss = 0;
+      for (const auto& [cl, val] : clips) {
+        sa += val.first;
+        if (vp[k].contains(cl)) sp += vp[k][cl];
+        if (vs[k].contains(cl)) ss += vs[k][cl];
+      }
+      const double n = static_cast<double>(clips.size());
+      md << std::format("| {} | {:.0f} | {:.2f} | {} | {} | {} |\n", k, kb[k] * 3.0 / 3.0, sa / n, vp[k].empty() ? "-" : std::format("{:.2f}", sp / n),
+                        vs[k].empty() ? "-" : std::format("{:.4f}", ss / n), ms[k] > 0 ? std::format("{:.3f}", ms[k]) : "-");
+    }
+    md << "\n| comparison (active PSNR, paired over 30 held-out settings) | difference |\n|---|---:|\n";
+    for (const std::string nk : {"grid_k8", "grid_k16"}) {
+      for (const std::string fk : {"nearest", "blend2", "oracle"}) {
+        if (!v.contains(nk) || !v.contains(fk)) continue;
+        std::vector<double> x, y;
+        for (const auto& [cl, val] : v[nk]) {
+          if (v[fk].contains(cl)) {
+            x.push_back(val.first);
+            y.push_back(v[fk][cl].first);
+          }
+        }
+        md << std::format("| {} - {} | {} |\n", nk, fk, fmt_iv(metrics::paired_bootstrap(x, y)));
+      }
+    }
+    md << "\n| effect | grid_k8 | grid_k16 | nearest | blend2 | oracle |\n|---|---:|---:|---:|---:|---:|\n";
+    for (const auto e : sim::kEffects) {
+      md << "| " << ename(e);
+      for (const std::string k : {"grid_k8", "grid_k16", "nearest", "blend2", "oracle"}) {
+        double s = 0;
+        int n = 0;
+        for (const auto& [cl, val] : v[k]) {
+          if (val.second == ename(e)) {
+            s += val.first;
+            ++n;
+          }
+        }
+        md << std::format(" | {}", n ? std::format("{:.2f}", s / n) : "-");
+      }
+      md << " |\n";
+    }
+    for (const Row& r : b.rows()) {
+      if (r.s("task") == "b_fit") md << std::format("\nTraining-setting fit ({}): mean active PSNR {:.2f} on every 4th training setting.\n", r.s("method"), r.d("active_psnr"));
+    }
+  }
+  // ---- C
+  if (fs::exists(c.results / "c_stats.csv")) {
+    Csv cs(c.results / "c_stats.csv", {"effect", "kind", "a", "b", "coverage_l1", "emission_l1", "spectrum_l1", "mean_frame_psnr", "motion_ratio", "active_psnr"});
+    md << "\n## C. Variation: new seeds against held-out real clips\n\nOne model per effect with 8-dimensional variation codes, trained on 24 seeds "
+          "(fixed controls). 8 new seeds are generated through the runtime and compared with 8 held-out simulated seeds. Distances are means over pairs; "
+          "smaller is closer. \"real vs real\" is the natural spread between two simulated seeds: a generator cannot be expected to beat it.\n\n";
+    md << "| effect | pairs | coverage L1 | emission L1 | spectrum L1 | mean-frame PSNR | motion ratio | active PSNR |\n|---|---|---:|---:|---:|---:|---:|---:|\n";
+    for (const auto e : sim::kEffects) {
+      for (const std::string kind : {"heldout_vs_heldout", "training_vs_heldout", "generated_vs_heldout", "generated_vs_generated", "heldout_nearest_training",
+                                     "generated_nearest_training", "reconstruction"}) {
+        double cov = 0, emi = 0, spe = 0, mfp = 0, mot = 0, act = 0;
+        int n = 0;
+        for (const Row& r : cs.rows()) {
+          if (r.s("effect") != ename(e) || r.s("kind") != kind) continue;
+          cov += r.d("coverage_l1");
+          emi += r.d("emission_l1");
+          spe += r.d("spectrum_l1");
+          mfp += r.d("mean_frame_psnr");
+          mot += r.d("motion_ratio");
+          act += r.d("active_psnr");
+          ++n;
+        }
+        if (!n) continue;
+        md << std::format("| {} | {} | {:.4f} | {:.4f} | {:.3f} | {:.2f} | {:.2f} | {:.2f} |\n", ename(e), kind, cov / n, emi / n, spe / n, mfp / n, mot / n, act / n);
+      }
+    }
+  }
+  fs::create_directories(c.results);
+  std::ofstream(c.results / "SUMMARY.md") << md.str();
+  std::println("wrote {}", (c.results / "SUMMARY.md").string());
+}
+
+}  // namespace
+
+int main(int argc, char** argv) try {
+  const tools::Args a(argc, argv, {"quick", "help"});
+  if (a.flag("help") || a.positional().empty()) {
+    std::println("nvfx_experiment data|a|b|c|media|report|all [--root DIR] [--results DIR] [--threads 4] [--quick]");
+    return 0;
+  }
+  Ctx c;
+  c.data = a.has("root") ? fs::path(a.str("root")) : data_root() / "experiments";
+  c.results = a.str("results", "results/experiments");
+  c.threads = a.i("threads", 4);
+  c.quick = a.flag("quick");
+  if (c.quick) {
+    c.data /= "quick";
+    c.results /= "quick";
+  }
+  const std::string step = a.positional()[0];
+  const auto t0 = std::chrono::steady_clock::now();
+  if (step == "data" || step == "all") step_data(c);
+  if (step == "a" || step == "all") step_a(c);
+  if (step == "b" || step == "all") step_b(c);
+  if (step == "c" || step == "all") step_c(c);
+  if (step == "media" || step == "all") step_media(c);
+  if (step == "report" || step == "all") step_report(c);
+  std::println("{} finished in {:.1f} min", step, std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count() / 60.0);
+  a.warn_unused();
+  return 0;
+} catch (const std::exception& e) {
+  std::println(stderr, "nvfx_experiment: {}", e.what());
+  return 2;
+}

@@ -1,0 +1,322 @@
+task,effect,clip,method,family,config,bytes,psnr,active_psnr,ssim,tpsnr,flicker,ms,train_s
+a,fire,fire_0,flipbook,flipbook_bc3,bc3 64f 128px,1048576,40.4852,30.8091,0.99499,40.1576,1.0768,0.0000,0.0
+a,fire,fire_0,flipbook,flipbook_bc3,bc3 32f 128px,524288,36.7519,27.3135,0.98768,35.1319,0.5021,0.0000,0.0
+a,fire,fire_0,flipbook,flipbook_bc3,bc3 16f 128px,262144,31.7883,22.7514,0.96938,32.4718,0.1546,0.0000,0.0
+a,fire,fire_0,flipbook,flipbook_bc3,bc3 8f 128px,131072,27.7794,19.1811,0.94350,31.3678,0.0372,0.0000,0.0
+a,fire,fire_0,flipbook,flipbook_bc3,bc3 4f 128px,65536,24.7794,16.4171,0.91996,30.9390,0.0068,0.0000,0.0
+a,fire,fire_0,flipbook,flipbook_bc3,bc3 64f 64px,262144,34.4392,25.6413,0.97933,35.9043,0.4174,0.0000,0.0
+a,fire,fire_0,flipbook,flipbook_bc3,bc3 32f 64px,131072,33.4761,24.7583,0.97435,34.0822,0.2610,0.0000,0.0
+a,fire,fire_0,flipbook,flipbook_bc3,bc3 16f 64px,65536,31.0524,22.5855,0.96051,32.2550,0.1038,0.0000,0.0
+a,fire,fire_0,flipbook,flipbook_bc3,bc3 8f 64px,32768,27.9282,19.7334,0.93932,31.3197,0.0292,0.0000,0.0
+a,fire,fire_0,flipbook,flipbook_bc3,bc3 4f 64px,16384,25.1191,17.0934,0.91913,30.9276,0.0057,0.0000,0.0
+a,fire,fire_0,flipbook,flipbook_bc3,bc3 64f 32px,65536,29.6132,21.8675,0.94286,32.7484,0.2802,0.0000,0.0
+a,fire,fire_0,flipbook,flipbook_bc3,bc3 32f 32px,32768,29.4365,21.6954,0.94031,32.6226,0.1306,0.0000,0.0
+a,fire,fire_0,flipbook,flipbook_bc3,bc3 16f 32px,16384,28.7101,21.1499,0.93281,31.8453,0.0662,0.0000,0.0
+a,fire,fire_0,flipbook,flipbook_bc3,bc3 8f 32px,8192,27.0783,19.7193,0.91898,31.2088,0.0209,0.0000,0.0
+a,fire,fire_0,flipbook,flipbook_bc3,bc3 4f 32px,4096,25.0686,17.9122,0.90464,30.9000,0.0046,0.0000,0.0
+a,fire,fire_0,flipbook,flipbook_raw,raw 64f 64px,1048576,35.8816,26.8784,0.98672,37.4066,0.3473,0.0000,0.0
+a,fire,fire_0,flipbook,flipbook_raw,raw 32f 64px,524288,34.4483,25.5791,0.98078,34.4460,0.2692,0.0000,0.0
+a,fire,fire_0,flipbook,flipbook_raw,raw 16f 64px,262144,31.4610,22.8587,0.96562,32.3330,0.1087,0.0000,0.0
+a,fire,fire_0,flipbook,flipbook_raw,raw 8f 64px,131072,28.0263,19.7348,0.94283,31.3367,0.0300,0.0000,0.0
+a,fire,fire_0,flipbook,flipbook_raw,raw 4f 64px,65536,25.1341,17.0335,0.92086,30.9315,0.0059,0.0000,0.0
+a,fire,fire_0,flipbook,flipbook_raw,raw 64f 32px,262144,30.3344,22.0865,0.95323,33.5555,0.1135,0.0000,0.0
+a,fire,fire_0,flipbook,flipbook_raw,raw 32f 32px,131072,30.0666,21.8865,0.95030,32.9100,0.1167,0.0000,0.0
+a,fire,fire_0,flipbook,flipbook_raw,raw 16f 32px,65536,29.1816,21.1568,0.94189,31.9330,0.0663,0.0000,0.0
+a,fire,fire_0,flipbook,flipbook_raw,raw 8f 32px,32768,27.3372,19.5152,0.92691,31.2334,0.0217,0.0000,0.0
+a,fire,fire_0,flipbook,flipbook_raw,raw 4f 32px,16384,25.1535,17.4983,0.91158,30.9051,0.0047,0.0000,0.0
+a,fire,fire_0,flipbook,flipbook_mv,bc3 16f 128px +mv32,294912,35.4068,26.0878,0.98468,35.3003,0.5235,0.0000,0.0
+a,fire,fire_0,flipbook,flipbook_mv,bc3 8f 128px +mv32,147456,28.1190,19.3572,0.94950,31.3516,0.1258,0.0000,0.0
+a,fire,fire_0,flipbook,flipbook_mv,bc3 4f 128px +mv32,73728,24.5352,16.0850,0.92081,30.8483,0.0180,0.0000,0.0
+a,fire,fire_0,flipbook,flipbook_mv,bc3 16f 64px +mv16,73728,33.6023,24.8368,0.97573,35.0747,0.2703,0.0000,0.0
+a,fire,fire_0,flipbook,flipbook_mv,bc3 8f 64px +mv16,36864,29.4931,21.0276,0.95300,31.9757,0.0731,0.0000,0.0
+a,fire,fire_0,flipbook,flipbook_mv,bc3 4f 64px +mv16,18432,24.8403,16.6859,0.92063,30.8529,0.0100,0.0000,0.0
+a,fire,fire_0,fire_0|grid_s|16,neural_grid,grid G24 C8 H16 L1 D0+z0 K1 T16 16-bit,147946,30.7424,21.9851,0.94865,32.3072,0.2306,0.4883,0.8
+a,fire,fire_0,fire_0|grid_s|8,neural_grid,grid G24 C8 H16 L1 D0+z0 K1 T16 8-bit,74730,30.7420,21.9849,0.94864,32.3064,0.2306,0.8317,0.8
+a,fire,fire_0,fire_0|grid_m|16,neural_grid,grid G32 C8 H32 L2 D0+z0 K1 T16 16-bit,265226,32.5478,23.3449,0.95989,32.8438,0.3089,1.1397,1.9
+a,fire,fire_0,fire_0|grid_m|8,neural_grid,grid G32 C8 H32 L2 D0+z0 K1 T16 8-bit,134666,32.5476,23.3453,0.95989,32.8440,0.3089,1.1084,1.9
+a,fire,fire_0,fire_0|grid_l|16,neural_grid,grid G48 C8 H32 L2 D0+z0 K1 T16 16-bit,592906,33.5734,24.2913,0.96911,33.1106,0.3363,1.1687,1.9
+a,fire,fire_0,fire_0|grid_l|8,neural_grid,grid G48 C8 H32 L2 D0+z0 K1 T16 8-bit,298506,33.5728,24.2912,0.96910,33.1104,0.3363,1.1384,1.9
+a,fire,fire_0,fire_0|grid_mt|16,neural_grid,grid G32 C8 H32 L2 D0+z0 K1 T32 16-bit,527370,33.5568,24.3077,0.96457,34.3997,0.5501,1.1161,1.9
+a,fire,fire_0,fire_0|grid_mt|8,neural_grid,grid G32 C8 H32 L2 D0+z0 K1 T32 8-bit,266250,33.5562,24.3075,0.96457,34.3987,0.5503,1.3124,1.9
+a,fire,fire_0,fire_0|conv_s|16,neural_conv,conv l16 16-8-8-4 D0+z0 K1 T16 16-bit,135210,31.5642,22.5312,0.92831,32.7308,0.1991,0.4715,1.8
+a,fire,fire_0,fire_0|conv_s|8,neural_conv,conv l16 16-8-8-4 D0+z0 K1 T16 8-bit,70698,31.5647,22.5325,0.92830,32.7311,0.1992,0.4510,1.8
+a,fire,fire_0,fire_0|conv_m|16,neural_conv,conv l16 32-16-8-4 D0+z0 K1 T16 16-bit,274394,32.8462,23.7810,0.95223,33.3265,0.2291,0.7097,3.1
+a,fire,fire_0,fire_0|conv_m|8,neural_conv,conv l16 32-16-8-4 D0+z0 K1 T16 8-bit,145370,32.8461,23.7813,0.95223,33.3265,0.2292,0.7204,3.1
+a_interp,fire,fire_0,fire_0|interp|bc3 0f 128px,flipbook,bc3 0f 128px,524288,34.7761,25.5687,0.98038,35.1319,0.5021,0.0000,0.0
+a_interp,fire,fire_0,fire_0|interp|bc3 0f 128px +mv32,flipbook_mv,bc3 0f 128px +mv32,589824,39.5974,30.0927,0.99338,38.9137,0.9605,0.0000,0.0
+a_interp,fire,fire_0,fire_0|interp|raw 0f 128px,flipbook,raw 0f 128px,2097152,35.6107,26.3470,0.98350,35.6107,0.5149,0.0000,0.0
+a_interp,fire,fire_0,fire_0|interp|grid_m,neural_grid,grid G32 C8 H32 L2 D0+z0 K1 T16 8-bit,134666,32.4045,23.1878,0.96003,32.9466,0.2384,0.0000,1.7
+a,fire,fire_1,flipbook,flipbook_bc3,bc3 64f 128px,1048576,37.2057,29.6480,0.99136,36.7037,1.0185,0.0000,0.0
+a,fire,fire_1,flipbook,flipbook_bc3,bc3 32f 128px,524288,32.9674,25.6373,0.97629,31.0925,0.4386,0.0000,0.0
+a,fire,fire_1,flipbook,flipbook_bc3,bc3 16f 128px,262144,28.1849,21.2600,0.94281,28.6229,0.1350,0.0000,0.0
+a,fire,fire_1,flipbook,flipbook_bc3,bc3 8f 128px,131072,24.2177,17.7484,0.89656,27.5806,0.0351,0.0000,0.0
+a,fire,fire_1,flipbook,flipbook_bc3,bc3 4f 128px,65536,20.9805,14.9102,0.85059,27.1356,0.0069,0.0000,0.0
+a,fire,fire_1,flipbook,flipbook_bc3,bc3 64f 64px,262144,31.3427,24.6180,0.96384,32.4103,0.4228,0.0000,0.0
+a,fire,fire_1,flipbook,flipbook_bc3,bc3 32f 64px,131072,30.1360,23.5089,0.95291,30.2029,0.2347,0.0000,0.0
+a,fire,fire_1,flipbook,flipbook_bc3,bc3 16f 64px,65536,27.6066,21.2210,0.92762,28.4440,0.0926,0.0000,0.0
+a,fire,fire_1,flipbook,flipbook_bc3,bc3 8f 64px,32768,24.3924,18.3431,0.88909,27.5406,0.0282,0.0000,0.0
+a,fire,fire_1,flipbook,flipbook_bc3,bc3 4f 64px,16384,21.3092,15.5964,0.84716,27.1259,0.0061,0.0000,0.0
+a,fire,fire_1,flipbook,flipbook_bc3,bc3 64f 32px,65536,26.6729,20.8545,0.90371,29.0784,0.2543,0.0000,0.0
+a,fire,fire_1,flipbook,flipbook_bc3,bc3 32f 32px,32768,26.4467,20.6299,0.89866,28.8052,0.1200,0.0000,0.0
+a,fire,fire_1,flipbook,flipbook_bc3,bc3 16f 32px,16384,25.5947,19.9428,0.88449,28.0473,0.0583,0.0000,0.0
+a,fire,fire_1,flipbook,flipbook_bc3,bc3 8f 32px,8192,23.7823,18.3605,0.85955,27.4402,0.0209,0.0000,0.0
+a,fire,fire_1,flipbook,flipbook_bc3,bc3 4f 32px,4096,21.3677,16.1758,0.82790,27.0998,0.0050,0.0000,0.0
+a,fire,fire_1,flipbook,flipbook_raw,raw 64f 64px,1048576,33.1040,26.1828,0.97779,34.0165,0.3787,0.0000,0.0
+a,fire,fire_1,flipbook,flipbook_raw,raw 32f 64px,524288,31.2378,24.4604,0.96500,30.5518,0.2458,0.0000,0.0
+a,fire,fire_1,flipbook,flipbook_raw,raw 16f 64px,262144,28.0472,21.5383,0.93671,28.5190,0.0973,0.0000,0.0
+a,fire,fire_1,flipbook,flipbook_raw,raw 8f 64px,131072,24.5014,18.3547,0.89527,27.5572,0.0292,0.0000,0.0
+a,fire,fire_1,flipbook,flipbook_raw,raw 4f 64px,65536,21.3016,15.5015,0.85144,27.1297,0.0062,0.0000,0.0
+a,fire,fire_1,flipbook,flipbook_raw,raw 64f 32px,262144,27.4856,21.2955,0.92097,29.8822,0.1283,0.0000,0.0
+a,fire,fire_1,flipbook,flipbook_raw,raw 32f 32px,131072,27.1430,21.0254,0.91483,29.1121,0.1136,0.0000,0.0
+a,fire,fire_1,flipbook,flipbook_raw,raw 16f 32px,65536,26.0887,20.1412,0.89842,28.1399,0.0605,0.0000,0.0
+a,fire,fire_1,flipbook,flipbook_raw,raw 8f 32px,32768,24.0311,18.3376,0.87082,27.4668,0.0221,0.0000,0.0
+a,fire,fire_1,flipbook,flipbook_raw,raw 4f 32px,16384,21.4143,15.9910,0.83704,27.1071,0.0051,0.0000,0.0
+a,fire,fire_1,flipbook,flipbook_mv,bc3 16f 128px +mv32,294912,31.2955,24.1468,0.96846,30.7406,0.4433,0.0000,0.0
+a,fire,fire_1,flipbook,flipbook_mv,bc3 8f 128px +mv32,147456,24.6918,18.0178,0.91103,27.6191,0.1627,0.0000,0.0
+a,fire,fire_1,flipbook,flipbook_mv,bc3 4f 128px +mv32,73728,20.6560,14.3472,0.85838,26.9606,0.0367,0.0000,0.0
+a,fire,fire_1,flipbook,flipbook_mv,bc3 16f 64px +mv16,73728,30.2217,23.5524,0.95521,30.9566,0.2862,0.0000,0.0
+a,fire,fire_1,flipbook,flipbook_mv,bc3 8f 64px +mv16,36864,25.7206,19.3944,0.91112,28.1162,0.1096,0.0000,0.0
+a,fire,fire_1,flipbook,flipbook_mv,bc3 4f 64px +mv16,18432,20.9844,14.9871,0.85614,26.9929,0.0220,0.0000,0.0
+a,fire,fire_1,fire_1|grid_s|16,neural_grid,grid G24 C8 H16 L1 D0+z0 K1 T16 16-bit,147946,27.2086,20.6936,0.89948,28.4771,0.1628,0.4883,0.7
+a,fire,fire_1,fire_1|grid_s|8,neural_grid,grid G24 C8 H16 L1 D0+z0 K1 T16 8-bit,74730,27.2088,20.6936,0.89946,28.4769,0.1629,0.8317,0.7
+a,fire,fire_1,fire_1|grid_m|16,neural_grid,grid G32 C8 H32 L2 D0+z0 K1 T16 16-bit,265226,29.0386,22.0295,0.93529,28.9524,0.2249,1.1397,1.9
+a,fire,fire_1,fire_1|grid_m|8,neural_grid,grid G32 C8 H32 L2 D0+z0 K1 T16 8-bit,134666,29.0385,22.0295,0.93529,28.9526,0.2249,1.1084,1.9
+a,fire,fire_1,fire_1|grid_l|16,neural_grid,grid G48 C8 H32 L2 D0+z0 K1 T16 16-bit,592906,30.2021,23.0576,0.94298,29.2918,0.2537,1.1687,1.9
+a,fire,fire_1,fire_1|grid_l|8,neural_grid,grid G48 C8 H32 L2 D0+z0 K1 T16 8-bit,298506,30.2017,23.0570,0.94297,29.2916,0.2538,1.1384,1.9
+a,fire,fire_1,fire_1|grid_mt|16,neural_grid,grid G32 C8 H32 L2 D0+z0 K1 T32 16-bit,527370,30.2336,23.1391,0.93732,30.4845,0.4640,1.1161,2.0
+a,fire,fire_1,fire_1|grid_mt|8,neural_grid,grid G32 C8 H32 L2 D0+z0 K1 T32 8-bit,266250,30.2335,23.1387,0.93732,30.4842,0.4641,1.3124,2.0
+a,fire,fire_1,fire_1|conv_s|16,neural_conv,conv l16 16-8-8-4 D0+z0 K1 T16 16-bit,135210,27.6723,20.8113,0.88721,28.7747,0.1685,0.4715,2.1
+a,fire,fire_1,fire_1|conv_s|8,neural_conv,conv l16 16-8-8-4 D0+z0 K1 T16 8-bit,70698,27.6725,20.8115,0.88721,28.7750,0.1685,0.4510,2.1
+a,fire,fire_1,fire_1|conv_m|16,neural_conv,conv l16 32-16-8-4 D0+z0 K1 T16 16-bit,274394,28.9544,22.0509,0.90233,29.1893,0.1801,0.7097,3.2
+a,fire,fire_1,fire_1|conv_m|8,neural_conv,conv l16 32-16-8-4 D0+z0 K1 T16 8-bit,145370,28.9544,22.0512,0.90233,29.1893,0.1801,0.7204,3.2
+a_interp,fire,fire_1,fire_1|interp|bc3 0f 128px,flipbook,bc3 0f 128px,524288,30.8663,23.7504,0.96121,31.0925,0.4386,0.0000,0.0
+a_interp,fire,fire_1,fire_1|interp|bc3 0f 128px +mv32,flipbook_mv,bc3 0f 128px +mv32,589824,35.9195,28.6023,0.98727,34.9725,0.8829,0.0000,0.0
+a_interp,fire,fire_1,fire_1|interp|raw 0f 128px,flipbook,raw 0f 128px,2097152,31.5018,24.3347,0.96604,31.5018,0.4569,0.0000,0.0
+a_interp,fire,fire_1,fire_1|interp|grid_m,neural_grid,grid G32 C8 H32 L2 D0+z0 K1 T16 8-bit,134666,28.8699,21.8489,0.93425,29.0169,0.1928,0.0000,1.8
+a,fire,fire_2,flipbook,flipbook_bc3,bc3 64f 128px,1048576,42.2332,30.6130,0.99657,42.5812,1.3407,0.0000,0.0
+a,fire,fire_2,flipbook,flipbook_bc3,bc3 32f 128px,524288,40.4153,29.0145,0.99346,40.2496,0.6480,0.0000,0.0
+a,fire,fire_2,flipbook,flipbook_bc3,bc3 16f 128px,262144,36.0042,25.0433,0.98353,37.4687,0.2354,0.0000,0.0
+a,fire,fire_2,flipbook,flipbook_bc3,bc3 8f 128px,131072,31.6535,21.1786,0.96522,36.0855,0.0595,0.0000,0.0
+a,fire,fire_2,flipbook,flipbook_bc3,bc3 4f 128px,65536,28.4271,18.2417,0.94627,35.5442,0.0144,0.0000,0.0
+a,fire,fire_2,flipbook,flipbook_bc3,bc3 64f 64px,262144,36.3893,25.9023,0.98498,39.5343,0.5258,0.0000,0.0
+a,fire,fire_2,flipbook,flipbook_bc3,bc3 32f 64px,131072,35.9038,25.4861,0.98286,38.8293,0.2872,0.0000,0.0
+a,fire,fire_2,flipbook,flipbook_bc3,bc3 16f 64px,65536,34.2607,24.0955,0.97551,37.1226,0.1405,0.0000,0.0
+a,fire,fire_2,flipbook,flipbook_bc3,bc3 8f 64px,32768,31.4665,21.6088,0.96086,36.0067,0.0429,0.0000,0.0
+a,fire,fire_2,flipbook,flipbook_bc3,bc3 4f 64px,16384,28.6892,19.0750,0.94453,35.5227,0.0122,0.0000,0.0
+a,fire,fire_2,flipbook,flipbook_bc3,bc3 64f 32px,65536,31.4647,22.1464,0.95780,36.6019,0.4379,0.0000,0.0
+a,fire,fire_2,flipbook,flipbook_bc3,bc3 32f 32px,32768,31.3963,22.0401,0.95680,36.8921,0.1487,0.0000,0.0
+a,fire,fire_2,flipbook,flipbook_bc3,bc3 16f 32px,16384,30.9926,21.7552,0.95338,36.4373,0.0723,0.0000,0.0
+a,fire,fire_2,flipbook,flipbook_bc3,bc3 8f 32px,8192,29.9029,20.8245,0.94463,35.8128,0.0280,0.0000,0.0
+a,fire,fire_2,flipbook,flipbook_bc3,bc3 4f 32px,4096,28.2271,19.3816,0.93361,35.4712,0.0098,0.0000,0.0
+a,fire,fire_2,flipbook,flipbook_raw,raw 64f 64px,1048576,37.7279,27.0048,0.98975,41.3588,0.2826,0.0000,0.0
+a,fire,fire_2,flipbook,flipbook_raw,raw 32f 64px,524288,36.9950,26.3830,0.98725,39.3629,0.2743,0.0000,0.0
+a,fire,fire_2,flipbook,flipbook_raw,raw 16f 64px,262144,34.8898,24.5511,0.97924,37.2438,0.1445,0.0000,0.0
+a,fire,fire_2,flipbook,flipbook_raw,raw 8f 64px,131072,31.7002,21.7006,0.96359,36.0352,0.0441,0.0000,0.0
+a,fire,fire_2,flipbook,flipbook_raw,raw 4f 64px,65536,28.7716,19.0141,0.94648,35.5304,0.0124,0.0000,0.0
+a,fire,fire_2,flipbook,flipbook_raw,raw 64f 32px,262144,31.9390,22.2377,0.96308,37.5725,0.0879,0.0000,0.0
+a,fire,fire_2,flipbook,flipbook_raw,raw 32f 32px,131072,31.8199,22.1677,0.96187,37.2496,0.1010,0.0000,0.0
+a,fire,fire_2,flipbook,flipbook_raw,raw 16f 32px,65536,31.3522,21.8421,0.95777,36.5424,0.0698,0.0000,0.0
+a,fire,fire_2,flipbook,flipbook_raw,raw 8f 32px,32768,30.1515,20.8791,0.94794,35.8389,0.0274,0.0000,0.0
+a,fire,fire_2,flipbook,flipbook_raw,raw 4f 32px,16384,28.4201,19.3346,0.93646,35.4818,0.0099,0.0000,0.0
+a,fire,fire_2,flipbook,flipbook_mv,bc3 16f 128px +mv32,294912,39.4015,28.1268,0.99258,40.2715,0.7825,0.0000,0.0
+a,fire,fire_2,flipbook,flipbook_mv,bc3 8f 128px +mv32,147456,32.1005,21.4482,0.96940,36.1599,0.1903,0.0000,0.0
+a,fire,fire_2,flipbook,flipbook_mv,bc3 4f 128px +mv32,73728,28.5194,18.1987,0.94788,35.4575,0.0455,0.0000,0.0
+a,fire,fire_2,flipbook,flipbook_mv,bc3 16f 64px +mv16,73728,35.9518,25.4493,0.98392,39.2043,0.3138,0.0000,0.0
+a,fire,fire_2,flipbook,flipbook_mv,bc3 8f 64px +mv16,36864,32.5507,22.3996,0.96962,36.7242,0.1119,0.0000,0.0
+a,fire,fire_2,flipbook,flipbook_mv,bc3 4f 64px +mv16,18432,28.7065,18.9228,0.94580,35.4722,0.0243,0.0000,0.0
+a,fire,fire_2,fire_2|grid_s|16,neural_grid,grid G24 C8 H16 L1 D0+z0 K1 T16 16-bit,147946,33.5787,22.9590,0.96669,37.1289,0.3331,0.4883,0.7
+a,fire,fire_2,fire_2|grid_s|8,neural_grid,grid G24 C8 H16 L1 D0+z0 K1 T16 8-bit,74730,33.5777,22.9584,0.96668,37.1289,0.3332,0.8317,0.7
+a,fire,fire_2,fire_2|grid_m|16,neural_grid,grid G32 C8 H32 L2 D0+z0 K1 T16 16-bit,265226,36.2511,25.0836,0.98141,37.7516,0.4819,1.1397,1.9
+a,fire,fire_2,fire_2|grid_m|8,neural_grid,grid G32 C8 H32 L2 D0+z0 K1 T16 8-bit,134666,36.2510,25.0831,0.98142,37.7510,0.4821,1.1084,1.9
+a,fire,fire_2,fire_2|grid_l|16,neural_grid,grid G48 C8 H32 L2 D0+z0 K1 T16 16-bit,592906,37.6544,26.3700,0.98555,38.0502,0.5202,1.1687,2.4
+a,fire,fire_2,fire_2|grid_l|8,neural_grid,grid G48 C8 H32 L2 D0+z0 K1 T16 8-bit,298506,37.6537,26.3692,0.98555,38.0491,0.5205,1.1384,2.4
+a,fire,fire_2,fire_2|grid_mt|16,neural_grid,grid G32 C8 H32 L2 D0+z0 K1 T32 16-bit,527370,36.8253,25.6319,0.98198,39.1827,0.6662,1.1161,2.0
+a,fire,fire_2,fire_2|grid_mt|8,neural_grid,grid G32 C8 H32 L2 D0+z0 K1 T32 8-bit,266250,36.8253,25.6319,0.98198,39.1820,0.6660,1.3124,2.0
+a,fire,fire_2,fire_2|conv_s|16,neural_conv,conv l16 16-8-8-4 D0+z0 K1 T16 16-bit,135210,34.8890,24.1091,0.96616,37.5796,0.2987,0.4715,1.8
+a,fire,fire_2,fire_2|conv_s|8,neural_conv,conv l16 16-8-8-4 D0+z0 K1 T16 8-bit,70698,34.8889,24.1088,0.96617,37.5797,0.2986,0.4510,1.8
+a,fire,fire_2,fire_2|conv_m|16,neural_conv,conv l16 32-16-8-4 D0+z0 K1 T16 16-bit,274394,36.2787,25.3791,0.97243,38.1469,0.3247,0.7097,3.3
+a,fire,fire_2,fire_2|conv_m|8,neural_conv,conv l16 32-16-8-4 D0+z0 K1 T16 8-bit,145370,36.2789,25.3793,0.97243,38.1479,0.3245,0.7204,3.3
+a_interp,fire,fire_2,fire_2|interp|bc3 0f 128px,flipbook,bc3 0f 128px,524288,39.1441,27.9530,0.99038,40.2496,0.6480,0.0000,0.0
+a_interp,fire,fire_2,fire_2|interp|bc3 0f 128px +mv32,flipbook_mv,bc3 0f 128px +mv32,589824,41.7872,30.4024,0.99564,41.7254,1.2004,0.0000,0.0
+a_interp,fire,fire_2,fire_2|interp|raw 0f 128px,flipbook,raw 0f 128px,2097152,41.1724,29.9081,0.99290,41.1724,0.6350,0.0000,0.0
+a_interp,fire,fire_2,fire_2|interp|grid_m,neural_grid,grid G32 C8 H32 L2 D0+z0 K1 T16 8-bit,134666,36.2071,25.0090,0.98156,37.8671,0.3820,0.0000,1.9
+a,fire,fire_3,flipbook,flipbook_bc3,bc3 64f 128px,1048576,39.3637,30.6958,0.99400,38.4397,1.0596,0.0000,0.0
+a,fire,fire_3,flipbook,flipbook_bc3,bc3 32f 128px,524288,34.7655,26.3759,0.98214,32.7773,0.4327,0.0000,0.0
+a,fire,fire_3,flipbook,flipbook_bc3,bc3 16f 128px,262144,29.9837,22.0209,0.95601,30.3439,0.1108,0.0000,0.0
+a,fire,fire_3,flipbook,flipbook_bc3,bc3 8f 128px,131072,26.5334,18.9838,0.92344,29.4580,0.0216,0.0000,0.0
+a,fire,fire_3,flipbook,flipbook_bc3,bc3 4f 128px,65536,24.1216,16.9426,0.89322,29.1644,0.0039,0.0000,0.0
+a,fire,fire_3,flipbook,flipbook_bc3,bc3 64f 64px,262144,32.9214,25.2157,0.97128,34.0179,0.4006,0.0000,0.0
+a,fire,fire_3,flipbook,flipbook_bc3,bc3 32f 64px,131072,31.7570,24.1569,0.96310,31.8736,0.2151,0.0000,0.0
+a,fire,fire_3,flipbook,flipbook_bc3,bc3 16f 64px,65536,29.3731,21.9937,0.94403,30.1610,0.0690,0.0000,0.0
+a,fire,fire_3,flipbook,flipbook_bc3,bc3 8f 64px,32768,26.7717,19.6814,0.91755,29.4152,0.0155,0.0000,0.0
+a,fire,fire_3,flipbook,flipbook_bc3,bc3 4f 64px,16384,24.5775,17.7671,0.89121,29.1532,0.0032,0.0000,0.0
+a,fire,fire_3,flipbook,flipbook_bc3,bc3 64f 32px,65536,28.2470,21.4117,0.92542,30.6850,0.2221,0.0000,0.0
+a,fire,fire_3,flipbook,flipbook_bc3,bc3 32f 32px,32768,28.0378,21.2275,0.92173,30.4621,0.0951,0.0000,0.0
+a,fire,fire_3,flipbook,flipbook_bc3,bc3 16f 32px,16384,27.3501,20.6735,0.91230,29.7852,0.0369,0.0000,0.0
+a,fire,fire_3,flipbook,flipbook_bc3,bc3 8f 32px,8192,26.0881,19.5678,0.89625,29.3187,0.0098,0.0000,0.0
+a,fire,fire_3,flipbook,flipbook_bc3,bc3 4f 32px,4096,24.6033,18.2856,0.87817,29.1269,0.0024,0.0000,0.0
+a,fire,fire_3,flipbook,flipbook_raw,raw 64f 64px,1048576,34.4556,26.5648,0.98132,35.3381,0.3358,0.0000,0.0
+a,fire,fire_3,flipbook,flipbook_raw,raw 32f 64px,524288,32.7582,25.0124,0.97188,32.1570,0.2181,0.0000,0.0
+a,fire,fire_3,flipbook,flipbook_raw,raw 16f 64px,262144,29.8254,22.3363,0.95073,30.2224,0.0717,0.0000,0.0
+a,fire,fire_3,flipbook,flipbook_raw,raw 8f 64px,131072,26.9020,19.7298,0.92240,29.4294,0.0159,0.0000,0.0
+a,fire,fire_3,flipbook,flipbook_raw,raw 4f 64px,65536,24.6041,17.7271,0.89467,29.1571,0.0032,0.0000,0.0
+a,fire,fire_3,flipbook,flipbook_raw,raw 64f 32px,262144,28.8901,21.7809,0.93622,31.3076,0.0984,0.0000,0.0
+a,fire,fire_3,flipbook,flipbook_raw,raw 32f 32px,131072,28.6030,21.5644,0.93188,30.6667,0.0837,0.0000,0.0
+a,fire,fire_3,flipbook,flipbook_raw,raw 16f 32px,65536,27.7707,20.8837,0.92079,29.8467,0.0374,0.0000,0.0
+a,fire,fire_3,flipbook,flipbook_raw,raw 8f 32px,32768,26.3347,19.6790,0.90297,29.3365,0.0103,0.0000,0.0
+a,fire,fire_3,flipbook,flipbook_raw,raw 4f 32px,16384,24.7238,18.2796,0.88324,29.1315,0.0025,0.0000,0.0
+a,fire,fire_3,flipbook,flipbook_mv,bc3 16f 128px +mv32,294912,33.2550,25.0736,0.97624,32.5824,0.3820,0.0000,0.0
+a,fire,fire_3,flipbook,flipbook_mv,bc3 8f 128px +mv32,147456,27.0691,19.3654,0.93249,29.5548,0.0842,0.0000,0.0
+a,fire,fire_3,flipbook,flipbook_mv,bc3 4f 128px +mv32,73728,24.0680,16.7554,0.89777,29.1138,0.0123,0.0000,0.0
+a,fire,fire_3,flipbook,flipbook_mv,bc3 16f 64px +mv16,73728,31.9124,24.2684,0.96422,32.6554,0.2223,0.0000,0.0
+a,fire,fire_3,flipbook,flipbook_mv,bc3 8f 64px +mv16,36864,28.1078,20.7394,0.93422,29.9375,0.0496,0.0000,0.0
+a,fire,fire_3,flipbook,flipbook_mv,bc3 4f 64px +mv16,18432,24.5637,17.5452,0.89668,29.1300,0.0058,0.0000,0.0
+a,fire,fire_3,fire_3|grid_s|16,neural_grid,grid G24 C8 H16 L1 D0+z0 K1 T16 16-bit,147946,29.1182,21.5352,0.92741,30.1367,0.1509,0.4883,0.7
+a,fire,fire_3,fire_3|grid_s|8,neural_grid,grid G24 C8 H16 L1 D0+z0 K1 T16 8-bit,74730,29.1183,21.5355,0.92740,30.1370,0.1508,0.8317,0.7
+a,fire,fire_3,fire_3|grid_m|16,neural_grid,grid G32 C8 H32 L2 D0+z0 K1 T16 16-bit,265226,30.7994,22.7697,0.94838,30.5200,0.2229,1.1397,2.0
+a,fire,fire_3,fire_3|grid_m|8,neural_grid,grid G32 C8 H32 L2 D0+z0 K1 T16 8-bit,134666,30.7992,22.7697,0.94838,30.5196,0.2228,1.1084,2.0
+a,fire,fire_3,fire_3|grid_l|16,neural_grid,grid G48 C8 H32 L2 D0+z0 K1 T16 16-bit,592906,31.8752,23.7426,0.95855,30.7397,0.2463,1.1687,2.1
+a,fire,fire_3,fire_3|grid_l|8,neural_grid,grid G48 C8 H32 L2 D0+z0 K1 T16 8-bit,298506,31.8748,23.7418,0.95855,30.7393,0.2463,1.1384,2.1
+a,fire,fire_3,fire_3|grid_mt|16,neural_grid,grid G32 C8 H32 L2 D0+z0 K1 T32 16-bit,527370,31.8598,23.8122,0.95422,32.0342,0.4445,1.1161,1.9
+a,fire,fire_3,fire_3|grid_mt|8,neural_grid,grid G32 C8 H32 L2 D0+z0 K1 T32 8-bit,266250,31.8598,23.8123,0.95421,32.0339,0.4446,1.3124,1.9
+a,fire,fire_3,fire_3|conv_s|16,neural_conv,conv l16 16-8-8-4 D0+z0 K1 T16 16-bit,135210,30.1344,22.2420,0.91808,30.4736,0.1377,0.4715,2.2
+a,fire,fire_3,fire_3|conv_s|8,neural_conv,conv l16 16-8-8-4 D0+z0 K1 T16 8-bit,70698,30.1340,22.2417,0.91808,30.4736,0.1377,0.4510,2.2
+a,fire,fire_3,fire_3|conv_m|16,neural_conv,conv l16 32-16-8-4 D0+z0 K1 T16 16-bit,274394,31.3022,23.3664,0.92738,30.9884,0.1627,0.7097,3.6
+a,fire,fire_3,fire_3|conv_m|8,neural_conv,conv l16 32-16-8-4 D0+z0 K1 T16 8-bit,145370,31.3028,23.3669,0.92738,30.9884,0.1626,0.7204,3.6
+a_interp,fire,fire_3,fire_3|interp|bc3 0f 128px,flipbook,bc3 0f 128px,524288,32.5810,24.4532,0.97027,32.7773,0.4327,0.0000,0.0
+a_interp,fire,fire_3,fire_3|interp|bc3 0f 128px +mv32,flipbook_mv,bc3 0f 128px +mv32,589824,38.4840,30.0849,0.99116,37.3516,0.8777,0.0000,0.0
+a_interp,fire,fire_3,fire_3|interp|raw 0f 128px,flipbook,raw 0f 128px,2097152,33.1494,24.9834,0.97348,33.1494,0.4424,0.0000,0.0
+a_interp,fire,fire_3,fire_3|interp|grid_m,neural_grid,grid G32 C8 H32 L2 D0+z0 K1 T16 8-bit,134666,30.6197,22.5774,0.94794,30.5985,0.1799,0.0000,1.9
+a,smoke,smoke_0,flipbook,flipbook_bc3,bc3 64f 128px,1048576,41.9981,37.2289,0.99152,39.5094,1.2812,0.0000,0.0
+a,smoke,smoke_0,flipbook,flipbook_bc3,bc3 32f 128px,524288,37.3400,32.5518,0.98559,35.1898,0.6433,0.0000,0.0
+a,smoke,smoke_0,flipbook,flipbook_bc3,bc3 16f 128px,262144,31.2678,26.5323,0.95885,32.1423,0.2119,0.0000,0.0
+a,smoke,smoke_0,flipbook,flipbook_bc3,bc3 8f 128px,131072,26.7989,22.1785,0.90593,30.8222,0.0473,0.0000,0.0
+a,smoke,smoke_0,flipbook,flipbook_bc3,bc3 4f 128px,65536,23.8390,19.3772,0.83790,30.3701,0.0127,0.0000,0.0
+a,smoke,smoke_0,flipbook,flipbook_bc3,bc3 64f 64px,262144,32.5493,28.0716,0.95029,35.3995,0.5072,0.0000,0.0
+a,smoke,smoke_0,flipbook,flipbook_bc3,bc3 32f 64px,131072,31.8064,27.3291,0.94460,33.8182,0.3078,0.0000,0.0
+a,smoke,smoke_0,flipbook,flipbook_bc3,bc3 16f 64px,65536,29.6890,25.2425,0.92357,31.8309,0.1276,0.0000,0.0
+a,smoke,smoke_0,flipbook,flipbook_bc3,bc3 8f 64px,32768,26.7676,22.3840,0.88260,30.7522,0.0343,0.0000,0.0
+a,smoke,smoke_0,flipbook,flipbook_bc3,bc3 4f 64px,16384,24.1868,19.9108,0.82786,30.3509,0.0106,0.0000,0.0
+a,smoke,smoke_0,flipbook,flipbook_bc3,bc3 64f 32px,65536,27.7670,23.6228,0.85550,31.8729,0.3570,0.0000,0.0
+a,smoke,smoke_0,flipbook,flipbook_bc3,bc3 32f 32px,32768,27.6321,23.4835,0.85338,31.9074,0.1422,0.0000,0.0
+a,smoke,smoke_0,flipbook,flipbook_bc3,bc3 16f 32px,16384,27.0833,22.9502,0.84379,31.2224,0.0688,0.0000,0.0
+a,smoke,smoke_0,flipbook,flipbook_bc3,bc3 8f 32px,8192,25.8266,21.7304,0.82238,30.5950,0.0239,0.0000,0.0
+a,smoke,smoke_0,flipbook,flipbook_bc3,bc3 4f 32px,4096,24.0745,20.0421,0.78972,30.3057,0.0089,0.0000,0.0
+a,smoke,smoke_0,flipbook,flipbook_raw,raw 64f 64px,1048576,32.9201,28.4260,0.95666,36.6397,0.3394,0.0000,0.0
+a,smoke,smoke_0,flipbook,flipbook_raw,raw 32f 64px,524288,32.0510,27.5671,0.94956,34.0394,0.2892,0.0000,0.0
+a,smoke,smoke_0,flipbook,flipbook_raw,raw 16f 64px,262144,29.8145,25.3619,0.92749,31.8665,0.1265,0.0000,0.0
+a,smoke,smoke_0,flipbook,flipbook_raw,raw 8f 64px,131072,26.8180,22.4306,0.88571,30.7599,0.0343,0.0000,0.0
+a,smoke,smoke_0,flipbook,flipbook_raw,raw 4f 64px,65536,24.2041,19.9234,0.83008,30.3528,0.0106,0.0000,0.0
+a,smoke,smoke_0,flipbook,flipbook_raw,raw 64f 32px,262144,27.9616,23.8090,0.86285,32.5940,0.1006,0.0000,0.0
+a,smoke,smoke_0,flipbook,flipbook_raw,raw 32f 32px,131072,27.7937,23.6463,0.85947,32.1174,0.1088,0.0000,0.0
+a,smoke,smoke_0,flipbook,flipbook_raw,raw 16f 32px,65536,27.2027,23.0706,0.84847,31.2742,0.0655,0.0000,0.0
+a,smoke,smoke_0,flipbook,flipbook_raw,raw 8f 32px,32768,25.8931,21.7964,0.82586,30.6066,0.0235,0.0000,0.0
+a,smoke,smoke_0,flipbook,flipbook_raw,raw 4f 32px,16384,24.1077,20.0761,0.79234,30.3089,0.0089,0.0000,0.0
+a,smoke,smoke_0,flipbook,flipbook_mv,bc3 16f 128px +mv32,294912,37.5117,32.7521,0.98526,37.1515,0.7096,0.0000,0.0
+a,smoke,smoke_0,flipbook,flipbook_mv,bc3 8f 128px +mv32,147456,29.0759,24.3797,0.94068,31.9504,0.2187,0.0000,0.0
+a,smoke,smoke_0,flipbook,flipbook_mv,bc3 4f 128px +mv32,73728,24.0303,19.4582,0.85592,30.2772,0.0523,0.0000,0.0
+a,smoke,smoke_0,flipbook,flipbook_mv,bc3 16f 64px +mv16,73728,32.1072,27.6244,0.94748,34.9759,0.2910,0.0000,0.0
+a,smoke,smoke_0,flipbook,flipbook_mv,bc3 8f 64px +mv16,36864,29.2538,24.7976,0.91914,32.3450,0.1343,0.0000,0.0
+a,smoke,smoke_0,flipbook,flipbook_mv,bc3 4f 64px +mv16,18432,24.6912,20.3212,0.84628,30.3922,0.0451,0.0000,0.0
+a,smoke,smoke_0,smoke_0|grid_s|16,neural_grid,grid G24 C8 H16 L1 D0+z0 K1 T16 16-bit,147946,28.4463,23.9546,0.88611,31.4683,0.2473,0.4883,0.7
+a,smoke,smoke_0,smoke_0|grid_s|8,neural_grid,grid G24 C8 H16 L1 D0+z0 K1 T16 8-bit,74730,28.4459,23.9545,0.88610,31.4680,0.2473,0.8317,0.7
+a,smoke,smoke_0,smoke_0|grid_m|16,neural_grid,grid G32 C8 H32 L2 D0+z0 K1 T16 16-bit,265226,29.8034,25.2066,0.92163,31.9080,0.2874,1.1397,1.8
+a,smoke,smoke_0,smoke_0|grid_m|8,neural_grid,grid G32 C8 H32 L2 D0+z0 K1 T16 8-bit,134666,29.8031,25.2065,0.92162,31.9076,0.2874,1.1084,1.8
+a,smoke,smoke_0,smoke_0|grid_l|16,neural_grid,grid G48 C8 H32 L2 D0+z0 K1 T16 16-bit,592906,31.4275,26.7168,0.95021,32.2639,0.3260,1.1687,2.0
+a,smoke,smoke_0,smoke_0|grid_l|8,neural_grid,grid G48 C8 H32 L2 D0+z0 K1 T16 8-bit,298506,31.4273,26.7166,0.95020,32.2639,0.3260,1.1384,2.0
+a,smoke,smoke_0,smoke_0|grid_mt|16,neural_grid,grid G32 C8 H32 L2 D0+z0 K1 T32 16-bit,527370,30.3767,25.7897,0.92006,32.7798,0.6074,1.1161,1.9
+a,smoke,smoke_0,smoke_0|grid_mt|8,neural_grid,grid G32 C8 H32 L2 D0+z0 K1 T32 8-bit,266250,30.3765,25.7895,0.92005,32.7796,0.6075,1.3124,1.9
+a,smoke,smoke_0,smoke_0|conv_s|16,neural_conv,conv l16 16-8-8-4 D0+z0 K1 T16 16-bit,135210,28.5704,24.1280,0.87403,31.4624,0.2050,0.4715,1.9
+a,smoke,smoke_0,smoke_0|conv_s|8,neural_conv,conv l16 16-8-8-4 D0+z0 K1 T16 8-bit,70698,28.5700,24.1275,0.87404,31.4622,0.2052,0.4510,1.9
+a,smoke,smoke_0,smoke_0|conv_m|16,neural_conv,conv l16 32-16-8-4 D0+z0 K1 T16 16-bit,274394,29.8659,25.3450,0.90005,31.9140,0.2333,0.7097,3.1
+a,smoke,smoke_0,smoke_0|conv_m|8,neural_conv,conv l16 32-16-8-4 D0+z0 K1 T16 8-bit,145370,29.8659,25.3453,0.90005,31.9134,0.2333,0.7204,3.1
+a_interp,smoke,smoke_0,smoke_0|interp|bc3 0f 128px,flipbook,bc3 0f 128px,524288,35.1461,30.3790,0.97960,35.1898,0.6433,0.0000,0.0
+a_interp,smoke,smoke_0,smoke_0|interp|bc3 0f 128px +mv32,flipbook_mv,bc3 0f 128px +mv32,589824,41.8346,37.0920,0.99251,39.7264,1.0613,0.0000,0.0
+a_interp,smoke,smoke_0,smoke_0|interp|raw 0f 128px,flipbook,raw 0f 128px,2097152,35.6368,30.8438,0.98401,35.6368,0.6106,0.0000,0.0
+a_interp,smoke,smoke_0,smoke_0|interp|grid_m,neural_grid,grid G32 C8 H32 L2 D0+z0 K1 T16 8-bit,134666,29.7207,25.1071,0.92055,31.9716,0.2415,0.0000,1.9
+a,smoke,smoke_1,flipbook,flipbook_bc3,bc3 64f 128px,1048576,41.3922,36.5440,0.99181,38.8260,1.2218,0.0000,0.0
+a,smoke,smoke_1,flipbook,flipbook_bc3,bc3 32f 128px,524288,35.7928,30.9620,0.98081,33.4430,0.6239,0.0000,0.0
+a,smoke,smoke_1,flipbook,flipbook_bc3,bc3 16f 128px,262144,29.5634,24.8475,0.94039,30.3497,0.2107,0.0000,0.0
+a,smoke,smoke_1,flipbook,flipbook_bc3,bc3 8f 128px,131072,24.9379,20.4108,0.86727,29.0164,0.0585,0.0000,0.0
+a,smoke,smoke_1,flipbook,flipbook_bc3,bc3 4f 128px,65536,21.2333,16.9574,0.77599,28.4387,0.0135,0.0000,0.0
+a,smoke,smoke_1,flipbook,flipbook_bc3,bc3 64f 64px,262144,31.9694,27.4640,0.95385,34.7009,0.5575,0.0000,0.0
+a,smoke,smoke_1,flipbook,flipbook_bc3,bc3 32f 64px,131072,30.9304,26.4404,0.94356,32.3710,0.3387,0.0000,0.0
+a,smoke,smoke_1,flipbook,flipbook_bc3,bc3 16f 64px,65536,28.3144,23.8875,0.91010,30.1183,0.1423,0.0000,0.0
+a,smoke,smoke_1,flipbook,flipbook_bc3,bc3 8f 64px,32768,24.9343,20.6315,0.85024,28.9637,0.0469,0.0000,0.0
+a,smoke,smoke_1,flipbook,flipbook_bc3,bc3 4f 64px,16384,21.5169,17.4190,0.76918,28.4255,0.0117,0.0000,0.0
+a,smoke,smoke_1,flipbook,flipbook_bc3,bc3 64f 32px,65536,26.6609,22.5348,0.84780,30.6258,0.3553,0.0000,0.0
+a,smoke,smoke_1,flipbook,flipbook_bc3,bc3 32f 32px,32768,26.4824,22.3611,0.84318,30.4901,0.1679,0.0000,0.0
+a,smoke,smoke_1,flipbook,flipbook_bc3,bc3 16f 32px,16384,25.7409,21.6494,0.82611,29.5873,0.0861,0.0000,0.0
+a,smoke,smoke_1,flipbook,flipbook_bc3,bc3 8f 32px,8192,24.0673,20.0582,0.78998,28.8266,0.0350,0.0000,0.0
+a,smoke,smoke_1,flipbook,flipbook_bc3,bc3 4f 32px,4096,21.5175,17.6678,0.73258,28.3890,0.0098,0.0000,0.0
+a,smoke,smoke_1,flipbook,flipbook_raw,raw 64f 64px,1048576,32.3486,27.8332,0.96079,36.0459,0.4077,0.0000,0.0
+a,smoke,smoke_1,flipbook,flipbook_raw,raw 32f 64px,524288,31.1557,26.6655,0.94862,32.5616,0.3218,0.0000,0.0
+a,smoke,smoke_1,flipbook,flipbook_raw,raw 16f 64px,262144,28.4176,23.9911,0.91391,30.1465,0.1403,0.0000,0.0
+a,smoke,smoke_1,flipbook,flipbook_raw,raw 8f 64px,131072,24.9710,20.6696,0.85252,28.9690,0.0465,0.0000,0.0
+a,smoke,smoke_1,flipbook,flipbook_raw,raw 4f 64px,65536,21.5421,17.4453,0.77076,28.4267,0.0116,0.0000,0.0
+a,smoke,smoke_1,flipbook,flipbook_raw,raw 64f 32px,262144,26.8444,22.7006,0.85648,31.3497,0.1377,0.0000,0.0
+a,smoke,smoke_1,flipbook,flipbook_raw,raw 32f 32px,131072,26.6203,22.4910,0.85015,30.6814,0.1398,0.0000,0.0
+a,smoke,smoke_1,flipbook,flipbook_raw,raw 16f 32px,65536,25.8412,21.7506,0.83113,29.6300,0.0834,0.0000,0.0
+a,smoke,smoke_1,flipbook,flipbook_raw,raw 8f 32px,32768,24.1132,20.1160,0.79243,28.8357,0.0347,0.0000,0.0
+a,smoke,smoke_1,flipbook,flipbook_raw,raw 4f 32px,16384,21.5368,17.6954,0.73433,28.3910,0.0097,0.0000,0.0
+a,smoke,smoke_1,flipbook,flipbook_mv,bc3 16f 128px +mv32,294912,34.2804,29.5100,0.97564,34.1840,0.7394,0.0000,0.0
+a,smoke,smoke_1,flipbook,flipbook_mv,bc3 8f 128px +mv32,147456,26.2686,21.6300,0.89825,29.5016,0.2695,0.0000,0.0
+a,smoke,smoke_1,flipbook,flipbook_mv,bc3 4f 128px +mv32,73728,21.2431,16.8151,0.78828,28.3034,0.0674,0.0000,0.0
+a,smoke,smoke_1,flipbook,flipbook_mv,bc3 16f 64px +mv16,73728,30.9955,26.5059,0.94399,33.3484,0.3863,0.0000,0.0
+a,smoke,smoke_1,flipbook,flipbook_mv,bc3 8f 64px +mv16,36864,26.9532,22.5229,0.89138,30.1902,0.1904,0.0000,0.0
+a,smoke,smoke_1,flipbook,flipbook_mv,bc3 4f 64px +mv16,18432,21.7390,17.4448,0.78539,28.4186,0.0472,0.0000,0.0
+a,smoke,smoke_1,smoke_1|grid_s|16,neural_grid,grid G24 C8 H16 L1 D0+z0 K1 T16 16-bit,147946,27.0975,22.6909,0.87416,29.9789,0.2796,0.4883,0.7
+a,smoke,smoke_1,smoke_1|grid_s|8,neural_grid,grid G24 C8 H16 L1 D0+z0 K1 T16 8-bit,74730,27.0973,22.6913,0.87414,29.9785,0.2797,0.8317,0.7
+a,smoke,smoke_1,smoke_1|grid_m|16,neural_grid,grid G32 C8 H32 L2 D0+z0 K1 T16 16-bit,265226,29.0623,24.4787,0.91820,30.5969,0.3412,1.1397,1.8
+a,smoke,smoke_1,smoke_1|grid_m|8,neural_grid,grid G32 C8 H32 L2 D0+z0 K1 T16 8-bit,134666,29.0621,24.4783,0.91820,30.5967,0.3411,1.1084,1.8
+a,smoke,smoke_1,smoke_1|grid_l|16,neural_grid,grid G48 C8 H32 L2 D0+z0 K1 T16 16-bit,592906,30.6172,25.8951,0.94545,30.9460,0.3691,1.1687,2.2
+a,smoke,smoke_1,smoke_1|grid_l|8,neural_grid,grid G48 C8 H32 L2 D0+z0 K1 T16 8-bit,298506,30.6169,25.8947,0.94544,30.9459,0.3690,1.1384,2.2
+a,smoke,smoke_1,smoke_1|grid_mt|16,neural_grid,grid G32 C8 H32 L2 D0+z0 K1 T32 16-bit,527370,29.7462,25.0921,0.91685,31.6495,0.6812,1.1161,2.2
+a,smoke,smoke_1,smoke_1|grid_mt|8,neural_grid,grid G32 C8 H32 L2 D0+z0 K1 T32 8-bit,266250,29.7458,25.0919,0.91683,31.6490,0.6814,1.3124,2.2
+a,smoke,smoke_1,smoke_1|conv_s|16,neural_conv,conv l16 16-8-8-4 D0+z0 K1 T16 16-bit,135210,27.0728,22.5614,0.82366,30.1274,0.2662,0.4715,1.9
+a,smoke,smoke_1,smoke_1|conv_s|8,neural_conv,conv l16 16-8-8-4 D0+z0 K1 T16 8-bit,70698,27.0724,22.5609,0.82365,30.1272,0.2662,0.4510,1.9
+a,smoke,smoke_1,smoke_1|conv_m|16,neural_conv,conv l16 32-16-8-4 D0+z0 K1 T16 16-bit,274394,28.4612,23.8831,0.82880,30.6250,0.2859,0.7097,5.8
+a,smoke,smoke_1,smoke_1|conv_m|8,neural_conv,conv l16 32-16-8-4 D0+z0 K1 T16 8-bit,145370,28.4611,23.8828,0.82880,30.6254,0.2858,0.7204,5.8
+a_interp,smoke,smoke_1,smoke_1|interp|bc3 0f 128px,flipbook,bc3 0f 128px,524288,33.4265,28.6478,0.96986,33.4430,0.6239,0.0000,0.0
+a_interp,smoke,smoke_1,smoke_1|interp|bc3 0f 128px +mv32,flipbook_mv,bc3 0f 128px +mv32,589824,39.1997,34.4186,0.99054,37.6075,1.0778,0.0000,0.0
+a_interp,smoke,smoke_1,smoke_1|interp|raw 0f 128px,flipbook,raw 0f 128px,2097152,33.7844,28.9971,0.97364,33.7844,0.5956,0.0000,0.0
+a_interp,smoke,smoke_1,smoke_1|interp|grid_m,neural_grid,grid G32 C8 H32 L2 D0+z0 K1 T16 8-bit,134666,28.9451,24.3624,0.91538,30.6340,0.2916,0.0000,2.0
+a,smoke,smoke_2,flipbook,flipbook_bc3,bc3 64f 128px,1048576,42.1084,35.9828,0.99387,39.6523,1.6038,0.0000,0.0
+a,smoke,smoke_2,flipbook,flipbook_bc3,bc3 32f 128px,524288,39.5457,33.4461,0.99142,38.0499,1.0358,0.0000,0.0
+a,smoke,smoke_2,flipbook,flipbook_bc3,bc3 16f 128px,262144,32.5775,26.5770,0.96824,34.2111,0.4846,0.0000,0.0
+a,smoke,smoke_2,flipbook,flipbook_bc3,bc3 8f 128px,131072,26.7197,20.9054,0.90994,32.1237,0.1234,0.0000,0.0
+a,smoke,smoke_2,flipbook,flipbook_bc3,bc3 4f 128px,65536,23.1814,17.5728,0.84201,31.3703,0.0272,0.0000,0.0
+a,smoke,smoke_2,flipbook,flipbook_bc3,bc3 64f 64px,262144,34.1327,28.4068,0.96618,37.3748,0.7885,0.0000,0.0
+a,smoke,smoke_2,flipbook,flipbook_bc3,bc3 32f 64px,131072,33.4183,27.7103,0.96227,36.5594,0.5285,0.0000,0.0
+a,smoke,smoke_2,flipbook,flipbook_bc3,bc3 16f 64px,65536,30.8322,25.1875,0.94213,33.8960,0.3169,0.0000,0.0
+a,smoke,smoke_2,flipbook,flipbook_bc3,bc3 8f 64px,32768,26.7405,21.2214,0.89306,32.0632,0.0955,0.0000,0.0
+a,smoke,smoke_2,flipbook,flipbook_bc3,bc3 4f 64px,16384,23.5116,18.1304,0.83336,31.3554,0.0232,0.0000,0.0
+a,smoke,smoke_2,flipbook,flipbook_bc3,bc3 64f 32px,65536,28.1853,22.8883,0.88030,33.2886,0.6777,0.0000,0.0
+a,smoke,smoke_2,flipbook,flipbook_bc3,bc3 32f 32px,32768,28.0657,22.7722,0.87819,33.6387,0.2535,0.0000,0.0
+a,smoke,smoke_2,flipbook,flipbook_bc3,bc3 16f 32px,16384,27.4571,22.2021,0.86775,32.9187,0.1599,0.0000,0.0
+a,smoke,smoke_2,flipbook,flipbook_bc3,bc3 8f 32px,8192,25.7585,20.6028,0.83837,31.8532,0.0626,0.0000,0.0
+a,smoke,smoke_2,flipbook,flipbook_bc3,bc3 4f 32px,4096,23.5290,18.4710,0.79774,31.3043,0.0184,0.0000,0.0
+a,smoke,smoke_2,flipbook,flipbook_raw,raw 64f 64px,1048576,34.7096,28.9668,0.97119,39.6040,0.3920,0.0000,0.0
+a,smoke,smoke_2,flipbook,flipbook_raw,raw 32f 64px,524288,33.8013,28.0845,0.96616,36.9806,0.4814,0.0000,0.0
+a,smoke,smoke_2,flipbook,flipbook_raw,raw 16f 64px,262144,31.0162,25.3631,0.94523,33.9552,0.3132,0.0000,0.0
+a,smoke,smoke_2,flipbook,flipbook_raw,raw 8f 64px,131072,26.7996,21.2743,0.89514,32.0730,0.0952,0.0000,0.0
+a,smoke,smoke_2,flipbook,flipbook_raw,raw 4f 64px,65536,23.5291,18.1489,0.83468,31.3573,0.0230,0.0000,0.0
+a,smoke,smoke_2,flipbook,flipbook_raw,raw 64f 32px,262144,28.4094,23.0922,0.88592,34.3384,0.1304,0.0000,0.0
+a,smoke,smoke_2,flipbook,flipbook_raw,raw 32f 32px,131072,28.2403,22.9367,0.88279,33.9464,0.1787,0.0000,0.0
+a,smoke,smoke_2,flipbook,flipbook_raw,raw 16f 32px,65536,27.5849,22.3226,0.87113,32.9893,0.1513,0.0000,0.0
+a,smoke,smoke_2,flipbook,flipbook_raw,raw 8f 32px,32768,25.8397,20.6650,0.84141,31.8685,0.0624,0.0000,0.0
+a,smoke,smoke_2,flipbook,flipbook_raw,raw 4f 32px,16384,23.5678,18.4808,0.80080,31.3080,0.0182,0.0000,0.0
+a,smoke,smoke_2,flipbook,flipbook_mv,bc3 16f 128px +mv32,294912,39.5867,33.5312,0.99072,39.7803,1.0571,0.0000,0.0
+a,smoke,smoke_2,flipbook,flipbook_mv,bc3 8f 128px +mv32,147456,31.1343,25.1509,0.95872,35.2678,0.5901,0.0000,0.0
+a,smoke,smoke_2,flipbook,flipbook_mv,bc3 4f 128px +mv32,73728,23.1861,17.4229,0.85482,31.2026,0.1247,0.0000,0.0
+a,smoke,smoke_2,flipbook,flipbook_mv,bc3 16f 64px +mv16,73728,33.9007,28.1720,0.96544,37.8379,0.4998,0.0000,0.0
+a,smoke,smoke_2,flipbook,flipbook_mv,bc3 8f 64px +mv16,36864,31.0977,25.4212,0.94229,35.6106,0.3627,0.0000,0.0
+a,smoke,smoke_2,flipbook,flipbook_mv,bc3 4f 64px +mv16,18432,24.5548,19.0140,0.85905,31.7178,0.1181,0.0000,0.0
+a,smoke,smoke_2,smoke_2|grid_s|16,neural_grid,grid G24 C8 H16 L1 D0+z0 K1 T16 16-bit,147946,29.6366,23.9077,0.92186,33.6707,0.6969,0.4883,0.7
+a,smoke,smoke_2,smoke_2|grid_s|8,neural_grid,grid G24 C8 H16 L1 D0+z0 K1 T16 8-bit,74730,29.6367,23.9077,0.92185,33.6712,0.6970,0.8317,0.7
+a,smoke,smoke_2,smoke_2|grid_m|16,neural_grid,grid G32 C8 H32 L2 D0+z0 K1 T16 16-bit,265226,31.8945,25.9430,0.95447,34.5658,0.7742,1.1397,1.9
+a,smoke,smoke_2,smoke_2|grid_m|8,neural_grid,grid G32 C8 H32 L2 D0+z0 K1 T16 8-bit,134666,31.8943,25.9429,0.95448,34.5664,0.7742,1.1084,1.9
+a,smoke,smoke_2,smoke_2|grid_l|16,neural_grid,grid G48 C8 H32 L2 D0+z0 K1 T16 16-bit,592906,33.8588,27.8381,0.97238,35.0037,0.8584,1.1687,2.2
+a,smoke,smoke_2,smoke_2|grid_l|8,neural_grid,grid G48 C8 H32 L2 D0+z0 K1 T16 8-bit,298506,33.8584,27.8378,0.97237,35.0034,0.8586,1.1384,2.2
+a,smoke,smoke_2,smoke_2|grid_mt|16,neural_grid,grid G32 C8 H32 L2 D0+z0 K1 T32 16-bit,527370,32.3987,26.4946,0.95530,35.6562,1.1153,1.1161,2.2
+a,smoke,smoke_2,smoke_2|grid_mt|8,neural_grid,grid G32 C8 H32 L2 D0+z0 K1 T32 8-bit,266250,32.3982,26.4940,0.95529,35.6553,1.1154,1.3124,2.2

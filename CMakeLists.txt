@@ -86,12 +86,12 @@ neuralfx_simd(neuralfx_train)
 
 # Images and videos (PNG via zlib, mp4 via an ffmpeg pipe) for previews, figures and comparisons.
 find_package(ZLIB REQUIRED)
-add_library(neuralfx_io STATIC src/core/image_io.cpp)
+add_library(neuralfx_io STATIC src/core/image_io.cpp src/core/ingest.cpp)
 target_link_libraries(neuralfx_io PUBLIC neuralfx_core PRIVATE ZLIB::ZLIB)
 neuralfx_defaults(neuralfx_io)
 
 if(NEURALFX_BUILD_TOOLS)
-  foreach(tool nvfx_sim nvfx_train nvfx_eval)
+  foreach(tool nvfx_sim nvfx_train nvfx_eval nvfx_experiment nvfx_ingest)
     add_executable(${tool} tools/${tool}.cpp)
     target_link_libraries(${tool} PRIVATE neuralfx_io neuralfx_train nvfx)
     neuralfx_defaults(${tool})
@@ -117,7 +117,7 @@ if(NEURALFX_BUILD_TESTS)
   find_package(GTest CONFIG REQUIRED)
   include(GoogleTest)
   add_executable(neuralfx_tests tests/test_proto.cpp tests/test_sim.cpp tests/test_baselines.cpp tests/test_train.cpp
-                                tests/test_runtime.cpp)
+                                tests/test_runtime.cpp tests/test_ingest.cpp)
   target_link_libraries(neuralfx_tests PRIVATE neuralfx_proto neuralfx_io neuralfx_train nvfx GTest::gtest_main)
   neuralfx_defaults(neuralfx_tests)
   gtest_discover_tests(neuralfx_tests TEST_PREFIX "neuralfx." DISCOVERY_MODE PRE_TEST PROPERTIES LABELS neuralfx)
