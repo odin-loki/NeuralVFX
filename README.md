@@ -64,6 +64,7 @@ From [docs/REPORT.md](docs/REPORT.md), measured on simulated fire, smoke and exp
 | trainer | `src/train`, `nvfx_train` | hand-written gradients (checked against finite differences), Adam, multithreaded; per-clip variation codes |
 | runtime | `src/runtime`, `include/neuralfx/nvfx.h` | the shipping library: C API, per-ISA SIMD (SSE2, AVX2, AVX-512), no allocation per frame, seeds and endless drift, exact hue, brightness and speed, bake to flipbook |
 | baselines | `src/core/flipbook.cpp` | flipbooks at matched memory: frame count, resolution, raw or BC1/BC4 (BC3-layout) compression, motion vectors |
+| lossless packing | `src/core/cm.cpp`, `nvfx_pack` | a context-mixing coder (context models, logistic mixer, APMs, binary arithmetic coder) that knows the tensors' shapes: `.nvfx` to `.nvfz` and back, bit-exact; flipbooks coded the same way for comparison ([results/compression](results/compression/README.md)) |
 | metrics | `src/core/metrics.cpp` | PSNR (full and active-region), SSIM, temporal PSNR, flicker, spectrum and motion statistics, paired bootstrap |
 | evaluation | `nvfx_experiment` | the whole study end to end: compression, controls, variation, timing, figures, report |
 | viewer | `viewer/`, `nvfx_viewer` | Dear ImGui: sliders for every control, side by side with the reference, a flipbook and the live simulation |
@@ -76,7 +77,7 @@ Ubuntu 24.04: `g++-14`, CMake 3.25+, Ninja, `libgtest-dev`, `zlib1g-dev` (and `f
 ```sh
 cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_COMPILER=g++-14
 cmake --build build
-ctest --test-dir build                     # 79 tests: sim, metrics, codecs, gradients, runtime parity, composition, allocation, C API
+ctest --test-dir build                     # 87 tests: sim, metrics, codecs, gradients, runtime parity, composition, allocation, C API, lossless coder
 ```
 
 Options: `NEURALFX_BUILD_VIEWER` (GLFW + OpenGL; fetches Dear ImGui), `NEURALFX_BUILD_SHARED` (libnvfx.so for engines),
@@ -112,13 +113,14 @@ training, evaluation; about three hours), then `d-timing` on an idle machine and
 | `nvfx_c_host` | the engine loop in plain C, with timings; `--self-test` checks the error paths |
 | `nvfx_viewer` | live viewer with sliders |
 | `nvfx_fireball` | a scripted scene of composed effects (a fireball with smoke, fires and embers) to video, with a profile of every stage |
+| `nvfx_pack` | pack a `.nvfx` into a `.nvfz` and back (`--unpack`), bit-exact; `--report DIR` for sizes and ratios; `--study` for the measurement in results/compression |
 | `neuralfx_arch_bench` | Phase 0 architecture microbenchmark |
 
 ## Layout
 
 | path | what |
 |---|---|
-| `include/neuralfx/` | public headers: `nvfx.h` (C API), `clip`, `sim`, `model`, `train`, `rollout`, `rollout_train`, `metrics`, `flipbook`, `ingest`, `image_io`, `noise` |
+| `include/neuralfx/` | public headers: `nvfx.h` (C API), `clip`, `sim`, `model`, `train`, `rollout`, `rollout_train`, `metrics`, `flipbook`, `ingest`, `image_io`, `noise`, `cm` (lossless coder) |
 | `src/core`, `src/sim`, `src/train`, `src/runtime`, `src/compose`, `src/common`, `src/proto` | libraries (see the table above); `src/proto` holds the Phase 0 prototypes |
 | `tools/`, `examples/`, `viewer/`, `bench/` | executables |
 | `tests/` | GoogleTest suites, the allocation test, the C host self-test, the viewer screenshot test |
