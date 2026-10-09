@@ -46,7 +46,7 @@ void eval(const Ctx& c, sim::Effect e);
 // Cost: microseconds per pixel of every expert group, context and the mixer, ms per 128 x 128 frame.
 void bench(const Ctx& c, sim::Effect e);
 // A generation diagnostic: mean and peak fine heat of v1 and of a mixer from the first validation setting.
-void probe(const Ctx& c, sim::Effect e, const std::string& mixer, double tau, bool relock, int frames);
+void probe(const Ctx& c, sim::Effect e, const std::string& mixer, double tau, int relock, int frames);
 // Paired-bootstrap summary of the CSVs (docs/DCM.md G1): printed and written to results/.../g_fine_summary.md.
 void summary(const Ctx& c);
 std::string summary_markdown(const std::filesystem::path& results);  // the same tables, for SUMMARY.md

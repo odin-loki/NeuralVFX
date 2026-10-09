@@ -35,8 +35,8 @@ namespace fine = dcm::fine;
 namespace {
 
 std::size_t sz(int v) { return static_cast<std::size_t>(v); }
-[[maybe_unused]] float fl(int v) { return static_cast<float>(v); }
-[[maybe_unused]] double dbl(float v) { return static_cast<double>(v); }
+float fl(int v) { return static_cast<float>(v); }
+double dbl(float v) { return static_cast<double>(v); }
 
 constexpr int kSize = 128;
 constexpr std::size_t kMacroStatsBench = 4;
@@ -95,7 +95,7 @@ void write_csv(const fs::path& path, const std::string& header, const std::vecto
 }
 
 // Rows keyed by their first `key_cells` cells replace rows with the same key; others are kept (per-effect runs merge).
-[[maybe_unused]] void merge_csv(const fs::path& path, const std::string& header, const std::vector<std::string>& rows, int key_cells = 1) {
+void merge_csv(const fs::path& path, const std::string& header, const std::vector<std::string>& rows, int key_cells = 1) {
   const auto key = [&](const std::string& r) {
     std::size_t at = 0;
     for (int k = 0; k < key_cells && at != std::string::npos; ++k) {
@@ -117,7 +117,7 @@ void write_csv(const fs::path& path, const std::string& header, const std::vecto
   write_csv(path, header, out);
 }
 
-[[maybe_unused]] std::vector<std::vector<std::string>> read_csv(const fs::path& p) {
+std::vector<std::vector<std::string>> read_csv(const fs::path& p) {
   std::vector<std::vector<std::string>> rows;
   std::ifstream in(p);
   std::string line;
@@ -176,7 +176,7 @@ void write_table(const fs::path& path, const Table& t) {
   if (!o) throw std::runtime_error("cannot write " + path.string());
 }
 
-[[maybe_unused]] Table read_table(const fs::path& path) {
+Table read_table(const fs::path& path) {
   std::ifstream in(path, std::ios::binary);
   char magic[8];
   in.read(magic, 8);
@@ -245,7 +245,7 @@ void write_windows(const fs::path& path, const std::vector<Window>& ws) {
   if (!o) throw std::runtime_error("cannot write " + path.string());
 }
 
-[[maybe_unused]] std::vector<Window> read_windows(const fs::path& path) {
+std::vector<Window> read_windows(const fs::path& path) {
   std::ifstream in(path, std::ios::binary);
   if (!in) throw std::runtime_error("cannot read " + path.string() + " (run record)");
   std::uint64_t n = 0;
@@ -406,7 +406,7 @@ RunRecord record_run(const rollout::Model& M, sim::Effect e, std::uint64_t salt,
 fs::path table_path(const Ctx& c, sim::Effect e, std::string_view split) { return c.data / std::format("{}_{}.rows", ename(e), split); }
 
 // A table without the rows the mixer never predicts (fine::skip_row: every value invisible).
-[[maybe_unused]] Table read_rows(const Ctx& c, sim::Effect e, std::string_view split, const rollout::Model& M) {
+Table read_rows(const Ctx& c, sim::Effect e, std::string_view split, const rollout::Model& M) {
   Table t = read_table(table_path(c, e, split));
   const fine::Spec sp = scale_spec(M);
   std::erase_if(t.rows, [&](const fine::Row& r) { return fine::skip_row(sp, r); });
@@ -1081,7 +1081,7 @@ dcm::ValueNet own_rollout_pass(const rollout::Model& M, const fine::Mixer& mix, 
     double y;
   };
   std::vector<std::vector<Sample>> per(ws.size());
-  const fine::GenOptions g{1.0, true, {}};
+  const fine::GenOptions g{0.0, 2, {}};  // the mean, with v1's lock (what generation turned out to use on validation)
   parallel(static_cast<int>(ws.size()), threads, [&](int wi) {
     const Window& w = ws[sz(wi)];
     const RunInfo& run = train.runs.at(sz(w.run));
@@ -1160,7 +1160,7 @@ dcm::ValueNet own_rollout_pass(const rollout::Model& M, const fine::Mixer& mix, 
 
 struct GenOption {
   double tau;
-  bool relock;
+  int relock;  // fine::GenOptions::relock
 };
 
 fs::path released_path(const Ctx& c, sim::Effect e) { return c.data / std::format("{}_released.mixer", ename(e)); }
@@ -1210,7 +1210,7 @@ void train(const Ctx& c, sim::Effect e) {
     double mean = 0;
     for (int i = 0; i < n_set; ++i) {
       mean += sc[sz(i)].score / n_set;
-      rows.push_back(std::format("{},{},{:.2f},{},{},{}", ename(e), name, g.tau, g.relock ? 1 : 0, i, gen_cells(sc[sz(i)])));
+      rows.push_back(std::format("{},{},{:.2f},{},{},{}", ename(e), name, g.tau, g.relock, i, gen_cells(sc[sz(i)])));
     }
     return mean;
   };
@@ -1238,23 +1238,24 @@ void train(const Ctx& c, sim::Effect e) {
     log(std::format("train {}: candidate {} {}: validation bits {:.4f} after training, {:.4f} after the own-rollout pass ({} rows), {:.0f} s", ename(e), k,
                     fine::describe(cd.one.config), cd.bits_one, cd.bits_two, n2, seconds_since(tk)));
   }
-  // tau and relock on the first candidate (both passes)
-  const std::vector<GenOption> grid = c.quick ? std::vector<GenOption>{{0.0, false}, {1.0, true}}
-                                              : std::vector<GenOption>{{0.0, false}, {0.5, false}, {1.0, false}, {1.5, false},
-                                                                       {0.0, true}, {0.5, true}, {1.0, true}, {1.5, true}};
-  GenOption best_g{0.0, false};
+  // tau and relock on the first candidate after the own-rollout pass; pass 1 alone at the chosen setting for comparison
+  const std::vector<GenOption> grid = c.quick ? std::vector<GenOption>{{0.0, 0}, {0.0, 2}}
+                                              : std::vector<GenOption>{{0.0, 0}, {0.5, 0}, {1.0, 0}, {0.0, 1}, {0.5, 1}, {1.0, 1},
+                                                                       {0.0, 2}, {0.5, 2}, {1.0, 2}};
+  GenOption best_g{0.0, 0};
   double best = std::numeric_limits<double>::infinity();
-  bool best_two = true;
-  for (const bool two : {false, true}) {
-    for (const GenOption& go : grid) {
-      const double s = evaluate(two ? &cand[0].two : &cand[0].one, {go.tau, go.relock, {}}, std::format("cand0_pass{}", two ? 2 : 1));
-      log(std::format("train {}: candidate 0 pass {} tau {} relock {}: score {:.4f} (v1 {:.4f})", ename(e), two ? 2 : 1, go.tau, go.relock, s, v1_score));
-      if (s < best) {
-        best = s;
-        best_g = go;
-        best_two = two;
-      }
+  const bool best_two = true;
+  for (const GenOption& go : grid) {
+    const double s = evaluate(&cand[0].two, {go.tau, go.relock, {}}, "cand0_pass2");
+    log(std::format("train {}: candidate 0 pass 2 tau {} relock {}: score {:.4f} (v1 {:.4f})", ename(e), go.tau, go.relock, s, v1_score));
+    if (s < best) {
+      best = s;
+      best_g = go;
     }
+  }
+  {
+    const double s = evaluate(&cand[0].one, {best_g.tau, best_g.relock, {}}, "cand0_pass1");
+    log(std::format("train {}: candidate 0 pass 1 tau {} relock {}: score {:.4f}", ename(e), best_g.tau, best_g.relock, s));
   }
   // re-rank the candidates at that setting
   int winner = 0;
@@ -1268,9 +1269,9 @@ void train(const Ctx& c, sim::Effect e) {
       winner = k;
     }
   }
-  if (winner != 0) {  // its own tau and relock
+  if (winner != 0) {  // its own tau, at the chosen relock
     for (const GenOption& go : grid) {
-      if (go.tau == best_g.tau && go.relock == best_g.relock) continue;
+      if (go.relock != best_g.relock || go.tau == best_g.tau) continue;
       const fine::Mixer& m = best_two ? cand[sz(winner)].two : cand[sz(winner)].one;
       const double s = evaluate(&m, {go.tau, go.relock, {}}, std::format("cand{}_pass{}", winner, best_two ? 2 : 1));
       if (s < win_score) {
@@ -1281,9 +1282,16 @@ void train(const Ctx& c, sim::Effect e) {
   }
   const fine::Mixer& rel = best_two ? cand[sz(winner)].two : cand[sz(winner)].one;
   fine::save_mixer(released_path(c, e), rel);
-  std::ofstream(released_gen_path(c, e)) << std::format("{} {} {} {} {}\n", best_g.tau, best_g.relock ? 1 : 0, winner, best_two ? 2 : 1, rel.version());
+  std::ofstream(released_gen_path(c, e)) << std::format("{} {} {} {} {}\n", best_g.tau, best_g.relock, winner, best_two ? 2 : 1, rel.version());
   merge_csv(c.results / "g_fine_val.csv", "effect,candidate,tau,relock,setting,score,spectrum_l1,motion_ratio,coverage_l1,emission_l1,mean_frame_psnr", rows);
   merge_csv(c.results / "g_fine_candidates.csv", "effect,candidate,val_bits_trained,val_bits_own_rollout,own_rollout_rows,version,config", cand_rows);
+  {
+    bool costed = false;
+    const dcm::SearchCost cost = cost_model(c, e, P, costed);
+    merge_csv(c.results / "g_fine_released.csv", "effect,candidate,pass,tau,relock,val_score,v1_val_score,cost_ms,version,config",
+              {std::format("{},{},{},{},{},{:.4f},{:.4f},{:.3f},{},\"{}\"", ename(e), winner, best_two ? 2 : 1, best_g.tau, best_g.relock, win_score,
+                           v1_score, costed ? dcm::config_cost(cost, top[sz(winner)]) : std::nan(""), rel.version(), fine::describe(rel.config))});
+  }
   log(std::format("train {}: released candidate {} (pass {}), tau {}, relock {}: validation score {:.4f} against v1 {:.4f}; {}; version {}; {:.0f} min",
                   ename(e), winner, best_two ? 2 : 1, best_g.tau, best_g.relock, win_score, v1_score, fine::describe(rel.config), rel.version(),
                   seconds_since(t_all) / 60.0));
@@ -1316,10 +1324,8 @@ void eval(const Ctx& c, sim::Effect e) {
   fine::GenOptions g;
   {
     std::ifstream in(released_gen_path(c, e));
-    int relock = 0;
-    in >> g.tau >> relock;
+    in >> g.tau >> g.relock;
     if (!in) throw std::runtime_error("no released generation options (run train-fine)");
-    g.relock = relock != 0;
   }
   log(std::format("eval {}: released mixer {} ({}), tau {}, relock {}", ename(e), mix.version(), fine::describe(mix.config), g.tau, g.relock));
   const Protocol pr = protocol(e);
@@ -1923,7 +1929,7 @@ void bench(const Ctx& c, sim::Effect e) {
 }
 // --- probe: a generation diagnostic ------------------------------------------------------------------------------
 
-void probe(const Ctx& c, sim::Effect e, const std::string& mixer, double tau, bool relock, int frames) {
+void probe(const Ctx& c, sim::Effect e, const std::string& mixer, double tau, int relock, int frames) {
   const rollout::Model M = load_v1(c, e);
   const fine::Mixer mix = fine::load_mixer(mixer.empty() ? released_path(c, e) : fs::path(mixer));
   const Setting s = validation_settings()[0];
@@ -1951,6 +1957,21 @@ void probe(const Ctx& c, sim::Effect e, const std::string& mixer, double tau, bo
     const auto [va, xa] = stat(a.fine_t);
     const auto [vb, xb] = stat(b.fine_t);
     log(std::format("frame {:3d}: coarse heat mean {:.4f}; v1 fine mean {:.4f} max {:.3f}; DCM fine mean {:.4f} max {:.3f}", k, cm / N, va, xa, vb, xb));
+  }
+  // statistics against a real run at the first validation settings
+  for (int i = 0; i < 2; ++i) {
+    const Setting st = validation_settings()[sz(i)];
+    const Reference ref = real_run(e, st, 800000 + static_cast<std::uint64_t>(i));
+    const int n = protocol(e).frames;
+    for (const bool dcm : {false, true}) {
+      const Clip cl = model_clip(M, dcm ? &mix : nullptr, g, st, 820000 + static_cast<std::uint64_t>(i), n);
+      const metrics::ClipStats ts = metrics::stats(cl);
+      double cov = 0, rcov = 0;
+      for (const double v : ts.coverage) cov += v / static_cast<double>(ts.coverage.size());
+      for (const double v : ref.all.coverage) rcov += v / static_cast<double>(ref.all.coverage.size());
+      log(std::format("setting {} {}: {} | mean cover {:.4f} (real {:.4f}), motion {:.5f} (real {:.5f})", i, dcm ? "DCM" : "v1 ",
+                      gen_cells(gen_score(ref.all, ts)), cov, rcov, ts.motion, ref.all.motion));
+    }
   }
 }
 
@@ -2052,10 +2073,13 @@ std::string summary_markdown(const fs::path& results) {
     md << std::format("1 - 0: {}; 2 - 0: {}; 2 - 1: {}.\n", fmt_iv(get("fire", "hand+macro", "1"), get("fire", "hand+macro", "0"), 4),
                       fmt_iv(get("fire", "hand+macro", "2"), get("fire", "hand+macro", "0"), 4), fmt_iv(get("fire", "hand+macro", "2"), get("fire", "hand+macro", "1"), 4));
     for (const auto& e : effects) {
-      if (get(e, "none", "0").empty()) continue;
-      md << std::format("\nContext families ({}, nested bits paired over training runs): hand - none {}; hand+macro - hand {}; hand+macro - none {}.\n", e,
-                        fmt_iv(get(e, "hand", "0"), get(e, "none", "0"), 4), fmt_iv(get(e, "hand+macro", "0"), get(e, "hand", "0"), 4),
-                        fmt_iv(get(e, "hand+macro", "0"), get(e, "none", "0"), 4));
+      for (const std::string sfx : {"", "/free"}) {
+        if (get(e, "none" + sfx, "0").empty()) continue;
+        md << std::format("\nContext families ({}{}, nested bits paired over training runs): hand - none {}; hand+macro - hand {}; hand+macro - none {}.\n",
+                          e, sfx.empty() ? ", within the cost budget" : ", without a cost budget (60 configurations, 1 refinement round)",
+                          fmt_iv(get(e, "hand" + sfx, "0"), get(e, "none" + sfx, "0"), 4), fmt_iv(get(e, "hand+macro" + sfx, "0"), get(e, "hand" + sfx, "0"), 4),
+                          fmt_iv(get(e, "hand+macro" + sfx, "0"), get(e, "none" + sfx, "0"), 4));
+      }
     }
   }
   // generation calibration on validation settings
@@ -2108,6 +2132,36 @@ std::string summary_markdown(const fs::path& results) {
       md << std::format("| {} | {} | {} | {} | {} | {} |\n", e, fmt_iv(col(a, 1), col(b, 1)), fmt_iv(la, lb), fmt_iv(col(a, 3), col(b, 3), 4),
                         fmt_iv(col(a, 5), col(b, 5), 2), fmt_iv(col(a, 0), col(b, 0)));
     }
+    // the decision rule (docs/DCM.md §3), fixed in advance
+    std::map<std::string, double> cost;
+    if (fs::exists(results / "g_fine_released.csv")) {
+      for (const auto& r : read_quoted(results / "g_fine_released.csv")) cost[r[0]] = cell(r, 7);
+    }
+    int better = 0;
+    bool worse = false, cost_ok = true;
+    std::string why;
+    for (const auto& e : effects) {
+      if (!t.contains(e)) continue;
+      const auto& a = t[e]["dcm_fine"];
+      const auto& b = t[e]["v1"];
+      std::vector<double> la, lb;
+      for (const auto& x : a) la.push_back(std::abs(std::log(std::max(1e-3, x[2]))));
+      for (const auto& x : b) lb.push_back(std::abs(std::log(std::max(1e-3, x[2]))));
+      const auto sp = metrics::paired_bootstrap(col(a, 1), col(b, 1)), mo = metrics::paired_bootstrap(la, lb), ps = metrics::paired_bootstrap(col(a, 5), col(b, 5));
+      if (sp.hi < 0) ++better;
+      if (sp.lo > 0) why += std::format(" {}: spectrum worse;", e);
+      if (mo.lo > 0) why += std::format(" {}: motion further from 1;", e);
+      if (ps.hi < 0) why += std::format(" {}: mean-frame PSNR worse;", e);
+      worse = worse || sp.lo > 0 || mo.lo > 0 || ps.hi < 0;
+      if (cost.contains(e) && !(cost[e] <= 1.0 + 1e-9)) {
+        cost_ok = false;
+        why += std::format(" {}: cost {:.2f} ms;", e, cost[e]);
+      }
+    }
+    md << std::format("\n**Decision (rule fixed in advance):** spectrum distance lower than v1 with an interval excluding zero on {} of 3 effects "
+                      "(2 needed); {}; cost {}. G1 **{}**.{}\n",
+                      better, worse ? "an effect is worse" : "no effect worse", cost_ok ? "within +1 ms" : "over +1 ms",
+                      better >= 2 && !worse && cost_ok ? "passes to stage S6" : "does not pass", why.empty() ? "" : " Notes:" + why);
     md << "\n### G1c: the first second\n\nCalibration score and spectrum distance of the first 30 frames against the real run (looping effects: "
           "its 10 s statistics; explosions: its own first second). `usual`: v1's start (fire: a 30-frame warm-up; smoke and explosions: stored "
           "fine fields); `cold`: from the coarse state alone, no warm-up and no stored fine fields.\n\n"

@@ -1,0 +1,4 @@
+effect,candidate,pass,tau,relock,val_score,v1_val_score,cost_ms,version,config
+fire,7,2,0,2,0.7204,0.8148,0.906,69faa016746779ff59d0314ca714b7aa9001542b1d03a946e67848e3f626b3d1,"inputs A+A_sl+A-A_sl+bias | mixers - | avm height 0.3 | scale height | loss laplace | lr 0.02/0.002 | ep 8"
+smoke,2,2,0,2,0.5674,0.5810,0.919,4d04479dbf7e3fb1ab50e1b0ea828ea3b1fdb6baa9d97cbcac1aa497161b95d1,"inputs A+A_sl+A-A_sl+prev+bias | mixers - | avm - 0.5 | scale - | loss laplace | lr 0.01/0.002 | ep 8"
+explosion,6,2,0,0,0.6655,0.7099,0.950,05ef4ae34c68eee093505d9f95ad90d992b5bc4b6266a5d7b185b8472c990af6,"inputs A+A_sl+A-A_sl+a_phi1+a_phi2+a_phi3 | mixers -,ratio,channel | avm off | scale ratio | loss squared | lr 0.002/0.05 | ep 8"

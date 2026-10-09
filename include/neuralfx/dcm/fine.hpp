@@ -214,7 +214,10 @@ inline constexpr float kSkip = 2e-4f;
 
 struct GenOptions {
   double tau = 0.0;     // grain amplitude in Laplace scales (0: the mean)
-  bool relock = false;  // lock block means back to the coarse state after sampling
+  // Block means back to the coarse state after sampling. 0: off; 1: exact (each block scaled to the coarse value,
+  // without bound); 2: v1's lock on the mixer's output (growth limited by DetailSpec::grow, the rest arrives as new
+  // material shaped by the flicker noise, as rollout::detail_step does it).
+  int relock = 0;
   CellContext extra;    // the kExtra hook (empty: 0)
 };
 

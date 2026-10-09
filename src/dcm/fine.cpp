@@ -796,8 +796,9 @@ void detail_step(const rollout::Model& m, const Mixer& mix, rollout::State& s, s
         out[sz(q)][i] = static_cast<float>(std::clamp(value_of(sp, q, vn, static_cast<double>(r.e[kCoarse])), 0.0, cap));
       }
     }
-    if (g.relock) {  // block means back to the coarse state: factors per block, bilinear between blocks (as the lock)
+    if (g.relock > 0) {  // block means back to the coarse state: factors per block, bilinear between blocks
       const int kk = S / R;
+      const rollout::DetailSpec& dt = m.detail;
       std::vector<float> B(sz(R) * sz(R), 0.f), rr(B.size()), aa(B.size());
       std::vector<float>& Q = out[sz(q)];
       for (int y = 0; y < S; ++y) {
@@ -806,14 +807,21 @@ void detail_step(const rollout::Model& m, const Mixer& mix, rollout::State& s, s
       for (std::size_t i = 0; i < B.size(); ++i) {
         const float b = B[i] / fl(kk * kk), target = s.coarse[i * sz(C) + 2 + sz(q)];
         constexpr float eps = 1e-4f;
-        rr[i] = (target + eps) / (b + eps);
+        const float r = (target + eps) / (b + eps);
+        rr[i] = g.relock == 1 || r <= 1.f ? r : std::min(r, dt.grow);
         aa[i] = std::max(0.f, target - b * rr[i]);
       }
       for (int y = 0; y < S; ++y) {
         for (int xx = 0; xx < S; ++xx) {
           const float xc = (fl(xx) + 0.5f) / k - 0.5f, yc = (fl(y) + 0.5f) / k - 0.5f;
+          float add = bilinear(aa.data(), R, xc, yc);
+          if (g.relock == 2 && add > 0.f && dt.contrast > 0.f) {
+            const float X = (fl(xx) + 0.5f) / px128 + 0.5f, Y = (fl(y) + 0.5f) / px128 + 0.5f;
+            const float phi = rollout::noise_flicker(m.noise, seed, X, Y, t);
+            add *= (1.f - dt.contrast) + dt.contrast * dt.kappa * smoothstep01((phi - dt.edge0) / (dt.edge1 - dt.edge0));
+          }
           float& v = Q[sz(y) * sz(S) + sz(xx)];
-          v = v * bilinear(rr.data(), R, xc, yc) + bilinear(aa.data(), R, xc, yc);
+          v = v * bilinear(rr.data(), R, xc, yc) + add;
         }
       }
     }

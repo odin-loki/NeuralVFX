@@ -196,7 +196,7 @@ int main(int argc, char** argv) try {
   } else if (pos[0] == "bench-experts") {
     fine_study::bench(fine_ctx(), effect());
   } else if (pos[0] == "probe-gen") {
-    fine_study::probe(fine_ctx(), effect(), a.str("mixer"), a.f("tau", 0.f), a.i("relock", 0) != 0, a.i("frames", 90));
+    fine_study::probe(fine_ctx(), effect(), a.str("mixer"), a.f("tau", 0.f), a.i("relock", 0), a.i("frames", 90));
   } else if (pos[0] == "fine-summary") {
     fine_study::summary(fine_ctx());
   } else {

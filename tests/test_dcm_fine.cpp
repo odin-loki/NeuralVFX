@@ -218,6 +218,35 @@ TEST(DcmFine, MixerFileRoundTrip) {
   EXPECT_EQ(b.predict(x, c, z).mu, 0.7);
 }
 
+// Determinism: 100 frames of a mixer that is not the v1 rule, with grain and each relock, give one hash.
+TEST(DcmFine, HundredStepsGiveOneHash) {
+  const rollout::Model m = small_model();
+  const fine::Spec sp = small_spec(m);
+  fine::Config c;
+  c.experts = {fine::kAdv, fine::kAdvSl, fine::kLock, fine::kPrev, fine::kBias};
+  c.mixer_contexts = {fine::kLvl};
+  c.spec.context_sizes = {1, fine::context_size(sp, fine::kLvl)};
+  c.spec.loss = nfx::dcm::ValueLoss::laplace;
+  nfx::dcm::ValueNet net(5, fine::kScaleFeatures, c.spec);
+  net.set_weights(std::vector<double>{0.5, 0.3, 0.3, -0.1, 0.01});
+  net.freeze();
+  const fine::Mixer mix = fine::make_mixer(sp, c, net);
+  const std::vector<float> controls{0.4f, 0.6f, 0.5f};
+  for (const int relock : {0, 1, 2}) {
+    std::string first;
+    for (int run = 0; run < 2; ++run) {
+      rollout::State s = small_state(m, 21);
+      fine::Frame f;
+      for (int k = 0; k < 100; ++k) fine::step(m, mix, s, controls, 99, {0.7, relock, {}}, f);
+      std::string bytes(reinterpret_cast<const char*>(s.fine_t.data()), s.fine_t.size() * sizeof(float));
+      bytes.append(reinterpret_cast<const char*>(s.fine_d.data()), s.fine_d.size() * sizeof(float));
+      const std::string h = nfx::dcm::sha256_hex(bytes);
+      if (run == 0) first = h;
+      EXPECT_EQ(h, first);
+    }
+  }
+}
+
 // The search's value_rule: a configuration that includes the rule's column starts training as the rule.
 TEST(DcmSearch, ValueRuleStartsTrainingAtTheRule) {
   namespace dcm = nfx::dcm;
