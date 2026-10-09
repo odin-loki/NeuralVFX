@@ -13,6 +13,8 @@
 //   nvfx_dcm ddpm-sample [--effect fire] [--controls 0.5,0.5,0.5] [--n 8] [--steps 25] [--t0 400]
 //                         fresh DDIM samples (and SDEdits of validation states with --t0) against real states: channel
 //                         means, spreads and time per sample
+//   nvfx_dcm ddpm-time [--effect fire] [--core 3]
+//                         one denoiser pass on one pinned core (median, p90) and the load average around it
 //   nvfx_dcm contexts [--effect fire] [--fit 1500] [--threads 2]
 //                         G2a: denoiser contexts (t = 400 and 600, levels 16 x 16 and 8 x 8, PCA-16, k-means per 8 x 8
 //                         region) and plain coarse-statistics contexts, fitted on training states; their mutual
@@ -39,6 +41,7 @@
 #include <atomic>
 #include <print>
 #include <random>
+#include <sched.h>
 #include <sstream>
 #include <string>
 
@@ -321,6 +324,42 @@ int ddpm_sample(const tools::Args& a) {
   return 0;
 }
 
+// One denoiser pass on one pinned core: median and 90th percentile of 200 passes, with the load average before and
+// after (the rules count it as measured only below 1.5).
+int ddpm_time(const tools::Args& a) {
+  const DiffPaths p = diff_paths(a);
+  auto loaded = dd::load(p.denoiser);
+  if (!loaded) throw std::runtime_error(loaded.error());
+  const dd::Denoiser d = std::move(*loaded);
+  const auto load = [] {
+    std::ifstream f("/proc/loadavg");
+    double v = 99;
+    f >> v;
+    return v;
+  };
+  const double before = load();
+  cpu_set_t one;
+  CPU_ZERO(&one);
+  CPU_SET(a.i("core", 3), &one);
+  sched_setaffinity(0, sizeof(one), &one);
+  std::vector<float> x(static_cast<std::size_t>(d.cfg.res * d.cfg.res * d.cfg.channels)), eps(x.size());
+  dd::gaussian(5, x);
+  const std::vector<float> cond(static_cast<std::size_t>(d.cfg.cond), 0.5f);
+  for (int i = 0; i < 10; ++i) dd::predict_eps(d, x, 50, cond, eps);
+  std::vector<double> ms;
+  for (int i = 0; i < a.i("n", 200); ++i) {
+    const auto t0 = std::chrono::steady_clock::now();
+    dd::predict_eps(d, x, 50, cond, eps);
+    ms.push_back(std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count());
+  }
+  std::ranges::sort(ms);
+  const double after = load();
+  std::println("one pass: median {:.3f} ms, p90 {:.3f} ms ({:.1f} M multiply-adds, {:.1f} GMAC/s); load {:.2f} before, {:.2f} after: {}", ms[ms.size() / 2],
+               ms[ms.size() * 9 / 10], dd::forward_macs(d.cfg) / 1e6, dd::forward_macs(d.cfg) / ms[ms.size() / 2] / 1e6, before, after,
+               before < 1.5 && after < 1.5 ? "quiet, measured" : "busy, an upper bound (unmeasured by the rules)");
+  return 0;
+}
+
 // Entropies and mutual information (bits) of two labellings, from their contingency counts.
 struct Info {
   double ha = 0, hb = 0, mi = 0;
@@ -447,7 +486,7 @@ int main(int argc, char** argv) try {
   const tools::Args a(argc, argv, {"help", "no-csv"});
   const auto& pos = a.positional();
   if (a.flag("help") || pos.empty()) {
-    std::println("nvfx_dcm selftest [--threads 2] [--seed 5] | version FILE | ddpm-train | ddpm-sample | contexts  (options: see the source's header)");
+    std::println("nvfx_dcm selftest [--threads 2] [--seed 5] | version FILE | ddpm-train | ddpm-sample | ddpm-time | contexts  (options: see the source's header)");
     return 0;
   }
   int rc = 0;
@@ -461,6 +500,8 @@ int main(int argc, char** argv) try {
     rc = ddpm_sample(a);
   } else if (pos[0] == "contexts") {
     rc = contexts(a);
+  } else if (pos[0] == "ddpm-time") {
+    rc = ddpm_time(a);
   } else {
     throw std::invalid_argument("unknown command (nvfx_dcm selftest | version FILE | ddpm-train | ddpm-sample | contexts)");
   }

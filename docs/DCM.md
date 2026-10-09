@@ -175,6 +175,18 @@ forward and backward, because this project uses no LibTorch.
 | **G2b** prior against drift: every N frames, Tweedie's one-step denoise at a small t, x0_hat = x - sqrt((1 - abar) / abar) eps_hat(sqrt(abar) x, t), blended with weight beta into the coarse state (no noise added) | the same continuous rollout without the prior; the runtime's 6 s shards as a reference | N in {4, 8, 16}, t in {20, 50, 100}, beta in {0.25, 0.5, 1}, chosen by the mean detail score of the six 10 s windows of one continuous 60 s rollout at validation settings 1 and 2 (tuning seeds). The decision uses fresh seeds at the same two settings, paired over the 12 (setting, window) pairs | the interval of (prior - none) lies below zero, and the prior costs at most 0.5 ms per frame (one pass every N frames) |
 | **G2c** start points: a fresh DDIM sample at the requested controls, or SDEdit of the nearest stored start from t0 in {300, 400, 500} | the nearest stored start rolled ahead 0.5 s at the requested controls (the stored start as it is, as a reference) | every start plays as fire does (a 1 s warm-up that grows the fine fields) and its first 2 s are scored against a real run, at the 10 validation settings. The variant is chosen on tuning seeds (2 per setting); the decision uses 2 fresh seeds per setting, paired over the 10 settings. Diversity: mean pairwise distance between 8 generated starts against 8 real states at a setting | the interval of (variant - rolled start) lies below zero, and generating costs at most 100 ms per shard (DDIM passes x one pass) |
 
+Two amendments, made before the trained denoiser was run on any of these comparisons (only a 500-step checkpoint, to
+test the pipeline):
+- **Two candidates per use.** One pass of this network takes at least 5 ms on one core of this machine, so N = 4 and
+  N = 8 cannot meet 0.5 ms per frame, and a fresh 25-step sample cannot meet 100 ms per shard. Choosing only the best
+  score could therefore stop a use for its cost while an affordable setting works. So two candidates go from tuning to
+  the decision: the best overall, and the best that can meet the bound (N = 16 for G2b; the best SDEdit for G2c). A
+  use is kept when a candidate passes both the interval and the cost bound. These are two looks at the validation
+  seeds, and are reported as such; a test, if one is earned, uses the cheaper passing candidate.
+- **The rolled start** steps the whole effect (coarse state, memory and fine fields) 15 frames after its start-up, as
+  the runtime rolls a shard ahead. SDEdit's t0 is rounded to the 25-step grid (multiples of 40): 300, 400 and 500 start
+  at 320, 400 and 520 (8, 10 and 13 passes).
+
 What would repeat CameraDetector's outcome here: the denoiser's clusters follow what the hand-made contexts already
 say (how hot a region is, how high, which controls), as CameraDetector's followed camera and light; the prior pulls
 the state towards an average fire and takes the flicker with it; generated starts are softer and less varied than

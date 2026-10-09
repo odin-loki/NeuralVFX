@@ -503,7 +503,7 @@ std::vector<float> start_state(const Loaded& L, const StartMethod& sm, const Set
   const std::size_t n = static_cast<std::size_t>(L.d.cfg.res * L.d.cfg.res * L.d.cfg.channels);
   std::vector<float> x(n), out(n), phys(sp.coarse.size());
   if (sm.kind == "stored") return sp.coarse;
-  if (sm.kind == "rolled") {  // the stepper alone, at the requested controls (the coarse half of rolling a shard ahead)
+  if (sm.kind == "rolled") {  // the stepper alone at the requested controls: the coarse state a shard rolled ahead shows (diversity)
     rollout::State st;
     st.res = L.m.h.res;
     st.size = kSize;
@@ -539,17 +539,19 @@ std::vector<float> start_state(const Loaded& L, const StartMethod& sm, const Set
 }
 
 // The first 2 s of play from a start: the effect's own start-up (fire grows its fine fields in a 1 s warm-up), then
-// kScoredFrames frames scored against the real run. The rolled start has already been rolled ahead.
+// kScoredFrames frames scored against the real run. The rolled start is rolled ahead as the runtime rolls a shard ahead:
+// the whole effect (coarse state, memory and fine fields) steps kRollAhead more frames before it is shown.
 Scored first_seconds(const Loaded& L, const StartMethod& sm, const Setting& s, std::uint64_t seed, const metrics::ClipStats& ref) {
   const std::vector<float> ctl(s.begin(), s.end());
   const int idx = nearest_start(L.m, ctl);
   rollout::Model mm = L.m;
   rollout::StartPoint sp = L.m.starts[static_cast<std::size_t>(idx)];
-  sp.coarse = start_state(L, sm, s, seed);
-  sp.controls = ctl;
-  if (sm.kind == "rolled") sp.time += static_cast<float>(kRollAhead) / L.m.fps;
+  if (sm.kind != "rolled" && sm.kind != "stored") sp.coarse = start_state(L, sm, s, seed);
   mm.starts = {sp};
   rollout::State st = rollout::start(mm, 0, kSize, ctl, seed);
+  if (sm.kind == "rolled") {
+    for (int f = 0; f < kRollAhead; ++f) rollout::step(mm, st, ctl, seed);
+  }
   Clip clip;
   play(mm, st, ctl, seed, clip, kScoredFrames, {});
   return score_clip(ref, clip);
@@ -627,28 +629,35 @@ void step_diff(const Ctx& c) {
     if (c.quick) grid = {{8, 50, 0.5f}, {16, 100, 1.f}};
     std::vector<std::string> rows;
     const auto tune = prior_phase(c, L, "tune", two, 1950000, 1960000, grid, true, rows);
-    Prior best;
-    double best_mean = 1e30;
-    for (const Prior& p : grid) {
-      const auto& v = tune.at(p.name());
-      const double m = std::accumulate(v.begin(), v.end(), 0.0) / static_cast<double>(v.size());
-      if (m < best_mean) {
-        best_mean = m;
-        best = p;
-      }
-    }
+    // Two candidates go to the decision (docs/DCM.md G2.3): the best configuration, and the best one that can meet the
+    // cost bound (N = 16: one pass takes at least 5 ms on this CPU, so N = 4 and 8 cost more than 0.5 ms per frame).
     const auto mean_of = [](const std::vector<double>& v) { return std::accumulate(v.begin(), v.end(), 0.0) / static_cast<double>(v.size()); };
-    std::println("g-diff G2b tuning: none {:.4f}, shards {:.4f}, best prior {} {:.4f}", mean_of(tune.at("none")), mean_of(tune.at("shards")), best.name(), best_mean);
-    const auto v = prior_phase(c, L, "validate", two, 1950000, 1970000, {best}, true, rows);
-    const metrics::Interval iv = metrics::paired_bootstrap(v.at(best.name()), v.at("none"), 10000, 1);
-    const metrics::Interval sh = metrics::paired_bootstrap(v.at(best.name()), v.at("shards"), 10000, 1);
-    const double cost = ms / best.every;
-    const bool pass = iv.hi < 0 && cost <= 0.5;
-    std::println("g-diff G2b validation: {} minus none {}; minus shards {}; {:.3f} ms per frame -> {}", best.name(), interval_text(iv), interval_text(sh), cost,
-                 pass ? "KEEP" : "STOP");
-    decisions.push_back(std::format("validate,G2b,{} - none,{},{:.3f},0.5,{},interval below zero and cost within bound,{}", best.name(), interval_csv(iv), cost,
-                                    quiet ? "quiet" : "busy", pass ? "keep" : "stop"));
-    decisions.push_back(std::format("validate,G2b,{} - shards,{},{:.3f},,{},reference only,", best.name(), interval_csv(sh), cost, quiet ? "quiet" : "busy"));
+    Prior best = grid[0], affordable;
+    for (const Prior& p : grid) {
+      if (mean_of(tune.at(p.name())) < mean_of(tune.at(best.name()))) best = p;
+      if (p.every == 16 && (affordable.every == 0 || mean_of(tune.at(p.name())) < mean_of(tune.at(affordable.name())))) affordable = p;
+    }
+    std::vector<Prior> cands = {best};
+    if (affordable.every != 0 && affordable.name() != best.name()) cands.push_back(affordable);
+    std::println("g-diff G2b tuning: none {:.4f}, shards {:.4f}, best prior {} {:.4f}, best with N = 16 {} {:.4f}", mean_of(tune.at("none")),
+                 mean_of(tune.at("shards")), best.name(), mean_of(tune.at(best.name())), affordable.name(),
+                 affordable.every ? mean_of(tune.at(affordable.name())) : 0.0);
+    const auto v = prior_phase(c, L, "validate", two, 1950000, 1970000, cands, true, rows);
+    for (std::size_t k = 0; k < cands.size(); ++k) {
+      const Prior& p = cands[k];
+      const metrics::Interval iv = metrics::paired_bootstrap(v.at(p.name()), v.at("none"), 10000, 1);
+      const metrics::Interval sh = metrics::paired_bootstrap(v.at(p.name()), v.at("shards"), 10000, 1);
+      const double cost = ms / p.every;
+      const bool pass = iv.hi < 0 && cost <= 0.5;
+      const char* which = k == 0 ? "best" : "best within N = 16";
+      std::println("g-diff G2b validation ({}): {} minus none {}; minus shards {}; {:.3f} ms per frame -> {}", which, p.name(), interval_text(iv), interval_text(sh),
+                   cost, pass ? "KEEP" : "STOP");
+      decisions.push_back(std::format("validate,G2b,{} - none,{},{:.3f},0.5,{},{}: interval below zero and cost within bound,{}", p.name(), interval_csv(iv), cost,
+                                      quiet ? "quiet" : "busy", which, pass ? "keep" : "stop"));
+      decisions.push_back(std::format("validate,G2b,{} - shards,{},{:.3f},,{},reference only,", p.name(), interval_csv(sh), cost, quiet ? "quiet" : "busy"));
+    }
+    const metrics::Interval ns = metrics::paired_bootstrap(v.at("none"), v.at("shards"), 10000, 1);
+    decisions.push_back(std::format("validate,G2b,none - shards,{},,,{},reference only,", interval_csv(ns), quiet ? "quiet" : "busy"));
     merge_rows(c.results / "g_diff_prior.csv", std::string("phase,setting,seed,method,window,") + kScoredHeader, rows);
   }
   // ---- G2c: tune on seeds 1'981'000 + 10 setting + k, decide on fresh seeds 1'982'000 + ...
@@ -658,20 +667,30 @@ void step_diff(const Ctx& c) {
     const std::vector<Setting> sv = c.quick ? std::vector<Setting>(val.begin(), val.begin() + 3) : val;
     const auto tune = start_phase(c, L, "tune", sv, 1980000, 1981000, c.quick ? 1 : 2, methods, rows);
     const auto mean_of = [](const std::vector<double>& v) { return std::accumulate(v.begin(), v.end(), 0.0) / static_cast<double>(v.size()); };
-    StartMethod best = methods[2];
+    // Two candidates (docs/DCM.md G2.3): the best generated start, and the best SDEdit (8 to 13 passes; a fresh sample
+    // needs 25, more than 100 ms at 5 ms or more per pass).
+    StartMethod best = methods[2], affordable = methods[3];
     for (std::size_t i = 2; i < methods.size(); ++i) {
       if (mean_of(tune.at(methods[i].name())) < mean_of(tune.at(best.name()))) best = methods[i];
+      if (methods[i].kind == "sdedit" && mean_of(tune.at(methods[i].name())) < mean_of(tune.at(affordable.name()))) affordable = methods[i];
     }
-    for (const auto& m : methods) std::println("g-diff G2c tuning: {:10} {:.4f}", m.name(), mean_of(tune.at(m.name())));
-    const auto v = start_phase(c, L, "validate", sv, 1980000, 1982000, c.quick ? 1 : 2, {methods[0], best}, rows);
-    const metrics::Interval iv = metrics::paired_bootstrap(v.at(best.name()), v.at("rolled"), 10000, 1);
-    const int passes = best.kind == "fresh" ? dd::ddim_passes(L.d.cfg, L.d.cfg.timesteps, kDdimSteps)
-                                            : dd::ddim_passes(L.d.cfg, std::clamp((best.t0 + 20) / 40 * 40, 40, L.d.cfg.timesteps), kDdimSteps);
-    const double cost = passes * ms;
-    const bool pass = iv.hi < 0 && cost <= 100.0;
-    std::println("g-diff G2c validation: {} minus rolled {}; {} passes, {:.1f} ms per shard -> {}", best.name(), interval_text(iv), passes, cost, pass ? "KEEP" : "STOP");
-    decisions.push_back(std::format("validate,G2c,{} - rolled,{},{:.2f},100,{},interval below zero and cost within bound,{}", best.name(), interval_csv(iv), cost,
-                                    quiet ? "quiet" : "busy", pass ? "keep" : "stop"));
+    for (const auto& m : methods) std::println("g-diff G2c tuning: {:12} {:.4f}", m.name(), mean_of(tune.at(m.name())));
+    std::vector<StartMethod> cands = {methods[0], best};
+    if (affordable.name() != best.name()) cands.push_back(affordable);
+    const auto v = start_phase(c, L, "validate", sv, 1980000, 1982000, c.quick ? 1 : 2, cands, rows);
+    for (std::size_t k = 1; k < cands.size(); ++k) {
+      const StartMethod& m = cands[k];
+      const metrics::Interval iv = metrics::paired_bootstrap(v.at(m.name()), v.at("rolled"), 10000, 1);
+      const int passes = m.kind == "fresh" ? dd::ddim_passes(L.d.cfg, L.d.cfg.timesteps, kDdimSteps)
+                                           : dd::ddim_passes(L.d.cfg, std::clamp((m.t0 + 20) / 40 * 40, 40, L.d.cfg.timesteps), kDdimSteps);
+      const double cost = passes * ms;
+      const bool pass = iv.hi < 0 && cost <= 100.0;
+      const char* which = k == 1 ? "best" : "best SDEdit";
+      std::println("g-diff G2c validation ({}): {} minus rolled {}; {} passes, {:.1f} ms per shard -> {}", which, m.name(), interval_text(iv), passes, cost,
+                   pass ? "KEEP" : "STOP");
+      decisions.push_back(std::format("validate,G2c,{} - rolled,{},{:.2f},100,{},{}: interval below zero and cost within bound,{}", m.name(), interval_csv(iv), cost,
+                                      quiet ? "quiet" : "busy", which, pass ? "keep" : "stop"));
+    }
     merge_rows(c.results / "g_diff_starts.csv", std::string("phase,setting,seed,method,") + kScoredHeader, rows);
     // diversity at three settings: 8 starts each, mean pairwise RMS distance in the denoiser's units
     std::vector<std::string> div;
@@ -680,7 +699,7 @@ void step_diff(const Ctx& c) {
       std::map<std::string, std::vector<std::vector<float>>> sets;
       std::vector<std::vector<float>> reals(8);
       parallel(8, c.threads, [&](int k) { reals[static_cast<std::size_t>(k)] = real_coarse(s, 1990000 + static_cast<std::uint64_t>(si * 10 + k), 150); });
-      for (const StartMethod& m : {methods[0], methods[2], best}) {
+      for (const StartMethod& m : {methods[0], methods[2], affordable}) {
         auto& xs = sets[m.name()];
         xs.resize(8);
         parallel(8, c.threads, [&](int k) { xs[static_cast<std::size_t>(k)] = start_state(L, m, s, 1991000 + static_cast<std::uint64_t>(si * 10 + k)); });
@@ -706,6 +725,7 @@ void step_diff(const Ctx& c) {
 void step_diff_test(const Ctx& c) {
   // The test protocol, once, for each use that passed validation (g_diff_decisions.csv says "keep").
   std::map<std::string, std::string> passed;  // use -> comparison
+  std::map<std::string, double> cost_of;
   if (std::ifstream in(c.results / "g_diff_decisions.csv"); in) {
     std::string line;
     std::getline(in, line);
@@ -713,7 +733,12 @@ void step_diff_test(const Ctx& c) {
       std::vector<std::string> f;
       std::stringstream ss(line);
       for (std::string x; std::getline(ss, x, ',');) f.push_back(x);
-      if (f.size() >= 11 && f[0] == "validate" && f[10] == "keep") passed[f[1]] = f[2];
+      if (f.size() >= 11 && f[0] == "validate" && f[10] == "keep") {  // the cheaper candidate when both passed
+        if (!passed.contains(f[1]) || std::stod(f[6]) < cost_of[f[1]]) {
+          passed[f[1]] = f[2];
+          cost_of[f[1]] = std::stod(f[6]);
+        }
+      }
     }
   }
   if (passed.empty()) {
