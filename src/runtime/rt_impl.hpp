@@ -12,6 +12,7 @@
 #include "rt_common.hpp"
 
 #include <algorithm>
+#include <array>
 #include <bit>
 #include <cmath>
 #include <cstring>
@@ -19,6 +20,8 @@
 #include <memory>
 #include <stdexcept>
 #include <stdfloat>
+#include <type_traits>
+#include <utility>
 #include <vector>
 
 #if defined(NFX_ARCH) && defined(__GNUC__) && !defined(__clang__)
