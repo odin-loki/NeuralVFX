@@ -367,3 +367,21 @@ effects. The design and a working prototype are in [COMPOSE.md](COMPOSE.md). Dec
 4. **Next:** optimisation passes on the scene's hot stages (by parallel agents, measured before and after), then the C
    API, a script format and training with couplings in the loop.
 
+## 13. Study G: diffusion-context mixing for generating effects (9 October 2026)
+
+The owner asked for their content mixer, the diffusion-context mixing algorithm (DCM) of CameraDetector, to be adapted
+to generating effects, trialled, and then combined with this project's models ("meet both in the middle"). The staged
+plan, its decision rules and its protocol are in [DCM.md](DCM.md). Decisions:
+
+1. **Port, do not re-invent.** The PAQ8-style mixer, its frozen inference copy and its nested structure search are
+   ported from CameraDetector as they are (`neuralfx_dcm`). The k-means, the PCA and the denoiser are rewritten
+   without LibTorch, which this project does not use.
+2. **Map fine to fine and macro to macro.** The mixer takes the detail layer's job: cheap per-pixel experts in, a
+   distribution per pixel out, sampled with the effect's own noise. The denoiser works on the 32 x 32 coarse state.
+3. **One decision rule per use**, in the spirit of CameraDetector's: a part is kept only if it beats its alternative
+   without diffusion or without the mixer, on held-out settings, within a cost budget. Null results are reported.
+4. **Compression is measured on disk and in memory separately**, against flipbooks coded the same way and against
+   video codecs.
+5. **Meet in the middle:** every part that passes goes into version 2 of the rollout effects, in the runtime, and the
+   fireball is rendered again with it.
+
