@@ -62,6 +62,17 @@ class RolloutRunner {
   virtual std::span<const float> coarse() const = 0;  // res * res * channels
   virtual std::span<const float> fine_heat() const = 0;
   virtual std::span<const float> fine_soot() const = 0;
+
+  // Composition (src/compose, docs/COMPOSE.md): between steps other effects may read and write the state, for example
+  // to push it with their flow or to hand over a whole state. Nothing here allocates.
+  virtual int size() const = 0;
+  virtual std::span<const float> flow() const = 0;  // projected velocity of the last step: res * res * 2, cells per frame
+  virtual std::span<float> coarse_mut() = 0;
+  virtual std::span<float> fine_heat_mut() = 0;
+  virtual std::span<float> fine_soot_mut() = 0;
+  // The state was written from outside (a hand-over): continue from it at `seconds` since the effect began, with the
+  // pressure and flow of the old state dropped and the sub-grid swirl at full strength.
+  virtual void adopt(float seconds) = 0;
 };
 
 // One factory per ISA build (rt_base.cpp, rt_avx2.cpp, rt_avx512.cpp). Allocates every buffer the renderer will use.

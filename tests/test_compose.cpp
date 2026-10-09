@@ -1,0 +1,238 @@
+// Composed effects (src/compose, docs/COMPOSE.md): the couplings keep what they promise, and a scene renders the same
+// on any number of threads.
+#include "compose_scene.hpp"
+
+#include <gtest/gtest.h>
+
+#include <atomic>
+#include <numeric>
+
+namespace {
+
+using namespace nfx;
+using namespace nfx::compose;
+using nfx::compose::testing::MiniScene;
+using nfx::compose::testing::tiny_effect;
+
+std::size_t z(int v) { return static_cast<std::size_t>(v); }
+
+TEST(Compose, PoolRunsEveryTaskOnce) {
+  Pool pool(4);
+  for (int round = 0; round < 50; ++round) {
+    std::vector<std::atomic<int>> hits(257);
+    pool.run(257, [&](int i) { hits[z(i)].fetch_add(1); });
+    for (const auto& h : hits) ASSERT_EQ(h.load(), 1);
+  }
+  Pool one(1);
+  int n = 0;
+  one.run(10, [&](int) { ++n; });
+  EXPECT_EQ(n, 10);
+}
+
+TEST(Compose, TilesOfAGroupShareOwnershipEverywhere) {
+  const rt::RolloutEffect e = tiny_effect();
+  // a 2 x 2 tiling: 32-pixel tiles (16 cells) at scale 2, overlapping by a band of 4 cells (16 world pixels)
+  std::vector<std::unique_ptr<Module>> t;
+  for (int r = 0; r < 2; ++r) {
+    for (int c = 0; c < 2; ++c) {
+      t.push_back(std::make_unique<Module>("t", e, 32, Placement{48.f * static_cast<float>(c), -48.f * static_cast<float>(r), 2.f}, Isa::base));
+      t.back()->band = {c == 1 ? 4 : 0, c == 0 ? 4 : 0, r == 1 ? 4 : 0, r == 0 ? 4 : 0};
+    }
+  }
+  for (float wy = -47.f; wy < 63.f; wy += 3.7f) {
+    for (float wx = 1.f; wx < 111.f; wx += 3.3f) {
+      float sum = 0.f;
+      for (const auto& m : t) {
+        const float tx = (wx - m->at.x) / m->at.scale, ty = 32.f - (wy - m->at.y) / m->at.scale;
+        if (tx >= 0.f && ty >= 0.f && tx <= 32.f && ty <= 32.f) sum += m->weight_px(tx, ty);
+      }
+      ASSERT_NEAR(sum, 1.f, 1e-5f) << "at " << wx << ", " << wy;
+    }
+  }
+}
+
+TEST(Compose, BlendBandMakesNeighboursAgree) {
+  const rt::RolloutEffect e = tiny_effect();
+  for (const Side side : {Side::right, Side::top}) {
+    Module a("a", e, 32, {}, Isa::base), b("b", e, 32, {}, Isa::base);
+    a.start(0, 1);
+    b.start(1, 2);
+    for (int i = 0; i < 3; ++i) {
+      a.step();
+      b.step();
+    }
+    blend_band(a, b, side, 4);
+    const int R = 16, Ca = a.channels(), S = 32;
+    for (int j = 0; j < 4; ++j) {
+      for (int i = 0; i < R; ++i) {
+        const std::size_t ia = side == Side::top ? z((R - 4 + j) * R + i) : z(i * R + R - 4 + j);
+        const std::size_t ib = side == Side::top ? z(j * R + i) : z(i * R + j);
+        for (int c = 0; c < rollout::kPhys; ++c) ASSERT_EQ(a.runner().coarse()[ia * z(Ca) + z(c)], b.runner().coarse()[ib * z(Ca) + z(c)]);
+      }
+    }
+    for (int j = 0; j < 8; ++j) {
+      for (int i = 0; i < S; ++i) {
+        const std::size_t fa = side == Side::top ? z((S - 8 + j) * S + i) : z(i * S + S - 8 + j);
+        const std::size_t fb = side == Side::top ? z(j * S + i) : z(i * S + j);
+        ASSERT_EQ(a.runner().fine_heat()[fa], b.runner().fine_heat()[fb]);
+        ASSERT_EQ(a.runner().fine_soot()[fa], b.runner().fine_soot()[fb]);
+      }
+    }
+  }
+}
+
+TEST(Compose, HandOverCarriesThePhysicalState) {
+  const rt::RolloutEffect e1 = tiny_effect(3), e2 = tiny_effect(4);
+  Module a("a", e1, 32, {}, Isa::base), b("b", e2, 32, {}, Isa::base);
+  a.start(1, 5);
+  for (int i = 0; i < 4; ++i) a.step();
+  b.take_over(a);
+  const int R = 16, C = a.channels();
+  for (int i = 0; i < R * R; ++i) {
+    for (int c = 0; c < C; ++c) {
+      const float want = c < rollout::kPhys ? a.runner().coarse()[z(i) * z(C) + z(c)] : 0.f;  // memory starts from rest
+      ASSERT_EQ(b.runner().coarse()[z(i) * z(C) + z(c)], want);
+    }
+  }
+  EXPECT_TRUE(std::ranges::equal(a.runner().fine_heat(), b.runner().fine_heat()));
+  EXPECT_TRUE(std::ranges::equal(a.runner().fine_soot(), b.runner().fine_soot()));
+  EXPECT_EQ(a.runner().time(), b.runner().time());
+  EXPECT_TRUE(b.active);
+}
+
+TEST(Compose, BusCarriesVelocityInWorldPixels) {
+  const rt::RolloutEffect e = tiny_effect();
+  Module m("m", e, 32, Placement{0.f, 0.f, 2.f}, Isa::base);  // 64 world pixels, 4 world pixels per coarse cell... x2
+  m.start_empty(0.f, 1);
+  m.group = 0;
+  auto co = m.runner().coarse_mut();
+  for (int i = 0; i < 16 * 16; ++i) {
+    co[z(i) * z(m.channels())] = 0.5f;       // cells per frame, x right
+    co[z(i) * z(m.channels()) + 1] = 0.25f;  // cells per frame, y up
+    co[z(i) * z(m.channels()) + 2] = 0.7f;
+  }
+  FieldBus bus(0.f, 0.f, 8, 8, 8.f, 2);
+  bus.publish(m);
+  const auto s = bus.at(32.f, 32.f);
+  const float cell = 64.f / 16.f;  // world pixels per coarse cell
+  EXPECT_NEAR(s.u, 0.5f * cell, 1e-4f);
+  EXPECT_NEAR(s.v, -0.25f * cell, 1e-4f);  // world y points down
+  EXPECT_NEAR(s.heat, 0.7f, 1e-5f);
+  const auto o = bus.others(32.f, 32.f, 0);  // without its own group, nothing is left
+  EXPECT_NEAR(o.u, 0.f, 1e-5f);
+  EXPECT_NEAR(o.heat, 0.f, 1e-5f);
+}
+
+TEST(Compose, PushMovesForOneStepOnly) {
+  const rt::RolloutEffect e = tiny_effect();
+  Module src("src", e, 32, Placement{0.f, 0.f, 2.f}, Isa::base), m("m", e, 32, Placement{0.f, 0.f, 2.f}, Isa::base);
+  src.start_empty(0.f, 1);
+  src.group = 0;
+  m.start(0, 2);
+  m.group = 1;
+  for (int i = 0; i < 16 * 16; ++i) src.runner().coarse_mut()[z(i) * z(src.channels())] = 1.f;
+  FieldBus bus(0.f, 0.f, 8, 8, 8.f, 2);
+  bus.publish(src);
+  const std::vector<float> before(m.runner().coarse().begin(), m.runner().coarse().end());
+  push(m, bus, 0.5f);
+  const int C = m.channels();
+  EXPECT_NEAR(m.runner().coarse()[z(5 * 16 + 5) * z(C)] - before[z(5 * 16 + 5) * z(C)], 0.5f, 1e-4f);  // half the others' flow
+  m.step();
+  for (const float p : m.pushed()) ASSERT_EQ(p, 0.f);
+  // without a push the same step gives the same velocity up to what the push moved
+  Module ref("ref", e, 32, Placement{0.f, 0.f, 2.f}, Isa::base);
+  ref.start(0, 2);
+  ref.step();
+  double diff = 0, mag = 0;
+  for (int i = 0; i < 16 * 16; ++i) {
+    diff += std::fabs(m.runner().coarse()[z(i) * z(C)] - ref.runner().coarse()[z(i) * z(C)]);
+    mag += 0.5;
+  }
+  EXPECT_LT(diff / mag, 0.5) << "the push should not stay in the velocity";
+}
+
+TEST(Compose, TransferConservesMaterial) {
+  const rt::RolloutEffect e = tiny_effect();
+  Module big("big", e, 32, Placement{0.f, 0.f, 4.f}, Isa::base), small("small", e, 32, Placement{40.f, 30.f, 1.f}, Isa::base);
+  big.start_empty(0.f, 1);
+  small.start(1, 2);
+  const auto amount = [](const Module& m, int c) {
+    const float cell = m.cell_px();
+    double s = 0;
+    for (std::size_t i = 0; i < m.runner().coarse().size(); i += z(m.channels())) s += m.runner().coarse()[i + z(c)];
+    return s * static_cast<double>(cell) * static_cast<double>(cell);
+  };
+  const double h0 = amount(big, 2) + amount(small, 2), d0 = amount(big, 3) + amount(small, 3);
+  Module* to[1] = {&big};
+  transfer(small, to, 1.f);
+  EXPECT_NEAR(amount(small, 2), 0.0, 1e-6 * h0);
+  EXPECT_NEAR(amount(big, 2) + amount(small, 2), h0, 1e-4 * h0);
+  EXPECT_NEAR(amount(big, 3) + amount(small, 3), d0, 1e-4 * d0);
+}
+
+TEST(Compose, SuppressClearsItsRegion) {
+  const rt::RolloutEffect e = tiny_effect();
+  Module m("m", e, 32, {}, Isa::base);
+  m.start(1, 3);
+  suppress(m, 2, 0, 10, 5);
+  const int C = m.channels();
+  for (int y = 0; y < 5; ++y) {
+    for (int x = 2; x < 10; ++x) {
+      ASSERT_EQ(m.runner().coarse()[z(y * 16 + x) * z(C) + 2], 0.f);
+      ASSERT_EQ(m.runner().coarse()[z(y * 16 + x) * z(C) + 3], 0.f);
+    }
+  }
+  for (int y = 0; y < 10; ++y) {
+    for (int x = 4; x < 20; ++x) ASSERT_EQ(m.runner().fine_soot()[z(y * 32 + x)], 0.f);
+  }
+}
+
+TEST(Compose, CeilingStopsRisingAboveIt) {
+  const rt::RolloutEffect e = tiny_effect();
+  Module m("m", e, 32, Placement{0.f, 0.f, 2.f}, Isa::base);  // world y 0 (top) to 64 (bottom)
+  m.start_empty(0.f, 1);
+  const int C = m.channels();
+  for (int i = 0; i < 256; ++i) m.runner().coarse_mut()[z(i) * z(C) + 1] = 1.f;
+  const ForceField ceiling{ForceField::Kind::ceiling, 0.f, 32.f, 0.f, 0.f, 4.f, 0.f, 0.f, 1.f};
+  apply(m, ceiling);
+  EXPECT_NEAR(m.runner().coarse()[z(15 * 16 + 3) * z(C) + 1], 0.f, 1e-6f);  // top row: above the ceiling
+  EXPECT_NEAR(m.runner().coarse()[z(0 * 16 + 3) * z(C) + 1], 1.f, 1e-6f);   // bottom row: below it
+}
+
+TEST(Compose, ShaderLeavesEmptyPixelsTransparent) {
+  const rt::RolloutEffect e = tiny_effect();
+  Module m("m", e, 32, {}, Isa::base);
+  m.start_empty(0.f, 1);
+  m.look = Look::shader;
+  m.shade(nullptr);
+  for (const float v : m.image().px) ASSERT_EQ(v, 0.f);
+  const auto c = heat_colour(1.f);
+  EXPECT_GT(c[0], c[2]);  // hot gas is warm
+}
+
+TEST(Compose, HotEmbersLandAndAreReported) {
+  Particles p(8);
+  ASSERT_TRUE(p.spawn(Kind::ember, 10.f, 0.f, 0.f, 200.f, 1.f, 1.f, 5.f));
+  bool landed = false;
+  for (int i = 0; i < 60 && !landed; ++i) {
+    p.update(1.f / 30.f, nullptr, 0.f, 50.f);
+    landed = !p.landings().empty();
+  }
+  EXPECT_TRUE(landed);
+  for (int i = 0; i < 8; ++i) p.spawn(Kind::flake, 0, 0, 0, 0, 0, 1, 1);
+  EXPECT_EQ(p.alive(), 8);  // capacity holds; extra spawns are dropped
+}
+
+TEST(Compose, ScenesRenderTheSameOnAnyNumberOfThreads) {
+  MiniScene one(1), four(4);
+  std::vector<std::uint8_t> a(160 * 90 * 3), b(a.size());
+  for (int f = 0; f < 12; ++f) {
+    one.step(f, a);
+    four.step(f, b);
+  }
+  EXPECT_EQ(a, b);
+  long sum = std::accumulate(a.begin(), a.end(), 0L);
+  EXPECT_GT(sum, 0L);
+}
+
+}  // namespace

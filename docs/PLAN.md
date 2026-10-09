@@ -350,3 +350,20 @@ Decisions:
    and new seeds are scored by frame statistics (detail spectrum, motion, coverage, light) against real runs, with a
    second real seed as the floor, against study B's control model, the nearest flipbook and the simulation on the same
    coarse grid with the same detail layer (the traditional cheap alternative).
+
+## 12. Future feature: composed effects (9 October 2026)
+
+The owner asked for effects that run on one another ("modules on modules"), for scriptable effects and field
+effects. The design and a working prototype are in [COMPOSE.md](COMPOSE.md). Decisions:
+
+1. **Couple rollout effects through their physical state.** All rollout effects share the simulator's units, and
+   advection and projection are built into each step, so outside writes need no retraining. Every coupling (tiles of
+   one domain, hand-over between models, push, transfer, suppression, force fields) is a read and write of runner
+   state between steps (`rt::RolloutRunner::coarse_mut()` and the related accessors), with no allocation.
+2. **A prototype first, over the runtime's internals** (`src/compose`), not the C API: the API waits until a script
+   format and training with couplings have been tried.
+3. **One demonstration scene, profiled stage by stage** (`nvfx_fireball`): a fireball with smoke, fires, embers and
+   field effects, under 10 seconds, with zero allocation in its frame loop.
+4. **Next:** optimisation passes on the scene's hot stages (by parallel agents, measured before and after), then the C
+   API, a script format and training with couplings in the loop.
+

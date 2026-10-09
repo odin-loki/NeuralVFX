@@ -13,6 +13,10 @@ Two kinds of effect:
   chaotic system: after about a second the start point no longer decides the picture, the noise does. So the frames
   in between are not stored, only made to look right, and every seed gives a new run that never repeats.
 
+Rollout effects can also run **on one another** (a prototype, [docs/COMPOSE.md](docs/COMPOSE.md)): an explosion's
+blast bends a fire, its cloud is handed to the smoke model, embers light new fires, and scripted force fields shape
+them. `nvfx_fireball` renders a 9-second fireball scene that way and profiles every stage.
+
 C++23, no third-party runtime dependencies, a C API for engines, no Python.
 
 - **Results:** [docs/REPORT.md](docs/REPORT.md) covers quality against memory and milliseconds, flipbooks at
@@ -63,6 +67,7 @@ From [docs/REPORT.md](docs/REPORT.md), measured on simulated fire, smoke and exp
 | metrics | `src/core/metrics.cpp` | PSNR (full and active-region), SSIM, temporal PSNR, flicker, spectrum and motion statistics, paired bootstrap |
 | evaluation | `nvfx_experiment` | the whole study end to end: compression, controls, variation, timing, figures, report |
 | viewer | `viewer/`, `nvfx_viewer` | Dear ImGui: sliders for every control, side by side with the reference, a flipbook and the live simulation |
+| composed effects | `src/compose`, `nvfx_fireball` | a prototype: rollout effects coupled through their fields (tiles of one domain, hand-over between models, pushes, transfers, force fields), with particles, light, distortion and bloom; [docs/COMPOSE.md](docs/COMPOSE.md) |
 
 ## Build and test
 
@@ -71,7 +76,7 @@ Ubuntu 24.04: `g++-14`, CMake 3.25+, Ninja, `libgtest-dev`, `zlib1g-dev` (and `f
 ```sh
 cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_COMPILER=g++-14
 cmake --build build
-ctest --test-dir build                     # 67 tests: sim, metrics, codecs, gradients, runtime parity, allocation, C API
+ctest --test-dir build                     # 79 tests: sim, metrics, codecs, gradients, runtime parity, composition, allocation, C API
 ```
 
 Options: `NEURALFX_BUILD_VIEWER` (GLFW + OpenGL; fetches Dear ImGui), `NEURALFX_BUILD_SHARED` (libnvfx.so for engines),
@@ -106,6 +111,7 @@ training, evaluation; about three hours), then `d-timing` on an idle machine and
 | `nvfx_experiment` | the full study: `data`, `a`, `b`, `c`, `media`, `timing`, `report`; study D: `d-chaos`, `d-train`, `d-tune`, `d-finish`, `d-eval`, `d-timing` |
 | `nvfx_c_host` | the engine loop in plain C, with timings; `--self-test` checks the error paths |
 | `nvfx_viewer` | live viewer with sliders |
+| `nvfx_fireball` | a scripted scene of composed effects (a fireball with smoke, fires and embers) to video, with a profile of every stage |
 | `neuralfx_arch_bench` | Phase 0 architecture microbenchmark |
 
 ## Layout
@@ -113,10 +119,10 @@ training, evaluation; about three hours), then `d-timing` on an idle machine and
 | path | what |
 |---|---|
 | `include/neuralfx/` | public headers: `nvfx.h` (C API), `clip`, `sim`, `model`, `train`, `rollout`, `rollout_train`, `metrics`, `flipbook`, `ingest`, `image_io`, `noise` |
-| `src/core`, `src/sim`, `src/train`, `src/runtime`, `src/common`, `src/proto` | libraries (see the table above); `src/proto` holds the Phase 0 prototypes |
+| `src/core`, `src/sim`, `src/train`, `src/runtime`, `src/compose`, `src/common`, `src/proto` | libraries (see the table above); `src/proto` holds the Phase 0 prototypes |
 | `tools/`, `examples/`, `viewer/`, `bench/` | executables |
 | `tests/` | GoogleTest suites, the allocation test, the C host self-test, the viewer screenshot test |
-| `docs/` | plan, report, engines, data, viewer, figures |
+| `docs/` | plan, report, composed effects, engines, data, viewer, figures |
 | `results/` | small text results (CSVs and generated summaries); no images, clips or weights |
 
 ## Rules

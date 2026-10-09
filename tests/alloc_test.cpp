@@ -1,6 +1,9 @@
-// nvfx_render must not allocate (docs/PLAN.md §5.4). This program replaces the global operator new to count heap
-// allocations, builds small grid and conv effects in memory, and renders 200 frames of each with every feature
-// switched on (controls, seeded drift, colour). Exit code 0 = no allocation during rendering.
+// nvfx_render must not allocate (docs/PLAN.md §5.4), nor may a frame of a composed scene (docs/COMPOSE.md). This
+// program replaces the global operator new to count heap allocations, builds small grid, conv and rollout effects in
+// memory, and renders 200 frames of each with every feature switched on (controls, seeded drift, colour), then 99
+// frames of a small composed scene. Exit code 0 = no allocation during rendering.
+#include "compose_scene.hpp"
+
 #include <neuralfx/model.hpp>
 #include <neuralfx/nvfx.h>
 #include <neuralfx/rollout.hpp>
@@ -111,6 +114,20 @@ int run_rollout(int size) {
   return n == 0 ? 0 : 1;
 }
 
+// A composed scene (src/compose): stepping, couplings, the bus, light, particles and the whole frame, on 2 threads.
+int run_compose() {
+  nfx::compose::testing::MiniScene scene(2);
+  std::vector<std::uint8_t> rgb(160 * 90 * 3);
+  scene.step(0, rgb);  // warm-up outside the count
+  g_allocations = 0;
+  g_counting = true;
+  for (int f = 1; f < 100; ++f) scene.step(f, rgb);
+  g_counting = false;
+  const long n = g_allocations.load();
+  std::printf("composed scene 160x90: %ld allocations in 99 frames\n", n);
+  return n == 0 ? 0 : 1;
+}
+
 }  // namespace
 
 int main() {
@@ -138,7 +155,7 @@ int main() {
   c.c0 = 8;
   c.c1 = 8;
   c.c2 = 8;
-  int failures = run(g, 64, "grid") + run(g, 128, "grid") + run(c, 64, "conv") + run(c, 32, "conv") + run_rollout(64) + run_rollout(128);
+  int failures = run(g, 64, "grid") + run(g, 128, "grid") + run(c, 64, "conv") + run(c, 32, "conv") + run_rollout(64) + run_rollout(128) + run_compose();
   std::printf("%s\n", failures ? "FAILED: nvfx_render allocated" : "ok: no allocation per frame");
   return failures ? 1 : 0;
 }

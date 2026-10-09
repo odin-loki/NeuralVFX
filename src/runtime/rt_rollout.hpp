@@ -358,6 +358,17 @@ class Rollout final : public RolloutRunner {
   std::span<const float> coarse() const override { return coarse_; }
   std::span<const float> fine_heat() const override { return ft_; }
   std::span<const float> fine_soot() const override { return fd_; }
+  int size() const override { return S_; }
+  std::span<const float> flow() const override { return flow_; }
+  std::span<float> coarse_mut() override { return coarse_; }
+  std::span<float> fine_heat_mut() override { return ft_; }
+  std::span<float> fine_soot_mut() override { return fd_; }
+  void adopt(float seconds) override {
+    time_ = seconds;
+    since_start_ = m_.detail.swirl_ramp;
+    std::fill(p_.begin(), p_.end(), 0.f);
+    std::fill(flow_.begin(), flow_.end(), 0.f);
+  }
 
  private:
   static std::size_t z(int v) { return static_cast<std::size_t>(v); }
