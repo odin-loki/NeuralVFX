@@ -116,14 +116,25 @@ ClipScores score(const Clip& ref, const Clip& test, std::span<const int> frames_
   if (ref.size != test.size || ref.frames != test.frames) throw std::invalid_argument("score: clips differ in shape");
   const std::vector<int> frames = frames_in.empty() ? all_frames(ref.frames) : std::vector<int>(frames_in.begin(), frames_in.end());
   ClipScores s;
-  double mse_sum = 0;
+  double mse_sum = 0, active_sum = 0, active_n = 0;
   for (const int f : frames) {
-    const double m = mse(ref.frame(f), test.frame(f));
+    const auto rf = ref.frame(f), tf = test.frame(f);
+    const double m = mse(rf, tf);
     mse_sum += m;
+    for (std::size_t i = 0; i < rf.size(); i += 4) {
+      const bool on = std::max({rf[i], rf[i + 1], rf[i + 2], rf[i + 3]}) > 4 || std::max({tf[i], tf[i + 1], tf[i + 2], tf[i + 3]}) > 4;
+      if (!on) continue;
+      active_n += 4;
+      for (std::size_t c = 0; c < 4; ++c) {
+        const double d = (double(rf[i + c]) - double(tf[i + c])) * kInv255;
+        active_sum += d * d;
+      }
+    }
     s.frame_psnr.push_back(psnr_from_mse(m));
     s.frame_ssim.push_back(ssim(ref.frame(f), test.frame(f), ref.size));
   }
   s.psnr = psnr_from_mse(mse_sum / static_cast<double>(frames.size()));
+  s.active_psnr = active_n > 0 ? psnr_from_mse(active_sum / active_n) : kPsnrCap;
   s.ssim = std::ranges::fold_left(s.frame_ssim, 0.0, std::plus{}) / static_cast<double>(frames.size());
   // Temporal differences over consecutive frame pairs (wrapping for looping clips).
   const int pairs = ref.loop ? ref.frames : ref.frames - 1;

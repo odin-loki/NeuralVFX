@@ -19,6 +19,8 @@ double ssim(std::span<const std::uint8_t> a, std::span<const std::uint8_t> b, in
 
 struct ClipScores {
   double psnr = 0;          // from the mean MSE over all frames
+  double active_psnr = 0;   // the same over active pixels only (visible in the reference or the test), so empty
+                            // background cannot flatter a method
   double ssim = 0;          // mean over frames
   double temporal_psnr = 0; // PSNR of frame-to-frame differences (motion error); wraps for looping clips
   double flicker = 0;       // second temporal difference energy, test / reference (1 = same, > 1 = more jitter)

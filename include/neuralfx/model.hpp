@@ -18,6 +18,7 @@
 #include <cstdint>
 #include <expected>
 #include <filesystem>
+#include <iosfwd>
 #include <span>
 #include <string>
 #include <vector>
@@ -65,7 +66,15 @@ struct Model {
   std::vector<Dense> films;     // D -> 2 width: grid one (width H); conv two (widths c1, c2)
   std::vector<float> z_mean, z_std;          // statistics of the training variation codes
   std::vector<std::vector<float>> z_train;   // the codes themselves (replay a training variation)
-  int feature_bits = 16;  // storage precision of `features` in the file: 16 (fp16) or 8 (per-channel affine)
+  int feature_bits = 16;  // storage precision of `features` in the file: 16 (fp16) or 8 (per-plane affine)
+  std::vector<std::string> control_names;    // n_controls names (stored, 15 characters each at most)
+
+  // The features in their storage format, as the runtime keeps them resident: fp16 bit patterns, or bytes with a
+  // (lo, hi) range per [side][side] plane. Filled by load_model() and by pack_features().
+  std::vector<std::uint16_t> raw_f16;
+  std::vector<std::uint8_t> raw_u8;
+  std::vector<float> raw_ranges;
+  void pack_features();
 
   std::size_t feature_count() const;
   std::size_t param_count() const;     // everything a shipped effect stores, codes included
@@ -91,7 +100,9 @@ void to_rgba8(std::span<const float> rgba, std::span<std::uint8_t> out);
 
 // .nvfx files. Features are stored at m.feature_bits; all other tensors as fp16. Loading gives floats.
 std::expected<void, std::string> save_model(const std::filesystem::path& path, const Model& m);
+std::expected<void, std::string> save_model(std::ostream& out, const Model& m);
 std::expected<Model, std::string> load_model(const std::filesystem::path& path);
+std::expected<Model, std::string> load_model(std::istream& in);  // from any stream (memory: std::ispanstream)
 
 // Round a model's weights through its storage precision (what a saved and reloaded model computes with).
 void quantise_like_storage(Model& m);

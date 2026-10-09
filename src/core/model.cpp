@@ -300,6 +300,26 @@ std::expected<Dense, std::string> get_dense(std::istream& i) {
 
 }  // namespace
 
+void Model::pack_features() {
+  raw_f16.clear();
+  raw_u8.clear();
+  raw_ranges.clear();
+  if (feature_bits == 8) {
+    const std::size_t p = plane_size(h);
+    raw_u8.reserve(features.size());
+    for (std::size_t off = 0; off < features.size(); off += p) {
+      const std::span plane(features.data() + off, p);
+      const Plane8 r = plane_range(plane);
+      raw_ranges.push_back(r.lo);
+      raw_ranges.push_back(r.hi);
+      for (const float v : plane) raw_u8.push_back(q8(v, r));
+    }
+  } else {
+    raw_f16.reserve(features.size());
+    for (const float v : features) raw_f16.push_back(std::bit_cast<std::uint16_t>(static_cast<std::float16_t>(v)));
+  }
+}
+
 void quantise_like_storage(Model& m) {
   if (m.feature_bits == 8) {
     const std::size_t p = plane_size(m.h);
@@ -327,6 +347,10 @@ std::expected<void, std::string> save_model(const std::filesystem::path& path, c
   if (path.has_parent_path()) std::filesystem::create_directories(path.parent_path(), ec);
   std::ofstream o(path, std::ios::binary);
   if (!o) return std::unexpected(std::format("nvfx: cannot write {}", path.string()));
+  return save_model(o, m);
+}
+
+std::expected<void, std::string> save_model(std::ostream& o, const Model& m) {
   const Hyper& h = m.h;
   o.write(kMagic.data(), static_cast<std::streamsize>(kMagic.size()));
   bin::put(o, kVersion);
@@ -338,6 +362,9 @@ std::expected<void, std::string> save_model(const std::filesystem::path& path, c
   bin::put_str(o, m.effect, 32);
   bin::put(o, m.fps);
   bin::put(o, static_cast<std::uint32_t>(m.feature_bits));
+  for (int k = 0; k < h.n_controls; ++k) {
+    bin::put_str(o, static_cast<std::size_t>(k) < m.control_names.size() ? m.control_names[static_cast<std::size_t>(k)] : std::string{}, 16);
+  }
   if (m.feature_bits == 8) {
     const std::size_t p = plane_size(h);
     for (std::size_t off = 0; off < m.features.size(); off += p) {
@@ -358,16 +385,22 @@ std::expected<void, std::string> save_model(const std::filesystem::path& path, c
   put_f16(o, m.z_std);
   bin::put(o, static_cast<std::uint32_t>(m.z_train.size()));
   for (const auto& z : m.z_train) put_f16(o, z);
-  if (!o) return std::unexpected(std::format("nvfx: write failed for {}", path.string()));
+  if (!o) return std::unexpected("nvfx: write failed");
   return {};
 }
 
 std::expected<Model, std::string> load_model(const std::filesystem::path& path) {
   std::ifstream i(path, std::ios::binary);
   if (!i) return std::unexpected(std::format("nvfx: cannot open {}", path.string()));
+  auto m = load_model(i);
+  if (!m) return std::unexpected(std::format("{} ({})", m.error(), path.string()));
+  return m;
+}
+
+std::expected<Model, std::string> load_model(std::istream& i) {
   std::string magic(kMagic.size(), '\0');
   i.read(magic.data(), static_cast<std::streamsize>(magic.size()));
-  if (!i || magic != kMagic) return std::unexpected(std::format("nvfx: not a model: {}", path.string()));
+  if (!i || magic != kMagic) return std::unexpected("nvfx: not a model");
   const auto version = bin::get<std::uint32_t>(i);
   if (!version || *version != kVersion) return std::unexpected("nvfx: unsupported version");
   const auto arch = bin::get<std::uint32_t>(i);
@@ -394,6 +427,11 @@ std::expected<Model, std::string> load_model(const std::filesystem::path& path) 
   if (!effect || !fps || !bits || (*bits != 8 && *bits != 16)) return std::unexpected("nvfx: bad header");
   m.effect = *effect;
   m.fps = *fps;
+  for (int k = 0; k < h.n_controls; ++k) {
+    auto name = bin::get_str(i, 16);
+    if (!name) return std::unexpected(name.error());
+    m.control_names.push_back(*name);
+  }
   m.feature_bits = static_cast<int>(*bits);
   if (m.feature_bits == 8) {
     const std::size_t p = plane_size(h);
@@ -432,6 +470,7 @@ std::expected<Model, std::string> load_model(const std::filesystem::path& path) 
   for (auto& z : m.z_train) {
     if (auto e = get_f16(i, z); !e) return std::unexpected(e.error());
   }
+  m.pack_features();  // the runtime keeps the features in their storage format
   return m;
 }
 
