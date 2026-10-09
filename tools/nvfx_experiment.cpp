@@ -15,6 +15,7 @@
 // sheets and videos go under the data root (never git); CSVs and the summary go under results/experiments.
 #include "args.hpp"
 #include "experiment_d.hpp"
+#include "experiment_g.hpp"
 
 #include <neuralfx/flipbook.hpp>
 #include <neuralfx/image_io.hpp>
@@ -1077,6 +1078,12 @@ void step_report(const Ctx& c) {
     d.quick = c.quick;
     study_d::report(d, md);
   }
+  {
+    study_g::Ctx g;  // the report reads only the CSVs in results
+    g.results = c.results;
+    g.quick = c.quick;
+    study_g::report(g, md);
+  }
   fs::create_directories(c.results);
   std::ofstream(c.results / "SUMMARY.md") << md.str();
   std::println("wrote {}", (c.results / "SUMMARY.md").string());
@@ -1087,7 +1094,7 @@ void step_report(const Ctx& c) {
 int main(int argc, char** argv) try {
   const tools::Args a(argc, argv, {"quick", "help"});
   if (a.flag("help") || a.positional().empty()) {
-    std::println("nvfx_experiment data|a|b|c|media|timing|report|all|d|d-chaos|d-train|d-tune|d-finish|d-eval|d-timing [--root DIR] [--results DIR] [--threads 4] [--quick]");
+    std::println("nvfx_experiment data|a|b|c|media|timing|report|all|d|d-chaos|d-train|d-tune|d-finish|d-eval|d-timing|g-data|g-pilot|g-search|g-eval|g-timing [--root DIR] [--results DIR] [--threads 4] [--quick]");
     return 0;
   }
   Ctx c;
@@ -1120,6 +1127,20 @@ int main(int argc, char** argv) try {
     if (step == "d-finish") study_d::step_finish(d);
     if (step == "d-eval" || step == "d") study_d::step_eval(d);
     if (step == "d-timing") study_d::step_timing(d);  // separately, on a quiet machine
+  }
+  {  // study G (docs/DCM.md): diffusion-context mixing
+    study_g::Ctx g;  // its data under the data root's g/ (docs/DCM.md §4), or --root DIR/g
+    g.data = (a.has("root") ? fs::path(a.str("root")) : data_root()) / "g";
+    if (c.quick) g.data /= "quick";
+    g.results = c.results;
+    g.threads = c.threads;
+    g.quick = c.quick;
+    g.effects = a.str("effects");
+    if (step == "g-data") study_g::step_data(g);
+    if (step == "g-pilot") study_g::step_pilot(g);
+    if (step == "g-search") study_g::step_search(g);
+    if (step == "g-eval") study_g::step_eval(g);
+    if (step == "g-timing") study_g::step_timing(g);  // separately, on a quiet machine
   }
   if (step == "report" || step == "all") step_report(c);
   std::println("{} finished in {:.1f} min", step, std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count() / 60.0);
