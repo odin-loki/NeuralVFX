@@ -114,7 +114,10 @@ S7's speed targets (the final video stays).
 
 ## G2. Diffusion for the macro features (stage S5)
 
-Status: **rules fixed before any result** (9 October 2026); results follow in G2.4 to G2.7 as each part finishes.
+Status: **done for fire** (9 October 2026). The prior against drift (G2b) is kept: it passed validation and its one
+test. Diffusion start points (G2c) are stopped. The diffusion contexts (G2a) are not redundant by the first check;
+their decision waits for stage S2's nested search, which is not on main yet. Smoke and explosion are not started: that
+is a later decision. Rules in G2.3 were fixed before any result; results are in G2.4 to G2.9.
 
 ### G2.1 The denoiser
 
@@ -180,8 +183,9 @@ forward and backward, because this project uses no LibTorch.
 
 Two amendments, made before the trained denoiser was run on any of these comparisons (only a 500-step checkpoint, to
 test the pipeline):
-- **Two candidates per use.** One pass of this network takes at least 5 ms on one core of this machine, so N = 4 and
-  N = 8 cannot meet 0.5 ms per frame, and a fresh 25-step sample cannot meet 100 ms per shard. Choosing only the best
+- **Two candidates per use.** One pass of this network took 6 to 10 ms on one core of the (busy) machine, and its
+  89.5 million multiply-adds need about 4.5 ms even at the kernels' best speed (20 GMAC/s), so N = 4 and N = 8 cannot
+  meet 0.5 ms per frame, and a fresh 25-step sample cannot meet 100 ms per shard. Choosing only the best
   score could therefore stop a use for its cost while an affordable setting works. So two candidates go from tuning to
   the decision: the best overall, and the best that can meet the bound (N = 16 for G2b; the best SDEdit for G2c). A
   use is kept when a candidate passes both the interval and the cost bound. These are two looks at the validation
@@ -194,3 +198,176 @@ What would repeat CameraDetector's outcome here: the denoiser's clusters follow 
 say (how hot a region is, how high, which controls), as CameraDetector's followed camera and light; the prior pulls
 the state towards an average fire and takes the flicker with it; generated starts are softer and less varied than
 real states, the usual failure of a small diffusion model trained briefly.
+
+### G2.4 Training
+
+10,000 steps of batch 32 (320,000 examples, 19 passes over the 16,800 states) in 3,830 s on two threads at `nice 10`:
+about 2.1 CPU-hours. The probe ran at 0.59 s per step on a machine loaded by other agents; the load fell during the run
+(0.38 s per step on average), so the run used less than the 3 to 4 CPU-hours it was sized for. Loss of the EMA weights on
+256 validation states (salt 3), fixed noise (`results/experiments/g_diff_train.csv`):
+
+| step | training loss | t = 50 | t = 200 | t = 500 | t = 800 |
+|---:|---:|---:|---:|---:|---:|
+| 500 | 0.416 | 0.513 | 0.199 | 0.099 | 0.062 |
+| 1,000 | 0.110 | 0.395 | 0.174 | 0.083 | 0.047 |
+| 2,000 | 0.073 | 0.291 | 0.119 | 0.055 | 0.026 |
+| 4,000 | 0.060 | 0.186 | 0.087 | 0.040 | 0.017 |
+| 6,000 | 0.054 | 0.168 | 0.080 | 0.037 | 0.015 |
+| 8,000 | 0.051 | 0.161 | 0.077 | 0.035 | 0.014 |
+| 10,000 | 0.050 | 0.158 | 0.076 | 0.035 | 0.014 |
+
+The curve is flat over the last 2,000 steps (the learning rate has decayed to 10%). CameraDetector's denoiser ended
+at 0.436 / 0.400 / 0.388 / 0.394 on its canvases; the data differ, so this is no ranking, but coarse fire states leave
+much less noise unexplained at middle and high noise levels. The released denoiser is `NEURALVFX_DATA/g/diff/fire.ddpm`, version
+`1152045db43ea534ff5b80099d538c1c0be555d3cb6c5e6aef701a933d8bf56a`.
+
+What its samples look like (`nvfx_dcm ddpm-sample`, network units, at controls 0.5 / 0.5 / 0.5): fresh 25-step DDIM
+samples have heat mean 0.06 and spread 0.25 where real states near those controls have 0.16 and 0.70. They are colder
+and smoother than real states, and hardly change with the controls (heat mean 0.08 at 0.9 / 0.2 / 0.8, real 0.34). A
+1000-step ancestral sampler (a scratch check, not used) lands nearer in mean (0.20) but over-spreads (1.0), and costs
+1000 passes. SDEdit from t0 = 400 returns almost its
+input (channel means within 0.01 of the stored state's).
+
+### G2.5 G2a: contexts, check 1 (mutual information)
+
+`nvfx_dcm contexts`: fitted on 1,500 training states (96,000 regions), scored on all 1,680 validation states (107,520
+regions). PCA-16 keeps 79% of the denoiser features' variance and 97% of the plain statistics'. Share of each context's
+entropy explained by the hand-made contexts, I(D; H) / H(D), and NMI (`results/experiments/g_diff_nmi.csv`):
+
+| contexts | K | entropy (bits) | heat | height | flow | controls | joint hand-made | NMI with plain, same K | ARI between two k-means seeds |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| diffusion | 4 | 1.47 | 0.45 | 0.06 | 0.40 | 0.01 | **0.65** | 0.39 | 0.998 |
+| diffusion | 8 | 2.38 | 0.28 | 0.10 | 0.27 | 0.04 | **0.55** | 0.42 | 0.80 |
+| diffusion | 16 | 3.61 | 0.20 | 0.11 | 0.19 | 0.05 | **0.47** | 0.37 | 0.86 |
+| plain statistics | 4 | 1.06 | 0.45 | 0.02 | 0.40 | 0.06 | 0.64 | | |
+| plain statistics | 8 | 1.68 | 0.34 | 0.05 | 0.35 | 0.05 | 0.58 | | |
+| plain statistics | 16 | 2.49 | 0.26 | 0.05 | 0.33 | 0.05 | 0.53 | | |
+
+- **Not redundant by the rule:** the joint hand-made context explains 47% to 65% of the diffusion contexts' entropy,
+  below the 80% line, at every K. They follow how hot a region is and how fast it moves (NMI 0.29 to 0.47 with heat,
+  0.27 to 0.39 with flow), and add height at larger K.
+- **CameraDetector's failure does not repeat in this check.** There, the clusters followed camera and light (NMI 0.10
+  to 0.29), the very variables that defined the held-out sites. Here the sites of the nested search are bins of the
+  controls, and the diffusion contexts carry almost nothing about the controls (NMI 0.007 to 0.063, as low as the plain
+  statistics' 0.04).
+- **But they are not obviously more than plain statistics.** Their agreement with plain coarse-statistics clusters is
+  NMI 0.37 to 0.42, the hand-made contexts explain about as much of either (0.47 to 0.65 against 0.53 to 0.64), and
+  the diffusion clusters are only more balanced (more entropy at the same K). Whether that extra resolution helps the
+  fine-detail mixer is exactly what the nested search measures.
+- **The full test is pending.** It needs stage S2's nested search on effect pixel rows, which is not on main. The API
+  is ready for it: `dcm::ddpm::context_planes()` gives, from one coarse state and its condition, an 8 x 8 plane of
+  cluster ids per K, and `nvfx_dcm contexts` writes every validation region's diffusion, plain and hand-made contexts
+  to `NEURALVFX_DATA/g/diff/fire_contexts.csv`. The rule stays §3's: kept only if they beat the hand-made contexts
+  beyond the search's own seed noise. Cost: two passes per frame (t = 400 and 600), 12 to 20 ms on one core; the
+  contexts could be refreshed every few frames.
+
+### G2.6 G2b: the prior against drift
+
+`nvfx_experiment g-diff`. One continuous 60 s rollout (the reference implementation, from the start point nearest the
+controls, fire's 1 s warm-up first) at validation settings 1 and 2 (0.67 / 0.33 / 0.24 and 0.11 / 0.42 / 0.89), each
+10 s window scored against a real 10 s run (`results/experiments/g_diff_prior.csv`).
+
+Tuning (tuning seeds), mean detail score over 12 windows, best first:
+
+| method | score | | method | score |
+|---|---:|---|---|---:|
+| N = 8, t = 100, beta = 1 | **0.605** | | N = 16, t = 100, beta = 1 | **0.621** |
+| N = 4, t = 100, beta = 0.5 | 0.606 | | runtime shards (6 s) | 0.635 |
+| N = 8, t = 100, beta = 0.5 | 0.614 | | no prior | 1.699 |
+| N = 4, t = 100, beta = 0.25 | 0.614 | | N = 4, t = 20, beta = 1 (worst) | 4.328 |
+
+Low noise levels mostly hurt: every prior at t = 20 and six of the nine at t = 50 drift **more** than no prior (1.9
+to 4.3 against 1.70); only the strongest t = 50 prior (every 4 frames, beta 1) comes near the best, at 0.64. Applied
+deterministically every few frames, a small bias in the predicted noise at low noise levels is a drift of its own. The
+best settings sit at the edge of the grid (the largest t and beta); larger t was not tried.
+
+Decision (fresh seeds, paired over the 12 (setting, window) pairs; cost = one pass / N on one core, measured on a busy
+machine, so an upper bound):
+
+| candidate | minus no prior | minus shards | ms per frame | decision |
+|---|---|---|---:|---|
+| best: N = 8, t = 100, beta = 1 | −1.655 [−3.015, −0.506] | −0.069 [−0.276, +0.116] (tie) | 0.72 | stop: cost above 0.5 ms |
+| best with N = 16: t = 100, beta = 1 | **−1.564 [−2.916, −0.396]** | +0.022 [−0.224, +0.287] (tie) | **0.36** | **keep** |
+
+**Test, once** (study B's held-out settings 1 and 2, new seeds), N = 16, t = 100, beta = 1:
+
+| | detail score | spectrum distance | motion ratio | mean-frame PSNR |
+|---|---|---|---|---|
+| prior minus no prior | **−5.28 [−9.01, −2.05]** | −0.66 [−1.47, −0.06] | +0.41 [+0.23, +0.59] | +6.4 [+4.5, +8.2] dB |
+| prior minus shards | −0.17 [−0.41, +0.05] (tie) | −0.001 (tie) | +0.015 (tie) | +0.9 [−0.4, +2.4] (tie) |
+| no prior minus shards | +5.10 [+1.86, +8.90] | | | |
+
+Without the prior, the test's first setting froze from 20 s to 50 s (motion ratio 0.006 to 0.03, spectrum distance up
+to 3.9: REPORT §6.6's failure), and the second slowed to a motion ratio of 0.06 to 0.24 in its last 30 s. With the
+prior, both kept a motion ratio of 0.64 to 0.95 for the whole minute (mean-frame PSNR 32 to 41 dB). Cost: one pass
+every 16 frames, 5.8 to 6.4 ms on a busy core, **0.36 to 0.40 ms per frame** (an upper bound; no quiet moment came for
+a measurement). Its weights add 1.5 MB as float32 (0.8 MB as fp16) to an 82 KB effect.
+
+What it means: the prior does what shards do (the test ties them on every statistic) without restarts, crossfades or
+stored states, so a single rollout can play for a minute. It does not beat shards. Shards are free per frame and need
+no 1.5 MB network, so the prior is worth having where a crossfade every 6 s is unwanted (one continuous run, an effect
+that must not jump), not as a replacement.
+
+### G2.7 G2c: start points
+
+First 2 s after each start (after fire's 1 s warm-up), at the 10 validation settings, 2 seeds each
+(`results/experiments/g_diff_starts.csv`):
+
+| method | tuning: detail score | spectrum distance | motion ratio | mean-frame PSNR |
+|---|---:|---:|---:|---:|
+| nearest stored start as it is | 1.493 | 0.721 | 0.84 | 31.97 |
+| nearest stored start rolled ahead 0.5 s (the alternative) | 1.545 | 0.724 | 0.82 | 31.96 |
+| SDEdit of it from t0 = 300 (320) | 1.525 | 0.730 | 0.82 | 31.95 |
+| SDEdit from t0 = 400 | 1.528 | 0.731 | 0.82 | 31.96 |
+| SDEdit from t0 = 500 (520) | 1.530 | 0.732 | 0.82 | 31.96 |
+| fresh DDIM sample (25 passes) | 1.878 | 0.747 | 0.74 | 31.56 |
+
+Decision (fresh seeds, paired over the 10 settings): the best generated start, SDEdit from t0 = 300 (also the best
+SDEdit), minus the rolled start: **−0.079 [−0.216, +0.038], a tie**; 8 passes, 46 ms per shard. **Stop.**
+
+Diversity, mean pairwise RMS distance between 8 starts at a setting (network units, validation settings 1 to 3): real
+states (8 seeds, frame 150) 0.69 to 1.00; fresh samples 0.45 to 0.51; the stored start rolled 0.5 s with 8 seeds 0.36
+to 0.52; SDEdit of the stored start 0.16 to 0.20 (`results/experiments/g_diff_diversity.csv`).
+
+- Fresh samples are worse than every stored start (colder, smoother, too little motion) and half as varied as real
+  states: the small diffusion model's usual failure, and the conditioning on the controls is weak.
+- SDEdit at t0 = 300 to 500 hardly moves a state (its 8 seeds differ by 0.16 to 0.20, a fifth of real states' spread):
+  at those levels the signal still dominates the noise, and the network restores it. It cannot move a stored start to
+  new controls, so it ties the stored start it came from.
+- Fire forgets its start within about a second (REPORT §6.1), and its 1 s warm-up rolls every start forward anyway, so
+  the start matters little here. Smoke and explosions keep their start's look longer; this result does not transfer
+  to them without a test.
+
+### G2.8 Costs
+
+| item | cost |
+|---|---|
+| states (176 runs simulated once) | 433 s on two threads |
+| training | 3,830 s on two threads (about 2.1 CPU-hours) |
+| G2a contexts (fit and score) | about 2 minutes on two threads |
+| G2b and G2c on validation (`g-diff`) | 21 minutes on two threads |
+| G2b test (`g-diff-test`) | 1.4 minutes on two threads |
+| all of stage S5 on fire, including probes and smoke tests | about 3.4 CPU-hours (budget 5) |
+| one denoiser pass | 5.8 to 6.4 ms on one core of a busy machine (89.5 M multiply-adds; 14 to 15 GMAC/s); a quiet measurement was never possible (load stayed above 1.5) |
+| denoiser size | 391,748 weights: 1.5 MB float32 |
+
+### G2.9 Decision
+
+The rule for each use was fixed in G2.3 before any result.
+
+| use | test | result | met? |
+|---|---|---|---|
+| G2a contexts | check 1: redundant if the hand-made contexts explain at least 80% of their entropy at every K | 47% to 65%; they follow heat and flow, not the controls (unlike CameraDetector's camera and light) | **not redundant** |
+| G2a contexts | they beat the hand-made contexts in the nested search beyond its seed noise | not run: stage S2's search is not on main | **pending** |
+| G2b prior | the drift (detail score per 10 s window of a 60 s rollout) falls, interval below zero, on validation | −1.56 [−2.92, −0.40] (N = 16, t = 100, beta = 1) | **yes** |
+| G2b prior | within 0.5 ms per frame | 0.36 to 0.40 ms (upper bound, busy machine) | **yes** |
+| G2b prior | the same on test, once | −5.28 [−9.01, −2.05] | **yes** |
+| G2b prior | (reference) better than the runtime's shards | tie on every statistic, validation and test | no |
+| G2c start points | better than the nearest stored start rolled ahead, interval below zero | SDEdit t0 = 300: −0.079 [−0.216, +0.038], a tie; fresh samples worse in tuning (1.88 against 1.55) | **no** |
+| G2c start points | within 100 ms per shard | SDEdit 46 ms yes; a fresh sample 25 passes, about 150 ms, no | partly |
+
+**Decision for fire: keep the denoiser as a prior against drift (G2b); stop diffusion start points (G2c); G2a waits
+for the nested search.** This is not CameraDetector's outcome: there no diffusion use survived, here one does, and the
+contexts do not encode the held-out sites. It is also a narrower win than it looks: the prior ties the shards that the
+runtime already has, so it buys continuity (no restarts, no crossfades), not better pictures, for 0.4 ms per frame and
+1.5 MB. Extending it to smoke and explosions is a later decision and has not been started.
