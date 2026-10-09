@@ -493,7 +493,7 @@ int main(int argc, char** argv) try {
     auto c7 = Clock::now();
     P[kShade] = ms(c6, c7);
 
-    frame.background(light, scorch);
+    frame.background(light, scorch, pool);
     auto c8 = Clock::now();
     P[kBackground] = ms(c7, c8);
     frame.draw(drawn, pool);

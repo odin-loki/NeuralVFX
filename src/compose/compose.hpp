@@ -247,6 +247,14 @@ class Light {
   void update(const FieldBus& bus, float gain, std::array<float, 3> flash);
   std::array<float, 3> at(float x, float y) const;  // world position
   std::span<const float> field() const { return L_; }
+  // The grid of field() (world position of its top-left corner, world pixels per cell, cells) and the flash, so a
+  // stage that needs the light along a whole row can look it up as at() does.
+  float x0() const { return x0_; }
+  float y0() const { return y0_; }
+  float cell() const { return cell_; }
+  int nx() const { return nx_; }
+  int ny() const { return ny_; }
+  std::array<float, 3> flash() const { return flash_; }
 
  private:
   float x0_, y0_, cell_;
@@ -320,7 +328,7 @@ class Frame {
   float fade = 1.f;            // overall fade (0: black)
   float time = 0;
 
-  void background(const Light& light, std::span<const std::array<float, 4>> scorch);  // scorch: x, y, radius, glow
+  void background(const Light& light, std::span<const std::array<float, 4>> scorch, Pool& pool);  // scorch: x, y, radius, glow
   // Draw modules (each group once, by ownership weights; single modules as they are) over the screen.
   void draw(std::span<Module* const> modules, Pool& pool);
   void particles(const Particles& p) { p.draw(screen_, cam_x, cam_y); }
@@ -330,11 +338,41 @@ class Frame {
   void finish(std::span<std::uint8_t> rgb, Pool& pool);
   const Image4& screen() const { return screen_; }
 
+  // One axis of a bilinear lookup: the two cells read and their weights. Taken once per column or row, it leaves a
+  // blend per pixel.
+  struct Tap {
+    int i0 = 0, i1 = 0;
+    float w0 = 1.f, w1 = 0.f;
+  };
+
  private:
+  // What a stage needs of a screen column, worked out once per frame instead of once per pixel.
+  struct Column {
+    float wx = 0;                 // world x of the column's centre
+    float hill = 0;               // background: world y of the hills' outline
+    std::array<float, 4> hill_colour{};
+    Tap light;                    // background: the light field's columns
+    std::uint32_t star = 0, tex = 0, grain = 0;  // hash keys of the stars, the ground and the grain
+    Tap bus;                      // distort: the bus's columns
+    bool on_bus = false;
+    float wobble = 0, phase = 0;  // distort: the haze's terms that depend on x alone
+    float vig = 0;                // finish: the vignette's x term
+  };
+  // A tile's screen column: its image columns and the factors of its ownership weight that depend on x.
+  struct TileColumn {
+    Tap t;
+    float band = 1.f, feather_left = 1.f, feather_right = 1.f;
+  };
+  static constexpr int kMaxTiles = 64;  // tiles of a group drawn together
+
   void draw_group(std::span<Module* const> tiles, Pool& pool);
   int w_, h_;
   Image4 screen_, tmp_;
   std::vector<Image4> mips_, mips_tmp_;
+  std::vector<Column> cols_;                         // [w]
+  std::vector<TileColumn> tile_cols_;                // [kMaxTiles][w]
+  std::vector<std::vector<Tap>> up_x_, up_y_;        // bloom: each level read from the next coarser (0: the screen)
+  std::vector<float> light4_;  // the light field with a fourth channel (0), a cell to a vector; sized on the first frame
 };
 
 }  // namespace nfx::compose

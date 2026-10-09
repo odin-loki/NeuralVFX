@@ -8,6 +8,7 @@
 #include <bit>
 #include <chrono>
 #include <cmath>
+#include <cstring>
 #include <numbers>
 #include <stdexcept>
 
@@ -35,10 +36,12 @@ std::uint32_t hash32(std::uint32_t x) {
   return x;
 }
 
-float hash01(int x, int y, int z) {
-  const auto h = hash32(static_cast<std::uint32_t>(x) * 73856093U ^ static_cast<std::uint32_t>(y) * 19349663U ^ static_cast<std::uint32_t>(z) * 83492791U);
-  return static_cast<float>(h >> 8) * (1.f / 16777216.f);
-}
+// A hash of integer coordinates in [0, 1): unit(hx(x) ^ hy(y) ^ hz(z)). The key is made by axis, so a stage can make
+// each part once per column or row.
+std::uint32_t hx(int x) { return static_cast<std::uint32_t>(x) * 73856093U; }
+std::uint32_t hy(int y) { return static_cast<std::uint32_t>(y) * 19349663U; }
+std::uint32_t hz(int z) { return static_cast<std::uint32_t>(z) * 83492791U; }
+float unit(std::uint32_t key) { return static_cast<float>(hash32(key) >> 8) * (1.f / 16777216.f); }
 
 // 8-bit display values to linear light (the learned renderers' output), and linear to 8-bit display values.
 struct Gamma {
@@ -814,6 +817,46 @@ float Shock::radius(float t) const {
   return speed * decay * (1.f - std::exp(-s / decay)) + 120.f * s;  // fast at first, then sound-like
 }
 
+namespace {
+
+// The taps bilerp() takes at continuous cell coordinate v on an axis of n cells (clamped as it clamps).
+Frame::Tap tap(float v, int n) {
+  v = std::clamp(v, 0.f, fl(n - 1));
+  const int i0 = std::min(static_cast<int>(v), std::max(0, n - 2));
+  const float f = v - fl(i0);
+  return {i0, std::min(i0 + 1, n - 1), 1.f - f, f};
+}
+
+// bilerp()'s blend of the corners a, b (first row) and c, d (second row), in its order of operations: a lookup by taps
+// gives its result to the bit.
+float blend(float a, float b, float c, float d, const Frame::Tap& x, const Frame::Tap& y) {
+  return y.w0 * (x.w0 * a + x.w1 * b) + y.w1 * (x.w0 * c + x.w1 * d);
+}
+
+// Channel c of a grid of `ch` interleaved channels and nx columns, looked up by taps.
+float lookup(const float* f, int nx, int ch, int c, const Frame::Tap& x, const Frame::Tap& y) {
+  const float* r0 = f + zs(y.i0) * zs(nx) * zs(ch) + zs(c);
+  const float* r1 = f + zs(y.i1) * zs(nx) * zs(ch) + zs(c);
+  return blend(r0[zs(x.i0) * zs(ch)], r0[zs(x.i1) * zs(ch)], r1[zs(x.i0) * zs(ch)], r1[zs(x.i1) * zs(ch)], x, y);
+}
+
+constexpr int kChunk = 8;    // screen rows per task
+constexpr int kBlock = 256;  // pixels per block of a row, for scratch on the stack
+
+// A pixel's four channels as one vector (GCC vector extensions, as in src/common/simd_kernels.hpp). Each lane does
+// what the scalar code does to its channel, in the same order, so the results are the same to the bit.
+typedef float px4 __attribute__((vector_size(16)));
+typedef float px4u __attribute__((vector_size(16), aligned(4)));  // unaligned access
+px4 load4(const float* p) { return *reinterpret_cast<const px4u*>(p); }
+void store4(float* p, px4 v) { *reinterpret_cast<px4u*>(p) = v; }
+
+// blend() of four pixels.
+px4 blend4(const float* a, const float* b, const float* c, const float* d, const Frame::Tap& x, const Frame::Tap& y) {
+  return y.w0 * (x.w0 * load4(a) + x.w1 * load4(b)) + y.w1 * (x.w0 * load4(c) + x.w1 * load4(d));
+}
+
+}  // namespace
+
 Frame::Frame(int width, int height) : w_(width), h_(height) {
   screen_.allocate(width, height);
   tmp_.allocate(width, height);
@@ -827,71 +870,125 @@ Frame::Frame(int width, int height) : w_(width), h_(height) {
     w = std::max(1, (w + 1) / 2);
     h = std::max(1, (h + 1) / 2);
   }
+  cols_.resize(zs(width));
+  tile_cols_.resize(zs(kMaxTiles) * zs(width));
+  // bloom's way up: level l of the mips read at half the coordinates of the next finer level (the screen for l = 0)
+  for (std::size_t l = 0; l < mips_.size(); ++l) {
+    const Image4& c = mips_[l];
+    const int fw = l == 0 ? w_ : mips_[l - 1].w, fh = l == 0 ? h_ : mips_[l - 1].h;
+    std::vector<Tap> tx(zs(fw)), ty(zs(fh));
+    for (int x = 0; x < fw; ++x) tx[zs(x)] = tap((fl(x) + 0.5f) / 2.f - 0.5f, c.w);
+    for (int y = 0; y < fh; ++y) ty[zs(y)] = tap((fl(y) + 0.5f) / 2.f - 0.5f, c.h);
+    up_x_.push_back(std::move(tx));
+    up_y_.push_back(std::move(ty));
+  }
 }
 
-void Frame::background(const Light& light, std::span<const std::array<float, 4>> scorch) {
-  for (int y = 0; y < h_; ++y) {
-    float* row = screen_.row(y);
-    const float wy = cam_y + fl(y) + 0.5f;
-    for (int x = 0; x < w_; ++x) {
-      const float wx = cam_x + fl(x) + 0.5f;
-      float* p = row + zs(x) * 4;
-      const float hill = ground_y - (18.f + 26.f * (0.5f + 0.5f * std::sin(wx * 0.0042f + 1.3f)) * (0.6f + 0.4f * std::sin(wx * 0.011f + 0.4f)));
-      if (wy >= hill && wy < ground_y) {  // distant hills: a dark silhouette, faintly lit
-        const auto l = light.at(wx, hill);
-        p[0] = 0.006f + 0.05f * l[0];
-        p[1] = 0.007f + 0.05f * l[1];
-        p[2] = 0.012f + 0.05f * l[2];
-      } else if (wy < ground_y) {  // sky: dark blue, lighter at the horizon, a few stars fixed in the world
+void Frame::background(const Light& light, std::span<const std::array<float, 4>> scorch, Pool& pool) {
+  // The light is looked up as Light::at() does it, by taps (its columns once per screen column, its rows once per row)
+  // in a copy with a fourth channel, so that a cell is one vector.
+  const auto field = light.field();
+  const int lnx = light.nx(), lny = light.ny();
+  light4_.resize(zs(lnx) * zs(lny) * 4);  // the same size every frame: allocates on the first only
+  for (std::size_t i = 0; i < zs(lnx) * zs(lny); ++i) {
+    for (std::size_t c = 0; c < 3; ++c) light4_[i * 4 + c] = field[i * 3 + c];
+    light4_[i * 4 + 3] = 0.f;
+  }
+  const std::array<float, 3> flash = light.flash();
+  const px4 flash4{flash[0], flash[1], flash[2], 0.f};
+  const float* L = light4_.data();
+  const auto light_at = [&](const Tap& x, const Tap& y) {
+    const float* r0 = L + zs(y.i0) * zs(lnx) * 4;
+    const float* r1 = L + zs(y.i1) * zs(lnx) * 4;
+    return blend4(r0 + zs(x.i0) * 4, r0 + zs(x.i1) * 4, r1 + zs(x.i0) * 4, r1 + zs(x.i1) * 4, x, y) + flash4;
+  };
+  const auto light_rows = [&](float wy) { return tap((wy - light.y0()) / light.cell() - 0.5f, lny); };
+  for (int x = 0; x < w_; ++x) {  // per column: the hills' outline and their colour, the light's columns, hash keys
+    Column& k = cols_[zs(x)];
+    k.wx = cam_x + fl(x) + 0.5f;
+    k.hill = ground_y - (18.f + 26.f * (0.5f + 0.5f * std::sin(k.wx * 0.0042f + 1.3f)) * (0.6f + 0.4f * std::sin(k.wx * 0.011f + 0.4f)));
+    k.light = tap((k.wx - light.x0()) / light.cell() - 0.5f, lnx);
+    const px4 l = light_at(k.light, light_rows(k.hill));  // distant hills: a dark silhouette, faintly lit
+    k.hill_colour = {0.006f + 0.05f * l[0], 0.007f + 0.05f * l[1], 0.012f + 0.05f * l[2], 1.f};
+    k.star = hx(ifloor(k.wx / 3.f));
+    k.tex = hx(ifloor(k.wx / 2.f));
+  }
+  pool.run((h_ + kChunk - 1) / kChunk, [&](int task) {
+    for (int y = task * kChunk; y < std::min(h_, (task + 1) * kChunk); ++y) {
+      float* row = screen_.row(y);
+      const float wy = cam_y + fl(y) + 0.5f;
+      if (wy < ground_y) {
+        // the hills, and above them the sky: dark blue, lighter at the horizon, a few stars fixed in the world, and a
+        // little glow where the light is
         const float u = std::clamp((ground_y - wy) / 900.f, 0.f, 1.f);
-        p[0] = 0.010f + 0.020f * (1.f - u);
-        p[1] = 0.013f + 0.024f * (1.f - u);
-        p[2] = 0.030f + 0.035f * (1.f - u);
-        const int sx = ifloor(wx / 3.f), sy = ifloor(wy / 3.f);
-        const float h = hash01(sx, sy, 7);
-        if (h > 0.9965f) {
-          const float tw = 0.6f + 0.4f * std::sin(time * (2.f + 6.f * hash01(sx, sy, 9)) + 20.f * h);
-          const float s = (h - 0.9965f) / 0.0035f * 0.35f * tw * u;
-          p[0] += s;
-          p[1] += s;
-          p[2] += 1.1f * s;
+        const px4 sky{0.010f + 0.020f * (1.f - u), 0.013f + 0.024f * (1.f - u), 0.030f + 0.035f * (1.f - u), 1.f};
+        const std::uint32_t star_y = hy(ifloor(wy / 3.f));
+        const Tap ly = light_rows(wy);
+        for (int x = 0; x < w_; ++x) {
+          const Column& k = cols_[zs(x)];
+          float* p = row + zs(x) * 4;
+          if (wy >= k.hill) {
+            store4(p, load4(k.hill_colour.data()));
+            continue;
+          }
+          px4 v = sky;
+          const float h = unit(k.star ^ star_y ^ hz(7));
+          if (h > 0.9965f) {
+            const float tw = 0.6f + 0.4f * std::sin(time * (2.f + 6.f * unit(k.star ^ star_y ^ hz(9))) + 20.f * h);
+            const float s = (h - 0.9965f) / 0.0035f * 0.35f * tw * u;
+            v += px4{s, s, 1.1f * s, 0.f};
+          }
+          v += 0.08f * light_at(k.light, ly);
+          v[3] = 1.f;
+          store4(p, v);
         }
-        const auto l = light.at(wx, wy);  // the sky glows a little where the light is
-        p[0] += 0.08f * l[0];
-        p[1] += 0.08f * l[1];
-        p[2] += 0.08f * l[2];
-      } else {  // ground: dark earth, lit by the scene's light from just above it, darker towards the viewer
-        const float depth = std::clamp((wy - ground_y) / 160.f, 0.f, 1.f);
-        const float tex = 0.75f + 0.5f * hash01(ifloor(wx / 2.f), ifloor(wy / 2.f), 3) * (0.5f + 0.5f * depth);
-        const auto l = light.at(wx, ground_y - 6.f - 30.f * depth);
-        const float lit = (1.f - 0.55f * depth) * tex;
-        p[0] = (0.012f + 0.35f * l[0] / (1.f + 0.6f * l[0])) * lit * 0.9f;
-        p[1] = (0.011f + 0.35f * l[1] / (1.f + 0.6f * l[1])) * lit * 0.75f;
-        p[2] = (0.010f + 0.35f * l[2] / (1.f + 0.6f * l[2])) * lit * 0.6f;
-        for (const auto& s : scorch) {  // scorch marks: x, y, radius, glow
-          const float dx = (wx - s[0]) / s[2], dy = (wy - s[1]) / (0.28f * s[2]);
+        continue;
+      }
+      // ground: dark earth, lit by the scene's light from just above it, darker towards the viewer
+      const float depth = std::clamp((wy - ground_y) / 160.f, 0.f, 1.f);
+      const float tex_amp = 0.5f + 0.5f * depth, shade = 1.f - 0.55f * depth;
+      const std::uint32_t tex_y = hy(ifloor(wy / 2.f)) ^ hz(3);
+      const Tap ly = light_rows(ground_y - 6.f - 30.f * depth);
+      const px4 earth{0.012f, 0.011f, 0.010f, 0.f}, tint{0.9f, 0.75f, 0.6f, 0.f};
+      for (int x = 0; x < w_; ++x) {
+        const Column& k = cols_[zs(x)];
+        const float tex = 0.75f + 0.5f * unit(k.tex ^ tex_y) * tex_amp;
+        const float lit = shade * tex;
+        const px4 l = light_at(k.light, ly);
+        px4 v = (earth + 0.35f * l / (1.f + 0.6f * l)) * lit * tint;
+        v[3] = 1.f;
+        store4(row + zs(x) * 4, v);
+      }
+      for (const auto& s : scorch) {  // scorch marks (x, y, radius, glow), over the columns each covers in this row
+        const float dy = (wy - s[1]) / (0.28f * s[2]);
+        if (!(dy * dy < 1.f)) continue;
+        const float half = s[2] * std::sqrt(1.f - dy * dy);  // with a margin below: the test per pixel decides
+        const int xa = std::max(0, ifloor(s[0] - half - cam_x) - 2), xb = std::min(w_, ifloor(s[0] + half - cam_x) + 3);
+        for (int x = xa; x < xb; ++x) {
+          const Column& k = cols_[zs(x)];
+          const float dx = (k.wx - s[0]) / s[2];
           const float r2 = dx * dx + dy * dy;
           if (r2 >= 1.f) continue;
-          const float k = 1.f - smooth01(r2);
-          for (int c = 0; c < 3; ++c) p[c] *= 1.f - 0.85f * k;
-          const float n = 0.5f + 0.5f * value_noise(wx / 7.f, wy / 3.f, time * 0.4f, 5);  // smooth glowing patches
-          const float g = s[3] * k * k * std::pow(n, 5.f) * 0.8f;
+          float* p = row + zs(x) * 4;
+          const float kk = 1.f - smooth01(r2);
+          for (int c = 0; c < 3; ++c) p[c] *= 1.f - 0.85f * kk;
+          const float n = 0.5f + 0.5f * value_noise(k.wx / 7.f, wy / 3.f, time * 0.4f, 5);  // smooth glowing patches
+          const float g = s[3] * kk * kk * std::pow(n, 5.f) * 0.8f;
           const auto c = heat_colour(0.2f + 0.35f * n);
           p[0] += g * c[0];
           p[1] += g * c[1];
           p[2] += g * c[2];
         }
       }
-      p[3] = 1.f;
     }
-  }
+  });
 }
 
 void Frame::draw(std::span<Module* const> modules, Pool& pool) {
   // groups in order of first appearance; each drawn once
-  std::array<int, 64> done{};
+  std::array<int, kMaxTiles> done{};
   int n_done = 0;
-  std::array<Module*, 64> tiles{};
+  std::array<Module*, kMaxTiles> tiles{};
   for (Module* m : modules) {
     if (!m->active || m->opacity <= 0.f) continue;
     bool seen = false;
@@ -904,7 +1001,7 @@ void Frame::draw(std::span<Module* const> modules, Pool& pool) {
     } else {
       done[zs(n_done++)] = m->group;
       for (Module* t : modules) {
-        if (t->active && t->opacity > 0.f && t->group == m->group && n < 64) tiles[zs(n++)] = t;
+        if (t->active && t->opacity > 0.f && t->group == m->group && n < kMaxTiles) tiles[zs(n++)] = t;
       }
     }
     draw_group(std::span<Module* const>(tiles.data(), zs(n)), pool);
@@ -920,94 +1017,234 @@ void Frame::draw_group(std::span<Module* const> tiles, Pool& pool) {
   }
   const int y0 = std::max(0, ifloor(top)), y1 = std::min(h_, ifloor(bottom) + 1);
   if (y0 >= y1) return;
-  const int rows = y1 - y0, chunk = 8;
-  pool.run((rows + chunk - 1) / chunk, [&](int task) {
-    for (int y = y0 + task * chunk; y < std::min(y1, y0 + (task + 1) * chunk); ++y) {
-      float* acc = tmp_.row(y);
-      std::fill_n(acc, zs(w_) * 4, 0.f);
+  // Each tile's screen columns, once: its image columns, and the factors of its ownership weight that depend on x.
+  // Module::weight_px() is a product of factors of x and of y; multiplied here in its order, the weight is the same
+  // to the bit. Only the columns that see the image are kept (a run: the image column grows with the screen's).
+  std::array<std::array<int, 2>, kMaxTiles> seen_cols{};
+  for (std::size_t i = 0; i < tiles.size(); ++i) {
+    const Module* t = tiles[i];
+    const float sc = t->at.scale, S = fl(t->size()), R = fl(t->res()), k = S / R;
+    const int x0 = std::max(0, ifloor(t->at.x - cam_x)), x1 = std::min(w_, ifloor(t->at.x + S * sc - cam_x) + 1);
+    int first = x1, last = x0 - 1;
+    TileColumn* cols = tile_cols_.data() + i * zs(w_);
+    for (int x = x0; x < x1; ++x) {
+      const float ix = (cam_x + fl(x) + 0.5f - t->at.x) / sc - 0.5f;  // image column, continuous
+      if (ix < -0.5f || ix > S - 0.5f) continue;
+      first = std::min(first, x);
+      last = x;
+      TileColumn& c = cols[zs(x)];
+      const int ix0 = std::clamp(ifloor(ix), 0, t->size() - 1);
+      const float fx = std::clamp(ix - fl(ix0), 0.f, 1.f);
+      c.t = {ix0, std::min(ix0 + 1, t->size() - 1), 1.f - fx, fx};
+      const float px = ix + 0.5f, cx = px / k - 0.5f;
+      c.band = 1.f;
+      if (t->band[0] > 0) c.band *= 1.f - band_weight(cx, t->band[0]);
+      if (t->band[1] > 0) c.band *= band_weight(cx - (R - fl(t->band[1])), t->band[1]);
+      c.feather_left = t->feather > 0.f && t->band[0] == 0 ? smooth01(px / t->feather) : 1.f;
+      c.feather_right = t->feather > 0.f && t->band[1] == 0 ? smooth01((S - px) / t->feather) : 1.f;
+    }
+    seen_cols[i] = first <= last ? std::array<int, 2>{first, last + 1} : std::array<int, 2>{0, 0};
+  }
+  const int rows = y1 - y0;
+  pool.run((rows + kChunk - 1) / kChunk, [&](int task) {
+    // A pixel whose four image pixels are all empty (every channel 0) adds exactly nothing, so each image row is drawn
+    // only between its first and last pixel that is not empty. Rows found here are kept, two per tile: the tiles are
+    // scaled up, so the next screen row mostly reads the same two image rows.
+    struct Occupied {
+      int row = -1, a = 0, b = 0;  // image columns [a, b) of image row `row`
+    };
+    std::array<std::array<Occupied, 2>, kMaxTiles> known{};
+    const auto occupied = [&](std::size_t i, int r) {
+      Occupied& o = known[i][zs(r & 1)];
+      if (o.row == r) return o;
+      const float* p = tiles[i]->image().row(r);
+      const int w = tiles[i]->size();
+      const auto empty = [&](int x) {  // all four channels +0 (bits all 0; a -0 is drawn, which adds nothing either)
+        std::uint64_t a = 0, b = 0;
+        std::memcpy(&a, p + zs(x) * 4, 8);
+        std::memcpy(&b, p + zs(x) * 4 + 2, 8);
+        return (a | b) == 0;
+      };
+      o = {r, 0, w};
+      while (o.a < w && empty(o.a)) ++o.a;
+      if (o.a == w) o.b = 0;  // all empty
+      while (o.b > o.a && empty(o.b - 1)) --o.b;
+      return o;
+    };
+    struct TileRow {
+      Tap ty;
+      float band_b = 1.f, band_t = 1.f, feather_b = 1.f, feather_t = 1.f;
+      int xa = 0, xb = 0;  // screen columns drawn
+    };
+    std::array<TileRow, kMaxTiles> tr;
+    for (int y = y0 + task * kChunk; y < std::min(y1, y0 + (task + 1) * kChunk); ++y) {
       const float wy = cam_y + fl(y) + 0.5f;
       const float clip = smooth01((ground_y + 2.f - wy) / 3.f);  // the ground hides what is below it
       if (clip <= 0.f) continue;
-      bool any = false;
-      for (const Module* t : tiles) {
-        const float sc = t->at.scale, S = fl(t->size());
+      int ux0 = w_, ux1 = 0;  // screen columns any tile draws in this row
+      for (std::size_t i = 0; i < tiles.size(); ++i) {
+        const Module* t = tiles[i];
+        TileRow& r = tr[i];
+        r.xa = r.xb = 0;
+        const float sc = t->at.scale, S = fl(t->size()), R = fl(t->res()), k = S / R;
         const float iy = (wy - t->at.y) / sc - 0.5f;  // image row (top to bottom), continuous
         if (iy < -0.5f || iy > S - 0.5f) continue;
-        const int iy0 = std::clamp(ifloor(iy), 0, t->size() - 1), iy1 = std::min(iy0 + 1, t->size() - 1);
+        const int iy0 = std::clamp(ifloor(iy), 0, t->size() - 1);
         const float fy = std::clamp(iy - fl(iy0), 0.f, 1.f);
-        const float ty_up = S - (iy + 0.5f);
-        const int x0 = std::max(0, ifloor(t->at.x - cam_x)), x1 = std::min(w_, ifloor(t->at.x + S * sc - cam_x) + 1);
-        const float* r0 = t->image().row(iy0);
-        const float* r1 = t->image().row(iy1);
-        for (int x = x0; x < x1; ++x) {
-          const float ix = (cam_x + fl(x) + 0.5f - t->at.x) / sc - 0.5f;
-          if (ix < -0.5f || ix > S - 0.5f) continue;
-          const int ix0 = std::clamp(ifloor(ix), 0, t->size() - 1), ix1 = std::min(ix0 + 1, t->size() - 1);
-          const float fx = std::clamp(ix - fl(ix0), 0.f, 1.f);
-          const float w = t->weight_px(ix + 0.5f, ty_up) * t->opacity * clip;
+        r.ty = {iy0, std::min(iy0 + 1, t->size() - 1), 1.f - fy, fy};
+        const Occupied o0 = occupied(i, r.ty.i0), o1 = occupied(i, r.ty.i1);
+        const int a = std::min(o0.a, o1.a), b = std::max(o0.b, o1.b);
+        if (a >= b) continue;
+        // the screen columns whose image columns reach [a, b)
+        const TileColumn* cols = tile_cols_.data() + i * zs(w_);
+        const TileColumn* c0 = cols + seen_cols[i][0];
+        const TileColumn* c1 = cols + seen_cols[i][1];
+        const TileColumn* ca = std::partition_point(c0, c1, [&](const TileColumn& c) { return c.t.i1 < a; });
+        const TileColumn* cb = std::partition_point(ca, c1, [&](const TileColumn& c) { return c.t.i0 < b; });
+        r.xa = static_cast<int>(ca - cols);
+        r.xb = static_cast<int>(cb - cols);
+        if (r.xa >= r.xb) continue;
+        ux0 = std::min(ux0, r.xa);
+        ux1 = std::max(ux1, r.xb);
+        // the factors of the ownership weight that depend on y (tile pixels, y up)
+        const float py = S - (iy + 0.5f), cy = py / k - 0.5f;
+        r.band_b = t->band[2] > 0 ? 1.f - band_weight(cy, t->band[2]) : 1.f;
+        r.band_t = t->band[3] > 0 ? band_weight(cy - (R - fl(t->band[3])), t->band[3]) : 1.f;
+        r.feather_b = t->feather > 0.f && t->band[2] == 0 ? smooth01(py / t->feather) : 1.f;
+        r.feather_t = t->feather > 0.f && t->band[3] == 0 ? smooth01((S - py) / t->feather) : 1.f;
+      }
+      if (ux0 >= ux1) continue;
+      float* acc = tmp_.row(y);
+      std::fill(acc + zs(ux0) * 4, acc + zs(ux1) * 4, 0.f);
+      bool any = false;
+      for (std::size_t i = 0; i < tiles.size(); ++i) {
+        const TileRow& r = tr[i];
+        if (r.xa >= r.xb) continue;
+        const float opacity = tiles[i]->opacity;
+        const float* r0 = tiles[i]->image().row(r.ty.i0);
+        const float* r1 = tiles[i]->image().row(r.ty.i1);
+        const TileColumn* cols = tile_cols_.data() + i * zs(w_);
+        for (int x = r.xa; x < r.xb; ++x) {
+          const TileColumn& c = cols[zs(x)];
+          float w = c.band * r.band_b;
+          w *= r.band_t;
+          w *= c.feather_left;
+          w *= c.feather_right;
+          w *= r.feather_b;
+          w *= r.feather_t;
+          w = w * opacity * clip;
           if (w <= 0.f) continue;
-          const float* a = r0 + zs(ix0) * 4;
-          const float* b = r0 + zs(ix1) * 4;
-          const float* c = r1 + zs(ix0) * 4;
-          const float* d = r1 + zs(ix1) * 4;
           float* o = acc + zs(x) * 4;
-          for (int ch = 0; ch < 4; ++ch) o[ch] += w * ((1.f - fy) * ((1.f - fx) * a[ch] + fx * b[ch]) + fy * ((1.f - fx) * c[ch] + fx * d[ch]));
+          store4(o, load4(o) + w * blend4(r0 + zs(c.t.i0) * 4, r0 + zs(c.t.i1) * 4, r1 + zs(c.t.i0) * 4, r1 + zs(c.t.i1) * 4, c.t, r.ty));
           any = true;
         }
       }
       if (!any) continue;
       float* s = screen_.row(y);
-      for (int x = 0; x < w_; ++x) {
-        const float* o = acc + zs(x) * 4;
+      for (int x = ux0; x < ux1; ++x) {  // over: colour only, the screen keeps its alpha
+        const px4 o = load4(acc + zs(x) * 4);
         float* p = s + zs(x) * 4;
-        const float k = 1.f - std::clamp(o[3], 0.f, 1.f);
-        p[0] = p[0] * k + o[0];
-        p[1] = p[1] * k + o[1];
-        p[2] = p[2] * k + o[2];
+        px4 v = load4(p) * (1.f - std::clamp(o[3], 0.f, 1.f)) + o;
+        v[3] = p[3];
+        store4(p, v);
       }
     }
   });
 }
 
 void Frame::distort(std::span<const Shock> shocks, const FieldBus& bus, Pool& pool) {
-  const int chunk = 8;
-  pool.run((h_ + chunk - 1) / chunk, [&](int task) {
-    for (int y = task * chunk; y < std::min(h_, (task + 1) * chunk); ++y) {
+  // The bus's heat is looked up as FieldBus::at() does it (nothing beyond a cell outside the bus), by taps: its columns
+  // once per screen column, its rows once per row. The haze's terms of x alone are made once per column.
+  const float* heat = bus.heat().data();
+  const int bnx = bus.nx(), bny = bus.ny();
+  for (int x = 0; x < w_; ++x) {
+    Column& k = cols_[zs(x)];
+    k.wx = cam_x + fl(x) + 0.5f;
+    const float gx = (k.wx - bus.x0()) / bus.cell() - 0.5f;
+    k.on_bus = !(gx < -1.f || gx > fl(bnx));
+    k.bus = tap(gx, bnx);
+    k.wobble = std::sin(k.wx * 0.045f + time * 1.7f);
+    k.phase = k.wx * 0.07f - time * 8.f;
+  }
+  pool.run((h_ + kChunk - 1) / kChunk, [&](int task) {
+    std::array<float, kBlock> dxs{}, dys{};
+    for (int y = task * kChunk; y < std::min(h_, (task + 1) * kChunk); ++y) {
       const float* src_row = screen_.row(y);
       float* out = tmp_.row(y);
       const float wy = cam_y + fl(y) + 0.5f;
-      for (int x = 0; x < w_; ++x) {
-        const float wx = cam_x + fl(x) + 0.5f;
-        float dx = 0.f, dy = 0.f;
-        for (const Shock& s : shocks) {
+      // hot air below shimmers what is seen through it; a row whose bus rows are all cool has none
+      const float gy = (wy + 22.f - bus.y0()) / bus.cell() - 0.5f;
+      const Tap by = tap(gy, bny);
+      bool hazy = haze > 0.f && !(gy < -1.f || gy > fl(bny));
+      if (hazy) {
+        float most = -1e30f;
+        for (int i = 0; i < bnx; ++i) most = std::max({most, heat[zs(by.i0) * zs(bnx) + zs(i)], heat[zs(by.i1) * zs(bnx) + zs(i)]});
+        hazy = most >= 0.0099f;  // a blend of corners all below this stays below the threshold, 0.01, rounding included
+      }
+      const float haze_y = wy * 0.09f + time * 11.f, wobble_y = 1.5f * std::sin(wy * 0.05f);
+      for (int bx = 0; bx < w_; bx += kBlock) {
+        const int n = std::min(kBlock, w_ - bx);
+        std::fill_n(dxs.begin(), n, 0.f);
+        std::fill_n(dys.begin(), n, 0.f);
+        bool moved = hazy;
+        for (const Shock& s : shocks) {  // shock rings, over the columns each ring may cover in this row
           const float R = s.radius(time);
           if (R <= 0.f) continue;
-          const float ex = wx - s.x, ey = wy - s.y, r = std::sqrt(ex * ex + ey * ey) + 1e-3f;
-          const float d = r - R;
-          if (std::fabs(d) >= s.width) continue;
-          const float a = s.amp * std::exp(-(time - s.t0) / (2.f * s.decay)) * std::sin(std::numbers::pi_v<float> * d / s.width);
-          dx += a * ex / r;
-          dy += a * ey / r;
-        }
-        if (haze > 0.f) {
-          const float h = bus.at(wx, wy + 22.f).heat;  // hot air below shimmers what is seen through it
-          if (h > 0.01f) {
-            const float a = haze * std::min(1.f, 1.6f * h);
-            dx += a * 1.6f * std::sin(wy * 0.09f + time * 11.f + 2.f * std::sin(wx * 0.045f + time * 1.7f));
-            dy += a * 1.1f * std::sin(wx * 0.07f - time * 8.f + 1.5f * std::sin(wy * 0.05f));
+          const float ey = wy - s.y, ay = std::fabs(ey);
+          const float outer = R + s.width + 2.f, inner = R - s.width - 2.f;  // a margin: the test per pixel decides
+          if (ay >= outer) continue;
+          const float xo = std::sqrt(outer * outer - ey * ey), xi = inner > ay ? std::sqrt(inner * inner - ey * ey) : 0.f;
+          const float centre = s.x - cam_x - 0.5f;  // screen column of the centre, continuous
+          int spans[2][2] = {{ifloor(centre - xo) - 1, ifloor(centre - xi) + 2}, {ifloor(centre + xi) - 1, ifloor(centre + xo) + 2}};
+          if (spans[1][0] <= spans[0][1]) {  // the two spans meet: one
+            spans[0][1] = spans[1][1];
+            spans[1][0] = spans[1][1];
+          }
+          const float amp = s.amp * std::exp(-(time - s.t0) / (2.f * s.decay));
+          for (const auto& sp : spans) {
+            const int xa = std::max(sp[0], bx), xb = std::min(sp[1], bx + n);
+            for (int x = xa; x < xb; ++x) {
+              const float ex = cols_[zs(x)].wx - s.x, r = std::sqrt(ex * ex + ey * ey) + 1e-3f;
+              const float d = r - R;
+              if (std::fabs(d) >= s.width) continue;
+              const float a = amp * std::sin(std::numbers::pi_v<float> * d / s.width);
+              dxs[zs(x - bx)] += a * ex / r;
+              dys[zs(x - bx)] += a * ey / r;
+              moved = true;
+            }
           }
         }
-        float* o = out + zs(x) * 4;
-        if (dx == 0.f && dy == 0.f) {
-          std::copy_n(src_row + zs(x) * 4, 4, o);
+        if (hazy) {
+          for (int i = 0; i < n; ++i) {
+            const Column& k = cols_[zs(bx + i)];
+            if (!k.on_bus) continue;
+            const float h = lookup(heat, bnx, 1, 0, k.bus, by);
+            if (h > 0.01f) {
+              const float a = haze * std::min(1.f, 1.6f * h);
+              dxs[zs(i)] += a * 1.6f * std::sin(haze_y + 2.f * k.wobble);
+              dys[zs(i)] += a * 1.1f * std::sin(k.phase + wobble_y);
+            }
+          }
+        }
+        if (!moved) {
+          std::copy_n(src_row + zs(bx) * 4, zs(n) * 4, out + zs(bx) * 4);
           continue;
         }
-        const float sx = std::clamp(fl(x) + dx, 0.f, fl(w_ - 1)), sy = std::clamp(fl(y) + dy, 0.f, fl(h_ - 1));
-        const int x0 = std::min(static_cast<int>(sx), w_ - 2), y0 = std::min(static_cast<int>(sy), h_ - 2);
-        const float fx = sx - fl(x0), fy = sy - fl(y0);
-        const float* a = screen_.row(y0) + zs(x0) * 4;
-        const float* c = screen_.row(y0 + 1) + zs(x0) * 4;
-        for (int ch = 0; ch < 4; ++ch) o[ch] = (1.f - fy) * ((1.f - fx) * a[ch] + fx * a[4 + ch]) + fy * ((1.f - fx) * c[ch] + fx * c[4 + ch]);
+        for (int i = 0; i < n; ++i) {
+          const int x = bx + i;
+          const float dx = dxs[zs(i)], dy = dys[zs(i)];
+          float* o = out + zs(x) * 4;
+          if (dx == 0.f && dy == 0.f) {
+            std::copy_n(src_row + zs(x) * 4, 4, o);
+            continue;
+          }
+          const float sx = std::clamp(fl(x) + dx, 0.f, fl(w_ - 1)), sy = std::clamp(fl(y) + dy, 0.f, fl(h_ - 1));
+          const int x0 = std::min(static_cast<int>(sx), w_ - 2), y0 = std::min(static_cast<int>(sy), h_ - 2);
+          const float fx = sx - fl(x0), fy = sy - fl(y0);
+          const float* a = screen_.row(y0) + zs(x0) * 4;
+          const float* c = screen_.row(y0 + 1) + zs(x0) * 4;
+          store4(o, (1.f - fy) * ((1.f - fx) * load4(a) + fx * load4(a + 4)) + fy * ((1.f - fx) * load4(c) + fx * load4(c + 4)));
+        }
       }
     }
   });
@@ -1015,33 +1252,54 @@ void Frame::distort(std::span<const Shock> shocks, const FieldBus& bus, Pool& po
 }
 
 void Frame::bloom(float threshold, float strength, Pool& pool) {
-  // bright pass into mip 0 (half size), then down, blur, and up
+  // Bright pass into mip 0 (half size), then down, blur, and up. Every pass works on all four channels; channel 3 of
+  // the mips stays 0, so what it adds to the screen's alpha is 0.
+  const auto each_row = [&](const Image4& im, auto&& f) {
+    if (zs(im.w) * zs(im.h) < 16384) {  // a small level: waking the workers would cost more than the work
+      for (int y = 0; y < im.h; ++y) f(y);
+      return;
+    }
+    pool.run((im.h + kChunk - 1) / kChunk, [&](int task) {
+      for (int y = task * kChunk; y < std::min(im.h, (task + 1) * kChunk); ++y) f(y);
+    });
+  };
   Image4& m0 = mips_[0];
-  pool.run(m0.h, [&](int y) {
+  each_row(m0, [&](int y) {
+    const float* r0 = screen_.row(std::min(2 * y, h_ - 1));
+    const float* r1 = screen_.row(std::min(2 * y + 1, h_ - 1));
     float* o = m0.row(y);
-    for (int x = 0; x < m0.w; ++x) {
-      float s[3] = {0, 0, 0};
-      for (int q = 0; q < 4; ++q) {
-        const int sx = std::min(2 * x + (q & 1), w_ - 1), sy = std::min(2 * y + (q >> 1), h_ - 1);
-        const float* p = screen_.row(sy) + zs(sx) * 4;
-        const float l = 0.2126f * p[0] + 0.7152f * p[1] + 0.0722f * p[2];
-        const float k = std::max(0.f, l - threshold) / std::max(l, 1e-4f);
-        for (int c = 0; c < 3; ++c) s[c] += 0.25f * k * p[c];
+    std::array<float, 2 * kBlock> k0, k1;  // a quarter of the bright part of each source pixel, by source row
+    for (int bx = 0; bx < m0.w; bx += kBlock) {
+      const int n = std::min(kBlock, m0.w - bx), sx0 = 2 * bx, sn = std::min(2 * n, w_ - sx0);
+      for (int j = 0; j < sn; ++j) {
+        const float* p = r0 + zs(sx0 + j) * 4;
+        const float* q = r1 + zs(sx0 + j) * 4;
+        const float lp = 0.2126f * p[0] + 0.7152f * p[1] + 0.0722f * p[2], lq = 0.2126f * q[0] + 0.7152f * q[1] + 0.0722f * q[2];
+        k0[zs(j)] = 0.25f * (std::max(0.f, lp - threshold) / std::max(lp, 1e-4f));
+        k1[zs(j)] = 0.25f * (std::max(0.f, lq - threshold) / std::max(lq, 1e-4f));
       }
-      for (int c = 0; c < 3; ++c) o[zs(x) * 4 + zs(c)] = s[c];
+      for (int i = 0; i < n; ++i) {
+        const int ja = std::min(2 * i, sn - 1), jb = std::min(2 * i + 1, sn - 1);
+        const float* a = r0 + zs(sx0 + ja) * 4;
+        const float* b = r0 + zs(sx0 + jb) * 4;
+        const float* c = r1 + zs(sx0 + ja) * 4;
+        const float* d = r1 + zs(sx0 + jb) * 4;
+        px4 v = k0[zs(ja)] * load4(a) + k0[zs(jb)] * load4(b) + k1[zs(ja)] * load4(c) + k1[zs(jb)] * load4(d);
+        v[3] = 0.f;
+        store4(o + zs(bx + i) * 4, v);
+      }
     }
   });
   for (std::size_t l = 1; l < mips_.size(); ++l) {
-    Image4& s = mips_[l - 1];
+    const Image4& s = mips_[l - 1];
     Image4& d = mips_[l];
-    pool.run(d.h, [&](int y) {
+    each_row(d, [&](int y) {
+      const float* r0 = s.row(std::min(2 * y, s.h - 1));
+      const float* r1 = s.row(std::min(2 * y + 1, s.h - 1));
       float* o = d.row(y);
       for (int x = 0; x < d.w; ++x) {
-        for (int c = 0; c < 3; ++c) {
-          float sum = 0.f;
-          for (int q = 0; q < 4; ++q) sum += s.row(std::min(2 * y + (q >> 1), s.h - 1))[zs(std::min(2 * x + (q & 1), s.w - 1)) * 4 + zs(c)];
-          o[zs(x) * 4 + zs(c)] = 0.25f * sum;
-        }
+        const std::size_t a = zs(std::min(2 * x, s.w - 1)) * 4, b = zs(std::min(2 * x + 1, s.w - 1)) * 4;
+        store4(o + zs(x) * 4, 0.25f * (load4(r0 + a) + load4(r0 + b) + load4(r1 + a) + load4(r1 + b)));
       }
     });
   }
@@ -1049,59 +1307,91 @@ void Frame::bloom(float threshold, float strength, Pool& pool) {
   for (std::size_t l = 0; l < mips_.size(); ++l) {
     Image4& a = mips_[l];
     Image4& b = mips_tmp_[l];
-    pool.run(a.h, [&](int y) {
-      for (int x = 0; x < a.w; ++x) {
-        for (int c = 0; c < 3; ++c) {
-          float s = 0.f;
-          for (int t = -2; t <= 2; ++t) s += kw[t + 2] * a.row(y)[zs(std::clamp(x + t, 0, a.w - 1)) * 4 + zs(c)];
-          b.row(y)[zs(x) * 4 + zs(c)] = s;
+    const int W = a.w;
+    each_row(a, [&](int y) {  // across, a into b: the clamped ends, then the middle
+      const float* s = a.row(y);
+      float* o = b.row(y);
+      const auto clamped = [&](int x) {
+        for (int c = 0; c < 4; ++c) {
+          float v = 0.f;
+          for (int t = -2; t <= 2; ++t) v += kw[t + 2] * s[zs(std::clamp(x + t, 0, W - 1)) * 4 + zs(c)];
+          o[zs(x) * 4 + zs(c)] = v;
         }
-      }
+      };
+      for (int x = 0; x < std::min(2, W); ++x) clamped(x);
+      for (int x = std::max(2, W - 2); x < W; ++x) clamped(x);
+      for (int i = 8; i < 4 * (W - 2); ++i) o[i] = kw[0] * s[i - 8] + kw[1] * s[i - 4] + kw[2] * s[i] + kw[3] * s[i + 4] + kw[4] * s[i + 8];
     });
-    pool.run(a.h, [&](int y) {
-      for (int x = 0; x < a.w; ++x) {
-        for (int c = 0; c < 3; ++c) {
-          float s = 0.f;
-          for (int t = -2; t <= 2; ++t) s += kw[t + 2] * b.row(std::clamp(y + t, 0, a.h - 1))[zs(x) * 4 + zs(c)];
-          a.row(y)[zs(x) * 4 + zs(c)] = s;
-        }
-      }
+    each_row(a, [&](int y) {  // down, b into a
+      const float* r[5];
+      for (int t = 0; t < 5; ++t) r[t] = b.row(std::clamp(y + t - 2, 0, a.h - 1));
+      float* o = a.row(y);
+      for (int i = 0; i < 4 * W; ++i) o[i] = kw[0] * r[0][i] + kw[1] * r[1][i] + kw[2] * r[2][i] + kw[3] * r[3][i] + kw[4] * r[4][i];
     });
   }
-  for (std::size_t l = mips_.size() - 1; l > 0; --l) {  // up: each level adds the coarser one, bilinear
-    Image4& c = mips_[l];
-    Image4& f = mips_[l - 1];
-    pool.run(f.h, [&](int y) {
-      for (int x = 0; x < f.w; ++x) {
-        const float gx = (fl(x) + 0.5f) / 2.f - 0.5f, gy = (fl(y) + 0.5f) / 2.f - 0.5f;
-        for (int ch = 0; ch < 3; ++ch) f.row(y)[zs(x) * 4 + zs(ch)] += bilerp(c.px.data(), c.w, c.h, 4, ch, gx, gy);
-      }
-    });
-  }
-  pool.run(h_, [&](int y) {
-    float* p = screen_.row(y);
-    for (int x = 0; x < w_; ++x) {
-      const float gx = (fl(x) + 0.5f) / 2.f - 0.5f, gy = (fl(y) + 0.5f) / 2.f - 0.5f;
-      for (int ch = 0; ch < 3; ++ch) p[zs(x) * 4 + zs(ch)] += strength * bilerp(m0.px.data(), m0.w, m0.h, 4, ch, gx, gy) / static_cast<float>(mips_.size());
+  const auto add_up = [&](float* o, const Image4& c, int y, int fw, std::size_t l, float gain, float div) {  // o += gain * c / div
+    const Tap& ty = up_y_[l][zs(y)];
+    const float* r0 = c.row(ty.i0);
+    const float* r1 = c.row(ty.i1);
+    const Tap* tx = up_x_[l].data();
+    for (int x = 0; x < fw; ++x) {
+      const Tap& t = tx[x];
+      float* p = o + zs(x) * 4;
+      store4(p, load4(p) + gain * blend4(r0 + zs(t.i0) * 4, r0 + zs(t.i1) * 4, r1 + zs(t.i0) * 4, r1 + zs(t.i1) * 4, t, ty) / div);
     }
-  });
+  };
+  for (std::size_t l = mips_.size() - 1; l > 0; --l) {  // up: each level adds the coarser one, bilinear
+    Image4& f = mips_[l - 1];
+    each_row(f, [&](int y) { add_up(f.row(y), mips_[l], y, f.w, l, 1.f, 1.f); });
+  }
+  each_row(screen_, [&](int y) { add_up(screen_.row(y), m0, y, w_, 0, strength, static_cast<float>(mips_.size())); });
 }
+
+namespace {
+
+// Tone mapping of n values into levels of the display table: ACES of the value times the exposure, vignette and fade,
+// plus grain.
+void tone(const float* p, const float* vig, const float* grain, float exposure, float fade, int* level, int n) {
+  const auto aces = [](float v) { return std::clamp(v * (2.51f * v + 0.03f) / (v * (2.43f * v + 0.59f) + 0.14f), 0.f, 1.f); };
+  for (int i = 0; i < n; ++i) {
+    const float v = aces(p[i] * exposure * vig[i] * fade) + grain[i];
+    level[i] = std::clamp(static_cast<int>(v * 4095.f + 0.5f), 0, 4095);
+  }
+}
+
+}  // namespace
 
 void Frame::finish(std::span<std::uint8_t> rgb, Pool& pool) {
   const Gamma& g = gamma();
-  const auto aces = [](float v) { return std::clamp(v * (2.51f * v + 0.03f) / (v * (2.43f * v + 0.59f) + 0.14f), 0.f, 1.f); };
-  const int frame_salt = static_cast<int>(time * 30.f);
-  pool.run(h_, [&](int y) {
-    const float* p = screen_.row(y);
-    std::uint8_t* o = rgb.data() + zs(y) * zs(w_) * 3;
-    const float ny = (fl(y) + 0.5f) / fl(h_) - 0.5f;
-    for (int x = 0; x < w_; ++x) {
-      const float nx = ((fl(x) + 0.5f) / fl(w_) - 0.5f) * (fl(w_) / fl(h_));
-      const float vig = 1.f - 0.45f * (nx * nx + ny * ny);
-      const float grain = (hash01(x, y, frame_salt) - 0.5f) * 0.006f;
-      for (int c = 0; c < 3; ++c) {
-        const float v = aces(p[zs(x) * 4 + zs(c)] * exposure * vig * fade) + grain;
-        o[zs(x) * 3 + zs(c)] = g.to_display[zs(std::clamp(static_cast<int>(v * 4095.f + 0.5f), 0, 4095))];
+  const std::uint32_t salt = hz(static_cast<int>(time * 30.f));
+  for (int x = 0; x < w_; ++x) {
+    const float nx = ((fl(x) + 0.5f) / fl(w_) - 0.5f) * (fl(w_) / fl(h_));
+    cols_[zs(x)].vig = nx * nx;
+    cols_[zs(x)].grain = hx(x);
+  }
+  pool.run((h_ + kChunk - 1) / kChunk, [&](int task) {
+    std::array<float, 4 * kBlock> vig, grain;  // per value of a block of pixels (all four channels, for vectors)
+    std::array<int, 4 * kBlock> level;
+    for (int y = task * kChunk; y < std::min(h_, (task + 1) * kChunk); ++y) {
+      const float* p = screen_.row(y);
+      std::uint8_t* o = rgb.data() + zs(y) * zs(w_) * 3;
+      const float ny = (fl(y) + 0.5f) / fl(h_) - 0.5f, ny2 = ny * ny;
+      const std::uint32_t key_y = hy(y) ^ salt;
+      for (int bx = 0; bx < w_; bx += kBlock) {
+        const int n = std::min(kBlock, w_ - bx);
+        for (int i = 0; i < n; ++i) {
+          const Column& k = cols_[zs(bx + i)];
+          const float v = 1.f - 0.45f * (k.vig + ny2), gr = (unit(k.grain ^ key_y) - 0.5f) * 0.006f;
+          for (int c = 0; c < 4; ++c) {
+            vig[zs(i) * 4 + zs(c)] = v;
+            grain[zs(i) * 4 + zs(c)] = gr;
+          }
+        }
+        tone(p + zs(bx) * 4, vig.data(), grain.data(), exposure, fade, level.data(), 4 * n);
+        std::uint8_t* ob = o + zs(bx) * 3;
+        for (int i = 0; i < n; ++i) {
+          for (int c = 0; c < 3; ++c) ob[zs(i) * 3 + zs(c)] = g.to_display[zs(level[zs(i) * 4 + zs(c)])];
+        }
       }
     }
   });

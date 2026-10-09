@@ -100,7 +100,7 @@ struct MiniScene {
     parts.update(1.f / 30.f, &bus, 1.f, frame.ground_y);
     pool.run(static_cast<int>(all.size()), [&](int i) { all[static_cast<std::size_t>(i)]->shade(&light); });
     const std::array<float, 4> scorch[1] = {{80.f, 82.f, 20.f, 0.5f}};
-    frame.background(light, scorch);
+    frame.background(light, scorch, pool);
     frame.draw(all, pool);
     frame.particles(parts);
     frame.distort(shocks, bus, pool);
