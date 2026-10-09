@@ -466,7 +466,7 @@ int main(int argc, char** argv) try {
     auto c4 = Clock::now();
     P[kBus] = ms(c3, c4);
 
-    light.update(bus, 0.14f, {0.75f * flash + 0.5f * flash2, 0.55f * flash + 0.36f * flash2, 0.37f * flash + 0.22f * flash2});
+    light.update(bus, 0.14f, {0.75f * flash + 0.5f * flash2, 0.55f * flash + 0.36f * flash2, 0.37f * flash + 0.22f * flash2}, pool);
     auto c5 = Clock::now();
     P[kLight] = ms(c4, c5);
 

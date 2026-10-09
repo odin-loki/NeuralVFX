@@ -145,6 +145,17 @@ class Module {
   // with the neighbour across a band (the weights of the tiles of a group sum to 1 everywhere).
   float weight_px(float x, float y) const;
   float weight_cell(int cx, int cy) const;
+  // weight_px() in two halves, for loops over rows and columns: the factors that depend on x and those that depend on
+  // y. weight() multiplies them in weight_px()'s order, so the value is the same to the last bit.
+  struct WeightX {
+    float band = 1.f, feather0 = 1.f, feather1 = 1.f;
+  };
+  struct WeightY {
+    float band0 = 1.f, band1 = 1.f, feather0 = 1.f, feather1 = 1.f;
+  };
+  WeightX weight_x(float x) const;
+  WeightY weight_y(float y) const;
+  static float weight(const WeightX& a, const WeightY& b) { return a.band * b.band0 * b.band1 * a.feather0 * a.feather1 * b.feather0 * b.feather1; }
 
   bool active = false;
   float opacity = 1.f;
@@ -163,10 +174,19 @@ class Module {
   std::string name_;
   const rt::RolloutEffect& e_;
   int size_;
+  Isa isa_;
   std::unique_ptr<rt::RolloutRunner> r_;
   Image4 img_;
   std::vector<std::uint8_t> rgba8_;
   std::vector<float> shadow_;  // coarse: soot summed towards the sky
+  // Field shader scratch. Light and shadow are bilinear in their grids, so each grid row is resampled along x once
+  // (the first half of a bilinear sample) and every pixel row only blends two such rows (the second half).
+  std::vector<float> shadow_x_;      // [res][size]: shadow_ resampled at the pixels' x
+  std::vector<float> light_x_;       // [2][3][size]: two rows of the light grid resampled at the pixels' x, a plane per colour
+  std::vector<int> sx_, lx_;         // [2][size]: the two grid columns each pixel's x falls between (shadow, light)
+  std::vector<float> sfx_, lfx_;     // [size]: weight of the second column
+  std::vector<float> row_;           // [2][size]: per row of pixels: soot slope along x, emission ramp
+  std::vector<int> drawn_;           // [size][2]: per row of the image, the pixels that may not be zero (the rest are)
   std::vector<float> pushed_;
   bool has_push_ = false;
   friend void push(Module&, const struct FieldBus&, float);
@@ -208,12 +228,23 @@ struct FieldBus {
   std::span<const float> soot() const { return soot_; }
 
  private:
-  Sample sample(const std::vector<float>& f, float x, float y) const;
+  Sample sample(const float* f, float x, float y) const;
   float x0_, y0_, cell_;
   int nx_, ny_, groups_;
   std::vector<float> all_;    // [ny][nx][4]: u, v, heat, soot
   std::vector<float> layer_;  // [group][ny][nx][4]
   std::vector<float> heat_, soot_;
+  struct Rect {  // bus cells [i0, i1] x [j0, j1] written since the last clear (empty: i0 > i1)
+    int i0 = 0, i1 = -1, j0 = 0, j1 = -1;
+  };
+  std::vector<Rect> dirty_;  // [group], then all groups
+  struct Column {            // publish(): what a column of bus cells takes from the module's tile
+    Module::WeightX w;       // its factors of the ownership weight
+    int x0 = 0, x1 = 0;      // the coarse columns it falls between
+    float fx = 0.f;          // and the weight of the second
+    bool inside = false;     // within the tile
+  };
+  std::vector<Column> cols_;
 };
 
 // Push: the others' flow (world pixels per frame from the bus), times `gain`, moves the module's material for its next
@@ -244,9 +275,17 @@ void transfer(Module& from, std::span<Module* const> to, float fraction, int row
 class Light {
  public:
   explicit Light(const FieldBus& bus);
-  void update(const FieldBus& bus, float gain, std::array<float, 3> flash);
+  // Rows are spread over the pool; the light is the same on any number of threads.
+  void update(const FieldBus& bus, float gain, std::array<float, 3> flash, Pool& pool);
   std::array<float, 3> at(float x, float y) const;  // world position
+  // The grid at() samples: field() is [ny][nx][3] cells of `cell` world pixels from (x0, y0); at() adds flash().
   std::span<const float> field() const { return L_; }
+  float x0() const { return x0_; }
+  float y0() const { return y0_; }
+  float cell() const { return cell_; }
+  int nx() const { return nx_; }
+  int ny() const { return ny_; }
+  std::array<float, 3> flash() const { return flash_; }
 
  private:
   float x0_, y0_, cell_;
@@ -255,6 +294,11 @@ class Light {
   struct Level {
     int nx = 0, ny = 0;
     std::vector<float> a, b;
+    // Sampling this level at the centres of the finest cells (bilinear): for each column and each row of the finest
+    // grid, the two cells of this level it falls between and the weight of the second.
+    std::vector<int> x0, x1, y0, y1;
+    std::vector<float> fx, fy;
+    std::vector<float> up;  // [ny][nx_ of the finest level][3]: each row resampled at the finest columns
   };
   std::vector<Level> levels_;
   std::array<float, 3> flash_{};

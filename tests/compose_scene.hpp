@@ -95,7 +95,7 @@ struct MiniScene {
     apply(*all[0], ceiling);
     const ForceField swirl{ForceField::Kind::vortex, 60.f, 40.f, 20.f, 1.f};
     apply(*all[1], swirl);
-    light.update(bus, 0.2f, {0.1f, 0.05f, 0.f});
+    light.update(bus, 0.2f, {0.1f, 0.05f, 0.f}, pool);
     if (f % 5 == 0) parts.spawn(Kind::ember, 60.f, 70.f, 20.f, -80.f, 1.f, 1.f, 2.f);
     parts.update(1.f / 30.f, &bus, 1.f, frame.ground_y);
     pool.run(static_cast<int>(all.size()), [&](int i) { all[static_cast<std::size_t>(i)]->shade(&light); });

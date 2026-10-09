@@ -66,6 +66,136 @@ float bilerp(const float* f, int nx, int ny, int ch, int c, float x, float y) {
   return (1.f - fy) * ((1.f - fx) * at(x0, y0) + fx * at(x1, y0)) + fy * ((1.f - fx) * at(x0, y1) + fx * at(x1, y1));
 }
 
+// One axis of bilerp(): the two cells a continuous coordinate falls between (clamped to n cells) and the weight of the
+// second. Computed exactly as bilerp() does, so samples built from it are the same to the last bit.
+struct Taps {
+  int i0, i1;
+  float f;
+};
+Taps taps(float x, int n) {
+  x = std::clamp(x, 0.f, fl(n - 1));
+  const int i0 = std::min(static_cast<int>(x), std::max(0, n - 2));
+  return {i0, std::min(i0 + 1, n - 1), x - fl(i0)};
+}
+
+// bilerp() of channels 0 .. N - 1 of a grid with `ch` interleaved channels, the weights computed once: the same values
+// as N calls of bilerp().
+template <int N>
+[[gnu::always_inline]] inline std::array<float, N> bilerp_n(const float* f, int nx, int ny, int ch, float x, float y) {
+  const Taps tx = taps(x, nx), ty = taps(y, ny);
+  const float* a = f + (zs(ty.i0) * zs(nx) + zs(tx.i0)) * zs(ch);
+  const float* b = f + (zs(ty.i0) * zs(nx) + zs(tx.i1)) * zs(ch);
+  const float* c = f + (zs(ty.i1) * zs(nx) + zs(tx.i0)) * zs(ch);
+  const float* d = f + (zs(ty.i1) * zs(nx) + zs(tx.i1)) * zs(ch);
+  const float fx = tx.f, fy = ty.f;
+  std::array<float, N> s;
+  for (int k = 0; k < N; ++k) s[zs(k)] = (1.f - fy) * ((1.f - fx) * a[k] + fx * b[k]) + fy * ((1.f - fx) * c[k] + fx * d[k]);
+  return s;
+}
+
+// exp(x) without branches or calls, so loops over pixels vectorise: the polynomial and range reduction of the Cephes
+// library, within a few units in the last place of std::exp. x is clamped to [-87, 88] (no denormals, no overflow).
+inline float exp_fast(float x) {
+  x = std::clamp(x, -87.f, 88.f);
+  const float n = (x * 1.44269504088896341f + 12582912.f) - 12582912.f;  // round to the nearest integer
+  const float r = (x - n * 0.693359375f) - n * -2.12194440e-4f;            // x - n ln 2, in two parts
+  float p = 1.9875691500e-4f;
+  p = p * r + 1.3981999507e-3f;
+  p = p * r + 8.3334519073e-3f;
+  p = p * r + 4.1665795894e-2f;
+  p = p * r + 1.6666665459e-1f;
+  p = p * r + 5.0000001201e-1f;
+  return (p * r * r + r + 1.f) * std::bit_cast<float>((static_cast<std::int32_t>(n) + 127) * (1 << 23));  // times 2^n
+}
+
+// heat_colour() as a sum of ramps, one per stop: no branches or table, so loops over pixels vectorise. The same colours
+// up to rounding.
+inline void heat_rgb(float t, float& r, float& g, float& b) {
+  t = std::clamp(t, 0.f, 1.4f);
+  const float r1 = std::max(0.f, t - 0.25f), r2 = std::max(0.f, t - 0.5f), r3 = std::max(0.f, t - 0.75f), r4 = std::max(0.f, t - 1.f);
+  r = 0.25f + 2.f * t - r1 - r2;
+  g = 0.02f + 0.4f * t + 0.52f * r1 + 0.16f * r2 - 0.16f * r3 - 0.62f * r4;
+  b = 0.04f * t + 0.08f * r1 + 0.32f * r2 + 0.76f * r3 - 0.2f * r4;
+}
+
+// The field shader on pixels [x0, x1) of one row (Module::shade): everything per pixel, in one loop without branches or
+// calls, which GCC vectorises. The light and the shadow come as rows already resampled along x, to be blended.
+struct ShadeSpan {
+  const float* heat;                      // fine heat and soot of the row
+  const float* soot;
+  const float* soot_up;                   // soot two rows above and below (clamped to the tile)
+  const float* soot_down;
+  const float* slope_x;                   // soot slope along x
+  const float* ramp;                      // (heat / heat_scale) ^ emission_power
+  const float* shadow0;                   // two coarse rows of the shadow sum resampled along x, and the second's weight
+  const float* shadow1;
+  float shadow_f;
+  const float* light0;                    // two rows of the light resampled along x (a plane of `size` per colour)
+  const float* light1;
+  float light_f;
+  std::array<float, 3> flash;
+  int size;
+  float* out;                             // RGBA, the row's first pixel
+};
+
+// (The rows are restrict-qualified parameters: GCC then knows the output overlaps none of them.)
+[[gnu::always_inline]] inline void shade_pixels(const float* __restrict fh, const float* __restrict fs, const float* __restrict up, const float* __restrict dn,
+                                    const float* __restrict sx, const float* __restrict pw, const float* __restrict s0, const float* __restrict s1,
+                                    const float* __restrict l0, const float* __restrict l1, float* __restrict o, const ShadeSpan& s, const ShaderSpec& sp,
+                                    int x0, int x1) {
+  const float* r0 = l0;
+  const float* g0 = l0 + s.size;
+  const float* b0 = l0 + 2 * s.size;
+  const float* r1 = l1;
+  const float* g1 = l1 + s.size;
+  const float* b1 = l1 + 2 * s.size;
+  const float sf = s.shadow_f, lf = s.light_f, fr = s.flash[0], fg = s.flash[1], fb = s.flash[2];
+  const float density = sp.soot_density, shadow = sp.shadow, relief = sp.relief, sky = sp.sky, scene = sp.scene_light;
+  const float inv_hs = 1.f / sp.heat_scale, emission = sp.emission, albedo = sp.soot_albedo;
+  const float tr = sp.tint[0], tg = sp.tint[1], tb = sp.tint[2];
+  for (int x = x0; x < x1; ++x) {
+    const float T = std::max(0.f, fh[x]), D = std::max(0.f, fs[x]);
+    const std::uint32_t keep = std::max(T, D) >= 1e-4f ? ~0u : 0u;  // empty pixels stay transparent
+    const float a = 1.f - exp_fast(-density * D);
+    const float sh = exp_fast(-shadow * ((1.f - sf) * s0[x] + sf * s1[x]));
+    // the soot as a height field: its slope towards the moon (up and left) lights billows, away from it darkens them
+    const float nx = -relief * sx[x], ny = -relief * (0.5f * (up[x] - dn[x])), inv = 1.f / std::sqrt(nx * nx + ny * ny + 1.f);
+    const float lambert = std::max(0.f, (-0.45f * nx + 0.6f * ny + 0.66f) * inv);
+    const float moon = sky * sh * (0.35f + 0.9f * lambert);
+    const float under = 0.4f + 0.9f * std::max(0.f, (0.2f * nx - 0.7f * ny + 0.68f) * inv);  // facing down: lit by the fire below
+    const float lr = (1.f - lf) * r0[x] + lf * r1[x] + fr, lg = (1.f - lf) * g0[x] + lf * g1[x] + fg, lb = (1.f - lf) * b0[x] + lf * b1[x] + fb;
+    const float Lr = 0.7f * moon + scene * lr / (1.f + lr) * under;  // soft limit: hot gas inside its own glow
+    const float Lg = 0.8f * moon + scene * lg / (1.f + lg) * under;
+    const float Lb = 1.1f * moon + scene * lb / (1.f + lb) * under;
+    float hr, hg, hb;
+    heat_rgb(T * inv_hs, hr, hg, hb);
+    const float e = emission * pw[x] * (1.f - 0.55f * a);
+    const float c[4] = {a * albedo * tr * Lr + e * hr, a * albedo * tg * Lg + e * hg, a * albedo * tb * Lb + e * hb, a};
+    for (int k = 0; k < 4; ++k) o[zs(x) * 4 + zs(k)] = std::bit_cast<float>(std::bit_cast<std::uint32_t>(c[k]) & keep);
+  }
+}
+
+// Compiled twice: for the baseline ISA and, when the module's runner uses it, for AVX2 (wider vectors, and multiply-adds
+// fused, so the two differ in the last bit or so, as the runtime's ISAs do).
+[[gnu::noinline]] void shade_span_base(const ShadeSpan& s, const ShaderSpec& sp, int x0, int x1) {
+  shade_pixels(s.heat, s.soot, s.soot_up, s.soot_down, s.slope_x, s.ramp, s.shadow0, s.shadow1, s.light0, s.light1, s.out, s, sp, x0, x1);
+}
+
+#if defined(__GNUC__) && !defined(__clang__) && defined(__x86_64__)
+#define NFX_COMPOSE_AVX2 1
+[[gnu::noinline, gnu::target("arch=x86-64-v3")]] void shade_span_avx2(const ShadeSpan& s, const ShaderSpec& sp, int x0, int x1) {
+  shade_pixels(s.heat, s.soot, s.soot_up, s.soot_down, s.slope_x, s.ramp, s.shadow0, s.shadow1, s.light0, s.light1, s.out, s, sp, x0, x1);
+}
+#endif
+
+void shade_span(const ShadeSpan& s, const ShaderSpec& sp, int x0, int x1, Isa isa) {
+#if defined(NFX_COMPOSE_AVX2)
+  if (isa != Isa::base) return shade_span_avx2(s, sp, x0, x1);
+#endif
+  (void)isa;
+  shade_span_base(s, sp, x0, x1);
+}
+
 }  // namespace
 
 // --- Pool --------------------------------------------------------------------------------------------------------------
@@ -166,10 +296,25 @@ std::unique_ptr<rt::RolloutRunner> make_runner(const rt::RolloutEffect& e, int s
 }
 
 Module::Module(std::string name, const rt::RolloutEffect& e, int size, Placement p, Isa isa)
-    : at(p), name_(std::move(name)), e_(e), size_(size), r_(make_runner(e, size, isa)) {
+    : at(p), name_(std::move(name)), e_(e), size_(size), isa_(isa), r_(make_runner(e, size, isa)) {
   img_.allocate(size, size);
   rgba8_.assign(zs(size) * zs(size) * 4, 0);
   shadow_.assign(zs(res()) * zs(res()), 0.f);
+  shadow_x_.assign(zs(res()) * zs(size), 0.f);
+  light_x_.assign(zs(size) * 6, 0.f);
+  sx_.assign(zs(size) * 2, 0);
+  lx_.assign(zs(size) * 2, 0);
+  sfx_.assign(zs(size), 0.f);
+  lfx_.assign(zs(size), 0.f);
+  row_.assign(zs(size) * 2, 0.f);
+  drawn_.assign(zs(size) * 2, 0);  // the image starts black
+  const float k = fl(size) / fl(res());
+  for (int x = 0; x < size; ++x) {  // the coarse columns (shadow) each pixel's x falls between: fixed for the tile
+    const Taps t = taps((fl(x) + 0.5f) / k - 0.5f, res());
+    sx_[zs(x)] = t.i0;
+    sx_[zs(size + x)] = t.i1;
+    sfx_[zs(x)] = t.f;
+  }
   pushed_.assign(zs(res()) * zs(res()) * 2, 0.f);
   controls.assign(zs(e.m.h.n_controls), 0.5f);
 }
@@ -247,6 +392,32 @@ float Module::weight_px(float x, float y) const {
   return w;
 }
 
+Module::WeightX Module::weight_x(float x) const {
+  const float k = fl(size_) / fl(res()), R = fl(res());
+  const float cx = x / k - 0.5f;
+  WeightX w;
+  if (band[0] > 0) w.band *= 1.f - band_weight(cx, band[0]);
+  if (band[1] > 0) w.band *= band_weight(cx - (R - fl(band[1])), band[1]);
+  if (feather > 0.f) {
+    if (band[0] == 0) w.feather0 = smooth01(x / feather);
+    if (band[1] == 0) w.feather1 = smooth01((fl(size_) - x) / feather);
+  }
+  return w;
+}
+
+Module::WeightY Module::weight_y(float y) const {
+  const float k = fl(size_) / fl(res()), R = fl(res());
+  const float cy = y / k - 0.5f;
+  WeightY w;
+  if (band[2] > 0) w.band0 = 1.f - band_weight(cy, band[2]);
+  if (band[3] > 0) w.band1 = band_weight(cy - (R - fl(band[3])), band[3]);
+  if (feather > 0.f) {
+    if (band[2] == 0) w.feather0 = smooth01(y / feather);
+    if (band[3] == 0) w.feather1 = smooth01((fl(size_) - y) / feather);
+  }
+  return w;
+}
+
 float Module::weight_cell(int cx, int cy) const {
   const float k = fl(size_) / fl(res());
   return weight_px((fl(cx) + 0.5f) * k, (fl(cy) + 0.5f) * k);
@@ -263,6 +434,10 @@ void Module::shade(const Light* light) {
       img_.px[i + 1] = g.to_linear[rgba8_[i + 1]];
       img_.px[i + 2] = g.to_linear[rgba8_[i + 2]];
       img_.px[i + 3] = fl(rgba8_[i + 3]) * (1.f / 255.f);
+    }
+    for (int y = 0; y < S; ++y) {
+      drawn_[zs(2 * y)] = 0;
+      drawn_[zs(2 * y + 1)] = S;
     }
     shade_ms = ms_since(t0);
     return;
@@ -284,38 +459,111 @@ void Module::shade(const Light* light) {
   const ShaderSpec& sp = spec;
   auto ft = r_->fine_heat();
   auto fd = r_->fine_soot();
-  const float k = fl(S) / fl(R), inv_hs = 1.f / sp.heat_scale;
+  const float k = fl(S) / fl(R), inv_hs = 1.f / sp.heat_scale, p = sp.emission_power;
+  for (int cy = 0; cy < R; ++cy) {  // every coarse row of the shadow sum resampled at the pixels' x
+    const float* s = shadow_.data() + zs(cy) * zs(R);
+    float* o = shadow_x_.data() + zs(cy) * zs(S);
+    for (int x = 0; x < S; ++x) o[x] = (1.f - sfx_[zs(x)]) * s[sx_[zs(x)]] + sfx_[zs(x)] * s[sx_[zs(S + x)]];
+  }
+  // the light grid's columns at the pixels' x (the tile may have moved); its rows are resampled along x when first
+  // needed, two at a time (rows of pixels go down the light grid in order). No light: rows of zeros.
+  std::array<int, 2> held{-1, -1};
+  if (light) {
+    for (int x = 0; x < S; ++x) {
+      const Taps t = taps((at.x + (fl(x) + 0.5f) * at.scale - light->x0()) / light->cell() - 0.5f, light->nx());
+      lx_[zs(x)] = t.i0;
+      lx_[zs(S + x)] = t.i1;
+      lfx_[zs(x)] = t.f;
+    }
+  } else {
+    std::ranges::fill(light_x_, 0.f);
+  }
+  const auto light_row = [&](int j, int other) {  // slot holding light row j, filled if needed (keeping row `other`)
+    for (int q = 0; q < 2; ++q)
+      if (held[zs(q)] == j) return light_x_.data() + zs(q) * zs(S) * 3;
+    const int q = held[0] == other ? 1 : 0;
+    const float* L = light->field().data() + zs(j) * zs(light->nx()) * 3;
+    float* o = light_x_.data() + zs(q) * zs(S) * 3;
+    for (int c = 0; c < 3; ++c) {
+      for (int x = 0; x < S; ++x) o[zs(c * S + x)] = (1.f - lfx_[zs(x)]) * L[zs(lx_[zs(x)]) * 3 + zs(c)] + lfx_[zs(x)] * L[zs(lx_[zs(S + x)]) * 3 + zs(c)];
+    }
+    held[zs(q)] = j;
+    return static_cast<float*>(o);
+  };
+  constexpr int kSpan = 16;  // pixels tested together for material: empty spans are only cleared
+  float* slope = row_.data();
+  float* ramp = row_.data() + S;
   for (int y = 0; y < S; ++y) {  // y up
     float* out = img_.row(S - 1 - y);
-    const float wy = at.y + (fl(S - y) - 0.5f) * at.scale;
-    const float cy = (fl(y) + 0.5f) / k - 0.5f;
-    for (int x = 0; x < S; ++x) {
-      const std::size_t i = zs(y) * zs(S) + zs(x);
-      const float T = std::max(0.f, ft[i]), D = std::max(0.f, fd[i]);
-      float* o = out + zs(x) * 4;
-      if (T < 1e-4f && D < 1e-4f) {
-        o[0] = o[1] = o[2] = o[3] = 0.f;
+    const float* fh = ft.data() + zs(y) * zs(S);
+    const float* fs = fd.data() + zs(y) * zs(S);
+    int* drawn = drawn_.data() + zs(S - 1 - y) * 2;  // [lo, hi): what the row held before; outside it is still black
+    const int lo = drawn[0], hi = drawn[1];
+    drawn[0] = S;
+    drawn[1] = 0;
+    ShadeSpan sp_row{};
+    bool ready = false;
+    for (int x0 = 0; x0 < S;) {
+      const auto empty = [&](int xa) {
+        unsigned any = 0;  // (an unsigned "or", which GCC vectorises)
+        for (int x = xa; x < std::min(S, xa + kSpan); ++x) any |= static_cast<unsigned>(fh[x] >= 1e-4f) | static_cast<unsigned>(fs[x] >= 1e-4f);
+        return any == 0;
+      };
+      int x1 = std::min(S, x0 + kSpan);
+      if (empty(x0)) {  // a run of empty spans: cleared where the row was not black already
+        while (x1 < S && empty(x1)) x1 = std::min(S, x1 + kSpan);
+        const int c0 = std::max(x0, lo), c1 = std::min(x1, hi);
+        if (c0 < c1) std::fill(out + zs(c0) * 4, out + zs(c1) * 4, 0.f);
+        x0 = x1;
         continue;
       }
-      const float a = 1.f - std::exp(-sp.soot_density * D);
-      const float sh = std::exp(-sp.shadow * bilerp(shadow_.data(), R, R, 1, 0, (fl(x) + 0.5f) / k - 0.5f, cy));
-      // the soot as a height field: its slope towards the moon (up and left) lights billows, away from it darkens them
-      const float dx = 0.5f * (fd[zs(y) * zs(S) + zs(std::min(x + 2, S - 1))] - fd[zs(y) * zs(S) + zs(std::max(x - 2, 0))]);
-      const float dy = 0.5f * (fd[zs(std::min(y + 2, S - 1)) * zs(S) + zs(x)] - fd[zs(std::max(y - 2, 0)) * zs(S) + zs(x)]);
-      const float nx = -sp.relief * dx, ny = -sp.relief * dy, inv = 1.f / std::sqrt(nx * nx + ny * ny + 1.f);
-      const float lambert = std::max(0.f, (-0.45f * nx + 0.6f * ny + 0.66f) * inv);
-      const float moon = sp.sky * sh * (0.35f + 0.9f * lambert);
-      const float under = std::max(0.f, (0.2f * nx - 0.7f * ny + 0.68f) * inv);  // facing down: lit by the fire below
-      std::array<float, 3> L{0.7f * moon, 0.8f * moon, 1.1f * moon};
-      if (light) {
-        const auto l = light->at(at.x + (fl(x) + 0.5f) * at.scale, wy);
-        for (int c = 0; c < 3; ++c) L[zs(c)] += sp.scene_light * l[zs(c)] / (1.f + l[zs(c)]) * (0.4f + 0.9f * under);  // soft limit: hot gas inside its own glow
+      while (x1 < S && !empty(x1)) x1 = std::min(S, x1 + kSpan);  // a run of spans with material: shaded together
+      if (!ready) {  // what the row needs: its rows of the shadow and the light, and its neighbours' soot
+        const Taps sy = taps((fl(y) + 0.5f) / k - 0.5f, R);
+        sp_row.shadow0 = shadow_x_.data() + zs(sy.i0) * zs(S);
+        sp_row.shadow1 = shadow_x_.data() + zs(sy.i1) * zs(S);
+        sp_row.shadow_f = sy.f;
+        if (light) {
+          const float wy = at.y + (fl(S - y) - 0.5f) * at.scale;
+          const Taps ly = taps((wy - light->y0()) / light->cell() - 0.5f, light->ny());
+          sp_row.light0 = light_row(ly.i0, ly.i1);
+          sp_row.light1 = light_row(ly.i1, ly.i0);
+          sp_row.light_f = ly.f;
+          sp_row.flash = light->flash();
+        } else {
+          sp_row.light0 = sp_row.light1 = light_x_.data();
+        }
+        sp_row.heat = fh;
+        sp_row.soot = fs;
+        sp_row.soot_up = fd.data() + zs(std::min(y + 2, S - 1)) * zs(S);
+        sp_row.soot_down = fd.data() + zs(std::max(y - 2, 0)) * zs(S);
+        sp_row.slope_x = slope;
+        sp_row.ramp = ramp;
+        sp_row.size = S;
+        sp_row.out = out;
+        ready = true;
       }
-      const float t = T * inv_hs;
-      const auto hc = heat_colour(t);
-      const float e = sp.emission * std::pow(t, sp.emission_power) * (1.f - 0.55f * a);
-      for (int c = 0; c < 3; ++c) o[c] = a * sp.soot_albedo * sp.tint[zs(c)] * L[zs(c)] + e * hc[zs(c)];
-      o[3] = a;
+      const int xa = std::clamp(x0, 2, std::max(2, S - 2)), xb = std::clamp(x1, xa, std::max(2, S - 2));  // [xa, xb): both neighbours inside
+      for (int x = x0; x < std::min(xa, x1); ++x) slope[x] = 0.5f * (fs[std::min(x + 2, S - 1)] - fs[std::max(x - 2, 0)]);
+      for (int x = xa; x < xb; ++x) slope[x] = 0.5f * (fs[x + 2] - fs[x - 2]);
+      for (int x = std::max(xb, x0); x < x1; ++x) slope[x] = 0.5f * (fs[std::min(x + 2, S - 1)] - fs[std::max(x - 2, 0)]);
+      if (p == 3.f) {  // the usual powers without std::pow
+        for (int x = x0; x < x1; ++x) {
+          const float t = std::max(0.f, fh[x]) * inv_hs;
+          ramp[x] = t * t * t;
+        }
+      } else if (p == 2.f) {
+        for (int x = x0; x < x1; ++x) {
+          const float t = std::max(0.f, fh[x]) * inv_hs;
+          ramp[x] = t * t;
+        }
+      } else {
+        for (int x = x0; x < x1; ++x) ramp[x] = std::pow(std::max(0.f, fh[x]) * inv_hs, p);
+      }
+      shade_span(sp_row, sp, x0, x1, isa_);
+      drawn[0] = std::min(drawn[0], x0);
+      drawn[1] = x1;
+      x0 = x1;
     }
   }
   shade_ms = ms_since(t0);
@@ -339,15 +587,22 @@ void blend_band(Module& a, Module& b, Side b_is, int cells) {
     }
   }
   const int bp = cells * k;
-  const auto fa = [&](int j, int i) { return b_is == Side::top ? zs(S - bp + j) * zs(S) + zs(i) : zs(i) * zs(S) + zs(S - bp + j); };
-  const auto fb = [&](int j, int i) { return b_is == Side::top ? zs(j) * zs(S) + zs(i) : zs(i) * zs(S) + zs(j); };
   for (auto [FA, FB] : {std::pair{a.runner().fine_heat_mut(), b.runner().fine_heat_mut()}, std::pair{a.runner().fine_soot_mut(), b.runner().fine_soot_mut()}}) {
-    for (int j = 0; j < bp; ++j) {
-      const float w = band_weight((fl(j) + 0.5f) / fl(k) - 0.5f, cells);
+    if (b_is == Side::top) {  // band lines are rows: a's top rows, b's bottom rows
+      for (int j = 0; j < bp; ++j) {
+        const float w = band_weight((fl(j) + 0.5f) / fl(k) - 0.5f, cells);
+        float* __restrict pa = FA.data() + zs(S - bp + j) * zs(S);
+        float* __restrict pb = FB.data() + zs(j) * zs(S);
+        for (int i = 0; i < S; ++i) pa[i] = pb[i] = w * pa[i] + (1.f - w) * pb[i];
+      }
+    } else {  // band lines are columns: walked row by row, so memory is read in order
       for (int i = 0; i < S; ++i) {
-        float& va = FA[fa(j, i)];
-        float& vb = FB[fb(j, i)];
-        va = vb = w * va + (1.f - w) * vb;
+        float* __restrict pa = FA.data() + zs(i) * zs(S) + zs(S - bp);
+        float* __restrict pb = FB.data() + zs(i) * zs(S);
+        for (int j = 0; j < bp; ++j) {
+          const float w = band_weight((fl(j) + 0.5f) / fl(k) - 0.5f, cells);
+          pa[j] = pb[j] = w * pa[j] + (1.f - w) * pb[j];
+        }
       }
     }
   }
@@ -378,13 +633,21 @@ FieldBus::FieldBus(float x0, float y0, int nx, int ny, float cell, int groups) :
   layer_.assign(zs(groups) * all_.size(), 0.f);
   heat_.assign(zs(nx) * zs(ny), 0.f);
   soot_.assign(heat_.size(), 0.f);
+  dirty_.assign(zs(groups) + 1, Rect{});
+  cols_.assign(zs(nx), Column{});
 }
 
 void FieldBus::clear() {
-  std::ranges::fill(all_, 0.f);
-  std::ranges::fill(layer_, 0.f);
-  std::ranges::fill(heat_, 0.f);
-  std::ranges::fill(soot_, 0.f);
+  // only what publish() wrote since the last clear (the rest is still zero)
+  const auto zero = [&](std::vector<float>& f, std::size_t offset, int ch, const Rect& r) {
+    for (int j = r.j0; j <= r.j1; ++j) std::fill_n(f.begin() + static_cast<std::ptrdiff_t>(offset + (zs(j) * zs(nx_) + zs(r.i0)) * zs(ch)), zs(r.i1 - r.i0 + 1) * zs(ch), 0.f);
+  };
+  for (int g = 0; g < groups_; ++g) zero(layer_, zs(g) * all_.size(), 4, dirty_[zs(g)]);
+  const Rect& r = dirty_[zs(groups_)];
+  zero(all_, 0, 4, r);
+  zero(heat_, 0, 1, r);
+  zero(soot_, 0, 1, r);
+  std::ranges::fill(dirty_, Rect{});
 }
 
 void FieldBus::publish(const Module& m) {
@@ -394,24 +657,53 @@ void FieldBus::publish(const Module& m) {
   auto co = m.runner().coarse();
   const int i0 = std::max(0, ifloor((m.at.x - x0_) / cell_)), i1 = std::min(nx_ - 1, ifloor((m.at.x + span - x0_) / cell_) + 1);
   const int j0 = std::max(0, ifloor((m.at.y - y0_) / cell_)), j1 = std::min(ny_ - 1, ifloor((m.at.y + span - y0_) / cell_) + 1);
+  if (i0 > i1 || j0 > j1) return;
+  for (Rect* r : {&dirty_[zs(m.group)], &dirty_[zs(groups_)]}) {
+    if (r->i0 > r->i1) {
+      *r = {i0, i1, j0, j1};
+    } else {
+      *r = {std::min(r->i0, i0), std::max(r->i1, i1), std::min(r->j0, j0), std::max(r->j1, j1)};
+    }
+  }
+  for (int i = i0; i <= i1; ++i) {  // what depends on the column alone: computed once
+    Column& c = cols_[zs(i)];
+    const float wx = x0_ + (fl(i) + 0.5f) * cell_;
+    const float tx = (wx - m.at.x) / sc;
+    c.inside = !(tx < 0.f || tx > fl(S));
+    if (!c.inside) continue;
+    c.w = m.weight_x(tx);
+    const Taps t = taps(tx / k - 0.5f, R);
+    c.x0 = t.i0;
+    c.x1 = t.i1;
+    c.fx = t.f;
+  }
   float* L = layer_.data() + zs(m.group) * all_.size();
   for (int j = j0; j <= j1; ++j) {
     const float wy = y0_ + (fl(j) + 0.5f) * cell_;
     const float ty = fl(S) - (wy - m.at.y) / sc;  // tile pixels, y up
     if (ty < 0.f || ty > fl(S)) continue;
+    const Module::WeightY wyf = m.weight_y(ty);
+    const Taps t = taps(ty / k - 0.5f, R);
+    const float fy = t.f;
+    const float* r0 = co.data() + zs(t.i0) * zs(R) * zs(C);
+    const float* r1 = co.data() + zs(t.i1) * zs(R) * zs(C);
     for (int i = i0; i <= i1; ++i) {
-      const float wx = x0_ + (fl(i) + 0.5f) * cell_;
-      const float tx = (wx - m.at.x) / sc;
-      if (tx < 0.f || tx > fl(S)) continue;
-      const float w = m.weight_px(tx, ty) * m.opacity;
+      const Column& c = cols_[zs(i)];
+      if (!c.inside) continue;
+      const float w = Module::weight(c.w, wyf) * m.opacity;  // weight_px(tx, ty) * opacity
       if (w <= 0.f) continue;
-      const float cx = tx / k - 0.5f, cy = ty / k - 0.5f;
-      const float s[4] = {bilerp(co.data(), R, R, C, 0, cx, cy) * k * sc, -bilerp(co.data(), R, R, C, 1, cx, cy) * k * sc,
-                          bilerp(co.data(), R, R, C, 2, cx, cy), bilerp(co.data(), R, R, C, 3, cx, cy)};
+      const float fx = c.fx;
+      const float* a = r0 + zs(c.x0) * zs(C);
+      const float* b = r0 + zs(c.x1) * zs(C);
+      const float* d = r1 + zs(c.x0) * zs(C);
+      const float* e = r1 + zs(c.x1) * zs(C);
+      float v[4];  // bilinear, as bilerp() computes it
+      for (int ch = 0; ch < 4; ++ch) v[ch] = (1.f - fy) * ((1.f - fx) * a[ch] + fx * b[ch]) + fy * ((1.f - fx) * d[ch] + fx * e[ch]);
+      const float s[4] = {v[0] * k * sc, -v[1] * k * sc, v[2], v[3]};
       const std::size_t q = (zs(j) * zs(nx_) + zs(i)) * 4;
-      for (int c = 0; c < 4; ++c) {
-        all_[q + zs(c)] += w * s[c];
-        L[q + zs(c)] += w * s[c];
+      for (int ch = 0; ch < 4; ++ch) {
+        all_[q + zs(ch)] += w * s[ch];
+        L[q + zs(ch)] += w * s[ch];
       }
       heat_[q / 4] += w * s[2];
       soot_[q / 4] += w * s[3];
@@ -419,25 +711,23 @@ void FieldBus::publish(const Module& m) {
   }
 }
 
-FieldBus::Sample FieldBus::sample(const std::vector<float>& f, float x, float y) const {
+FieldBus::Sample FieldBus::sample(const float* f, float x, float y) const {
   const float gx = (x - x0_) / cell_ - 0.5f, gy = (y - y0_) / cell_ - 0.5f;
   if (gx < -1.f || gy < -1.f || gx > fl(nx_) || gy > fl(ny_)) return {};
-  return {bilerp(f.data(), nx_, ny_, 4, 0, gx, gy), bilerp(f.data(), nx_, ny_, 4, 1, gx, gy), bilerp(f.data(), nx_, ny_, 4, 2, gx, gy),
-          bilerp(f.data(), nx_, ny_, 4, 3, gx, gy)};
+  const auto s = bilerp_n<4>(f, nx_, ny_, 4, gx, gy);
+  return {s[0], s[1], s[2], s[3]};
 }
 
-FieldBus::Sample FieldBus::at(float x, float y) const { return sample(all_, x, y); }
+FieldBus::Sample FieldBus::at(float x, float y) const { return sample(all_.data(), x, y); }
 
 FieldBus::Sample FieldBus::others(float x, float y, int group) const {
-  Sample s = sample(all_, x, y);
+  Sample s = sample(all_.data(), x, y);
   if (group < 0 || group >= groups_) return s;
-  const float gx = (x - x0_) / cell_ - 0.5f, gy = (y - y0_) / cell_ - 0.5f;
-  if (gx < -1.f || gy < -1.f || gx > fl(nx_) || gy > fl(ny_)) return s;
-  const float* L = layer_.data() + zs(group) * all_.size();
-  s.u -= bilerp(L, nx_, ny_, 4, 0, gx, gy);
-  s.v -= bilerp(L, nx_, ny_, 4, 1, gx, gy);
-  s.heat -= bilerp(L, nx_, ny_, 4, 2, gx, gy);
-  s.soot -= bilerp(L, nx_, ny_, 4, 3, gx, gy);
+  const Sample own = sample(layer_.data() + zs(group) * all_.size(), x, y);  // zero outside, as all_ is
+  s.u -= own.u;
+  s.v -= own.v;
+  s.heat -= own.heat;
+  s.soot -= own.soot;
   return s;
 }
 
@@ -511,6 +801,17 @@ void transfer(Module& from, std::span<Module* const> to, float fraction, int row
   auto ft = from.runner().fine_heat_mut();
   auto fd = from.runner().fine_soot_mut();
   row0 = std::clamp(row0, 0, R);
+  // The targets a source cell can reach are those whose tile overlaps it (by a margin of a world pixel, for rounding):
+  // only those are tried for the cell and its pixels, in their order, so the result is as if all were. Up to 64
+  // targets are told apart by a bit each; with more, all are tried.
+  const bool masked = to.size() <= 64;
+  std::array<float*, 64> to_heat{}, to_soot{};
+  if (masked) {
+    for (std::size_t q = 0; q < to.size(); ++q) {
+      to_heat[q] = to[q]->runner().fine_heat_mut().data();
+      to_soot[q] = to[q]->runner().fine_soot_mut().data();
+    }
+  }
   // coarse: each source cell's amount, splatted bilinearly into the targets' cells at its world centre
   for (int cy = row0; cy < R; ++cy) {
     for (int cx = 0; cx < R; ++cx) {
@@ -519,9 +820,21 @@ void transfer(Module& from, std::span<Module* const> to, float fraction, int row
       if (h <= 0.f && d <= 0.f) continue;
       const float wx = from.at.x + (fl(cx) + 0.5f) * k * sc, wy = from.at.y + (fl(S) - (fl(cy) + 0.5f) * k) * sc;
       const float area = (k * sc) * (k * sc);
+      std::uint64_t near = 0;
+      if (masked) {
+        const float x0 = from.at.x + fl(cx) * k * sc - 1.f, x1 = from.at.x + fl(cx + 1) * k * sc + 1.f;
+        const float y0 = from.at.y + (fl(S) - fl(cy + 1) * k) * sc - 1.f, y1 = from.at.y + (fl(S) - fl(cy) * k) * sc + 1.f;
+        for (std::size_t q = 0; q < to.size(); ++q) {
+          const Module* t = to[q];
+          const float span = fl(t->size()) * t->at.scale;
+          if (t->at.x <= x1 && t->at.x + span >= x0 && t->at.y <= y1 && t->at.y + span >= y0) near |= std::uint64_t{1} << q;
+        }
+      }
+      const auto reaches = [&](std::size_t q) { return !masked || (near >> q & 1) != 0; };
       float placed = 0.f;
-      for (Module* t : to) {
-        if (!t->active || t == &from) continue;
+      for (std::size_t q = 0; q < to.size(); ++q) {
+        Module* t = to[q];
+        if (!reaches(q) || !t->active || t == &from) continue;
         const int tR = t->res(), tS = t->size(), tC = t->channels();
         const float tk = fl(tS) / fl(tR), tsc = t->at.scale;
         const float tx = (wx - t->at.x) / tsc, ty = fl(tS) - (wy - t->at.y) / tsc;
@@ -535,10 +848,10 @@ void transfer(Module& from, std::span<Module* const> to, float fraction, int row
         auto tc = t->runner().coarse_mut();
         const float ws[4] = {(1 - fx) * (1 - fy), fx * (1 - fy), (1 - fx) * fy, fx * fy};
         const int dx[4] = {0, 1, 0, 1}, dy[4] = {0, 0, 1, 1};
-        for (int q = 0; q < 4; ++q) {
-          float* p = tc.data() + (zs(y0 + dy[q]) * zs(tR) + zs(x0 + dx[q])) * zs(tC);
-          p[2] += ratio * ws[q] * h;
-          p[3] += ratio * ws[q] * d;
+        for (int n = 0; n < 4; ++n) {
+          float* p = tc.data() + (zs(y0 + dy[n]) * zs(tR) + zs(x0 + dx[n])) * zs(tC);
+          p[2] += ratio * ws[n] * h;
+          p[3] += ratio * ws[n] * d;
         }
         placed += w;
       }
@@ -551,8 +864,9 @@ void transfer(Module& from, std::span<Module* const> to, float fraction, int row
           const std::size_t i = zs(py) * zs(S) + zs(px);
           const float fh = ft[i] * fraction * heat_gain, fdd = fd[i] * fraction * soot_gain;
           const float pwx = from.at.x + (fl(px) + 0.5f) * sc, pwy = from.at.y + (fl(S - py) - 0.5f) * sc;
-          for (Module* t : to) {
-            if (!t->active || t == &from) continue;
+          for (std::size_t q = 0; q < to.size(); ++q) {
+            Module* t = to[q];
+            if (!reaches(q) || !t->active || t == &from) continue;
             const int tS = t->size();
             const float tsc = t->at.scale;
             const float tx = (pwx - t->at.x) / tsc, ty = fl(tS) - (pwy - t->at.y) / tsc;
@@ -561,8 +875,8 @@ void transfer(Module& from, std::span<Module* const> to, float fraction, int row
             if (w <= 0.f) continue;
             const std::size_t j = zs(static_cast<int>(ty)) * zs(tS) + zs(static_cast<int>(tx));
             const float ratio = w * (sc * sc) / (tsc * tsc);
-            t->runner().fine_heat_mut()[j] += ratio * fh;
-            t->runner().fine_soot_mut()[j] += ratio * fdd;
+            (masked ? to_heat[q] : t->runner().fine_heat_mut().data())[j] += ratio * fh;
+            (masked ? to_soot[q] : t->runner().fine_soot_mut().data())[j] += ratio * fdd;
           }
           ft[i] *= keep;
           fd[i] *= keep;
@@ -594,76 +908,142 @@ Light::Light(const FieldBus& bus) : x0_(bus.x0()), y0_(bus.y0()), cell_(bus.cell
     v.ny = ny;
     v.a.assign(zs(nx) * zs(ny) * 3, 0.f);
     v.b.assign(v.a.size(), 0.f);
+    // where the finest cells' centres fall in this level (cell centres at integers), as bilerp() clamps them
+    const float f = static_cast<float>(1u << l);
+    for (int x = 0; x < nx_; ++x) {
+      const Taps t = taps((fl(x) + 0.5f) / f - 0.5f, nx);
+      v.x0.push_back(t.i0);
+      v.x1.push_back(t.i1);
+      v.fx.push_back(t.f);
+    }
+    for (int y = 0; y < ny_; ++y) {
+      const Taps t = taps((fl(y) + 0.5f) / f - 0.5f, ny);
+      v.y0.push_back(t.i0);
+      v.y1.push_back(t.i1);
+      v.fy.push_back(t.f);
+    }
+    if (l > 0) v.up.assign(zs(ny) * zs(nx_) * 3, 0.f);
     levels_.push_back(std::move(v));
     nx = std::max(1, (nx + 1) / 2);
     ny = std::max(1, (ny + 1) / 2);
   }
 }
 
-void Light::update(const FieldBus& bus, float gain, std::array<float, 3> flash) {
+namespace {
+
+// One row of the [1 4 6 4 1] / 16 blur along x of an RGB row of n cells (clamped at the ends), summed in the order of
+// the taps.
+void blur_row(const float* __restrict src, float* __restrict dst, int n) {
+  static constexpr float kw[5] = {1.f / 16, 4.f / 16, 6.f / 16, 4.f / 16, 1.f / 16};
+  const auto edge = [&](int x) {
+    for (int ch = 0; ch < 3; ++ch) {
+      float s = 0.f;
+      for (int t = -2; t <= 2; ++t) s += kw[t + 2] * src[zs(std::clamp(x + t, 0, n - 1)) * 3 + zs(ch)];
+      dst[zs(x) * 3 + zs(ch)] = s;
+    }
+  };
+  for (int x = 0; x < std::min(2, n); ++x) edge(x);
+  for (int i = 6; i < 3 * n - 6; ++i) {  // interior cells, channels interleaved: the taps are 3 floats apart
+    float s = 0.f;
+    s += kw[0] * src[i - 6];
+    s += kw[1] * src[i - 3];
+    s += kw[2] * src[i];
+    s += kw[3] * src[i + 3];
+    s += kw[4] * src[i + 6];
+    dst[i] = s;
+  }
+  for (int x = std::max(2, n - 2); x < n; ++x) edge(x);
+}
+
+}  // namespace
+
+void Light::update(const FieldBus& bus, float gain, std::array<float, 3> flash, Pool& pool) {
+  // Every value is computed as a plain pass over the levels would compute it, in the same order of operations, so the
+  // light does not depend on the number of threads. Rows are spread over the pool in four passes.
   flash_ = flash;
+  static constexpr float kw[5] = {1.f / 16, 4.f / 16, 6.f / 16, 4.f / 16, 1.f / 16};
+  const int L = static_cast<int>(levels_.size());
   auto heat = bus.heat();
+  // 1. the finest level: each cell's heat emits; then the blur along x, row by row
   Level& l0 = levels_[0];
-  for (std::size_t i = 0; i < heat.size(); ++i) {
-    const float h = std::max(0.f, heat[i]);
-    const auto c = heat_colour(h / 1.2f);
-    const float e = gain * h * h;
-    for (int ch = 0; ch < 3; ++ch) l0.a[i * 3 + zs(ch)] = e * c[zs(ch)];
-  }
-  for (std::size_t l = 1; l < levels_.size(); ++l) {  // 2x2 box down
-    Level& s = levels_[l - 1];
-    Level& d = levels_[l];
-    for (int y = 0; y < d.ny; ++y) {
-      for (int x = 0; x < d.nx; ++x) {
-        for (int ch = 0; ch < 3; ++ch) {
-          float sum = 0.f;
-          for (int q = 0; q < 4; ++q) {
-            const int sx = std::min(2 * x + (q & 1), s.nx - 1), sy = std::min(2 * y + (q >> 1), s.ny - 1);
-            sum += s.a[(zs(sy) * zs(s.nx) + zs(sx)) * 3 + zs(ch)];
-          }
-          d.a[(zs(y) * zs(d.nx) + zs(x)) * 3 + zs(ch)] = sum;  // amounts add up: coarser levels carry the total
-        }
-      }
-    }
-  }
-  for (Level& v : levels_) {  // separable [1 4 6 4 1] / 16 blur, a then b then a
-    for (int pass = 0; pass < 2; ++pass) {
-      const std::vector<float>& src = pass == 0 ? v.a : v.b;
-      std::vector<float>& dst = pass == 0 ? v.b : v.a;
-      for (int y = 0; y < v.ny; ++y) {
-        for (int x = 0; x < v.nx; ++x) {
-          for (int ch = 0; ch < 3; ++ch) {
-            float s = 0.f;
-            static constexpr float kw[5] = {1.f / 16, 4.f / 16, 6.f / 16, 4.f / 16, 1.f / 16};
-            for (int t = -2; t <= 2; ++t) {
-              const int xx = pass == 0 ? std::clamp(x + t, 0, v.nx - 1) : x, yy = pass == 1 ? std::clamp(y + t, 0, v.ny - 1) : y;
-              s += kw[t + 2] * src[(zs(yy) * zs(v.nx) + zs(xx)) * 3 + zs(ch)];
-            }
-            dst[(zs(y) * zs(v.nx) + zs(x)) * 3 + zs(ch)] = s;
-          }
-        }
-      }
-    }
-  }
-  // light = sum over levels of the blurred amounts per area of that level's cell: a soft falloff with a long tail
-  std::ranges::fill(L_, 0.f);
-  for (std::size_t l = 0; l < levels_.size(); ++l) {
-    const Level& v = levels_[l];
-    const float scale = 1.f / static_cast<float>(1u << (2 * l)) * 0.6f;  // per unit area of the level's cells
-    const float f = static_cast<float>(1u << l);
-    for (int y = 0; y < ny_; ++y) {
+  const int chunk = 8;
+  pool.run((ny_ + chunk - 1) / chunk, [&](int task) {
+    for (int y = task * chunk; y < std::min(ny_, (task + 1) * chunk); ++y) {
+      float* a = l0.a.data() + zs(y) * zs(nx_) * 3;
       for (int x = 0; x < nx_; ++x) {
-        const float gx = (fl(x) + 0.5f) / f - 0.5f, gy = (fl(y) + 0.5f) / f - 0.5f;
-        for (int ch = 0; ch < 3; ++ch) L_[(zs(y) * zs(nx_) + zs(x)) * 3 + zs(ch)] += scale * bilerp(v.a.data(), v.nx, v.ny, 3, ch, gx, gy);
+        const float h = std::max(0.f, heat[zs(y) * zs(nx_) + zs(x)]);
+        const auto c = heat_colour(h / 1.2f);
+        const float e = gain * h * h;
+        for (int ch = 0; ch < 3; ++ch) a[zs(x) * 3 + zs(ch)] = e * c[zs(ch)];
+      }
+      blur_row(a, l0.b.data() + zs(y) * zs(nx_) * 3, nx_);
+    }
+  });
+  // 2. the coarser levels (small): 2x2 boxes down from the unblurred level above (amounts add up: coarser levels carry
+  // the total), then the blur along x
+  for (int l = 1; l < L; ++l) {
+    const Level& s = levels_[zs(l - 1)];
+    Level& d = levels_[zs(l)];
+    for (int y = 0; y < d.ny; ++y) {
+      const float* r0 = s.a.data() + zs(std::min(2 * y, s.ny - 1)) * zs(s.nx) * 3;
+      const float* r1 = s.a.data() + zs(std::min(2 * y + 1, s.ny - 1)) * zs(s.nx) * 3;
+      float* o = d.a.data() + zs(y) * zs(d.nx) * 3;
+      for (int x = 0; x < d.nx; ++x) {
+        const std::size_t p = zs(std::min(2 * x, s.nx - 1)) * 3, q = zs(std::min(2 * x + 1, s.nx - 1)) * 3;
+        for (int ch = 0; ch < 3; ++ch) o[zs(x) * 3 + zs(ch)] = 0.f + r0[p + zs(ch)] + r0[q + zs(ch)] + r1[p + zs(ch)] + r1[q + zs(ch)];
       }
     }
+    for (int y = 0; y < d.ny; ++y) blur_row(d.a.data() + zs(y) * zs(d.nx) * 3, d.b.data() + zs(y) * zs(d.nx) * 3, d.nx);
   }
+  // 3. the blur along y of every row of every level (b into a), and each coarser row resampled at the finest columns
+  int rows = 0;
+  for (const Level& v : levels_) rows += v.ny;
+  pool.run(rows, [&](int task) {
+    int l = 0, y = task;
+    while (y >= levels_[zs(l)].ny) y -= levels_[zs(l++)].ny;
+    Level& v = levels_[zs(l)];
+    const std::size_t n = zs(v.nx) * 3;
+    float* o = v.a.data() + zs(y) * n;
+    const float* src[5];
+    for (int t = -2; t <= 2; ++t) src[t + 2] = v.b.data() + zs(std::clamp(y + t, 0, v.ny - 1)) * n;
+    for (std::size_t i = 0; i < n; ++i) {
+      float s = 0.f;
+      for (int t = 0; t < 5; ++t) s += kw[t] * src[t][i];
+      o[i] = s;
+    }
+    if (l == 0) return;
+    float* u = v.up.data() + zs(y) * zs(nx_) * 3;  // first half of the bilinear sample: along x
+    for (int x = 0; x < nx_; ++x) {
+      const float fx = v.fx[zs(x)];
+      const float* a = o + zs(v.x0[zs(x)]) * 3;
+      const float* b = o + zs(v.x1[zs(x)]) * 3;
+      for (int ch = 0; ch < 3; ++ch) u[zs(x) * 3 + zs(ch)] = (1.f - fx) * a[ch] + fx * b[ch];
+    }
+  });
+  // 4. light = sum over levels of the blurred amounts per area of that level's cell: a soft falloff with a long tail.
+  // The finest level is sampled at its own centres (bilinear weights 0 and 1: the cells themselves).
+  pool.run((ny_ + chunk - 1) / chunk, [&](int task) {
+    const std::size_t n = zs(nx_) * 3;
+    for (int y = task * chunk; y < std::min(ny_, (task + 1) * chunk); ++y) {
+      float* __restrict o = L_.data() + zs(y) * n;
+      const float* __restrict a = l0.a.data() + zs(y) * n;
+      const float s0 = 0.6f;  // the finest level's scale (1 / 1 * 0.6, as below)
+      for (std::size_t i = 0; i < n; ++i) o[i] = 0.f + s0 * a[i];
+      for (int l = 1; l < L; ++l) {
+        const Level& v = levels_[zs(l)];
+        const float scale = 1.f / static_cast<float>(1u << (2 * l)) * 0.6f;  // per unit area of the level's cells
+        const float fy = v.fy[zs(y)];
+        const float* __restrict u0 = v.up.data() + zs(v.y0[zs(y)]) * n;  // second half of the bilinear sample: along y
+        const float* __restrict u1 = v.up.data() + zs(v.y1[zs(y)]) * n;
+        for (std::size_t i = 0; i < n; ++i) o[i] += scale * ((1.f - fy) * u0[i] + fy * u1[i]);
+      }
+    }
+  });
 }
 
 std::array<float, 3> Light::at(float x, float y) const {
-  const float gx = (x - x0_) / cell_ - 0.5f, gy = (y - y0_) / cell_ - 0.5f;
-  return {bilerp(L_.data(), nx_, ny_, 3, 0, gx, gy) + flash_[0], bilerp(L_.data(), nx_, ny_, 3, 1, gx, gy) + flash_[1],
-          bilerp(L_.data(), nx_, ny_, 3, 2, gx, gy) + flash_[2]};
+  const auto l = bilerp_n<3>(L_.data(), nx_, ny_, 3, (x - x0_) / cell_ - 0.5f, (y - y0_) / cell_ - 0.5f);
+  return {l[0] + flash_[0], l[1] + flash_[1], l[2] + flash_[2]};
 }
 
 // --- particles ---------------------------------------------------------------------------------------------------------
