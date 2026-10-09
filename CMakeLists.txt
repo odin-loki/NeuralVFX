@@ -50,7 +50,7 @@ neuralfx_defaults(neuralfx_proto)
 neuralfx_simd(neuralfx_proto)
 
 # The model description and .nvfx format: shared by the runtime, the trainer and the tools.
-add_library(neuralfx_model STATIC src/core/model.cpp)
+add_library(neuralfx_model STATIC src/core/model.cpp src/core/rollout.cpp)
 target_include_directories(neuralfx_model PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include")
 set_target_properties(neuralfx_model PROPERTIES POSITION_INDEPENDENT_CODE ON)
 neuralfx_defaults(neuralfx_model)
@@ -79,7 +79,7 @@ target_link_libraries(neuralfx_core PUBLIC neuralfx_model)
 neuralfx_defaults(neuralfx_core)
 
 # Trainer: hand-written gradients; its hot loops switch on AVX2 + FMA (train() checks the CPU).
-add_library(neuralfx_train STATIC src/train/net.cpp src/train/train.cpp)
+add_library(neuralfx_train STATIC src/train/net.cpp src/train/train.cpp src/train/rollout_train.cpp)
 target_link_libraries(neuralfx_train PUBLIC neuralfx_core)
 neuralfx_defaults(neuralfx_train)
 neuralfx_simd(neuralfx_train)
@@ -96,6 +96,7 @@ if(NEURALFX_BUILD_TOOLS)
     target_link_libraries(${tool} PRIVATE neuralfx_io neuralfx_train nvfx)
     neuralfx_defaults(${tool})
   endforeach()
+  target_sources(nvfx_experiment PRIVATE tools/experiment_d.cpp)  # study D: start points and learned dynamics
   # The engine-side example: plain C against the shared library's API.
   add_executable(nvfx_c_host examples/c_host.c)
   target_link_libraries(nvfx_c_host PRIVATE nvfx)
@@ -120,7 +121,7 @@ if(NEURALFX_BUILD_TESTS)
   find_package(GTest CONFIG REQUIRED)
   include(GoogleTest)
   add_executable(neuralfx_tests tests/test_proto.cpp tests/test_sim.cpp tests/test_baselines.cpp tests/test_train.cpp
-                                tests/test_runtime.cpp tests/test_ingest.cpp)
+                                tests/test_runtime.cpp tests/test_ingest.cpp tests/test_rollout.cpp)
   target_link_libraries(neuralfx_tests PRIVATE neuralfx_proto neuralfx_io neuralfx_train nvfx GTest::gtest_main)
   neuralfx_defaults(neuralfx_tests)
   gtest_discover_tests(neuralfx_tests TEST_PREFIX "neuralfx." DISCOVERY_MODE PRE_TEST PROPERTIES LABELS neuralfx)

@@ -1,0 +1,1051 @@
+// Training rollout effects (include/neuralfx/rollout_train.hpp). The forward pass mirrors coarse_step() in
+// src/core/rollout.cpp operation by operation; tests/test_rollout.cpp checks it against that reference and the
+// gradients against finite differences.
+#include <neuralfx/metrics.hpp>
+#include <neuralfx/rollout_train.hpp>
+
+#include <algorithm>
+#include <atomic>
+#include <chrono>
+#include <cmath>
+#include <cstring>
+#include <limits>
+#include <random>
+#include <stdexcept>
+#include <thread>
+
+// AVX2 + FMA for the loops below, switched on after the standard headers (the trainer needs x86-64-v3; train() in
+// train.cpp documents the same requirement and nvfx_experiment checks it before training).
+#if defined(__GNUC__) && !defined(__clang__) && defined(__x86_64__)
+#pragma GCC push_options
+#pragma GCC target("arch=x86-64-v3")
+#define NFX_ROLLOUT_PUSHED 1
+#endif
+
+namespace nfx::rollout {
+
+namespace {
+
+using Vec = std::vector<float>;
+std::size_t sz(int v) { return static_cast<std::size_t>(v); }
+float fl(int v) { return static_cast<float>(v); }
+
+typedef float v8 __attribute__((vector_size(32)));
+typedef float v8u __attribute__((vector_size(32), aligned(4)));
+
+inline float dot(const float* __restrict a, const float* __restrict b, int n) {
+  v8 acc{};
+  int i = 0;
+  for (; i + 8 <= n; i += 8) acc += *reinterpret_cast<const v8u*>(a + i) * *reinterpret_cast<const v8u*>(b + i);
+  float s = 0;
+  for (int k = 0; k < 8; ++k) s += acc[k];
+  for (; i < n; ++i) s += a[i] * b[i];
+  return s;
+}
+
+// --- convolution and physics operations on [cell][channel] layouts, with their transposes ---------------------------
+
+void conv3(int R, const float* in, int ci, const float* W, const float* b, int co, float* out) {
+  for (int y = 0; y < R; ++y) {
+    for (int x = 0; x < R; ++x) {
+      float* __restrict o = out + (sz(y) * sz(R) + sz(x)) * sz(co);
+      for (int k = 0; k < co; ++k) o[k] = b[k];
+      for (int dy = -1; dy <= 1; ++dy) {
+        const int yy = y + dy;
+        if (yy < 0 || yy >= R) continue;
+        for (int dx = -1; dx <= 1; ++dx) {
+          const int xx = x + dx;
+          if (xx < 0 || xx >= R) continue;
+          const float* a = in + (sz(yy) * sz(R) + sz(xx)) * sz(ci);
+          const float* w = W + sz((dy + 1) * 3 + (dx + 1)) * sz(ci) * sz(co);
+          for (int c = 0; c < ci; ++c) {
+            const float av = a[c];
+            const float* __restrict wr = w + sz(c) * sz(co);
+            for (int k = 0; k < co; ++k) o[k] += wr[k] * av;
+          }
+        }
+      }
+    }
+  }
+}
+
+void conv3_back(int R, const float* in, int ci, const float* W, int co, const float* g, float* gin, float* gW, float* gb) {
+  for (int y = 0; y < R; ++y) {
+    for (int x = 0; x < R; ++x) {
+      const float* go = g + (sz(y) * sz(R) + sz(x)) * sz(co);
+      for (int k = 0; k < co; ++k) gb[k] += go[k];
+      for (int dy = -1; dy <= 1; ++dy) {
+        const int yy = y + dy;
+        if (yy < 0 || yy >= R) continue;
+        for (int dx = -1; dx <= 1; ++dx) {
+          const int xx = x + dx;
+          if (xx < 0 || xx >= R) continue;
+          const float* a = in + (sz(yy) * sz(R) + sz(xx)) * sz(ci);
+          float* ga = gin ? gin + (sz(yy) * sz(R) + sz(xx)) * sz(ci) : nullptr;
+          const std::size_t t = sz((dy + 1) * 3 + (dx + 1)) * sz(ci) * sz(co);
+          for (int c = 0; c < ci; ++c) {
+            const float av = a[c];
+            float* __restrict gw = gW + t + sz(c) * sz(co);
+            for (int k = 0; k < co; ++k) gw[k] += av * go[k];
+            if (ga) ga[c] += dot(W + t + sz(c) * sz(co), go, co);
+          }
+        }
+      }
+    }
+  }
+}
+
+// 1x1: W [in][out].
+void conv1(int n, const float* in, int ci, const float* W, const float* b, int co, float* out) {
+  for (int i = 0; i < n; ++i) {
+    float* __restrict o = out + sz(i) * sz(co);
+    for (int k = 0; k < co; ++k) o[k] = b[k];
+    const float* a = in + sz(i) * sz(ci);
+    for (int c = 0; c < ci; ++c) {
+      const float av = a[c];
+      for (int k = 0; k < co; ++k) o[k] += W[sz(c) * sz(co) + sz(k)] * av;
+    }
+  }
+}
+
+void conv1_back(int n, const float* in, int ci, const float* W, int co, const float* g, float* gin, float* gW, float* gb) {
+  for (int i = 0; i < n; ++i) {
+    const float* go = g + sz(i) * sz(co);
+    const float* a = in + sz(i) * sz(ci);
+    float* ga = gin + sz(i) * sz(ci);
+    for (int k = 0; k < co; ++k) gb[k] += go[k];
+    for (int c = 0; c < ci; ++c) {
+      for (int k = 0; k < co; ++k) gW[sz(c) * sz(co) + sz(k)] += a[c] * go[k];
+      ga[c] += dot(W + sz(c) * sz(co), go, co);
+    }
+  }
+}
+
+int cl(int v, int R) { return v < 0 ? 0 : (v >= R ? R - 1 : v); }
+
+void divergence(int R, const float* S, int C, const float* d, int O, float qs, float* div) {
+  for (int y = 0; y < R; ++y) {
+    for (int x = 0; x < R; ++x) {
+      const auto U = [&](int xx, int yy, int c) { return S[(sz(cl(yy, R)) * sz(R) + sz(cl(xx, R))) * sz(C) + sz(c)]; };
+      div[sz(y) * sz(R) + sz(x)] = -0.5f * (U(x + 1, y, 0) - U(x - 1, y, 0) + U(x, y + 1, 1) - U(x, y - 1, 1)) + qs * d[(sz(y) * sz(R) + sz(x)) * sz(O) + sz(O - 1)];
+    }
+  }
+}
+void divergence_back(int R, int C, int O, float qs, const float* gdiv, float* gS, float* gd) {
+  for (int y = 0; y < R; ++y) {
+    for (int x = 0; x < R; ++x) {
+      const float g = gdiv[sz(y) * sz(R) + sz(x)];
+      gd[(sz(y) * sz(R) + sz(x)) * sz(O) + sz(O - 1)] += qs * g;
+      gS[(sz(y) * sz(R) + sz(cl(x + 1, R))) * sz(C)] -= 0.5f * g;
+      gS[(sz(y) * sz(R) + sz(cl(x - 1, R))) * sz(C)] += 0.5f * g;
+      gS[(sz(cl(y + 1, R)) * sz(R) + sz(x)) * sz(C) + 1] -= 0.5f * g;
+      gS[(sz(cl(y - 1, R)) * sz(R) + sz(x)) * sz(C) + 1] += 0.5f * g;
+    }
+  }
+}
+
+void neighbour_sum(int R, const float* p, float* o) {
+  for (int y = 0; y < R; ++y) {
+    for (int x = 0; x < R; ++x) {
+      float s = 0;
+      if (x > 0) s += p[sz(y) * sz(R) + sz(x - 1)];
+      if (x < R - 1) s += p[sz(y) * sz(R) + sz(x + 1)];
+      if (y > 0) s += p[sz(y - 1) * sz(R) + sz(x)];
+      if (y < R - 1) s += p[sz(y + 1) * sz(R) + sz(x)];
+      o[sz(y) * sz(R) + sz(x)] = s;
+    }
+  }
+}
+void jacobi(int R, int K, const float* div, float* p, float* tmp) {  // p: warm start in, solution out
+  for (int k = 0; k < K; ++k) {
+    neighbour_sum(R, p, tmp);
+    for (int i = 0; i < R * R; ++i) p[i] = 0.25f * (div[i] + tmp[i]);
+  }
+}
+// p_K = M^K p_0 + 0.25 sum_j M^j div with M = neighbour_sum / 4 (symmetric): the transpose runs the same iteration.
+void jacobi_back(int R, int K, const float* g, float* gdiv, float* gp0, float* w, float* tmp) {
+  std::memcpy(w, g, sizeof(float) * sz(R) * sz(R));
+  std::fill_n(gdiv, sz(R) * sz(R), 0.f);
+  for (int k = 0; k < K; ++k) {
+    for (int i = 0; i < R * R; ++i) gdiv[i] += 0.25f * w[i];
+    neighbour_sum(R, w, tmp);
+    for (int i = 0; i < R * R; ++i) w[i] = 0.25f * tmp[i];
+  }
+  for (int i = 0; i < R * R; ++i) gp0[i] += w[i];
+}
+
+void subtract_grad(int R, const float* p, float* S, int C) {
+  for (int y = 0; y < R; ++y) {
+    for (int x = 0; x < R; ++x) {
+      const auto P = [&](int xx, int yy) { return (xx < 0 || yy < 0 || xx >= R || yy >= R) ? 0.f : p[sz(yy) * sz(R) + sz(xx)]; };
+      S[(sz(y) * sz(R) + sz(x)) * sz(C)] -= 0.5f * (P(x + 1, y) - P(x - 1, y));
+      S[(sz(y) * sz(R) + sz(x)) * sz(C) + 1] -= 0.5f * (P(x, y + 1) - P(x, y - 1));
+    }
+  }
+}
+void subtract_grad_back(int R, const float* gS, int C, float* gp) {
+  for (int y = 0; y < R; ++y) {
+    for (int x = 0; x < R; ++x) {
+      const float gu = gS[(sz(y) * sz(R) + sz(x)) * sz(C)], gv = gS[(sz(y) * sz(R) + sz(x)) * sz(C) + 1];
+      if (x + 1 < R) gp[sz(y) * sz(R) + sz(x + 1)] -= 0.5f * gu;
+      if (x > 0) gp[sz(y) * sz(R) + sz(x - 1)] += 0.5f * gu;
+      if (y + 1 < R) gp[sz(y + 1) * sz(R) + sz(x)] -= 0.5f * gv;
+      if (y > 0) gp[sz(y - 1) * sz(R) + sz(x)] += 0.5f * gv;
+    }
+  }
+}
+
+void advect(int R, const float* S, int C, float* out) {
+  for (int y = 0; y < R; ++y) {
+    for (int x = 0; x < R; ++x) {
+      const float* s = S + (sz(y) * sz(R) + sz(x)) * sz(C);
+      const float px = std::clamp(fl(x) - s[0], 0.f, fl(R - 1)), py = std::clamp(fl(y) - s[1], 0.f, fl(R - 1));
+      const int x0 = std::min(static_cast<int>(px), R - 2), y0 = std::min(static_cast<int>(py), R - 2);
+      const float fx = px - fl(x0), fy = py - fl(y0);
+      const float* a = S + (sz(y0) * sz(R) + sz(x0)) * sz(C);
+      const float* b = a + C;
+      const float* c = a + sz(R) * sz(C);
+      const float* d = c + C;
+      float* o = out + (sz(y) * sz(R) + sz(x)) * sz(C);
+      for (int k = 0; k < C; ++k) o[k] = (1.f - fy) * ((1.f - fx) * a[k] + fx * b[k]) + fy * ((1.f - fx) * c[k] + fx * d[k]);
+    }
+  }
+}
+void advect_back(int R, const float* S, int C, const float* g, float* gS) {
+  for (int y = 0; y < R; ++y) {
+    for (int x = 0; x < R; ++x) {
+      const float* s = S + (sz(y) * sz(R) + sz(x)) * sz(C);
+      const float rx = fl(x) - s[0], ry = fl(y) - s[1];
+      const float px = std::clamp(rx, 0.f, fl(R - 1)), py = std::clamp(ry, 0.f, fl(R - 1));
+      const int x0 = std::min(static_cast<int>(px), R - 2), y0 = std::min(static_cast<int>(py), R - 2);
+      const float fx = px - fl(x0), fy = py - fl(y0);
+      const std::size_t ia = (sz(y0) * sz(R) + sz(x0)) * sz(C), ib = ia + sz(C), ic = ia + sz(R) * sz(C), id = ic + sz(C);
+      const float* go = g + (sz(y) * sz(R) + sz(x)) * sz(C);
+      float dpx = 0, dpy = 0;
+      for (int k = 0; k < C; ++k) {
+        const float gk = go[k];
+        gS[ia + sz(k)] += gk * (1.f - fx) * (1.f - fy);
+        gS[ib + sz(k)] += gk * fx * (1.f - fy);
+        gS[ic + sz(k)] += gk * (1.f - fx) * fy;
+        gS[id + sz(k)] += gk * fx * fy;
+        dpx += gk * ((1.f - fy) * (S[ib + sz(k)] - S[ia + sz(k)]) + fy * (S[id + sz(k)] - S[ic + sz(k)]));
+        dpy += gk * ((1.f - fx) * (S[ic + sz(k)] - S[ia + sz(k)]) + fx * (S[id + sz(k)] - S[ib + sz(k)]));
+      }
+      if (rx > 0.f && rx < fl(R - 1)) gS[(sz(y) * sz(R) + sz(x)) * sz(C)] -= dpx;
+      if (ry > 0.f && ry < fl(R - 1)) gS[(sz(y) * sz(R) + sz(x)) * sz(C) + 1] -= dpy;
+    }
+  }
+}
+
+// --- one differentiable coarse step ------------------------------------------------------------------------------------
+
+struct Cache {
+  Vec X, y1, a1, y2, a2, out, mid, div, p, proj, next;
+  Vec g1, e1, g2, e2;
+  std::vector<std::uint8_t> clamped;
+};
+
+void film(const Model& m, const StepLayout& L, std::span<const float> cond, std::size_t G, std::size_t E, Vec& g, Vec& e) {
+  const int H = m.h.hidden;
+  g.assign(sz(H), 1.f);
+  e.assign(sz(H), 0.f);
+  for (int k = 0; k < m.h.cond(); ++k) {
+    for (int j = 0; j < H; ++j) {
+      g[sz(j)] += m.step_w[G + sz(k) * sz(H) + sz(j)] * cond[sz(k)];
+      e[sz(j)] += m.step_w[E + sz(k) * sz(H) + sz(j)] * cond[sz(k)];
+    }
+  }
+  (void)L;
+}
+
+// in -> c.next; pressure: warm start in, solution out (also kept in c.p).
+void forward(const Model& m, const StepLayout& L, const float* in, const float* noise, std::span<const float> cond, Vec& pressure, Cache& c) {
+  const Hyper& h = m.h;
+  const int R = h.res, N = R * R, C = h.channels(), I = h.inputs(), H = h.hidden, O = h.outputs();
+  const float* w = m.step_w.data();
+  c.X.resize(sz(N) * sz(I));
+  for (int y = 0; y < R; ++y) {
+    for (int x = 0; x < R; ++x) {
+      const std::size_t i = sz(y) * sz(R) + sz(x);
+      float* xi = c.X.data() + i * sz(I);
+      for (int k = 0; k < C; ++k) xi[k] = in[i * sz(C) + sz(k)] / (k < kPhys ? m.scale[sz(k)] : 1.f);
+      xi[C] = noise[i * kNoise];
+      xi[C + 1] = noise[i * kNoise + 1];
+      xi[C + 2] = (fl(x) + 0.5f) / fl(R) * 2.f - 1.f;
+      xi[C + 3] = (fl(y) + 0.5f) / fl(R) * 2.f - 1.f;
+    }
+  }
+  film(m, L, cond, L.g1, L.e1, c.g1, c.e1);
+  film(m, L, cond, L.g2, L.e2, c.g2, c.e2);
+  c.y1.resize(sz(N) * sz(H));
+  c.a1.resize(sz(N) * sz(H));
+  conv3(R, c.X.data(), I, w + L.w1, w + L.b1, H, c.y1.data());
+  for (int i = 0; i < N; ++i) {
+    for (int j = 0; j < H; ++j) c.a1[sz(i) * sz(H) + sz(j)] = std::max(0.f, c.g1[sz(j)] * c.y1[sz(i) * sz(H) + sz(j)] + c.e1[sz(j)]);
+  }
+  c.y2.resize(sz(N) * sz(H));
+  c.a2.resize(sz(N) * sz(H));
+  conv3(R, c.a1.data(), H, w + L.w2, w + L.b2, H, c.y2.data());
+  for (int i = 0; i < N; ++i) {
+    for (int j = 0; j < H; ++j) c.a2[sz(i) * sz(H) + sz(j)] = std::max(0.f, c.g2[sz(j)] * c.y2[sz(i) * sz(H) + sz(j)] + c.e2[sz(j)]);
+  }
+  c.out.resize(sz(N) * sz(O));
+  conv1(N, c.a2.data(), H, w + L.wo, w + L.bo, O, c.out.data());
+  c.mid.resize(sz(N) * sz(C));
+  for (int i = 0; i < N; ++i) {
+    for (int k = 0; k < kPhys; ++k) c.mid[sz(i) * sz(C) + sz(k)] = in[sz(i) * sz(C) + sz(k)] + m.scale[sz(k)] * c.out[sz(i) * sz(O) + sz(k)];
+    for (int k = kPhys; k < C; ++k) c.mid[sz(i) * sz(C) + sz(k)] = std::tanh(in[sz(i) * sz(C) + sz(k)] + c.out[sz(i) * sz(O) + sz(k)]);
+  }
+  c.div.resize(sz(N));
+  divergence(R, c.mid.data(), C, c.out.data(), O, m.qscale, c.div.data());
+  Vec tmp(sz(N));
+  jacobi(R, h.jacobi, c.div.data(), pressure.data(), tmp.data());
+  c.p = pressure;
+  c.proj = c.mid;
+  subtract_grad(R, c.p.data(), c.proj.data(), C);
+  c.next.resize(sz(N) * sz(C));
+  advect(R, c.proj.data(), C, c.next.data());
+  c.clamped.assign(sz(N) * kPhys, 0);
+  for (int i = 0; i < N; ++i) {
+    for (int k = 0; k < kPhys; ++k) {
+      float& v = c.next[sz(i) * sz(C) + sz(k)];
+      if (v < m.lo[sz(k)] || v > m.hi[sz(k)]) {
+        v = std::clamp(v, m.lo[sz(k)], m.hi[sz(k)]);
+        c.clamped[sz(i) * kPhys + sz(k)] = 1;
+      }
+    }
+  }
+}
+
+// gS (gradient wrt c.next, consumed), gp_out (wrt c.p) -> gS_in, gp_in (wrt the warm start); grad accumulated.
+void backward(const Model& m, const StepLayout& L, const Cache& c, std::span<const float> cond, Vec& gS, const Vec& gp_out, Vec& gS_in,
+              Vec& gp_in, float* grad) {
+  const Hyper& h = m.h;
+  const int R = h.res, N = R * R, C = h.channels(), I = h.inputs(), H = h.hidden, O = h.outputs();
+  const float* w = m.step_w.data();
+  for (int i = 0; i < N; ++i) {
+    for (int k = 0; k < kPhys; ++k) {
+      if (c.clamped[sz(i) * kPhys + sz(k)]) gS[sz(i) * sz(C) + sz(k)] = 0;
+    }
+  }
+  Vec gproj(sz(N) * sz(C), 0.f);
+  advect_back(R, c.proj.data(), C, gS.data(), gproj.data());
+  Vec gp(gp_out);
+  subtract_grad_back(R, gproj.data(), C, gp.data());
+  Vec gdiv(sz(N)), wk(sz(N)), tmp(sz(N));
+  gp_in.assign(sz(N), 0.f);
+  jacobi_back(R, h.jacobi, gp.data(), gdiv.data(), gp_in.data(), wk.data(), tmp.data());
+  Vec& gmid = gproj;
+  Vec gout(sz(N) * sz(O), 0.f);
+  divergence_back(R, C, O, m.qscale, gdiv.data(), gmid.data(), gout.data());
+  for (int i = 0; i < N; ++i) {
+    for (int k = kPhys; k < C; ++k) {
+      const float t = c.mid[sz(i) * sz(C) + sz(k)];
+      gmid[sz(i) * sz(C) + sz(k)] *= 1.f - t * t;
+    }
+    for (int k = 0; k < C; ++k) gout[sz(i) * sz(O) + sz(k)] += (k < kPhys ? m.scale[sz(k)] : 1.f) * gmid[sz(i) * sz(C) + sz(k)];
+  }
+  gS_in = gmid;
+  Vec ga2(sz(N) * sz(H), 0.f);
+  conv1_back(N, c.a2.data(), H, w + L.wo, O, gout.data(), ga2.data(), grad + L.wo, grad + L.bo);
+  const auto film_back = [&](const Vec& a, const Vec& y, const Vec& gam, Vec& ga, std::size_t G, std::size_t E) {
+    std::vector<double> sg(sz(H), 0), se(sz(H), 0);
+    for (int i = 0; i < N; ++i) {
+      for (int j = 0; j < H; ++j) {
+        const std::size_t q = sz(i) * sz(H) + sz(j);
+        const float gz = a[q] > 0.f ? ga[q] : 0.f;
+        sg[sz(j)] += static_cast<double>(gz * y[q]);
+        se[sz(j)] += static_cast<double>(gz);
+        ga[q] = gz * gam[sz(j)];
+      }
+    }
+    for (int k = 0; k < h.cond(); ++k) {
+      for (int j = 0; j < H; ++j) {
+        grad[G + sz(k) * sz(H) + sz(j)] += static_cast<float>(sg[sz(j)]) * cond[sz(k)];
+        grad[E + sz(k) * sz(H) + sz(j)] += static_cast<float>(se[sz(j)]) * cond[sz(k)];
+      }
+    }
+  };
+  film_back(c.a2, c.y2, c.g2, ga2, L.g2, L.e2);  // ga2 now holds the gradient wrt y2
+  Vec ga1(sz(N) * sz(H), 0.f);
+  conv3_back(R, c.a1.data(), H, w + L.w2, H, ga2.data(), ga1.data(), grad + L.w2, grad + L.b2);
+  film_back(c.a1, c.y1, c.g1, ga1, L.g1, L.e1);
+  Vec gX(sz(N) * sz(I), 0.f);
+  conv3_back(R, c.X.data(), I, w + L.w1, H, ga1.data(), gX.data(), grad + L.w1, grad + L.b1);
+  for (int i = 0; i < N; ++i) {
+    for (int k = 0; k < C; ++k) gS_in[sz(i) * sz(C) + sz(k)] += gX[sz(i) * sz(I) + sz(k)] / (k < kPhys ? m.scale[sz(k)] : 1.f);
+  }
+}
+
+float run_time(const Run& r, int state) { return static_cast<float>(state + 1) / r.p.fps; }
+
+void state_of(const Model& m, const Run& r, int i, Vec& S) {
+  const int N = m.h.res * m.h.res, C = m.h.channels();
+  S.assign(sz(N) * sz(C), 0.f);
+  for (int j = 0; j < N; ++j) {
+    for (int k = 0; k < kPhys; ++k) S[sz(j) * sz(C) + sz(k)] = r.coarse[(sz(i) * sz(N) + sz(j)) * kPhys + sz(k)];
+  }
+}
+
+}  // namespace
+
+// --- data ---------------------------------------------------------------------------------------------------------------
+
+void coarse_from_sim(const sim::State& st, int res, float fps, std::span<float> out) {
+  const int n = st.n, k = n / res;
+  if (k * res != n) throw std::invalid_argument("rollout: the coarse grid must divide the simulation grid");
+  std::fill(out.begin(), out.begin() + static_cast<std::ptrdiff_t>(sz(res) * sz(res) * kPhys), 0.f);
+  for (int y = 0; y < n; ++y) {
+    for (int x = 0; x < n; ++x) {
+      const std::size_t i = sz(y) * sz(n) + sz(x);
+      float* o = out.data() + (sz(y / k) * sz(res) + sz(x / k)) * kPhys;
+      o[0] += st.u[i];
+      o[1] += st.v[i];
+      o[2] += st.temp[i];
+      o[3] += st.soot[i];
+    }
+  }
+  const float a = 1.f / fl(k * k), av = a / (fl(k) * fps);
+  for (int i = 0; i < res * res; ++i) {
+    out[sz(i) * kPhys] *= av;
+    out[sz(i) * kPhys + 1] *= av;
+    out[sz(i) * kPhys + 2] *= a;
+    out[sz(i) * kPhys + 3] *= a;
+  }
+}
+
+Run record_run(const sim::Params& p, int frames, int res) {
+  Run r;
+  r.p = p;
+  r.frames = frames;
+  const std::size_t per = sz(res) * sz(res) * kPhys;
+  r.coarse.resize(sz(frames) * per);
+  sim::Fluid f(p);
+  for (int i = 0; i < frames; ++i) {
+    f.step_frame();
+    coarse_from_sim(f.state(), res, p.fps, std::span(r.coarse).subspan(sz(i) * per, per));
+  }
+  return r;
+}
+
+// --- stepper ------------------------------------------------------------------------------------------------------------
+
+double window_loss(const Model& m, const Run& r, int first, int unroll, int burn, float sigma, float profile, std::uint64_t noise_seed,
+                   std::vector<float>* grad) {
+  const Hyper& h = m.h;
+  const StepLayout L = step_layout(h);
+  const int R = h.res, N = R * R, C = h.channels();
+  Vec S, pressure(sz(N), 0.f), noise(sz(N) * kNoise), cond(sz(h.cond()));
+  state_of(m, r, first, S);
+  const std::vector<float> controls = r.controls();
+  int i0 = first;
+  if (burn > 0) {  // the stepper's own rollout, no gradient: it learns to correct its own drift
+    Cache cb;
+    for (int s = 0; s < burn; ++s) {
+      condition(m, controls, run_time(r, i0 + s), cond);
+      coarse_noise(m, r.p.seed, run_time(r, i0 + s), noise);
+      forward(m, L, S.data(), noise.data(), cond, pressure, cb);
+      S = cb.next;
+    }
+    i0 += burn;
+  }
+  std::vector<Cache> cs(sz(unroll));
+  std::vector<Vec> conds(sz(unroll));
+  std::vector<Vec> gout(sz(unroll));
+  std::array<float, kPhys> wch{};
+  for (int k = 0; k < kPhys; ++k) wch[sz(k)] = 1.f / (m.scale[sz(k)] * m.scale[sz(k)]);
+  const float inv = 1.f / (fl(N) * kPhys * fl(unroll));
+  std::mt19937 rng(static_cast<unsigned>(noise_seed));
+  std::normal_distribution<float> nd(0.f, 1.f);
+  double loss = 0;
+  for (int s = 0; s < unroll; ++s) {
+    conds[sz(s)].resize(sz(h.cond()));
+    condition(m, controls, run_time(r, i0 + s), conds[sz(s)]);
+    coarse_noise(m, r.p.seed, run_time(r, i0 + s), noise);
+    if (sigma > 0.f) {
+      for (int j = 0; j < N; ++j) {
+        for (int k = 0; k < kPhys; ++k) {
+          float& x = S[sz(j) * sz(C) + sz(k)];
+          x = std::clamp(x + sigma * m.scale[sz(k)] * nd(rng), m.lo[sz(k)], m.hi[sz(k)]);
+        }
+      }
+    }
+    forward(m, L, S.data(), noise.data(), conds[sz(s)], pressure, cs[sz(s)]);
+    S = cs[sz(s)].next;
+    const float* t = r.coarse.data() + sz(i0 + s + 1) * sz(N) * kPhys;
+    Vec& g = gout[sz(s)];
+    g.assign(sz(N) * sz(C), 0.f);
+    for (int j = 0; j < N; ++j) {
+      for (int k = 0; k < kPhys; ++k) {
+        const float e = S[sz(j) * sz(C) + sz(k)] - t[sz(j) * kPhys + sz(k)];
+        loss += static_cast<double>(wch[sz(k)] * e * e * inv);
+        g[sz(j) * sz(C) + sz(k)] = 2.f * wch[sz(k)] * e * inv;
+      }
+    }
+    if (profile > 0.f) {  // where the heat and soot are: row and column sums
+      const float pinv = profile / fl(4 * R * unroll);
+      for (int k = 2; k < kPhys; ++k) {
+        for (int axis = 0; axis < 2; ++axis) {
+          Vec dm(sz(R), 0.f);
+          for (int y = 0; y < R; ++y) {
+            for (int x = 0; x < R; ++x) {
+              const int j = y * R + x;
+              dm[sz(axis == 0 ? y : x)] += (S[sz(j) * sz(C) + sz(k)] - t[sz(j) * kPhys + sz(k)]) / (m.scale[sz(k)] * fl(R));
+            }
+          }
+          for (int b = 0; b < R; ++b) loss += static_cast<double>(pinv * dm[sz(b)] * dm[sz(b)]);
+          for (int y = 0; y < R; ++y) {
+            for (int x = 0; x < R; ++x) {
+              const int j = y * R + x;
+              g[sz(j) * sz(C) + sz(k)] += 2.f * pinv * dm[sz(axis == 0 ? y : x)] / (m.scale[sz(k)] * fl(R));
+            }
+          }
+        }
+      }
+    }
+  }
+  if (grad) {
+    Vec gS(sz(N) * sz(C), 0.f), gp(sz(N), 0.f), gS_in, gp_in;
+    for (int s = unroll - 1; s >= 0; --s) {
+      for (std::size_t j = 0; j < gS.size(); ++j) gS[j] += gout[sz(s)][j];
+      backward(m, L, cs[sz(s)], conds[sz(s)], gS, gp, gS_in, gp_in, grad->data());
+      gS.swap(gS_in);
+      gp.swap(gp_in);
+    }
+  }
+  return loss;
+}
+
+namespace {
+
+struct Adam {
+  Vec m, v;
+  int t = 0;
+  explicit Adam(std::size_t n) : m(n, 0.f), v(n, 0.f) {}
+  void step(Vec& w, const Vec& g, float lr) {
+    ++t;
+    constexpr float b1 = 0.9f, b2 = 0.999f;
+    const float c1 = 1.f - std::pow(b1, static_cast<float>(t)), c2 = 1.f - std::pow(b2, static_cast<float>(t));
+    for (std::size_t j = 0; j < w.size(); ++j) {
+      m[j] = b1 * m[j] + (1.f - b1) * g[j];
+      v[j] = b2 * v[j] + (1.f - b2) * g[j] * g[j];
+      w[j] -= lr * (m[j] / c1) / (std::sqrt(v[j] / c2) + 1e-8f);
+    }
+  }
+};
+
+int thread_count(int requested) {
+  const int hw = static_cast<int>(std::max(1u, std::thread::hardware_concurrency()));
+  return requested > 0 ? requested : hw;
+}
+
+}  // namespace
+
+StepperResult train_stepper(Model& m, std::span<const Run> runs, const StepperOptions& o) {
+  if (runs.empty()) throw std::invalid_argument("rollout: no runs");
+  const Hyper& h = m.h;
+  const std::size_t per = sz(h.res) * sz(h.res) * kPhys;
+  for (const Run& r : runs) {
+    if (r.coarse.size() != sz(r.frames) * per || r.frames < o.max_unroll + 2) throw std::invalid_argument("rollout: run has the wrong shape");
+  }
+  // Channel scales (RMS) and the range the state is kept in (1.5 x the largest magnitude seen).
+  std::array<double, kPhys> s2{};
+  std::array<float, kPhys> mx{};
+  std::size_t count = 0;
+  for (const Run& r : runs) {
+    for (std::size_t j = 0; j < r.coarse.size(); j += kPhys) {
+      for (int k = 0; k < kPhys; ++k) {
+        const float v = r.coarse[j + sz(k)];
+        s2[sz(k)] += static_cast<double>(v) * v;
+        mx[sz(k)] = std::max(mx[sz(k)], std::abs(v));
+      }
+      ++count;
+    }
+  }
+  for (int k = 0; k < kPhys; ++k) {
+    m.scale[sz(k)] = static_cast<float>(std::sqrt(s2[sz(k)] / static_cast<double>(count))) + 1e-4f;
+    m.hi[sz(k)] = 1.5f * mx[sz(k)] + 1e-4f;
+    m.lo[sz(k)] = k < 2 ? -m.hi[sz(k)] : 0.f;
+  }
+  const StepLayout L = step_layout(h);
+  if (m.step_w.size() != L.size) throw std::invalid_argument("rollout: weights do not match the hyperparameters");
+  const int threads = thread_count(o.threads);
+  Adam adam(L.size);
+  StepperResult res;
+  const auto t0 = std::chrono::steady_clock::now();
+  const int total = o.iterations + o.finetune;
+  std::vector<double> tail;
+  for (int it = 0; it < total; ++it) {
+    const bool fine = it >= o.iterations;
+    const int unroll = fine ? o.max_unroll : std::min(o.max_unroll, 1 + it * o.max_unroll / std::max(1, o.iterations / 2));
+    std::vector<Vec> grads(sz(threads), Vec(L.size, 0.f));
+    std::vector<double> losses(sz(threads), 0.0);
+    {
+      std::vector<std::jthread> pool;
+      for (int t = 0; t < threads; ++t) {
+        pool.emplace_back([&, t] {
+          std::mt19937_64 rng(o.seed * 1000003ULL + static_cast<std::uint64_t>(it) * 977ULL + static_cast<std::uint64_t>(t));
+          for (int b = t; b < o.batch; b += threads) {
+            const Run& r = runs[rng() % runs.size()];
+            const int burn = fine && o.burn_max > 0 && (b & 1) ? static_cast<int>(rng() % static_cast<std::uint64_t>(o.burn_max + 1)) : 0;
+            const int span = r.frames - unroll - burn - 1;
+            if (span <= 0) continue;
+            const int first = static_cast<int>(rng() % static_cast<std::uint64_t>(span));
+            losses[sz(t)] += window_loss(m, r, first, unroll, burn, o.sigma, fine ? o.profile : 0.f, rng(), &grads[sz(t)]);
+          }
+        });
+      }
+    }
+    for (int t = 1; t < threads; ++t) {
+      for (std::size_t j = 0; j < L.size; ++j) grads[0][j] += grads[sz(t)][j];
+    }
+    double loss = 0, gn = 0;
+    for (const double v : losses) loss += v;
+    loss /= o.batch;
+    for (float& g : grads[0]) {
+      g /= static_cast<float>(o.batch);
+      gn += static_cast<double>(g) * g;
+    }
+    gn = std::sqrt(gn);
+    if (gn > o.clip) {
+      const float s = static_cast<float>(o.clip / gn);
+      for (float& g : grads[0]) g *= s;
+    }
+    const int stage_it = fine ? it - o.iterations : it, stage_n = fine ? o.finetune : o.iterations;
+    const float base = fine ? o.lr_finetune : o.lr;
+    const float lr = base * (0.05f + 0.95f * 0.5f * (1.f + std::cos(3.14159265f * static_cast<float>(stage_it) / static_cast<float>(std::max(1, stage_n)))));
+    adam.step(m.step_w, grads[0], lr);
+    if (it >= total - std::max(1, total / 20)) tail.push_back(loss);
+    if (it % std::max(1, o.log_every) == 0 || it == total - 1) {
+      res.curve.emplace_back(it, loss);
+      if (o.progress) o.progress(it, unroll, loss);
+    }
+  }
+  for (const double v : tail) res.final_loss += v / static_cast<double>(tail.size());
+  res.seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
+  return res;
+}
+
+// --- renderer -----------------------------------------------------------------------------------------------------------
+
+RenderSample render_sample(const sim::Fluid& f, int res) {
+  RenderSample s;
+  const sim::State st = f.state();
+  s.size = f.params().size;
+  if (st.n != s.size) throw std::invalid_argument("rollout: render samples need the solver at the output size");
+  s.fine_t = st.temp;
+  s.fine_d = st.soot;
+  s.coarse.resize(sz(res) * sz(res) * kPhys);
+  coarse_from_sim(st, res, f.params().fps, s.coarse);
+  s.rgba.resize(sz(s.size) * sz(s.size) * 4);
+  f.render(s.rgba);
+  return s;
+}
+
+namespace {
+
+State sample_state(const Model& m, const RenderSample& s) {
+  State st;
+  st.res = m.h.res;
+  st.size = s.size;
+  const int C = m.h.channels(), N = m.h.res * m.h.res;
+  st.coarse.assign(sz(N) * sz(C), 0.f);
+  for (int i = 0; i < N; ++i) {
+    for (int k = 0; k < kPhys; ++k) st.coarse[sz(i) * sz(C) + sz(k)] = s.coarse[sz(i) * kPhys + sz(k)];
+  }
+  st.fine_t = s.fine_t;
+  st.fine_d = s.fine_d;
+  return st;
+}
+
+}  // namespace
+
+double train_renderer(Model& m, std::span<const RenderSample> samples, const RendererOptions& o) {
+  if (samples.empty()) throw std::invalid_argument("rollout: no render samples");
+  // Input normalisation: the 99.5th percentile of fine heat and soot over the samples' active pixels.
+  {
+    std::vector<float> t, d;
+    for (const RenderSample& s : samples) {
+      for (std::size_t i = 0; i < s.fine_t.size(); i += 7) {
+        if (s.fine_t[i] > 1e-4f) t.push_back(s.fine_t[i]);
+        if (s.fine_d[i] > 1e-5f) d.push_back(s.fine_d[i]);
+      }
+    }
+    const auto pct = [](std::vector<float>& v) {
+      if (v.empty()) return 1.f;
+      const auto k = static_cast<std::ptrdiff_t>(static_cast<double>(v.size() - 1) * 0.995);
+      std::nth_element(v.begin(), v.begin() + k, v.end());
+      return std::max(v[static_cast<std::size_t>(k)], 1e-4f);
+    };
+    m.render_scale = {pct(t), pct(d)};
+  }
+  std::vector<State> states;
+  states.reserve(samples.size());
+  for (const RenderSample& s : samples) states.push_back(sample_state(m, s));
+  const RenderLayout L = render_layout(m.h);
+  const int H = m.h.render_hidden;
+  const int threads = thread_count(o.threads);
+  Adam adam(L.size);
+  double psnr = 0;
+  for (int it = 0; it < o.iterations; ++it) {
+    std::vector<Vec> grads(sz(threads), Vec(L.size, 0.f));
+    std::vector<double> sse(sz(threads), 0.0);
+    {
+      std::vector<std::jthread> pool;
+      for (int t = 0; t < threads; ++t) {
+        pool.emplace_back([&, t] {
+          std::mt19937_64 rng(o.seed * 7919ULL + static_cast<std::uint64_t>(it) * 131ULL + static_cast<std::uint64_t>(t));
+          std::array<float, kRenderIn> f{};
+          Vec h1(sz(H)), h2(sz(H)), g1(sz(H)), g2(sz(H));
+          const float* w = m.render_w.data();
+          float* g = grads[sz(t)].data();
+          for (int b = t; b < o.batch_frames; b += threads) {
+            const std::size_t si = rng() % samples.size();
+            const RenderSample& s = samples[si];
+            const State& st = states[si];
+            const int S = s.size;
+            for (int p = 0; p < o.pixels; ++p) {
+              // half the pixels where something is visible, half anywhere
+              int x = static_cast<int>(rng() % static_cast<std::uint64_t>(S)), y = static_cast<int>(rng() % static_cast<std::uint64_t>(S));
+              if (p & 1) {
+                for (int tries = 0; tries < 8; ++tries) {
+                  if (s.fine_t[sz(y) * sz(S) + sz(x)] > 0.01f * m.render_scale[0] || s.fine_d[sz(y) * sz(S) + sz(x)] > 0.01f * m.render_scale[1]) break;
+                  x = static_cast<int>(rng() % static_cast<std::uint64_t>(S));
+                  y = static_cast<int>(rng() % static_cast<std::uint64_t>(S));
+                }
+              }
+              render_features(m, st, x, y, f);
+              for (int j = 0; j < H; ++j) h1[sz(j)] = std::max(0.f, w[L.b1 + sz(j)] + dot(w + L.w1 + sz(j) * kRenderIn, f.data(), kRenderIn));
+              for (int j = 0; j < H; ++j) h2[sz(j)] = std::max(0.f, w[L.b2 + sz(j)] + dot(w + L.w2 + sz(j) * sz(H), h1.data(), H));
+              const std::uint8_t* target = s.rgba.data() + (sz(S - 1 - y) * sz(S) + sz(x)) * 4;
+              std::fill(g2.begin(), g2.end(), 0.f);
+              const float gate = render_gate(f[0], f[1]);
+              for (int c = 0; c < 4; ++c) {
+                const float out = (w[L.bo + sz(c)] + dot(w + L.wo + sz(c) * sz(H), h2.data(), H)) * gate;
+                const float e = out - static_cast<float>(target[c]) / 255.f;
+                sse[sz(t)] += static_cast<double>(e * e);
+                const float ge = 2.f * e * gate / static_cast<float>(o.pixels * 4);
+                g[L.bo + sz(c)] += ge;
+                for (int j = 0; j < H; ++j) {
+                  g[L.wo + sz(c) * sz(H) + sz(j)] += ge * h2[sz(j)];
+                  g2[sz(j)] += ge * w[L.wo + sz(c) * sz(H) + sz(j)];
+                }
+              }
+              std::fill(g1.begin(), g1.end(), 0.f);
+              for (int j = 0; j < H; ++j) {
+                if (h2[sz(j)] <= 0.f) continue;
+                g[L.b2 + sz(j)] += g2[sz(j)];
+                for (int i = 0; i < H; ++i) {
+                  g[L.w2 + sz(j) * sz(H) + sz(i)] += g2[sz(j)] * h1[sz(i)];
+                  g1[sz(i)] += g2[sz(j)] * w[L.w2 + sz(j) * sz(H) + sz(i)];
+                }
+              }
+              for (int j = 0; j < H; ++j) {
+                if (h1[sz(j)] <= 0.f) continue;
+                g[L.b1 + sz(j)] += g1[sz(j)];
+                for (int i = 0; i < kRenderIn; ++i) g[L.w1 + sz(j) * kRenderIn + sz(i)] += g1[sz(j)] * f[sz(i)];
+              }
+            }
+          }
+        });
+      }
+    }
+    for (int t = 1; t < threads; ++t) {
+      for (std::size_t j = 0; j < L.size; ++j) grads[0][j] += grads[sz(t)][j];
+    }
+    double total = 0;
+    for (const double v : sse) total += v;
+    const double mse = total / (static_cast<double>(o.batch_frames) * o.pixels * 4);
+    for (float& g : grads[0]) g /= static_cast<float>(o.batch_frames);
+    const float lr = o.lr * (0.05f + 0.95f * 0.5f * (1.f + std::cos(3.14159265f * static_cast<float>(it) / static_cast<float>(o.iterations))));
+    adam.step(m.render_w, grads[0], lr);
+    psnr = -10.0 * std::log10(std::max(mse, 1e-10));
+    if (o.progress && (it % 250 == 0 || it == o.iterations - 1)) o.progress(it, psnr);
+  }
+  return psnr;
+}
+
+// --- detail calibration and start points ------------------------------------------------------------------------------
+
+namespace {
+
+Clip rollout_clip(const Model& m, State s, std::span<const float> controls, std::uint64_t seed, int frames) {
+  Clip c;
+  c.allocate(s.size, frames);
+  c.fps = m.fps;
+  std::vector<float> rgba(sz(s.size) * sz(s.size) * 4);
+  for (int f = 0; f < frames; ++f) {
+    step(m, s, controls, seed);
+    render(m, s, rgba);
+    auto out = c.frame(f);
+    for (std::size_t i = 0; i < rgba.size(); ++i) out[i] = static_cast<std::uint8_t>(rgba[i] * 255.f + 0.5f);
+  }
+  return c;
+}
+
+State true_start(const Model& m, const sim::Fluid& f) {
+  const sim::State st = f.state();
+  State s;
+  s.res = m.h.res;
+  s.size = st.n;
+  s.time = st.time;
+  s.since_start = 0.f;
+  const int N = m.h.res * m.h.res, C = m.h.channels();
+  std::vector<float> c(sz(N) * kPhys);
+  coarse_from_sim(st, m.h.res, f.params().fps, c);
+  s.coarse.assign(sz(N) * sz(C), 0.f);
+  for (int i = 0; i < N; ++i) {
+    for (int k = 0; k < kPhys; ++k) s.coarse[sz(i) * sz(C) + sz(k)] = c[sz(i) * kPhys + sz(k)];
+  }
+  s.pressure.assign(sz(N), 0.f);
+  s.flow.assign(sz(N) * 2, 0.f);
+  s.fine_t = st.temp;
+  s.fine_d = st.soot;
+  return s;
+}
+
+double detail_score(const metrics::ClipStats& ref, const metrics::ClipStats& test) {
+  const metrics::StatDistance d = metrics::distance(ref, test);
+  return d.spectrum_l1 + std::abs(std::log(std::max(1e-3, d.motion_ratio)));
+}
+
+}  // namespace
+
+double calibrate_detail(Model& m, std::span<const sim::Params> runs, int from, int frames) {
+  struct Case {
+    sim::Params p;
+    State start;
+    metrics::ClipStats ref;
+  };
+  std::vector<Case> cases;
+  for (const sim::Params& p : runs) {
+    sim::Fluid f(p);
+    for (int i = 0; i < from; ++i) f.step_frame();
+    Case c{p, true_start(m, f), {}};
+    Clip ref;
+    ref.allocate(p.size, frames);
+    ref.fps = p.fps;
+    for (int i = 0; i < frames; ++i) {
+      f.step_frame();
+      f.render(ref.frame(i));
+    }
+    c.ref = metrics::stats(ref);
+    cases.push_back(std::move(c));
+  }
+  // kappa: 1 / mean of the contrast curve over the flicker noise, so contrast moves material around but adds none.
+  {
+    double mean = 0;
+    constexpr int n = 20000;
+    for (int i = 0; i < n; ++i) {
+      const float phi = noise_flicker(m.noise, 9, static_cast<float>(i % 137) * 0.7f, static_cast<float>(i / 137) * 0.9f, 0.3f);
+      const float t = std::clamp((phi - m.detail.edge0) / (m.detail.edge1 - m.detail.edge0), 0.f, 1.f);
+      mean += static_cast<double>(t * t * (3.f - 2.f * t));
+    }
+    m.detail.kappa = static_cast<float>(n / std::max(1e-6, mean));
+  }
+  double best = std::numeric_limits<double>::infinity();
+  DetailSpec keep = m.detail;
+  std::vector<std::pair<float, float>> grid;
+  for (const float contrast : {0.f, 0.5f, 1.f}) {
+    for (const float swirl : {0.f, 0.4f, 0.8f, 1.2f}) grid.emplace_back(contrast, swirl);
+  }
+  std::vector<double> scores(grid.size(), 0.0);
+  std::atomic<std::size_t> next{0};
+  {
+    std::vector<std::jthread> pool;
+    for (int t = 0; t < thread_count(0); ++t) {
+      pool.emplace_back([&] {
+        for (std::size_t g; (g = next++) < grid.size();) {
+          Model mm = m;
+          mm.detail.contrast = grid[g].first;
+          mm.detail.swirl = grid[g].second;
+          double s = 0;
+          for (const Case& c : cases) {
+            const std::vector<float> controls{c.p.intensity, c.p.wind, c.p.turbulence};
+            s += detail_score(c.ref, metrics::stats(rollout_clip(mm, c.start, controls, c.p.seed, frames)));
+          }
+          scores[g] = s / static_cast<double>(cases.size());
+        }
+      });
+    }
+  }
+  for (std::size_t g = 0; g < grid.size(); ++g) {
+    if (scores[g] < best) {
+      best = scores[g];
+      keep.contrast = grid[g].first;
+      keep.swirl = grid[g].second;
+    }
+  }
+  keep.kappa = m.detail.kappa;
+  m.detail = keep;
+  return best;
+}
+
+void choose_starts(Model& m, std::span<const Run> runs, int count, int frame) {
+  if (runs.empty() || count < 1) throw std::invalid_argument("rollout: no runs to take start points from");
+  // Farthest-point order in control space, starting from the run nearest the middle.
+  std::vector<std::size_t> order;
+  std::vector<double> dist(runs.size(), std::numeric_limits<double>::infinity());
+  const auto d2 = [&](std::size_t a, const std::vector<float>& c) {
+    const auto ca = runs[a].controls();
+    double s = 0;
+    for (std::size_t k = 0; k < c.size(); ++k) s += static_cast<double>((ca[k] - c[k]) * (ca[k] - c[k]));
+    return s;
+  };
+  std::size_t first = 0;
+  for (std::size_t i = 1; i < runs.size(); ++i) {
+    if (d2(i, {0.5f, 0.5f, 0.5f}) < d2(first, {0.5f, 0.5f, 0.5f})) first = i;
+  }
+  order.push_back(first);
+  while (order.size() < std::min(runs.size(), sz(count))) {
+    const auto last = runs[order.back()].controls();
+    std::size_t pick = 0;
+    double far = -1;
+    for (std::size_t i = 0; i < runs.size(); ++i) {
+      dist[i] = std::min(dist[i], d2(i, last));
+      if (dist[i] > far) {
+        far = dist[i];
+        pick = i;
+      }
+    }
+    order.push_back(pick);
+  }
+  m.starts.clear();
+  const int R = m.h.res;
+  for (const std::size_t i : order) {
+    const Run& r = runs[i];
+    const int f = std::clamp(frame, 0, r.frames - 1);
+    StartPoint sp;
+    sp.controls = r.controls();
+    sp.seed = r.p.seed;
+    sp.time = static_cast<float>(f + 1) / r.p.fps;
+    sp.coarse.assign(r.coarse.begin() + static_cast<std::ptrdiff_t>(sz(f) * sz(R) * sz(R) * kPhys),
+                     r.coarse.begin() + static_cast<std::ptrdiff_t>(sz(f + 1) * sz(R) * sz(R) * kPhys));
+    if (m.h.start_fine > 0) {  // re-simulate to the frame for the fine fields, block-averaged to start_fine
+      sim::Fluid fl(r.p);
+      for (int k = 0; k <= f; ++k) fl.step_frame();
+      const sim::State st = fl.state();
+      const int F = m.h.start_fine, k = st.n / F;
+      sp.fine_t.assign(sz(F) * sz(F), 0.f);
+      sp.fine_d.assign(sz(F) * sz(F), 0.f);
+      for (int y = 0; y < st.n; ++y) {
+        for (int x = 0; x < st.n; ++x) {
+          sp.fine_t[sz(y / k) * sz(F) + sz(x / k)] += st.temp[sz(y) * sz(st.n) + sz(x)] / static_cast<float>(k * k);
+          sp.fine_d[sz(y / k) * sz(F) + sz(x / k)] += st.soot[sz(y) * sz(st.n) + sz(x)] / static_cast<float>(k * k);
+        }
+      }
+    }
+    m.starts.push_back(std::move(sp));
+  }
+}
+
+// --- recipe -------------------------------------------------------------------------------------------------------------
+
+SimRecipe recipe_for(sim::Effect e) {
+  SimRecipe r;
+  r.effect = e;
+  if (e == sim::Effect::smoke) r.start_fine = 64;  // smoke lingers: growing its detail would take seconds
+  if (e == sim::Effect::explosion) {
+    r.runs = 240;
+    r.frames = 90;
+    r.start_frame = 0;
+    r.start_fine = 64;  // the burst's shape is the look
+    r.starts = 16;
+    r.stepper.burn_max = 32;
+  }
+  return r;
+}
+
+sim::Params recipe_run(const SimRecipe& r, std::uint64_t index) {
+  std::mt19937_64 rng(index * 0x9E3779B97F4A7C15ULL + r.salt);
+  std::uniform_real_distribution<float> u(0.f, 1.f);
+  sim::Params p;
+  p.effect = r.effect;
+  p.intensity = u(rng);
+  p.wind = u(rng);
+  p.turbulence = u(rng);
+  p.seed = 500000 + r.salt * 100000 + index;
+  p.size = 128;
+  return p;
+}
+
+std::vector<Run> record_runs(const SimRecipe& r) {
+  std::vector<Run> runs(sz(r.runs));
+  std::atomic<int> next{0};
+  {
+    std::vector<std::jthread> pool;
+    for (int t = 0; t < thread_count(r.threads); ++t) {
+      pool.emplace_back([&] {
+        for (int i; (i = next++) < r.runs;) runs[sz(i)] = record_run(recipe_run(r, static_cast<std::uint64_t>(i)), r.frames, 32);
+      });
+    }
+  }
+  return runs;
+}
+
+Model recipe_model(const SimRecipe& r) {
+  Hyper h;
+  h.res = 32;
+  h.n_controls = sim::kControls;
+  const bool one_shot = !sim::effect_loops(r.effect);
+  h.n_age = one_shot ? 2 : 0;
+  h.frames = one_shot ? r.frames : 0;
+  h.start_fine = r.start_fine;
+  Model m = init_model(h, 1);
+  m.effect = std::string(sim::effect_name(r.effect));
+  m.fps = 30.f;
+  m.loop = !one_shot;
+  m.control_names.assign(sim::kControlNames.begin(), sim::kControlNames.end());
+  m.noise.flicker_rate = r.effect == sim::Effect::fire ? 2.6f : 1.4f;  // as the simulation's source flicker
+  m.detail.swirl_control = 2;                                            // turbulence
+  return m;
+}
+
+FinishResult finish_model(Model& m, const SimRecipe& r, std::span<const Run> runs) {
+  FinishResult out;
+  const bool one_shot = !sim::effect_loops(r.effect);
+  const int threads = thread_count(r.threads);
+  // renderer: two frames from each of the first render_runs runs, re-simulated at full size
+  std::vector<RenderSample> samples;
+  {
+    const int n = std::min(static_cast<int>(runs.size()), r.render_runs);
+    std::vector<std::vector<RenderSample>> per(sz(n));
+    std::atomic<int> next{0};
+    {
+      std::vector<std::jthread> pool;
+      for (int t = 0; t < threads; ++t) {
+        pool.emplace_back([&] {
+          for (int i; (i = next++) < n;) {
+            sim::Fluid f(runs[sz(i)].p);
+            const int span = std::max(1, r.frames - 20);
+            const int a = 10 + (i * 37) % span, b = 10 + (i * 71 + 13) % span;
+            for (int k = 0; k <= std::max(a, b); ++k) {
+              f.step_frame();
+              if (k == a || k == b) per[sz(i)].push_back(render_sample(f, m.h.res));
+            }
+          }
+        });
+      }
+    }
+    for (auto& v : per) {
+      for (auto& s : v) samples.push_back(std::move(s));
+    }
+  }
+  RendererOptions ro = r.renderer;
+  ro.threads = r.threads;
+  out.render_psnr = train_renderer(m, samples, ro);
+  samples.clear();
+  // detail layer, on three training runs
+  std::vector<sim::Params> cal;
+  for (std::size_t i = 0; i < std::min<std::size_t>(3, runs.size()); ++i) cal.push_back(runs[i].p);
+  out.detail_score = calibrate_detail(m, cal, one_shot ? 1 : std::min(100, r.frames - 40), one_shot ? 60 : 90);
+  choose_starts(m, runs, r.starts, r.start_frame);
+  quantise_like_storage(m);
+  return out;
+}
+
+}  // namespace nfx::rollout
+
+#ifdef NFX_ROLLOUT_PUSHED
+#pragma GCC pop_options
+#endif

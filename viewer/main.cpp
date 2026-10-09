@@ -178,6 +178,7 @@ int main(int argc, char** argv) try {
     inst = nullptr;
     const auto& info = effects[static_cast<std::size_t>(current)].info;
     if (info.arch == 2 && size != info.native_size && size * 2 != info.native_size && size * 4 != info.native_size) size = info.native_size;
+    if (info.arch == 3) size = std::max(32, size / 32 * 32);  // rollout effects: a multiple of the 32-cell coarse grid
     if (nvfx_instance_create(effects[static_cast<std::size_t>(current)].fx, size, &inst) != NVFX_OK) throw std::runtime_error("instance failed");
     frame.assign(static_cast<std::size_t>(size) * size * 4, 0);
     shown.assign(frame.size(), 0);
@@ -257,7 +258,9 @@ int main(int argc, char** argv) try {
       }
       ImGui::EndCombo();
     }
-    ImGui::Text("%s, %d controls, %d variations", info.loops ? "looping" : "one-shot", info.n_controls, info.n_variations);
+    const bool rollout = info.arch == 3;
+    ImGui::Text("%s%s, %d controls, %d %s", rollout ? "rollout, " : "", info.loops ? "looping" : "one-shot", info.n_controls, info.n_variations,
+                rollout ? "start points" : "variations");
     ImGui::SeparatorText("learned controls");
     for (int i = 0; i < info.n_controls; ++i) {
       const char* name = nvfx_effect_control_name(effects[static_cast<std::size_t>(current)].fx, i);
@@ -266,16 +269,16 @@ int main(int argc, char** argv) try {
     ImGui::SeparatorText("variation");
     ImGui::InputInt("seed", &seed);
     if (ImGui::Button("new seed")) seed = static_cast<int>(clock_type::now().time_since_epoch().count() & 0x7fffffff);
-    ImGui::SliderInt("training variation", &variation, -1, std::max(-1, info.n_variations - 1), variation < 0 ? "seeded" : "%d");
-    ImGui::SliderFloat("drift (s)", &drift, 0.f, 30.f);
+    ImGui::SliderInt(rollout ? "start point" : "training variation", &variation, -1, std::max(-1, info.n_variations - 1), variation < 0 ? "seeded" : "%d");
+    if (!rollout) ImGui::SliderFloat("drift (s)", &drift, 0.f, 30.f);  // rollout effects never repeat anyway
     ImGui::SeparatorText("exact runtime controls");
     ImGui::SliderFloat("speed", &speed, 0.f, 3.f);
     ImGui::SliderAngle("hue", &hue, -180.f, 180.f);
     ImGui::SliderFloat("brightness", &brightness, 0.f, 2.f);
     ImGui::SeparatorText("view");
     int sz = size;
-    if (ImGui::InputInt("size", &sz, 16, 64) && sz != size) {
-      size = std::clamp(sz / 16 * 16, 16, 512);
+    if (ImGui::InputInt("size", &sz, rollout ? 32 : 16, 64) && sz != size) {
+      size = rollout ? std::clamp(sz / 32 * 32, 32, 512) : std::clamp(sz / 16 * 16, 16, 512);
       rebuild();
     }
     ImGui::Combo("background", &bg_index, bg_names, 3);

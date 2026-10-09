@@ -65,6 +65,61 @@ Tune tune(const Params& p) {
 
 }  // namespace
 
+float curl_potential(const Params& p, float X, float Y, float time) {
+  return value_noise(X / 14.f, Y / 14.f, time * 0.8f, p.seed * 0x2545F4914F6CDD1DULL + 77);  // as in add_forces
+}
+
+float source_flicker(const Params& p, float X, float Y, float time) {
+  return fbm(X * 0.10f, Y * 0.10f, time * (p.effect == Effect::fire ? 2.6f : 1.4f), p.seed, 3);  // as in add_sources
+}
+
+State Fluid::state() const {
+  State s;
+  s.n = n_;
+  s.frame = frame_;
+  s.time = time_;
+  const auto inside = [this](const Field& q) {
+    std::vector<float> o(static_cast<std::size_t>(n_) * n_);
+    for (int y = 1; y <= n_; ++y) {
+      for (int x = 1; x <= n_; ++x) o[static_cast<std::size_t>(y - 1) * n_ + (x - 1)] = q[x, y];
+    }
+    return o;
+  };
+  s.u = inside(u_);
+  s.v = inside(v_);
+  s.temp = inside(temp_);
+  s.soot = inside(soot_);
+  s.pressure = inside(pressure_);
+  return s;
+}
+
+void Fluid::set_state(const State& s) {
+  const auto nn = static_cast<std::size_t>(n_) * n_;
+  if (s.n != n_ || s.u.size() != nn || s.v.size() != nn || s.temp.size() != nn || s.soot.size() != nn || s.pressure.size() != nn) {
+    throw std::invalid_argument("sim: state does not match the solver resolution");
+  }
+  const auto put = [this](Field& q, const std::vector<float>& from) {
+    for (int y = 1; y <= n_; ++y) {
+      for (int x = 1; x <= n_; ++x) q[x, y] = from[static_cast<std::size_t>(y - 1) * n_ + (x - 1)];
+    }
+  };
+  put(u_, s.u);
+  put(v_, s.v);
+  put(temp_, s.temp);
+  put(soot_, s.soot);
+  put(pressure_, s.pressure);
+  for (int k = 1; k <= n_; ++k) {  // velocity border as project() leaves it
+    for (Field* q : {&u_, &v_}) {
+      (*q)[0, k] = (*q)[1, k];
+      (*q)[n_ + 1, k] = (*q)[n_, k];
+      (*q)[k, 0] = (*q)[k, 1];
+      (*q)[k, n_ + 1] = (*q)[k, n_];
+    }
+  }
+  frame_ = s.frame;
+  time_ = s.time;
+}
+
 Fluid::Fluid(const Params& p) : p_(p), n_(p.sim_res > 0 ? p.sim_res : p.size) {
   if (p.size < 8 || p.size > 1024 || n_ < 8 || n_ > 1024) throw std::invalid_argument("sim: size out of range");
   if (p.substeps < 1 || p.fps <= 0.f) throw std::invalid_argument("sim: bad substeps or fps");

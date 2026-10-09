@@ -42,7 +42,8 @@ struct Clip {
   void allocate(int s, int n) {
     size = s;
     frames = n;
-    rgba.assign(frame_bytes() * static_cast<std::size_t>(n), 0);
+    rgba.clear();  // clear + resize (zero-filled): assign(n, 0) trips a GCC 14 -Wnonnull false positive when n may be 0
+    rgba.resize(frame_bytes() * static_cast<std::size_t>(n));
   }
 };
 

@@ -60,6 +60,21 @@ class Field {
   std::vector<float> v_;
 };
 
+// The solver's fields without their border: n * n values each, row-major from the bottom row (y up). Velocities are
+// in solver cells per second. Start points for learned dynamics are made from these (src/core/rollout.cpp).
+struct State {
+  int n = 0;
+  int frame = 0;
+  float time = 0.f;
+  std::vector<float> u, v, temp, soot, pressure;
+};
+
+// The run's stochastic forcing, at a position in cells of a 128-cell frame (X, Y in [0, 128], Y up) and a time in
+// seconds: the curl-noise stream function behind add_forces and the flicker of the source in add_sources. Learned
+// dynamics take these as inputs, so a new seed gives new detail with the right statistics.
+float curl_potential(const Params& p, float X, float Y, float time);
+float source_flicker(const Params& p, float X, float Y, float time);
+
 // The simulator state, for clip generation and for live use (viewer, cost measurement).
 class Fluid {
  public:
@@ -68,6 +83,8 @@ class Fluid {
   void render(std::span<std::uint8_t> rgba) const;  // p.size * p.size * 4, premultiplied
   int frame_index() const { return frame_; }
   const Params& params() const { return p_; }
+  State state() const;
+  void set_state(const State& s);  // s.n must equal the solver resolution
 
  private:
   void step(float dt);

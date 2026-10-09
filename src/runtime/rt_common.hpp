@@ -2,6 +2,7 @@
 #pragma once
 
 #include <neuralfx/model.hpp>
+#include <neuralfx/rollout.hpp>
 
 #include <array>
 #include <cstddef>
@@ -35,9 +36,43 @@ class Renderer {
   virtual double macs_per_pixel() const = 0;
 };
 
+// A loaded rollout effect (rollout.hpp): stepper, renderer and start points as floats.
+struct RolloutEffect {
+  rollout::Model m;
+  std::size_t stored_bytes = 0;
+  std::size_t resident_bytes = 0;
+};
+
+// A running rollout effect: the coarse state, pressure and fine fields of one instance. Every buffer is allocated at
+// construction; start(), step() and render() allocate nothing. Same operations as the reference in
+// src/core/rollout.cpp (tests/test_runtime.cpp holds them to it).
+class RolloutRunner {
+ public:
+  virtual ~RolloutRunner() = default;
+  // Begin at start point `index`: its coarse state and fine fields, or fine fields grown by h.warmup frames.
+  virtual void start(int index, std::span<const float> controls, std::uint64_t seed) = 0;
+  virtual void step(std::span<const float> controls, std::uint64_t seed) = 0;
+  virtual void render(const FrameInput& in, std::uint8_t* rgba, std::size_t stride) = 0;
+  virtual std::size_t scratch_bytes() const = 0;
+  virtual double macs_per_pixel() const = 0;
+  virtual float time() const = 0;  // seconds since the effect began (the start point's run time plus frames stepped)
+  virtual std::span<const float> coarse() const = 0;  // res * res * channels
+  virtual std::span<const float> fine_heat() const = 0;
+  virtual std::span<const float> fine_soot() const = 0;
+};
+
 // One factory per ISA build (rt_base.cpp, rt_avx2.cpp, rt_avx512.cpp). Allocates every buffer the renderer will use.
-namespace isa_base { std::unique_ptr<Renderer> make_renderer(const Effect& e, int size); }
-namespace isa_avx2 { std::unique_ptr<Renderer> make_renderer(const Effect& e, int size); }
-namespace isa_avx512 { std::unique_ptr<Renderer> make_renderer(const Effect& e, int size); }
+namespace isa_base {
+std::unique_ptr<Renderer> make_renderer(const Effect& e, int size);
+std::unique_ptr<RolloutRunner> make_rollout(const RolloutEffect& e, int size);
+}  // namespace isa_base
+namespace isa_avx2 {
+std::unique_ptr<Renderer> make_renderer(const Effect& e, int size);
+std::unique_ptr<RolloutRunner> make_rollout(const RolloutEffect& e, int size);
+}  // namespace isa_avx2
+namespace isa_avx512 {
+std::unique_ptr<Renderer> make_renderer(const Effect& e, int size);
+std::unique_ptr<RolloutRunner> make_rollout(const RolloutEffect& e, int size);
+}  // namespace isa_avx512
 
 }  // namespace nfx::rt

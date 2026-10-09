@@ -14,6 +14,7 @@
 // Everything trained is scored through the shipping runtime (nvfx.h) at its stored precision. Clips, models,
 // sheets and videos go under the data root (never git); CSVs and the summary go under results/experiments.
 #include "args.hpp"
+#include "experiment_d.hpp"
 
 #include <neuralfx/flipbook.hpp>
 #include <neuralfx/image_io.hpp>
@@ -1068,6 +1069,14 @@ void step_report(const Ctx& c) {
       md << "\n";
     }
   }
+  {
+    study_d::Ctx d;
+    d.data = c.data;
+    d.results = c.results;
+    d.threads = c.threads;
+    d.quick = c.quick;
+    study_d::report(d, md);
+  }
   fs::create_directories(c.results);
   std::ofstream(c.results / "SUMMARY.md") << md.str();
   std::println("wrote {}", (c.results / "SUMMARY.md").string());
@@ -1078,7 +1087,7 @@ void step_report(const Ctx& c) {
 int main(int argc, char** argv) try {
   const tools::Args a(argc, argv, {"quick", "help"});
   if (a.flag("help") || a.positional().empty()) {
-    std::println("nvfx_experiment data|a|b|c|media|timing|report|all [--root DIR] [--results DIR] [--threads 4] [--quick]");
+    std::println("nvfx_experiment data|a|b|c|media|timing|report|all|d|d-chaos|d-train|d-finish|d-eval|d-timing [--root DIR] [--results DIR] [--threads 4] [--quick]");
     return 0;
   }
   Ctx c;
@@ -1098,6 +1107,18 @@ int main(int argc, char** argv) try {
   if (step == "c" || step == "all") step_c(c);
   if (step == "media" || step == "all") step_media(c);
   if (step == "timing") step_timing(c);  // separately, on a quiet machine
+  {
+    study_d::Ctx d;
+    d.data = c.data;
+    d.results = c.results;
+    d.threads = c.threads;
+    d.quick = c.quick;
+    if (step == "d-chaos" || step == "d") study_d::step_chaos(d);
+    if (step == "d-train" || step == "d") study_d::step_train(d);
+    if (step == "d-finish") study_d::step_finish(d);
+    if (step == "d-eval" || step == "d") study_d::step_eval(d);
+    if (step == "d-timing") study_d::step_timing(d);  // separately, on a quiet machine
+  }
   if (step == "report" || step == "all") step_report(c);
   std::println("{} finished in {:.1f} min", step, std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count() / 60.0);
   a.warn_unused();

@@ -1,5 +1,10 @@
 // nvfx_train: train a neural effect from clips and save it as .nvfx.
 //
+//   nvfx_train --rollout fire|smoke|explosion --out effect.nvfx [--runs 160] [--frames 240] [--iters 2500]
+//              [--finetune 1500] [--render-iters 2500] [--starts 8] [--threads 0]
+//     trains a rollout effect (include/neuralfx/rollout.hpp) from runs of the built-in simulation instead: start
+//     points, a learned coarse stepper, the detail layer and a renderer (about 40 minutes per effect on 4 cores).
+//
 //   nvfx_train --clips a.nfxclip[,b.nfxclip...] | --clip-dir DIR   --out model.nvfx
 //              [--arch grid|conv] [--grid 32] [--channels 8] [--hidden 32] [--layers 2] [--grid-t 16] [--bases 1]
 //              [--latent 16] [--c0 32] [--c1 16] [--c2 8] [--latent-dims 0] [--no-controls]
@@ -13,6 +18,7 @@
 
 #include <neuralfx/metrics.hpp>
 #include <neuralfx/model.hpp>
+#include <neuralfx/rollout_train.hpp>
 #include <neuralfx/sim.hpp>
 #include <neuralfx/train.hpp>
 
@@ -26,7 +32,43 @@ using namespace nfx;
 int main(int argc, char** argv) try {
   const tools::Args a(argc, argv, {"no-controls", "help", "quiet"});
   if (a.flag("help")) {
-    std::println("nvfx_train --clips a,b | --clip-dir DIR --out model.nvfx [--arch grid|conv ...] (see the source header)");
+    std::println("nvfx_train --clips a,b | --clip-dir DIR --out model.nvfx [--arch grid|conv ...]");
+    std::println("nvfx_train --rollout fire|smoke|explosion --out effect.nvfx [--runs N --iters N ...] (see the source header)");
+    return 0;
+  }
+  if (a.has("rollout")) {
+    sim::Effect e;
+    if (!sim::parse_effect(a.str("rollout"), e)) throw std::invalid_argument("--rollout: fire, smoke or explosion");
+    if (!train::cpu_supported()) throw std::runtime_error("training needs AVX2 + FMA");
+    rollout::SimRecipe r = rollout::recipe_for(e);
+    r.runs = a.i("runs", r.runs);
+    r.frames = a.i("frames", r.frames);
+    r.starts = a.i("starts", r.starts);
+    r.threads = a.i("threads", 0);
+    r.stepper.iterations = a.i("iters", r.stepper.iterations);
+    r.stepper.finetune = a.i("finetune", r.stepper.finetune);
+    r.stepper.threads = r.threads;
+    r.renderer.iterations = a.i("render-iters", r.renderer.iterations);
+    r.renderer.threads = r.threads;
+    r.start_frame = std::min(r.start_frame, r.frames - 1);
+    const bool quiet = a.flag("quiet");
+    std::println("recording {} runs of {} frames ({:.1f} minutes of simulation)", r.runs, r.frames, r.runs * r.frames / 30.0 / 60.0);
+    const auto runs = rollout::record_runs(r);
+    rollout::Model m = rollout::recipe_model(r);
+    r.stepper.progress = [quiet](int it, int unroll, double loss) {
+      if (!quiet) std::println("  stepper {:5}  unroll {:2}  loss {:.5f}", it, unroll, loss);
+    };
+    r.renderer.progress = [quiet](int it, double psnr) {
+      if (!quiet) std::println("  renderer {:5}  psnr {:.2f}", it, psnr);
+    };
+    const auto sr = rollout::train_stepper(m, runs, r.stepper);
+    const auto fin = rollout::finish_model(m, r, runs);
+    const auto out = a.need("out");
+    if (auto s = rollout::save_model(out, m); !s) throw std::runtime_error(s.error());
+    std::println("stepper loss {:.5f} ({:.0f} s), renderer {:.2f} dB, detail contrast {} swirl {}, {} start points, {:.1f} KB stored",
+                 sr.final_loss, sr.seconds, fin.render_psnr, m.detail.contrast, m.detail.swirl, m.starts.size(),
+                 static_cast<double>(m.storage_bytes()) / 1024.0);
+    a.warn_unused();
     return 0;
   }
   std::vector<std::filesystem::path> paths;

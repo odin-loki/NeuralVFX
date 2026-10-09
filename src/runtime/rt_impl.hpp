@@ -15,6 +15,7 @@
 #include <bit>
 #include <cmath>
 #include <cstring>
+#include <limits>
 #include <memory>
 #include <stdexcept>
 #include <stdfloat>
@@ -92,7 +93,6 @@ void blend_slice(const Model& m, float t, std::span<const float> w, std::span<fl
   }
 }
 
-// Premultiplied RGBA floats (planar rows r, g, b, a of n pixels) to RGBA8, with the optional colour matrix.
 // One channel of a grid row expanded to full width: d[x] = lerp(r[xi[x]], r[xi[x] + 1], xf[x]). Kept out of line so its
 // registers are its own (inlined into render() it reloaded every pointer from the stack per pixel).
 [[gnu::noinline]] void expand_row(const float* __restrict r, const int* __restrict xi, const float* __restrict xf,
@@ -103,6 +103,7 @@ void blend_slice(const Model& m, float t, std::span<const float> w, std::span<fl
   }
 }
 
+// Premultiplied RGBA floats (planar rows r, g, b, a of n pixels) to RGBA8, with the optional colour matrix.
 // Planar rows are processed in chunks of 16: the colour matrix and the clamp-and-round vectorise as plain loops; only
 // the final interleave into RGBA bytes is per pixel.
 inline void write_pixels(const float* r, const float* g, const float* b, const float* a, int n, const FrameInput& in,
@@ -310,12 +311,16 @@ class ConvRenderer final : public Renderer {
   Dense k0_, k1_;
 };
 
+#include "rt_rollout.hpp"
+
 }  // namespace
 
 std::unique_ptr<Renderer> make_renderer(const Effect& e, int size) {
   if (e.m.h.arch == Arch::grid) return std::make_unique<GridRenderer>(e, size);
   return std::make_unique<ConvRenderer>(e, size);
 }
+
+std::unique_ptr<RolloutRunner> make_rollout(const RolloutEffect& e, int size) { return std::make_unique<Rollout>(e, size); }
 
 }  // namespace nfx::rt::NFX_NS
 

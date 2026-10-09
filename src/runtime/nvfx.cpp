@@ -10,6 +10,7 @@
 #include <atomic>
 #include <cmath>
 #include <cstring>
+#include <fstream>
 #include <memory>
 #include <new>
 #include <numbers>
@@ -19,15 +20,21 @@
 using nfx::rt::Effect;
 using nfx::rt::FrameInput;
 using nfx::rt::Renderer;
+using nfx::rt::RolloutEffect;
+using nfx::rt::RolloutRunner;
 
+// Either kind of effect: a frame model (model.hpp) or a rollout effect (rollout.hpp), told apart by the file's magic.
 struct nvfx_effect {
   Effect e;
+  std::unique_ptr<RolloutEffect> roll;
 };
 
 struct nvfx_instance {
   const nvfx_effect* effect = nullptr;
   int size = 0;
   std::unique_ptr<Renderer> renderer;
+  std::unique_ptr<RolloutRunner> runner;  // rollout effects
+  std::int64_t frame = -1;                // rollout: frame of the current state since the effect began (-1: none)
   std::vector<float> controls, cond, za, zb;
   std::uint64_t seed = 0;
   int variation = -1;
@@ -67,6 +74,79 @@ std::size_t resident_bytes(const nfx::Model& m) {
   n += (m.z_mean.size() + m.z_std.size()) * 4;
   for (const auto& z : m.z_train) n += z.size() * 4;
   return n;
+}
+
+std::size_t rollout_resident(const nfx::rollout::Model& m) {
+  std::size_t n = (m.step_w.size() + m.render_w.size()) * 4;
+  for (const auto& s : m.starts) n += (s.controls.size() + s.coarse.size() + s.fine_t.size() + s.fine_d.size()) * 4;
+  return n;
+}
+
+nvfx_status adopt_rollout(std::expected<nfx::rollout::Model, std::string>&& m, nvfx_effect** out) {
+  if (!m) return m.error().find("cannot open") != std::string::npos ? NVFX_ERROR_IO : NVFX_ERROR_FORMAT;
+  auto* e = new (std::nothrow) nvfx_effect;
+  if (!e) return NVFX_ERROR_MEMORY;
+  e->roll = std::make_unique<RolloutEffect>();
+  e->roll->m = std::move(*m);
+  e->roll->stored_bytes = e->roll->m.storage_bytes();
+  e->roll->resident_bytes = rollout_resident(e->roll->m);
+  *out = e;
+  return NVFX_OK;
+}
+
+// Rollout timeline: looping effects are cut into shards of this many frames; a seek (backwards, or more than
+// kCatchUp frames ahead) restarts from the start point of the shard (chosen by seed, shard and controls) and steps to
+// the frame. Continuous playback never restarts.
+constexpr std::int64_t kShardFrames = 120, kCatchUp = 60;
+
+// The start point for (seed, shard): one of the three whose controls are nearest the instance's.
+int pick_start(const nvfx_instance& in, std::int64_t shard) {
+  const auto& m = in.effect->roll->m;
+  if (in.variation >= 0) return in.variation;
+  std::array<int, 3> best{-1, -1, -1};
+  std::array<float, 3> dist{1e30f, 1e30f, 1e30f};
+  for (std::size_t i = 0; i < m.starts.size(); ++i) {
+    float d = 0.f;
+    for (std::size_t k = 0; k < m.starts[i].controls.size() && k < in.controls.size(); ++k) {
+      const float e = m.starts[i].controls[k] - in.controls[k];
+      d += e * e;
+    }
+    for (std::size_t j = 0; j < best.size(); ++j) {
+      if (d < dist[j]) {
+        for (std::size_t q = best.size() - 1; q > j; --q) {
+          best[q] = best[q - 1];
+          dist[q] = dist[q - 1];
+        }
+        best[j] = static_cast<int>(i);
+        dist[j] = d;
+        break;
+      }
+    }
+  }
+  const int count = static_cast<int>(std::min<std::size_t>(3, m.starts.size()));
+  const std::uint32_t h = nfx::hash_cell(static_cast<std::int32_t>(shard), static_cast<std::int32_t>(shard >> 31), 17, in.seed);
+  return best[h % static_cast<std::uint32_t>(count)];
+}
+
+// The seed the dynamics run with: a replayed training variation keeps its run's seed (so it tracks that run).
+std::uint64_t run_seed(const nvfx_instance& in) {
+  return in.variation >= 0 ? in.effect->roll->m.starts[static_cast<std::size_t>(in.variation)].seed : in.seed;
+}
+
+// Bring a rollout instance to frame f (no allocation).
+void rollout_seek(nvfx_instance& in, std::int64_t f) {
+  const auto& m = in.effect->roll->m;
+  if (!m.loop && m.h.frames > 0) f = std::min<std::int64_t>(f, m.h.frames - 1);  // one-shot: hold the last frame
+  f = std::max<std::int64_t>(f, 0);
+  if (in.frame < 0 || f < in.frame || f - in.frame > kCatchUp) {
+    const std::int64_t shard = m.loop ? f / kShardFrames : 0;
+    in.runner->start(pick_start(in, shard), in.controls, run_seed(in));
+    in.frame = m.loop ? shard * kShardFrames : 0;
+  }
+  while (in.frame < f) {
+    in.runner->step(in.controls, run_seed(in));
+    ++in.frame;
+  }
 }
 
 nvfx_status adopt(std::expected<nfx::Model, std::string>&& m, nvfx_effect** out) {
@@ -155,6 +235,13 @@ const char* nvfx_status_string(nvfx_status s) {
 nvfx_status nvfx_effect_load(const char* path, nvfx_effect** out) {
   if (!path || !out) return NVFX_ERROR_ARGUMENT;
   try {
+    char magic[8] = {};
+    {
+      std::ifstream f(path, std::ios::binary);
+      if (!f) return NVFX_ERROR_IO;
+      f.read(magic, 8);
+    }
+    if (nfx::rollout::is_rollout_file(std::span<const char>(magic, 8))) return adopt_rollout(nfx::rollout::load_model(std::filesystem::path(path)), out);
     return adopt(nfx::load_model(std::filesystem::path(path)), out);
   } catch (const std::bad_alloc&) {
     return NVFX_ERROR_MEMORY;
@@ -167,6 +254,7 @@ nvfx_status nvfx_effect_load_memory(const void* data, size_t bytes, nvfx_effect*
   if (!data || !out) return NVFX_ERROR_ARGUMENT;
   try {
     std::ispanstream in(std::span(static_cast<const char*>(data), bytes));
+    if (nfx::rollout::is_rollout_file(std::span(static_cast<const char*>(data), bytes))) return adopt_rollout(nfx::rollout::load_model(in), out);
     return adopt(nfx::load_model(in), out);
   } catch (const std::bad_alloc&) {
     return NVFX_ERROR_MEMORY;
@@ -179,8 +267,22 @@ void nvfx_effect_free(nvfx_effect* e) { delete e; }
 
 nvfx_status nvfx_effect_get_info(const nvfx_effect* e, nvfx_effect_info* info) {
   if (!e || !info) return NVFX_ERROR_ARGUMENT;
-  const nfx::Model& m = e->e.m;
   *info = {};
+  if (e->roll) {
+    const auto& m = e->roll->m;
+    info->arch = 3;
+    info->native_size = 128;
+    info->frames = m.h.frames;
+    info->fps = m.fps;
+    info->loops = m.loop ? 1 : 0;
+    info->n_controls = m.h.n_controls;
+    info->n_variations = static_cast<int>(m.starts.size());
+    info->stored_bytes = e->roll->stored_bytes;
+    info->resident_bytes = e->roll->resident_bytes;
+    std::strncpy(info->name, m.effect.c_str(), sizeof(info->name) - 1);
+    return NVFX_OK;
+  }
+  const nfx::Model& m = e->e.m;
   info->arch = static_cast<int>(m.h.arch);
   info->native_size = m.h.size;
   info->frames = m.h.frames;
@@ -195,12 +297,35 @@ nvfx_status nvfx_effect_get_info(const nvfx_effect* e, nvfx_effect_info* info) {
 }
 
 const char* nvfx_effect_control_name(const nvfx_effect* e, int i) {
-  if (!e || i < 0 || static_cast<std::size_t>(i) >= e->e.m.control_names.size()) return nullptr;
-  return e->e.m.control_names[static_cast<std::size_t>(i)].c_str();
+  if (!e || i < 0) return nullptr;
+  const auto& names = e->roll ? e->roll->m.control_names : e->e.m.control_names;
+  if (static_cast<std::size_t>(i) >= names.size()) return nullptr;
+  return names[static_cast<std::size_t>(i)].c_str();
 }
 
 nvfx_status nvfx_instance_create(const nvfx_effect* e, int size, nvfx_instance** out) {
   if (!e || !out) return NVFX_ERROR_ARGUMENT;
+  if (e->roll) {
+    const auto& h = e->roll->m.h;
+    if (size < h.res || size > 1024 || size % h.res) return NVFX_ERROR_UNSUPPORTED;
+    try {
+      auto in = std::make_unique<nvfx_instance>();
+      in->effect = e;
+      in->size = size;
+      in->controls.assign(static_cast<std::size_t>(h.n_controls), 0.5f);
+      switch (resolved_isa()) {
+        case NVFX_ISA_AVX512: in->runner = nfx::rt::isa_avx512::make_rollout(*e->roll, size); break;
+        case NVFX_ISA_AVX2: in->runner = nfx::rt::isa_avx2::make_rollout(*e->roll, size); break;
+        default: in->runner = nfx::rt::isa_base::make_rollout(*e->roll, size); break;
+      }
+      *out = in.release();
+      return NVFX_OK;
+    } catch (const std::bad_alloc&) {
+      return NVFX_ERROR_MEMORY;
+    } catch (...) {
+      return NVFX_ERROR_ARGUMENT;
+    }
+  }
   const nfx::Hyper& h = e->e.m.h;
   if (h.arch == nfx::Arch::grid) {
     if (size < 16 || size > 1024 || size % 16) return NVFX_ERROR_UNSUPPORTED;
@@ -234,6 +359,7 @@ void nvfx_instance_free(nvfx_instance* in) { delete in; }
 
 size_t nvfx_instance_scratch_bytes(const nvfx_instance* in) {
   if (!in) return 0;
+  if (in->runner) return in->runner->scratch_bytes() + 4 * in->controls.size();
   return in->renderer->scratch_bytes() + 4 * (in->controls.size() + in->cond.size() + in->za.size() + in->zb.size());
 }
 
@@ -253,6 +379,12 @@ nvfx_status nvfx_instance_set_seed(nvfx_instance* in, uint64_t seed) {
 
 nvfx_status nvfx_instance_set_variation(nvfx_instance* in, int index) {
   if (!in) return NVFX_ERROR_ARGUMENT;
+  if (in->runner) {
+    if (index < -1 || index >= static_cast<int>(in->effect->roll->m.starts.size())) return NVFX_ERROR_ARGUMENT;
+    if (index != in->variation) in->frame = -1;  // restart from that start point at the next render
+    in->variation = index;
+    return NVFX_OK;
+  }
   const nfx::Model& m = in->effect->e.m;
   const int n = m.h.n_latent > 0 ? static_cast<int>(m.z_train.size()) : 0;
   if (index < -1 || index >= n) return NVFX_ERROR_ARGUMENT;
@@ -278,6 +410,15 @@ nvfx_status nvfx_instance_set_colour(nvfx_instance* in, float hue, float brightn
 
 nvfx_status nvfx_render(nvfx_instance* in, double seconds, uint8_t* rgba, size_t stride) {
   if (!in || !rgba || stride < static_cast<size_t>(in->size) * 4 || !std::isfinite(seconds)) return NVFX_ERROR_ARGUMENT;
+  if (in->runner) {
+    const double frames = std::clamp(seconds * static_cast<double>(in->effect->roll->m.fps), -1e12, 1e12);
+    rollout_seek(*in, static_cast<std::int64_t>(std::floor(frames + 1e-6)));
+    FrameInput f;
+    f.colour = in->colour;
+    f.apply_colour = in->apply_colour;
+    in->runner->render(f, rgba, stride);
+    return NVFX_OK;
+  }
   FrameInput f;
   f.t = prepare(*in, seconds, true);
   f.c = in->cond;
@@ -289,6 +430,41 @@ nvfx_status nvfx_render(nvfx_instance* in, double seconds, uint8_t* rgba, size_t
 
 nvfx_status nvfx_bake(nvfx_instance* in, int frames, uint8_t* rgba) {
   if (!in || !rgba || frames < 1) return NVFX_ERROR_ARGUMENT;
+  if (in->runner) {
+    // `frames` consecutive frames from a fresh start; a looping effect's `blend` extra frames are crossfaded into its
+    // first ones (as the simulation makes its clips loop), so the flipbook loops without a jump. Baking happens at
+    // load time, so unlike nvfx_render it may allocate (one frame).
+    const auto& m = in->effect->roll->m;
+    const std::size_t bytes = static_cast<std::size_t>(in->size) * in->size * 4, stride = static_cast<std::size_t>(in->size) * 4;
+    const int blend = m.loop ? std::min(16, frames / 2) : 0;
+    FrameInput f;
+    f.colour = in->colour;
+    f.apply_colour = in->apply_colour;
+    try {
+      std::vector<std::uint8_t> extra(blend > 0 ? bytes : 0);
+      in->frame = -1;
+      rollout_seek(*in, 0);
+      for (int k = 0; k < frames + blend; ++k) {
+        if (k > 0) {
+          in->runner->step(in->controls, run_seed(*in));
+          ++in->frame;
+        }
+        if (k < frames) {
+          in->runner->render(f, rgba + bytes * static_cast<std::size_t>(k), stride);
+          continue;
+        }
+        const int e = k - frames;  // extra frame e flows into frame e: mix(extra, frame, (e + 0.5) / blend)
+        in->runner->render(f, extra.data(), stride);
+        std::uint8_t* d = rgba + bytes * static_cast<std::size_t>(e);
+        const float w = (static_cast<float>(e) + 0.5f) / static_cast<float>(blend);
+        for (std::size_t i = 0; i < bytes; ++i) d[i] = static_cast<std::uint8_t>(static_cast<float>(extra[i]) * (1.f - w) + static_cast<float>(d[i]) * w + 0.5f);
+      }
+    } catch (const std::bad_alloc&) {
+      return NVFX_ERROR_MEMORY;
+    }
+    in->frame = -1;
+    return NVFX_OK;
+  }
   const nfx::Model& m = in->effect->e.m;
   const double duration = (m.h.loop ? m.h.frames : std::max(1, m.h.frames - 1)) / static_cast<double>(m.fps);
   const std::size_t bytes = static_cast<std::size_t>(in->size) * in->size * 4;
@@ -312,6 +488,9 @@ nvfx_status nvfx_set_isa(nvfx_isa isa) {
   return NVFX_OK;
 }
 
-double nvfx_instance_macs_per_pixel(const nvfx_instance* in) { return in ? in->renderer->macs_per_pixel() : 0.0; }
+double nvfx_instance_macs_per_pixel(const nvfx_instance* in) {
+  if (!in) return 0.0;
+  return in->runner ? in->runner->macs_per_pixel() : in->renderer->macs_per_pixel();
+}
 
 }  // extern "C"
