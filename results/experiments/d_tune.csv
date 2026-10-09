@@ -1,0 +1,4 @@
+effect,iterations,activity_weight,loss,seconds
+fire,800,100,0.08811,1080
+smoke,800,100,0.08316,1057
+explosion,800,100,0.02040,1221

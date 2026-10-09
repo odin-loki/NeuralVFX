@@ -1087,7 +1087,7 @@ void step_report(const Ctx& c) {
 int main(int argc, char** argv) try {
   const tools::Args a(argc, argv, {"quick", "help"});
   if (a.flag("help") || a.positional().empty()) {
-    std::println("nvfx_experiment data|a|b|c|media|timing|report|all|d|d-chaos|d-train|d-finish|d-eval|d-timing [--root DIR] [--results DIR] [--threads 4] [--quick]");
+    std::println("nvfx_experiment data|a|b|c|media|timing|report|all|d|d-chaos|d-train|d-tune|d-finish|d-eval|d-timing [--root DIR] [--results DIR] [--threads 4] [--quick]");
     return 0;
   }
   Ctx c;
@@ -1113,8 +1113,10 @@ int main(int argc, char** argv) try {
     d.results = c.results;
     d.threads = c.threads;
     d.quick = c.quick;
+    d.effects = a.str("effects");
     if (step == "d-chaos" || step == "d") study_d::step_chaos(d);
     if (step == "d-train" || step == "d") study_d::step_train(d);
+    if (step == "d-tune") study_d::step_tune(d);
     if (step == "d-finish") study_d::step_finish(d);
     if (step == "d-eval" || step == "d") study_d::step_eval(d);
     if (step == "d-timing") study_d::step_timing(d);  // separately, on a quiet machine

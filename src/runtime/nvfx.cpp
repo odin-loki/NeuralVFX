@@ -33,8 +33,15 @@ struct nvfx_instance {
   const nvfx_effect* effect = nullptr;
   int size = 0;
   std::unique_ptr<Renderer> renderer;
-  std::unique_ptr<RolloutRunner> runner;  // rollout effects
-  std::int64_t frame = -1;                // rollout: frame of the current state since the effect began (-1: none)
+  // Rollout effects: two runners (the shard on screen and the next one, rolled ahead for the crossfade) and a frame
+  // for the blend. A runner's state belongs to `shard` at frame `frame` of the effect's timeline.
+  struct Track {
+    std::unique_ptr<RolloutRunner> r;
+    std::int64_t shard = -1, frame = 0;
+    std::uint64_t seed = 0;
+  };
+  Track a, b;  // a.r is non-null for rollout effects
+  std::vector<std::uint8_t> mix;
   std::vector<float> controls, cond, za, zb;
   std::uint64_t seed = 0;
   int variation = -1;
@@ -94,15 +101,24 @@ nvfx_status adopt_rollout(std::expected<nfx::rollout::Model, std::string>&& m, n
   return NVFX_OK;
 }
 
-// Rollout timeline: looping effects are cut into shards of this many frames; a seek (backwards, or more than
-// kCatchUp frames ahead) restarts from the start point of the shard (chosen by seed, shard and controls) and steps to
-// the frame. Continuous playback never restarts.
-constexpr std::int64_t kShardFrames = 120, kCatchUp = 60;
+// Rollout timeline (the owner's design: inference sharded from start points). A looping effect is cut into shards of
+// drift_seconds (default 6 s). Shard k is a fresh rollout from a start point chosen by seed, shard and the nearest
+// controls, with a seed of its own; it is rolled ahead of its turn (its warm-up, if its start point has no fine
+// fields) and crossfades in over the last kBlend frames of shard k - 1. So drift never builds up past one shard, and
+// the frame shown depends only on the time (and the controls). drift_seconds = 0: one continuous rollout (it drifts
+// after 20 s or so; seeks then step from the start). One-shot effects are a single shard and hold their last frame.
+constexpr std::int64_t kBlend = 15, kCatchUp = 60;
+
+std::int64_t shard_frames(const nvfx_instance& in) {
+  const auto& m = in.effect->roll->m;
+  if (!m.loop || in.drift_seconds <= 0.f) return 0;
+  return std::max<std::int64_t>(4 * kBlend, static_cast<std::int64_t>(std::lround(in.drift_seconds * m.fps)));
+}
 
 // The start point for (seed, shard): one of the three whose controls are nearest the instance's.
 int pick_start(const nvfx_instance& in, std::int64_t shard) {
   const auto& m = in.effect->roll->m;
-  if (in.variation >= 0) return in.variation;
+  if (in.variation >= 0 && shard == 0) return in.variation;
   std::array<int, 3> best{-1, -1, -1};
   std::array<float, 3> dist{1e30f, 1e30f, 1e30f};
   for (std::size_t i = 0; i < m.starts.size(); ++i) {
@@ -128,24 +144,66 @@ int pick_start(const nvfx_instance& in, std::int64_t shard) {
   return best[h % static_cast<std::uint32_t>(count)];
 }
 
-// The seed the dynamics run with: a replayed training variation keeps its run's seed (so it tracks that run).
-std::uint64_t run_seed(const nvfx_instance& in) {
-  return in.variation >= 0 ? in.effect->roll->m.starts[static_cast<std::size_t>(in.variation)].seed : in.seed;
+struct ShardPlan {
+  int index = 0;
+  std::uint64_t seed = 0;
+  std::int64_t first = 0;  // frame of the timeline at which the shard's rollout begins (before it is shown)
+};
+
+ShardPlan plan_shard(const nvfx_instance& in, std::int64_t k) {
+  const auto& m = in.effect->roll->m;
+  ShardPlan p;
+  p.index = pick_start(in, k);
+  const bool replay = in.variation >= 0 && k == 0;  // a replayed start point keeps its run's seed (it tracks that run)
+  p.seed = replay ? m.starts[static_cast<std::size_t>(p.index)].seed
+                  : (k == 0 ? in.seed : in.seed ^ (0x9E3779B97F4A7C15ULL * static_cast<std::uint64_t>(k + 1)));
+  const std::int64_t pre = m.starts[static_cast<std::size_t>(p.index)].fine_t.empty() ? m.h.warmup : 0;
+  const std::int64_t L = shard_frames(in);
+  p.first = (L == 0 || k == 0) ? -pre : k * L - kBlend - pre;
+  return p;
 }
 
-// Bring a rollout instance to frame f (no allocation).
-void rollout_seek(nvfx_instance& in, std::int64_t f) {
+// Bring a track to shard k at frame f: continue it, or begin the shard afresh and step to f. No allocation.
+void bring(nvfx_instance& in, nvfx_instance::Track& t, std::int64_t k, std::int64_t f) {
+  if (t.shard != k || f < t.frame || f - t.frame > kCatchUp) {
+    const ShardPlan p = plan_shard(in, k);
+    t.r->begin(p.index, p.seed);
+    t.shard = k;
+    t.frame = p.first;
+    t.seed = p.seed;
+  }
+  while (t.frame < f) {
+    t.r->step(in.controls, t.seed);
+    ++t.frame;
+  }
+}
+
+// The frame at f (frames since the effect began) into rgba.
+void rollout_frame(nvfx_instance& in, std::int64_t f, const FrameInput& fi, std::uint8_t* rgba, std::size_t stride) {
   const auto& m = in.effect->roll->m;
   if (!m.loop && m.h.frames > 0) f = std::min<std::int64_t>(f, m.h.frames - 1);  // one-shot: hold the last frame
   f = std::max<std::int64_t>(f, 0);
-  if (in.frame < 0 || f < in.frame || f - in.frame > kCatchUp) {
-    const std::int64_t shard = m.loop ? f / kShardFrames : 0;
-    in.runner->start(pick_start(in, shard), in.controls, run_seed(in));
-    in.frame = m.loop ? shard * kShardFrames : 0;
+  const std::int64_t L = shard_frames(in);
+  if (L == 0) {
+    bring(in, in.a, 0, f);
+    in.a.r->render(fi, rgba, stride);
+    return;
   }
-  while (in.frame < f) {
-    in.runner->step(in.controls, run_seed(in));
-    ++in.frame;
+  const std::int64_t k = f / L, j = f - k * L;
+  nvfx_instance::Track& cur = in.b.shard == k ? in.b : in.a;
+  nvfx_instance::Track& next = &cur == &in.a ? in.b : in.a;
+  bring(in, cur, k, f);
+  if (f >= plan_shard(in, k + 1).first) bring(in, next, k + 1, f);  // rolled ahead of its turn
+  cur.r->render(fi, rgba, stride);
+  if (j < L - kBlend) return;
+  // the crossfade: the next shard comes in over the last kBlend frames
+  const std::size_t row = static_cast<std::size_t>(in.size) * 4;
+  next.r->render(fi, in.mix.data(), row);
+  const float w = (static_cast<float>(j - (L - kBlend)) + 0.5f) / static_cast<float>(kBlend);
+  for (int y = 0; y < in.size; ++y) {
+    std::uint8_t* d = rgba + stride * static_cast<std::size_t>(y);
+    const std::uint8_t* s = in.mix.data() + row * static_cast<std::size_t>(y);
+    for (std::size_t i = 0; i < row; ++i) d[i] = static_cast<std::uint8_t>(static_cast<float>(d[i]) * (1.f - w) + static_cast<float>(s[i]) * w + 0.5f);
   }
 }
 
@@ -313,11 +371,15 @@ nvfx_status nvfx_instance_create(const nvfx_effect* e, int size, nvfx_instance**
       in->effect = e;
       in->size = size;
       in->controls.assign(static_cast<std::size_t>(h.n_controls), 0.5f);
-      switch (resolved_isa()) {
-        case NVFX_ISA_AVX512: in->runner = nfx::rt::isa_avx512::make_rollout(*e->roll, size); break;
-        case NVFX_ISA_AVX2: in->runner = nfx::rt::isa_avx2::make_rollout(*e->roll, size); break;
-        default: in->runner = nfx::rt::isa_base::make_rollout(*e->roll, size); break;
+      for (auto* t : {&in->a, &in->b}) {
+        switch (resolved_isa()) {
+          case NVFX_ISA_AVX512: t->r = nfx::rt::isa_avx512::make_rollout(*e->roll, size); break;
+          case NVFX_ISA_AVX2: t->r = nfx::rt::isa_avx2::make_rollout(*e->roll, size); break;
+          default: t->r = nfx::rt::isa_base::make_rollout(*e->roll, size); break;
+        }
       }
+      in->mix.assign(static_cast<std::size_t>(size) * size * 4, 0);
+      in->drift_seconds = e->roll->m.loop ? 6.f : 0.f;
       *out = in.release();
       return NVFX_OK;
     } catch (const std::bad_alloc&) {
@@ -359,7 +421,7 @@ void nvfx_instance_free(nvfx_instance* in) { delete in; }
 
 size_t nvfx_instance_scratch_bytes(const nvfx_instance* in) {
   if (!in) return 0;
-  if (in->runner) return in->runner->scratch_bytes() + 4 * in->controls.size();
+  if (in->a.r) return in->a.r->scratch_bytes() + in->b.r->scratch_bytes() + in->mix.size() + 4 * in->controls.size();
   return in->renderer->scratch_bytes() + 4 * (in->controls.size() + in->cond.size() + in->za.size() + in->zb.size());
 }
 
@@ -379,9 +441,9 @@ nvfx_status nvfx_instance_set_seed(nvfx_instance* in, uint64_t seed) {
 
 nvfx_status nvfx_instance_set_variation(nvfx_instance* in, int index) {
   if (!in) return NVFX_ERROR_ARGUMENT;
-  if (in->runner) {
+  if (in->a.r) {
     if (index < -1 || index >= static_cast<int>(in->effect->roll->m.starts.size())) return NVFX_ERROR_ARGUMENT;
-    if (index != in->variation) in->frame = -1;  // restart from that start point at the next render
+    if (index != in->variation) in->a.shard = in->b.shard = -1;  // restart from that start point at the next render
     in->variation = index;
     return NVFX_OK;
   }
@@ -394,6 +456,7 @@ nvfx_status nvfx_instance_set_variation(nvfx_instance* in, int index) {
 
 nvfx_status nvfx_instance_set_drift(nvfx_instance* in, float seconds) {
   if (!in || seconds < 0.f) return NVFX_ERROR_ARGUMENT;
+  if (in->a.r && seconds != in->drift_seconds) in->a.shard = in->b.shard = -1;  // rollout: a new shard length, a new timeline
   in->drift_seconds = seconds;
   return NVFX_OK;
 }
@@ -410,13 +473,12 @@ nvfx_status nvfx_instance_set_colour(nvfx_instance* in, float hue, float brightn
 
 nvfx_status nvfx_render(nvfx_instance* in, double seconds, uint8_t* rgba, size_t stride) {
   if (!in || !rgba || stride < static_cast<size_t>(in->size) * 4 || !std::isfinite(seconds)) return NVFX_ERROR_ARGUMENT;
-  if (in->runner) {
+  if (in->a.r) {
     const double frames = std::clamp(seconds * static_cast<double>(in->effect->roll->m.fps), -1e12, 1e12);
-    rollout_seek(*in, static_cast<std::int64_t>(std::floor(frames + 1e-6)));
     FrameInput f;
     f.colour = in->colour;
     f.apply_colour = in->apply_colour;
-    in->runner->render(f, rgba, stride);
+    rollout_frame(*in, static_cast<std::int64_t>(std::floor(frames + 1e-6)), f, rgba, stride);
     return NVFX_OK;
   }
   FrameInput f;
@@ -430,10 +492,10 @@ nvfx_status nvfx_render(nvfx_instance* in, double seconds, uint8_t* rgba, size_t
 
 nvfx_status nvfx_bake(nvfx_instance* in, int frames, uint8_t* rgba) {
   if (!in || !rgba || frames < 1) return NVFX_ERROR_ARGUMENT;
-  if (in->runner) {
-    // `frames` consecutive frames from a fresh start; a looping effect's `blend` extra frames are crossfaded into its
-    // first ones (as the simulation makes its clips loop), so the flipbook loops without a jump. Baking happens at
-    // load time, so unlike nvfx_render it may allocate (one frame).
+  if (in->a.r) {
+    // `frames` consecutive frames from the start of the timeline; a looping effect's `blend` extra frames are
+    // crossfaded into its first ones (as the simulation makes its clips loop), so the flipbook loops without a jump.
+    // Baking happens at load time, so unlike nvfx_render it may allocate (one frame).
     const auto& m = in->effect->roll->m;
     const std::size_t bytes = static_cast<std::size_t>(in->size) * in->size * 4, stride = static_cast<std::size_t>(in->size) * 4;
     const int blend = m.loop ? std::min(16, frames / 2) : 0;
@@ -442,19 +504,13 @@ nvfx_status nvfx_bake(nvfx_instance* in, int frames, uint8_t* rgba) {
     f.apply_colour = in->apply_colour;
     try {
       std::vector<std::uint8_t> extra(blend > 0 ? bytes : 0);
-      in->frame = -1;
-      rollout_seek(*in, 0);
       for (int k = 0; k < frames + blend; ++k) {
-        if (k > 0) {
-          in->runner->step(in->controls, run_seed(*in));
-          ++in->frame;
-        }
         if (k < frames) {
-          in->runner->render(f, rgba + bytes * static_cast<std::size_t>(k), stride);
+          rollout_frame(*in, k, f, rgba + bytes * static_cast<std::size_t>(k), stride);
           continue;
         }
         const int e = k - frames;  // extra frame e flows into frame e: mix(extra, frame, (e + 0.5) / blend)
-        in->runner->render(f, extra.data(), stride);
+        rollout_frame(*in, k, f, extra.data(), stride);
         std::uint8_t* d = rgba + bytes * static_cast<std::size_t>(e);
         const float w = (static_cast<float>(e) + 0.5f) / static_cast<float>(blend);
         for (std::size_t i = 0; i < bytes; ++i) d[i] = static_cast<std::uint8_t>(static_cast<float>(extra[i]) * (1.f - w) + static_cast<float>(d[i]) * w + 0.5f);
@@ -462,7 +518,6 @@ nvfx_status nvfx_bake(nvfx_instance* in, int frames, uint8_t* rgba) {
     } catch (const std::bad_alloc&) {
       return NVFX_ERROR_MEMORY;
     }
-    in->frame = -1;
     return NVFX_OK;
   }
   const nfx::Model& m = in->effect->e.m;
@@ -490,7 +545,7 @@ nvfx_status nvfx_set_isa(nvfx_isa isa) {
 
 double nvfx_instance_macs_per_pixel(const nvfx_instance* in) {
   if (!in) return 0.0;
-  return in->runner ? in->runner->macs_per_pixel() : in->renderer->macs_per_pixel();
+  return in->a.r ? in->a.r->macs_per_pixel() : in->renderer->macs_per_pixel();
 }
 
 }  // extern "C"

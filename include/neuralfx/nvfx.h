@@ -47,13 +47,13 @@ typedef struct nvfx_effect nvfx_effect;
 typedef struct nvfx_instance nvfx_instance;
 
 typedef struct nvfx_effect_info {
-  int arch;            /* 1 = grid (any size), 2 = conv (native size and native / 2, / 4) */
+  int arch;            /* 1 = grid (any size), 2 = conv (native size and native / 2, / 4), 3 = rollout (multiples of 32) */
   int native_size;     /* training sprite size in pixels */
   int frames;          /* frames of the training clip */
   float fps;           /* frames per second of the training clip */
   int loops;           /* 1 = seamless loop, 0 = plays once */
   int n_controls;      /* learned controls */
-  int n_variations;    /* training variations that can be replayed (0 if none) */
+  int n_variations;    /* training variations that can be replayed (0 if none); rollout: start points */
   size_t stored_bytes; /* size of the weights as shipped */
   size_t resident_bytes; /* memory the loaded effect occupies (features stay in their stored format) */
   char name[32];
@@ -70,7 +70,8 @@ NVFX_API nvfx_status nvfx_effect_get_info(const nvfx_effect* effect, nvfx_effect
 NVFX_API const char* nvfx_effect_control_name(const nvfx_effect* effect, int i);
 
 /* Instances ---------------------------------------------------------------------------------------------------- */
-/* `size`: output side in pixels (grid: any multiple of 16 from 16 to 1024; conv: native, native / 2 or native / 4). */
+/* `size`: output side in pixels (grid: any multiple of 16 from 16 to 1024; conv: native, native / 2 or native / 4;
+ * rollout: any multiple of 32 from 32 to 1024). */
 NVFX_API nvfx_status nvfx_instance_create(const nvfx_effect* effect, int size, nvfx_instance** out);
 NVFX_API void nvfx_instance_free(nvfx_instance* instance);
 NVFX_API size_t nvfx_instance_scratch_bytes(const nvfx_instance* instance);
@@ -78,7 +79,9 @@ NVFX_API nvfx_status nvfx_instance_set_controls(nvfx_instance* instance, const f
 /* Which variation plays: a seed (any value), or a training variation by index (seed ignored; -1 returns to seeds). */
 NVFX_API nvfx_status nvfx_instance_set_seed(nvfx_instance* instance, uint64_t seed);
 NVFX_API nvfx_status nvfx_instance_set_variation(nvfx_instance* instance, int training_index);
-/* Seconds per drift between variations for looping effects (default: 4 loops; 0 = no drift). */
+/* Frame models: seconds per drift between variations for looping effects (default: 4 loops; 0 = no drift).
+ * Rollout effects: seconds per shard, each a fresh rollout from a start point, crossfaded into the next (default 6;
+ * 0 = one continuous rollout, which drifts after 20 s or so). */
 NVFX_API nvfx_status nvfx_instance_set_drift(nvfx_instance* instance, float seconds);
 /* Exact colour controls applied to the output: hue rotation in radians, brightness multiplier (default 0, 1). */
 NVFX_API nvfx_status nvfx_instance_set_colour(nvfx_instance* instance, float hue_radians, float brightness);

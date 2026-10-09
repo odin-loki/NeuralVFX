@@ -49,7 +49,10 @@ struct RolloutEffect {
 class RolloutRunner {
  public:
   virtual ~RolloutRunner() = default;
-  // Begin at start point `index`: its coarse state and fine fields, or fine fields grown by h.warmup frames.
+  // Begin at start point `index` with a noise seed: its coarse state and fine fields (or fine fields upsampled from
+  // the coarse state, to be grown by h.warmup ordinary steps).
+  virtual void begin(int index, std::uint64_t seed) = 0;
+  // begin(), then the warm-up steps when the start point has no fine fields.
   virtual void start(int index, std::span<const float> controls, std::uint64_t seed) = 0;
   virtual void step(std::span<const float> controls, std::uint64_t seed) = 0;
   virtual void render(const FrameInput& in, std::uint8_t* rgba, std::size_t stride) = 0;

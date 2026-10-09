@@ -4,10 +4,12 @@
 //   2. train_stepper: backpropagation through time over windows of up to `max_unroll` frames from true states, with
 //      noise added to the inputs (so the stepper learns to recover from its own errors); then fine-tuning on windows
 //      that start from the stepper's own rollout, with a loss on where the heat and soot are (row and column profiles),
-//      which stays meaningful after the chaos horizon where frame-by-frame errors do not.
+//      which stays meaningful after the chaos horizon where frame-by-frame errors do not; then a third stage that also
+//      matches how much the state changes from frame to frame (squared error alone settles on a smooth average in
+//      time, and the effect loses its flicker).
 //   3. train_renderer: a per-pixel MLP from true fields to the simulation's frames.
-//   4. calibrate_detail: the detail layer's few constants by matching frame statistics (detail spectrum, motion) on
-//      training runs.
+//   4. calibrate_detail: the detail layer's few constants by matching frame statistics (detail spectrum, motion, light,
+//      cover) of endless runs from the start points against real runs, at the controls of training runs.
 //   5. choose_starts: start points spread over the control space.
 // Nothing here is evaluated on the runs it trained on; nvfx_experiment holds out seeds and settings.
 #pragma once
@@ -41,9 +43,14 @@ struct StepperOptions {
   int max_unroll = 16;
   int burn_max = 48;
   float sigma = 0.03f;     // input noise, in channel scales
-  float profile = 1.f;     // weight of the profile loss in stage 2
+  float profile = 1.f;     // weight of the profile loss in stages 2 and 3
+  int activity_stage = 0;  // stage 3: windows as in stage 2, plus matching how much the state changes per frame
+                           // (recipe_for: 800)
+  float activity = 1.f;    // weight of that loss (per channel: mean squared frame-to-frame change, model against truth;
+                           // recipe_for: 100)
   float lr = 2e-3f, lr_finetune = 7e-4f;
   float clip = 1.f;        // gradient norm clip
+  bool keep_normalisation = false;  // continue training a model: keep its channel scales and range
   int threads = 0;
   std::uint64_t seed = 1;
   int log_every = 250;
@@ -79,10 +86,11 @@ struct RendererOptions {
 // Sets m.render_scale and trains m.render_w. Returns PSNR on the samples' sampled pixels.
 double train_renderer(Model& m, std::span<const RenderSample> samples, const RendererOptions& o);
 
-// Grid search over the contrast and swirl constants on `runs` (training runs): rollouts of `frames` frames from a true
-// state at frame `from` (with its fine fields), scored by detail-spectrum distance plus |log motion ratio| against the
-// true frames. Writes the best into m.detail and returns its score.
-double calibrate_detail(Model& m, std::span<const sim::Params> runs, int from, int frames);
+// Grid search over the contrast, swirl and growth constants, as the effect is used: from the start point nearest each
+// run's controls with a seed of its own, `skip` frames of transition, then `frames` frames scored against a real run at
+// those controls (another seed, warmed up `warm` frames) by detail-spectrum distance plus the absolute log ratios of
+// motion, mean light (emission) and mean cover. Needs start points. Writes the best into m.detail; returns its score.
+double calibrate_detail(Model& m, std::span<const sim::Params> runs, int warm, int skip, int frames);
 
 // `count` start points from the runs: spread over the control space (farthest-point order), at frame `frame` (looping
 // effects: a steady frame; one-shot effects: the first). Fine fields are kept when m.h.start_fine > 0.
@@ -118,6 +126,6 @@ FinishResult finish_model(Model& m, const SimRecipe& r, std::span<const Run> run
 
 // Exposed for tests: the loss of one window and its gradient (added to grad, which has step_layout size).
 double window_loss(const Model& m, const Run& run, int first, int unroll, int burn, float sigma, float profile,
-                   std::uint64_t noise_seed, std::vector<float>* grad);
+                   std::uint64_t noise_seed, std::vector<float>* grad, float activity = 0.f);
 
 }  // namespace nfx::rollout

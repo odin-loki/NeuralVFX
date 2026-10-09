@@ -1,4 +1,4 @@
-// Study D (docs/REPORT.md §8): start points and learned dynamics. Part of nvfx_experiment.
+// Study D (docs/REPORT.md §6): start points and learned dynamics. Part of nvfx_experiment.
 //
 //   d-chaos   how fast runs from the same start point drift apart, and how much the noise seed decides
 //   d-train   per effect: record runs, train the stepper, the renderer, calibrate the detail layer, keep start points
@@ -41,13 +41,27 @@ constexpr int kSize = 128, kRes = 32;
 std::string ename(sim::Effect e) { return std::string(sim::effect_name(e)); }
 
 // The library recipe per effect (rollout::recipe_for), scaled down for --quick, with the experiment's thread count.
+bool wanted(const Ctx& c, sim::Effect e) {
+  if (c.effects.empty()) return true;
+  const std::string name(sim::effect_name(e));
+  std::size_t a = 0;
+  while (a <= c.effects.size()) {
+    const std::size_t b = std::min(c.effects.find(',', a), c.effects.size());
+    if (c.effects.substr(a, b - a) == name) return true;
+    a = b + 1;
+  }
+  return false;
+}
+
 std::vector<rollout::SimRecipe> recipes(const Ctx& c) {
   std::vector<rollout::SimRecipe> v;
   for (const auto e : sim::kEffects) {
+    if (!wanted(c, e)) continue;
     rollout::SimRecipe r = rollout::recipe_for(e);
     r.threads = c.threads;
     r.stepper.iterations = c.iters(2500);
     r.stepper.finetune = c.iters(1500);
+    r.stepper.activity_stage = c.iters(r.stepper.activity_stage);
     r.stepper.threads = c.threads;
     r.renderer.iterations = c.iters(2500);
     r.renderer.threads = c.threads;
@@ -90,6 +104,24 @@ void write_csv(const fs::path& path, const std::string& header, const std::vecto
   std::ofstream o(path);
   o << header << "\n";
   for (const auto& r : rows) o << r << "\n";
+}
+
+// Write rows keyed by their first cell, keeping rows of other keys already in the file (per-effect runs merge).
+void merge_csv(const fs::path& path, const std::string& header, const std::vector<std::string>& rows) {
+  std::map<std::string, std::string> keep;
+  if (std::ifstream in(path); in) {
+    std::string line;
+    std::getline(in, line);
+    while (std::getline(in, line)) {
+      if (!line.empty()) keep[line.substr(0, line.find(','))] = line;
+    }
+  }
+  for (const auto& r : rows) keep[r.substr(0, r.find(','))] = r;
+  std::vector<std::string> out;
+  for (const auto e : sim::kEffects) {
+    if (const auto it = keep.find(ename(e)); it != keep.end()) out.push_back(it->second);
+  }
+  write_csv(path, header, out);
 }
 
 }  // namespace
@@ -197,6 +229,28 @@ void step_train(const Ctx& c) {
             rows);
 }
 
+// Stage 3 of the stepper on trained models (continuing from stage 2): windows as in stage 2 plus the activity loss.
+void step_tune(const Ctx& c) {
+  std::vector<std::string> rows;
+  for (const rollout::SimRecipe& r : recipes(c)) {
+    auto loaded = rollout::load_model(model_path(c, r.effect));
+    if (!loaded) throw std::runtime_error(loaded.error());
+    rollout::Model m = std::move(*loaded);
+    const std::vector<rollout::Run> runs = rollout::record_runs(r);
+    rollout::StepperOptions so = r.stepper;
+    so.iterations = 0;
+    so.finetune = 0;
+    so.keep_normalisation = true;
+    so.progress = [&](int it, int unroll, double loss) { std::println("  {} stage 3 {:5d} unroll {:2d} loss {:.5f}", m.effect, it, unroll, loss); };
+    const rollout::StepperResult sr = rollout::train_stepper(m, runs, so);
+    if (auto w = rollout::save_model(model_path(c, r.effect), m); !w) throw std::runtime_error(w.error());
+    std::println("d-tune: {} stage 3 ({} iterations, activity weight {}) loss {:.5f} in {:.0f} s", m.effect, so.activity_stage, so.activity, sr.final_loss, sr.seconds);
+    std::fflush(stdout);
+    rows.push_back(std::format("{},{},{},{:.5f},{:.0f}", m.effect, so.activity_stage, so.activity, sr.final_loss, sr.seconds));
+  }
+  merge_csv(c.results / "d_tune.csv", "effect,iterations,activity_weight,loss,seconds", rows);
+}
+
 // Redo the cheap stages on trained models (the stepper is kept): renderer, detail layer, start points.
 void step_finish(const Ctx& c) {
   std::vector<std::string> rows;
@@ -208,12 +262,13 @@ void step_finish(const Ctx& c) {
     const std::vector<rollout::Run> runs = rollout::record_runs(r);
     const rollout::FinishResult fin = rollout::finish_model(m, r, runs);
     if (auto w = rollout::save_model(model_path(c, r.effect), m); !w) throw std::runtime_error(w.error());
-    std::println("d-finish: {} renderer {:.2f} dB, detail contrast {} swirl {} (score {:.3f}), {} start points, {:.1f} KB", m.effect, fin.render_psnr,
-                 m.detail.contrast, m.detail.swirl, fin.detail_score, m.starts.size(), static_cast<double>(m.storage_bytes()) / 1024.0);
+    std::println("d-finish: {} renderer {:.2f} dB, detail contrast {} swirl {} grow {} (score {:.3f}), {} start points, {:.1f} KB", m.effect, fin.render_psnr,
+                 m.detail.contrast, m.detail.swirl, m.detail.grow, fin.detail_score, m.starts.size(), static_cast<double>(m.storage_bytes()) / 1024.0);
     std::fflush(stdout);
-    rows.push_back(std::format("{},{:.2f},{},{},{:.3f},{},{}", m.effect, fin.render_psnr, m.detail.contrast, m.detail.swirl, fin.detail_score, m.starts.size(), m.storage_bytes()));
+    rows.push_back(std::format("{},{:.2f},{},{},{:.3f},{},{},{}", m.effect, fin.render_psnr, m.detail.contrast, m.detail.swirl, fin.detail_score, m.starts.size(),
+                               m.storage_bytes(), m.detail.grow));
   }
-  write_csv(c.results / "d_finish.csv", "effect,renderer_psnr,contrast,swirl,detail_score,starts,stored_bytes", rows);
+  merge_csv(c.results / "d_finish.csv", "effect,renderer_psnr,contrast,swirl,detail_score,starts,stored_bytes,grow", rows);
 }
 
 }  // namespace nfx::study_d
@@ -261,17 +316,20 @@ struct Effect {
 };
 
 // `frames` frames from the runtime: controls, then a start point (variation >= 0, which keeps its run's seed) or a seed.
-Clip runtime_clip(nvfx_effect* e, std::span<const float> controls, int variation, std::uint64_t seed, int frames, int first = 0) {
+// shards: rollout effects play in shards from start points (the default); false: one continuous rollout (tracking).
+Clip runtime_clip(nvfx_effect* e, std::span<const float> controls, int variation, std::uint64_t seed, int frames, bool shards = true) {
   nvfx_instance* in = nullptr;
   if (nvfx_instance_create(e, kSize, &in) != NVFX_OK) throw std::runtime_error("instance");
   nvfx_instance_set_controls(in, controls.data(), static_cast<int>(controls.size()));
-  nvfx_instance_set_drift(in, 0.f);
+  nvfx_effect_info info{};
+  nvfx_effect_get_info(e, &info);
+  if (!shards || info.arch != 3) nvfx_instance_set_drift(in, 0.f);
   if (variation >= 0) nvfx_instance_set_variation(in, variation);
   else nvfx_instance_set_seed(in, seed);
   Clip c;
   c.allocate(kSize, frames);
   c.fps = 30.f;
-  for (int f = 0; f < frames; ++f) nvfx_render(in, (first + f) / 30.0, c.frame(f).data(), kSize * 4);
+  for (int f = 0; f < frames; ++f) nvfx_render(in, f / 30.0, c.frame(f).data(), kSize * 4);
   nvfx_instance_free(in);
   return c;
 }
@@ -453,7 +511,7 @@ void step_eval(const Ctx& c) {
               }
             }
             Effect fx(mt);
-            const Clip neural = runtime_clip(fx.e, sp.controls, 0, 0, KE + 1);  // frame 0 is the start point itself
+            const Clip neural = runtime_clip(fx.e, sp.controls, 0, 0, KE + 1, false);  // frame 0 is the start point itself
             Clip dyn;  // the same dynamics (reference implementation), drawn by the simulation's renderer
             dyn.allocate(kSize, KE);
             {
@@ -791,16 +849,25 @@ void report(const Ctx& c, std::ostream& md) {
   if (fs::exists(c.results / "d_finish.csv")) {
     for (auto& r : read_csv(c.results / "d_finish.csv")) finish[r[0]] = r;
   }
+  std::map<std::string, std::vector<std::string>> tune;
+  if (fs::exists(c.results / "d_tune.csv")) {
+    for (auto& r : read_csv(c.results / "d_tune.csv")) tune[r[0]] = r;
+  }
   if (fs::exists(c.results / "d_train.csv")) {
-    md << "\n### Training\n\n| effect | runs x frames | minutes of simulation | stepper loss | stepper s | renderer dB | contrast | swirl | start points | KB stored |\n"
-          "|---|---|---:|---:|---:|---:|---:|---:|---:|---:|\n";
+    md << "\n### Training\n\nStepper loss: stages 1-2 (normalised squared error plus profiles) and stage 3 (plus activity). Renderer PSNR on "
+          "its training samples (true fields). Detail constants as calibrated.\n\n| effect | runs x frames | minutes of simulation | stepper loss 1-2 | "
+          "stepper s | stage 3 loss | stage 3 s | renderer dB | contrast | swirl | grow | start points | KB stored |\n"
+          "|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|\n";
     for (const auto& r : read_csv(c.results / "d_train.csv")) {
       const auto f = finish.find(r[0]);
       const bool fin = f != finish.end();
-      md << std::format("| {} | {} x {} | {} | {} | {} | {} | {} | {} | {} | {:.1f} |\n", r[0], r[1], r[2], r[3], r[5], r[6], fin ? f->second[1] : r[7],
-                        fin ? f->second[2] : r[8], fin ? f->second[3] : r[9], fin ? f->second[5] : r[11], num(fin ? f->second[6] : r[13]) / 1024.0);
+      const auto t = tune.find(r[0]);
+      const bool tu = t != tune.end();
+      md << std::format("| {} | {} x {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {:.1f} |\n", r[0], r[1], r[2], r[3], r[5], r[6], tu ? t->second[3] : "-",
+                        tu ? t->second[4] : "-", fin ? f->second[1] : r[7], fin ? f->second[2] : r[8], fin ? f->second[3] : r[9],
+                        fin && f->second.size() > 7 ? f->second[7] : "1", fin ? f->second[5] : r[11], num(fin ? f->second[6] : r[13]) / 1024.0);
     }
-    if (!finish.empty()) md << "\nRenderer, detail constants and start points from `d-finish` (retrained on the trained steppers).\n";
+    if (!finish.empty()) md << "\nRenderer, detail constants and start points from `d-finish` on the trained steppers; stage 3 from `d-tune`.\n";
   }
   if (fs::exists(c.results / "d_track.csv")) {
     md << "\n### Tracking a held-out run from its true start point\n\nActive PSNR against the true run, mean over held-out runs (other seeds and "
@@ -885,8 +952,8 @@ void report(const Ctx& c, std::ostream& md) {
     }
   }
   if (fs::exists(c.results / "d_long.csv")) {
-    md << "### One minute without a restart\n\nStatistics of each 10 s window of a 60 s neural run against a real 10 s run at the same setting (two "
-          "held-out settings): if the dynamics drifted, the distances would grow window by window.\n\n| effect | setting | window | spectrum L1 | "
+    md << "### One minute of play\n\nStatistics of each 10 s window of a 60 s neural run (shards of 6 s from start points, the default) against a "
+          "real 10 s run at the same setting (two held-out settings): if the effect drifted, the distances would grow window by window.\n\n| effect | setting | window | spectrum L1 | "
           "motion ratio | coverage L1 | mean-frame PSNR |\n|---|---:|---:|---:|---:|---:|---:|\n";
     for (const auto& r : read_csv(c.results / "d_long.csv")) md << std::format("| {} | {} | {} | {} | {} | {} | {} |\n", r[0], r[1], r[2], r[3], r[4], r[5], r[7]);
   }

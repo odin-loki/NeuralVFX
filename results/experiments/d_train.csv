@@ -1,0 +1,4 @@
+effect,runs,frames,sim_minutes,record_s,stepper_loss,stepper_s,renderer_psnr,contrast,swirl,detail_score,starts,start_fine,stored_bytes,total_s
+fire,160,240,21.33,81,0.06687,2533,36.98,1,1.2,0.318,8,0,83594,2715
+smoke,160,240,21.33,81,0.07107,3205,30.95,1,1.2,0.771,8,64,149162,3495
+explosion,240,90,12.00,89,0.01317,3316,28.82,1,0.8,0.233,16,64,280826,3560

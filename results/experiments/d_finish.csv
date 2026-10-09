@@ -1,0 +1,4 @@
+effect,renderer_psnr,contrast,swirl,detail_score,starts,stored_bytes,grow
+fire,54.96,1,0.5,1.694,8,83594,1.5
+smoke,34.66,1,0.5,0.545,8,149162,4
+explosion,34.67,0.5,0.5,0.806,16,280826,1

@@ -431,7 +431,7 @@ Run record_run(const sim::Params& p, int frames, int res) {
 // --- stepper ------------------------------------------------------------------------------------------------------------
 
 double window_loss(const Model& m, const Run& r, int first, int unroll, int burn, float sigma, float profile, std::uint64_t noise_seed,
-                   std::vector<float>* grad) {
+                   std::vector<float>* grad, float activity) {
   const Hyper& h = m.h;
   const StepLayout L = step_layout(h);
   const int R = h.res, N = R * R, C = h.channels();
@@ -452,6 +452,7 @@ double window_loss(const Model& m, const Run& r, int first, int unroll, int burn
   std::vector<Cache> cs(sz(unroll));
   std::vector<Vec> conds(sz(unroll));
   std::vector<Vec> gout(sz(unroll));
+  std::vector<Vec> gprev(sz(unroll), Vec(activity > 0.f ? sz(N) * sz(C) : 0, 0.f));  // activity terms on earlier outputs
   std::array<float, kPhys> wch{};
   for (int k = 0; k < kPhys; ++k) wch[sz(k)] = 1.f / (m.scale[sz(k)] * m.scale[sz(k)]);
   const float inv = 1.f / (fl(N) * kPhys * fl(unroll));
@@ -503,11 +504,38 @@ double window_loss(const Model& m, const Run& r, int first, int unroll, int burn
         }
       }
     }
+    if (activity > 0.f && s > 0) {  // how much each channel changes per frame: mean squared change, model against truth
+      const float* tp = r.coarse.data() + sz(i0 + s) * sz(N) * kPhys;  // the truth one frame earlier
+      const Vec& prev = cs[sz(s - 1)].next;
+      for (int k = 0; k < kPhys; ++k) {
+        const float is2 = 1.f / (m.scale[sz(k)] * m.scale[sz(k)]);
+        double am = 0, at = 0;
+        for (int j = 0; j < N; ++j) {
+          const float dmod = S[sz(j) * sz(C) + sz(k)] - prev[sz(j) * sz(C) + sz(k)];
+          const float dtru = t[sz(j) * kPhys + sz(k)] - tp[sz(j) * kPhys + sz(k)];
+          am += static_cast<double>(dmod * dmod * is2);
+          at += static_cast<double>(dtru * dtru * is2);
+        }
+        am /= N;
+        at /= N;
+        const float e = static_cast<float>(am - at), w = activity / (fl(kPhys) * fl(unroll - 1));
+        loss += static_cast<double>(w * e * e);
+        for (int j = 0; j < N; ++j) {
+          const float dmod = S[sz(j) * sz(C) + sz(k)] - prev[sz(j) * sz(C) + sz(k)];
+          const float gj = w * 2.f * e * 2.f * dmod * is2 / fl(N);
+          g[sz(j) * sz(C) + sz(k)] += gj;
+          gprev[sz(s - 1)][sz(j) * sz(C) + sz(k)] -= gj;
+        }
+      }
+    }
   }
   if (grad) {
     Vec gS(sz(N) * sz(C), 0.f), gp(sz(N), 0.f), gS_in, gp_in;
     for (int s = unroll - 1; s >= 0; --s) {
       for (std::size_t j = 0; j < gS.size(); ++j) gS[j] += gout[sz(s)][j];
+      if (activity > 0.f) {
+        for (std::size_t j = 0; j < gS.size(); ++j) gS[j] += gprev[sz(s)][j];
+      }
       backward(m, L, cs[sz(s)], conds[sz(s)], gS, gp, gS_in, gp_in, grad->data());
       gS.swap(gS_in);
       gp.swap(gp_in);
@@ -562,7 +590,7 @@ StepperResult train_stepper(Model& m, std::span<const Run> runs, const StepperOp
       ++count;
     }
   }
-  for (int k = 0; k < kPhys; ++k) {
+  for (int k = 0; k < kPhys && !o.keep_normalisation; ++k) {
     m.scale[sz(k)] = static_cast<float>(std::sqrt(s2[sz(k)] / static_cast<double>(count))) + 1e-4f;
     m.hi[sz(k)] = 1.5f * mx[sz(k)] + 1e-4f;
     m.lo[sz(k)] = k < 2 ? -m.hi[sz(k)] : 0.f;
@@ -573,10 +601,11 @@ StepperResult train_stepper(Model& m, std::span<const Run> runs, const StepperOp
   Adam adam(L.size);
   StepperResult res;
   const auto t0 = std::chrono::steady_clock::now();
-  const int total = o.iterations + o.finetune;
+  const int total = o.iterations + o.finetune + o.activity_stage;
   std::vector<double> tail;
   for (int it = 0; it < total; ++it) {
     const bool fine = it >= o.iterations;
+    const bool act = it >= o.iterations + o.finetune;
     const int unroll = fine ? o.max_unroll : std::min(o.max_unroll, 1 + it * o.max_unroll / std::max(1, o.iterations / 2));
     std::vector<Vec> grads(sz(threads), Vec(L.size, 0.f));
     std::vector<double> losses(sz(threads), 0.0);
@@ -591,7 +620,7 @@ StepperResult train_stepper(Model& m, std::span<const Run> runs, const StepperOp
             const int span = r.frames - unroll - burn - 1;
             if (span <= 0) continue;
             const int first = static_cast<int>(rng() % static_cast<std::uint64_t>(span));
-            losses[sz(t)] += window_loss(m, r, first, unroll, burn, o.sigma, fine ? o.profile : 0.f, rng(), &grads[sz(t)]);
+            losses[sz(t)] += window_loss(m, r, first, unroll, burn, o.sigma, fine ? o.profile : 0.f, rng(), &grads[sz(t)], act ? o.activity : 0.f);
           }
         });
       }
@@ -611,7 +640,8 @@ StepperResult train_stepper(Model& m, std::span<const Run> runs, const StepperOp
       const float s = static_cast<float>(o.clip / gn);
       for (float& g : grads[0]) g *= s;
     }
-    const int stage_it = fine ? it - o.iterations : it, stage_n = fine ? o.finetune : o.iterations;
+    const int stage_it = act ? it - o.iterations - o.finetune : (fine ? it - o.iterations : it);
+    const int stage_n = act ? o.activity_stage : (fine ? o.finetune : o.iterations);
     const float base = fine ? o.lr_finetune : o.lr;
     const float lr = base * (0.05f + 0.95f * 0.5f * (1.f + std::cos(3.14159265f * static_cast<float>(stage_it) / static_cast<float>(std::max(1, stage_n)))));
     adam.step(m.step_w, grads[0], lr);
@@ -783,45 +813,40 @@ Clip rollout_clip(const Model& m, State s, std::span<const float> controls, std:
   return c;
 }
 
-State true_start(const Model& m, const sim::Fluid& f) {
-  const sim::State st = f.state();
-  State s;
-  s.res = m.h.res;
-  s.size = st.n;
-  s.time = st.time;
-  s.since_start = 0.f;
-  const int N = m.h.res * m.h.res, C = m.h.channels();
-  std::vector<float> c(sz(N) * kPhys);
-  coarse_from_sim(st, m.h.res, f.params().fps, c);
-  s.coarse.assign(sz(N) * sz(C), 0.f);
-  for (int i = 0; i < N; ++i) {
-    for (int k = 0; k < kPhys; ++k) s.coarse[sz(i) * sz(C) + sz(k)] = c[sz(i) * kPhys + sz(k)];
-  }
-  s.pressure.assign(sz(N), 0.f);
-  s.flow.assign(sz(N) * 2, 0.f);
-  s.fine_t = st.temp;
-  s.fine_d = st.soot;
-  return s;
-}
 
+// How far a rollout's frame statistics are from the true run's: detail spectrum, motion, and how much light and cover
+// it has (log ratios of the means, so too dim and too bright cost the same).
 double detail_score(const metrics::ClipStats& ref, const metrics::ClipStats& test) {
   const metrics::StatDistance d = metrics::distance(ref, test);
-  return d.spectrum_l1 + std::abs(std::log(std::max(1e-3, d.motion_ratio)));
+  const auto mean = [](const std::vector<double>& v) {
+    double s = 0;
+    for (const double x : v) s += x;
+    return v.empty() ? 0.0 : s / static_cast<double>(v.size());
+  };
+  const auto log_ratio = [](double a, double b) { return std::abs(std::log(std::max(1e-6, a) / std::max(1e-6, b))); };
+  const double em = mean(ref.emission);  // light only counts for effects that give it (smoke gives almost none)
+  return d.spectrum_l1 + std::abs(std::log(std::max(1e-3, d.motion_ratio))) + (em > 1e-3 ? log_ratio(mean(test.emission), em) : 0.0) +
+         log_ratio(mean(test.coverage), mean(ref.coverage));
 }
 
 }  // namespace
 
-double calibrate_detail(Model& m, std::span<const sim::Params> runs, int from, int frames) {
+double calibrate_detail(Model& m, std::span<const sim::Params> runs, int warm, int skip, int frames) {
+  // As deployed: the model starts from its start point nearest the run's controls, with a seed of its own; after `skip`
+  // frames its statistics over `frames` frames are compared with a real run at those controls (another seed, warmed up
+  // by `warm` frames).
   struct Case {
     sim::Params p;
-    State start;
+    int start = 0;
     metrics::ClipStats ref;
   };
+  if (m.starts.empty()) throw std::invalid_argument("rollout: calibrate_detail needs start points");
   std::vector<Case> cases;
-  for (const sim::Params& p : runs) {
+  for (const sim::Params& run : runs) {
+    sim::Params p = run;
+    p.seed = run.seed * 7 + 12345;  // a real run the model has not seen
     sim::Fluid f(p);
-    for (int i = 0; i < from; ++i) f.step_frame();
-    Case c{p, true_start(m, f), {}};
+    for (int i = 0; i < warm; ++i) f.step_frame();
     Clip ref;
     ref.allocate(p.size, frames);
     ref.fps = p.fps;
@@ -829,7 +854,19 @@ double calibrate_detail(Model& m, std::span<const sim::Params> runs, int from, i
       f.step_frame();
       f.render(ref.frame(i));
     }
+    Case c;
+    c.p = run;
     c.ref = metrics::stats(ref);
+    float best = std::numeric_limits<float>::infinity();
+    const std::array<float, 3> ctl{run.intensity, run.wind, run.turbulence};
+    for (std::size_t k = 0; k < m.starts.size(); ++k) {
+      float d = 0.f;
+      for (std::size_t q = 0; q < 3 && q < m.starts[k].controls.size(); ++q) d += (m.starts[k].controls[q] - ctl[q]) * (m.starts[k].controls[q] - ctl[q]);
+      if (d < best) {
+        best = d;
+        c.start = static_cast<int>(k);
+      }
+    }
     cases.push_back(std::move(c));
   }
   // kappa: 1 / mean of the contrast curve over the flicker noise, so contrast moves material around but adds none.
@@ -845,9 +882,14 @@ double calibrate_detail(Model& m, std::span<const sim::Params> runs, int from, i
   }
   double best = std::numeric_limits<double>::infinity();
   DetailSpec keep = m.detail;
-  std::vector<std::pair<float, float>> grid;
-  for (const float contrast : {0.f, 0.5f, 1.f}) {
-    for (const float swirl : {0.f, 0.4f, 0.8f, 1.2f}) grid.emplace_back(contrast, swirl);
+  struct Cell {
+    float contrast, swirl, grow;
+  };
+  std::vector<Cell> grid;
+  for (const float contrast : {0.5f, 1.f}) {
+    for (const float swirl : {0.f, 0.5f, 1.f, 1.5f, 2.f, 3.f}) {
+      for (const float grow : {1.f, 1.5f, 2.f, 4.f}) grid.push_back({contrast, swirl, grow});
+    }
   }
   std::vector<double> scores(grid.size(), 0.0);
   std::atomic<std::size_t> next{0};
@@ -857,12 +899,16 @@ double calibrate_detail(Model& m, std::span<const sim::Params> runs, int from, i
       pool.emplace_back([&] {
         for (std::size_t g; (g = next++) < grid.size();) {
           Model mm = m;
-          mm.detail.contrast = grid[g].first;
-          mm.detail.swirl = grid[g].second;
+          mm.detail.contrast = grid[g].contrast;
+          mm.detail.swirl = grid[g].swirl;
+          mm.detail.grow = grid[g].grow;
           double s = 0;
           for (const Case& c : cases) {
             const std::vector<float> controls{c.p.intensity, c.p.wind, c.p.turbulence};
-            s += detail_score(c.ref, metrics::stats(rollout_clip(mm, c.start, controls, c.p.seed, frames)));
+            const std::uint64_t seed = c.p.seed * 31 + 777;
+            State st = start(mm, c.start, c.p.size, controls, seed);
+            for (int i = 0; i < skip; ++i) step(mm, st, controls, seed);
+            s += detail_score(c.ref, metrics::stats(rollout_clip(mm, st, controls, seed, frames)));
           }
           scores[g] = s / static_cast<double>(cases.size());
         }
@@ -872,8 +918,9 @@ double calibrate_detail(Model& m, std::span<const sim::Params> runs, int from, i
   for (std::size_t g = 0; g < grid.size(); ++g) {
     if (scores[g] < best) {
       best = scores[g];
-      keep.contrast = grid[g].first;
-      keep.swirl = grid[g].second;
+      keep.contrast = grid[g].contrast;
+      keep.swirl = grid[g].swirl;
+      keep.grow = grid[g].grow;
     }
   }
   keep.kappa = m.detail.kappa;
@@ -944,6 +991,8 @@ void choose_starts(Model& m, std::span<const Run> runs, int count, int frame) {
 SimRecipe recipe_for(sim::Effect e) {
   SimRecipe r;
   r.effect = e;
+  r.stepper.activity_stage = 800;
+  r.stepper.activity = 100.f;
   if (e == sim::Effect::smoke) r.start_fine = 64;  // smoke lingers: growing its detail would take seconds
   if (e == sim::Effect::explosion) {
     r.runs = 240;
@@ -1035,12 +1084,12 @@ FinishResult finish_model(Model& m, const SimRecipe& r, std::span<const Run> run
   ro.threads = r.threads;
   out.render_psnr = train_renderer(m, samples, ro);
   samples.clear();
-  // detail layer, on three training runs
-  std::vector<sim::Params> cal;
-  for (std::size_t i = 0; i < std::min<std::size_t>(3, runs.size()); ++i) cal.push_back(runs[i].p);
-  out.detail_score = calibrate_detail(m, cal, one_shot ? 1 : std::min(100, r.frames - 40), one_shot ? 60 : 90);
   choose_starts(m, runs, r.starts, r.start_frame);
   quantise_like_storage(m);
+  // detail layer, as deployed (from start points, new seeds), at the controls of four training runs
+  std::vector<sim::Params> cal;
+  for (std::size_t i = 0; i < std::min<std::size_t>(4, runs.size()); ++i) cal.push_back(runs[i].p);
+  out.detail_score = one_shot ? calibrate_detail(m, cal, 1, 0, std::min(89, r.frames - 1)) : calibrate_detail(m, cal, 150, 60, 180);
   return out;
 }
 

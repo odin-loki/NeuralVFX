@@ -16,7 +16,7 @@ namespace nfx::rollout {
 
 namespace {
 
-constexpr std::uint32_t kVersion = 1;
+constexpr std::uint32_t kVersion = 2;  // 2 added DetailSpec::grow (version 1 files load with grow = 1)
 
 float round_f16(float v) { return static_cast<float>(static_cast<std::float16_t>(v)); }
 
@@ -79,6 +79,21 @@ float bilinear_ch(const float* f, int n, int channels, int c, float x, float y) 
   const float fx = x - fl(x0), fy = y - fl(y0);
   const auto at = [&](int xx, int yy) { return f[(sz(yy) * sz(n) + sz(xx)) * sz(channels) + sz(c)]; };
   return (1.f - fy) * ((1.f - fx) * at(x0, y0) + fx * at(x0 + 1, y0)) + fy * ((1.f - fx) * at(x0, y0 + 1) + fx * at(x0 + 1, y0 + 1));
+}
+
+// Bilinear sample of an n x n field with zero outside it (material leaves the frame and nothing flows in), and the
+// range of the four values used.
+float bilinear_zero(const float* f, int n, float x, float y, float* lo = nullptr, float* hi = nullptr) {
+  x = std::clamp(x, -1.f, fl(n));
+  y = std::clamp(y, -1.f, fl(n));
+  const float fx0 = std::floor(x), fy0 = std::floor(y);
+  const int x0 = static_cast<int>(fx0), y0 = static_cast<int>(fy0);
+  const float fx = x - fx0, fy = y - fy0;
+  const auto at = [&](int xx, int yy) { return (xx < 0 || yy < 0 || xx >= n || yy >= n) ? 0.f : f[sz(yy) * sz(n) + sz(xx)]; };
+  const float a = at(x0, y0), b = at(x0 + 1, y0), c = at(x0, y0 + 1), d = at(x0 + 1, y0 + 1);
+  if (lo) *lo = std::min(std::min(a, b), std::min(c, d));
+  if (hi) *hi = std::max(std::max(a, b), std::max(c, d));
+  return (1.f - fy) * ((1.f - fx) * a + fx * b) + fy * ((1.f - fx) * c + fx * d);
 }
 
 float smoothstep01(float t) {
@@ -187,6 +202,7 @@ std::expected<void, std::string> save_model(std::ostream& o, const Model& m) {
   }
   bin::put(o, static_cast<std::int32_t>(n.flicker_octaves));
   bin::put(o, static_cast<std::int32_t>(d.swirl_control));
+  bin::put(o, d.grow);
   for (const auto* a : {&m.scale, &m.lo, &m.hi}) bin::put_array(o, std::span<const float>(*a));
   put_f16(o, m.step_w);
   put_f16(o, m.render_w);
@@ -217,7 +233,7 @@ std::expected<Model, std::string> load_model(std::istream& i) {
   i.read(magic, 8);
   if (!i || std::memcmp(magic, kMagic, 8) != 0) return std::unexpected("not a rollout effect");
   auto version = bin::get<std::uint32_t>(i);
-  if (!version || *version != kVersion) return std::unexpected("unsupported rollout version");
+  if (!version || *version < 1 || *version > kVersion) return std::unexpected("unsupported rollout version");
   Model m;
   Hyper& h = m.h;
   for (int* v : {&h.res, &h.hidden, &h.memory, &h.jacobi, &h.n_controls, &h.n_age, &h.frames, &h.render_hidden, &h.start_fine, &h.warmup}) {
@@ -256,6 +272,11 @@ std::expected<Model, std::string> load_model(std::istream& i) {
   if (!oct || !sc || *oct < 1 || *oct > 8 || *sc < -1 || *sc >= h.n_controls) return std::unexpected("rollout: bad noise spec");
   n.flicker_octaves = *oct;
   d.swirl_control = *sc;
+  if (*version >= 2) {
+    auto g = bin::get<float>(i);
+    if (!g || !(*g >= 1.f) || *g > 64.f) return std::unexpected("rollout: bad detail spec");
+    d.grow = *g;
+  }
   if (!(d.swirl_scale > 0.f) || !(d.edge1 > d.edge0)) return std::unexpected("rollout: bad detail spec");
   for (auto* a : {&m.scale, &m.lo, &m.hi}) {
     if (auto r = bin::get_array(i, std::span<float>(*a)); !r) return std::unexpected(r.error());
@@ -509,33 +530,24 @@ void detail_step(const Model& m, State& s, std::uint64_t seed, std::span<const f
       vy[sz(y) * sz(S) + sz(x)] = v;
     }
   }
-  // MacCormack advection of the fine fields (clamped to the forward step's stencil, as in the simulation).
-  std::vector<float> fa(sz(S) * sz(S)), fb(sz(S) * sz(S)), fo(sz(S) * sz(S));
+  // MacCormack advection of the fine fields (clamped to the forward step's stencil, as in the simulation), with zero
+  // outside the frame.
+  std::vector<float> fa(sz(S) * sz(S)), fb(sz(S) * sz(S)), lo(sz(S) * sz(S)), hi(sz(S) * sz(S));
   for (std::vector<float>* q : {&s.fine_t, &s.fine_d}) {
-    const std::vector<float>& Q = *q;
+    std::vector<float>& Q = *q;
     for (int y = 0; y < S; ++y) {
       for (int x = 0; x < S; ++x) {
         const std::size_t i = sz(y) * sz(S) + sz(x);
-        fa[i] = bilinear(Q.data(), S, fl(x) - ux[i], fl(y) - vy[i]);
+        fa[i] = bilinear_zero(Q.data(), S, fl(x) - ux[i], fl(y) - vy[i], &lo[i], &hi[i]);
       }
     }
     for (int y = 0; y < S; ++y) {
       for (int x = 0; x < S; ++x) {
         const std::size_t i = sz(y) * sz(S) + sz(x);
-        fb[i] = bilinear(fa.data(), S, fl(x) + ux[i], fl(y) + vy[i]);
+        fb[i] = bilinear_zero(fa.data(), S, fl(x) + ux[i], fl(y) + vy[i]);
       }
     }
-    for (int y = 0; y < S; ++y) {
-      for (int x = 0; x < S; ++x) {
-        const std::size_t i = sz(y) * sz(S) + sz(x);
-        const float bx = std::clamp(fl(x) - ux[i], 0.f, fl(S - 1)), by = std::clamp(fl(y) - vy[i], 0.f, fl(S - 1));
-        const int x0 = std::min(static_cast<int>(bx), S - 2), y0 = std::min(static_cast<int>(by), S - 2);
-        const float* a = Q.data() + sz(y0) * sz(S) + sz(x0);
-        const float lo = std::min({a[0], a[1], a[S], a[S + 1]}), hi = std::max({a[0], a[1], a[S], a[S + 1]});
-        fo[i] = std::max(0.f, std::clamp(fa[i] + 0.5f * (Q[i] - fb[i]), lo, hi));
-      }
-    }
-    q->swap(fo);
+    for (std::size_t i = 0; i < Q.size(); ++i) Q[i] = std::max(0.f, std::clamp(fa[i] + 0.5f * (Q[i] - fb[i]), lo[i], hi[i]));
   }
   // Lock to the coarse state: where the fine field holds more than the coarse cell, scale it down; where it holds
   // less, add the difference, broken up by the flicker noise (new material arrives as tongues, not as a smear).
@@ -550,8 +562,9 @@ void detail_step(const Model& m, State& s, std::uint64_t seed, std::span<const f
     for (int i = 0; i < R * R; ++i) {
       const float b = B[sz(i)] / fl(kk * kk), target = s.coarse[sz(i) * sz(C) + 2 + sz(ch)];
       constexpr float eps = 1e-4f;
-      rr[sz(i)] = std::min(1.f, (target + eps) / (b + eps));
-      aa[sz(i)] = std::max(0.f, target - b);
+      const float r = (target + eps) / (b + eps);
+      rr[sz(i)] = r <= 1.f ? r : std::min(r, dt.grow);  // decreases scale; increases scale up to `grow`
+      aa[sz(i)] = std::max(0.f, target - b * rr[sz(i)]);  // the rest arrives as new material
     }
     for (int y = 0; y < S; ++y) {
       for (int x = 0; x < S; ++x) {

@@ -162,7 +162,7 @@ int main(int argc, char** argv) try {
   nvfx_instance* inst = nullptr;
   float controls[8] = {0.5f, 0.5f, 0.5f, 0.5f, 0.5f, 0.5f, 0.5f, 0.5f};
   int seed = 1, variation = -1, bg_index = 0;
-  float drift = 8.f, speed = 1.f, hue = 0.f, brightness = 1.f;
+  float drift = 6.f, speed = 1.f, hue = 0.f, brightness = 1.f;
   bool paused = false, show_ref = ref.has_value(), show_fb = ref.has_value(), show_sim = false;
   double time = 0.0;
   Rolling effect_ms, sim_ms;
@@ -270,7 +270,7 @@ int main(int argc, char** argv) try {
     ImGui::InputInt("seed", &seed);
     if (ImGui::Button("new seed")) seed = static_cast<int>(clock_type::now().time_since_epoch().count() & 0x7fffffff);
     ImGui::SliderInt(rollout ? "start point" : "training variation", &variation, -1, std::max(-1, info.n_variations - 1), variation < 0 ? "seeded" : "%d");
-    if (!rollout) ImGui::SliderFloat("drift (s)", &drift, 0.f, 30.f);  // rollout effects never repeat anyway
+    ImGui::SliderFloat(rollout ? "shard (s)" : "drift (s)", &drift, 0.f, 30.f);  // rollout: shard length, 0 = one run
     ImGui::SeparatorText("exact runtime controls");
     ImGui::SliderFloat("speed", &speed, 0.f, 3.f);
     ImGui::SliderAngle("hue", &hue, -180.f, 180.f);

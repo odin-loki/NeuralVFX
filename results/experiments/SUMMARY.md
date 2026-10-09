@@ -215,3 +215,159 @@ Median (90th percentile) ms per frame through `nvfx_render`, one pinned core, no
 | simulation:fire | - | - | - | - | - | - | 8.825 (13.094) | - |
 | simulation:smoke | - | - | - | - | - | - | 11.662 (14.008) | - |
 | simulation:explosion | - | - | - | - | - | - | 10.656 (11.589) | - |
+
+## D: start points and learned dynamics
+
+### Chaos horizon (the simulation itself)
+
+Active PSNR against a run of the simulation from a stored start point, by frames after it (30 per second), mean over runs. Perturbations are relative to the velocity RMS.
+
+| effect | case | 1 | 4 | 8 | 15 | 30 | 60 | 120 | 240 |
+|---|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| fire | start+1e-3_same_seed | 73.94 | 71.32 | 69.92 | 66.74 | 61.86 | 56.65 | 47.81 | 34.79 |
+| fire | start+1e-1_same_seed | 50.21 | 45.74 | 43.45 | 40.17 | 33.44 | 27.21 | 26.08 | 26.05 |
+| fire | same_start_other_seed | 22.77 | 17.75 | 15.76 | 13.57 | 12.76 | 12.41 | 13.29 | 12.90 |
+| fire | other_start_same_seed | 15.19 | 16.03 | 16.78 | 17.14 | 19.07 | 19.81 | 19.80 | 22.14 |
+| smoke | start+1e-3_same_seed | 71.43 | 68.15 | 66.27 | 64.85 | 61.60 | 52.93 | 45.30 | 31.70 |
+| smoke | start+1e-1_same_seed | 48.05 | 43.67 | 40.83 | 37.82 | 32.23 | 23.92 | 20.58 | 18.21 |
+| smoke | same_start_other_seed | 25.08 | 23.02 | 21.08 | 18.50 | 15.01 | 13.28 | 13.63 | 12.91 |
+| smoke | other_start_same_seed | 12.54 | 12.71 | 12.88 | 13.22 | 13.56 | 14.66 | 15.83 | 17.24 |
+| explosion | start+1e-3_same_seed | 72.24 | 69.86 | 69.04 | 67.92 | 64.71 | 60.42 | - | - |
+| explosion | start+1e-1_same_seed | 48.07 | 44.59 | 42.84 | 39.78 | 33.64 | 27.72 | - | - |
+| explosion | same_start_other_seed | 54.22 | 36.74 | 28.10 | 20.86 | 16.09 | 13.77 | - | - |
+| explosion | other_start_same_seed | 16.64 | 17.07 | 17.33 | 16.85 | 14.49 | 13.55 | - | - |
+
+### Training
+
+Stepper loss: stages 1-2 (normalised squared error plus profiles) and stage 3 (plus activity). Renderer PSNR on its training samples (true fields). Detail constants as calibrated.
+
+| effect | runs x frames | minutes of simulation | stepper loss 1-2 | stepper s | stage 3 loss | stage 3 s | renderer dB | contrast | swirl | grow | start points | KB stored |
+|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| fire | 160 x 240 | 21.33 | 0.06687 | 2533 | 0.08811 | 1080 | 54.96 | 1 | 0.5 | 1.5 | 8 | 81.6 |
+| smoke | 160 x 240 | 21.33 | 0.07107 | 3205 | 0.08316 | 1057 | 34.66 | 1 | 0.5 | 4 | 8 | 145.7 |
+| explosion | 240 x 90 | 12.00 | 0.01317 | 3316 | 0.02040 | 1221 | 34.67 | 0.5 | 0.5 | 1 | 16 | 274.2 |
+
+Renderer, detail constants and start points from `d-finish` on the trained steppers; stage 3 from `d-tune`.
+
+### Tracking a held-out run from its true start point
+
+Active PSNR against the true run, mean over held-out runs (other seeds and settings), by frames after the start point. `neural`: the rollout effect through the runtime, started from the true state (coarse and fine) with the run's noise seed. `coarse_sim_detail`: the simulation on the same 32-cell grid with the same detail layer, drawn by the simulation's own renderer. `neural_dynamics_true_renderer`: the neural dynamics drawn by that renderer too (separates dynamics from rendering). `renderer_on_true_fields`: the learned renderer on the true fields (frames 1-30, then their mean).
+
+**explosion**
+
+| method | 1 | 4 | 8 | 16 | 30 | 60 | 120 | 240 |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| neural | 20.35 | 18.03 | 20.16 | 20.49 | 18.79 | 18.04 | - | - |
+| neural_dynamics_true_renderer | 26.13 | 20.41 | 22.09 | 20.55 | 18.77 | 18.16 | - | - |
+| coarse_sim_detail | 26.56 | 18.43 | 16.38 | 15.38 | 14.07 | 15.50 | - | - |
+| coarse_sim | 22.66 | 19.51 | 17.46 | 16.10 | 14.73 | 16.14 | - | - |
+| frozen | 11.17 | 6.56 | 5.77 | 5.75 | 5.75 | 7.21 | - | - |
+| renderer_on_true_fields | 20.89 | 21.38 | 24.12 | 31.41 | 34.20 | 29.22 | 29.22 | 29.22 |
+
+neural - coarse_sim_detail, paired over runs: frame 1: -6.21 [-7.35, -5.08]; frame 8: +3.78 [+2.49, +5.09]; frame 30: +4.72 [+3.78, +5.67]; frame 60: +2.54 [+1.81, +3.33];
+
+neural_dynamics_true_renderer - coarse_sim_detail, paired over runs: frame 1: -0.43 [-2.17, +1.23] (tie); frame 8: +5.71 [+4.05, +7.28]; frame 30: +4.70 [+3.76, +5.64]; frame 60: +2.66 [+1.97, +3.45];
+
+**fire**
+
+| method | 1 | 4 | 8 | 16 | 30 | 60 | 120 | 240 |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| neural | 25.49 | 22.00 | 20.17 | 18.76 | 17.53 | 16.40 | 16.89 | 14.83 |
+| neural_dynamics_true_renderer | 25.53 | 22.06 | 20.24 | 18.81 | 17.55 | 16.41 | 16.95 | 14.84 |
+| coarse_sim_detail | 23.01 | 19.30 | 17.34 | 16.24 | 15.38 | 14.70 | 16.41 | 14.76 |
+| coarse_sim | 19.90 | 18.38 | 17.68 | 16.63 | 16.23 | 15.23 | 17.14 | 15.60 |
+| frozen | 21.06 | 14.85 | 13.84 | 12.05 | 12.48 | 12.45 | 12.68 | 11.51 |
+| renderer_on_true_fields | 49.57 | 48.64 | 48.89 | 48.95 | 49.16 | 48.84 | 48.84 | 48.84 |
+
+neural - coarse_sim_detail, paired over runs: frame 1: +2.48 [+0.92, +4.04]; frame 8: +2.83 [+2.23, +3.37]; frame 30: +2.14 [+1.68, +2.64]; frame 60: +1.70 [+1.18, +2.19]; frame 240: +0.08 [-1.21, +1.08] (tie);
+
+neural_dynamics_true_renderer - coarse_sim_detail, paired over runs: frame 1: +2.53 [+0.92, +4.11]; frame 8: +2.89 [+2.30, +3.44]; frame 30: +2.17 [+1.69, +2.68]; frame 60: +1.71 [+1.18, +2.19]; frame 240: +0.09 [-1.20, +1.11] (tie);
+
+**smoke**
+
+| method | 1 | 4 | 8 | 16 | 30 | 60 | 120 | 240 |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| neural | 26.83 | 23.13 | 20.76 | 18.74 | 17.08 | 15.20 | 14.09 | 12.58 |
+| neural_dynamics_true_renderer | 29.52 | 24.04 | 21.15 | 18.90 | 17.16 | 15.20 | 14.06 | 12.58 |
+| coarse_sim_detail | 26.80 | 20.98 | 18.20 | 16.15 | 14.99 | 14.52 | 14.84 | 13.98 |
+| coarse_sim | 21.20 | 19.75 | 18.90 | 17.93 | 16.98 | 16.14 | 16.16 | 15.00 |
+| frozen | 23.33 | 15.39 | 13.76 | 12.47 | 11.83 | 11.90 | 11.93 | 12.12 |
+| renderer_on_true_fields | 30.67 | 30.67 | 31.06 | 31.15 | 31.44 | 31.01 | 31.01 | 31.01 |
+
+neural - coarse_sim_detail, paired over runs: frame 1: +0.03 [-1.76, +1.61] (tie); frame 8: +2.56 [+2.05, +3.08]; frame 30: +2.09 [+1.65, +2.52]; frame 60: +0.68 [+0.28, +1.10]; frame 240: -1.41 [-1.69, -1.08];
+
+neural_dynamics_true_renderer - coarse_sim_detail, paired over runs: frame 1: +2.72 [+1.64, +3.79]; frame 8: +2.95 [+2.51, +3.43]; frame 30: +2.17 [+1.67, +2.66]; frame 60: +0.68 [+0.29, +1.08]; frame 240: -1.40 [-1.69, -1.09];
+
+### Endless runs at held-out settings
+
+The ten held-out settings of study B, a new seed each, 10 s per run (explosions: their 3 s). Distances of each method's frame statistics to a real run of the simulation at that setting; `real_other_seed` is a second real run with another seed, the floor. Lower is better except motion ratio (1 is right) and mean-frame PSNR (higher is closer).
+
+**explosion**
+
+| method | spectrum L1 | motion ratio | coverage L1 | emission L1 | mean-frame PSNR |
+|---|---:|---:|---:|---:|---:|
+| real_other_seed | 0.116 | 1.07 | 0.0195 | 0.0000 | 26.76 |
+| neural | 0.200 | 1.03 | 0.0517 | 0.0000 | 24.69 |
+| grid_k8 | 0.203 | 1.03 | 0.0257 | 0.0000 | 25.81 |
+| flipbook_nearest | 0.141 | 0.97 | 0.0548 | 0.0000 | 23.22 |
+| coarse_sim_detail | 0.261 | 0.82 | 0.0163 | 0.0000 | 26.02 |
+| coarse_sim | 0.782 | 0.74 | 0.0179 | 0.0000 | 26.29 |
+
+Spectrum distance, paired over settings: neural - grid_k8 -0.004 [-0.078, +0.073] (tie); neural - flipbook_nearest +0.059 [-0.021, +0.149] (tie); neural - coarse_sim_detail -0.061 [-0.174, +0.035] (tie); neural - real_other_seed +0.083 [+0.014, +0.168].
+
+**fire**
+
+| method | spectrum L1 | motion ratio | coverage L1 | emission L1 | mean-frame PSNR |
+|---|---:|---:|---:|---:|---:|
+| real_other_seed | 0.080 | 1.06 | 0.0035 | 0.0030 | 36.39 |
+| neural | 0.195 | 0.89 | 0.0052 | 0.0043 | 33.78 |
+| grid_k8 | 0.250 | 0.83 | 0.0032 | 0.0026 | 31.66 |
+| flipbook_nearest | 0.158 | 1.13 | 0.0043 | 0.0035 | 30.25 |
+| coarse_sim_detail | 0.229 | 0.94 | 0.0055 | 0.0044 | 31.66 |
+| coarse_sim | 0.907 | 0.59 | 0.0055 | 0.0043 | 31.78 |
+
+Spectrum distance, paired over settings: neural - grid_k8 -0.055 [-0.156, +0.051] (tie); neural - flipbook_nearest +0.038 [-0.057, +0.129] (tie); neural - coarse_sim_detail -0.034 [-0.099, +0.031] (tie); neural - real_other_seed +0.115 [+0.050, +0.179].
+
+**smoke**
+
+| method | spectrum L1 | motion ratio | coverage L1 | emission L1 | mean-frame PSNR |
+|---|---:|---:|---:|---:|---:|
+| real_other_seed | 0.076 | 1.04 | 0.0208 | 0.0000 | 29.79 |
+| neural | 0.143 | 0.87 | 0.0247 | 0.0001 | 28.20 |
+| grid_k8 | 0.409 | 1.02 | 0.0175 | 0.0000 | 27.47 |
+| flipbook_nearest | 0.136 | 1.09 | 0.0236 | 0.0000 | 24.91 |
+| coarse_sim_detail | 0.268 | 0.84 | 0.0252 | 0.0000 | 28.07 |
+| coarse_sim | 1.078 | 0.45 | 0.0285 | 0.0000 | 27.62 |
+
+Spectrum distance, paired over settings: neural - grid_k8 -0.266 [-0.326, -0.192]; neural - flipbook_nearest +0.008 [-0.063, +0.072] (tie); neural - coarse_sim_detail -0.125 [-0.171, -0.080]; neural - real_other_seed +0.067 [+0.036, +0.099].
+
+### One minute of play
+
+Statistics of each 10 s window of a 60 s neural run (shards of 6 s from start points, the default) against a real 10 s run at the same setting (two held-out settings): if the effect drifted, the distances would grow window by window.
+
+| effect | setting | window | spectrum L1 | motion ratio | coverage L1 | mean-frame PSNR |
+|---|---:|---:|---:|---:|---:|---:|
+| fire | 0 | 0 | 0.2091 | 1.1495 | 0.0032 | 37.355 |
+| fire | 0 | 1 | 0.2015 | 0.9450 | 0.0035 | 38.966 |
+| fire | 0 | 2 | 0.1503 | 1.0114 | 0.0038 | 37.567 |
+| fire | 0 | 3 | 0.1548 | 0.9905 | 0.0041 | 39.132 |
+| fire | 0 | 4 | 0.1856 | 0.6597 | 0.0032 | 34.609 |
+| fire | 0 | 5 | 0.1996 | 0.9728 | 0.0040 | 37.753 |
+| fire | 1 | 0 | 0.1601 | 0.8531 | 0.0045 | 37.981 |
+| fire | 1 | 1 | 0.1376 | 0.8102 | 0.0034 | 38.437 |
+| fire | 1 | 2 | 0.1567 | 0.7084 | 0.0022 | 38.681 |
+| fire | 1 | 3 | 0.0984 | 0.7033 | 0.0032 | 35.378 |
+| fire | 1 | 4 | 0.2739 | 0.9982 | 0.0028 | 34.827 |
+| fire | 1 | 5 | 0.2429 | 0.8271 | 0.0034 | 36.326 |
+| smoke | 0 | 0 | 0.1684 | 0.9365 | 0.0286 | 30.306 |
+| smoke | 0 | 1 | 0.1520 | 0.7690 | 0.0220 | 31.095 |
+| smoke | 0 | 2 | 0.1364 | 0.7796 | 0.0170 | 31.855 |
+| smoke | 0 | 3 | 0.1545 | 0.9239 | 0.0183 | 30.099 |
+| smoke | 0 | 4 | 0.1399 | 0.7545 | 0.0291 | 30.451 |
+| smoke | 0 | 5 | 0.1220 | 0.8486 | 0.0154 | 30.956 |
+| smoke | 1 | 0 | 0.1062 | 1.1530 | 0.0306 | 27.198 |
+| smoke | 1 | 1 | 0.1000 | 1.1626 | 0.0211 | 30.539 |
+| smoke | 1 | 2 | 0.1050 | 1.0678 | 0.0208 | 30.707 |
+| smoke | 1 | 3 | 0.1086 | 1.0567 | 0.0273 | 28.821 |
+| smoke | 1 | 4 | 0.0849 | 0.9651 | 0.0178 | 30.048 |
+| smoke | 1 | 5 | 0.0848 | 0.7958 | 0.0271 | 28.413 |

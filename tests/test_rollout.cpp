@@ -176,13 +176,13 @@ TEST(Rollout, TrainerForwardMatchesTheReference) {
 
 namespace {
 
-void rollout_gradient_check(int unroll, int burn, float profile) {
+void rollout_gradient_check(int unroll, int burn, float profile, float activity = 0.f) {
   Model m = tiny_model(11 + static_cast<std::uint64_t>(unroll + burn));
   const auto r = tiny_run(m.h, 12);
   std::vector<float> grad(m.step_w.size(), 0.f);
-  const double l0 = window_loss(m, r, 1, unroll, burn, 0.f, profile, 5, &grad);
+  const double l0 = window_loss(m, r, 1, unroll, burn, 0.f, profile, 5, &grad, activity);
   ASSERT_GT(l0, 0.0);
-  const auto eval = [&] { return window_loss(m, r, 1, unroll, burn, 0.f, profile, 5, nullptr); };
+  const auto eval = [&] { return window_loss(m, r, 1, unroll, burn, 0.f, profile, 5, nullptr, activity); };
   // Central differences at three step sizes, and one-sided differences at the two smaller ones. A parameter passes
   // when one of them matches within 3%: the loss is summed in float, and ReLUs, clamps and bilinear interpolation make
   // it only piecewise smooth, so a kink just beside the current point spoils the central differences while the
@@ -236,6 +236,7 @@ TEST(Rollout, GradientsMatchFiniteDifferencesThroughTime) { rollout_gradient_che
 // The burn-in frames of a fine-tuning window are a stop-gradient by design (the window starts from wherever the
 // stepper's own rollout went), so finite differences, which would re-run them, check the profile loss without them.
 TEST(Rollout, GradientsMatchFiniteDifferencesWithProfiles) { rollout_gradient_check(3, 0, 1.f); }
+TEST(Rollout, GradientsMatchFiniteDifferencesWithActivity) { rollout_gradient_check(4, 0, 0.5f, 50.f); }
 
 TEST(Rollout, BurnInStartsFromTheStepperRollout) {
   const Model m = tiny_model();
@@ -440,6 +441,32 @@ TEST(RolloutRuntime, MatchesTheReferenceOnEveryIsa) {
     }
   }
   nvfx_set_isa(NVFX_ISA_AUTO);
+}
+
+TEST(RolloutRuntime, ShardsMakeEveryFrameAFunctionOfTime) {
+  const Model m = runtime_model();
+  Fx fx(m);
+  const int size = 32;
+  std::vector<std::uint8_t> a(static_cast<std::size_t>(size) * size * 4), b(a.size()), c(a.size());
+  nvfx_instance *played = nullptr, *fresh = nullptr;
+  ASSERT_EQ(nvfx_instance_create(fx.e, size, &played), NVFX_OK);
+  ASSERT_EQ(nvfx_instance_create(fx.e, size, &fresh), NVFX_OK);
+  for (nvfx_instance* in : {played, fresh}) {
+    nvfx_instance_set_seed(in, 99);
+    nvfx_instance_set_drift(in, 2.f);  // 60-frame shards: frames 45-59 crossfade into the second shard
+  }
+  for (int f = 0; f <= 130; ++f) {
+    nvfx_render(played, f / 30.0, a.data(), size * 4);
+    if (f == 50 || f == 75 || f == 130) {
+      nvfx_render(fresh, f / 30.0, b.data(), size * 4);  // a seek straight to the frame
+      EXPECT_EQ(a, b) << "frame " << f;
+    }
+  }
+  nvfx_render(fresh, 44 / 30.0, b.data(), size * 4);  // the last frame of the first shard alone
+  nvfx_render(fresh, 52 / 30.0, c.data(), size * 4);  // inside the crossfade
+  EXPECT_NE(b, c);
+  nvfx_instance_free(played);
+  nvfx_instance_free(fresh);
 }
 
 TEST(RolloutRuntime, SeeksAreDeterministicWithinAShard) {

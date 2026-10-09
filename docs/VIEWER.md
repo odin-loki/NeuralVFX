@@ -20,6 +20,12 @@ build/viewer/nvfx_viewer fire.nvfx smoke.nvfx --clip fire_reference.nfxclip
 build/viewer/nvfx_viewer --demo                 # an untrained demo effect, no files needed
 ```
 
+Rollout effects ([REPORT.md](REPORT.md) §6) play in the same viewer: the variation slider picks a start point, sizes
+step by 32, and the drift slider becomes "shard (s)", the length of each fresh rollout (6 s by default; 0 plays one
+continuous rollout, which drifts after 20 s or so). The info line shows the start points, stored size and cost.
+
+![The viewer playing the fire rollout effect](figures/viewer_rollout.png)
+
 Headless (for tests and screenshots): `xvfb-run -a build/viewer/nvfx_viewer fire.nvfx --screenshot out.png --frames 30`.
 
 ## Panels

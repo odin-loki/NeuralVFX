@@ -305,3 +305,48 @@ answers below were chosen on that instruction; each can be revisited.
 Language: C++23 throughout (owner's instruction, 8 October 2026): `std::print`, `std::expected`, `std::span`, ranges
 and views, multidimensional `operator[]`, `std::float16_t`, `std::byteswap`, `std::ispanstream`, `std::jthread`. The
 engine-facing header is C so that every engine can call it.
+
+## 11. Study D: start points and learned dynamics (9 October 2026)
+
+After the first report the owner pointed the work in a new direction: "we can store the saved points of the
+simulation from training and shard the inference from the start points. We don't have to store all the data, just the
+start points. Essentially we are modelling chaotic systems, so the right start point matters but the data in between
+doesn't. A lossy algorithm with some noise that benefits the simulation would be good ... Use those characteristics as
+strengths. Don't fight the algorithm." Studies A to C had fought it: they asked a network to reproduce every frame of a
+chaotic run, and the squared-error optimum for turbulence it cannot predict is a blur.
+
+Decisions:
+
+1. **Measure the chaos first** (`nvfx_experiment d-chaos`). Runs of the simulation from the same stored state with a
+   tiny nudge stay close for seconds; the same state with another noise seed is unrelated within a second; another
+   state with the same seed drifts towards the first. The seed's noise, not the state, decides most of what is seen.
+2. **A second kind of effect, `rollout`** (`include/neuralfx/rollout.hpp`): start points (coarse simulation states)
+   plus a learned stepper that moves a 32 x 32 state one frame at a time. What physics does cheaply and exactly is
+   built in (advection, pressure projection); the network supplies what is local and learnable (forces, sources,
+   decay, the sub-grid closure), conditioned on the controls and **driven by the same procedural noise as the
+   simulation's forcing**, so the noise is an input, not something to memorise.
+3. **Detail from the dynamics, not from the network**: full-resolution heat and soot are carried by the learned flow
+   (stretching makes filaments), their block averages locked to the coarse state (scaling existing structure where
+   it can, so peaks stay peaks, and adding the rest as new material), new material broken up by the flicker noise,
+   plus a small sub-grid swirl. Its few constants are calibrated (decision 5). A per-pixel MLP renders the fields,
+   gated so empty pixels are exactly transparent.
+4. **Training for the long run**: backpropagation through up to 16 frames with noise on the inputs; then fine-tuning
+   on windows that start from the stepper's own rollout, with a loss on where the heat and soot are (row and column
+   profiles), which still means something after the chaos horizon; then a third stage that also matches how much the
+   state changes from frame to frame (the first two left the heat changing about 60% as much as the simulation's: a
+   smooth average in time). Data: 160 runs of 8 s per looping effect, 240 runs of 3 s of explosions, random controls
+   and seeds (55 minutes of simulation, nearly six times the 9.7 minutes of clips A to C used; 13 times study B's data
+   per effect).
+5. **Calibrated as deployed**: the detail layer's constants (contrast, swirl, how far the lock may scale existing
+   structure) are chosen by the statistics of endless runs from the start points with new seeds against real runs at
+   training controls (detail spectrum, motion, light, cover), not by tracking a true run for three seconds, which
+   favoured settings that faded later.
+6. **Shards** (the owner's proposal): playback is a chain of 6 s rollouts, each from a start point chosen by the seed,
+   the shard and the nearest controls, with a seed of its own, rolled ahead and crossfaded in over half a second. One
+   continuous rollout drifted (fire froze, smoke filled the frame) within a minute; shards keep every minute like the
+   first, make every frame a function of time, and make any time reachable in bounded cost.
+7. **Judged as a chaotic system**: tracking from true start points is scored frame by frame against the true run
+   only as far as the chaos allows (against the simulation's own nudged-start curve); beyond that, held-out settings
+   and new seeds are scored by frame statistics (detail spectrum, motion, coverage, light) against real runs, with a
+   second real seed as the floor, against study B's control model, the nearest flipbook and the simulation on the same
+   coarse grid with the same detail layer (the traditional cheap alternative).

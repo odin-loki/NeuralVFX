@@ -166,7 +166,8 @@ class Rollout final : public RolloutRunner {
     b2_.resize(z(H_));
     cond_.assign(z(h_.cond()), 0.f);
     folded_cond_.assign(z(h_.cond()), std::numeric_limits<float>::quiet_NaN());
-    X_.resize(z(N_) * z(I_));
+    X_.assign(z(R_ + 2) * z(R_ + 2) * z(I_), 0.f);  // planar, zero border (written inside only)
+    h1p_.assign(z(R_ + 2) * z(R_ + 2) * z(H_), 0.f);
     h1_.resize(z(N_) * z(H_));
     h2_.resize(z(N_) * z(H_));
     d_.resize(z(N_) * z(O_));
@@ -187,9 +188,12 @@ class Rollout final : public RolloutRunner {
     fd_.resize(S2);
     ux_.resize(S2);
     vy_.resize(S2);
-    fa_.resize(S2);
+    const std::size_t P2 = z(S_ + 3) * z(S_ + 3);
+    fa_.assign(P2, 0.f);  // padded: zero border, interior written each step
+    ga_.assign(P2, 0.f);
+    tp_.assign(P2, 0.f);
+    dp_.assign(P2, 0.f);
     fb_.resize(S2);
-    ga_.resize(S2);
     gb_.resize(S2);
     lo_t_.resize(S2);
     hi_t_.resize(S2);
@@ -220,13 +224,22 @@ class Rollout final : public RolloutRunner {
     rowd_.resize(rowa_.size());
     B2_.resize(z(N_));
     crow_.resize(z(R_) * (2 + kDirs));
+    frow_.resize(z(kRenderIn) * z(S_));
     rr2_.resize(z(N_));
     aa2_.resize(z(N_));
     sx_ = axis(S_, sw_n_, 128.f / static_cast<float>(S_) / sw_spacing_, 0.5f / sw_spacing_ + 1.f);
+    reseed(0);  // sizes every noise cache now, so a later begin() with another seed allocates nothing
     (void)k;
   }
 
   void start(int index, std::span<const float> controls, std::uint64_t seed) override {
+    begin(index, seed);
+    if (!m_.starts[z(index)].fine_t.empty()) return;
+    for (int f = 0; f < h_.warmup; ++f) step(controls, seed);
+    since_start_ = m_.detail.swirl_ramp;
+  }
+
+  void begin(int index, std::uint64_t seed) override {
     using namespace rollout;
     const StartPoint& sp = m_.starts[z(index)];
     reseed(seed);
@@ -249,10 +262,6 @@ class Rollout final : public RolloutRunner {
       }
     }
     since_start_ = fine ? 0.f : m_.detail.swirl_ramp;
-    if (!fine) {
-      for (int f = 0; f < h_.warmup; ++f) step(controls, seed);
-      since_start_ = m_.detail.swirl_ramp;
-    }
   }
 
   void step(std::span<const float> controls, std::uint64_t seed) override {
@@ -286,6 +295,7 @@ class Rollout final : public RolloutRunner {
     const float* w = m_.render_w.data();
     const float it = 1.f / m_.render_scale[0], id = 1.f / m_.render_scale[1];
     constexpr int kc = 2 + kDirs;  // coarse features: heat, soot, directional sums
+    const std::size_t S = z(S_);
     for (int y = 0; y < S_; ++y) {
       // one row of the coarse features, interpolated in y and normalised
       const float wy = ax_.w[z(y)];
@@ -297,35 +307,39 @@ class Rollout final : public RolloutRunner {
         o[1] = (coarse_[a * z(C_) + 3] + wy * (coarse_[b * z(C_) + 3] - coarse_[a * z(C_) + 3])) * id;
         for (int j = 0; j < kDirs; ++j) o[2 + j] = (dirsum_[a * kDirs + z(j)] + wy * (dirsum_[b * kDirs + z(j)] - dirsum_[a * kDirs + z(j)])) * id;
       }
-      std::uint8_t* row = rgba + stride * z(S_ - 1 - y);
-      const float* tf = ft_.data() + z(y) * z(S_);
-      const float* df = fd_.data() + z(y) * z(S_);
-      for (int x0 = 0; x0 < S_; x0 += kB) {
-        const int n = std::min(kB, S_ - x0);
-        for (int q = 0; q < kB; ++q) {
-          const int x = std::min(x0 + q, S_ - 1);
-          const float* ca = crow_.data() + z(ax_.i[z(x)]) * kc;
-          const float wx = ax_.w[z(x)];
-          feat_[z(q)] = tf[x] * it;
-          feat_[kB + z(q)] = df[x] * id;
-          for (int j = 0; j < kc; ++j) feat_[z(2 + j) * kB + z(q)] = ca[j] + wx * (ca[kc + j] - ca[j]);
+      // the row's features as full-width planes [feature][S]: the dense kernel reads blocks of them in place
+      float* F = frow_.data();
+      const float* tf = ft_.data() + z(y) * S;
+      const float* df = fd_.data() + z(y) * S;
+      for (std::size_t x = 0; x < S; ++x) {
+        F[x] = tf[x] * it;
+        F[S + x] = df[x] * id;
+      }
+      for (int j = 0; j < kc; ++j) {
+        float* row = F + z(2 + j) * S;
+        for (std::size_t x = 0; x < S; ++x) {
+          const float* ca = crow_.data() + z(ax_.i[x]) * kc + z(j);
+          row[x] = ca[0] + ax_.w[x] * (ca[kc] - ca[0]);
         }
-        dense(w + RL_.w1, w + RL_.b1, feat_.data(), kB, r1_.data(), kB, kRenderIn, RH, true);
+      }
+      std::uint8_t* out_row = rgba + stride * z(S_ - 1 - y);
+      for (int x0 = 0; x0 < S_; x0 += kB) {  // S_ is a multiple of 32, so blocks of 16 are whole
+        dense(w + RL_.w1, w + RL_.b1, F + x0, S_, r1_.data(), kB, kRenderIn, RH, true);
         dense(w + RL_.w2, w + RL_.b2, r1_.data(), kB, r2_.data(), kB, RH, RH, true);
         dense(w + RL_.wo, w + RL_.bo, r2_.data(), kB, out_.data(), kB, RH, 4, false);
         for (int q = 0; q < kB; ++q) {
-          const float g = rollout::render_gate(feat_[z(q)], feat_[kB + z(q)]);
+          const float g = rollout::render_gate(F[z(x0 + q)], F[S + z(x0 + q)]);
           for (int ch = 0; ch < 4; ++ch) out_[z(ch) * kB + z(q)] *= g;
         }
-        write_pixels(out_.data(), out_.data() + kB, out_.data() + 2 * kB, out_.data() + 3 * kB, n, in, row + 4 * z(x0));
+        write_pixels(out_.data(), out_.data() + kB, out_.data() + 2 * kB, out_.data() + 3 * kB, kB, in, out_row + 4 * z(x0));
       }
     }
   }
 
   std::size_t scratch_bytes() const override {
     std::size_t n = 0;
-    for (const auto* v : {&w1_, &b1_, &w2_, &b2_, &cond_, &folded_cond_, &X_, &h1_, &h2_, &d_, &mid_, &next_, &coarse_, &flow_, &div_, &p_,
-                          &tmp_, &noise_, &dirsum_, &B_, &rr_, &aa_, &ft_, &fd_, &ux_, &vy_, &fa_, &fb_, &ga_, &gb_, &lo_t_, &hi_t_, &lo_d_, &hi_d_, &rowa_, &rowb_, &rowc_, &rowd_, &B2_, &rr2_, &aa2_, &crow_, &feat_, &r1_, &r2_, &out_,
+    for (const auto* v : {&w1_, &b1_, &w2_, &b2_, &cond_, &folded_cond_, &X_, &h1p_, &h1_, &h2_, &d_, &mid_, &next_, &coarse_, &flow_, &div_, &p_,
+                          &tmp_, &noise_, &dirsum_, &B_, &rr_, &aa_, &ft_, &fd_, &ux_, &vy_, &fa_, &fb_, &ga_, &gb_, &tp_, &dp_, &lo_t_, &hi_t_, &lo_d_, &hi_d_, &rowa_, &rowb_, &rowc_, &rowd_, &B2_, &rr2_, &aa2_, &crow_, &frow_, &feat_, &r1_, &r2_, &out_,
                           &row_, &swu_, &swv_}) {
       n += v->size() * 4;
     }
@@ -418,7 +432,10 @@ class Rollout final : public RolloutRunner {
           g += w[G + z(k) * z(H_) + z(j)] * cond_[z(k)];
           e += w[E + z(k) * z(H_) + z(j)] * cond_[z(k)];
         }
-        for (int t = 0; t < 9 * ci; ++t) wo[z(t) * z(H_) + z(j)] = g * w[W + z(t) * z(H_) + z(j)];
+        // stored [tap][in][out]; the planar kernel wants [out][in][tap]
+        for (int tap = 0; tap < 9; ++tap) {
+          for (int c = 0; c < ci; ++c) wo[(z(j) * z(ci) + z(c)) * 9 + z(tap)] = g * w[W + (z(tap) * z(ci) + z(c)) * z(H_) + z(j)];
+        }
         bo[z(j)] = g * w[Bb + z(j)] + e;
       }
     };
@@ -427,99 +444,46 @@ class Rollout final : public RolloutRunner {
     std::copy(cond_.begin(), cond_.end(), folded_cond_.begin());
   }
 
-  // 3x3 convolution with ReLU on [cell][channel] layouts, zero padding. CO outputs are accumulated in registers
-  // (CO a multiple of 8: the common widths), the generic version otherwise.
-  template <int CO>
-  void conv3_fixed(const float* in, int ci, const float* W, const float* b, float* out) const {
-    for (int y = 0; y < R_; ++y) {
-      for (int x = 0; x < R_; ++x) {
-        float acc[CO];
-        for (int k = 0; k < CO; ++k) acc[k] = b[k];
-        for (int dy = -1; dy <= 1; ++dy) {
-          const int yy = y + dy;
-          if (yy < 0 || yy >= R_) continue;
-          for (int dx = -1; dx <= 1; ++dx) {
-            const int xx = x + dx;
-            if (xx < 0 || xx >= R_) continue;
-            const float* a = in + (z(yy) * z(R_) + z(xx)) * z(ci);
-            const float* wt = W + z((dy + 1) * 3 + (dx + 1)) * z(ci) * CO;
-            for (int c = 0; c < ci; ++c) {
-              const float av = a[c];
-              const float* wr = wt + z(c) * CO;
-              for (int k = 0; k < CO; ++k) acc[k] += wr[k] * av;
-            }
-          }
-        }
-        float* o = out + (z(y) * z(R_) + z(x)) * CO;
-        for (int k = 0; k < CO; ++k) o[k] = acc[k] > 0.f ? acc[k] : 0.f;
-      }
-    }
-  }
-
-  void conv3(const float* in, int ci, const float* W, const float* b, int co, float* out) const {
-    switch (co) {
-      case 8: return conv3_fixed<8>(in, ci, W, b, out);
-      case 16: return conv3_fixed<16>(in, ci, W, b, out);
-      case 24: return conv3_fixed<24>(in, ci, W, b, out);
-      case 32: return conv3_fixed<32>(in, ci, W, b, out);
-      default: break;
-    }
-    for (int y = 0; y < R_; ++y) {
-      for (int x = 0; x < R_; ++x) {
-        float* __restrict o = out + (z(y) * z(R_) + z(x)) * z(co);
-        for (int k = 0; k < co; ++k) o[k] = b[k];
-        for (int dy = -1; dy <= 1; ++dy) {
-          const int yy = y + dy;
-          if (yy < 0 || yy >= R_) continue;
-          for (int dx = -1; dx <= 1; ++dx) {
-            const int xx = x + dx;
-            if (xx < 0 || xx >= R_) continue;
-            const float* a = in + (z(yy) * z(R_) + z(xx)) * z(ci);
-            const float* wt = W + z((dy + 1) * 3 + (dx + 1)) * z(ci) * z(co);
-            for (int c = 0; c < ci; ++c) {
-              const float av = a[c];
-              const float* __restrict wr = wt + z(c) * z(co);
-              for (int k = 0; k < co; ++k) o[k] += wr[k] * av;
-            }
-          }
-        }
-        for (int k = 0; k < co; ++k) o[k] = o[k] > 0.f ? o[k] : 0.f;
-      }
-    }
-  }
-
   void coarse_step() {
     using namespace rollout;
     const float* w = m_.step_w.data();
+    // inputs, planar with a zero border, for the shared 3x3 kernel: [input][R + 2][R + 2]
+    const int Pw = R_ + 2;
     for (int y = 0; y < R_; ++y) {
       for (int x = 0; x < R_; ++x) {
-        const std::size_t i = z(y) * z(R_) + z(x);
-        float* xi = X_.data() + i * z(I_);
-        for (int k = 0; k < C_; ++k) xi[k] = coarse_[i * z(C_) + z(k)] / (k < kPhys ? m_.scale[z(k)] : 1.f);
-        xi[C_] = noise_[i * 2];
-        xi[C_ + 1] = noise_[i * 2 + 1];
-        xi[C_ + 2] = (static_cast<float>(x) + 0.5f) / static_cast<float>(R_) * 2.f - 1.f;
-        xi[C_ + 3] = (static_cast<float>(y) + 0.5f) / static_cast<float>(R_) * 2.f - 1.f;
+        const std::size_t i = z(y) * z(R_) + z(x), q = z(y + 1) * z(Pw) + z(x + 1), plane = z(Pw) * z(Pw);
+        for (int k = 0; k < C_; ++k) X_[z(k) * plane + q] = coarse_[i * z(C_) + z(k)] / (k < kPhys ? m_.scale[z(k)] : 1.f);
+        X_[z(C_) * plane + q] = noise_[i * 2];
+        X_[z(C_ + 1) * plane + q] = noise_[i * 2 + 1];
+        X_[z(C_ + 2) * plane + q] = (static_cast<float>(x) + 0.5f) / static_cast<float>(R_) * 2.f - 1.f;
+        X_[z(C_ + 3) * plane + q] = (static_cast<float>(y) + 0.5f) / static_cast<float>(R_) * 2.f - 1.f;
       }
     }
-    conv3(X_.data(), I_, w1_.data(), b1_.data(), H_, h1_.data());
-    conv3(h1_.data(), H_, w2_.data(), b2_.data(), H_, h2_.data());
-    for (int i = 0; i < N_; ++i) {
-      float* __restrict o = d_.data() + z(i) * z(O_);
-      for (int k = 0; k < O_; ++k) o[k] = w[L_.bo + z(k)];
-      const float* a = h2_.data() + z(i) * z(H_);
-      for (int j = 0; j < H_; ++j) {
-        const float av = a[j];
-        const float* __restrict wr = w + L_.wo + z(j) * z(O_);
-        for (int k = 0; k < O_; ++k) o[k] += wr[k] * av;
+    conv3x3(X_.data(), w1_.data(), b1_.data(), h1_.data(), I_, H_, R_, R_, true);
+    for (int c = 0; c < H_; ++c) {  // into a zero-bordered buffer for the second convolution
+      for (int y = 0; y < R_; ++y) {
+        std::copy_n(h1_.data() + (z(c) * z(R_) + z(y)) * z(R_), R_, h1p_.data() + (z(c) * z(Pw) + z(y + 1)) * z(Pw) + 1);
       }
-      for (int k = 0; k < kPhys; ++k) mid_[z(i) * z(C_) + z(k)] = coarse_[z(i) * z(C_) + z(k)] + m_.scale[z(k)] * o[k];
-      for (int k = kPhys; k < C_; ++k) mid_[z(i) * z(C_) + z(k)] = std::tanh(coarse_[z(i) * z(C_) + z(k)] + o[k]);
+    }
+    conv3x3(h1p_.data(), w2_.data(), b2_.data(), h2_.data(), H_, H_, R_, R_, true);
+    // the 1x1 output layer, planar: d[k][cell]
+    for (int k = 0; k < O_; ++k) {
+      float* __restrict o = d_.data() + z(k) * z(N_);
+      std::fill_n(o, N_, w[L_.bo + z(k)]);
+      for (int j = 0; j < H_; ++j) {
+        const float wk = w[L_.wo + z(j) * z(O_) + z(k)];
+        const float* __restrict a = h2_.data() + z(j) * z(N_);
+        for (int i = 0; i < N_; ++i) o[i] += wk * a[i];
+      }
+    }
+    for (int i = 0; i < N_; ++i) {
+      for (int k = 0; k < kPhys; ++k) mid_[z(i) * z(C_) + z(k)] = coarse_[z(i) * z(C_) + z(k)] + m_.scale[z(k)] * d_[z(k) * z(N_) + z(i)];
+      for (int k = kPhys; k < C_; ++k) mid_[z(i) * z(C_) + z(k)] = std::tanh(coarse_[z(i) * z(C_) + z(k)] + d_[z(k) * z(N_) + z(i)]);
     }
     const auto U = [&](int x, int y, int c) { return mid_[(z(std::clamp(y, 0, R_ - 1)) * z(R_) + z(std::clamp(x, 0, R_ - 1))) * z(C_) + z(c)]; };
     for (int y = 0; y < R_; ++y) {
       for (int x = 0; x < R_; ++x) {
-        div_[z(y) * z(R_) + z(x)] = -0.5f * (U(x + 1, y, 0) - U(x - 1, y, 0) + U(x, y + 1, 1) - U(x, y - 1, 1)) + m_.qscale * d_[(z(y) * z(R_) + z(x)) * z(O_) + z(C_)];
+        div_[z(y) * z(R_) + z(x)] = -0.5f * (U(x + 1, y, 0) - U(x - 1, y, 0) + U(x, y + 1, 1) - U(x, y - 1, 1)) + m_.qscale * d_[z(C_) * z(N_) + z(y) * z(R_) + z(x)];
       }
     }
     for (int it = 0; it < h_.jacobi; ++it) {
@@ -650,24 +614,37 @@ class Rollout final : public RolloutRunner {
         }
       }
     }
-    // MacCormack for heat and soot together: one backtrace per pixel, the forward samples and the clamp range in one
-    // pass, the round trip in a second, the correction in a third (no gathers).
-    const float lim = static_cast<float>(S_ - 1);
-    const float* T = ft_.data();
-    const float* D = fd_.data();
+    // MacCormack for heat and soot together, zero outside the frame. The fields are copied into buffers with a zero
+    // border, so a backtrace clamped to [-1, size] reads zeros outside without a branch: the forward samples and the
+    // clamp range in one pass, the round trip in a second, the correction in a third.
+    const int Pw = S_ + 3;  // one zero column and row before, two after (a clamped backtrace at the far edge reads two zeros)
+    for (int y = 0; y < S_; ++y) {
+      std::copy_n(ft_.data() + z(y) * z(S_), S_, tp_.data() + z(y + 1) * z(Pw) + 1);
+      std::copy_n(fd_.data() + z(y) * z(S_), S_, dp_.data() + z(y + 1) * z(Pw) + 1);
+    }
+    const float hi_lim = static_cast<float>(S_);
+    const auto backtrace = [&](float px, float py, std::size_t& a, float& fx, float& fy) {
+      px = std::clamp(px, -1.f, hi_lim) + 1.f;  // padded coordinates in [0, size + 1]
+      py = std::clamp(py, -1.f, hi_lim) + 1.f;
+      const int x0 = static_cast<int>(px), y0 = static_cast<int>(py);  // up to size + 1
+      fx = px - static_cast<float>(x0);
+      fy = py - static_cast<float>(y0);
+      a = z(y0) * z(Pw) + z(x0);
+    };
     for (int y = 0; y < S_; ++y) {
       for (int x = 0; x < S_; ++x) {
         const std::size_t i = z(y) * z(S_) + z(x);
-        const float bx = std::clamp(static_cast<float>(x) - ux_[i], 0.f, lim), by = std::clamp(static_cast<float>(y) - vy_[i], 0.f, lim);
-        const int x0 = std::min(static_cast<int>(bx), S_ - 2), y0 = std::min(static_cast<int>(by), S_ - 2);
-        const float fx = bx - static_cast<float>(x0), fy = by - static_cast<float>(y0);
-        const std::size_t a = z(y0) * z(S_) + z(x0), c = a + z(S_);
-        const float t00 = T[a], t10 = T[a + 1], t01 = T[c], t11 = T[c + 1];
-        const float d00 = D[a], d10 = D[a + 1], d01 = D[c], d11 = D[c + 1];
+        std::size_t a;
+        float fx, fy;
+        backtrace(static_cast<float>(x) - ux_[i], static_cast<float>(y) - vy_[i], a, fx, fy);
+        const std::size_t c = a + z(Pw);
+        const float t00 = tp_[a], t10 = tp_[a + 1], t01 = tp_[c], t11 = tp_[c + 1];
+        const float d00 = dp_[a], d10 = dp_[a + 1], d01 = dp_[c], d11 = dp_[c + 1];
         const float ta = t00 + fx * (t10 - t00), tb = t01 + fx * (t11 - t01);
         const float da = d00 + fx * (d10 - d00), db = d01 + fx * (d11 - d01);
-        fa_[i] = ta + fy * (tb - ta);
-        ga_[i] = da + fy * (db - da);
+        const std::size_t o = z(y + 1) * z(Pw) + z(x + 1);
+        fa_[o] = ta + fy * (tb - ta);
+        ga_[o] = da + fy * (db - da);
         lo_t_[i] = std::min(std::min(t00, t10), std::min(t01, t11));
         hi_t_[i] = std::max(std::max(t00, t10), std::max(t01, t11));
         lo_d_[i] = std::min(std::min(d00, d10), std::min(d01, d11));
@@ -677,19 +654,23 @@ class Rollout final : public RolloutRunner {
     for (int y = 0; y < S_; ++y) {
       for (int x = 0; x < S_; ++x) {
         const std::size_t i = z(y) * z(S_) + z(x);
-        const float bx = std::clamp(static_cast<float>(x) + ux_[i], 0.f, lim), by = std::clamp(static_cast<float>(y) + vy_[i], 0.f, lim);
-        const int x0 = std::min(static_cast<int>(bx), S_ - 2), y0 = std::min(static_cast<int>(by), S_ - 2);
-        const float fx = bx - static_cast<float>(x0), fy = by - static_cast<float>(y0);
-        const std::size_t a = z(y0) * z(S_) + z(x0), c = a + z(S_);
+        std::size_t a;
+        float fx, fy;
+        backtrace(static_cast<float>(x) + ux_[i], static_cast<float>(y) + vy_[i], a, fx, fy);
+        const std::size_t c = a + z(Pw);
         const float ta = fa_[a] + fx * (fa_[a + 1] - fa_[a]), tb = fa_[c] + fx * (fa_[c + 1] - fa_[c]);
         const float da = ga_[a] + fx * (ga_[a + 1] - ga_[a]), db = ga_[c] + fx * (ga_[c + 1] - ga_[c]);
         fb_[i] = ta + fy * (tb - ta);
         gb_[i] = da + fy * (db - da);
       }
     }
-    for (std::size_t i = 0; i < ft_.size(); ++i) {
-      ft_[i] = std::max(0.f, std::clamp(fa_[i] + 0.5f * (ft_[i] - fb_[i]), lo_t_[i], hi_t_[i]));
-      fd_[i] = std::max(0.f, std::clamp(ga_[i] + 0.5f * (fd_[i] - gb_[i]), lo_d_[i], hi_d_[i]));
+    for (int y = 0; y < S_; ++y) {
+      const std::size_t o = z(y + 1) * z(Pw) + 1;
+      for (int x = 0; x < S_; ++x) {
+        const std::size_t i = z(y) * z(S_) + z(x);
+        ft_[i] = std::max(0.f, std::clamp(fa_[o + z(x)] + 0.5f * (ft_[i] - fb_[i]), lo_t_[i], hi_t_[i]));
+        fd_[i] = std::max(0.f, std::clamp(ga_[o + z(x)] + 0.5f * (fd_[i] - gb_[i]), lo_d_[i], hi_d_[i]));
+      }
     }
     // lock to the coarse state (as the reference), heat and soot together so the flicker is evaluated once per pixel
     const int kk = S_ / R_;
@@ -710,10 +691,11 @@ class Rollout final : public RolloutRunner {
     for (int i = 0; i < N_; ++i) {
       const float bt = B_[z(i)] * inv, tt = coarse_[z(i) * z(C_) + 2];
       const float bd = B2_[z(i)] * inv, td = coarse_[z(i) * z(C_) + 3];
-      rr_[z(i)] = std::min(1.f, (tt + eps) / (bt + eps));
-      aa_[z(i)] = std::max(0.f, tt - bt);
-      rr2_[z(i)] = std::min(1.f, (td + eps) / (bd + eps));
-      aa2_[z(i)] = std::max(0.f, td - bd);
+      const float rt = (tt + eps) / (bt + eps), rd = (td + eps) / (bd + eps);
+      rr_[z(i)] = rt <= 1.f ? rt : std::min(rt, dt.grow);
+      aa_[z(i)] = std::max(0.f, tt - bt * rr_[z(i)]);
+      rr2_[z(i)] = rd <= 1.f ? rd : std::min(rd, dt.grow);
+      aa2_[z(i)] = std::max(0.f, td - bd * rr2_[z(i)]);
     }
     const float span = 1.f / (dt.edge1 - dt.edge0);
     if (dt.contrast > 0.f) fine_flicker_.at(t);
@@ -753,12 +735,13 @@ class Rollout final : public RolloutRunner {
   rollout::StepLayout L_{};
   rollout::RenderLayout RL_{};
   std::vector<float> w1_, b1_, w2_, b2_, cond_, folded_cond_;
-  std::vector<float> X_, h1_, h2_, d_, mid_, next_, coarse_, flow_, div_, p_, tmp_, noise_, dirsum_, B_, rr_, aa_;
-  std::vector<float> ft_, fd_, ux_, vy_, fa_, fb_, ga_, gb_, lo_t_, hi_t_, lo_d_, hi_d_, feat_, r1_, r2_, out_, row_, swu_, swv_;
+  std::vector<float> X_, h1p_, h1_, h2_, d_, mid_, next_, coarse_, flow_, div_, p_, tmp_, noise_, dirsum_, B_, rr_, aa_;
+  std::vector<float> ft_, fd_, ux_, vy_, fa_, fb_, ga_, gb_, tp_, dp_, lo_t_, hi_t_, lo_d_, hi_d_, feat_, r1_, r2_, out_, row_, swu_, swv_;
   Axis ax_, sx_;  // fine pixel -> coarse cell, fine pixel -> swirl lattice
   std::vector<float> rowa_, rowb_, rowc_, rowd_;  // one interpolated row of a coarse field or of the swirl lattice
   std::vector<float> B2_, rr2_, aa2_;             // the lock's block sums and factors for soot (B_, rr_, aa_: heat)
   std::vector<float> crow_;                       // one row of the renderer's coarse features
+  std::vector<float> frow_;                       // one row of all renderer features, planar [feature][size]
   SliceNoise curl_, swirl_;
   LatticeFbm fine_flicker_;
   std::vector<SliceNoise> flicker_;

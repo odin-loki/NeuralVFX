@@ -31,7 +31,7 @@ smoke (colour at most alpha).
 
 - `nvfx_render` is single-threaded and touches only the instance's own scratch memory; run different instances on
   different worker threads freely. One instance must not be rendered from two threads at once.
-- Cost scales with pixels: measured costs per configuration are in [REPORT.md](REPORT.md) §6 (about 1 ms per
+- Cost scales with pixels: measured costs per configuration are in [REPORT.md](REPORT.md) §7 (about 1 ms per
   128 x 128 frame for the default grid model on one AVX2 core, a quarter of that at 64 x 64).
 - Evaluate effects at their own rate (20-30 Hz is plenty for fire and smoke) and blend the last two results in the
   shader if needed; share one instance between all copies of an effect that use the same controls and seed; use
@@ -88,7 +88,37 @@ the static library with your engine's compiler flags, or link the shared one. Th
 AVX2 at run time when present and falls back to SSE2 code otherwise (AVX-512 code is included and can be forced
 with `nvfx_set_isa`, but it was not faster on the benchmark machine).
 
-## 5. Memory
+## 5. Rollout effects
+
+A `.nvfx` file can also hold a **rollout effect** (`nvfx_effect_info.arch == 3`; [REPORT.md](REPORT.md) §6): a few
+stored simulation states (start points) and a small network that moves the effect forward one frame at a time. The API
+is the same; what differs:
+
+- **Shards.** A looping effect plays as a chain of shards (6 s by default, `nvfx_instance_set_drift` sets the length),
+  each a fresh rollout from a start point chosen by the seed, the shard and the nearest controls, with a seed of its
+  own; the next shard is rolled ahead of its turn and crossfades in over half a second. Drift never builds up beyond a
+  shard (one continuous rollout, `set_drift(0)`, wanders off after 20 s or so), and the frame shown depends only on the
+  time and the controls.
+- **Time moves forward.** `nvfx_render(inst, t, ...)` steps the shards to frame `floor(t * fps)`: normal playback
+  costs one step per new frame, two during the half second before each shard change (the next shard rolling ahead) and
+  two renders during the crossfade. Going backwards, or more than 2 s forwards, restarts the shard that contains `t`
+  (a one-off cost of up to one shard of steps). Playback speed is exact as before: scale the time you pass.
+- **It never repeats.** Every shard starts afresh, and a new seed (`nvfx_instance_set_seed`) gives new runs; changing
+  it mid-play takes effect from the next shard, without a jump.
+- **Variations are start points.** `nvfx_instance_set_variation(i)` restarts from start point `i` with the seed of the
+  run it came from (`info.n_variations` start points).
+- **Controls change the dynamics**, so a change shows within a few frames rather than at once.
+- **Sizes**: any multiple of 32 from 32 to 1024. The coarse step costs the same at every size; the detail layer and the
+  renderer scale with pixels.
+- **One instance per playing copy.** The state belongs to the instance; two copies that should look different need two
+  instances (sharing one instance shares the look, as before).
+- **Memory**: the effect holds the weights and the start points (stored and resident sizes in `nvfx_effect_info`);
+  each instance holds two shards' states and work buffers (`nvfx_instance_scratch_bytes`: about 3.4 MB at 128 x 128,
+  2 MB at 64 x 64).
+- `nvfx_bake` renders consecutive frames from a fresh start and crossfades a few extra frames into the first ones, so
+  the flipbook loops.
+
+## 6. Memory
 
 | what | where | size |
 |---|---|---|

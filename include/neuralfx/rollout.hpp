@@ -1,4 +1,4 @@
-// Rollout effects: learned dynamics from stored start points (docs/REPORT.md §8).
+// Rollout effects: learned dynamics from stored start points (docs/REPORT.md §6).
 //
 // The frame models of model.hpp store an effect's frames (compressed into features) and reproduce them. A rollout
 // effect stores almost nothing that changes over time. It keeps:
@@ -64,6 +64,8 @@ struct DetailSpec {
   float swirl_rate = 1.5f;   // swirl change per second
   float swirl_ramp = 0.5f;   // seconds over which the swirl fades in after a start point (keeps the start's look)
   int swirl_control = -1;    // a control that scales the swirl by (0.3 + value), e.g. turbulence; -1: none
+  float grow = 1.f;          // the lock may scale a block's existing fine structure up by this much (peaks stay
+                             // peaks); only the rest arrives as new material (1: all increases arrive as new material)
 };
 
 struct Hyper {

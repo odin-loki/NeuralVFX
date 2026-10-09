@@ -1,9 +1,17 @@
 # NeuralVFX
 
-Neural visual effects for games that run on **one CPU core**. Each effect (fire, smoke, an explosion) is a small
-network trained offline from clips of that effect. At run time it draws sprites (64-256 px) from time, artist
-controls (intensity, wind, turbulence) and a seed, with no GPU. The idea follows NVIDIA's small-network-per-asset
-work (RTX Neural Shaders, Neural Texture Compression), but runs on a CPU instead of tensor cores.
+Neural visual effects for games that run on **one CPU core**. Each effect (fire, smoke, an explosion) is small and
+trained offline. At run time it draws sprites (64-256 px) from time, artist controls (intensity, wind, turbulence) and
+a seed, with no GPU. The idea follows NVIDIA's small-network-per-asset work (RTX Neural Shaders, Neural Texture
+Compression), but runs on a CPU instead of tensor cores.
+
+Two kinds of effect:
+
+- **Frame models** (studies A to C): a network that stores an effect's frames in feature volumes and reproduces them.
+- **Rollout effects** (study D): a few stored simulation states (start points) and a small network that moves the
+  effect forward one frame at a time, driven by the same kind of noise that forces the simulation. The effect is a
+  chaotic system: after about a second the start point no longer decides the picture, the noise does. So the frames
+  in between are not stored, only made to look right, and every seed gives a new run that never repeats.
 
 C++23, no third-party runtime dependencies, a C API for engines, no Python.
 
@@ -19,6 +27,12 @@ C++23, no third-party runtime dependencies, a C API for engines, no Python.
 
 From [docs/REPORT.md](docs/REPORT.md), measured on simulated fire, smoke and explosions at 128 x 128 on one AVX2 core:
 
+- **Rollout effects (study D):** endless, controllable, never-repeating effects in **82 to 274 KB** per effect. At
+  settings and seeds never seen in training, their detail statistically ties a 45 MB flipbook library and beats the
+  1 MB control model on smoke. The learned dynamics follow a real run 2 to 5 dB better than the same simulation at
+  the same resolution for the first second. Played in 6 s shards from the start points, a minute looks like the
+  first 10 s. The price is **2.6 to 4.1 ms per 128 x 128 frame** (1.2 to 1.3 ms at 64 x 64) and 3.4 MB per playing
+  instance.
 - **Memory:** for equal quality, a network per effect clip needs **3.6 to 7.4 times less memory** than a flipbook;
   at equal memory it scores +2.8 to +7.0 dB higher (every 95% interval above zero). NVIDIA claims "up to 8x" for
   Neural Texture Compression; our flipbooks use our own BC3-layout encoder, so the ratio against BC7 would be lower.
@@ -26,8 +40,10 @@ From [docs/REPORT.md](docs/REPORT.md), measured on simulated fire, smoke and exp
   (+1.0 to +2.5 dB), but its unseen-setting flames look softer than the real simulation.
 - **Variation:** endless non-repeating playback by drifting between learned variations; variations are softer than
   real ones and are blends of the training seeds.
-- **Cost:** 0.38 ms (73 KB model) to 1.1 ms (132 KB model) per 128 x 128 frame; 0.1-0.3 ms at 64 x 64; 8-30 times
+- **Cost of frame models:** 0.38 ms (73 KB model) to 1.1 ms (132 KB model) per 128 x 128 frame; 0.1-0.3 ms at 64 x 64; 8-30 times
   cheaper than simulating, 50-150 times dearer than playing a flipbook.
+
+![D: fire, 10 s at a setting never seen in training. Rows: the simulation; the 82 KB rollout effect with a new seed; the 1 MB control model; the nearest of 45 training flipbooks](docs/figures/d_fire_endless.png)
 
 ![A: rows are the reference smoke clip, the 132 KB network, a 128 KB flipbook at 64 px, and a 144 KB flipbook with 8 frames and motion vectors](docs/figures/a_smoke_compare.png)
 
@@ -40,6 +56,7 @@ From [docs/REPORT.md](docs/REPORT.md), measured on simulated fire, smoke and exp
 | simulation | `src/sim`, `nvfx_sim` | a 2D stable-fluids solver (temperature, soot, vorticity, curl noise, combustion expansion) that renders fire, smoke and explosions to premultiplied RGBA clips with labelled controls: unlimited training and test data |
 | ingest | `src/core/ingest.cpp`, `nvfx_ingest` | owner footage into clips via ffmpeg, with a licence check and a licence register |
 | models | `src/core/model.cpp` | a **grid** family (learned feature volumes over x, y and t, blended by the controls, sampled bilinearly, then a small MLP with FiLM conditioning) and a **conv** family (a learned latent, three upsampling convolutions); `.nvfx` files store features at 8 or 16 bits |
+| rollout effects | `src/core/rollout.cpp`, `src/train/rollout_train.cpp`, `src/runtime/rt_rollout.hpp` | start points plus a learned stepper on a 32 x 32 grid (advection and pressure projection built in; the network supplies forces and the sub-grid closure, conditioned on the controls and fed the simulation's kind of noise), a detail layer that carries full-resolution heat and soot with the learned flow, and a per-pixel renderer; trained by backpropagation through time, then on its own rollouts with statistical losses |
 | trainer | `src/train`, `nvfx_train` | hand-written gradients (checked against finite differences), Adam, multithreaded; per-clip variation codes |
 | runtime | `src/runtime`, `include/neuralfx/nvfx.h` | the shipping library: C API, per-ISA SIMD (SSE2, AVX2, AVX-512), no allocation per frame, seeds and endless drift, exact hue, brightness and speed, bake to flipbook |
 | baselines | `src/core/flipbook.cpp` | flipbooks at matched memory: frame count, resolution, raw or BC1/BC4 (BC3-layout) compression, motion vectors |
@@ -54,7 +71,7 @@ Ubuntu 24.04: `g++-14`, CMake 3.25+, Ninja, `libgtest-dev`, `zlib1g-dev` (and `f
 ```sh
 cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_COMPILER=g++-14
 cmake --build build
-ctest --test-dir build                     # 51 tests: sim, metrics, codecs, gradients, runtime parity, allocation, C API
+ctest --test-dir build                     # 67 tests: sim, metrics, codecs, gradients, runtime parity, allocation, C API
 ```
 
 Options: `NEURALFX_BUILD_VIEWER` (GLFW + OpenGL; fetches Dear ImGui), `NEURALFX_BUILD_SHARED` (libnvfx.so for engines),
@@ -71,10 +88,12 @@ build/nvfx_train --clips $NEURALVFX_DATA/fire.nfxclip --out $NEURALVFX_DATA/fire
 build/nvfx_eval baselines --clip $NEURALVFX_DATA/fire.nfxclip           # flipbooks at every memory size
 build/nvfx_eval model --clip $NEURALVFX_DATA/fire.nfxclip --model $NEURALVFX_DATA/fire.nvfx
 build/nvfx_c_host $NEURALVFX_DATA/fire.nvfx 128 5                       # what an engine does, with timings
+build/nvfx_train --rollout fire --out $NEURALVFX_DATA/fire_rollout.nvfx   # a rollout effect (about 40 min on 4 cores)
 ```
 
-The whole evaluation (about two hours on 4 cores): `build/nvfx_experiment all`, then on an idle machine
-`build/nvfx_experiment timing` and `build/nvfx_experiment report`.
+The whole evaluation of studies A to C (about two hours on 4 cores): `build/nvfx_experiment all`, then on an idle
+machine `build/nvfx_experiment timing` and `build/nvfx_experiment report`. Study D: `build/nvfx_experiment d` (chaos,
+training, evaluation; about three hours), then `d-timing` on an idle machine and `report`.
 
 ## Tools
 
@@ -82,9 +101,9 @@ The whole evaluation (about two hours on 4 cores): `build/nvfx_experiment all`, 
 |---|---|
 | `nvfx_sim` | simulate one clip; `--bench` reports the solver's cost per frame |
 | `nvfx_ingest` | footage into a clip, after a licence check; adds a row to the licence register |
-| `nvfx_train` | train an effect from one or more clips (controls and variation codes come from the clips) |
+| `nvfx_train` | train a frame model from one or more clips (controls and variation codes come from the clips), or with `--rollout` a rollout effect from the simulation |
 | `nvfx_eval` | score the flipbook ladder or a model against a reference clip |
-| `nvfx_experiment` | the full study: `data`, `a`, `b`, `c`, `media`, `timing`, `report` |
+| `nvfx_experiment` | the full study: `data`, `a`, `b`, `c`, `media`, `timing`, `report`; study D: `d-chaos`, `d-train`, `d-tune`, `d-finish`, `d-eval`, `d-timing` |
 | `nvfx_c_host` | the engine loop in plain C, with timings; `--self-test` checks the error paths |
 | `nvfx_viewer` | live viewer with sliders |
 | `neuralfx_arch_bench` | Phase 0 architecture microbenchmark |
@@ -93,7 +112,7 @@ The whole evaluation (about two hours on 4 cores): `build/nvfx_experiment all`, 
 
 | path | what |
 |---|---|
-| `include/neuralfx/` | public headers: `nvfx.h` (C API), `clip`, `sim`, `model`, `train`, `metrics`, `flipbook`, `ingest`, `image_io`, `noise` |
+| `include/neuralfx/` | public headers: `nvfx.h` (C API), `clip`, `sim`, `model`, `train`, `rollout`, `rollout_train`, `metrics`, `flipbook`, `ingest`, `image_io`, `noise` |
 | `src/core`, `src/sim`, `src/train`, `src/runtime`, `src/common`, `src/proto` | libraries (see the table above); `src/proto` holds the Phase 0 prototypes |
 | `tools/`, `examples/`, `viewer/`, `bench/` | executables |
 | `tests/` | GoogleTest suites, the allocation test, the C host self-test, the viewer screenshot test |
