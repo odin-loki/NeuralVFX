@@ -117,7 +117,56 @@ The video itself is not in git (data rules): it is written where `--out` says.
 
 ## 7. Cost
 
-PROFILE
+Measured with `nvfx_fireball --profile`, which times every stage of every frame. The machine is the report's
+4-core machine, with AVX2 unless the row says otherwise. The figures are medians over the frames after the detonation,
+when everything runs, and are for the prototype as first written. The per-frame data is in
+`results/compose/fireball_frames_before.csv` and the summary in `results/compose/fireball_profile_before.csv`.
+
+| configuration | ms per frame (median) | p90 | max | frames per second | model step, CPU ms | model shading, CPU ms |
+|---|---:|---:|---:|---:|---:|---:|
+| 1280 x 720, 4 threads | 196 | 232 | 335 | 5.1 | 78 | 49 |
+| 1280 x 720, 2 threads | 276 | 325 | 419 | 3.6 | 75 | 46 |
+| 1280 x 720, 1 thread | 456 | 554 | 680 | 2.2 | 73 | 44 |
+| 1280 x 720, 4 threads, baseline ISA (SSE2) | 203 | 239 | 295 | 4.9 | 100 | 50 |
+| 1280 x 720, 4 threads, AVX-512 | 198 | 240 | 295 | 5.0 | 82 | 52 |
+| 1280 x 720, 4 threads, tiles at half size | 164 | 195 | 251 | 6.1 | 25 | 13 |
+| 640 x 360, 4 threads | 58 | 70 | 96 | 17.3 | 24 | 12 |
+
+Stages at 1280 x 720 (median ms per frame):
+
+| stage | 4 threads | 1 thread |
+|---|---:|---:|
+| step the learned models (up to 10 at once) | 22.1 | 73.4 |
+| couplings | 2.1 | 2.0 |
+| field bus | 2.8 | 2.8 |
+| light | 6.2 | 6.2 |
+| particles (update and draw) | 0.6 | 0.6 |
+| shade the models | 15.1 | 44.3 |
+| background (sky, stars, hills, ground) | 74.1 | 74.8 |
+| draw the modules | 20.2 | 72.0 |
+| distortion (shock fronts, heat haze) | 27.6 | 98.5 |
+| bloom | 11.8 | 37.2 |
+| tone mapping and grain | 8.9 | 31.3 |
+
+![Stage times per frame, 1280 x 720, 4 threads, before optimisation](figures/fireball_profile_before.svg)
+
+What the profile shows:
+- **The learned models are the small part.** Stepping and shading them takes 37 ms of the 196 (19%), or 127 ms of CPU
+  time over up to ten models. The hand-written picture stages take the rest. The background alone takes 74 ms
+  because it runs on one thread and evaluates the light, a sine and a hash for every pixel.
+- **The models scale with threads; the prototype's picture stages scale badly.** One to four threads is 2.3 times
+  faster overall: the model step 3.3 times, the background not at all.
+- **SIMD matters for the models only.** AVX2 against the baseline SSE2 build: the step takes 22 ms against 28 ms, but
+  the frame barely changes, because the compositing is plain code. AVX-512 is no faster than AVX2 (as in the report).
+- **Smaller tiles make the models 3 to 4 times cheaper but the frame only 16% faster**, for the same reason.
+- **At 640 x 360 the whole scene runs at 17 frames per second** on 4 threads.
+- **Memory:** the three effects take 1.4 MB resident. The 16 modules take 115 MB of working memory: 8.7 MB per
+  384-pixel tile, created up front so the frame loop allocates nothing (0 allocations in 269 frames). Peak resident
+  memory is 231 MB, and setup takes 0.45 s.
+- **perf** (6 s of the scene): the runtime's rollout step 13%, the compositor's bilinear helper 18%, tone mapping 8%,
+  drawing 8% plus its ownership weights 6%, distortion 7%, background 6% plus `sinf` 5%, bloom 8%, shading 3%.
+
+Optimisation passes on these stages follow, each measured before and after with the same picture.
 
 ## 8. Limits and what a product feature needs
 
