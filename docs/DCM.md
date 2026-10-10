@@ -1743,8 +1743,9 @@ tools/study_h/h2_occupancy.sh build /tmp/h2_occupancy.csv # how empty the fireba
 
 ## 11. v2: meeting in the middle (stage S6)
 
-Status: **v2 rollout effects assembled and frozen** (10 October 2026); the runtime's prior against drift for fire is
-being added (G2.13). v2 holds every part that passed its own rule, and nothing else.
+Status: **v2 rollout effects assembled and frozen** (10 October 2026), with fire's prior against drift in the runtime
+(G2.13: `nvfx_effect_attach_prior`, `nvfx_instance_set_prior`; one continuous run, mean cost like shards, a 3.9 ms
+frame every 16th frame). v2 holds every part that passed its own rule, and nothing else.
 
 ### 11.1 What passed, and what is in v2
 
