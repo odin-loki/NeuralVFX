@@ -1,0 +1,23 @@
+kind,comparison,detail,mean,lo,hi
+seed_noise,hand,1 - 0,0.0046,0.0030,0.0064
+seed_noise,hand,2 - 0,0.0694,0.0561,0.0835
+seed_noise,hand,2 - 1,0.0648,0.0516,0.0786
+seed_noise,hand+diff,1 - 0,-0.0138,-0.0183,-0.0100
+seed_noise,hand+diff,2 - 0,-0.0160,-0.0217,-0.0106
+seed_noise,hand+diff,2 - 1,-0.0022,-0.0058,0.0014
+seed_noise,hand+plain,1 - 0,-0.0138,-0.0269,-0.0030
+seed_noise,hand+plain,2 - 0,-0.0307,-0.0427,-0.0212
+seed_noise,hand+plain,2 - 1,-0.0169,-0.0206,-0.0133
+pairing,hand+diff s0 - hand s0,,-0.0115,-0.0214,-0.0013
+pairing,hand+diff s0 - hand s1,,-0.0161,-0.0262,-0.0060
+pairing,hand+diff s0 - hand s2,,-0.0809,-0.1019,-0.0603
+pairing,hand+diff s1 - hand s0,,-0.0252,-0.0352,-0.0153
+pairing,hand+diff s1 - hand s1,,-0.0299,-0.0403,-0.0198
+pairing,hand+diff s1 - hand s2,,-0.0947,-0.1153,-0.0745
+pairing,hand+diff s2 - hand s0,,-0.0275,-0.0374,-0.0176
+pairing,hand+diff s2 - hand s1,,-0.0321,-0.0422,-0.0222
+pairing,hand+diff s2 - hand s2,,-0.0969,-0.1179,-0.0768
+three_seed,hand+diff - hand,,-0.0461,-0.0589,-0.0335
+three_seed,hand+diff - hand+plain,,-0.0321,-0.0434,-0.0214
+three_seed,hand+plain - hand,,-0.0140,-0.0181,-0.0100
+decision,stop,sigma 0.0694; pairings below zero 9 of 9; mean below -sigma no; beats plain yes,,,

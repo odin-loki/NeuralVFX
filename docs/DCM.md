@@ -774,7 +774,7 @@ runtime already has, so it buys continuity (no restarts, no crossfades), not bet
 
 ### G2.10 G2a: denoiser contexts in the nested search (round 2)
 
-Status: **rules fixed** (10 October 2026), before any of these searches was run.
+Status: **done** (10 October 2026). The rules were fixed and committed before any of these searches was run.
 
 - **Contexts per pixel row.** The context models of G2.5, refitted exactly as there (same denoiser
   `fire.ddpm` 1152045d..., same 1,500 training states, spec and seeds, so the same clusters): diffusion contexts
@@ -800,6 +800,50 @@ Status: **rules fixed** (10 October 2026), before any of these searches was run.
   bits on the validation runs are reported beside it. The rule is about the search alone: a kept context would still
   need a generation test (it has no generation path yet; `detail_step` refuses it).
 - Tables: `results/experiments/g_ctx_*.csv` (`nvfx_dcm ctx-summary --prefix g_ctx`).
+
+**Result in one line:** the denoiser's contexts beat the hand-made ones on all 9 seed pairings (by 0.012 to 0.097 bits)
+and beat the plain floor (-0.032 [-0.043, -0.021] bits), but the three-seed gain over hand-made contexts, -0.046 bits,
+is smaller than the search's own seed noise, 0.069 bits, so by the rule fixed in advance **G2a stops**. Unlike
+CameraDetector's, these diffusion contexts help; they do not help by more than the search's randomness.
+
+Nested held-out bits per active pixel (48 training runs) and the bits of each search's global #0 on the 16 validation
+runs:
+
+| family | seed 0 | seed 1 | seed 2 | three-seed mean | global #0 on validation (seeds 0 / 1 / 2) | global #0's contexts (seeds 0 / 1 / 2) |
+|---|---:|---:|---:|---:|---|---|
+| hand | 2.6287 | 2.6333 | 2.6981 | 2.6534 | 2.645 / 2.652 / 2.688 | AVM channel, scale height / scale height / AVM heat level |
+| hand+diff | 2.6172 | 2.6035 | 2.6012 | **2.6073** | 2.639 / 2.617 / **2.611** | scale diff8 / AVM diff4, scale diff8 / AVM diff16, scale diff8 |
+| hand+plain (floor) | 2.6542 | 2.6404 | 2.6236 | 2.6394 | 2.663 / 2.653 / 2.641 | AVM plain8, scale height / AVM plain4, scale height / AVM plain8, scale height |
+
+| comparison (paired over the 48 training runs) | difference |
+|---|---|
+| hand+diff - hand, the 9 seed pairings | -0.0115 [-0.0214, -0.0013] to -0.0969 [-0.1179, -0.0768]: **9 of 9 below zero** |
+| hand+diff - hand, three-seed means | -0.0461 [-0.0589, -0.0335] |
+| hand+diff - hand+plain, three-seed means | **-0.0321 [-0.0434, -0.0214]** |
+| hand+plain - hand, three-seed means | -0.0140 [-0.0181, -0.0100] |
+| seed noise: largest difference of two seeds' means in one family | **0.0694** (hand, seed 2 - seed 0: +0.0694 [+0.0561, +0.0835]) |
+
+| rule (G2.10) | result | met? |
+|---|---|---|
+| (1) every pairing of a hand+diff seed with a hand seed below zero | 9 of 9 | yes |
+| (2) the three-seed mean of hand+diff - hand below -sigma | -0.046 against -0.069 | **no** |
+| (3) hand+diff beats the plain floor | -0.032 [-0.043, -0.021] | yes |
+
+- **What the search did with them.** Every hand+diff search put the 8-cluster diffusion context on the Laplace scale
+  (and two of three also a diffusion context on the AVM), with the advected inputs only. The denoiser's regions say how
+  uncertain the next fine value is better than heat level, height or the plain statistics do. The hand+diff searches
+  also agree with each other (seeds within 0.016 bits), while one of the three hand searches (seed 2) landed in a
+  context-poor optimum 0.069 bits worse: the same failure as the retry's fire search (§6.10). That one seed sets sigma.
+  Against the two good hand seeds alone the gain is 0.012 to 0.032 bits.
+- **Why the rule still says stop, and why it matters little for generation.** The rule asks for a gain beyond what a
+  different search seed can do, and one seed of the hand-made family did worse by more than the gain. More to the
+  point for stage S6: most of the gain is in the Laplace scale, which the released generators do not use (tau = 0
+  ignores the scale; only the AVM moves the mean). The gain is about predicting uncertainty, so it would belong to the
+  coding use (G3), not to generated detail; and it costs two denoiser passes (about 12 ms) per refresh of the
+  contexts.
+- **CameraDetector's outcome does not repeat**: there the diffusion contexts lowered the held-out score (0.792 to
+  0.770); here they raise it on every pairing and beat the plain floor, inside the +1 ms budget. They fail only the
+  margin the plan set for them.
 
 ### G2.11 G2b beyond fire (round 2)
 
