@@ -33,9 +33,12 @@ Plan and decisions: [PLAN.md](PLAN.md).
   ratios would be lower (§8).
 - **It depends on the effect.** At 132 KB the network beats the full 1 MB flipbook on fire, not on smoke or
   explosions (§3).
-- **On disk the advantage mostly goes.** With both sides packed by a lossless context-mixing coder, flipbooks shrink
-  2.9 to 12.9 times and networks 1.2 to 1.7 times, so at equal quality the best networks need only 1.4 times less disk
-  (§3, study F). Memory at run time is unchanged.
+- **Fewer bits push it to 9x, not past 10x.** Features trained for 4 bits need 9.1 times less memory than an
+  equal-quality flipbook [6.3, 11.3] (§3, study F2).
+- **On disk, video codecs win.** With both sides packed by a lossless coder, the networks need 1.4 times less disk than
+  flipbooks at 8 bits and 4.1 times less when trained with a rate term, but AV1 needs 2.8 times less disk than the
+  best network. In memory the networks win against video: about 115 KB against 2.6 to 23 MB for a running decoder
+  (§3, studies F and F2).
 - **Controls work, at a fidelity cost.** One 1 MB model per effect plays control settings it never saw better than a
   45 MB library of flipbooks: **+2.49 [+2.22, +2.77] dB** against the nearest setting, **+0.99 [+0.65, +1.36] dB**
   against blending the two nearest, with higher SSIM and matching motion. By eye its held-out flames are softer and
@@ -168,6 +171,27 @@ the details are in `results/compression/README.md`.
 - Memory at run time does not change: the runtime unpacks at load. Decoding runs at 0.32 to 0.44 MB/s on one core
   (0.4 s for a 132 KB model).
 - To gain from coding, the networks would have to be trained for it (a rate term in the loss).
+
+**Pushed further (study F2).** The features were trained for fewer bits (quantisation-aware training; the runtime keeps
+them bit-packed) and, for disk, with a rate term in the loss. Same 12 clips, same scoring; every choice was made on 6
+separate validation clips. Details in `results/compression/README.md`, study F2.
+- **Memory:** grid_m at 4 bits holds 30.65 dB in 67.5 KB (8 bits: 32.63 dB in 131.5 KB) and needs **8.5x [4.4, 10.4]**
+  less memory than the best flipbook of equal quality. With three times the training steps it gains 0.44 dB
+  [0.36, 0.54] and needs **9.1x [6.3, 11.3]**. 6 bits give 7.4x, 5 bits 8.0x. **10x is not reached.** Each bit below
+  8 costs more than the one before (2.0 dB from 8 to 4 bits), and the flipbook envelope is flat from 288 to 512 KB,
+  then needs 1 MB for 4.6 dB more. Smaller grids, fewer time slices, trimmed quantiser ranges and learned codebooks
+  (vector quantisation) did not beat 4-bit features.
+- **Disk:** the rate term removes 18% of the packed bytes for 0.12 dB. Packed against packed flipbooks, the networks
+  now need **4.1x [2.6, 4.5]** less disk (1.4x at 8 bits).
+- **Video codecs win on disk by far.** AV1 (libaom, 4:4:4) reaches the same 30.5 dB in 8.0 KB, 2.8 times less than the
+  best network (22.3 KB); HEVC, VP9 and H.264 also need less, VP9 with alpha ties. 4:2:0 video caps fire at 29 dB.
+- **Networks win in memory against video:** 71 KB resident plus 44 KB working memory, against 2.6 to 23 MB for a
+  running decoder (inside ffmpeg) or 4 MB of decoded frames, and any frame can be drawn without decoding from a
+  keyframe.
+- **Rollout effects (G3c):** 6-bit start states keep study D's test statistics on fire (one better, four tied) and
+  explosions (all tied) and halve them on disk (packed 44.5 to 20.6 KB and 55.7 to 25.4 KB). Smoke is worse by a hair
+  on coverage (+0.0001 [+0.0000, +0.0002]), so it keeps fp16. Dithering with the seed's noise and halving the number
+  of start points failed on validation.
 
 ![A: smoke. Rows: reference; neural grid_m, 132 KB; BC3 32 frames at 64 px, 128 KB; BC3 8 frames at 128 px with motion vectors, 144 KB](figures/a_smoke_compare.png)
 
