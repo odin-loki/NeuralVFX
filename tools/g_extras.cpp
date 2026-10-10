@@ -761,7 +761,10 @@ void g5a_train(const Ctx& c) {
     }
     log(std::format("g5a-train {}: critic {} on {} + {} windows, AUC on its training windows {:.3f}", ename(e), critic.version(), fit.size(), train.size(),
                     dcm::roc_auc(sc, y)));
-    std::ofstream o(c.results / "g_extras_g5a_critics.csv", std::ios::app);
+    const fs::path cp = c.results / "g_extras_g5a_critics.csv";
+    const bool fresh = !fs::exists(cp);
+    std::ofstream o(cp, std::ios::app);
+    if (fresh) o << "effect,version,fit_windows,train_windows,auc_on_train_windows\n";
     o << std::format("{},{},{},{},{:.4f}\n", ename(e), critic.version(), fit.size(), train.size(), dcm::roc_auc(sc, y));
   }
 }

@@ -1473,3 +1473,68 @@ did not pass its rule in §6 nor in the round-2 retry. There is nothing for it t
 3. **G5b's learning rates** (before any G5b run, after G4a's lesson): the update mixers' rates anneal over 100,000 uses
    of a context, and m1's first-layer rate is chosen among 0.02, 0.05, 0.1 and 0.2 by the training rows' own error
    after training (`g5b-train` logs each).
+
+### 10.7 G4a: results
+
+**In one line:** the renderer mixer draws the explosion's first second 1.0 dB closer to the real run on test
+(+1.02 [+0.80, +1.25] dB), and follows tracked runs 0.4 to 1.0 dB better on every effect, but the explosion's endless
+frames score worse (calibration score +0.080 [+0.020, +0.139], from the detail spectrum), so by the rule **G4a is not
+kept**.
+
+**Pilot** (validation tracking, each renderer alone on the model's own fields; active PSNR, mean over 10 settings;
+`g_extras_g4a_pilot.csv`):
+
+| effect | learned (L) | simulator's (S) | field shader (F) | S - L, frames 1-30 | F - L, frames 1-30 |
+|---|---|---|---|---|---|
+| | frames 1-30 / 31-60 (89) | | | | |
+| fire | 20.44 / 18.12 | 20.50 / 18.16 | 18.73 / 19.21 | +0.06 [+0.04, +0.09] | -1.72 [-2.61, -0.99] |
+| smoke | 20.19 / 16.59 | 20.50 / 16.61 | 18.83 / 16.93 | +0.31 [+0.16, +0.47] | -1.36 [-1.72, -0.99] |
+| explosion | 21.18 / 17.96 | 22.16 / 18.02 | 17.34 / 17.18 | **+0.99 [+0.84, +1.15]** | -3.83 [-4.41, -3.19] |
+
+The simulator's renderer beats the learned one on the explosion's first second (not a null); the other effects' learned
+renderers are 2 to 9 dB worse than the effect's own (`g_extras_g4a_pilot.csv`). Rows: 24 tracked training runs per
+effect, 827,640 pixels in all (`g4a-rows`, 3.2 minutes).
+
+**Validation** (paired over 10 settings; mixer - v1; `g_extras_g4a_val.csv`):
+
+| effect | mixer | frames 1-30 | frames 31-60 (89) | calibration score | spectrum distance | mean-frame PSNR |
+|---|---|---|---|---|---|---|
+| fire | {L, S} | +0.36 [+0.24, +0.47] | +0.43 [+0.35, +0.52] | -0.016 (tie) | -0.081 [-0.096, -0.060] | +0.07 (tie) |
+| fire | {L, S, F} | +0.44 [+0.25, +0.62] | +0.76 [+0.59, +0.94] | -0.077 (tie) | -0.120 [-0.149, -0.082] | +0.01 (tie) |
+| fire | {L, S, F, X} | +1.94 [+1.70, +2.18] | +3.07 [+2.57, +3.59] | -0.155 [-0.232, -0.081] | -0.118 [-0.145, -0.082] | -0.02 (tie) |
+| smoke | {L, S} | +0.57 [+0.43, +0.74] | +0.42 [+0.33, +0.52] | +0.028 (tie) | -0.062 [-0.079, -0.045] | +0.01 (tie) |
+| smoke | {L, S, F} | +0.65 [+0.49, +0.83] | +0.62 [+0.49, +0.74] | +0.017 (tie) | -0.079 [-0.104, -0.052] | +0.05 (tie) |
+| smoke | {L, S, F, X} | +0.67 [+0.51, +0.85] | +0.80 [+0.65, +0.96] | +0.043 (tie) | -0.081 [-0.108, -0.051] | +0.08 (tie) |
+| explosion | {L, S} | +0.82 [+0.63, +1.01] | +0.19 [+0.10, +0.28] | +0.057 (tie) | +0.043 [+0.008, +0.073] | +0.22 (tie) |
+| explosion | {L, S, F} | +0.90 [+0.71, +1.09] | +0.27 [+0.18, +0.37] | +0.064 (tie) | +0.052 [+0.018, +0.081] | +0.19 (tie) |
+| explosion | {L, S, F, X} | +1.01 [+0.90, +1.11] | +0.38 [+0.28, +0.49] | **+0.091 [+0.006, +0.168]** | +0.081 [+0.034, +0.118] | +0.20 (tie) |
+
+{L, S, F, X} is worse in a rule measure (the explosion's calibration score), so the choice by the rule is **{L, S, F}**
+(mean first-second gain +0.66 dB over the three effects; {L, S} +0.58). Committed before the test.
+
+**Test, once** ({L, S, F}, version `60da0bd0...`; `g_extras_g4a_test.csv`):
+
+| effect | frames 1-30 | frames 31-60 (89) | calibration score | spectrum distance | \|ln motion ratio\| | coverage L1 | mean-frame PSNR |
+|---|---|---|---|---|---|---|---|
+| fire | +0.68 [+0.53, +0.82] | +0.99 [+0.76, +1.22] | -0.044 (tie) | -0.128 [-0.149, -0.105] | +0.037 (tie) | 0.000 (tie) | +0.16 (tie) |
+| smoke | +0.63 [+0.57, +0.69] | +0.52 [+0.49, +0.55] | +0.017 (tie) | -0.082 [-0.109, -0.054] | +0.079 [+0.069, +0.090] | 0.000 (tie) | +0.07 (tie) |
+| explosion | **+1.02 [+0.80, +1.25]** | +0.37 [+0.32, +0.43] | **+0.080 [+0.020, +0.139]** | +0.048 [+0.017, +0.074] | +0.028 (tie) | -0.001 (tie) | +0.31 [+0.16, +0.44] |
+
+(Means: the explosion's first second 19.68 dB with v1's renderer, 20.70 dB with the mixer.)
+
+- **The rule:** the explosion's first second improves with an interval above zero (met), but the explosion's endless
+  calibration score is worse (not met). **Not kept.**
+- **What the mixer draws with** (`g_extras_g4a_mixers.csv`; mean weights over contexts): the simulator's renderer 0.51
+  to 0.63, the learned renderer 0.16 to 0.46, the field shader 0.16 to 0.28, per colour channel. One mixer serves every
+  effect, so every module is drawn mostly by the simulator's own look; "modules match in look" in that sense, not
+  measured further.
+- **Why the explosion's endless frames get worse while its tracking gets better:** the mixer is trained for squared error
+  against runs it cannot follow exactly, so it averages its renderers into a slightly smoother, calmer picture. Motion
+  falls by about 7% on every effect (test motion ratio: fire 0.86 to 0.79, smoke 0.82 to 0.75, explosion 0.90 to 0.85),
+  and the explosion's detail spectrum moves away from the real one. On fire and smoke the detail spectrum moves closer
+  (-0.08 to -0.13), the same direction G1's mixer took them.
+- **Without its bias** the mixer cannot paint haze (amendment 2): the stopped first run "gained" 6 dB on fire by a haze
+  that made the empty background count as active pixels. Active PSNR alone would have kept that mixer.
+- **For v2:** nothing from G4a by the rule. A per-effect use (the mixer for fire and smoke, where no measure is worse
+  on test, and v1's renderer for the explosion) would need its own validation and a new test; the test above cannot
+  choose it.
