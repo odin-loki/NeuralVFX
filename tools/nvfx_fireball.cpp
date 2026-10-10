@@ -10,7 +10,9 @@
 // the state, captured as for the overlap; --stages draws it stage by stage on the live scene (the reference). All three
 // give the same frames to the bit. The profile's `period` is the wall time between finished frames (output excluded);
 // with the overlap, a frame's stages overlap the next frame's, so their sum (`total`) is more than the period.
-// --no-checksums skips the per-frame checksum (FNV-1a over the RGB, 3 ms on one thread) for timing runs.
+// --no-checksums skips the per-frame checksum (FNV-1a over the RGB, 3 ms on one thread) for timing runs. After the
+// run it prints the CPU time per frame over all threads and their shares of busy, waiting for a core (on a shared
+// machine: other processes) and idle time, from frame 36 on (/proc/self/task/*/schedstat).
 // --raw writes every frame's RGB, one after another, for comparisons (PSNR) outside.
 // --baseline-kernels uses the picture's row kernels for the baseline ISA even where AVX2 is used (they give the same
 // bits; this checks it).
