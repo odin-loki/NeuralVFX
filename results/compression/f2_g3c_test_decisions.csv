@@ -1,0 +1,16 @@
+split,effect,variant,starts,file_bytes,packed_bytes,stat,mean,lo,hi,verdict
+test,explosion,b6,16,199271,25983,spectrum_l1,-0.00006,-0.00139,0.00137,tie
+test,explosion,b6,16,199271,25983,motion_ratio,0.00046,-0.00058,0.00138,tie
+test,explosion,b6,16,199271,25983,coverage_l1,0.00003,-0.00006,0.00013,tie
+test,explosion,b6,16,199271,25983,emission_l1,0.00000,0.00000,0.00000,tie
+test,explosion,b6,16,199271,25983,mean_frame_psnr,-0.00020,-0.02600,0.01980,tie
+test,fire,b6,8,42895,21071,spectrum_l1,0.00019,-0.00379,0.00373,tie
+test,fire,b6,8,42895,21071,motion_ratio,-0.00746,-0.01484,-0.00150,better
+test,fire,b6,8,42895,21071,coverage_l1,-0.00004,-0.00010,0.00000,tie
+test,fire,b6,8,42895,21071,emission_l1,-0.00002,-0.00005,0.00000,tie
+test,fire,b6,8,42895,21071,mean_frame_psnr,-0.01960,-0.07290,0.03570,tie
+test,smoke,b6,8,108463,27547,spectrum_l1,-0.00073,-0.00288,0.00169,tie
+test,smoke,b6,8,108463,27547,motion_ratio,-0.00140,-0.00447,0.00208,tie
+test,smoke,b6,8,108463,27547,coverage_l1,0.00009,0.00000,0.00021,worse
+test,smoke,b6,8,108463,27547,emission_l1,0.00000,0.00000,0.00000,tie
+test,smoke,b6,8,108463,27547,mean_frame_psnr,-0.00960,-0.03090,0.01280,tie
