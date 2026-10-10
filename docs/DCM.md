@@ -1,7 +1,8 @@
 # Study G: diffusion-context mixing for generating effects
 
-Status: **plan** (9 October 2026), with G1 and G1c decided (stage S2, §6). Each section turns into a result when its
-stage finishes. Audience: owner, research, dev.
+Status: **plan** (9 October 2026), with G1 and G1c decided (stage S2, §6); round 2 (10 October 2026): the G1 retry
+(§6.10), G2a in the nested search (G2.10) and G2b for smoke (G2.11), each with its rules fixed first. Each section
+turns into a result when its stage finishes. Audience: owner, research, dev.
 
 ## 1. The algorithm and where it comes from
 
@@ -383,6 +384,60 @@ smoke's fails only on motion, so a per-effect choice (DCM-fine for fire, v1 for 
 deserves a lock) or a smoke mixer selected with motion weighted higher on validation are the obvious next candidates.
 Each needs a new validation selection and a new test with new seeds; this stage does not claim them.
 
+### 6.10 G1 retry: only advected experts (round 2)
+
+Status: **rules fixed** (10 October 2026), before any round-2 search, calibration or test was run. Results follow below
+the rules when they exist.
+
+**Why G1 failed (§6.6, §6.9).** The released smoke mixer is 0.91 A + 0.02 A_sl + 0.07 prev: 7% of the previous
+frame's value at the pixel, *unadvected*. One step from the truth it lowers the code length; over many frames it is a
+temporal smoothing, and the motion ratio fell from 0.85 to 0.72 (the mean frame 0.05 dB further away). The motion loss
+was already visible on validation (motion ratio 0.755 against v1's 0.899), but the calibration score let the spectrum
+gain outweigh it. Explosions had no lock (relock off won on the score), so their burst followed a real run 0.5 to 2 dB
+worse.
+
+**The fix.**
+1. **Only advected experts.** The `prev` group is removed from the search space; every remaining expert is built from
+   the advected field (A, A_sl, A - A_sl, the lock's parts, the shape terms) or from the current coarse state (C_up, the
+   block residual, the new material). "The previous field advected by the current flow" is not a new expert: it is A
+   (MacCormack) and A_sl (semi-Lagrangian), both already in the `adv` group, so the fix is the drop. (`prev` stays in
+   the row files and in the cap of the maximum principle; the mixer can no longer use it.)
+2. **Every relock is considered for every effect, explosions included**, and v1's lock is no longer second to the
+   score alone: the validation selection now mirrors the test rule and adds a tracking guard (below), so a lock-free
+   generator that drifts from its coarse state cannot be chosen for its spectrum.
+
+Everything else is G1's: the same rows, spec, cost model (`g_fine_cost.csv`), search (family hand+macro, seed 0, 200
+configurations and 2 refinement rounds on 100,000 rows, budget +1 ms), own-rollout pass and validation settings and
+seeds (real runs 800000 + i, shards 820000 + i). Data under `NEURALVFX_DATA/g/round2/fine`; tables
+`results/experiments/g_fine2_*.csv`.
+
+**Validation selection (rules fixed before any result).**
+- Generators: each of the search's global top 10 (trained on every row, then the own-rollout pass) with each relock
+  (off, exact, v1's lock) at tau = 0: 30 per effect. Each is scored on the 10 validation settings and tracked on 8
+  validation runs (salt 3, runs 0 to 7) from their true state (frame 100; explosions frame 1) for 30 frames.
+- **Admissible** on validation, generator - v1 with the same seeds, 95% paired bootstrap over the 10 settings (tracking:
+  over the 8 runs): the detail spectrum distance lower with an interval excluding zero; \|ln motion ratio\|, coverage L1
+  and mean-frame PSNR not worse with an interval excluding zero; and the **tracking guard**: active PSNR at 8 and at 30
+  frames not lower with an interval excluding zero.
+- **Released:** the admissible generator with the lowest mean calibration score; then tau = 0.5 is tried once for it
+  and kept only if admissible and lower in score. If no generator is admissible, the effect **fails on validation**,
+  keeps v1 and is not tested (the best score is kept in the CSV for the record).
+
+**Test, once, per effect that passed validation (rule fixed in advance).** An effect **passes** if, DCM-fine - v1
+paired over B's 10 held-out settings: its spectrum distance is lower with an interval excluding zero; its \|ln motion
+ratio\|, coverage L1 and mean-frame PSNR are not worse with an interval excluding zero; and its cost is at most +1 ms per
+128 x 128 frame (the search's cost model, as in G1: provisional upper bounds measured on a busy machine; the main agent
+re-times). Effects are decided one by one: a pass needs no other effect.
+- **Fresh test seeds** (G1's 900000, 910000 and 920000 + i are spent): seed base **6,900,000**: real runs
+  6,900,000 + i, the floor (another real run) 6,910,000 + i, shards 6,920,000 + i, at B's 10 held-out settings.
+  Tracking: the salt-2 runs **8 to 15** (d-eval and G1 used 0 to 7), from their true state; reported, not in the rule.
+- **G1c again**, with the same fresh seeds and the retried generators: the first 30 frames of a cold start (coarse state
+  only) against v1's usual start; §3's rule per effect: the calibration score ties or beats it (interval not above zero).
+
+Commands (`nvfx_dcm`, 2 threads, `nice 10`): `search-fine --effect E --drop-groups prev --prefix g_fine2 --max-rows 100000
+--data DIR`, then `train-fine` and `eval-fine` with the same options plus `--rule-selection --test-base 6900000
+--track-first 8`, then `fine-summary --prefix g_fine2 --rule-selection`.
+
 ## 7. G2: diffusion for the macro features (stage S5)
 
 Status: **done for fire** (9 October 2026). The prior against drift (G2b) is kept: it passed validation and its one
@@ -641,3 +696,53 @@ for the nested search.** This is not CameraDetector's outcome: there no diffusio
 contexts do not encode the held-out sites. It is also a narrower win than it looks: the prior ties the shards that the
 runtime already has, so it buys continuity (no restarts, no crossfades), not better pictures, for 0.4 ms per frame and
 1.5 MB. Extending it to smoke and explosions is a later decision and has not been started.
+
+### G2.10 G2a: denoiser contexts in the nested search (round 2)
+
+Status: **rules fixed** (10 October 2026), before any of these searches was run.
+
+- **Contexts per pixel row.** The context models of G2.5, refitted exactly as there (same denoiser
+  `fire.ddpm` 1152045d..., same 1,500 training states, spec and seeds, so the same clusters): diffusion contexts
+  (features at t = 400 and 600 from e1, m1, d1, per region, PCA-16, k-means K = 4, 8, 16) and the plain coarse-statistics
+  contexts (the same on the region's raw coarse values), the floor. G1's 48 training and 16 validation runs are replayed
+  (`nvfx_dcm region-contexts`), and at every recorded frame the contexts are computed from the stepped coarse state the
+  detail step sees; each pixel row takes the cluster ids of its region (16 x 16 pixels, one of 8 x 8). As for every
+  context here, the clusters and the denoiser were fitted on training states, including the runs of the held-out bins
+  (unsupervised preprocessing; the plain floor is treated the same way).
+- **Families**, each searched with seeds 0, 1 and 2 on fire with the G1 retry's settings (no `prev`; 200
+  configurations, 2 refinement rounds, 100,000 rows, budget +1 ms): **hand** (heat level, A / C ratio, flow, height,
+  controls, channel); **hand+diff** (hand plus the diffusion contexts at K = 4, 8 and 16, each one candidate context of
+  the search); **hand+plain** (hand plus the plain contexts at K = 4, 8, 16), the floor. G1's regional clusters
+  (macro4, macro8) are left out of all three, so the comparison isolates the denoiser. In the cost model a region
+  context costs what G1's `extra` hook costs (one more mixer); the denoiser's own passes (two per refresh, about 12 ms)
+  are reported apart.
+- **Rule (§3's G2a row made concrete).** Nested held-out bits per active pixel, per training run. The search's seed
+  noise sigma is the largest absolute difference between the mean nested bits of two seeds of one family (3 pairs x 3
+  families). The diffusion contexts are **kept** only if all three hold: (1) for every one of the 9 pairings of a
+  hand+diff seed with a hand seed, hand+diff - hand, paired over the 48 training runs, has an interval below zero; (2)
+  the three-seed mean of hand+diff - hand is below -sigma; (3) they beat the floor: the three-seed means of
+  hand+diff - hand+plain have an interval below zero. Otherwise G2a **stops**, reported with its numbers. Global #0's
+  bits on the validation runs are reported beside it. The rule is about the search alone: a kept context would still
+  need a generation test (it has no generation path yet; `detail_step` refuses it).
+- Tables: `results/experiments/g_ctx_*.csv` (`nvfx_dcm ctx-summary --prefix g_ctx`).
+
+### G2.11 G2b beyond fire (round 2)
+
+Status: **rules fixed** (10 October 2026), before the smoke denoiser was trained.
+
+- **Explosions are skipped.** A 3 s one-shot effect plays 90 frames from its start and ends; the question G2b answers
+  (does one rollout stay alive for a minute without restarts) does not arise, and G1 already noted that a 3-second
+  explosion has no time to drift. A one-step prior would only move a burst whose shape the stepper has to keep.
+- **Smoke, with fire's recipe and rules.** States: study D's training runs for smoke (`recipe_for(smoke)`, salt 1, 160
+  runs of 240 frames), every second coarse state from frame 30 (16,800 states); validation states from 16 runs of salt 3.
+  The same network and optimiser (G2.1, G2.2), 10,000 steps of batch 32 on two threads at `nice 10` (about 2 to 3
+  CPU-hours), resumable after a restart (the training state is kept at every log; a resumed run gives the same weights,
+  `Ddpm.ResumedTrainingGivesTheSameWeights`). Data under `NEURALVFX_DATA/g/round2/diff`.
+- **G2b exactly as G2.3 and G2.6:** the grid N in {4, 8, 16}, t in {20, 50, 100}, beta in {0.25, 0.5, 1}; one
+  continuous 60 s rollout from the start point nearest the controls (smoke starts from its stored 64-pixel fine fields,
+  as the runtime starts it) at validation settings 1 and 2, six 10 s windows each against a real 10 s run; tuning seeds
+  (real 1,950,000 + i, model 1,960,000 + i), decision seeds 1,970,000 + i; two candidates (the best, and the best with
+  N = 16); kept if (prior - none) has an interval below zero and costs at most 0.5 ms per frame. Then **the test, once**,
+  if a candidate passed: B's held-out settings 1 and 2, real runs 2,950,000 + i, model 2,970,000 + i (not used for
+  smoke before). Shards are reported as a reference. `nvfx_experiment g-prior --effects smoke` and `g-prior-test`;
+  tables `results/experiments/g_diff_smoke_*.csv`.

@@ -27,6 +27,13 @@ struct Ctx {
   int configs = 200, refine = 2;
   int max_rows = 0;               // cap on search rows (0: all)
   double budget_ms = 1.0;         // the search's cost budget per 128 x 128 frame; <= 0: none (results labelled family/free)
+  // Round 2 (docs/DCM.md §6.10 and G2.10). Defaults repeat G1.
+  std::string prefix = "g_fine";            // CSVs: results/<prefix>_*.csv (the cost model stays g_fine_cost.csv)
+  std::vector<std::string> drop_groups;     // expert groups the search may not use (the G1 retry: prev)
+  bool rule_selection = false;              // validation selection mirrors the per-effect test rule (§6.10)
+  std::uint64_t test_base = 900000;         // test seeds: real runs base + i, the floor base + 10000 + i, shards base + 20000 + i
+  int track_first = 0;                      // the first of the 8 salt-2 tracking runs of the test
+  std::filesystem::path regions;            // G2a: region contexts of the recorded frames (region-contexts); empty: none
 };
 
 // 1. Pixel rows of 48 training runs (salt 1) and 16 validation runs (salt 3) at 128 px, and the own-rollout windows of
@@ -50,5 +57,15 @@ void probe(const Ctx& c, sim::Effect e, const std::string& mixer, double tau, in
 // Paired-bootstrap summary of the CSVs (docs/DCM.md G1): printed and written to results/.../g_fine_summary.md.
 void summary(const Ctx& c);
 std::string summary_markdown(const std::filesystem::path& results);  // the same tables, for SUMMARY.md
+// The G1 retry (docs/DCM.md §6.10): validation selection, the test and the per-effect decisions, from <prefix>_*.csv.
+void summary_retry(const Ctx& c);
+std::string retry_markdown(const std::filesystem::path& results, const std::string& prefix);
+
+// G2a (docs/DCM.md G2.10): the region contexts of every recorded frame of the training and validation runs (denoiser
+// clusters and plain coarse-statistics clusters at K = 4, 8, 16, fitted as nvfx_dcm contexts fits them), written to
+// c.regions. `denoiser` and `states`: the effect's denoiser and its training states.
+void region_contexts(const Ctx& c, sim::Effect e, const std::filesystem::path& denoiser, const std::filesystem::path& states);
+// G2a's decision from <prefix>_search_runs.csv: the context families over three seeds, the seed noise, the rule.
+void context_summary(const Ctx& c);
 
 }  // namespace nfx::fine_study

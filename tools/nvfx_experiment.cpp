@@ -1100,7 +1100,7 @@ void step_report(const Ctx& c) {
 int main(int argc, char** argv) try {
   const tools::Args a(argc, argv, {"quick", "help"});
   if (a.flag("help") || a.positional().empty()) {
-    std::println("nvfx_experiment data|a|b|c|media|timing|report|all|d|d-chaos|d-train|d-tune|d-finish|d-eval|d-timing|g-data|g-pilot|g-search|g-eval|g-timing|g-fine|g-diff|g-diff-test [--root DIR] [--results DIR] [--threads 4] [--quick]");
+    std::println("nvfx_experiment data|a|b|c|media|timing|report|all|d|d-chaos|d-train|d-tune|d-finish|d-eval|d-timing|g-data|g-pilot|g-search|g-eval|g-timing|g-fine|g-diff|g-diff-test|g-prior|g-prior-test [--root DIR] [--results DIR] [--threads 4] [--quick]");
     return 0;
   }
   Ctx c;
@@ -1150,6 +1150,8 @@ int main(int argc, char** argv) try {
     if (step == "g-fine") study_g::step_fine(g);      // design G1 end to end (docs/DCM.md)
     if (step == "g-diff") study_g::step_diff(g);       // stage S5 (needs nvfx_dcm ddpm-train first)
     if (step == "g-diff-test") study_g::step_diff_test(g);
+    if (step == "g-prior") study_g::step_prior(g);            // round 2: G2b for smoke (docs/DCM.md G2.11)
+    if (step == "g-prior-test") study_g::step_prior_test(g);
   }
   if (step == "report" || step == "all") step_report(c);
   std::println("{} finished in {:.1f} min", step, std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count() / 60.0);

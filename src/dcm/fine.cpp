@@ -150,7 +150,8 @@ const std::vector<ExpertGroup>& expert_groups() {
 }
 
 std::string_view context_name(int c) {
-  static constexpr std::array<std::string_view, kContexts> n{"lvl", "ratio", "flow", "height", "ctrl", "age", "channel", "macro4", "macro8", "extra"};
+  static constexpr std::array<std::string_view, kContexts> n{"lvl",   "ratio", "flow",  "height", "ctrl",   "age",    "channel", "macro4",
+                                                             "macro8", "extra", "diff4", "diff8",  "diff16", "plain4", "plain8",  "plain16"};
   return c >= 0 && c < kContexts ? n[sz(c)] : "?";
 }
 
@@ -166,6 +167,12 @@ int context_size(const Spec& s, int c) {
     case kMacro4: return std::max<int>(1, static_cast<int>(s.macro4.size() / kMacroStats));
     case kMacro8: return std::max<int>(1, static_cast<int>(s.macro8.size() / kMacroStats));
     case kExtra: return std::max(1, s.extra_size);
+    case kDiff4:
+    case kPlain4: return 4;
+    case kDiff8:
+    case kPlain8: return 8;
+    case kDiff16:
+    case kPlain16: return 16;
     default: throw std::out_of_range("dcm fine: context");
   }
 }
@@ -175,6 +182,8 @@ std::string_view family_name(Family f) {
     case Family::none: return "none";
     case Family::hand: return "hand";
     case Family::hand_macro: return "hand+macro";
+    case Family::hand_diff: return "hand+diff";
+    case Family::hand_plain: return "hand+plain";
   }
   return "?";
 }
@@ -188,6 +197,8 @@ std::vector<int> family_contexts(Family f, bool one_shot) {
     c.push_back(kMacro4);
     c.push_back(kMacro8);
   }
+  if (f == Family::hand_diff) c.insert(c.end(), {kDiff4, kDiff8, kDiff16});
+  if (f == Family::hand_plain) c.insert(c.end(), {kPlain4, kPlain8, kPlain16});
   return c;
 }
 
@@ -758,6 +769,11 @@ float grain(const Spec& sp, std::uint64_t seed, float X, float Y, float t) {
 
 void detail_step(const rollout::Model& m, const Mixer& mix, rollout::State& s, std::uint64_t seed, std::span<const float> controls,
                  const GenOptions& g, Frame& f) {
+  {
+    const Config& cf = mix.config;
+    const bool region = std::ranges::any_of(cf.mixer_contexts, region_context) || region_context(cf.avm_context) || region_context(cf.scale_context);
+    if (region) throw std::invalid_argument("dcm fine: the G2a region contexts have no generation path (search only)");
+  }
   compute_frame(m, s, seed, controls, f, g.extra);
   const Spec& sp = mix.spec;
   const int S = s.size, R = m.h.res, C = m.h.channels();

@@ -2,6 +2,7 @@
 #include "fine_study.hpp"
 
 #include <neuralfx/clip.hpp>
+#include <neuralfx/dcm/ddpm.hpp>
 #include <neuralfx/dcm/kmeans.hpp>
 #include <neuralfx/dcm/search.hpp>
 #include <neuralfx/image_io.hpp>
@@ -155,9 +156,15 @@ sim::Params run_params(sim::Effect e, std::uint64_t salt, std::uint64_t index) {
   return rollout::recipe_run(r, index);  // 128 px, controls uniform in [0, 1]^3, seed of its own
 }
 
+// G2a's region contexts of one recorded frame: for kDiff4 .. kPlain16 in order, the cluster id of each of the 8 x 8
+// regions (rows from the bottom).
+constexpr int kRegionCells = 64;
+using RegionPlanes = std::array<std::uint8_t, fine::kRegionContexts * kRegionCells>;
+
 struct Table {
   std::vector<RunInfo> runs;
   std::vector<fine::Row> rows;
+  std::map<std::pair<int, int>, RegionPlanes> regions;  // (run, frame) -> planes; empty unless Ctx::regions is set
 };
 
 constexpr char kTableMagic[8] = {'N', 'V', 'F', 'X', 'F', 'R', 'W', '1'};
@@ -330,8 +337,11 @@ struct RunRecord {
 
 // One run: the simulation at 128 px; every frame the v1 stepper takes the true coarse state (memory channels carried
 // from its own previous step), and the detail step's experts are computed from the true fine fields of the frame before.
+// on_frame (optional) sees the state of every sampled frame (the stepped coarse state, the true fine fields of the frame
+// before); rows = false skips the pixel rows (region-contexts replays the runs for their coarse states only).
+using FrameHook = std::function<void(int frame, const rollout::State& s)>;
 RunRecord record_run(const rollout::Model& M, sim::Effect e, std::uint64_t salt, std::uint64_t index, int run_id, bool windows, int active,
-                     int empty) {
+                     int empty, const FrameHook& on_frame = {}, bool rows = true) {
   const sim::Params p = run_params(e, salt, index);
   const std::vector<float> controls{p.intensity, p.wind, p.turbulence};
   const int R = M.h.res, C = M.h.channels(), F = run_frames(e);
@@ -392,9 +402,12 @@ RunRecord record_run(const rollout::Model& M, sim::Effect e, std::uint64_t salt,
       s.flow = flow;
       s.fine_t = prev_t;
       s.fine_d = prev_d;
-      fine::compute_frame(M, s, p.seed, controls, fr);
-      sample_rows(sp, fr, s, 0, st.temp, active, empty, rng, run_id, k, out.rows);
-      sample_rows(sp, fr, s, 1, st.soot, active, empty, rng, run_id, k, out.rows);
+      if (rows) {
+        fine::compute_frame(M, s, p.seed, controls, fr);
+        sample_rows(sp, fr, s, 0, st.temp, active, empty, rng, run_id, k, out.rows);
+        sample_rows(sp, fr, s, 1, st.soot, active, empty, rng, run_id, k, out.rows);
+      }
+      if (on_frame) on_frame(k, s);
     }
     prev_t = st.temp;
     prev_d = st.soot;
@@ -404,12 +417,55 @@ RunRecord record_run(const rollout::Model& M, sim::Effect e, std::uint64_t salt,
 }
 
 fs::path table_path(const Ctx& c, sim::Effect e, std::string_view split) { return c.data / std::format("{}_{}.rows", ename(e), split); }
+fs::path regions_path(const fs::path& dir, sim::Effect e, std::string_view split) { return dir / std::format("{}_{}.regions", ename(e), split); }
 
-// A table without the rows the mixer never predicts (fine::skip_row: every value invisible).
+constexpr char kRegionMagic[8] = {'N', 'V', 'F', 'X', 'R', 'E', 'G', '1'};
+
+void write_regions(const fs::path& path, const std::map<std::pair<int, int>, RegionPlanes>& m) {
+  fs::create_directories(path.parent_path());
+  std::ofstream o(path, std::ios::binary);
+  o.write(kRegionMagic, 8);
+  const std::uint64_t n = m.size();
+  o.write(reinterpret_cast<const char*>(&n), 8);
+  for (const auto& [key, planes] : m) {
+    const std::array<std::int32_t, 2> k{key.first, key.second};
+    o.write(reinterpret_cast<const char*>(k.data()), 8);
+    o.write(reinterpret_cast<const char*>(planes.data()), static_cast<std::streamsize>(planes.size()));
+  }
+  if (!o) throw std::runtime_error("cannot write " + path.string());
+}
+
+std::map<std::pair<int, int>, RegionPlanes> read_regions(const fs::path& path) {
+  std::ifstream in(path, std::ios::binary);
+  char magic[8];
+  in.read(magic, 8);
+  if (!in || std::memcmp(magic, kRegionMagic, 8) != 0) throw std::runtime_error(path.string() + " is not a region-context table (run region-contexts)");
+  std::uint64_t n = 0;
+  in.read(reinterpret_cast<char*>(&n), 8);
+  std::map<std::pair<int, int>, RegionPlanes> m;
+  for (std::uint64_t i = 0; i < n && in; ++i) {
+    std::array<std::int32_t, 2> k{};
+    RegionPlanes planes{};
+    in.read(reinterpret_cast<char*>(k.data()), 8);
+    in.read(reinterpret_cast<char*>(planes.data()), static_cast<std::streamsize>(planes.size()));
+    m[{k[0], k[1]}] = planes;
+  }
+  if (!in) throw std::runtime_error(path.string() + " is truncated");
+  return m;
+}
+
+// A table without the rows the mixer never predicts (fine::skip_row: every value invisible), with its region contexts
+// when Ctx::regions is set.
 Table read_rows(const Ctx& c, sim::Effect e, std::string_view split, const rollout::Model& M) {
   Table t = read_table(table_path(c, e, split));
   const fine::Spec sp = scale_spec(M);
   std::erase_if(t.rows, [&](const fine::Row& r) { return fine::skip_row(sp, r); });
+  if (!c.regions.empty()) {
+    t.regions = read_regions(regions_path(c.regions, e, split));
+    for (const fine::Row& r : t.rows) {
+      if (!t.regions.contains({r.run, r.frame})) throw std::runtime_error(std::format("region contexts: no entry for run {} frame {}", r.run, r.frame));
+    }
+  }
   return t;
 }
 fs::path windows_path(const Ctx& c, sim::Effect e) { return c.data / std::format("{}_train.windows", ename(e)); }
@@ -472,6 +528,11 @@ Prepared prepare(const fine::Spec& sp, const Table& t) {
     const fine::Row& r = t.rows[i];
     const auto& run = t.runs.at(sz(r.run));
     p.ctx[i] = fine::contexts_of(sp, r, run.controls, kSize);
+    if (!t.regions.empty()) {  // G2a: the cluster ids of the pixel's 16 x 16 region (8 x 8 regions, rows from the bottom)
+      const RegionPlanes& pl = t.regions.at({r.run, r.frame});
+      const int region = (r.y * 8 / kSize) * 8 + r.x * 8 / kSize;
+      for (int j = 0; j < fine::kRegionContexts; ++j) p.ctx[i][sz(fine::kDiff4 + j)] = pl[sz(j * kRegionCells + region)];
+    }
     fine::normalise(sp, r, p.x[i], p.z[i]);
     p.y[i] = fine::normalise_value(sp, r.channel, dbl(r.target), dbl(r.e[fine::kCoarse]));
   }
@@ -487,7 +548,9 @@ fine::Family parse_family(const std::string& s) {
   if (s == "none") return fine::Family::none;
   if (s == "hand") return fine::Family::hand;
   if (s == "hand+macro" || s == "hand_macro") return fine::Family::hand_macro;
-  throw std::invalid_argument("--family none|hand|hand+macro");
+  if (s == "hand+diff" || s == "hand_diff") return fine::Family::hand_diff;
+  if (s == "hand+plain" || s == "hand_plain") return fine::Family::hand_plain;
+  throw std::invalid_argument("--family none|hand|hand+macro|hand+diff|hand+plain");
 }
 
 fs::path spec_path(const Ctx& c, sim::Effect e, fine::Domain d) { return c.data / std::format("{}_{}_spec.mixer", ename(e), fine::domain_name(d)); }
@@ -521,7 +584,7 @@ struct Problem {
 };
 
 Problem make_problem(const fine::Spec& sp, const Prepared& pr, const Table& t, const std::vector<int>& fam, const std::vector<int>& site_of_run,
-                     int max_rows) {
+                     int max_rows, const std::vector<std::string>& drop = {}) {
   Problem P;
   P.fam = fam;
   dcm::SearchProblem& p = P.p;
@@ -529,7 +592,9 @@ Problem make_problem(const fine::Spec& sp, const Prepared& pr, const Table& t, c
   const std::size_t stride = max_rows > 0 ? std::max<std::size_t>(1, (n + sz(max_rows) - 1) / sz(max_rows)) : 1;
   for (std::size_t i = 0; i < n; i += stride) P.rows.push_back(i);
   for (int e = 0; e < fine::kExperts; ++e) p.input_names.emplace_back(fine::expert_name(e));
-  for (const auto& g : fine::expert_groups()) p.groups.push_back({std::string(g.name), g.experts});
+  for (const auto& g : fine::expert_groups()) {
+    if (std::ranges::find(drop, std::string(g.name)) == drop.end()) p.groups.push_back({std::string(g.name), g.experts});
+  }
   for (const int k : fam) {
     p.context_names.emplace_back(fine::context_name(k));
     p.context_sizes.push_back(fine::context_size(sp, k));
@@ -698,15 +763,17 @@ dcm::SearchCost cost_model(const Ctx& c, sim::Effect e, const Problem& P, bool& 
   if (!ms.contains("base")) return cost;
   found = true;
   cost.base_ms = ms["base"];
-  for (const auto& g : fine::expert_groups()) {
+  for (const auto& g : P.p.groups) {  // the problem's groups (a dropped group is not there)
     cost.components.push_back(std::format("group_{}", g.name));
     cost.ms.push_back(ms.contains(std::format("group_{}", g.name)) ? ms[std::format("group_{}", g.name)] : 0.0);
     cost.group_components.push_back({static_cast<int>(cost.components.size()) - 1});
   }
   for (const int k : P.fam) {
     const std::string name = std::format("context_{}", fine::context_name(k));
+    // a G2a region context costs as the extra hook: one more mixer (its denoiser passes are reported apart, G2.10)
+    const std::string priced = fine::region_context(k) ? std::string("context_extra") : name;
     cost.components.push_back(name);
-    cost.ms.push_back(ms.contains(name) ? ms[name] : 0.0);
+    cost.ms.push_back(ms.contains(priced) ? ms[priced] : 0.0);
     cost.context_components.push_back({static_cast<int>(cost.components.size()) - 1});
   }
   cost.budget_ms = 1.0;
@@ -850,7 +917,7 @@ void search(const Ctx& c, sim::Effect e) {
   const fine::Spec sp = get_spec(c, e, d, M, train);
   const auto sites = run_sites(train);
   const Prepared ptr = prepare(sp, train), pv = prepare(sp, val);
-  const Problem P = make_problem(sp, ptr, train, fine::family_contexts(fam, one_shot(e)), sites, c.max_rows);
+  const Problem P = make_problem(sp, ptr, train, fine::family_contexts(fam, one_shot(e)), sites, c.max_rows, c.drop_groups);
   dcm::SearchOptions o;
   o.configs = c.quick ? 12 : c.configs;
   o.refine_rounds = c.quick ? 1 : c.refine;
@@ -867,7 +934,7 @@ void search(const Ctx& c, sim::Effect e) {
   if (!costed) log("search: no cost model for this effect yet (run bench-experts): searching without a budget");
   const bool free = c.budget_ms <= 0.0;
   o.cost.budget_ms = free ? std::numeric_limits<double>::infinity() : c.budget_ms;
-  const std::string label = (fam == fine::Family::hand_macro ? std::string("hand+macro") : c.family) + (free ? "/free" : "");
+  const std::string label = std::string(fine::family_name(fam)) + (free ? "/free" : "");
   const auto t0 = std::chrono::steady_clock::now();
   const dcm::SearchResult r = dcm::run_search(P.p, o);
   const double secs = seconds_since(t0);
@@ -907,9 +974,9 @@ void search(const Ctx& c, sim::Effect e) {
     log(std::format("search {}: global #{} {} (search bits {:.4f}, cost {:.3f} ms), validation bits per active pixel {:.4f}, version {}", key, k,
                     fine::describe(mix.config), -g.score, dcm::config_cost(o.cost, g.config), val_means.back(), mix.version().substr(0, 16)));
   }
-  merge_csv(c.results / "g_fine_search.csv", "effect,family,domain,seed,kind,index,bits,cost_ms,config", rows, 4);
-  merge_csv(c.results / "g_fine_search_runs.csv", "effect,family,domain,seed,run,site,nested_bits_active,nested_bits_all,nested_sq_err", run_rows, 4);
-  merge_csv(c.results / "g_fine_topval.csv", "effect,family,domain,seed,rank,run,bits_active,sq_err", val_rows, 4);
+  merge_csv(c.results / (c.prefix + "_search.csv"), "effect,family,domain,seed,kind,index,bits,cost_ms,config", rows, 4);
+  merge_csv(c.results / (c.prefix + "_search_runs.csv"), "effect,family,domain,seed,run,site,nested_bits_active,nested_bits_all,nested_sq_err", run_rows, 4);
+  merge_csv(c.results / (c.prefix + "_topval.csv"), "effect,family,domain,seed,rank,run,bits_active,sq_err", val_rows, 4);
   log(std::format("search {}: {} candidates, {} trainings in {:.0f} s; nested held-out bits per active pixel {:.4f} over {} training runs; rows {}",
                   key, r.candidates, r.trainings, secs, mean_of(nm.active), nm.active.size(), P.rows.size()));
 }
@@ -1163,6 +1230,121 @@ struct GenOption {
   int relock;  // fine::GenOptions::relock
 };
 
+// Active PSNR: pixels where either frame shows something (any channel above 4 of 255).
+double apsnr(std::span<const std::uint8_t> r, std::span<const std::uint8_t> t) {
+  double sum = 0, n = 0;
+  for (std::size_t i = 0; i < r.size(); i += 4) {
+    if (std::max({r[i], r[i + 1], r[i + 2], r[i + 3]}) <= 4 && std::max({t[i], t[i + 1], t[i + 2], t[i + 3]}) <= 4) continue;
+    n += 4;
+    for (std::size_t c = 0; c < 4; ++c) {
+      const double d = (static_cast<double>(r[i + c]) - static_cast<double>(t[i + c])) / 255.0;
+      sum += d * d;
+    }
+  }
+  return n > 0 ? metrics::psnr_from_mse(sum / n) : metrics::kPsnrCap;
+}
+
+// Tracking a run from its true state (as d-eval): the model with the true start (coarse state and 128-pixel fine fields)
+// as its only start point, and the true frames that follow.
+struct TrackTruth {
+  rollout::Model mt;
+  std::vector<float> controls;
+  std::uint64_t seed = 0;
+  std::vector<std::vector<std::uint8_t>> frames;
+};
+
+TrackTruth track_truth(const rollout::Model& M, sim::Effect e, std::uint64_t salt, std::uint64_t index, int frames) {
+  const sim::Params p = run_params(e, salt, index);
+  sim::Fluid truth(p);
+  const int warm = one_shot(e) ? 1 : 100;
+  for (int i = 0; i < warm; ++i) truth.step_frame();
+  const sim::State st = truth.state();
+  TrackTruth t;
+  t.mt = M;
+  t.mt.h.start_fine = kSize;
+  rollout::StartPoint sp;
+  sp.controls = {p.intensity, p.wind, p.turbulence};
+  sp.seed = p.seed;
+  sp.time = st.time;
+  sp.coarse.resize(sz(M.h.res) * sz(M.h.res) * rollout::kPhys);
+  rollout::coarse_from_sim(st, M.h.res, p.fps, sp.coarse);
+  sp.fine_t = st.temp;
+  sp.fine_d = st.soot;
+  t.mt.starts = {sp};
+  t.controls = sp.controls;
+  t.seed = p.seed;
+  for (int i = 0; i < frames; ++i) {
+    truth.step_frame();
+    t.frames.emplace_back(sz(kSize) * sz(kSize) * 4);
+    truth.render(t.frames.back());
+  }
+  return t;
+}
+
+// Active PSNR per frame of v1 (mix == nullptr) or DCM-fine against the truth, from the true start.
+std::vector<double> track_curve(const TrackTruth& t, const fine::Mixer* mix, const fine::GenOptions& g) {
+  rollout::State s = mix ? fine::start(t.mt, *mix, 0, kSize, t.controls, t.seed, g) : rollout::start(t.mt, 0, kSize, t.controls, t.seed);
+  fine::Frame f;
+  std::vector<float> rgba(sz(kSize) * sz(kSize) * 4);
+  std::vector<std::uint8_t> out(rgba.size());
+  std::vector<double> curve;
+  for (const auto& ref : t.frames) {
+    if (mix) {
+      fine::step(t.mt, *mix, s, t.controls, t.seed, g, f);
+    } else {
+      rollout::step(t.mt, s, t.controls, t.seed);
+    }
+    fine::render(t.mt, s, rgba);
+    for (std::size_t k = 0; k < rgba.size(); ++k) out[k] = static_cast<std::uint8_t>(rgba[k] * 255.f + 0.5f);
+    curve.push_back(apsnr(ref, out));
+  }
+  return curve;
+}
+
+// The per-effect rule of the G1 retry (docs/DCM.md §6.10), generator minus v1, paired over settings (statistics) and
+// over runs (tracking): the spectrum distance lower with an interval excluding zero; |ln motion ratio|, coverage L1 and
+// mean-frame PSNR not worse with an interval excluding zero; on validation also active PSNR at 8 and 30 frames not
+// worse with an interval excluding zero (the tracking guard).
+struct RuleCheck {
+  metrics::Interval spectrum, motion, coverage, psnr, f8, f30;
+  bool tracked = false;
+  [[nodiscard]] bool stats_pass() const { return spectrum.hi < 0 && !(motion.lo > 0) && !(coverage.lo > 0) && !(psnr.hi < 0); }
+  [[nodiscard]] bool pass() const { return stats_pass() && (!tracked || (!(f8.hi < 0) && !(f30.hi < 0))); }
+};
+
+double abs_log_motion(double m) { return std::abs(std::log(std::max(1e-3, m))); }
+
+template <class Get>
+std::vector<double> column(const std::vector<GenScore>& v, Get get) {
+  std::vector<double> out;
+  for (const GenScore& g : v) out.push_back(get(g));
+  return out;
+}
+
+RuleCheck check_rule(const std::vector<GenScore>& a, const std::vector<GenScore>& v1, const std::vector<std::vector<double>>* ta = nullptr,
+                     const std::vector<std::vector<double>>* tv = nullptr) {
+  RuleCheck r;
+  r.spectrum = metrics::paired_bootstrap(column(a, [](const GenScore& g) { return g.d.spectrum_l1; }), column(v1, [](const GenScore& g) { return g.d.spectrum_l1; }));
+  r.motion = metrics::paired_bootstrap(column(a, [](const GenScore& g) { return abs_log_motion(g.d.motion_ratio); }),
+                                       column(v1, [](const GenScore& g) { return abs_log_motion(g.d.motion_ratio); }));
+  r.coverage = metrics::paired_bootstrap(column(a, [](const GenScore& g) { return g.d.coverage_l1; }), column(v1, [](const GenScore& g) { return g.d.coverage_l1; }));
+  r.psnr = metrics::paired_bootstrap(column(a, [](const GenScore& g) { return g.d.mean_frame_psnr; }),
+                                     column(v1, [](const GenScore& g) { return g.d.mean_frame_psnr; }));
+  if (ta && tv) {
+    r.tracked = true;
+    const auto at = [](const std::vector<std::vector<double>>& c, std::size_t f) {
+      std::vector<double> v;
+      for (const auto& x : c) v.push_back(x.at(f - 1));
+      return v;
+    };
+    r.f8 = metrics::paired_bootstrap(at(*ta, 8), at(*tv, 8));
+    r.f30 = metrics::paired_bootstrap(at(*ta, 30), at(*tv, 30));
+  }
+  return r;
+}
+
+std::string iv_cells(const metrics::Interval& v) { return std::format("{:.4f},{:.4f},{:.4f}", v.mean, v.lo, v.hi); }
+
 fs::path released_path(const Ctx& c, sim::Effect e) { return c.data / std::format("{}_released.mixer", ename(e)); }
 fs::path released_gen_path(const Ctx& c, sim::Effect e) { return c.data / std::format("{}_released.gen", ename(e)); }
 
@@ -1179,7 +1361,7 @@ void train(const Ctx& c, sim::Effect e) {
   const auto sites = run_sites(train);
   const Prepared ptr = prepare(sp, train), pv = prepare(sp, val);
   const fine::Family fam = parse_family(c.family);
-  const Problem P = make_problem(sp, ptr, train, fine::family_contexts(fam, one_shot(e)), sites, 0);
+  const Problem P = make_problem(sp, ptr, train, fine::family_contexts(fam, one_shot(e)), sites, 0, c.drop_groups);
   dcm::SearchSpace space;
   std::vector<dcm::SearchConfig> top;
   {
@@ -1201,21 +1383,24 @@ void train(const Ctx& c, sim::Effect e) {
   log(std::format("train {}: {} validation references in {:.0f} s", ename(e), n_set, seconds_since(t_all)));
   std::vector<std::string> rows;
   // statistics of one generator over the validation settings (model seeds 820000 + i)
-  const auto evaluate = [&](const fine::Mixer* mix, const fine::GenOptions& g, const std::string& name) {
+  const auto evaluate_all = [&](const fine::Mixer* mix, const fine::GenOptions& g, const std::string& name) {
     std::vector<GenScore> sc(sz(n_set));
     parallel(n_set, c.threads, [&](int i) {
       const Clip cl = model_clip(M, mix, g, settings[sz(i)], 820000 + static_cast<std::uint64_t>(i), frames);
       sc[sz(i)] = gen_score(refs[sz(i)].all, metrics::stats(cl));
     });
+    for (int i = 0; i < n_set; ++i) rows.push_back(std::format("{},{},{:.2f},{},{},{}", ename(e), name, g.tau, g.relock, i, gen_cells(sc[sz(i)])));
+    return sc;
+  };
+  const auto mean_score = [](const std::vector<GenScore>& sc) {
     double mean = 0;
-    for (int i = 0; i < n_set; ++i) {
-      mean += sc[sz(i)].score / n_set;
-      rows.push_back(std::format("{},{},{:.2f},{},{},{}", ename(e), name, g.tau, g.relock, i, gen_cells(sc[sz(i)])));
-    }
+    for (const GenScore& g : sc) mean += g.score / static_cast<double>(sc.size());
     return mean;
   };
+  const auto evaluate = [&](const fine::Mixer* mix, const fine::GenOptions& g, const std::string& name) { return mean_score(evaluate_all(mix, g, name)); };
   const auto t0 = std::chrono::steady_clock::now();
-  const double v1_score = evaluate(nullptr, {}, "v1");
+  const std::vector<GenScore> v1_all = evaluate_all(nullptr, {}, "v1");
+  const double v1_score = mean_score(v1_all);
   log(std::format("train {}: v1 validation score {:.4f} ({:.0f} s)", ename(e), v1_score, seconds_since(t0)));
   // every candidate: trained on every training row, then the own-rollout pass
   struct Candidate {
@@ -1237,6 +1422,93 @@ void train(const Ctx& c, sim::Effect e) {
     cand_rows.push_back(std::format("{},{},{:.5f},{:.5f},{},{},\"{}\"", ename(e), k, cd.bits_one, cd.bits_two, n2, cd.two.version(), fine::describe(cd.one.config)));
     log(std::format("train {}: candidate {} {}: validation bits {:.4f} after training, {:.4f} after the own-rollout pass ({} rows), {:.0f} s", ename(e), k,
                     fine::describe(cd.one.config), cd.bits_one, cd.bits_two, n2, seconds_since(tk)));
+  }
+  if (c.rule_selection) {
+    // The G1 retry (docs/DCM.md §6.10): every candidate (after the own-rollout pass) at every relock with tau 0, then
+    // tau 0.5 for the chosen one. Admissible: the per-effect test rule on the validation settings, plus the tracking
+    // guard on 8 validation runs (salt 3) followed from their true state for 30 frames. Released: the admissible
+    // generator with the lowest mean calibration score.
+    const int n_track = c.quick ? 2 : 8, track_frames = 30;
+    std::vector<TrackTruth> truths(sz(n_track));
+    parallel(n_track, c.threads, [&](int r) { truths[sz(r)] = track_truth(M, e, kValSalt, static_cast<std::uint64_t>(r), track_frames); });
+    std::vector<std::string> track_rows, rule_rows;
+    const auto track_all = [&](const fine::Mixer* mix, const fine::GenOptions& g, const std::string& name) {
+      std::vector<std::vector<double>> curves(sz(n_track));
+      parallel(n_track, c.threads, [&](int r) { curves[sz(r)] = track_curve(truths[sz(r)], mix, g); });
+      for (int r = 0; r < n_track; ++r) {
+        track_rows.push_back(std::format("{},{},{:.2f},{},{},{:.3f},{:.3f}", ename(e), name, g.tau, g.relock, r, curves[sz(r)][7], curves[sz(r)][29]));
+      }
+      return curves;
+    };
+    const auto v1_track = track_all(nullptr, {}, "v1");
+    log(std::format("train {}: validation tracking truths and v1 in {:.0f} s", ename(e), seconds_since(t_all)));
+    struct Gen {
+      int k = 0;
+      GenOption go{};
+      double score = 0;
+      RuleCheck rule;
+    };
+    std::vector<Gen> gens;
+    const auto try_gen = [&](int k, GenOption go) {
+      const fine::Mixer& m = cand[sz(k)].two;
+      const std::string name = std::format("cand{}_pass2", k);
+      const fine::GenOptions g{go.tau, go.relock, {}};
+      const auto sc = evaluate_all(&m, g, name);
+      const auto tr = track_all(&m, g, name);
+      Gen gen{k, go, mean_score(sc), check_rule(sc, v1_all, &tr, &v1_track)};
+      const RuleCheck& r = gen.rule;
+      rule_rows.push_back(std::format("{},{},{:.2f},{},{:.4f},{},{},{},{},{},{},{}", ename(e), name, go.tau, go.relock, gen.score, iv_cells(r.spectrum),
+                                      iv_cells(r.motion), iv_cells(r.coverage), iv_cells(r.psnr), iv_cells(r.f8), iv_cells(r.f30), r.pass() ? "yes" : "no"));
+      log(std::format("train {}: {} tau {} relock {}: score {:.4f} (v1 {:.4f}); - v1: spectrum {}, |ln motion| {}, coverage {}, PSNR {}, tracking f8 {}, "
+                      "f30 {} -> {}",
+                      ename(e), name, go.tau, go.relock, gen.score, v1_score, iv(r.spectrum), iv(r.motion), iv(r.coverage, 4), iv(r.psnr, 2), iv(r.f8, 2),
+                      iv(r.f30, 2), r.pass() ? "ADMISSIBLE" : "not admissible"));
+      gens.push_back(gen);
+      return gen;
+    };
+    for (int k = 0; k < n_top; ++k) {
+      for (const int relock : {0, 1, 2}) (void)try_gen(k, {0.0, relock});
+    }
+    const auto pick = [&]() -> const Gen* {
+      const Gen* best_gen = nullptr;
+      for (const Gen& g : gens) {
+        if (g.rule.pass() && (!best_gen || g.score < best_gen->score)) best_gen = &g;
+      }
+      return best_gen;
+    };
+    const Gen* chosen = pick();
+    if (chosen) {  // the grain, once, for the chosen generator
+      const Gen at = *chosen;
+      (void)try_gen(at.k, {0.5, at.go.relock});
+      chosen = pick();
+    }
+    const bool admissible = chosen != nullptr;
+    if (!chosen) {  // nothing admissible: the best score is kept for the record, and the effect is not tested
+      for (const Gen& g : gens) {
+        if (!chosen || g.score < chosen->score) chosen = &g;
+      }
+    }
+    const fine::Mixer& rel = cand[sz(chosen->k)].two;
+    fine::save_mixer(released_path(c, e), rel);
+    std::ofstream(released_gen_path(c, e)) << std::format("{} {} {} 2 {} {}\n", chosen->go.tau, chosen->go.relock, chosen->k, rel.version(), admissible ? 1 : 0);
+    merge_csv(c.results / (c.prefix + "_val.csv"), "effect,candidate,tau,relock,setting,score,spectrum_l1,motion_ratio,coverage_l1,emission_l1,mean_frame_psnr",
+              rows);
+    merge_csv(c.results / (c.prefix + "_val_track.csv"), "effect,candidate,tau,relock,run,f8,f30", track_rows);
+    merge_csv(c.results / (c.prefix + "_val_rule.csv"),
+              "effect,candidate,tau,relock,score,spectrum,spectrum_lo,spectrum_hi,abs_log_motion,abs_log_motion_lo,abs_log_motion_hi,coverage,coverage_lo,"
+              "coverage_hi,psnr,psnr_lo,psnr_hi,track_f8,track_f8_lo,track_f8_hi,track_f30,track_f30_lo,track_f30_hi,admissible",
+              rule_rows);
+    merge_csv(c.results / (c.prefix + "_candidates.csv"), "effect,candidate,val_bits_trained,val_bits_own_rollout,own_rollout_rows,version,config", cand_rows);
+    bool costed = false;
+    const dcm::SearchCost cost = cost_model(c, e, P, costed);
+    merge_csv(c.results / (c.prefix + "_released.csv"), "effect,candidate,pass,tau,relock,val_score,v1_val_score,admissible,cost_ms,version,config",
+              {std::format("{},{},2,{},{},{:.4f},{:.4f},{},{:.3f},{},\"{}\"", ename(e), chosen->k, chosen->go.tau, chosen->go.relock, chosen->score, v1_score,
+                           admissible ? "yes" : "no", costed ? dcm::config_cost(cost, top[sz(chosen->k)]) : std::nan(""), rel.version(),
+                           fine::describe(rel.config))});
+    log(std::format("train {}: {} candidate {}, tau {}, relock {}: validation score {:.4f} against v1 {:.4f}; {}; version {}; {:.0f} min", ename(e),
+                    admissible ? "released" : "NOTHING ADMISSIBLE; best score kept for the record:", chosen->k, chosen->go.tau, chosen->go.relock,
+                    chosen->score, v1_score, fine::describe(rel.config), rel.version(), seconds_since(t_all) / 60.0));
+    return;
   }
   // tau and relock on the first candidate after the own-rollout pass; pass 1 alone at the chosen setting for comparison
   const std::vector<GenOption> grid = c.quick ? std::vector<GenOption>{{0.0, 0}, {0.0, 2}}
@@ -1283,12 +1555,13 @@ void train(const Ctx& c, sim::Effect e) {
   const fine::Mixer& rel = best_two ? cand[sz(winner)].two : cand[sz(winner)].one;
   fine::save_mixer(released_path(c, e), rel);
   std::ofstream(released_gen_path(c, e)) << std::format("{} {} {} {} {}\n", best_g.tau, best_g.relock, winner, best_two ? 2 : 1, rel.version());
-  merge_csv(c.results / "g_fine_val.csv", "effect,candidate,tau,relock,setting,score,spectrum_l1,motion_ratio,coverage_l1,emission_l1,mean_frame_psnr", rows);
-  merge_csv(c.results / "g_fine_candidates.csv", "effect,candidate,val_bits_trained,val_bits_own_rollout,own_rollout_rows,version,config", cand_rows);
+  merge_csv(c.results / (c.prefix + "_val.csv"), "effect,candidate,tau,relock,setting,score,spectrum_l1,motion_ratio,coverage_l1,emission_l1,mean_frame_psnr",
+            rows);
+  merge_csv(c.results / (c.prefix + "_candidates.csv"), "effect,candidate,val_bits_trained,val_bits_own_rollout,own_rollout_rows,version,config", cand_rows);
   {
     bool costed = false;
     const dcm::SearchCost cost = cost_model(c, e, P, costed);
-    merge_csv(c.results / "g_fine_released.csv", "effect,candidate,pass,tau,relock,val_score,v1_val_score,cost_ms,version,config",
+    merge_csv(c.results / (c.prefix + "_released.csv"), "effect,candidate,pass,tau,relock,val_score,v1_val_score,cost_ms,version,config",
               {std::format("{},{},{},{},{},{:.4f},{:.4f},{:.3f},{},\"{}\"", ename(e), winner, best_two ? 2 : 1, best_g.tau, best_g.relock, win_score,
                            v1_score, costed ? dcm::config_cost(cost, top[sz(winner)]) : std::nan(""), rel.version(), fine::describe(rel.config))});
   }
@@ -1299,19 +1572,6 @@ void train(const Ctx& c, sim::Effect e) {
 // --- eval-fine: G1c and the test, once ---------------------------------------------------------------------------
 
 namespace {
-
-double apsnr(std::span<const std::uint8_t> r, std::span<const std::uint8_t> t) {
-  double sum = 0, n = 0;
-  for (std::size_t i = 0; i < r.size(); i += 4) {
-    if (std::max({r[i], r[i + 1], r[i + 2], r[i + 3]}) <= 4 && std::max({t[i], t[i + 1], t[i + 2], t[i + 3]}) <= 4) continue;
-    n += 4;
-    for (std::size_t c = 0; c < 4; ++c) {
-      const double d = (static_cast<double>(r[i + c]) - static_cast<double>(t[i + c])) / 255.0;
-      sum += d * d;
-    }
-  }
-  return n > 0 ? metrics::psnr_from_mse(sum / n) : metrics::kPsnrCap;
-}
 
 const std::vector<int> kHorizons = {1, 4, 8, 16, 30, 60, 120, 240};
 
@@ -1326,14 +1586,24 @@ void eval(const Ctx& c, sim::Effect e) {
     std::ifstream in(released_gen_path(c, e));
     in >> g.tau >> g.relock;
     if (!in) throw std::runtime_error("no released generation options (run train-fine)");
+    if (c.rule_selection) {  // the G1 retry tests only a generator that passed the rule on validation (docs/DCM.md §6.10)
+      int k = 0, pass = 0, admissible = -1;
+      std::string version;
+      in >> k >> pass >> version >> admissible;
+      if (admissible != 1) {
+        log(std::format("eval {}: the released generator did not pass the rule on validation: not tested", ename(e)));
+        return;
+      }
+    }
   }
   log(std::format("eval {}: released mixer {} ({}), tau {}, relock {}", ename(e), mix.version(), fine::describe(mix.config), g.tau, g.relock));
   const Protocol pr = protocol(e);
   const auto settings = test_settings();
   const int n_set = c.quick ? 2 : static_cast<int>(settings.size());
   const int frames = c.quick ? std::min(60, pr.frames) : pr.frames;
-  // endless statistics at the held-out settings: real runs (seeds 900000 + i, as d-eval) against single shards from the
-  // nearest start point (seeds 920000 + i), v1 and DCM-fine through the reference; G1c: the first second of a cold start
+  // endless statistics at the held-out settings: real runs (seeds test_base + i; G1: 900000 + i, as d-eval) against
+  // single shards from the nearest start point (seeds test_base + 20000 + i), v1 and DCM-fine through the reference; G1c:
+  // the first second of a cold start
   struct SetResult {
     std::map<std::string, GenScore> d;
     Clip real, v1, dcm;
@@ -1342,10 +1612,10 @@ void eval(const Ctx& c, sim::Effect e) {
   parallel(n_set, c.threads, [&](int i) {
     const Setting& s = settings[sz(i)];
     SetResult& r = res[sz(i)];
-    Reference ref = real_run(e, s, 900000 + static_cast<std::uint64_t>(i), i == 0);
-    const Reference other = real_run(e, s, 910000 + static_cast<std::uint64_t>(i));
+    Reference ref = real_run(e, s, c.test_base + static_cast<std::uint64_t>(i), i == 0);
+    const Reference other = real_run(e, s, c.test_base + 10000 + static_cast<std::uint64_t>(i));
     r.d["real_other_seed"] = gen_score(ref.all, other.all);
-    const std::uint64_t seed = 920000 + static_cast<std::uint64_t>(i);
+    const std::uint64_t seed = c.test_base + 20000 + static_cast<std::uint64_t>(i);
     Clip v1 = model_clip(M, nullptr, {}, s, seed, frames);
     Clip dc = model_clip(M, &mix, g, s, seed, frames);
     r.d["v1"] = gen_score(ref.all, metrics::stats(v1));
@@ -1367,7 +1637,8 @@ void eval(const Ctx& c, sim::Effect e) {
   for (int i = 0; i < n_set; ++i) {
     for (const auto& [name, gs] : res[sz(i)].d) stat_rows.push_back(std::format("{},{},{},{}", ename(e), i, name, gen_cells(gs)));
   }
-  merge_csv(c.results / "g_fine_test_stats.csv", "effect,setting,method,score,spectrum_l1,motion_ratio,coverage_l1,emission_l1,mean_frame_psnr", stat_rows);
+  merge_csv(c.results / (c.prefix + "_test_stats.csv"), "effect,setting,method,score,spectrum_l1,motion_ratio,coverage_l1,emission_l1,mean_frame_psnr",
+            stat_rows);
   if (e == sim::Effect::fire || c.quick) {  // figure: real, v1, DCM-fine at the first held-out setting across the shard
     std::vector<int> cols = {0, 29, 59, 89, 119, 149, std::min(179, frames - 1)};
     if (one_shot(e) || frames < 180) cols = {0, frames / 6, frames / 3, frames / 2, 2 * frames / 3, 5 * frames / 6, frames - 1};
@@ -1384,17 +1655,17 @@ void eval(const Ctx& c, sim::Effect e) {
     const Clip a = pick(res[0].real), b = pick(res[0].v1), cc = pick(res[0].dcm);
     std::vector<const Clip*> sheet = {&a, &b, &cc};
     fs::create_directories(c.figures);
-    if (auto w = write_png(c.figures / std::format("g_fine_endless{}.png", e == sim::Effect::fire ? "" : "_" + ename(e)),
+    if (auto w = write_png(c.figures / std::format("{}_endless{}.png", c.prefix, e == sim::Effect::fire ? "" : "_" + ename(e)),
                            comparison_sheet(sheet, static_cast<int>(cols.size()), Background::black));
         !w) {
       log("figure: " + w.error());
     }
   }
-  // tracking: 8 held-out runs (salt 2) from their true state with their own seed, as d-eval
+  // tracking: 8 held-out runs (salt 2, from track_first; G1: 0 to 7, as d-eval) from their true state with their own seed
   const int n_runs = c.quick ? 2 : 8, KE = one_shot(e) ? 89 : (c.quick ? 60 : 240), warm = one_shot(e) ? 1 : 100;
   std::vector<std::array<std::vector<double>, 2>> curves(sz(n_runs));
   parallel(n_runs, c.threads, [&](int r) {
-    const sim::Params p = run_params(e, 2, static_cast<std::uint64_t>(r));
+    const sim::Params p = run_params(e, 2, static_cast<std::uint64_t>(c.track_first + r));
     sim::Fluid truth(p);
     for (int i = 0; i < warm; ++i) truth.step_frame();
     const sim::State st = truth.state();
@@ -1431,14 +1702,14 @@ void eval(const Ctx& c, sim::Effect e) {
   std::vector<std::string> track_rows;
   for (int r = 0; r < n_runs; ++r) {
     for (int m = 0; m < 2; ++m) {
-      std::string row = std::format("{},{},{}", ename(e), r, m == 0 ? "v1" : "dcm_fine");
+      std::string row = std::format("{},{},{}", ename(e), c.track_first + r, m == 0 ? "v1" : "dcm_fine");
       for (const int h : kHorizons) row += h <= KE ? std::format(",{:.3f}", curves[sz(r)][sz(m)][sz(h - 1)]) : ",";
       track_rows.push_back(row);
     }
   }
   std::string th = "effect,run,method";
   for (const int h : kHorizons) th += std::format(",f{}", h);
-  merge_csv(c.results / "g_fine_test_track.csv", th, track_rows);
+  merge_csv(c.results / (c.prefix + "_test_track.csv"), th, track_rows);
   log(std::format("eval {}: done in {:.1f} min", ename(e), seconds_since(t_all) / 60.0));
 }
 // --- bench-experts: what each part costs per pixel ---------------------------------------------------------------
@@ -2211,6 +2482,284 @@ void summary(const Ctx& c) {
   std::ofstream(c.results / "g_fine_summary.md") << "# Study G, design G1 (DCM-fine): generated tables\n\nGenerated by `nvfx_dcm fine-summary` from "
                                                      "results/experiments/g_fine_*.csv; see docs/DCM.md.\n\n"
                                                   << md;
+}
+
+// --- G1 retry: the per-effect decisions (docs/DCM.md §6.10) ------------------------------------------------------------
+
+std::string retry_markdown(const fs::path& results, const std::string& prefix) {
+  std::ostringstream md;
+  const std::vector<std::string> effects = {"fire", "smoke", "explosion"};
+  const auto file = [&](const std::string& what) { return results / std::format("{}_{}.csv", prefix, what); };
+  std::map<std::string, std::vector<std::string>> released;
+  if (fs::exists(file("released"))) {
+    for (const auto& r : read_quoted(file("released"))) released[r[0]] = r;
+  }
+  if (fs::exists(file("val_rule"))) {
+    md << "### Validation: every candidate at every relock (tau 0), against v1\n\nCalibration score (mean over the 10 validation settings) "
+          "and the rule's intervals, generator - v1, paired over settings (statistics) or the 8 validation runs (tracking, active PSNR). "
+          "`yes`: admissible (the per-effect rule plus the tracking guard).\n\n"
+          "| effect | generator | tau | relock | score | spectrum | abs ln motion | coverage | mean-frame PSNR | tracking f8 | tracking f30 | admissible |\n"
+          "|---|---|---:|---:|---:|---|---|---|---|---|---|---|\n";
+    for (const auto& r : read_quoted(file("val_rule"))) {
+      const auto ivc = [&](std::size_t k, int prec) {
+        const metrics::Interval v{cell(r, k), cell(r, k + 1), cell(r, k + 2)};
+        return std::format("{:+.{}f} [{:+.{}f}, {:+.{}f}]", v.mean, prec, v.lo, prec, v.hi, prec);
+      };
+      md << std::format("| {} | {} | {} | {} | {:.3f} | {} | {} | {} | {} | {} | {} | {} |\n", r[0], r[1], r[2], r[3], cell(r, 4), ivc(5, 3), ivc(8, 3), ivc(11, 4),
+                        ivc(14, 2), ivc(17, 2), ivc(20, 2), r[23]);
+    }
+    md << "\n| effect | released | tau | relock | validation score | v1 | admissible | cost (model) | version |\n|---|---|---:|---:|---:|---:|---|---:|---|\n";
+    for (const auto& e : effects) {
+      if (!released.contains(e)) continue;
+      const auto& r = released[e];
+      md << std::format("| {} | candidate {} | {} | {} | {:.4f} | {:.4f} | {} | {:.2f} ms | {} |\n", e, r[1], r[3], r[4], cell(r, 5), cell(r, 6), r[7], cell(r, 8),
+                        r[9]);
+    }
+  }
+  if (fs::exists(file("test_stats"))) {
+    std::map<std::string, std::map<std::string, std::vector<std::vector<double>>>> t;
+    for (const auto& r : read_quoted(file("test_stats"))) {
+      std::vector<double> x;
+      for (std::size_t k = 3; k < r.size(); ++k) x.push_back(cell(r, k));
+      t[r[0]][r[2]].push_back(x);
+    }
+    const auto col = [](const std::vector<std::vector<double>>& m, std::size_t k) {
+      std::vector<double> v;
+      for (const auto& x : m) v.push_back(x[k]);
+      return v;
+    };
+    md << "\n### Test (once): B's 10 held-out settings, fresh seeds\n\nMeans over settings.\n\n"
+          "| effect | method | spectrum L1 | motion ratio | coverage L1 | emission L1 | mean-frame PSNR | calibration score |\n|---|---|---:|---:|---:|---:|---:|---:|\n";
+    for (const auto& e : effects) {
+      if (!t.contains(e)) continue;
+      for (const std::string name : {"real_other_seed", "v1", "dcm_fine"}) {
+        const auto& m = t[e][name];
+        md << std::format("| {} | {} | {:.4f} | {:.3f} | {:.4f} | {:.4f} | {:.2f} | {:.3f} |\n", e, name, mean_of(col(m, 1)), mean_of(col(m, 2)), mean_of(col(m, 3)),
+                          mean_of(col(m, 4)), mean_of(col(m, 5)), mean_of(col(m, 0)));
+      }
+    }
+    md << "\nDCM-fine - v1, paired over the 10 settings, and the per-effect rule fixed in advance (§6.10).\n\n"
+          "| effect | spectrum L1 | abs ln motion ratio | coverage L1 | mean-frame PSNR | calibration score | cost (model) | decision |\n|---|---|---|---|---|---|---:|---|\n";
+    std::vector<std::string> dec;
+    for (const auto& e : effects) {
+      if (!t.contains(e)) continue;
+      // CSV cells: score, spectrum_l1, motion_ratio, coverage_l1, emission_l1, mean_frame_psnr (gen_cells)
+      const auto gs = [](const std::vector<double>& x) {
+        GenScore g;
+        g.score = x[0];
+        g.d.spectrum_l1 = x[1];
+        g.d.motion_ratio = x[2];
+        g.d.coverage_l1 = x[3];
+        g.d.emission_l1 = x[4];
+        g.d.mean_frame_psnr = x[5];
+        return g;
+      };
+      std::vector<GenScore> a, b;
+      for (const auto& x : t[e]["dcm_fine"]) a.push_back(gs(x));
+      for (const auto& x : t[e]["v1"]) b.push_back(gs(x));
+      const RuleCheck r = check_rule(a, b);
+      const double cost = released.contains(e) ? cell(released[e], 8) : std::nan("");
+      const bool pass = r.stats_pass() && cost <= 1.0 + 1e-9;
+      const metrics::Interval sc = metrics::paired_bootstrap(column(a, [](const GenScore& g) { return g.score; }), column(b, [](const GenScore& g) { return g.score; }));
+      md << std::format("| {} | {} | {} | {} | {} | {} | {:.2f} ms | **{}** |\n", e, iv(r.spectrum), iv(r.motion), iv(r.coverage, 4), iv(r.psnr, 2), iv(sc), cost,
+                        pass ? "passes" : "does not pass");
+      dec.push_back(std::format("{},{},{},{},{},{:.3f},{}", e, iv_cells(r.spectrum), iv_cells(r.motion), iv_cells(r.coverage), iv_cells(r.psnr), cost,
+                                pass ? "pass" : "fail"));
+    }
+    write_csv(file("decision"), "effect,spectrum,spectrum_lo,spectrum_hi,abs_log_motion,abs_log_motion_lo,abs_log_motion_hi,coverage,coverage_lo,coverage_hi,"
+                                "psnr,psnr_lo,psnr_hi,cost_ms,decision",
+              dec);
+    md << "\n### G1c with the retried generators: the first second\n\n| effect | v1 usual | v1 cold | DCM-fine usual | DCM-fine cold | DCM cold - v1 usual "
+          "(score) | (spectrum) |\n|---|---:|---:|---:|---:|---|---|\n";
+    for (const auto& e : effects) {
+      if (!t.contains(e)) continue;
+      auto& m = t[e];
+      md << std::format("| {} | {:.3f} | {:.3f} | {:.3f} | {:.3f} | {} | {} |\n", e, mean_of(col(m["g1c_v1_usual"], 0)), mean_of(col(m["g1c_v1_cold"], 0)),
+                        mean_of(col(m["g1c_dcm_usual"], 0)), mean_of(col(m["g1c_dcm_cold"], 0)), fmt_iv(col(m["g1c_dcm_cold"], 0), col(m["g1c_v1_usual"], 0)),
+                        fmt_iv(col(m["g1c_dcm_cold"], 1), col(m["g1c_v1_usual"], 1)));
+    }
+  }
+  if (fs::exists(file("test_track"))) {
+    std::map<std::string, std::map<std::string, std::vector<std::vector<double>>>> t;
+    for (const auto& r : read_quoted(file("test_track"))) {
+      std::vector<double> x;
+      for (std::size_t k = 3; k < r.size(); ++k) x.push_back(cell(r, k));
+      t[r[0]][r[2]].push_back(x);
+    }
+    md << "\n### Test: tracking 8 fresh held-out runs (salt 2, runs 8 to 15) from their true state (reported, not in the rule)\n\n"
+          "| effect | v1 1 / 8 / 30 / 60 | DCM-fine 1 / 8 / 30 / 60 | difference at 1 | 8 | 30 | 60 |\n|---|---|---|---|---|---|---|\n";
+    for (const auto& e : effects) {
+      if (!t.contains(e)) continue;
+      const auto& a = t[e]["dcm_fine"];
+      const auto& b = t[e]["v1"];
+      std::string va, vb, diffs;
+      for (const std::size_t k : {std::size_t{0}, std::size_t{2}, std::size_t{4}, std::size_t{5}}) {
+        std::vector<double> x, y;
+        for (std::size_t r = 0; r < a.size(); ++r) {
+          x.push_back(a[r][k]);
+          y.push_back(b[r][k]);
+        }
+        va += std::format("{}{:.2f}", va.empty() ? "" : " / ", mean_of(y));
+        vb += std::format("{}{:.2f}", vb.empty() ? "" : " / ", mean_of(x));
+        diffs += " | " + fmt_iv(x, y, 2);
+      }
+      md << std::format("| {} | {} | {}{} |\n", e, va, vb, diffs);
+    }
+  }
+  return md.str();
+}
+
+void summary_retry(const Ctx& c) {
+  const std::string md = retry_markdown(c.results, c.prefix);
+  std::print("{}", md);
+  std::ofstream(c.results / (c.prefix + "_summary.md")) << std::format("# Study G, the G1 retry (DCM-fine, round 2): generated tables\n\nGenerated by "
+                                                                       "`nvfx_dcm fine-summary --prefix {}` from results/experiments/{}_*.csv; see "
+                                                                       "docs/DCM.md §6.10.\n\n",
+                                                                       c.prefix, c.prefix)
+                                                         << md;
+}
+
+// --- G2a: region contexts of the recorded frames, and the decision ---------------------------------------------------
+
+void region_contexts(const Ctx& c, sim::Effect e, const fs::path& denoiser, const fs::path& states) {
+  namespace dd = dcm::ddpm;
+  const auto t0 = std::chrono::steady_clock::now();
+  const rollout::Model M = load_v1(c, e);
+  auto ld = dd::load(denoiser);
+  if (!ld) throw std::runtime_error(ld.error());
+  const dd::Denoiser d = std::move(*ld);
+  auto ts = dd::load_dataset(states);
+  if (!ts) throw std::runtime_error(ts.error());
+  const int R = d.cfg.res, C = d.cfg.channels, nfit = std::min(c.quick ? 100 : 1500, ts->count);
+  if (R != M.h.res) throw std::runtime_error("region contexts: the denoiser's grid differs from the model's");
+  std::vector<int> fit_states;
+  for (int i = 0; i < nfit; ++i) fit_states.push_back(static_cast<int>(static_cast<long long>(i) * ts->count / nfit));
+  // the context models of G2.5 (nvfx_dcm contexts): the same spec, states and seeds, so the same clusters
+  dd::ContextSpec sd, sp;
+  sp.diffusion = false;
+  const dd::ContextModel cd = dd::fit_contexts(&d, sd, *ts, fit_states, R, C, c.threads);
+  const dd::ContextModel cp = dd::fit_contexts(nullptr, sp, *ts, fit_states, R, C, c.threads);
+  if (cd.km.size() != 3 || cp.km.size() != 3) throw std::logic_error("region contexts: K = 4, 8, 16 expected");
+  log(std::format("region contexts {}: context models fitted on {} training states in {:.0f} s (denoiser {})", ename(e), nfit, seconds_since(t0),
+                  dd::version(d).substr(0, 16)));
+  for (const bool val : {false, true}) {
+    const int n = val ? (c.quick ? 3 : kValRuns) : (c.quick ? 6 : kTrainRuns);
+    const std::uint64_t salt = val ? kValSalt : kTrainSalt;
+    std::vector<std::map<std::pair<int, int>, RegionPlanes>> per(sz(n));
+    std::atomic<int> done{0};
+    parallel(n, c.threads, [&](int i) {
+      const sim::Params p = run_params(e, salt, static_cast<std::uint64_t>(i));
+      const std::vector<float> controls{p.intensity, p.wind, p.turbulence};
+      std::vector<float> cond(sz(M.h.cond()));
+      (void)record_run(M, e, salt, static_cast<std::uint64_t>(i), i, false, 0, 0,
+                       [&](int k, const rollout::State& s) {
+                         // the condition of the state the stepper produced (time k + 1 frames), as the denoiser's states
+                         rollout::condition(M, controls, s.time + 1.f / M.fps, cond);
+                         const auto pd = dd::context_planes(&d, cd, s.coarse, M.h.channels(), d.scale, cond, R);
+                         const auto pp = dd::context_planes(nullptr, cp, s.coarse, M.h.channels(), d.scale, cond, R);
+                         RegionPlanes pl{};
+                         for (std::size_t j = 0; j < 3; ++j) {
+                           for (std::size_t r = 0; r < kRegionCells; ++r) {
+                             pl[j * kRegionCells + r] = static_cast<std::uint8_t>(pd[j][r]);
+                             pl[(3 + j) * kRegionCells + r] = static_cast<std::uint8_t>(pp[j][r]);
+                           }
+                         }
+                         per[sz(i)][{i, k}] = pl;
+                       },
+                       false);
+      log(std::format("region contexts {} {} run {} ({}/{}), {:.0f} s", ename(e), val ? "validation" : "training", i, ++done, n, seconds_since(t0)));
+    });
+    std::map<std::pair<int, int>, RegionPlanes> all;
+    for (auto& m : per) all.merge(m);
+    write_regions(regions_path(c.regions, e, val ? "val" : "train"), all);
+    log(std::format("region contexts {} {}: {} frames written to {}", ename(e), val ? "validation" : "training", all.size(),
+                    regions_path(c.regions, e, val ? "val" : "train").string()));
+  }
+}
+
+void context_summary(const Ctx& c) {
+  const fs::path runs = c.results / (c.prefix + "_search_runs.csv");
+  if (!fs::exists(runs)) throw std::runtime_error("no " + runs.string() + " (run the G2a searches)");
+  std::map<std::string, std::map<int, std::vector<double>>> nb;  // family -> seed -> nested bits per training run
+  for (const auto& r : read_quoted(runs)) {
+    if (r[0] == "fire" && r[2] == "linear") nb[r[1]][std::stoi(r[3])].push_back(cell(r, 6));
+  }
+  std::map<std::string, std::map<int, double>> topval;  // family -> seed -> global #0 validation bits
+  if (fs::exists(c.results / (c.prefix + "_topval.csv"))) {
+    std::map<std::string, std::vector<double>> v;
+    for (const auto& r : read_quoted(c.results / (c.prefix + "_topval.csv"))) {
+      if (r[0] == "fire" && r[4] == "0") v[r[1] + "," + r[3]].push_back(cell(r, 6));
+    }
+    for (const auto& [k, x] : v) topval[k.substr(0, k.find(','))][std::stoi(k.substr(k.find(',') + 1))] = mean_of(x);
+  }
+  const std::vector<std::string> fams = {"hand", "hand+diff", "hand+plain"};
+  const std::vector<int> seeds = {0, 1, 2};
+  for (const auto& f : fams) {
+    for (const int s : seeds) {
+      if (!nb[f].contains(s)) throw std::runtime_error(std::format("G2a: no search for family {} seed {}", f, s));
+    }
+  }
+  std::ostringstream md;
+  std::vector<std::string> rows;
+  md << "| family | seed 0 | seed 1 | seed 2 | 3-seed mean | global #0 validation bits (seeds 0 / 1 / 2) |\n|---|---:|---:|---:|---:|---|\n";
+  for (const auto& f : fams) {
+    md << std::format("| {} | {:.4f} | {:.4f} | {:.4f} | {:.4f} | {:.4f} / {:.4f} / {:.4f} |\n", f, mean_of(nb[f][0]), mean_of(nb[f][1]), mean_of(nb[f][2]),
+                      (mean_of(nb[f][0]) + mean_of(nb[f][1]) + mean_of(nb[f][2])) / 3.0, topval[f][0], topval[f][1], topval[f][2]);
+  }
+  // the search's own seed noise: the largest difference of mean nested bits between two seeds of one family
+  double sigma = 0;
+  md << "\nSeed noise (nested bits, seed b - seed a, paired over the 48 training runs):\n\n| family | 1 - 0 | 2 - 0 | 2 - 1 |\n|---|---|---|---|\n";
+  for (const auto& f : fams) {
+    std::string line = "| " + f;
+    for (const auto& [a, b] : std::vector<std::pair<int, int>>{{0, 1}, {0, 2}, {1, 2}}) {
+      const metrics::Interval v = metrics::paired_bootstrap(nb[f][b], nb[f][a]);
+      sigma = std::max(sigma, std::abs(mean_of(nb[f][b]) - mean_of(nb[f][a])));
+      line += " | " + iv(v, 4);
+      rows.push_back(std::format("seed_noise,{},{} - {},{}", f, b, a, iv_cells(v)));
+    }
+    md << line << " |\n";
+  }
+  md << std::format("\nThe seed noise sigma (largest absolute difference of two seeds' mean nested bits in one family): {:.4f} bits.\n", sigma);
+  // (1) every pairing of a hand+diff seed with a hand seed below zero
+  int below = 0;
+  md << "\nhand+diff - hand for every pairing of seeds (nested bits, paired over runs):\n\n| hand+diff seed | hand seed 0 | hand seed 1 | hand seed 2 |\n|---|---|---|---|\n";
+  for (const int i : seeds) {
+    std::string line = std::format("| {}", i);
+    for (const int j : seeds) {
+      const metrics::Interval v = metrics::paired_bootstrap(nb["hand+diff"][i], nb["hand"][j]);
+      below += v.hi < 0 ? 1 : 0;
+      line += " | " + iv(v, 4);
+      rows.push_back(std::format("pairing,hand+diff s{} - hand s{},,{}", i, j, iv_cells(v)));
+    }
+    md << line << " |\n";
+  }
+  const auto avg3 = [&](const std::string& f) {
+    std::vector<double> v(nb[f][0].size(), 0.0);
+    for (const int s : seeds) {
+      for (std::size_t r = 0; r < v.size(); ++r) v[r] += nb[f][s][r] / 3.0;
+    }
+    return v;
+  };
+  const auto D = avg3("hand+diff"), H = avg3("hand"), P = avg3("hand+plain");
+  const metrics::Interval dh = metrics::paired_bootstrap(D, H), dp = metrics::paired_bootstrap(D, P), ph = metrics::paired_bootstrap(P, H);
+  rows.push_back(std::format("three_seed,hand+diff - hand,,{}", iv_cells(dh)));
+  rows.push_back(std::format("three_seed,hand+diff - hand+plain,,{}", iv_cells(dp)));
+  rows.push_back(std::format("three_seed,hand+plain - hand,,{}", iv_cells(ph)));
+  const bool c1 = below == 9, c2 = dh.mean < -sigma, c3 = dp.hi < 0;
+  const bool keep = c1 && c2 && c3;
+  md << std::format("\nThree-seed means, paired over runs: hand+diff - hand {}; hand+diff - hand+plain {}; hand+plain - hand {}.\n", iv(dh, 4), iv(dp, 4),
+                    iv(ph, 4));
+  md << std::format("\n**Rule (G2.10):** (1) all 9 pairings below zero: {} of 9; (2) the 3-seed mean of hand+diff - hand below -sigma ({:+.4f} against "
+                    "{:+.4f}): {}; (3) hand+diff beats the plain floor (interval below zero): {}. **G2a {}.**\n",
+                    below, dh.mean, -sigma, c2 ? "yes" : "no", c3 ? "yes" : "no", keep ? "keeps the diffusion contexts" : "stops: the diffusion contexts are not kept");
+  rows.push_back(std::format("decision,sigma {:.4f}; pairings below zero {} of 9; mean below -sigma {}; beats plain {},,,,,{}", sigma, below, c2 ? "yes" : "no",
+                             c3 ? "yes" : "no", keep ? "keep" : "stop"));
+  write_csv(c.results / (c.prefix + "_decision.csv"), "kind,comparison,detail,mean,lo,hi", rows);
+  std::print("{}", md.str());
+  std::ofstream(c.results / (c.prefix + "_summary.md")) << "# Study G, G2a: denoiser contexts in the nested search (fire): generated tables\n\nGenerated by "
+                                                           "`nvfx_dcm ctx-summary` from results/experiments/"
+                                                        << c.prefix << "_*.csv; see docs/DCM.md G2.10. Nested held-out bits per active pixel.\n\n"
+                                                        << md.str();
 }
 
 }  // namespace nfx::fine_study

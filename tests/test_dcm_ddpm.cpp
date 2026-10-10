@@ -8,6 +8,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <filesystem>
 #include <format>
 #include <set>
 #include <string>
@@ -214,6 +215,39 @@ TEST(Ddpm, ShortTrainingGivesOneHash) {
   o.seed = 2;
   (void)train(d, data, o);
   EXPECT_FALSE(hashes.contains(version(d)));
+}
+
+// A training stopped after a log and resumed from its state file ends with the same weights as one never stopped.
+TEST(Ddpm, ResumedTrainingGivesTheSameWeights) {
+  const Config c = toy_config();
+  const Dataset data = toy_set(c, 32, 3);
+  TrainOptions o;
+  o.steps = 8;
+  o.batch = 8;
+  o.warmup = 2;
+  o.log_every = 3;
+  Denoiser whole = init_denoiser(c, 9);
+  set_range(whole, data);
+  (void)train(whole, data, o);
+  const auto state = std::filesystem::temp_directory_path() / "nvfx_ddpm_resume_test.state";
+  std::filesystem::remove(state);
+  Denoiser part = init_denoiser(c, 9);
+  set_range(part, data);
+  TrainOptions o1 = o;
+  o1.state_path = state;
+  o1.stop_after = 4;  // stopped after step 4: the state of step 3 (the last log) is on disk
+  (void)train(part, data, o1);
+  EXPECT_NE(version(part), version(whole));
+  Denoiser resumed = init_denoiser(c, 9);
+  set_range(resumed, data);
+  TrainOptions o2 = o;
+  o2.state_path = state;
+  o2.threads = 2;
+  const TrainResult r = train(resumed, data, o2);
+  std::filesystem::remove(state);
+  EXPECT_EQ(version(resumed), version(whole));
+  ASSERT_FALSE(r.curve.empty());
+  EXPECT_EQ(r.curve.front().step, 6);  // resumed at step 4: the next logs are 6 and 8
 }
 
 TEST(Ddpm, SerialisationRoundTrips) {
