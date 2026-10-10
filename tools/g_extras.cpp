@@ -462,6 +462,11 @@ struct PixelRow {
 };
 static_assert(std::is_trivially_copyable_v<PixelRow>);
 
+// The renderer mixer's rates (docs/DCM.md §10.6, amendment 1): chosen on the training rows' own error before any
+// validation run. With the mixer's default annealing (rates halved after 2,000 uses of a context) it hardly left the
+// learned renderer: the experts are close to each other, and normalised LMS moves slowly along their difference.
+constexpr double kG4aLr = 0.1, kG4aAnneal = 1e5;
+
 fs::path g4a_rows_path(const Ctx& c, sim::Effect e) { return c.data / std::format("g4a_rows_{}.bin", ename(e)); }
 fs::path g4a_mixer_path(const Ctx& c, const ex::RenderMixConfig& cfg) { return c.data / std::format("g4a_{}.mixer", cfg_tag(cfg)); }
 
@@ -540,7 +545,7 @@ void g4a_train(const Ctx& c) {
   std::vector<std::string> out;
   for (const auto& cfg : g4a_configs()) {
     const double t0 = thread_cpu_s();
-    ex::RenderMixer mix(cfg);
+    ex::RenderMixer mix(cfg, kG4aLr, kG4aAnneal);
     std::vector<std::size_t> order(rows.size() * 4);
     std::iota(order.begin(), order.end(), std::size_t{0});
     std::mt19937_64 rng(1);
@@ -1041,6 +1046,331 @@ void g5b_eval(const Ctx& c, const std::string& split) {
 }
 
 // =====================================================================================================================
+// summary: paired bootstrap tables, the choices and the decisions by the rules of docs/DCM.md §10
+// =====================================================================================================================
+
+struct Csv {
+  std::vector<std::string> header;
+  std::vector<std::vector<std::string>> rows;
+  int col(const std::string& name) const {
+    for (std::size_t k = 0; k < header.size(); ++k) {
+      if (header[k] == name) return static_cast<int>(k);
+    }
+    throw std::runtime_error("no column " + name);
+  }
+};
+Csv load_csv(const fs::path& p) {
+  Csv c;
+  std::ifstream in(p);
+  std::string line;
+  if (!std::getline(in, line)) return c;
+  std::stringstream hs(line);
+  for (std::string cell; std::getline(hs, cell, ',');) c.header.push_back(cell);
+  c.rows = read_csv(p);
+  return c;
+}
+
+// A measure of a method: its value per setting (index = setting).
+struct Measure {
+  std::string name;
+  bool higher_better = true;
+};
+const std::vector<Measure>& endless_measures() {
+  static const std::vector<Measure> v = {{"score", false}, {"spectrum_l1", false}, {"abs_ln_motion", false}, {"coverage_l1", false}, {"mean_frame_psnr", true}};
+  return v;
+}
+double cell_value(const Csv& c, const std::vector<std::string>& r, const std::string& name) {
+  if (name == "abs_ln_motion") return std::abs(std::log(std::max(1e-6, std::stod(r[sz(c.col("motion_ratio"))]))));
+  return std::stod(r[sz(c.col(name))]);
+}
+using Series = std::map<std::string, std::vector<double>>;  // measure -> per setting
+// effect -> method -> measure -> values over settings (rows with a method column)
+std::map<std::string, std::map<std::string, Series>> by_method(const Csv& c, const std::vector<std::string>& measures) {
+  std::map<std::string, std::map<std::string, Series>> out;
+  std::map<std::string, std::map<std::string, std::map<int, std::vector<double>>>> tmp;
+  for (const auto& r : c.rows) {
+    const std::string e = r[sz(c.col("effect"))], m = r[sz(c.col("method"))];
+    const int s = std::stoi(r[sz(c.col("setting"))]);
+    for (const auto& name : measures) out[e][m][name];
+    for (std::size_t k = 0; k < measures.size(); ++k) tmp[e][m][s].push_back(cell_value(c, r, measures[k]));
+  }
+  for (auto& [e, ms] : tmp) {
+    for (auto& [m, ss] : ms) {
+      for (auto& [s, vals] : ss) {
+        (void)s;
+        for (std::size_t k = 0; k < measures.size(); ++k) out[e][m][measures[k]].push_back(vals[k]);
+      }
+    }
+  }
+  return out;
+}
+
+double mean_of(const std::vector<double>& v) { return v.empty() ? std::nan("") : std::accumulate(v.begin(), v.end(), 0.0) / static_cast<double>(v.size()); }
+std::string iv_text(const metrics::Interval& iv, int prec = 3) {
+  return std::format("{:+.{}f} [{:+.{}f}, {:+.{}f}]{}", iv.mean, prec, iv.lo, prec, iv.hi, prec, iv.covers_zero() ? " (tie)" : "");
+}
+metrics::Interval diff(const std::vector<double>& a, const std::vector<double>& b) { return metrics::paired_bootstrap(a, b, 10000, 1); }
+bool worse(const metrics::Interval& iv, bool higher_better) { return higher_better ? iv.hi < 0 : iv.lo > 0; }
+
+struct Md {
+  std::ostringstream o;
+  void line(const std::string& s = "") { o << s << "\n"; }
+};
+
+// G4a: the pilot, validation (the choice), test (the decision).
+void summary_g4a(const Ctx& c, Md& md) {
+  const fs::path pilot = c.results / "g_extras_g4a_pilot.csv";
+  if (fs::exists(pilot)) {
+    const Csv p = load_csv(pilot);
+    const auto bm = by_method(p, {"track_1_30", "track_31_end"});
+    md.line("#### G4a pilot: each renderer alone (validation tracking, active PSNR in dB, means over 10 settings)");
+    md.line();
+    md.line("| effect | renderer | frames 1-30 | frames 31-60 (89) | minus learned, frames 1-30 |");
+    md.line("|---|---|---:|---:|---|");
+    for (const auto& [e, ms] : bm) {
+      for (const auto& [m, s] : ms) {
+        const std::string d = m == "learned" ? "" : iv_text(diff(s.at("track_1_30"), ms.at("learned").at("track_1_30")), 2);
+        md.line(std::format("| {} | {} | {:.2f} | {:.2f} | {} |", e, m, mean_of(s.at("track_1_30")), mean_of(s.at("track_31_end")), d));
+      }
+    }
+    md.line();
+  }
+  const std::vector<std::string> meas = {"track_1_30", "track_31_end", "score", "spectrum_l1", "abs_ln_motion", "coverage_l1", "mean_frame_psnr"};
+  const std::vector<std::string> rule = {"track_1_30", "track_31_end", "score", "mean_frame_psnr"};
+  const auto hb = [](const std::string& m) { return m.starts_with("track") || m == "mean_frame_psnr"; };
+  for (const std::string split : {"val", "test"}) {
+    const fs::path f = c.results / std::format("g_extras_g4a_{}.csv", split);
+    if (!fs::exists(f)) continue;
+    const auto bm = by_method(load_csv(f), meas);
+    md.line(std::format("#### G4a {}: v1's learned renderer and the mixers (means over settings; differences paired over settings)", split));
+    md.line();
+    md.line("| effect | method | frames 1-30 | 31-60 (89) | score | spectrum | \\|ln motion\\| | coverage L1 | mean-frame PSNR |");
+    md.line("|---|---|---:|---:|---:|---:|---:|---:|---:|");
+    for (const auto& [e, ms] : bm) {
+      for (const auto& [m, s] : ms) {
+        std::string row = std::format("| {} | {} |", e, m);
+        for (const auto& k : meas) row += std::format(" {:.4f} |", mean_of(s.at(k)));
+        md.line(row);
+      }
+    }
+    md.line();
+    md.line("| effect | method - v1 | frames 1-30 | 31-60 (89) | score | spectrum | \\|ln motion\\| | coverage L1 | mean-frame PSNR | worse in a rule measure |");
+    md.line("|---|---|---|---|---|---|---|---|---|---|");
+    std::map<std::string, std::pair<bool, double>> ok;  // method -> (not worse anywhere, sum of first-second gains)
+    for (const auto& [e, ms] : bm) {
+      for (const auto& [m, s] : ms) {
+        if (m == "v1") continue;
+        std::string row = std::format("| {} | {} |", e, m);
+        bool bad = false;
+        for (const auto& k : meas) {
+          const auto iv = diff(s.at(k), ms.at("v1").at(k));
+          row += " " + iv_text(iv, k.starts_with("track") || k == "mean_frame_psnr" ? 2 : 4) + " |";
+          if (std::ranges::find(rule, k) != rule.end() && worse(iv, hb(k))) bad = true;
+        }
+        md.line(row + (bad ? " **yes** |" : " no |"));
+        auto& o = ok.try_emplace(m, std::make_pair(true, 0.0)).first->second;
+        o.first = o.first && !bad;
+        o.second += mean_of(s.at("track_1_30")) - mean_of(ms.at("v1").at("track_1_30"));
+      }
+    }
+    md.line();
+    if (split == "val") {
+      std::string best;
+      double gain = -1e30;
+      for (const auto& cfg : g4a_configs()) {  // in order of inputs: ties go to fewer
+        const auto it = ok.find(cfg_tag(cfg));
+        if (it == ok.end() || !it->second.first) continue;
+        if (it->second.second / 3.0 > gain + 1e-9) {
+          gain = it->second.second / 3.0;
+          best = it->first;
+        }
+      }
+      md.line(best.empty() ? "**G4a validation: no configuration is free of a worse measure; G4a stops.**"
+                           : std::format("**G4a choice (validation):** `{}`, mean first-second gain over the effects {:+.2f} dB.", best, gain));
+      md.line();
+    } else {
+      for (const auto& [m, o] : ok) {
+        const auto& ms = bm.at("explosion");
+        const auto iv = diff(ms.at(m).at("track_1_30"), ms.at("v1").at("track_1_30"));
+        const bool pass = iv.lo > 0 && o.first;
+        md.line(std::format("**G4a decision (test), `{}`:** explosion first second {} dB; an effect worse in a rule measure: {}. **{}**", m, iv_text(iv, 2),
+                            o.first ? "no" : "yes", pass ? "Kept." : "Not kept."));
+      }
+      md.line();
+    }
+  }
+}
+
+// G5a: per setting, the mean over slots of the shard each policy plays.
+void summary_g5a(const Ctx& c, Md& md) {
+  for (const std::string split : {"val", "test"}) {
+    const fs::path f = c.results / std::format("g_extras_g5a_{}.csv", split);
+    if (!fs::exists(f)) continue;
+    const Csv t = load_csv(f);
+    std::map<std::string, std::map<int, std::map<int, std::vector<std::vector<std::string>>>>> cand;  // effect, setting, slot -> rows by cand
+    std::map<std::string, std::pair<std::vector<float>, std::vector<int>>> auc;
+    for (const auto& r : t.rows) {
+      const std::string e = r[0];
+      const int s = std::stoi(r[1]), slot = std::stoi(r[2]), j = std::stoi(r[3]);
+      const float p = std::stof(r[6]);
+      if (slot < 0) {
+        auc[e].first.push_back(p);
+        auc[e].second.push_back(1);
+        continue;
+      }
+      if (j == 0 || true) {
+        auc[e].first.push_back(p);
+        auc[e].second.push_back(0);
+      }
+      auto& v = cand[e][s][slot];
+      if (static_cast<int>(v.size()) <= j) v.resize(sz(j + 1));
+      v[sz(j)] = r;
+    }
+    md.line(std::format("#### G5a {}: shard policies (means over settings of the mean over 4 slots; differences paired over settings)", split));
+    md.line();
+    for (const auto& [e, sets] : cand) {
+      const int kmax = static_cast<int>(sets.begin()->second.begin()->second.size());
+      md.line(std::format("{}: critic AUC, real windows against every candidate's first second: {:.3f}", e, dcm::roc_auc(auc[e].first, auc[e].second)));
+      md.line();
+      md.line("| policy | score | spectrum | \\|ln motion\\| | coverage L1 | mean-frame PSNR |");
+      md.line("|---|---:|---:|---:|---:|---:|");
+      const auto& meas = endless_measures();
+      std::map<std::string, std::map<std::string, std::vector<double>>> pol;  // policy -> measure -> per setting
+      std::vector<std::string> order;
+      const auto add = [&](const std::string& name, const std::function<int(const std::vector<std::vector<std::string>>&)>& pick, bool average) {
+        if (!pol.contains(name)) order.push_back(name);
+        for (const auto& [s, slots] : sets) {
+          (void)s;
+          for (const auto& m : meas) {
+            double acc = 0;
+            for (const auto& [slot, rows] : slots) {
+              (void)slot;
+              if (average) {
+                double a = 0;
+                for (const auto& r : rows) a += cell_value(t, r, m.name) / static_cast<double>(rows.size());
+                acc += a;
+              } else {
+                acc += cell_value(t, rows[sz(pick(rows))], m.name);
+              }
+            }
+            pol[name][m.name].push_back(acc / static_cast<double>(slots.size()));
+          }
+        }
+      };
+      add("runtime (candidate 0)", [](const auto&) { return 0; }, false);
+      for (const int K : {2, 4, 8}) {
+        if (K > kmax) continue;
+        add(std::format("critic, K = {}", K), [K](const auto& rows) {
+          int b = 0;
+          for (int j = 1; j < K; ++j) {
+            if (std::stod(rows[sz(j)][6]) > std::stod(rows[sz(b)][6])) b = j;
+          }
+          return b;
+        }, false);
+        add(std::format("oracle, K = {}", K), [K, &t](const auto& rows) {
+          int b = 0;
+          for (int j = 1; j < K; ++j) {
+            if (cell_value(t, rows[sz(j)], "score") < cell_value(t, rows[sz(b)], "score")) b = j;
+          }
+          return b;
+        }, false);
+      }
+      add(std::format("mean of {} candidates", kmax), [](const auto&) { return 0; }, true);
+      for (const auto& name : order) {
+        std::string row = "| " + name + " |";
+        for (const auto& m : meas) row += std::format(" {:.4f} |", mean_of(pol[name][m.name]));
+        md.line(row);
+      }
+      md.line();
+      md.line("| policy - runtime | score | spectrum | \\|ln motion\\| | coverage L1 | mean-frame PSNR | passes the rule |");
+      md.line("|---|---|---|---|---|---|---|");
+      for (const auto& name : order) {
+        if (name.starts_with("runtime")) continue;
+        std::string row = "| " + name + " |";
+        bool bad = false, better = false;
+        for (const auto& m : meas) {
+          const auto iv = diff(pol[name][m.name], pol["runtime (candidate 0)"][m.name]);
+          row += " " + iv_text(iv, m.name == "mean_frame_psnr" ? 2 : 4) + " |";
+          if (m.name == "score") better = iv.hi < 0;
+          else if (worse(iv, m.higher_better)) bad = true;
+        }
+        md.line(row + (name == "critic, K = 4" ? (better && !bad ? " **yes** |" : " **no** |") : " |"));
+      }
+      md.line();
+    }
+  }
+}
+
+void summary_g5b(const Ctx& c, Md& md) {
+  const std::vector<std::string> meas = {"f1", "f8", "f30", "f60", "track_mean", "score", "spectrum_l1", "abs_ln_motion", "coverage_l1", "mean_frame_psnr"};
+  for (const std::string split : {"val", "test"}) {
+    const fs::path f = c.results / std::format("g_extras_g5b_{}.csv", split);
+    if (!fs::exists(f)) continue;
+    const auto bm = by_method(load_csv(f), meas);
+    md.line(std::format("#### G5b {}: smoke, v1 against the update mixers (means over settings; differences paired over settings)", split));
+    md.line();
+    md.line("| method | frame 1 | 8 | 30 | 60 | mean 1-60 | score | spectrum | \\|ln motion\\| | coverage L1 | mean-frame PSNR |");
+    md.line("|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|");
+    const auto& ms = bm.at("smoke");
+    for (const auto& [m, s] : ms) {
+      std::string row = "| " + m + " |";
+      for (const auto& k : meas) row += std::format(" {:.4f} |", mean_of(s.at(k)));
+      md.line(row);
+    }
+    md.line();
+    md.line("| method - v1 | frame 30 | frame 60 | mean 1-60 | score | spectrum | \\|ln motion\\| | coverage L1 | mean-frame PSNR | endless worse |");
+    md.line("|---|---|---|---|---|---|---|---|---|---|");
+    std::string best;
+    double gain = -1e30;
+    for (const auto& [m, s] : ms) {
+      if (m == "v1") continue;
+      std::string row = "| " + m + " |";
+      bool bad = false;
+      for (const auto& k : {"f30", "f60", "track_mean", "score", "spectrum_l1", "abs_ln_motion", "coverage_l1", "mean_frame_psnr"}) {
+        const std::string ks = k;
+        const bool hi = ks.starts_with("f") || ks == "track_mean" || ks == "mean_frame_psnr";
+        const auto iv = diff(s.at(ks), ms.at("v1").at(ks));
+        row += " " + iv_text(iv, hi ? 2 : 4) + " |";
+        if (!ks.starts_with("f") && ks != "track_mean" && worse(iv, hi)) bad = true;
+      }
+      md.line(row + (bad ? " **yes** |" : " no |"));
+      const double g = 0.5 * (mean_of(s.at("f30")) - mean_of(ms.at("v1").at("f30")) + mean_of(s.at("f60")) - mean_of(ms.at("v1").at("f60")));
+      if (split == "val" && !bad && g > gain) {
+        gain = g;
+        best = m;
+      }
+      if (split == "test") {
+        const auto a = diff(s.at("f30"), ms.at("v1").at("f30")), b = diff(s.at("f60"), ms.at("v1").at("f60"));
+        md.line();
+        md.line(std::format("**G5b decision (test), `{}`:** frame 30 {}, frame 60 {}, endless worse: {}. **{}**", m, iv_text(a, 2), iv_text(b, 2),
+                            bad ? "yes" : "no", a.lo > 0 && b.lo > 0 && !bad ? "Kept." : "Not kept."));
+      }
+    }
+    md.line();
+    if (split == "val") {
+      md.line(best.empty() ? "**G5b validation: no candidate keeps the endless statistics; G5b stops.**"
+                           : std::format("**G5b choice (validation):** `{}`, mean gain at frames 30 and 60 {:+.2f} dB.", best, gain));
+      md.line();
+    }
+  }
+}
+
+void summary(const Ctx& c) {
+  Md md;
+  md.line("# Study G extras (stage S8): tables");
+  md.line();
+  md.line("Written by `nvfx_g_extras summary` from `results/experiments/g_extras_*.csv`; rules in docs/DCM.md §10. Intervals: 95% paired");
+  md.line("bootstrap, 10,000 resamples, over settings; (tie): the interval covers zero.");
+  md.line();
+  summary_g4a(c, md);
+  summary_g5a(c, md);
+  summary_g5b(c, md);
+  const std::string text = md.o.str();
+  std::print("{}", text);
+  write_text(c.results / "g_extras_summary.md", text);
+}
+
+// =====================================================================================================================
 // costs: thread CPU time (the least of `reps`), provisional on a shared machine
 // =====================================================================================================================
 
@@ -1173,6 +1503,7 @@ int main(int argc, char** argv) try {
   else if (cmd == "g5b-train") g5b_train(c);
   else if (cmd == "g5b-eval") g5b_eval(c, split);
   else if (cmd == "bench") bench(c);
+  else if (cmd == "summary") summary(c);
   else throw std::invalid_argument("unknown step " + cmd);
   log(std::format("nvfx_g_extras {} done: {:.0f} s thread CPU on the main thread", cmd, thread_cpu_s() - t0));
   return 0;

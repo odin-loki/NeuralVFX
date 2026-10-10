@@ -153,7 +153,7 @@ std::string RenderMixConfig::name() const {
 }
 
 namespace {
-ValueNetSpec render_spec(double lr) {
+ValueNetSpec render_spec(double lr, double anneal) {
   ValueNetSpec sp;
   sp.context_sizes = {4 * kAgeBins, 4 * kLevelBins, 4 * kLevelBins};
   sp.final_contexts = 4;
@@ -162,14 +162,14 @@ ValueNetSpec render_spec(double lr) {
   sp.loss = ValueLoss::squared;
   sp.lr1 = lr;
   sp.lr2 = lr / 2;
-  sp.anneal = 2000.0;
+  sp.anneal = anneal;
   sp.limit = 4.0;
   return sp;
 }
 }  // namespace
 
-RenderMixer::RenderMixer(RenderMixConfig cfg, double lr)
-    : cfg_(std::move(cfg)), net_(static_cast<int>(cfg_.experts.size()) + 1, 0, render_spec(lr)) {
+RenderMixer::RenderMixer(RenderMixConfig cfg, double lr, double anneal)
+    : cfg_(std::move(cfg)), net_(static_cast<int>(cfg_.experts.size()) + 1, 0, render_spec(lr, anneal)) {
   if (cfg_.experts.empty() || cfg_.experts[0] != kLearned) throw std::invalid_argument("RenderMixer: the learned renderer comes first");
   net_.set_rule(0);
   x_.assign(cfg_.experts.size() + 1, 1.0);

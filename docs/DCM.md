@@ -1450,3 +1450,13 @@ Code: `include/neuralfx/dcm/extras.hpp` and `src/dcm/extras.cpp` (library `neura
 
 **Not run.** G6 (one DCM-fine for every effect, the effect as a context) is decided "as G1", and depends on G1, which
 did not pass its rule in §6 nor in the round-2 retry. There is nothing for it to build on.
+
+### 10.6 Amendments, each made before the validation run it concerns
+
+1. **G4a's learning rates** (before any G4a validation run; the pilot of §10.2 had run). Trained with the mixer's
+   default annealing (each context's rates halved after 2,000 uses), the three configurations hardly left the learned
+   renderer: training rmse 0.1154 against 0.1157 at the first pass, weight 0.8 to 0.98 on L. The experts are close to
+   each other, and normalised LMS moves slowly along their difference. The rates now anneal over 100,000 uses, with a
+   first-layer rate of 0.1, chosen among 0.02, 0.05, 0.1 and 0.2 by the training rows' own error after training (rmse
+   0.1145, 0.1141, 0.1140, 0.1139; a least-squares fit per age bin and channel of each effect gives 0.109 to 0.118).
+   Still 3 passes with the rates halved after each.

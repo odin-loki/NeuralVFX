@@ -79,7 +79,9 @@ struct RenderMixConfig {
 // loss, no AVM. It starts as the learned renderer (weight 1 on it).
 class RenderMixer {
  public:
-  explicit RenderMixer(RenderMixConfig cfg, double lr = 0.02);
+  // lr: the first layer's learning rate (the final mixer's is half); anneal: uses of a context after which its rate has
+  // halved.
+  explicit RenderMixer(RenderMixConfig cfg, double lr = 0.02, double anneal = 2000.0);
   // A frozen mixer from its serialisation (ValueNet::serialise of a released one).
   static RenderMixer load(RenderMixConfig cfg, const std::string& text);
   // The mixed value of channel c (0..3) from the experts' values of that channel (all kRenderExperts of them; unused
