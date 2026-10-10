@@ -3,7 +3,7 @@
 //   nvfx_fireball --models DIR [--out fireball.mp4] [--width 1280 --height 720] [--quality 1] [--threads 4]
 //                 [--isa avx2|avx512|baseline] [--seconds 9] [--profile profile.csv] [--keyframes DIR]
 //                 [--sheet sheet.png] [--no-video] [--no-skip] [--occupancy occupancy.csv]
-//                 [--stages | --no-overlap] [--no-checksums]
+//                 [--stages | --no-overlap] [--no-checksums] [--baseline-kernels]
 //
 // The picture of a frame is drawn on a thread of its own while the next frame's state (script, step, couplings, bus,
 // light, particles) is computed (with 2 or more threads; --threads counts that thread). --no-overlap draws it after
@@ -11,6 +11,8 @@
 // give the same frames to the bit. The profile's `period` is the wall time between finished frames (output excluded);
 // with the overlap, a frame's stages overlap the next frame's, so their sum (`total`) is more than the period.
 // --no-checksums skips the per-frame checksum (FNV-1a over the RGB, 3 ms on one thread) for timing runs.
+// --baseline-kernels uses the picture's row kernels for the baseline ISA even where AVX2 is used (they give the same
+// bits; this checks it).
 //
 // --no-skip computes every pixel of the runtime's detail step and renderer (study H, H2: by default they skip what is
 // +0 and cannot change; the result is the same to the bit). --occupancy writes, every third frame and for every
@@ -86,7 +88,7 @@ enum class Mode { stages, render, overlap };
 
 struct Args {
   std::filesystem::path models, out = "fireball.mp4", profile, keyframes, sheet, occupancy;
-  bool skip = true, checksums = true;
+  bool skip = true, checksums = true, baseline_kernels = false;
   Mode mode = Mode::overlap;
   bool mode_set = false;
   int width = 1280, height = 720, threads = 4;
@@ -121,6 +123,7 @@ Args parse(int argc, char** argv) {
     else if (k == "--stages") a.mode = Mode::stages, a.mode_set = true;
     else if (k == "--no-overlap") a.mode = Mode::render, a.mode_set = true;
     else if (k == "--no-checksums") a.checksums = false;
+    else if (k == "--baseline-kernels") a.baseline_kernels = true;
     else throw std::invalid_argument("unknown option " + k + " (see the source header)");
   }
   if (a.models.empty()) throw std::invalid_argument("--models DIR (or NEURALVFX_DATA) is needed");
@@ -317,6 +320,7 @@ int main(int argc, char** argv) try {
   Light light(bus);
   Particles parts(12000);
   Frame frame(A.width, A.height);
+  if (A.baseline_kernels) frame.use_avx2(false);
   Pool pool(A.mode == Mode::overlap ? A.threads - 1 : A.threads);  // overlapped: the picture thread is one of them
   frame.ground_y = ground;
   std::vector<Shock> shocks;

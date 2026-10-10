@@ -444,6 +444,9 @@ class Frame {
   void render(std::span<std::uint8_t> rgb, float bloom_threshold, float bloom_strength, Pool& pool, std::atomic<bool>* images_read = nullptr);
   // Room for captures (capture() allocates only when a count grows beyond what it held before).
   void reserve(int modules, int shocks, int scorch, int particles);
+  // The row kernels for the baseline ISA or AVX2 (by default, AVX2 when the runtime's ISA is AVX2 or better): the same
+  // frames either way.
+  void use_avx2(bool on) { avx2_ = on; }
   // The stages of the last render(), wall ms.
   enum RenderStage { kCompose, kParticles, kDistort, kBloom, kFinish, kRenderStages };
   const std::array<double, kRenderStages>& render_ms() const { return render_ms_; }
@@ -503,6 +506,8 @@ class Frame {
 
   LightView light_view(const Light& light);  // fills light4_
   void background_columns(const Params& P, const LightView& L);
+  Tap light_tap(int y, const Params& P, const LightView& L) const;  // the light's rows the background reads at screen row y
+  void light_columns(const Params& P, const LightView& L, Pool& pool);  // fills light_x_ (after background_columns())
   void background_row(int y, const Params& P, const LightView& L, std::span<const std::array<float, 4>> scorch);
   void take_tiles(std::span<Module* const> modules);  // into tiles_
   // The background (if L) and the groups of tiles_, row by row in one pass (in passes of up to kMaxTiles tiles).
@@ -510,9 +515,11 @@ class Frame {
   void distort_impl(const Params& P, std::span<const Shock> shocks, const HeatView& H, Pool& pool);
   void bloom_impl(float threshold, float strength, Pool& pool);
   void finish_impl(const Params& P, std::span<std::uint8_t> rgb, Pool& pool);
+  friend struct FrameKernels;  // the row kernels (compose.cpp)
   void settle_row(int y);    // the distortion's moved pixels of row y back into the screen
   void settle(Pool* pool);   // every row's, and bloom's last pass, if pending (for stages that do not do them on the way)
   int w_, h_, blocks_;
+  bool avx2_;  // the row kernels compiled for AVX2 (the same bits as the baseline's)
   Image4 screen_, tmp_;
   std::vector<Image4> mips_, mips_tmp_;
   std::vector<Column> cols_;                         // [w]
@@ -520,6 +527,13 @@ class Frame {
   std::vector<std::array<int, 2>> seen_cols_;        // [kMaxTiles]: the screen columns that see each tile's image
   std::vector<std::vector<Tap>> up_x_, up_y_;        // bloom: each level read from the next coarser (0: the screen)
   std::vector<float> light4_;  // the light field with a fourth channel (0), a cell to a vector; sized on the first frame
+  // The first half of the background's bilinear light lookup, done once per row of the light grid instead of once per
+  // pixel: rows of light4_ resampled at the screen columns, [light ny][w][4] (the rows the screen reads).
+  std::vector<float> light_x_;
+  // The same for distort()'s lookup of the bus's heat, [bus ny][w]; and per block of kBlock pixels, the bus columns
+  // its pixels read, [lo, hi] (lo > hi: none).
+  std::vector<float> heat_x_;
+  std::vector<std::array<int, 2>> block_bus_;
   std::vector<Tile> tiles_;    // the modules to draw, in order
   std::vector<int> order_;     // tiles_ by group, in drawing order
   std::vector<Group> groups_;

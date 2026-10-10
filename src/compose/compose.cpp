@@ -27,7 +27,7 @@ float smooth01(float t) {
   return t * t * (3.f - 2.f * t);
 }
 
-std::uint32_t hash32(std::uint32_t x) {
+[[gnu::always_inline]] inline std::uint32_t hash32(std::uint32_t x) {
   x ^= x >> 16;
   x *= 0x7feb352dU;
   x ^= x >> 15;
@@ -41,7 +41,7 @@ std::uint32_t hash32(std::uint32_t x) {
 std::uint32_t hx(int x) { return static_cast<std::uint32_t>(x) * 73856093U; }
 std::uint32_t hy(int y) { return static_cast<std::uint32_t>(y) * 19349663U; }
 std::uint32_t hz(int z) { return static_cast<std::uint32_t>(z) * 83492791U; }
-float unit(std::uint32_t key) { return static_cast<float>(hash32(key) >> 8) * (1.f / 16777216.f); }
+[[gnu::always_inline]] inline float unit(std::uint32_t key) { return static_cast<float>(hash32(key) >> 8) * (1.f / 16777216.f); }
 
 // 8-bit display values to linear light (the learned renderers' output), and linear to 8-bit display values.
 struct Gamma {
@@ -1274,19 +1274,6 @@ Frame::Tap tap(float v, int n) {
   return {i0, std::min(i0 + 1, n - 1), 1.f - f, f};
 }
 
-// bilerp()'s blend of the corners a, b (first row) and c, d (second row), in its order of operations: a lookup by taps
-// gives its result to the bit.
-float blend(float a, float b, float c, float d, const Frame::Tap& x, const Frame::Tap& y) {
-  return y.w0 * (x.w0 * a + x.w1 * b) + y.w1 * (x.w0 * c + x.w1 * d);
-}
-
-// Channel c of a grid of `ch` interleaved channels and nx columns, looked up by taps.
-float lookup(const float* f, int nx, int ch, int c, const Frame::Tap& x, const Frame::Tap& y) {
-  const float* r0 = f + zs(y.i0) * zs(nx) * zs(ch) + zs(c);
-  const float* r1 = f + zs(y.i1) * zs(nx) * zs(ch) + zs(c);
-  return blend(r0[zs(x.i0) * zs(ch)], r0[zs(x.i1) * zs(ch)], r1[zs(x.i0) * zs(ch)], r1[zs(x.i1) * zs(ch)], x, y);
-}
-
 constexpr int kChunk = 8;    // screen rows per task
 constexpr int kBlock = 256;  // pixels per block of a row, for scratch on the stack
 
@@ -1294,11 +1281,11 @@ constexpr int kBlock = 256;  // pixels per block of a row, for scratch on the st
 // what the scalar code does to its channel, in the same order, so the results are the same to the bit.
 typedef float px4 __attribute__((vector_size(16)));
 typedef float px4u __attribute__((vector_size(16), aligned(4)));  // unaligned access
-px4 load4(const float* p) { return *reinterpret_cast<const px4u*>(p); }
-void store4(float* p, px4 v) { *reinterpret_cast<px4u*>(p) = v; }
+[[gnu::always_inline]] inline px4 load4(const float* p) { return *reinterpret_cast<const px4u*>(p); }
+[[gnu::always_inline]] inline void store4(float* p, px4 v) { *reinterpret_cast<px4u*>(p) = v; }
 
-// blend() of four pixels.
-px4 blend4(const float* a, const float* b, const float* c, const float* d, const Frame::Tap& x, const Frame::Tap& y) {
+// A bilinear lookup of four channels by taps, in bilerp()'s order of operations (to the bit).
+[[gnu::always_inline]] inline px4 blend4(const float* a, const float* b, const float* c, const float* d, const Frame::Tap& x, const Frame::Tap& y) {
   return y.w0 * (x.w0 * load4(a) + x.w1 * load4(b)) + y.w1 * (x.w0 * load4(c) + x.w1 * load4(d));
 }
 
@@ -1308,7 +1295,7 @@ double ms_between(std::chrono::steady_clock::time_point a, std::chrono::steady_c
 
 }  // namespace
 
-Frame::Frame(int width, int height) : w_(width), h_(height), blocks_((width + kBlock - 1) / kBlock) {
+Frame::Frame(int width, int height) : w_(width), h_(height), blocks_((width + kBlock - 1) / kBlock), avx2_(best_isa() != Isa::base) {
   screen_.allocate(width, height);
   tmp_.allocate(width, height);
   int w = (width + 1) / 2, h = (height + 1) / 2;
@@ -1385,19 +1372,51 @@ void Frame::background_columns(const Params& P, const LightView& L) {
   }
 }
 
+Frame::Tap Frame::light_tap(int y, const Params& P, const LightView& L) const {
+  const float wy = P.cam_y + fl(y) + 0.5f;
+  // the sky at its own height; the ground from just above it (higher towards the viewer)
+  const float ly = wy < P.ground_y ? wy : P.ground_y - 6.f - 30.f * std::clamp((wy - P.ground_y) / 160.f, 0.f, 1.f);
+  return tap((ly - L.y0) / L.cell - 0.5f, L.ny);
+}
+
+void Frame::light_columns(const Params& P, const LightView& L, Pool& pool) {
+  light_x_.resize(zs(L.ny) * zs(w_) * 4);  // the same size every frame: allocates on the first only
+  int lo = L.ny, hi = -1;
+  for (int y = 0; y < h_; ++y) {
+    const Tap t = light_tap(y, P, L);
+    lo = std::min(lo, t.i0);
+    hi = std::max(hi, t.i1);
+  }
+  if (lo > hi) return;
+  const int rows = hi - lo + 1;
+  pool.run((rows + kChunk - 1) / kChunk, [&](int task) {
+    for (int j = lo + task * kChunk; j < std::min(hi + 1, lo + (task + 1) * kChunk); ++j) {
+      const float* r = L.L4 + zs(j) * zs(L.nx) * 4;
+      float* o = light_x_.data() + zs(j) * zs(w_) * 4;
+      for (int x = 0; x < w_; ++x) {
+        const Tap& t = cols_[zs(x)].light;
+        store4(o + zs(x) * 4, t.w0 * load4(r + zs(t.i0) * 4) + t.w1 * load4(r + zs(t.i1) * 4));
+      }
+    }
+  });
+}
+
 void Frame::background_row(int y, const Params& P, const LightView& L, std::span<const std::array<float, 4>> scorch) {
   const px4 flash4{L.flash[0], L.flash[1], L.flash[2], 0.f};
-  const auto light_rows = [&](float wy) { return tap((wy - L.y0) / L.cell - 0.5f, L.ny); };
   float* row = screen_.row(y);
   const float wy = P.cam_y + fl(y) + 0.5f;
   const float ground = P.ground_y, now = P.time;
+  // the light, bilinear as Light::at(): its rows resampled at the screen's columns (light_columns()), blended here
+  const Tap ly = light_tap(y, P, L);
+  const float* lx0 = light_x_.data() + zs(ly.i0) * zs(w_) * 4;
+  const float* lx1 = light_x_.data() + zs(ly.i1) * zs(w_) * 4;
+  const auto light_at_x = [&](int x) { return ly.w0 * load4(lx0 + zs(x) * 4) + ly.w1 * load4(lx1 + zs(x) * 4) + flash4; };
   if (wy < ground) {
     // the hills, and above them the sky: dark blue, lighter at the horizon, a few stars fixed in the world, and a
     // little glow where the light is
     const float u = std::clamp((ground - wy) / 900.f, 0.f, 1.f);
     const px4 sky{0.010f + 0.020f * (1.f - u), 0.013f + 0.024f * (1.f - u), 0.030f + 0.035f * (1.f - u), 1.f};
     const std::uint32_t star_y = hy(ifloor(wy / 3.f));
-    const Tap ly = light_rows(wy);
     for (int x = 0; x < w_; ++x) {
       const Column& k = cols_[zs(x)];
       float* p = row + zs(x) * 4;
@@ -1412,7 +1431,7 @@ void Frame::background_row(int y, const Params& P, const LightView& L, std::span
         const float s = (h - 0.9965f) / 0.0035f * 0.35f * tw * u;
         v += px4{s, s, 1.1f * s, 0.f};
       }
-      v += 0.08f * light_at(L.L4, L.nx, flash4, k.light, ly);
+      v += 0.08f * light_at_x(x);
       v[3] = 1.f;
       store4(p, v);
     }
@@ -1422,13 +1441,12 @@ void Frame::background_row(int y, const Params& P, const LightView& L, std::span
   const float depth = std::clamp((wy - ground) / 160.f, 0.f, 1.f);
   const float tex_amp = 0.5f + 0.5f * depth, shade = 1.f - 0.55f * depth;
   const std::uint32_t tex_y = hy(ifloor(wy / 2.f)) ^ hz(3);
-  const Tap ly = light_rows(ground - 6.f - 30.f * depth);
   const px4 earth{0.012f, 0.011f, 0.010f, 0.f}, tint{0.9f, 0.75f, 0.6f, 0.f};
   for (int x = 0; x < w_; ++x) {
     const Column& k = cols_[zs(x)];
     const float tex = 0.75f + 0.5f * unit(k.tex ^ tex_y) * tex_amp;
     const float lit = shade * tex;
-    const px4 l = light_at(L.L4, L.nx, flash4, k.light, ly);
+    const px4 l = light_at_x(x);
     px4 v = (earth + 0.35f * l / (1.f + 0.6f * l)) * lit * tint;
     v[3] = 1.f;
     store4(row + zs(x) * 4, v);
@@ -1461,6 +1479,7 @@ void Frame::background(const Light& light, std::span<const std::array<float, 4>>
   const Params P = params();
   const LightView L = light_view(light);
   background_columns(P, L);
+  light_columns(P, L, pool);
   pool.run((h_ + kChunk - 1) / kChunk, [&](int task) {
     for (int y = task * kChunk; y < std::min(h_, (task + 1) * kChunk); ++y) background_row(y, P, L, scorch);
   });
@@ -1520,6 +1539,7 @@ void Frame::compose(const Params& P, const LightView* L, std::span<const std::ar
   if (L) {
     moved_rows_ = bloom_pending_ = false;  // every pixel is written anew
     background_columns(P, *L);
+    light_columns(P, *L, pool);
   }
   // Passes of whole groups, up to kMaxTiles tiles each (one pass unless the scene is large); the background goes
   // with the first. Every pixel gets the background, then each group over it in order, as stage by stage.
@@ -1724,6 +1744,46 @@ void Frame::distort_impl(const Params& P, std::span<const Shock> shocks, const H
     k.wobble = std::sin(k.wx * 0.045f + now * 1.7f);
     k.phase = k.wx * 0.07f - now * 8.f;
   }
+  // The haze's heat lookup in two halves: the bus rows the screen reads, resampled at the screen's columns (once per
+  // bus row), then blended per pixel. And the bus columns each block of pixels reads, for a test of a block's heat.
+  heat_x_.resize(zs(bny) * zs(w_));  // the same size every frame: allocates on the first only
+  block_bus_.resize(zs(blocks_));
+  for (int b = 0; b < blocks_; ++b) {
+    std::array<int, 2> r{bnx, -1};
+    for (int x = b * kBlock; x < std::min(w_, (b + 1) * kBlock); ++x) {
+      const Column& k = cols_[zs(x)];
+      if (!k.on_bus) continue;
+      r[0] = std::min(r[0], k.bus.i0);
+      r[1] = std::max(r[1], k.bus.i1);
+    }
+    block_bus_[zs(b)] = r;
+  }
+  const auto bus_rows = [&](int y) {  // the bus rows the haze of screen row y reads (none: i0 > i1)
+    const float gy = (P.cam_y + fl(y) + 0.5f + 22.f - H.y0) / H.cell - 0.5f;
+    if (!(haze_k > 0.f) || gy < -1.f || gy > fl(bny)) return Tap{1, 0, 0.f, 0.f};
+    return tap(gy, bny);
+  };
+  {
+    int lo = bny, hi = -1;
+    for (int y = 0; y < h_; ++y) {
+      const Tap t = bus_rows(y);
+      if (t.i0 > t.i1) continue;
+      lo = std::min(lo, t.i0);
+      hi = std::max(hi, t.i1);
+    }
+    if (lo <= hi) {
+      pool.run((hi - lo + 1 + kChunk - 1) / kChunk, [&](int task) {
+        for (int j = lo + task * kChunk; j < std::min(hi + 1, lo + (task + 1) * kChunk); ++j) {
+          const float* r = heat + zs(j) * zs(bnx);
+          float* o = heat_x_.data() + zs(j) * zs(w_);
+          for (int x = 0; x < w_; ++x) {
+            const Column& k = cols_[zs(x)];
+            o[x] = k.on_bus ? k.bus.w0 * r[k.bus.i0] + k.bus.w1 * r[k.bus.i1] : 0.f;
+          }
+        }
+      });
+    }
+  }
   // A pixel that does not move keeps its value, so only the pixels that move are computed (into tmp_, which holds a
   // block's span of them, [first, last] moved pixel) and copied back by the next stage that reads the screen.
   pool.run((h_ + kChunk - 1) / kChunk, [&](int task) {
@@ -1732,21 +1792,25 @@ void Frame::distort_impl(const Params& P, std::span<const Shock> shocks, const H
       float* out = tmp_.row(y);
       std::array<int, 2>* spans = moved_.data() + zs(y) * zs(blocks_);
       const float wy = P.cam_y + fl(y) + 0.5f;
-      // hot air below shimmers what is seen through it; a row whose bus rows are all cool has none
-      const float gy = (wy + 22.f - H.y0) / H.cell - 0.5f;
-      const Tap by = tap(gy, bny);
-      bool hazy = haze_k > 0.f && !(gy < -1.f || gy > fl(bny));
-      if (hazy) {
-        float most = -1e30f;
-        for (int i = 0; i < bnx; ++i) most = std::max({most, heat[zs(by.i0) * zs(bnx) + zs(i)], heat[zs(by.i1) * zs(bnx) + zs(i)]});
-        hazy = most >= 0.0099f;  // a blend of corners all below this stays below the threshold, 0.01, rounding included
-      }
+      // hot air below shimmers what is seen through it
+      const Tap by = bus_rows(y);
+      const bool hazy_row = by.i0 <= by.i1;
+      const float* hx0 = heat_x_.data() + zs(hazy_row ? by.i0 : 0) * zs(w_);
+      const float* hx1 = heat_x_.data() + zs(hazy_row ? by.i1 : 0) * zs(w_);
       const float haze_y = wy * 0.09f + now * 11.f, wobble_y = 1.5f * std::sin(wy * 0.05f);
       for (int bx = 0, b = 0; bx < w_; bx += kBlock, ++b) {
         const int n = std::min(kBlock, w_ - bx);
         spans[b] = {0, 0};
         std::fill_n(dxs.begin(), n, 0.f);
         std::fill_n(dys.begin(), n, 0.f);
+        // a block whose bus cells are all cool has no haze: a blend of corners all below 0.0099 stays below the
+        // threshold, 0.01, rounding included
+        bool hazy = hazy_row && block_bus_[zs(b)][0] <= block_bus_[zs(b)][1];
+        if (hazy) {
+          float most = -1e30f;
+          for (int i = block_bus_[zs(b)][0]; i <= block_bus_[zs(b)][1]; ++i) most = std::max({most, heat[zs(by.i0) * zs(bnx) + zs(i)], heat[zs(by.i1) * zs(bnx) + zs(i)]});
+          hazy = most >= 0.0099f;
+        }
         bool moved = hazy;
         for (const Shock& s : shocks) {  // shock rings, over the columns each ring may cover in this row
           const float R = s.radius(now);
@@ -1779,7 +1843,7 @@ void Frame::distort_impl(const Params& P, std::span<const Shock> shocks, const H
           for (int i = 0; i < n; ++i) {
             const Column& k = cols_[zs(bx + i)];
             if (!k.on_bus) continue;
-            const float h = lookup(heat, bnx, 1, 0, k.bus, by);
+            const float h = by.w0 * hx0[bx + i] + by.w1 * hx1[bx + i];  // blend() of the four cells, to the bit
             if (h > 0.01f) {
               const float a = haze_k * std::min(1.f, 1.6f * h);
               dxs[zs(i)] += a * 1.6f * std::sin(haze_y + 2.f * k.wobble);
@@ -1984,12 +2048,14 @@ void Frame::bloom_impl(float threshold, float strength, Pool& pool) {
 namespace {
 
 // Tone mapping of n values into levels of the display table: ACES of the value times the exposure, vignette and fade,
-// plus grain.
-void tone(const float* p, const float* vig, const float* grain, float exposure, float fade, int* level, int n) {
+// plus grain. The level is clamped before it is made an integer (the same level as clamping the integer for every value
+// that can arrive here: finite, at most 1.003 * 4095 + 0.5, or NaN, which max(0, NaN) makes 0 as the integer's clamp
+// did), so that the loop vectorises without integer min and max.
+[[gnu::always_inline]] inline void tone(const float* p, const float* vig, const float* grain, float exposure, float fade, int* level, int n) {
   const auto aces = [](float v) { return std::clamp(v * (2.51f * v + 0.03f) / (v * (2.43f * v + 0.59f) + 0.14f), 0.f, 1.f); };
   for (int i = 0; i < n; ++i) {
     const float v = aces(p[i] * exposure * vig[i] * fade) + grain[i];
-    level[i] = std::clamp(static_cast<int>(v * 4095.f + 0.5f), 0, 4095);
+    level[i] = static_cast<int>(std::min(4095.f, std::max(0.f, v * 4095.f + 0.5f)));
   }
 }
 
@@ -1997,36 +2063,37 @@ void tone(const float* p, const float* vig, const float* grain, float exposure, 
 
 void Frame::finish(std::span<std::uint8_t> rgb, Pool& pool) { finish_impl(params(), rgb, pool); }
 
-void Frame::finish_impl(const Params& P, std::span<std::uint8_t> rgb, Pool& pool) {
-  const Gamma& g = gamma();
-  const std::uint32_t salt = hz(static_cast<int>(P.time * 30.f));
-  for (int x = 0; x < w_; ++x) {
-    const float nx = ((fl(x) + 0.5f) / fl(w_) - 0.5f) * (fl(w_) / fl(h_));
-    cols_[zs(x)].vig = nx * nx;
-    cols_[zs(x)].grain = hx(x);
-  }
-  // On the way: the distortion's moved pixels back into the screen, and bloom's last pass (the screen plus mip 0,
-  // bilinear, times its gain over the levels: as bloom() would have added it, to the bit).
-  const bool settle_rows = moved_rows_, add_bloom = bloom_pending_;
-  const float gain = bloom_gain_, div = bloom_div_;
-  const Image4& m0 = mips_[0];
-  const float expo = P.exposure, fade_k = P.fade;
-  pool.run((h_ + kChunk - 1) / kChunk, [&](int task) {
+// The row kernels of the picture stages that gain from wider vectors, compiled twice: for the baseline ISA and for AVX2
+// without FMA. Both do the same IEEE operations on each value in the same order (only more values at once), so they give
+// the same bits; the second is used when the runtime's ISA is AVX2 or better (best_isa()).
+struct FrameKernels {
+  struct Finish {
+    const Frame::Params* P;
+    std::uint8_t* rgb;
+    std::uint32_t salt;
+    bool settle, bloom;
+    float gain, div;
+  };
+  [[gnu::always_inline]] static inline void finish_rows(Frame& F, const Finish& a, int y0, int y1) {
+    const Gamma& g = gamma();
+    const Image4& m0 = F.mips_[0];
+    const float expo = a.P->exposure, fade_k = a.P->fade, gain = a.gain, div = a.div;
+    const int w = F.w_, h = F.h_;
     std::array<float, 4 * kBlock> vig, grain, sum;  // per value of a block of pixels (all four channels, for vectors)
     std::array<int, 4 * kBlock> level;
-    for (int y = task * kChunk; y < std::min(h_, (task + 1) * kChunk); ++y) {
-      if (settle_rows) settle_row(y);
-      const float* p = screen_.row(y);
-      std::uint8_t* o = rgb.data() + zs(y) * zs(w_) * 3;
-      const float ny = (fl(y) + 0.5f) / fl(h_) - 0.5f, ny2 = ny * ny;
-      const std::uint32_t key_y = hy(y) ^ salt;
-      const Tap& ty = up_y_[0][zs(y)];
+    for (int y = y0; y < y1; ++y) {
+      if (a.settle) F.settle_row(y);
+      const float* p = F.screen_.row(y);
+      std::uint8_t* o = a.rgb + zs(y) * zs(w) * 3;
+      const float ny = (fl(y) + 0.5f) / fl(h) - 0.5f, ny2 = ny * ny;
+      const std::uint32_t key_y = hy(y) ^ a.salt;
+      const Frame::Tap& ty = F.up_y_[0][zs(y)];
       const float* b0 = m0.row(ty.i0);
       const float* b1 = m0.row(ty.i1);
-      for (int bx = 0; bx < w_; bx += kBlock) {
-        const int n = std::min(kBlock, w_ - bx);
+      for (int bx = 0; bx < w; bx += kBlock) {
+        const int n = std::min(kBlock, w - bx);
         for (int i = 0; i < n; ++i) {
-          const Column& k = cols_[zs(bx + i)];
+          const Frame::Column& k = F.cols_[zs(bx + i)];
           const float v = 1.f - 0.45f * (k.vig + ny2), gr = (unit(k.grain ^ key_y) - 0.5f) * 0.006f;
           for (int c = 0; c < 4; ++c) {
             vig[zs(i) * 4 + zs(c)] = v;
@@ -2034,10 +2101,10 @@ void Frame::finish_impl(const Params& P, std::span<std::uint8_t> rgb, Pool& pool
           }
         }
         const float* src = p + zs(bx) * 4;
-        if (add_bloom) {
-          const Tap* tx = up_x_[0].data() + bx;
+        if (a.bloom) {
+          const Frame::Tap* tx = F.up_x_[0].data() + bx;
           for (int i = 0; i < n; ++i) {
-            const Tap& t = tx[i];
+            const Frame::Tap& t = tx[i];
             store4(sum.data() + zs(i) * 4, load4(src + zs(i) * 4) + gain * blend4(b0 + zs(t.i0) * 4, b0 + zs(t.i1) * 4, b1 + zs(t.i0) * 4, b1 + zs(t.i1) * 4, t, ty) / div);
           }
           src = sum.data();
@@ -2049,7 +2116,31 @@ void Frame::finish_impl(const Params& P, std::span<std::uint8_t> rgb, Pool& pool
         }
       }
     }
-  });
+  }
+};
+
+namespace {
+[[gnu::noinline]] void finish_rows_base(Frame& F, const FrameKernels::Finish& a, int y0, int y1) { FrameKernels::finish_rows(F, a, y0, y1); }
+#if defined(NFX_COMPOSE_AVX2)
+[[gnu::noinline, gnu::target("avx2")]] void finish_rows_avx2(Frame& F, const FrameKernels::Finish& a, int y0, int y1) { FrameKernels::finish_rows(F, a, y0, y1); }
+#endif
+}  // namespace
+
+void Frame::finish_impl(const Params& P, std::span<std::uint8_t> rgb, Pool& pool) {
+  const std::uint32_t salt = hz(static_cast<int>(P.time * 30.f));
+  for (int x = 0; x < w_; ++x) {
+    const float nx = ((fl(x) + 0.5f) / fl(w_) - 0.5f) * (fl(w_) / fl(h_));
+    cols_[zs(x)].vig = nx * nx;
+    cols_[zs(x)].grain = hx(x);
+  }
+  // On the way: the distortion's moved pixels back into the screen, and bloom's last pass (the screen plus mip 0,
+  // bilinear, times its gain over the levels: as bloom() would have added it, to the bit).
+  const FrameKernels::Finish a{&P, rgb.data(), salt, moved_rows_, bloom_pending_, bloom_gain_, bloom_div_};
+  auto rows = finish_rows_base;
+#if defined(NFX_COMPOSE_AVX2)
+  if (avx2_) rows = finish_rows_avx2;
+#endif
+  pool.run((h_ + kChunk - 1) / kChunk, [&](int task) { rows(*this, a, task * kChunk, std::min(h_, (task + 1) * kChunk)); });
   moved_rows_ = bloom_pending_ = false;
 }
 

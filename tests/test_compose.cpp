@@ -307,6 +307,22 @@ TEST(Compose, CapturedAndOverlappedPicturesAreTheStagesPictures) {
   }
 }
 
+// The picture's row kernels for the baseline ISA and for AVX2 (without FMA) give the same bits.
+TEST(Compose, RowKernelsGiveTheSameBitsOnEveryIsa) {
+#if defined(__x86_64__)
+  if (!__builtin_cpu_supports("avx2")) GTEST_SKIP() << "no AVX2";
+#endif
+  MiniScene a(2), b(2);
+  a.frame.use_avx2(false);
+  b.frame.use_avx2(true);
+  std::vector<std::uint8_t> ra(160 * 90 * 3), rb(ra.size());
+  for (int f = 0; f < 14; ++f) {
+    a.step_captured(f, ra);
+    b.step_captured(f, rb);
+    ASSERT_EQ(ra, rb) << "frame " << f;
+  }
+}
+
 }  // namespace
 
 // --- study H (H2): skipping the empty parts of the fine fields changes nothing ----------------------------------------
