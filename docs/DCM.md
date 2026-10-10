@@ -1645,3 +1645,51 @@ THREADS4=1 SKIP_MICRO=1 tools/study_h/h2_time.sh build /tmp/h2 2 15 6   # also a
 tools/study_h/h2_summary.sh /tmp/h2                       # one line per fireball run
 tools/study_h/h2_occupancy.sh build /tmp/h2_occupancy.csv # how empty the fireball's fields are
 ```
+
+## 11. v2: meeting in the middle (stage S6)
+
+Status: **v2 rollout effects assembled and frozen** (10 October 2026); the runtime's prior against drift for fire is
+being added (G2.13). v2 holds every part that passed its own rule, and nothing else.
+
+### 11.1 What passed, and what is in v2
+
+| part | from | decision | in v2 |
+|---|---|---|---|
+| 6-bit start states | study F2, G3c (`results/compression/README.md`) | fire: passes (motion better, four statistics tied); explosion: passes alone; smoke: fails by a hair on coverage | **fire** |
+| a stepper fine-tuned with couplings (v2c) | study I (`docs/COMPOSE.md` §9) | explosion: passes (better under forcing, no regression); fire: tie; smoke: fails no-regression | **explosion** |
+| 6-bit start states on top of the v2c explosion | this stage, the G3c rule | **fails**: spectrum distance +0.014 [+0.0003, +0.030] against v1 on test (validation: every statistic tied) | no: the explosion keeps 16-bit start states |
+| prior against drift (G2b) | study G, §7 | fire: kept (ties shards, removes drift in one continuous run); smoke: tie, stopped | fire, as a runtime option in continuous mode (G2.13) |
+| empty spans skipped in the detail step and renderer (H2) | study H, §9 | kept, bit-exact | in the runtime for every effect (not a file change) |
+| the coder's format 2 (H3) | study H, §9 | kept | a packing option for distribution |
+| DCM-fine (G1), G1 retry, G1c | §6 | fails twice | no |
+| denoiser contexts (G2a), start points (G2c) | §7 | stopped | no |
+| the run codec (G3a/b) | §8 | wins only at low quality | a separate use, not part of an effect |
+
+The combination row was decided with the G3c protocol (`nvfx_f2 g3c --base DIR --tag v2c`; rows `v2c_v1` and `v2c_b6`
+in `results/compression/f2_g3c*.csv`): validation first (both tied with v1 on every statistic), then the test once.
+The v2c file alone repeats study I's test result on these statistics (coverage and mean-frame PSNR better, the rest
+tied); with 6-bit start states, spectrum distance moves just past the line.
+
+### 11.2 The v2 files
+
+| effect | what changed from v1 | stored | packed (format 1) | v1 stored / packed |
+|---|---|---:|---:|---:|
+| fire | start states at 6 bits | 42.9 KB | 21.1 KB | 83.7 / 45.6 KB |
+| smoke | nothing | 149.3 KB | 51.5 KB | same |
+| explosion | the stepper (fine-tuned with couplings; 1 to 2.5% of its weights' norm) | 280.9 KB | 57.1 KB | 280.9 / 57.1 KB |
+
+SHA-256 of each file: `results/experiments/v2_frozen.csv` (v1: `v1_frozen.csv`). Resident memory and the cost per frame
+are unchanged: the runtime widens start states to floats at load, and the stepper has the same shape.
+
+### 11.3 The fireball, v1 against v2
+
+The same scene rendered with v2 (`nvfx_fireball --models DIR`), same build, same seeds:
+- Before the detonation the frames are the same (62.8 dB PSNR at 0.9 s: only fire's 6-bit start states differ).
+- After it they differ by 31 to 35 dB (keyframes at 1.5 to 8.2 s), as two runs of a chaotic effect with a slightly
+  different stepper must.
+- By eye the shapes, timing and colours are the same; edges and swirls differ. Neither looks better. The rules fire at
+  the same times (1.20, 1.60, 3.63 s) and the same two fires are lit.
+
+What the meeting in the middle produced, plainly: the owner's mixer and the diffusion side contributed one thing, the
+prior against drift for fire, which buys continuity rather than better pictures. The compression side halved fire's
+file. Training with couplings improved the explosion where it is coupled. The fine detail stays v1's hand-made layer.

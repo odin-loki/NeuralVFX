@@ -7,7 +7,7 @@
 //   nvfx_f2 video --set val|test [--codecs x264,...] the video codecs' quality ladders on every clip
 //   nvfx_f2 report --set val|test [--configs ...]   equal-quality ratios against flipbooks and each codec, memory and
 //                                                   disk, with 95% bootstrap intervals over clips
-//   nvfx_f2 g3c --split val|test [--variants v1,b6_d,...]
+//   nvfx_f2 g3c --split val|test [--variants v1,b6_d,...] [--base DIR --tag NAME]  (another base than the v1 files)
 //                                                   design G3c: study D's rollout effects with quantised, dithered and
 //                                                   fewer start points, scored as study D's endless runs
 //   nvfx_f2 g3c-report --split val|test             each variant against v1, paired over the settings
@@ -78,6 +78,8 @@ struct Ctx {
   int threads = 2;
   std::string set = "val";
   std::set<std::string> only;  // clip subset
+  fs::path base;               // g3c: the rollout effects to start from (default: the frozen v1 files)
+  std::string tag;             // g3c: prefix of the variant names written for that base
 };
 
 // --- clips --------------------------------------------------------------------------------------------------------
@@ -1017,12 +1019,14 @@ void step_g3c(const Ctx& c, const std::string& split, const std::vector<std::str
     const std::string en(sim::effect_name(e));
     if (!c.only.empty() && !c.only.contains(en)) continue;
     const bool ex = e == sim::Effect::explosion;
-    auto loaded = rollout::load_model(c.root / "experiments" / "models" / "d" / (en + ".nvfx"));
+    const fs::path base = c.base.empty() ? c.root / "experiments" / "models" / "d" : c.base;
+    auto loaded = rollout::load_model(base / (en + ".nvfx"));
     if (!loaded) throw std::runtime_error(loaded.error());
     const int F = ex ? 89 : 300, warm = ex ? 1 : 150;
     std::vector<std::string> todo;
+    const auto named = [&](const std::string& v) { return c.tag.empty() ? v : c.tag + "_" + v; };
     for (const auto& v : variants) {
-      if (!csv.has({{"split", split}, {"effect", en}, {"variant", v}})) todo.push_back(v);
+      if (!csv.has({{"split", split}, {"effect", en}, {"variant", named(v)}})) todo.push_back(v);
     }
     if (todo.empty()) continue;
     // The real runs, one per setting (threads over settings).
@@ -1056,12 +1060,12 @@ void step_g3c(const Ctx& c, const std::string& split, const std::vector<std::str
     }
     for (const std::string& v : todo) {
       rollout::Model m = g3c_variant(*loaded, v);
-      const fs::path file = dir / std::format("{}__{}.nvfx", en, v);
+      const fs::path file = dir / std::format("{}__{}.nvfx", en, named(v));
       std::ostringstream os;
       if (auto w = rollout::save_model(os, m); !w) throw std::runtime_error(w.error());
       const std::string str = os.str();
       const std::vector<std::uint8_t> bytes(str.begin(), str.end());
-      if (v != "v1") {
+      if (v != "v1" || !c.tag.empty()) {
         std::ofstream of(file, std::ios::binary);
         of.write(str.data(), static_cast<std::streamsize>(str.size()));
       }
@@ -1088,14 +1092,14 @@ void step_g3c(const Ctx& c, const std::string& split, const std::vector<std::str
         }
       }
       for (std::size_t si = 0; si < settings.size(); ++si) {
-        csv.add({{"split", split}, {"effect", en}, {"variant", v}, {"setting", std::to_string(si)}, {"starts", std::to_string(m.starts.size())},
+        csv.add({{"split", split}, {"effect", en}, {"variant", named(v)}, {"setting", std::to_string(si)}, {"starts", std::to_string(m.starts.size())},
                  {"start_bits", std::to_string(m.start_bits)}, {"dither", m.start_dither ? "1" : "0"}, {"file_bytes", std::to_string(bytes.size())},
                  {"packed_bytes", std::to_string(packed.data.size())}, {"packed_coarse_bytes", std::format("{:.1f}", coarse)},
                  {"resident_bytes", std::to_string(info.resident_bytes)}, {"spectrum_l1", f4(d[si].spectrum_l1)},
                  {"motion_ratio", f4(d[si].motion_ratio)}, {"coverage_l1", f4(d[si].coverage_l1)}, {"emission_l1", f4(d[si].emission_l1)},
                  {"mean_frame_psnr", std::format("{:.3f}", d[si].mean_frame_psnr)}});
       }
-      std::println("g3c {} {} {}: {} bytes, {} packed (coarse {:.0f})", split, en, v, bytes.size(), packed.data.size(), coarse);
+      std::println("g3c {} {} {}: {} bytes, {} packed (coarse {:.0f})", split, en, named(v), bytes.size(), packed.data.size(), coarse);
       std::fflush(stdout);
     }
   }
@@ -1220,6 +1224,8 @@ int main(int argc, char** argv) try {
   c.threads = a.i("threads", 2);
   c.set = a.str("set", "val");
   for (const auto& s : split(a.str("clips", ""))) c.only.insert(s);
+  c.base = a.str("base", "");
+  c.tag = a.str("tag", "");
   const std::string step = pos[0];
   if (step == "data") step_data(c);
   else if (step == "flipbooks") step_flipbooks(c);

@@ -1,0 +1,4 @@
+kind,name,file,bytes,sha256,source
+rollout_effect,fire,v2/fire.nvfx,42895,b0f7ad32cf34be2a83b7c9959f5c1f0d701d984282483badfaaed54e6661c827,v1 with 6-bit start states (G3c)
+rollout_effect,smoke,v2/smoke.nvfx,149287,dfa2b546a5e035b87166d48dbb535d1e6540c8fcf7d483f9df73043ac26d4b52,v1 unchanged
+rollout_effect,explosion,v2/explosion.nvfx,280927,b8e7aa4283567b8f3949ab16b1a181622c8b0d9d49af3708b47c8169557f722b,v1 with the coupled stepper (study I v2c)
