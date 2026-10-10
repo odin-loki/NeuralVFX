@@ -995,7 +995,10 @@ void g5b_eval(const Ctx& c, const std::string& split) {
   const sim::Effect e = sim::Effect::smoke;
   const rollout::Model M = load_v1(c, e);
   std::vector<std::string> names;
-  if (split == "val") {
+  const bool pilot = split == "val" && c.method == "pilot";  // the fixed blends alone (§10.4's pilot)
+  if (pilot) {
+    names = {"blend_0.1", "blend_0.25", "blend_0.5"};
+  } else if (split == "val") {
     names = {"blend_0.1", "blend_0.25", "blend_0.5", "m1", "m2"};
   } else {
     if (c.method.empty()) throw std::invalid_argument("g5b-eval --split test needs --method");
@@ -1014,7 +1017,7 @@ void g5b_eval(const Ctx& c, const std::string& split) {
   const auto settings = settings_for(c, split);
   const Seeds sd = seeds_for(split, c.quick);
   const Protocol pr = protocol(c, e);
-  UnitCsv csv(c.results / std::format("g_extras_g5b_{}.csv", split), std::string("effect,setting,method,f1,f8,f30,f60,track_mean,") + kStatsHeader, 2);
+  UnitCsv csv(c.results / std::format("g_extras_g5b_{}.csv", pilot ? "pilot" : split), std::string("effect,setting,method,f1,f8,f30,f60,track_mean,") + kStatsHeader, 2);
   parallel(static_cast<int>(settings.size()), c.threads, [&](int i) {
     const std::string unit = std::format("{},{}", ename(e), i);
     if (csv.done(unit)) return;
@@ -1326,7 +1329,7 @@ void summary_g5a(const Ctx& c, Md& md) {
 
 void summary_g5b(const Ctx& c, Md& md) {
   const std::vector<std::string> meas = {"f1", "f8", "f30", "f60", "track_mean", "score", "spectrum_l1", "abs_ln_motion", "coverage_l1", "mean_frame_psnr"};
-  for (const std::string split : {"val", "test"}) {
+  for (const std::string split : {"pilot", "val", "test"}) {
     const fs::path f = c.results / std::format("g_extras_g5b_{}.csv", split);
     if (!fs::exists(f)) continue;
     const auto bm = by_method(load_csv(f), meas);
