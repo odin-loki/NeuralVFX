@@ -55,6 +55,7 @@
 #include <print>
 #include <string>
 #include <sys/resource.h>
+#include <system_error>
 #include <vector>
 
 namespace {
@@ -149,6 +150,24 @@ double thread_cpu_ms() {
   timespec t{};
   clock_gettime(CLOCK_THREAD_CPUTIME_ID, &t);
   return 1e3 * static_cast<double>(t.tv_sec) + 1e-6 * static_cast<double>(t.tv_nsec);
+}
+
+// Per thread of this process: nanoseconds on a core and waiting for one (/proc/self/task/*/schedstat), summed over the
+// threads. Busy plus waiting plus idle (blocked) is the threads' wall time: on a shared machine the waiting share is
+// what other processes took, and the idle share what the frame's dependencies left unused.
+std::array<double, 3> sched_totals() {
+  double run = 0, wait = 0, n = 0;
+  std::error_code ec;
+  for (const auto& d : std::filesystem::directory_iterator("/proc/self/task", ec)) {
+    std::ifstream f(d.path() / "schedstat");
+    double a = 0, b = 0;
+    if (f >> a >> b) {
+      run += a;
+      wait += b;
+      n += 1;
+    }
+  }
+  return {run * 1e-6, wait * 1e-6, n};  // ms, ms, threads
 }
 
 // --occupancy: how empty each active module's fine fields are after its step (see the header).
@@ -518,8 +537,14 @@ int main(int argc, char** argv) try {
     last_done = now;
   };
 
+  std::array<double, 3> sched0{};
+  Clock::time_point loop0{};
   for (int f = 0; f < frames; ++f) {
     const float t = static_cast<float>(f) / 30.f;
+    if (f == 36) {  // the frames after the detonation, when everything runs
+      sched0 = sched_totals();
+      loop0 = Clock::now();
+    }
     if (f == 1) g_counting.store(true);  // the first frame may still touch lazily sized buffers
     const long alloc0 = g_allocations.load();
     std::array<double, kStages>& P = prof[zs(f)];
@@ -778,6 +803,8 @@ int main(int argc, char** argv) try {
       output(f, rgbs[0]);
     }
   }
+  const std::array<double, 3> sched1 = sched_totals();
+  const double loop_ms = ms(loop0, Clock::now());
   if (picture) {
     picture->wait();
     const auto& R = frame.render_ms();
@@ -834,6 +861,12 @@ int main(int argc, char** argv) try {
   rusage ru{};
   getrusage(RUSAGE_SELF, &ru);
   std::println("allocations in the frame loop: {} in {} of {} frames", alloc_total, alloc_frames, frames - 1);
+  if (frames > 36 && sched1[2] > 0) {  // (threads made before the loop: main, workers, picture thread)
+    const double thread_ms = loop_ms * static_cast<double>(A.threads), busy = sched1[0] - sched0[0], waiting = sched1[1] - sched0[1];
+    std::println("threads over frames 36 on: CPU {:.1f} ms per frame; of {} threads' time busy {:.0f}%, waiting for a core {:.0f}%, idle {:.0f}%",
+                 busy / static_cast<double>(frames - 36), A.threads, 100.0 * busy / thread_ms, 100.0 * waiting / thread_ms,
+                 100.0 * (1.0 - (busy + waiting) / thread_ms));
+  }
   std::println("memory: effects resident {:.0f} KB, module scratch {:.1f} MB, peak RSS {:.1f} MB", static_cast<double>(resident) / 1024.0,
                static_cast<double>(scratch) / 1048576.0, static_cast<double>(ru.ru_maxrss) / 1024.0);
   for (const Rule& r : rules) std::println("rule '{}' fired at {:.2f} s", r.name, r.fired_at);
