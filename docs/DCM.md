@@ -386,8 +386,8 @@ Each needs a new validation selection and a new test with new seeds; this stage 
 
 ### 6.10 G1 retry: only advected experts (round 2)
 
-Status: **rules fixed** (10 October 2026), before any round-2 search, calibration or test was run. Results follow below
-the rules when they exist.
+Status: **done** (10 October 2026). The rules below were fixed and committed before any round-2 search, calibration
+or test was run; the results follow them.
 
 **Why G1 failed (§6.6, §6.9).** The released smoke mixer is 0.91 A + 0.02 A_sl + 0.07 prev: 7% of the previous
 frame's value at the pixel, *unadvected*. One step from the truth it lowers the code length; over many frames it is a
@@ -437,6 +437,81 @@ re-times). Effects are decided one by one: a pass needs no other effect.
 Commands (`nvfx_dcm`, 2 threads, `nice 10`): `search-fine --effect E --drop-groups prev --prefix g_fine2 --max-rows 100000
 --data DIR`, then `train-fine` and `eval-fine` with the same options plus `--rule-selection --test-base 6900000
 --track-first 8`, then `fine-summary --prefix g_fine2 --rule-selection`.
+
+#### Results of the retry
+
+**Result in one line:** the retry passes on **no effect**. Dropping `prev` removes most of smoke's motion loss, but on
+validation every generator that clearly improves the detail spectrum still loses a little motion or tracking, so fire
+and explosions find no admissible generator, and smoke's only admissible one (nearly v1 itself) fails its test by
++0.002 in \|ln motion ratio\| and -0.01 dB, both with intervals excluding zero. G1c, re-run on smoke, ties.
+
+Tables: `results/experiments/g_fine2_*.csv`, collected in `g_fine2_summary.md`. The machine was busy throughout (load 6
+to 13 from other agents); nothing here depends on time.
+
+**Search** (nested held-out bits per active pixel over the 48 training runs; same seed and settings as G1, without `prev`):
+
+| effect | G1 | retry | retry's global #0 (cost model) |
+|---|---:|---:|---|
+| fire | 2.626 | 2.697 | A, A_sl, A - A_sl, the lock's parts, the noise group, bias; no context (0.96 ms) |
+| smoke | 3.393 | 3.428 | A, A_sl, A - A_sl, the lock's parts, bias; no context (0.93 ms) |
+| explosion | 2.725 | 2.727 | A, A_sl, A - A_sl, C_up, block residual, bias; mixer by channel, AVM by channel, scale by A / C (0.95 ms) |
+
+- Smoke loses 0.035 bits without `prev`, as expected: one step from the truth the unadvected value is a good guess.
+- **Fire's search got stuck.** Its top 10 use no context at all, and its nested bits are 0.07 worse than G1's, six times
+  G1's measured seed noise (0.012). Under the +1 ms budget a context costs about 0.09 ms, so from a context-free
+  configuration at 0.93 to 0.96 ms, adding one is only possible together with dropping an expert group: a two-step move
+  the hill climbing cannot make. G1's seeds happened to start in the region with contexts (AVM by channel, scale by
+  height). The search's seed noise is therefore larger than G1's three seeds showed; G2.10 measures it again.
+
+**Validation** (generator - v1, paired over the 10 validation settings and the 8 validation runs; 30 generators per
+effect, `g_fine2_val_rule.csv`):
+
+| effect | admissible | with v1's lock (10 generators) | without a lock (10) | exact relock (10) |
+|---|---:|---|---|---|
+| fire | 0 | spectrum better on all 10 (-0.06 to -0.07), PSNR and tracking better or tied, but \|ln motion\| worse on all 10 (best score: +0.024 [+0.012, +0.032], about 2% less motion) | the fine fields run away from the coarse state (score 8 to 18) | spectrum worse on all 10 (+0.55 to +0.68) |
+| smoke | 1 | spectrum better on all 10; motion worse on 3, tracking at 8 frames worse on 6; **candidate 6 admissible**: spectrum -0.008 [-0.011, -0.005], everything else tied | worse on every measure | spectrum better on 1, PSNR worse on all |
+| explosion | 0 | spectrum never better (+0.017 to +0.035) | spectrum better on 1 (candidate 5: -0.043 [-0.091, -0.001]), but tracking at 30 frames worse on 9 of 10 (candidate 5: -1.42 dB [-1.77, -1.10]) | PSNR and tracking worse on all 10 |
+
+- The trade-off is the same on every effect: the generators that change the detail enough to improve its spectrum
+  clearly also smooth it a little (fire, smoke: 1 to 7% less motion) or let it drift from the coarse state
+  (explosions without a lock); the generators that keep motion and tracking change the detail hardly at all. Smoke's
+  admissible generator is 0.92 A + 0.02 A_sl + 0.04 r_up A before v1's lock, with about a twentieth of G1's smoke spectrum gain.
+- **The rule is strict at this resolution.** v1 and the generator share the stepper and the seeds, so their differences
+  are consistent across settings, and intervals over 10 settings exclude zero for less than 1% of motion or 0.01 dB. G1's
+  own released generators, judged on their validation rows by this rule (a scratch recomputation), would all have
+  been inadmissible too: fire's \|ln motion\| +0.055 [+0.030, +0.073] (although its test then tied, +0.009), smoke's
+  +0.143, and explosions' spectrum a tie.
+- The grain (tau = 0.5), tried once for smoke's admissible generator, makes it worse on spectrum (+0.33) and tracking
+  (-1.8 dB at 8 frames): inadmissible, as in G1.
+
+**Test, once** (smoke only; B's 10 held-out settings, seeds 6,900,000 + i, 6,910,000 + i, 6,920,000 + i):
+
+| smoke | spectrum distance | motion ratio | coverage L1 | mean-frame PSNR |
+|---|---:|---:|---:|---:|
+| real, other seed (floor) | 0.058 | 1.07 | 0.0233 | 30.15 |
+| v1 | 0.228 | 0.801 | 0.0259 | 27.67 |
+| DCM-fine, retry | 0.221 | 0.799 | 0.0260 | 27.65 |
+| retry - v1 | **-0.007 [-0.010, -0.005]** | \|ln\| +0.002 [+0.000, +0.003] (worse) | +0.0000 (tie) | -0.01 [-0.02, -0.01] (worse) |
+
+Cost (the search's model): 0.93 ms, within +1 ms. Tracking the fresh salt-2 runs 8 to 15 (reported, not in the rule):
+-0.02, -0.04, +0.01 (tie) and -0.01 (tie) dB at 1, 8, 30 and 60 frames. **G1c** with this generator: the cold start's
+first second minus v1's usual start, +0.001 [-0.026, +0.030] in score (tie), so G1c's rule holds for it, but the
+generator itself did not pass.
+
+**Decision (rule fixed in advance):** fire: fails on validation (motion), not tested; smoke: fails its test (motion and
+mean-frame PSNR, by 0.2% and 0.01 dB); explosion: fails on validation (no spectrum gain with a lock; tracking without
+one), not tested. **The G1 retry passes on no effect; nothing from DCM-fine goes to stage S6.** The released files,
+their versions and the best-scoring inadmissible generators of fire and explosions (kept for the record) are in
+`g_fine2_released.csv`.
+
+What this says, without touching the test again:
+- The fix worked on what it targeted (smoke's motion loss fell from +0.14 to +0.03 on validation without `prev`), but
+  the mixer's one-step objective still favours a slightly smoothed field, and a rule that counts any consistent loss as
+  worse will refuse every generator that changes the detail visibly.
+- A round 3, if wanted, should fix in advance (before looking at fresh validation seeds): a non-inferiority margin for
+  motion, coverage and mean-frame PSNR (a size people would notice, not zero); a source of motion in every candidate's
+  grid (the grain at small tau with v1's lock); and several search seeds, keeping the best nested bits, since one seed
+  can land in a context-free optimum. It would need fresh validation and test seeds; this round does not claim it.
 
 ## 7. G2: diffusion for the macro features (stage S5)
 
