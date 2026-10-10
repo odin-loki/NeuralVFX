@@ -498,7 +498,7 @@ TEST(Cm, Format2SizesAndLzTokens) {
   const std::size_t fast = round_trip2({a}, {cm::Literal::fast, true, false});
   EXPECT_LE(full, light + 64);
   EXPECT_LE(light, fast + 64);
-  EXPECT_LT(static_cast<double>(fast), static_cast<double>(a.values.size()) / 2.0);
+  EXPECT_LT(static_cast<double>(fast), 0.6 * static_cast<double>(a.values.size()));
 }
 
 TEST(Cm, SeekableSlicesDecodeAlone) {

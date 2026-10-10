@@ -143,6 +143,10 @@ if(NEURALFX_BUILD_TOOLS)
     target_compile_options(nvfx_fireball PRIVATE -Wno-mismatched-new-delete)  # counts allocations (replaces operator new)
   endif()
   # Lossless context-mixing compression of .nvfx files, and its measurement against flipbooks (results/compression).
+  # Study H (docs/DCM.md §9): run-aware fields (H2) and products on compressed data (H1).
+  add_executable(nvfx_study_h tools/nvfx_study_h.cpp)
+  target_link_libraries(nvfx_study_h PRIVATE neuralfx_compose neuralfx_model)
+  neuralfx_defaults(nvfx_study_h)
   add_executable(nvfx_pack tools/nvfx_pack.cpp)
   target_link_libraries(nvfx_pack PRIVATE neuralfx_core ZLIB::ZLIB)
   neuralfx_defaults(nvfx_pack)

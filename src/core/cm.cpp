@@ -1679,6 +1679,12 @@ std::vector<std::pair<size_t, size_t>> chunks(const Shape& s, size_t target) {
   return c;
 }
 
+// LZ tokens only where values repeat exactly: fine fields (mostly empty), headers and the flipbook kinds. Features,
+// weights and states almost never repeat four values in a row and the flag would only cost (measured: results/compression).
+bool lz_kind(Kind k) {
+  return k == Kind::fine || k == Kind::bytes || k == Kind::bc3 || k == Kind::rgba || k == Kind::flow;
+}
+
 // In seekable files, headers and the small tensors that later parsing reads (feature ranges, field scales) go to one
 // stream, segment 0, decoded whenever anything is.
 bool in_header_stream(Kind k) { return k == Kind::bytes || k == Kind::ranges || k == Kind::scales; }
@@ -1827,7 +1833,7 @@ class Io2 {
   // A whole tensor in the single stream (or segment 0), with the stream's model.
   template <class A>
   bool code_stream(A& ac, const Shape& s, size_t planes, uint16_t* v) {
-    LzState* lz = o_.lz ? &lz_ : nullptr;
+    LzState* lz = o_.lz && lz_kind(s.kind) ? &lz_ : nullptr;
     if (o_.model == 0) return code_tensor(*full_, ac, s, v, lz);
     if (o_.model == 1) return code_tensor_fast(*light_, ac, s, 0, planes, v, lz);
     return code_tensor_rice(*rice_, ac, s, 0, planes, v, lz);
@@ -1836,12 +1842,13 @@ class Io2 {
   template <class A>
   bool code_segment(A& ac, const Shape& s, size_t first, size_t last, uint16_t* v) {
     LzState lz;
+    LzState* z = o_.lz && lz_kind(s.kind) ? &lz : nullptr;
     if (o_.model == 1) {
       Light m(1);
-      return code_tensor_fast(m, ac, s, first, last, v, o_.lz ? &lz : nullptr);
+      return code_tensor_fast(m, ac, s, first, last, v, z);
     }
     Rice m(1);
-    return code_tensor_rice(m, ac, s, first, last, v, o_.lz ? &lz : nullptr);
+    return code_tensor_rice(m, ac, s, first, last, v, z);
   }
   static uint32_t sum_of(const uint16_t* v, size_t n, int width) {
     uint32_t h = kSum32;

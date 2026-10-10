@@ -383,6 +383,7 @@ int main(int argc, char** argv) try {
   std::vector<std::vector<std::pair<double, double>>> mod_prof(static_cast<std::size_t>(frames), std::vector<std::pair<double, double>>(owned.size()));
   std::vector<int> n_active(static_cast<std::size_t>(frames)), n_parts(static_cast<std::size_t>(frames));
   std::vector<long> allocs(static_cast<std::size_t>(frames));
+  std::vector<std::uint64_t> sums(static_cast<std::size_t>(frames));
   const double setup_ms = ms(setup0, Clock::now());
   std::size_t scratch = 0, resident = 0;
   for (const auto& m : owned) scratch += m->runner().scratch_bytes();
@@ -584,6 +585,11 @@ int main(int argc, char** argv) try {
     n_active[zs(f)] = static_cast<int>(active.size());
     n_parts[zs(f)] = parts.alive();
     g_counting.store(false);
+    {  // the final picture's checksum (FNV-1a, 64 bits), outside the timed stages: same checksums, same pictures
+      std::uint64_t h = 0xcbf29ce484222325ull;
+      for (const std::uint8_t v : rgb) h = (h ^ v) * 0x100000001b3ull;
+      sums[zs(f)] = h;
+    }
     for (const float kt : key_times) {
       if (f == static_cast<int>(std::lround(kt * 30.f))) {
         Image img;
@@ -677,13 +683,13 @@ int main(int argc, char** argv) try {
     for (const char* n : kStageNames) o << ',' << n;
     o << ",total";
     for (const auto& m : owned) o << ',' << m->name() << "_step," << m->name() << "_shade";
-    o << '\n';
+    o << ",rgb_fnv\n";
     for (int f = 0; f < frames; ++f) {
       o << f << ',' << std::format("{:.3f}", static_cast<double>(f) / 30.0) << ',' << n_active[zs(f)] << ',' << n_parts[zs(f)] << ',' << allocs[zs(f)];
       for (const double v : prof[zs(f)]) o << std::format(",{:.3f}", v);
       o << std::format(",{:.3f}", total[zs(f)]);
       for (const auto& [a, b] : mod_prof[zs(f)]) o << std::format(",{:.3f},{:.3f}", a, b);
-      o << '\n';
+      o << std::format(",{:016x}\n", sums[zs(f)]);
     }
     std::ofstream meta(A.profile.string() + ".meta");
     meta << std::format("width,{}\nheight,{}\nquality,{}\nthreads,{}\nisa,{}\nmain_tile_px,{}\nmodules,{}\nsetup_ms,{:.1f}\nresident_kb,{:.1f}\nscratch_mb,{:.2f}\npeak_rss_mb,{:.1f}\n"

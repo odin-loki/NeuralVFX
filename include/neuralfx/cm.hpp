@@ -94,7 +94,9 @@ std::expected<std::vector<std::uint8_t>, std::string> unpack_model(std::span<con
 // Format 2 (study H, docs/DCM.md §9): the same container and predictions with options for speed.
 //   - lz: LZ tokens (as LZP). Before a value is coded, the value that followed the last occurrence of the four values
 //     before it is offered, and one adaptive flag says whether it is the value; a match is followed while it holds.
-//     Repeats (empty fields, saturated features, repeated headers) then cost a flag per value and no modelling.
+//     Repeats (empty fields, repeated headers) then cost a flag per value and no modelling. Used for the kinds whose
+//     values repeat exactly (fine fields, headers, flipbooks), not for features, weights or states, where they would
+//     only cost.
 //   - light: a light model instead of the full one: seven predictors instead of fourteen, and per bit four directly
 //     indexed statistics, one small mixer and one APM (no hashed contexts, no second mixer). Many times faster to
 //     decode, a few percent larger.
