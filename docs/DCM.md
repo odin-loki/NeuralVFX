@@ -1538,3 +1538,45 @@ effect, 827,640 pixels in all (`g4a-rows`, 3.2 minutes).
 - **For v2:** nothing from G4a by the rule. A per-effect use (the mixer for fire and smoke, where no measure is worse
   on test, and v1's renderer for the explosion) would need its own validation and a new test; the test above cannot
   choose it.
+
+### 10.8 G5a: results
+
+**In one line:** the critic tells the model's first second from a real one (held-out AUC 0.84 on fire, 1.00 on smoke and
+explosions), but that does not tell which candidate makes the better shard: with 4 candidates the shard it picks scores
++0.057 (tie) on fire, **+0.110 [+0.041, +0.181] (worse)** on smoke and -0.089 (tie) on explosions against the runtime's own
+choice, so **no effect passes validation, nothing goes to test, and G5a is not kept.**
+
+Critics (`g_extras_g5a_critics.csv`; `g5a-train`, 10 minutes): fire `cc0deb46...`, smoke `afe430ba...`, explosion
+`8745fbaa...`; AUC on the mixer's own training windows (held out from the Gaussians' fit) 0.85, 1.00, 1.00.
+
+Validation (10 settings x 4 slots x 8 candidates, every candidate's whole shard scored; `g_extras_g5a_val.csv`; the
+policies read the same rows). Calibration score of the shard played (lower is better), mean over settings of the mean
+over slots, and the difference from the runtime's choice paired over settings:
+
+| effect | runtime (candidate 0) | critic, K = 2 | critic, **K = 4** | critic, K = 8 | oracle, K = 4 | mean candidate |
+|---|---:|---:|---:|---:|---:|---:|
+| fire | 0.900 | 0.899 | 0.957 | 1.007 | 0.548 | 0.978 |
+| smoke | 0.587 | 0.640 | 0.697 | 0.686 | 0.401 | 0.599 |
+| explosion | 0.798 | 0.746 | 0.709 | 0.695 | 0.546 | 0.852 |
+
+| effect | critic K = 4 - runtime: score | spectrum distance | \|ln motion ratio\| | coverage L1 | mean-frame PSNR | rule |
+|---|---|---|---|---|---|---|
+| fire | +0.057 [-0.125, +0.242] (tie) | +0.011 (tie) | +0.036 (tie) | 0.000 (tie) | +0.06 (tie) | no |
+| smoke | **+0.110 [+0.041, +0.181]** | +0.019 (tie) | +0.026 (tie) | +0.004 [+0.001, +0.008] | -0.82 [-1.50, -0.19] | no |
+| explosion | -0.089 [-0.253, +0.062] (tie) | +0.017 (tie) | -0.026 (tie) | -0.010 (tie) | +0.80 (tie) | no |
+
+- **Not a null by the pilot gate** (the explosion's mean score falls), **but no effect passes the validation rule**, so
+  no test was run.
+- **The critic does not rank candidates by what the test measures.** Within a slot, the rank correlation of the critic's
+  probability with the shard's score is -0.01 on fire (none), +0.26 on smoke (it prefers the worse shards) and -0.43 on
+  explosions (it prefers the better ones, too weakly to show over 10 settings). An AUC of 1.00 says every model window
+  is far from every real one (the learned renderer's look alone separates them; REPORT §6.4), so "most real-looking"
+  ranks candidates along what tells model from real, not along what makes one shard closer to a real run than another.
+- **Fire forgets its start within a second** (REPORT §6.1): its 6 s shard is decided by the seed's noise after the first
+  second the critic reads, so no pick from that second can help much.
+- **The oracle is a ceiling, not a target:** picking the best of 4 by the very statistic being scored gains 0.19 to 0.35,
+  most of it selection on the noise of one 6 s sample.
+- **Cost, had it passed:** (K - 1) x 30 = 90 extra frames of the runtime per 6 s shard, 70 to 82 ms at 0.78 to 0.91 ms
+  per frame (REPORT §6.7), that is 0.39 to 0.46 ms per frame on average (+45 to +55%), plus 4 critic evaluations
+  (§10.10).
+- **For v2:** nothing.
