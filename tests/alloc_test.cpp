@@ -1,10 +1,12 @@
 // nvfx_render must not allocate (docs/PLAN.md §5.4), nor may a frame of a composed scene (docs/COMPOSE.md). This
 // program replaces the global operator new to count heap allocations, builds small grid, conv and rollout effects in
-// memory, and renders 200 frames of each with every feature switched on (controls, seeded drift, colour), then 99
-// frames of a small composed scene and 44 frames of a scripted one. Exit code 0 = no allocation during rendering.
+// memory, and renders 200 frames of each with every feature switched on (controls, seeded drift, colour), a rollout
+// effect as one continuous rollout with the prior against drift, then 99 frames of a small composed scene and 44 frames
+// of a scripted one. Exit code 0 = no allocation during rendering.
 #include "compose_scene.hpp"
 #include "script.hpp"
 
+#include <neuralfx/dcm/ddpm.hpp>
 #include <neuralfx/model.hpp>
 #include <neuralfx/nvfx.h>
 #include <neuralfx/rollout.hpp>
@@ -14,6 +16,7 @@
 #include <cstdlib>
 #include <new>
 #include <sstream>
+#include <string>
 #include <vector>
 
 namespace {
@@ -122,6 +125,78 @@ int run_rollout(int size) {
   return n == 0 ? 0 : 1;
 }
 
+// A rollout effect played as one continuous rollout with the prior against drift (docs/DCM.md G2.13) acting every 4
+// frames: 50 passes of the denoiser in the counted frames, then a seek backwards (a replay from the start, with passes)
+// and a new seed.
+int run_rollout_prior(int size) {
+  nfx::rollout::Hyper h;
+  h.res = 16;
+  h.hidden = 8;
+  h.memory = 2;
+  h.jacobi = 10;
+  h.render_hidden = 6;
+  h.warmup = 4;
+  nfx::rollout::Model m = nfx::rollout::init_model(h, 3);
+  m.effect = "rollout";
+  m.control_names = {"intensity", "wind", "turbulence"};
+  m.scale = {0.2f, 0.2f, 0.4f, 0.3f};
+  m.lo = {-2.f, -2.f, 0.f, 0.f};
+  m.hi = {2.f, 2.f, 3.f, 3.f};
+  for (int k = 0; k < 3; ++k) {
+    nfx::rollout::StartPoint sp;
+    sp.controls = {0.2f * static_cast<float>(k), 0.5f, 0.5f};
+    sp.seed = static_cast<std::uint64_t>(k);
+    sp.coarse.assign(static_cast<std::size_t>(h.res) * h.res * nfx::rollout::kPhys, 0.2f);
+    m.starts.push_back(sp);
+  }
+  namespace dd = nfx::dcm::ddpm;
+  dd::Config c;
+  c.res = h.res;
+  c.c0 = 8;
+  c.c1 = 16;
+  c.c2 = 16;
+  dd::Denoiser d = dd::init_denoiser(c, 4);
+  std::vector<float> g(d.w.size());
+  dd::gaussian(5, g);
+  for (std::size_t i = 0; i < g.size(); ++i) d.w[i] += 0.03f * g[i];
+  d.scale = {0.2f, 0.2f, 0.4f, 0.3f};
+  const std::string prior = dd::serialise(d);
+  std::ostringstream os;
+  if (!nfx::rollout::save_model(os, m)) return 1;
+  const std::string bytes = os.str();
+  nvfx_effect* e = nullptr;
+  nvfx_instance* in = nullptr;
+  if (nvfx_effect_load_memory(bytes.data(), bytes.size(), &e) != NVFX_OK) return 1;
+  if (nvfx_effect_attach_prior_memory(e, prior.data(), prior.size()) != NVFX_OK) return 1;
+  if (nvfx_instance_create(e, size, &in) != NVFX_OK) return 1;
+  const float controls[3] = {0.7f, 0.2f, 0.9f};
+  nvfx_instance_set_controls(in, controls, 3);
+  nvfx_instance_set_seed(in, 99);
+  nvfx_instance_set_colour(in, 0.4f, 1.2f);
+  nvfx_instance_set_drift(in, 0.f);
+  if (nvfx_instance_set_prior(in, 4, 100, 1.f) != NVFX_OK) return 1;
+  std::vector<std::uint8_t> rgba(static_cast<std::size_t>(size) * size * 4);
+  nvfx_render(in, 0.0, rgba.data(), static_cast<std::size_t>(size) * 4);  // warm-up outside the count
+  g_allocations = 0;
+  g_counting = true;
+  for (int f = 0; f < 200; ++f) nvfx_render(in, f / 30.0, rgba.data(), static_cast<std::size_t>(size) * 4);
+  nvfx_render(in, 1.0, rgba.data(), static_cast<std::size_t>(size) * 4);  // backwards: replay from the start
+  nvfx_instance_set_seed(in, 5);
+  nvfx_render(in, 1.5, rgba.data(), static_cast<std::size_t>(size) * 4);
+  g_counting = false;
+  const long n = g_allocations.load();
+  // the prior did act: the same frame without it differs
+  std::vector<std::uint8_t> plain(rgba.size());
+  nvfx_instance_set_prior(in, 0, 100, 1.f);
+  nvfx_render(in, 1.5, plain.data(), static_cast<std::size_t>(size) * 4);
+  const bool acted = plain != rgba;
+  std::printf("rollout %dx%d, one continuous rollout with the prior every 4 frames: %ld allocations in 202 frames (with a replay)%s\n", size, size, n,
+              acted ? "" : "; the prior did not act");
+  nvfx_instance_free(in);
+  nvfx_effect_free(e);
+  return n == 0 && acted ? 0 : 1;
+}
+
 // A composed scene (src/compose): stepping, couplings, the bus, light, particles and the whole frame, on 2 threads.
 int run_compose() {
   nfx::compose::testing::MiniScene scene(2);
@@ -184,6 +259,7 @@ int main() {
   c.c1 = 8;
   c.c2 = 8;
   int failures = run(g, 64, "grid") + run(g, 128, "grid") + run(c, 64, "conv") + run(c, 32, "conv") + run_rollout(64) + run_rollout(128) + run_compose() + run_script();
+  failures += run_rollout_prior(64) + run_rollout_prior(128);  // the prior against drift
   failures += run(g, 128, "grid", 8) + run(g, 128, "grid", 5) + run(g, 64, "grid", 4) + run(c, 64, "conv", 4);  // packed features
   failures += run(g, 128, "grid", 8, 6) + run(c, 64, "conv", 8, 8);  // vector-quantised features
   std::printf("%s\n", failures ? "FAILED: nvfx_render allocated" : "ok: no allocation per frame");

@@ -86,6 +86,25 @@ NVFX_API nvfx_status nvfx_instance_set_drift(nvfx_instance* instance, float seco
 /* Exact colour controls applied to the output: hue rotation in radians, brightness multiplier (default 0, 1). */
 NVFX_API nvfx_status nvfx_instance_set_colour(nvfx_instance* instance, float hue_radians, float brightness);
 
+/* Rollout effects: the prior against drift (docs/ENGINES.md §5, docs/DCM.md G2.13) ------------------------------
+ * An optional second file, a small denoiser trained for the effect (fire.ddpm: 1.57 MB, about 20 times the 82 KB
+ * fire effect, whose file is unchanged). With it one continuous rollout (nvfx_instance_set_drift(instance, 0)) plays
+ * for a minute or more without drifting: every N frames one pass of the denoiser (89.5 M multiply-adds, a few ms on
+ * one AVX2 core, so that frame costs that much more) moves the coarse state towards the denoiser's one-step estimate
+ * of a clean state. Study G found it ties the 6 s shards on every statistic: it buys continuity (no restarts, no
+ * crossfades), not better pictures. Validated on fire only.
+ * Attach once, before the effect is shared between threads and before creating instances. Errors:
+ * NVFX_ERROR_ARGUMENT (not a rollout effect, or a prior is already attached), NVFX_ERROR_IO, NVFX_ERROR_FORMAT (not a
+ * denoiser file, or one for another grid or condition). info.resident_bytes grows by the prior's weights. */
+NVFX_API nvfx_status nvfx_effect_attach_prior(nvfx_effect* effect, const char* path);
+NVFX_API nvfx_status nvfx_effect_attach_prior_memory(nvfx_effect* effect, const void* data, size_t bytes);
+/* One pass every `every_frames` frames (0 = off) at noise level `t` (1 to the denoiser's T), blended with weight
+ * `beta` in [0, 1]. Default once a prior is attached: 16, 100, 1 (study G's tested setting). It acts only while the
+ * instance plays one continuous rollout (drift 0, or a one-shot effect); with shards it is idle. A change replays the
+ * timeline from the start at the next render. Instances created after the attach hold the prior's buffers
+ * (in nvfx_instance_scratch_bytes); for an instance created before it, this call allocates them. */
+NVFX_API nvfx_status nvfx_instance_set_prior(nvfx_instance* instance, int every_frames, int t, float beta);
+
 /* Render the frame at `time_seconds` (looping effects wrap; one-shot effects hold their last frame) into `rgba`,
  * whose rows are `stride_bytes` apart (>= size * 4). No allocation. */
 NVFX_API nvfx_status nvfx_render(nvfx_instance* instance, double time_seconds, uint8_t* rgba, size_t stride_bytes);

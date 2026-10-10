@@ -4,6 +4,7 @@
 #include <neuralfx/nvfx.h>
 
 #include "rt_common.hpp"
+#include "rt_prior.hpp"
 
 #include <algorithm>
 #include <array>
@@ -11,6 +12,7 @@
 #include <cmath>
 #include <cstring>
 #include <fstream>
+#include <iterator>
 #include <memory>
 #include <new>
 #include <numbers>
@@ -27,6 +29,7 @@ using nfx::rt::RolloutRunner;
 struct nvfx_effect {
   Effect e;
   std::unique_ptr<RolloutEffect> roll;
+  std::unique_ptr<nfx::rt::PriorNet> prior;  // rollout effects: the optional prior against drift (nvfx_effect_attach_prior)
 };
 
 struct nvfx_instance {
@@ -49,6 +52,11 @@ struct nvfx_instance {
   float hue = 0.f, brightness = 1.f;
   std::array<float, 9> colour{};
   bool apply_colour = false;
+  // The prior against drift (docs/DCM.md G2.13): its work buffers, its condition, and when and how strongly it acts.
+  std::unique_ptr<nfx::rt::Prior> prior;
+  std::vector<float> prior_cond;
+  int prior_every = 16, prior_t = 100;
+  float prior_beta = 1.f;
 };
 
 namespace {
@@ -163,6 +171,15 @@ ShardPlan plan_shard(const nvfx_instance& in, std::int64_t k) {
   return p;
 }
 
+// The prior against drift (docs/DCM.md G2.13), after the step that reached t.frame: in one continuous rollout only,
+// every prior_every frames counted from the end of the start point's warm-up, as study G applied it (G2b). No allocation.
+void apply_prior(nvfx_instance& in, nvfx_instance::Track& t) {
+  if (!in.prior || in.prior_every <= 0 || t.frame <= 0 || t.frame % in.prior_every != 0 || shard_frames(in) != 0) return;
+  const auto& m = in.effect->roll->m;
+  nfx::rollout::condition(m, in.controls, t.r->time(), in.prior_cond);
+  in.prior->apply(t.r->coarse_mut(), m.h.channels(), m.lo, m.hi, in.prior_t, in.prior_beta, in.prior_cond);
+}
+
 // Bring a track to shard k at frame f: continue it, or begin the shard afresh and step to f. No allocation.
 void bring(nvfx_instance& in, nvfx_instance::Track& t, std::int64_t k, std::int64_t f) {
   if (t.shard != k || f < t.frame || f - t.frame > kCatchUp) {
@@ -175,6 +192,7 @@ void bring(nvfx_instance& in, nvfx_instance::Track& t, std::int64_t k, std::int6
   while (t.frame < f) {
     t.r->step(in.controls, t.seed);
     ++t.frame;
+    apply_prior(in, t);
   }
 }
 
@@ -205,6 +223,28 @@ void rollout_frame(nvfx_instance& in, std::int64_t f, const FrameInput& fi, std:
     const std::uint8_t* s = in.mix.data() + row * static_cast<std::size_t>(y);
     for (std::size_t i = 0; i < row; ++i) d[i] = static_cast<std::uint8_t>(static_cast<float>(d[i]) * (1.f - w) + static_cast<float>(s[i]) * w + 0.5f);
   }
+}
+
+// The prior's work buffers for an instance, on the instance's ISA.
+std::unique_ptr<nfx::rt::Prior> make_prior(const nfx::rt::PriorNet& n) {
+  switch (resolved_isa()) {
+    case NVFX_ISA_AVX512: return nfx::rt::isa_avx512::make_prior(n);
+    case NVFX_ISA_AVX2: return nfx::rt::isa_avx2::make_prior(n);
+    default: return nfx::rt::isa_base::make_prior(n);
+  }
+}
+
+// A denoiser for a rollout effect: read, checked against the effect's grid and condition, and attached.
+nvfx_status attach_prior(nvfx_effect* e, std::span<const char> bytes) {
+  if (!e->roll) return NVFX_ERROR_ARGUMENT;
+  if (e->prior) return NVFX_ERROR_ARGUMENT;  // instances may hold the attached one
+  auto n = nfx::rt::parse_prior(bytes);
+  if (!n) return NVFX_ERROR_FORMAT;
+  const auto& h = e->roll->m.h;
+  if (n->res != h.res || n->channels != nfx::rollout::kPhys || n->cond != h.cond()) return NVFX_ERROR_FORMAT;
+  e->prior = std::make_unique<nfx::rt::PriorNet>(std::move(*n));
+  e->roll->resident_bytes += e->prior->resident_bytes();
+  return NVFX_OK;
 }
 
 nvfx_status adopt(std::expected<nfx::Model, std::string>&& m, nvfx_effect** out) {
@@ -382,6 +422,8 @@ nvfx_status nvfx_instance_create(const nvfx_effect* e, int size, nvfx_instance**
       }
       in->mix.assign(static_cast<std::size_t>(size) * size * 4, 0);
       in->drift_seconds = e->roll->m.loop ? 6.f : 0.f;
+      in->prior_cond.assign(static_cast<std::size_t>(h.cond()), 0.f);
+      if (e->prior) in->prior = make_prior(*e->prior);
       *out = in.release();
       return NVFX_OK;
     } catch (const std::bad_alloc&) {
@@ -423,7 +465,10 @@ void nvfx_instance_free(nvfx_instance* in) { delete in; }
 
 size_t nvfx_instance_scratch_bytes(const nvfx_instance* in) {
   if (!in) return 0;
-  if (in->a.r) return in->a.r->scratch_bytes() + in->b.r->scratch_bytes() + in->mix.size() + 4 * in->controls.size();
+  if (in->a.r) {
+    return in->a.r->scratch_bytes() + in->b.r->scratch_bytes() + in->mix.size() + 4 * (in->controls.size() + in->prior_cond.size()) +
+           (in->prior ? in->prior->scratch_bytes() : 0);
+  }
   return in->renderer->scratch_bytes() + 4 * (in->controls.size() + in->cond.size() + in->za.size() + in->zb.size());
 }
 
@@ -460,6 +505,55 @@ nvfx_status nvfx_instance_set_drift(nvfx_instance* in, float seconds) {
   if (!in || seconds < 0.f) return NVFX_ERROR_ARGUMENT;
   if (in->a.r && seconds != in->drift_seconds) in->a.shard = in->b.shard = -1;  // rollout: a new shard length, a new timeline
   in->drift_seconds = seconds;
+  return NVFX_OK;
+}
+
+nvfx_status nvfx_effect_attach_prior(nvfx_effect* e, const char* path) {
+  if (!e || !path) return NVFX_ERROR_ARGUMENT;
+  try {
+    std::ifstream f(path, std::ios::binary);
+    if (!f) return NVFX_ERROR_IO;
+    const std::vector<char> bytes((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
+    if (f.bad()) return NVFX_ERROR_IO;
+    return attach_prior(e, bytes);
+  } catch (const std::bad_alloc&) {
+    return NVFX_ERROR_MEMORY;
+  } catch (...) {
+    return NVFX_ERROR_FORMAT;
+  }
+}
+
+nvfx_status nvfx_effect_attach_prior_memory(nvfx_effect* e, const void* data, size_t bytes) {
+  if (!e || !data) return NVFX_ERROR_ARGUMENT;
+  try {
+    return attach_prior(e, std::span(static_cast<const char*>(data), bytes));
+  } catch (const std::bad_alloc&) {
+    return NVFX_ERROR_MEMORY;
+  } catch (...) {
+    return NVFX_ERROR_FORMAT;
+  }
+}
+
+nvfx_status nvfx_instance_set_prior(nvfx_instance* in, int every_frames, int t, float beta) {
+  if (!in || !in->a.r || every_frames < 0 || !(beta >= 0.f && beta <= 1.f)) return NVFX_ERROR_ARGUMENT;
+  const nfx::rt::PriorNet* net = in->effect->prior.get();
+  if (every_frames > 0 && (!net || t < 1 || t > net->timesteps)) return NVFX_ERROR_ARGUMENT;
+  const bool was_on = in->prior && in->prior_every > 0, on = every_frames > 0;
+  if (on && !in->prior) {  // the instance was created before the prior was attached: a set-up call allocates
+    try {
+      in->prior = make_prior(*net);
+    } catch (const std::bad_alloc&) {
+      return NVFX_ERROR_MEMORY;
+    }
+  }
+  if (was_on != on || (on && (every_frames != in->prior_every || t != in->prior_t || beta != in->prior_beta))) {
+    in->a.shard = in->b.shard = -1;  // another prior, another timeline: replay from the start at the next render
+  }
+  in->prior_every = every_frames;
+  if (every_frames > 0) {
+    in->prior_t = t;
+    in->prior_beta = beta;
+  }
   return NVFX_OK;
 }
 

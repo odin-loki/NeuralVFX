@@ -58,7 +58,8 @@ set_target_properties(neuralfx_model PROPERTIES POSITION_INDEPENDENT_CODE ON)
 neuralfx_defaults(neuralfx_model)
 
 # The runtime (what ships in a game): C API, per-ISA renderers, no allocation per frame.
-set(NVFX_RUNTIME_SOURCES src/runtime/nvfx.cpp src/runtime/rt_base.cpp src/runtime/rt_avx2.cpp src/runtime/rt_avx512.cpp)
+set(NVFX_RUNTIME_SOURCES src/runtime/nvfx.cpp src/runtime/rt_base.cpp src/runtime/rt_avx2.cpp src/runtime/rt_avx512.cpp
+                         src/runtime/rt_prior.cpp src/runtime/rt_prior_base.cpp src/runtime/rt_prior_avx2.cpp src/runtime/rt_prior_avx512.cpp)
 add_library(nvfx STATIC ${NVFX_RUNTIME_SOURCES})
 target_link_libraries(nvfx PUBLIC neuralfx_model)
 set_target_properties(nvfx PROPERTIES POSITION_INDEPENDENT_CODE ON)
@@ -177,6 +178,11 @@ if(NEURALFX_BUILD_TOOLS)
   add_executable(nvfx_f2 tools/nvfx_f2.cpp)
   target_link_libraries(nvfx_f2 PRIVATE neuralfx_codec neuralfx_train nvfx)
   neuralfx_defaults(nvfx_f2)
+  # The prior against drift in the runtime (docs/DCM.md G2.13): parity with study G's reference, and its cost per frame.
+  add_executable(nvfx_prior tools/nvfx_prior.cpp)
+  target_include_directories(nvfx_prior PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src/runtime")
+  target_link_libraries(nvfx_prior PRIVATE nvfx neuralfx_ddpm)
+  neuralfx_defaults(nvfx_prior)
   add_executable(nvfx_scene examples/scene_bench.cpp)
   target_link_libraries(nvfx_scene PRIVATE nvfx)
   neuralfx_defaults(nvfx_scene)
@@ -198,7 +204,7 @@ if(NEURALFX_BUILD_TESTS)
   add_executable(neuralfx_tests tests/test_proto.cpp tests/test_sim.cpp tests/test_baselines.cpp tests/test_train.cpp
                                 tests/test_runtime.cpp tests/test_ingest.cpp tests/test_rollout.cpp tests/test_compose.cpp
                                 tests/test_dcm.cpp tests/test_cm.cpp tests/test_dcm_fine.cpp tests/test_dcm_ddpm.cpp tests/test_script.cpp
-                                tests/test_g3_codec.cpp tests/test_video_codec.cpp)
+                                tests/test_g3_codec.cpp tests/test_video_codec.cpp tests/test_runtime_prior.cpp)
   target_link_libraries(neuralfx_tests PRIVATE neuralfx_proto neuralfx_io neuralfx_train nvfx neuralfx_compose neuralfx_dcm
                                                neuralfx_dcm_fine neuralfx_ddpm neuralfx_codec GTest::gtest_main)
   neuralfx_defaults(neuralfx_tests)
@@ -206,7 +212,7 @@ if(NEURALFX_BUILD_TESTS)
   gtest_discover_tests(neuralfx_tests TEST_PREFIX "neuralfx." DISCOVERY_MODE PRE_TEST PROPERTIES LABELS neuralfx)
   # Counts heap allocations around nvfx_render (replaces the global operator new, so it is its own program).
   add_executable(nvfx_alloc_test tests/alloc_test.cpp)
-  target_link_libraries(nvfx_alloc_test PRIVATE nvfx neuralfx_compose)
+  target_link_libraries(nvfx_alloc_test PRIVATE nvfx neuralfx_compose neuralfx_ddpm)  # the trainer's format writer makes a test prior
   neuralfx_defaults(nvfx_alloc_test)
   if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
     target_compile_options(nvfx_alloc_test PRIVATE -Wno-mismatched-new-delete)  # replacing operator new is the point
