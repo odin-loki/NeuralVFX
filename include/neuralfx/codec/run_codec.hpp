@@ -93,7 +93,8 @@ struct Decoded {
   int frames = 0, size = 0;
   std::vector<std::uint8_t> rgba;  // frames * size * size * 4 (empty when a frame callback was given)
   bool verified = false;           // the reconstruction equals the encoder's (hash of the final state)
-  std::size_t working_bytes = 0;   // decoder memory while it ran: coded integers, coder model, reconstruction state
+  std::size_t working_bytes = 0;   // decoder memory while it ran: one plane of integers, coder model, reconstruction state
+  double entropy_seconds = 0;      // thread CPU time spent decoding integers (the rest is the effect's own step and render)
 };
 
 // Decodes a stream. Refuses a stream made for another model, or one that is damaged or truncated (the decoder runs
@@ -101,6 +102,12 @@ struct Decoded {
 // given, receives each frame as it is made instead (streaming): damage is then reported after the frames.
 std::expected<Decoded, std::string> decode(const rollout::Model& m, std::span<const std::uint8_t> stream,
                                            const std::function<void(int, std::span<const std::uint8_t>)>& on_frame = {});
+
+// The effect's renderer as the codec runs it: the 8-bit output of rollout::render (rounded as v * 255 + 0.5), byte for
+// byte, without its per-pixel cost (the directional soot sums are made once per coarse cell, no allocation per pixel,
+// and pixels the material gate closes are not run through the MLP). out: size * size * 4, rows top to bottom. scratch is
+// reused between calls.
+void render_u8(const rollout::Model& m, const rollout::State& s, std::span<std::uint8_t> out, std::vector<float>& scratch);
 
 // A 32-bit tag of the model's stored form (weights, scales, detail constants, start points): a stream names the model
 // it was made with.

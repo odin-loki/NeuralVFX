@@ -161,6 +161,23 @@ TEST(G3Coder, EmptyPlanesCostAlmostNothing) {
   EXPECT_LT(bytes.size(), 120u);  // 30 x 4,096 zeros
 }
 
+TEST(G3Codec, RendererMatchesTheReferenceByteForByte) {
+  const Fixture& fx = fixture();
+  rollout::Model m = fx.m;
+  m.render_w[rollout::render_layout(m.h).bo] = -0.3f;  // a negative output bias: the gate's zero must still give 0
+  std::vector<float> ctl(fx.run.controls.begin(), fx.run.controls.end());
+  rollout::State s = rollout::start(m, 0, fx.run.size, ctl, 9);
+  std::vector<float> ref(sz(fx.run.size) * sz(fx.run.size) * 4), scratch;
+  std::vector<std::uint8_t> want(ref.size()), got(ref.size());
+  for (int f = 0; f < 6; ++f) {
+    rollout::step(m, s, ctl, 9);
+    rollout::render(m, s, ref);
+    for (std::size_t i = 0; i < ref.size(); ++i) want[i] = static_cast<std::uint8_t>(ref[i] * 255.f + 0.5f);
+    codec::render_u8(m, s, got, scratch);
+    ASSERT_EQ(got, want) << "frame " << f;
+  }
+}
+
 TEST(G3Codec, DecoderReproducesTheEncoderBitExactly) {
   const Fixture& fx = fixture();
   for (const auto& s : settings_set()) {

@@ -6,6 +6,7 @@
 #include <bit>
 #include <cmath>
 #include <cstring>
+#include <ctime>
 #include <format>
 #include <limits>
 #include <sstream>
@@ -21,6 +22,11 @@ constexpr std::size_t kTrailer = 8;  // hash of the final reconstruction state, 
                                      // integer and that hash
 
 std::size_t sz(int v) { return static_cast<std::size_t>(v); }
+double thread_seconds() {
+  timespec t{};
+  clock_gettime(CLOCK_THREAD_CPUTIME_ID, &t);
+  return static_cast<double>(t.tv_sec) + 1e-9 * static_cast<double>(t.tv_nsec);
+}
 float fl(int v) { return static_cast<float>(v); }
 
 // --- 8-bit step codes: q = 2^((code - 160) / 16); code 0 means "off" -------------------------------------------------
@@ -204,7 +210,7 @@ struct Loop {
     cond.resize(sz(m.h.cond()));
     noise.resize(sz(R) * sz(R) * rollout::kNoise);
     next.resize(st.coarse.size());
-    rgba.resize(sz(size) * sz(size) * 4);
+    rgba.reserve(sz(m.h.res) * sz(m.h.res) * rollout::kDirs);
     chans = corrected_channels(s);
     for (int c = 0; c < kPhys; ++c) cstep[sz(c)] = s.q * (c < 2 ? s.q_vel : s.q_mat) * m.scale[sz(c)];
     for (int c = 0; c < 2; ++c) fstep[sz(c)] = s.qf * m.render_scale[sz(c)];
@@ -345,10 +351,7 @@ struct Loop {
       }
     }
   }
-  void render(std::span<std::uint8_t> out) {
-    rollout::render(m, st, rgba);
-    for (std::size_t i = 0; i < rgba.size(); ++i) out[i] = static_cast<std::uint8_t>(rgba[i] * 255.f + 0.5f);
-  }
+  void render(std::span<std::uint8_t> out) { render_u8(m, st, out, rgba); }
   void advance() {
     st.time += 1.f / m.fps;
     st.since_start += 1.f / m.fps;
@@ -365,6 +368,16 @@ struct Loop {
             rgba.size()) * sizeof(float);
   }
 };
+
+// rollout.cpp's bilinear sample of a strided field, operation for operation (the renderer's coarse inputs).
+float bilinear_ch(const float* f, int n, int channels, int c, float x, float y) {
+  x = std::clamp(x, 0.f, fl(n - 1));
+  y = std::clamp(y, 0.f, fl(n - 1));
+  const int x0 = std::min(static_cast<int>(x), n - 2), y0 = std::min(static_cast<int>(y), n - 2);
+  const float fx = x - fl(x0), fy = y - fl(y0);
+  const auto at = [&](int xx, int yy) { return f[(sz(yy) * sz(n) + sz(xx)) * sz(channels) + sz(c)]; };
+  return (1.f - fy) * ((1.f - fx) * at(x0, y0) + fx * at(x0 + 1, y0)) + fy * ((1.f - fx) * at(x0, y0 + 1) + fx * at(x0 + 1, y0 + 1));
+}
 
 bool coarse_frame(const Settings& s, int f) { return s.k > 0 && (s.q_vel > 0.f || s.q_mat > 0.f) && f % s.k == 0; }
 bool fine_frame(const Settings& s, int f) { return s.kf > 0 && f % s.kf == 0; }
@@ -399,6 +412,72 @@ std::array<float, 3> controls_of(const std::array<std::uint16_t, 3>& q) {
 }  // namespace
 
 // --- public helpers --------------------------------------------------------------------------------------------------------
+
+void render_u8(const rollout::Model& m, const rollout::State& s, std::span<std::uint8_t> out, std::vector<float>& dirs) {
+  using rollout::kDirs;
+  using rollout::kDirSteps;
+  using rollout::kRenderIn;
+  const int R = m.h.res, S = s.size, C = m.h.channels(), H = m.h.render_hidden;
+  if (H > 64) throw std::invalid_argument("render_u8: renderer wider than 64");
+  static constexpr std::array<std::array<int, 2>, kDirs> dir{{{1, 0}, {1, 1}, {0, 1}, {-1, 1}, {-1, 0}, {-1, -1}, {0, -1}, {1, -1}}};
+  dirs.resize(sz(R) * sz(R) * kDirs);
+  for (int cy = 0; cy < R; ++cy) {
+    for (int cx = 0; cx < R; ++cx) {
+      for (int j = 0; j < kDirs; ++j) {
+        float sum = 0.f;
+        for (int st = 1; st <= kDirSteps; ++st) {
+          const int xx = cx + st * dir[sz(j)][0], yy = cy + st * dir[sz(j)][1];
+          if (xx >= 0 && yy >= 0 && xx < R && yy < R) sum += s.coarse[(sz(yy) * sz(R) + sz(xx)) * sz(C) + 3];
+        }
+        dirs[(sz(cy) * sz(R) + sz(cx)) * kDirs + sz(j)] = sum;
+      }
+    }
+  }
+  const auto D = [&](int cx, int cy, int j) { return dirs[(sz(cy) * sz(R) + sz(cx)) * kDirs + sz(j)]; };
+  const rollout::RenderLayout L = rollout::render_layout(m.h);
+  const float* w = m.render_w.data();
+  const float k = fl(S) / fl(R), it = 1.f / m.render_scale[0], id = 1.f / m.render_scale[1];
+  std::array<float, kRenderIn> f{};
+  std::array<float, 64> h1{}, h2{};
+  for (int y = 0; y < S; ++y) {
+    for (int x = 0; x < S; ++x) {
+      std::uint8_t* p = out.data() + (sz(S - 1 - y) * sz(S) + sz(x)) * 4;
+      f[0] = s.fine_t[sz(y) * sz(S) + sz(x)] * it;
+      f[1] = s.fine_d[sz(y) * sz(S) + sz(x)] * id;
+      const float g = rollout::render_gate(f[0], f[1]);
+      if (g == 0.f) {  // the reference multiplies the MLP's output by 0 here: every channel rounds to 0
+        p[0] = p[1] = p[2] = p[3] = 0;
+        continue;
+      }
+      const float xc = (fl(x) + 0.5f) / k - 0.5f, yc = (fl(y) + 0.5f) / k - 0.5f;
+      f[2] = bilinear_ch(s.coarse.data(), R, C, 2, xc, yc) * it;
+      f[3] = bilinear_ch(s.coarse.data(), R, C, 3, xc, yc) * id;
+      const float cx = std::clamp(xc, 0.f, fl(R - 1)), cy = std::clamp(yc, 0.f, fl(R - 1));
+      const int x0 = std::min(static_cast<int>(cx), R - 2), y0 = std::min(static_cast<int>(cy), R - 2);
+      const float fx = cx - fl(x0), fy = cy - fl(y0);
+      for (int j = 0; j < kDirs; ++j) {
+        const float a = (1.f - fx) * D(x0, y0, j) + fx * D(x0 + 1, y0, j);
+        const float b = (1.f - fx) * D(x0, y0 + 1, j) + fx * D(x0 + 1, y0 + 1, j);
+        f[4 + sz(j)] = ((1.f - fy) * a + fy * b) * id;
+      }
+      for (int j = 0; j < H; ++j) {
+        float acc = w[L.b1 + sz(j)];
+        for (int i = 0; i < kRenderIn; ++i) acc += w[L.w1 + sz(j) * kRenderIn + sz(i)] * f[sz(i)];
+        h1[sz(j)] = std::max(0.f, acc);
+      }
+      for (int j = 0; j < H; ++j) {
+        float acc = w[L.b2 + sz(j)];
+        for (int i = 0; i < H; ++i) acc += w[L.w2 + sz(j) * sz(H) + sz(i)] * h1[sz(i)];
+        h2[sz(j)] = std::max(0.f, acc);
+      }
+      for (int c = 0; c < 4; ++c) {
+        float acc = w[L.bo + sz(c)];
+        for (int i = 0; i < H; ++i) acc += w[L.wo + sz(c) * sz(H) + sz(i)] * h2[sz(i)];
+        p[c] = static_cast<std::uint8_t>(std::clamp(acc * g, 0.f, 1.f) * 255.f + 0.5f);
+      }
+    }
+  }
+}
 
 Settings stored_settings(const Settings& s) {
   return from_codes(to_codes(s));
@@ -599,8 +678,10 @@ std::expected<Decoded, std::string> decode(const rollout::Model& m, std::span<co
   bool ok = true;
   std::vector<std::int32_t> r;
   const auto take = [&](PlaneKind kind, int h, int w, int ch, const std::vector<std::uint8_t>& side) {
+    const double t0 = thread_seconds();
     r.resize(sz(h) * sz(w) * sz(ch));
     ok = ok && rm.decode(ad, kind, h, w, ch, r, side);
+    out.entropy_seconds += thread_seconds() - t0;
     for (const std::int32_t v : r) fnv(sum, static_cast<std::uint32_t>(v));
     return std::span<const std::int32_t>(r);
   };
