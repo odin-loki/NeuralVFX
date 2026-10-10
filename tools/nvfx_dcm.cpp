@@ -5,8 +5,19 @@
 //   nvfx_dcm version FILE                        the SHA-256 version of a serialised mixer (nvfx-paq-mixer v1 or
 //                                                nvfx-value-mixer v1), after checking that it parses
 //
-// Later stages (docs/DCM.md §5) add the subcommands that search and release mixers on effect data.
+// DCM-fine (docs/DCM.md G1), per effect (--effect fire|smoke|explosion, --threads 2, data under NEURALVFX_DATA/g/fine):
+//   nvfx_dcm record --effect E          pixel rows of 48 training (salt 1) and 16 validation (salt 3) runs, and windows
+//   nvfx_dcm experts --effect E         the spec (bins, regional clusters); each expert alone on the validation rows
+//   nvfx_dcm search-fine --effect E [--pilot] [--family none|hand|hand+macro] [--domain linear|log] [--seed 0]
+//                                       the pilot (default mixer against the v1 lock), or the nested mixer search
+//   nvfx_dcm train-fine --effect E      own-rollout pass, tau and relock on validation settings, re-ranking, release
+//   nvfx_dcm eval-fine --effect E       G1c and the test (once), v1 against DCM-fine through the reference
+//   nvfx_dcm bench-experts --effect E   microseconds per pixel of each expert group, context and the mixer
+//   nvfx_dcm fine-summary               paired-bootstrap tables of the CSVs
 #include "args.hpp"
+#include "fine_study.hpp"
+
+#include <neuralfx/clip.hpp>
 
 #include <neuralfx/dcm/compact.hpp>
 #include <neuralfx/dcm/search.hpp>
@@ -129,19 +140,67 @@ int version(const std::string& path) {
 }  // namespace
 
 int main(int argc, char** argv) try {
-  const tools::Args a(argc, argv, {"help"});
+  const tools::Args a(argc, argv, {"help", "quick", "pilot"});
   const auto& pos = a.positional();
   if (a.flag("help") || pos.empty()) {
-    std::println("nvfx_dcm selftest [--threads 2] [--seed 5] | version FILE");
+    std::println("nvfx_dcm selftest [--threads 2] [--seed 5] | version FILE | record|experts|search-fine [--pilot]|train-fine|eval-fine|"
+                 "bench-experts --effect fire|smoke|explosion [--threads 2] [--quick] | fine-summary");
     return 0;
   }
   int rc = 0;
+  const auto fine_ctx = [&] {
+    fine_study::Ctx c;
+    c.data = a.has("data") ? std::filesystem::path(a.str("data")) : data_root() / "g" / "fine";
+    c.models = a.has("models") ? std::filesystem::path(a.str("models")) : data_root() / "experiments" / "models" / "d";
+    c.results = a.str("results", "results/experiments");
+    c.figures = a.str("figures", "docs/figures");
+    c.threads = a.i("threads", 2);
+    c.quick = a.flag("quick");
+    if (c.quick) {
+      c.data /= "quick";
+      c.results /= "quick";
+      c.figures = c.data / "figures";
+    }
+    c.seed = a.u64("seed", 0);
+    c.family = a.str("family", "hand+macro");
+    c.domain = a.str("domain", "linear");
+    c.configs = a.i("configs", 200);
+    c.refine = a.i("refine", 2);
+    c.max_rows = a.i("max-rows", 0);
+    c.budget_ms = a.f("budget", 1.f);
+    return c;
+  };
+  const auto effect = [&] {
+    sim::Effect e{};
+    if (!sim::parse_effect(a.need("effect"), e)) throw std::invalid_argument("--effect fire|smoke|explosion");
+    return e;
+  };
   if (pos[0] == "selftest") {
     rc = selftest(a);
   } else if (pos[0] == "version" && pos.size() == 2) {
     rc = version(pos[1]);
+  } else if (pos[0] == "record") {
+    fine_study::record(fine_ctx(), effect());
+  } else if (pos[0] == "experts") {
+    fine_study::experts(fine_ctx(), effect());
+  } else if (pos[0] == "search-fine") {
+    if (a.flag("pilot")) {
+      fine_study::pilot(fine_ctx(), effect());
+    } else {
+      fine_study::search(fine_ctx(), effect());
+    }
+  } else if (pos[0] == "train-fine") {
+    fine_study::train(fine_ctx(), effect());
+  } else if (pos[0] == "eval-fine") {
+    fine_study::eval(fine_ctx(), effect());
+  } else if (pos[0] == "bench-experts") {
+    fine_study::bench(fine_ctx(), effect());
+  } else if (pos[0] == "probe-gen") {
+    fine_study::probe(fine_ctx(), effect(), a.str("mixer"), a.f("tau", 0.f), a.i("relock", 0), a.i("frames", 90));
+  } else if (pos[0] == "fine-summary") {
+    fine_study::summary(fine_ctx());
   } else {
-    throw std::invalid_argument("unknown command (nvfx_dcm selftest | version FILE)");
+    throw std::invalid_argument("unknown command (nvfx_dcm --help)");
   }
   a.warn_unused();
   return rc;

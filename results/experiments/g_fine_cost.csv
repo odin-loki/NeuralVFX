@@ -1,0 +1,118 @@
+effect,component,us_per_pixel,ms_per_frame,evaluated_pixels,load,note
+fire,base,0.0233,0.7631,11105,4.85,mixer without inputs, grain, relock
+fire,group_adv,0.0014,0.0474,11105,4.85,experts plus their inputs in the mixer without context
+fire,group_lock,0.0008,0.0259,11105,4.85,experts plus their inputs in the mixer without context
+fire,group_noise,0.0034,0.1122,11105,4.85,experts plus their inputs in the mixer without context
+fire,group_coarse,0.0032,0.1058,11105,4.85,experts plus their inputs in the mixer without context
+fire,group_shape,0.0049,0.1605,11105,4.85,experts plus their inputs in the mixer without context
+fire,group_prev,0.0006,0.0196,11105,4.85,experts plus their inputs in the mixer without context
+fire,group_bias,0.0003,0.0086,11105,4.85,experts plus their inputs in the mixer without context
+fire,context_lvl,0.0040,0.1313,11105,4.85,context plus one mixer over every input
+fire,context_ratio,0.0035,0.1134,11105,4.85,context plus one mixer over every input
+fire,context_flow,0.0044,0.1447,11105,4.85,context plus one mixer over every input
+fire,context_height,0.0026,0.0867,11105,4.85,context plus one mixer over every input
+fire,context_ctrl,0.0026,0.0867,11105,4.85,context plus one mixer over every input
+fire,context_age,0.0026,0.0867,11105,4.85,context plus one mixer over every input
+fire,context_channel,0.0026,0.0867,11105,4.85,context plus one mixer over every input
+fire,context_macro4,0.0050,0.1648,11105,4.85,context plus one mixer over every input
+fire,context_macro8,0.0055,0.1789,11105,4.85,context plus one mixer over every input
+fire,context_extra,0.0026,0.0867,11105,4.85,context plus one mixer over every input
+fire,part_group_adv,0.0007,0.0215,11105,4.85,the part alone
+fire,part_group_lock,0.0000,0.0000,11105,4.85,the part alone
+fire,part_group_noise,0.0026,0.0863,11105,4.85,the part alone
+fire,part_group_coarse,0.0027,0.0885,11105,4.85,the part alone
+fire,part_group_shape,0.0044,0.1432,11105,4.85,the part alone
+fire,part_group_prev,0.0003,0.0110,11105,4.85,the part alone
+fire,part_group_bias,0.0000,0.0000,11105,4.85,the part alone
+fire,part_context_lvl,0.0014,0.0446,11105,4.85,the part alone
+fire,part_context_ratio,0.0008,0.0266,11105,4.85,the part alone
+fire,part_context_flow,0.0018,0.0580,11105,4.85,the part alone
+fire,part_context_height,0.0000,0.0000,11105,4.85,the part alone
+fire,part_context_ctrl,0.0000,0.0000,11105,4.85,the part alone
+fire,part_context_age,0.0000,0.0000,11105,4.85,the part alone
+fire,part_context_channel,0.0000,0.0000,11105,4.85,the part alone
+fire,part_context_extra,0.0000,0.0000,11105,4.85,the part alone
+fire,part_context_macro4,0.0024,0.0781,11105,4.85,the part alone
+fire,part_context_macro8,0.0028,0.0922,11105,4.85,the part alone
+fire,part_mixer_15x1,0.0153,0.5028,11105,4.85,15 inputs, 1 mixer
+fire,part_mixer_15x4,0.0233,0.7630,11105,4.85,15 inputs, 4 mixers
+fire,part_grain,0.0067,0.2211,11105,4.85,grain noise
+fire,part_relock,0.0052,0.1688,11105,4.85,relock
+smoke,base,0.0257,0.8429,13261,5.31,mixer without inputs, grain, relock
+smoke,group_adv,0.0014,0.0462,13261,5.31,experts plus their inputs in the mixer without context
+smoke,group_lock,0.0009,0.0279,13261,5.31,experts plus their inputs in the mixer without context
+smoke,group_noise,0.0034,0.1114,13261,5.31,experts plus their inputs in the mixer without context
+smoke,group_coarse,0.0032,0.1045,13261,5.31,experts plus their inputs in the mixer without context
+smoke,group_shape,0.0043,0.1409,13261,5.31,experts plus their inputs in the mixer without context
+smoke,group_prev,0.0006,0.0203,13261,5.31,experts plus their inputs in the mixer without context
+smoke,group_bias,0.0003,0.0093,13261,5.31,experts plus their inputs in the mixer without context
+smoke,context_lvl,0.0046,0.1493,13261,5.31,context plus one mixer over every input
+smoke,context_ratio,0.0043,0.1397,13261,5.31,context plus one mixer over every input
+smoke,context_flow,0.0052,0.1694,13261,5.31,context plus one mixer over every input
+smoke,context_height,0.0034,0.1110,13261,5.31,context plus one mixer over every input
+smoke,context_ctrl,0.0034,0.1110,13261,5.31,context plus one mixer over every input
+smoke,context_age,0.0034,0.1110,13261,5.31,context plus one mixer over every input
+smoke,context_channel,0.0034,0.1110,13261,5.31,context plus one mixer over every input
+smoke,context_macro4,0.0057,0.1876,13261,5.31,context plus one mixer over every input
+smoke,context_macro8,0.0063,0.2054,13261,5.31,context plus one mixer over every input
+smoke,context_extra,0.0034,0.1110,13261,5.31,context plus one mixer over every input
+smoke,part_group_adv,0.0006,0.0183,13261,5.31,the part alone
+smoke,part_group_lock,0.0000,0.0000,13261,5.31,the part alone
+smoke,part_group_noise,0.0025,0.0835,13261,5.31,the part alone
+smoke,part_group_coarse,0.0026,0.0860,13261,5.31,the part alone
+smoke,part_group_shape,0.0037,0.1223,13261,5.31,the part alone
+smoke,part_group_prev,0.0003,0.0110,13261,5.31,the part alone
+smoke,part_group_bias,0.0000,0.0000,13261,5.31,the part alone
+smoke,part_context_lvl,0.0012,0.0382,13261,5.31,the part alone
+smoke,part_context_ratio,0.0009,0.0287,13261,5.31,the part alone
+smoke,part_context_flow,0.0018,0.0584,13261,5.31,the part alone
+smoke,part_context_height,0.0000,0.0000,13261,5.31,the part alone
+smoke,part_context_ctrl,0.0000,0.0000,13261,5.31,the part alone
+smoke,part_context_age,0.0000,0.0000,13261,5.31,the part alone
+smoke,part_context_channel,0.0000,0.0000,13261,5.31,the part alone
+smoke,part_context_extra,0.0000,0.0000,13261,5.31,the part alone
+smoke,part_context_macro4,0.0023,0.0766,13261,5.31,the part alone
+smoke,part_context_macro8,0.0029,0.0944,13261,5.31,the part alone
+smoke,part_mixer_15x1,0.0179,0.5851,13261,5.31,15 inputs, 1 mixer
+smoke,part_mixer_15x4,0.0280,0.9181,13261,5.31,15 inputs, 4 mixers
+smoke,part_grain,0.0066,0.2168,13261,5.31,grain noise
+smoke,part_relock,0.0055,0.1803,13261,5.31,relock
+explosion,base,0.0185,0.6075,8898,5.31,mixer without inputs, grain, relock
+explosion,group_adv,0.0015,0.0504,8898,5.31,experts plus their inputs in the mixer without context
+explosion,group_lock,0.0007,0.0227,8898,5.31,experts plus their inputs in the mixer without context
+explosion,group_noise,0.0035,0.1137,8898,5.31,experts plus their inputs in the mixer without context
+explosion,group_coarse,0.0031,0.1021,8898,5.31,experts plus their inputs in the mixer without context
+explosion,group_shape,0.0048,0.1566,8898,5.31,experts plus their inputs in the mixer without context
+explosion,group_prev,0.0006,0.0185,8898,5.31,experts plus their inputs in the mixer without context
+explosion,group_bias,0.0002,0.0076,8898,5.31,experts plus their inputs in the mixer without context
+explosion,context_lvl,0.0031,0.1022,8898,5.31,context plus one mixer over every input
+explosion,context_ratio,0.0030,0.0983,8898,5.31,context plus one mixer over every input
+explosion,context_flow,0.0042,0.1380,8898,5.31,context plus one mixer over every input
+explosion,context_height,0.0025,0.0803,8898,5.31,context plus one mixer over every input
+explosion,context_ctrl,0.0025,0.0803,8898,5.31,context plus one mixer over every input
+explosion,context_age,0.0025,0.0803,8898,5.31,context plus one mixer over every input
+explosion,context_channel,0.0025,0.0803,8898,5.31,context plus one mixer over every input
+explosion,context_macro4,0.0048,0.1578,8898,5.31,context plus one mixer over every input
+explosion,context_macro8,0.0054,0.1758,8898,5.31,context plus one mixer over every input
+explosion,context_extra,0.0025,0.0803,8898,5.31,context plus one mixer over every input
+explosion,part_group_adv,0.0008,0.0277,8898,5.31,the part alone
+explosion,part_group_lock,0.0000,0.0000,8898,5.31,the part alone
+explosion,part_group_noise,0.0028,0.0910,8898,5.31,the part alone
+explosion,part_group_coarse,0.0027,0.0870,8898,5.31,the part alone
+explosion,part_group_shape,0.0043,0.1414,8898,5.31,the part alone
+explosion,part_group_prev,0.0003,0.0109,8898,5.31,the part alone
+explosion,part_group_bias,0.0000,0.0000,8898,5.31,the part alone
+explosion,part_context_lvl,0.0007,0.0218,8898,5.31,the part alone
+explosion,part_context_ratio,0.0005,0.0180,8898,5.31,the part alone
+explosion,part_context_flow,0.0018,0.0577,8898,5.31,the part alone
+explosion,part_context_height,0.0000,0.0000,8898,5.31,the part alone
+explosion,part_context_ctrl,0.0000,0.0000,8898,5.31,the part alone
+explosion,part_context_age,0.0000,0.0000,8898,5.31,the part alone
+explosion,part_context_channel,0.0000,0.0000,8898,5.31,the part alone
+explosion,part_context_extra,0.0000,0.0000,8898,5.31,the part alone
+explosion,part_context_macro4,0.0024,0.0775,8898,5.31,the part alone
+explosion,part_context_macro8,0.0029,0.0954,8898,5.31,the part alone
+explosion,part_mixer_15x1,0.0120,0.3926,8898,5.31,15 inputs, 1 mixer
+explosion,part_mixer_15x4,0.0193,0.6336,8898,5.31,15 inputs, 4 mixers
+explosion,part_grain,0.0051,0.1682,8898,5.31,grain noise
+explosion,part_relock,0.0049,0.1602,8898,5.31,relock
