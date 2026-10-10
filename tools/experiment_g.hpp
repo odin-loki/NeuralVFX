@@ -24,6 +24,9 @@ void step_search(const Ctx& c);  // g-search  the nested leave-one-control-bin-o
 void step_eval(const Ctx& c);    // g-eval    G1 and G1c on held-out settings through the runtime
 void step_timing(const Ctx& c);  // g-timing  milliseconds per frame (quiet machine)
 void step_fine(const Ctx& c);    // g-fine    design G1 (DCM-fine) end to end: rows, pilot, cost, search, generation, test
+void step_diff(const Ctx& c);       // g-diff       stage S5 on validation: the denoiser as a prior against drift (G2b) and as
+                                    //              a source of start points (G2c), against the alternatives without diffusion
+void step_diff_test(const Ctx& c);  // g-diff-test  the test protocol, once, for a use that passed validation
 void report(const Ctx& c, std::ostream& md);  // the G section of SUMMARY.md (nothing yet)
 
 }  // namespace nfx::study_g

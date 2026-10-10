@@ -78,7 +78,7 @@ Ubuntu 24.04: `g++-14`, CMake 3.25+, Ninja, `libgtest-dev`, `zlib1g-dev` (and `f
 ```sh
 cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_COMPILER=g++-14
 cmake --build build
-ctest --test-dir build                     # 123 tests: sim, metrics, codecs, gradients, runtime parity, composition, context mixing, lossless coder, allocation, C API
+ctest --test-dir build                     # 133 tests: sim, metrics, codecs, gradients, runtime parity, composition, context mixing, denoiser, lossless coder, allocation, C API
 ```
 
 Options: `NEURALFX_BUILD_VIEWER` (GLFW + OpenGL; fetches Dear ImGui), `NEURALFX_BUILD_SHARED` (libnvfx.so for engines),
@@ -114,7 +114,7 @@ training, evaluation; about three hours), then `d-timing` on an idle machine and
 | `nvfx_c_host` | the engine loop in plain C, with timings; `--self-test` checks the error paths |
 | `nvfx_viewer` | live viewer with sliders |
 | `nvfx_fireball` | a scripted scene of composed effects (a fireball with smoke, fires and embers) to video, with a profile of every stage |
-| `nvfx_dcm` | context mixing: `selftest` runs a small synthetic mixer search under both objectives (ROC-AUC and Laplace bits); `version FILE` prints the SHA-256 version of a serialised mixer; DCM-fine (G1): `record`, `experts`, `search-fine` (with `--pilot`), `train-fine`, `eval-fine`, `bench-experts`, `fine-summary` |
+| `nvfx_dcm` | context mixing: `selftest` runs a small synthetic mixer search under both objectives (ROC-AUC and Laplace bits); `version FILE` prints the SHA-256 version of a serialised mixer; DCM-fine (G1): `record`, `experts`, `search-fine` (with `--pilot`), `train-fine`, `eval-fine`, `bench-experts`, `fine-summary`; the coarse-state denoiser (G2): `ddpm-train`, `ddpm-sample`, `ddpm-time`, `contexts` |
 | `nvfx_pack` | pack a `.nvfx` into a `.nvfz` and back (`--unpack`), bit-exact; `--report DIR` for sizes and ratios; `--study` for the measurement in results/compression |
 | `neuralfx_arch_bench` | Phase 0 architecture microbenchmark |
 

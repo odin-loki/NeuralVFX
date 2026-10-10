@@ -1,0 +1,8 @@
+phase,use,comparison,mean,lo,hi,cost_ms,cost_bound_ms,timing,rule,decision
+validate,G2b,prior_n8_t100_b1 - none,-1.6553,-3.0152,-0.5063,0.724,0.5,busy,best: interval below zero and cost within bound,stop
+validate,G2b,prior_n8_t100_b1 - shards,-0.0690,-0.2762,0.1162,0.724,,busy,reference only,
+validate,G2b,prior_n16_t100_b1 - none,-1.5639,-2.9158,-0.3955,0.362,0.5,busy,best within N = 16: interval below zero and cost within bound,keep
+validate,G2b,prior_n16_t100_b1 - shards,0.0224,-0.2238,0.2872,0.362,,busy,reference only,
+validate,G2b,none - shards,1.5863,0.4833,2.9335,,,busy,reference only,
+validate,G2c,sdedit_t300 - rolled,-0.0785,-0.2156,0.0384,46.33,100,busy,best: interval below zero and cost within bound,stop
+test,G2b,prior_n16_t100_b1 - none,-5.2769,-9.0069,-2.0548,0.401,0.5,busy,interval below zero and cost within bound,keep
