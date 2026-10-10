@@ -119,7 +119,7 @@ neuralfx_simd(neuralfx_ddpm)
 # G3 (docs/DCM.md §8): a codec for authored runs of rollout effects, built from their learned dynamics, with a small
 # integer context-mixing coder for the corrections. Baseline ISA, no contraction: the encoder's reconstruction loop and
 # the decoder's must round alike.
-add_library(neuralfx_codec STATIC src/codec/rcoder.cpp src/codec/run_codec.cpp)
+add_library(neuralfx_codec STATIC src/codec/rcoder.cpp src/codec/run_codec.cpp src/codec/clip_residual.cpp)
 target_link_libraries(neuralfx_codec PUBLIC neuralfx_model)
 neuralfx_defaults(neuralfx_codec)
 
@@ -155,7 +155,7 @@ if(NEURALFX_BUILD_TOOLS)
   neuralfx_defaults(nvfx_pack)
   # G3: the run codec's study (rate-distortion against flipbooks and video codecs through an ffmpeg pipe).
   add_executable(nvfx_g3 tools/nvfx_g3.cpp)
-  target_link_libraries(nvfx_g3 PRIVATE neuralfx_codec neuralfx_io neuralfx_train)
+  target_link_libraries(nvfx_g3 PRIVATE neuralfx_codec neuralfx_io neuralfx_train nvfx)
   neuralfx_defaults(nvfx_g3)
   add_executable(nvfx_scene examples/scene_bench.cpp)
   target_link_libraries(nvfx_scene PRIVATE nvfx)

@@ -49,7 +49,7 @@ class ArithDecoder {
 };
 
 // What a plane holds. Each kind keeps its own previous plane (a context) and its own hashed statistics.
-enum class PlaneKind : std::uint8_t { coarse_start = 0, coarse, fine_start, fine, count };
+enum class PlaneKind : std::uint8_t { coarse_start = 0, coarse, fine_start, fine, pixel, count };
 
 // The model: adaptive state for a whole stream. The encoder and the decoder each make one and code the same planes in
 // the same order.

@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <bit>
 #include <cmath>
+#include <stdexcept>
 #include <cstring>
 #include <ctime>
 #include <format>

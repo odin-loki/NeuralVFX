@@ -16,9 +16,11 @@
 
 #include <neuralfx/clip.hpp>
 #include <neuralfx/cm.hpp>
+#include <neuralfx/codec/clip_residual.hpp>
 #include <neuralfx/codec/run_codec.hpp>
 #include <neuralfx/flipbook.hpp>
 #include <neuralfx/metrics.hpp>
+#include <neuralfx/nvfx.h>
 #include <neuralfx/rollout.hpp>
 #include <neuralfx/rollout_train.hpp>
 #include <neuralfx/sim.hpp>
@@ -632,6 +634,101 @@ void cmd_baselines(const tools::Args& a) {
   }
 }
 
+// --- G3b: study A clips, a frame model plus a coded residual ----------------------------------------------------------------
+
+const char* kG3bHeader = "clip,method,config,bytes,model_bytes,frames,active_psnr,psnr,ssim";
+
+std::vector<std::string> a_clip_names() {
+  std::vector<std::string> v;
+  for (const auto e : sim::kEffects) {
+    for (int k = 0; k < 4; ++k) v.push_back(std::format("{}_{}", sim::effect_name(e), k));
+  }
+  return v;
+}
+
+// The frame model's clip through the runtime, as study A scores it (variation 0, no drift, frame f at f / fps).
+Clip model_clip(const fs::path& model, int frames) {
+  nvfx_effect* fx = nullptr;
+  if (nvfx_effect_load(model.string().c_str(), &fx) != NVFX_OK) throw std::runtime_error("cannot load " + model.string());
+  nvfx_effect_info info{};
+  nvfx_effect_get_info(fx, &info);
+  nvfx_instance* in = nullptr;
+  if (nvfx_instance_create(fx, kSize, &in) != NVFX_OK) throw std::runtime_error("instance");
+  nvfx_instance_set_drift(in, 0.f);
+  nvfx_instance_set_variation(in, 0);
+  Clip c;
+  c.allocate(kSize, frames);
+  for (int f = 0; f < frames; ++f) nvfx_render(in, f / static_cast<double>(info.fps), c.frame(f).data(), kSize * 4);
+  nvfx_instance_free(in);
+  nvfx_effect_free(fx);
+  return c;
+}
+
+void cmd_g3b(const tools::Args& a) {
+  const fs::path exp = a.str("experiments", "/root/nvfx-data/experiments");
+  const fs::path out = a.str("out", "/root/nvfx-data/g3");
+  const fs::path work = a.str("work", "/tmp/claude-0/-home-user/7f3ed069-4de9-5eae-b560-587577dc6cd8/scratchpad/s4/video");
+  const auto vcfg = video_configs(a.str("codecs", "x264_rgb,x265_444,vp9a,aom_444,svt"));
+  const float round = a.f("round", 0.3f);
+  const std::string model_cfg = a.str("model", "grid_m8");
+  Appender app(out / "g3b.csv", kG3bHeader);
+  const auto done = app.keys({"clip", "method", "config"});
+  for (const auto& name : a_clip_names()) {
+    auto ref = read_clip(exp / "clips" / "a" / std::format("{}.nfxclip", name));
+    if (!ref) throw std::runtime_error(ref.error());
+    const int F = ref->frames;
+    const fs::path mpath = exp / "models" / "a" / std::format("{}_{}.nvfx", name, model_cfg);
+    std::vector<std::uint8_t> file;
+    {
+      std::ifstream in(mpath, std::ios::binary);
+      file.assign(std::istreambuf_iterator<char>(in), {});
+    }
+    const std::size_t model_raw = file.size(), model_packed = cm::pack_model(file).data.size();
+    const Clip pred = model_clip(mpath, F);
+    std::vector<std::string> rows;
+    const auto add = [&](const std::string& method, const std::string& config, std::size_t bytes, std::size_t mb, const Clip& c) {
+      const auto sc = metrics::score(*ref, c);
+      rows.push_back(std::format("{},{},{},{},{},{},{:.4f},{:.4f},{:.5f}", name, method, config, bytes, mb, F, sc.active_psnr, sc.psnr, sc.ssim));
+    };
+    if (!done.count(name + "|model|" + model_cfg + "|")) {
+      add("model", model_cfg, model_raw, model_raw, pred);
+      add("model_packed", model_cfg, model_packed, model_packed, pred);
+    }
+    for (const float step : {2.f, 3.f, 4.f, 6.f, 8.f, 12.f, 16.f, 24.f, 32.f, 48.f}) {
+      const std::string cfg = std::format("{}_step{:g}", model_cfg, step);
+      if (done.count(name + "|g3b|" + cfg + "|")) continue;
+      const auto e = codec::encode_clip_residual(pred.rgba, ref->rgba, kSize, F, step, round);
+      const auto d = codec::decode_clip_residual(pred.rgba, e.stream);
+      if (!d || *d != e.frames) throw std::runtime_error("g3b: decoder mismatch");
+      add("g3b", cfg, e.stream.size() + model_packed, model_packed, as_clip(e.frames, F));
+      add("residual_only", cfg, e.stream.size(), 0, as_clip(e.frames, F));
+    }
+    for (const auto& sp : flipbook::ladder(kSize, F)) {
+      if (sp.flow_res > 0) continue;
+      const std::string kind = sp.codec == flipbook::Codec::bc3 ? "bc3" : "raw";
+      if (done.count(name + "|flipbook_" + kind + "_packed|" + sp.describe() + "|")) continue;
+      const flipbook::Flipbook fb = flipbook::build(*ref, sp);
+      const Clip played = flipbook::play(fb);
+      const cm::Packed p = cm::pack_tensors(flipbook_tensors(*ref, sp, fb));
+      add("flipbook_" + kind, sp.describe(), fb.bytes, 0, played);
+      add("flipbook_" + kind + "_packed", sp.describe(), p.data.size(), 0, played);
+    }
+    for (const auto& vc : vcfg) {
+      for (const int q : vc.codec.ladder) {
+        if (done.count(name + "|" + vc.name() + "|" + std::to_string(q) + "|")) continue;
+        const auto r = video::roundtrip(vc.codec, q, ref->rgba, kSize, F, ref->fps, work, "g3b_" + name);
+        if (!r.ok) throw std::runtime_error(r.error);
+        add(vc.name(), std::to_string(q), r.bytes, 0, as_clip(r.rgba, F));
+        std::error_code ec;
+        fs::remove(work / std::format("g3b_{}_{}_q{}.{}", name, vc.codec.name, q, vc.codec.ext), ec);
+      }
+    }
+    app.add(rows);
+    std::println("g3b {}: {} rows", name, rows.size());
+    std::fflush(stdout);
+  }
+}
+
 // --- summary -----------------------------------------------------------------------------------------------------------------
 
 struct Point {
@@ -1179,6 +1276,7 @@ int main(int argc, char** argv) {
     else if (cmd == "baselines") cmd_baselines(a);
     else if (cmd == "summary") cmd_summary(a);
     else if (cmd == "timing") cmd_timing(a);
+    else if (cmd == "g3b") cmd_g3b(a);
     else {
       std::println(stderr, "usage: nvfx_g3 probe|ladder|baselines|summary|timing [options]");
       return 2;

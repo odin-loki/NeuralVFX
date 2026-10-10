@@ -1,6 +1,7 @@
 // G3 run codec (include/neuralfx/codec, docs/DCM.md §8): the residual coder round-trips exactly, the decoder reproduces
 // the encoder's reconstruction bit for bit, encoding is deterministic, and streams made for another model, damaged or
 // truncated are refused.
+#include <neuralfx/codec/clip_residual.hpp>
 #include <neuralfx/codec/rcoder.hpp>
 #include <neuralfx/codec/run_codec.hpp>
 #include <neuralfx/rollout.hpp>
@@ -291,4 +292,31 @@ TEST(G3Codec, StoredSettingsRoundTrip) {
   EXPECT_NEAR(t.q * t.q_mat, 0.246f, 0.246f * 0.025f);
   EXPECT_NEAR(t.round, 0.3f, 0.002f);
   EXPECT_EQ(codec::describe(codec::stored_settings(t)), codec::describe(t));
+}
+
+TEST(G3bClipResidual, RoundTripsAndRefusesDamage) {
+  std::mt19937_64 rng(5);
+  const int size = 16, frames = 5;
+  std::vector<std::uint8_t> pred(sz(size) * sz(size) * 4 * frames), truth(pred.size());
+  for (std::size_t i = 0; i < pred.size(); ++i) {
+    pred[i] = static_cast<std::uint8_t>(rng() % 256);
+    truth[i] = static_cast<std::uint8_t>(std::clamp(static_cast<int>(pred[i]) + static_cast<int>(rng() % 41) - 20, 0, 255));
+  }
+  for (const float step : {1.f, 3.5f, 8.f}) {
+    const auto e = codec::encode_clip_residual(pred, truth, size, frames, step, 0.3f);
+    const auto d = codec::decode_clip_residual(pred, e.stream);
+    ASSERT_TRUE(d.has_value()) << d.error();
+    EXPECT_EQ(*d, e.frames);
+    if (step == 1.f) {  // step 1, nearest rounding: lossless
+      const auto l = codec::encode_clip_residual(pred, truth, size, frames, 1.f, 0.5f);
+      EXPECT_EQ(l.frames, truth);
+    }
+    for (std::size_t i = 0; i < e.stream.size(); i += 1 + e.stream.size() / 16) {
+      auto bad = e.stream;
+      bad[i] ^= 0x04;
+      EXPECT_FALSE(codec::decode_clip_residual(pred, bad).has_value()) << "byte " << i;
+    }
+    EXPECT_FALSE(codec::decode_clip_residual(pred, std::span(e.stream).first(e.stream.size() - 3)).has_value());
+    EXPECT_FALSE(codec::decode_clip_residual(std::span(pred).first(pred.size() - 4), e.stream).has_value());
+  }
 }
