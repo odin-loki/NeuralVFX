@@ -910,7 +910,8 @@ struct Series {
 
 // Rate-distortion curves as small multiples (one panel per effect, one log-scale axis each), light surface, the default
 // categorical palette in fixed order (docs: dataviz reference palette), a legend and an end label per series.
-void write_svg(const fs::path& path, const std::vector<std::pair<std::string, std::vector<Series>>>& panels, const std::string& title, const std::string& note) {
+void write_svg(const fs::path& path, const std::vector<std::pair<std::string, std::vector<Series>>>& panels, const std::string& title, const std::string& note,
+               double y1 = 50, const std::string& unit = "run") {
   static const char* colors[8] = {"#2a78d6", "#eb6834", "#1baf7a", "#eda100", "#e87ba4", "#008300", "#6250d6", "#e34948"};
   const auto np = static_cast<double>(panels.size());
   const double pw = panels.size() == 1 ? 640 : 380, ph = 330, ml = 52, mr = 14, gap = 24, mb = 64;
@@ -955,7 +956,7 @@ void write_svg(const fs::path& path, const std::vector<std::pair<std::string, st
       }
     }
   }
-  const double x0 = std::log10(std::min(30.0, 0.7 * bmin)), x1 = std::log10(std::max(1e4, 1.5 * bmax)), y0 = 10, y1 = 50;
+  const double x0 = std::log10(std::min(30.0, 0.7 * bmin)), x1 = std::log10(std::max(1e4, 1.5 * bmax)), y0 = 10;
   std::string o = std::format("<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"{:.0f}\" height=\"{:.0f}\" viewBox=\"0 0 {:.0f} {:.0f}\" "
                               "font-family=\"system-ui, -apple-system, Segoe UI, Helvetica, Arial, sans-serif\">\n",
                               W, H, W, H);
@@ -987,8 +988,8 @@ void write_svg(const fs::path& path, const std::vector<std::pair<std::string, st
       o += std::format("<text x=\"{:.1f}\" y=\"{:.1f}\" font-size=\"11\" fill=\"#52514e\" text-anchor=\"middle\">{}</text>\n", X(b), mt + ph + 16, lab);
     }
     o += std::format("<line x1=\"{:.1f}\" y1=\"{:.1f}\" x2=\"{:.1f}\" y2=\"{:.1f}\" stroke=\"#8a8984\" stroke-width=\"1\"/>\n", px, mt + ph, px + pw, mt + ph);
-    o += std::format("<text x=\"{:.1f}\" y=\"{:.1f}\" font-size=\"11\" fill=\"#52514e\" text-anchor=\"middle\">bytes per run (log scale)</text>\n", px + pw / 2,
-                     mt + ph + 34);
+    o += std::format("<text x=\"{:.1f}\" y=\"{:.1f}\" font-size=\"11\" fill=\"#52514e\" text-anchor=\"middle\">bytes per {} (log scale)</text>\n", px + pw / 2,
+                     mt + ph + 34, unit);
     if (p == 0) {
       o += std::format("<text transform=\"translate({:.1f},{:.1f}) rotate(-90)\" font-size=\"11\" fill=\"#52514e\" text-anchor=\"middle\">active PSNR (dB)</text>\n",
                        px - 36, mt + ph / 2);
@@ -996,11 +997,15 @@ void write_svg(const fs::path& path, const std::vector<std::pair<std::string, st
     const auto& ser = panels[p].second;
     for (std::size_t i = ser.size(); i-- > 0;) {  // the hero (first) drawn last, on top
       if (i >= 8 || ser[i].pts.empty()) continue;
+      std::vector<std::pair<double, double>> shown;  // points above the scale (lossless) are not drawn
+      for (const auto& pt : ser[i].pts) {
+        if (pt.second <= y1) shown.push_back(pt);
+      }
       std::string pl;
-      for (const auto& [b, q] : ser[i].pts) pl += std::format("{:.1f},{:.1f} ", X(b), Y(q));
+      for (const auto& [b, q] : shown) pl += std::format("{:.1f},{:.1f} ", X(b), Y(q));
       o += std::format("<polyline points=\"{}\" fill=\"none\" stroke=\"{}\" stroke-width=\"{}\" stroke-linejoin=\"round\"{}/>\n", pl, colors[i], ser[i].hero ? 3 : 2,
                        ser[i].dashed ? " stroke-dasharray=\"5 3\"" : "");
-      for (const auto& [b, q] : ser[i].pts) {
+      for (const auto& [b, q] : shown) {
         o += std::format("<circle cx=\"{:.1f}\" cy=\"{:.1f}\" r=\"{}\" fill=\"{}\" stroke=\"#fcfcfb\" stroke-width=\"2\"><title>{}: {:.0f} B, {:.2f} dB</title></circle>\n",
                          X(b), Y(q), ser[i].hero ? 4.5 : 4, colors[i], ser[i].label, b, q);
       }
@@ -1123,7 +1128,8 @@ void summary_g3b(const fs::path& dir, const fs::path& res, const std::string& fi
   for (const auto& m : ms) {
     rows_curve.push_back(std::format("{},{},{:.1f},{:.3f},{:.3f},{:.4f}", m.method, m.config, m.bytes, m.apsnr, m.psnr, m.ssim));
   }
-  compare_families("study_a_clips", pts, runs, fam, "g3b", {24, 26, 28, 30, 32, 34, 36, 38, 40, 42}, {10000, 30000, 100000, 200000, 500000, 1000000},
+  compare_families("study_a_clips", pts, runs, fam, "g3b", {24, 26, 28, 30, 32, 34, 36, 38, 40, 42, 44, 46, 48, 50},
+                   {10000, 30000, 100000, 200000, 300000, 500000},
                    rows_q, rows_r);
   const auto write = [&](const fs::path& p, const std::string& head, const std::vector<std::string>& rows) {
     std::ofstream o(p);
@@ -1156,7 +1162,8 @@ void summary_g3b(const fs::path& dir, const fs::path& res, const std::string& fi
     ser.push_back(std::move(x));
   }
   write_svg(figure, {{"12 study A clips (64 frames, 128 x 128)", ser}}, "G3b: a frame model plus a coded residual, against video codecs and flipbooks",
-            "Means over the 12 study A clips. G3b bytes include the packed frame model (grid_m 8-bit, about 85 KB).");
+            "Means over the 12 study A clips. G3b bytes include the packed frame model (grid_m 8-bit, about 87 KB). Lossless points (crf 0) are off the scale.",
+            55, "clip");
 }
 
 void cmd_summary(const tools::Args& a) {
