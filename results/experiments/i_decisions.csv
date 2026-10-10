@@ -1,0 +1,4 @@
+effect,coupled_better,plain_not_worse,endless_not_worse,decision
+fire,0,1,1,keep_v1
+smoke,1,0,1,keep_v1
+explosion,1,1,1,keep_v2c
