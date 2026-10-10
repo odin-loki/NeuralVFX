@@ -844,6 +844,44 @@ double eval_loss(const Denoiser& d, const Dataset& data, int t, std::uint64_t se
   return s / static_cast<double>(n);
 }
 
+namespace {
+
+// The training state for a resume: "NVFXDTS1", step, Adam's t, the weight count, elapsed seconds, then w, ema, m, v.
+void save_train_state(const std::filesystem::path& path, int step, double seconds, const Vec& w, const Vec& ema, const Adam& adam) {
+  const std::filesystem::path tmp = path.string() + ".tmp";
+  {
+    std::ofstream o(tmp, std::ios::binary);
+    o.write("NVFXDTS1", 8);
+    bin::put(o, static_cast<std::int32_t>(step));
+    bin::put(o, static_cast<std::int32_t>(adam.t));
+    bin::put(o, static_cast<std::uint64_t>(w.size()));
+    bin::put(o, seconds);
+    for (const Vec* v : {&w, &ema, &adam.m, &adam.v}) o.write(reinterpret_cast<const char*>(v->data()), static_cast<std::streamsize>(v->size() * sizeof(float)));
+    if (!o) throw std::runtime_error("ddpm: cannot write the training state " + tmp.string());
+  }
+  std::filesystem::rename(tmp, path);
+}
+
+// Returns the step the state was saved at (0 when there is no state file).
+int load_train_state(const std::filesystem::path& path, double& seconds, Vec& w, Vec& ema, Adam& adam) {
+  std::ifstream in(path, std::ios::binary);
+  if (!in) return 0;
+  char magic[8] = {};
+  in.read(magic, 8);
+  if (!in || std::memcmp(magic, "NVFXDTS1", 8) != 0) throw std::runtime_error(path.string() + " is not a training state (NVFXDTS1)");
+  const auto step = bin::get<std::int32_t>(in), t = bin::get<std::int32_t>(in);
+  const auto n = bin::get<std::uint64_t>(in);
+  const auto secs = bin::get<double>(in);
+  if (!step || !t || !n || !secs || *n != w.size()) throw std::runtime_error(path.string() + ": the training state does not match the network");
+  for (Vec* v : {&w, &ema, &adam.m, &adam.v}) in.read(reinterpret_cast<char*>(v->data()), static_cast<std::streamsize>(v->size() * sizeof(float)));
+  if (!in) throw std::runtime_error(path.string() + ": truncated training state");
+  adam.t = *t;
+  seconds = *secs;
+  return *step;
+}
+
+}  // namespace
+
 TrainResult train(Denoiser& d, const Dataset& data, const TrainOptions& o, const Dataset* eval) {
   const Config& c = d.cfg;
   const Layout L = layout(c);
@@ -853,6 +891,8 @@ TrainResult train(Denoiser& d, const Dataset& data, const TrainOptions& o, const
   if (o.steps < 1 || o.batch < 1) throw std::invalid_argument("ddpm: steps and batch must be positive");
   Vec w = d.w, ema = d.w;
   Adam adam(L.size);
+  double seconds0 = 0;
+  const int first = o.state_path.empty() ? 1 : 1 + load_train_state(o.state_path, seconds0, w, ema, adam);
   // The batch is cut into fixed chunks; each chunk's gradient is summed in sample order and the chunks in chunk order,
   // so the result does not depend on the thread count.
   const int chunks = std::min(o.batch, 8);
@@ -864,7 +904,7 @@ TrainResult train(Denoiser& d, const Dataset& data, const TrainOptions& o, const
   double window = 0;
   int in_window = 0;
   const float inv_batch = 1.f / static_cast<float>(o.batch);
-  for (int step = 1; step <= o.steps; ++step) {
+  for (int step = first; step <= o.steps; ++step) {
     float lr = o.lr;
     if (step <= o.warmup) {
       lr = o.lr * static_cast<float>(step) / static_cast<float>(std::max(1, o.warmup));
@@ -912,20 +952,22 @@ TrainResult train(Denoiser& d, const Dataset& data, const TrainOptions& o, const
       log.step = step;
       log.loss = window / in_window;
       log.lr = lr;
-      log.seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
+      log.seconds = seconds0 + std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
       Denoiser e = d;
       e.w = ema;
       if (eval && eval->count > 0) {
         for (const int t : o.eval_t) log.eval.push_back(eval_loss(e, *eval, t, o.eval_seed, o.eval_count, o.threads));
       }
       res.curve.push_back(log);
+      if (!o.state_path.empty()) save_train_state(o.state_path, step, log.seconds, w, ema, adam);
       if (o.progress) o.progress(log, e);
       window = 0;
       in_window = 0;
     }
+    if (o.stop_after > 0 && step >= o.stop_after) break;
   }
   d.w = ema;
-  res.seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
+  res.seconds = seconds0 + std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
   return res;
 }
 

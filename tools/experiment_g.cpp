@@ -178,9 +178,9 @@ std::string scored_csv(const Scored& s) {
 constexpr const char* kScoredHeader = "spectrum_l1,motion_ratio,coverage_l1,emission_l1,mean_frame_psnr,detail_score";
 
 // A real run at a setting: warmed up, then `frames` frames at 128 x 128.
-Clip real_clip(const Setting& s, std::uint64_t seed, int warm, int frames) {
+Clip real_clip(const Setting& s, std::uint64_t seed, int warm, int frames, sim::Effect effect = sim::Effect::fire) {
   sim::Params p;
-  p.effect = sim::Effect::fire;
+  p.effect = effect;
   p.intensity = s[0];
   p.wind = s[1];
   p.turbulence = s[2];
@@ -462,13 +462,14 @@ void merge_rows(const fs::path& path, const std::string& header, const std::vect
 struct Loaded {
   rollout::Model m;
   dd::Denoiser d;
+  sim::Effect effect = sim::Effect::fire;
 };
-Loaded load_both(const DiffPaths& p) {
+Loaded load_both(const DiffPaths& p, sim::Effect effect = sim::Effect::fire) {
   auto m = rollout::load_model(p.dmodel);
   if (!m) throw std::runtime_error(p.dmodel.string() + ": " + m.error());
   auto d = dd::load(p.denoiser);
   if (!d) throw std::runtime_error(p.denoiser.string() + ": " + d.error() + " (train it with nvfx_dcm ddpm-train)");
-  return {std::move(*m), std::move(*d)};
+  return {std::move(*m), std::move(*d), effect};
 }
 
 // --- G2b ------------------------------------------------------------------------------------------------------------
@@ -487,7 +488,8 @@ std::map<std::string, std::vector<double>> prior_phase(const Ctx& c, const Loade
   const int windows = c.quick ? 2 : 6;
   std::vector<metrics::ClipStats> refs(settings.size());
   parallel(static_cast<int>(settings.size()), c.threads, [&](int si) {
-    refs[static_cast<std::size_t>(si)] = metrics::stats(real_clip(settings[static_cast<std::size_t>(si)], real_seed + static_cast<std::uint64_t>(si), 150, 300));
+    refs[static_cast<std::size_t>(si)] =
+        metrics::stats(real_clip(settings[static_cast<std::size_t>(si)], real_seed + static_cast<std::uint64_t>(si), 150, 300, L.effect));
   });
   struct Job {
     int setting;
@@ -643,6 +645,52 @@ std::map<std::string, std::vector<double>> start_phase(const Ctx& c, const Loade
   return per_setting;
 }
 
+// G2b on validation (docs/DCM.md G2.3, G2.6): tune on seeds 1'960'000 + setting, decide on fresh seeds 1'970'000 + setting
+// (real runs 1'950'000 + setting), at validation settings 1 and 2. Rows go to <prefix>_prior.csv, decisions to `decisions`.
+void prior_validate(const Ctx& c, const Loaded& L, double ms, bool quiet, const std::string& prefix, std::vector<std::string>& decisions) {
+  const auto val = validation_settings();
+  const std::vector<Setting> two(val.begin(), val.begin() + 2);
+  std::vector<Prior> grid;
+  for (const int n : {4, 8, 16}) {
+    for (const int t : {20, 50, 100}) {
+      for (const float b : {0.25f, 0.5f, 1.f}) grid.push_back({n, t, b});
+    }
+  }
+  if (c.quick) grid = {{8, 50, 0.5f}, {16, 100, 1.f}};
+  std::vector<std::string> rows;
+  const auto tune = prior_phase(c, L, "tune", two, 1950000, 1960000, grid, true, rows);
+  // Two candidates go to the decision (docs/DCM.md G2.3): the best configuration, and the best one that can meet the
+  // cost bound (N = 16: one pass takes at least 5 ms on this CPU, so N = 4 and 8 cost more than 0.5 ms per frame).
+  const auto mean_of = [](const std::vector<double>& v) { return std::accumulate(v.begin(), v.end(), 0.0) / static_cast<double>(v.size()); };
+  Prior best = grid[0], affordable;
+  for (const Prior& p : grid) {
+    if (mean_of(tune.at(p.name())) < mean_of(tune.at(best.name()))) best = p;
+    if (p.every == 16 && (affordable.every == 0 || mean_of(tune.at(p.name())) < mean_of(tune.at(affordable.name())))) affordable = p;
+  }
+  std::vector<Prior> cands = {best};
+  if (affordable.every != 0 && affordable.name() != best.name()) cands.push_back(affordable);
+  std::println("g-diff G2b {} tuning: none {:.4f}, shards {:.4f}, best prior {} {:.4f}, best with N = 16 {} {:.4f}", sim::effect_name(L.effect), mean_of(tune.at("none")),
+               mean_of(tune.at("shards")), best.name(), mean_of(tune.at(best.name())), affordable.name(),
+               affordable.every ? mean_of(tune.at(affordable.name())) : 0.0);
+  const auto v = prior_phase(c, L, "validate", two, 1950000, 1970000, cands, true, rows);
+  for (std::size_t k = 0; k < cands.size(); ++k) {
+    const Prior& p = cands[k];
+    const metrics::Interval iv = metrics::paired_bootstrap(v.at(p.name()), v.at("none"), 10000, 1);
+    const metrics::Interval sh = metrics::paired_bootstrap(v.at(p.name()), v.at("shards"), 10000, 1);
+    const double cost = ms / p.every;
+    const bool pass = iv.hi < 0 && cost <= 0.5;
+    const char* which = k == 0 ? "best" : "best within N = 16";
+    std::println("g-diff G2b {} validation ({}): {} minus none {}; minus shards {}; {:.3f} ms per frame -> {}", sim::effect_name(L.effect), which, p.name(), interval_text(iv), interval_text(sh),
+                 cost, pass ? "KEEP" : "STOP");
+    decisions.push_back(std::format("validate,G2b,{} - none,{},{:.3f},0.5,{},{}: interval below zero and cost within bound,{}", p.name(), interval_csv(iv), cost,
+                                    quiet ? "quiet" : "busy", which, pass ? "keep" : "stop"));
+    decisions.push_back(std::format("validate,G2b,{} - shards,{},{:.3f},,{},reference only,", p.name(), interval_csv(sh), cost, quiet ? "quiet" : "busy"));
+  }
+  const metrics::Interval ns = metrics::paired_bootstrap(v.at("none"), v.at("shards"), 10000, 1);
+  decisions.push_back(std::format("validate,G2b,none - shards,{},,,{},reference only,", interval_csv(ns), quiet ? "quiet" : "busy"));
+  merge_rows(c.results / (prefix + "_prior.csv"), std::string("phase,setting,seed,method,window,") + kScoredHeader, rows);
+}
+
 const std::string kDecisionHeader = "phase,use,comparison,mean,lo,hi,cost_ms,cost_bound_ms,timing,rule,decision";
 
 }  // namespace
@@ -661,49 +709,7 @@ void step_diff(const Ctx& c) {
   const auto [ms, quiet] = pass_ms(L.d);
   std::println("g-diff: one denoiser pass {:.2f} ms on one core ({})", ms, quiet ? "quiet machine" : "machine busy: an upper bound, unmeasured by the rules");
   std::vector<std::string> decisions;
-  // ---- G2b: tune on seeds 1'960'000 + setting, decide on fresh seeds 1'970'000 + setting
-  {
-    const std::vector<Setting> two(val.begin(), val.begin() + 2);
-    std::vector<Prior> grid;
-    for (const int n : {4, 8, 16}) {
-      for (const int t : {20, 50, 100}) {
-        for (const float b : {0.25f, 0.5f, 1.f}) grid.push_back({n, t, b});
-      }
-    }
-    if (c.quick) grid = {{8, 50, 0.5f}, {16, 100, 1.f}};
-    std::vector<std::string> rows;
-    const auto tune = prior_phase(c, L, "tune", two, 1950000, 1960000, grid, true, rows);
-    // Two candidates go to the decision (docs/DCM.md G2.3): the best configuration, and the best one that can meet the
-    // cost bound (N = 16: one pass takes at least 5 ms on this CPU, so N = 4 and 8 cost more than 0.5 ms per frame).
-    const auto mean_of = [](const std::vector<double>& v) { return std::accumulate(v.begin(), v.end(), 0.0) / static_cast<double>(v.size()); };
-    Prior best = grid[0], affordable;
-    for (const Prior& p : grid) {
-      if (mean_of(tune.at(p.name())) < mean_of(tune.at(best.name()))) best = p;
-      if (p.every == 16 && (affordable.every == 0 || mean_of(tune.at(p.name())) < mean_of(tune.at(affordable.name())))) affordable = p;
-    }
-    std::vector<Prior> cands = {best};
-    if (affordable.every != 0 && affordable.name() != best.name()) cands.push_back(affordable);
-    std::println("g-diff G2b tuning: none {:.4f}, shards {:.4f}, best prior {} {:.4f}, best with N = 16 {} {:.4f}", mean_of(tune.at("none")),
-                 mean_of(tune.at("shards")), best.name(), mean_of(tune.at(best.name())), affordable.name(),
-                 affordable.every ? mean_of(tune.at(affordable.name())) : 0.0);
-    const auto v = prior_phase(c, L, "validate", two, 1950000, 1970000, cands, true, rows);
-    for (std::size_t k = 0; k < cands.size(); ++k) {
-      const Prior& p = cands[k];
-      const metrics::Interval iv = metrics::paired_bootstrap(v.at(p.name()), v.at("none"), 10000, 1);
-      const metrics::Interval sh = metrics::paired_bootstrap(v.at(p.name()), v.at("shards"), 10000, 1);
-      const double cost = ms / p.every;
-      const bool pass = iv.hi < 0 && cost <= 0.5;
-      const char* which = k == 0 ? "best" : "best within N = 16";
-      std::println("g-diff G2b validation ({}): {} minus none {}; minus shards {}; {:.3f} ms per frame -> {}", which, p.name(), interval_text(iv), interval_text(sh),
-                   cost, pass ? "KEEP" : "STOP");
-      decisions.push_back(std::format("validate,G2b,{} - none,{},{:.3f},0.5,{},{}: interval below zero and cost within bound,{}", p.name(), interval_csv(iv), cost,
-                                      quiet ? "quiet" : "busy", which, pass ? "keep" : "stop"));
-      decisions.push_back(std::format("validate,G2b,{} - shards,{},{:.3f},,{},reference only,", p.name(), interval_csv(sh), cost, quiet ? "quiet" : "busy"));
-    }
-    const metrics::Interval ns = metrics::paired_bootstrap(v.at("none"), v.at("shards"), 10000, 1);
-    decisions.push_back(std::format("validate,G2b,none - shards,{},,,{},reference only,", interval_csv(ns), quiet ? "quiet" : "busy"));
-    merge_rows(c.results / "g_diff_prior.csv", std::string("phase,setting,seed,method,window,") + kScoredHeader, rows);
-  }
+  prior_validate(c, L, ms, quiet, "g_diff", decisions);
   // ---- G2c: tune on seeds 1'981'000 + 10 setting + k, decide on fresh seeds 1'982'000 + ...
   {
     std::vector<StartMethod> methods = {{"rolled", 0}, {"stored", 0}, {"fresh", 0}, {"sdedit", 300}, {"sdedit", 400}, {"sdedit", 500}};
@@ -821,6 +827,92 @@ void step_diff_test(const Ctx& c) {
     merge_rows(c.results / "g_diff_starts.csv", std::string("phase,setting,seed,method,") + kScoredHeader, rows);
   }
   merge_rows(c.results / "g_diff_decisions.csv", kDecisionHeader, decisions);
+}
+
+}  // namespace nfx::study_g
+
+// --- round 2: G2b beyond fire (docs/DCM.md G2.11) -----------------------------------------------------------------------
+
+namespace nfx::study_g {
+
+namespace {
+
+// The one effect of a round-2 G2b step (--effects, default smoke). A one-shot effect has no long run to drift in.
+sim::Effect prior_effect(const Ctx& c, DiffPaths& P) {
+  sim::Effect e = sim::Effect::smoke;
+  if (!c.effects.empty() && !sim::parse_effect(c.effects, e)) throw std::invalid_argument("g-prior: --effects names one effect");
+  if (!sim::effect_loops(e)) {
+    throw std::invalid_argument("g-prior: a one-shot effect plays its few seconds and ends; there is no long run to drift in (docs/DCM.md G2.11)");
+  }
+  const std::string name(sim::effect_name(e));
+  P.root = c.quick ? c.data.parent_path().parent_path() : c.data.parent_path();
+  P.out = c.data / "round2" / "diff";
+  P.denoiser = P.root / "g" / "round2" / "diff" / (name + ".ddpm");
+  P.dmodel = P.root / "experiments" / "models" / "d" / (name + ".nvfx");
+  return e;
+}
+
+}  // namespace
+
+void step_prior(const Ctx& c) {
+  DiffPaths P;
+  const sim::Effect e = prior_effect(c, P);
+  const Loaded L = load_both(P, e);
+  const std::string prefix = std::format("g_diff_{}", sim::effect_name(e));
+  std::println("g-prior {}: denoiser {} ({}), {} parameters", sim::effect_name(e), P.denoiser.string(), dd::version(L.d), L.d.parameters());
+  const auto [ms, quiet] = pass_ms(L.d);
+  std::println("g-prior: one denoiser pass {:.2f} ms on one core ({})", ms, quiet ? "quiet machine" : "machine busy: an upper bound, unmeasured by the rules");
+  std::vector<std::string> decisions;
+  prior_validate(c, L, ms, quiet, prefix, decisions);
+  merge_rows(c.results / (prefix + "_decisions.csv"), kDecisionHeader, decisions);
+  std::println("g-prior: wrote {}", (c.results / (prefix + "_decisions.csv")).string());
+}
+
+void step_prior_test(const Ctx& c) {
+  DiffPaths P;
+  const sim::Effect e = prior_effect(c, P);
+  const std::string prefix = std::format("g_diff_{}", sim::effect_name(e));
+  // the cheaper passing candidate of validation, if any (as g-diff-test)
+  std::string passed;
+  double cost_of = 1e30;
+  if (std::ifstream in(c.results / (prefix + "_decisions.csv")); in) {
+    std::string line;
+    std::getline(in, line);
+    while (std::getline(in, line)) {
+      std::vector<std::string> f;
+      std::stringstream ss(line);
+      for (std::string x; std::getline(ss, x, ',');) f.push_back(x);
+      if (f.size() >= 11 && f[0] == "validate" && f[1] == "G2b" && f[10] == "keep" && std::stod(f[6]) < cost_of) {
+        passed = f[2];
+        cost_of = std::stod(f[6]);
+      }
+    }
+  }
+  if (passed.empty()) {
+    std::println("g-prior-test {}: no prior passed validation; nothing is tested", sim::effect_name(e));
+    return;
+  }
+  const Loaded L = load_both(P, e);
+  const auto [ms, quiet] = pass_ms(L.d);
+  const std::string name = passed.substr(0, passed.find(' '));
+  Prior p;
+  if (std::sscanf(name.c_str(), "prior_n%d_t%d_b%f", &p.every, &p.t, &p.beta) != 3) throw std::runtime_error("g-prior-test: cannot read " + name);
+  std::vector<std::string> rows, decisions;
+  const auto test = b_test_settings();
+  const std::vector<Setting> two(test.begin(), test.begin() + 2);
+  const auto v = prior_phase(c, L, "test", two, 2950000, 2970000, {p}, true, rows);
+  const metrics::Interval iv = metrics::paired_bootstrap(v.at(p.name()), v.at("none"), 10000, 1);
+  const metrics::Interval sh = metrics::paired_bootstrap(v.at(p.name()), v.at("shards"), 10000, 1);
+  const metrics::Interval ns = metrics::paired_bootstrap(v.at("none"), v.at("shards"), 10000, 1);
+  const double cost = ms / p.every;
+  std::println("g-prior-test {}: {} minus none {}; minus shards {}; none minus shards {}", sim::effect_name(e), p.name(), interval_text(iv), interval_text(sh),
+               interval_text(ns));
+  decisions.push_back(std::format("test,G2b,{} - none,{},{:.3f},0.5,{},interval below zero and cost within bound,{}", p.name(), interval_csv(iv), cost,
+                                  quiet ? "quiet" : "busy", iv.hi < 0 && cost <= 0.5 ? "keep" : "stop"));
+  decisions.push_back(std::format("test,G2b,{} - shards,{},{:.3f},,{},reference only,", p.name(), interval_csv(sh), cost, quiet ? "quiet" : "busy"));
+  decisions.push_back(std::format("test,G2b,none - shards,{},,,{},reference only,", interval_csv(ns), quiet ? "quiet" : "busy"));
+  merge_rows(c.results / (prefix + "_prior.csv"), std::string("phase,setting,seed,method,window,") + kScoredHeader, rows);
+  merge_rows(c.results / (prefix + "_decisions.csv"), kDecisionHeader, decisions);
 }
 
 }  // namespace nfx::study_g

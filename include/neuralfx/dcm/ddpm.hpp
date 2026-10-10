@@ -194,6 +194,11 @@ struct TrainOptions {
   int eval_count = 256;      // states of the evaluation set scored at each log
   std::uint64_t eval_seed = 77;
   std::function<void(const TrainLog&, const Denoiser& ema)> progress;
+  // The training state (step, weights, EMA, Adam moments, elapsed seconds) is written here at every log when set, and
+  // training resumes from it when the file exists at the start: a resumed run gives the same weights, bit for bit, as
+  // one that was never stopped (the noise of a step depends only on the seed and the step).
+  std::filesystem::path state_path;
+  int stop_after = 0;  // > 0: end after this step, as an interruption would (for the resume test)
 };
 
 struct TrainResult {
