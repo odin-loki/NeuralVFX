@@ -647,18 +647,21 @@ double mean(const std::vector<double>& v) {
 const std::vector<int> kTrackHorizons = {1, 8, 30, 60};
 const std::vector<int> kDHorizons = {1, 4, 8, 16, 30, 60, 120, 240};
 
-std::vector<TrackCase> forced_cases(sim::Effect e, const std::vector<Setting>& settings, std::uint64_t seed0, std::uint64_t forcing0, bool quick) {
+// forced: B's or the validation settings with couplings; unforced (a diagnostic, outside the rule): the same runs
+// without them, which shows what the couplings cost a model.
+std::vector<TrackCase> forced_cases(sim::Effect e, const std::vector<Setting>& settings, std::uint64_t seed0, std::uint64_t forcing0, bool quick,
+                                    bool couplings = true) {
   std::vector<TrackCase> v;
   const bool ex = e == sim::Effect::explosion;
   for (std::size_t si = 0; si < settings.size(); ++si) {
     for (int k = 0; k < (quick ? 1 : 2); ++k) {
       TrackCase tc;
-      tc.kind = "forced";
+      tc.kind = couplings ? "forced" : "unforced";
       tc.index = static_cast<int>(v.size());
       tc.p = at_setting(e, settings[si], seed0 + 10 * si + static_cast<std::uint64_t>(k));
       tc.warm = ex ? 1 : 100;
       tc.frames = 60;
-      tc.forcing = forcing0 + 10 * si + static_cast<std::uint64_t>(k);
+      tc.forcing = couplings ? forcing0 + 10 * si + static_cast<std::uint64_t>(k) : 0;
       v.push_back(tc);
     }
   }
@@ -745,6 +748,7 @@ void step_val(const Ctx& c) {
       for (TrackCase tc : handover_cases(vs, kValSalt, 860000, 7, c.quick)) cases.push_back(tc);
     }
     for (TrackCase tc : plain_cases(e, kValSalt, c.quick ? 2 : 16, 60)) cases.push_back(tc);
+    for (TrackCase tc : forced_cases(e, vs, 830000, 870000, c.quick, false)) cases.push_back(tc);
     const auto t0 = std::chrono::steady_clock::now();
     const TrackResults tr = run_tracking(c, models, cases);
     std::println("i-val: {} tracking in {:.0f} s", en, seconds_since(t0));
@@ -769,7 +773,7 @@ void step_val(const Ctx& c) {
       for (std::size_t k = 0; k < cases.size(); ++k) {
         const auto& v = tr[m][k];
         if (cases[k].kind == "plain") pl.push_back((v[0] + v[7] + v[29] + v[59]) / 4.0);
-        else cp.push_back((v[7] + v[29]) / 2.0);
+        if (cases[k].kind == "forced" || cases[k].kind == "handover") cp.push_back((v[7] + v[29]) / 2.0);
       }
       sum[m].coupled = mean(cp);
       sum[m].plain = mean(pl);
@@ -844,6 +848,7 @@ void step_test(const Ctx& c) {
       for (TrackCase tc : handover_cases(ts, kTestSalt, 980000, 101, c.quick)) cases.push_back(tc);
     }
     for (TrackCase tc : plain_cases(e, kTestSalt, c.quick ? 2 : 16, c.quick ? 60 : (ex ? 89 : 240))) cases.push_back(tc);
+    for (TrackCase tc : forced_cases(e, ts, 960000, 970000, c.quick, false)) cases.push_back(tc);
     const auto t0 = std::chrono::steady_clock::now();
     const TrackResults tr = run_tracking(c, models, cases);
     std::println("i-test: {} tracking in {:.0f} s", en, seconds_since(t0));
@@ -886,6 +891,7 @@ void step_test(const Ctx& c) {
     const std::vector<std::string> stat_names = {"spectrum_l1(-)", "abs_log_motion(-)", "coverage_l1(-)", "mean_frame_psnr"};
     std::vector<std::string> kinds = {"forced"};
     if (e == sim::Effect::smoke) kinds.push_back("handover");
+    kinds.push_back("unforced");  // a diagnostic, outside the rule
     for (std::size_t m = 1; m < models.size(); ++m) {
       const std::string mn = models[m].name;
       for (const std::string& kind : kinds) {

@@ -353,6 +353,8 @@ from the explosion model's state (hand-over at 2.4 s after the detonation).
 - **No regression.** Plain tracking as study D's (salt-2 runs from their true states, here 16 runs, D's 8 and 8
   more of the same kind), and the endless statistics exactly as study D's test (B's settings, D's seeds, shards):
   spectrum distance, motion ratio (as |log ratio|), coverage distance and mean-frame PSNR.
+- **A diagnostic outside the rule:** the forced cases again without the couplings (same settings, seeds and start
+  states), which shows what the couplings cost each model.
 - **Intervals:** 95% paired bootstrap (10,000 resamples) over runs or settings, model minus v1.
 
 ### 9.5 The rule (written before the test)
