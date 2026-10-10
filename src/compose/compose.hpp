@@ -202,7 +202,9 @@ class Module {
   // (the first half of a bilinear sample) and every pixel row only blends two such rows (the second half).
   std::vector<float> shadow_x_;      // [res][size]: shadow_ resampled at the pixels' x
   std::vector<float> light_x_;
-  std::vector<std::array<int, 2>> star_runs_;  // runs of columns [x0, x1) with the same star key       // [2][3][size]: two rows of the light grid resampled at the pixels' x, a plane per colour
+  std::vector<std::array<int, 2>> star_runs_;  // runs of columns [x0, x1) with the same star key
+  std::vector<float> fin_vig_;                 // finish(): per column, the vignette's term of x
+  std::vector<std::uint32_t> fin_key_;         // and the grain's hash key of x       // [2][3][size]: two rows of the light grid resampled at the pixels' x, a plane per colour
   std::vector<int> sx_, lx_;         // [2][size]: the two grid columns each pixel's x falls between (shadow, light)
   std::vector<float> sfx_, lfx_;     // [size]: weight of the second column
   std::vector<float> row_;           // [2][size]: per row of pixels: soot slope along x, emission ramp
@@ -495,11 +497,10 @@ class Frame {
     float hill = 0;               // background: world y of the hills' outline
     std::array<float, 4> hill_colour{};
     Tap light;                    // background: the light field's columns
-    std::uint32_t star = 0, tex = 0, grain = 0;  // hash keys of the stars, the ground and the grain
+    std::uint32_t star = 0, tex = 0;  // hash keys of the stars and the ground
     Tap bus;                      // distort: the bus's columns
     bool on_bus = false;
     float wobble = 0, phase = 0;  // distort: the haze's terms that depend on x alone
-    float vig = 0;                // finish: the vignette's x term
   };
   // A tile's screen column: its image columns and the factors of its ownership weight that depend on x.
   struct TileColumn {
@@ -542,6 +543,8 @@ class Frame {
   // pixel: rows of light4_ resampled at the screen columns, [light ny][w][4] (the rows the screen reads).
   std::vector<float> light_x_;
   std::vector<std::array<int, 2>> star_runs_;  // runs of columns [x0, x1) with the same star key
+  std::vector<float> fin_vig_;                 // finish(): per column, the vignette's term of x
+  std::vector<std::uint32_t> fin_key_;         // and the grain's hash key of x
   // The same for distort()'s lookup of the bus's heat, [bus ny][w]; and per block of kBlock pixels, the bus columns
   // its pixels read, [lo, hi] (lo > hi: none).
   std::vector<float> heat_x_;

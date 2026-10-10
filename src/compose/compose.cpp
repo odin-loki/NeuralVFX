@@ -1310,6 +1310,8 @@ Frame::Frame(int width, int height) : w_(width), h_(height), blocks_((width + kB
   }
   cols_.resize(zs(width));
   star_runs_.reserve(zs(width));
+  fin_vig_.resize(zs(width));
+  fin_key_.resize(zs(width));
   tile_cols_.resize(zs(kMaxTiles) * zs(width));
   seen_cols_.resize(zs(kMaxTiles));
   moved_.assign(zs(height) * zs(blocks_), {0, 0});
@@ -1982,119 +1984,7 @@ void Frame::settle(Pool* pool) {
   }
 }
 
-// --- bloom ------------------------------------------------------------------------------------------------------------
-
-void Frame::bloom(float threshold, float strength, Pool& pool) { bloom_impl(threshold, strength, pool); }
-
-void Frame::bloom_impl(float threshold, float strength, Pool& pool) {
-  // Bright pass into mip 0 (half size), then down, blur, and up. Every pass works on all four channels; channel 3 of
-  // the mips stays 0, so what it adds to the screen's alpha is 0. The distortion's moved pixels are copied back into
-  // the screen on the way (the bright pass reads each screen row once), and the last pass, adding mip 0 to the
-  // screen, is left to finish(), which reads the screen anyway.
-  if (bloom_pending_) settle(&pool);  // (a second bloom without finish() between)
-  const auto each_row = [&](const Image4& im, auto&& f) {
-    if (zs(im.w) * zs(im.h) < 16384) {  // a small level: waking the workers would cost more than the work
-      for (int y = 0; y < im.h; ++y) f(y);
-      return;
-    }
-    pool.run((im.h + kChunk - 1) / kChunk, [&](int task) {
-      for (int y = task * kChunk; y < std::min(im.h, (task + 1) * kChunk); ++y) f(y);
-    });
-  };
-  Image4& m0 = mips_[0];
-  const bool settle_rows = moved_rows_;
-  each_row(m0, [&](int y) {
-    if (settle_rows) {
-      settle_row(2 * y);
-      if (2 * y + 1 < h_) settle_row(2 * y + 1);
-    }
-    const float* r0 = screen_.row(std::min(2 * y, h_ - 1));
-    const float* r1 = screen_.row(std::min(2 * y + 1, h_ - 1));
-    float* o = m0.row(y);
-    std::array<float, 2 * kBlock> k0, k1;  // a quarter of the bright part of each source pixel, by source row
-    for (int bx = 0; bx < m0.w; bx += kBlock) {
-      const int n = std::min(kBlock, m0.w - bx), sx0 = 2 * bx, sn = std::min(2 * n, w_ - sx0);
-      for (int j = 0; j < sn; ++j) {
-        const float* p = r0 + zs(sx0 + j) * 4;
-        const float* q = r1 + zs(sx0 + j) * 4;
-        const float lp = 0.2126f * p[0] + 0.7152f * p[1] + 0.0722f * p[2], lq = 0.2126f * q[0] + 0.7152f * q[1] + 0.0722f * q[2];
-        k0[zs(j)] = 0.25f * (std::max(0.f, lp - threshold) / std::max(lp, 1e-4f));
-        k1[zs(j)] = 0.25f * (std::max(0.f, lq - threshold) / std::max(lq, 1e-4f));
-      }
-      for (int i = 0; i < n; ++i) {
-        const int ja = std::min(2 * i, sn - 1), jb = std::min(2 * i + 1, sn - 1);
-        const float* a = r0 + zs(sx0 + ja) * 4;
-        const float* b = r0 + zs(sx0 + jb) * 4;
-        const float* c = r1 + zs(sx0 + ja) * 4;
-        const float* d = r1 + zs(sx0 + jb) * 4;
-        px4 v = k0[zs(ja)] * load4(a) + k0[zs(jb)] * load4(b) + k1[zs(ja)] * load4(c) + k1[zs(jb)] * load4(d);
-        v[3] = 0.f;
-        store4(o + zs(bx + i) * 4, v);
-      }
-    }
-  });
-  moved_rows_ = false;
-  for (std::size_t l = 1; l < mips_.size(); ++l) {
-    const Image4& s = mips_[l - 1];
-    Image4& d = mips_[l];
-    each_row(d, [&](int y) {
-      const float* r0 = s.row(std::min(2 * y, s.h - 1));
-      const float* r1 = s.row(std::min(2 * y + 1, s.h - 1));
-      float* o = d.row(y);
-      for (int x = 0; x < d.w; ++x) {
-        const std::size_t a = zs(std::min(2 * x, s.w - 1)) * 4, b = zs(std::min(2 * x + 1, s.w - 1)) * 4;
-        store4(o + zs(x) * 4, 0.25f * (load4(r0 + a) + load4(r0 + b) + load4(r1 + a) + load4(r1 + b)));
-      }
-    });
-  }
-  static constexpr float kw[5] = {1.f / 16, 4.f / 16, 6.f / 16, 4.f / 16, 1.f / 16};
-  for (std::size_t l = 0; l < mips_.size(); ++l) {
-    Image4& a = mips_[l];
-    Image4& b = mips_tmp_[l];
-    const int W = a.w;
-    each_row(a, [&](int y) {  // across, a into b: the clamped ends, then the middle
-      const float* s = a.row(y);
-      float* o = b.row(y);
-      const auto clamped = [&](int x) {
-        for (int c = 0; c < 4; ++c) {
-          float v = 0.f;
-          for (int t = -2; t <= 2; ++t) v += kw[t + 2] * s[zs(std::clamp(x + t, 0, W - 1)) * 4 + zs(c)];
-          o[zs(x) * 4 + zs(c)] = v;
-        }
-      };
-      for (int x = 0; x < std::min(2, W); ++x) clamped(x);
-      for (int x = std::max(2, W - 2); x < W; ++x) clamped(x);
-      for (int i = 8; i < 4 * (W - 2); ++i) o[i] = kw[0] * s[i - 8] + kw[1] * s[i - 4] + kw[2] * s[i] + kw[3] * s[i + 4] + kw[4] * s[i + 8];
-    });
-    each_row(a, [&](int y) {  // down, b into a
-      const float* r[5];
-      for (int t = 0; t < 5; ++t) r[t] = b.row(std::clamp(y + t - 2, 0, a.h - 1));
-      float* o = a.row(y);
-      for (int i = 0; i < 4 * W; ++i) o[i] = kw[0] * r[0][i] + kw[1] * r[1][i] + kw[2] * r[2][i] + kw[3] * r[3][i] + kw[4] * r[4][i];
-    });
-  }
-  const auto add_up = [&](float* o, const Image4& c, int y, int fw, std::size_t l, float gain, float div) {  // o += gain * c / div
-    const Tap& ty = up_y_[l][zs(y)];
-    const float* r0 = c.row(ty.i0);
-    const float* r1 = c.row(ty.i1);
-    const Tap* tx = up_x_[l].data();
-    for (int x = 0; x < fw; ++x) {
-      const Tap& t = tx[x];
-      float* p = o + zs(x) * 4;
-      store4(p, load4(p) + gain * blend4(r0 + zs(t.i0) * 4, r0 + zs(t.i1) * 4, r1 + zs(t.i0) * 4, r1 + zs(t.i1) * 4, t, ty) / div);
-    }
-  };
-  for (std::size_t l = mips_.size() - 1; l > 0; --l) {  // up: each level adds the coarser one, bilinear
-    Image4& f = mips_[l - 1];
-    each_row(f, [&](int y) { add_up(f.row(y), mips_[l], y, f.w, l, 1.f, 1.f); });
-  }
-  // the last pass, screen += strength * mip 0 / levels, is finish()'s
-  bloom_pending_ = true;
-  bloom_gain_ = strength;
-  bloom_div_ = static_cast<float>(mips_.size());
-}
-
-// --- tone mapping -----------------------------------------------------------------------------------------------------
+// --- tone mapping, and the row kernels --------------------------------------------------------------------------------
 
 namespace {
 
@@ -2125,13 +2015,22 @@ struct FrameKernels {
     bool settle, bloom;
     float gain, div;
   };
+  // Wide: tone mapping two pixels to a vector of 8 (for AVX2; on the baseline ISA GCC splits such vectors badly, so
+  // there it is a loop over values that GCC vectorises itself). The same operations on each value either way.
+  template <bool Wide>
   [[gnu::always_inline]] static inline void finish_rows(Frame& F, const Finish& a, int y0, int y1) {
+    typedef float f8 __attribute__((vector_size(32)));
+    typedef float f8u __attribute__((vector_size(32), aligned(4)));
+    typedef int i8 __attribute__((vector_size(32)));
+    typedef float f4u __attribute__((vector_size(16), aligned(4)));
     const Gamma& g = gamma();
     const Image4& m0 = F.mips_[0];
     const float expo = a.P->exposure, fade_k = a.P->fade, gain = a.gain, div = a.div;
     const int w = F.w_, h = F.h_;
-    std::array<float, 4 * kBlock> vig, grain, sum;  // per value of a block of pixels (all four channels, for vectors)
-    std::array<int, 4 * kBlock> level;
+    alignas(32) std::array<float, kBlock + 4> vig, grain;  // per pixel of a block (padded: read four at a time)
+    alignas(32) std::array<float, 4 * kBlock> vig_v, grain_v, sum;  // per value (not Wide); the screen plus bloom
+    alignas(32) std::array<int, 4 * kBlock> level;  // display levels, all four channels
+    const f8 zero{}, one = zero + 1.f, top = zero + 4095.f;
     for (int y = y0; y < y1; ++y) {
       if (a.settle) F.settle_row(y);
       const float* p = F.screen_.row(y);
@@ -2144,12 +2043,8 @@ struct FrameKernels {
       for (int bx = 0; bx < w; bx += kBlock) {
         const int n = std::min(kBlock, w - bx);
         for (int i = 0; i < n; ++i) {
-          const Frame::Column& k = F.cols_[zs(bx + i)];
-          const float v = 1.f - 0.45f * (k.vig + ny2), gr = (unit(k.grain ^ key_y) - 0.5f) * 0.006f;
-          for (int c = 0; c < 4; ++c) {
-            vig[zs(i) * 4 + zs(c)] = v;
-            grain[zs(i) * 4 + zs(c)] = gr;
-          }
+          vig[zs(i)] = 1.f - 0.45f * (F.fin_vig_[zs(bx + i)] + ny2);
+          grain[zs(i)] = (unit(F.fin_key_[zs(bx + i)] ^ key_y) - 0.5f) * 0.006f;
         }
         const float* src = p + zs(bx) * 4;
         if (a.bloom) {
@@ -2160,37 +2055,243 @@ struct FrameKernels {
           }
           src = sum.data();
         }
-        tone(src, vig.data(), grain.data(), expo, fade_k, level.data(), 4 * n);
-        std::uint8_t* ob = o + zs(bx) * 3;
-        for (int i = 0; i < n; ++i) {
-          for (int c = 0; c < 3; ++c) ob[zs(i) * 3 + zs(c)] = g.to_display[zs(level[zs(i) * 4 + zs(c)])];
+        if constexpr (Wide) {
+          // tone(), two pixels to a vector: ACES of the value times the exposure, vignette and fade, plus grain,
+          // clamped as a float, then the level
+          int i = 0;
+          for (; i + 2 <= n; i += 2) {
+            const f8 v = *reinterpret_cast<const f8u*>(src + zs(i) * 4);
+            const f4u vq = *reinterpret_cast<const f4u*>(vig.data() + i), gq = *reinterpret_cast<const f4u*>(grain.data() + i);
+            const f8 vv = __builtin_shufflevector(vq, vq, 0, 0, 0, 0, 1, 1, 1, 1), gg = __builtin_shufflevector(gq, gq, 0, 0, 0, 0, 1, 1, 1, 1);
+            const f8 t = v * expo * vv * fade_k;
+            f8 c = t * (2.51f * t + 0.03f) / (t * (2.43f * t + 0.59f) + 0.14f);
+            c = c < zero ? zero : (one < c ? one : c);  // std::clamp(c, 0, 1)
+            f8 x = (c + gg) * 4095.f + 0.5f;
+            x = zero < x ? x : zero;  // std::max(0, x)
+            x = x < top ? x : top;    // std::min(4095, x)
+            *reinterpret_cast<i8*>(level.data() + zs(i) * 4) = __builtin_convertvector(x, i8);
+          }
+          for (; i < n; ++i) {
+            const std::array<float, 4> v4{vig[zs(i)], vig[zs(i)], vig[zs(i)], vig[zs(i)]}, g4{grain[zs(i)], grain[zs(i)], grain[zs(i)], grain[zs(i)]};
+            tone(src + zs(i) * 4, v4.data(), g4.data(), expo, fade_k, level.data() + zs(i) * 4, 4);
+          }
+        } else {
+          for (int i = 0; i < n; ++i) {
+            for (int c = 0; c < 4; ++c) {
+              vig_v[zs(i) * 4 + zs(c)] = vig[zs(i)];
+              grain_v[zs(i) * 4 + zs(c)] = grain[zs(i)];
+            }
+          }
+          tone(src, vig_v.data(), grain_v.data(), expo, fade_k, level.data(), 4 * n);
         }
+        std::uint8_t* ob = o + zs(bx) * 3;
+        for (int q = 0; q < n; ++q) {
+          for (int c = 0; c < 3; ++c) ob[zs(q) * 3 + zs(c)] = g.to_display[zs(level[zs(q) * 4 + zs(c)])];
+        }
+      }
+    }
+  }
+
+  // --- bloom --------------------------------------------------------------------------------------------------------
+
+  // Bright pass: mip 0 row y from screen rows 2y and 2y + 1 (copied back from the distortion first, if it moved them).
+  [[gnu::always_inline]] static inline void bright_rows(Frame& F, float threshold, bool settle, int y0, int y1) {
+    Image4& m0 = F.mips_[0];
+    const int w = F.w_, h = F.h_;
+    // a quarter of the bright part of a run of source pixels, by source row: k = 0.25 max(0, lum - threshold) /
+    // max(lum, 1e-4), four pixels at a time (transposed to planes), each value as the scalar code computes it
+    const auto bright = [&](const float* src, int n, float* k) {
+      const px4 zero{}, eps{1e-4f, 1e-4f, 1e-4f, 1e-4f};
+      int j = 0;
+      for (; j + 4 <= n; j += 4) {
+        const px4 a = load4(src + zs(j) * 4), b = load4(src + zs(j) * 4 + 4), c = load4(src + zs(j) * 4 + 8), d = load4(src + zs(j) * 4 + 12);
+        const px4 t0 = __builtin_shufflevector(a, b, 0, 4, 1, 5), t1 = __builtin_shufflevector(c, d, 0, 4, 1, 5);
+        const px4 t2 = __builtin_shufflevector(a, b, 2, 6, 3, 7), t3 = __builtin_shufflevector(c, d, 2, 6, 3, 7);
+        const px4 R = __builtin_shufflevector(t0, t1, 0, 1, 4, 5), G = __builtin_shufflevector(t0, t1, 2, 3, 6, 7), B = __builtin_shufflevector(t2, t3, 0, 1, 4, 5);
+        const px4 lum = 0.2126f * R + 0.7152f * G + 0.0722f * B;
+        const px4 over = lum - threshold;
+        const px4 num = zero < over ? over : zero;  // std::max(0, over)
+        const px4 den = lum < eps ? eps : lum;      // std::max(lum, 1e-4)
+        store4(k + j, 0.25f * (num / den));
+      }
+      for (; j < n; ++j) {
+        const float* p = src + zs(j) * 4;
+        const float lum = 0.2126f * p[0] + 0.7152f * p[1] + 0.0722f * p[2];
+        k[j] = 0.25f * (std::max(0.f, lum - threshold) / std::max(lum, 1e-4f));
+      }
+    };
+    for (int y = y0; y < y1; ++y) {
+      if (settle) {
+        F.settle_row(2 * y);
+        if (2 * y + 1 < h) F.settle_row(2 * y + 1);
+      }
+      const float* r0 = F.screen_.row(std::min(2 * y, h - 1));
+      const float* r1 = F.screen_.row(std::min(2 * y + 1, h - 1));
+      float* o = m0.row(y);
+      alignas(16) std::array<float, 2 * kBlock> k0, k1;
+      for (int bx = 0; bx < m0.w; bx += kBlock) {
+        const int n = std::min(kBlock, m0.w - bx), sx0 = 2 * bx, sn = std::min(2 * n, w - sx0);
+        bright(r0 + zs(sx0) * 4, sn, k0.data());
+        bright(r1 + zs(sx0) * 4, sn, k1.data());
+        for (int i = 0; i < n; ++i) {
+          const int ja = std::min(2 * i, sn - 1), jb = std::min(2 * i + 1, sn - 1);
+          const float* a = r0 + zs(sx0 + ja) * 4;
+          const float* b = r0 + zs(sx0 + jb) * 4;
+          const float* c = r1 + zs(sx0 + ja) * 4;
+          const float* d = r1 + zs(sx0 + jb) * 4;
+          px4 v = k0[zs(ja)] * load4(a) + k0[zs(jb)] * load4(b) + k1[zs(ja)] * load4(c) + k1[zs(jb)] * load4(d);
+          v[3] = 0.f;
+          store4(o + zs(bx + i) * 4, v);
+        }
+      }
+    }
+  }
+  // Level l from level l - 1: 2 x 2 boxes.
+  [[gnu::always_inline]] static inline void down_rows(Frame& F, int l, int y0, int y1) {
+    const Image4& s = F.mips_[zs(l - 1)];
+    Image4& d = F.mips_[zs(l)];
+    for (int y = y0; y < y1; ++y) {
+      const float* r0 = s.row(std::min(2 * y, s.h - 1));
+      const float* r1 = s.row(std::min(2 * y + 1, s.h - 1));
+      float* o = d.row(y);
+      for (int x = 0; x < d.w; ++x) {
+        const std::size_t a = zs(std::min(2 * x, s.w - 1)) * 4, b = zs(std::min(2 * x + 1, s.w - 1)) * 4;
+        store4(o + zs(x) * 4, 0.25f * (load4(r0 + a) + load4(r0 + b) + load4(r1 + a) + load4(r1 + b)));
+      }
+    }
+  }
+  static constexpr float kw[5] = {1.f / 16, 4.f / 16, 6.f / 16, 4.f / 16, 1.f / 16};
+  // The [1 4 6 4 1] / 16 blur of level l across, into its scratch: the clamped ends, then the middle.
+  [[gnu::always_inline]] static inline void blur_x_rows(Frame& F, int l, int y0, int y1) {
+    const Image4& a = F.mips_[zs(l)];
+    Image4& b = F.mips_tmp_[zs(l)];
+    const int W = a.w;
+    for (int y = y0; y < y1; ++y) {
+      const float* __restrict s = a.row(y);
+      float* __restrict o = b.row(y);
+      const auto clamped = [&](int x) {
+        for (int c = 0; c < 4; ++c) {
+          float v = 0.f;
+          for (int t = -2; t <= 2; ++t) v += kw[t + 2] * s[zs(std::clamp(x + t, 0, W - 1)) * 4 + zs(c)];
+          o[zs(x) * 4 + zs(c)] = v;
+        }
+      };
+      for (int x = 0; x < std::min(2, W); ++x) clamped(x);
+      for (int x = std::max(2, W - 2); x < W; ++x) clamped(x);
+      for (int i = 8; i < 4 * (W - 2); ++i) o[i] = kw[0] * s[i - 8] + kw[1] * s[i - 4] + kw[2] * s[i] + kw[3] * s[i + 4] + kw[4] * s[i + 8];
+    }
+  }
+  // ... and down, from the scratch back into the level.
+  [[gnu::always_inline]] static inline void blur_y_rows(Frame& F, int l, int y0, int y1) {
+    Image4& a = F.mips_[zs(l)];
+    const Image4& b = F.mips_tmp_[zs(l)];
+    const int W = a.w;
+    for (int y = y0; y < y1; ++y) {
+      const float* r[5];
+      for (int t = 0; t < 5; ++t) r[t] = b.row(std::clamp(y + t - 2, 0, a.h - 1));
+      float* __restrict o = a.row(y);
+      for (int i = 0; i < 4 * W; ++i) o[i] = kw[0] * r[0][i] + kw[1] * r[1][i] + kw[2] * r[2][i] + kw[3] * r[3][i] + kw[4] * r[4][i];
+    }
+  }
+  // Level l - 1 plus level l, bilinear.
+  [[gnu::always_inline]] static inline void up_rows(Frame& F, int l, int y0, int y1) {
+    Image4& f = F.mips_[zs(l - 1)];
+    const Image4& c = F.mips_[zs(l)];
+    for (int y = y0; y < y1; ++y) {
+      const Frame::Tap& ty = F.up_y_[zs(l)][zs(y)];
+      const float* r0 = c.row(ty.i0);
+      const float* r1 = c.row(ty.i1);
+      const Frame::Tap* tx = F.up_x_[zs(l)].data();
+      float* o = f.row(y);
+      for (int x = 0; x < f.w; ++x) {
+        const Frame::Tap& t = tx[x];
+        float* p = o + zs(x) * 4;
+        store4(p, load4(p) + 1.f * blend4(r0 + zs(t.i0) * 4, r0 + zs(t.i1) * 4, r1 + zs(t.i0) * 4, r1 + zs(t.i1) * 4, t, ty) / 1.f);
       }
     }
   }
 };
 
 namespace {
-[[gnu::noinline]] void finish_rows_base(Frame& F, const FrameKernels::Finish& a, int y0, int y1) { FrameKernels::finish_rows(F, a, y0, y1); }
+
+// Every kernel twice: for the baseline ISA and for AVX2 without FMA.
+struct KernelSet {
+  void (*finish)(Frame&, const FrameKernels::Finish&, int, int);
+  void (*bright)(Frame&, float, bool, int, int);
+  void (*down)(Frame&, int, int, int);
+  void (*blur_x)(Frame&, int, int, int);
+  void (*blur_y)(Frame&, int, int, int);
+  void (*up)(Frame&, int, int, int);
+};
+#define NFX_FRAME_KERNELS(SUFFIX, WIDE, ...)                                                                                                         \
+  __VA_ARGS__ void finish_##SUFFIX(Frame& F, const FrameKernels::Finish& a, int y0, int y1) { FrameKernels::finish_rows<WIDE>(F, a, y0, y1); } \
+  __VA_ARGS__ void bright_##SUFFIX(Frame& F, float t, bool s, int y0, int y1) { FrameKernels::bright_rows(F, t, s, y0, y1); }            \
+  __VA_ARGS__ void down_##SUFFIX(Frame& F, int l, int y0, int y1) { FrameKernels::down_rows(F, l, y0, y1); }                            \
+  __VA_ARGS__ void blur_x_##SUFFIX(Frame& F, int l, int y0, int y1) { FrameKernels::blur_x_rows(F, l, y0, y1); }                        \
+  __VA_ARGS__ void blur_y_##SUFFIX(Frame& F, int l, int y0, int y1) { FrameKernels::blur_y_rows(F, l, y0, y1); }                        \
+  __VA_ARGS__ void up_##SUFFIX(Frame& F, int l, int y0, int y1) { FrameKernels::up_rows(F, l, y0, y1); }                                \
+  const KernelSet kernels_##SUFFIX{finish_##SUFFIX, bright_##SUFFIX, down_##SUFFIX, blur_x_##SUFFIX, blur_y_##SUFFIX, up_##SUFFIX};
+NFX_FRAME_KERNELS(base, false, [[gnu::noinline]])
 #if defined(NFX_COMPOSE_AVX2)
-[[gnu::noinline, gnu::target("avx2")]] void finish_rows_avx2(Frame& F, const FrameKernels::Finish& a, int y0, int y1) { FrameKernels::finish_rows(F, a, y0, y1); }
+NFX_FRAME_KERNELS(avx2, true, [[gnu::noinline, gnu::target("avx2")]])
 #endif
+#undef NFX_FRAME_KERNELS
+
+const KernelSet& kernels(bool avx2) {
+#if defined(NFX_COMPOSE_AVX2)
+  if (avx2) return kernels_avx2;
+#endif
+  (void)avx2;
+  return kernels_base;
+}
+
 }  // namespace
+
+// --- bloom ------------------------------------------------------------------------------------------------------------
+
+void Frame::bloom(float threshold, float strength, Pool& pool) { bloom_impl(threshold, strength, pool); }
+
+void Frame::bloom_impl(float threshold, float strength, Pool& pool) {
+  // Bright pass into mip 0 (half size), then down, blur, and up. Every pass works on all four channels; channel 3 of
+  // the mips stays 0, so what it adds to the screen's alpha is 0. The distortion's moved pixels are copied back into
+  // the screen on the way (the bright pass reads each screen row once), and the last pass, adding mip 0 to the
+  // screen, is left to finish(), which reads the screen anyway. The rows are FrameKernels'.
+  if (bloom_pending_) settle(&pool);  // (a second bloom without finish() between)
+  const KernelSet& K = kernels(avx2_);
+  const auto each_row = [&](const Image4& im, auto&& rows) {  // rows(y0, y1)
+    if (zs(im.w) * zs(im.h) < 16384) {  // a small level: waking the workers would cost more than the work
+      rows(0, im.h);
+      return;
+    }
+    pool.run((im.h + kChunk - 1) / kChunk, [&](int task) { rows(task * kChunk, std::min(im.h, (task + 1) * kChunk)); });
+  };
+  const bool settle_rows = moved_rows_;
+  each_row(mips_[0], [&](int y0, int y1) { K.bright(*this, threshold, settle_rows, y0, y1); });
+  moved_rows_ = false;
+  for (int l = 1; l < static_cast<int>(mips_.size()); ++l) each_row(mips_[zs(l)], [&](int y0, int y1) { K.down(*this, l, y0, y1); });
+  for (int l = 0; l < static_cast<int>(mips_.size()); ++l) {
+    each_row(mips_[zs(l)], [&](int y0, int y1) { K.blur_x(*this, l, y0, y1); });
+    each_row(mips_[zs(l)], [&](int y0, int y1) { K.blur_y(*this, l, y0, y1); });
+  }
+  for (int l = static_cast<int>(mips_.size()) - 1; l > 0; --l) each_row(mips_[zs(l - 1)], [&](int y0, int y1) { K.up(*this, l, y0, y1); });
+  // the last pass, screen += strength * mip 0 / levels, is finish()'s
+  bloom_pending_ = true;
+  bloom_gain_ = strength;
+  bloom_div_ = static_cast<float>(mips_.size());
+}
+
 
 void Frame::finish_impl(const Params& P, std::span<std::uint8_t> rgb, Pool& pool) {
   const std::uint32_t salt = hz(static_cast<int>(P.time * 30.f));
   for (int x = 0; x < w_; ++x) {
     const float nx = ((fl(x) + 0.5f) / fl(w_) - 0.5f) * (fl(w_) / fl(h_));
-    cols_[zs(x)].vig = nx * nx;
-    cols_[zs(x)].grain = hx(x);
+    fin_vig_[zs(x)] = nx * nx;
+    fin_key_[zs(x)] = hx(x);
   }
   // On the way: the distortion's moved pixels back into the screen, and bloom's last pass (the screen plus mip 0,
   // bilinear, times its gain over the levels: as bloom() would have added it, to the bit).
   const FrameKernels::Finish a{&P, rgb.data(), salt, moved_rows_, bloom_pending_, bloom_gain_, bloom_div_};
-  auto rows = finish_rows_base;
-#if defined(NFX_COMPOSE_AVX2)
-  if (avx2_) rows = finish_rows_avx2;
-#endif
+  const auto rows = kernels(avx2_).finish;
   pool.run((h_ + kChunk - 1) / kChunk, [&](int task) { rows(*this, a, task * kChunk, std::min(h_, (task + 1) * kChunk)); });
   moved_rows_ = bloom_pending_ = false;
 }
