@@ -630,7 +630,8 @@ Ratio equal_quality(const Point& net, const std::string& net_measure, const Fami
 
 std::string ratio_cell(const Ratio& r) {
   const std::string mark = r.censor > 0 ? ">" : r.censor < 0 ? "<" : "";
-  std::string s = std::format("{}{:.1f}x [{:.1f}, {:.1f}]", mark, r.point, r.lo, r.hi);
+  const int prec = r.point < 1 ? 2 : 1;  // the codecs' side: 0.13x reads better than 0.1x
+  std::string s = std::format("{}{:.{}f}x [{:.{}f}, {:.{}f}]", mark, r.point, prec, r.lo, prec, r.hi, prec);
   if (r.censored_share > 0.025) s += std::format(" ({:.0f}% censored)", 100 * r.censored_share);
   return s;
 }
