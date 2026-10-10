@@ -25,16 +25,94 @@
 
 namespace nfx::rollout {
 
+// Outside operations on the coarse state before a step, per coarse cell (couplings, docs/COMPOSE.md §9):
+//   0, 1  push u, v: added before the step and taken out after it (compose::push, vortex and wind fields)
+//   2, 3  force u, v: added and kept (a lasting change of the flow)
+//   4     v multiplier, kept (the ceiling field's damping)
+//   5     material multiplier on heat and soot (transfer out, suppress)
+//   6, 7  heat and soot added (transfer in)
+// Velocities in coarse cells per frame. Applied in the order material, v multiplier, force and push.
+inline constexpr int kForce = 8;
+
 struct Run {
-  sim::Params p;               // re-simulating p reproduces the run exactly
-  int frames = 0;              // states 0..frames-1: state i is after i + 1 simulated frames (time (i + 1) / fps)
+  sim::Params p;               // re-simulating p reproduces the run exactly (plain runs; forced runs: with their spec)
+  int frames = 0;              // states 0..frames-1: state i is after i + 1 simulated frames (time t0 + (i + 1) / fps)
   std::vector<float> coarse;   // frames * res * res * kPhys
+  float t0 = 0.f;              // seconds before the step that produced state 0 began (hand-over runs: the explosion's time)
+  // Forced runs: forcing_at[i] >= 0 is the slot in `forcing` (res * res * kForce each) of the operations applied
+  // before the step that produced state i; -1 (or an empty forcing_at): none.
+  std::vector<int> forcing_at;
+  std::vector<float> forcing;
   std::vector<float> controls() const { return {p.intensity, p.wind, p.turbulence}; }
+  // The operations before the step that produced `state` (per = res * res * kForce), or null.
+  const float* forcing_for(int state, std::size_t per) const {
+    if (state < 0 || static_cast<std::size_t>(state) >= forcing_at.size() || forcing_at[static_cast<std::size_t>(state)] < 0) return nullptr;
+    return forcing.data() + static_cast<std::size_t>(forcing_at[static_cast<std::size_t>(state)]) * per;
+  }
 };
 
 // Block averages of a simulation state on a res x res grid; velocity converted to coarse cells per frame.
 void coarse_from_sim(const sim::State& st, int res, float fps, std::span<float> out);
 Run record_run(const sim::Params& p, int frames, int res);
+
+// Apply the operations f (res * res * kForce) to a coarse state of `channels` channels per cell before a step, and
+// take the push out again after it. Heat and soot stay at or above zero.
+void apply_forcing(std::span<float> coarse, int channels, std::span<const float> f);
+void remove_push(std::span<float> coarse, int channels, std::span<const float> f);
+
+// --- couplings in training: forced runs and hand-over runs (docs/COMPOSE.md §9) -----------------------------------
+
+// One outside operation over a span of frames. Positions are in domain units ([0, 1] across the square, y up).
+struct Coupling {
+  enum class Kind : std::uint8_t { push, force, ceiling, add, remove };
+  enum class Shape : std::uint8_t { gust, vortex, wave };  // velocity fields (push, force)
+  Kind kind = Kind::push;
+  Shape shape = Shape::gust;
+  int onset = 0, duration = 1;  // applied before the steps that produce states onset .. onset + duration - 1
+  float x = 0.5f, y = 0.5f;     // centre (gust, vortex, add; remove: a disc) at onset
+  float dx = 0, dy = 0;         // drift of the centre per frame
+  float radius = 0.2f;
+  float angle = 0;              // direction of a gust or a wave
+  float across = 0, wavelength = 1.f, speed = 0;  // wave: modulated along `across` with this length (domain units),
+                                                 // moving by `speed` wavelengths per frame
+  float amp = 0;     // push, force: coarse cells per frame at the peak (vortex: at the radius); ceiling: fraction of v
+                     // removed per frame at full depth; add: heat per frame at the centre; remove: fraction per frame
+  float amp2 = 0;    // add: soot per frame at the centre
+  bool band = false;                  // remove: everything above `height` instead of a disc (a fire's smoke leaving
+                                      // through its tile top)
+  float height = 0.7f, soft = 0.25f;  // ceiling and band: full strength from height + soft up, none below height
+  float envelope(int state) const;    // 0 outside the span; ramps in and out over a few frames
+};
+
+struct ForcingSpec {
+  std::vector<Coupling> events;
+  bool active(int state) const;
+};
+
+// A random spec for a run of `frames` frames of effect e: a few events of every kind at random onsets (from `first`
+// to `last`), durations, places and amplitudes, covering what the fireball scene does (docs/COMPOSE.md §9).
+// Deterministic for a seed.
+ForcingSpec random_forcing(sim::Effect e, int frames, std::uint64_t seed, int first, int last);
+
+// The spec's fields at a state index on an n x n solver grid (rows from the bottom), in solver units: push and force
+// in solver cells per second, multipliers, heat and soot. Fields that are not used are left at their neutral value.
+struct SimForcing {
+  int n = 0;
+  std::vector<float> pu, pv, fu, fv, vk, mk, ah, as;
+  bool push = false, force = false, material = false;
+};
+void forcing_fields(const ForcingSpec& spec, const sim::Params& p, int n, int state, SimForcing& out);
+// Apply to the simulation before a frame (material, v multiplier, force, push); unpush after it.
+void apply_forcing(sim::Fluid& f, const SimForcing& s);
+void unpush(sim::Fluid& f, const SimForcing& s);
+// The coarse version (res * res * kForce), averaged and scaled exactly as coarse_from_sim.
+void coarse_forcing(const SimForcing& s, int res, float fps, std::span<float> out);
+
+// A forced run: the simulation with the spec's operations, recorded with its coarse forcing.
+Run record_forced_run(const sim::Params& p, const ForcingSpec& spec, int frames, int res);
+// A hand-over run: an explosion (params `from`) simulated for `before` frames, its state set into a simulation with
+// params p (the smoke), which is recorded: state 0 is the handed-over state, state i is i frames of p later.
+Run record_handover_run(const sim::Params& from, int before, const sim::Params& p, int frames, int res);
 
 struct StepperOptions {
   int iterations = 3000;   // stage 1: windows from true states, unroll growing to max_unroll over the first half
@@ -51,6 +129,13 @@ struct StepperOptions {
   float lr = 2e-3f, lr_finetune = 7e-4f;
   float clip = 1.f;        // gradient norm clip
   bool keep_normalisation = false;  // continue training a model: keep its channel scales and range
+  // Couplings in training (docs/COMPOSE.md §9): runs from index `plain_runs` on are forced or hand-over runs, and a
+  // window is taken from them with probability `coupled_share`. plain_runs < 0: every run is equally likely (as before).
+  int plain_runs = -1;
+  float coupled_share = 0.f;
+  int checkpoint_every = 0;                    // call checkpoint(iterations done) this often (0: never)
+  int stop_after = 0;                          // stop after this many iterations, on the full schedule (0: run it all)
+  std::function<void(int done)> checkpoint;
   int threads = 0;
   std::uint64_t seed = 1;
   int log_every = 250;

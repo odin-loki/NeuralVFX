@@ -34,6 +34,16 @@ val,explosion,h,8,149671,37039,motion_ratio,0.25655,0.07672,0.44932,worse
 val,explosion,h,8,149671,37039,coverage_l1,0.03123,0.00481,0.06048,worse
 val,explosion,h,8,149671,37039,emission_l1,0.00000,0.00000,0.00000,tie
 val,explosion,h,8,149671,37039,mean_frame_psnr,1.86680,-0.07510,4.10600,tie
+val,explosion,v2c_b6,16,199271,25984,spectrum_l1,0.00510,-0.00911,0.02011,tie
+val,explosion,v2c_b6,16,199271,25984,motion_ratio,0.00336,-0.01146,0.01884,tie
+val,explosion,v2c_b6,16,199271,25984,coverage_l1,-0.00051,-0.00213,0.00129,tie
+val,explosion,v2c_b6,16,199271,25984,emission_l1,0.00000,0.00000,0.00000,tie
+val,explosion,v2c_b6,16,199271,25984,mean_frame_psnr,-0.11310,-0.24140,0.02080,tie
+val,explosion,v2c_v1,16,280927,57055,spectrum_l1,0.00611,-0.00825,0.02155,tie
+val,explosion,v2c_v1,16,280927,57055,motion_ratio,0.00375,-0.01127,0.01925,tie
+val,explosion,v2c_v1,16,280927,57055,coverage_l1,-0.00051,-0.00215,0.00131,tie
+val,explosion,v2c_v1,16,280927,57055,emission_l1,0.00000,0.00000,0.00000,tie
+val,explosion,v2c_v1,16,280927,57055,mean_frame_psnr,-0.11670,-0.24650,0.02240,tie
 val,fire,b4,8,34703,18298,spectrum_l1,0.00381,-0.01135,0.01631,tie
 val,fire,b4,8,34703,18298,motion_ratio,0.01880,-0.00710,0.04578,tie
 val,fire,b4,8,34703,18298,coverage_l1,-0.00009,-0.00022,0.00002,tie

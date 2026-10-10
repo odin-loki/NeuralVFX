@@ -1,0 +1,8 @@
+effect,kind,runs,frames,forced_share,seconds
+fire,plain,96,240,0,
+fire,forced,96,240,0.433,198
+smoke,plain,96,240,0,233
+smoke,forced,64,240,0.409,182
+smoke,handover,64,120,0,130
+explosion,plain,144,90,0,157
+explosion,forced,144,90,0.607,165

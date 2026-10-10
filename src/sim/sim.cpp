@@ -108,7 +108,13 @@ void Fluid::set_state(const State& s) {
   put(temp_, s.temp);
   put(soot_, s.soot);
   put(pressure_, s.pressure);
-  for (int k = 1; k <= n_; ++k) {  // velocity border as project() leaves it
+  velocity_border();
+  frame_ = s.frame;
+  time_ = s.time;
+}
+
+void Fluid::velocity_border() {  // as project() leaves it: the neighbour's value
+  for (int k = 1; k <= n_; ++k) {
     for (Field* q : {&u_, &v_}) {
       (*q)[0, k] = (*q)[1, k];
       (*q)[n_ + 1, k] = (*q)[n_, k];
@@ -116,8 +122,31 @@ void Fluid::set_state(const State& s) {
       (*q)[k, n_ + 1] = (*q)[k, n_];
     }
   }
-  frame_ = s.frame;
-  time_ = s.time;
+}
+
+void Fluid::push(std::span<const float> du, std::span<const float> dv) {
+  const auto nn = static_cast<std::size_t>(n_) * n_;
+  if (du.size() != nn || dv.size() != nn) throw std::invalid_argument("sim: push field does not match the solver resolution");
+  for (int y = 1; y <= n_; ++y) {
+    for (int x = 1; x <= n_; ++x) {
+      const std::size_t i = static_cast<std::size_t>(y - 1) * n_ + static_cast<std::size_t>(x - 1);
+      u_[x, y] += du[i];
+      v_[x, y] += dv[i];
+    }
+  }
+  velocity_border();
+}
+
+void Fluid::add_material(std::span<const float> dtemp, std::span<const float> dsoot) {
+  const auto nn = static_cast<std::size_t>(n_) * n_;
+  if (dtemp.size() != nn || dsoot.size() != nn) throw std::invalid_argument("sim: material field does not match the solver resolution");
+  for (int y = 1; y <= n_; ++y) {
+    for (int x = 1; x <= n_; ++x) {
+      const std::size_t i = static_cast<std::size_t>(y - 1) * n_ + static_cast<std::size_t>(x - 1);
+      temp_[x, y] = std::max(0.f, temp_[x, y] + dtemp[i]);
+      soot_[x, y] = std::max(0.f, soot_[x, y] + dsoot[i]);
+    }
+  }
 }
 
 Fluid::Fluid(const Params& p) : p_(p), n_(p.sim_res > 0 ? p.sim_res : p.size) {

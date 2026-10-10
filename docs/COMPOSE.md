@@ -522,10 +522,12 @@ What the profile shows:
 
 ## 8. Limits and what a product feature needs
 
-- **Couplings are outside the models' training.** Each model was trained alone. A hand-over or a transfer gives it
-  states it never saw, and a push gives it flows it never felt. It copes because the physics it relies on is built
-  in, but its learned part was not trained for this. Training the stepper with random outside forcing and random
-  hand-overs would put couplings inside its training.
+- **Couplings were outside the models' training; study I (§9) put them in.** Each v1 model was trained alone, so a
+  hand-over or a transfer gives it states it never saw and a push gives it flows it never felt; it copes because the
+  physics it relies on is built in. Fine-tuning the stepper with random pushes, forces, ceilings, transfers and
+  hand-overs improved the explosion under couplings (+0.4 dB at 8 frames, +0.55 dB at 30) and kept its plain play,
+  so the explosion now has a coupled version (v2c). Smoke gained on hand-overs (+0.3 dB) but lost 0.09 dB on the
+  first frame of plain tracking, and fire gained nothing at 8 or 30 frames: both keep v1.
 - **A model's learned source cannot be switched off**, only removed afterwards (`suppress`), which costs a little
   material that passes through.
 - **Tiles solve their pressure separately.** Bands exchange the state, not a global solve. The seams hold in the
@@ -546,6 +548,197 @@ What it needs to become a product feature:
    `nvfx_scene_step` and `nvfx_scene_render` per frame, and fields readable by the game (for gameplay: is this tile
    on fire?).
 2. A viewer to edit scripts live (the format and its runner exist, §4), and scripts reachable from the C API.
-3. Training with couplings in the loop (above).
+3. Training with couplings in the loop: done for the explosion (§9); smoke and fire need another round.
 4. A cheaper compositor: SIMD, half-resolution light and distortion, and the engine's own renderer doing the drawing
    (the fields can be uploaded as textures).
+
+## 9. Couplings in training (study I)
+
+Status: **done** (10 October 2026). The design and the rule (§9.5) were committed before the test (commit 50761a0);
+the test was run once (commit 757f6be). **The explosion keeps the coupled model (v2c); fire and smoke keep v1.**
+Code: the simulator's hooks
+(`sim::Fluid::push`, `add_material`), forced and hand-over runs and the coupled loss (`src/train/rollout_train.cpp`),
+and the study's steps (`nvfx_experiment i-data | i-probe | i-train | i-val | i-test`, `tools/experiment_i.cpp`).
+
+### 9.1 The question
+
+Each rollout effect of study D (v1) was trained alone. In a scene a push, a force field, a transfer or a hand-over
+gives it states and flows it never saw (§8). Does putting these couplings into training make a model follow the
+simulator better when it is coupled, without making it worse when it runs alone?
+
+### 9.2 What the fireball does to each model
+
+`nvfx_fireball` was run once with every coupling measured on the coarse grid, per module and frame (velocities in
+cells of the 32-cell grid per frame; heat and soot in the simulator's units):
+
+| module | its own flow (RMS) | push (strongest cell: median / max) | ceiling (velocity change) | material in, per frame | material out, per frame |
+|---|---:|---:|---:|---:|---|
+| burning wreck (fire) | 0.35-0.48 | 0.18 / 0.49 | - | - | half of the top 4 rows (transfer to the sky) |
+| new fires (fire) | 0.39-0.58 | 0.14-0.22 / 0.32 | - | - | half of the top 4 rows |
+| explosion tiles | 0.20-0.49 | 0 | up to 0.06 | heat up to 0.056, soot up to 0.047 | - |
+| second explosion | 0.15-0.36 | 0.07 / 0.09 | - | - | 5% everywhere (transfer to the cloud) |
+| smoke tiles | 0.12-0.46 | 0 | up to 0.10 | soot up to 0.017 | everything over the source in two tiles (suppress) |
+
+So the wreck's fire is pushed by up to its own speed, and the clouds are damped and fed. The smoke model also starts
+from the explosion model's state (hand-over at 2.4 s after the detonation).
+
+### 9.3 Design
+
+- **Ground truth for coupled runs is the simulator with the same operations.** `Fluid::push(du, dv)` adds a velocity
+  field; `push`, `step_frame()`, `push(-du, -dv)` is what `compose::push` does to a learned effect (the flow moves
+  material for one frame and does not build up). `add_material(dT, dD)` adds heat and soot, clamped at zero. Push then
+  unpush without a step restores the state up to one float rounding of each sum (exactly where the addition is exact;
+  a zero push changes nothing, bit for bit); the tests check this, determinism, and that material moves with a push.
+- **Forced runs.** Each run has a random spec (`random_forcing`, seeded): one to four events, each with a random onset,
+  duration, place and amplitude, of five kinds: a temporary push (35%: a gust, a vortex or a drifting wave; up to 0.5
+  cells per frame on fire, 0.3 on the others; 10 to 120 frames), a lasting force (15%: a kick of 2 to 12 frames that
+  stays in the flow), a ceiling (15%: v multiplied by down to 0.7 per frame above a height, 30 to 150 frames),
+  material in (15%: up to 0.06 heat and soot per frame in a blob) and material out (20%: 2% to 60% per frame, or all,
+  in a disc, over the source, or through the top). The fields are evaluated at the simulator's resolution and
+  applied to it; their coarse version is averaged and scaled exactly as `coarse_from_sim` averages the state, and
+  stored with the run for the state it produced. The amplitudes cover §9.2 and go somewhat beyond it.
+- **Hand-over runs (smoke).** An explosion simulated for 0.8 to 3 s, its state set into a smoke simulation
+  (`set_state`) and recorded from there: the smoke model's training then contains explosion states.
+- **The coupled loss.** In `window_loss` (and its burn-in) the operations are applied to the model's state before
+  each step exactly as compose applies them (material, then the ceiling's v multiplier, then force and push), and the
+  push is taken out after the step. The gradient passes through the offsets unchanged, is scaled by the multipliers
+  and stops where heat or soot is clamped at zero (the finite-difference test covers it). As in compose, the state
+  is clamped to the training range inside the step, before the push is taken out.
+- **Fine-tuning from v1, not retraining.** v1 is loaded (frozen: never overwritten), its normalisation kept, and only
+  the stepper trained, with the recipe's last stage (windows of 16 frames, half after up to 48 frames of the model's
+  own rollout, 32 for explosions; the profile and activity losses) at a lower learning rate, on a mix: a window comes
+  from a coupled run (forced or hand-over) with probability `share`, otherwise from a plain run. Renderer, detail
+  constants and start points stay v1's, so only the stepper differs. The plain runs are v1's own training runs
+  (salt 1, the first 96 of fire and smoke and 144 of the explosion); the forced runs are new salt-1 runs (96 fire, 64
+  smoke plus 64 hand-overs, 144 explosion).
+- **Choices on validation only.** A 2 x 2 grid (share 0.5 and 0.8, learning rate 1e-4 and 3e-4; v1's last stage
+  used 7e-4), 400 iterations of 16 windows each, with a model saved every 100 iterations, is scored on validation:
+  salt-3 runs, study G's 10 validation settings, validation seeds and validation forcing seeds, with the measures of
+  §9.4. The chosen candidate, **v2c**, has the best coupled tracking (mean PSNR at 8 and 30 frames over the forced
+  cases, and for smoke the hand-over cases too) among the candidates that stay within guards against v1 on
+  validation: plain tracking (mean over 1, 8, 30 and 60 frames) at most 0.1 dB lower, spectrum distance at most 0.01
+  higher, mean |log motion ratio| at most 0.03 higher, coverage distance at most 0.005 higher and mean-frame PSNR at
+  most 0.3 dB lower (if none stays within them, the best coupled score is taken anyway, and the test decides). The
+  same fine-tuning with share 0 (plain runs only) at v2c's learning rate, stopped at v2c's checkpoint, is the control
+  **v2p**: it shows how much of any change comes from the couplings and how much from more training.
+
+### 9.4 Evaluation
+
+- **Forced tracking.** Study B's 10 held-out settings, two new seeds each, random couplings from held-out forcing
+  seeds (onsets in the first half second). The truth is the simulator with the couplings; the model starts from the
+  true state (coarse and fine, as stored) with the run's noise seed and gets the same couplings, through the
+  runtime's runner as compose drives it (the material also enters the fine fields). Active PSNR against the truth at
+  1, 8, 30 and 60 frames.
+- **Hand-over tracking (smoke).** Explosions of salt 2 handed to the smoke simulation after 0.8 to 3 s, at B's
+  settings with new seeds; the smoke model takes the true explosion state over as `compose::hand_over` does.
+- **No regression.** Plain tracking as study D's (salt-2 runs from their true states, here 16 runs, D's 8 and 8
+  more of the same kind), and the endless statistics exactly as study D's test (B's settings, D's seeds, shards):
+  spectrum distance, motion ratio (as |log ratio|), coverage distance and mean-frame PSNR.
+- **A diagnostic outside the rule:** the forced cases again without the couplings (same settings, seeds and start
+  states), which shows what the couplings cost each model.
+- **Intervals:** 95% paired bootstrap (10,000 resamples) over runs or settings, model minus v1.
+
+### 9.5 The rule (written before the test)
+
+v2c is kept for an effect when all of these hold on the test, which is run once:
+1. **Coupled tracking is better:** forced tracking is better than v1 at 8 and at 30 frames, both intervals above
+   zero. For smoke, either the forced or the hand-over tracking is better at 8 and 30 frames in this sense, and the
+   other is not worse at 8 or 30 frames (no interval entirely below zero).
+2. **Plain tracking is not worse:** at 1, 8, 30 and 60 frames no interval lies entirely below zero.
+3. **The endless statistics are not worse:** for spectrum distance, |log motion ratio|, coverage distance and
+   mean-frame PSNR, no interval lies entirely on the worse side.
+
+Otherwise v1 stays. Every effect is reported, nulls with their numbers.
+
+### 9.6 Validation and the choice
+
+| effect | v2c | coupled tracking at 8 and 30 frames (validation mean, v1) | within the guards |
+|---|---|---:|---|
+| fire | share 0.5, rate 1e-4, 300 iterations | 19.61 dB (19.59) | yes |
+| smoke | share 0.8, rate 3e-4, 200 iterations | 18.30 dB (18.02) | yes |
+| explosion | share 0.8, rate 3e-4, 200 iterations | 20.99 dB (20.55) | no: none of the 16 was (14 raised the spectrum distance by more than 0.01, 5 lowered plain tracking by more than 0.1 dB); the best coupled score was taken, and its spectrum distance was 0.029 higher than v1's on validation |
+
+On fire every candidate was within 0.06 dB of v1 at 8 and 30 frames; the candidates differed only at 60 frames (up
+to +0.6 dB). Each candidate took 10 to 25 minutes on one shared thread (the controls 5 to 12). Files: `results/experiments/i_train.csv`,
+`i_val_track.csv`, `i_val_stats.csv`, `i_val_choice.csv`.
+
+### 9.7 Results (the test, run once)
+
+Active PSNR against the simulator, mean over cases (forced: 20 per effect; hand-over: 20; plain: 16), at 1, 8, 30 and
+60 frames:
+
+| effect | test | v1 | v2c | v2p (plain control) |
+|---|---|---|---|---|
+| fire | forced | 27.28 / 20.47 / 17.20 / 16.44 | 27.30 / 20.41 / 17.60 / 16.79 | 27.30 / 20.44 / 17.20 / 16.43 |
+| fire | plain | 25.15 / 20.04 / 17.43 / 17.43 | 25.14 / 20.05 / 17.36 / 17.43 | 25.16 / 20.00 / 17.37 / 17.36 |
+| smoke | forced | 27.73 / 21.50 / 18.55 / 16.69 | 27.63 / 21.51 / 18.47 / 16.79 | 27.68 / 21.39 / 18.35 / 16.44 |
+| smoke | hand-over | 20.44 / 17.89 / 14.64 / 14.47 | 20.45 / 18.18 / 14.95 / 14.72 | 20.43 / 17.83 / 14.39 / 14.24 |
+| smoke | plain | 26.98 / 20.78 / 17.26 / 15.59 | 26.89 / 20.81 / 17.26 / 15.49 | 26.95 / 20.69 / 17.10 / 15.54 |
+| explosion | forced | 22.30 / 21.15 / 19.62 / 22.98 | 22.30 / 21.54 / 20.17 / 23.27 | 22.35 / 20.82 / 19.18 / 22.76 |
+| explosion | plain | 21.42 / 20.78 / 18.75 / 17.85 | 21.41 / 21.16 / 19.23 / 18.16 | 21.55 / 20.63 / 18.40 / 17.63 |
+
+v2c minus v1, paired, with 95% intervals (dB for tracking; endless statistics oriented so that positive is better):
+
+| effect | coupled tracking, 8 frames | 30 frames | plain tracking, worst of 1-60 frames | endless statistics | decision |
+|---|---|---|---|---|---|
+| fire | forced −0.06 [−0.19, +0.02] (tie) | forced +0.39 [−0.03, +0.96] (tie) | 30 frames: −0.07 [−0.22, +0.11] (tie) | all four tie (mean-frame PSNR −0.28 [−0.67, +0.10]) | **v1 stays** (rule 1 fails) |
+| smoke | hand-over +0.29 [+0.18, +0.44]; forced +0.01 [−0.05, +0.07] | hand-over +0.31 [+0.12, +0.53]; forced −0.08 [−0.20, +0.05] | **1 frame: −0.09 [−0.14, −0.05]** | three tie; mean-frame PSNR +0.27 [+0.04, +0.50] | **v1 stays** (rule 2 fails) |
+| explosion | forced +0.39 [+0.18, +0.62] | forced +0.55 [+0.34, +0.77] | 1 frame: −0.02 [−0.04, +0.01] (tie); better at 4 to 60 frames (+0.14 to +0.52) | spectrum distance 0.200 → 0.213, −0.014 [−0.029, +0.0003] (a tie, only just); motion ties; coverage +0.0014 [+0.0003, +0.0025]; mean-frame PSNR +0.24 [+0.01, +0.56] | **v2c kept** |
+
+Outside the rule:
+- **Fire's gain shows only later.** Forced tracking at 60 frames: +0.35 [+0.05, +0.74]. Without the couplings the
+  same runs give +0.02 [−0.09, +0.13], so this part is specific to couplings. Plain tracking at 120 frames is
+  −0.21 [−0.36, −0.07] (240 frames: a tie).
+- **Smoke's gain is the hand-over**, from 8 frames to 2 s (+0.26 [+0.06, +0.45] at 60 frames). Its loss at 1 frame
+  (−0.09 to −0.10 dB) is the same in plain, forced and unforced runs: the fine-tuned stepper's first step from a
+  true state is slightly worse.
+- **The explosion's gain is mostly general.** Without the couplings its tracking improves by +0.39 at 8 frames and
+  +0.30 at 30, against +0.39 and +0.55 with them.
+- **The plain controls (v2p) are worse than v1** on smoke and explosions in nearly every tracking measure (smoke
+  forced at 30 frames −0.20 [−0.30, −0.10], hand-over −0.25 [−0.34, −0.17]; explosion forced at 30 frames −0.44
+  [−0.66, −0.22]), and tie or lose a little on fire. So v2c's gains come from the coupled runs, not from more
+  training at a lower rate.
+- **The couplings themselves cost v1 little in this measure.** On the same runs with and without the couplings,
+  v1's fire loses 0.30 dB at 30 frames and 0.81 dB at 60 frames; smoke and explosion runs with couplings are easier
+  to track than without (material removed and whole-cloud flows leave less to get wrong), so this comparison
+  cannot isolate what the couplings cost them.
+- **Reproduction:** v1's endless statistics equal study D's published ones for fire and explosions (same seeds); for
+  smoke four settings differ by at most 0.002 in spectrum distance and 0.007 dB, probably float order from the
+  runtime's rewrite after study D's run (§7.1). The tracking path (the runtime's runner as compose drives it) gives
+  the same bytes as study D's path through the C API (checked on a validation run, 60 frames, 0 differing bytes).
+
+Files: `results/experiments/i_test_track.csv`, `i_test_stats.csv`, `i_test_compare.csv` (every paired difference),
+`i_decisions.csv`.
+
+### 9.8 The fireball with v2c
+
+Only the explosion passed, so the scene was rendered with v2c's explosion and v1's fire and smoke (`nvfx_fireball
+--models DIR`, the data root's `i/fireball_v2c.mp4`), and with v1 by the same build (its keyframes have the
+checksums of `v1_frozen.csv`). What the explosion model feels in the scene is the ceiling, the second cloud's transfer
+and the tile bands, then its state is handed to the smoke model at 3.6 s:
+- The keyframe before the detonation (0.9 s) is identical. After it, v2c's keyframes differ from v1's by 47 dB PSNR
+  at 1.27 s, 35 dB at 1.5 s and 31 to 33 dB from 2 s to 8.2 s (whole frame).
+- By eye the scene is the same: the fireball, the cap under the ceiling, the second cloud and the smoke column have
+  the same shapes and sizes; edges and swirls sit in slightly different places, and after the hand-over the cap of
+  the smoke column spreads a little differently. No new artefact was seen, and no difference in quality can be
+  claimed from the pictures.
+
+The comparison sheets (v1 above or left, v2c below or right) are in the data root's `i/` (`fireball_v1_v2c_sheet.png`,
+`fireball_v1_v2c_side.png`, `fireball_v1_v2c_pairs.png`); they are not in git.
+
+### 9.9 What it means
+
+- **Training with couplings helped two models in what was measured**: the smoke model continuing an explosion (+0.3
+  dB from 8 frames to 2 s), and the explosion (+0.4 to +0.55 dB under couplings; +0.3 to +0.4 dB without them, so
+  the coupled runs made it better in general). Fire tied at 8 and 30 frames and gained only at 2 s. One possible
+  reason (not tested) is that what fire meets, pushes and removal through the top, acts mostly through the
+  built-in advection and projection, which v1 already has.
+- **The gains come from the coupled runs:** the same fine-tuning on plain runs only (v2p) made smoke and explosions
+  worse.
+- **The rule was strict and two of three effects fail it**: fire on the coupled tracking, smoke on 0.09 dB at the
+  first frame of plain tracking. The explosion passes, with its detail spectrum distance a tie by 0.0003.
+- **The price is small**: the files have the same size and format (only the stepper's weights change, by 1 to 2.5%
+  of their norm), and the cost per frame is unchanged.
+- **What might help next** (untested): more windows that contain couplings (about half the 16-frame windows of a
+  fire or smoke forced run contain one, three quarters for explosions, so at share 0.5 only a quarter of all
+  windows do), and a look at smoke's first step; then a new test with new seeds.

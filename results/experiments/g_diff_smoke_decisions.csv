@@ -1,0 +1,4 @@
+phase,use,comparison,mean,lo,hi,cost_ms,cost_bound_ms,timing,rule,decision
+validate,G2b,prior_n16_t100_b0.25 - none,1.5775,-0.2556,4.3587,0.250,0.5,busy,best: interval below zero and cost within bound,stop
+validate,G2b,prior_n16_t100_b0.25 - shards,2.4675,0.3839,5.2858,0.250,,busy,reference only,
+validate,G2b,none - shards,0.8901,0.1497,1.9251,,,busy,reference only,

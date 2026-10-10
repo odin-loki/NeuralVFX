@@ -56,6 +56,10 @@ Plan and decisions: [PLAN.md](PLAN.md).
   zero, within 1 ms per 128² frame): on held-out settings (study B, against a 45 times larger flipbook library) and on
   held-out frames against a BC3 flipbook with four times the memory (study A; motion-vector flipbooks still win
   there). Every study A model is within 1 ms in the later session (grid_m 0.78 ms); in the first, grid_m was 6% over.
+- **Later studies (§12):** the owner's diffusion-context mixer survives in one use, a prior against drift that lets
+  fire play one continuous run; its fine-detail mixer fails twice. Computing on compressed data is slower than dense
+  code here, but LZ tokens and lighter models make the coder decode 4 to 38 times faster. Training with couplings
+  improves the explosion inside scenes. The composed fireball runs at 42 frames per second at 720p on 4 threads.
 - **Not done:** owner footage (none supplied), a BC7 baseline, int8 kernels, an engine plugin (§9, §10).
 
 ## 2. How it was measured
@@ -641,3 +645,50 @@ the D steps to some effects.
 
 Clips are deterministic, so the data regenerates identically; training uses fixed seeds, but thread scheduling makes
 the last digits of trained weights, and so of the scores, vary slightly between runs.
+
+## 12. Later studies: G, H, I, and v2
+
+These came after the report's main studies, each with its own rules fixed before its test. The full write-ups are
+in [DCM.md](DCM.md) (study G and its stages, study H, v2) and [COMPOSE.md](COMPOSE.md) (composed effects, scripts,
+study I).
+
+**Study G: the owner's diffusion-context mixer (DCM), adapted to generating effects.** The PAQ8-style mixer, its
+frozen copy and its nested structure search were ported from CameraDetector bit-identically; a small denoiser was
+written by hand.
+- *DCM-fine* (the mixer makes the fine detail): it halves the detail spectrum distance on every effect, but smoke moves
+  too little and its average picture is 0.05 dB further, so it fails its rule. A retry without the expert that caused
+  it fails again, by 0.2% of motion and 0.01 dB on smoke; fire and explosions found no admissible generator.
+- *Diffusion contexts* for the mixer help its bits (-0.046 bits per pixel against hand-made contexts) but not beyond
+  the search's own seed noise (0.069), so they stop. Unlike CameraDetector's, they do help.
+- *A prior against drift*: a one-step denoise every 16 frames lets fire play one continuous run without drifting
+  (test: detail score -5.28 [-9.01, -2.05] against no prior). It ties the 6 s shards on every statistic, so it buys
+  continuity, not better pictures. Smoke ties; it is not kept there.
+- *Denoiser start points*: a tie with the stored ones, stopped.
+- *A codec from the learned dynamics* (an authored run stored as coarse corrections over the stepper): 50 bytes to
+  about 2.5 KB per run, fewer bytes than every video codec and flipbook below about 18 dB active PSNR (22 dB for
+  explosions); above about 20 to 26 dB, AV1, H.265 and H.264 in 4:4:4 need 1.5 to 7 times fewer bytes. A frame model
+  plus a coded residual loses to video at every quality.
+
+**Study H: computing on compressed data** (the owner's addition).
+- Products computed on LZ78- or RePair-compressed feature volumes and weights are 3 to 23 times slower than the dense
+  AVX2 code: these numbers barely repeat, and where zeros make compressed products win, plain sparse rows win by more.
+- LZ tokens and lighter literal models inside the lossless coder decode **4 to 9 times faster for 2 to 4% more disk**,
+  or 18 to 38 times faster for 10 to 23% more, and a single tensor or start point decodes alone.
+- Skipping the empty spans of the fine fields keeps every frame bit-exact and saves 6.4% [4.2, 8.7] of the model step
+  in the fireball; the whole frame's saving (-1.6% [-3.6, +0.3]) is a tie so far.
+
+**Study I: training with couplings.** The simulator gained pushes and material transfers, so coupled runs have a
+ground truth. Fine-tuning the steppers on forced and hand-over runs made the explosion follow forced runs better
+(+0.39 dB [+0.18, +0.62] at 8 frames, +0.55 dB [+0.34, +0.77] at 30) without making its plain play worse; fire tied,
+and smoke lost 0.09 dB on its first plain frame. A control fine-tuned on plain runs only was worse, so the gain comes
+from the couplings.
+
+**v2 rollout effects** hold every part that passed its rule: fire with 6-bit start states (half the disk), the
+explosion with the coupled stepper, smoke unchanged, and fire's prior against drift as a runtime option. Putting the
+6-bit start states on the coupled explosion as well failed the start-state rule by a hair, so the explosion keeps
+16-bit ones. In the fireball, v2 and v1 give the same scene: frames differ by 31 to 35 dB after the detonation, as two
+runs of a chaotic effect must, and neither looks better.
+
+**Composed effects.** The fireball (16 coupled modules, particles, light, distortion, bloom) runs at 24 ms per frame at
+1280 x 720 on 4 threads after one optimisation round, 5.9 times faster than first written (same session). Scenes are
+written as text scripts; the scripted fireball reproduces the hand-written one to the bit.

@@ -1,0 +1,2 @@
+effect,spectrum,spectrum_lo,spectrum_hi,abs_log_motion,abs_log_motion_lo,abs_log_motion_hi,coverage,coverage_lo,coverage_hi,psnr,psnr_lo,psnr_hi,cost_ms,decision
+smoke,-0.0072,-0.0095,-0.0047,0.0019,0.0003,0.0032,0.0000,0.0000,0.0000,-0.0119,-0.0192,-0.0065,0.926,fail

@@ -73,11 +73,24 @@ enum Context : int {
   kMacro8,   // the same with K = 8
   kExtra,    // a hook for later macro contexts (stage S5: clusters of a denoiser's features, macro_ddpm): a per coarse
              // cell value in [0, Spec::extra_size) supplied by a callback (CellContext); 0 everywhere until then
+  // Region contexts of design G2a (docs/DCM.md G2.10): the cluster id of the pixel's 16 x 16 pixel region (one of the
+  // 8 x 8 regions of dcm::ddpm::context_planes) at K = 4, 8, 16, from the denoiser's features (diff) or from the plain
+  // coarse statistics (plain, the floor). They are not computed from a Row: contexts_of leaves them 0 and the caller
+  // fills them (nvfx_dcm region-contexts writes them per recorded frame). There is no generation path for them yet:
+  // detail_step refuses a mixer that uses one.
+  kDiff4,
+  kDiff8,
+  kDiff16,
+  kPlain4,
+  kPlain8,
+  kPlain16,
   kContexts
 };
+inline constexpr int kRegionContexts = 6;  // kDiff4 .. kPlain16
+[[nodiscard]] constexpr bool region_context(int c) { return c >= kDiff4 && c < kDiff4 + kRegionContexts; }
 [[nodiscard]] std::string_view context_name(int c);
-// Context families compared by the search (docs/DCM.md G1).
-enum class Family { none, hand, hand_macro };
+// Context families compared by the search (docs/DCM.md G1; hand_diff and hand_plain: G2a, G2.10).
+enum class Family { none, hand, hand_macro, hand_diff, hand_plain };
 [[nodiscard]] std::string_view family_name(Family f);
 [[nodiscard]] std::vector<int> family_contexts(Family f, bool one_shot);
 

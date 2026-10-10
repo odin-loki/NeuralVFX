@@ -13,7 +13,14 @@
 //   nvfx_dcm train-fine --effect E      own-rollout pass, tau and relock on validation settings, re-ranking, release
 //   nvfx_dcm eval-fine --effect E       G1c and the test (once), v1 against DCM-fine through the reference
 //   nvfx_dcm bench-experts --effect E   microseconds per pixel of each expert group, context and the mixer
-//   nvfx_dcm fine-summary               paired-bootstrap tables of the CSVs
+//   nvfx_dcm fine-summary               paired-bootstrap tables of the CSVs (with --prefix P --rule-selection: the G1 retry's)
+// Round 2 (docs/DCM.md §6.10, G2.10): --prefix P writes results/P_*.csv; --drop-groups prev keeps the search to advected
+// experts; --rule-selection selects on validation by the per-effect rule and tests only what passed; --test-base B and
+// --track-first K set fresh test seeds (real runs B + i, floor B + 10000 + i, shards B + 20000 + i; tracking salt-2 runs
+// K to K + 7); --regions DIR adds G2a's region contexts (families hand+diff and hand+plain).
+//   nvfx_dcm region-contexts --effect fire --regions DIR [--denoiser F] [--states F]
+//                                       G2a: denoiser and plain clusters (K = 4, 8, 16) of every recorded frame's regions
+//   nvfx_dcm ctx-summary --prefix g_ctx G2a's decision from the three-seed searches of hand, hand+diff and hand+plain
 // The coarse-state denoiser (include/neuralfx/dcm/ddpm.hpp, study G stage S5; data under NEURALVFX_DATA/g/diff):
 //   nvfx_dcm ddpm-train [--effect fire] [--steps 12000] [--batch 32] [--threads 2] ...
 //                         records the training runs (salt 1) and validation runs (salt 3) once, as study D's d-train
@@ -54,6 +61,7 @@
 #include <sched.h>
 #include <sstream>
 #include <string>
+#include <time.h>
 
 using namespace nfx;
 
@@ -262,7 +270,12 @@ int ddpm_train(const tools::Args& a) {
   o.log_every = a.i("log-every", 500);
   o.eval_count = eval.count;
   const fs::path curve_csv = a.str("curve", "results/experiments/g_diff_train.csv");
-  std::vector<std::string> rows;
+  // A container restart must not lose the run: the training state is kept beside the denoiser at every log and the run
+  // resumes from it (bit-identical, ddpm::TrainOptions::state_path); the loss curve is kept beside it too.
+  o.state_path = p.denoiser.string() + ".state";
+  const fs::path curve_side = p.denoiser.string() + ".curve";
+  if (!fs::exists(o.state_path)) fs::remove(curve_side);
+  if (fs::exists(o.state_path)) std::println("resuming from {}", o.state_path.string());
   o.progress = [&](const dd::TrainLog& l, const dd::Denoiser& ema) {
     std::print("step {:6d}  loss {:.4f}  lr {:.2e}  {:.3f} s/step", l.step, l.loss, l.lr, l.seconds / l.step);
     for (std::size_t k = 0; k < l.eval.size(); ++k) std::print("  t={} {:.4f}", o.eval_t[k], l.eval[k]);
@@ -270,7 +283,7 @@ int ddpm_train(const tools::Args& a) {
     std::fflush(stdout);
     std::string row = std::format("{},{},{:.5f},{:.3e},{:.1f}", p.name, l.step, l.loss, l.lr, l.seconds);
     for (const double v : l.eval) row += std::format(",{:.5f}", v);
-    rows.push_back(row);
+    std::ofstream(curve_side, std::ios::app) << row << "\n";
     if (auto w = dd::save(fs::path(p.denoiser.string() + ".ckpt"), ema); !w) std::println(stderr, "checkpoint: {}", w.error());
   };
   std::println("denoiser: {} parameters, {:.1f} M multiply-adds per pass; {} steps of batch {} on {} threads", d.parameters(),
@@ -284,7 +297,8 @@ int ddpm_train(const tools::Args& a) {
     csv << "effect,step,train_loss,lr,seconds";
     for (const int t : o.eval_t) csv << ",val_loss_t" << t;
     csv << "\n";
-    for (const auto& r : rows) csv << r << "\n";
+    std::ifstream side(curve_side);
+    for (std::string r; std::getline(side, r);) csv << r << "\n";
   }
   return 0;
 }
@@ -356,17 +370,26 @@ int ddpm_time(const tools::Args& a) {
   dd::gaussian(5, x);
   const std::vector<float> cond(static_cast<std::size_t>(d.cfg.cond), 0.5f);
   for (int i = 0; i < 10; ++i) dd::predict_eps(d, x, 50, cond, eps);
-  std::vector<double> ms;
+  std::vector<double> ms, cpu;
+  const auto thread_ms = [] {
+    timespec ts{};
+    clock_gettime(CLOCK_THREAD_CPUTIME_ID, &ts);
+    return static_cast<double>(ts.tv_sec) * 1e3 + static_cast<double>(ts.tv_nsec) * 1e-6;
+  };
   for (int i = 0; i < a.i("n", 200); ++i) {
     const auto t0 = std::chrono::steady_clock::now();
+    const double c0 = thread_ms();
     dd::predict_eps(d, x, 50, cond, eps);
+    cpu.push_back(thread_ms() - c0);
     ms.push_back(std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count());
   }
   std::ranges::sort(ms);
+  std::ranges::sort(cpu);
   const double after = load();
-  std::println("one pass: median {:.3f} ms, p90 {:.3f} ms ({:.1f} M multiply-adds, {:.1f} GMAC/s); load {:.2f} before, {:.2f} after: {}", ms[ms.size() / 2],
-               ms[ms.size() * 9 / 10], dd::forward_macs(d.cfg) / 1e6, dd::forward_macs(d.cfg) / ms[ms.size() / 2] / 1e6, before, after,
-               before < 1.5 && after < 1.5 ? "quiet, measured" : "busy, an upper bound (unmeasured by the rules)");
+  std::println("one pass: median {:.3f} ms, p90 {:.3f} ms ({:.1f} M multiply-adds, {:.1f} GMAC/s); thread CPU time: least {:.3f} ms, median {:.3f} ms; "
+               "load {:.2f} before, {:.2f} after: {}",
+               ms[ms.size() / 2], ms[ms.size() * 9 / 10], dd::forward_macs(d.cfg) / 1e6, dd::forward_macs(d.cfg) / ms[ms.size() / 2] / 1e6, cpu.front(),
+               cpu[cpu.size() / 2], before, after, before < 1.5 && after < 1.5 ? "quiet, measured" : "busy, an upper bound (unmeasured by the rules)");
   return 0;
 }
 
@@ -493,7 +516,7 @@ int contexts(const tools::Args& a) {
 }  // namespace
 
 int main(int argc, char** argv) try {
-  const tools::Args a(argc, argv, {"help", "quick", "pilot", "no-csv"});
+  const tools::Args a(argc, argv, {"help", "quick", "pilot", "no-csv", "rule-selection"});
   const auto& pos = a.positional();
   if (a.flag("help") || pos.empty()) {
     std::println("nvfx_dcm selftest [--threads 2] [--seed 5] | version FILE | record|experts|search-fine [--pilot]|train-fine|eval-fine|"
@@ -522,6 +545,16 @@ int main(int argc, char** argv) try {
     c.refine = a.i("refine", 2);
     c.max_rows = a.i("max-rows", 0);
     c.budget_ms = a.f("budget", 1.f);
+    c.prefix = a.str("prefix", "g_fine");
+    for (std::string g = a.str("drop-groups"); !g.empty();) {
+      const auto k = g.find(',');
+      c.drop_groups.push_back(g.substr(0, k));
+      g = k == std::string::npos ? "" : g.substr(k + 1);
+    }
+    c.rule_selection = a.flag("rule-selection");
+    c.test_base = a.u64("test-base", 900000);
+    c.track_first = a.i("track-first", 0);
+    if (a.has("regions")) c.regions = a.str("regions");
     return c;
   };
   const auto effect = [&] {
@@ -552,7 +585,22 @@ int main(int argc, char** argv) try {
   } else if (pos[0] == "probe-gen") {
     fine_study::probe(fine_ctx(), effect(), a.str("mixer"), a.f("tau", 0.f), a.i("relock", 0), a.i("frames", 90));
   } else if (pos[0] == "fine-summary") {
-    fine_study::summary(fine_ctx());
+    const fine_study::Ctx c = fine_ctx();
+    if (c.rule_selection) {
+      fine_study::summary_retry(c);
+    } else {
+      fine_study::summary(c);
+    }
+  } else if (pos[0] == "region-contexts") {
+    const fine_study::Ctx c = fine_ctx();
+    const sim::Effect e = effect();
+    if (c.regions.empty()) throw std::invalid_argument("region-contexts needs --regions DIR");
+    const std::string name(sim::effect_name(e));
+    rc = 0;
+    fine_study::region_contexts(c, e, a.str("denoiser", (data_root() / "g" / "diff" / (name + ".ddpm")).string()),
+                                a.str("states", (data_root() / "g" / "diff" / (name + "_train.states")).string()));
+  } else if (pos[0] == "ctx-summary") {
+    fine_study::context_summary(fine_ctx());
   } else if (pos[0] == "ddpm-train") {
     rc = ddpm_train(a);
   } else if (pos[0] == "ddpm-sample") {
