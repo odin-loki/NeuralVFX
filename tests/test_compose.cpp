@@ -5,6 +5,7 @@
 #include <gtest/gtest.h>
 
 #include <atomic>
+#include <cstring>
 #include <numeric>
 
 namespace {
@@ -236,3 +237,121 @@ TEST(Compose, ScenesRenderTheSameOnAnyNumberOfThreads) {
 }
 
 }  // namespace
+
+// --- study H (H2): skipping the empty parts of the fine fields changes nothing ----------------------------------------
+
+namespace {
+
+// A rollout effect whose material sits in a small blob of an otherwise empty grid, with a strong wind and swirl, so
+// that material moves several pixels per step and most of every row is empty.
+rt::RolloutEffect sparse_effect(int res, std::uint64_t seed) {
+  rollout::Hyper h;
+  h.res = res;
+  h.hidden = 8;
+  h.memory = 2;
+  h.jacobi = 10;
+  h.render_hidden = 6;
+  h.warmup = 2;
+  h.start_fine = 2 * res;
+  rt::RolloutEffect e;
+  e.m = rollout::init_model(h, seed);
+  // no learned change to the state: the blob is only carried by the wind and swirl (and the lock keeps it together)
+  std::ranges::fill(e.m.step_w, 0.f);
+  e.m.effect = "sparse";
+  e.m.control_names = {"intensity", "wind", "turbulence"};
+  e.m.scale = {0.2f, 0.2f, 0.4f, 0.3f};
+  e.m.lo = {-3.f, -3.f, 0.f, 0.f};
+  e.m.hi = {3.f, 3.f, 3.f, 3.f};
+  e.m.detail.swirl_control = 2;
+  e.m.detail.swirl = 1.5f;
+  for (int k = 0; k < 2; ++k) {
+    rollout::StartPoint sp;
+    sp.controls = {0.6f, 0.5f, 0.9f};
+    sp.seed = 20 + static_cast<std::uint64_t>(k);
+    sp.coarse.assign(static_cast<std::size_t>(res) * static_cast<std::size_t>(res) * rollout::kPhys, 0.f);
+    for (int y = 0; y < res; ++y) {
+      for (int x = 0; x < res; ++x) {
+        float* c = sp.coarse.data() + (static_cast<std::size_t>(y) * static_cast<std::size_t>(res) + static_cast<std::size_t>(x)) * rollout::kPhys;
+        c[0] = 1.2f + 0.3f * std::sin(0.5f * static_cast<float>(y));  // wind to the right, about a cell per step
+        c[1] = 0.6f * std::cos(0.4f * static_cast<float>(x + k));
+        const float d = std::hypot(static_cast<float>(x - 3 - k), static_cast<float>(y - res / 2));
+        c[2] = std::max(0.f, 1.5f - 0.6f * d);
+        c[3] = std::max(0.f, 0.9f - 0.5f * d);
+      }
+    }
+    if (k == 1) {  // a start with fine fields: a blob too
+      const int F = h.start_fine;
+      for (int i = 0; i < F * F; ++i) {
+        const float d = std::hypot(static_cast<float>(i % F - F / 4), static_cast<float>(i / F - F / 2));
+        sp.fine_t.push_back(std::max(0.f, 0.8f - 0.2f * d));
+        sp.fine_d.push_back(std::max(0.f, 0.5f - 0.15f * d));
+      }
+    }
+    e.m.starts.push_back(sp);
+  }
+  rollout::quantise_like_storage(e.m);
+  return e;
+}
+
+bool same_bits(std::span<const float> a, std::span<const float> b) {
+  return a.size() == b.size() && std::memcmp(a.data(), b.data(), a.size() * sizeof(float)) == 0;
+}
+
+}  // namespace
+
+TEST(Compose, SkippingEmptyFieldsIsBitExact) {
+  std::vector<Isa> isas{Isa::base};
+#if defined(__x86_64__)
+  if (__builtin_cpu_supports("avx2") && __builtin_cpu_supports("fma")) isas.push_back(Isa::avx2);
+  if (__builtin_cpu_supports("avx512f")) isas.push_back(Isa::avx512);
+#endif
+  int skipped_rows = 0;
+  for (const auto& [res, size] : {std::pair{12, 36}, std::pair{12, 60}, std::pair{16, 64}, std::pair{16, 16}}) {
+    const rt::RolloutEffect e = sparse_effect(res, 5);
+    const rt::RolloutEffect dense = tiny_effect();  // fields that fill the tile: nothing to skip
+    for (const rt::RolloutEffect* fx : {&e, &dense}) {
+      if (fx == &dense && size % 16 != 0) continue;
+      for (const Isa isa : isas) {
+        for (const int start : {0, 1}) {
+          auto a = make_runner(*fx, size, isa), b = make_runner(*fx, size, isa);
+          b->skip_empty(false);
+          const auto& controls = fx->m.starts[z(start)].controls;
+          a->start(start, controls, 7);
+          b->start(start, controls, 7);
+          std::vector<std::uint8_t> ra(z(size) * z(size) * 4), rb(ra.size());
+          for (int f = 0; f < 24; ++f) {
+            if (f == 9 || f == 17) {  // written from outside between steps, as couplings do: a band cleared, a spot added
+              for (rt::RolloutRunner* r : {a.get(), b.get()}) {
+                auto ft = r->fine_heat_mut();
+                auto fd = r->fine_soot_mut();
+                for (int y = 0; y < size; ++y) {
+                  for (int x = 0; x < size; ++x) {
+                    const std::size_t i = z(y) * z(size) + z(x);
+                    if (y < size / 3) ft[i] = fd[i] = 0.f;
+                    if (std::abs(x - size + 4) < 3 && std::abs(y - 5) < 3) ft[i] += 0.7f;
+                  }
+                }
+              }
+            }
+            a->step(controls, 7);
+            b->step(controls, 7);
+            ASSERT_TRUE(same_bits(a->fine_heat(), b->fine_heat())) << isa_name(isa) << " size " << size << " start " << start << " frame " << f;
+            ASSERT_TRUE(same_bits(a->fine_soot(), b->fine_soot())) << isa_name(isa) << " size " << size << " start " << start << " frame " << f;
+            ASSERT_TRUE(same_bits(a->coarse(), b->coarse()));
+            a->render(rt::FrameInput{}, ra.data(), z(size) * 4);
+            b->render(rt::FrameInput{}, rb.data(), z(size) * 4);
+            ASSERT_EQ(ra, rb) << isa_name(isa) << " size " << size << " start " << start << " frame " << f;
+            if (fx == &e) {  // the sparse effect really has empty rows to skip
+              for (int y = 0; y < size; ++y) {
+                bool any = false;
+                for (int x = 0; x < size; ++x) any |= a->fine_heat()[z(y) * z(size) + z(x)] != 0.f;
+                skipped_rows += any ? 0 : 1;
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+  EXPECT_GT(skipped_rows, 100);
+}
