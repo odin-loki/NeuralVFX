@@ -525,7 +525,8 @@ test. Diffusion start points (G2c) are stopped. The diffusion contexts (G2a) are
 their decision waits for stage S2's nested search, which is not on main yet. Smoke and explosion are not started: that
 is a later decision. Rules in G2.3 were fixed before any result; results are in G2.4 to G2.9. **Round 2** (10 October
 2026): G2a is decided in the nested search and stops (G2.10); G2b is stopped on smoke and skipped for explosions
-(G2.11); decisions in G2.12.
+(G2.11); decisions in G2.12. **Runtime** (10 October 2026): fire's prior plays in the runtime, so a rollout effect can
+run one continuous rollout instead of 6 s shards (G2.13).
 
 ### G2.1 The denoiser
 
@@ -939,6 +940,100 @@ which ties the runtime's shards and buys continuity for 0.4 ms per frame and 1.5
 closer than CameraDetector's ever did (they help the mixer's bits on every comparison) but not by more than the
 search's own randomness, and what they help is the predicted uncertainty, which generation at tau = 0 does not use.
 The smoke prior is stopped: it rescues one setting and not the other.
+
+### G2.13 In the runtime (stage S6a)
+
+Status: **done** (10 October 2026). The one diffusion use that survived, fire's prior against drift (G2.6: every
+N = 16 frames, Tweedie's one-step denoise at t = 100, beta = 1), is in the runtime, so a rollout effect can play one
+continuous rollout instead of 6 s shards.
+
+- **API** (`include/neuralfx/nvfx.h`, [ENGINES.md](ENGINES.md) §5). `nvfx_effect_attach_prior(effect, "fire.ddpm")` (or
+  `nvfx_effect_attach_prior_memory`) attaches the denoiser to a loaded rollout effect, once, before instances are made.
+  `nvfx_instance_set_prior(instance, every_frames, t, beta)` sets it per instance (default 16, 100, 1 once a prior is
+  attached; 0 frames turns it off). It acts only while the instance plays one continuous rollout
+  (`nvfx_instance_set_drift(instance, 0)`, or a one-shot effect), after every N-th frame counted from the end of the
+  start point's warm-up and before that frame is drawn: where `long_run` (`tools/experiment_g.cpp`) applied it. With
+  shards it does nothing. The `.nvfx` file is unchanged: the prior is a separate, optional file of 1.57 MB, about 19
+  times the 82 KB fire effect it serves.
+- **Code.** `src/runtime/rt_prior.hpp` and `rt_prior.cpp` (the `.ddpm` reader and the schedule), `rt_prior_impl.hpp`
+  compiled per ISA (`rt_prior_base.cpp`, `rt_prior_avx2.cpp`, `rt_prior_avx512.cpp`), and hooks in `nvfx.cpp`. The
+  runtime reads the `.ddpm` format itself and links no training library (a test holds its weight layout to
+  `dcm::ddpm::layout`); the forward pass is written again for inference only. Weights are held once per effect (1.57 MB
+  as floats, counted in `info.resident_bytes`); an instance's buffers (1.10 MB) are allocated with it, and a pass
+  allocates nothing (`nvfx_alloc_test` plays a continuous instance with the prior every 4 frames, with a replay, at 64
+  and 128 px, and counts aligned allocations too). Composed scenes (`src/compose`) drive the runners directly and do
+  not use it.
+- **The same floats as the reference.** Every value is computed by `dcm::ddpm`'s operations in its order (the bias,
+  then tap by tap and input channel by input channel; FiLM, SiLU and the residual as there), and under contraction
+  with FMA (AVX2, AVX-512) the multiply-adds fuse where the reference's do. That needs the reference's kernel *shape*,
+  not only its order: GCC's generic tuning (`--param avoid-fma-max-bits=256`) leaves some loop-carried multiply-add
+  chains unfused, depending on how many chains a loop carries. A blocking of three cells at a time was about 15%
+  faster but left the single-cell remainders unfused and lost the bits on AVX2, so it was dropped. What differs is
+  bookkeeping: FiLM and the skips in place (the reference keeps every intermediate for its backward pass), padded
+  buffers written inside, and storage aligned to 64 bytes (with `std::vector`'s 16 bytes every other weight load split
+  a cache line: 3.8 against 3.0 ms per pass).
+
+Parity (`tests/test_runtime_prior.cpp`, `nvfx_prior parity`). Study G's test run is study B's held-out setting 1
+(0.312 / 0.882 / 0.737, model seed 2,970,000) or 2 (0.098 / 0.445 / 0.381, seed 2,970,001), the start point nearest the
+controls, 128 px, 60 s: 1,800 frames and 112 passes.
+
+| check | AVX2 (the default) | AVX-512 | baseline (SSE2, no FMA) |
+|---|---|---|---|
+| prior step and predicted noise against `dcm::ddpm::prior_step` and `predict_eps` on random networks (two shapes, t = 1 to 400, beta = 0.25 to 1) | bit for bit | bit for bit | within 7.7e-7 network units |
+| the runtime's prior step on the runtime's own state against the reference's prior step on that state, `fire.ddpm` (version 1152045d...), every pass of the test run, settings 1 and 2 | bit for bit (0 of 4,096 values differ at each of 112 passes) | bit for bit (112 of 112 passes) | within 1.4e-6 (every pass differs) |
+| `nvfx_render` against the runner and the prior driven by hand | the same pixels on every checked frame (every 16th, 60 s) | the same | the same |
+| the runtime's continuous rollout with the prior against the reference's (`rollout::step`, then `prior_step` as `long_run`), the whole 60 s | within 3.7e-5 network units (coarse state), at most 1 level of 255 (pixels) | the same | within 3.8e-5, at most 1 level |
+
+The tests hold the baseline to 1e-5 network units per step, and the rollouts to 1e-4 network units and 2 levels over
+the first 96 frames (6 passes) on every ISA; the fire tests are skipped when study G's data is absent.
+
+- **The prior keeps the two implementations together.** The runtime's stepper is not bit-exact with the reference's
+  (it runs in another order; `tests/test_rollout.cpp` allows 3 levels). Without the prior, their two runs of the test
+  run stay within 1e-4 network units for 31 to 45 s (to frame 944 to 1,376, by setting and ISA) and then part: more
+  than 1e-3 apart from frame 1,392 to 1,440, and up to 28 to 49 levels of 255 apart in the last 15 s on AVX2 (173 on
+  the baseline). With the prior they stay within 3.8e-5 and 1 level for the whole minute on every ISA: each pass pulls
+  both states towards the same denoised state, so the last-bit differences do not grow.
+
+Cost (provisional: the machine was busy, load 2.6 to 3.3). Thread CPU time of every `nvfx_render` call on one pinned
+core, each frame the least of 5 repeats of the same 60 s run (the run is deterministic), study B's held-out setting 1,
+AVX2; cores 3 and 2 agreed within 0.01 ms on the means and 0.06 ms on the p99 and worst frames (core 3 shown):
+
+| 128 x 128 px | mean per frame | median | p99 | worst | frames where the prior acts |
+|---|---:|---:|---:|---:|---|
+| one continuous rollout with the prior | **0.91 ms** | 0.71 ms | **3.92 ms** | **4.13 ms** | 112 frames: 3.86 ms (the others 0.72 ms) |
+| one continuous rollout without it (drifts) | 0.75 ms | 0.74 ms | 1.17 ms | 1.27 ms | |
+| 6 s shards (the default) | 0.93 ms | 0.81 ms | 1.75 ms | 1.85 ms | |
+| 64 x 64 px: with the prior / without / shards | 0.65 / 0.47 / 0.56 ms | | 3.63 / 0.57 / 1.04 ms | 3.70 / 0.65 / 1.09 ms | 3.59 ms (the others 0.45 ms) |
+
+- **On average it costs what shards cost** (0.91 against 0.93 ms per frame at 128 px; shards pay a second rollout
+  during each roll-ahead and two renders during each crossfade), 0.16 ms more than the plain continuous rollout:
+  within G2.3's bound of 0.5 ms per frame. **But not evenly:** every 16th frame costs about 3.9 ms instead of 0.7 ms,
+  a spike of about 3.1 ms that sets the p99 and the worst frame; the shards' worst frame is 1.85 ms. The start (frame 0,
+  with fire's 30 warm-up steps) costs 14 ms either way.
+- One pass alone (`nvfx_prior pass`, least of 200 with the weights in cache): 3.0 ms on AVX2 (median 3.1 ms; 29.5
+  GMAC/s), 3.0 ms on AVX-512 (the kernels are 8 floats wide either way; a forced AVX-512 instance measured 0.87 ms
+  per frame on average and a 4.06 ms worst frame), 12.2 ms on the baseline. The reference's pass, measured the same
+  way at the same time (`nvfx_dcm ddpm-time`), takes 3.8 ms: the runtime skips the buffers of the backward pass and the
+  per-call widening of the output layer. Inside a frame a pass costs about 0.1 ms more than alone (3.14 ms over the
+  other frames' 0.72 ms), because the frame's own work evicts the weights from the 2 MB L2.
+- **The pass cannot be split across the 16 frames without changing the result.** It needs the state of frame k after
+  its step, and its output is both what frame k shows and what frame k + 1 steps from, so none of it can run earlier
+  and none of it later. Computing it on the state of frame k and applying it at a later frame is a lagged prior, a
+  different method; it was not tried (it would need G2.6's validation of its own, and could become the default only if
+  it tied). A version that keeps the result would have to run the rollout 16 frames ahead of the screen and spread
+  each pass over those frames: the same pictures for steady controls, but control changes shown about 0.5 s late and
+  16 frames held per instance; not built. What an engine can do now: call `nvfx_render` on a worker (the usual
+  advice), and start instances on different frames so their passes fall on different frames (the pass runs on frames
+  16, 32, ... of each instance's own timeline).
+
+Reproduce (outside git: `NEURALVFX_DATA/experiments/models/d/fire.nvfx` and `NEURALVFX_DATA/g/diff/fire.ddpm`):
+
+```sh
+build/nvfx_prior parity --frames 1800 --setting 0     # or --setting 1; --isa avx512 | baseline
+build/nvfx_prior pass --core 3                        # one pass per ISA
+build/nvfx_prior time --core 3 --repeats 5            # add --size 64 or --isa avx512; ~30 s per run
+ctest --test-dir build -R RuntimePrior                # the parity tests (the fire one needs the data)
+```
 
 ## 8. G3: a codec from the learned dynamics (stage S4)
 
