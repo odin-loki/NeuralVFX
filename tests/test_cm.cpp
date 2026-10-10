@@ -256,15 +256,21 @@ TEST(Cm, RolloutEffectsRoundTrip) {
     m.starts.push_back(sp);
   }
   rollout::quantise_like_storage(m);
-  std::ostringstream os;
-  ASSERT_TRUE(rollout::save_model(os, m));
-  const auto file = bytes_of(os.str());
-  expect_model_round_trip(file);
-  const cm::Packed p = cm::pack_model(file);
-  std::vector<cm::Kind> kinds;
-  for (const auto& part : p.parts) kinds.push_back(part.kind);
-  for (const cm::Kind k : {cm::Kind::weights, cm::Kind::biases, cm::Kind::coarse, cm::Kind::fine, cm::Kind::scales}) {
-    EXPECT_NE(std::ranges::find(kinds, k), kinds.end()) << cm::kind_name(k);
+  for (const int bits : {16, 8, 6, 4}) {  // fp16 start states (versions 1 and 2), and quantised ones (version 3)
+    rollout::Model q = m;
+    q.start_bits = bits;
+    q.start_dither = bits == 6;
+    std::ostringstream os;
+    ASSERT_TRUE(rollout::save_model(os, q));
+    const auto file = bytes_of(os.str());
+    expect_model_round_trip(file);
+    const cm::Packed p = cm::pack_model(file);
+    std::vector<cm::Kind> kinds;
+    for (const auto& part : p.parts) kinds.push_back(part.kind);
+    for (const cm::Kind k : {cm::Kind::weights, cm::Kind::biases, cm::Kind::coarse, cm::Kind::fine, cm::Kind::scales}) {
+      EXPECT_NE(std::ranges::find(kinds, k), kinds.end()) << cm::kind_name(k) << " " << bits;
+    }
+    EXPECT_EQ(std::ranges::find(kinds, cm::Kind::ranges) != kinds.end(), bits < 16);
   }
 }
 

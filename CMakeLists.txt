@@ -92,6 +92,11 @@ add_library(neuralfx_io STATIC src/core/image_io.cpp src/core/ingest.cpp)
 target_link_libraries(neuralfx_io PUBLIC neuralfx_core PRIVATE ZLIB::ZLIB)
 neuralfx_defaults(neuralfx_io)
 
+# Video codecs as compression baselines (results/compression, study F2): x264, x265, VP9, AV1 through an ffmpeg pipe.
+add_library(neuralfx_codec STATIC src/codec/video_codec.cpp)
+target_link_libraries(neuralfx_codec PUBLIC neuralfx_core)
+neuralfx_defaults(neuralfx_codec)
+
 # Composed effects (docs/COMPOSE.md): rollout effects coupled through their fields, with particles, light, distortion
 # and bloom for whole scenes. A prototype over the runtime's internals, not part of the C API.
 add_library(neuralfx_compose STATIC src/compose/compose.cpp)
@@ -146,6 +151,11 @@ if(NEURALFX_BUILD_TOOLS)
   add_executable(nvfx_pack tools/nvfx_pack.cpp)
   target_link_libraries(nvfx_pack PRIVATE neuralfx_core ZLIB::ZLIB)
   neuralfx_defaults(nvfx_pack)
+  # Study F2: compression pushed further (fewer bits, rate-aware training, smaller grids) against flipbooks and video
+  # codecs, memory and disk apart.
+  add_executable(nvfx_f2 tools/nvfx_f2.cpp)
+  target_link_libraries(nvfx_f2 PRIVATE neuralfx_codec neuralfx_train nvfx)
+  neuralfx_defaults(nvfx_f2)
   add_executable(nvfx_scene examples/scene_bench.cpp)
   target_link_libraries(nvfx_scene PRIVATE nvfx)
   neuralfx_defaults(nvfx_scene)
@@ -166,9 +176,10 @@ if(NEURALFX_BUILD_TESTS)
   include(GoogleTest)
   add_executable(neuralfx_tests tests/test_proto.cpp tests/test_sim.cpp tests/test_baselines.cpp tests/test_train.cpp
                                 tests/test_runtime.cpp tests/test_ingest.cpp tests/test_rollout.cpp tests/test_compose.cpp
-                                tests/test_dcm.cpp tests/test_cm.cpp tests/test_dcm_fine.cpp tests/test_dcm_ddpm.cpp)
+                                tests/test_dcm.cpp tests/test_cm.cpp tests/test_dcm_fine.cpp tests/test_dcm_ddpm.cpp
+                                tests/test_video_codec.cpp)
   target_link_libraries(neuralfx_tests PRIVATE neuralfx_proto neuralfx_io neuralfx_train nvfx neuralfx_compose neuralfx_dcm
-                                               neuralfx_dcm_fine neuralfx_ddpm GTest::gtest_main)
+                                               neuralfx_dcm_fine neuralfx_ddpm neuralfx_codec GTest::gtest_main)
   neuralfx_defaults(neuralfx_tests)
   gtest_discover_tests(neuralfx_tests TEST_PREFIX "neuralfx." DISCOVERY_MODE PRE_TEST PROPERTIES LABELS neuralfx)
   # Counts heap allocations around nvfx_render (replaces the global operator new, so it is its own program).

@@ -149,6 +149,61 @@ TEST(Rollout, SaveLoadRoundTrips) {
   EXPECT_FALSE(load_model(bad));
 }
 
+TEST(Rollout, QuantisedStartStatesRoundTrip) {
+  // Version 3 files: coarse start states at 2 to 8 bits per channel plane, with and without the seed's dither. What
+  // loads equals quantise_like_storage; the error stays within a step (half a step undithered); empty heat stays
+  // empty; files without quantised starts keep the version 2 layout.
+  Model m = tiny_model();
+  const auto r = tiny_run(m.h, 4);
+  for (int k = 0; k < 2; ++k) {
+    StartPoint sp;
+    sp.controls = r.controls();
+    sp.seed = 7 + static_cast<std::uint64_t>(k);
+    sp.time = 1.f;
+    sp.coarse.assign(r.coarse.begin() + k * 8 * 8 * kPhys, r.coarse.begin() + (k + 1) * 8 * 8 * kPhys);
+    for (int i = 0; i < 8; ++i) sp.coarse[static_cast<std::size_t>(i) * kPhys + 2] = 0.f;  // some empty heat
+    m.starts.push_back(sp);
+  }
+  {
+    std::stringstream ss;
+    ASSERT_TRUE(save_model(ss, m));
+    EXPECT_EQ(ss.str()[8], 2);  // version 2 layout when start states are fp16
+  }
+  for (const int bits : {8, 6, 4, 3}) {
+    for (const bool dither : {false, true}) {
+      Model q = m;
+      q.start_bits = bits;
+      q.start_dither = dither;
+      std::stringstream ss;
+      ASSERT_TRUE(save_model(ss, q));
+      const std::string bytes = ss.str();
+      EXPECT_EQ(bytes[8], 3);
+      EXPECT_NEAR(static_cast<double>(bytes.size()), static_cast<double>(q.storage_bytes()), 0.2 * static_cast<double>(bytes.size()));
+      auto back = load_model(ss);
+      ASSERT_TRUE(back) << back.error();
+      EXPECT_EQ(back->start_bits, bits);
+      EXPECT_EQ(back->start_dither, dither);
+      Model ref = q;
+      quantise_like_storage(ref);
+      for (std::size_t k = 0; k < 2; ++k) {
+        ASSERT_EQ(back->starts[k].coarse, ref.starts[k].coarse) << bits << " " << dither;
+        for (int c = 0; c < kPhys; ++c) {
+          float mn = 1e9f, mx = -1e9f;
+          for (std::size_t i = static_cast<std::size_t>(c); i < m.starts[k].coarse.size(); i += kPhys) {
+            mn = std::min(mn, m.starts[k].coarse[i]);
+            mx = std::max(mx, m.starts[k].coarse[i]);
+          }
+          const float step = (mx - mn) / static_cast<float>((1 << bits) - 1);
+          for (std::size_t i = static_cast<std::size_t>(c); i < m.starts[k].coarse.size(); i += kPhys) {
+            EXPECT_LE(std::abs(back->starts[k].coarse[i] - m.starts[k].coarse[i]), (dither ? 1.01f : 0.51f) * step + 2e-3f * std::abs(mx) + 1e-6f);
+          }
+        }
+        for (int i = 0; i < 8; ++i) EXPECT_EQ(back->starts[k].coarse[static_cast<std::size_t>(i) * kPhys + 2], 0.f);
+      }
+    }
+  }
+}
+
 TEST(Rollout, TrainerForwardMatchesTheReference) {
   const Model m = tiny_model();
   const auto r = tiny_run(m.h, 6);

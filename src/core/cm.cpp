@@ -1083,7 +1083,7 @@ bool walk_frame(IO& io, size_t& pos) {
   return true;
 }
 
-// A rollout effect (NVFXROL1 versions 1 and 2, rollout.cpp): header, stepper and renderer weights, start points.
+// A rollout effect (NVFXROL1 versions 1 to 3, rollout.cpp): header, stepper and renderer weights, start points.
 template <class IO>
 bool walk_rollout(IO& io, size_t& pos) {
   pos = 0;
@@ -1092,14 +1092,18 @@ bool walk_rollout(IO& io, size_t& pos) {
   const uint64_t version = io.le(8, 4);
   const int res = i32(12), hidden = i32(16), memory = i32(20), n_controls = i32(28), n_age = i32(32);
   const int render_hidden = i32(40), start_fine = i32(44);
-  if (version < 1 || version > 2 || res < 2 || res > 256 || hidden < 1 || hidden > 256 || memory < 0 || memory > 64 ||
+  if (version < 1 || version > 3 || res < 2 || res > 256 || hidden < 1 || hidden > 256 || memory < 0 || memory > 64 ||
       n_controls < 0 || n_controls > 8 || n_age < 0 || n_age > 2 || render_hidden < 1 || render_hidden > 256 || start_fine < 0 ||
       start_fine > 1024) {
     return false;
   }
   pos = 52;
-  const size_t rest = 32 + 4 + 1 + 16 * static_cast<size_t>(n_controls) + 60 + 8 + (version >= 2 ? 4 : 0) + 48;
+  const size_t before_grow = 32 + 4 + 1 + 16 * static_cast<size_t>(n_controls) + 60 + 8;
+  const size_t rest = before_grow + (version >= 2 ? 4 : 0) + (version >= 3 ? 8 : 0) + 48;
   if (!io.raw(pos, rest)) return false;
+  // Version 3: quantised coarse start states, start_bits per code (rollout.cpp).
+  const uint64_t qbits = version >= 3 ? io.le(pos + before_grow + 4, 4) : 16;
+  if (qbits != 16 && (qbits < 2 || qbits > 8)) return false;
   pos += rest;
   const uint32_t H = static_cast<uint32_t>(hidden), I = static_cast<uint32_t>(4 + memory + 2 + 2), O = static_cast<uint32_t>(4 + memory + 1);
   const uint32_t Cd = static_cast<uint32_t>(n_controls + n_age), RH = static_cast<uint32_t>(render_hidden), RI = static_cast<uint32_t>(rollout::kRenderIn);
@@ -1127,12 +1131,15 @@ bool walk_rollout(IO& io, size_t& pos) {
   // Start points: first the small headers in order (each start's layout depends on its has-fine flag), then all
   // coarse states as one tensor, then the fine fields.
   const size_t R = static_cast<size_t>(res), coarse = R * R * rollout::kPhys, SF = static_cast<size_t>(start_fine);
+  const size_t qpb = qbits < 16 ? (R * R * qbits + 7) / 8 : 0;  // bytes per quantised plane
+  const size_t coarse_bytes = qbits < 16 ? rollout::kPhys * (4 + qpb) : 2 * coarse;
+  if (qbits < 8 && (R * R * qbits) % 8 != 0) return false;  // planes ending inside a byte: coded as plain bytes
   std::vector<size_t> coarse_at, fine_at;
   for (uint64_t k = 0; k < count; ++k) {
     if (!io.raw(pos, 12 + 2 * static_cast<size_t>(n_controls))) return false;
     pos += 12 + 2 * static_cast<size_t>(n_controls);
     coarse_at.push_back(pos);
-    pos += 2 * coarse;
+    pos += coarse_bytes;
     if (!io.raw(pos, 1)) return false;
     const bool fine = io.data()[pos] != 0;
     pos += 1;
@@ -1144,11 +1151,38 @@ bool walk_rollout(IO& io, size_t& pos) {
     if (pos > io.size()) return false;
   }
   std::vector<size_t> at;
-  at.reserve(count * coarse);
-  for (const size_t c : coarse_at) {
-    for (size_t j = 0; j < coarse; ++j) at.push_back(c + 2 * j);
+  if (qbits < 16) {
+    // Ranges of every start's channel planes, then the codes as planes [start][channel][y][x] in each plane's scale.
+    for (const size_t c : coarse_at) {
+      for (size_t ch = 0; ch < rollout::kPhys; ++ch) {
+        at.push_back(c + ch * (4 + qpb));
+        at.push_back(c + ch * (4 + qpb) + 2);
+      }
+    }
+    if (!io.tensor(shape(Kind::ranges, 2, {static_cast<uint32_t>(count), rollout::kPhys, 2}, true), at)) return false;
+    Shape qs = shape(Kind::coarse, 1, {static_cast<uint32_t>(count), rollout::kPhys, static_cast<uint32_t>(R), static_cast<uint32_t>(R)});
+    qs.bits = static_cast<int>(qbits);
+    at.clear();
+    for (const size_t c : coarse_at) {
+      for (size_t ch = 0; ch < rollout::kPhys; ++ch) {
+        const size_t off = c + ch * (4 + qpb);
+        qs.lo.push_back(f16_lin(static_cast<uint16_t>(io.le(off, 2))));
+        qs.hi.push_back(f16_lin(static_cast<uint16_t>(io.le(off + 2, 2))));
+        if (qbits == 8) {
+          for (size_t j = 0; j < R * R; ++j) at.push_back(off + 4 + j);
+        } else {
+          at.push_back(off + 4);
+        }
+      }
+    }
+    if (qbits == 8 ? !io.tensor(qs, at) : !io.tensor_bits(qs, at, R * R)) return false;
+  } else {
+    at.reserve(count * coarse);
+    for (const size_t c : coarse_at) {
+      for (size_t j = 0; j < coarse; ++j) at.push_back(c + 2 * j);
+    }
+    if (!io.tensor(shape(Kind::coarse, 2, {static_cast<uint32_t>(count), static_cast<uint32_t>(R), static_cast<uint32_t>(R), rollout::kPhys}, true), at)) return false;
   }
-  if (!io.tensor(shape(Kind::coarse, 2, {static_cast<uint32_t>(count), static_cast<uint32_t>(R), static_cast<uint32_t>(R), rollout::kPhys}, true), at)) return false;
   if (!fine_at.empty()) {
     const uint32_t nf = static_cast<uint32_t>(fine_at.size());
     at.clear();
