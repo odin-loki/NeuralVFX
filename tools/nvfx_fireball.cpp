@@ -8,7 +8,8 @@
 // +0 and cannot change; the result is the same to the bit). --occupancy writes, every third frame and for every
 // active module, how much of its fine fields is not +0, holds material (1e-4 or more), lies within each row's first
 // and last pixel that is not +0, within 16-pixel blocks that are not all +0, and within the rows' spans widened by
-// 4 pixels and joined over 4 rows each way (what a run-aware detail step must still compute, roughly).
+// 4 pixels and joined over 4 rows each way (what a run-aware detail step must still compute, roughly); and for material
+// alone (what the shader draws), the rows' spans and the 16-pixel blocks that hold any.
 //
 // DIR holds the rollout effects fire.nvfx, smoke.nvfx and explosion.nvfx (nvfx_experiment d-train). The scene: a
 // burning wreck at night; a fuse runs to a charge; the charge explodes. Six tiles of the explosion model make one
@@ -128,7 +129,8 @@ void write_occupancy(std::FILE* o, int frame, float t, const std::vector<Module*
     const int S = m->size();
     const auto zs = [](int v) { return static_cast<std::size_t>(v); };
     const auto nonzero = [&](int x, int y) { return ft[zs(y) * zs(S) + zs(x)] != 0.f || fd[zs(y) * zs(S) + zs(x)] != 0.f; };
-    long nz = 0, mat = 0, span = 0, blocks = 0, n_blocks = 0, dilated = 0;
+    long nz = 0, mat = 0, span = 0, blocks = 0, n_blocks = 0, dilated = 0, mspan = 0, mblocks = 0;
+    const auto material = [&](int x, int y) { return ft[zs(y) * zs(S) + zs(x)] >= 1e-4f || fd[zs(y) * zs(S) + zs(x)] >= 1e-4f; };
     std::vector<int> first(zs(S), S), last(zs(S), -1);
     for (int y = 0; y < S; ++y) {
       for (int x = 0; x < S; ++x) {
@@ -140,12 +142,22 @@ void write_occupancy(std::FILE* o, int frame, float t, const std::vector<Module*
           last[zs(y)] = x;
         }
       }
+      int mf = S, ml = -1;
       for (int x0 = 0; x0 < S; x0 += 16, ++n_blocks) {
-        bool any = false;
-        for (int x = x0; x < std::min(S, x0 + 16); ++x) any |= nonzero(x, y);
+        bool any = false, anym = false;
+        for (int x = x0; x < std::min(S, x0 + 16); ++x) {
+          any |= nonzero(x, y);
+          if (material(x, y)) {
+            anym = true;
+            mf = std::min(mf, x);
+            ml = x;
+          }
+        }
         blocks += any;
+        mblocks += anym;
       }
       if (last[zs(y)] >= 0) span += last[zs(y)] - first[zs(y)] + 1;
+      if (ml >= 0) mspan += ml - mf + 1;
     }
     for (int y = 0; y < S; ++y) {
       int a = S, b = -1;
@@ -158,9 +170,9 @@ void write_occupancy(std::FILE* o, int frame, float t, const std::vector<Module*
       if (b >= a) dilated += std::min(S - 1, b) - std::max(0, a) + 1;
     }
     const double n = static_cast<double>(S) * static_cast<double>(S);
-    std::fprintf(o, "%d,%.4f,%s,%d,%.4f,%.4f,%.4f,%.4f,%.4f\n", frame, static_cast<double>(t), m->name().c_str(), S, static_cast<double>(nz) / n,
+    std::fprintf(o, "%d,%.4f,%s,%d,%.4f,%.4f,%.4f,%.4f,%.4f,%.4f,%.4f\n", frame, static_cast<double>(t), m->name().c_str(), S, static_cast<double>(nz) / n,
                  static_cast<double>(mat) / n, static_cast<double>(span) / n, static_cast<double>(blocks) / static_cast<double>(n_blocks),
-                 static_cast<double>(dilated) / n);
+                 static_cast<double>(dilated) / n, static_cast<double>(mspan) / n, static_cast<double>(mblocks) / static_cast<double>(n_blocks));
   }
 }
 
@@ -364,7 +376,7 @@ int main(int argc, char** argv) try {
   if (!A.occupancy.empty()) {
     occupancy = std::fopen(A.occupancy.c_str(), "w");
     if (!occupancy) throw std::runtime_error("cannot write " + A.occupancy.string());
-    std::fprintf(occupancy, "frame,t,module,size,not_zero,material,row_spans,blocks16,spans_widened\n");
+    std::fprintf(occupancy, "frame,t,module,size,not_zero,material,row_spans,blocks16,spans_widened,material_row_spans,material_blocks16\n");
   }
   std::FILE* video = nullptr;
   if (A.video) {
