@@ -621,6 +621,8 @@ runs at 1280 x 720 and of 2 at 1920 x 1080; before: commit d41adff):
 | tone mapping and grain | 1.9 | 1.6 | 7.2 | 5.7 | 4.7 | 3.7 |
 | **the frame (stages one after another)** | **19.4** | **15.8** | **62.9** | **50.9** | **43.9** | **33.8** |
 
+![Stage times per frame after the second round, 1280 x 720, 4 threads, stage by stage](figures/fireball_profile_after2.svg)
+
 Overlapped, a frame's picture runs alongside the next frame's state, so the stages' wall times are longer and their
 sum is not the frame time; what counts is the time between finished frames: 12.5 ms at 1280 x 720 on 4 threads
 against 15.8 ms stage by stage. The scripted fireball (`nvfx_scene_script`, overlapped by default) takes 13.7 to

@@ -122,7 +122,9 @@ wins here are the large blended feature volumes of the frame models, the mostly 
 The core is S1, S2, S3 and S6. If time runs short, the cuts are S8, then S5's extension beyond fire, then G3b, then
 S7's speed targets (the final video stays).
 
-**Done so far:** S0, S1, S2 (§6), S3 (study F2, `results/compression/README.md`), S4 (§8), S5 on fire (§7), S6 (§11), S8 (§10: G4a, G5a, G5b not kept) and S9 (§9); round 2 of study G (10 October 2026): the G1 retry passes on no
+**Done so far:** S0, S1, S2 (§6), S3 (study F2, `results/compression/README.md`), S4 (§8), S5 on fire (§7), S6 (§11), S7 (`docs/COMPOSE.md` §7.3: the fireball at 12.5 ms per frame at 1280 x 720 and 27.2 ms at 1920 x 1080
+on 4 threads; the final video, 1920 x 1080 at 30 fps, rendered with v2), S8 (§10: G4a, G5a, G5b not kept) and S9 (§9);
+round 2 of study G (10 October 2026): the G1 retry passes on no
 effect (§6.10), G2a stops in the nested search (G2.10), G2b is stopped on smoke and skipped for explosions (G2.11). From
 study G, only fire's prior against drift (G2b, round 1) goes to stage S6.
 - **S1:** the three optimisation branches and the coder are merged. The fireball runs at 24 ms per frame at
