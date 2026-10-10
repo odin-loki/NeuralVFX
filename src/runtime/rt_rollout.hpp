@@ -1172,8 +1172,8 @@ class Rollout final : public RolloutRunner {
     });
     // Outside, every sample and its range is +0 (its stencil reads only +0): stored as such, and the round trip of
     // this row skips the same pixels.
-    std::fill(o, o + 2 * done[0], 0.f);
-    std::fill(o + 2 * std::max(done[0], done[1]), o + 2 * S, 0.f);
+    if (done[0] > 0) std::fill(o, o + 2 * done[0], 0.f);  // (guarded: an empty fill is still a call)
+    if (std::max(done[0], done[1]) < S_) std::fill(o + 2 * std::max(done[0], done[1]), o + 2 * S, 0.f);
     act_[z(y) * 2] = done[0];
     act_[z(y) * 2 + 1] = done[1];
     mirror(fg_, y + 1);
@@ -1197,10 +1197,14 @@ class Rollout final : public RolloutRunner {
     });
     // Outside, the forward samples' range is [+0, +0], so the corrected value is +0 whatever the round trip gives;
     // the column sums add nothing.
-    std::fill(ft, ft + xa, 0.f);
-    std::fill(fd, fd + xa, 0.f);
-    std::fill(ft + std::max(xa, xb), ft + S_, 0.f);
-    std::fill(fd + std::max(xa, xb), fd + S_, 0.f);
+    if (xa > 0) {
+      std::fill(ft, ft + xa, 0.f);
+      std::fill(fd, fd + xa, 0.f);
+    }
+    if (std::max(xa, xb) < S_) {
+      std::fill(ft + std::max(xa, xb), ft + S_, 0.f);
+      std::fill(fd + std::max(xa, xb), fd + S_, 0.f);
+    }
     each_block_in(S_, xa, xb, [&]<class V>(int x) {
       V a, b;
       sample2<V, false>(fg, 2 * Pw, off + x, ld<V>(wx + x), ld<V>(wy + x), a, b, nullptr, nullptr);
