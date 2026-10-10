@@ -1536,7 +1536,7 @@ effect, 827,640 pixels in all (`g4a-rows`, 3.2 minutes).
   measured further.
 - **Why the explosion's endless frames get worse while its tracking gets better:** the mixer is trained for squared error
   against runs it cannot follow exactly, so it averages its renderers into a slightly smoother, calmer picture. Motion
-  falls by about 7% on every effect (test motion ratio: fire 0.86 to 0.79, smoke 0.82 to 0.75, explosion 0.90 to 0.85),
+  falls by 5 to 8% on every effect (test motion ratio: fire 0.86 to 0.79, smoke 0.82 to 0.75, explosion 0.90 to 0.85),
   and the explosion's detail spectrum moves away from the real one. On fire and smoke the detail spectrum moves closer
   (-0.08 to -0.13), the same direction G1's mixer took them.
 - **Without its bias** the mixer cannot paint haze (amendment 2): the stopped first run "gained" 6 dB on fire by a haze
@@ -1668,7 +1668,8 @@ $B bench && $B summary                                         # g_extras_cost.c
 | G6 one DCM-fine for every effect | as G1 | not run: G1 failed its rule in §6 and in the round-2 retry | **not run** |
 
 **What this says.** Each design traded the endless look for a gain on a narrower measure: G4a and G5b for pixel
-distance to a run they cannot follow exactly (a squared-error mixer averages into a calmer picture: motion falls 6 to 10%),
+distance to a run they cannot follow exactly (the picture gets calmer: G4a's motion ratio falls 5 to 8%, the G5b
+blends' 4 to 16%),
 G5a for "real-looking" in a sense (separable from real) that does not order the model's own shards. The rules caught all
 three, as G1's rule caught smoke's motion. **Nothing from S8 goes into v2.** The one positive finding worth keeping in
 mind for a later stage: the simulator's own renderer draws the explosion's first frames about 1 dB better than the
