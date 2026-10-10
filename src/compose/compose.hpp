@@ -65,6 +65,9 @@ class Pool {
     help_impl([](void* ctx) { return static_cast<bool>((*static_cast<std::remove_reference_t<P>*>(ctx))()); }, const_cast<void*>(static_cast<const void*>(&done)));
   }
   void wake();
+  // Post jobs even without workers, so that other threads waiting in help_until() run their tasks (a pool of one thread
+  // shared with a PictureThread: two threads in all).
+  void share_with_callers() { shared_ = true; }
 
  private:
   using Fn = void (*)(void*, int);
@@ -86,6 +89,7 @@ class Pool {
   std::array<bool, kJobs> slot_taken_{};
   std::atomic<std::uint32_t> posted_{0};  // changes whenever there may be new work (or a reason to look again)
   std::atomic<bool> stop_{false};
+  bool shared_ = false;
 };
 
 // --- images ------------------------------------------------------------------------------------------------------------
@@ -201,10 +205,7 @@ class Module {
   // Field shader scratch. Light and shadow are bilinear in their grids, so each grid row is resampled along x once
   // (the first half of a bilinear sample) and every pixel row only blends two such rows (the second half).
   std::vector<float> shadow_x_;      // [res][size]: shadow_ resampled at the pixels' x
-  std::vector<float> light_x_;
-  std::vector<std::array<int, 2>> star_runs_;  // runs of columns [x0, x1) with the same star key
-  std::vector<float> fin_vig_;                 // finish(): per column, the vignette's term of x
-  std::vector<std::uint32_t> fin_key_;         // and the grain's hash key of x       // [2][3][size]: two rows of the light grid resampled at the pixels' x, a plane per colour
+  std::vector<float> light_x_;       // [2][3][size]: two rows of the light grid resampled at the pixels' x, a plane per colour
   std::vector<int> sx_, lx_;         // [2][size]: the two grid columns each pixel's x falls between (shadow, light)
   std::vector<float> sfx_, lfx_;     // [size]: weight of the second column
   std::vector<float> row_;           // [2][size]: per row of pixels: soot slope along x, emission ramp

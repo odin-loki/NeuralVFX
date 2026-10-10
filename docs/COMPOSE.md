@@ -258,6 +258,12 @@ Every frame runs in this order (`src/compose/script_run.cpp`):
 
 A module woken by a landing in step 9 is drawn from the next frame (it has not stepped yet).
 
+With `Options::overlap` (the default of `nvfx_scene_script`; §7.3), step 10 after the shading is drawn on a thread of
+its own while steps 1 to 9 of the next frame run: what the picture needs (the light, the bus's heat, the particles, the
+shock fronts, the scorch marks, the modules' places and the frame's settings) is copied first, and the next frame's
+shading waits until the modules' images have been drawn. The frames are the same to the bit; `render(f)` then returns
+with frame f + 1's state already computed.
+
 ### 4.8 The fireball as a script, to the bit
 
 `examples/scenes/fireball.nvfxs` is the fireball of §6, rewritten from `tools/nvfx_fireball.cpp`. It gives the same

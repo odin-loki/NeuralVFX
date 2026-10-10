@@ -450,6 +450,7 @@ int main(int argc, char** argv) try {
   // Thread CPU time: of the main thread per frame (with one thread, the whole frame's work) and of each module's step
   // (on whichever thread ran it), so that comparisons on a shared machine are not swamped by preemption.
   std::vector<double> frame_cpu(static_cast<std::size_t>(frames)), step_cpu_frame(static_cast<std::size_t>(frames)), step_cpu_now(owned.size());
+  std::vector<double> shade_cpu_frame(static_cast<std::size_t>(frames)), shade_cpu_now(owned.size());
   const double setup_ms = ms(setup0, Clock::now());
   std::size_t scratch = 0, resident = 0;
   for (const auto& m : owned) scratch += m->runner().scratch_bytes();
@@ -730,7 +731,13 @@ int main(int argc, char** argv) try {
       wait_images[zs(f)] = picture->waited_images_ms;
     }
     auto c6b = Clock::now();
-    pool.run(static_cast<int>(active.size()), [&](int i) { active[zs(i)]->shade(&light); });
+    std::ranges::fill(shade_cpu_now, 0.0);
+    pool.run(static_cast<int>(active.size()), [&](int i) {
+      const double t0 = thread_cpu_ms();
+      active[zs(i)]->shade(&light);
+      shade_cpu_now[zs(i)] = thread_cpu_ms() - t0;
+    });
+    for (std::size_t i = 0; i < active.size(); ++i) shade_cpu_frame[zs(f)] += shade_cpu_now[i];
     auto c7 = Clock::now();
     P[kShade] = ms(c6b, c7);
     cpu_stage(kShade);
@@ -879,7 +886,7 @@ int main(int argc, char** argv) try {
     for (const char* n : kStageNames) o << ',' << n;
     o << ",total";
     for (const auto& m : owned) o << ',' << m->name() << "_step," << m->name() << "_shade";
-    o << ",frame_thread_cpu_ms,step_thread_cpu_ms,rgb_fnv,period,wait_images,wait_picture,output";
+    o << ",frame_thread_cpu_ms,step_thread_cpu_ms,rgb_fnv,period,wait_images,wait_picture,output,shade_thread_cpu_ms";
     for (const char* n : kStageNames) o << ",cpu_" << n;
     o << '\n';
     for (int f = 0; f < frames; ++f) {
@@ -887,8 +894,8 @@ int main(int argc, char** argv) try {
       for (const double v : prof[zs(f)]) o << std::format(",{:.3f}", v);
       o << std::format(",{:.3f}", total[zs(f)]);
       for (const auto& [a, b] : mod_prof[zs(f)]) o << std::format(",{:.3f},{:.3f}", a, b);
-      o << std::format(",{:.3f},{:.3f},{:016x},{:.3f},{:.3f},{:.3f},{:.3f}", frame_cpu[zs(f)], step_cpu_frame[zs(f)], sums[zs(f)], period[zs(f)], wait_images[zs(f)],
-                       wait_picture[zs(f)], output_ms[zs(f)]);
+      o << std::format(",{:.3f},{:.3f},{:016x},{:.3f},{:.3f},{:.3f},{:.3f},{:.3f}", frame_cpu[zs(f)], step_cpu_frame[zs(f)], sums[zs(f)], period[zs(f)],
+                       wait_images[zs(f)], wait_picture[zs(f)], output_ms[zs(f)], shade_cpu_frame[zs(f)]);
       for (const double v : cpu[zs(f)]) o << std::format(",{:.3f}", v);
       o << '\n';
     }

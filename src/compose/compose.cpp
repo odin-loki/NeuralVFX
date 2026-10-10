@@ -228,7 +228,7 @@ inline void cpu_relax() {
 
 void Pool::run_impl(int n, Fn fn, void* ctx) {
   if (n <= 0) return;
-  if (workers_.empty() || n == 1) {
+  if ((workers_.empty() && !shared_) || n == 1) {
     for (int i = 0; i < n; ++i) fn(ctx, i);
     return;
   }
@@ -2334,7 +2334,7 @@ void Frame::render(std::span<std::uint8_t> rgb, float bloom_threshold, float blo
 
 // --- the picture thread -----------------------------------------------------------------------------------------------
 
-PictureThread::PictureThread(Frame& frame, Pool& pool) : frame_(frame), pool_(pool), thread_([this] { loop(); }) {}
+PictureThread::PictureThread(Frame& frame, Pool& pool) : frame_(frame), pool_(pool), thread_([this] { loop(); }) { pool_.share_with_callers(); }
 
 PictureThread::~PictureThread() {
   wait();
