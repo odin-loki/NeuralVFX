@@ -1,7 +1,7 @@
 // Study H, H2: thread CPU time of N rollout steps of one effect at one size, built against main's runtime or this
 // branch's, to compare the two in separate processes (tools/study_h/h2_vs_main.sh). Not part of the CMake build:
-//   g++-14 -O3 -std=c++23 -DNFX_HAS_SKIP -Iinclude -Isrc/compose -Isrc/runtime tools/study_h/ab_step.cpp -o ab_new \
-//          build/libneuralfx_compose.a build/libnvfx.a build/libneuralfx_model.a -lpthread
+//   g++-14 -O3 -std=c++23 -DNFX_HAS_SKIP -Iinclude -Isrc/compose -Isrc/runtime tools/study_h/ab_step.cpp -o ab_new
+//          build/libneuralfx_compose.a build/libnvfx.a build/libneuralfx_model.a -lpthread   (one line)
 //   (against main: the same without -DNFX_HAS_SKIP, with main's include directories and libraries)
 // Usage: ab_step EFFECT.nvfx SIZE SKIP STEPS  ->  prints "SKIP ms-per-step"
 #include "compose.hpp"
