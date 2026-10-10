@@ -58,9 +58,12 @@ struct Shape {
   int width = 1;                      // bytes per value: 1 (8-bit) or 2 (fp16 bit patterns)
   std::vector<std::uint32_t> dims;    // outermost first
   bool channels = false;
-  // Optional, 8-bit tensors without channels: the affine map of each plane, value = lo + q / 255 * (hi - lo), in
+  // Optional, 8-bit tensors without channels: the affine map of each plane, value = lo + q / qmax * (hi - lo), in
   // fixed point (the value times 2^24, as from fp16). Neighbours in other planes are mapped into this plane's scale.
   std::vector<std::int64_t> lo, hi;
+  // Bits per value of an 8-bit-wide tensor (2 to 8): values in [0, 2^bits - 1], qmax = 2^bits - 1, and only the low
+  // `bits` bits are coded. 8 for everything except bit-packed feature planes (model.hpp); not serialised.
+  int bits = 8;
 
   std::size_t size() const;    // number of values
   std::size_t planes() const;  // number of planes (product of the plane axes)

@@ -66,11 +66,13 @@ struct Model {
   std::vector<Dense> films;     // D -> 2 width: grid one (width H); conv two (widths c1, c2)
   std::vector<float> z_mean, z_std;          // statistics of the training variation codes
   std::vector<std::vector<float>> z_train;   // the codes themselves (replay a training variation)
-  int feature_bits = 16;  // storage precision of `features` in the file: 16 (fp16) or 8 (per-plane affine)
+  int feature_bits = 16;  // storage precision of `features` in the file: 16 (fp16), or 2 to 8 (per-plane affine, below 8
+                          // bit-packed; see packed_plane_bytes)
   std::vector<std::string> control_names;    // n_controls names (stored, 15 characters each at most)
 
-  // The features in their storage format, as the runtime keeps them resident: fp16 bit patterns, or bytes with a
-  // (lo, hi) range per [side][side] plane. Filled by load_model() and by pack_features().
+  // The features in their storage format, as the runtime keeps them resident: fp16 bit patterns, or N-bit codes with
+  // a (lo, hi) range per [side][side] plane (one byte per code at 8 bits, bit-packed below; packed_plane_bytes()
+  // bytes per plane). Filled by load_model() and by pack_features().
   std::vector<std::uint16_t> raw_f16;
   std::vector<std::uint8_t> raw_u8;
   std::vector<float> raw_ranges;
@@ -90,6 +92,28 @@ float frame_time(const Hyper& h, int frame, int frames);
 
 // The conditioning vector for given controls and a variation code (missing entries are zero).
 std::vector<float> condition(const Model& m, std::span<const float> controls, std::span<const float> z);
+
+// Affine feature storage at N bits (2 to 8): each [side][side] plane keeps an fp16 (lo, hi) and codes
+// q in [0, 2^N - 1], value = lo + q / (2^N - 1) * (hi - lo). Below 8 bits the codes of a plane are bit-packed: code j
+// occupies bits [j N, j N + N) of the plane's bytes, least significant bit first, and the plane is padded with zero
+// bits to a whole byte.
+inline bool valid_feature_bits(int bits) { return bits == 16 || (bits >= 2 && bits <= 8); }
+inline std::size_t packed_plane_bytes(std::size_t values, int bits) {
+  return bits >= 8 ? values : (values * static_cast<std::size_t>(bits) + 7) / 8;
+}
+inline unsigned packed_code(const std::uint8_t* plane, std::size_t j, int bits) {
+  const std::size_t bit = j * static_cast<std::size_t>(bits);
+  const unsigned shift = static_cast<unsigned>(bit & 7);
+  unsigned v = static_cast<unsigned>(plane[bit >> 3]) >> shift;
+  if (shift + static_cast<unsigned>(bits) > 8) v |= static_cast<unsigned>(plane[(bit >> 3) + 1]) << (8 - shift);
+  return v & ((1u << bits) - 1u);
+}
+inline void put_packed_code(std::uint8_t* plane, std::size_t j, int bits, unsigned code) {  // plane zeroed first
+  const std::size_t bit = j * static_cast<std::size_t>(bits);
+  const unsigned shift = static_cast<unsigned>(bit & 7);
+  plane[bit >> 3] = static_cast<std::uint8_t>(plane[bit >> 3] | ((code << shift) & 0xffu));
+  if (shift + static_cast<unsigned>(bits) > 8) plane[(bit >> 3) + 1] = static_cast<std::uint8_t>(plane[(bit >> 3) + 1] | (code >> (8 - shift)));
+}
 
 // Plain reference forward pass: RGBA floats [size][size][4] at time t for condition c. `size` must be the native
 // size for the conv family; any size for the grid family. Slow and simple on purpose.

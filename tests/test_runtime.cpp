@@ -134,14 +134,18 @@ const nvfx_isa kIsas[] = {NVFX_ISA_BASELINE, NVFX_ISA_AVX2, NVFX_ISA_AVX512};
 
 }  // namespace
 
-TEST(Runtime, MatchesTheReferenceOnEveryIsaFamilyPrecisionAndSize) {
+TEST(Runtime, MatchesTheReferenceOnEveryIsaFamilyPrecisionAndSize) {  // precisions: fp16, 8 bits, 3 to 6 bits packed
   const float controls[3] = {0.8f, 0.1f, 0.6f};
   struct Case {
     Hyper h;
     int bits, size;
   };
-  const Case cases[] = {{grid_hyper(), 16, 32}, {grid_hyper(), 8, 32}, {grid_hyper(), 16, 48},
-                        {conv_hyper(), 16, 32}, {conv_hyper(), 8, 32}, {conv_hyper(), 16, 16}};
+  Hyper odd = grid_hyper();  // planes of 13 x 13: bit-packed planes end inside a byte
+  odd.grid = 13;
+  const Case cases[] = {{grid_hyper(), 16, 32}, {grid_hyper(), 8, 32}, {grid_hyper(), 16, 48}, {grid_hyper(), 6, 32},
+                        {grid_hyper(), 5, 48},  {grid_hyper(), 4, 32}, {odd, 5, 32},           {odd, 3, 32},
+                        {conv_hyper(), 16, 32}, {conv_hyper(), 8, 32}, {conv_hyper(), 16, 16}, {conv_hyper(), 4, 32},
+                        {conv_hyper(), 6, 32}};
   for (const nvfx_isa isa : kIsas) {
     if (nvfx_set_isa(isa) != NVFX_OK) continue;  // the CPU lacks it
     for (const Case& c : cases) {

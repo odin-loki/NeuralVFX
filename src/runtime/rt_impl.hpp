@@ -76,6 +76,24 @@ void accumulate_slice(const Model& m, int k, int i, float a, std::span<float> sl
       float* s = slice.data() + p * side2;
       for (std::size_t j = 0; j < side2; ++j) s[j] += base + step * static_cast<float>(q[j]);
     }
+  } else if (m.feature_bits < 8) {  // bit-packed codes (model.hpp), decoded as they are read
+    const int bits = m.feature_bits;
+    const std::size_t pb = packed_plane_bytes(side2, bits);
+    for (std::size_t p = 0; p < planes; ++p) {
+      const float lo = m.raw_ranges[(first_plane + p) * 2], hi = m.raw_ranges[(first_plane + p) * 2 + 1];
+      const float base = a * lo, step = a * (hi - lo) / static_cast<float>((1 << bits) - 1);
+      const std::uint8_t* q = m.raw_u8.data() + (first_plane + p) * pb;
+      float* s = slice.data() + p * side2;
+      if (bits == 4) {
+        for (std::size_t j = 0; j + 1 < side2; j += 2) {
+          s[j] += base + step * static_cast<float>(q[j >> 1] & 15u);
+          s[j + 1] += base + step * static_cast<float>(q[j >> 1] >> 4);
+        }
+        if (side2 & 1) s[side2 - 1] += base + step * static_cast<float>(q[side2 >> 1] & 15u);
+      } else {
+        for (std::size_t j = 0; j < side2; ++j) s[j] += base + step * static_cast<float>(packed_code(q, j, bits));
+      }
+    }
   } else {
     const std::uint16_t* q = m.raw_f16.data() + first_plane * side2;
     const std::size_t n = planes * side2;

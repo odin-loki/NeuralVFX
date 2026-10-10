@@ -153,7 +153,7 @@ TEST(Cm, SmoothTensorsCompressWell) {
 
 TEST(Cm, FrameModelsRoundTrip) {
   for (const Arch arch : {Arch::grid, Arch::conv}) {
-    for (const int bits : {8, 16}) {
+    for (const int bits : {8, 16, 6, 5, 4, 3}) {
       Hyper h;
       h.arch = arch;
       h.size = 32;
@@ -180,14 +180,48 @@ TEST(Cm, FrameModelsRoundTrip) {
       ASSERT_TRUE(save_model(os, m));
       const auto file = bytes_of(os.str());
       expect_model_round_trip(file);
-      // It is parsed as a model: features, weights and codes are coded as tensors.
+      // It is parsed as a model: features, weights and codes are coded as tensors. (Bit-packed planes that end
+      // inside a byte are not parsed; the file is coded as plain bytes, still exactly.)
+      const int side = arch == Arch::grid ? h.grid : h.latent;
+      if (bits < 8 && side * side * bits % 8 != 0) continue;
       const cm::Packed p = cm::pack_model(file);
       std::vector<cm::Kind> kinds;
       for (const auto& part : p.parts) kinds.push_back(part.kind);
-      EXPECT_NE(std::ranges::find(kinds, cm::Kind::features), kinds.end());
+      EXPECT_NE(std::ranges::find(kinds, cm::Kind::features), kinds.end()) << bits;
       EXPECT_NE(std::ranges::find(kinds, cm::Kind::weights), kinds.end());
       EXPECT_NE(std::ranges::find(kinds, cm::Kind::codes), kinds.end());
-      EXPECT_EQ(std::ranges::find(kinds, cm::Kind::ranges) != kinds.end(), bits == 8);
+      EXPECT_EQ(std::ranges::find(kinds, cm::Kind::ranges) != kinds.end(), bits < 16);
+    }
+  }
+}
+
+TEST(Cm, PackedFeaturesCodeOnlyTheirBits) {
+  // A 4-bit model is parsed (its features are coded as 4-bit values: under 4 bits each), and a model whose packed
+  // planes end inside a byte is still restored exactly (coded as plain bytes).
+  for (const int grid : {16, 5}) {
+    Hyper h;
+    h.arch = Arch::grid;
+    h.size = 32;
+    h.frames = 8;
+    h.grid = grid;
+    h.channels = 4;
+    h.hidden = 6;
+    h.grid_t = 4;
+    Model m = init_model(h, 9);
+    m.feature_bits = grid == 16 ? 4 : 5;
+    m.effect = "fire";
+    std::ostringstream os;
+    ASSERT_TRUE(save_model(os, m));
+    const auto file = bytes_of(os.str());
+    expect_model_round_trip(file);
+    const cm::Packed p = cm::pack_model(file);
+    const auto feat = std::ranges::find(p.parts, cm::Kind::features, &cm::Part::kind);
+    if (grid == 16) {
+      ASSERT_NE(feat, p.parts.end());
+      EXPECT_EQ(feat->bytes, m.features.size() / 2);
+      EXPECT_LT(8.0 * feat->coded_bytes / static_cast<double>(feat->values), 4.5);
+    } else {
+      EXPECT_EQ(feat, p.parts.end());
     }
   }
 }

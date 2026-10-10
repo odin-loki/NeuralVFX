@@ -10,6 +10,11 @@
 //              [--latent 16] [--c0 32] [--c1 16] [--c2 8] [--latent-dims 0] [--no-controls]
 //              [--iters 3000] [--batch 8] [--pixels 4096] [--threads 0] [--lr 3e-3] [--lr-features 2e-2]
 //              [--lr-codes 1e-2] [--z-prior 1e-3] [--bits 16] [--frames all|even] [--seed 1]
+//              [--qat] [--qat-start 0] [--rate LAMBDA]
+//
+// --bits: feature storage, 16 (fp16) or 2 to 8 (per-plane affine codes; below 8 bit-packed). --qat trains for that
+// precision (the forward pass sees the stored features, after the first --qat-start fraction of the iterations);
+// --rate adds LAMBDA times the estimated bits per feature value to the loss (results/compression, study F2).
 //
 // Every clip must have the same size and length. The clips' controls become the model's controls unless
 // --no-controls; --latent-dims gives each clip its own learned variation code. Prints the training curve and,
@@ -30,7 +35,7 @@
 using namespace nfx;
 
 int main(int argc, char** argv) try {
-  const tools::Args a(argc, argv, {"no-controls", "help", "quiet"});
+  const tools::Args a(argc, argv, {"no-controls", "help", "quiet", "qat"});
   if (a.flag("help")) {
     std::println("nvfx_train --clips a,b | --clip-dir DIR --out model.nvfx [--arch grid|conv ...]");
     std::println("nvfx_train --rollout fire|smoke|explosion --out effect.nvfx [--runs N --iters N ...] (see the source header)");
@@ -122,6 +127,15 @@ int main(int argc, char** argv) try {
   o.z_prior = a.f("z-prior", o.z_prior);
   o.seed = a.u64("seed", o.seed);
   o.log_every = a.i("log-every", 250);
+  const int bits = a.i("bits", 16);
+  if (!valid_feature_bits(bits)) throw std::invalid_argument("--bits must be 16 or 2 to 8");
+  if (a.flag("qat")) {
+    if (bits >= 16) throw std::invalid_argument("--qat needs --bits 2 to 8");
+    o.qat_bits = bits;
+    o.qat_start = a.f("qat-start", 0.f);
+  }
+  o.rate_lambda = a.f("rate", 0.f);
+  o.rate_bits = std::min(bits, 8);
   if (a.str("frames", "all") == "even") {
     for (int f = 0; f < h.frames; f += 2) o.frames.push_back(f);
   }
@@ -134,7 +148,7 @@ int main(int argc, char** argv) try {
   auto r = train::train(h, data, o);
   r.model.effect = first.effect;
   r.model.fps = first.fps;
-  r.model.feature_bits = a.i("bits", 16);
+  r.model.feature_bits = bits;
   if (first.source == "sim" && h.n_controls == sim::kControls) {
     r.model.control_names.assign(sim::kControlNames.begin(), sim::kControlNames.end());
   }

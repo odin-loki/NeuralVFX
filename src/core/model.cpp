@@ -31,7 +31,8 @@ std::size_t Model::param_count() const {
 
 std::size_t Model::storage_bytes() const {
   const std::size_t slices = static_cast<std::size_t>(h.bases) * h.grid_t * h.feature_channels();
-  const std::size_t feat = feature_bits == 8 ? features.size() + slices * 4 : features.size() * 2;
+  const std::size_t side2 = static_cast<std::size_t>(h.feature_side()) * h.feature_side();
+  const std::size_t feat = feature_bits < 16 ? slices * (packed_plane_bytes(side2, feature_bits) + 4) : features.size() * 2;
   return feat + (param_count() - features.size()) * 2;
 }
 
@@ -256,7 +257,7 @@ constexpr std::uint32_t kVersion = 1;
 
 float round_f16(float v) { return static_cast<float>(static_cast<std::float16_t>(v)); }
 
-// 8-bit features: each [C][side][side] channel plane of each slice gets its own fp16 min and max.
+// N-bit features (2 to 8): each [C][side][side] channel plane of each slice gets its own fp16 min and max.
 struct Plane8 {
   float lo, hi;
 };
@@ -264,10 +265,22 @@ Plane8 plane_range(std::span<const float> p) {
   const auto [mn, mx] = std::ranges::minmax(p);
   return {round_f16(mn), round_f16(std::max(mx, mn + 1e-6f))};
 }
-std::uint8_t q8(float v, Plane8 r) {
-  return static_cast<std::uint8_t>(std::clamp(std::lround((v - r.lo) / (r.hi - r.lo) * 255.f), 0L, 255L));
+long qmax_of(int bits) { return (1L << bits) - 1; }
+std::uint8_t q8(float v, Plane8 r, int bits = 8) {
+  const long qm = qmax_of(bits);
+  return static_cast<std::uint8_t>(std::clamp(std::lround((v - r.lo) / (r.hi - r.lo) * static_cast<float>(qm)), 0L, qm));
 }
-float dq8(std::uint8_t q, Plane8 r) { return r.lo + static_cast<float>(q) / 255.f * (r.hi - r.lo); }
+float dq8(unsigned q, Plane8 r, int bits = 8) { return r.lo + static_cast<float>(q) / static_cast<float>(qmax_of(bits)) * (r.hi - r.lo); }
+
+// One plane's codes into `out` (packed_plane_bytes bytes: one per code at 8 bits, bit-packed below).
+void put_plane_codes(std::span<const float> plane, Plane8 r, int bits, std::uint8_t* out) {
+  if (bits == 8) {
+    for (std::size_t j = 0; j < plane.size(); ++j) out[j] = q8(plane[j], r);
+    return;
+  }
+  std::fill_n(out, packed_plane_bytes(plane.size(), bits), std::uint8_t{0});
+  for (std::size_t j = 0; j < plane.size(); ++j) put_packed_code(out, j, bits, q8(plane[j], r, bits));
+}
 
 std::size_t plane_size(const Hyper& h) { return static_cast<std::size_t>(h.feature_side()) * h.feature_side(); }
 
@@ -304,15 +317,15 @@ void Model::pack_features() {
   raw_f16.clear();
   raw_u8.clear();
   raw_ranges.clear();
-  if (feature_bits == 8) {
-    const std::size_t p = plane_size(h);
-    raw_u8.reserve(features.size());
-    for (std::size_t off = 0; off < features.size(); off += p) {
+  if (feature_bits < 16) {
+    const std::size_t p = plane_size(h), pb = packed_plane_bytes(p, feature_bits);
+    raw_u8.assign(features.size() / p * pb, 0);
+    for (std::size_t off = 0, k = 0; off < features.size(); off += p, ++k) {
       const std::span plane(features.data() + off, p);
       const Plane8 r = plane_range(plane);
       raw_ranges.push_back(r.lo);
       raw_ranges.push_back(r.hi);
-      for (const float v : plane) raw_u8.push_back(q8(v, r));
+      put_plane_codes(plane, r, feature_bits, raw_u8.data() + k * pb);
     }
   } else {
     raw_f16.reserve(features.size());
@@ -321,12 +334,12 @@ void Model::pack_features() {
 }
 
 void quantise_like_storage(Model& m) {
-  if (m.feature_bits == 8) {
+  if (m.feature_bits < 16) {
     const std::size_t p = plane_size(m.h);
     for (std::size_t off = 0; off < m.features.size(); off += p) {
       const std::span plane(m.features.data() + off, p);
       const Plane8 r = plane_range(plane);
-      for (float& v : plane) v = dq8(q8(v, r), r);
+      for (float& v : plane) v = dq8(q8(v, r, m.feature_bits), r, m.feature_bits);
     }
   } else {
     for (float& v : m.features) v = round_f16(v);
@@ -365,13 +378,16 @@ std::expected<void, std::string> save_model(std::ostream& o, const Model& m) {
   for (int k = 0; k < h.n_controls; ++k) {
     bin::put_str(o, static_cast<std::size_t>(k) < m.control_names.size() ? m.control_names[static_cast<std::size_t>(k)] : std::string{}, 16);
   }
-  if (m.feature_bits == 8) {
+  if (!valid_feature_bits(m.feature_bits)) return std::unexpected("nvfx: feature bits must be 2 to 8 or 16");
+  if (m.feature_bits < 16) {
     const std::size_t p = plane_size(h);
+    std::vector<std::uint8_t> codes(packed_plane_bytes(p, m.feature_bits));
     for (std::size_t off = 0; off < m.features.size(); off += p) {
       const std::span plane(m.features.data() + off, p);
       const Plane8 r = plane_range(plane);
       put_f16(o, std::array{r.lo, r.hi});
-      for (const float v : plane) bin::put(o, q8(v, r));
+      put_plane_codes(plane, r, m.feature_bits, codes.data());
+      o.write(reinterpret_cast<const char*>(codes.data()), static_cast<std::streamsize>(codes.size()));
     }
   } else {
     put_f16(o, m.features);
@@ -424,7 +440,7 @@ std::expected<Model, std::string> load_model(std::istream& i) {
   const auto effect = bin::get_str(i, 32);
   const auto fps = bin::get<float>(i);
   const auto bits = bin::get<std::uint32_t>(i);
-  if (!effect || !fps || !bits || (*bits != 8 && *bits != 16)) return std::unexpected("nvfx: bad header");
+  if (!effect || !fps || !bits || !valid_feature_bits(static_cast<int>(*bits))) return std::unexpected("nvfx: bad header");
   m.effect = *effect;
   m.fps = *fps;
   for (int k = 0; k < h.n_controls; ++k) {
@@ -433,15 +449,17 @@ std::expected<Model, std::string> load_model(std::istream& i) {
     m.control_names.push_back(*name);
   }
   m.feature_bits = static_cast<int>(*bits);
-  if (m.feature_bits == 8) {
+  if (m.feature_bits < 16) {
     const std::size_t p = plane_size(h);
+    std::vector<std::uint8_t> codes(packed_plane_bytes(p, m.feature_bits));
     for (std::size_t off = 0; off < m.features.size(); off += p) {
       std::array<float, 2> r{};
       if (auto e = get_f16(i, r); !e) return std::unexpected(e.error());
-      for (float& v : std::span(m.features.data() + off, p)) {
-        const auto q = bin::get<std::uint8_t>(i);
-        if (!q) return std::unexpected(q.error());
-        v = dq8(*q, {r[0], r[1]});
+      i.read(reinterpret_cast<char*>(codes.data()), static_cast<std::streamsize>(codes.size()));
+      if (!i) return std::unexpected("truncated file");
+      float* v = m.features.data() + off;
+      for (std::size_t j = 0; j < p; ++j) {
+        v[j] = dq8(m.feature_bits == 8 ? codes[j] : packed_code(codes.data(), j, m.feature_bits), {r[0], r[1]}, m.feature_bits);
       }
     }
   } else if (auto e = get_f16(i, m.features); !e) {

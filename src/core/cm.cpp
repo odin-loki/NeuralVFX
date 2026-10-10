@@ -468,12 +468,13 @@ Geometry geometry(const Shape& s) {
 }
 
 // Maps an 8-bit neighbour from plane n into plane c's scale: lin_c = (A + lin_n * B) / D, all in 1/256 steps.
+// `span` is qmax * 256 (65280 for 8-bit values).
 struct Remap {
   bool on = false;
-  int64_t A = 0, B = 0, D = 1;
+  int64_t A = 0, B = 0, D = 1, span = 65280;
   int64_t operator()(int64_t lin) const {
     if (!on) return lin;
-    return std::clamp<int64_t>((A + lin * B) / D, -2 * 65280, 3 * 65280);
+    return std::clamp<int64_t>((A + lin * B) / D, -2 * span, 3 * span);
   }
 };
 
@@ -486,7 +487,8 @@ Remap make_remap(const Shape& s, size_t n, size_t c) {
   }
   if (hi_c <= lo_c || hi_n < lo_n) return r;
   r.on = true;
-  r.A = (lo_n - lo_c) * 65280;
+  r.span = ((int64_t{1} << s.bits) - 1) * 256;
+  r.A = (lo_n - lo_c) * r.span;
   r.B = hi_n - lo_n;
   r.D = hi_c - lo_c;
   return r;
@@ -508,8 +510,11 @@ bool code_tensor(Model& model, AC& ac, const Shape& s, uint16_t* values) {
   uint32_t group = kind;
   if (s.kind == Kind::biases || s.kind == Kind::codes || s.kind == Kind::scales) group = static_cast<uint32_t>(Kind::weights);
   const int err_shift = f16 ? 8 : 4;               // errors kept in code units (fp16) or 1/16 code units (8-bit)
-  const int64_t code_max = f16 ? 65535 * 256 : 255 * 256;
-  const int64_t lin_default = f16 ? 0 : 128 * 256;
+  // 8-bit-wide values may use fewer bits (bit-packed feature planes): codes in [0, qmax], only `vbits` bits coded.
+  const int vbits = f16 ? 8 : std::clamp(s.bits, 1, 8);
+  const int64_t qmax = (int64_t{1} << vbits) - 1;
+  const int64_t code_max = f16 ? 65535 * 256 : qmax * 256;
+  const int64_t lin_default = f16 ? 0 : (qmax + 1) / 2 * 256;
   std::vector<uint16_t> code(n);                    // order codes (fp16) or values (8-bit) known so far
   std::vector<int64_t> lin(n);                      // values in their plane's units (8-bit: q * 256) or * 2^24 (fp16)
   // Errors of each predictor and of the blend, for the current and (when there are planes) the previous plane.
@@ -653,12 +658,12 @@ bool code_tensor(Model& model, AC& ac, const Shape& s, uint16_t* values) {
           const auto C1 = [&](size_t off) -> int {
             if (!has1 || off == npos) return -1;
             if (!r1.on) return code[base - stride1 + off];
-            return static_cast<int>(std::clamp<int64_t>((r1(lin[base - stride1 + off]) + 128) >> 8, 0, 255));
+            return static_cast<int>(std::clamp<int64_t>((r1(lin[base - stride1 + off]) + 128) >> 8, 0, qmax));
           };
           const int cW = C0(oW), cN = C0(oN), cNE = C0(oNE), cNW = C0(oNW), cWW = C0(oWW), cNN = C0(oNN);
           const int cP1 = C1(o), cP1S = C1(oS);
           int cP2 = -1;
-          if (has2) cP2 = r2.on ? static_cast<int>(std::clamp<int64_t>((r2(lin[i - stride2]) + 128) >> 8, 0, 255)) : code[i - stride2];
+          if (has2) cP2 = r2.on ? static_cast<int>(std::clamp<int64_t>((r2(lin[i - stride2]) + 128) >> 8, 0, qmax)) : code[i - stride2];
           const int cprev = c > 0 ? code[i - 1] : -1;
           const int pcode = static_cast<int>(std::clamp<int64_t>((pred + 128) >> 8, 0, code_max >> 8));
           int bflags = 0;
@@ -705,7 +710,8 @@ bool code_tensor(Model& model, AC& ac, const Shape& s, uint16_t* values) {
               ctx[10] = mixes(B, 10, nW, nN, nb(cNW));
             }
             model.byte(ctx.data());
-            for (int k = 8 * b + 7; k >= 8 * b; --k) {
+            const int top = f16 ? 8 * b + 7 : vbits - 1;  // the value's most significant coded bit
+            for (int k = top; k >= 8 * b; --k) {
               const int kk = f16 ? 8 + k : k;
               const int64_t mid = static_cast<int64_t>(((sym >> (k + 1)) << (k + 1)) + (1u << k)) << 8;
               const int64_t d = pred - mid, db = best - mid;
@@ -713,7 +719,7 @@ bool code_tensor(Model& model, AC& ac, const Shape& s, uint16_t* values) {
               const int rr3 = static_cast<int>(std::clamp<int64_t>(db >> (k + 5), -24, 24));
               const int rr2 = static_cast<int>(std::clamp<int64_t>((d * sig_inv) >> 32, -32, 31));
               const size_t kb = static_cast<size_t>(group) * kBitIdx + static_cast<size_t>(kk);
-              const int bits_done = 8 * b + 7 - k;
+              const int bits_done = top - k;
               const uint32_t c0 = (1u << bits_done) | ((sym >> (k + 1)) & ((1u << bits_done) - 1));
               BitSel bs{};
               bs.direct[0] = (kb * kRel + static_cast<size_t>(rr1 + 24)) * kAct + static_cast<size_t>(actb);
@@ -837,6 +843,41 @@ class Io {
     return true;
   }
 
+  // Bit-packed values (s.width 1, s.bits < 8): plane k of s holds `per_plane` values at bits [j * bits, ...) of the
+  // bytes from plane_at[k], least significant bit first, in whole bytes (per_plane * bits a multiple of 8).
+  bool tensor_bits(const Shape& s, const std::vector<size_t>& plane_at, size_t per_plane) {
+    const size_t nb = per_plane * static_cast<size_t>(s.bits) / 8;
+    if (s.width != 1 || s.bits < 1 || s.bits >= 8 || (per_plane * static_cast<size_t>(s.bits)) % 8 != 0) return false;
+    if (plane_at.size() * per_plane != s.size()) return false;
+    for (const size_t a : plane_at) {
+      if (!fits(a, nb)) return false;
+    }
+    std::vector<uint16_t> v(s.size());
+    if constexpr (AC::encoding) {
+      for (size_t k = 0; k < plane_at.size(); ++k) {
+        for (size_t j = 0; j < per_plane; ++j) v[k * per_plane + j] = static_cast<uint16_t>(packed_code(in_ + plane_at[k], j, s.bits));
+        for (size_t b = 0; b < nb; ++b) {
+          if (covered_[plane_at[k] + b]) overlap_ = true;
+          covered_[plane_at[k] + b] = true;
+        }
+      }
+    }
+    const double before = ac_.cost;
+    if (!code_tensor(m_, ac_, s, v.data())) return false;
+    Part& part = parts[static_cast<size_t>(s.kind)];
+    part.kind = s.kind;
+    part.values += v.size();
+    part.bytes += plane_at.size() * nb;
+    part.coded_bytes += (ac_.cost - before) / 8.0;
+    if constexpr (!AC::encoding) {
+      for (size_t k = 0; k < plane_at.size(); ++k) {
+        std::fill_n(out_ + plane_at[k], nb, uint8_t{0});
+        for (size_t j = 0; j < per_plane; ++j) put_packed_code(out_ + plane_at[k], j, s.bits, v[k * per_plane + j]);
+      }
+    }
+    return true;
+  }
+
   // Encoding: every byte coded exactly once.
   bool complete() const { return !overlap_ && std::ranges::all_of(covered_, [](bool b) { return b; }); }
 
@@ -871,6 +912,15 @@ class Collect {
     for (const size_t a : at) {
       if (!fits(a, static_cast<size_t>(s.width))) return false;
       for (int k = 0; k < s.width; ++k) b.push_back(in_[a + static_cast<size_t>(k)]);
+    }
+    return true;
+  }
+  bool tensor_bits(const Shape& s, const std::vector<size_t>& plane_at, size_t per_plane) {
+    auto& b = out[static_cast<size_t>(s.kind)];
+    const size_t nb = per_plane * static_cast<size_t>(s.bits) / 8;
+    for (const size_t a : plane_at) {
+      if (!fits(a, nb)) return false;
+      b.insert(b.end(), in_.begin() + static_cast<std::ptrdiff_t>(a), in_.begin() + static_cast<std::ptrdiff_t>(a + nb));
     }
     return true;
   }
@@ -929,7 +979,7 @@ bool walk_frame(IO& io, size_t& pos) {
   pos += 40 + 16 * static_cast<size_t>(n_controls);
   const size_t K = static_cast<size_t>(bases), T = static_cast<size_t>(grid_t), Cs = static_cast<size_t>(C), S = static_cast<size_t>(side);
   const size_t planes = K * T * Cs, plane = S * S;
-  if (planes * plane > io.size()) return false;
+  if (bits < 2 || planes * ((plane * std::min<uint64_t>(bits, 8) + 7) / 8) > io.size()) return false;  // a bound before allocating
   // Coding order [C][K][T][y][x]: the plane before is the previous time slice, two axes back the previous basis.
   const auto plane_index = [&](size_t c, size_t k, size_t t) { return (k * T + t) * Cs + c; };
   if (bits == 8) {
@@ -961,6 +1011,38 @@ bool walk_frame(IO& io, size_t& pos) {
     }
     if (!io.tensor(fs, at)) return false;
     pos += planes * (4 + plane);
+  } else if (bits >= 2 && bits < 8 && (plane * bits) % 8 == 0) {
+    // Bit-packed codes (model.hpp): ranges as for 8 bits, then the planes' codes with `bits` bits coded per value.
+    // (Planes that end inside a byte are not parsed: such files are coded as plain bytes.)
+    const size_t pb = plane * bits / 8;
+    if (!io.fits(pos, planes * (4 + pb))) return false;
+    std::vector<size_t> at;
+    at.reserve(planes * 2);
+    for (size_t c = 0; c < Cs; ++c) {
+      for (size_t k = 0; k < K; ++k) {
+        for (size_t t = 0; t < T; ++t) {
+          const size_t off = pos + plane_index(c, k, t) * (4 + pb);
+          at.push_back(off);
+          at.push_back(off + 2);
+        }
+      }
+    }
+    if (!io.tensor(shape(Kind::ranges, 2, {static_cast<uint32_t>(Cs), static_cast<uint32_t>(K), static_cast<uint32_t>(T), 2}, true), at)) return false;
+    Shape fs = shape(Kind::features, 1, {static_cast<uint32_t>(Cs), static_cast<uint32_t>(K), static_cast<uint32_t>(T), static_cast<uint32_t>(S), static_cast<uint32_t>(S)});
+    fs.bits = static_cast<int>(bits);
+    at.clear();
+    for (size_t c = 0; c < Cs; ++c) {
+      for (size_t k = 0; k < K; ++k) {
+        for (size_t t = 0; t < T; ++t) {
+          const size_t off = pos + plane_index(c, k, t) * (4 + pb);
+          fs.lo.push_back(f16_lin(static_cast<uint16_t>(io.le(off, 2))));
+          fs.hi.push_back(f16_lin(static_cast<uint16_t>(io.le(off + 2, 2))));
+          at.push_back(off + 4);
+        }
+      }
+    }
+    if (!io.tensor_bits(fs, at, plane)) return false;
+    pos += planes * (4 + pb);
   } else if (bits == 16) {
     if (!io.fits(pos, planes * plane * 2)) return false;
     std::vector<size_t> at;
