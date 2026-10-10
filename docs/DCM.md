@@ -1470,3 +1470,6 @@ did not pass its rule in §6 nor in the round-2 retry. There is nothing for it t
    amendment 1 was checked again on the training rows (rmse 0.1161, 0.1160, 0.1159, 0.1159 for 0.05, 0.1, 0.2, 0.5;
    the learned renderer alone 0.1201) and kept at 0.1. The stopped run's rows are kept outside git
    (`g4a_val_with_bias_aborted.csv`).
+3. **G5b's learning rates** (before any G5b run, after G4a's lesson): the update mixers' rates anneal over 100,000 uses
+   of a context, and m1's first-layer rate is chosen among 0.02, 0.05, 0.1 and 0.2 by the training rows' own error
+   after training (`g5b-train` logs each).

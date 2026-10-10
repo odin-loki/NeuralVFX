@@ -704,7 +704,7 @@ void g5a_train(const Ctx& c) {
     if (!wanted(c, e)) continue;
     const rollout::Model M = load_v1(c, e);
     const Protocol pr = protocol(c, e);
-    const int runs = c.quick ? 4 : (one_shot(e) ? 120 : 40);
+    const int runs = c.quick ? 8 : (one_shot(e) ? 120 : 40);
     UnitCsv csv(g5a_windows_path(c, e), "run,kind,k,i,w,t" + [] {
       std::string h;
       for (int j = 0; j < ex::kCriticFeatures; ++j) h += std::format(",{}", ex::critic_feature_name(j));
