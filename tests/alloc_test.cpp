@@ -33,10 +33,16 @@ void operator delete[](void* p, std::size_t) noexcept { std::free(p); }
 
 namespace {
 
-int run(nfx::Hyper h, int size, const char* name, int bits = 16) {
+int run(nfx::Hyper h, int size, const char* name, int bits = 16, int vq_bits = 0) {
   nfx::Model m = nfx::init_model(h, 1);
   m.effect = name;
   m.feature_bits = bits;
+  if (vq_bits > 0) {  // vector-quantised features: an index per two channels
+    m.vq_bits = vq_bits;
+    m.vq_dim = 2;
+    m.vq_codebook.assign(static_cast<std::size_t>(m.vq_groups()) * (std::size_t{1} << vq_bits) * 2, 0.f);
+    for (std::size_t i = 0; i < m.vq_codebook.size(); ++i) m.vq_codebook[i] = 0.01f * static_cast<float>(i % 97);
+  }
   m.z_train = {std::vector<float>(static_cast<std::size_t>(h.n_latent), 0.1f), std::vector<float>(static_cast<std::size_t>(h.n_latent), -0.2f)};
   m.z_mean.assign(static_cast<std::size_t>(h.n_latent), 0.f);
   m.z_std.assign(static_cast<std::size_t>(h.n_latent), 0.1f);
@@ -59,7 +65,7 @@ int run(nfx::Hyper h, int size, const char* name, int bits = 16) {
   for (int f = 0; f < 200; ++f) nvfx_render(in, f / 30.0, rgba.data(), static_cast<std::size_t>(size) * 4);
   g_counting = false;
   const long n = g_allocations.load();
-  std::printf("%s %dx%d, %d-bit features: %ld allocations in 200 frames\n", name, size, size, bits, n);
+  std::printf("%s %dx%d, %d-bit features%s: %ld allocations in 200 frames\n", name, size, size, bits, vq_bits ? " (vector-quantised)" : "", n);
   nvfx_instance_free(in);
   nvfx_effect_free(e);
   return n == 0 ? 0 : 1;
@@ -158,6 +164,7 @@ int main() {
   c.c2 = 8;
   int failures = run(g, 64, "grid") + run(g, 128, "grid") + run(c, 64, "conv") + run(c, 32, "conv") + run_rollout(64) + run_rollout(128) + run_compose();
   failures += run(g, 128, "grid", 8) + run(g, 128, "grid", 5) + run(g, 64, "grid", 4) + run(c, 64, "conv", 4);  // packed features
+  failures += run(g, 128, "grid", 8, 6) + run(c, 64, "conv", 8, 8);  // vector-quantised features
   std::printf("%s\n", failures ? "FAILED: nvfx_render allocated" : "ok: no allocation per frame");
   return failures ? 1 : 0;
 }

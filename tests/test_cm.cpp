@@ -226,6 +226,36 @@ TEST(Cm, PackedFeaturesCodeOnlyTheirBits) {
   }
 }
 
+TEST(Cm, VectorQuantisedModelsRoundTrip) {
+  // Codebooks and index planes are parsed: the indices are coded with their bits, the codebooks as fp16 weights.
+  for (const int bits : {8, 5, 3}) {
+    Hyper h;
+    h.arch = Arch::grid;
+    h.size = 32;
+    h.frames = 8;
+    h.grid = 16;
+    h.channels = 4;
+    h.hidden = 6;
+    h.grid_t = 4;
+    Model m = init_model(h, 9);
+    m.effect = "fire";
+    m.feature_bits = 8;
+    m.vq_bits = bits;
+    m.vq_dim = 2;
+    m.vq_codebook.resize(static_cast<std::size_t>(m.vq_groups()) * (std::size_t{1} << bits) * 2);
+    for (std::size_t i = 0; i < m.vq_codebook.size(); ++i) m.vq_codebook[i] = 0.1f * std::sin(0.37f * static_cast<float>(i));
+    std::ostringstream os;
+    ASSERT_TRUE(save_model(os, m));
+    const auto file = bytes_of(os.str());
+    expect_model_round_trip(file);
+    const cm::Packed p = cm::pack_model(file);
+    const auto feat = std::ranges::find(p.parts, cm::Kind::features, &cm::Part::kind);
+    ASSERT_NE(feat, p.parts.end()) << bits;
+    EXPECT_EQ(feat->values, m.features.size() / 2);
+    EXPECT_LT(8.0 * feat->coded_bytes / static_cast<double>(feat->values), bits + 0.5);
+  }
+}
+
 TEST(Cm, RolloutEffectsRoundTrip) {
   rollout::Hyper h;
   h.res = 8;

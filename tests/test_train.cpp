@@ -462,3 +462,46 @@ TEST(Train, QuantisationAwareAndRateAwareTrainingWork) {
   const auto r1 = train::train(h, std::span(&ex, 1), o);
   EXPECT_LT(train::feature_rate(r1.model, 4), 0.8 * train::feature_rate(r0.model, 4));
 }
+
+TEST(Train, VectorQuantisedTrainingWorks) {
+  // Codebooks fitted halfway, then trained through: the saved model renders what the trainer saw, and at one bit per
+  // feature value (8-bit indices for 8 channels) it still learns the clip.
+  const Clip clip = smooth_clip(32, 8, 0.f);
+  Hyper h;
+  h.arch = Arch::grid;
+  h.size = 32;
+  h.frames = 8;
+  h.grid = 16;
+  h.grid_t = 8;
+  h.channels = 8;
+  h.hidden = 16;
+  h.layers = 1;
+  train::Options o;
+  o.iterations = 400;
+  o.batch_frames = 4;
+  o.pixels = 512;
+  o.threads = 2;
+  o.log_every = 0;
+  o.vq_bits = 8;
+  o.vq_dim = 8;
+  const train::Example ex{&clip, {}};
+  const auto r = train::train(h, std::span(&ex, 1), o);
+  ASSERT_EQ(r.model.vq_codebook.size(), 256u * 8u);
+  Model m = r.model;
+  m.feature_bits = 8;
+  std::stringstream ss;
+  ASSERT_TRUE(save_model(ss, m));
+  const auto back = load_model(ss);
+  ASSERT_TRUE(back.has_value()) << back.error();
+  Model q = m;
+  quantise_like_storage(q);
+  EXPECT_EQ(back->features, q.features);
+  EXPECT_LT(back->storage_bytes(), 16u * 16u * 8u + 256u * 8u * 2u + 2048u);
+  EXPECT_GT(metrics::score(clip, train::render_clip(*back, {}, {}, 8, 32)).psnr, 26.0);
+  EXPECT_THROW(train::train(h, std::span(&ex, 1), [&] {
+                 train::Options bad = o;
+                 bad.vq_dim = 3;
+                 return bad;
+               }()),
+               std::invalid_argument);
+}

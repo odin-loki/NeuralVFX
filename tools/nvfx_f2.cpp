@@ -7,6 +7,10 @@
 //   nvfx_f2 video --set val|test [--codecs x264,...] the video codecs' quality ladders on every clip
 //   nvfx_f2 report --set val|test [--configs ...]   equal-quality ratios against flipbooks and each codec, memory and
 //                                                   disk, with 95% bootstrap intervals over clips
+//   nvfx_f2 g3c --split val|test [--variants v1,b6_d,...]
+//                                                   design G3c: study D's rollout effects with quantised, dithered and
+//                                                   fewer start points, scored as study D's endless runs
+//   nvfx_f2 g3c-report --split val|test             each variant against v1, paired over the settings
 //   nvfx_f2 timing --models a.nvfx,b.nvfx [--core 3] [--reps 5]
 //                                                   thread CPU time per 128 x 128 frame, least of the repetitions
 //   options: --root DIR (data root, default $NEURALVFX_DATA), --out DIR (results/compression), --threads 2,
@@ -24,6 +28,8 @@
 //   q                        quantisation-aware training at the storage bits (qs<f>: start after a fraction f)
 //   t                        trimmed plane ranges (Model::feature_trim): the best-quantising range, tails clipped
 //   r<lambda>                rate term in the loss (estimated bits per feature value, at the storage bits)
+//   vq<bits>x<dim>           vector-quantised features: an index of <bits> bits per <dim> channels (vs<f>: from a
+//                            fraction f of the training on, default 0.5)
 //   i<iterations>            training steps (default 2000 grid, 1500 conv, as study A)
 //   s<seed>                  training seed (default 1)
 //   e.g. g32c8h32l2t16_b8 is study A's grid_m at 8 bits; g32c8h32l2t16_b4_q_r3e-5 adds 4-bit QAT and a rate term.
@@ -35,11 +41,13 @@
 #include <neuralfx/metrics.hpp>
 #include <neuralfx/model.hpp>
 #include <neuralfx/nvfx.h>
+#include <neuralfx/rollout.hpp>
 #include <neuralfx/sim.hpp>
 #include <neuralfx/train.hpp>
 #include <neuralfx/video_codec.hpp>
 
 #include <algorithm>
+#include <atomic>
 #include <chrono>
 #include <cmath>
 #include <ctime>
@@ -261,6 +269,8 @@ struct Config {
   float lambda = 0.f;
   int iters = 0;
   std::uint64_t seed = 1;
+  int vq_bits = 0, vq_dim = 0;
+  float vq_start = 0.5f;
 };
 
 Config parse_config(const std::string& name) {
@@ -297,6 +307,9 @@ Config parse_config(const std::string& name) {
     const std::string& p = parts[k];
     if (p == "q") cf.qat = true;
     else if (p == "t") cf.trim = true;
+    else if (p.starts_with("vq")) {
+      if (std::sscanf(p.c_str(), "vq%dx%d", &cf.vq_bits, &cf.vq_dim) != 2) throw std::invalid_argument("configuration: vq<bits>x<dim>");
+    } else if (p.starts_with("vs")) cf.vq_start = std::stof(p.substr(2));
     else if (p.starts_with("qs")) {
       cf.qat = true;
       cf.qat_start = std::stof(p.substr(2));
@@ -401,6 +414,9 @@ void step_train(const Ctx& c, const std::vector<std::string>& configs) {
       }
       o.rate_lambda = cf.lambda;
       o.rate_bits = std::min(cf.bits, 8);
+      o.vq_bits = cf.vq_bits;
+      o.vq_dim = cf.vq_dim;
+      o.vq_start = cf.vq_start;
       Hyper h = cf.h;
       h.loop = ref.loop;
       const train::Example ex{&ref, {}};
@@ -414,7 +430,7 @@ void step_train(const Ctx& c, const std::vector<std::string>& configs) {
       if (auto w = save_model(file, res.model); !w) throw std::runtime_error(w.error());
       std::map<std::string, std::string> row = {{"set", c.set}, {"clip", r.name}, {"effect", r.effect}, {"config", name},
                                                 {"arch", h.arch == Arch::grid ? "grid" : "conv"}, {"bits", std::to_string(cf.bits)},
-                                                {"qat", cf.qat ? std::format("{}", cf.qat_start) : "-"}, {"lambda", std::format("{}", cf.lambda)},
+                                                {"qat", cf.qat ? std::format("{}", cf.qat_start) : cf.vq_bits ? std::format("vq{}x{}", cf.vq_bits, cf.vq_dim) : "-"}, {"lambda", std::format("{}", cf.lambda)},
                                                 {"iters", std::to_string(cf.iters)}, {"train_s", std::format("{:.1f}", res.seconds)}};
       score_and_pack(ref, file, row);
       csv.add(row);
@@ -748,6 +764,253 @@ void step_report(const Ctx& c, const std::vector<std::string>& only_configs) {
   }
 }
 
+// --- G3c: rollout start points quantised, dithered, coded; fewer of them -------------------------------------------
+
+// Study B's held-out settings (study D's test) and study G's validation settings (docs/DCM.md §4), as the tools draw
+// them (tools/experiment_d.cpp, tools/experiment_g.cpp).
+using Setting = std::array<float, 3>;
+bool off_grid(const Setting& s) {
+  const auto off = [](float x, std::initializer_list<float> g) { return std::ranges::all_of(g, [x](float y) { return std::abs(x - y) >= 0.05f; }); };
+  return off(s[0], {0.f, 0.5f, 1.f}) && off(s[1], {0.f, 0.25f, 0.5f, 0.75f, 1.f}) && off(s[2], {0.f, 0.5f, 1.f});
+}
+std::vector<Setting> test_settings() {
+  std::mt19937_64 rng(2026);
+  std::uniform_real_distribution<float> u(0.05f, 0.95f);
+  std::vector<Setting> v;
+  while (v.size() < 10) {
+    const Setting s{u(rng), u(rng), u(rng)};
+    if (off_grid(s)) v.push_back(s);
+  }
+  return v;
+}
+std::vector<Setting> validation_settings() {
+  const auto test = test_settings();
+  std::mt19937_64 rng(2027);
+  std::uniform_real_distribution<float> u(0.05f, 0.95f);
+  std::vector<Setting> v;
+  while (v.size() < 10) {
+    const Setting s{u(rng), u(rng), u(rng)};
+    const bool far = std::ranges::all_of(test, [&](const Setting& t) {
+      return std::sqrt((s[0] - t[0]) * (s[0] - t[0]) + (s[1] - t[1]) * (s[1] - t[1]) + (s[2] - t[2]) * (s[2] - t[2])) >= 0.05f;
+    });
+    if (off_grid(s) && far) v.push_back(s);
+  }
+  return v;
+}
+
+// A variant of a rollout effect: "v1" (as trained), or fields joined by "_": b<bits> (coarse start states at that many
+// bits per channel plane), d (dithered by the start's seed), h (half the start points, the most spread in controls).
+rollout::Model g3c_variant(const rollout::Model& v1, const std::string& name) {
+  rollout::Model m = v1;
+  if (name == "v1") return m;
+  for (const auto part : std::views::split(name, '_')) {
+    const std::string p(std::string_view{part});
+    if (p == "d") m.start_dither = true;
+    else if (p == "h") {
+      // Farthest-point sampling in control space from the start nearest the middle of the controls.
+      const std::size_t n = m.starts.size(), keep = std::max<std::size_t>(1, n / 2);
+      const auto dist = [&](std::size_t a, const std::vector<float>& b) {
+        float d = 0;
+        for (std::size_t k = 0; k < b.size(); ++k) d += (m.starts[a].controls[k] - b[k]) * (m.starts[a].controls[k] - b[k]);
+        return d;
+      };
+      std::vector<std::size_t> chosen;
+      std::size_t first = 0;
+      for (std::size_t k = 1; k < n; ++k) {
+        if (dist(k, {0.5f, 0.5f, 0.5f}) < dist(first, {0.5f, 0.5f, 0.5f})) first = k;
+      }
+      chosen.push_back(first);
+      while (chosen.size() < keep) {
+        std::size_t best = 0;
+        float best_d = -1;
+        for (std::size_t k = 0; k < n; ++k) {
+          if (std::ranges::find(chosen, k) != chosen.end()) continue;
+          float dmin = 1e30f;
+          for (const std::size_t c : chosen) dmin = std::min(dmin, dist(k, m.starts[c].controls));
+          if (dmin > best_d) {
+            best_d = dmin;
+            best = k;
+          }
+        }
+        chosen.push_back(best);
+      }
+      std::ranges::sort(chosen);
+      std::vector<rollout::StartPoint> kept;
+      for (const std::size_t k : chosen) kept.push_back(m.starts[k]);
+      m.starts = std::move(kept);
+    } else if (p[0] == 'b') {
+      m.start_bits = std::stoi(p.substr(1));
+    } else {
+      throw std::invalid_argument("g3c: unknown variant field " + p);
+    }
+  }
+  return m;
+}
+
+Clip rollout_clip(const std::vector<std::uint8_t>& bytes, const Setting& s, std::uint64_t seed, int frames) {
+  RtEffect fx(bytes);
+  nvfx_instance* in = nullptr;
+  if (nvfx_instance_create(fx.e, kSize, &in) != NVFX_OK) throw std::runtime_error("instance");
+  nvfx_instance_set_controls(in, s.data(), 3);
+  nvfx_instance_set_seed(in, seed);
+  Clip c;
+  c.allocate(kSize, frames);
+  c.fps = 30.f;
+  for (int f = 0; f < frames; ++f) nvfx_render(in, f / 30.0, c.frame(f).data(), kSize * 4);
+  nvfx_instance_free(in);
+  return c;
+}
+
+const std::vector<std::string> kG3cCols = {"split", "effect", "variant", "setting", "starts", "start_bits", "dither", "file_bytes",
+                                           "packed_bytes", "packed_coarse_bytes", "resident_bytes", "spectrum_l1", "motion_ratio",
+                                           "coverage_l1", "emission_l1", "mean_frame_psnr"};
+
+// Endless runs at held-out settings with new seeds, scored by frame statistics against a real run, as study D's
+// evaluation (tools/experiment_d.cpp, d-eval): test = study B's held-out settings with study D's seeds; val = study G's
+// validation settings with seeds of their own.
+void step_g3c(const Ctx& c, const std::string& split, const std::vector<std::string>& variants) {
+  Csv csv(c.out / "f2_g3c.csv", kG3cCols);
+  const auto settings = split == "test" ? test_settings() : validation_settings();
+  const std::uint64_t real_seed = split == "test" ? 900000 : 960000, net_seed = split == "test" ? 920000 : 970000;
+  const fs::path dir = c.root / "f2" / "g3c";
+  fs::create_directories(dir);
+  for (const auto e : sim::kEffects) {
+    const std::string en(sim::effect_name(e));
+    if (!c.only.empty() && !c.only.contains(en)) continue;
+    const bool ex = e == sim::Effect::explosion;
+    auto loaded = rollout::load_model(c.root / "experiments" / "models" / "d" / (en + ".nvfx"));
+    if (!loaded) throw std::runtime_error(loaded.error());
+    const int F = ex ? 89 : 300, warm = ex ? 1 : 150;
+    std::vector<std::string> todo;
+    for (const auto& v : variants) {
+      if (!csv.has({{"split", split}, {"effect", en}, {"variant", v}})) todo.push_back(v);
+    }
+    if (todo.empty()) continue;
+    // The real runs, one per setting (threads over settings).
+    std::vector<metrics::ClipStats> real(settings.size());
+    {
+      std::atomic<std::size_t> next{0};
+      std::vector<std::jthread> pool;
+      for (int t = 0; t < c.threads; ++t) {
+        pool.emplace_back([&] {
+          for (std::size_t si; (si = next++) < settings.size();) {
+            sim::Params p;
+            p.effect = e;
+            p.intensity = settings[si][0];
+            p.wind = settings[si][1];
+            p.turbulence = settings[si][2];
+            p.seed = real_seed + si;
+            p.size = kSize;
+            sim::Fluid f(p);
+            for (int i = 0; i < warm; ++i) f.step_frame();
+            Clip cl;
+            cl.allocate(kSize, F);
+            cl.fps = 30.f;
+            for (int i = 0; i < F; ++i) {
+              f.step_frame();
+              f.render(cl.frame(i));
+            }
+            real[si] = metrics::stats(cl);
+          }
+        });
+      }
+    }
+    for (const std::string& v : todo) {
+      rollout::Model m = g3c_variant(*loaded, v);
+      const fs::path file = dir / std::format("{}__{}.nvfx", en, v);
+      std::ostringstream os;
+      if (auto w = rollout::save_model(os, m); !w) throw std::runtime_error(w.error());
+      const std::string str = os.str();
+      const std::vector<std::uint8_t> bytes(str.begin(), str.end());
+      if (v != "v1") {
+        std::ofstream of(file, std::ios::binary);
+        of.write(str.data(), static_cast<std::streamsize>(str.size()));
+      }
+      const cm::Packed packed = cm::pack_model(bytes);
+      const auto back = cm::unpack_model(packed.data);
+      if (!back || *back != bytes) throw std::runtime_error("g3c: lossless round trip failed");
+      double coarse = 0;
+      for (const auto& part : packed.parts) {
+        if (part.kind == cm::Kind::coarse || part.kind == cm::Kind::ranges) coarse += part.coded_bytes;
+      }
+      RtEffect probe(bytes);
+      nvfx_effect_info info{};
+      nvfx_effect_get_info(probe.e, &info);
+      std::vector<metrics::StatDistance> d(settings.size());
+      {
+        std::atomic<std::size_t> next{0};
+        std::vector<std::jthread> pool;
+        for (int t = 0; t < c.threads; ++t) {
+          pool.emplace_back([&] {
+            for (std::size_t si; (si = next++) < settings.size();) {
+              d[si] = metrics::distance(real[si], metrics::stats(rollout_clip(bytes, settings[si], net_seed + si, F)));
+            }
+          });
+        }
+      }
+      for (std::size_t si = 0; si < settings.size(); ++si) {
+        csv.add({{"split", split}, {"effect", en}, {"variant", v}, {"setting", std::to_string(si)}, {"starts", std::to_string(m.starts.size())},
+                 {"start_bits", std::to_string(m.start_bits)}, {"dither", m.start_dither ? "1" : "0"}, {"file_bytes", std::to_string(bytes.size())},
+                 {"packed_bytes", std::to_string(packed.data.size())}, {"packed_coarse_bytes", std::format("{:.1f}", coarse)},
+                 {"resident_bytes", std::to_string(info.resident_bytes)}, {"spectrum_l1", f4(d[si].spectrum_l1)},
+                 {"motion_ratio", f4(d[si].motion_ratio)}, {"coverage_l1", f4(d[si].coverage_l1)}, {"emission_l1", f4(d[si].emission_l1)},
+                 {"mean_frame_psnr", std::format("{:.3f}", d[si].mean_frame_psnr)}});
+      }
+      std::println("g3c {} {} {}: {} bytes, {} packed (coarse {:.0f})", split, en, v, bytes.size(), packed.data.size(), coarse);
+      std::fflush(stdout);
+    }
+  }
+}
+
+// Variant against v1 on one split: per effect and statistic, the paired difference of distances to the real run
+// (spectrum, coverage, emission: lower is better; |log motion ratio|: lower is better; mean-frame PSNR: higher is
+// better), signed so that positive means the variant is worse.
+void step_g3c_report(const Ctx& c, const std::string& split) {
+  Csv csv(c.out / "f2_g3c.csv", kG3cCols);
+  std::map<std::string, std::map<std::string, std::map<int, std::map<std::string, std::string>>>> rows;  // effect, variant, setting
+  for (const auto& r : csv.rows()) {
+    if (r.at("split") == split) rows[r.at("effect")][r.at("variant")][std::stoi(r.at("setting"))] = r;
+  }
+  std::println("## G3c on {} settings: variant minus v1, positive = worse (95% paired bootstrap over 10 settings)\n", split);
+  std::println("| effect | variant | starts | KB | packed KB | spectrum | abs log motion | coverage | emission | mean-frame PSNR (v1 minus variant) | verdict |");
+  std::println("|---|---|---:|---:|---:|---|---|---|---|---|---|");
+  std::ofstream out(c.out / std::format("f2_g3c_{}_decisions.csv", split));
+  out << "split,effect,variant,starts,file_bytes,packed_bytes,stat,mean,lo,hi,verdict\n";
+  for (const auto& [effect, vars] : rows) {
+    if (!vars.contains("v1")) continue;
+    const auto& base = vars.at("v1");
+    for (const auto& [v, sets] : vars) {
+      if (v == "v1") continue;
+      std::string line = std::format("| {} | {} | {} | {:.1f} | {:.1f} |", effect, v, sets.begin()->second.at("starts"),
+                                     std::stod(sets.begin()->second.at("file_bytes")) / 1024, std::stod(sets.begin()->second.at("packed_bytes")) / 1024);
+      bool worse = false, better = false;
+      for (const std::string stat : {"spectrum_l1", "motion_ratio", "coverage_l1", "emission_l1", "mean_frame_psnr"}) {
+        std::vector<double> a, b;
+        for (const auto& [si, r] : sets) {
+          if (!base.contains(si)) continue;
+          const auto val = [&](const std::map<std::string, std::string>& row) {
+            const double x = std::stod(row.at(stat));
+            if (stat == "motion_ratio") return std::abs(std::log(x));
+            if (stat == "mean_frame_psnr") return -x;
+            return x;
+          };
+          a.push_back(val(r));
+          b.push_back(val(base.at(si)));
+        }
+        const auto iv = metrics::paired_bootstrap(a, b);
+        const std::string verdict = iv.covers_zero() ? "tie" : iv.lo > 0 ? "worse" : "better";
+        worse = worse || verdict == "worse";
+        better = better || verdict == "better";
+        line += std::format(" {:+.4f} [{:+.4f}, {:+.4f}] |", iv.mean, iv.lo, iv.hi);
+        out << std::format("{},{},{},{},{},{},{},{:.5f},{:.5f},{:.5f},{}\n", split, effect, v, sets.begin()->second.at("starts"),
+                           sets.begin()->second.at("file_bytes"), sets.begin()->second.at("packed_bytes"), stat, iv.mean, iv.lo, iv.hi, verdict);
+      }
+      line += worse ? " worse |" : better ? " better |" : " tie |";
+      std::println("{}", line);
+    }
+  }
+}
+
 // --- timing ----------------------------------------------------------------------------------------------------------
 
 double thread_seconds() {
@@ -828,6 +1091,8 @@ int main(int argc, char** argv) try {
     step_video(c, std::set<std::string>(v.begin(), v.end()));
   } else if (step == "report") step_report(c, split(a.str("configs", "")));
   else if (step == "timing") step_timing(split(a.need("models")), a.i("core", 3), a.i("reps", 5));
+  else if (step == "g3c") step_g3c(c, a.str("split", "val"), split(a.str("variants", "v1,b8,b6,b6_d,b4_d,h,b6_d_h")));
+  else if (step == "g3c-report") step_g3c_report(c, a.str("split", "val"));
   else throw std::invalid_argument("unknown step " + step);
   a.warn_unused();
   return 0;

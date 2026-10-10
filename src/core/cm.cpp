@@ -974,15 +974,46 @@ bool walk_frame(IO& io, size_t& pos) {
   const int side = arch == 1 ? grid : latent, C = arch == 1 ? channels : c0;
   if (side < 1 || side > 4096 || C < 1 || C > 4096) return false;
   pos = 76;
-  if (!io.raw(pos, 40 + 16 * static_cast<size_t>(n_controls))) return false;
+  const uint64_t version = io.le(8, 4);
+  const size_t vq_fields = version == 2 ? 8 : 0;  // version 2: vector-quantised features (vq_bits, vq_dim)
+  if (!io.raw(pos, 40 + vq_fields + 16 * static_cast<size_t>(n_controls))) return false;
   const uint64_t bits = io.le(pos + 36, 4);
-  pos += 40 + 16 * static_cast<size_t>(n_controls);
+  const uint64_t vq_bits = vq_fields ? io.le(pos + 40, 4) : 0, vq_dim = vq_fields ? io.le(pos + 44, 4) : 0;
+  pos += 40 + vq_fields + 16 * static_cast<size_t>(n_controls);
   const size_t K = static_cast<size_t>(bases), T = static_cast<size_t>(grid_t), Cs = static_cast<size_t>(C), S = static_cast<size_t>(side);
   const size_t planes = K * T * Cs, plane = S * S;
-  if (bits < 2 || planes * ((plane * std::min<uint64_t>(bits, 8) + 7) / 8) > io.size()) return false;  // a bound before allocating
+  const uint64_t stored_bits = vq_fields ? std::max<uint64_t>(1, vq_bits) : std::min<uint64_t>(bits, 8);
+  if (bits < 2 || planes / (vq_fields && vq_dim ? vq_dim : 1) * ((plane * stored_bits + 7) / 8) > io.size()) return false;  // a bound before allocating
   // Coding order [C][K][T][y][x]: the plane before is the previous time slice, two axes back the previous basis.
   const auto plane_index = [&](size_t c, size_t k, size_t t) { return (k * T + t) * Cs + c; };
-  if (bits == 8) {
+  if (vq_fields) {
+    // Codebooks [group][codeword][dim] (fp16), then index planes [basis][slice][group] coded as [group][basis][slice].
+    if (vq_bits < 2 || vq_bits > 8 || vq_dim < 1 || Cs % vq_dim != 0) return false;
+    const size_t G = Cs / vq_dim, Kc = size_t{1} << vq_bits, D = vq_dim, pb = (plane * vq_bits + 7) / 8;
+    if ((plane * vq_bits) % 8 != 0 && vq_bits < 8) return false;
+    const size_t cb = G * Kc * D;
+    if (!io.fits(pos, 2 * cb)) return false;
+    if (!io.tensor(shape(Kind::weights, 2, {static_cast<uint32_t>(G), static_cast<uint32_t>(Kc), static_cast<uint32_t>(D)}), run(pos, cb, 2))) return false;
+    pos += 2 * cb;
+    const size_t slices = K * T;
+    if (!io.fits(pos, slices * G * pb)) return false;
+    Shape is = shape(Kind::features, 1, {static_cast<uint32_t>(G), static_cast<uint32_t>(slices), static_cast<uint32_t>(S), static_cast<uint32_t>(S)});
+    is.bits = static_cast<int>(vq_bits);
+    std::vector<size_t> at;
+    for (size_t g = 0; g < G; ++g) {
+      for (size_t sl = 0; sl < slices; ++sl) at.push_back(pos + (sl * G + g) * pb);
+    }
+    if (vq_bits == 8) {
+      std::vector<size_t> each;
+      for (const size_t a : at) {
+        for (size_t j = 0; j < plane; ++j) each.push_back(a + j);
+      }
+      if (!io.tensor(is, each)) return false;
+    } else if (!io.tensor_bits(is, at, plane)) {
+      return false;
+    }
+    pos += slices * G * pb;
+  } else if (bits == 8) {
     if (!io.fits(pos, planes * (4 + plane))) return false;
     std::vector<size_t> at;
     at.reserve(planes * 2);

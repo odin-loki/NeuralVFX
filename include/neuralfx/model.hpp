@@ -71,6 +71,12 @@ struct Model {
                           // bit-packed; see packed_plane_bytes)
   bool feature_trim = false;  // affine planes: the range that quantises the plane best (feature_plane_range), clipping
                               // its tails, instead of its min and max. Chosen when saving; the file stores the range.
+  // Vector-quantised features (study F2): with vq_bits in 2..8, the channels of every grid point are split into groups
+  // of vq_dim, and each group stores one index of vq_bits bits into the group's codebook of 2^vq_bits vectors (fp16).
+  // The features are the codewords nearest to `features` (vq_assign); feature_bits is then not used. File version 2.
+  int vq_bits = 0, vq_dim = 0;
+  std::vector<float> vq_codebook;  // [group][2^vq_bits][vq_dim]
+  std::vector<float> raw_codebook; // resident: the codebook as floats (raw_u8 then holds the packed indices)
   std::vector<std::string> control_names;    // n_controls names (stored, 15 characters each at most)
 
   // The features in their storage format, as the runtime keeps them resident: fp16 bit patterns, or N-bit codes with
@@ -80,6 +86,7 @@ struct Model {
   std::vector<std::uint8_t> raw_u8;
   std::vector<float> raw_ranges;
   void pack_features();
+  int vq_groups() const { return vq_bits > 0 && vq_dim > 0 ? h.feature_channels() / vq_dim : 0; }
 
   std::size_t feature_count() const;
   std::size_t param_count() const;     // everything a shipped effect stores, codes included
@@ -122,6 +129,10 @@ inline void put_packed_code(std::uint8_t* plane, std::size_t j, int bits, unsign
   plane[bit >> 3] = static_cast<std::uint8_t>(plane[bit >> 3] | ((code << shift) & 0xffu));
   if (shift + static_cast<unsigned>(bits) > 8) plane[(bit >> 3) + 1] = static_cast<std::uint8_t>(plane[(bit >> 3) + 1] | (code >> (8 - shift)));
 }
+
+// Vector quantisation: for every grid point of every slice and every channel group, the index of the nearest codeword
+// (squared distance; the lowest index on ties). Indices are laid out as planes [basis][slice][group][side][side].
+std::vector<std::uint8_t> vq_assign(const Model& m);
 
 // Plain reference forward pass: RGBA floats [size][size][4] at time t for condition c. `size` must be the native
 // size for the conv family; any size for the grid family. Slow and simple on purpose.

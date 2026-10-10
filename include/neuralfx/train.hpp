@@ -53,6 +53,13 @@ struct Options {
   // step at rate_bits (its min/max range over 2^rate_bits - 1; held constant within a step).
   float rate_lambda = 0.f;
   int rate_bits = 8;
+  // Vector quantisation (Model::vq_bits): after the first vq_start fraction of the iterations, a codebook of
+  // 2^vq_bits vectors per group of vq_dim channels is fitted by k-means to the features; from then on the forward pass
+  // sees every feature vector as its nearest codeword (gradients pass straight through to the float features) and
+  // each codeword moves towards the mean of the features assigned to it (exponential average); codewords unused for
+  // 50 steps restart at a random feature vector. The result carries the codebook.
+  int vq_bits = 0, vq_dim = 0;
+  float vq_start = 0.5f;
   std::function<void(int iteration, double loss)> progress;
 };
 

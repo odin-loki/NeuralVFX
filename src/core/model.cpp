@@ -33,7 +33,11 @@ std::size_t Model::param_count() const {
 std::size_t Model::storage_bytes() const {
   const std::size_t slices = static_cast<std::size_t>(h.bases) * h.grid_t * h.feature_channels();
   const std::size_t side2 = static_cast<std::size_t>(h.feature_side()) * h.feature_side();
-  const std::size_t feat = feature_bits < 16 ? slices * (packed_plane_bytes(side2, feature_bits) + 4) : features.size() * 2;
+  std::size_t feat = feature_bits < 16 ? slices * (packed_plane_bytes(side2, feature_bits) + 4) : features.size() * 2;
+  if (vq_groups() > 0) {
+    const std::size_t idx_planes = static_cast<std::size_t>(h.bases) * h.grid_t * static_cast<std::size_t>(vq_groups());
+    feat = 2 * vq_codebook.size() + idx_planes * packed_plane_bytes(side2, vq_bits);
+  }
   return feat + (param_count() - features.size()) * 2;
 }
 
@@ -255,6 +259,7 @@ namespace {
 
 constexpr std::string_view kMagic = "NVFXMDL1";
 constexpr std::uint32_t kVersion = 1;
+constexpr std::uint32_t kVersionVq = 2;  // vector-quantised features (vq_bits, vq_dim after feature_bits)
 
 float round_f16(float v) { return static_cast<float>(static_cast<std::float16_t>(v)); }
 
@@ -344,10 +349,123 @@ std::pair<float, float> feature_plane_range(std::span<const float> p, int bits, 
   return {best.lo, best.hi};
 }
 
+std::vector<std::uint8_t> vq_assign(const Model& m) {
+  const Hyper& h = m.h;
+  const int G = m.vq_groups(), d = m.vq_dim, K = 1 << m.vq_bits, C = h.feature_channels();
+  const std::size_t S2 = static_cast<std::size_t>(h.feature_side()) * h.feature_side();
+  const std::size_t slices = static_cast<std::size_t>(h.bases) * h.grid_t;
+  std::vector<std::uint8_t> idx(slices * static_cast<std::size_t>(G) * S2);
+  std::vector<float> v(static_cast<std::size_t>(d));
+  for (std::size_t sl = 0; sl < slices; ++sl) {
+    const float* f = m.features.data() + sl * static_cast<std::size_t>(C) * S2;
+    for (int g = 0; g < G; ++g) {
+      const float* cb = m.vq_codebook.data() + static_cast<std::size_t>(g) * K * d;
+      for (std::size_t j = 0; j < S2; ++j) {
+        for (int c = 0; c < d; ++c) v[static_cast<std::size_t>(c)] = f[static_cast<std::size_t>(g * d + c) * S2 + j];
+        int best = 0;
+        float best_d = std::numeric_limits<float>::infinity();
+        for (int k = 0; k < K; ++k) {
+          float dist = 0;
+          for (int c = 0; c < d; ++c) {
+            const float e = v[static_cast<std::size_t>(c)] - cb[static_cast<std::size_t>(k) * d + c];
+            dist += e * e;
+          }
+          if (dist < best_d) {
+            best_d = dist;
+            best = k;
+          }
+        }
+        idx[(sl * static_cast<std::size_t>(G) + static_cast<std::size_t>(g)) * S2 + j] = static_cast<std::uint8_t>(best);
+      }
+    }
+  }
+  return idx;
+}
+
+namespace {
+
+// The codebook in storage precision, ordered within each group by the codewords' projection on the group's first
+// principal axis (power iteration from a fixed start): neighbouring grid points with similar codewords then get
+// similar indices, which the lossless coder's numeric predictors exploit. The order changes no feature.
+void vq_canonical(Model& m) {
+  const int G = m.vq_groups(), d = m.vq_dim, K = 1 << m.vq_bits;
+  for (float& c : m.vq_codebook) c = round_f16(c);
+  for (int g = 0; g < G; ++g) {
+    float* cb = m.vq_codebook.data() + static_cast<std::size_t>(g) * K * d;
+    std::vector<double> mean(static_cast<std::size_t>(d), 0.0), axis(static_cast<std::size_t>(d), 1.0);
+    for (int k = 0; k < K; ++k) {
+      for (int c = 0; c < d; ++c) mean[static_cast<std::size_t>(c)] += static_cast<double>(cb[static_cast<std::size_t>(k) * d + c]) / K;
+    }
+    for (int it = 0; it < 30; ++it) {
+      std::vector<double> next(static_cast<std::size_t>(d), 0.0);
+      for (int k = 0; k < K; ++k) {
+        double dot = 0;
+        for (int c = 0; c < d; ++c) dot += (cb[static_cast<std::size_t>(k) * d + c] - mean[static_cast<std::size_t>(c)]) * axis[static_cast<std::size_t>(c)];
+        for (int c = 0; c < d; ++c) next[static_cast<std::size_t>(c)] += dot * (cb[static_cast<std::size_t>(k) * d + c] - mean[static_cast<std::size_t>(c)]);
+      }
+      double norm = 0;
+      for (const double x : next) norm += x * x;
+      if (norm <= 0) break;
+      for (int c = 0; c < d; ++c) axis[static_cast<std::size_t>(c)] = next[static_cast<std::size_t>(c)] / std::sqrt(norm);
+    }
+    std::vector<std::pair<double, int>> order;
+    for (int k = 0; k < K; ++k) {
+      double dot = 0;
+      for (int c = 0; c < d; ++c) dot += cb[static_cast<std::size_t>(k) * d + c] * axis[static_cast<std::size_t>(c)];
+      order.emplace_back(dot, k);
+    }
+    std::ranges::sort(order);
+    std::vector<float> sorted(static_cast<std::size_t>(K) * d);
+    for (int k = 0; k < K; ++k) {
+      std::copy_n(cb + static_cast<std::size_t>(order[static_cast<std::size_t>(k)].second) * d, d, sorted.begin() + static_cast<std::ptrdiff_t>(k) * d);
+    }
+    std::ranges::copy(sorted, cb);
+  }
+}
+
+bool vq_valid(const Model& m) {
+  return m.vq_bits >= 2 && m.vq_bits <= 8 && m.vq_dim >= 1 && m.h.feature_channels() % m.vq_dim == 0 &&
+         m.vq_codebook.size() == static_cast<std::size_t>(m.vq_groups()) * (std::size_t{1} << m.vq_bits) * static_cast<std::size_t>(m.vq_dim);
+}
+
+// Features replaced by their codewords.
+void vq_apply(Model& m, std::span<const std::uint8_t> idx) {
+  const Hyper& h = m.h;
+  const int G = m.vq_groups(), d = m.vq_dim, K = 1 << m.vq_bits, C = h.feature_channels();
+  const std::size_t S2 = static_cast<std::size_t>(h.feature_side()) * h.feature_side();
+  const std::size_t slices = static_cast<std::size_t>(h.bases) * h.grid_t;
+  for (std::size_t sl = 0; sl < slices; ++sl) {
+    float* f = m.features.data() + sl * static_cast<std::size_t>(C) * S2;
+    for (int g = 0; g < G; ++g) {
+      const float* cb = m.vq_codebook.data() + static_cast<std::size_t>(g) * K * d;
+      for (std::size_t j = 0; j < S2; ++j) {
+        const std::size_t q = idx[(sl * static_cast<std::size_t>(G) + static_cast<std::size_t>(g)) * S2 + j];
+        for (int c = 0; c < d; ++c) f[static_cast<std::size_t>(g * d + c) * S2 + j] = cb[q * static_cast<std::size_t>(d) + static_cast<std::size_t>(c)];
+      }
+    }
+  }
+}
+
+}  // namespace
+
 void Model::pack_features() {
   raw_f16.clear();
   raw_u8.clear();
   raw_ranges.clear();
+  raw_codebook.clear();
+  if (vq_groups() > 0) {
+    const std::size_t S2 = static_cast<std::size_t>(h.feature_side()) * h.feature_side(), pb = packed_plane_bytes(S2, vq_bits);
+    const auto idx = vq_assign(*this);
+    raw_u8.assign(idx.size() / S2 * pb, 0);
+    for (std::size_t p = 0; p < idx.size() / S2; ++p) {
+      for (std::size_t j = 0; j < S2; ++j) {
+        if (vq_bits == 8) raw_u8[p * pb + j] = idx[p * S2 + j];
+        else put_packed_code(raw_u8.data() + p * pb, j, vq_bits, idx[p * S2 + j]);
+      }
+    }
+    raw_codebook = vq_codebook;
+    return;
+  }
   if (feature_bits < 16) {
     const std::size_t p = plane_size(h), pb = packed_plane_bytes(p, feature_bits);
     raw_u8.assign(features.size() / p * pb, 0);
@@ -365,7 +483,10 @@ void Model::pack_features() {
 }
 
 void quantise_like_storage(Model& m) {
-  if (m.feature_bits < 16) {
+  if (m.vq_groups() > 0) {
+    vq_canonical(m);
+    vq_apply(m, vq_assign(m));
+  } else if (m.feature_bits < 16) {
     const std::size_t p = plane_size(m.h);
     for (std::size_t off = 0; off < m.features.size(); off += p) {
       const std::span plane(m.features.data() + off, p);
@@ -394,10 +515,18 @@ std::expected<void, std::string> save_model(const std::filesystem::path& path, c
   return save_model(o, m);
 }
 
-std::expected<void, std::string> save_model(std::ostream& o, const Model& m) {
+std::expected<void, std::string> save_model(std::ostream& o, const Model& m0) {
+  const bool vq = m0.vq_bits > 0;
+  if (vq && !vq_valid(m0)) return std::unexpected("nvfx: bad vector quantisation (bits 2 to 8, a codebook per channel group)");
+  Model canon;
+  if (vq) {  // the stored codebook order (vq_canonical)
+    canon = m0;
+    vq_canonical(canon);
+  }
+  const Model& m = vq ? canon : m0;
   const Hyper& h = m.h;
   o.write(kMagic.data(), static_cast<std::streamsize>(kMagic.size()));
-  bin::put(o, kVersion);
+  bin::put(o, vq ? kVersionVq : kVersion);
   bin::put(o, static_cast<std::uint32_t>(h.arch));
   for (const int v : {h.size, h.frames, static_cast<int>(h.loop), h.n_controls, h.n_latent, h.bases, h.grid_t, h.grid,
                       h.channels, h.hidden, h.layers, h.latent, h.c0, h.c1, h.c2}) {
@@ -406,11 +535,29 @@ std::expected<void, std::string> save_model(std::ostream& o, const Model& m) {
   bin::put_str(o, m.effect, 32);
   bin::put(o, m.fps);
   bin::put(o, static_cast<std::uint32_t>(m.feature_bits));
+  if (vq) {
+    bin::put(o, static_cast<std::uint32_t>(m.vq_bits));
+    bin::put(o, static_cast<std::uint32_t>(m.vq_dim));
+  }
   for (int k = 0; k < h.n_controls; ++k) {
     bin::put_str(o, static_cast<std::size_t>(k) < m.control_names.size() ? m.control_names[static_cast<std::size_t>(k)] : std::string{}, 16);
   }
   if (!valid_feature_bits(m.feature_bits)) return std::unexpected("nvfx: feature bits must be 2 to 8 or 16");
-  if (m.feature_bits < 16) {
+  if (vq) {
+    // The codebooks (fp16), then the index planes [basis][slice][group][side][side].
+    put_f16(o, m.vq_codebook);
+    const auto idx = vq_assign(m);
+    const std::size_t S2 = plane_size(h), pb = packed_plane_bytes(S2, m.vq_bits);
+    std::vector<std::uint8_t> codes(pb);
+    for (std::size_t p = 0; p < idx.size() / S2; ++p) {
+      std::ranges::fill(codes, std::uint8_t{0});
+      for (std::size_t j = 0; j < S2; ++j) {
+        if (m.vq_bits == 8) codes[j] = idx[p * S2 + j];
+        else put_packed_code(codes.data(), j, m.vq_bits, idx[p * S2 + j]);
+      }
+      o.write(reinterpret_cast<const char*>(codes.data()), static_cast<std::streamsize>(codes.size()));
+    }
+  } else if (m.feature_bits < 16) {
     const std::size_t p = plane_size(h);
     std::vector<std::uint8_t> codes(packed_plane_bytes(p, m.feature_bits));
     for (std::size_t off = 0; off < m.features.size(); off += p) {
@@ -449,7 +596,7 @@ std::expected<Model, std::string> load_model(std::istream& i) {
   i.read(magic.data(), static_cast<std::streamsize>(magic.size()));
   if (!i || magic != kMagic) return std::unexpected("nvfx: not a model");
   const auto version = bin::get<std::uint32_t>(i);
-  if (!version || *version != kVersion) return std::unexpected("nvfx: unsupported version");
+  if (!version || (*version != kVersion && *version != kVersionVq)) return std::unexpected("nvfx: unsupported version");
   const auto arch = bin::get<std::uint32_t>(i);
   if (!arch) return std::unexpected(arch.error());
   Hyper h;
@@ -474,13 +621,31 @@ std::expected<Model, std::string> load_model(std::istream& i) {
   if (!effect || !fps || !bits || !valid_feature_bits(static_cast<int>(*bits))) return std::unexpected("nvfx: bad header");
   m.effect = *effect;
   m.fps = *fps;
+  if (*version == kVersionVq) {
+    const auto vb = bin::get<std::uint32_t>(i), vd = bin::get<std::uint32_t>(i);
+    if (!vb || !vd || *vb < 2 || *vb > 8 || *vd < 1 || h.feature_channels() % static_cast<int>(*vd) != 0) return std::unexpected("nvfx: bad vector quantisation");
+    m.vq_bits = static_cast<int>(*vb);
+    m.vq_dim = static_cast<int>(*vd);
+    m.vq_codebook.resize(static_cast<std::size_t>(m.vq_groups()) * (std::size_t{1} << m.vq_bits) * static_cast<std::size_t>(m.vq_dim));
+  }
   for (int k = 0; k < h.n_controls; ++k) {
     auto name = bin::get_str(i, 16);
     if (!name) return std::unexpected(name.error());
     m.control_names.push_back(*name);
   }
   m.feature_bits = static_cast<int>(*bits);
-  if (m.feature_bits < 16) {
+  if (m.vq_bits > 0) {
+    if (auto e = get_f16(i, m.vq_codebook); !e) return std::unexpected(e.error());
+    const std::size_t S2 = plane_size(h), pb = packed_plane_bytes(S2, m.vq_bits);
+    const std::size_t planes = static_cast<std::size_t>(h.bases) * h.grid_t * static_cast<std::size_t>(m.vq_groups());
+    std::vector<std::uint8_t> idx(planes * S2), codes(pb);
+    for (std::size_t p = 0; p < planes; ++p) {
+      i.read(reinterpret_cast<char*>(codes.data()), static_cast<std::streamsize>(codes.size()));
+      if (!i) return std::unexpected("truncated file");
+      for (std::size_t j = 0; j < S2; ++j) idx[p * S2 + j] = static_cast<std::uint8_t>(m.vq_bits == 8 ? codes[j] : packed_code(codes.data(), j, m.vq_bits));
+    }
+    vq_apply(m, idx);
+  } else if (m.feature_bits < 16) {
     const std::size_t p = plane_size(h);
     std::vector<std::uint8_t> codes(packed_plane_bytes(p, m.feature_bits));
     for (std::size_t off = 0; off < m.features.size(); off += p) {
