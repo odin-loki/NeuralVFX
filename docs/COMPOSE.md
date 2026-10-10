@@ -272,3 +272,97 @@ What it needs to become a product feature:
 3. Training with couplings in the loop (above).
 4. A cheaper compositor: SIMD, half-resolution light and distortion, and the engine's own renderer doing the drawing
    (the fields can be uploaded as textures).
+
+## 9. Couplings in training (study I)
+
+Status: **design and rule written before the test** (10 October 2026). Code: the simulator's hooks
+(`sim::Fluid::push`, `add_material`), forced and hand-over runs and the coupled loss (`src/train/rollout_train.cpp`),
+and the study's steps (`nvfx_experiment i-data | i-probe | i-train | i-val | i-test`, `tools/experiment_i.cpp`).
+
+### 9.1 The question
+
+Each rollout effect of study D (v1) was trained alone. In a scene a push, a force field, a transfer or a hand-over
+gives it states and flows it never saw (§8). Does putting these couplings into training make a model follow the
+simulator better when it is coupled, without making it worse when it runs alone?
+
+### 9.2 What the fireball does to each model
+
+`nvfx_fireball` was run once with every coupling measured on the coarse grid, per module and frame (velocities in
+cells of the 32-cell grid per frame; heat and soot in the simulator's units):
+
+| module | its own flow (RMS) | push (strongest cell: median / max) | ceiling (velocity change) | material in, per frame | material out, per frame |
+|---|---:|---:|---:|---:|---|
+| burning wreck (fire) | 0.35-0.48 | 0.18 / 0.49 | - | - | half of the top 4 rows (transfer to the sky) |
+| new fires (fire) | 0.39-0.58 | 0.14-0.22 / 0.32 | - | - | half of the top 4 rows |
+| explosion tiles | 0.20-0.49 | 0 | up to 0.06 | heat up to 0.056, soot up to 0.047 | - |
+| second explosion | 0.15-0.36 | 0.07 / 0.09 | - | - | 5% everywhere (transfer to the cloud) |
+| smoke tiles | 0.12-0.46 | 0 | up to 0.10 | soot up to 0.017 | everything over the source in two tiles (suppress) |
+
+So the wreck's fire is pushed by up to its own speed, and the clouds are damped and fed. The smoke model also starts
+from the explosion model's state (hand-over at 2.4 s after the detonation).
+
+### 9.3 Design
+
+- **Ground truth for coupled runs is the simulator with the same operations.** `Fluid::push(du, dv)` adds a velocity
+  field; `push`, `step_frame()`, `push(-du, -dv)` is what `compose::push` does to a learned effect (the flow moves
+  material for one frame and does not build up). `add_material(dT, dD)` adds heat and soot, clamped at zero. Push then
+  unpush without a step restores the state up to one float rounding of each sum (exactly where the addition is exact;
+  a zero push changes nothing, bit for bit); the tests check this, determinism, and that material moves with a push.
+- **Forced runs.** Each run has a random spec (`random_forcing`, seeded): one to four events, each with a random onset,
+  duration, place and amplitude, of five kinds: a temporary push (35%: a gust, a vortex or a drifting wave; up to 0.5
+  cells per frame on fire, 0.3 on the others; 10 to 120 frames), a lasting force (15%: a kick of 2 to 12 frames that
+  stays in the flow), a ceiling (15%: v multiplied by down to 0.7 per frame above a height, 30 to 150 frames),
+  material in (15%: up to 0.06 heat and soot per frame in a blob) and material out (20%: 2% to 60% per frame, or all,
+  in a disc, over the source, or through the top). The fields are evaluated at the simulator's resolution and
+  applied to it; their coarse version is averaged and scaled exactly as `coarse_from_sim` averages the state, and
+  stored with the run for the state it produced. The amplitudes cover §9.2 and go somewhat beyond it.
+- **Hand-over runs (smoke).** An explosion simulated for 0.8 to 3 s, its state set into a smoke simulation
+  (`set_state`) and recorded from there: the smoke model's training then contains explosion states.
+- **The coupled loss.** In `window_loss` (and its burn-in) the operations are applied to the model's state before
+  each step exactly as compose applies them (material, then the ceiling's v multiplier, then force and push), and the
+  push is taken out after the step. The gradient passes through the offsets unchanged, is scaled by the multipliers
+  and stops where heat or soot is clamped at zero (the finite-difference test covers it). As in compose, the state
+  is clamped to the training range inside the step, before the push is taken out.
+- **Fine-tuning from v1, not retraining.** v1 is loaded (frozen: never overwritten), its normalisation kept, and only
+  the stepper trained, with the recipe's last stage (windows of 16 frames, half after up to 48 frames of the model's
+  own rollout, 32 for explosions; the profile and activity losses) at a lower learning rate, on a mix: a window comes
+  from a coupled run (forced or hand-over) with probability `share`, otherwise from a plain run. Renderer, detail
+  constants and start points stay v1's, so only the stepper differs. The plain runs are v1's own training runs
+  (salt 1, the first 96 of fire and smoke and 144 of the explosion); the forced runs are new salt-1 runs (96 fire, 64
+  smoke plus 64 hand-overs, 144 explosion).
+- **Choices on validation only.** A 2 x 2 grid (share 0.5 and 0.8, learning rate 1e-4 and 3e-4; v1's last stage
+  used 7e-4), 400 iterations of 16 windows each, with a model saved every 100 iterations, is scored on validation:
+  salt-3 runs, study G's 10 validation settings, validation seeds and validation forcing seeds, with the measures of
+  §9.4. The chosen candidate, **v2c**, has the best coupled tracking (mean PSNR at 8 and 30 frames over the forced
+  cases, and for smoke the hand-over cases too) among the candidates that stay within guards against v1 on
+  validation: plain tracking (mean over 1, 8, 30 and 60 frames) at most 0.1 dB lower, spectrum distance at most 0.01
+  higher, mean |log motion ratio| at most 0.03 higher, coverage distance at most 0.005 higher and mean-frame PSNR at
+  most 0.3 dB lower (if none stays within them, the best coupled score is taken anyway, and the test decides). The
+  same fine-tuning with share 0 (plain runs only) at v2c's learning rate, stopped at v2c's checkpoint, is the control
+  **v2p**: it shows how much of any change comes from the couplings and how much from more training.
+
+### 9.4 Evaluation
+
+- **Forced tracking.** Study B's 10 held-out settings, two new seeds each, random couplings from held-out forcing
+  seeds (onsets in the first half second). The truth is the simulator with the couplings; the model starts from the
+  true state (coarse and fine, as stored) with the run's noise seed and gets the same couplings, through the
+  runtime's runner as compose drives it (the material also enters the fine fields). Active PSNR against the truth at
+  1, 8, 30 and 60 frames.
+- **Hand-over tracking (smoke).** Explosions of salt 2 handed to the smoke simulation after 0.8 to 3 s, at B's
+  settings with new seeds; the smoke model takes the true explosion state over as `compose::hand_over` does.
+- **No regression.** Plain tracking as study D's (salt-2 runs from their true states, here 16 runs, D's 8 and 8
+  more of the same kind), and the endless statistics exactly as study D's test (B's settings, D's seeds, shards):
+  spectrum distance, motion ratio (as |log ratio|), coverage distance and mean-frame PSNR.
+- **Intervals:** 95% paired bootstrap (10,000 resamples) over runs or settings, model minus v1.
+
+### 9.5 The rule (written before the test)
+
+v2c is kept for an effect when all of these hold on the test, which is run once:
+1. **Coupled tracking is better:** forced tracking is better than v1 at 8 and at 30 frames, both intervals above
+   zero. For smoke, either the forced or the hand-over tracking is better at 8 and 30 frames in this sense, and the
+   other is not worse at 8 or 30 frames (no interval entirely below zero).
+2. **Plain tracking is not worse:** at 1, 8, 30 and 60 frames no interval lies entirely below zero.
+3. **The endless statistics are not worse:** for spectrum distance, |log motion ratio|, coverage distance and
+   mean-frame PSNR, no interval lies entirely on the worse side.
+
+Otherwise v1 stays. Every effect is reported, nulls with their numbers.

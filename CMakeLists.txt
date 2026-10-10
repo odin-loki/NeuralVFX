@@ -125,6 +125,9 @@ if(NEURALFX_BUILD_TOOLS)
   target_sources(nvfx_experiment PRIVATE tools/experiment_d.cpp)  # study D: start points and learned dynamics
   target_sources(nvfx_experiment PRIVATE tools/experiment_g.cpp tools/fine_study.cpp)  # study G (docs/DCM.md)
   target_link_libraries(nvfx_experiment PRIVATE neuralfx_dcm neuralfx_dcm_fine neuralfx_ddpm)
+  # study I (docs/COMPOSE.md §9): couplings in training; tracking drives the runtime's runner as compose does
+  target_sources(nvfx_experiment PRIVATE tools/experiment_i.cpp)
+  target_link_libraries(nvfx_experiment PRIVATE neuralfx_compose)
   # DCM: the mixer search on synthetic problems, version stamps of released mixers, DCM-fine (G1) and the coarse-state
   # denoiser (G2).
   add_executable(nvfx_dcm tools/nvfx_dcm.cpp tools/fine_study.cpp)

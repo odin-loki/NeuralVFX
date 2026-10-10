@@ -204,3 +204,99 @@ TEST(ImageIo, PngHasSignatureAndSheetHasExpectedSize) {
   EXPECT_EQ(std::string_view(sig + 1, 3), "PNG");
   std::filesystem::remove(path);
 }
+
+// Couplings from outside (docs/COMPOSE.md §9): push and add_material.
+namespace {
+
+sim::Fluid running(sim::Effect e, int frames) {
+  sim::Fluid f(small(e));
+  for (int i = 0; i < frames; ++i) f.step_frame();
+  return f;
+}
+
+std::vector<float> wave(int n, float amp, float phase) {
+  std::vector<float> v(static_cast<std::size_t>(n) * n);
+  for (std::size_t i = 0; i < v.size(); ++i) v[i] = amp * std::sin(0.37f * static_cast<float>(i % 97) + phase);
+  return v;
+}
+
+}  // namespace
+
+TEST(Sim, PushThenUnpushRestoresTheState) {
+  for (const sim::Effect e : sim::kEffects) {
+    sim::Fluid f = running(e, 15);
+    const sim::State a = f.state();
+    const auto du = wave(a.n, 37.f, 0.f), dv = wave(a.n, 23.f, 1.f);
+    std::vector<float> mu(du.size()), mv(dv.size());
+    std::ranges::transform(du, mu.begin(), [](float x) { return -x; });
+    std::ranges::transform(dv, mv.begin(), [](float x) { return -x; });
+    f.push(du, dv);
+    const sim::State b = f.state();
+    EXPECT_NE(a.u, b.u);
+    f.push(mu, mv);
+    const sim::State c = f.state();
+    // (u + du) - du is u up to one rounding of the sum: exact wherever float addition is
+    for (std::size_t i = 0; i < a.u.size(); ++i) {
+      ASSERT_NEAR(c.u[i], a.u[i], 1e-6f * (std::abs(a.u[i]) + std::abs(du[i]))) << i;
+      ASSERT_NEAR(c.v[i], a.v[i], 1e-6f * (std::abs(a.v[i]) + std::abs(dv[i]))) << i;
+    }
+    EXPECT_EQ(c.temp, a.temp);
+    EXPECT_EQ(c.soot, a.soot);
+    EXPECT_EQ(c.pressure, a.pressure);
+    // a zero push changes nothing, and the run continues bit for bit as if nothing had been done
+    sim::Fluid g = running(e, 15), h = running(e, 15);
+    const std::vector<float> zero(du.size(), 0.f);
+    g.push(zero, zero);
+    g.add_material(zero, zero);
+    for (int i = 0; i < 5; ++i) {
+      g.step_frame();
+      h.step_frame();
+    }
+    EXPECT_EQ(g.state().u, h.state().u) << sim::effect_name(e);
+    EXPECT_EQ(g.state().soot, h.state().soot) << sim::effect_name(e);
+  }
+}
+
+TEST(Sim, PushIsDeterministicAndMovesMaterial) {
+  const auto run = [](bool pushed) {
+    sim::Fluid f = running(sim::Effect::smoke, 20);
+    const int n = f.state().n;
+    const std::vector<float> du(static_cast<std::size_t>(n) * n, 300.f), zero(du.size(), 0.f);
+    std::vector<float> back(du.size(), -300.f);
+    for (int i = 0; i < 4; ++i) {
+      if (pushed) f.push(du, zero);
+      f.step_frame();
+      if (pushed) f.push(back, zero);
+    }
+    return f.state();
+  };
+  const sim::State a = run(true), b = run(true), plain = run(false);
+  EXPECT_EQ(a.u, b.u);
+  EXPECT_EQ(a.soot, b.soot);
+  // the soot's centre of mass moved right (a push of 300 cells per second for 4 frames)
+  const auto cx = [](const sim::State& s) {
+    double m = 0, x = 0;
+    for (std::size_t i = 0; i < s.soot.size(); ++i) {
+      m += s.soot[i];
+      x += s.soot[i] * static_cast<double>(i % static_cast<std::size_t>(s.n));
+    }
+    return x / m;
+  };
+  EXPECT_GT(cx(a), cx(plain) + 1.0);
+}
+
+TEST(Sim, AddMaterialClampsAtZero) {
+  sim::Fluid f = running(sim::Effect::fire, 20);
+  const sim::State a = f.state();
+  std::vector<float> minus(a.temp.size(), -0.3f), plus(a.temp.size(), 0.25f);
+  f.add_material(minus, plus);
+  const sim::State b = f.state();
+  for (std::size_t i = 0; i < a.temp.size(); ++i) {
+    ASSERT_EQ(b.temp[i], std::max(0.f, a.temp[i] - 0.3f));
+    ASSERT_EQ(b.soot[i], std::max(0.f, a.soot[i] + 0.25f));
+  }
+  EXPECT_EQ(b.u, a.u);
+  const std::vector<float> wrong(5, 0.f);
+  EXPECT_THROW(f.add_material(wrong, wrong), std::invalid_argument);
+  EXPECT_THROW(f.push(wrong, wrong), std::invalid_argument);
+}

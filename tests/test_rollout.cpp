@@ -8,6 +8,7 @@
 #include <gtest/gtest.h>
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <format>
 #include <random>
@@ -176,9 +177,27 @@ TEST(Rollout, TrainerForwardMatchesTheReference) {
 
 namespace {
 
-void rollout_gradient_check(int unroll, int burn, float profile, float activity = 0.f) {
+// Couplings on the tiny run (docs/COMPOSE.md §9): every operation before two steps in three, small enough that the
+// backtraces stay inside their cells.
+Run tiny_forced_run(const Hyper& h, int frames) {
+  Run r = tiny_run(h, frames);
+  const int N = h.res * h.res;
+  r.forcing_at.assign(static_cast<std::size_t>(frames), -1);
+  for (int i = 0; i < frames; ++i) {
+    if (i % 3 == 0) continue;
+    r.forcing_at[static_cast<std::size_t>(i)] = static_cast<int>(r.forcing.size() / (static_cast<std::size_t>(N) * kForce));
+    for (int j = 0; j < N; ++j) {
+      const float a = 0.3f * static_cast<float>(i) + 0.7f * static_cast<float>(j);
+      r.forcing.insert(r.forcing.end(), {0.03f * std::sin(a), 0.025f * std::cos(a), 0.012f * std::sin(1.3f * a), -0.01f * std::cos(0.7f * a),
+                                         0.9f + 0.08f * std::sin(a), 0.85f + 0.1f * std::cos(a), 0.03f * (1.f + std::sin(a)), 0.02f * (1.f + std::cos(a))});
+    }
+  }
+  return r;
+}
+
+void rollout_gradient_check(int unroll, int burn, float profile, float activity = 0.f, bool forced = false) {
   Model m = tiny_model(11 + static_cast<std::uint64_t>(unroll + burn));
-  const auto r = tiny_run(m.h, 12);
+  const auto r = forced ? tiny_forced_run(m.h, 12) : tiny_run(m.h, 12);
   std::vector<float> grad(m.step_w.size(), 0.f);
   const double l0 = window_loss(m, r, 1, unroll, burn, 0.f, profile, 5, &grad, activity);
   ASSERT_GT(l0, 0.0);
@@ -237,6 +256,140 @@ TEST(Rollout, GradientsMatchFiniteDifferencesThroughTime) { rollout_gradient_che
 // stepper's own rollout went), so finite differences, which would re-run them, check the profile loss without them.
 TEST(Rollout, GradientsMatchFiniteDifferencesWithProfiles) { rollout_gradient_check(3, 0, 1.f); }
 TEST(Rollout, GradientsMatchFiniteDifferencesWithActivity) { rollout_gradient_check(4, 0, 0.5f, 50.f); }
+// Through the couplings: the push is added and taken out, forces and material added, v and material multiplied.
+TEST(Rollout, GradientsMatchFiniteDifferencesWithCouplings) { rollout_gradient_check(4, 0, 0.5f, 50.f, true); }
+
+TEST(Rollout, CouplingsChangeTheWindowAndBurnInFollowsThem) {
+  const Model m = tiny_model();
+  const auto plain = tiny_run(m.h, 12), forced = tiny_forced_run(m.h, 12);
+  EXPECT_NE(window_loss(m, plain, 1, 3, 0, 0.f, 0.f, 5, nullptr), window_loss(m, forced, 1, 3, 0, 0.f, 0.f, 5, nullptr));
+  const double a = window_loss(m, plain, 1, 2, 3, 0.f, 0.f, 5, nullptr), b = window_loss(m, forced, 1, 2, 3, 0.f, 0.f, 5, nullptr);
+  EXPECT_TRUE(std::isfinite(a) && std::isfinite(b));
+  EXPECT_NE(a, b);
+  // a forced run whose slots are all empty is the plain run
+  rollout::Run none = forced;
+  std::ranges::fill(none.forcing_at, -1);
+  EXPECT_EQ(window_loss(m, plain, 1, 3, 2, 0.f, 0.5f, 5, nullptr, 20.f), window_loss(m, none, 1, 3, 2, 0.f, 0.5f, 5, nullptr, 20.f));
+}
+
+TEST(Rollout, ApplyForcingAndRemovePushMirrorCompose) {
+  const int C = 6;
+  std::vector<float> s = {0.5f, -0.2f, 0.8f, 0.3f, 0.1f, 0.2f};
+  const std::vector<float> f = {0.25f, 0.125f, 0.5f, -0.25f, 0.5f, 0.75f, 0.125f, 0.0625f};
+  apply_forcing(s, C, f);
+  EXPECT_FLOAT_EQ(s[0], 0.5f + 0.5f + 0.25f);
+  EXPECT_FLOAT_EQ(s[1], -0.2f * 0.5f - 0.25f + 0.125f);
+  EXPECT_FLOAT_EQ(s[2], 0.8f * 0.75f + 0.125f);
+  EXPECT_FLOAT_EQ(s[3], 0.3f * 0.75f + 0.0625f);
+  EXPECT_EQ(s[4], 0.1f);  // memory channels are not touched
+  remove_push(s, C, f);
+  EXPECT_FLOAT_EQ(s[0], 0.5f + 0.5f);  // the force stays, the push goes
+  EXPECT_FLOAT_EQ(s[1], -0.2f * 0.5f - 0.25f);
+  std::vector<float> t = {0.f, 0.f, 0.1f, 0.1f};
+  apply_forcing(t, 4, std::vector<float>{0, 0, 0, 0, 1, 1, -0.5f, 0});
+  EXPECT_EQ(t[2], 0.f);  // heat stays at or above zero
+}
+
+TEST(Rollout, ForcedRunWithoutEventsIsThePlainRun) {
+  sim::Params p;
+  p.effect = sim::Effect::fire;
+  p.size = 32;
+  p.pressure_iters = 10;
+  p.seed = 9;
+  const rollout::Run a = record_run(p, 12, 8), b = record_forced_run(p, ForcingSpec{}, 12, 8);
+  EXPECT_EQ(a.coarse, b.coarse);
+  EXPECT_TRUE(std::ranges::all_of(b.forcing_at, [](int k) { return k < 0; }));
+  // with couplings: deterministic, different from the plain run, the slots where the spec is active
+  const ForcingSpec spec = random_forcing(sim::Effect::fire, 12, 77, 2, 6);
+  const rollout::Run c = record_forced_run(p, spec, 12, 8), d = record_forced_run(p, spec, 12, 8);
+  EXPECT_EQ(c.coarse, d.coarse);
+  EXPECT_EQ(c.forcing, d.forcing);
+  EXPECT_NE(c.coarse, a.coarse);
+  for (int i = 0; i < 12; ++i) EXPECT_EQ(c.forcing_at[static_cast<std::size_t>(i)] >= 0, spec.active(i)) << i;
+}
+
+TEST(Rollout, CoarseForcingIsAveragedLikeTheState) {
+  ForcingSpec spec;
+  Coupling g;
+  g.kind = Coupling::Kind::push;
+  g.shape = Coupling::Shape::vortex;
+  g.duration = 5;
+  g.amp = 0.4f;
+  g.radius = 0.2f;
+  spec.events.push_back(g);
+  Coupling a;
+  a.kind = Coupling::Kind::add;
+  a.duration = 5;
+  a.amp = 0.05f;
+  a.amp2 = 0.02f;
+  spec.events.push_back(a);
+  sim::Params p;
+  SimForcing sf;
+  forcing_fields(spec, p, 64, 2, sf);
+  std::vector<float> cf(16 * 16 * kForce), cs(16 * 16 * kPhys);
+  coarse_forcing(sf, 16, p.fps, cf);
+  sim::State st;
+  st.n = 64;
+  st.u = sf.pu;
+  st.v = sf.pv;
+  st.temp = sf.ah;
+  st.soot = sf.as;
+  coarse_from_sim(st, 16, p.fps, cs);
+  float peak = 0.f;
+  for (int i = 0; i < 16 * 16; ++i) {
+    for (int k = 0; k < 2; ++k) EXPECT_EQ(cf[static_cast<std::size_t>(i) * kForce + k], cs[static_cast<std::size_t>(i) * kPhys + k]);
+    EXPECT_EQ(cf[static_cast<std::size_t>(i) * kForce + 6], cs[static_cast<std::size_t>(i) * kPhys + 2]);
+    EXPECT_EQ(cf[static_cast<std::size_t>(i) * kForce + 7], cs[static_cast<std::size_t>(i) * kPhys + 3]);
+    EXPECT_FLOAT_EQ(cf[static_cast<std::size_t>(i) * kForce + 4], 1.f);  // no ceiling
+    peak = std::max(peak, std::hypot(cf[static_cast<std::size_t>(i) * kForce], cf[static_cast<std::size_t>(i) * kForce + 1]));
+  }
+  // the vortex's peak speed is `amp` cells of a 32-cell grid per frame: 0.2 cells of this 16-cell grid
+  EXPECT_NEAR(peak, 0.4f * 16.f / 32.f, 0.03f);
+}
+
+TEST(Rollout, RandomForcingIsDeterministicAndCoversEveryKind) {
+  std::array<int, 5> kinds{};
+  for (std::uint64_t seed = 1; seed <= 300; ++seed) {
+    const ForcingSpec a = random_forcing(sim::Effect::smoke, 240, seed, 15, 230), b = random_forcing(sim::Effect::smoke, 240, seed, 15, 230);
+    ASSERT_EQ(a.events.size(), b.events.size());
+    ASSERT_GE(a.events.size(), 1u);
+    for (std::size_t k = 0; k < a.events.size(); ++k) {
+      const Coupling& c = a.events[k];
+      EXPECT_EQ(c.onset, b.events[k].onset);
+      EXPECT_EQ(c.amp, b.events[k].amp);
+      EXPECT_GE(c.onset, 15);
+      EXPECT_LE(c.onset + c.duration, 240);
+      ++kinds[static_cast<std::size_t>(c.kind)];
+    }
+  }
+  for (const int n : kinds) EXPECT_GT(n, 30);
+}
+
+TEST(Rollout, HandoverRunStartsFromTheExplosionsState) {
+  sim::Params ex, sm;
+  ex.effect = sim::Effect::explosion;
+  ex.size = 32;
+  ex.pressure_iters = 10;
+  sm = ex;
+  sm.effect = sim::Effect::smoke;
+  sm.seed = 3;
+  const rollout::Run r = record_handover_run(ex, 6, sm, 5, 8);
+  sim::Fluid f(ex);
+  for (int i = 0; i < 6; ++i) f.step_frame();
+  std::vector<float> c(8 * 8 * kPhys);
+  coarse_from_sim(f.state(), 8, ex.fps, c);
+  EXPECT_EQ(std::vector<float>(r.coarse.begin(), r.coarse.begin() + static_cast<std::ptrdiff_t>(c.size())), c);
+  EXPECT_EQ(r.p.effect, sim::Effect::smoke);
+  EXPECT_FLOAT_EQ(r.t0 + 1.f / ex.fps, 6.f / ex.fps);  // state 0 at the explosion's time
+  // and then the smoke simulation continues from it
+  sim::Params q = sm;
+  q.sim_res = 32;
+  sim::Fluid g(q);
+  g.set_state(f.state());
+  g.step_frame();
+  coarse_from_sim(g.state(), 8, ex.fps, c);
+  EXPECT_EQ(std::vector<float>(r.coarse.begin() + static_cast<std::ptrdiff_t>(c.size()), r.coarse.begin() + static_cast<std::ptrdiff_t>(2 * c.size())), c);
+}
 
 TEST(Rollout, BurnInStartsFromTheStepperRollout) {
   const Model m = tiny_model();
