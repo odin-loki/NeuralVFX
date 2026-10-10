@@ -21,6 +21,7 @@
 #include <iosfwd>
 #include <span>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace nfx {
@@ -68,6 +69,8 @@ struct Model {
   std::vector<std::vector<float>> z_train;   // the codes themselves (replay a training variation)
   int feature_bits = 16;  // storage precision of `features` in the file: 16 (fp16), or 2 to 8 (per-plane affine, below 8
                           // bit-packed; see packed_plane_bytes)
+  bool feature_trim = false;  // affine planes: the range that quantises the plane best (feature_plane_range), clipping
+                              // its tails, instead of its min and max. Chosen when saving; the file stores the range.
   std::vector<std::string> control_names;    // n_controls names (stored, 15 characters each at most)
 
   // The features in their storage format, as the runtime keeps them resident: fp16 bit patterns, or N-bit codes with
@@ -98,6 +101,11 @@ std::vector<float> condition(const Model& m, std::span<const float> controls, st
 // occupies bits [j N, j N + N) of the plane's bytes, least significant bit first, and the plane is padded with zero
 // bits to a whole byte.
 inline bool valid_feature_bits(int bits) { return bits == 16 || (bits >= 2 && bits <= 8); }
+
+// The (lo, hi) range of an affine plane at `bits`, both fp16 values: the plane's min and max, or with `trim` the
+// candidate range with the least squared quantisation error among the min and max and the ranges that clip the
+// plane's lowest and highest 0.2%, 0.5%, 1%, 2%, 4% and 8% of values (values outside are stored as the end codes).
+std::pair<float, float> feature_plane_range(std::span<const float> plane, int bits, bool trim);
 inline std::size_t packed_plane_bytes(std::size_t values, int bits) {
   return bits >= 8 ? values : (values * static_cast<std::size_t>(bits) + 7) / 8;
 }

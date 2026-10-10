@@ -6,6 +6,7 @@
 #include <cmath>
 #include <format>
 #include <fstream>
+#include <limits>
 #include <random>
 #include <ranges>
 #include <stdexcept>
@@ -261,7 +262,7 @@ float round_f16(float v) { return static_cast<float>(static_cast<std::float16_t>
 struct Plane8 {
   float lo, hi;
 };
-Plane8 plane_range(std::span<const float> p) {
+Plane8 minmax_range(std::span<const float> p) {
   const auto [mn, mx] = std::ranges::minmax(p);
   return {round_f16(mn), round_f16(std::max(mx, mn + 1e-6f))};
 }
@@ -271,6 +272,11 @@ std::uint8_t q8(float v, Plane8 r, int bits = 8) {
   return static_cast<std::uint8_t>(std::clamp(std::lround((v - r.lo) / (r.hi - r.lo) * static_cast<float>(qm)), 0L, qm));
 }
 float dq8(unsigned q, Plane8 r, int bits = 8) { return r.lo + static_cast<float>(q) / static_cast<float>(qmax_of(bits)) * (r.hi - r.lo); }
+
+Plane8 plane_range(std::span<const float> p, int bits, bool trim) {
+  const auto [lo, hi] = feature_plane_range(p, bits, trim);
+  return {lo, hi};
+}
 
 // One plane's codes into `out` (packed_plane_bytes bytes: one per code at 8 bits, bit-packed below).
 void put_plane_codes(std::span<const float> plane, Plane8 r, int bits, std::uint8_t* out) {
@@ -313,6 +319,31 @@ std::expected<Dense, std::string> get_dense(std::istream& i) {
 
 }  // namespace
 
+std::pair<float, float> feature_plane_range(std::span<const float> p, int bits, bool trim) {
+  const Plane8 full = minmax_range(p);
+  if (!trim || p.size() < 8) return {full.lo, full.hi};
+  std::vector<float> v(p.begin(), p.end());
+  std::ranges::sort(v);
+  const std::size_t n = v.size();
+  Plane8 best = full;
+  double best_err = std::numeric_limits<double>::infinity();
+  for (const double t : {0.0, 0.002, 0.005, 0.01, 0.02, 0.04, 0.08}) {
+    const auto k = static_cast<std::size_t>(t * static_cast<double>(n - 1));
+    Plane8 r = t == 0.0 ? full : Plane8{round_f16(v[k]), round_f16(v[n - 1 - k])};
+    if (!(r.hi > r.lo)) continue;
+    double err = 0;
+    for (const float x : v) {
+      const double d = static_cast<double>(x) - static_cast<double>(dq8(q8(x, r, bits), r, bits));
+      err += d * d;
+    }
+    if (err < best_err) {
+      best_err = err;
+      best = r;
+    }
+  }
+  return {best.lo, best.hi};
+}
+
 void Model::pack_features() {
   raw_f16.clear();
   raw_u8.clear();
@@ -322,7 +353,7 @@ void Model::pack_features() {
     raw_u8.assign(features.size() / p * pb, 0);
     for (std::size_t off = 0, k = 0; off < features.size(); off += p, ++k) {
       const std::span plane(features.data() + off, p);
-      const Plane8 r = plane_range(plane);
+      const Plane8 r = plane_range(plane, feature_bits, feature_trim);
       raw_ranges.push_back(r.lo);
       raw_ranges.push_back(r.hi);
       put_plane_codes(plane, r, feature_bits, raw_u8.data() + k * pb);
@@ -338,7 +369,7 @@ void quantise_like_storage(Model& m) {
     const std::size_t p = plane_size(m.h);
     for (std::size_t off = 0; off < m.features.size(); off += p) {
       const std::span plane(m.features.data() + off, p);
-      const Plane8 r = plane_range(plane);
+      const Plane8 r = plane_range(plane, m.feature_bits, m.feature_trim);
       for (float& v : plane) v = dq8(q8(v, r, m.feature_bits), r, m.feature_bits);
     }
   } else {
@@ -384,7 +415,7 @@ std::expected<void, std::string> save_model(std::ostream& o, const Model& m) {
     std::vector<std::uint8_t> codes(packed_plane_bytes(p, m.feature_bits));
     for (std::size_t off = 0; off < m.features.size(); off += p) {
       const std::span plane(m.features.data() + off, p);
-      const Plane8 r = plane_range(plane);
+      const Plane8 r = plane_range(plane, m.feature_bits, m.feature_trim);
       put_f16(o, std::array{r.lo, r.hi});
       put_plane_codes(plane, r, m.feature_bits, codes.data());
       o.write(reinterpret_cast<const char*>(codes.data()), static_cast<std::streamsize>(codes.size()));

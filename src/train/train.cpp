@@ -67,26 +67,21 @@ void check(const Hyper& h, std::span<const Example> data) {
 
 }  // namespace
 
-void fake_quantise(Model& m, int bits) {
-  const int saved = m.feature_bits;
-  m.feature_bits = bits;
+void fake_quantise(Model& m, int bits, bool trim) {
   // Only the features: quantise_like_storage also rounds the other weights to fp16, which training must not do.
   const std::size_t plane = static_cast<std::size_t>(m.h.feature_side()) * m.h.feature_side();
   const float qm = static_cast<float>((1 << bits) - 1);
   for (std::size_t off = 0; off < m.features.size(); off += plane) {
     const std::span p(m.features.data() + off, plane);
-    const auto [mn, mx] = std::ranges::minmax(p);
-    const float lo = static_cast<float>(static_cast<std::float16_t>(mn));
-    const float hi = static_cast<float>(static_cast<std::float16_t>(std::max(mx, mn + 1e-6f)));
+    const auto [lo, hi] = feature_plane_range(p, bits, trim);
     for (float& v : p) {
       const float q = std::clamp(static_cast<float>(std::lround((v - lo) / (hi - lo) * qm)), 0.f, qm);
       v = lo + q / qm * (hi - lo);
     }
   }
-  m.feature_bits = saved;
 }
 
-double feature_rate(const Model& m, int bits, std::span<float> grad, float weight) {
+double feature_rate(const Model& m, int bits, std::span<float> grad, float weight, bool trim) {
   const Hyper& h = m.h;
   const int S = h.feature_side(), C = h.feature_channels(), T = h.grid_t;
   const std::size_t plane = static_cast<std::size_t>(S) * S;
@@ -99,8 +94,8 @@ double feature_rate(const Model& m, int bits, std::span<float> grad, float weigh
         const std::size_t off = ((static_cast<std::size_t>(k) * T + t) * C + c) * plane;
         const float* p = m.features.data() + off;
         const float* q = t > 0 ? p - static_cast<std::size_t>(C) * plane : nullptr;  // previous time slice, same channel
-        const auto [mn, mx] = std::minmax_element(p, p + plane);
-        const float step = std::max(*mx - *mn, 1e-6f) / qm;
+        const auto [plo, phi] = feature_plane_range(std::span(p, plane), bits, trim);
+        const float step = std::max(phi - plo, 1e-6f) / qm;
         float* g = grad.empty() ? nullptr : grad.data() + off;
         float* gq = g && q ? g - static_cast<std::size_t>(C) * plane : nullptr;
         for (int y = 0; y < S; ++y) {
@@ -257,7 +252,7 @@ Result train(const Hyper& h_in, std::span<const Example> data, const Options& o)
     const bool qat = o.qat_bits > 0 && it >= qat_from;
     if (qat) {
       fwd = m;
-      fake_quantise(fwd, o.qat_bits);
+      fake_quantise(fwd, o.qat_bits, o.qat_trim);
     }
     const Model& seen = qat ? fwd : m;
     // The minibatch: (example, frame) pairs, dealt round-robin to the threads.
@@ -295,7 +290,7 @@ Result train(const Hyper& h_in, std::span<const Example> data, const Options& o)
     const double loss = std::ranges::fold_left(sse, 0.0, std::plus{}) / (static_cast<double>(o.batch_frames) * pixels_per_frame * 4.0);
     losses.push_back(loss);
     if (o.rate_lambda > 0.f && !o.freeze_model) {  // the rate term reaches every slice
-      rate = feature_rate(m, o.rate_bits, total.g.features, o.rate_lambda / static_cast<float>(m.features.size())) /
+      rate = feature_rate(m, o.rate_bits, total.g.features, o.rate_lambda / static_cast<float>(m.features.size()), o.qat_trim) /
              static_cast<double>(m.features.size());
       std::ranges::fill(total.touched, std::uint8_t{1});
     }
@@ -344,7 +339,8 @@ Result train(const Hyper& h_in, std::span<const Example> data, const Options& o)
     }
   }
 
-  res.final_rate = o.rate_lambda > 0.f ? rate : feature_rate(m, o.qat_bits > 0 ? o.qat_bits : 8) / static_cast<double>(m.features.size());
+  res.final_rate = o.rate_lambda > 0.f ? rate
+                                        : feature_rate(m, o.qat_bits > 0 ? o.qat_bits : 8, {}, 0.f, o.qat_trim) / static_cast<double>(m.features.size());
   const std::size_t tail = std::max<std::size_t>(1, losses.size() / 20);
   res.final_loss = std::accumulate(losses.end() - static_cast<std::ptrdiff_t>(tail), losses.end(), 0.0) / static_cast<double>(tail);
   if (Z > 0) m.z_train = codes;  // no codes to keep without a variation dimension

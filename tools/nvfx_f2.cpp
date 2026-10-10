@@ -22,6 +22,7 @@
 //   v<c0>.<c1>.<c2>t<T>      conv family at 128 px (latent 16 x 16)
 //   b<bits>                  feature storage: 16, or 2 to 8 (default 8)
 //   q                        quantisation-aware training at the storage bits (qs<f>: start after a fraction f)
+//   t                        trimmed plane ranges (Model::feature_trim): the best-quantising range, tails clipped
 //   r<lambda>                rate term in the loss (estimated bits per feature value, at the storage bits)
 //   i<iterations>            training steps (default 2000 grid, 1500 conv, as study A)
 //   s<seed>                  training seed (default 1)
@@ -255,6 +256,7 @@ struct Config {
   Hyper h;
   int bits = 8;
   bool qat = false;
+  bool trim = false;
   float qat_start = 0.f;
   float lambda = 0.f;
   int iters = 0;
@@ -294,6 +296,7 @@ Config parse_config(const std::string& name) {
   for (std::size_t k = 1; k < parts.size(); ++k) {
     const std::string& p = parts[k];
     if (p == "q") cf.qat = true;
+    else if (p == "t") cf.trim = true;
     else if (p.starts_with("qs")) {
       cf.qat = true;
       cf.qat_start = std::stof(p.substr(2));
@@ -394,6 +397,7 @@ void step_train(const Ctx& c, const std::vector<std::string>& configs) {
       if (cf.qat) {
         o.qat_bits = cf.bits;
         o.qat_start = cf.qat_start;
+        o.qat_trim = cf.trim;
       }
       o.rate_lambda = cf.lambda;
       o.rate_bits = std::min(cf.bits, 8);
@@ -404,6 +408,7 @@ void step_train(const Ctx& c, const std::vector<std::string>& configs) {
       res.model.effect = r.effect;
       res.model.fps = ref.fps;
       res.model.feature_bits = cf.bits;
+      res.model.feature_trim = cf.trim;
       const fs::path file = models / std::format("{}__{}.nvfx", r.name, name);
       fs::create_directories(models);
       if (auto w = save_model(file, res.model); !w) throw std::runtime_error(w.error());
@@ -508,6 +513,7 @@ std::vector<std::pair<double, double>> envelope(const Family& fam, const std::st
 // Size along an envelope for a quality: log-linear between points. censor: -1 below the smallest, +1 above the largest.
 double size_for(const std::vector<std::pair<double, double>>& env, double q, int& censor) {
   censor = 0;
+  if (env.empty()) return std::nan("");
   if (env.front().second >= q) {
     censor = -1;
     return env.front().first;
@@ -524,7 +530,7 @@ double size_for(const std::vector<std::pair<double, double>>& env, double q, int
 
 // Quality along an envelope at a size (the best at or below it, log-linear between points); NaN below the smallest.
 double quality_at(const std::vector<std::pair<double, double>>& env, double bytes) {
-  if (bytes < env.front().first) return std::nan("");
+  if (env.empty() || bytes < env.front().first) return std::nan("");
   for (std::size_t i = 1; i < env.size(); ++i) {
     if (bytes < env[i].first) {
       const double u = (std::log(bytes) - std::log(env[i - 1].first)) / (std::log(env[i].first) - std::log(env[i - 1].first));
@@ -568,13 +574,16 @@ Ratio equal_quality(const Point& net, const std::string& net_measure, const Fami
     for (auto& i : idx) i = pick(rng);
     int ce = 0;
     double other = 0, dq = 0;
-    ratios.push_back(one(idx, ce, other, dq));
+    const double ratio = one(idx, ce, other, dq);
+    if (!std::isnan(ratio)) ratios.push_back(ratio);
     if (!std::isnan(dq)) dqs.push_back(dq);
     cens += ce != 0;
   }
   std::ranges::sort(ratios);
   std::ranges::sort(dqs);
-  const auto pct = [](const std::vector<double>& v, double p) { return v.empty() ? std::nan("") : v[static_cast<std::size_t>(p * static_cast<double>(v.size() - 1) + 0.5)]; };
+  const auto pct = [](const std::vector<double>& v, double p) {
+    return v.empty() ? std::nan("") : v[static_cast<std::size_t>(p * static_cast<double>(v.size() - 1) + 0.5)];
+  };
   r.lo = pct(ratios, 0.025);
   r.hi = pct(ratios, 0.975);
   r.dq_lo = pct(dqs, 0.025);
@@ -727,9 +736,13 @@ void step_report(const Ctx& c, const std::vector<std::string>& only_configs) {
         write(k, p, name, "packed", "payload", r);
         line += " " + ratio_cell(r) + " |";
       }
-      const Ratio r = equal_quality(p, "packed", all_video, "payload");
-      write(k, p, "best_video", "packed", "payload", r);
-      line += " " + ratio_cell(r) + " |";
+      if (!all_video.empty()) {
+        const Ratio r = equal_quality(p, "packed", all_video, "payload");
+        write(k, p, "best_video", "packed", "payload", r);
+        line += " " + ratio_cell(r) + " |";
+      } else {
+        line += " - |";
+      }
       std::println("{}", line);
     }
   }

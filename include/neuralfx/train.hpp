@@ -45,6 +45,7 @@ struct Options {
   // starts after the first qat_start fraction of the iterations.
   int qat_bits = 0;
   float qat_start = 0.f;
+  bool qat_trim = false;  // quantise with Model::feature_trim ranges (the model must then be saved with it)
   // Rate term: rate_lambda times the estimated bits per feature value is added to the loss, so the features become
   // predictable for the lossless coder (src/core/cm.cpp). The estimate per value is log2(1 + |r| / step), with r the
   // smallest residual of three causal predictors the coder also uses (the median edge predictor in the plane, the
@@ -74,9 +75,10 @@ bool cpu_supported();
 
 // The rate estimate of Options::rate_lambda for a model's features: total estimated bits, and (when `grad` is not
 // empty, same size as the features) adds the gradient of those bits times `weight` to it.
-double feature_rate(const Model& m, int bits, std::span<float> grad = {}, float weight = 0.f);
+double feature_rate(const Model& m, int bits, std::span<float> grad = {}, float weight = 0.f, bool trim = false);
 
-// Features as stored at `bits` (2 to 8) and read back, in place (the forward pass of quantisation-aware training).
-void fake_quantise(Model& m, int bits);
+// Features as stored at `bits` (2 to 8) and read back, in place (the forward pass of quantisation-aware training),
+// with min/max ranges or (trim) the ranges of Model::feature_trim.
+void fake_quantise(Model& m, int bits, bool trim = false);
 
 }  // namespace nfx::train

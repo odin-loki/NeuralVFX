@@ -14,6 +14,7 @@
 #include <algorithm>
 #include <array>
 #include <random>
+#include <sstream>
 #include <unistd.h>
 
 using namespace nfx;
@@ -344,15 +345,49 @@ TEST(Train, ConvFamilyLearnsToo) {
 }
 
 TEST(Train, FakeQuantiseIsTheStorageRounding) {
-  for (const int bits : {8, 6, 5, 4, 3}) {
-    Model m = randomised(tiny_grid(), 11);
-    Model a = m, b = m;
-    train::fake_quantise(a, bits);
-    b.feature_bits = bits;
-    quantise_like_storage(b);
-    EXPECT_EQ(a.features, b.features) << bits;
-    EXPECT_EQ(a.layers[0].w, m.layers[0].w);  // only the features change
+  for (const bool trim : {false, true}) {
+    for (const int bits : {8, 6, 5, 4, 3}) {
+      Hyper h = tiny_grid();
+      h.grid = 8;
+      Model m = randomised(h, 11);
+      Model a = m, b = m;
+      train::fake_quantise(a, bits, trim);
+      b.feature_bits = bits;
+      b.feature_trim = trim;
+      quantise_like_storage(b);
+      EXPECT_EQ(a.features, b.features) << bits << " " << trim;
+      EXPECT_EQ(a.layers[0].w, m.layers[0].w);  // only the features change
+      // ...and it is what a saved file holds.
+      std::stringstream ss;
+      ASSERT_TRUE(save_model(ss, b));
+      const auto back = load_model(ss);
+      ASSERT_TRUE(back.has_value());
+      EXPECT_EQ(back->features, a.features) << bits << " " << trim;
+    }
   }
+}
+
+TEST(Model, TrimmedRangesQuantiseHeavyTailsBetter) {
+  // A bell-shaped plane with a few outliers: at 4 bits, clipping the tails lowers the squared error.
+  std::mt19937 rng(3);
+  std::normal_distribution<float> nd(0.f, 1.f);
+  std::vector<float> p(1024);
+  for (float& v : p) v = nd(rng);
+  p[5] = 9.f;
+  p[700] = -7.f;
+  const auto err = [&](bool trim) {
+    const auto [lo, hi] = feature_plane_range(p, 4, trim);
+    double e = 0;
+    for (const float v : p) {
+      const float q = std::clamp(std::round((v - lo) / (hi - lo) * 15.f), 0.f, 15.f);
+      e += std::pow(v - (lo + q / 15.f * (hi - lo)), 2.f);
+    }
+    return e;
+  };
+  EXPECT_LT(err(true), 0.8 * err(false));
+  const auto [lo8, hi8] = feature_plane_range(p, 8, false);
+  EXPECT_EQ(lo8, -7.f);
+  EXPECT_EQ(hi8, 9.f);
 }
 
 TEST(Train, RateGradientMatchesFiniteDifferences) {
