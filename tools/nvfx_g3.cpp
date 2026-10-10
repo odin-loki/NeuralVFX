@@ -768,14 +768,19 @@ struct Point {
   double bytes = 0, apsnr = 0, psnr = 0, ssim = 0;
 };
 
+// Rows of a split (a restarted job can repeat a row: the first of each run, method and config is kept).
 std::vector<Point> load_points(const fs::path& dir, const std::string& split, sim::Effect e) {
   std::vector<Point> v;
+  std::set<std::string> seen;
+  const auto keep = [&](Point p) {
+    if (seen.insert(p.run + "|" + p.method + "|" + p.config).second) v.push_back(std::move(p));
+  };
   const std::string en(sim::effect_name(e));
   for (const auto& r : read_csv(dir / std::format("ladder_{}_{}.csv", split, en))) {
-    v.push_back({r.at("run"), "g3a", r.at("settings"), std::stod(r.at("bytes")), std::stod(r.at("active_psnr")), std::stod(r.at("psnr")), std::stod(r.at("ssim"))});
+    keep({r.at("run"), "g3a", r.at("settings"), std::stod(r.at("bytes")), std::stod(r.at("active_psnr")), std::stod(r.at("psnr")), std::stod(r.at("ssim"))});
   }
   for (const auto& r : read_csv(dir / std::format("base_{}_{}.csv", split, en))) {
-    v.push_back({r.at("run"), r.at("method"), r.at("config"), std::stod(r.at("bytes")), std::stod(r.at("active_psnr")), std::stod(r.at("psnr")), std::stod(r.at("ssim"))});
+    keep({r.at("run"), r.at("method"), r.at("config"), std::stod(r.at("bytes")), std::stod(r.at("active_psnr")), std::stod(r.at("psnr")), std::stod(r.at("ssim"))});
   }
   return v;
 }
@@ -956,8 +961,14 @@ void write_svg(const fs::path& path, const std::vector<std::pair<std::string, st
 
 // Families drawn in the figure, in the palette's order (at most 8). The video formats are those chosen on validation.
 std::vector<std::pair<std::string, std::string>> figure_families() {
-  return {{"g3a", "G3a (this codec)"}, {"x264_rgb", "H.264 RGB"}, {"x265_444", "H.265 4:4:4"}, {"vp9a", "VP9 alpha"},  {"aom_444", "AV1 4:4:4"},
-          {"svt", "SVT-AV1 4:2:0"},    {"flipbook_bc3_packed", "flipbook BC3, packed"}, {"flipbook_raw_packed", "flipbook raw, packed"}};
+  return {{"g3a", "G3a"},
+          {"x264_444", "H.264 4:4:4"},
+          {"x265_444", "H.265 4:4:4"},
+          {"vp9a", "VP9 alpha"},
+          {"aom_444", "AV1 4:4:4"},
+          {"x265_444_64px", "H.265 4:4:4 at 64 px"},
+          {"flipbook_bc3_packed", "flipbook BC3, packed"},
+          {"flipbook_raw_packed", "flipbook raw, packed"}};
 }
 
 // Paired comparisons of the `hero` family with every other family, per run: bytes needed at stated qualities (log ratio,
@@ -1029,8 +1040,10 @@ std::vector<std::string> run_ids_of(const std::vector<RunSpec>& runs) {
 void summary_g3b(const fs::path& dir, const fs::path& res, const std::string& figure) {
   std::vector<Point> pts;
   std::set<std::string> clips;
+  std::set<std::string> seen;
   for (const auto& r : read_csv(dir / "g3b.csv")) {
     std::string method = r.at("method"), config = r.at("config");
+    if (!seen.insert(r.at("clip") + "|" + method + "|" + config).second) continue;
     if (method == "model_packed") {
       method = "g3b";
       config += "_alone";
@@ -1070,9 +1083,14 @@ void summary_g3b(const fs::path& dir, const fs::path& res, const std::string& fi
         rows_q);
   write(res / "g3b_at_rate.csv", "clips,other,bytes,runs,g3b_active_psnr,other_active_psnr,diff,diff_lo,diff_hi", rows_r);
   std::vector<Series> ser;
-  const std::vector<std::pair<std::string, std::string>> order = {{"g3b", "G3b: grid_m 8-bit + residual"}, {"x264_rgb", "H.264 RGB"}, {"x265_444", "H.265 4:4:4"},
-                                                                  {"vp9a", "VP9 alpha"}, {"aom_444", "AV1 4:4:4"}, {"svt", "SVT-AV1 4:2:0"},
-                                                                  {"flipbook_bc3_packed", "flipbook BC3, packed"}, {"flipbook_raw_packed", "flipbook raw, packed"}};
+  const std::vector<std::pair<std::string, std::string>> order = {{"g3b", "G3b"},
+                                                                  {"x264_rgb", "H.264 RGB"},
+                                                                  {"x265_444", "H.265 4:4:4"},
+                                                                  {"vp9a", "VP9 alpha"},
+                                                                  {"aom_444", "AV1 4:4:4"},
+                                                                  {"svt", "SVT-AV1 4:2:0"},
+                                                                  {"flipbook_bc3_packed", "flipbook BC3, packed"},
+                                                                  {"flipbook_raw_packed", "flipbook raw, packed"}};
   for (const auto& [meth, lab] : order) {
     if (!fam.count(meth)) continue;
     Series x;
@@ -1189,7 +1207,7 @@ void cmd_summary(const tools::Args& a) {
     }();
   }
   // 2. test: curves (means per config), and paired comparisons at stated qualities and rates
-  std::vector<std::string> rows_curve, rows_q, rows_r;
+  std::vector<std::string> rows_curve, rows_q, rows_r, rows_runs;
   std::vector<std::pair<std::string, std::vector<Series>>> fig;
   for (const auto e : effects_of(a.str("effects"))) {
     const std::string en(sim::effect_name(e));
@@ -1231,6 +1249,11 @@ void cmd_summary(const tools::Args& a) {
         }
       }
     }
+    for (const auto& p : pts) {
+      if (fam.count(p.method) && fam[p.method].count(p.config)) {
+        rows_runs.push_back(std::format("{},{},{},{},{:.0f},{:.3f},{:.3f},{:.4f}", en, p.run, p.method, p.config, p.bytes, p.apsnr, p.psnr, p.ssim));
+      }
+    }
     for (const auto& m : ms) {
       if (!fam.count(m.method) || !fam[m.method].count(m.config)) continue;
       rows_curve.push_back(std::format("{},{},{},{:.1f},{:.3f},{:.3f},{:.4f}", en, m.method, m.config, m.bytes, m.apsnr, m.psnr, m.ssim));
@@ -1260,6 +1283,7 @@ void cmd_summary(const tools::Args& a) {
     for (const auto& r : rows) o << r << "\n";
   };
   write(res / "g3_test_curves.csv", "effect,method,config,bytes,active_psnr,psnr,ssim", rows_curve);
+  write(res / "g3_test_runs.csv", "effect,run,method,config,bytes,active_psnr,psnr,ssim", rows_runs);
   write(res / "g3_test_at_quality.csv",
         "effect,other,active_psnr,runs,g3a_unreached,other_unreached,other_at_floor,g3a_bytes,other_bytes,bytes_ratio,ratio_lo,ratio_hi", rows_q);
   write(res / "g3_test_at_rate.csv", "effect,other,bytes,runs,g3a_active_psnr,other_active_psnr,diff,diff_lo,diff_hi", rows_r);
@@ -1295,9 +1319,14 @@ void cmd_timing(const tools::Args& a) {
     const Simulated S = simulate(rs);
     std::vector<std::string> pts;
     {
+      std::vector<std::string> all;
       std::ifstream f(dir / std::format("frontier_{}.txt", en));
       for (std::string l; std::getline(f, l);) {
-        if (!l.empty()) pts.push_back(l);
+        if (!l.empty()) all.push_back(l);
+      }
+      const int every = std::max(1, a.i("every", 1));  // every n-th frontier point, and the last
+      for (std::size_t i = 0; i < all.size(); ++i) {
+        if (i % sz(every) == 0 || i + 1 == all.size()) pts.push_back(all[i]);
       }
     }
     // resident: the effect as loaded (weights and start points in floats) plus the stream

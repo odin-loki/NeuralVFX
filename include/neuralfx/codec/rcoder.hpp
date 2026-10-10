@@ -3,14 +3,15 @@
 // residual planes need:
 //   - each integer is binarised: zero or not, the sign, the magnitude class (unary over floor(log2 |v|)), then the
 //     bits below the leading one;
-//   - each binary decision gets a probability from seven adaptive context models (counters indexed by a hash of the
+//   - each binary decision gets a probability from nine adaptive context models (counters indexed by a hash of the
 //     decision and a context built from integers already coded: neighbours in this plane, the same place in the
-//     previous plane of the same kind, the other channels of this cell, the position), mixed by an online logistic
-//     mixer whose weight set is chosen by the decision and the local activity, and refined by an APM;
+//     previous plane of the same kind, the other channels of this cell, the position; two of them also take an
+//     optional caller-given side value per cell), mixed by an online logistic mixer whose weight set is chosen by the
+//     decision and the local activity, and refined by an APM;
 //   - a 32-bit carry-less binary arithmetic coder writes the bits.
 // Every operation is integer arithmetic in a fixed order, so the coded bits do not depend on the compiler, the
-// instruction set or the floating-point environment. Contexts never use floating-point state, so a stream decodes on
-// any machine even where a float reconstruction loop would round differently.
+// instruction set or the floating-point environment. Without side values, contexts never use floating-point state, so a
+// stream decodes on any machine even where a float reconstruction loop would round differently.
 #pragma once
 
 #include <array>
