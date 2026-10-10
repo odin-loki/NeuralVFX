@@ -91,11 +91,59 @@ struct Packed {
 Packed pack_model(std::span<const std::uint8_t> file);
 std::expected<std::vector<std::uint8_t>, std::string> unpack_model(std::span<const std::uint8_t> packed);
 
+// Format 2 (study H, docs/DCM.md §9): the same container and predictions with options for speed.
+//   - lz: LZ tokens (as LZP). Before a value is coded, the value that followed the last occurrence of the four values
+//     before it is offered, and one adaptive flag says whether it is the value; a match is followed while it holds.
+//     Repeats (empty fields, saturated features, repeated headers) then cost a flag per value and no modelling.
+//   - light: a light model instead of the full one: seven predictors instead of fourteen, and per bit four directly
+//     indexed statistics, one small mixer and one APM (no hashed contexts, no second mixer). Many times faster to
+//     decode, a few percent larger.
+//   - fast: in the manner of LOCO-I (JPEG-LS): one of three cheap predictions per value, the residual as a Golomb-Rice
+//     code with an adaptive parameter, its unary part coded with one adaptive statistic per decision and its low bits
+//     plainly. Several times faster again than the light model, and larger.
+//   - seekable (light or fast): every tensor, large ones in slices of whole planes of about `segment` values, is its own
+//     segment with its own model and arithmetic coder, so one slice decodes without the others (list_slices,
+//     unpack_slice). Headers and the small tensors that parsing reads (feature ranges, field scales) share segment 0,
+//     which is always decoded. Each segment carries a 32-bit checksum.
+// unpack_model and unpack_tensors read either format.
+enum class Literal : std::uint8_t {
+  full = 0,   // the full model of format 1
+  light = 1,  // the light model
+  fast = 2,   // a Golomb-Rice code of the residual of a cheap prediction (as LOCO-I), few coder steps per value
+};
+struct Options {
+  Literal literal = Literal::light;
+  bool lz = true;
+  bool seekable = false;
+  std::size_t segment = std::size_t{1} << 16;
+};
+Packed pack_model(std::span<const std::uint8_t> file, const Options& options);
+
+// One segment of a seekable file: which tensor (in coding order, counting every tensor the parser codes), which planes.
+struct SliceInfo {
+  Kind kind = Kind::bytes;
+  std::size_t values = 0;
+  std::size_t packed_bytes = 0;
+  std::size_t tensor = 0;
+  std::size_t first_plane = 0, planes = 0;
+};
+std::expected<std::vector<SliceInfo>, std::string> list_slices(std::span<const std::uint8_t> packed);
+
+// Segment `index` (of list_slices) alone: its tensor's shape, its values and where each value's bytes are in the file
+// (`at`, as the parser saw them). Decodes segment 0 and this segment only; both checksums are checked.
+struct Slice {
+  Tensor tensor;  // the whole tensor's shape; values of planes [first_plane, first_plane + planes) only
+  std::size_t first_plane = 0;
+  std::vector<std::size_t> at;
+};
+std::expected<Slice, std::string> unpack_slice(std::span<const std::uint8_t> packed, std::size_t index);
+
 // The bytes of each kind of value in a .nvfx file, in the order they are coded (for reports: zlib on each part).
 std::vector<std::pair<Kind, std::vector<std::uint8_t>>> split_model(std::span<const std::uint8_t> file);
 
 // Tensors without a container (flipbooks): shapes and values in, shapes and values out.
 Packed pack_tensors(std::span<const Tensor> tensors);
+Packed pack_tensors(std::span<const Tensor> tensors, const Options& options);
 std::expected<std::vector<Tensor>, std::string> unpack_tensors(std::span<const std::uint8_t> packed);
 
 // The fp16 reordering used for coding: a bijection on 16-bit patterns that is monotone in the value (-0 just below

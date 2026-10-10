@@ -151,6 +151,25 @@ class Encoder {
     }
     return bit;
   }
+  // n bits of v at even odds, most significant first: the same as n calls of code(32768, bit), with the state kept in
+  // registers.
+  uint32_t plain(uint32_t v, int n) {
+    uint32_t x1 = x1_, x2 = x2_;
+    for (int b = n - 1; b >= 0; --b) {
+      const uint32_t xmid = x1 + ((x2 - x1) >> 1);
+      if ((v >> b) & 1u) x2 = xmid;
+      else x1 = xmid + 1;
+      while (((x1 ^ x2) & 0xff000000u) == 0) {
+        out_.push_back(static_cast<uint8_t>(x2 >> 24));
+        x1 <<= 8;
+        x2 = (x2 << 8) | 255;
+      }
+    }
+    x1_ = x1;
+    x2_ = x2;
+    cost += n;
+    return v;
+  }
   void flush() {
     for (int i = 0; i < 4; ++i) {
       out_.push_back(static_cast<uint8_t>(x1_ >> 24));
@@ -191,6 +210,25 @@ class Decoder {
       x_ = (x_ << 8) | next();
     }
     return bit;
+  }
+  uint32_t plain(uint32_t /*v*/, int n) {
+    uint32_t x1 = x1_, x2 = x2_, x = x_, r = 0;
+    for (int b = 0; b < n; ++b) {
+      const uint32_t xmid = x1 + ((x2 - x1) >> 1);
+      const bool bit = x <= xmid;
+      r = (r << 1) | (bit ? 1u : 0u);
+      x2 = bit ? xmid : x2;
+      x1 = bit ? x1 : xmid + 1;
+      while (((x1 ^ x2) & 0xff000000u) == 0) {
+        x1 <<= 8;
+        x2 = (x2 << 8) | 255;
+        x = (x << 8) | next();
+      }
+    }
+    x1_ = x1;
+    x2_ = x2;
+    x_ = x;
+    return r;
   }
   double cost = 0;
   // A valid stream is read exactly to its end (the decoder shifts in one byte for each byte the encoder shifted out,
@@ -494,8 +532,132 @@ Remap make_remap(const Shape& s, size_t n, size_t c) {
 
 int ilog2(uint64_t v) { return v ? static_cast<int>(std::bit_width(v)) - 1 : -1; }
 
+// --- LZ tokens (format 2) ---------------------------------------------------------------------------------------------
+
+// LZ tokens in the manner of LZP: a hash of the kLzOrder values before a position names the last position that had the
+// same values before it, and the value that followed there is offered. One flag, coded with an adaptive probability
+// (by kind, by how long the match has held, and by whether the offered value is the numeric prediction), says whether
+// it is the value; if so, none of its bits are coded. A match is followed while it holds, so a long repeat costs one
+// cheap flag per value and no modelling at all. Within one tensor (or one segment of it), in coding order.
+constexpr int kLzOrder = 4;
+constexpr int kLzLen = 16;
+
+struct LzState {
+  std::vector<uint32_t> table;  // context hash -> position + 1 of the value that followed that context
+  uint32_t mask = 0;
+  size_t ptr = 0;  // position + 1 of the value the current match offers next (0: no match)
+  int len = 0;     // values matched so far in the current match
+  std::array<uint32_t, static_cast<size_t>(kKinds) * kLzLen * 2> flag;
+  LzState() { flag.fill(kFresh); }
+  void start(size_t n) {
+    const int bits = std::clamp(static_cast<int>(std::bit_width(n)) + 1, 8, 16);  // at most 256 KB: stays in cache
+    table.assign(size_t{1} << bits, 0);
+    mask = (uint32_t{1} << bits) - 1;
+    ptr = 0;
+    len = 0;
+  }
+};
+
+// The token at position i (codes of positions before i known). Returns true when the value was coded as a match (and
+// then sets sym); otherwise the caller codes the value's bits.
 template <class AC>
-bool code_tensor(Model& model, AC& ac, const Shape& s, uint16_t* values) {
+bool lz_token(LzState& z, AC& ac, const uint16_t* code, size_t i, uint32_t group, uint32_t pcode, uint32_t& sym) {
+  uint32_t h = 0;
+  const bool ctx = i >= kLzOrder;
+  if (ctx) {
+    h = mixes(0x2545F491u, code[i - 1], code[i - 2], code[i - 3], code[i - 4]) & z.mask;
+    if (z.ptr == 0) {
+      // a candidate only when its kLzOrder values before really are these (not a collision of the hash)
+      const size_t c = z.table[h];
+      if (c > kLzOrder && code[c - 2] == code[i - 1] && code[c - 3] == code[i - 2] && code[c - 4] == code[i - 3] && code[c - 5] == code[i - 4]) z.ptr = c;
+      z.len = 0;
+    }
+  }
+  bool hit = false;
+  if (z.ptr != 0) {
+    const uint32_t want = code[z.ptr - 1];
+    uint32_t& c = z.flag[(static_cast<size_t>(group) * kLzLen + static_cast<size_t>(std::min(z.len, kLzLen - 1))) * 2 + (want == pcode ? 1 : 0)];
+    const int p16 = std::clamp(static_cast<int>(c >> 16), 32, 65536 - 32);
+    const int bit = ac.code(p16, AC::encoding ? (sym == want ? 1 : 0) : 0);
+    train(c, bit, 255);
+    if (bit) {
+      sym = want;
+      hit = true;
+      ++z.ptr;
+      ++z.len;
+    } else {
+      z.ptr = 0;
+      z.len = 0;
+    }
+  }
+  if (ctx) z.table[h] = static_cast<uint32_t>(i + 1);
+  return hit;
+}
+
+// --- the light model (format 2) ---------------------------------------------------------------------------------------
+
+// The fast literal coder: per bit, four directly indexed statistics (the three of the full model, relative to the
+// numeric prediction, and the bits of the byte so far), one small mixer chosen by bit position and error level, and one
+// APM. No hashed contexts. `groups` is 1 for a segment (one kind of tensor) or every kind for a whole stream.
+class Light {
+ public:
+  static constexpr int kIn = 4, kLanes = 8;
+  explicit Light(size_t groups)
+      : groups_(groups),
+        d0_(groups * kBitIdx * kRel * kAct, kFresh),
+        d1_(groups * kBitIdx * kSig, kFresh),
+        d2_(groups * kBitIdx * kRel * kAct, kFresh),
+        d3_(groups * 3 * 256, kFresh),
+        w_(groups * kBitIdx * 4 * kLanes, 0),
+        apm_(groups * kBitIdx * kRel, 7) {
+    for (size_t s = 0; s < w_.size(); s += kLanes) {
+      for (int k = 0; k < kIn; ++k) w_[s + static_cast<size_t>(k)] = static_cast<std::int16_t>((1 << 14) / kIn);
+    }
+  }
+  size_t groups() const { return groups_; }
+
+  int predict(size_t i0, size_t i1, size_t i2, size_t i3, size_t mix, size_t apm) {
+    c_[0] = &d0_[i0];
+    c_[1] = &d1_[i1];
+    c_[2] = &d2_[i2];
+    c_[3] = &d3_[i3];
+    for (int k = 0; k < kIn; ++k) x_[static_cast<size_t>(k)] = static_cast<std::int16_t>(stretch(counter_p12(*c_[static_cast<size_t>(k)])));
+    x_[kIn] = 256;
+    sel_ = mix * kLanes;
+    const std::int16_t* w = w_.data() + sel_;
+    int s = 0;
+    for (int k = 0; k < kLanes; ++k) s += x_[static_cast<size_t>(k)] * w[k];
+    const int st = std::clamp(s >> 14, -2047, 2047);
+    p_ = squash(st);
+    const int pa = apm_.p(st, apm);
+    return std::clamp((p_ * 16 + 3 * pa) >> 2, 32, 65536 - 32);
+  }
+
+  void update(int bit) {
+    for (int k = 0; k < kIn; ++k) train(*c_[static_cast<size_t>(k)], bit, 1023);
+    const auto err = static_cast<std::int16_t>(((bit << 12) - p_) * 6);
+    std::int16_t* w = w_.data() + sel_;
+    for (int k = 0; k <= kIn; ++k) {
+      const auto step = static_cast<std::int16_t>((x_[static_cast<size_t>(k)] * err + 32768) >> 16);
+      w[k] = std::clamp<std::int16_t>(static_cast<std::int16_t>(w[k] + step), -kWeightMax, kWeightMax);
+    }
+    apm_.update(bit);
+  }
+
+ private:
+  static constexpr std::int16_t kWeightMax = 32767 - 1024;
+  size_t groups_;
+  std::vector<uint32_t> d0_, d1_, d2_, d3_;
+  std::vector<std::int16_t> w_;
+  Apm apm_;
+  std::array<uint32_t*, kIn> c_{};
+  std::array<std::int16_t, kLanes> x_{};
+  size_t sel_ = 0;
+  int p_ = 2048;
+};
+
+template <class AC>
+bool code_tensor(Model& model, AC& ac, const Shape& s, uint16_t* values, LzState* lz = nullptr) {
   const size_t n = s.size();
   if (n == 0) return true;
   const Geometry g = geometry(s);
@@ -523,6 +685,7 @@ bool code_tensor(Model& model, AC& ac, const Shape& s, uint16_t* values) {
   constexpr int64_t lms_mu = 512;  // NLMS step, 1/128
   std::array<int64_t, kLms> lw{};  // weights of the adaptive linear predictor, 16 fractional bits
   std::array<uint32_t, kHashed> ctx{};
+  if (lz) lz->start(n);
   for (size_t p = 0; p < g.planes; ++p) {
     const uint32_t a1 = static_cast<uint32_t>(p % g.D1), a2 = static_cast<uint32_t>((p / g.D1) % g.D2);
     const bool has1 = a1 > 0, has2 = a2 > 0;
@@ -668,7 +831,8 @@ bool code_tensor(Model& model, AC& ac, const Shape& s, uint16_t* values) {
           }
 
           uint32_t sym = AC::encoding ? (f16 ? f16_order(values[i]) : values[i]) : 0u;
-          for (int b = width - 1; b >= 0; --b) {
+          const bool matched = lz != nullptr && lz_token(*lz, ac, code.data(), i, group, static_cast<uint32_t>(pcode), sym);
+          for (int b = matched ? -1 : width - 1; b >= 0; --b) {
             const int role = f16 ? (b == 1 ? 1 : 2) : 0;
             const int hi = role == 2 ? static_cast<int>(sym >> 8) : 0;
             // A neighbour's code as seen by this byte: the value (8-bit), the high byte (fp16 high byte), or for the
@@ -747,6 +911,352 @@ bool code_tensor(Model& model, AC& ac, const Shape& s, uint16_t* values) {
               w = std::clamp<int64_t>(w + ((step * lx[static_cast<size_t>(k)]) >> 16), -(int64_t{1} << 20), int64_t{1} << 20);
             }
           }
+        }
+      }
+    }
+  }
+  return !ac.overrun();
+}
+
+// The light coder (format 2) on planes [p0, p1) of a tensor; `values` holds those planes only. Predictions as the full
+// coder's but fewer (seven fixed predictors, no adaptive linear one), blended the same way; nothing before p0 is read,
+// so a segment decodes on its own. Each value is first offered to the LZ tokens when `lz` is set.
+constexpr int kFastPred = 7;
+constexpr int kPlainShift = 3;  // a bit is coded plainly when the expected error is at least 8 times its weight
+
+// 65536 / e without a division: exact below 4096, from the table at e / 64 above (e < 2^18), else 0.
+struct RecipTable {
+  std::array<uint32_t, 4096> t{};
+  constexpr RecipTable() {
+    t[0] = 65536;
+    for (uint32_t e = 1; e < 4096; ++e) t[e] = 65536u / e;
+  }
+};
+constexpr RecipTable kRecip;
+inline uint64_t recip16(uint64_t e) {
+  if (e < 4096) return kRecip.t[e];
+  if (e < (uint64_t{1} << 18)) return kRecip.t[e >> 6] >> 6;
+  return 0;
+}
+
+template <class AC>
+bool code_tensor_fast(Light& model, AC& ac, const Shape& s, size_t p0, size_t p1, uint16_t* values, LzState* lz) {
+  // Plain bits (see below) for the kinds whose low bits are noise: features and weights. Not for smooth fields (coarse
+  // states), whose exact zeros the low bits still predict, nor for bytes without structure.
+  const bool plain_ok = s.kind == Kind::features || s.kind == Kind::weights || s.kind == Kind::biases || s.kind == Kind::codes;
+  const Geometry g = geometry(s);
+  const size_t n = (p1 - p0) * g.plane;
+  if (n == 0) return true;
+  const int width = s.width;
+  const bool f16 = width == 2;
+  uint32_t group = static_cast<uint32_t>(s.kind);
+  if (s.kind == Kind::biases || s.kind == Kind::codes || s.kind == Kind::scales) group = static_cast<uint32_t>(Kind::weights);
+  const uint32_t slot = model.groups() == 1 ? 0u : group;  // where this group's statistics are
+  const int err_shift = f16 ? 8 : 4;
+  const int64_t code_max = f16 ? 65535 * 256 : 255 * 256;
+  const int64_t lin_default = f16 ? 0 : 128 * 256;
+  std::vector<uint16_t> code(n);
+  std::vector<int64_t> lin(n);
+  const size_t ring_plane = g.plane * (kFastPred + 1);
+  const size_t rings = g.D1 > 1 ? 2 : 1;
+  std::vector<uint16_t> errs(rings * ring_plane, 0);
+  const size_t CX = static_cast<size_t>(g.C) * g.X;
+  const size_t stride1 = g.plane, stride2 = g.plane * g.D1;
+  if (lz) lz->start(n);
+  for (size_t p = p0; p < p1; ++p) {
+    const uint32_t a1 = static_cast<uint32_t>(p % g.D1), a2 = static_cast<uint32_t>((p / g.D1) % g.D2);
+    const bool has1 = a1 > 0 && p > p0, has2 = a2 > 0 && p >= p0 + g.D1;
+    const Remap r1 = has1 ? make_remap(s, p - 1, p) : Remap{};
+    const Remap r2 = has2 ? make_remap(s, p - g.D1, p) : Remap{};
+    uint16_t* ecur = errs.data() + (p % rings) * ring_plane;
+    const uint16_t* eprv = errs.data() + ((p + 1) % rings) * ring_plane;
+    const size_t base = (p - p0) * g.plane;
+    for (uint32_t y = 0; y < g.Y; ++y) {
+      for (uint32_t x = 0; x < g.X; ++x) {
+        if (ac.overrun()) return false;
+        for (uint32_t c = 0; c < g.C; ++c) {
+          const size_t o = (static_cast<size_t>(y) * g.X + x) * g.C + c;
+          const size_t i = base + o;
+          constexpr size_t npos = ~size_t{0};
+          const size_t oW = x > 0 ? o - g.C : npos, oN = y > 0 ? o - CX : npos;
+          const size_t oNW = (x > 0 && y > 0) ? o - CX - g.C : npos, oNE = (y > 0 && x + 1 < g.X) ? o - CX + g.C : npos;
+          const auto L = [&](size_t off) { return lin[base + off]; };
+          const auto L1 = [&](size_t off) { return r1(lin[base - stride1 + off]); };
+          const bool hW = oW != npos, hN = oN != npos, hNW = oNW != npos, hNE = oNE != npos;
+          int64_t base_pred = lin_default;
+          if (hW) base_pred = L(oW);
+          else if (hN) base_pred = L(oN);
+          else if (has1) base_pred = L1(o);
+          else if (o > 0) base_pred = L(o - 1);
+          const int64_t W = hW ? L(oW) : base_pred, N = hN ? L(oN) : base_pred;
+          const int64_t NW = hNW ? L(oNW) : (hN ? N : W), NE = hNE ? L(oNE) : N;
+          std::array<int64_t, kFastPred> pr;
+          pr[0] = W;
+          pr[1] = N;
+          {
+            const int64_t mn = std::min(W, N), mx = std::max(W, N);
+            pr[2] = NW >= mx ? mn : NW <= mn ? mx : W + N - NW;
+          }
+          pr[3] = W + N - NW;
+          const int64_t P1 = has1 ? L1(o) : base_pred;
+          pr[4] = P1;
+          pr[5] = has1 && hW ? P1 + W - L1(oW) : (has2 ? r2(lin[i - stride2]) : (W + NE) / 2);
+          if (c > 0) {
+            const int64_t prev = L(o - 1);
+            pr[6] = hW ? W + prev - L(oW - 1) : prev;
+          } else {
+            pr[6] = (W + NE) / 2;
+          }
+          std::array<int64_t, kFastPred> pc;
+          for (int j = 0; j < kFastPred; ++j) {
+            pc[static_cast<size_t>(j)] = f16 ? static_cast<int64_t>(lin_code(pr[static_cast<size_t>(j)])) << 8
+                                             : std::clamp<int64_t>(pr[static_cast<size_t>(j)], 0, code_max);
+          }
+          uint64_t wsum = 0, best_e = ~uint64_t{0};
+          int64_t acc = 0, best = pc[0];
+          for (int j = 0; j < kFastPred; ++j) {
+            const uint16_t* ej = ecur + static_cast<size_t>(j) * g.plane;
+            uint64_t e = 1;
+            if (hW) e += ej[oW];
+            if (hN) e += ej[oN];
+            if (hNW) e += ej[oNW];
+            if (hNE) e += ej[oNE];
+            if (has1) e += eprv[static_cast<size_t>(j) * g.plane + o];
+            if (e < best_e) {
+              best_e = e;
+              best = pc[static_cast<size_t>(j)];
+            }
+            const uint64_t r = recip16(e);
+            const uint64_t w = r * r;
+            wsum += w;
+            acc += static_cast<int64_t>(w) * pc[static_cast<size_t>(j)];
+          }
+          const int64_t pred = wsum ? acc / static_cast<int64_t>(wsum) : pc[2];
+          uint64_t act = 0;
+          int nact = 0;
+          {
+            const uint16_t* eb = ecur + static_cast<size_t>(kFastPred) * g.plane;
+            if (hW) act += eb[oW], ++nact;
+            if (hN) act += eb[oN], ++nact;
+            if (hNW) act += eb[oNW], ++nact;
+            if (hNE) act += eb[oNE], ++nact;
+            if (has1) act += eprv[static_cast<size_t>(kFastPred) * g.plane + o], ++nact;
+          }
+          const uint64_t act4 = nact ? act * 4 / static_cast<uint64_t>(nact) : (f16 ? 8192u : 2048u);
+          const int actb = std::min(kAct - 1, ilog2(act4) + 1);
+          const int64_t sig_inv = (int64_t{1} << 32) / (f16 ? 16 * (static_cast<int64_t>(act4) + 1) : static_cast<int64_t>(act4) + 1);
+          const int pcode = static_cast<int>(std::clamp<int64_t>((pred + 128) >> 8, 0, code_max >> 8));
+
+          uint32_t sym = AC::encoding ? (f16 ? f16_order(values[i]) : values[i]) : 0u;
+          const bool matched = lz != nullptr && lz_token(*lz, ac, code.data(), i, group, static_cast<uint32_t>(pcode), sym);
+          // Bits whose weight is far below the expected error are close to even odds: coded as such, without a model.
+          // The expected error in code units is act4 / 64 (8-bit) or act4 / 4 (fp16); bit k weighs 2^k.
+          const int64_t expected = f16 ? static_cast<int64_t>(act4 >> 2) : static_cast<int64_t>(act4 >> 6);
+          int plain = 0;  // bits below this one are coded plainly
+          if (plain_ok) {
+            while (plain < 8 * width - 1 && (int64_t{1} << (plain + kPlainShift)) <= expected) ++plain;
+          }
+          if (!matched) {
+            for (int k = 8 * width - 1; k >= 0; --k) {
+              if (k < plain) {
+                const int bit = ac.code(32768, static_cast<int>((sym >> k) & 1u));
+                if constexpr (!AC::encoding) sym |= static_cast<uint32_t>(bit) << k;
+                continue;
+              }
+              const int kk = f16 ? 8 + k : k;
+              const int role = f16 ? (k >= 8 ? 1 : 2) : 0;
+              const int64_t mid = static_cast<int64_t>(((sym >> (k + 1)) << (k + 1)) + (1u << k)) << 8;
+              const int64_t d = pred - mid, db = best - mid;
+              const int rr1 = static_cast<int>(std::clamp<int64_t>(d >> (k + 5), -24, 24));
+              const int rr3 = static_cast<int>(std::clamp<int64_t>(db >> (k + 5), -24, 24));
+              const int rr2 = static_cast<int>(std::clamp<int64_t>((d * sig_inv) >> 32, -32, 31));
+              const size_t kb = static_cast<size_t>(slot) * kBitIdx + static_cast<size_t>(kk);
+              const int b8 = k & 7, bits_done = 7 - b8;
+              const uint32_t c0 = (1u << bits_done) | ((sym >> (k + 1)) & ((1u << bits_done) - 1));
+              const int p16 = model.predict((kb * kRel + static_cast<size_t>(rr1 + 24)) * kAct + static_cast<size_t>(actb),
+                                            kb * kSig + static_cast<size_t>(rr2 + 32),
+                                            (kb * kRel + static_cast<size_t>(rr3 + 24)) * kAct + static_cast<size_t>(actb),
+                                            (static_cast<size_t>(slot) * 3 + static_cast<size_t>(role)) * 256 + c0,
+                                            kb * 4 + static_cast<size_t>(actb >> 2), kb * kRel + static_cast<size_t>(rr1 + 24));
+              const int bit = ac.code(p16, static_cast<int>((sym >> k) & 1u));
+              if constexpr (!AC::encoding) sym |= static_cast<uint32_t>(bit) << k;
+              model.update(bit);
+            }
+          }
+          if constexpr (!AC::encoding) values[i] = f16 ? f16_unorder(static_cast<uint16_t>(sym)) : static_cast<uint16_t>(sym);
+          code[i] = static_cast<uint16_t>(sym);
+          lin[i] = f16 ? f16_lin(f16_unorder(static_cast<uint16_t>(sym))) : static_cast<int64_t>(sym) << 8;
+          const int64_t actual = static_cast<int64_t>(sym) << 8;
+          for (int j = 0; j <= kFastPred; ++j) {
+            const int64_t e = (j < kFastPred ? pc[static_cast<size_t>(j)] : pred) - actual;
+            ecur[static_cast<size_t>(j) * g.plane + o] = static_cast<uint16_t>(std::min<int64_t>(65535, (e < 0 ? -e : e) >> err_shift));
+          }
+        }
+      }
+    }
+  }
+  return !ac.overrun();
+}
+
+// The fast coder (format 2), on planes [p0, p1) as code_tensor_fast. In the manner of LOCO-I (JPEG-LS): per value one
+// of three cheap predictions in code units (the one with the smaller error at the left and upper neighbours: the
+// median edge detector, and with a plane before, that plane's value and its value plus the local gradient), the
+// residual binarised as a Golomb-Rice code whose parameter follows the residuals' running mean in an activity context,
+// the unary part coded with one adaptive statistic per decision and the low bits plainly. A few coder steps per value
+// and no mixing: many times faster than the light model, larger.
+constexpr int kRiceBuckets = 18;  // activity contexts: bit length of the left and upper residuals' sum
+constexpr int kRiceUnary = 16;    // unary decisions before the escape (the residual then follows in plain bits)
+
+class Rice {
+ public:
+  explicit Rice(size_t groups) : groups_(groups), cont_(groups * kRiceBuckets * kRiceUnary, kFresh), A_(groups * kRiceBuckets, 4), N_(groups * kRiceBuckets, 1) {}
+  size_t groups() const { return groups_; }
+  uint32_t& cont(size_t g, int b, int j) { return cont_[(g * kRiceBuckets + static_cast<size_t>(b)) * kRiceUnary + static_cast<size_t>(j)]; }
+  int k(size_t g, int b) const {
+    const size_t i = g * kRiceBuckets + static_cast<size_t>(b);
+    int k = 0;
+    while (k < 16 && (static_cast<uint64_t>(N_[i]) << k) < A_[i]) ++k;
+    return k;
+  }
+  void update(size_t g, int b, uint32_t u) {
+    const size_t i = g * kRiceBuckets + static_cast<size_t>(b);
+    A_[i] += u;
+    if (++N_[i] == 64) {
+      A_[i] = (A_[i] + 1) >> 1;
+      N_[i] >>= 1;
+    }
+  }
+
+ private:
+  size_t groups_;
+  std::vector<uint32_t> cont_;
+  std::vector<uint64_t> A_;
+  std::vector<uint32_t> N_;
+};
+
+template <class AC>
+inline uint32_t plain_bits(AC& ac, uint32_t v, int n) {
+  return ac.plain(v, n);
+}
+
+template <class AC>
+bool code_tensor_rice(Rice& model, AC& ac, const Shape& s, size_t p0, size_t p1, uint16_t* values, LzState* lz) {
+  const Geometry g = geometry(s);
+  const size_t n = (p1 - p0) * g.plane;
+  if (n == 0) return true;
+  const bool f16 = s.width == 2;
+  uint32_t group = static_cast<uint32_t>(s.kind);
+  if (s.kind == Kind::biases || s.kind == Kind::codes || s.kind == Kind::scales) group = static_cast<uint32_t>(Kind::weights);
+  const size_t slot = model.groups() == 1 ? 0u : group;
+  const int32_t cmax = f16 ? 65535 : 255;
+  const int ubits = f16 ? 17 : 9;  // bits of a zigzagged residual
+  std::vector<uint16_t> code(n);
+  std::vector<uint16_t> err(g.plane * 4, 0);  // per position: |error| of the three predictions and of the one used
+  const size_t CX = static_cast<size_t>(g.C) * g.X;
+  std::array<uint8_t, 256> lut{};  // 8-bit planes with maps: the plane before's codes in this plane's scale
+  if (lz) lz->start(n);
+  for (size_t p = p0; p < p1; ++p) {
+    const bool has1 = p % g.D1 > 0 && p > p0;
+    bool mapped = false;
+    if (has1) {
+      const Remap r1 = make_remap(s, p - 1, p);
+      mapped = r1.on;
+      if (mapped) {
+        for (int q = 0; q < 256; ++q) lut[static_cast<size_t>(q)] = static_cast<uint8_t>(std::clamp<int64_t>((r1(int64_t{q} << 8) + 128) >> 8, 0, 255));
+      }
+    }
+    const size_t base = (p - p0) * g.plane;
+    const auto P = [&](size_t o) -> int32_t {
+      const uint16_t v = code[base - g.plane + o];
+      return mapped ? lut[v] : v;
+    };
+    for (uint32_t y = 0; y < g.Y; ++y) {
+      if (ac.overrun()) return false;
+      for (uint32_t x = 0; x < g.X; ++x) {
+        for (uint32_t c = 0; c < g.C; ++c) {
+          const size_t o = (static_cast<size_t>(y) * g.X + x) * g.C + c;
+          const size_t i = base + o;
+          const bool hW = x > 0, hN = y > 0;
+          const size_t oW = o - g.C, oN = o - CX;
+          int32_t fallback = f16 ? 0x8000 : 128;
+          if (hW) fallback = code[i - g.C];
+          else if (hN) fallback = code[i - CX];
+          else if (has1) fallback = P(o);
+          else if (o > 0) fallback = code[i - 1];
+          const int32_t W = hW ? code[i - g.C] : fallback, N = hN ? code[i - CX] : fallback;
+          const int32_t NW = hW && hN ? code[i - CX - g.C] : (hN ? N : W);
+          std::array<int32_t, 3> pr;
+          {
+            const int32_t mn = std::min(W, N), mx = std::max(W, N);
+            pr[0] = NW >= mx ? mn : NW <= mn ? mx : W + N - NW;
+          }
+          if (has1) {
+            const int32_t P1 = P(o);
+            pr[1] = P1;
+            pr[2] = hW ? P1 + W - P(oW) : P1;
+          } else if (c > 0) {
+            const int32_t prev = code[i - 1];
+            pr[1] = hW ? W + prev - code[i - g.C - 1] : prev;
+            pr[2] = W + N - NW;
+          } else {
+            pr[1] = W + N - NW;
+            pr[2] = (W + N + 1) >> 1;
+          }
+          int best = 0;
+          uint32_t best_e = ~0u;
+          for (int j = 0; j < 3; ++j) {
+            pr[static_cast<size_t>(j)] = std::clamp(pr[static_cast<size_t>(j)], 0, cmax);
+            uint32_t e = 0;
+            if (hW) e += err[oW * 4 + static_cast<size_t>(j)];
+            if (hN) e += err[oN * 4 + static_cast<size_t>(j)];
+            if (e < best_e) {
+              best_e = e;
+              best = j;
+            }
+          }
+          const int32_t pred = pr[static_cast<size_t>(best)];
+          uint32_t act = 0;
+          if (hW) act += err[oW * 4 + 3];
+          if (hN) act += err[oN * 4 + 3];
+          if (!hW && !hN) act = f16 ? 4096u : 16u;
+          const int b = std::min(kRiceBuckets - 1, static_cast<int>(std::bit_width(act)));
+
+          uint32_t sym = AC::encoding ? (f16 ? f16_order(values[i]) : values[i]) : 0u;
+          const bool matched = lz != nullptr && lz_token(*lz, ac, code.data(), i, group, static_cast<uint32_t>(pred), sym);
+          if (!matched) {
+            const int k = model.k(slot, b);
+            uint32_t u = 0;
+            if constexpr (AC::encoding) {
+              const int32_t r = static_cast<int32_t>(sym) - pred;
+              u = r >= 0 ? static_cast<uint32_t>(2 * r) : static_cast<uint32_t>(-2 * r - 1);
+            }
+            const uint32_t q = u >> k;
+            int j = 0;
+            for (; j < kRiceUnary; ++j) {
+              uint32_t& cn = model.cont(slot, b, j);
+              const int p16 = std::clamp(static_cast<int>(cn >> 16), 32, 65536 - 32);
+              const int more = ac.code(p16, AC::encoding ? (q > static_cast<uint32_t>(j) ? 1 : 0) : 0);
+              train(cn, more, 255);
+              if (!more) break;
+            }
+            if (j == kRiceUnary) {
+              u = plain_bits(ac, u, ubits);  // escape: the whole residual
+            } else {
+              const uint32_t low = plain_bits(ac, u & ((1u << k) - 1u), k);
+              if constexpr (!AC::encoding) u = (static_cast<uint32_t>(j) << k) | low;
+            }
+            model.update(slot, b, u);
+            if constexpr (!AC::encoding) {
+              const int32_t r = (u & 1u) ? -static_cast<int32_t>((u + 1) >> 1) : static_cast<int32_t>(u >> 1);
+              const int32_t v = pred + r;
+              if (v < 0 || v > cmax) return false;  // damaged data
+              sym = static_cast<uint32_t>(v);
+            }
+          }
+          if constexpr (!AC::encoding) values[i] = f16 ? f16_unorder(static_cast<uint16_t>(sym)) : static_cast<uint16_t>(sym);
+          code[i] = static_cast<uint16_t>(sym);
+          for (int j = 0; j < 3; ++j) err[o * 4 + static_cast<size_t>(j)] = static_cast<uint16_t>(std::min<int32_t>(65535, std::abs(static_cast<int32_t>(sym) - pr[static_cast<size_t>(j)])));
+          err[o * 4 + 3] = static_cast<uint16_t>(std::min<int32_t>(65535, std::abs(static_cast<int32_t>(sym) - pred)));
         }
       }
     }
@@ -1147,6 +1657,322 @@ bool walk(Mode mode, IO& io) {
   return io.raw(pos, io.size() - pos);  // anything after the parsed structure (or the whole file) as plain bytes
 }
 
+// --- format 2: LZ tokens, the light model, seekable segments --------------------------------------------------------
+
+constexpr uint8_t kFormat2 = 2;
+constexpr uint8_t kModelMask = 3, kFlagLz = 4, kFlagSeek = 8;  // flags: the literal model (0 full, 1 light, 2 fast), options
+
+uint32_t checksum32(uint32_t h, uint8_t v) { return (h ^ v) * 16777619u; }  // FNV-1a, 32 bits
+constexpr uint32_t kSum32 = 2166136261u;
+
+// Planes [first, last) of each segment of a tensor, about `target` values each, as even as the units allow. With two
+// plane axes or more, the unit is D1 planes (all time slices of a feature plane, both fields of a start point), so the
+// plane before is in the segment except at its start; with one (coarse start states), a unit is one plane.
+std::vector<std::pair<size_t, size_t>> chunks(const Shape& s, size_t target) {
+  const Geometry g = geometry(s);
+  const size_t unit = g.D1 > 1 && g.planes > g.D1 ? g.D1 : 1, units = std::max<size_t>(1, g.planes / unit);
+  const size_t per = std::max<size_t>(1, target / std::max<size_t>(1, unit * g.plane));
+  const size_t n = (units + per - 1) / per;
+  std::vector<std::pair<size_t, size_t>> c;
+  for (size_t k = 0; k < n; ++k) c.emplace_back(k * units / n * unit, (k + 1) * units / n * unit);
+  c.back().second = g.planes;
+  return c;
+}
+
+// In seekable files, headers and the small tensors that later parsing reads (feature ranges, field scales) go to one
+// stream, segment 0, decoded whenever anything is.
+bool in_header_stream(Kind k) { return k == Kind::bytes || k == Kind::ranges || k == Kind::scales; }
+
+struct Opt2 {
+  int model = 1;  // 0 full, 1 light, 2 fast
+  bool lz = true, seek = false;
+  size_t segment = size_t{1} << 16;
+};
+
+// What a seekable file holds, segment by segment (filled while walking).
+struct SegMeta {
+  Kind kind = Kind::bytes;
+  size_t tensor = 0, first = 0, last = 0, values = 0;
+  Shape shape;
+  std::vector<size_t> at;  // kept only for the selected segment
+};
+
+// The coder's view of a file in format 2 (as Io for format 1). Encoding writes either one stream or segments; decoding
+// reads them, and with `select` set decodes segment 0 and that segment only (the others are left as zeros).
+template <class AC>
+class Io2 {
+ public:
+  static constexpr bool kEnc = AC::encoding;
+  Io2(const Opt2& o, const uint8_t* in, uint8_t* out, size_t size) : o_(o), in_(in), out_(out), size_(size) {
+    if constexpr (kEnc) covered_.assign(size, false);
+    if (o_.model == 0) full_ = std::make_unique<Model>(size);
+    else if (o_.model == 1) light_ = std::make_unique<Light>(static_cast<size_t>(kKinds));  // the stream's, or segment 0's
+    else rice_ = std::make_unique<Rice>(static_cast<size_t>(kKinds));
+  }
+  const uint8_t* data() const { return kEnc ? in_ : out_; }
+  size_t size() const { return size_; }
+  bool fits(size_t off, size_t n) const { return off <= size_ && n <= size_ - off; }
+  uint64_t le(size_t off, int bytes) const { return get_le(data() + off, bytes); }
+
+  bool raw(size_t off, size_t n) {
+    if (!fits(off, n)) return false;
+    constexpr size_t kPiece = size_t{1} << 20;
+    for (size_t done = 0; done < n; done += kPiece) {
+      const size_t len = std::min(kPiece, n - done);
+      std::vector<size_t> at(len);
+      for (size_t k = 0; k < len; ++k) at[k] = off + done + k;
+      Shape s;
+      s.kind = Kind::bytes;
+      s.dims = {static_cast<uint32_t>(len)};
+      if (!tensor(s, at)) return false;
+    }
+    return true;
+  }
+
+  bool tensor(const Shape& s, const std::vector<size_t>& at) {
+    if (at.size() != s.size()) return false;
+    for (const size_t a : at) {
+      if (!fits(a, static_cast<size_t>(s.width))) return false;
+    }
+    std::vector<uint16_t> v(at.size());
+    if constexpr (kEnc) {
+      for (size_t k = 0; k < at.size(); ++k) {
+        v[k] = static_cast<uint16_t>(get_le(in_ + at[k], s.width));
+        for (int b = 0; b < s.width; ++b) {
+          if (covered_[at[k] + static_cast<size_t>(b)]) overlap_ = true;
+          covered_[at[k] + static_cast<size_t>(b)] = true;
+        }
+      }
+    }
+    Part& part = parts[static_cast<size_t>(s.kind)];
+    part.kind = s.kind;
+    part.values += v.size();
+    part.bytes += v.size() * static_cast<size_t>(s.width);
+    const size_t planes = geometry(s).planes;
+    if (!o_.seek) {
+      AC& ac = *ac_;
+      const double before = ac.cost;
+      if (!code_stream(ac, s, planes, v.data())) return false;
+      part.coded_bytes += (ac.cost - before) / 8.0;
+      place(at, v, s.width, 0, v.size());
+      ++tensors_;
+      return true;
+    }
+    if (in_header_stream(s.kind)) {  // segment 0, one stream
+      AC& ac = *ac_;
+      const double before = ac.cost;
+      if (!code_stream(ac, s, planes, v.data())) return false;
+      part.coded_bytes += (ac.cost - before) / 8.0;
+      for (size_t k = 0; k < v.size(); ++k) {
+        for (int b = 0; b < s.width; ++b) header_sum_ = checksum32(header_sum_, static_cast<uint8_t>(v[k] >> (8 * b)));
+      }
+      place(at, v, s.width, 0, v.size());
+      ++tensors_;
+      return true;
+    }
+    const size_t plane = geometry(s).plane;
+    for (const auto& [first, last] : chunks(s, o_.segment)) {
+      const size_t seg = segs.size() + 1;  // segment 0 is the header stream
+      SegMeta m;
+      m.kind = s.kind;
+      m.tensor = tensors_;
+      m.first = first;
+      m.last = last;
+      m.values = (last - first) * plane;
+      const size_t lo = first * plane, hi = last * plane;
+      uint16_t* vals = v.data() + lo;
+      if constexpr (kEnc) {
+        std::vector<uint8_t> buf;
+        Encoder ac(buf);
+        if (!code_segment(ac, s, first, last, vals)) return false;
+        ac.flush();
+        part.coded_bytes += ac.cost / 8.0;
+        seg_data.push_back(std::move(buf));
+        seg_sums.push_back(sum_of(vals, hi - lo, s.width));
+      } else {
+        if (seg >= spans.size()) return false;
+        const bool want = select == 0 || select == seg;
+        if (want) {
+          Decoder ac(spans[seg]);
+          if (!code_segment(ac, s, first, last, vals)) return false;
+          if (sum_of(vals, hi - lo, s.width) != sums[seg]) return false;
+          place(at, v, s.width, lo, hi);
+        }
+        if (select == seg) {
+          m.shape = s;
+          m.at.assign(at.begin() + static_cast<std::ptrdiff_t>(lo), at.begin() + static_cast<std::ptrdiff_t>(hi));
+          picked.assign(vals, vals + (hi - lo));
+        }
+      }
+      segs.push_back(std::move(m));
+    }
+    ++tensors_;
+    return true;
+  }
+
+  bool complete() const { return !overlap_ && std::ranges::all_of(covered_, [](bool b) { return b; }); }
+
+  std::array<Part, static_cast<size_t>(Kind::count)> parts{};
+  std::unique_ptr<AC> ac_;                // the single stream, or the header stream (segment 0)
+  std::vector<SegMeta> segs;              // segments 1.. in order
+  std::vector<std::vector<uint8_t>> seg_data;  // encoding: their streams
+  std::vector<uint32_t> seg_sums;              // encoding: their checksums
+  std::vector<std::span<const uint8_t>> spans;  // decoding: every segment's stream (0 = header)
+  std::vector<uint32_t> sums;                   // decoding: every segment's checksum
+  size_t select = 0;                            // decoding: 0 = every segment, else that one only
+  std::vector<uint16_t> picked;                 // decoding: the selected segment's values
+  uint32_t header_sum_ = kSum32;
+
+ private:
+  // A whole tensor in the single stream (or segment 0), with the stream's model.
+  template <class A>
+  bool code_stream(A& ac, const Shape& s, size_t planes, uint16_t* v) {
+    LzState* lz = o_.lz ? &lz_ : nullptr;
+    if (o_.model == 0) return code_tensor(*full_, ac, s, v, lz);
+    if (o_.model == 1) return code_tensor_fast(*light_, ac, s, 0, planes, v, lz);
+    return code_tensor_rice(*rice_, ac, s, 0, planes, v, lz);
+  }
+  // A segment: a fresh model for one kind, a fresh coder.
+  template <class A>
+  bool code_segment(A& ac, const Shape& s, size_t first, size_t last, uint16_t* v) {
+    LzState lz;
+    if (o_.model == 1) {
+      Light m(1);
+      return code_tensor_fast(m, ac, s, first, last, v, o_.lz ? &lz : nullptr);
+    }
+    Rice m(1);
+    return code_tensor_rice(m, ac, s, first, last, v, o_.lz ? &lz : nullptr);
+  }
+  static uint32_t sum_of(const uint16_t* v, size_t n, int width) {
+    uint32_t h = kSum32;
+    for (size_t k = 0; k < n; ++k) {
+      for (int b = 0; b < width; ++b) h = checksum32(h, static_cast<uint8_t>(v[k] >> (8 * b)));
+    }
+    return h;
+  }
+  void place(const std::vector<size_t>& at, const std::vector<uint16_t>& v, int width, size_t lo, size_t hi) {
+    if constexpr (!kEnc) {
+      for (size_t k = lo; k < hi; ++k) {
+        for (int b = 0; b < width; ++b) out_[at[k] + static_cast<size_t>(b)] = static_cast<uint8_t>(v[k] >> (8 * b));
+      }
+    }
+  }
+  Opt2 o_;
+  const uint8_t* in_;
+  uint8_t* out_;
+  size_t size_;
+  std::vector<bool> covered_;
+  bool overlap_ = false;
+  std::unique_ptr<Light> light_;
+  std::unique_ptr<Model> full_;
+  std::unique_ptr<Rice> rice_;
+  LzState lz_;
+  size_t tensors_ = 0;
+};
+
+uint8_t flags_of(const Opt2& o) {
+  return static_cast<uint8_t>(o.model | (o.lz ? kFlagLz : 0) | (o.seek ? kFlagSeek : 0));
+}
+
+Packed encode2(Mode mode, std::span<const uint8_t> file, Opt2 o) {
+  if (o.seek && o.model == 0) o.model = 1;  // segments: not the full model (too large to restart per segment)
+  Packed r;
+  r.data.assign(kMagic.begin(), kMagic.end());
+  r.data.push_back(kFormat2);
+  r.data.push_back(static_cast<uint8_t>(mode));
+  put_le(r.data, file.size(), 8);
+  put_le(r.data, checksum(file), 8);
+  r.data.push_back(flags_of(o));
+  std::vector<uint8_t> main;
+  Io2<Encoder> io(o, file.data(), nullptr, file.size());
+  io.ac_ = std::make_unique<Encoder>(main);
+  if (!walk(mode, io) || !io.complete()) {
+    if (mode == Mode::bytes) throw std::logic_error("cm: plain coding failed");
+    return encode2(Mode::bytes, file, o);
+  }
+  io.ac_->flush();
+  if (o.seek) {
+    put_le(r.data, std::min<size_t>(o.segment, 0xffffffffu), 4);
+    put_le(r.data, io.seg_data.size() + 1, 4);
+    put_le(r.data, main.size(), 4);
+    put_le(r.data, io.header_sum_, 4);
+    for (size_t k = 0; k < io.seg_data.size(); ++k) {
+      put_le(r.data, io.seg_data[k].size(), 4);
+      put_le(r.data, io.seg_sums[k], 4);
+    }
+    r.data.insert(r.data.end(), main.begin(), main.end());
+    for (const auto& b : io.seg_data) r.data.insert(r.data.end(), b.begin(), b.end());
+  } else {
+    r.data.insert(r.data.end(), main.begin(), main.end());
+  }
+  for (const Part& p : io.parts) {
+    if (p.values > 0) r.parts.push_back(p);
+  }
+  return r;
+}
+
+// Decodes a format-2 file: everything (select = 0), the header stream and segment `select`, or (kListOnly) the header
+// stream alone, which is enough to list the segments.
+constexpr size_t kListOnly = ~size_t{0};
+
+struct Decoded2 {
+  Mode mode = Mode::bytes;
+  std::vector<uint8_t> file;
+  std::vector<SegMeta> segs;
+  std::vector<size_t> seg_bytes;  // packed bytes of each segment (0 = header stream)
+  std::vector<uint16_t> picked;
+};
+
+std::expected<Decoded2, std::string> decode2(std::span<const uint8_t> packed, size_t select) {
+  constexpr size_t kHeader2 = kHeader + 1;
+  if (packed.size() < kHeader2) return std::unexpected("nvfz: truncated");
+  const auto mode = static_cast<Mode>(packed[5]);
+  if (packed[5] > static_cast<uint8_t>(Mode::tensors)) return std::unexpected("nvfz: unknown content");
+  const uint64_t size = get_le(packed.data() + 6, 8), sum = get_le(packed.data() + 14, 8);
+  if (size > kMaxSize) return std::unexpected("nvfz: implausible size");
+  const uint8_t flags = packed[kHeader];
+  if ((flags & ~(kModelMask | kFlagLz | kFlagSeek)) || (flags & kModelMask) == 3) return std::unexpected("nvfz: unknown options");
+  Opt2 o;
+  o.model = flags & kModelMask;
+  o.lz = (flags & kFlagLz) != 0;
+  o.seek = (flags & kFlagSeek) != 0;
+  if (o.seek && o.model == 0) return std::unexpected("nvfz: unknown options");
+  if (!o.seek && select != 0) return std::unexpected("nvfz: not seekable");
+  Decoded2 d;
+  d.mode = mode;
+  d.file.assign(static_cast<size_t>(size), 0);
+  if (o.seek && packed.size() >= kHeader2 + 4) o.segment = std::max<size_t>(1, static_cast<size_t>(get_le(packed.data() + kHeader2, 4)));
+  Io2<Decoder> io(o, nullptr, d.file.data(), d.file.size());
+  if (o.seek) {
+    // the segment size, the number of segments, then each one's packed length and checksum
+    constexpr size_t kIndex = kHeader2 + 8;
+    if (packed.size() < kIndex) return std::unexpected("nvfz: truncated");
+    const uint64_t segment = get_le(packed.data() + kHeader2, 4), count = get_le(packed.data() + kHeader2 + 4, 4);
+    if (segment == 0 || count < 1 || count > (packed.size() - kIndex) / 8) return std::unexpected("nvfz: corrupt index");
+    size_t at = kIndex + 8 * static_cast<size_t>(count);
+    for (size_t k = 0; k < count; ++k) {
+      const uint64_t len = get_le(packed.data() + kIndex + 8 * k, 4);
+      if (len > packed.size() - at) return std::unexpected("nvfz: corrupt index");
+      io.spans.push_back(packed.subspan(at, static_cast<size_t>(len)));
+      io.sums.push_back(static_cast<uint32_t>(get_le(packed.data() + kIndex + 4 + 8 * k, 4)));
+      d.seg_bytes.push_back(static_cast<size_t>(len));
+      at += static_cast<size_t>(len);
+    }
+    if (select >= count && select != kListOnly) return std::unexpected("nvfz: no such segment");
+    io.select = select;
+    io.ac_ = std::make_unique<Decoder>(io.spans[0]);
+  } else {
+    io.ac_ = std::make_unique<Decoder>(packed.subspan(kHeader2));
+  }
+  if (!walk(mode, io)) return std::unexpected("nvfz: corrupt data");
+  if (o.seek && (io.segs.size() + 1 != io.spans.size() || io.header_sum_ != io.sums[0])) return std::unexpected("nvfz: corrupt data");
+  if (select == 0 && checksum(d.file) != sum) return std::unexpected("nvfz: checksum mismatch");
+  if (select != 0 && select != kListOnly && select > io.segs.size()) return std::unexpected("nvfz: no such segment");
+  d.segs = std::move(io.segs);
+  d.picked = std::move(io.picked);
+  return d;
+}
+
 Packed encode(Mode mode, std::span<const uint8_t> file) {
   Packed r;
   r.data.assign(kMagic.begin(), kMagic.end());
@@ -1170,6 +1996,11 @@ Packed encode(Mode mode, std::span<const uint8_t> file) {
 
 std::expected<std::pair<Mode, std::vector<uint8_t>>, std::string> decode(std::span<const uint8_t> packed) {
   if (packed.size() < kHeader || !std::equal(kMagic.begin(), kMagic.end(), packed.begin())) return std::unexpected("nvfz: not a packed file");
+  if (packed[4] == kFormat2) {
+    auto d = decode2(packed, 0);
+    if (!d) return std::unexpected(d.error());
+    return std::pair{d->mode, std::move(d->file)};
+  }
   if (packed[4] != kFormat) return std::unexpected("nvfz: unsupported format");
   const auto mode = static_cast<Mode>(packed[5]);
   if (packed[5] > static_cast<uint8_t>(Mode::tensors)) return std::unexpected("nvfz: unknown content");
@@ -1206,6 +2037,51 @@ Packed pack_model(std::span<const uint8_t> file) {
   return encode(detect(file), file);
 }
 
+namespace {
+Opt2 opt2(const Options& o) {
+  Opt2 r;
+  r.model = static_cast<int>(o.literal);
+  if (o.seekable && r.model == 0) r.model = 1;
+  r.lz = o.lz;
+  r.seek = o.seekable;
+  r.segment = std::max<std::size_t>(1, o.segment);
+  return r;
+}
+}  // namespace
+
+Packed pack_model(std::span<const uint8_t> file, const Options& o) {
+  if (file.size() > kMaxSize) throw std::invalid_argument("pack_model: files over 256 MB are not supported");
+  return encode2(detect(file), file, opt2(o));
+}
+
+std::expected<std::vector<SliceInfo>, std::string> list_slices(std::span<const uint8_t> packed) {
+  if (packed.size() < kHeader || !std::equal(kMagic.begin(), kMagic.end(), packed.begin())) return std::unexpected("nvfz: not a packed file");
+  if (packed[4] != kFormat2) return std::unexpected("nvfz: not seekable");
+  const auto d = decode2(packed, kListOnly);
+  if (!d) return std::unexpected(d.error());
+  std::vector<SliceInfo> r;
+  for (std::size_t k = 0; k < d->segs.size(); ++k) {
+    const SegMeta& m = d->segs[k];
+    r.push_back({m.kind, m.values, d->seg_bytes[k + 1], m.tensor, m.first, m.last - m.first});
+  }
+  return r;
+}
+
+std::expected<Slice, std::string> unpack_slice(std::span<const uint8_t> packed, std::size_t index) {
+  if (packed.size() < kHeader || !std::equal(kMagic.begin(), kMagic.end(), packed.begin())) return std::unexpected("nvfz: not a packed file");
+  if (packed[4] != kFormat2) return std::unexpected("nvfz: not seekable");
+  if (index + 1 == 0) return std::unexpected("nvfz: no such segment");
+  auto d = decode2(packed, index + 1);
+  if (!d) return std::unexpected(d.error());
+  const SegMeta& m = d->segs[index];
+  Slice s;
+  s.tensor.shape = m.shape;
+  s.tensor.values = std::move(d->picked);
+  s.first_plane = m.first;
+  s.at = m.at;
+  return s;
+}
+
 std::vector<std::pair<Kind, std::vector<uint8_t>>> split_model(std::span<const uint8_t> file) {
   Collect c(file);
   if (!walk(detect(file), c)) {
@@ -1227,7 +2103,8 @@ std::expected<std::vector<uint8_t>, std::string> unpack_model(std::span<const ui
   return std::move(r->second);
 }
 
-Packed pack_tensors(std::span<const Tensor> tensors) {
+namespace {
+std::vector<uint8_t> serialise(std::span<const Tensor> tensors) {
   std::vector<uint8_t> b;
   put_le(b, tensors.size(), 4);
   for (const Tensor& t : tensors) {
@@ -1255,8 +2132,13 @@ Packed pack_tensors(std::span<const Tensor> tensors) {
     }
   }
   if (b.size() > kMaxSize) throw std::invalid_argument("pack_tensors: more than 256 MB");
-  return encode(Mode::tensors, b);
+  return b;
 }
+}  // namespace
+
+Packed pack_tensors(std::span<const Tensor> tensors) { return encode(Mode::tensors, serialise(tensors)); }
+
+Packed pack_tensors(std::span<const Tensor> tensors, const Options& o) { return encode2(Mode::tensors, serialise(tensors), opt2(o)); }
 
 std::expected<std::vector<Tensor>, std::string> unpack_tensors(std::span<const uint8_t> packed) {
   auto r = decode(packed);

@@ -12,6 +12,11 @@
 //                                             to results/experiments/a_scores.csv, OUT to results/compression
 //   nvfx_pack --tables [--scores CSV] [--out OUT]
 //                                             the tables again from OUT/cm.csv, without coding anything
+//   nvfx_pack in.nvfx out.nvfz [--light | --fast] [--lz] [--seekable [--segment N]]
+//                                             format 2 (study H): LZ tokens, the light model, seekable segments
+//   nvfx_pack --h3 [--reps N] [--segment N] [--out OUT] [--csv NAME] FILES_OR_DIRS
+//                                             study H, H3: every configuration of the coder on each file, decode
+//                                             times (thread CPU time, interleaved repetitions), one-slice decodes
 //
 // Packing changes the bytes on disk only: the runtime loads the unpacked .nvfx, so resident memory is unchanged.
 // Single-threaded throughout; decoding speed is the unpacked size over the time to unpack.
@@ -26,6 +31,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <ctime>
 #include <cmath>
 #include <filesystem>
 #include <format>
@@ -478,15 +484,166 @@ int tables(const fs::path& out, const fs::path& scores) {
   return 0;
 }
 
+// --- study H, H3: LZ tokens and a light model in the coder (docs/DCM.md §9) ---------------------------------------------
+
+double thread_seconds() {
+  timespec t{};
+  clock_gettime(CLOCK_THREAD_CPUTIME_ID, &t);
+  return static_cast<double>(t.tv_sec) + 1e-9 * static_cast<double>(t.tv_nsec);
+}
+
+struct H3Config {
+  std::string name;
+  int kind;  // 0: format 1; 1: format 2 with options; 2: zlib -9
+  cm::Options o;
+};
+
+std::vector<H3Config> h3_configs(std::size_t segment) {
+  std::vector<H3Config> c;
+  c.push_back({"cm", 0, {}});
+  using L = cm::Literal;
+  c.push_back({"cm+lz", 1, {L::full, true, false, segment}});
+  c.push_back({"light", 1, {L::light, false, false, segment}});
+  c.push_back({"light+lz", 1, {L::light, true, false, segment}});
+  c.push_back({"light+lz seekable", 1, {L::light, true, true, segment}});
+  c.push_back({"fast", 1, {L::fast, false, false, segment}});
+  c.push_back({"fast+lz", 1, {L::fast, true, false, segment}});
+  c.push_back({"fast+lz seekable", 1, {L::fast, true, true, segment}});
+  c.push_back({"zlib-9", 2, {}});
+  return c;
+}
+
+std::vector<std::uint8_t> zlib_pack(std::span<const std::uint8_t> b) {
+  uLongf n = compressBound(static_cast<uLong>(b.size()));
+  std::vector<std::uint8_t> out(n);
+  if (compress2(out.data(), &n, b.data(), static_cast<uLong>(b.size()), 9) != Z_OK) throw std::runtime_error("zlib failed");
+  out.resize(n);
+  return out;
+}
+
+std::vector<std::uint8_t> zlib_unpack(std::span<const std::uint8_t> b, std::size_t size) {
+  std::vector<std::uint8_t> out(size);
+  uLongf n = static_cast<uLongf>(size);
+  if (uncompress(out.data(), &n, b.data(), static_cast<uLong>(b.size())) != Z_OK || n != size) throw std::runtime_error("zlib failed");
+  return out;
+}
+
+// Every file under the arguments packed in every configuration (round trips checked), then decoded `reps` times with
+// the configurations interleaved within each repetition; thread CPU time, least and median. For seekable files, each
+// segment is also decoded alone (least of the repetitions per segment; the mean and largest over segments are kept).
+int h3(const tools::Args& a) {
+  const int reps = a.i("reps", 15);
+  const std::size_t segment = static_cast<std::size_t>(a.i("segment", 1 << 16));
+  const fs::path out = a.str("out", "results/compression");
+  std::vector<fs::path> files;
+  for (const auto& p : a.positional()) {
+    if (fs::is_directory(p)) {
+      for (const auto& e : fs::recursive_directory_iterator(p)) {
+        if (e.is_regular_file() && e.path().extension() == ".nvfx") files.push_back(e.path());
+      }
+    } else {
+      files.push_back(p);
+    }
+  }
+  std::ranges::sort(files);
+  const auto configs = h3_configs(segment);
+  fs::create_directories(out);
+  const std::string name = a.str("csv", "h3_decode.csv");
+  std::ofstream csv(out / name);
+  std::ofstream parts(out / (fs::path(name).stem().string() + "_parts.csv"));
+  parts << "file,config,part,values,original_bytes,coded_bytes\n";
+  csv << "file,config,original_bytes,packed_bytes,ratio,decode_ms_min,decode_ms_median,decode_mb_per_s,segments,slice_ms_mean,slice_ms_max,"
+         "slice_values_max\n";
+  std::println("| file | config | KB | packed KB | ratio | decode ms (least) | median | MB/s | segments | one slice ms (mean / max) |");
+  std::println("|---|---|---:|---:|---:|---:|---:|---:|---:|---:|");
+  for (const auto& f : files) {
+    const auto file = read_file(f);
+    std::vector<std::vector<std::uint8_t>> packed;
+    for (const auto& c : configs) {
+      if (c.kind == 2) {
+        packed.push_back(zlib_pack(file));
+        continue;
+      }
+      const cm::Packed p = c.kind == 0 ? cm::pack_model(file) : cm::pack_model(file, c.o);
+      for (const cm::Part& q : p.parts) {
+        parts << std::format("{},{},{},{},{},{:.1f}\n", f.filename().string(), c.name, cm::kind_name(q.kind), q.values, q.bytes, q.coded_bytes);
+      }
+      packed.push_back(p.data);
+    }
+    std::vector<std::vector<double>> t(configs.size());
+    for (int r = 0; r < reps; ++r) {
+      for (std::size_t k = 0; k < configs.size(); ++k) {
+        const double t0 = thread_seconds();
+        std::vector<std::uint8_t> back;
+        if (configs[k].kind == 2) {
+          back = zlib_unpack(packed[k], file.size());
+        } else {
+          auto u = cm::unpack_model(packed[k]);
+          if (!u) throw std::runtime_error(std::format("{} {}: {}", f.string(), configs[k].name, u.error()));
+          back = std::move(*u);
+        }
+        t[k].push_back(thread_seconds() - t0);
+        if (back != file) throw std::runtime_error(std::format("round trip failed: {} {}", f.string(), configs[k].name));
+      }
+    }
+    for (std::size_t k = 0; k < configs.size(); ++k) {
+      auto v = t[k];
+      std::ranges::sort(v);
+      const double least = v.front(), median = v[v.size() / 2];
+      std::size_t nseg = 0, max_values = 0;
+      double slice_mean = 0, slice_max = 0;
+      if (configs[k].kind == 1 && configs[k].o.seekable) {
+        const auto list = cm::list_slices(packed[k]);
+        if (!list) throw std::runtime_error(list.error());
+        nseg = list->size();
+        for (std::size_t j = 0; j < list->size(); ++j) {
+          double best = 1e9;
+          for (int r = 0; r < std::max(3, reps / 3); ++r) {
+            const double t0 = thread_seconds();
+            const auto sl = cm::unpack_slice(packed[k], j);
+            best = std::min(best, thread_seconds() - t0);
+            if (!sl) throw std::runtime_error(sl.error());
+            for (std::size_t q = 0; q < sl->at.size(); ++q) {
+              const int w = sl->tensor.shape.width;
+              const auto want = static_cast<std::uint16_t>(file[sl->at[q]] | (w == 2 ? file[sl->at[q] + 1] << 8 : 0));
+              if (sl->tensor.values[q] != want) throw std::runtime_error("slice differs from the file");
+            }
+          }
+          slice_mean += best;
+          slice_max = std::max(slice_max, best);
+          max_values = std::max(max_values, (*list)[j].values);
+        }
+        if (nseg) slice_mean /= static_cast<double>(nseg);
+      }
+      const double ratio = static_cast<double>(file.size()) / static_cast<double>(packed[k].size());
+      csv << std::format("{},{},{},{},{:.4f},{:.3f},{:.3f},{:.3f},{},{:.3f},{:.3f},{}\n", f.filename().string(), configs[k].name, file.size(),
+                         packed[k].size(), ratio, 1e3 * least, 1e3 * median, static_cast<double>(file.size()) / 1e6 / least, nseg, 1e3 * slice_mean,
+                         1e3 * slice_max, max_values);
+      std::println("| {} | {} | {:.1f} | {:.1f} | {:.3f}x | {:.2f} | {:.2f} | {:.2f} | {} | {} |", f.filename().string(), configs[k].name, kb(file.size()),
+                   kb(packed[k].size()), ratio, 1e3 * least, 1e3 * median, static_cast<double>(file.size()) / 1e6 / least, nseg,
+                   nseg ? std::format("{:.2f} / {:.2f}", 1e3 * slice_mean, 1e3 * slice_max) : std::string());
+    }
+    csv.flush();
+    parts.flush();
+  }
+  return 0;
+}
+
 }  // namespace
 
 int main(int argc, char** argv) try {
-  const tools::Args a(argc, argv, {"help", "unpack", "study", "tables"});
+  const tools::Args a(argc, argv, {"help", "unpack", "study", "tables", "h3", "light", "fast", "lz", "seekable"});
   const auto& pos = a.positional();
   if (a.flag("help") || (pos.empty() && !a.has("report") && !a.flag("study") && !a.flag("tables"))) {
-    std::println("nvfx_pack in.nvfx out.nvfz | --unpack in.nvfz out.nvfx | --report DIR | --study [--data DIR] [--scores CSV] [--out DIR] | "
-                 "--tables [--scores CSV] [--out DIR]");
+    std::println("nvfx_pack in.nvfx out.nvfz [--light | --fast] [--lz] [--seekable [--segment N]] | --unpack in.nvfz out.nvfx | --report DIR | "
+                 "--study [--data DIR] [--scores CSV] [--out DIR] | --tables [--scores CSV] [--out DIR] | "
+                 "--h3 [--reps N] [--segment N] [--out DIR] [--csv NAME] FILES_OR_DIRS");
     return 0;
+  }
+  if (a.flag("h3")) {
+    const int r = h3(a);
+    a.warn_unused();
+    return r;
   }
   if (a.flag("tables")) return tables(a.str("out", "results/compression"), a.str("scores", "results/experiments/a_scores.csv"));
   if (a.has("report")) return report(a.str("report"));
@@ -506,7 +663,10 @@ int main(int argc, char** argv) try {
     std::println("{}: {} bytes -> {} bytes in {:.3f} s ({:.2f} MB/s)", pos[0], in.size(), r->size(), s, static_cast<double>(r->size()) / 1e6 / s);
     return 0;
   }
-  const cm::Packed p = cm::pack_model(in);
+  const bool format2 = a.flag("light") || a.flag("fast") || a.flag("lz") || a.flag("seekable");
+  const cm::Literal lit = a.flag("fast") ? cm::Literal::fast : a.flag("light") ? cm::Literal::light : cm::Literal::full;
+  const cm::Options o{lit, a.flag("lz"), a.flag("seekable"), static_cast<std::size_t>(a.i("segment", 1 << 16))};
+  const cm::Packed p = format2 ? cm::pack_model(in, o) : cm::pack_model(in);
   write_file(pos[1], p.data);
   std::println("{}: {} bytes -> {} bytes ({:.3f}x)", pos[0], in.size(), p.data.size(), static_cast<double>(in.size()) / static_cast<double>(p.data.size()));
   for (const cm::Part& q : p.parts) {
