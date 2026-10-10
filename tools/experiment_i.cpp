@@ -392,7 +392,9 @@ void step_train(const Ctx& c) {
         if (!line.empty() && line.rfind(std::format("{},{},", ename(e), tag), 0) != 0) keep.push_back(line);
       }
     }
-    keep.push_back(std::format("{},{},{},{},{},{},{},{:.5f},{:.0f}", ename(e), tag, c.share, c.lr, c.iters, c.batch, c.threads, sr.final_loss, sr.seconds));
+    const std::string done = c.stop > 0 ? std::format("{} of {}", c.stop, c.iters) : std::to_string(c.iters);  // a control stops early
+    keep.push_back(std::format("{},{},{},{},{},{},{},{},{:.0f}", ename(e), tag, c.share, c.lr, done, c.batch, c.threads,
+                               c.stop > 0 ? std::string() : std::format("{:.5f}", sr.final_loss), sr.seconds));
     std::ofstream o(log);
     o << "effect,candidate,share,lr,iterations,batch,threads,final_loss,seconds\n";
     for (const auto& r : keep) o << r << "\n";
