@@ -11,6 +11,8 @@
 // bit; the baseline (SSE2, no FMA) rounds each multiply-add twice and stays within a stated tolerance.
 #pragma once
 
+#include "rt_aligned.hpp"
+
 #include <array>
 #include <cstddef>
 #include <cstdint>
@@ -22,21 +24,6 @@
 #include <vector>
 
 namespace nfx::rt {
-
-// Storage aligned to a cache line. The kernels read 32-byte vectors at offsets that are multiples of 8 floats; with
-// std::vector's 16-byte alignment every other weight load straddled two cache lines, which cost about 25% of a pass.
-template <class T>
-struct CacheAligned {
-  using value_type = T;
-  static constexpr std::align_val_t kAlign{64};
-  CacheAligned() noexcept = default;
-  template <class U>
-  CacheAligned(const CacheAligned<U>&) noexcept {}
-  T* allocate(std::size_t n) { return static_cast<T*>(::operator new(n * sizeof(T), kAlign)); }
-  void deallocate(T* p, std::size_t n) noexcept { ::operator delete(p, n * sizeof(T), kAlign); }
-  friend bool operator==(const CacheAligned&, const CacheAligned&) noexcept { return true; }
-};
-using AlignedFloats = std::vector<float, CacheAligned<float>>;
 
 // A denoiser read from a .ddpm file ("NVFXDDPM", version 1, little-endian: nine int32 sizes, scale, lo and hi per
 // channel, a uint64 weight count, the weights as float32; written by dcm::ddpm::save). The weight offsets are those of

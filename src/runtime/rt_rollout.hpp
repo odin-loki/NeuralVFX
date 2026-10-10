@@ -240,7 +240,7 @@ class SliceNoise {
   std::size_t bytes() const { return 4 * (x_.size() + y_.size() + a_.size() + b_.size()); }
 
  private:
-  void fill(std::vector<float>& s, std::int32_t iz) const {
+  void fill(AlignedFloats& s, std::int32_t iz) const {
     for (std::size_t i = 0; i < s.size(); ++i) {
       const float fx = std::floor(x_[i]), fy = std::floor(y_[i]);
       const auto ix = static_cast<std::int32_t>(fx), iy = static_cast<std::int32_t>(fy);
@@ -252,7 +252,7 @@ class SliceNoise {
     }
   }
   std::uint64_t seed_ = 0;
-  std::vector<float> x_, y_, a_, b_;
+  AlignedFloats x_, y_, a_, b_;
   std::int64_t iz_ = 0;
   float tz_ = 0.f;
 };
@@ -266,7 +266,7 @@ class LatticeFbm {
   struct Octave {
     std::uint64_t seed = 0;
     int i0 = 0, n = 0;           // the lattice: n x n corners from (i0, i0)
-    std::vector<float> a, b, c;  // corner values of the slices below and above z, and their blend at z
+    AlignedFloats a, b, c;  // corner values of the slices below and above z, and their blend at z
     std::int64_t iz = 0;
     float amp = 1.f;  // weight in the sum
   };
@@ -322,7 +322,7 @@ class LatticeFbm {
   }
 
  private:
-  static void fill(const Octave& q, std::vector<float>& s, std::int32_t iz) {
+  static void fill(const Octave& q, AlignedFloats& s, std::int32_t iz) {
     for (int j = 0; j < q.n; ++j) {
       for (int i = 0; i < q.n; ++i) s[static_cast<std::size_t>(j) * static_cast<std::size_t>(q.n) + static_cast<std::size_t>(i)] = cell_value(q.i0 + i, q.i0 + j, iz, q.seed);
     }
@@ -335,7 +335,7 @@ class LatticeFbm {
 // with weight w[p] on the second.
 struct Axis {
   std::vector<int> i;
-  std::vector<float> w;
+  AlignedFloats w;
 };
 
 // Rows of a small grid (n columns of Q interleaved values; Q = 0: as many as init() says) expanded to the fine width
@@ -382,7 +382,7 @@ class RowPair {
     key_[static_cast<std::size_t>(s)] = j;
   }
   std::size_t w_ = 0, q_ = 0, stride_ = 0;
-  std::array<std::vector<float>, 2> rows_;
+  std::array<AlignedFloats, 2> rows_;
   std::array<int, 2> key_{-1, -1};
 };
 
@@ -767,7 +767,7 @@ class Rollout final : public RolloutRunner {
   void fold() {
     if (std::equal(cond_.begin(), cond_.end(), folded_cond_.begin())) return;
     const float* w = m_.step_w.data();
-    const auto one = [&](std::size_t W, std::size_t Bb, std::size_t G, std::size_t E, int ci, std::vector<float>& wo, std::vector<float>& bo) {
+    const auto one = [&](std::size_t W, std::size_t Bb, std::size_t G, std::size_t E, int ci, AlignedFloats& wo, AlignedFloats& bo) {
       for (int j = 0; j < H_; ++j) {
         float g = 1.f, e = 0.f;
         for (int k = 0; k < h_.cond(); ++k) {
@@ -916,11 +916,11 @@ class Rollout final : public RolloutRunner {
 
   // Slot of padded row p in a ring; after writing slot 0, mirror() copies it above the last slot, so that the row above
   // any slot is the next one in memory.
-  float* ring_row(std::vector<float>& ring, int p) { return ring.data() + z(p & (ring_rows_ - 1)) * z(S_ + 3) * 2; }
-  void mirror(std::vector<float>& ring, int p) {
+  float* ring_row(AlignedFloats& ring, int p) { return ring.data() + z(p & (ring_rows_ - 1)) * z(S_ + 3) * 2; }
+  void mirror(AlignedFloats& ring, int p) {
     if ((p & (ring_rows_ - 1)) == 0) std::copy_n(ring.data(), z(S_ + 3) * 2, ring.data() + z(ring_rows_) * z(S_ + 3) * 2);
   }
-  void zero_row(std::vector<float>& ring, int p) {
+  void zero_row(AlignedFloats& ring, int p) {
     std::fill_n(ring_row(ring, p), z(S_ + 3) * 2, 0.f);
     mirror(ring, p);
   }
@@ -1337,18 +1337,18 @@ class Rollout final : public RolloutRunner {
   int S_, R_ = 0, N_ = 0, C_ = 0, I_ = 0, H_ = 0, O_ = 0;
   rollout::StepLayout L_{};
   rollout::RenderLayout RL_{};
-  std::vector<float> w1_, b1_, w2_, b2_, cond_, folded_cond_;
-  std::vector<float> X_, h1p_, h1_, h2_, d_, mid_, next_, coarse_, flow_, div_, p_, tmp_, wot_, noise_, dirsum_, soot_;
-  std::vector<float> ft_, fd_;  // the fine fields
-  std::vector<float> td_, fg_;  // rings of padded rows: the fine fields and the forward samples, interleaved
+  AlignedFloats w1_, b1_, w2_, b2_, cond_, folded_cond_;
+  AlignedFloats X_, h1p_, h1_, h2_, d_, mid_, next_, coarse_, flow_, div_, p_, tmp_, wot_, noise_, dirsum_, soot_;
+  AlignedFloats ft_, fd_;  // the fine fields
+  AlignedFloats td_, fg_;  // rings of padded rows: the fine fields and the forward samples, interleaved
   int slots_ = 1, ring_rows_ = 1;  // slots of the rings, and those in use in this frame (powers of two)
   static constexpr int kRec = 8;                            // planes of a row record (see row_record)
-  std::vector<float> rec_;                                  // the ring of row records
+  AlignedFloats rec_;                                  // the ring of row records
   int ring_ = 1;                                            // rows in the ring in this frame
-  std::vector<float> cs_t_, cs_d_;                          // column sums of the row of coarse cells being summed
+  AlignedFloats cs_t_, cs_d_;                          // column sums of the row of coarse cells being summed
   std::vector<std::int32_t> off_;                           // one row of sample stencils: offsets of the lower left
-  std::vector<float> wx_, wy_;                              // corners, and the weights
-  std::vector<float> fac_;                                  // the lock's factors per coarse cell: add, scale (heat, soot)
+  AlignedFloats wx_, wy_;                              // corners, and the weights
+  AlignedFloats fac_;                                  // the lock's factors per coarse cell: add, scale (heat, soot)
   std::vector<std::uint8_t> any_;                           // a row of coarse cells receives new material
   // Study H (H2): skipping what is +0. Per fine row, the first and last pixel that is not +0 before the step (ext_) and
   // the pixels the forward samples and the round trip computed (act_, [a, b)); per coarse row, the first and last cell
@@ -1360,16 +1360,16 @@ class Rollout final : public RolloutRunner {
   double computed_ = 0.0;            // the fraction of pixels the last step with spans computed
   int dense_steps_ = 0;              // steps since then
   int lead_ = 0, lag_ = 0, reach_lo_ = 0, reach_hi_ = 0;
-  std::vector<float> swl_;                                  // the swirl lattice's velocity, (u, v) interleaved
-  std::vector<float> r1_, r2_, out_;                        // the renderer's activations for one block
+  AlignedFloats swl_;                                  // the swirl lattice's velocity, (u, v) interleaved
+  AlignedFloats r1_, r2_, out_;                        // the renderer's activations for one block
   Axis ax_, sx_;                     // fine pixel -> coarse cell, fine pixel -> swirl lattice
   std::vector<Axis> nax_;            // fine pixel -> flicker lattice, per octave (smooth5 weights)
   RowPair<2> flow_rows_, swirl_rows_;  // expanded rows of the flow and of the swirl
   RowPair<4> fac_rows_;                // expanded rows of the lock's factors
   std::vector<RowPair<1>> noise_rows_;  // expanded rows of the flicker lattices, per octave
   RowPair<> render_rows_;              // expanded rows of the renderer's first layer (its coarse part)
-  std::vector<float> g1_;              // the renderer's first layer per coarse cell: bias and coarse part [cell][unit]
-  std::vector<float> frow_;            // one row of the renderer's fine features, planar [feature][padded size]
+  AlignedFloats g1_;              // the renderer's first layer per coarse cell: bias and coarse part [cell][unit]
+  AlignedFloats frow_;            // one row of the renderer's fine features, planar [feature][padded size]
   SliceNoise curl_, swirl_;
   LatticeFbm fine_flicker_;
   std::vector<SliceNoise> flicker_;

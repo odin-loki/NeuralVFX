@@ -9,6 +9,7 @@
 #error "define NFX_NS, NFX_TILE and NFX_VW before including rt_impl.hpp"
 #endif
 
+#include "rt_aligned.hpp"
 #include "rt_common.hpp"
 
 #include <algorithm>
