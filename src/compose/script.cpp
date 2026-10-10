@@ -142,7 +142,49 @@ bool is_reserved(std::string_view w) {
   return false;
 }
 
+std::string did_you_mean(std::string_view w, std::span<const std::string> candidates) {
+  const auto distance = [](std::string_view a, std::string_view b) {  // Levenshtein, small strings
+    std::vector<std::size_t> row(b.size() + 1);
+    for (std::size_t j = 0; j <= b.size(); ++j) row[j] = j;
+    for (std::size_t i = 1; i <= a.size(); ++i) {
+      std::size_t diag = row[0];
+      row[0] = i;
+      for (std::size_t j = 1; j <= b.size(); ++j) {
+        const std::size_t up = row[j];
+        row[j] = std::min({row[j] + 1, row[j - 1] + 1, diag + (a[i - 1] == b[j - 1] ? 0 : 1)});
+        diag = up;
+      }
+    }
+    return row[b.size()];
+  };
+  std::size_t best = 3;
+  const std::string* pick = nullptr;
+  bool tie = false;
+  for (const std::string& c : candidates) {
+    if (c == w) continue;
+    const std::size_t d = distance(w, c);
+    if (d < best) {
+      best = d;
+      pick = &c;
+      tie = false;
+    } else if (d == best) {
+      tie = true;
+    }
+  }
+  return pick && !tie && best < w.size() ? std::format(" (did you mean '{}'?)", *pick) : std::string{};
+}
+
 namespace {
+template <std::size_t N>
+std::vector<std::string> strings(const std::string_view (&list)[N]) {
+  return {std::begin(list), std::end(list)};
+}
+std::vector<std::string> strings(std::span<const Key> keys) {
+  std::vector<std::string> out;
+  for (const Key& k : keys) out.emplace_back(k.key);
+  return out;
+}
+
 // Whether a name list goes on with the word after a comma: not a key of the statement, nor a word of the grammar.
 bool list_goes_on(std::string_view w, std::span<const Key> keys) { return w == "particles" || (!is_keyword(w) && !find_key(keys, w)); }
 }  // namespace
@@ -262,7 +304,10 @@ std::vector<LogicalLine> lex(std::string_view src, std::string_view source) {
         ++i;
         continue;
       }
-      throw Error(pos, std::format("unexpected character '{}'", c), source);
+      // a character outside ASCII: quote all of its UTF-8 bytes, not the first alone
+      const auto lead = static_cast<unsigned char>(c);
+      const std::size_t n = lead >= 0xF0 ? 4 : lead >= 0xE0 ? 3 : lead >= 0xC0 ? 2 : 1;
+      throw Error(pos, std::format("unexpected character '{}'", line.substr(i, std::min(n, line.size() - i))), source);
     }
     if (toks.empty()) continue;
     if (open && !out.empty()) {
@@ -563,7 +608,9 @@ void parse_props(Parser& p, Statement& s, bool controls_allowed) {
     } else if (!controls_allowed) {
       std::string list;
       for (const Key& kk : keys) list += std::format("{}{}", list.empty() ? "" : ", ", kk.key);
-      p.fail(k.pos, std::format("'{}' is not a property of {}{}", k.text, s.keyword, list.empty() ? std::string(" (it takes none)") : " (it takes: " + list + ")"));
+      const std::string hint = did_you_mean(k.text, strings(keys));
+      p.fail(k.pos, hint.empty() ? std::format("'{}' is not a property of {}{}", k.text, s.keyword, list.empty() ? std::string(" (it takes none)") : " (it takes: " + list + ")")
+                                 : std::format("'{}' is not a property of {}{}", k.text, s.keyword, hint));
     }
     if (s.prop(k.text)) p.fail(k.pos, std::format("'{}' is given twice", k.text));
     Value v = parse_value(p, type, keys);
@@ -577,7 +624,9 @@ Statement parse_action(Parser& p) {
   s.keyword = k.text;
   s.pos = k.pos;
   if (k.type != Tok::ident || !is_action(k.text)) {
-    p.fail(k.pos, std::format("expected an action (transfer, push, suppress, hand_over, start, wake, stop, shock, scorch, burst), found '{}'", k.text));
+    const std::string hint = did_you_mean(k.text, strings(kActions));
+    p.fail(k.pos, hint.empty() ? std::format("expected an action (transfer, push, suppress, hand_over, start, wake, stop, shock, scorch, burst), found '{}'", k.text)
+                               : std::format("expected an action, found '{}'{}", k.text, hint));
   }
   const auto names = [&](std::vector<std::string>& out, std::string_view what) {
     out.push_back(p.name(what));
@@ -681,7 +730,7 @@ Statement parse_statement(Parser& p, std::string_view source) {
     declared("field");
     const Pos at = p.pos();
     s.kind = p.name("the field's kind");
-    if (!in(kFieldKinds, s.kind)) p.fail(at, std::format("'{}' is not a kind of field (ceiling, vortex, wind, gust, ring, attract, heat, cold)", s.kind));
+    if (!in(kFieldKinds, s.kind)) p.fail(at, std::format("'{}' is not a kind of field (ceiling, vortex, wind, gust, ring, attract, heat, cold){}", s.kind, did_you_mean(s.kind, strings(kFieldKinds))));
     parse_props(p, s, false);
   } else if (w == "emit") {
     const Pos at = p.pos();
@@ -732,7 +781,9 @@ Statement parse_statement(Parser& p, std::string_view source) {
   } else if (is_action(w)) {
     p.fail(k.pos, std::format("'{}' is an action: put it in a rule (at ..., when ...) or under 'every frame:', indented", w));
   } else {
-    p.fail(k.pos, std::format("unknown statement '{}' (expected scene, bus, light, particles, frame, camera, keyframes, effect, look, let, module, field, emit, every, at or when)", w));
+    const std::string hint = did_you_mean(w, strings(kTop));
+    p.fail(k.pos, hint.empty() ? std::format("unknown statement '{}' (expected scene, bus, light, particles, frame, camera, keyframes, effect, look, let, module, field, emit, every, at or when)", w)
+                               : std::format("unknown statement '{}'{}", w, hint));
   }
   if (!p.done()) p.fail(p.pos(), std::format("unexpected {} at the end of the {} statement", p.found(), w));
   (void)source;

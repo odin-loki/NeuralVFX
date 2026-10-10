@@ -103,6 +103,8 @@ void validate(const Script& s);
 // module, a field, an effect or a look (they would be ambiguous in lists of names).
 bool is_keyword(std::string_view word);
 bool is_reserved(std::string_view word);
+// " (did you mean 'x'?)" when exactly one candidate is the closest within two edits of `word`, else "".
+std::string did_you_mean(std::string_view word, std::span<const std::string> candidates);
 
 // --- the runner --------------------------------------------------------------------------------------------------------
 

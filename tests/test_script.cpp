@@ -51,6 +51,7 @@ TEST(Script, ParserErrorsHaveLineAndColumn) {
       {"  stop a", 1, 3, "indented, but no rule"},
       {"let a = 1 < 2 < 3", 1, 15, "comparisons do not chain"},
       {"let a = 3 $ 4", 1, 11, "unexpected character '$'"},
+      {"let a = 3 \u00a7 4", 1, 11, "unexpected character '\u00a7'"},
       {"scene size 1280 x", 1, 18, "expected a value"},
       {"scene size 1280 720", 1, 17, "expected 'x' between the two sizes"},
       {"field f = whirl, at (1, 2)", 1, 11, "'whirl' is not a kind of field"},
@@ -110,6 +111,29 @@ TEST(Script, ValidationErrorsHaveLineAndColumn) {
       EXPECT_NE(e.message.find(b.says), std::string::npos) << b.text << "\n  " << e.what();
     }
   }
+}
+
+// A word within two edits of exactly one known word gets a suggestion.
+TEST(Script, ErrorsSuggestTheNearestWord) {
+  const std::pair<const char*, const char*> cases[] = {
+      {"effect e = \"e\"\nmodule m = e, size 32\nevery frame:\n  transfer m -> m, fractio 0.5", "(did you mean 'fraction'?)"},
+      {"modle m = e", "(did you mean 'module'?)"},
+      {"at 1:\n  wak m", "(did you mean 'wake'?)"},
+      {"field f = vortx, at (0, 0)", "(did you mean 'vortex'?)"},
+      {"let since = t - 1\nlet b = sinse * 2", "(did you mean 'since'?)"},
+      {"let b = smoth(t)", "(did you mean 'smooth'?)"},
+      {"effect fire = \"f\"\nmodule m = fier, size 32", "(did you mean 'fire'?)"},
+      {"effect e = \"e\"\nmodule wreck = e, size 32\nat 1: stop wrek", "(did you mean 'wreck'?)"},
+  };
+  for (const auto& [text, says] : cases) {
+    try {
+      sc::validate(sc::parse(text, "t"));
+      ADD_FAILURE() << "no error for: " << text;
+    } catch (const sc::Error& e) {
+      EXPECT_NE(e.message.find(says), std::string::npos) << text << "\n  " << e.what();
+    }
+  }
+  EXPECT_EQ(sc::did_you_mean("zzzzzz", std::vector<std::string>{"fraction", "top"}), "");
 }
 
 // Problems that need the effects: sizes, controls, start points.

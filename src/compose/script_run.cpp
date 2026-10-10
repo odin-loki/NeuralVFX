@@ -351,15 +351,25 @@ class Compiler {
     if (b != kParams) p[b] = code(pr->value.exprs[1], cc);
   }
   int module_index(const std::string& name, Pos pos) const {
-    for (std::size_t i = 0; i < prog_.modules.size(); ++i)
+    std::vector<std::string> all;
+    for (std::size_t i = 0; i < prog_.modules.size(); ++i) {
       if (prog_.modules[i].name == name) return static_cast<int>(i);
+      all.push_back(prog_.modules[i].name);
+    }
     if (const auto it = names_.find(name); it != names_.end()) fail(pos, std::format("'{}' is a {}, not a module", name, it->second.first));
-    fail(pos, std::format("unknown module '{}'", name));
+    fail(pos, std::format("unknown module '{}'{}", name, did_you_mean(name, all)));
   }
   int look_index(const std::string& name, Pos pos) const {
     for (std::size_t i = 0; i < prog_.look_names.size(); ++i)
       if (prog_.look_names[i] == name) return static_cast<int>(i);
-    fail(pos, std::format("unknown look '{}' (declare it with 'look {} = shader ...' above)", name, name));
+    const std::string hint = did_you_mean(name, prog_.look_names);
+    fail(pos, hint.empty() ? std::format("unknown look '{}' (declare it with 'look {} = shader ...')", name, name) : std::format("unknown look '{}'{}", name, hint));
+  }
+  std::vector<std::string> value_names() const {  // what a name in an expression can be
+    std::vector<std::string> out = {"t", "length", "fps", "ground", "rand", "infinity"};
+    for (const auto& [n, what] : names_)
+      if (what.first == "value" || what.first == "rule") out.push_back(n);
+    return out;
   }
   void only(const Statement& s, std::initializer_list<std::string_view> keys, std::string_view what) {
     for (const Prop& p : s.props) {
@@ -434,7 +444,7 @@ void Compiler::emit(const Expr& e, const Ctx& c, Code& code, std::vector<std::st
         fail(e.pos, std::format("'{}' is a {}, not a value", n, it->second.first));
       }
       if (is_reserved(n)) fail(e.pos, std::format("'{}' is not a value here", n));
-      fail(e.pos, std::format("unknown name '{}'", n));
+      fail(e.pos, std::format("unknown name '{}'{}", n, did_you_mean(n, value_names())));
     }
     case Expr::Kind::member: {
       if (c.scene) fail(e.pos, "the scene's settings cannot depend on modules");
@@ -566,7 +576,9 @@ void Compiler::emit(const Expr& e, const Ctx& c, Code& code, std::vector<std::st
         code.ops[j2].arg = static_cast<int>(code.ops.size());
         return;
       }
-      fail(e.pos, std::format("unknown function '{}'", f));
+      static const std::vector<std::string> functions = {"smooth", "exp", "sqrt", "sin", "cos", "abs", "floor", "min", "max", "pow", "hypot", "clamp",
+                                                         "lerp", "noise", "if", "rand", "heat", "soot", "shock", "near"};
+      fail(e.pos, std::format("unknown function '{}'{}", f, did_you_mean(f, functions)));
     }
   }
 }
@@ -608,7 +620,12 @@ void Compiler::scene(const Statement& s) {
 void Compiler::module(const Statement& s, ModC& m) {
   for (std::size_t i = 0; i < prog_.effects.size(); ++i)
     if (prog_.effects[i].name == s.kind) m.effect = static_cast<int>(i);
-  if (m.effect < 0) fail(s.pos, std::format("unknown effect '{}' (declare it with 'effect {} = \"FILE\"')", s.kind, s.kind));
+  if (m.effect < 0) {
+    std::vector<std::string> effects;
+    for (const EffectC& e : prog_.effects) effects.push_back(e.name);
+    const std::string hint = did_you_mean(s.kind, effects);
+    fail(s.pos, hint.empty() ? std::format("unknown effect '{}' (declare it with 'effect {} = \"FILE\"')", s.kind, s.kind) : std::format("unknown effect '{}'{}", s.kind, hint));
+  }
   const int self = static_cast<int>(&m - prog_.modules.data());
   if (const Prop* p = s.prop("over")) {
     m.over = module_index(p->value.names[0], p->value.pos);
@@ -1509,7 +1526,10 @@ void Scene::Impl::build(const EffectLoader& load, const Options& o) {
       if (it == names.end()) {
         std::string list;
         for (const auto& s : names) list += (list.empty() ? "" : ", ") + s;
-        fail(n.pos, std::format("'{}' is not a property of a module nor a control of effect '{}' (its controls: {})", n.name, prog.effects[zs(mc.effect)].name, list));
+        std::vector<std::string> keys(names.begin(), names.end());
+        for (const std::string_view k : kModuleKeys) keys.emplace_back(k);
+        const std::string hint = did_you_mean(n.name, keys);
+        fail(n.pos, std::format("'{}' is not a property of a module nor a control of effect '{}' (its controls: {}){}", n.name, prog.effects[zs(mc.effect)].name, list, hint));
       }
       r.named.push_back(static_cast<int>(it - names.begin()));
     }
