@@ -119,8 +119,86 @@ The video itself is not in git (data rules): it is written where `--out` says.
 
 Measured with `nvfx_fireball --profile`, which times every stage of every frame. The machine is the report's
 4-core machine, with AVX2 unless the row says otherwise. The figures are medians over the frames after the detonation,
-when everything runs, and are for the prototype as first written. The per-frame data is in
-`results/compose/fireball_frames_before.csv` and the summary in `results/compose/fireball_profile_before.csv`.
+when everything runs.
+
+### 7.1 After the first optimisation round
+
+Three passes, each on its own branch and each checked against the picture before it:
+- **The runtime's rollout step and renderer** (4.7 times faster step, renderer 2 to 4 times): separable interpolation,
+  cheaper flicker noise, vectorised advection, and a row pipeline with small rings instead of full-frame buffers. The
+  runtime's parity tests are unchanged (worst difference 0). Keyframes differ from the old ones by float order only
+  (82 to 111 dB PSNR).
+- **Shading, light, field bus and couplings:** a field shader that skips empty spans and is vectorised, the light
+  computed on the thread pool, and a 4-channel bus. Shading CPU time fell about 7 times. The light, the bus and every
+  module's state are bit-exact; keyframes are within one level on at most two pixels.
+- **The final-picture stages** (background, draw, distortion, bloom, tone mapping), 4.6 times less work and
+  **bit-exact**: all 270 frames have the same RGB checksum as before, at 1 and at 4 threads. Work that depends on a
+  row or a column alone is computed once, empty spans are skipped (skipping only ever adds exactly zero), and pixels
+  use 4-lane vectors with each channel's operations in their original order.
+
+Measured one configuration at a time, before and after on the same machine in the same session (load about 1 at the
+start of each batch): the code before the first pass (commit 1d14d4a) was built beside the current code. The machine
+was faster in this session than when the prototype was first profiled (§7.2): the old code ran at 143 ms per frame
+here against 196 ms then, so the speed-ups below compare like with like and are smaller than 196 / 24 would suggest.
+
+| configuration | before: ms per frame (median) | after: ms per frame (median) | p90 | max | frames per second | speed-up | model step, CPU ms | model shading, CPU ms |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| 1280 x 720, 4 threads | 143 | **24.1** | 29.9 | 77 | **41.6** | 5.9x | 55 → 13.2 | 35 → 6.7 |
+| 1280 x 720, 2 threads | 205 | 38.2 | 43.5 | 57 | 26.2 | 5.4x | 54 → 12.5 | 35 → 6.5 |
+| 1280 x 720, 1 thread | 332 | 67.8 | 78.6 | 105 | 14.8 | 4.9x | 53 → 11.9 | 34 → 6.2 |
+| 1280 x 720, 4 threads, baseline ISA (SSE2) | 148 | 26.7 | 31.1 | 41 | 37.5 | 5.6x | 71 → 22.3 | 37 → 11.2 |
+| 1280 x 720, 4 threads, AVX-512 | 145 | 23.7 | 29.0 | 37 | 42.3 | 6.1x | 56 → 14.3 | 38 → 7.3 |
+| 1280 x 720, 4 threads, tiles at half size | 129 | 18.9 | 21.3 | 31 | 52.9 | 6.8x | 21 → 6.4 | 10 → 2.5 |
+| 640 x 360, 4 threads | 48 | 9.5 | 10.9 | 17 | 105 | 5.0x | 21 → 6.6 | 10 → 2.5 |
+| 1920 x 1080, 4 threads | 318 | 46.5 | 54.2 | 61 | 21.5 | 6.8x | 119 → 24.7 | 81 → 13.4 |
+
+A second run of the first row, interleaved with the old code's runs, gave 22.6 ms (44 frames per second).
+
+Stages at 1280 x 720 (median ms per frame, same session):
+
+| stage | 4 threads, before | 4 threads, after | 1 thread, before | 1 thread, after |
+|---|---:|---:|---:|---:|
+| step the learned models (up to 10 at once) | 16.3 | 3.7 | 53.1 | 11.9 |
+| couplings | 1.6 | 1.1 | 1.7 | 1.1 |
+| field bus | 2.1 | 0.7 | 2.0 | 0.7 |
+| light | 5.1 | 0.6 | 5.1 | 0.6 |
+| particles (update and draw) | 0.4 | 0.4 | 0.4 | 0.4 |
+| shade the models | 11.2 | 2.0 | 34.2 | 6.2 |
+| background | 57.0 | 2.2 | 56.7 | 7.0 |
+| draw the modules | 13.3 | 3.0 | 48.1 | 9.1 |
+| distortion | 19.9 | 3.7 | 74.4 | 13.5 |
+| bloom | 8.7 | 3.6 | 32.5 | 8.6 |
+| tone mapping and grain | 6.1 | 2.3 | 22.7 | 8.1 |
+
+![Stage times per frame, 1280 x 720, 4 threads, after the first round](figures/fireball_profile_after1.svg)
+
+What changed in the picture of the cost:
+- **The scene runs at 42 frames per second at 1280 x 720 on 4 threads,** 21 at 1920 x 1080 and 105 at 640 x 360.
+  The 77 ms maximum is one frame at 2.9 s whose light and shading stages took 28 and 19 ms (normally 0.6 and 2).
+  It does not repeat: no other run's light stage exceeded 3 ms, and the other runs' maxima are 37 to 41 ms at
+  1280 x 720. Single-stage stalls like this one (bloom 31 ms in one frame, drawing 23 ms in another) look like a
+  worker thread losing its core, which the pool then waits for.
+- **The learned models are still the small part:** stepping and shading take 5.7 of 24 ms. The five picture stages
+  take 15 ms, about 3 ms each, which is close to the cost of reading and writing a 1280 x 720 float image a few
+  times; the next gains there need fewer full-screen passes (bloom's last add folded into tone mapping, light and
+  distortion at half resolution) rather than faster arithmetic.
+- **SIMD now matters for the frame:** the baseline SSE2 build is 11% slower overall (before: 4%) and its model step
+  1.7 times slower. AVX-512 is still no faster than AVX2.
+- **Threads:** one to four threads is 2.8 times faster (before: 2.3, same session).
+- **Memory:** unchanged in kind. The 16 modules' working memory grew from 115 to 127 MB, mostly the faster runner's
+  per-instance buffers (4.0 MB against 3.4 MB for one 128 px instance), and peak resident memory from 231 to 247 MB.
+  The frame loop still allocates nothing (0 in 269 frames).
+- **perf** (6 s of the scene): distortion 14%, tone mapping 12%, the runtime's detail step 11%, background 10%,
+  drawing 9%, bloom 13% over its passes, the runtime's coarse convolution 3%, shading 3%, `sinf` 3% (the haze).
+
+The summaries are in `results/compose/fireball_profile_after1.csv` (before and after, same session) and
+`results/compose/fireball_profile_before.csv` (the first profile, §7.2), with that profile's per-frame data in
+`results/compose/fireball_frames_before.csv`.
+
+### 7.2 Before: the prototype as first written
+
+The first profile, taken in an earlier session of the machine that ran the same code about 1.4 times slower than the
+session of §7.1. Its absolute times are kept as measured; compare across sections with §7.1's same-session rows.
 
 | configuration | ms per frame (median) | p90 | max | frames per second | model step, CPU ms | model shading, CPU ms |
 |---|---:|---:|---:|---:|---:|---:|
@@ -166,7 +244,7 @@ What the profile shows:
 - **perf** (6 s of the scene): the runtime's rollout step 13%, the compositor's bilinear helper 18%, tone mapping 8%,
   drawing 8% plus its ownership weights 6%, distortion 7%, background 6% plus `sinf` 5%, bloom 8%, shading 3%.
 
-Optimisation passes on these stages follow, each measured before and after with the same picture.
+§7.1 has the same measurements after the first optimisation round.
 
 ## 8. Limits and what a product feature needs
 
@@ -183,7 +261,8 @@ Optimisation passes on these stages follow, each measured before and after with 
   by all models would fix that.
 - **The units are shared because the simulator is shared.** Effects trained on other data (footage, another solver)
   would need a map between their units.
-- **Cost:** see §7. The prototype's compositing is plain C++ and runs on every pixel.
+- **Cost:** see §7. After the first round the scene runs at 42 frames per second at 1280 x 720 on 4 CPU threads; the
+  compositing still runs on every pixel at full resolution.
 
 What it needs to become a product feature:
 1. A C API: `nvfx_scene_create`, modules placed in it, `nvfx_scene_couple(...)`, `nvfx_scene_field(...)`, one

@@ -35,17 +35,18 @@ From [docs/REPORT.md](docs/REPORT.md), measured on simulated fire, smoke and exp
   settings and seeds never seen in training, their detail statistically ties a 45 MB flipbook library and beats the
   1 MB control model on smoke. The learned dynamics follow a real run 2 to 5 dB better than the same simulation at
   the same resolution for the first second. Played in 6 s shards from the start points, a minute looks like the
-  first 10 s. The price is **2.6 to 4.1 ms per 128 x 128 frame** (1.2 to 1.3 ms at 64 x 64) and 3.4 MB per playing
+  first 10 s. The price is **0.8 to 0.9 ms per 128 x 128 frame** (0.4 to 0.5 ms at 64 x 64) and 4.0 MB per playing
   instance.
-- **Memory:** for equal quality, a network per effect clip needs **3.6 to 7.4 times less memory** than a flipbook;
+- **Memory:** for equal quality, a network per effect clip needs **3.6 to 5.9 times less memory** than a flipbook;
   at equal memory it scores +2.8 to +7.0 dB higher (every 95% interval above zero). NVIDIA claims "up to 8x" for
   Neural Texture Compression; our flipbooks use our own BC3-layout encoder, so the ratio against BC7 would be lower.
 - **Controls:** one 1 MB model per effect plays unseen settings better than a 45 MB flipbook library
   (+1.0 to +2.5 dB), but its unseen-setting flames look softer than the real simulation.
 - **Variation:** endless non-repeating playback by drifting between learned variations; variations are softer than
   real ones and are blends of the training seeds.
-- **Cost of frame models:** 0.38 ms (73 KB model) to 1.1 ms (132 KB model) per 128 x 128 frame; 0.1-0.3 ms at 64 x 64; 8-30 times
-  cheaper than simulating, 50-150 times dearer than playing a flipbook.
+- **Cost of frame models:** 0.25 ms (73 KB model) to 0.87 ms (292 KB model) per 128 x 128 frame; 0.07-0.33 ms at 64 x 64;
+  8-37 times cheaper than simulating, 35-125 times dearer than playing a flipbook (one CPU core; the same code ran
+  1.2-1.4 times slower in an earlier session of the same cloud VM type).
 
 ![D: fire, 10 s at a setting never seen in training. Rows: the simulation; the 82 KB rollout effect with a new seed; the 1 MB control model; the nearest of 45 training flipbooks](docs/figures/d_fire_endless.png)
 

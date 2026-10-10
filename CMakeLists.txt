@@ -34,8 +34,10 @@ function(neuralfx_defaults target)
 endfunction()
 
 # SIMD code: one translation unit per ISA, the ISA switched on with #pragma GCC target after the standard headers.
-# ISO C++ mode turns off multiply-add contraction, which halves the throughput of these loops, so it is switched back
-# on here; the ISAs then differ in the last bits, which the tests allow for.
+# GCC contracts a * b + c into one fused multiply-add in C++ (only its ISO C modes turn this off), so any code under
+# a "fma" target pragma fuses unless contraction is switched off explicitly. It is asked for explicitly here because
+# separate multiplies and adds would halve the throughput of these loops; the ISAs then differ in the last bits, which
+# the tests allow for. Code that must be bit-exact across ISAs stays out of these targets.
 function(neuralfx_simd target)
   if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
     target_compile_options(${target} PRIVATE -ffp-contract=fast -Wno-psabi)

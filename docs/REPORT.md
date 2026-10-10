@@ -20,17 +20,22 @@ Plan and decisions: [PLAN.md](PLAN.md).
     40 s.
 - **The learned dynamics follow a held-out run better than the simulation at the same resolution**: +2.1 to +4.7 dB
   of active PSNR after 1 s (intervals above zero), until the chaos makes every method equal.
-- **The price is CPU: 2.6 to 4.1 ms per 128 x 128 frame (1.2 to 1.3 ms at 64 px) and 3.4 MB of working memory per
-  playing instance.** That suits a few hero effects, not crowds of sprites. It is not at the real floor yet: two real
+- **The price is CPU: 0.8 to 0.9 ms per 128 x 128 frame (0.4 to 0.5 ms at 64 px) and 4.0 MB of working memory per
+  playing instance**, after the runtime's rollout code was optimised (2.0 to 2.4 ms before, measured in the same
+  session; §7). That suits a handful of hero effects, not crowds of sprites. It is not at the real floor yet: two real
   seeds are 0.07 to 0.12 closer in detail, and the first frames of an explosion are poorly drawn (§6.4).
 - **Compression works, and in the range NVIDIA claims.** On 12 effect clips, a network per clip beats flipbooks
   of the same memory by **+2.8 to +7.0 dB** of active-region PSNR at every budget from 128 to 512 KB (every 95%
-  interval above zero; SSIM better or tied). For equal quality the networks need **3.6 to 7.4 times less memory**:
-  the 132 KB grid model equals a 772 KB flipbook (5.9x). NVIDIA claims "up to 8x" for Neural Texture Compression
+  interval above zero; SSIM better or tied). For equal quality the networks need **3.6 to 5.9 times less memory**:
+  the 132 KB grid model equals a 772 KB flipbook (5.9x). (An earlier version said 7.4x for conv_s; that came from
+  an error in the envelope, corrected in §3.) NVIDIA claims "up to 8x" for Neural Texture Compression
   against block compression. Our flipbooks use our own BC3-layout encoder, so against a production BC7 encoder the
   ratios would be lower (§8).
 - **It depends on the effect.** At 132 KB the network beats the full 1 MB flipbook on fire, not on smoke or
   explosions (§3).
+- **On disk the advantage mostly goes.** With both sides packed by a lossless context-mixing coder, flipbooks shrink
+  2.9 to 12.9 times and networks 1.2 to 1.7 times, so at equal quality the best networks need only 1.4 times less disk
+  (§3, study F). Memory at run time is unchanged.
 - **Controls work, at a fidelity cost.** One 1 MB model per effect plays control settings it never saw better than a
   45 MB library of flipbooks: **+2.49 [+2.22, +2.77] dB** against the nearest setting, **+0.99 [+0.65, +1.36] dB**
   against blending the two nearest, with higher SSIM and matching motion. By eye its held-out flames are softer and
@@ -38,14 +43,16 @@ Plan and decisions: [PLAN.md](PLAN.md).
 - **Endless variation works, as morphs of what it saw.** Looping effects drift between learned variation codes and
   never repeat. Generated variations are about as diverse as real seeds but softer, and they are blends of the
   training seeds rather than new turbulence (§5).
-- **Studies A to C cost 0.38 to 1.1 ms per 128 x 128 sprite on one AVX2 core** (0.10 to 0.27 ms at 64 x 64). A scene of 24 effects
-  (8 near, 16 far, each at 30 Hz) costs 2.6 to 7.2 ms of one core per 60 fps frame. The networks are 8 to 30 times
-  cheaper than running the simulation and 50 to 150 times more expensive than playing a flipbook. Only the small
-  grid model (73 KB, 0.38 ms) meets the 0.5 ms target set in the plan (§7).
+- **Studies A to C cost 0.25 to 0.87 ms per 128 x 128 sprite on one AVX2 core** (0.07 to 0.33 ms at 64 x 64 for the
+  grid models). A scene of 24 effects (8 near, 16 far, each at 30 Hz) costs 1.7 to 6.3 ms of one core per 60 fps
+  frame. The networks are 8 to 37 times cheaper than running the simulation and 35 to 125 times more expensive than playing a flipbook. The small
+  grid model (73 KB, 0.25 ms) and the small conv model (69 KB, 0.43 ms) meet the 0.5 ms target set in the plan (§7).
+  These are from a later session of the same cloud VM type, in which unchanged code ran 1.2 to 1.4 times faster than
+  in the first; the first session's figures were 0.38 to 1.1 ms, with only the small grid model under 0.5 ms.
 - **The plan's continuation rule is met** (PLAN.md §7: beat the flipbook of equal memory on held-out data, interval above
   zero, within 1 ms per 128² frame): on held-out settings (study B, against a 45 times larger flipbook library) and on
-  held-out frames against a BC3 flipbook with four times the memory (study A; motion-vector flipbooks still win there). grid_s, conv_s and conv_m are within 1 ms;
-  grid_m is 6% over.
+  held-out frames against a BC3 flipbook with four times the memory (study A; motion-vector flipbooks still win
+  there). Every study A model is within 1 ms in the later session (grid_m 0.78 ms); in the first, grid_m was 6% over.
 - **Not done:** owner footage (none supplied), a BC7 baseline, int8 kernels, an engine plugin (§9, §10).
 
 ## 2. How it was measured
@@ -128,8 +135,12 @@ paired over the 12 clips (active PSNR, then SSIM):
 | 512 KB | grid_l, 292 KB | BC3 32f 128 px, 512 KB | +6.30 [+4.87, +7.70] | +0.0092 [+0.0065, +0.0123] |
 
 **Memory at equal quality** (flipbook memory for the same mean active PSNR, along the best-flipbook envelope):
-conv_s 7.4x, grid_m 5.9x, conv_m 4.5x, grid_s 3.6x, grid_mt 3.5x; grid_l (292 KB) is above every flipbook up to the
-full 1 MB BC3 one (36.23 against 34.48), so its ratio is more than 3.5x.
+grid_m 5.9x, conv_s 4.9x, conv_m 4.5x, grid_s 3.6x, grid_mt 3.5x; grid_l (292 KB) is above every flipbook up to the
+full 1 MB BC3 one (36.23 against 34.48), so its ratio is more than 3.5x. An earlier version of this report gave
+conv_s 7.4x: the envelope kept two flipbooks of the same size (512 KB, 26.94 and 29.92 dB) as two points, so any
+quality between them interpolated to 512 KB. The envelope now has one point per size (`nvfx_experiment report`), and
+only conv_s changes. On disk, with both sides packed by the lossless coder, the ratios are much smaller (1.4x at
+best; `results/compression/README.md`).
 
 **By effect** (grid_m, 132 KB, against the 1 MB BC3 flipbook of every frame, active PSNR): fire 31.47 against 30.44,
 smoke 31.86 against 36.48, explosion 34.53 against 36.51. The average hides this: the network beats the full flipbook
@@ -143,6 +154,20 @@ time better than frame blending, but motion-vector flipbooks interpolate better 
 **Flicker and motion.** The networks are temporally smooth: flicker ratios 0.6-1.0 (1 = as much frame-to-frame jitter
 as the reference) and motion ratios 0.93-1.01. Low-frame-count flipbooks lose motion (ratios 0.6-0.9) because frame
 blending averages it away.
+
+**On disk, with both sides packed (study F).** A lossless context-mixing coder (`nvfx_pack`, PAQ/lpaq style, with
+numeric predictors that know the tensors' shapes) was written and applied to the networks and to the flipbooks alike;
+the details are in `results/compression/README.md`.
+- The networks shrink by 1.2 to 1.7 times (frame models; zlib -9 1.07 to 1.23) and the rollout effects of study D by
+  1.8 to 4.9 times (to 45 to 56 KB each).
+- Flipbooks shrink far more: 2.9 to 6.9 times in BC3 layout and 6.9 to 12.9 times as raw RGBA. A flipbook is mostly
+  empty, smooth and repeated in time; a trained network's 8-bit features are close to noise.
+- So at equal quality, packed against packed, the 8-bit networks need **1.4 times less disk at best** (grid_m, conv_s),
+  tie at grid_s (1.0x), and need more for conv_m (0.9x) and grid_mt (0.8x); fp16 networks lose (0.4 to 0.8x). Coding
+  erodes the networks' advantage rather than extending it.
+- Memory at run time does not change: the runtime unpacks at load. Decoding runs at 0.32 to 0.44 MB/s on one core
+  (0.4 s for a 132 KB model).
+- To gain from coding, the networks would have to be trained for it (a rate term in the loss).
 
 ![A: smoke. Rows: reference; neural grid_m, 132 KB; BC3 32 frames at 64 px, 128 KB; BC3 8 frames at 128 px with motion vectors, 144 KB](figures/a_smoke_compare.png)
 
@@ -396,26 +421,34 @@ With shards, the last window is as good as the first.
 
 ### 6.7 Memory and cost
 
-Median ms per frame through `nvfx_render` on one pinned AVX2 core (90th percentiles in SUMMARY.md):
+Median ms per frame through `nvfx_render` on one pinned AVX2 core (90th percentiles in SUMMARY.md), after the
+runtime's rollout code was optimised; in brackets the code before that, built and measured in the same session:
 
 | effect | stored | resident | per instance at 128 px | 64 px | 128 px | 256 px | restart (seek) |
 |---|---:|---:|---:|---:|---:|---:|---:|
-| fire | 82 KB | 163 KB | 3.4 MB | 1.27 | 3.25 | 9.75 | 50 ms (1 s warm-up) |
-| smoke | 146 KB | 419 KB | 3.4 MB | 1.34 | 4.10 | 9.60 | 1 ms |
-| explosion | 274 KB | 804 KB | 3.4 MB | 1.19 | 2.63 | 7.47 | 1.5 ms |
+| fire | 82 KB | 163 KB | 4.0 MB (3.4) | 0.47 (0.98) | 0.91 (2.40) | 2.37 (7.08) | 14 ms (42), 1 s warm-up |
+| smoke | 146 KB | 419 KB | 4.0 MB (3.4) | 0.48 (0.91) | 0.85 (2.13) | 2.35 (6.71) | 0.4 ms (0.7) |
+| explosion | 274 KB | 804 KB | 4.0 MB (3.4) | 0.44 (0.87) | 0.78 (1.96) | 1.76 (5.50) | 0.4 ms (0.7) |
 
-For scale: the 32-cell simulation with its own renderer, without the detail layer, costs 1.6 to 4.2 ms per frame in
-our scalar code. Study A's grid_m costs 1.06 ms and the full simulation 8.8 to 11.7 ms.
+The optimisation (separable interpolation, cheaper flicker noise, vectorised advection, a row pipeline with small
+rings, a vectorised coarse step and renderer) changes no output: the runtime's parity tests still give a worst
+difference of 0. Six repeated runs at 128 px ranged over 0.89 to 1.07 ms (fire), 0.83 to 0.85 (smoke) and 0.78 to
+1.18 (explosion). The first session's figures for the code before the optimisation were 1.2 to 1.3, 2.6 to 4.1 and
+7.5 to 9.8 ms: that session's machine was slower (the unchanged scalar simulation took 1.6 to 4.2 ms there, 1.3 to 3.4 ms here).
+
+For scale: the 32-cell simulation with its own renderer, without the detail layer, costs 1.3 to 3.4 ms per frame in
+our scalar code. Study A's grid_m costs 0.78 ms and the full simulation 6.9 to 9.4 ms (same session).
 
 - **It is small**: 4 to 12 times smaller than one 1 MB flipbook of 64 frames or study B's 1 MB control model, and
   170 to 560 times smaller than study B's 45 MB flipbook library. And it is endless, controllable and never
   repeats.
-- **It is not cheap per frame**: 2.6 to 4.1 ms at 128 px is 2.5 to 4 times study A's models and 400 to 600 times a
-  flipbook. Roughly half a millisecond goes to the coarse step, which costs the same at every size. The rest is the detail layer and
-  the renderer, which scale with pixels.
-- **Each instance needs 3.4 MB of working memory** at 128 px (2 MB at 64 px): two shards' fine fields and buffers.
-- **Seeks are cheap**: a restart costs 1 to 1.5 ms where start points keep fine fields. Fire, which grows its fine
-  fields from a coarse start, takes 50 ms.
+- **It is no longer expensive per frame**: 0.8 to 0.9 ms at 128 px is about study A's grid_m (0.78 ms) and 110 to 130
+  times a flipbook. Part goes to the coarse step, which costs the same at every size; the rest is the detail layer and
+  the renderer, which scale with pixels, so 64 px costs about half of 128 px rather than a quarter.
+- **Each instance needs 4.0 MB of working memory** at 128 px (2.3 MB at 64 px): two shards' fine fields and buffers.
+  The faster code keeps more buffers than before (3.4 and 2.0 MB).
+- **Seeks are cheap**: a restart costs about 0.4 ms where start points keep fine fields. Fire, which grows its fine
+  fields from a coarse start, takes 14 ms.
 - **No allocation per frame**, including restarts and shard changes (`tests/alloc_test.cpp`).
 
 ### 6.8 What it means
@@ -428,8 +461,8 @@ Using the chaos instead of fighting it works where studies A to C did not:
   flipbook.
 - **The learned dynamics beat the simulation at the same resolution** at following a real run for 1 to 2 s, by
   2 to 5 dB.
-- **The price is per-frame CPU** (3 to 4 ms at 128 px) **and 3.4 MB per playing instance.** This suits a few hero
-  effects at 64 to 128 px, updated at 30 Hz, not dozens of sprites.
+- **The price is per-frame CPU** (0.8 to 0.9 ms at 128 px after the runtime's optimisation) **and 4.0 MB per playing
+  instance.** This suits a handful of hero effects at 64 to 128 px, updated at 30 Hz, not dozens of sprites.
 
 What did not work, or is not done:
 - The explosion's first frames, drawn by the learned renderer (§6.4).
@@ -440,50 +473,58 @@ What did not work, or is not done:
 ## 7. Runtime cost and budget
 
 Median ms per frame through `nvfx_render`, one pinned AVX2 core (90th percentiles and every configuration in
-[SUMMARY.md](../results/experiments/SUMMARY.md)):
+[SUMMARY.md](../results/experiments/SUMMARY.md)). Every row was measured in one session (10 October 2026), the rollout
+effects (D) after the runtime's rollout code was optimised; the first session's figures are in brackets.
 
 | model | KB | 64 px | 128 px | 256 px | MAC/px |
 |---|---:|---:|---:|---:|---:|
-| grid_s | 73 | 0.10 | **0.38** | 1.49 | 209 |
-| grid_m | 132 | 0.27 | 1.06 | 4.12 | 1,425 |
-| grid_l | 292 | 0.27 | 1.09 | 4.31 | 1,426 |
-| conv_s | 69 | 0.62 | 0.57 | - | 504 |
-| control model k8 (B) | 1,031 | 0.29 | 1.07 | 4.11 | 1,432 |
-| variation model k8 (C) | 1,033 | 0.30 | 1.15 | 4.23 | 1,432 |
-| rollout fire (D) | 82 | 1.27 | 3.25 | 9.75 | 1,012 |
-| rollout smoke (D) | 146 | 1.34 | 4.10 | 9.60 | 1,012 |
-| rollout explosion (D) | 274 | 1.19 | 2.63 | 7.47 | 1,012 |
-| simulation on the 32-cell grid (solver + render, scalar) | - | - | 1.6-4.2 | - | - |
-| fluid simulation (solver + render) | - | - | 8.8-11.7 | - | - |
+| grid_s | 73 | 0.07 | **0.25** (0.38) | 1.00 | 209 |
+| grid_m | 132 | 0.33 | 0.78 (1.06) | 3.15 | 1,425 |
+| grid_l | 292 | 0.28 | 0.87 (1.09) | 3.04 | 1,426 |
+| conv_s | 69 | 0.42 | **0.43** (0.57) | - | 504 |
+| control model k8 (B) | 1,031 | 0.21 | 0.79 (1.07) | 3.08 | 1,432 |
+| variation model k8 (C) | 1,033 | 0.24 | 0.80 (1.15) | 3.08 | 1,432 |
+| rollout fire (D) | 82 | 0.47 | 0.91 (3.25) | 2.37 | 1,012 |
+| rollout smoke (D) | 146 | 0.48 | 0.85 (4.10) | 2.35 | 1,012 |
+| rollout explosion (D) | 274 | 0.44 | 0.78 (2.63) | 1.76 | 1,012 |
+| simulation on the 32-cell grid (solver + render, scalar) | - | - | 1.3-3.4 (1.6-4.2) | - | - |
+| fluid simulation (solver + render) | - | - | 6.9-9.4 (8.8-11.7) | - | - |
 | flipbook playback | 128-1,024 | - | 0.007 | - | - |
 
+- **Between sessions of the same cloud VM type, unchanged code ran 1.2 to 1.4 times faster** (median 1.28 over the 95
+  frame-model cells; the scalar simulation 1.17 to 1.27). Absolute times here are good to that factor; comparisons
+  within one session are not affected. The rollout effects' change is mostly the optimisation: built from the code
+  before it and measured in the same session, they took 2.0 to 2.4 ms at 128 px (§6.7), 2.5 to 2.6 times longer.
 - Cost depends on the network, not on the memory: grid_l stores twice grid_m's features at the same cost; the 1 MB
   control and variation models cost the same as grid_m.
-- **The 0.5 ms budget is met by grid_s (0.38 ms) only.** grid_m takes 1.06 ms (0.27 ms at 64 px). conv_s takes 0.57 ms
-  at every size: its level of detail renders the native frame and filters it down, so distant copies save nothing.
-- AVX-512 is slower than AVX2 on this machine (grid_m 1.36 against 1.06 ms); the baseline SSE2 build is 2.2 times
-  slower. The default is AVX2.
-- The networks are 8 to 30 times cheaper per frame than running the simulation, and 50 to 150 times more expensive
+- **The 0.5 ms budget is met by grid_s (0.25 ms) and conv_s (0.43 ms).** In the first session only grid_s met it
+  (conv_s 0.57 ms). grid_m takes 0.78 ms (0.33 ms at 64 px). conv_s costs about the same at every size: its level of
+  detail renders the native frame and filters it down, so distant copies save nothing.
+- AVX-512 is slower than AVX2 on this machine (grid_m 1.41 against 0.78 ms); the baseline SSE2 build is 1.8 to 2.7
+  times slower. The default is AVX2.
+- The networks are 8 to 37 times cheaper per frame than running the simulation, and 35 to 125 times more expensive
   than playing a flipbook.
-- **Rollout effects (D) cost 2.6 to 4.1 ms at 128 px**, three times the frame-model networks, and each playing
-  instance holds 3.4 MB of state and buffers (2 MB at 64 px). MAC per pixel counts the convolutions of the coarse step
-  spread over the pixels and the renderer, not the projection, advection or noise. A seek costs 1 to 1.5 ms (fire: 50 ms, its
-  start points grow their fine fields). The rollout runner is still scalar in places (the noise and the
-  MacCormack gathers) and evaluates the detail layer at full resolution every frame; neither has been optimised as
-  far as the frame models.
+- **Rollout effects (D) cost 0.8 to 0.9 ms at 128 px**, about the same as the frame-model networks of the same width,
+  and each playing instance holds 4.0 MB of state and buffers (2.3 MB at 64 px). MAC per pixel counts the convolutions
+  of the coarse step spread over the pixels and the renderer, not the projection, advection or noise. A seek costs
+  about 0.4 ms (fire: 14 ms, its start points grow their fine fields). The detail layer still runs at full resolution
+  every frame.
 
 **A scene** (`nvfx_scene`): 8 instances at 128 px and 16 at 64 px, each updated at 30 Hz, staggered over a 60 fps
-game, on one core: grid_m 7.2 ms per game frame on average (43% of 16.7 ms; 99th percentile 22.5 ms, from VM
-preemption spikes), grid_s 2.6 ms (16%; p99 8.7 ms), conv_s 9.0 ms (54%). Sharing instances between copies with the
-same controls and seed lowers this further; the game's other CPU work has to fit around it.
+game, on one core, in the later session: grid_s 1.7 ms per game frame on average (10% of 16.7 ms; 99th percentile
+6.1 ms), grid_m 5.3 ms (32%; p99 17.7 ms, from VM preemption spikes), conv_s 6.3 ms (38%). The first session measured
+2.6, 7.2 and 9.0 ms. The rollout effects, with every copy playing its own run, cost 4.7 to 10.1 ms (28 to 60%); their
+99th percentiles are 24 to 39 ms because all copies change shards in the same frame, which a game would stagger.
+Sharing instances between copies with the same controls and seed lowers this further; the game's other CPU work has
+to fit around it.
 
 ## 8. Against NVIDIA's published claims and traditional methods
 
 | | NVIDIA (published) | NeuralVFX (measured here) |
 |---|---|---|
 | what | small networks in shaders (RTX Neural Shaders; Neural Texture Compression; Neural Materials) on GPU tensor cores; DLSS 5, a full-frame model | a small network per effect on one CPU core: frame models (A to C) or learned dynamics from start points (D) |
-| memory | NTC: "up to 8x" less texture memory than block compression "at similar visual fidelity" | 3.6x to 7.4x less memory than flipbooks at equal mean active PSNR (study A); an endless, controllable effect in 82-274 KB, 4 to 12 times less than one 64-frame flipbook (study D) |
-| speed | no per-pixel costs published; DLSS 5's demo reportedly used a second RTX 5090 | 0.38-1.1 ms per 128 x 128 sprite on one CPU core (A to C); 2.6-4.1 ms for rollout effects (D) |
+| memory | NTC: "up to 8x" less texture memory than block compression "at similar visual fidelity" | 3.6x to 5.9x less memory than flipbooks at equal mean active PSNR (study A; 1.4x at best on disk with both sides losslessly packed); an endless, controllable effect in 82-274 KB, 4 to 12 times less than one 64-frame flipbook (study D) |
+| speed | no per-pixel costs published; DLSS 5's demo reportedly used a second RTX 5090 | 0.25-0.87 ms per 128 x 128 sprite on one CPU core (A to C); 0.8-0.9 ms for rollout effects (D) |
 | controls and variation | not claimed for effects | continuous learned controls and endless drift (B, C, softer than real); endless, never-repeating runs driven by noise whose detail ties a flipbook library at new settings (D) |
 
 The memory ratios are in the range NVIDIA claims for static textures, now for animated effects on a CPU. They are
@@ -518,15 +559,15 @@ Against traditional methods:
    which say whether it looks like the effect, not whether it matches a given run; they can miss artefacts that a
    person would see.
 4. **Variations are morphs of the training seeds**, softer than real ones, not new turbulence.
-5. **The runtime misses the 0.5 ms target for the better models** (grid_m 1.06 ms). The kernels run at about 45% of the
+5. **The runtime misses the 0.5 ms target for the better models** (grid_m 0.78 ms; 1.06 ms in the first session). The kernels run at about 45% of the
    core's FMA peak; int8 or VNNI kernels and a projected first layer were not done. The conv family's level of
    detail saves no time.
-6. **One cloud VM.** Timings carry VM jitter (90th percentiles usually 4-10% above the medians, up to 70% in a few cells; scene p99 three times the mean).
+6. **One cloud VM.** Timings carry VM jitter (90th percentiles usually 4-10% above the medians, up to 70% in a few cells; scene p99 three times the mean), and the same code ran 1.2 to 1.4 times faster in a later session than in the first (§7).
 7. **Small samples.** 12 clips (A) and 30 settings (B) from one simulator; intervals are over those, not over the
    variety of effects a game has.
 8. **No engine plugin was built or tested in an engine.** The C API is engine-neutral and its example host is tested.
-9. **Rollout effects (D) are expensive per frame** (2.6 to 4.1 ms at 128 px, 3.4 MB per instance), not yet at the
-   real floor (detail 0.07 to 0.12 further than a second real seed, motion 10-13% low on fire and smoke), and:
+9. **Rollout effects (D) cost about a frame model's time per frame** (0.8 to 0.9 ms at 128 px) **but 4.0 MB per
+   instance**, and they are not yet at the real floor (detail 0.07 to 0.12 further than a second real seed, motion 10-13% low on fire and smoke), and:
    - The explosion's first frames are poorly drawn by the learned renderer.
    - Smoke wanders from a tracked run after a few seconds.
    - At the lowest turbulence setting the coarse flow overshoots: 1.7 times the simulation's kinetic energy, in a
@@ -538,16 +579,18 @@ Against traditional methods:
 ## 10. Recommendations
 
 - For **endless, controllable hero effects** (a campfire, a burning building, smoke that must not loop), use a
-  **rollout effect** (D): 82 to 274 KB per effect, about 1.3 ms at 64 px or 3 to 4 ms at 128 px per playing copy,
-  updated at 30 Hz. Keep the number of copies small, and use the frame models or flipbooks for the rest.
-- For a game today: use **grid_s** (73 KB, 0.38 ms) where memory matters most and some softness is acceptable, or
-  **grid_m** (132 KB, 1.06 ms at 128 px, 0.27 ms at 64 px) when quality matters, evaluated at 20-30 Hz and shared
+  **rollout effect** (D): 82 to 274 KB per effect, about 0.5 ms at 64 px or 0.8 to 0.9 ms at 128 px per playing copy,
+  updated at 30 Hz, and 4 MB of working memory each. Keep the number of copies small, and use the frame models or
+  flipbooks for the rest.
+- For a game today: use **grid_s** (73 KB, 0.25 ms) where memory matters most and some softness is acceptable, or
+  **grid_m** (132 KB, 0.78 ms at 128 px, 0.33 ms at 64 px) when quality matters, evaluated at 20-30 Hz and shared
   between instances; keep motion-vector flipbooks where per-frame cost must be near zero.
 - Train one model per effect *and* setting for hero effects (study A quality); use one controllable model per effect
   (study B) where artists need sliders, accepting softer detail.
 - Next work, in order:
-  1. A faster rollout runner: the detail layer at half resolution with an upsampling renderer, vectorised noise, and
-     the coarse step at 15 Hz with interpolation.
+  1. A cheaper rollout runner still (the first round, separable interpolation, vectorised noise and advection and a
+     row pipeline, made it 2.5 times faster): the detail layer at half resolution with an upsampling renderer, and
+     the coarse step at 15 Hz with interpolation; and less working memory per instance.
   2. Close the gap to the real floor: a statistics loss (spectrum and motion) through the detail layer, and the
      renderer trained on more first frames of explosions.
   3. Owner footage, with start points estimated from it.

@@ -113,8 +113,8 @@ is the same; what differs:
 - **One instance per playing copy.** The state belongs to the instance; two copies that should look different need two
   instances (sharing one instance shares the look, as before).
 - **Memory**: the effect holds the weights and the start points (stored and resident sizes in `nvfx_effect_info`);
-  each instance holds two shards' states and work buffers (`nvfx_instance_scratch_bytes`: about 3.4 MB at 128 x 128,
-  2 MB at 64 x 64).
+  each instance holds two shards' states and work buffers (`nvfx_instance_scratch_bytes`: about 4.0 MB at 128 x 128,
+  2.3 MB at 64 x 64).
 - `nvfx_bake` renders consecutive frames from a fresh start and crossfades a few extra frames into the first ones, so
   the flipbook loops.
 

@@ -868,11 +868,17 @@ void step_report(const Ctx& c) {
                         fmt_iv(metrics::paired_bootstrap(na, fa)), fmt_iv(metrics::paired_bootstrap(np, fp)), fmt_iv(metrics::paired_bootstrap(ns, fs2), 4));
     }
     // Memory ratio at equal quality: flipbook envelope (best active PSNR at or below each size), log-interpolated.
-    std::vector<std::pair<double, double>> env;  // (kb, best active psnr at <= kb)
+    std::vector<std::pair<double, double>> env;  // (kb, best active psnr at <= kb), one point per size
     for (const Agg& g : aggs) {
       if (!g.family.starts_with("flipbook")) continue;
       const double best = env.empty() ? g.active : std::max(env.back().second, g.active);
-      env.emplace_back(g.kb, best);
+      // Flipbooks of equal size are one point at their best quality; two points at one size would interpolate to
+      // that size for every quality between them.
+      if (!env.empty() && env.back().first == g.kb) {
+        env.back().second = best;
+      } else {
+        env.emplace_back(g.kb, best);
+      }
     }
     md << "\n### Memory at equal quality\n\nFor each neural configuration: the flipbook memory needed for the same mean active PSNR "
           "(log-linear interpolation along the best-flipbook-at-each-size envelope; \">\" when no flipbook up to 1 MB reaches it).\n\n";

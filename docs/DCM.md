@@ -121,6 +121,15 @@ wins here are the large blended feature volumes of the frame models, the mostly 
 The core is S1, S2, S3 and S6. If time runs short, the cuts are S8, then S5's extension beyond fire, then G3b, then
 S7's speed targets (the final video stays).
 
+**Done so far:** S0, S1, S2 (§6) and S5 on fire (§7).
+- **S1:** the three optimisation branches and the coder are merged. The fireball runs at 24 ms per frame at
+  1280 x 720 on 4 threads against 143 ms before, measured in the same session (`docs/COMPOSE.md` §7.1), and study F
+  is in `docs/REPORT.md` §3. The report's cost tables were re-measured in one session; the rollout effects take 0.8 to
+  0.9 ms per 128 x 128 frame (2.0 to 2.4 ms before the runner was optimised).
+- **v1 is frozen:** the three rollout effects of study D as trained, with the SHA-256 of each file and of the
+  fireball's eight keyframes rendered by main, in `results/experiments/v1_frozen.csv`. Stage S6 compares v2 against
+  these.
+
 ## 6. G1 and G1c: DCM-fine (stage S2)
 
 **Result in one line:** the mixer about halves the detail spectrum distance on all three effects at held-out settings,

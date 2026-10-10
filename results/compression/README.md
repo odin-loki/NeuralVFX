@@ -183,7 +183,7 @@ saved files (grid_m 8-bit: 12 clips; the others: clip 0 of each effect). Ratio =
   (26.94 dB) and BC3 32 frames at 128 px (29.92 dB), both 512 KB. The report's envelope kept both points and
   interpolated between them, which lands on 512 KB for any quality in between. With one point per size (the best), the
   envelope goes from 288 KB (29.25 dB) to 512 KB (29.92 dB) and conv_s's 29.45 dB needs 341 KB: 4.9x. The tool here
-  merges equal sizes; `nvfx_experiment report` does not yet.
+  merges equal sizes, and so does `nvfx_experiment report` now; the report is corrected.
 
 ## Speed
 

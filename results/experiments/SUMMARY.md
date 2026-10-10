@@ -25,32 +25,32 @@ Spectrum = mean |log power difference| of the radially averaged luminance spectr
 | bc3 64f 32px | flipbook_bc3 | 64.0 | 28.49 | 23.03 | 0.9016 | 31.86 | 0.41 | 0.963 | 0.79 | - |
 | bc3 4f 128px | flipbook_bc3 | 64.0 | 21.89 | 16.36 | 0.8234 | 29.52 | 0.01 | 0.152 | 0.42 | - |
 | bc3 16f 64px | flipbook_bc3 | 64.0 | 29.61 | 23.76 | 0.9352 | 31.34 | 0.15 | 0.688 | 0.71 | - |
-| conv_s|8 | neural_conv | 69.0 | 35.79 | 29.45 | 0.9658 | 36.18 | 0.63 | 0.262 | 0.94 | 0.567 |
+| conv_s|8 | neural_conv | 69.0 | 35.79 | 29.45 | 0.9658 | 36.18 | 0.63 | 0.262 | 0.94 | 0.430 |
 | bc3 4f 128px +mv32 | flipbook_mv | 72.0 | 22.25 | 16.53 | 0.8453 | 29.55 | 0.05 | 0.221 | 0.49 | - |
 | bc3 16f 64px +mv16 | flipbook_mv | 72.0 | 32.71 | 26.69 | 0.9618 | 34.50 | 0.32 | 0.574 | 0.83 | - |
-| grid_s|8 | neural_grid | 73.0 | 34.32 | 28.07 | 0.9627 | 34.97 | 0.64 | 0.171 | 0.95 | 0.383 |
+| grid_s|8 | neural_grid | 73.0 | 34.32 | 28.07 | 0.9627 | 34.97 | 0.64 | 0.171 | 0.95 | 0.247 |
 | bc3 8f 128px | flipbook_bc3 | 128.0 | 25.82 | 19.91 | 0.8990 | 30.14 | 0.06 | 0.141 | 0.61 | - |
 | bc3 32f 64px | flipbook_bc3 | 128.0 | 32.38 | 26.39 | 0.9593 | 33.46 | 0.32 | 0.647 | 0.81 | - |
 | raw 32f 32px | flipbook_raw | 128.0 | 28.56 | 22.98 | 0.9065 | 31.93 | 0.14 | 0.979 | 0.67 | - |
 | raw 8f 64px | flipbook_raw | 128.0 | 25.96 | 20.30 | 0.8914 | 30.11 | 0.05 | 0.747 | 0.57 | - |
-| grid_m|8 | neural_grid | 131.5 | 39.10 | 32.62 | 0.9873 | 39.83 | 0.87 | 0.096 | 0.98 | 1.060 |
-| conv_s|16 | neural_conv | 132.0 | 35.79 | 29.45 | 0.9658 | 36.18 | 0.63 | 0.262 | 0.94 | 0.565 |
-| conv_m|8 | neural_conv | 142.0 | 37.72 | 31.33 | 0.9733 | 37.61 | 0.67 | 0.191 | 0.95 | 0.760 |
+| grid_m|8 | neural_grid | 131.5 | 39.10 | 32.62 | 0.9873 | 39.83 | 0.87 | 0.096 | 0.98 | 0.778 |
+| conv_s|16 | neural_conv | 132.0 | 35.79 | 29.45 | 0.9658 | 36.18 | 0.63 | 0.262 | 0.94 | 0.478 |
+| conv_m|8 | neural_conv | 142.0 | 37.72 | 31.33 | 0.9733 | 37.61 | 0.67 | 0.191 | 0.95 | 0.595 |
 | bc3 8f 128px +mv32 | flipbook_mv | 144.0 | 28.07 | 21.99 | 0.9337 | 31.19 | 0.24 | 0.189 | 0.74 | - |
-| grid_s|16 | neural_grid | 144.5 | 34.33 | 28.07 | 0.9631 | 34.97 | 0.64 | 0.171 | 0.95 | 0.394 |
+| grid_s|16 | neural_grid | 144.5 | 34.33 | 28.07 | 0.9631 | 34.97 | 0.64 | 0.171 | 0.95 | 0.267 |
 | bc3 16f 128px | flipbook_bc3 | 256.0 | 30.67 | 24.44 | 0.9548 | 31.57 | 0.23 | 0.124 | 0.79 | - |
 | bc3 64f 64px | flipbook_bc3 | 256.0 | 33.63 | 27.59 | 0.9671 | 35.60 | 0.56 | 0.602 | 0.89 | - |
 | raw 64f 32px | flipbook_raw | 256.0 | 28.91 | 23.30 | 0.9119 | 32.70 | 0.14 | 0.958 | 0.69 | - |
 | raw 16f 64px | flipbook_raw | 256.0 | 29.87 | 23.97 | 0.9406 | 31.40 | 0.15 | 0.721 | 0.71 | - |
-| grid_m|16 | neural_grid | 259.0 | 39.12 | 32.64 | 0.9874 | 39.85 | 0.87 | 0.096 | 0.98 | 1.105 |
-| grid_mt|8 | neural_grid | 260.0 | 40.26 | 33.76 | 0.9897 | 41.22 | 0.96 | 0.089 | 1.01 | 1.091 |
-| conv_m|16 | neural_conv | 268.0 | 37.73 | 31.33 | 0.9734 | 37.61 | 0.67 | 0.191 | 0.95 | 0.790 |
+| grid_m|16 | neural_grid | 259.0 | 39.12 | 32.64 | 0.9874 | 39.85 | 0.87 | 0.096 | 0.98 | 0.771 |
+| grid_mt|8 | neural_grid | 260.0 | 40.26 | 33.76 | 0.9897 | 41.22 | 0.96 | 0.089 | 1.01 | 0.817 |
+| conv_m|16 | neural_conv | 268.0 | 37.73 | 31.33 | 0.9734 | 37.61 | 0.67 | 0.191 | 0.95 | 0.655 |
 | bc3 16f 128px +mv32 | flipbook_mv | 288.0 | 35.61 | 29.25 | 0.9811 | 35.20 | 0.63 | 0.123 | 0.93 | - |
-| grid_l|8 | neural_grid | 291.5 | 42.73 | 36.23 | 0.9930 | 41.42 | 0.90 | 0.039 | 0.98 | 1.091 |
+| grid_l|8 | neural_grid | 291.5 | 42.73 | 36.23 | 0.9930 | 41.42 | 0.90 | 0.039 | 0.98 | 0.866 |
 | raw 32f 64px | flipbook_raw | 512.0 | 32.99 | 26.94 | 0.9663 | 33.77 | 0.31 | 0.677 | 0.80 | - |
 | bc3 32f 128px | flipbook_bc3 | 512.0 | 36.36 | 29.92 | 0.9838 | 34.50 | 0.61 | 0.103 | 0.94 | - |
-| grid_mt|16 | neural_grid | 515.0 | 40.28 | 33.77 | 0.9897 | 41.24 | 0.96 | 0.089 | 1.01 | 1.100 |
-| grid_l|16 | neural_grid | 579.0 | 42.78 | 36.28 | 0.9931 | 41.44 | 0.90 | 0.039 | 0.98 | 1.124 |
+| grid_mt|16 | neural_grid | 515.0 | 40.28 | 33.77 | 0.9897 | 41.24 | 0.96 | 0.089 | 1.01 | 0.818 |
+| grid_l|16 | neural_grid | 579.0 | 42.78 | 36.28 | 0.9931 | 41.44 | 0.90 | 0.039 | 0.98 | 0.884 |
 | bc3 64f 128px | flipbook_bc3 | 1024.0 | 41.02 | 34.48 | 0.9924 | 39.39 | 1.23 | 0.102 | 1.03 | - |
 | raw 64f 64px | flipbook_raw | 1024.0 | 34.62 | 28.50 | 0.9756 | 37.30 | 0.39 | 0.636 | 0.84 | - |
 
@@ -72,10 +72,10 @@ For each neural configuration: the flipbook memory needed for the same mean acti
 
 | neural | KB | active PSNR | flipbook KB for equal quality | ratio |
 |---|---:|---:|---:|---:|
-| conv_s|8 | 69 | 29.45 | 512 | 7.4x |
+| conv_s|8 | 69 | 29.45 | 341 | 4.9x |
 | grid_s|8 | 73 | 28.07 | 265 | 3.6x |
 | grid_m|8 | 132 | 32.62 | 772 | 5.9x |
-| conv_s|16 | 132 | 29.45 | 512 | 3.9x |
+| conv_s|16 | 132 | 29.45 | 343 | 2.6x |
 | conv_m|8 | 142 | 31.33 | 634 | 4.5x |
 | grid_s|16 | 144 | 28.07 | 265 | 1.8x |
 | grid_m|16 | 259 | 32.64 | 774 | 3.0x |
@@ -196,25 +196,25 @@ Median (90th percentile) ms per frame through `nvfx_render`, one pinned core, no
 
 | model | KB stored / resident | 32 px | 64 px | 128 px | 256 px | avx512 128 | baseline 128 | MAC/px |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|
-| b:fire_grid_k16 | 2062.7 / 2077.4 | 0.145 (0.179) | 0.472 (0.533) | 1.750 (1.837) | 6.816 (7.135) | 2.239 (3.482) | 4.467 (5.297) | 2912 |
-| b:fire_grid_k8 | 1031.4 / 1038.9 | 0.087 (0.109) | 0.291 (0.316) | 1.069 (1.116) | 4.113 (7.025) | 1.353 (1.408) | 2.280 (2.403) | 1432 |
-| c:fire_variation_k24 | 3088.8 / 3105.7 | 0.129 (0.157) | 0.348 (0.424) | 1.128 (1.166) | 4.320 (4.683) | 1.449 (1.536) | 2.492 (3.106) | 1448 |
-| c:fire_variation_k8 | 1032.6 / 1041.1 | 0.093 (0.122) | 0.304 (0.342) | 1.148 (1.500) | 4.227 (4.374) | 1.456 (1.653) | 2.421 (3.249) | 1432 |
-| conv_m16 | 268.0 / 279.9 | 0.764 (1.070) | 0.821 (0.895) | 0.790 (0.862) | - | 0.856 (1.155) | 2.076 (2.554) | 865 |
-| conv_m8 | 142.0 / 155.9 | 0.702 (0.768) | 0.783 (1.367) | 0.760 (0.818) | - | 0.770 (0.836) | 1.917 (2.044) | 865 |
-| conv_s16 | 132.0 / 136.1 | 0.469 (0.498) | 0.551 (0.602) | 0.565 (0.623) | - | 0.655 (0.710) | 1.300 (1.388) | 504 |
-| conv_s8 | 69.0 / 74.1 | 0.459 (0.517) | 0.617 (0.675) | 0.567 (0.621) | - | 0.650 (0.707) | 1.251 (1.331) | 504 |
-| grid_l16 | 579.0 / 582.0 | 0.121 (0.142) | 0.330 (0.363) | 1.124 (1.162) | 4.275 (4.441) | 1.463 (2.424) | 2.559 (4.705) | 1426 |
-| grid_l8 | 291.5 / 295.0 | 0.072 (0.091) | 0.274 (0.299) | 1.091 (1.186) | 4.314 (6.630) | 1.421 (1.559) | 2.490 (2.792) | 1426 |
-| grid_m16 | 259.0 / 262.0 | 0.096 (0.117) | 0.301 (0.355) | 1.105 (1.891) | 4.190 (6.611) | 1.413 (1.462) | 2.386 (2.454) | 1425 |
-| grid_m8 | 131.5 / 135.0 | 0.075 (0.082) | 0.273 (0.299) | 1.060 (1.107) | 4.121 (4.322) | 1.364 (1.430) | 2.302 (2.541) | 1425 |
-| grid_mt16 | 515.0 / 518.0 | 0.099 (0.118) | 0.306 (0.337) | 1.100 (1.168) | 4.263 (4.595) | 1.505 (2.565) | 2.438 (2.669) | 1425 |
-| grid_mt8 | 260.0 / 264.0 | 0.078 (0.102) | 0.283 (0.309) | 1.091 (1.170) | 4.243 (4.755) | 1.433 (1.550) | 2.354 (3.189) | 1425 |
-| grid_s16 | 144.5 / 145.0 | 0.040 (0.045) | 0.115 (0.159) | 0.394 (0.431) | 1.627 (2.335) | 0.599 (0.893) | 0.635 (0.750) | 209 |
-| grid_s8 | 73.0 / 74.0 | 0.029 (0.053) | 0.103 (0.138) | 0.383 (0.426) | 1.492 (2.032) | 0.549 (0.608) | 0.624 (0.716) | 209 |
-| simulation:fire | - | - | - | - | - | - | 8.825 (13.094) | - |
-| simulation:smoke | - | - | - | - | - | - | 11.662 (14.008) | - |
-| simulation:explosion | - | - | - | - | - | - | 10.656 (11.589) | - |
+| b:fire_grid_k16 | 2062.7 / 2077.4 | 0.114 (0.145) | 0.359 (0.410) | 1.475 (2.449) | 5.341 (5.687) | 2.416 (2.643) | 3.985 (4.482) | 2912 |
+| b:fire_grid_k8 | 1031.4 / 1038.9 | 0.064 (0.070) | 0.210 (0.237) | 0.785 (0.822) | 3.081 (3.719) | 1.492 (1.977) | 2.103 (2.512) | 1432 |
+| c:fire_variation_k24 | 3088.8 / 3105.7 | 0.096 (0.144) | 0.262 (0.305) | 0.886 (1.475) | 3.262 (3.996) | 1.530 (1.664) | 2.234 (2.977) | 1448 |
+| c:fire_variation_k8 | 1032.6 / 1041.1 | 0.116 (0.152) | 0.241 (0.353) | 0.804 (0.857) | 3.081 (5.420) | 1.538 (1.670) | 2.092 (4.192) | 1432 |
+| conv_m16 | 268.0 / 279.9 | 0.584 (0.935) | 0.639 (0.679) | 0.655 (0.848) | - | 0.829 (1.341) | 1.476 (2.155) | 865 |
+| conv_m8 | 142.0 / 155.9 | 0.569 (0.615) | 0.628 (0.669) | 0.595 (0.636) | - | 0.784 (0.960) | 1.359 (1.498) | 865 |
+| conv_s16 | 132.0 / 136.1 | 0.354 (0.434) | 0.454 (0.655) | 0.478 (0.630) | - | 0.582 (0.618) | 0.907 (0.951) | 504 |
+| conv_s8 | 69.0 / 74.1 | 0.344 (0.378) | 0.421 (0.484) | 0.430 (0.571) | - | 0.609 (0.757) | 0.863 (0.945) | 504 |
+| grid_l16 | 579.0 / 582.0 | 0.076 (0.104) | 0.216 (0.257) | 0.884 (1.537) | 3.145 (4.032) | 1.605 (1.864) | 2.350 (2.769) | 1426 |
+| grid_l8 | 291.5 / 295.0 | 0.093 (0.130) | 0.279 (0.400) | 0.866 (1.310) | 3.042 (3.229) | 1.494 (1.542) | 2.066 (2.140) | 1426 |
+| grid_m16 | 259.0 / 262.0 | 0.065 (0.080) | 0.212 (0.242) | 0.771 (0.873) | 3.171 (3.450) | 1.438 (1.633) | 2.226 (3.813) | 1425 |
+| grid_m8 | 131.5 / 135.0 | 0.096 (0.123) | 0.331 (0.402) | 0.778 (0.846) | 3.147 (4.594) | 1.411 (1.517) | 2.090 (2.335) | 1425 |
+| grid_mt16 | 515.0 / 518.0 | 0.072 (0.120) | 0.225 (0.256) | 0.818 (0.911) | 3.087 (3.991) | 1.496 (1.583) | 2.221 (2.925) | 1425 |
+| grid_mt8 | 260.0 / 264.0 | 0.059 (0.076) | 0.227 (0.431) | 0.817 (0.856) | 3.210 (4.621) | 1.500 (1.551) | 2.060 (2.139) | 1425 |
+| grid_s16 | 144.5 / 145.0 | 0.024 (0.025) | 0.076 (0.091) | 0.267 (0.289) | 0.951 (1.003) | 0.482 (0.677) | 0.529 (0.842) | 209 |
+| grid_s8 | 73.0 / 74.0 | 0.019 (0.020) | 0.068 (0.086) | 0.247 (0.274) | 0.998 (1.064) | 0.455 (0.475) | 0.449 (0.473) | 209 |
+| simulation:fire | - | - | - | - | - | - | 6.944 (8.143) | - |
+| simulation:smoke | - | - | - | - | - | - | 9.356 (10.869) | - |
+| simulation:explosion | - | - | - | - | - | - | 9.105 (10.872) | - |
 
 ## D: start points and learned dynamics
 
@@ -371,3 +371,180 @@ Statistics of each 10 s window of a 60 s neural run (shards of 6 s from start po
 | smoke | 1 | 3 | 0.1086 | 1.0567 | 0.0273 | 28.821 |
 | smoke | 1 | 4 | 0.0849 | 0.9651 | 0.0178 | 30.048 |
 | smoke | 1 | 5 | 0.0848 | 0.7958 | 0.0271 | 28.413 |
+
+### Cost
+
+Median (90th percentile) ms per frame through `nvfx_render` on one pinned core; `restart` is a seek (a restart from a start point, including any warm-up). The coarse simulation row is the 32-cell solver plus its renderer at 128 px (scalar code).
+
+| model | ISA | size | ms | restart ms | MAC/px | KB stored / resident | KB scratch |
+|---|---|---:|---:|---:|---:|---|---:|
+| rollout_fire | avx2 | 64 | 0.4735 (0.9375) | 11.06 | 2510 | 81.6 / 162.8 | 2307.3 |
+| rollout_fire | avx2 | 128 | 0.9146 (1.2453) | 14.27 | 1012 | 81.6 / 162.8 | 4127.8 |
+| rollout_fire | avx2 | 256 | 2.3666 (4.2355) | 25.05 | 637 | 81.6 / 162.8 | 11320.8 |
+| rollout_fire | baseline | 128 | 2.2795 (3.4795) | 54.61 | 1012 | 81.6 / 162.8 | 4127.8 |
+| rollout_fire | avx512 | 128 | 1.2386 (1.9197) | 20.25 | 1012 | 81.6 / 162.8 | 4127.8 |
+| coarse_sim_fire | scalar | 128 | 1.3628 (1.7019) | - | - | - | - |
+| rollout_smoke | avx2 | 64 | 0.4790 (0.7015) | 0.46 | 2510 | 145.7 / 418.8 | 2307.3 |
+| rollout_smoke | avx2 | 128 | 0.8529 (1.1368) | 0.41 | 1012 | 145.7 / 418.8 | 4127.8 |
+| rollout_smoke | avx2 | 256 | 2.3514 (2.9944) | 1.52 | 637 | 145.7 / 418.8 | 11320.8 |
+| rollout_smoke | baseline | 128 | 1.9126 (2.2075) | 1.13 | 1012 | 145.7 / 418.8 | 4127.8 |
+| rollout_smoke | avx512 | 128 | 1.1480 (1.4139) | 0.65 | 1012 | 145.7 / 418.8 | 4127.8 |
+| coarse_sim_smoke | scalar | 128 | 3.4053 (5.3575) | - | - | - | - |
+| rollout_explosion | avx2 | 64 | 0.4442 (0.5027) | 0.15 | 2510 | 274.2 / 803.6 | 2307.3 |
+| rollout_explosion | avx2 | 128 | 0.7766 (0.8540) | 0.41 | 1012 | 274.2 / 803.6 | 4127.8 |
+| rollout_explosion | avx2 | 256 | 1.7600 (2.5153) | 1.45 | 637 | 274.2 / 803.6 | 11320.8 |
+| rollout_explosion | baseline | 128 | 1.9237 (3.1724) | 0.92 | 1012 | 274.2 / 803.6 | 4127.8 |
+| rollout_explosion | avx512 | 128 | 1.0671 (1.1780) | 0.66 | 1012 | 274.2 / 803.6 | 4127.8 |
+| coarse_sim_explosion | scalar | 128 | 2.5312 (2.6757) | - | - | - | - |
+
+## G1: DCM-fine (docs/DCM.md)
+
+### G1 pilot: the default mixer against the v1 lock as a predictor
+
+Held-out bits per active pixel on the validation runs (salt 3), each pixel coded in a bin of s_q / 256; the v1 lock with a Laplace scale fitted per channel and heat-level bin. Differences paired over validation runs.
+
+| effect | v1 lock | default mixer (linear) | default mixer (log) | linear - v1 | log - linear |
+|---|---:|---:|---:|---|---|
+| fire | 3.417 | 2.678 | 3.235 | -0.739 [-0.784, -0.692] | +0.556 [+0.528, +0.584] |
+| smoke | 4.149 | 3.403 | 3.828 | -0.746 [-0.825, -0.664] | +0.425 [+0.381, +0.466] |
+| explosion | 3.808 | 3.082 | 3.632 | -0.726 [-0.802, -0.649] | +0.550 [+0.496, +0.608] |
+
+### G1 search: nested held-out bits per active pixel
+
+Nested leave-one-control-bin-out search (5 k-means bins of the 48 training runs' controls), 200 configurations plus 2 refinement rounds, objective Laplace bits, cost budget +1 ms per 128 x 128 frame. `nested` is the honest held-out score of the whole search procedure (mean over training runs, each predicted by a mixer chosen and trained without its bin); `global #0` is the released configuration (chosen with every bin, so its search score is optimistic), with its bits on the validation runs.
+
+| effect | family | seed | nested bits | global #0 validation bits | cost ms | global #0 configuration |
+|---|---|---:|---:|---:|---:|---|
+| explosion | hand+macro | 0 | 2.7248 | 2.9086 | 0.950 | inputs A+A_sl+A-A_sl+a_phi1+a_phi2+a_phi3 | mixers -,channel | avm - 0.15 | scale ratio | loss squared | lr 0.002/0.05 | ep 8 |
+| fire | hand+macro | 0 | 2.6264 | 2.6449 | 0.993 | inputs A+A_sl+A-A_sl+bias | mixers - | avm channel 0.15 | scale height | loss laplace | lr 0.02/0.002 | ep 8 |
+| fire | hand+macro | 1 | 2.6383 | 2.6421 | 0.917 | inputs A+A_sl+A-A_sl+prev | mixers - | avm off | scale height | loss laplace | lr 0.002/0.005 | ep 8 |
+| fire | hand+macro | 2 | 2.6269 | 2.6476 | 0.993 | inputs A+A_sl+A-A_sl+bias | mixers - | avm channel 0.15 | scale height | loss laplace | lr 0.002/0.002 | ep 6 |
+| fire | hand+macro/free | 0 | 2.6611 | 2.6769 | 1.321 | inputs A+A_sl+A-A_sl+L+rA+a_up+C_up+bres+lap+grad | mixers -,lvl | avm off | scale height | loss laplace | lr 0.02/0.05 | ep 8 |
+| fire | hand | 0 | 2.6421 | 2.6718 | 0.906 | inputs A+A_sl+A-A_sl+bias | mixers - | avm off | scale height | loss laplace | lr 0.002/0.002 | ep 3 |
+| fire | hand/free | 0 | 2.6324 | 2.6363 | 1.648 | inputs A+A_sl+A-A_sl+L+rA+a_up+a_phi1+a_phi2+a_phi3+C_up+bres+lap+grad+prev+bias | mixers -,flow,ctrl,channel | avm flow 0.15 | scale height | loss laplace | lr 0.05/0.005 | ep 8 |
+| fire | none | 0 | 2.6930 | 2.6655 | 0.977 | inputs A+A_sl+A-A_sl+L+rA+a_up+a_phi1+a_phi2+a_phi3+prev+bias | mixers - | avm off | scale - | loss laplace | lr 0.005/0.002 | ep 4 |
+| fire | none/free | 0 | 2.6898 | 2.6681 | 1.083 | inputs A+A_sl+A-A_sl+L+rA+a_up+a_phi1+a_phi2+a_phi3+C_up+bres+prev+bias | mixers - | avm - 0.15 | scale - | loss laplace | lr 0.02/0.002 | ep 8 |
+| smoke | hand+macro | 0 | 3.3931 | 3.3951 | 0.947 | inputs A+A_sl+A-A_sl+L+rA+a_up+prev+bias | mixers - | avm - 0.5 | scale - | loss laplace | lr 0.01/0.005 | ep 8 |
+
+Seed noise of the search (fire, seeds 0, 1, 2; nested bits paired over training runs): 1 - 0: +0.0119 [+0.0086, +0.0158]; 2 - 0: +0.0004 [-0.0023, +0.0031] (tie); 2 - 1: -0.0115 [-0.0140, -0.0091].
+
+Context families (fire, within the cost budget, nested bits paired over training runs): hand - none -0.0509 [-0.0693, -0.0333]; hand+macro - hand -0.0156 [-0.0194, -0.0117]; hand+macro - none -0.0665 [-0.0856, -0.0485].
+
+Context families (fire, without a cost budget (60 configurations, 1 refinement round), nested bits paired over training runs): hand - none -0.0574 [-0.0699, -0.0451]; hand+macro - hand +0.0288 [+0.0192, +0.0374]; hand+macro - none -0.0286 [-0.0476, -0.0104].
+
+### G1 generation on validation settings
+
+The calibration score of `calibrate_detail` (detail spectrum distance + |log motion ratio| + log ratios of light and cover; lower is better), mean over the 10 validation settings, single shards from the nearest start point. Candidates are the search's global top 10; pass 1 is trained on the one-step rows, pass 2 adds the own-rollout windows.
+
+| effect | generator | score | - v1, paired over settings |
+|---|---|---:|---|
+| fire | cand0_pass1 tau 0.00 relock 2 | 0.7720 | -0.043 [-0.054, -0.033] |
+| fire | cand0_pass2 tau 0.00 relock 0 | 15.2364 | +14.422 [+13.612, +15.293] |
+| fire | cand0_pass2 tau 0.00 relock 1 | 1.2759 | +0.461 [+0.340, +0.590] |
+| fire | cand0_pass2 tau 0.00 relock 2 | 0.7660 | -0.049 [-0.061, -0.039] |
+| fire | cand0_pass2 tau 0.50 relock 0 | 8.8664 | +8.052 [+7.257, +8.852] |
+| fire | cand0_pass2 tau 0.50 relock 1 | 2.1789 | +1.364 [+1.159, +1.567] |
+| fire | cand0_pass2 tau 0.50 relock 2 | 1.1007 | +0.286 [+0.226, +0.349] |
+| fire | cand0_pass2 tau 1.00 relock 0 | 10.0451 | +9.230 [+8.241, +10.235] |
+| fire | cand0_pass2 tau 1.00 relock 1 | 2.5368 | +1.722 [+1.439, +1.992] |
+| fire | cand0_pass2 tau 1.00 relock 2 | 1.3958 | +0.581 [+0.452, +0.706] |
+| fire | cand1_pass2 tau 0.00 relock 2 | 0.7418 | -0.073 [-0.097, -0.052] |
+| fire | cand2_pass2 tau 0.00 relock 2 | 0.7440 | -0.071 [-0.093, -0.052] |
+| fire | cand3_pass2 tau 0.00 relock 2 | 0.7430 | -0.072 [-0.095, -0.052] |
+| fire | cand4_pass2 tau 0.00 relock 2 | 0.7352 | -0.080 [-0.109, -0.053] |
+| fire | cand5_pass2 tau 0.00 relock 2 | 0.7425 | -0.072 [-0.095, -0.053] |
+| fire | cand6_pass2 tau 0.00 relock 2 | 0.7308 | -0.084 [-0.115, -0.054] |
+| fire | cand7_pass2 tau 0.00 relock 2 | 0.7204 | -0.094 [-0.128, -0.059] |
+| fire | cand7_pass2 tau 0.50 relock 2 | 0.9519 | +0.137 [+0.093, +0.179] |
+| fire | cand7_pass2 tau 1.00 relock 2 | 1.2655 | +0.451 [+0.348, +0.551] |
+| fire | cand8_pass2 tau 0.00 relock 2 | 0.7440 | -0.071 [-0.092, -0.053] |
+| fire | cand9_pass2 tau 0.00 relock 2 | 0.7526 | -0.062 [-0.081, -0.044] |
+| fire | v1 tau 0.00 relock 0 | 0.8148 |  |
+| smoke | cand0_pass1 tau 0.00 relock 2 | 0.5831 | +0.002 [-0.070, +0.055] (tie) |
+| smoke | cand0_pass2 tau 0.00 relock 0 | 1.0304 | +0.449 [+0.293, +0.590] |
+| smoke | cand0_pass2 tau 0.00 relock 1 | 0.5973 | +0.016 [-0.083, +0.098] (tie) |
+| smoke | cand0_pass2 tau 0.00 relock 2 | 0.5941 | +0.013 [-0.086, +0.096] (tie) |
+| smoke | cand0_pass2 tau 0.50 relock 0 | 4.0815 | +3.501 [+3.207, +3.795] |
+| smoke | cand0_pass2 tau 0.50 relock 1 | 0.8054 | +0.224 [+0.187, +0.256] |
+| smoke | cand0_pass2 tau 0.50 relock 2 | 0.7740 | +0.193 [+0.164, +0.220] |
+| smoke | cand0_pass2 tau 1.00 relock 0 | 4.7775 | +4.197 [+3.878, +4.503] |
+| smoke | cand0_pass2 tau 1.00 relock 1 | 1.1647 | +0.584 [+0.464, +0.706] |
+| smoke | cand0_pass2 tau 1.00 relock 2 | 0.9395 | +0.359 [+0.309, +0.414] |
+| smoke | cand1_pass2 tau 0.00 relock 2 | 0.5707 | -0.010 [-0.082, +0.045] (tie) |
+| smoke | cand2_pass2 tau 0.00 relock 2 | 0.5674 | -0.014 [-0.092, +0.049] (tie) |
+| smoke | cand2_pass2 tau 0.50 relock 2 | 0.8066 | +0.226 [+0.189, +0.259] |
+| smoke | cand2_pass2 tau 1.00 relock 2 | 1.0152 | +0.434 [+0.353, +0.517] |
+| smoke | cand3_pass2 tau 0.00 relock 2 | 0.5830 | +0.002 [-0.088, +0.078] (tie) |
+| smoke | cand4_pass2 tau 0.00 relock 2 | 0.5770 | -0.004 [-0.091, +0.068] (tie) |
+| smoke | cand5_pass2 tau 0.00 relock 2 | 0.5714 | -0.010 [-0.094, +0.058] (tie) |
+| smoke | cand6_pass2 tau 0.00 relock 2 | 0.5848 | +0.004 [-0.088, +0.082] (tie) |
+| smoke | cand7_pass2 tau 0.00 relock 2 | 0.5830 | +0.002 [-0.090, +0.080] (tie) |
+| smoke | cand8_pass2 tau 0.00 relock 2 | 0.5684 | -0.013 [-0.118, +0.080] (tie) |
+| smoke | cand9_pass2 tau 0.00 relock 2 | 0.6587 | +0.078 [-0.044, +0.181] (tie) |
+| smoke | v1 tau 0.00 relock 0 | 0.5809 |  |
+| explosion | cand0_pass1 tau 0.00 relock 0 | 0.6764 | -0.034 [-0.149, +0.082] (tie) |
+| explosion | cand0_pass2 tau 0.00 relock 0 | 0.6699 | -0.040 [-0.143, +0.061] (tie) |
+| explosion | cand0_pass2 tau 0.00 relock 1 | 0.7152 | +0.005 [-0.094, +0.108] (tie) |
+| explosion | cand0_pass2 tau 0.00 relock 2 | 0.7520 | +0.042 [-0.001, +0.081] (tie) |
+| explosion | cand0_pass2 tau 0.50 relock 0 | 3.8421 | +3.132 [+2.567, +3.633] |
+| explosion | cand0_pass2 tau 0.50 relock 1 | 2.2786 | +1.569 [+1.330, +1.780] |
+| explosion | cand0_pass2 tau 0.50 relock 2 | 0.7270 | +0.017 [-0.025, +0.064] (tie) |
+| explosion | cand0_pass2 tau 1.00 relock 0 | 4.0650 | +3.355 [+2.802, +3.847] |
+| explosion | cand0_pass2 tau 1.00 relock 1 | 2.8805 | +2.171 [+1.935, +2.383] |
+| explosion | cand0_pass2 tau 1.00 relock 2 | 0.8424 | +0.132 [-0.006, +0.271] (tie) |
+| explosion | cand1_pass2 tau 0.00 relock 0 | 0.6976 | -0.012 [-0.160, +0.136] (tie) |
+| explosion | cand2_pass2 tau 0.00 relock 0 | 0.7103 | +0.000 [-0.162, +0.163] (tie) |
+| explosion | cand3_pass2 tau 0.00 relock 0 | 0.6968 | -0.013 [-0.161, +0.135] (tie) |
+| explosion | cand4_pass2 tau 0.00 relock 0 | 0.7318 | +0.022 [-0.161, +0.207] (tie) |
+| explosion | cand5_pass2 tau 0.00 relock 0 | 0.6976 | -0.012 [-0.160, +0.136] (tie) |
+| explosion | cand6_pass2 tau 0.00 relock 0 | 0.6655 | -0.044 [-0.135, +0.043] (tie) |
+| explosion | cand6_pass2 tau 0.50 relock 0 | 3.8243 | +3.114 [+2.554, +3.612] |
+| explosion | cand6_pass2 tau 1.00 relock 0 | 4.0450 | +3.335 [+2.782, +3.827] |
+| explosion | cand7_pass2 tau 0.00 relock 0 | 0.6976 | -0.012 [-0.160, +0.136] (tie) |
+| explosion | cand8_pass2 tau 0.00 relock 0 | 0.6976 | -0.012 [-0.160, +0.136] (tie) |
+| explosion | cand9_pass2 tau 0.00 relock 0 | 0.6976 | -0.012 [-0.160, +0.136] (tie) |
+| explosion | v1 tau 0.00 relock 0 | 0.7099 |  |
+
+### G1 test (once): B's 10 held-out settings, new seeds
+
+Single 6 s shards (explosions: 3 s) from the nearest start point, v1 and DCM-fine through the reference with the same stepper and seeds (only the detail layer differs), against a real 10 s run (explosions: 3 s). Means over settings; differences DCM-fine - v1 paired over settings.
+
+| effect | method | spectrum L1 | motion ratio | coverage L1 | emission L1 | mean-frame PSNR |
+|---|---|---:|---:|---:|---:|---:|
+| fire | real_other_seed | 0.0803 | 1.058 | 0.0035 | 0.0030 | 36.39 |
+| fire | v1 | 0.3652 | 0.959 | 0.0044 | 0.0039 | 33.59 |
+| fire | dcm_fine | 0.1914 | 0.897 | 0.0044 | 0.0039 | 33.72 |
+| smoke | real_other_seed | 0.0763 | 1.042 | 0.0208 | 0.0000 | 29.79 |
+| smoke | v1 | 0.2538 | 0.850 | 0.0239 | 0.0001 | 28.31 |
+| smoke | dcm_fine | 0.1252 | 0.718 | 0.0239 | 0.0001 | 28.27 |
+| explosion | real_other_seed | 0.1164 | 1.067 | 0.0195 | 0.0000 | 26.76 |
+| explosion | v1 | 0.1993 | 0.922 | 0.0305 | 0.0000 | 26.16 |
+| explosion | dcm_fine | 0.1023 | 1.045 | 0.0306 | 0.0000 | 25.86 |
+
+| effect | spectrum L1 | abs log motion ratio | coverage L1 | mean-frame PSNR | calibration score |
+|---|---|---|---|---|---|
+| fire | -0.174 [-0.186, -0.161] | +0.009 [-0.033, +0.053] (tie) | -0.0000 [-0.0000, +0.0000] (tie) | +0.13 [+0.07, +0.20] | -0.169 [-0.221, -0.119] |
+| smoke | -0.129 [-0.176, -0.068] | +0.160 [+0.135, +0.180] | +0.0000 [-0.0001, +0.0001] (tie) | -0.05 [-0.07, -0.02] | +0.032 [-0.021, +0.093] (tie) |
+| explosion | -0.097 [-0.151, -0.047] | -0.033 [-0.112, +0.049] (tie) | +0.0001 [-0.0034, +0.0038] (tie) | -0.30 [-0.73, +0.11] (tie) | -0.121 [-0.234, -0.025] |
+
+**Decision (rule fixed in advance):** spectrum distance lower than v1 with an interval excluding zero on 3 of 3 effects (2 needed); an effect is worse; cost within +1 ms. G1 **does not pass**. Notes: smoke: motion further from 1; smoke: mean-frame PSNR worse;
+
+### G1c: the first second
+
+Calibration score and spectrum distance of the first 30 frames against the real run (looping effects: its 10 s statistics; explosions: its own first second). `usual`: v1's start (fire: a 30-frame warm-up; smoke and explosions: stored fine fields); `cold`: from the coarse state alone, no warm-up and no stored fine fields.
+
+| effect | v1 usual | v1 cold | DCM-fine usual | DCM-fine cold | DCM cold - v1 usual (score) | DCM cold - v1 usual (spectrum) |
+|---|---:|---:|---:|---:|---|---|
+| fire | 1.693 | 2.185 | 1.552 | 2.018 | +0.325 [-0.161, +0.911] (tie) | -0.179 [-0.339, -0.062] |
+| smoke | 1.671 | 1.671 | 1.536 | 1.542 | -0.129 [-0.198, -0.067] | -0.188 [-0.206, -0.170] |
+| explosion | 0.510 | 0.520 | 0.484 | 0.496 | -0.014 [-0.054, +0.025] (tie) | -0.016 [-0.048, +0.015] (tie) |
+
+### G1 test: tracking 8 held-out runs from their true state
+
+Active PSNR against the true run at 1, 8, 30 and 60 frames; DCM-fine - v1 paired over runs.
+
+| effect | v1 1 / 8 / 30 / 60 | DCM-fine 1 / 8 / 30 / 60 | difference at 1 | 8 | 30 | 60 |
+|---|---|---|---|---|---|---|
+| fire | 25.49 / 20.17 / 17.53 / 16.40 | 25.59 / 20.52 / 17.79 / 16.87 | +0.10 [+0.07, +0.14] | +0.35 [+0.27, +0.45] | +0.27 [+0.14, +0.42] | +0.47 [+0.28, +0.67] |
+| smoke | 26.83 / 20.77 / 17.08 / 15.20 | 27.14 / 21.33 / 17.61 / 15.48 | +0.31 [+0.20, +0.42] | +0.57 [+0.44, +0.69] | +0.53 [+0.43, +0.64] | +0.28 [+0.20, +0.36] |
+| explosion | 20.35 / 20.16 / 18.79 / 18.04 | 19.90 / 18.39 / 16.84 / 16.66 | -0.45 [-0.71, -0.20] | -1.77 [-2.89, -0.37] | -1.95 [-2.40, -1.50] | -1.38 [-1.82, -1.00] |
