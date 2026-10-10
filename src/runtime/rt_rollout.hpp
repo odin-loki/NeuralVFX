@@ -427,6 +427,8 @@ class Rollout final : public RolloutRunner {
     fac_.resize(z(N_) * 4);
     any_.resize(z(R_));
     ext_.assign(z(S_) * 2, 0);
+    qmin_.assign(z(S_), 0);
+    qmax_.assign(z(S_), 0);
     act_.assign(z(S_) * 2, 0);
     nm_.assign(z(R_) * 2, 0);
     const std::size_t S2 = z(S_) * z(S_);
@@ -507,6 +509,8 @@ class Rollout final : public RolloutRunner {
   void begin(int index, std::uint64_t seed) override {
     using namespace rollout;
     const StartPoint& sp = m_.starts[z(index)];
+    computed_ = 0.0;
+    dense_steps_ = 0;
     reseed(seed);
     time_ = sp.time;
     std::fill(coarse_.begin(), coarse_.end(), 0.f);
@@ -666,7 +670,7 @@ class Rollout final : public RolloutRunner {
                           &cs_t_, &cs_d_, &wx_, &wy_, &swl_, &g1_, &frow_, &r1_, &r2_, &out_}) {
       n += v->size() * 4;
     }
-    n += any_.size() + 4 * off_.size() + 4 * (ext_.size() + act_.size() + nm_.size() + cell_lo_.size() + cell_hi_.size());
+    n += any_.size() + 4 * off_.size() + 4 * (ext_.size() + act_.size() + nm_.size() + cell_lo_.size() + cell_hi_.size() + qmin_.size() + qmax_.size());
     n += curl_.bytes() + swirl_.bytes() + fine_flicker_.bytes();
     for (const auto& f : flicker_) n += f.bytes();
     n += flow_rows_.bytes() + swirl_rows_.bytes() + fac_rows_.bytes() + render_rows_.bytes();
@@ -983,7 +987,11 @@ class Rollout final : public RolloutRunner {
     const int lag = static_cast<int>(std::min(edge, std::max(0.f, k * fhi + amp * shi))) + 3;
     lead_ = lead;
     lag_ = lag;
-    if (skip_) {  // how far the samples reach left and right, as lead and lag up and down
+    // Spans only pay where much is empty: a step uses them when the last step that measured its spans computed at most
+    // 90% of the pixels, and measures again every 8 steps (both paths give the same bits).
+    spans_ = skip_ && (computed_ <= 0.9 || dense_steps_ >= 8);
+    dense_steps_ = spans_ ? 0 : dense_steps_ + 1;
+    if (spans_) {  // how far the samples reach left and right, as lead and lag up and down
       float ulo = 0.f, uhi = 0.f, sulo = 0.f, suhi = 0.f;
       for (int i = 0; i < N_; ++i) {
         ulo = std::min(ulo, flow_[z(i) * 2]);
@@ -1005,6 +1013,7 @@ class Rollout final : public RolloutRunner {
     ring_rows_ = std::min(slots_, static_cast<int>(std::bit_ceil(z(lead + lag + 2))));
     zero_row(td_, 0);
     zero_row(fg_, 0);
+    win_next_ = qmin_head_ = qmin_tail_ = qmax_head_ = qmax_tail_ = 0;
     const int kk = S_ / R_;
     int copied = 0, back = 0, locked = 0;
     for (int r = 0; r < S_; ++r) {
@@ -1026,6 +1035,11 @@ class Rollout final : public RolloutRunner {
         if ((back + 1) % kk == 0) lock_factors(back / kk);
       }
       for (; locked < S_ && (back == S_ || back / kk >= ax_.i[z(locked)] + 2); ++locked) lock_row(locked);
+    }
+    if (spans_) {
+      long n = 0;
+      for (int y = 0; y < S_; ++y) n += act_[z(y) * 2 + 1] - act_[z(y) * 2];
+      computed_ = static_cast<double>(n) / (static_cast<double>(S_) * static_cast<double>(S_));
     }
   }
 
@@ -1051,19 +1065,31 @@ class Rollout final : public RolloutRunner {
     const float* b = fd_.data() + z(y) * S;
     each_block(S_, [&]<class V>(int x) { st_pairs<V>(o + 2 * x, ld<V>(a + x), ld<V>(b + x)); });
     mirror(td_, y + 1);
-    if (skip_) {  // the first and last pixel of the row that is not +0 in either field (bit patterns: -0 and NaN count)
+    if (spans_) {  // the first and last pixel of the row that is not +0 in either field (bit patterns: -0 and NaN count)
+      // Blocks of 8 pixels are tested at once (an "or" of their bits, which vectorises), then the pixel in the block.
+      const auto bits = [&](int x) { return std::bit_cast<std::uint32_t>(a[x]) | std::bit_cast<std::uint32_t>(b[x]); };
+      const auto any8 = [&](int x0) {
+        std::uint32_t m = 0;
+        for (int x = x0; x < std::min(S_, x0 + 8); ++x) m |= bits(x);
+        return m != 0;
+      };
       int first = S_, last = -1;
-      const auto nonzero = [&](int x) { return (std::bit_cast<std::uint32_t>(a[x]) | std::bit_cast<std::uint32_t>(b[x])) != 0; };
-      for (int x = 0; x < S_; ++x) {
-        if (nonzero(x)) {
-          first = x;
-          break;
+      for (int x0 = 0; x0 < S_ && first == S_; x0 += 8) {
+        if (!any8(x0)) continue;
+        for (int x = x0;; ++x) {
+          if (bits(x)) {
+            first = x;
+            break;
+          }
         }
       }
-      for (int x = S_ - 1; x >= first; --x) {
-        if (nonzero(x)) {
-          last = x;
-          break;
+      for (int x0 = (S_ - 1) / 8 * 8; x0 >= 0 && last < 0 && first < S_; x0 -= 8) {
+        if (!any8(x0)) continue;
+        for (int x = std::min(S_, x0 + 8) - 1;; --x) {
+          if (bits(x)) {
+            last = x;
+            break;
+          }
         }
       }
       ext_[z(y) * 2] = first;
@@ -1073,13 +1099,21 @@ class Rollout final : public RolloutRunner {
 
   // The pixels of row y whose forward samples can see material (copied rows within the samples' vertical reach,
   // widened by their horizontal reach): [a, b), or every pixel when nothing is skipped.
-  std::array<int, 2> forward_span(int y, int copied) const {
-    if (!skip_) return {0, S_};
-    int first = S_, last = -1;
-    for (int r = std::max(0, y - lag_); r <= std::min(copied - 1, y + lead_); ++r) {
-      first = std::min(first, ext_[z(r) * 2]);
-      last = std::max(last, ext_[z(r) * 2 + 1]);
+  // The window [y - lag, y + lead] moves down one row per call, so its least first pixel and greatest last pixel are
+  // kept in two monotone queues of rows (each row enters and leaves once).
+  std::array<int, 2> forward_span(int y, int copied) {
+    if (!spans_) return {0, S_};
+    for (const int top = std::min(copied - 1, y + lead_); win_next_ <= top; ++win_next_) {
+      const int r = win_next_;
+      while (qmin_tail_ > qmin_head_ && ext_[z(qmin_[z(qmin_tail_ - 1)]) * 2] >= ext_[z(r) * 2]) --qmin_tail_;
+      qmin_[z(qmin_tail_++)] = r;
+      while (qmax_tail_ > qmax_head_ && ext_[z(qmax_[z(qmax_tail_ - 1)]) * 2 + 1] <= ext_[z(r) * 2 + 1]) --qmax_tail_;
+      qmax_[z(qmax_tail_++)] = r;
     }
+    while (qmin_head_ < qmin_tail_ && qmin_[z(qmin_head_)] < y - lag_) ++qmin_head_;
+    while (qmax_head_ < qmax_tail_ && qmax_[z(qmax_head_)] < y - lag_) ++qmax_head_;
+    if (qmin_head_ == qmin_tail_) return {0, 0};
+    const int first = ext_[z(qmin_[z(qmin_head_)]) * 2], last = ext_[z(qmax_[z(qmax_head_)]) * 2 + 1];
     if (last < first) return {0, 0};
     // samples of pixel x lie in [x - uhi, x - ulo] (+1 for the stencil): x + reach_lo_ reaches first, x - reach_hi_ last
     return {std::max(0, first - reach_lo_), std::min(S_, last + reach_hi_ + 1)};
@@ -1260,7 +1294,7 @@ class Rollout final : public RolloutRunner {
     // Where the fields are +0 after the round trip and no new material is interpolated, the lock gives +0 * scale + 0:
     // +0 again. So it runs on the round trip's pixels and on those that read a coarse cell with new material.
     int xa = 0, xb = S_;
-    if (skip_) {
+    if (spans_) {
       xa = act_[z(y) * 2];
       xb = act_[z(y) * 2 + 1];
       if (xa >= xb) xa = S_, xb = 0;
@@ -1316,7 +1350,11 @@ class Rollout final : public RolloutRunner {
   // the pixels the forward samples and the round trip computed (act_, [a, b)); per coarse row, the first and last cell
   // with new material (nm_); per coarse cell, the fine pixels whose lock reads it ([cell_lo_, cell_hi_)).
   std::vector<int> ext_, act_, nm_, cell_lo_, cell_hi_;
-  bool skip_ = true;
+  std::vector<int> qmin_, qmax_;  // the rows of the forward samples' window, as monotone queues (see forward_span)
+  int win_next_ = 0, qmin_head_ = 0, qmin_tail_ = 0, qmax_head_ = 0, qmax_tail_ = 0;
+  bool skip_ = true, spans_ = false;  // skipping allowed; used in this step
+  double computed_ = 0.0;            // the fraction of pixels the last step with spans computed
+  int dense_steps_ = 0;              // steps since then
   int lead_ = 0, lag_ = 0, reach_lo_ = 0, reach_hi_ = 0;
   std::vector<float> swl_;                                  // the swirl lattice's velocity, (u, v) interleaved
   std::vector<float> r1_, r2_, out_;                        // the renderer's activations for one block

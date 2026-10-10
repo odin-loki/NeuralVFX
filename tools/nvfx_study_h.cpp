@@ -1,6 +1,6 @@
 // nvfx_study_h: the measurements of study H (docs/DCM.md §9) that are not the coder's (nvfx_pack --h3 has those).
 //
-//   nvfx_study_h --h2 [--models DIR] [--reps N] [--frames N] [--isa avx2|avx512|baseline] [--out CSV]
+//   nvfx_study_h --h2 [--models DIR] [--reps N] [--frames N] [--isa avx2|avx512|baseline] [--only EFFECT] [--out CSV]
 //       H2, run-aware fields: the runtime's rollout step and learned renderer with skipping on and off, on the study D
 //       effects at the fireball's sizes. Two runners in lock step from the same start; every frame each is stepped
 //       and rendered, timed by thread CPU time, alternating which goes first, and their fields and pictures are
@@ -99,7 +99,9 @@ int h2(const tools::Args& a) {
   };
   // The fireball's sizes at 1280 x 720: main tiles 384, the wreck's explosion 256, the wreck's fire 192, fires 128.
   const std::vector<Case> cases = {{"explosion", 384, true}, {"explosion", 256, true}, {"smoke", 384, false}, {"fire", 192, false}, {"fire", 128, false}};
+  const std::string only = a.str("only", "");
   for (const Case& c : cases) {
+    if (!only.empty() && c.file != only) continue;
     const rt::RolloutEffect e = load_effect(dir / (c.file + ".nvfx"));
     const int start = c.strongest ? strongest(e.m) : 0;
     const auto& controls = e.m.starts[zs(start)].controls;
