@@ -2,7 +2,12 @@
 //
 //   nvfx_scene_script --script FILE [--models DIR] [--out scene.mp4 | --no-video] [--keyframes DIR] [--sheet sheet.png]
 //                     [--threads 2] [--isa avx2|avx512|baseline] [--frames N] [--profile profile.csv]
-//                     [--verify frozen.csv] [--check] [--print]
+//                     [--verify frozen.csv] [--check] [--print] [--no-overlap]
+//
+// Each frame's picture is drawn on a thread of its own while the next frame's state is computed (Options::overlap,
+// with 2 or more threads; --threads counts that thread); --no-overlap draws it after the state. The frames are the
+// same. The profile has every frame's stages, its wall time and the checksum of its RGB (FNV-1a, 64 bits, as
+// nvfx_fireball's: the hand-written and the scripted fireball can be compared frame by frame).
 //
 // --check parses and checks the script without loading any effect; --print writes it back in canonical form.
 // --verify compares the SHA-256 of the keyframes written to --keyframes with the rows "*_keyframe,frame_NNN,...,sha256"
@@ -58,7 +63,7 @@ struct Args {
   std::filesystem::path script, models, out = "scene.mp4", keyframes, sheet, profile, verify;
   int threads = 2, frames = -1;
   std::string isa;
-  bool video = true, check = false, print = false;
+  bool video = true, check = false, print = false, overlap = true;
 };
 
 Args parse(int argc, char** argv) {
@@ -82,6 +87,7 @@ Args parse(int argc, char** argv) {
     else if (k == "--no-video") a.video = false;
     else if (k == "--check") a.check = true;
     else if (k == "--print") a.print = true;
+    else if (k == "--no-overlap") a.overlap = false;
     else throw std::invalid_argument("unknown option " + k + " (see the source header)");
   }
   if (a.script.empty()) throw std::invalid_argument("--script FILE is needed");
@@ -130,12 +136,13 @@ int main(int argc, char** argv) try {
   sc::Options opt;
   opt.threads = A.threads;
   opt.isa = compose::best_isa();
+  opt.overlap = A.overlap;
   sc::Scene scene(script, sc::load_from(A.models), opt);
   const double setup_ms = std::chrono::duration<double, std::milli>(Clock::now() - setup0).count();
   const int W = scene.width(), H = scene.height();
   const int frames = A.frames >= 0 ? std::min(A.frames, scene.frames()) : scene.frames();
-  std::println("nvfx_scene_script: {} at {}x{}, {} frames at {} fps ({} threads, {}); {} modules; setup {:.0f} ms", A.script.filename().string(), W, H, frames,
-               scene.fps(), A.threads, compose::isa_name(opt.isa), scene.modules().size(), setup_ms);
+  std::println("nvfx_scene_script: {} at {}x{}, {} frames at {} fps ({} threads, {}{}); {} modules; setup {:.0f} ms", A.script.filename().string(), W, H, frames,
+               scene.fps(), A.threads, compose::isa_name(opt.isa), A.overlap && A.threads > 1 ? ", overlapped" : "", scene.modules().size(), setup_ms);
 
   std::FILE* video = nullptr;
   if (A.video) {
@@ -152,6 +159,7 @@ int main(int argc, char** argv) try {
   std::vector<std::filesystem::path> key_files;
   std::vector<std::array<double, sc::Scene::kStages + 1>> prof(static_cast<std::size_t>(frames));
   std::vector<long> allocs(static_cast<std::size_t>(frames));
+  std::vector<std::uint64_t> sums(static_cast<std::size_t>(frames));
   for (int f = 0; f < frames; ++f) {
     if (f == 1) g_counting.store(true);  // the first frame may still touch lazily sized buffers
     const long a0 = g_allocations.load();
@@ -163,6 +171,9 @@ int main(int argc, char** argv) try {
     auto& P = prof[static_cast<std::size_t>(f)];
     std::ranges::copy(scene.stage_ms(), P.begin());
     P[sc::Scene::kStages] = total;
+    std::uint64_t h = 0xcbf29ce484222325ull;
+    for (const std::uint8_t v : rgb) h = (h ^ v) * 0x100000001b3ull;
+    sums[static_cast<std::size_t>(f)] = h;
     if (video) std::fwrite(rgb.data(), 1, rgb.size(), video);
     if (std::ranges::find(key_frames, f) != key_frames.end()) {
       Image img;
@@ -214,11 +225,11 @@ int main(int argc, char** argv) try {
     std::ofstream o(A.profile);
     o << "frame,allocations";
     for (int s = 0; s < sc::Scene::kStages; ++s) o << ',' << sc::Scene::stage_name(s);
-    o << ",total\n";
+    o << ",period,rgb_fnv\n";  // period: the frame's wall time (render() returns each frame done)
     for (int f = 0; f < frames; ++f) {
       o << f << ',' << allocs[static_cast<std::size_t>(f)];
       for (const double v : prof[static_cast<std::size_t>(f)]) o << std::format(",{:.3f}", v);
-      o << '\n';
+      o << std::format(",{:016x}\n", sums[static_cast<std::size_t>(f)]);
     }
   }
   if (!A.sheet.empty() && !keys.empty()) {  // keyframes, 4 per row, at a quarter size

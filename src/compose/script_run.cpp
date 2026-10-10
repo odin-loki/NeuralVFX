@@ -1106,6 +1106,7 @@ struct Scene::Impl {
   std::unique_ptr<Particles> parts;
   std::unique_ptr<Frame> frame;
   std::unique_ptr<Pool> pool;
+  std::unique_ptr<PictureThread> picture;  // Options::overlap
   std::vector<Shock> shocks;
   std::vector<std::array<float, 4>> scorch;
   std::vector<const Code*> scorch_glow;
@@ -1445,6 +1446,9 @@ struct Scene::Impl {
 
   void build(const EffectLoader& load, const Options& o);
   void render(int f, std::span<std::uint8_t> rgb);
+  void state(int f);  // steps 1 to 9 of frame f
+  void shade();       // the active modules into their images
+  void picture_ms();  // the picture's stages into stage[] (background and modules are one pass: draw)
 };
 
 void Scene::Impl::build(const EffectLoader& load, const Options& o) {
@@ -1596,7 +1600,9 @@ void Scene::Impl::build(const EffectLoader& load, const Options& o) {
   light = std::make_unique<Light>(*bus);
   parts = std::make_unique<Particles>(prog.capacity);
   frame = std::make_unique<Frame>(prog.width, prog.height);
-  pool = std::make_unique<Pool>(o.threads);
+  pool = std::make_unique<Pool>(o.overlap && o.threads > 1 ? o.threads - 1 : o.threads);  // overlapped: the picture thread is one of them
+  if (o.overlap && o.threads > 1) picture = std::make_unique<PictureThread>(*frame, *pool);
+  frame->reserve(static_cast<int>(all.size()), std::max(1, prog.shock_capacity), std::max(1, prog.scorch_capacity), prog.capacity);
   frame->ground_y = prog.ground;
   env.bus = bus.get();
   env.parts = parts.get();
@@ -1633,6 +1639,46 @@ void Scene::Impl::render(int f, std::span<std::uint8_t> rgb) {
   if (f != next) throw std::invalid_argument("Scene::render: frames must come in order from 0");
   if (rgb.size() < zs(prog.width) * zs(prog.height) * 3) throw std::invalid_argument("Scene::render: the buffer is too small");
   ++next;
+  if (!picture) {
+    state(f);
+    shade();
+    frame->capture(*light, scorch, active, *parts, shocks, *bus);
+    frame->render(rgb, bloom_threshold, bloom, *pool);
+    picture_ms();
+    return;
+  }
+  // Overlapped: frame f's state was computed (and shaded) by the last call; its picture is drawn on the picture thread
+  // while the next frame's state is computed here.
+  if (f == 0) {
+    state(0);
+    shade();
+  }
+  frame->capture(*light, scorch, active, *parts, shocks, *bus);
+  picture->start(rgb, bloom_threshold, bloom);
+  state(f + 1);
+  picture->wait_images();
+  shade();
+  picture->wait();
+  picture_ms();
+}
+
+void Scene::Impl::picture_ms() {
+  const auto& R = frame->render_ms();
+  stage[kBackground] = 0.0;
+  stage[kDraw] = R[Frame::kCompose];
+  stage[kPartDraw] = R[Frame::kParticles];
+  stage[kDistort] = R[Frame::kDistort];
+  stage[kBloom] = R[Frame::kBloom];
+  stage[kFinish] = R[Frame::kFinish];
+}
+
+void Scene::Impl::shade() {
+  const auto c0 = Clock::now();
+  pool->run(static_cast<int>(active.size()), [&](int i) { active[zs(i)]->shade(light.get()); });
+  stage[kShade] = ms(c0, Clock::now());
+}
+
+void Scene::Impl::state(int f) {
   const float t = static_cast<float>(f) / prog.fps;
   slots[s_t] = t;
   const auto c0 = Clock::now();
@@ -1709,22 +1755,13 @@ void Scene::Impl::render(int f, std::span<std::uint8_t> rgb) {
     }
   }
   const auto c6 = Clock::now();
-  // 10. the picture
-  pool->run(static_cast<int>(active.size()), [&](int i) { active[zs(i)]->shade(light.get()); });
-  const auto c7 = Clock::now();
-  frame->background(*light, scorch, *pool);
-  const auto c8 = Clock::now();
-  frame->draw(active, *pool);
-  const auto c9 = Clock::now();
-  frame->particles(*parts);
-  const auto c10 = Clock::now();
-  frame->distort(shocks, *bus, *pool);
-  const auto c11 = Clock::now();
-  frame->bloom(bloom_threshold, bloom, *pool);
-  const auto c12 = Clock::now();
-  frame->finish(rgb, *pool);
-  const auto c13 = Clock::now();
-  stage = {ms(c0, c1), ms(c1, c2), ms(c2, c3), ms(c3, c4), ms(c4, c5), ms(c5, c6), ms(c6, c7), ms(c7, c8), ms(c8, c9), ms(c9, c10), ms(c10, c11), ms(c11, c12), ms(c12, c13)};
+  // 10. the picture: shade(), then Frame::capture() and render() (render())
+  stage[kScript] = ms(c0, c1);
+  stage[kStep] = ms(c1, c2);
+  stage[kCouple] = ms(c2, c3);
+  stage[kBus] = ms(c3, c4);
+  stage[kLight] = ms(c4, c5);
+  stage[kParticles] = ms(c5, c6);
 }
 
 Scene::Scene(const Script& s, const EffectLoader& load, Options o) : impl_(std::make_unique<Impl>()) {

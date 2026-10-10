@@ -116,6 +116,10 @@ EffectLoader load_from(const std::filesystem::path& dir);
 struct Options {
   int threads = 2;
   Isa isa = best_isa();
+  // Draw each frame's picture on a thread of its own (one of `threads`) while the next frame's state is computed: the
+  // same frames, faster. render(f) then returns with frame f + 1's state already computed (rules, particles and modules
+  // are a frame ahead of the picture it returned).
+  bool overlap = false;
 };
 
 // A scene built from a script: every module, buffer and list is created here, so render() allocates nothing.
@@ -134,7 +138,8 @@ class Scene {
   // Frame `f` into rgb (width * height * 3). Frames must come in order from 0.
   void render(int f, std::span<std::uint8_t> rgb);
 
-  // Stages of the last frame, ms.
+  // Stages of the last frame, ms (overlapped: the picture's are frame f's, the others frame f + 1's; background and
+  // modules are drawn in one pass, under kDraw).
   enum Stage { kScript, kStep, kCouple, kBus, kLight, kParticles, kShade, kBackground, kDraw, kPartDraw, kDistort, kBloom, kFinish, kStages };
   static const char* stage_name(int s);
   const std::array<double, kStages>& stage_ms() const;

@@ -42,9 +42,14 @@ inline std::size_t zs(int v) { return static_cast<std::size_t>(v); }
 // A fixed set of worker threads. run(n, f) calls f(0) .. f(n - 1) spread over the workers and the calling thread, and
 // returns when all are done. One thread: everything runs on the caller. Allocates nothing per run (f is referred to,
 // not copied).
+//
+// Several threads may run jobs at once (a frame's state on one thread while the previous frame's picture is drawn on
+// another): the workers take tasks from every job, and a caller whose own tasks are all taken runs other jobs' tasks,
+// one at a time, while it waits for its own. Tasks of one job must not depend on each other; which thread runs a task
+// changes nothing.
 class Pool {
  public:
-  explicit Pool(int threads);
+  explicit Pool(int threads);  // threads - 1 workers
   ~Pool();
   Pool(const Pool&) = delete;
   Pool& operator=(const Pool&) = delete;
@@ -53,22 +58,34 @@ class Pool {
   void run(int n, F&& f) {
     run_impl(n, [](void* ctx, int i) { (*static_cast<std::remove_reference_t<F>*>(ctx))(i); }, const_cast<void*>(static_cast<const void*>(&f)));
   }
+  // Runs other jobs' tasks until done() holds: for a thread that waits for another thread's work. done() is polled
+  // between tasks and after wake(); whoever makes it true calls wake().
+  template <class P>
+  void help_until(P&& done) {
+    help_impl([](void* ctx) { return static_cast<bool>((*static_cast<std::remove_reference_t<P>*>(ctx))()); }, const_cast<void*>(static_cast<const void*>(&done)));
+  }
+  void wake();
 
  private:
   using Fn = void (*)(void*, int);
+  struct alignas(64) Job {
+    Fn fn = nullptr;
+    void* ctx = nullptr;
+    std::atomic<int> n{0}, next{0}, left{0};
+    std::atomic<int> users{0};  // threads inside the job: its slot is reused when none is
+    std::atomic<bool> live{false};
+  };
+  static constexpr int kJobs = 8;  // jobs at once (more callers run their tasks alone)
   void run_impl(int n, Fn fn, void* ctx);
+  void help_impl(bool (*done)(void*), void* ctx);
+  bool take(int skip, bool one);  // tasks of a live job other than `skip`: one, or all that can be had; false if none
   void work();
-  void drain();
   std::vector<std::thread> workers_;
-  std::mutex mu_;
-  std::condition_variable cv_, done_cv_;
-  Fn job_ = nullptr;
-  void* ctx_ = nullptr;
-  int n_ = 0;
-  std::atomic<int> next_{0}, left_{0};
-  std::uint64_t generation_ = 0;
-  int busy_ = 0;
-  bool stop_ = false;
+  std::array<Job, kJobs> jobs_;
+  std::mutex slots_mu_;
+  std::array<bool, kJobs> slot_taken_{};
+  std::atomic<std::uint32_t> posted_{0};  // changes whenever there may be new work (or a reason to look again)
+  std::atomic<bool> stop_{false};
 };
 
 // --- images ------------------------------------------------------------------------------------------------------------
@@ -362,6 +379,8 @@ class Particles {
   }
   // Draw into a screen image (camera offset: world minus screen).
   void draw(Image4& screen, float cam_x, float cam_y) const;
+  // The live particles into `to`, as far as draw() needs them (`to` holds at least alive() particles).
+  void copy_to(Particles& to) const;
   std::uint64_t rng = 0x9E3779B97F4A7C15ULL;
   float uniform();  // [0, 1)
 
@@ -383,6 +402,18 @@ struct Shock {
 
 // The final picture: background (sky, stars, ground lit by the scene's light), groups of tiles and single modules,
 // particles, distortion (shock rings, heat haze), bloom, tone mapping. Screen-sized buffers, allocated once.
+//
+// Two ways to draw it, the same to the bit:
+//   - the stages one at a time, on the live scene: background(), draw(), particles(), distort(), bloom(), finish(),
+//     each reading the settings below when it runs;
+//   - capture() then render(): capture() copies what the picture needs (the settings below, the light, the scorch
+//     marks, the modules' places, opacity and groups, the particles, the shock fronts and the bus's heat), and render()
+//     draws it, the background and the modules in one pass over the screen. Between the two, the scene may move on
+//     (the next frame's script, step, couplings, bus, light and particles), on another thread: only the modules'
+//     images are read late, so a module must not be shaded again before render() has drawn them (`images_read`).
+// Some work moves to a later stage on the way (the distortion is copied back into the screen by bloom() or finish(),
+// and bloom's last pass, adding it to the screen, is done by finish()), so screen() is only the finished picture
+// before bloom's last pass.
 class Frame {
  public:
   Frame(int width, int height);
@@ -399,12 +430,23 @@ class Frame {
   void background(const Light& light, std::span<const std::array<float, 4>> scorch, Pool& pool);  // scorch: x, y, radius, glow
   // Draw modules (each group once, by ownership weights; single modules as they are) over the screen.
   void draw(std::span<Module* const> modules, Pool& pool);
-  void particles(const Particles& p) { p.draw(screen_, cam_x, cam_y); }
+  void particles(const Particles& p);
   void distort(std::span<const Shock> shocks, const FieldBus& bus, Pool& pool);
   void bloom(float threshold, float strength, Pool& pool);
   // Tone map, vignette and grain into RGB8 (width * height * 3).
   void finish(std::span<std::uint8_t> rgb, Pool& pool);
   const Image4& screen() const { return screen_; }
+
+  // See above. `modules` in drawing order, as draw() takes them. render() sets *images_read (and wakes the pool's
+  // waiting threads) once the modules' images have been drawn.
+  void capture(const Light& light, std::span<const std::array<float, 4>> scorch, std::span<Module* const> modules, const Particles& parts,
+               std::span<const Shock> shocks, const FieldBus& bus);
+  void render(std::span<std::uint8_t> rgb, float bloom_threshold, float bloom_strength, Pool& pool, std::atomic<bool>* images_read = nullptr);
+  // Room for captures (capture() allocates only when a count grows beyond what it held before).
+  void reserve(int modules, int shocks, int scorch, int particles);
+  // The stages of the last render(), wall ms.
+  enum RenderStage { kCompose, kParticles, kDistort, kBloom, kFinish, kRenderStages };
+  const std::array<double, kRenderStages>& render_ms() const { return render_ms_; }
 
   // One axis of a bilinear lookup: the two cells read and their weights. Taken once per column or row, it leaves a
   // blend per pixel.
@@ -414,6 +456,32 @@ class Frame {
   };
 
  private:
+  struct Params {  // the settings above, as a stage reads them
+    float cam_x, cam_y, ground_y, exposure, haze, fade, time;
+  };
+  Params params() const { return {cam_x, cam_y, ground_y, exposure, haze, fade, time}; }
+  struct LightView {  // the light field with a fourth channel (0), a cell to a vector, and where it lies
+    const float* L4 = nullptr;
+    int nx = 0, ny = 0;
+    float x0 = 0, y0 = 0, cell = 1;
+    std::array<float, 3> flash{};
+  };
+  struct HeatView {  // the bus's heat, all groups, and where it lies
+    const float* heat = nullptr;
+    int nx = 0, ny = 0;
+    float x0 = 0, y0 = 0, cell = 1;
+  };
+  struct Tile {  // a module as draw() reads it
+    const Image4* img = nullptr;
+    Placement at;
+    float opacity = 0, feather = 0;
+    int group = -1, size = 0, res = 0;
+    std::array<int, 4> band{};
+    bool active = false;
+  };
+  struct Group {  // tiles [first, first + count) of order_, and the screen rows they cover
+    int first = 0, count = 0, y0 = 0, y1 = 0;
+  };
   // What a stage needs of a screen column, worked out once per frame instead of once per pixel.
   struct Column {
     float wx = 0;                 // world x of the column's centre
@@ -431,16 +499,72 @@ class Frame {
     Tap t;
     float band = 1.f, feather_left = 1.f, feather_right = 1.f;
   };
-  static constexpr int kMaxTiles = 64;  // tiles of a group drawn together
+  static constexpr int kMaxTiles = 64;  // tiles of a group, and of the groups drawn in one pass
 
-  void draw_group(std::span<Module* const> tiles, Pool& pool);
-  int w_, h_;
+  LightView light_view(const Light& light);  // fills light4_
+  void background_columns(const Params& P, const LightView& L);
+  void background_row(int y, const Params& P, const LightView& L, std::span<const std::array<float, 4>> scorch);
+  void take_tiles(std::span<Module* const> modules);  // into tiles_
+  // The background (if L) and the groups of tiles_, row by row in one pass (in passes of up to kMaxTiles tiles).
+  void compose(const Params& P, const LightView* L, std::span<const std::array<float, 4>> scorch, Pool& pool);
+  void distort_impl(const Params& P, std::span<const Shock> shocks, const HeatView& H, Pool& pool);
+  void bloom_impl(float threshold, float strength, Pool& pool);
+  void finish_impl(const Params& P, std::span<std::uint8_t> rgb, Pool& pool);
+  void settle_row(int y);    // the distortion's moved pixels of row y back into the screen
+  void settle(Pool* pool);   // every row's, and bloom's last pass, if pending (for stages that do not do them on the way)
+  int w_, h_, blocks_;
   Image4 screen_, tmp_;
   std::vector<Image4> mips_, mips_tmp_;
   std::vector<Column> cols_;                         // [w]
   std::vector<TileColumn> tile_cols_;                // [kMaxTiles][w]
+  std::vector<std::array<int, 2>> seen_cols_;        // [kMaxTiles]: the screen columns that see each tile's image
   std::vector<std::vector<Tap>> up_x_, up_y_;        // bloom: each level read from the next coarser (0: the screen)
   std::vector<float> light4_;  // the light field with a fourth channel (0), a cell to a vector; sized on the first frame
+  std::vector<Tile> tiles_;    // the modules to draw, in order
+  std::vector<int> order_;     // tiles_ by group, in drawing order
+  std::vector<Group> groups_;
+  // distort(): per row and block of kBlock pixels, the pixels [a, b) it moved (written to tmp_; the rest stay as they
+  // are), copied back into the screen by the next stage that reads it (pending: moved_rows_).
+  std::vector<std::array<int, 2>> moved_;
+  bool moved_rows_ = false;
+  bool bloom_pending_ = false;  // bloom's last pass: the screen += bloom_gain_ * mip 0 (bilinear) / bloom_div_
+  float bloom_gain_ = 0.f, bloom_div_ = 1.f;
+  // capture()
+  Params P_{};
+  LightView light_cap_;
+  HeatView heat_cap_;
+  std::vector<float> heat_;
+  std::vector<std::array<float, 4>> scorch_;
+  std::vector<Shock> shocks_;
+  Particles parts_{0};
+  std::array<double, kRenderStages> render_ms_{};
+};
+
+// Draws captured frames (Frame::capture, Frame::render) on a thread of its own, so that the caller can compute the next
+// frame's state meanwhile. Both use the same pool: while one waits, it runs the other's tasks.
+//
+//   per frame f: state(f); wait_images(); shade(f); wait(); [use the picture of f - 1]; frame.capture(...); start(rgb)
+class PictureThread {
+ public:
+  PictureThread(Frame& frame, Pool& pool);
+  ~PictureThread();
+  PictureThread(const PictureThread&) = delete;
+  PictureThread& operator=(const PictureThread&) = delete;
+  // Draws the frame captured last into rgb; returns at once. The previous picture must be done (wait()).
+  void start(std::span<std::uint8_t> rgb, float bloom_threshold, float bloom_strength);
+  void wait_images();  // until the modules' images of the picture being drawn have been read: they may be shaded again
+  void wait();         // until the picture is done
+  // Wall ms the caller spent in the last wait_images() and wait().
+  double waited_images_ms = 0, waited_ms = 0;
+
+ private:
+  void loop();
+  Frame& frame_;
+  Pool& pool_;
+  std::span<std::uint8_t> rgb_;
+  float threshold_ = 1.f, strength_ = 1.f;
+  std::atomic<bool> images_read_{true}, done_{true}, go_{false}, stop_{false};
+  std::thread thread_;
 };
 
 }  // namespace nfx::compose
