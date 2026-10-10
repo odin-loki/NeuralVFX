@@ -693,8 +693,8 @@ int h1(const tools::Args& a) {
   std::println("| file | product | form | dense KB | compressed KB | ratio | entries | dense ms | compressed ms | slower by | max rel. diff |");
   std::println("|---|---|---|---:|---:|---:|---:|---:|---:|---:|---:|");
   for (const H1Row& r : rows) {
-    csv << std::format("{},{},{},{},{},{},{},{:.4f},{:.4f},{:.3g}\n", r.file, r.what, r.form, r.dense_bytes, r.compressed_bytes, r.phrases, r.nodes, r.ms_dense,
-                       r.ms_compressed, r.max_rel_diff);
+    csv << std::format("{},\"{}\",{},{},{},{},{},{:.4f},{:.4f},{:.3g}\n", r.file, r.what, r.form, r.dense_bytes, r.compressed_bytes, r.phrases, r.nodes,
+                       r.ms_dense, r.ms_compressed, r.max_rel_diff);
     std::println("| {} | {} | {} | {:.1f} | {:.1f} | {:.2f}x | {} | {:.3f} | {:.3f} | {:.1f}x | {:.1e} |", r.file, r.what, r.form, static_cast<double>(r.dense_bytes) / 1024.0,
                  static_cast<double>(r.compressed_bytes) / 1024.0, static_cast<double>(r.dense_bytes) / static_cast<double>(r.compressed_bytes), r.nodes, r.ms_dense,
                  r.ms_compressed, r.ms_compressed / r.ms_dense, r.max_rel_diff);
