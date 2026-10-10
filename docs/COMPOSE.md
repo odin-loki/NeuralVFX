@@ -379,7 +379,7 @@ Otherwise v1 stays. Every effect is reported, nulls with their numbers.
 |---|---|---:|---|
 | fire | share 0.5, rate 1e-4, 300 iterations | 19.61 dB (19.59) | yes |
 | smoke | share 0.8, rate 3e-4, 200 iterations | 18.30 dB (18.02) | yes |
-| explosion | share 0.8, rate 3e-4, 200 iterations | 20.99 dB (20.55) | no: none of the 16 was (13 raised the spectrum distance by more than 0.01, 5 lowered plain tracking by more than 0.1 dB); the best coupled score was taken, and its spectrum distance was 0.029 higher than v1's on validation |
+| explosion | share 0.8, rate 3e-4, 200 iterations | 20.99 dB (20.55) | no: none of the 16 was (14 raised the spectrum distance by more than 0.01, 5 lowered plain tracking by more than 0.1 dB); the best coupled score was taken, and its spectrum distance was 0.029 higher than v1's on validation |
 
 On fire every candidate was within 0.06 dB of v1 at 8 and 30 frames; the candidates differed only at 60 frames (up
 to +0.6 dB). Each candidate took 10 to 25 minutes on one shared thread (the controls 5 to 12). Files: `results/experiments/i_train.csv`,
