@@ -51,6 +51,7 @@
 #include <chrono>
 #include <cmath>
 #include <ctime>
+#include <limits>
 #include <filesystem>
 #include <format>
 #include <fstream>
@@ -565,16 +566,31 @@ struct Ratio {
 };
 
 // Equal-quality ratio of a network against a family, with a bootstrap over clips (the same resample on both sides).
-Ratio equal_quality(const Point& net, const std::string& net_measure, const Family& fam, const std::string& fam_measure, int resamples = 10000) {
+// With several families (the video codecs), the best of them: the smallest size at the network's quality, and the
+// best quality at its size, each codec along its own ladder.
+Ratio equal_quality(const Point& net, const std::string& net_measure, const std::vector<const Family*>& fams, const std::string& fam_measure,
+                    int resamples = 10000) {
   const std::size_t n = net.q.size();
   std::vector<std::size_t> all(n);
   std::iota(all.begin(), all.end(), 0);
   Ratio r;
   const auto one = [&](const std::vector<std::size_t>& idx, int& censor, double& other, double& dq) {
-    const auto env = envelope(fam, fam_measure, idx);
     const double nb = mean_at(net.b.at(net_measure), idx), nq = mean_at(net.q, idx);
-    other = size_for(env, nq, censor);
-    dq = nq - quality_at(env, nb);
+    other = std::numeric_limits<double>::infinity();
+    double best_q = -std::numeric_limits<double>::infinity();
+    for (const Family* fam : fams) {
+      const auto env = envelope(*fam, fam_measure, idx);
+      int ce = 0;
+      const double kb = size_for(env, nq, ce);
+      if (!std::isnan(kb) && kb < other) {
+        other = kb;
+        censor = ce;
+      }
+      const double q = quality_at(env, nb);
+      if (!std::isnan(q)) best_q = std::max(best_q, q);
+    }
+    if (std::isinf(other)) other = std::nan("");
+    dq = std::isinf(best_q) ? std::nan("") : nq - best_q;
     return other / nb;
   };
   double dq0 = 0;
@@ -606,6 +622,10 @@ Ratio equal_quality(const Point& net, const std::string& net_measure, const Fami
   r.dq_hi = pct(dqs, 0.975);
   r.censored_share = static_cast<double>(cens) / resamples;
   return r;
+}
+
+Ratio equal_quality(const Point& net, const std::string& net_measure, const Family& fam, const std::string& fam_measure) {
+  return equal_quality(net, net_measure, std::vector<const Family*>{&fam}, fam_measure);
 }
 
 std::string ratio_cell(const Ratio& r) {
@@ -853,7 +873,11 @@ void step_report(const Ctx& c, const std::vector<std::string>& only_configs, con
         line += " " + ratio_cell(r) + " |";
       }
       if (!all_video.empty()) {
-        const Ratio r = equal_quality(p, "packed", all_video, "payload");
+        std::vector<const Family*> fams;
+        for (const auto& [name, fam] : videos) {
+          if (!fam.empty()) fams.push_back(&fam);
+        }
+        const Ratio r = equal_quality(p, "packed", fams, "payload");
         write(k, p, "best_video", "packed", "payload", r);
         line += " " + ratio_cell(r) + " |";
       } else {
