@@ -649,7 +649,7 @@ std::string short_label(const std::string& config) {
   if (cf.h.grid_t != 16) s += std::format(" T{}", cf.h.grid_t);
   if (cf.vq_bits) s += std::format(" VQ{}/{}", cf.vq_bits, cf.vq_dim);
   else s += std::format(" {}-bit", cf.bits);
-  if (cf.lambda > 0) s += std::format(" r{:g}", cf.lambda);
+  if (cf.lambda > 0) s += " + rate";
   if ((cf.h.arch == Arch::grid && cf.iters != 2000) || (cf.h.arch == Arch::conv && cf.iters != 1500)) s += std::format(" {}k it", cf.iters / 1000);
   return s;
 }
@@ -720,11 +720,25 @@ void write_figure(const fs::path& path, const std::string& title, const Family& 
       o << std::format("<text x=\"{:.1f}\" y=\"{}\" font-size=\"11\" fill=\"{}\">{}</text>\n", lx + 18, y0 - 11, ink2, name);
       lx += 26 + 6.2 * static_cast<double>(name.size());
     }
+    std::vector<std::array<double, 4>> placed;  // label boxes: x0, y0, x1, y1
     for (const auto& [k, p] : nets) {
       if (short_label(k) == k) continue;  // rescored copies are not drawn twice
       const double kb = mean_at(p->b.at(panel == 0 ? "stored" : "packed"), idx) / 1024, q = mean_at(p->q, idx);
       o << std::format("<circle cx=\"{:.1f}\" cy=\"{:.1f}\" r=\"4.5\" fill=\"{}\" stroke=\"#fcfcfb\" stroke-width=\"2\"/>\n", X(kb), Y(q), slot[1]);
-      o << std::format("<text x=\"{:.1f}\" y=\"{:.1f}\" font-size=\"10\" fill=\"{}\">{}</text>\n", X(kb) + 7, Y(q) + 3.5, ink, short_label(k));
+      // The label right of its point, moved up or down until it overlaps no other label.
+      const std::string text = short_label(k);
+      const double w = 5.6 * static_cast<double>(text.size()), lx0 = X(kb) + 7;
+      double ly = Y(q) + 3.5;
+      for (const double dy : {0.0, 12.0, -12.0, 24.0, -24.0, 36.0, -36.0}) {
+        const double y = Y(q) + 3.5 + dy;
+        const bool clash = std::ranges::any_of(placed, [&](const auto& b) { return lx0 < b[2] && lx0 + w > b[0] && y - 9 < b[3] && y + 2 > b[1]; });
+        if (!clash) {
+          ly = y;
+          break;
+        }
+      }
+      placed.push_back({lx0, ly - 9, lx0 + w, ly + 2});
+      o << std::format("<text x=\"{:.1f}\" y=\"{:.1f}\" font-size=\"10\" fill=\"{}\">{}</text>\n", lx0, ly, ink, text);
     }
   }
   o << "</svg>\n";
