@@ -34,6 +34,7 @@
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
+#include <ctime>
 #include <filesystem>
 #include <format>
 #include <fstream>
@@ -121,6 +122,12 @@ rt::RolloutEffect load(const std::filesystem::path& p) {
 }
 
 int round32(float v) { return std::max(32, 32 * static_cast<int>(std::lround(v / 32.f))); }
+
+double thread_cpu_ms() {
+  timespec t{};
+  clock_gettime(CLOCK_THREAD_CPUTIME_ID, &t);
+  return 1e3 * static_cast<double>(t.tv_sec) + 1e-6 * static_cast<double>(t.tv_nsec);
+}
 
 // --occupancy: how empty each active module's fine fields are after its step (see the header).
 void write_occupancy(std::FILE* o, int frame, float t, const std::vector<Module*>& active) {
@@ -396,6 +403,9 @@ int main(int argc, char** argv) try {
   std::vector<int> n_active(static_cast<std::size_t>(frames)), n_parts(static_cast<std::size_t>(frames));
   std::vector<long> allocs(static_cast<std::size_t>(frames));
   std::vector<std::uint64_t> sums(static_cast<std::size_t>(frames));
+  // Thread CPU time: of the main thread per frame (with one thread, the whole frame's work) and of each module's step
+  // (on whichever thread ran it), so that comparisons on a shared machine are not swamped by preemption.
+  std::vector<double> frame_cpu(static_cast<std::size_t>(frames)), step_cpu_frame(static_cast<std::size_t>(frames)), step_cpu_now(owned.size());
   const double setup_ms = ms(setup0, Clock::now());
   std::size_t scratch = 0, resident = 0;
   for (const auto& m : owned) scratch += m->runner().scratch_bytes();
@@ -412,6 +422,7 @@ int main(int argc, char** argv) try {
     if (f == 1) g_counting.store(true);  // the first frame may still touch lazily sized buffers
     const long alloc0 = g_allocations.load();
     std::array<double, kStages>& P = prof[zs(f)];
+    const double cpu0 = thread_cpu_ms();
     auto c0 = Clock::now();
     // script: rules, then controls and the scene's time-driven settings
     for (Rule& r : rules) {
@@ -492,7 +503,13 @@ int main(int argc, char** argv) try {
       if (m->active && !((m.get() == fires[0] || m.get() == fires[1]) && m->opacity <= 0.f && lit == 0)) active.push_back(m.get());
     }
     for (Module* m : active) m->step_ms = m->shade_ms = 0.0;
-    pool.run(static_cast<int>(active.size()), [&](int i) { active[zs(i)]->step(); });
+    std::ranges::fill(step_cpu_now, 0.0);
+    pool.run(static_cast<int>(active.size()), [&](int i) {
+      const double t0 = thread_cpu_ms();
+      active[zs(i)]->step();
+      step_cpu_now[zs(i)] = thread_cpu_ms() - t0;
+    });
+    for (std::size_t i = 0; i < active.size(); ++i) step_cpu_frame[zs(f)] += step_cpu_now[i];
     if (occupancy && f % 3 == 0) {
       g_counting.store(false);  // (measurement only: its buffers are not the frame loop's)
       write_occupancy(occupancy, f, t, active);
@@ -593,6 +610,7 @@ int main(int argc, char** argv) try {
     auto c14 = Clock::now();
     P[kEncode] = ms(c13, c14);
     allocs[zs(f)] = g_allocations.load() - alloc0;
+    frame_cpu[zs(f)] = thread_cpu_ms() - cpu0;
     for (std::size_t i = 0; i < owned.size(); ++i) mod_prof[zs(f)][i] = {owned[i]->active ? owned[i]->step_ms : 0.0, owned[i]->active ? owned[i]->shade_ms : 0.0};
     n_active[zs(f)] = static_cast<int>(active.size());
     n_parts[zs(f)] = parts.alive();
@@ -695,13 +713,13 @@ int main(int argc, char** argv) try {
     for (const char* n : kStageNames) o << ',' << n;
     o << ",total";
     for (const auto& m : owned) o << ',' << m->name() << "_step," << m->name() << "_shade";
-    o << ",rgb_fnv\n";
+    o << ",frame_thread_cpu_ms,step_thread_cpu_ms,rgb_fnv\n";
     for (int f = 0; f < frames; ++f) {
       o << f << ',' << std::format("{:.3f}", static_cast<double>(f) / 30.0) << ',' << n_active[zs(f)] << ',' << n_parts[zs(f)] << ',' << allocs[zs(f)];
       for (const double v : prof[zs(f)]) o << std::format(",{:.3f}", v);
       o << std::format(",{:.3f}", total[zs(f)]);
       for (const auto& [a, b] : mod_prof[zs(f)]) o << std::format(",{:.3f},{:.3f}", a, b);
-      o << std::format(",{:016x}\n", sums[zs(f)]);
+      o << std::format(",{:.3f},{:.3f},{:016x}\n", frame_cpu[zs(f)], step_cpu_frame[zs(f)], sums[zs(f)]);
     }
     std::ofstream meta(A.profile.string() + ".meta");
     meta << std::format("width,{}\nheight,{}\nquality,{}\nthreads,{}\nisa,{}\nmain_tile_px,{}\nmodules,{}\nsetup_ms,{:.1f}\nresident_kb,{:.1f}\nscratch_mb,{:.2f}\npeak_rss_mb,{:.1f}\n"
