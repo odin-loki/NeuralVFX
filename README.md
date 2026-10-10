@@ -81,7 +81,7 @@ Ubuntu 24.04: `g++-14`, CMake 3.25+, Ninja, `libgtest-dev`, `zlib1g-dev` (and `f
 ```sh
 cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_COMPILER=g++-14
 cmake --build build
-ctest --test-dir build                     # 155 tests: sim, metrics, codecs, gradients, runtime parity, composition, scene scripts, field effects, context mixing, denoiser, lossless coder, allocation, C API
+ctest --test-dir build                     # 160 tests: sim, metrics, codecs, gradients, runtime parity, composition, scene scripts, field effects, context mixing, denoiser, lossless coder, allocation, C API
 ```
 
 Options: `NEURALFX_BUILD_VIEWER` (GLFW + OpenGL; fetches Dear ImGui), `NEURALFX_BUILD_SHARED` (libnvfx.so for engines),
@@ -119,7 +119,8 @@ training, evaluation; about three hours), then `d-timing` on an idle machine and
 | `nvfx_fireball` | a scene of composed effects written in C++ (a fireball with smoke, fires and embers) to video, with a profile of every stage |
 | `nvfx_scene_script` | plays a scene script (`examples/scenes/*.nvfxs`) to video, keyframes and a sheet; `--check` and `--print` check and reformat a script; `--verify` compares keyframes with frozen SHA-256 |
 | `nvfx_dcm` | context mixing: `selftest` runs a small synthetic mixer search under both objectives (ROC-AUC and Laplace bits); `version FILE` prints the SHA-256 version of a serialised mixer; DCM-fine (G1): `record`, `experts`, `search-fine` (with `--pilot`), `train-fine`, `eval-fine`, `bench-experts`, `fine-summary`; the coarse-state denoiser (G2): `ddpm-train`, `ddpm-sample`, `ddpm-time`, `contexts` |
-| `nvfx_pack` | pack a `.nvfx` into a `.nvfz` and back (`--unpack`), bit-exact; `--report DIR` for sizes and ratios; `--study` for the measurement in results/compression |
+| `nvfx_pack` | pack a `.nvfx` into a `.nvfz` and back (`--unpack`), bit-exact; `--h3` for format 2 (light or fast literal models, LZ tokens, seekable segments: 4 to 38 times faster decoding for 2 to 23% more disk); `--report DIR` for sizes and ratios; `--study` for the measurement in results/compression |
+| `nvfx_study_h` | study H's measurements: products on LZ78/RePair-compressed data against dense code (`--h1`), the run-aware detail step (`--h2`); scripts in `tools/study_h/` |
 | `neuralfx_arch_bench` | Phase 0 architecture microbenchmark |
 
 ## Layout
