@@ -1,0 +1,13 @@
+config,version,channel,pixel_rows,weights (mean over contexts, through the final mixer)
+learned+sim,44cce10236891f21,R,827640,learned=0.362,sim=0.644
+learned+sim,44cce10236891f21,G,827640,learned=0.245,sim=0.728
+learned+sim,44cce10236891f21,B,827640,learned=0.229,sim=0.739
+learned+sim,44cce10236891f21,A,827640,learned=0.458,sim=0.691
+learned+sim+shader,60da0bd0c21e6b10,R,827640,learned=0.255,sim=0.510,shader=0.278
+learned+sim+shader,60da0bd0c21e6b10,G,827640,learned=0.160,sim=0.627,shader=0.192
+learned+sim+shader,60da0bd0c21e6b10,B,827640,learned=0.222,sim=0.548,shader=0.160
+learned+sim+shader,60da0bd0c21e6b10,A,827640,learned=0.458,sim=0.539,shader=0.187
+learned+sim+shader+other1+other2,cf9107916c090738,R,827640,learned=0.308,sim=0.433,shader=0.354,other1=0.106,other2=-0.114
+learned+sim+shader+other1+other2,cf9107916c090738,G,827640,learned=0.213,sim=0.564,shader=0.206,other1=0.013,other2=-0.029
+learned+sim+shader+other1+other2,cf9107916c090738,B,827640,learned=0.290,sim=0.472,shader=0.247,other1=0.018,other2=-0.092
+learned+sim+shader+other1+other2,cf9107916c090738,A,827640,learned=0.547,sim=0.372,shader=0.207,other1=0.126,other2=-0.032

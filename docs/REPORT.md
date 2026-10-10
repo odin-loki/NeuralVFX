@@ -664,6 +664,11 @@ written by hand.
   (test: detail score -5.28 [-9.01, -2.05] against no prior). It ties the 6 s shards on every statistic, so it buys
   continuity, not better pictures. Smoke ties; it is not kept there.
 - *Denoiser start points*: a tie with the stored ones, stopped.
+- *Extras*: one renderer mixing the learned renderer, the simulator's renderer and the field shader draws the
+  explosion's first second +1.02 dB [+0.80, +1.25] better but makes its endless detail worse; a critic that picks the
+  most real-looking of four rolled-ahead shards separates real from model runs (AUC 0.84 to 1.00) yet picks no better
+  shards; mixing a cheap solver into the smoke stepper tracks +0.40 dB better at 30 frames but calms the smoke. None
+  is kept. The simulator's own renderer drawing the explosion's first second better is a finding worth a follow-up.
 - *A codec from the learned dynamics* (an authored run stored as coarse corrections over the stepper): 50 bytes to
   about 2.5 KB per run, fewer bytes than every video codec and flipbook below about 18 dB active PSNR (22 dB for
   explosions); above about 20 to 26 dB, AV1, H.265 and H.264 in 4:4:4 need 1.5 to 7 times fewer bytes. A frame model

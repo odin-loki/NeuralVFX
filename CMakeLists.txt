@@ -114,6 +114,12 @@ add_library(neuralfx_dcm_fine STATIC src/dcm/fine.cpp)
 target_link_libraries(neuralfx_dcm_fine PUBLIC neuralfx_dcm neuralfx_model)
 neuralfx_defaults(neuralfx_dcm_fine)
 
+# Study G's extras (docs/DCM.md §10, stage S8): one renderer over several (G4a), a shard critic (G5a), and the stepper's
+# and a coarse solver's updates mixed (G5b), on the reference rollout model.
+add_library(neuralfx_dcm_extras STATIC src/dcm/extras.cpp)
+target_link_libraries(neuralfx_dcm_extras PUBLIC neuralfx_dcm_fine neuralfx_core)
+neuralfx_defaults(neuralfx_dcm_extras)
+
 # The denoiser on coarse states of rollout effects (docs/DCM.md, stage S5): forward and backward passes written by hand,
 # AVX2 + FMA kernels (the trainer's requirement).
 add_library(neuralfx_ddpm STATIC src/dcm/ddpm.cpp)
@@ -147,6 +153,10 @@ if(NEURALFX_BUILD_TOOLS)
   add_executable(nvfx_dcm tools/nvfx_dcm.cpp tools/fine_study.cpp)
   target_link_libraries(nvfx_dcm PRIVATE neuralfx_dcm neuralfx_dcm_fine neuralfx_ddpm neuralfx_io neuralfx_train)
   neuralfx_defaults(nvfx_dcm)
+  # Study G's extras (docs/DCM.md §10): G4a, G5a and G5b on validation and test, and their costs.
+  add_executable(nvfx_g_extras tools/g_extras.cpp)
+  target_link_libraries(nvfx_g_extras PRIVATE neuralfx_dcm_extras neuralfx_io neuralfx_train)
+  neuralfx_defaults(nvfx_g_extras)
   # The engine-side example: plain C against the shared library's API.
   add_executable(nvfx_c_host examples/c_host.c)
   target_link_libraries(nvfx_c_host PRIVATE nvfx)
@@ -210,9 +220,10 @@ if(NEURALFX_BUILD_TESTS)
   add_executable(neuralfx_tests tests/test_proto.cpp tests/test_sim.cpp tests/test_baselines.cpp tests/test_train.cpp
                                 tests/test_runtime.cpp tests/test_ingest.cpp tests/test_rollout.cpp tests/test_compose.cpp
                                 tests/test_dcm.cpp tests/test_cm.cpp tests/test_dcm_fine.cpp tests/test_dcm_ddpm.cpp tests/test_script.cpp
-                                tests/test_g3_codec.cpp tests/test_video_codec.cpp tests/test_runtime_prior.cpp)
+                                tests/test_g3_codec.cpp tests/test_video_codec.cpp tests/test_runtime_prior.cpp
+                                tests/test_dcm_extras.cpp)
   target_link_libraries(neuralfx_tests PRIVATE neuralfx_proto neuralfx_io neuralfx_train nvfx neuralfx_compose neuralfx_dcm
-                                               neuralfx_dcm_fine neuralfx_ddpm neuralfx_codec GTest::gtest_main)
+                                               neuralfx_dcm_fine neuralfx_ddpm neuralfx_codec neuralfx_dcm_extras GTest::gtest_main)
   neuralfx_defaults(neuralfx_tests)
   target_compile_definitions(neuralfx_tests PRIVATE NEURALFX_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
   gtest_discover_tests(neuralfx_tests TEST_PREFIX "neuralfx." DISCOVERY_MODE PRE_TEST PROPERTIES LABELS neuralfx)

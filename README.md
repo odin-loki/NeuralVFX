@@ -92,7 +92,7 @@ Ubuntu 24.04: `g++-14`, CMake 3.25+, Ninja, `libgtest-dev`, `zlib1g-dev` (and `f
 ```sh
 cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_COMPILER=g++-14
 cmake --build build
-ctest --test-dir build                     # 202 tests: sim, metrics, codecs, gradients, runtime parity, composition, scene scripts, field effects, context mixing, denoiser, lossless coder, low-bit and vector-quantised features, video codecs, allocation, C API
+ctest --test-dir build                     # 209 tests: sim, metrics, codecs, gradients, runtime parity, composition, scene scripts, field effects, context mixing, denoiser, lossless coder, low-bit and vector-quantised features, video codecs, allocation, C API
 ```
 
 Options: `NEURALFX_BUILD_VIEWER` (GLFW + OpenGL; fetches Dear ImGui), `NEURALFX_BUILD_SHARED` (libnvfx.so for engines),
@@ -133,6 +133,7 @@ training, evaluation; about three hours), then `d-timing` on an idle machine and
 | `nvfx_prior` | the runtime's prior against drift (docs/DCM.md G2.13): `parity` (study G's test run through the reference and the runtime, bit by bit), `pass` (one denoiser pass per ISA), `time` (frame cost with and without the prior, and of shards: mean, p99, worst) |
 | `nvfx_pack` | pack a `.nvfx` into a `.nvfz` and back (`--unpack`), bit-exact; `--h3` for format 2 (light or fast literal models, LZ tokens, seekable segments: 4 to 38 times faster decoding for 2 to 23% more disk); `--report DIR` for sizes and ratios; `--study` for the measurement in results/compression |
 | `nvfx_g3` | study G's G3: a codec for authored effect runs from the learned dynamics (closed-loop coarse corrections, an integer context-mixing coder) and a frame model plus a coded residual, against video codecs (through ffmpeg) and flipbooks; `probe`, `ladder`, `baselines`, `g3b`, `summary`, `timing` ([docs/DCM.md](docs/DCM.md) §8) |
+| `nvfx_g_extras` | study G's extras (stage S8): one renderer for every model (G4a), a shard critic (G5a), a mixer of the stepper and a coarse solver for smoke (G5b); none kept ([docs/DCM.md](docs/DCM.md) §10) |
 | `nvfx_study_h` | study H's measurements: products on LZ78/RePair-compressed data against dense code (`--h1`), the run-aware detail step (`--h2`); scripts in `tools/study_h/` |
 | `nvfx_f2` | study F2 (results/compression): `data`, `flipbooks`, `train` (low-bit, quantisation-aware, rate-aware and vector-quantised models), `rescore`, `video` (x264, x265, VP9, AV1 through ffmpeg), `report` (equal-quality ratios, memory and disk, with intervals; `--figure`), `g3c`, `g3c-report`, `timing` |
 | `neuralfx_arch_bench` | Phase 0 architecture microbenchmark |

@@ -1,0 +1,4 @@
+effect,version,fit_windows,train_windows,auc_on_train_windows
+fire,cc0deb46573fa66a1aed66f42f8b6c8bbcf7714b34af664cda1b6ff868eaca05,280,280,0.8471
+smoke,afe430ba9978fa39faaec0e690240346af759f42be5fb482c3e6325d5e360f62,280,280,1.0000
+explosion,8745fbaa32614f6bd5bca73176ea3bcfe2390992531a0a8fa4fc7096271b75c9,300,300,1.0000

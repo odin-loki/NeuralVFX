@@ -122,7 +122,7 @@ wins here are the large blended feature volumes of the frame models, the mostly 
 The core is S1, S2, S3 and S6. If time runs short, the cuts are S8, then S5's extension beyond fire, then G3b, then
 S7's speed targets (the final video stays).
 
-**Done so far:** S0, S1, S2 (§6), S3 (study F2, `results/compression/README.md`), S4 (§8), S5 on fire (§7) and S9 (§9); round 2 of study G (10 October 2026): the G1 retry passes on no
+**Done so far:** S0, S1, S2 (§6), S3 (study F2, `results/compression/README.md`), S4 (§8), S5 on fire (§7), S6 (§11), S8 (§10: G4a, G5a, G5b not kept) and S9 (§9); round 2 of study G (10 October 2026): the G1 retry passes on no
 effect (§6.10), G2a stops in the nested search (G2.10), G2b is stopped on smoke and skipped for explosions (G2.11). From
 study G, only fire's prior against drift (G2b, round 1) goes to stage S6.
 - **S1:** the three optimisation branches and the coder are merged. The fireball runs at 24 ms per frame at
@@ -1741,6 +1741,334 @@ tools/study_h/h2_summary.sh /tmp/h2                       # one line per firebal
 tools/study_h/h2_occupancy.sh build /tmp/h2_occupancy.csv # how empty the fireball's fields are
 ```
 
+## 10. Study G extras (stage S8)
+
+Status: **done** (10 October 2026). Rules (§10.1 to §10.5) were written and committed before any validation or test
+number was looked at; amendments in §10.6; results in §10.7 to §10.9; costs in §10.10; decisions in §10.11. Designs G4a,
+G5a and G5b of §3, in the order G4a, G5a, G5b; G6 is not run (§10.5).
+
+**Result in one line:** none of the three is kept. G4a (one renderer) draws the explosion's first second 1.0 dB
+closer on test but makes its endless frames score worse; G5a (shard critic) tells model from real but picks no better
+shards (no effect passes validation); G5b (stepper plus coarse solver) tracks smoke slightly better only by making it
+calmer, and no candidate keeps the endless statistics (stopped at validation). Nothing from S8 goes into v2.
+
+Code: `include/neuralfx/dcm/extras.hpp` and `src/dcm/extras.cpp` (library `neuralfx_dcm_extras`), `tools/g_extras.cpp`
+(`nvfx_g_extras`), `tests/test_dcm_extras.cpp`. Tables: `results/experiments/g_extras_*.csv`. Data, mixers and logs under
+`NEURALVFX_DATA/g/extras`, outside git.
+
+### 10.1 Common protocol
+
+- **Model:** study D's v1 rollout effects (the frozen files of `v1_frozen.csv`), through the reference implementation at
+  128 px (`rollout::start` and `step`, the learned renderer as `fine::render`), as G1 ran them. The runtime is not
+  touched.
+- **Training:** salt-1 runs (`rollout::recipe_run`); never scored.
+- **Validation**, for every choice: the 10 validation settings of §4. Seeds: real 10 s runs 2,100,000 + i, model shards
+  2,110,000 + i, tracked runs 2,120,000 + i (i the setting).
+- **Test**, once, only for what passed validation: study B's 10 held-out settings. Seeds: real runs 2,200,000 + i, model
+  shards 2,220,000 + i, tracked runs 2,230,000 + i. A one-shot effect's shard slots use instance seed base + 100 i + slot.
+- **Endless statistics** (study D's test, as G1 ran it): a single 6 s shard (explosions: 89 frames) against a real 10 s
+  run at the setting (150 frames of warm-up; explosions: 89 frames from the first): the calibration score (detail
+  spectrum distance + |ln motion ratio| + |ln emission ratio| + |ln coverage ratio|, lower is better), spectrum
+  distance, motion ratio, coverage L1 and mean-frame PSNR.
+- **Tracking** (REPORT §6.4): a real run at the setting, warmed up 100 frames (explosions: 1), its true state with
+  128 px fine fields as the only start point, replayed with the run's seed; active PSNR per frame for 60 frames
+  (explosions: 89).
+- **Intervals:** 95% paired bootstrap (10,000 resamples) over the 10 settings. An interval covering zero is a tie;
+  **worse** means an interval entirely on the bad side.
+- **Costs:** thread CPU time, the least of 15, reference code at baseline ISA, on the shared machine: provisional upper
+  bounds (`nvfx_g_extras bench`).
+- **Budget:** about 6 CPU-hours, one thread at `nice 19`.
+
+### 10.2 G4a rule: one renderer
+
+- **Experts**, per pixel and RGBA channel, in display units (0 to 1): the effect's learned renderer (L); the
+  simulator's own renderer of the effect drawn on the fine fields (S); the compositor's field shader with the fireball's
+  `cloud` look and no scene light, its linear colour clamped and raised to 1 / 2.2 (F); the other two effects' learned
+  renderers on the same fields (X).
+- **Mixer:** one ValueNet for every effect (the effect is not a context): inputs the chosen experts' values of the
+  channel and a bias; first-layer mixers by channel x age (frames since the start point, 5 bins), channel x heat level
+  (4 bins of the fine heat over the renderer's scale), channel x soot level (4); final mixer by channel; squared loss;
+  it starts as L (weight 1). Trained on 24 tracked training runs per effect (frames 1 to 60, explosions 1 to 89; per
+  frame 150 visible and 15 empty pixels), 3 shuffled passes with the rates halved after each, then frozen (SHA-256).
+- **Pilot:** each renderer alone on the validation tracking runs. A null (stop) if neither S nor F beats L in the mean
+  on the explosion's first second (frames 1 to 30).
+- **Configurations:** {L, S}, {L, S, F}, {L, S, F, X}. **Chosen on validation:** among those not worse than v1 on any
+  effect in any of four measures (tracking active PSNR over frames 1 to 30 and over frames 31 to 60 (explosions 31 to
+  89), endless calibration score, endless mean-frame PSNR), the one with the highest mean over the three effects of the
+  first-second tracking gain (ties: fewer inputs). None: G4a stops.
+- **Kept if, on test:** the explosion's first-second active PSNR (mean over frames 1 to 30) improves with an interval
+  above zero, and no effect is worse in any of the four measures.
+- "Modules match in look" is reported as the weight each renderer receives, not scored.
+
+### 10.3 G5a rule: shard critic
+
+- **Candidates:** per setting four shard slots (looping effects: shards 0 to 3 of one instance seed; explosions: four
+  instance seeds, shard 0). Candidate 0 is what the runtime plays (a start point among the three nearest the controls by
+  a hash of seed and shard, and the shard's seed, as `src/runtime/nvfx.cpp`); candidate j >= 1 takes the seed
+  splitmix64(seed_0 + j) and picks its start point with it the same way.
+- **Look-ahead:** the first 30 frames (1 s) of each candidate's shard (after fire's warm-up).
+- **Critic:** 16 statistics of the 30 frames (log coverage, emission and motion; six radial spectrum bands; alpha
+  centroid and spread in x and y; coverage and motion trends; opacity). Per statistic, a Gaussian log-likelihood ratio
+  of a real window against a model window, each class with a mean linear in (1, i, w, t, (w - 0.5)^2, i t); the ratios
+  (clamped to +-8) and a bias enter a PAQ8 MixerNet (first-layer mixers: none, intensity tercile, turbulence tercile;
+  final mixer; APM), 4 shuffled passes, frozen (SHA-256). Training windows (salt 1): fire and smoke 40 runs (10 real
+  windows of a 10 s run each, and the model's first 30 frames of 4 shard starts at the run's controls), explosions 120
+  runs (one real window, the first second, and 4 shard starts); the Gaussians are fitted on the first half of the runs,
+  the mixer on the second.
+- **Measure:** per setting, the mean over the 4 slots of each statistic of the shard played; critic - runtime, paired
+  over settings. **K = 4 candidates decide**; K = 2 and 8 are reported on validation, with an oracle (the candidate
+  with the best score: not playable, a ceiling) and the mean candidate as references.
+- **Pilot** = validation. A null (stop before any test) if the critic's mean calibration score is not below the
+  runtime's on any effect.
+- **Kept per effect if, on validation and then on test:** the calibration score falls (interval below zero), and spectrum
+  distance, |ln motion ratio|, coverage L1 and mean-frame PSNR are not worse. **Cost per shard:** (K - 1) x 30 extra
+  frames of the runtime plus K critic evaluations.
+
+### 10.4 G5b rule: the stepper's update and a cheap solver's update
+
+- **Smoke only.** Per coarse cell and physical channel, x' = x + mix(dN, dS, 1): dN the stepper's update, dS the cheap
+  solver's (the simulation on the 32-cell grid from the same state, same controls and seed, its own pressure warm-started
+  from its last step). Memory channels come from the stepper; the detail layer's flow is shifted by the mixer's change
+  of velocity. Mixer: a ValueNet with first-layer mixers by channel x heat level (4), channel x height band (4) and
+  channel x age (frames since the start point: 1-8, 9-30, 31-60, 61+); final mixer by channel; squared loss; it starts
+  as the stepper (weight 1 on dN), which is `rollout::step` to the bit (`DcmExtras.UpdateMixerAtItsStartIsTheStepper`).
+- **Candidates:** fixed blends (1 - a) dN + a dS with a = 0.1, 0.25, 0.5; **m1**, trained one step from the truth (24
+  training runs, frames 100 to 238, 128 cells per step, 3 passes, the stepper's memory channels carried from its own
+  steps); **m2**, m1 plus one own-rollout pass (60-frame windows of the mixed coarse dynamics from the true state at
+  frames 100 and 160 of each training run, targets the true state at the same frame, mixed with as many one-step rows,
+  at the rates training ended with).
+- **Pilot:** the fixed blends on validation tracking. A null (stop) if no blend gains in the mean at frame 30 or at frame
+  60.
+- **Chosen on validation:** among the candidates whose endless statistics are not worse than v1 (calibration score,
+  spectrum distance, |ln motion ratio|, coverage L1, mean-frame PSNR), the highest mean of the gains in active PSNR at
+  frames 30 and 60.
+- **Kept if, on test:** smoke's active PSNR at frame 30 and at frame 60 both improve with intervals above zero, and the
+  endless statistics are not worse.
+
+### 10.5 G6
+
+**Not run.** G6 (one DCM-fine for every effect, the effect as a context) is decided "as G1", and depends on G1, which
+did not pass its rule in §6 nor in the round-2 retry. There is nothing for it to build on.
+
+### 10.6 Amendments (each says when it was made)
+
+1. **G4a's learning rates** (before any G4a validation run; the pilot of §10.2 had run). Trained with the mixer's
+   default annealing (each context's rates halved after 2,000 uses), the three configurations hardly left the learned
+   renderer: training rmse 0.1154 against 0.1157 at the first pass, weight 0.8 to 0.98 on L. The experts are close to
+   each other, and normalised LMS moves slowly along their difference. The rates now anneal over 100,000 uses, with a
+   first-layer rate of 0.1, chosen among 0.02, 0.05, 0.1 and 0.2 by the training rows' own error after training (rmse
+   0.1145, 0.1141, 0.1140, 0.1139; a least-squares fit per age bin and channel of each effect gives 0.109 to 0.118).
+   Still 3 passes with the rates halved after each.
+2. **G4a's mixer has no bias** (after five validation settings of fire had run; that run was stopped and is not used).
+   Its first validation run showed a first-second "gain" of 5.5 to 8 dB on fire, with coverage L1 ten times v1's
+   (0.05 against 0.005) and mean-frame PSNR 3 to 8 dB lower. The cause was the bias input (0.01 to 0.035): a faint haze
+   over the whole frame. Active PSNR counts every pixel visible in either frame, so a haze makes the empty background
+   "active" with a small error and inflates the score; it is not a better picture. The mixer now has no bias, so a pixel
+   that every expert leaves empty stays exactly transparent (a test holds it), and its normalised-LMS regulariser is 1
+   (inputs are colours in [0, 1]; without a bias, dim pixels made the normalised steps blow up). The rate of
+   amendment 1 was checked again on the training rows (rmse 0.1161, 0.1160, 0.1159, 0.1159 for 0.05, 0.1, 0.2, 0.5;
+   the learned renderer alone 0.1201) and kept at 0.1. The stopped run's rows are kept outside git
+   (`g4a_val_with_bias_aborted.csv`).
+3. **G5b's learning rates** (before any G5b run, after G4a's lesson): the update mixers' rates anneal over 100,000 uses
+   of a context, and m1's first-layer rate is chosen among 0.02, 0.05, 0.1 and 0.2 by the training rows' own error
+   after training (`g5b-train` logs each).
+
+### 10.7 G4a: results
+
+**In one line:** the renderer mixer draws the explosion's first second 1.0 dB closer to the real run on test
+(+1.02 [+0.80, +1.25] dB), and follows tracked runs 0.4 to 1.0 dB better on every effect, but the explosion's endless
+frames score worse (calibration score +0.080 [+0.020, +0.139], from the detail spectrum), so by the rule **G4a is not
+kept**.
+
+**Pilot** (validation tracking, each renderer alone on the model's own fields; active PSNR, mean over 10 settings;
+`g_extras_g4a_pilot.csv`):
+
+| effect | learned (L) | simulator's (S) | field shader (F) | S - L, frames 1-30 | F - L, frames 1-30 |
+|---|---|---|---|---|---|
+| | frames 1-30 / 31-60 (89) | | | | |
+| fire | 20.44 / 18.12 | 20.50 / 18.16 | 18.73 / 19.21 | +0.06 [+0.04, +0.09] | -1.72 [-2.61, -0.99] |
+| smoke | 20.19 / 16.59 | 20.50 / 16.61 | 18.83 / 16.93 | +0.31 [+0.16, +0.47] | -1.36 [-1.72, -0.99] |
+| explosion | 21.18 / 17.96 | 22.16 / 18.02 | 17.34 / 17.18 | **+0.99 [+0.84, +1.15]** | -3.83 [-4.41, -3.19] |
+
+The simulator's renderer beats the learned one on the explosion's first second (not a null); the other effects' learned
+renderers are 2 to 9 dB worse than the effect's own (`g_extras_g4a_pilot.csv`). Rows: 24 tracked training runs per
+effect, 827,640 pixels in all (`g4a-rows`, 3.2 minutes).
+
+**Validation** (paired over 10 settings; mixer - v1; `g_extras_g4a_val.csv`):
+
+| effect | mixer | frames 1-30 | frames 31-60 (89) | calibration score | spectrum distance | mean-frame PSNR |
+|---|---|---|---|---|---|---|
+| fire | {L, S} | +0.36 [+0.24, +0.47] | +0.43 [+0.35, +0.52] | -0.016 (tie) | -0.081 [-0.096, -0.060] | +0.07 (tie) |
+| fire | {L, S, F} | +0.44 [+0.25, +0.62] | +0.76 [+0.59, +0.94] | -0.077 (tie) | -0.120 [-0.149, -0.082] | +0.01 (tie) |
+| fire | {L, S, F, X} | +1.94 [+1.70, +2.18] | +3.07 [+2.57, +3.59] | -0.155 [-0.232, -0.081] | -0.118 [-0.145, -0.082] | -0.02 (tie) |
+| smoke | {L, S} | +0.57 [+0.43, +0.74] | +0.42 [+0.33, +0.52] | +0.028 (tie) | -0.062 [-0.079, -0.045] | +0.01 (tie) |
+| smoke | {L, S, F} | +0.65 [+0.49, +0.83] | +0.62 [+0.49, +0.74] | +0.017 (tie) | -0.079 [-0.104, -0.052] | +0.05 (tie) |
+| smoke | {L, S, F, X} | +0.67 [+0.51, +0.85] | +0.80 [+0.65, +0.96] | +0.043 (tie) | -0.081 [-0.108, -0.051] | +0.08 (tie) |
+| explosion | {L, S} | +0.82 [+0.63, +1.01] | +0.19 [+0.10, +0.28] | +0.057 (tie) | +0.043 [+0.008, +0.073] | +0.22 (tie) |
+| explosion | {L, S, F} | +0.90 [+0.71, +1.09] | +0.27 [+0.18, +0.37] | +0.064 (tie) | +0.052 [+0.018, +0.081] | +0.19 (tie) |
+| explosion | {L, S, F, X} | +1.01 [+0.90, +1.11] | +0.38 [+0.28, +0.49] | **+0.091 [+0.006, +0.168]** | +0.081 [+0.034, +0.118] | +0.20 (tie) |
+
+{L, S, F, X} is worse in a rule measure (the explosion's calibration score), so the choice by the rule is **{L, S, F}**
+(mean first-second gain +0.66 dB over the three effects; {L, S} +0.58). Committed before the test.
+
+**Test, once** ({L, S, F}, version `60da0bd0...`; `g_extras_g4a_test.csv`):
+
+| effect | frames 1-30 | frames 31-60 (89) | calibration score | spectrum distance | \|ln motion ratio\| | coverage L1 | mean-frame PSNR |
+|---|---|---|---|---|---|---|---|
+| fire | +0.68 [+0.53, +0.82] | +0.99 [+0.76, +1.22] | -0.044 (tie) | -0.128 [-0.149, -0.105] | +0.037 (tie) | 0.000 (tie) | +0.16 (tie) |
+| smoke | +0.63 [+0.57, +0.69] | +0.52 [+0.49, +0.55] | +0.017 (tie) | -0.082 [-0.109, -0.054] | +0.079 [+0.069, +0.090] | 0.000 (tie) | +0.07 (tie) |
+| explosion | **+1.02 [+0.80, +1.25]** | +0.37 [+0.32, +0.43] | **+0.080 [+0.020, +0.139]** | +0.048 [+0.017, +0.074] | +0.028 (tie) | -0.001 (tie) | +0.31 [+0.16, +0.44] |
+
+(Means: the explosion's first second 19.68 dB with v1's renderer, 20.70 dB with the mixer.)
+
+- **The rule:** the explosion's first second improves with an interval above zero (met), but the explosion's endless
+  calibration score is worse (not met). **Not kept.**
+- **What the mixer draws with** (`g_extras_g4a_mixers.csv`; mean weights over contexts): the simulator's renderer 0.51
+  to 0.63, the learned renderer 0.16 to 0.46, the field shader 0.16 to 0.28, per colour channel. One mixer serves every
+  effect, so every module is drawn mostly by the simulator's own look; "modules match in look" in that sense, not
+  measured further.
+- **Why the explosion's endless frames get worse while its tracking gets better:** the mixer is trained for squared error
+  against runs it cannot follow exactly, so it averages its renderers into a slightly smoother, calmer picture. Motion
+  falls by 5 to 8% on every effect (test motion ratio: fire 0.86 to 0.79, smoke 0.82 to 0.75, explosion 0.90 to 0.85),
+  and the explosion's detail spectrum moves away from the real one. On fire and smoke the detail spectrum moves closer
+  (-0.08 to -0.13), the same direction G1's mixer took them.
+- **Without its bias** the mixer cannot paint haze (amendment 2): the stopped first run "gained" 6 dB on fire by a haze
+  that made the empty background count as active pixels. Active PSNR alone would have kept that mixer.
+- **For v2:** nothing from G4a by the rule. A per-effect use (the mixer for fire and smoke, where no measure is worse
+  on test, and v1's renderer for the explosion) would need its own validation and a new test; the test above cannot
+  choose it.
+
+### 10.8 G5a: results
+
+**In one line:** the critic tells the model's first second from a real one (held-out AUC 0.84 on fire, 1.00 on smoke and
+explosions), but that does not tell which candidate makes the better shard: with 4 candidates the shard it picks scores
++0.057 (tie) on fire, **+0.110 [+0.041, +0.181] (worse)** on smoke and -0.089 (tie) on explosions against the runtime's own
+choice, so **no effect passes validation, nothing goes to test, and G5a is not kept.**
+
+Critics (`g_extras_g5a_critics.csv`; `g5a-train`, 10 minutes): fire `cc0deb46...`, smoke `afe430ba...`, explosion
+`8745fbaa...`; AUC on the mixer's own training windows (held out from the Gaussians' fit) 0.85, 1.00, 1.00.
+
+Validation (10 settings x 4 slots x 8 candidates, every candidate's whole shard scored; `g_extras_g5a_val.csv`; the
+policies read the same rows). Calibration score of the shard played (lower is better), mean over settings of the mean
+over slots, and the difference from the runtime's choice paired over settings:
+
+| effect | runtime (candidate 0) | critic, K = 2 | critic, **K = 4** | critic, K = 8 | oracle, K = 4 | mean candidate |
+|---|---:|---:|---:|---:|---:|---:|
+| fire | 0.900 | 0.899 | 0.957 | 1.007 | 0.548 | 0.978 |
+| smoke | 0.587 | 0.640 | 0.697 | 0.686 | 0.401 | 0.599 |
+| explosion | 0.798 | 0.746 | 0.709 | 0.695 | 0.546 | 0.852 |
+
+| effect | critic K = 4 - runtime: score | spectrum distance | \|ln motion ratio\| | coverage L1 | mean-frame PSNR | rule |
+|---|---|---|---|---|---|---|
+| fire | +0.057 [-0.125, +0.242] (tie) | +0.011 (tie) | +0.036 (tie) | 0.000 (tie) | +0.06 (tie) | no |
+| smoke | **+0.110 [+0.041, +0.181]** | +0.019 (tie) | +0.026 (tie) | +0.004 [+0.001, +0.008] | -0.82 [-1.50, -0.19] | no |
+| explosion | -0.089 [-0.253, +0.062] (tie) | +0.017 (tie) | -0.026 (tie) | -0.010 (tie) | +0.80 (tie) | no |
+
+- **Not a null by the pilot gate** (the explosion's mean score falls), **but no effect passes the validation rule**, so
+  no test was run.
+- **The critic does not rank candidates by what the test measures.** Within a slot, the rank correlation of the critic's
+  probability with the shard's score is -0.01 on fire (none), +0.26 on smoke (it prefers the worse shards) and -0.43 on
+  explosions (it prefers the better ones, too weakly to show over 10 settings). An AUC of 1.00 says every model window
+  is far from every real one (the learned renderer's look alone separates them; REPORT §6.4), so "most real-looking"
+  ranks candidates along what tells model from real, not along what makes one shard closer to a real run than another.
+- **Fire forgets its start within a second** (REPORT §6.1): its 6 s shard is decided by the seed's noise after the first
+  second the critic reads, so no pick from that second can help much.
+- **The oracle is a ceiling, not a target:** picking the best of 4 by the very statistic being scored gains 0.19 to 0.35,
+  most of it selection on the noise of one 6 s sample.
+- **Cost, had it passed:** (K - 1) x 30 = 90 extra frames of the runtime per 6 s shard, 70 to 82 ms at 0.78 to 0.91 ms
+  per frame (REPORT §6.7), that is 0.39 to 0.46 ms per frame on average (+45 to +55%), plus 4 critic evaluations
+  (§10.10).
+- **For v2:** nothing.
+
+### 10.9 G5b: results
+
+**In one line:** mixing in the coarse solver's update helps smoke follow a tracked run a little (+0.40 dB at frame 30,
++0.28 dB at frame 60 with a fixed 10% share) but every candidate makes the endless statistics worse, and the trained
+mixers also track worse, so **G5b stops at validation; no test was run; not kept.**
+
+Validation (smoke, 10 settings; candidate - v1 paired over settings; `g_extras_g5b_pilot.csv` (the blends alone, the
+pilot) and `g_extras_g5b_val.csv` (all candidates; the blends' rows are the pilot's, recomputed identically)):
+
+| candidate | frame 30 | frame 60 | calibration score | spectrum distance | \|ln motion ratio\| | mean-frame PSNR | motion ratio (v1 0.84) |
+|---|---|---|---|---|---|---|---:|
+| blend a = 0.1 | +0.40 [+0.24, +0.58] | +0.28 [+0.11, +0.45] | **+0.060 [+0.033, +0.086]** | +0.025 [+0.008, +0.043] | +0.042 [+0.020, +0.061] | -0.26 [-0.40, -0.14] | 0.80 |
+| blend a = 0.25 | +0.21 [+0.00, +0.40] | +0.07 (tie) | **+0.141 [+0.087, +0.192]** | +0.044 [+0.014, +0.076] | +0.100 [+0.058, +0.140] | -0.57 [-0.83, -0.32] | 0.76 |
+| blend a = 0.5 | -0.80 [-1.31, -0.35] | -0.53 (tie) | **+0.257 [+0.171, +0.337]** | +0.072 [+0.040, +0.106] | +0.186 [+0.118, +0.252] | -0.68 [-1.11, -0.27] | 0.70 |
+| m1 (one step from the truth) | -1.10 [-1.39, -0.79] | -1.03 [-1.52, -0.51] | -0.055 (tie) | **+0.071 [+0.039, +0.105]** | -0.057 [-0.091, -0.021] | **-1.52 [-2.18, -0.84]** | 0.91 |
+| m2 (m1 + own rollouts) | -1.78 [-2.50, -1.05] | -1.98 [-2.95, -1.04] | **+1.251 [+0.915, +1.601]** | -0.025 (tie) | +0.793 [+0.655, +0.931] | **-6.37 [-7.09, -5.70]** | 0.39 |
+
+- **Pilot:** the 10% blend gains at frames 30 and 60, so G5b was not a null by its gate; it went on to the mixers.
+- **The choice rule finds nothing:** every candidate is worse in at least one endless statistic, so none is tested.
+- **Why the blends track better and look worse:** the coarse solver is the slower dynamics (on its own, without a
+  detail layer, its smoke moves at 0.45 of real, REPORT §6.5); a share of its update pulls the state towards a calmer
+  run, which a pixel measure rewards after the chaos horizon, and costs motion and detail (motion ratio 0.84 to 0.80,
+  0.76 and 0.70).
+- **Why the trained mixers fail:** one step from the truth, m1 learns to scale the stepper's velocity update up by 14%
+  and to take 5 to 7% of the solver's heat and soot (training rmse 0.00785 against the stepper's 0.00873), which
+  compounds over a rollout: tracking falls by 1 dB and the average picture by 1.5 dB. The own-rollout pass (m2) fits
+  targets that chaos has already decorrelated (rmse 0.039, five times the one-step error) and learns to damp the
+  velocity (weights 0.72 and 0.41 on the stepper's u and v updates): the smoke slows to a motion ratio of 0.39 and fills
+  the frame (mean-frame PSNR -6.4 dB), the failure of a single long rollout (REPORT §6.6) brought on early.
+- **For v2:** nothing. The drift REPORT §6.4 saw in smoke after a few seconds is a trade against motion here, as it was
+  for G1's smoke; the runtime's shards (REPORT §6.6) and G2b's prior (§7) already bound it.
+
+Mixers (`g_extras_g5b_mixers.csv`): m1 `28186895...` (rate 0.2 chosen on the training rows, the largest tried), m2
+`9ad51b95...`.
+
+### 10.10 Costs
+
+Thread CPU time per 128 x 128 frame (or per call), the least of 15, on the reference code at baseline ISA, at load 3.2
+to 3.4 from other agents: **provisional upper bounds** (`g_extras_cost.csv`; the runtime's optimised code is about 10
+times faster, REPORT §6.7):
+
+| part | fire | smoke | explosion |
+|---|---:|---:|---:|
+| reference step (stepper and detail layer) | 5.8 ms | 5.6 ms | 4.7 ms |
+| learned renderer (v1) | 3.5 ms | 3.4 ms | 3.3 ms |
+| simulator's renderer | 0.7 ms | 1.9 ms | 1.9 ms |
+| field shader | 0.4 ms | 0.4 ms | 0.5 ms |
+| G4a mixing, {L, S, F} (after the three experts) | 2.3 ms | 2.3 ms | 2.2 ms |
+| G4a in all, {L, S, F}, against the learned renderer alone | +3.4 ms | +4.6 ms | +4.5 ms |
+| G5a critic, per candidate (statistics of 30 frames and the mixer) | 28 ms | 28 ms | 28 ms |
+| G5b mixed step (stepper, coarse solver, mixer, detail layer) | | 8.5 ms (+2.9 ms) | |
+| G5b coarse solver step alone | | 0.33 ms | |
+
+- **G5a per 6 s shard, at K = 4:** 90 extra runtime frames (70 to 82 ms at 0.78 to 0.91 ms per frame, REPORT §6.7) plus
+  4 critic evaluations (113 ms here, most of it 30 two-dimensional FFTs per candidate in `metrics::stats`): about
+  190 ms per shard, 1.0 ms per frame on average.
+- **Study CPU:** 1.05 CPU-hours of study steps (thread CPU logged per step in `NEURALVFX_DATA/g/extras/logs`: G4a 0.27 h
+  including the stopped run, G5a 0.64 h, G5b 0.14 h), about 1.5 with builds, tests and quick checks; budget 6. One
+  thread at `nice 19`.
+
+Reproduce (data under `NEURALVFX_DATA`, default `/root/nvfx-data`; every eval step resumes from its CSV):
+
+```sh
+B=build/nvfx_g_extras
+$B g4a-pilot && $B g4a-rows && $B g4a-train && $B g4a-eval --split val
+$B g4a-eval --split test --method mix_learned_sim_shader      # once
+$B g5a-train && $B g5a-eval --split val                        # no effect passed: no test
+$B g5b-eval --split val --method pilot && $B g5b-train && $B g5b-eval --split val   # nothing chosen: no test
+$B bench && $B summary                                         # g_extras_cost.csv, g_extras_summary.md
+```
+
+### 10.11 Decisions
+
+| design | rule (§10.2 to §10.4) | result | decision |
+|---|---|---|---|
+| G4a one renderer | the explosion's first-second active PSNR improves on test (interval above zero), no effect worse in tracking (frames 1-30, 31-60), endless score or mean-frame PSNR | explosion first second **+1.02 [+0.80, +1.25] dB**; but the explosion's endless calibration score **+0.080 [+0.020, +0.139]** (worse); fire and smoke no measure worse | **not kept** |
+| G5a shard critic | per effect: endless calibration score falls (interval below zero) and no statistic worse, on validation then test | K = 4 on validation: fire +0.057 (tie), smoke **+0.110 [+0.041, +0.181]** (worse), explosion -0.089 [-0.253, +0.062] (tie); no test | **not kept** |
+| G5b stepper + coarse solver | smoke's active PSNR at frames 30 and 60 improve on test (intervals above zero), endless statistics not worse | best tracking (10% blend): +0.40 [+0.24, +0.58] and +0.28 [+0.11, +0.45] dB on validation, but its calibration score +0.060 [+0.033, +0.086]; every candidate worse somewhere; no test | **not kept** (stopped at validation) |
+| G6 one DCM-fine for every effect | as G1 | not run: G1 failed its rule in §6 and in the round-2 retry | **not run** |
+
+**What this says.** Each design traded the endless look for a gain on a narrower measure: G4a and G5b for pixel
+distance to a run they cannot follow exactly (the picture gets calmer: G4a's motion ratio falls 5 to 8%, the G5b
+blends' 4 to 16%),
+G5a for "real-looking" in a sense (separable from real) that does not order the model's own shards. The rules caught all
+three, as G1's rule caught smoke's motion. **Nothing from S8 goes into v2.** The one positive finding worth keeping in
+mind for a later stage: the simulator's own renderer draws the explosion's first frames about 1 dB better than the
+learned renderer (pilot, §10.7); a per-effect use of the renderer mixer for fire and smoke would need its own
+validation and test.
+
 ## 11. v2: meeting in the middle (stage S6)
 
 Status: **v2 rollout effects assembled and frozen** (10 October 2026), with fire's prior against drift in the runtime
@@ -1760,6 +2088,7 @@ frame every 16th frame). v2 holds every part that passed its own rule, and nothi
 | DCM-fine (G1), G1 retry, G1c | §6 | fails twice | no |
 | denoiser contexts (G2a), start points (G2c) | §7 | stopped | no |
 | the run codec (G3a/b) | §8 | wins only at low quality | a separate use, not part of an effect |
+| one renderer (G4a), shard critic (G5a), stepper plus solver (G5b) | §10 | not kept: each fails on the endless statistics | no |
 
 The combination row was decided with the G3c protocol (`nvfx_f2 g3c --base DIR --tag v2c`; rows `v2c_v1` and `v2c_b6`
 in `results/compression/f2_g3c*.csv`): validation first (both tied with v1 on every statistic), then the test once.
