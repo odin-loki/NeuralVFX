@@ -122,7 +122,9 @@ wins here are the large blended feature volumes of the frame models, the mostly 
 The core is S1, S2, S3 and S6. If time runs short, the cuts are S8, then S5's extension beyond fire, then G3b, then
 S7's speed targets (the final video stays).
 
-**Done so far:** S0, S1, S2 (§6) and S5 on fire (§7).
+**Done so far:** S0, S1, S2 (§6) and S5 on fire (§7); round 2 of study G (10 October 2026): the G1 retry passes on no
+effect (§6.10), G2a stops in the nested search (G2.10), G2b is stopped on smoke and skipped for explosions (G2.11). From
+study G, only fire's prior against drift (G2b, round 1) goes to stage S6.
 - **S1:** the three optimisation branches and the coder are merged. The fireball runs at 24 ms per frame at
   1280 x 720 on 4 threads against 143 ms before, measured in the same session (`docs/COMPOSE.md` §7.1), and study F
   is in `docs/REPORT.md` §3. The report's cost tables were re-measured in one session; the rollout effects take 0.8 to
@@ -431,12 +433,13 @@ re-times). Effects are decided one by one: a pass needs no other effect.
 - **Fresh test seeds** (G1's 900000, 910000 and 920000 + i are spent): seed base **6,900,000**: real runs
   6,900,000 + i, the floor (another real run) 6,910,000 + i, shards 6,920,000 + i, at B's 10 held-out settings.
   Tracking: the salt-2 runs **8 to 15** (d-eval and G1 used 0 to 7), from their true state; reported, not in the rule.
-- **G1c again**, with the same fresh seeds and the retried generators: the first 30 frames of a cold start (coarse state
-  only) against v1's usual start; §3's rule per effect: the calibration score ties or beats it (interval not above zero).
+- **G1c again**, with the same fresh seeds and the retried generators: the first 30 frames of a cold start (coarse
+  state only) against v1's usual start; §3's rule per effect: the calibration score ties or beats it (interval not
+  above zero).
 
-Commands (`nvfx_dcm`, 2 threads, `nice 10`): `search-fine --effect E --drop-groups prev --prefix g_fine2 --max-rows 100000
---data DIR`, then `train-fine` and `eval-fine` with the same options plus `--rule-selection --test-base 6900000
---track-first 8`, then `fine-summary --prefix g_fine2 --rule-selection`.
+Commands (`nvfx_dcm`, 2 threads, `nice 10`): `search-fine --effect E --drop-groups prev --prefix g_fine2
+--max-rows 100000 --data DIR`, then `train-fine` and `eval-fine` with the same options plus `--rule-selection
+--test-base 6900000 --track-first 8`, then `fine-summary --prefix g_fine2 --rule-selection`.
 
 #### Results of the retry
 
@@ -448,7 +451,8 @@ and explosions find no admissible generator, and smoke's only admissible one (ne
 Tables: `results/experiments/g_fine2_*.csv`, collected in `g_fine2_summary.md`. The machine was busy throughout (load 6
 to 13 from other agents); nothing here depends on time.
 
-**Search** (nested held-out bits per active pixel over the 48 training runs; same seed and settings as G1, without `prev`):
+**Search** (nested held-out bits per active pixel over the 48 training runs; same seed and settings as G1, without
+`prev`):
 
 | effect | G1 | retry | retry's global #0 (cost model) |
 |---|---:|---:|---|
@@ -475,12 +479,13 @@ effect, `g_fine2_val_rule.csv`):
 - The trade-off is the same on every effect: the generators that change the detail enough to improve its spectrum
   clearly also smooth it a little (fire, smoke: 1 to 7% less motion) or let it drift from the coarse state
   (explosions without a lock); the generators that keep motion and tracking change the detail hardly at all. Smoke's
-  admissible generator is 0.92 A + 0.02 A_sl + 0.04 r_up A before v1's lock, with about a twentieth of G1's smoke spectrum gain.
-- **The rule is strict at this resolution.** v1 and the generator share the stepper and the seeds, so their differences
-  are consistent across settings, and intervals over 10 settings exclude zero for less than 1% of motion or 0.01 dB. G1's
-  own released generators, judged on their validation rows by this rule (a scratch recomputation), would all have
-  been inadmissible too: fire's \|ln motion\| +0.055 [+0.030, +0.073] (although its test then tied, +0.009), smoke's
-  +0.143, and explosions' spectrum a tie.
+  admissible generator is 0.92 A + 0.02 A_sl + 0.04 r_up A before v1's lock, with about a twentieth of G1's smoke
+  spectrum gain.
+- **The rule is strict at this resolution.** v1 and the generator share the stepper and the seeds, so their
+  differences are consistent across settings, and intervals over 10 settings exclude zero for less than 1% of motion
+  or 0.01 dB. G1's own released generators, judged on their validation rows by this rule (a scratch recomputation),
+  would all have been inadmissible too: fire's \|ln motion\| +0.055 [+0.030, +0.073] (although its test then tied,
+  +0.009), smoke's +0.143, and explosions' spectrum a tie.
 - The grain (tau = 0.5), tried once for smoke's admissible generator, makes it worse on spectrum (+0.33) and tracking
   (-1.8 dB at 8 frames): inadmissible, as in G1.
 
@@ -518,7 +523,9 @@ What this says, without touching the test again:
 Status: **done for fire** (9 October 2026). The prior against drift (G2b) is kept: it passed validation and its one
 test. Diffusion start points (G2c) are stopped. The diffusion contexts (G2a) are not redundant by the first check;
 their decision waits for stage S2's nested search, which is not on main yet. Smoke and explosion are not started: that
-is a later decision. Rules in G2.3 were fixed before any result; results are in G2.4 to G2.9.
+is a later decision. Rules in G2.3 were fixed before any result; results are in G2.4 to G2.9. **Round 2** (10 October
+2026): G2a is decided in the nested search and stops (G2.10); G2b is stopped on smoke and skipped for explosions
+(G2.11); decisions in G2.12.
 
 ### G2.1 The denoiser
 
@@ -847,7 +854,7 @@ runs:
 
 ### G2.11 G2b beyond fire (round 2)
 
-Status: **rules fixed** (10 October 2026), before the smoke denoiser was trained.
+Status: **done** (10 October 2026). The rules were fixed and committed before the smoke denoiser was trained.
 
 - **Explosions are skipped.** A 3 s one-shot effect plays 90 frames from its start and ends; the question G2b answers
   (does one rollout stay alive for a minute without restarts) does not arise, and G1 already noted that a 3-second
@@ -865,3 +872,70 @@ Status: **rules fixed** (10 October 2026), before the smoke denoiser was trained
   if a candidate passed: B's held-out settings 1 and 2, real runs 2,950,000 + i, model 2,970,000 + i (not used for
   smoke before). Shards are reported as a reference. `nvfx_experiment g-prior --effects smoke` and `g-prior-test`;
   tables `results/experiments/g_diff_smoke_*.csv`.
+
+**Training.** 16,800 training states recorded in 318 s and 1,680 validation states in 28 s (two threads); 10,000 steps of
+batch 32 in 4,623 s on two threads at `nice 10` (0.46 s per step on a machine loaded by other agents to 5 to 13): about
+2.6 CPU-hours. EMA loss on 256 validation states (`g_diff_smoke_train.csv`), fire's for comparison:
+
+| step | training loss | t = 50 | t = 200 | t = 500 | t = 800 |
+|---:|---:|---:|---:|---:|---:|
+| 500 | 0.417 | 0.520 | 0.190 | 0.098 | 0.063 |
+| 2,000 | 0.068 | 0.268 | 0.109 | 0.054 | 0.027 |
+| 6,000 | 0.049 | 0.142 | 0.073 | 0.035 | 0.015 |
+| 10,000 | 0.045 | 0.133 | 0.069 | 0.033 | 0.014 |
+| fire, 10,000 | 0.050 | 0.158 | 0.076 | 0.035 | 0.014 |
+
+The curve is flat over the last 2,000 steps, as fire's was. The released denoiser is
+`NEURALVFX_DATA/g/round2/diff/smoke.ddpm`, version `8362a0c347e2da0097d014cc836f7e52b44311a31ef3751124e37a2da0a1cbff`
+(`g_diff_smoke_released.csv`), the same network as fire's (391,748 weights, 89.5 million multiply-adds per pass).
+
+**Result in one line:** on smoke the prior against drift **does not pass validation** (prior - none +1.58 [-0.26, +4.36],
+a tie, worse on average), so it is stopped and not tested. Smoke without a prior also drifts (mean detail score 8.3 in
+tuning against the shards' 0.48), but at one of the two settings it dies after about 30 s with or without the prior.
+
+G2b on smoke (`g_diff_smoke_prior.csv`, `g_diff_smoke_decisions.csv`), mean detail score over the 12 (setting, window)
+pairs of one 60 s rollout at validation settings 1 and 2:
+
+| method | tuning seeds | decision seeds |
+|---|---:|---:|
+| no prior | 8.278 | 1.359 |
+| runtime shards (6 s) | 0.480 | 0.469 |
+| best prior, also the best with N = 16: N = 16, t = 100, beta = 0.25 | **0.647** | 2.937 |
+| next: N = 16, t = 100, beta = 0.5 / N = 16, t = 20, beta = 0.5 | 0.692 / 0.698 | |
+
+| decision seeds | difference | rule | decision |
+|---|---|---|---|
+| prior - no prior | +1.58 [-0.26, +4.36] (tie) | interval below zero, at most 0.5 ms per frame (cost 0.25 ms) | **stop** |
+| prior - shards | +2.47 [+0.38, +5.29] | reference | |
+| no prior - shards | +0.89 [+0.15, +1.93] | reference | |
+
+- **Where it fails.** At validation setting 1 (0.67 / 0.33 / 0.24) the prior helps on the decision seeds too (its
+  windows score 0.23 to 0.49, where the run without it reaches 2.31 in its last window). At setting 2 (0.11 / 0.42 /
+  0.89: faint, turbulent smoke) the run without the prior almost stops for one window (20 to 30 s, motion ratio 0.07)
+  and then moves again, while with the prior it stops for 30 s (20 to 50 s, motion ratio 0.00 to 0.06; window score up
+  to 16.2 against 1.2). Tuning saw the opposite at that setting (no prior: dead from 30 s, score 30.9; the prior 0.7 to
+  1.2). With two settings and six windows each, which seed freezes decides the mean, and the interval says so: a tie.
+- **What differs from fire.** Fire's prior brought a freezing rollout back to a moving fire at both settings and on
+  both seed sets (G2.6). Smoke's runs freeze at the faint, turbulent setting with or without it. A plausible reading,
+  not tested here: faint smoke is rare among the training states, so a denoiser at t = 100 has little to pull it
+  towards. The best prior is also the gentlest one (beta = 0.25).
+- Explosions were not run (see above); `g-prior --effects explosion` refuses.
+- **Cost (provisional).** One pass of the smoke denoiser, `nvfx_dcm ddpm-time --effect smoke --dir
+  NEURALVFX_DATA/g/round2/diff --core 2` (and `--core 3`), 200 passes on one pinned core at load 5.2 (busy, so an upper
+  bound): least thread CPU time 3.80 ms, median 3.94 and 5.16 ms. The decision used the run's own measurement, 4.0 ms
+  (0.25 ms per frame at N = 16); the prior failed on drift, not on cost.
+
+### G2.12 Decision, round 2
+
+| use | effect | test | result | met? |
+|---|---|---|---|---|
+| G2a contexts | fire | beat the hand-made contexts in the nested search beyond the search's seed noise (G2.10's three conditions) | 9 of 9 pairings below zero and better than the plain floor (-0.032), but the three-seed gain (-0.046) is smaller than sigma (0.069) | **no: stop** |
+| G2b prior | smoke | drift falls on validation, interval below zero, at most 0.5 ms per frame | +1.58 [-0.26, +4.36], a tie | **no: stop** (not tested) |
+| G2b prior | explosion | (a 3 s one-shot effect has no long run to drift in) | not run | skipped |
+| G2b prior | fire | (G2.9) | kept, tested once | **yes** (round 1) |
+
+**Decision:** across both rounds, the only diffusion use that survives is fire's prior against drift (G2b, round 1),
+which ties the runtime's shards and buys continuity for 0.4 ms per frame and 1.5 MB. The diffusion contexts come
+closer than CameraDetector's ever did (they help the mixer's bits on every comparison) but not by more than the
+search's own randomness, and what they help is the predicted uncertainty, which generation at tau = 0 does not use.
+The smoke prior is stopped: it rescues one setting and not the other.

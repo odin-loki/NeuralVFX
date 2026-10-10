@@ -1,0 +1,2 @@
+effect,file,version_sha256,parameters,multiply_adds_per_pass,steps,batch,train_seconds,threads,train_states,val_states
+smoke,NEURALVFX_DATA/g/round2/diff/smoke.ddpm,8362a0c347e2da0097d014cc836f7e52b44311a31ef3751124e37a2da0a1cbff,391748,89.5e6,10000,32,4623,2,16800,1680
