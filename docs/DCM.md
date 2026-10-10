@@ -1,8 +1,8 @@
 # Study G: diffusion-context mixing for generating effects
 
-Status: **plan** (9 October 2026), with G1 and G1c decided (stage S2, §6); round 2 (10 October 2026): the G1 retry
-(§6.10), G2a in the nested search (G2.10) and G2b for smoke (G2.11), each with its rules fixed first. Each section
-turns into a result when its stage finishes. Audience: owner, research, dev.
+Status: **plan** (9 October 2026), with G1 and G1c decided (stage S2, §6); round 2 done (10 October 2026): the G1
+retry passes on no effect (§6.10), G2a stops in the nested search (G2.10), G2b is stopped on smoke (G2.11), each with
+its rules fixed first. Each section turns into a result when its stage finishes. Audience: owner, research, dev.
 
 ## 1. The algorithm and where it comes from
 
