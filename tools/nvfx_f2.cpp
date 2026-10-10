@@ -617,7 +617,12 @@ std::string ratio_cell(const Ratio& r) {
 
 // A short label for a network configuration ("G32 4-bit", "G48 VQ 8 bits / 8 ch, rate 1e-4").
 std::string short_label(const std::string& config) {
-  const Config cf = parse_config(config);
+  Config cf;
+  try {
+    cf = parse_config(config);
+  } catch (const std::exception&) {
+    return config;  // a rescored file (e.g. study A's own models)
+  }
   std::string s = cf.h.arch == Arch::grid ? std::format("G{}", cf.h.grid) : std::string("conv");
   if (cf.h.arch == Arch::grid && cf.h.channels != 8) s += std::format(" C{}", cf.h.channels);
   if (cf.h.grid_t != 16) s += std::format(" T{}", cf.h.grid_t);
@@ -695,6 +700,7 @@ void write_figure(const fs::path& path, const std::string& title, const Family& 
       lx += 26 + 6.2 * static_cast<double>(name.size());
     }
     for (const auto& [k, p] : nets) {
+      if (short_label(k) == k) continue;  // rescored copies are not drawn twice
       const double kb = mean_at(p->b.at(panel == 0 ? "stored" : "packed"), idx) / 1024, q = mean_at(p->q, idx);
       o << std::format("<circle cx=\"{:.1f}\" cy=\"{:.1f}\" r=\"4.5\" fill=\"{}\" stroke=\"#fcfcfb\" stroke-width=\"2\"/>\n", X(kb), Y(q), slot[1]);
       o << std::format("<text x=\"{:.1f}\" y=\"{:.1f}\" font-size=\"10\" fill=\"{}\">{}</text>\n", X(kb) + 7, Y(q) + 3.5, ink, short_label(k));
