@@ -5,12 +5,16 @@
 //   ladder     the run codec over a ladder of settings, every run of a split; rows appended per run (resumable)
 //   baselines  flipbooks (BC3, raw RGBA; as stored and packed by the model-file coder) and video codecs through ffmpeg,
 //              every run of a split; rows appended per run (resumable)
-//   summary    curves, the validation-chosen frontier, paired comparisons on test, CSVs and the figure
-//   timing     decode time per frame and memory of the run codec on one pinned core
+//   g3b        G3b: study A's clips, each frame model's output plus a coded residual, against the same baselines
+//   summary    curves, the validation-chosen frontier, paired comparisons on test, CSVs and the figures
+//   timing     decode time per frame and memory of the run codec and of the video decoders on one pinned core
+//   probe-video  one validation run through every video codec (a sanity check)
 //
 // Splits (docs/DCM.md §4): val = the 10 validation settings of study G with seeds 800000 + i; test = study B's 10 held-out
-// settings with seeds 900000 + i and study D's 8 salt-2 tracking runs. Runs: 240 frames after a warm-up (explosions: 89
-// frames after the first), the real run rendered by the simulation's own renderer at 128 x 128.
+// settings with seeds 900000 + i (b0..b9), then study D's 8 salt-2 tracking runs (d0..d7; --max-runs 10 leaves them out).
+// Runs: 240 frames after a warm-up (explosions: 89 frames after the first), the real run rendered by the simulation's own
+// renderer at 128 x 128. Data: $NEURALVFX_DATA (default /root/nvfx-data); the v1 effects from experiments/models/d, rows
+// and logs in g3/. The full sequence of commands is in docs/DCM.md §8.
 #include "args.hpp"
 #include "video_pipe.hpp"
 
@@ -49,6 +53,15 @@ using namespace nfx;
 namespace {
 
 constexpr int kSize = 128, kRes = 32;
+
+// The data root: $NEURALVFX_DATA, else /root/nvfx-data. The study's data and logs live in <root>/g3 (outside git).
+fs::path data_root() {
+  if (const char* d = std::getenv("NEURALVFX_DATA"); d && *d) return d;
+  return "/root/nvfx-data";
+}
+std::string g3_dir() { return (data_root() / "g3").string(); }
+std::string models_dir() { return (data_root() / "experiments" / "models" / "d").string(); }
+std::string work_dir() { return (data_root() / "g3" / "work").string(); }
 
 std::size_t sz(int v) { return static_cast<std::size_t>(v); }
 
@@ -432,8 +445,8 @@ std::string ladder_row(sim::Effect e, const std::string& split, const std::strin
 }
 
 void cmd_ladder(const tools::Args& a) {
-  const fs::path models = a.str("models", "/root/nvfx-data/experiments/models/d");
-  const fs::path out = a.str("out", "/root/nvfx-data/g3");
+  const fs::path models = a.str("models", models_dir());
+  const fs::path out = a.str("out", g3_dir());
   const std::string split = a.str("split", "val"), set = a.str("set", "val");
   const int threads = a.i("threads", 1), max_runs = a.i("max-runs", 1000);
   const bool ssim = !a.flag("no-ssim");  // validation chooses by active PSNR only
@@ -584,8 +597,8 @@ std::vector<VideoConfig> video_configs(const std::string& list) {
 }
 
 void cmd_baselines(const tools::Args& a) {
-  const fs::path out = a.str("out", "/root/nvfx-data/g3");
-  const fs::path work = a.str("work", "/tmp/claude-0/-home-user/7f3ed069-4de9-5eae-b560-587577dc6cd8/scratchpad/s4/video");
+  const fs::path out = a.str("out", g3_dir());
+  const fs::path work = a.str("work", work_dir());
   const std::string split = a.str("split", "test"), what = a.str("what", "flipbook");
   const std::string runs_only = a.str("runs");  // e.g. "v0,v1" (a subset, for the choice of video formats)
   const auto vcfg = video_configs(a.str("codecs", "x264,x265,vp9,vp9a,aom,svt"));
@@ -697,9 +710,9 @@ Clip model_clip(const fs::path& model, int frames) {
 }
 
 void cmd_g3b(const tools::Args& a) {
-  const fs::path exp = a.str("experiments", "/root/nvfx-data/experiments");
-  const fs::path out = a.str("out", "/root/nvfx-data/g3");
-  const fs::path work = a.str("work", "/tmp/claude-0/-home-user/7f3ed069-4de9-5eae-b560-587577dc6cd8/scratchpad/s4/video");
+  const fs::path exp = a.str("experiments", (data_root() / "experiments").string());
+  const fs::path out = a.str("out", g3_dir());
+  const fs::path work = a.str("work", work_dir());
   const auto vcfg = video_configs(a.str("codecs", "x264_rgb,x265_444,vp9a,aom_444,svt"));
   const float round = a.f("round", 0.3f);
   const std::string model_cfg = a.str("model", "grid_m8");
@@ -899,27 +912,65 @@ struct Series {
 // categorical palette in fixed order (docs: dataviz reference palette), a legend and an end label per series.
 void write_svg(const fs::path& path, const std::vector<std::pair<std::string, std::vector<Series>>>& panels, const std::string& title, const std::string& note) {
   static const char* colors[8] = {"#2a78d6", "#eb6834", "#1baf7a", "#eda100", "#e87ba4", "#008300", "#6250d6", "#e34948"};
-  const double pw = 380, ph = 330, ml = 52, mr = 14, mt = 92, mb = 64, gap = 24;
   const auto np = static_cast<double>(panels.size());
-  const double W = ml + np * pw + (np - 1) * gap + mr, H = mt + ph + mb;
-  const double x0 = std::log10(30.0), x1 = std::log10(3e6), y0 = 10, y1 = 50;
+  const double pw = panels.size() == 1 ? 640 : 380, ph = 330, ml = 52, mr = 14, gap = 24, mb = 64;
+  const double W = ml + np * pw + (np - 1) * gap + mr;
+  // legend entries laid out in rows that fit the width; the note wrapped at spaces
+  const auto& lser = panels.front().second;
+  std::vector<std::pair<double, double>> lpos;  // x, y of each legend entry
+  {
+    double lx = ml, ly = 64;
+    for (std::size_t i = 0; i < lser.size() && i < 8; ++i) {
+      const double w = 24 + 6.6 * static_cast<double>(lser[i].label.size()) + 18;
+      if (lx + w > W - mr && lx > ml) {
+        lx = ml;
+        ly += 20;
+      }
+      lpos.emplace_back(lx, ly);
+      lx += w;
+    }
+  }
+  std::vector<std::string> note_lines;
+  {
+    const auto per_line = static_cast<std::size_t>((W - ml - mr) / 6.2);
+    std::string rest = note;
+    while (rest.size() > per_line) {
+      std::size_t cut = rest.rfind(' ', per_line);
+      if (cut == std::string::npos) cut = per_line;
+      note_lines.push_back(rest.substr(0, cut));
+      rest = rest.substr(cut + 1);
+    }
+    note_lines.push_back(rest);
+  }
+  const double note_h = 16.0 * static_cast<double>(note_lines.size() - 1);
+  for (auto& [x, y] : lpos) y += note_h;
+  const double mt = (lpos.empty() ? 64 + note_h : lpos.back().second) + 36;
+  const double H = mt + ph + mb;
+  double bmin = 1e12, bmax = 1;
+  for (const auto& pnl : panels) {
+    for (const auto& ser : pnl.second) {
+      for (const auto& pt : ser.pts) {
+        bmin = std::min(bmin, pt.first);
+        bmax = std::max(bmax, pt.first);
+      }
+    }
+  }
+  const double x0 = std::log10(std::min(30.0, 0.7 * bmin)), x1 = std::log10(std::max(1e4, 1.5 * bmax)), y0 = 10, y1 = 50;
   std::string o = std::format("<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"{:.0f}\" height=\"{:.0f}\" viewBox=\"0 0 {:.0f} {:.0f}\" "
                               "font-family=\"system-ui, -apple-system, Segoe UI, Helvetica, Arial, sans-serif\">\n",
                               W, H, W, H);
   o += std::format("<rect width=\"{:.0f}\" height=\"{:.0f}\" fill=\"#fcfcfb\"/>\n", W, H);
   o += std::format("<text x=\"{}\" y=\"24\" font-size=\"16\" font-weight=\"600\" fill=\"#0b0b0b\">{}</text>\n", ml, title);
-  o += std::format("<text x=\"{}\" y=\"44\" font-size=\"12\" fill=\"#52514e\">{}</text>\n", ml, note);
-  // legend (one row), from the first panel's series order
-  {
-    double lx = ml;
-    const auto& ser = panels.front().second;
-    for (std::size_t i = 0; i < ser.size() && i < 8; ++i) {
-      o += std::format("<line x1=\"{:.1f}\" y1=\"64\" x2=\"{:.1f}\" y2=\"64\" stroke=\"{}\" stroke-width=\"{}\"{}/>\n", lx, lx + 18, colors[i], ser[i].hero ? 3 : 2,
-                       ser[i].dashed ? " stroke-dasharray=\"5 3\"" : "");
-      o += std::format("<circle cx=\"{:.1f}\" cy=\"64\" r=\"4\" fill=\"{}\" stroke=\"#fcfcfb\" stroke-width=\"2\"/>\n", lx + 9, colors[i]);
-      o += std::format("<text x=\"{:.1f}\" y=\"68\" font-size=\"12\" fill=\"#0b0b0b\">{}</text>\n", lx + 24, ser[i].label);
-      lx += 24 + 7.0 * static_cast<double>(ser[i].label.size()) + 18;
-    }
+  for (std::size_t i = 0; i < note_lines.size(); ++i) {
+    o += std::format("<text x=\"{}\" y=\"{:.0f}\" font-size=\"12\" fill=\"#52514e\">{}</text>\n", ml, 44.0 + 16.0 * static_cast<double>(i), note_lines[i]);
+  }
+  // legend, from the first panel's series order
+  for (std::size_t i = 0; i < lpos.size(); ++i) {
+    const auto [lx, ly] = lpos[i];
+    o += std::format("<line x1=\"{:.1f}\" y1=\"{:.1f}\" x2=\"{:.1f}\" y2=\"{:.1f}\" stroke=\"{}\" stroke-width=\"{}\"{}/>\n", lx, ly, lx + 18, ly, colors[i],
+                     lser[i].hero ? 3 : 2, lser[i].dashed ? " stroke-dasharray=\"5 3\"" : "");
+    o += std::format("<circle cx=\"{:.1f}\" cy=\"{:.1f}\" r=\"4\" fill=\"{}\" stroke=\"#fcfcfb\" stroke-width=\"2\"/>\n", lx + 9, ly, colors[i]);
+    o += std::format("<text x=\"{:.1f}\" y=\"{:.1f}\" font-size=\"12\" fill=\"#0b0b0b\">{}</text>\n", lx + 24, ly + 4, lser[i].label);
   }
   for (std::size_t p = 0; p < panels.size(); ++p) {
     const double px = ml + static_cast<double>(p) * (pw + gap);
@@ -931,6 +982,7 @@ void write_svg(const fs::path& path, const std::vector<std::pair<std::string, st
       if (p == 0) o += std::format("<text x=\"{:.1f}\" y=\"{:.1f}\" font-size=\"11\" fill=\"#52514e\" text-anchor=\"end\">{:.0f}</text>\n", px - 6, Y(q) + 4, q);
     }
     for (const auto& [b, lab] : std::vector<std::pair<double, const char*>>{{100, "100 B"}, {1e3, "1 KB"}, {1e4, "10 KB"}, {1e5, "100 KB"}, {1e6, "1 MB"}}) {
+      if (std::log10(b) < x0 || std::log10(b) > x1) continue;
       o += std::format("<line x1=\"{:.1f}\" y1=\"{:.1f}\" x2=\"{:.1f}\" y2=\"{:.1f}\" stroke=\"#e6e5e1\" stroke-width=\"1\"/>\n", X(b), mt, X(b), mt + ph);
       o += std::format("<text x=\"{:.1f}\" y=\"{:.1f}\" font-size=\"11\" fill=\"#52514e\" text-anchor=\"middle\">{}</text>\n", X(b), mt + ph + 16, lab);
     }
@@ -1108,7 +1160,7 @@ void summary_g3b(const fs::path& dir, const fs::path& res, const std::string& fi
 }
 
 void cmd_summary(const tools::Args& a) {
-  const fs::path dir = a.str("data", "/root/nvfx-data/g3");
+  const fs::path dir = a.str("data", g3_dir());
   const fs::path res = a.str("results", "results/experiments");
   fs::create_directories(res);
   // 1. validation: the codec's frontier (written for the test run) and the variants
@@ -1292,6 +1344,7 @@ void cmd_summary(const tools::Args& a) {
               "Test: study B's 10 held-out settings, new seeds; 240 frames at 128 x 128 (explosions 89); means over the runs. Codec points: the frontier chosen on validation.");
   }
   summary_g3b(dir, res, a.str("figure-g3b", "docs/figures/g3b_rd.svg"));
+  if (fs::exists(dir / "timing.csv")) fs::copy_file(dir / "timing.csv", res / "g3_timing.csv", fs::copy_options::overwrite_existing);
   std::println("summary written to {}", res.string());
 }
 
@@ -1300,9 +1353,9 @@ void cmd_summary(const tools::Args& a) {
 // Decode time per frame of the run codec (thread CPU time of the whole decode: integers, the effect's step and render,
 // the least of `reps` repetitions) pinned to one core, and the video decoders' (ffmpeg -benchmark, decode only, pinned).
 void cmd_timing(const tools::Args& a) {
-  const fs::path models = a.str("models", "/root/nvfx-data/experiments/models/d");
-  const fs::path dir = a.str("data", "/root/nvfx-data/g3");
-  const fs::path work = a.str("work", "/tmp/claude-0/-home-user/7f3ed069-4de9-5eae-b560-587577dc6cd8/scratchpad/s4/timing");
+  const fs::path models = a.str("models", models_dir());
+  const fs::path dir = a.str("data", g3_dir());
+  const fs::path work = a.str("work", work_dir());
   const int reps = a.i("reps", 5), cpu = a.i("cpu", 3);
   const auto vcfg = video_configs(a.str("codecs", ""));
   cpu_set_t set;
@@ -1377,7 +1430,7 @@ void cmd_timing(const tools::Args& a) {
 }
 
 void cmd_probe(const tools::Args& a) {
-  const fs::path models = a.str("models", "/root/nvfx-data/experiments/models/d");
+  const fs::path models = a.str("models", models_dir());
   const auto e = effects_of(a.str("effects", "fire")).front();
   const rollout::Model M = load_effect(models, e);
   std::println("model {}: scale {} {} {} {}  render_scale {} {}  starts {}  start_fine {}", sim::effect_name(e), M.scale[0], M.scale[1], M.scale[2],
@@ -1416,7 +1469,7 @@ void cmd_probe_video(const tools::Args& a) {
   const auto runs = split_runs(e, "val");
   const RunSpec& rs = runs[sz(a.i("run", 0))];
   const Simulated S = simulate(rs);
-  const fs::path work = a.str("work", "/tmp/claude-0/-home-user/7f3ed069-4de9-5eae-b560-587577dc6cd8/scratchpad/s4/video");
+  const fs::path work = a.str("work", work_dir());
   const std::string only = a.str("codecs");
   for (const auto& c : video::study_codecs()) {
     if (!only.empty() && only.find(c.name) == std::string::npos) continue;
