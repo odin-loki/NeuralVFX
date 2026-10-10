@@ -2,6 +2,7 @@
 // reference of every operation. The trainer differentiates exactly these operations and the runtime reproduces them;
 // tests/test_rollout.cpp holds both to this file.
 #include <neuralfx/binio.hpp>
+#include <neuralfx/model.hpp>
 #include <neuralfx/rollout.hpp>
 
 #include <algorithm>
@@ -16,7 +17,8 @@ namespace nfx::rollout {
 
 namespace {
 
-constexpr std::uint32_t kVersion = 2;  // 2 added DetailSpec::grow (version 1 files load with grow = 1)
+constexpr std::uint32_t kVersion = 3;  // 2 added DetailSpec::grow (version 1 files load with grow = 1); 3 quantised
+                                       // start states (written only when start_bits < 16)
 
 float round_f16(float v) { return static_cast<float>(static_cast<std::float16_t>(v)); }
 
@@ -60,6 +62,64 @@ void round_u8_field(std::vector<float>& v) {
 
 std::size_t sz(int v) { return static_cast<std::size_t>(v); }
 float fl(int v) { return static_cast<float>(v); }
+
+// Quantised coarse start states (version 3): per channel plane an fp16 (lo, hi), then res * res codes of `bits` bits
+// (one byte each at 8, bit-packed below), planes in channel order. The state itself is [cell][channel].
+struct PlaneQ {
+  float lo, hi;
+  float step(int bits) const { return (hi - lo) / static_cast<float>((1 << bits) - 1); }
+};
+PlaneQ coarse_range(std::span<const float> coarse, int c) {
+  float mn = 1e30f, mx = -1e30f;
+  for (std::size_t i = sz(c); i < coarse.size(); i += kPhys) {
+    mn = std::min(mn, coarse[i]);
+    mx = std::max(mx, coarse[i]);
+  }
+  const float lo = round_f16(mn);
+  float hi = round_f16(std::max(mx, mn + 1e-6f));
+  if (hi <= lo) hi = round_f16(lo + std::max(1e-3f, std::abs(lo) * 1e-3f));
+  return {lo, hi};
+}
+unsigned coarse_code(float v, PlaneQ r, int bits, float d) {
+  const float q = std::round((v + d * r.step(bits) - r.lo) / r.step(bits));
+  return static_cast<unsigned>(std::clamp(q, 0.f, static_cast<float>((1 << bits) - 1)));
+}
+float coarse_value(unsigned q, PlaneQ r, int bits, float d) {
+  if (q == 0 && r.lo == 0.f) return 0.f;  // empty cells of heat and soot stay empty
+  return r.lo + static_cast<float>(q) * r.step(bits) - d * r.step(bits);
+}
+void put_coarse_q(std::ostream& o, const StartPoint& s, int res, int bits, bool dither) {
+  const std::size_t n = sz(res) * sz(res);
+  std::vector<std::uint8_t> codes(packed_plane_bytes(n, bits));
+  for (int c = 0; c < kPhys; ++c) {
+    const PlaneQ r = coarse_range(s.coarse, c);
+    put_f16(o, std::array{r.lo, r.hi});
+    std::ranges::fill(codes, std::uint8_t{0});
+    for (std::size_t i = 0; i < n; ++i) {
+      const float d = dither ? start_dither_value(s.seed, static_cast<int>(i), c) : 0.f;
+      const unsigned q = coarse_code(s.coarse[i * kPhys + sz(c)], r, bits, d);
+      if (bits == 8) codes[i] = static_cast<std::uint8_t>(q);
+      else put_packed_code(codes.data(), i, bits, q);
+    }
+    o.write(reinterpret_cast<const char*>(codes.data()), static_cast<std::streamsize>(codes.size()));
+  }
+}
+std::expected<void, std::string> get_coarse_q(std::istream& i, StartPoint& s, int res, int bits, bool dither) {
+  const std::size_t n = sz(res) * sz(res);
+  std::vector<std::uint8_t> codes(packed_plane_bytes(n, bits));
+  for (int c = 0; c < kPhys; ++c) {
+    std::array<float, 2> r{};
+    if (auto e = get_f16(i, r); !e) return e;
+    i.read(reinterpret_cast<char*>(codes.data()), static_cast<std::streamsize>(codes.size()));
+    if (!i) return std::unexpected("truncated file");
+    const PlaneQ q{r[0], r[1]};
+    for (std::size_t j = 0; j < n; ++j) {
+      const unsigned code = bits == 8 ? codes[j] : packed_code(codes.data(), j, bits);
+      s.coarse[j * kPhys + sz(c)] = coarse_value(code, q, bits, dither ? start_dither_value(s.seed, static_cast<int>(j), c) : 0.f);
+    }
+  }
+  return {};
+}
 
 // Bilinear sample of an n x n field at cell-centre coordinates, clamped to the grid.
 float bilinear(const float* f, int n, float x, float y) {
@@ -145,10 +205,16 @@ RenderLayout render_layout(const Hyper& h) {
   return L;
 }
 
+float start_dither_value(std::uint64_t seed, int i, int c) {
+  return static_cast<float>(hash_cell(i, c, 0x51a7, seed) >> 8) * (1.f / 16777216.f) - 0.5f;
+}
+
 std::size_t Model::storage_bytes() const {
   std::size_t n = 64 + 16 * control_names.size() + 2 * (step_w.size() + render_w.size());
   for (const auto& s : starts) {
-    n += 16 + 2 * (s.controls.size() + s.coarse.size());
+    const std::size_t coarse = start_bits >= 16 ? 2 * s.coarse.size()
+                                                : kPhys * (4 + packed_plane_bytes(s.coarse.size() / kPhys, start_bits));
+    n += 16 + 2 * s.controls.size() + coarse;
     if (!s.fine_t.empty()) n += 4 + s.fine_t.size() + s.fine_d.size();
   }
   return n;
@@ -183,8 +249,10 @@ Model init_model(const Hyper& h, std::uint64_t seed) {
 
 std::expected<void, std::string> save_model(std::ostream& o, const Model& m) {
   const Hyper& h = m.h;
+  const bool quantised = m.start_bits < 16;
+  if (quantised && (m.start_bits < 2 || m.start_bits > 8)) return std::unexpected("rollout: start_bits must be 2 to 8 or 16");
   o.write(kMagic, sizeof(kMagic));
-  bin::put(o, kVersion);
+  bin::put(o, quantised ? kVersion : std::uint32_t{2});  // files without quantised starts keep the version 2 layout
   for (const int v : {h.res, h.hidden, h.memory, h.jacobi, h.n_controls, h.n_age, h.frames, h.render_hidden, h.start_fine, h.warmup}) {
     bin::put(o, static_cast<std::int32_t>(v));
   }
@@ -203,6 +271,10 @@ std::expected<void, std::string> save_model(std::ostream& o, const Model& m) {
   bin::put(o, static_cast<std::int32_t>(n.flicker_octaves));
   bin::put(o, static_cast<std::int32_t>(d.swirl_control));
   bin::put(o, d.grow);
+  if (quantised) {
+    bin::put(o, static_cast<std::int32_t>(m.start_bits));
+    bin::put(o, static_cast<std::int32_t>(m.start_dither ? 1 : 0));
+  }
   for (const auto* a : {&m.scale, &m.lo, &m.hi}) bin::put_array(o, std::span<const float>(*a));
   put_f16(o, m.step_w);
   put_f16(o, m.render_w);
@@ -211,7 +283,8 @@ std::expected<void, std::string> save_model(std::ostream& o, const Model& m) {
     bin::put(o, s.seed);
     bin::put(o, s.time);
     put_f16(o, s.controls);
-    put_f16(o, s.coarse);
+    if (quantised) put_coarse_q(o, s, h.res, m.start_bits, m.start_dither);
+    else put_f16(o, s.coarse);
     bin::put(o, static_cast<std::uint8_t>(s.fine_t.empty() ? 0 : 1));
     if (!s.fine_t.empty()) {
       put_u8_field(o, s.fine_t);
@@ -277,6 +350,13 @@ std::expected<Model, std::string> load_model(std::istream& i) {
     if (!g || !(*g >= 1.f) || *g > 64.f) return std::unexpected("rollout: bad detail spec");
     d.grow = *g;
   }
+  if (*version >= 3) {
+    auto b = bin::get<std::int32_t>(i);
+    auto dith = bin::get<std::int32_t>(i);
+    if (!b || !dith || *b < 2 || *b > 8 || *dith < 0 || *dith > 1) return std::unexpected("rollout: bad start storage");
+    m.start_bits = *b;
+    m.start_dither = *dith != 0;
+  }
   if (!(d.swirl_scale > 0.f) || !(d.edge1 > d.edge0)) return std::unexpected("rollout: bad detail spec");
   for (auto* a : {&m.scale, &m.lo, &m.hi}) {
     if (auto r = bin::get_array(i, std::span<float>(*a)); !r) return std::unexpected(r.error());
@@ -297,7 +377,11 @@ std::expected<Model, std::string> load_model(std::istream& i) {
     s.controls.resize(sz(h.n_controls));
     s.coarse.resize(sz(h.res) * sz(h.res) * kPhys);
     if (auto r = get_f16(i, s.controls); !r) return std::unexpected(r.error());
-    if (auto r = get_f16(i, s.coarse); !r) return std::unexpected(r.error());
+    if (m.start_bits < 16) {
+      if (auto r = get_coarse_q(i, s, h.res, m.start_bits, m.start_dither); !r) return std::unexpected(r.error());
+    } else if (auto r = get_f16(i, s.coarse); !r) {
+      return std::unexpected(r.error());
+    }
     auto has_fine = bin::get<std::uint8_t>(i);
     if (!has_fine) return std::unexpected(has_fine.error());
     if (*has_fine) {
@@ -328,7 +412,19 @@ void quantise_like_storage(Model& m) {
   r16(m.render_w);
   for (StartPoint& s : m.starts) {
     r16(s.controls);
-    r16(s.coarse);
+    if (m.start_bits < 16) {
+      const std::size_t n = s.coarse.size() / kPhys;
+      for (int c = 0; c < kPhys; ++c) {
+        const PlaneQ r = coarse_range(s.coarse, c);
+        for (std::size_t j = 0; j < n; ++j) {
+          const float d = m.start_dither ? start_dither_value(s.seed, static_cast<int>(j), c) : 0.f;
+          float& v = s.coarse[j * kPhys + sz(c)];
+          v = coarse_value(coarse_code(v, r, m.start_bits, d), r, m.start_bits, d);
+        }
+      }
+    } else {
+      r16(s.coarse);
+    }
     if (!s.fine_t.empty()) {
       round_u8_field(s.fine_t);
       round_u8_field(s.fine_d);

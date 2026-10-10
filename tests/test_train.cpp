@@ -14,6 +14,7 @@
 #include <algorithm>
 #include <array>
 #include <random>
+#include <sstream>
 #include <unistd.h>
 
 using namespace nfx;
@@ -194,8 +195,8 @@ TEST(Model, ShapesCountsAndCost) {
   EXPECT_THROW(init_model(bad, 1), std::invalid_argument);
 }
 
-TEST(Model, SaveLoadRoundTripsAtBothPrecisions) {
-  for (const int bits : {16, 8}) {
+TEST(Model, SaveLoadRoundTripsAtEveryPrecision) {
+  for (const int bits : {16, 8, 6, 5, 4, 3, 2}) {
     Model m = randomised(tiny_grid(), 7);
     m.effect = "fire";
     m.feature_bits = bits;
@@ -229,6 +230,31 @@ TEST(Model, EightBitFeaturesHalveFeatureStorage) {
   const auto b16 = m.storage_bytes();
   m.feature_bits = 8;
   EXPECT_LT(m.storage_bytes(), b16 * 6 / 10);
+}
+
+TEST(Model, PackedFeaturesUseTheirBitsAndRoundTrip) {
+  // Codes of every width survive packing, whatever the plane length (planes may end inside a byte).
+  for (const int bits : {2, 3, 4, 5, 6, 7}) {
+    for (const std::size_t n : {1u, 7u, 13u, 144u, 169u, 1024u}) {
+      std::vector<std::uint8_t> buf(packed_plane_bytes(n, bits) + 1, 0);
+      buf.back() = 0xa5;  // a guard byte: nothing writes past the plane
+      std::mt19937 rng(static_cast<unsigned>(bits * 1000 + n));
+      std::vector<unsigned> codes(n);
+      for (auto& c : codes) c = static_cast<unsigned>(rng()) & ((1u << bits) - 1u);
+      for (std::size_t j = 0; j < n; ++j) put_packed_code(buf.data(), j, bits, codes[j]);
+      EXPECT_EQ(buf.back(), 0xa5);
+      for (std::size_t j = 0; j < n; ++j) ASSERT_EQ(packed_code(buf.data(), j, bits), codes[j]) << bits << " " << n << " " << j;
+    }
+  }
+  // Storage shrinks with the bits: a 32 x 32 grid's features at 4 bits take a quarter of fp16 (plus the ranges).
+  Hyper h = tiny_grid();
+  h.grid = 32;
+  Model m = init_model(h, 1);
+  m.feature_bits = 16;
+  const auto b16 = m.storage_bytes();
+  m.feature_bits = 4;
+  const std::size_t planes = static_cast<std::size_t>(h.bases) * h.grid_t * h.channels;
+  EXPECT_EQ(b16 - m.storage_bytes(), m.features.size() * 2 - (m.features.size() / 2 + planes * 4));
 }
 
 TEST(Train, ForwardMatchesTheReference) {
@@ -316,4 +342,166 @@ TEST(Train, ConvFamilyLearnsToo) {
   const train::Example ex{&clip, {}};
   const auto r = train::train(h, std::span(&ex, 1), o);
   EXPECT_GT(metrics::score(clip, train::render_clip(r.model, {}, {}, 8, 32)).psnr, 24.0);
+}
+
+TEST(Train, FakeQuantiseIsTheStorageRounding) {
+  for (const bool trim : {false, true}) {
+    for (const int bits : {8, 6, 5, 4, 3}) {
+      Hyper h = tiny_grid();
+      h.grid = 8;
+      Model m = randomised(h, 11);
+      Model a = m, b = m;
+      train::fake_quantise(a, bits, trim);
+      b.feature_bits = bits;
+      b.feature_trim = trim;
+      quantise_like_storage(b);
+      EXPECT_EQ(a.features, b.features) << bits << " " << trim;
+      EXPECT_EQ(a.layers[0].w, m.layers[0].w);  // only the features change
+      // ...and it is what a saved file holds.
+      std::stringstream ss;
+      ASSERT_TRUE(save_model(ss, b));
+      const auto back = load_model(ss);
+      ASSERT_TRUE(back.has_value());
+      EXPECT_EQ(back->features, a.features) << bits << " " << trim;
+    }
+  }
+}
+
+TEST(Model, TrimmedRangesQuantiseHeavyTailsBetter) {
+  // A bell-shaped plane with a few outliers: at 4 bits, clipping the tails lowers the squared error.
+  std::mt19937 rng(3);
+  std::normal_distribution<float> nd(0.f, 1.f);
+  std::vector<float> p(1024);
+  for (float& v : p) v = nd(rng);
+  p[5] = 9.f;
+  p[700] = -7.f;
+  const auto err = [&](bool trim) {
+    const auto [lo, hi] = feature_plane_range(p, 4, trim);
+    double e = 0;
+    for (const float v : p) {
+      const float q = std::clamp(std::round((v - lo) / (hi - lo) * 15.f), 0.f, 15.f);
+      e += std::pow(v - (lo + q / 15.f * (hi - lo)), 2.f);
+    }
+    return e;
+  };
+  EXPECT_LT(err(true), 0.8 * err(false));
+  const auto [lo8, hi8] = feature_plane_range(p, 8, false);
+  EXPECT_EQ(lo8, -7.f);
+  EXPECT_EQ(hi8, 9.f);
+}
+
+TEST(Train, RateGradientMatchesFiniteDifferences) {
+  // The rate estimate is piecewise smooth (min over predictors, |r|); check away from the kinks.
+  Hyper h = tiny_grid();
+  h.grid = 6;
+  Model m = randomised(h, 13);
+  std::vector<float> g(m.features.size(), 0.f);
+  const double r0 = train::feature_rate(m, 5, g, 1.f);
+  EXPECT_GT(r0, 0.0);
+  int checked = 0, bad = 0;
+  std::string first_bad;
+  for (std::size_t i = 0; i < m.features.size(); i += 3) {
+    const float keep = m.features[i];
+    const float eps = 1e-4f * std::max(1.f, std::abs(keep));
+    std::array<double, 2> n{};
+    for (int s = 0; s < 2; ++s) {
+      m.features[i] = keep + (s ? -eps : eps);
+      n[static_cast<std::size_t>(s)] = train::feature_rate(m, 5);
+    }
+    m.features[i] = keep;
+    const double num = (n[0] - n[1]) / (2.0 * static_cast<double>(eps));
+    // A plane's min or max moves the step itself, which the estimate holds constant: skip those values.
+    const std::size_t plane = static_cast<std::size_t>(h.grid) * h.grid, p0 = i / plane * plane;
+    const auto [mn, mx] = std::minmax_element(m.features.begin() + static_cast<std::ptrdiff_t>(p0),
+                                              m.features.begin() + static_cast<std::ptrdiff_t>(p0 + plane));
+    if (keep == *mn || keep == *mx) continue;
+    ++checked;
+    if (std::abs(num - g[i]) > 2e-2 * std::max(std::abs(num), std::abs(static_cast<double>(g[i]))) + 1e-2) {
+      if (++bad <= 5) first_bad += std::format(" feature {}: analytic {} numeric {};", i, g[i], num);
+    }
+  }
+  EXPECT_GT(checked, 20);
+  EXPECT_LE(bad, checked / 20) << "a few values sit on a kink of the predictor choice; more means a wrong gradient:" << first_bad;
+}
+
+TEST(Train, QuantisationAwareAndRateAwareTrainingWork) {
+  const Clip clip = smooth_clip(32, 8, 0.f);
+  Hyper h;
+  h.arch = Arch::grid;
+  h.size = 32;
+  h.frames = 8;
+  h.grid = 16;
+  h.grid_t = 8;
+  h.channels = 4;
+  h.hidden = 16;
+  h.layers = 1;
+  train::Options o;
+  o.iterations = 400;
+  o.batch_frames = 4;
+  o.pixels = 512;
+  o.threads = 2;
+  o.log_every = 0;
+  o.qat_bits = 3;
+  const train::Example ex{&clip, {}};
+  const auto qat = train::train(h, std::span(&ex, 1), o);
+  o.qat_bits = 0;
+  const auto plain = train::train(h, std::span(&ex, 1), o);
+  // At 3 bits, the model trained for them beats the float model rounded to them.
+  const auto at_bits = [&](Model m) {
+    m.feature_bits = 3;
+    quantise_like_storage(m);
+    return metrics::score(clip, train::render_clip(m, {}, {}, 8, 32)).psnr;
+  };
+  EXPECT_GT(at_bits(qat.model), at_bits(plain.model) + 1.0);
+  EXPECT_GT(at_bits(qat.model), 26.0);
+  // A rate term lowers the estimated bits per value.
+  o.qat_bits = 4;
+  const auto r0 = train::train(h, std::span(&ex, 1), o);
+  o.rate_lambda = 3e-3f;
+  o.rate_bits = 4;
+  const auto r1 = train::train(h, std::span(&ex, 1), o);
+  EXPECT_LT(train::feature_rate(r1.model, 4), 0.8 * train::feature_rate(r0.model, 4));
+}
+
+TEST(Train, VectorQuantisedTrainingWorks) {
+  // Codebooks fitted halfway, then trained through: the saved model renders what the trainer saw, and at one bit per
+  // feature value (8-bit indices for 8 channels) it still learns the clip.
+  const Clip clip = smooth_clip(32, 8, 0.f);
+  Hyper h;
+  h.arch = Arch::grid;
+  h.size = 32;
+  h.frames = 8;
+  h.grid = 16;
+  h.grid_t = 8;
+  h.channels = 8;
+  h.hidden = 16;
+  h.layers = 1;
+  train::Options o;
+  o.iterations = 400;
+  o.batch_frames = 4;
+  o.pixels = 512;
+  o.threads = 2;
+  o.log_every = 0;
+  o.vq_bits = 8;
+  o.vq_dim = 8;
+  const train::Example ex{&clip, {}};
+  const auto r = train::train(h, std::span(&ex, 1), o);
+  ASSERT_EQ(r.model.vq_codebook.size(), 256u * 8u);
+  Model m = r.model;
+  m.feature_bits = 8;
+  std::stringstream ss;
+  ASSERT_TRUE(save_model(ss, m));
+  const auto back = load_model(ss);
+  ASSERT_TRUE(back.has_value()) << back.error();
+  Model q = m;
+  quantise_like_storage(q);
+  EXPECT_EQ(back->features, q.features);
+  EXPECT_LT(back->storage_bytes(), 16u * 16u * 8u + 256u * 8u * 2u + 2048u);
+  EXPECT_GT(metrics::score(clip, train::render_clip(*back, {}, {}, 8, 32)).psnr, 26.0);
+  EXPECT_THROW(train::train(h, std::span(&ex, 1), [&] {
+                 train::Options bad = o;
+                 bad.vq_dim = 3;
+                 return bad;
+               }()),
+               std::invalid_argument);
 }

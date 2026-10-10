@@ -134,14 +134,18 @@ const nvfx_isa kIsas[] = {NVFX_ISA_BASELINE, NVFX_ISA_AVX2, NVFX_ISA_AVX512};
 
 }  // namespace
 
-TEST(Runtime, MatchesTheReferenceOnEveryIsaFamilyPrecisionAndSize) {
+TEST(Runtime, MatchesTheReferenceOnEveryIsaFamilyPrecisionAndSize) {  // precisions: fp16, 8 bits, 3 to 6 bits packed
   const float controls[3] = {0.8f, 0.1f, 0.6f};
   struct Case {
     Hyper h;
     int bits, size;
   };
-  const Case cases[] = {{grid_hyper(), 16, 32}, {grid_hyper(), 8, 32}, {grid_hyper(), 16, 48},
-                        {conv_hyper(), 16, 32}, {conv_hyper(), 8, 32}, {conv_hyper(), 16, 16}};
+  Hyper odd = grid_hyper();  // planes of 13 x 13: bit-packed planes end inside a byte
+  odd.grid = 13;
+  const Case cases[] = {{grid_hyper(), 16, 32}, {grid_hyper(), 8, 32}, {grid_hyper(), 16, 48}, {grid_hyper(), 6, 32},
+                        {grid_hyper(), 5, 48},  {grid_hyper(), 4, 32}, {odd, 5, 32},           {odd, 3, 32},
+                        {conv_hyper(), 16, 32}, {conv_hyper(), 8, 32}, {conv_hyper(), 16, 16}, {conv_hyper(), 4, 32},
+                        {conv_hyper(), 6, 32}};
   for (const nvfx_isa isa : kIsas) {
     if (nvfx_set_isa(isa) != NVFX_OK) continue;  // the CPU lacks it
     for (const Case& c : cases) {
@@ -155,6 +159,44 @@ TEST(Runtime, MatchesTheReferenceOnEveryIsaFamilyPrecisionAndSize) {
         EXPECT_LE(max_diff(got, reference(m, f, controls, 1, c.size)), 2)
             << m.h.describe() << " bits " << c.bits << " size " << c.size << " frame " << f << " isa " << isa;
       }
+    }
+  }
+  nvfx_set_isa(NVFX_ISA_AUTO);
+}
+
+TEST(Runtime, VectorQuantisedFeaturesMatchTheReference) {
+  // Codebooks of 2^bits vectors per group of channels: the runtime decodes the index planes as the reference sees the
+  // features after quantise_like_storage (nearest codewords).
+  const float controls[3] = {0.3f, 0.6f, 0.1f};
+  struct Case {
+    Hyper h;
+    int bits, dim, size;
+  };
+  const Case cases[] = {{grid_hyper(), 4, 2, 32}, {grid_hyper(), 8, 6, 48}, {grid_hyper(), 5, 3, 32}, {conv_hyper(), 6, 3, 32}};
+  for (const nvfx_isa isa : kIsas) {
+    if (nvfx_set_isa(isa) != NVFX_OK) continue;
+    for (const Case& c : cases) {
+      Model m = make_model(c.h, 16);
+      m.feature_bits = 8;
+      m.vq_bits = c.bits;
+      m.vq_dim = c.dim;
+      std::mt19937_64 rng(5);
+      std::uniform_real_distribution<float> u(-0.6f, 0.6f);
+      m.vq_codebook.resize(static_cast<std::size_t>(m.vq_groups()) * (std::size_t{1} << c.bits) * static_cast<std::size_t>(c.dim));
+      for (float& v : m.vq_codebook) v = u(rng);
+      quantise_like_storage(m);
+      auto e = load(m);
+      auto in = instance(e.get(), c.size);
+      nvfx_instance_set_controls(in.get(), controls, 3);
+      nvfx_instance_set_variation(in.get(), 1);
+      for (const int f : {0, 7}) {
+        const auto got = render(in.get(), f / static_cast<double>(m.fps), c.size);
+        EXPECT_LE(max_diff(got, reference(m, f, controls, 1, c.size)), 2) << m.h.describe() << " vq " << c.bits << "x" << c.dim << " isa " << isa;
+      }
+      nvfx_effect_info info{};
+      nvfx_effect_get_info(e.get(), &info);
+      EXPECT_EQ(info.stored_bytes, m.storage_bytes());
+      EXPECT_LT(info.stored_bytes, make_model(c.h, 8).storage_bytes());
     }
   }
   nvfx_set_isa(NVFX_ISA_AUTO);

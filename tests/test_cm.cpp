@@ -153,7 +153,7 @@ TEST(Cm, SmoothTensorsCompressWell) {
 
 TEST(Cm, FrameModelsRoundTrip) {
   for (const Arch arch : {Arch::grid, Arch::conv}) {
-    for (const int bits : {8, 16}) {
+    for (const int bits : {8, 16, 6, 5, 4, 3}) {
       Hyper h;
       h.arch = arch;
       h.size = 32;
@@ -180,15 +180,79 @@ TEST(Cm, FrameModelsRoundTrip) {
       ASSERT_TRUE(save_model(os, m));
       const auto file = bytes_of(os.str());
       expect_model_round_trip(file);
-      // It is parsed as a model: features, weights and codes are coded as tensors.
+      // It is parsed as a model: features, weights and codes are coded as tensors. (Bit-packed planes that end
+      // inside a byte are not parsed; the file is coded as plain bytes, still exactly.)
+      const int side = arch == Arch::grid ? h.grid : h.latent;
+      if (bits < 8 && side * side * bits % 8 != 0) continue;
       const cm::Packed p = cm::pack_model(file);
       std::vector<cm::Kind> kinds;
       for (const auto& part : p.parts) kinds.push_back(part.kind);
-      EXPECT_NE(std::ranges::find(kinds, cm::Kind::features), kinds.end());
+      EXPECT_NE(std::ranges::find(kinds, cm::Kind::features), kinds.end()) << bits;
       EXPECT_NE(std::ranges::find(kinds, cm::Kind::weights), kinds.end());
       EXPECT_NE(std::ranges::find(kinds, cm::Kind::codes), kinds.end());
-      EXPECT_EQ(std::ranges::find(kinds, cm::Kind::ranges) != kinds.end(), bits == 8);
+      EXPECT_EQ(std::ranges::find(kinds, cm::Kind::ranges) != kinds.end(), bits < 16);
     }
+  }
+}
+
+TEST(Cm, PackedFeaturesCodeOnlyTheirBits) {
+  // A 4-bit model is parsed (its features are coded as 4-bit values: under 4 bits each), and a model whose packed
+  // planes end inside a byte is still restored exactly (coded as plain bytes).
+  for (const int grid : {16, 5}) {
+    Hyper h;
+    h.arch = Arch::grid;
+    h.size = 32;
+    h.frames = 8;
+    h.grid = grid;
+    h.channels = 4;
+    h.hidden = 6;
+    h.grid_t = 4;
+    Model m = init_model(h, 9);
+    m.feature_bits = grid == 16 ? 4 : 5;
+    m.effect = "fire";
+    std::ostringstream os;
+    ASSERT_TRUE(save_model(os, m));
+    const auto file = bytes_of(os.str());
+    expect_model_round_trip(file);
+    const cm::Packed p = cm::pack_model(file);
+    const auto feat = std::ranges::find(p.parts, cm::Kind::features, &cm::Part::kind);
+    if (grid == 16) {
+      ASSERT_NE(feat, p.parts.end());
+      EXPECT_EQ(feat->bytes, m.features.size() / 2);
+      EXPECT_LT(8.0 * feat->coded_bytes / static_cast<double>(feat->values), 4.5);
+    } else {
+      EXPECT_EQ(feat, p.parts.end());
+    }
+  }
+}
+
+TEST(Cm, VectorQuantisedModelsRoundTrip) {
+  // Codebooks and index planes are parsed: the indices are coded with their bits, the codebooks as fp16 weights.
+  for (const int bits : {8, 5, 3}) {
+    Hyper h;
+    h.arch = Arch::grid;
+    h.size = 32;
+    h.frames = 8;
+    h.grid = 16;
+    h.channels = 4;
+    h.hidden = 6;
+    h.grid_t = 4;
+    Model m = init_model(h, 9);
+    m.effect = "fire";
+    m.feature_bits = 8;
+    m.vq_bits = bits;
+    m.vq_dim = 2;
+    m.vq_codebook.resize(static_cast<std::size_t>(m.vq_groups()) * (std::size_t{1} << bits) * 2);
+    for (std::size_t i = 0; i < m.vq_codebook.size(); ++i) m.vq_codebook[i] = 0.1f * std::sin(0.37f * static_cast<float>(i));
+    std::ostringstream os;
+    ASSERT_TRUE(save_model(os, m));
+    const auto file = bytes_of(os.str());
+    expect_model_round_trip(file);
+    const cm::Packed p = cm::pack_model(file);
+    const auto feat = std::ranges::find(p.parts, cm::Kind::features, &cm::Part::kind);
+    ASSERT_NE(feat, p.parts.end()) << bits;
+    EXPECT_EQ(feat->values, m.features.size() / 2);
+    EXPECT_LT(8.0 * feat->coded_bytes / static_cast<double>(feat->values), bits + 0.5);
   }
 }
 
@@ -222,15 +286,21 @@ TEST(Cm, RolloutEffectsRoundTrip) {
     m.starts.push_back(sp);
   }
   rollout::quantise_like_storage(m);
-  std::ostringstream os;
-  ASSERT_TRUE(rollout::save_model(os, m));
-  const auto file = bytes_of(os.str());
-  expect_model_round_trip(file);
-  const cm::Packed p = cm::pack_model(file);
-  std::vector<cm::Kind> kinds;
-  for (const auto& part : p.parts) kinds.push_back(part.kind);
-  for (const cm::Kind k : {cm::Kind::weights, cm::Kind::biases, cm::Kind::coarse, cm::Kind::fine, cm::Kind::scales}) {
-    EXPECT_NE(std::ranges::find(kinds, k), kinds.end()) << cm::kind_name(k);
+  for (const int bits : {16, 8, 6, 4}) {  // fp16 start states (versions 1 and 2), and quantised ones (version 3)
+    rollout::Model q = m;
+    q.start_bits = bits;
+    q.start_dither = bits == 6;
+    std::ostringstream os;
+    ASSERT_TRUE(rollout::save_model(os, q));
+    const auto file = bytes_of(os.str());
+    expect_model_round_trip(file);
+    const cm::Packed p = cm::pack_model(file);
+    std::vector<cm::Kind> kinds;
+    for (const auto& part : p.parts) kinds.push_back(part.kind);
+    for (const cm::Kind k : {cm::Kind::weights, cm::Kind::biases, cm::Kind::coarse, cm::Kind::fine, cm::Kind::scales}) {
+      EXPECT_NE(std::ranges::find(kinds, k), kinds.end()) << cm::kind_name(k) << " " << bits;
+    }
+    EXPECT_EQ(std::ranges::find(kinds, cm::Kind::ranges) != kinds.end(), bits < 16);
   }
 }
 
@@ -458,6 +528,33 @@ TEST(Cm, Format2RoundTripsInEveryConfiguration) {
     EXPECT_EQ(cm::pack_model(roll, o).data, cm::pack_model(roll, o).data);
   }
   EXPECT_EQ(cm::pack_model(roll).data[4], 1);
+}
+
+TEST(Cm, Format2RoundTripsBitPackedFeatures) {
+  // Low-bit features (study F2) in format 2: coded as packed values in a single stream; a seekable file, whose segments
+  // are placed byte by byte, falls back to plain bytes. Both restore the file exactly.
+  for (const int grid : {16, 5}) {
+    Hyper h;
+    h.arch = Arch::grid;
+    h.size = 32;
+    h.frames = 8;
+    h.grid = grid;
+    h.channels = 4;
+    h.hidden = 6;
+    h.grid_t = 4;
+    Model m = init_model(h, 11);
+    m.feature_bits = grid == 16 ? 4 : 5;
+    m.effect = "smoke";
+    std::ostringstream os;
+    ASSERT_TRUE(save_model(os, m));
+    const auto file = bytes_of(os.str());
+    for (const cm::Options& o : format2_options()) {
+      expect_model_round_trip2(file, o);
+      const cm::Packed p = cm::pack_model(file, o);
+      const bool packed_planes = grid == 16 && !o.seekable;
+      EXPECT_EQ(std::ranges::find(p.parts, cm::Kind::features, &cm::Part::kind) != p.parts.end(), packed_planes);
+    }
+  }
 }
 
 TEST(Cm, Format2SizesAndLzTokens) {

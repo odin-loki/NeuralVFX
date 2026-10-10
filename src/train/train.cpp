@@ -5,11 +5,13 @@
 #include <algorithm>
 #include <chrono>
 #include <cmath>
+#include <limits>
 #include <numbers>
 #include <numeric>
 #include <random>
 #include <ranges>
 #include <stdexcept>
+#include <stdfloat>
 #include <thread>
 
 namespace nfx::train {
@@ -63,7 +65,238 @@ void check(const Hyper& h, std::span<const Example> data) {
   if (h.arch == Arch::conv && size != h.size) throw std::invalid_argument("train: conv family must train at its native size");
 }
 
+// Vector quantisation during training (Options::vq_bits): the codebook, the latest assignment, and use counts.
+struct Vq {
+  int G = 0, d = 0, K = 0, C = 0;
+  std::size_t S2 = 0, slices = 0;
+  std::vector<float> cb;            // [G][K][d]
+  std::vector<std::uint16_t> idx;   // [slice][G][S2]
+  std::vector<int> idle;            // steps since each codeword was last used
+
+  float* code(int g, int k) { return cb.data() + (static_cast<std::size_t>(g) * K + k) * d; }
+  void vec(const Model& m, std::size_t sl, int g, std::size_t j, float* v) const {
+    const float* f = m.features.data() + sl * static_cast<std::size_t>(C) * S2;
+    for (int c = 0; c < d; ++c) v[c] = f[static_cast<std::size_t>(g * d + c) * S2 + j];
+  }
+  // Nearest codewords of the model's features into idx.
+  void assign(const Model& m) {
+    std::vector<float> v(static_cast<std::size_t>(d));
+    for (std::size_t sl = 0; sl < slices; ++sl) {
+      for (int g = 0; g < G; ++g) {
+        const float* base = code(g, 0);
+        for (std::size_t j = 0; j < S2; ++j) {
+          vec(m, sl, g, j, v.data());
+          int best = 0;
+          float bd = std::numeric_limits<float>::infinity();
+          for (int k = 0; k < K; ++k) {
+            const float* w = base + static_cast<std::size_t>(k) * d;
+            float dist = 0;
+            for (int c = 0; c < d; ++c) dist += (v[static_cast<std::size_t>(c)] - w[c]) * (v[static_cast<std::size_t>(c)] - w[c]);
+            if (dist < bd) {
+              bd = dist;
+              best = k;
+            }
+          }
+          idx[(sl * static_cast<std::size_t>(G) + static_cast<std::size_t>(g)) * S2 + j] = static_cast<std::uint16_t>(best);
+        }
+      }
+    }
+  }
+  // Features replaced by their assigned codewords.
+  void apply(Model& m) {
+    for (std::size_t sl = 0; sl < slices; ++sl) {
+      float* f = m.features.data() + sl * static_cast<std::size_t>(C) * S2;
+      for (int g = 0; g < G; ++g) {
+        for (std::size_t j = 0; j < S2; ++j) {
+          const float* w = code(g, idx[(sl * static_cast<std::size_t>(G) + static_cast<std::size_t>(g)) * S2 + j]);
+          for (int c = 0; c < d; ++c) f[static_cast<std::size_t>(g * d + c) * S2 + j] = w[c];
+        }
+      }
+    }
+  }
+  // Codewords towards the mean of their assigned features (rate a); unused ones restart at a random feature vector.
+  void update(const Model& m, float a, std::mt19937_64& rng) {
+    std::vector<double> sum(cb.size(), 0.0);
+    std::vector<int> count(static_cast<std::size_t>(G) * K, 0);
+    std::vector<float> v(static_cast<std::size_t>(d));
+    for (std::size_t sl = 0; sl < slices; ++sl) {
+      for (int g = 0; g < G; ++g) {
+        for (std::size_t j = 0; j < S2; ++j) {
+          const int k = idx[(sl * static_cast<std::size_t>(G) + static_cast<std::size_t>(g)) * S2 + j];
+          vec(m, sl, g, j, v.data());
+          const std::size_t o = static_cast<std::size_t>(g) * K + static_cast<std::size_t>(k);
+          ++count[o];
+          for (int c = 0; c < d; ++c) sum[o * static_cast<std::size_t>(d) + static_cast<std::size_t>(c)] += v[static_cast<std::size_t>(c)];
+        }
+      }
+    }
+    std::uniform_int_distribution<std::size_t> pick_sl(0, slices - 1), pick_j(0, S2 - 1);
+    for (int g = 0; g < G; ++g) {
+      for (int k = 0; k < K; ++k) {
+        const std::size_t o = static_cast<std::size_t>(g) * K + static_cast<std::size_t>(k);
+        float* w = code(g, k);
+        if (count[o] > 0) {
+          idle[o] = 0;
+          for (int c = 0; c < d; ++c) {
+            const float mean = static_cast<float>(sum[o * static_cast<std::size_t>(d) + static_cast<std::size_t>(c)] / count[o]);
+            w[c] += a * (mean - w[c]);
+          }
+        } else if (++idle[o] > 50) {
+          idle[o] = 0;
+          vec(m, pick_sl(rng), g, pick_j(rng), w);
+        }
+      }
+    }
+  }
+  // k-means from K distinct random feature vectors, 15 Lloyd iterations.
+  void init(const Model& m, int bits, int dim, std::mt19937_64& rng) {
+    const Hyper& h = m.h;
+    C = h.feature_channels();
+    d = dim;
+    G = C / dim;
+    K = 1 << bits;
+    S2 = static_cast<std::size_t>(h.feature_side()) * h.feature_side();
+    slices = static_cast<std::size_t>(h.bases) * h.grid_t;
+    cb.assign(static_cast<std::size_t>(G) * K * d, 0.f);
+    idx.assign(slices * static_cast<std::size_t>(G) * S2, 0);
+    idle.assign(static_cast<std::size_t>(G) * K, 0);
+    std::uniform_int_distribution<std::size_t> pick_sl(0, slices - 1), pick_j(0, S2 - 1);
+    for (int g = 0; g < G; ++g) {
+      for (int k = 0; k < K; ++k) vec(m, pick_sl(rng), g, pick_j(rng), code(g, k));
+    }
+    for (int it = 0; it < 15; ++it) {
+      assign(m);
+      std::vector<int> keep(idle);
+      update(m, 1.f, rng);
+      idle = keep;
+    }
+    std::ranges::fill(idle, 0);
+  }
+};
+
 }  // namespace
+
+void fake_quantise(Model& m, int bits, bool trim) {
+  // Only the features: quantise_like_storage also rounds the other weights to fp16, which training must not do.
+  const std::size_t plane = static_cast<std::size_t>(m.h.feature_side()) * m.h.feature_side();
+  const float qm = static_cast<float>((1 << bits) - 1);
+  for (std::size_t off = 0; off < m.features.size(); off += plane) {
+    const std::span p(m.features.data() + off, plane);
+    const auto [lo, hi] = feature_plane_range(p, bits, trim);
+    for (float& v : p) {
+      const float q = std::clamp(static_cast<float>(std::lround((v - lo) / (hi - lo) * qm)), 0.f, qm);
+      v = lo + q / qm * (hi - lo);
+    }
+  }
+}
+
+double feature_rate(const Model& m, int bits, std::span<float> grad, float weight, bool trim) {
+  const Hyper& h = m.h;
+  const int S = h.feature_side(), C = h.feature_channels(), T = h.grid_t;
+  const std::size_t plane = static_cast<std::size_t>(S) * S;
+  const float qm = static_cast<float>((1 << bits) - 1);
+  const float inv_ln2 = 1.f / std::numbers::ln2_v<float>;
+  double total = 0;
+  for (int k = 0; k < h.bases; ++k) {
+    for (int t = 0; t < T; ++t) {
+      for (int c = 0; c < C; ++c) {
+        const std::size_t off = ((static_cast<std::size_t>(k) * T + t) * C + c) * plane;
+        const float* p = m.features.data() + off;
+        const float* q = t > 0 ? p - static_cast<std::size_t>(C) * plane : nullptr;  // previous time slice, same channel
+        const auto [plo, phi] = feature_plane_range(std::span(p, plane), bits, trim);
+        const float step = std::max(phi - plo, 1e-6f) / qm;
+        float* g = grad.empty() ? nullptr : grad.data() + off;
+        float* gq = g && q ? g - static_cast<std::size_t>(C) * plane : nullptr;
+        for (int y = 0; y < S; ++y) {
+          for (int x = 0; x < S; ++x) {
+            const std::size_t i = static_cast<std::size_t>(y) * S + x;
+            const float v = p[i];
+            // candidate predictions: value and the indices (and signs) it is made of
+            float best = std::numeric_limits<float>::infinity(), res = 0;
+            int which = -1;
+            std::size_t a = 0, b = 0, cc = 0;  // MED pieces
+            int med_kind = 0;                  // 0: W only, 1: N only, 2: min/max picks one, 3: W + N - NW
+            if (x > 0 || y > 0) {
+              float pred;
+              if (x > 0 && y > 0) {
+                const float W = p[i - 1], N = p[i - S], NW = p[i - S - 1];
+                const float lo = std::min(W, N), hi = std::max(W, N);
+                if (NW >= hi) {
+                  pred = lo;
+                  a = W <= N ? i - 1 : i - S;
+                  med_kind = 2;
+                } else if (NW <= lo) {
+                  pred = hi;
+                  a = W >= N ? i - 1 : i - S;
+                  med_kind = 2;
+                } else {
+                  pred = W + N - NW;
+                  a = i - 1;
+                  b = i - S;
+                  cc = i - S - 1;
+                  med_kind = 3;
+                }
+              } else if (x > 0) {
+                pred = p[i - 1];
+                a = i - 1;
+                med_kind = 2;
+              } else {
+                pred = p[i - S];
+                a = i - S;
+                med_kind = 2;
+              }
+              const float r = v - pred;
+              if (std::abs(r) < best) {
+                best = std::abs(r);
+                res = r;
+                which = 0;
+              }
+            }
+            if (q) {
+              const float r1 = v - q[i];
+              if (std::abs(r1) < best) {
+                best = std::abs(r1);
+                res = r1;
+                which = 1;
+              }
+              if (x > 0) {
+                const float r2 = v - (q[i] + p[i - 1] - q[i - 1]);
+                if (std::abs(r2) < best) {
+                  best = std::abs(r2);
+                  res = r2;
+                  which = 2;
+                }
+              }
+            }
+            if (which < 0) continue;  // the first value of the first slice: nothing to predict it from
+            const float u = best / step;
+            total += std::log2(1.0 + static_cast<double>(u));
+            if (!g) continue;
+            // d log2(1 + |r| / step) / dr, then r = v - prediction
+            const float d = weight * (res > 0 ? 1.f : -1.f) * inv_ln2 / (step * (1.f + u));
+            g[i] += d;
+            if (which == 0) {
+              if (med_kind == 2) {
+                g[a] -= d;
+              } else {
+                g[a] -= d;
+                g[b] -= d;
+                g[cc] += d;
+              }
+            } else if (which == 1) {
+              gq[i] -= d;
+            } else {
+              gq[i] -= d;
+              g[i - 1] -= d;
+              gq[i - 1] += d;
+            }
+          }
+        }
+      }
+    }
+  }
+  return total;
+}
 
 Result train(const Hyper& h_in, std::span<const Example> data, const Options& o) {
   if (!cpu_supported()) throw std::runtime_error("train: this CPU lacks AVX2 + FMA");
@@ -118,7 +351,33 @@ Result train(const Hyper& h_in, std::span<const Example> data, const Options& o)
   losses.reserve(static_cast<std::size_t>(o.iterations));
   std::uniform_int_distribution<std::size_t> pick_ex(0, data.size() - 1), pick_fr(0, frames.size() - 1);
 
+  if (o.qat_bits != 0 && (o.qat_bits < 2 || o.qat_bits > 8)) throw std::invalid_argument("train: qat_bits must be 0 or 2 to 8");
+  if (o.vq_bits != 0 && (o.vq_bits < 2 || o.vq_bits > 8 || o.vq_dim < 1 || h.feature_channels() % o.vq_dim != 0 || o.qat_bits != 0)) {
+    throw std::invalid_argument("train: vq_bits 2 to 8 and vq_dim dividing the channels, without qat_bits");
+  }
+  const int vq_from = o.vq_bits > 0 ? static_cast<int>(std::lround(static_cast<double>(o.vq_start) * o.iterations)) : o.iterations + 1;
+  Vq vq;
+  std::mt19937_64 vq_rng(o.seed * 7919 + 3);
+  if (o.rate_lambda > 0.f && (o.rate_bits < 2 || o.rate_bits > 8)) throw std::invalid_argument("train: rate_bits must be 2 to 8");
+  const int qat_from = static_cast<int>(std::lround(static_cast<double>(o.qat_start) * o.iterations));
+  Model fwd;  // the model the forward pass sees: features as stored (quantisation-aware training)
+  double rate = 0;
+
   for (int it = 0; it < o.iterations; ++it) {
+    const bool qat = o.qat_bits > 0 && it >= qat_from;
+    const bool vq_on = it >= vq_from;
+    if (it == vq_from) {
+      vq.init(m, o.vq_bits, o.vq_dim, vq_rng);
+      vq.assign(m);
+    }
+    if (qat) {
+      fwd = m;
+      fake_quantise(fwd, o.qat_bits, o.qat_trim);
+    } else if (vq_on) {
+      fwd = m;
+      vq.apply(fwd);
+    }
+    const Model& seen = qat || vq_on ? fwd : m;
     // The minibatch: (example, frame) pairs, dealt round-robin to the threads.
     std::vector<std::pair<std::size_t, int>> batch(static_cast<std::size_t>(o.batch_frames));
     for (auto& b : batch) b = {pick_ex(rng), frames[pick_fr(rng)]};
@@ -139,7 +398,7 @@ Result train(const Hyper& h_in, std::span<const Example> data, const Options& o)
         std::ranges::sort(px);  // better locality in the feature planes
         std::ranges::fill(dc, 0.f);
         sse[static_cast<std::size_t>(t)] += nets[static_cast<std::size_t>(t)].step(
-            m, grads[static_cast<std::size_t>(t)], frame_time(h, f, h.frames), c, data[e].clip->frame(f), px, size, scale, dc);
+            seen, grads[static_cast<std::size_t>(t)], frame_time(h, f, h.frames), c, data[e].clip->frame(f), px, size, scale, dc);
         for (int j = 0; j < Z; ++j) dcode[static_cast<std::size_t>(t)][e * static_cast<std::size_t>(Z) + static_cast<std::size_t>(j)] += dc[static_cast<std::size_t>(NC + j)];
       }
     };
@@ -153,6 +412,11 @@ Result train(const Hyper& h_in, std::span<const Example> data, const Options& o)
     for (const auto& g : grads) total.add(g);
     const double loss = std::ranges::fold_left(sse, 0.0, std::plus{}) / (static_cast<double>(o.batch_frames) * pixels_per_frame * 4.0);
     losses.push_back(loss);
+    if (o.rate_lambda > 0.f && !o.freeze_model) {  // the rate term reaches every slice
+      rate = feature_rate(m, o.rate_bits, total.g.features, o.rate_lambda / static_cast<float>(m.features.size()), o.qat_trim) /
+             static_cast<double>(m.features.size());
+      std::ranges::fill(total.touched, std::uint8_t{1});
+    }
 
     // Cosine decay of every learning rate to final_lr_scale.
     const float progress = static_cast<float>(it) / static_cast<float>(std::max(1, o.iterations - 1));
@@ -192,12 +456,18 @@ Result train(const Hyper& h_in, std::span<const Example> data, const Options& o)
         if (used || o.z_prior > 0.f) adam.update(codes[e], g, mz[e], o.lr_codes * k, 1e-8f);
       }
     }
+    if (vq_on && !o.freeze_model) {  // the next assignment, and the codebook towards it
+      vq.assign(m);
+      vq.update(m, 0.2f, vq_rng);
+    }
     if (o.log_every > 0 && (it % o.log_every == 0 || it + 1 == o.iterations)) {
       res.curve.emplace_back(it, loss);
       if (o.progress) o.progress(it, loss);
     }
   }
 
+  res.final_rate = o.rate_lambda > 0.f ? rate
+                                        : feature_rate(m, o.qat_bits > 0 ? o.qat_bits : 8, {}, 0.f, o.qat_trim) / static_cast<double>(m.features.size());
   const std::size_t tail = std::max<std::size_t>(1, losses.size() / 20);
   res.final_loss = std::accumulate(losses.end() - static_cast<std::ptrdiff_t>(tail), losses.end(), 0.0) / static_cast<double>(tail);
   if (Z > 0) m.z_train = codes;  // no codes to keep without a variation dimension
@@ -214,6 +484,12 @@ Result train(const Hyper& h_in, std::span<const Example> data, const Options& o)
     }
   }
   for (float& s : m.z_std) s = std::sqrt(s);
+  if (o.vq_bits > 0 && vq_from <= o.iterations) {
+    if (vq.cb.empty()) vq.init(m, o.vq_bits, o.vq_dim, vq_rng);  // vq_start = 1: a codebook fitted after training
+    m.vq_bits = o.vq_bits;
+    m.vq_dim = o.vq_dim;
+    m.vq_codebook = vq.cb;
+  }
   res.model = std::move(m);
   res.codes = std::move(codes);
   res.seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - t_start).count();

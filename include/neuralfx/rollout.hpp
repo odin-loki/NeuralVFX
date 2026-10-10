@@ -121,9 +121,20 @@ struct Model {
   std::vector<float> step_w;                   // step_layout(h).size
   std::vector<float> render_w;                 // render_layout(h).size
   std::vector<StartPoint> starts;
+  // Storage of the coarse start states (results/compression, study F2, design G3c): 16 = fp16 (file versions 1
+  // and 2); 2 to 8 = codes per channel plane with an fp16 (lo, hi) per start and channel, bit-packed below 8 (file
+  // version 3). With start_dither, the codes are dithered subtractively by the start's seed hashed per cell
+  // (start_dither_value): stored q = round((v + d - lo) / step), restored v = lo + q step - d, so the error is uniform
+  // and unrelated to the field; a zero code of a channel whose range starts at zero restores exactly zero.
+  int start_bits = 16;
+  bool start_dither = false;
 
-  std::size_t storage_bytes() const;  // as saved: weights and coarse states fp16, fine fields 8-bit
+  std::size_t storage_bytes() const;  // as saved: weights fp16, coarse states at start_bits, fine fields 8-bit
 };
+
+// The dither of a quantised start state at cell i (of res * res), channel c, for a start with this seed: in [-0.5, 0.5)
+// steps, from the same integer hash as the effect's noise.
+float start_dither_value(std::uint64_t seed, int i, int c);
 
 // Fresh weights (He initialisation, small output layer), no start points.
 Model init_model(const Hyper& h, std::uint64_t seed);

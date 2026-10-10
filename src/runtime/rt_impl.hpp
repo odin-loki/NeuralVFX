@@ -68,13 +68,43 @@ void accumulate_slice(const Model& m, int k, int i, float a, std::span<float> sl
   const std::size_t side2 = static_cast<std::size_t>(h.feature_side()) * h.feature_side();
   const std::size_t planes = static_cast<std::size_t>(h.feature_channels());
   const std::size_t first_plane = (static_cast<std::size_t>(k) * h.grid_t + i) * planes;
-  if (m.feature_bits == 8) {
+  if (m.vq_bits > 0) {  // vector-quantised: per channel group an index plane into the group's codebook
+    const int G = m.vq_groups(), d = m.vq_dim, bits = m.vq_bits;
+    const std::size_t pb = packed_plane_bytes(side2, bits), K = std::size_t{1} << bits;
+    for (int g = 0; g < G; ++g) {
+      const std::uint8_t* q = m.raw_u8.data() + ((static_cast<std::size_t>(k) * h.grid_t + i) * G + static_cast<std::size_t>(g)) * pb;
+      const float* cb = m.raw_codebook.data() + static_cast<std::size_t>(g) * K * static_cast<std::size_t>(d);
+      float* s = slice.data() + static_cast<std::size_t>(g * d) * side2;
+      for (std::size_t j = 0; j < side2; ++j) {
+        const float* w = cb + static_cast<std::size_t>(bits == 8 ? q[j] : packed_code(q, j, bits)) * static_cast<std::size_t>(d);
+        for (int c = 0; c < d; ++c) s[static_cast<std::size_t>(c) * side2 + j] += a * w[c];
+      }
+    }
+  } else if (m.feature_bits == 8) {
     for (std::size_t p = 0; p < planes; ++p) {
       const float lo = m.raw_ranges[(first_plane + p) * 2], hi = m.raw_ranges[(first_plane + p) * 2 + 1];
       const float base = a * lo, step = a * (hi - lo) / 255.f;
       const std::uint8_t* q = m.raw_u8.data() + (first_plane + p) * side2;
       float* s = slice.data() + p * side2;
       for (std::size_t j = 0; j < side2; ++j) s[j] += base + step * static_cast<float>(q[j]);
+    }
+  } else if (m.feature_bits < 8) {  // bit-packed codes (model.hpp), decoded as they are read
+    const int bits = m.feature_bits;
+    const std::size_t pb = packed_plane_bytes(side2, bits);
+    for (std::size_t p = 0; p < planes; ++p) {
+      const float lo = m.raw_ranges[(first_plane + p) * 2], hi = m.raw_ranges[(first_plane + p) * 2 + 1];
+      const float base = a * lo, step = a * (hi - lo) / static_cast<float>((1 << bits) - 1);
+      const std::uint8_t* q = m.raw_u8.data() + (first_plane + p) * pb;
+      float* s = slice.data() + p * side2;
+      if (bits == 4) {
+        for (std::size_t j = 0; j + 1 < side2; j += 2) {
+          s[j] += base + step * static_cast<float>(q[j >> 1] & 15u);
+          s[j + 1] += base + step * static_cast<float>(q[j >> 1] >> 4);
+        }
+        if (side2 & 1) s[side2 - 1] += base + step * static_cast<float>(q[side2 >> 1] & 15u);
+      } else {
+        for (std::size_t j = 0; j < side2; ++j) s[j] += base + step * static_cast<float>(packed_code(q, j, bits));
+      }
     }
   } else {
     const std::uint16_t* q = m.raw_f16.data() + first_plane * side2;
