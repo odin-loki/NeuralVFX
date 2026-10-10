@@ -37,8 +37,8 @@ namespace ro = nfx::rollout;
 namespace {
 
 // Largest difference the baseline build (no FMA: every multiply-add rounded twice) may show after one prior step, in
-// network units. Measured: at most 1.2e-6 on the fire denoiser (112 passes of study G's test run, nvfx_prior parity
-// --isa baseline) and 7.7e-7 on the random networks below.
+// network units. Measured: at most 1.4e-6 on the fire denoiser (112 passes of study G's test run at each of its two
+// settings, nvfx_prior parity --isa baseline) and 7.7e-7 on the random networks below.
 constexpr double kBaselineTolerance = 1e-5;
 
 // A denoiser with every weight random (the zero-initialised layers too), so every path of the network matters.

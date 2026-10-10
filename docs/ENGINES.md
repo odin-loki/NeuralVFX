@@ -97,8 +97,22 @@ is the same; what differs:
 - **Shards.** A looping effect plays as a chain of shards (6 s by default, `nvfx_instance_set_drift` sets the length),
   each a fresh rollout from a start point chosen by the seed, the shard and the nearest controls, with a seed of its
   own; the next shard is rolled ahead of its turn and crossfades in over half a second. Drift never builds up beyond a
-  shard (one continuous rollout, `set_drift(0)`, wanders off after 20 s or so), and the frame shown depends only on the
+  shard (one continuous rollout, `set_drift(0)`, wanders off after 20 s or so, unless a prior is attached: below), and the frame shown depends only on the
   time and the controls.
+- **One continuous run: the prior against drift (optional, fire only).** A second file, a small denoiser trained for
+  the effect (`fire.ddpm`: 1.57 MB, about 19 times the 82 KB fire effect, whose own file is unchanged), keeps one
+  continuous rollout alive for a minute or more without shards. Attach it once, before sharing the effect between
+  threads and creating instances: `nvfx_effect_attach_prior(fire, "fire.ddpm")` (or `_memory`); then
+  `nvfx_instance_set_drift(inst, 0)`. Every 16th frame one pass of the denoiser (89.5 million multiply-adds) moves the
+  coarse state towards its estimate of a clean state ([DCM.md](DCM.md) G2.6, G2.13). Study G found it **ties** the 6 s
+  shards on every statistic: it buys continuity (no restarts, no crossfades), not better pictures, and it was
+  validated on fire only (smoke tied without it; explosions do not run long enough to drift).
+  `nvfx_instance_set_prior(inst, every_frames, t, beta)` changes it (default 16, 100, 1; 0 frames turns it off); with
+  shards it does nothing. **Cost** (provisional, one AVX2 core, 128 x 128): on average what shards cost (0.91 against
+  0.93 ms per frame), but not evenly: the frame where the pass runs costs about 3.9 ms instead of 0.7 ms, once every
+  16 frames (worst frame 4.1 ms, against 1.85 ms with shards). Running `nvfx_render` on a worker hides it from the game thread; with many such instances, start them on
+  different frames so their passes fall on different frames (the pass runs on frames 16, 32, ... of each instance's
+  own timeline). Memory: 1.57 MB per effect, 1.1 MB more per instance (in `nvfx_instance_scratch_bytes`).
 - **Time moves forward.** `nvfx_render(inst, t, ...)` steps the shards to frame `floor(t * fps)`: normal playback
   costs one step per new frame, two during the half second before each shard change (the next shard rolling ahead) and
   two renders during the crossfade. Going backwards, or more than 2 s forwards, restarts the shard that contains `t`
@@ -123,5 +137,6 @@ is the same; what differs:
 | what | where | size |
 |---|---|---|
 | effect weights | `nvfx_effect` | `info.resident_bytes`: features stay at their stored precision (8 or 16 bits); the small MLP is widened to floats |
-| per instance | `nvfx_instance` | `nvfx_instance_scratch_bytes`: a few tens of KB |
+| per instance | `nvfx_instance` | `nvfx_instance_scratch_bytes`: a few tens of KB (rollout effects: about 4 MB at 128 x 128, 1.1 MB more with a prior) |
+| prior against drift (optional, rollout effects) | `nvfx_effect`, after `nvfx_effect_attach_prior` | the denoiser's weights as floats: 1.57 MB for fire; counted in `info.resident_bytes` |
 | output | the engine's buffer | size x size x 4 bytes |

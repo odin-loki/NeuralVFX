@@ -37,7 +37,10 @@ endfunction()
 # GCC contracts a * b + c into one fused multiply-add in C++ (only its ISO C modes turn this off), so any code under
 # a "fma" target pragma fuses unless contraction is switched off explicitly. It is asked for explicitly here because
 # separate multiplies and adds would halve the throughput of these loops; the ISAs then differ in the last bits, which
-# the tests allow for. Code that must be bit-exact across ISAs stays out of these targets.
+# the tests allow for. Code that must be bit-exact across ISAs stays out of these targets. Not every a * b + c fuses,
+# though: GCC's generic tuning (--param avoid-fma-max-bits=256) leaves some loop-carried multiply-add chains unfused,
+# depending on the loop's shape, so code that must match another file's floats copies its loops' shape too
+# (src/runtime/rt_prior_impl.hpp against src/dcm/ddpm_kernels.hpp; docs/DCM.md G2.13).
 function(neuralfx_simd target)
   if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
     target_compile_options(${target} PRIVATE -ffp-contract=fast -Wno-psabi)
