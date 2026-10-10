@@ -188,6 +188,20 @@ inline void each_block(int width, F&& f) {
   for (; x < width; ++x) f.template operator()<float>(x);
 }
 
+// each_block() restricted to pixels [a, b): the same blocks (whole blocks of kW from 0, the pixels past the last whole
+// block one by one), so a pixel goes through the same code as in each_block(). Returns the pixels covered, [lo, hi).
+template <class F>
+inline std::array<int, 2> each_block_in(int width, int a, int b, F&& f) {
+  const int full = width / kW * kW;
+  if (a >= b) return {0, 0};
+  int x = a / kW * kW;
+  const int lo = a < full ? x : a;
+  for (; x < b && x + kW <= width; x += kW) f.template operator()<vf>(x);
+  const int hi = b <= full ? x : b;
+  for (x = std::max(x, a); x < b; ++x) f.template operator()<float>(x);
+  return {lo, hi};
+}
+
 // --- noise and interpolation ------------------------------------------------------------------------------------------
 
 // Value noise at fixed 2D points, as a function of the third coordinate z. value_noise(x, y, z) is
@@ -412,6 +426,11 @@ class Rollout final : public RolloutRunner {
     soot_.assign(z(R_ + 2 * kDirSteps) * z(R_ + 2 * kDirSteps), 0.f);  // zero border, written inside only
     fac_.resize(z(N_) * 4);
     any_.resize(z(R_));
+    ext_.assign(z(S_) * 2, 0);
+    qmin_.assign(z(S_), 0);
+    qmax_.assign(z(S_), 0);
+    act_.assign(z(S_) * 2, 0);
+    nm_.assign(z(R_) * 2, 0);
     const std::size_t S2 = z(S_) * z(S_);
     ft_.resize(S2);
     fd_.resize(S2);
@@ -440,6 +459,15 @@ class Rollout final : public RolloutRunner {
     swirl_.init(z(sw_n_) * z(sw_n_), 0);
     swl_.resize(z(sw_n_) * z(sw_n_) * 2);
     ax_ = axis(S_, R_, static_cast<float>(R_) / static_cast<float>(S_), -0.5f);
+    // fine pixels whose lock reads coarse cell j (as the first or second cell of their interpolation): [cell_lo, cell_hi)
+    cell_lo_.assign(z(R_), S_);
+    cell_hi_.assign(z(R_), 0);
+    for (int p = 0; p < S_; ++p) {
+      for (const int j : {ax_.i[z(p)], ax_.i[z(p)] + 1}) {
+        cell_lo_[z(j)] = std::min(cell_lo_[z(j)], p);
+        cell_hi_[z(j)] = std::max(cell_hi_[z(j)], p + 1);
+      }
+    }
     sx_ = axis(S_, sw_n_, 128.f / static_cast<float>(S_) / sw_spacing_, 0.5f / sw_spacing_ + 1.f);
     const int Sb = (S_ + kB - 1) / kB * kB;  // a row padded to whole blocks of 16 pixels
     frow_.assign(2 * z(Sb), 0.f);
@@ -481,6 +509,8 @@ class Rollout final : public RolloutRunner {
   void begin(int index, std::uint64_t seed) override {
     using namespace rollout;
     const StartPoint& sp = m_.starts[z(index)];
+    computed_ = 0.0;
+    dense_steps_ = 0;
     reseed(seed);
     time_ = sp.time;
     std::fill(coarse_.begin(), coarse_.end(), 0.f);
@@ -568,9 +598,19 @@ class Rollout final : public RolloutRunner {
       std::uint8_t* out_row = rgba + stride * z(S_ - 1 - y);
       for (int x0 = 0; x0 < S_; x0 += kB) {  // blocks of 16 pixels (the last one maybe in part)
         vf tv[kV], dv[kV];
+        vi lit{};
         for (int v = 0; v < kV; ++v) {
           tv[v] = load(ftn + x0 + v * kW);
           dv[v] = load(fdn + x0 + v * kW);
+          lit |= (tv[v] > 0.f) | (dv[v] > 0.f);
+        }
+        if (skip_) {  // no heat or soot in the block: the material gate is +0, so every byte is 0
+          bool any = false;
+          for (int l = 0; l < kW; ++l) any |= lit[l] != 0;
+          if (!any) {
+            std::memset(out_row + 4 * z(x0), 0, 4 * z(std::min(kB, S_ - x0)));
+            continue;
+          }
         }
         for (int j = 0; j < RH; ++j) {
           const float w0 = w[RL_.w1 + z(j) * kRenderIn], w1 = w[RL_.w1 + z(j) * kRenderIn + 1];
@@ -630,7 +670,7 @@ class Rollout final : public RolloutRunner {
                           &cs_t_, &cs_d_, &wx_, &wy_, &swl_, &g1_, &frow_, &r1_, &r2_, &out_}) {
       n += v->size() * 4;
     }
-    n += any_.size() + 4 * off_.size();
+    n += any_.size() + 4 * off_.size() + 4 * (ext_.size() + act_.size() + nm_.size() + cell_lo_.size() + cell_hi_.size() + qmin_.size() + qmax_.size());
     n += curl_.bytes() + swirl_.bytes() + fine_flicker_.bytes();
     for (const auto& f : flicker_) n += f.bytes();
     n += flow_rows_.bytes() + swirl_rows_.bytes() + fac_rows_.bytes() + render_rows_.bytes();
@@ -653,6 +693,7 @@ class Rollout final : public RolloutRunner {
   std::span<float> coarse_mut() override { return coarse_; }
   std::span<float> fine_heat_mut() override { return ft_; }
   std::span<float> fine_soot_mut() override { return fd_; }
+  void skip_empty(bool on) override { skip_ = on; }
   void adopt(float seconds) override {
     time_ = seconds;
     since_start_ = m_.detail.swirl_ramp;
@@ -944,12 +985,35 @@ class Rollout final : public RolloutRunner {
     }
     const int lead = static_cast<int>(std::min(edge, std::max(0.f, -(k * flo + amp * slo)))) + 3;
     const int lag = static_cast<int>(std::min(edge, std::max(0.f, k * fhi + amp * shi))) + 3;
+    lead_ = lead;
+    lag_ = lag;
+    // Spans only pay where much is empty: a step uses them when the last step that measured its spans computed at most
+    // 90% of the pixels, and measures again every 8 steps (both paths give the same bits).
+    spans_ = skip_ && (computed_ <= 0.9 || dense_steps_ >= 8);
+    dense_steps_ = spans_ ? 0 : dense_steps_ + 1;
+    if (spans_) {  // how far the samples reach left and right, as lead and lag up and down
+      float ulo = 0.f, uhi = 0.f, sulo = 0.f, suhi = 0.f;
+      for (int i = 0; i < N_; ++i) {
+        ulo = std::min(ulo, flow_[z(i) * 2]);
+        uhi = std::max(uhi, flow_[z(i) * 2]);
+      }
+      if (amp > 0.f) {
+        for (std::size_t q = 0; q < swl_.size(); q += 2) {
+          sulo = std::min(sulo, swl_[q]);
+          suhi = std::max(suhi, swl_[q]);
+        }
+      }
+      // a pixel at x samples x - u: it can see material in [first, last] only if x is in [first + ulo - 1, last + uhi + 1]
+      reach_lo_ = static_cast<int>(std::min(edge, std::max(0.f, -(k * ulo + amp * sulo)))) + 3;
+      reach_hi_ = static_cast<int>(std::min(edge, std::max(0.f, k * uhi + amp * suhi))) + 3;
+    }
     ring_ = std::min(S_, lag + 1);  // a row's record lives from its forward samples until its round trip, lag rows later
     // The rings of padded rows hold every row from the oldest a sample still reads to the newest written ahead of it,
     // and the zero rows below and above the frame.
     ring_rows_ = std::min(slots_, static_cast<int>(std::bit_ceil(z(lead + lag + 2))));
     zero_row(td_, 0);
     zero_row(fg_, 0);
+    win_next_ = qmin_head_ = qmin_tail_ = qmax_head_ = qmax_tail_ = 0;
     const int kk = S_ / R_;
     int copied = 0, back = 0, locked = 0;
     for (int r = 0; r < S_; ++r) {
@@ -960,7 +1024,7 @@ class Rollout final : public RolloutRunner {
           zero_row(td_, S_ + 2);
         }
       }
-      forward_row(r);
+      forward_row(r, forward_span(r, copied));
       const bool last = r + 1 == S_;
       if (last) {
         zero_row(fg_, S_ + 1);
@@ -971,6 +1035,11 @@ class Rollout final : public RolloutRunner {
         if ((back + 1) % kk == 0) lock_factors(back / kk);
       }
       for (; locked < S_ && (back == S_ || back / kk >= ax_.i[z(locked)] + 2); ++locked) lock_row(locked);
+    }
+    if (spans_) {
+      long n = 0;
+      for (int y = 0; y < S_; ++y) n += act_[z(y) * 2 + 1] - act_[z(y) * 2];
+      computed_ = static_cast<double>(n) / (static_cast<double>(S_) * static_cast<double>(S_));
     }
   }
 
@@ -996,10 +1065,62 @@ class Rollout final : public RolloutRunner {
     const float* b = fd_.data() + z(y) * S;
     each_block(S_, [&]<class V>(int x) { st_pairs<V>(o + 2 * x, ld<V>(a + x), ld<V>(b + x)); });
     mirror(td_, y + 1);
+    if (spans_) {  // the first and last pixel of the row that is not +0 in either field (bit patterns: -0 and NaN count)
+      // Blocks of 8 pixels are tested at once (an "or" of their bits, which vectorises), then the pixel in the block.
+      const auto bits = [&](int x) { return std::bit_cast<std::uint32_t>(a[x]) | std::bit_cast<std::uint32_t>(b[x]); };
+      const auto any8 = [&](int x0) {
+        std::uint32_t m = 0;
+        for (int x = x0; x < std::min(S_, x0 + 8); ++x) m |= bits(x);
+        return m != 0;
+      };
+      int first = S_, last = -1;
+      for (int x0 = 0; x0 < S_ && first == S_; x0 += 8) {
+        if (!any8(x0)) continue;
+        for (int x = x0;; ++x) {
+          if (bits(x)) {
+            first = x;
+            break;
+          }
+        }
+      }
+      for (int x0 = (S_ - 1) / 8 * 8; x0 >= 0 && last < 0 && first < S_; x0 -= 8) {
+        if (!any8(x0)) continue;
+        for (int x = std::min(S_, x0 + 8) - 1;; --x) {
+          if (bits(x)) {
+            last = x;
+            break;
+          }
+        }
+      }
+      ext_[z(y) * 2] = first;
+      ext_[z(y) * 2 + 1] = last;
+    }
+  }
+
+  // The pixels of row y whose forward samples can see material (copied rows within the samples' vertical reach,
+  // widened by their horizontal reach): [a, b), or every pixel when nothing is skipped.
+  // The window [y - lag, y + lead] moves down one row per call, so its least first pixel and greatest last pixel are
+  // kept in two monotone queues of rows (each row enters and leaves once).
+  std::array<int, 2> forward_span(int y, int copied) {
+    if (!spans_) return {0, S_};
+    for (const int top = std::min(copied - 1, y + lead_); win_next_ <= top; ++win_next_) {
+      const int r = win_next_;
+      while (qmin_tail_ > qmin_head_ && ext_[z(qmin_[z(qmin_tail_ - 1)]) * 2] >= ext_[z(r) * 2]) --qmin_tail_;
+      qmin_[z(qmin_tail_++)] = r;
+      while (qmax_tail_ > qmax_head_ && ext_[z(qmax_[z(qmax_tail_ - 1)]) * 2 + 1] <= ext_[z(r) * 2 + 1]) --qmax_tail_;
+      qmax_[z(qmax_tail_++)] = r;
+    }
+    while (qmin_head_ < qmin_tail_ && qmin_[z(qmin_head_)] < y - lag_) ++qmin_head_;
+    while (qmax_head_ < qmax_tail_ && qmax_[z(qmax_head_)] < y - lag_) ++qmax_head_;
+    if (qmin_head_ == qmin_tail_) return {0, 0};
+    const int first = ext_[z(qmin_[z(qmin_head_)]) * 2], last = ext_[z(qmax_[z(qmax_head_)]) * 2 + 1];
+    if (last < first) return {0, 0};
+    // samples of pixel x lie in [x - uhi, x - ulo] (+1 for the stencil): x + reach_lo_ reaches first, x - reach_hi_ last
+    return {std::max(0, first - reach_lo_), std::min(S_, last + reach_hi_ + 1)};
   }
 
   // Row y of the fine velocity (the coarse flow and the swirl, interpolated), the forward samples and their range.
-  void forward_row(int y) {
+  void forward_row(int y, std::array<int, 2> span) {
     const std::size_t S = z(S_);
     const int Pw = S_ + 3;
     const float k = static_cast<float>(S_) / static_cast<float>(R_), edge = static_cast<float>(S_), yf = static_cast<float>(y);
@@ -1024,7 +1145,7 @@ class Rollout final : public RolloutRunner {
     const int mask = ring_rows_ - 1;
     std::int32_t* off = off_.data();
     float *wx = wx_.data(), *wy = wy_.data();
-    each_block(S_, [&]<class V>(int x) {  // the velocity and the stencils
+    each_block_in(S_, span[0], span[1], [&]<class V>(int x) {  // the velocity and the stencils
       const V a = ld<V>(u0 + x), b = ld<V>(v0 + x);
       V u = (a + wy0 * (ld<V>(u1 + x) - a)) * k, v = (b + wy0 * (ld<V>(v1 + x) - b)) * k;
       if (swirl) {
@@ -1037,7 +1158,7 @@ class Rollout final : public RolloutRunner {
       st<V>(r + kW, v);
       stencil<V>(bc<V>(static_cast<float>(x)) + lane_index<V>() - u, bc<V>(yf) - v, Pw, mask, edge, off + x, wx + x, wy + x);
     });
-    each_block(S_, [&]<class V>(int x) {  // the samples and their range
+    const auto done = each_block_in(S_, span[0], span[1], [&]<class V>(int x) {  // the samples and their range
       V sa, sb, lo[2], hi[2];
       sample2<V, true>(td, 2 * Pw, off + x, ld<V>(wx + x), ld<V>(wy + x), sa, sb, lo, hi);
       st_pairs<V>(o + 2 * x, sa, sb);
@@ -1049,6 +1170,12 @@ class Rollout final : public RolloutRunner {
       st<V>(r + 6 * kW, lo[1]);
       st<V>(r + 7 * kW, hi[1]);
     });
+    // Outside, every sample and its range is +0 (its stencil reads only +0): stored as such, and the round trip of
+    // this row skips the same pixels.
+    if (done[0] > 0) std::fill(o, o + 2 * done[0], 0.f);  // (guarded: an empty fill is still a call)
+    if (std::max(done[0], done[1]) < S_) std::fill(o + 2 * std::max(done[0], done[1]), o + 2 * S, 0.f);
+    act_[z(y) * 2] = done[0];
+    act_[z(y) * 2 + 1] = done[1];
     mirror(fg_, y + 1);
   }
 
@@ -1063,11 +1190,22 @@ class Rollout final : public RolloutRunner {
     float *ft = ft_.data() + i, *fd = fd_.data() + i, *cst = cs_t_.data(), *csd = cs_d_.data();
     std::int32_t* off = off_.data();
     float *wx = wx_.data(), *wy = wy_.data();
-    each_block(S_, [&]<class V>(int x) {
+    const int xa = act_[z(y) * 2], xb = act_[z(y) * 2 + 1];
+    each_block_in(S_, xa, xb, [&]<class V>(int x) {
       const float* r = in_record<V>(rec, x);
       stencil<V>(bc<V>(static_cast<float>(x)) + lane_index<V>() + ld<V>(r), bc<V>(yf) + ld<V>(r + kW), Pw, mask, edge, off + x, wx + x, wy + x);
     });
-    each_block(S_, [&]<class V>(int x) {
+    // Outside, the forward samples' range is [+0, +0], so the corrected value is +0 whatever the round trip gives;
+    // the column sums add nothing.
+    if (xa > 0) {
+      std::fill(ft, ft + xa, 0.f);
+      std::fill(fd, fd + xa, 0.f);
+    }
+    if (std::max(xa, xb) < S_) {
+      std::fill(ft + std::max(xa, xb), ft + S_, 0.f);
+      std::fill(fd + std::max(xa, xb), fd + S_, 0.f);
+    }
+    each_block_in(S_, xa, xb, [&]<class V>(int x) {
       V a, b;
       sample2<V, false>(fg, 2 * Pw, off + x, ld<V>(wx + x), ld<V>(wy + x), a, b, nullptr, nullptr);
       const float* r = in_record<V>(rec, x);
@@ -1100,6 +1238,8 @@ class Rollout final : public RolloutRunner {
     const float inv = 1.f / static_cast<float>(kk * kk);
     constexpr float eps = 1e-4f;
     any_[z(c)] = 0;
+    nm_[z(c) * 2] = R_;  // the cells with new material: [first, last]
+    nm_[z(c) * 2 + 1] = -1;
     for (int x = 0; x < R_; ++x) {
       float st = 0.f, sd = 0.f;
       for (int p = x * kk; p < (x + 1) * kk; ++p) {
@@ -1115,7 +1255,11 @@ class Rollout final : public RolloutRunner {
       f[0] = std::max(0.f, tt - bt * f[1]);
       f[3] = rd <= 1.f ? rd : std::min(rd, dt.grow);
       f[2] = std::max(0.f, td - bd * f[3]);
-      if (f[0] > 0.f || f[2] > 0.f) any_[z(c)] = 1;
+      if (f[0] > 0.f || f[2] > 0.f) {
+        any_[z(c)] = 1;
+        nm_[z(c) * 2] = std::min(nm_[z(c) * 2], x);
+        nm_[z(c) * 2 + 1] = std::max(nm_[z(c) * 2 + 1], x);
+      }
     }
     std::fill(cs_t_.begin(), cs_t_.end(), 0.f);
     std::fill(cs_d_.begin(), cs_d_.end(), 0.f);
@@ -1151,7 +1295,21 @@ class Rollout final : public RolloutRunner {
     const float keep = 1.f - dt.contrast, ck = dt.contrast * dt.kappa;
     float* qt = ft_.data() + z(y) * S;
     float* qd = fd_.data() + z(y) * S;
-    each_block(S_, [&]<class V>(int x) {
+    // Where the fields are +0 after the round trip and no new material is interpolated, the lock gives +0 * scale + 0:
+    // +0 again. So it runs on the round trip's pixels and on those that read a coarse cell with new material.
+    int xa = 0, xb = S_;
+    if (spans_) {
+      xa = act_[z(y) * 2];
+      xb = act_[z(y) * 2 + 1];
+      if (xa >= xb) xa = S_, xb = 0;
+      for (const int cc : {c, c + 1}) {
+        if (nm_[z(cc) * 2 + 1] >= nm_[z(cc) * 2]) {
+          xa = std::min(xa, cell_lo_[z(nm_[z(cc) * 2])]);
+          xb = std::max(xb, cell_hi_[z(nm_[z(cc) * 2 + 1])]);
+        }
+      }
+    }
+    each_block_in(S_, xa, xb, [&]<class V>(int x) {
       V at = ld<V>(at0 + x), ad = ld<V>(ad0 + x), rt = ld<V>(rt0 + x), rd = ld<V>(rd0 + x);
       at = at + wy * (ld<V>(at1 + x) - at);
       rt = rt + wy * (ld<V>(rt1 + x) - rt);
@@ -1192,6 +1350,16 @@ class Rollout final : public RolloutRunner {
   std::vector<float> wx_, wy_;                              // corners, and the weights
   std::vector<float> fac_;                                  // the lock's factors per coarse cell: add, scale (heat, soot)
   std::vector<std::uint8_t> any_;                           // a row of coarse cells receives new material
+  // Study H (H2): skipping what is +0. Per fine row, the first and last pixel that is not +0 before the step (ext_) and
+  // the pixels the forward samples and the round trip computed (act_, [a, b)); per coarse row, the first and last cell
+  // with new material (nm_); per coarse cell, the fine pixels whose lock reads it ([cell_lo_, cell_hi_)).
+  std::vector<int> ext_, act_, nm_, cell_lo_, cell_hi_;
+  std::vector<int> qmin_, qmax_;  // the rows of the forward samples' window, as monotone queues (see forward_span)
+  int win_next_ = 0, qmin_head_ = 0, qmin_tail_ = 0, qmax_head_ = 0, qmax_tail_ = 0;
+  bool skip_ = true, spans_ = false;  // skipping allowed; used in this step
+  double computed_ = 0.0;            // the fraction of pixels the last step with spans computed
+  int dense_steps_ = 0;              // steps since then
+  int lead_ = 0, lag_ = 0, reach_lo_ = 0, reach_hi_ = 0;
   std::vector<float> swl_;                                  // the swirl lattice's velocity, (u, v) interleaved
   std::vector<float> r1_, r2_, out_;                        // the renderer's activations for one block
   Axis ax_, sx_;                     // fine pixel -> coarse cell, fine pixel -> swirl lattice

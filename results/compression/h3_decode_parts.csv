@@ -1,0 +1,729 @@
+file,config,part,values,original_bytes,coded_bytes
+explosion_0_grid_m8.nvfx,cm,header,168,168,53.6
+explosion_0_grid_m8.nvfx,cm,features,131072,131072,84775.8
+explosion_0_grid_m8.nvfx,cm,feature ranges,256,512,366.5
+explosion_0_grid_m8.nvfx,cm,weights,1408,2816,2373.2
+explosion_0_grid_m8.nvfx,cm,biases,133,266,229.0
+explosion_0_grid_m8.nvfx,cm+lz,header,168,168,56.3
+explosion_0_grid_m8.nvfx,cm+lz,features,131072,131072,84775.8
+explosion_0_grid_m8.nvfx,cm+lz,feature ranges,256,512,366.5
+explosion_0_grid_m8.nvfx,cm+lz,weights,1408,2816,2373.2
+explosion_0_grid_m8.nvfx,cm+lz,biases,133,266,229.0
+explosion_0_grid_m8.nvfx,light,header,168,168,57.2
+explosion_0_grid_m8.nvfx,light,features,131072,131072,87607.8
+explosion_0_grid_m8.nvfx,light,feature ranges,256,512,384.6
+explosion_0_grid_m8.nvfx,light,weights,1408,2816,2437.6
+explosion_0_grid_m8.nvfx,light,biases,133,266,243.1
+explosion_0_grid_m8.nvfx,light+lz,header,168,168,59.2
+explosion_0_grid_m8.nvfx,light+lz,features,131072,131072,87607.8
+explosion_0_grid_m8.nvfx,light+lz,feature ranges,256,512,384.6
+explosion_0_grid_m8.nvfx,light+lz,weights,1408,2816,2437.6
+explosion_0_grid_m8.nvfx,light+lz,biases,133,266,243.1
+explosion_0_grid_m8.nvfx,light+lz seekable,header,168,168,59.2
+explosion_0_grid_m8.nvfx,light+lz seekable,features,131072,131072,87708.6
+explosion_0_grid_m8.nvfx,light+lz seekable,feature ranges,256,512,384.6
+explosion_0_grid_m8.nvfx,light+lz seekable,weights,1408,2816,2422.5
+explosion_0_grid_m8.nvfx,light+lz seekable,biases,133,266,243.6
+explosion_0_grid_m8.nvfx,fast,header,168,168,143.6
+explosion_0_grid_m8.nvfx,fast,features,131072,131072,95564.7
+explosion_0_grid_m8.nvfx,fast,feature ranges,256,512,402.7
+explosion_0_grid_m8.nvfx,fast,weights,1408,2816,2864.1
+explosion_0_grid_m8.nvfx,fast,biases,133,266,272.4
+explosion_0_grid_m8.nvfx,fast+lz,header,168,168,119.2
+explosion_0_grid_m8.nvfx,fast+lz,features,131072,131072,95564.7
+explosion_0_grid_m8.nvfx,fast+lz,feature ranges,256,512,402.7
+explosion_0_grid_m8.nvfx,fast+lz,weights,1408,2816,2864.1
+explosion_0_grid_m8.nvfx,fast+lz,biases,133,266,272.4
+explosion_0_grid_m8.nvfx,fast+lz seekable,header,168,168,119.2
+explosion_0_grid_m8.nvfx,fast+lz seekable,features,131072,131072,95600.6
+explosion_0_grid_m8.nvfx,fast+lz seekable,feature ranges,256,512,402.7
+explosion_0_grid_m8.nvfx,fast+lz seekable,weights,1408,2816,2927.0
+explosion_0_grid_m8.nvfx,fast+lz seekable,biases,133,266,347.5
+fire_0_conv_m16.nvfx,cm,header,176,176,54.3
+fire_0_conv_m16.nvfx,cm,features,131072,262144,216233.0
+fire_0_conv_m16.nvfx,cm,weights,6048,12096,10200.5
+fire_0_conv_m16.nvfx,cm,biases,77,154,134.9
+fire_0_conv_m16.nvfx,cm+lz,header,176,176,57.4
+fire_0_conv_m16.nvfx,cm+lz,features,131072,262144,216233.0
+fire_0_conv_m16.nvfx,cm+lz,weights,6048,12096,10200.5
+fire_0_conv_m16.nvfx,cm+lz,biases,77,154,134.9
+fire_0_conv_m16.nvfx,light,header,176,176,57.2
+fire_0_conv_m16.nvfx,light,features,131072,262144,220143.7
+fire_0_conv_m16.nvfx,light,weights,6048,12096,10438.2
+fire_0_conv_m16.nvfx,light,biases,77,154,138.2
+fire_0_conv_m16.nvfx,light+lz,header,176,176,59.7
+fire_0_conv_m16.nvfx,light+lz,features,131072,262144,220143.7
+fire_0_conv_m16.nvfx,light+lz,weights,6048,12096,10438.2
+fire_0_conv_m16.nvfx,light+lz,biases,77,154,138.2
+fire_0_conv_m16.nvfx,light+lz seekable,header,176,176,59.7
+fire_0_conv_m16.nvfx,light+lz seekable,features,131072,262144,220230.6
+fire_0_conv_m16.nvfx,light+lz seekable,weights,6048,12096,10447.2
+fire_0_conv_m16.nvfx,light+lz seekable,biases,77,154,144.0
+fire_0_conv_m16.nvfx,fast,header,176,176,146.7
+fire_0_conv_m16.nvfx,fast,features,131072,262144,258110.9
+fire_0_conv_m16.nvfx,fast,weights,6048,12096,12161.5
+fire_0_conv_m16.nvfx,fast,biases,77,154,156.7
+fire_0_conv_m16.nvfx,fast+lz,header,176,176,118.8
+fire_0_conv_m16.nvfx,fast+lz,features,131072,262144,258110.9
+fire_0_conv_m16.nvfx,fast+lz,weights,6048,12096,12161.5
+fire_0_conv_m16.nvfx,fast+lz,biases,77,154,156.7
+fire_0_conv_m16.nvfx,fast+lz seekable,header,176,176,118.8
+fire_0_conv_m16.nvfx,fast+lz seekable,features,131072,262144,258162.1
+fire_0_conv_m16.nvfx,fast+lz seekable,weights,6048,12096,12232.9
+fire_0_conv_m16.nvfx,fast+lz seekable,biases,77,154,222.8
+fire_0_conv_m8.nvfx,cm,header,176,176,54.1
+fire_0_conv_m8.nvfx,cm,features,131072,131072,105906.4
+fire_0_conv_m8.nvfx,cm,feature ranges,1024,2048,1415.0
+fire_0_conv_m8.nvfx,cm,weights,6048,12096,10199.8
+fire_0_conv_m8.nvfx,cm,biases,77,154,134.9
+fire_0_conv_m8.nvfx,cm+lz,header,176,176,57.4
+fire_0_conv_m8.nvfx,cm+lz,features,131072,131072,105906.6
+fire_0_conv_m8.nvfx,cm+lz,feature ranges,1024,2048,1415.0
+fire_0_conv_m8.nvfx,cm+lz,weights,6048,12096,10199.8
+fire_0_conv_m8.nvfx,cm+lz,biases,77,154,134.9
+fire_0_conv_m8.nvfx,light,header,176,176,57.3
+fire_0_conv_m8.nvfx,light,features,131072,131072,108288.8
+fire_0_conv_m8.nvfx,light,feature ranges,1024,2048,1449.1
+fire_0_conv_m8.nvfx,light,weights,6048,12096,10438.2
+fire_0_conv_m8.nvfx,light,biases,77,154,138.2
+fire_0_conv_m8.nvfx,light+lz,header,176,176,59.7
+fire_0_conv_m8.nvfx,light+lz,features,131072,131072,108288.8
+fire_0_conv_m8.nvfx,light+lz,feature ranges,1024,2048,1449.1
+fire_0_conv_m8.nvfx,light+lz,weights,6048,12096,10438.2
+fire_0_conv_m8.nvfx,light+lz,biases,77,154,138.2
+fire_0_conv_m8.nvfx,light+lz seekable,header,176,176,59.7
+fire_0_conv_m8.nvfx,light+lz seekable,features,131072,131072,108410.0
+fire_0_conv_m8.nvfx,light+lz seekable,feature ranges,1024,2048,1449.1
+fire_0_conv_m8.nvfx,light+lz seekable,weights,6048,12096,10447.2
+fire_0_conv_m8.nvfx,light+lz seekable,biases,77,154,144.0
+fire_0_conv_m8.nvfx,fast,header,176,176,146.6
+fire_0_conv_m8.nvfx,fast,features,131072,131072,116057.5
+fire_0_conv_m8.nvfx,fast,feature ranges,1024,2048,1510.4
+fire_0_conv_m8.nvfx,fast,weights,6048,12096,12161.5
+fire_0_conv_m8.nvfx,fast,biases,77,154,156.7
+fire_0_conv_m8.nvfx,fast+lz,header,176,176,118.7
+fire_0_conv_m8.nvfx,fast+lz,features,131072,131072,116057.5
+fire_0_conv_m8.nvfx,fast+lz,feature ranges,1024,2048,1510.4
+fire_0_conv_m8.nvfx,fast+lz,weights,6048,12096,12161.5
+fire_0_conv_m8.nvfx,fast+lz,biases,77,154,156.7
+fire_0_conv_m8.nvfx,fast+lz seekable,header,176,176,118.7
+fire_0_conv_m8.nvfx,fast+lz seekable,features,131072,131072,116088.9
+fire_0_conv_m8.nvfx,fast+lz seekable,feature ranges,1024,2048,1510.4
+fire_0_conv_m8.nvfx,fast+lz seekable,weights,6048,12096,12232.9
+fire_0_conv_m8.nvfx,fast+lz seekable,biases,77,154,222.8
+fire_0_conv_s16.nvfx,cm,header,176,176,52.8
+fire_0_conv_s16.nvfx,cm,features,65536,131072,108192.9
+fire_0_conv_s16.nvfx,cm,weights,2016,4032,3441.4
+fire_0_conv_s16.nvfx,cm,biases,53,106,97.1
+fire_0_conv_s16.nvfx,cm+lz,header,176,176,55.8
+fire_0_conv_s16.nvfx,cm+lz,features,65536,131072,108192.9
+fire_0_conv_s16.nvfx,cm+lz,weights,2016,4032,3441.4
+fire_0_conv_s16.nvfx,cm+lz,biases,53,106,97.1
+fire_0_conv_s16.nvfx,light,header,176,176,56.2
+fire_0_conv_s16.nvfx,light,features,65536,131072,109909.2
+fire_0_conv_s16.nvfx,light,weights,2016,4032,3537.0
+fire_0_conv_s16.nvfx,light,biases,53,106,97.8
+fire_0_conv_s16.nvfx,light+lz,header,176,176,58.5
+fire_0_conv_s16.nvfx,light+lz,features,65536,131072,109909.2
+fire_0_conv_s16.nvfx,light+lz,weights,2016,4032,3537.0
+fire_0_conv_s16.nvfx,light+lz,biases,53,106,97.8
+fire_0_conv_s16.nvfx,light+lz seekable,header,176,176,58.5
+fire_0_conv_s16.nvfx,light+lz seekable,features,65536,131072,109909.2
+fire_0_conv_s16.nvfx,light+lz seekable,weights,2016,4032,3537.4
+fire_0_conv_s16.nvfx,light+lz seekable,biases,53,106,103.2
+fire_0_conv_s16.nvfx,fast,header,176,176,144.5
+fire_0_conv_s16.nvfx,fast,features,65536,131072,128262.2
+fire_0_conv_s16.nvfx,fast,weights,2016,4032,4087.4
+fire_0_conv_s16.nvfx,fast,biases,53,106,109.9
+fire_0_conv_s16.nvfx,fast+lz,header,176,176,118.6
+fire_0_conv_s16.nvfx,fast+lz,features,65536,131072,128262.2
+fire_0_conv_s16.nvfx,fast+lz,weights,2016,4032,4087.4
+fire_0_conv_s16.nvfx,fast+lz,biases,53,106,109.9
+fire_0_conv_s16.nvfx,fast+lz seekable,header,176,176,118.6
+fire_0_conv_s16.nvfx,fast+lz seekable,features,65536,131072,128262.2
+fire_0_conv_s16.nvfx,fast+lz seekable,weights,2016,4032,4154.5
+fire_0_conv_s16.nvfx,fast+lz seekable,biases,53,106,167.2
+fire_0_conv_s8.nvfx,cm,header,176,176,52.7
+fire_0_conv_s8.nvfx,cm,features,65536,65536,52839.5
+fire_0_conv_s8.nvfx,cm,feature ranges,512,1024,715.9
+fire_0_conv_s8.nvfx,cm,weights,2016,4032,3441.4
+fire_0_conv_s8.nvfx,cm,biases,53,106,97.2
+fire_0_conv_s8.nvfx,cm+lz,header,176,176,55.7
+fire_0_conv_s8.nvfx,cm+lz,features,65536,65536,52839.5
+fire_0_conv_s8.nvfx,cm+lz,feature ranges,512,1024,715.9
+fire_0_conv_s8.nvfx,cm+lz,weights,2016,4032,3441.4
+fire_0_conv_s8.nvfx,cm+lz,biases,53,106,97.3
+fire_0_conv_s8.nvfx,light,header,176,176,56.2
+fire_0_conv_s8.nvfx,light,features,65536,65536,53912.5
+fire_0_conv_s8.nvfx,light,feature ranges,512,1024,738.2
+fire_0_conv_s8.nvfx,light,weights,2016,4032,3537.0
+fire_0_conv_s8.nvfx,light,biases,53,106,97.8
+fire_0_conv_s8.nvfx,light+lz,header,176,176,58.5
+fire_0_conv_s8.nvfx,light+lz,features,65536,65536,53912.5
+fire_0_conv_s8.nvfx,light+lz,feature ranges,512,1024,738.2
+fire_0_conv_s8.nvfx,light+lz,weights,2016,4032,3537.0
+fire_0_conv_s8.nvfx,light+lz,biases,53,106,97.8
+fire_0_conv_s8.nvfx,light+lz seekable,header,176,176,58.5
+fire_0_conv_s8.nvfx,light+lz seekable,features,65536,65536,53912.5
+fire_0_conv_s8.nvfx,light+lz seekable,feature ranges,512,1024,738.2
+fire_0_conv_s8.nvfx,light+lz seekable,weights,2016,4032,3537.4
+fire_0_conv_s8.nvfx,light+lz seekable,biases,53,106,103.2
+fire_0_conv_s8.nvfx,fast,header,176,176,144.5
+fire_0_conv_s8.nvfx,fast,features,65536,65536,57681.0
+fire_0_conv_s8.nvfx,fast,feature ranges,512,1024,779.4
+fire_0_conv_s8.nvfx,fast,weights,2016,4032,4087.4
+fire_0_conv_s8.nvfx,fast,biases,53,106,109.9
+fire_0_conv_s8.nvfx,fast+lz,header,176,176,118.3
+fire_0_conv_s8.nvfx,fast+lz,features,65536,65536,57681.0
+fire_0_conv_s8.nvfx,fast+lz,feature ranges,512,1024,779.4
+fire_0_conv_s8.nvfx,fast+lz,weights,2016,4032,4087.4
+fire_0_conv_s8.nvfx,fast+lz,biases,53,106,109.9
+fire_0_conv_s8.nvfx,fast+lz seekable,header,176,176,118.3
+fire_0_conv_s8.nvfx,fast+lz seekable,features,65536,65536,57681.0
+fire_0_conv_s8.nvfx,fast+lz seekable,feature ranges,512,1024,779.4
+fire_0_conv_s8.nvfx,fast+lz seekable,weights,2016,4032,4154.5
+fire_0_conv_s8.nvfx,fast+lz seekable,biases,53,106,167.2
+fire_0_grid_l16.nvfx,cm,header,168,168,51.0
+fire_0_grid_l16.nvfx,cm,features,294912,589824,444905.8
+fire_0_grid_l16.nvfx,cm,weights,1408,2816,2406.4
+fire_0_grid_l16.nvfx,cm,biases,133,266,228.5
+fire_0_grid_l16.nvfx,cm+lz,header,168,168,54.1
+fire_0_grid_l16.nvfx,cm+lz,features,294912,589824,444905.7
+fire_0_grid_l16.nvfx,cm+lz,weights,1408,2816,2406.4
+fire_0_grid_l16.nvfx,cm+lz,biases,133,266,228.5
+fire_0_grid_l16.nvfx,light,header,168,168,53.5
+fire_0_grid_l16.nvfx,light,features,294912,589824,452456.5
+fire_0_grid_l16.nvfx,light,weights,1408,2816,2450.4
+fire_0_grid_l16.nvfx,light,biases,133,266,244.6
+fire_0_grid_l16.nvfx,light+lz,header,168,168,55.8
+fire_0_grid_l16.nvfx,light+lz,features,294912,589824,452456.5
+fire_0_grid_l16.nvfx,light+lz,weights,1408,2816,2450.4
+fire_0_grid_l16.nvfx,light+lz,biases,133,266,244.6
+fire_0_grid_l16.nvfx,light+lz seekable,header,168,168,55.8
+fire_0_grid_l16.nvfx,light+lz seekable,features,294912,589824,452343.1
+fire_0_grid_l16.nvfx,light+lz seekable,weights,1408,2816,2450.7
+fire_0_grid_l16.nvfx,light+lz seekable,biases,133,266,247.1
+fire_0_grid_l16.nvfx,fast,header,168,168,140.7
+fire_0_grid_l16.nvfx,fast,features,294912,589824,516039.3
+fire_0_grid_l16.nvfx,fast,weights,1408,2816,2855.9
+fire_0_grid_l16.nvfx,fast,biases,133,266,272.9
+fire_0_grid_l16.nvfx,fast+lz,header,168,168,116.6
+fire_0_grid_l16.nvfx,fast+lz,features,294912,589824,516039.3
+fire_0_grid_l16.nvfx,fast+lz,weights,1408,2816,2855.9
+fire_0_grid_l16.nvfx,fast+lz,biases,133,266,272.9
+fire_0_grid_l16.nvfx,fast+lz seekable,header,168,168,116.6
+fire_0_grid_l16.nvfx,fast+lz seekable,features,294912,589824,515422.2
+fire_0_grid_l16.nvfx,fast+lz seekable,weights,1408,2816,2926.1
+fire_0_grid_l16.nvfx,fast+lz seekable,biases,133,266,333.6
+fire_0_grid_l8.nvfx,cm,header,168,168,50.7
+fire_0_grid_l8.nvfx,cm,features,294912,294912,165085.5
+fire_0_grid_l8.nvfx,cm,feature ranges,256,512,360.9
+fire_0_grid_l8.nvfx,cm,weights,1408,2816,2406.5
+fire_0_grid_l8.nvfx,cm,biases,133,266,228.3
+fire_0_grid_l8.nvfx,cm+lz,header,168,168,53.6
+fire_0_grid_l8.nvfx,cm+lz,features,294912,294912,165085.5
+fire_0_grid_l8.nvfx,cm+lz,feature ranges,256,512,360.9
+fire_0_grid_l8.nvfx,cm+lz,weights,1408,2816,2406.5
+fire_0_grid_l8.nvfx,cm+lz,biases,133,266,228.3
+fire_0_grid_l8.nvfx,light,header,168,168,53.5
+fire_0_grid_l8.nvfx,light,features,294912,294912,169821.9
+fire_0_grid_l8.nvfx,light,feature ranges,256,512,376.2
+fire_0_grid_l8.nvfx,light,weights,1408,2816,2450.4
+fire_0_grid_l8.nvfx,light,biases,133,266,244.6
+fire_0_grid_l8.nvfx,light+lz,header,168,168,55.7
+fire_0_grid_l8.nvfx,light+lz,features,294912,294912,169821.9
+fire_0_grid_l8.nvfx,light+lz,feature ranges,256,512,376.2
+fire_0_grid_l8.nvfx,light+lz,weights,1408,2816,2450.4
+fire_0_grid_l8.nvfx,light+lz,biases,133,266,244.6
+fire_0_grid_l8.nvfx,light+lz seekable,header,168,168,55.7
+fire_0_grid_l8.nvfx,light+lz seekable,features,294912,294912,170284.0
+fire_0_grid_l8.nvfx,light+lz seekable,feature ranges,256,512,376.2
+fire_0_grid_l8.nvfx,light+lz seekable,weights,1408,2816,2450.7
+fire_0_grid_l8.nvfx,light+lz seekable,biases,133,266,247.1
+fire_0_grid_l8.nvfx,fast,header,168,168,140.7
+fire_0_grid_l8.nvfx,fast,features,294912,294912,189408.8
+fire_0_grid_l8.nvfx,fast,feature ranges,256,512,406.0
+fire_0_grid_l8.nvfx,fast,weights,1408,2816,2855.9
+fire_0_grid_l8.nvfx,fast,biases,133,266,272.9
+fire_0_grid_l8.nvfx,fast+lz,header,168,168,116.5
+fire_0_grid_l8.nvfx,fast+lz,features,294912,294912,189408.8
+fire_0_grid_l8.nvfx,fast+lz,feature ranges,256,512,406.0
+fire_0_grid_l8.nvfx,fast+lz,weights,1408,2816,2855.9
+fire_0_grid_l8.nvfx,fast+lz,biases,133,266,272.9
+fire_0_grid_l8.nvfx,fast+lz seekable,header,168,168,116.5
+fire_0_grid_l8.nvfx,fast+lz seekable,features,294912,294912,189690.3
+fire_0_grid_l8.nvfx,fast+lz seekable,feature ranges,256,512,406.0
+fire_0_grid_l8.nvfx,fast+lz seekable,weights,1408,2816,2926.1
+fire_0_grid_l8.nvfx,fast+lz seekable,biases,133,266,333.6
+fire_0_grid_m16.nvfx,cm,header,168,168,50.2
+fire_0_grid_m16.nvfx,cm,features,131072,262144,199462.9
+fire_0_grid_m16.nvfx,cm,weights,1408,2816,2408.4
+fire_0_grid_m16.nvfx,cm,biases,133,266,237.1
+fire_0_grid_m16.nvfx,cm+lz,header,168,168,53.4
+fire_0_grid_m16.nvfx,cm+lz,features,131072,262144,199462.9
+fire_0_grid_m16.nvfx,cm+lz,weights,1408,2816,2408.4
+fire_0_grid_m16.nvfx,cm+lz,biases,133,266,237.1
+fire_0_grid_m16.nvfx,light,header,168,168,53.1
+fire_0_grid_m16.nvfx,light,features,131072,262144,202825.6
+fire_0_grid_m16.nvfx,light,weights,1408,2816,2458.0
+fire_0_grid_m16.nvfx,light,biases,133,266,247.3
+fire_0_grid_m16.nvfx,light+lz,header,168,168,55.5
+fire_0_grid_m16.nvfx,light+lz,features,131072,262144,202825.6
+fire_0_grid_m16.nvfx,light+lz,weights,1408,2816,2458.0
+fire_0_grid_m16.nvfx,light+lz,biases,133,266,247.3
+fire_0_grid_m16.nvfx,light+lz seekable,header,168,168,55.5
+fire_0_grid_m16.nvfx,light+lz seekable,features,131072,262144,202766.3
+fire_0_grid_m16.nvfx,light+lz seekable,weights,1408,2816,2459.0
+fire_0_grid_m16.nvfx,light+lz seekable,biases,133,266,253.5
+fire_0_grid_m16.nvfx,fast,header,168,168,139.4
+fire_0_grid_m16.nvfx,fast,features,131072,262144,231643.5
+fire_0_grid_m16.nvfx,fast,weights,1408,2816,2860.2
+fire_0_grid_m16.nvfx,fast,biases,133,266,272.4
+fire_0_grid_m16.nvfx,fast+lz,header,168,168,112.7
+fire_0_grid_m16.nvfx,fast+lz,features,131072,262144,231643.5
+fire_0_grid_m16.nvfx,fast+lz,weights,1408,2816,2860.2
+fire_0_grid_m16.nvfx,fast+lz,biases,133,266,272.4
+fire_0_grid_m16.nvfx,fast+lz seekable,header,168,168,112.7
+fire_0_grid_m16.nvfx,fast+lz seekable,features,131072,262144,231630.9
+fire_0_grid_m16.nvfx,fast+lz seekable,weights,1408,2816,2922.7
+fire_0_grid_m16.nvfx,fast+lz seekable,biases,133,266,332.8
+fire_0_grid_m8.nvfx,cm,header,168,168,49.8
+fire_0_grid_m8.nvfx,cm,features,131072,131072,78342.5
+fire_0_grid_m8.nvfx,cm,feature ranges,256,512,360.2
+fire_0_grid_m8.nvfx,cm,weights,1408,2816,2408.5
+fire_0_grid_m8.nvfx,cm,biases,133,266,236.9
+fire_0_grid_m8.nvfx,cm+lz,header,168,168,53.1
+fire_0_grid_m8.nvfx,cm+lz,features,131072,131072,78342.5
+fire_0_grid_m8.nvfx,cm+lz,feature ranges,256,512,360.2
+fire_0_grid_m8.nvfx,cm+lz,weights,1408,2816,2408.5
+fire_0_grid_m8.nvfx,cm+lz,biases,133,266,236.9
+fire_0_grid_m8.nvfx,light,header,168,168,53.0
+fire_0_grid_m8.nvfx,light,features,131072,131072,80930.1
+fire_0_grid_m8.nvfx,light,feature ranges,256,512,378.7
+fire_0_grid_m8.nvfx,light,weights,1408,2816,2458.0
+fire_0_grid_m8.nvfx,light,biases,133,266,247.3
+fire_0_grid_m8.nvfx,light+lz,header,168,168,55.4
+fire_0_grid_m8.nvfx,light+lz,features,131072,131072,80930.1
+fire_0_grid_m8.nvfx,light+lz,feature ranges,256,512,378.7
+fire_0_grid_m8.nvfx,light+lz,weights,1408,2816,2458.0
+fire_0_grid_m8.nvfx,light+lz,biases,133,266,247.3
+fire_0_grid_m8.nvfx,light+lz seekable,header,168,168,55.4
+fire_0_grid_m8.nvfx,light+lz seekable,features,131072,131072,81033.0
+fire_0_grid_m8.nvfx,light+lz seekable,feature ranges,256,512,378.7
+fire_0_grid_m8.nvfx,light+lz seekable,weights,1408,2816,2459.0
+fire_0_grid_m8.nvfx,light+lz seekable,biases,133,266,253.5
+fire_0_grid_m8.nvfx,fast,header,168,168,139.3
+fire_0_grid_m8.nvfx,fast,features,131072,131072,89233.9
+fire_0_grid_m8.nvfx,fast,feature ranges,256,512,403.8
+fire_0_grid_m8.nvfx,fast,weights,1408,2816,2860.2
+fire_0_grid_m8.nvfx,fast,biases,133,266,272.4
+fire_0_grid_m8.nvfx,fast+lz,header,168,168,112.6
+fire_0_grid_m8.nvfx,fast+lz,features,131072,131072,89233.9
+fire_0_grid_m8.nvfx,fast+lz,feature ranges,256,512,403.8
+fire_0_grid_m8.nvfx,fast+lz,weights,1408,2816,2860.2
+fire_0_grid_m8.nvfx,fast+lz,biases,133,266,272.4
+fire_0_grid_m8.nvfx,fast+lz seekable,header,168,168,112.6
+fire_0_grid_m8.nvfx,fast+lz seekable,features,131072,131072,89270.7
+fire_0_grid_m8.nvfx,fast+lz seekable,feature ranges,256,512,403.8
+fire_0_grid_m8.nvfx,fast+lz seekable,weights,1408,2816,2922.7
+fire_0_grid_m8.nvfx,fast+lz seekable,biases,133,266,332.8
+fire_0_grid_mt16.nvfx,cm,header,168,168,49.9
+fire_0_grid_mt16.nvfx,cm,features,262144,524288,390195.8
+fire_0_grid_mt16.nvfx,cm,weights,1408,2816,2394.2
+fire_0_grid_mt16.nvfx,cm,biases,133,266,228.7
+fire_0_grid_mt16.nvfx,cm+lz,header,168,168,53.0
+fire_0_grid_mt16.nvfx,cm+lz,features,262144,524288,390195.9
+fire_0_grid_mt16.nvfx,cm+lz,weights,1408,2816,2394.2
+fire_0_grid_mt16.nvfx,cm+lz,biases,133,266,228.7
+fire_0_grid_mt16.nvfx,light,header,168,168,52.8
+fire_0_grid_mt16.nvfx,light,features,262144,524288,396405.7
+fire_0_grid_mt16.nvfx,light,weights,1408,2816,2442.6
+fire_0_grid_mt16.nvfx,light,biases,133,266,244.9
+fire_0_grid_mt16.nvfx,light+lz,header,168,168,55.0
+fire_0_grid_mt16.nvfx,light+lz,features,262144,524288,396405.7
+fire_0_grid_mt16.nvfx,light+lz,weights,1408,2816,2442.6
+fire_0_grid_mt16.nvfx,light+lz,biases,133,266,244.9
+fire_0_grid_mt16.nvfx,light+lz seekable,header,168,168,55.0
+fire_0_grid_mt16.nvfx,light+lz seekable,features,262144,524288,396566.0
+fire_0_grid_mt16.nvfx,light+lz seekable,weights,1408,2816,2440.9
+fire_0_grid_mt16.nvfx,light+lz seekable,biases,133,266,249.1
+fire_0_grid_mt16.nvfx,fast,header,168,168,139.6
+fire_0_grid_mt16.nvfx,fast,features,262144,524288,450357.3
+fire_0_grid_mt16.nvfx,fast,weights,1408,2816,2858.1
+fire_0_grid_mt16.nvfx,fast,biases,133,266,279.0
+fire_0_grid_mt16.nvfx,fast+lz,header,168,168,113.9
+fire_0_grid_mt16.nvfx,fast+lz,features,262144,524288,450357.3
+fire_0_grid_mt16.nvfx,fast+lz,weights,1408,2816,2858.1
+fire_0_grid_mt16.nvfx,fast+lz,biases,133,266,279.0
+fire_0_grid_mt16.nvfx,fast+lz seekable,header,168,168,113.9
+fire_0_grid_mt16.nvfx,fast+lz seekable,features,262144,524288,450375.8
+fire_0_grid_mt16.nvfx,fast+lz seekable,weights,1408,2816,2917.8
+fire_0_grid_mt16.nvfx,fast+lz seekable,biases,133,266,343.9
+fire_0_grid_mt8.nvfx,cm,header,168,168,49.7
+fire_0_grid_mt8.nvfx,cm,features,262144,262144,176694.6
+fire_0_grid_mt8.nvfx,cm,feature ranges,512,1024,686.6
+fire_0_grid_mt8.nvfx,cm,weights,1408,2816,2394.1
+fire_0_grid_mt8.nvfx,cm,biases,133,266,228.6
+fire_0_grid_mt8.nvfx,cm+lz,header,168,168,52.6
+fire_0_grid_mt8.nvfx,cm+lz,features,262144,262144,176694.6
+fire_0_grid_mt8.nvfx,cm+lz,feature ranges,512,1024,686.6
+fire_0_grid_mt8.nvfx,cm+lz,weights,1408,2816,2394.1
+fire_0_grid_mt8.nvfx,cm+lz,biases,133,266,228.6
+fire_0_grid_mt8.nvfx,light,header,168,168,52.7
+fire_0_grid_mt8.nvfx,light,features,262144,262144,181346.5
+fire_0_grid_mt8.nvfx,light,feature ranges,512,1024,713.5
+fire_0_grid_mt8.nvfx,light,weights,1408,2816,2442.6
+fire_0_grid_mt8.nvfx,light,biases,133,266,244.9
+fire_0_grid_mt8.nvfx,light+lz,header,168,168,54.8
+fire_0_grid_mt8.nvfx,light+lz,features,262144,262144,181346.5
+fire_0_grid_mt8.nvfx,light+lz,feature ranges,512,1024,713.5
+fire_0_grid_mt8.nvfx,light+lz,weights,1408,2816,2442.6
+fire_0_grid_mt8.nvfx,light+lz,biases,133,266,244.9
+fire_0_grid_mt8.nvfx,light+lz seekable,header,168,168,54.8
+fire_0_grid_mt8.nvfx,light+lz seekable,features,262144,262144,181585.8
+fire_0_grid_mt8.nvfx,light+lz seekable,feature ranges,512,1024,713.5
+fire_0_grid_mt8.nvfx,light+lz seekable,weights,1408,2816,2440.9
+fire_0_grid_mt8.nvfx,light+lz seekable,biases,133,266,249.1
+fire_0_grid_mt8.nvfx,fast,header,168,168,138.9
+fire_0_grid_mt8.nvfx,fast,features,262144,262144,197859.7
+fire_0_grid_mt8.nvfx,fast,feature ranges,512,1024,738.4
+fire_0_grid_mt8.nvfx,fast,weights,1408,2816,2858.1
+fire_0_grid_mt8.nvfx,fast,biases,133,266,279.0
+fire_0_grid_mt8.nvfx,fast+lz,header,168,168,113.8
+fire_0_grid_mt8.nvfx,fast+lz,features,262144,262144,197859.7
+fire_0_grid_mt8.nvfx,fast+lz,feature ranges,512,1024,738.4
+fire_0_grid_mt8.nvfx,fast+lz,weights,1408,2816,2858.1
+fire_0_grid_mt8.nvfx,fast+lz,biases,133,266,279.0
+fire_0_grid_mt8.nvfx,fast+lz seekable,header,168,168,113.8
+fire_0_grid_mt8.nvfx,fast+lz seekable,features,262144,262144,197987.3
+fire_0_grid_mt8.nvfx,fast+lz seekable,feature ranges,512,1024,738.4
+fire_0_grid_mt8.nvfx,fast+lz seekable,weights,1408,2816,2917.8
+fire_0_grid_mt8.nvfx,fast+lz seekable,biases,133,266,343.9
+fire_0_grid_s16.nvfx,cm,header,160,160,47.6
+fire_0_grid_s16.nvfx,cm,features,73728,147456,112372.2
+fire_0_grid_s16.nvfx,cm,weights,192,384,341.5
+fire_0_grid_s16.nvfx,cm,biases,53,106,92.8
+fire_0_grid_s16.nvfx,cm+lz,header,160,160,51.2
+fire_0_grid_s16.nvfx,cm+lz,features,73728,147456,112372.3
+fire_0_grid_s16.nvfx,cm+lz,weights,192,384,341.5
+fire_0_grid_s16.nvfx,cm+lz,biases,53,106,92.8
+fire_0_grid_s16.nvfx,light,header,160,160,50.6
+fire_0_grid_s16.nvfx,light,features,73728,147456,114108.5
+fire_0_grid_s16.nvfx,light,weights,192,384,346.1
+fire_0_grid_s16.nvfx,light,biases,53,106,96.7
+fire_0_grid_s16.nvfx,light+lz,header,160,160,53.4
+fire_0_grid_s16.nvfx,light+lz,features,73728,147456,114108.5
+fire_0_grid_s16.nvfx,light+lz,weights,192,384,346.1
+fire_0_grid_s16.nvfx,light+lz,biases,53,106,96.7
+fire_0_grid_s16.nvfx,light+lz seekable,header,160,160,53.4
+fire_0_grid_s16.nvfx,light+lz seekable,features,73728,147456,114184.0
+fire_0_grid_s16.nvfx,light+lz seekable,weights,192,384,347.9
+fire_0_grid_s16.nvfx,light+lz seekable,biases,53,106,99.8
+fire_0_grid_s16.nvfx,fast,header,160,160,129.7
+fire_0_grid_s16.nvfx,fast,features,73728,147456,128302.4
+fire_0_grid_s16.nvfx,fast,weights,192,384,419.8
+fire_0_grid_s16.nvfx,fast,biases,53,106,111.8
+fire_0_grid_s16.nvfx,fast+lz,header,160,160,105.0
+fire_0_grid_s16.nvfx,fast+lz,features,73728,147456,128302.4
+fire_0_grid_s16.nvfx,fast+lz,weights,192,384,419.8
+fire_0_grid_s16.nvfx,fast+lz,biases,53,106,111.8
+fire_0_grid_s16.nvfx,fast+lz seekable,header,160,160,105.0
+fire_0_grid_s16.nvfx,fast+lz seekable,features,73728,147456,128350.6
+fire_0_grid_s16.nvfx,fast+lz seekable,weights,192,384,440.5
+fire_0_grid_s16.nvfx,fast+lz seekable,biases,53,106,152.5
+fire_0_grid_s8.nvfx,cm,header,160,160,47.5
+fire_0_grid_s8.nvfx,cm,features,73728,73728,44011.9
+fire_0_grid_s8.nvfx,cm,feature ranges,256,512,368.6
+fire_0_grid_s8.nvfx,cm,weights,192,384,341.4
+fire_0_grid_s8.nvfx,cm,biases,53,106,92.8
+fire_0_grid_s8.nvfx,cm+lz,header,160,160,50.9
+fire_0_grid_s8.nvfx,cm+lz,features,73728,73728,44012.0
+fire_0_grid_s8.nvfx,cm+lz,feature ranges,256,512,368.6
+fire_0_grid_s8.nvfx,cm+lz,weights,192,384,341.4
+fire_0_grid_s8.nvfx,cm+lz,biases,53,106,92.8
+fire_0_grid_s8.nvfx,light,header,160,160,50.7
+fire_0_grid_s8.nvfx,light,features,73728,73728,45705.5
+fire_0_grid_s8.nvfx,light,feature ranges,256,512,390.4
+fire_0_grid_s8.nvfx,light,weights,192,384,346.1
+fire_0_grid_s8.nvfx,light,biases,53,106,96.7
+fire_0_grid_s8.nvfx,light+lz,header,160,160,53.5
+fire_0_grid_s8.nvfx,light+lz,features,73728,73728,45705.5
+fire_0_grid_s8.nvfx,light+lz,feature ranges,256,512,390.4
+fire_0_grid_s8.nvfx,light+lz,weights,192,384,346.1
+fire_0_grid_s8.nvfx,light+lz,biases,53,106,96.7
+fire_0_grid_s8.nvfx,light+lz seekable,header,160,160,53.5
+fire_0_grid_s8.nvfx,light+lz seekable,features,73728,73728,45850.3
+fire_0_grid_s8.nvfx,light+lz seekable,feature ranges,256,512,390.4
+fire_0_grid_s8.nvfx,light+lz seekable,weights,192,384,347.9
+fire_0_grid_s8.nvfx,light+lz seekable,biases,53,106,99.8
+fire_0_grid_s8.nvfx,fast,header,160,160,129.8
+fire_0_grid_s8.nvfx,fast,features,73728,73728,50135.9
+fire_0_grid_s8.nvfx,fast,feature ranges,256,512,407.0
+fire_0_grid_s8.nvfx,fast,weights,192,384,419.8
+fire_0_grid_s8.nvfx,fast,biases,53,106,111.8
+fire_0_grid_s8.nvfx,fast+lz,header,160,160,104.9
+fire_0_grid_s8.nvfx,fast+lz,features,73728,73728,50135.9
+fire_0_grid_s8.nvfx,fast+lz,feature ranges,256,512,407.0
+fire_0_grid_s8.nvfx,fast+lz,weights,192,384,419.8
+fire_0_grid_s8.nvfx,fast+lz,biases,53,106,111.8
+fire_0_grid_s8.nvfx,fast+lz seekable,header,160,160,104.9
+fire_0_grid_s8.nvfx,fast+lz seekable,features,73728,73728,50173.0
+fire_0_grid_s8.nvfx,fast+lz seekable,feature ranges,256,512,407.0
+fire_0_grid_s8.nvfx,fast+lz seekable,weights,192,384,440.5
+fire_0_grid_s8.nvfx,fast+lz seekable,biases,53,106,152.5
+smoke_0_grid_m8.nvfx,cm,header,168,168,50.8
+smoke_0_grid_m8.nvfx,cm,features,131072,131072,85969.8
+smoke_0_grid_m8.nvfx,cm,feature ranges,256,512,360.8
+smoke_0_grid_m8.nvfx,cm,weights,1408,2816,2354.1
+smoke_0_grid_m8.nvfx,cm,biases,133,266,226.3
+smoke_0_grid_m8.nvfx,cm+lz,header,168,168,54.0
+smoke_0_grid_m8.nvfx,cm+lz,features,131072,131072,85969.8
+smoke_0_grid_m8.nvfx,cm+lz,feature ranges,256,512,360.8
+smoke_0_grid_m8.nvfx,cm+lz,weights,1408,2816,2354.1
+smoke_0_grid_m8.nvfx,cm+lz,biases,133,266,226.3
+smoke_0_grid_m8.nvfx,light,header,168,168,53.9
+smoke_0_grid_m8.nvfx,light,features,131072,131072,88584.5
+smoke_0_grid_m8.nvfx,light,feature ranges,256,512,377.4
+smoke_0_grid_m8.nvfx,light,weights,1408,2816,2422.7
+smoke_0_grid_m8.nvfx,light,biases,133,266,242.7
+smoke_0_grid_m8.nvfx,light+lz,header,168,168,56.3
+smoke_0_grid_m8.nvfx,light+lz,features,131072,131072,88584.5
+smoke_0_grid_m8.nvfx,light+lz,feature ranges,256,512,377.4
+smoke_0_grid_m8.nvfx,light+lz,weights,1408,2816,2422.7
+smoke_0_grid_m8.nvfx,light+lz,biases,133,266,242.7
+smoke_0_grid_m8.nvfx,light+lz seekable,header,168,168,56.3
+smoke_0_grid_m8.nvfx,light+lz seekable,features,131072,131072,88753.2
+smoke_0_grid_m8.nvfx,light+lz seekable,feature ranges,256,512,377.4
+smoke_0_grid_m8.nvfx,light+lz seekable,weights,1408,2816,2409.1
+smoke_0_grid_m8.nvfx,light+lz seekable,biases,133,266,243.0
+smoke_0_grid_m8.nvfx,fast,header,168,168,141.1
+smoke_0_grid_m8.nvfx,fast,features,131072,131072,96770.2
+smoke_0_grid_m8.nvfx,fast,feature ranges,256,512,400.2
+smoke_0_grid_m8.nvfx,fast,weights,1408,2816,2843.6
+smoke_0_grid_m8.nvfx,fast,biases,133,266,275.8
+smoke_0_grid_m8.nvfx,fast+lz,header,168,168,115.0
+smoke_0_grid_m8.nvfx,fast+lz,features,131072,131072,96770.2
+smoke_0_grid_m8.nvfx,fast+lz,feature ranges,256,512,400.2
+smoke_0_grid_m8.nvfx,fast+lz,weights,1408,2816,2843.6
+smoke_0_grid_m8.nvfx,fast+lz,biases,133,266,275.8
+smoke_0_grid_m8.nvfx,fast+lz seekable,header,168,168,115.0
+smoke_0_grid_m8.nvfx,fast+lz seekable,features,131072,131072,96815.6
+smoke_0_grid_m8.nvfx,fast+lz seekable,feature ranges,256,512,400.2
+smoke_0_grid_m8.nvfx,fast+lz seekable,weights,1408,2816,2879.6
+smoke_0_grid_m8.nvfx,fast+lz seekable,biases,133,266,335.6
+fire_grid_k8.nvfx,cm,header,216,216,73.8
+fire_grid_k8.nvfx,cm,features,1048576,1048576,803582.4
+fire_grid_k8.nvfx,cm,feature ranges,2048,4096,2683.6
+fire_grid_k8.nvfx,cm,weights,1624,3248,2793.6
+fire_grid_k8.nvfx,cm,biases,140,280,243.0
+fire_grid_k8.nvfx,cm+lz,header,216,216,77.9
+fire_grid_k8.nvfx,cm+lz,features,1048576,1048576,803582.1
+fire_grid_k8.nvfx,cm+lz,feature ranges,2048,4096,2683.6
+fire_grid_k8.nvfx,cm+lz,weights,1624,3248,2793.6
+fire_grid_k8.nvfx,cm+lz,biases,140,280,243.0
+fire_grid_k8.nvfx,light,header,216,216,83.2
+fire_grid_k8.nvfx,light,features,1048576,1048576,821275.2
+fire_grid_k8.nvfx,light,feature ranges,2048,4096,2730.1
+fire_grid_k8.nvfx,light,weights,1624,3248,2845.9
+fire_grid_k8.nvfx,light,biases,140,280,248.8
+fire_grid_k8.nvfx,light+lz,header,216,216,85.7
+fire_grid_k8.nvfx,light+lz,features,1048576,1048576,821275.2
+fire_grid_k8.nvfx,light+lz,feature ranges,2048,4096,2730.1
+fire_grid_k8.nvfx,light+lz,weights,1624,3248,2845.9
+fire_grid_k8.nvfx,light+lz,biases,140,280,248.8
+fire_grid_k8.nvfx,light+lz seekable,header,216,216,85.7
+fire_grid_k8.nvfx,light+lz seekable,features,1048576,1048576,823676.2
+fire_grid_k8.nvfx,light+lz seekable,feature ranges,2048,4096,2730.1
+fire_grid_k8.nvfx,light+lz seekable,weights,1624,3248,2859.9
+fire_grid_k8.nvfx,light+lz seekable,biases,140,280,259.2
+fire_grid_k8.nvfx,fast,header,216,216,185.1
+fire_grid_k8.nvfx,fast,features,1048576,1048576,886953.0
+fire_grid_k8.nvfx,fast,feature ranges,2048,4096,2824.3
+fire_grid_k8.nvfx,fast,weights,1624,3248,3288.9
+fire_grid_k8.nvfx,fast,biases,140,280,280.8
+fire_grid_k8.nvfx,fast+lz,header,216,216,154.2
+fire_grid_k8.nvfx,fast+lz,features,1048576,1048576,886953.0
+fire_grid_k8.nvfx,fast+lz,feature ranges,2048,4096,2824.3
+fire_grid_k8.nvfx,fast+lz,weights,1624,3248,3288.9
+fire_grid_k8.nvfx,fast+lz,biases,140,280,280.8
+fire_grid_k8.nvfx,fast+lz seekable,header,216,216,154.2
+fire_grid_k8.nvfx,fast+lz seekable,features,1048576,1048576,887626.4
+fire_grid_k8.nvfx,fast+lz seekable,feature ranges,2048,4096,2824.3
+fire_grid_k8.nvfx,fast+lz seekable,weights,1624,3248,3384.5
+fire_grid_k8.nvfx,fast+lz seekable,biases,140,280,349.9
+fire_variation_k8.nvfx,cm,header,168,168,51.4
+fire_variation_k8.nvfx,cm,features,1048576,1048576,703058.8
+fire_variation_k8.nvfx,cm,feature ranges,2048,4096,2691.5
+fire_variation_k8.nvfx,cm,weights,1984,3968,3391.9
+fire_variation_k8.nvfx,cm,biases,140,280,240.9
+fire_variation_k8.nvfx,cm,codes,208,416,355.7
+fire_variation_k8.nvfx,cm+lz,header,168,168,54.9
+fire_variation_k8.nvfx,cm+lz,features,1048576,1048576,703058.3
+fire_variation_k8.nvfx,cm+lz,feature ranges,2048,4096,2691.5
+fire_variation_k8.nvfx,cm+lz,weights,1984,3968,3391.9
+fire_variation_k8.nvfx,cm+lz,biases,140,280,240.9
+fire_variation_k8.nvfx,cm+lz,codes,208,416,355.7
+fire_variation_k8.nvfx,light,header,168,168,54.7
+fire_variation_k8.nvfx,light,features,1048576,1048576,719565.2
+fire_variation_k8.nvfx,light,feature ranges,2048,4096,2744.4
+fire_variation_k8.nvfx,light,weights,1984,3968,3441.5
+fire_variation_k8.nvfx,light,biases,140,280,252.5
+fire_variation_k8.nvfx,light,codes,208,416,383.9
+fire_variation_k8.nvfx,light+lz,header,168,168,56.8
+fire_variation_k8.nvfx,light+lz,features,1048576,1048576,719565.2
+fire_variation_k8.nvfx,light+lz,feature ranges,2048,4096,2744.4
+fire_variation_k8.nvfx,light+lz,weights,1984,3968,3441.5
+fire_variation_k8.nvfx,light+lz,biases,140,280,252.5
+fire_variation_k8.nvfx,light+lz,codes,208,416,383.9
+fire_variation_k8.nvfx,light+lz seekable,header,168,168,56.8
+fire_variation_k8.nvfx,light+lz seekable,features,1048576,1048576,722433.5
+fire_variation_k8.nvfx,light+lz seekable,feature ranges,2048,4096,2744.4
+fire_variation_k8.nvfx,light+lz seekable,weights,1984,3968,3461.9
+fire_variation_k8.nvfx,light+lz seekable,biases,140,280,253.6
+fire_variation_k8.nvfx,light+lz seekable,codes,208,416,363.8
+fire_variation_k8.nvfx,fast,header,168,168,142.2
+fire_variation_k8.nvfx,fast,features,1048576,1048576,788085.7
+fire_variation_k8.nvfx,fast,feature ranges,2048,4096,2829.5
+fire_variation_k8.nvfx,fast,weights,1984,3968,4013.5
+fire_variation_k8.nvfx,fast,biases,140,280,285.0
+fire_variation_k8.nvfx,fast,codes,208,416,417.2
+fire_variation_k8.nvfx,fast+lz,header,168,168,115.0
+fire_variation_k8.nvfx,fast+lz,features,1048576,1048576,788085.7
+fire_variation_k8.nvfx,fast+lz,feature ranges,2048,4096,2829.5
+fire_variation_k8.nvfx,fast+lz,weights,1984,3968,4013.5
+fire_variation_k8.nvfx,fast+lz,biases,140,280,285.0
+fire_variation_k8.nvfx,fast+lz,codes,208,416,417.2
+fire_variation_k8.nvfx,fast+lz seekable,header,168,168,115.0
+fire_variation_k8.nvfx,fast+lz seekable,features,1048576,1048576,788715.9
+fire_variation_k8.nvfx,fast+lz seekable,feature ranges,2048,4096,2829.5
+fire_variation_k8.nvfx,fast+lz seekable,weights,1984,3968,4151.3
+fire_variation_k8.nvfx,fast+lz seekable,biases,140,280,359.4
+fire_variation_k8.nvfx,fast+lz seekable,codes,208,416,470.5
+explosion.nvfx,cm,header,565,565,309.3
+explosion.nvfx,cm,weights,8984,17968,15340.0
+explosion.nvfx,cm,biases,93,186,158.6
+explosion.nvfx,cm,coarse states,65536,131072,36557.0
+explosion.nvfx,cm,fine fields,131072,131072,4683.8
+explosion.nvfx,cm,field scales,32,64,46.6
+explosion.nvfx,cm+lz,header,565,565,315.1
+explosion.nvfx,cm+lz,weights,8984,17968,15340.0
+explosion.nvfx,cm+lz,biases,93,186,158.6
+explosion.nvfx,cm+lz,coarse states,65536,131072,36556.9
+explosion.nvfx,cm+lz,fine fields,131072,131072,4481.0
+explosion.nvfx,cm+lz,field scales,32,64,46.6
+explosion.nvfx,light,header,565,565,350.0
+explosion.nvfx,light,weights,8984,17968,15551.0
+explosion.nvfx,light,biases,93,186,162.3
+explosion.nvfx,light,coarse states,65536,131072,38250.3
+explosion.nvfx,light,fine fields,131072,131072,7292.2
+explosion.nvfx,light,field scales,32,64,61.0
+explosion.nvfx,light+lz,header,565,565,355.8
+explosion.nvfx,light+lz,weights,8984,17968,15551.0
+explosion.nvfx,light+lz,biases,93,186,162.3
+explosion.nvfx,light+lz,coarse states,65536,131072,38250.3
+explosion.nvfx,light+lz,fine fields,131072,131072,4688.4
+explosion.nvfx,light+lz,field scales,32,64,61.0
+explosion.nvfx,light+lz seekable,header,565,565,355.8
+explosion.nvfx,light+lz seekable,weights,8984,17968,15614.5
+explosion.nvfx,light+lz seekable,biases,93,186,174.6
+explosion.nvfx,light+lz seekable,coarse states,65536,131072,38250.3
+explosion.nvfx,light+lz seekable,fine fields,131072,131072,4756.7
+explosion.nvfx,light+lz seekable,field scales,32,64,50.4
+explosion.nvfx,fast,header,565,565,581.0
+explosion.nvfx,fast,weights,8984,17968,18124.8
+explosion.nvfx,fast,biases,93,186,186.6
+explosion.nvfx,fast,coarse states,65536,131072,46246.5
+explosion.nvfx,fast,fine fields,131072,131072,8795.6
+explosion.nvfx,fast,field scales,32,64,65.7
+explosion.nvfx,fast+lz,header,565,565,570.8
+explosion.nvfx,fast+lz,weights,8984,17968,18124.8
+explosion.nvfx,fast+lz,biases,93,186,186.6
+explosion.nvfx,fast+lz,coarse states,65536,131072,46246.5
+explosion.nvfx,fast+lz,fine fields,131072,131072,5180.0
+explosion.nvfx,fast+lz,field scales,32,64,65.7
+explosion.nvfx,fast+lz seekable,header,565,565,570.8
+explosion.nvfx,fast+lz seekable,weights,8984,17968,18387.2
+explosion.nvfx,fast+lz seekable,biases,93,186,270.1
+explosion.nvfx,fast+lz seekable,coarse states,65536,131072,46246.5
+explosion.nvfx,fast+lz seekable,fine fields,131072,131072,5204.2
+explosion.nvfx,fast+lz seekable,field scales,32,64,69.8
+fire.nvfx,cm,header,413,413,231.4
+fire.nvfx,cm,weights,8792,17584,15040.2
+fire.nvfx,cm,biases,93,186,160.0
+fire.nvfx,cm,coarse states,32768,65536,30166.2
+fire.nvfx,cm+lz,header,413,413,237.4
+fire.nvfx,cm+lz,weights,8792,17584,15040.2
+fire.nvfx,cm+lz,biases,93,186,160.0
+fire.nvfx,cm+lz,coarse states,32768,65536,30166.4
+fire.nvfx,light,header,413,413,256.8
+fire.nvfx,light,weights,8792,17584,15241.7
+fire.nvfx,light,biases,93,186,163.1
+fire.nvfx,light,coarse states,32768,65536,31281.4
+fire.nvfx,light+lz,header,413,413,262.8
+fire.nvfx,light+lz,weights,8792,17584,15241.7
+fire.nvfx,light+lz,biases,93,186,163.1
+fire.nvfx,light+lz,coarse states,32768,65536,31281.4
+fire.nvfx,light+lz seekable,header,413,413,262.8
+fire.nvfx,light+lz seekable,weights,8792,17584,15301.3
+fire.nvfx,light+lz seekable,biases,93,186,172.9
+fire.nvfx,light+lz seekable,coarse states,32768,65536,31281.4
+fire.nvfx,fast,header,413,413,412.1
+fire.nvfx,fast,weights,8792,17584,17761.9
+fire.nvfx,fast,biases,93,186,186.4
+fire.nvfx,fast,coarse states,32768,65536,35718.4
+fire.nvfx,fast+lz,header,413,413,400.9
+fire.nvfx,fast+lz,weights,8792,17584,17761.9
+fire.nvfx,fast+lz,biases,93,186,186.4
+fire.nvfx,fast+lz,coarse states,32768,65536,35718.4
+fire.nvfx,fast+lz seekable,header,413,413,400.9
+fire.nvfx,fast+lz seekable,weights,8792,17584,18011.6
+fire.nvfx,fast+lz seekable,biases,93,186,268.7
+fire.nvfx,fast+lz seekable,coarse states,32768,65536,35718.4
+smoke.nvfx,cm,header,413,413,237.4
+smoke.nvfx,cm,weights,8792,17584,15039.8
+smoke.nvfx,cm,biases,93,186,164.4
+smoke.nvfx,cm,coarse states,32768,65536,29736.5
+smoke.nvfx,cm,fine fields,65536,65536,6300.8
+smoke.nvfx,cm,field scales,16,32,25.4
+smoke.nvfx,cm+lz,header,413,413,242.6
+smoke.nvfx,cm+lz,weights,8792,17584,15039.8
+smoke.nvfx,cm+lz,biases,93,186,164.4
+smoke.nvfx,cm+lz,coarse states,32768,65536,29736.5
+smoke.nvfx,cm+lz,fine fields,65536,65536,6134.0
+smoke.nvfx,cm+lz,field scales,16,32,25.4
+smoke.nvfx,light,header,413,413,262.3
+smoke.nvfx,light,weights,8792,17584,15238.8
+smoke.nvfx,light,biases,93,186,164.0
+smoke.nvfx,light,coarse states,32768,65536,31048.3
+smoke.nvfx,light,fine fields,65536,65536,9885.6
+smoke.nvfx,light,field scales,16,32,31.0
+smoke.nvfx,light+lz,header,413,413,267.6
+smoke.nvfx,light+lz,weights,8792,17584,15238.8
+smoke.nvfx,light+lz,biases,93,186,164.0
+smoke.nvfx,light+lz,coarse states,32768,65536,31048.3
+smoke.nvfx,light+lz,fine fields,65536,65536,6347.8
+smoke.nvfx,light+lz,field scales,16,32,31.0
+smoke.nvfx,light+lz seekable,header,413,413,267.6
+smoke.nvfx,light+lz seekable,weights,8792,17584,15295.8
+smoke.nvfx,light+lz seekable,biases,93,186,176.6
+smoke.nvfx,light+lz seekable,coarse states,32768,65536,31048.3
+smoke.nvfx,light+lz seekable,fine fields,65536,65536,6347.8
+smoke.nvfx,light+lz seekable,field scales,16,32,27.1
+smoke.nvfx,fast,header,413,413,415.7
+smoke.nvfx,fast,weights,8792,17584,17756.8
+smoke.nvfx,fast,biases,93,186,186.1
+smoke.nvfx,fast,coarse states,32768,65536,37134.6
+smoke.nvfx,fast,fine fields,65536,65536,11631.1
+smoke.nvfx,fast,field scales,16,32,31.8
+smoke.nvfx,fast+lz,header,413,413,402.2
+smoke.nvfx,fast+lz,weights,8792,17584,17756.8
+smoke.nvfx,fast+lz,biases,93,186,186.1
+smoke.nvfx,fast+lz,coarse states,32768,65536,37134.6
+smoke.nvfx,fast+lz,fine fields,65536,65536,7204.3
+smoke.nvfx,fast+lz,field scales,16,32,31.8
+smoke.nvfx,fast+lz seekable,header,413,413,402.2
+smoke.nvfx,fast+lz seekable,weights,8792,17584,18007.3
+smoke.nvfx,fast+lz seekable,biases,93,186,261.2
+smoke.nvfx,fast+lz seekable,coarse states,32768,65536,37134.6
+smoke.nvfx,fast+lz seekable,fine fields,65536,65536,7204.3
+smoke.nvfx,fast+lz seekable,field scales,16,32,42.7

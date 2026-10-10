@@ -2,7 +2,14 @@
 //
 //   nvfx_fireball --models DIR [--out fireball.mp4] [--width 1280 --height 720] [--quality 1] [--threads 4]
 //                 [--isa avx2|avx512|baseline] [--seconds 9] [--profile profile.csv] [--keyframes DIR]
-//                 [--sheet sheet.png] [--no-video]
+//                 [--sheet sheet.png] [--no-video] [--no-skip] [--occupancy occupancy.csv]
+//
+// --no-skip computes every pixel of the runtime's detail step and renderer (study H, H2: by default they skip what is
+// +0 and cannot change; the result is the same to the bit). --occupancy writes, every third frame and for every
+// active module, how much of its fine fields is not +0, holds material (1e-4 or more), lies within each row's first
+// and last pixel that is not +0, within 16-pixel blocks that are not all +0, and within the rows' spans widened by
+// 4 pixels and joined over 4 rows each way (what a run-aware detail step must still compute, roughly); and for material
+// alone (what the shader draws), the rows' spans and the 16-pixel blocks that hold any.
 //
 // DIR holds the rollout effects fire.nvfx, smoke.nvfx and explosion.nvfx (nvfx_experiment d-train). The scene: a
 // burning wreck at night; a fuse runs to a charge; the charge explodes. Six tiles of the explosion model make one
@@ -27,6 +34,7 @@
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
+#include <ctime>
 #include <filesystem>
 #include <format>
 #include <fstream>
@@ -67,7 +75,8 @@ float smooth(float t) {
 }
 
 struct Args {
-  std::filesystem::path models, out = "fireball.mp4", profile, keyframes, sheet;
+  std::filesystem::path models, out = "fireball.mp4", profile, keyframes, sheet, occupancy;
+  bool skip = true;
   int width = 1280, height = 720, threads = 4;
   float quality = 1.f, seconds = 9.f;
   std::string isa;
@@ -95,6 +104,8 @@ Args parse(int argc, char** argv) {
     else if (k == "--seconds") a.seconds = std::stof(next());
     else if (k == "--isa") a.isa = next();
     else if (k == "--no-video") a.video = false;
+    else if (k == "--no-skip") a.skip = false;
+    else if (k == "--occupancy") a.occupancy = next();
     else throw std::invalid_argument("unknown option " + k + " (see the source header)");
   }
   if (a.models.empty()) throw std::invalid_argument("--models DIR (or NEURALVFX_DATA) is needed");
@@ -111,6 +122,66 @@ rt::RolloutEffect load(const std::filesystem::path& p) {
 }
 
 int round32(float v) { return std::max(32, 32 * static_cast<int>(std::lround(v / 32.f))); }
+
+double thread_cpu_ms() {
+  timespec t{};
+  clock_gettime(CLOCK_THREAD_CPUTIME_ID, &t);
+  return 1e3 * static_cast<double>(t.tv_sec) + 1e-6 * static_cast<double>(t.tv_nsec);
+}
+
+// --occupancy: how empty each active module's fine fields are after its step (see the header).
+void write_occupancy(std::FILE* o, int frame, float t, const std::vector<Module*>& active) {
+  for (const Module* m : active) {
+    const auto ft = m->runner().fine_heat(), fd = m->runner().fine_soot();
+    const int S = m->size();
+    const auto zs = [](int v) { return static_cast<std::size_t>(v); };
+    const auto nonzero = [&](int x, int y) { return ft[zs(y) * zs(S) + zs(x)] != 0.f || fd[zs(y) * zs(S) + zs(x)] != 0.f; };
+    long nz = 0, mat = 0, span = 0, blocks = 0, n_blocks = 0, dilated = 0, mspan = 0, mblocks = 0;
+    const auto material = [&](int x, int y) { return ft[zs(y) * zs(S) + zs(x)] >= 1e-4f || fd[zs(y) * zs(S) + zs(x)] >= 1e-4f; };
+    std::vector<int> first(zs(S), S), last(zs(S), -1);
+    for (int y = 0; y < S; ++y) {
+      for (int x = 0; x < S; ++x) {
+        const std::size_t i = zs(y) * zs(S) + zs(x);
+        mat += ft[i] >= 1e-4f || fd[i] >= 1e-4f;
+        if (nonzero(x, y)) {
+          ++nz;
+          first[zs(y)] = std::min(first[zs(y)], x);
+          last[zs(y)] = x;
+        }
+      }
+      int mf = S, ml = -1;
+      for (int x0 = 0; x0 < S; x0 += 16, ++n_blocks) {
+        bool any = false, anym = false;
+        for (int x = x0; x < std::min(S, x0 + 16); ++x) {
+          any |= nonzero(x, y);
+          if (material(x, y)) {
+            anym = true;
+            mf = std::min(mf, x);
+            ml = x;
+          }
+        }
+        blocks += any;
+        mblocks += anym;
+      }
+      if (last[zs(y)] >= 0) span += last[zs(y)] - first[zs(y)] + 1;
+      if (ml >= 0) mspan += ml - mf + 1;
+    }
+    for (int y = 0; y < S; ++y) {
+      int a = S, b = -1;
+      for (int r = std::max(0, y - 4); r <= std::min(S - 1, y + 4); ++r) {
+        if (last[zs(r)] >= 0) {
+          a = std::min(a, first[zs(r)] - 4);
+          b = std::max(b, last[zs(r)] + 4);
+        }
+      }
+      if (b >= a) dilated += std::min(S - 1, b) - std::max(0, a) + 1;
+    }
+    const double n = static_cast<double>(S) * static_cast<double>(S);
+    std::fprintf(o, "%d,%.4f,%s,%d,%.4f,%.4f,%.4f,%.4f,%.4f,%.4f,%.4f\n", frame, static_cast<double>(t), m->name().c_str(), S, static_cast<double>(nz) / n,
+                 static_cast<double>(mat) / n, static_cast<double>(span) / n, static_cast<double>(blocks) / static_cast<double>(n_blocks),
+                 static_cast<double>(dilated) / n, static_cast<double>(mspan) / n, static_cast<double>(mblocks) / static_cast<double>(n_blocks));
+  }
+}
 
 // A rule of the script: when `when` first holds, `then` runs (once).
 struct Rule {
@@ -155,6 +226,7 @@ int main(int argc, char** argv) try {
   std::vector<std::unique_ptr<Module>> owned;
   const auto make = [&](std::string name, const rt::RolloutEffect& e, int size, Placement p) {
     owned.push_back(std::make_unique<Module>(std::move(name), e, size, p, isa));
+    owned.back()->runner().skip_empty(A.skip);
     return owned.back().get();
   };
   std::array<std::array<Module*, 3>, 2> ex{}, sm{};
@@ -307,6 +379,12 @@ int main(int argc, char** argv) try {
   active.reserve(owned.size());
 
   // --- output --------------------------------------------------------------------------------------------------------
+  std::FILE* occupancy = nullptr;
+  if (!A.occupancy.empty()) {
+    occupancy = std::fopen(A.occupancy.c_str(), "w");
+    if (!occupancy) throw std::runtime_error("cannot write " + A.occupancy.string());
+    std::fprintf(occupancy, "frame,t,module,size,not_zero,material,row_spans,blocks16,spans_widened,material_row_spans,material_blocks16\n");
+  }
   std::FILE* video = nullptr;
   if (A.video) {
     const std::string cmd = std::format("ffmpeg -loglevel error -y -f rawvideo -pix_fmt rgb24 -s {}x{} -r 30 -i - -c:v libx264 -preset slow -crf 19 "
@@ -324,6 +402,10 @@ int main(int argc, char** argv) try {
   std::vector<std::vector<std::pair<double, double>>> mod_prof(static_cast<std::size_t>(frames), std::vector<std::pair<double, double>>(owned.size()));
   std::vector<int> n_active(static_cast<std::size_t>(frames)), n_parts(static_cast<std::size_t>(frames));
   std::vector<long> allocs(static_cast<std::size_t>(frames));
+  std::vector<std::uint64_t> sums(static_cast<std::size_t>(frames));
+  // Thread CPU time: of the main thread per frame (with one thread, the whole frame's work) and of each module's step
+  // (on whichever thread ran it), so that comparisons on a shared machine are not swamped by preemption.
+  std::vector<double> frame_cpu(static_cast<std::size_t>(frames)), step_cpu_frame(static_cast<std::size_t>(frames)), step_cpu_now(owned.size());
   const double setup_ms = ms(setup0, Clock::now());
   std::size_t scratch = 0, resident = 0;
   for (const auto& m : owned) scratch += m->runner().scratch_bytes();
@@ -340,6 +422,7 @@ int main(int argc, char** argv) try {
     if (f == 1) g_counting.store(true);  // the first frame may still touch lazily sized buffers
     const long alloc0 = g_allocations.load();
     std::array<double, kStages>& P = prof[zs(f)];
+    const double cpu0 = thread_cpu_ms();
     auto c0 = Clock::now();
     // script: rules, then controls and the scene's time-driven settings
     for (Rule& r : rules) {
@@ -420,7 +503,18 @@ int main(int argc, char** argv) try {
       if (m->active && !((m.get() == fires[0] || m.get() == fires[1]) && m->opacity <= 0.f && lit == 0)) active.push_back(m.get());
     }
     for (Module* m : active) m->step_ms = m->shade_ms = 0.0;
-    pool.run(static_cast<int>(active.size()), [&](int i) { active[zs(i)]->step(); });
+    std::ranges::fill(step_cpu_now, 0.0);
+    pool.run(static_cast<int>(active.size()), [&](int i) {
+      const double t0 = thread_cpu_ms();
+      active[zs(i)]->step();
+      step_cpu_now[zs(i)] = thread_cpu_ms() - t0;
+    });
+    for (std::size_t i = 0; i < active.size(); ++i) step_cpu_frame[zs(f)] += step_cpu_now[i];
+    if (occupancy && f % 3 == 0) {
+      g_counting.store(false);  // (measurement only: its buffers are not the frame loop's)
+      write_occupancy(occupancy, f, t, active);
+      g_counting.store(f >= 1);
+    }
     auto c2 = Clock::now();
     P[kStep] = ms(c1, c2);
 
@@ -516,10 +610,16 @@ int main(int argc, char** argv) try {
     auto c14 = Clock::now();
     P[kEncode] = ms(c13, c14);
     allocs[zs(f)] = g_allocations.load() - alloc0;
+    frame_cpu[zs(f)] = thread_cpu_ms() - cpu0;
     for (std::size_t i = 0; i < owned.size(); ++i) mod_prof[zs(f)][i] = {owned[i]->active ? owned[i]->step_ms : 0.0, owned[i]->active ? owned[i]->shade_ms : 0.0};
     n_active[zs(f)] = static_cast<int>(active.size());
     n_parts[zs(f)] = parts.alive();
     g_counting.store(false);
+    {  // the final picture's checksum (FNV-1a, 64 bits), outside the timed stages: same checksums, same pictures
+      std::uint64_t h = 0xcbf29ce484222325ull;
+      for (const std::uint8_t v : rgb) h = (h ^ v) * 0x100000001b3ull;
+      sums[zs(f)] = h;
+    }
     for (const float kt : key_times) {
       if (f == static_cast<int>(std::lround(kt * 30.f))) {
         Image img;
@@ -561,6 +661,7 @@ int main(int argc, char** argv) try {
     }
   }
   if (video && pclose(video) != 0) throw std::runtime_error("ffmpeg failed");
+  if (occupancy) std::fclose(occupancy);
 
   // --- profile -------------------------------------------------------------------------------------------------------
   const auto stats = [](std::vector<double> v) {
@@ -612,13 +713,13 @@ int main(int argc, char** argv) try {
     for (const char* n : kStageNames) o << ',' << n;
     o << ",total";
     for (const auto& m : owned) o << ',' << m->name() << "_step," << m->name() << "_shade";
-    o << '\n';
+    o << ",frame_thread_cpu_ms,step_thread_cpu_ms,rgb_fnv\n";
     for (int f = 0; f < frames; ++f) {
       o << f << ',' << std::format("{:.3f}", static_cast<double>(f) / 30.0) << ',' << n_active[zs(f)] << ',' << n_parts[zs(f)] << ',' << allocs[zs(f)];
       for (const double v : prof[zs(f)]) o << std::format(",{:.3f}", v);
       o << std::format(",{:.3f}", total[zs(f)]);
       for (const auto& [a, b] : mod_prof[zs(f)]) o << std::format(",{:.3f},{:.3f}", a, b);
-      o << '\n';
+      o << std::format(",{:.3f},{:.3f},{:016x}\n", frame_cpu[zs(f)], step_cpu_frame[zs(f)], sums[zs(f)]);
     }
     std::ofstream meta(A.profile.string() + ".meta");
     meta << std::format("width,{}\nheight,{}\nquality,{}\nthreads,{}\nisa,{}\nmain_tile_px,{}\nmodules,{}\nsetup_ms,{:.1f}\nresident_kb,{:.1f}\nscratch_mb,{:.2f}\npeak_rss_mb,{:.1f}\n"

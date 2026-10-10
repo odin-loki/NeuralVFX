@@ -318,3 +318,253 @@ TEST(Cm, PackingIsDeterministic) {
   const auto file = bytes_of(os.str());
   EXPECT_EQ(cm::pack_model(file).data, cm::pack_model(file).data);
 }
+
+// --- format 2 (study H, H3): LZ tokens, the light and fast models, seekable segments ----------------------------------
+
+namespace {
+
+std::vector<cm::Options> format2_options() {
+  std::vector<cm::Options> v;
+  for (const cm::Literal lit : {cm::Literal::full, cm::Literal::light, cm::Literal::fast}) {
+    for (const bool lz : {false, true}) {
+      for (const bool seek : {false, true}) {
+        if (seek && lit == cm::Literal::full) continue;
+        v.push_back({lit, lz, seek, std::size_t{200}});  // small segments: many per tensor
+      }
+    }
+  }
+  return v;
+}
+
+std::string describe(const cm::Options& o) {
+  return std::to_string(static_cast<int>(o.literal)) + (o.lz ? " lz" : "") + (o.seekable ? " seekable" : "");
+}
+
+std::size_t round_trip2(const std::vector<cm::Tensor>& in, const cm::Options& o) {
+  const cm::Packed p = cm::pack_tensors(in, o);
+  EXPECT_EQ(p.data[4], 2) << "format 2";
+  const auto back = cm::unpack_tensors(p.data);
+  EXPECT_TRUE(back) << describe(o) << ": " << (back ? "" : back.error());
+  if (!back) return 0;
+  EXPECT_EQ(back->size(), in.size());
+  for (std::size_t k = 0; k < std::min(back->size(), in.size()); ++k) {
+    EXPECT_EQ((*back)[k].shape.dims, in[k].shape.dims);
+    EXPECT_TRUE((*back)[k].values == in[k].values) << describe(o) << ", tensor " << k;
+  }
+  return p.data.size();
+}
+
+void expect_model_round_trip2(const std::vector<std::uint8_t>& file, const cm::Options& o) {
+  const cm::Packed p = cm::pack_model(file, o);
+  const auto back = cm::unpack_model(p.data);
+  ASSERT_TRUE(back) << describe(o) << ": " << back.error();
+  EXPECT_TRUE(*back == file) << describe(o);
+}
+
+std::vector<std::uint8_t> small_rollout_file() {
+  rollout::Hyper h;
+  h.res = 8;
+  h.hidden = 6;
+  h.memory = 2;
+  h.render_hidden = 5;
+  h.start_fine = 16;
+  h.n_age = 1;
+  rollout::Model m = rollout::init_model(h, 3);
+  m.effect = "explosion";
+  m.control_names = {"intensity", "wind", "turbulence"};
+  for (int k = 0; k < 4; ++k) {
+    rollout::StartPoint sp;
+    sp.controls = {0.1f * static_cast<float>(k), 0.5f, 0.9f};
+    sp.seed = 40 + static_cast<std::uint64_t>(k);
+    sp.time = 0.5f * static_cast<float>(k);
+    for (int y = 0; y < 8; ++y) {
+      for (int x = 0; x < 8; ++x) {
+        for (int c = 0; c < rollout::kPhys; ++c) sp.coarse.push_back(std::sin(0.4f * static_cast<float>(x + c) + static_cast<float>(k)) * std::cos(0.3f * static_cast<float>(y)));
+      }
+    }
+    if (k != 1) {  // mostly empty fine fields, as the effects' are
+      for (int i = 0; i < 16 * 16; ++i) {
+        const bool on = (i % 16) > 5 && (i % 16) < 10 && i / 16 > 4;
+        sp.fine_t.push_back(on ? std::max(0.f, std::sin(0.1f * static_cast<float>(i))) : 0.f);
+        sp.fine_d.push_back(on ? std::max(0.f, std::cos(0.13f * static_cast<float>(i))) : 0.f);
+      }
+    }
+    m.starts.push_back(sp);
+  }
+  rollout::quantise_like_storage(m);
+  std::ostringstream os;
+  EXPECT_TRUE(rollout::save_model(os, m));
+  return bytes_of(os.str());
+}
+
+std::vector<std::uint8_t> small_frame_file(int bits) {
+  Hyper h;
+  h.arch = Arch::grid;
+  h.size = 32;
+  h.frames = 8;
+  h.grid = 6;
+  h.channels = 3;
+  h.hidden = 5;
+  h.grid_t = 3;
+  h.bases = 2;
+  h.n_controls = 2;
+  h.n_latent = 2;
+  Model m = init_model(h, 7);
+  m.feature_bits = bits;
+  m.effect = "smoke";
+  m.control_names = {"intensity", "wind"};
+  m.z_train = {{0.5f, -1.f}, {0.25f, 2.f}, {0.f, 0.f}};
+  m.z_mean = {0.1f, 0.2f};
+  m.z_std = {1.f, 0.5f};
+  std::ostringstream os;
+  EXPECT_TRUE(save_model(os, m));
+  return bytes_of(os.str());
+}
+
+}  // namespace
+
+TEST(Cm, Format2RoundTripsInEveryConfiguration) {
+  using K = cm::Kind;
+  std::vector<cm::Tensor> ts;
+  std::uint64_t seed = 100;
+  for (const int width : {1, 2}) {
+    ts.push_back(random_tensor(K::bytes, width, {1}, false, seed++));
+    ts.push_back(random_tensor(K::weights, width, {5, 9}, false, seed++));
+    ts.push_back(random_tensor(K::features, width, {2, 3, 2, 5, 5}, false, seed++));
+    ts.push_back(random_tensor(K::coarse, width, {3, 6, 5, 4}, true, seed++));
+    ts.push_back(random_tensor(K::rgba, width, {3, 1, 8, 4}, true, seed++));
+  }
+  cm::Tensor m = random_tensor(K::features, 1, {2, 3, 6, 6}, false, seed++);
+  for (int p = 0; p < 6; ++p) {
+    m.shape.lo.push_back(-(int64_t{1} << 20) * p);
+    m.shape.hi.push_back(p == 2 ? m.shape.lo.back() : p == 4 ? m.shape.lo.back() - 5 : (int64_t{1} << 22) * (p + 1));
+  }
+  ts.push_back(m);
+  cm::Tensor z;  // long repeats: what LZ tokens are for
+  z.shape.kind = K::fine;
+  z.shape.dims = {4, 2, 16, 16};
+  z.values.assign(z.shape.size(), 0);
+  for (std::size_t i = 0; i < z.values.size(); i += 37) z.values[i] = static_cast<std::uint16_t>(i % 251);
+  ts.push_back(z);
+  const auto frame8 = small_frame_file(8), frame16 = small_frame_file(16), roll = small_rollout_file();
+  for (const cm::Options& o : format2_options()) {
+    round_trip2(ts, o);
+    round_trip2({}, o);
+    for (const auto* f : {&frame8, &frame16, &roll}) expect_model_round_trip2(*f, o);
+    expect_model_round_trip2({}, o);
+    expect_model_round_trip2({42}, o);
+    expect_model_round_trip2(bytes_of("NVFXROL1 but not really a rollout effect"), o);
+    // Format 1 files still unpack, and format 2 is deterministic.
+    EXPECT_EQ(cm::pack_model(roll, o).data, cm::pack_model(roll, o).data);
+  }
+  EXPECT_EQ(cm::pack_model(roll).data[4], 1);
+}
+
+TEST(Cm, Format2SizesAndLzTokens) {
+  // Exact repeats (one noisy patch copied into every plane of an empty field) cost much less with LZ tokens; noise
+  // costs about the same.
+  cm::Tensor z;
+  z.shape.kind = cm::Kind::fine;
+  z.shape.dims = {8, 2, 32, 32};
+  z.values.assign(z.shape.size(), 0);
+  std::mt19937_64 rng(5);
+  std::array<std::uint16_t, 12 * 12> patch{};
+  for (auto& v : patch) v = static_cast<std::uint16_t>(rng() & 255);
+  for (std::size_t p = 0; p < 16; ++p) {
+    for (std::size_t y = 0; y < 12; ++y) {
+      for (std::size_t x = 0; x < 12; ++x) z.values[p * 1024 + (y + 10) * 32 + x + 4 + p] = patch[y * 12 + x];
+    }
+  }
+  const cm::Tensor noise = random_tensor(cm::Kind::features, 1, {4, 32, 32}, false, 77);
+  for (const cm::Literal lit : {cm::Literal::full, cm::Literal::light, cm::Literal::fast}) {
+    const std::size_t with = round_trip2({z}, {lit, true, false}), without = round_trip2({z}, {lit, false, false});
+    EXPECT_LT(static_cast<double>(with), 0.8 * static_cast<double>(without)) << static_cast<int>(lit) << ": " << with << " against " << without;
+    const std::size_t nw = round_trip2({noise}, {lit, true, false}), nwo = round_trip2({noise}, {lit, false, false});
+    EXPECT_LT(static_cast<double>(nw), 1.01 * static_cast<double>(nwo)) << static_cast<int>(lit);
+  }
+  // The levels are ordered by size on a smooth field: full <= light <= fast, and all far below the raw size.
+  cm::Tensor a;
+  a.shape.kind = cm::Kind::features;
+  a.shape.dims = {8, 48, 48};
+  for (int t = 0; t < 8; ++t) {
+    for (int y = 0; y < 48; ++y) {
+      for (int x = 0; x < 48; ++x) {
+        const double v = 128 + 90 * std::sin(0.11 * x + 0.3 * t) * std::cos(0.07 * y - 0.2 * t) + 3.0 * std::sin(1.7 * x * y + t);
+        a.values.push_back(static_cast<std::uint16_t>(std::lround(v)));
+      }
+    }
+  }
+  const std::size_t full = round_trip2({a}, {cm::Literal::full, true, false}), light = round_trip2({a}, {cm::Literal::light, true, false});
+  const std::size_t fast = round_trip2({a}, {cm::Literal::fast, true, false});
+  EXPECT_LE(full, light + 64);
+  EXPECT_LE(light, fast + 64);
+  EXPECT_LT(static_cast<double>(fast), 0.6 * static_cast<double>(a.values.size()));
+}
+
+TEST(Cm, SeekableSlicesDecodeAlone) {
+  for (const auto& file : {small_rollout_file(), small_frame_file(8), small_frame_file(16)}) {
+    for (const cm::Literal lit : {cm::Literal::light, cm::Literal::fast}) {
+      const cm::Packed p = cm::pack_model(file, {lit, true, true, 128});
+      const auto list = cm::list_slices(p.data);
+      ASSERT_TRUE(list) << list.error();
+      ASSERT_GT(list->size(), 3u);
+      std::size_t values = 0, packed = 0;
+      for (std::size_t k = 0; k < list->size(); ++k) {
+        const auto s = cm::unpack_slice(p.data, k);
+        ASSERT_TRUE(s) << s.error();
+        const cm::SliceInfo& info = (*list)[k];
+        EXPECT_EQ(s->tensor.shape.kind, info.kind);
+        EXPECT_EQ(s->first_plane, info.first_plane);
+        ASSERT_EQ(s->tensor.values.size(), info.values);
+        ASSERT_EQ(s->at.size(), info.values);
+        for (std::size_t q = 0; q < s->at.size(); ++q) {
+          const int w = s->tensor.shape.width;
+          const auto want = static_cast<std::uint16_t>(file[s->at[q]] | (w == 2 ? file[s->at[q] + 1] << 8 : 0));
+          ASSERT_EQ(s->tensor.values[q], want) << "slice " << k << " value " << q;
+        }
+        values += info.values * static_cast<std::size_t>(s->tensor.shape.width);
+        packed += info.packed_bytes;
+      }
+      EXPECT_LT(values, file.size());  // headers and small tensors are in segment 0
+      EXPECT_LT(packed, p.data.size());
+      EXPECT_FALSE(cm::unpack_slice(p.data, list->size()));
+      // Damage inside a segment's stream is refused when that segment is decoded.
+      for (std::size_t k = 0; k < list->size(); k += 3) {
+        std::size_t at = p.data.size();
+        for (std::size_t j = list->size(); j-- > k;) at -= (*list)[j].packed_bytes;
+        auto bad = p.data;
+        bad[at + (*list)[k].packed_bytes / 2] ^= 0x41;
+        const auto s = cm::unpack_slice(bad, k);
+        const auto ok = cm::unpack_slice(p.data, k);
+        EXPECT_TRUE(!s || s->tensor.values == ok->tensor.values) << "slice " << k;
+        EXPECT_FALSE(cm::unpack_model(bad).has_value() && *cm::unpack_model(bad) != file);
+      }
+    }
+  }
+  // Not seekable: refused.
+  const auto f = small_rollout_file();
+  EXPECT_FALSE(cm::list_slices(cm::pack_model(f).data));
+  EXPECT_FALSE(cm::unpack_slice(cm::pack_model(f, {cm::Literal::light, true, false}).data, 0));
+}
+
+TEST(Cm, Format2DamagedDataIsRefused) {
+  const auto file = small_frame_file(8);
+  for (const cm::Options& o : format2_options()) {
+    const cm::Packed p = cm::pack_model(file, o);
+    int refused = 0, tries = 0;
+    for (std::size_t at = 0; at < p.data.size(); at += 5, ++tries) {
+      auto bad = p.data;
+      bad[at] ^= 0x5a;
+      const auto r = cm::unpack_model(bad);
+      EXPECT_TRUE(!r || *r == file) << describe(o) << ": damage at " << at << " gave another file";
+      refused += r ? 0 : 1;
+    }
+    EXPECT_GT(refused, tries * 3 / 4) << describe(o);
+    auto cut = p.data;
+    cut.resize(cut.size() / 2);
+    EXPECT_FALSE(cm::unpack_model(cut)) << describe(o);
+    auto flags = p.data;
+    flags[22] = 0xff;  // unknown options
+    EXPECT_FALSE(cm::unpack_model(flags)) << describe(o);
+  }
+}

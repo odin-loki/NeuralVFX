@@ -641,3 +641,366 @@ for the nested search.** This is not CameraDetector's outcome: there no diffusio
 contexts do not encode the held-out sites. It is also a narrower win than it looks: the prior ties the shards that the
 runtime already has, so it buys continuity (no restarts, no crossfades), not better pictures, for 0.4 ms per frame and
 1.5 MB. Extending it to smoke and explosions is a later decision and has not been started.
+
+## 9. Study H: computing on compressed data (stage S9)
+
+Status: **H1 to H3 decided** (10 October 2026). Timings are **provisional**: the shared 4-core machine ran at load 9
+to 18 throughout, so every timing is thread CPU time on one pinned core, the least of 15 interleaved repetitions,
+and is to be re-run on a quiet machine with `tools/study_h/*.sh` before any claim moves to the report. Audience:
+owner, research, dev.
+
+**Result in one line:** LZ tokens alone do not make the coder fast, because network files hardly repeat (only the
+mostly empty fine fields do); a lighter literal model behind them does: **format 2 decodes 4 to 9 times faster for
+1.6 to 3.9% more disk**, a LOCO-I-style fast model 18 to 38 times faster for 10 to 23% more, and a seekable variant
+decodes one tensor or start point alone for 0.1 to 1% more (H3 kept). Run-aware fine fields are bit-exact on every
+ISA and make the step of sparse effects at 384 px 9 to 13% and the learned renderer 15 to 30% cheaper than main's
+code, but the fireball's fields are not empty where it matters (81% of pixels must still be computed): its step stage
+does 6.4% less work and its frame 1.6% less, the second inside the noise of this machine (H2 kept provisionally; the frame-time rule waits for the quiet
+machine). Computing on LZ78- or RePair-coded data is a null: 10 to 23 times slower than the dense AVX2 code on every
+feature volume and 3 to 4 times on weight tables, and where zeros make it win, a plain sparse list wins by more (H1
+stopped).
+
+| id | design | rule (§3) | result | decision |
+|---|---|---|---|---|
+| H3 | LZ inside the coder | load or decode time falls by more than the size grows | light model with LZ tokens: decode time −76 to −89%, size +1.6 to +3.9% (seekable +1.7 to +4.4%); fast model with LZ tokens: −94 to −97%, +10 to +23%; LZ tokens in the full model alone: 0 to −29%, −0.3 to 0% | **kept** (format 2) |
+| H2 | run-aware fields | faster at the same result, zero allocations, and the fireball's frame time falls | bit-exact (every ISA; all 270 fireball frames), zero allocations; against main's code the step of sparse effects −9 to −13% (explosion and smoke at 384 px), dense fire +1 to +4% (a tie against the same build without skipping); learned renderer −15 to −30%; fireball at one thread: step stage −6.4% [−8.7, −4.2], frame CPU −1.6% [−3.6, +0.3] | **kept provisionally**: everything but the frame-time rule holds; the frame fell in 5 of 6 pairs but its interval touches zero |
+| H1 | computing on LZ78/RePair data | faster than the dense SIMD code at the same result | feature blends 10 to 23 times slower (plain sparse rows 4.5 to 4.9), weight tables 3.3 to 3.9 times; only stored fields with at most 5 to 10% non-zero win, and there plain sparse rows (no grammar) win more | **null, stopped** |
+
+### 9.1 H3: LZ inside the coder
+
+**What was built** (`include/neuralfx/cm.hpp`, `src/core/cm.cpp`, `nvfx_pack --h3`). A second format of `.nvfz` beside
+the first, which is unchanged to the byte (checked against main's coder on four files). Same container, same
+parsing of `.nvfx` files into tensors, same predictions from neighbours and planes. Three options:
+- **LZ tokens** (as LZP): before a value is coded, the value that followed the last occurrence of the four values
+  before it is offered (the four are checked, not only their hash), and one adaptive flag says whether it is the
+  value; a match is followed while it holds, so a long repeat costs one cheap flag per value and no modelling. Used
+  for the kinds that repeat exactly: fine fields, headers and flipbooks.
+- **A literal model**: the full model of format 1 (14 predictors and an adaptive linear one, 17 statistics, two
+  mixers, two APMs per bit); a **light** one (7 predictors, per bit 4 directly indexed statistics, one small mixer, one
+  APM; the low bits of features and weights coded plainly when the expected error is 8 times their weight or more); or a
+  **fast** one in the manner of LOCO-I (JPEG-LS): one of three cheap predictions per value, the residual as a
+  Golomb-Rice code with an adaptive parameter, the unary part coded with one adaptive statistic per decision, the
+  low bits plainly.
+- **Seekable segments** (light or fast): every tensor, large ones in slices of whole planes of about N values (all
+  time slices of a feature plane together; one start point's coarse state; both fine fields of a start), is its own
+  segment with its own model and coder and a 32-bit checksum; headers and the small tensors that parsing needs share
+  segment 0. `cm::list_slices` and `cm::unpack_slice` decode segment 0 and one segment.
+
+Tests (`tests/test_cm.cpp`, 4 new): exact round trips in every configuration on random, smooth and repeating tensors,
+frame models, rollout effects and malformed inputs; every slice of seekable files equal to the file's bytes;
+damaged data refused (whole files and single slices); LZ tokens at least 20% smaller on exact repeats and within 1%
+on noise; sizes ordered full ≤ light ≤ fast.
+
+**Where the speed comes from.** Not from LZ. The LZ tokens find exact repeats of four values almost only in the fine
+fields of rollout start points (mostly zero), where they make the light model's code 36% smaller and decode the
+whole explosion file 1.5 times faster; on features, weights and coarse states they hit 0 to 1.4% of values and only
+cost (so they are not used there). The time goes to the literal model: format 1 spends about 1,700 instructions per
+coded bit on 17 statistics, two mixers and two APMs; the light model, with a quarter of the statistics and one mixer,
+decodes 4 to 9 times faster; the fast model, a few coder steps per value, 18 to 38 times.
+
+Sizes against format 1 and decode times (thread CPU time, least of 15; `results/compression/h3_decode.csv`, parts in
+`h3_decode_parts.csv`):
+
+| files | coder | size against format 1 | decoding against format 1 | decode MB/s |
+|---|---|---:|---:|---:|
+| D: rollout effects (3) | format 1 (full model) | 0 | 1 | 0.55 to 0.58 |
+| D: rollout effects (3) | full model, LZ tokens | -0.3% to +0.0% | 1.0x faster to 1.4x faster | 0.55 to 0.79 |
+| D: rollout effects (3) | light model | +2.9% to +10.0% | 4.5x faster to 4.6x faster | 2.50 to 2.64 |
+| D: rollout effects (3) | light model, LZ tokens | +3.0% to +3.5% | 4.5x faster to 6.7x faster | 2.51 to 3.87 |
+| D: rollout effects (3) | light, LZ, seekable (64K) | +3.6% to +4.1% | 4.4x faster to 6.7x faster | 2.44 to 3.87 |
+| D: rollout effects (3) | fast model | +18.7% to +30.5% | 27.0x faster to 39.1x faster | 14.92 to 22.70 |
+| D: rollout effects (3) | fast model, LZ tokens | +18.6% to +23.4% | 27.6x faster to 37.8x faster | 15.23 to 21.92 |
+| D: rollout effects (3) | fast, LZ, seekable (64K) | +19.8% to +24.4% | 26.7x faster to 36.8x faster | 14.77 to 21.37 |
+| D: rollout effects (3) | zlib -9 (reference) | +42.0% to +86.8% | 298.9x faster to 488.8x faster | 165.16 to 283.78 |
+| A: 8-bit frame models (8) | format 1 (full model) | 0 | 1 | 0.46 to 0.55 |
+| A: 8-bit frame models (8) | full model, LZ tokens | +0.0% | 1.0x faster | 0.45 to 0.57 |
+| A: 8-bit frame models (8) | light model | +2.1% to +3.9% | 4.1x faster to 4.9x faster | 2.23 to 2.34 |
+| A: 8-bit frame models (8) | light model, LZ tokens | +2.1% to +3.9% | 4.1x faster to 4.9x faster | 2.20 to 2.35 |
+| A: 8-bit frame models (8) | light, LZ, seekable (64K) | +2.3% to +4.4% | 4.1x faster to 5.0x faster | 2.23 to 2.40 |
+| A: 8-bit frame models (8) | fast model | +9.9% to +14.9% | 17.5x faster to 22.8x faster | 9.57 to 11.31 |
+| A: 8-bit frame models (8) | fast model, LZ tokens | +9.9% to +14.9% | 17.7x faster to 22.9x faster | 9.64 to 11.38 |
+| A: 8-bit frame models (8) | fast, LZ, seekable (64K) | +10.3% to +15.2% | 17.4x faster to 22.6x faster | 9.47 to 11.10 |
+| A: 8-bit frame models (8) | zlib -9 (reference) | +13.4% to +42.2% | 240.6x faster to 289.6x faster | 125.84 to 138.21 |
+| A: fp16 frame models (6) | format 1 (full model) | 0 | 1 | 0.43 to 0.49 |
+| A: fp16 frame models (6) | full model, LZ tokens | +0.0% | 1.0x faster | 0.44 to 0.49 |
+| A: fp16 frame models (6) | light model | +1.5% to +1.8% | 7.2x faster to 9.1x faster | 3.49 to 3.96 |
+| A: fp16 frame models (6) | light model, LZ tokens | +1.6% to +1.8% | 7.2x faster to 9.1x faster | 3.50 to 3.94 |
+| A: fp16 frame models (6) | light, LZ, seekable (64K) | +1.7% to +1.9% | 7.3x faster to 9.3x faster | 3.54 to 4.00 |
+| A: fp16 frame models (6) | fast model | +14.3% to +19.4% | 25.5x faster to 27.7x faster | 12.00 to 13.02 |
+| A: fp16 frame models (6) | fast model, LZ tokens | +14.3% to +19.4% | 25.5x faster to 28.3x faster | 12.23 to 13.01 |
+| A: fp16 frame models (6) | fast, LZ, seekable (64K) | +14.5% to +19.6% | 25.2x faster to 27.8x faster | 12.01 to 12.76 |
+| A: fp16 frame models (6) | zlib -9 (reference) | +12.0% to +21.4% | 302.9x faster to 356.9x faster | 148.35 to 154.46 |
+| B and C: 1 MB models (2) | format 1 (full model) | 0 | 1 | 0.44 to 0.48 |
+| B and C: 1 MB models (2) | full model, LZ tokens | +0.0% | 1.0x faster | 0.43 to 0.48 |
+| B and C: 1 MB models (2) | light model | +2.2% to +2.3% | 4.8x faster to 5.2x faster | 2.29 to 2.31 |
+| B and C: 1 MB models (2) | light model, LZ tokens | +2.2% to +2.3% | 4.9x faster to 5.2x faster | 2.31 to 2.32 |
+| B and C: 1 MB models (2) | light, LZ, seekable (64K) | +2.5% to +2.8% | 4.7x faster to 5.1x faster | 2.23 to 2.24 |
+| B and C: 1 MB models (2) | fast model | +10.4% to +12.2% | 21.8x faster to 22.9x faster | 10.07 to 10.44 |
+| B and C: 1 MB models (2) | fast model, LZ tokens | +10.4% to +12.2% | 22.0x faster to 22.9x faster | 10.07 to 10.51 |
+| B and C: 1 MB models (2) | fast, LZ, seekable (64K) | +10.6% to +12.3% | 21.5x faster to 22.5x faster | 9.88 to 10.26 |
+| B and C: 1 MB models (2) | zlib -9 (reference) | +18.6% to +31.5% | 279.6x faster to 311.2x faster | 133.62 to 136.90 |
+
+Load time is decode time plus parsing the unpacked file into the runtime, which takes 0.8 ms (fire, 82 KB), 2.8 ms
+(explosion, 274 KB), 3.6 ms (grid_m 8-bit, 132 KB) and 30 ms (grid k8, 1 MB). For format 1 parsing is under 1% of
+the load; for the fast model it is 10 to 25%.
+
+Per file (KB and ms, the least of 15):
+
+| file | KB | format 1: KB, ms | light + LZ: KB, ms | fast + LZ: KB, ms | zlib -9: KB, ms |
+|---|---:|---:|---:|---:|---:|
+| explosion_0_grid_m8 | 131.7 | 85.7, 284.2 | 88.6, 61.4 | 96.9, 12.7 | 116.6, 1.0 |
+| fire_0_conv_m16 | 268.1 | 221.2, 634.6 | 225.3, 69.6 | 264.2, 22.4 | 247.7, 1.8 |
+| fire_0_conv_m8 | 142.1 | 114.9, 304.9 | 117.5, 61.8 | 127.0, 15.1 | 130.3, 1.1 |
+| fire_0_conv_s16 | 132.2 | 109.1, 282.6 | 110.9, 35.1 | 129.5, 11.1 | 122.5, 0.9 |
+| fire_0_conv_s8 | 69.2 | 55.8, 129.9 | 57.0, 30.7 | 61.3, 7.3 | 63.6, 0.5 |
+| fire_0_grid_l16 | 579.2 | 436.9, 1243.4 | 444.4, 164.0 | 507.1, 46.0 | 530.2, 4.0 |
+| fire_0_grid_l8 | 291.7 | 164.1, 594.7 | 168.8, 128.0 | 188.5, 26.2 | 220.3, 2.4 |
+| fire_0_grid_m16 | 259.2 | 197.4, 568.1 | 200.7, 72.6 | 229.4, 20.6 | 239.5, 1.7 |
+| fire_0_grid_m8 | 131.7 | 79.5, 270.0 | 82.1, 58.8 | 90.7, 12.3 | 106.6, 1.1 |
+| fire_0_grid_mt16 | 515.2 | 383.5, 1077.3 | 389.6, 149.0 | 443.0, 40.6 | 465.2, 3.6 |
+| fire_0_grid_mt8 | 260.2 | 175.8, 579.8 | 180.4, 120.4 | 197.1, 25.3 | 226.4, 2.0 |
+| fire_0_grid_s16 | 144.6 | 110.2, 307.7 | 111.9, 42.3 | 125.9, 11.5 | 133.4, 1.0 |
+| fire_0_grid_s8 | 73.1 | 43.8, 137.2 | 45.5, 33.2 | 50.0, 6.8 | 62.3, 0.6 |
+| smoke_0_grid_m8 | 131.7 | 86.9, 285.8 | 89.5, 59.2 | 98.1, 12.8 | 112.4, 1.0 |
+| fire_grid_k8 | 1031.7 | 790.1, 2401.4 | 807.5, 457.7 | 872.5, 104.9 | 937.3, 7.7 |
+| fire_variation_k8 | 1032.7 | 692.8, 2212.5 | 709.1, 455.8 | 777.1, 100.7 | 910.9, 7.9 |
+| explosion | 274.3 | 55.7, 483.9 | 57.7, 72.5 | 68.7, 12.8 | 104.1, 1.0 |
+| fire | 81.8 | 44.5, 151.5 | 45.8, 33.3 | 52.8, 5.5 | 63.2, 0.5 |
+| smoke | 145.8 | 50.3, 267.9 | 51.8, 43.5 | 61.3, 8.7 | 72.4, 0.6 |
+
+What else was measured:
+- **The fast model on noise-like fp16 data loses to zlib** (conv latents: 1.02x against zlib's 1.08x of the raw
+  size; conv_m fp16: 264 KB against 248 KB): a Golomb-Rice code on 16-bit order codes cannot use the exponent's
+  low entropy. A constant fourth prediction gained only 0.5 to 1% and was not kept. For fp16 the light model is the choice (7 to 9 times faster, +1.6 to +1.8%).
+- **Plain low bits** gave the light model 1.4 times on fp16 features at +0.2% size, but cost coarse states 7.6%
+  (their exact zeros are predicted by the low bits), so they are used for features and weights only.
+- **Seekable segments**: segment size against the size cost and one slice's decode time (segment 0 and one segment;
+  the least of 5 per slice, mean and largest over the file's slices; `h3_segment_*.csv`):
+
+| file | segment (values) | coder | segments | size against the same coder without segments | whole file ms | one slice ms, mean / largest |
+|---|---:|---|---:|---:|---:|---:|
+| fire | 4096 | light+lz | 25 | +1.5% | 34.5 | 2.24 / 4.78 |
+| fire | 4096 | fast+lz | 25 | +0.9% | 5.7 | 0.66 / 0.98 |
+| smoke | 4096 | light+lz | 33 | +2.7% | 43.9 | 2.73 / 6.79 |
+| smoke | 4096 | fast+lz | 33 | -0.3% | 8.8 | 1.10 / 1.38 |
+| explosion | 4096 | light+lz | 49 | +10.5% | 74.8 | 3.76 / 6.08 |
+| explosion | 4096 | fast+lz | 49 | +3.5% | 13.3 | 2.03 / 2.50 |
+| fire_grid_k8 | 4096 | light+lz | 74 | +1.0% | 467.4 | 11.24 / 17.61 |
+| fire_grid_k8 | 4096 | fast+lz | 74 | +0.4% | 107.4 | 4.12 / 6.04 |
+| fire | 16384 | light+lz | 18 | +1.0% | 34.0 | 2.68 / 14.96 |
+| fire | 16384 | fast+lz | 18 | +1.1% | 5.7 | 0.74 / 2.34 |
+| smoke | 16384 | light+lz | 22 | +1.4% | 44.5 | 3.30 / 15.40 |
+| smoke | 16384 | fast+lz | 22 | +0.9% | 9.3 | 1.22 / 2.74 |
+| explosion | 16384 | light+lz | 28 | +3.6% | 72.0 | 4.71 / 15.67 |
+| explosion | 16384 | fast+lz | 28 | +1.6% | 13.0 | 2.11 / 3.16 |
+| fire_grid_k8 | 16384 | light+lz | 74 | +1.0% | 480.1 | 11.58 / 15.64 |
+| fire_grid_k8 | 16384 | fast+lz | 74 | +0.4% | 106.7 | 4.10 / 5.79 |
+| fire | 65536 | light+lz | 17 | +0.6% | 34.3 | 3.06 / 30.75 |
+| fire | 65536 | fast+lz | 17 | +1.0% | 5.7 | 0.74 / 4.11 |
+| smoke | 65536 | light+lz | 18 | +0.5% | 44.8 | 3.70 / 29.41 |
+| smoke | 65536 | fast+lz | 18 | +0.9% | 8.9 | 1.51 / 4.69 |
+| explosion | 65536 | light+lz | 19 | +0.6% | 72.6 | 6.38 / 56.13 |
+| explosion | 65536 | fast+lz | 19 | +0.9% | 13.1 | 2.34 / 7.40 |
+| fire_grid_k8 | 65536 | light+lz | 26 | +0.3% | 471.5 | 22.73 / 35.49 |
+| fire_grid_k8 | 65536 | fast+lz | 26 | +0.1% | 106.9 | 7.05 / 12.47 |
+
+  With segments of 4,096 values a rollout effect's start point (its coarse state, and its fine fields when it has
+  them) is one or two segments: the explosion as 49 segments costs 3.5% (fast) to 10.5% (light) more disk, and any
+  one of them decodes in 2.0 to 2.5 ms (fast) or 3.8 to 6.1 ms (light) against 13 or 75 ms for the whole file. With
+  segments of 65,536 values the cost is 0.1 to 1%.
+
+**Decision: kept.** Format 2 with the light model and LZ tokens is the faster default where disk matters (it passes
+the rule by a factor of 20 to 50: its time falls by 76 to 89% while its size grows by 1.6 to 3.9%); the fast model
+where load time matters more than disk (still smaller than zlib -9 on everything but conv fp16 latents); seekable segments for streaming start points or tensors. Format 1
+stays for the smallest files. Encoding speed was not optimised (the light model encodes about as fast as it
+decodes).
+
+### 9.2 H2: run-aware fields
+
+**What was built** (`src/runtime/rt_rollout.hpp`, `RolloutRunner::skip_empty`, on by default). The detail step finds
+each row's first and last pixel that is not +0 (bit patterns, so −0 and NaN count as material) while it copies the
+fields; the forward samples of row y run only on the pixels that can see material (the rows within the samples'
+vertical reach, widened by their horizontal reach from the velocity bounds); outside, every sample and its range is
++0, so the round trip's clamped correction is +0 too; the lock runs on those pixels and on the pixels that read a
+coarse cell with new material. A step uses these spans when the last step that measured them computed at most 90%
+of the pixels (re-measured every 8 steps): dense fields run the old path. The learned renderer skips blocks of 16
+pixels with no heat or soot above 0 (their material gate is 0, so every byte is 0). Nothing allocates.
+
+**Same result:** bit-exact, not just within the parity tests. A new test (`Compose.SkippingEmptyFieldsIsBitExact`)
+runs a sparse effect with strong wind and swirl and a dense one, on every ISA, at sizes with and without a ragged
+last block, with couplings writing into the fields between steps, and compares fields, coarse states and pictures to
+the bit every frame (it fails when the horizontal reach is set to zero). The whole fireball gives the same picture
+checksum on all 270 frames with skipping on and off, on the baseline, AVX2 and AVX-512 builds
+(`tools/study_h/h2_exact.sh`). Zero allocations in 269 frames.
+
+**How empty the fireball's fields are** (`nvfx_fireball --occupancy`, every third frame, pixel-weighted;
+`results/experiments/h2_occupancy.csv`):
+
+| modules | module-frames | not +0 | material (1e-4 or more) | rows' spans (not +0) | 16-pixel blocks (not +0) | spans widened by the reach | rows' spans of material | 16-pixel blocks with material |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| all | 727 | 72% | 35% | 79% | 77% | 81% | 48% | 42% |
+| explosion tiles, 384 px (1.2 to 3.6 s) | 150 | 36% | 24% | 41% | 40% | 43% | 26% | 26% |
+| explosion at the wreck, 256 px | 31 | 64% | 23% | 77% | 75% | 82% | 26% | 28% |
+| smoke tiles, 384 px (3.6 s on) | 318 | 88% | 42% | 96% | 92% | 97% | 61% | 50% |
+| fires, 128 and 192 px | 228 | 87% | 29% | 94% | 96% | 98% | 32% | 41% |
+
+The fields are mostly empty only in the sense of material (35% of pixels hold 1e-4 or more): advection and the lock
+spread tiny non-zero amounts everywhere, so 72% of pixels are not +0, and a bit-exact detail step must still compute
+81%. Only the explosion tiles before the hand-over (1.2 to 3.6 s) are mostly empty. The compositor already skips
+empty 16-pixel spans in shading and each image row's empty ends in drawing; a draw over runs of material blocks
+would skip at most 12% of the pixels it draws now (row spans 48% of the image, blocks 42%), so it was not built.
+
+**Speed of the runtime alone** (D effects from their start points at the fireball's sizes, 90 frames, both runners
+in lock step and compared to the bit every frame, thread CPU time, least of 15 per frame, ratio of sums with a 95%
+bootstrap interval over frames; the two runners are created in alternating order, since two instances' places in
+memory alone can differ by several percent; `results/experiments/h2_step_*.csv`):
+
+| ISA | effect | size | not +0 | step ms, all pixels | step, skipping / all [95%] | learned renderer ms, all | renderer, skipping / all [95%] |
+|---|---|---:|---:|---:|---:|---:|---:|
+| avx2 | explosion | 384 | 64% | 1.35 | 0.931 [0.919, 0.943] | 2.28 | 0.792 [0.772, 0.811] |
+| avx2 | explosion | 256 | 69% | 0.80 | 0.971 [0.960, 0.981] | 1.05 | 0.846 [0.826, 0.863] |
+| avx2 | smoke | 384 | 53% | 1.53 | 0.913 [0.898, 0.927] | 2.56 | 0.762 [0.736, 0.785] |
+| avx2 | fire | 192 | 83% | 0.73 | 0.978 [0.974, 0.983] | 0.82 | 0.990 [0.976, 1.014] |
+| avx2 | fire | 128 | 87% | 0.47 | 1.009 [1.005, 1.014] | 0.35 | 0.985 [0.981, 0.989] |
+| baseline | explosion | 384 | 64% | 2.27 | 0.929 [0.916, 0.941] | 4.99 | 0.758 [0.734, 0.781] |
+| baseline | explosion | 256 | 69% | 1.45 | 0.968 [0.960, 0.975] | 2.25 | 0.829 [0.806, 0.848] |
+| baseline | smoke | 384 | 53% | 2.52 | 0.897 [0.882, 0.911] | 5.38 | 0.697 [0.672, 0.721] |
+| baseline | fire | 192 | 83% | 1.32 | 0.998 [0.995, 1.001] | 1.58 | 0.963 [0.957, 0.969] |
+| baseline | fire | 128 | 87% | 0.99 | 0.999 [0.997, 1.003] | 0.68 | 0.986 [0.982, 0.990] |
+| avx512 | explosion | 384 | 64% | 1.26 | 0.915 [0.902, 0.928] | 2.64 | 0.774 [0.752, 0.795] |
+| avx512 | explosion | 256 | 69% | 0.71 | 0.975 [0.965, 0.984] | 1.17 | 0.848 [0.827, 0.868] |
+| avx512 | smoke | 384 | 53% | 1.41 | 0.915 [0.900, 0.930] | 2.93 | 0.721 [0.695, 0.747] |
+| avx512 | fire | 192 | 83% | 0.63 | 0.992 [0.987, 0.997] | 0.88 | 0.972 [0.964, 0.979] |
+| avx512 | fire | 128 | 87% | 0.40 | 1.005 [1.001, 1.008] | 0.38 | 0.987 [0.981, 0.993] |
+
+Against main's code (separate binaries, alternated, least of 15 runs of 90 steps from start point 0, AVX2;
+`results/experiments/h2_vs_main.csv`, `tools/study_h/ab_step.cpp`):
+
+| effect | size | main: ms per step (least) | this branch: ms per step (least) | change |
+|---|---:|---:|---:|---:|
+| fire | 192 | 0.740 | 0.746 | +0.8% |
+| fire | 128 | 0.492 | 0.511 | +3.7% |
+| explosion | 384 | 1.443 | 1.249 | -13.4% |
+| explosion | 256 | 0.829 | 0.790 | -4.8% |
+| smoke | 384 | 1.626 | 1.481 | -8.9% |
+
+**The fireball** (1280 x 720, one thread on a pinned core, 6 interleaved pairs, thread CPU time summed over the 270
+frames, which at one thread is the whole frame's work; wall-clock medians for reference;
+`results/experiments/h2_fireball.csv`, checksums in `h2_exact.csv`):
+
+| pair | step stage CPU s, skipping / all | frame CPU s, skipping / all | median frame ms (wall), skipping / all |
+|---:|---:|---:|---:|
+| 1 | 2.834 / 3.084 | 15.92 / 16.53 | 127 / 129 |
+| 2 | 2.894 / 2.977 | 16.26 / 16.36 | 128 / 128 |
+| 3 | 2.838 / 3.087 | 16.06 / 16.78 | 128 / 130 |
+| 4 | 2.937 / 3.184 | 16.77 / 16.95 | 131 / 131 |
+| 5 | 2.866 / 3.079 | 16.48 / 16.46 | 128 / 128 |
+| 6 | 2.880 / 3.028 | 16.41 / 16.47 | 129 / 129 |
+| mean change | -6.4% (pairs -8.1% to -2.8%) | -1.6% (pairs -4.3% to +0.1%) | |
+
+**Decision: kept provisionally.** It is bit-exact on every ISA (stronger than the parity tests), allocates nothing,
+cuts the step of sparse effects by 9 to 13% and the learned renderer by 15 to 30%, and ties on dense fields. In the
+fireball the step stage does 6.4% less work (95% interval −8.7 to −4.2%, every pair), about 0.7 ms of CPU per frame at
+one thread; the whole frame (61 ms of CPU) falls by 1.6% in the mean and in 5 of 6 pairs, but its 95% interval
+(−3.6 to +0.3%, paired t over the 6 pairs) touches zero; the wall-clock medians fall by 0.7% (−1.4 to 0.0%), so "the fireball's frame time falls" is likely but not shown on this machine. At 4
+threads the step is spread over modules and the expected gain is 0.2 to 0.3 ms of 24. The quiet-machine run
+(`THREADS4=1 tools/study_h/h2_time.sh build OUT 2 15 15`) decides; if the frame shows no fall there, `skip_empty`
+still pays for the standalone runtime on sparse effects (explosions) at no cost to correctness.
+
+### 9.3 H1: computing on LZ78- and grammar-compressed data
+
+**What was built** (`nvfx_study_h --h1`). Grammar compression applied where a product reads stored data:
+- **Feature blends** of frame models: per frame the runtime sums, for every channel, the planes of K bases at two time
+  slices weighted by the blend weights (`blend_slice`, a dense AVX2 multiply-add over bytes). Here each
+  (time slice, channel) group's K basis planes are the rows of one dictionary.
+- **Weight tables**: the first layer of a frame model's network, W x per pixel (4,096 pixels).
+- **Stored fields**: a blend of a rollout effect's stored fine start fields (8-bit, mostly empty).
+- **Synthetic fields**: 16 fields of 64 x 64, empty but for a blob covering 50% down to 2%, to find the crossover.
+
+Three compressed forms over each row's non-zero (column, value) pairs (zeros add nothing, so they are left out, as in
+the sparse formats where grammar-compressed products are published): **LZ78** (a phrase is its parent plus one pair; a
+left product pushes each phrase's weight to its parent, so the cost follows the dictionary; a right product builds
+each phrase's partial sum from its parent's); **RePair** (the most frequent pair of symbols replaced by a rule until
+none repeats; weights pushed down the rules); and, to tell the grammar's part from the sparse format's, **plain
+sparse rows** (CSR). Results agree with the dense code to 1e-7 relative (float order only).
+
+Sizes and times (`results/experiments/h1_compressed_products.csv`; dense bytes are the stored bytes; compressed
+bytes count 7 bytes per LZ78 node, 4 per rule, 3 per terminal and 2 per reference, generously small):
+
+| data | product | form | dense KB | compressed KB | ratio | dictionary entries | dense ms | compressed ms | compressed / dense time |
+|---|---|---|---:|---:|---:|---:|---:|---:|---:|
+| synthetic | blend of 16 fields 64 x 64, 50% covered | LZ78 | 64.0 | 265.8 | 0.24x | 30237 | 0.0074 | 0.0642 | 8.68 |
+| synthetic | blend of 16 fields 64 x 64, 50% covered | RePair | 64.0 | 149.2 | 0.43x | 664 | 0.0074 | 0.0414 | 5.59 |
+| synthetic | blend of 16 fields 64 x 64, 50% covered | CSR | 64.0 | 95.7 | 0.67x | 0 | 0.0074 | 0.0175 | 2.36 |
+| synthetic | blend of 16 fields 64 x 64, 20% covered | LZ78 | 64.0 | 106.8 | 0.60x | 12153 | 0.0072 | 0.0216 | 3.00 |
+| synthetic | blend of 16 fields 64 x 64, 20% covered | RePair | 64.0 | 59.8 | 1.07x | 200 | 0.0072 | 0.0163 | 2.26 |
+| synthetic | blend of 16 fields 64 x 64, 20% covered | CSR | 64.0 | 38.3 | 1.67x | 0 | 0.0072 | 0.0075 | 1.04 |
+| synthetic | blend of 16 fields 64 x 64, 10% covered | LZ78 | 64.0 | 53.6 | 1.19x | 6097 | 0.0071 | 0.0109 | 1.54 |
+| synthetic | blend of 16 fields 64 x 64, 10% covered | RePair | 64.0 | 30.0 | 2.13x | 74 | 0.0071 | 0.0084 | 1.18 |
+| synthetic | blend of 16 fields 64 x 64, 10% covered | CSR | 64.0 | 19.2 | 3.34x | 0 | 0.0071 | 0.0038 | 0.54 |
+| synthetic | blend of 16 fields 64 x 64, 5% covered | LZ78 | 64.0 | 27.3 | 2.35x | 3104 | 0.0072 | 0.0060 | 0.83 |
+| synthetic | blend of 16 fields 64 x 64, 5% covered | RePair | 64.0 | 15.4 | 4.15x | 17 | 0.0072 | 0.0047 | 0.65 |
+| synthetic | blend of 16 fields 64 x 64, 5% covered | CSR | 64.0 | 9.6 | 6.63x | 0 | 0.0072 | 0.0023 | 0.32 |
+| synthetic | blend of 16 fields 64 x 64, 2% covered | LZ78 | 64.0 | 11.0 | 5.83x | 1248 | 0.0069 | 0.0028 | 0.41 |
+| synthetic | blend of 16 fields 64 x 64, 2% covered | RePair | 64.0 | 6.2 | 10.38x | 7 | 0.0069 | 0.0026 | 0.38 |
+| synthetic | blend of 16 fields 64 x 64, 2% covered | CSR | 64.0 | 3.9 | 16.50x | 0 | 0.0069 | 0.0014 | 0.20 |
+| fire_grid_k8 | feature blend, 8 bases x 2 time slices x 8 channels, 32 x 32 | LZ78 | 1024.0 | 8925.7 | 0.11x | 1015544 | 0.0153 | 0.2512 | 16.42 |
+| fire_grid_k8 | feature blend, 8 bases x 2 time slices x 8 channels, 32 x 32 | RePair | 1024.0 | 5013.2 | 0.20x | 882 | 0.0153 | 0.1738 | 11.36 |
+| fire_grid_k8 | feature blend, 8 bases x 2 time slices x 8 channels, 32 x 32 | CSR | 1024.0 | 3073.4 | 0.33x | 0 | 0.0153 | 0.0758 | 4.95 |
+| fire_grid_k8 | first layer 32 x 8, W x for 4096 pixels | LZ78 | 0.5 | 2.2 | 0.22x | 256 | 0.4012 | 1.3232 | 3.30 |
+| fire_grid_k16 | feature blend, 16 bases x 2 time slices x 8 channels, 32 x 32 | LZ78 | 2048.0 | 17208.8 | 0.12x | 1957940 | 0.0307 | 0.6239 | 20.32 |
+| fire_grid_k16 | feature blend, 16 bases x 2 time slices x 8 channels, 32 x 32 | RePair | 2048.0 | 9757.1 | 0.21x | 6319 | 0.0307 | 0.3481 | 11.34 |
+| fire_grid_k16 | feature blend, 16 bases x 2 time slices x 8 channels, 32 x 32 | CSR | 2048.0 | 6146.3 | 0.33x | 0 | 0.0307 | 0.1477 | 4.81 |
+| fire_grid_k16 | first layer 48 x 8, W x for 4096 pixels | LZ78 | 0.8 | 3.4 | 0.22x | 382 | 0.5731 | 2.2566 | 3.94 |
+| fire_variation_k8 | feature blend, 8 bases x 2 time slices x 8 channels, 32 x 32 | LZ78 | 1024.0 | 8895.5 | 0.12x | 1012096 | 0.0160 | 0.2628 | 16.42 |
+| fire_variation_k8 | feature blend, 8 bases x 2 time slices x 8 channels, 32 x 32 | RePair | 1024.0 | 5000.2 | 0.20x | 1720 | 0.0160 | 0.1752 | 10.95 |
+| fire_variation_k8 | feature blend, 8 bases x 2 time slices x 8 channels, 32 x 32 | CSR | 1024.0 | 3073.4 | 0.33x | 0 | 0.0160 | 0.0736 | 4.60 |
+| fire_variation_k8 | first layer 32 x 8, W x for 4096 pixels | LZ78 | 0.5 | 2.2 | 0.22x | 256 | 0.4012 | 1.3254 | 3.30 |
+| fire_variation_k24 | feature blend, 24 bases x 2 time slices x 8 channels, 32 x 32 | LZ78 | 3072.0 | 24734.6 | 0.12x | 2814153 | 0.0469 | 1.0900 | 23.24 |
+| fire_variation_k24 | feature blend, 24 bases x 2 time slices x 8 channels, 32 x 32 | RePair | 3072.0 | 14113.5 | 0.22x | 18807 | 0.0469 | 0.5122 | 10.92 |
+| fire_variation_k24 | feature blend, 24 bases x 2 time slices x 8 channels, 32 x 32 | CSR | 3072.0 | 9219.2 | 0.33x | 0 | 0.0469 | 0.2207 | 4.71 |
+| fire_variation_k24 | first layer 32 x 8, W x for 4096 pixels | LZ78 | 0.5 | 2.2 | 0.22x | 255 | 0.4042 | 1.3354 | 3.30 |
+| fire_0_grid_m8 | feature blend, 1 bases x 2 time slices x 8 channels, 32 x 32 | LZ78 | 128.0 | 1150.8 | 0.11x | 130940 | 0.0024 | 0.0280 | 11.67 |
+| fire_0_grid_m8 | feature blend, 1 bases x 2 time slices x 8 channels, 32 x 32 | RePair | 128.0 | 639.4 | 0.20x | 0 | 0.0024 | 0.0231 | 9.62 |
+| fire_0_grid_m8 | feature blend, 1 bases x 2 time slices x 8 channels, 32 x 32 | CSR | 128.0 | 384.6 | 0.33x | 0 | 0.0024 | 0.0109 | 4.54 |
+| fire_0_grid_m8 | first layer 32 x 8, W x for 4096 pixels | LZ78 | 0.5 | 2.2 | 0.22x | 256 | 0.4012 | 1.3269 | 3.31 |
+| fire_0_grid_m16 | feature blend, 1 bases x 2 time slices x 8 channels, 32 x 32 | LZ78 | 256.0 | 1152.0 | 0.22x | 131072 | 0.0121 | 0.0261 | 2.16 |
+| fire_0_grid_m16 | feature blend, 1 bases x 2 time slices x 8 channels, 32 x 32 | RePair | 256.0 | 640.0 | 0.40x | 0 | 0.0121 | 0.0215 | 1.78 |
+| fire_0_grid_m16 | feature blend, 1 bases x 2 time slices x 8 channels, 32 x 32 | CSR | 256.0 | 385.0 | 0.66x | 0 | 0.0121 | 0.0092 | 0.76 |
+| fire_0_grid_m16 | first layer 32 x 8, W x for 4096 pixels | LZ78 | 0.5 | 2.2 | 0.22x | 256 | 0.4010 | 1.3187 | 3.29 |
+| explosion | blend of 32 stored fine fields 64 x 64 | LZ78 | 128.0 | 68.5 | 1.87x | 7795 | 0.0134 | 0.0141 | 1.05 |
+| explosion | blend of 32 stored fine fields 64 x 64 | RePair | 128.0 | 36.0 | 3.55x | 5041 | 0.0134 | 0.0105 | 0.78 |
+| explosion | blend of 32 stored fine fields 64 x 64 | CSR | 128.0 | 31.3 | 4.09x | 0 | 0.0134 | 0.0060 | 0.45 |
+| smoke | blend of 16 stored fine fields 64 x 64 | LZ78 | 64.0 | 100.8 | 0.63x | 11473 | 0.0069 | 0.0200 | 2.90 |
+| smoke | blend of 16 stored fine fields 64 x 64 | RePair | 64.0 | 52.7 | 1.21x | 7556 | 0.0069 | 0.0155 | 2.25 |
+| smoke | blend of 16 stored fine fields 64 x 64 | CSR | 64.0 | 45.4 | 1.41x | 0 | 0.0069 | 0.0084 | 1.22 |
+
+- **Feature volumes are near noise to exact matching**: across 8 to 24 bases of one time slice and channel almost no
+  (column, value) pair repeats (RePair finds 882 to 18,807 rules in 1 to 3 million pairs), so every grammar is 5 to 9
+  times *larger* than the 8-bit planes (a node costs more than a byte) and the products 10 to 23 times slower than the
+  vectorised dense loop, which blends a 1 MB model's frame in 15 to 16 µs; plain sparse rows are 4.5 to 4.9 times
+  slower. Study A's models have one basis, so nothing can repeat across rows at all (for its fp16 model sparse rows
+  are faster only because they hold the values already converted to float, at 1.5 times the size).
+- **Weight tables** are fp16 and do not repeat: no saving, 3.3 to 3.9 times slower.
+- **Where zeros dominate** (stored fine fields, synthetic fields covered 10% or less), the compressed products do win
+  over dense, but the win is the zeros', not the grammar's: plain sparse rows are smaller and faster than LZ78 and
+  RePair in every case (explosion's fine fields: CSR 4.1x smaller and 2.2 times faster than dense; RePair 3.6x
+  smaller and 1.3 times faster; LZ78 1.9x smaller, no faster; smoke's fuller fields: all three slower than dense).
+
+**Decision: null, stopped.** Products on LZ78- or RePair-coded data do not beat the dense AVX2 code on anything the
+runtime computes per frame. The data that would favour grammars (exact repeats of runs of values) is not what
+trained networks store; what the stored fields do have (zeros) is better served by sparse rows or by skipping, which
+H2 does at run time.
+
+### 9.4 Reproduce
+
+```sh
+tools/study_h/h3.sh build results/compression 3 15        # H3: every coder configuration, sizes and decode times
+tools/study_h/h1.sh build results/experiments/h1_compressed_products.csv 3 15
+tools/study_h/h2_exact.sh build /tmp/h2                   # H2: fireball checksums, skipping on and off, every ISA
+tools/study_h/h2_time.sh build /tmp/h2 2 15 6             # H2: runtime micro-benchmark and fireball pairs (1 thread)
+tools/study_h/h2_vs_main.sh ab_main ab_new out.csv 2 15   # H2: against main's runtime (ab_step.cpp built twice)
+THREADS4=1 SKIP_MICRO=1 tools/study_h/h2_time.sh build /tmp/h2 2 15 6   # also at 4 threads (quiet machine only)
+tools/study_h/h2_summary.sh /tmp/h2                       # one line per fireball run
+tools/study_h/h2_occupancy.sh build /tmp/h2_occupancy.csv # how empty the fireball's fields are
+```

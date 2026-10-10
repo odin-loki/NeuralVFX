@@ -73,6 +73,9 @@ class RolloutRunner {
   // The state was written from outside (a hand-over): continue from it at `seconds` since the effect began, with the
   // pressure and flow of the old state dropped and the sub-grid swirl at full strength.
   virtual void adopt(float seconds) = 0;
+  // Study H (H2): the detail step and the renderer skip the parts of a row where the fine fields are zero and nothing
+  // can reach them, which leaves every value as it was to the bit. On by default; off computes every pixel (tests).
+  virtual void skip_empty(bool on) = 0;
 };
 
 // One factory per ISA build (rt_base.cpp, rt_avx2.cpp, rt_avx512.cpp). Allocates every buffer the renderer will use.
