@@ -55,7 +55,8 @@ From [docs/REPORT.md](docs/REPORT.md), measured on simulated fire, smoke and exp
   run); its fine-detail mixer fails its rule twice. A codec from the learned dynamics wins only at low quality.
   Computing on LZ- or grammar-compressed data is slower than dense code here; LZ tokens and lighter models in the
   coder decode 4 to 38 times faster. Training with couplings in the loop improves the explosion inside scenes. The
-  composed fireball runs at 42 frames per second at 1280 x 720 on 4 threads.
+  composed fireball runs at 80 frames per second at 1280 x 720 (37 at 1920 x 1080) on 4 threads, 10.6 times faster
+  than first written.
 - **Cost of frame models:** 0.25 ms (73 KB model) to 0.87 ms (292 KB model) per 128 x 128 frame; 0.07-0.33 ms at 64 x 64;
   8-37 times cheaper than simulating, 35-125 times dearer than playing a flipbook (one CPU core; the same code ran
   1.2-1.4 times slower in an earlier session of the same cloud VM type).

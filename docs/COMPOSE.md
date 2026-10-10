@@ -399,7 +399,7 @@ The video itself is not in git (data rules): it is written where `--out` says.
 
 Measured with `nvfx_fireball --profile`, which times every stage of every frame. The machine is the report's
 4-core machine, with AVX2 unless the row says otherwise. The figures are medians over the frames after the detonation,
-when everything runs. §7.3 has the second optimisation round (provisional numbers).
+when everything runs. §7.3 has the second optimisation round.
 
 ### 7.1 After the first optimisation round
 
@@ -528,9 +528,10 @@ What the profile shows:
 
 ### 7.3 After the second optimisation round
 
-**Provisional.** Every number in this section was measured on the report's 4-core machine while two training jobs ran
-on it (load average 1.3 to 4 before the runs), old and new code interleaved run by run. They are to be replaced by a
-re-timing on a quiet machine with the commands at the end of the section.
+Measured on a quiet machine (no other jobs; load average 1.0 to 2.9, most of it the runs themselves), old and new
+code interleaved run by run in one session. In that session the prototype as first written (commit 1d14d4a) took
+132 ms per frame at 1280 x 720 and 280 ms at 1920 x 1080 on 4 threads, so from first version to now the scene is
+**10.6 times faster at 1280 x 720 and 10.3 times at 1920 x 1080**.
 
 Six changes, all exact: every one of the 270 frames has the same RGB checksum as the old code's
 (`tools/opt2/verify.sh`): at 1280 x 720 on 1, 2, 3 and 4 threads, stage by stage, captured or overlapped, with the
@@ -586,57 +587,55 @@ memory grew from 247 to 257 MB (the copies the capture takes and the per-row loo
 
 Configurations (the least of three runs' medians, frames after the detonation; before: commit d41adff, the code of
 §7.1, with its frame time the sum of its stages; after: the time between finished frames, overlapped; the CPU columns
-are thread CPU time summed over the modules, after). The machine's load moved between runs, so compare a row's two
-columns (interleaved), not rows with each other: the AVX-512 row ran in a quieter moment than the AVX2 one.
+are thread CPU time summed over the modules, after):
 
 | configuration | before: ms per frame | after: ms per frame | p90 | max | frames per second | speed-up | model step, CPU ms | model shading, CPU ms |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|
-| 1280 x 720, 4 threads | 26.7 | **16.8** | 20.1 | 24 | **59.6** | 1.59x | 10.7 | 5.2 |
-| 1280 x 720, 2 threads | 33.6 | 25.8 | 30.2 | 54 | 38.7 | 1.30x | 11.2 | 5.5 |
-| 1280 x 720, 1 thread | 62.7 | 51.2 | 62.4 | 86 | 19.5 | 1.22x | 11.0 | 5.6 |
-| 1280 x 720, 4 threads, baseline ISA (SSE2) | 24.4 | 17.0 | 20.1 | 49 | 58.9 | 1.44x | 18.7 | 8.8 |
-| 1280 x 720, 4 threads, AVX-512 | 20.3 | 12.2 | 13.6 | 18 | 82.1 | 1.66x | 9.4 | 5.1 |
-| 1280 x 720, 4 threads, tiles at half size | 15.6 | 10.3 | 12.7 | 18 | 96.7 | 1.50x | 5.3 | 1.6 |
-| 640 x 360, 4 threads | 7.6 | 4.5 | 5.8 | 10 | 222 | 1.68x | 5.0 | 1.7 |
-| 1920 x 1080, 4 threads | 45.7 | **29.3** | 35.6 | 63 | **34.1** | 1.56x | 21.0 | 11.7 |
+| 1280 x 720, 4 threads | 20.2 | **12.5** | 14.6 | 20 | **79.8** | 1.61x | 10.9 | 5.0 |
+| 1280 x 720, 2 threads | 33.1 | 23.7 | 26.4 | 39 | 42.3 | 1.40x | 10.4 | 5.1 |
+| 1280 x 720, 1 thread | 61.7 | 50.2 | 56.8 | 76 | 19.9 | 1.23x | 10.9 | 5.7 |
+| 1280 x 720, 4 threads, baseline ISA (SSE2) | 22.7 | 15.7 | 17.3 | 21 | 63.7 | 1.45x | 18.1 | 8.4 |
+| 1280 x 720, 4 threads, AVX-512 | 19.5 | 12.2 | 13.3 | 20 | 81.9 | 1.60x | 9.6 | 5.0 |
+| 1280 x 720, 4 threads, tiles at half size | 15.6 | 10.0 | 11.3 | 13 | 100.1 | 1.56x | 5.1 | 1.6 |
+| 640 x 360, 4 threads | 7.2 | 4.5 | 5.5 | 7 | 225 | 1.62x | 5.1 | 1.6 |
+| 1920 x 1080, 4 threads | 41.4 | **27.2** | 31.1 | 43 | **36.7** | 1.52x | 20.0 | 11.3 |
 
-Stages at 1280 x 720, drawn stage by stage (`--stages`) so that each is timed alone (median ms per frame, 3 runs each,
-interleaved; before: commit d41adff):
+The "before" column is faster than §7.1's 24.1 ms for the same code: this session's machine was faster than that
+one's (§7.1 compares like with like within its session, as this table does within this one).
 
-| stage | 4 threads, before | 4 threads, after | 1 thread, before | 1 thread, after |
-|---|---:|---:|---:|---:|
-| step the learned models (up to 10 at once) | 4.8 | 4.2 | 12.1 | 11.0 |
-| couplings | 1.0 | 0.7 | 1.2 | 1.1 |
-| field bus | 0.7 | 0.6 | 0.7 | 0.6 |
-| light | 0.5 | 0.4 | 0.6 | 0.6 |
-| particles (update and draw) | 0.3 | 0.3 | 0.3 | 0.3 |
-| shade the models | 2.4 | 2.2 | 5.8 | 5.7 |
-| background | 2.5 | 1.6 | 6.3 | 4.0 |
-| draw the modules | 3.2 | 2.5 | 8.4 | 6.9 |
-| distortion | 4.5 | 3.7 | 12.1 | 9.5 |
-| bloom | 3.6 | 2.1 | 8.0 | 4.9 |
-| tone mapping and grain | 2.7 | 2.2 | 7.2 | 5.6 |
-| the frame (the stages one after another) | 26.3 | 21.1 | 62.7 | 49.7 |
+Stages, drawn stage by stage (`--stages`) so that each is timed alone (median ms per frame, the best of 3 interleaved
+runs at 1280 x 720 and of 2 at 1920 x 1080; before: commit d41adff):
+
+| stage | 720p, 4 threads, before | 720p, 4 threads, after | 720p, 1 thread, before | 720p, 1 thread, after | 1080p, 4 threads, before | 1080p, 4 threads, after |
+|---|---:|---:|---:|---:|---:|---:|
+| step the learned models (up to 10 at once) | 3.4 | 3.0 | 12.0 | 11.0 | 6.7 | 6.0 |
+| couplings | 0.8 | 0.6 | 1.2 | 1.1 | 2.2 | 1.9 |
+| field bus | 0.6 | 0.6 | 0.7 | 0.6 | 0.7 | 0.6 |
+| light | 0.5 | 0.4 | 0.6 | 0.6 | 0.5 | 0.4 |
+| particles (update and draw) | 0.3 | 0.2 | 0.4 | 0.3 | 0.5 | 0.3 |
+| shade the models | 1.6 | 1.7 | 5.8 | 5.8 | 3.8 | 3.6 |
+| background | 1.9 | 1.2 | 6.2 | 4.1 | 4.2 | 2.7 |
+| draw the modules | 2.3 | 1.7 | 8.6 | 7.1 | 5.5 | 4.1 |
+| distortion | 3.2 | 2.6 | 12.1 | 9.5 | 7.9 | 6.2 |
+| bloom | 2.7 | 1.6 | 8.2 | 5.3 | 6.6 | 3.9 |
+| tone mapping and grain | 1.9 | 1.6 | 7.2 | 5.7 | 4.7 | 3.7 |
+| **the frame (stages one after another)** | **19.4** | **15.8** | **62.9** | **50.9** | **43.9** | **33.8** |
 
 Overlapped, a frame's picture runs alongside the next frame's state, so the stages' wall times are longer and their
-sum is not the frame time; what counts is the time between finished frames (`period`): 16.5, 16.6 and 17.6 ms in the
-same three rounds (p90 18.7 to 20.6, maxima 24 to 29 ms), against 19.0 to 21.6 ms stage by stage and 26.2 to 27.3 ms
-before. The main thread then waits 3.3 to 3.7 ms per frame for the last picture, running its tasks meanwhile. The
-scripted fireball (`nvfx_scene_script`, overlapped by default) went from 26.7 and 27.7 to 18.3 and 18.6 ms per frame
-in two interleaved rounds (it costs a little more than the hand-written one before and after).
+sum is not the frame time; what counts is the time between finished frames: 12.5 ms at 1280 x 720 on 4 threads
+against 15.8 ms stage by stage. The scripted fireball (`nvfx_scene_script`, overlapped by default) takes 13.7 to
+14.0 ms per frame in three runs (p90 15.7 to 17.0 ms), a little more than the hand-written one.
 
 The picture of the cost now:
-- **The frame is close to its CPU time over the threads.** After the detonation a frame takes about 49 ms of CPU at
-  1280 x 720 and 101 ms at 1920 x 1080, over all threads; with the threads idle 4 to 5% of the time, a quiet machine
-  should give about 13 and 26 ms per frame (to be measured).
+- **The fireball runs at 80 frames per second at 1280 x 720 and 37 at 1920 x 1080 on 4 threads,** with every frame
+  the same as the first version's to the bit. One thread gives 20 frames per second at 1280 x 720.
 - **The learned models are a larger share:** the model step and shading take 17 of 50 ms of CPU (before: 18 of 62).
 - **The remaining picture stages are per-pixel arithmetic:** the distortion's resampling of moved pixels (with two
   `sinf` per hot pixel), tone mapping, drawing the tiles and bloom's bright pass. At 1920 x 1080 bloom and tone
   mapping grow faster than the pixel count (reading the 33 MB float screen twice).
 - **Stalls:** the waiting threads now run each other's tasks, and a stall in one stream is partly hidden by the other,
-  but a worker that loses its core while it holds a task still holds up that task's job. On the shared machine the
-  maxima were 24 to 29 ms at 1280 x 720 overlapped, and one run at 1920 x 1080 had a 224 ms frame (frames 53 to 55,
-  every stage slow at once, at load 4: the machine, not the pipeline).
+  but a worker that loses its core while it holds a task still holds up that task's job. On the quiet machine the
+  maxima were 20 ms at 1280 x 720 and 43 ms at 1920 x 1080.
 
 To re-time (from the repository's root, with the old code built beside it, e.g. `git worktree add ../before d41adff`):
 
@@ -673,9 +672,9 @@ comparisons.
   the scales avoids it; a bilinear deposit would fix it but changes the fireball's frames, so it was left for now.
 - **The units are shared because the simulator is shared.** Effects trained on other data (footage, another solver)
   would need a map between their units.
-- **Cost:** see §7. After the first round the scene ran at 42 frames per second at 1280 x 720 on 4 CPU threads;
-  after the second, which draws each picture while the next frame's state is computed, about 60 (provisional,
-  §7.3). The compositing still runs on every pixel at full resolution.
+- **Cost:** see §7. After the second optimisation round, which draws each picture while the next frame's state is
+  computed, the scene runs at 80 frames per second at 1280 x 720 and 37 at 1920 x 1080 on 4 CPU threads (§7.3). The
+  compositing still runs on every pixel at full resolution.
 
 What it needs to become a product feature:
 1. A C API: `nvfx_scene_create`, modules placed in it, `nvfx_scene_couple(...)`, `nvfx_scene_field(...)`, one

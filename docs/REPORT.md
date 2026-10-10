@@ -59,7 +59,7 @@ Plan and decisions: [PLAN.md](PLAN.md).
 - **Later studies (§12):** the owner's diffusion-context mixer survives in one use, a prior against drift that lets
   fire play one continuous run; its fine-detail mixer fails twice. Computing on compressed data is slower than dense
   code here, but LZ tokens and lighter models make the coder decode 4 to 38 times faster. Training with couplings
-  improves the explosion inside scenes. The composed fireball runs at 42 frames per second at 720p on 4 threads.
+  improves the explosion inside scenes. The composed fireball runs at 80 frames per second at 720p on 4 threads.
 - **Not done:** owner footage (none supplied), a BC7 baseline, int8 kernels, an engine plugin (§9, §10).
 
 ## 2. How it was measured
@@ -519,6 +519,9 @@ effects (D) after the runtime's rollout code was optimised; the first session's 
 | fluid simulation (solver + render) | - | - | 6.9-9.4 (8.8-11.7) | - | - |
 | flipbook playback | 128-1,024 | - | 0.007 | - | - |
 
+- **Checked again later** on a quiet machine, after the runtime gained empty-span skipping and cache-aligned buffers
+  (§12): the rollout effects took 0.8 to 1.2 ms (smoke varied from 0.86 to 1.17 ms between three runs), the frame
+  models and the simulation within a few percent; the table stands (`results/quiet/`).
 - **Between sessions of the same cloud VM type, unchanged code ran 1.2 to 1.4 times faster** (median 1.28 over the 95
   frame-model cells; the scalar simulation 1.17 to 1.27). Absolute times here are good to that factor; comparisons
   within one session are not affected. The rollout effects' change is mostly the optimisation: built from the code
@@ -677,10 +680,11 @@ written by hand.
 **Study H: computing on compressed data** (the owner's addition).
 - Products computed on LZ78- or RePair-compressed feature volumes and weights are 3 to 23 times slower than the dense
   AVX2 code: these numbers barely repeat, and where zeros make compressed products win, plain sparse rows win by more.
-- LZ tokens and lighter literal models inside the lossless coder decode **4 to 9 times faster for 2 to 4% more disk**,
-  or 18 to 38 times faster for 10 to 23% more, and a single tensor or start point decodes alone.
-- Skipping the empty spans of the fine fields keeps every frame bit-exact and saves 6.4% [4.2, 8.7] of the model step
-  in the fireball; the whole frame's saving (-1.6% [-3.6, +0.3]) is a tie so far.
+- LZ tokens and lighter literal models inside the lossless coder decode **4 to 8.5 times faster for 2 to 4% more
+  disk**, or 17 to 41 times faster for 10 to 23% more (quiet machine), and a single tensor or start point decodes alone.
+- Skipping the empty spans of the fine fields keeps every frame bit-exact and saves 4.6% [2.7, 6.8] of the model
+  step in the fireball on a quiet machine, but the whole frame is a tie (+0.4% [-1.2, +2.2]), so the frame-time part
+  of its rule is not met. The skipping stays on (exact, and cheaper per step).
 
 **Study I: training with couplings.** The simulator gained pushes and material transfers, so coupled runs have a
 ground truth. Fine-tuning the steppers on forced and hand-over runs made the explosion follow forced runs better
@@ -694,6 +698,8 @@ explosion with the coupled stepper, smoke unchanged, and fire's prior against dr
 16-bit ones. In the fireball, v2 and v1 give the same scene: frames differ by 31 to 35 dB after the detonation, as two
 runs of a chaotic effect must, and neither looks better.
 
-**Composed effects.** The fireball (16 coupled modules, particles, light, distortion, bloom) runs at 24 ms per frame at
-1280 x 720 on 4 threads after one optimisation round, 5.9 times faster than first written (same session). Scenes are
-written as text scripts; the scripted fireball reproduces the hand-written one to the bit.
+**Composed effects.** The fireball (16 coupled modules, particles, light, distortion, bloom) runs at **12.5 ms per frame
+at 1280 x 720 (80 frames per second) and 27.2 ms at 1920 x 1080 on 4 threads** after two optimisation rounds, 10.6 and
+10.3 times faster than first written (measured in one session on a quiet machine), with every frame the same to the
+bit. The second round draws each picture while the next frame's state is computed. Scenes are written as text
+scripts; the scripted fireball reproduces the hand-written one to the bit.

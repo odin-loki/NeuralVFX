@@ -994,7 +994,8 @@ the first 96 frames (6 passes) on every ISA; the fire tests are skipped when stu
   the baseline). With the prior they stay within 3.8e-5 and 1 level for the whole minute on every ISA: each pass pulls
   both states towards the same denoised state, so the last-bit differences do not grow.
 
-Cost (provisional: the machine was busy, load 2.6 to 3.3). Thread CPU time of every `nvfx_render` call on one pinned
+Cost (measured on a busy machine, load 2.6 to 3.3, then re-run on a quiet one at load 1.0 with the same result: mean 0.912
+ms with the prior against 0.916 ms with shards, p99 3.98 ms, the prior's frames 3.93 ms, one pass 3.02 ms). Thread CPU time of every `nvfx_render` call on one pinned
 core, each frame the least of 5 repeats of the same 60 s run (the run is deterministic), study B's held-out setting 1,
 AVX2; cores 3 and 2 agreed within 0.01 ms on the means and 0.06 ms on the p99 and worst frames (core 3 shown):
 
@@ -1380,10 +1381,10 @@ $B timing --effects fire,smoke,explosion --every 3 --reps 3 --cpu 3 --codecs x26
 
 ## 9. Study H: computing on compressed data (stage S9)
 
-Status: **H1 to H3 decided** (10 October 2026). Timings are **provisional**: the shared 4-core machine ran at load 9
-to 18 throughout, so every timing is thread CPU time on one pinned core, the least of 15 interleaved repetitions,
-and is to be re-run on a quiet machine with `tools/study_h/*.sh` before any claim moves to the report. Audience:
-owner, research, dev.
+Status: **H1 to H3 decided** (10 October 2026). The study ran on a shared machine (load 9 to 18), timing thread CPU
+time on one pinned core, the least of 15 interleaved repetitions; H2 and H3 were then **re-timed on a quiet machine**
+(§9.Q at the end of this section), which confirms H3 and decides H2's frame-time rule. Audience: owner, research,
+dev.
 
 **Result in one line:** LZ tokens alone do not make the coder fast, because network files hardly repeat (only the
 mostly empty fine fields do); a lighter literal model behind them does: **format 2 decodes 4 to 9 times faster for
@@ -1391,15 +1392,15 @@ mostly empty fine fields do); a lighter literal model behind them does: **format
 decodes one tensor or start point alone for 0.1 to 1% more (H3 kept). Run-aware fine fields are bit-exact on every
 ISA and make the step of sparse effects at 384 px 9 to 13% and the learned renderer 15 to 30% cheaper than main's
 code, but the fireball's fields are not empty where it matters (81% of pixels must still be computed): its step stage
-does 6.4% less work and its frame 1.6% less, the second inside the noise of this machine (H2 kept provisionally; the frame-time rule waits for the quiet
-machine). Computing on LZ78- or RePair-coded data is a null: 10 to 23 times slower than the dense AVX2 code on every
+does 4.6% less work on a quiet machine but its frame time is a tie, so H2's frame-time rule is not met; the code stays,
+being exact and cheaper per step. Computing on LZ78- or RePair-coded data is a null: 10 to 23 times slower than the dense AVX2 code on every
 feature volume and 3 to 4 times on weight tables, and where zeros make it win, a plain sparse list wins by more (H1
 stopped).
 
 | id | design | rule (§3) | result | decision |
 |---|---|---|---|---|
 | H3 | LZ inside the coder | load or decode time falls by more than the size grows | light model with LZ tokens: decode time −76 to −89%, size +1.6 to +3.9% (seekable +1.7 to +4.4%); fast model with LZ tokens: −94 to −97%, +10 to +23%; LZ tokens in the full model alone: 0 to −29%, −0.3 to 0% | **kept** (format 2) |
-| H2 | run-aware fields | faster at the same result, zero allocations, and the fireball's frame time falls | bit-exact (every ISA; all 270 fireball frames), zero allocations; against main's code the step of sparse effects −9 to −13% (explosion and smoke at 384 px), dense fire +1 to +4% (a tie against the same build without skipping); learned renderer −15 to −30%; fireball at one thread: step stage −6.4% [−8.7, −4.2], frame CPU −1.6% [−3.6, +0.3] | **kept provisionally**: everything but the frame-time rule holds; the frame fell in 5 of 6 pairs but its interval touches zero |
+| H2 | run-aware fields | faster at the same result, zero allocations, and the fireball's frame time falls | bit-exact (every ISA; all 270 fireball frames), zero allocations; against main's code the step of sparse effects −9 to −13% (explosion and smoke at 384 px), dense fire +1 to +4% (a tie against the same build without skipping); learned renderer −15 to −30%; fireball at one thread: step stage −6.4% [−8.7, −4.2], frame CPU −1.6% [−3.6, +0.3] | **the frame-time rule is not met** on the quiet machine (frame +0.4% [−1.2, +2.2] at one thread, a tie); the code stays on, being bit-exact and 4.6% cheaper per step |
 | H1 | computing on LZ78/RePair data | faster than the dense SIMD code at the same result | feature blends 10 to 23 times slower (plain sparse rows 4.5 to 4.9), weight tables 3.3 to 3.9 times; only stored fields with at most 5 to 10% non-zero win, and there plain sparse rows (no grammar) win more | **null, stopped** |
 
 ### 9.1 H3: LZ inside the coder
@@ -1634,7 +1635,8 @@ frames, which at one thread is the whole frame's work; wall-clock medians for re
 | 6 | 2.880 / 3.028 | 16.41 / 16.47 | 129 / 129 |
 | mean change | -6.4% (pairs -8.1% to -2.8%) | -1.6% (pairs -4.3% to +0.1%) | |
 
-**Decision: kept provisionally.** It is bit-exact on every ISA (stronger than the parity tests), allocates nothing,
+**Decision (busy machine): kept provisionally; on the quiet machine (§9.Q) the frame-time rule is not met, and the
+code stays on as exact and cheaper per step.** It is bit-exact on every ISA (stronger than the parity tests), allocates nothing,
 cuts the step of sparse effects by 9 to 13% and the learned renderer by 15 to 30%, and ties on dense fields. In the
 fireball the step stage does 6.4% less work (95% interval −8.7 to −4.2%, every pair), about 0.7 ms of CPU per frame at
 one thread; the whole frame (61 ms of CPU) falls by 1.6% in the mean and in 5 of 6 pairs, but its 95% interval
@@ -1740,6 +1742,20 @@ THREADS4=1 SKIP_MICRO=1 tools/study_h/h2_time.sh build /tmp/h2 2 15 6   # also a
 tools/study_h/h2_summary.sh /tmp/h2                       # one line per fireball run
 tools/study_h/h2_occupancy.sh build /tmp/h2_occupancy.csv # how empty the fireball's fields are
 ```
+
+### 9.Q Quiet-machine re-timing
+
+Re-run on a quiet machine (no other jobs; load 1.0 to 2.5, mostly the runs themselves) with `tools/study_h/h3.sh` and
+`THREADS4=1 SKIP_MICRO=1 tools/study_h/h2_time.sh` (6 interleaved pairs), on main after the second optimisation
+round of the fireball (`docs/COMPOSE.md` §7.3):
+- **H3** (format 2 against format 1, decode time on one pinned core): light model with LZ tokens 3.9 to 8.5 times
+  faster for 1.6 to 3.9% more disk (A 8-bit 3.9 to 5.0x, A fp16 6.8 to 8.5x, B and C 5.0 to 5.2x, D 4.6 to 6.9x); fast
+  model with LZ tokens 17.5 to 41 times faster for 10 to 23% more. The busy machine's figures hold. Kept.
+- **H2** (the fireball with skipping on against off, paired): at one thread the model step's thread CPU time
+  −4.6% [−6.8, −2.7], the frame's thread CPU time +0.6% [−2.3, +3.2] and its median time +0.4% [−1.2, +2.2]; at four
+  threads step −4.6% [−9.0, +0.2], frame −1.2% [−7.1, +5.7]. The frame does not get faster, so the frame-time part of
+  the rule is not met. The code stays on by default: it is bit-exact and makes the step cheaper, and it costs nothing
+  measurable elsewhere.
 
 ## 10. Study G extras (stage S8)
 

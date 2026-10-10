@@ -1,0 +1,9 @@
+denoiser /root/nvfx-data/g/diff/fire.ddpm (version 1152045db43ea534), 391748 parameters
+nvfx_prior time: 128 x 128 px, 1801 frames (60 s), setting 1, seed 2970000, 5 repeats, core 3, runtime avx2
+continuous with the prior     : frame 0 (start, warm-up) 14.12 ms; frames 1 to 1800: mean 0.912 ms, median 0.706, p99 3.981, max 4.220
+                                the 112 frames where the prior acts: mean 3.925 ms; the others: mean 0.712 ms
+continuous without the prior  : frame 0 (start, warm-up) 14.05 ms; frames 1 to 1800: mean 0.739 ms, median 0.725, p99 1.113, max 1.213
+6 s shards (default)          : frame 0 (start, warm-up) 13.99 ms; frames 1 to 1800: mean 0.916 ms, median 0.798, p99 1.734, max 1.842
+one prior pass (89.5 M multiply-adds): least 3.027 ms, median 4.222 ms of 200 (29.6 GMAC/s at the least)
+instance scratch: 5.33 MB, of which the prior's buffers 1.10 MB; prior weights 1.57 MB resident, once per effect (file 1.57 MB)
+load average 1.00 before, 1.00 after: quiet
