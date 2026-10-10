@@ -50,7 +50,7 @@ neuralfx_defaults(neuralfx_proto)
 neuralfx_simd(neuralfx_proto)
 
 # The model description and .nvfx format: shared by the runtime, the trainer and the tools.
-add_library(neuralfx_model STATIC src/core/model.cpp src/core/rollout.cpp)
+add_library(neuralfx_model STATIC src/core/model.cpp src/core/rollout.cpp src/core/cm.cpp)
 target_include_directories(neuralfx_model PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include")
 set_target_properties(neuralfx_model PROPERTIES POSITION_INDEPENDENT_CODE ON)
 neuralfx_defaults(neuralfx_model)
@@ -128,6 +128,10 @@ if(NEURALFX_BUILD_TOOLS)
   if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
     target_compile_options(nvfx_fireball PRIVATE -Wno-mismatched-new-delete)  # counts allocations (replaces operator new)
   endif()
+  # Lossless context-mixing compression of .nvfx files, and its measurement against flipbooks (results/compression).
+  add_executable(nvfx_pack tools/nvfx_pack.cpp)
+  target_link_libraries(nvfx_pack PRIVATE neuralfx_core ZLIB::ZLIB)
+  neuralfx_defaults(nvfx_pack)
   add_executable(nvfx_scene examples/scene_bench.cpp)
   target_link_libraries(nvfx_scene PRIVATE nvfx)
   neuralfx_defaults(nvfx_scene)
@@ -148,7 +152,7 @@ if(NEURALFX_BUILD_TESTS)
   include(GoogleTest)
   add_executable(neuralfx_tests tests/test_proto.cpp tests/test_sim.cpp tests/test_baselines.cpp tests/test_train.cpp
                                 tests/test_runtime.cpp tests/test_ingest.cpp tests/test_rollout.cpp tests/test_compose.cpp
-                                tests/test_dcm.cpp)
+                                tests/test_dcm.cpp tests/test_cm.cpp)
   target_link_libraries(neuralfx_tests PRIVATE neuralfx_proto neuralfx_io neuralfx_train nvfx neuralfx_compose neuralfx_dcm
                                                GTest::gtest_main)
   neuralfx_defaults(neuralfx_tests)
