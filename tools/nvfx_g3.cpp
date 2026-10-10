@@ -339,6 +339,13 @@ std::vector<codec::Settings> ladder_set(const std::string& name) {
     });
   };
   const bool all = name == "val" || name == "all";
+  if (name == "novar") {  // smoke and explosion: the variants were measured on fire only (CPU budget)
+    for (const auto* part : {"core", "fine", "extra"}) {
+      const auto p = ladder_set(part);
+      v.insert(v.end(), p.begin(), p.end());
+    }
+    return v;
+  }
   if (name == "core" || all) {
     for (const float s0 : {60.f, 1.6f, 0.8f, 0.4f, 0.2f}) v.push_back(core(0, 0.4f, s0));
     for (const int k : {2, 4, 8, 16, 32}) {
@@ -370,6 +377,14 @@ std::vector<codec::Settings> ladder_set(const std::string& name) {
     v.push_back(with(b, [](codec::Settings& x) { x.side_context = true; }));
     v.push_back(with(b, [](codec::Settings& x) { x.fine_sets_coarse = false; }));
     v.push_back(with(b, [](codec::Settings& x) { x.fine_res = 64; }));
+  }
+  // added after fire's first validation runs put the frontier at the grid's edge (q 1.6, k 2) and left a gap between
+  // the coarse points (at most about 21 dB) and the fine ones (from about 24 dB)
+  if (name == "extra" || all) {
+    for (const float q : {0.8f, 1.6f, 3.2f}) v.push_back(core(1, q));
+    for (const int k : {2, 4, 8}) v.push_back(core(k, 3.2f));
+    for (const float qf : {0.1f, 0.14f, 0.2f, 0.3f}) v.push_back(with(fine(qf), [](codec::Settings& x) { x.fine_res = 64; }));
+    for (const float qf : {0.3f, 0.4f}) v.push_back(fine(qf));
   }
   if (v.empty()) throw std::invalid_argument("unknown ladder set " + name);
   return v;
@@ -546,15 +561,24 @@ std::vector<VideoConfig> video_configs(const std::string& list) {
   std::stringstream ss(list);
   for (std::string t; std::getline(ss, t, ',');) {
     if (t.empty()) continue;
+    std::vector<int> rungs;  // "name:q1/q2/...": only these rungs of the codec's ladder
+    if (const auto c = t.find(':'); c != std::string::npos) {
+      std::stringstream qs(t.substr(c + 1));
+      for (std::string q; std::getline(qs, q, '/');) rungs.push_back(std::stoi(q));
+      t = t.substr(0, c);
+    }
     int res = kSize;
     std::string name = t;
-    if (const auto p = t.find("_64px"); p != std::string::npos) {
-      res = 64;
-      name = t.substr(0, p);
+    for (const int r : {64, 32}) {
+      if (const auto p = t.find(std::format("_{}px", r)); p != std::string::npos) {
+        res = r;
+        name = t.substr(0, p);
+      }
     }
     const auto it = std::ranges::find_if(codecs, [&](const video::Codec& c) { return c.name == name; });
     if (it == codecs.end()) throw std::invalid_argument("unknown codec " + t);
     v.push_back({*it, res});
+    if (!rungs.empty()) v.back().codec.ladder = rungs;
   }
   return v;
 }
@@ -566,8 +590,11 @@ void cmd_baselines(const tools::Args& a) {
   const std::string runs_only = a.str("runs");  // e.g. "v0,v1" (a subset, for the choice of video formats)
   const auto vcfg = video_configs(a.str("codecs", "x264,x265,vp9,vp9a,aom,svt"));
   const bool keep_files = a.flag("keep");
+  const int max_runs = a.i("max-runs", 1000);
+  const std::size_t pack_max = static_cast<std::size_t>(a.i("pack-max-kb", 1024)) * 1024;  // larger flipbooks: stored size only
   for (const auto e : effects_of(a.str("effects"))) {
-    const auto runs = split_runs(e, split);
+    auto runs = split_runs(e, split);
+    if (static_cast<int>(runs.size()) > max_runs) runs.resize(sz(max_runs));
     Appender app(out / std::format("base_{}_{}.csv", split, sim::effect_name(e)), kBaseHeader);
     const auto done = app.keys({"run", "method", "config"});
     for (const RunSpec& rs : runs) {
@@ -577,7 +604,7 @@ void cmd_baselines(const tools::Args& a) {
       std::vector<std::pair<const VideoConfig*, int>> vids;
       if (what == "flipbook") {
         for (const auto& sp : flipbook_specs(rs.frames)) {
-          if (!done.count(rs.id + "|flipbook_" + std::string(sp.codec == flipbook::Codec::bc3 ? "bc3" : "raw") + "_packed|" + sp.describe() + "|")) specs.push_back(sp);
+          if (!done.count(rs.id + "|flipbook_" + std::string(sp.codec == flipbook::Codec::bc3 ? "bc3" : "raw") + "|" + sp.describe() + "|")) specs.push_back(sp);
         }
       } else {
         for (const auto& vc : vcfg) {
@@ -597,6 +624,13 @@ void cmd_baselines(const tools::Args& a) {
         std::size_t stored = 0;
         for (const auto& t : tensors) stored += t.values.size();
         if (stored != fb.bytes) throw std::runtime_error("flipbook: stored size differs from flipbook::memory_bytes");
+        const std::string kind = sp.codec == flipbook::Codec::bc3 ? "bc3" : "raw";
+        const std::string row_stored = std::format("{},{},{},flipbook_{},{},{},{},{},{:.4f},{:.4f},{:.5f},0,0", en, split, rs.id, kind, sp.describe(), stored, stored,
+                                                   rs.frames, sc.active_psnr, sc.psnr, sc.ssim);
+        if (stored > pack_max) {
+          app.add({row_stored});
+          continue;
+        }
         const double t0 = thread_seconds();
         const cm::Packed p = cm::pack_tensors(tensors);
         const double te = thread_seconds() - t0;
@@ -604,9 +638,7 @@ void cmd_baselines(const tools::Args& a) {
         const auto back = cm::unpack_tensors(p.data);
         const double td = thread_seconds() - t1;
         if (!back || (*back)[0].values != tensors[0].values) throw std::runtime_error("flipbook: packing round trip failed");
-        const std::string kind = sp.codec == flipbook::Codec::bc3 ? "bc3" : "raw";
-        app.add({std::format("{},{},{},flipbook_{},{},{},{},{},{:.4f},{:.4f},{:.5f},0,0", en, split, rs.id, kind, sp.describe(), stored, stored, rs.frames,
-                             sc.active_psnr, sc.psnr, sc.ssim),
+        app.add({row_stored,
                  std::format("{},{},{},flipbook_{}_packed,{},{},{},{},{:.4f},{:.4f},{:.5f},{:.3f},{:.3f}", en, split, rs.id, kind, sp.describe(), p.data.size(),
                              p.data.size(), rs.frames, sc.active_psnr, sc.psnr, sc.ssim, te, td)});
       }
@@ -780,10 +812,11 @@ std::vector<Mean> means(const std::vector<Point>& pts, int n_runs) {
 }
 
 // The configs of a method on its frontier of means: no other config has fewer mean bytes and a higher mean active PSNR.
+// The codec's side-context option is left out (the codec as shipped decodes on any build; its gain is reported apart).
 std::vector<std::string> frontier(const std::vector<Mean>& ms, const std::string& method) {
   std::vector<Mean> v;
   for (const auto& m : ms) {
-    if (m.method == method) v.push_back(m);
+    if (m.method == method && m.config.find("_side") == std::string::npos) v.push_back(m);
   }
   std::ranges::sort(v, [](const Mean& a, const Mean& b) { return a.bytes < b.bytes || (a.bytes == b.bytes && a.apsnr > b.apsnr); });
   std::vector<std::string> out;
@@ -927,23 +960,167 @@ std::vector<std::pair<std::string, std::string>> figure_families() {
           {"svt", "SVT-AV1 4:2:0"},    {"flipbook_bc3_packed", "flipbook BC3, packed"}, {"flipbook_raw_packed", "flipbook raw, packed"}};
 }
 
+// Paired comparisons of the `hero` family with every other family, per run: bytes needed at stated qualities (log ratio,
+// paired bootstrap over runs) and active PSNR at stated byte budgets.
+void compare_families(const std::string& label, const std::vector<Point>& pts, const std::vector<std::string>& runs,
+                      std::map<std::string, std::set<std::string>>& fam, const std::string& hero, const std::vector<double>& qualities,
+                      const std::vector<double>& rates, std::vector<std::string>& rows_q, std::vector<std::string>& rows_r) {
+  for (const auto& [meth, cfgs] : fam) {
+    if (meth == hero) continue;
+    for (const double Q : qualities) {
+      std::vector<double> x, y;
+      int floors = 0, g_missing = 0, o_missing = 0;
+      for (const auto& run : runs) {
+        const Curve cg = curve(pts, run, hero, fam[hero], 0), co = curve(pts, run, meth, cfgs, 0);
+        bool fg = false, fo = false;
+        const double bg = bytes_at(cg, Q, fg), bo = bytes_at(co, Q, fo);
+        if (std::isnan(bg)) ++g_missing;
+        if (std::isnan(bo)) ++o_missing;
+        if (std::isnan(bg) || std::isnan(bo)) continue;
+        if (fo) ++floors;
+        x.push_back(bg);
+        y.push_back(bo);
+      }
+      if (x.size() < 3) {
+        rows_q.push_back(std::format("{},{},{:.0f},{},{},{},,,,,,", label, meth, Q, x.size(), g_missing, o_missing));
+        continue;
+      }
+      const auto iv = metrics::paired_bootstrap(x, y);
+      double mg = 0, mo = 0;
+      for (std::size_t i = 0; i < x.size(); ++i) {
+        mg += std::exp(x[i]) / static_cast<double>(x.size());
+        mo += std::exp(y[i]) / static_cast<double>(x.size());
+      }
+      rows_q.push_back(std::format("{},{},{:.0f},{},{},{},{},{:.0f},{:.0f},{:.3f},{:.3f},{:.3f}", label, meth, Q, x.size(), g_missing, o_missing, floors, mg, mo,
+                                   std::exp(iv.mean), std::exp(iv.lo), std::exp(iv.hi)));
+    }
+    for (const double R : rates) {
+      std::vector<double> x, y;
+      for (const auto& run : runs) {
+        const double qg = quality_at(curve(pts, run, hero, fam[hero], 0), std::log(R));
+        const double qo = quality_at(curve(pts, run, meth, cfgs, 0), std::log(R));
+        if (std::isnan(qg) || std::isnan(qo)) continue;
+        x.push_back(qg);
+        y.push_back(qo);
+      }
+      if (x.size() < 3) {
+        rows_r.push_back(std::format("{},{},{:.0f},{},,,,,", label, meth, R, x.size()));
+        continue;
+      }
+      const auto iv = metrics::paired_bootstrap(x, y);
+      double mg = 0, mo = 0;
+      for (std::size_t i = 0; i < x.size(); ++i) {
+        mg += x[i] / static_cast<double>(x.size());
+        mo += y[i] / static_cast<double>(x.size());
+      }
+      rows_r.push_back(std::format("{},{},{:.0f},{},{:.3f},{:.3f},{:.3f},{:.3f},{:.3f}", label, meth, R, x.size(), mg, mo, iv.mean, iv.lo, iv.hi));
+    }
+  }
+}
+
+std::vector<std::string> run_ids_of(const std::vector<RunSpec>& runs) {
+  std::vector<std::string> v;
+  for (const auto& r : runs) v.push_back(r.id);
+  return v;
+}
+
+// G3b's tables and figure from g3b.csv: families are the model plus residual (with the model alone as its first point),
+// each video codec, and the flipbook envelopes; paired over the 12 clips.
+void summary_g3b(const fs::path& dir, const fs::path& res, const std::string& figure) {
+  std::vector<Point> pts;
+  std::set<std::string> clips;
+  for (const auto& r : read_csv(dir / "g3b.csv")) {
+    std::string method = r.at("method"), config = r.at("config");
+    if (method == "model_packed") {
+      method = "g3b";
+      config += "_alone";
+    }
+    pts.push_back({r.at("clip"), method, config, std::stod(r.at("bytes")), std::stod(r.at("active_psnr")), std::stod(r.at("psnr")), std::stod(r.at("ssim"))});
+    clips.insert(r.at("clip"));
+  }
+  if (pts.empty()) return;
+  const std::vector<std::string> runs(clips.begin(), clips.end());
+  const auto ms = means(pts, static_cast<int>(runs.size()));
+  std::map<std::string, std::set<std::string>> fam;
+  std::set<std::string> methods;
+  for (const auto& m : ms) methods.insert(m.method);
+  for (const auto& meth : methods) {
+    if (meth == "model" || meth == "residual_only") continue;
+    if (meth.rfind("flipbook", 0) == 0) {
+      for (const auto& c : frontier(ms, meth)) fam[meth].insert(c);
+    } else {
+      for (const auto& m : ms) {
+        if (m.method == meth) fam[meth].insert(m.config);
+      }
+    }
+  }
+  std::vector<std::string> rows_curve, rows_q, rows_r;
+  for (const auto& m : ms) {
+    rows_curve.push_back(std::format("{},{},{:.1f},{:.3f},{:.3f},{:.4f}", m.method, m.config, m.bytes, m.apsnr, m.psnr, m.ssim));
+  }
+  compare_families("study_a_clips", pts, runs, fam, "g3b", {24, 26, 28, 30, 32, 34, 36, 38, 40, 42}, {10000, 30000, 100000, 200000, 500000, 1000000},
+                   rows_q, rows_r);
+  const auto write = [&](const fs::path& p, const std::string& head, const std::vector<std::string>& rows) {
+    std::ofstream o(p);
+    o << head << "\n";
+    for (const auto& r : rows) o << r << "\n";
+  };
+  write(res / "g3b_curves.csv", "method,config,bytes,active_psnr,psnr,ssim", rows_curve);
+  write(res / "g3b_at_quality.csv", "clips,other,active_psnr,runs,g3b_unreached,other_unreached,other_at_floor,g3b_bytes,other_bytes,bytes_ratio,ratio_lo,ratio_hi",
+        rows_q);
+  write(res / "g3b_at_rate.csv", "clips,other,bytes,runs,g3b_active_psnr,other_active_psnr,diff,diff_lo,diff_hi", rows_r);
+  std::vector<Series> ser;
+  const std::vector<std::pair<std::string, std::string>> order = {{"g3b", "G3b: grid_m 8-bit + residual"}, {"x264_rgb", "H.264 RGB"}, {"x265_444", "H.265 4:4:4"},
+                                                                  {"vp9a", "VP9 alpha"}, {"aom_444", "AV1 4:4:4"}, {"svt", "SVT-AV1 4:2:0"},
+                                                                  {"flipbook_bc3_packed", "flipbook BC3, packed"}, {"flipbook_raw_packed", "flipbook raw, packed"}};
+  for (const auto& [meth, lab] : order) {
+    if (!fam.count(meth)) continue;
+    Series x;
+    x.label = lab;
+    x.hero = meth == "g3b";
+    x.dashed = meth.rfind("flipbook", 0) == 0;
+    for (const auto& m : ms) {
+      if (m.method == meth && fam[meth].count(m.config)) x.pts.emplace_back(m.bytes, m.apsnr);
+    }
+    std::ranges::sort(x.pts);
+    ser.push_back(std::move(x));
+  }
+  write_svg(figure, {{"12 study A clips (64 frames, 128 x 128)", ser}}, "G3b: a frame model plus a coded residual, against video codecs and flipbooks",
+            "Means over the 12 study A clips. G3b bytes include the packed frame model (grid_m 8-bit, about 85 KB).");
+}
+
 void cmd_summary(const tools::Args& a) {
   const fs::path dir = a.str("data", "/root/nvfx-data/g3");
   const fs::path res = a.str("results", "results/experiments");
   fs::create_directories(res);
   // 1. validation: the codec's frontier (written for the test run) and the variants
   {
-    std::vector<std::string> rows_front, rows_var, rows_val;
+    std::vector<std::string> rows_front, rows_var, rows_val, rows_vid;
     for (const auto e : effects_of(a.str("effects"))) {
       const std::string en(sim::effect_name(e));
       const auto pts = load_points(dir, "val", e);
       if (pts.empty()) continue;
       std::set<std::string> run_ids;
-      for (const auto& p : pts) run_ids.insert(p.run);
+      for (const auto& p : pts) {
+        if (p.method == "g3a") run_ids.insert(p.run);
+      }
       const int n = static_cast<int>(run_ids.size());
       const auto ms = means(pts, n);
       for (const auto& m : ms) {
         if (m.method == "g3a") rows_val.push_back(std::format("{},{},{:.1f},{:.3f},{:.3f},{:.4f}", en, m.config, m.bytes, m.apsnr, m.psnr, m.ssim));
+      }
+      {  // video formats on the validation runs they were run on (the choice of formats for the test)
+        std::vector<Point> vp;
+        std::set<std::string> vr;
+        for (const auto& p : pts) {
+          if (p.method != "g3a") {
+            vp.push_back(p);
+            vr.insert(p.run);
+          }
+        }
+        for (const auto& m : means(vp, static_cast<int>(vr.size()))) {
+          rows_vid.push_back(std::format("{},{},{},{},{:.1f},{:.3f},{:.3f}", en, m.method, m.config, vr.size(), m.bytes, m.apsnr, m.psnr));
+        }
       }
       const auto fr = frontier(ms, "g3a");
       std::ofstream f(dir / std::format("frontier_{}.txt", en));
@@ -1000,6 +1177,11 @@ void cmd_summary(const tools::Args& a) {
       for (const auto& r : rows_front) t += r + "\n";
       return t;
     }();
+    std::ofstream(res / "g3_val_video.csv") << "effect,method,config,runs,bytes,active_psnr,psnr\n" << [&] {
+      std::string t;
+      for (const auto& r : rows_vid) t += r + "\n";
+      return t;
+    }();
     std::ofstream(res / "g3_val_variants.csv") << "effect,variant,base,runs,bytes_ratio,bytes_ratio_lo,bytes_ratio_hi,d_active_psnr,d_lo,d_hi\n" << [&] {
       std::string t;
       for (const auto& r : rows_var) t += r + "\n";
@@ -1011,9 +1193,21 @@ void cmd_summary(const tools::Args& a) {
   std::vector<std::pair<std::string, std::vector<Series>>> fig;
   for (const auto e : effects_of(a.str("effects"))) {
     const std::string en(sim::effect_name(e));
-    const auto pts = load_points(dir, "test", e);
-    if (pts.empty()) continue;
-    const auto runs = split_runs(e, "test");
+    const auto all_pts = load_points(dir, "test", e);
+    if (all_pts.empty()) continue;
+    // the test runs: those the codec was run on (study B's held-out settings; the salt-2 runs if they were added)
+    std::set<std::string> ids;
+    for (const auto& p : all_pts) {
+      if (p.method == "g3a") ids.insert(p.run);
+    }
+    std::vector<RunSpec> runs;
+    for (const auto& r : split_runs(e, "test")) {
+      if (ids.count(r.id)) runs.push_back(r);
+    }
+    std::vector<Point> pts;
+    for (const auto& p : all_pts) {
+      if (ids.count(p.run)) pts.push_back(p);
+    }
     const int n = static_cast<int>(runs.size());
     const auto ms = means(pts, n);
     // families and their configs: the codec's validation frontier; every rung of each video codec; the flipbook
@@ -1057,60 +1251,8 @@ void cmd_summary(const tools::Args& a) {
       }
       fig.emplace_back(en, std::move(ser));
     }
-    // paired comparisons of g3a with every other family
-    const std::vector<double> qualities = {14, 16, 18, 20, 22, 24, 26, 28, 30, 33, 36};
-    const std::vector<double> rates = {100, 300, 1000, 3000, 10000, 30000, 100000, 300000};
-    for (const auto& [meth, cfgs] : fam) {
-      if (meth == "g3a") continue;
-      for (const double Q : qualities) {
-        std::vector<double> x, y;
-        int floors = 0, g_missing = 0, o_missing = 0;
-        for (const auto& rs : runs) {
-          const Curve cg = curve(pts, rs.id, "g3a", fam["g3a"], 0), co = curve(pts, rs.id, meth, cfgs, 0);
-          bool fg = false, fo = false;
-          const double bg = bytes_at(cg, Q, fg), bo = bytes_at(co, Q, fo);
-          if (std::isnan(bg)) ++g_missing;
-          if (std::isnan(bo)) ++o_missing;
-          if (std::isnan(bg) || std::isnan(bo)) continue;
-          if (fo) ++floors;
-          x.push_back(bg);
-          y.push_back(bo);
-        }
-        if (x.size() < 3) {
-          rows_q.push_back(std::format("{},{},{:.0f},{},{},{},,,,,,", en, meth, Q, x.size(), g_missing, o_missing));
-          continue;
-        }
-        const auto iv = metrics::paired_bootstrap(x, y);
-        double mg = 0, mo = 0;
-        for (std::size_t i = 0; i < x.size(); ++i) {
-          mg += std::exp(x[i]) / static_cast<double>(x.size());
-          mo += std::exp(y[i]) / static_cast<double>(x.size());
-        }
-        rows_q.push_back(std::format("{},{},{:.0f},{},{},{},{},{:.0f},{:.0f},{:.3f},{:.3f},{:.3f}", en, meth, Q, x.size(), g_missing, o_missing, floors, mg, mo,
-                                     std::exp(iv.mean), std::exp(iv.lo), std::exp(iv.hi)));
-      }
-      for (const double R : rates) {
-        std::vector<double> x, y;
-        for (const auto& rs : runs) {
-          const double qg = quality_at(curve(pts, rs.id, "g3a", fam["g3a"], 0), std::log(R));
-          const double qo = quality_at(curve(pts, rs.id, meth, cfgs, 0), std::log(R));
-          if (std::isnan(qg) || std::isnan(qo)) continue;
-          x.push_back(qg);
-          y.push_back(qo);
-        }
-        if (x.size() < 3) {
-          rows_r.push_back(std::format("{},{},{:.0f},{},,,,,", en, meth, R, x.size()));
-          continue;
-        }
-        const auto iv = metrics::paired_bootstrap(x, y);
-        double mg = 0, mo = 0;
-        for (std::size_t i = 0; i < x.size(); ++i) {
-          mg += x[i] / static_cast<double>(x.size());
-          mo += y[i] / static_cast<double>(x.size());
-        }
-        rows_r.push_back(std::format("{},{},{:.0f},{},{:.3f},{:.3f},{:.3f},{:.3f},{:.3f}", en, meth, R, x.size(), mg, mo, iv.mean, iv.lo, iv.hi));
-      }
-    }
+    compare_families(en, pts, run_ids_of(runs), fam, "g3a", {14, 16, 18, 20, 22, 24, 26, 28, 30, 33, 36},
+                     {100, 300, 1000, 3000, 10000, 30000, 100000, 300000}, rows_q, rows_r);
   }
   const auto write = [&](const fs::path& p, const std::string& head, const std::vector<std::string>& rows) {
     std::ofstream o(p);
@@ -1123,8 +1265,9 @@ void cmd_summary(const tools::Args& a) {
   write(res / "g3_test_at_rate.csv", "effect,other,bytes,runs,g3a_active_psnr,other_active_psnr,diff,diff_lo,diff_hi", rows_r);
   if (!fig.empty()) {
     write_svg(a.str("figure", "docs/figures/g3_rd.svg"), fig, "G3a: a run codec from the learned dynamics, against video codecs and flipbooks",
-              "Held-out runs (test): 240 frames at 128 x 128 (explosions 89). Means over 18 runs per effect. Codec points: the frontier chosen on validation.");
+              "Test: study B's 10 held-out settings, new seeds; 240 frames at 128 x 128 (explosions 89); means over the runs. Codec points: the frontier chosen on validation.");
   }
+  summary_g3b(dir, res, a.str("figure-g3b", "docs/figures/g3b_rd.svg"));
   std::println("summary written to {}", res.string());
 }
 
