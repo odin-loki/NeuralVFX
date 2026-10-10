@@ -377,7 +377,7 @@ void backward(const Model& m, const StepLayout& L, const Cache& c, std::span<con
   }
 }
 
-float run_time(const Run& r, int state) { return static_cast<float>(state + 1) / r.p.fps; }
+float run_time(const Run& r, int state) { return r.t0 + static_cast<float>(state + 1) / r.p.fps; }
 
 void state_of(const Model& m, const Run& r, int i, Vec& S) {
   const int N = m.h.res * m.h.res, C = m.h.channels();
@@ -428,6 +428,301 @@ Run record_run(const sim::Params& p, int frames, int res) {
   return r;
 }
 
+// --- couplings: outside operations on the state (docs/COMPOSE.md §9) --------------------------------------------------
+
+void apply_forcing(std::span<float> coarse, int channels, std::span<const float> f) {
+  const std::size_t n = f.size() / kForce, C = sz(channels);
+  for (std::size_t i = 0; i < n; ++i) {
+    float* c = coarse.data() + i * C;
+    const float* g = f.data() + i * kForce;
+    c[2] = std::max(0.f, c[2] * g[5] + g[6]);
+    c[3] = std::max(0.f, c[3] * g[5] + g[7]);
+    c[1] *= g[4];
+    c[0] += g[2] + g[0];
+    c[1] += g[3] + g[1];
+  }
+}
+
+void remove_push(std::span<float> coarse, int channels, std::span<const float> f) {
+  const std::size_t n = f.size() / kForce, C = sz(channels);
+  for (std::size_t i = 0; i < n; ++i) {
+    coarse[i * C] -= f[i * kForce];
+    coarse[i * C + 1] -= f[i * kForce + 1];
+  }
+}
+
+namespace {
+
+float smooth01(float t) {
+  t = std::clamp(t, 0.f, 1.f);
+  return t * t * (3.f - 2.f * t);
+}
+
+constexpr float kCoarseCells = 32.f;  // push and force amplitudes are in cells of a 32-cell grid per frame
+
+}  // namespace
+
+float Coupling::envelope(int state) const {
+  if (state < onset || state >= onset + duration) return 0.f;
+  const float ramp = std::clamp(fl(duration) / 3.f, 1.f, 4.f);
+  return smooth01(fl(std::min(state - onset + 1, onset + duration - state)) / ramp);
+}
+
+bool ForcingSpec::active(int state) const {
+  return std::ranges::any_of(events, [state](const Coupling& c) { return c.envelope(state) > 0.f; });
+}
+
+void forcing_fields(const ForcingSpec& spec, const sim::Params& p, int n, int state, SimForcing& out) {
+  const std::size_t nn = sz(n) * sz(n);
+  out.n = n;
+  for (auto* v : {&out.pu, &out.pv, &out.fu, &out.fv, &out.ah, &out.as}) v->assign(nn, 0.f);
+  out.vk.assign(nn, 1.f);
+  out.mk.assign(nn, 1.f);
+  out.push = out.force = out.material = false;
+  const float to_sim = fl(n) / kCoarseCells * p.fps;  // cells of the 32-cell grid per frame -> solver cells per second
+  for (const Coupling& c : spec.events) {
+    const float env = c.envelope(state);
+    if (env <= 0.f) continue;
+    const float age = fl(state - c.onset);
+    const float cx = c.x + c.dx * age, cy = c.y + c.dy * age, r = std::max(1e-3f, c.radius);
+    const float ca = std::cos(c.angle), sa = std::sin(c.angle);
+    for (int y = 0; y < n; ++y) {
+      for (int x = 0; x < n; ++x) {
+        const std::size_t i = sz(y) * sz(n) + sz(x);
+        const float X = (fl(x) + 0.5f) / fl(n), Y = (fl(y) + 0.5f) / fl(n);
+        const float ex = X - cx, ey = Y - cy, d2 = ex * ex + ey * ey;
+        const float gauss = std::exp(-0.5f * d2 / (r * r));
+        switch (c.kind) {
+          case Coupling::Kind::push:
+          case Coupling::Kind::force: {
+            float u = 0.f, v = 0.f;
+            if (c.shape == Coupling::Shape::gust) {
+              u = c.amp * gauss * ca;
+              v = c.amp * gauss * sa;
+            } else if (c.shape == Coupling::Shape::vortex) {  // peak speed amp at the radius, as compose's vortex field
+              const float d = std::sqrt(d2);
+              const float sp = c.amp * (d / r) * std::exp(0.5f * (1.f - d2 / (r * r))) / (d + 1e-4f);
+              u = -sp * ey;
+              v = sp * ex;
+            } else {  // a wave: a flow along `angle`, modulated across the domain and drifting (wind, shear, gusts)
+              const float ph = 6.2831853f * (((X - c.x) * std::cos(c.across) + (Y - c.y) * std::sin(c.across)) / std::max(1e-3f, c.wavelength) - c.speed * age);
+              const float k = 0.5f + 0.5f * std::sin(ph);
+              u = c.amp * k * ca;
+              v = c.amp * k * sa;
+            }
+            auto& U = c.kind == Coupling::Kind::push ? out.pu : out.fu;
+            auto& V = c.kind == Coupling::Kind::push ? out.pv : out.fv;
+            U[i] += env * to_sim * u;
+            V[i] += env * to_sim * v;
+            (c.kind == Coupling::Kind::push ? out.push : out.force) = true;
+            break;
+          }
+          case Coupling::Kind::ceiling:
+            out.vk[i] *= 1.f - env * c.amp * smooth01((Y - c.height) / std::max(1e-3f, c.soft));
+            out.force = true;
+            break;
+          case Coupling::Kind::add:
+            out.ah[i] += env * c.amp * gauss;
+            out.as[i] += env * c.amp2 * gauss;
+            out.material = true;
+            break;
+          case Coupling::Kind::remove:
+            out.mk[i] *= 1.f - env * c.amp * (c.band ? smooth01((Y - c.height) / std::max(1e-3f, c.soft)) : gauss);
+            out.material = true;
+            break;
+        }
+      }
+    }
+  }
+}
+
+void apply_forcing(sim::Fluid& f, const SimForcing& s) {
+  const std::size_t nn = sz(s.n) * sz(s.n);
+  if (s.material) {
+    const sim::State st = f.state();
+    std::vector<float> dt(nn), ds(nn);
+    for (std::size_t i = 0; i < nn; ++i) {
+      dt[i] = st.temp[i] * (s.mk[i] - 1.f) + s.ah[i];
+      ds[i] = st.soot[i] * (s.mk[i] - 1.f) + s.as[i];
+    }
+    f.add_material(dt, ds);
+  }
+  if (s.push || s.force) {
+    const sim::State st = f.state();
+    std::vector<float> du(nn), dv(nn);
+    for (std::size_t i = 0; i < nn; ++i) {
+      du[i] = s.fu[i] + s.pu[i];
+      dv[i] = st.v[i] * (s.vk[i] - 1.f) + s.fv[i] + s.pv[i];
+    }
+    f.push(du, dv);
+  }
+}
+
+void unpush(sim::Fluid& f, const SimForcing& s) {
+  if (!s.push) return;
+  const std::size_t nn = sz(s.n) * sz(s.n);
+  std::vector<float> du(nn), dv(nn);
+  for (std::size_t i = 0; i < nn; ++i) {
+    du[i] = -s.pu[i];
+    dv[i] = -s.pv[i];
+  }
+  f.push(du, dv);
+}
+
+void coarse_forcing(const SimForcing& s, int res, float fps, std::span<float> out) {
+  const int n = s.n, k = n / res;
+  if (k * res != n) throw std::invalid_argument("rollout: the coarse grid must divide the simulation grid");
+  std::fill(out.begin(), out.begin() + static_cast<std::ptrdiff_t>(sz(res) * sz(res) * kForce), 0.f);
+  for (int y = 0; y < n; ++y) {
+    for (int x = 0; x < n; ++x) {
+      const std::size_t i = sz(y) * sz(n) + sz(x);
+      float* o = out.data() + (sz(y / k) * sz(res) + sz(x / k)) * kForce;
+      o[0] += s.pu[i];
+      o[1] += s.pv[i];
+      o[2] += s.fu[i];
+      o[3] += s.fv[i];
+      o[4] += s.vk[i];
+      o[5] += s.mk[i];
+      o[6] += s.ah[i];
+      o[7] += s.as[i];
+    }
+  }
+  const float a = 1.f / fl(k * k), av = a / (fl(k) * fps);  // as coarse_from_sim
+  for (int i = 0; i < res * res; ++i) {
+    float* o = out.data() + sz(i) * kForce;
+    for (int c = 0; c < 4; ++c) o[c] *= av;
+    for (int c = 4; c < kForce; ++c) o[c] *= a;
+  }
+}
+
+Run record_forced_run(const sim::Params& p, const ForcingSpec& spec, int frames, int res) {
+  Run r;
+  r.p = p;
+  r.frames = frames;
+  const std::size_t per = sz(res) * sz(res) * kPhys, fper = sz(res) * sz(res) * kForce;
+  r.coarse.resize(sz(frames) * per);
+  r.forcing_at.assign(sz(frames), -1);
+  sim::Fluid f(p);
+  SimForcing sf;
+  const int n = p.sim_res > 0 ? p.sim_res : p.size;
+  for (int i = 0; i < frames; ++i) {
+    const bool on = spec.active(i);
+    if (on) {
+      forcing_fields(spec, p, n, i, sf);
+      apply_forcing(f, sf);
+      r.forcing_at[sz(i)] = static_cast<int>(r.forcing.size() / fper);
+      r.forcing.resize(r.forcing.size() + fper);
+      coarse_forcing(sf, res, p.fps, std::span(r.forcing).subspan(r.forcing.size() - fper, fper));
+    }
+    f.step_frame();
+    if (on) unpush(f, sf);
+    coarse_from_sim(f.state(), res, p.fps, std::span(r.coarse).subspan(sz(i) * per, per));
+  }
+  return r;
+}
+
+Run record_handover_run(const sim::Params& from, int before, const sim::Params& p, int frames, int res) {
+  sim::Fluid a(from);
+  for (int i = 0; i < before; ++i) a.step_frame();
+  sim::Params q = p;
+  q.sim_res = from.sim_res > 0 ? from.sim_res : from.size;
+  sim::Fluid f(q);
+  f.set_state(a.state());
+  Run r;
+  r.p = q;
+  r.frames = frames;
+  r.t0 = fl(before - 1) / p.fps;  // state 0 (the handed-over state) is at the explosion's time, before / fps
+  const std::size_t per = sz(res) * sz(res) * kPhys;
+  r.coarse.resize(sz(frames) * per);
+  coarse_from_sim(f.state(), res, p.fps, std::span(r.coarse).subspan(0, per));
+  for (int i = 1; i < frames; ++i) {
+    f.step_frame();
+    coarse_from_sim(f.state(), res, p.fps, std::span(r.coarse).subspan(sz(i) * per, per));
+  }
+  return r;
+}
+
+// What the fireball scene does to each model (nvfx_fireball, measured per frame on the coarse grid; push in cells of the
+// 32-cell grid per frame): the wreck's fire is pushed by up to 0.49 (median 0.18 at its strongest cell) against its
+// own flow of 0.35 to 0.5 RMS, and loses half of the material in its top four rows every frame (transfer); the
+// clouds are damped by the ceiling (v multiplied by down to 0.7 per frame, changes up to 0.1), receive up to 0.06 heat
+// and soot per frame (transfers), lose 5% per frame (the second cloud) or everything in a box over the smoke source
+// (suppress); the second explosion is pushed by up to 0.09; the smoke model takes over explosion states (hand-over
+// runs). The random specs cover these ranges and go somewhat beyond them, for every effect.
+ForcingSpec random_forcing(sim::Effect e, int frames, std::uint64_t seed, int first, int last) {
+  std::mt19937_64 rng(seed * 0x9E3779B97F4A7C15ULL + 0x1F0BCE5ULL);
+  const auto U = [&](float a, float b) { return std::uniform_real_distribution<float>(a, b)(rng); };
+  const auto I = [&](int a, int b) { return a + static_cast<int>(rng() % static_cast<std::uint64_t>(std::max(1, b - a + 1))); };
+  const bool fire = e == sim::Effect::fire;
+  const float push_max = fire ? 0.5f : 0.3f;
+  last = std::clamp(last, first, frames - 2);
+  ForcingSpec spec;
+  const int n = I(1, 4);
+  for (int k = 0; k < n; ++k) {
+    Coupling c;
+    const float w = U(0.f, 1.f);  // kind: push 35%, lasting force 15%, ceiling 15%, material in 15%, out 20%
+    c.kind = w < 0.35f ? Coupling::Kind::push
+             : w < 0.50f ? Coupling::Kind::force
+             : w < 0.65f ? Coupling::Kind::ceiling
+             : w < 0.80f ? Coupling::Kind::add
+                         : Coupling::Kind::remove;
+    c.onset = I(first, last);
+    c.x = U(0.2f, 0.8f);
+    c.y = U(0.15f, 0.85f);
+    c.dx = U(-0.006f, 0.006f);
+    c.dy = U(-0.006f, 0.006f);
+    switch (c.kind) {
+      case Coupling::Kind::push:
+      case Coupling::Kind::force: {
+        const float s = U(0.f, 1.f);
+        c.shape = s < 0.4f ? Coupling::Shape::gust : s < 0.7f ? Coupling::Shape::vortex : Coupling::Shape::wave;
+        c.angle = U(0.f, 6.2831853f);
+        c.across = U(0.f, 6.2831853f);
+        c.wavelength = U(0.4f, 3.f);
+        c.speed = U(-0.03f, 0.03f);
+        c.radius = c.shape == Coupling::Shape::vortex ? U(0.08f, 0.25f) : U(0.12f, 0.4f);
+        if (c.kind == Coupling::Kind::push) {  // a flow passing through, for a while
+          c.duration = I(10, 120);
+          c.amp = U(0.05f, push_max);
+        } else {  // a short kick that stays in the flow
+          c.duration = I(2, 12);
+          c.amp = U(0.01f, 0.4f * push_max) / static_cast<float>(c.duration);  // 0.01 to 0.2 (fire) in all
+        }
+        if (c.shape == Coupling::Shape::vortex && U(0.f, 1.f) < 0.5f) c.amp = -c.amp;
+        break;
+      }
+      case Coupling::Kind::ceiling:
+        c.duration = I(30, 150);
+        c.amp = U(0.05f, 0.3f);
+        c.height = U(0.3f, 0.8f);
+        c.soft = U(0.1f, 0.3f);
+        break;
+      case Coupling::Kind::add:  // fire's soot is thin (its training range ends at 0.16): less of it
+        c.amp = U(0.005f, 0.06f);
+        c.amp2 = fire ? U(0.0005f, 0.004f) : U(0.005f, 0.06f);
+        c.duration = I(10, std::clamp(static_cast<int>(1.f / std::max(c.amp, c.amp2)), 10, 60));  // at most about 1 in all
+        c.radius = U(0.06f, 0.2f);
+        break;
+      case Coupling::Kind::remove:
+        c.duration = I(10, 120);
+        c.band = U(0.f, 1.f) < 0.4f;  // out through the top, or a disc anywhere (suppress, transfer out)
+        c.amp = U(0.f, 1.f) < 0.2f ? 1.f : U(0.02f, 0.6f);
+        c.height = U(0.7f, 0.9f);
+        c.soft = U(0.03f, 0.12f);
+        c.radius = U(0.08f, 0.25f);
+        if (!c.band && U(0.f, 1.f) < 0.3f) {  // over the source
+          c.x = 0.5f;
+          c.y = U(0.05f, 0.2f);
+          c.dx = c.dy = 0.f;
+        }
+        break;
+    }
+    c.duration = std::min(c.duration, frames - c.onset);
+    spec.events.push_back(c);
+  }
+  return spec;
+}
+
 // --- stepper ------------------------------------------------------------------------------------------------------------
 
 double window_loss(const Model& m, const Run& r, int first, int unroll, int burn, float sigma, float profile, std::uint64_t noise_seed,
@@ -438,14 +733,24 @@ double window_loss(const Model& m, const Run& r, int first, int unroll, int burn
   Vec S, pressure(sz(N), 0.f), noise(sz(N) * kNoise), cond(sz(h.cond()));
   state_of(m, r, first, S);
   const std::vector<float> controls = r.controls();
+  // Couplings (forced runs): the operations before the step that produced state i are applied to the state before the
+  // step from state i - 1, and the push is taken out after it (as compose does at run time).
+  const std::size_t fper = sz(N) * kForce;
+  const auto forcing = [&](int state) -> std::span<const float> {
+    const float* f = r.forcing_for(state, fper);
+    return f ? std::span<const float>(f, fper) : std::span<const float>{};
+  };
   int i0 = first;
   if (burn > 0) {  // the stepper's own rollout, no gradient: it learns to correct its own drift
     Cache cb;
     for (int s = 0; s < burn; ++s) {
       condition(m, controls, run_time(r, i0 + s), cond);
       coarse_noise(m, r.p.seed, run_time(r, i0 + s), noise);
+      const auto f = forcing(i0 + s + 1);
+      if (!f.empty()) apply_forcing(S, C, f);
       forward(m, L, S.data(), noise.data(), cond, pressure, cb);
       S = cb.next;
+      if (!f.empty()) remove_push(S, C, f);
     }
     i0 += burn;
   }
@@ -453,6 +758,9 @@ double window_loss(const Model& m, const Run& r, int first, int unroll, int burn
   std::vector<Vec> conds(sz(unroll));
   std::vector<Vec> gout(sz(unroll));
   std::vector<Vec> gprev(sz(unroll), Vec(activity > 0.f ? sz(N) * sz(C) : 0, 0.f));  // activity terms on earlier outputs
+  std::vector<std::span<const float>> fs(sz(unroll));  // the operations before each step
+  std::vector<std::vector<std::uint8_t>> zeroed(sz(unroll));  // cells whose heat (bit 0) or soot (bit 1) was clamped at zero
+  std::vector<Vec> outs(sz(unroll));  // each step's state after the push is taken out (what the loss sees)
   std::array<float, kPhys> wch{};
   for (int k = 0; k < kPhys; ++k) wch[sz(k)] = 1.f / (m.scale[sz(k)] * m.scale[sz(k)]);
   const float inv = 1.f / (fl(N) * kPhys * fl(unroll));
@@ -471,8 +779,22 @@ double window_loss(const Model& m, const Run& r, int first, int unroll, int burn
         }
       }
     }
+    fs[sz(s)] = forcing(i0 + s + 1);
+    if (!fs[sz(s)].empty()) {
+      const std::span<const float> f = fs[sz(s)];
+      auto& z = zeroed[sz(s)];
+      z.assign(sz(N), 0);
+      for (int j = 0; j < N; ++j) {
+        const float* g = f.data() + sz(j) * kForce;
+        const float* x = S.data() + sz(j) * sz(C);
+        z[sz(j)] = static_cast<std::uint8_t>((x[2] * g[5] + g[6] < 0.f ? 1 : 0) | (x[3] * g[5] + g[7] < 0.f ? 2 : 0));
+      }
+      apply_forcing(S, C, f);
+    }
     forward(m, L, S.data(), noise.data(), conds[sz(s)], pressure, cs[sz(s)]);
     S = cs[sz(s)].next;
+    if (!fs[sz(s)].empty()) remove_push(S, C, fs[sz(s)]);
+    if (activity > 0.f) outs[sz(s)] = S;
     const float* t = r.coarse.data() + sz(i0 + s + 1) * sz(N) * kPhys;
     Vec& g = gout[sz(s)];
     g.assign(sz(N) * sz(C), 0.f);
@@ -506,7 +828,7 @@ double window_loss(const Model& m, const Run& r, int first, int unroll, int burn
     }
     if (activity > 0.f && s > 0) {  // how much each channel changes per frame: mean squared change, model against truth
       const float* tp = r.coarse.data() + sz(i0 + s) * sz(N) * kPhys;  // the truth one frame earlier
-      const Vec& prev = cs[sz(s - 1)].next;
+      const Vec& prev = outs[sz(s - 1)];
       for (int k = 0; k < kPhys; ++k) {
         const float is2 = 1.f / (m.scale[sz(k)] * m.scale[sz(k)]);
         double am = 0, at = 0;
@@ -537,6 +859,17 @@ double window_loss(const Model& m, const Run& r, int first, int unroll, int burn
         for (std::size_t j = 0; j < gS.size(); ++j) gS[j] += gprev[sz(s)][j];
       }
       backward(m, L, cs[sz(s)], conds[sz(s)], gS, gp, gS_in, gp_in, grad->data());
+      if (!fs[sz(s)].empty()) {  // through the operations: the multipliers scale, the offsets pass, clamped cells stop
+        const std::span<const float> f = fs[sz(s)];
+        for (int j = 0; j < N; ++j) {
+          const float* g = f.data() + sz(j) * kForce;
+          float* q = gS_in.data() + sz(j) * sz(C);
+          const std::uint8_t z = zeroed[sz(s)][sz(j)];
+          q[1] *= g[4];
+          q[2] = z & 1 ? 0.f : q[2] * g[5];
+          q[3] = z & 2 ? 0.f : q[3] * g[5];
+        }
+      }
       gS.swap(gS_in);
       gp.swap(gp_in);
     }
@@ -603,6 +936,16 @@ StepperResult train_stepper(Model& m, std::span<const Run> runs, const StepperOp
   const auto t0 = std::chrono::steady_clock::now();
   const int total = o.iterations + o.finetune + o.activity_stage;
   std::vector<double> tail;
+  // The mix of plain and coupled runs (o.plain_runs >= 0): a window from the coupled runs with probability
+  // o.coupled_share.
+  const std::size_t n_plain = o.plain_runs < 0 ? runs.size() : std::min(runs.size(), sz(o.plain_runs));
+  if (o.plain_runs >= 0 && ((n_plain == 0 && o.coupled_share < 1.f) || (n_plain == runs.size() && o.coupled_share > 0.f))) {
+    throw std::invalid_argument("rollout: the mix needs plain and coupled runs");
+  }
+  const auto pick_run = [&](std::mt19937_64& rng) {
+    const bool coupled = std::uniform_real_distribution<float>(0.f, 1.f)(rng) < o.coupled_share;
+    return coupled ? n_plain + rng() % (runs.size() - n_plain) : rng() % n_plain;
+  };
   for (int it = 0; it < total; ++it) {
     const bool fine = it >= o.iterations;
     const bool act = it >= o.iterations + o.finetune;
@@ -615,7 +958,7 @@ StepperResult train_stepper(Model& m, std::span<const Run> runs, const StepperOp
         pool.emplace_back([&, t] {
           std::mt19937_64 rng(o.seed * 1000003ULL + static_cast<std::uint64_t>(it) * 977ULL + static_cast<std::uint64_t>(t));
           for (int b = t; b < o.batch; b += threads) {
-            const Run& r = runs[rng() % runs.size()];
+            const Run& r = o.plain_runs < 0 ? runs[rng() % runs.size()] : runs[pick_run(rng)];
             const int burn = fine && o.burn_max > 0 && (b & 1) ? static_cast<int>(rng() % static_cast<std::uint64_t>(o.burn_max + 1)) : 0;
             const int span = r.frames - unroll - burn - 1;
             if (span <= 0) continue;
@@ -650,6 +993,8 @@ StepperResult train_stepper(Model& m, std::span<const Run> runs, const StepperOp
       res.curve.emplace_back(it, loss);
       if (o.progress) o.progress(it, unroll, loss);
     }
+    if (o.checkpoint && o.checkpoint_every > 0 && (it + 1) % o.checkpoint_every == 0) o.checkpoint(it + 1);
+    if (o.stop_after > 0 && it + 1 >= o.stop_after) break;
   }
   for (const double v : tail) res.final_loss += v / static_cast<double>(tail.size());
   res.seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();

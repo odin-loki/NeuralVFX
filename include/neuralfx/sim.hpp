@@ -86,6 +86,15 @@ class Fluid {
   State state() const;
   void set_state(const State& s);  // s.n must equal the solver resolution
 
+  // Couplings from outside (docs/COMPOSE.md §9), between frames. Fields are n * n values without the border, rows from
+  // the bottom (as State).
+  //   push: adds a velocity field (solver cells per second). push(du, dv), step_frame(), push(-du, -dv) is what
+  //         compose::push does to a learned effect: the flow moves material for one frame and does not build up; a
+  //         push that is not taken out again is a lasting force.
+  //   add_material: adds heat and soot, clamped at zero (negative amounts remove material).
+  void push(std::span<const float> du, std::span<const float> dv);
+  void add_material(std::span<const float> dtemp, std::span<const float> dsoot);
+
  private:
   void step(float dt);
   void add_sources(float dt);
@@ -93,6 +102,7 @@ class Fluid {
   void project();
   void advect_velocity(float dt);
   void advect_scalar(Field& q, float dt);
+  void velocity_border();
 
   Params p_;
   int n_;
