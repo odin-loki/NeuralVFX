@@ -224,9 +224,10 @@ int run_compose() {
   nfx::compose::testing::MiniScene over(2);
   nfx::compose::PictureThread picture(over.frame, over.pool);
   std::array<std::vector<std::uint8_t>, 2> bufs{rgb, rgb};
-  const auto frame = [&](int f) {
+  const auto frame = [&](int f, bool count_from_start) {
     over.capture();
     picture.start(bufs[static_cast<std::size_t>(f % 2)], 0.8f, 1.f);
+    if (count_from_start) g_counting = true;  // the picture thread's first picture is counted too
     over.state(f + 1);
     picture.wait_images();
     over.shade();
@@ -234,13 +235,12 @@ int run_compose() {
   };
   over.state(0);
   over.shade();
-  frame(0);  // warm-up outside the count
   g_allocations = 0;
-  g_counting = true;
-  for (int f = 1; f < 100; ++f) frame(f);
+  frame(0, true);  // (the capture of the first frame sizes what the pictures need: outside the count)
+  for (int f = 1; f < 100; ++f) frame(f, false);
   g_counting = false;
   const long m = g_allocations.load();
-  std::printf("composed scene 160x90, picture overlapped: %ld allocations in 99 frames\n", m);
+  std::printf("composed scene 160x90, picture overlapped: %ld allocations in 100 pictures and 99 frames\n", m);
   return n == 0 && m == 0 ? 0 : 1;
 }
 

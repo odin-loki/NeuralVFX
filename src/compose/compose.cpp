@@ -2310,6 +2310,11 @@ void Frame::capture(const Light& light, std::span<const std::array<float, 4>> sc
   const auto heat = bus.heat();
   heat_.assign(heat.begin(), heat.end());  // the same size every frame: allocates on the first only
   heat_cap_ = {heat_.data(), bus.nx(), bus.ny(), bus.x0(), bus.y0(), bus.cell()};
+  // render()'s buffers that depend on the grids' sizes, sized here (render() may run on another thread, and nothing it
+  // does should allocate)
+  light_x_.resize(zs(light.ny()) * zs(w_) * 4);
+  heat_x_.resize(zs(bus.ny()) * zs(w_));
+  block_bus_.resize(zs(blocks_));
 }
 
 void Frame::render(std::span<std::uint8_t> rgb, float bloom_threshold, float bloom_strength, Pool& pool, std::atomic<bool>* images_read) {

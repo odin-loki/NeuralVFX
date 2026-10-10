@@ -22,7 +22,7 @@ for csv in "$@"; do
   # the modules' step and shading summed over the modules (each timed on whichever thread ran it): the CPU time of the
   # learned models, as §7's tables give it
   for kind in step shade; do
-    m=$(awk -F, -v k="_$kind" 'NR == 1 { for (i = 1; i <= NF; i++) if (substr($i, length($i) - length(k) + 1) == k && $i != k) c[i] = 1; next }
+    m=$(awk -F, -v k="_$kind" 'NR == 1 { for (i = 1; i <= NF; i++) if (substr($i, length($i) - length(k) + 1) == k && $i != k && substr($i, 1, 4) != "cpu_") c[i] = 1; next }
                                $1 >= 36 { s = 0; for (i in c) s += $i; print s }' "$csv" | sort -g | awk '{ v[NR] = $1 } END { if (NR) printf "%.3f", (NR % 2) ? v[(NR + 1) / 2] : (v[NR / 2] + v[NR / 2 + 1]) / 2 }')
     line="$line model_${kind}_cpu=$m"
   done
