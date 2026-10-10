@@ -107,7 +107,16 @@ int h2(const tools::Args& a) {
     const auto& controls = e.m.starts[zs(start)].controls;
     std::vector<double> ss(zs(frames), 1e9), sf(zs(frames), 1e9), rs(zs(frames), 1e9), rf(zs(frames), 1e9), nz(zs(frames), 0);
     for (int r = 0; r < reps; ++r) {
-      auto skip = compose::make_runner(e, c.size, isa), full = compose::make_runner(e, c.size, isa);
+      // created in alternating order, so that neither runner always gets the same place in memory (cache aliasing
+      // between two instances can differ by several percent for the same work)
+      std::unique_ptr<rt::RolloutRunner> skip, full;
+      if (r % 2 == 0) {
+        skip = compose::make_runner(e, c.size, isa);
+        full = compose::make_runner(e, c.size, isa);
+      } else {
+        full = compose::make_runner(e, c.size, isa);
+        skip = compose::make_runner(e, c.size, isa);
+      }
       full->skip_empty(false);
       skip->start(start, controls, 11);
       full->start(start, controls, 11);
