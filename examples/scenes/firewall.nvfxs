@@ -1,0 +1,71 @@
+# A wall of fire in a gale, torn apart by a vortex ring, written only as a script (docs/COMPOSE.md §4 and §5):
+#
+#   nvfx_scene_script --script examples/scenes/firewall.nvfxs --models DIR --out firewall.mp4
+#
+# Night. A wall of fire burns along the ground; a gusting wind from the left leans its flames, carries its smoke and
+# drives a storm of embers. A brand dropped by a woodpile heats the air until the pile catches fire. Water puts out the
+# left of the wall in a puff of steam. A vortex ring rolls in from the left and tears the flames out one by one; then
+# the smoke is drawn into a knot. The woodpile burns on. The effects are those of study D (fire.nvfx, smoke.nvfx).
+
+scene      size 1280 x 720, fps 30, length 9 s, ground 600
+bus        at (-128, -400), size 1536 x 1100, cell 8
+particles  capacity 16000, flow 0.9
+keyframes  0.8, 2.2, 3.4, 4.4, 5.4, 6.4, 7.4, 8.3
+
+effect fire  = "fire.nvfx"
+effect smoke = "smoke.nvfx", swirl 1.4, swirl_scale 9
+
+look smoke = shader, heat_scale 2.5, emission 0.6, emission_power 3, soot_density 4, soot_albedo 0.45, sky 0.3,
+             shadow 0.3, scene_light 0.8, relief 1.2, tint (0.9, 0.9, 0.93)
+
+let blow   = smooth((t - 0.3) / 2.5)                                  # the gale rises
+let douse  = smooth((t - 2.4) / 0.5) * (1 - smooth((t - 4.2) / 0.6)) # the water, on and off
+let ring_t = t - 3.6                                                  # the vortex ring's clock
+let ring_x = -160 + 300 * ring_t                                      # where it is: left to right, 300 pixels a second
+let knot   = smooth((t - 6.2) / 0.4) * (1 - smooth((t - 7.6) / 0.5)) # the pull into a knot, on and off
+
+# The sky: eight tiles of the smoke model, started with nothing in them; it gets only the fires' smoke. Its outer edges
+# fade (feather) so smoke that piles up against the domain's walls does not show.
+module sky  = smoke, tiles 4 x 2, band 8, size 256, width 384, at (640, 660), feather 0.1, look smoke, start 0, empty,
+              seed 300, controls (0.3, 0.6, 0.5)
+# The wall: six tiles of the fire model sharing bands, one fire 910 pixels wide, leaning with the wind (the model's
+# own wind control). 1.5 world pixels per tile pixel, as the sky: transfer puts fine material at the nearest pixel, and
+# at different scales a strong transfer shows a regular pattern.
+module wall = fire, tiles 6 x 1, band 8, size 128, width 192, at (640, ground), sink 0.08, start 0, seed 11,
+              controls (0.95, 0.5, 0.5), wind 0.5 + 0.2 * blow
+# The woodpile, which waits until it catches.
+module pyre = fire, size 128, width 192, sink 0.08, start 3, seed 21, waiting, controls (0.5, 0.5, 0.5),
+              intensity 0.3 + 0.6 * smooth(pyre.age / 1.2), opacity smooth(pyre.age / 0.4), wind 0.5 + 0.2 * blow
+
+# The gale: gusts that travel with it, on the smoke and the embers; the same gusts, gentler, on the flames (pushed
+# harder, the learned fire loses its flames).
+field gale   = gust, velocity (2.4 * blow, -0.2 * blow), amount 0.7, scale 260, rate 0.6, seed 7, on sky, particles
+field breeze = gust, velocity (0.4 * blow, 0), amount 0.7, scale 260, rate 0.6, seed 7, on wall, pyre
+# A brand by the woodpile heats the air there.
+field brand  = heat, at (1170, 585), radius 26, strength 0.06, on sky, from 1.6, until 3.5
+# Water on the left of the wall: the flames go out and a little steam rises (with more steam the learned fire renderer
+# meets soot-heavy states it never saw in training and tints them green).
+field hose   = cold, at (280, 560), radius 170, strength 0.3 * douse, steam 0.15, on wall, from 2.4, until 4.8
+# A vortex ring rolling in from the left, just above the flames: through the smoke and the embers, and at half strength
+# through the flames, which it tears out.
+field punch  = ring, at (ring_x, 455), direction (1, -0.25), radius 75, core 42, strength 8 * smooth(ring_t / 0.3),
+               on sky, particles, from 3.6, until 7.4
+field tear   = ring, at (ring_x, 455), direction (1, -0.25), radius 75, core 42, strength 4 * smooth(ring_t / 0.3),
+               on wall, from 3.6, until 7.4
+# The smoke drawn into a knot above the middle, with a swirl.
+field pull   = attract, at (640, 260), radius 300, strength 5 * knot, swirl 3 * knot, on sky, particles, from 6.2, until 8.1
+
+emit embers, on wall, pyre, tries 4, chance 0.7, spread 120
+emit flakes, in (0, -100), size 1280 x 600, tries 30, chance 0.2, soot 0.3
+
+light   gain 0.14
+frame   exposure 1.25, fade smooth(t / 0.4) * smooth((length - t) / 0.6), haze 1.2, bloom 1, bloom_threshold 1
+
+when heat(1170, 575) > 0.12 as catch:
+  wake pyre at (1170, ground)
+  scorch at (1170, ground + 6), radius 90, glow 0.2 + 0.3 * smooth(pyre.age / 1.5)
+
+every frame:
+  suppress sky, tiles (0, 0), (1, 0), (2, 0), (3, 0), cells (7, 0) to (25, 7)   # no smoke source of its own
+  transfer wall -> sky, top 4, fraction 0.5, heat 0, soot 20                     # the fires' smoke into the sky
+  transfer pyre -> sky, top 4, fraction 0.5, heat 0, soot 20

@@ -257,12 +257,38 @@ void push(Module& m, const FieldBus& bus, float gain);
 //   vortex   swirls around (x, y) with `strength` world pixels per frame at radius `radius` (positive: clockwise on
 //            screen), for one step at a time like a push;
 //   wind     a uniform flow (`u`, `v` world pixels per frame) for one step at a time.
+// More field effects (fields.cpp, docs/COMPOSE.md §5):
+//   gust     the wind (`u`, `v`) made gusty: its speed varies by `amount` (0.5: +-50%) with smooth noise of `soft`
+//            world pixels that travels with the wind and changes `rate` times a second (at `time`, from `seed`), with
+//            a crosswind wobble of a third of that;
+//   ring     a vortex ring seen from the side: two opposite vortices `radius` either side of (x, y), each with a core
+//            of `soft` pixels and `strength` pixels per frame, blowing along (`u`, `v`) (a direction) through the
+//            centre; it tears through whatever it crosses;
+//   attract  material within about `radius` of (x, y) is drawn `strength` world pixels per frame towards it
+//            (negative: pushed away), moved directly (pull()) because the pressure projection would remove a radial
+//            flow; `damping` adds a swirl around the point (a push, pixels per frame);
+//   heat     a heat source: adds `strength` heat per frame at (x, y), falling off over `radius` (a Gaussian) (a
+//            burning object; the fire models turn the heat into flames);
+//   cold     an extinguisher: removes a fraction `strength` of the heat per frame at (x, y), falling off over
+//            `radius`, and turns a fraction `damping` of what it removes into soot (steam and smoke).
 struct ForceField {
-  enum class Kind { ceiling, vortex, wind } kind = Kind::ceiling;
+  enum class Kind { ceiling, vortex, wind, gust, ring, attract, heat, cold } kind = Kind::ceiling;
   float x = 0, y = 0, radius = 100.f, strength = 0.f, soft = 80.f, u = 0, v = 0;
   float damping = 0.25f;  // ceiling: fraction of vertical velocity removed per frame at full depth
+  float amount = 0.5f, rate = 0.5f, time = 0.f;  // gust
+  std::uint64_t seed = 1;                        // gust
 };
 void apply(Module& m, const ForceField& f, float weight = 1.f);
+// The flow of the fields that push (gust, ring, attract's swirl) at world (wx, wy), world pixels per frame, y down,
+// times `weight` (fields.cpp). Zero for the others.
+std::array<float, 2> field_flow(const ForceField& f, float wx, float wy, float weight);
+// heat and cold: change the module's heat (and soot) in place, coarse and fine (fields.cpp; apply() calls it).
+void apply_heat(Module& m, const ForceField& f, float weight);
+// attract: move the module's material (heat and soot, coarse and fine) towards (f.x, f.y) by up to f.strength world
+// pixels, conserving the amount (each cell and pixel is splatted bilinearly at its new place). `scratch` holds at least
+// pull_scratch(m) floats. apply() does only the swirl; this does the pull.
+std::size_t pull_scratch(const Module& m);
+void pull(Module& m, const ForceField& f, float weight, std::span<float> scratch);
 // Move `fraction` of the material in from's coarse rows [row0, res) (y up; all rows: row0 = 0) into the modules of
 // `to` that cover it (by their ownership weights; fine fields follow). Material that lands outside them stays. What
 // arrives is scaled by the gains (one model's thin soot can be another's smoke; 1 conserves the amount).
@@ -328,6 +354,12 @@ class Particles {
   // embers cool. Landings of hot particles are recorded (cleared each update).
   void update(float dt, const FieldBus* bus, float flow_gain, float ground_y);
   std::span<const Landing> landings() const { return std::span<const Landing>(landed_).first(zs(n_landed_)); }
+  // Every live particle's position (world pixels) and velocity (world pixels per second, which f may change), for
+  // fields that act on particles.
+  template <class F>
+  void each(F&& f) {
+    for (int i = 0; i < n_; ++i) f(x_[zs(i)], y_[zs(i)], vx_[zs(i)], vy_[zs(i)]);
+  }
   // Draw into a screen image (camera offset: world minus screen).
   void draw(Image4& screen, float cam_x, float cam_y) const;
   std::uint64_t rng = 0x9E3779B97F4A7C15ULL;

@@ -1,8 +1,9 @@
 # Composed effects: modules on modules
 
-Status: **future feature, with a working prototype** (9 October 2026). Audience: dev, research, artists. The prototype
-lives in `src/compose` (a library over the runtime's internals) and `tools/nvfx_fireball` (a scripted scene). It is
-not part of the C API yet. Section 8 sketches what would make it a product feature.
+Status: **future feature, with a working prototype** (10 October 2026). Audience: dev, research, artists. The prototype
+lives in `src/compose` (a library over the runtime's internals, with a script format and its runner) and two tools:
+`nvfx_fireball` (the fireball scene, written in C++) and `nvfx_scene_script` (plays scene scripts, §4). It is not part
+of the C API yet. Section 8 sketches what would make it a product feature.
 
 ## 1. The idea
 
@@ -34,7 +35,7 @@ composed scene they can still appear as decoration.
 |---|---|---|---|
 | rollout effect (`compose::Module`) | a learned effect in a square tile of the world, stepped with its controls and seed | its own state | its state (velocity, heat, soot; fine fields), published to the bus |
 | field bus (`FieldBus`) | every module's velocity, heat and soot resampled into world space, kept per group | all modules | (read by everything else) |
-| force field (`ForceField`) | a force the script places in the world: `ceiling`, `vortex`, `wind` | the bus position | the velocity of the modules it covers |
+| force field (`ForceField`) | a force the script places in the world: `ceiling`, `vortex`, `wind`, `gust`, `ring`, `attract`, `heat`, `cold` (§5) | the bus position | the velocity (or heat and soot) of the modules it covers, and particles |
 | particles (`Particles`) | sparks, embers, debris and soot flakes, carried by the bus flow, cooling, landing | the bus flow | landing events (for triggers) |
 | light (`Light`) | light from everything hot on the bus, spread by a pyramid of blurs, plus flashes | the bus heat | the light that lights soot and the ground |
 | distortion | shock fronts and heat haze, bending what is seen through hot air | the bus heat, shocks | the picture |
@@ -52,52 +53,325 @@ These are applied between steps. Each reads and writes the runners' states throu
 | `push(m, bus, gain)` | the other modules' flow moves this module's material for one step (added before the step, taken out after, so momentum does not build up) | the blast bends the wreck's fire and the new fires |
 | `transfer(from, to, fraction, rows, gains)` | material moves from one module into others, conserving the amount (gains can convert one model's thin soot into another's smoke) | the second blast's cloud joins the first; the fires' smoke leaves through their tile tops into the sky |
 | `suppress(m, region)` | material is removed from a region | the smoke model's learned source is kept only in the crater's tile |
-| `apply(m, ForceField)` | a scripted force: `ceiling` damps rising above a height, `vortex` swirls, `wind` blows | a ceiling stops the cloud rising so it spreads into a cap and stays in view |
+| `apply(m, ForceField)` | a scripted force: `ceiling` damps rising above a height, `vortex` swirls, `wind` blows; and the field effects of §5 | a ceiling stops the cloud rising so it spreads into a cap and stays in view |
 | triggers | rules on the bus, the shocks and the particles: when a condition first holds, an action runs | the wreck explodes when the shock front reaches it; embers that land hot light fires |
 | controls from the script | any module's controls, seed, look and opacity, at any time | the crater's smoke fades; new fires grow; the cloud's look turns from fireball to smoke |
 
 ## 4. Scripts
 
-In the prototype the script is C++ (`tools/nvfx_fireball.cpp`). It has three parts:
-- modules created at the start, so the frame loop allocates nothing;
-- rules (`when` → `then`, each fires once);
-- per-frame couplings and control curves.
+A scene is a text file (`.nvfxs`) that an artist edits and `nvfx_scene_script` plays: modules, how they couple, force
+fields, particles, light and camera, and rules that change the scene over time. The runner (`src/compose/script.hpp`)
+builds every compose object up front, so a frame allocates nothing (`nvfx_alloc_test` plays a scripted scene with
+every kind of statement and counts 0 allocations; the tool counts them too). Two scenes are in `examples/scenes`: the
+fireball of §6 (`fireball.nvfxs`, which reproduces the hand-written C++ scene to the bit, §4.8) and a wall of fire in a
+gale (`firewall.nvfxs`, §5.2), written only as a script.
 
-The future form is a data file that an artist edits and the runtime runs. A sketch of the fireball in that form:
+```sh
+nvfx_scene_script --script examples/scenes/firewall.nvfxs --models DIR --out firewall.mp4 [--keyframes DIR] [--sheet sheet.png]
+nvfx_scene_script --script FILE --check     # parse and check, without loading any effect
+nvfx_scene_script --script FILE --print     # the script in canonical form
+nvfx_scene_script --script FILE --models DIR --keyframes DIR --no-video --verify results/experiments/v1_frozen.csv
+```
+
+### 4.1 A first look
 
 ```text
-module crater  = tiles(explosion, 3 x 2, tile 576, band 8, look shader:cloud)  at (-80, -324)
-module sky     = tiles(smoke,     3 x 2, same placement,      look shader:smoke)
-module wreck   = fire(192) at (1010, ground)  controls intensity 0.62
-module blast2  = explosion(320) at (1010, 560)
-field  ceiling = ceiling(y -30, soft 150, damping 0.3)       from 2.0 s on crater, sky
+scene   size 1280 x 720, fps 30, length 9 s, ground 600
+effect  fire = "fire.nvfx"                         # a rollout effect (files are read from --models DIR)
+let     blow = smooth((t - 0.3) / 2.5)             # a named value; t is the scene's time in seconds
 
-at 0.2 s       particles fuse from (250, ground) to (640, ground) until 1.2 s
-at 1.2 s       start crater from start 9; shock at (640, 500); embers 1400; debris 160; scorch
-when shock(1).reaches(blast2)   start blast2; shock; embers 450
-at 3.6 s       hand_over crater -> sky; crossfade look over 1.2 s
-every frame    push wreck by others 0.22; transfer wreck.top -> sky soot x6
-every frame    after blast2 + 0.7 s: transfer blast2 -> crater 5%
-when ember lands hot, away from crater and wreck, at most 2:  start fire(144) there, grow over 1.5 s
+module  wall = fire, tiles 6 x 1, band 8, size 128, width 192, at (640, ground), sink 0.08, start 0, seed 11,
+               controls (0.95, 0.5, 0.5), wind 0.5 + 0.2 * blow       # a control that changes over time
+module  pyre = fire, size 128, width 192, sink 0.08, start 3, waiting,
+               intensity 0.3 + 0.6 * smooth(pyre.age / 1.2)
+
+field   gale = gust, velocity (2.4 * blow, 0), amount 0.7, scale 260, on wall, particles
+emit    embers, on wall, pyre, tries 4, chance 0.7, spread 120
+
+when heat(1170, 575) > 0.12 as catch:              # a rule: when it first holds, its actions run (once)
+  wake pyre at (1170, ground)
+every frame:                                       # couplings, every frame (sky: a smoke domain, as in firewall.nvfxs)
+  transfer wall -> sky, top 4, fraction 0.5, heat 0, soot 20
 ```
+
+The rules of the text:
+- One statement per line; `#` starts a comment. A line that ends with a comma, an operator, `and`, `or` or `not`, or
+  inside parentheses goes on on the next line.
+- A line that ends with `:` opens a block (a rule or `every frame`); the indented lines under it are its actions.
+  Actions may also follow the colon on the same line, separated by `;`.
+- A statement is a keyword, perhaps `NAME =` and a kind, then properties: a key and its value, separated by commas
+  (the commas are optional). Values are numbers or expressions (§4.4), points `(x, y)`, lists `(a, b, c)`, sizes
+  `W x H`, names and lists of names `a, b, c`.
+- Coordinates are world pixels with y pointing down (the ground is a line of constant y); times are seconds (a trailing
+  `s` is allowed); velocities of fields are world pixels per frame (at 30 frames a second).
+- Any value may be an expression. Settings that can change over time (a module's controls, opacity, look and place,
+  fields, light, frame, camera, scorch glows) are re-evaluated every frame; the others (sizes, tiles, start points,
+  seeds, looks, the scene, the bus, keyframes) must be constants, and the checker says so if they are not.
+- Names can be used before they are declared. Effects and looks have their own names; values, rules, modules and
+  fields share one set. Words of the language (statement and action keywords, functions, `t`, `x`, ...) cannot be
+  names; a module also cannot be named after a property that follows a list of modules (`weight`, `on`, `fraction`, ...).
+
+Errors give the line and the column, and the parser stops at the first one. A word within two edits of one known word
+gets a suggestion; otherwise the message lists what was expected. From the tests:
+
+```text
+t:2:40: 'strenght' is not a property of field (did you mean 'strength'?)
+t:3:7: unknown module 'wrek' (did you mean 'wreck'?)
+t:1:9: this '(' is not closed
+t:3:7: 'm' is not waiting: give it 'start N, waiting' to wake it later
+t:2:49: the place of tiles must be a constant: it cannot depend on time, rules, modules or rand
+t:2:24: 'heat_power' is not a property of a module nor a control of effect 'e' (its controls: intensity, wind, turbulence)
+```
+
+Fed 3000 random mutations of the two example scripts (deleted characters, inserted tokens, duplicated lines), the
+checker accepted 817 and rejected 2183, every one with a line and a column, and never crashed. Checking happens in
+three steps, each before anything runs: the parser (syntax, keys, the shape of values), the
+checker (names, contexts, constants; `--check`), and the build (sizes against the effects' grids, control names, start
+points, hand-overs between tiles of the same size).
+
+### 4.2 Statements
+
+| statement | what it sets | keys (defaults) |
+|---|---|---|
+| `scene` | the picture and the clock | `size W x H` (1280 x 720), `fps` (30), `length` (10 s), `ground` (600: world y of the ground) |
+| `bus` | the field bus's rectangle (§2) | `at (x, y)` top-left corner, `size W x H`, `cell` (8 world pixels); default: the screen with an eighth of its width each side and half its height above |
+| `effect NAME = "FILE"` | a rollout effect, loaded once | the detail layer's settings: `swirl`, `swirl_scale`, `swirl_rate`, `swirl_ramp`, `contrast`, `grow` |
+| `look NAME = shader` or `= like LOOK` | a field-shader look (§2) | `heat_scale`, `emission`, `emission_power`, `soot_density`, `soot_albedo`, `sky`, `shadow`, `scene_light`, `relief`, `tint (r, g, b)`: the fields of `ShaderSpec` |
+| `let NAME = EXPR` | a named value, computed where it is used (so it may change over time) | |
+| `module NAME = EFFECT` | a module (§4.3) | |
+| `field NAME = KIND` | a force field (§5) | per kind, and `on M, ..., particles`, `weight`, `if`, `from`, `until` |
+| `emit KIND` | particles every frame (§4.6) | |
+| `light` | light from the bus's heat | `gain` (0.14), `flash (r, g, b)` (0) |
+| `particles` | the particle pool | `capacity` (4096), `flow` (0.9: how much particles follow the bus's flow) |
+| `frame` | the picture | `exposure` (1), `fade` (1), `haze` (1: heat haze), `bloom` (1: strength), `bloom_threshold` (1) |
+| `camera` | the screen's top-left corner in the world | `x`, `y` (0) |
+| `keyframes T, T, ...` | frames the tool writes as PNG (`--keyframes`) and to the sheet | |
+| `at T:` / `when ...:` | a rule (§4.5) | |
+| `every frame:` | couplings applied every frame (§4.5) | |
+
+### 4.3 Modules
+
+A module is one rollout effect in a square tile, or a domain of several tiles of one effect that share bands of cells
+(`blend_band`, §3), drawn and published as one.
+
+| property | meaning | default |
+|---|---|---|
+| `= EFFECT` | the effect it runs | (required) |
+| `size N` | pixels of its tile (what the model renders at); a multiple of the effect's grid (32 cells) | (required) |
+| `width W` | world pixels the tile covers | `size` |
+| `tiles C x R`, `band B` | a domain of C x R tiles overlapping by B cells; the band blending runs every frame while the tiles are active | one tile |
+| `at (X, Y)` | where it stands: the bottom centre of its tile (or domain). A single module's place may change over time | its tile's top-left corner at (0, 0) |
+| `sink F` | how far the tile reaches below Y, as a fraction of its width (a fire's base sits a little under the ground) | 0 |
+| `over M` | the same tiles, place and group as M: two models of one domain (the explosion's tiles and the smoke model's that take over) | |
+| `feather F` | outer edges fade over F times the tile's size when drawn | 0 |
+| `look L`, `look A to B by W`, `look learned` | a field-shader look, a blend of two (W from 0 to 1, may change over time), or the effect's learned renderer | learned |
+| `controls (a, b, c)` | the effect's controls at the start | 0.5 each |
+| `CONTROL value` | one control by its name (`intensity`, `wind`, `turbulence` for the study D effects); may change over time | |
+| `opacity` | how much it is drawn and published (may change over time) | 1 |
+| `start N`, `seed S` | started at setup from start point N with seed S (its warm-up runs then, not in a frame); a domain's bottom middle tile starts from it with seed S, the others start empty at its age with seed S + 10 r + c (column c, row r from the bottom) | not started |
+| `empty` | with `start`: nothing in it, at start point N's age (a domain that only receives material) | |
+| `waiting` | with `start`: started now, but asleep until a rule wakes it | |
+
+A module without its own controls takes the controls of the start point it starts from. Expressions can read a module:
+`M.x` (the centre of its tile or domain), `M.y` (the y it stands on), `M.started` (when it was last started, woken or
+taken over; infinity before), `M.age` (`t - M.started`) and `M.active` (1 or 0).
+
+### 4.4 Expressions
+
+Arithmetic in single-precision float, one operation at a time, as C++ computes it (`1.2 + 2.4` is a little more than
+`3.6`, as `1.2f + 2.4f` is): `+ - * /`, unary `-`, comparisons `< <= > >= == !=` (1 or 0; they do not chain), `and`,
+`or`, `not` (which only evaluate their right side when needed), parentheses.
+
+| name | value |
+|---|---|
+| `t`, `length`, `fps`, `ground` | the scene's time (s), length, frame rate and ground |
+| `infinity` | infinity |
+| a `let` | its expression |
+| a rule's name | when it last fired (infinity before: so `smooth((t - boom) / 1)` is 0 until `boom`) |
+| `M.x`, `M.y`, `M.started`, `M.age`, `M.active` | a module (§4.3) |
+| `x`, `temp` | in a rule `when ember lands`: where the ember landed and how hot it was |
+| `rand` | a random number in [0, 1), from the particles' generator (deterministic: the same script gives the same frames) |
+| `smooth(v)` | 0 below 0, 1 above 1, smooth in between (`3v² - 2v³`) |
+| `exp`, `sqrt`, `sin`, `cos`, `abs`, `floor`, `pow(a, b)`, `hypot(a, b)`, `min(a, b)`, `max(a, b)`, `clamp(v, lo, hi)`, `lerp(a, b, w)` | as in C++ (`std::exp` of a float, ...) |
+| `noise(x, y, z)` | smooth value noise in [-1, 1] |
+| `if(c, a, b)` | a when c is not 0, else b (only the side taken is evaluated) |
+| `heat(x, y)`, `soot(x, y)` | the bus at a world point (as published in the last frame) |
+| `shock(n)` | the radius of the n-th shock front now (0 before it) |
+| `near(M, x, d)` | 1 when M is active and its centre is within d of x |
+
+### 4.5 Rules and couplings
+
+A rule runs its actions when its condition holds: **once** by default, **every time** with `repeat` (a time or field
+condition: every frame it holds; a landing: every landing), or **at most N times** with `at most N`. `as NAME` names it
+(its time is then a value).
+
+| condition | holds when |
+|---|---|
+| `at T` | `t >= T` |
+| `when EXPR` | the expression is not 0 (for example `heat(1170, 575) > 0.12`, `t - boom > 3`) |
+| `when shock N reaches (x, y)` or `reaches M` | the N-th shock's radius is at least the distance to the point (or to where M stands) |
+| `when ember lands [where EXPR]` (or `debris`) | a hot ember (debris) lands on the ground, and the condition holds for it (`x`, `temp`) |
+
+| action | what it does | keys |
+|---|---|---|
+| `start M` | start M from a start point (a domain: one tile from it, the others empty at its age) | `from N` (0), `in (c, r)` (the tile with the start point; bottom middle), `seed`, `at (x, y)` (move first), `empty` |
+| `wake M1, M2, ...` | wake the first of them that is asleep (`waiting`), where it is or `at (x, y)` | `at` |
+| `stop M, ...` | stop them (no longer stepped, drawn or published) | `if` |
+| `hand_over A -> B` | B continues from A's physical state, tile by tile (`hand_over`, §3); A stops | `seed` (B's tiles take seed + 10 r + c) |
+| `transfer A -> B, C, ...` | move material from A into the active tiles of B, C, ... that cover it (`transfer`, §3) | `fraction` (1), `top N` (only the top N rows), `heat` and `soot` (gains, 1), `if` |
+| `push M` | the other modules' flow moves M's material for one step (`push`, §3) | `gain` (1), `if` |
+| `suppress M` | remove material in a rectangle of cells (y up), in all tiles or some | `cells (x0, y0) to (x1, y1)`, `tiles (c, r), ...`, `if` |
+| `shock` | a shock front: distortion ring, and `when shock N reaches` | `at (x, y)`, `speed` (900), `decay` (0.35), `amp` (6), `width` (26) |
+| `scorch` | a glowing mark on the ground | `at`, `radius` (100), `glow` (1; may change over time) |
+| `burst` | an explosion's embers and debris | `at`, `radius` (50), `embers` (200), `debris` (0), `speed` (600) |
+
+`every frame:` holds couplings that run every frame, in order: `transfer`, `suppress` and `stop` right after the
+modules step, `push` after the bus is published (it reads the bus). `start`, `wake`, `hand_over`, `shock`, `scorch` and
+`burst` happen once, so they belong to rules; the checker says so.
+
+### 4.6 Emitters
+
+Three kinds, each a transcription of what the hand-written fireball does (the same formulas and the same order of
+random draws), with its constants as defaults:
+
+| emitter | particles | keys (defaults) |
+|---|---|---|
+| `emit sparks` | a fuse: a point runs from one end to the other between `from` and `until`, throwing sparks | `along (x0, y0) to (x1, y1)`, `from` (0), `until` (the end), `count` per frame (22) |
+| `emit embers` | embers from the base of burning modules (each active tile), rising and cooling | `on M, ...`, `tries` per tile and frame (2), `chance` (0.6), `spread` (40 pixels) |
+| `emit flakes` | soot flakes falling out of thick smoke on the bus | `in (x, y)`, `size W x H`, `tries` (40), `chance` (0.25), `soot` (0.35: the least soot) |
+
+All take `from`, `until` and `if`.
+
+### 4.7 The order of a frame
+
+Every frame runs in this order (`src/compose/script_run.cpp`):
+1. rules on time, shocks and fields, in script order; their actions run at once;
+2. emitters, in script order;
+3. settings that change over time: modules (controls, opacity, look, place), scorch marks, frame, light, camera;
+4. every active module steps (in parallel);
+5. tiles of a domain share their bands; the couplings of `every frame` (transfer, suppress, stop), in order;
+6. the field bus is cleared and every active module publishes to it;
+7. the pushes of `every frame`, then the force fields, in order;
+8. light;
+9. fields that act on particles, then the particles move; rules on landings;
+10. shading, background, modules, particles, distortion, bloom, tone mapping.
+
+A module woken by a landing in step 9 is drawn from the next frame (it has not stepped yet).
+
+### 4.8 The fireball as a script, to the bit
+
+`examples/scenes/fireball.nvfxs` is the fireball of §6, rewritten from `tools/nvfx_fireball.cpp`. It gives the same
+picture to the bit: the eight keyframes have the SHA-256 recorded in `results/experiments/v1_frozen.csv` (rendered
+with `nvfx_fireball --keyframes DIR --no-video`), and all 270 frames have the same SHA-256 of their RGB as the
+hand-written scene's (checked by hashing every frame of both). `ctest` runs the keyframe check
+(`neuralfx.ScriptedFireballBitExact`, about a minute on 2 threads; skipped when the effects are not in
+`NEURALFX_MODELS_D`, by default `$NEURALVFX_DATA/experiments/models/d`). A test without data
+(`Script.MatchesTheSameSceneWrittenInCpp`) plays a small scene both as a script and as hand-written C++ in the same
+order and compares every frame.
+
+Getting every float the same forced a few things, all visible in the script:
+- **Times are written as the C++ computes them.** The hand-over is at `t_det + 2.4`, not `3.6`: in float the sum is
+  a little more than 3.6, so the C++ hands over at the frame of 3.63 s, and `at 3.6` would do it one frame early. The
+  blast's centre is `684 - 0.32 * 576`, not `499.68`. The expressions run operation by operation in float.
+- **A rule's time is infinity until it fires.** The C++ guards the wreck's later behaviour with `if (t_sec >= 0)`;
+  the script writes `0.62 + 0.3 * smooth((t - wreck_blast) / 1)`, which is exactly 0.62 until the wreck explodes.
+- **The order of random draws is the hand-written scene's.** Particles, the camera's shake and the emitters all draw
+  from one generator. The C++ passes several random numbers as arguments of one `spawn()` call, and GCC evaluates such
+  arguments right to left; the emitters and `burst` draw in that order, written out step by step. (Built with another
+  compiler, the hand-written scene could change; the script would not.)
+- **Emitters are fixed kinds** with the fireball's formulas (§4.6), rather than general particle systems.
+- **One check of the C++ was dropped:** it compared a landing's x with a time (`|x - lit_at[0]| < 1`), which never
+  holds because x is at least 120; the script leaves it out and nothing changes.
+- **Live settings are applied from the first frame,** after the setup starts: the fires warm up with their constant
+  controls (0.35), as in the C++, although their `intensity` expression would give 0.15 before they are lit.
+
+### 4.9 What scripts cannot do yet
+
+- The order of a frame is fixed (§4.7); a script cannot, say, publish the bus twice.
+- Emitters are the three kinds above, with few parameters; there is no general particle system or ember colour.
+- The parser stops at the first error; `--print` drops comments (it is for round trips and checks, not for editing).
+- Seeds are whole numbers up to 16 777 216 (they pass through a float).
+- There is no live reload or viewer yet; `--check` is the quick loop.
+- Scripts and the runner are a prototype over the runtime's internals, like the rest of this page, not part of the C
+  API.
 
 ## 5. Field effects
 
-Force fields are modules too: the script places them in the world and they act on whatever they cover. The
-prototype has three. Others that would fit the same interface:
-- **walls and obstacles**: velocity into a mask removed, so smoke flows around a building;
-- **attractors and repulsors**: a spell drawing fire towards a point;
-- **pressure waves**: a radial impulse from any explosion, felt by every effect nearby;
-- **inversion layers and wind shear**: what the ceiling does, as weather;
-- **heat sources from gameplay**: a burning object adding heat that the fire model then turns into flames.
+Force fields are modules too: the script places them in the world and they act on whatever they cover (`on M, ...`),
+for one step at a time like a push (velocity added before the step and taken out after) unless the table says
+otherwise. Because advection and projection are built into each step, material moves and the flow stays consistent.
+Every field takes `weight` (multiplies its effect, 1), `if`, `from` and `until`, and its values may change over time.
 
-Because advection and projection are built into each step, any of these acts like a physical force: material moves
-and the flow stays consistent.
+| field | what it does | keys | tested by |
+|---|---|---|---|
+| `ceiling` | damps rising above a height (permanently, not for one step), so a cloud stalls and spreads into a cap | `level` (world y), `soft` (80), `damping` (0.25) | `Compose.CeilingStopsRisingAboveIt` |
+| `vortex` | swirls around a point | `at`, `radius` (100), `strength` | used in `Compose.ScenesRenderTheSameOnAnyNumberOfThreads` |
+| `wind` | a uniform flow | `velocity (u, v)` | `Fields.WindOnParticlesBlowsThem` |
+| `gust` | the wind made gusty: its speed swings by `amount` with smooth noise of `scale` pixels that travels with the wind and changes `rate` times a second, with a crosswind wobble of a third of that | `velocity`, `amount` (0.5), `scale` (80), `rate` (0.5), `seed` | `Fields.GustVariesAroundTheWindAndTravelsWithIt` |
+| `ring` | a vortex ring seen from the side: two opposite vortices `radius` either side of a point, blowing along `direction` through it and back around it; animate `at` to make it travel | `at`, `direction (dx, dy)`, `radius`, `core` (80), `strength` | `Fields.VortexRingBlowsThroughItsCentre` |
+| `attract` | draws material within about `radius` towards a point by up to `strength` pixels a frame (negative: pushes it away), moving it directly and keeping its amount; `swirl` adds a swirl around the point. An implosion is a short strong pull | `at`, `radius`, `strength`, `swirl` (0) | `Fields.AttractorPullsMaterialInAndKeepsTheAmount` |
+| `heat` | a heat source (a burning object from gameplay): adds `strength` heat a frame at a point, falling off over `radius`; the fire models turn heat into flames, and a rule on `heat(x, y)` can light fuel there | `at`, `radius`, `strength` | `Fields.HeatSourceAddsHeatWhereItIs`, `Fields.HeatSourceIgnitesFuelThroughARule` |
+| `cold` | an extinguisher: removes a fraction `strength` of the heat a frame at a point (falling off over `radius`) and turns a fraction `steam` of what it removes into soot | `at`, `radius`, `strength`, `steam` (0) | `Fields.ColdPutsOutHeatAndMakesSteam` |
+
+The flows (`wind`, `gust`, `vortex`, `ring`, `attract`) can also act on particles (`on ..., particles`): a particle's
+velocity relaxes towards the field's flow with a drag of 1.1 per second, on top of the bus's flow.
+
+Notes from building them:
+- **`attract` moves material instead of pushing it.** A radial flow is curl-free, and the pressure projection inside
+  each step removes exactly that part: a pushed attractor would hardly move anything (and taking the push out after
+  the step would then leave the opposite flow). So the field moves heat and soot (coarse and fine) directly, each cell
+  and pixel splatted bilinearly at its new place, which keeps the amount (material that would leave the tile stays at
+  its edge). Its swirl is an ordinary push.
+- **Strong pushes put a learned fire out.** The fire model was trained without outside forcing. A gust of 0.8 pixels a
+  frame on its flames weakens them within three seconds, and a ring at half the strength used on the smoke tears them
+  out for good (§5.2 uses this). The wall of §5.2 leans with the model's own `wind` control and feels only a fifth of
+  the gale.
+- **Too much steam turns a learned fire green.** `cold` with `steam 0.8` fills the fire model's state with soot and
+  little heat, which its learned renderer never saw in training: it draws such cells green. `steam 0.15` stays in range.
+  The field shader has no such problem.
+- **A heat source on a smoke model is carried away fast.** The brand of §5.2 adds 0.06 heat a frame, but the smoke
+  model's buoyancy lifts it, so the bus reads only about 0.1 to 0.2 just above the brand; the rule's threshold (0.12)
+  was set from that.
+
+Other fields that would fit the same interface: walls and obstacles (velocity into a mask removed, so smoke flows
+around a building), pressure waves (a radial impulse from any shock front, felt by every effect nearby), and inversion
+layers and wind shear (what the ceiling does, as weather).
+
+### 5.1 How to write them
+
+```text
+field gale   = gust, velocity (2.4 * blow, -0.2 * blow), amount 0.7, scale 260, rate 0.6, seed 7, on sky, particles
+field punch  = ring, at (-160 + 300 * (t - 3.6), 455), direction (1, -0.25), radius 75, core 42, strength 8,
+               on sky, particles, from 3.6, until 7.4
+field knot   = attract, at (640, 260), radius 300, strength 5 * pull, swirl 3 * pull, on sky, particles
+field brand  = heat, at (1170, 585), radius 26, strength 0.06, on sky, from 1.6, until 3.5
+field hose   = cold, at (280, 560), radius 170, strength 0.3 * douse, steam 0.15, on wall
+when heat(1170, 575) > 0.12 as catch:              # the heat source lights the fuel when it is hot enough
+  wake pyre at (1170, ground)
+```
+
+### 5.2 The demonstration: a wall of fire in a gale
+
+`examples/scenes/firewall.nvfxs` (9 s at 1280 x 720 and 30 fps, written only as a script, about 70 lines) uses every
+new field. Night. A wall of fire (six tiles of the fire model sharing bands, 910 pixels wide) burns along the ground; a
+gusting wind from the left leans its flames, carries its smoke (transferred into eight tiles of the smoke model, started
+empty) and drives a storm of embers. A brand by a woodpile heats the air there until a rule lights the pile (1.83 s).
+Water puts out the left of the wall (2.4 to 4.8 s). A vortex ring rolls in from the left (3.6 s) and tears the flames
+out one by one, curling the smoke; then the smoke is drawn into a knot (6.2 to 8.1 s). The woodpile burns on.
+
+![The wall of fire: keyframes at 0.8, 2.2, 3.4, 4.4, 5.4, 6.4, 7.4 and 8.3 s](figures/firewall_keyframes.png)
+
+What works: the script reads as the story, the scene plays without an allocation in its frame loop, and each field
+does visibly what it says. What does not, yet: the fire model makes one flame per tile, so the "wall" is a row of six
+flames rather than a sheet of fire; the smoke model's look on thin, stretched smoke shows banding from the shader's
+relief; and smoke that reaches the sky domain's outer wall piles up there (its feather hides most of it). The video is
+not in git (data rules); it is written where `--out` says.
 
 ## 6. The demonstration: a fireball
 
 `nvfx_fireball --models DIR --out fireball.mp4` renders 9 seconds at 1280 x 720 and 30 fps from the three rollout
-effects of study D (fire 82 KB, smoke 146 KB, explosion 274 KB):
+effects of study D (fire 82 KB, smoke 146 KB, explosion 274 KB). The same scene as a script,
+`nvfx_scene_script --script examples/scenes/fireball.nvfxs --models DIR`, gives the same frames to the bit (§4.8):
 
 | time | what happens | how |
 |---|---|---|
@@ -259,6 +533,9 @@ What the profile shows:
 - **The look is hand-tuned.** The field shader and its constants were set by eye for this scene. Each learned renderer
   has its own look, so tiles of different models drawn by their renderers would not match. A learned renderer shared
   by all models would fix that.
+- **`transfer` puts fine material at the nearest pixel.** Between tiles of different scales some target pixels get two
+  source pixels and some one, which shows as a regular pattern when the gains are large (soot 20 in §5.2). Matching
+  the scales avoids it; a bilinear deposit would fix it but changes the fireball's frames, so it was left for now.
 - **The units are shared because the simulator is shared.** Effects trained on other data (footage, another solver)
   would need a map between their units.
 - **Cost:** see §7. After the first round the scene runs at 42 frames per second at 1280 x 720 on 4 CPU threads; the
@@ -268,7 +545,7 @@ What it needs to become a product feature:
 1. A C API: `nvfx_scene_create`, modules placed in it, `nvfx_scene_couple(...)`, `nvfx_scene_field(...)`, one
    `nvfx_scene_step` and `nvfx_scene_render` per frame, and fields readable by the game (for gameplay: is this tile
    on fire?).
-2. A script format (section 4), with a viewer to edit it live.
+2. A viewer to edit scripts live (the format and its runner exist, §4), and scripts reachable from the C API.
 3. Training with couplings in the loop (above).
 4. A cheaper compositor: SIMD, half-resolution light and distortion, and the engine's own renderer doing the drawing
    (the fields can be uploaded as textures).

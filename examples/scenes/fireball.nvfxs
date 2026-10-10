@@ -1,0 +1,106 @@
+# The fireball of docs/COMPOSE.md §6 as a script: the same scene as the hand-written tools/nvfx_fireball.cpp, frame for
+# frame and to the bit (the eight keyframes have the SHA-256 in results/experiments/v1_frozen.csv).
+#
+#   nvfx_scene_script --script examples/scenes/fireball.nvfxs --models DIR --out fireball.mp4
+#
+# World pixels, y down; the screen is 1280 x 720 and the ground is at y 600.
+#
+# A few things are written the way the C++ computes them, so that every float comes out the same:
+#   - t_hand is "t_det + 2.4", not 3.6: in float, 1.2 + 2.4 is a little more than 3.6, so the hand-over happens at the
+#     frame of 3.63 s, as in the C++;
+#   - burst_y is "684 - 0.32 * 576" (the crater tile's height above its base), not 499.68;
+#   - a rule's time (detonate, wreck_blast, a module's started) is infinity until it happens, so
+#     smooth((t - wreck_blast) / 1) is 0 before the wreck explodes.
+
+scene      size 1280 x 720, fps 30, length 9 s, ground 600
+bus        at (-96, -340), size 1392 x 1080, cell 8
+particles  capacity 12000, flow 0.9
+keyframes  0.9, 1.27, 1.5, 2.0, 2.9, 4.2, 6.0, 8.2
+
+# The three rollout effects of study D, with the detail layer's settings this scene wants: at this size the cloud
+# wants larger, stronger sub-grid eddies and fully broken-up new material.
+effect explosion = "explosion.nvfx", swirl 2.2, swirl_scale 9, contrast 1
+effect smoke     = "smoke.nvfx", swirl 1.4, swirl_scale 9
+effect fire      = "fire.nvfx"
+
+# Field-shader looks: hot gas glows, soot absorbs and is lit by the scene.
+look cloud = shader, heat_scale 1.6, emission 1.6, emission_power 3, soot_density 3, relief 4, soot_albedo 0.3,
+             sky 0.18, shadow 0.3, scene_light 0.6, tint (1, 0.93, 0.86)
+look smoke = like cloud, tint (0.92, 0.92, 0.95), soot_density 4, soot_albedo 0.45, emission 0.6, heat_scale 2.5,
+             emission_power 3, sky 0.3, relief 2.5
+
+let t_det   = 1.2                    # the charge goes off
+let t_hand  = t_det + 2.4            # the smoke model takes the cloud over
+let burst_x = 640
+let burst_y = 684 - 0.32 * 576       # the centre of the blast, a third of the way up the crater's tile
+let since   = t - t_det
+let flash   = if(since >= 0, exp(-since / 0.09), 0)
+let flash2  = if(t >= wreck_blast, 0.5 * exp(-(t - wreck_blast) / 0.07), 0)
+let shake   = if(since >= 0, 10 * exp(-since / 0.22), 0) + if(flash2 > 0, 6 * exp(-(t - wreck_blast) / 0.18), 0)
+let burn    = 0.25 + 0.75 * exp(-max(0, since) / 2.5)
+
+# The crater: six tiles of the explosion model (384 px each, 576 world pixels) sharing bands of 8 cells, one domain
+# 2.5 times wider and 1.75 times taller than the model was trained on, standing on (640, 684). The sky: six tiles of the
+# smoke model in the same place, which take the cloud over.
+module crater = explosion, tiles 3 x 2, band 8, size 384, width 576, at (640, 684), look cloud
+module sky    = smoke, over crater, look cloud to smoke by smooth((t - t_hand) / 1.2),
+                controls (0.75, 0.56, 0.55), intensity 0.75 - 0.4 * smooth((t - t_hand) / 5)
+# The second explosion, in the wreck; the wreck's fire; two fires that embers light.
+module blast2 = explosion, size 256, width 320, at (1010, 560), sink 0.32, feather 0.12, look cloud,
+                opacity 1 - smooth((t - wreck_blast - 2.4) / 0.6)
+module wreck  = fire, size 192, width 192, at (1010, ground), sink 0.08, feather 0.15, controls (0.62, 0.5, 0.55),
+                start 0, seed 4242, intensity 0.62 + 0.3 * smooth((t - wreck_blast) / 1)
+module fire_a = fire, size 128, width 144, sink 0.08, feather 0.15, controls (0.35, 0.5, 0.5), start 0, seed 777, waiting,
+                intensity 0.15 + 0.6 * smooth(fire_a.age / 1.5), opacity smooth(fire_a.age / 0.5)
+module fire_b = fire, size 128, width 144, sink 0.08, feather 0.15, controls (0.35, 0.5, 0.5), start 6, seed 778, waiting,
+                intensity 0.15 + 0.6 * smooth(fire_b.age / 1.5), opacity smooth(fire_b.age / 0.5)
+
+# The cloud stops rising where it stops being buoyant and spreads into a cap.
+field cap = ceiling, level -30, soft 150, damping 0.3, on crater, sky, weight smooth((since - 0.8) / 1), if since > 0.8
+
+# A fuse runs along the ground; the fires shed embers; soot flakes fall out of the cloud.
+emit sparks, along (250, ground - 2) to (640, ground - 2), from 0.2, until t_det, count 22
+emit embers, on wreck, fire_a, fire_b, tries 2, chance 0.6, spread 40
+emit flakes, in (0, -200), size 1280 x 700, tries 40, chance 0.25, soot 0.35, if t > t_det + 2
+
+light   gain 0.14, flash (0.75 * flash + 0.5 * flash2, 0.55 * flash + 0.36 * flash2, 0.37 * flash + 0.22 * flash2)
+frame   exposure 1.25 * (1 + 0.3 * flash + 0.15 * flash2), fade smooth(t / 0.35) * smooth((length - t) / 0.6),
+        haze 1.2, bloom 1, bloom_threshold 1
+camera  x (rand - 0.5) * 2 * shake, y -125 * smooth((since - 0.4) / 5.5) + (rand - 0.5) * 2 * shake
+
+# The charge explodes in the crater's bottom middle tile, from the explosion model's strongest start point (9); the
+# other five tiles start empty and receive the fireball through their bands.
+at t_det as detonate:
+  start crater, from 9, seed 9001
+  shock at (burst_x, burst_y), speed 1500, decay 0.3, amp 7, width 30
+  scorch at (burst_x, ground + 6), radius 190, glow burn
+  burst at (burst_x, burst_y), radius 70, embers 1400, debris 160, speed 900
+
+# The wreck explodes when the shock front reaches it.
+when shock 1 reaches blast2 as wreck_blast:
+  start blast2, from 0, seed 31337
+  shock at (1010, 560), speed 900, decay 0.25, amp 4, width 22
+  scorch at (1010, ground + 4), radius 95, glow 0.8 * burn
+  burst at (1010, 560), radius 35, embers 450, debris 60, speed 650
+when t - wreck_blast > 3:
+  stop blast2
+
+# The smoke model takes the cloud over, tile by tile.
+at t_hand as takeover:
+  hand_over crater -> sky, seed 5150
+
+# Embers that land hot, away from the crater and the wreck, light the two fires.
+when ember lands where temp >= 0.4 and t >= t_det + 0.5 and abs(x - burst_x) >= 230 and abs(x - blast2.x) >= 150 and
+     x >= 120 and x <= 1160 and not near(fire_a, x, 200) and not near(fire_b, x, 200), at most 2:
+  wake fire_a, fire_b at (x, ground)
+
+every frame:
+  suppress sky, tiles (0, 0), (2, 0), cells (8, 0) to (24, 7)       # the smoke model's source belongs to the crater
+  transfer wreck -> crater, sky, top 4, fraction 0.5, heat 0, soot 6   # fires' smoke leaves through their tops
+  transfer fire_a -> crater, sky, top 4, fraction 0.5, heat 0, soot 6
+  transfer fire_b -> crater, sky, top 4, fraction 0.5, heat 0, soot 6
+  transfer blast2 -> crater, sky, fraction 0.05, if t - wreck_blast > 0.7   # the second cloud joins the first
+  push wreck, gain 0.22                                               # the blast bends the fires
+  push fire_a, gain 0.22
+  push fire_b, gain 0.22
+  push blast2, gain 0.1

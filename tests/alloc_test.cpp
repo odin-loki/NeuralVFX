@@ -1,8 +1,9 @@
 // nvfx_render must not allocate (docs/PLAN.md §5.4), nor may a frame of a composed scene (docs/COMPOSE.md). This
 // program replaces the global operator new to count heap allocations, builds small grid, conv and rollout effects in
 // memory, and renders 200 frames of each with every feature switched on (controls, seeded drift, colour), then 99
-// frames of a small composed scene. Exit code 0 = no allocation during rendering.
+// frames of a small composed scene and 44 frames of a scripted one. Exit code 0 = no allocation during rendering.
 #include "compose_scene.hpp"
+#include "script.hpp"
 
 #include <neuralfx/model.hpp>
 #include <neuralfx/nvfx.h>
@@ -128,6 +129,26 @@ int run_compose() {
   return n == 0 ? 0 : 1;
 }
 
+// A scripted scene (src/compose/script.hpp): rules on time, shocks, the bus and landings, emitters, every kind of field,
+// hand-over, wake, transfers and pushes, all on 2 threads.
+int run_script() {
+  namespace sc = nfx::compose::script;
+  const sc::Script s = sc::parse(nfx::compose::testing::kEverything, "everything");
+  sc::Scene scene(s, [](const std::string& file) { return nfx::compose::testing::tiny_effect(file == "other" ? 4 : 3); }, {2, nfx::compose::best_isa()});
+  std::vector<std::uint8_t> rgb(static_cast<std::size_t>(scene.width()) * static_cast<std::size_t>(scene.height()) * 3);
+  scene.render(0, rgb);  // warm-up outside the count
+  g_allocations = 0;
+  g_counting = true;
+  for (int f = 1; f < scene.frames(); ++f) scene.render(f, rgb);
+  g_counting = false;
+  const long n = g_allocations.load();
+  int fired = 0;
+  for (const auto& r : scene.rules_fired()) fired += r.second < 1e30f;
+  std::printf("scripted scene %dx%d: %ld allocations in %d frames (%d of %zu rules fired)\n", scene.width(), scene.height(), n, scene.frames() - 1, fired,
+              scene.rules_fired().size());
+  return n == 0 && fired >= 6 ? 0 : 1;
+}
+
 }  // namespace
 
 int main() {
@@ -155,7 +176,7 @@ int main() {
   c.c0 = 8;
   c.c1 = 8;
   c.c2 = 8;
-  int failures = run(g, 64, "grid") + run(g, 128, "grid") + run(c, 64, "conv") + run(c, 32, "conv") + run_rollout(64) + run_rollout(128) + run_compose();
+  int failures = run(g, 64, "grid") + run(g, 128, "grid") + run(c, 64, "conv") + run(c, 32, "conv") + run_rollout(64) + run_rollout(128) + run_compose() + run_script();
   std::printf("%s\n", failures ? "FAILED: nvfx_render allocated" : "ok: no allocation per frame");
   return failures ? 1 : 0;
 }

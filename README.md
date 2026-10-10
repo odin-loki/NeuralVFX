@@ -14,8 +14,10 @@ Two kinds of effect:
   in between are not stored, only made to look right, and every seed gives a new run that never repeats.
 
 Rollout effects can also run **on one another** (a prototype, [docs/COMPOSE.md](docs/COMPOSE.md)): an explosion's
-blast bends a fire, its cloud is handed to the smoke model, embers light new fires, and scripted force fields shape
-them. `nvfx_fireball` renders a 9-second fireball scene that way and profiles every stage.
+blast bends a fire, its cloud is handed to the smoke model, embers light new fires, and scripted force fields (wind,
+gusts, vortex rings, attractors, heat sources, extinguishers) shape them. Scenes are written as small text scripts
+that `nvfx_scene_script` plays without allocating per frame; `nvfx_fireball` renders the 9-second fireball scene in
+C++ and profiles every stage, and its script version gives the same frames to the bit.
 
 C++23, no third-party runtime dependencies, a C API for engines, no Python.
 
@@ -69,7 +71,7 @@ From [docs/REPORT.md](docs/REPORT.md), measured on simulated fire, smoke and exp
 | metrics | `src/core/metrics.cpp` | PSNR (full and active-region), SSIM, temporal PSNR, flicker, spectrum and motion statistics, paired bootstrap |
 | evaluation | `nvfx_experiment` | the whole study end to end: compression, controls, variation, timing, figures, report |
 | viewer | `viewer/`, `nvfx_viewer` | Dear ImGui: sliders for every control, side by side with the reference, a flipbook and the live simulation |
-| composed effects | `src/compose`, `nvfx_fireball` | a prototype: rollout effects coupled through their fields (tiles of one domain, hand-over between models, pushes, transfers, force fields), with particles, light, distortion and bloom; [docs/COMPOSE.md](docs/COMPOSE.md) |
+| composed effects | `src/compose`, `nvfx_fireball`, `nvfx_scene_script` | a prototype: rollout effects coupled through their fields (tiles of one domain, hand-over between models, pushes, transfers, force fields and field effects), with particles, light, distortion and bloom; scene scripts (a text format with a hand-written parser and a runner that allocates nothing per frame, `examples/scenes`); [docs/COMPOSE.md](docs/COMPOSE.md) |
 | context mixing | `src/dcm`, `nvfx_dcm` | the owner's diffusion-context mixing (DCM) from CameraDetector: a PAQ8-style mixer with a frozen, versioned inference copy and a nested mixer search, k-means contexts without LibTorch, and a value-domain mixer (a value and a Laplace scale per prediction) for generating and coding effects; docs/DCM.md (study G) |
 
 ## Build and test
@@ -79,7 +81,7 @@ Ubuntu 24.04: `g++-14`, CMake 3.25+, Ninja, `libgtest-dev`, `zlib1g-dev` (and `f
 ```sh
 cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_COMPILER=g++-14
 cmake --build build
-ctest --test-dir build                     # 133 tests: sim, metrics, codecs, gradients, runtime parity, composition, context mixing, denoiser, lossless coder, allocation, C API
+ctest --test-dir build                     # 155 tests: sim, metrics, codecs, gradients, runtime parity, composition, scene scripts, field effects, context mixing, denoiser, lossless coder, allocation, C API
 ```
 
 Options: `NEURALFX_BUILD_VIEWER` (GLFW + OpenGL; fetches Dear ImGui), `NEURALFX_BUILD_SHARED` (libnvfx.so for engines),
@@ -114,7 +116,8 @@ training, evaluation; about three hours), then `d-timing` on an idle machine and
 | `nvfx_experiment` | the full study: `data`, `a`, `b`, `c`, `media`, `timing`, `report`; study D: `d-chaos`, `d-train`, `d-tune`, `d-finish`, `d-eval`, `d-timing`; study G: `g-fine` (design G1, DCM-fine, end to end); to come: `g-data`, `g-pilot`, `g-search`, `g-eval`, `g-timing` |
 | `nvfx_c_host` | the engine loop in plain C, with timings; `--self-test` checks the error paths |
 | `nvfx_viewer` | live viewer with sliders |
-| `nvfx_fireball` | a scripted scene of composed effects (a fireball with smoke, fires and embers) to video, with a profile of every stage |
+| `nvfx_fireball` | a scene of composed effects written in C++ (a fireball with smoke, fires and embers) to video, with a profile of every stage |
+| `nvfx_scene_script` | plays a scene script (`examples/scenes/*.nvfxs`) to video, keyframes and a sheet; `--check` and `--print` check and reformat a script; `--verify` compares keyframes with frozen SHA-256 |
 | `nvfx_dcm` | context mixing: `selftest` runs a small synthetic mixer search under both objectives (ROC-AUC and Laplace bits); `version FILE` prints the SHA-256 version of a serialised mixer; DCM-fine (G1): `record`, `experts`, `search-fine` (with `--pilot`), `train-fine`, `eval-fine`, `bench-experts`, `fine-summary`; the coarse-state denoiser (G2): `ddpm-train`, `ddpm-sample`, `ddpm-time`, `contexts` |
 | `nvfx_pack` | pack a `.nvfx` into a `.nvfz` and back (`--unpack`), bit-exact; `--report DIR` for sizes and ratios; `--study` for the measurement in results/compression |
 | `neuralfx_arch_bench` | Phase 0 architecture microbenchmark |
