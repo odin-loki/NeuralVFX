@@ -1457,7 +1457,7 @@ Code: `include/neuralfx/dcm/extras.hpp` and `src/dcm/extras.cpp` (library `neura
 **Not run.** G6 (one DCM-fine for every effect, the effect as a context) is decided "as G1", and depends on G1, which
 did not pass its rule in §6 nor in the round-2 retry. There is nothing for it to build on.
 
-### 10.6 Amendments, each made before the validation run it concerns
+### 10.6 Amendments (each says when it was made)
 
 1. **G4a's learning rates** (before any G4a validation run; the pilot of §10.2 had run). Trained with the mixer's
    default annealing (each context's rates halved after 2,000 uses), the three configurations hardly left the learned
