@@ -615,7 +615,97 @@ std::string ratio_cell(const Ratio& r) {
   return s;
 }
 
-void step_report(const Ctx& c, const std::vector<std::string>& only_configs) {
+// A short label for a network configuration ("G32 4-bit", "G48 VQ 8 bits / 8 ch, rate 1e-4").
+std::string short_label(const std::string& config) {
+  const Config cf = parse_config(config);
+  std::string s = cf.h.arch == Arch::grid ? std::format("G{}", cf.h.grid) : std::string("conv");
+  if (cf.h.arch == Arch::grid && cf.h.channels != 8) s += std::format(" C{}", cf.h.channels);
+  if (cf.h.grid_t != 16) s += std::format(" T{}", cf.h.grid_t);
+  if (cf.vq_bits) s += std::format(" VQ{}/{}", cf.vq_bits, cf.vq_dim);
+  else s += std::format(" {}-bit", cf.bits);
+  if (cf.lambda > 0) s += std::format(" r{:g}", cf.lambda);
+  if ((cf.h.arch == Arch::grid && cf.iters != 2000) || (cf.h.arch == Arch::conv && cf.iters != 1500)) s += std::format(" {}k it", cf.iters / 1000);
+  return s;
+}
+
+// Two panels as SVG: memory against quality (flipbooks, networks) and disk against quality (flipbooks and networks
+// packed by the lossless coder, video codecs' payload). Log size axis; one quality axis per panel.
+void write_figure(const fs::path& path, const std::string& title, const Family& flips, const std::map<std::string, Family>& videos,
+                  const std::vector<std::pair<std::string, const Point*>>& nets, const std::vector<std::size_t>& idx) {
+  constexpr double W = 1040, H = 470, top = 74, bottom = 58, left = 62, gap = 70;
+  const double pw = (W - left - gap - 24) / 2, ph = H - top - bottom;
+  const char* ink = "#0b0b0b";
+  const char* ink2 = "#52514e";
+  const char* grid = "#e4e3df";
+  // Categorical slots in fixed order (the reference palette): flipbooks, networks, then the codecs shown.
+  const std::array<const char*, 8> slot = {"#2a78d6", "#eb6834", "#1baf7a", "#eda100", "#e87ba4", "#008300", "#6250d6", "#e34948"};
+  double qlo = 1e9, qhi = -1e9;
+  const auto qrange = [&](double q) {
+    qlo = std::min(qlo, q);
+    qhi = std::max(qhi, q);
+  };
+  for (const auto& [k, p] : nets) qrange(mean_at(p->q, idx));
+  qlo = std::floor(std::min(qlo, 26.0)) - 1;
+  qhi = std::ceil(std::max(qhi, 36.0)) + 1;
+  const double klo = 2, khi = 2048;
+  std::ostringstream o;
+  o << std::format("<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"{}\" height=\"{}\" viewBox=\"0 0 {} {}\" font-family=\"Helvetica, Arial, sans-serif\">\n", W, H, W, H);
+  o << std::format("<rect width=\"{}\" height=\"{}\" fill=\"#fcfcfb\"/>\n", W, H);
+  o << std::format("<text x=\"{}\" y=\"24\" font-size=\"16\" font-weight=\"600\" fill=\"{}\">{}</text>\n", left, ink, title);
+  const std::vector<std::string> shown = {"aom", "x265", "vp9a"};
+  for (int panel = 0; panel < 2; ++panel) {
+    const double x0 = left + panel * (pw + gap), y0 = top;
+    const auto X = [&](double kb) { return x0 + (std::log(std::clamp(kb, klo, khi)) - std::log(klo)) / (std::log(khi) - std::log(klo)) * pw; };
+    const auto Y = [&](double q) { return y0 + ph - (std::clamp(q, qlo, qhi) - qlo) / (qhi - qlo) * ph; };
+    o << std::format("<text x=\"{}\" y=\"{}\" font-size=\"13\" font-weight=\"600\" fill=\"{}\">{}</text>\n", x0, y0 - 30, ink,
+                     panel == 0 ? "Memory: bytes held while playing (flipbook texture, network as stored)" : "Disk: both sides losslessly packed; codecs' bitstream");
+    for (double kb = klo; kb <= khi * 1.01; kb *= 4) {
+      o << std::format("<line x1=\"{:.1f}\" y1=\"{}\" x2=\"{:.1f}\" y2=\"{}\" stroke=\"{}\" stroke-width=\"1\"/>\n", X(kb), y0, X(kb), y0 + ph, grid);
+      o << std::format("<text x=\"{:.1f}\" y=\"{}\" font-size=\"11\" fill=\"{}\" text-anchor=\"middle\">{:g}</text>\n", X(kb), y0 + ph + 16, ink2, kb);
+    }
+    for (double q = std::ceil(qlo / 2) * 2; q <= qhi; q += 2) {
+      o << std::format("<line x1=\"{}\" y1=\"{:.1f}\" x2=\"{}\" y2=\"{:.1f}\" stroke=\"{}\" stroke-width=\"1\"/>\n", x0, Y(q), x0 + pw, Y(q), grid);
+      o << std::format("<text x=\"{}\" y=\"{:.1f}\" font-size=\"11\" fill=\"{}\" text-anchor=\"end\">{:g}</text>\n", x0 - 6, Y(q) + 4, ink2, q);
+    }
+    o << std::format("<text x=\"{}\" y=\"{}\" font-size=\"12\" fill=\"{}\" text-anchor=\"middle\">KB per effect (log scale)</text>\n", x0 + pw / 2, y0 + ph + 36, ink2);
+    o << std::format("<text transform=\"translate({},{}) rotate(-90)\" font-size=\"12\" fill=\"{}\" text-anchor=\"middle\">mean active PSNR (dB)</text>\n", x0 - 42, y0 + ph / 2, ink2);
+    const auto line = [&](const std::vector<std::pair<double, double>>& env, const char* colour) {
+      std::string d;
+      for (std::size_t i = 0; i < env.size(); ++i) {
+        const double kb = env[i].first / 1024;
+        if (kb < klo || kb > khi) continue;
+        d += std::format("{}{:.1f},{:.1f} ", d.empty() ? "M" : "L", X(kb), Y(env[i].second));
+      }
+      o << std::format("<path d=\"{}\" fill=\"none\" stroke=\"{}\" stroke-width=\"2\" stroke-linejoin=\"round\"/>\n", d, colour);
+    };
+    // legend
+    std::vector<std::pair<std::string, const char*>> legend = {{panel == 0 ? "best flipbook at each size" : "best packed flipbook", slot[0]}, {"networks (F2)", slot[1]}};
+    line(envelope(flips, panel == 0 ? "memory" : "packed", idx), slot[0]);
+    if (panel == 1) {
+      for (std::size_t v = 0; v < shown.size(); ++v) {
+        if (!videos.contains(shown[v]) || videos.at(shown[v]).empty()) continue;
+        line(envelope(videos.at(shown[v]), "payload", idx), slot[2 + v]);
+        legend.emplace_back(shown[v] == "aom" ? "AV1 (libaom, 4:4:4)" : shown[v] == "x265" ? "HEVC (x265, 4:4:4)" : "VP9 with alpha (4:2:0)", slot[2 + v]);
+      }
+    }
+    double lx = x0;
+    for (const auto& [name, colour] : legend) {
+      o << std::format("<rect x=\"{:.1f}\" y=\"{}\" width=\"14\" height=\"4\" rx=\"2\" fill=\"{}\"/>\n", lx, y0 - 16, colour);
+      o << std::format("<text x=\"{:.1f}\" y=\"{}\" font-size=\"11\" fill=\"{}\">{}</text>\n", lx + 18, y0 - 11, ink2, name);
+      lx += 26 + 6.2 * static_cast<double>(name.size());
+    }
+    for (const auto& [k, p] : nets) {
+      const double kb = mean_at(p->b.at(panel == 0 ? "stored" : "packed"), idx) / 1024, q = mean_at(p->q, idx);
+      o << std::format("<circle cx=\"{:.1f}\" cy=\"{:.1f}\" r=\"4.5\" fill=\"{}\" stroke=\"#fcfcfb\" stroke-width=\"2\"/>\n", X(kb), Y(q), slot[1]);
+      o << std::format("<text x=\"{:.1f}\" y=\"{:.1f}\" font-size=\"10\" fill=\"{}\">{}</text>\n", X(kb) + 7, Y(q) + 3.5, ink, short_label(k));
+    }
+  }
+  o << "</svg>\n";
+  std::ofstream f(path);
+  f << o.str();
+}
+
+void step_report(const Ctx& c, const std::vector<std::string>& only_configs, const std::string& figure) {
   const auto clips = clip_set(c);
   std::map<std::string, std::size_t> ci;
   for (std::size_t i = 0; i < clips.size(); ++i) ci[clips[i].name] = i;
@@ -728,6 +818,10 @@ void step_report(const Ctx& c, const std::vector<std::string>& only_configs) {
     }
     std::println("| {} | {:.2f} | {:.1f} | {:.1f} | {:.1f} | {} | {} | {} |", k, mean_at(p.q, idx), mean_at(p.b.at("stored"), idx) / 1024,
                  mean_at(p.b.at("resident"), idx) / 1024, mean_at(p.b.at("packed"), idx) / 1024, mem, disk, ddb);
+  }
+  if (!figure.empty()) {
+    write_figure(figure, std::format("Study F2, {} clips ({} set): quality against bytes", n, c.set), flips, videos, order, idx);
+    std::println("figure: {}", figure);
   }
   if (!videos.empty()) {
     std::println("\nOn disk against video codecs (network packed by the lossless coder; codec payload bytes; equal mean active PSNR):\n");
@@ -1089,7 +1183,7 @@ int main(int argc, char** argv) try {
   else if (step == "video") {
     const auto v = split(a.str("codecs", ""));
     step_video(c, std::set<std::string>(v.begin(), v.end()));
-  } else if (step == "report") step_report(c, split(a.str("configs", "")));
+  } else if (step == "report") step_report(c, split(a.str("configs", "")), a.str("figure", ""));
   else if (step == "timing") step_timing(split(a.need("models")), a.i("core", 3), a.i("reps", 5));
   else if (step == "g3c") step_g3c(c, a.str("split", "val"), split(a.str("variants", "v1,b8,b6,b6_d,b4_d,h,b6_d_h")));
   else if (step == "g3c-report") step_g3c_report(c, a.str("split", "val"));
