@@ -9,6 +9,9 @@
 //       state against the reference's prior step on the same state (floats that differ, largest difference), and how
 //       far the two rollouts have drifted apart (coarse state in network units, pixels). The same frames through the
 //       C API, when its start point for this seed is the nearest one (it picks among the three nearest by seed).
+//   nvfx_prior pass [--core 3] [--n 200]
+//       One prior pass on a real coarse state (study G's test run, after its warm-up) on one pinned core, for every ISA
+//       this CPU runs: thread CPU time, least and median of n, with the weights and buffers warm in cache.
 //   nvfx_prior time [--setting 0] [--size 128] [--seconds 60] [--repeats 5] [--core 3] [--isa avx2] [--every 16]
 //       One instance through the C API: one continuous rollout (drift 0) with the prior and without, and the default
 //       6 s shards. Thread CPU time of every frame on one pinned core, the least over the repeats for each frame (the
@@ -339,7 +342,7 @@ int timing(const tools::Args& a, const rollout::Model& m, const std::string& mod
     float drift;
     int every;
   };
-  std::size_t scratch_prior = 0, scratch_plain = 0;
+  std::size_t scratch_prior = 0;
   for (const Variant v : {Variant{"continuous with the prior", 0.f, every}, Variant{"continuous without the prior", 0.f, 0}, Variant{"6 s shards (default)", 6.f, 0}}) {
     std::vector<double> best(static_cast<std::size_t>(frames), 1e30);
     for (int r = 0; r < repeats; ++r) {
@@ -364,13 +367,6 @@ int timing(const tools::Args& a, const rollout::Model& m, const std::string& mod
       std::println("{:30}  the {} frames where the prior acts: mean {:.3f} ms; the others: mean {:.3f} ms", "", st.prior_frames, st.prior_mean, st.other_mean);
     }
   }
-  {
-    nvfx_instance* in = nullptr;
-    nvfx_instance_create(fx, size, &in);
-    nvfx_instance_set_prior(in, 0, kT, kBeta);
-    scratch_plain = nvfx_instance_scratch_bytes(in);
-    nvfx_instance_free(in);
-  }
   // one pass alone, through the runtime's prior on a real state
   auto net = rt::parse_prior(prior_bytes);
   const auto prior = make_prior(isa, *net);
@@ -393,8 +389,8 @@ int timing(const tools::Args& a, const rollout::Model& m, const std::string& mod
   const double after = load_average();
   std::println("one prior pass ({:.1f} M multiply-adds): least {:.3f} ms, median {:.3f} ms of {} ({:.1f} GMAC/s at the least)", net->macs() / 1e6, pass.front(),
                pass[pass.size() / 2], pass.size(), net->macs() / pass.front() / 1e6);
-  std::println("instance scratch: {:.2f} MB with the prior's buffers, {:.2f} MB without; prior weights {:.2f} MB resident (file {:.2f} MB)",
-               static_cast<double>(scratch_prior) / 1e6, static_cast<double>(scratch_plain) / 1e6, static_cast<double>(net->resident_bytes()) / 1e6,
+  std::println("instance scratch: {:.2f} MB, of which the prior's buffers {:.2f} MB; prior weights {:.2f} MB resident, once per effect (file {:.2f} MB)",
+               static_cast<double>(scratch_prior) / 1e6, static_cast<double>(prior->scratch_bytes()) / 1e6, static_cast<double>(net->resident_bytes()) / 1e6,
                static_cast<double>(net->file_bytes) / 1e6);
   std::println("load average {:.2f} before, {:.2f} after: {}", before, after,
                before < 1.5 && after < 1.5 ? "quiet" : "busy machine: provisional (thread CPU time, least of the repeats)");
@@ -403,12 +399,49 @@ int timing(const tools::Args& a, const rollout::Model& m, const std::string& mod
   return 0;
 }
 
+int pass(const tools::Args& a, const rollout::Model& m, const std::string& prior_bytes) {
+  const int core = a.i("core", 3), n = a.i("n", 200);
+  cpu_set_t one;
+  CPU_ZERO(&one);
+  CPU_SET(core, &one);
+  if (sched_setaffinity(0, sizeof(one), &one) != 0) throw std::runtime_error("cannot pin to the core");
+  const double before = load_average();
+  auto net = rt::parse_prior(prior_bytes);
+  if (!net) throw std::runtime_error(net.error());
+  const Setting s = b_test_settings()[0];
+  const std::vector<float> ctl(s.begin(), s.end());
+  rt::RolloutEffect re;
+  re.m = m;
+  const auto run = rt::isa_base::make_rollout(re, kSize);
+  run->start(nearest_start(m, ctl), ctl, 2970000);
+  std::vector<float> state(run->coarse().begin(), run->coarse().end()), cond(static_cast<std::size_t>(m.h.cond()));
+  rollout::condition(m, ctl, run->time(), cond);
+  for (const Isa& isa : {Isa{NVFX_ISA_BASELINE, "baseline"}, Isa{NVFX_ISA_AVX2, "avx2"}, Isa{NVFX_ISA_AVX512, "avx512"}}) {
+    if (nvfx_set_isa(isa.id) != NVFX_OK) continue;
+    const auto prior = make_prior(isa, *net);
+    std::vector<double> ms;
+    for (int i = 0; i < n + 10; ++i) {
+      std::ranges::copy(run->coarse(), state.begin());
+      const double c0 = thread_ms();
+      prior->apply(state, m.h.channels(), m.lo, m.hi, kT, kBeta, cond);
+      if (i >= 10) ms.push_back(thread_ms() - c0);
+    }
+    std::ranges::sort(ms);
+    std::println("{:8}: one pass least {:.3f} ms, median {:.3f} ms of {} ({:.1f} GMAC/s at the least)", isa.name, ms.front(), ms[ms.size() / 2], ms.size(),
+                 net->macs() / ms.front() / 1e6);
+  }
+  nvfx_set_isa(NVFX_ISA_AUTO);
+  const double after = load_average();
+  std::println("core {}, load average {:.2f} before, {:.2f} after: {}", core, before, after, before < 1.5 && after < 1.5 ? "quiet" : "busy machine: provisional");
+  return 0;
+}
+
 }  // namespace
 
 int main(int argc, char** argv) try {
   const tools::Args a(argc, argv, {"help"});
   if (a.flag("help") || a.positional().empty()) {
-    std::println("nvfx_prior parity|time [--setting 0] [--model fire.nvfx] [--prior fire.ddpm] [--isa avx2]  (options: see the source's header)");
+    std::println("nvfx_prior parity|pass|time [--setting 0] [--model fire.nvfx] [--prior fire.ddpm] [--isa avx2]  (options: see the source's header)");
     return 0;
   }
   const fs::path model_path = a.has("model") ? fs::path(a.str("model")) : data_root() / "experiments" / "models" / "d" / "fire.nvfx";
@@ -423,6 +456,8 @@ int main(int argc, char** argv) try {
   const std::string& cmd = a.positional()[0];
   if (cmd == "parity") {
     rc = parity(a, *m, *d, prior_bytes);
+  } else if (cmd == "pass") {
+    rc = pass(a, *m, prior_bytes);
   } else if (cmd == "time") {
     rc = timing(a, *m, read_file(model_path), prior_bytes);
   } else {

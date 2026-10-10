@@ -7,9 +7,10 @@
 // same vectorised exponential; the residual is added after the convolution. Under contraction (CMakeLists.txt,
 // neuralfx_simd) with FMA (AVX2, AVX-512) each multiply-add is fused exactly where the reference fuses it, so the
 // floats are the reference's bit for bit; the baseline build has no FMA and rounds twice. What differs is
-// bookkeeping only: padded buffers keep their zero border and are written inside, SiLU writes straight into them, the
-// position channels are written once, and the output layer's weights are widened to 8 channels once, not per pass.
-// Every buffer is allocated in the constructor.
+// bookkeeping only: padded buffers keep their zero border and are written inside, SiLU writes straight into them, FiLM
+// and the skip additions are done in place (the reference keeps every intermediate for its backward pass), the position
+// channels are written once, and the output layer's weights are widened to 8 channels once, not per pass. Every buffer
+// is allocated in the constructor: about 1 MB for the released network.
 #if !defined(NFX_NS)
 #error "define NFX_NS before including rt_prior_impl.hpp"
 #endif
@@ -102,8 +103,11 @@ inline void silu_pad(int R, const float* in, int C, float* pad) {
   for (int y = 0; y < R; ++y) silu_n(in + z(y) * row, pad + (z(y + 1) * z(R + 2) + 1) * z(C), row);
 }
 
-// NV output vectors (8 channels each) starting at k0, for cells (x, y) and (x + 1, y) when two is set: the
-// reference's conv3_block.
+// NV output vectors (8 channels each) starting at k0, for cells (x, y) and (x + 1, y) when two is set: the reference's
+// conv3_block, written exactly as there. The shape matters, not only the order of the operations: under contraction
+// GCC fuses a * b + c, but its generic tuning (--param avoid-fma-max-bits=256) leaves some loop-carried
+// multiply-add chains unfused, depending on how many chains a loop carries. A blocking of three cells at a time was
+// about 15% faster but left the single-cell remainders unfused, so it lost the bits; this one keeps them.
 template <int NV>
 inline void conv3_block(int R, const float* __restrict ip, int ci, const float* __restrict W, const float* b, int co, int k0, int x, int y,
                         bool two, float* __restrict out) {
@@ -144,7 +148,8 @@ inline void conv3_block(int R, const float* __restrict ip, int ci, const float* 
   }
 }
 
-// out (R^2 x co) = b + conv3(in), ip the padded input ((R + 2)^2 x ci), co a multiple of 8, weights [tap][in][out].
+// out (R^2 x co) = b + conv3(in), ip the padded input ((R + 2)^2 x ci), co a multiple of 8, weights [tap][in][out]: the
+// reference's conv3_fwd for those widths.
 inline void conv3_fwd(int R, const float* ip, int ci, const float* W, const float* b, int co, float* out) {
   for (int y = 0; y < R; ++y) {
     for (int x = 0; x < R; x += 2) {
@@ -224,24 +229,18 @@ class PriorImpl final : public Prior {
     for (int l = 0; l < 3; ++l) {
       const int R = l == 0 ? R0_ : (l == 1 ? R1_ : R2_), C = l == 0 ? n.c0 : (l == 1 ? n.c1 : n.c2);
       pad_[z(l)].assign(P(R) * z(C), 0.f);
-      act_[z(l)].assign(N(R) * z(C), 0.f);
       h_[z(l)].assign(N(R) * z(C), 0.f);
     }
-    stem_.assign(N(R0_) * z(n.c0), 0.f);
     s0_.assign(N(R0_) * z(n.c0), 0.f);
+    t0_.assign(N(R0_) * z(n.c0), 0.f);
     s1_.assign(N(R1_) * z(n.c1), 0.f);
-    pool0_.assign(N(R1_) * z(n.c0), 0.f);
+    t1_.assign(N(R1_) * z(n.c1), 0.f);
+    q1_.assign(N(R1_) * z(n.c0), 0.f);
     pool1_.assign(N(R2_) * z(n.c1), 0.f);
-    d1in_.assign(N(R1_) * z(n.c1), 0.f);
     d2in_.assign(N(R2_) * z(n.c2), 0.f);
     mm_.assign(N(R2_) * z(n.c2), 0.f);
     mout_.assign(N(R2_) * z(n.c2), 0.f);
     u2c_.assign(N(R2_) * z(n.c1), 0.f);
-    u1in_.assign(N(R1_) * z(n.c1), 0.f);
-    dec1_.assign(N(R1_) * z(n.c1), 0.f);
-    u1c_.assign(N(R1_) * z(n.c0), 0.f);
-    u0in_.assign(N(R0_) * z(n.c0), 0.f);
-    dec0_.assign(N(R0_) * z(n.c0), 0.f);
     // The output layer widened to a multiple of 8 channels with zeros, as the reference's conv3_fwd widens it per call.
     c8_ = (ch + 7) / 8 * 8;
     out_w8_.assign(9 * z(n.c0) * z(c8_), 0.f);
@@ -295,32 +294,31 @@ class PriorImpl final : public Prior {
 
   std::size_t scratch_bytes() const override {
     std::size_t n = 0;
-    for (const auto* v : {&emb_, &mh_, &ma_, &film_, &xpad_, &stem_, &s0_, &s1_, &pool0_, &pool1_, &d1in_, &d2in_, &mm_, &mout_, &u2c_, &u1in_, &dec1_,
-                          &u1c_, &u0in_, &dec0_, &out_w8_, &out_b8_, &y8_, &x_, &xt_, &eps_}) {
+    for (const auto* v : {&emb_, &mh_, &ma_, &film_, &xpad_, &s0_, &t0_, &s1_, &t1_, &q1_, &pool1_, &d2in_, &mm_, &mout_, &u2c_, &out_w8_, &out_b8_, &y8_,
+                          &x_, &xt_, &eps_}) {
       n += v->size();
     }
-    for (int l = 0; l < 3; ++l) n += pad_[z(l)].size() + act_[z(l)].size() + h_[z(l)].size();
+    for (int l = 0; l < 3; ++l) n += pad_[z(l)].size() + h_[z(l)].size();
     return 4 * n;
   }
 
  private:
-  // A residual block at level l: out = in + conv3(SiLU(FiLM(conv3(SiLU(in))))).
+  // A residual block at level l: out = in + conv3(SiLU(FiLM(conv3(SiLU(in))))). out and in are different buffers.
   void block(int k, int l, const float* in, float* out) {
     const PriorNet::Block& B = n_.blocks[z(k)];
     const float* w = n_.w.data();
     const int C = B.width, R = B.side;
     const std::size_t n = z(R) * z(R) * z(C);
     float* pad = pad_[z(l)].data();
-    float* act = act_[z(l)].data();
     float* h = h_[z(l)].data();
     silu_pad(R, in, C, pad);
     conv3_fwd(R, pad, C, w + B.wa, w + B.ba, C, h);
     const float* gamma = film_.data() + B.film;
     const float* beta = gamma + C;
-    for (std::size_t i = 0; i < n; i += z(C)) {
-      for (int c = 0; c < C; ++c) act[i + z(c)] = h[i + z(c)] * (1.f + gamma[c]) + beta[c];
+    for (std::size_t i = 0; i < n; i += z(C)) {  // FiLM, in place
+      for (int c = 0; c < C; ++c) h[i + z(c)] = h[i + z(c)] * (1.f + gamma[c]) + beta[c];
     }
-    silu_pad(R, act, C, pad);
+    silu_pad(R, h, C, pad);
     conv3_fwd(R, pad, C, w + B.wb, w + B.bb, C, out);
     for (std::size_t i = 0; i < n; ++i) out[i] += in[i];
   }
@@ -348,37 +346,37 @@ class PriorImpl final : public Prior {
       }
     }
     const int R0 = R0_, R1 = R1_, R2 = R2_;
-    // encoder
-    conv3_fwd(R0, xpad_.data(), I, w + n.stem_w, w + n.stem_b, n.c0, stem_.data());
-    block(0, 0, stem_.data(), s0_.data());
-    avgpool(R0, s0_.data(), n.c0, pool0_.data());
-    conv1_fwd(R1 * R1, pool0_.data(), n.c0, w + n.down1_w, w + n.down1_b, n.c1, d1in_.data());
-    block(1, 1, d1in_.data(), s1_.data());
-    avgpool(R1, s1_.data(), n.c1, pool1_.data());
+    float *s0 = s0_.data(), *t0 = t0_.data(), *s1 = s1_.data(), *t1 = t1_.data(), *q1 = q1_.data();
+    // encoder: the stem into t0, block e0 into the skip s0, pooled into q1, block e1 from t1 into the skip s1
+    conv3_fwd(R0, xpad_.data(), I, w + n.stem_w, w + n.stem_b, n.c0, t0);
+    block(0, 0, t0, s0);
+    avgpool(R0, s0, n.c0, q1);
+    conv1_fwd(R1 * R1, q1, n.c0, w + n.down1_w, w + n.down1_b, n.c1, t1);
+    block(1, 1, t1, s1);
+    avgpool(R1, s1, n.c1, pool1_.data());
     conv1_fwd(R2 * R2, pool1_.data(), n.c1, w + n.down2_w, w + n.down2_b, n.c2, d2in_.data());
     block(2, 2, d2in_.data(), mm_.data());
     block(3, 2, mm_.data(), mout_.data());
-    // decoder
+    // decoder: the skips take the upsampled path in place (s1 becomes d1's input, s0 d0's)
     conv1_fwd(R2 * R2, mout_.data(), n.c2, w + n.up2_w, w + n.up2_b, n.c1, u2c_.data());
-    std::copy(s1_.begin(), s1_.end(), u1in_.begin());
-    upsample_add(R2, u2c_.data(), n.c1, u1in_.data());
-    block(4, 1, u1in_.data(), dec1_.data());
-    conv1_fwd(R1 * R1, dec1_.data(), n.c1, w + n.up1_w, w + n.up1_b, n.c0, u1c_.data());
-    std::copy(s0_.begin(), s0_.end(), u0in_.begin());
-    upsample_add(R1, u1c_.data(), n.c0, u0in_.data());
-    block(5, 0, u0in_.data(), dec0_.data());
+    upsample_add(R2, u2c_.data(), n.c1, s1);
+    block(4, 1, s1, t1);
+    conv1_fwd(R1 * R1, t1, n.c1, w + n.up1_w, w + n.up1_b, n.c0, q1);
+    upsample_add(R1, q1, n.c0, s0);
+    block(5, 0, s0, t0);
     // output
-    silu_pad(R0, dec0_.data(), n.c0, pad_[0].data());
+    silu_pad(R0, t0, n.c0, pad_[0].data());
     conv3_fwd(R0, pad_[0].data(), n.c0, out_w8_.data(), out_b8_.data(), c8_, y8_.data());
   }
 
   const PriorNet& n_;
   int R0_ = 0, R1_ = 0, R2_ = 0, c8_ = 8;
-  std::vector<float> emb_, mh_, ma_, film_, xpad_;
-  std::array<std::vector<float>, 3> pad_, act_, h_;  // per level: padded input of a convolution, activations, first convolution
-  std::vector<float> stem_, s0_, s1_, pool0_, pool1_, d1in_, d2in_, mm_, mout_, u2c_, u1in_, dec1_, u1c_, u0in_, dec0_;
-  std::vector<float> out_w8_, out_b8_, y8_;
-  std::vector<float> x_, xt_, eps_;
+  AlignedFloats emb_, mh_, ma_, film_, xpad_;
+  std::array<AlignedFloats, 3> pad_, h_;  // per level: the padded input of a convolution; a block's first convolution
+  AlignedFloats s0_, t0_, s1_, t1_, q1_;  // levels 0 and 1: the skips and working maps
+  AlignedFloats pool1_, d2in_, mm_, mout_, u2c_;
+  AlignedFloats out_w8_, out_b8_, y8_;
+  AlignedFloats x_, xt_, eps_;
 };
 
 }  // namespace

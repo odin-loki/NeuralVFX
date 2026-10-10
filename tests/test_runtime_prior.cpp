@@ -259,7 +259,7 @@ TEST(RuntimePrior, ReadsTheTrainersFormatWithTheTrainersLayout) {
     EXPECT_EQ(n.scale, d.scale);
     EXPECT_EQ(n.lo, d.lo);
     EXPECT_EQ(n.hi, d.hi);
-    EXPECT_EQ(n.w, d.w);
+    EXPECT_TRUE(std::ranges::equal(n.w, d.w));
     EXPECT_EQ(n.size, L.size);
     for (const auto& [a, b] : {std::pair{n.stem_w, L.stem_w}, {n.stem_b, L.stem_b}, {n.down1_w, L.down1_w}, {n.down1_b, L.down1_b}, {n.down2_w, L.down2_w},
                                {n.down2_b, L.down2_b}, {n.up2_w, L.up2_w}, {n.up2_b, L.up2_b}, {n.up1_w, L.up1_w}, {n.up1_b, L.up1_b},

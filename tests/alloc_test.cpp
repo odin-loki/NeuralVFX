@@ -30,6 +30,17 @@ void* operator new(std::size_t n) {
   throw std::bad_alloc();
 }
 void* operator new[](std::size_t n) { return operator new(n); }
+void* operator new(std::size_t n, std::align_val_t a) {  // aligned allocations (the prior's buffers) count too
+  if (g_counting.load(std::memory_order_relaxed)) g_allocations.fetch_add(1, std::memory_order_relaxed);
+  const std::size_t al = static_cast<std::size_t>(a);
+  if (void* p = std::aligned_alloc(al, (n + al - 1) / al * al + (n ? 0 : al))) return p;
+  throw std::bad_alloc();
+}
+void* operator new[](std::size_t n, std::align_val_t a) { return operator new(n, a); }
+void operator delete(void* p, std::align_val_t) noexcept { std::free(p); }
+void operator delete[](void* p, std::align_val_t) noexcept { std::free(p); }
+void operator delete(void* p, std::size_t, std::align_val_t) noexcept { std::free(p); }
+void operator delete[](void* p, std::size_t, std::align_val_t) noexcept { std::free(p); }
 void operator delete(void* p) noexcept { std::free(p); }
 void operator delete[](void* p) noexcept { std::free(p); }
 void operator delete(void* p, std::size_t) noexcept { std::free(p); }

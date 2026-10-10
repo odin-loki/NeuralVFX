@@ -16,11 +16,27 @@
 #include <cstdint>
 #include <expected>
 #include <memory>
+#include <new>
 #include <span>
 #include <string>
 #include <vector>
 
 namespace nfx::rt {
+
+// Storage aligned to a cache line. The kernels read 32-byte vectors at offsets that are multiples of 8 floats; with
+// std::vector's 16-byte alignment every other weight load straddled two cache lines, which cost about 25% of a pass.
+template <class T>
+struct CacheAligned {
+  using value_type = T;
+  static constexpr std::align_val_t kAlign{64};
+  CacheAligned() noexcept = default;
+  template <class U>
+  CacheAligned(const CacheAligned<U>&) noexcept {}
+  T* allocate(std::size_t n) { return static_cast<T*>(::operator new(n * sizeof(T), kAlign)); }
+  void deallocate(T* p, std::size_t n) noexcept { ::operator delete(p, n * sizeof(T), kAlign); }
+  friend bool operator==(const CacheAligned&, const CacheAligned&) noexcept { return true; }
+};
+using AlignedFloats = std::vector<float, CacheAligned<float>>;
 
 // A denoiser read from a .ddpm file ("NVFXDDPM", version 1, little-endian: nine int32 sizes, scale, lo and hi per
 // channel, a uint64 weight count, the weights as float32; written by dcm::ddpm::save). The weight offsets are those of
@@ -29,7 +45,7 @@ struct PriorNet {
   static constexpr int kBlocks = 6;  // e0, e1, m0, m1, d1, d0
   int res = 0, channels = 0, c0 = 0, c1 = 0, c2 = 0, cond = 0, freqs = 0, film_hidden = 0, timesteps = 0;
   std::vector<float> scale, lo, hi;  // per channel: physical units of one network unit; range of network values
-  std::vector<float> w;              // the weights as stored
+  AlignedFloats w;                   // the weights as stored
   struct Block {
     int width = 0, side = 0;
     std::size_t wa = 0, ba = 0, wb = 0, bb = 0, film = 0;
