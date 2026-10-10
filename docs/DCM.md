@@ -468,12 +468,12 @@ to 13 from other agents); nothing here depends on time.
   height). The search's seed noise is therefore larger than G1's three seeds showed; G2.10 measures it again.
 
 **Validation** (generator - v1, paired over the 10 validation settings and the 8 validation runs; 30 generators per
-effect, `g_fine2_val_rule.csv`):
+effect at tau = 0, plus tau = 0.5 for smoke's admissible one; `g_fine2_val_rule.csv`):
 
 | effect | admissible | with v1's lock (10 generators) | without a lock (10) | exact relock (10) |
 |---|---:|---|---|---|
 | fire | 0 | spectrum better on all 10 (-0.06 to -0.07), PSNR and tracking better or tied, but \|ln motion\| worse on all 10 (best score: +0.024 [+0.012, +0.032], about 2% less motion) | the fine fields run away from the coarse state (score 8 to 18) | spectrum worse on all 10 (+0.55 to +0.68) |
-| smoke | 1 | spectrum better on all 10; motion worse on 3, tracking at 8 frames worse on 6; **candidate 6 admissible**: spectrum -0.008 [-0.011, -0.005], everything else tied | worse on every measure | spectrum better on 1, PSNR worse on all |
+| smoke | 1 | spectrum better on all 10; motion worse on 3, tracking at 8 frames worse on 6; **candidate 6 admissible**: spectrum -0.008 [-0.011, -0.005], everything else tied | motion, coverage, PSNR and tracking worse on all 10 | spectrum better on 1, PSNR worse on all |
 | explosion | 0 | spectrum never better (+0.017 to +0.035) | spectrum better on 1 (candidate 5: -0.043 [-0.091, -0.001]), but tracking at 30 frames worse on 9 of 10 (candidate 5: -1.42 dB [-1.77, -1.10]) | PSNR and tracking worse on all 10 |
 
 - The trade-off is the same on every effect: the generators that change the detail enough to improve its spectrum
