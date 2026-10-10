@@ -1460,3 +1460,13 @@ did not pass its rule in §6 nor in the round-2 retry. There is nothing for it t
    first-layer rate of 0.1, chosen among 0.02, 0.05, 0.1 and 0.2 by the training rows' own error after training (rmse
    0.1145, 0.1141, 0.1140, 0.1139; a least-squares fit per age bin and channel of each effect gives 0.109 to 0.118).
    Still 3 passes with the rates halved after each.
+2. **G4a's mixer has no bias** (after five validation settings of fire had run; that run was stopped and is not used).
+   Its first validation run showed a first-second "gain" of 5.5 to 8 dB on fire, with coverage L1 ten times v1's
+   (0.05 against 0.005) and mean-frame PSNR 3 to 8 dB lower. The cause was the bias input (0.01 to 0.035): a faint haze
+   over the whole frame. Active PSNR counts every pixel visible in either frame, so a haze makes the empty background
+   "active" with a small error and inflates the score; it is not a better picture. The mixer now has no bias, so a pixel
+   that every expert leaves empty stays exactly transparent (a test holds it), and its normalised-LMS regulariser is 1
+   (inputs are colours in [0, 1]; without a bias, dim pixels made the normalised steps blow up). The rate of
+   amendment 1 was checked again on the training rows (rmse 0.1161, 0.1160, 0.1159, 0.1159 for 0.05, 0.1, 0.2, 0.5;
+   the learned renderer alone 0.1201) and kept at 0.1. The stopped run's rows are kept outside git
+   (`g4a_val_with_bias_aborted.csv`).

@@ -202,6 +202,11 @@ TEST(DcmExtras, RenderMixerStartsAsTheLearnedRenderer) {
     learn.update(x[ex::kSim]);
   }
   EXPECT_LT(after, 0.25 * before);
+  // no bias: a pixel every expert leaves empty stays exactly transparent, however it was trained
+  learn.freeze();
+  for (auto& v : planes.p) std::ranges::fill(v, 0.f);
+  ex::render_mixed(learn, m, s, planes, out);
+  for (const float v : out) ASSERT_EQ(v, 0.f);
 }
 
 // G5a: the critic tells shifted features apart on fresh windows, is deterministic, and loads from its text.

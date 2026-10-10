@@ -163,27 +163,27 @@ ValueNetSpec render_spec(double lr, double anneal) {
   sp.lr1 = lr;
   sp.lr2 = lr / 2;
   sp.anneal = anneal;
+  sp.eps = 1.0;  // the inputs are colours in [0, 1]: a step size of plain LMS for dim pixels, normalised for bright ones
   sp.limit = 4.0;
   return sp;
 }
 }  // namespace
 
 RenderMixer::RenderMixer(RenderMixConfig cfg, double lr, double anneal)
-    : cfg_(std::move(cfg)), net_(static_cast<int>(cfg_.experts.size()) + 1, 0, render_spec(lr, anneal)) {
+    : cfg_(std::move(cfg)), net_(static_cast<int>(cfg_.experts.size()), 0, render_spec(lr, anneal)) {
   if (cfg_.experts.empty() || cfg_.experts[0] != kLearned) throw std::invalid_argument("RenderMixer: the learned renderer comes first");
   net_.set_rule(0);
-  x_.assign(cfg_.experts.size() + 1, 1.0);
+  x_.assign(cfg_.experts.size(), 0.0);
 }
 
 double RenderMixer::predict(std::span<const float> experts, int channel, int age, int heat, int soot) {
   for (std::size_t k = 0; k < cfg_.experts.size(); ++k) x_[k] = experts[sz(cfg_.experts[k])];
-  x_.back() = 1.0;
   const std::array<int, 6> ctx{channel * kAgeBins + age, channel * kLevelBins + heat, channel * kLevelBins + soot, channel, 0, 0};
   return std::clamp(net_.predict(x_, ctx, {}).mu, 0.0, 1.0);
 }
 
 std::vector<double> RenderMixer::mean_weights(int channel) const {
-  const std::size_t n = cfg_.experts.size() + 1;
+  const std::size_t n = cfg_.experts.size();
   std::vector<double> w(n, 0.0);
   const auto fw = net_.final_mixer().weights(channel);
   for (int k = 0; k < net_.first_layer(); ++k) {
@@ -225,7 +225,7 @@ RenderMixer RenderMixer::load(RenderMixConfig cfg, const std::string& text) {
   r.net_.freeze(true);
   r.text_ = text;
   r.compact_ = std::make_shared<const CompactValueNet<float>>(text);
-  if (r.compact_->inputs() != static_cast<int>(r.cfg_.experts.size()) + 1) throw std::invalid_argument("RenderMixer::load: inputs differ from the config");
+  if (r.compact_->inputs() != static_cast<int>(r.cfg_.experts.size())) throw std::invalid_argument("RenderMixer::load: inputs differ from the config");
   return r;
 }
 
@@ -236,7 +236,7 @@ void render_mixed(const RenderMixer& mix, const rollout::Model& m, const rollout
   const float it = 1.f / m.render_scale[0], id = 1.f / m.render_scale[1];
   const int age = age_bin(s.since_start * m.fps);
   const auto& ex = mix.config().experts;
-  std::vector<double> x(ex.size() + 1, 1.0);
+  std::vector<double> x(ex.size(), 0.0);
   for (int y = 0; y < S; ++y) {
     for (int xx = 0; xx < S; ++xx) {
       const std::size_t fi = sz(y) * sz(S) + sz(xx), pi = (sz(S - 1 - y) * sz(S) + sz(xx)) * 4;
@@ -564,7 +564,7 @@ void CoarseSolver::step(const rollout::Model& m, const rollout::State& s, std::s
 }
 
 namespace {
-ValueNetSpec update_spec(double lr) {
+ValueNetSpec update_spec(double lr, double anneal) {
   ValueNetSpec sp;
   sp.context_sizes = {4 * kHeatBins, 4 * kBands, 4 * kAges};
   sp.final_contexts = 4;
@@ -573,14 +573,14 @@ ValueNetSpec update_spec(double lr) {
   sp.loss = ValueLoss::squared;
   sp.lr1 = lr;
   sp.lr2 = lr / 2;
-  sp.anneal = 2000.0;
+  sp.anneal = anneal;
   sp.eps = 1e-4;
   sp.limit = 1e3;
   return sp;
 }
 }  // namespace
 
-UpdateMixer::UpdateMixer(double lr) : net_(3, 0, update_spec(lr)) { net_.set_rule(0); }
+UpdateMixer::UpdateMixer(double lr, double anneal) : net_(3, 0, update_spec(lr, anneal)) { net_.set_rule(0); }
 
 UpdateMixer UpdateMixer::blend(double a) {
   UpdateMixer u;

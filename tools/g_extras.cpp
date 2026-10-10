@@ -571,7 +571,6 @@ void g4a_train(const Ctx& c) {
     for (int q = 0; q < 4; ++q) {
       std::string row = std::format("{},{},{},{}", cfg.name(), mix.version().substr(0, 16), "RGBA"[q], rows.size());
       for (std::size_t k = 0; k < cfg.experts.size(); ++k) row += std::format(",{}={:.3f}", ex::render_expert_name(cfg.experts[k]), w[sz(q)][k]);
-      row += std::format(",bias={:.4f}", w[sz(q)].back());
       out.push_back(row);
     }
     log(std::format("g4a-train {}: version {} ({:.0f} s thread CPU)", cfg.name(), mix.version(), thread_cpu_s() - t0));
@@ -888,13 +887,34 @@ void g5b_train(const Ctx& c) {
   std::vector<rollout::Run> recorded;
   std::vector<TargetRow> truth = g5b_truth_rows(c, M, runs, recorded);
   log(std::format("g5b-train: {} one-step rows from {} runs ({:.0f} s thread CPU)", truth.size(), runs, thread_cpu_s() - t0));
-  ex::UpdateMixer mix;
+  // m1: the first-layer rate chosen among four by the training rows' own error after training (rates anneal over
+  // 100,000 uses of a context; docs/DCM.md §10.6)
   std::mt19937_64 rng(1);
-  for (int pass = 0; pass < 3; ++pass) {
-    double rmse = 0;
-    train_pass(mix, truth, rng, &rmse);
-    log(std::format("g5b-train m1 pass {}: rmse {:.5f}", pass, rmse));
-    mix.scale_lr(0.5);
+  ex::UpdateMixer mix;
+  double best_rmse = 1e30, v1_rmse = 0;
+  for (const TargetRow& t : truth) v1_rmse += (t.r.dn - t.y) * (t.r.dn - t.y);
+  v1_rmse = std::sqrt(v1_rmse / static_cast<double>(truth.size()));
+  for (const double lr : {0.02, 0.05, 0.1, 0.2}) {
+    ex::UpdateMixer cand(lr, 1e5);
+    std::mt19937_64 rr(1);
+    std::vector<TargetRow> rows = truth;
+    for (int pass = 0; pass < 3; ++pass) {
+      train_pass(cand, rows, rr);
+      cand.scale_lr(0.5);
+    }
+    ex::UpdateMixer probe = cand;
+    probe.freeze();
+    double se = 0;
+    for (const TargetRow& t : truth) {
+      const double p = probe.predict(t.r.dn, t.r.ds, t.r.channel, t.r.heat, t.r.band, t.r.age);
+      se += (p - t.y) * (p - t.y);
+    }
+    const double rmse = std::sqrt(se / static_cast<double>(truth.size()));
+    log(std::format("g5b-train m1 lr {}: training rmse {:.6f} (the stepper alone {:.6f})", lr, rmse, v1_rmse));
+    if (rmse < best_rmse) {
+      best_rmse = rmse;
+      mix = cand;
+    }
   }
   std::vector<std::string> wrows;
   const auto weights = [&](const std::string& name, const ex::UpdateMixer& m) {

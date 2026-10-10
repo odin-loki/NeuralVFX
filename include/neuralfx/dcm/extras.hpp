@@ -70,13 +70,14 @@ inline constexpr int kAgeBins = 5, kLevelBins = 4;
 [[nodiscard]] int level_bin(float normalised);
 
 struct RenderMixConfig {
-  std::vector<int> experts;  // which RenderExpert inputs the mixer sees (plus a bias of 1); kLearned first
+  std::vector<int> experts;  // which RenderExpert inputs the mixer sees; kLearned first
   [[nodiscard]] std::string name() const;
 };
 
-// One mixer for every effect: a ValueNet whose inputs are the chosen experts' values of one channel and a bias, its
-// first-layer mixers selected by channel x age, channel x heat and channel x soot, the final mixer by channel; squared
-// loss, no AVM. It starts as the learned renderer (weight 1 on it).
+// One mixer for every effect: a ValueNet whose inputs are the chosen experts' values of one channel (no bias, so a pixel
+// every expert leaves empty stays exactly transparent), its first-layer mixers selected by channel x age, channel x heat
+// and channel x soot, the final mixer by channel; squared loss, no AVM. It starts as the learned renderer (weight 1 on
+// it).
 class RenderMixer {
  public:
   // lr: the first layer's learning rate (the final mixer's is half); anneal: uses of a context after which its rate has
@@ -96,8 +97,8 @@ class RenderMixer {
   [[nodiscard]] const RenderMixConfig& config() const { return cfg_; }
   [[nodiscard]] const CompactValueNet<float>* compact() const { return compact_.get(); }
   [[nodiscard]] const ValueNet& net() const { return net_; }
-  // Mean weight on each chosen expert (and the bias, last) over the contexts, through the final mixer: a summary of
-  // what the mixer draws with, per channel.
+  // Mean weight on each chosen expert over the contexts, through the final mixer: a summary of what the mixer draws
+  // with, per channel.
   [[nodiscard]] std::vector<double> mean_weights(int channel) const;
 
  private:
@@ -208,7 +209,9 @@ inline constexpr int kHeatBins = 4, kBands = 4, kAges = 4;
 // starts as the stepper alone (weight 1 on dN). A fixed blend (1 - a) dN + a dS is the same net with those weights.
 class UpdateMixer {
  public:
-  explicit UpdateMixer(double lr = 0.02);
+  // lr: the first layer's learning rate (the final mixer's is half); anneal: uses of a context after which its rate has
+  // halved.
+  explicit UpdateMixer(double lr = 0.02, double anneal = 2000.0);
   static UpdateMixer blend(double a);
   // A frozen mixer from its serialisation.
   static UpdateMixer load(const std::string& text);
