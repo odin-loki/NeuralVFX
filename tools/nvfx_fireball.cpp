@@ -3,6 +3,19 @@
 //   nvfx_fireball --models DIR [--out fireball.mp4] [--width 1280 --height 720] [--quality 1] [--threads 4]
 //                 [--isa avx2|avx512|baseline] [--seconds 9] [--profile profile.csv] [--keyframes DIR]
 //                 [--sheet sheet.png] [--no-video] [--no-skip] [--occupancy occupancy.csv]
+//                 [--stages | --no-overlap] [--no-checksums] [--baseline-kernels] [--raw frames.rgb]
+//
+// The picture of a frame is drawn on a thread of its own while the next frame's state (script, step, couplings, bus,
+// light, particles) is computed (with 2 or more threads; --threads counts that thread). --no-overlap draws it after
+// the state, captured as for the overlap; --stages draws it stage by stage on the live scene (the reference). All three
+// give the same frames to the bit. The profile's `period` is the wall time between finished frames (output excluded);
+// with the overlap, a frame's stages overlap the next frame's, so their sum (`total`) is more than the period.
+// --no-checksums skips the per-frame checksum (FNV-1a over the RGB, 3 ms on one thread) for timing runs. After the
+// run it prints the CPU time per frame over all threads and their shares of busy, waiting for a core (on a shared
+// machine: other processes) and idle time, from frame 36 on (/proc/self/task/*/schedstat).
+// --raw writes every frame's RGB, one after another, for comparisons (PSNR) outside.
+// --baseline-kernels uses the picture's row kernels for the baseline ISA even where AVX2 is used (they give the same
+// bits; this checks it).
 //
 // --no-skip computes every pixel of the runtime's detail step and renderer (study H, H2: by default they skip what is
 // +0 and cannot change; the result is the same to the bit). --occupancy writes, every third frame and for every
@@ -44,6 +57,7 @@
 #include <print>
 #include <string>
 #include <sys/resource.h>
+#include <system_error>
 #include <vector>
 
 namespace {
@@ -74,9 +88,14 @@ float smooth(float t) {
   return t * t * (3.f - 2.f * t);
 }
 
+enum class Mode { stages, render, overlap };
+
 struct Args {
   std::filesystem::path models, out = "fireball.mp4", profile, keyframes, sheet, occupancy;
-  bool skip = true;
+  bool skip = true, checksums = true, baseline_kernels = false;
+  std::filesystem::path raw;
+  Mode mode = Mode::overlap;
+  bool mode_set = false;
   int width = 1280, height = 720, threads = 4;
   float quality = 1.f, seconds = 9.f;
   std::string isa;
@@ -106,9 +125,15 @@ Args parse(int argc, char** argv) {
     else if (k == "--no-video") a.video = false;
     else if (k == "--no-skip") a.skip = false;
     else if (k == "--occupancy") a.occupancy = next();
+    else if (k == "--stages") a.mode = Mode::stages, a.mode_set = true;
+    else if (k == "--no-overlap") a.mode = Mode::render, a.mode_set = true;
+    else if (k == "--no-checksums") a.checksums = false;
+    else if (k == "--baseline-kernels") a.baseline_kernels = true;
+    else if (k == "--raw") a.raw = next();
     else throw std::invalid_argument("unknown option " + k + " (see the source header)");
   }
   if (a.models.empty()) throw std::invalid_argument("--models DIR (or NEURALVFX_DATA) is needed");
+  if (a.threads < 2 && a.mode == Mode::overlap) a.mode = Mode::render;  // one thread: nothing to overlap
   return a;
 }
 
@@ -127,6 +152,24 @@ double thread_cpu_ms() {
   timespec t{};
   clock_gettime(CLOCK_THREAD_CPUTIME_ID, &t);
   return 1e3 * static_cast<double>(t.tv_sec) + 1e-6 * static_cast<double>(t.tv_nsec);
+}
+
+// Per thread of this process: nanoseconds on a core and waiting for one (/proc/self/task/*/schedstat), summed over the
+// threads. Busy plus waiting plus idle (blocked) is the threads' wall time: on a shared machine the waiting share is
+// what other processes took, and the idle share what the frame's dependencies left unused.
+std::array<double, 3> sched_totals() {
+  double run = 0, wait = 0, n = 0;
+  std::error_code ec;
+  for (const auto& d : std::filesystem::directory_iterator("/proc/self/task", ec)) {
+    std::ifstream f(d.path() / "schedstat");
+    double a = 0, b = 0;
+    if (f >> a >> b) {
+      run += a;
+      wait += b;
+      n += 1;
+    }
+  }
+  return {run * 1e-6, wait * 1e-6, n};  // ms, ms, threads
 }
 
 // --occupancy: how empty each active module's fine fields are after its step (see the header).
@@ -301,7 +344,8 @@ int main(int argc, char** argv) try {
   Light light(bus);
   Particles parts(12000);
   Frame frame(A.width, A.height);
-  Pool pool(A.threads);
+  if (A.baseline_kernels) frame.use_avx2(false);
+  Pool pool(A.mode == Mode::overlap ? A.threads - 1 : A.threads);  // overlapped: the picture thread is one of them
   frame.ground_y = ground;
   std::vector<Shock> shocks;
   shocks.reserve(4);
@@ -393,6 +437,8 @@ int main(int argc, char** argv) try {
     video = popen(cmd.c_str(), "w");
     if (!video) throw std::runtime_error("cannot start ffmpeg");
   }
+  std::FILE* raw = nullptr;
+  if (!A.raw.empty() && !(raw = std::fopen(A.raw.c_str(), "wb"))) throw std::runtime_error("cannot write " + A.raw.string());
   std::vector<std::uint8_t> rgb(static_cast<std::size_t>(A.width) * static_cast<std::size_t>(A.height) * 3);
   const std::array<float, 8> key_times = {0.9f, 1.27f, 1.5f, 2.0f, 2.9f, 4.2f, 6.0f, 8.2f};
   std::vector<Image> keys;
@@ -406,6 +452,7 @@ int main(int argc, char** argv) try {
   // Thread CPU time: of the main thread per frame (with one thread, the whole frame's work) and of each module's step
   // (on whichever thread ran it), so that comparisons on a shared machine are not swamped by preemption.
   std::vector<double> frame_cpu(static_cast<std::size_t>(frames)), step_cpu_frame(static_cast<std::size_t>(frames)), step_cpu_now(owned.size());
+  std::vector<double> shade_cpu_frame(static_cast<std::size_t>(frames)), shade_cpu_now(owned.size());
   const double setup_ms = ms(setup0, Clock::now());
   std::size_t scratch = 0, resident = 0;
   for (const auto& m : owned) scratch += m->runner().scratch_bytes();
@@ -414,15 +461,105 @@ int main(int argc, char** argv) try {
     for (const auto& s : e->m.starts) n += (s.coarse.size() + s.fine_t.size() + s.fine_d.size()) * 4;
     resident += n;
   }
-  std::println("nvfx_fireball: {}x{} at quality {} ({} threads, {}); main tiles {} px, {} modules; setup {:.0f} ms", A.width, A.height, q, pool.threads(),
-               isa_name(isa), T, owned.size(), setup_ms);
+  const char* mode_name = A.mode == Mode::stages ? "stage by stage" : A.mode == Mode::render ? "captured" : "overlapped";
+  std::println("nvfx_fireball: {}x{} at quality {} ({} threads, {}, picture {}); main tiles {} px, {} modules; setup {:.0f} ms", A.width, A.height, q, A.threads,
+               isa_name(isa), mode_name, T, owned.size(), setup_ms);
 
+  // The frame loop: a frame's state (script, step, couplings, bus, light, particles), its shading, then its picture.
+  // The picture is drawn stage by stage on the live scene (--stages), or captured and drawn in one go, either at once
+  // (--no-overlap) or on a thread of its own while the next frame's state is computed (the default with 2 or more
+  // threads). The three give the same frames to the bit.
+  std::array<std::vector<std::uint8_t>, 2> rgbs{rgb, rgb};
+  std::vector<double> period(zs(frames)), output_ms(zs(frames)), wait_images(zs(frames)), wait_picture(zs(frames));
+  std::vector<std::array<double, kStages>> cpu(zs(frames));  // main thread CPU ms per stage (with one thread: all of it)
+  std::unique_ptr<PictureThread> picture;
+  if (A.mode == Mode::overlap) picture = std::make_unique<PictureThread>(frame, pool);
+  std::vector<Module*> to_draw;  // the modules drawn this frame, as Frame::draw() takes them
+  to_draw.reserve(drawn.size());
+  frame.reserve(static_cast<int>(drawn.size()), static_cast<int>(shocks.capacity()), static_cast<int>(scorch.capacity()), parts.capacity());
+  Clock::time_point last_done = Clock::now();
+  double last_output = 0.0;
+  const auto output = [&](int f, const std::vector<std::uint8_t>& out) {  // video, checksum, keyframes, progress: not timed
+    const auto o0 = Clock::now();
+    if (video) std::fwrite(out.data(), 1, out.size(), video);
+    if (raw) std::fwrite(out.data(), 1, out.size(), raw);
+    if (A.checksums) {  // the final picture's checksum (FNV-1a, 64 bits): same checksums, same pictures
+      std::uint64_t h = 0xcbf29ce484222325ull;
+      for (const std::uint8_t v : out) h = (h ^ v) * 0x100000001b3ull;
+      sums[zs(f)] = h;
+    }
+    const std::vector<std::uint8_t>& rgb_out = out;
+    {
+      for (const float kt : key_times) {
+        if (f == static_cast<int>(std::lround(kt * 30.f))) {
+          Image img;
+          img.allocate(A.width, A.height);
+          for (std::size_t i = 0, j = 0; i < rgb_out.size(); i += 3, j += 4) {
+            img.rgba[j] = rgb_out[i];
+            img.rgba[j + 1] = rgb_out[i + 1];
+            img.rgba[j + 2] = rgb_out[i + 2];
+            img.rgba[j + 3] = 255;
+          }
+          if (!A.keyframes.empty()) {
+            std::filesystem::create_directories(A.keyframes);
+            (void)write_png(A.keyframes / std::format("frame_{:03d}.png", f), img);
+          }
+          keys.push_back(std::move(img));
+        }
+      }
+    }
+    const std::array<double, kStages>& P = prof[zs(f)];
+    const float t = static_cast<float>(f) / 30.f;
+    if (f % 30 == 0) {
+      double tot = 0;
+      for (const double v : P) tot += v;
+      std::println("  t {:4.1f} s: {:6.1f} ms ({} modules, {} particles)", t, tot, active.size(), parts.alive());
+      if (std::getenv("NVFX_FIREBALL_STATS")) {
+        for (Module* m : active) {
+          auto co = m->runner().coarse();
+          float hmax = 0, dmax = 0, hsum = 0, dsum = 0, vmax = 0;
+          const int C = m->channels();
+          for (std::size_t i = 0; i < co.size(); i += zs(C)) {
+            hmax = std::max(hmax, co[i + 2]);
+            dmax = std::max(dmax, co[i + 3]);
+            hsum += co[i + 2];
+            dsum += co[i + 3];
+            vmax = std::max(vmax, std::hypot(co[i], co[i + 1]));
+          }
+          const float n = static_cast<float>(co.size() / zs(C));
+          std::println("      {:<18} heat max {:5.2f} mean {:6.3f}  soot max {:5.2f} mean {:6.3f}  |v| max {:5.2f}", m->name(), hmax, hsum / n, dmax, dsum / n, vmax);
+        }
+      }
+      std::fflush(stdout);
+    }
+    output_ms[zs(f)] = ms(o0, Clock::now());
+  };
+  const auto done = [&](int f) {  // the picture of frame f is in its buffer: the wall time since the last one
+    const auto now = Clock::now();
+    period[zs(f)] = ms(last_done, now) - last_output;
+    last_done = now;
+  };
+
+  std::array<double, 3> sched0{};
+  Clock::time_point loop0{};
   for (int f = 0; f < frames; ++f) {
     const float t = static_cast<float>(f) / 30.f;
+    if (f == 36) {  // the frames after the detonation, when everything runs
+      sched0 = sched_totals();
+      loop0 = Clock::now();
+    }
     if (f == 1) g_counting.store(true);  // the first frame may still touch lazily sized buffers
     const long alloc0 = g_allocations.load();
     std::array<double, kStages>& P = prof[zs(f)];
+    std::array<double, kStages>& PC = cpu[zs(f)];
     const double cpu0 = thread_cpu_ms();
+    double cpu_mark = cpu0;
+    const auto cpu_stage = [&](Stage st) {
+      const double c = thread_cpu_ms();
+      PC[zs(st)] = c - cpu_mark;
+      cpu_mark = c;
+    };
+    if (A.mode != Mode::overlap) last_done = Clock::now(), last_output = 0.0;
     auto c0 = Clock::now();
     // script: rules, then controls and the scene's time-driven settings
     for (Rule& r : rules) {
@@ -494,8 +631,10 @@ int main(int argc, char** argv) try {
     frame.fade = smooth(t / 0.35f) * smooth((t_end - t) / 0.6f);
     frame.time = t;
     for (auto& s : scorch) s[3] = (s == scorch.front() ? 1.f : 0.8f) * (0.25f + 0.75f * std::exp(-std::max(0.f, since) / 2.5f));
+    frame.haze = 1.2f * u;
     auto c1 = Clock::now();
     P[kScript] = ms(c0, c1);
+    cpu_stage(kScript);
 
     // step every active module, in parallel
     active.clear();
@@ -517,6 +656,7 @@ int main(int argc, char** argv) try {
     }
     auto c2 = Clock::now();
     P[kStep] = ms(c1, c2);
+    cpu_stage(kStep);
 
     // couplings
     main_tiles.clear();
@@ -546,6 +686,7 @@ int main(int argc, char** argv) try {
     }
     auto c3 = Clock::now();
     P[kCouple] = ms(c2, c3);
+    cpu_stage(kCouple);
 
     // the bus, and the pushes it carries
     bus.clear();
@@ -559,10 +700,12 @@ int main(int argc, char** argv) try {
     }
     auto c4 = Clock::now();
     P[kBus] = ms(c3, c4);
+    cpu_stage(kBus);
 
     light.update(bus, 0.14f, {0.75f * flash + 0.5f * flash2, 0.55f * flash + 0.36f * flash2, 0.37f * flash + 0.22f * flash2}, pool);
     auto c5 = Clock::now();
     P[kLight] = ms(c4, c5);
+    cpu_stage(kLight);
 
     parts.update(1.f / 30.f, &bus, 0.9f, ground);
     for (const auto& l : parts.landings()) {  // hot embers light new fires, away from the crater and the wreck
@@ -582,85 +725,110 @@ int main(int argc, char** argv) try {
     }
     auto c6 = Clock::now();
     P[kPartUpdate] = ms(c5, c6);
+    cpu_stage(kPartUpdate);
 
-    pool.run(static_cast<int>(active.size()), [&](int i) { active[zs(i)]->shade(&light); });
+    // the picture of the last frame must have read the modules' images before they are shaded again
+    if (picture) {
+      picture->wait_images();
+      wait_images[zs(f)] = picture->waited_images_ms;
+    }
+    auto c6b = Clock::now();
+    std::ranges::fill(shade_cpu_now, 0.0);
+    pool.run(static_cast<int>(active.size()), [&](int i) {
+      const double t0 = thread_cpu_ms();
+      active[zs(i)]->shade(&light);
+      shade_cpu_now[zs(i)] = thread_cpu_ms() - t0;
+    });
+    for (std::size_t i = 0; i < active.size(); ++i) shade_cpu_frame[zs(f)] += shade_cpu_now[i];
     auto c7 = Clock::now();
-    P[kShade] = ms(c6, c7);
-
-    frame.background(light, scorch, pool);
-    auto c8 = Clock::now();
-    P[kBackground] = ms(c7, c8);
-    frame.draw(drawn, pool);
-    auto c9 = Clock::now();
-    P[kDraw] = ms(c8, c9);
-    frame.particles(parts);
-    auto c10 = Clock::now();
-    P[kPartDraw] = ms(c9, c10);
-    frame.haze = 1.2f * u;
-    frame.distort(shocks, bus, pool);
-    auto c11 = Clock::now();
-    P[kDistort] = ms(c10, c11);
-    frame.bloom(1.0f, 1.0f, pool);
-    auto c12 = Clock::now();
-    P[kBloom] = ms(c11, c12);
-    frame.finish(rgb, pool);
-    auto c13 = Clock::now();
-    P[kFinish] = ms(c12, c13);
-    if (video) std::fwrite(rgb.data(), 1, rgb.size(), video);
-    auto c14 = Clock::now();
-    P[kEncode] = ms(c13, c14);
+    P[kShade] = ms(c6b, c7);
+    cpu_stage(kShade);
+    to_draw.clear();
+    for (Module* m : drawn) to_draw.push_back(m);
+    if (A.mode == Mode::stages) {
+      frame.background(light, scorch, pool);
+      auto c8 = Clock::now();
+      P[kBackground] = ms(c7, c8);
+      cpu_stage(kBackground);
+      frame.draw(to_draw, pool);
+      auto c9 = Clock::now();
+      P[kDraw] = ms(c8, c9);
+      cpu_stage(kDraw);
+      frame.particles(parts);
+      auto c10 = Clock::now();
+      P[kPartDraw] = ms(c9, c10);
+      cpu_stage(kPartDraw);
+      frame.distort(shocks, bus, pool);
+      auto c11 = Clock::now();
+      P[kDistort] = ms(c10, c11);
+      cpu_stage(kDistort);
+      frame.bloom(1.0f, 1.0f, pool);
+      auto c12 = Clock::now();
+      P[kBloom] = ms(c11, c12);
+      cpu_stage(kBloom);
+      frame.finish(rgbs[0], pool);
+      P[kFinish] = ms(c12, Clock::now());
+      cpu_stage(kFinish);
+    } else {
+      const auto record = [&](int pf) {  // the picture's stages (background and modules are one pass: draw)
+        const auto& R = frame.render_ms();
+        auto& Q = prof[zs(pf)];
+        Q[kBackground] = 0.0;
+        Q[kDraw] = R[Frame::kCompose];
+        Q[kPartDraw] = R[Frame::kParticles];
+        Q[kDistort] = R[Frame::kDistort];
+        Q[kBloom] = R[Frame::kBloom];
+        Q[kFinish] = R[Frame::kFinish];
+      };
+      if (picture) {
+        picture->wait();  // the last frame's picture
+        wait_picture[zs(f)] = picture->waited_ms;
+        if (f > 0) {
+          record(f - 1);
+          done(f - 1);
+          const bool counting = g_counting.load();
+          g_counting.store(false);  // (output is not the frame loop's work)
+          output(f - 1, rgbs[zs((f - 1) % 2)]);
+          g_counting.store(counting);
+          last_output = output_ms[zs(f - 1)];
+        }
+        frame.capture(light, scorch, to_draw, parts, shocks, bus);
+        picture->start(rgbs[zs(f % 2)], 1.0f, 1.0f);
+      } else {
+        frame.capture(light, scorch, to_draw, parts, shocks, bus);
+        frame.render(rgbs[0], 1.0f, 1.0f, pool);
+        record(f);
+      }
+      cpu_stage(kFinish);
+    }
     allocs[zs(f)] = g_allocations.load() - alloc0;
     frame_cpu[zs(f)] = thread_cpu_ms() - cpu0;
     for (std::size_t i = 0; i < owned.size(); ++i) mod_prof[zs(f)][i] = {owned[i]->active ? owned[i]->step_ms : 0.0, owned[i]->active ? owned[i]->shade_ms : 0.0};
     n_active[zs(f)] = static_cast<int>(active.size());
     n_parts[zs(f)] = parts.alive();
     g_counting.store(false);
-    {  // the final picture's checksum (FNV-1a, 64 bits), outside the timed stages: same checksums, same pictures
-      std::uint64_t h = 0xcbf29ce484222325ull;
-      for (const std::uint8_t v : rgb) h = (h ^ v) * 0x100000001b3ull;
-      sums[zs(f)] = h;
-    }
-    for (const float kt : key_times) {
-      if (f == static_cast<int>(std::lround(kt * 30.f))) {
-        Image img;
-        img.allocate(A.width, A.height);
-        for (std::size_t i = 0, j = 0; i < rgb.size(); i += 3, j += 4) {
-          img.rgba[j] = rgb[i];
-          img.rgba[j + 1] = rgb[i + 1];
-          img.rgba[j + 2] = rgb[i + 2];
-          img.rgba[j + 3] = 255;
-        }
-        if (!A.keyframes.empty()) {
-          std::filesystem::create_directories(A.keyframes);
-          (void)write_png(A.keyframes / std::format("frame_{:03d}.png", f), img);
-        }
-        keys.push_back(std::move(img));
-      }
-    }
-    if (f % 30 == 0) {
-      double tot = 0;
-      for (const double v : P) tot += v;
-      std::println("  t {:4.1f} s: {:6.1f} ms ({} modules, {} particles)", t, tot, active.size(), parts.alive());
-      if (std::getenv("NVFX_FIREBALL_STATS")) {
-        for (Module* m : active) {
-          auto co = m->runner().coarse();
-          float hmax = 0, dmax = 0, hsum = 0, dsum = 0, vmax = 0;
-          const int C = m->channels();
-          for (std::size_t i = 0; i < co.size(); i += zs(C)) {
-            hmax = std::max(hmax, co[i + 2]);
-            dmax = std::max(dmax, co[i + 3]);
-            hsum += co[i + 2];
-            dsum += co[i + 3];
-            vmax = std::max(vmax, std::hypot(co[i], co[i + 1]));
-          }
-          const float n = static_cast<float>(co.size() / zs(C));
-          std::println("      {:<18} heat max {:5.2f} mean {:6.3f}  soot max {:5.2f} mean {:6.3f}  |v| max {:5.2f}", m->name(), hmax, hsum / n, dmax, dsum / n, vmax);
-        }
-      }
-      std::fflush(stdout);
+    if (!picture) {
+      done(f);
+      output(f, rgbs[0]);
     }
   }
+  const std::array<double, 3> sched1 = sched_totals();
+  const double loop_ms = ms(loop0, Clock::now());
+  if (picture) {
+    picture->wait();
+    const auto& R = frame.render_ms();
+    auto& Q = prof[zs(frames - 1)];
+    Q[kBackground] = 0.0;
+    Q[kDraw] = R[Frame::kCompose];
+    Q[kPartDraw] = R[Frame::kParticles];
+    Q[kDistort] = R[Frame::kDistort];
+    Q[kBloom] = R[Frame::kBloom];
+    Q[kFinish] = R[Frame::kFinish];
+    done(frames - 1);
+    output(frames - 1, rgbs[zs((frames - 1) % 2)]);
+  }
   if (video && pclose(video) != 0) throw std::runtime_error("ffmpeg failed");
+  if (raw) std::fclose(raw);
   if (occupancy) std::fclose(occupancy);
 
   // --- profile -------------------------------------------------------------------------------------------------------
@@ -689,8 +857,9 @@ int main(int argc, char** argv) try {
       shade_cpu[zs(f)] += b;
     }
   }
-  const auto tt = stats(total), sc_ = stats(step_cpu), sh_ = stats(shade_cpu);
-  std::println("{:<18} {:8.2f} {:8.2f} {:8.2f} {:8.2f}", "total", tt[0], tt[1], tt[2], tt[3]);
+  const auto tt = stats(total), sc_ = stats(step_cpu), sh_ = stats(shade_cpu), pp = stats(period);
+  std::println("{:<18} {:8.2f} {:8.2f} {:8.2f} {:8.2f}   (sum of the stages)", "total", tt[0], tt[1], tt[2], tt[3]);
+  std::println("{:<18} {:8.2f} {:8.2f} {:8.2f} {:8.2f}   (wall time from one finished frame to the next: the frame time)", "period", pp[0], pp[1], pp[2], pp[3]);
   std::println("{:<18} {:8.2f} {:8.2f} {:8.2f} {:8.2f}   (sum over modules, all threads)", "step cpu", sc_[0], sc_[1], sc_[2], sc_[3]);
   std::println("{:<18} {:8.2f} {:8.2f} {:8.2f} {:8.2f}", "shade cpu", sh_[0], sh_[1], sh_[2], sh_[3]);
   long alloc_frames = 0, alloc_total = 0;
@@ -701,6 +870,12 @@ int main(int argc, char** argv) try {
   rusage ru{};
   getrusage(RUSAGE_SELF, &ru);
   std::println("allocations in the frame loop: {} in {} of {} frames", alloc_total, alloc_frames, frames - 1);
+  if (frames > 36 && sched1[2] > 0) {  // (threads made before the loop: main, workers, picture thread)
+    const double thread_ms = loop_ms * static_cast<double>(A.threads), busy = sched1[0] - sched0[0], waiting = sched1[1] - sched0[1];
+    std::println("threads over frames 36 on: CPU {:.1f} ms per frame; of {} threads' time busy {:.0f}%, waiting for a core {:.0f}%, idle {:.0f}%",
+                 busy / static_cast<double>(frames - 36), A.threads, 100.0 * busy / thread_ms, 100.0 * waiting / thread_ms,
+                 100.0 * (1.0 - (busy + waiting) / thread_ms));
+  }
   std::println("memory: effects resident {:.0f} KB, module scratch {:.1f} MB, peak RSS {:.1f} MB", static_cast<double>(resident) / 1024.0,
                static_cast<double>(scratch) / 1048576.0, static_cast<double>(ru.ru_maxrss) / 1024.0);
   for (const Rule& r : rules) std::println("rule '{}' fired at {:.2f} s", r.name, r.fired_at);
@@ -713,19 +888,24 @@ int main(int argc, char** argv) try {
     for (const char* n : kStageNames) o << ',' << n;
     o << ",total";
     for (const auto& m : owned) o << ',' << m->name() << "_step," << m->name() << "_shade";
-    o << ",frame_thread_cpu_ms,step_thread_cpu_ms,rgb_fnv\n";
+    o << ",frame_thread_cpu_ms,step_thread_cpu_ms,rgb_fnv,period,wait_images,wait_picture,output,shade_thread_cpu_ms";
+    for (const char* n : kStageNames) o << ",cpu_" << n;
+    o << '\n';
     for (int f = 0; f < frames; ++f) {
       o << f << ',' << std::format("{:.3f}", static_cast<double>(f) / 30.0) << ',' << n_active[zs(f)] << ',' << n_parts[zs(f)] << ',' << allocs[zs(f)];
       for (const double v : prof[zs(f)]) o << std::format(",{:.3f}", v);
       o << std::format(",{:.3f}", total[zs(f)]);
       for (const auto& [a, b] : mod_prof[zs(f)]) o << std::format(",{:.3f},{:.3f}", a, b);
-      o << std::format(",{:.3f},{:.3f},{:016x}\n", frame_cpu[zs(f)], step_cpu_frame[zs(f)], sums[zs(f)]);
+      o << std::format(",{:.3f},{:.3f},{:016x},{:.3f},{:.3f},{:.3f},{:.3f},{:.3f}", frame_cpu[zs(f)], step_cpu_frame[zs(f)], sums[zs(f)], period[zs(f)],
+                       wait_images[zs(f)], wait_picture[zs(f)], output_ms[zs(f)], shade_cpu_frame[zs(f)]);
+      for (const double v : cpu[zs(f)]) o << std::format(",{:.3f}", v);
+      o << '\n';
     }
     std::ofstream meta(A.profile.string() + ".meta");
     meta << std::format("width,{}\nheight,{}\nquality,{}\nthreads,{}\nisa,{}\nmain_tile_px,{}\nmodules,{}\nsetup_ms,{:.1f}\nresident_kb,{:.1f}\nscratch_mb,{:.2f}\npeak_rss_mb,{:.1f}\n"
-                        "alloc_total,{}\nalloc_frames,{}\nfires_lit,{}\n",
-                        A.width, A.height, q, pool.threads(), isa_name(isa), T, owned.size(), setup_ms, static_cast<double>(resident) / 1024.0,
-                        static_cast<double>(scratch) / 1048576.0, static_cast<double>(ru.ru_maxrss) / 1024.0, alloc_total, alloc_frames, lit);
+                        "alloc_total,{}\nalloc_frames,{}\nfires_lit,{}\nmode,{}\n",
+                        A.width, A.height, q, A.threads, isa_name(isa), T, owned.size(), setup_ms, static_cast<double>(resident) / 1024.0,
+                        static_cast<double>(scratch) / 1048576.0, static_cast<double>(ru.ru_maxrss) / 1024.0, alloc_total, alloc_frames, lit, mode_name);
     for (const auto& m : owned) meta << std::format("module,{},{},{},{:.2f}\n", m->name(), m->effect().m.effect, m->size(), static_cast<double>(m->runner().scratch_bytes()) / 1048576.0);
     for (const Rule& r : rules) meta << std::format("rule,{},{:.3f}\n", r.name, r.fired_at);
   }

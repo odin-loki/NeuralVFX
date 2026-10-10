@@ -258,6 +258,12 @@ Every frame runs in this order (`src/compose/script_run.cpp`):
 
 A module woken by a landing in step 9 is drawn from the next frame (it has not stepped yet).
 
+With `Options::overlap` (the default of `nvfx_scene_script`; §7.3), step 10 after the shading is drawn on a thread of
+its own while steps 1 to 9 of the next frame run: what the picture needs (the light, the bus's heat, the particles, the
+shock fronts, the scorch marks, the modules' places and the frame's settings) is copied first, and the next frame's
+shading waits until the modules' images have been drawn. The frames are the same to the bit; `render(f)` then returns
+with frame f + 1's state already computed.
+
 ### 4.8 The fireball as a script, to the bit
 
 `examples/scenes/fireball.nvfxs` is the fireball of §6, rewritten from `tools/nvfx_fireball.cpp`. It gives the same
@@ -393,7 +399,7 @@ The video itself is not in git (data rules): it is written where `--out` says.
 
 Measured with `nvfx_fireball --profile`, which times every stage of every frame. The machine is the report's
 4-core machine, with AVX2 unless the row says otherwise. The figures are medians over the frames after the detonation,
-when everything runs.
+when everything runs. §7.3 has the second optimisation round (provisional numbers).
 
 ### 7.1 After the first optimisation round
 
@@ -518,7 +524,134 @@ What the profile shows:
 - **perf** (6 s of the scene): the runtime's rollout step 13%, the compositor's bilinear helper 18%, tone mapping 8%,
   drawing 8% plus its ownership weights 6%, distortion 7%, background 6% plus `sinf` 5%, bloom 8%, shading 3%.
 
-§7.1 has the same measurements after the first optimisation round.
+§7.1 has the same measurements after the first optimisation round, §7.3 after the second.
+
+### 7.3 After the second optimisation round
+
+**Provisional.** Every number in this section was measured on the report's 4-core machine while two training jobs ran
+on it (load average 1.3 to 4 before the runs), old and new code interleaved run by run. They are to be replaced by a
+re-timing on a quiet machine with the commands at the end of the section.
+
+Six changes, all exact: every one of the 270 frames has the same RGB checksum as the old code's
+(`tools/opt2/verify.sh`): at 1280 x 720 on 1, 2, 3 and 4 threads, stage by stage, captured or overlapped, with the
+baseline or the AVX2 row kernels; and on 1 and 4 threads with the baseline and AVX-512 runtimes, tiles at half size,
+at 640 x 360 and at 1920 x 1080. The scripted fireball gives the hand-written one's frames, all 270 of them (its
+keyframes match `v1_frozen.csv`), and the frame loop still allocates nothing.
+
+1. **The picture of a frame is drawn while the next frame's state is computed.** `Frame::capture()` copies what the
+   picture needs (the frame's settings, the light, the bus's heat, the particles, the shock fronts, the scorch marks,
+   and the modules' places, opacity and groups) and `Frame::render()` draws it. A `PictureThread` runs `render()` on a
+   thread of its own (one of the `--threads`) while the main thread computes the next frame's script, step, couplings,
+   bus, light and particles, then waits until the modules' images have been drawn before it shades them again (§4.7).
+   After the detonation the four threads are idle 4 to 5% of the time, against 14% without the overlap
+   (`nvfx_fireball` prints these shares from the kernel's per-thread accounting; the rest of their time was busy,
+   70%, or waiting for a core the training jobs had, 25%).
+2. **The thread pool takes jobs from several threads at once.** A thread waiting for its own job's last tasks, or for
+   the other thread's picture, runs other jobs' tasks instead of sleeping. With two threads the pool has no workers
+   and shares its jobs between the main thread and the picture thread.
+3. **Fewer full-screen passes.** The background and the modules are drawn in one pass. The distortion computes only
+   the pixels that move (30 to 55% of them after the detonation) and leaves the copy back into the screen to bloom's
+   bright pass, which reads each screen row anyway. Bloom's last pass (adding mip 0 to the screen) is done by tone
+   mapping.
+4. **Work per row or run instead of per pixel.** The light in the background and the bus's heat in the haze are
+   bilinear lookups in coarse grids: their first half (along x) is now done once per grid row, and each pixel blends
+   two such rows, in the same order of operations. The haze is tested per block of 256 pixels instead of per row. The
+   sky's stars are found once per run of columns with the same key (about 3) and band of rows, and the ground's
+   texture is hashed per run of 2 columns. Drawing a tile row scans for its first and last non-empty pixel from the
+   span outside which the shader left the image +0, and skips the four factors of y of the ownership weight where
+   they are all 1.
+5. **Wider vectors where they pay.** Tone mapping and bloom's passes are row kernels compiled twice: for the baseline
+   ISA and for AVX2 without FMA, which gives the same bits (the same IEEE operations on each value, in the same
+   order, only more values at once). Tone mapping clamps its level as a float before making it an integer (the same
+   level for every value that can arrive, and no integer min and max, which SSE2 lacks), and on AVX2 works on two
+   pixels per vector; the bright pass computes luminance four pixels at a time.
+6. **The runtime's rollout buffers on 64-byte boundaries** (the cache-aligned allocator of the drift prior, now in
+   `src/runtime/rt_aligned.hpp`): no 32-byte load straddles two cache lines. The model step takes 12% less CPU time;
+   the runtime's parity tests and the fireball's frames are unchanged.
+
+Tried and not kept:
+- **Distortion at half resolution** (the displacement at the centres of 2 x 2 blocks, interpolated; the screen still
+  sampled at every pixel): 66.7 to 78.8 dB PSNR on the eight keyframes against the exact frames and 72.1 dB over the
+  whole video (worst frame 63.8 dB), but only 1 ms less CPU per frame at 1280 x 720 (8.9 against 9.9 ms): resampling
+  the screen at each moved pixel is most of the cost, and it stays at full resolution. Removed.
+- **Light at half resolution:** the light's grid already has 8-pixel cells and costs 0.6 ms; the background now
+  blends two of its rows per pixel. Nothing left to gain.
+- **Bloom's last pass resampled once per row of mip 0** (as the light): it cost bloom more than it saved tone mapping.
+
+Not done: **the modules' working memory** is unchanged (127 MB at 1280 x 720, 294 MB at 1920 x 1080). Of the 127 MB,
+102 MB are the rollout runners' rings of padded rows and row records, which hold a lag of up to the whole tile
+because the flow's speed is not bounded. Rings shared by the threads that step (one set per thread, 31 MB for four)
+would bring the modules to about 56 MB, but the runner would have to take its scratch from outside. Peak resident
+memory grew from 247 to 257 MB (the copies the capture takes and the per-row lookups).
+
+Configurations (the least of three runs' medians, frames after the detonation; before: commit d41adff, the code of
+§7.1, with its frame time the sum of its stages; after: the time between finished frames, overlapped; the CPU columns
+are thread CPU time summed over the modules, after). The machine's load moved between runs, so compare a row's two
+columns (interleaved), not rows with each other: the AVX-512 row ran in a quieter moment than the AVX2 one.
+
+| configuration | before: ms per frame | after: ms per frame | p90 | max | frames per second | speed-up | model step, CPU ms | model shading, CPU ms |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| 1280 x 720, 4 threads | 26.7 | **16.8** | 20.1 | 24 | **59.6** | 1.59x | 10.7 | 5.2 |
+| 1280 x 720, 2 threads | 33.6 | 25.8 | 30.2 | 54 | 38.7 | 1.30x | 11.2 | 5.5 |
+| 1280 x 720, 1 thread | 62.7 | 51.2 | 62.4 | 86 | 19.5 | 1.22x | 11.0 | 5.6 |
+| 1280 x 720, 4 threads, baseline ISA (SSE2) | 24.4 | 17.0 | 20.1 | 49 | 58.9 | 1.44x | 18.7 | 8.8 |
+| 1280 x 720, 4 threads, AVX-512 | 20.3 | 12.2 | 13.6 | 18 | 82.1 | 1.66x | 9.4 | 5.1 |
+| 1280 x 720, 4 threads, tiles at half size | 15.6 | 10.3 | 12.7 | 18 | 96.7 | 1.50x | 5.3 | 1.6 |
+| 640 x 360, 4 threads | 7.6 | 4.5 | 5.8 | 10 | 222 | 1.68x | 5.0 | 1.7 |
+| 1920 x 1080, 4 threads | 45.7 | **29.3** | 35.6 | 63 | **34.1** | 1.56x | 21.0 | 11.7 |
+
+Stages at 1280 x 720, drawn stage by stage (`--stages`) so that each is timed alone (median ms per frame, 3 runs each,
+interleaved; before: commit d41adff):
+
+| stage | 4 threads, before | 4 threads, after | 1 thread, before | 1 thread, after |
+|---|---:|---:|---:|---:|
+| step the learned models (up to 10 at once) | 4.8 | 4.2 | 12.1 | 11.0 |
+| couplings | 1.0 | 0.7 | 1.2 | 1.1 |
+| field bus | 0.7 | 0.6 | 0.7 | 0.6 |
+| light | 0.5 | 0.4 | 0.6 | 0.6 |
+| particles (update and draw) | 0.3 | 0.3 | 0.3 | 0.3 |
+| shade the models | 2.4 | 2.2 | 5.8 | 5.7 |
+| background | 2.5 | 1.6 | 6.3 | 4.0 |
+| draw the modules | 3.2 | 2.5 | 8.4 | 6.9 |
+| distortion | 4.5 | 3.7 | 12.1 | 9.5 |
+| bloom | 3.6 | 2.1 | 8.0 | 4.9 |
+| tone mapping and grain | 2.7 | 2.2 | 7.2 | 5.6 |
+| the frame (the stages one after another) | 26.3 | 21.1 | 62.7 | 49.7 |
+
+Overlapped, a frame's picture runs alongside the next frame's state, so the stages' wall times are longer and their
+sum is not the frame time; what counts is the time between finished frames (`period`): 16.5, 16.6 and 17.6 ms in the
+same three rounds (p90 18.7 to 20.6, maxima 24 to 29 ms), against 19.0 to 21.6 ms stage by stage and 26.2 to 27.3 ms
+before. The main thread then waits 3.3 to 3.7 ms per frame for the last picture, running its tasks meanwhile. The
+scripted fireball (`nvfx_scene_script`, overlapped by default) went from 26.7 and 27.7 to 18.3 and 18.6 ms per frame
+in two interleaved rounds (it costs a little more than the hand-written one before and after).
+
+The picture of the cost now:
+- **The frame is close to its CPU time over the threads.** After the detonation a frame takes about 49 ms of CPU at
+  1280 x 720 and 101 ms at 1920 x 1080, over all threads; with the threads idle 4 to 5% of the time, a quiet machine
+  should give about 13 and 26 ms per frame (to be measured).
+- **The learned models are a larger share:** the model step and shading take 17 of 50 ms of CPU (before: 18 of 62).
+- **The remaining picture stages are per-pixel arithmetic:** the distortion's resampling of moved pixels (with two
+  `sinf` per hot pixel), tone mapping, drawing the tiles and bloom's bright pass. At 1920 x 1080 bloom and tone
+  mapping grow faster than the pixel count (reading the 33 MB float screen twice).
+- **Stalls:** the waiting threads now run each other's tasks, and a stall in one stream is partly hidden by the other,
+  but a worker that loses its core while it holds a task still holds up that task's job. On the shared machine the
+  maxima were 24 to 29 ms at 1280 x 720 overlapped, and one run at 1920 x 1080 had a 224 ms frame (frames 53 to 55,
+  every stage slow at once, at load 4: the machine, not the pipeline).
+
+To re-time (from the repository's root, with the old code built beside it, e.g. `git worktree add ../before d41adff`):
+
+```sh
+cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release && cmake --build build
+cmake -S ../before -B ../before/build -G Ninja -DCMAKE_BUILD_TYPE=Release && cmake --build ../before/build --target nvfx_fireball
+MODELS=$NEURALVFX_DATA/experiments/models/d tools/opt2/table.sh ../before/build/nvfx_fireball build/nvfx_fireball /tmp/t2 3   # the table above
+tools/opt2/time_fireball.sh /tmp/s2 3 "old_t1|../before/build/nvfx_fireball|--threads 1" "new_t1|build/nvfx_fireball|--threads 1 --stages --no-checksums" \
+  "old_t4|../before/build/nvfx_fireball|--threads 4" "new_t4|build/nvfx_fireball|--threads 4 --stages --no-checksums" \
+  "ov_t4|build/nvfx_fireball|--threads 4 --no-checksums"                                                            # the stages
+tools/opt2/verify.sh ../before/build/nvfx_fireball build/nvfx_fireball /tmp/v2                                  # the same frames
+```
+
+The summaries come from `tools/opt2/summary.sh` (medians from frame 36 on); `--raw` writes every frame's RGB for PSNR
+comparisons.
 
 ## 8. Limits and what a product feature needs
 
@@ -540,8 +673,9 @@ What the profile shows:
   the scales avoids it; a bilinear deposit would fix it but changes the fireball's frames, so it was left for now.
 - **The units are shared because the simulator is shared.** Effects trained on other data (footage, another solver)
   would need a map between their units.
-- **Cost:** see §7. After the first round the scene runs at 42 frames per second at 1280 x 720 on 4 CPU threads; the
-  compositing still runs on every pixel at full resolution.
+- **Cost:** see §7. After the first round the scene ran at 42 frames per second at 1280 x 720 on 4 CPU threads;
+  after the second, which draws each picture while the next frame's state is computed, about 60 (provisional,
+  §7.3). The compositing still runs on every pixel at full resolution.
 
 What it needs to become a product feature:
 1. A C API: `nvfx_scene_create`, modules placed in it, `nvfx_scene_couple(...)`, `nvfx_scene_field(...)`, one
@@ -549,8 +683,8 @@ What it needs to become a product feature:
    on fire?).
 2. A viewer to edit scripts live (the format and its runner exist, §4), and scripts reachable from the C API.
 3. Training with couplings in the loop: done for the explosion (§9); smoke and fire need another round.
-4. A cheaper compositor: SIMD, half-resolution light and distortion, and the engine's own renderer doing the drawing
-   (the fields can be uploaded as textures).
+4. A cheaper compositor: the engine's own renderer doing the drawing (the fields can be uploaded as textures). The
+   CPU compositor has had its SIMD and fewer passes (§7.3); distortion at half resolution did not pay.
 
 ## 9. Couplings in training (study I)
 

@@ -206,6 +206,21 @@ TEST(Script, EverythingPlaysTheSameOnAnyNumberOfThreads) {
   EXPECT_EQ(one.keyframes().size(), 2u);
 }
 
+// Options::overlap draws each picture while the next frame's state is computed: the same frames.
+TEST(Script, OverlapGivesTheSameFrames) {
+  const sc::Script s = sc::parse(kEverything, "everything");
+  sc::Scene one(s, tiny_loader(), {1, Isa::base}), two(s, tiny_loader(), {2, Isa::base, true}), three(s, tiny_loader(), {3, Isa::base, true});
+  std::vector<std::uint8_t> a(160 * 90 * 3), b(a.size()), c(a.size());
+  for (int f = 0; f < one.frames(); ++f) {
+    one.render(f, a);
+    two.render(f, b);
+    three.render(f, c);
+    ASSERT_EQ(a, b) << "frame " << f;
+    ASSERT_EQ(a, c) << "frame " << f;
+  }
+  EXPECT_EQ(three.rule_count("boom"), 1);
+}
+
 // --- the runner matches the same scene written in C++ ------------------------------------------------------------------
 
 constexpr const char* kMini = R"(

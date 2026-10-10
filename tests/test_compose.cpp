@@ -7,6 +7,7 @@
 #include <atomic>
 #include <cstring>
 #include <numeric>
+#include <thread>
 
 namespace {
 
@@ -28,6 +29,41 @@ TEST(Compose, PoolRunsEveryTaskOnce) {
   int n = 0;
   one.run(10, [&](int) { ++n; });
   EXPECT_EQ(n, 10);
+}
+
+// Jobs posted from several threads at once (a frame's state and the last frame's picture): every task runs once, and
+// a thread that waits for another's work runs pool tasks meanwhile.
+TEST(Compose, PoolRunsJobsFromSeveralThreadsAtOnce) {
+  for (const int threads : {1, 2, 4}) {
+    Pool pool(threads);
+    constexpr int kCallers = 3, kRounds = 40;
+    std::vector<std::vector<std::atomic<int>>> hits(kCallers);
+    for (auto& h : hits) h = std::vector<std::atomic<int>>(kRounds * 64);
+    std::atomic<int> finished{0};
+    std::vector<std::thread> callers;
+    for (int c = 0; c < kCallers; ++c) {
+      callers.emplace_back([&, c] {
+        for (int r = 0; r < kRounds; ++r) {
+          const int n = 1 + (r * 7 + c * 13) % 64;
+          pool.run(n, [&](int i) {
+            volatile float x = 0.f;  // a little work, so that jobs overlap
+            for (int k = 0; k < 200 * (i % 5); ++k) x = x + 1.f;
+            hits[z(c)][z(r * 64 + i)].fetch_add(1);
+          });
+        }
+        finished.fetch_add(1);
+        pool.wake();
+      });
+    }
+    pool.help_until([&] { return finished.load() == kCallers; });
+    for (auto& t : callers) t.join();
+    for (int c = 0; c < kCallers; ++c) {
+      for (int r = 0; r < kRounds; ++r) {
+        const int n = 1 + (r * 7 + c * 13) % 64;
+        for (int i = 0; i < 64; ++i) ASSERT_EQ(hits[z(c)][z(r * 64 + i)].load(), i < n ? 1 : 0) << threads << " threads, caller " << c << " round " << r;
+      }
+    }
+  }
 }
 
 TEST(Compose, TilesOfAGroupShareOwnershipEverywhere) {
@@ -234,6 +270,57 @@ TEST(Compose, ScenesRenderTheSameOnAnyNumberOfThreads) {
   EXPECT_EQ(a, b);
   long sum = std::accumulate(a.begin(), a.end(), 0L);
   EXPECT_GT(sum, 0L);
+}
+
+// The picture captured and rendered in one go, at once or on the picture thread while the next frame's state is
+// computed, is the stage-by-stage picture to the bit, on any number of threads.
+TEST(Compose, CapturedAndOverlappedPicturesAreTheStagesPictures) {
+  constexpr int kFrames = 14;
+  std::vector<std::vector<std::uint8_t>> ref(kFrames, std::vector<std::uint8_t>(160 * 90 * 3));
+  {
+    MiniScene s(1);
+    for (int f = 0; f < kFrames; ++f) s.step(f, ref[z(f)]);
+  }
+  for (const int threads : {1, 3}) {
+    MiniScene s(threads);
+    std::vector<std::uint8_t> rgb(ref[0].size());
+    for (int f = 0; f < kFrames; ++f) {
+      s.step_captured(f, rgb);
+      ASSERT_EQ(rgb, ref[z(f)]) << "captured, " << threads << " threads, frame " << f;
+    }
+  }
+  for (const int threads : {1, 2, 3}) {  // the scene's pool, plus the picture thread
+    MiniScene s(threads);
+    PictureThread picture(s.frame, s.pool);
+    std::array<std::vector<std::uint8_t>, 2> rgb{ref[0], ref[0]};
+    s.state(0);
+    s.shade();
+    for (int f = 0; f < kFrames; ++f) {
+      s.capture();
+      picture.start(rgb[z(f % 2)], 0.8f, 1.f);
+      s.state(f + 1);
+      picture.wait_images();
+      s.shade();
+      picture.wait();
+      ASSERT_EQ(rgb[z(f % 2)], ref[z(f)]) << "overlapped, " << threads << " threads, frame " << f;
+    }
+  }
+}
+
+// The picture's row kernels for the baseline ISA and for AVX2 (without FMA) give the same bits.
+TEST(Compose, RowKernelsGiveTheSameBitsOnEveryIsa) {
+#if defined(__x86_64__)
+  if (!__builtin_cpu_supports("avx2")) GTEST_SKIP() << "no AVX2";
+#endif
+  MiniScene a(2), b(2);
+  a.frame.use_avx2(false);
+  b.frame.use_avx2(true);
+  std::vector<std::uint8_t> ra(160 * 90 * 3), rb(ra.size());
+  for (int f = 0; f < 14; ++f) {
+    a.step_captured(f, ra);
+    b.step_captured(f, rb);
+    ASSERT_EQ(ra, rb) << "frame " << f;
+  }
 }
 
 }  // namespace

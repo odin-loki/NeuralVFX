@@ -7,6 +7,7 @@
 
 #include <neuralfx/rollout.hpp>
 
+#include <array>
 #include <cmath>
 #include <cstdint>
 #include <memory>
@@ -80,8 +81,27 @@ struct MiniScene {
     frame.ground_y = 80.f;
   }
 
-  // One frame of the whole pipeline into rgb (160 * 90 * 3).
+  // One frame of the whole pipeline into rgb (160 * 90 * 3), the picture stage by stage.
   void step(int f, std::span<std::uint8_t> rgb) {
+    state(f);
+    shade();
+    frame.background(light, scorch, pool);
+    frame.draw(all, pool);
+    frame.particles(parts);
+    frame.distort(shocks, bus, pool);
+    frame.bloom(0.8f, 1.f, pool);
+    frame.finish(rgb, pool);
+  }
+  // The same, the picture captured and rendered in one go.
+  void step_captured(int f, std::span<std::uint8_t> rgb) {
+    state(f);
+    shade();
+    capture();
+    frame.render(rgb, 0.8f, 1.f, pool);
+  }
+
+  // The frame's state: script, step, couplings, bus, fields, light, particles.
+  void state(int f) {
     const float t = static_cast<float>(f) / 30.f;
     frame.time = t;
     pool.run(static_cast<int>(all.size()), [&](int i) { all[static_cast<std::size_t>(i)]->step(); });
@@ -98,15 +118,12 @@ struct MiniScene {
     light.update(bus, 0.2f, {0.1f, 0.05f, 0.f}, pool);
     if (f % 5 == 0) parts.spawn(Kind::ember, 60.f, 70.f, 20.f, -80.f, 1.f, 1.f, 2.f);
     parts.update(1.f / 30.f, &bus, 1.f, frame.ground_y);
-    pool.run(static_cast<int>(all.size()), [&](int i) { all[static_cast<std::size_t>(i)]->shade(&light); });
-    const std::array<float, 4> scorch[1] = {{80.f, 82.f, 20.f, 0.5f}};
-    frame.background(light, scorch, pool);
-    frame.draw(all, pool);
-    frame.particles(parts);
-    frame.distort(shocks, bus, pool);
-    frame.bloom(0.8f, 1.f, pool);
-    frame.finish(rgb, pool);
   }
+  void shade() {
+    pool.run(static_cast<int>(all.size()), [&](int i) { all[static_cast<std::size_t>(i)]->shade(&light); });
+  }
+  void capture() { frame.capture(light, scorch, all, parts, shocks, bus); }
+  std::array<std::array<float, 4>, 1> scorch{{{80.f, 82.f, 20.f, 0.5f}}};
 };
 
 // A scene script that uses every statement, value shape, field and action (test_script.cpp, alloc_test.cpp), for the

@@ -11,6 +11,7 @@
 #include <neuralfx/nvfx.h>
 #include <neuralfx/rollout.hpp>
 
+#include <array>
 #include <atomic>
 #include <cstdio>
 #include <cstdlib>
@@ -219,7 +220,28 @@ int run_compose() {
   g_counting = false;
   const long n = g_allocations.load();
   std::printf("composed scene 160x90: %ld allocations in 99 frames\n", n);
-  return n == 0 ? 0 : 1;
+  // the same with the picture drawn on its own thread while the next frame's state is computed
+  nfx::compose::testing::MiniScene over(2);
+  nfx::compose::PictureThread picture(over.frame, over.pool);
+  std::array<std::vector<std::uint8_t>, 2> bufs{rgb, rgb};
+  const auto frame = [&](int f, bool count_from_start) {
+    over.capture();
+    picture.start(bufs[static_cast<std::size_t>(f % 2)], 0.8f, 1.f);
+    if (count_from_start) g_counting = true;  // the picture thread's first picture is counted too
+    over.state(f + 1);
+    picture.wait_images();
+    over.shade();
+    picture.wait();
+  };
+  over.state(0);
+  over.shade();
+  g_allocations = 0;
+  frame(0, true);  // (the capture of the first frame sizes what the pictures need: outside the count)
+  for (int f = 1; f < 100; ++f) frame(f, false);
+  g_counting = false;
+  const long m = g_allocations.load();
+  std::printf("composed scene 160x90, picture overlapped: %ld allocations in 100 pictures and 99 frames\n", m);
+  return n == 0 && m == 0 ? 0 : 1;
 }
 
 // A scripted scene (src/compose/script.hpp): rules on time, shocks, the bus and landings, emitters, every kind of field,
@@ -227,19 +249,23 @@ int run_compose() {
 int run_script() {
   namespace sc = nfx::compose::script;
   const sc::Script s = sc::parse(nfx::compose::testing::kEverything, "everything");
-  sc::Scene scene(s, [](const std::string& file) { return nfx::compose::testing::tiny_effect(file == "other" ? 4 : 3); }, {2, nfx::compose::best_isa()});
-  std::vector<std::uint8_t> rgb(static_cast<std::size_t>(scene.width()) * static_cast<std::size_t>(scene.height()) * 3);
-  scene.render(0, rgb);  // warm-up outside the count
-  g_allocations = 0;
-  g_counting = true;
-  for (int f = 1; f < scene.frames(); ++f) scene.render(f, rgb);
-  g_counting = false;
-  const long n = g_allocations.load();
-  int fired = 0;
-  for (const auto& r : scene.rules_fired()) fired += r.second < 1e30f;
-  std::printf("scripted scene %dx%d: %ld allocations in %d frames (%d of %zu rules fired)\n", scene.width(), scene.height(), n, scene.frames() - 1, fired,
-              scene.rules_fired().size());
-  return n == 0 && fired >= 6 ? 0 : 1;
+  int failures = 0;
+  for (const bool overlap : {false, true}) {
+    sc::Scene scene(s, [](const std::string& file) { return nfx::compose::testing::tiny_effect(file == "other" ? 4 : 3); }, {2, nfx::compose::best_isa(), overlap});
+    std::vector<std::uint8_t> rgb(static_cast<std::size_t>(scene.width()) * static_cast<std::size_t>(scene.height()) * 3);
+    scene.render(0, rgb);  // warm-up outside the count
+    g_allocations = 0;
+    g_counting = true;
+    for (int f = 1; f < scene.frames(); ++f) scene.render(f, rgb);
+    g_counting = false;
+    const long n = g_allocations.load();
+    int fired = 0;
+    for (const auto& r : scene.rules_fired()) fired += r.second < 1e30f;
+    std::printf("scripted scene %dx%d%s: %ld allocations in %d frames (%d of %zu rules fired)\n", scene.width(), scene.height(), overlap ? ", overlapped" : "", n,
+                scene.frames() - 1, fired, scene.rules_fired().size());
+    failures += n == 0 && fired >= 6 ? 0 : 1;
+  }
+  return failures;
 }
 
 }  // namespace
