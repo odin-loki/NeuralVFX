@@ -663,7 +663,7 @@ void write_figure(const fs::path& path, const std::string& title, const Family& 
     const auto X = [&](double kb) { return x0 + (std::log(std::clamp(kb, klo, khi)) - std::log(klo)) / (std::log(khi) - std::log(klo)) * pw; };
     const auto Y = [&](double q) { return y0 + ph - (std::clamp(q, qlo, qhi) - qlo) / (qhi - qlo) * ph; };
     o << std::format("<text x=\"{}\" y=\"{}\" font-size=\"13\" font-weight=\"600\" fill=\"{}\">{}</text>\n", x0, y0 - 30, ink,
-                     panel == 0 ? "Memory: bytes held while playing (flipbook texture, network as stored)" : "Disk: both sides losslessly packed; codecs' bitstream");
+                     panel == 0 ? "Memory while playing: flipbook texture, network as stored" : "Disk: both sides losslessly packed; video bitstreams");
     for (double kb = klo; kb <= khi * 1.01; kb *= 4) {
       o << std::format("<line x1=\"{:.1f}\" y1=\"{}\" x2=\"{:.1f}\" y2=\"{}\" stroke=\"{}\" stroke-width=\"1\"/>\n", X(kb), y0, X(kb), y0 + ph, grid);
       o << std::format("<text x=\"{:.1f}\" y=\"{}\" font-size=\"11\" fill=\"{}\" text-anchor=\"middle\">{:g}</text>\n", X(kb), y0 + ph + 16, ink2, kb);
@@ -678,7 +678,7 @@ void write_figure(const fs::path& path, const std::string& title, const Family& 
       std::string d;
       for (std::size_t i = 0; i < env.size(); ++i) {
         const double kb = env[i].first / 1024;
-        if (kb < klo || kb > khi) continue;
+        if (kb < klo || kb > khi || env[i].second < qlo || env[i].second > qhi) continue;  // drawn inside the frame only
         d += std::format("{}{:.1f},{:.1f} ", d.empty() ? "M" : "L", X(kb), Y(env[i].second));
       }
       o << std::format("<path d=\"{}\" fill=\"none\" stroke=\"{}\" stroke-width=\"2\" stroke-linejoin=\"round\"/>\n", d, colour);
