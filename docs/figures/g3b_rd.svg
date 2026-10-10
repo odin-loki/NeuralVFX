@@ -1,0 +1,143 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="706" height="530" viewBox="0 0 706 530" font-family="system-ui, -apple-system, Segoe UI, Helvetica, Arial, sans-serif">
+<rect width="706" height="530" fill="#fcfcfb"/>
+<text x="52" y="24" font-size="16" font-weight="600" fill="#0b0b0b">G3b: a frame model plus a coded residual, against video codecs and flipbooks</text>
+<text x="52" y="44" font-size="12" fill="#52514e">Means over the 12 study A clips. G3b bytes include the packed frame model (grid_m 8-bit, about 87 KB).</text>
+<text x="52" y="60" font-size="12" fill="#52514e">Lossless points (crf 0) are off the scale.</text>
+<line x1="52.0" y1="80.0" x2="70.0" y2="80.0" stroke="#2a78d6" stroke-width="3"/>
+<circle cx="61.0" cy="80.0" r="4" fill="#2a78d6" stroke="#fcfcfb" stroke-width="2"/>
+<text x="76.0" y="84.0" font-size="12" fill="#0b0b0b">G3b</text>
+<line x1="113.8" y1="80.0" x2="131.8" y2="80.0" stroke="#eb6834" stroke-width="2"/>
+<circle cx="122.8" cy="80.0" r="4" fill="#eb6834" stroke="#fcfcfb" stroke-width="2"/>
+<text x="137.8" y="84.0" font-size="12" fill="#0b0b0b">H.264 RGB</text>
+<line x1="215.2" y1="80.0" x2="233.2" y2="80.0" stroke="#1baf7a" stroke-width="2"/>
+<circle cx="224.2" cy="80.0" r="4" fill="#1baf7a" stroke="#fcfcfb" stroke-width="2"/>
+<text x="239.2" y="84.0" font-size="12" fill="#0b0b0b">H.265 4:4:4</text>
+<line x1="329.8" y1="80.0" x2="347.8" y2="80.0" stroke="#eda100" stroke-width="2"/>
+<circle cx="338.8" cy="80.0" r="4" fill="#eda100" stroke="#fcfcfb" stroke-width="2"/>
+<text x="353.8" y="84.0" font-size="12" fill="#0b0b0b">VP9 alpha</text>
+<line x1="431.2" y1="80.0" x2="449.2" y2="80.0" stroke="#e87ba4" stroke-width="2"/>
+<circle cx="440.2" cy="80.0" r="4" fill="#e87ba4" stroke="#fcfcfb" stroke-width="2"/>
+<text x="455.2" y="84.0" font-size="12" fill="#0b0b0b">AV1 4:4:4</text>
+<line x1="532.6" y1="80.0" x2="550.6" y2="80.0" stroke="#008300" stroke-width="2"/>
+<circle cx="541.6" cy="80.0" r="4" fill="#008300" stroke="#fcfcfb" stroke-width="2"/>
+<text x="556.6" y="84.0" font-size="12" fill="#0b0b0b">SVT-AV1 4:2:0</text>
+<line x1="52.0" y1="100.0" x2="70.0" y2="100.0" stroke="#6250d6" stroke-width="2" stroke-dasharray="5 3"/>
+<circle cx="61.0" cy="100.0" r="4" fill="#6250d6" stroke="#fcfcfb" stroke-width="2"/>
+<text x="76.0" y="104.0" font-size="12" fill="#0b0b0b">flipbook BC3, packed</text>
+<line x1="226.0" y1="100.0" x2="244.0" y2="100.0" stroke="#e34948" stroke-width="2" stroke-dasharray="5 3"/>
+<circle cx="235.0" cy="100.0" r="4" fill="#e34948" stroke="#fcfcfb" stroke-width="2"/>
+<text x="250.0" y="104.0" font-size="12" fill="#0b0b0b">flipbook raw, packed</text>
+<text x="52.0" y="126.0" font-size="14" font-weight="600" fill="#0b0b0b">12 study A clips (64 frames, 128 x 128)</text>
+<line x1="52.0" y1="466.0" x2="692.0" y2="466.0" stroke="#e6e5e1" stroke-width="1"/>
+<text x="46.0" y="470.0" font-size="11" fill="#52514e" text-anchor="end">10</text>
+<line x1="52.0" y1="429.3" x2="692.0" y2="429.3" stroke="#e6e5e1" stroke-width="1"/>
+<text x="46.0" y="433.3" font-size="11" fill="#52514e" text-anchor="end">15</text>
+<line x1="52.0" y1="392.7" x2="692.0" y2="392.7" stroke="#e6e5e1" stroke-width="1"/>
+<text x="46.0" y="396.7" font-size="11" fill="#52514e" text-anchor="end">20</text>
+<line x1="52.0" y1="356.0" x2="692.0" y2="356.0" stroke="#e6e5e1" stroke-width="1"/>
+<text x="46.0" y="360.0" font-size="11" fill="#52514e" text-anchor="end">25</text>
+<line x1="52.0" y1="319.3" x2="692.0" y2="319.3" stroke="#e6e5e1" stroke-width="1"/>
+<text x="46.0" y="323.3" font-size="11" fill="#52514e" text-anchor="end">30</text>
+<line x1="52.0" y1="282.7" x2="692.0" y2="282.7" stroke="#e6e5e1" stroke-width="1"/>
+<text x="46.0" y="286.7" font-size="11" fill="#52514e" text-anchor="end">35</text>
+<line x1="52.0" y1="246.0" x2="692.0" y2="246.0" stroke="#e6e5e1" stroke-width="1"/>
+<text x="46.0" y="250.0" font-size="11" fill="#52514e" text-anchor="end">40</text>
+<line x1="52.0" y1="209.3" x2="692.0" y2="209.3" stroke="#e6e5e1" stroke-width="1"/>
+<text x="46.0" y="213.3" font-size="11" fill="#52514e" text-anchor="end">45</text>
+<line x1="52.0" y1="172.7" x2="692.0" y2="172.7" stroke="#e6e5e1" stroke-width="1"/>
+<text x="46.0" y="176.7" font-size="11" fill="#52514e" text-anchor="end">50</text>
+<line x1="52.0" y1="136.0" x2="692.0" y2="136.0" stroke="#e6e5e1" stroke-width="1"/>
+<text x="46.0" y="140.0" font-size="11" fill="#52514e" text-anchor="end">55</text>
+<line x1="126.0" y1="136.0" x2="126.0" y2="466.0" stroke="#e6e5e1" stroke-width="1"/>
+<text x="126.0" y="482.0" font-size="11" fill="#52514e" text-anchor="middle">100 B</text>
+<line x1="267.6" y1="136.0" x2="267.6" y2="466.0" stroke="#e6e5e1" stroke-width="1"/>
+<text x="267.6" y="482.0" font-size="11" fill="#52514e" text-anchor="middle">1 KB</text>
+<line x1="409.1" y1="136.0" x2="409.1" y2="466.0" stroke="#e6e5e1" stroke-width="1"/>
+<text x="409.1" y="482.0" font-size="11" fill="#52514e" text-anchor="middle">10 KB</text>
+<line x1="550.6" y1="136.0" x2="550.6" y2="466.0" stroke="#e6e5e1" stroke-width="1"/>
+<text x="550.6" y="482.0" font-size="11" fill="#52514e" text-anchor="middle">100 KB</text>
+<line x1="52.0" y1="466.0" x2="692.0" y2="466.0" stroke="#8a8984" stroke-width="1"/>
+<text x="372.0" y="500.0" font-size="11" fill="#52514e" text-anchor="middle">bytes per clip (log scale)</text>
+<text transform="translate(16.0,301.0) rotate(-90)" font-size="11" fill="#52514e" text-anchor="middle">active PSNR (dB)</text>
+<polyline points="320.8,413.1 362.3,392.6 400.7,377.8 434.8,370.8 467.7,368.4 468.6,363.5 505.7,341.8 537.9,330.3 " fill="none" stroke="#e34948" stroke-width="2" stroke-linejoin="round" stroke-dasharray="5 3"/>
+<circle cx="320.8" cy="413.1" r="4" fill="#e34948" stroke="#fcfcfb" stroke-width="2"><title>flipbook raw, packed: 2379 B, 17.21 dB</title></circle>
+<circle cx="362.3" cy="392.6" r="4" fill="#e34948" stroke="#fcfcfb" stroke-width="2"><title>flipbook raw, packed: 4672 B, 20.01 dB</title></circle>
+<circle cx="400.7" cy="377.8" r="4" fill="#e34948" stroke="#fcfcfb" stroke-width="2"><title>flipbook raw, packed: 8719 B, 22.02 dB</title></circle>
+<circle cx="434.8" cy="370.8" r="4" fill="#e34948" stroke="#fcfcfb" stroke-width="2"><title>flipbook raw, packed: 15200 B, 22.98 dB</title></circle>
+<circle cx="467.7" cy="368.4" r="4" fill="#e34948" stroke="#fcfcfb" stroke-width="2"><title>flipbook raw, packed: 25945 B, 23.30 dB</title></circle>
+<circle cx="468.6" cy="363.5" r="4" fill="#e34948" stroke="#fcfcfb" stroke-width="2"><title>flipbook raw, packed: 26334 B, 23.97 dB</title></circle>
+<circle cx="505.7" cy="341.8" r="4" fill="#e34948" stroke="#fcfcfb" stroke-width="2"><title>flipbook raw, packed: 48171 B, 26.94 dB</title></circle>
+<circle cx="537.9" cy="330.3" r="4" fill="#e34948" stroke="#fcfcfb" stroke-width="2"><title>flipbook raw, packed: 81342 B, 28.50 dB</title></circle>
+<polyline points="288.8,412.8 327.3,392.8 363.9,378.8 397.2,372.4 426.1,370.4 435.2,365.1 471.1,345.8 502.3,337.0 542.3,319.9 576.3,286.5 " fill="none" stroke="#6250d6" stroke-width="2" stroke-linejoin="round" stroke-dasharray="5 3"/>
+<circle cx="288.8" cy="412.8" r="4" fill="#6250d6" stroke="#fcfcfb" stroke-width="2"><title>flipbook BC3, packed: 1413 B, 17.25 dB</title></circle>
+<circle cx="327.3" cy="392.8" r="4" fill="#6250d6" stroke="#fcfcfb" stroke-width="2"><title>flipbook BC3, packed: 2644 B, 19.98 dB</title></circle>
+<circle cx="363.9" cy="378.8" r="4" fill="#6250d6" stroke="#fcfcfb" stroke-width="2"><title>flipbook BC3, packed: 4796 B, 21.89 dB</title></circle>
+<circle cx="397.2" cy="372.4" r="4" fill="#6250d6" stroke="#fcfcfb" stroke-width="2"><title>flipbook BC3, packed: 8239 B, 22.76 dB</title></circle>
+<circle cx="426.1" cy="370.4" r="4" fill="#6250d6" stroke="#fcfcfb" stroke-width="2"><title>flipbook BC3, packed: 13180 B, 23.03 dB</title></circle>
+<circle cx="435.2" cy="365.1" r="4" fill="#6250d6" stroke="#fcfcfb" stroke-width="2"><title>flipbook BC3, packed: 15293 B, 23.76 dB</title></circle>
+<circle cx="471.1" cy="345.8" r="4" fill="#6250d6" stroke="#fcfcfb" stroke-width="2"><title>flipbook BC3, packed: 27440 B, 26.39 dB</title></circle>
+<circle cx="502.3" cy="337.0" r="4" fill="#6250d6" stroke="#fcfcfb" stroke-width="2"><title>flipbook BC3, packed: 45577 B, 27.59 dB</title></circle>
+<circle cx="542.3" cy="319.9" r="4" fill="#6250d6" stroke="#fcfcfb" stroke-width="2"><title>flipbook BC3, packed: 87319 B, 29.92 dB</title></circle>
+<circle cx="576.3" cy="286.5" r="4" fill="#6250d6" stroke="#fcfcfb" stroke-width="2"><title>flipbook BC3, packed: 151715 B, 34.48 dB</title></circle>
+<polyline points="347.2,355.7 368.0,344.0 385.8,332.8 403.5,322.2 424.6,310.2 453.5,296.1 478.4,285.6 507.9,275.8 " fill="none" stroke="#008300" stroke-width="2" stroke-linejoin="round"/>
+<circle cx="347.2" cy="355.7" r="4" fill="#008300" stroke="#fcfcfb" stroke-width="2"><title>SVT-AV1 4:2:0: 3654 B, 25.03 dB</title></circle>
+<circle cx="368.0" cy="344.0" r="4" fill="#008300" stroke="#fcfcfb" stroke-width="2"><title>SVT-AV1 4:2:0: 5127 B, 26.64 dB</title></circle>
+<circle cx="385.8" cy="332.8" r="4" fill="#008300" stroke="#fcfcfb" stroke-width="2"><title>SVT-AV1 4:2:0: 6848 B, 28.16 dB</title></circle>
+<circle cx="403.5" cy="322.2" r="4" fill="#008300" stroke="#fcfcfb" stroke-width="2"><title>SVT-AV1 4:2:0: 9135 B, 29.61 dB</title></circle>
+<circle cx="424.6" cy="310.2" r="4" fill="#008300" stroke="#fcfcfb" stroke-width="2"><title>SVT-AV1 4:2:0: 12862 B, 31.25 dB</title></circle>
+<circle cx="453.5" cy="296.1" r="4" fill="#008300" stroke="#fcfcfb" stroke-width="2"><title>SVT-AV1 4:2:0: 20594 B, 33.16 dB</title></circle>
+<circle cx="478.4" cy="285.6" r="4" fill="#008300" stroke="#fcfcfb" stroke-width="2"><title>SVT-AV1 4:2:0: 30899 B, 34.60 dB</title></circle>
+<circle cx="507.9" cy="275.8" r="4" fill="#008300" stroke="#fcfcfb" stroke-width="2"><title>SVT-AV1 4:2:0: 49917 B, 35.94 dB</title></circle>
+<polyline points="350.5,353.1 373.7,335.2 393.6,319.8 412.2,304.7 433.0,288.0 460.9,266.4 484.8,248.0 513.6,225.5 550.3,198.8 628.1,147.4 " fill="none" stroke="#e87ba4" stroke-width="2" stroke-linejoin="round"/>
+<circle cx="350.5" cy="353.1" r="4" fill="#e87ba4" stroke="#fcfcfb" stroke-width="2"><title>AV1 4:4:4: 3854 B, 25.39 dB</title></circle>
+<circle cx="373.7" cy="335.2" r="4" fill="#e87ba4" stroke="#fcfcfb" stroke-width="2"><title>AV1 4:4:4: 5624 B, 27.83 dB</title></circle>
+<circle cx="393.6" cy="319.8" r="4" fill="#e87ba4" stroke="#fcfcfb" stroke-width="2"><title>AV1 4:4:4: 7769 B, 29.94 dB</title></circle>
+<circle cx="412.2" cy="304.7" r="4" fill="#e87ba4" stroke="#fcfcfb" stroke-width="2"><title>AV1 4:4:4: 10512 B, 31.99 dB</title></circle>
+<circle cx="433.0" cy="288.0" r="4" fill="#e87ba4" stroke="#fcfcfb" stroke-width="2"><title>AV1 4:4:4: 14744 B, 34.27 dB</title></circle>
+<circle cx="460.9" cy="266.4" r="4" fill="#e87ba4" stroke="#fcfcfb" stroke-width="2"><title>AV1 4:4:4: 23233 B, 37.22 dB</title></circle>
+<circle cx="484.8" cy="248.0" r="4" fill="#e87ba4" stroke="#fcfcfb" stroke-width="2"><title>AV1 4:4:4: 34262 B, 39.73 dB</title></circle>
+<circle cx="513.6" cy="225.5" r="4" fill="#e87ba4" stroke="#fcfcfb" stroke-width="2"><title>AV1 4:4:4: 54789 B, 42.80 dB</title></circle>
+<circle cx="550.3" cy="198.8" r="4" fill="#e87ba4" stroke="#fcfcfb" stroke-width="2"><title>AV1 4:4:4: 99390 B, 46.43 dB</title></circle>
+<circle cx="628.1" cy="147.4" r="4" fill="#e87ba4" stroke="#fcfcfb" stroke-width="2"><title>AV1 4:4:4: 352828 B, 53.44 dB</title></circle>
+<polyline points="389.6,363.2 400.3,353.2 413.6,343.0 433.6,329.7 456.9,314.9 487.8,297.4 512.9,285.6 539.6,275.3 " fill="none" stroke="#eda100" stroke-width="2" stroke-linejoin="round"/>
+<circle cx="389.6" cy="363.2" r="4" fill="#eda100" stroke="#fcfcfb" stroke-width="2"><title>VP9 alpha: 7282 B, 24.01 dB</title></circle>
+<circle cx="400.3" cy="353.2" r="4" fill="#eda100" stroke="#fcfcfb" stroke-width="2"><title>VP9 alpha: 8673 B, 25.39 dB</title></circle>
+<circle cx="413.6" cy="343.0" r="4" fill="#eda100" stroke="#fcfcfb" stroke-width="2"><title>VP9 alpha: 10756 B, 26.78 dB</title></circle>
+<circle cx="433.6" cy="329.7" r="4" fill="#eda100" stroke="#fcfcfb" stroke-width="2"><title>VP9 alpha: 14899 B, 28.58 dB</title></circle>
+<circle cx="456.9" cy="314.9" r="4" fill="#eda100" stroke="#fcfcfb" stroke-width="2"><title>VP9 alpha: 21757 B, 30.60 dB</title></circle>
+<circle cx="487.8" cy="297.4" r="4" fill="#eda100" stroke="#fcfcfb" stroke-width="2"><title>VP9 alpha: 36001 B, 32.99 dB</title></circle>
+<circle cx="512.9" cy="285.6" r="4" fill="#eda100" stroke="#fcfcfb" stroke-width="2"><title>VP9 alpha: 54144 B, 34.60 dB</title></circle>
+<circle cx="539.6" cy="275.3" r="4" fill="#eda100" stroke="#fcfcfb" stroke-width="2"><title>VP9 alpha: 83606 B, 36.01 dB</title></circle>
+<polyline points="319.9,383.1 333.9,377.2 361.8,361.8 398.3,335.6 435.0,308.3 471.9,279.9 507.2,251.3 541.3,224.1 " fill="none" stroke="#1baf7a" stroke-width="2" stroke-linejoin="round"/>
+<circle cx="319.9" cy="383.1" r="4" fill="#1baf7a" stroke="#fcfcfb" stroke-width="2"><title>H.265 4:4:4: 2342 B, 21.31 dB</title></circle>
+<circle cx="333.9" cy="377.2" r="4" fill="#1baf7a" stroke="#fcfcfb" stroke-width="2"><title>H.265 4:4:4: 2943 B, 22.11 dB</title></circle>
+<circle cx="361.8" cy="361.8" r="4" fill="#1baf7a" stroke="#fcfcfb" stroke-width="2"><title>H.265 4:4:4: 4633 B, 24.21 dB</title></circle>
+<circle cx="398.3" cy="335.6" r="4" fill="#1baf7a" stroke="#fcfcfb" stroke-width="2"><title>H.265 4:4:4: 8394 B, 27.78 dB</title></circle>
+<circle cx="435.0" cy="308.3" r="4" fill="#1baf7a" stroke="#fcfcfb" stroke-width="2"><title>H.265 4:4:4: 15242 B, 31.51 dB</title></circle>
+<circle cx="471.9" cy="279.9" r="4" fill="#1baf7a" stroke="#fcfcfb" stroke-width="2"><title>H.265 4:4:4: 27776 B, 35.37 dB</title></circle>
+<circle cx="507.2" cy="251.3" r="4" fill="#1baf7a" stroke="#fcfcfb" stroke-width="2"><title>H.265 4:4:4: 49309 B, 39.28 dB</title></circle>
+<circle cx="541.3" cy="224.1" r="4" fill="#1baf7a" stroke="#fcfcfb" stroke-width="2"><title>H.265 4:4:4: 85906 B, 42.99 dB</title></circle>
+<polyline points="385.2,363.4 403.4,355.7 428.1,338.0 444.4,319.5 465.8,299.4 496.2,275.1 532.0,245.8 569.5,212.8 594.3,190.3 618.5,167.1 " fill="none" stroke="#eb6834" stroke-width="2" stroke-linejoin="round"/>
+<circle cx="385.2" cy="363.4" r="4" fill="#eb6834" stroke="#fcfcfb" stroke-width="2"><title>H.264 RGB: 6775 B, 23.99 dB</title></circle>
+<circle cx="403.4" cy="355.7" r="4" fill="#eb6834" stroke="#fcfcfb" stroke-width="2"><title>H.264 RGB: 9111 B, 25.04 dB</title></circle>
+<circle cx="428.1" cy="338.0" r="4" fill="#eb6834" stroke="#fcfcfb" stroke-width="2"><title>H.264 RGB: 13630 B, 27.45 dB</title></circle>
+<circle cx="444.4" cy="319.5" r="4" fill="#eb6834" stroke="#fcfcfb" stroke-width="2"><title>H.264 RGB: 17761 B, 29.98 dB</title></circle>
+<circle cx="465.8" cy="299.4" r="4" fill="#eb6834" stroke="#fcfcfb" stroke-width="2"><title>H.264 RGB: 25140 B, 32.72 dB</title></circle>
+<circle cx="496.2" cy="275.1" r="4" fill="#eb6834" stroke="#fcfcfb" stroke-width="2"><title>H.264 RGB: 41255 B, 36.04 dB</title></circle>
+<circle cx="532.0" cy="245.8" r="4" fill="#eb6834" stroke="#fcfcfb" stroke-width="2"><title>H.264 RGB: 73796 B, 40.03 dB</title></circle>
+<circle cx="569.5" cy="212.8" r="4" fill="#eb6834" stroke="#fcfcfb" stroke-width="2"><title>H.264 RGB: 135960 B, 44.53 dB</title></circle>
+<circle cx="594.3" cy="190.3" r="4" fill="#eb6834" stroke="#fcfcfb" stroke-width="2"><title>H.264 RGB: 203363 B, 47.59 dB</title></circle>
+<circle cx="618.5" cy="167.1" r="4" fill="#eb6834" stroke="#fcfcfb" stroke-width="2"><title>H.264 RGB: 301821 B, 50.76 dB</title></circle>
+<polyline points="542.1,300.1 544.0,285.0 546.9,278.1 550.8,271.0 557.3,260.8 564.3,250.5 576.4,232.5 583.5,223.0 601.3,192.2 605.1,193.1 621.5,160.9 " fill="none" stroke="#2a78d6" stroke-width="3" stroke-linejoin="round"/>
+<circle cx="542.1" cy="300.1" r="4.5" fill="#2a78d6" stroke="#fcfcfb" stroke-width="2"><title>G3b: 87046 B, 32.62 dB</title></circle>
+<circle cx="544.0" cy="285.0" r="4.5" fill="#2a78d6" stroke="#fcfcfb" stroke-width="2"><title>G3b: 89770 B, 34.68 dB</title></circle>
+<circle cx="546.9" cy="278.1" r="4.5" fill="#2a78d6" stroke="#fcfcfb" stroke-width="2"><title>G3b: 94142 B, 35.63 dB</title></circle>
+<circle cx="550.8" cy="271.0" r="4.5" fill="#2a78d6" stroke="#fcfcfb" stroke-width="2"><title>G3b: 100222 B, 36.58 dB</title></circle>
+<circle cx="557.3" cy="260.8" r="4.5" fill="#2a78d6" stroke="#fcfcfb" stroke-width="2"><title>G3b: 111417 B, 37.99 dB</title></circle>
+<circle cx="564.3" cy="250.5" r="4.5" fill="#2a78d6" stroke="#fcfcfb" stroke-width="2"><title>G3b: 124882 B, 39.39 dB</title></circle>
+<circle cx="576.4" cy="232.5" r="4.5" fill="#2a78d6" stroke="#fcfcfb" stroke-width="2"><title>G3b: 152119 B, 41.83 dB</title></circle>
+<circle cx="583.5" cy="223.0" r="4.5" fill="#2a78d6" stroke="#fcfcfb" stroke-width="2"><title>G3b: 170579 B, 43.14 dB</title></circle>
+<circle cx="601.3" cy="192.2" r="4.5" fill="#2a78d6" stroke="#fcfcfb" stroke-width="2"><title>G3b: 228174 B, 47.33 dB</title></circle>
+<circle cx="605.1" cy="193.1" r="4.5" fill="#2a78d6" stroke="#fcfcfb" stroke-width="2"><title>G3b: 242581 B, 47.21 dB</title></circle>
+<circle cx="621.5" cy="160.9" r="4.5" fill="#2a78d6" stroke="#fcfcfb" stroke-width="2"><title>G3b: 316848 B, 51.61 dB</title></circle>
+</svg>

@@ -117,6 +117,13 @@ target_link_libraries(neuralfx_ddpm PUBLIC neuralfx_dcm neuralfx_train)
 neuralfx_defaults(neuralfx_ddpm)
 neuralfx_simd(neuralfx_ddpm)
 
+# G3 (docs/DCM.md §8): a codec for authored runs of rollout effects, built from their learned dynamics, with a small
+# integer context-mixing coder for the corrections. Baseline ISA, no contraction: the encoder's reconstruction loop and
+# the decoder's must round alike.
+add_library(neuralfx_codec STATIC src/codec/rcoder.cpp src/codec/run_codec.cpp src/codec/clip_residual.cpp)
+target_link_libraries(neuralfx_codec PUBLIC neuralfx_model)
+neuralfx_defaults(neuralfx_codec)
+
 if(NEURALFX_BUILD_TOOLS)
   foreach(tool nvfx_sim nvfx_train nvfx_eval nvfx_experiment nvfx_ingest)
     add_executable(${tool} tools/${tool}.cpp)
@@ -159,6 +166,10 @@ if(NEURALFX_BUILD_TOOLS)
   add_executable(nvfx_pack tools/nvfx_pack.cpp)
   target_link_libraries(nvfx_pack PRIVATE neuralfx_core ZLIB::ZLIB)
   neuralfx_defaults(nvfx_pack)
+  # G3: the run codec's study (rate-distortion against flipbooks and video codecs through an ffmpeg pipe).
+  add_executable(nvfx_g3 tools/nvfx_g3.cpp)
+  target_link_libraries(nvfx_g3 PRIVATE neuralfx_codec neuralfx_io neuralfx_train nvfx)
+  neuralfx_defaults(nvfx_g3)
   add_executable(nvfx_scene examples/scene_bench.cpp)
   target_link_libraries(nvfx_scene PRIVATE nvfx)
   neuralfx_defaults(nvfx_scene)
@@ -179,9 +190,10 @@ if(NEURALFX_BUILD_TESTS)
   include(GoogleTest)
   add_executable(neuralfx_tests tests/test_proto.cpp tests/test_sim.cpp tests/test_baselines.cpp tests/test_train.cpp
                                 tests/test_runtime.cpp tests/test_ingest.cpp tests/test_rollout.cpp tests/test_compose.cpp
-                                tests/test_dcm.cpp tests/test_cm.cpp tests/test_dcm_fine.cpp tests/test_dcm_ddpm.cpp tests/test_script.cpp)
+                                tests/test_dcm.cpp tests/test_cm.cpp tests/test_dcm_fine.cpp tests/test_dcm_ddpm.cpp tests/test_script.cpp
+                                tests/test_g3_codec.cpp)
   target_link_libraries(neuralfx_tests PRIVATE neuralfx_proto neuralfx_io neuralfx_train nvfx neuralfx_compose neuralfx_dcm
-                                               neuralfx_dcm_fine neuralfx_ddpm GTest::gtest_main)
+                                               neuralfx_dcm_fine neuralfx_ddpm neuralfx_codec GTest::gtest_main)
   neuralfx_defaults(neuralfx_tests)
   target_compile_definitions(neuralfx_tests PRIVATE NEURALFX_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
   gtest_discover_tests(neuralfx_tests TEST_PREFIX "neuralfx." DISCOVERY_MODE PRE_TEST PROPERTIES LABELS neuralfx)

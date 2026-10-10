@@ -642,6 +642,349 @@ contexts do not encode the held-out sites. It is also a narrower win than it loo
 runtime already has, so it buys continuity (no restarts, no crossfades), not better pictures, for 0.4 ms per frame and
 1.5 MB. Extending it to smoke and explosions is a later decision and has not been started.
 
+## 8. G3: a codec from the learned dynamics (stage S4)
+
+Status: **done** (10 October 2026). G3a on the three rollout effects; G3b on study A's 12 clips. Rules (§3): a
+rate-distortion result, claimed only where the curves cross, at a stated quality.
+
+**Result in one line:** G3a wins only at low rates. Up to 18 dB active PSNR on fire and smoke and 22 dB on explosions
+(50 bytes to about 2.5 KB per run) it needs fewer bytes than every video codec and flipbook tested, between a hundredth
+and a half of the closest; the curves tie at 20 to 22 dB (fire), 20 dB (smoke) and 24 to 26 dB (explosions); above that
+AV1, H.265 and H.264 in 4:4:4 need 1.5 to 7 times fewer bytes. G3b (a frame model plus a residual) loses to every video
+codec at every quality.
+
+Code: `include/neuralfx/codec/` and `src/codec/` (library `neuralfx_codec`): `run_codec.hpp` (G3a), `rcoder.hpp` (the
+coder), `clip_residual.hpp` (G3b); `tools/nvfx_g3.cpp` (the study: `probe | ladder | baselines | g3b | summary |
+timing`) and `tools/video_pipe.hpp` (the ffmpeg harness); `tests/test_g3_codec.cpp`. Tables:
+`results/experiments/g3_*.csv` and `g3b_*.csv`. Figures: `docs/figures/g3_rd.svg`, `docs/figures/g3b_rd.svg`. Data and
+logs under `NEURALVFX_DATA/g3`, outside git.
+
+### 8.1 What was built
+
+An **authored run** is one real simulation run at a chosen setting and seed: here 240 frames at 128 x 128 after a
+warm-up (explosions: 89 frames from the first), rendered by the simulation's own renderer. The v1 effect of study D
+(frozen, `v1_frozen.csv`) is the decoder's model; the stream holds only what the model cannot know.
+
+| part of the stream | what it holds | bytes |
+|---|---|---|
+| header | magic, version, a 32-bit tag of the model, controls (3 x 16 bits), the run's noise seed, the start time, frames, size, the settings (8-bit codes), a 16-bit header check | 38-45 |
+| coarse start | the true 32 x 32 coarse state (u, v, heat, soot) at the first frame, quantised as a correction of the nearest stored start point | 0-1,500 |
+| fine start (option) | the true fine heat and soot at 64 px, as a correction of the upsampled coarse state | about 350 |
+| coarse corrections | every k frames: true coarse state minus the v1 stepper's prediction, quantised with step q x the channel's scale; heat and soot, optionally velocity | per setting |
+| fine residuals (option) | every kf frames: true fine heat and soot minus the detail layer's, block-averaged to 32, 64 or 128 px, quantised with step qf x the renderer's input scale; the coarse heat and soot then follow the fine fields' block means | per setting |
+| trailer | a hash of the decoder's final state, and a checksum of the header, every coded integer and that hash | 8 |
+
+With the arithmetic coder's 4 closing bytes, the smallest stream (a start with no correction) is 50 bytes.
+
+Everything between corrections is the v1 effect playing: the stepper driven by **the simulator's own forcing noise with
+the run's seed**, the detail layer and the renderer. That is why a header alone (seed, controls, start time) already
+follows the run in rough outline: the noise pulls runs with the same seed together (REPORT §6.1).
+
+- **Closed loop.** The encoder runs the decoder's reconstruction and computes each correction against it. Decoder and
+  encoder share one `Loop` (the reference implementation of `rollout.hpp`, plain float C++, baseline ISA, no
+  contraction), so the decoder reproduces the encoder's frames byte for byte (tested on five settings, and on one
+  setting of every run of the study).
+- **The coder** (`rcoder.hpp`): PAQ/lpaq-style context mixing, integer arithmetic only. Each integer is binarised (zero,
+  sign, magnitude class in unary, mantissa bits); each decision is predicted by nine context models (neighbours in the
+  plane, the same cell in the previous plane of the same kind, the other channels of the cell, the position, and two
+  optional side contexts), mixed by a logistic mixer selected by decision and local activity, refined by an APM, and
+  written by a 32-bit carry-less binary arithmetic coder. By default no context depends on floating-point state, so a
+  stream decodes on any build; the side context (a class of the decoder's own prediction) is an option.
+- **Refusal.** A stream for another model (tag), a damaged header (16-bit check, before the loop runs), a decoder that
+  runs past its input, or a checksum mismatch: the decoder returns an error and no frames.
+- **The renderer** in the codec is v1's, byte for byte (`render_u8`, tested against `rollout::render`), without the
+  reference's per-pixel cost: the directional soot sums are made once per coarse cell and pixels the material gate
+  closes skip the MLP. It halved the study's encode time (17 to 9.5 ms per frame on a loaded machine).
+
+### 8.2 Protocol as run
+
+- **Runs.** Validation: study G's validation settings (`std::mt19937_64 rng(2027)`, §4) with seeds 800000 + i, the first
+  6 of the 10 (CPU budget: the machine ran at a load of 5 to 16 from other agents throughout). Test: study B's 10
+  held-out settings with seeds 900000 + i, as study D's endless runs. The 8 salt-2 tracking runs of `d-eval` were not
+  run (CPU budget); the tool includes them (`--max-runs 18`), and its CSVs resume. Each run: a real simulation at 128 x
+  128, 150 frames of warm-up (explosions: 1), then 240 frames (explosions: 89) are the run, rendered by the simulation's
+  own renderer. Every method codes and is scored on exactly these frames.
+- **Quality:** active PSNR (the primary measure, as in the report: pixels visible in either frame), PSNR and SSIM of the
+  decoded 128 x 128 RGBA frames against the real frames, pooled over the run (`metrics::score`).
+- **Bytes:** what is stored for the run. G3a: the stream; the effect file (82 to 274 KB, 45 to 56 KB packed) is shared
+  by every run and every endless use of the effect and is not counted, but is given beside the results. Video: the
+  elementary stream (SEI with encoder settings removed from H.264 and H.265; IVF framing subtracted; VP9 alpha: the
+  whole WebM file, since its alpha lives in the container). Flipbooks: as stored (BC3 or raw RGBA,
+  `flipbook::memory_bytes`) and packed by the model-file coder (`cm::pack_tensors`, as `nvfx_pack`); flipbooks above 1
+  MB stored are given stored only (packing them costs about a minute of CPU each).
+- **Choices on validation only:** the codec's frontier (every setting no other setting beats in mean bytes and mean
+  active PSNR over the validation runs), the one-change-at-a-time variants (fire only), and the video formats (4:2:0,
+  4:4:4, RGB, 64 and 32 px; one validation run per effect). Then test once.
+- **Comparisons on test, paired over the 10 runs:** for each run, each method's curve (its settings sorted by bytes, the
+  best quality at or below each size) is interpolated in log bytes. At a stated active PSNR: the ratio of bytes, G3a
+  over the other (geometric mean, 95% paired bootstrap interval, 10,000 resamples). At a stated byte budget: the
+  difference in active PSNR. A method whose smallest setting already exceeds the stated quality is counted at that
+  smallest size ("at its floor"); a method that cannot reach a quality on a run leaves that run out (the counts are in
+  the CSV).
+- **Video codecs** (`tools/video_pipe.hpp`): one thread, constant quality, one keyframe for the whole run; x264 `-preset
+  veryslow`, x265 `-preset slow`, libvpx-vp9 `-deadline good -cpu-used 1`, libaom `-cpu-used 4`, SVT-AV1 `-preset 6`;
+  colour (premultiplied RGB over black) above the alpha as grey in one frame twice as tall, except VP9 with native alpha
+  (WebM). Lower resolutions are box-downsampled before coding and upsampled bilinearly after decoding, as a game samples
+  a smaller texture.
+
+### 8.3 Validation: what the codec's curve is made of
+
+The ladder (`nvfx_g3 ladder --set val`, `novar` for smoke and explosions): the start alone (from the nearest stored
+start, its correction at five steps, or none); coarse corrections every k = 1 to 32 frames at q = 0.2 to 3.2 channel
+scales; fine residuals every frame at 64 and 128 px at qf = 0.025 to 0.4; and, on fire, one change at a time at two
+coarse points and one fine point. 6 validation runs per effect; means over runs (`g3_val_ladder.csv`). The frontier
+(`g3_val_frontier.csv`; 28 settings for fire, 22 for smoke, 27 for explosions) has three parts:
+
+| part | settings | fire | smoke | explosion |
+|---|---|---|---|---|
+| header only | the nearest stored start as it is, the run's seed | 50 B, 16.1 dB | 50 B, 14.4 dB | 50 B, 13.3 dB |
+| start and coarse heat and soot | k 1 to 32, q 0.4 to 3.2 | 0.27 to 5.8 KB, 16.8 to 21.3 dB | 0.24 to 12 KB, 15.3 to 21.0 dB | 0.08 to 2.3 KB, 15.7 to 25.5 dB |
+| fine residual every frame | 64 px, then 128 px, qf 0.2 down to 0.025 | 8.4 to 204 KB, 21.8 to 39.7 dB | 21 to 259 KB, 21.8 to 31.4 dB | 5.3 to 60 KB, 26.2 to 30.7 dB |
+
+(bytes per run of 240 frames, explosions 89; active PSNR.)
+
+- **The run's seed is worth most of the start.** A 50-byte header (controls, seed, start time; the nearest stored start
+  as it is) already gives 16.1 dB on fire. Coding the true coarse start adds 0.7 to 1.2 dB for 220 to 390 bytes; after
+  that, frequent coarse corrections at a coarse step beat rarer fine ones (the frontier runs k = 8 to 1 at q = 3.2 and
+  1.6 before it reaches q = 0.8).
+- **Coarse corrections saturate at about 21 dB** (fire and smoke; 25.5 dB on explosions). The coarse state fixes where
+  the material is, not the fine structure inside each 4 x 4 block, which the detail layer invents. Past that, only the
+  fine residual raises quality, and v1's renderer caps it: on the true fine fields it reaches about 49 dB on fire, 31 dB
+  on smoke and 29 dB on explosions (`d_track.csv`, `renderer_on_true_fields`), which is where the curves flatten.
+
+One change at a time (fire, paired over the 6 runs; bytes as a ratio, quality as a difference in active PSNR):
+
+| change | at k 8, q 0.8 | at k 4, q 0.4 | at a fine residual (qf 0.07, 128 px) |
+|---|---|---|---|
+| nearest rounding instead of the dead zone (offset 0.3) | bytes x1.18 [1.15, 1.22], +0.19 dB [+0.06, +0.31] | x1.15 [1.13, 1.16], +0.02 dB (tie) | x1.26 [1.24, 1.28], +1.68 dB [+1.61, +1.74] |
+| velocity corrected too | x1.23 [1.17, 1.30], +0.89 dB [+0.61, +1.21] | x1.38 [1.30, 1.46], +0.91 dB [+0.73, +1.09] | |
+| fine start coded at 64 px | x1.17 [1.16, 1.17], +0.00 dB (tie) | x1.05 [1.05, 1.06], +0.01 dB (tie) | |
+| coarse start from zero instead of the nearest stored start | x0.95 [0.91, 0.99], -0.12 dB (tie) | x0.98 [0.97, 0.99], -0.05 dB (tie) | |
+| side context (a class of the decoder's prediction) | x0.94 [0.93, 0.94], identical frames | x0.95 [0.94, 0.95], identical frames | x0.98 [0.98, 0.98], identical frames |
+| coarse heat and soot not synced to the fine residual | | | x1.71 [1.63, 1.79], -0.05 dB [-0.09, -0.02] |
+| fine residual at 64 px instead of 128 | | | x0.28 [0.27, 0.28], -6.3 dB [-6.9, -5.8] |
+
+The dead zone and the default choices were kept; each rejected change either costs bytes for nothing or lies on the
+same curve (velocity corrections and nearest rounding at the fine point are on or near the frontier, and the frontier
+keeps them where they are). The side context saves 2 to 6% of the bytes for identical frames, but makes the stream
+decode only on builds that round alike, so it stays an option and out of the frontier.
+
+### 8.4 Test: the curves
+
+![G3a against video codecs and flipbooks: bytes per run against active PSNR, means over the 10 test runs per effect](figures/g3_rd.svg)
+
+Means over the 10 test runs (`g3_test_curves.csv`; every run's points in `g3_test_runs.csv`). G3a's points are the
+validation frontier, replayed on test.
+
+| effect | G3a: header only | G3a: best without a fine residual | G3a: largest point | smallest video stream on the ladders | AV1 4:4:4: smallest, largest | smallest packed flipbook |
+|---|---|---|---|---|---|---|
+| fire (240 frames) | 50 B, 15.7 dB | 8.6 KB, 20.8 dB | 233 KB, 39.7 dB | 4.3 KB, 16.5 dB (H.265 4:4:4 at 32 px) | 9.8 KB, 23.6 dB; 142 KB, 40.8 dB | 3.1 KB, 18.1 dB (BC3, 32 px, 15 frames) |
+| smoke (240 frames) | 50 B, 14.1 dB | 13 KB, 20.6 dB | 290 KB, 31.7 dB | 4.3 KB, 19.1 dB (H.265 4:4:4 at 32 px) | 14 KB, 25.6 dB; 189 KB, 43.8 dB | 5.3 KB, 19.3 dB (BC3, 32 px, 15 frames) |
+| explosion (89 frames) | 50 B, 14.7 dB | 2.5 KB, 24.5 dB | 69 KB, 30.9 dB | 1.7 KB, 18.3 dB (H.265 4:4:4 at 32 px) | 4.8 KB, 27.2 dB; 49 KB, 44.2 dB | 1.5 KB, 16.1 dB (BC3, 32 px, 5 frames) |
+
+(Active PSNR, means over the runs. The validation means of the same settings are within about 0.5 dB of these.)
+
+- **G3a covers rates no video stream reaches.** Its smallest streams are 50 bytes per run (the header: 14 to 16 dB) and
+  a few hundred bytes (start corrections and sparse coarse corrections: 16 to 21 dB). The smallest video stream on the
+  ladders here is about 4.3 KB for 240 frames and 1.7 KB for 89 (H.265 4:4:4 at 32 px, crf 51): a video codec spends
+  about 18 bytes per frame even on frames it hardly changes.
+- **Coarse corrections saturate at 20 to 25 dB, and the fine residual is an inefficient way up.** It codes scalar
+  quantised fields pixel by pixel with no transform; a video codec's transform and motion search do the same job for 2
+  to 7 times fewer bytes. The renderer then caps it (smoke near 31 dB, explosions near 31 dB).
+- **Pixel measures favour blur at low rates.** G3a's frames are sharp, plausible detail in slightly wrong places; a
+  video codec at crf 51 is blurred. Active PSNR and SSIM both penalise the first more (G3a's SSIM at its low end is 0.64
+  to 0.75 on smoke against 0.86 for AV1's lowest point). Nothing here measures whether a frame looks like fire; this is
+  noted, not used.
+
+### 8.5 Where the curves cross
+
+Bytes G3a needs for a stated active PSNR, as a ratio of the other method's bytes at the same quality (below 1: G3a
+needs fewer), paired over the 10 test runs, 95% bootstrap interval; "(floor)": the other method's smallest stream on
+its ladder already exceeds that quality, so it is counted at that smallest size; "tie": the interval covers 1. All
+methods and qualities: `g3_test_at_quality.csv`; quality at stated byte budgets: `g3_test_at_rate.csv`.
+
+**Fire**
+
+| active PSNR | G3a bytes | AV1 4:4:4 | H.265 4:4:4 | best 64 or 32 px video | flipbook BC3, packed |
+|---:|---:|---|---|---|---|
+| 16 dB | 489 B | **0.02 [0.01, 0.04]** (floor) | **0.03 [0.01, 0.07]** (floor) | H.265 32 px: **0.04 [0.02, 0.10]** | **0.06 [0.03, 0.13]** (floor) |
+| 18 dB | 2.2 KB | **0.08 [0.03, 0.19]** (floor) | **0.12 [0.05, 0.31]** (floor) | H.265 32 px: **0.16 [0.06, 0.41]** | **0.21 [0.10, 0.45]** |
+| 20 dB | 6.3 KB | **0.36 [0.19, 0.68]** (floor) | **0.50 [0.27, 0.92]** | SVT-AV1 64 px: tie 0.53 [0.27, 1.06] | **0.50 [0.36, 0.71]** |
+| 22 dB | 14 KB | tie 1.14 [0.78, 1.65] (floor) | tie 0.99 [0.75, 1.30] | AV1 64 px: tie 1.41 [0.99, 1.99] | **0.50 [0.43, 0.59]** |
+| 24 dB | 30 KB | 2.32 [1.81, 2.97] | 1.58 [1.32, 1.88] | n/a (its ladder stops below) | **0.52 [0.46, 0.60]** (n = 8) |
+| 28 dB | 72 KB | 3.34 [3.15, 3.56] | 2.14 [1.99, 2.31] | n/a (its ladder stops below) | n/a |
+| 33 dB | 125 KB | 2.74 [2.56, 2.91] | 1.66 [1.53, 1.79] | n/a (its ladder stops below) | n/a |
+
+**Smoke**
+
+| active PSNR | G3a bytes | AV1 4:4:4 | H.265 4:4:4 | best 64 or 32 px video | flipbook BC3, packed |
+|---:|---:|---|---|---|---|
+| 16 dB | 821 B | **0.03 [0.02, 0.06]** (floor) | **0.06 [0.03, 0.11]** (floor) | H.265 32 px: **0.11 [0.06, 0.22]** (floor) | **0.09 [0.05, 0.18]** (floor) |
+| 18 dB | 2.5 KB | **0.12 [0.08, 0.20]** (floor) | **0.23 [0.14, 0.36]** (floor) | H.265 32 px: **0.41 [0.25, 0.69]** | **0.33 [0.21, 0.54]** |
+| 20 dB | 11 KB | **0.48 [0.27, 0.86]** (floor) | tie 0.86 [0.48, 1.54] (floor) | H.265 32 px: tie 1.31 [0.77, 2.26] | tie 0.95 [0.61, 1.48] |
+| 22 dB | 27 KB | 1.53 [1.08, 2.13] (floor) | 2.35 [1.74, 3.06] | SVT-AV1 64 px: 2.56 [1.78, 3.61] | 1.33 [1.04, 1.69] |
+| 24 dB | 90 KB | 5.85 [4.99, 6.92] (floor) | 6.20 [5.57, 7.05] | SVT-AV1 64 px: 7.35 [6.70, 8.07] (n = 9) | 1.86 [1.62, 2.16] |
+| 28 dB | 157 KB | 7.13 [6.54, 7.91] | 5.64 [5.17, 6.32] | n/a (its ladder stops below) | tie 1.06 [0.95, 1.19] (n = 5) |
+
+**Explosion**
+
+| active PSNR | G3a bytes | AV1 4:4:4 | H.265 4:4:4 | best 64 or 32 px video | flipbook BC3, packed |
+|---:|---:|---|---|---|---|
+| 16 dB | 73 B | **0.01 [0.01, 0.02]** (floor) | **0.02 [0.02, 0.03]** (floor) | H.265 32 px: **0.04 [0.03, 0.05]** | **0.04 [0.03, 0.06]** |
+| 18 dB | 144 B | **0.03 [0.02, 0.04]** (floor) | **0.04 [0.03, 0.06]** (floor) | H.265 32 px: **0.07 [0.05, 0.09]** | **0.07 [0.04, 0.10]** |
+| 20 dB | 291 B | **0.05 [0.04, 0.07]** (floor) | **0.08 [0.06, 0.11]** (floor) | H.265 32 px: **0.12 [0.09, 0.17]** | **0.10 [0.07, 0.13]** |
+| 22 dB | 750 B | **0.13 [0.09, 0.18]** (floor) | **0.19 [0.13, 0.28]** | H.265 64 px: **0.21 [0.14, 0.30]** | **0.15 [0.10, 0.21]** |
+| 24 dB | 3.3 KB | **0.42 [0.23, 0.76]** (floor) | **0.52 [0.29, 0.95]** | SVT-AV1 64 px: tie 0.58 [0.32, 1.02] | **0.20 [0.14, 0.28]** |
+| 26 dB | 11 KB | tie 1.44 [0.73, 2.64] | tie 1.35 [0.74, 2.34] | n/a (its ladder stops below) | **0.40 [0.24, 0.66]** |
+| 28 dB | 25 KB | 4.23 [3.39, 5.17] (n = 9) | 3.52 [2.98, 4.16] (n = 9) | n/a (its ladder stops below) | tie 0.85 [0.69, 1.05] (n = 9) |
+| 30 dB | 39 KB | 5.22 [4.51, 6.04] (n = 8) | 4.19 [3.83, 4.61] (n = 8) | n/a (its ladder stops below) | **0.78 [0.63, 0.93]** (n = 8) |
+
+(Bold: G3a needs fewer bytes, the interval below 1. H.264 4:4:4, VP9 with alpha and raw flipbooks are in the CSV; H.264
+sits between H.265 and VP9, VP9 with alpha is the weakest video codec here, raw packed flipbooks are close to BC3 packed
+ones. The 64 and 32 px variants were run only at their lowest rungs, which is where they matter.)
+
+- **Fire:** G3a needs fewer bytes than every baseline up to 18 dB; at 20 dB still fewer than the full-size video codecs
+  (0.36 [0.19, 0.68] of AV1 4:4:4, at its floor; 0.50 [0.27, 0.92] of H.265 4:4:4) and the flipbooks, but it ties the 64
+  px AV1 variants; at 22 dB it ties H.264, H.265 and AV1 4:4:4, and from 24 dB it needs 1.5 to 3.4 times their bytes.
+  Against packed flipbooks it needs 0.15 to 0.6 of their bytes wherever both reach (18 to 26 dB).
+- **Smoke:** the same shape, crossing lower: fewer bytes than every video codec up to 18 dB (0.12 [0.08, 0.20] of AV1 at
+  18 dB), a tie with H.265 and H.264 at 20 dB, and 1.5 to 7 times the video codecs' bytes from 22 dB. Packed BC3
+  flipbooks beat it at 22 to 26 dB (1.3 to 1.9 times).
+- **Explosions:** the widest win: fewer bytes than every baseline up to 22 dB, and at 24 dB than all but SVT-AV1 at 64
+  px (0.58 [0.32, 1.02], a tie; 0.42 [0.23, 0.76] of AV1 4:4:4 at its floor); a tie with every video codec at 26 dB; 3.5
+  to 5.2 times the bytes of H.265 and AV1 4:4:4 from 28 dB. An explosion is short (89 frames) and much of it is the
+  start, which a few hundred bytes of coarse correction pin down: 291 bytes give 20 dB, where the smallest video stream
+  is 1.7 KB for 18 dB. Packed BC3 flipbooks need more bytes than G3a from 16 to 30 dB (a tie at 28).
+
+### 8.6 G3b: a frame model plus a coded residual (study A's clips)
+
+![G3b against video codecs and flipbooks on study A's 12 clips](figures/g3b_rd.svg)
+
+`nvfx_g3 g3b`: study A's 12 clips (64 frames at 128 x 128, 4 per effect), each with its own grid_m 8-bit frame model
+(study A, rendered through the runtime). The stream is the packed model (`cm::pack_model`, about 87 KB) plus the
+8-bit RGBA residual at steps 2 to 48 levels (dead zone 0.3), coded by the same coder; the model alone is the first
+point. No choice was made on these clips (the steps are a ladder, all reported); the video formats are those chosen
+for G3a, with H.264 RGB and SVT-AV1 4:2:0, at their full ladders, then extended to crf 0 to 8 (H.264 RGB) and 0 to 4
+(AV1 4:4:4) to compare above 44 dB. Paired over the 12 clips (`g3b_curves.csv`, `g3b_at_quality.csv`):
+
+| active PSNR | G3b bytes | AV1 4:4:4 | H.265 4:4:4 | H.264 RGB | flipbook BC3, packed |
+|---:|---:|---|---|---|---|
+| 26 dB | 87 KB (its floor) | 19.27 [17.07, 21.84] | 14.15 [11.36, 17.56] | 8.41 [6.50, 11.02] | 3.15 [2.20, 4.45] |
+| 30 dB | 87 KB | 10.99 [8.96, 13.55] | 7.54 [5.81, 9.88] | 5.19 [3.96, 6.92] | tie 1.27 [0.97, 1.79] (n = 11) |
+| 34 dB | 94 KB | 6.74 [5.46, 8.50] | 4.45 [3.50, 5.80] | 3.35 [2.54, 4.54] | tie 0.79 [0.66, 1.01] (n = 8) |
+| 38 dB | 116 KB | 4.58 [3.80, 5.68] | 3.00 [2.45, 3.76] | 2.31 [1.85, 2.97] | n/a |
+| 42 dB | 156 KB | 3.41 [2.82, 4.15] | 2.77 [2.39, 3.27] (n = 8) | 1.78 [1.48, 2.19] | n/a |
+| 46 dB | 210 KB | 2.42 [2.01, 2.92] | n/a | 1.40 [1.16, 1.73] | n/a |
+| 50 dB | 289 KB | 1.57 [1.39, 1.76] | n/a | tie 1.13 [0.95, 1.37] | n/a |
+
+(Ratio of G3b's bytes to the other's at the same active PSNR, paired over the 12 clips; above 1: G3b needs more.)
+
+- **G3b loses to every video codec at every quality measured,** up to 50 dB. Its floor is the model: 87 KB for 32.6 dB,
+  where AV1 4:4:4 needs about 11 KB. At 40 dB AV1 needs a quarter of G3b's bytes; at 50 dB still 1.6 times fewer. Only
+  H.264 RGB ties it, at 50 dB.
+- **Against flipbooks it wins only at high quality**: packed BC3 flipbooks need fewer bytes below 30 dB, tie at 30 to 34
+  dB, and need more above (G3b 0.61 [0.57, 0.65] of their bytes at 36 dB, 6 clips).
+- The residual alone (if the model were free, which for a per-clip model it is not) costs 3 to 230 KB for 35 to 52 dB;
+  study A's frame models were not trained to be predictors for a residual, and nothing here suggests they should be.
+
+### 8.7 Costs: disk, resident memory, working memory, decode time
+
+Each measured on its own (`g3_timing.csv`). Timing: thread CPU time on one pinned core (core 3), the least of 3 decodes
+of test run b0, **while other agents loaded the machine (load 7.1 to 7.9): provisional upper bounds**, to be re-timed on
+a quiet machine:
+
+```sh
+build/nvfx_g3 summary                     # writes NEURALVFX_DATA/g3/frontier_*.txt (from the validation ladders)
+build/nvfx_g3 timing --effects fire,smoke,explosion --every 3 --reps 3 --cpu 3 --codecs x264_444,x265_444,vp9a,aom_444   # pins itself and ffmpeg to core 3
+```
+
+| | G3a | video codecs (ffmpeg, one thread) | flipbooks |
+|---|---|---|---|
+| disk per run | the stream: 50 B to 290 KB (`g3_test_curves.csv`); plus the effect (fire 82 KB, smoke 146 KB, explosion 274 KB; packed 45 to 56 KB), shared by every run and by the endless effect | the stream: 1.7 KB to 310 KB | stored 2.6 KB to 3.9 MB; packed 1.5 KB to 165 KB (above 1 MB stored: not packed) |
+| resident memory | the effect as loaded plus the stream: 163 to 357 KB (fire), 419 to 654 KB (smoke), 804 to 868 KB (explosion) | the stream | the stored flipbook (what the GPU samples) |
+| working memory | 2.7 MB (coarse corrections) to 3.0 MB (fine residuals at 128 px): the coder's tables (9 x 256 KB), one plane, the reconstruction state | ffmpeg's peak resident set: 50 to 73 MB (an upper bound: the whole program) | none; unpacking a packed flipbook needs the model-file coder's tables (up to about 70 MB, README of `results/compression`) |
+| decode | 7.8 to 9.5 ms per frame with coarse corrections, 10.7 to 11.0 ms with 64 px fine residuals, 13.7 to 15.2 ms with 128 px ones (fire, smoke, explosion); of which decoding integers 0.002 to 0.3 ms and 1.2 to 5.6 ms | 0.05 to 0.45 ms per frame (decode only, ffmpeg's own CPU time, process start included) | sampling: free on a GPU; unpacking a packed flipbook: 0.58 to 0.67 MB of stored data per second, once at load |
+
+- **The decoder runs the effect's reference code** (plain float C++, `rollout.hpp`), which is what makes it bit-exact
+  with the encoder; the optimised runtime plays the same effect in 0.8 to 0.9 ms per frame (REPORT §6.7). Decoding
+  inside the runtime would cost that plus the integers (up to 0.3 ms per frame for coarse corrections, up to 5.6 ms for
+  128 px fine residuals, this coder being plain scalar code), but the runtime's SIMD stepper does not round like the
+  reference, so its reconstruction would drift from the encoder's between corrections; making that bit-exact is work
+  this stage did not do.
+- **So G3a costs 17 to 300 times a video decoder's CPU per frame**, and about 3 MB of working memory where a flipbook
+  needs none.
+
+### 8.8 Decision
+
+The rule (§3): G3a is a rate-distortion curve, claimed only where it crosses the flipbook and video-codec curves, at a
+stated quality.
+
+**G3a is claimed at low rates only, and there against every baseline tested** (AV1, H.265, H.264 and VP9 at their
+full ladders in the formats chosen on validation, their lowest rungs at 64 and 32 px, and flipbooks stored and packed):
+
+| effect | fewer bytes than every baseline (every interval below 1) up to | there, against the closest baseline | the curves tie at | video codecs need fewer bytes from |
+|---|---|---|---|---|
+| fire | 18 dB active PSNR (2.2 KB per 8 s run) | 0.21 [0.10, 0.45] of a packed BC3 flipbook; 0.16 [0.06, 0.41] of H.265 4:4:4 at 32 px | 20 dB against AV1 and SVT-AV1 at 64 px (H.265, AV1 and H.264 at full size and every flipbook still need more there), 22 dB against all video | 24 dB: 1.6 to 2.3 times (H.265, AV1 4:4:4), up to 3.4 times at 28 to 30 dB |
+| smoke | 18 dB (2.5 KB per 8 s run) | 0.41 [0.25, 0.69] of H.265 4:4:4 at 32 px | 20 dB | 22 dB: 1.5 to 2.6 times; 6 to 7 times at 24 dB and above |
+| explosion | 22 dB (750 B per 3 s run) | 0.21 [0.14, 0.30] of H.265 4:4:4 at 64 px | 24 dB against SVT-AV1 at 64 px (0.58 [0.32, 1.02]; everything else still needs more), 26 dB against all video | 28 dB: 3.5 to 5.2 times |
+
+- **Below these qualities no video stream is that small.** The ladders' smallest streams are 4.3 KB per 240 frames and
+  1.7 KB per 89; G3a goes down to 50 bytes (14 to 16 dB) and gives 18 dB on fire for 2.2 KB, on explosions 20 dB for 291
+  bytes.
+- **Where video codecs win, they win by a lot.** Above the crossing, a transform codec with motion search spends its
+  bytes far better than G3a's per-pixel fine residual, and v1's renderer caps G3a near 31 dB on smoke and explosions.
+- **Against flipbooks** G3a needs 0.15 to 0.6 of the bytes of packed flipbooks on fire wherever both reach (18 to 26 dB)
+  and 0.04 to 0.8 on explosions up to 30 dB (a tie at 28); on smoke only up to 18 dB (packed BC3 flipbooks need 1.3 to
+  1.9 times fewer bytes at 22 to 24 dB).
+- **G3b is not claimed anywhere.**
+- **The quality where G3a wins is low.** 18 to 24 dB active PSNR is a picture that follows where the material is and how
+  it moves, with invented detail, not a copy of the frames; and G3a costs 8 to 15 ms per frame to decode in its
+  reference form against 0.05 to 0.45 ms for a video decoder (§8.7).
+
+### 8.9 What it means
+
+- **What wins is the dynamics, not the coder.** A 50-byte header (controls, seed, start time) gives 14 to 16 dB because
+  the stepper replays the simulator's own forcing noise with the run's seed, which pulls a run from the nearest stored
+  start towards the real one (REPORT §6.1). That only works for runs made by the same simulator with a known seed, which
+  is what "authored run" meant here. An effect authored elsewhere (another solver, a filmed element) has no seed to
+  replay; G3a would then start from its coarse corrections, and its low end would be worse.
+- **A use it suggests:** an exact replay of one authored run (a cut-scene, a scripted explosion) stored as a few hundred
+  bytes to a few KB next to the effect the game already has for endless play, where the run's outline matters more than
+  its pixels. For anything that must look like the frames themselves (25 dB and up), store AV1 or H.265 in 4:4:4: on
+  validation, 4:2:0 capped fire near 28.5 dB however many bytes it got, because of its saturated colours and hard edges.
+- **What would move the crossing, untried here:** a transform (or learned) coder for the fine residual instead of
+  per-pixel scalar quantisation; a better predictor of the fine field than the detail layer's invented detail; a
+  renderer closer to the simulation's (the cap on smoke and explosions); and decoding inside the runtime, which needs a
+  stepper that rounds like the reference (the runtime's SIMD code does not).
+- **What did not help** (validation, fire): velocity corrections cost 23 to 38% more bytes for 0.9 dB (they stay on the
+  frontier, as alternatives); a coded fine start costs 5 to 17% for nothing (fire forgets its start within a second);
+  coding the start from zero instead of the nearest stored start ties. Measured once, not tried further: the side
+  context (2 to 6% fewer bytes, but the stream would only decode on builds that round alike).
+- **Protocol notes.** Only study B's 10 held-out settings were used as test runs (the 8 salt-2 runs were cut for CPU,
+  and the tool can add them); validation used 6 of the 10 validation settings; the one-change-at-a-time variants were
+  run on fire only; the video formats were chosen on one validation run per effect. Active PSNR, the primary measure,
+  rewards a codec that spreads faint haze over a larger active area: some video codecs' lowest rungs score higher than
+  the next ones (the curves use the best quality at or below each size). PSNR and SSIM are in every CSV.
+- **Costs of the study:** about 3.5 to 4 CPU-hours of a budget of 8 (thread CPU logged in the CSVs: coding by G3a on
+  validation and test 1.0, by the baselines 1.1; the rest is scoring, simulation, G3b, timing, probes and builds), on a
+  machine at load 5 to 16 from other agents.
+
+Reproduce (data under `NEURALVFX_DATA`, default `/root/nvfx-data`; each step appends rows and resumes):
+
+```sh
+B=build/nvfx_g3
+$B ladder --split val --set val --max-runs 6 --no-ssim --effects fire
+$B ladder --split val --set novar --max-runs 6 --no-ssim --effects smoke,explosion
+$B baselines --split val --what video --runs v0 --codecs x264,x264_444,x264_rgb,x265,x265_444,vp9_444,vp9a,aom_444,svt,x265_444_64px,aom_444_64px,svt_64px,x265_444_32px,aom_444_32px
+$B summary                                    # the validation frontier: $NEURALVFX_DATA/g3/frontier_<effect>.txt
+for e in fire smoke explosion; do $B ladder --split test --max-runs 10 --effects $e --points $NEURALVFX_DATA/g3/frontier_$e.txt; done
+$B baselines --split test --what flipbook --max-runs 10
+$B baselines --split test --what video --max-runs 10 --codecs aom_444,x265_444,x264_444:18/24/30/42/51,vp9a:20/40/55/63,x265_444_64px:36/42/47/51,aom_444_64px:55/60/63,svt_64px:55/60/63,x265_444_32px:36/42/47/51
+$B g3b && $B g3b --codecs x264_rgb:0/4/8,aom_444:0/4
+$B summary                                    # results/experiments/g3_*.csv, g3b_*.csv, docs/figures/g3_rd.svg, g3b_rd.svg
+$B timing --effects fire,smoke,explosion --every 3 --reps 3 --cpu 3 --codecs x264_444,x265_444,vp9a,aom_444
+```
+
 ## 9. Study H: computing on compressed data (stage S9)
 
 Status: **H1 to H3 decided** (10 October 2026). Timings are **provisional**: the shared 4-core machine ran at load 9
