@@ -93,8 +93,9 @@ target_link_libraries(neuralfx_io PUBLIC neuralfx_core PRIVATE ZLIB::ZLIB)
 neuralfx_defaults(neuralfx_io)
 
 # Composed effects (docs/COMPOSE.md): rollout effects coupled through their fields, with particles, light, distortion
-# and bloom for whole scenes. A prototype over the runtime's internals, not part of the C API.
-add_library(neuralfx_compose STATIC src/compose/compose.cpp)
+# and bloom for whole scenes, field effects, and scene scripts (a text format, its parser and runner). A prototype over
+# the runtime's internals, not part of the C API.
+add_library(neuralfx_compose STATIC src/compose/compose.cpp src/compose/fields.cpp src/compose/script.cpp src/compose/script_run.cpp)
 target_include_directories(neuralfx_compose PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src/compose" "${CMAKE_CURRENT_SOURCE_DIR}/src/runtime")
 target_link_libraries(neuralfx_compose PUBLIC nvfx)
 neuralfx_defaults(neuralfx_compose)
@@ -142,6 +143,14 @@ if(NEURALFX_BUILD_TOOLS)
   if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
     target_compile_options(nvfx_fireball PRIVATE -Wno-mismatched-new-delete)  # counts allocations (replaces operator new)
   endif()
+  # Scene scripts (docs/COMPOSE.md §4): play a script to video, keyframes and a profile; check keyframes against frozen
+  # ones. Links the context-mixing library for its SHA-256.
+  add_executable(nvfx_scene_script tools/nvfx_scene_script.cpp)
+  target_link_libraries(nvfx_scene_script PRIVATE neuralfx_compose neuralfx_io neuralfx_dcm)
+  neuralfx_defaults(nvfx_scene_script)
+  if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+    target_compile_options(nvfx_scene_script PRIVATE -Wno-mismatched-new-delete)  # counts allocations (replaces operator new)
+  endif()
   # Lossless context-mixing compression of .nvfx files, and its measurement against flipbooks (results/compression).
   add_executable(nvfx_pack tools/nvfx_pack.cpp)
   target_link_libraries(nvfx_pack PRIVATE neuralfx_core ZLIB::ZLIB)
@@ -166,10 +175,11 @@ if(NEURALFX_BUILD_TESTS)
   include(GoogleTest)
   add_executable(neuralfx_tests tests/test_proto.cpp tests/test_sim.cpp tests/test_baselines.cpp tests/test_train.cpp
                                 tests/test_runtime.cpp tests/test_ingest.cpp tests/test_rollout.cpp tests/test_compose.cpp
-                                tests/test_dcm.cpp tests/test_cm.cpp tests/test_dcm_fine.cpp tests/test_dcm_ddpm.cpp)
+                                tests/test_dcm.cpp tests/test_cm.cpp tests/test_dcm_fine.cpp tests/test_dcm_ddpm.cpp tests/test_script.cpp)
   target_link_libraries(neuralfx_tests PRIVATE neuralfx_proto neuralfx_io neuralfx_train nvfx neuralfx_compose neuralfx_dcm
                                                neuralfx_dcm_fine neuralfx_ddpm GTest::gtest_main)
   neuralfx_defaults(neuralfx_tests)
+  target_compile_definitions(neuralfx_tests PRIVATE NEURALFX_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
   gtest_discover_tests(neuralfx_tests TEST_PREFIX "neuralfx." DISCOVERY_MODE PRE_TEST PROPERTIES LABELS neuralfx)
   # Counts heap allocations around nvfx_render (replaces the global operator new, so it is its own program).
   add_executable(nvfx_alloc_test tests/alloc_test.cpp)
@@ -183,5 +193,22 @@ if(NEURALFX_BUILD_TESTS)
   if(NEURALFX_BUILD_TOOLS)
     add_test(NAME neuralfx.CHostExample COMMAND nvfx_c_host --self-test)
     set_tests_properties(neuralfx.CHostExample PROPERTIES LABELS neuralfx)
+    # The fireball as a script reproduces the hand-written scene's frozen keyframes to the bit (about a minute on 2
+    # threads). Needs the study D effects (outside git): skipped when they are not in NEURALFX_MODELS_D.
+    if(DEFINED ENV{NEURALVFX_DATA})
+      set(_nvfx_data "$ENV{NEURALVFX_DATA}")
+    else()
+      set(_nvfx_data "$ENV{HOME}/nvfx-data")
+    endif()
+    set(NEURALFX_MODELS_D "${_nvfx_data}/experiments/models/d" CACHE PATH "The study D rollout effects (fire, smoke, explosion .nvfx)")
+    add_test(NAME neuralfx.ScriptedFireballBitExact
+             COMMAND nvfx_scene_script --script ${CMAKE_CURRENT_SOURCE_DIR}/examples/scenes/fireball.nvfxs --models ${NEURALFX_MODELS_D}
+                     --keyframes ${CMAKE_CURRENT_BINARY_DIR}/fireball_script_keyframes --no-video --threads 2
+                     --verify ${CMAKE_CURRENT_SOURCE_DIR}/results/experiments/v1_frozen.csv)
+    set_tests_properties(neuralfx.ScriptedFireballBitExact PROPERTIES LABELS "neuralfx;data" SKIP_RETURN_CODE 77 TIMEOUT 1200)
+    foreach(scene fireball firewall)
+      add_test(NAME neuralfx.SceneScriptChecks.${scene} COMMAND nvfx_scene_script --script ${CMAKE_CURRENT_SOURCE_DIR}/examples/scenes/${scene}.nvfxs --check)
+      set_tests_properties(neuralfx.SceneScriptChecks.${scene} PROPERTIES LABELS neuralfx)
+    endforeach()
   endif()
 endif()

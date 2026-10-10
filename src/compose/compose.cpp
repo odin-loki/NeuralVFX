@@ -758,6 +758,7 @@ void push(Module& m, const FieldBus& bus, float gain) {
 
 void apply(Module& m, const ForceField& f, float weight) {
   if (!m.active || weight <= 0.f) return;
+  if (f.kind == ForceField::Kind::heat || f.kind == ForceField::Kind::cold) return apply_heat(m, f, weight);  // fields.cpp
   const int R = m.res(), S = m.size(), C = m.channels();
   const float k = fl(S) / fl(R), sc = m.at.scale, to_cells = 1.f / (k * sc);
   auto co = m.runner().coarse_mut();
@@ -785,6 +786,12 @@ void apply(Module& m, const ForceField& f, float weight) {
           du = weight * f.u;
           dv = weight * f.v;
           break;
+        default: {  // gust, ring, attract's swirl (fields.cpp)
+          const auto uv = field_flow(f, wx, wy, weight);
+          du = uv[0];
+          dv = uv[1];
+          break;
+        }
       }
       const float a = du * to_cells, b = -dv * to_cells;
       c[0] += a;
