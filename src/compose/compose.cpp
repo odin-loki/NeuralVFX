@@ -1309,6 +1309,7 @@ Frame::Frame(int width, int height) : w_(width), h_(height), blocks_((width + kB
     h = std::max(1, (h + 1) / 2);
   }
   cols_.resize(zs(width));
+  star_runs_.reserve(zs(width));
   tile_cols_.resize(zs(kMaxTiles) * zs(width));
   seen_cols_.resize(zs(kMaxTiles));
   moved_.assign(zs(height) * zs(blocks_), {0, 0});
@@ -1370,6 +1371,14 @@ void Frame::background_columns(const Params& P, const LightView& L) {
     k.star = hx(ifloor(k.wx / 3.f));
     k.tex = hx(ifloor(k.wx / 2.f));
   }
+  // runs of columns with the same star key (about 3 columns each): a row's stars are found once per run
+  star_runs_.clear();
+  for (int x = 0; x < w_;) {
+    int e = x + 1;
+    while (e < w_ && cols_[zs(e)].star == cols_[zs(x)].star) ++e;
+    star_runs_.push_back({x, e});
+    x = e;
+  }
 }
 
 Frame::Tap Frame::light_tap(int y, const Params& P, const LightView& L) const {
@@ -1401,8 +1410,22 @@ void Frame::light_columns(const Params& P, const LightView& L, Pool& pool) {
   });
 }
 
-void Frame::background_row(int y, const Params& P, const LightView& L, std::span<const std::array<float, 4>> scorch) {
+void Frame::background_row(int y, const Params& P, const LightView& L, std::span<const std::array<float, 4>> scorch, StarCache& cache) {
   const px4 flash4{L.flash[0], L.flash[1], L.flash[2], 0.f};
+  const auto star_run = [&](int x0, int x1, std::uint32_t star_y, px4 sky, float u, float wy_, float* row_, const auto& light_at_x_, float now_) {
+    for (int x = x0; x < x1; ++x) {
+      const Column& k = cols_[zs(x)];
+      if (wy_ >= k.hill) continue;
+      px4 v = sky;
+      const float h = unit(k.star ^ star_y ^ hz(7));
+      const float tw = 0.6f + 0.4f * std::sin(now_ * (2.f + 6.f * unit(k.star ^ star_y ^ hz(9))) + 20.f * h);
+      const float s = (h - 0.9965f) / 0.0035f * 0.35f * tw * u;
+      v += px4{s, s, 1.1f * s, 0.f};
+      v += 0.08f * light_at_x_(x);
+      v[3] = 1.f;
+      store4(row_ + zs(x) * 4, v);
+    }
+  };
   float* row = screen_.row(y);
   const float wy = P.cam_y + fl(y) + 0.5f;
   const float ground = P.ground_y, now = P.time;
@@ -1417,24 +1440,34 @@ void Frame::background_row(int y, const Params& P, const LightView& L, std::span
     const float u = std::clamp((ground - wy) / 900.f, 0.f, 1.f);
     const px4 sky{0.010f + 0.020f * (1.f - u), 0.013f + 0.024f * (1.f - u), 0.030f + 0.035f * (1.f - u), 1.f};
     const std::uint32_t star_y = hy(ifloor(wy / 3.f));
-    for (int x = 0; x < w_; ++x) {
+    for (int x = 0; x < w_; ++x) {  // the sky without stars
       const Column& k = cols_[zs(x)];
       float* p = row + zs(x) * 4;
       if (wy >= k.hill) {
         store4(p, load4(k.hill_colour.data()));
         continue;
       }
-      px4 v = sky;
-      const float h = unit(k.star ^ star_y ^ hz(7));
-      if (h > 0.9965f) {
-        const float tw = 0.6f + 0.4f * std::sin(now * (2.f + 6.f * unit(k.star ^ star_y ^ hz(9))) + 20.f * h);
-        const float s = (h - 0.9965f) / 0.0035f * 0.35f * tw * u;
-        v += px4{s, s, 1.1f * s, 0.f};
-      }
-      v += 0.08f * light_at_x(x);
+      px4 v = sky + 0.08f * light_at_x(x);
       v[3] = 1.f;
       store4(p, v);
     }
+    // the stars: a pixel's star value depends on its run of columns and its band of rows (star_y), so it is found
+    // once per run (and kept for the rows of the band); a star pixel is then drawn as a whole, as without the runs
+    if (cache.star_y != star_y || !cache.valid) {
+      cache.star_y = star_y;
+      cache.valid = true;
+      cache.n = 0;
+      for (const auto& r : star_runs_) {
+        if (unit(cols_[zs(r[0])].star ^ star_y ^ hz(7)) > 0.9965f && cache.n < static_cast<int>(cache.runs.size())) cache.runs[zs(cache.n++)] = r;
+      }
+      if (cache.n == static_cast<int>(cache.runs.size())) {  // (many stars: all of them, without the cache)
+        cache.valid = false;
+        cache.n = 0;
+        for (const auto& r : star_runs_)
+          if (unit(cols_[zs(r[0])].star ^ star_y ^ hz(7)) > 0.9965f) star_run(r[0], r[1], star_y, sky, u, wy, row, light_at_x, now);
+      }
+    }
+    for (int q = 0; q < cache.n; ++q) star_run(cache.runs[zs(q)][0], cache.runs[zs(q)][1], star_y, sky, u, wy, row, light_at_x, now);
     return;
   }
   // ground: dark earth, lit by the scene's light from just above it, darker towards the viewer
@@ -1442,9 +1475,10 @@ void Frame::background_row(int y, const Params& P, const LightView& L, std::span
   const float tex_amp = 0.5f + 0.5f * depth, shade = 1.f - 0.55f * depth;
   const std::uint32_t tex_y = hy(ifloor(wy / 2.f)) ^ hz(3);
   const px4 earth{0.012f, 0.011f, 0.010f, 0.f}, tint{0.9f, 0.75f, 0.6f, 0.f};
+  float tex = 0.f;
   for (int x = 0; x < w_; ++x) {
     const Column& k = cols_[zs(x)];
-    const float tex = 0.75f + 0.5f * unit(k.tex ^ tex_y) * tex_amp;
+    if (x == 0 || k.tex != cols_[zs(x - 1)].tex) tex = 0.75f + 0.5f * unit(k.tex ^ tex_y) * tex_amp;  // per run of columns
     const float lit = shade * tex;
     const px4 l = light_at_x(x);
     px4 v = (earth + 0.35f * l / (1.f + 0.6f * l)) * lit * tint;
@@ -1481,7 +1515,8 @@ void Frame::background(const Light& light, std::span<const std::array<float, 4>>
   background_columns(P, L);
   light_columns(P, L, pool);
   pool.run((h_ + kChunk - 1) / kChunk, [&](int task) {
-    for (int y = task * kChunk; y < std::min(h_, (task + 1) * kChunk); ++y) background_row(y, P, L, scorch);
+    StarCache cache;
+    for (int y = task * kChunk; y < std::min(h_, (task + 1) * kChunk); ++y) background_row(y, P, L, scorch, cache);
   });
 }
 
@@ -1492,6 +1527,7 @@ void Frame::take_tiles(std::span<Module* const> modules) {
   for (const Module* m : modules) {
     Tile t;
     t.img = &m->image();
+    t.spans = m->drawn_spans().data();
     t.at = m->at;
     t.opacity = m->opacity;
     t.feather = m->feather;
@@ -1590,6 +1626,7 @@ void Frame::compose(const Params& P, const LightView* L, std::span<const std::ar
           if (t.band[1] > 0) c.band *= band_weight(cx - (R - fl(t.band[1])), t.band[1]);
           c.feather_left = t.feather > 0.f && t.band[0] == 0 ? smooth01(px / t.feather) : 1.f;
           c.feather_right = t.feather > 0.f && t.band[1] == 0 ? smooth01((S - px) / t.feather) : 1.f;
+          c.x_weight = c.band * c.feather_left * c.feather_right;
         }
         seen_cols_[zs(q - base)] = fc <= lc ? std::array<int, 2>{fc, lc + 1} : std::array<int, 2>{0, 0};
       }
@@ -1620,9 +1657,14 @@ void Frame::compose(const Params& P, const LightView* L, std::span<const std::ar
             std::memcpy(&b, p + zs(x) * 4 + 2, 8);
             return (a | b) == 0;
           };
-          o = {r, 0, w};
-          while (o.a < w && empty(o.a)) ++o.a;
-          if (o.a == w) o.b = 0;  // all empty
+          // the scan starts from the span outside which the shader left every pixel +0
+          const int lo = t.spans[2 * r], hi = t.spans[2 * r + 1];
+          o = {r, lo, hi};
+          while (o.a < hi && empty(o.a)) ++o.a;
+          if (o.a >= hi) {  // all empty
+            o.a = w;
+            o.b = 0;
+          }
           while (o.b > o.a && empty(o.b - 1)) --o.b;
           return o;
         };
@@ -1632,8 +1674,9 @@ void Frame::compose(const Params& P, const LightView* L, std::span<const std::ar
           int xa = 0, xb = 0;  // screen columns drawn
         };
         std::array<TileRow, kMaxTiles> tr;
+        StarCache stars;
         for (int y = rows0 + task * kChunk; y < std::min(rows1, rows0 + (task + 1) * kChunk); ++y) {
-          if (bg) background_row(y, P, *L, scorch);
+          if (bg) background_row(y, P, *L, scorch, stars);
           const float wy = P.cam_y + fl(y) + 0.5f;
           const float clip = smooth01((P.ground_y + 2.f - wy) / 3.f);  // the ground hides what is below it
           if (clip <= 0.f) continue;
@@ -1684,14 +1727,22 @@ void Frame::compose(const Params& P, const LightView* L, std::span<const std::ar
               const float* r0 = t.img->row(r.ty.i0);
               const float* r1 = t.img->row(r.ty.i1);
               const TileColumn* cols = tile_cols_.data() + zs(q) * zs(w_);
+              // the weight, Module::weight_px() in its order of factors; where the factors of y are all 1, the product
+              // is the factors of x' (a product with 1 is exact)
+              const bool x_only = r.band_b == 1.f && r.band_t == 1.f && r.feather_b == 1.f && r.feather_t == 1.f;
               for (int x = r.xa; x < r.xb; ++x) {
                 const TileColumn& c = cols[zs(x)];
-                float w = c.band * r.band_b;
-                w *= r.band_t;
-                w *= c.feather_left;
-                w *= c.feather_right;
-                w *= r.feather_b;
-                w *= r.feather_t;
+                float w;
+                if (x_only) {
+                  w = c.x_weight;
+                } else {
+                  w = c.band * r.band_b;
+                  w *= r.band_t;
+                  w *= c.feather_left;
+                  w *= c.feather_right;
+                  w *= r.feather_b;
+                  w *= r.feather_t;
+                }
                 w = w * opacity * clip;
                 if (w <= 0.f) continue;
                 float* o = acc + zs(x) * 4;

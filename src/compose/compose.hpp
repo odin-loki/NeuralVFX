@@ -157,6 +157,8 @@ class Module {
   void step();
   void shade(const Light* light);  // into image(): learned renderer or field shader, tile space
   const Image4& image() const { return img_; }
+  // Per row of image(), [lo, hi): every pixel outside is +0 in every channel (written by shade()). [size][2]
+  std::span<const int> drawn_spans() const { return drawn_; }
 
   // Ownership weight of a tile pixel (x right, y up, tile pixels) or coarse cell for tiling groups: 1 inside, shared
   // with the neighbour across a band (the weights of the tiles of a group sum to 1 everywhere).
@@ -199,7 +201,8 @@ class Module {
   // Field shader scratch. Light and shadow are bilinear in their grids, so each grid row is resampled along x once
   // (the first half of a bilinear sample) and every pixel row only blends two such rows (the second half).
   std::vector<float> shadow_x_;      // [res][size]: shadow_ resampled at the pixels' x
-  std::vector<float> light_x_;       // [2][3][size]: two rows of the light grid resampled at the pixels' x, a plane per colour
+  std::vector<float> light_x_;
+  std::vector<std::array<int, 2>> star_runs_;  // runs of columns [x0, x1) with the same star key       // [2][3][size]: two rows of the light grid resampled at the pixels' x, a plane per colour
   std::vector<int> sx_, lx_;         // [2][size]: the two grid columns each pixel's x falls between (shadow, light)
   std::vector<float> sfx_, lfx_;     // [size]: weight of the second column
   std::vector<float> row_;           // [2][size]: per row of pixels: soot slope along x, emission ramp
@@ -476,6 +479,7 @@ class Frame {
   };
   struct Tile {  // a module as draw() reads it
     const Image4* img = nullptr;
+    const int* spans = nullptr;  // Module::drawn_spans()
     Placement at;
     float opacity = 0, feather = 0;
     int group = -1, size = 0, res = 0;
@@ -501,6 +505,7 @@ class Frame {
   struct TileColumn {
     Tap t;
     float band = 1.f, feather_left = 1.f, feather_right = 1.f;
+    float x_weight = 1.f;  // band * feather_left * feather_right: the weight where the factors of y are all 1
   };
   static constexpr int kMaxTiles = 64;  // tiles of a group, and of the groups drawn in one pass
 
@@ -508,7 +513,13 @@ class Frame {
   void background_columns(const Params& P, const LightView& L);
   Tap light_tap(int y, const Params& P, const LightView& L) const;  // the light's rows the background reads at screen row y
   void light_columns(const Params& P, const LightView& L, Pool& pool);  // fills light_x_ (after background_columns())
-  void background_row(int y, const Params& P, const LightView& L, std::span<const std::array<float, 4>> scorch);
+  struct StarCache {  // the runs of columns with a star in a band of sky rows (per task: rows come in order)
+    std::uint32_t star_y = 0;
+    bool valid = false;
+    int n = 0;
+    std::array<std::array<int, 2>, 32> runs;
+  };
+  void background_row(int y, const Params& P, const LightView& L, std::span<const std::array<float, 4>> scorch, StarCache& cache);
   void take_tiles(std::span<Module* const> modules);  // into tiles_
   // The background (if L) and the groups of tiles_, row by row in one pass (in passes of up to kMaxTiles tiles).
   void compose(const Params& P, const LightView* L, std::span<const std::array<float, 4>> scorch, Pool& pool);
@@ -530,6 +541,7 @@ class Frame {
   // The first half of the background's bilinear light lookup, done once per row of the light grid instead of once per
   // pixel: rows of light4_ resampled at the screen columns, [light ny][w][4] (the rows the screen reads).
   std::vector<float> light_x_;
+  std::vector<std::array<int, 2>> star_runs_;  // runs of columns [x0, x1) with the same star key
   // The same for distort()'s lookup of the bus's heat, [bus ny][w]; and per block of kBlock pixels, the bus columns
   // its pixels read, [lo, hi] (lo > hi: none).
   std::vector<float> heat_x_;

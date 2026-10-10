@@ -3,7 +3,7 @@
 //   nvfx_fireball --models DIR [--out fireball.mp4] [--width 1280 --height 720] [--quality 1] [--threads 4]
 //                 [--isa avx2|avx512|baseline] [--seconds 9] [--profile profile.csv] [--keyframes DIR]
 //                 [--sheet sheet.png] [--no-video] [--no-skip] [--occupancy occupancy.csv]
-//                 [--stages | --no-overlap] [--no-checksums] [--baseline-kernels]
+//                 [--stages | --no-overlap] [--no-checksums] [--baseline-kernels] [--raw frames.rgb]
 //
 // The picture of a frame is drawn on a thread of its own while the next frame's state (script, step, couplings, bus,
 // light, particles) is computed (with 2 or more threads; --threads counts that thread). --no-overlap draws it after
@@ -11,6 +11,7 @@
 // give the same frames to the bit. The profile's `period` is the wall time between finished frames (output excluded);
 // with the overlap, a frame's stages overlap the next frame's, so their sum (`total`) is more than the period.
 // --no-checksums skips the per-frame checksum (FNV-1a over the RGB, 3 ms on one thread) for timing runs.
+// --raw writes every frame's RGB, one after another, for comparisons (PSNR) outside.
 // --baseline-kernels uses the picture's row kernels for the baseline ISA even where AVX2 is used (they give the same
 // bits; this checks it).
 //
@@ -89,6 +90,7 @@ enum class Mode { stages, render, overlap };
 struct Args {
   std::filesystem::path models, out = "fireball.mp4", profile, keyframes, sheet, occupancy;
   bool skip = true, checksums = true, baseline_kernels = false;
+  std::filesystem::path raw;
   Mode mode = Mode::overlap;
   bool mode_set = false;
   int width = 1280, height = 720, threads = 4;
@@ -124,6 +126,7 @@ Args parse(int argc, char** argv) {
     else if (k == "--no-overlap") a.mode = Mode::render, a.mode_set = true;
     else if (k == "--no-checksums") a.checksums = false;
     else if (k == "--baseline-kernels") a.baseline_kernels = true;
+    else if (k == "--raw") a.raw = next();
     else throw std::invalid_argument("unknown option " + k + " (see the source header)");
   }
   if (a.models.empty()) throw std::invalid_argument("--models DIR (or NEURALVFX_DATA) is needed");
@@ -413,6 +416,8 @@ int main(int argc, char** argv) try {
     video = popen(cmd.c_str(), "w");
     if (!video) throw std::runtime_error("cannot start ffmpeg");
   }
+  std::FILE* raw = nullptr;
+  if (!A.raw.empty() && !(raw = std::fopen(A.raw.c_str(), "wb"))) throw std::runtime_error("cannot write " + A.raw.string());
   std::vector<std::uint8_t> rgb(static_cast<std::size_t>(A.width) * static_cast<std::size_t>(A.height) * 3);
   const std::array<float, 8> key_times = {0.9f, 1.27f, 1.5f, 2.0f, 2.9f, 4.2f, 6.0f, 8.2f};
   std::vector<Image> keys;
@@ -455,6 +460,7 @@ int main(int argc, char** argv) try {
   const auto output = [&](int f, const std::vector<std::uint8_t>& out) {  // video, checksum, keyframes, progress: not timed
     const auto o0 = Clock::now();
     if (video) std::fwrite(out.data(), 1, out.size(), video);
+    if (raw) std::fwrite(out.data(), 1, out.size(), raw);
     if (A.checksums) {  // the final picture's checksum (FNV-1a, 64 bits): same checksums, same pictures
       std::uint64_t h = 0xcbf29ce484222325ull;
       for (const std::uint8_t v : out) h = (h ^ v) * 0x100000001b3ull;
@@ -786,6 +792,7 @@ int main(int argc, char** argv) try {
     output(frames - 1, rgbs[zs((frames - 1) % 2)]);
   }
   if (video && pclose(video) != 0) throw std::runtime_error("ffmpeg failed");
+  if (raw) std::fclose(raw);
   if (occupancy) std::fclose(occupancy);
 
   // --- profile -------------------------------------------------------------------------------------------------------
