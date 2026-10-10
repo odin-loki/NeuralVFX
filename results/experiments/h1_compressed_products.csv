@@ -1,0 +1,46 @@
+file,product,form,dense_bytes,compressed_bytes,references,dictionary_entries,dense_ms,compressed_ms,max_rel_diff
+synthetic,"blend of 16 fields 64 x 64, 50% covered",LZ78,65536,272135,30238,30237,0.0074,0.0642,2.98e-07
+synthetic,"blend of 16 fields 64 x 64, 50% covered",RePair,65536,152765,30899,664,0.0074,0.0414,1.49e-07
+synthetic,"blend of 16 fields 64 x 64, 50% covered",CSR,65536,97967,32633,0,0.0074,0.0175,0
+synthetic,"blend of 16 fields 64 x 64, 20% covered",LZ78,65536,109377,12153,12153,0.0072,0.0216,2.37e-07
+synthetic,"blend of 16 fields 64 x 64, 20% covered",RePair,65536,61284,12434,200,0.0072,0.0163,1.58e-07
+synthetic,"blend of 16 fields 64 x 64, 20% covered",CSR,65536,39227,13053,0,0.0072,0.0075,0
+synthetic,"blend of 16 fields 64 x 64, 10% covered",LZ78,65536,54873,6097,6097,0.0071,0.0109,2.23e-07
+synthetic,"blend of 16 fields 64 x 64, 10% covered",RePair,65536,30751,6262,74,0.0071,0.0084,2.23e-07
+synthetic,"blend of 16 fields 64 x 64, 10% covered",CSR,65536,19610,6514,0,0.0071,0.0038,0
+synthetic,"blend of 16 fields 64 x 64, 5% covered",LZ78,65536,27938,3105,3104,0.0072,0.0060,1.73e-07
+synthetic,"blend of 16 fields 64 x 64, 5% covered",RePair,65536,15781,3235,17,0.0072,0.0047,1.16e-07
+synthetic,"blend of 16 fields 64 x 64, 5% covered",CSR,65536,9881,3271,0,0.0072,0.0023,0
+synthetic,"blend of 16 fields 64 x 64, 2% covered",LZ78,65536,11234,1249,1248,0.0069,0.0028,2.19e-07
+synthetic,"blend of 16 fields 64 x 64, 2% covered",RePair,65536,6313,1284,7,0.0069,0.0026,1.09e-07
+synthetic,"blend of 16 fields 64 x 64, 2% covered",CSR,65536,3971,1301,0,0.0069,0.0014,0
+fire_grid_k8.nvfx,"feature blend, 8 bases x 2 time slices x 8 channels, 32 x 32",LZ78,1048576,9139960,1015576,1015544,0.0153,0.2512,1.51e-07
+fire_grid_k8.nvfx,"feature blend, 8 bases x 2 time slices x 8 channels, 32 x 32",RePair,1048576,5133547,1045754,882,0.0153,0.1738,2.11e-07
+fire_grid_k8.nvfx,"feature blend, 8 bases x 2 time slices x 8 channels, 32 x 32",CSR,1048576,3147162,1047518,0,0.0153,0.0758,2.11e-07
+fire_grid_k8.nvfx,"first layer 32 x 8, W x for 4096 pixels",LZ78,512,2304,256,256,0.4012,1.3232,0
+fire_grid_k16.nvfx,"feature blend, 16 bases x 2 time slices x 8 channels, 32 x 32",LZ78,2097152,17621810,1958115,1957940,0.0307,0.6239,3.93e-07
+fire_grid_k16.nvfx,"feature blend, 16 bases x 2 time slices x 8 channels, 32 x 32",RePair,2097152,9991226,2082356,6319,0.0307,0.3481,3.27e-07
+fire_grid_k16.nvfx,"feature blend, 16 bases x 2 time slices x 8 channels, 32 x 32",CSR,2097152,6293809,2095035,0,0.0307,0.1477,3.11e-07
+fire_grid_k16.nvfx,"first layer 48 x 8, W x for 4096 pixels",LZ78,768,3438,382,382,0.5731,2.2566,0
+fire_variation_k8.nvfx,"feature blend, 8 bases x 2 time slices x 8 channels, 32 x 32",LZ78,1048576,9108960,1012144,1012096,0.0160,0.2628,1.82e-07
+fire_variation_k8.nvfx,"feature blend, 8 bases x 2 time slices x 8 channels, 32 x 32",RePair,1048576,5120249,1044068,1720,0.0160,0.1752,1.82e-07
+fire_variation_k8.nvfx,"feature blend, 8 bases x 2 time slices x 8 channels, 32 x 32",CSR,1048576,3147147,1047513,0,0.0160,0.0736,1.82e-07
+fire_variation_k8.nvfx,"first layer 32 x 8, W x for 4096 pixels",LZ78,512,2304,256,256,0.4012,1.3254,0
+fire_variation_k24.nvfx,"feature blend, 24 bases x 2 time slices x 8 channels, 32 x 32",LZ78,3145728,25328187,2814558,2814153,0.0469,1.0900,3.19e-07
+fire_variation_k24.nvfx,"feature blend, 24 bases x 2 time slices x 8 channels, 32 x 32",RePair,3145728,14452237,3104756,18807,0.0469,0.5122,4.64e-07
+fire_variation_k24.nvfx,"feature blend, 24 bases x 2 time slices x 8 channels, 32 x 32",CSR,3145728,9440468,3142556,0,0.0469,0.2207,3.48e-07
+fire_variation_k24.nvfx,"first layer 32 x 8, W x for 4096 pixels",LZ78,512,2297,256,255,0.4042,1.3354,0
+fire_0_grid_m8.nvfx,"feature blend, 1 bases x 2 time slices x 8 channels, 32 x 32",LZ78,131072,1178460,130940,130940,0.0024,0.0280,1.02e-07
+fire_0_grid_m8.nvfx,"feature blend, 1 bases x 2 time slices x 8 channels, 32 x 32",RePair,131072,654700,130940,0,0.0024,0.0231,1.02e-07
+fire_0_grid_m8.nvfx,"feature blend, 1 bases x 2 time slices x 8 channels, 32 x 32",CSR,131072,393844,130940,0,0.0024,0.0109,1.02e-07
+fire_0_grid_m8.nvfx,"first layer 32 x 8, W x for 4096 pixels",LZ78,512,2304,256,256,0.4012,1.3269,0
+fire_0_grid_m16.nvfx,"feature blend, 1 bases x 2 time slices x 8 channels, 32 x 32",LZ78,262144,1179648,131072,131072,0.0121,0.0261,1.02e-07
+fire_0_grid_m16.nvfx,"feature blend, 1 bases x 2 time slices x 8 channels, 32 x 32",RePair,262144,655360,131072,0,0.0121,0.0215,1.02e-07
+fire_0_grid_m16.nvfx,"feature blend, 1 bases x 2 time slices x 8 channels, 32 x 32",CSR,262144,394240,131072,0,0.0121,0.0092,1.02e-07
+fire_0_grid_m16.nvfx,"first layer 32 x 8, W x for 4096 pixels",LZ78,512,2304,256,256,0.4010,1.3187,0
+explosion.nvfx,"blend of 32 stored fine fields 64 x 64",LZ78,131072,70179,7807,7795,0.0134,0.0141,2.11e-07
+explosion.nvfx,"blend of 32 stored fine fields 64 x 64",RePair,131072,36881,545,5041,0.0134,0.0105,2.64e-07
+explosion.nvfx,"blend of 32 stored fine fields 64 x 64",CSR,131072,32070,10646,0,0.0134,0.0060,0
+smoke.nvfx,"blend of 16 stored fine fields 64 x 64",LZ78,65536,103261,11475,11473,0.0069,0.0200,1.45e-07
+smoke.nvfx,"blend of 16 stored fine fields 64 x 64",RePair,65536,53966,366,7556,0.0069,0.0155,1.45e-07
+smoke.nvfx,"blend of 16 stored fine fields 64 x 64",CSR,65536,46523,15485,0,0.0069,0.0084,0

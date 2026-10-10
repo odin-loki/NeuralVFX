@@ -26,6 +26,17 @@ part) and [cm_equal_quality.csv](cm_equal_quality.csv). Code: `include/neuralfx/
 - **A correction to the report**: the equal-quality ratio of conv_s is **4.9x, not 7.4x**. The report's envelope
   interpolated between two flipbooks of the same size (512 KB); see "Equal quality" below. The other ratios reproduce.
 
+## Format 2: faster decoding (study H)
+
+Study H (H3, [docs/DCM.md](../../docs/DCM.md) §9) added a second format beside this one, which is unchanged to the
+byte: LZ tokens for the kinds that repeat exactly (fine fields, headers, flipbooks), a light or a fast literal model
+instead of the full one, and optional seekable segments (one tensor or start point decodes alone). The light model
+decodes 4 to 9 times faster for 1.6 to 3.9% more disk (seekable: 1.7 to 4.4%); the fast one 18 to 38 times faster for
+10 to 23% more (provisional timings, a busy machine).
+Measurements: [h3_decode.csv](h3_decode.csv) (every file and configuration, with zlib -9), parts in
+[h3_decode_parts.csv](h3_decode_parts.csv), segment sizes in `h3_segment_*.csv`; `nvfx_pack --h3` and
+`tools/study_h/h3.sh` reproduce them.
+
 ## The coder
 
 A PAQ/lpaq-style context-mixing coder that knows the tensors' shapes. Every value is coded bit by bit, most significant

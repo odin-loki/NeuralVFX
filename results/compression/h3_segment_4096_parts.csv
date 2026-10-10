@@ -1,0 +1,169 @@
+file,config,part,values,original_bytes,coded_bytes
+fire_grid_k8.nvfx,cm,header,216,216,73.8
+fire_grid_k8.nvfx,cm,features,1048576,1048576,803582.4
+fire_grid_k8.nvfx,cm,feature ranges,2048,4096,2683.6
+fire_grid_k8.nvfx,cm,weights,1624,3248,2793.6
+fire_grid_k8.nvfx,cm,biases,140,280,243.0
+fire_grid_k8.nvfx,cm+lz,header,216,216,77.9
+fire_grid_k8.nvfx,cm+lz,features,1048576,1048576,803582.1
+fire_grid_k8.nvfx,cm+lz,feature ranges,2048,4096,2683.6
+fire_grid_k8.nvfx,cm+lz,weights,1624,3248,2793.6
+fire_grid_k8.nvfx,cm+lz,biases,140,280,243.0
+fire_grid_k8.nvfx,light,header,216,216,83.2
+fire_grid_k8.nvfx,light,features,1048576,1048576,821275.2
+fire_grid_k8.nvfx,light,feature ranges,2048,4096,2730.1
+fire_grid_k8.nvfx,light,weights,1624,3248,2845.9
+fire_grid_k8.nvfx,light,biases,140,280,248.8
+fire_grid_k8.nvfx,light+lz,header,216,216,85.7
+fire_grid_k8.nvfx,light+lz,features,1048576,1048576,821275.2
+fire_grid_k8.nvfx,light+lz,feature ranges,2048,4096,2730.1
+fire_grid_k8.nvfx,light+lz,weights,1624,3248,2845.9
+fire_grid_k8.nvfx,light+lz,biases,140,280,248.8
+fire_grid_k8.nvfx,light+lz seekable,header,216,216,85.7
+fire_grid_k8.nvfx,light+lz seekable,features,1048576,1048576,828442.5
+fire_grid_k8.nvfx,light+lz seekable,feature ranges,2048,4096,2730.1
+fire_grid_k8.nvfx,light+lz seekable,weights,1624,3248,2859.9
+fire_grid_k8.nvfx,light+lz seekable,biases,140,280,259.2
+fire_grid_k8.nvfx,fast,header,216,216,185.1
+fire_grid_k8.nvfx,fast,features,1048576,1048576,886953.0
+fire_grid_k8.nvfx,fast,feature ranges,2048,4096,2824.3
+fire_grid_k8.nvfx,fast,weights,1624,3248,3288.9
+fire_grid_k8.nvfx,fast,biases,140,280,280.8
+fire_grid_k8.nvfx,fast+lz,header,216,216,154.2
+fire_grid_k8.nvfx,fast+lz,features,1048576,1048576,886953.0
+fire_grid_k8.nvfx,fast+lz,feature ranges,2048,4096,2824.3
+fire_grid_k8.nvfx,fast+lz,weights,1624,3248,3288.9
+fire_grid_k8.nvfx,fast+lz,biases,140,280,280.8
+fire_grid_k8.nvfx,fast+lz seekable,header,216,216,154.2
+fire_grid_k8.nvfx,fast+lz seekable,features,1048576,1048576,889306.0
+fire_grid_k8.nvfx,fast+lz seekable,feature ranges,2048,4096,2824.3
+fire_grid_k8.nvfx,fast+lz seekable,weights,1624,3248,3384.5
+fire_grid_k8.nvfx,fast+lz seekable,biases,140,280,349.9
+explosion.nvfx,cm,header,565,565,309.3
+explosion.nvfx,cm,weights,8984,17968,15340.0
+explosion.nvfx,cm,biases,93,186,158.6
+explosion.nvfx,cm,coarse states,65536,131072,36557.0
+explosion.nvfx,cm,fine fields,131072,131072,4683.8
+explosion.nvfx,cm,field scales,32,64,46.6
+explosion.nvfx,cm+lz,header,565,565,315.1
+explosion.nvfx,cm+lz,weights,8984,17968,15340.0
+explosion.nvfx,cm+lz,biases,93,186,158.6
+explosion.nvfx,cm+lz,coarse states,65536,131072,36556.9
+explosion.nvfx,cm+lz,fine fields,131072,131072,4481.0
+explosion.nvfx,cm+lz,field scales,32,64,46.6
+explosion.nvfx,light,header,565,565,350.0
+explosion.nvfx,light,weights,8984,17968,15551.0
+explosion.nvfx,light,biases,93,186,162.3
+explosion.nvfx,light,coarse states,65536,131072,38250.3
+explosion.nvfx,light,fine fields,131072,131072,7292.2
+explosion.nvfx,light,field scales,32,64,61.0
+explosion.nvfx,light+lz,header,565,565,355.8
+explosion.nvfx,light+lz,weights,8984,17968,15551.0
+explosion.nvfx,light+lz,biases,93,186,162.3
+explosion.nvfx,light+lz,coarse states,65536,131072,38250.3
+explosion.nvfx,light+lz,fine fields,131072,131072,4688.4
+explosion.nvfx,light+lz,field scales,32,64,61.0
+explosion.nvfx,light+lz seekable,header,565,565,355.8
+explosion.nvfx,light+lz seekable,weights,8984,17968,15639.6
+explosion.nvfx,light+lz seekable,biases,93,186,174.6
+explosion.nvfx,light+lz seekable,coarse states,65536,131072,43159.4
+explosion.nvfx,light+lz seekable,fine fields,131072,131072,5305.7
+explosion.nvfx,light+lz seekable,field scales,32,64,50.4
+explosion.nvfx,fast,header,565,565,581.0
+explosion.nvfx,fast,weights,8984,17968,18124.8
+explosion.nvfx,fast,biases,93,186,186.6
+explosion.nvfx,fast,coarse states,65536,131072,46246.5
+explosion.nvfx,fast,fine fields,131072,131072,8795.6
+explosion.nvfx,fast,field scales,32,64,65.7
+explosion.nvfx,fast+lz,header,565,565,570.8
+explosion.nvfx,fast+lz,weights,8984,17968,18124.8
+explosion.nvfx,fast+lz,biases,93,186,186.6
+explosion.nvfx,fast+lz,coarse states,65536,131072,46246.5
+explosion.nvfx,fast+lz,fine fields,131072,131072,5180.0
+explosion.nvfx,fast+lz,field scales,32,64,65.7
+explosion.nvfx,fast+lz seekable,header,565,565,570.8
+explosion.nvfx,fast+lz seekable,weights,8984,17968,18432.6
+explosion.nvfx,fast+lz seekable,biases,93,186,270.1
+explosion.nvfx,fast+lz seekable,coarse states,65536,131072,47425.9
+explosion.nvfx,fast+lz seekable,fine fields,131072,131072,5522.7
+explosion.nvfx,fast+lz seekable,field scales,32,64,69.8
+fire.nvfx,cm,header,413,413,231.4
+fire.nvfx,cm,weights,8792,17584,15040.2
+fire.nvfx,cm,biases,93,186,160.0
+fire.nvfx,cm,coarse states,32768,65536,30166.2
+fire.nvfx,cm+lz,header,413,413,237.4
+fire.nvfx,cm+lz,weights,8792,17584,15040.2
+fire.nvfx,cm+lz,biases,93,186,160.0
+fire.nvfx,cm+lz,coarse states,32768,65536,30166.4
+fire.nvfx,light,header,413,413,256.8
+fire.nvfx,light,weights,8792,17584,15241.7
+fire.nvfx,light,biases,93,186,163.1
+fire.nvfx,light,coarse states,32768,65536,31281.4
+fire.nvfx,light+lz,header,413,413,262.8
+fire.nvfx,light+lz,weights,8792,17584,15241.7
+fire.nvfx,light+lz,biases,93,186,163.1
+fire.nvfx,light+lz,coarse states,32768,65536,31281.4
+fire.nvfx,light+lz seekable,header,413,413,262.8
+fire.nvfx,light+lz seekable,weights,8792,17584,15326.2
+fire.nvfx,light+lz seekable,biases,93,186,172.9
+fire.nvfx,light+lz seekable,coarse states,32768,65536,31594.8
+fire.nvfx,fast,header,413,413,412.1
+fire.nvfx,fast,weights,8792,17584,17761.9
+fire.nvfx,fast,biases,93,186,186.4
+fire.nvfx,fast,coarse states,32768,65536,35718.4
+fire.nvfx,fast+lz,header,413,413,400.9
+fire.nvfx,fast+lz,weights,8792,17584,17761.9
+fire.nvfx,fast+lz,biases,93,186,186.4
+fire.nvfx,fast+lz,coarse states,32768,65536,35718.4
+fire.nvfx,fast+lz seekable,header,413,413,400.9
+fire.nvfx,fast+lz seekable,weights,8792,17584,18053.7
+fire.nvfx,fast+lz seekable,biases,93,186,268.7
+fire.nvfx,fast+lz seekable,coarse states,32768,65536,35533.0
+smoke.nvfx,cm,header,413,413,237.4
+smoke.nvfx,cm,weights,8792,17584,15039.8
+smoke.nvfx,cm,biases,93,186,164.4
+smoke.nvfx,cm,coarse states,32768,65536,29736.5
+smoke.nvfx,cm,fine fields,65536,65536,6300.8
+smoke.nvfx,cm,field scales,16,32,25.4
+smoke.nvfx,cm+lz,header,413,413,242.6
+smoke.nvfx,cm+lz,weights,8792,17584,15039.8
+smoke.nvfx,cm+lz,biases,93,186,164.4
+smoke.nvfx,cm+lz,coarse states,32768,65536,29736.5
+smoke.nvfx,cm+lz,fine fields,65536,65536,6134.0
+smoke.nvfx,cm+lz,field scales,16,32,25.4
+smoke.nvfx,light,header,413,413,262.3
+smoke.nvfx,light,weights,8792,17584,15238.8
+smoke.nvfx,light,biases,93,186,164.0
+smoke.nvfx,light,coarse states,32768,65536,31048.3
+smoke.nvfx,light,fine fields,65536,65536,9885.6
+smoke.nvfx,light,field scales,16,32,31.0
+smoke.nvfx,light+lz,header,413,413,267.6
+smoke.nvfx,light+lz,weights,8792,17584,15238.8
+smoke.nvfx,light+lz,biases,93,186,164.0
+smoke.nvfx,light+lz,coarse states,32768,65536,31048.3
+smoke.nvfx,light+lz,fine fields,65536,65536,6347.8
+smoke.nvfx,light+lz,field scales,16,32,31.0
+smoke.nvfx,light+lz seekable,header,413,413,267.6
+smoke.nvfx,light+lz seekable,weights,8792,17584,15323.0
+smoke.nvfx,light+lz seekable,biases,93,186,176.6
+smoke.nvfx,light+lz seekable,coarse states,32768,65536,31672.8
+smoke.nvfx,light+lz seekable,fine fields,65536,65536,6681.3
+smoke.nvfx,light+lz seekable,field scales,16,32,27.1
+smoke.nvfx,fast,header,413,413,415.7
+smoke.nvfx,fast,weights,8792,17584,17756.8
+smoke.nvfx,fast,biases,93,186,186.1
+smoke.nvfx,fast,coarse states,32768,65536,37134.6
+smoke.nvfx,fast,fine fields,65536,65536,11631.1
+smoke.nvfx,fast,field scales,16,32,31.8
+smoke.nvfx,fast+lz,header,413,413,402.2
+smoke.nvfx,fast+lz,weights,8792,17584,17756.8
+smoke.nvfx,fast+lz,biases,93,186,186.1
+smoke.nvfx,fast+lz,coarse states,32768,65536,37134.6
+smoke.nvfx,fast+lz,fine fields,65536,65536,7204.3
+smoke.nvfx,fast+lz,field scales,16,32,31.8
+smoke.nvfx,fast+lz seekable,header,413,413,402.2
+smoke.nvfx,fast+lz seekable,weights,8792,17584,18037.1
+smoke.nvfx,fast+lz seekable,biases,93,186,261.2
+smoke.nvfx,fast+lz seekable,coarse states,32768,65536,36001.5
+smoke.nvfx,fast+lz seekable,fine fields,65536,65536,7405.4
+smoke.nvfx,fast+lz seekable,field scales,16,32,42.7

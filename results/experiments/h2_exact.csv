@@ -1,0 +1,4 @@
+isa,frames,frames_with_the_same_checksum
+avx2,270,270
+baseline,270,270
+avx512,270,270
