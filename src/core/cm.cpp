@@ -602,6 +602,8 @@ bool lz_token(LzState& z, AC& ac, const uint16_t* code, size_t i, uint32_t group
 class Light {
  public:
   static constexpr int kIn = 4, kLanes = 8;
+  // `groups` sets of statistics: one per kind (kKinds), or fewer, given to kinds in the order they first appear (the
+  // same in the encoder and the decoder), the last one shared when they run out.
   explicit Light(size_t groups)
       : groups_(groups),
         d0_(groups * kBitIdx * kRel * kAct, kFresh),
@@ -614,7 +616,12 @@ class Light {
       for (int k = 0; k < kIn; ++k) w_[s + static_cast<size_t>(k)] = static_cast<std::int16_t>((1 << 14) / kIn);
     }
   }
-  size_t groups() const { return groups_; }
+  size_t slot(uint32_t group) {
+    if (groups_ == static_cast<size_t>(kKinds)) return group;
+    std::int8_t& s = slots_[group];
+    if (s < 0) s = static_cast<std::int8_t>(std::min(used_++, groups_ - 1));
+    return static_cast<size_t>(s);
+  }
 
   int predict(size_t i0, size_t i1, size_t i2, size_t i3, size_t mix, size_t apm) {
     c_[0] = &d0_[i0];
@@ -646,7 +653,12 @@ class Light {
 
  private:
   static constexpr std::int16_t kWeightMax = 32767 - 1024;
-  size_t groups_;
+  size_t groups_, used_ = 0;
+  std::array<std::int8_t, static_cast<size_t>(kKinds)> slots_ = [] {
+    std::array<std::int8_t, static_cast<size_t>(kKinds)> a{};
+    a.fill(-1);
+    return a;
+  }();
   std::vector<uint32_t> d0_, d1_, d2_, d3_;
   std::vector<std::int16_t> w_;
   Apm apm_;
@@ -951,7 +963,7 @@ bool code_tensor_fast(Light& model, AC& ac, const Shape& s, size_t p0, size_t p1
   const bool f16 = width == 2;
   uint32_t group = static_cast<uint32_t>(s.kind);
   if (s.kind == Kind::biases || s.kind == Kind::codes || s.kind == Kind::scales) group = static_cast<uint32_t>(Kind::weights);
-  const uint32_t slot = model.groups() == 1 ? 0u : group;  // where this group's statistics are
+  const size_t slot = model.slot(group);  // where this group's statistics are
   const int err_shift = f16 ? 8 : 4;
   const int64_t code_max = f16 ? 65535 * 256 : 255 * 256;
   const int64_t lin_default = f16 ? 0 : 128 * 256;
@@ -1711,8 +1723,9 @@ class Io2 {
   static constexpr bool kEnc = AC::encoding;
   Io2(const Opt2& o, const uint8_t* in, uint8_t* out, size_t size) : o_(o), in_(in), out_(out), size_(size) {
     if constexpr (kEnc) covered_.assign(size, false);
+    // The stream's model; in seekable files segment 0's, which holds three kinds at most (headers, ranges, scales).
     if (o_.model == 0) full_ = std::make_unique<Model>(size);
-    else if (o_.model == 1) light_ = std::make_unique<Light>(static_cast<size_t>(kKinds));  // the stream's, or segment 0's
+    else if (o_.model == 1) light_ = std::make_unique<Light>(o_.seek ? size_t{3} : static_cast<size_t>(kKinds));
     else rice_ = std::make_unique<Rice>(static_cast<size_t>(kKinds));
   }
   const uint8_t* data() const { return kEnc ? in_ : out_; }
