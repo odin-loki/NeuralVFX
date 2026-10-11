@@ -242,7 +242,7 @@ nvfx_status nvfx_scene_create(const nvfx_scene_desc* d, nvfx_scene** out, nvfx_s
     // the scene
     s->opt.threads = d->threads > 0 ? d->threads : 2;
     s->opt.isa = nfx::compose::best_isa();
-    s->opt.overlap = d->overlap < 0 ? s->opt.threads > 1 : d->overlap > 0;
+    s->opt.overlap = s->opt.threads > 1 && d->overlap != 0;  // default (-1) and 1: on, given a second thread
     for (int i = 0; i < d->n_inputs; ++i) {
       if (!d->inputs[i].name) throw std::invalid_argument("an input without a name");
       s->opt.inputs.emplace_back(d->inputs[i].name, d->inputs[i].value);

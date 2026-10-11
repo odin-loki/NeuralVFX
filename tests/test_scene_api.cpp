@@ -22,6 +22,7 @@
 #include <memory>
 #include <sstream>
 #include <string>
+#include <thread>
 #include <vector>
 
 #include "nvfx_internal.hpp"
@@ -100,6 +101,23 @@ std::vector<std::uint8_t> picture(nvfx_scene* s) {
   return rgb;
 }
 
+// A scene the game drives: inputs, a rule only the game fires, a landing rule, a waiting module.
+constexpr const char* kGameScript = R"(
+scene size 160 x 90, fps 30, length 4, ground 80
+effect tiny = "tiny"
+input spot = 40                       # where the game wants the fire
+input power = 0.3
+module fire = tiny, size 32, at (spot, ground), start 1, seed 5, intensity power
+module torch = tiny, size 32, at (120, ground), start 0, seed 6
+module spare = tiny, size 32, at (20, ground), start 0, seed 7, waiting
+when 0 as boom, repeat:               # only the game fires it
+  shock at (80, 50), speed 600
+when ember lands:
+  stop spare
+at 100 as late:
+  wake spare
+)";
+
 // Every frame of the scene that uses every statement, through the API and through the script runner: the same bits,
 // on 1 and 2 threads, overlapped or not.
 TEST(SceneApi, PlaysTheSameFramesAsTheScriptRunner) {
@@ -151,6 +169,30 @@ TEST(SceneApi, SkippedPicturesChangeNothing) {
   }
 }
 
+// Scenes are independent: two played at once on two threads give the frames each gives alone.
+TEST(SceneApi, TwoScenesOnTwoThreadsAreIndependent) {
+  const Tiny fx;
+  const auto play = [&](nvfx_scene* s, std::vector<std::vector<std::uint8_t>>& out) {
+    for (int f = 0; f < 30; ++f) {
+      if (f > 0) nvfx_scene_step(s, 1.0 / 30.0, nullptr);
+      if (f % 3 == 0) out.push_back(picture(s));
+    }
+  };
+  std::vector<std::vector<std::uint8_t>> alone_a, alone_b, a, b;
+  {
+    ScenePtr x = make(fx, kEverything, 2, 1), y = make(fx, kGameScript, 2, 0);
+    play(x.get(), alone_a);
+    play(y.get(), alone_b);
+  }
+  ScenePtr x = make(fx, kEverything, 2, 1), y = make(fx, kGameScript, 2, 0);
+  std::thread ta([&] { play(x.get(), a); });
+  std::thread tb([&] { play(y.get(), b); });
+  ta.join();
+  tb.join();
+  EXPECT_EQ(a, alone_a);
+  EXPECT_EQ(b, alone_b);
+}
+
 // The clock: a step computes the frames whose time has come (frame f at f / fps); seeking back rebuilds the scene and
 // gives the same frames; a restart starts again from frame 0.
 TEST(SceneApi, ClockSeekAndRestart) {
@@ -187,27 +229,11 @@ TEST(SceneApi, ClockSeekAndRestart) {
   EXPECT_EQ(picture(s.get()), at30);
 }
 
-constexpr const char* kGame = R"(
-scene size 160 x 90, fps 30, length 4, ground 80
-effect tiny = "tiny"
-input spot = 40                       # where the game wants the fire
-input power = 0.3
-module fire = tiny, size 32, at (spot, ground), start 1, seed 5, intensity power
-module torch = tiny, size 32, at (120, ground), start 0, seed 6
-module spare = tiny, size 32, at (20, ground), start 0, seed 7, waiting
-when 0 as boom, repeat:               # only the game fires it
-  shock at (80, 50), speed 600
-when ember lands:
-  stop spare
-at 100 as late:
-  wake spare
-)";
-
 // The game drives the scene: inputs read by expressions, rules fired by name, modules moved and their controls set.
 TEST(SceneApi, InputsTriggersAndModules) {
   const Tiny fx;
   for (const int overlap : {0, 1}) {
-    ScenePtr s = make(fx, kGame, 2, overlap);
+    ScenePtr s = make(fx, kGameScript, 2, overlap);
     ASSERT_TRUE(s);
     const nvfx_scene_info i = info_of(s.get());
     ASSERT_EQ(i.n_inputs, 2);
@@ -282,7 +308,7 @@ TEST(SceneApi, InputsTriggersAndModules) {
   const nvfx_scene_input start[] = {{"spot", 70.f}};
   nvfx_scene_desc d;
   nvfx_scene_desc_init(&d);
-  d.script = kGame;
+  d.script = kGameScript;
   d.effects = list.data();
   d.n_effects = 2;
   d.inputs = start;
