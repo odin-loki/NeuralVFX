@@ -300,7 +300,7 @@ if(NEURALFX_BUILD_TESTS)
                      --expect ${CMAKE_CURRENT_BINARY_DIR}/fireball_script_profile.csv)
     set_tests_properties(neuralfx.SceneApiFireballBitExact PROPERTIES LABELS "neuralfx;data" SKIP_RETURN_CODE 77 TIMEOUT 1200
                          FIXTURES_REQUIRED fireball_profile)
-    foreach(scene fireball firewall)
+    foreach(scene fireball firewall campfire)
       add_test(NAME neuralfx.SceneScriptChecks.${scene} COMMAND nvfx_scene_script --script ${CMAKE_CURRENT_SOURCE_DIR}/examples/scenes/${scene}.nvfxs --check)
       set_tests_properties(neuralfx.SceneScriptChecks.${scene} PROPERTIES LABELS neuralfx)
     endforeach()

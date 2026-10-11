@@ -157,6 +157,10 @@ NVFX_API nvfx_status nvfx_scene_sample_grid(const nvfx_scene* scene, nvfx_scene_
  * pixels): "is anything in this rectangle burning?". Both 0 when no cell is inside. Either pointer may be NULL. */
 NVFX_API nvfx_status nvfx_scene_field_region(const nvfx_scene* scene, nvfx_scene_field field, float x0, float y0, float x1, float y1,
                                              float* max, float* mean);
+/* Where the camera was in the last frame computed (the frame the field reads see): the world position of the screen's
+ * top-left corner (the script's `camera`, shake included). Pixel (px, py) of the script's picture (scene_width x
+ * scene_height) is at world (x + px, y + py): what a pointer over the picture is over. Either pointer may be NULL. */
+NVFX_API nvfx_status nvfx_scene_camera(const nvfx_scene* scene, float* x, float* y);
 
 /* Run-time settings -------------------------------------------------------------------------------------------------
  * Names are those of the script. Each acts from the next frame computed (see nvfx_scene_render). */

@@ -63,9 +63,11 @@ These are applied between steps. Each reads and writes the runners' states throu
 A scene is a text file (`.nvfxs`) that an artist edits and `nvfx_scene_script` plays: modules, how they couple, force
 fields, particles, light and camera, and rules that change the scene over time. The runner (`src/compose/script.hpp`)
 builds every compose object up front, so a frame allocates nothing (`nvfx_alloc_test` plays a scripted scene with
-every kind of statement and counts 0 allocations; the tool counts them too). Two scenes are in `examples/scenes`: the
+every kind of statement and counts 0 allocations; the tool counts them too). Three scenes are in `examples/scenes`: the
 fireball of §6 (`fireball.nvfxs`, which reproduces the hand-written C++ scene to the bit, §4.8) and a wall of fire in a
-gale (`firewall.nvfxs`, §5.2), written only as a script.
+gale (`firewall.nvfxs`, §5.2), written only as a script, and a campfire the game drives with inputs and rules only the
+game fires (`campfire.nvfxs`). The viewer edits scripts live ([VIEWER.md](VIEWER.md)): a scene rebuilt as you type,
+errors at their line and column, the last good scene playing on.
 
 ```sh
 nvfx_scene_script --script examples/scenes/firewall.nvfxs --models DIR --out firewall.mp4 [--keyframes DIR] [--sheet sheet.png]
@@ -301,7 +303,9 @@ Getting every float the same forced a few things, all visible in the script:
 - Emitters are the three kinds above, with few parameters; there is no general particle system or ember colour.
 - The parser stops at the first error; `--print` drops comments (it is for round trips and checks, not for editing).
 - Seeds are whole numbers up to 16 777 216 (they pass through a float).
-- There is no live reload or viewer yet; `--check` is the quick loop.
+- Live editing is the viewer's scene mode ([VIEWER.md](VIEWER.md)): an edit is checked once typing pauses and rebuilt off
+  the frame. It shows one error at a time, as the parser stops at the first; `--check` remains the quick loop on the
+  command line.
 - The game drives a scene through inputs, rule triggers and module moves and controls (the C API, [ENGINES.md](ENGINES.md)
   §7); it cannot add modules, couplings or fields while the scene plays: those are the script's.
 
@@ -745,7 +749,10 @@ What it needs to become a product feature:
    a region), and the game driving the scene with inputs, rule triggers and module moves and controls. Not done:
    modules, couplings and fields added from C (`nvfx_scene_couple(...)`, `nvfx_scene_field(...)`); they are written in
    the script. A Godot 4 plugin plays scenes and effects and is tested headless ([ENGINES.md](ENGINES.md) §8).
-2. A viewer to edit scripts live (the format and its runner exist, §4; `nvfx_scene_check` is the quick loop). Scripts
+2. A viewer to edit scripts live: done ([VIEWER.md](VIEWER.md), the scene mode): edits are debounced, checked with
+   `nvfx_scene_check` and rebuilt on a worker thread while the last good scene plays; errors show at their line and
+   column; play, pause, scrub, restart and speed; the script's inputs as sliders, a button per named rule, and a field
+   probe under the pointer (`nvfx_scene_camera` gives the camera, so a pointer maps to the world). Scripts
    are reachable from the C API (done).
 3. Training with couplings in the loop: done for the explosion (§9); for smoke and fire two rounds (§9, §10) found
    the gains under couplings, but not yet a way to keep their endless motion while getting them.

@@ -177,7 +177,7 @@ upload_to_texture(rgba);
 | check | `nvfx_scene_check` (parse and check without effects, for an editor's quick loop), `nvfx_scene_list_effects` (the files a script names, for hosts that read them from a package and pass them in) |
 | clock | `nvfx_scene_step(dt)`, `nvfx_scene_step_frames(n)`, `nvfx_scene_seek(seconds)`, `nvfx_scene_restart`, `nvfx_scene_time`, `nvfx_scene_frame` |
 | picture | `nvfx_scene_render(rgba, stride)` |
-| fields | `nvfx_scene_sample` (heat, soot, velocity at a point), `nvfx_scene_sample_grid` (a field on a grid of points: a tile map), `nvfx_scene_field_region` (largest and mean value in a rectangle) |
+| fields | `nvfx_scene_sample` (heat, soot, velocity at a point), `nvfx_scene_sample_grid` (a field on a grid of points: a tile map), `nvfx_scene_field_region` (largest and mean value in a rectangle), `nvfx_scene_camera` (where the screen's top-left corner is in the world, so a pointer over the picture maps to the world) |
 | inputs | `nvfx_scene_set_input`, `nvfx_scene_get_input`, `nvfx_scene_input_name` |
 | rules | `nvfx_scene_trigger`, `nvfx_scene_rule_state` (times fired, last time), `nvfx_scene_rule_name` |
 | modules | `nvfx_scene_module_get_info` (where, active, controls), `nvfx_scene_module_place`, `nvfx_scene_module_set_control`, `nvfx_scene_module_name`, `nvfx_scene_module_control_name` |
@@ -221,6 +221,9 @@ burning?". They read the bus of the last frame computed and cost a few bilinear 
 - **Modules:** `nvfx_scene_module_place` moves a module that is not tiled; `nvfx_scene_module_set_control` sets one of
   its learned controls. A place or control the script changes over time is set by the script again next frame, so
   give the game an input for those instead.
+
+`examples/scenes/campfire.nvfxs` is a small scene driven this way (three inputs, four rules only the game fires); the
+viewer's scene mode shows a script's inputs as sliders and its named rules as buttons ([VIEWER.md](VIEWER.md)).
 
 **Errors.** Script errors (`NVFX_ERROR_SCRIPT`) carry the line and the column, in `nvfx_scene_error` and in the
 message (`"name:line:column: message"`, with a suggestion for a misspelt word). The script is checked before any

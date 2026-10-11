@@ -94,7 +94,7 @@ From [docs/REPORT.md](docs/REPORT.md), measured on simulated fire, smoke and exp
 | lossless packing | `src/core/cm.cpp`, `nvfx_pack` | a context-mixing coder (context models, logistic mixer, APMs, binary arithmetic coder) that knows the tensors' shapes: `.nvfx` to `.nvfz` and back, bit-exact; flipbooks coded the same way for comparison ([results/compression](results/compression/README.md)) |
 | metrics | `src/core/metrics.cpp` | PSNR (full and active-region), SSIM, temporal PSNR, flicker, spectrum and motion statistics, paired bootstrap |
 | evaluation | `nvfx_experiment` | the whole study end to end: compression, controls, variation, timing, figures, report |
-| viewer | `viewer/`, `nvfx_viewer` | Dear ImGui: sliders for every control, side by side with the reference, a flipbook and the live simulation |
+| viewer | `viewer/`, `nvfx_viewer` | Dear ImGui: sliders for every control, side by side with the reference, a flipbook and the live simulation; a scene mode that edits scene scripts live (rebuilt off the frame as you type, errors at their line, the last good scene playing on, inputs, rule buttons and a field probe); [docs/VIEWER.md](docs/VIEWER.md) |
 | composed effects | `src/compose`, `nvfx_fireball`, `nvfx_scene_script` | a prototype: rollout effects coupled through their fields (tiles of one domain, hand-over between models, pushes, transfers, force fields and field effects), with particles, light, distortion and bloom; scene scripts (a text format with a hand-written parser and a runner that allocates nothing per frame, `examples/scenes`); [docs/COMPOSE.md](docs/COMPOSE.md) |
 | scene C API | `include/neuralfx/nvfx_scene.h`, `src/compose/nvfx_scene.cpp` | scene scripts for engines, in libnvfx: a clock in seconds, the picture as RGBA, the fields for gameplay (a point, a tile grid, a region), inputs, rule triggers and module moves and controls; the script runner's frames to the bit, no allocation per frame; [docs/ENGINES.md](docs/ENGINES.md) §7 |
 | Godot 4 plugin | `engines/godot` | a GDExtension (godot-cpp at a pinned tag): `NeuralVFXScene` and `NeuralVFXEffect` nodes into textures, a demo project and a headless test in Godot 4.4.1 (`engines/godot/test.sh`); [docs/ENGINES.md](docs/ENGINES.md) §8 |
@@ -144,7 +144,7 @@ training, evaluation; about three hours), then `d-timing` on an idle machine and
 | `nvfx_eval` | score the flipbook ladder or a model against a reference clip |
 | `nvfx_experiment` | the full study: `data`, `a` (`a-flipbooks`: only the flipbook rows still missing), `b`, `c`, `media`, `timing`, `report`; study D: `d-chaos`, `d-train`, `d-tune`, `d-finish`, `d-eval`, `d-timing`; study G: `g-fine` (design G1, DCM-fine, end to end); to come: `g-data`, `g-pilot`, `g-search`, `g-eval`, `g-timing` |
 | `nvfx_c_host` | the engine loop in plain C, with timings; `--scene` plays a scene script through the scene API (and with `--expect` compares every frame with `nvfx_scene_script --profile`); `--self-test` checks the error paths |
-| `nvfx_viewer` | live viewer with sliders |
+| `nvfx_viewer` | live viewer with sliders; `--scene FILE` edits a scene script live |
 | `nvfx_fireball` | a scene of composed effects written in C++ (a fireball with smoke, fires and embers) to video, with a profile of every stage |
 | `nvfx_scene_script` | plays a scene script (`examples/scenes/*.nvfxs`) to video, keyframes and a sheet; `--check` and `--print` check and reformat a script; `--verify` compares keyframes with frozen SHA-256 |
 | `nvfx_dcm` | context mixing: `selftest` runs a small synthetic mixer search under both objectives (ROC-AUC and Laplace bits); `version FILE` prints the SHA-256 version of a serialised mixer; DCM-fine (G1): `record`, `experts`, `search-fine` (with `--pilot`), `train-fine`, `eval-fine`, `bench-experts`, `fine-summary`; the coarse-state denoiser (G2): `ddpm-train`, `ddpm-sample`, `ddpm-time`, `contexts` |
@@ -164,7 +164,7 @@ training, evaluation; about three hours), then `d-timing` on an idle machine and
 | `src/core`, `src/sim`, `src/train`, `src/runtime`, `src/compose`, `src/dcm`, `src/codec`, `src/common`, `src/proto` | libraries (see the table above); `src/codec` runs video codecs through ffmpeg as baselines; `src/proto` holds the Phase 0 prototypes |
 | `tools/`, `examples/`, `viewer/`, `bench/` | executables |
 | `engines/godot/` | the Godot 4 GDExtension, its demo project and its headless test |
-| `tests/` | GoogleTest suites, the allocation test, the C host self-test, the viewer screenshot test |
+| `tests/` | GoogleTest suites, the allocation test, the C host self-test (the viewer's tests are in `viewer/`) |
 | `docs/` | plan, report, composed effects, engines, data, viewer, figures |
 | `results/` | small text results (CSVs and generated summaries); no images, clips or weights |
 

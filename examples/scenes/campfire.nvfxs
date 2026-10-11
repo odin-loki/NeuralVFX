@@ -1,0 +1,55 @@
+# A campfire the game drives (docs/ENGINES.md §7): inputs the game sets while the scene plays, and rules only the game
+# fires. Made for the viewer's scene mode (docs/VIEWER.md), where the inputs are sliders and the rules are buttons:
+#
+#   nvfx_viewer --scene examples/scenes/campfire.nvfxs --effects DIR
+#
+# The effects are those of study D (fire.nvfx, smoke.nvfx).
+
+scene      size 960 x 540, fps 30, length 12 s, ground 490
+bus        at (-96, -300), size 1152 x 840, cell 8
+particles  capacity 6000, flow 0.9
+
+effect fire  = "fire.nvfx"
+effect smoke = "smoke.nvfx", swirl 1.4, swirl_scale 9
+
+look smoke = shader, heat_scale 2.5, emission 0.6, emission_power 3, soot_density 4, soot_albedo 0.45, sky 0.3,
+             shadow 0.3, scene_light 0.8, relief 1.2, tint (0.9, 0.9, 0.93)
+
+input fuel   = 0.7       # the campfire's intensity (the fire model's control, 0 to 1)
+input lean   = 0.5       # its wind control: 0.5 is still air
+input breeze = 0         # a steady wind on the smoke and the embers, world pixels a frame
+
+let blowing = smooth((t - blow) / 0.3) * (1 - smooth((t - blow - 1.2) / 0.6))   # a gust: up, then down again
+
+# The sky: four tiles of the smoke model, started empty; it only gets the fires' smoke. The fires have its scale (1.5
+# world pixels per tile pixel): transfer puts fine material at the nearest pixel, which shows a pattern across scales.
+module sky  = smoke, tiles 2 x 2, band 8, size 256, width 384, at (480, 540), feather 0.1, look smoke, start 0, empty,
+              seed 300, controls (0.3, 0.6, 0.5)
+module camp = fire, size 192, width 288, at (440, ground), sink 0.08, start 0, seed 11, controls (0.7, 0.5, 0.5),
+              intensity fuel, wind lean + 0.25 * blowing
+module log  = fire, size 128, width 192, at (700, ground), sink 0.08, start 3, seed 21, waiting, controls (0.5, 0.5, 0.5),
+              intensity 0.2 + 0.5 * smooth(log.age / 1.5), opacity smooth(log.age / 0.4), wind lean + 0.25 * blowing
+
+field air  = wind, velocity (breeze, 0), on sky, particles
+field puff = gust, velocity (2 * blowing, -0.3 * blowing), amount 0.6, scale 200, rate 0.8, seed 5, on sky, particles
+
+emit embers, on camp, log, tries 3, chance 0.6, spread 60
+
+light   gain 0.14
+frame   exposure 1.2, fade smooth(t / 0.4), haze 1.1, bloom 1, bloom_threshold 1
+
+# Rules only the game fires (nvfx_scene_trigger; the viewer's buttons).
+when 0 as blow, repeat:              # a gust: the flames lean, the smoke and the embers fly
+  burst at (440, ground - 30), radius 30, embers 120, speed 250
+when 0 as light_log:                 # the log beside the fire catches (once)
+  wake log at (700, ground)
+  scorch at (700, ground + 4), radius 80, glow 0.4
+when 0 as douse, repeat:             # water on the campfire
+  stop camp
+when 0 as relight, repeat:
+  start camp, from 0, seed 12
+
+every frame:
+  suppress sky, tiles (0, 0), (1, 0), cells (7, 0) to (25, 7)   # no smoke source of its own
+  transfer camp -> sky, top 4, fraction 0.5, heat 0, soot 30     # the fires' smoke into the sky
+  transfer log -> sky, top 4, fraction 0.5, heat 0, soot 30
