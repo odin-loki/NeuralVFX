@@ -1400,6 +1400,45 @@ class Io {
     return true;
   }
 
+  // Bit-packed runs of different lengths (s.width 1, 1 <= s.bits < 8, a one-dimensional tensor): run k holds counts[k]
+  // values from byte run_at[k], least significant bit first, padded with zero bits to a whole byte (a run whose padding
+  // is not zero cannot be restored and is refused). Masked feature planes (study F3).
+  bool tensor_bits_runs(const Shape& s, const std::vector<size_t>& run_at, const std::vector<size_t>& counts) {
+    if (s.width != 1 || s.bits < 1 || s.bits >= 8 || run_at.size() != counts.size()) return false;
+    size_t total = 0;
+    for (size_t k = 0; k < counts.size(); ++k) {
+      if (!fits(run_at[k], packed_plane_bytes(counts[k], s.bits))) return false;
+      total += counts[k];
+    }
+    if (total != s.size()) return false;
+    std::vector<uint16_t> v(total);
+    if constexpr (AC::encoding) {
+      for (size_t k = 0, o = 0; k < counts.size(); ++k) {
+        const size_t nb = packed_plane_bytes(counts[k], s.bits), used = counts[k] * static_cast<size_t>(s.bits);
+        if (used % 8 != 0 && (in_[run_at[k] + nb - 1] >> (used % 8)) != 0) return false;
+        for (size_t j = 0; j < counts[k]; ++j) v[o++] = static_cast<uint16_t>(packed_code(in_ + run_at[k], j, s.bits));
+        for (size_t b = 0; b < nb; ++b) {
+          if (covered_[run_at[k] + b]) overlap_ = true;
+          covered_[run_at[k] + b] = true;
+        }
+      }
+    }
+    const double before = ac_.cost;
+    if (!code_tensor(m_, ac_, s, v.data())) return false;
+    Part& part = parts[static_cast<size_t>(s.kind)];
+    part.kind = s.kind;
+    part.values += v.size();
+    for (const size_t c : counts) part.bytes += packed_plane_bytes(c, s.bits);
+    part.coded_bytes += (ac_.cost - before) / 8.0;
+    if constexpr (!AC::encoding) {
+      for (size_t k = 0, o = 0; k < counts.size(); ++k) {
+        std::fill_n(out_ + run_at[k], packed_plane_bytes(counts[k], s.bits), uint8_t{0});
+        for (size_t j = 0; j < counts[k]; ++j) put_packed_code(out_ + run_at[k], j, s.bits, v[o++]);
+      }
+    }
+    return true;
+  }
+
   // Encoding: every byte coded exactly once.
   bool complete() const { return !overlap_ && std::ranges::all_of(covered_, [](bool b) { return b; }); }
 
@@ -1443,6 +1482,15 @@ class Collect {
     for (const size_t a : plane_at) {
       if (!fits(a, nb)) return false;
       b.insert(b.end(), in_.begin() + static_cast<std::ptrdiff_t>(a), in_.begin() + static_cast<std::ptrdiff_t>(a + nb));
+    }
+    return true;
+  }
+  bool tensor_bits_runs(const Shape& s, const std::vector<size_t>& run_at, const std::vector<size_t>& counts) {
+    auto& b = out[static_cast<size_t>(s.kind)];
+    for (size_t k = 0; k < run_at.size() && k < counts.size(); ++k) {
+      const size_t nb = packed_plane_bytes(counts[k], s.bits);
+      if (!fits(run_at[k], nb)) return false;
+      b.insert(b.end(), in_.begin() + static_cast<std::ptrdiff_t>(run_at[k]), in_.begin() + static_cast<std::ptrdiff_t>(run_at[k] + nb));
     }
     return true;
   }
@@ -1497,7 +1545,9 @@ bool walk_frame(IO& io, size_t& pos) {
   if (side < 1 || side > 4096 || C < 1 || C > 4096) return false;
   pos = 76;
   const uint64_t version = io.le(8, 4);
+  if (version < 1 || version > 3) return false;
   const size_t vq_fields = version == 2 ? 8 : 0;  // version 2: vector-quantised features (vq_bits, vq_dim)
+  const bool mixed = version == 3;                 // version 3: bits per feature plane (study F3)
   if (!io.raw(pos, 40 + vq_fields + 16 * static_cast<size_t>(n_controls))) return false;
   const uint64_t bits = io.le(pos + 36, 4);
   const uint64_t vq_bits = vq_fields ? io.le(pos + 40, 4) : 0, vq_dim = vq_fields ? io.le(pos + 44, 4) : 0;
@@ -1505,10 +1555,113 @@ bool walk_frame(IO& io, size_t& pos) {
   const size_t K = static_cast<size_t>(bases), T = static_cast<size_t>(grid_t), Cs = static_cast<size_t>(C), S = static_cast<size_t>(side);
   const size_t planes = K * T * Cs, plane = S * S;
   const uint64_t stored_bits = vq_fields ? std::max<uint64_t>(1, vq_bits) : std::min<uint64_t>(bits, 8);
-  if (bits < 2 || planes / (vq_fields && vq_dim ? vq_dim : 1) * ((plane * stored_bits + 7) / 8) > io.size()) return false;  // a bound before allocating
+  if (bits < 2 || (mixed ? planes : planes / (vq_fields && vq_dim ? vq_dim : 1) * ((plane * stored_bits + 7) / 8)) > io.size()) return false;  // a bound before allocating
   // Coding order [C][K][T][y][x]: the plane before is the previous time slice, two axes back the previous basis.
   const auto plane_index = [&](size_t c, size_t k, size_t t) { return (k * T + t) * Cs + c; };
-  if (vq_fields) {
+  if (mixed) {
+    // Flags (bit 0: a mask) and a width byte per plane [basis][slice][channel] (plain bytes), the mask (per slice,
+    // bit-packed; plain bytes), then per plane its range (fp16), its fill (fp16, masked) and its codes at its width (none
+    // at 0 bits). Ranges and fills are tensors in the coding order [C][K][T]; the codes of the planes of each width (1 to
+    // 8) one tensor: [planes of that width, in the same order][S][S], or masked, the planes' stored points one after
+    // another (each plane's codes padded to a whole byte).
+    if (!io.raw(pos, 4 + planes)) return false;
+    const uint64_t flags = io.le(pos, 4);
+    if ((flags & ~uint64_t{1}) != 0 || ((flags & 1) != 0 && arch != 1)) return false;
+    const bool masked = (flags & 1) != 0;
+    std::vector<int> width(planes);
+    for (size_t k = 0; k < planes; ++k) {
+      width[k] = static_cast<int>(io.le(pos + 4 + k, 1));
+      if (width[k] > 8) return false;
+    }
+    pos += 4 + planes;
+    const size_t mb = (plane + 7) / 8;
+    std::vector<size_t> points(T, plane);  // stored points per slice
+    if (masked) {
+      if (!io.raw(pos, T * mb)) return false;
+      for (size_t t = 0; t < T; ++t) {
+        size_t n = 0;
+        for (size_t j = 0; j < mb; ++j) n += static_cast<size_t>(std::popcount(static_cast<uint8_t>(io.le(pos + t * mb + j, 1))));
+        if ((plane % 8) != 0 && (io.le(pos + t * mb + mb - 1, 1) >> (plane % 8)) != 0) return false;  // padding bits are zero
+        points[t] = n;
+      }
+      pos += T * mb;
+    }
+    const auto count = [&](size_t p) { return points[(p / Cs) % T]; };  // stored points of plane p ([K][T][C] order)
+    std::vector<size_t> start(planes);
+    size_t end = pos;
+    for (size_t k = 0; k < planes; ++k) {
+      start[k] = end;
+      end += 4 + (masked ? 2 : 0) + (count(k) * static_cast<size_t>(width[k]) + 7) / 8;
+    }
+    if (!io.fits(pos, end - pos)) return false;
+    std::vector<size_t> at;
+    at.reserve(planes * 2);
+    for (size_t c = 0; c < Cs; ++c) {
+      for (size_t k = 0; k < K; ++k) {
+        for (size_t t = 0; t < T; ++t) {
+          at.push_back(start[plane_index(c, k, t)]);
+          at.push_back(start[plane_index(c, k, t)] + 2);
+        }
+      }
+    }
+    if (!io.tensor(shape(Kind::ranges, 2, {static_cast<uint32_t>(Cs), static_cast<uint32_t>(K), static_cast<uint32_t>(T), 2}, true), at)) return false;
+    if (masked) {
+      at.clear();
+      for (size_t c = 0; c < Cs; ++c) {
+        for (size_t k = 0; k < K; ++k) {
+          for (size_t t = 0; t < T; ++t) at.push_back(start[plane_index(c, k, t)] + 4);
+        }
+      }
+      if (!io.tensor(shape(Kind::ranges, 2, {static_cast<uint32_t>(Cs), static_cast<uint32_t>(K), static_cast<uint32_t>(T)}), at)) return false;
+    }
+    const size_t code_at = masked ? 6 : 4;
+    for (int b = 1; b <= 8; ++b) {
+      std::vector<size_t> group;
+      for (size_t c = 0; c < Cs; ++c) {
+        for (size_t k = 0; k < K; ++k) {
+          for (size_t t = 0; t < T; ++t) {
+            if (width[plane_index(c, k, t)] == b && count(plane_index(c, k, t)) > 0) group.push_back(plane_index(c, k, t));
+          }
+        }
+      }
+      if (group.empty()) continue;
+      at.clear();
+      if (!masked) {
+        if (b < 8 && (plane * static_cast<size_t>(b)) % 8 != 0) return false;  // planes ending inside a byte: plain bytes
+        Shape fs = shape(Kind::features, 1, {static_cast<uint32_t>(group.size()), static_cast<uint32_t>(S), static_cast<uint32_t>(S)});
+        fs.bits = b;
+        for (const size_t p : group) {
+          fs.lo.push_back(f16_lin(static_cast<uint16_t>(io.le(start[p], 2))));
+          fs.hi.push_back(f16_lin(static_cast<uint16_t>(io.le(start[p] + 2, 2))));
+          if (b == 8) {
+            for (size_t j = 0; j < plane; ++j) at.push_back(start[p] + code_at + j);
+          } else {
+            at.push_back(start[p] + code_at);
+          }
+        }
+        if (b == 8 ? !io.tensor(fs, at) : !io.tensor_bits(fs, at, plane)) return false;
+        continue;
+      }
+      std::vector<size_t> counts;
+      size_t total = 0;
+      for (const size_t p : group) {
+        counts.push_back(count(p));
+        total += count(p);
+      }
+      Shape fs = shape(Kind::features, 1, {static_cast<uint32_t>(total)});
+      fs.bits = b;
+      if (b == 8) {
+        for (const size_t p : group) {
+          for (size_t j = 0; j < count(p); ++j) at.push_back(start[p] + code_at + j);
+        }
+        if (!io.tensor(fs, at)) return false;
+      } else {
+        for (const size_t p : group) at.push_back(start[p] + code_at);
+        if (!io.tensor_bits_runs(fs, at, counts)) return false;
+      }
+    }
+    pos = end;
+  } else if (vq_fields) {
     // Codebooks [group][codeword][dim] (fp16), then index planes [basis][slice][group] coded as [group][basis][slice].
     if (vq_bits < 2 || vq_bits > 8 || vq_dim < 1 || Cs % vq_dim != 0) return false;
     const size_t G = Cs / vq_dim, Kc = size_t{1} << vq_bits, D = vq_dim, pb = (plane * vq_bits + 7) / 8;
@@ -2008,6 +2161,46 @@ class Io2 {
       for (size_t k = 0; k < plane_at.size(); ++k) {
         std::fill_n(out_ + plane_at[k], nb, uint8_t{0});
         for (size_t j = 0; j < per_plane; ++j) put_packed_code(out_ + plane_at[k], j, s.bits, v[k * per_plane + j]);
+      }
+    }
+    ++tensors_;
+    return true;
+  }
+
+  // Bit-packed runs of different lengths (as Io::tensor_bits_runs), in the single stream only.
+  bool tensor_bits_runs(const Shape& s, const std::vector<size_t>& run_at, const std::vector<size_t>& counts) {
+    if (o_.seek) return false;
+    if (s.width != 1 || s.bits < 1 || s.bits >= 8 || run_at.size() != counts.size()) return false;
+    size_t total = 0;
+    for (size_t k = 0; k < counts.size(); ++k) {
+      if (!fits(run_at[k], packed_plane_bytes(counts[k], s.bits))) return false;
+      total += counts[k];
+    }
+    if (total != s.size()) return false;
+    std::vector<uint16_t> v(total);
+    if constexpr (kEnc) {
+      for (size_t k = 0, o = 0; k < counts.size(); ++k) {
+        const size_t nb = packed_plane_bytes(counts[k], s.bits), used = counts[k] * static_cast<size_t>(s.bits);
+        if (used % 8 != 0 && (in_[run_at[k] + nb - 1] >> (used % 8)) != 0) return false;
+        for (size_t j = 0; j < counts[k]; ++j) v[o++] = static_cast<uint16_t>(packed_code(in_ + run_at[k], j, s.bits));
+        for (size_t b = 0; b < nb; ++b) {
+          if (covered_[run_at[k] + b]) overlap_ = true;
+          covered_[run_at[k] + b] = true;
+        }
+      }
+    }
+    Part& part = parts[static_cast<size_t>(s.kind)];
+    part.kind = s.kind;
+    part.values += v.size();
+    for (const size_t c : counts) part.bytes += packed_plane_bytes(c, s.bits);
+    AC& ac = *ac_;
+    const double before = ac.cost;
+    if (!code_stream(ac, s, geometry(s).planes, v.data())) return false;
+    part.coded_bytes += (ac.cost - before) / 8.0;
+    if constexpr (!kEnc) {
+      for (size_t k = 0, o = 0; k < counts.size(); ++k) {
+        std::fill_n(out_ + run_at[k], packed_plane_bytes(counts[k], s.bits), uint8_t{0});
+        for (size_t j = 0; j < counts[k]; ++j) put_packed_code(out_ + run_at[k], j, s.bits, v[o++]);
       }
     }
     ++tensors_;

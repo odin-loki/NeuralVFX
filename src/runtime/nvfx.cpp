@@ -82,6 +82,7 @@ nvfx_isa resolved_isa() {
 
 std::size_t resident_bytes(const nfx::Model& m) {
   std::size_t n = m.raw_f16.size() * 2 + m.raw_u8.size() + m.raw_ranges.size() * 4 + m.raw_codebook.size() * 4;
+  n += m.plane_bits.size() + m.raw_offsets.size() * 4 + m.raw_mask.size() + m.raw_fill.size() * 4;  // per-plane storage
   n += (m.basis.w.size() + m.basis.b.size()) * 4;
   for (const auto* group : {&m.layers, &m.films}) {
     for (const auto& d : *group) n += (d.w.size() + d.b.size()) * 4;
@@ -258,6 +259,8 @@ nvfx_status adopt(std::expected<nfx::Model, std::string>&& m, nvfx_effect** out)
   e->e.m.features.shrink_to_fit();
   e->e.m.vq_codebook.clear();  // kept as raw_codebook
   e->e.m.vq_codebook.shrink_to_fit();
+  e->e.m.feature_mask.clear();  // kept bit-packed as raw_mask
+  e->e.m.feature_mask.shrink_to_fit();
   e->e.resident_bytes = resident_bytes(e->e.m);
   *out = e;
   return NVFX_OK;

@@ -69,7 +69,41 @@ void accumulate_slice(const Model& m, int k, int i, float a, std::span<float> sl
   const std::size_t side2 = static_cast<std::size_t>(h.feature_side()) * h.feature_side();
   const std::size_t planes = static_cast<std::size_t>(h.feature_channels());
   const std::size_t first_plane = (static_cast<std::size_t>(k) * h.grid_t + i) * planes;
-  if (m.vq_bits > 0) {  // vector-quantised: per channel group an index plane into the group's codebook
+  if (!m.plane_bits.empty()) {  // per-plane widths (0 to 8 bits), each plane found by its offset; optionally masked
+    const std::size_t mb = packed_plane_bytes(side2, 1);
+    const std::uint8_t* mask = m.raw_mask.empty() ? nullptr : m.raw_mask.data() + static_cast<std::size_t>(i) * mb;
+    for (std::size_t p = 0; p < planes; ++p) {
+      const int bits = m.plane_bits[first_plane + p];
+      const float lo = m.raw_ranges[(first_plane + p) * 2], hi = m.raw_ranges[(first_plane + p) * 2 + 1];
+      const float base = a * lo, step = bits > 0 ? a * (hi - lo) / static_cast<float>((1 << bits) - 1) : 0.f;
+      const std::uint8_t* q = m.raw_u8.data() + m.raw_offsets[first_plane + p];
+      float* s = slice.data() + p * side2;
+      if (mask) {  // stored points in raster order; the others take the plane's fill
+        const float fill = a * m.raw_fill[first_plane + p];
+        std::size_t n = 0;
+        for (std::size_t j = 0; j < side2; ++j) {
+          if ((mask[j >> 3] >> (j & 7)) & 1u) {
+            s[j] += base + step * static_cast<float>(bits == 0 ? 0u : bits == 8 ? q[n] : packed_code(q, n, bits));
+            ++n;
+          } else {
+            s[j] += fill;
+          }
+        }
+      } else if (bits == 0) {
+        for (std::size_t j = 0; j < side2; ++j) s[j] += base;
+      } else if (bits == 8) {
+        for (std::size_t j = 0; j < side2; ++j) s[j] += base + step * static_cast<float>(q[j]);
+      } else if (bits == 4) {
+        for (std::size_t j = 0; j + 1 < side2; j += 2) {
+          s[j] += base + step * static_cast<float>(q[j >> 1] & 15u);
+          s[j + 1] += base + step * static_cast<float>(q[j >> 1] >> 4);
+        }
+        if (side2 & 1) s[side2 - 1] += base + step * static_cast<float>(q[side2 >> 1] & 15u);
+      } else {
+        for (std::size_t j = 0; j < side2; ++j) s[j] += base + step * static_cast<float>(packed_code(q, j, bits));
+      }
+    }
+  } else if (m.vq_bits > 0) {  // vector-quantised: per channel group an index plane into the group's codebook
     const int G = m.vq_groups(), d = m.vq_dim, bits = m.vq_bits;
     const std::size_t pb = packed_plane_bytes(side2, bits), K = std::size_t{1} << bits;
     for (int g = 0; g < G; ++g) {

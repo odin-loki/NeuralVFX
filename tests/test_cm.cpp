@@ -226,6 +226,73 @@ TEST(Cm, PackedFeaturesCodeOnlyTheirBits) {
   }
 }
 
+TEST(Cm, MixedPrecisionModelsRoundTrip) {
+  // Study F3's file version 3 (a width per feature plane, 0 to 8 bits) is parsed: ranges as one tensor, the codes of
+  // each width as their own tensor with only their bits coded, planes at 0 bits as their range only. In every format.
+  // Planes that end inside a byte are not parsed (plain bytes), and are still restored exactly.
+  for (const int grid : {16, 5}) {
+    Hyper h;
+    h.arch = Arch::grid;
+    h.size = 32;
+    h.frames = 8;
+    h.grid = grid;
+    h.channels = 4;
+    h.hidden = 6;
+    h.grid_t = 5;
+    h.bases = 2;
+    Model m = init_model(h, 13);
+    m.feature_bits = 8;
+    m.effect = "explosion";
+    const std::size_t side2 = static_cast<std::size_t>(grid) * grid;
+    m.plane_bits.resize(m.features.size() / side2);
+    std::size_t coded = 0;
+    for (std::size_t k = 0; k < m.plane_bits.size(); ++k) {
+      m.plane_bits[k] = static_cast<std::uint8_t>((k * 4 + 1) % 9);
+      if (m.plane_bits[k] > 0) coded += side2;
+    }
+    std::ostringstream os;
+    ASSERT_TRUE(save_model(os, m));
+    const auto file = bytes_of(os.str());
+    expect_model_round_trip(file);
+    for (const cm::Options o : {cm::Options{}, cm::Options{cm::Literal::fast, true, false}, cm::Options{cm::Literal::light, true, true, 512}}) {
+      const auto back = cm::unpack_model(cm::pack_model(file, o).data);
+      ASSERT_TRUE(back) << back.error();
+      EXPECT_TRUE(*back == file);
+    }
+    const cm::Packed p = cm::pack_model(file);
+    const auto feat = std::ranges::find(p.parts, cm::Kind::features, &cm::Part::kind);
+    if (grid == 16) {
+      ASSERT_NE(feat, p.parts.end());
+      EXPECT_EQ(feat->values, coded);
+      EXPECT_NE(std::ranges::find(p.parts, cm::Kind::ranges, &cm::Part::kind), p.parts.end());
+    } else {
+      EXPECT_EQ(feat, p.parts.end());
+    }
+    // With a mask: the stored points of each width one after another (runs of any length, padded to whole bytes),
+    // fills as a tensor of their own. Parsed for both plane sizes.
+    m.feature_mask.resize(static_cast<std::size_t>(h.grid_t) * side2);
+    std::size_t stored = 0;
+    for (std::size_t j = 0; j < m.feature_mask.size(); ++j) m.feature_mask[j] = static_cast<std::uint8_t>((j * j + j / 3) % 3 == 0);
+    for (std::size_t k = 0; k < m.plane_bits.size(); ++k) {
+      const std::size_t t = (k / static_cast<std::size_t>(h.channels)) % static_cast<std::size_t>(h.grid_t);
+      if (m.plane_bits[k] > 0) stored += static_cast<std::size_t>(std::count(m.feature_mask.begin() + static_cast<std::ptrdiff_t>(t * side2), m.feature_mask.begin() + static_cast<std::ptrdiff_t>((t + 1) * side2), std::uint8_t{1}));
+    }
+    std::ostringstream ms;
+    ASSERT_TRUE(save_model(ms, m));
+    const auto masked = bytes_of(ms.str());
+    expect_model_round_trip(masked);
+    for (const cm::Options o : {cm::Options{}, cm::Options{cm::Literal::fast, true, false}, cm::Options{cm::Literal::light, true, true, 512}}) {
+      const auto back = cm::unpack_model(cm::pack_model(masked, o).data);
+      ASSERT_TRUE(back) << back.error();
+      EXPECT_TRUE(*back == masked);
+    }
+    const cm::Packed pm = cm::pack_model(masked);
+    const auto mf = std::ranges::find(pm.parts, cm::Kind::features, &cm::Part::kind);
+    ASSERT_NE(mf, pm.parts.end()) << grid;
+    EXPECT_EQ(mf->values, stored);
+  }
+}
+
 TEST(Cm, VectorQuantisedModelsRoundTrip) {
   // Codebooks and index planes are parsed: the indices are coded with their bits, the codebooks as fp16 weights.
   for (const int bits : {8, 5, 3}) {

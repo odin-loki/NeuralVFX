@@ -49,10 +49,18 @@ void operator delete[](void* p, std::size_t) noexcept { std::free(p); }
 
 namespace {
 
-int run(nfx::Hyper h, int size, const char* name, int bits = 16, int vq_bits = 0) {
+int run(nfx::Hyper h, int size, const char* name, int bits = 16, int vq_bits = 0, bool mixed = false, bool masked = false) {
   nfx::Model m = nfx::init_model(h, 1);
   m.effect = name;
   m.feature_bits = bits;
+  if (mixed) {  // every width from 0 to 8 bits among the planes
+    m.plane_bits.resize(m.features.size() / (static_cast<std::size_t>(h.feature_side()) * h.feature_side()));
+    for (std::size_t k = 0; k < m.plane_bits.size(); ++k) m.plane_bits[k] = static_cast<std::uint8_t>(k % 9);
+  }
+  if (masked) {  // half of the grid points of each slice stored
+    m.feature_mask.resize(static_cast<std::size_t>(h.grid_t) * h.grid * h.grid);
+    for (std::size_t j = 0; j < m.feature_mask.size(); ++j) m.feature_mask[j] = static_cast<std::uint8_t>((j * 7 / 3) % 2);
+  }
   if (vq_bits > 0) {  // vector-quantised features: an index per two channels
     m.vq_bits = vq_bits;
     m.vq_dim = 2;
@@ -81,7 +89,8 @@ int run(nfx::Hyper h, int size, const char* name, int bits = 16, int vq_bits = 0
   for (int f = 0; f < 200; ++f) nvfx_render(in, f / 30.0, rgba.data(), static_cast<std::size_t>(size) * 4);
   g_counting = false;
   const long n = g_allocations.load();
-  std::printf("%s %dx%d, %d-bit features%s: %ld allocations in 200 frames\n", name, size, size, bits, vq_bits ? " (vector-quantised)" : "", n);
+  std::printf("%s %dx%d, %d-bit features%s: %ld allocations in 200 frames\n", name, size, size, bits,
+              vq_bits ? " (vector-quantised)" : masked ? " (sparse, 0 to 8 bits per plane)" : mixed ? " (mixed, 0 to 8 bits per plane)" : "", n);
   nvfx_instance_free(in);
   nvfx_effect_free(e);
   return n == 0 ? 0 : 1;
@@ -299,6 +308,8 @@ int main() {
   failures += run_rollout_prior(64) + run_rollout_prior(128);  // the prior against drift
   failures += run(g, 128, "grid", 8) + run(g, 128, "grid", 5) + run(g, 64, "grid", 4) + run(c, 64, "conv", 4);  // packed features
   failures += run(g, 128, "grid", 8, 6) + run(c, 64, "conv", 8, 8);  // vector-quantised features
+  failures += run(g, 128, "grid", 8, 0, true) + run(c, 64, "conv", 8, 0, true);  // mixed precision per plane
+  failures += run(g, 128, "grid", 8, 0, true, true) + run(g, 64, "grid", 4, 0, true, true);  // sparse features
   std::printf("%s\n", failures ? "FAILED: nvfx_render allocated" : "ok: no allocation per frame");
   return failures ? 1 : 0;
 }
