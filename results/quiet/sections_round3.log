@@ -1,0 +1,5 @@
+== int8 timing (frame models, float and int8, AVX2 and VNNI)  03:06:30  0.59 1.90 2.87 1/105 30462
+== F3 sparse models against dense twins  03:08:06  0.92 1.65 2.68 1/108 30484
+== fireball with shared step scratch (default) against own scratch, 720p and 1080p, 4 threads, 3 rounds  03:08:12  0.92 1.64 2.67 1/108 30487
+== rollout effects through the C API (d-timing), 3 runs  03:09:13  2.77 2.03 2.74 1/107 30538
+== done  03:09:26  2.38 1.98 2.71 1/105 30548

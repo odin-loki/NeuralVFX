@@ -137,7 +137,8 @@ Study H (H3, [docs/DCM.md](../../docs/DCM.md) §9) added a second format beside 
 byte: LZ tokens for the kinds that repeat exactly (fine fields, headers, flipbooks), a light or a fast literal model
 instead of the full one, and optional seekable segments (one tensor or start point decodes alone). The light model
 decodes 4 to 9 times faster for 1.6 to 3.9% more disk (seekable: 1.7 to 4.4%); the fast one 18 to 38 times faster for
-10 to 23% more (provisional timings, a busy machine).
+10 to 23% more (measured on a busy machine; re-run on a quiet one: 3.9 to 8.5 times and 17.5 to 41 times,
+`results/quiet/h3_decode.csv`).
 Measurements: [h3_decode.csv](h3_decode.csv) (every file and configuration, with zlib -9), parts in
 [h3_decode_parts.csv](h3_decode_parts.csv), segment sizes in `h3_segment_*.csv`; `nvfx_pack --h3` and
 `tools/study_h/h3.sh` reproduce them.
@@ -632,10 +633,12 @@ B's 10 held-out settings with study D's seeds.
 - Memory at run time does not change: the runtime widens start points to floats at load (fire 163 KB, smoke 419 KB,
   explosion 804 KB resident). Keeping them quantised in memory would be a runtime change for stage S6.
 
-### Timing (provisional)
+### Timing
 
-Thread CPU time per 128 x 128 frame through the runtime (AVX2), median of 200 frames, least of 7 runs, pinned to one
-core of the shared machine (load average 7.45): **provisional**, to be measured again on a quiet machine.
+Thread CPU time per 128 x 128 frame through the runtime (AVX2, float), median of 200 frames, least of 7 runs, pinned
+to one core, first measured on the shared machine (load average 7.45) and re-run on a quiet one (load 1.1) with the
+same result within 2% (8-bit 0.857 ms, 4-bit 0.864, 5-bit 0.910, 6-bit 0.901, conv_s 0.406 and 0.415). The table
+below is the first run:
 
 | model | stored KB | resident KB | ms per frame |
 |---|---:|---:|---:|
@@ -824,9 +827,10 @@ On disk against the video codecs (network packed by the lossless coder, codec pa
   most.
 - **The steadier number** (the quality difference at the network's own size, against flipbooks as stored) grows from
   +6.00 dB [+5.18, +6.90] (F2's best) to +8.26 [+7.17, +9.44] (sparse, 6,000 steps).
-- **No cost per frame** (provisional, the shared machine at load average 9; thread CPU per 128 x 128 frame, one
-  core): 0.815 ms for the sparse 4-bit fire_v0 against 0.831 ms for its dense twin, 0.828 ms sparse at 5 bits, 0.807 ms
-  dense at 8 bits. Resident memory: 40.6 KB against 71.0 KB on the test clips (+44 KB working memory per playing
+- **No cost per frame** (thread CPU per 128 x 128 frame, one core, float): on the shared machine 0.815 ms for the
+  sparse 4-bit fire_v0 against 0.831 ms for its dense twin, 0.828 ms sparse at 5 bits, 0.807 ms dense at 8 bits; on a
+  quiet machine 0.786 and 0.801 ms for the sparse test models against 0.791 ms for the dense 4-bit one and 0.772 ms
+  for the 8-bit one. Resident memory: 40.6 KB against 71.0 KB on the test clips (+44 KB working memory per playing
   instance, unchanged).
 - **Disk barely moves with sparsity** (-1 to -2 KB packed): the lossless coder already coded the empty points almost
   for free, and masked planes lose its plane-above context. The rate term is the disk lever: with 6,000 steps it costs

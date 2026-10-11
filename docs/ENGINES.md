@@ -111,7 +111,7 @@ is the same; what differs:
   shards on every statistic: it buys continuity (no restarts, no crossfades), not better pictures, and it was
   validated on fire only (smoke tied without it; explosions do not run long enough to drift).
   `nvfx_instance_set_prior(inst, every_frames, t, beta)` changes it (default 16, 100, 1; 0 frames turns it off); with
-  shards it does nothing. **Cost** (provisional, one AVX2 core, 128 x 128): on average what shards cost (0.91 against
+  shards it does nothing. **Cost** (one AVX2 core, 128 x 128, confirmed on a quiet machine): on average what shards cost (0.91 against
   0.93 ms per frame), but not evenly: the frame where the pass runs costs about 3.9 ms instead of 0.7 ms, once every
   16 frames (worst frame 4.1 ms, against 1.85 ms with shards). Running `nvfx_render` on a worker hides it from the game thread; with many such instances, start them on
   different frames so their passes fall on different frames (the pass runs on frames 16, 32, ... of each instance's

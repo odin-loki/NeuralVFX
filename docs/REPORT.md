@@ -67,10 +67,10 @@ Plan and decisions: [PLAN.md](PLAN.md).
   grid model (73 KB, 0.25 ms) and the small conv model (69 KB, 0.43 ms) meet the 0.5 ms target set in the plan (§7).
   These are from a later session of the same cloud VM type, in which unchanged code ran 1.2 to 1.4 times faster than
   in the first; the first session's figures were 0.38 to 1.1 ms, with only the small grid model under 0.5 ms.
-- **int8 (since 11 October 2026; timings provisional, from a busy machine).** The grid models now run their hidden
+- **int8 (since 11 October 2026; timings re-run on a quiet machine).** The grid models now run their hidden
   layers in 8-bit integers, with the first layer evaluated per grid point and interpolated, by default. grid_m,
-  grid_mt and the B and C models take 0.41 to 0.48 ms per 128 x 128 frame (grid_l 0.51 ms), with AVX-512 VNNI or with
-  AVX2 alone, against 0.75 to 0.78 ms for the float network measured alongside. Study A's 12 clips lose
+  grid_mt and the B and C models take 0.42 to 0.47 ms per 128 x 128 frame (grid_l 0.50 to 0.51 ms), with AVX-512 VNNI
+  or with AVX2 alone, against 0.74 to 0.79 ms for the float network measured alongside. Study A's 12 clips lose
   **−0.008 [−0.015, −0.001] dB** of active PSNR with VNNI and −0.018 [−0.031, −0.008] dB with AVX2, both within the
   −0.05 dB set for a default (§7).
 - **The plan's continuation rule is met** (PLAN.md §7: beat the flipbook of equal memory on held-out data, interval above
@@ -663,9 +663,10 @@ effects (D) after the runtime's rollout code was optimised; the first session's 
 - **The 0.5 ms budget is met by grid_s (0.25 ms) and conv_s (0.43 ms).** In the first session only grid_s met it
   (conv_s 0.57 ms). grid_m takes 0.78 ms (0.33 ms at 64 px). conv_s costs about the same at every size: its level of
   detail renders the native frame and filters it down, so distant copies save nothing. With int8 (below, now the
-  default) grid_m, grid_mt and the B and C models meet it too (0.41 to 0.48 ms, provisional), grid_l nearly (0.51 ms).
+  default) grid_m, grid_mt and the B and C models meet it too (0.42 to 0.47 ms, quiet machine), grid_l nearly (0.50 to
+  0.51 ms).
 - AVX-512 is slower than AVX2 on this machine for the float network (grid_m 1.41 against 0.78 ms; 0.92 ms since a
-  broadcast in the shared kernels compiles to one instruction, provisional, below); the baseline SSE2 build is 1.8 to
+  broadcast in the shared kernels compiles to one instruction, 0.98 ms on the quiet machine, below); the baseline SSE2 build is 1.8 to
   2.7 times slower. The default is AVX2, and the AVX-512 build for int8 where the CPU has VNNI.
 - The networks are 8 to 37 times cheaper per frame than running the simulation, and 35 to 125 times more expensive
   than playing a flipbook.
@@ -676,8 +677,9 @@ effects (D) after the runtime's rollout code was optimised; the first session's 
   A seek costs about 0.4 ms (fire: 14 ms, its start points grow their fine fields). The detail layer still runs at full
   resolution every frame.
 
-**int8 hidden layers and a projected first layer** (11 October 2026). Timings are **provisional**: thread CPU time on
-one pinned core of a machine shared with other jobs, the least of five runs' medians over 180 frames
+**int8 hidden layers and a projected first layer** (11 October 2026). Timings: thread CPU time on one pinned core of a
+quiet machine (re-run after the study, which measured on a shared machine; the two agree within a few percent), the
+least of five runs' medians over 180 frames
 (`results/experiments/int8_timing.csv`); the main tables above are float. Quality: `int8_quality.csv` and
 `int8_summary.csv`. The code is `src/runtime/rt_int8.hpp`.
 - **The hidden layers** (32 to 32 units in grid_m) multiply 8-bit activations by 8-bit weights and add in 32-bit
@@ -699,12 +701,12 @@ ms per frame, and the change in active PSNR, int8 minus float (paired over the c
 
 | model, 128 px | float, AVX2 | int8, AVX2 | int8, AVX-512 VNNI | change, VNNI | change, AVX2 |
 |---|---:|---:|---:|---|---|
-| grid_s (no hidden layer: the projection alone) | 0.252 | **0.091** | 0.117 | 0.000 (3 clips) | 0.000 |
-| grid_m | 0.751 | **0.468** | **0.463** | **−0.008 [−0.015, −0.001]** (A, 12 clips) | −0.018 [−0.031, −0.008] |
-| grid_l | 0.747 | 0.511 | 0.509 | −0.017 [−0.034, −0.004] (3 clips) | −0.036 [−0.069, −0.013] |
-| grid_mt | 0.779 | **0.468** | **0.414** | −0.005 [−0.007, −0.002] (3 clips) | −0.015 [−0.019, −0.010] |
-| control model k8 (B) | 0.776 | **0.476** | **0.453** | −0.004 [−0.013, +0.005] (30 held-out settings) | −0.004 [−0.013, +0.005] |
-| variation model k8 (C) | 0.753 | **0.481** | **0.457** | −0.027 [−0.033, −0.022] (72 training seeds) | −0.031 [−0.037, −0.025] |
+| grid_s (no hidden layer: the projection alone) | 0.252 | **0.089** | 0.127 | 0.000 (3 clips) | 0.000 |
+| grid_m | 0.757 | **0.465** | **0.450** | **−0.008 [−0.015, −0.001]** (A, 12 clips) | −0.018 [−0.031, −0.008] |
+| grid_l | 0.773 | 0.511 | 0.504 | −0.017 [−0.034, −0.004] (3 clips) | −0.036 [−0.069, −0.013] |
+| grid_mt | 0.787 | **0.460** | **0.417** | −0.005 [−0.007, −0.002] (3 clips) | −0.015 [−0.019, −0.010] |
+| control model k8 (B) | 0.743 | **0.469** | **0.455** | −0.004 [−0.013, +0.005] (30 held-out settings) | −0.004 [−0.013, +0.005] |
+| variation model k8 (C) | 0.746 | **0.468** | **0.453** | −0.027 [−0.033, −0.022] (72 training seeds) | −0.031 [−0.037, −0.025] |
 
 - **Quality.** The rule, set before measuring: int8 becomes the default if study A's mean change in active PSNR is
   within −0.05 dB with an interval not entirely below that. grid_m on the 12 clips: 32.619 to 32.611 dB with VNNI,
@@ -737,7 +739,7 @@ game, on one core, in the later session: grid_s 1.7 ms per game frame on average
 Sharing instances between copies with the same controls and seed lowers this further; the game's other CPU work has
 to fit around it. These are the float network's figures (`nvfx_scene --float` since int8 became the default); at int8
 grid_m's scene took 4.0 to 4.2 ms per game frame against 5.0 to 6.6 ms in float, in two interleaved runs on the busy
-machine (wall-clock time, provisional).
+machine (wall-clock time; not re-run on the quiet machine).
 
 ## 8. Against NVIDIA's published claims and traditional methods
 
@@ -802,7 +804,7 @@ Against traditional methods:
    person would see.
 4. **Variations are morphs of the training seeds**, softer than real ones, not new turbulence.
 5. **The better models meet the 0.5 ms target only at int8**, the default since 11 October 2026 (grid_m 0.46 to
-   0.47 ms with AVX-512 VNNI or AVX2, grid_l 0.51 ms; provisional, measured on a busy machine), for 0.01 to 0.04 dB of
+   0.47 ms with AVX-512 VNNI or AVX2, grid_l 0.50 to 0.51 ms, on a quiet machine), for 0.01 to 0.04 dB of
    active PSNR. The float network takes 0.78 ms (1.06 ms in the first session). AVX-VNNI, on newer CPUs without
    AVX-512, is not used (none was at hand to test). The conv family has no int8 path, and its level of detail saves no
    time.
@@ -829,7 +831,7 @@ Against traditional methods:
   flipbooks for the rest.
 - For a game today, to store one clip: on desktop GPUs (BC7) use **grid_s** (73 KB, 0.25 ms; 0.09 ms with the int8
   path's projected first layer) where memory matters most and some softness is acceptable, or **grid_m** (132 KB,
-  0.78 ms at 128 px in float, about 0.47 ms at int8, provisional) when quality matters, evaluated at 20-30 Hz and
+  0.78 ms at 128 px in float, about 0.47 ms at int8) when quality matters, evaluated at 20-30 Hz and
   shared between instances. Where the GPU samples ASTC, an ASTC 8x8 to 12x12 flipbook of every frame is within 2
   times of the networks' memory at equal quality and costs nothing to play: use it unless memory is very tight
   (grid_s ties it). Keep motion-vector flipbooks where per-frame cost must be near zero.

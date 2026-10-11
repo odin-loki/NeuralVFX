@@ -13,3 +13,11 @@ jobs (load average 1.0 to 2.9, mostly the runs themselves). `sections.log` has t
 The report's cost tables (`docs/REPORT.md` §6.7 and §7) were checked in the same session: the rollout effects took
 0.8 to 1.2 ms per 128 x 128 frame (smoke varied from 0.86 to 1.17 ms between three runs), the frame models and the
 simulation within a few percent of the tables, so the tables stand.
+
+## Round 3 (11 October 2026)
+
+`int8_timing.csv` (`nvfx_experiment int8-timing --runs 5 --core 3`: frame models in float and int8 per ISA and size),
+`sections_round3.log`. The fireball with the shared step scratch tied with each module's own scratch (`docs/COMPOSE.md`
+§7.4), and the sparse F3 models cost the same per frame as their dense twins. This session's machine ran about 1.35
+times slower than the first quiet session's (the end-of-round-2 build of the fireball took 16.8 to 18.2 ms per frame at
+1280 x 720 beside the current one's 17.0 to 17.4 ms), so absolute times are compared only within a session.

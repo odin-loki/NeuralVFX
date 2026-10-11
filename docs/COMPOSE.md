@@ -692,9 +692,10 @@ Memory (`nvfx_fireball` prints it; the old code's does not depend on the number 
 - What is left per module is its own: fine fields, coarse state, pressure, noise caches and the shader's buffers
   (21.8 MB for the 16 modules at 1280 x 720). The step buffers are now about a third of the modules' memory on four
   threads; most of each set is the row records (4.7 MB of the 7.2), which still hold a lag of up to the whole tile.
-- Time: no measurable change on the busy machine (the model step's CPU time per frame at 1280 x 720 on one thread:
-  12.0 to 14.3 ms before, 13.0 to 13.5 ms after, three interleaved runs each). Provisional; to be re-timed on a quiet
-  machine (`tools/opt2/table.sh` with the old build beside the new).
+- Time: no change. On a quiet machine, three interleaved runs at 1280 x 720 on 4 threads: 15.4 to 17.6 ms per frame
+  with the shared scratch against 16.0 to 16.6 ms with each module's own (`--own-scratch`); at 1920 x 1080, 32.3 to
+  32.5 against 32.5 to 33.3 ms. (That session's machine was about 1.35 times slower than §7.3's: the build of §7.3
+  ran at 16.8 to 18.2 ms beside it, so nothing in this round slowed the scene.)
 - An nvfx rollout instance's two runners (the shard on screen and the next one) step one after the other, so they
   share one scratch too: `nvfx_instance_scratch_bytes` is 2.4 MB at 128 px instead of 4.0 MB (1.5 instead of 2.3 MB at
   64 px, 5.6 instead of 11.1 MB at 256 px).
