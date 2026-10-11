@@ -1,105 +1,109 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="1040" height="470" viewBox="0 0 1040 470" font-family="Helvetica, Arial, sans-serif">
-<rect width="1040" height="470" fill="#fcfcfb"/>
+<svg xmlns="http://www.w3.org/2000/svg" width="1040" height="484" viewBox="0 0 1040 484" font-family="Helvetica, Arial, sans-serif">
+<rect width="1040" height="484" fill="#fcfcfb"/>
 <text x="62" y="24" font-size="16" font-weight="600" fill="#0b0b0b">Study F2, 12 clips (test set): quality against bytes</text>
 <text x="62" y="44" font-size="13" font-weight="600" fill="#0b0b0b">Memory while playing: flipbook texture, network as stored</text>
-<line x1="62.0" y1="74" x2="62.0" y2="412" stroke="#e4e3df" stroke-width="1"/>
-<text x="62.0" y="428" font-size="11" fill="#52514e" text-anchor="middle">2</text>
-<line x1="150.4" y1="74" x2="150.4" y2="412" stroke="#e4e3df" stroke-width="1"/>
-<text x="150.4" y="428" font-size="11" fill="#52514e" text-anchor="middle">8</text>
-<line x1="238.8" y1="74" x2="238.8" y2="412" stroke="#e4e3df" stroke-width="1"/>
-<text x="238.8" y="428" font-size="11" fill="#52514e" text-anchor="middle">32</text>
-<line x1="327.2" y1="74" x2="327.2" y2="412" stroke="#e4e3df" stroke-width="1"/>
-<text x="327.2" y="428" font-size="11" fill="#52514e" text-anchor="middle">128</text>
-<line x1="415.6" y1="74" x2="415.6" y2="412" stroke="#e4e3df" stroke-width="1"/>
-<text x="415.6" y="428" font-size="11" fill="#52514e" text-anchor="middle">512</text>
-<line x1="504.0" y1="74" x2="504.0" y2="412" stroke="#e4e3df" stroke-width="1"/>
-<text x="504.0" y="428" font-size="11" fill="#52514e" text-anchor="middle">2048</text>
-<line x1="62" y1="383.8" x2="504" y2="383.8" stroke="#e4e3df" stroke-width="1"/>
-<text x="56" y="387.8" font-size="11" fill="#52514e" text-anchor="end">26</text>
-<line x1="62" y1="327.5" x2="504" y2="327.5" stroke="#e4e3df" stroke-width="1"/>
-<text x="56" y="331.5" font-size="11" fill="#52514e" text-anchor="end">28</text>
-<line x1="62" y1="271.2" x2="504" y2="271.2" stroke="#e4e3df" stroke-width="1"/>
-<text x="56" y="275.2" font-size="11" fill="#52514e" text-anchor="end">30</text>
-<line x1="62" y1="214.8" x2="504" y2="214.8" stroke="#e4e3df" stroke-width="1"/>
-<text x="56" y="218.8" font-size="11" fill="#52514e" text-anchor="end">32</text>
-<line x1="62" y1="158.5" x2="504" y2="158.5" stroke="#e4e3df" stroke-width="1"/>
-<text x="56" y="162.5" font-size="11" fill="#52514e" text-anchor="end">34</text>
-<line x1="62" y1="102.2" x2="504" y2="102.2" stroke="#e4e3df" stroke-width="1"/>
-<text x="56" y="106.2" font-size="11" fill="#52514e" text-anchor="end">36</text>
-<text x="283" y="448" font-size="12" fill="#52514e" text-anchor="middle">KB per effect (log scale)</text>
-<text transform="translate(20,243) rotate(-90)" font-size="12" fill="#52514e" text-anchor="middle">mean active PSNR (dB)</text>
-<path d="M290.5,364.4 L327.2,364.4 L334.7,364.4 L371.4,338.9 L378.9,292.4 L415.6,273.3 L459.8,145.0 " fill="none" stroke="#2a78d6" stroke-width="2" stroke-linejoin="round"/>
+<line x1="62.0" y1="88" x2="62.0" y2="426" stroke="#e4e3df" stroke-width="1"/>
+<text x="62.0" y="442" font-size="11" fill="#52514e" text-anchor="middle">2</text>
+<line x1="150.4" y1="88" x2="150.4" y2="426" stroke="#e4e3df" stroke-width="1"/>
+<text x="150.4" y="442" font-size="11" fill="#52514e" text-anchor="middle">8</text>
+<line x1="238.8" y1="88" x2="238.8" y2="426" stroke="#e4e3df" stroke-width="1"/>
+<text x="238.8" y="442" font-size="11" fill="#52514e" text-anchor="middle">32</text>
+<line x1="327.2" y1="88" x2="327.2" y2="426" stroke="#e4e3df" stroke-width="1"/>
+<text x="327.2" y="442" font-size="11" fill="#52514e" text-anchor="middle">128</text>
+<line x1="415.6" y1="88" x2="415.6" y2="426" stroke="#e4e3df" stroke-width="1"/>
+<text x="415.6" y="442" font-size="11" fill="#52514e" text-anchor="middle">512</text>
+<line x1="504.0" y1="88" x2="504.0" y2="426" stroke="#e4e3df" stroke-width="1"/>
+<text x="504.0" y="442" font-size="11" fill="#52514e" text-anchor="middle">2048</text>
+<line x1="62" y1="397.8" x2="504" y2="397.8" stroke="#e4e3df" stroke-width="1"/>
+<text x="56" y="401.8" font-size="11" fill="#52514e" text-anchor="end">26</text>
+<line x1="62" y1="341.5" x2="504" y2="341.5" stroke="#e4e3df" stroke-width="1"/>
+<text x="56" y="345.5" font-size="11" fill="#52514e" text-anchor="end">28</text>
+<line x1="62" y1="285.2" x2="504" y2="285.2" stroke="#e4e3df" stroke-width="1"/>
+<text x="56" y="289.2" font-size="11" fill="#52514e" text-anchor="end">30</text>
+<line x1="62" y1="228.8" x2="504" y2="228.8" stroke="#e4e3df" stroke-width="1"/>
+<text x="56" y="232.8" font-size="11" fill="#52514e" text-anchor="end">32</text>
+<line x1="62" y1="172.5" x2="504" y2="172.5" stroke="#e4e3df" stroke-width="1"/>
+<text x="56" y="176.5" font-size="11" fill="#52514e" text-anchor="end">34</text>
+<line x1="62" y1="116.2" x2="504" y2="116.2" stroke="#e4e3df" stroke-width="1"/>
+<text x="56" y="120.2" font-size="11" fill="#52514e" text-anchor="end">36</text>
+<text x="283" y="462" font-size="12" fill="#52514e" text-anchor="middle">KB per effect (log scale)</text>
+<text transform="translate(20,257) rotate(-90)" font-size="12" fill="#52514e" text-anchor="middle">mean active PSNR (dB)</text>
+<path d="M220.5,401.1 L221.8,401.1 L223.4,401.1 L235.2,401.1 L237.0,401.1 L238.8,401.1 L246.3,401.1 L248.3,401.1 L250.2,380.3 L256.5,380.3 L264.7,380.3 L266.0,380.3 L267.6,372.0 L279.4,349.1 L281.2,349.1 L283.0,349.1 L290.5,349.1 L292.5,337.6 L294.4,337.6 L300.7,324.0 L308.9,315.0 L311.8,315.0 L323.6,303.0 L327.2,294.0 L334.7,294.0 L338.6,294.0 L344.9,256.6 L356.0,256.6 L367.8,256.6 L371.4,185.5 L378.9,185.5 L389.1,185.5 L412.0,89.3 L415.6,89.3 " fill="none" stroke="#2a78d6" stroke-width="2" stroke-linejoin="round"/>
+<path d="M290.5,378.4 L327.2,378.4 L334.7,378.4 L371.4,352.9 L378.9,306.4 L415.6,287.3 L459.8,159.0 " fill="none" stroke="#2a78d6" stroke-width="2" stroke-linejoin="round" stroke-dasharray="5 4" opacity="0.6"/>
 <rect x="62.0" y="58" width="14" height="4" rx="2" fill="#2a78d6"/>
 <text x="80.0" y="63" font-size="11" fill="#52514e">best flipbook at each size</text>
 <rect x="249.2" y="58" width="14" height="4" rx="2" fill="#eb6834"/>
 <text x="267.2" y="63" font-size="11" fill="#52514e">networks (F2)</text>
-<circle cx="248.1" cy="308.4" r="4.5" fill="#eb6834" stroke="#fcfcfb" stroke-width="2"/>
-<text x="255.1" y="311.9" font-size="10" fill="#0b0b0b">conv 4-bit</text>
-<circle cx="286.4" cy="252.9" r="4.5" fill="#eb6834" stroke="#fcfcfb" stroke-width="2"/>
-<text x="293.4" y="256.4" font-size="10" fill="#0b0b0b">G32 4-bit</text>
-<circle cx="286.4" cy="240.5" r="4.5" fill="#eb6834" stroke="#fcfcfb" stroke-width="2"/>
-<text x="293.4" y="244.0" font-size="10" fill="#0b0b0b">G32 4-bit 6k it</text>
-<circle cx="286.4" cy="256.3" r="4.5" fill="#eb6834" stroke="#fcfcfb" stroke-width="2"/>
-<text x="293.4" y="271.8" font-size="10" fill="#0b0b0b">G32 4-bit + rate</text>
-<circle cx="300.0" cy="223.1" r="4.5" fill="#eb6834" stroke="#fcfcfb" stroke-width="2"/>
-<text x="307.0" y="226.6" font-size="10" fill="#0b0b0b">G32 5-bit</text>
-<circle cx="311.1" cy="206.0" r="4.5" fill="#eb6834" stroke="#fcfcfb" stroke-width="2"/>
-<text x="318.1" y="209.5" font-size="10" fill="#0b0b0b">G32 6-bit</text>
-<circle cx="328.9" cy="197.2" r="4.5" fill="#eb6834" stroke="#fcfcfb" stroke-width="2"/>
-<text x="335.9" y="188.7" font-size="10" fill="#0b0b0b">G32 8-bit</text>
+<rect x="62.0" y="72" width="14" height="4" rx="2" fill="#2a78d6"/>
+<text x="80.0" y="77" font-size="11" fill="#52514e">dashed: our BC3 layout and raw</text>
+<circle cx="248.1" cy="322.4" r="4.5" fill="#eb6834" stroke="#fcfcfb" stroke-width="2"/>
+<text x="255.1" y="325.9" font-size="10" fill="#0b0b0b">conv 4-bit</text>
+<circle cx="286.4" cy="266.9" r="4.5" fill="#eb6834" stroke="#fcfcfb" stroke-width="2"/>
+<text x="293.4" y="270.4" font-size="10" fill="#0b0b0b">G32 4-bit</text>
+<circle cx="286.4" cy="254.5" r="4.5" fill="#eb6834" stroke="#fcfcfb" stroke-width="2"/>
+<text x="293.4" y="258.0" font-size="10" fill="#0b0b0b">G32 4-bit 6k it</text>
+<circle cx="286.4" cy="270.3" r="4.5" fill="#eb6834" stroke="#fcfcfb" stroke-width="2"/>
+<text x="293.4" y="285.8" font-size="10" fill="#0b0b0b">G32 4-bit + rate</text>
+<circle cx="300.0" cy="237.1" r="4.5" fill="#eb6834" stroke="#fcfcfb" stroke-width="2"/>
+<text x="307.0" y="240.6" font-size="10" fill="#0b0b0b">G32 5-bit</text>
+<circle cx="311.1" cy="220.0" r="4.5" fill="#eb6834" stroke="#fcfcfb" stroke-width="2"/>
+<text x="318.1" y="223.5" font-size="10" fill="#0b0b0b">G32 6-bit</text>
+<circle cx="328.9" cy="211.2" r="4.5" fill="#eb6834" stroke="#fcfcfb" stroke-width="2"/>
+<text x="335.9" y="202.7" font-size="10" fill="#0b0b0b">G32 8-bit</text>
 <text x="574" y="44" font-size="13" font-weight="600" fill="#0b0b0b">Disk: both sides losslessly packed; video bitstreams</text>
-<line x1="574.0" y1="74" x2="574.0" y2="412" stroke="#e4e3df" stroke-width="1"/>
-<text x="574.0" y="428" font-size="11" fill="#52514e" text-anchor="middle">2</text>
-<line x1="662.4" y1="74" x2="662.4" y2="412" stroke="#e4e3df" stroke-width="1"/>
-<text x="662.4" y="428" font-size="11" fill="#52514e" text-anchor="middle">8</text>
-<line x1="750.8" y1="74" x2="750.8" y2="412" stroke="#e4e3df" stroke-width="1"/>
-<text x="750.8" y="428" font-size="11" fill="#52514e" text-anchor="middle">32</text>
-<line x1="839.2" y1="74" x2="839.2" y2="412" stroke="#e4e3df" stroke-width="1"/>
-<text x="839.2" y="428" font-size="11" fill="#52514e" text-anchor="middle">128</text>
-<line x1="927.6" y1="74" x2="927.6" y2="412" stroke="#e4e3df" stroke-width="1"/>
-<text x="927.6" y="428" font-size="11" fill="#52514e" text-anchor="middle">512</text>
-<line x1="1016.0" y1="74" x2="1016.0" y2="412" stroke="#e4e3df" stroke-width="1"/>
-<text x="1016.0" y="428" font-size="11" fill="#52514e" text-anchor="middle">2048</text>
-<line x1="574" y1="383.8" x2="1016" y2="383.8" stroke="#e4e3df" stroke-width="1"/>
-<text x="568" y="387.8" font-size="11" fill="#52514e" text-anchor="end">26</text>
-<line x1="574" y1="327.5" x2="1016" y2="327.5" stroke="#e4e3df" stroke-width="1"/>
-<text x="568" y="331.5" font-size="11" fill="#52514e" text-anchor="end">28</text>
-<line x1="574" y1="271.2" x2="1016" y2="271.2" stroke="#e4e3df" stroke-width="1"/>
-<text x="568" y="275.2" font-size="11" fill="#52514e" text-anchor="end">30</text>
-<line x1="574" y1="214.8" x2="1016" y2="214.8" stroke="#e4e3df" stroke-width="1"/>
-<text x="568" y="218.8" font-size="11" fill="#52514e" text-anchor="end">32</text>
-<line x1="574" y1="158.5" x2="1016" y2="158.5" stroke="#e4e3df" stroke-width="1"/>
-<text x="568" y="162.5" font-size="11" fill="#52514e" text-anchor="end">34</text>
-<line x1="574" y1="102.2" x2="1016" y2="102.2" stroke="#e4e3df" stroke-width="1"/>
-<text x="568" y="106.2" font-size="11" fill="#52514e" text-anchor="end">36</text>
-<text x="795" y="448" font-size="12" fill="#52514e" text-anchor="middle">KB per effect (log scale)</text>
-<text transform="translate(532,243) rotate(-90)" font-size="12" fill="#52514e" text-anchor="middle">mean active PSNR (dB)</text>
-<path d="M708.9,364.4 L734.4,364.4 L735.9,364.4 L736.9,364.4 L739.5,364.4 L741.8,364.4 L771.8,338.9 L775.0,338.9 L775.4,338.9 L781.2,292.4 L808.8,292.4 L813.3,273.3 L848.5,145.0 " fill="none" stroke="#2a78d6" stroke-width="2" stroke-linejoin="round"/>
-<path d="M637.7,327.7 L661.8,258.0 L678.4,208.1 L694.0,162.3 L711.0,112.2 " fill="none" stroke="#1baf7a" stroke-width="2" stroke-linejoin="round"/>
-<path d="M639.6,392.3 L665.7,323.9 L691.1,254.7 L715.9,183.0 L740.6,109.3 " fill="none" stroke="#eda100" stroke-width="2" stroke-linejoin="round"/>
-<path d="M650.1,401.2 L670.7,355.2 L691.3,311.5 L711.2,268.8 L732.3,225.8 L753.0,187.1 L772.0,154.6 L784.8,134.1 L801.8,111.0 L828.0,83.9 " fill="none" stroke="#e87ba4" stroke-width="2" stroke-linejoin="round"/>
+<line x1="574.0" y1="88" x2="574.0" y2="426" stroke="#e4e3df" stroke-width="1"/>
+<text x="574.0" y="442" font-size="11" fill="#52514e" text-anchor="middle">2</text>
+<line x1="662.4" y1="88" x2="662.4" y2="426" stroke="#e4e3df" stroke-width="1"/>
+<text x="662.4" y="442" font-size="11" fill="#52514e" text-anchor="middle">8</text>
+<line x1="750.8" y1="88" x2="750.8" y2="426" stroke="#e4e3df" stroke-width="1"/>
+<text x="750.8" y="442" font-size="11" fill="#52514e" text-anchor="middle">32</text>
+<line x1="839.2" y1="88" x2="839.2" y2="426" stroke="#e4e3df" stroke-width="1"/>
+<text x="839.2" y="442" font-size="11" fill="#52514e" text-anchor="middle">128</text>
+<line x1="927.6" y1="88" x2="927.6" y2="426" stroke="#e4e3df" stroke-width="1"/>
+<text x="927.6" y="442" font-size="11" fill="#52514e" text-anchor="middle">512</text>
+<line x1="1016.0" y1="88" x2="1016.0" y2="426" stroke="#e4e3df" stroke-width="1"/>
+<text x="1016.0" y="442" font-size="11" fill="#52514e" text-anchor="middle">2048</text>
+<line x1="574" y1="397.8" x2="1016" y2="397.8" stroke="#e4e3df" stroke-width="1"/>
+<text x="568" y="401.8" font-size="11" fill="#52514e" text-anchor="end">26</text>
+<line x1="574" y1="341.5" x2="1016" y2="341.5" stroke="#e4e3df" stroke-width="1"/>
+<text x="568" y="345.5" font-size="11" fill="#52514e" text-anchor="end">28</text>
+<line x1="574" y1="285.2" x2="1016" y2="285.2" stroke="#e4e3df" stroke-width="1"/>
+<text x="568" y="289.2" font-size="11" fill="#52514e" text-anchor="end">30</text>
+<line x1="574" y1="228.8" x2="1016" y2="228.8" stroke="#e4e3df" stroke-width="1"/>
+<text x="568" y="232.8" font-size="11" fill="#52514e" text-anchor="end">32</text>
+<line x1="574" y1="172.5" x2="1016" y2="172.5" stroke="#e4e3df" stroke-width="1"/>
+<text x="568" y="176.5" font-size="11" fill="#52514e" text-anchor="end">34</text>
+<line x1="574" y1="116.2" x2="1016" y2="116.2" stroke="#e4e3df" stroke-width="1"/>
+<text x="568" y="120.2" font-size="11" fill="#52514e" text-anchor="end">36</text>
+<text x="795" y="462" font-size="12" fill="#52514e" text-anchor="middle">KB per effect (log scale)</text>
+<text transform="translate(532,257) rotate(-90)" font-size="12" fill="#52514e" text-anchor="middle">mean active PSNR (dB)</text>
+<path d="M660.7,401.1 L661.9,401.1 L662.5,401.1 L662.8,401.1 L663.0,401.1 L663.5,401.1 L664.7,401.1 L665.9,401.1 L666.4,401.1 L671.3,401.1 L673.3,401.1 L675.3,401.1 L676.6,401.1 L676.7,401.1 L677.8,401.1 L677.8,401.1 L678.8,401.1 L679.0,401.1 L680.8,401.1 L681.2,401.1 L684.8,401.1 L685.2,401.1 L686.2,401.1 L686.4,401.1 L686.5,401.1 L687.3,380.3 L691.8,380.3 L692.7,380.3 L694.3,380.3 L694.6,380.3 L695.2,380.3 L696.2,380.3 L697.5,380.3 L699.3,380.3 L700.6,357.5 L701.0,357.5 L701.8,357.5 L702.2,357.5 L703.6,357.5 L704.7,357.5 L704.7,357.5 L708.9,357.5 L709.8,357.5 L710.9,357.5 L711.3,357.5 L715.2,357.5 L715.4,337.6 L715.5,337.6 L715.9,337.6 L716.3,337.6 L719.5,337.6 L720.7,337.6 L720.9,337.6 L721.5,337.6 L721.7,337.6 L726.0,337.6 L726.3,337.6 L727.4,337.6 L731.6,337.6 L734.4,337.6 L735.3,315.0 L735.9,315.0 L736.9,315.0 L737.6,315.0 L739.3,315.0 L739.5,315.0 L739.5,315.0 L741.8,315.0 L749.4,315.0 L754.6,315.0 L755.2,315.0 L755.3,315.0 L755.5,315.0 L756.2,303.0 L760.3,303.0 L760.6,303.0 L762.9,297.8 L763.2,297.8 L763.5,294.0 L771.8,294.0 L775.0,294.0 L775.0,294.0 L775.4,294.0 L777.9,256.6 L780.8,256.6 L781.2,256.6 L781.3,256.6 L791.6,256.6 L793.0,256.6 L796.4,256.6 L797.0,256.6 L798.6,256.6 L803.0,256.6 L804.2,185.5 L804.8,185.5 L808.8,185.5 L813.3,185.5 L817.5,185.5 L832.3,185.5 L838.5,89.3 L841.3,89.3 L848.5,89.3 " fill="none" stroke="#2a78d6" stroke-width="2" stroke-linejoin="round"/>
+<path d="M708.9,378.4 L734.4,378.4 L735.9,378.4 L736.9,378.4 L739.5,378.4 L741.8,378.4 L771.8,352.9 L775.0,352.9 L775.4,352.9 L781.2,306.4 L808.8,306.4 L813.3,287.3 L848.5,159.0 " fill="none" stroke="#2a78d6" stroke-width="2" stroke-linejoin="round" stroke-dasharray="5 4" opacity="0.6"/>
+<path d="M637.7,341.7 L661.8,272.0 L678.4,222.1 L694.0,176.3 L711.0,126.2 " fill="none" stroke="#1baf7a" stroke-width="2" stroke-linejoin="round"/>
+<path d="M639.6,406.3 L665.7,337.9 L691.1,268.7 L715.9,197.0 L740.6,123.3 " fill="none" stroke="#eda100" stroke-width="2" stroke-linejoin="round"/>
+<path d="M650.1,415.2 L670.7,369.2 L691.3,325.5 L711.2,282.8 L732.3,239.8 L753.0,201.1 L772.0,168.6 L784.8,148.1 L801.8,125.0 L828.0,97.9 " fill="none" stroke="#e87ba4" stroke-width="2" stroke-linejoin="round"/>
 <rect x="574.0" y="58" width="14" height="4" rx="2" fill="#2a78d6"/>
 <text x="592.0" y="63" font-size="11" fill="#52514e">best packed flipbook</text>
 <rect x="724.0" y="58" width="14" height="4" rx="2" fill="#eb6834"/>
 <text x="742.0" y="63" font-size="11" fill="#52514e">networks (F2)</text>
 <rect x="830.6" y="58" width="14" height="4" rx="2" fill="#1baf7a"/>
 <text x="848.6" y="63" font-size="11" fill="#52514e">AV1 (libaom, 4:4:4)</text>
-<rect x="974.4" y="58" width="14" height="4" rx="2" fill="#eda100"/>
-<text x="992.4" y="63" font-size="11" fill="#52514e">HEVC (x265, 4:4:4)</text>
-<rect x="1112.0" y="58" width="14" height="4" rx="2" fill="#e87ba4"/>
-<text x="1130.0" y="63" font-size="11" fill="#52514e">VP9 with alpha (4:2:0)</text>
-<circle cx="733.3" cy="308.4" r="4.5" fill="#eb6834" stroke="#fcfcfb" stroke-width="2"/>
-<text x="740.3" y="311.9" font-size="10" fill="#0b0b0b">conv 4-bit</text>
-<circle cx="740.4" cy="252.9" r="4.5" fill="#eb6834" stroke="#fcfcfb" stroke-width="2"/>
-<text x="747.4" y="256.4" font-size="10" fill="#0b0b0b">G32 4-bit</text>
-<circle cx="737.9" cy="240.5" r="4.5" fill="#eb6834" stroke="#fcfcfb" stroke-width="2"/>
-<text x="744.9" y="244.0" font-size="10" fill="#0b0b0b">G32 4-bit 6k it</text>
-<circle cx="727.8" cy="256.3" r="4.5" fill="#eb6834" stroke="#fcfcfb" stroke-width="2"/>
-<text x="734.8" y="271.8" font-size="10" fill="#0b0b0b">G32 4-bit + rate</text>
-<circle cx="762.3" cy="223.1" r="4.5" fill="#eb6834" stroke="#fcfcfb" stroke-width="2"/>
-<text x="769.3" y="226.6" font-size="10" fill="#0b0b0b">G32 5-bit</text>
-<circle cx="782.7" cy="206.0" r="4.5" fill="#eb6834" stroke="#fcfcfb" stroke-width="2"/>
-<text x="789.7" y="209.5" font-size="10" fill="#0b0b0b">G32 6-bit</text>
-<circle cx="813.1" cy="197.2" r="4.5" fill="#eb6834" stroke="#fcfcfb" stroke-width="2"/>
-<text x="820.1" y="188.7" font-size="10" fill="#0b0b0b">G32 8-bit</text>
+<rect x="574.0" y="72" width="14" height="4" rx="2" fill="#eda100"/>
+<text x="592.0" y="77" font-size="11" fill="#52514e">HEVC (x265, 4:4:4)</text>
+<rect x="711.6" y="72" width="14" height="4" rx="2" fill="#e87ba4"/>
+<text x="729.6" y="77" font-size="11" fill="#52514e">VP9 with alpha (4:2:0)</text>
+<circle cx="733.3" cy="322.4" r="4.5" fill="#eb6834" stroke="#fcfcfb" stroke-width="2"/>
+<text x="740.3" y="325.9" font-size="10" fill="#0b0b0b">conv 4-bit</text>
+<circle cx="740.4" cy="266.9" r="4.5" fill="#eb6834" stroke="#fcfcfb" stroke-width="2"/>
+<text x="747.4" y="270.4" font-size="10" fill="#0b0b0b">G32 4-bit</text>
+<circle cx="737.9" cy="254.5" r="4.5" fill="#eb6834" stroke="#fcfcfb" stroke-width="2"/>
+<text x="744.9" y="258.0" font-size="10" fill="#0b0b0b">G32 4-bit 6k it</text>
+<circle cx="727.8" cy="270.3" r="4.5" fill="#eb6834" stroke="#fcfcfb" stroke-width="2"/>
+<text x="734.8" y="285.8" font-size="10" fill="#0b0b0b">G32 4-bit + rate</text>
+<circle cx="762.3" cy="237.1" r="4.5" fill="#eb6834" stroke="#fcfcfb" stroke-width="2"/>
+<text x="769.3" y="240.6" font-size="10" fill="#0b0b0b">G32 5-bit</text>
+<circle cx="782.7" cy="220.0" r="4.5" fill="#eb6834" stroke="#fcfcfb" stroke-width="2"/>
+<text x="789.7" y="223.5" font-size="10" fill="#0b0b0b">G32 6-bit</text>
+<circle cx="813.1" cy="211.2" r="4.5" fill="#eb6834" stroke="#fcfcfb" stroke-width="2"/>
+<text x="820.1" y="202.7" font-size="10" fill="#0b0b0b">G32 8-bit</text>
 </svg>

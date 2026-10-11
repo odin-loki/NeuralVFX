@@ -8,29 +8,31 @@ Means over 12 clips (fire, smoke, explosion; 128 x 128, 64 frames). ms = median 
 
 Spectrum = mean |log power difference| of the radially averaged luminance spectrum against the reference (0 = same sharpness; blur raises it); motion = frame-to-frame change relative to the reference (1 = same).
 
+Flipbooks come in three baselines: **our BC3 layout and raw RGBA8** (the original ladder, our own BC1 + BC4 encoder), **with BC7** (bc7e, the formats desktop GPUs sample), and **with BC7 and ASTC** (Arm's astc-encoder, 4x4 to 12x12 blocks: every format, the strongest flipbook at each size). The first table has the networks and the original ladder; the production formats follow it.
+
 | method | family | KB | PSNR | active PSNR | SSIM | temporal PSNR | flicker | spectrum | motion | ms |
 |---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
 | bc3 4f 32px | flipbook_bc3 | 4.0 | 22.16 | 17.25 | 0.7967 | 29.48 | 0.01 | 1.096 | 0.37 | - |
 | bc3 8f 32px | flipbook_bc3 | 8.0 | 25.16 | 19.98 | 0.8506 | 29.97 | 0.04 | 1.043 | 0.52 | - |
-| raw 4f 32px | flipbook_raw | 16.0 | 22.21 | 17.21 | 0.8007 | 29.49 | 0.01 | 1.095 | 0.37 | - |
 | bc3 16f 32px | flipbook_bc3 | 16.0 | 27.24 | 21.89 | 0.8831 | 30.80 | 0.09 | 1.021 | 0.63 | - |
 | bc3 4f 64px | flipbook_bc3 | 16.0 | 22.17 | 16.88 | 0.8191 | 29.51 | 0.01 | 0.748 | 0.40 | - |
+| raw 4f 32px | flipbook_raw | 16.0 | 22.21 | 17.21 | 0.8007 | 29.49 | 0.01 | 1.095 | 0.37 | - |
 | bc3 4f 64px +mv16 | flipbook_mv | 18.0 | 22.84 | 17.29 | 0.8493 | 29.69 | 0.04 | 0.584 | 0.49 | - |
-| raw 8f 32px | flipbook_raw | 32.0 | 25.29 | 20.01 | 0.8564 | 29.98 | 0.04 | 1.042 | 0.52 | - |
 | bc3 32f 32px | flipbook_bc3 | 32.0 | 28.21 | 22.76 | 0.8973 | 31.67 | 0.17 | 0.986 | 0.71 | - |
 | bc3 8f 64px | flipbook_bc3 | 32.0 | 25.88 | 20.27 | 0.8877 | 30.09 | 0.05 | 0.709 | 0.57 | - |
+| raw 8f 32px | flipbook_raw | 32.0 | 25.29 | 20.01 | 0.8564 | 29.98 | 0.04 | 1.042 | 0.52 | - |
 | bc3 8f 64px +mv16 | flipbook_mv | 36.0 | 28.65 | 22.79 | 0.9282 | 31.60 | 0.15 | 0.567 | 0.71 | - |
+| bc3 16f 64px | flipbook_bc3 | 64.0 | 29.61 | 23.76 | 0.9352 | 31.34 | 0.15 | 0.688 | 0.71 | - |
+| bc3 4f 128px | flipbook_bc3 | 64.0 | 21.89 | 16.36 | 0.8234 | 29.52 | 0.01 | 0.152 | 0.42 | - |
+| bc3 64f 32px | flipbook_bc3 | 64.0 | 28.49 | 23.03 | 0.9016 | 31.86 | 0.41 | 0.963 | 0.79 | - |
 | raw 16f 32px | flipbook_raw | 64.0 | 27.49 | 22.02 | 0.8906 | 30.87 | 0.09 | 1.016 | 0.62 | - |
 | raw 4f 64px | flipbook_raw | 64.0 | 22.19 | 16.87 | 0.8215 | 29.51 | 0.01 | 0.788 | 0.40 | - |
-| bc3 64f 32px | flipbook_bc3 | 64.0 | 28.49 | 23.03 | 0.9016 | 31.86 | 0.41 | 0.963 | 0.79 | - |
-| bc3 4f 128px | flipbook_bc3 | 64.0 | 21.89 | 16.36 | 0.8234 | 29.52 | 0.01 | 0.152 | 0.42 | - |
-| bc3 16f 64px | flipbook_bc3 | 64.0 | 29.61 | 23.76 | 0.9352 | 31.34 | 0.15 | 0.688 | 0.71 | - |
 | conv_s|8 | neural_conv | 69.0 | 35.79 | 29.45 | 0.9658 | 36.18 | 0.63 | 0.262 | 0.94 | 0.430 |
-| bc3 4f 128px +mv32 | flipbook_mv | 72.0 | 22.25 | 16.53 | 0.8453 | 29.55 | 0.05 | 0.221 | 0.49 | - |
 | bc3 16f 64px +mv16 | flipbook_mv | 72.0 | 32.71 | 26.69 | 0.9618 | 34.50 | 0.32 | 0.574 | 0.83 | - |
+| bc3 4f 128px +mv32 | flipbook_mv | 72.0 | 22.25 | 16.53 | 0.8453 | 29.55 | 0.05 | 0.221 | 0.49 | - |
 | grid_s|8 | neural_grid | 73.0 | 34.32 | 28.07 | 0.9627 | 34.97 | 0.64 | 0.171 | 0.95 | 0.247 |
-| bc3 8f 128px | flipbook_bc3 | 128.0 | 25.82 | 19.91 | 0.8990 | 30.14 | 0.06 | 0.141 | 0.61 | - |
 | bc3 32f 64px | flipbook_bc3 | 128.0 | 32.38 | 26.39 | 0.9593 | 33.46 | 0.32 | 0.647 | 0.81 | - |
+| bc3 8f 128px | flipbook_bc3 | 128.0 | 25.82 | 19.91 | 0.8990 | 30.14 | 0.06 | 0.141 | 0.61 | - |
 | raw 32f 32px | flipbook_raw | 128.0 | 28.56 | 22.98 | 0.9065 | 31.93 | 0.14 | 0.979 | 0.67 | - |
 | raw 8f 64px | flipbook_raw | 128.0 | 25.96 | 20.30 | 0.8914 | 30.11 | 0.05 | 0.747 | 0.57 | - |
 | grid_m|8 | neural_grid | 131.5 | 39.10 | 32.62 | 0.9873 | 39.83 | 0.87 | 0.096 | 0.98 | 0.778 |
@@ -40,21 +42,173 @@ Spectrum = mean |log power difference| of the radially averaged luminance spectr
 | grid_s|16 | neural_grid | 144.5 | 34.33 | 28.07 | 0.9631 | 34.97 | 0.64 | 0.171 | 0.95 | 0.267 |
 | bc3 16f 128px | flipbook_bc3 | 256.0 | 30.67 | 24.44 | 0.9548 | 31.57 | 0.23 | 0.124 | 0.79 | - |
 | bc3 64f 64px | flipbook_bc3 | 256.0 | 33.63 | 27.59 | 0.9671 | 35.60 | 0.56 | 0.602 | 0.89 | - |
-| raw 64f 32px | flipbook_raw | 256.0 | 28.91 | 23.30 | 0.9119 | 32.70 | 0.14 | 0.958 | 0.69 | - |
 | raw 16f 64px | flipbook_raw | 256.0 | 29.87 | 23.97 | 0.9406 | 31.40 | 0.15 | 0.721 | 0.71 | - |
+| raw 64f 32px | flipbook_raw | 256.0 | 28.91 | 23.30 | 0.9119 | 32.70 | 0.14 | 0.958 | 0.69 | - |
 | grid_m|16 | neural_grid | 259.0 | 39.12 | 32.64 | 0.9874 | 39.85 | 0.87 | 0.096 | 0.98 | 0.771 |
 | grid_mt|8 | neural_grid | 260.0 | 40.26 | 33.76 | 0.9897 | 41.22 | 0.96 | 0.089 | 1.01 | 0.817 |
 | conv_m|16 | neural_conv | 268.0 | 37.73 | 31.33 | 0.9734 | 37.61 | 0.67 | 0.191 | 0.95 | 0.655 |
 | bc3 16f 128px +mv32 | flipbook_mv | 288.0 | 35.61 | 29.25 | 0.9811 | 35.20 | 0.63 | 0.123 | 0.93 | - |
 | grid_l|8 | neural_grid | 291.5 | 42.73 | 36.23 | 0.9930 | 41.42 | 0.90 | 0.039 | 0.98 | 0.866 |
-| raw 32f 64px | flipbook_raw | 512.0 | 32.99 | 26.94 | 0.9663 | 33.77 | 0.31 | 0.677 | 0.80 | - |
 | bc3 32f 128px | flipbook_bc3 | 512.0 | 36.36 | 29.92 | 0.9838 | 34.50 | 0.61 | 0.103 | 0.94 | - |
+| raw 32f 64px | flipbook_raw | 512.0 | 32.99 | 26.94 | 0.9663 | 33.77 | 0.31 | 0.677 | 0.80 | - |
 | grid_mt|16 | neural_grid | 515.0 | 40.28 | 33.77 | 0.9897 | 41.24 | 0.96 | 0.089 | 1.01 | 0.818 |
 | grid_l|16 | neural_grid | 579.0 | 42.78 | 36.28 | 0.9931 | 41.44 | 0.90 | 0.039 | 0.98 | 0.884 |
 | bc3 64f 128px | flipbook_bc3 | 1024.0 | 41.02 | 34.48 | 0.9924 | 39.39 | 1.23 | 0.102 | 1.03 | - |
 | raw 64f 64px | flipbook_raw | 1024.0 | 34.62 | 28.50 | 0.9756 | 37.30 | 0.39 | 0.636 | 0.84 | - |
 
-### Matched memory
+### Flipbooks in production block formats (BC7, ASTC)
+
+| method | family | KB | PSNR | active PSNR | SSIM | temporal PSNR | flicker | spectrum | motion | ms |
+|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| astc12x12 4f 32px | flipbook_astc | 0.6 | 21.96 | 17.19 | 0.7728 | 29.45 | 0.01 | 1.212 | 0.37 | - |
+| astc10x10 4f 32px | flipbook_astc | 1.0 | 22.03 | 17.15 | 0.7822 | 29.46 | 0.01 | 1.194 | 0.37 | - |
+| astc8x8 4f 32px | flipbook_astc | 1.0 | 22.15 | 17.22 | 0.7901 | 29.47 | 0.01 | 1.145 | 0.37 | - |
+| astc12x12 8f 32px | flipbook_astc | 1.1 | 24.39 | 19.37 | 0.8158 | 29.84 | 0.03 | 1.151 | 0.51 | - |
+| astc10x10 8f 32px | flipbook_astc | 2.0 | 24.61 | 19.49 | 0.8268 | 29.88 | 0.03 | 1.133 | 0.51 | - |
+| astc8x8 8f 32px | flipbook_astc | 2.0 | 24.97 | 19.78 | 0.8386 | 29.93 | 0.03 | 1.080 | 0.52 | - |
+| astc12x12 16f 32px | flipbook_astc | 2.2 | 25.67 | 20.50 | 0.8374 | 30.29 | 0.08 | 1.134 | 0.63 | - |
+| astc12x12 4f 64px | flipbook_astc | 2.2 | 22.13 | 16.91 | 0.8082 | 29.50 | 0.01 | 0.855 | 0.39 | - |
+| astc6x6 4f 32px | flipbook_astc | 2.2 | 22.18 | 17.18 | 0.7970 | 29.48 | 0.01 | 1.122 | 0.37 | - |
+| astc10x10 4f 64px | flipbook_astc | 3.1 | 22.14 | 16.89 | 0.8125 | 29.50 | 0.01 | 0.830 | 0.39 | - |
+| astc5x5 4f 32px | flipbook_astc | 3.1 | 22.19 | 17.18 | 0.7995 | 29.48 | 0.01 | 1.108 | 0.37 | - |
+| astc10x10 16f 32px | flipbook_astc | 4.0 | 26.08 | 20.78 | 0.8518 | 30.44 | 0.08 | 1.106 | 0.63 | - |
+| astc4x4 4f 32px | flipbook_astc | 4.0 | 22.20 | 17.19 | 0.8006 | 29.48 | 0.01 | 1.102 | 0.37 | - |
+| astc8x8 16f 32px | flipbook_astc | 4.0 | 26.74 | 21.39 | 0.8668 | 30.63 | 0.09 | 1.060 | 0.63 | - |
+| astc8x8 4f 64px | flipbook_astc | 4.0 | 22.18 | 16.89 | 0.8168 | 29.51 | 0.01 | 0.789 | 0.40 | - |
+| bc7 4f 32px | flipbook_bc7 | 4.0 | 22.20 | 17.21 | 0.7981 | 29.48 | 0.01 | 1.101 | 0.37 | - |
+| astc12x12 4f 64px +mv16 | flipbook_astc_mv | 4.2 | 22.76 | 17.29 | 0.8355 | 29.66 | 0.04 | 0.703 | 0.47 | - |
+| astc12x12 32f 32px | flipbook_astc | 4.5 | 26.12 | 20.86 | 0.8460 | 30.30 | 0.27 | 1.100 | 0.80 | - |
+| astc12x12 8f 64px | flipbook_astc | 4.5 | 25.52 | 19.99 | 0.8691 | 30.02 | 0.04 | 0.808 | 0.56 | - |
+| astc6x6 8f 32px | flipbook_astc | 4.5 | 25.15 | 19.88 | 0.8502 | 29.96 | 0.03 | 1.064 | 0.52 | - |
+| astc10x10 4f 64px +mv16 | flipbook_astc_mv | 5.1 | 22.80 | 17.29 | 0.8410 | 29.67 | 0.04 | 0.671 | 0.48 | - |
+| astc8x8 4f 64px +mv16 | flipbook_astc_mv | 6.0 | 22.84 | 17.28 | 0.8460 | 29.68 | 0.04 | 0.628 | 0.48 | - |
+| astc10x10 8f 64px | flipbook_astc | 6.1 | 25.67 | 20.10 | 0.8761 | 30.05 | 0.05 | 0.785 | 0.57 | - |
+| astc5x5 8f 32px | flipbook_astc | 6.1 | 25.22 | 19.93 | 0.8538 | 29.97 | 0.03 | 1.055 | 0.52 | - |
+| astc12x12 4f 128px | flipbook_astc | 7.6 | 21.93 | 16.42 | 0.8206 | 29.52 | 0.01 | 0.195 | 0.41 | - |
+| astc6x6 4f 64px | flipbook_astc | 7.6 | 22.18 | 16.86 | 0.8198 | 29.51 | 0.01 | 0.785 | 0.40 | - |
+| astc10x10 32f 32px | flipbook_astc | 8.0 | 26.63 | 21.26 | 0.8615 | 30.65 | 0.24 | 1.073 | 0.77 | - |
+| astc4x4 8f 32px | flipbook_astc | 8.0 | 25.27 | 19.98 | 0.8558 | 29.98 | 0.04 | 1.047 | 0.52 | - |
+| astc8x8 32f 32px | flipbook_astc | 8.0 | 27.49 | 22.05 | 0.8786 | 31.13 | 0.20 | 1.025 | 0.75 | - |
+| astc8x8 8f 64px | flipbook_astc | 8.0 | 25.83 | 20.22 | 0.8829 | 30.08 | 0.05 | 0.751 | 0.57 | - |
+| bc7 8f 32px | flipbook_bc7 | 8.0 | 25.25 | 19.98 | 0.8528 | 29.98 | 0.03 | 1.047 | 0.52 | - |
+| astc12x12 8f 64px +mv16 | flipbook_astc_mv | 8.5 | 27.63 | 21.89 | 0.9029 | 31.14 | 0.13 | 0.679 | 0.68 | - |
+| astc12x12 16f 64px | flipbook_astc | 9.0 | 28.32 | 22.58 | 0.9080 | 31.01 | 0.14 | 0.797 | 0.70 | - |
+| astc12x12 64f 32px | flipbook_astc | 9.0 | 26.14 | 20.84 | 0.8478 | 29.16 | 1.38 | 1.076 | 1.08 | - |
+| astc6x6 16f 32px | flipbook_astc | 9.0 | 27.17 | 21.72 | 0.8817 | 30.78 | 0.09 | 1.043 | 0.62 | - |
+| astc6x6 4f 64px +mv16 | flipbook_astc_mv | 9.6 | 22.85 | 17.27 | 0.8498 | 29.70 | 0.04 | 0.621 | 0.49 | - |
+| astc10x10 8f 64px +mv16 | flipbook_astc_mv | 10.1 | 27.98 | 22.19 | 0.9122 | 31.28 | 0.14 | 0.650 | 0.69 | - |
+| astc10x10 4f 128px | flipbook_astc | 10.6 | 21.92 | 16.40 | 0.8223 | 29.52 | 0.01 | 0.177 | 0.41 | - |
+| astc5x5 4f 64px | flipbook_astc | 10.6 | 22.18 | 16.85 | 0.8208 | 29.51 | 0.01 | 0.782 | 0.40 | - |
+| astc8x8 8f 64px +mv16 | flipbook_astc_mv | 12.0 | 28.38 | 22.54 | 0.9213 | 31.46 | 0.14 | 0.614 | 0.70 | - |
+| astc10x10 16f 64px | flipbook_astc | 12.3 | 28.77 | 22.97 | 0.9178 | 31.13 | 0.14 | 0.762 | 0.71 | - |
+| astc5x5 16f 32px | flipbook_astc | 12.3 | 27.32 | 21.85 | 0.8864 | 30.82 | 0.09 | 1.031 | 0.62 | - |
+| astc5x5 4f 64px +mv16 | flipbook_astc_mv | 12.6 | 22.85 | 17.26 | 0.8512 | 29.70 | 0.04 | 0.617 | 0.49 | - |
+| astc12x12 8f 128px | flipbook_astc | 15.1 | 25.78 | 19.92 | 0.8931 | 30.12 | 0.06 | 0.181 | 0.61 | - |
+| astc6x6 8f 64px | flipbook_astc | 15.1 | 25.90 | 20.25 | 0.8883 | 30.09 | 0.05 | 0.745 | 0.57 | - |
+| astc12x12 4f 128px +mv32 | flipbook_astc_mv | 15.6 | 22.28 | 16.58 | 0.8417 | 29.55 | 0.05 | 0.276 | 0.49 | - |
+| astc10x10 64f 32px | flipbook_astc | 16.0 | 26.70 | 21.29 | 0.8635 | 29.73 | 1.13 | 1.051 | 1.04 | - |
+| astc4x4 16f 32px | flipbook_astc | 16.0 | 27.45 | 21.96 | 0.8895 | 30.85 | 0.09 | 1.022 | 0.62 | - |
+| astc4x4 4f 64px | flipbook_astc | 16.0 | 22.18 | 16.86 | 0.8214 | 29.51 | 0.01 | 0.786 | 0.40 | - |
+| astc8x8 16f 64px | flipbook_astc | 16.0 | 29.30 | 23.45 | 0.9278 | 31.25 | 0.15 | 0.729 | 0.71 | - |
+| astc8x8 4f 128px | flipbook_astc | 16.0 | 21.92 | 16.37 | 0.8238 | 29.52 | 0.01 | 0.161 | 0.41 | - |
+| astc8x8 64f 32px | flipbook_astc | 16.0 | 27.65 | 22.18 | 0.8812 | 30.64 | 0.80 | 1.000 | 0.95 | - |
+| bc7 16f 32px | flipbook_bc7 | 16.0 | 27.40 | 21.94 | 0.8860 | 30.84 | 0.09 | 1.022 | 0.62 | - |
+| bc7 4f 64px | flipbook_bc7 | 16.0 | 22.18 | 16.87 | 0.8202 | 29.51 | 0.01 | 0.781 | 0.40 | - |
+| astc12x12 16f 64px +mv16 | flipbook_astc_mv | 17.0 | 30.05 | 24.16 | 0.9284 | 32.78 | 0.27 | 0.696 | 0.80 | - |
+| astc12x12 32f 64px | flipbook_astc | 18.0 | 29.84 | 23.99 | 0.9252 | 32.05 | 0.33 | 0.754 | 0.84 | - |
+| astc4x4 4f 64px +mv16 | flipbook_astc_mv | 18.0 | 22.86 | 17.26 | 0.8521 | 29.70 | 0.04 | 0.619 | 0.49 | - |
+| astc6x6 32f 32px | flipbook_astc | 18.0 | 28.09 | 22.55 | 0.8954 | 31.59 | 0.17 | 1.009 | 0.71 | - |
+| bc7 4f 64px +mv16 | flipbook_bc7_mv | 18.0 | 22.86 | 17.28 | 0.8508 | 29.70 | 0.04 | 0.616 | 0.49 | - |
+| astc10x10 4f 128px +mv32 | flipbook_astc_mv | 18.6 | 22.27 | 16.55 | 0.8437 | 29.55 | 0.05 | 0.263 | 0.49 | - |
+| astc6x6 8f 64px +mv16 | flipbook_astc_mv | 19.1 | 28.63 | 22.74 | 0.9286 | 31.60 | 0.14 | 0.605 | 0.70 | - |
+| astc10x10 16f 64px +mv16 | flipbook_astc_mv | 20.2 | 30.87 | 24.92 | 0.9402 | 33.29 | 0.28 | 0.658 | 0.81 | - |
+| astc10x10 8f 128px | flipbook_astc | 21.1 | 25.82 | 19.93 | 0.8961 | 30.13 | 0.06 | 0.162 | 0.61 | - |
+| astc5x5 8f 64px | flipbook_astc | 21.1 | 25.93 | 20.27 | 0.8900 | 30.10 | 0.05 | 0.743 | 0.57 | - |
+| astc8x8 16f 64px +mv16 | flipbook_astc_mv | 24.0 | 31.90 | 25.88 | 0.9523 | 33.91 | 0.29 | 0.621 | 0.82 | - |
+| astc8x8 4f 128px +mv32 | flipbook_astc_mv | 24.0 | 22.27 | 16.53 | 0.8452 | 29.56 | 0.05 | 0.251 | 0.49 | - |
+| astc10x10 32f 64px | flipbook_astc | 24.5 | 30.62 | 24.70 | 0.9374 | 32.49 | 0.33 | 0.723 | 0.84 | - |
+| astc5x5 32f 32px | flipbook_astc | 24.5 | 28.32 | 22.74 | 0.9014 | 31.75 | 0.16 | 0.995 | 0.70 | - |
+| astc5x5 8f 64px +mv16 | flipbook_astc_mv | 25.1 | 28.73 | 22.83 | 0.9310 | 31.66 | 0.14 | 0.602 | 0.70 | - |
+| astc12x12 16f 128px | flipbook_astc | 30.2 | 30.15 | 24.01 | 0.9448 | 31.43 | 0.21 | 0.161 | 0.78 | - |
+| astc6x6 16f 64px | flipbook_astc | 30.2 | 29.63 | 23.74 | 0.9356 | 31.34 | 0.15 | 0.721 | 0.71 | - |
+| astc6x6 4f 128px | flipbook_astc | 30.2 | 21.91 | 16.35 | 0.8249 | 29.52 | 0.01 | 0.149 | 0.42 | - |
+| astc12x12 8f 128px +mv32 | flipbook_astc_mv | 31.1 | 27.84 | 21.82 | 0.9260 | 31.06 | 0.21 | 0.248 | 0.73 | - |
+| astc4x4 32f 32px | flipbook_astc | 32.0 | 28.49 | 22.90 | 0.9049 | 31.87 | 0.14 | 0.986 | 0.68 | - |
+| astc4x4 8f 64px | flipbook_astc | 32.0 | 25.94 | 20.29 | 0.8911 | 30.10 | 0.05 | 0.745 | 0.57 | - |
+| astc8x8 32f 64px | flipbook_astc | 32.0 | 31.62 | 25.65 | 0.9497 | 33.01 | 0.31 | 0.687 | 0.82 | - |
+| astc8x8 8f 128px | flipbook_astc | 32.0 | 25.86 | 19.95 | 0.8989 | 30.14 | 0.06 | 0.143 | 0.61 | - |
+| bc7 32f 32px | flipbook_bc7 | 32.0 | 28.43 | 22.87 | 0.9013 | 31.83 | 0.15 | 0.987 | 0.69 | - |
+| bc7 8f 64px | flipbook_bc7 | 32.0 | 25.94 | 20.29 | 0.8895 | 30.10 | 0.05 | 0.741 | 0.57 | - |
+| astc12x12 64f 64px | flipbook_astc | 36.0 | 30.25 | 24.34 | 0.9292 | 31.70 | 1.08 | 0.709 | 1.05 | - |
+| astc4x4 8f 64px +mv16 | flipbook_astc_mv | 36.0 | 28.79 | 22.89 | 0.9327 | 31.70 | 0.14 | 0.605 | 0.70 | - |
+| astc6x6 64f 32px | flipbook_astc | 36.0 | 28.36 | 22.78 | 0.8996 | 31.68 | 0.44 | 0.985 | 0.84 | - |
+| bc7 8f 64px +mv16 | flipbook_bc7_mv | 36.0 | 28.76 | 22.88 | 0.9310 | 31.68 | 0.14 | 0.601 | 0.70 | - |
+| astc10x10 8f 128px +mv32 | flipbook_astc_mv | 37.1 | 27.95 | 21.90 | 0.9296 | 31.13 | 0.22 | 0.231 | 0.73 | - |
+| astc6x6 16f 64px +mv16 | flipbook_astc_mv | 38.2 | 32.69 | 26.62 | 0.9619 | 34.50 | 0.30 | 0.610 | 0.82 | - |
+| astc6x6 4f 128px +mv32 | flipbook_astc_mv | 38.2 | 22.26 | 16.51 | 0.8463 | 29.56 | 0.05 | 0.244 | 0.49 | - |
+| astc10x10 16f 128px | flipbook_astc | 42.2 | 30.41 | 24.23 | 0.9496 | 31.49 | 0.22 | 0.140 | 0.79 | - |
+| astc5x5 16f 64px | flipbook_astc | 42.2 | 29.75 | 23.84 | 0.9381 | 31.37 | 0.15 | 0.719 | 0.71 | - |
+| astc5x5 4f 128px | flipbook_astc | 42.2 | 21.91 | 16.34 | 0.8252 | 29.52 | 0.01 | 0.149 | 0.42 | - |
+| astc8x8 8f 128px +mv32 | flipbook_astc_mv | 48.0 | 28.05 | 21.97 | 0.9327 | 31.20 | 0.22 | 0.219 | 0.74 | - |
+| astc10x10 64f 64px | flipbook_astc | 49.0 | 31.23 | 25.26 | 0.9425 | 32.65 | 0.93 | 0.676 | 1.01 | - |
+| astc5x5 64f 32px | flipbook_astc | 49.0 | 28.62 | 23.01 | 0.9059 | 32.10 | 0.32 | 0.973 | 0.79 | - |
+| astc5x5 16f 64px +mv16 | flipbook_astc_mv | 50.2 | 33.00 | 26.92 | 0.9651 | 34.73 | 0.30 | 0.604 | 0.82 | - |
+| astc5x5 4f 128px +mv32 | flipbook_astc_mv | 50.2 | 22.25 | 16.51 | 0.8468 | 29.56 | 0.05 | 0.246 | 0.49 | - |
+| astc12x12 32f 128px | flipbook_astc | 60.5 | 34.05 | 27.73 | 0.9704 | 33.63 | 0.57 | 0.127 | 0.94 | - |
+| astc6x6 32f 64px | flipbook_astc | 60.5 | 32.36 | 26.33 | 0.9593 | 33.43 | 0.32 | 0.679 | 0.81 | - |
+| astc6x6 8f 128px | flipbook_astc | 60.5 | 25.87 | 19.94 | 0.9008 | 30.15 | 0.06 | 0.128 | 0.61 | - |
+| astc12x12 16f 128px +mv32 | flipbook_astc_mv | 62.2 | 33.69 | 27.43 | 0.9691 | 34.16 | 0.55 | 0.192 | 0.91 | - |
+| astc4x4 16f 64px | flipbook_astc | 64.0 | 29.83 | 23.93 | 0.9398 | 31.39 | 0.15 | 0.721 | 0.71 | - |
+| astc4x4 4f 128px | flipbook_astc | 64.0 | 21.91 | 16.34 | 0.8254 | 29.53 | 0.01 | 0.150 | 0.42 | - |
+| astc4x4 64f 32px | flipbook_astc | 64.0 | 28.82 | 23.21 | 0.9100 | 32.48 | 0.20 | 0.965 | 0.74 | - |
+| astc8x8 16f 128px | flipbook_astc | 64.0 | 30.67 | 24.46 | 0.9538 | 31.55 | 0.22 | 0.120 | 0.79 | - |
+| astc8x8 64f 64px | flipbook_astc | 64.0 | 32.54 | 26.51 | 0.9562 | 34.10 | 0.67 | 0.644 | 0.95 | - |
+| bc7 16f 64px | flipbook_bc7 | 64.0 | 29.79 | 23.91 | 0.9381 | 31.38 | 0.15 | 0.716 | 0.71 | - |
+| bc7 4f 128px | flipbook_bc7 | 64.0 | 21.91 | 16.35 | 0.8250 | 29.53 | 0.01 | 0.148 | 0.42 | - |
+| bc7 64f 32px | flipbook_bc7 | 64.0 | 28.76 | 23.16 | 0.9062 | 32.38 | 0.23 | 0.965 | 0.75 | - |
+| astc4x4 16f 64px +mv16 | flipbook_astc_mv | 72.0 | 33.23 | 27.14 | 0.9674 | 34.90 | 0.30 | 0.606 | 0.82 | - |
+| astc4x4 4f 128px +mv32 | flipbook_astc_mv | 72.0 | 22.25 | 16.50 | 0.8470 | 29.57 | 0.05 | 0.250 | 0.49 | - |
+| bc7 16f 64px +mv16 | flipbook_bc7_mv | 72.0 | 33.15 | 27.08 | 0.9655 | 34.84 | 0.30 | 0.602 | 0.82 | - |
+| bc7 4f 128px +mv32 | flipbook_bc7_mv | 72.0 | 22.26 | 16.51 | 0.8466 | 29.56 | 0.05 | 0.243 | 0.49 | - |
+| astc10x10 16f 128px +mv32 | flipbook_astc_mv | 74.2 | 34.44 | 28.14 | 0.9745 | 34.64 | 0.57 | 0.169 | 0.92 | - |
+| astc6x6 8f 128px +mv32 | flipbook_astc_mv | 76.5 | 28.10 | 22.00 | 0.9350 | 31.25 | 0.22 | 0.216 | 0.74 | - |
+| astc10x10 32f 128px | flipbook_astc | 84.5 | 34.98 | 28.62 | 0.9765 | 34.00 | 0.58 | 0.107 | 0.94 | - |
+| astc5x5 32f 64px | flipbook_astc | 84.5 | 32.66 | 26.61 | 0.9627 | 33.59 | 0.32 | 0.675 | 0.81 | - |
+| astc5x5 8f 128px | flipbook_astc | 84.5 | 25.88 | 19.93 | 0.9014 | 30.15 | 0.06 | 0.125 | 0.61 | - |
+| astc8x8 16f 128px +mv32 | flipbook_astc_mv | 96.0 | 35.28 | 28.94 | 0.9792 | 35.14 | 0.57 | 0.155 | 0.92 | - |
+| astc5x5 8f 128px +mv32 | flipbook_astc_mv | 100.5 | 28.12 | 22.01 | 0.9357 | 31.27 | 0.22 | 0.223 | 0.74 | - |
+| astc12x12 64f 128px | flipbook_astc | 121.0 | 35.77 | 29.37 | 0.9768 | 34.86 | 1.36 | 0.103 | 1.11 | - |
+| astc6x6 16f 128px | flipbook_astc | 121.0 | 30.83 | 24.59 | 0.9568 | 31.60 | 0.23 | 0.104 | 0.79 | - |
+| astc6x6 64f 64px | flipbook_astc | 121.0 | 33.60 | 27.50 | 0.9671 | 35.58 | 0.53 | 0.638 | 0.90 | - |
+| astc4x4 32f 64px | flipbook_astc | 128.0 | 32.87 | 26.82 | 0.9651 | 33.71 | 0.31 | 0.677 | 0.81 | - |
+| astc4x4 8f 128px | flipbook_astc | 128.0 | 25.88 | 19.93 | 0.9018 | 30.15 | 0.06 | 0.125 | 0.61 | - |
+| astc8x8 32f 128px | flipbook_astc | 128.0 | 36.10 | 29.69 | 0.9820 | 34.40 | 0.58 | 0.085 | 0.94 | - |
+| bc7 32f 64px | flipbook_bc7 | 128.0 | 32.80 | 26.76 | 0.9632 | 33.68 | 0.31 | 0.672 | 0.81 | - |
+| bc7 8f 128px | flipbook_bc7 | 128.0 | 25.88 | 19.94 | 0.9013 | 30.15 | 0.06 | 0.122 | 0.61 | - |
+| astc4x4 8f 128px +mv32 | flipbook_astc_mv | 144.0 | 28.13 | 22.02 | 0.9363 | 31.29 | 0.22 | 0.224 | 0.74 | - |
+| bc7 8f 128px +mv32 | flipbook_bc7_mv | 144.0 | 28.13 | 22.02 | 0.9359 | 31.28 | 0.22 | 0.216 | 0.74 | - |
+| astc6x6 16f 128px +mv32 | flipbook_astc_mv | 153.0 | 35.93 | 29.55 | 0.9826 | 35.58 | 0.57 | 0.147 | 0.92 | - |
+| astc10x10 64f 128px | flipbook_astc | 169.0 | 37.47 | 31.01 | 0.9838 | 36.32 | 1.27 | 0.086 | 1.09 | - |
+| astc5x5 16f 128px | flipbook_astc | 169.0 | 30.89 | 24.63 | 0.9579 | 31.61 | 0.23 | 0.099 | 0.79 | - |
+| astc5x5 64f 64px | flipbook_astc | 169.0 | 34.07 | 27.95 | 0.9711 | 36.27 | 0.47 | 0.634 | 0.88 | - |
+| astc5x5 16f 128px +mv32 | flipbook_astc_mv | 201.0 | 36.19 | 29.80 | 0.9839 | 35.79 | 0.57 | 0.147 | 0.92 | - |
+| astc6x6 32f 128px | flipbook_astc | 242.0 | 37.03 | 30.58 | 0.9861 | 34.71 | 0.59 | 0.065 | 0.93 | - |
+| astc4x4 16f 128px | flipbook_astc | 256.0 | 30.93 | 24.67 | 0.9586 | 31.62 | 0.23 | 0.098 | 0.79 | - |
+| astc4x4 64f 64px | flipbook_astc | 256.0 | 34.42 | 28.30 | 0.9739 | 36.87 | 0.42 | 0.636 | 0.86 | - |
+| astc8x8 64f 128px | flipbook_astc | 256.0 | 40.04 | 33.54 | 0.9903 | 38.61 | 1.15 | 0.064 | 1.06 | - |
+| bc7 16f 128px | flipbook_bc7 | 256.0 | 30.90 | 24.65 | 0.9580 | 31.62 | 0.23 | 0.095 | 0.79 | - |
+| bc7 64f 64px | flipbook_bc7 | 256.0 | 34.30 | 28.20 | 0.9720 | 36.73 | 0.44 | 0.631 | 0.87 | - |
+| astc4x4 16f 128px +mv32 | flipbook_astc_mv | 288.0 | 36.40 | 29.99 | 0.9847 | 35.96 | 0.57 | 0.150 | 0.92 | - |
+| bc7 16f 128px +mv32 | flipbook_bc7_mv | 288.0 | 36.31 | 29.91 | 0.9843 | 35.86 | 0.57 | 0.143 | 0.92 | - |
+| astc5x5 32f 128px | flipbook_astc | 338.0 | 37.43 | 30.95 | 0.9876 | 34.83 | 0.59 | 0.056 | 0.93 | - |
+| astc6x6 64f 128px | flipbook_astc | 484.0 | 43.50 | 36.95 | 0.9953 | 41.82 | 1.07 | 0.041 | 1.03 | - |
+| astc4x4 32f 128px | flipbook_astc | 512.0 | 37.75 | 31.26 | 0.9886 | 34.93 | 0.59 | 0.051 | 0.93 | - |
+| bc7 32f 128px | flipbook_bc7 | 512.0 | 37.59 | 31.11 | 0.9880 | 34.89 | 0.59 | 0.053 | 0.93 | - |
+| astc5x5 64f 128px | flipbook_astc | 676.0 | 46.03 | 39.46 | 0.9972 | 44.22 | 1.05 | 0.026 | 1.02 | - |
+| astc4x4 64f 128px | flipbook_astc | 1024.0 | 49.81 | 43.22 | 0.9986 | 47.77 | 1.03 | 0.012 | 1.01 | - |
+| bc7 64f 128px | flipbook_bc7 | 1024.0 | 47.81 | 41.23 | 0.9981 | 45.85 | 1.05 | 0.024 | 1.02 | - |
+
+### Matched memory, flipbooks BC3 layout and raw (our encoder)
 
 Within each budget, the neural configuration and the flipbook configuration with the best mean active PSNR (chosen on the same clips they are scored on, which favours neither), compared clip by clip.
 
@@ -66,39 +220,73 @@ Within each budget, the neural configuration and the flipbook configuration with
 | 320 KB | grid_l|8 | 292 | bc3 16f 128px +mv32 | 288 | +6.98 [+5.70, +8.22] | +7.12 [+5.81, +8.38] | +0.0119 [+0.0083, +0.0158] |
 | 512 KB | grid_l|8 | 292 | bc3 32f 128px | 512 | +6.30 [+4.87, +7.70] | +6.37 [+4.92, +7.77] | +0.0092 [+0.0065, +0.0123] |
 
+### Matched memory, flipbooks with BC7
+
+Within each budget, the neural configuration and the flipbook configuration with the best mean active PSNR (chosen on the same clips they are scored on, which favours neither), compared clip by clip.
+
+| budget | neural | KB | flipbook | KB | delta active PSNR | delta PSNR | delta SSIM |
+|---|---|---:|---|---:|---:|---:|---:|
+| 128 KB | conv_s|8 | 69 | bc7 16f 64px +mv16 | 72 | +2.37 [+1.90, +2.91] | +2.64 [+2.19, +3.16] | +0.0003 [-0.0052, +0.0058] (tie) |
+| 160 KB | grid_m|8 | 132 | bc7 16f 64px +mv16 | 72 | +5.54 [+4.72, +6.52] | +5.96 [+5.05, +6.98] | +0.0218 [+0.0167, +0.0269] |
+| 256 KB | grid_mt|8 | 260 | bc7 64f 64px | 256 | +5.55 [+4.35, +6.75] | +5.96 [+4.66, +7.26] | +0.0177 [+0.0134, +0.0223] |
+| 320 KB | grid_l|8 | 292 | bc7 16f 128px +mv32 | 288 | +6.32 [+5.03, +7.61] | +6.42 [+5.10, +7.73] | +0.0087 [+0.0054, +0.0123] |
+| 512 KB | grid_l|8 | 292 | bc7 32f 128px | 512 | +5.12 [+3.65, +6.64] | +5.14 [+3.66, +6.66] | +0.0049 [+0.0026, +0.0075] |
+
+### Matched memory, flipbooks with BC7 and ASTC
+
+Within each budget, the neural configuration and the flipbook configuration with the best mean active PSNR (chosen on the same clips they are scored on, which favours neither), compared clip by clip.
+
+| budget | neural | KB | flipbook | KB | delta active PSNR | delta PSNR | delta SSIM |
+|---|---|---:|---|---:|---:|---:|---:|
+| 128 KB | conv_s|8 | 69 | astc8x8 32f 128px | 128 | -0.24 [-1.38, +1.01] (tie) | -0.31 [-1.48, +0.96] (tie) | -0.0163 [-0.0211, -0.0115] |
+| 160 KB | grid_m|8 | 132 | astc8x8 32f 128px | 128 | +2.93 [+1.51, +4.42] | +3.00 [+1.54, +4.52] | +0.0053 [+0.0015, +0.0090] |
+| 256 KB | grid_mt|8 | 260 | astc8x8 64f 128px | 256 | +0.22 [-1.62, +2.17] (tie) | +0.22 [-1.63, +2.17] (tie) | -0.0006 [-0.0033, +0.0018] (tie) |
+| 320 KB | grid_l|8 | 292 | astc8x8 64f 128px | 256 | +2.69 [+1.38, +4.15] | +2.69 [+1.37, +4.16] | +0.0026 [+0.0013, +0.0040] |
+| 512 KB | grid_l|8 | 292 | astc6x6 64f 128px | 484 | -0.73 [-2.28, +0.93] (tie) | -0.77 [-2.32, +0.89] (tie) | -0.0023 [-0.0039, -0.0007] |
+
 ### Memory at equal quality
 
-For each neural configuration: the flipbook memory needed for the same mean active PSNR (log-linear interpolation along the best-flipbook-at-each-size envelope; ">" when no flipbook up to 1 MB reaches it).
+For each neural configuration: the flipbook memory needed for the same mean active PSNR (log-linear interpolation along the best-flipbook-at-each-size envelope, one point per size), and the ratio with its 95% bootstrap interval over clips (10,000 resamples; network and flipbooks resampled together). ">" when no flipbook in the ladder reaches it (the ratio is then at least that), "<" when every flipbook is as good.
 
-| neural | KB | active PSNR | flipbook KB for equal quality | ratio |
-|---|---:|---:|---:|---:|
-| conv_s|8 | 69 | 29.45 | 341 | 4.9x |
-| grid_s|8 | 73 | 28.07 | 265 | 3.6x |
-| grid_m|8 | 132 | 32.62 | 772 | 5.9x |
-| conv_s|16 | 132 | 29.45 | 343 | 2.6x |
-| conv_m|8 | 142 | 31.33 | 634 | 4.5x |
-| grid_s|16 | 144 | 28.07 | 265 | 1.8x |
-| grid_m|16 | 259 | 32.64 | 774 | 3.0x |
-| grid_mt|8 | 260 | 33.76 | 917 | 3.5x |
-| conv_m|16 | 268 | 31.33 | 634 | 2.4x |
-| grid_l|8 | 292 | 36.23 | > 1024 | > 3.5x |
-| grid_mt|16 | 515 | 33.77 | 920 | 1.8x |
-| grid_l|16 | 579 | 36.28 | > 1024 | > 1.8x |
+| neural | KB | active PSNR | flipbook KB, BC3 layout and raw (our encoder) | ratio | flipbook KB, with BC7 | ratio | flipbook KB, with BC7 and ASTC | ratio |
+|---|---:|---:|---:|---|---:|---|---:|---|
+| conv_s|8 | 69 | 29.45 | 341 | 4.9x [4.0, 8.3] | 279 | 4.0x [3.9, 6.7] | 123 | 1.8x [1.2, 2.3] |
+| grid_s|8 | 73 | 28.07 | 265 | 3.6x [3.4, 3.9] | 239 | 3.3x [2.7, 3.6] | 74 | 1.0x [0.8, 1.4] |
+| grid_m|8 | 132 | 32.62 | 772 | 5.9x [4.6, 7.8] (4% censored) | 568 | 4.3x [3.9, 4.8] | 251 | 1.9x [1.8, 2.8] |
+| conv_s|16 | 132 | 29.45 | 343 | 2.6x [2.1, 4.3] | 279 | 2.1x [2.0, 3.5] | 123 | 0.93x [0.62, 1.20] |
+| conv_m|8 | 142 | 31.33 | 634 | 4.5x [3.8, 5.2] | 520 | 3.7x [2.2, 4.0] | 244 | 1.7x [1.1, 1.8] |
+| grid_s|16 | 144 | 28.07 | 265 | 1.8x [1.7, 2.0] | 240 | 1.7x [1.4, 1.8] | 74 | 0.51x [0.39, 0.71] |
+| grid_m|16 | 259 | 32.64 | 774 | 3.0x [2.4, 4.0] (4% censored) | 569 | 2.2x [2.0, 2.4] | 251 | 0.97x [0.94, 1.44] |
+| grid_mt|8 | 260 | 33.76 | 917 | 3.5x [2.7, 3.9] (26% censored) | 614 | 2.4x [2.1, 2.6] | 346 | 1.3x [0.9, 1.6] |
+| conv_m|16 | 268 | 31.33 | 634 | 2.4x [2.0, 2.8] | 520 | 1.9x [1.2, 2.1] | 244 | 0.91x [0.60, 0.93] |
+| grid_l|8 | 292 | 36.23 | > 1024 | >3.5x [3.5, 3.5] (99% censored) | 727 | 2.5x [2.3, 2.8] | 448 | 1.5x [1.3, 2.0] |
+| grid_mt|16 | 515 | 33.77 | 920 | 1.8x [1.4, 2.0] (26% censored) | 615 | 1.2x [1.1, 1.3] | 346 | 0.67x [0.48, 0.83] |
+| grid_l|16 | 579 | 36.28 | > 1024 | >1.8x [1.8, 1.8] (99% censored) | 730 | 1.3x [1.1, 1.4] | 451 | 0.78x [0.67, 0.99] |
 
-### By effect (grid_m 8-bit against BC3 16 frames 128 px and BC3 all frames)
+Envelope, flipbooks BC3 layout and raw (our encoder) (KB: mean active PSNR): 4.0: 17.25; 8.0: 19.98; 16: 21.89; 18: 21.89; 32: 22.76; 36: 22.79; 64: 23.76; 72: 26.69; 128: 26.69; 144: 26.69; 256: 27.59; 288: 29.25; 512: 29.92; 1024: 34.48;
 
-| effect | grid_m 8-bit active | bc3 16f 128px active | bc3 64f 128px active |
-|---|---:|---:|---:|
-| fire | 31.47 | 22.77 | 30.44 |
-| smoke | 31.86 | 26.13 | 36.48 |
-| explosion | 34.53 | 24.43 | 36.51 |
+Envelope, flipbooks with BC7 (KB: mean active PSNR): 4.0: 17.25; 8.0: 19.98; 16: 21.94; 18: 21.94; 32: 22.87; 36: 22.88; 64: 23.91; 72: 27.08; 128: 27.08; 144: 27.08; 256: 28.20; 288: 29.91; 512: 31.11; 1024: 41.23;
+
+Envelope, flipbooks with BC7 and ASTC (KB: mean active PSNR): 0.6: 17.19; 1.0: 17.22; 1.1: 19.37; 2.0: 19.78; 2.2: 20.50; 3.1: 20.50; 4.0: 21.39; 4.2: 21.39; 4.5: 21.39; 5.1: 21.39; 6.0: 21.39; 6.1: 21.39; 7.6: 21.39; 8.0: 22.05; 8.5: 22.05; 9.0: 22.58; 9.6: 22.58; 10: 22.58; 11: 22.58; 12: 22.58; 12: 22.97; 13: 22.97; 15: 22.97; 16: 22.97; 16: 23.45; 17: 24.16; 18: 24.16; 19: 24.16; 19: 24.16; 20: 24.92; 21: 24.92; 24: 25.88; 24: 25.88; 25: 25.88; 30: 25.88; 31: 25.88; 32: 25.88; 36: 25.88; 37: 25.88; 38: 26.62; 42: 26.62; 48: 26.62; 49: 26.62; 50: 26.92; 60: 27.73; 62: 27.73; 64: 27.73; 72: 27.73; 74: 28.14; 76: 28.14; 84: 28.62; 96: 28.94; 100: 28.94; 121: 29.37; 128: 29.69; 144: 29.69; 153: 29.69; 169: 31.01; 201: 31.01; 242: 31.01; 256: 33.54; 288: 33.54; 338: 33.54; 484: 36.95; 512: 36.95; 676: 39.46; 1024: 43.22;
+
+### By effect (grid_m 8-bit against BC3 16 frames 128 px and BC3 all frames; astc8x8 32f 128px, the best production-format flipbook within grid_m's memory; BC7 all frames)
+
+| effect | grid_m 8-bit active | bc3 16f 128px active | bc3 64f 128px active | astc8x8 32f 128px active | bc7 64f 128px active |
+|---|---:|---:|---:|---:|---:|
+| fire | 31.47 | 22.77 | 30.44 | 27.21 | 38.53 |
+| smoke | 31.86 | 26.13 | 36.48 | 31.90 | 43.05 |
+| explosion | 34.53 | 24.43 | 36.51 | 29.95 | 42.11 |
 
 ### Frame interpolation (only even frames available; odd frames scored)
 
 | method | KB | mean active PSNR on odd frames | method minus neural |
 |---|---:|---:|---:|
+| astc4x4 even frames, 128px | 512 | 28.58 | -0.95 [-2.33, +0.29] (tie) |
+| astc4x4 even frames, 128px +mv32 | 576 | 35.08 | +5.54 [+4.28, +6.66] |
 | bc3 even frames, 128px | 512 | 27.99 | -1.54 [-2.93, -0.29] |
 | bc3 even frames, 128px +mv32 | 576 | 33.45 | +3.92 [+2.40, +5.22] |
+| bc7 even frames, 128px | 512 | 28.51 | -1.02 [-2.39, +0.22] (tie) |
+| bc7 even frames, 128px +mv32 | 576 | 34.90 | +5.37 [+4.09, +6.48] |
 | grid_m 8-bit (trained on the even frames) | 132 | 29.53 | - |
 | raw even frames, 128px | 2048 | 28.66 | -0.87 [-2.22, +0.36] (tie) |
 
