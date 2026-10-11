@@ -62,6 +62,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <cctype>
 #include <chrono>
 #include <cmath>
 #include <ctime>
@@ -848,7 +849,7 @@ std::string short_label(const std::string& config) {
 
 // Two panels as SVG: memory against quality (flipbooks, networks) and disk against quality (flipbooks and networks
 // packed by the lossless coder, video codecs' payload). Log size axis; one quality axis per panel.
-void write_figure(const fs::path& path, const std::string& title, const Family& flips, const std::map<std::string, Family>& videos,
+void write_figure(const fs::path& path, const std::string& title, const Family& flips, const Family* flips_more, const std::map<std::string, Family>& videos,
                   const std::vector<std::pair<std::string, const Point*>>& nets, const std::vector<std::size_t>& idx) {
   constexpr double W = 1040, H = 470, top = 74, bottom = 58, left = 62, gap = 70;
   const double pw = (W - left - gap - 24) / 2, ph = H - top - bottom;
@@ -897,8 +898,12 @@ void write_figure(const fs::path& path, const std::string& title, const Family& 
       o << std::format("<path d=\"{}\" fill=\"none\" stroke=\"{}\" stroke-width=\"2\" stroke-linejoin=\"round\"/>\n", d, colour);
     };
     // legend
-    std::vector<std::pair<std::string, const char*>> legend = {{panel == 0 ? "best flipbook at each size" : "best packed flipbook", slot[0]}, {"networks (F2)", slot[1]}};
+    std::vector<std::pair<std::string, const char*>> legend = {{panel == 0 ? "best flipbook at each size" : "best packed flipbook", slot[0]}, {"networks", slot[1]}};
     line(envelope(flips, panel == 0 ? "memory" : "packed", idx), slot[0]);
+    if (panel == 0 && flips_more) {  // with the extra tables (F3: flipbooks without their empty space)
+      line(envelope(*flips_more, "memory", idx), slot[6]);
+      legend.emplace_back("flipbooks trimmed to their content", slot[6]);
+    }
     if (panel == 1) {
       for (std::size_t v = 0; v < shown.size(); ++v) {
         if (!videos.contains(shown[v]) || videos.at(shown[v]).empty()) continue;
@@ -948,7 +953,7 @@ void step_report(const Ctx& c, const std::vector<std::string>& only_configs, con
     return ci.at(clip);
   };
   // Flipbooks.
-  Family flips;
+  Family flips, flips_stored;  // every table; F2's table only
   std::vector<fs::path> flip_tables = {c.out / std::format("f2_flipbooks_{}.csv", c.set)};
   for (const fs::path& extra : c.flipbooks) flip_tables.push_back(extra);
   for (const fs::path& table : flip_tables) {
@@ -957,13 +962,16 @@ void step_report(const Ctx& c, const std::vector<std::string>& only_configs, con
     for (const auto& r : f.rows()) {
       if (r.contains("set") && r.at("set") != c.set) continue;
       if (!ci.contains(r.at("clip"))) continue;
-      Point& p = flips[r.at("config")];
-      const std::size_t i = fill(p, r.at("clip"));
-      p.q[i] = std::stod(r.at("active_psnr"));
-      for (const std::string m : {"memory", "packed"}) {
-        auto& v = p.b[m];
-        if (v.empty()) v.assign(n, std::nan(""));
-        v[i] = std::stod(r.at(m + "_bytes"));
+      for (Family* fam : {&flips, table == flip_tables.front() ? &flips_stored : nullptr}) {
+        if (!fam) continue;
+        Point& p = (*fam)[r.at("config")];
+        const std::size_t i = fill(p, r.at("clip"));
+        p.q[i] = std::stod(r.at("active_psnr"));
+        for (const std::string m : {"memory", "packed"}) {
+          auto& v = p.b[m];
+          if (v.empty()) v.assign(n, std::nan(""));
+          v[i] = std::stod(r.at(m + "_bytes"));
+        }
       }
     }
   }
@@ -1011,6 +1019,7 @@ void step_report(const Ctx& c, const std::vector<std::string>& only_configs, con
     return std::ranges::none_of(p.q, [](double v) { return std::isnan(v); });
   };
   std::erase_if(flips, [&](const auto& kv) { return !complete(kv.second); });
+  std::erase_if(flips_stored, [&](const auto& kv) { return !complete(kv.second); });
   for (auto& [k, fam] : videos) std::erase_if(fam, [&](const auto& kv) { return !complete(kv.second); });
   std::erase_if(all_video, [&](const auto& kv) { return !complete(kv.second); });
   std::vector<std::size_t> idx(n);
@@ -1061,7 +1070,10 @@ void step_report(const Ctx& c, const std::vector<std::string>& only_configs, con
                  mean_at(p.b.at("resident"), idx) / 1024, mean_at(p.b.at("packed"), idx) / 1024, mem, disk, ddb);
   }
   if (!figure.empty()) {
-    write_figure(figure, std::format("Study F2, {} clips ({} set): quality against bytes", n, c.set), flips, videos, order, idx);
+    std::string study = c.study;
+    std::ranges::transform(study, study.begin(), [](unsigned char ch) { return static_cast<char>(std::toupper(ch)); });
+    write_figure(figure, std::format("Study {}, {} clips ({} set): quality against bytes", study, n, c.set), c.flipbooks.empty() ? flips : flips_stored,
+                 c.flipbooks.empty() ? nullptr : &flips, videos, order, idx);
     std::println("figure: {}", figure);
   }
   if (!videos.empty()) {
