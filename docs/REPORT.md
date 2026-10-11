@@ -615,7 +615,9 @@ game, on one core, in the later session: grid_s 1.7 ms per game frame on average
 2.6, 7.2 and 9.0 ms. The rollout effects, with every copy playing its own run, cost 4.7 to 10.1 ms (28 to 60%); their
 99th percentiles are 24 to 39 ms because all copies change shards in the same frame, which a game would stagger.
 Sharing instances between copies with the same controls and seed lowers this further; the game's other CPU work has
-to fit around it.
+to fit around it. These are the float network's figures (`nvfx_scene --float` since int8 became the default); at int8
+grid_m's scene took 4.0 to 4.2 ms per game frame against 5.0 to 6.6 ms in float, in two interleaved runs on the busy
+machine (wall-clock time, provisional).
 
 ## 8. Against NVIDIA's published claims and traditional methods
 
