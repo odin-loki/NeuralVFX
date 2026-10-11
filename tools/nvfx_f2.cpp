@@ -15,7 +15,8 @@
 //                                                   design G3c: study D's rollout effects with quantised, dithered and
 //                                                   fewer start points, scored as study D's endless runs
 //   nvfx_f2 g3c-report --split val|test             each variant against v1, paired over the settings
-//   nvfx_f2 timing --models a.nvfx,b.nvfx [--core 3] [--reps 5]
+//   nvfx_f2 int8 --set val|test --configs A,B       the runtime's int8 path against the float network, paired over clips
+//   nvfx_f2 timing --models a.nvfx,b.nvfx [--core 3] [--reps 5] [--precision float|int8|both]
 //                                                   thread CPU time per 128 x 128 frame, least of the repetitions
 //   options: --root DIR (data root, default $NEURALVFX_DATA), --out DIR (results/compression), --threads 2,
 //            --clips a,b (a subset of the set), --study NAME (default f2: networks in $NEURALVFX_DATA/NAME/models and
@@ -23,7 +24,10 @@
 //            distillation teacher, a configuration trained by the same study or F2; default the same architecture at
 //            8 bits), --flipbooks a.csv,b.csv (report: more flipbook rows, e.g. other encoders, besides f2_flipbooks_<set>.csv),
 //            --suffix S (report: its table as <study>_equal_quality_<set>S.csv), --pareto (report: envelopes of the points
-//            that improve on every smaller one only; see tools::pareto_envelope)
+//            that improve on every smaller one only; see tools::pareto_envelope), --pilot (train: score with the trainer's
+//            forward pass, no runtime and no coder, into <study>_pilot_<set>.csv; report, pairs: read that table),
+//            --reuse (train: score a model file saved before instead of training it again), --also f3 (report, pairs:
+//            another study's networks too)
 //
 // Sets: "test" is study A's 12 clips (docs/REPORT.md §3), scored exactly as study A scores them (the network trained
 // on the clip, rendered through the runtime at its stored precision, active-region PSNR over all 64 frames). "val"
@@ -48,6 +52,10 @@
 //                            stored (the clip's support, grown by d points, default 0); the others take a fill per plane
 //   d<alpha>                 distillation (study F3): the target is (1 - alpha) x the clip + alpha x the teacher's frames
 //                            (for a squared error, the same as weighting the two losses); scored against the clip
+//   p<G>.<C>.<T>[+...]h<H>l<L>  the multi family (study F4): levels of G x G points, C channels, T time slices, their features
+//                            concatenated, then the MLP; file version 4. Its options: lb<b1>.<b2>... (bits per level, with
+//                            q), pe<n> and pt<n> (Fourier features of position and time), w8 (MLP weights stored at 8
+//                            bits), wq (and trained for them); b, q, sp, i and s as above
 //   e.g. g32c8h32l2t16_b8 is study A's grid_m at 8 bits; g32c8h32l2t16_b4_q_r3e-5 adds 4-bit QAT and a rate term.
 #include "args.hpp"
 #include "baselines.hpp"
@@ -548,10 +556,10 @@ struct RtEffect {
 };
 
 // The clip through the runtime, as study A renders it (training variation 0, no drift).
-Clip runtime_clip(const RtEffect& fx, const Model& m, std::size_t& scratch) {
+Clip runtime_clip(const RtEffect& fx, const Model& m, std::size_t& scratch, nvfx_precision precision = NVFX_PRECISION_FLOAT) {
   nvfx_instance* in = nullptr;
   if (nvfx_instance_create(fx.e, kSize, &in) != NVFX_OK) throw std::runtime_error("runtime instance failed");
-  nvfx_instance_set_precision(in, NVFX_PRECISION_FLOAT);  // the float network, as the study scored it
+  nvfx_instance_set_precision(in, precision);  // the float network, as the study scores it (int8: step_int8)
   nvfx_instance_set_drift(in, 0.f);
   nvfx_instance_set_variation(in, 0);
   scratch = nvfx_instance_scratch_bytes(in);
@@ -750,6 +758,39 @@ void step_rescore(const Ctx& c, const std::string& name, const std::string& patt
     score_and_pack(ref, p, row);
     csv.add(row);
     std::println("rescore {} {}: {} bytes, {} packed, active {}", r.name, name, row["stored_bytes"], row["packed_bytes"], row["active_psnr"]);
+  }
+}
+
+// The int8 path (the runtime's default for the grid and multi families) against the float network the study scores:
+// every saved model of the configurations on the set rendered both ways, active PSNR int8 minus float, paired over the
+// clips with a 95% bootstrap interval. Models from this study's folder, else F3's or F2's.
+void step_int8(const Ctx& c, const std::vector<std::string>& configs) {
+  std::println("| configuration ({} set) | clips | float active PSNR | int8 active PSNR | int8 - float dB |", c.set);
+  std::println("|---|---:|---:|---:|---|");
+  for (const std::string& name : configs) {
+    std::vector<double> fl, q8;
+    for (const ClipRef& r : clip_set(c)) {
+      fs::path file;
+      for (const std::string& study : {c.study, std::string("f3"), std::string("f2")}) {
+        const fs::path f = c.root / study / "models" / c.set / std::format("{}__{}.nvfx", r.name, name);
+        if (fs::exists(f)) {
+          file = f;
+          break;
+        }
+      }
+      if (file.empty()) continue;
+      const Clip ref = load_clip(r);
+      auto loaded = load_model(file);
+      if (!loaded) throw std::runtime_error(loaded.error());
+      RtEffect fx(read_bytes(file));
+      std::size_t scratch = 0;
+      fl.push_back(metrics::score(ref, runtime_clip(fx, *loaded, scratch, NVFX_PRECISION_FLOAT)).active_psnr);
+      q8.push_back(metrics::score(ref, runtime_clip(fx, *loaded, scratch, NVFX_PRECISION_INT8)).active_psnr);
+    }
+    if (fl.empty()) continue;
+    const auto iv = metrics::paired_bootstrap(q8, fl);
+    std::println("| {} | {} | {:.3f} | {:.3f} | {:+.3f} [{:+.3f}, {:+.3f}] |", name, fl.size(), std::accumulate(fl.begin(), fl.end(), 0.0) / static_cast<double>(fl.size()),
+                 std::accumulate(q8.begin(), q8.end(), 0.0) / static_cast<double>(q8.size()), iv.mean, iv.lo, iv.hi);
   }
 }
 
@@ -1547,6 +1588,7 @@ int main(int argc, char** argv) try {
     const auto v = split(a.str("codecs", ""));
     step_video(c, std::set<std::string>(v.begin(), v.end()));
   } else if (step == "report") step_report(c, split(a.str("configs", "")), a.str("figure", ""));
+  else if (step == "int8") step_int8(c, split(a.need("configs")));
   else if (step == "timing") step_timing(split(a.need("models")), a.i("core", 3), a.i("reps", 5), a.str("precision", "float"));
   else if (step == "g3c") step_g3c(c, a.str("split", "val"), split(a.str("variants", "v1,b8,b6,b6_d,b4_d,h,b6_d_h")));
   else if (step == "g3c-report") step_g3c_report(c, a.str("split", "val"));
