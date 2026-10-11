@@ -866,7 +866,7 @@ void step_report(const Ctx& c) {
       }
       aggs.push_back(g);
     }
-    std::ranges::sort(aggs, {}, &Agg::kb);
+    std::ranges::stable_sort(aggs, {}, &Agg::kb);  // equal sizes in key order
     using tools::Baseline;
     constexpr std::array kBaselines = {Baseline::bc3_layout, Baseline::desktop, Baseline::all};
     const auto in = [](const Agg& g, Baseline b) { return g.family.starts_with("neural") || tools::in_baseline(g.key, b); };
@@ -981,7 +981,7 @@ void step_report(const Ctx& c) {
       md << std::format("\nEnvelope, flipbooks {} (KB: mean active PSNR):", tools::baseline_name(b));
       std::vector<std::size_t> all(clip_order.size());
       std::iota(all.begin(), all.end(), 0);
-      for (const auto& [bytes, q] : tools::envelope(fams[b], "memory", all)) md << std::format(" {:.0f}: {:.2f};", bytes / 1024, q);
+      for (const auto& [bytes, q] : tools::envelope(fams[b], "memory", all)) md << std::format(" {:.{}f}: {:.2f};", bytes / 1024, bytes < 10240 ? 1 : 0, q);
       md << "\n";
     }
     // per effect for the headline configs

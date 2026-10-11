@@ -305,6 +305,7 @@ TEST(Formats, EncodersGiveTheSameBlocksOnSeveralThreads) {
 
 TEST(Formats, ProductionFlipbooksPlayLikeTheOthers) {
   using flipbook::Codec;
+  if (!flipbook::available(Codec::bc7) && !flipbook::available(Codec::astc8x8)) GTEST_SKIP() << "no production encoder in this build";
   sim::Params p;
   p.effect = sim::Effect::fire;
   p.size = 32;

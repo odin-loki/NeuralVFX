@@ -41,6 +41,11 @@ std::size_t stored_bytes(Codec codec, int w, int h) {
   return static_cast<std::size_t>(blocks_along(w, b)) * static_cast<std::size_t>(blocks_along(h, b)) * 16;
 }
 
+void need_multiple_of_4(Codec codec, int w, int h) {
+  if (w % 4 || h % 4) throw std::invalid_argument(std::format("{}: width and height must be multiples of 4", codec_name(codec)));
+}
+
+#if NEURALFX_HAVE_BC7
 // Texels of a block-row-major image of 4x4 blocks (row by row, 16 RGBA texels each) to and from an RGBA image.
 void gather4x4(std::span<const std::uint8_t> rgba, int w, int bx, int by, std::uint8_t* out) {
   for (int y = 0; y < 4; ++y) {
@@ -53,11 +58,6 @@ void scatter4x4(std::span<std::uint8_t> rgba, int w, int bx, int by, const std::
   }
 }
 
-void need_multiple_of_4(Codec codec, int w, int h) {
-  if (w % 4 || h % 4) throw std::invalid_argument(std::format("{}: width and height must be multiples of 4", codec_name(codec)));
-}
-
-#if NEURALFX_HAVE_BC7
 // BC7 by bc7e at its "veryslow" level (uber level 2, two partitions tried per mode, p-bit search): on the study
 // clips' frames it scores as well as its slowest level, 0.2 dB above its basic level.
 std::vector<std::uint8_t> encode_bc7(std::span<const std::uint8_t> rgba, int w, int h) {

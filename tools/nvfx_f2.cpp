@@ -544,7 +544,7 @@ std::string short_label(const std::string& config) {
 // packed by the lossless coder, video codecs' payload). Log size axis; one quality axis per panel.
 void write_figure(const fs::path& path, const std::string& title, const Family& flips, const Family& old_flips, const std::map<std::string, Family>& videos,
                   const std::vector<std::pair<std::string, const Point*>>& nets, const std::vector<std::size_t>& idx) {
-  constexpr double W = 1040, H = 470, top = 74, bottom = 58, left = 62, gap = 70;
+  constexpr double W = 1040, H = 484, top = 88, bottom = 58, left = 62, gap = 70;
   const double pw = (W - left - gap - 24) / 2, ph = H - top - bottom;
   const char* ink = "#0b0b0b";
   const char* ink2 = "#52514e";
@@ -569,7 +569,7 @@ void write_figure(const fs::path& path, const std::string& title, const Family& 
     const double x0 = left + panel * (pw + gap), y0 = top;
     const auto X = [&](double kb) { return x0 + (std::log(std::clamp(kb, klo, khi)) - std::log(klo)) / (std::log(khi) - std::log(klo)) * pw; };
     const auto Y = [&](double q) { return y0 + ph - (std::clamp(q, qlo, qhi) - qlo) / (qhi - qlo) * ph; };
-    o << std::format("<text x=\"{}\" y=\"{}\" font-size=\"13\" font-weight=\"600\" fill=\"{}\">{}</text>\n", x0, y0 - 30, ink,
+    o << std::format("<text x=\"{}\" y=\"{}\" font-size=\"13\" font-weight=\"600\" fill=\"{}\">{}</text>\n", x0, y0 - 44, ink,
                      panel == 0 ? "Memory while playing: flipbook texture, network as stored" : "Disk: both sides losslessly packed; video bitstreams");
     for (double kb = klo; kb <= khi * 1.01; kb *= 4) {
       o << std::format("<line x1=\"{:.1f}\" y1=\"{}\" x2=\"{:.1f}\" y2=\"{}\" stroke=\"{}\" stroke-width=\"1\"/>\n", X(kb), y0, X(kb), y0 + ph, grid);
@@ -596,7 +596,7 @@ void write_figure(const fs::path& path, const std::string& title, const Family& 
     line(envelope(flips, panel == 0 ? "memory" : "packed", idx), slot[0]);
     if (old_flips.size() < flips.size()) {
       line(envelope(old_flips, panel == 0 ? "memory" : "packed", idx), slot[0], true);
-      legend.emplace_back("dashed: our BC3 layout and raw only", slot[0]);
+      if (panel == 0) legend.emplace_back("dashed: our BC3 layout and raw", slot[0]);
     }
     if (panel == 1) {
       for (std::size_t v = 0; v < shown.size(); ++v) {
@@ -605,11 +605,16 @@ void write_figure(const fs::path& path, const std::string& title, const Family& 
         legend.emplace_back(shown[v] == "aom" ? "AV1 (libaom, 4:4:4)" : shown[v] == "x265" ? "HEVC (x265, 4:4:4)" : "VP9 with alpha (4:2:0)", slot[2 + v]);
       }
     }
-    double lx = x0;
+    double lx = x0, row_y = y0 - 30;  // up to two rows within the panel's width
     for (const auto& [name, colour] : legend) {
-      o << std::format("<rect x=\"{:.1f}\" y=\"{}\" width=\"14\" height=\"4\" rx=\"2\" fill=\"{}\"/>\n", lx, y0 - 16, colour);
-      o << std::format("<text x=\"{:.1f}\" y=\"{}\" font-size=\"11\" fill=\"{}\">{}</text>\n", lx + 18, y0 - 11, ink2, name);
-      lx += 26 + 6.2 * static_cast<double>(name.size());
+      const double w = 26 + 6.2 * static_cast<double>(name.size());
+      if (lx > x0 && lx + w - 8 > x0 + pw) {
+        lx = x0;
+        row_y += 14;
+      }
+      o << std::format("<rect x=\"{:.1f}\" y=\"{}\" width=\"14\" height=\"4\" rx=\"2\" fill=\"{}\"/>\n", lx, row_y, colour);
+      o << std::format("<text x=\"{:.1f}\" y=\"{}\" font-size=\"11\" fill=\"{}\">{}</text>\n", lx + 18, row_y + 5, ink2, name);
+      lx += w;
     }
     std::vector<std::array<double, 4>> placed;  // label boxes: x0, y0, x1, y1
     for (const auto& [k, p] : nets) {
