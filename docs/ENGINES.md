@@ -222,6 +222,9 @@ burning?". They read the bus of the last frame computed and cost a few bilinear 
   its learned controls. A place or control the script changes over time is set by the script again next frame, so
   give the game an input for those instead.
 
+`examples/scenes/campfire.nvfxs` is a small scene driven this way (three inputs, four rules only the game fires); the
+viewer's scene mode shows a script's inputs as sliders and its named rules as buttons ([VIEWER.md](VIEWER.md)).
+
 **Errors.** Script errors (`NVFX_ERROR_SCRIPT`) carry the line and the column, in `nvfx_scene_error` and in the
 message (`"name:line:column: message"`, with a suggestion for a misspelt word). The script is checked before any
 effect is loaded; an effect that cannot be read (`NVFX_ERROR_IO`) or is not a rollout effect (`NVFX_ERROR_FORMAT`)

@@ -1,8 +1,9 @@
 # Build and test on Ubuntu 24.04 with warnings as errors.
 #   build   the libraries, tools and tests (ffmpeg installed so the video-ingest test runs; the BC7 and ASTC encoders of
 #           the flipbook baselines fetched at pinned commits), plus a benchmark smoke run
-#   viewer  the Dear ImGui viewer (fetched at a pinned tag) and its headless screenshot test under Xvfb; configured
-#           without the encoders (the build that does without them)
+#   viewer  the Dear ImGui viewer (fetched at a pinned tag) and its tests: the scene mode's reload logic (no display) and
+#           headless screenshots under Xvfb of both modes (the scene mode on untrained stand-ins: CI has no models);
+#           configured without the encoders (the build that does without them)
 #   godot   the Godot 4 GDExtension (godot-cpp fetched at a pinned tag), built only: its test needs the effects and a
 #           Godot binary (engines/godot/test.sh)
 name: CI
@@ -64,10 +65,10 @@ jobs:
           -DNEURALFX_WERROR=ON -DNEURALFX_BUILD_VIEWER=ON -DNEURALFX_FETCH_ENCODERS=OFF
 
       - name: Build
-        run: cmake --build build --target nvfx_viewer
+        run: cmake --build build --target nvfx_viewer nvfx_viewer_tests
 
-      - name: Screenshot test
-        run: ctest --test-dir build -R ViewerScreenshot --output-on-failure
+      - name: Viewer tests (reload logic, screenshots)
+        run: ctest --test-dir build -R Viewer --output-on-failure
 
   godot:
     name: Godot 4 GDExtension (build)
