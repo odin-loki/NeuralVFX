@@ -38,7 +38,7 @@ composed scene they can still appear as decoration.
 | field bus (`FieldBus`) | every module's velocity, heat and soot resampled into world space, kept per group | all modules | (read by everything else) |
 | force field (`ForceField`) | a force the script places in the world: `ceiling`, `vortex`, `wind`, `gust`, `ring`, `attract`, `heat`, `cold` (§5) | the bus position | the velocity (or heat and soot) of the modules it covers, and particles |
 | particles (`Particles`) | sparks, embers, debris and soot flakes, carried by the bus flow, cooling, landing | the bus flow | landing events (for triggers) |
-| light (`Light`) | light from everything hot on the bus, spread by a pyramid of blurs, plus flashes | the bus heat | the light that lights soot and the ground |
+| light (`Light`) | light from everything hot on the bus, spread by a pyramid of blurs, plus flashes; in fire colours, or in a module's own colour if it glows (§4.3) | the bus heat | the light that lights soot and the ground |
 | distortion | shock fronts and heat haze, bending what is seen through hot air | the bus heat, shocks | the picture |
 | look | each module's learned renderer, or the field shader (light from heat, soot that absorbs and is lit by the scene and the moon) | the module's fields, light | the picture |
 
@@ -63,9 +63,10 @@ These are applied between steps. Each reads and writes the runners' states throu
 A scene is a text file (`.nvfxs`) that an artist edits and `nvfx_scene_script` plays: modules, how they couple, force
 fields, particles, light and camera, and rules that change the scene over time. The runner (`src/compose/script.hpp`)
 builds every compose object up front, so a frame allocates nothing (`nvfx_alloc_test` plays a scripted scene with
-every kind of statement and counts 0 allocations; the tool counts them too). Two scenes are in `examples/scenes`: the
-fireball of §6 (`fireball.nvfxs`, which reproduces the hand-written C++ scene to the bit, §4.8) and a wall of fire in a
-gale (`firewall.nvfxs`, §5.2), written only as a script.
+every kind of statement and counts 0 allocations; the tool counts them too). Three scenes are in `examples/scenes`: the
+fireball of §6 (`fireball.nvfxs`, which reproduces the hand-written C++ scene to the bit, §4.8), a wall of fire in a
+gale (`firewall.nvfxs`, §5.2), written only as a script, and a magic portal with steam vents (`portal.nvfxs`), which
+shows the effects added later with study D's ([EFFECTS.md](EFFECTS.md)).
 
 ```sh
 nvfx_scene_script --script examples/scenes/firewall.nvfxs --models DIR --out firewall.mp4 [--keyframes DIR] [--sheet sheet.png]
@@ -168,11 +169,12 @@ A module is one rollout effect in a square tile, or a domain of several tiles of
 | `feather F` | outer edges fade over F times the tile's size when drawn | 0 |
 | `look L`, `look A to B by W`, `look learned` | a field-shader look, a blend of two (W from 0 to 1, may change over time), or the effect's learned renderer | learned |
 | `controls (a, b, c)` | the effect's controls at the start | 0.5 each |
-| `CONTROL value` | one control by its name (`intensity`, `wind`, `turbulence` for the study D effects); may change over time | |
+| `CONTROL value` | one control by its name (`intensity`, `wind`, `turbulence` for the study D effects and steam; `intensity`, `spin`, `turbulence` for magic); may change over time | |
 | `opacity` | how much it is drawn and published (may change over time) | 1 |
 | `start N`, `seed S` | started at setup from start point N with seed S (its warm-up runs then, not in a frame); a domain's bottom middle tile starts from it with seed S, the others start empty at its age with seed S + 10 r + c (column c, row r from the bottom) | not started |
 | `empty` | with `start`: nothing in it, at start point N's age (a domain that only receives material) | |
 | `waiting` | with `start`: started now, but asleep until a rule wakes it | |
+| `glow (r, g, b)` | its heat lights the scene in this colour (times heat squared and the light's gain) instead of the fire colours; its heat stays on the bus for rules and haze (a magic portal's violet light, [EFFECTS.md](EFFECTS.md)) | fire colours |
 
 A module without its own controls takes the controls of the start point it starts from. Expressions can read a module:
 `M.x` (the centre of its tile or domain), `M.y` (the y it stands on), `M.started` (when it was last started, woken or

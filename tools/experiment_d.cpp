@@ -967,18 +967,26 @@ void report(const Ctx& c, std::ostream& md) {
         }
         md << std::format("| {} | {:.3f} | {:.2f} | {:.4f} | {:.4f} | {:.2f} |\n", name, m[0], m[1], m[2], m[3], m[4]);
       }
-      const auto paired = [&](const std::string& a, const std::string& b, std::size_t k) -> std::string {
+      // k: a column; 5: the motion error |ln(motion ratio)| (0 is right)
+      const auto paired = [&](const std::string& a, const std::string& b, std::size_t k, int prec = 3) -> std::string {
         if (!methods.contains(a) || !methods.contains(b) || methods.at(a).size() != methods.at(b).size()) return "-";
+        const auto col = [k](const std::array<double, 5>& v) { return k == 5 ? std::abs(std::log(v[1])) : v[k]; };
         std::vector<double> x, y;
         for (std::size_t i = 0; i < methods.at(a).size(); ++i) {
-          x.push_back(methods.at(a)[i][k]);
-          y.push_back(methods.at(b)[i][k]);
+          x.push_back(col(methods.at(a)[i]));
+          y.push_back(col(methods.at(b)[i]));
         }
-        return iv(metrics::paired_bootstrap(x, y), 3);
+        return iv(metrics::paired_bootstrap(x, y), prec);
       };
       md << "\nSpectrum distance, paired over settings: neural - grid_k8 " << paired("neural", "grid_k8", 0) << "; neural - flipbook_nearest "
          << paired("neural", "flipbook_nearest", 0) << "; neural - coarse_sim_detail " << paired("neural", "coarse_sim_detail", 0)
          << "; neural - real_other_seed " << paired("neural", "real_other_seed", 0) << ".\n\n";
+      md << "Mean-frame PSNR (dB), paired: neural - flipbook_nearest " << paired("neural", "flipbook_nearest", 4, 2) << "; neural - coarse_sim_detail "
+         << paired("neural", "coarse_sim_detail", 4, 2) << "; neural - real_other_seed " << paired("neural", "real_other_seed", 4, 2)
+         << ". Motion error |ln(motion ratio)|, paired: neural - flipbook_nearest " << paired("neural", "flipbook_nearest", 5)
+         << "; neural - coarse_sim_detail " << paired("neural", "coarse_sim_detail", 5) << "; neural - real_other_seed "
+         << paired("neural", "real_other_seed", 5) << ". Coverage distance, paired: neural - flipbook_nearest " << paired("neural", "flipbook_nearest", 2, 4)
+         << "; neural - real_other_seed " << paired("neural", "real_other_seed", 2, 4) << ".\n\n";
     }
   }
   if (fs::exists(c.results / "d_long.csv")) {
