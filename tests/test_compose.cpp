@@ -4,6 +4,7 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <atomic>
 #include <cstring>
 #include <numeric>
@@ -158,6 +159,38 @@ TEST(Compose, BusCarriesVelocityInWorldPixels) {
   const auto o = bus.others(32.f, 32.f, 0);  // without its own group, nothing is left
   EXPECT_NEAR(o.u, 0.f, 1e-5f);
   EXPECT_NEAR(o.heat, 0.f, 1e-5f);
+}
+
+// A module that glows (docs/EFFECTS.md: the magic portal) lights the scene in its own colour; its heat stays on the bus.
+TEST(Compose, GlowingModuleLightsInItsOwnColour) {
+  const rt::RolloutEffect e = tiny_effect();
+  const auto light_of = [&](bool glows) {
+    Module m("m", e, 32, Placement{0.f, 0.f, 2.f}, Isa::base);
+    m.start_empty(0.f, 1);
+    m.group = 0;
+    m.glows = glows;
+    m.glow = {0.3f, 0.1f, 0.9f};
+    auto co = m.runner().coarse_mut();
+    for (int i = 0; i < 16 * 16; ++i) co[z(i) * z(m.channels()) + 2] = 0.7f;
+    FieldBus bus(0.f, 0.f, 8, 8, 8.f, 2);
+    bus.publish(m);
+    EXPECT_EQ(bus.glowing(), glows);
+    EXPECT_NEAR(bus.at(32.f, 32.f).heat, 0.7f, 1e-5f);  // on the bus either way
+    Light light(bus);
+    Pool pool(1);
+    light.update(bus, 0.14f, {0.f, 0.f, 0.f}, pool);
+    const auto at = light.at(32.f, 32.f);
+    bus.clear();
+    EXPECT_FALSE(bus.glowing());
+    EXPECT_TRUE(std::ranges::all_of(bus.glow(), [](float v) { return v == 0.f; }));
+    return at;
+  };
+  const auto fire = light_of(false), magic = light_of(true);
+  EXPECT_GT(fire[0], fire[2]);    // fire light: red over blue
+  EXPECT_GT(magic[2], magic[0]);  // its own: blue over red
+  EXPECT_GT(magic[2], 2.f * magic[1]);
+  // the same amount of light: heat squared times the gain, in the module's colour against the fire ramp's
+  EXPECT_NEAR(magic[0] / magic[2], 0.3f / 0.9f, 1e-3f);
 }
 
 TEST(Compose, PushMovesForOneStepOnly) {
