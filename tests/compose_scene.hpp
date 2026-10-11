@@ -147,7 +147,7 @@ module pair = tiny, tiles 2 x 1, band 4, size 32, width 64, at (80, 74), look ga
 module sky = other, over pair, look smoke
 module fire = tiny, size 32, at (66, 72), sink 0.1, feather 0.125, start 1, seed 99,
               intensity 0.3 + 0.2 * smooth(t / 0.5), opacity if(t > 2, 0.5, 1)
-module spare = tiny, size 32, width 24, start 0, seed 5, waiting, controls (0.4, 0.5, 0.6)
+module spare = tiny, size 32, width 24, start 0, seed 5, waiting, controls (0.4, 0.5, 0.6), glow (0.3, 0.2, 1)
 field cap = ceiling, level 20, soft 10, damping 0.3, on pair, weight smooth(t), if t > 0.1
 field swirl = vortex, at (60, 40), radius 20, strength 1, on pair, particles
 field breeze = wind, velocity (0.5, 0), on fire, from 0.2, until 1
