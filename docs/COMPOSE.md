@@ -1038,8 +1038,38 @@ tested. Every effect is reported, nulls with their numbers.
 - **Cost:** thread CPU time per frame during the first second, with and without the hand-off, through `nvfx_render` at
   64, 128 and 256 px, least of 15 (`i2-cost`); the simulator's look drawn alone.
 
-### 10.7 Validation and the choice
+### 10.7 Fire and smoke: validation and the choice
 
 (Not run yet.) Before the design was committed, the validation step ran once in its quick mode (one seed per setting,
 two plain runs, a 3 s endless play) on two checkpoints, as a check of the code: sA after 100 iterations and a round-1
 fire candidate. It changed nothing above; those numbers are not used.
+
+### 10.8 The explosion's first second: stopped at validation
+
+The simulator's look draws the first second closer to the real run, as study G's pilot found. On validation (20 tracked
+explosions, `i2_handoff_val.csv`) the first second averages 21.40 dB without a hand-off; with one, the gain is +0.41
+[+0.37, +0.45] dB (N = 4, no crossfade) to +0.88 [+0.77, +0.98] dB (N = 8, M = 30), and from N = 15 on it stays at
++0.81 to +0.87 dB. Frames 31 to 89 are not worse (+0.00 to +0.03 dB).
+
+But **every configuration makes an endless statistic worse**, so by the rule none is chosen and the hand-off is not
+tested:
+- **Coverage distance is worse in 23 of the 24**, by 0.0001 to 0.0006 against 0.062 without a hand-off (0.2% to 1%).
+  Drawn in the simulator's look, the model's fireball covers a little more of the frame than the learned renderer
+  draws it, and the model's fireballs already spread too far (REPORT §6.5).
+- **Without a crossfade the switch is a jump** that the motion statistic sees: at N = 4 and N = 8 with M = 0, |log
+  motion ratio| is worse by 0.007 [0.001, 0.011]. N = 4, M = 0 is the one configuration whose coverage ties.
+- The other two statistics improve or tie: spectrum distance by 0.002 to 0.012, mean-frame PSNR by +0.01 to +0.03 dB.
+
+It is G4a's pattern again (DCM §10.7), much smaller: the first second is closer to the run, one endless statistic is a
+little further. The rule counts an interval, not a size, and was written before the numbers.
+
+**Cost** (`i2_handoff_cost.csv`; thread CPU time, least of 15, AVX2, shared machine): while it shows, the simulator's
+look costs 0.57 ms per frame at 64 px, 1.99 ms at 128 px and 7.4 ms at 256 px, on top of 0.45, 0.62 and 1.19 ms for the
+whole learned frame, so a first-second frame would cost 2.8 to 7 times as much. It runs straight from the runtime's
+state (the fine fields at the output size), but as scalar code that repeats the simulator's arithmetic to the bit: 12
+bilinear samples of soot towards the light per covered pixel and two exponentials. A vectorised version allowed to
+differ in the last bits would be several times cheaper (not measured).
+
+The runtime path stays, off by default (`nvfx_instance_set_handoff`; tests `Handoff.*` and the allocation test),
+because the validation ran through it. Nothing in v2 changes.
+

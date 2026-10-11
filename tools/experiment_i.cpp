@@ -1126,7 +1126,7 @@ Verdict judge(sim::Effect e, const std::vector<Named>& models, std::size_t m, co
   };
   const auto has = [&](const std::string& kind) { return std::ranges::any_of(cases, [&](const TrackCase& tc) { return tc.kind == kind; }); };
   const auto row = [&](const std::string& test, const std::string& measure, const metrics::Interval& d) {
-    v.rows.push_back(std::format("{},{},{},{},{:.4f},{:.4f},{:.4f}", en, mn, test, measure, d.mean, d.lo, d.hi));
+    v.rows.push_back(std::format("{},{},{},{},{:.6f},{:.6f},{:.6f}", en, mn, test, measure, d.mean, d.lo, d.hi));
   };
   // 1. coupled tracking
   const auto better = [&](const Kinds& k) { return paired(k, 8).lo > 0 && paired(k, 30).lo > 0; };
@@ -1725,7 +1725,7 @@ void step_handoff(const Ctx& c) {
       }
       const auto d = metrics::paired_bootstrap(a, b);
       endless = endless && d.hi >= 0;
-      row += std::format(",{:.4f},{:.4f},{:.4f}", d.mean, d.lo, d.hi);
+      row += std::format(",{:.6f},{:.6f},{:.6f}", d.mean, d.lo, d.hi);
     }
     score[k] = {first.mean, k > 0 && endless && rest.hi >= 0};
     const bool kept = k > 0 && first.lo > 0 && rest.hi >= 0 && endless;

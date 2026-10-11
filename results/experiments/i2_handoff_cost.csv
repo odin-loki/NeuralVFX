@@ -1,0 +1,4 @@
+effect,size,learned_ms,with_handoff_ms,extra_ms,sim_look_ms
+explosion,64,0.4462,1.2448,0.7986,0.5691
+explosion,128,0.6225,2.7767,2.1542,1.9872
+explosion,256,1.1848,8.6793,7.4945,7.4011
