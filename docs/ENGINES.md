@@ -177,7 +177,7 @@ upload_to_texture(rgba);
 | check | `nvfx_scene_check` (parse and check without effects, for an editor's quick loop), `nvfx_scene_list_effects` (the files a script names, for hosts that read them from a package and pass them in) |
 | clock | `nvfx_scene_step(dt)`, `nvfx_scene_step_frames(n)`, `nvfx_scene_seek(seconds)`, `nvfx_scene_restart`, `nvfx_scene_time`, `nvfx_scene_frame` |
 | picture | `nvfx_scene_render(rgba, stride)` |
-| fields | `nvfx_scene_sample` (heat, soot, velocity at a point), `nvfx_scene_sample_grid` (a field on a grid of points: a tile map), `nvfx_scene_field_region` (largest and mean value in a rectangle) |
+| fields | `nvfx_scene_sample` (heat, soot, velocity at a point), `nvfx_scene_sample_grid` (a field on a grid of points: a tile map), `nvfx_scene_field_region` (largest and mean value in a rectangle), `nvfx_scene_camera` (where the screen's top-left corner is in the world, so a pointer over the picture maps to the world) |
 | inputs | `nvfx_scene_set_input`, `nvfx_scene_get_input`, `nvfx_scene_input_name` |
 | rules | `nvfx_scene_trigger`, `nvfx_scene_rule_state` (times fired, last time), `nvfx_scene_rule_name` |
 | modules | `nvfx_scene_module_get_info` (where, active, controls), `nvfx_scene_module_place`, `nvfx_scene_module_set_control`, `nvfx_scene_module_name`, `nvfx_scene_module_control_name` |

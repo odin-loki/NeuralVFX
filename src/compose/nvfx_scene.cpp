@@ -430,6 +430,14 @@ nvfx_status nvfx_scene_field_region(const nvfx_scene* s, nvfx_scene_field field,
   return NVFX_OK;
 }
 
+nvfx_status nvfx_scene_camera(const nvfx_scene* s, float* x, float* y) {
+  if (!s || !s->scene) return NVFX_ERROR_ARGUMENT;
+  const nfx::compose::Frame& f = s->scene->frame();
+  if (x) *x = f.cam_x;
+  if (y) *y = f.cam_y;
+  return NVFX_OK;
+}
+
 nvfx_status nvfx_scene_set_input(nvfx_scene* s, const char* name, float value) {
   if (!s || !s->scene || !name) return NVFX_ERROR_ARGUMENT;
   const int i = s->scene->input_index(name);

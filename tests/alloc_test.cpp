@@ -368,6 +368,8 @@ int run_scene_api() {
       if (f == 31) nvfx_scene_module_set_control(s, "spare", "wind", 0.7f);
       int count = 0;
       nvfx_scene_rule_state(s, "poke", &count, nullptr);
+      float cam_x = 0.f, cam_y = 0.f;
+      nvfx_scene_camera(s, &cam_x, &cam_y);
       nvfx_scene_module_info mi{};
       nvfx_scene_module_get_info(s, "fire", &mi);
       nvfx_scene_render(s, rgba.data(), static_cast<std::size_t>(info.width) * 4);

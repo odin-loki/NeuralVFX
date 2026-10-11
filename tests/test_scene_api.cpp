@@ -372,6 +372,37 @@ module fire = tiny, size 32, width 32, at (40, ground), start 1, seed 5
   EXPECT_EQ(nvfx_scene_sample_grid(s.get(), NVFX_FIELD_HEAT, 0, 0, 1, 1, 2, 1, grid.data(), 1), NVFX_ERROR_ARGUMENT);  // row stride < nx
 }
 
+// The camera of the last frame computed, for a pointer over the picture (the viewer's field probe): overlapped, drawing
+// frame f computes frame f + 1, and the camera moves on with the field reads.
+TEST(SceneApi, CameraOfTheLastFrameComputed) {
+  const Tiny fx;
+  constexpr const char* kCamera = R"(
+scene size 160 x 90, fps 30, length 2, ground 80
+effect tiny = "tiny"
+module fire = tiny, size 32, at (40, ground), start 1, seed 5
+camera x 90 * t, y -7
+)";
+  for (const int overlap : {0, 1}) {
+    ScenePtr s = make(fx, kCamera, 2, overlap);
+    ASSERT_TRUE(s);
+    float x = -1.f, y = -1.f;
+    ASSERT_EQ(nvfx_scene_camera(s.get(), &x, &y), NVFX_OK);
+    EXPECT_EQ(x, 0.f);
+    EXPECT_EQ(y, -7.f);
+    ASSERT_EQ(nvfx_scene_step_frames(s.get(), 10), NVFX_OK);
+    ASSERT_EQ(nvfx_scene_camera(s.get(), &x, nullptr), NVFX_OK);
+    EXPECT_NEAR(x, 30.f, 1e-4f);  // 3 world pixels a frame
+    std::vector<std::uint8_t> rgba(160 * 90 * 4);
+    ASSERT_EQ(nvfx_scene_render(s.get(), rgba.data(), 160 * 4), NVFX_OK);
+    ASSERT_EQ(nvfx_scene_camera(s.get(), &x, &y), NVFX_OK);
+    EXPECT_NEAR(x, overlap ? 33.f : 30.f, 1e-4f) << "overlap " << overlap;
+    EXPECT_EQ(y, -7.f);
+    EXPECT_EQ(nvfx_scene_camera(s.get(), nullptr, nullptr), NVFX_OK);
+  }
+  float x = 0.f;
+  EXPECT_EQ(nvfx_scene_camera(nullptr, &x, nullptr), NVFX_ERROR_ARGUMENT);
+}
+
 // Errors: the script's line and column, the effect's statement for a file that cannot be read, wrong effects.
 TEST(SceneApi, ErrorsSayWhere) {
   const Tiny fx;
