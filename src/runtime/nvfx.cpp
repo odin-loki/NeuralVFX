@@ -4,6 +4,7 @@
 #include <neuralfx/nvfx.h>
 
 #include "rt_common.hpp"
+#include "rt_handoff.hpp"
 #include "rt_prior.hpp"
 
 #include <algorithm>
@@ -57,6 +58,9 @@ struct nvfx_instance {
   std::vector<float> prior_cond;
   int prior_every = 16, prior_t = 100;
   float prior_beta = 1.f;
+  // The simulator's look for the first frames (docs/COMPOSE.md §10; rt_handoff.hpp), drawn into `mix`: off at 0, 0.
+  int handoff_frames = 0, handoff_fade = 0;
+  nfx::rt::SimLook handoff_look = nfx::rt::SimLook::none;
 };
 
 namespace {
@@ -196,6 +200,17 @@ void bring(nvfx_instance& in, nvfx_instance::Track& t, std::int64_t k, std::int6
   }
 }
 
+// The hand-off at frame f of the timeline (docs/COMPOSE.md §10): the simulator's look from the runner's fine fields,
+// blended with the learned frame already in rgba. Before the shard crossfade, which reuses `mix`. No allocation.
+void hand_off(nvfx_instance& in, const RolloutRunner& r, std::int64_t f, const FrameInput& fi, std::uint8_t* rgba, std::size_t stride) {
+  if (in.handoff_frames + in.handoff_fade <= 0) return;
+  const float w = nfx::rt::handoff_weight(f, in.handoff_frames, in.handoff_fade);
+  if (w >= 1.f) return;
+  const std::size_t row = static_cast<std::size_t>(in.size) * 4;
+  nfx::rt::draw_sim_look(in.handoff_look, r.fine_heat(), r.fine_soot(), in.size, in.mix.data(), row, fi.apply_colour ? fi.colour.data() : nullptr);
+  nfx::rt::blend_handoff(rgba, stride, in.mix.data(), row, in.size, w);
+}
+
 // The frame at f (frames since the effect began) into rgba.
 void rollout_frame(nvfx_instance& in, std::int64_t f, const FrameInput& fi, std::uint8_t* rgba, std::size_t stride) {
   const auto& m = in.effect->roll->m;
@@ -205,6 +220,7 @@ void rollout_frame(nvfx_instance& in, std::int64_t f, const FrameInput& fi, std:
   if (L == 0) {
     bring(in, in.a, 0, f);
     in.a.r->render(fi, rgba, stride);
+    hand_off(in, *in.a.r, f, fi, rgba, stride);
     return;
   }
   const std::int64_t k = f / L, j = f - k * L;
@@ -213,6 +229,7 @@ void rollout_frame(nvfx_instance& in, std::int64_t f, const FrameInput& fi, std:
   bring(in, cur, k, f);
   if (f >= plan_shard(in, k + 1).first) bring(in, next, k + 1, f);  // rolled ahead of its turn
   cur.r->render(fi, rgba, stride);
+  hand_off(in, *cur.r, f, fi, rgba, stride);
   if (j < L - kBlend) return;
   // the crossfade: the next shard comes in over the last kBlend frames
   const std::size_t row = static_cast<std::size_t>(in.size) * 4;
@@ -554,6 +571,16 @@ nvfx_status nvfx_instance_set_prior(nvfx_instance* in, int every_frames, int t, 
     in->prior_t = t;
     in->prior_beta = beta;
   }
+  return NVFX_OK;
+}
+
+nvfx_status nvfx_instance_set_handoff(nvfx_instance* in, int frames, int fade) {
+  if (!in || !in->a.r || frames < 0 || fade < 0 || frames > 100000 || fade > 100000) return NVFX_ERROR_ARGUMENT;
+  const nfx::rt::SimLook look = nfx::rt::sim_look_for(in->effect->roll->m.effect);
+  if (frames + fade > 0 && look == nfx::rt::SimLook::none) return NVFX_ERROR_ARGUMENT;
+  in->handoff_frames = frames;
+  in->handoff_fade = fade;
+  in->handoff_look = look;
   return NVFX_OK;
 }
 

@@ -105,6 +105,14 @@ NVFX_API nvfx_status nvfx_effect_attach_prior_memory(nvfx_effect* effect, const 
  * (in nvfx_instance_scratch_bytes); for an instance created before it, this call allocates them. */
 NVFX_API nvfx_status nvfx_instance_set_prior(nvfx_instance* instance, int every_frames, int t, float beta);
 
+/* Rollout effects: the simulator's look for the first frames (docs/COMPOSE.md §10) ------------------------------
+ * Draw the first `frames` frames of the instance's timeline (frame 0 is the start point) in the look of the simulator
+ * the effect was trained on, drawn from the instance's own fine fields, then crossfade to the learned renderer over
+ * `fade` frames. Meant for explosions, whose learned renderer draws a fresh fireball poorly. 0, 0 (the default) is
+ * off. Only the picture changes, not the state. Costs one more drawing per frame while it shows; no allocation.
+ * Errors: NVFX_ERROR_ARGUMENT (not a rollout effect, negative counts, or an effect the simulator does not make). */
+NVFX_API nvfx_status nvfx_instance_set_handoff(nvfx_instance* instance, int frames, int fade);
+
 /* Render the frame at `time_seconds` (looping effects wrap; one-shot effects hold their last frame) into `rgba`,
  * whose rows are `stride_bytes` apart (>= size * 4). No allocation. */
 NVFX_API nvfx_status nvfx_render(nvfx_instance* instance, double time_seconds, uint8_t* rgba, size_t stride_bytes);

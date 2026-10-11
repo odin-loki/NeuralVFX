@@ -62,7 +62,8 @@ neuralfx_defaults(neuralfx_model)
 
 # The runtime (what ships in a game): C API, per-ISA renderers, no allocation per frame.
 set(NVFX_RUNTIME_SOURCES src/runtime/nvfx.cpp src/runtime/rt_base.cpp src/runtime/rt_avx2.cpp src/runtime/rt_avx512.cpp
-                         src/runtime/rt_prior.cpp src/runtime/rt_prior_base.cpp src/runtime/rt_prior_avx2.cpp src/runtime/rt_prior_avx512.cpp)
+                         src/runtime/rt_prior.cpp src/runtime/rt_prior_base.cpp src/runtime/rt_prior_avx2.cpp src/runtime/rt_prior_avx512.cpp
+                         src/runtime/rt_handoff.cpp)
 add_library(nvfx STATIC ${NVFX_RUNTIME_SOURCES})
 target_link_libraries(nvfx PUBLIC neuralfx_model)
 set_target_properties(nvfx PROPERTIES POSITION_INDEPENDENT_CODE ON)
@@ -221,7 +222,7 @@ if(NEURALFX_BUILD_TESTS)
                                 tests/test_runtime.cpp tests/test_ingest.cpp tests/test_rollout.cpp tests/test_compose.cpp
                                 tests/test_dcm.cpp tests/test_cm.cpp tests/test_dcm_fine.cpp tests/test_dcm_ddpm.cpp tests/test_script.cpp
                                 tests/test_g3_codec.cpp tests/test_video_codec.cpp tests/test_runtime_prior.cpp
-                                tests/test_dcm_extras.cpp)
+                                tests/test_dcm_extras.cpp tests/test_handoff.cpp)
   target_link_libraries(neuralfx_tests PRIVATE neuralfx_proto neuralfx_io neuralfx_train nvfx neuralfx_compose neuralfx_dcm
                                                neuralfx_dcm_fine neuralfx_ddpm neuralfx_codec neuralfx_dcm_extras GTest::gtest_main)
   neuralfx_defaults(neuralfx_tests)

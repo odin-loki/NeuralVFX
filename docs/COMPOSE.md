@@ -877,3 +877,169 @@ The comparison sheets (v1 above or left, v2c below or right) are in the data roo
 - **What might help next** (untested): more windows that contain couplings (about half the 16-frame windows of a
   fire or smoke forced run contain one, three quarters for explosions, so at share 0.5 only a quarter of all
   windows do), and a look at smoke's first step; then a new test with new seeds.
+
+## 10. Study I, round 2
+
+Status: **design and rules committed before any validation or test number** (§10.1 to §10.6; the commit is named in
+§10.7). Code: the anchor, aimed windows and `scene_forcing` (`src/train/rollout_train.cpp`), the simulator's
+look in the runtime (`src/runtime/rt_handoff.hpp`, `.cpp`, one hook in `src/runtime/nvfx.cpp`,
+`nvfx_instance_set_handoff`), and the steps `nvfx_experiment i2-data | i2-probe | i2-train | i2-val | i2-test |
+i2-handoff | i2-cost` (`tools/experiment_i.cpp`). Data under the data root's `i2/` (round 1's recorded runs are reused
+from `i/`, read only).
+
+### 10.1 The questions
+
+1. Round 1 (§9) left fire tied at 8 and 30 frames and smoke 0.09 dB worse on the first frame of plain tracking. Can a
+   second round, with a safeguard for plain play and forcing like the scenes', make fire and smoke follow coupled runs
+   better without making their plain play or endless statistics worse? And does the fire then keep burning under strong
+   pushes, which put the learned fire out (§5)?
+2. The simulator's own renderer draws the explosion's first second about 1 dB closer to the real run than the learned
+   renderer (DCM §10.7). Does a simple hand-off, the simulator's look for the first frames and then a crossfade to the
+   learned renderer, make the first second better without making the endless statistics worse?
+
+### 10.2 Fire and smoke: what changes in training
+
+Everything else is round 1's (§9.3): fine-tuning from v1's stepper (not from round 1's candidates), v1's normalisation
+kept, only the stepper trained, the recipe's last stage (windows of 16 frames, half of them after up to 48 frames of the
+model's own rollout; profile and activity losses), batch 16, seed 11, 400 iterations, a model saved every 100.
+- **Forcing like the scenes' (`scene_forcing`).** New forced runs, 64 of fire and 48 of smoke (salt 1, runs 600 on,
+  forcing seeds 5000 on, 240 frames, events from frame 15 to 180), each with: a **gale** always (a broad push that
+  varies slowly across the domain and drifts like gusts, within 20 degrees of sideways, 60 to 150 frames, up to 0.15 to
+  0.6 cells of the 32-cell grid per frame on fire and 0.15 to 0.4 on smoke); a **vortex ring** rolling through in 60% of
+  the runs (two opposite vortices of core 0.05 to 0.1 of the domain, peak 0.3 to 0.7 cells per frame, crossing the
+  domain with the gale at 0.03 to 0.06 of its width per frame, so in 22 to 44 frames, as the firewall's ring crosses a
+  tile of the wall); a **blast** in 30% (a broad gust of 5 to 20 frames, up to 0.5 on fire and 0.3 on smoke); and
+  **material leaving through the top** for good in 50% of the fire runs and 30% of the smoke runs (20% to 60% per frame
+  above 0.75 to 0.88 of the height). For scale (§9.2 and the scripts): the wall of the firewall feels its ring at up to
+  0.67 cells per frame and its sky 0.2 +- 70% from the gale and 0.67 from the ring; the fireball pushes the wreck's fire
+  by up to 0.49 and takes half of its top rows every frame. They join round 1's forced runs: a coupled window comes from
+  any forced or hand-over run. Two first versions were dropped before any model was trained on them: a ring crawling
+  through in 40 to 120 frames, and a ring of up to 1.0 cells per frame on fire. In both the simulator's vorticity
+  confinement spun the pushed vortices up to flows of 1.5 to 3.8 cells per frame that last after the ring, and 6% (then
+  1.2%) of the fire runs' horizontal velocities ended beyond v1's range, which its stepper's clamp cannot follow. As
+  used, 0.06% do (fire) and none (smoke) (`i2_data.csv`).
+- **A safeguard for plain play (the anchor).** On a window from a plain run that starts at a true state (no burn-in),
+  the first step's squared difference from v1's first step on the same input is added to the loss, weighted by `anchor`
+  (in the loss's own channel units, as a mean over cells and the four physical channels). It keeps plain one-step
+  predictions close to v1's, which is what smoke lost in round 1, and leaves the steps from coupled states and the
+  model's own states free. The gradient is checked against finite differences.
+- **Windows aimed at couplings.** With `aim`, a window from a forced run is placed so that a coupling acts in one of its
+  16 steps (up to 16 tries), so more of the coupled windows contain one (round 1: about half of a fire or smoke forced
+  run's windows did).
+- **Candidates** (each with checkpoints at 100, 200, 300 and 400 iterations, so validation also chooses how long to
+  train, which is early stopping on validation):
+
+| effect | candidate | share of coupled windows | learning rate | anchor | aimed windows | strong runs |
+|---|---|---:|---:|---:|---|---|
+| fire | fA | 0.5 | 1e-4 | 0 | no | yes |
+| fire | fB | 0.5 | 1e-4 | 10 | yes | yes |
+| fire | fC | 0.8 | 3e-4 | 10 | yes | yes |
+| fire | fD | 0.8 | 3e-4 | 100 | yes | yes |
+| smoke | sA | 0.8 | 3e-4 | 0 (see below) | yes | yes |
+| smoke | sB | 0.8 | 3e-4 | 10 | yes | yes |
+| smoke | sC | 0.8 | 3e-4 | 100 | yes | yes |
+| smoke | sD | 0.8 | 1e-4 | 10 | yes | yes |
+
+fA is round 1's fire recipe with the strong runs added; sA is round 1's smoke recipe with the strong runs and aimed
+windows; the others add the anchor. Its weight was set from a probe on training-salt runs only (`i2-probe` on runs 900
+to 907, `i2_probe.csv`): v1's first step from a true state has a squared error of 0.0088 (fire) and 0.0068 (smoke) in
+the loss's units, and round 1's chosen candidates had moved their first step 0.00007 (fire) and 0.00022 (smoke) away
+from v1's. At 10, round 1's smoke drift would add 0.0022 to an anchored window's loss of about 0.13; 100 is the strong
+version. **A bug, found before any validation:** sA was trained with anchor 10, but the anchor's gradient was added
+before the data term's and then overwritten by it, so only its loss value was counted and sA is in effect an anchor-0
+candidate (its first step had moved 0.00016 from v1's after 100 iterations and 0.00030 after 400, against round 1's
+0.00010 and 0.00025). The finite-difference test of the anchor (`Rollout.GradientsMatchFiniteDifferencesWithTheAnchor`)
+failed on it; the fix came before the next anchored candidate was trained. (On training windows round 1's smoke
+candidate's first step is a little closer to the truth than v1's, 0.0058 against 0.0060 in the loss's units, though its
+first frame on round 1's test was 0.09 dB worse in pixels: what the anchor keeps is the step as v1 makes it, velocity
+included, and the velocity moves the fine fields.)
+
+The same probe shows what the strong couplings do to v1's fire: on 8 training-salt runs, over the fourth second it keeps
+**28%** of the simulator's light (survival score 1.10; one run 0.07%, one 1.5%); round 1's fire candidate keeps 35%
+(0.89). Under round 1's random couplings the same runs keep tracking at 15 to 20 dB at 30 frames, under the strong ones
+at 10 to 16 dB. Smoke has no light of its own; its probe is in the table.
+
+### 10.3 Fire and smoke: what is measured
+
+Against the **baseline, v2's file** (fire: v1's stepper with 6-bit start states; smoke: v1). Fire's candidates are
+scored in v2's form, v2's fire with the candidate's stepper, so only the stepper differs. As in §9.4, the models run
+through the runtime's runner as compose drives it; tracking starts from the true state (coarse and fine; its coarse
+state kept at 16 bits for every model).
+- **Forced tracking**, 40 cases: the 10 settings, two seeds each with round 1's random couplings (`random_forcing`,
+  onsets in the first half second), and two other seeds each with strong couplings (`scene_forcing`: the gale from
+  frames 0 to 10, the other events by frame 30). Active PSNR against the simulator with the same couplings at 1, 8, 30
+  and 60 frames. The rule pools the 40 cases; each half is reported too.
+- **Hand-over tracking (smoke)**, 20 cases, as §9.4, with explosions of other runs (validation: salt-3 runs 500 on;
+  test: salt-2 runs 600 on).
+- **Plain tracking**, 16 runs of the held-out salt from their true states (validation: salt-3 runs 100 to 115; test:
+  salt-2 runs 200 to 215), 60 frames (test: 240, the later horizons as diagnostics).
+- **Endless statistics** as §9.4 (one 10 s play per setting against a real run): spectrum distance, |log motion ratio|,
+  coverage distance, mean-frame PSNR.
+- **Fire: does it keep burning under strong pushes (survival).** The 20 strong cases are tracked for 120 frames (4 s).
+  Per frame the light (mean of max(0, rgb - alpha), as `metrics::stats`' emission) and the cover (mean alpha) of the
+  model's frame and of the simulator's forced frame; the survival score of a case is the mean over frames 31 to 120 of
+  (|ln((light_model + 0.001) / (light_truth + 0.001))| + |ln((cover_model + 0.001) / (cover_truth + 0.001))|) / 2. Lower
+  is better; 0 is burning exactly as much as the simulator. Reported with it: the share of the simulator's light the
+  model keeps over the last second.
+- **Diagnostic (test only, outside the rule):** the random-forcing cases again without their couplings.
+- **Intervals:** 95% paired bootstrap (10,000 resamples) over cases or settings, candidate minus baseline.
+
+### 10.4 Seeds (all new; round 1's are spent)
+
+| | validation (G's 10 validation settings, salt 3) | test (B's 10 held-out settings, salt 2) |
+|---|---|---|
+| forced: run seeds, forcing seeds | 1,430,000, 1,470,000 (+ 10 x setting + k) | 1,960,000, 1,970,000 |
+| strong: run seeds, forcing seeds | 1,440,000, 1,480,000 | 1,940,000, 1,950,000 |
+| hand-over (smoke): smoke seeds; explosion runs | 1,460,000; salt-3 runs 500 on | 1,980,000; salt-2 runs 600 on |
+| plain: runs | salt-3 runs 100 to 115 | salt-2 runs 200 to 215 |
+| endless: real run, other real run, model | 1,540,000, -, 1,550,000 (+ setting) | 1,900,000, 1,910,000, 1,920,000 |
+| explosion hand-off: tracked runs | 1,620,000 (+ 10 x setting + k) | 1,720,000 |
+| explosion hand-off: real run, other real run, model | 1,640,000, -, 1,650,000 | 1,740,000, 1,745,000, 1,750,000 |
+
+### 10.5 The rule for fire and smoke (written before validation and the test)
+
+A candidate is kept for an effect, replacing the stepper of v2's file, when all of these hold on the test, which is run
+once:
+1. **Coupled tracking is better:** forced tracking (the 40 cases pooled) is better than the baseline at 8 and at 30
+   frames, both intervals above zero. For smoke, either the forced or the hand-over tracking is better at 8 and 30
+   frames in this sense, and the other is not worse at 8 or 30 frames (no interval entirely below zero).
+2. **Plain tracking is not worse:** at 1, 8, 30 and 60 frames no interval lies entirely below zero.
+3. **The endless statistics are not worse:** for spectrum distance, |log motion ratio|, coverage distance and mean-frame
+   PSNR, no interval lies entirely on the worse side.
+4. **Fire only: survival is not worse:** the survival score's interval does not lie entirely on the worse side.
+
+**The choice, on validation:** among the 16 checkpoints of an effect's candidates, those that meet all four parts on
+validation; of these, the best coupled score (mean active PSNR at 8 and 30 frames over the coupled cases: fire the 40
+forced cases, smoke those and the 20 hand-over cases). If none meets them, the effect stops at validation and is not
+tested. Every effect is reported, nulls with their numbers.
+
+### 10.6 The explosion's first second: the hand-off
+
+- **What it draws.** Frame f of an instance's timeline (f = 0 is the start point) is the simulator's renderer
+  (`sim::Fluid::render`) drawn from the instance's own fine heat and soot (`rt::draw_sim_look`, to the bit the
+  simulator's renderer on those fields), mixed byte by byte with the learned renderer's frame, learned weight w(f) = 0
+  for f < N, (f - N + 1) / (M + 1) for N <= f < N + M, and 1 from N + M on. Only the picture changes, not the state. In
+  the runtime: `nvfx_instance_set_handoff(instance, N, M)`, off by default; no allocation (the frame buffer of the shard
+  crossfade is reused); parity tests (`Handoff.*`) and the allocation test cover it. The model is v2's explosion (the
+  coupled stepper of §9), the baseline the same without hand-off.
+- **Measured.** Tracking (REPORT §6.4): a real run at a setting warmed one frame, its true state (fine fields at 128
+  px) the only start point, the run's seed; active PSNR per frame for 89 frames through the runtime's runner; the
+  **first second** is the mean over frames 1 to 30, the rest the mean over frames 31 to 89. Two seeds at each of the
+  10 settings (20 cases). The endless statistics of §9.4 for explosions (one 89-frame play from the start points,
+  through the C API with the hand-off, against a real run from its first frame; 10 settings).
+- **Configurations:** N in {4, 8, 15, 22, 30, 45} frames, M in {0, 8, 15, 30} (24).
+- **The choice, on validation:** among configurations whose endless statistics are not worse (no interval entirely on
+  the worse side, all four) and whose frames 31 to 89 are not worse (interval not entirely below zero), the largest mean
+  first-second gain; among those within 0.05 dB of it, the fewest frames that show the simulator's look (N + M), then
+  the smaller N. None: the hand-off stops at validation.
+- **Kept if, on the test** (run once, the chosen configuration against none): the first second improves with an interval
+  above zero, frames 31 to 89 are not worse, and none of the four endless statistics is worse. The test also checks that
+  `nvfx_instance_set_handoff` gives the very bytes that were scored.
+- **Cost:** thread CPU time per frame during the first second, with and without the hand-off, through `nvfx_render` at
+  64, 128 and 256 px, least of 15 (`i2-cost`); the simulator's look drawn alone.
+
+### 10.7 Validation and the choice
+
+(Not run yet.) Before the design was committed, the validation step ran once in its quick mode (one seed per setting,
+two plain runs, a 3 s endless play) on two checkpoints, as a check of the code: sA after 100 iterations and a round-1
+fire candidate. It changed nothing above; those numbers are not used.

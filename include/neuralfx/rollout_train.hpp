@@ -93,6 +93,14 @@ struct ForcingSpec {
 // to `last`), durations, places and amplitudes, covering what the fireball scene does (docs/COMPOSE.md §9).
 // Deterministic for a seed.
 ForcingSpec random_forcing(sim::Effect e, int frames, std::uint64_t seed, int first, int last);
+// Strong pushes as scenes give them (study I round 2, docs/COMPOSE.md §10), made of the same events: always a gale (a
+// broad push that varies slowly across the domain and drifts like gusts, mostly sideways, for 2 to 5 s; fire up to
+// 0.6 cells of the 32-cell grid per frame, smoke 0.4), often a vortex ring rolling through (two opposite vortices
+// travelling together; up to 0.7, as the wall of examples/scenes/firewall.nvfxs feels), sometimes a
+// short blast (a broad gust, as the fireball's shock on the wreck) and material leaving through the top (the
+// fireball's transfer to the sky). The gale starts between `first` and `first + 10`, the rest by `last`.
+// Deterministic for a seed.
+ForcingSpec scene_forcing(sim::Effect e, int frames, std::uint64_t seed, int first, int last);
 
 // The spec's fields at a state index on an n x n solver grid (rows from the bottom), in solver units: push and force
 // in solver cells per second, multipliers, heat and soot. Fields that are not used are left at their neutral value.
@@ -133,6 +141,13 @@ struct StepperOptions {
   // window is taken from them with probability `coupled_share`. plain_runs < 0: every run is equally likely (as before).
   int plain_runs = -1;
   float coupled_share = 0.f;
+  // Round 2 (docs/COMPOSE.md §10): a window from a plain run that starts at a true state (no burn-in) adds
+  // anchor * (the first step's squared difference from anchor_model's first step on the same input), in the loss's
+  // channel units, so plain one-step predictions stay close to the model fine-tuning started from; and with
+  // aim_couplings a window from a forced run is placed so that a coupling acts inside it (up to 16 tries).
+  const Model* anchor_model = nullptr;
+  float anchor = 0.f;
+  bool aim_couplings = false;
   int checkpoint_every = 0;                    // call checkpoint(iterations done) this often (0: never)
   int stop_after = 0;                          // stop after this many iterations, on the full schedule (0: run it all)
   std::function<void(int done)> checkpoint;
@@ -209,8 +224,13 @@ struct FinishResult {
 };
 FinishResult finish_model(Model& m, const SimRecipe& r, std::span<const Run> runs);
 
-// Exposed for tests: the loss of one window and its gradient (added to grad, which has step_layout size).
+// Exposed for tests: the loss of one window and its gradient (added to grad, which has step_layout size). With an
+// anchor model and weight (StepperOptions::anchor) and no burn-in, the first step's difference from the anchor's is
+// added.
 double window_loss(const Model& m, const Run& run, int first, int unroll, int burn, float sigma, float profile,
-                   std::uint64_t noise_seed, std::vector<float>* grad, float activity = 0.f);
+                   std::uint64_t noise_seed, std::vector<float>* grad, float activity = 0.f, const Model* anchor = nullptr,
+                   float anchor_weight = 0.f);
+// Whether the steps of a window (states first + 1 .. first + unroll after `first`) include a coupling of a forced run.
+bool window_has_coupling(const Run& run, int first, int unroll);
 
 }  // namespace nfx::rollout

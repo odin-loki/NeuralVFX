@@ -1101,7 +1101,7 @@ void step_report(const Ctx& c) {
 int main(int argc, char** argv) try {
   const tools::Args a(argc, argv, {"quick", "help"});
   if (a.flag("help") || a.positional().empty()) {
-    std::println("nvfx_experiment data|a|b|c|media|timing|report|all|d|d-chaos|d-train|d-tune|d-finish|d-eval|d-timing|g-data|g-pilot|g-search|g-eval|g-timing|g-fine|g-diff|g-diff-test|g-prior|g-prior-test|i-data|i-probe|i-train|i-val|i-test [--root DIR] [--results DIR] [--threads 4] [--quick]");
+    std::println("nvfx_experiment data|a|b|c|media|timing|report|all|d|d-chaos|d-train|d-tune|d-finish|d-eval|d-timing|g-data|g-pilot|g-search|g-eval|g-timing|g-fine|g-diff|g-diff-test|g-prior|g-prior-test|i-data|i-probe|i-train|i-val|i-test|i2-data|i2-probe|i2-train|i2-val|i2-test|i2-handoff|i2-cost [--root DIR] [--results DIR] [--threads 4] [--quick]");
     return 0;
   }
   Ctx c;
@@ -1175,6 +1175,21 @@ int main(int argc, char** argv) try {
     if (step == "i-train") study_i::step_train(ic);
     if (step == "i-val") study_i::step_val(ic);
     if (step == "i-test") study_i::step_test(ic);
+    // round 2 (docs/COMPOSE.md §10)
+    ic.data2 = (a.has("root") ? fs::path(a.str("root")) : data_root()) / "i2";
+    if (c.quick) ic.data2 /= "quick";
+    ic.v2 = a.has("v2") ? fs::path(a.str("v2")) : data_root() / "v2" / "models";
+    ic.anchor = a.f("anchor", 0.f);
+    ic.aim = a.i("aim", 0) != 0;
+    ic.strong = a.i("strong", 1) != 0;
+    ic.split = a.has("split") ? a.str("split") : std::string("val");
+    if (step == "i2-data") study_i::step_data2(ic);
+    if (step == "i2-probe") study_i::step_probe2(ic);
+    if (step == "i2-train") study_i::step_train2(ic);
+    if (step == "i2-val") study_i::step_val2(ic);
+    if (step == "i2-test") study_i::step_test2(ic);
+    if (step == "i2-handoff") study_i::step_handoff(ic);
+    if (step == "i2-cost") study_i::step_cost2(ic);
   }
   if (step == "report" || step == "all") step_report(c);
   std::println("{} finished in {:.1f} min", step, std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count() / 60.0);
