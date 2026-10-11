@@ -1,14 +1,24 @@
 # Lossless packing of effect files: context mixing, and flipbooks coded the same way
 
 Status: **results** (9 October 2026; study F2, training for fewer bits and for the coder, against video codecs too,
-added 10 October 2026 [below](#study-f2-compression-pushed-further-10-october-2026); study F3, sparse features and
-flipbooks without their empty space, added 11 October 2026
-[at the end](#study-f3-sparse-features-and-flipbooks-without-their-empty-space-11-october-2026)). Audience: owner, research,
-dev. Data: [cm.csv](cm.csv) (every file, flipbook and part) and [cm_equal_quality.csv](cm_equal_quality.csv). Code:
+added 10 October 2026 [below](#study-f2-compression-pushed-further-10-october-2026); flipbooks in BC7 and ASTC, with
+every ratio against them, added 11 October 2026
+[below](#flipbooks-in-production-formats-bc7-and-astc-11-october-2026); study F3, sparse features and flipbooks
+without their empty space, added 11 October 2026
+[at the end](#study-f3-sparse-features-and-flipbooks-without-their-empty-space-11-october-2026)). Ratios in the older
+sections are against our own BC3-layout encoder and raw RGBA, as first measured. Audience: owner, research, dev. Data:
+[cm.csv](cm.csv) (every file, flipbook and part) and [cm_equal_quality.csv](cm_equal_quality.csv). Code:
 `include/neuralfx/cm.hpp`, `src/core/cm.cpp`, `tools/nvfx_pack.cpp`.
 
 ## Bottom line
 
+- **With production flipbooks (BC7, ASTC; [below](#flipbooks-in-production-formats-bc7-and-astc-11-october-2026)) every
+  ratio falls.** Memory at 8 bits: 2.4 to 4.3 times against BC7, 1.0 to 1.9 times against every format (first
+  measured: 3.6 to 5.9 times). Disk, both sides packed: 8-bit networks tie or lose against packed ASTC flipbooks (0.4
+  to 0.9x); trained for 4 bits with a rate term they keep 2.2x [1.7, 3.2] (4.5x against BC7). Study F3's sparse
+  features reach 13.8x against BC7 and 4.7x against every format, 2.2x when the flipbooks keep only their non-empty
+  blocks ([F3](#study-f3-sparse-features-and-flipbooks-without-their-empty-space-11-october-2026)). The bullets below
+  are against our BC3-layout encoder and raw, as first measured.
 - **The network files shrink by 1.2 to 1.7 times (frame models) and 1.8 to 4.9 times (rollout effects), losslessly.**
   zlib -9 manages 1.07 to 1.23 times on the frame models and 1.3 to 2.6 times on the rollout effects.
 - **Flipbooks shrink far more: 2.9 to 6.9 times in BC3 layout and 6.9 to 12.9 times as raw RGBA** (zlib -9: 2.5 to
@@ -30,6 +40,96 @@ dev. Data: [cm.csv](cm.csv) (every file, flipbook and part) and [cm_equal_qualit
   8.3 to 8.5 times less memory), but video codecs (AV1) still need 2.8 times less disk than the networks.
 - **A correction to the report**: the equal-quality ratio of conv_s is **4.9x, not 7.4x**. The report's envelope
   interpolated between two flipbooks of the same size (512 KB); see "Equal quality" below. The other ratios reproduce.
+
+## Flipbooks in production formats: BC7 and ASTC (11 October 2026)
+
+The flipbook baselines of studies A, F and F2 first used our own BC3-layout encoder and raw RGBA8. They now also come in
+production block formats, from open-source encoders fetched at build time ([docs/DATA.md](../../docs/DATA.md) §5):
+
+- **BC7** by bc7e (Binomial's encoder, all eight modes; its plain C++ port in Basis Universal) at its "veryslow" level,
+  decoded by bc7enc_rdo's reference decoder; 8 bits per pixel.
+- **ASTC** (LDR) at 4x4, 5x5, 6x6, 8x8, 10x10 and 12x12 blocks by Arm's astc-encoder at its "thorough" preset, decoded
+  by the same library to 8 bits per channel; 8, 5.12, 3.56, 2, 1.28 and 0.89 bits per pixel (a frame that is not a
+  whole number of blocks is padded to one, and memory counts the whole blocks).
+- Both minimise plain RGBA error, the error the studies score. The same frame counts and resolutions as the BC3 rows,
+  with and without motion vectors: 21 configurations per format, 147 in all, beside the original 31 (whose rows are
+  unchanged to the byte). Scored exactly as study A scores; packed by the same coder, 16-byte blocks of every format as
+  its block kind (its contexts of the same byte in the neighbouring blocks suit any format; its endpoint contexts were
+  written for BC3).
+- Data: the new rows of [f2_flipbooks_test.csv](f2_flipbooks_test.csv), [f2_flipbooks_val.csv](f2_flipbooks_val.csv),
+  [cm.csv](cm.csv) and `results/experiments/a_scores.csv` (the same scores in all three). Ratios:
+  [f2_equal_quality_test.csv](f2_equal_quality_test.csv) (baseline `flipbook` = every format, `flipbook_bc7` = with
+  BC7, `flipbook_bc3layout` = the original) and [cm_equal_quality.csv](cm_equal_quality.csv) (column `baseline`).
+
+**What the formats store**, every frame at 128 px (means over the 12 test clips):
+
+| flipbook, 64 frames at 128 px | KB in memory | bits per pixel | active PSNR | packed KB | packed ratio |
+|---|---:|---:|---:|---:|---:|
+| BC3 layout (our encoder) | 1024 | 8 | 34.48 | 148.2 | 6.91x |
+| BC7 | 1024 | 8 | 41.23 | 210.8 | 4.86x |
+| ASTC 4x4 | 1024 | 8 | 43.22 | 255.9 | 4.00x |
+| ASTC 5x5 | 676 | 5.12 | 39.46 | 176.0 | 3.84x |
+| ASTC 6x6 | 484 | 3.56 | 36.95 | 126.6 | 3.82x |
+| ASTC 8x8 | 256 | 2 | 33.54 | 74.0 | 3.46x |
+| ASTC 10x10 | 169 | 1.28 | 31.01 | 48.9 | 3.45x |
+| ASTC 12x12 | 121 | 0.89 | 29.37 | 34.8 | 3.47x |
+
+- **Our BC3 encoder was not the weak part; the BC3 format was.** A production BC3 encoder (rgbcx at level 18, tried on
+  every eighth frame of fire_0, smoke_0 and explosion_0 at 128 and 64 px, outside the committed study) scores 0.2 to
+  0.7 dB higher per frame than ours. BC7 scores 5.0 to 8.0 dB higher and ASTC 4x4 6.2 to 9.5 dB higher at the same 8
+  bits per pixel. On the same frames bc7e's "veryslow" level is within 0.15 dB of its slowest level (mostly above
+  it), and astc-encoder's "exhaustive" preset is 0.15 to 0.3 dB above "thorough" at 4 to 7 times the time.
+- **ASTC removes the flat stretch the ratios lived on.** Our BC3 envelope was nearly flat from 288 to 512 KB (29.3 to
+  29.9 dB), then needed 1 MB for 34.5 dB, so a network near 30 to 33 dB was compared with a 512 KB to 1 MB flipbook.
+  ASTC keeps every frame at full size in 121, 169 and 256 KB for 29.4, 31.0 and 33.5 dB.
+- **BC7 lifts the envelope by 0.1 to 1.2 dB up to 512 KB and by 6.8 dB at 1 MB**: memory ratios fall by a quarter to a
+  third.
+- **BC7 and ASTC pack worse than the BC3 layout** (1.6 to 4.9 times against 2.9 to 6.9), but they are so much better
+  per byte of memory that the best packed flipbook at a given quality is now ASTC.
+
+**Study A's networks** (12 clips; memory with 95% bootstrap intervals from `nvfx_experiment report`, packed sizes from
+`nvfx_pack --tables`, point estimates):
+
+| network (8-bit) | active PSNR | memory: BC3 layout | memory: with BC7 | memory: with BC7 and ASTC | packed: BC3 layout | packed: with BC7 | packed: with BC7 and ASTC |
+|---|---:|---|---|---|---:|---:|---:|
+| conv_s, 69 KB | 29.45 | 4.9x [4.0, 8.3] | 4.0x [3.9, 6.7] | 1.8x [1.2, 2.3] | 1.4x | 1.1x | 0.7x |
+| grid_s, 73 KB | 28.07 | 3.6x [3.4, 3.9] | 3.3x [2.7, 3.6] | 1.0x [0.8, 1.4] | 1.0x | 1.0x | 0.4x |
+| grid_m, 132 KB | 32.62 | 5.9x [4.6, 7.8] | 4.3x [3.9, 4.8] | 1.9x [1.8, 2.8] | 1.4x | 1.5x | 0.9x |
+| conv_m, 142 KB | 31.33 | 4.5x [3.8, 5.2] | 3.7x [2.2, 4.0] | 1.7x [1.1, 1.8] | 0.9x | 1.0x | 0.6x |
+| grid_mt, 260 KB | 33.76 | 3.5x [2.7, 3.9] | 2.4x [2.1, 2.6] | 1.3x [0.9, 1.6] | 0.8x | 0.8x | 0.6x |
+| grid_l, 292 KB | 36.23 | > 3.5x | 2.5x [2.3, 2.8] | 1.5x [1.3, 2.0] | > 0.8x | 0.9x | 0.7x |
+
+**Study F2's networks** (the 12 test clips; `nvfx_f2 report --set test`; memory, then disk with both sides packed):
+
+| test | active PSNR | memory: BC3 layout | memory: with BC7 | memory: with BC7 and ASTC | disk: BC3 layout | disk: with BC7 | disk: with BC7 and ASTC |
+|---|---:|---|---|---|---|---|---|
+| G32 8-bit (study A's grid_m, retrained) | 32.63 | 5.9x [4.7, 7.8] | 4.3x [3.9, 4.8] | 1.9x [1.8, 2.8] | 1.4x [1.3, 1.5] | 1.5x [1.3, 1.7] | 0.86x [0.75, 1.27] |
+| G32 6-bit QAT | 32.31 | 7.4x [5.9, 9.9] | 5.6x [4.6, 6.2] | 2.5x [1.7, 3.6] | 2.2x [2.0, 2.4] | 2.4x [2.1, 2.7] | 1.4x [1.1, 1.9] |
+| G32 5-bit QAT | 31.70 | 8.0x [6.5, 10.3] | 6.4x [4.2, 7.0] | 2.9x [1.9, 3.0] | 2.8x [2.5, 3.0] | 3.1x [2.5, 3.6] | 1.9x [1.3, 2.1] |
+| G32 4-bit QAT | 30.65 | 8.5x [4.4, 10.4] | 6.1x [4.2, 8.1] | 2.4x [1.8, 3.7] | 3.4x [2.9, 3.7] | 3.8x [2.1, 4.9] | 1.8x [1.4, 2.7] |
+| G32 4-bit QAT, 3x the steps | 31.09 | 9.1x [6.3, 11.3] | 7.5x [4.2, 8.3] | 3.6x [2.3, 3.7] | 3.8x [3.4, 4.1] | 4.4x [2.5, 5.1] | 2.8x [1.7, 3.0] |
+| G32 4-bit QAT + rate 3e-4 | 30.53 | 8.3x [4.3, 10.1] | 5.7x [4.1, 8.0] | 2.4x [1.8, 3.6] | 4.1x [2.6, 4.5] | 4.5x [2.5, 5.8] | 2.2x [1.7, 3.2] |
+| conv_s 4-bit QAT | 28.68 | 7.5x [7.2, 13.9] | 7.1x [6.9, 8.4] | 2.3x [2.0, 3.2] | 2.1x [1.8, 3.5] | 2.1x [1.8, 3.4] | 1.0x [0.7, 1.7] |
+
+At equal memory, against every format, the F2 networks are +2.8 to +3.4 dB above the flipbook envelope (against our BC3
+layout: +5.0 to +6.0 dB).
+
+- **Memory: 2.4 to 4.3 times against BC7 at 8 bits, at best 7.5x [4.2, 8.3] at 4 bits; against every format 1.0 to
+  1.9 times at 8 bits, at best 3.6x [2.3, 3.7].** The first figures (3.6 to 5.9 times, 9.1x) stand as measured
+  against our BC3 layout.
+- **Disk: against BC7 alone the ratios barely move** (8 bits 1.4x to 1.5x; 4 bits with the rate term 4.1x to 4.5x): BC7
+  packs worse than BC3, and a real BC7 point replaces part of the line the old envelope interpolated (log-linear
+  interpolation between sparse points is optimistic for the flipbooks). **Against ASTC the 8-bit networks tie or lose
+  on disk** (grid_m 0.86x [0.75, 1.27]; study A's others 0.4x to 0.7x) and the best low-bit network keeps 2.2x to 2.8x.
+- **On validation the best bit depth for memory is no longer 4 bits**: against every format 5 bits (2.9x [1.1, 3.1]
+  against 2.2x [1.2, 3.6] at 4 bits), against BC7 6 bits (5.2x [2.8, 5.8] against 4.2x [4.0, 7.7]). The intervals
+  overlap widely; the choice of 4 bits was made against our BC3 layout.
+- **What active PSNR does not see**: flipbooks of every frame flicker a little more than the reference (flicker ratios
+  1.15 to 1.36 for ASTC 8x8 to 12x12, 1.23 for BC3; the networks 0.6 to 1.0). Their sharpness is similar (spectrum
+  distance 0.10 for grid_m, 0.06 to 0.10 for those ASTC flipbooks).
+- **Not done**: rate-optimised block encoding for disk (bc7enc_rdo's RDO BC7 and its entropy-reduction transform,
+  ASTC with rate-distortion tuning, supercompressed KTX2) and a coder whose block contexts know BC7's and ASTC's bit
+  fields. Packed BC7 and ASTC sizes here are upper bounds, so the disk ratios against them flatter the networks.
 
 ## Format 2: faster decoding (study H)
 
@@ -142,7 +242,7 @@ What compresses and what does not:
 The study A flipbook ladder for the 12 study A clips, encoded by `src/core/flipbook.cpp` exactly as the study stored
 them: BC3-layout blocks as a tensor [frame][block row][block column][16 bytes], raw RGBA as [frame][y][x][4], motion
 vectors as [frame][y][x][2] (quarter pixels, 8 bits). Means over the 12 clips; the full ladder (31 configurations) is in
-cm.csv.
+cm.csv, with the 147 BC7 and ASTC configurations added later (see above).
 
 | flipbook | KB in memory | packed KB | ratio | zlib -9 KB | zlib ratio |
 |---|---:|---:|---:|---:|---:|
@@ -169,6 +269,8 @@ For each study A network, the flipbook size that reaches the same mean active PS
 best-flipbook envelope (the best quality at or below each size, log-linear between sizes), as in the report; then the
 same with every flipbook and every network packed by this coder, and with zlib -9. Network sizes are the means of the
 saved files (grid_m 8-bit: 12 clips; the others: clip 0 of each effect). Ratio = flipbook size / network size.
+Against our BC3 layout and raw, as first measured; with BC7 and ASTC in the envelope, see the section on production
+formats above (`nvfx_pack --tables` prints one table per baseline).
 
 | network | active PSNR | in memory: network / flipbook KB, ratio | packed: network / flipbook KB, ratio | zlib -9: network / flipbook KB, ratio |
 |---|---:|---|---|---|
@@ -239,7 +341,8 @@ cm.csv were measured while other jobs shared the machine and spread wider (0.17 
 
 ```sh
 build/nvfx_pack --study --data $NEURALVFX_DATA/experiments   # about 25 minutes, one core: cm.csv, cm_equal_quality.csv, tables
-build/nvfx_pack --tables                                     # the tables again from cm.csv
+build/nvfx_pack --study --flipbooks-only --threads 2         # only the flipbooks cm.csv lacks (BC7, ASTC): 19 min, 2 threads
+build/nvfx_pack --tables                                     # the tables again from cm.csv (one per flipbook baseline)
 build/nvfx_pack --report $NEURALVFX_DATA/experiments/models  # any folder of .nvfx files
 build/nvfx_pack in.nvfx out.nvfz && build/nvfx_pack --unpack out.nvfz back.nvfx
 ```
@@ -256,6 +359,13 @@ twins), [f2_equal_quality_test.csv](f2_equal_quality_test.csv) (every ratio with
 `.nvfx` format, the coder and the runtime (below).
 
 ### Bottom line
+
+Since 11 October 2026 the flipbooks include BC7 and ASTC
+([above](#flipbooks-in-production-formats-bc7-and-astc-11-october-2026)). Against them the memory ratios below fall to
+**at best 7.5x [4.2, 8.3] against BC7 and 3.6x [2.3, 3.7] against every format** (4-bit, three times the steps), and
+the disk ratio of the rate-trained network to 2.2x [1.7, 3.2] against every format. The figures in this section are
+against our BC3-layout encoder and raw, as first measured; the tables keep them and add the new ones where they matter.
+The figure's flipbook line is the new envelope (every format); the dashed line is the old one.
 
 - **Memory: at best 9.1x [6.3, 11.3] at equal quality; "far better than 10x" is not reached.** Trained for 4-bit
   features (kept bit-packed by the runtime), study A's grid_m holds 67.5 KB instead of 131.5 KB; with the usual 2,000
@@ -282,7 +392,7 @@ twins), [f2_equal_quality_test.csv](f2_equal_quality_test.csv) (every ratio with
   them on disk (44.5 to 20.6 KB, 55.7 to 25.4 KB packed); smoke fails by one tiny coverage difference and keeps fp16
   starts. Dithering with the seed's noise and fewer start points failed on validation.
 
-![Study F2 on the 12 test clips: mean active PSNR against KB. Left, memory: the best flipbook at each size and the networks as stored. Right, disk: the best packed flipbook, three video codecs and the networks packed by the lossless coder](f2_rate_quality.svg)
+![Study F2 on the 12 test clips: mean active PSNR against KB. Left, memory: the best flipbook of any format at each size (dashed: our BC3 layout and raw only) and the networks as stored. Right, disk: the best packed flipbook, three video codecs and the networks packed by the lossless coder](f2_rate_quality.svg)
 
 ### What was built
 
@@ -330,7 +440,9 @@ twins), [f2_equal_quality_test.csv](f2_equal_quality_test.csv) (every ratio with
   network and baselines resampled together, so it is paired). The envelope has steps (288 to 512 KB is almost flat,
   then the 1 MB flipbook is 4.6 dB better), so a few tenths of a dB can move a ratio a lot and the interval can sit
   off-centre. The quality difference at the network's own size (dB, paired interval) is the steadier number and is
-  given next to the ratios.
+  given next to the ratios. (These steps are our BC3 layout's. With BC7 and ASTC, added on 11 October 2026, the
+  report gives every ratio against three envelopes: the original, with BC7, and with BC7 and ASTC; its unqualified
+  columns and the `flipbook` rows of `f2_equal_quality_*.csv` are now against every format.)
 - **Bytes.** *Memory*: what playback holds: the flipbook texture; the network as stored (features at their bits,
   other weights fp16). *Resident*: what the runtime really keeps (the small MLP widened to floats; +3.5 KB).
   *Working memory* per playing instance is separate and the same for every grid model (44 KB at 128 px). *Disk*:
@@ -343,7 +455,7 @@ twins), [f2_equal_quality_test.csv](f2_equal_quality_test.csv) (every ratio with
 Quantisation-aware training of study A's grid_m (G32 C8 H32 L2, 16 time slices, 2,000 steps), features at fewer
 bits. **Test clips** (study A's 12), the configurations fixed on validation:
 
-| test (12 clips) | active PSNR | memory KB (resident) | packed KB | memory vs flipbooks | dB over flipbooks at equal memory | disk vs packed flipbooks | disk vs AV1 (libaom) | disk vs best codec |
+| test (12 clips) | active PSNR | memory KB (resident) | packed KB | memory vs flipbooks (BC3 layout) | dB over flipbooks (BC3 layout) at equal memory | disk vs packed flipbooks (BC3 layout) | disk vs AV1 (libaom) | disk vs best codec |
 |---|---:|---:|---:|---|---|---|---|---|
 | G32 8-bit (study A's grid_m, retrained) | 32.63 | 131.5 (135.0) | 85.0 | 5.9x [4.7, 7.8] | +5.94 [+5.00, +7.01] | 1.4x [1.3, 1.5] | 0.13x [0.11, 0.14] | 0.13x [0.11, 0.14] |
 | G32 6-bit QAT | 32.31 | 99.5 (103.0) | 52.8 | 7.4x [5.9, 9.9] | +5.62 [+4.73, +6.64] | 2.2x [2.0, 2.4] | 0.20x [0.17, 0.22] | 0.20x [0.17, 0.22] |
@@ -360,7 +472,7 @@ the dB column is steadier. conv_s at 4 bits (37 KB) reaches 28.68 dB against stu
 
 On validation (6 clips; every option tried):
 
-| validation, G32 | active PSNR | change | stored KB | packed KB | memory ratio | disk ratio |
+| validation, G32 | active PSNR | change | stored KB | packed KB | memory ratio (BC3 layout) | disk ratio (BC3 layout) |
 |---|---:|---:|---:|---:|---|---|
 | 8-bit (study A's procedure) | 32.09 | | 131.5 | 83.8 | 5.4x [2.2, 7.8] | 1.2x [0.7, 1.5] |
 | 6-bit QAT | 31.75 | -0.34 | 99.5 | 51.5 | 6.8x [2.9, 10.3] | 1.9x [1.0, 2.3] |
@@ -388,7 +500,7 @@ On validation (6 clips; every option tried):
 The rate term (estimated bits per feature value under the coder's own causal predictors) was calibrated on two
 validation clips at 4 bits, then compared on all six:
 
-| validation, G32 4-bit QAT | active PSNR | stored KB | packed KB | memory ratio | disk ratio (packed vs packed flipbooks) |
+| validation, G32 4-bit QAT | active PSNR | stored KB | packed KB | memory ratio (BC3 layout) | disk ratio (packed vs packed BC3-layout flipbooks) |
 |---|---:|---:|---:|---|---|
 | no rate term | 30.22 | 67.5 | 26.5 | 7.7x [4.1, 10.4] | 3.0x [1.7, 3.4] |
 | lambda 3e-4 | 30.12 | 67.5 | 21.6 | 6.5x [4.1, 10.0] | **3.6x [2.1, 4.2]** |
@@ -413,7 +525,7 @@ stays 8.3x [4.3, 10.1].
 
 On validation, at about the same memory as 3-bit G32 features:
 
-| validation | active PSNR | stored KB | packed KB | memory ratio | dB over the flipbooks at equal memory |
+| validation | active PSNR | stored KB | packed KB | memory ratio (BC3 layout) | dB over the BC3-layout flipbooks at equal memory |
 |---|---:|---:|---:|---|---|
 | G32 C8 T16, 4-bit | 30.22 | 67.5 | 26.5 | 7.7x [4.1, 10.4] | +5.22 [+4.49, +5.90] |
 | G32 C8 T16, 3-bit | 28.68 | 51.5 | 18.5 | 5.3x [5.1, 10.0] | +5.27 [+4.23, +6.15] |
@@ -546,22 +658,25 @@ core of the shared machine (load average 7.45): **provisional**, to be measured 
   Meanwhile the best-flipbook envelope is nearly flat from 288 to 512 KB (29.3 to 29.9 dB on the test clips) and then
   needs the full 1 MB flipbook for 34.5 dB: a network near 30 dB is compared with about 512 KB, one near 33 dB with
   about 800 KB. To pass 10x a network would need about 31.5 dB in 65 KB, or 34.5 dB in 100 KB. The best one here
-  holds 31.09 dB in 67.5 KB.
+  holds 31.09 dB in 67.5 KB. That flat stretch belonged to our BC3 layout: ASTC flipbooks of every frame give 29.4,
+  31.0 and 33.5 dB in 121, 169 and 256 KB, so against every format a network near 31 dB is compared with about
+  170 to 250 KB, and 10x would need about 31 dB in 17 KB.
 - **Disk: the video codecs.** AV1 needs 7.9 KB for 30.5 dB. The best network on disk (4-bit with the rate term)
   needs 22.3 KB for 30.5 dB: its 131,072 feature values cost about 1.2 bits each after the lossless coder (0.17 bits
   per pixel of the clip), while AV1 spends 0.06 bits per pixel through motion-compensated prediction and transforms
   tuned for decades. To match AV1 the features would have to cost about 0.3 bit each (with the weights as they
   are), and the rate term's estimate stopped tracking the coder well before that.
 - **What the networks keep**: memory while playing (a few tens of KB, against megabytes for a decoder or decoded
-  frames), random access to any frame, no decoder, controls and variation (studies B and C), and on disk they now
-  beat packed flipbooks by 4x.
+  frames), random access to any frame, no decoder, controls and variation (studies B and C), and on disk the
+  rate-trained 4-bit network beats packed flipbooks by 4.1x against our BC3 layout and 2.2x against every format.
 
 ### Reproduce
 
 ```sh
 export NEURALVFX_DATA=/root/nvfx-data          # study A's clips under experiments/clips/a, study D's effects under experiments/models/d
 build/nvfx_f2 data                              # the 6 validation clips
-build/nvfx_f2 flipbooks --set val; build/nvfx_f2 flipbooks --set test        # 25 min per set, one core
+build/nvfx_f2 flipbooks --set val; build/nvfx_f2 flipbooks --set test        # 25 min per set, one core (BC3, raw)
+build/nvfx_f2 flipbooks --set test --threads 2  # BC7 and ASTC rows (encoders built): 41 min; val 20 min, 2 threads
 build/nvfx_f2 video --set val;     build/nvfx_f2 video --set test            # 1 and 2.5 hours, one core
 build/nvfx_f2 train --set val --threads 1 --configs g32c8h32l2t16_b8,g32c8h32l2t16_b4_q,...   # about 1 to 1.5 min per clip
 build/nvfx_f2 train --set test --threads 1 --configs g32c8h32l2t16_b8,g32c8h32l2t16_b6_q,g32c8h32l2t16_b5_q,g32c8h32l2t16_b4_q,g32c8h32l2t16_b4_q_r3e-4,g32c8h32l2t16_b4_q_i6000,v16.8.8t16_b4_q
@@ -601,17 +716,22 @@ flipbook baseline and each video codec; `val` twins), the figure [f3_rate_qualit
   **6.7x [4.7, 8.1]** (dense: 3.6x). A flipbook's 4 x 4 blocks are finer than the network's grid (each grid point
   feeds an 8 x 8 pixel area), so empty space helps flipbooks more than networks.
 - **So: far better than 10x against flipbooks that store their empty space; about 10x against trimmed flipbooks; not
-  against flipbooks that skip empty blocks.** BC7 and ASTC flipbooks (another study) will lower each of these.
+  against flipbooks that skip empty blocks.** These are against our BC3-layout encoder and raw.
+- **With production flipbooks (BC7 and ASTC, [above](#flipbooks-in-production-formats-bc7-and-astc-11-october-2026))
+  each falls.** Against BC7: **13.8x [7.9, 16.6]** as stored, **8.8x [5.1, 11.3]** trimmed, **5.6x [3.4, 7.3]**
+  block-sparse. Against every format, with ASTC: **4.7x [3.3, 7.7], 3.1x [2.4, 4.4] and 2.2x [1.6, 2.8]**. 10x holds
+  only against BC7 flipbooks that store their empty space. Table [below](#against-bc7-and-astc).
 - **Disk: the rate term with 6,000 steps** (the combination F2 did not run) gains 0.62 dB [+0.50, +0.74] over F2's
   rate run at the same packed size, 22.6 KB at 31.14 dB: **4.4x [3.4, 4.8]** less disk than packed flipbooks (F2's best:
-  4.1x). AV1 still needs 2.6 times less (0.39x [0.35, 0.43]). Sparse features save memory, not disk (-1.1 KB packed).
+  4.1x); 5.1x [2.7, 5.9] against packed BC7 and 2.2x [1.8, 2.9] against every format. AV1 still needs 2.6 times
+  less (0.39x [0.35, 0.43]). Sparse features save memory, not disk (-1.1 KB packed).
 - **Null results** (validation): mixed precision per plane (bits allocated by measured distortion): -0.17 dB
   [-0.23, -0.10] at the same bytes; distillation from the 8-bit network: -0.04 dB [-0.10, +0.01] at alpha 0.5,
   -0.30 dB [-0.41, -0.20] at alpha 1; more capacity at 3 bits, at about the bytes of G32 at 4 bits: G36 -1.06 dB
   [-1.25, -0.84], ten channels -0.97 dB [-1.22, -0.69]; 5 bits on the sparse grid: +0.99 dB for 7.3 KB, a lower ratio
   than 4 bits; a larger sparse grid (G40 at 4 bits): +0.92 dB for 15.5 KB, also a lower ratio.
 
-![Study F3 on the 12 test clips: mean active PSNR against KB. Left, memory: the best flipbook at each size as stored and trimmed to its content, and the networks. Right, disk: packed flipbooks, three video codecs and the networks packed](f3_rate_quality.svg)
+![Study F3 on the 12 test clips: mean active PSNR against KB. Left, memory: the best flipbook of any format (BC3 layout, raw, BC7, ASTC) at each size as stored (dashed: BC3 layout and raw only) and trimmed to its content, and the networks. Right, disk: packed flipbooks, three video codecs and the networks packed](f3_rate_quality.svg)
 
 ### What was built
 
@@ -661,6 +781,9 @@ clips (10,000 resamples). Two changes:
 
 ### Test clips
 
+Against our BC3-layout encoder and raw, as first measured (the `flipbook_bc3layout` rows of the F3 tables); with BC7
+and ASTC [below](#against-bc7-and-astc).
+
 | test | active PSNR | memory KB (resident) | packed KB | memory vs flipbooks as stored | vs trimmed flipbooks | vs block-sparse flipbooks | dB over stored flipbooks at equal memory | disk vs packed flipbooks |
 |---|---:|---:|---:|---|---|---|---|---|
 | G32 8-bit (F2) | 32.63 | 131.5 (135.0) | 85.0 | 5.9x [4.6, 7.8] (4% censored) | 3.7x [3.0, 4.8] (4% censored) | 2.3x [1.9, 2.8] (4% censored) | +5.51 [+4.54, +6.65] | 1.4x [1.3, 1.5] (4% censored) |
@@ -709,6 +832,53 @@ On disk against the video codecs (network packed by the lossless coder, codec pa
   for free, and masked planes lose its plane-above context. The rate term is the disk lever: with 6,000 steps it costs
   no quality (+0.05 dB [-0.06, +0.17] against 6,000 steps without it) and removes 3.6 KB. Sparse features and the rate
   term were not combined (the rate estimate's predictors do not match how the coder codes masked planes).
+
+### Against BC7 and ASTC
+
+The same test networks against the ladder in every format (BC3 layout, raw, BC7, ASTC 4x4 to 12x12; `nvfx_f2 trim`
+made the trimmed and block-sparse variants of the 147 BC7 and ASTC configurations too, ASTC at its own block size).
+Memory at equal mean active PSNR, Pareto envelopes, 95% bootstrap intervals over the 12 test clips; the first column
+of each baseline is the table above:
+
+| test | as stored: BC3 layout | with BC7 | with BC7 and ASTC | trimmed: BC3 layout | with BC7 | with BC7 and ASTC | block-sparse: BC3 layout | with BC7 | with BC7 and ASTC |
+|---|---|---|---|---|---|---|---|---|---|
+| G32 8-bit (F2) | 5.9x [4.6, 7.8] | 4.3x [3.9, 4.8] | 1.7x [1.3, 2.3] | 3.7x [3.0, 4.8] | 3.4x [2.3, 4.5] | 1.1x [0.9, 1.4] | 2.3x [1.9, 2.8] | 2.1x [1.6, 2.8] | 0.76x [0.65, 0.91] |
+| G32 4-bit QAT (F2) | 8.5x [4.4, 10.3] | 6.1x [4.2, 8.1] | 2.3x [1.7, 3.6] | 5.4x [2.9, 6.8] | 3.9x [2.5, 5.8] | 1.6x [1.2, 2.1] | 3.4x [1.9, 4.1] | 3.0x [1.6, 3.8] | 1.1x [0.8, 1.4] |
+| G32 4-bit, 6,000 steps (F2) | 9.1x [6.2, 11.2] | 7.5x [4.2, 8.3] | 2.5x [1.9, 3.7] | 5.8x [3.9, 7.2] | 4.8x [2.7, 6.3] | 1.7x [1.3, 2.3] | 3.6x [2.5, 4.4] | 3.0x [1.8, 4.0] | 1.2x [0.9, 1.4] |
+| G32 4-bit + rate 3e-4, 6,000 steps | 9.1x [6.3, 11.3] | 7.6x [4.2, 8.3] | 2.6x [1.9, 3.7] | 5.8x [4.0, 7.4] | 4.9x [2.7, 6.3] | 1.7x [1.4, 2.3] | 3.6x [2.6, 4.4] | 3.0x [1.8, 4.0] | 1.2x [0.9, 1.4] |
+| conv_s 4-bit (F2) | 7.5x [7.2, 13.9] | 7.1x [6.9, 8.2] | 2.3x [1.7, 3.2] | 4.8x [4.1, 9.1] | 4.7x [4.0, 5.6] | 1.6x [1.2, 2.1] | 3.2x [2.7, 5.8] | 3.2x [2.7, 4.3] | 1.1x [0.8, 1.6] |
+| **G32 4-bit sparse** | 15.7x [8.4, 20.8] | 11.3x [7.6, 15.8] | 4.3x [3.0, 7.5] | 10.0x [5.5, 13.0] | 7.2x [4.9, 10.3] | 2.9x [2.2, 4.3] | 6.3x [3.5, 7.5] | 5.6x [3.3, 6.6] | 2.0x [1.5, 2.7] |
+| **G32 4-bit sparse, 6,000 steps** | 16.8x [11.2, 22.7] | 13.8x [7.9, 16.6] | 4.7x [3.3, 7.7] | 10.7x [7.3, 14.3] | 8.8x [5.1, 11.3] | 3.1x [2.4, 4.4] | 6.7x [4.7, 8.1] | 5.6x [3.4, 7.3] | 2.2x [1.6, 2.8] |
+| **G32 4-bit sparse, 12,000 steps** | 17.1x [12.3, 23.4] | 14.2x [8.1, 16.7] | 4.8x [3.4, 7.7] | 10.9x [8.1, 14.7] | 9.1x [5.3, 11.7] | 3.2x [2.4, 4.5] | 6.8x [5.1, 8.3] | 5.7x [3.4, 7.5] | 2.2x [1.7, 2.9] |
+
+Disk (both sides packed; trimming and dropping blocks leave the packed sizes as they are, so one column per set of
+formats):
+
+| test, disk | packed KB | BC3 layout | with BC7 | with BC7 and ASTC |
+|---|---:|---|---|---|
+| G32 8-bit (F2) | 85.0 | 1.4x [1.3, 1.5] | 1.5x [1.3, 1.7] | 0.75x [0.65, 0.89] |
+| G32 4-bit, 6,000 steps (F2) | 26.1 | 3.8x [2.9, 4.1] | 4.4x [2.4, 5.1] | 1.9x [1.5, 2.6] |
+| G32 4-bit + rate 3e-4, 6,000 steps | 22.6 | 4.4x [3.4, 4.8] | 5.1x [2.7, 5.9] | 2.2x [1.8, 2.9] |
+| G32 4-bit sparse, 6,000 steps | 25.1 | 3.9x [3.0, 4.4] | 4.5x [2.4, 5.3] | 2.0x [1.5, 2.7] |
+| G32 4-bit sparse, 12,000 steps | 25.0 | 4.0x [3.3, 4.4] | 4.6x [2.6, 5.3] | 2.0x [1.6, 2.8] |
+
+- **The sparse network keeps 10x only against BC7 flipbooks as stored** (13.8x [7.9, 16.6]); trimmed BC7 flipbooks
+  bring it to 8.8x (interval 5.1 to 11.3), block-sparse ones to 5.6x.
+- **Against every format: 4.7x, 3.1x and 2.2x.** The dense networks fall to 1.1 to 1.7x against trimmed flipbooks, and
+  against block-sparse ones they tie (4 bits, 1.1 to 1.2x, intervals covering 1) or lose (8 bits, 0.76x).
+- **The steadier number**, the quality difference at the network's own size against every format (sparse, 6,000
+  steps): +4.52 dB [+3.77, +5.58] against flipbooks as stored, +3.78 [+2.98, +4.75] trimmed, +2.65 [+1.50, +4.04]
+  block-sparse (against our BC3 layout: +8.26 as stored).
+- **ASTC's empty blocks are larger**: kept as non-empty blocks, an ASTC 8x8 or 12x12 flipbook of every frame keeps
+  45 to 47% of its blocks, a BC3 or BC7 one 40% (4 x 4 blocks). Trimming keeps 64 to 67% of each.
+- **Pareto envelopes** lower some ratios against every format, because ASTC's steps leave dominated flipbooks behind
+  (dense 4-bit, 6,000 steps: 2.5x here, 3.6x with F2's envelope; the 8-bit network 1.7x and 1.9x). Against our BC3
+  layout they change no point estimate here.
+- Data: the new rows of [f3_flipbooks_trim_test.csv](f3_flipbooks_trim_test.csv) and
+  [f3_flipbooks_sparse_test.csv](f3_flipbooks_sparse_test.csv), ratios in
+  [f3_equal_quality_test.csv](f3_equal_quality_test.csv), `_trim` and `_sparse` (baselines `flipbook` = every format,
+  `flipbook_bc7`, `flipbook_bc3layout`). The validation tables were not re-run (no choice depends on them here): their
+  trimmed and block-sparse ladders are BC3 layout and raw.
 
 ### Validation clips
 
@@ -781,6 +951,9 @@ Paired over the 6 validation clips (`nvfx_f2 pairs`):
 - **Against block-sparse flipbooks: 6.7x [4.7, 8.1].** With empty space removed on both sides, the networks are back
   below F2's dense-against-stored 9.1x: flipbook blocks are 4 x 4 pixels, while a network grid point (4 pixels apart)
   feeds an 8 x 8 pixel area, so the flipbook drops more.
+- **With BC7 and ASTC in the ladder** ([above](#against-bc7-and-astc)): against BC7 as stored 13.8x, trimmed 8.8x
+  [5.1, 11.3], block-sparse 5.6x; against every format 4.7x, 3.1x and 2.2x. 10x stands only against BC7 flipbooks that
+  store their empty space.
 - **Further steps not taken:** the MLP at 8 bits (about 1.5 KB of the 36 KB), a smaller mask (run lengths), sparse
   features with the rate term and a coder context for masked planes (disk only).
 
@@ -788,7 +961,8 @@ Paired over the 6 validation clips (`nvfx_f2 pairs`):
 
 ```sh
 export NEURALVFX_DATA=/root/nvfx-data   # F2's clips, flipbook and video tables as in study F2
-build/nvfx_f2 trim --set val; build/nvfx_f2 trim --set test                  # seconds
+build/nvfx_f2 trim --set val; build/nvfx_f2 trim --set test                  # seconds (BC3 layout and raw)
+build/nvfx_f2 trim --set test --threads 2       # with BC7 and ASTC (encoders built): 3 minutes
 build/nvfx_f2 train --study f3 --set val --threads 1 --configs g32c8h32l2t16_b4_q_sp,g32c8h32l2t16_b4_q_sp_i6000,...   # val configurations in f3_nets_val.csv
 build/nvfx_f2 train --study f3 --set test --threads 1 --configs g32c8h32l2t16_b4_q_sp,g32c8h32l2t16_b4_q_sp_i6000,g32c8h32l2t16_b4_q_sp_i12000,g32c8h32l2t16_b4_q_r3e-4_i6000
 build/nvfx_f2 report --pareto --study f3 --set test       # f3_equal_quality_test.csv; then the trimmed and block-sparse baselines:

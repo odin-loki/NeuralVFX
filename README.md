@@ -41,13 +41,23 @@ From [docs/REPORT.md](docs/REPORT.md), measured on simulated fire, smoke and exp
   the same resolution for the first second. Played in 6 s shards from the start points, a minute looks like the
   first 10 s. The price is **0.8 to 0.9 ms per 128 x 128 frame** (0.4 to 0.5 ms at 64 x 64) and 4.0 MB per playing
   instance.
-- **Memory:** for equal quality, a network per effect clip needs **3.6 to 5.9 times less memory** than a flipbook
-  at 8 bits, and **9.1 times less [6.3, 11.3]** with features trained for 4 bits (study F2; 10x is not reached). At
-  equal memory it scores +2.8 to +7.0 dB higher (every 95% interval above zero). NVIDIA claims "up to 8x" for Neural
-  Texture Compression; our flipbooks use our own BC3-layout encoder, so the ratio against BC7 would be lower.
-- **Disk:** packed losslessly on both sides, the networks need 4.1 times less disk than flipbooks when trained with a
-  rate term, but **video codecs win on disk** (AV1 needs 2.8 times less than the best network). In memory the networks
-  win against video: about 115 KB against 2.6 to 23 MB for a running decoder.
+- **Memory, against production block compression:** for equal quality, a network per effect clip needs **2.4 to
+  4.3 times less memory than a BC7 flipbook** at 8 bits, and 7.5 times less [4.2, 8.3] with features trained for 4
+  bits. **Against ASTC** (mobile GPUs; 8x8 to 12x12 blocks hold every frame at full size in 121 to 256 KB) the ratios
+  fall to **1.0 to 1.9 times** at 8 bits and about 2.5 times at 4 bits. At equal memory the networks beat BC7
+  flipbooks by +2.4 to +6.3 dB at every budget; against ASTC they win at two budgets and tie at three. First
+  published against our own BC3-layout encoder: 3.6 to 5.9 times, and 9.1 times at 4 bits; the BC3 format, not the
+  encoder, made that baseline weak.
+- **Sparse features (study F3)** store only the grid points a clip needs (36 KB instead of 67.5 KB at 4 bits, same
+  quality): **13.8 times less memory [7.9, 16.6] than a BC7 flipbook as stored, 4.7 times [3.3, 7.7] against every
+  format.** Flipbooks can drop their empty space too: trimmed to their content, 8.8x (BC7) and 3.1x (every format);
+  keeping only their non-empty blocks, 5.6x and **2.2x [1.6, 2.8]**. NVIDIA claims "up to 8x" for Neural Texture
+  Compression against block compression: met here against BC7 flipbooks that keep or trim their empty space, not
+  against ASTC or block-sparse flipbooks. (Against our BC3 layout F3 first reported 16.8x, 10.7x and 6.7x.)
+- **Disk:** packed losslessly on both sides, 8-bit networks need a little more disk than packed ASTC flipbooks; trained
+  for 4 bits with a rate term they need 2.2 times less (5.1 times less than BC7). **Video codecs win on disk** (AV1
+  needs 2.6 times less than the best network). In memory the networks win against video: about 115 KB against 2.6 to
+  23 MB for a running decoder.
 - **Controls:** one 1 MB model per effect plays unseen settings better than a 45 MB flipbook library
   (+1.0 to +2.5 dB), but its unseen-setting flames look softer than the real simulation.
 - **Variation:** endless non-repeating playback by drifting between learned variations; variations are softer than
@@ -79,7 +89,7 @@ From [docs/REPORT.md](docs/REPORT.md), measured on simulated fire, smoke and exp
 | rollout effects | `src/core/rollout.cpp`, `src/train/rollout_train.cpp`, `src/runtime/rt_rollout.hpp` | start points plus a learned stepper on a 32 x 32 grid (advection and pressure projection built in; the network supplies forces and the sub-grid closure, conditioned on the controls and fed the simulation's kind of noise), a detail layer that carries full-resolution heat and soot with the learned flow, and a per-pixel renderer; trained by backpropagation through time, then on its own rollouts with statistical losses |
 | trainer | `src/train`, `nvfx_train` | hand-written gradients (checked against finite differences), Adam, multithreaded; per-clip variation codes |
 | runtime | `src/runtime`, `include/neuralfx/nvfx.h` | the shipping library: C API, per-ISA SIMD (SSE2, AVX2, AVX-512), no allocation per frame, seeds and endless drift, exact hue, brightness and speed, bake to flipbook; for rollout effects an optional prior against drift (study G's denoiser, a separate 1.57 MB file) so one continuous rollout plays for a minute without shards ([docs/DCM.md](docs/DCM.md) G2.13) |
-| baselines | `src/core/flipbook.cpp` | flipbooks at matched memory: frame count, resolution, raw or BC1/BC4 (BC3-layout) compression, motion vectors |
+| baselines | `src/core/flipbook.cpp`, `src/core/block_formats.cpp` | flipbooks at matched memory: frame count, resolution, motion vectors, raw RGBA8 or block compression: our own BC3-layout encoder (BC1 + BC4), and BC7 and ASTC (4x4 to 12x12) through open-source encoders fetched at build time ([docs/DATA.md](docs/DATA.md) §5) |
 | compression study F2 | `src/codec`, `nvfx_f2` | quantisation-aware, rate-aware and vector-quantised training, and video codecs (x264, x265, VP9, AV1) through ffmpeg as baselines, memory and disk apart ([results/compression](results/compression/README.md)) |
 | lossless packing | `src/core/cm.cpp`, `nvfx_pack` | a context-mixing coder (context models, logistic mixer, APMs, binary arithmetic coder) that knows the tensors' shapes: `.nvfx` to `.nvfz` and back, bit-exact; flipbooks coded the same way for comparison ([results/compression](results/compression/README.md)) |
 | metrics | `src/core/metrics.cpp` | PSNR (full and active-region), SSIM, temporal PSNR, flicker, spectrum and motion statistics, paired bootstrap |
@@ -97,12 +107,14 @@ Ubuntu 24.04: `g++-14`, CMake 3.25+, Ninja, `libgtest-dev`, `zlib1g-dev` (and `f
 ```sh
 cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_COMPILER=g++-14
 cmake --build build
-ctest --test-dir build                     # 235 tests: sim, metrics, codecs, gradients, runtime parity, composition, scene scripts, field effects, context mixing, denoiser, lossless coder, low-bit and vector-quantised features, video codecs, allocation, C API for effects and scenes
+ctest --test-dir build                     # 241 tests: sim, metrics, codecs, gradients, runtime parity, composition, scene scripts, field effects, context mixing, denoiser, lossless coder, low-bit and vector-quantised features, video codecs, BC7 and ASTC flipbooks, allocation, C API for effects and scenes
 ```
 
 Options: `NEURALFX_BUILD_VIEWER` (GLFW + OpenGL; fetches Dear ImGui), `NEURALFX_BUILD_SHARED` (libnvfx.so for engines),
 `NEURALFX_BUILD_GODOT` (the Godot 4 GDExtension; fetches godot-cpp, needs Python 3 to generate its bindings; see
-`engines/godot/test.sh`), `NEURALFX_BUILD_TOOLS`, `NEURALFX_BUILD_TESTS`, `NEURALFX_BUILD_BENCH`, `NEURALFX_WERROR` (CI).
+`engines/godot/test.sh`), `NEURALFX_FETCH_ENCODERS` (on by default: fetches BC7 and ASTC encoders for the flipbook
+baselines; study code only, [docs/DATA.md](docs/DATA.md) §5), `NEURALFX_BUILD_TOOLS`, `NEURALFX_BUILD_TESTS`,
+`NEURALFX_BUILD_BENCH`, `NEURALFX_WERROR` (CI).
 
 The trainer and the tools need AVX2 + FMA (checked at start). The runtime falls back to SSE2 code on older x86-64.
 
@@ -130,18 +142,18 @@ training, evaluation; about three hours), then `d-timing` on an idle machine and
 | `nvfx_ingest` | footage into a clip, after a licence check; adds a row to the licence register |
 | `nvfx_train` | train a frame model from one or more clips (controls and variation codes come from the clips), or with `--rollout` a rollout effect from the simulation |
 | `nvfx_eval` | score the flipbook ladder or a model against a reference clip |
-| `nvfx_experiment` | the full study: `data`, `a`, `b`, `c`, `media`, `timing`, `report`; study D: `d-chaos`, `d-train`, `d-tune`, `d-finish`, `d-eval`, `d-timing`; study G: `g-fine` (design G1, DCM-fine, end to end); to come: `g-data`, `g-pilot`, `g-search`, `g-eval`, `g-timing` |
+| `nvfx_experiment` | the full study: `data`, `a` (`a-flipbooks`: only the flipbook rows still missing), `b`, `c`, `media`, `timing`, `report`; study D: `d-chaos`, `d-train`, `d-tune`, `d-finish`, `d-eval`, `d-timing`; study G: `g-fine` (design G1, DCM-fine, end to end); to come: `g-data`, `g-pilot`, `g-search`, `g-eval`, `g-timing` |
 | `nvfx_c_host` | the engine loop in plain C, with timings; `--scene` plays a scene script through the scene API (and with `--expect` compares every frame with `nvfx_scene_script --profile`); `--self-test` checks the error paths |
 | `nvfx_viewer` | live viewer with sliders |
 | `nvfx_fireball` | a scene of composed effects written in C++ (a fireball with smoke, fires and embers) to video, with a profile of every stage |
 | `nvfx_scene_script` | plays a scene script (`examples/scenes/*.nvfxs`) to video, keyframes and a sheet; `--check` and `--print` check and reformat a script; `--verify` compares keyframes with frozen SHA-256 |
 | `nvfx_dcm` | context mixing: `selftest` runs a small synthetic mixer search under both objectives (ROC-AUC and Laplace bits); `version FILE` prints the SHA-256 version of a serialised mixer; DCM-fine (G1): `record`, `experts`, `search-fine` (with `--pilot`), `train-fine`, `eval-fine`, `bench-experts`, `fine-summary`; the coarse-state denoiser (G2): `ddpm-train`, `ddpm-sample`, `ddpm-time`, `contexts` |
 | `nvfx_prior` | the runtime's prior against drift (docs/DCM.md G2.13): `parity` (study G's test run through the reference and the runtime, bit by bit), `pass` (one denoiser pass per ISA), `time` (frame cost with and without the prior, and of shards: mean, p99, worst) |
-| `nvfx_pack` | pack a `.nvfx` into a `.nvfz` and back (`--unpack`), bit-exact; `--h3` for format 2 (light or fast literal models, LZ tokens, seekable segments: 4 to 38 times faster decoding for 2 to 23% more disk); `--report DIR` for sizes and ratios; `--study` for the measurement in results/compression |
+| `nvfx_pack` | pack a `.nvfx` into a `.nvfz` and back (`--unpack`), bit-exact; `--h3` for format 2 (light or fast literal models, LZ tokens, seekable segments: 4 to 38 times faster decoding for 2 to 23% more disk); `--report DIR` for sizes and ratios; `--study` for the measurement in results/compression (`--flipbooks-only` adds the flipbooks `cm.csv` lacks) |
 | `nvfx_g3` | study G's G3: a codec for authored effect runs from the learned dynamics (closed-loop coarse corrections, an integer context-mixing coder) and a frame model plus a coded residual, against video codecs (through ffmpeg) and flipbooks; `probe`, `ladder`, `baselines`, `g3b`, `summary`, `timing` ([docs/DCM.md](docs/DCM.md) §8) |
 | `nvfx_g_extras` | study G's extras (stage S8): one renderer for every model (G4a), a shard critic (G5a), a mixer of the stepper and a coarse solver for smoke (G5b); none kept ([docs/DCM.md](docs/DCM.md) §10) |
 | `nvfx_study_h` | study H's measurements: products on LZ78/RePair-compressed data against dense code (`--h1`), the run-aware detail step (`--h2`); scripts in `tools/study_h/` |
-| `nvfx_f2` | study F2 (results/compression): `data`, `flipbooks`, `train` (low-bit, quantisation-aware, rate-aware and vector-quantised models), `rescore`, `video` (x264, x265, VP9, AV1 through ffmpeg), `report` (equal-quality ratios, memory and disk, with intervals; `--figure`), `g3c`, `g3c-report`, `timing` |
+| `nvfx_f2` | studies F2 and F3 (results/compression): `data`, `flipbooks` (our BC3 layout and raw, then BC7 and ASTC), `trim` (the same flipbooks without their empty space), `train` (low-bit, quantisation-aware, rate-aware, vector-quantised and sparse models), `rescore`, `pairs`, `video` (x264, x265, VP9, AV1 through ffmpeg), `report` (equal-quality ratios against each flipbook baseline and codec, memory and disk, with intervals; `--figure`, `--pareto`), `g3c`, `g3c-report`, `timing` |
 | `neuralfx_arch_bench` | Phase 0 architecture microbenchmark |
 
 ## Layout

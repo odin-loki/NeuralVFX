@@ -1,14 +1,16 @@
 // nvfx_f2: study F2, compression of effects pushed as far as it honestly goes (results/compression/README.md, F2).
 //
 //   nvfx_f2 data                                    validation clips (2 per effect, settings and seeds not in study A)
-//   nvfx_f2 flipbooks --set val|test                the study A flipbook ladder on every clip: scores, memory, packed bytes
+//   nvfx_f2 flipbooks --set val|test                the study A flipbook ladder on every clip (our BC3 layout and raw, then
+//                                                   BC7 and ASTC): scores, memory, packed bytes
 //   nvfx_f2 trim --set val|test                     the same flipbooks without their empty space (study F3, below)
 //   nvfx_f2 pairs --set val|test --pairs a:b,c:d    paired differences of network configurations over the clips
 //   nvfx_f2 train --set val|test --configs A,B,...  train, save, score through the runtime, pack (lossless coder)
 //   nvfx_f2 rescore --set test --name N --pattern P score and pack existing models ("{clip}" in P is the clip name)
 //   nvfx_f2 video --set val|test [--codecs x264,...] the video codecs' quality ladders on every clip
-//   nvfx_f2 report --set val|test [--configs ...]   equal-quality ratios against flipbooks and each codec, memory and
-//                                                   disk, with 95% bootstrap intervals over clips
+//   nvfx_f2 report --set val|test [--configs ...]   equal-quality ratios against flipbooks (every format, and the BC3
+//                                                   layout alone as first measured) and each codec, memory and disk,
+//                                                   with 95% bootstrap intervals over clips
 //   nvfx_f2 g3c --split val|test [--variants v1,b6_d,...] [--base DIR --tag NAME]  (another base than the v1 files)
 //                                                   design G3c: study D's rollout effects with quantised, dithered and
 //                                                   fewer start points, scored as study D's endless runs
@@ -21,7 +23,7 @@
 //            distillation teacher, a configuration trained by the same study or F2; default the same architecture at
 //            8 bits), --flipbooks a.csv,b.csv (report: more flipbook rows, e.g. other encoders, besides f2_flipbooks_<set>.csv),
 //            --suffix S (report: its table as <study>_equal_quality_<set>S.csv), --pareto (report: envelopes of the points
-//            that improve on every smaller one only; see g_pareto)
+//            that improve on every smaller one only; see tools::pareto_envelope)
 //
 // Sets: "test" is study A's 12 clips (docs/REPORT.md §3), scored exactly as study A scores them (the network trained
 // on the clip, rendered through the runtime at its stored precision, active-region PSNR over all 64 frames). "val"
@@ -48,6 +50,7 @@
 //                            (for a squared error, the same as weighting the two losses); scored against the clip
 //   e.g. g32c8h32l2t16_b8 is study A's grid_m at 8 bits; g32c8h32l2t16_b4_q_r3e-5 adds 4-bit QAT and a rate term.
 #include "args.hpp"
+#include "baselines.hpp"
 
 #include <neuralfx/clip.hpp>
 #include <neuralfx/cm.hpp>
@@ -223,21 +226,21 @@ void step_data(const Ctx& c0) {
 
 // --- flipbooks -------------------------------------------------------------------------------------------------------
 
-// The stored form of a flipbook as tensors, exactly as tools/nvfx_pack.cpp codes them.
-std::vector<cm::Tensor> flipbook_tensors(const Clip& ref, const flipbook::Flipbook& fb) {
+// The stored form of a flipbook as tensors, exactly as tools/nvfx_pack.cpp codes them: 16-byte blocks of any block
+// format (BC3 layout, BC7, ASTC) as [frame][block row][block column][16], raw RGBA as [frame][y][x][4], motion vectors
+// as [frame][y][x][2]. The coder's block kind was written for the BC3 layout: its contexts of the same byte in the
+// neighbouring blocks suit any 16-byte block, its endpoint contexts only BC3's.
+std::vector<cm::Tensor> flipbook_tensors(const flipbook::Flipbook& fb) {
   const flipbook::Spec& spec = fb.spec;
   const auto F = static_cast<std::uint32_t>(fb.kept.size()), R = static_cast<std::uint32_t>(spec.res);
   cm::Tensor img;
   img.shape.width = 1;
   img.shape.channels = true;
-  for (const int f : fb.kept) {
-    auto small = flipbook::downsample(ref.frame(f), ref.size, spec.res);
-    if (spec.codec == flipbook::Codec::bc3) small = flipbook::compress_bc3(small, spec.res, spec.res);
-    img.values.insert(img.values.end(), small.begin(), small.end());
-  }
-  if (spec.codec == flipbook::Codec::bc3) {
+  for (const auto& stored : fb.stored) img.values.insert(img.values.end(), stored.begin(), stored.end());
+  if (spec.codec != flipbook::Codec::raw) {
+    const auto B = static_cast<std::uint32_t>((spec.res + flipbook::block_dim(spec.codec) - 1) / flipbook::block_dim(spec.codec));
     img.shape.kind = cm::Kind::bc3;
-    img.shape.dims = {F, R / 4, R / 4, 16};
+    img.shape.dims = {F, B, B, 16};
   } else {
     img.shape.kind = cm::Kind::rgba;
     img.shape.dims = {F, R, R, 4};
@@ -261,102 +264,138 @@ std::vector<cm::Tensor> flipbook_tensors(const Clip& ref, const flipbook::Flipbo
 const std::vector<std::string> kFlipCols = {"set", "clip", "effect", "config", "family", "memory_bytes", "packed_bytes", "psnr",
                                             "active_psnr", "ssim", "tpsnr", "flicker"};
 
+// The ladder (tools/baselines.hpp: our BC3 layout and raw RGBA8, then the production formats this build has). Rows
+// already in the CSV are skipped; each clip's missing rows are computed on --threads threads, then appended in ladder
+// order.
 void step_flipbooks(const Ctx& c) {
   Csv csv(c.out / std::format("f2_flipbooks_{}.csv", c.set), kFlipCols);
+  const auto specs = tools::flipbook_ladder(kSize, kFrames);
   for (const ClipRef& r : clip_set(c)) {
+    std::vector<flipbook::Spec> todo;
+    for (const auto& spec : specs) {
+      if (!csv.has({{"set", c.set}, {"clip", r.name}, {"config", spec.describe()}})) todo.push_back(spec);
+    }
+    if (todo.empty()) continue;
     const Clip ref = load_clip(r);
-    for (const auto& spec : flipbook::ladder(kSize, kFrames)) {
-      if (csv.has({{"set", c.set}, {"clip", r.name}, {"config", spec.describe()}})) continue;
-      const auto fb = flipbook::build(ref, spec);
-      const auto tensors = flipbook_tensors(ref, fb);
+    flipbook::FrameCache cache;
+    std::vector<std::map<std::string, std::string>> rows(todo.size());
+    tools::parallel_for(todo.size(), c.threads, [&](std::size_t i) {
+      const flipbook::Spec& spec = todo[i];
+      const auto fb = flipbook::build(ref, spec, {}, &cache);
+      const auto tensors = flipbook_tensors(fb);
       std::size_t bytes = 0;
       for (const auto& t : tensors) bytes += t.values.size();
       if (bytes != fb.bytes) throw std::runtime_error("flipbook: stored size does not match");
       const cm::Packed p = cm::pack_tensors(tensors);
       const auto back = cm::unpack_tensors(p.data);
       if (!back || back->size() != tensors.size() || (*back)[0].values != tensors[0].values) throw std::runtime_error("flipbook round trip failed");
-      std::map<std::string, std::string> row = {{"set", c.set}, {"clip", r.name}, {"effect", r.effect}, {"config", spec.describe()},
-                                                {"family", spec.flow_res > 0 ? "flipbook_mv" : spec.codec == flipbook::Codec::raw ? "flipbook_raw" : "flipbook_bc3"},
-                                                {"memory_bytes", std::to_string(fb.bytes)}, {"packed_bytes", std::to_string(p.data.size())}};
+      auto& row = rows[i];
+      row = {{"set", c.set}, {"clip", r.name}, {"effect", r.effect}, {"config", spec.describe()}, {"family", spec.family()},
+             {"memory_bytes", std::to_string(fb.bytes)}, {"packed_bytes", std::to_string(p.data.size())}};
       put_scores(row, metrics::score(ref, flipbook::play(fb)));
-      csv.add(row);
-      std::println("flipbook {} {}: {} -> {} bytes, active {}", r.name, spec.describe(), fb.bytes, p.data.size(), row["active_psnr"]);
+    });
+    for (auto& row : rows) {
+      std::println("flipbook {} {}: {} -> {} bytes, active {}", r.name, row["config"], row["memory_bytes"], row["packed_bytes"], row["active_psnr"]);
+      csv.add(std::move(row));
     }
   }
 }
 
 // Flipbooks without their empty space (study F3), as a fairer baseline for networks that store only the grid points
-// their frames need. Two variants of every ladder flipbook, at the same quality (the dropped blocks decode to zero, so
-// playback is unchanged; scores and packed sizes are F2's):
-//   trim    each kept frame cropped to the bounding box of its non-zero blocks (BC3: 4 x 4 texels; raw: pixels), as
-//           sprite atlases are packed in production, plus 8 bytes per frame for its rectangle (packing assumed perfect);
-//   sparse  only the non-zero 4 x 4 blocks of each frame, plus one bit per block (a mask, as the networks keep).
+// their frames need. Two variants of every ladder flipbook (tools/baselines.hpp: our BC3 layout and raw, then BC7 and
+// ASTC), at the same quality (the dropped blocks decode to zero, so playback is unchanged; scores and packed sizes are
+// F2's):
+//   trim    each kept frame cropped to the bounding box of its non-zero blocks (block formats: whole blocks of the
+//           format's own size, 4 x 4 texels for BC3 and BC7; raw: pixels), as sprite atlases are packed in production,
+//           plus 8 bytes per frame for its rectangle (packing assumed perfect);
+//   sparse  only the non-zero blocks of each frame (ASTC at its own block size; raw in 4 x 4 pixels), plus one bit
+//           per block (a mask, as the networks keep).
 // Motion vectors are cropped to the frame's rectangle scaled to their resolution in both variants.
+std::pair<std::size_t, std::size_t> trimmed_bytes(const flipbook::Flipbook& fb) {
+  const flipbook::Spec& spec = fb.spec;
+  const bool raw = spec.codec == flipbook::Codec::raw;
+  const int R = spec.res, b = raw ? 4 : flipbook::block_dim(spec.codec), B = (R + b - 1) / b;
+  const std::size_t block_bytes = raw ? static_cast<std::size_t>(b * b * 4) : 16;
+  std::size_t trim_bytes = 0, sparse_bytes = 0;
+  for (const auto& img : fb.frames) {
+    int x0 = R, y0 = R, x1 = -1, y1 = -1;  // bounding box of non-zero texels
+    std::size_t blocks = 0;
+    for (int by = 0; by < B; ++by) {
+      for (int bx = 0; bx < B; ++bx) {
+        bool any = false;
+        for (int y = b * by; y < std::min(R, b * by + b); ++y) {
+          for (int x = b * bx; x < std::min(R, b * bx + b); ++x) {
+            const std::size_t i = (static_cast<std::size_t>(y) * static_cast<std::size_t>(R) + static_cast<std::size_t>(x)) * 4;
+            if (img[i] | img[i + 1] | img[i + 2] | img[i + 3]) {
+              any = true;
+              x0 = std::min(x0, x);
+              y0 = std::min(y0, y);
+              x1 = std::max(x1, x);
+              y1 = std::max(y1, y);
+            }
+          }
+        }
+        blocks += any;
+      }
+    }
+    std::size_t w = 0, hgt = 0, rect = 0;  // the rectangle in texels (block formats: whole blocks), and its bytes
+    if (x1 >= 0) {
+      if (raw) {
+        w = static_cast<std::size_t>(x1 - x0 + 1);
+        hgt = static_cast<std::size_t>(y1 - y0 + 1);
+        rect = w * hgt * 4;
+      } else {
+        const auto bw = static_cast<std::size_t>(x1 / b - x0 / b + 1), bh = static_cast<std::size_t>(y1 / b - y0 / b + 1);
+        rect = bw * bh * 16;
+        w = std::min(static_cast<std::size_t>(R), static_cast<std::size_t>(b) * bw);
+        hgt = std::min(static_cast<std::size_t>(R), static_cast<std::size_t>(b) * bh);
+      }
+    }
+    trim_bytes += rect + 8;
+    sparse_bytes += blocks * block_bytes + static_cast<std::size_t>(B * B + 7) / 8;
+    if (spec.flow_res > 0) {  // vectors of the rectangle at the flow's resolution, 2 bytes each
+      const double sc = static_cast<double>(spec.flow_res) / R;
+      const auto fw = static_cast<std::size_t>(std::ceil(static_cast<double>(w) * sc)), fh = static_cast<std::size_t>(std::ceil(static_cast<double>(hgt) * sc));
+      trim_bytes += 2 * fw * fh;
+      sparse_bytes += 2 * fw * fh;
+    }
+  }
+  return {trim_bytes, sparse_bytes};
+}
+
 void step_trim(const Ctx& c) {
   Csv f2(c.out / std::format("f2_flipbooks_{}.csv", c.set), kFlipCols);
   Csv trim(c.out / std::format("f3_flipbooks_trim_{}.csv", c.set), kFlipCols);
   Csv sparse(c.out / std::format("f3_flipbooks_sparse_{}.csv", c.set), kFlipCols);
+  const auto specs = tools::flipbook_ladder(kSize, kFrames);
   for (const ClipRef& r : clip_set(c)) {
+    std::vector<flipbook::Spec> todo;
+    for (const auto& spec : specs) {
+      if (!trim.has({{"set", c.set}, {"clip", r.name}, {"config", spec.describe() + " trim"}})) todo.push_back(spec);
+    }
+    if (todo.empty()) continue;
+    std::vector<const std::map<std::string, std::string>*> src(todo.size());
+    for (std::size_t i = 0; i < todo.size(); ++i) {
+      const std::string name = todo[i].describe();
+      const auto it = std::ranges::find_if(f2.rows(), [&](const auto& row) { return row.at("set") == c.set && row.at("clip") == r.name && row.at("config") == name; });
+      if (it == f2.rows().end()) throw std::runtime_error("trim: run the flipbooks step first (" + r.name + ", " + name + ")");
+      src[i] = &*it;
+    }
     const Clip ref = load_clip(r);
-    for (const auto& spec : flipbook::ladder(kSize, kFrames)) {
-      const std::string name = spec.describe();
-      if (trim.has({{"set", c.set}, {"clip", r.name}, {"config", name + " trim"}})) continue;
-      const auto src = std::ranges::find_if(f2.rows(), [&](const auto& row) { return row.at("set") == c.set && row.at("clip") == r.name && row.at("config") == name; });
-      if (src == f2.rows().end()) throw std::runtime_error("trim: run the flipbooks step first (" + r.name + ", " + name + ")");
-      const auto fb = flipbook::build(ref, spec);
-      const int R = spec.res, B = R / 4;
-      const bool bc3 = spec.codec == flipbook::Codec::bc3;
-      std::size_t trim_bytes = 0, sparse_bytes = 0;
-      for (std::size_t k = 0; k < fb.frames.size(); ++k) {
-        const auto& img = fb.frames[k];
-        int x0 = R, y0 = R, x1 = -1, y1 = -1;  // bounding box of non-zero texels
-        std::size_t blocks = 0;
-        for (int by = 0; by < B; ++by) {
-          for (int bx = 0; bx < B; ++bx) {
-            bool any = false;
-            for (int y = 4 * by; y < 4 * by + 4; ++y) {
-              for (int x = 4 * bx; x < 4 * bx + 4; ++x) {
-                const std::size_t i = (static_cast<std::size_t>(y) * R + x) * 4;
-                if (img[i] | img[i + 1] | img[i + 2] | img[i + 3]) {
-                  any = true;
-                  x0 = std::min(x0, x);
-                  y0 = std::min(y0, y);
-                  x1 = std::max(x1, x);
-                  y1 = std::max(y1, y);
-                }
-              }
-            }
-            blocks += any;
-          }
-        }
-        std::size_t w = 0, hgt = 0;  // the rectangle, in texels (BC3: whole blocks)
-        if (x1 >= 0) {
-          if (bc3) {
-            w = static_cast<std::size_t>(4 * (x1 / 4 - x0 / 4 + 1));
-            hgt = static_cast<std::size_t>(4 * (y1 / 4 - y0 / 4 + 1));
-          } else {
-            w = static_cast<std::size_t>(x1 - x0 + 1);
-            hgt = static_cast<std::size_t>(y1 - y0 + 1);
-          }
-        }
-        const std::size_t texel = bc3 ? 1 : 4;  // bytes per texel (BC3: 16 bytes per 4 x 4 block)
-        trim_bytes += w * hgt * texel + 8;
-        sparse_bytes += blocks * 16 * texel + static_cast<std::size_t>(B * B + 7) / 8;
-        if (spec.flow_res > 0) {  // vectors of the rectangle at the flow's resolution, 2 bytes each
-          const double sc = static_cast<double>(spec.flow_res) / R;
-          const auto fw = static_cast<std::size_t>(std::ceil(static_cast<double>(w) * sc)), fh = static_cast<std::size_t>(std::ceil(static_cast<double>(hgt) * sc));
-          trim_bytes += 2 * fw * fh;
-          sparse_bytes += 2 * fw * fh;
-        }
-      }
-      for (auto [table, suffix, bytes] : {std::tuple{&trim, " trim", trim_bytes}, std::tuple{&sparse, " sparse", sparse_bytes}}) {
-        std::map<std::string, std::string> row = *src;
+    flipbook::FrameCache cache;
+    std::vector<std::pair<std::size_t, std::size_t>> bytes(todo.size());
+    tools::parallel_for(todo.size(), c.threads, [&](std::size_t i) { bytes[i] = trimmed_bytes(flipbook::build(ref, todo[i], {}, &cache)); });
+    for (std::size_t i = 0; i < todo.size(); ++i) {
+      const std::string name = todo[i].describe();
+      for (auto [table, suffix, b] : {std::tuple{&trim, " trim", bytes[i].first}, std::tuple{&sparse, " sparse", bytes[i].second}}) {
+        std::map<std::string, std::string> row = *src[i];
         row["config"] = name + suffix;
         row["family"] = row["family"] + std::string(suffix == std::string(" trim") ? "_trim" : "_sparse");
-        row["memory_bytes"] = std::to_string(bytes);
+        row["memory_bytes"] = std::to_string(b);
         table->add(row);
       }
-      std::println("trim {} {}: {} -> {} (trim), {} (sparse) bytes", r.name, name, fb.bytes, trim_bytes, sparse_bytes);
+      std::println("trim {} {}: {} -> {} (trim), {} (sparse) bytes", r.name, name, flipbook::memory_bytes(todo[i], todo[i].frames), bytes[i].first,
+                   bytes[i].second);
     }
   }
 }
@@ -680,151 +719,14 @@ void step_video(const Ctx& c, const std::set<std::string>& which) {
 
 // --- report ---------------------------------------------------------------------------------------------------------
 
-// One method's points on a set: per clip (bytes, quality) for one or more size measures.
-struct Point {
-  std::vector<double> q;                         // active PSNR per clip (clip order of the set)
-  std::map<std::string, std::vector<double>> b;  // size measure -> bytes per clip
-};
-
-// A family of configurations (a flipbook ladder, a codec's quality ladder): config -> point.
-using Family = std::map<std::string, Point>;
-
-double mean_at(const std::vector<double>& v, const std::vector<std::size_t>& idx) {
-  double s = 0;
-  for (const std::size_t i : idx) s += v[i];
-  return s / static_cast<double>(idx.size());
-}
-
-// With --pareto (study F3), the envelope keeps only the points that improve on every smaller one: a dominated point
-// otherwise stays a vertex at the running best and draws a flat step that the log-linear interpolation then crosses
-// steeply (it inflates the size at equal quality). F2's envelopes are the default.
-bool g_pareto = false;
-
-// The best-of-family envelope: best mean quality at or below each mean size, one point per size.
-std::vector<std::pair<double, double>> envelope(const Family& fam, const std::string& measure, const std::vector<std::size_t>& idx) {
-  std::vector<std::pair<double, double>> pts;
-  for (const auto& [k, p] : fam) {
-    if (!p.b.contains(measure)) continue;
-    pts.emplace_back(mean_at(p.b.at(measure), idx), mean_at(p.q, idx));
-  }
-  std::ranges::sort(pts);
-  std::vector<std::pair<double, double>> env;
-  for (const auto& [kb, q] : pts) {
-    const double best = env.empty() ? q : std::max(env.back().second, q);
-    if (!env.empty() && env.back().first == kb) env.back().second = best;
-    else if (!(g_pareto && !env.empty() && q <= env.back().second)) env.emplace_back(kb, best);
-  }
-  return env;
-}
-
-// Size along an envelope for a quality: log-linear between points. censor: -1 below the smallest, +1 above the largest.
-double size_for(const std::vector<std::pair<double, double>>& env, double q, int& censor) {
-  censor = 0;
-  if (env.empty()) return std::nan("");
-  if (env.front().second >= q) {
-    censor = -1;
-    return env.front().first;
-  }
-  for (std::size_t i = 1; i < env.size(); ++i) {
-    if (env[i].second >= q && env[i - 1].second < q) {
-      const double u = (q - env[i - 1].second) / (env[i].second - env[i - 1].second);
-      return std::exp(std::log(env[i - 1].first) + u * (std::log(env[i].first) - std::log(env[i - 1].first)));
-    }
-  }
-  censor = 1;
-  return env.back().first;
-}
-
-// Quality along an envelope at a size (the best at or below it, log-linear between points); NaN below the smallest.
-double quality_at(const std::vector<std::pair<double, double>>& env, double bytes) {
-  if (env.empty() || bytes < env.front().first) return std::nan("");
-  for (std::size_t i = 1; i < env.size(); ++i) {
-    if (bytes < env[i].first) {
-      const double u = (std::log(bytes) - std::log(env[i - 1].first)) / (std::log(env[i].first) - std::log(env[i - 1].first));
-      return env[i - 1].second + u * (env[i].second - env[i - 1].second);
-    }
-  }
-  return env.back().second;
-}
-
-struct Ratio {
-  double point = 0, lo = 0, hi = 0;
-  int censor = 0;            // of the point estimate
-  double censored_share = 0; // share of resamples outside the envelope
-  double other_kb = 0;       // the baseline's size at equal quality (point estimate)
-  double dq = 0, dq_lo = 0, dq_hi = 0;  // quality difference at the network's size (network minus baseline envelope)
-};
-
-// Equal-quality ratio of a network against a family, with a bootstrap over clips (the same resample on both sides).
-// With several families (the video codecs), the best of them: the smallest size at the network's quality, and the
-// best quality at its size, each codec along its own ladder.
-Ratio equal_quality(const Point& net, const std::string& net_measure, const std::vector<const Family*>& fams, const std::string& fam_measure,
-                    int resamples = 10000) {
-  const std::size_t n = net.q.size();
-  std::vector<std::size_t> all(n);
-  std::iota(all.begin(), all.end(), 0);
-  Ratio r;
-  const auto one = [&](const std::vector<std::size_t>& idx, int& censor, double& other, double& dq) {
-    const double nb = mean_at(net.b.at(net_measure), idx), nq = mean_at(net.q, idx);
-    other = std::numeric_limits<double>::infinity();
-    double best_q = -std::numeric_limits<double>::infinity();
-    for (const Family* fam : fams) {
-      const auto env = envelope(*fam, fam_measure, idx);
-      int ce = 0;
-      const double kb = size_for(env, nq, ce);
-      if (!std::isnan(kb) && kb < other) {
-        other = kb;
-        censor = ce;
-      }
-      const double q = quality_at(env, nb);
-      if (!std::isnan(q)) best_q = std::max(best_q, q);
-    }
-    if (std::isinf(other)) other = std::nan("");
-    dq = std::isinf(best_q) ? std::nan("") : nq - best_q;
-    return other / nb;
-  };
-  double dq0 = 0;
-  r.point = one(all, r.censor, r.other_kb, dq0);
-  r.other_kb /= 1024.0;
-  r.dq = dq0;
-  std::mt19937_64 rng(1);
-  std::uniform_int_distribution<std::size_t> pick(0, n - 1);
-  std::vector<double> ratios, dqs;
-  int cens = 0;
-  std::vector<std::size_t> idx(n);
-  for (int b = 0; b < resamples; ++b) {
-    for (auto& i : idx) i = pick(rng);
-    int ce = 0;
-    double other = 0, dq = 0;
-    const double ratio = one(idx, ce, other, dq);
-    if (!std::isnan(ratio)) ratios.push_back(ratio);
-    if (!std::isnan(dq)) dqs.push_back(dq);
-    cens += ce != 0;
-  }
-  std::ranges::sort(ratios);
-  std::ranges::sort(dqs);
-  const auto pct = [](const std::vector<double>& v, double p) {
-    return v.empty() ? std::nan("") : v[static_cast<std::size_t>(p * static_cast<double>(v.size() - 1) + 0.5)];
-  };
-  r.lo = pct(ratios, 0.025);
-  r.hi = pct(ratios, 0.975);
-  r.dq_lo = pct(dqs, 0.025);
-  r.dq_hi = pct(dqs, 0.975);
-  r.censored_share = static_cast<double>(cens) / resamples;
-  return r;
-}
-
-Ratio equal_quality(const Point& net, const std::string& net_measure, const Family& fam, const std::string& fam_measure) {
-  return equal_quality(net, net_measure, std::vector<const Family*>{&fam}, fam_measure);
-}
-
-std::string ratio_cell(const Ratio& r) {
-  const std::string mark = r.censor > 0 ? ">" : r.censor < 0 ? "<" : "";
-  const int prec = r.point < 1 ? 2 : 1;  // the codecs' side: 0.13x reads better than 0.1x
-  std::string s = std::format("{}{:.{}f}x [{:.{}f}, {:.{}f}]", mark, r.point, prec, r.lo, prec, r.hi, prec);
-  if (r.censored_share > 0.025) s += std::format(" ({:.0f}% censored)", 100 * r.censored_share);
-  return s;
-}
+// Equal-quality ratios with bootstrap intervals, and Pareto envelopes (--pareto): tools/baselines.hpp.
+using tools::envelope;
+using tools::equal_quality;
+using tools::Family;
+using tools::mean_at;
+using tools::Point;
+using tools::Ratio;
+using tools::ratio_cell;
 
 // A short label for a network configuration ("G32 4-bit", "G48 VQ 8 bits / 8 ch, rate 1e-4").
 std::string short_label(const std::string& config) {
@@ -850,9 +752,12 @@ std::string short_label(const std::string& config) {
 
 // Two panels as SVG: memory against quality (flipbooks, networks) and disk against quality (flipbooks and networks
 // packed by the lossless coder, video codecs' payload). Log size axis; one quality axis per panel.
-void write_figure(const fs::path& path, const std::string& title, const Family& flips, const Family* flips_more, const std::map<std::string, Family>& videos,
+// `old_flips`: our BC3 layout and raw only, drawn dashed when the ladder has more formats; `flips_more`: with the extra
+// tables (F3: flipbooks without their empty space).
+void write_figure(const fs::path& path, const std::string& title, const Family& flips, const Family* old_flips, const Family* flips_more,
+                  const std::map<std::string, Family>& videos,
                   const std::vector<std::pair<std::string, const Point*>>& nets, const std::vector<std::size_t>& idx) {
-  constexpr double W = 1040, H = 470, top = 74, bottom = 58, left = 62, gap = 70;
+  constexpr double W = 1040, H = 484, top = 88, bottom = 58, left = 62, gap = 70;
   const double pw = (W - left - gap - 24) / 2, ph = H - top - bottom;
   const char* ink = "#0b0b0b";
   const char* ink2 = "#52514e";
@@ -877,7 +782,7 @@ void write_figure(const fs::path& path, const std::string& title, const Family& 
     const double x0 = left + panel * (pw + gap), y0 = top;
     const auto X = [&](double kb) { return x0 + (std::log(std::clamp(kb, klo, khi)) - std::log(klo)) / (std::log(khi) - std::log(klo)) * pw; };
     const auto Y = [&](double q) { return y0 + ph - (std::clamp(q, qlo, qhi) - qlo) / (qhi - qlo) * ph; };
-    o << std::format("<text x=\"{}\" y=\"{}\" font-size=\"13\" font-weight=\"600\" fill=\"{}\">{}</text>\n", x0, y0 - 30, ink,
+    o << std::format("<text x=\"{}\" y=\"{}\" font-size=\"13\" font-weight=\"600\" fill=\"{}\">{}</text>\n", x0, y0 - 44, ink,
                      panel == 0 ? "Memory while playing: flipbook texture, network as stored" : "Disk: both sides losslessly packed; video bitstreams");
     for (double kb = klo; kb <= khi * 1.01; kb *= 4) {
       o << std::format("<line x1=\"{:.1f}\" y1=\"{}\" x2=\"{:.1f}\" y2=\"{}\" stroke=\"{}\" stroke-width=\"1\"/>\n", X(kb), y0, X(kb), y0 + ph, grid);
@@ -889,18 +794,23 @@ void write_figure(const fs::path& path, const std::string& title, const Family& 
     }
     o << std::format("<text x=\"{}\" y=\"{}\" font-size=\"12\" fill=\"{}\" text-anchor=\"middle\">KB per effect (log scale)</text>\n", x0 + pw / 2, y0 + ph + 36, ink2);
     o << std::format("<text transform=\"translate({},{}) rotate(-90)\" font-size=\"12\" fill=\"{}\" text-anchor=\"middle\">mean active PSNR (dB)</text>\n", x0 - 42, y0 + ph / 2, ink2);
-    const auto line = [&](const std::vector<std::pair<double, double>>& env, const char* colour) {
+    const auto line = [&](const std::vector<std::pair<double, double>>& env, const char* colour, bool dashed = false) {
       std::string d;
       for (std::size_t i = 0; i < env.size(); ++i) {
         const double kb = env[i].first / 1024;
         if (kb < klo || kb > khi || env[i].second < qlo || env[i].second > qhi) continue;  // drawn inside the frame only
         d += std::format("{}{:.1f},{:.1f} ", d.empty() ? "M" : "L", X(kb), Y(env[i].second));
       }
-      o << std::format("<path d=\"{}\" fill=\"none\" stroke=\"{}\" stroke-width=\"2\" stroke-linejoin=\"round\"/>\n", d, colour);
+      o << std::format("<path d=\"{}\" fill=\"none\" stroke=\"{}\" stroke-width=\"2\" stroke-linejoin=\"round\"{}/>\n", d, colour,
+                       dashed ? " stroke-dasharray=\"5 4\" opacity=\"0.6\"" : "");
     };
     // legend
     std::vector<std::pair<std::string, const char*>> legend = {{panel == 0 ? "best flipbook at each size" : "best packed flipbook", slot[0]}, {"networks", slot[1]}};
     line(envelope(flips, panel == 0 ? "memory" : "packed", idx), slot[0]);
+    if (old_flips && old_flips->size() < flips.size()) {
+      line(envelope(*old_flips, panel == 0 ? "memory" : "packed", idx), slot[0], true);
+      if (panel == 0) legend.emplace_back("dashed: our BC3 layout and raw", slot[0]);
+    }
     if (panel == 0 && flips_more) {  // with the extra tables (F3: flipbooks without their empty space)
       line(envelope(*flips_more, "memory", idx), slot[6]);
       legend.emplace_back("flipbooks trimmed to their content", slot[6]);
@@ -912,11 +822,16 @@ void write_figure(const fs::path& path, const std::string& title, const Family& 
         legend.emplace_back(shown[v] == "aom" ? "AV1 (libaom, 4:4:4)" : shown[v] == "x265" ? "HEVC (x265, 4:4:4)" : "VP9 with alpha (4:2:0)", slot[2 + v]);
       }
     }
-    double lx = x0;
+    double lx = x0, row_y = y0 - 30;  // up to two rows within the panel's width
     for (const auto& [name, colour] : legend) {
-      o << std::format("<rect x=\"{:.1f}\" y=\"{}\" width=\"14\" height=\"4\" rx=\"2\" fill=\"{}\"/>\n", lx, y0 - 16, colour);
-      o << std::format("<text x=\"{:.1f}\" y=\"{}\" font-size=\"11\" fill=\"{}\">{}</text>\n", lx + 18, y0 - 11, ink2, name);
-      lx += 26 + 6.2 * static_cast<double>(name.size());
+      const double w = 26 + 6.2 * static_cast<double>(name.size());
+      if (lx > x0 && lx + w - 8 > x0 + pw) {
+        lx = x0;
+        row_y += 14;
+      }
+      o << std::format("<rect x=\"{:.1f}\" y=\"{}\" width=\"14\" height=\"4\" rx=\"2\" fill=\"{}\"/>\n", lx, row_y, colour);
+      o << std::format("<text x=\"{:.1f}\" y=\"{}\" font-size=\"11\" fill=\"{}\">{}</text>\n", lx + 18, row_y + 5, ink2, name);
+      lx += w;
     }
     std::vector<std::array<double, 4>> placed;  // label boxes: x0, y0, x1, y1
     for (const auto& [k, p] : nets) {
@@ -1021,6 +936,16 @@ void step_report(const Ctx& c, const std::vector<std::string>& only_configs, con
   };
   std::erase_if(flips, [&](const auto& kv) { return !complete(kv.second); });
   std::erase_if(flips_stored, [&](const auto& kv) { return !complete(kv.second); });
+  // The flipbook baselines: the original (our BC3 layout and raw), with BC7, and with BC7 and ASTC (`flips`, the
+  // strongest, which the ratios without a qualifier are against). With extra tables (F3) each includes their rows.
+  using tools::Baseline;
+  constexpr std::array kBaselines = {Baseline::bc3_layout, Baseline::desktop, Baseline::all};
+  std::map<Baseline, Family> by_baseline;
+  for (const Baseline b : kBaselines) {
+    for (const auto& [k, p] : flips) {
+      if (tools::in_baseline(k, b)) by_baseline[b][k] = p;
+    }
+  }
   for (auto& [k, fam] : videos) std::erase_if(fam, [&](const auto& kv) { return !complete(kv.second); });
   std::erase_if(all_video, [&](const auto& kv) { return !complete(kv.second); });
   std::vector<std::size_t> idx(n);
@@ -1028,10 +953,12 @@ void step_report(const Ctx& c, const std::vector<std::string>& only_configs, con
 
   std::println("## Study F2 on the {} set ({} clips)\n", c.set, n);
   if (!flips.empty()) {
-    for (const std::string m : {"memory", "packed"}) {
-      std::string s;
-      for (const auto& [kb, q] : envelope(flips, m, idx)) s += std::format(" {:.1f}:{:.2f}", kb / 1024, q);
-      std::println("Flipbook envelope ({}, KB:dB):{}", m, s);
+    for (const Baseline b : kBaselines) {
+      for (const std::string m : {"memory", "packed"}) {
+        std::string s;
+        for (const auto& [kb, q] : envelope(by_baseline[b], m, idx)) s += std::format(" {:.1f}:{:.2f}", kb / 1024, q);
+        std::println("Flipbook envelope, {} ({}, KB:dB):{}", tools::baseline_name(b), m, s);
+      }
     }
   }
   for (const auto& [name, fam] : videos) {
@@ -1039,7 +966,8 @@ void step_report(const Ctx& c, const std::vector<std::string>& only_configs, con
     for (const auto& [kb, q] : envelope(fam, "payload", idx)) s += std::format(" {:.1f}:{:.2f}", kb / 1024, q);
     std::println("{} envelope (payload, KB:dB):{}", name, s);
   }
-  std::println("\n| network | active PSNR | stored KB | resident KB | packed KB | memory vs flipbooks | disk: packed vs packed flipbooks | dB vs flipbooks at equal memory |");
+  std::println("\nFlipbooks below: every format (BC3 layout, raw, BC7, ASTC), the best at each size.\n");
+  std::println("| network | active PSNR | stored KB | resident KB | packed KB | memory vs flipbooks | disk: packed vs packed flipbooks | dB vs flipbooks at equal memory |");
   std::println("|---|---:|---:|---:|---:|---|---|---|");
   std::ofstream eq(c.out / std::format("{}_equal_quality_{}{}.csv", c.study, c.set, c.suffix));
   eq << "set,network,clips,active_psnr,stored_kb,resident_kb,scratch_kb,packed_kb,baseline,net_measure,baseline_measure,baseline_kb,ratio,ratio_lo,ratio_hi,censor,censored_share,"
@@ -1055,6 +983,7 @@ void step_report(const Ctx& c, const std::vector<std::string>& only_configs, con
                       net_extra[k]["scratch"] / 1024, mean_at(p.b.at("packed"), idx) / 1024, base, nm, bm, r.other_kb, r.point, r.lo, r.hi, r.censor,
                       r.censored_share, r.dq, r.dq_lo, r.dq_hi);
   };
+  std::map<std::string, std::map<Baseline, std::pair<Ratio, Ratio>>> per_baseline;  // network -> (memory, disk)
   for (const auto& [k, pp] : order) {
     const Point& p = *pp;
     std::string mem = "-", disk = "-", ddb = "-";
@@ -1066,15 +995,49 @@ void step_report(const Ctx& c, const std::vector<std::string>& only_configs, con
       ddb = std::format("{:+.2f} [{:+.2f}, {:+.2f}]", rm.dq, rm.dq_lo, rm.dq_hi);
       write(k, p, "flipbook", "stored", "memory", rm);
       write(k, p, "flipbook", "packed", "packed", rd);
+      per_baseline[k][Baseline::all] = {rm, rd};
+      for (const Baseline b : {Baseline::bc3_layout, Baseline::desktop}) {
+        const std::string name = std::format("flipbook_{}", tools::baseline_key(b));
+        auto& [m, d] = per_baseline[k][b];
+        m = equal_quality(p, "stored", by_baseline[b], "memory");
+        d = equal_quality(p, "packed", by_baseline[b], "packed");
+        write(k, p, name, "stored", "memory", m);
+        write(k, p, name, "packed", "packed", d);
+      }
     }
     std::println("| {} | {:.2f} | {:.1f} | {:.1f} | {:.1f} | {} | {} | {} |", k, mean_at(p.q, idx), mean_at(p.b.at("stored"), idx) / 1024,
                  mean_at(p.b.at("resident"), idx) / 1024, mean_at(p.b.at("packed"), idx) / 1024, mem, disk, ddb);
   }
+  if (!flips.empty()) {
+    std::println("\nAgainst each flipbook baseline (equal mean active PSNR; memory, then disk with both sides packed):\n");
+    std::string head = "| network |", rule = "|---|";
+    for (const std::string m : {"memory", "disk"}) {
+      for (const Baseline b : kBaselines) {
+        head += std::format(" {}: {} |", m, tools::baseline_name(b));
+        rule += "---|";
+      }
+    }
+    std::println("{}\n{}", head, rule);
+    for (const auto& [k, pp] : order) {
+      std::string line = std::format("| {} |", k);
+      for (const int disk : {0, 1}) {
+        for (const Baseline b : kBaselines) {
+          const auto& rr = per_baseline[k][b];
+          line += " " + ratio_cell(disk ? rr.second : rr.first) + " |";
+        }
+      }
+      std::println("{}", line);
+    }
+  }
   if (!figure.empty()) {
     std::string study = c.study;
     std::ranges::transform(study, study.begin(), [](unsigned char ch) { return static_cast<char>(std::toupper(ch)); });
+    Family old_stored;  // our BC3 layout and raw, as stored: the first baseline, dashed
+    for (const auto& [k, p] : flips_stored) {
+      if (tools::in_baseline(k, Baseline::bc3_layout)) old_stored[k] = p;
+    }
     write_figure(figure, std::format("Study {}, {} clips ({} set): quality against bytes", study, n, c.set), c.flipbooks.empty() ? flips : flips_stored,
-                 c.flipbooks.empty() ? nullptr : &flips, videos, order, idx);
+                 &old_stored, c.flipbooks.empty() ? nullptr : &flips, videos, order, idx);
     std::println("figure: {}", figure);
   }
   if (!videos.empty()) {
@@ -1484,7 +1447,7 @@ int main(int argc, char** argv) try {
   c.teacher = a.str("teacher", "");
   for (const auto& f : split(a.str("flipbooks", ""))) c.flipbooks.emplace_back(f);
   c.suffix = a.str("suffix", "");
-  g_pareto = a.flag("pareto");
+  tools::pareto_envelope = a.flag("pareto");
   const std::string step = pos[0];
   if (step == "data") step_data(c);
   else if (step == "flipbooks") step_flipbooks(c);
