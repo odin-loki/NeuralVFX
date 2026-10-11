@@ -341,6 +341,7 @@ struct RtEffect {
 Clip runtime_clip(const RtEffect& fx, const Model& m, std::size_t& scratch) {
   nvfx_instance* in = nullptr;
   if (nvfx_instance_create(fx.e, kSize, &in) != NVFX_OK) throw std::runtime_error("runtime instance failed");
+  nvfx_instance_set_precision(in, NVFX_PRECISION_FLOAT);  // the float network, as the study scored it
   nvfx_instance_set_drift(in, 0.f);
   nvfx_instance_set_variation(in, 0);
   scratch = nvfx_instance_scratch_bytes(in);
@@ -1182,6 +1183,7 @@ void step_timing(const std::vector<std::string>& models, int core, int reps) {
     nvfx_effect_get_info(fx.e, &info);
     nvfx_instance* in = nullptr;
     if (nvfx_instance_create(fx.e, kSize, &in) != NVFX_OK) throw std::runtime_error("instance failed");
+    nvfx_instance_set_precision(in, NVFX_PRECISION_FLOAT);  // the float network, as first timed (int8: nvfx_experiment int8-timing)
     std::vector<std::uint8_t> buf(static_cast<std::size_t>(kSize) * kSize * 4);
     double best = 1e9;
     for (int r = 0; r < reps; ++r) {

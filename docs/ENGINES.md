@@ -48,6 +48,7 @@ smoke (colour at most alpha).
 | variation | `nvfx_instance_set_seed`, `nvfx_instance_set_variation` (replay a training clip), `nvfx_instance_set_drift` | learned |
 | playback speed | scale the time you pass to `nvfx_render` | exact |
 | hue and brightness | `nvfx_instance_set_colour` | exact (applied to the output colour) |
+| precision (grid frame models) | `nvfx_instance_set_precision`: `NVFX_PRECISION_INT8` (the default for the grid family) or `NVFX_PRECISION_FLOAT` | int8 changes a few pixels by a few levels (REPORT.md §7); float is the reference network |
 
 Looping effects wrap time; one-shot effects (explosions) hold their last frame after their duration
 (`info.frames / info.fps` seconds).
@@ -127,8 +128,8 @@ is the same; what differs:
 - **One instance per playing copy.** The state belongs to the instance; two copies that should look different need two
   instances (sharing one instance shares the look, as before).
 - **Memory**: the effect holds the weights and the start points (stored and resident sizes in `nvfx_effect_info`);
-  each instance holds two shards' states and work buffers (`nvfx_instance_scratch_bytes`: about 4.0 MB at 128 x 128,
-  2.3 MB at 64 x 64).
+  each instance holds two shards' states and one set of work buffers that both shards' steps share
+  (`nvfx_instance_scratch_bytes`: about 2.4 MB at 128 x 128, 1.5 MB at 64 x 64; 4.0 and 2.3 MB before they shared it).
 - `nvfx_bake` renders consecutive frames from a fresh start and crossfades a few extra frames into the first ones, so
   the flipbook loops.
 
@@ -137,6 +138,6 @@ is the same; what differs:
 | what | where | size |
 |---|---|---|
 | effect weights | `nvfx_effect` | `info.resident_bytes`: features stay at their stored precision (8 or 16 bits); the small MLP is widened to floats |
-| per instance | `nvfx_instance` | `nvfx_instance_scratch_bytes`: a few tens of KB (rollout effects: about 4 MB at 128 x 128, 1.1 MB more with a prior) |
+| per instance | `nvfx_instance` | `nvfx_instance_scratch_bytes`: a few tens of KB at float precision; at int8 (the grid family's default) 60 to 400 KB, most of it the first layer evaluated at every grid point (grid_m 0.18 MB, grid_l 0.38 MB); rollout effects about 2.4 MB at 128 x 128, 1.1 MB more with a prior |
 | prior against drift (optional, rollout effects) | `nvfx_effect`, after `nvfx_effect_attach_prior` | the denoiser's weights as floats: 1.57 MB for fire; counted in `info.resident_bytes` |
 | output | the engine's buffer | size x size x 4 bytes |

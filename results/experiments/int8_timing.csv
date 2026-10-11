@@ -1,0 +1,85 @@
+model,size,isa,precision,cpu_ms,wall_ms,runs,note
+grid_s,64,avx2,float,0.0670,0.0667,5,
+grid_s,64,avx2,int8,0.0306,0.0303,5,
+grid_s,64,avx512,float,0.0841,0.0838,5,
+grid_s,64,avx512,int8,0.0488,0.0485,5,int8: VNNI where the CPU has it
+grid_s,128,avx2,float,0.2487,0.2484,5,
+grid_s,128,avx2,int8,0.0902,0.0899,5,
+grid_s,128,avx512,float,0.3091,0.3088,5,
+grid_s,128,avx512,int8,0.1144,0.1140,5,int8: VNNI where the CPU has it
+grid_s,128,baseline,float,0.4415,0.4411,5,
+grid_s,128,baseline,int8,0.3716,0.3713,5,
+grid_s,256,avx2,float,0.9638,0.9635,5,
+grid_s,256,avx2,int8,0.3182,0.3178,5,
+grid_s,256,avx512,float,1.2514,1.2507,5,
+grid_s,256,avx512,int8,0.3827,0.3823,5,int8: VNNI where the CPU has it
+grid_m,64,avx2,float,0.1963,0.1960,5,
+grid_m,64,avx2,int8,0.1513,0.1509,5,
+grid_m,64,avx512,float,0.2383,0.2379,5,
+grid_m,64,avx512,int8,0.1399,0.1396,5,int8: VNNI where the CPU has it
+grid_m,128,avx2,float,0.7604,0.7599,5,
+grid_m,128,avx2,int8,0.5277,0.5272,5,
+grid_m,128,avx512,float,0.9341,0.9334,5,
+grid_m,128,avx512,int8,0.4591,0.4584,5,int8: VNNI where the CPU has it
+grid_m,128,baseline,float,2.0353,2.0348,5,
+grid_m,128,baseline,int8,1.4398,1.4404,5,
+grid_m,256,avx2,float,2.9895,2.9904,5,
+grid_m,256,avx2,int8,1.9254,1.9290,5,
+grid_m,256,avx512,float,3.5805,3.5827,5,
+grid_m,256,avx512,int8,1.6319,1.6311,5,int8: VNNI where the CPU has it
+grid_l,64,avx2,float,0.1967,0.1964,5,
+grid_l,64,avx2,int8,0.1909,0.1906,5,
+grid_l,64,avx512,float,0.2585,0.2581,5,
+grid_l,64,avx512,int8,0.1802,0.1797,5,int8: VNNI where the CPU has it
+grid_l,128,avx2,float,0.7834,0.7828,5,
+grid_l,128,avx2,int8,0.5943,0.5940,5,
+grid_l,128,avx512,float,1.0042,1.0080,5,
+grid_l,128,avx512,int8,0.4967,0.4961,5,int8: VNNI where the CPU has it
+grid_l,128,baseline,float,2.0702,2.0716,5,
+grid_l,128,baseline,int8,1.4461,1.4456,5,
+grid_l,256,avx2,float,3.0111,3.0105,5,
+grid_l,256,avx2,int8,2.1043,2.1117,5,
+grid_l,256,avx512,float,4.0239,4.0687,5,
+grid_l,256,avx512,int8,1.7071,1.7060,5,int8: VNNI where the CPU has it
+grid_mt,64,avx2,float,0.2000,0.1996,5,
+grid_mt,64,avx2,int8,0.1557,0.1555,5,
+grid_mt,64,avx512,float,0.2590,0.2587,5,
+grid_mt,64,avx512,int8,0.1321,0.1317,5,int8: VNNI where the CPU has it
+grid_mt,128,avx2,float,0.7701,0.7696,5,
+grid_mt,128,avx2,int8,0.5242,0.5236,5,
+grid_mt,128,avx512,float,1.0168,1.0160,5,
+grid_mt,128,avx512,int8,0.4296,0.4287,5,int8: VNNI where the CPU has it
+grid_mt,128,baseline,float,2.0614,2.0630,5,
+grid_mt,128,baseline,int8,1.4319,1.4314,5,
+grid_mt,256,avx2,float,2.9553,2.9602,5,
+grid_mt,256,avx2,int8,1.9004,1.9007,5,
+grid_mt,256,avx512,float,3.7778,3.7775,5,
+grid_mt,256,avx512,int8,1.5918,1.5908,5,int8: VNNI where the CPU has it
+control_k8,64,avx2,float,0.1962,0.1959,5,
+control_k8,64,avx2,int8,0.1602,0.1599,5,
+control_k8,64,avx512,float,0.2485,0.2482,5,
+control_k8,64,avx512,int8,0.1464,0.1460,5,int8: VNNI where the CPU has it
+control_k8,128,avx2,float,0.7372,0.7367,5,
+control_k8,128,avx2,int8,0.5224,0.5219,5,
+control_k8,128,avx512,float,0.9582,0.9575,5,
+control_k8,128,avx512,int8,0.4562,0.4555,5,int8: VNNI where the CPU has it
+control_k8,128,baseline,float,2.0704,2.0875,5,
+control_k8,128,baseline,int8,1.4641,1.4668,5,
+control_k8,256,avx2,float,2.9082,2.9132,5,
+control_k8,256,avx2,int8,1.9868,1.9864,5,
+control_k8,256,avx512,float,3.7978,3.8019,5,
+control_k8,256,avx512,int8,1.5638,1.5630,5,int8: VNNI where the CPU has it
+variation_k8,64,avx2,float,0.2046,0.2043,5,
+variation_k8,64,avx2,int8,0.1693,0.1689,5,
+variation_k8,64,avx512,float,0.2718,0.2711,5,
+variation_k8,64,avx512,int8,0.1508,0.1505,5,int8: VNNI where the CPU has it
+variation_k8,128,avx2,float,0.7707,0.7707,5,
+variation_k8,128,avx2,int8,0.5340,0.5333,5,
+variation_k8,128,avx512,float,0.9703,0.9695,5,
+variation_k8,128,avx512,int8,0.4554,0.4548,5,int8: VNNI where the CPU has it
+variation_k8,128,baseline,float,2.0627,2.0625,5,
+variation_k8,128,baseline,int8,1.4499,1.4494,5,
+variation_k8,256,avx2,float,2.8868,2.8873,5,
+variation_k8,256,avx2,int8,1.9542,1.9618,5,
+variation_k8,256,avx512,float,3.8452,3.8516,5,
+variation_k8,256,avx512,int8,1.6083,1.6073,5,int8: VNNI where the CPU has it

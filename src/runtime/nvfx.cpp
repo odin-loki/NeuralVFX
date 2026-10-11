@@ -99,12 +99,14 @@ nfx::rt::Precision frame_precision(const nfx::Model& m, nvfx_precision p) {
   return nfx::rt::Precision::int8;
 }
 
-// A frame model's renderer on the instances' ISA. With int8 and no ISA forced, the AVX-512 build is taken where the CPU
-// has VNNI (its integer kernel); float stays on AVX2 (docs/PLAN.md §8).
+// A frame model's renderer on the instances' ISA. With int8, a hidden layer to run in integers and no ISA forced, the
+// AVX-512 build is taken where the CPU has VNNI (its integer kernel: 0.46 against 0.53 ms for grid_m at 128 px,
+// docs/REPORT.md §7); everything else stays on AVX2 (docs/PLAN.md §8).
 std::unique_ptr<Renderer> make_frame_renderer(const nfx::rt::Effect& e, int size, nvfx_precision p, nvfx_isa forced) {
   const nfx::rt::Precision q = frame_precision(e.m, p);
   nvfx_isa isa = forced != NVFX_ISA_AUTO ? forced : cpu_has(NVFX_ISA_AVX2) ? NVFX_ISA_AVX2 : NVFX_ISA_BASELINE;
-  if (q == nfx::rt::Precision::int8 && forced == NVFX_ISA_AUTO && cpu_has(NVFX_ISA_AVX512) && cpu_has_vnni()) isa = NVFX_ISA_AVX512;
+  const bool hidden = e.m.layers.size() > 2;
+  if (q == nfx::rt::Precision::int8 && hidden && forced == NVFX_ISA_AUTO && cpu_has(NVFX_ISA_AVX512) && cpu_has_vnni()) isa = NVFX_ISA_AVX512;
   switch (isa) {
     case NVFX_ISA_AVX512: return nfx::rt::isa_avx512::make_renderer(e, size, q);
     case NVFX_ISA_AVX2: return nfx::rt::isa_avx2::make_renderer(e, size, q);

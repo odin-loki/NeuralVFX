@@ -20,10 +20,11 @@ Plan and decisions: [PLAN.md](PLAN.md).
     40 s.
 - **The learned dynamics follow a held-out run better than the simulation at the same resolution**: +2.1 to +4.7 dB
   of active PSNR after 1 s (intervals above zero), until the chaos makes every method equal.
-- **The price is CPU: 0.8 to 0.9 ms per 128 x 128 frame (0.4 to 0.5 ms at 64 px) and 4.0 MB of working memory per
+- **The price is CPU: 0.8 to 0.9 ms per 128 x 128 frame (0.4 to 0.5 ms at 64 px) and 2.4 MB of working memory per
   playing instance**, after the runtime's rollout code was optimised (2.0 to 2.4 ms before, measured in the same
-  session; §7). That suits a handful of hero effects, not crowds of sprites. It is not at the real floor yet: two real
-  seeds are 0.07 to 0.12 closer in detail, and the first frames of an explosion are poorly drawn (§6.4).
+  session; §7). The memory was 4.0 MB until the instance's two shards shared their step buffers (§7). That suits a
+  handful of hero effects, not crowds of sprites. It is not at the real floor yet: two real seeds are 0.07 to 0.12
+  closer in detail, and the first frames of an explosion are poorly drawn (§6.4).
 - **Compression works, and in the range NVIDIA claims.** On 12 effect clips, a network per clip beats flipbooks
   of the same memory by **+2.8 to +7.0 dB** of active-region PSNR at every budget from 128 to 512 KB (every 95%
   interval above zero; SSIM better or tied). For equal quality the networks need **3.6 to 5.9 times less memory**:
@@ -52,6 +53,11 @@ Plan and decisions: [PLAN.md](PLAN.md).
   grid model (73 KB, 0.25 ms) and the small conv model (69 KB, 0.43 ms) meet the 0.5 ms target set in the plan (§7).
   These are from a later session of the same cloud VM type, in which unchanged code ran 1.2 to 1.4 times faster than
   in the first; the first session's figures were 0.38 to 1.1 ms, with only the small grid model under 0.5 ms.
+- **int8 (since 11 October 2026; timings provisional, from a busy machine).** The grid models now run their hidden
+  layers in 8-bit integers, with the first layer evaluated per grid point and interpolated, by default. Where the CPU
+  has AVX-512 VNNI, grid_m, grid_l, grid_mt and the B and C models take 0.43 to 0.50 ms per 128 x 128 frame, against
+  0.74 to 0.78 ms for the float network measured alongside; with AVX2 alone 0.52 to 0.59 ms. Study A's 12 clips lose
+  **−0.008 [−0.015, −0.001] dB** of active PSNR, within the −0.05 dB set for a default (§7).
 - **The plan's continuation rule is met** (PLAN.md §7: beat the flipbook of equal memory on held-out data, interval above
   zero, within 1 ms per 128² frame): on held-out settings (study B, against a 45 times larger flipbook library) and on
   held-out frames against a BC3 flipbook with four times the memory (study A; motion-vector flipbooks still win
@@ -60,7 +66,7 @@ Plan and decisions: [PLAN.md](PLAN.md).
   fire play one continuous run; its fine-detail mixer fails twice. Computing on compressed data is slower than dense
   code here, but LZ tokens and lighter models make the coder decode 4 to 38 times faster. Training with couplings
   improves the explosion inside scenes. The composed fireball runs at 80 frames per second at 720p on 4 threads.
-- **Not done:** owner footage (none supplied), a BC7 baseline, int8 kernels, an engine plugin (§9, §10).
+- **Not done:** owner footage (none supplied), a BC7 baseline, an engine plugin (§9, §10).
 
 ## 2. How it was measured
 
@@ -189,7 +195,8 @@ separate validation clips. Details in `results/compression/README.md`, study F2.
   now need **4.1x [2.6, 4.5]** less disk (1.4x at 8 bits).
 - **Video codecs win on disk by far.** AV1 (libaom, 4:4:4) reaches the same 30.5 dB in 8.0 KB, 2.8 times less than the
   best network (22.3 KB); HEVC, VP9 and H.264 also need less, VP9 with alpha ties. 4:2:0 video caps fire at 29 dB.
-- **Networks win in memory against video:** 71 KB resident plus 44 KB working memory, against 2.6 to 23 MB for a
+- **Networks win in memory against video:** 71 KB resident plus 44 KB working memory (180 KB with the int8 path's
+  projected grid, the default since §7's int8 round), against 2.6 to 23 MB for a
   running decoder (inside ffmpeg) or 4 MB of decoded frames, and any frame can be drawn without decoding from a
   keyframe.
 - **Rollout effects (G3c):** 6-bit start states keep study D's test statistics on fire (one better, four tied) and
@@ -454,9 +461,12 @@ runtime's rollout code was optimised; in brackets the code before that, built an
 
 | effect | stored | resident | per instance at 128 px | 64 px | 128 px | 256 px | restart (seek) |
 |---|---:|---:|---:|---:|---:|---:|---:|
-| fire | 82 KB | 163 KB | 4.0 MB (3.4) | 0.47 (0.98) | 0.91 (2.40) | 2.37 (7.08) | 14 ms (42), 1 s warm-up |
-| smoke | 146 KB | 419 KB | 4.0 MB (3.4) | 0.48 (0.91) | 0.85 (2.13) | 2.35 (6.71) | 0.4 ms (0.7) |
-| explosion | 274 KB | 804 KB | 4.0 MB (3.4) | 0.44 (0.87) | 0.78 (1.96) | 1.76 (5.50) | 0.4 ms (0.7) |
+| fire | 82 KB | 163 KB | 2.4 MB (4.0; 3.4) | 0.47 (0.98) | 0.91 (2.40) | 2.37 (7.08) | 14 ms (42), 1 s warm-up |
+| smoke | 146 KB | 419 KB | 2.4 MB (4.0; 3.4) | 0.48 (0.91) | 0.85 (2.13) | 2.35 (6.71) | 0.4 ms (0.7) |
+| explosion | 274 KB | 804 KB | 2.4 MB (4.0; 3.4) | 0.44 (0.87) | 0.78 (1.96) | 1.76 (5.50) | 0.4 ms (0.7) |
+
+Per instance: 2.4 MB since the instance's two runners share one set of step buffers (11 October 2026); 4.0 MB when
+each had its own, 3.4 MB before the optimisation. The frames are the same to the bit.
 
 The optimisation (separable interpolation, cheaper flicker noise, vectorised advection, a row pipeline with small
 rings, a vectorised coarse step and renderer) changes no output: the runtime's parity tests still give a worst
@@ -473,8 +483,9 @@ our scalar code. Study A's grid_m costs 0.78 ms and the full simulation 6.9 to 9
 - **It is no longer expensive per frame**: 0.8 to 0.9 ms at 128 px is about study A's grid_m (0.78 ms) and 110 to 130
   times a flipbook. Part goes to the coarse step, which costs the same at every size; the rest is the detail layer and
   the renderer, which scale with pixels, so 64 px costs about half of 128 px rather than a quarter.
-- **Each instance needs 4.0 MB of working memory** at 128 px (2.3 MB at 64 px): two shards' fine fields and buffers.
-  The faster code keeps more buffers than before (3.4 and 2.0 MB).
+- **Each instance needs 2.4 MB of working memory** at 128 px (1.5 MB at 64 px): two shards' fine fields and states, and
+  one set of step buffers that they share. With a set each it was 4.0 and 2.3 MB; before the optimisation, 3.4 and
+  2.0 MB.
 - **Seeks are cheap**: a restart costs about 0.4 ms where start points keep fine fields. Fire, which grows its fine
   fields from a coarse start, takes 14 ms.
 - **No allocation per frame**, including restarts and shard changes (`tests/alloc_test.cpp`).
@@ -489,7 +500,7 @@ Using the chaos instead of fighting it works where studies A to C did not:
   flipbook.
 - **The learned dynamics beat the simulation at the same resolution** at following a real run for 1 to 2 s, by
   2 to 5 dB.
-- **The price is per-frame CPU** (0.8 to 0.9 ms at 128 px after the runtime's optimisation) **and 4.0 MB per playing
+- **The price is per-frame CPU** (0.8 to 0.9 ms at 128 px after the runtime's optimisation) **and 2.4 MB per playing
   instance.** This suits a handful of hero effects at 64 to 128 px, updated at 30 Hz, not dozens of sprites.
 
 What did not work, or is not done:
@@ -530,16 +541,67 @@ effects (D) after the runtime's rollout code was optimised; the first session's 
   control and variation models cost the same as grid_m.
 - **The 0.5 ms budget is met by grid_s (0.25 ms) and conv_s (0.43 ms).** In the first session only grid_s met it
   (conv_s 0.57 ms). grid_m takes 0.78 ms (0.33 ms at 64 px). conv_s costs about the same at every size: its level of
-  detail renders the native frame and filters it down, so distant copies save nothing.
-- AVX-512 is slower than AVX2 on this machine (grid_m 1.41 against 0.78 ms); the baseline SSE2 build is 1.8 to 2.7
-  times slower. The default is AVX2.
+  detail renders the native frame and filters it down, so distant copies save nothing. With int8 (below, now the
+  default) grid_m, grid_l, grid_mt and the B and C models meet it too where the CPU has AVX-512 VNNI (0.43 to 0.50 ms,
+  provisional), not with AVX2 alone (0.52 to 0.59 ms).
+- AVX-512 is slower than AVX2 on this machine for the float network (grid_m 1.41 against 0.78 ms; 0.93 ms since a
+  broadcast in the shared kernels compiles to one instruction, provisional, below); the baseline SSE2 build is 1.8 to
+  2.7 times slower. The default is AVX2, and the AVX-512 build for int8 where the CPU has VNNI.
 - The networks are 8 to 37 times cheaper per frame than running the simulation, and 35 to 125 times more expensive
   than playing a flipbook.
 - **Rollout effects (D) cost 0.8 to 0.9 ms at 128 px**, about the same as the frame-model networks of the same width,
-  and each playing instance holds 4.0 MB of state and buffers (2.3 MB at 64 px). MAC per pixel counts the convolutions
-  of the coarse step spread over the pixels and the renderer, not the projection, advection or noise. A seek costs
-  about 0.4 ms (fire: 14 ms, its start points grow their fine fields). The detail layer still runs at full resolution
-  every frame.
+  and each playing instance holds 2.4 MB of state and buffers (1.5 MB at 64 px; 4.0 and 2.3 MB before its two shards
+  shared their step buffers, 11 October 2026: the same frames, and no measurable change in time). MAC per pixel counts
+  the convolutions of the coarse step spread over the pixels and the renderer, not the projection, advection or noise.
+  A seek costs about 0.4 ms (fire: 14 ms, its start points grow their fine fields). The detail layer still runs at full
+  resolution every frame.
+
+**int8 hidden layers and a projected first layer** (11 October 2026). Timings are **provisional**: thread CPU time on
+one pinned core of a machine shared with other jobs, the least of five runs' medians over 180 frames
+(`results/experiments/int8_timing.csv`); the main tables above are float. Quality: `int8_quality.csv` and
+`int8_summary.csv`. The code is `src/runtime/rt_int8.hpp`.
+- **The hidden layers** (32 to 32 units in grid_m) multiply 8-bit activations by 8-bit weights and add in 32-bit
+  integers. Weights have one scale per unit, activations one per pixel (its largest unit maps to 255; they follow a
+  ReLU). With AVX-512 VNNI one instruction does 64 multiply-adds; with AVX2 alone, pairs of 16-bit products
+  (`pmaddwd`) give the same sums at a quarter of the rate. The first and output layers stay in float; the last hidden
+  layer feeds the output layer directly.
+- **The first layer is projected.** It is linear in the features, which reach a pixel by bilinear interpolation, so it
+  is evaluated at the grid points once per frame (FiLM folded in) and its 32 outputs are interpolated instead of the 8
+  features: 256 multiply-adds per pixel fewer, for 24 more interpolations done with a vector permute. Used where the
+  frame has at least as many pixels across as the grid has points, on AVX2 and AVX-512.
+- **It is the default for the grid family** (`nvfx_instance_set_precision`; `NVFX_PRECISION_FLOAT` gives the float
+  network, unchanged). The conv family and rollout effects stay float. With no ISA forced, int8 instances of models with
+  a hidden layer take the AVX-512 build where the CPU has VNNI. The studies' tables stay those of the float network
+  (`nvfx_experiment` scores at float; its `int8` step measures the difference).
+
+| model, 128 px | float, AVX2 | int8, AVX2 | int8, AVX-512 VNNI | active PSNR change, int8 - float |
+|---|---:|---:|---:|---|
+| grid_s (no hidden layer: the projection alone) | 0.249 | **0.090** | 0.114 | 0.000 (3 clips) |
+| grid_m | 0.760 | 0.528 | **0.459** | **−0.008 [−0.015, −0.001]** (A, 12 clips) |
+| grid_l | 0.783 | 0.594 | **0.497** | −0.017 [−0.034, −0.004] (3 clips) |
+| grid_mt | 0.770 | 0.524 | **0.430** | −0.005 [−0.007, −0.002] (3 clips) |
+| control model k8 (B) | 0.737 | 0.522 | **0.456** | −0.004 [−0.013, +0.005] (30 held-out settings, a tie) |
+| variation model k8 (C) | 0.771 | 0.534 | **0.455** | −0.027 [−0.033, −0.022] (72 training seeds replayed) |
+
+- **Quality.** The rule, set before measuring: int8 becomes the default if study A's mean change in active PSNR is
+  within −0.05 dB with an interval not entirely below that. grid_m on the 12 clips: 32.619 to 32.611 dB, **−0.008
+  [−0.015, −0.001]**: met. Elsewhere: B's k16 +0.005 [−0.007, +0.014], C's k24 −0.028 [−0.034, −0.022], study A's
+  grid_m at fp16 features −0.005 [−0.012, −0.001]. No channel of study A's frames moves by more than 6 levels of 255
+  (0.05 on average); on B and C up to 16 (0.11 to 0.15 on average). The int8 frames of the three ISAs agree within 1
+  to 3 levels (their float parts round differently).
+- **One scale per pixel is what makes 8 bits enough.** In a scalar simulation on the same 12 clips (outside the
+  repository), one activation scale for the whole clip lost 0.46 dB (at 7 bits); per pixel, 7-bit activations lost
+  0.018 dB and 8-bit 0.008 dB, and 7-bit weights 0.03 dB; quantising the output layer too cost 0.02 dB more.
+- **Cost.** With VNNI the better models meet 0.5 ms (grid_l just). With AVX2 alone they do not: the integer layer is
+  half of the time there. At 64 px the gain is smaller (grid_m 0.20 to 0.14 ms; grid_l 0.20 to 0.18: the projection's
+  per-frame work over 48 x 48 points weighs more), at 256 px larger (grid_m 2.99 to 1.63 ms). The baseline SSE2 build
+  takes 1.44 ms against 2.04 ms in float. An int8 instance holds the projected grid: 0.18 MB for grid_m and 0.38 MB for
+  grid_l, against 0.04 and 0.08 MB in float.
+- **AVX-512 float, found on the way:** the shared kernels' broadcast of a weight (`splat`) filled a 512-bit vector
+  through the stack (four 128-bit stores, then a load: a store-forwarding stall per tile of outputs). It now compiles to
+  one broadcast: the AVX-512 build's float grid_m went from 1.41 to 0.93 ms, with the same values. AVX2 is still faster.
+- To re-time on a quiet machine: `build/nvfx_experiment int8-timing --runs 5 --core 3` (two minutes; float and int8
+  per ISA at 64, 128 and 256 px), and `build/nvfx_experiment int8` for the quality (eight minutes on one core).
 
 **A scene** (`nvfx_scene`): 8 instances at 128 px and 16 at 64 px, each updated at 30 Hz, staggered over a 60 fps
 game, on one core, in the later session: grid_s 1.7 ms per game frame on average (10% of 16.7 ms; 99th percentile
@@ -590,14 +652,16 @@ Against traditional methods:
    which say whether it looks like the effect, not whether it matches a given run; they can miss artefacts that a
    person would see.
 4. **Variations are morphs of the training seeds**, softer than real ones, not new turbulence.
-5. **The runtime misses the 0.5 ms target for the better models** (grid_m 0.78 ms; 1.06 ms in the first session). The kernels run at about 45% of the
-   core's FMA peak; int8 or VNNI kernels and a projected first layer were not done. The conv family's level of
+5. **The better models meet the 0.5 ms target only with int8 and AVX-512 VNNI** (grid_m 0.46 ms, grid_l 0.50 ms;
+   provisional, measured on a busy machine). With AVX2 alone the int8 path takes 0.52 to 0.59 ms: its integer layer
+   uses pairs of 16-bit products (AVX-VNNI, on newer CPUs without AVX-512, is not used: none was at hand to test). The
+   float network takes 0.78 ms (1.06 ms in the first session). The conv family has no int8 path, and its level of
    detail saves no time.
 6. **One cloud VM.** Timings carry VM jitter (90th percentiles usually 4-10% above the medians, up to 70% in a few cells; scene p99 three times the mean), and the same code ran 1.2 to 1.4 times faster in a later session than in the first (§7).
 7. **Small samples.** 12 clips (A) and 30 settings (B) from one simulator; intervals are over those, not over the
    variety of effects a game has.
 8. **No engine plugin was built or tested in an engine.** The C API is engine-neutral and its example host is tested.
-9. **Rollout effects (D) cost about a frame model's time per frame** (0.8 to 0.9 ms at 128 px) **but 4.0 MB per
+9. **Rollout effects (D) cost about a frame model's time per frame** (0.8 to 0.9 ms at 128 px) **but 2.4 MB per
    instance**, and they are not yet at the real floor (detail 0.07 to 0.12 further than a second real seed, motion 10-13% low on fire and smoke), and:
    - The explosion's first frames are poorly drawn by the learned renderer.
    - Smoke wanders from a tracked run after a few seconds.
@@ -611,22 +675,25 @@ Against traditional methods:
 
 - For **endless, controllable hero effects** (a campfire, a burning building, smoke that must not loop), use a
   **rollout effect** (D): 82 to 274 KB per effect, about 0.5 ms at 64 px or 0.8 to 0.9 ms at 128 px per playing copy,
-  updated at 30 Hz, and 4 MB of working memory each. Keep the number of copies small, and use the frame models or
+  updated at 30 Hz, and 2.4 MB of working memory each. Keep the number of copies small, and use the frame models or
   flipbooks for the rest.
-- For a game today: use **grid_s** (73 KB, 0.25 ms) where memory matters most and some softness is acceptable, or
-  **grid_m** (132 KB, 0.78 ms at 128 px, 0.33 ms at 64 px) when quality matters, evaluated at 20-30 Hz and shared
-  between instances; keep motion-vector flipbooks where per-frame cost must be near zero.
+- For a game today: use **grid_s** (73 KB, 0.25 ms; 0.09 ms with the int8 path's projected first layer) where memory
+  matters most and some softness is acceptable, or **grid_m** (132 KB, 0.78 ms at 128 px in float, 0.46 ms at int8
+  with VNNI, provisional) when quality matters, evaluated at 20-30 Hz and shared between instances; keep motion-vector
+  flipbooks where per-frame cost must be near zero.
 - Train one model per effect *and* setting for hero effects (study A quality); use one controllable model per effect
   (study B) where artists need sliders, accepting softer detail.
 - Next work, in order:
   1. A cheaper rollout runner still (the first round, separable interpolation, vectorised noise and advection and a
      row pipeline, made it 2.5 times faster): the detail layer at half resolution with an upsampling renderer, and
-     the coarse step at 15 Hz with interpolation; and less working memory per instance.
+     the coarse step at 15 Hz with interpolation; and less working memory per instance (in part done: 2.4 MB, its
+     shards sharing their step buffers; the row records still hold a lag of up to the whole tile).
   2. Close the gap to the real floor: a statistics loss (spectrum and motion) through the detail layer, and the
      renderer trained on more first frames of explosions.
   3. Owner footage, with start points estimated from it.
   4. A BC7 baseline (an open-source encoder fetched at build time).
-  5. Faster frame-model kernels (int8, a projected first layer, a cheaper conv level of detail).
+  5. Faster frame-model kernels: AVX-VNNI for CPUs with AVX2 but not AVX-512, and a cheaper conv level of detail
+     (int8 hidden layers and a projected first layer are done, §7).
   6. An engine plugin (Godot is the cheapest to test).
 
 ## 11. Reproduce
@@ -634,7 +701,9 @@ Against traditional methods:
 ```sh
 cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_COMPILER=g++-14 && cmake --build build
 build/nvfx_experiment all --threads 4      # data, A, B, C, media, report: about 2 hours on 4 cores
-build/nvfx_experiment timing               # on an idle machine
+build/nvfx_experiment timing               # on an idle machine (the float network)
+build/nvfx_experiment int8                 # the int8 path against float on studies A to C (8 min on one core)
+build/nvfx_experiment int8-timing          # its cost per ISA and size, on an idle machine
 build/nvfx_experiment d --threads 4        # D: chaos, training (all stages), evaluation; about 5 hours on 4 cores
 build/nvfx_experiment d-timing             # D timing, on an idle machine
 build/nvfx_experiment report               # results/experiments/SUMMARY.md

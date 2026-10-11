@@ -88,11 +88,14 @@ NVFX_API nvfx_status nvfx_instance_set_colour(nvfx_instance* instance, float hue
 
 /* Precision of a frame model's network (docs/REPORT.md §7). INT8: the hidden layers multiply 8-bit activations (one
  * scale per pixel) by 8-bit weights (one scale per unit) in integers, and the first layer is evaluated per grid point
- * and interpolated; AVX-512 VNNI where the CPU has it. FLOAT: the float network (the reference). DEFAULT is INT8 for
- * the grid family: on study A's clips it changes active PSNR by -0.01 dB (interval within the -0.05 dB the project
- * allows for a default) and changes few pixels by more than one level. The conv family and rollout effects are float
- * either way (INT8 returns NVFX_ERROR_UNSUPPORTED for them). A set-up call: a change allocates the instance's new
- * buffers. */
+ * and interpolated; AVX-512 VNNI where the CPU has it (with no ISA forced, int8 instances of models with a hidden
+ * layer then use the AVX-512 build).
+ * FLOAT: the float network (the reference). DEFAULT is INT8 for the grid family: on study A's 12 clips it changes
+ * active PSNR by -0.008 dB [-0.015, -0.001] (within the -0.05 dB allowed for a default), no pixel channel by more than
+ * 6 levels of 255 (0.05 on average; up to 16 on studies B and C), and costs 0.43 to 0.50 ms instead of 0.74 to
+ * 0.78 ms per 128 x 128 frame for the larger models with VNNI (provisional). The conv family and rollout effects are
+ * float either way (INT8 returns NVFX_ERROR_UNSUPPORTED for them). A set-up call: a change allocates the instance's new
+ * buffers (at INT8 an instance holds the first layer at every grid point: 0.2 to 0.4 MB). */
 typedef enum nvfx_precision { NVFX_PRECISION_DEFAULT = 0, NVFX_PRECISION_FLOAT = 1, NVFX_PRECISION_INT8 = 2 } nvfx_precision;
 NVFX_API nvfx_status nvfx_instance_set_precision(nvfx_instance* instance, nvfx_precision precision);
 
@@ -124,7 +127,7 @@ NVFX_API nvfx_status nvfx_render(nvfx_instance* instance, double time_seconds, u
 NVFX_API nvfx_status nvfx_bake(nvfx_instance* instance, int frames, uint8_t* rgba);
 
 /* Testing and benchmarking -------------------------------------------------------------------------------------- */
-NVFX_API nvfx_isa nvfx_get_isa(void);                 /* the ISA instances are created with */
+NVFX_API nvfx_isa nvfx_get_isa(void);                 /* the ISA instances are created with (see nvfx_instance_set_precision) */
 NVFX_API nvfx_status nvfx_set_isa(nvfx_isa isa);      /* force an ISA for instances created afterwards */
 NVFX_API double nvfx_instance_macs_per_pixel(const nvfx_instance* instance);
 

@@ -157,11 +157,13 @@ struct RtEffect {
   RtEffect& operator=(const RtEffect&) = delete;
 };
 
-// Render a clip through the runtime: controls, then a training variation (>= 0) or a seed (drift off).
+// Render a clip through the runtime: controls, then a training variation (>= 0) or a seed (drift off). The studies
+// score the float network (the runtime's int8 default for the grid family is measured against it by the int8 step).
 Clip runtime_clip(const Model& m, std::span<const float> controls, int variation, std::uint64_t seed) {
   RtEffect fx(m);
   nvfx_instance* in = nullptr;
   if (nvfx_instance_create(fx.e, kSize, &in) != NVFX_OK) throw std::runtime_error("runtime instance failed");
+  nvfx_instance_set_precision(in, NVFX_PRECISION_FLOAT);
   nvfx_instance_set_controls(in, controls.data(), static_cast<int>(controls.size()));
   nvfx_instance_set_drift(in, 0.f);
   if (variation >= 0) nvfx_instance_set_variation(in, variation);
@@ -185,6 +187,7 @@ double runtime_ms(const Model& m) {
   RtEffect fx(m);
   nvfx_instance* in = nullptr;
   nvfx_instance_create(fx.e, kSize, &in);
+  nvfx_instance_set_precision(in, NVFX_PRECISION_FLOAT);  // the float network, as runtime_clip()
   std::vector<std::uint8_t> buf(kSize * kSize * 4);
   std::vector<double> ms;
   for (int f = 0; f < 140; ++f) {
@@ -622,6 +625,7 @@ std::pair<double, double> measure(const fs::path& model, int size, nvfx_isa isa,
     sched_setaffinity(0, sizeof(old), &old);
     return {-1, -1};
   }
+  nvfx_instance_set_precision(in, NVFX_PRECISION_FLOAT);  // the float network (int8: the int8-timing step)
   macs = nvfx_instance_macs_per_pixel(in);
   std::vector<std::uint8_t> buf(static_cast<std::size_t>(size) * size * 4);
   std::vector<double> ms;

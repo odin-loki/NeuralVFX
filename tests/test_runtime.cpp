@@ -211,7 +211,8 @@ TEST(Runtime, VectorQuantisedFeaturesMatchTheReference) {
 // and 0.37; one hidden layer, as every trained grid model has, stays within 4 and 0.25). Shapes: hidden widths that
 // are not a multiple of 4 (the VNNI words are padded), one and two hidden layers and none, the first layer projected
 // (frame at least as wide as the grid) or per pixel (narrower), 16- and 8-bit features. On study A's trained models
-// the int8 path is within 6 levels of the float path, and less than 0.03 levels on average (results/experiments/int8).
+// the int8 path is within 6 levels of the float path and 0.05 levels on average; on B's and C's, within 16 and 0.15
+// (results/experiments/int8_summary.csv).
 constexpr int kInt8Max = 6;
 constexpr double kInt8Mean = 0.4;
 
