@@ -24,6 +24,7 @@ option(NEURALFX_BUILD_TOOLS "Build the command-line tools" ON)
 option(NEURALFX_BUILD_SHARED "Build libnvfx as a shared library for engines" ON)
 option(NEURALFX_BUILD_VIEWER "Build the Dear ImGui viewer (needs GLFW and OpenGL; fetches Dear ImGui)" OFF)
 option(NEURALFX_WERROR "Treat warnings in neuralfx targets as errors (CI)" OFF)
+option(NEURALFX_BUILD_GODOT "Build the Godot 4 GDExtension (engines/godot; fetches godot-cpp, needs Python 3)" OFF)
 
 function(neuralfx_defaults target)
   if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
@@ -239,6 +240,10 @@ endif()
 
 if(NEURALFX_BUILD_VIEWER)
   add_subdirectory(viewer)
+endif()
+
+if(NEURALFX_BUILD_GODOT)
+  add_subdirectory(engines/godot)
 endif()
 
 if(NEURALFX_BUILD_TESTS)

@@ -1,6 +1,8 @@
 # Build and test on Ubuntu 24.04 with warnings as errors.
 #   build   the libraries, tools and tests (ffmpeg installed so the video-ingest test runs), plus a benchmark smoke run
 #   viewer  the Dear ImGui viewer (fetched at a pinned tag) and its headless screenshot test under Xvfb
+#   godot   the Godot 4 GDExtension (godot-cpp fetched at a pinned tag), built only: its test needs the effects and a
+#           Godot binary (engines/godot/test.sh)
 name: CI
 
 on:
@@ -64,3 +66,29 @@ jobs:
 
       - name: Screenshot test
         run: ctest --test-dir build -R ViewerScreenshot --output-on-failure
+
+  godot:
+    name: Godot 4 GDExtension (build)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install system packages
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends g++-14 cmake ninja-build git python3 zlib1g-dev
+
+      - name: Configure
+        run: >-
+          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_COMPILER=g++-14 -DCMAKE_C_COMPILER=gcc-14
+          -DNEURALFX_WERROR=ON -DNEURALFX_BUILD_GODOT=ON -DNEURALFX_BUILD_TESTS=OFF -DNEURALFX_BUILD_TOOLS=OFF -DNEURALFX_BUILD_BENCH=OFF
+
+      - name: Build
+        run: cmake --build build --target nvfx_godot
+
+      - name: Check the extension and libnvfx
+        run: |
+          ls -l engines/godot/demo/bin
+          nm -D --defined-only engines/godot/demo/bin/libneuralvfx_godot.so | grep -q neuralvfx_library_init
+          nm -D --defined-only engines/godot/demo/bin/libnvfx.so | grep -q nvfx_scene_create

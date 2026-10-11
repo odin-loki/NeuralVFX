@@ -1,0 +1,17 @@
+; The NeuralVFX GDExtension: NeuralVFXScene and NeuralVFXEffect (engines/godot/src). libnvfx is the runtime with the
+; scene C API; the extension finds it next to itself (RPATH $ORIGIN), and an export copies it along.
+[configuration]
+
+entry_symbol = "neuralvfx_library_init"
+compatibility_minimum = "4.4"
+reloadable = false
+
+[libraries]
+
+linux.debug.x86_64 = "res://bin/libneuralvfx_godot.so"
+linux.release.x86_64 = "res://bin/libneuralvfx_godot.so"
+
+[dependencies]
+
+linux.debug.x86_64 = { "res://bin/libnvfx.so" : "" }
+linux.release.x86_64 = { "res://bin/libnvfx.so" : "" }
