@@ -506,7 +506,6 @@ TEST(Runtime, MultiLevelModelsMatchTheReference) {
           for (const int size : {32, 48}) {
             auto in = instance(e.get(), size);
             ASSERT_EQ(nvfx_instance_set_precision(in.get(), NVFX_PRECISION_FLOAT), NVFX_OK);
-            EXPECT_EQ(nvfx_instance_set_precision(in.get(), NVFX_PRECISION_INT8), NVFX_ERROR_UNSUPPORTED);  // float only
             nvfx_instance_set_controls(in.get(), controls, 3);
             nvfx_instance_set_variation(in.get(), 1);
             for (const int f : {0, 5, 11}) {
@@ -524,4 +523,48 @@ TEST(Runtime, MultiLevelModelsMatchTheReference) {
     }
   }
   nvfx_set_isa(NVFX_ISA_AUTO);
+}
+
+TEST(Runtime, MultiLevelInt8StaysWithinItsToleranceOfTheFloatReference) {
+  // The int8 path of the multi family: each level's projected first layer interpolated (a level wider than the frame,
+  // and the baseline ISA, take the first layer per pixel instead), the hidden layers in integers; as the grid family's
+  // int8 path, within its tolerance of the float reference. It is the default precision.
+  const float controls[3] = {0.3f, 0.7f, 0.5f};
+  Hyper wide = multi_hyper(true);
+  wide.levels.push_back({40, 3, 2});
+  Hyper deep = multi_hyper(false);
+  deep.layers = 3;
+  int compared = 0;
+  for (const nvfx_isa isa : kIsas) {
+    if (nvfx_set_isa(isa) != NVFX_OK) continue;
+    for (const Hyper& h : {multi_hyper(true), multi_hyper(false), wide, deep}) {
+      Model m = make_model(h, 16);
+      m.mlp_bits = 8;
+      const auto vols = volumes(m.h);
+      for (std::size_t l = 0; l < vols.size(); ++l) {
+        const std::size_t n = static_cast<std::size_t>(m.h.bases) * vols[l].slices * vols[l].channels;
+        for (std::size_t k = 0; k < n; ++k) m.plane_bits.push_back(static_cast<std::uint8_t>(4 + l));
+      }
+      quantise_like_storage(m);
+      auto e = load(m);
+      for (const int size : {32, 48}) {
+        auto in = instance(e.get(), size);  // the default precision: int8
+        nvfx_instance_set_controls(in.get(), controls, 3);
+        nvfx_instance_set_variation(in.get(), 2);
+        for (const int f : {0, 5, 11}) {
+          const auto got = render(in.get(), f / static_cast<double>(m.fps), size);
+          const auto want = reference(m, f, controls, 2, size);
+          double sum = 0;
+          for (std::size_t i = 0; i < got.size(); ++i) sum += std::abs(int(got[i]) - int(want[i]));
+          EXPECT_LE(max_diff(got, want), kInt8Max) << m.h.describe() << " size " << size << " frame " << f << " isa " << isa;
+          EXPECT_LE(sum / static_cast<double>(got.size()), kInt8Mean) << m.h.describe() << " size " << size << " frame " << f << " isa " << isa;
+          ++compared;
+        }
+        ASSERT_EQ(nvfx_instance_set_precision(in.get(), NVFX_PRECISION_FLOAT), NVFX_OK);
+        EXPECT_LE(max_diff(render(in.get(), 4 / static_cast<double>(m.fps), size), reference(m, 4, controls, 2, size)), 2);
+      }
+    }
+  }
+  nvfx_set_isa(NVFX_ISA_AUTO);
+  EXPECT_GE(compared, 48);
 }

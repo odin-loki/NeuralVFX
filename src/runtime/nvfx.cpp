@@ -100,9 +100,9 @@ nvfx_isa resolved_isa() {
   return NVFX_ISA_BASELINE;
 }
 
-// The precision a frame model's instance runs at: DEFAULT is int8 for the grid family (docs/REPORT.md §7).
+// The precision a frame model's instance runs at: DEFAULT is int8 for the grid and multi families (docs/REPORT.md §7).
 nfx::rt::Precision frame_precision(const nfx::Model& m, nvfx_precision p) {
-  if (m.h.arch != nfx::Arch::grid || p == NVFX_PRECISION_FLOAT) return nfx::rt::Precision::float32;
+  if ((m.h.arch != nfx::Arch::grid && m.h.arch != nfx::Arch::multi) || p == NVFX_PRECISION_FLOAT) return nfx::rt::Precision::float32;
   return nfx::rt::Precision::int8;
 }
 
@@ -640,7 +640,7 @@ nvfx_status nvfx_instance_set_precision(nvfx_instance* in, nvfx_precision precis
   if (!in || (precision != NVFX_PRECISION_DEFAULT && precision != NVFX_PRECISION_FLOAT && precision != NVFX_PRECISION_INT8)) {
     return NVFX_ERROR_ARGUMENT;
   }
-  const bool grid = !in->a.r && in->effect->e.m.h.arch == nfx::Arch::grid;
+  const bool grid = !in->a.r && (in->effect->e.m.h.arch == nfx::Arch::grid || in->effect->e.m.h.arch == nfx::Arch::multi);
   if (precision == NVFX_PRECISION_INT8 && !grid) return NVFX_ERROR_UNSUPPORTED;
   if (in->a.r) return NVFX_OK;  // rollout effects: float
   const nfx::Model& m = in->effect->e.m;

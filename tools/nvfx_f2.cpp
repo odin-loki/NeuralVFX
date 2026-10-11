@@ -1452,7 +1452,7 @@ double thread_seconds() {
   return static_cast<double>(ts.tv_sec) + 1e-9 * static_cast<double>(ts.tv_nsec);
 }
 
-void step_timing(const std::vector<std::string>& models, int core, int reps) {
+void step_timing(const std::vector<std::string>& models, int core, int reps, const std::string& precision) {
   cpu_set_t one;
   CPU_ZERO(&one);
   CPU_SET(core, &one);
@@ -1463,16 +1463,24 @@ void step_timing(const std::vector<std::string>& models, int core, int reps) {
     la >> load[0] >> load[1] >> load[2];
   }
   std::println("timing on core {}, load average {:.2f} {:.2f} {:.2f} (provisional: the machine is shared)", core, load[0], load[1], load[2]);
-  std::println("| model | stored KB | resident KB | ms per 128 x 128 frame (thread CPU, median of 200 frames, least of {} runs) |", reps);
-  std::println("|---|---:|---:|---:|");
+  std::println("| model | precision | stored KB | resident KB | scratch KB | ms per 128 x 128 frame (thread CPU, median of 200 frames, least of {} runs) |", reps);
+  std::println("|---|---|---:|---:|---:|---:|");
+  std::vector<nvfx_precision> precisions;  // float as first timed; int8 (the default of the grid and multi families) on request
+  if (precision == "float" || precision == "both") precisions.push_back(NVFX_PRECISION_FLOAT);
+  if (precision == "int8" || precision == "both") precisions.push_back(NVFX_PRECISION_INT8);
+  if (precisions.empty()) throw std::invalid_argument("--precision float, int8 or both");
   for (const std::string& path : models) {
+  for (const nvfx_precision prec : precisions) {
     const auto bytes = read_bytes(path);
     RtEffect fx(bytes);
     nvfx_effect_info info{};
     nvfx_effect_get_info(fx.e, &info);
     nvfx_instance* in = nullptr;
     if (nvfx_instance_create(fx.e, kSize, &in) != NVFX_OK) throw std::runtime_error("instance failed");
-    nvfx_instance_set_precision(in, NVFX_PRECISION_FLOAT);  // the float network, as first timed (int8: nvfx_experiment int8-timing)
+    if (nvfx_instance_set_precision(in, prec) != NVFX_OK) {
+      nvfx_instance_free(in);
+      continue;  // the conv family has no int8 path
+    }
     std::vector<std::uint8_t> buf(static_cast<std::size_t>(kSize) * kSize * 4);
     double best = 1e9;
     for (int r = 0; r < reps; ++r) {
@@ -1485,9 +1493,11 @@ void step_timing(const std::vector<std::string>& models, int core, int reps) {
       std::ranges::sort(ms);
       best = std::min(best, ms[ms.size() / 2]);
     }
+    const double scratch = static_cast<double>(nvfx_instance_scratch_bytes(in)) / 1024;
     nvfx_instance_free(in);
-    std::println("| {} | {:.1f} | {:.1f} | {:.3f} |", fs::path(path).filename().string(), static_cast<double>(info.stored_bytes) / 1024,
-                 static_cast<double>(info.resident_bytes) / 1024, best);
+    std::println("| {} | {} | {:.1f} | {:.1f} | {:.1f} | {:.3f} |", fs::path(path).filename().string(), prec == NVFX_PRECISION_FLOAT ? "float" : "int8",
+                 static_cast<double>(info.stored_bytes) / 1024, static_cast<double>(info.resident_bytes) / 1024, scratch, best);
+  }
   }
 }
 
@@ -1537,7 +1547,7 @@ int main(int argc, char** argv) try {
     const auto v = split(a.str("codecs", ""));
     step_video(c, std::set<std::string>(v.begin(), v.end()));
   } else if (step == "report") step_report(c, split(a.str("configs", "")), a.str("figure", ""));
-  else if (step == "timing") step_timing(split(a.need("models")), a.i("core", 3), a.i("reps", 5));
+  else if (step == "timing") step_timing(split(a.need("models")), a.i("core", 3), a.i("reps", 5), a.str("precision", "float"));
   else if (step == "g3c") step_g3c(c, a.str("split", "val"), split(a.str("variants", "v1,b8,b6,b6_d,b4_d,h,b6_d_h")));
   else if (step == "g3c-report") step_g3c_report(c, a.str("split", "val"));
   else throw std::invalid_argument("unknown step " + step);

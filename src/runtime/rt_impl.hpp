@@ -580,7 +580,10 @@ std::unique_ptr<Renderer> make_renderer(const Effect& e, int size, Precision p) 
     if (p == Precision::int8) return std::make_unique<GridRendererQ>(e, size);
     return std::make_unique<GridRenderer>(e, size);
   }
-  if (e.m.h.arch == Arch::multi) return std::make_unique<MultiRenderer>(e, size);  // float (no int8 path yet)
+  if (e.m.h.arch == Arch::multi) {
+    if (p == Precision::int8) return std::make_unique<MultiRendererQ>(e, size);
+    return std::make_unique<MultiRenderer>(e, size);
+  }
   return std::make_unique<ConvRenderer>(e, size);  // the conv family has no int8 path
 }
 

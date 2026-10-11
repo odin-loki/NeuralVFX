@@ -134,7 +134,7 @@ int run_per_plane(nfx::Hyper h, int size, const char* name, bool masked) {
 
 // A multi-level frame model (study F4): three levels at their own widths, optionally masked (stored as runs), the MLP
 // at 8 bits, Fourier features of position and time.
-int run_multi(int size, bool masked) {
+int run_multi(int size, bool masked, nvfx_precision precision = NVFX_PRECISION_DEFAULT) {
   nfx::Hyper h;
   h.arch = nfx::Arch::multi;
   h.size = 64;
@@ -168,6 +168,7 @@ int run_multi(int size, bool masked) {
   nvfx_instance* in = nullptr;
   if (nvfx_effect_load_memory(bytes.data(), bytes.size(), &e) != NVFX_OK) return 1;
   if (nvfx_instance_create(e, size, &in) != NVFX_OK) return 1;
+  if (nvfx_instance_set_precision(in, precision) != NVFX_OK) return 1;
   const float controls[3] = {0.7f, 0.2f, 0.9f};
   nvfx_instance_set_controls(in, controls, 3);
   nvfx_instance_set_seed(in, 99);
@@ -180,7 +181,8 @@ int run_multi(int size, bool masked) {
   for (int f = 0; f < 200; ++f) nvfx_render(in, f / 30.0, rgba.data(), static_cast<std::size_t>(size) * 4);
   g_counting = false;
   const long n = g_allocations.load();
-  std::printf("multi-level %dx%d%s: %ld allocations in 200 frames\n", size, size, masked ? ", sparse" : "", n);
+  std::printf("multi-level %dx%d%s%s: %ld allocations in 200 frames\n", size, size, masked ? ", sparse" : "",
+              precision == NVFX_PRECISION_FLOAT ? ", float" : ", int8", n);
   nvfx_instance_free(in);
   nvfx_effect_free(e);
   return n == 0 ? 0 : 1;
@@ -482,7 +484,8 @@ int main() {
   failures += run(g, 128, "grid", 8, 6) + run(c, 64, "conv", 8, 8);  // vector-quantised features
   failures += run_per_plane(g, 128, "grid", false) + run_per_plane(c, 64, "conv", false);  // a width per feature plane
   failures += run_per_plane(g, 128, "grid", true) + run_per_plane(g, 64, "grid", true);       // sparse features
-  failures += run_multi(128, false) + run_multi(64, true) + run_multi(128, true);                // multi-level models (study F4)
+  failures += run_multi(128, false) + run_multi(64, true) + run_multi(128, true);                // multi-level models (study F4), int8
+  failures += run_multi(128, false, NVFX_PRECISION_FLOAT) + run_multi(64, true, NVFX_PRECISION_FLOAT);  // and float
   std::printf("%s\n", failures ? "FAILED: nvfx_render allocated" : "ok: no allocation per frame");
   return failures ? 1 : 0;
 }

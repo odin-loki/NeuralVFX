@@ -457,3 +457,333 @@ class GridRendererQ final : public Renderer {
   std::vector<std::int32_t> act_;
   Dense l0_;
 };
+
+// The multi family (study F4) at int8: as GridRendererQ, with the projected first layer per level. The first layer is
+// linear in every level's features and in the Fourier features, so each level's part is evaluated once per grid point
+// and frame (FiLM folded in) and interpolated at the pixel, the x Fourier features' part is a vector per column, and
+// the y and time parts are the row's bias; a pixel pays H interpolations per level. Projected when every level has at
+// most as many points across as the frame has pixels, on AVX2 and AVX-512; otherwise the first layer runs per pixel
+// in float, as MultiRenderer's. The hidden layers in 8-bit integers as GridRendererQ's.
+class MultiRendererQ final : public Renderer {
+ public:
+  MultiRendererQ(const Effect& e, int size) : m_(e.m), S_(size), vols_(volumes(e.m.h)) {
+    const Hyper& h = m_.h;
+    const int H = h.hidden;
+    if constexpr (kVnniBuild) {
+      __builtin_cpu_init();
+      vnni_ = __builtin_cpu_supports("avx512vnni");
+    }
+    pack_ = vnni_ ? Pack::quads255 : kW == 8 ? Pack::quads127 : Pack::pairs255;
+    for (std::size_t l = 1; l + 1 < m_.layers.size(); ++l) ql_.push_back(quantise_layer(m_.layers[l], pack_ != Pack::pairs255));
+    if (!ql_.empty()) fold_head(ql_.back(), m_.layers.back());
+    CT_ = h.feature_channels();
+    in_ = CT_ + 2 * h.pe_xy;
+    w_.resize(static_cast<std::size_t>(h.bases));
+    film_.resize(static_cast<std::size_t>(2 * H));
+    gain_.resize(static_cast<std::size_t>(H));
+    bias0_.resize(static_cast<std::size_t>(H));
+    rowb_.resize(static_cast<std::size_t>(H));
+    tpe_.resize(static_cast<std::size_t>(2 * h.pe_t));
+    l0_ = Dense(in_, H);
+    std::size_t total = 0, widest = 0;
+    proj_ = kW >= 8;
+    for (const Volume& v : vols_) {
+      loff_.push_back(total);
+      total += static_cast<std::size_t>(v.channels) * v.plane_values();
+      widest = std::max(widest, static_cast<std::size_t>(v.channels) * static_cast<std::size_t>(v.side));
+      if (S_ < v.side) proj_ = false;
+    }
+    slice_.resize(total);
+    const std::size_t L = vols_.size(), S = static_cast<std::size_t>(S_);
+    xi_.resize(L * S);
+    xf_.resize(L * S);
+    for (std::size_t l = 0; l < L; ++l) {
+      const int G = vols_[l].side;
+      for (int x = 0; x < S_; ++x) {
+        const float g = std::clamp((static_cast<float>(x) + 0.5f) / static_cast<float>(S_) * static_cast<float>(G) - 0.5f, 0.f, static_cast<float>(G - 1));
+        const std::size_t at = l * S + static_cast<std::size_t>(x);
+        xi_[at] = std::min(static_cast<int>(g), G - 2);
+        xf_[at] = g - static_cast<float>(xi_[at]);
+      }
+    }
+    if (proj_) {  // every vector of pixels reads at most kW consecutive points of each level
+      base_.resize(L * (S / static_cast<std::size_t>(kW)));
+      idx_.resize(L * S);
+      for (std::size_t l = 0; l < L && proj_; ++l) {
+        for (int x = 0; x < S_; x += kW) {
+          const int b = xi_[l * S + static_cast<std::size_t>(x)];
+          base_[l * (S / static_cast<std::size_t>(kW)) + static_cast<std::size_t>(x / kW)] = b;
+          for (int k = 0; k < kW; ++k) {
+            const int d = xi_[l * S + static_cast<std::size_t>(x + k)] - b;
+            if (d < 0 || d >= kW) proj_ = false;
+            idx_[l * S + static_cast<std::size_t>(x + k)] = d;
+          }
+        }
+      }
+    }
+    ype_.resize(S * static_cast<std::size_t>(2 * h.pe_xy));
+    std::vector<float> xpe(S * static_cast<std::size_t>(2 * h.pe_xy));  // [x][2 pe_xy]
+    std::array<float, 48> pf{};
+    for (int x = 0; x < S_; ++x) {
+      const float u = (static_cast<float>(x) + 0.5f) / static_cast<float>(S_);
+      position_features(h.pe_xy, u, u, pf.data());
+      for (int k = 0; k < h.pe_xy; ++k) {
+        const std::size_t at = static_cast<std::size_t>(x) * static_cast<std::size_t>(2 * h.pe_xy) + static_cast<std::size_t>(2 * k);
+        xpe[at] = pf[static_cast<std::size_t>(4 * k)];
+        xpe[at + 1] = pf[static_cast<std::size_t>(4 * k + 1)];
+        ype_[at] = pf[static_cast<std::size_t>(4 * k + 2)];
+        ype_[at + 1] = pf[static_cast<std::size_t>(4 * k + 3)];
+      }
+    }
+    if (proj_) {
+      for (const Volume& v : vols_) {
+        const std::size_t G = static_cast<std::size_t>(v.side), Gp = G + static_cast<std::size_t>(kW), Hs = static_cast<std::size_t>(H);
+        poff_.push_back(proj_grid_.size());
+        proj_grid_.resize(proj_grid_.size() + Hs * G * G + (Hs + 1) * G + static_cast<std::size_t>(kW) + 1, 0.f);  // padded as GridRendererQ's
+        roff_.push_back(rowg_.size());
+        rowg_.resize(rowg_.size() + Hs * Gp, 0.f);
+        rowd_.resize(rowg_.size(), 0.f);
+      }
+      xpe_ = std::move(xpe);
+      ax_.assign(static_cast<std::size_t>(H) * S, 0.f);  // per frame: the x features' part of the first layer, [H][S]
+    } else {
+      rowgf_.resize(widest);
+      rowf_.assign(static_cast<std::size_t>(in_) * S, 0.f);
+      for (int x = 0; x < S_; ++x) {  // the x features as constant input rows
+        for (int j = 0; j < 2 * h.pe_xy; ++j) {
+          rowf_[static_cast<std::size_t>(CT_ + j) * S + static_cast<std::size_t>(x)] = xpe[static_cast<std::size_t>(x) * static_cast<std::size_t>(2 * h.pe_xy) + static_cast<std::size_t>(j)];
+        }
+      }
+    }
+    const int widest_out = std::max(H, 4);
+    buf_a_.resize(static_cast<std::size_t>(widest_out) * kB);
+    buf_b_.resize(static_cast<std::size_t>(widest_out) * kB);
+    act_.resize(static_cast<std::size_t>((H + 1) / 2) * kB);
+    sa_.resize(kB);
+    mx_.resize(kB);
+    const Dense& head = m_.layers.back();
+    head_wt_.resize(static_cast<std::size_t>(head.in) * 4);
+    for (int i = 0; i < head.in; ++i) {
+      for (int t = 0; t < 4; ++t) head_wt_[static_cast<std::size_t>(i) * 4 + static_cast<std::size_t>(t)] = head.w[static_cast<std::size_t>(t) * static_cast<std::size_t>(head.in) + static_cast<std::size_t>(i)];
+    }
+  }
+
+  void render(const FrameInput& in, std::uint8_t* rgba, std::size_t stride) override {
+    const Hyper& h = m_.h;
+    const int H = h.hidden, NI = h.mlp_in();
+    const std::size_t S = static_cast<std::size_t>(S_);
+    small_dense(m_.basis, in.c, w_);
+    small_dense(m_.films[0], in.c, film_);
+    time_features(h.pe_t, h.loop, in.t, tpe_.data());
+    const Dense& L0 = m_.layers[0];  // FiLM folded in, columns compacted, time features in the bias: as MultiRenderer
+    for (int o = 0; o < H; ++o) {
+      const float g = 1.f + film_[static_cast<std::size_t>(o)];
+      const float* wr = L0.w.data() + static_cast<std::size_t>(o) * static_cast<std::size_t>(NI);
+      float* dst = l0_.w.data() + static_cast<std::size_t>(o) * static_cast<std::size_t>(in_);
+      for (int i = 0; i < CT_; ++i) dst[i] = g * wr[i];
+      for (int k = 0; k < h.pe_xy; ++k) {
+        dst[CT_ + 2 * k] = g * wr[CT_ + 4 * k];
+        dst[CT_ + 2 * k + 1] = g * wr[CT_ + 4 * k + 1];
+      }
+      float b = L0.b[static_cast<std::size_t>(o)];
+      for (int k = 0; k < 2 * h.pe_t; ++k) b += wr[CT_ + 4 * h.pe_xy + k] * tpe_[static_cast<std::size_t>(k)];
+      gain_[static_cast<std::size_t>(o)] = g;
+      bias0_[static_cast<std::size_t>(o)] = g * b + film_[static_cast<std::size_t>(H + o)];
+    }
+    std::ranges::fill(slice_, 0.f);
+    for (std::size_t l = 0; l < vols_.size(); ++l) {
+      int i0, i1;
+      float ft;
+      slice_lerp(vols_[l].slices, h.loop, in.t, i0, i1, ft);
+      for (int k = 0; k < h.bases; ++k) {
+        const float wk = w_[static_cast<std::size_t>(k)];
+        accumulate_level(m_, vols_[l], k, i0, wk * (1.f - ft), slice_.data() + loff_[l]);
+        if (ft > 0.f) accumulate_level(m_, vols_[l], k, i1, wk * ft, slice_.data() + loff_[l]);
+      }
+    }
+    if (proj_) {
+      project();
+      for (int o = 0; o < H; ++o) {  // the x features' part per column
+        float* a = ax_.data() + static_cast<std::size_t>(o) * S;
+        const float* wr = l0_.w.data() + static_cast<std::size_t>(o) * static_cast<std::size_t>(in_) + CT_;
+        for (std::size_t x = 0; x < S; ++x) {
+          float s = 0.f;
+          for (int j = 0; j < 2 * h.pe_xy; ++j) s += wr[j] * xpe_[x * static_cast<std::size_t>(2 * h.pe_xy) + static_cast<std::size_t>(j)];
+          a[x] = s;
+        }
+      }
+    }
+    const Dense& head = m_.layers.back();
+    float out[4 * kB];
+    for (int y = 0; y < S_; ++y) {
+      for (int o = 0; o < H; ++o) {  // the y features into the row's bias
+        float b = bias0_[static_cast<std::size_t>(o)];
+        const float* wr = L0.w.data() + static_cast<std::size_t>(o) * static_cast<std::size_t>(NI) + CT_;
+        const float* py = ype_.data() + static_cast<std::size_t>(y) * static_cast<std::size_t>(2 * h.pe_xy);
+        for (int k = 0; k < h.pe_xy; ++k) b += gain_[static_cast<std::size_t>(o)] * (wr[4 * k + 2] * py[2 * k] + wr[4 * k + 3] * py[2 * k + 1]);
+        rowb_[static_cast<std::size_t>(o)] = b;
+      }
+      std::size_t ch0 = 0;
+      for (std::size_t l = 0; l < vols_.size(); ++l) {
+        const int G = vols_[l].side;
+        const float gy = std::clamp((static_cast<float>(y) + 0.5f) / static_cast<float>(S_) * static_cast<float>(G) - 0.5f, 0.f, static_cast<float>(G - 1));
+        const int y0 = std::min(static_cast<int>(gy), G - 2);
+        const float fy = gy - static_cast<float>(y0);
+        if (proj_) {  // the level's projected rows y0 and y0 + 1 blended, and the steps along x (as GridRendererQ)
+          const std::size_t HG = static_cast<std::size_t>(H) * static_cast<std::size_t>(G), Gp = static_cast<std::size_t>(G + kW);
+          for (int o = 0; o < H; ++o) {
+            const float* a = proj_grid_.data() + poff_[l] + static_cast<std::size_t>(y0) * HG + static_cast<std::size_t>(o) * static_cast<std::size_t>(G);
+            float* r = rowg_.data() + roff_[l] + static_cast<std::size_t>(o) * Gp;
+            float* d = rowd_.data() + roff_[l] + static_cast<std::size_t>(o) * Gp;
+            for (int gx = 0; gx < G; gx += kW) {
+              const vf a0 = load(a + gx), b0 = load(a + gx + 1);
+              const vf r0 = a0 + fy * (load(a + gx + HG) - a0), r1 = b0 + fy * (load(a + gx + 1 + HG) - b0);
+              store(r + gx, r0);
+              store(d + gx, r1 - r0);
+            }
+          }
+        } else {
+          for (int c = 0; c < vols_[l].channels; ++c) {
+            const float* a = slice_.data() + loff_[l] + (static_cast<std::size_t>(c) * static_cast<std::size_t>(G) + static_cast<std::size_t>(y0)) * static_cast<std::size_t>(G);
+            float* r = rowgf_.data() + static_cast<std::size_t>(c) * static_cast<std::size_t>(G);
+            for (int gx = 0; gx < G; ++gx) r[gx] = a[gx] + fy * (a[gx + G] - a[gx]);
+            expand_row(r, xi_.data() + l * S, xf_.data() + l * S, rowf_.data() + (ch0 + static_cast<std::size_t>(c)) * S, S_);
+          }
+        }
+        ch0 += static_cast<std::size_t>(vols_[l].channels);
+      }
+      std::uint8_t* row = rgba + stride * static_cast<std::size_t>(y);
+      for (int x0 = 0; x0 < S_; x0 += kB) {
+        if (proj_) {
+          expand_block(x0, buf_a_.data(), mx_.data());
+        } else {
+          dense(l0_.w.data(), rowb_.data(), rowf_.data() + x0, S_, buf_a_.data(), kB, in_, H, true);
+          if (!ql_.empty()) block_max(buf_a_.data(), H, mx_.data());
+        }
+        float* src = buf_a_.data();
+        float* dst = buf_b_.data();
+        for (std::size_t l = 0; l < ql_.size(); ++l) {
+          const QLayer& Lq = ql_[l];
+          if (l > 0) block_max(src, Lq.in, mx_.data());
+          quantise_block(src, Lq.in, mx_.data(), pack_, act_.data(), sa_.data());
+          if (l + 1 < ql_.size()) {
+            if (vnni_) qvnni::qlayer<false>(Lq, act_.data(), sa_.data(), dst);
+            else qmadd::qlayer<false>(Lq, act_.data(), sa_.data(), dst);
+            std::swap(src, dst);
+            continue;
+          }
+          for (int k = 0; k < 4; ++k) std::fill_n(out + k * kB, kB, head.b[static_cast<std::size_t>(k)]);
+          if (vnni_) qvnni::qlayer<true>(Lq, act_.data(), sa_.data(), out);
+          else qmadd::qlayer<true>(Lq, act_.data(), sa_.data(), out);
+        }
+        if (ql_.empty()) head_block(head_wt_.data(), head.b.data(), head.in, src, out);
+        write_block(out, in, row + 4 * static_cast<std::size_t>(x0));
+      }
+    }
+  }
+
+  std::size_t scratch_bytes() const override {
+    std::size_t n = 4 * (w_.size() + film_.size() + gain_.size() + bias0_.size() + rowb_.size() + tpe_.size() + slice_.size() + proj_grid_.size() +
+                         rowg_.size() + rowd_.size() + rowgf_.size() + rowf_.size() + xf_.size() + xi_.size() + base_.size() + idx_.size() +
+                         ype_.size() + xpe_.size() + ax_.size() + l0_.w.size() + l0_.b.size() + buf_a_.size() + buf_b_.size() + act_.size() +
+                         sa_.size() + mx_.size() + head_wt_.size());
+    n += sizeof(std::size_t) * (loff_.size() + poff_.size() + roff_.size());
+    for (const QLayer& L : ql_) n += 4 * (L.w.size() + L.scale.size() + L.bias.size() + L.head.size());
+    return n;
+  }
+  double macs_per_pixel() const override { return m_.macs_per_pixel(S_); }
+
+ private:
+  // Each level's part of the first layer at its grid points: proj[gy][o][gx] = sum_c w_oc slice[c][gy][gx] (by grid row,
+  // then unit, as GridRendererQ's; the bias is the row's).
+  void project() {
+    const int H = m_.h.hidden;
+    std::size_t ch0 = 0;
+    for (std::size_t l = 0; l < vols_.size(); ++l) {
+      const int G = vols_[l].side, C = vols_[l].channels;
+      const std::size_t n = static_cast<std::size_t>(G) * static_cast<std::size_t>(G);
+      for (int gy = 0; gy < G; ++gy) {
+        const float* s = slice_.data() + loff_[l] + static_cast<std::size_t>(gy) * static_cast<std::size_t>(G);
+        float* p = proj_grid_.data() + poff_[l] + static_cast<std::size_t>(gy) * static_cast<std::size_t>(H) * static_cast<std::size_t>(G);
+        int gx = 0;
+        for (; gx + kW <= G; gx += kW) {
+          for (int o = 0; o < H; ++o) {
+            const float* w = l0_.w.data() + static_cast<std::size_t>(o) * static_cast<std::size_t>(in_) + ch0;
+            vf acc{};
+            for (int i = 0; i < C; ++i) acc += w[i] * load(s + static_cast<std::size_t>(i) * n + static_cast<std::size_t>(gx));
+            store(p + static_cast<std::size_t>(o) * static_cast<std::size_t>(G) + static_cast<std::size_t>(gx), acc);
+          }
+        }
+        for (; gx < G; ++gx) {
+          for (int o = 0; o < H; ++o) {
+            const float* w = l0_.w.data() + static_cast<std::size_t>(o) * static_cast<std::size_t>(in_) + ch0;
+            float acc = 0.f;
+            for (int i = 0; i < C; ++i) acc += w[i] * s[static_cast<std::size_t>(i) * n + static_cast<std::size_t>(gx)];
+            p[static_cast<std::size_t>(o) * static_cast<std::size_t>(G) + static_cast<std::size_t>(gx)] = acc;
+          }
+        }
+      }
+      ch0 += static_cast<std::size_t>(C);
+    }
+  }
+
+  // The first layer's outputs (ReLU) for the block at x0: the row's bias, the x features' part and every level's
+  // interpolated projection; h [H][kB], and their largest per pixel.
+  void expand_block(int x0, float* h, float* mx) const {
+    switch (vols_.size()) {  // the levels' loop unrolled for the usual counts
+      case 1: expand_block_<1>(x0, h, mx); break;
+      case 2: expand_block_<2>(x0, h, mx); break;
+      case 3: expand_block_<3>(x0, h, mx); break;
+      default: expand_block_<0>(x0, h, mx); break;
+    }
+  }
+  template <int NL>  // NL levels (0: any number, at most 16)
+  void expand_block_(int x0, float* h, float* mx) const {
+    const int H = m_.h.hidden;
+    const std::size_t S = static_cast<std::size_t>(S_), L = NL > 0 ? static_cast<std::size_t>(NL) : vols_.size(), per = S / static_cast<std::size_t>(kW);
+    const bool px = m_.h.pe_xy > 0;
+    for (int v = 0; v < kV; ++v) {
+      const int x = x0 + v * kW;
+      std::array<qi, 16> idx;  // per level: the lanes' grid points, weights and rows (the same for every unit)
+      std::array<vf, 16> f;
+      std::array<const float*, 16> r, d;
+      std::array<std::size_t, 16> gp;
+      for (std::size_t l = 0; l < L; ++l) {
+        gp[l] = static_cast<std::size_t>(vols_[l].side + kW);
+        const std::size_t b = static_cast<std::size_t>(base_[l * per + static_cast<std::size_t>(x / kW)]);
+        idx[l] = load_q(idx_.data() + l * S + static_cast<std::size_t>(x));
+        f[l] = load(xf_.data() + l * S + static_cast<std::size_t>(x));
+        r[l] = rowg_.data() + roff_[l] + b;
+        d[l] = rowd_.data() + roff_[l] + b;
+      }
+      vf m0{}, m1{};
+      for (int o = 0; o < H; ++o) {
+        vf acc = splat(rowb_[static_cast<std::size_t>(o)]);
+        if (px) acc += load(ax_.data() + static_cast<std::size_t>(o) * S + static_cast<std::size_t>(x));
+        for (std::size_t l = 0; l < L; ++l) {
+          const std::size_t at = static_cast<std::size_t>(o) * gp[l];
+          acc += take(r[l] + at, idx[l]) + f[l] * take(d[l] + at, idx[l]);
+        }
+        const vf y = relu(acc);
+        store(h + o * kB + v * kW, y);
+        if (o & 1) m1 = vmaxf(m1, y);
+        else m0 = vmaxf(m0, y);
+      }
+      store(mx + v * kW, vmaxf(m0, m1));
+    }
+  }
+
+  const Model& m_;
+  int S_, CT_ = 0, in_ = 0;
+  bool vnni_ = false, proj_ = false;
+  Pack pack_ = Pack::pairs255;
+  std::vector<Volume> vols_;
+  std::vector<QLayer> ql_;
+  std::vector<std::size_t> loff_, poff_, roff_;
+  std::vector<float> w_, film_, gain_, bias0_, rowb_, tpe_, slice_, proj_grid_, rowg_, rowd_, rowgf_, rowf_, xf_, ype_, xpe_, ax_, buf_a_, buf_b_, sa_, mx_,
+      head_wt_;
+  std::vector<int> xi_, base_;
+  std::vector<std::int32_t> idx_;
+  std::vector<std::int32_t> act_;
+  Dense l0_;
+};
