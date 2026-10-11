@@ -1040,9 +1040,34 @@ tested. Every effect is reported, nulls with their numbers.
 
 ### 10.7 Fire and smoke: validation and the choice
 
-(Not run yet.) Before the design was committed, the validation step ran once in its quick mode (one seed per setting,
-two plain runs, a 3 s endless play) on two checkpoints, as a check of the code: sA after 100 iterations and a round-1
-fire candidate. It changed nothing above; those numbers are not used.
+Eight candidates of 400 iterations took 12 to 16 minutes each on one thread (`i2_train.csv`; sA's row says anchor 10,
+which in effect was 0, §10.2); validation of their 32 checkpoints and the baselines took 11 minutes
+(`i2_val_track.csv`, `i2_val_stats.csv`, `i2_val_survival.csv`, every interval in `i2_val_compare.csv`, the rule's parts
+per checkpoint in `i2_val_choice.csv`). One checkpoint per effect meets every part of the rule on validation:
+
+| effect | chosen | forced, 8 frames | forced, 30 frames | hand-over, 8 / 30 frames | plain, worst of 1-60 frames | endless | survival score |
+|---|---|---|---|---|---|---|---|
+| fire | fB after 100 iterations | +0.14 [+0.02, +0.28] | +0.61 [+0.36, +0.87] | - | 8 frames: -0.12 [-0.25, +0.01] | all tie | -0.32 [-0.43, -0.23] (better) |
+| smoke | sD after 300 iterations | +0.03 [-0.02, +0.07] | +0.29 [+0.16, +0.43] | +0.22 [+0.10, +0.35] / +0.50 [+0.29, +0.73] | 1 frame: -0.04 [-0.10, +0.01] | all tie | - |
+
+(dB against v2 on validation; forced is the 40 cases pooled.)
+- **Fire.** Every other checkpoint makes plain tracking worse at 8 frames (-0.14 to -0.29 dB, intervals below zero),
+  its forced tracking ties at 8 frames, and four of them also make the spectrum distance worse. Even fA, which has no
+  anchor, loses at 8 frames from 100 iterations on; fB's anchor at 10 keeps the first step 40% to 65% closer to v1's than fA's
+  on training windows, but the loss at 8 frames comes later in the rollout. fB after 100 iterations
+  is the only one with forced tracking better at 8 frames and plain tracking still a tie there, by 0.01 dB.
+- **The strong runs keep the fire burning.** Under strong pushes, over the fourth second, v2's fire keeps 23% of the
+  simulator's light (mean survival score 1.24). The candidates trained at share 0.5 keep 35% after 100 iterations and
+  53% to 62% after 200 to 400; those at share 0.8 keep 73% to 84%, with survival scores of 0.34 to 0.42. The longer and
+  the more coupled the training, the more the fire keeps burning, and the more its plain tracking at 8 frames suffers:
+  the rule took the safe end.
+- **Smoke.** At a rate of 3e-4 the first frame of plain tracking is worse at 10 of the 12 checkpoints, whatever the
+  anchor: by 0.07 to 0.19 dB with none (sA), 0.09 to 0.16 at 10 (sB), 0.05 to 0.12 at 100 (sC). The two that keep it
+  (sB and sC after 200 iterations) make the endless motion worse. The anchor narrows the loss at frame 1 as its weight
+  grows; the lower rate (sD) keeps frame 1 a tie for 300 iterations (after 400 it is worse by 0.06 [0.01, 0.11]), and sD
+  after 300 iterations is the one checkpoint that keeps everything (after 100 and 200 its coverage distance is worse).
+- The chosen files are fire: v2's fire with fB's stepper after 100 iterations; smoke: v1's smoke with sD's stepper
+  after 300 iterations (`i2/chosen` in the data root). The test (§10.9) compares each with v2's file, once.
 
 ### 10.8 The explosion's first second: stopped at validation
 
