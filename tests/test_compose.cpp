@@ -442,3 +442,87 @@ TEST(Compose, SkippingEmptyFieldsIsBitExact) {
   }
   EXPECT_GT(skipped_rows, 100);
 }
+
+// Runners that share step()'s working memory (rt::RolloutScratch) give the bits of runners with their own, whatever
+// the scratch holds when a step begins: the other runners' leftovers (other effects, grids and sizes, stepped in turn,
+// with and without skipping) or garbage written over it before every step.
+TEST(Compose, SharedStepScratchIsBitExact) {
+  std::vector<Isa> isas{Isa::base};
+#if defined(__x86_64__)
+  if (__builtin_cpu_supports("avx2") && __builtin_cpu_supports("fma")) isas.push_back(Isa::avx2);
+  if (__builtin_cpu_supports("avx512f")) isas.push_back(Isa::avx512);
+#endif
+  const rt::RolloutEffect sparse12 = sparse_effect(12, 5), dense = tiny_effect(), other = tiny_effect(4);
+  struct Use {
+    const rt::RolloutEffect* e;
+    int size, start;
+    bool skip;
+  };
+  const Use uses[] = {{&sparse12, 60, 0, true}, {&dense, 32, 1, true}, {&sparse12, 36, 1, false}, {&other, 64, 0, true}, {&dense, 16, 0, true}};
+  for (const Isa isa : isas) {
+    std::vector<std::unique_ptr<rt::RolloutRunner>> own, shared;
+    rt::RolloutScratch scratch;
+    for (const Use& u : uses) {
+      own.push_back(make_runner(*u.e, u.size, isa));
+      shared.push_back(make_runner(*u.e, u.size, isa));
+      own.back()->skip_empty(u.skip);
+      shared.back()->skip_empty(u.skip);
+      scratch.fit(*shared.back());
+    }
+    rt::RolloutScratch small;  // not fit for any runner
+    EXPECT_THROW(shared[0]->use_scratch(&small), std::invalid_argument);
+    for (auto& r : shared) r->use_scratch(&scratch);
+    EXPECT_LT(shared[0]->scratch_bytes(), own[0]->scratch_bytes());
+    std::uint64_t rng = 12345;
+    for (std::size_t k = 0; k < own.size(); ++k) {
+      const auto& controls = uses[k].e->m.starts[z(uses[k].start)].controls;
+      own[k]->start(uses[k].start, controls, 7 + k);
+      shared[k]->start(uses[k].start, controls, 7 + k);
+    }
+    for (int f = 0; f < 16; ++f) {
+      for (std::size_t k = 0; k < own.size(); ++k) {
+        const auto& controls = uses[k].e->m.starts[z(uses[k].start)].controls;
+        if (f % 4 == 1) {  // garbage over the scratch: NaN, huge values of either sign, or noise; small integers
+          const int kind = (f / 4 + static_cast<int>(k)) % 4;
+          for (float& v : scratch.floats) {
+            rng = rng * 6364136223846793005ULL + 1442695040888963407ULL;
+            const float noise = static_cast<float>(static_cast<std::int32_t>(rng >> 32)) * 1e-6f;
+            v = kind == 0 ? std::nanf("") : kind == 1 ? 3e38f : kind == 2 ? -3e38f : noise;
+          }
+          for (std::int32_t& v : scratch.ints) v = static_cast<std::int32_t>(f % 3);
+        }
+        own[k]->step(controls, 7 + k);
+        shared[k]->step(controls, 7 + k);
+        const int S = uses[k].size;
+        ASSERT_TRUE(same_bits(own[k]->coarse(), shared[k]->coarse())) << isa_name(isa) << " runner " << k << " frame " << f;
+        ASSERT_TRUE(same_bits(own[k]->fine_heat(), shared[k]->fine_heat())) << isa_name(isa) << " runner " << k << " frame " << f;
+        ASSERT_TRUE(same_bits(own[k]->fine_soot(), shared[k]->fine_soot())) << isa_name(isa) << " runner " << k << " frame " << f;
+        std::vector<std::uint8_t> a(z(S) * z(S) * 4), b(a.size());
+        own[k]->render(rt::FrameInput{}, a.data(), z(S) * 4);
+        shared[k]->render(rt::FrameInput{}, b.data(), z(S) * 4);
+        ASSERT_EQ(a, b) << isa_name(isa) << " runner " << k << " frame " << f;
+      }
+    }
+    for (auto& r : shared) r->use_scratch(nullptr);  // back to their own
+    EXPECT_EQ(shared[0]->scratch_bytes(), own[0]->scratch_bytes());
+  }
+}
+
+// A scene whose modules share one step scratch per thread renders the frames of one whose modules have their own, on
+// any number of threads.
+TEST(Compose, ScenesWithSharedStepScratchRenderTheSame) {
+  MiniScene ref(1), one(1, true), four(4, true);
+  EXPECT_EQ(four.shared->slots(), 4);
+  std::vector<std::uint8_t> a(160 * 90 * 3), b(a.size()), c(a.size());
+  for (int f = 0; f < 12; ++f) {
+    ref.step(f, a);
+    one.step(f, b);
+    four.step(f, c);
+    ASSERT_EQ(a, b) << "frame " << f;
+    ASSERT_EQ(a, c) << "frame " << f;
+  }
+  std::size_t own = 0, shared = one.shared->bytes();  // three modules: three sets of working memory, or one
+  for (const Module* m : ref.all) own += m->runner().scratch_bytes();
+  for (const Module* m : one.all) shared += m->runner().scratch_bytes();
+  EXPECT_LT(shared, own);
+}

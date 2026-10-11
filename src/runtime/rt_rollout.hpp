@@ -405,12 +405,6 @@ class Rollout final : public RolloutRunner {
     b2_.resize(z(H_));
     cond_.assign(z(h_.cond()), 0.f);
     folded_cond_.assign(z(h_.cond()), std::numeric_limits<float>::quiet_NaN());
-    X_.assign(z(R_ + 2) * z(R_ + 2) * z(I_), 0.f);  // planar, zero border (written inside only)
-    h1p_.assign(z(R_ + 2) * z(R_ + 2) * z(H_), 0.f);
-    h1_.resize(z(N_) * z(H_));
-    h2_.resize(z(N_) * z(H_));
-    d_.resize(z(N_) * z(O_));
-    mid_.resize(z(N_) * z(C_));
     next_.resize(z(N_) * z(C_));
     coarse_.resize(z(N_) * z(C_));
     flow_.resize(z(N_) * 2);
@@ -426,25 +420,45 @@ class Rollout final : public RolloutRunner {
     soot_.assign(z(R_ + 2 * kDirSteps) * z(R_ + 2 * kDirSteps), 0.f);  // zero border, written inside only
     fac_.resize(z(N_) * 4);
     any_.resize(z(R_));
-    ext_.assign(z(S_) * 2, 0);
-    qmin_.assign(z(S_), 0);
-    qmax_.assign(z(S_), 0);
-    act_.assign(z(S_) * 2, 0);
     nm_.assign(z(R_) * 2, 0);
     const std::size_t S2 = z(S_) * z(S_);
     ft_.resize(S2);
     fd_.resize(S2);
-    rec_.resize(z(S_) * z(record_stride()));  // as many rows as the largest lag can need
-    // Rings of padded rows (zero border columns, written inside only): enough slots for every padded row of the frame,
-    // a power of two, and one more for a copy of slot 0 (the row above the last slot).
+    // step()'s working memory, carved from one RolloutScratch (its own, or one shared by runners stepped one after
+    // another; see bind()). Rings of padded rows: up to a slot for every padded row of the frame, a power of two
+    // (slots_), plus a copy of slot 0 above the last slot used (mirror()). A ring of slots_ never wraps (the frame's S + 3
+    // padded rows fit) and needs no copy; a smaller one has at most slots_ / 2 + 1 rows. So S + 3 rows hold either.
+    // Row records: as many rows as the largest lag can need.
     slots_ = static_cast<int>(std::bit_ceil(z(S_ + 3)));
-    td_.assign(z(slots_ + 1) * z(S_ + 3) * 2, 0.f);
-    fg_.assign(td_.size(), 0.f);
-    cs_t_.assign(z(S_), 0.f);
-    cs_d_.assign(z(S_), 0.f);
-    off_.assign(z(S_), 0);
-    wx_.assign(z(S_), 0.f);
-    wy_.assign(z(S_), 0.f);
+    const auto carve = [](std::size_t& at, std::size_t n) {  // on 64-byte boundaries
+      const std::size_t a = at;
+      at += (n + 15) / 16 * 16;
+      return Part{a, n};
+    };
+    std::size_t nf = 0, ni = 0;
+    map_.X = carve(nf, z(R_ + 2) * z(R_ + 2) * z(I_));  // planar, zero border
+    map_.h1p = carve(nf, z(R_ + 2) * z(R_ + 2) * z(H_));
+    map_.h1 = carve(nf, z(N_) * z(H_));
+    map_.h2 = carve(nf, z(N_) * z(H_));
+    map_.d = carve(nf, z(N_) * z(O_));
+    map_.mid = carve(nf, z(N_) * z(C_));
+    map_.rec = carve(nf, z(S_) * z(record_stride()));
+    map_.td = carve(nf, z(S_ + 3) * z(S_ + 3) * 2);
+    map_.fg = carve(nf, z(S_ + 3) * z(S_ + 3) * 2);
+    map_.cs_t = carve(nf, z(S_));
+    map_.cs_d = carve(nf, z(S_));
+    map_.wx = carve(nf, z(S_));
+    map_.wy = carve(nf, z(S_));
+    map_.off = carve(ni, z(S_));
+    map_.ext = carve(ni, z(S_) * 2);
+    map_.act = carve(ni, z(S_) * 2);
+    map_.qmin = carve(ni, z(S_));
+    map_.qmax = carve(ni, z(S_));
+    need_ = {nf, ni};
+    own_ = std::make_unique<RolloutScratch>();
+    own_->fit(*this);
+    scratch_ = own_.get();
+    bind();
     r1_.resize(z(h_.render_hidden) * kB);
     r2_.resize(z(h_.render_hidden) * kB);
     out_.resize(4 * kB);
@@ -534,6 +548,7 @@ class Rollout final : public RolloutRunner {
   }
 
   void step(std::span<const float> controls, std::uint64_t seed) override {
+    bind();
     reseed(seed);
     rollout::condition(m_, controls, time_, cond_);
     fold();
@@ -664,13 +679,12 @@ class Rollout final : public RolloutRunner {
   }
 
   std::size_t scratch_bytes() const override {
-    std::size_t n = 0;
-    for (const auto* v : {&w1_, &b1_, &w2_, &b2_, &cond_, &folded_cond_, &X_, &h1p_, &h1_, &h2_, &d_, &mid_, &next_, &coarse_, &flow_, &div_, &p_,
-                          &tmp_, &wot_, &noise_, &dirsum_, &soot_, &fac_, &ft_, &fd_, &rec_, &td_, &fg_,
-                          &cs_t_, &cs_d_, &wx_, &wy_, &swl_, &g1_, &frow_, &r1_, &r2_, &out_}) {
+    std::size_t n = own_ ? own_->bytes() : 0;
+    for (const auto* v : {&w1_, &b1_, &w2_, &b2_, &cond_, &folded_cond_, &next_, &coarse_, &flow_, &div_, &p_,
+                          &tmp_, &wot_, &noise_, &dirsum_, &soot_, &fac_, &ft_, &fd_, &swl_, &g1_, &frow_, &r1_, &r2_, &out_}) {
       n += v->size() * 4;
     }
-    n += any_.size() + 4 * off_.size() + 4 * (ext_.size() + act_.size() + nm_.size() + cell_lo_.size() + cell_hi_.size() + qmin_.size() + qmax_.size());
+    n += any_.size() + 4 * (nm_.size() + cell_lo_.size() + cell_hi_.size());
     n += curl_.bytes() + swirl_.bytes() + fine_flicker_.bytes();
     for (const auto& f : flicker_) n += f.bytes();
     n += flow_rows_.bytes() + swirl_rows_.bytes() + fac_rows_.bytes() + render_rows_.bytes();
@@ -694,6 +708,20 @@ class Rollout final : public RolloutRunner {
   std::span<float> fine_heat_mut() override { return ft_; }
   std::span<float> fine_soot_mut() override { return fd_; }
   void skip_empty(bool on) override { skip_ = on; }
+  void use_scratch(RolloutScratch* s) override {
+    if (s) {
+      if (!s->fits(*this)) throw std::invalid_argument("rollout: the scratch is too small for this runner (RolloutScratch::fit)");
+      scratch_ = s;
+      own_.reset();
+      return;
+    }
+    if (!own_) {
+      own_ = std::make_unique<RolloutScratch>();
+      own_->fit(*this);
+    }
+    scratch_ = own_.get();
+  }
+  std::array<std::size_t, 2> scratch_need() const override { return need_; }
   void adopt(float seconds) override {
     time_ = seconds;
     since_start_ = m_.detail.swirl_ramp;
@@ -703,6 +731,43 @@ class Rollout final : public RolloutRunner {
 
  private:
   static std::size_t z(int v) { return static_cast<std::size_t>(v); }
+
+  // The buffers of step() in the scratch in use (which may have been reallocated by fit() since the last step).
+  void bind() {
+    float* f = scratch_->floats.data();
+    std::int32_t* q = scratch_->ints.data();
+    const auto F = [f](Part p) { return std::span<float>(f + p.at, p.n); };
+    const auto Q = [q](Part p) { return std::span<std::int32_t>(q + p.at, p.n); };
+    X_ = F(map_.X);
+    h1p_ = F(map_.h1p);
+    h1_ = F(map_.h1);
+    h2_ = F(map_.h2);
+    d_ = F(map_.d);
+    mid_ = F(map_.mid);
+    rec_ = F(map_.rec);
+    td_ = F(map_.td);
+    fg_ = F(map_.fg);
+    cs_t_ = F(map_.cs_t);
+    cs_d_ = F(map_.cs_d);
+    wx_ = F(map_.wx);
+    wy_ = F(map_.wy);
+    off_ = Q(map_.off);
+    ext_ = Q(map_.ext);
+    act_ = Q(map_.act);
+    qmin_ = Q(map_.qmin);
+    qmax_ = Q(map_.qmax);
+  }
+
+  // The zero border of `count` planes of (R + 2)^2 values (the scratch may hold another runner's values there).
+  void zero_borders(std::span<float> planes, int count) const {
+    const std::size_t P = z(R_ + 2);
+    for (int c = 0; c < count; ++c) {
+      float* p = planes.data() + z(c) * P * P;
+      std::fill_n(p, P, 0.f);
+      std::fill_n(p + (P - 1) * P, P, 0.f);
+      for (std::size_t y = 1; y + 1 < P; ++y) p[y * P] = p[y * P + P - 1] = 0.f;
+    }
+  }
 
   // Bilinear at cell-centre coordinates on an n x n grid of `channels` interleaved values, clamped.
   static float bilinear(const float* f, int n, int channels, int c, float x, float y) {
@@ -791,6 +856,8 @@ class Rollout final : public RolloutRunner {
     const float* w = m_.step_w.data();
     // inputs, planar with a zero border, for the shared 3x3 kernel: [input][R + 2][R + 2]
     const int Pw = R_ + 2;
+    zero_borders(X_, I_);
+    zero_borders(h1p_, H_);
     for (int y = 0; y < R_; ++y) {
       for (int x = 0; x < R_; ++x) {
         const std::size_t i = z(y) * z(R_) + z(x), q = z(y + 1) * z(Pw) + z(x + 1), plane = z(Pw) * z(Pw);
@@ -915,14 +982,20 @@ class Rollout final : public RolloutRunner {
   }
 
   // Slot of padded row p in a ring; after writing slot 0, mirror() copies it above the last slot, so that the row above
-  // any slot is the next one in memory.
-  float* ring_row(AlignedFloats& ring, int p) { return ring.data() + z(p & (ring_rows_ - 1)) * z(S_ + 3) * 2; }
-  void mirror(AlignedFloats& ring, int p) {
-    if ((p & (ring_rows_ - 1)) == 0) std::copy_n(ring.data(), z(S_ + 3) * 2, ring.data() + z(ring_rows_) * z(S_ + 3) * 2);
+  // any slot is the next one in memory. A ring of every slot (slots_) does not wrap: nothing reads above its last slot.
+  float* ring_row(std::span<float> ring, int p) const { return ring.data() + z(p & (ring_rows_ - 1)) * z(S_ + 3) * 2; }
+  void mirror(std::span<float> ring, int p) const {
+    if ((p & (ring_rows_ - 1)) == 0 && ring_rows_ < slots_) std::copy_n(ring.data(), z(S_ + 3) * 2, ring.data() + z(ring_rows_) * z(S_ + 3) * 2);
   }
-  void zero_row(AlignedFloats& ring, int p) {
+  void zero_row(std::span<float> ring, int p) const {
     std::fill_n(ring_row(ring, p), z(S_ + 3) * 2, 0.f);
     mirror(ring, p);
+  }
+  // The zero border columns of padded row p (padded columns 0, S + 1 and S + 2), before the row is mirrored.
+  void zero_ends(std::span<float> ring, int p) const {
+    float* r = ring_row(ring, p);
+    std::fill_n(r, 2, 0.f);
+    std::fill_n(r + z(S_ + 1) * 2, 4, 0.f);
   }
 
   // Bilinear samples of both fields at stencils from stencil() (rows `row` floats apart), with the range of the four
@@ -1064,6 +1137,7 @@ class Rollout final : public RolloutRunner {
     const float* a = ft_.data() + z(y) * S;
     const float* b = fd_.data() + z(y) * S;
     each_block(S_, [&]<class V>(int x) { st_pairs<V>(o + 2 * x, ld<V>(a + x), ld<V>(b + x)); });
+    zero_ends(td_, y + 1);
     mirror(td_, y + 1);
     if (spans_) {  // the first and last pixel of the row that is not +0 in either field (bit patterns: -0 and NaN count)
       // Blocks of 8 pixels are tested at once (an "or" of their bits, which vectorises), then the pixel in the block.
@@ -1176,6 +1250,7 @@ class Rollout final : public RolloutRunner {
     if (std::max(done[0], done[1]) < S_) std::fill(o + 2 * std::max(done[0], done[1]), o + 2 * S, 0.f);
     act_[z(y) * 2] = done[0];
     act_[z(y) * 2 + 1] = done[1];
+    zero_ends(fg_, y + 1);
     mirror(fg_, y + 1);
   }
 
@@ -1338,23 +1413,36 @@ class Rollout final : public RolloutRunner {
   rollout::StepLayout L_{};
   rollout::RenderLayout RL_{};
   AlignedFloats w1_, b1_, w2_, b2_, cond_, folded_cond_;
-  AlignedFloats X_, h1p_, h1_, h2_, d_, mid_, next_, coarse_, flow_, div_, p_, tmp_, wot_, noise_, dirsum_, soot_;
+  AlignedFloats next_, coarse_, flow_, div_, p_, tmp_, wot_, noise_, dirsum_, soot_;
   AlignedFloats ft_, fd_;  // the fine fields
-  AlignedFloats td_, fg_;  // rings of padded rows: the fine fields and the forward samples, interleaved
+  // step()'s working memory, in the scratch in use (bind()): where each buffer lies in it, and the spans themselves.
+  struct Part {
+    std::size_t at = 0, n = 0;
+  };
+  struct {
+    Part X, h1p, h1, h2, d, mid, rec, td, fg, cs_t, cs_d, wx, wy;  // floats
+    Part off, ext, act, qmin, qmax;                                 // integers
+  } map_;
+  std::array<std::size_t, 2> need_{};
+  std::unique_ptr<RolloutScratch> own_;  // null while a shared one is used
+  RolloutScratch* scratch_ = nullptr;
+  std::span<float> X_, h1p_, h1_, h2_, d_, mid_;  // the coarse step's inputs and activations (planar, zero borders)
+  std::span<float> td_, fg_;  // rings of padded rows: the fine fields and the forward samples, interleaved
   int slots_ = 1, ring_rows_ = 1;  // slots of the rings, and those in use in this frame (powers of two)
   static constexpr int kRec = 8;                            // planes of a row record (see row_record)
-  AlignedFloats rec_;                                  // the ring of row records
+  std::span<float> rec_;                                    // the ring of row records
   int ring_ = 1;                                            // rows in the ring in this frame
-  AlignedFloats cs_t_, cs_d_;                          // column sums of the row of coarse cells being summed
-  std::vector<std::int32_t> off_;                           // one row of sample stencils: offsets of the lower left
-  AlignedFloats wx_, wy_;                              // corners, and the weights
+  std::span<float> cs_t_, cs_d_;                            // column sums of the row of coarse cells being summed
+  std::span<std::int32_t> off_;                             // one row of sample stencils: offsets of the lower left
+  std::span<float> wx_, wy_;                                // corners, and the weights
   AlignedFloats fac_;                                  // the lock's factors per coarse cell: add, scale (heat, soot)
   std::vector<std::uint8_t> any_;                           // a row of coarse cells receives new material
   // Study H (H2): skipping what is +0. Per fine row, the first and last pixel that is not +0 before the step (ext_) and
   // the pixels the forward samples and the round trip computed (act_, [a, b)); per coarse row, the first and last cell
   // with new material (nm_); per coarse cell, the fine pixels whose lock reads it ([cell_lo_, cell_hi_)).
-  std::vector<int> ext_, act_, nm_, cell_lo_, cell_hi_;
-  std::vector<int> qmin_, qmax_;  // the rows of the forward samples' window, as monotone queues (see forward_span)
+  std::span<std::int32_t> ext_, act_;
+  std::vector<int> nm_, cell_lo_, cell_hi_;
+  std::span<std::int32_t> qmin_, qmax_;  // the rows of the forward samples' window, as monotone queues (see forward_span)
   int win_next_ = 0, qmin_head_ = 0, qmin_tail_ = 0, qmax_head_ = 0, qmax_tail_ = 0;
   bool skip_ = true, spans_ = false;  // skipping allowed; used in this step
   double computed_ = 0.0;            // the fraction of pixels the last step with spans computed

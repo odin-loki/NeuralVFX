@@ -348,6 +348,30 @@ std::unique_ptr<rt::RolloutRunner> make_runner(const rt::RolloutEffect& e, int s
   return nullptr;
 }
 
+StepScratch::StepScratch(int slots) : s_(zs(std::max(1, slots))), busy_(std::make_unique<std::atomic<bool>[]>(s_.size())) {}
+
+void StepScratch::fit(const rt::RolloutRunner& r) {
+  for (rt::RolloutScratch& s : s_) s.fit(r);
+}
+
+rt::RolloutScratch& StepScratch::take() {
+  for (;;) {
+    for (std::size_t i = 0; i < s_.size(); ++i) {
+      bool free = false;
+      if (!busy_[i].load(std::memory_order_relaxed) && busy_[i].compare_exchange_strong(free, true, std::memory_order_acquire)) return s_[i];
+    }
+    std::this_thread::yield();  // more threads step than there are slots: wait for one
+  }
+}
+
+void StepScratch::give(rt::RolloutScratch& s) { busy_[zs(static_cast<int>(&s - s_.data()))].store(false, std::memory_order_release); }
+
+std::size_t StepScratch::bytes() const {
+  std::size_t n = 0;
+  for (const rt::RolloutScratch& s : s_) n += s.bytes();
+  return n;
+}
+
 Module::Module(std::string name, const rt::RolloutEffect& e, int size, Placement p, Isa isa)
     : at(p), name_(std::move(name)), e_(e), size_(size), isa_(isa), r_(make_runner(e, size, isa)) {
   img_.allocate(size, size);
@@ -372,9 +396,20 @@ Module::Module(std::string name, const rt::RolloutEffect& e, int size, Placement
   controls.assign(zs(e.m.h.n_controls), 0.5f);
 }
 
+void Module::share_scratch(StepScratch& shared) {
+  shared.fit(*r_);
+  rt::RolloutScratch& s = shared.take();
+  r_->use_scratch(&s);  // frees the runner's own
+  shared.give(s);
+  shared_ = &shared;
+}
+
 void Module::start(int index, std::uint64_t run_seed) {
   seed = run_seed;
+  rt::RolloutScratch* s = shared_ ? &shared_->take() : nullptr;
+  if (s) r_->use_scratch(s);
   r_->start(index, controls, seed);
+  if (s) shared_->give(*s);
   active = true;
   frames = 0;
 }
@@ -412,7 +447,10 @@ void Module::take_over(const Module& from) {
 
 void Module::step() {
   const auto t0 = std::chrono::steady_clock::now();
+  rt::RolloutScratch* s = shared_ ? &shared_->take() : nullptr;
+  if (s) r_->use_scratch(s);
   r_->step(controls, seed);
+  if (s) shared_->give(*s);
   if (has_push_) {  // what was pushed in moved material for one step; take it out again
     auto co = r_->coarse_mut();
     const int C = channels(), N = res() * res();

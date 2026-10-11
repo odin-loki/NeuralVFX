@@ -59,13 +59,16 @@ struct MiniScene {
   Particles parts{512};
   Frame frame{160, 90};
   Pool pool;
+  std::unique_ptr<StepScratch> shared;  // the modules' step working memory, one per thread (shared_scratch)
   std::vector<Module*> all;
   std::vector<Shock> shocks;
 
-  explicit MiniScene(int threads) : pool(threads) {
+  explicit MiniScene(int threads, bool shared_scratch = false) : pool(threads) {
+    if (shared_scratch) shared = std::make_unique<StepScratch>(threads);
     for (int i = 0; i < 2; ++i) {  // two tiles side by side, 64 world pixels each, overlapping by 4 cells (16 px)
       mods.push_back(std::make_unique<Module>("tile" + std::to_string(i), e, 32, Placement{16.f + 48.f * static_cast<float>(i), 10.f, 2.f}, best_isa()));
       Module& m = *mods.back();
+      if (shared) m.share_scratch(*shared);
       m.group = 0;
       m.band = {i == 1 ? 4 : 0, i == 0 ? 4 : 0, 0, 0};
       m.look = Look::shader;
@@ -73,6 +76,7 @@ struct MiniScene {
     }
     mods.push_back(std::make_unique<Module>("fire", e, 32, Placement{50.f, 40.f, 1.f}, best_isa()));
     Module& f = *mods.back();
+    if (shared) f.share_scratch(*shared);
     f.group = 1;
     f.feather = 4.f;
     f.start(1, 99);

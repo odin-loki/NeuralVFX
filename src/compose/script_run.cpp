@@ -247,6 +247,13 @@ struct EffectC {
   std::vector<std::pair<std::string, float>> detail;
 };
 
+struct InputC {  // `input NAME = value`: a value the game sets while the scene plays
+  std::string name;
+  Pos pos;
+  int slot = 0;
+  float value = 0.f;  // the script's starting value
+};
+
 struct Program {
   int width = 1280, height = 720;
   float fps = 30.f, length = 10.f, ground = 600.f;
@@ -264,6 +271,7 @@ struct Program {
   std::vector<EmitC> emitters;
   std::vector<RuleC> rules;
   std::vector<ActC> every;
+  std::vector<InputC> inputs;
   int slots = s_first;
   int shock_capacity = 0, scorch_capacity = 0;
 };
@@ -293,7 +301,8 @@ class Compiler {
     if (listed ? is_reserved(name) : is_keyword(name)) fail(pos, std::format("'{}' is a word of the script language; choose another name for this {}", name, what));
     auto& names = what == "effect" ? effect_names_ : what == "look" ? look_names_ : names_;
     if (const auto it = names.find(name); it != names.end()) {
-      fail(pos, std::format("'{}' is already the name of a {} (line {})", name, it->second.first, it->second.second.line));
+      const std::string& kind = it->second.first;
+      fail(pos, std::format("'{}' is already the name of {} {} (line {})", name, kind == "effect" || kind == "input" ? "an" : "a", kind, it->second.second.line));
     }
     names[name] = {std::string(what), pos};
   }
@@ -319,7 +328,7 @@ class Compiler {
       hmax = std::max(hmax, h + 1);
     }
     if (hmax >= kMaxStack) fail(e.pos, "this expression is too deeply nested");
-    if (c.constant && out.varying) fail(e.pos, std::format("{} must be a constant: it cannot depend on time, rules, modules or rand", c.what));
+    if (c.constant && out.varying) fail(e.pos, std::format("{} must be a constant: it cannot depend on time, rules, modules, inputs or rand", c.what));
     return out;
   }
   float constant(const Expr& e, std::string_view what, bool scene = false) {
@@ -368,7 +377,7 @@ class Compiler {
   std::vector<std::string> value_names() const {  // what a name in an expression can be
     std::vector<std::string> out = {"t", "length", "fps", "ground", "rand", "infinity"};
     for (const auto& [n, what] : names_)
-      if (what.first == "value" || what.first == "rule") out.push_back(n);
+      if (what.first == "value" || what.first == "rule" || what.first == "input") out.push_back(n);
     return out;
   }
   void only(const Statement& s, std::initializer_list<std::string_view> keys, std::string_view what) {
@@ -393,7 +402,7 @@ class Compiler {
   Program prog_;
   std::map<std::string, std::pair<std::string, Pos>> names_, effect_names_, look_names_;
   std::map<std::string, const Statement*> lets_;
-  std::map<std::string, int> rule_slots_;
+  std::map<std::string, int> rule_slots_, input_slots_;
 };
 
 void Compiler::emit(const Expr& e, const Ctx& c, Code& code, std::vector<std::string>& open) {
@@ -437,6 +446,10 @@ void Compiler::emit(const Expr& e, const Ctx& c, Code& code, std::vector<std::st
       }
       if (const auto it = rule_slots_.find(n); it != rule_slots_.end()) {
         if (c.scene) fail(e.pos, "the scene's settings cannot depend on rules");
+        return slot(it->second, true);
+      }
+      if (const auto it = input_slots_.find(n); it != input_slots_.end()) {  // set by the game: it may change at any frame
+        if (c.scene) fail(e.pos, "the scene's settings cannot depend on inputs");
         return slot(it->second, true);
       }
       if (const auto it = names_.find(n); it != names_.end()) {
@@ -934,6 +947,10 @@ Program Compiler::compile() {
     } else if (w == "let") {
       declare(st.name, st.name_pos, "value");
       lets_[st.name] = &st;
+    } else if (w == "input") {
+      declare(st.name, st.name_pos, "input");
+      input_slots_[st.name] = prog_.slots;
+      prog_.inputs.push_back({st.name, st.pos, prog_.slots++, 0.f});
     } else if (w == "module") {
       declare(st.name, st.name_pos, "module");
       ModC m;
@@ -953,6 +970,9 @@ Program Compiler::compile() {
   // 2. the scene, then everything that only needs constants
   for (const Statement& st : s_.statements)
     if (st.keyword == "scene") scene(st);
+  std::size_t input_i = 0;
+  for (const Statement& st : s_.statements)
+    if (st.keyword == "input") prog_.inputs[input_i++].value = constant(st.args[0], "an input's starting value");
   for (const Statement& st : s_.statements) {
     if (st.keyword == "let") {  // a let is checked where it is used; here only that it compiles at all
       Ctx c;
@@ -1107,11 +1127,13 @@ struct Scene::Impl {
   std::unique_ptr<Frame> frame;
   std::unique_ptr<Pool> pool;
   std::unique_ptr<PictureThread> picture;  // Options::overlap
+  std::unique_ptr<StepScratch> step_scratch;  // Options::shared_scratch
   std::vector<Shock> shocks;
   std::vector<std::array<float, 4>> scorch;
   std::vector<const Code*> scorch_glow;
   std::vector<float> slots;
   std::vector<int> fired;
+  std::vector<char> pending;  // per rule: triggered by the game, to fire at the start of the next frame
   std::vector<std::pair<std::string, float>> first;
   std::vector<Module*> active;
   std::vector<float> scratch;
@@ -1121,7 +1143,9 @@ struct Scene::Impl {
   float light_gain = 0.14f, flow = 0.9f, bloom = 1.f, bloom_threshold = 1.f;
   std::array<float, 3> flash{};
   Env env;
-  int next = 0;
+  int drawn = -1;     // the last frame drawn
+  int computed = -1;  // the last frame whose state (steps 1 to 9) is computed
+  int shaded = -1;    // the frame the modules' images show
 
   [[noreturn]] void fail(Pos p, const std::string& m) const { throw Error(p, m, source); }
   float eval(const Code& c) { return run(c, env); }
@@ -1446,17 +1470,42 @@ struct Scene::Impl {
 
   void build(const EffectLoader& load, const Options& o);
   void render(int f, std::span<std::uint8_t> rgb);
+  void advance(int f) {  // the states of the frames up to f, without pictures
+    while (computed < f) state(++computed);
+  }
+  void shade_for(int f) {  // the modules' images of frame f (its state is the last computed)
+    if (shaded == f) return;
+    shade();
+    shaded = f;
+  }
+  int script_module(std::string_view name) const {
+    for (std::size_t i = 0; i < prog.modules.size(); ++i)
+      if (prog.modules[i].name == name) return static_cast<int>(i);
+    return -1;
+  }
   void state(int f);  // steps 1 to 9 of frame f
   void shade();       // the active modules into their images
   void picture_ms();  // the picture's stages into stage[] (background and modules are one pass: draw)
 };
 
 void Scene::Impl::build(const EffectLoader& load, const Options& o) {
+  // step()'s working memory, one set per thread that may step at once (the picture thread is one of o.threads)
+  if (o.shared_scratch) step_scratch = std::make_unique<StepScratch>(std::max(1, o.threads));
   slots.assign(zs(prog.slots), 0.f);
   slots[s_length] = prog.length;
   slots[s_fps] = prog.fps;
   slots[s_ground] = prog.ground;
   for (const RuleC& r : prog.rules) slots[zs(r.slot)] = kNever;
+  for (const InputC& in : prog.inputs) slots[zs(in.slot)] = in.value;
+  for (const auto& [name, v] : o.inputs) {  // the game's starting values
+    const auto it = std::ranges::find(prog.inputs, name, &InputC::name);
+    if (it == prog.inputs.end()) {
+      std::vector<std::string> names;
+      for (const InputC& in : prog.inputs) names.push_back(in.name);
+      throw std::invalid_argument(std::format("the script has no input '{}'{}", name, did_you_mean(name, names)));
+    }
+    slots[zs(it->slot)] = v;
+  }
   env.slots = slots.data();
   env.shocks = &shocks;
   // effects, with the script's settings of their detail layers
@@ -1508,6 +1557,7 @@ void Scene::Impl::build(const EffectLoader& load, const Options& o) {
         const std::string name = mc.tiled ? std::format("{}_r{}c{}", mc.name, row, c) : mc.name;
         owned.push_back(std::make_unique<Module>(name, e, mc.size, Placement{0.f, 0.f, scale}, o.isa));
         Module* m = owned.back().get();
+        if (step_scratch) m->share_scratch(*step_scratch);
         m->group = r.group;
         if (mc.tiled) m->band = {c > 0 ? mc.band : 0, c < mc.cols - 1 ? mc.band : 0, row > 0 ? mc.band : 0, row < mc.rows - 1 ? mc.band : 0};
         m->feather = mc.feather * static_cast<float>(mc.size);
@@ -1632,32 +1682,29 @@ void Scene::Impl::build(const EffectLoader& load, const Options& o) {
   fweight.assign(prog.fields.size(), 0.f);
   scratch.assign(pull, 0.f);
   fired.assign(prog.rules.size(), 0);
+  pending.assign(prog.rules.size(), 0);
   for (const RuleC& r : prog.rules) first.push_back({r.name, kNever});
 }
 
 void Scene::Impl::render(int f, std::span<std::uint8_t> rgb) {
-  if (f != next) throw std::invalid_argument("Scene::render: frames must come in order from 0");
+  if (f <= drawn || f < computed) throw std::invalid_argument("Scene::render: frames must come in order, after the last one drawn or computed");
   if (rgb.size() < zs(prog.width) * zs(prog.height) * 3) throw std::invalid_argument("Scene::render: the buffer is too small");
-  ++next;
+  drawn = f;
+  advance(f);  // frames skipped since the last picture (and frame f itself, unless the last call computed it)
+  shade_for(f);
   if (!picture) {
-    state(f);
-    shade();
     frame->capture(*light, scorch, active, *parts, shocks, *bus);
     frame->render(rgb, bloom_threshold, bloom, *pool);
     picture_ms();
     return;
   }
-  // Overlapped: frame f's state was computed (and shaded) by the last call; its picture is drawn on the picture thread
-  // while the next frame's state is computed here.
-  if (f == 0) {
-    state(0);
-    shade();
-  }
+  // Overlapped: frame f's picture is drawn on the picture thread while the next frame's state is computed (and shaded)
+  // here; the next call finds it done.
   frame->capture(*light, scorch, active, *parts, shocks, *bus);
   picture->start(rgb, bloom_threshold, bloom);
-  state(f + 1);
+  state(++computed);
   picture->wait_images();
-  shade();
+  shade_for(computed);
   picture->wait();
   picture_ms();
 }
@@ -1682,11 +1729,13 @@ void Scene::Impl::state(int f) {
   const float t = static_cast<float>(f) / prog.fps;
   slots[s_t] = t;
   const auto c0 = Clock::now();
-  // 1. rules on time, shocks and fields
+  // 1. rules on time, shocks and fields (and rules the game triggered)
   for (std::size_t i = 0; i < prog.rules.size(); ++i) {
     RuleC& r = prog.rules[i];
+    const bool triggered = pending[i] != 0;
+    pending[i] = 0;
     if (r.kind == "lands" || fired[i] >= r.limit) continue;
-    if (eval(r.cond) != 0.f) fire(r, i, t);
+    if (triggered || eval(r.cond) != 0.f) fire(r, i, t);
   }
   // 2. emitters; 3. settings that change over time
   for (const EmitC& e : prog.emitters) emit(e, t);
@@ -1776,8 +1825,73 @@ int Scene::width() const { return impl_->prog.width; }
 int Scene::height() const { return impl_->prog.height; }
 float Scene::fps() const { return impl_->prog.fps; }
 int Scene::frames() const { return static_cast<int>(std::lround(impl_->prog.length * impl_->prog.fps)); }
+float Scene::length() const { return impl_->prog.length; }
 std::span<const float> Scene::keyframes() const { return impl_->prog.keyframes; }
 void Scene::render(int f, std::span<std::uint8_t> rgb) { impl_->render(f, rgb); }
+void Scene::advance(int f) { impl_->advance(f); }
+int Scene::computed() const { return impl_->computed; }
+
+int Scene::inputs() const { return static_cast<int>(impl_->prog.inputs.size()); }
+const std::string& Scene::input_name(int i) const { return impl_->prog.inputs.at(zs(i)).name; }
+int Scene::input_index(std::string_view name) const {
+  const auto& in = impl_->prog.inputs;
+  for (std::size_t i = 0; i < in.size(); ++i)
+    if (in[i].name == name) return static_cast<int>(i);
+  return -1;
+}
+float Scene::input(int i) const { return impl_->slots[zs(impl_->prog.inputs.at(zs(i)).slot)]; }
+void Scene::set_input(int i, float v) { impl_->slots[zs(impl_->prog.inputs.at(zs(i)).slot)] = v; }
+
+bool Scene::trigger(std::string_view rule) {
+  for (std::size_t i = 0; i < impl_->prog.rules.size(); ++i) {
+    if (impl_->prog.rules[i].name != rule) continue;
+    if (impl_->prog.rules[i].kind == "lands") return false;
+    impl_->pending[i] = 1;
+    return true;
+  }
+  return false;
+}
+
+bool Scene::place(std::string_view module, float x, float y) {
+  const int mi = impl_->script_module(module);
+  if (mi < 0 || impl_->prog.modules[zs(mi)].tiled) return false;
+  impl_->place(mi, x, y);
+  impl_->shaded = -1;  // a module's shading samples the light where it stands: an image shaded ahead is shaded again
+  return true;
+}
+
+bool Scene::set_control(std::string_view module, std::string_view control, float v) {
+  const int mi = impl_->script_module(module);
+  if (mi < 0) return false;
+  const auto& names = impl_->effects[zs(impl_->prog.modules[zs(mi)].effect)]->m.control_names;
+  for (std::size_t c = 0; c < names.size(); ++c) {
+    if (names[c] != control) continue;
+    for (Module* m : impl_->mods[zs(mi)].tiles) m->controls[c] = v;
+    return true;
+  }
+  return false;
+}
+
+int Scene::script_modules() const { return static_cast<int>(impl_->prog.modules.size()); }
+Scene::ModuleInfo Scene::module_info(int i) const {
+  const ModC& mc = impl_->prog.modules.at(zs(i));
+  const ModR& r = impl_->mods[zs(i)];
+  ModuleInfo out;
+  out.name = mc.name;
+  out.effect = impl_->prog.effects[zs(mc.effect)].name;
+  out.tiles = static_cast<int>(r.tiles.size());
+  out.x = impl_->slots[zs(mc.slot + m_x)];
+  out.y = impl_->slots[zs(mc.slot + m_y)];
+  out.width = r.Wd;
+  out.started = impl_->slots[zs(mc.slot + m_started)];
+  out.active = r.tiles[0]->active;
+  out.tiled = mc.tiled;
+  out.controls = std::span<const float>(r.tiles[0]->controls);
+  out.control_names = std::span<const std::string>(impl_->effects[zs(mc.effect)]->m.control_names);
+  return out;
+}
+int Scene::rules() const { return static_cast<int>(impl_->prog.rules.size()); }
+const std::string& Scene::rule_name(int i) const { return impl_->prog.rules.at(zs(i)).name; }
 const char* Scene::stage_name(int s) {
   static constexpr const char* names[kStages] = {"script", "step", "couple", "bus", "light", "particles", "shade", "background", "draw", "particles_draw", "distort", "bloom", "finish"};
   return s >= 0 && s < kStages ? names[s] : "?";
@@ -1808,7 +1922,7 @@ Particles& Scene::particles() { return *impl_->parts; }
 const Frame& Scene::frame() const { return *impl_->frame; }
 int Scene::active_modules() const { return static_cast<int>(impl_->active.size()); }
 std::size_t Scene::scratch_bytes() const {
-  std::size_t n = 0;
+  std::size_t n = impl_->step_scratch ? impl_->step_scratch->bytes() : 0;
   for (const Module* m : impl_->all) n += m->runner().scratch_bytes();
   return n;
 }

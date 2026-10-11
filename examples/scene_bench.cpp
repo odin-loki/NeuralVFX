@@ -1,11 +1,12 @@
 // nvfx_scene: how many neural effects fit in a game frame on one core (docs/REPORT.md §6).
 //
-//   nvfx_scene effect.nvfx [--near 8] [--far 16] [--rate 30] [--fps 60] [--seconds 10] [--core 3]
+//   nvfx_scene effect.nvfx [--near 8] [--far 16] [--rate 30] [--fps 60] [--seconds 10] [--core 3] [--float]
 //
 // A scene with `near` instances at 128 px and `far` instances at 64 px (level of detail), each with its own seed.
 // Every instance is evaluated `rate` times per second, its updates spread evenly over the game's frames (a game at
 // `fps` frames per second updates rate / fps of the instances each frame). Reports the cost per game frame on one
-// pinned core: mean, 99th percentile and worst, plus the share of a frame's time.
+// pinned core: mean, 99th percentile and worst, plus the share of a frame's time. Frame models run at the runtime's
+// default precision (int8 for the grid family); --float runs the float network.
 #include "../tools/args.hpp"
 
 #include <neuralfx/nvfx.h>
@@ -17,9 +18,9 @@
 #include <vector>
 
 int main(int argc, char** argv) try {
-  const nfx::tools::Args a(argc, argv, {"help"});
+  const nfx::tools::Args a(argc, argv, {"help", "float"});
   if (a.flag("help") || a.positional().empty()) {
-    std::println("nvfx_scene effect.nvfx [--near 8] [--far 16] [--rate 30] [--fps 60] [--seconds 10] [--core 3]");
+    std::println("nvfx_scene effect.nvfx [--near 8] [--far 16] [--rate 30] [--fps 60] [--seconds 10] [--core 3] [--float]");
     return 0;
   }
   const int near = a.i("near", 8), far = a.i("far", 16), rate = a.i("rate", 30), fps = a.i("fps", 60), core = a.i("core", 3);
@@ -43,6 +44,7 @@ int main(int argc, char** argv) try {
     const int size = i < near ? 128 : 64;
     Inst s{nullptr, size, std::vector<std::uint8_t>(static_cast<std::size_t>(size) * size * 4)};
     if (nvfx_instance_create(fx, size, &s.in) != NVFX_OK) throw std::runtime_error("cannot create an instance");
+    if (a.flag("float")) nvfx_instance_set_precision(s.in, NVFX_PRECISION_FLOAT);
     nvfx_instance_set_seed(s.in, static_cast<std::uint64_t>(i) * 7919u + 1u);
     const float controls[3] = {0.3f + 0.05f * static_cast<float>(i % 8), 0.5f, 0.5f};
     nvfx_instance_set_controls(s.in, controls, info.n_controls);

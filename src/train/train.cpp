@@ -3,6 +3,7 @@
 #include "net.hpp"
 
 #include <algorithm>
+#include <atomic>
 #include <chrono>
 #include <cmath>
 #include <limits>
@@ -176,6 +177,200 @@ struct Vq {
 
 }  // namespace
 
+namespace {
+
+// The time slices a frame at model time t blends, and the weight of the second (as Net::begin_frame).
+void slices_at(const Hyper& h, float t, int& i0, int& i1, float& ft) {
+  if (h.loop) {
+    const float u = (t - std::floor(t)) * static_cast<float>(h.grid_t);
+    i0 = std::min(static_cast<int>(u), h.grid_t - 1);
+    i1 = (i0 + 1) % h.grid_t;
+    ft = u - static_cast<float>(i0);
+  } else {
+    const float u = std::clamp(t, 0.f, 1.f) * static_cast<float>(h.grid_t - 1);
+    i0 = std::min(static_cast<int>(u), h.grid_t - 2);
+    i1 = i0 + 1;
+    ft = u - static_cast<float>(i0);
+  }
+}
+
+}  // namespace
+
+void store_planes(Model& m, std::span<const std::uint8_t> plane_bits, bool trim) {
+  const std::size_t S2 = static_cast<std::size_t>(m.h.feature_side()) * m.h.feature_side();
+  const std::size_t C = static_cast<std::size_t>(m.h.feature_channels()), T = static_cast<std::size_t>(m.h.grid_t);
+  if (!plane_bits.empty() && plane_bits.size() * S2 != m.features.size()) throw std::invalid_argument("store_planes: one width per feature plane");
+  if (!m.feature_mask.empty() && m.feature_mask.size() != T * S2) throw std::invalid_argument("store_planes: a mask of grid_t planes");
+  for (std::size_t off = 0, k = 0; off < m.features.size(); off += S2, ++k) {
+    const auto active = m.feature_mask.empty() ? std::span<const std::uint8_t>{} : std::span<const std::uint8_t>(m.feature_mask).subspan(((k / C) % T) * S2, S2);
+    quantise_plane(std::span(m.features.data() + off, S2), plane_bits.empty() ? 16 : plane_bits[k], trim, active);
+  }
+}
+
+void fake_quantise(Model& m, std::span<const std::uint8_t> plane_bits, bool trim) {
+  if (plane_bits.empty()) throw std::invalid_argument("fake_quantise: one width per feature plane");
+  store_planes(m, plane_bits, trim);
+}
+
+std::vector<std::uint8_t> feature_support(const Hyper& h, std::span<const Example> data, int threshold, int dilate) {
+  if (h.arch != Arch::grid || data.empty()) throw std::invalid_argument("feature_support: the grid family, and examples");
+  const int G = h.grid, T = h.grid_t, S = data[0].clip->size;
+  const std::size_t G2 = static_cast<std::size_t>(G) * G;
+  // Per pixel column (and row): the grid points it samples with a weight above zero (-1: none).
+  std::vector<std::array<int, 2>> cover(static_cast<std::size_t>(S));
+  const float gmax = static_cast<float>(G - 1);
+  for (int x = 0; x < S; ++x) {
+    const float g = std::clamp((static_cast<float>(x) + 0.5f) / static_cast<float>(S) * static_cast<float>(G) - 0.5f, 0.f, gmax);
+    const int x0 = std::min(static_cast<int>(g), G - 2);
+    const float fx = g - static_cast<float>(x0);
+    cover[static_cast<std::size_t>(x)] = {fx < 1.f ? x0 : -1, fx > 0.f ? x0 + 1 : -1};
+  }
+  std::vector<std::uint8_t> mask(static_cast<std::size_t>(T) * G2, 0);
+  std::vector<std::uint8_t> on(G2);
+  for (const Example& e : data) {
+    for (int f = 0; f < e.clip->frames && f < h.frames; ++f) {
+      std::ranges::fill(on, std::uint8_t{0});
+      const auto fr = e.clip->frame(f);
+      for (int y = 0; y < S; ++y) {
+        for (int x = 0; x < S; ++x) {
+          const std::size_t i = (static_cast<std::size_t>(y) * S + x) * 4;
+          if (std::max({fr[i], fr[i + 1], fr[i + 2], fr[i + 3]}) <= threshold) continue;
+          for (const int gy : cover[static_cast<std::size_t>(y)]) {
+            for (const int gx : cover[static_cast<std::size_t>(x)]) {
+              if (gy >= 0 && gx >= 0) on[static_cast<std::size_t>(gy) * G + gx] = 1;
+            }
+          }
+        }
+      }
+      int i0 = 0, i1 = 0;
+      float ft = 0;
+      slices_at(h, frame_time(h, f, h.frames), i0, i1, ft);
+      for (const int sl : {i0, ft > 0.f ? i1 : i0}) {
+        std::uint8_t* d = mask.data() + static_cast<std::size_t>(sl) * G2;
+        for (std::size_t j = 0; j < G2; ++j) d[j] |= on[j];
+      }
+    }
+  }
+  for (int step = 0; step < dilate; ++step) {
+    const std::vector<std::uint8_t> before = mask;
+    for (int t = 0; t < T; ++t) {
+      for (int y = 0; y < G; ++y) {
+        for (int x = 0; x < G; ++x) {
+          std::uint8_t v = 0;
+          for (int dy = -1; dy <= 1; ++dy) {
+            for (int dx = -1; dx <= 1; ++dx) {
+              const int yy = y + dy, xx = x + dx;
+              if (yy >= 0 && xx >= 0 && yy < G && xx < G) v |= before[static_cast<std::size_t>(t) * G2 + static_cast<std::size_t>(yy) * G + xx];
+            }
+          }
+          mask[static_cast<std::size_t>(t) * G2 + static_cast<std::size_t>(y) * G + x] = v;
+        }
+      }
+    }
+  }
+  return mask;
+}
+
+std::vector<std::uint8_t> allocate_plane_bits(const Model& m, std::span<const Example> data, std::span<const std::vector<float>> codes,
+                                              double avg_bits, int min_bits, int max_bits, bool trim, int threads, int size,
+                                              std::vector<double>* distortion) {
+  if (min_bits < 0 || max_bits > 8 || min_bits > max_bits || data.empty() || avg_bits < min_bits || avg_bits > max_bits) {
+    throw std::invalid_argument("allocate_plane_bits: bits 0 to 8, min <= average <= max, and examples");
+  }
+  const Hyper& h = m.h;
+  const std::size_t S2 = static_cast<std::size_t>(h.feature_side()) * h.feature_side();
+  const std::size_t C = static_cast<std::size_t>(h.feature_channels()), T = static_cast<std::size_t>(h.grid_t);
+  const std::size_t planes = m.features.size() / S2;
+  const int rs = h.arch == Arch::conv ? h.size : size > 0 ? size : data[0].clip->size;
+  const std::size_t L = static_cast<std::size_t>(max_bits - min_bits + 1);
+  const std::size_t px = static_cast<std::size_t>(rs) * rs * 4;
+  threads = std::max(1, threads);
+
+  struct Frame {
+    std::size_t e;
+    float t;
+  };
+  std::vector<Frame> frames;
+  std::vector<std::vector<std::size_t>> by_slice(T);  // the frames that blend each time slice with a weight above zero
+  std::vector<std::vector<float>> conds;
+  for (std::size_t e = 0; e < data.size(); ++e) {
+    const std::vector<float> zero(static_cast<std::size_t>(h.n_latent), 0.f);
+    conds.push_back(condition(m, data[e].controls, e < codes.size() && !codes[e].empty() ? std::span<const float>(codes[e]) : std::span<const float>(zero)));
+    for (int f = 0; f < h.frames; ++f) {
+      const float t = frame_time(h, f, h.frames);
+      int i0 = 0, i1 = 0;
+      float ft = 0;
+      slices_at(h, t, i0, i1, ft);
+      by_slice[static_cast<std::size_t>(i0)].push_back(frames.size());
+      if (ft > 0.f && i1 != i0) by_slice[static_cast<std::size_t>(i1)].push_back(frames.size());
+      frames.push_back({e, t});
+    }
+  }
+  // The frames as the float model renders them (with a mask: the points outside it at their planes' fills).
+  Model base = m;
+  if (!base.feature_mask.empty()) store_planes(base, {}, trim);
+  std::vector<float> ref(frames.size() * px);
+  const auto run = [&](auto&& body) {
+    std::vector<std::jthread> pool;
+    for (int t = 0; t < threads; ++t) pool.emplace_back(body, t);
+  };
+  run([&](int t) {
+    Net net(base);
+    for (std::size_t i = static_cast<std::size_t>(t); i < frames.size(); i += static_cast<std::size_t>(threads)) {
+      net.render(base, frames[i].t, conds[frames[i].e], rs, std::span(ref.data() + i * px, px));
+    }
+  });
+  // Each plane alone at each width: the squared change of the frames that use it.
+  std::vector<double> D(planes * L, 0.0);
+  std::atomic<std::size_t> next{0};
+  run([&](int) {
+    Model mt = base;
+    Net net(mt);
+    std::vector<float> out(px), keep(S2);
+    for (std::size_t P = next++; P < planes; P = next++) {
+      const std::size_t slice = (P / C) % T;  // planes are [basis][slice][channel]
+      const auto active = mt.feature_mask.empty() ? std::span<const std::uint8_t>{} : std::span<const std::uint8_t>(mt.feature_mask).subspan(slice * S2, S2);
+      float* pl = mt.features.data() + P * S2;
+      std::copy_n(pl, S2, keep.begin());
+      for (int b = min_bits; b <= max_bits; ++b) {
+        quantise_plane(std::span(pl, S2), b, trim, active);
+        double d = 0;
+        for (const std::size_t i : by_slice[slice]) {
+          net.render(mt, frames[i].t, conds[frames[i].e], rs, out);
+          const float* r = ref.data() + i * px;
+          for (std::size_t j = 0; j < px; ++j) d += static_cast<double>(out[j] - r[j]) * static_cast<double>(out[j] - r[j]);
+        }
+        D[P * L + static_cast<std::size_t>(b - min_bits)] = d;
+        std::copy_n(keep.begin(), S2, pl);
+      }
+    }
+  });
+  // Bits to the steepest fall in distortion per bit, along each plane's lower convex hull.
+  std::vector<std::uint8_t> bits(planes, static_cast<std::uint8_t>(min_bits));
+  long budget = std::lround(avg_bits * static_cast<double>(planes)) - static_cast<long>(min_bits) * static_cast<long>(planes);
+  while (budget > 0) {
+    double best = 0;
+    std::size_t best_p = planes;
+    int best_j = 0;
+    for (std::size_t P = 0; P < planes; ++P) {
+      const int b = bits[P];
+      for (int j = 1; b + j <= max_bits && j <= budget; ++j) {
+        const double slope = (D[P * L + static_cast<std::size_t>(b - min_bits)] - D[P * L + static_cast<std::size_t>(b + j - min_bits)]) / j;
+        if (slope > best) {
+          best = slope;
+          best_p = P;
+          best_j = j;
+        }
+      }
+    }
+    if (best_p == planes) break;  // no plane gains from another bit
+    bits[best_p] = static_cast<std::uint8_t>(bits[best_p] + best_j);
+    budget -= best_j;
+  }
+  if (distortion) *distortion = std::move(D);
+  return bits;
+}
+
 void fake_quantise(Model& m, int bits, bool trim) {
   // Only the features: quantise_like_storage also rounds the other weights to fp16, which training must not do.
   const std::size_t plane = static_cast<std::size_t>(m.h.feature_side()) * m.h.feature_side();
@@ -190,17 +385,20 @@ void fake_quantise(Model& m, int bits, bool trim) {
   }
 }
 
-double feature_rate(const Model& m, int bits, std::span<float> grad, float weight, bool trim) {
+double feature_rate(const Model& m, int bits_all, std::span<float> grad, float weight, bool trim, std::span<const std::uint8_t> plane_bits) {
   const Hyper& h = m.h;
   const int S = h.feature_side(), C = h.feature_channels(), T = h.grid_t;
   const std::size_t plane = static_cast<std::size_t>(S) * S;
-  const float qm = static_cast<float>((1 << bits) - 1);
   const float inv_ln2 = 1.f / std::numbers::ln2_v<float>;
   double total = 0;
   for (int k = 0; k < h.bases; ++k) {
     for (int t = 0; t < T; ++t) {
       for (int c = 0; c < C; ++c) {
-        const std::size_t off = ((static_cast<std::size_t>(k) * T + t) * C + c) * plane;
+        const std::size_t index = (static_cast<std::size_t>(k) * T + t) * C + c;
+        const int bits = plane_bits.empty() ? bits_all : plane_bits[index];
+        if (bits == 0) continue;  // one value per plane: nothing per value to code
+        const float qm = static_cast<float>((1 << bits) - 1);
+        const std::size_t off = index * plane;
         const float* p = m.features.data() + off;
         const float* q = t > 0 ? p - static_cast<std::size_t>(C) * plane : nullptr;  // previous time slice, same channel
         const auto [plo, phi] = feature_plane_range(std::span(p, plane), bits, trim);
@@ -359,25 +557,48 @@ Result train(const Hyper& h_in, std::span<const Example> data, const Options& o)
   Vq vq;
   std::mt19937_64 vq_rng(o.seed * 7919 + 3);
   if (o.rate_lambda > 0.f && (o.rate_bits < 2 || o.rate_bits > 8)) throw std::invalid_argument("train: rate_bits must be 2 to 8");
+  const bool mixed = o.mixed_bits > 0.f;
+  if (mixed && (o.qat_bits != 0 || o.vq_bits != 0 || o.mixed_min < 0 || o.mixed_max > 8 || o.mixed_min > o.mixed_max ||
+                o.mixed_bits < static_cast<float>(o.mixed_min) || o.mixed_bits > static_cast<float>(o.mixed_max))) {
+    throw std::invalid_argument("train: mixed_bits between mixed_min and mixed_max (0 to 8), without qat_bits or vq_bits");
+  }
+  std::vector<std::uint8_t> plane_bits;  // per plane: chosen when quantisation starts (mixed), or all qat_bits (sparse)
+  if (o.sparse) {
+    if (h.arch != Arch::grid || o.vq_bits != 0 || o.rate_lambda > 0.f) {
+      throw std::invalid_argument("train: sparse features need the grid family, without vq_bits or a rate term");
+    }
+    m.feature_mask = feature_support(h, data, o.sparse_threshold, o.sparse_dilate);
+    if (o.qat_bits > 0) plane_bits.assign(m.features.size() / (static_cast<std::size_t>(h.grid) * h.grid), static_cast<std::uint8_t>(o.qat_bits));
+  }
+  const bool per_plane = mixed || o.sparse;
   const int qat_from = static_cast<int>(std::lround(static_cast<double>(o.qat_start) * o.iterations));
   Model fwd;  // the model the forward pass sees: features as stored (quantisation-aware training)
   double rate = 0;
 
+  const auto allocate = [&] {
+    const auto t0 = std::chrono::steady_clock::now();
+    plane_bits = allocate_plane_bits(m, data, codes, o.mixed_bits, o.mixed_min, o.mixed_max, o.qat_trim, threads, o.mixed_size);
+    res.alloc_seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
+  };
   for (int it = 0; it < o.iterations; ++it) {
-    const bool qat = o.qat_bits > 0 && it >= qat_from;
+    const bool qat = (o.qat_bits > 0 || mixed) && it >= qat_from;
     const bool vq_on = it >= vq_from;
     if (it == vq_from) {
       vq.init(m, o.vq_bits, o.vq_dim, vq_rng);
       vq.assign(m);
     }
-    if (qat) {
+    if (mixed && it == qat_from) allocate();
+    if (per_plane && (qat || o.sparse)) {
+      fwd = m;
+      store_planes(fwd, qat ? std::span<const std::uint8_t>(plane_bits) : std::span<const std::uint8_t>{}, o.qat_trim);
+    } else if (qat) {
       fwd = m;
       fake_quantise(fwd, o.qat_bits, o.qat_trim);
     } else if (vq_on) {
       fwd = m;
       vq.apply(fwd);
     }
-    const Model& seen = qat || vq_on ? fwd : m;
+    const Model& seen = qat || vq_on || o.sparse ? fwd : m;
     // The minibatch: (example, frame) pairs, dealt round-robin to the threads.
     std::vector<std::pair<std::size_t, int>> batch(static_cast<std::size_t>(o.batch_frames));
     for (auto& b : batch) b = {pick_ex(rng), frames[pick_fr(rng)]};
@@ -413,7 +634,7 @@ Result train(const Hyper& h_in, std::span<const Example> data, const Options& o)
     const double loss = std::ranges::fold_left(sse, 0.0, std::plus{}) / (static_cast<double>(o.batch_frames) * pixels_per_frame * 4.0);
     losses.push_back(loss);
     if (o.rate_lambda > 0.f && !o.freeze_model) {  // the rate term reaches every slice
-      rate = feature_rate(m, o.rate_bits, total.g.features, o.rate_lambda / static_cast<float>(m.features.size()), o.qat_trim) /
+      rate = feature_rate(m, o.rate_bits, total.g.features, o.rate_lambda / static_cast<float>(m.features.size()), o.qat_trim, plane_bits) /
              static_cast<double>(m.features.size());
       std::ranges::fill(total.touched, std::uint8_t{1});
     }
@@ -466,8 +687,10 @@ Result train(const Hyper& h_in, std::span<const Example> data, const Options& o)
     }
   }
 
+  if (mixed && plane_bits.empty()) allocate();  // quantisation never started: bits for the trained model
   res.final_rate = o.rate_lambda > 0.f ? rate
-                                        : feature_rate(m, o.qat_bits > 0 ? o.qat_bits : 8, {}, 0.f, o.qat_trim) / static_cast<double>(m.features.size());
+                                        : feature_rate(m, o.qat_bits > 0 ? o.qat_bits : 8, {}, 0.f, o.qat_trim, plane_bits) /
+                                              static_cast<double>(m.features.size());
   const std::size_t tail = std::max<std::size_t>(1, losses.size() / 20);
   res.final_loss = std::accumulate(losses.end() - static_cast<std::ptrdiff_t>(tail), losses.end(), 0.0) / static_cast<double>(tail);
   if (Z > 0) m.z_train = codes;  // no codes to keep without a variation dimension
@@ -490,6 +713,7 @@ Result train(const Hyper& h_in, std::span<const Example> data, const Options& o)
     m.vq_dim = o.vq_dim;
     m.vq_codebook = vq.cb;
   }
+  if (per_plane) m.plane_bits = std::move(plane_bits);  // (sparse without quantisation: no widths; the caller sets them)
   res.model = std::move(m);
   res.codes = std::move(codes);
   res.seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - t_start).count();

@@ -120,6 +120,12 @@ struct Options {
   // same frames, faster. render(f) then returns with frame f + 1's state already computed (rules, particles and modules
   // are a frame ahead of the picture it returned).
   bool overlap = false;
+  // Starting values of inputs (`input NAME = value`) instead of the script's; a name the script lacks throws
+  // std::invalid_argument.
+  std::vector<std::pair<std::string, float>> inputs = {};
+  // The modules step with working memory shared per thread (StepScratch, docs/COMPOSE.md §7.3) rather than their own:
+  // the same frames, less memory.
+  bool shared_scratch = true;
 };
 
 // A scene built from a script: every module, buffer and list is created here, so render() allocates nothing.
@@ -134,9 +140,49 @@ class Scene {
   int height() const;
   float fps() const;
   int frames() const;                     // length * fps, rounded
+  float length() const;                   // seconds (the scene may play on after it)
   std::span<const float> keyframes() const;  // times from the `keyframes` statement
-  // Frame `f` into rgb (width * height * 3). Frames must come in order from 0.
+  // Frame `f` into rgb (width * height * 3). Frames come in order: f is after the last frame drawn and not before the
+  // last frame computed (computed()); the frames in between are computed without pictures, as advance() does.
   void render(int f, std::span<std::uint8_t> rgb);
+  // The states of the frames up to f (steps 1 to 9 of §4.7), without pictures: frames the caller does not show. Nothing
+  // if they are computed already. Skipping a frame's picture changes none of the pictures after it (shading keeps no
+  // state), so a scene drawn every other frame draws those frames as a scene drawn every frame does.
+  void advance(int f);
+  int computed() const;  // the last frame whose state is computed (-1: none); overlapped, render(f) leaves f + 1
+
+  // --- for games (the C API, include/neuralfx/nvfx_scene.h) ------------------------------------------------------------
+  // Inputs: values the game sets while the scene plays (`input NAME = value`), read by expressions like t. A change
+  // acts from the next frame computed.
+  int inputs() const;
+  const std::string& input_name(int i) const;
+  int input_index(std::string_view name) const;  // -1: none
+  float input(int i) const;
+  void set_input(int i, float v);
+  // Fire a named rule (`as NAME`, or "line N") at the start of the next frame computed, as if its condition held there,
+  // if it has firings left (once, `at most N`, or `repeat`). False when there is no such rule or it is a landing rule.
+  bool trigger(std::string_view rule);
+  // Move a module that is not tiled to stand at (x, y) (world pixels: the bottom centre of its tile). A module whose
+  // place the script changes over time is placed by the script again in the next frame. False: no such module, or tiles.
+  bool place(std::string_view module, float x, float y);
+  // Set one of a module's learned controls (every tile) by its name. A control the script changes over time is set by
+  // the script again in the next frame. False: no such module or control.
+  bool set_control(std::string_view module, std::string_view control, float v);
+  // The script's modules (a domain of tiles is one) and rules, in script order.
+  struct ModuleInfo {
+    std::string_view name, effect;
+    int tiles = 1;
+    float x = 0, y = 0;     // where it stands: the centre of its tile or domain, and the y it stands on (world pixels)
+    float width = 0;        // world pixels its tile or domain covers across
+    float started = 0;      // when it last started, woke or took over (infinity: not yet)
+    bool active = false, tiled = false;
+    std::span<const float> controls;               // its first tile's
+    std::span<const std::string> control_names;    // its effect's
+  };
+  int script_modules() const;
+  ModuleInfo module_info(int i) const;
+  int rules() const;
+  const std::string& rule_name(int i) const;
 
   // Stages of the last frame, ms (overlapped: the picture's are frame f's, the others frame f + 1's; background and
   // modules are drawn in one pass, under kDraw).

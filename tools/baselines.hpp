@@ -74,6 +74,11 @@ inline double mean_at(const std::vector<double>& v, const std::vector<std::size_
   return s / static_cast<double>(idx.size());
 }
 
+// With nvfx_f2's --pareto (study F3), the envelope keeps only the points that improve on every smaller one: a dominated
+// point otherwise stays a vertex at the running best and draws a flat step that the log-linear interpolation then
+// crosses steeply (it inflates the size at equal quality). Off by default (F2's envelopes and study A's).
+inline bool pareto_envelope = false;
+
 // The best-of-family envelope: best mean quality at or below each mean size, one point per size.
 inline std::vector<std::pair<double, double>> envelope(const Family& fam, const std::string& measure, const std::vector<std::size_t>& idx) {
   std::vector<std::pair<double, double>> pts;
@@ -86,7 +91,7 @@ inline std::vector<std::pair<double, double>> envelope(const Family& fam, const 
   for (const auto& [kb, q] : pts) {
     const double best = env.empty() ? q : std::max(env.back().second, q);
     if (!env.empty() && env.back().first == kb) env.back().second = best;
-    else env.emplace_back(kb, best);
+    else if (!(pareto_envelope && !env.empty() && q <= env.back().second)) env.emplace_back(kb, best);
   }
   return env;
 }

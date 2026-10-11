@@ -21,10 +21,11 @@ Plan and decisions: [PLAN.md](PLAN.md).
     40 s.
 - **The learned dynamics follow a held-out run better than the simulation at the same resolution**: +2.1 to +4.7 dB
   of active PSNR after 1 s (intervals above zero), until the chaos makes every method equal.
-- **The price is CPU: 0.8 to 0.9 ms per 128 x 128 frame (0.4 to 0.5 ms at 64 px) and 4.0 MB of working memory per
+- **The price is CPU: 0.8 to 0.9 ms per 128 x 128 frame (0.4 to 0.5 ms at 64 px) and 2.4 MB of working memory per
   playing instance**, after the runtime's rollout code was optimised (2.0 to 2.4 ms before, measured in the same
-  session; §7). That suits a handful of hero effects, not crowds of sprites. It is not at the real floor yet: two real
-  seeds are 0.07 to 0.12 closer in detail, and the first frames of an explosion are poorly drawn (§6.4).
+  session; §7). The memory was 4.0 MB until the instance's two shards shared their step buffers (§7). That suits a
+  handful of hero effects, not crowds of sprites. It is not at the real floor yet: two real seeds are 0.07 to 0.12
+  closer in detail, and the first frames of an explosion are poorly drawn (§6.4).
 - **Compression works, but far less once the flipbooks use production block compression.** On 12 effect clips, with
   flipbooks in BC7 and ASTC from open-source encoders (fetched at build time, §3), the memory ratios fall:
   - **Against BC7** (what desktop GPUs sample, and what NVIDIA's claim is measured against) the 8-bit networks need
@@ -37,18 +38,22 @@ Plan and decisions: [PLAN.md](PLAN.md).
   - First published, against our own BC3-layout encoder: 3.6 to 5.9 times, +2.8 to +7.0 dB. The BC3 format, not our
     encoder, was the weak baseline: at 8 bits per pixel BC7 and ASTC 4x4 score 7 to 9 dB higher.
   - NVIDIA claims "up to 8x" for Neural Texture Compression against block compression. Here the 8-bit networks reach
-    about half that against BC7, and less than 2x against ASTC.
+    about half that against BC7, and less than 2x against ASTC; sparse low-bit networks reach it against BC7 only
+    (next bullets).
 - **It depends on the effect.** At 132 KB the network beats an ASTC flipbook of the same memory by about 4.5 dB on fire
   and explosions and ties it on smoke (§3).
-- **Fewer bits: 7.5x against BC7, 3.6x against every format.** Features trained for 4 bits (three times the steps)
-  need 7.5 times less memory than an equal-quality BC7 flipbook [4.2, 8.3] and 3.6 times less than the best flipbook
-  of any format [2.3, 3.7] (9.1x [6.3, 11.3] against our BC3 layout, as first published; §3, study F2). 10x is far
-  away.
-- **On disk, video codecs win, and packed ASTC flipbooks match the 8-bit networks.** With both sides packed by a
-  lossless coder, 8-bit networks tie the best packed flipbook of any format (0.86x [0.75, 1.27]); trained for 4 bits
-  with a rate term they need 2.2 times less disk [1.7, 3.2] (4.5x against BC7, 4.1x against our BC3 layout). AV1 needs
-  2.8 times less disk than the best network. In memory the networks win against video: about 115 KB against 2.6 to
-  23 MB for a running decoder (§3, studies F and F2).
+- **Fewer bits and sparse features: 13.8x against BC7, 4.7x against every format, about 2x once flipbooks drop their
+  empty space.** Features trained for 4 bits (three times the steps) need 7.5x [4.2, 8.3] less memory than an
+  equal-quality BC7 flipbook and 2.5x [1.9, 3.7] less than the best flipbook of any format (§3, study F2). Storing only
+  the grid points a clip needs (study F3: 36 KB instead of 67.5 KB, same quality) lifts this to **13.8x [7.9, 16.6]
+  against BC7 and 4.7x [3.3, 7.7] against every format**. Flipbooks can drop their empty space too: trimmed to their
+  content, 8.8x [5.1, 11.3] and 3.1x [2.4, 4.4]; keeping only their non-empty blocks, 5.6x [3.4, 7.3] and **2.2x
+  [1.6, 2.8]**. Against our BC3 layout, as first reported: 9.1x (F2), and 16.8x, 10.7x and 6.7x (F3).
+- **On disk, video codecs win, and packed ASTC flipbooks beat the 8-bit networks.** With both sides packed by a
+  lossless coder, 8-bit networks need more disk than the best packed flipbook of any format (0.75x [0.65, 0.89]); 4-bit
+  features with a rate term and 6,000 training steps need 2.2x [1.8, 2.9] less (5.1x against BC7, 4.4x against our
+  BC3 layout). AV1 needs 2.6 times less disk than that network. In memory the networks win against video: about
+  115 KB against 2.6 to 23 MB for a running decoder (§3, studies F, F2 and F3).
 - **Controls work, at a fidelity cost.** One 1 MB model per effect plays control settings it never saw better than a
   45 MB library of flipbooks: **+2.49 [+2.22, +2.77] dB** against the nearest setting, **+0.99 [+0.65, +1.36] dB**
   against blending the two nearest, with higher SSIM and matching motion. By eye its held-out flames are softer and
@@ -62,6 +67,12 @@ Plan and decisions: [PLAN.md](PLAN.md).
   grid model (73 KB, 0.25 ms) and the small conv model (69 KB, 0.43 ms) meet the 0.5 ms target set in the plan (§7).
   These are from a later session of the same cloud VM type, in which unchanged code ran 1.2 to 1.4 times faster than
   in the first; the first session's figures were 0.38 to 1.1 ms, with only the small grid model under 0.5 ms.
+- **int8 (since 11 October 2026; timings provisional, from a busy machine).** The grid models now run their hidden
+  layers in 8-bit integers, with the first layer evaluated per grid point and interpolated, by default. grid_m,
+  grid_mt and the B and C models take 0.41 to 0.48 ms per 128 x 128 frame (grid_l 0.51 ms), with AVX-512 VNNI or with
+  AVX2 alone, against 0.75 to 0.78 ms for the float network measured alongside. Study A's 12 clips lose
+  **−0.008 [−0.015, −0.001] dB** of active PSNR with VNNI and −0.018 [−0.031, −0.008] dB with AVX2, both within the
+  −0.05 dB set for a default (§7).
 - **The plan's continuation rule is met** (PLAN.md §7: beat the flipbook of equal memory on held-out data, interval above
   zero, within 1 ms per 128² frame): on held-out settings (study B, against a 45 times larger flipbook library) and on
   held-out frames against a BC3 flipbook with four times the memory (study A; motion-vector flipbooks still win
@@ -72,8 +83,8 @@ Plan and decisions: [PLAN.md](PLAN.md).
   fire play one continuous run; its fine-detail mixer fails twice. Computing on compressed data is slower than dense
   code here, but LZ tokens and lighter models make the coder decode 4 to 38 times faster. Training with couplings
   improves the explosion inside scenes. The composed fireball runs at 80 frames per second at 720p on 4 threads.
-- **Not done:** owner footage (none supplied), rate-optimised block encoding for disk, int8 kernels, an engine plugin
-  (§9, §10).
+- **Not done:** owner footage (none supplied), rate-optimised block encoding for disk, engine plugins other than
+  Godot's (§9, §10; the Godot 4 plugin and a C API for scenes: [ENGINES.md](ENGINES.md) §7, §8).
 
 ## 2. How it was measured
 
@@ -261,7 +272,8 @@ separate validation clips. Details in `results/compression/README.md`, study F2.
   first published, it needs **8.5x [4.4, 10.4]** less memory than the best flipbook of equal quality, and with three
   times the training steps (+0.44 dB [0.36, 0.54]) **9.1x [6.3, 11.3]**; 6 bits give 7.4x, 5 bits 8.0x. **Against
   BC7: 6.1x [4.2, 8.1] and 7.5x [4.2, 8.3]** (5 bits 6.4x, 6 bits 5.6x, 8 bits 4.3x). **Against every format, with
-  ASTC: 2.4x [1.8, 3.7] and 3.6x [2.3, 3.7]** (5 bits 2.9x, 6 bits 2.5x, 8 bits 1.9x). 10x is far away. Each bit below
+  ASTC: 2.4x [1.8, 3.7] and 3.6x [2.3, 3.7]** (5 bits 2.9x, 6 bits 2.5x, 8 bits 1.9x; with study F3's Pareto envelope,
+  below, 2.3x and 2.5x, and 1.7x at 8 bits). 10x is far away. Each bit below
   8 costs more than the one before (2.0 dB from 8 to 4 bits), while ASTC flipbooks of every frame at 0.9 to 2 bits per
   pixel reach 29.4 to 33.5 dB in 121 to 256 KB, about twice the low-bit networks' size. On validation the best memory
   ratio against every format is 5 bits (2.9x), not 4 (2.2x). Smaller grids, fewer time slices, trimmed quantiser
@@ -271,13 +283,47 @@ separate validation clips. Details in `results/compression/README.md`, study F2.
   [1.7, 3.2] with ASTC** (8 bits: 0.86x [0.75, 1.27], a tie).
 - **Video codecs win on disk by far.** AV1 (libaom, 4:4:4) reaches the same 30.5 dB in 8.0 KB, 2.8 times less than the
   best network (22.3 KB); HEVC, VP9 and H.264 also need less, VP9 with alpha ties. 4:2:0 video caps fire at 29 dB.
-- **Networks win in memory against video:** 71 KB resident plus 44 KB working memory, against 2.6 to 23 MB for a
+- **Networks win in memory against video:** 71 KB resident plus 44 KB working memory (180 KB with the int8 path's
+  projected grid, the default since §7's int8 round), against 2.6 to 23 MB for a
   running decoder (inside ffmpeg) or 4 MB of decoded frames, and any frame can be drawn without decoding from a
   keyframe.
 - **Rollout effects (G3c):** 6-bit start states keep study D's test statistics on fire (one better, four tied) and
   explosions (all tied) and halve them on disk (packed 44.5 to 20.6 KB and 55.7 to 25.4 KB). Smoke is worse by a hair
   on coverage (+0.0001 [+0.0000, +0.0002]), so it keeps fp16. Dithering with the seed's noise and halving the number
   of start points failed on validation.
+
+**Sparse features, and flipbooks without their empty space (study F3).** Effects are mostly empty space: on the 12
+test clips only 47% of a time slice's grid points are sampled by any visible pixel. Study F3 stores only those (a
+2 KB mask, one fill value per plane): the 4-bit network keeps its quality (-0.03 dB [-0.12, +0.10]) in 36.3 KB instead
+of 67.5 KB, at no cost per frame. Flipbooks can drop their empty space too, so F3 added two flipbook baselines: every
+kept frame trimmed to the bounding box of its content (as sprite atlases are packed in production), and only the
+non-empty blocks kept, with a one-bit mask per block (ASTC at its own block size). Each is measured with every set of
+formats. F3's envelopes keep only the flipbooks that beat every smaller one ("Pareto"; with the old ladder this changes
+no point estimate). Memory at equal quality, the 12 test clips, 95% bootstrap intervals:
+
+| test | as stored: BC3 layout | with BC7 | with BC7 and ASTC | trimmed: BC3 layout | with BC7 | with BC7 and ASTC | block-sparse: BC3 layout | with BC7 | with BC7 and ASTC |
+|---|---|---|---|---|---|---|---|---|---|
+| G32 8-bit (study A's grid_m), 131.5 KB | 5.9x [4.6, 7.8] | 4.3x [3.9, 4.8] | 1.7x [1.3, 2.3] | 3.7x [3.0, 4.8] | 3.4x [2.3, 4.5] | 1.1x [0.9, 1.4] | 2.3x [1.9, 2.8] | 2.1x [1.6, 2.8] | 0.76x [0.65, 0.91] |
+| G32 4-bit, 6,000 steps, 67.5 KB | 9.1x [6.2, 11.2] | 7.5x [4.2, 8.3] | 2.5x [1.9, 3.7] | 5.8x [3.9, 7.2] | 4.8x [2.7, 6.3] | 1.7x [1.3, 2.3] | 3.6x [2.5, 4.4] | 3.0x [1.8, 4.0] | 1.2x [0.9, 1.4] |
+| **G32 4-bit sparse, 6,000 steps, 36.3 KB** | 16.8x [11.2, 22.7] | 13.8x [7.9, 16.6] | **4.7x [3.3, 7.7]** | 10.7x [7.3, 14.3] | 8.8x [5.1, 11.3] | **3.1x [2.4, 4.4]** | 6.7x [4.7, 8.1] | 5.6x [3.4, 7.3] | **2.2x [1.6, 2.8]** |
+| G32 4-bit sparse, 12,000 steps, 36.3 KB | 17.1x [12.3, 23.4] | 14.2x [8.1, 16.7] | 4.8x [3.4, 7.7] | 10.9x [8.1, 14.7] | 9.1x [5.3, 11.7] | 3.2x [2.4, 4.5] | 6.8x [5.1, 8.3] | 5.7x [3.4, 7.5] | 2.2x [1.7, 2.9] |
+
+- **Against BC7 the sparse network passes 10x as stored (13.8x) and nearly when the flipbooks are trimmed (8.8x,
+  interval 5.1 to 11.3), not when they keep only their non-empty blocks (5.6x).** F3 first reported 16.8x, 10.7x and
+  6.7x against our BC3 layout.
+- **Against every format the best ratios are 4.7x, 3.1x and 2.2x.** The dense networks fall to 1.1 to 1.7x against
+  trimmed flipbooks, and against block-sparse ones they tie (4 bits, 1.2x [0.9, 1.4]) or lose (8 bits, 0.76x
+  [0.65, 0.91]).
+- **The steadier number**, the quality difference at the network's own size against every format: sparse, 6,000
+  steps, +4.52 dB [+3.77, +5.58] against flipbooks as stored, +3.78 [+2.98, +4.75] trimmed, +2.65 [+1.50, +4.04]
+  block-sparse (+8.26 as stored against our BC3 layout).
+- **Disk:** sparse features save memory, not disk. The best on disk is 4-bit with the rate term and 6,000 steps, 22.6 KB
+  at 31.14 dB: 2.2x [1.8, 2.9] less disk than packed flipbooks of every format (5.1x against BC7, 4.4x against our BC3
+  layout); AV1 needs 2.6 times less (0.39x [0.35, 0.43]). Packed, the 8-bit networks lose (0.75x [0.65, 0.89]).
+- Pareto envelopes lower some ratios against every format, because ASTC's steps leave dominated flipbooks behind:
+  dense 4-bit with 6,000 steps 2.5x instead of 3.6x with F2's envelope, the 8-bit network 1.7x instead of 1.9x (memory)
+  and 0.75x instead of 0.86x (disk). The tables of F2 and study A above keep F2's envelope; both are in
+  `results/compression`.
 
 ![A: smoke. Rows: reference; neural grid_m, 132 KB; BC3 32 frames at 64 px, 128 KB; BC3 8 frames at 128 px with motion vectors, 144 KB](figures/a_smoke_compare.png)
 
@@ -536,9 +582,12 @@ runtime's rollout code was optimised; in brackets the code before that, built an
 
 | effect | stored | resident | per instance at 128 px | 64 px | 128 px | 256 px | restart (seek) |
 |---|---:|---:|---:|---:|---:|---:|---:|
-| fire | 82 KB | 163 KB | 4.0 MB (3.4) | 0.47 (0.98) | 0.91 (2.40) | 2.37 (7.08) | 14 ms (42), 1 s warm-up |
-| smoke | 146 KB | 419 KB | 4.0 MB (3.4) | 0.48 (0.91) | 0.85 (2.13) | 2.35 (6.71) | 0.4 ms (0.7) |
-| explosion | 274 KB | 804 KB | 4.0 MB (3.4) | 0.44 (0.87) | 0.78 (1.96) | 1.76 (5.50) | 0.4 ms (0.7) |
+| fire | 82 KB | 163 KB | 2.4 MB (4.0; 3.4) | 0.47 (0.98) | 0.91 (2.40) | 2.37 (7.08) | 14 ms (42), 1 s warm-up |
+| smoke | 146 KB | 419 KB | 2.4 MB (4.0; 3.4) | 0.48 (0.91) | 0.85 (2.13) | 2.35 (6.71) | 0.4 ms (0.7) |
+| explosion | 274 KB | 804 KB | 2.4 MB (4.0; 3.4) | 0.44 (0.87) | 0.78 (1.96) | 1.76 (5.50) | 0.4 ms (0.7) |
+
+Per instance: 2.4 MB since the instance's two runners share one set of step buffers (11 October 2026); 4.0 MB when
+each had its own, 3.4 MB before the optimisation. The frames are the same to the bit.
 
 The optimisation (separable interpolation, cheaper flicker noise, vectorised advection, a row pipeline with small
 rings, a vectorised coarse step and renderer) changes no output: the runtime's parity tests still give a worst
@@ -555,8 +604,9 @@ our scalar code. Study A's grid_m costs 0.78 ms and the full simulation 6.9 to 9
 - **It is no longer expensive per frame**: 0.8 to 0.9 ms at 128 px is about study A's grid_m (0.78 ms) and 110 to 130
   times a flipbook. Part goes to the coarse step, which costs the same at every size; the rest is the detail layer and
   the renderer, which scale with pixels, so 64 px costs about half of 128 px rather than a quarter.
-- **Each instance needs 4.0 MB of working memory** at 128 px (2.3 MB at 64 px): two shards' fine fields and buffers.
-  The faster code keeps more buffers than before (3.4 and 2.0 MB).
+- **Each instance needs 2.4 MB of working memory** at 128 px (1.5 MB at 64 px): two shards' fine fields and states, and
+  one set of step buffers that they share. With a set each it was 4.0 and 2.3 MB; before the optimisation, 3.4 and
+  2.0 MB.
 - **Seeks are cheap**: a restart costs about 0.4 ms where start points keep fine fields. Fire, which grows its fine
   fields from a coarse start, takes 14 ms.
 - **No allocation per frame**, including restarts and shard changes (`tests/alloc_test.cpp`).
@@ -571,7 +621,7 @@ Using the chaos instead of fighting it works where studies A to C did not:
   flipbook.
 - **The learned dynamics beat the simulation at the same resolution** at following a real run for 1 to 2 s, by
   2 to 5 dB.
-- **The price is per-frame CPU** (0.8 to 0.9 ms at 128 px after the runtime's optimisation) **and 4.0 MB per playing
+- **The price is per-frame CPU** (0.8 to 0.9 ms at 128 px after the runtime's optimisation) **and 2.4 MB per playing
   instance.** This suits a handful of hero effects at 64 to 128 px, updated at 30 Hz, not dozens of sprites.
 
 What did not work, or is not done:
@@ -612,16 +662,72 @@ effects (D) after the runtime's rollout code was optimised; the first session's 
   control and variation models cost the same as grid_m.
 - **The 0.5 ms budget is met by grid_s (0.25 ms) and conv_s (0.43 ms).** In the first session only grid_s met it
   (conv_s 0.57 ms). grid_m takes 0.78 ms (0.33 ms at 64 px). conv_s costs about the same at every size: its level of
-  detail renders the native frame and filters it down, so distant copies save nothing.
-- AVX-512 is slower than AVX2 on this machine (grid_m 1.41 against 0.78 ms); the baseline SSE2 build is 1.8 to 2.7
-  times slower. The default is AVX2.
+  detail renders the native frame and filters it down, so distant copies save nothing. With int8 (below, now the
+  default) grid_m, grid_mt and the B and C models meet it too (0.41 to 0.48 ms, provisional), grid_l nearly (0.51 ms).
+- AVX-512 is slower than AVX2 on this machine for the float network (grid_m 1.41 against 0.78 ms; 0.92 ms since a
+  broadcast in the shared kernels compiles to one instruction, provisional, below); the baseline SSE2 build is 1.8 to
+  2.7 times slower. The default is AVX2, and the AVX-512 build for int8 where the CPU has VNNI.
 - The networks are 8 to 37 times cheaper per frame than running the simulation, and 35 to 125 times more expensive
   than playing a flipbook.
 - **Rollout effects (D) cost 0.8 to 0.9 ms at 128 px**, about the same as the frame-model networks of the same width,
-  and each playing instance holds 4.0 MB of state and buffers (2.3 MB at 64 px). MAC per pixel counts the convolutions
-  of the coarse step spread over the pixels and the renderer, not the projection, advection or noise. A seek costs
-  about 0.4 ms (fire: 14 ms, its start points grow their fine fields). The detail layer still runs at full resolution
-  every frame.
+  and each playing instance holds 2.4 MB of state and buffers (1.5 MB at 64 px; 4.0 and 2.3 MB before its two shards
+  shared their step buffers, 11 October 2026: the same frames, and no measurable change in time). MAC per pixel counts
+  the convolutions of the coarse step spread over the pixels and the renderer, not the projection, advection or noise.
+  A seek costs about 0.4 ms (fire: 14 ms, its start points grow their fine fields). The detail layer still runs at full
+  resolution every frame.
+
+**int8 hidden layers and a projected first layer** (11 October 2026). Timings are **provisional**: thread CPU time on
+one pinned core of a machine shared with other jobs, the least of five runs' medians over 180 frames
+(`results/experiments/int8_timing.csv`); the main tables above are float. Quality: `int8_quality.csv` and
+`int8_summary.csv`. The code is `src/runtime/rt_int8.hpp`.
+- **The hidden layers** (32 to 32 units in grid_m) multiply 8-bit activations by 8-bit weights and add in 32-bit
+  integers. Weights have one scale per unit, activations one per pixel (its largest unit maps to 255; they follow a
+  ReLU). With AVX-512 VNNI one instruction does 64 multiply-adds. With AVX2 alone, `pmaddubsw` adds pairs of products
+  in 16 bits, so the activations get 7 bits (0 to 127) to keep a pair from saturating; this was 10% faster than exact
+  pairs of 16-bit products (`pmaddwd`, which the SSE2 build and AVX-512 without VNNI use) for 0.01 dB. The first and
+  output layers stay in float; the last hidden layer feeds the output layer directly.
+- **The first layer is projected.** It is linear in the features, which reach a pixel by bilinear interpolation, so it
+  is evaluated at the grid points once per frame (FiLM folded in) and its 32 outputs are interpolated instead of the 8
+  features: 256 multiply-adds per pixel fewer, for 24 more interpolations done with a vector permute. Used where the
+  frame has at least as many pixels across as the grid has points, on AVX2 and AVX-512.
+- **It is the default for the grid family** (`nvfx_instance_set_precision`; `NVFX_PRECISION_FLOAT` gives the float
+  network, unchanged). The conv family and rollout effects stay float. With no ISA forced, int8 instances of models with
+  a hidden layer take the AVX-512 build where the CPU has VNNI. The studies' tables stay those of the float network
+  (`nvfx_experiment` scores at float; its `int8` step measures the difference).
+
+ms per frame, and the change in active PSNR, int8 minus float (paired over the clips, 95% intervals):
+
+| model, 128 px | float, AVX2 | int8, AVX2 | int8, AVX-512 VNNI | change, VNNI | change, AVX2 |
+|---|---:|---:|---:|---|---|
+| grid_s (no hidden layer: the projection alone) | 0.252 | **0.091** | 0.117 | 0.000 (3 clips) | 0.000 |
+| grid_m | 0.751 | **0.468** | **0.463** | **−0.008 [−0.015, −0.001]** (A, 12 clips) | −0.018 [−0.031, −0.008] |
+| grid_l | 0.747 | 0.511 | 0.509 | −0.017 [−0.034, −0.004] (3 clips) | −0.036 [−0.069, −0.013] |
+| grid_mt | 0.779 | **0.468** | **0.414** | −0.005 [−0.007, −0.002] (3 clips) | −0.015 [−0.019, −0.010] |
+| control model k8 (B) | 0.776 | **0.476** | **0.453** | −0.004 [−0.013, +0.005] (30 held-out settings) | −0.004 [−0.013, +0.005] |
+| variation model k8 (C) | 0.753 | **0.481** | **0.457** | −0.027 [−0.033, −0.022] (72 training seeds) | −0.031 [−0.037, −0.025] |
+
+- **Quality.** The rule, set before measuring: int8 becomes the default if study A's mean change in active PSNR is
+  within −0.05 dB with an interval not entirely below that. grid_m on the 12 clips: 32.619 to 32.611 dB with VNNI,
+  **−0.008 [−0.015, −0.001]**, and 32.602 dB with AVX2, −0.018 [−0.031, −0.008]: met either way. B's control models
+  tie (k16: +0.005 [−0.007, +0.014]); C's variation models lose 0.03 dB with intervals below zero (k24: −0.028
+  [−0.034, −0.022] with VNNI). No channel of study A's frames moves by more than 6 levels of 255 with VNNI and 10 with
+  AVX2 (0.05 and 0.06 on average); on B and C up to 16 and 20 (0.11 to 0.16 on average). The int8 frames of the ISAs
+  differ by up to 9 levels on A and 22 on B and C, mostly AVX2's 7-bit activations against VNNI's 8 bits.
+- **One scale per pixel is what makes 8 bits enough.** In a scalar simulation on the same 12 clips (outside the
+  repository), one activation scale for the whole clip lost 0.46 dB (at 7 bits); per pixel, 7-bit activations lost
+  0.018 dB and 8-bit 0.008 dB, and 7-bit weights 0.03 dB; quantising the output layer too cost 0.02 dB more.
+- **Cost.** The better models meet 0.5 ms except grid_l (0.51 ms: with its 48 x 48 grid the rows blended per frame
+  row are half as long again and the projection costs twice as much). The integer layer is still the largest part,
+  about half of the time.
+  At 64 px the gain is smaller (grid_m 0.20 to 0.13 ms; grid_l 0.19 to 0.18: the projection's work per frame weighs
+  more), at 256 px larger (grid_m 3.01 to 1.63 ms). The baseline SSE2 build takes 1.44 ms against 2.06 ms in float. An
+  int8 instance holds the projected grid: 0.18 MB for grid_m and 0.38 MB for grid_l, against 0.04 and 0.08 MB in
+  float.
+- **AVX-512 float, found on the way:** the shared kernels' broadcast of a weight (`splat`) filled a 512-bit vector
+  through the stack (four 128-bit stores, then a load: a store-forwarding stall per tile of outputs). It now compiles to
+  one broadcast: the AVX-512 build's float grid_m went from 1.41 to 0.92 ms, with the same values. AVX2 is still faster.
+- To re-time on a quiet machine: `build/nvfx_experiment int8-timing --runs 5 --core 3` (two minutes; float and int8
+  per ISA at 64, 128 and 256 px), and `build/nvfx_experiment int8` for the quality (eight minutes on one core).
 
 **A scene** (`nvfx_scene`): 8 instances at 128 px and 16 at 64 px, each updated at 30 Hz, staggered over a 60 fps
 game, on one core, in the later session: grid_s 1.7 ms per game frame on average (10% of 16.7 ms; 99th percentile
@@ -629,25 +735,31 @@ game, on one core, in the later session: grid_s 1.7 ms per game frame on average
 2.6, 7.2 and 9.0 ms. The rollout effects, with every copy playing its own run, cost 4.7 to 10.1 ms (28 to 60%); their
 99th percentiles are 24 to 39 ms because all copies change shards in the same frame, which a game would stagger.
 Sharing instances between copies with the same controls and seed lowers this further; the game's other CPU work has
-to fit around it.
+to fit around it. These are the float network's figures (`nvfx_scene --float` since int8 became the default); at int8
+grid_m's scene took 4.0 to 4.2 ms per game frame against 5.0 to 6.6 ms in float, in two interleaved runs on the busy
+machine (wall-clock time, provisional).
 
 ## 8. Against NVIDIA's published claims and traditional methods
 
 | | NVIDIA (published) | NeuralVFX (measured here) |
 |---|---|---|
 | what | small networks in shaders (RTX Neural Shaders; Neural Texture Compression; Neural Materials) on GPU tensor cores; DLSS 5, a full-frame model | a small network per effect on one CPU core: frame models (A to C) or learned dynamics from start points (D) |
-| memory | NTC: "up to 8x" less texture memory than block compression (BC formats) "at similar visual fidelity" | against BC7 flipbooks, 2.4x to 4.3x less memory at equal mean active PSNR for 8-bit networks, 7.5x [4.2, 8.3] for the best 4-bit one; against every format with ASTC, 1.0x to 1.9x and 3.6x [2.3, 3.7] (study A, F2; first published against our own BC3-layout encoder: 3.6x to 5.9x and 9.1x); on disk with both sides losslessly packed, 1.5x at best at 8 bits against BC7, a tie against ASTC; an endless, controllable effect in 82-274 KB, 4 to 12 times less than one 64-frame BC7 flipbook at 128 px and about the size of one in ASTC 8x8 (256 KB) (study D) |
+| memory | NTC: "up to 8x" less texture memory than block compression (BC formats) "at similar visual fidelity" | against BC7 flipbooks at equal mean active PSNR: 2.4x to 4.3x less memory for 8-bit networks, 7.5x [4.2, 8.3] at 4 bits, 13.8x [7.9, 16.6] with sparse 4-bit features (8.8x against trimmed BC7 flipbooks, 5.6x against block-sparse ones); against every format with ASTC: 1.0x to 1.9x, 2.5x and 4.7x [3.3, 7.7] (3.1x trimmed, 2.2x block-sparse) (studies A, F2, F3; first published against our own BC3-layout encoder: 3.6x to 5.9x, 9.1x and 16.8x); on disk with both sides losslessly packed, 1.5x at best at 8 bits against BC7, less than 1x against ASTC, 2.2x for the best network; an endless, controllable effect in 82-274 KB, 4 to 12 times less than one 64-frame BC7 flipbook at 128 px and about the size of one in ASTC 8x8 (256 KB) (study D) |
 | speed | no per-pixel costs published; DLSS 5's demo reportedly used a second RTX 5090 | 0.25-0.87 ms per 128 x 128 sprite on one CPU core (A to C); 0.8-0.9 ms for rollout effects (D) |
 | controls and variation | not claimed for effects | continuous learned controls and endless drift (B, C, softer than real); endless, never-repeating runs driven by noise whose detail ties a flipbook library at new settings (D) |
 
 NVIDIA measures Neural Texture Compression against block compression. Against the same kind of baseline, BC7
 flipbooks from a production encoder (bc7e) with the same frame counts, resolutions and motion vectors as before, the
-8-bit networks need 2.4 to 4.3 times less memory, about half of NVIDIA's "up to 8x", and the best 4-bit network 7.5
-times less. The first version of this report gave 3.6 to 5.9 times (and 9.1 times at 4 bits) against our own
-BC3-layout encoder; the BC3 format, not the encoder, made that baseline weak. On GPUs that sample ASTC, flipbooks of
-every frame at 2 bits per pixel and below come close to the networks: 1.0 to 1.9 times at 8 bits, 3.6 times at 4 bits.
-So for animated effects on a CPU the claim holds in part: a clear win against desktop formats, a small one against
-ASTC. DLSS 5 is a different problem (whole frames on a GPU) and is not comparable.
+8-bit networks need 2.4 to 4.3 times less memory, about half of NVIDIA's "up to 8x", the best dense 4-bit network 7.5
+times less, and the sparse 4-bit network of study F3 13.8 times less. The first version of this report gave 3.6 to 5.9
+times (and 9.1 times at 4 bits) against our own BC3-layout encoder; the BC3 format, not the encoder, made that
+baseline weak. Two things narrow the gap further. On GPUs that sample ASTC, flipbooks of every frame at 2 bits per
+pixel and below come close: 1.0 to 1.9 times at 8 bits, 2.5 times at 4 bits, 4.7 times sparse. And flipbooks can skip
+their empty space as the sparse network does: kept as non-empty blocks, the sparse network needs 5.6 times less than
+BC7 flipbooks and 2.2 times less than ASTC ones. So for animated effects on a CPU the claim's 8x is reached against
+desktop formats (BC7) as stored, and by the point estimate when they are trimmed (8.8x, interval 5.1 to 11.3), but
+not against ASTC or block-sparse flipbooks. DLSS 5 is a different problem (whole frames on a GPU) and is not
+comparable.
 
 Neural Texture Compression stores one image per material and compresses it. Study D stores no frames at all: it
 stores where a run starts and learns how it moves, which is only possible because the frames of a chaotic effect
@@ -678,7 +790,8 @@ Against traditional methods:
      lossless coder's block contexts were written for BC3. Packed BC7 and ASTC sizes are upper bounds, so the disk
      ratios against them flatter the networks.
    - The envelope picks the best of 178 configurations on the same clips it scores (31 before), which favours the
-     flipbooks slightly.
+     flipbooks slightly. Study F3's trimmed and block-sparse ladders have BC7 and ASTC on the test clips only; its
+     validation tables (used for its choices) are BC3 layout and raw.
    - Study B's flipbook library and the flipbook comparisons of studies D and G3 are still BC3; in B and D the error
      comes from the setting, not the codec (G3's flipbooks are packed BC3 and raw).
    - ASTC is sampled by mobile and some integrated GPUs, not by most desktop GPUs, so which envelope applies depends
@@ -688,14 +801,17 @@ Against traditional methods:
    which say whether it looks like the effect, not whether it matches a given run; they can miss artefacts that a
    person would see.
 4. **Variations are morphs of the training seeds**, softer than real ones, not new turbulence.
-5. **The runtime misses the 0.5 ms target for the better models** (grid_m 0.78 ms; 1.06 ms in the first session). The kernels run at about 45% of the
-   core's FMA peak; int8 or VNNI kernels and a projected first layer were not done. The conv family's level of
-   detail saves no time.
+5. **The better models meet the 0.5 ms target only at int8**, the default since 11 October 2026 (grid_m 0.46 to
+   0.47 ms with AVX-512 VNNI or AVX2, grid_l 0.51 ms; provisional, measured on a busy machine), for 0.01 to 0.04 dB of
+   active PSNR. The float network takes 0.78 ms (1.06 ms in the first session). AVX-VNNI, on newer CPUs without
+   AVX-512, is not used (none was at hand to test). The conv family has no int8 path, and its level of detail saves no
+   time.
 6. **One cloud VM.** Timings carry VM jitter (90th percentiles usually 4-10% above the medians, up to 70% in a few cells; scene p99 three times the mean), and the same code ran 1.2 to 1.4 times faster in a later session than in the first (§7).
 7. **Small samples.** 12 clips (A) and 30 settings (B) from one simulator; intervals are over those, not over the
    variety of effects a game has.
-8. **No engine plugin was built or tested in an engine.** The C API is engine-neutral and its example host is tested.
-9. **Rollout effects (D) cost about a frame model's time per frame** (0.8 to 0.9 ms at 128 px) **but 4.0 MB per
+8. **One engine plugin, tested headless only.** A Godot 4 GDExtension plays effects and composed scenes and passes its
+   test in Godot 4.4.1 without a display ([ENGINES.md](ENGINES.md) §8); no plugin for Unreal or Unity was built.
+9. **Rollout effects (D) cost about a frame model's time per frame** (0.8 to 0.9 ms at 128 px) **but 2.4 MB per
    instance**, and they are not yet at the real floor (detail 0.07 to 0.12 further than a second real seed, motion 10-13% low on fire and smoke), and:
    - The explosion's first frames are poorly drawn by the learned renderer.
    - Smoke wanders from a tracked run after a few seconds.
@@ -709,33 +825,39 @@ Against traditional methods:
 
 - For **endless, controllable hero effects** (a campfire, a burning building, smoke that must not loop), use a
   **rollout effect** (D): 82 to 274 KB per effect, about 0.5 ms at 64 px or 0.8 to 0.9 ms at 128 px per playing copy,
-  updated at 30 Hz, and 4 MB of working memory each. Keep the number of copies small, and use the frame models or
+  updated at 30 Hz, and 2.4 MB of working memory each. Keep the number of copies small, and use the frame models or
   flipbooks for the rest.
-- For a game today, to store one clip: on desktop GPUs (BC7) use **grid_s** (73 KB, 0.25 ms) where memory matters
-  most and some softness is acceptable, or **grid_m** (132 KB, 0.78 ms at 128 px, 0.33 ms at 64 px) when quality
-  matters, evaluated at 20-30 Hz and shared between instances. Where the GPU samples ASTC, an ASTC 8x8 to 12x12
-  flipbook of every frame is within 2 times of the networks' memory at equal quality and costs nothing to play: use it
-  unless memory is very tight (grid_s ties it). Keep motion-vector flipbooks where per-frame cost must be near zero.
+- For a game today, to store one clip: on desktop GPUs (BC7) use **grid_s** (73 KB, 0.25 ms; 0.09 ms with the int8
+  path's projected first layer) where memory matters most and some softness is acceptable, or **grid_m** (132 KB,
+  0.78 ms at 128 px in float, about 0.47 ms at int8, provisional) when quality matters, evaluated at 20-30 Hz and
+  shared between instances. Where the GPU samples ASTC, an ASTC 8x8 to 12x12 flipbook of every frame is within 2
+  times of the networks' memory at equal quality and costs nothing to play: use it unless memory is very tight
+  (grid_s ties it). Keep motion-vector flipbooks where per-frame cost must be near zero.
 - Train one model per effect *and* setting for hero effects (study A quality); use one controllable model per effect
   (study B) where artists need sliders, accepting softer detail.
 - Next work, in order:
   1. A cheaper rollout runner still (the first round, separable interpolation, vectorised noise and advection and a
      row pipeline, made it 2.5 times faster): the detail layer at half resolution with an upsampling renderer, and
-     the coarse step at 15 Hz with interpolation; and less working memory per instance.
+     the coarse step at 15 Hz with interpolation; and less working memory per instance (in part done: 2.4 MB, its
+     shards sharing their step buffers; the row records still hold a lag of up to the whole tile).
   2. Close the gap to the real floor: a statistics loss (spectrum and motion) through the detail layer, and the
      renderer trained on more first frames of explosions.
   3. Owner footage, with start points estimated from it.
   4. Disk baselines with rate-optimised block encoding (RDO BC7 and ASTC, supercompressed), and the low-bit networks
      chosen again against the new envelope (on validation 5 bits now beat 4).
-  5. Faster frame-model kernels (int8, a projected first layer, a cheaper conv level of detail).
-  6. An engine plugin (Godot is the cheapest to test).
+  5. Faster frame-model kernels: AVX-VNNI for CPUs with AVX2 but not AVX-512, and a cheaper conv level of detail
+     (int8 hidden layers and a projected first layer are done, §7).
+  6. An engine plugin (Godot is the cheapest to test): done for Godot 4, over a C API for scenes as well as effects
+     ([ENGINES.md](ENGINES.md) §7, §8).
 
 ## 11. Reproduce
 
 ```sh
 cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_COMPILER=g++-14 && cmake --build build
 build/nvfx_experiment all --threads 4      # data, A, B, C, media, report: about 2 hours on 4 cores
-build/nvfx_experiment timing               # on an idle machine
+build/nvfx_experiment timing               # on an idle machine (the float network)
+build/nvfx_experiment int8                 # the int8 path against float on studies A to C (8 min on one core)
+build/nvfx_experiment int8-timing          # its cost per ISA and size, on an idle machine
 build/nvfx_experiment d --threads 4        # D: chaos, training (all stages), evaluation; about 5 hours on 4 cores
 build/nvfx_experiment d-timing             # D timing, on an idle machine
 build/nvfx_experiment a-flipbooks --threads 2   # only the flipbook rows missing (BC7, ASTC): 32 min on 2 busy threads
@@ -746,7 +868,8 @@ build/nvfx_train --rollout fire --out fire.nvfx   # one rollout effect on its ow
 
 The BC7 and ASTC flipbooks need the encoders fetched at configure time (`NEURALFX_FETCH_ENCODERS`, on by default;
 [DATA.md](DATA.md) §5); without them those rows are left out. The study F and F2 flipbook rows:
-`nvfx_pack --study --flipbooks-only --threads 2` and `nvfx_f2 flipbooks --set test|val --threads 2`
+`nvfx_pack --study --flipbooks-only --threads 2` and `nvfx_f2 flipbooks --set test|val --threads 2`; study F3's
+trimmed and block-sparse ones: `nvfx_f2 trim --set test --threads 2`, then its reports
 (`results/compression/README.md`).
 
 The D results above were trained in steps (`d-train` with stages 1 and 2, then `d-tune` for stage 3 and `d-finish`

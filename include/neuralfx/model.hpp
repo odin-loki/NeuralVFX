@@ -77,6 +77,23 @@ struct Model {
   int vq_bits = 0, vq_dim = 0;
   std::vector<float> vq_codebook;  // [group][2^vq_bits][vq_dim]
   std::vector<float> raw_codebook; // resident: the codebook as floats (raw_u8 then holds the packed indices)
+  // Per-plane storage (study F3, file version 3; not combined with vector quantisation). plane_bits, when not empty,
+  // holds one width per feature plane [basis][slice][channel], 0 to 8 bits (affine planes as below; 0 bits: the plane's
+  // stored values are one value, its lo, and it has no codes); feature_bits is then not used for the features.
+  std::vector<std::uint8_t> plane_bits;
+  // Optional with plane_bits, grid family only: the grid points each time slice stores, [grid_t][side][side], 1 =
+  // stored (the same in every basis and channel). A plane stores codes for those points only (raster order) and one
+  // fill value (fp16) that every other point of the plane takes: the mean of the plane's values there.
+  std::vector<std::uint8_t> feature_mask;
+  // Resident, per-plane storage: each plane's first byte in raw_u8, the mask bit-packed per slice
+  // (packed_plane_bytes(side * side, 1) bytes each), the fill value of each plane.
+  std::vector<std::uint32_t> raw_offsets;
+  std::vector<std::uint8_t> raw_mask;
+  std::vector<float> raw_fill;
+  bool per_plane() const { return !plane_bits.empty(); }
+  bool masked() const { return !feature_mask.empty(); }
+  // Stored points of time slice t (per_plane storage): side * side, or the mask's count.
+  std::size_t plane_points(int t) const;
   std::vector<std::string> control_names;    // n_controls names (stored, 15 characters each at most)
 
   // The features in their storage format, as the runtime keeps them resident: fp16 bit patterns, or N-bit codes with
@@ -112,7 +129,12 @@ inline bool valid_feature_bits(int bits) { return bits == 16 || (bits >= 2 && bi
 // The (lo, hi) range of an affine plane at `bits`, both fp16 values: the plane's min and max, or with `trim` the
 // candidate range with the least squared quantisation error among the min and max and the ranges that clip the
 // plane's lowest and highest 0.2%, 0.5%, 1%, 2%, 4% and 8% of values (values outside are stored as the end codes).
+// At 0 bits (mixed precision only) both are the plane's mean: the plane is stored as that one value.
 std::pair<float, float> feature_plane_range(std::span<const float> plane, int bits, bool trim);
+// A plane's values as stored at `bits` (0 to 8; above 8: left as they are) with the range of feature_plane_range, in
+// place. With `active` (one flag per value; empty: all), only the active values are coded (the range is theirs), and
+// every other value becomes the plane's fill: the mean of those values, rounded to fp16.
+void quantise_plane(std::span<float> plane, int bits, bool trim, std::span<const std::uint8_t> active = {});
 inline std::size_t packed_plane_bytes(std::size_t values, int bits) {
   return bits >= 8 ? values : (values * static_cast<std::size_t>(bits) + 7) / 8;
 }
@@ -141,7 +163,8 @@ void reference_render(const Model& m, float t, std::span<const float> c, int siz
 // Quantise a float RGBA frame to premultiplied RGBA8.
 void to_rgba8(std::span<const float> rgba, std::span<std::uint8_t> out);
 
-// .nvfx files. Features are stored at m.feature_bits; all other tensors as fp16. Loading gives floats.
+// .nvfx files. Features are stored at m.feature_bits (or per plane: m.plane_bits, m.feature_mask); all other tensors
+// as fp16. Loading gives floats.
 std::expected<void, std::string> save_model(const std::filesystem::path& path, const Model& m);
 std::expected<void, std::string> save_model(std::ostream& out, const Model& m);
 std::expected<Model, std::string> load_model(const std::filesystem::path& path);

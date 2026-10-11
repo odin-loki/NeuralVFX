@@ -1,9 +1,10 @@
 # Composed effects: modules on modules
 
-Status: **future feature, with a working prototype** (10 October 2026). Audience: dev, research, artists. The prototype
+Status: **future feature, with a working prototype** (11 October 2026). Audience: dev, research, artists. The prototype
 lives in `src/compose` (a library over the runtime's internals, with a script format and its runner) and two tools:
-`nvfx_fireball` (the fireball scene, written in C++) and `nvfx_scene_script` (plays scene scripts, §4). It is not part
-of the C API yet. Section 8 sketches what would make it a product feature.
+`nvfx_fireball` (the fireball scene, written in C++) and `nvfx_scene_script` (plays scene scripts, §4). Scene scripts
+are reachable from the C API (`include/neuralfx/nvfx_scene.h`, [ENGINES.md](ENGINES.md) §7) and from Godot 4
+(`engines/godot`, [ENGINES.md](ENGINES.md) §8). Section 8 says what else would make it a product feature.
 
 ## 1. The idea
 
@@ -138,6 +139,7 @@ points, hand-overs between tiles of the same size).
 | `effect NAME = "FILE"` | a rollout effect, loaded once | the detail layer's settings: `swirl`, `swirl_scale`, `swirl_rate`, `swirl_ramp`, `contrast`, `grow` |
 | `look NAME = shader` or `= like LOOK` | a field-shader look (§2) | `heat_scale`, `emission`, `emission_power`, `soot_density`, `soot_albedo`, `sky`, `shadow`, `scene_light`, `relief`, `tint (r, g, b)`: the fields of `ShaderSpec` |
 | `let NAME = EXPR` | a named value, computed where it is used (so it may change over time) | |
+| `input NAME = EXPR` | a value the game sets while the scene plays (`nvfx_scene_set_input`, [ENGINES.md](ENGINES.md) §7); EXPR, a constant, is its starting value | |
 | `module NAME = EFFECT` | a module (§4.3) | |
 | `field NAME = KIND` | a force field (§5) | per kind, and `on M, ..., particles`, `weight`, `if`, `from`, `until` |
 | `emit KIND` | particles every frame (§4.6) | |
@@ -187,6 +189,7 @@ Arithmetic in single-precision float, one operation at a time, as C++ computes i
 | `t`, `length`, `fps`, `ground` | the scene's time (s), length, frame rate and ground |
 | `infinity` | infinity |
 | a `let` | its expression |
+| an `input` | its value, as the game last set it (never a constant: it cannot size, tile or place tiles) |
 | a rule's name | when it last fired (infinity before: so `smooth((t - boom) / 1)` is 0 until `boom`) |
 | `M.x`, `M.y`, `M.started`, `M.age`, `M.active` | a module (§4.3) |
 | `x`, `temp` | in a rule `when ember lands`: where the ember landed and how hot it was |
@@ -203,7 +206,8 @@ Arithmetic in single-precision float, one operation at a time, as C++ computes i
 
 A rule runs its actions when its condition holds: **once** by default, **every time** with `repeat` (a time or field
 condition: every frame it holds; a landing: every landing), or **at most N times** with `at most N`. `as NAME` names it
-(its time is then a value).
+(its time is then a value). The game can also fire a rule by its name (`nvfx_scene_trigger`): at the start of the next
+frame, as if its condition held, if it has firings left; a rule only the game fires is written `when 0 as NAME:`.
 
 | condition | holds when |
 |---|---|
@@ -245,7 +249,7 @@ All take `from`, `until` and `if`.
 ### 4.7 The order of a frame
 
 Every frame runs in this order (`src/compose/script_run.cpp`):
-1. rules on time, shocks and fields, in script order; their actions run at once;
+1. rules on time, shocks and fields (and rules the game triggered), in script order; their actions run at once;
 2. emitters, in script order;
 3. settings that change over time: modules (controls, opacity, look, place), scorch marks, frame, light, camera;
 4. every active module steps (in parallel);
@@ -298,8 +302,8 @@ Getting every float the same forced a few things, all visible in the script:
 - The parser stops at the first error; `--print` drops comments (it is for round trips and checks, not for editing).
 - Seeds are whole numbers up to 16 777 216 (they pass through a float).
 - There is no live reload or viewer yet; `--check` is the quick loop.
-- Scripts and the runner are a prototype over the runtime's internals, like the rest of this page, not part of the C
-  API.
+- The game drives a scene through inputs, rule triggers and module moves and controls (the C API, [ENGINES.md](ENGINES.md)
+  §7); it cannot add modules, couplings or fields while the scene plays: those are the script's.
 
 ## 5. Field effects
 
@@ -399,7 +403,7 @@ The video itself is not in git (data rules): it is written where `--out` says.
 
 Measured with `nvfx_fireball --profile`, which times every stage of every frame. The machine is the report's
 4-core machine, with AVX2 unless the row says otherwise. The figures are medians over the frames after the detonation,
-when everything runs. §7.3 has the second optimisation round.
+when everything runs. §7.3 has the second optimisation round, §7.4 the modules' working memory.
 
 ### 7.1 After the first optimisation round
 
@@ -579,11 +583,9 @@ Tried and not kept:
   blends two of its rows per pixel. Nothing left to gain.
 - **Bloom's last pass resampled once per row of mip 0** (as the light): it cost bloom more than it saved tone mapping.
 
-Not done: **the modules' working memory** is unchanged (127 MB at 1280 x 720, 294 MB at 1920 x 1080). Of the 127 MB,
-102 MB are the rollout runners' rings of padded rows and row records, which hold a lag of up to the whole tile
-because the flow's speed is not bounded. Rings shared by the threads that step (one set per thread, 31 MB for four)
-would bring the modules to about 56 MB, but the runner would have to take its scratch from outside. Peak resident
-memory grew from 247 to 257 MB (the copies the capture takes and the per-row lookups).
+Not done in this round: **the modules' working memory** stayed at 127 MB at 1280 x 720 and 294 MB at 1920 x 1080, and
+peak resident memory grew from 247 to 257 MB (the copies the capture takes and the per-row lookups). §7.4 shares the
+runners' step buffers between modules: 51 and 103 MB.
 
 Configurations (the least of three runs' medians, frames after the detonation; before: commit d41adff, the code of
 §7.1, with its frame time the sum of its stages; after: the time between finished frames, overlapped; the CPU columns
@@ -654,6 +656,57 @@ tools/opt2/verify.sh ../before/build/nvfx_fireball build/nvfx_fireball /tmp/v2  
 The summaries come from `tools/opt2/summary.sh` (medians from frame 36 on); `--raw` writes every frame's RGB for PSNR
 comparisons.
 
+### 7.4 The modules' working memory
+
+Of the 127 MB that the 16 modules took at 1280 x 720, 102 MB were the rollout runners' step buffers: rings of padded
+rows and row records, which hold a lag of up to the whole tile because the flow's speed is not bounded, plus the
+coarse step's activations. A step leaves nothing in them that the next step reads. So (11 October 2026):
+- **Runners take their step buffers from outside** (`rt::RolloutScratch`, `RolloutRunner::use_scratch`). A runner
+  zeroes the border columns and planes it relies on in every step, and reads nothing else that it has not written in
+  the same step. Tests fill the scratch with garbage (NaN, ±3e38, noise) between the steps of runners of other effects,
+  grids and sizes, and compare every field and pixel bit for bit with runners that have their own.
+- **A scene holds one scratch per thread that steps** (`compose::StepScratch`). A module takes a free one for each step
+  (or start) and gives it back, lock-free and without allocating; which one it gets changes nothing. The hand-written
+  fireball, scripted scenes and the test scene use it; `--own-scratch` (`Options::shared_scratch = false`) gives every
+  module its own, as before.
+- **The rings hold the rows a frame uses**, S + 3 of them instead of the next power of two plus one: 7.2 MB per scratch
+  for a 384-pixel tile instead of 8.0 MB.
+
+Every frame is the same to the bit. `tools/opt2/verify.sh` (the old code's 270 frame checksums against the new) passes
+at 1280 x 720 on 1, 2, 3 and 4 threads, stage by stage, captured and overlapped, and with the baseline row kernels; and
+with the baseline and AVX-512 runtimes, tiles at half size, 640 x 360 and 1920 x 1080 on 1 and 4 threads: 18 runs, all
+270 frames each. `ctest -R ScriptedFireballBitExact` passes, and the frame loop still allocates nothing.
+
+Memory (`nvfx_fireball` prints it; the old code's does not depend on the number of threads):
+
+| configuration | modules before | modules after | of which shared step buffers | peak resident before | after |
+|---|---:|---:|---:|---:|---:|
+| 1280 x 720, 4 threads | 126.9 MB | **50.6 MB** | 28.9 MB (4 x 7.2) | 257.2 MB | **189.2 MB** |
+| 1280 x 720, 2 threads | 126.9 MB | 36.2 MB | 14.4 MB | 257.1 MB | 174.8 MB |
+| 1280 x 720, 1 thread | 126.9 MB | 29.0 MB | 7.2 MB | 257.1 MB | 167.6 MB |
+| 1920 x 1080, 4 threads | 293.7 MB | **103.2 MB** | 62.7 MB (4 x 15.7) | 565.0 MB | **397.1 MB** |
+| 1920 x 1080, 1 thread | 293.7 MB | 56.2 MB | 15.7 MB | 564.9 MB | 349.8 MB |
+| 1280 x 720, tiles at half size, 4 threads | 41.7 MB | 18.8 MB | 8.5 MB | 144.2 MB | 121.2 MB |
+| 640 x 360, 4 threads | 41.7 MB | 18.8 MB | 8.5 MB | 85.9 MB | 63.6 MB |
+
+- What is left per module is its own: fine fields, coarse state, pressure, noise caches and the shader's buffers
+  (21.8 MB for the 16 modules at 1280 x 720). The step buffers are now about a third of the modules' memory on four
+  threads; most of each set is the row records (4.7 MB of the 7.2), which still hold a lag of up to the whole tile.
+- Time: no measurable change on the busy machine (the model step's CPU time per frame at 1280 x 720 on one thread:
+  12.0 to 14.3 ms before, 13.0 to 13.5 ms after, three interleaved runs each). Provisional; to be re-timed on a quiet
+  machine (`tools/opt2/table.sh` with the old build beside the new).
+- An nvfx rollout instance's two runners (the shard on screen and the next one) step one after the other, so they
+  share one scratch too: `nvfx_instance_scratch_bytes` is 2.4 MB at 128 px instead of 4.0 MB (1.5 instead of 2.3 MB at
+  64 px, 5.6 instead of 11.1 MB at 256 px).
+
+To check and measure again (old build beside the new, as in §7.3):
+
+```sh
+tools/opt2/verify.sh ../before/build/nvfx_fireball build/nvfx_fireball /tmp/v4        # the same frames
+build/nvfx_fireball --models $MODELS --no-video --threads 4 --profile /tmp/m.csv       # the 'memory:' line; /tmp/m.csv.meta
+build/nvfx_fireball --models $MODELS --no-video --threads 4 --own-scratch --profile /tmp/o.csv   # every module its own
+```
+
 ## 8. Limits and what a product feature needs
 
 - **Couplings were outside the models' training; study I (§9) put them in.** Each v1 model was trained alone, so a
@@ -679,10 +732,14 @@ comparisons.
   compositing still runs on every pixel at full resolution.
 
 What it needs to become a product feature:
-1. A C API: `nvfx_scene_create`, modules placed in it, `nvfx_scene_couple(...)`, `nvfx_scene_field(...)`, one
-   `nvfx_scene_step` and `nvfx_scene_render` per frame, and fields readable by the game (for gameplay: is this tile
-   on fire?).
-2. A viewer to edit scripts live (the format and its runner exist, §4), and scripts reachable from the C API.
+1. A C API: done for scenes from scripts (`include/neuralfx/nvfx_scene.h`, [ENGINES.md](ENGINES.md) §7):
+   `nvfx_scene_create` from a script and its effects, one `nvfx_scene_step` and `nvfx_scene_render` per frame (to the
+   bit the script runner's frames, allocating nothing), the fields readable by the game (a point, a grid for a tile map,
+   a region), and the game driving the scene with inputs, rule triggers and module moves and controls. Not done:
+   modules, couplings and fields added from C (`nvfx_scene_couple(...)`, `nvfx_scene_field(...)`); they are written in
+   the script. A Godot 4 plugin plays scenes and effects and is tested headless ([ENGINES.md](ENGINES.md) §8).
+2. A viewer to edit scripts live (the format and its runner exist, §4; `nvfx_scene_check` is the quick loop). Scripts
+   are reachable from the C API (done).
 3. Training with couplings in the loop: done for the explosion (§9); smoke and fire need another round.
 4. A cheaper compositor: the engine's own renderer doing the drawing (the fields can be uploaded as textures). The
    CPU compositor has had its SIMD and fewer passes (§7.3); distortion at half resolution did not pay.

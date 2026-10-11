@@ -3,7 +3,7 @@
 //   nvfx_fireball --models DIR [--out fireball.mp4] [--width 1280 --height 720] [--quality 1] [--threads 4]
 //                 [--isa avx2|avx512|baseline] [--seconds 9] [--profile profile.csv] [--keyframes DIR]
 //                 [--sheet sheet.png] [--no-video] [--no-skip] [--occupancy occupancy.csv]
-//                 [--stages | --no-overlap] [--no-checksums] [--baseline-kernels] [--raw frames.rgb]
+//                 [--stages | --no-overlap] [--no-checksums] [--baseline-kernels] [--raw frames.rgb] [--own-scratch]
 //
 // The picture of a frame is drawn on a thread of its own while the next frame's state (script, step, couplings, bus,
 // light, particles) is computed (with 2 or more threads; --threads counts that thread). --no-overlap draws it after
@@ -16,6 +16,8 @@
 // --raw writes every frame's RGB, one after another, for comparisons (PSNR) outside.
 // --baseline-kernels uses the picture's row kernels for the baseline ISA even where AVX2 is used (they give the same
 // bits; this checks it).
+// The modules step with working memory shared per thread (StepScratch: one set per thread instead of one per module,
+// docs/COMPOSE.md §7.3); --own-scratch gives each module its own, as before (the same frames to the bit).
 //
 // --no-skip computes every pixel of the runtime's detail step and renderer (study H, H2: by default they skip what is
 // +0 and cannot change; the result is the same to the bit). --occupancy writes, every third frame and for every
@@ -92,7 +94,7 @@ enum class Mode { stages, render, overlap };
 
 struct Args {
   std::filesystem::path models, out = "fireball.mp4", profile, keyframes, sheet, occupancy;
-  bool skip = true, checksums = true, baseline_kernels = false;
+  bool skip = true, checksums = true, baseline_kernels = false, own_scratch = false;
   std::filesystem::path raw;
   Mode mode = Mode::overlap;
   bool mode_set = false;
@@ -130,6 +132,7 @@ Args parse(int argc, char** argv) {
     else if (k == "--no-checksums") a.checksums = false;
     else if (k == "--baseline-kernels") a.baseline_kernels = true;
     else if (k == "--raw") a.raw = next();
+    else if (k == "--own-scratch") a.own_scratch = true;
     else throw std::invalid_argument("unknown option " + k + " (see the source header)");
   }
   if (a.models.empty()) throw std::invalid_argument("--models DIR (or NEURALVFX_DATA) is needed");
@@ -328,6 +331,11 @@ int main(int argc, char** argv) try {
     for (Module* m : row) m->spec = smoke;
   sec->spec = cloud;
 
+  // step()'s working memory: one set per thread that may step at once (the picture thread is one of A.threads)
+  StepScratch step_scratch(A.own_scratch ? 0 : A.threads);
+  if (!A.own_scratch)
+    for (auto& m : owned) m->share_scratch(step_scratch);
+
   // fires are started now, so their warm-up is not in the frame loop; they wait (not stepped) until lit
   wreck->controls = {0.62f, 0.5f, 0.55f};
   wreck->start(0, 4242);
@@ -456,6 +464,7 @@ int main(int argc, char** argv) try {
   const double setup_ms = ms(setup0, Clock::now());
   std::size_t scratch = 0, resident = 0;
   for (const auto& m : owned) scratch += m->runner().scratch_bytes();
+  if (!A.own_scratch) scratch += step_scratch.bytes();
   for (const auto* e : {&EX, &SM, &FI}) {
     std::size_t n = (e->m.step_w.size() + e->m.render_w.size()) * 4;
     for (const auto& s : e->m.starts) n += (s.coarse.size() + s.fine_t.size() + s.fine_d.size()) * 4;
@@ -876,7 +885,7 @@ int main(int argc, char** argv) try {
                  busy / static_cast<double>(frames - 36), A.threads, 100.0 * busy / thread_ms, 100.0 * waiting / thread_ms,
                  100.0 * (1.0 - (busy + waiting) / thread_ms));
   }
-  std::println("memory: effects resident {:.0f} KB, module scratch {:.1f} MB, peak RSS {:.1f} MB", static_cast<double>(resident) / 1024.0,
+  std::println("memory: effects resident {:.0f} KB, module scratch {:.1f} MB (shared step scratch included), peak RSS {:.1f} MB", static_cast<double>(resident) / 1024.0,
                static_cast<double>(scratch) / 1048576.0, static_cast<double>(ru.ru_maxrss) / 1024.0);
   for (const Rule& r : rules) std::println("rule '{}' fired at {:.2f} s", r.name, r.fired_at);
   std::println("fires lit: {}", lit);
@@ -906,6 +915,8 @@ int main(int argc, char** argv) try {
                         "alloc_total,{}\nalloc_frames,{}\nfires_lit,{}\nmode,{}\n",
                         A.width, A.height, q, A.threads, isa_name(isa), T, owned.size(), setup_ms, static_cast<double>(resident) / 1024.0,
                         static_cast<double>(scratch) / 1048576.0, static_cast<double>(ru.ru_maxrss) / 1024.0, alloc_total, alloc_frames, lit, mode_name);
+    meta << std::format("shared_scratch_mb,{:.2f}\nshared_scratch_slots,{}\n", static_cast<double>(A.own_scratch ? 0 : step_scratch.bytes()) / 1048576.0,
+                        A.own_scratch ? 0 : step_scratch.slots());
     for (const auto& m : owned) meta << std::format("module,{},{},{},{:.2f}\n", m->name(), m->effect().m.effect, m->size(), static_cast<double>(m->runner().scratch_bytes()) / 1048576.0);
     for (const Rule& r : rules) meta << std::format("rule,{},{:.3f}\n", r.name, r.fired_at);
   }
