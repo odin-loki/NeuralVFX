@@ -17,8 +17,10 @@ namespace nfx::rollout {
 
 namespace {
 
-constexpr std::uint32_t kVersion = 3;  // 2 added DetailSpec::grow (version 1 files load with grow = 1); 3 quantised
-                                       // start states (written only when start_bits < 16)
+constexpr std::uint32_t kVersion = 4;  // 2 added DetailSpec::grow (version 1 files load with grow = 1); 3 quantised
+                                       // start states (written only when start_bits < 16); 4 DetailSpec::advect and
+                                       // soften (study D2; written only when either differs from its default; the
+                                       // start storage fields are then always present, 16 meaning fp16)
 
 float round_f16(float v) { return static_cast<float>(static_cast<std::float16_t>(v)); }
 
@@ -251,8 +253,15 @@ std::expected<void, std::string> save_model(std::ostream& o, const Model& m) {
   const Hyper& h = m.h;
   const bool quantised = m.start_bits < 16;
   if (quantised && (m.start_bits < 2 || m.start_bits > 8)) return std::unexpected("rollout: start_bits must be 2 to 8 or 16");
+  const DetailSpec& d = m.detail;
+  const bool moved = d.d2();
+  if (moved && (!(d.advect > 0.f && d.advect <= 8.f) || !(d.soften >= 0.f && d.soften <= 1.f))) {
+    return std::unexpected("rollout: advect must be in (0, 8] and soften in [0, 1]");
+  }
+  // Files keep the oldest layout that holds them: 2 without quantised starts, 3 with, 4 with study D2's constants.
+  const std::uint32_t version = moved ? 4u : (quantised ? 3u : 2u);
   o.write(kMagic, sizeof(kMagic));
-  bin::put(o, quantised ? kVersion : std::uint32_t{2});  // files without quantised starts keep the version 2 layout
+  bin::put(o, version);
   for (const int v : {h.res, h.hidden, h.memory, h.jacobi, h.n_controls, h.n_age, h.frames, h.render_hidden, h.start_fine, h.warmup}) {
     bin::put(o, static_cast<std::int32_t>(v));
   }
@@ -263,7 +272,6 @@ std::expected<void, std::string> save_model(std::ostream& o, const Model& m) {
     bin::put_str(o, sz(k) < m.control_names.size() ? m.control_names[sz(k)] : std::string{}, 16);
   }
   const NoiseSpec& n = m.noise;
-  const DetailSpec& d = m.detail;
   for (const float v : {n.curl_scale, n.curl_rate, n.flicker_freq, n.flicker_rate, d.contrast, d.kappa, d.edge0, d.edge1, d.swirl,
                         d.swirl_scale, d.swirl_rate, d.swirl_ramp, m.qscale, m.render_scale[0], m.render_scale[1]}) {
     bin::put(o, v);
@@ -271,9 +279,13 @@ std::expected<void, std::string> save_model(std::ostream& o, const Model& m) {
   bin::put(o, static_cast<std::int32_t>(n.flicker_octaves));
   bin::put(o, static_cast<std::int32_t>(d.swirl_control));
   bin::put(o, d.grow);
-  if (quantised) {
+  if (version >= 3) {
     bin::put(o, static_cast<std::int32_t>(m.start_bits));
-    bin::put(o, static_cast<std::int32_t>(m.start_dither ? 1 : 0));
+    bin::put(o, static_cast<std::int32_t>(quantised && m.start_dither ? 1 : 0));
+  }
+  if (version >= 4) {
+    bin::put(o, d.advect);
+    bin::put(o, d.soften);
   }
   for (const auto* a : {&m.scale, &m.lo, &m.hi}) bin::put_array(o, std::span<const float>(*a));
   put_f16(o, m.step_w);
@@ -353,9 +365,17 @@ std::expected<Model, std::string> load_model(std::istream& i) {
   if (*version >= 3) {
     auto b = bin::get<std::int32_t>(i);
     auto dith = bin::get<std::int32_t>(i);
-    if (!b || !dith || *b < 2 || *b > 8 || *dith < 0 || *dith > 1) return std::unexpected("rollout: bad start storage");
+    const bool fp16 = *version >= 4 && b && *b == 16;  // version 4 may hold fp16 start states
+    if (!b || !dith || ((*b < 2 || *b > 8) && !fp16) || *dith < 0 || *dith > 1) return std::unexpected("rollout: bad start storage");
     m.start_bits = *b;
-    m.start_dither = *dith != 0;
+    m.start_dither = !fp16 && *dith != 0;
+  }
+  if (*version >= 4) {
+    auto adv = bin::get<float>(i);
+    auto soft = bin::get<float>(i);
+    if (!adv || !soft || !(*adv > 0.f && *adv <= 8.f) || !(*soft >= 0.f && *soft <= 1.f)) return std::unexpected("rollout: bad detail spec");
+    d.advect = *adv;
+    d.soften = *soft;
   }
   if (!(d.swirl_scale > 0.f) || !(d.edge1 > d.edge0)) return std::unexpected("rollout: bad detail spec");
   for (auto* a : {&m.scale, &m.lo, &m.hi}) {
@@ -602,11 +622,32 @@ Swirl swirl_field(const Model& m, std::uint64_t seed, float t) {
 
 }  // namespace
 
+void soften_field(std::span<float> q, int size, float s) {
+  const int S = size;
+  std::vector<float> prev(sz(S) + 2, 0.f), cur(sz(S) + 2, 0.f);  // original rows y - 1 and y, zero-padded
+  for (int y = 0; y < S; ++y) {
+    float* row = q.data() + sz(y) * sz(S);
+    std::copy(row, row + S, cur.begin() + 1);
+    const float* up = y + 1 < S ? row + S : nullptr;
+    for (int x = 0; x < S; ++x) {
+      const float c = cur[sz(x) + 1];
+      const float n = cur[sz(x)] + cur[sz(x) + 2] + (up ? up[x] : 0.f) + (y > 0 ? prev[sz(x) + 1] : 0.f);
+      row[x] = c + s * (0.25f * n - c);
+    }
+    prev.swap(cur);
+  }
+}
+
 void detail_step(const Model& m, State& s, std::uint64_t seed, std::span<const float> controls) {
   const Hyper& h = m.h;
   const DetailSpec& dt = m.detail;
+  if (dt.soften > 0.f) {  // study D2: the fine-scale diffusion, before the advection
+    soften_field(s.fine_t, s.size, dt.soften);
+    soften_field(s.fine_d, s.size, dt.soften);
+  }
   const int R = h.res, S = s.size, C = h.channels();
   const float k = fl(S) / fl(R), px128 = fl(S) / 128.f, t = s.time + 0.5f / m.fps;
+  const float ka = k * dt.advect;  // coarse cells per frame to pixels per frame, times the advection gain
   float amp = dt.swirl * px128;
   if (dt.swirl_control >= 0 && sz(dt.swirl_control) < controls.size()) amp *= 0.3f + controls[sz(dt.swirl_control)];
   if (dt.swirl_ramp > 0.f) amp *= std::min(1.f, s.since_start / dt.swirl_ramp);
@@ -616,7 +657,7 @@ void detail_step(const Model& m, State& s, std::uint64_t seed, std::span<const f
   for (int y = 0; y < S; ++y) {
     for (int x = 0; x < S; ++x) {
       const float xc = (fl(x) + 0.5f) / k - 0.5f, yc = (fl(y) + 0.5f) / k - 0.5f;
-      float u = bilinear_ch(s.flow.data(), R, 2, 0, xc, yc) * k, v = bilinear_ch(s.flow.data(), R, 2, 1, xc, yc) * k;
+      float u = bilinear_ch(s.flow.data(), R, 2, 0, xc, yc) * ka, v = bilinear_ch(s.flow.data(), R, 2, 1, xc, yc) * ka;
       if (amp > 0.f) {
         const float lx = ((fl(x) + 0.5f) / px128 + 0.5f) / sw.spacing + 1.f, ly = ((fl(y) + 0.5f) / px128 + 0.5f) / sw.spacing + 1.f;
         u += amp * bilinear(sw.u.data(), sw.n, lx, ly);

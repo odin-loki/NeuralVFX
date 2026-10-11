@@ -66,7 +66,16 @@ struct DetailSpec {
   int swirl_control = -1;    // a control that scales the swirl by (0.3 + value), e.g. turbulence; -1: none
   float grow = 1.f;          // the lock may scale a block's existing fine structure up by this much (peaks stay
                              // peaks); only the rest arrives as new material (1: all increases arrive as new material)
+  // Study D2 (docs/REPORT.md §6.9; file version 4, written only when one of them differs from its default):
+  float advect = 1.f;         // the fine fields move with this multiple of the coarse flow (the swirl is added as is)
+  float soften = 0.f;         // each frame, before advection, the fine fields move this fraction of the way to the mean
+                              // of their four neighbours (zero outside the frame): the fine-scale diffusion of the
+                              // simulation, which the detail layer otherwise lacks
+  bool d2() const { return advect != 1.f || soften != 0.f; }
 };
+
+// Study D2's softening of a fine field (DetailSpec::soften): q + s (mean of the four neighbours - q), zero outside.
+void soften_field(std::span<float> q, int size, float s);
 
 struct Hyper {
   int res = 32;            // coarse cells per side

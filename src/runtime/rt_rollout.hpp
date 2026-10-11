@@ -485,6 +485,7 @@ class Rollout final : public RolloutRunner {
     sx_ = axis(S_, sw_n_, 128.f / static_cast<float>(S_) / sw_spacing_, 0.5f / sw_spacing_ + 1.f);
     const int Sb = (S_ + kB - 1) / kB * kB;  // a row padded to whole blocks of 16 pixels
     frow_.assign(2 * z(Sb), 0.f);
+    if (m_.detail.soften > 0.f) soft_.assign(3 * z(S_ + 2), 0.f);  // study D2: two padded rows and a zero row
     g1_.resize(z(N_) * z(h_.render_hidden));
     render_rows_.init(S_, h_.render_hidden, Sb);
     flow_rows_.init(S_);
@@ -554,6 +555,7 @@ class Rollout final : public RolloutRunner {
     fold();
     coarse_noise(time_ + 0.5f / m_.fps);
     coarse_step();
+    if (m_.detail.soften > 0.f) soften_fields();  // study D2: the fine-scale diffusion, before the advection
     detail_step(controls);
     time_ += 1.f / m_.fps;
     since_start_ += 1.f / m_.fps;
@@ -681,7 +683,7 @@ class Rollout final : public RolloutRunner {
   std::size_t scratch_bytes() const override {
     std::size_t n = own_ ? own_->bytes() : 0;
     for (const auto* v : {&w1_, &b1_, &w2_, &b2_, &cond_, &folded_cond_, &next_, &coarse_, &flow_, &div_, &p_,
-                          &tmp_, &wot_, &noise_, &dirsum_, &soot_, &fac_, &ft_, &fd_, &swl_, &g1_, &frow_, &r1_, &r2_, &out_}) {
+                          &tmp_, &wot_, &noise_, &dirsum_, &soot_, &fac_, &ft_, &fd_, &swl_, &g1_, &frow_, &soft_, &r1_, &r2_, &out_}) {
       n += v->size() * 4;
     }
     n += any_.size() + 4 * (nm_.size() + cell_lo_.size() + cell_hi_.size());
@@ -1044,7 +1046,7 @@ class Rollout final : public RolloutRunner {
     std::fill(cs_d_.begin(), cs_d_.end(), 0.f);
     // How far the samples reach up and down: from the range of the vertical velocity (interpolation stays within the
     // range of what it interpolates, and the margin covers rounding).
-    const float k = static_cast<float>(S_) / static_cast<float>(R_), edge = static_cast<float>(S_);
+    const float k = static_cast<float>(S_) / static_cast<float>(R_) * dt.advect, edge = static_cast<float>(S_);
     float flo = 0.f, fhi = 0.f, slo = 0.f, shi = 0.f;
     for (int i = 0; i < N_; ++i) {
       flo = std::min(flo, flow_[z(i) * 2 + 1]);
@@ -1113,6 +1115,34 @@ class Rollout final : public RolloutRunner {
       long n = 0;
       for (int y = 0; y < S_; ++y) n += act_[z(y) * 2 + 1] - act_[z(y) * 2];
       computed_ = static_cast<double>(n) / (static_cast<double>(S_) * static_cast<double>(S_));
+    }
+  }
+
+  // Study D2: a fine field moves the fraction s of the way to the mean of its four neighbours, zero outside the frame
+  // (rollout::soften_field). Rows are read from copies of the original rows y - 1 and y, padded with a zero at each end.
+  // Kept out of detail_step (and not inlined) so that the detail step compiles exactly as without it: its frames are
+  // the same to the bit when soften is 0 (the fireball's frozen keyframes).
+  [[gnu::noinline]] void soften_fields() {
+    soften(ft_.data(), m_.detail.soften);
+    soften(fd_.data(), m_.detail.soften);
+  }
+  void soften(float* q, float s) {
+    const std::size_t S = z(S_), P = S + 2;
+    float* prev = soft_.data();
+    float* cur = soft_.data() + P;
+    const float* zero = soft_.data() + 2 * P;
+    std::fill(prev, prev + P, 0.f);
+    cur[0] = cur[S + 1] = 0.f;
+    for (int y = 0; y < S_; ++y) {
+      float* row = q + z(y) * S;
+      std::copy(row, row + S, cur + 1);
+      const float* up = y + 1 < S_ ? row + S : zero;
+      each_block(S_, [&]<class V>(int x) {
+        const V c = ld<V>(cur + x + 1);
+        const V n = ld<V>(cur + x) + ld<V>(cur + x + 2) + ld<V>(up + x) + ld<V>(prev + x + 1);
+        st<V>(row + x, c + s * (0.25f * n - c));
+      });
+      std::swap(prev, cur);
     }
   }
 
@@ -1197,7 +1227,7 @@ class Rollout final : public RolloutRunner {
   void forward_row(int y, std::array<int, 2> span) {
     const std::size_t S = z(S_);
     const int Pw = S_ + 3;
-    const float k = static_cast<float>(S_) / static_cast<float>(R_), edge = static_cast<float>(S_), yf = static_cast<float>(y);
+    const float k = static_cast<float>(S_) / static_cast<float>(R_) * m_.detail.advect, edge = static_cast<float>(S_), yf = static_cast<float>(y);
     const auto f = flow_rows_.get(flow_.data(), R_, ax_, ax_.i[z(y)]);
     const float wy0 = ax_.w[z(y)];
     const float *u0 = f[0], *v0 = f[0] + S, *u1 = f[1], *v1 = f[1] + S;
@@ -1457,6 +1487,7 @@ class Rollout final : public RolloutRunner {
   std::vector<RowPair<1>> noise_rows_;  // expanded rows of the flicker lattices, per octave
   RowPair<> render_rows_;              // expanded rows of the renderer's first layer (its coarse part)
   AlignedFloats g1_;              // the renderer's first layer per coarse cell: bias and coarse part [cell][unit]
+  AlignedFloats soft_;            // study D2's softening: two padded rows and a zero row (empty without it)
   AlignedFloats frow_;            // one row of the renderer's fine features, planar [feature][padded size]
   SliceNoise curl_, swirl_;
   LatticeFbm fine_flicker_;
