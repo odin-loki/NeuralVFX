@@ -127,9 +127,10 @@ std::vector<MotionSample> simulate_motion_samples(sim::Effect e, const Inverse& 
             }
           }
           MotionSample s;
-          for (int q = 0; q < cells; ++q) {
+          const int count = cells > 0 ? cells : R * R;
+          for (int q = 0; q < count; ++q) {
             const std::vector<int>& from = (q % 2 == 0 && !near.empty()) ? near : any;
-            const int cell = from[rng() % from.size()];
+            const int cell = cells > 0 ? from[rng() % from.size()] : q;  // cells <= 0: every cell, in grid order
             const float* row = in.data() + static_cast<std::size_t>(cell) * Motion::kInputs;
             s.inputs.insert(s.inputs.end(), row, row + Motion::kInputs);
             s.target.push_back(truth[static_cast<std::size_t>(cell) * rollout::kPhys]);

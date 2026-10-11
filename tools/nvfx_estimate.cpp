@@ -17,8 +17,8 @@
 // --alpha: whether the footage has a real alpha channel; auto: no when alpha is max(r, g, b) everywhere (nvfx_ingest
 //   --alpha luma) or zero everywhere.
 // The inverse network maps frames to fine heat and soot. It is trained from the built-in simulation for fire, smoke and
-// explosion effects (--train-inverse FILE, a few minutes on one core; cached at <data root>/j/inverse/ by
-// nvfx_study_j inverse). Validated on simulated renders only: real footage is untested (docs/FOOTAGE.md §6).
+// explosion effects, with the motion network that measures velocity (--train-inverse FILE, about 6 minutes on one core;
+// cached at <data root>/j/inverse/ by nvfx_study_j inverse and motion). Validated on simulated renders only: real footage is untested (docs/FOOTAGE.md §6).
 #include "args.hpp"
 
 #include <neuralfx/footage.hpp>
@@ -103,18 +103,22 @@ int main(int argc, char** argv) try {
     sim::Effect e{};
     if (!sim::parse_effect(M.effect, e)) throw std::runtime_error(std::format("--train-inverse: the simulation makes fire, smoke and explosion, not '{}'", M.effect));
     std::println("training the inverse network for {} ({}) from the simulation ...", M.effect, mode);
-    footage::SampleOptions so;
+    footage::SampleOptions so;  // as nvfx_study_j inverse and motion (docs/FOOTAGE.md §2)
+    so.runs = 64;
     so.drop_alpha = !alpha;
     so.threads = a.i("threads", 1);
-    const auto samples = footage::simulate_samples(e, so);
     footage::InverseSpec spec;
     spec.alpha = alpha;
     inv = footage::init_inverse(spec, 11);
     inv.effect = M.effect;
     footage::InverseTrainOptions to;
+    to.iterations = 12000;
     to.threads = so.threads;
     to.progress = [](int it, double loss) { std::println("  {:5d} loss {:.5f}", it, loss); };
-    footage::train_inverse(inv, samples, to);
+    footage::train_inverse(inv, footage::simulate_samples(e, so), to);
+    std::println("training the motion network ...");
+    inv.motion.in_scale = inv.scale;
+    footage::train_motion(inv.motion, footage::simulate_motion_samples(e, inv, so), to);
     if (auto w = footage::save_inverse(a.str("train-inverse"), inv); !w) throw std::runtime_error(w.error());
   } else {
     const fs::path p = a.has("inverse") ? fs::path(a.str("inverse")) : data_root() / "j" / "inverse" / std::format("{}_{}.nvfxinv", M.effect, mode);

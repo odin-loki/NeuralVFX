@@ -247,7 +247,8 @@ struct SampleOptions {
 };
 std::vector<InverseSample> simulate_samples(sim::Effect e, const SampleOptions& o);
 // Samples for the motion network: three consecutive frames per sample (degraded alike), through the inverse network,
-// with the true coarse velocity of the last; `cells` cells per sample, half where there is material.
+// with the true coarse velocity of the last; `cells` cells per sample, half where there is material (cells <= 0: every
+// cell of the grid, in order).
 std::vector<MotionSample> simulate_motion_samples(sim::Effect e, const Inverse& inv, const SampleOptions& o, int cells = 256);
 
 // A copy of the effect whose start points are `starts` (after the stored ones when keep_stored). Fine fields are kept

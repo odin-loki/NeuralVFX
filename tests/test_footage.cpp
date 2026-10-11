@@ -383,13 +383,17 @@ TEST(Footage, MotionNetworkRoundTripsAndReadsItsInputs) {
     samples[0].target.push_back(0.3f * in[sz(q) * Motion::kInputs + 162] + 0.05f);
     samples[0].target.push_back(-0.1f);
   }
-  Motion mo = init_motion(16, 3);
+  Motion mo;
+  mo.hidden = 16;
+  mo.in_scale = {0.5f, 0.25f};
   InverseTrainOptions o;
   o.iterations = 800;
   o.batch = 64;
   o.lr = 5e-3f;
   const double loss = train_motion(mo, samples, o);
   EXPECT_LT(loss, 0.05);
+  EXPECT_FLOAT_EQ(mo.in_scale[1], 0.25f);  // training keeps the input units the inputs were made with
+  EXPECT_GT(mo.out_scale, 0.04f);
   const Flow v = apply_motion(mo, in, R);
   EXPECT_EQ(v.known, std::vector<std::uint8_t>(sz(R) * R, 1));
 }

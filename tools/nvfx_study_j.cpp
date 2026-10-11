@@ -559,7 +559,7 @@ void step_motion(const Ctx& c) {
       ho.per_run = 4;
       ho.salt = 3;
       ho.degrade_share = 0.f;
-      const auto held = footage::simulate_motion_samples(e, inv, ho, kRes * kRes);
+      const auto held = footage::simulate_motion_samples(e, inv, ho, 0);  // every cell, in grid order
       double em = 0, ef = 0, rms = 0, n = 0;
       for (const auto& s : held) {
         const footage::Flow mv = footage::apply_motion(inv.motion, s.inputs, kRes);

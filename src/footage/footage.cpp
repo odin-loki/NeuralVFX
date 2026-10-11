@@ -580,7 +580,7 @@ double train_motion(Motion& mo, std::span<const MotionSample> samples, const Inv
   }
   if (rows.empty()) throw std::invalid_argument("motion: no samples");
   mo.out_scale = static_cast<float>(std::max(1e-4, std::sqrt(ss / (2.0 * static_cast<double>(rows.size())))));
-  if (mo.w.empty()) mo = init_motion(mo.hidden, o.seed);
+  if (mo.w.empty()) mo.w = init_motion(mo.hidden, o.seed).w;  // fresh weights; the input and output units stay
   const InvLayout L = mlp_layout(Motion::kInputs, mo.hidden);
   const int H = mo.hidden, threads = std::max(1, o.threads);
   InvAdam adam(L.size);
