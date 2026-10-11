@@ -33,7 +33,7 @@
 <rect x="62.0" y="58" width="14" height="4" rx="2" fill="#2a78d6"/>
 <text x="80.0" y="63" font-size="11" fill="#52514e">best flipbook at each size</text>
 <rect x="249.2" y="58" width="14" height="4" rx="2" fill="#eb6834"/>
-<text x="267.2" y="63" font-size="11" fill="#52514e">networks (F2)</text>
+<text x="267.2" y="63" font-size="11" fill="#52514e">networks</text>
 <rect x="62.0" y="72" width="14" height="4" rx="2" fill="#2a78d6"/>
 <text x="80.0" y="77" font-size="11" fill="#52514e">dashed: our BC3 layout and raw</text>
 <circle cx="248.1" cy="322.4" r="4.5" fill="#eb6834" stroke="#fcfcfb" stroke-width="2"/>
@@ -85,9 +85,9 @@
 <rect x="574.0" y="58" width="14" height="4" rx="2" fill="#2a78d6"/>
 <text x="592.0" y="63" font-size="11" fill="#52514e">best packed flipbook</text>
 <rect x="724.0" y="58" width="14" height="4" rx="2" fill="#eb6834"/>
-<text x="742.0" y="63" font-size="11" fill="#52514e">networks (F2)</text>
-<rect x="830.6" y="58" width="14" height="4" rx="2" fill="#1baf7a"/>
-<text x="848.6" y="63" font-size="11" fill="#52514e">AV1 (libaom, 4:4:4)</text>
+<text x="742.0" y="63" font-size="11" fill="#52514e">networks</text>
+<rect x="799.6" y="58" width="14" height="4" rx="2" fill="#1baf7a"/>
+<text x="817.6" y="63" font-size="11" fill="#52514e">AV1 (libaom, 4:4:4)</text>
 <rect x="574.0" y="72" width="14" height="4" rx="2" fill="#eda100"/>
 <text x="592.0" y="77" font-size="11" fill="#52514e">HEVC (x265, 4:4:4)</text>
 <rect x="711.6" y="72" width="14" height="4" rx="2" fill="#e87ba4"/>
