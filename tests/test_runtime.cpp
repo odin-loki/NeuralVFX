@@ -222,13 +222,14 @@ TEST(Runtime, Int8StaysWithinItsToleranceOfTheFloatReferenceOnEveryIsa) {
     Hyper h;
     int bits, size;
   };
-  Hyper deep = grid_hyper(), shallow = grid_hyper(), wide = grid_hyper(), quad = grid_hyper();
+  Hyper deep = grid_hyper(), shallow = grid_hyper(), wide = grid_hyper(), quad = grid_hyper(), odd = grid_hyper();
   deep.layers = 3;
   shallow.layers = 1;
   wide.grid = 40;  // more grid points across than pixels at 32: the first layer per pixel
   quad.hidden = 24;
-  const Case cases[] = {{grid_hyper(), 16, 32}, {grid_hyper(), 8, 48}, {grid_hyper(), 16, 16}, {deep, 16, 32},
-                        {shallow, 8, 32},       {wide, 16, 32},        {wide, 8, 64},          {quad, 16, 48}};
+  odd.hidden = 21;  // a last word in part (pairs and quads)
+  const Case cases[] = {{grid_hyper(), 16, 32}, {grid_hyper(), 8, 48}, {grid_hyper(), 16, 16}, {deep, 16, 32}, {shallow, 8, 32},
+                        {wide, 16, 32},         {wide, 8, 64},         {quad, 16, 48},         {odd, 16, 32}};
   int compared = 0;
   for (const nvfx_isa isa : kIsas) {
     if (nvfx_set_isa(isa) != NVFX_OK) continue;
