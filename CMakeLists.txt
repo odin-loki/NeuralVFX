@@ -97,12 +97,34 @@ target_link_libraries(neuralfx_io PUBLIC neuralfx_core PRIVATE ZLIB::ZLIB)
 neuralfx_defaults(neuralfx_io)
 
 # Composed effects (docs/COMPOSE.md): rollout effects coupled through their fields, with particles, light, distortion
-# and bloom for whole scenes, field effects, and scene scripts (a text format, its parser and runner). A prototype over
-# the runtime's internals, not part of the C API.
-add_library(neuralfx_compose STATIC src/compose/compose.cpp src/compose/fields.cpp src/compose/script.cpp src/compose/script_run.cpp)
+# and bloom for whole scenes, field effects, and scene scripts (a text format, its parser and runner), over the
+# runtime's internals.
+set(NEURALFX_COMPOSE_SOURCES src/compose/compose.cpp src/compose/fields.cpp src/compose/script.cpp src/compose/script_run.cpp)
+add_library(neuralfx_compose STATIC ${NEURALFX_COMPOSE_SOURCES})
 target_include_directories(neuralfx_compose PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src/compose" "${CMAKE_CURRENT_SOURCE_DIR}/src/runtime")
 target_link_libraries(neuralfx_compose PUBLIC nvfx)
 neuralfx_defaults(neuralfx_compose)
+
+# The C API for scenes (include/neuralfx/nvfx_scene.h, docs/ENGINES.md §7): scene scripts played for engines. Static:
+# a library over compose. Shared: compose and the scene API are built into libnvfx, position-independent, with hidden
+# symbols and compose's own flags (not the runtime's -ffp-contract=fast), so the frames are the static build's.
+add_library(nvfx_scene_api STATIC src/compose/nvfx_scene.cpp)
+target_link_libraries(nvfx_scene_api PUBLIC neuralfx_compose)
+neuralfx_defaults(nvfx_scene_api)
+if(NEURALFX_BUILD_SHARED)
+  add_library(nvfx_shared_scene OBJECT ${NEURALFX_COMPOSE_SOURCES} src/compose/nvfx_scene.cpp)
+  target_include_directories(nvfx_shared_scene PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/include" "${CMAKE_CURRENT_SOURCE_DIR}/src/compose"
+                                                       "${CMAKE_CURRENT_SOURCE_DIR}/src/runtime")
+  target_compile_definitions(nvfx_shared_scene PRIVATE NVFX_SHARED_BUILD)
+  set_target_properties(nvfx_shared_scene PROPERTIES POSITION_INDEPENDENT_CODE ON CXX_VISIBILITY_PRESET hidden VISIBILITY_INLINES_HIDDEN ON)
+  neuralfx_defaults(nvfx_shared_scene)
+  find_package(Threads REQUIRED)
+  target_sources(nvfx_shared PRIVATE $<TARGET_OBJECTS:nvfx_shared_scene>)
+  target_link_libraries(nvfx_shared PRIVATE Threads::Threads)
+  if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    target_link_options(nvfx_shared PRIVATE "LINKER:--exclude-libs,ALL")  # the static model library's symbols stay inside
+  endif()
+endif()
 
 # Diffusion-context mixing (docs/DCM.md): the owner's PAQ-style mixer, its frozen inference copy and its search, ported
 # from CameraDetector, with a value-domain mixer for generating and coding effects. The standard library only.
@@ -157,9 +179,14 @@ if(NEURALFX_BUILD_TOOLS)
   add_executable(nvfx_g_extras tools/g_extras.cpp)
   target_link_libraries(nvfx_g_extras PRIVATE neuralfx_dcm_extras neuralfx_io neuralfx_train)
   neuralfx_defaults(nvfx_g_extras)
-  # The engine-side example: plain C against the shared library's API.
+  # The engine-side example: plain C against the C API (effects and scenes), linked to the shared library when it is
+  # built (so its exports are what the example uses), else to the static ones.
   add_executable(nvfx_c_host examples/c_host.c)
-  target_link_libraries(nvfx_c_host PRIVATE nvfx)
+  if(NEURALFX_BUILD_SHARED)
+    target_link_libraries(nvfx_c_host PRIVATE nvfx_shared)
+  else()
+    target_link_libraries(nvfx_c_host PRIVATE nvfx_scene_api)
+  endif()
   set_target_properties(nvfx_c_host PROPERTIES LINKER_LANGUAGE CXX)
   neuralfx_defaults(nvfx_c_host)
   # A scripted scene of composed effects (a fireball with smoke, fires, embers), rendered to video and profiled.
@@ -221,15 +248,15 @@ if(NEURALFX_BUILD_TESTS)
                                 tests/test_runtime.cpp tests/test_ingest.cpp tests/test_rollout.cpp tests/test_compose.cpp
                                 tests/test_dcm.cpp tests/test_cm.cpp tests/test_dcm_fine.cpp tests/test_dcm_ddpm.cpp tests/test_script.cpp
                                 tests/test_g3_codec.cpp tests/test_video_codec.cpp tests/test_runtime_prior.cpp
-                                tests/test_dcm_extras.cpp)
-  target_link_libraries(neuralfx_tests PRIVATE neuralfx_proto neuralfx_io neuralfx_train nvfx neuralfx_compose neuralfx_dcm
+                                tests/test_dcm_extras.cpp tests/test_scene_api.cpp)
+  target_link_libraries(neuralfx_tests PRIVATE neuralfx_proto neuralfx_io neuralfx_train nvfx neuralfx_compose nvfx_scene_api neuralfx_dcm
                                                neuralfx_dcm_fine neuralfx_ddpm neuralfx_codec neuralfx_dcm_extras GTest::gtest_main)
   neuralfx_defaults(neuralfx_tests)
   target_compile_definitions(neuralfx_tests PRIVATE NEURALFX_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
   gtest_discover_tests(neuralfx_tests TEST_PREFIX "neuralfx." DISCOVERY_MODE PRE_TEST PROPERTIES LABELS neuralfx)
   # Counts heap allocations around nvfx_render (replaces the global operator new, so it is its own program).
   add_executable(nvfx_alloc_test tests/alloc_test.cpp)
-  target_link_libraries(nvfx_alloc_test PRIVATE nvfx neuralfx_compose neuralfx_ddpm)  # the trainer's format writer makes a test prior
+  target_link_libraries(nvfx_alloc_test PRIVATE nvfx neuralfx_compose nvfx_scene_api neuralfx_ddpm)  # the trainer's format writer makes a test prior
   neuralfx_defaults(nvfx_alloc_test)
   if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
     target_compile_options(nvfx_alloc_test PRIVATE -Wno-mismatched-new-delete)  # replacing operator new is the point
@@ -250,8 +277,16 @@ if(NEURALFX_BUILD_TESTS)
     add_test(NAME neuralfx.ScriptedFireballBitExact
              COMMAND nvfx_scene_script --script ${CMAKE_CURRENT_SOURCE_DIR}/examples/scenes/fireball.nvfxs --models ${NEURALFX_MODELS_D}
                      --keyframes ${CMAKE_CURRENT_BINARY_DIR}/fireball_script_keyframes --no-video --threads 2
-                     --verify ${CMAKE_CURRENT_SOURCE_DIR}/results/experiments/v1_frozen.csv)
-    set_tests_properties(neuralfx.ScriptedFireballBitExact PROPERTIES LABELS "neuralfx;data" SKIP_RETURN_CODE 77 TIMEOUT 1200)
+                     --verify ${CMAKE_CURRENT_SOURCE_DIR}/results/experiments/v1_frozen.csv --profile ${CMAKE_CURRENT_BINARY_DIR}/fireball_script_profile.csv)
+    set_tests_properties(neuralfx.ScriptedFireballBitExact PROPERTIES LABELS "neuralfx;data" SKIP_RETURN_CODE 77 TIMEOUT 1200
+                         FIXTURES_SETUP fireball_profile)
+    # The same fireball through the scene C API of the shared library, from C (nvfx_c_host --scene): every one of its 270
+    # frames has the RGB checksum the script runner's profile above has.
+    add_test(NAME neuralfx.SceneApiFireballBitExact
+             COMMAND nvfx_c_host --scene ${CMAKE_CURRENT_SOURCE_DIR}/examples/scenes/fireball.nvfxs --effects ${NEURALFX_MODELS_D} --threads 2
+                     --expect ${CMAKE_CURRENT_BINARY_DIR}/fireball_script_profile.csv)
+    set_tests_properties(neuralfx.SceneApiFireballBitExact PROPERTIES LABELS "neuralfx;data" SKIP_RETURN_CODE 77 TIMEOUT 1200
+                         FIXTURES_REQUIRED fireball_profile)
     foreach(scene fireball firewall)
       add_test(NAME neuralfx.SceneScriptChecks.${scene} COMMAND nvfx_scene_script --script ${CMAKE_CURRENT_SOURCE_DIR}/examples/scenes/${scene}.nvfxs --check)
       set_tests_properties(neuralfx.SceneScriptChecks.${scene} PROPERTIES LABELS neuralfx)

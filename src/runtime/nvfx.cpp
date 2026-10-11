@@ -3,6 +3,7 @@
 #include <neuralfx/noise.hpp>
 #include <neuralfx/nvfx.h>
 
+#include "nvfx_internal.hpp"
 #include "rt_common.hpp"
 #include "rt_prior.hpp"
 
@@ -58,6 +59,8 @@ struct nvfx_instance {
   int prior_every = 16, prior_t = 100;
   float prior_beta = 1.f;
 };
+
+const RolloutEffect* nfx::rt::rollout_of(const nvfx_effect* e) { return e ? e->roll.get() : nullptr; }
 
 namespace {
 
@@ -328,6 +331,7 @@ const char* nvfx_status_string(nvfx_status s) {
     case NVFX_ERROR_FORMAT: return "not a valid .nvfx file";
     case NVFX_ERROR_MEMORY: return "out of memory";
     case NVFX_ERROR_UNSUPPORTED: return "unsupported size or ISA";
+    case NVFX_ERROR_SCRIPT: return "error in the scene script";
   }
   return "unknown status";
 }

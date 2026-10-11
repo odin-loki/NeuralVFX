@@ -1,4 +1,5 @@
-/* NeuralVFX runtime: evaluate trained neural effects on the CPU. C API for game engines (docs/ENGINES.md).
+/* NeuralVFX runtime: evaluate trained neural effects on the CPU. C API for game engines (docs/ENGINES.md); composed
+ * scenes played from scripts are in nvfx_scene.h.
  *
  * An effect (nvfx_effect) is a loaded .nvfx file: immutable, shareable between threads and instances. An instance
  * (nvfx_instance) is one playing copy with its own controls, seed and scratch memory; it is used from one thread
@@ -30,7 +31,7 @@
 extern "C" {
 #endif
 
-#define NVFX_VERSION 1
+#define NVFX_VERSION 2 /* 2: scenes (nvfx_scene.h) */
 
 typedef enum nvfx_status {
   NVFX_OK = 0,
@@ -38,7 +39,8 @@ typedef enum nvfx_status {
   NVFX_ERROR_IO = 2,         /* the file could not be read */
   NVFX_ERROR_FORMAT = 3,     /* not a valid .nvfx file */
   NVFX_ERROR_MEMORY = 4,     /* allocation failed (only at load or instance creation) */
-  NVFX_ERROR_UNSUPPORTED = 5 /* size or ISA not supported */
+  NVFX_ERROR_UNSUPPORTED = 5, /* size or ISA not supported */
+  NVFX_ERROR_SCRIPT = 6      /* a scene script is wrong (nvfx_scene.h: the error has its line and column) */
 } nvfx_status;
 
 typedef enum nvfx_isa { NVFX_ISA_AUTO = 0, NVFX_ISA_BASELINE = 1, NVFX_ISA_AVX2 = 2, NVFX_ISA_AVX512 = 3 } nvfx_isa;
