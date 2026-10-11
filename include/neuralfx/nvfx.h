@@ -86,6 +86,16 @@ NVFX_API nvfx_status nvfx_instance_set_drift(nvfx_instance* instance, float seco
 /* Exact colour controls applied to the output: hue rotation in radians, brightness multiplier (default 0, 1). */
 NVFX_API nvfx_status nvfx_instance_set_colour(nvfx_instance* instance, float hue_radians, float brightness);
 
+/* Precision of a frame model's network (docs/REPORT.md §7). INT8: the hidden layers multiply 8-bit activations (one
+ * scale per pixel) by 8-bit weights (one scale per unit) in integers, and the first layer is evaluated per grid point
+ * and interpolated; AVX-512 VNNI where the CPU has it. FLOAT: the float network (the reference). DEFAULT is INT8 for
+ * the grid family: on study A's clips it changes active PSNR by -0.01 dB (interval within the -0.05 dB the project
+ * allows for a default) and changes few pixels by more than one level. The conv family and rollout effects are float
+ * either way (INT8 returns NVFX_ERROR_UNSUPPORTED for them). A set-up call: a change allocates the instance's new
+ * buffers. */
+typedef enum nvfx_precision { NVFX_PRECISION_DEFAULT = 0, NVFX_PRECISION_FLOAT = 1, NVFX_PRECISION_INT8 = 2 } nvfx_precision;
+NVFX_API nvfx_status nvfx_instance_set_precision(nvfx_instance* instance, nvfx_precision precision);
+
 /* Rollout effects: the prior against drift (docs/ENGINES.md §5, docs/DCM.md G2.13) ------------------------------
  * An optional second file, a small denoiser trained for the effect (fire.ddpm: 1.57 MB, about 20 times the 82 KB
  * fire effect, whose file is unchanged). With it one continuous rollout (nvfx_instance_set_drift(instance, 0)) plays

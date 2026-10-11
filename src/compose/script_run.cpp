@@ -1107,6 +1107,7 @@ struct Scene::Impl {
   std::unique_ptr<Frame> frame;
   std::unique_ptr<Pool> pool;
   std::unique_ptr<PictureThread> picture;  // Options::overlap
+  std::unique_ptr<StepScratch> step_scratch;  // Options::shared_scratch
   std::vector<Shock> shocks;
   std::vector<std::array<float, 4>> scorch;
   std::vector<const Code*> scorch_glow;
@@ -1452,6 +1453,8 @@ struct Scene::Impl {
 };
 
 void Scene::Impl::build(const EffectLoader& load, const Options& o) {
+  // step()'s working memory, one set per thread that may step at once (the picture thread is one of o.threads)
+  if (o.shared_scratch) step_scratch = std::make_unique<StepScratch>(std::max(1, o.threads));
   slots.assign(zs(prog.slots), 0.f);
   slots[s_length] = prog.length;
   slots[s_fps] = prog.fps;
@@ -1508,6 +1511,7 @@ void Scene::Impl::build(const EffectLoader& load, const Options& o) {
         const std::string name = mc.tiled ? std::format("{}_r{}c{}", mc.name, row, c) : mc.name;
         owned.push_back(std::make_unique<Module>(name, e, mc.size, Placement{0.f, 0.f, scale}, o.isa));
         Module* m = owned.back().get();
+        if (step_scratch) m->share_scratch(*step_scratch);
         m->group = r.group;
         if (mc.tiled) m->band = {c > 0 ? mc.band : 0, c < mc.cols - 1 ? mc.band : 0, row > 0 ? mc.band : 0, row < mc.rows - 1 ? mc.band : 0};
         m->feather = mc.feather * static_cast<float>(mc.size);
@@ -1808,7 +1812,7 @@ Particles& Scene::particles() { return *impl_->parts; }
 const Frame& Scene::frame() const { return *impl_->frame; }
 int Scene::active_modules() const { return static_cast<int>(impl_->active.size()); }
 std::size_t Scene::scratch_bytes() const {
-  std::size_t n = 0;
+  std::size_t n = impl_->step_scratch ? impl_->step_scratch->bytes() : 0;
   for (const Module* m : impl_->all) n += m->runner().scratch_bytes();
   return n;
 }

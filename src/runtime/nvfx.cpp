@@ -44,6 +44,8 @@ struct nvfx_instance {
     std::uint64_t seed = 0;
   };
   Track a, b;  // a.r is non-null for rollout effects
+  // The two runners step one after the other on the caller's thread, so they share step()'s working memory.
+  std::unique_ptr<nfx::rt::RolloutScratch> step_scratch;
   std::vector<std::uint8_t> mix;
   std::vector<float> controls, cond, za, zb;
   std::uint64_t seed = 0;
@@ -52,6 +54,8 @@ struct nvfx_instance {
   float hue = 0.f, brightness = 1.f;
   std::array<float, 9> colour{};
   bool apply_colour = false;
+  nvfx_precision precision = NVFX_PRECISION_DEFAULT;  // frame models (nvfx_instance_set_precision)
+  nvfx_isa isa = NVFX_ISA_AUTO;                        // the ISA forced when the instance was created
   // The prior against drift (docs/DCM.md G2.13): its work buffers, its condition, and when and how strongly it acts.
   std::unique_ptr<nfx::rt::Prior> prior;
   std::vector<float> prior_cond;
@@ -72,12 +76,40 @@ bool cpu_has(nvfx_isa isa) {
   return isa == NVFX_ISA_BASELINE;
 }
 
+bool cpu_has_vnni() {
+#if defined(__GNUC__) && defined(__x86_64__)
+  __builtin_cpu_init();
+  return __builtin_cpu_supports("avx512vnni");
+#else
+  return false;
+#endif
+}
+
 nvfx_isa resolved_isa() {
   const auto forced = static_cast<nvfx_isa>(g_forced_isa.load());
   if (forced != NVFX_ISA_AUTO) return forced;
   // AVX2 by default: AVX-512 measured as a tie on the benchmark machine (docs/PLAN.md §8) and lowers clocks on some CPUs.
   if (cpu_has(NVFX_ISA_AVX2)) return NVFX_ISA_AVX2;
   return NVFX_ISA_BASELINE;
+}
+
+// The precision a frame model's instance runs at: DEFAULT is int8 for the grid family (docs/REPORT.md §7).
+nfx::rt::Precision frame_precision(const nfx::Model& m, nvfx_precision p) {
+  if (m.h.arch != nfx::Arch::grid || p == NVFX_PRECISION_FLOAT) return nfx::rt::Precision::float32;
+  return nfx::rt::Precision::int8;
+}
+
+// A frame model's renderer on the instances' ISA. With int8 and no ISA forced, the AVX-512 build is taken where the CPU
+// has VNNI (its integer kernel); float stays on AVX2 (docs/PLAN.md §8).
+std::unique_ptr<Renderer> make_frame_renderer(const nfx::rt::Effect& e, int size, nvfx_precision p, nvfx_isa forced) {
+  const nfx::rt::Precision q = frame_precision(e.m, p);
+  nvfx_isa isa = forced != NVFX_ISA_AUTO ? forced : cpu_has(NVFX_ISA_AVX2) ? NVFX_ISA_AVX2 : NVFX_ISA_BASELINE;
+  if (q == nfx::rt::Precision::int8 && forced == NVFX_ISA_AUTO && cpu_has(NVFX_ISA_AVX512) && cpu_has_vnni()) isa = NVFX_ISA_AVX512;
+  switch (isa) {
+    case NVFX_ISA_AVX512: return nfx::rt::isa_avx512::make_renderer(e, size, q);
+    case NVFX_ISA_AVX2: return nfx::rt::isa_avx2::make_renderer(e, size, q);
+    default: return nfx::rt::isa_base::make_renderer(e, size, q);
+  }
 }
 
 std::size_t resident_bytes(const nfx::Model& m) {
@@ -420,6 +452,9 @@ nvfx_status nvfx_instance_create(const nvfx_effect* e, int size, nvfx_instance**
           default: t->r = nfx::rt::isa_base::make_rollout(*e->roll, size); break;
         }
       }
+      in->step_scratch = std::make_unique<nfx::rt::RolloutScratch>();
+      for (auto* t : {&in->a, &in->b}) in->step_scratch->fit(*t->r);
+      for (auto* t : {&in->a, &in->b}) t->r->use_scratch(in->step_scratch.get());  // frees their own
       in->mix.assign(static_cast<std::size_t>(size) * size * 4, 0);
       in->drift_seconds = e->roll->m.loop ? 6.f : 0.f;
       in->prior_cond.assign(static_cast<std::size_t>(h.cond()), 0.f);
@@ -447,11 +482,8 @@ nvfx_status nvfx_instance_create(const nvfx_effect* e, int size, nvfx_instance**
     in->za.assign(static_cast<std::size_t>(h.n_latent), 0.f);
     in->zb.assign(static_cast<std::size_t>(h.n_latent), 0.f);
     in->drift_seconds = h.loop ? 4.f * static_cast<float>(h.frames) / std::max(1.f, e->e.m.fps) : 0.f;
-    switch (resolved_isa()) {
-      case NVFX_ISA_AVX512: in->renderer = nfx::rt::isa_avx512::make_renderer(e->e, size); break;
-      case NVFX_ISA_AVX2: in->renderer = nfx::rt::isa_avx2::make_renderer(e->e, size); break;
-      default: in->renderer = nfx::rt::isa_base::make_renderer(e->e, size); break;
-    }
+    in->isa = static_cast<nvfx_isa>(g_forced_isa.load());
+    in->renderer = make_frame_renderer(e->e, size, in->precision, in->isa);
     *out = in.release();
     return NVFX_OK;
   } catch (const std::bad_alloc&) {
@@ -466,7 +498,7 @@ void nvfx_instance_free(nvfx_instance* in) { delete in; }
 size_t nvfx_instance_scratch_bytes(const nvfx_instance* in) {
   if (!in) return 0;
   if (in->a.r) {
-    return in->a.r->scratch_bytes() + in->b.r->scratch_bytes() + in->mix.size() + 4 * (in->controls.size() + in->prior_cond.size()) +
+    return in->a.r->scratch_bytes() + in->b.r->scratch_bytes() + in->step_scratch->bytes() + in->mix.size() + 4 * (in->controls.size() + in->prior_cond.size()) +
            (in->prior ? in->prior->scratch_bytes() : 0);
   }
   return in->renderer->scratch_bytes() + 4 * (in->controls.size() + in->cond.size() + in->za.size() + in->zb.size());
@@ -564,6 +596,25 @@ nvfx_status nvfx_instance_set_colour(nvfx_instance* in, float hue, float brightn
   in->colour = {c + k, k - r, k + r, k + r, c + k, k - r, k - r, k + r, c + k};
   for (float& v : in->colour) v *= brightness;
   in->apply_colour = hue != 0.f || brightness != 1.f;
+  return NVFX_OK;
+}
+
+nvfx_status nvfx_instance_set_precision(nvfx_instance* in, nvfx_precision precision) {
+  if (!in || (precision != NVFX_PRECISION_DEFAULT && precision != NVFX_PRECISION_FLOAT && precision != NVFX_PRECISION_INT8)) {
+    return NVFX_ERROR_ARGUMENT;
+  }
+  const bool grid = !in->a.r && in->effect->e.m.h.arch == nfx::Arch::grid;
+  if (precision == NVFX_PRECISION_INT8 && !grid) return NVFX_ERROR_UNSUPPORTED;
+  if (in->a.r) return NVFX_OK;  // rollout effects: float
+  const nfx::Model& m = in->effect->e.m;
+  if (frame_precision(m, precision) != frame_precision(m, in->precision)) {
+    try {  // a set-up call: the new renderer's buffers
+      in->renderer = make_frame_renderer(in->effect->e, in->size, precision, in->isa);
+    } catch (const std::bad_alloc&) {
+      return NVFX_ERROR_MEMORY;
+    }
+  }
+  in->precision = precision;
   return NVFX_OK;
 }
 

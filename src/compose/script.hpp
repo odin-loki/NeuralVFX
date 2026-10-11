@@ -120,6 +120,9 @@ struct Options {
   // same frames, faster. render(f) then returns with frame f + 1's state already computed (rules, particles and modules
   // are a frame ahead of the picture it returned).
   bool overlap = false;
+  // The modules step with working memory shared per thread (StepScratch, docs/COMPOSE.md §7.3) rather than their own:
+  // the same frames, less memory.
+  bool shared_scratch = true;
 };
 
 // A scene built from a script: every module, buffer and list is created here, so render() allocates nothing.
