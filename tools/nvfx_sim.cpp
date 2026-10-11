@@ -1,10 +1,11 @@
 // nvfx_sim: simulate one effect clip and write it (.nfxclip), a contact sheet (PNG) and/or a video (mp4 via ffmpeg).
 //
-//   nvfx_sim --effect fire|smoke|explosion [--intensity 0.5] [--wind 0.5] [--turbulence 0.5] [--seed 1]
+//   nvfx_sim --effect fire|smoke|explosion|steam|magic [--intensity 0.5] [--wind 0.5] [--turbulence 0.5] [--seed 1]
 //            [--size 128] [--frames 64] [--sim-res 0] [--out clip.nfxclip] [--sheet sheet.png] [--video v.mp4]
 //            [--bg black|grey|checker] [--bench]
 //
-// --bench reports the solver's cost per output frame (medians over the clip) as well.
+// --bench reports the solver's cost per output frame (medians over the clip) as well. magic's second control is its
+// spin: --spin is the same as --wind.
 #include "args.hpp"
 
 #include <neuralfx/image_io.hpp>
@@ -20,14 +21,15 @@ using namespace nfx;
 int main(int argc, char** argv) try {
   const tools::Args a(argc, argv, {"bench", "help"});
   if (a.flag("help")) {
-    std::println("nvfx_sim --effect fire|smoke|explosion [--intensity --wind --turbulence --seed --size --frames "
+    std::println("nvfx_sim --effect fire|smoke|explosion|steam|magic [--intensity --wind|--spin --turbulence --seed --size --frames "
                  "--sim-res --substeps --pressure-iters --out --sheet --video --bg --bench]");
     return 0;
   }
   sim::Params p;
-  if (!sim::parse_effect(a.str("effect", "fire"), p.effect)) throw std::invalid_argument("--effect: fire, smoke or explosion");
+  if (!sim::parse_effect(a.str("effect", "fire"), p.effect)) throw std::invalid_argument("--effect: fire, smoke, explosion, steam or magic");
   p.intensity = a.f("intensity", p.intensity);
   p.wind = a.f("wind", p.wind);
+  p.wind = a.f("spin", p.wind);
   p.turbulence = a.f("turbulence", p.turbulence);
   p.seed = a.u64("seed", p.seed);
   p.size = a.i("size", p.size);
@@ -36,7 +38,8 @@ int main(int argc, char** argv) try {
   p.substeps = a.i("substeps", p.substeps);
   p.pressure_iters = a.i("pressure-iters", p.pressure_iters);
   Background bg{};
-  if (!parse_background(a.str("bg", p.effect == sim::Effect::fire ? "black" : "grey"), bg)) {
+  const bool emissive = p.effect == sim::Effect::fire || p.effect == sim::Effect::magic;
+  if (!parse_background(a.str("bg", emissive ? "black" : "grey"), bg)) {
     throw std::invalid_argument("--bg: black, grey or checker");
   }
 

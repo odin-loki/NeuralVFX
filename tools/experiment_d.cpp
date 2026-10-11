@@ -40,23 +40,30 @@ constexpr int kSize = 128, kRes = 32;
 
 std::string ename(sim::Effect e) { return std::string(sim::effect_name(e)); }
 
-// The library recipe per effect (rollout::recipe_for), scaled down for --quick, with the experiment's thread count.
-bool wanted(const Ctx& c, sim::Effect e) {
-  if (c.effects.empty()) return true;
-  const std::string name(sim::effect_name(e));
-  std::size_t a = 0;
-  while (a <= c.effects.size()) {
+// The effects of a step: those of --effects (any of sim::kAllEffects, in sim's order), or study D's three.
+std::vector<sim::Effect> effects_of(const Ctx& c) {
+  if (c.effects.empty()) return {sim::kEffects.begin(), sim::kEffects.end()};
+  std::vector<std::string> names;
+  for (std::size_t a = 0; a <= c.effects.size();) {
     const std::size_t b = std::min(c.effects.find(',', a), c.effects.size());
-    if (c.effects.substr(a, b - a) == name) return true;
+    names.push_back(c.effects.substr(a, b - a));
     a = b + 1;
   }
-  return false;
+  std::vector<sim::Effect> v;
+  for (const auto& n : names) {
+    sim::Effect e{};
+    if (!sim::parse_effect(n, e)) throw std::invalid_argument("--effects: unknown effect '" + n + "'");
+  }
+  for (const auto e : sim::kAllEffects) {
+    if (std::ranges::find(names, sim::effect_name(e)) != names.end()) v.push_back(e);
+  }
+  return v;
 }
 
+// The library recipe per effect (rollout::recipe_for), scaled down for --quick, with the experiment's thread count.
 std::vector<rollout::SimRecipe> recipes(const Ctx& c) {
   std::vector<rollout::SimRecipe> v;
-  for (const auto e : sim::kEffects) {
-    if (!wanted(c, e)) continue;
+  for (const auto e : effects_of(c)) {
     rollout::SimRecipe r = rollout::recipe_for(e);
     r.threads = c.threads;
     r.stepper.iterations = c.iters(2500);
@@ -118,7 +125,7 @@ void merge_csv(const fs::path& path, const std::string& header, const std::vecto
   }
   for (const auto& r : rows) keep[r.substr(0, r.find(','))] = r;
   std::vector<std::string> out;
-  for (const auto e : sim::kEffects) {
+  for (const auto e : sim::kAllEffects) {
     if (const auto it = keep.find(ename(e)); it != keep.end()) out.push_back(it->second);
   }
   write_csv(path, header, out);
@@ -131,8 +138,8 @@ void merge_csv(const fs::path& path, const std::string& header, const std::vecto
 void step_chaos(const Ctx& c) {
   const std::vector<int> report = {1, 2, 4, 8, 15, 30, 60, 90, 120, 180, 240};
   std::vector<std::string> rows;
-  for (const auto e : sim::kEffects) {
-    const bool ex = e == sim::Effect::explosion;
+  for (const auto e : effects_of(c)) {
+    const bool ex = !sim::effect_loops(e);  // the explosion
     const int N = ex ? 90 : 240, warm = ex ? 1 : 100, seeds = c.quick ? 1 : 4;
     // curves: perturbed start (1e-3, 1e-1 of the velocity RMS) with the same seed; same start with another seed;
     // another start with the same seed
@@ -224,7 +231,7 @@ void step_train(const Ctx& c) {
                                sr.final_loss, sr.seconds, fin.render_psnr, m.detail.contrast, m.detail.swirl, fin.detail_score, m.starts.size(), r.start_fine,
                                m.storage_bytes(), total));
   }
-  write_csv(c.results / "d_train.csv",
+  merge_csv(c.results / "d_train.csv",
             "effect,runs,frames,sim_minutes,record_s,stepper_loss,stepper_s,renderer_psnr,contrast,swirl,detail_score,starts,start_fine,stored_bytes,total_s",
             rows);
 }
@@ -444,11 +451,11 @@ const std::vector<int> kHorizons = {1, 4, 8, 16, 30, 60, 120, 240};
 
 void step_eval(const Ctx& c) {
   std::vector<std::string> track_rows, stat_rows, long_rows;
-  const fs::path fig = c.quick ? c.data / "media" / "d" : fs::path("docs/figures");
+  const fs::path fig = c.quick ? c.data / "media" / "d" : c.figures;
   fs::create_directories(fig);
   fs::create_directories(c.data / "media" / "d");
-  for (const auto e : sim::kEffects) {
-    const bool ex = e == sim::Effect::explosion;
+  for (const auto e : effects_of(c)) {
+    const bool ex = !sim::effect_loops(e);  // the explosion
     auto loaded = rollout::load_model(model_path(c, e));
     if (!loaded) throw std::runtime_error(loaded.error());
     const rollout::Model M = std::move(*loaded);
@@ -579,6 +586,41 @@ void step_eval(const Ctx& c) {
     const int F = ex ? 89 : (c.quick ? 90 : 300), real_warm = ex ? 1 : 150;
     std::unique_ptr<Effect> grid;
     if (fs::exists(c.data / "models" / "b" / std::format("{}_grid_k8.nvfx", en))) grid = std::make_unique<Effect>(c.data / "models" / "b" / std::format("{}_grid_k8.nvfx", en));
+    const auto library_clip = [&](const std::array<float, 3>& tb) {
+      return c.data / "clips" / "b" / std::format("{}_train_{:.2f}_{:.2f}_{:.2f}.nfxclip", en, tb[0], tb[1], tb[2]);
+    };
+    const auto nearest_training_setting = [](const std::array<float, 3>& s) {
+      const auto train = b_train_settings();
+      std::size_t best = 0;
+      float bd = 1e9f;
+      for (std::size_t k = 0; k < train.size(); ++k) {
+        float dd = 0;
+        for (int q = 0; q < 3; ++q) dd += (train[k][static_cast<std::size_t>(q)] - s[static_cast<std::size_t>(q)]) * (train[k][static_cast<std::size_t>(q)] - s[static_cast<std::size_t>(q)]);
+        if (dd < bd) {
+          bd = dd;
+          best = k;
+        }
+      }
+      return train[best];
+    };
+    // Effects added after study B (sim::kNewEffects) have no flipbook library yet: the clips this test needs are made
+    // as study B made its library (nvfx_experiment data: 64 frames at 128 pixels, seed 1).
+    if (std::ranges::find(sim::kNewEffects, e) != sim::kNewEffects.end()) {
+      for (int si = 0; si < n_set; ++si) {
+        const auto tb = nearest_training_setting(settings[static_cast<std::size_t>(si)]);
+        if (fs::exists(library_clip(tb))) continue;
+        sim::Params p;
+        p.effect = e;
+        p.intensity = tb[0];
+        p.wind = tb[1];
+        p.turbulence = tb[2];
+        p.seed = 1;
+        p.size = kSize;
+        p.frames = 64;
+        fs::create_directories(library_clip(tb).parent_path());
+        if (auto w = write_clip(library_clip(tb), sim::simulate(p)); !w) throw std::runtime_error(w.error());
+      }
+    }
     Effect fx(model_path(c, e));
     struct SetResult {
       std::map<std::string, metrics::StatDistance> d;
@@ -627,19 +669,7 @@ void step_eval(const Ctx& c) {
               res.d["grid_k8"] = metrics::distance(ref, metrics::stats(res.grid));
             }
             // the nearest training clip of study B's flipbook library, looped
-            const auto train = b_train_settings();
-            std::size_t best = 0;
-            float bd = 1e9f;
-            for (std::size_t k = 0; k < train.size(); ++k) {
-              float dd = 0;
-              for (int q = 0; q < 3; ++q) dd += (train[k][static_cast<std::size_t>(q)] - s[static_cast<std::size_t>(q)]) * (train[k][static_cast<std::size_t>(q)] - s[static_cast<std::size_t>(q)]);
-              if (dd < bd) {
-                bd = dd;
-                best = k;
-              }
-            }
-            const auto& tb = train[best];
-            const fs::path lib = c.data / "clips" / "b" / std::format("{}_train_{:.2f}_{:.2f}_{:.2f}.nfxclip", en, tb[0], tb[1], tb[2]);
+            const fs::path lib = library_clip(nearest_training_setting(s));
             if (auto clip = read_clip(lib)) {
               Clip looped;
               looped.allocate(kSize, F);
@@ -740,7 +770,7 @@ void step_timing(const Ctx& c) {
     std::ranges::sort(v);
     return std::make_pair(v[v.size() / 2], v[v.size() * 9 / 10]);
   };
-  for (const auto e : sim::kEffects) {
+  for (const auto e : effects_of(c)) {
     Effect fx(model_path(c, e));
     nvfx_effect_info info{};
     nvfx_effect_get_info(fx.e, &info);
@@ -755,7 +785,7 @@ void step_timing(const Ctx& c) {
         std::vector<std::uint8_t> buf(static_cast<std::size_t>(size) * size * 4);
         nvfx_render(in, 0.0, buf.data(), static_cast<std::size_t>(size) * 4);
         std::vector<double> ms;
-        const int n = e == sim::Effect::explosion ? 80 : 200;
+        const int n = sim::effect_loops(e) ? 200 : 80;
         for (int f = 1; f <= n; ++f) {
           const auto t0 = std::chrono::steady_clock::now();
           nvfx_render(in, f / 30.0, buf.data(), static_cast<std::size_t>(size) * 4);

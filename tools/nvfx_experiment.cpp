@@ -13,6 +13,8 @@
 //   report  bootstrap intervals and tables: results/experiments/SUMMARY.md (generated)
 //   int8    the frame models' int8 path against their float path on studies A to C (experiment_int8.hpp)
 //   int8-timing   its cost per frame, float against int8 per ISA and size (on a quiet machine; --runs 5 --core 3)
+//   d-*     study D (experiment_d.hpp); --effects steam,magic runs its steps on the effects added since
+//           (docs/EFFECTS.md), with --figures DIR for d-eval's sheets and d-report for a D_SUMMARY.md of its own
 //
 // Everything trained is scored through the shipping runtime (nvfx.h) at its stored precision. Clips, models,
 // sheets and videos go under the data root (never git); CSVs and the summary go under results/experiments.
@@ -1211,7 +1213,7 @@ void step_report(const Ctx& c) {
 int main(int argc, char** argv) try {
   const tools::Args a(argc, argv, {"quick", "help"});
   if (a.flag("help") || a.positional().empty()) {
-    std::println("nvfx_experiment data|a|b|c|media|timing|report|all|d|d-chaos|d-train|d-tune|d-finish|d-eval|d-timing|g-data|g-pilot|g-search|g-eval|g-timing|g-fine|g-diff|g-diff-test|g-prior|g-prior-test|i-data|i-probe|i-train|i-val|i-test|i2-data|i2-probe|i2-train|i2-val|i2-test|i2-handoff|i2-cost|int8|int8-timing [--root DIR] [--results DIR] [--threads 4] [--quick]");
+    std::println("nvfx_experiment data|a|b|c|media|timing|report|all|d|d-chaos|d-train|d-tune|d-finish|d-eval|d-timing|d-report|g-data|g-pilot|g-search|g-eval|g-timing|g-fine|g-diff|g-diff-test|g-prior|g-prior-test|i-data|i-probe|i-train|i-val|i-test|i2-data|i2-probe|i2-train|i2-val|i2-test|i2-handoff|i2-cost|int8|int8-timing [--root DIR] [--results DIR] [--threads 4] [--quick]");
     return 0;
   }
   Ctx c;
@@ -1239,12 +1241,20 @@ int main(int argc, char** argv) try {
     d.threads = c.threads;
     d.quick = c.quick;
     d.effects = a.str("effects");
+    if (a.has("figures")) d.figures = a.str("figures");
     if (step == "d-chaos" || step == "d") study_d::step_chaos(d);
     if (step == "d-train" || step == "d") study_d::step_train(d);
     if (step == "d-tune") study_d::step_tune(d);
     if (step == "d-finish") study_d::step_finish(d);
     if (step == "d-eval" || step == "d") study_d::step_eval(d);
     if (step == "d-timing") study_d::step_timing(d);  // separately, on a quiet machine
+    if (step == "d-report") {  // the D section alone, for a results directory of its own (results/experiments/fx)
+      std::ostringstream md;
+      study_d::report(d, md);
+      fs::create_directories(c.results);
+      std::ofstream(c.results / "D_SUMMARY.md") << md.str();
+      std::println("wrote {}", (c.results / "D_SUMMARY.md").string());
+    }
   }
   {  // study G (docs/DCM.md): diffusion-context mixing
     study_g::Ctx g;  // its data under the data root's g/ (docs/DCM.md §4), or --root DIR/g

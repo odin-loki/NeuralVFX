@@ -78,9 +78,13 @@ TEST(Rollout, NoiseIsTheSimulationsForcing) {
   sim::Params p;
   p.seed = 4242;
   NoiseSpec n;
-  for (const auto e : sim::kEffects) {
+  for (const auto e : sim::kAllEffects) {
     p.effect = e;
-    n.flicker_rate = e == sim::Effect::fire ? 2.6f : 1.4f;
+    n.flicker_rate = sim::flicker_rate(e);
+    const Model m = recipe_model(recipe_for(e));  // what the recipe gives the model
+    EXPECT_EQ(m.noise.flicker_rate, n.flicker_rate);
+    const auto names = sim::control_names(e);
+    EXPECT_EQ(m.control_names, std::vector<std::string>(names.begin(), names.end()));
     for (int i = 0; i < 50; ++i) {
       const float X = 2.7f * static_cast<float>(i), Y = 1.9f * static_cast<float>(i % 13), t = 0.13f * static_cast<float>(i);
       // equal up to rounding (X * (1 / 14) against X / 14)

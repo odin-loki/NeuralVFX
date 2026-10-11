@@ -212,7 +212,7 @@ struct SimRecipe {
   RendererOptions renderer;
   std::function<void(const std::string&)> log;
 };
-SimRecipe recipe_for(sim::Effect e);  // fire as above; smoke keeps 64-pixel fine fields; explosion: 240 runs x 90 frames, 16 starts
+SimRecipe recipe_for(sim::Effect e);  // fire, steam, magic as above; smoke keeps 64-pixel fine fields; explosion: 240 runs x 90 frames, 16 starts
 sim::Params recipe_run(const SimRecipe& r, std::uint64_t index);
 std::vector<Run> record_runs(const SimRecipe& r);
 Model recipe_model(const SimRecipe& r);  // hyperparameters, noise and detail settings for the effect, fresh weights

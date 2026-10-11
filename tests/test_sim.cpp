@@ -7,11 +7,14 @@
 #include <gtest/gtest.h>
 
 #include <algorithm>
+#include <array>
 #include <cmath>
+#include <cstdint>
 #include <filesystem>
 #include <format>
 #include <fstream>
 #include <numeric>
+#include <span>
 #include <unistd.h>
 
 using namespace nfx;
@@ -174,6 +177,89 @@ TEST(Sim, LoopSeamIsNoWorseThanAnOrdinaryFrameStep) {
   for (int f = 1; f < c.frames; ++f) step += mean_abs_diff(c.frame(f - 1), c.frame(f));
   step /= c.frames - 1;
   EXPECT_LE(mean_abs_diff(c.frame(c.frames - 1), c.frame(0)), 1.5 * step + 0.5);
+}
+
+// Adding effects (docs/EFFECTS.md) must not change the studies' effects: these hashes are of clips made before steam
+// and magic existed (FNV-1a of the RGBA bytes; the solver is built at the baseline ISA without contraction).
+TEST(Sim, StudyEffectsAreUnchangedByTheNewOnes) {
+  const auto fnv = [](std::span<const std::uint8_t> b) {
+    std::uint64_t h = 1469598103934665603ULL;
+    for (const auto v : b) {
+      h ^= v;
+      h *= 1099511628211ULL;
+    }
+    return h;
+  };
+  const std::array<std::uint64_t, 3> want{0xecb25de8e62e7379ULL, 0xea602bfa2409bf3fULL, 0xbb823d31fd8c4eb4ULL};
+  for (std::size_t k = 0; k < sim::kEffects.size(); ++k) {
+    auto p = small(sim::kEffects[k]);
+    p.intensity = 0.8f;
+    p.wind = 0.3f;
+    p.turbulence = 0.7f;
+    p.seed = 7;
+    EXPECT_EQ(fnv(sim::simulate(p).rgba), want[k]) << sim::effect_name(sim::kEffects[k]);
+  }
+}
+
+TEST(Sim, NewEffectsAreNamedAndLoop) {
+  for (const sim::Effect e : sim::kNewEffects) {
+    sim::Effect back{};
+    ASSERT_TRUE(sim::parse_effect(sim::effect_name(e), back));
+    EXPECT_EQ(back, e);
+    EXPECT_TRUE(sim::effect_loops(e));
+    EXPECT_EQ(sim::simulate(small(e)).rgba, sim::simulate(small(e)).rgba) << sim::effect_name(e);
+  }
+  EXPECT_EQ(sim::kAllEffects.size(), sim::kEffects.size() + sim::kNewEffects.size());
+  EXPECT_EQ(sim::control_names(sim::Effect::magic)[1], "spin");
+  EXPECT_EQ(sim::control_names(sim::Effect::steam), sim::kControlNames);
+  EXPECT_EQ(sim::control_names(sim::Effect::fire), sim::kControlNames);
+}
+
+TEST(Sim, SteamIsWhiteVapourAndMagicGivesBlueLight) {
+  const Clip steam = sim::simulate(small(sim::Effect::steam));
+  const Clip magic = sim::simulate(small(sim::Effect::magic));
+  long bad = 0, white = 0, lit = 0, emissive = 0;
+  double r = 0, b = 0;
+  for (std::size_t i = 0; i < steam.rgba.size(); i += 4) {
+    for (int c = 0; c < 3; ++c) bad += steam.rgba[i + c] > steam.rgba[i + 3] + 1;  // reflected light only
+    if (steam.rgba[i + 3] > 64) white += steam.rgba[i] * 2 > steam.rgba[i + 3];   // and bright: more than half its cover
+  }
+  for (std::size_t i = 0; i < magic.rgba.size(); i += 4) {
+    if (std::max({magic.rgba[i], magic.rgba[i + 1], magic.rgba[i + 2]}) > 64) {
+      ++lit;
+      emissive += magic.rgba[i + 2] > magic.rgba[i + 3];
+      r += magic.rgba[i];
+      b += magic.rgba[i + 2];
+    }
+  }
+  EXPECT_EQ(bad, 0);
+  EXPECT_GT(white, 50);
+  EXPECT_GT(lit, 50);
+  EXPECT_GT(emissive, lit / 2);  // additive light
+  EXPECT_GT(b, 1.5 * r);         // violet to blue
+}
+
+TEST(Sim, MagicSpinsFasterWithItsSpinControl) {
+  // angular momentum about the middle of the frame (counter-clockwise positive, y up)
+  const auto momentum = [](float spin) {
+    auto p = small(sim::Effect::magic);
+    p.wind = spin;
+    sim::Fluid f(p);
+    for (int i = 0; i < 30; ++i) f.step_frame();
+    const sim::State s = f.state();
+    const float c = 0.5f * static_cast<float>(s.n - 1);
+    double l = 0;
+    for (int y = 0; y < s.n; ++y) {
+      for (int x = 0; x < s.n; ++x) {
+        const std::size_t i = static_cast<std::size_t>(y * s.n + x);
+        l += (static_cast<float>(x) - c) * s.v[i] - (static_cast<float>(y) - c) * s.u[i];
+      }
+    }
+    return l;
+  };
+  const double slow = momentum(0.f), fast = momentum(1.f);
+  EXPECT_GT(slow, 0.0);
+  EXPECT_GT(fast, 2.0 * slow);
 }
 
 TEST(Sim, ParamsRoundTripThroughClipMetadata) {

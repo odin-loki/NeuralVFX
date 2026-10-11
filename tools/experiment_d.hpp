@@ -13,7 +13,8 @@ struct Ctx {
   std::filesystem::path results;  // CSVs (in git)
   int threads = 4;
   bool quick = false;
-  std::string effects;  // comma-separated subset ("fire,smoke"); empty = all
+  std::string effects;  // comma-separated effects ("fire,smoke", or later ones: "steam,magic"); empty = study D's three
+  std::filesystem::path figures = "docs/figures";  // d-eval's comparison sheets
   int iters(int full) const { return quick ? std::max(50, full / 20) : full; }
 };
 
