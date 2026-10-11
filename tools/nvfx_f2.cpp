@@ -2,6 +2,8 @@
 //
 //   nvfx_f2 data                                    validation clips (2 per effect, settings and seeds not in study A)
 //   nvfx_f2 flipbooks --set val|test                the study A flipbook ladder on every clip: scores, memory, packed bytes
+//   nvfx_f2 trim --set val|test                     the same flipbooks without their empty space (study F3, below)
+//   nvfx_f2 pairs --set val|test --pairs a:b,c:d    paired differences of network configurations over the clips
 //   nvfx_f2 train --set val|test --configs A,B,...  train, save, score through the runtime, pack (lossless coder)
 //   nvfx_f2 rescore --set test --name N --pattern P score and pack existing models ("{clip}" in P is the clip name)
 //   nvfx_f2 video --set val|test [--codecs x264,...] the video codecs' quality ladders on every clip
@@ -14,7 +16,12 @@
 //   nvfx_f2 timing --models a.nvfx,b.nvfx [--core 3] [--reps 5]
 //                                                   thread CPU time per 128 x 128 frame, least of the repetitions
 //   options: --root DIR (data root, default $NEURALVFX_DATA), --out DIR (results/compression), --threads 2,
-//            --clips a,b (a subset of the set)
+//            --clips a,b (a subset of the set), --study NAME (default f2: networks in $NEURALVFX_DATA/NAME/models and
+//            NAME_nets_<set>.csv; study F3 uses f3, and its report also reads F2's networks), --teacher CONFIG (the
+//            distillation teacher, a configuration trained by the same study or F2; default the same architecture at
+//            8 bits), --flipbooks a.csv,b.csv (report: more flipbook rows, e.g. other encoders, besides f2_flipbooks_<set>.csv),
+//            --suffix S (report: its table as <study>_equal_quality_<set>S.csv), --pareto (report: envelopes of the points
+//            that improve on every smaller one only; see g_pareto)
 //
 // Sets: "test" is study A's 12 clips (docs/REPORT.md §3), scored exactly as study A scores them (the network trained
 // on the clip, rendered through the runtime at its stored precision, active-region PSNR over all 64 frames). "val"
@@ -32,6 +39,13 @@
 //                            fraction f of the training on, default 0.5)
 //   i<iterations>            training steps (default 2000 grid, 1500 conv, as study A)
 //   s<seed>                  training seed (default 1)
+//   m<bits>                  mixed precision (study F3): every feature plane its own bits, an average of <bits> per value,
+//                            chosen by distortion when quantisation starts (default halfway; qs<f> moves it), then QAT
+//   mr<lo>-<hi>              the range of the mixed widths (default 0-8; 0 bits: the plane is one value)
+//   sp<d>                    sparse features (study F3, grid family): only the grid points each time slice needs are
+//                            stored (the clip's support, grown by d points, default 0); the others take a fill per plane
+//   d<alpha>                 distillation (study F3): the target is (1 - alpha) x the clip + alpha x the teacher's frames
+//                            (for a squared error, the same as weighting the two losses); scored against the clip
 //   e.g. g32c8h32l2t16_b8 is study A's grid_m at 8 bits; g32c8h32l2t16_b4_q_r3e-5 adds 4-bit QAT and a rate term.
 #include "args.hpp"
 
@@ -48,6 +62,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <cctype>
 #include <chrono>
 #include <cmath>
 #include <ctime>
@@ -64,6 +79,7 @@
 #include <set>
 #include <sstream>
 #include <thread>
+#include <tuple>
 
 namespace fs = std::filesystem;
 using namespace nfx;
@@ -80,6 +96,10 @@ struct Ctx {
   std::set<std::string> only;  // clip subset
   fs::path base;               // g3c: the rollout effects to start from (default: the frozen v1 files)
   std::string tag;             // g3c: prefix of the variant names written for that base
+  std::string study = "f2";    // prefix of the network table and folder of the models
+  std::string teacher;         // distillation teacher configuration (empty: the architecture at 8 bits)
+  std::vector<fs::path> flipbooks;  // report: more flipbook tables
+  std::string suffix;          // report: written as <study>_equal_quality_<set><suffix>.csv
 };
 
 // --- clips --------------------------------------------------------------------------------------------------------
@@ -136,11 +156,16 @@ Clip load_clip(const ClipRef& r) {
 
 class Csv {
  public:
+  // An existing file is read, and appended to, by its own header (older tables may have fewer columns).
   Csv(fs::path path, std::vector<std::string> cols) : path_(std::move(path)), cols_(std::move(cols)) {
     std::ifstream in(path_);
     std::string line;
     if (!std::getline(in, line)) return;
+    if (!line.empty() && line.back() == '\r') line.pop_back();
+    cols_.clear();
+    for (const auto part : std::views::split(line, ',')) cols_.emplace_back(std::string_view(part));
     while (std::getline(in, line)) {
+      if (!line.empty() && line.back() == '\r') line.pop_back();
       if (line.empty()) continue;
       std::map<std::string, std::string> r;
       std::size_t k = 0;
@@ -260,6 +285,82 @@ void step_flipbooks(const Ctx& c) {
   }
 }
 
+// Flipbooks without their empty space (study F3), as a fairer baseline for networks that store only the grid points
+// their frames need. Two variants of every ladder flipbook, at the same quality (the dropped blocks decode to zero, so
+// playback is unchanged; scores and packed sizes are F2's):
+//   trim    each kept frame cropped to the bounding box of its non-zero blocks (BC3: 4 x 4 texels; raw: pixels), as
+//           sprite atlases are packed in production, plus 8 bytes per frame for its rectangle (packing assumed perfect);
+//   sparse  only the non-zero 4 x 4 blocks of each frame, plus one bit per block (a mask, as the networks keep).
+// Motion vectors are cropped to the frame's rectangle scaled to their resolution in both variants.
+void step_trim(const Ctx& c) {
+  Csv f2(c.out / std::format("f2_flipbooks_{}.csv", c.set), kFlipCols);
+  Csv trim(c.out / std::format("f3_flipbooks_trim_{}.csv", c.set), kFlipCols);
+  Csv sparse(c.out / std::format("f3_flipbooks_sparse_{}.csv", c.set), kFlipCols);
+  for (const ClipRef& r : clip_set(c)) {
+    const Clip ref = load_clip(r);
+    for (const auto& spec : flipbook::ladder(kSize, kFrames)) {
+      const std::string name = spec.describe();
+      if (trim.has({{"set", c.set}, {"clip", r.name}, {"config", name + " trim"}})) continue;
+      const auto src = std::ranges::find_if(f2.rows(), [&](const auto& row) { return row.at("set") == c.set && row.at("clip") == r.name && row.at("config") == name; });
+      if (src == f2.rows().end()) throw std::runtime_error("trim: run the flipbooks step first (" + r.name + ", " + name + ")");
+      const auto fb = flipbook::build(ref, spec);
+      const int R = spec.res, B = R / 4;
+      const bool bc3 = spec.codec == flipbook::Codec::bc3;
+      std::size_t trim_bytes = 0, sparse_bytes = 0;
+      for (std::size_t k = 0; k < fb.frames.size(); ++k) {
+        const auto& img = fb.frames[k];
+        int x0 = R, y0 = R, x1 = -1, y1 = -1;  // bounding box of non-zero texels
+        std::size_t blocks = 0;
+        for (int by = 0; by < B; ++by) {
+          for (int bx = 0; bx < B; ++bx) {
+            bool any = false;
+            for (int y = 4 * by; y < 4 * by + 4; ++y) {
+              for (int x = 4 * bx; x < 4 * bx + 4; ++x) {
+                const std::size_t i = (static_cast<std::size_t>(y) * R + x) * 4;
+                if (img[i] | img[i + 1] | img[i + 2] | img[i + 3]) {
+                  any = true;
+                  x0 = std::min(x0, x);
+                  y0 = std::min(y0, y);
+                  x1 = std::max(x1, x);
+                  y1 = std::max(y1, y);
+                }
+              }
+            }
+            blocks += any;
+          }
+        }
+        std::size_t w = 0, hgt = 0;  // the rectangle, in texels (BC3: whole blocks)
+        if (x1 >= 0) {
+          if (bc3) {
+            w = static_cast<std::size_t>(4 * (x1 / 4 - x0 / 4 + 1));
+            hgt = static_cast<std::size_t>(4 * (y1 / 4 - y0 / 4 + 1));
+          } else {
+            w = static_cast<std::size_t>(x1 - x0 + 1);
+            hgt = static_cast<std::size_t>(y1 - y0 + 1);
+          }
+        }
+        const std::size_t texel = bc3 ? 1 : 4;  // bytes per texel (BC3: 16 bytes per 4 x 4 block)
+        trim_bytes += w * hgt * texel + 8;
+        sparse_bytes += blocks * 16 * texel + static_cast<std::size_t>(B * B + 7) / 8;
+        if (spec.flow_res > 0) {  // vectors of the rectangle at the flow's resolution, 2 bytes each
+          const double sc = static_cast<double>(spec.flow_res) / R;
+          const auto fw = static_cast<std::size_t>(std::ceil(static_cast<double>(w) * sc)), fh = static_cast<std::size_t>(std::ceil(static_cast<double>(hgt) * sc));
+          trim_bytes += 2 * fw * fh;
+          sparse_bytes += 2 * fw * fh;
+        }
+      }
+      for (auto [table, suffix, bytes] : {std::tuple{&trim, " trim", trim_bytes}, std::tuple{&sparse, " sparse", sparse_bytes}}) {
+        std::map<std::string, std::string> row = *src;
+        row["config"] = name + suffix;
+        row["family"] = row["family"] + std::string(suffix == std::string(" trim") ? "_trim" : "_sparse");
+        row["memory_bytes"] = std::to_string(bytes);
+        table->add(row);
+      }
+      std::println("trim {} {}: {} -> {} (trim), {} (sparse) bytes", r.name, name, fb.bytes, trim_bytes, sparse_bytes);
+    }
+  }
+}
+
 // --- networks -------------------------------------------------------------------------------------------------------
 
 struct Config {
@@ -274,6 +375,12 @@ struct Config {
   std::uint64_t seed = 1;
   int vq_bits = 0, vq_dim = 0;
   float vq_start = 0.5f;
+  float mixed = 0.f;  // average bits per value of mixed precision
+  int mixed_min = 0, mixed_max = 8;
+  float distill = 0.f;
+  bool sparse = false;
+  int sparse_dilate = 0;
+  std::string arch;   // the architecture field
 };
 
 Config parse_config(const std::string& name) {
@@ -286,6 +393,7 @@ Config parse_config(const std::string& name) {
   h.size = kSize;
   h.frames = kFrames;
   const std::string& a = parts[0];
+  cf.arch = a;
   int G, C, H, L, T, c0, c1, c2;
   if (std::sscanf(a.c_str(), "g%dc%dh%dl%dt%d", &G, &C, &H, &L, &T) == 5) {
     h.arch = Arch::grid;
@@ -306,10 +414,24 @@ Config parse_config(const std::string& name) {
   } else {
     throw std::invalid_argument("configuration: unknown architecture " + a);
   }
+  const bool has_qs = std::ranges::any_of(parts, [](const std::string& p) { return p.starts_with("qs"); });
+  bool q_flag = false;
   for (std::size_t k = 1; k < parts.size(); ++k) {
     const std::string& p = parts[k];
-    if (p == "q") cf.qat = true;
-    else if (p == "t") cf.trim = true;
+    if (p == "q") {
+      cf.qat = true;
+      q_flag = true;
+    } else if (p == "t") cf.trim = true;
+    else if (p.starts_with("mr")) {
+      if (std::sscanf(p.c_str(), "mr%d-%d", &cf.mixed_min, &cf.mixed_max) != 2) throw std::invalid_argument("configuration: mr<lo>-<hi>");
+    } else if (p[0] == 'm') {
+      cf.mixed = std::stof(p.substr(1));
+      if (!has_qs) cf.qat_start = 0.5f;
+    } else if (p[0] == 'd') cf.distill = std::stof(p.substr(1));
+    else if (p.starts_with("sp")) {
+      cf.sparse = true;
+      if (p.size() > 2) cf.sparse_dilate = std::stoi(p.substr(2));
+    }
     else if (p.starts_with("vq")) {
       if (std::sscanf(p.c_str(), "vq%dx%d", &cf.vq_bits, &cf.vq_dim) != 2) throw std::invalid_argument("configuration: vq<bits>x<dim>");
     } else if (p.starts_with("vs")) cf.vq_start = std::stof(p.substr(2));
@@ -324,6 +446,14 @@ Config parse_config(const std::string& name) {
   }
   if (!valid_feature_bits(cf.bits)) throw std::invalid_argument("configuration: bits must be 16 or 2 to 8");
   if (cf.qat && cf.bits > 8) throw std::invalid_argument("configuration: QAT needs bits 2 to 8");
+  if (cf.mixed > 0.f && !q_flag) cf.qat = false;  // qs<f> only moves the allocation and the quantisation
+  if (cf.mixed > 0.f && (cf.qat || cf.vq_bits || cf.mixed < static_cast<float>(cf.mixed_min) || cf.mixed > static_cast<float>(cf.mixed_max))) {
+    throw std::invalid_argument("configuration: m<bits> within mr<lo>-<hi>, without q or vq");
+  }
+  if (cf.distill < 0.f || cf.distill > 1.f) throw std::invalid_argument("configuration: d<alpha> with alpha in [0, 1]");
+  if (cf.sparse && (h.arch != Arch::grid || cf.vq_bits || cf.lambda > 0.f || (!cf.qat && cf.mixed == 0.f))) {
+    throw std::invalid_argument("configuration: sp needs the grid family and q or m<bits>, without vq or a rate term");
+  }
   return cf;
 }
 
@@ -357,7 +487,19 @@ Clip runtime_clip(const RtEffect& fx, const Model& m, std::size_t& scratch) {
 const std::vector<std::string> kNetCols = {"set", "clip", "effect", "config", "arch", "bits", "qat", "lambda", "iters", "train_s",
                                            "stored_bytes", "file_bytes", "resident_bytes", "scratch_bytes", "packed_bytes",
                                            "packed_feature_bytes", "feature_values", "est_bits_per_value", "psnr", "active_psnr",
-                                           "ssim", "tpsnr", "flicker"};
+                                           "ssim", "tpsnr", "flicker", "alloc_s", "plane_bits", "mask_share"};
+
+// Planes per width of a mixed-precision model ("0:3;2:40;4:85"), or empty.
+std::string bits_histogram(const Model& m) {
+  if (!m.per_plane()) return "";
+  std::array<int, 9> n{};
+  for (const std::uint8_t b : m.plane_bits) ++n[b];
+  std::string s;
+  for (std::size_t b = 0; b < n.size(); ++b) {
+    if (n[b] > 0) s += std::format("{}{}:{}", s.empty() ? "" : ";", b, n[b]);
+  }
+  return s;
+}
 
 std::vector<std::uint8_t> read_bytes(const fs::path& p) {
   std::ifstream in(p, std::ios::binary);
@@ -394,18 +536,44 @@ void score_and_pack(const Clip& ref, const fs::path& file, std::map<std::string,
   row["packed_bytes"] = std::to_string(p.data.size());
   row["packed_feature_bytes"] = std::format("{:.1f}", feat);
   row["feature_values"] = std::to_string(values);
-  row["est_bits_per_value"] = f4(train::feature_rate(*loaded, loaded->feature_bits < 16 ? loaded->feature_bits : 8) /
+  row["est_bits_per_value"] = f4(train::feature_rate(*loaded, loaded->feature_bits < 16 ? loaded->feature_bits : 8, {}, 0.f, false, loaded->plane_bits) /
                                  static_cast<double>(loaded->features.size()));
+  row["plane_bits"] = bits_histogram(*loaded);
+  if (loaded->masked()) {
+    row["mask_share"] = f4(static_cast<double>(std::ranges::count(loaded->feature_mask, std::uint8_t{1})) / static_cast<double>(loaded->feature_mask.size()));
+  }
+}
+
+// The distillation teacher's frames for a clip: its model file from this study or F2, through the runtime.
+Clip teacher_clip(const Ctx& c, const ClipRef& r, const std::string& teacher) {
+  for (const std::string& study : {c.study, std::string("f2")}) {
+    const fs::path file = c.root / study / "models" / c.set / std::format("{}__{}.nvfx", r.name, teacher);
+    if (!fs::exists(file)) continue;
+    auto m = load_model(file);
+    if (!m) throw std::runtime_error(m.error());
+    RtEffect fx(read_bytes(file));
+    std::size_t scratch = 0;
+    return runtime_clip(fx, *m, scratch);
+  }
+  throw std::runtime_error(std::format("distillation: no teacher {} for {} (train it first)", teacher, r.name));
 }
 
 void step_train(const Ctx& c, const std::vector<std::string>& configs) {
-  Csv csv(c.out / std::format("f2_nets_{}.csv", c.set), kNetCols);
-  const fs::path models = c.root / "f2" / "models" / c.set;
+  Csv csv(c.out / std::format("{}_nets_{}.csv", c.study, c.set), kNetCols);
+  const fs::path models = c.root / c.study / "models" / c.set;
   for (const std::string& name : configs) {
     const Config cf = parse_config(name);
     for (const ClipRef& r : clip_set(c)) {
       if (csv.has({{"set", c.set}, {"clip", r.name}, {"config", name}})) continue;
       const Clip ref = load_clip(r);
+      Clip target = ref;  // what training sees: the clip, or with distillation its blend with the teacher's frames
+      if (cf.distill > 0.f) {
+        const Clip t = teacher_clip(c, r, c.teacher.empty() ? cf.arch + "_b8" : c.teacher);
+        for (std::size_t i = 0; i < target.rgba.size(); ++i) {
+          const float v = (1.f - cf.distill) * static_cast<float>(ref.rgba[i]) + cf.distill * static_cast<float>(t.rgba[i]);
+          target.rgba[i] = static_cast<std::uint8_t>(std::clamp(std::lround(v), 0L, 255L));
+        }
+      }
       train::Options o;
       o.iterations = cf.iters;
       o.threads = c.threads;
@@ -421,9 +589,20 @@ void step_train(const Ctx& c, const std::vector<std::string>& configs) {
       o.vq_bits = cf.vq_bits;
       o.vq_dim = cf.vq_dim;
       o.vq_start = cf.vq_start;
+      if (cf.sparse) {
+        o.sparse = true;
+        o.sparse_dilate = cf.sparse_dilate;
+      }
+      if (cf.mixed > 0.f) {
+        o.mixed_bits = cf.mixed;
+        o.mixed_min = cf.mixed_min;
+        o.mixed_max = cf.mixed_max;
+        o.qat_start = cf.qat_start;
+        o.qat_trim = cf.trim;
+      }
       Hyper h = cf.h;
       h.loop = ref.loop;
-      const train::Example ex{&ref, {}};
+      const train::Example ex{&target, {}};
       auto res = train::train(h, std::span(&ex, 1), o);
       res.model.effect = r.effect;
       res.model.fps = ref.fps;
@@ -433,19 +612,22 @@ void step_train(const Ctx& c, const std::vector<std::string>& configs) {
       fs::create_directories(models);
       if (auto w = save_model(file, res.model); !w) throw std::runtime_error(w.error());
       std::map<std::string, std::string> row = {{"set", c.set}, {"clip", r.name}, {"effect", r.effect}, {"config", name},
-                                                {"arch", h.arch == Arch::grid ? "grid" : "conv"}, {"bits", std::to_string(cf.bits)},
-                                                {"qat", cf.qat ? std::format("{}", cf.qat_start) : cf.vq_bits ? std::format("vq{}x{}", cf.vq_bits, cf.vq_dim) : "-"}, {"lambda", std::format("{}", cf.lambda)},
-                                                {"iters", std::to_string(cf.iters)}, {"train_s", std::format("{:.1f}", res.seconds)}};
+                                                {"arch", h.arch == Arch::grid ? "grid" : "conv"},
+                                                {"bits", cf.mixed > 0.f ? std::format("{}", cf.mixed) : std::to_string(cf.bits)},
+                                                {"qat", cf.qat || cf.mixed > 0.f ? std::format("{}", cf.qat_start) : cf.vq_bits ? std::format("vq{}x{}", cf.vq_bits, cf.vq_dim) : "-"}, {"lambda", std::format("{}", cf.lambda)},
+                                                {"iters", std::to_string(cf.iters)}, {"train_s", std::format("{:.1f}", res.seconds)},
+                                                {"alloc_s", std::format("{:.1f}", res.alloc_seconds)}};
       score_and_pack(ref, file, row);
       csv.add(row);
-      std::println("train {} {}: {:.0f} s, {} -> {} bytes packed, active {}, est {} bits/value", r.name, name, res.seconds, row["stored_bytes"],
-                   row["packed_bytes"], row["active_psnr"], row["est_bits_per_value"]);
+      std::println("train {} {}: {:.0f} s, {} -> {} bytes packed, active {}, est {} bits/value {}", r.name, name, res.seconds, row["stored_bytes"],
+                   row["packed_bytes"], row["active_psnr"], row["est_bits_per_value"], row["plane_bits"]);
+      std::fflush(stdout);
     }
   }
 }
 
 void step_rescore(const Ctx& c, const std::string& name, const std::string& pattern) {
-  Csv csv(c.out / std::format("f2_nets_{}.csv", c.set), kNetCols);
+  Csv csv(c.out / std::format("{}_nets_{}.csv", c.study, c.set), kNetCols);
   for (const ClipRef& r : clip_set(c)) {
     if (csv.has({{"set", c.set}, {"clip", r.name}, {"config", name}})) continue;
     std::string p = pattern;
@@ -513,6 +695,11 @@ double mean_at(const std::vector<double>& v, const std::vector<std::size_t>& idx
   return s / static_cast<double>(idx.size());
 }
 
+// With --pareto (study F3), the envelope keeps only the points that improve on every smaller one: a dominated point
+// otherwise stays a vertex at the running best and draws a flat step that the log-linear interpolation then crosses
+// steeply (it inflates the size at equal quality). F2's envelopes are the default.
+bool g_pareto = false;
+
 // The best-of-family envelope: best mean quality at or below each mean size, one point per size.
 std::vector<std::pair<double, double>> envelope(const Family& fam, const std::string& measure, const std::vector<std::size_t>& idx) {
   std::vector<std::pair<double, double>> pts;
@@ -525,7 +712,7 @@ std::vector<std::pair<double, double>> envelope(const Family& fam, const std::st
   for (const auto& [kb, q] : pts) {
     const double best = env.empty() ? q : std::max(env.back().second, q);
     if (!env.empty() && env.back().first == kb) env.back().second = best;
-    else env.emplace_back(kb, best);
+    else if (!(g_pareto && !env.empty() && q <= env.back().second)) env.emplace_back(kb, best);
   }
   return env;
 }
@@ -650,8 +837,12 @@ std::string short_label(const std::string& config) {
   std::string s = cf.h.arch == Arch::grid ? std::format("G{}", cf.h.grid) : std::string("conv");
   if (cf.h.arch == Arch::grid && cf.h.channels != 8) s += std::format(" C{}", cf.h.channels);
   if (cf.h.grid_t != 16) s += std::format(" T{}", cf.h.grid_t);
+  if (cf.h.arch == Arch::grid && cf.h.hidden != 32) s += std::format(" H{}", cf.h.hidden);
   if (cf.vq_bits) s += std::format(" VQ{}/{}", cf.vq_bits, cf.vq_dim);
+  else if (cf.mixed > 0.f) s += std::format(" mixed {:g}-bit", cf.mixed);
   else s += std::format(" {}-bit", cf.bits);
+  if (cf.sparse) s += " sparse";
+  if (cf.distill > 0.f) s += std::format(" distil {:g}", cf.distill);
   if (cf.lambda > 0) s += " + rate";
   if ((cf.h.arch == Arch::grid && cf.iters != 2000) || (cf.h.arch == Arch::conv && cf.iters != 1500)) s += std::format(" {}k it", cf.iters / 1000);
   return s;
@@ -659,7 +850,7 @@ std::string short_label(const std::string& config) {
 
 // Two panels as SVG: memory against quality (flipbooks, networks) and disk against quality (flipbooks and networks
 // packed by the lossless coder, video codecs' payload). Log size axis; one quality axis per panel.
-void write_figure(const fs::path& path, const std::string& title, const Family& flips, const std::map<std::string, Family>& videos,
+void write_figure(const fs::path& path, const std::string& title, const Family& flips, const Family* flips_more, const std::map<std::string, Family>& videos,
                   const std::vector<std::pair<std::string, const Point*>>& nets, const std::vector<std::size_t>& idx) {
   constexpr double W = 1040, H = 470, top = 74, bottom = 58, left = 62, gap = 70;
   const double pw = (W - left - gap - 24) / 2, ph = H - top - bottom;
@@ -708,8 +899,12 @@ void write_figure(const fs::path& path, const std::string& title, const Family& 
       o << std::format("<path d=\"{}\" fill=\"none\" stroke=\"{}\" stroke-width=\"2\" stroke-linejoin=\"round\"/>\n", d, colour);
     };
     // legend
-    std::vector<std::pair<std::string, const char*>> legend = {{panel == 0 ? "best flipbook at each size" : "best packed flipbook", slot[0]}, {"networks (F2)", slot[1]}};
+    std::vector<std::pair<std::string, const char*>> legend = {{panel == 0 ? "best flipbook at each size" : "best packed flipbook", slot[0]}, {"networks", slot[1]}};
     line(envelope(flips, panel == 0 ? "memory" : "packed", idx), slot[0]);
+    if (panel == 0 && flips_more) {  // with the extra tables (F3: flipbooks without their empty space)
+      line(envelope(*flips_more, "memory", idx), slot[6]);
+      legend.emplace_back("flipbooks trimmed to their content", slot[6]);
+    }
     if (panel == 1) {
       for (std::size_t v = 0; v < shown.size(); ++v) {
         if (!videos.contains(shown[v]) || videos.at(shown[v]).empty()) continue;
@@ -759,18 +954,25 @@ void step_report(const Ctx& c, const std::vector<std::string>& only_configs, con
     return ci.at(clip);
   };
   // Flipbooks.
-  Family flips;
-  {
-    Csv f(c.out / std::format("f2_flipbooks_{}.csv", c.set), kFlipCols);
+  Family flips, flips_stored;  // every table; F2's table only
+  std::vector<fs::path> flip_tables = {c.out / std::format("f2_flipbooks_{}.csv", c.set)};
+  for (const fs::path& extra : c.flipbooks) flip_tables.push_back(extra);
+  for (const fs::path& table : flip_tables) {
+    if (!fs::exists(table)) throw std::runtime_error("no flipbook table " + table.string());
+    Csv f(table, kFlipCols);
     for (const auto& r : f.rows()) {
+      if (r.contains("set") && r.at("set") != c.set) continue;
       if (!ci.contains(r.at("clip"))) continue;
-      Point& p = flips[r.at("config")];
-      const std::size_t i = fill(p, r.at("clip"));
-      p.q[i] = std::stod(r.at("active_psnr"));
-      for (const std::string m : {"memory", "packed"}) {
-        auto& v = p.b[m];
-        if (v.empty()) v.assign(n, std::nan(""));
-        v[i] = std::stod(r.at(m + "_bytes"));
+      for (Family* fam : {&flips, table == flip_tables.front() ? &flips_stored : nullptr}) {
+        if (!fam) continue;
+        Point& p = (*fam)[r.at("config")];
+        const std::size_t i = fill(p, r.at("clip"));
+        p.q[i] = std::stod(r.at("active_psnr"));
+        for (const std::string m : {"memory", "packed"}) {
+          auto& v = p.b[m];
+          if (v.empty()) v.assign(n, std::nan(""));
+          v[i] = std::stod(r.at(m + "_bytes"));
+        }
       }
     }
   }
@@ -794,8 +996,12 @@ void step_report(const Ctx& c, const std::vector<std::string>& only_configs, con
   // Networks.
   std::map<std::string, Point> nets;
   std::map<std::string, std::map<std::string, double>> net_extra;  // config -> resident, scratch means
-  {
-    Csv f(c.out / std::format("f2_nets_{}.csv", c.set), kNetCols);
+  std::vector<std::string> net_studies = {"f2"};
+  if (c.study != "f2") net_studies.push_back(c.study);  // a later study's report shows F2's networks beside its own
+  for (const std::string& study : net_studies) {
+    const fs::path table = c.out / std::format("{}_nets_{}.csv", study, c.set);
+    if (!fs::exists(table)) continue;
+    Csv f(table, kNetCols);
     for (const auto& r : f.rows()) {
       if (!ci.contains(r.at("clip"))) continue;
       if (!only_configs.empty() && std::ranges::find(only_configs, r.at("config")) == only_configs.end()) continue;
@@ -814,6 +1020,7 @@ void step_report(const Ctx& c, const std::vector<std::string>& only_configs, con
     return std::ranges::none_of(p.q, [](double v) { return std::isnan(v); });
   };
   std::erase_if(flips, [&](const auto& kv) { return !complete(kv.second); });
+  std::erase_if(flips_stored, [&](const auto& kv) { return !complete(kv.second); });
   for (auto& [k, fam] : videos) std::erase_if(fam, [&](const auto& kv) { return !complete(kv.second); });
   std::erase_if(all_video, [&](const auto& kv) { return !complete(kv.second); });
   std::vector<std::size_t> idx(n);
@@ -834,7 +1041,7 @@ void step_report(const Ctx& c, const std::vector<std::string>& only_configs, con
   }
   std::println("\n| network | active PSNR | stored KB | resident KB | packed KB | memory vs flipbooks | disk: packed vs packed flipbooks | dB vs flipbooks at equal memory |");
   std::println("|---|---:|---:|---:|---:|---|---|---|");
-  std::ofstream eq(c.out / std::format("f2_equal_quality_{}.csv", c.set));
+  std::ofstream eq(c.out / std::format("{}_equal_quality_{}{}.csv", c.study, c.set, c.suffix));
   eq << "set,network,clips,active_psnr,stored_kb,resident_kb,scratch_kb,packed_kb,baseline,net_measure,baseline_measure,baseline_kb,ratio,ratio_lo,ratio_hi,censor,censored_share,"
         "delta_db_at_net_size,delta_db_lo,delta_db_hi\n";
   std::vector<std::pair<std::string, const Point*>> order;
@@ -864,7 +1071,10 @@ void step_report(const Ctx& c, const std::vector<std::string>& only_configs, con
                  mean_at(p.b.at("resident"), idx) / 1024, mean_at(p.b.at("packed"), idx) / 1024, mem, disk, ddb);
   }
   if (!figure.empty()) {
-    write_figure(figure, std::format("Study F2, {} clips ({} set): quality against bytes", n, c.set), flips, videos, order, idx);
+    std::string study = c.study;
+    std::ranges::transform(study, study.begin(), [](unsigned char ch) { return static_cast<char>(std::toupper(ch)); });
+    write_figure(figure, std::format("Study {}, {} clips ({} set): quality against bytes", study, n, c.set), c.flipbooks.empty() ? flips : flips_stored,
+                 c.flipbooks.empty() ? nullptr : &flips, videos, order, idx);
     std::println("figure: {}", figure);
   }
   if (!videos.empty()) {
@@ -903,6 +1113,47 @@ void step_report(const Ctx& c, const std::vector<std::string>& only_configs, con
       }
       std::println("{}", line);
     }
+  }
+}
+
+// Paired differences of two network configurations over the clips of a set (study F3): active PSNR, stored and packed
+// KB, each a - b with a 95% bootstrap interval (10,000 resamples). Networks from F2's table and this study's.
+void step_pairs(const Ctx& c, const std::vector<std::string>& pairs) {
+  std::map<std::string, std::map<std::string, std::map<std::string, double>>> v;  // config -> clip -> column -> value
+  for (const std::string& study : {std::string("f2"), c.study}) {
+    const fs::path table = c.out / std::format("{}_nets_{}.csv", study, c.set);
+    if (!fs::exists(table)) continue;
+    Csv f(table, kNetCols);
+    for (const auto& r : f.rows()) {
+      for (const std::string col : {"active_psnr", "stored_bytes", "packed_bytes"}) v[r.at("config")][r.at("clip")][col] = std::stod(r.at(col));
+    }
+  }
+  const auto clips = clip_set(c);
+  std::println("| a - b ({} set) | clips | active PSNR dB | stored KB | packed KB |", c.set);
+  std::println("|---|---:|---|---|---|");
+  for (const std::string& pr : pairs) {
+    const auto colon = pr.find(':');
+    if (colon == std::string::npos) throw std::invalid_argument("--pairs a:b,c:d");
+    const std::string a = pr.substr(0, colon), b = pr.substr(colon + 1);
+    std::string cells;
+    std::size_t n = 0;
+    for (const std::string col : {"active_psnr", "stored_bytes", "packed_bytes"}) {
+      std::vector<double> x, y;
+      for (const ClipRef& r : clips) {
+        if (!v[a].contains(r.name) || !v[b].contains(r.name)) continue;
+        const double k = col == "active_psnr" ? 1.0 : 1.0 / 1024.0;
+        x.push_back(v[a][r.name][col] * k);
+        y.push_back(v[b][r.name][col] * k);
+      }
+      n = x.size();
+      if (x.empty()) {
+        cells += " - |";
+        continue;
+      }
+      const auto iv = metrics::paired_bootstrap(x, y);
+      cells += std::format(" {:+.2f} [{:+.2f}, {:+.2f}] |", iv.mean, iv.lo, iv.hi);
+    }
+    std::println("| {} - {} | {} |{}", a, b, n, cells);
   }
 }
 
@@ -1213,11 +1464,12 @@ std::vector<std::string> split(const std::string& s) {
 }  // namespace
 
 int main(int argc, char** argv) try {
-  const tools::Args a(argc, argv, {"help"});
+  const tools::Args a(argc, argv, {"help", "pareto"});
   const auto& pos = a.positional();
   if (a.flag("help") || pos.empty()) {
     std::println("nvfx_f2 data | flipbooks | train --configs A,B | rescore --name N --pattern P | video [--codecs ...] | report | timing --models a,b\n"
-                 "        [--set val|test] [--root DIR] [--out DIR] [--threads 2] [--clips a,b]");
+                 "        [--set val|test] [--root DIR] [--out DIR] [--threads 2] [--clips a,b] [--study f2|f3] [--teacher CONFIG]\n"
+                 "        [--flipbooks more.csv,...]");
     return 0;
   }
   Ctx c;
@@ -1228,9 +1480,16 @@ int main(int argc, char** argv) try {
   for (const auto& s : split(a.str("clips", ""))) c.only.insert(s);
   c.base = a.str("base", "");
   c.tag = a.str("tag", "");
+  c.study = a.str("study", "f2");
+  c.teacher = a.str("teacher", "");
+  for (const auto& f : split(a.str("flipbooks", ""))) c.flipbooks.emplace_back(f);
+  c.suffix = a.str("suffix", "");
+  g_pareto = a.flag("pareto");
   const std::string step = pos[0];
   if (step == "data") step_data(c);
   else if (step == "flipbooks") step_flipbooks(c);
+  else if (step == "trim") step_trim(c);
+  else if (step == "pairs") step_pairs(c, split(a.need("pairs")));
   else if (step == "train") step_train(c, split(a.need("configs")));
   else if (step == "rescore") step_rescore(c, a.need("name"), a.need("pattern"));
   else if (step == "video") {

@@ -257,6 +257,205 @@ TEST(Model, PackedFeaturesUseTheirBitsAndRoundTrip) {
   EXPECT_EQ(b16 - m.storage_bytes(), m.features.size() * 2 - (m.features.size() / 2 + planes * 4));
 }
 
+TEST(Model, MixedPrecisionFilesRoundTrip) {
+  // Every plane at its own width (study F3, file version 3), 0 to 8 bits, for both families and odd plane sizes.
+  Hyper odd = tiny_grid();
+  odd.grid = 5;  // planes of 25 values: packed planes end inside a byte
+  for (const Hyper& h : {tiny_grid(), odd, tiny_conv()}) {
+    Model m = randomised(h, 9);
+    m.effect = "smoke";
+    m.feature_bits = 8;
+    m.z_train = {{0.1f}, {-0.2f}};
+    m.z_mean = {-0.05f};
+    m.z_std = {0.15f};
+    const std::size_t side2 = static_cast<std::size_t>(h.feature_side()) * h.feature_side();
+    m.plane_bits.resize(m.features.size() / side2);
+    for (std::size_t k = 0; k < m.plane_bits.size(); ++k) m.plane_bits[k] = static_cast<std::uint8_t>((k * 7 + 3) % 9);
+    std::stringstream ss;
+    ASSERT_TRUE(save_model(ss, m).has_value());
+    const std::string bytes = ss.str();
+    const auto back = load_model(ss);
+    ASSERT_TRUE(back.has_value()) << back.error();
+    Model q = m;
+    quantise_like_storage(q);
+    EXPECT_EQ(back->plane_bits, m.plane_bits);
+    EXPECT_EQ(back->features, q.features) << h.describe();
+    EXPECT_EQ(back->storage_bytes(), m.storage_bytes());
+    EXPECT_LE(m.storage_bytes(), bytes.size());
+    EXPECT_LT(bytes.size() - m.storage_bytes(), 256u);
+    // A plane at 0 bits is its mean; saving the loaded model again gives the same bytes.
+    for (std::size_t k = 0; k < m.plane_bits.size(); ++k) {
+      if (m.plane_bits[k] != 0) continue;
+      const float* p = back->features.data() + k * side2;
+      EXPECT_TRUE(std::all_of(p, p + side2, [&](float v) { return v == p[0]; }));
+    }
+    std::stringstream again;
+    ASSERT_TRUE(save_model(again, *back).has_value());
+    EXPECT_EQ(again.str(), bytes);
+    // Widths above 8, a wrong count, or a damaged width byte are refused.
+    Model bad = m;
+    bad.plane_bits[1] = 9;
+    std::stringstream sb;
+    EXPECT_FALSE(save_model(sb, bad).has_value());
+    bad.plane_bits.pop_back();
+    EXPECT_FALSE(save_model(sb, bad).has_value());
+    std::string damaged = bytes;
+    const std::size_t at = 8 + 4 + 4 + 15 * 4 + 32 + 4 + 4 + 16 * static_cast<std::size_t>(h.n_controls);  // the first width byte
+    damaged[at] = static_cast<char>(12);
+    std::istringstream sd(damaged);
+    EXPECT_FALSE(load_model(sd).has_value());
+  }
+}
+
+TEST(Train, MixedPrecisionAllocationAndTraining) {
+  const Clip clip = smooth_clip(32, 8, 0.f);
+  Hyper h;
+  h.arch = Arch::grid;
+  h.size = 32;
+  h.frames = 8;
+  h.grid = 16;
+  h.grid_t = 8;
+  h.channels = 4;
+  h.hidden = 16;
+  h.layers = 1;
+  train::Options o;
+  o.iterations = 400;
+  o.batch_frames = 4;
+  o.pixels = 512;
+  o.threads = 2;
+  o.log_every = 0;
+  const train::Example ex{&clip, {}};
+  const auto plain = train::train(h, std::span(&ex, 1), o);
+  // The allocation spends the budget within the range, and its summed distortion is no worse than every plane at the
+  // average width (the uniform allocation is one the search could have made).
+  std::vector<double> D;
+  const auto bits = train::allocate_plane_bits(plain.model, std::span(&ex, 1), {}, 3.0, 1, 6, false, 2, 0, &D);
+  const std::size_t planes = plain.model.features.size() / 256;
+  ASSERT_EQ(bits.size(), planes);
+  ASSERT_EQ(D.size(), planes * 6);
+  long total = 0;
+  double mixed = 0, uniform = 0;
+  for (std::size_t p = 0; p < planes; ++p) {
+    EXPECT_GE(bits[p], 1);
+    EXPECT_LE(bits[p], 6);
+    total += bits[p];
+    mixed += D[p * 6 + bits[p] - 1];
+    uniform += D[p * 6 + 2];
+    EXPECT_GE(D[p * 6], D[p * 6 + 5]);  // one bit distorts more than six
+  }
+  EXPECT_LE(total, static_cast<long>(3 * planes));
+  EXPECT_LE(mixed, uniform);
+  // A plane the frames never see (a constant feature channel is still seen, so: zero weights on channel 0 of the
+  // first layer) gets the fewest bits.
+  Model blind = plain.model;
+  for (int o2 = 0; o2 < blind.layers[0].out; ++o2) blind.layers[0].w[static_cast<std::size_t>(o2) * blind.layers[0].in] = 0.f;
+  const auto bits2 = train::allocate_plane_bits(blind, std::span(&ex, 1), {}, 3.0, 0, 8, false, 2);
+  for (std::size_t p = 0; p < planes; p += 4) EXPECT_EQ(bits2[p], 0) << p;  // channel 0 of every slice
+  // Mixed-precision QAT: the result carries its widths, the saved file renders what the trainer saw, and it beats the
+  // float model quantised to the same widths afterwards.
+  o.mixed_bits = 3.f;
+  o.mixed_min = 1;
+  o.mixed_max = 6;
+  o.qat_start = 0.5f;
+  const auto r = train::train(h, std::span(&ex, 1), o);
+  ASSERT_EQ(r.model.plane_bits.size(), planes);
+  std::stringstream ss;
+  ASSERT_TRUE(save_model(ss, r.model).has_value());
+  const auto back = load_model(ss);
+  ASSERT_TRUE(back.has_value()) << back.error();
+  Model seen = r.model;
+  train::fake_quantise(seen, seen.plane_bits);
+  EXPECT_EQ(back->features, seen.features);
+  const double qat_psnr = metrics::score(clip, train::render_clip(*back, {}, {}, 8, 32)).psnr;
+  Model ptq = plain.model;
+  ptq.plane_bits = r.model.plane_bits;
+  quantise_like_storage(ptq);
+  EXPECT_GT(qat_psnr, metrics::score(clip, train::render_clip(ptq, {}, {}, 8, 32)).psnr);
+  EXPECT_GT(qat_psnr, 26.0);
+  EXPECT_THROW(train::train(h, std::span(&ex, 1), [&] {
+                 train::Options bad = o;
+                 bad.qat_bits = 4;
+                 return bad;
+               }()),
+               std::invalid_argument);
+}
+
+TEST(Train, SparseFeaturesKeepWhatTheFramesNeed) {
+  // A clip that is empty but for a square that moves right: each slice's mask holds the grid points under the square
+  // in the frames that blend it (and their bilinear neighbours), nothing far from it.
+  Clip clip;
+  clip.allocate(32, 8);
+  clip.loop = true;
+  for (int f = 0; f < 8; ++f) {
+    auto fr = clip.frame(f);
+    for (int y = 12; y < 18; ++y) {
+      for (int x = 2 + 3 * f; x < 8 + 3 * f; ++x) {
+        const std::size_t i = (static_cast<std::size_t>(y) * 32 + x) * 4;
+        fr[i] = 200;
+        fr[i + 1] = 120;
+        fr[i + 2] = 40;
+        fr[i + 3] = 220;
+      }
+    }
+  }
+  Hyper h;
+  h.arch = Arch::grid;
+  h.size = 32;
+  h.frames = 8;
+  h.grid = 16;
+  h.grid_t = 8;
+  h.channels = 4;
+  h.hidden = 16;
+  h.layers = 1;
+  const train::Example ex{&clip, {}};
+  const auto mask = train::feature_support(h, std::span(&ex, 1), 0);
+  ASSERT_EQ(mask.size(), 8u * 256u);
+  // Slice 0 is blended by frame 0 only (8 frames, 8 slices, looping): the square covers pixels 2..7 x 12..17, sampled
+  // by grid points 0..4 x 5..9 (pixel x samples point floor(x / 2 - 0.25) and the next, both with weight above zero).
+  for (int y = 0; y < 16; ++y) {
+    for (int x = 0; x < 16; ++x) {
+      EXPECT_EQ(mask[static_cast<std::size_t>(y) * 16 + x], (x <= 4 && y >= 5 && y <= 9) ? 1 : 0) << x << " " << y;
+    }
+  }
+  const auto grown = train::feature_support(h, std::span(&ex, 1), 0, 1);
+  EXPECT_EQ(grown[4 * 16 + 4], 1);  // one point further
+  EXPECT_EQ(grown[2 * 16 + 4], 0);
+  // Sparse 4-bit training: the model keeps the mask, stores less than the dense model at the same bits, the file
+  // renders what the trainer saw, and it learns the square.
+  train::Options o;
+  o.iterations = 400;
+  o.batch_frames = 4;
+  o.pixels = 512;
+  o.threads = 2;
+  o.log_every = 0;
+  o.qat_bits = 4;
+  o.sparse = true;
+  const auto r = train::train(h, std::span(&ex, 1), o);
+  EXPECT_EQ(r.model.feature_mask, mask);
+  ASSERT_EQ(r.model.plane_bits.size(), 32u);
+  Model m = r.model;
+  m.feature_bits = 4;
+  Model dense = m;
+  dense.plane_bits.clear();
+  dense.feature_mask.clear();
+  EXPECT_LT(m.storage_bytes(), dense.storage_bytes() * 6 / 10);
+  std::stringstream ss;
+  ASSERT_TRUE(save_model(ss, m).has_value());
+  const auto back = load_model(ss);
+  ASSERT_TRUE(back.has_value()) << back.error();
+  Model seen = r.model;
+  train::fake_quantise(seen, seen.plane_bits);
+  EXPECT_EQ(back->features, seen.features);
+  o.sparse = false;
+  const auto d = train::train(h, std::span(&ex, 1), o);
+  Model dq = d.model;
+  dq.feature_bits = 4;
+  quantise_like_storage(dq);
+  const double sparse_psnr = metrics::score(clip, train::render_clip(*back, {}, {}, 8, 32)).active_psnr;
+  EXPECT_GT(sparse_psnr, 20.0);
+  EXPECT_GT(sparse_psnr, metrics::score(clip, train::render_clip(dq, {}, {}, 8, 32)).active_psnr - 2.0);
+}
+
 TEST(Train, ForwardMatchesTheReference) {
   for (const Hyper& h : {tiny_grid(), tiny_conv()}) {
     const Model m = randomised(h, 11);

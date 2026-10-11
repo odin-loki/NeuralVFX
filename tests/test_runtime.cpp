@@ -385,3 +385,74 @@ TEST(Runtime, ErrorsAreStatusesNotCrashes) {
   EXPECT_EQ(nvfx_render(ok.get(), std::nan(""), buf.data(), 128), NVFX_ERROR_ARGUMENT);
   EXPECT_EQ(nvfx_instance_set_colour(ok.get(), 0.f, -1.f), NVFX_ERROR_ARGUMENT);
 }
+
+TEST(Runtime, MixedPrecisionFeaturesMatchTheReference) {
+  // Every plane at its own width, 0 to 8 bits (study F3): the runtime decodes each plane as the reference sees the
+  // features after quantise_like_storage, on every ISA, for both families and for planes that end inside a byte.
+  const float controls[3] = {0.4f, 0.9f, 0.2f};
+  Hyper odd = grid_hyper();
+  odd.grid = 13;
+  const Hyper hypers[] = {grid_hyper(), odd, conv_hyper()};
+  for (const nvfx_isa isa : kIsas) {
+    if (nvfx_set_isa(isa) != NVFX_OK) continue;
+    for (const Hyper& h : hypers) {
+      Model m = make_model(h, 16);
+      m.feature_bits = 8;
+      const std::size_t side2 = static_cast<std::size_t>(h.feature_side()) * h.feature_side();
+      m.plane_bits.resize(m.features.size() / side2);
+      for (std::size_t k = 0; k < m.plane_bits.size(); ++k) m.plane_bits[k] = static_cast<std::uint8_t>((k * 5) % 9);
+      quantise_like_storage(m);
+      auto e = load(m);
+      auto in = instance(e.get(), 32);
+      nvfx_instance_set_controls(in.get(), controls, 3);
+      nvfx_instance_set_variation(in.get(), 2);
+      for (const int f : {0, 6, 13}) {
+        const auto got = render(in.get(), f / static_cast<double>(m.fps), 32);
+        EXPECT_LE(max_diff(got, reference(m, f, controls, 2, 32)), 2) << h.describe() << " mixed, frame " << f << " isa " << isa;
+      }
+      nvfx_effect_info info{};
+      nvfx_effect_get_info(e.get(), &info);
+      EXPECT_EQ(info.stored_bytes, m.storage_bytes());
+      EXPECT_LT(info.stored_bytes, make_model(h, 8).storage_bytes());  // 4 bits on average plus a byte per plane
+    }
+  }
+  nvfx_set_isa(NVFX_ISA_AUTO);
+}
+
+TEST(Runtime, SparseFeaturesMatchTheReference) {
+  // A mask per time slice (study F3): the runtime decodes the stored points of each plane in raster order and gives
+  // every other point the plane's fill, as the reference sees the features after quantise_like_storage. Planes of
+  // 13 x 13 points end inside a byte; one slice stores no point at all.
+  const float controls[3] = {0.7f, 0.3f, 0.5f};
+  Hyper odd = grid_hyper();
+  odd.grid = 13;
+  for (const nvfx_isa isa : kIsas) {
+    if (nvfx_set_isa(isa) != NVFX_OK) continue;
+    for (const Hyper& h : {grid_hyper(), odd}) {
+      Model m = make_model(h, 16);
+      m.feature_bits = 4;
+      const std::size_t side2 = static_cast<std::size_t>(h.grid) * h.grid;
+      m.plane_bits.resize(m.features.size() / side2);
+      for (std::size_t k = 0; k < m.plane_bits.size(); ++k) m.plane_bits[k] = static_cast<std::uint8_t>((k * 5) % 9);
+      std::mt19937_64 rng(31);
+      m.feature_mask.resize(static_cast<std::size_t>(h.grid_t) * side2);
+      for (std::size_t j = 0; j < m.feature_mask.size(); ++j) m.feature_mask[j] = j < side2 ? 0 : static_cast<std::uint8_t>(rng() % 2);
+      quantise_like_storage(m);
+      auto e = load(m);
+      auto in = instance(e.get(), 32);
+      nvfx_instance_set_controls(in.get(), controls, 3);
+      nvfx_instance_set_variation(in.get(), 0);
+      for (const int f : {0, 4, 9}) {
+        const auto got = render(in.get(), f / static_cast<double>(m.fps), 32);
+        EXPECT_LE(max_diff(got, reference(m, f, controls, 0, 32)), 2) << h.describe() << " sparse, frame " << f << " isa " << isa;
+      }
+      nvfx_effect_info info{};
+      nvfx_effect_get_info(e.get(), &info);
+      EXPECT_EQ(info.stored_bytes, m.storage_bytes());
+      Model dense = m;
+      dense.feature_mask.clear();
+      EXPECT_LT(info.stored_bytes, dense.storage_bytes());
+    }
+  }
+  nvfx_set_isa(NVFX_ISA_AUTO);
+}

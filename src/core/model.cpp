@@ -11,6 +11,7 @@
 #include <ranges>
 #include <stdexcept>
 #include <stdfloat>
+#include <tuple>
 
 namespace nfx {
 
@@ -34,11 +35,33 @@ std::size_t Model::storage_bytes() const {
   const std::size_t slices = static_cast<std::size_t>(h.bases) * h.grid_t * h.feature_channels();
   const std::size_t side2 = static_cast<std::size_t>(h.feature_side()) * h.feature_side();
   std::size_t feat = feature_bits < 16 ? slices * (packed_plane_bytes(side2, feature_bits) + 4) : features.size() * 2;
-  if (vq_groups() > 0) {
+  if (per_plane()) {  // flags, a width byte per plane, the mask; per plane its range, fill (masked) and codes
+    const bool mk = masked() || !raw_mask.empty();
+    feat = 4 + plane_bits.size() + (mk ? static_cast<std::size_t>(h.grid_t) * packed_plane_bytes(side2, 1) : 0);
+    const std::size_t C = static_cast<std::size_t>(h.feature_channels()), T = static_cast<std::size_t>(h.grid_t);
+    for (std::size_t k = 0; k < plane_bits.size(); ++k) {
+      feat += 4 + (mk ? 2 : 0) + packed_plane_bytes(plane_points(static_cast<int>((k / C) % T)), plane_bits[k]);
+    }
+  } else if (vq_groups() > 0) {
     const std::size_t idx_planes = static_cast<std::size_t>(h.bases) * h.grid_t * static_cast<std::size_t>(vq_groups());
     feat = 2 * vq_codebook.size() + idx_planes * packed_plane_bytes(side2, vq_bits);
   }
   return feat + (param_count() - features.size()) * 2;
+}
+
+std::size_t Model::plane_points(int t) const {
+  const std::size_t side2 = static_cast<std::size_t>(h.feature_side()) * h.feature_side();
+  if (!feature_mask.empty()) {
+    const auto first = feature_mask.begin() + static_cast<std::ptrdiff_t>(static_cast<std::size_t>(t) * side2);
+    return static_cast<std::size_t>(std::count_if(first, first + static_cast<std::ptrdiff_t>(side2), [](std::uint8_t v) { return v != 0; }));
+  }
+  if (!raw_mask.empty()) {  // the runtime keeps the mask bit-packed only
+    const std::size_t mb = packed_plane_bytes(side2, 1);
+    std::size_t n = 0;
+    for (std::size_t j = 0; j < mb; ++j) n += static_cast<std::size_t>(std::popcount(raw_mask[static_cast<std::size_t>(t) * mb + j]));
+    return n;
+  }
+  return side2;
 }
 
 double Model::macs_per_pixel(int out) const {
@@ -260,6 +283,7 @@ namespace {
 constexpr std::string_view kMagic = "NVFXMDL1";
 constexpr std::uint32_t kVersion = 1;
 constexpr std::uint32_t kVersionVq = 2;  // vector-quantised features (vq_bits, vq_dim after feature_bits)
+constexpr std::uint32_t kVersionMixed = 3;  // bits per feature plane (a byte per plane before the planes)
 
 float round_f16(float v) { return static_cast<float>(static_cast<std::float16_t>(v)); }
 
@@ -273,10 +297,14 @@ Plane8 minmax_range(std::span<const float> p) {
 }
 long qmax_of(int bits) { return (1L << bits) - 1; }
 std::uint8_t q8(float v, Plane8 r, int bits = 8) {
+  if (bits == 0) return 0;  // a plane of one value
   const long qm = qmax_of(bits);
   return static_cast<std::uint8_t>(std::clamp(std::lround((v - r.lo) / (r.hi - r.lo) * static_cast<float>(qm)), 0L, qm));
 }
-float dq8(unsigned q, Plane8 r, int bits = 8) { return r.lo + static_cast<float>(q) / static_cast<float>(qmax_of(bits)) * (r.hi - r.lo); }
+float dq8(unsigned q, Plane8 r, int bits = 8) {
+  if (bits == 0) return r.lo;
+  return r.lo + static_cast<float>(q) / static_cast<float>(qmax_of(bits)) * (r.hi - r.lo);
+}
 
 Plane8 plane_range(std::span<const float> p, int bits, bool trim) {
   const auto [lo, hi] = feature_plane_range(p, bits, trim);
@@ -289,6 +317,7 @@ void put_plane_codes(std::span<const float> plane, Plane8 r, int bits, std::uint
     for (std::size_t j = 0; j < plane.size(); ++j) out[j] = q8(plane[j], r);
     return;
   }
+  if (bits == 0) return;  // no codes
   std::fill_n(out, packed_plane_bytes(plane.size(), bits), std::uint8_t{0});
   for (std::size_t j = 0; j < plane.size(); ++j) put_packed_code(out, j, bits, q8(plane[j], r, bits));
 }
@@ -325,6 +354,12 @@ std::expected<Dense, std::string> get_dense(std::istream& i) {
 }  // namespace
 
 std::pair<float, float> feature_plane_range(std::span<const float> p, int bits, bool trim) {
+  if (bits == 0) {
+    double s = 0;
+    for (const float v : p) s += v;
+    const float mean = round_f16(p.empty() ? 0.f : static_cast<float>(s / static_cast<double>(p.size())));
+    return {mean, mean};
+  }
   const Plane8 full = minmax_range(p);
   if (!trim || p.size() < 8) return {full.lo, full.hi};
   std::vector<float> v(p.begin(), p.end());
@@ -347,6 +382,85 @@ std::pair<float, float> feature_plane_range(std::span<const float> p, int bits, 
     }
   }
   return {best.lo, best.hi};
+}
+
+namespace {
+
+// Per-plane storage of one plane: the range of its stored values, the fill of the others, and the codes of the stored
+// values in raster order. `active` empty: every value is stored. No stored values: the range is (0, 0).
+struct PlaneCodes {
+  float lo = 0, hi = 0, fill = 0;
+  std::vector<unsigned> codes;
+};
+PlaneCodes plane_codes(std::span<const float> plane, int bits, bool trim, std::span<const std::uint8_t> active) {
+  PlaneCodes pc;
+  std::vector<float> on;
+  double fs = 0;
+  std::size_t fn = 0;
+  if (active.empty()) {
+    on.assign(plane.begin(), plane.end());
+  } else {
+    for (std::size_t j = 0; j < plane.size(); ++j) {
+      if (active[j]) {
+        on.push_back(plane[j]);
+      } else {
+        fs += plane[j];
+        ++fn;
+      }
+    }
+  }
+  pc.fill = round_f16(fn > 0 ? static_cast<float>(fs / static_cast<double>(fn)) : 0.f);
+  if (!on.empty()) std::tie(pc.lo, pc.hi) = feature_plane_range(on, bits, trim);
+  pc.codes.reserve(on.size());
+  for (const float v : on) pc.codes.push_back(q8(v, {pc.lo, pc.hi}, bits));
+  return pc;
+}
+
+// Plane k's mask (its time slice's), or empty.
+std::span<const std::uint8_t> plane_mask(const Model& m, std::size_t k) {
+  if (m.feature_mask.empty()) return {};
+  const std::size_t S2 = plane_size(m.h), C = static_cast<std::size_t>(m.h.feature_channels()), T = static_cast<std::size_t>(m.h.grid_t);
+  return std::span(m.feature_mask).subspan(((k / C) % T) * S2, S2);
+}
+
+// Why a model's per-plane storage is invalid, or empty.
+std::string per_plane_error(const Model& m) {
+  const std::size_t S2 = plane_size(m.h);
+  if (m.vq_bits > 0) return "per-plane widths and vector quantisation do not combine";
+  if (m.plane_bits.size() * S2 != m.features.size()) return "one width per feature plane";
+  if (std::ranges::any_of(m.plane_bits, [](std::uint8_t b) { return b > 8; })) return "widths 0 to 8";
+  if (!m.feature_mask.empty()) {
+    if (m.h.arch != Arch::grid) return "a mask needs the grid family";
+    if (m.feature_mask.size() != static_cast<std::size_t>(m.h.grid_t) * S2) return "a mask of grid_t x side x side";
+    if (std::ranges::any_of(m.feature_mask, [](std::uint8_t v) { return v > 1; })) return "mask values 0 or 1";
+  }
+  return {};
+}
+
+// Codes into a plane's bytes (one per code at 8 bits, bit-packed below, none at 0 bits).
+void put_codes(const std::vector<unsigned>& codes, int bits, std::uint8_t* out) {
+  if (bits == 8) {
+    for (std::size_t j = 0; j < codes.size(); ++j) out[j] = static_cast<std::uint8_t>(codes[j]);
+  } else if (bits > 0) {
+    std::fill_n(out, packed_plane_bytes(codes.size(), bits), std::uint8_t{0});
+    for (std::size_t j = 0; j < codes.size(); ++j) put_packed_code(out, j, bits, codes[j]);
+  }
+}
+
+}  // namespace
+
+void quantise_plane(std::span<float> plane, int bits, bool trim, std::span<const std::uint8_t> active) {
+  if (bits > 8) {  // the fill only
+    if (active.empty()) return;
+    const PlaneCodes pc = plane_codes(plane, 8, trim, active);
+    for (std::size_t j = 0; j < plane.size(); ++j) {
+      if (!active[j]) plane[j] = pc.fill;
+    }
+    return;
+  }
+  const PlaneCodes pc = plane_codes(plane, bits, trim, active);
+  std::size_t n = 0;
+  for (std::size_t j = 0; j < plane.size(); ++j) plane[j] = active.empty() || active[j] ? dq8(pc.codes[n++], {pc.lo, pc.hi}, bits) : pc.fill;
 }
 
 std::vector<std::uint8_t> vq_assign(const Model& m) {
@@ -453,6 +567,34 @@ void Model::pack_features() {
   raw_u8.clear();
   raw_ranges.clear();
   raw_codebook.clear();
+  raw_offsets.clear();
+  raw_mask.clear();
+  raw_fill.clear();
+  if (per_plane()) {
+    const std::size_t p = plane_size(h);
+    if (masked()) {
+      const std::size_t mb = packed_plane_bytes(p, 1);
+      raw_mask.assign(static_cast<std::size_t>(h.grid_t) * mb, 0);
+      for (std::size_t t = 0; t < static_cast<std::size_t>(h.grid_t); ++t) {
+        for (std::size_t j = 0; j < p; ++j) put_packed_code(raw_mask.data() + t * mb, j, 1, feature_mask[t * p + j]);
+      }
+    }
+    std::vector<PlaneCodes> pcs;
+    std::size_t total = 0;
+    for (std::size_t off = 0, k = 0; off < features.size(); off += p, ++k) {
+      pcs.push_back(plane_codes(std::span(features.data() + off, p), plane_bits[k], feature_trim, plane_mask(*this, k)));
+      raw_offsets.push_back(static_cast<std::uint32_t>(total));
+      total += packed_plane_bytes(pcs.back().codes.size(), plane_bits[k]);
+    }
+    raw_u8.assign(total, 0);
+    for (std::size_t k = 0; k < pcs.size(); ++k) {
+      raw_ranges.push_back(pcs[k].lo);
+      raw_ranges.push_back(pcs[k].hi);
+      if (masked()) raw_fill.push_back(pcs[k].fill);
+      put_codes(pcs[k].codes, plane_bits[k], raw_u8.data() + raw_offsets[k]);
+    }
+    return;
+  }
   if (vq_groups() > 0) {
     const std::size_t S2 = static_cast<std::size_t>(h.feature_side()) * h.feature_side(), pb = packed_plane_bytes(S2, vq_bits);
     const auto idx = vq_assign(*this);
@@ -483,7 +625,12 @@ void Model::pack_features() {
 }
 
 void quantise_like_storage(Model& m) {
-  if (m.vq_groups() > 0) {
+  if (m.per_plane()) {
+    const std::size_t p = plane_size(m.h);
+    for (std::size_t off = 0, k = 0; off < m.features.size() && k < m.plane_bits.size(); off += p, ++k) {
+      quantise_plane(std::span(m.features.data() + off, p), m.plane_bits[k], m.feature_trim, plane_mask(m, k));
+    }
+  } else if (m.vq_groups() > 0) {
     vq_canonical(m);
     vq_apply(m, vq_assign(m));
   } else if (m.feature_bits < 16) {
@@ -518,6 +665,12 @@ std::expected<void, std::string> save_model(const std::filesystem::path& path, c
 std::expected<void, std::string> save_model(std::ostream& o, const Model& m0) {
   const bool vq = m0.vq_bits > 0;
   if (vq && !vq_valid(m0)) return std::unexpected("nvfx: bad vector quantisation (bits 2 to 8, a codebook per channel group)");
+  const bool mixed = m0.per_plane();
+  if (mixed) {
+    if (const std::string e = per_plane_error(m0); !e.empty()) return std::unexpected("nvfx: per-plane storage: " + e);
+  } else if (!m0.feature_mask.empty()) {
+    return std::unexpected("nvfx: a feature mask needs per-plane widths");
+  }
   Model canon;
   if (vq) {  // the stored codebook order (vq_canonical)
     canon = m0;
@@ -526,7 +679,7 @@ std::expected<void, std::string> save_model(std::ostream& o, const Model& m0) {
   const Model& m = vq ? canon : m0;
   const Hyper& h = m.h;
   o.write(kMagic.data(), static_cast<std::streamsize>(kMagic.size()));
-  bin::put(o, vq ? kVersionVq : kVersion);
+  bin::put(o, vq ? kVersionVq : mixed ? kVersionMixed : kVersion);
   bin::put(o, static_cast<std::uint32_t>(h.arch));
   for (const int v : {h.size, h.frames, static_cast<int>(h.loop), h.n_controls, h.n_latent, h.bases, h.grid_t, h.grid,
                       h.channels, h.hidden, h.layers, h.latent, h.c0, h.c1, h.c2}) {
@@ -543,7 +696,31 @@ std::expected<void, std::string> save_model(std::ostream& o, const Model& m0) {
     bin::put_str(o, static_cast<std::size_t>(k) < m.control_names.size() ? m.control_names[static_cast<std::size_t>(k)] : std::string{}, 16);
   }
   if (!valid_feature_bits(m.feature_bits)) return std::unexpected("nvfx: feature bits must be 2 to 8 or 16");
-  if (vq) {
+  if (mixed) {
+    // Flags (bit 0: a mask), the width of every plane, the mask (per slice, bit-packed), then per plane its range
+    // (fp16), its fill (fp16, masked) and the codes of its stored points (packed_plane_bytes at its width).
+    const bool mk = m.masked();
+    bin::put(o, static_cast<std::uint32_t>(mk ? 1 : 0));
+    o.write(reinterpret_cast<const char*>(m.plane_bits.data()), static_cast<std::streamsize>(m.plane_bits.size()));
+    const std::size_t p = plane_size(h);
+    if (mk) {
+      std::vector<std::uint8_t> packed(packed_plane_bytes(p, 1));
+      for (std::size_t t = 0; t < static_cast<std::size_t>(h.grid_t); ++t) {
+        std::ranges::fill(packed, std::uint8_t{0});
+        for (std::size_t j = 0; j < p; ++j) put_packed_code(packed.data(), j, 1, m.feature_mask[t * p + j]);
+        o.write(reinterpret_cast<const char*>(packed.data()), static_cast<std::streamsize>(packed.size()));
+      }
+    }
+    std::vector<std::uint8_t> codes(p);
+    for (std::size_t off = 0, k = 0; off < m.features.size(); off += p, ++k) {
+      const int b = m.plane_bits[k];
+      const PlaneCodes pc = plane_codes(std::span(m.features.data() + off, p), b, m.feature_trim, plane_mask(m, k));
+      put_f16(o, std::array{pc.lo, pc.hi});
+      if (mk) put_f16(o, std::array{pc.fill});
+      put_codes(pc.codes, b, codes.data());
+      o.write(reinterpret_cast<const char*>(codes.data()), static_cast<std::streamsize>(packed_plane_bytes(pc.codes.size(), b)));
+    }
+  } else if (vq) {
     // The codebooks (fp16), then the index planes [basis][slice][group][side][side].
     put_f16(o, m.vq_codebook);
     const auto idx = vq_assign(m);
@@ -596,7 +773,7 @@ std::expected<Model, std::string> load_model(std::istream& i) {
   i.read(magic.data(), static_cast<std::streamsize>(magic.size()));
   if (!i || magic != kMagic) return std::unexpected("nvfx: not a model");
   const auto version = bin::get<std::uint32_t>(i);
-  if (!version || (*version != kVersion && *version != kVersionVq)) return std::unexpected("nvfx: unsupported version");
+  if (!version || (*version != kVersion && *version != kVersionVq && *version != kVersionMixed)) return std::unexpected("nvfx: unsupported version");
   const auto arch = bin::get<std::uint32_t>(i);
   if (!arch) return std::unexpected(arch.error());
   Hyper h;
@@ -634,7 +811,45 @@ std::expected<Model, std::string> load_model(std::istream& i) {
     m.control_names.push_back(*name);
   }
   m.feature_bits = static_cast<int>(*bits);
-  if (m.vq_bits > 0) {
+  if (*version == kVersionMixed) {
+    const std::size_t p = plane_size(h);
+    const auto flags = bin::get<std::uint32_t>(i);
+    if (!flags || (*flags & ~1u) != 0) return std::unexpected("nvfx: bad per-plane flags");
+    const bool mk = (*flags & 1u) != 0;
+    if (mk && h.arch != Arch::grid) return std::unexpected("nvfx: a feature mask needs the grid family");
+    m.plane_bits.resize(m.features.size() / p);
+    i.read(reinterpret_cast<char*>(m.plane_bits.data()), static_cast<std::streamsize>(m.plane_bits.size()));
+    if (!i) return std::unexpected("truncated file");
+    if (std::ranges::any_of(m.plane_bits, [](std::uint8_t b) { return b > 8; })) return std::unexpected("nvfx: bad plane bits");
+    if (mk) {
+      std::vector<std::uint8_t> packed(packed_plane_bytes(p, 1));
+      m.feature_mask.resize(static_cast<std::size_t>(h.grid_t) * p);
+      for (std::size_t t = 0; t < static_cast<std::size_t>(h.grid_t); ++t) {
+        i.read(reinterpret_cast<char*>(packed.data()), static_cast<std::streamsize>(packed.size()));
+        if (!i) return std::unexpected("truncated file");
+        for (std::size_t j = 0; j < p; ++j) m.feature_mask[t * p + j] = static_cast<std::uint8_t>(packed_code(packed.data(), j, 1));
+      }
+    }
+    std::vector<std::uint8_t> codes(p);
+    for (std::size_t off = 0, k = 0; off < m.features.size(); off += p, ++k) {
+      const int b = m.plane_bits[k];
+      const auto active = plane_mask(m, k);
+      const std::size_t n = active.empty() ? p : static_cast<std::size_t>(std::ranges::count(active, std::uint8_t{1}));
+      std::array<float, 3> r{};
+      if (auto e = get_f16(i, std::span(r).first(mk ? 3 : 2)); !e) return std::unexpected(e.error());
+      i.read(reinterpret_cast<char*>(codes.data()), static_cast<std::streamsize>(packed_plane_bytes(n, b)));
+      if (!i) return std::unexpected("truncated file");
+      float* v = m.features.data() + off;
+      for (std::size_t j = 0, q = 0; j < p; ++j) {
+        if (!active.empty() && !active[j]) {
+          v[j] = r[2];
+          continue;
+        }
+        v[j] = dq8(b == 8 ? codes[q] : b == 0 ? 0u : packed_code(codes.data(), q, b), {r[0], r[1]}, b);
+        ++q;
+      }
+    }
+  } else if (m.vq_bits > 0) {
     if (auto e = get_f16(i, m.vq_codebook); !e) return std::unexpected(e.error());
     const std::size_t S2 = plane_size(h), pb = packed_plane_bytes(S2, m.vq_bits);
     const std::size_t planes = static_cast<std::size_t>(h.bases) * h.grid_t * static_cast<std::size_t>(m.vq_groups());

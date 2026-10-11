@@ -60,6 +60,19 @@ struct Options {
   // 50 steps restart at a random feature vector. The result carries the codebook.
   int vq_bits = 0, vq_dim = 0;
   float vq_start = 0.5f;
+  // Mixed precision (study F3): with mixed_bits > 0 (and qat_bits 0), when quantisation starts (qat_start) every feature
+  // plane gets its own bits, mixed_min to mixed_max, for an average of mixed_bits per value (allocate_plane_bits), and
+  // from then on the forward pass sees each plane at its bits. The result carries them (Model::plane_bits).
+  float mixed_bits = 0.f;
+  int mixed_min = 0, mixed_max = 8;
+  int mixed_size = 0;  // frame size at which the allocation renders (0: the clips' size; the conv family: always native)
+  // Sparse features (study F3, grid family): only the grid points each time slice needs are stored (feature_support of
+  // the examples), every other point of a plane holds the plane's fill (the mean of the plane's values there). The
+  // forward pass sees the features that way from the first step; with qat_bits (or mixed_bits) the stored points are
+  // also quantised. The result carries the mask (Model::feature_mask) and the widths (Model::plane_bits).
+  bool sparse = false;
+  int sparse_threshold = 0;  // a pixel counts when a channel is above this (0 to 255)
+  int sparse_dilate = 0;     // grow the mask by this many grid points
   std::function<void(int iteration, double loss)> progress;
 };
 
@@ -69,6 +82,7 @@ struct Result {
   double final_loss = 0;                  // mean squared error per channel over the last 5% of steps
   double final_rate = 0;                  // estimated bits per feature value at the end (see Options::rate_lambda)
   double seconds = 0;
+  double alloc_seconds = 0;               // of which the bit allocation (Options::mixed_bits)
   std::vector<std::pair<int, double>> curve;
 };
 
@@ -81,11 +95,35 @@ Clip render_clip(const Model& m, std::span<const float> controls, std::span<cons
 bool cpu_supported();
 
 // The rate estimate of Options::rate_lambda for a model's features: total estimated bits, and (when `grad` is not
-// empty, same size as the features) adds the gradient of those bits times `weight` to it.
-double feature_rate(const Model& m, int bits, std::span<float> grad = {}, float weight = 0.f, bool trim = false);
+// empty, same size as the features) adds the gradient of those bits times `weight` to it. With `plane_bits` (one per
+// plane), each plane's step is that of its own bits, and planes at 0 bits cost nothing.
+double feature_rate(const Model& m, int bits, std::span<float> grad = {}, float weight = 0.f, bool trim = false,
+                    std::span<const std::uint8_t> plane_bits = {});
 
 // Features as stored at `bits` (2 to 8) and read back, in place (the forward pass of quantisation-aware training),
-// with min/max ranges or (trim) the ranges of Model::feature_trim.
+// with min/max ranges or (trim) the ranges of Model::feature_trim. The second form: each plane at its own bits (0 to 8).
 void fake_quantise(Model& m, int bits, bool trim = false);
+void fake_quantise(Model& m, std::span<const std::uint8_t> plane_bits, bool trim = false);
+
+// The grid points each time slice needs (grid family), [grid_t][grid][grid], 1 = needed: point (x, y) of slice t is
+// needed when a pixel that samples it with a weight above zero (bilinear, as the trainer and the runtime sample at the
+// clips' size) has a channel above `threshold` in a frame of an example that blends slice t with a weight above zero;
+// then grown by `dilate` points (a 3 x 3 neighbourhood per step).
+std::vector<std::uint8_t> feature_support(const Hyper& h, std::span<const Example> data, int threshold, int dilate = 0);
+
+// Features as stored per plane, in place: each plane at plane_bits[k] (empty: unquantised), and with m.feature_mask
+// the points outside the mask at their plane's fill.
+void store_planes(Model& m, std::span<const std::uint8_t> plane_bits, bool trim = false);
+
+// Mixed precision: the bits of every feature plane [basis][slice][channel] for an average of `avg_bits` per value,
+// each from min_bits to max_bits. Every plane's distortion at every width is measured alone, as the squared change of
+// the rendered frames (every frame of every example whose time slices use the plane) when only that plane is quantised
+// (feature_plane_range ranges); then bits go to the plane whose distortion falls most per bit (along each plane's lower
+// convex hull, so a step of several bits counts at its mean slope) until the budget is spent or no plane gains.
+// `codes`: the examples' variation codes (empty: zero codes). `size`: render size (0: the clips'). `distortion`, when
+// given, receives the table [plane][bits - min_bits].
+std::vector<std::uint8_t> allocate_plane_bits(const Model& m, std::span<const Example> data, std::span<const std::vector<float>> codes,
+                                              double avg_bits, int min_bits, int max_bits, bool trim, int threads, int size = 0,
+                                              std::vector<double>* distortion = nullptr);
 
 }  // namespace nfx::train
