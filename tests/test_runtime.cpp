@@ -404,6 +404,7 @@ TEST(Runtime, MixedPrecisionFeaturesMatchTheReference) {
       quantise_like_storage(m);
       auto e = load(m);
       auto in = instance(e.get(), 32);
+      ASSERT_EQ(nvfx_instance_set_precision(in.get(), NVFX_PRECISION_FLOAT), NVFX_OK);  // the float reference
       nvfx_instance_set_controls(in.get(), controls, 3);
       nvfx_instance_set_variation(in.get(), 2);
       for (const int f : {0, 6, 13}) {
@@ -440,6 +441,7 @@ TEST(Runtime, SparseFeaturesMatchTheReference) {
       quantise_like_storage(m);
       auto e = load(m);
       auto in = instance(e.get(), 32);
+      ASSERT_EQ(nvfx_instance_set_precision(in.get(), NVFX_PRECISION_FLOAT), NVFX_OK);  // the float reference
       nvfx_instance_set_controls(in.get(), controls, 3);
       nvfx_instance_set_variation(in.get(), 0);
       for (const int f : {0, 4, 9}) {
