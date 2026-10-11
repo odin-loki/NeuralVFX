@@ -205,6 +205,115 @@ TEST(Rollout, QuantisedStartStatesRoundTrip) {
   }
 }
 
+TEST(Rollout, StudyD2ConstantsRoundTripInVersion4) {
+  // Study D2: DetailSpec::advect and soften. At their defaults the file keeps its old layout (2, or 3
+  // with quantised starts) byte for byte; otherwise it is version 4, with fp16 or quantised start states; out-of-range
+  // values are refused.
+  Model m = tiny_model();
+  const auto r = tiny_run(m.h, 4);
+  StartPoint sp;
+  sp.controls = r.controls();
+  sp.seed = 5;
+  sp.time = 1.f;
+  sp.coarse.assign(r.coarse.begin(), r.coarse.begin() + 8 * 8 * kPhys);
+  m.starts.push_back(sp);
+  quantise_like_storage(m);
+  for (const int bits : {16, 6}) {
+    Model q = m;
+    q.start_bits = bits;
+    q.start_dither = bits < 16;
+    std::stringstream old_ss;
+    ASSERT_TRUE(save_model(old_ss, q));
+    EXPECT_EQ(old_ss.str()[8], bits < 16 ? 3 : 2);
+    if (bits == 16) {  // a file without the new constants writes back to the same bytes (fp16 starts round-trip exactly)
+      auto again = load_model(old_ss);
+      ASSERT_TRUE(again) << again.error();
+      std::stringstream again_ss;
+      ASSERT_TRUE(save_model(again_ss, *again));
+      EXPECT_EQ(again_ss.str(), old_ss.str());
+    }
+    q.detail.advect = 1.25f;
+    q.detail.soften = 0.125f;
+    std::stringstream ss;
+    ASSERT_TRUE(save_model(ss, q));
+    EXPECT_EQ(ss.str()[8], 4);
+    auto back = load_model(ss);
+    ASSERT_TRUE(back) << back.error();
+    EXPECT_EQ(back->detail.advect, 1.25f);
+    EXPECT_EQ(back->detail.soften, 0.125f);
+    EXPECT_EQ(back->start_bits, bits);
+    EXPECT_EQ(back->start_dither, bits < 16);
+    Model ref = q;
+    quantise_like_storage(ref);
+    EXPECT_EQ(back->starts[0].coarse, ref.starts[0].coarse);
+    EXPECT_EQ(back->step_w, q.step_w);
+  }
+  for (const auto& [advect, soften] : {std::pair{0.f, 0.f}, {1.f, 1.5f}, {1.f, -0.1f}}) {
+    Model bad = m;
+    bad.detail.advect = advect;
+    bad.detail.soften = soften;
+    std::stringstream ss;
+    EXPECT_FALSE(save_model(ss, bad));
+  }
+  Model soft = m;  // soften alone also needs version 4
+  soft.detail.soften = 0.25f;
+  std::stringstream ss;
+  ASSERT_TRUE(save_model(ss, soft));
+  EXPECT_EQ(ss.str()[8], 4);
+}
+
+TEST(Rollout, SoftenMovesTowardsTheNeighboursMean) {
+  // q + s (mean of the four neighbours - q), zero outside: a single spike keeps 1 - s and gives s / 4 to each
+  // neighbour; a uniform field is unchanged inside and loses s / 4 per missing neighbour at the edges.
+  const int S = 8;
+  std::vector<float> q(S * S, 0.f);
+  q[3 * S + 4] = 1.f;
+  soften_field(q, S, 0.4f);
+  EXPECT_FLOAT_EQ(q[3 * S + 4], 0.6f);
+  for (const int i : {3 * S + 3, 3 * S + 5, 2 * S + 4, 4 * S + 4}) EXPECT_FLOAT_EQ(q[static_cast<std::size_t>(i)], 0.1f);
+  EXPECT_FLOAT_EQ(q[2 * S + 3], 0.f);
+  std::vector<float> u(S * S, 1.f);
+  soften_field(u, S, 0.4f);
+  EXPECT_FLOAT_EQ(u[3 * S + 4], 1.f);
+  EXPECT_FLOAT_EQ(u[3 * S], 0.9f);  // left edge
+  EXPECT_FLOAT_EQ(u[0], 0.8f);      // corner
+}
+
+TEST(Rollout, AdvectionGainScalesHowFarDetailMoves) {
+  // As DetailLayerCarriesFieldsWithTheFlow, with advect = 2: the blob moves two pixels for a quarter cell of flow.
+  Model m = tiny_model();
+  m.detail.swirl = 0.f;
+  m.detail.contrast = 0.f;
+  m.detail.advect = 2.f;
+  const int R = m.h.res, S = 32, C = m.h.channels();
+  State s;
+  s.res = R;
+  s.size = S;
+  s.coarse.assign(static_cast<std::size_t>(R) * R * C, 0.f);
+  s.flow.assign(static_cast<std::size_t>(R) * R * 2, 0.f);
+  for (int i = 0; i < R * R; ++i) s.flow[static_cast<std::size_t>(i) * 2] = 0.25f;
+  s.fine_t.assign(static_cast<std::size_t>(S) * S, 0.f);
+  s.fine_d.assign(s.fine_t.size(), 0.f);
+  for (int y = 12; y < 20; ++y) {
+    for (int x = 8; x < 16; ++x) s.fine_t[static_cast<std::size_t>(y) * S + x] = 1.f;
+  }
+  std::vector<float> moved(s.fine_t.size(), 0.f);
+  for (int y = 12; y < 20; ++y) {
+    for (int x = 10; x < 18; ++x) moved[static_cast<std::size_t>(y) * S + x] = 1.f;
+  }
+  for (int y = 0; y < S; ++y) {
+    for (int x = 0; x < S; ++x) s.coarse[(static_cast<std::size_t>(y / 4) * R + x / 4) * C + 2] += moved[static_cast<std::size_t>(y) * S + x] / 16.f;
+  }
+  detail_step(m, s, 1, {});
+  double mass = 0, err = 0;
+  for (std::size_t i = 0; i < moved.size(); ++i) {
+    mass += s.fine_t[i];
+    err += std::abs(s.fine_t[i] - moved[i]);
+  }
+  EXPECT_NEAR(mass, 64.0, 1.0);
+  EXPECT_LT(err, 2.0);
+}
+
 TEST(Rollout, TrainerForwardMatchesTheReference) {
   const Model m = tiny_model();
   const auto r = tiny_run(m.h, 6);
@@ -712,6 +821,45 @@ TEST(RolloutRuntime, MatchesTheReferenceOnEveryIsa) {
     }
   }
   nvfx_set_isa(NVFX_ISA_AUTO);
+}
+
+TEST(RolloutRuntime, MatchesTheReferenceWithStudyD2sConstants) {
+  // The advection gain and the softening (DetailSpec::advect, soften) in the runtime, as in the reference.
+  Model m = runtime_model();
+  m.detail.advect = 1.4f;
+  m.detail.soften = 0.3f;
+  m.detail.swirl = 1.2f;
+  Fx fx(m);
+  for (const nvfx_isa isa : {NVFX_ISA_BASELINE, NVFX_ISA_AVX2, NVFX_ISA_AVX512}) {
+    if (nvfx_set_isa(isa) != NVFX_OK) continue;
+    for (const int start_index : {0, 1}) {
+      const int size = 64;
+      nvfx_instance* in = nullptr;
+      ASSERT_EQ(nvfx_instance_create(fx.e, size, &in), NVFX_OK);
+      nvfx_instance_set_controls(in, m.starts[static_cast<std::size_t>(start_index)].controls.data(), 3);
+      ASSERT_EQ(nvfx_instance_set_variation(in, start_index), NVFX_OK);
+      std::vector<std::uint8_t> rt(static_cast<std::size_t>(size) * size * 4);
+      for (const int frames : {4, 12}) {
+        ASSERT_EQ(nvfx_render(in, frames / 30.0, rt.data(), static_cast<std::size_t>(size) * 4), NVFX_OK);
+        const auto ref = reference_frame(m, start_index, size, frames);
+        int worst = 0;
+        std::size_t off = 0;
+        for (std::size_t i = 0; i < ref.size(); ++i) {
+          const int d = std::abs(int(ref[i]) - int(rt[i]));
+          worst = std::max(worst, d);
+          off += d > 1;
+        }
+        EXPECT_LE(worst, 3) << "isa " << isa << " start " << start_index << " frame " << frames;
+        EXPECT_LE(off, ref.size() / 100) << "isa " << isa << " start " << start_index << " frame " << frames;
+      }
+      nvfx_instance_free(in);
+    }
+  }
+  nvfx_set_isa(NVFX_ISA_AUTO);
+  // and they change the frames: the same instance without them differs
+  Model plain = runtime_model();
+  plain.detail.swirl = 1.2f;
+  EXPECT_NE(reference_frame(m, 1, 64, 12), reference_frame(plain, 1, 64, 12));
 }
 
 TEST(RolloutRuntime, ShardsMakeEveryFrameAFunctionOfTime) {

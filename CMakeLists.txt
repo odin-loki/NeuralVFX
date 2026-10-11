@@ -238,6 +238,10 @@ if(NEURALFX_BUILD_TOOLS)
   add_executable(nvfx_scene examples/scene_bench.cpp)
   target_link_libraries(nvfx_scene PRIVATE nvfx)
   neuralfx_defaults(nvfx_scene)
+  # Study D2 (docs/REPORT.md §6.9): the detail layer's constants tuned on the endless statistics.
+  add_executable(nvfx_d2 tools/nvfx_d2.cpp)
+  target_link_libraries(nvfx_d2 PRIVATE neuralfx_train nvfx)
+  neuralfx_defaults(nvfx_d2)
 endif()
 
 if(NEURALFX_BUILD_BENCH)

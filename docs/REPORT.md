@@ -630,6 +630,90 @@ What did not work, or is not done:
 - A gap of 0.07 to 0.12 in detail to the real floor, with motion 10-13% low on fire and smoke.
 - A crossfade every 6 s. It is smooth, but it is a blend of two runs.
 
+### 6.9 Study D2: statistics without the trade
+
+Status: **design and rule fixed** (11 October 2026), committed before any validation or test number. Results follow
+in this section when they exist.
+
+**The question.** v2's rollout effects (§12) are 0.07 to 0.12 further from a real run in detail than a second real run,
+and fire and smoke move 10-13% too little (§6.5). Every earlier attempt to improve one statistic cost motion: DCM-fine
+halved the detail spectrum distance but smoke's motion fell to 0.72 (DCM §6), the renderer mixer and the solver blends
+calmed the effects (DCM §10), and study I's coupled fine-tuning lowered fire's motion from 0.88 to 0.83 (COMPOSE §10).
+The detail constants themselves were set by a grid search over three of them, on four training settings with one
+run each. Can the detail layer, tuned against the statistics themselves, improve detail *and* motion, with nothing
+else worse?
+
+**What changes.** Only the detail layer (§6.2). The stepper, the renderer and the start points stay v2's, so the coarse
+dynamics are the same to the bit and only the fine fields, and the picture drawn from them, differ. Nine constants are
+searched:
+- the seven the file already has: `contrast`, the edges of the contrast curve (`edge0`, `edge1`; `kappa` follows them
+  as in `calibrate_detail`), the swirl's speed, length and rate (`swirl`, `swirl_scale`, `swirl_rate`) and `grow`;
+- two new ones (`DetailSpec`; file version 4, written only when either differs from its default, so older files keep
+  their layout): `advect`, the fine fields move with this multiple of the coarse flow (a constant folded into another,
+  free per pixel); `soften`, each frame before the advection the fine fields move this fraction of the way to the mean
+  of their four neighbours (the simulation's fine-scale diffusion, which the detail layer lacks; one pass over the two
+  fine fields). In the reference (`src/core/rollout.cpp`) and the runtime (`src/runtime/rt_rollout.hpp`), with parity
+  tests on every ISA (`RolloutRuntime.MatchesTheReferenceWithStudyD2sConstants`).
+- Two more were built and dropped before the search, on training settings only: the speed and the size of the
+  breakup noise of new material, as multiples of the source flicker's. Changing either by 5% put fire's mean frame
+  0.4 to 1.9 dB further from the real one and raised its spectrum distance by 0.03 to 0.12: the breakup is the very
+  flicker field that drives the stepper's sources, and new material only lands where the stepper made it while the two
+  stay one field.
+
+Why these: on training settings (below), v2 fire's detail spectrum has too much power at the finest scales (radial
+bins 33 to 64 of 64: +0.13 to +0.18 in log10 power) and too little at 8 to 14 pixels (bins 9 to 16: -0.10; smoke -0.20,
+explosions -0.22). Every constant that raised motion on its own (more swirl, `grow`, `advect`) did it
+with more fine-scale power, so its spectrum distance rose; `soften` and lower `contrast` cut the fine-scale power and
+the motion with it. Longer, faster swirls (`swirl_scale`, `swirl_rate`) improved both a little on fire and smoke. The
+trade is in the constants one at a time; the question is whether some combination escapes it. (These probes, one
+constant at a time on the training settings, are in the data root's `d2/logs`.)
+
+**Pooled statistics.** Study D's protocol (§6.5) scores one 10 s real run against one 10 s play per setting. Between
+two real seeds a run's motion varies by about ±25% (`d_stats.csv`), which buries a bias of 10%. Here each setting has R
+real runs and R plays, and its statistics are those of the R runs pooled: coverage and emission curves, log spectrum,
+mean frame and motion averaged over the runs, then distances as `metrics::distance`. With R = 1 it is study D's
+protocol, which is reported beside (as `one` in the CSVs).
+
+**The training objective.** 12 settings: the controls of the effect's salt-1 training runs 0 to 11; per setting 3 real
+runs (seeds 4,100,000 + 100 s + k; 5 s of warm-up, then 10 s; explosions from their first frame, 89 frames) and 3
+plays of the runtime from the start points, as shipped (seeds 4,200,000 + 100 s + k; explosions 89 frames). With r_s
+and r_m the means over settings of the detail spectrum distance and of |ln motion ratio| as fractions of v2's,
+J = (r_s + r_m) / 2 + max(r_s, r_m), so neither can be bought with the other (J = 2 at v2); plus 20 times the relative
+excess of the coverage and emission distances over v2's and 4 times the mean-frame PSNR lost in dB, so the picture
+cannot be traded for either.
+
+**The search.** CMA-ES (Hansen's (mu / mu_w, lambda) form; lambda = 10 for nine constants, 9 for seven) on the
+constants mapped to [0, 1] (logarithmic for the speeds, lengths and `grow`), from v2's values, step 0.1, a fixed seed;
+the same seeds at every evaluation, so the objective is deterministic. Two searches per effect: **all nine**
+(130 evaluations) and **the seven old ones** only (80 evaluations), so that a candidate needing no new file version
+exists. Code: `tools/nvfx_d2.cpp` (`nvfx_d2 probe | tune | candidates | val | test | write | cost`); every evaluation is
+logged in the data root's `d2/cand`. (Two first fire searches, with the breakup's speed and size among the constants
+and steps 0.2 and 0.1, were stopped after one generation each: no sample beat v2, and every one lost 0.6 to 4 dB of
+mean-frame PSNR, which led to dropping those two constants (above). Their 31 evaluations are kept in the data root and
+not used.)
+
+**Candidates.** Per search: the evaluation with the lowest J; and the lowest J among those no worse than v2 on any of
+the five statistics on the training settings, when that is another. Up to four per effect.
+
+**Validation (the choice).** Study G's 10 validation settings (DCM §4), R = 8: real runs 4,300,000 + 100 s + k, the
+floor (other real runs) 4,300,050 + 100 s + k, plays 4,400,000 + 100 s + k (s the setting, k the run). Each candidate
+is judged against v2 by the rule below (without the cost part); among those that meet it, the lowest mean of
+spectrum distance + |ln motion ratio| is chosen. If none meets it, the effect stops at validation and is not tested.
+
+**The rule (fixed now; the test runs once).** Study B's 10 held-out settings (study D's test settings), R = 8, fresh
+seeds: real runs **4,700,000 + 100 s + k**, the floor 4,700,050 + 100 s + k, plays **4,800,000 + 100 s + k** (s = 0 to
+9, k = 0 to 7). The chosen constants replace v2's for an effect if, chosen minus v2, paired over the 10 settings, 95%
+bootstrap (10,000 resamples):
+1. the detail spectrum distance is lower, interval entirely below zero;
+2. |ln motion ratio| is lower, interval entirely below zero;
+3. coverage distance, emission distance and mean-frame PSNR are not worse: no interval entirely on the worse side;
+4. the frame costs at most 0.2 ms more at 128 x 128: thread CPU time through `nvfx_render`, the median over 200 frames
+   (explosions 88) at controls (0.6, 0.5, 0.6), the median of the paired difference over 7 interleaved repetitions.
+
+Effects are decided one by one; ties are ties; a null is reported with its numbers. What passes is written as v3
+candidate files under the data root's `d2/models` (v2's files with the new constants; v2's own files are not touched)
+and the fireball is rendered with them beside v2's.
+
 ## 7. Runtime cost and budget
 
 Median ms per frame through `nvfx_render`, one pinned AVX2 core (90th percentiles and every configuration in
