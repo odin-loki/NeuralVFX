@@ -16,10 +16,49 @@
 namespace nfx {
 
 std::string Hyper::describe() const {
+  if (arch == Arch::multi) {
+    std::string lv;
+    for (const Level& l : levels) lv += std::format("{}G{} T{} C{}", lv.empty() ? "" : ", ", l.grid, l.grid_t, l.channels);
+    return std::format("multi [{}] H{} L{} pe{}/{} D{}+z{} K{}", lv, hidden, layers, pe_xy, pe_t, n_controls, n_latent, bases);
+  }
   const std::string cond = std::format("D{}+z{} K{} T{}", n_controls, n_latent, bases, grid_t);
   if (arch == Arch::grid) return std::format("grid G{} C{} H{} L{} {}", grid, channels, hidden, layers, cond);
   return std::format("conv l{} {}-{}-{}-4 {}", latent, c0, c1, c2, cond);
 }
+
+int Hyper::feature_channels() const {
+  if (arch == Arch::grid) return channels;
+  if (arch == Arch::conv) return c0;
+  int n = 0;
+  for (const Level& l : levels) n += l.channels;
+  return n;
+}
+
+std::vector<Volume> volumes(const Hyper& h) {
+  std::vector<Volume> v;
+  const auto add = [&](int side, int slices, int channels) {
+    Volume x{side, slices, channels, 0, 0, 0, 0};
+    if (!v.empty()) {
+      const Volume& p = v.back();
+      const std::size_t planes = static_cast<std::size_t>(h.bases) * static_cast<std::size_t>(p.slices) * static_cast<std::size_t>(p.channels);
+      x.value0 = p.value0 + planes * p.plane_values();
+      x.plane0 = p.plane0 + planes;
+      x.slice0 = p.slice0 + static_cast<std::size_t>(p.slices);
+      x.mask0 = p.mask0 + static_cast<std::size_t>(p.slices) * p.plane_values();
+    }
+    v.push_back(x);
+  };
+  if (h.arch == Arch::multi) {
+    for (const Level& l : h.levels) add(l.grid, l.grid_t, l.channels);
+  } else {
+    add(h.feature_side(), h.grid_t, h.feature_channels());
+  }
+  return v;
+}
+
+namespace {
+std::size_t multi_storage(const Model& m);  // storage_bytes() of the multi family (file version 4), below
+}  // namespace
 
 std::size_t Model::feature_count() const { return features.size(); }
 
@@ -32,6 +71,7 @@ std::size_t Model::param_count() const {
 }
 
 std::size_t Model::storage_bytes() const {
+  if (h.arch == Arch::multi) return multi_storage(*this);
   const std::size_t slices = static_cast<std::size_t>(h.bases) * h.grid_t * h.feature_channels();
   const std::size_t side2 = static_cast<std::size_t>(h.feature_side()) * h.feature_side();
   std::size_t feat = feature_bits < 16 ? slices * (packed_plane_bytes(side2, feature_bits) + 4) : features.size() * 2;
@@ -66,6 +106,13 @@ std::size_t Model::plane_points(int t) const {
 
 double Model::macs_per_pixel(int out) const {
   const double px = static_cast<double>(out) * out;
+  if (h.arch == Arch::multi) {  // per frame: blend and time lerp of every level; per pixel: bilinear rows, the MLP
+    double slice = 0;
+    for (const Level& l : h.levels) slice += 2.0 * h.bases * l.channels * l.grid * l.grid / px;
+    double mlp = 0;
+    for (const auto& l : layers) mlp += static_cast<double>(l.in) * l.out;
+    return slice + 2.0 * h.feature_channels() + mlp;
+  }
   const double side = h.feature_side();
   const double slice = 2.0 * h.bases * h.feature_channels() * side * side / px;  // per-frame blend and time lerp
   if (h.arch == Arch::grid) {
@@ -87,9 +134,19 @@ namespace {
 
 void validate(const Hyper& h) {
   const auto bad = [](std::string_view what) { throw std::invalid_argument(std::format("model: {}", what)); };
-  if (h.frames < 2 || h.bases < 1 || h.grid_t < 2 || h.n_controls < 0 || h.n_latent < 0 || h.dims() > 64) bad("bad shape");
+  if (h.frames < 2 || h.bases < 1 || (h.grid_t < 2 && h.arch != Arch::multi) || h.n_controls < 0 || h.n_latent < 0 || h.dims() > 64) bad("bad shape");
   if (h.arch == Arch::grid) {
     if (h.grid < 2 || h.channels < 1 || h.hidden < 1 || h.layers < 1 || h.size < 4) bad("bad grid shape");
+  } else if (h.arch == Arch::multi) {
+    if (h.levels.empty() || h.levels.size() > 16 || h.hidden < 1 || h.layers < 1 || h.size < 4 || h.pe_xy < 0 || h.pe_xy > 12 ||
+        h.pe_t < 0 || h.pe_t > 12) {
+      bad("bad multi-level shape");
+    }
+    for (const Level& l : h.levels) {
+      if (l.grid < 2 || l.grid > 1024 || l.grid_t < 1 || l.grid_t > 4096 || l.channels < 1 || l.channels > 256) {
+        bad("bad level (side 2 to 1024, 1 to 4096 slices, 1 to 256 channels)");
+      }
+    }
   } else if (h.arch == Arch::conv) {
     if (h.latent < 2 || h.c0 < 1 || h.c1 < 1 || h.c2 < 1 || h.size != 8 * h.latent) bad("conv: size must be 8 * latent");
   } else {
@@ -142,6 +199,67 @@ std::vector<float> slice(const Model& m, float t, std::span<const float> c) {
   return s;
 }
 
+// The multi family's reference forward pass: every level blended and sliced at its own time slices, sampled bilinearly
+// at the pixel (the grid family's coordinates at the level's side), the levels' features concatenated with the Fourier
+// features, then the grid family's MLP.
+void multi_render(const Model& m, float t, std::span<const float> c, int size, std::span<float> rgba) {
+  const Hyper& h = m.h;
+  const auto vols = volumes(h);
+  const auto w = apply(m.basis, c);
+  const auto film = apply(m.films[0], c);
+  std::vector<std::vector<float>> sl;
+  for (const Volume& v : vols) {
+    int i0, i1;
+    float ft;
+    slice_lerp(v.slices, h.loop, t, i0, i1, ft);
+    const std::size_t n = static_cast<std::size_t>(v.channels) * v.plane_values();
+    std::vector<float> s(n, 0.f);
+    for (int k = 0; k < h.bases; ++k) {
+      const float* a = m.features.data() + v.value0 + (static_cast<std::size_t>(k) * v.slices + static_cast<std::size_t>(i0)) * n;
+      const float* b = m.features.data() + v.value0 + (static_cast<std::size_t>(k) * v.slices + static_cast<std::size_t>(i1)) * n;
+      for (std::size_t i = 0; i < n; ++i) s[i] += w[static_cast<std::size_t>(k)] * (a[i] + ft * (b[i] - a[i]));
+    }
+    sl.push_back(std::move(s));
+  }
+  std::vector<float> tf(static_cast<std::size_t>(2 * h.pe_t));
+  time_features(h.pe_t, h.loop, t, tf.data());
+  const int H = h.hidden;
+  std::vector<float> f(static_cast<std::size_t>(h.mlp_in()));
+  for (int py = 0; py < size; ++py) {
+    for (int px = 0; px < size; ++px) {
+      std::size_t at = 0;
+      for (std::size_t l = 0; l < vols.size(); ++l) {
+        const int G = vols[l].side;
+        const float gx = std::clamp((static_cast<float>(px) + 0.5f) / static_cast<float>(size) * static_cast<float>(G) - 0.5f, 0.f, static_cast<float>(G - 1));
+        const float gy = std::clamp((static_cast<float>(py) + 0.5f) / static_cast<float>(size) * static_cast<float>(G) - 0.5f, 0.f, static_cast<float>(G - 1));
+        const int x0 = std::min(static_cast<int>(gx), G - 2), y0 = std::min(static_cast<int>(gy), G - 2);
+        const float fx = gx - static_cast<float>(x0), fy = gy - static_cast<float>(y0);
+        for (int ch = 0; ch < vols[l].channels; ++ch) {
+          const float* p = sl[l].data() + static_cast<std::size_t>(ch) * G * G;
+          const auto v = [&](int x, int y) { return p[static_cast<std::size_t>(y) * G + x]; };
+          const float a = v(x0, y0) + fx * (v(x0 + 1, y0) - v(x0, y0));
+          const float b = v(x0, y0 + 1) + fx * (v(x0 + 1, y0 + 1) - v(x0, y0 + 1));
+          f[at++] = a + fy * (b - a);
+        }
+      }
+      position_features(h.pe_xy, (static_cast<float>(px) + 0.5f) / static_cast<float>(size), (static_cast<float>(py) + 0.5f) / static_cast<float>(size),
+                        f.data() + at);
+      at += static_cast<std::size_t>(4 * h.pe_xy);
+      std::ranges::copy(tf, f.begin() + static_cast<std::ptrdiff_t>(at));
+      auto x = apply(m.layers[0], f);
+      for (int o = 0; o < H; ++o) {
+        const auto i = static_cast<std::size_t>(o);
+        x[i] = std::max(0.f, (1.f + film[i]) * x[i] + film[static_cast<std::size_t>(H) + i]);
+      }
+      for (std::size_t l = 1; l < m.layers.size(); ++l) {
+        x = apply(m.layers[l], x);
+        if (l + 1 < m.layers.size()) std::ranges::for_each(x, [](float& v) { v = std::max(0.f, v); });
+      }
+      std::ranges::copy(x, rgba.begin() + static_cast<std::ptrdiff_t>((static_cast<std::size_t>(py) * size + px) * 4));
+    }
+  }
+}
+
 }  // namespace
 
 Model init_model(const Hyper& h, std::uint64_t seed) {
@@ -150,16 +268,21 @@ Model init_model(const Hyper& h, std::uint64_t seed) {
   m.h = h;
   std::mt19937_64 rng(seed);
   const int D = h.dims();
-  const std::size_t plane = static_cast<std::size_t>(h.feature_channels()) * h.feature_side() * h.feature_side();
-  m.features.resize(static_cast<std::size_t>(h.bases) * h.grid_t * plane);
+  if (h.arch == Arch::multi) {
+    const Volume last = volumes(h).back();
+    m.features.resize(last.value0 + static_cast<std::size_t>(h.bases) * last.slices * last.channels * last.plane_values());
+  } else {
+    const std::size_t plane = static_cast<std::size_t>(h.feature_channels()) * h.feature_side() * h.feature_side();
+    m.features.resize(static_cast<std::size_t>(h.bases) * h.grid_t * plane);
+  }
   std::uniform_real_distribution<float> fu(-0.1f, 0.1f);
   for (float& v : m.features) v = fu(rng);
   m.basis = Dense(D, h.bases);
   std::uniform_real_distribution<float> bu(-0.5f, 0.5f);
   for (float& w : m.basis.w) w = bu(rng) / std::sqrt(static_cast<float>(std::max(1, D)));
   std::ranges::fill(m.basis.b, 1.f);
-  if (h.arch == Arch::grid) {
-    int in = h.channels;
+  if (h.arch == Arch::grid || h.arch == Arch::multi) {
+    int in = h.arch == Arch::grid ? h.channels : h.mlp_in();
     for (int l = 0; l < h.layers; ++l) {
       m.layers.emplace_back(in, h.hidden);
       he_init(m.layers.back(), rng, 1.f);
@@ -199,6 +322,10 @@ std::vector<float> condition(const Model& m, std::span<const float> controls, st
 void reference_render(const Model& m, float t, std::span<const float> c, int size, std::span<float> rgba) {
   const Hyper& h = m.h;
   if (rgba.size() < static_cast<std::size_t>(size) * size * 4) throw std::invalid_argument("reference_render: buffer too small");
+  if (h.arch == Arch::multi) {
+    multi_render(m, t, c, size, rgba);
+    return;
+  }
   const auto s = slice(m, t, c);
   if (h.arch == Arch::grid) {
     const auto film = apply(m.films[0], c);
@@ -284,6 +411,7 @@ constexpr std::string_view kMagic = "NVFXMDL1";
 constexpr std::uint32_t kVersion = 1;
 constexpr std::uint32_t kVersionVq = 2;  // vector-quantised features (vq_bits, vq_dim after feature_bits)
 constexpr std::uint32_t kVersionMixed = 3;  // bits per feature plane (a byte per plane before the planes)
+constexpr std::uint32_t kVersionMulti = 4;  // the multi family (study F4)
 
 float round_f16(float v) { return static_cast<float>(static_cast<std::float16_t>(v)); }
 
@@ -562,6 +690,395 @@ void vq_apply(Model& m, std::span<const std::uint8_t> idx) {
 
 }  // namespace
 
+std::vector<std::uint8_t> mask_runs(std::span<const std::uint8_t> mask) {
+  std::vector<std::uint8_t> out;
+  const auto put = [&](std::size_t n) {
+    do {
+      const auto low = static_cast<std::uint8_t>(n & 0x7f);
+      n >>= 7;
+      out.push_back(static_cast<std::uint8_t>(low | (n ? 0x80 : 0)));
+    } while (n);
+  };
+  std::size_t j = 0;
+  std::uint8_t value = 0;
+  while (j < mask.size()) {
+    std::size_t n = 0;
+    while (j + n < mask.size() && (mask[j + n] != 0) == (value != 0)) ++n;
+    put(n);
+    j += n;
+    value ^= 1;
+  }
+  if (mask.empty()) put(0);
+  return out;
+}
+
+std::size_t read_mask_runs(std::span<const std::uint8_t> runs, std::span<std::uint8_t> mask) {
+  std::size_t at = 0, j = 0;
+  std::uint8_t value = 0;
+  bool first = true;
+  do {
+    std::size_t n = 0;
+    for (int shift = 0;; shift += 7) {
+      if (at >= runs.size() || shift > 56) return 0;
+      const std::uint8_t b = runs[at++];
+      n |= static_cast<std::size_t>(b & 0x7f) << shift;
+      if (!(b & 0x80)) break;
+    }
+    if ((n == 0 && !first) || n > mask.size() - j) return 0;
+    std::fill_n(mask.begin() + static_cast<std::ptrdiff_t>(j), n, value);
+    j += n;
+    value ^= 1;
+    first = false;
+  } while (j < mask.size());
+  return at;
+}
+
+namespace {
+
+// --- the multi family (file version 4) ---
+
+// Every feature plane of a multi model: its first value, values, level, time slice and first mask point.
+struct PlaneAt {
+  std::size_t value0, n, mask0;
+  int level, slice;
+};
+std::vector<PlaneAt> multi_planes(const Hyper& h) {
+  std::vector<PlaneAt> v;
+  const auto vols = volumes(h);
+  for (std::size_t l = 0; l < vols.size(); ++l) {
+    const Volume& vol = vols[l];
+    const std::size_t n = vol.plane_values();
+    for (int k = 0; k < h.bases; ++k) {
+      for (int t = 0; t < vol.slices; ++t) {
+        for (int c = 0; c < vol.channels; ++c) {
+          const std::size_t local = (static_cast<std::size_t>(k) * vol.slices + static_cast<std::size_t>(t)) * vol.channels + static_cast<std::size_t>(c);
+          v.push_back({vol.value0 + local * n, n, vol.mask0 + static_cast<std::size_t>(t) * n, static_cast<int>(l), t});
+        }
+      }
+    }
+  }
+  return v;
+}
+
+int multi_bits(const Model& m, std::size_t plane) {
+  return m.plane_bits.empty() ? std::min(m.feature_bits, 8) : m.plane_bits[plane];
+}
+
+// Why a multi model cannot be stored, or empty.
+std::string multi_error(const Model& m) {
+  const auto planes = multi_planes(m.h);
+  if (!m.plane_bits.empty()) {
+    if (m.plane_bits.size() != planes.size()) return "one width per feature plane";
+    for (std::size_t k = 0; k < planes.size(); ++k) {
+      if (m.plane_bits[k] < 1 || m.plane_bits[k] > 8) return "widths 1 to 8";
+      if (k > 0 && planes[k].level == planes[k - 1].level && m.plane_bits[k] != m.plane_bits[k - 1]) return "one width per level";
+    }
+  } else if (m.feature_bits < 1) {
+    return "feature bits";
+  }
+  if (!m.feature_mask.empty()) {
+    const Volume last = volumes(m.h).back();
+    if (m.feature_mask.size() != last.mask0 + static_cast<std::size_t>(last.slices) * last.plane_values()) return "a mask per level";
+    if (std::ranges::any_of(m.feature_mask, [](std::uint8_t v) { return v > 1; })) return "mask values 0 or 1";
+  }
+  if (m.mlp_bits != 8 && m.mlp_bits != 16) return "MLP weights at 8 or 16 bits";
+  if (m.vq_bits > 0) return "no vector quantisation";
+  return {};
+}
+
+std::span<const std::uint8_t> multi_mask(const Model& m, const PlaneAt& p) {
+  if (m.feature_mask.empty()) return {};
+  return std::span(m.feature_mask).subspan(p.mask0, p.n);
+}
+
+// A layer's weights as stored at 8 bits: per output unit the fp16 scale of its largest |w| over 127, and signed codes.
+float weight_scale8(const Dense& d, int o) {
+  float mx = 0.f;
+  for (int i = 0; i < d.in; ++i) mx = std::max(mx, std::abs(d.w[static_cast<std::size_t>(o) * d.in + i]));
+  return round_f16(mx / 127.f);
+}
+std::int8_t weight_code8(float w, float scale) {
+  if (!(scale > 0.f)) return 0;
+  return static_cast<std::int8_t>(std::clamp(std::lround(w / scale), -127L, 127L));
+}
+
+std::size_t multi_storage(const Model& m) {
+  const auto vols = volumes(m.h);
+  const auto planes = multi_planes(m.h);
+  const bool mk = !m.feature_mask.empty() || !m.raw_mask_at.empty();
+  std::size_t n = 20 + 16 * vols.size();  // level count, Fourier frequencies, flags, mask bytes; per level its shape and width
+  if (!m.raw_offsets.empty()) {  // the resident form (pack_features)
+    n += m.raw_mask.size() + m.raw_u8.size() + planes.size() * (mk ? 6 : 4);
+  } else {
+    if (mk) {
+      for (const Volume& v : vols) {
+        for (int t = 0; t < v.slices; ++t) n += mask_runs(std::span(m.feature_mask).subspan(v.mask0 + static_cast<std::size_t>(t) * v.plane_values(), v.plane_values())).size();
+      }
+    }
+    for (std::size_t k = 0; k < planes.size(); ++k) {
+      const auto act = multi_mask(m, planes[k]);
+      const std::size_t pts = act.empty() ? planes[k].n : static_cast<std::size_t>(std::ranges::count(act, std::uint8_t{1}));
+      n += (mk ? 6 : 4) + packed_plane_bytes(pts, multi_bits(m, k));
+    }
+  }
+  n += 2 * m.basis.params();
+  for (const auto& d : m.layers) n += m.mlp_bits == 8 ? d.w.size() + 2 * static_cast<std::size_t>(d.out) + 2 * d.b.size() : 2 * d.params();
+  for (const auto& d : m.films) n += 2 * d.params();
+  n += 2 * (m.z_mean.size() + m.z_std.size());
+  for (const auto& z : m.z_train) n += 2 * z.size();
+  return n;
+}
+
+void multi_pack(Model& m) {
+  const auto vols = volumes(m.h);
+  const auto planes = multi_planes(m.h);
+  if (m.masked()) {
+    for (const Volume& v : vols) {
+      for (int t = 0; t < v.slices; ++t) {
+        m.raw_mask_at.push_back(static_cast<std::uint32_t>(m.raw_mask.size()));
+        const auto r = mask_runs(std::span(m.feature_mask).subspan(v.mask0 + static_cast<std::size_t>(t) * v.plane_values(), v.plane_values()));
+        m.raw_mask.insert(m.raw_mask.end(), r.begin(), r.end());
+      }
+    }
+  }
+  std::vector<PlaneCodes> pcs;
+  std::size_t total = 0;
+  for (std::size_t k = 0; k < planes.size(); ++k) {
+    pcs.push_back(plane_codes(std::span(m.features.data() + planes[k].value0, planes[k].n), multi_bits(m, k), m.feature_trim, multi_mask(m, planes[k])));
+    m.raw_offsets.push_back(static_cast<std::uint32_t>(total));
+    total += packed_plane_bytes(pcs.back().codes.size(), multi_bits(m, k));
+  }
+  m.raw_u8.assign(total, 0);
+  for (std::size_t k = 0; k < pcs.size(); ++k) {
+    m.raw_ranges.push_back(pcs[k].lo);
+    m.raw_ranges.push_back(pcs[k].hi);
+    if (m.masked()) m.raw_fill.push_back(pcs[k].fill);
+    put_codes(pcs[k].codes, multi_bits(m, k), m.raw_u8.data() + m.raw_offsets[k]);
+  }
+}
+
+void multi_quantise(Model& m) {
+  const auto planes = multi_planes(m.h);
+  for (std::size_t k = 0; k < planes.size(); ++k) {
+    quantise_plane(std::span(m.features.data() + planes[k].value0, planes[k].n), multi_bits(m, k), m.feature_trim, multi_mask(m, planes[k]));
+  }
+  if (m.mlp_bits == 8) {
+    for (auto& d : m.layers) quantise_weights8(d);
+  }
+}
+
+std::expected<void, std::string> save_multi(std::ostream& o, const Model& m) {
+  if (const std::string e = multi_error(m); !e.empty()) return std::unexpected("nvfx: multi-level storage: " + e);
+  const Hyper& h = m.h;
+  const auto vols = volumes(h);
+  const auto planes = multi_planes(h);
+  const bool mk = m.masked();
+  o.write(kMagic.data(), static_cast<std::streamsize>(kMagic.size()));
+  bin::put(o, kVersionMulti);
+  bin::put(o, static_cast<std::uint32_t>(h.arch));
+  for (const int v : {h.size, h.frames, static_cast<int>(h.loop), h.n_controls, h.n_latent, h.bases, h.grid_t, h.grid,
+                      h.channels, h.hidden, h.layers, h.latent, h.c0, h.c1, h.c2}) {
+    bin::put(o, static_cast<std::int32_t>(v));
+  }
+  std::vector<std::uint8_t> runs;  // every (level, slice)'s mask runs, one after another
+  if (mk) {
+    for (const Volume& v : vols) {
+      for (int t = 0; t < v.slices; ++t) {
+        const auto r = mask_runs(std::span(m.feature_mask).subspan(v.mask0 + static_cast<std::size_t>(t) * v.plane_values(), v.plane_values()));
+        runs.insert(runs.end(), r.begin(), r.end());
+      }
+    }
+  }
+  bin::put(o, static_cast<std::uint32_t>(vols.size()));
+  bin::put(o, static_cast<std::uint32_t>(h.pe_xy));
+  bin::put(o, static_cast<std::uint32_t>(h.pe_t));
+  bin::put(o, static_cast<std::uint32_t>((mk ? 1u : 0u) | (m.mlp_bits == 8 ? 2u : 0u)));
+  bin::put(o, static_cast<std::uint32_t>(runs.size()));
+  for (std::size_t l = 0; l < vols.size(); ++l) {
+    std::size_t first = 0;
+    while (first < planes.size() && planes[first].level != static_cast<int>(l)) ++first;
+    for (const int v : {vols[l].side, vols[l].slices, vols[l].channels, multi_bits(m, first)}) bin::put(o, static_cast<std::uint32_t>(v));
+  }
+  bin::put_str(o, m.effect, 32);
+  bin::put(o, m.fps);
+  for (int k = 0; k < h.n_controls; ++k) {
+    bin::put_str(o, static_cast<std::size_t>(k) < m.control_names.size() ? m.control_names[static_cast<std::size_t>(k)] : std::string{}, 16);
+  }
+  o.write(reinterpret_cast<const char*>(runs.data()), static_cast<std::streamsize>(runs.size()));
+  std::vector<std::uint8_t> codes;
+  for (std::size_t k = 0; k < planes.size(); ++k) {
+    const int b = multi_bits(m, k);
+    const PlaneCodes pc = plane_codes(std::span(m.features.data() + planes[k].value0, planes[k].n), b, m.feature_trim, multi_mask(m, planes[k]));
+    put_f16(o, std::array{pc.lo, pc.hi});
+    if (mk) put_f16(o, std::array{pc.fill});
+    codes.assign(std::max<std::size_t>(1, packed_plane_bytes(pc.codes.size(), b)), 0);
+    put_codes(pc.codes, b, codes.data());
+    o.write(reinterpret_cast<const char*>(codes.data()), static_cast<std::streamsize>(packed_plane_bytes(pc.codes.size(), b)));
+  }
+  put_dense(o, m.basis);
+  bin::put(o, static_cast<std::uint32_t>(m.layers.size()));
+  for (const auto& d : m.layers) {
+    if (m.mlp_bits != 8) {
+      put_dense(o, d);
+      continue;
+    }
+    bin::put(o, static_cast<std::uint32_t>(d.in));
+    bin::put(o, static_cast<std::uint32_t>(d.out));
+    std::vector<float> sc(static_cast<std::size_t>(d.out));
+    for (int u = 0; u < d.out; ++u) sc[static_cast<std::size_t>(u)] = weight_scale8(d, u);
+    put_f16(o, sc);
+    for (int u = 0; u < d.out; ++u) {
+      for (int i = 0; i < d.in; ++i) {
+        const std::int8_t q = weight_code8(d.w[static_cast<std::size_t>(u) * d.in + i], sc[static_cast<std::size_t>(u)]);
+        o.put(static_cast<char>(static_cast<std::uint8_t>(q + 128)));  // excess 128: 1 to 255
+      }
+    }
+    put_f16(o, d.b);
+  }
+  bin::put(o, static_cast<std::uint32_t>(m.films.size()));
+  for (const auto& d : m.films) put_dense(o, d);
+  put_f16(o, m.z_mean);
+  put_f16(o, m.z_std);
+  bin::put(o, static_cast<std::uint32_t>(m.z_train.size()));
+  for (const auto& z : m.z_train) put_f16(o, z);
+  if (!o) return std::unexpected("nvfx: write failed");
+  return {};
+}
+
+std::expected<Model, std::string> load_multi(std::istream& i, Hyper h) {
+  const auto nl = bin::get<std::uint32_t>(i), pxy = bin::get<std::uint32_t>(i), pt = bin::get<std::uint32_t>(i), flags = bin::get<std::uint32_t>(i);
+  const auto mask_bytes = bin::get<std::uint32_t>(i);
+  if (!nl || !pxy || !pt || !flags || !mask_bytes || *nl < 1 || *nl > 16 || *pxy > 12 || *pt > 12 || (*flags & ~3u) != 0 ||
+      ((*flags & 1u) == 0 && *mask_bytes != 0) || *mask_bytes > (1u << 28)) {
+    return std::unexpected("nvfx: bad multi-level header");
+  }
+  h.pe_xy = static_cast<int>(*pxy);
+  h.pe_t = static_cast<int>(*pt);
+  h.levels.clear();
+  std::vector<int> level_bits;
+  for (std::uint32_t l = 0; l < *nl; ++l) {
+    std::array<std::uint32_t, 4> f{};
+    for (auto& v : f) {
+      const auto r = bin::get<std::uint32_t>(i);
+      if (!r || *r > 4096) return std::unexpected("nvfx: bad level");
+      v = *r;
+    }
+    if (f[3] < 1 || f[3] > 8) return std::unexpected("nvfx: bad level width");
+    h.levels.push_back({static_cast<int>(f[0]), static_cast<int>(f[1]), static_cast<int>(f[2])});
+    level_bits.push_back(static_cast<int>(f[3]));
+  }
+  Model m;
+  try {
+    m = init_model(h, 0);  // shapes and validation
+  } catch (const std::exception& e) {
+    return std::unexpected(std::format("nvfx: {}", e.what()));
+  }
+  const auto effect = bin::get_str(i, 32);
+  const auto fps = bin::get<float>(i);
+  if (!effect || !fps) return std::unexpected("nvfx: bad header");
+  m.effect = *effect;
+  m.fps = *fps;
+  m.feature_bits = 8;
+  m.mlp_bits = (*flags & 2u) ? 8 : 16;
+  for (int k = 0; k < h.n_controls; ++k) {
+    auto name = bin::get_str(i, 16);
+    if (!name) return std::unexpected(name.error());
+    m.control_names.push_back(*name);
+  }
+  const auto vols = volumes(h);
+  const auto planes = multi_planes(h);
+  m.plane_bits.resize(planes.size());
+  for (std::size_t k = 0; k < planes.size(); ++k) m.plane_bits[k] = static_cast<std::uint8_t>(level_bits[static_cast<std::size_t>(planes[k].level)]);
+  const bool mk = (*flags & 1u) != 0;
+  if (mk) {  // the runs of every (level, slice), one after another, exactly mask_bytes of them
+    m.feature_mask.assign(vols.back().mask0 + static_cast<std::size_t>(vols.back().slices) * vols.back().plane_values(), 0);
+    std::vector<std::uint8_t> runs(*mask_bytes);
+    i.read(reinterpret_cast<char*>(runs.data()), static_cast<std::streamsize>(runs.size()));
+    if (!i) return std::unexpected("truncated file");
+    std::size_t at = 0;
+    for (const Volume& v : vols) {
+      for (int t = 0; t < v.slices; ++t) {
+        const std::size_t used = read_mask_runs(std::span(runs).subspan(at), std::span(m.feature_mask.data() + v.mask0 + static_cast<std::size_t>(t) * v.plane_values(), v.plane_values()));
+        if (used == 0) return std::unexpected("nvfx: bad mask runs");
+        at += used;
+      }
+    }
+    if (at != runs.size()) return std::unexpected("nvfx: bad mask runs");
+  }
+  std::vector<std::uint8_t> codes;
+  for (std::size_t k = 0; k < planes.size(); ++k) {
+    const int b = m.plane_bits[k];
+    const auto act = multi_mask(m, planes[k]);
+    const std::size_t n = act.empty() ? planes[k].n : static_cast<std::size_t>(std::ranges::count(act, std::uint8_t{1}));
+    std::array<float, 3> r{};
+    if (auto e = get_f16(i, std::span(r).first(mk ? 3 : 2)); !e) return std::unexpected(e.error());
+    codes.assign(packed_plane_bytes(n, b), 0);
+    i.read(reinterpret_cast<char*>(codes.data()), static_cast<std::streamsize>(codes.size()));
+    if (!i) return std::unexpected("truncated file");
+    float* v = m.features.data() + planes[k].value0;
+    for (std::size_t j = 0, q = 0; j < planes[k].n; ++j) {
+      if (!act.empty() && !act[j]) {
+        v[j] = r[2];
+        continue;
+      }
+      v[j] = dq8(b == 8 ? codes[q] : packed_code(codes.data(), q, b), {r[0], r[1]}, b);
+      ++q;
+    }
+  }
+  const auto expect_dense = [&](Dense& slot, bool w8) -> std::expected<void, std::string> {
+    if (!w8) {
+      auto d = get_dense(i);
+      if (!d) return std::unexpected(d.error());
+      if (d->in != slot.in || d->out != slot.out) return std::unexpected("nvfx: layer shape does not match the header");
+      slot = std::move(*d);
+      return {};
+    }
+    const auto in = bin::get<std::uint32_t>(i), out = bin::get<std::uint32_t>(i);
+    if (!in || !out || static_cast<int>(*in) != slot.in || static_cast<int>(*out) != slot.out) return std::unexpected("nvfx: layer shape does not match the header");
+    std::vector<float> sc(static_cast<std::size_t>(slot.out));
+    if (auto e = get_f16(i, sc); !e) return std::unexpected(e.error());
+    std::vector<char> q(slot.w.size());
+    i.read(q.data(), static_cast<std::streamsize>(q.size()));
+    if (!i) return std::unexpected("truncated file");
+    for (std::size_t j = 0; j < q.size(); ++j) {
+      const int c = static_cast<int>(static_cast<std::uint8_t>(q[j])) - 128;  // excess 128
+      if (c < -127) return std::unexpected("nvfx: bad 8-bit weight");
+      slot.w[j] = static_cast<float>(c) * sc[j / static_cast<std::size_t>(slot.in)];
+    }
+    return get_f16(i, slot.b);
+  };
+  if (auto e = expect_dense(m.basis, false); !e) return std::unexpected(e.error());
+  for (auto* group : {&m.layers, &m.films}) {
+    const auto n = bin::get<std::uint32_t>(i);
+    if (!n || *n != group->size()) return std::unexpected("nvfx: layer count does not match the header");
+    for (auto& d : *group) {
+      if (auto e = expect_dense(d, group == &m.layers && m.mlp_bits == 8); !e) return std::unexpected(e.error());
+    }
+  }
+  if (auto e = get_f16(i, m.z_mean); !e) return std::unexpected(e.error());
+  if (auto e = get_f16(i, m.z_std); !e) return std::unexpected(e.error());
+  const auto nz = bin::get<std::uint32_t>(i);
+  if (!nz || *nz > 1000000) return std::unexpected("nvfx: bad code count");
+  m.z_train.assign(*nz, std::vector<float>(static_cast<std::size_t>(h.n_latent)));
+  for (auto& z : m.z_train) {
+    if (auto e = get_f16(i, z); !e) return std::unexpected(e.error());
+  }
+  m.pack_features();
+  return m;
+}
+
+}  // namespace
+
+void quantise_weights8(Dense& d) {
+  for (int o = 0; o < d.out; ++o) {
+    const float s = weight_scale8(d, o);
+    for (int i = 0; i < d.in; ++i) {
+      float& w = d.w[static_cast<std::size_t>(o) * d.in + i];
+      w = static_cast<float>(weight_code8(w, s)) * s;
+    }
+  }
+}
+
 void Model::pack_features() {
   raw_f16.clear();
   raw_u8.clear();
@@ -570,6 +1087,11 @@ void Model::pack_features() {
   raw_offsets.clear();
   raw_mask.clear();
   raw_fill.clear();
+  raw_mask_at.clear();
+  if (h.arch == Arch::multi) {
+    multi_pack(*this);
+    return;
+  }
   if (per_plane()) {
     const std::size_t p = plane_size(h);
     if (masked()) {
@@ -625,7 +1147,9 @@ void Model::pack_features() {
 }
 
 void quantise_like_storage(Model& m) {
-  if (m.per_plane()) {
+  if (m.h.arch == Arch::multi) {
+    multi_quantise(m);  // features at their widths, the MLP's weights at mlp_bits (then fp16, below, changes nothing)
+  } else if (m.per_plane()) {
     const std::size_t p = plane_size(m.h);
     for (std::size_t off = 0, k = 0; off < m.features.size() && k < m.plane_bits.size(); off += p, ++k) {
       quantise_plane(std::span(m.features.data() + off, p), m.plane_bits[k], m.feature_trim, plane_mask(m, k));
@@ -648,6 +1172,10 @@ void quantise_like_storage(Model& m) {
   r16(m.basis.b);
   for (auto* group : {&m.layers, &m.films}) {
     for (auto& d : *group) {
+      if (group == &m.layers && m.h.arch == Arch::multi && m.mlp_bits == 8) {
+        r16(d.b);  // the weights are their 8-bit codes times an fp16 scale already
+        continue;
+      }
       r16(d.w);
       r16(d.b);
     }
@@ -663,6 +1191,7 @@ std::expected<void, std::string> save_model(const std::filesystem::path& path, c
 }
 
 std::expected<void, std::string> save_model(std::ostream& o, const Model& m0) {
+  if (m0.h.arch == Arch::multi) return save_multi(o, m0);
   const bool vq = m0.vq_bits > 0;
   if (vq && !vq_valid(m0)) return std::unexpected("nvfx: bad vector quantisation (bits 2 to 8, a codebook per channel group)");
   const bool mixed = m0.per_plane();
@@ -773,7 +1302,9 @@ std::expected<Model, std::string> load_model(std::istream& i) {
   i.read(magic.data(), static_cast<std::streamsize>(magic.size()));
   if (!i || magic != kMagic) return std::unexpected("nvfx: not a model");
   const auto version = bin::get<std::uint32_t>(i);
-  if (!version || (*version != kVersion && *version != kVersionVq && *version != kVersionMixed)) return std::unexpected("nvfx: unsupported version");
+  if (!version || (*version != kVersion && *version != kVersionVq && *version != kVersionMixed && *version != kVersionMulti)) {
+    return std::unexpected("nvfx: unsupported version");
+  }
   const auto arch = bin::get<std::uint32_t>(i);
   if (!arch) return std::unexpected(arch.error());
   Hyper h;
@@ -786,6 +1317,8 @@ std::expected<Model, std::string> load_model(std::istream& i) {
     if (f) *f = *v;
     else h.loop = *v != 0;
   }
+  if ((h.arch == Arch::multi) != (*version == kVersionMulti)) return std::unexpected("nvfx: the multi family is file version 4");
+  if (h.arch == Arch::multi) return load_multi(i, h);
   Model m;
   try {
     m = init_model(h, 0);  // shapes and validation

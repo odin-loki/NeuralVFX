@@ -293,6 +293,74 @@ TEST(Cm, MixedPrecisionModelsRoundTrip) {
   }
 }
 
+TEST(Cm, MultiLevelModelsRoundTrip) {
+  // Study F4's file version 4 is parsed: per level the ranges (and fills) as tensors and the codes at the level's width
+  // (whole planes when they fill whole bytes, else and when masked one plane after another), the mask runs as plain
+  // bytes, 8-bit MLP weights as a tensor with their scales. In every format; a damaged stream is refused.
+  for (const bool masked : {false, true}) {
+    for (const int mlp_bits : {16, 8}) {
+      Hyper h;
+      h.arch = Arch::multi;
+      h.size = 32;
+      h.frames = 8;
+      h.bases = 2;
+      h.n_latent = 1;
+      h.levels = {{16, 4, 3}, {5, 1, 2}, {8, 6, 2}};  // 5 x 5 planes at 3 bits end inside a byte
+      h.pe_xy = 1;
+      h.pe_t = 1;
+      h.hidden = 6;
+      Model m = init_model(h, 17);
+      m.effect = "smoke";
+      m.mlp_bits = mlp_bits;
+      const auto vols = volumes(h);
+      std::size_t values = 0;
+      for (std::size_t l = 0; l < vols.size(); ++l) {
+        const std::size_t n = static_cast<std::size_t>(h.bases) * vols[l].slices * vols[l].channels;
+        for (std::size_t k = 0; k < n; ++k) m.plane_bits.push_back(static_cast<std::uint8_t>(l == 0 ? 4 : l == 1 ? 3 : 8));
+        values += n * vols[l].plane_values();
+      }
+      if (masked) {
+        m.feature_mask.resize(vols.back().mask0 + static_cast<std::size_t>(vols.back().slices) * vols.back().plane_values());
+        values = 0;
+        for (std::size_t j = 0; j < m.feature_mask.size(); ++j) m.feature_mask[j] = static_cast<std::uint8_t>((j * j + j / 3) % 3 != 0);
+        for (const Volume& v : vols) {
+          for (int t = 0; t < v.slices; ++t) {
+            const auto first = m.feature_mask.begin() + static_cast<std::ptrdiff_t>(v.mask0 + static_cast<std::size_t>(t) * v.plane_values());
+            values += static_cast<std::size_t>(h.bases) * v.channels * static_cast<std::size_t>(std::count(first, first + static_cast<std::ptrdiff_t>(v.plane_values()), std::uint8_t{1}));
+          }
+        }
+      }
+      m.z_train = {{0.3f}, {-0.2f}};
+      m.z_mean = {0.05f};
+      m.z_std = {0.25f};
+      std::ostringstream os;
+      ASSERT_TRUE(save_model(os, m));
+      const auto file = bytes_of(os.str());
+      expect_model_round_trip(file);
+      for (const cm::Options o : {cm::Options{}, cm::Options{cm::Literal::fast, true, false}, cm::Options{cm::Literal::light, true, true, 512}}) {
+        const auto back = cm::unpack_model(cm::pack_model(file, o).data);
+        ASSERT_TRUE(back) << back.error();
+        EXPECT_TRUE(*back == file);
+      }
+      const cm::Packed p = cm::pack_model(file);
+      const auto feat = std::ranges::find(p.parts, cm::Kind::features, &cm::Part::kind);
+      ASSERT_NE(feat, p.parts.end()) << "masked " << masked << " mlp " << mlp_bits;
+      EXPECT_EQ(feat->values, values);
+      const auto w = std::ranges::find(p.parts, cm::Kind::weights, &cm::Part::kind);
+      ASSERT_NE(w, p.parts.end());
+      int refused = 0;
+      for (std::size_t at = 30; at < p.data.size(); at += std::max<std::size_t>(11, p.data.size() / 10)) {
+        auto bad = p.data;
+        bad[at] ^= 0x3c;
+        const auto r = cm::unpack_model(bad);
+        EXPECT_TRUE(!r || *r == file) << "damage at " << at << " gave another file";
+        refused += r ? 0 : 1;
+      }
+      EXPECT_GT(refused, 0);
+    }
+  }
+}
+
 TEST(Cm, VectorQuantisedModelsRoundTrip) {
   // Codebooks and index planes are parsed: the indices are coded with their bits, the codebooks as fp16 weights.
   for (const int bits : {8, 5, 3}) {

@@ -103,6 +103,9 @@ struct Ctx {
   std::string teacher;         // distillation teacher configuration (empty: the architecture at 8 bits)
   std::vector<fs::path> flipbooks;  // report: more flipbook tables
   std::string suffix;          // report: written as <study>_equal_quality_<set><suffix>.csv
+  bool pilot = false;          // train: score with the trainer's forward pass (no runtime, no coder): <study>_pilot_<set>.csv
+  bool reuse = false;          // train: score a model file already saved (by a pilot) instead of training it again
+  std::vector<std::string> also;  // report, pairs: more studies' network tables (e.g. f3 beside f4)
 };
 
 // --- clips --------------------------------------------------------------------------------------------------------
@@ -419,6 +422,8 @@ struct Config {
   float distill = 0.f;
   bool sparse = false;
   int sparse_dilate = 0;
+  std::vector<int> level_bits;  // multi: per level (empty: `bits` for all)
+  bool mlp8 = false, mlp_qat = false;
   std::string arch;   // the architecture field
 };
 
@@ -442,6 +447,19 @@ Config parse_config(const std::string& name) {
     h.layers = L;
     h.grid_t = T;
     cf.iters = 2000;
+  } else if (a.size() > 1 && a[0] == 'p' && a.find('h') != std::string::npos) {  // multi: p<G>.<C>.<T>[+<G>.<C>.<T>...]h<H>l<L>
+    h.arch = Arch::multi;
+    const std::string lv = a.substr(1, a.find('h') - 1);
+    for (const auto part : std::views::split(lv, '+')) {
+      const std::string one(std::string_view(part).begin(), std::string_view(part).end());
+      Level l;
+      if (std::sscanf(one.c_str(), "%d.%d.%d", &l.grid, &l.channels, &l.grid_t) != 3) throw std::invalid_argument("configuration: level <G>.<C>.<T>");
+      h.levels.push_back(l);
+    }
+    if (std::sscanf(a.c_str() + a.find('h'), "h%dl%d", &H, &L) != 2) throw std::invalid_argument("configuration: p...h<H>l<L>");
+    h.hidden = H;
+    h.layers = L;
+    cf.iters = 2000;
   } else if (std::sscanf(a.c_str(), "v%d.%d.%dt%d", &c0, &c1, &c2, &T) == 4) {
     h.arch = Arch::conv;
     h.latent = kSize / 8;
@@ -457,6 +475,23 @@ Config parse_config(const std::string& name) {
   bool q_flag = false;
   for (std::size_t k = 1; k < parts.size(); ++k) {
     const std::string& p = parts[k];
+    if (p.starts_with("lb")) {  // multi: bits per level, "lb6.4"
+      for (const auto b : std::views::split(std::string_view(p).substr(2), '.')) cf.level_bits.push_back(std::stoi(std::string(std::string_view(b))));
+      continue;
+    }
+    if (p.starts_with("pe")) {
+      h.pe_xy = std::stoi(p.substr(2));
+      continue;
+    }
+    if (p.starts_with("pt")) {
+      h.pe_t = std::stoi(p.substr(2));
+      continue;
+    }
+    if (p == "w8" || p == "wq") {  // multi: the MLP's weights at 8 bits (wq: and trained for them)
+      cf.mlp8 = true;
+      cf.mlp_qat = cf.mlp_qat || p == "wq";
+      continue;
+    }
     if (p == "q") {
       cf.qat = true;
       q_flag = true;
@@ -490,8 +525,14 @@ Config parse_config(const std::string& name) {
     throw std::invalid_argument("configuration: m<bits> within mr<lo>-<hi>, without q or vq");
   }
   if (cf.distill < 0.f || cf.distill > 1.f) throw std::invalid_argument("configuration: d<alpha> with alpha in [0, 1]");
-  if (cf.sparse && (h.arch != Arch::grid || cf.vq_bits || cf.lambda > 0.f || (!cf.qat && cf.mixed == 0.f))) {
-    throw std::invalid_argument("configuration: sp needs the grid family and q or m<bits>, without vq or a rate term");
+  if (cf.sparse && ((h.arch != Arch::grid && h.arch != Arch::multi) || cf.vq_bits || cf.lambda > 0.f || (!cf.qat && cf.mixed == 0.f))) {
+    throw std::invalid_argument("configuration: sp needs the grid or multi family and q or m<bits>, without vq or a rate term");
+  }
+  if (h.arch == Arch::multi) {
+    if (cf.mixed > 0.f || cf.vq_bits || cf.bits > 8) throw std::invalid_argument("configuration: the multi family stores 1 to 8 bits per level");
+    if (!cf.level_bits.empty() && (cf.level_bits.size() != h.levels.size() || !cf.qat)) throw std::invalid_argument("configuration: lb needs a width per level and q");
+  } else if (!cf.level_bits.empty() || cf.mlp8 || h.pe_xy || h.pe_t) {
+    throw std::invalid_argument("configuration: lb, pe, pt, w8 and wq are options of the multi family");
   }
   return cf;
 }
@@ -597,8 +638,22 @@ Clip teacher_clip(const Ctx& c, const ClipRef& r, const std::string& teacher) {
   throw std::runtime_error(std::format("distillation: no teacher {} for {} (train it first)", teacher, r.name));
 }
 
+// A pilot's score (study F4): the saved model loaded back and rendered by the trainer's float forward pass (what the
+// runtime computes, to rounding), its stored size; no packing.
+void score_pilot(const Ctx& c, const Clip& ref, const fs::path& file, std::map<std::string, std::string>& row) {
+  auto loaded = load_model(file);
+  if (!loaded) throw std::runtime_error(loaded.error());
+  const Clip out = train::render_clip(*loaded, {}, {}, kFrames, kSize, c.threads);
+  put_scores(row, metrics::score(ref, out));
+  row["stored_bytes"] = std::to_string(loaded->storage_bytes());
+  row["file_bytes"] = std::to_string(fs::file_size(file));
+  if (loaded->masked()) {
+    row["mask_share"] = f4(static_cast<double>(std::ranges::count(loaded->feature_mask, std::uint8_t{1})) / static_cast<double>(loaded->feature_mask.size()));
+  }
+}
+
 void step_train(const Ctx& c, const std::vector<std::string>& configs) {
-  Csv csv(c.out / std::format("{}_nets_{}.csv", c.study, c.set), kNetCols);
+  Csv csv(c.out / std::format("{}_{}_{}.csv", c.study, c.pilot ? "pilot" : "nets", c.set), kNetCols);
   const fs::path models = c.root / c.study / "models" / c.set;
   for (const std::string& name : configs) {
     const Config cf = parse_config(name);
@@ -632,6 +687,8 @@ void step_train(const Ctx& c, const std::vector<std::string>& configs) {
         o.sparse = true;
         o.sparse_dilate = cf.sparse_dilate;
       }
+      o.level_bits = cf.level_bits;
+      o.mlp_qat = cf.mlp_qat;
       if (cf.mixed > 0.f) {
         o.mixed_bits = cf.mixed;
         o.mixed_min = cf.mixed_min;
@@ -641,22 +698,31 @@ void step_train(const Ctx& c, const std::vector<std::string>& configs) {
       }
       Hyper h = cf.h;
       h.loop = ref.loop;
-      const train::Example ex{&target, {}};
-      auto res = train::train(h, std::span(&ex, 1), o);
-      res.model.effect = r.effect;
-      res.model.fps = ref.fps;
-      res.model.feature_bits = cf.bits;
-      res.model.feature_trim = cf.trim;
       const fs::path file = models / std::format("{}__{}.nvfx", r.name, name);
-      fs::create_directories(models);
-      if (auto w = save_model(file, res.model); !w) throw std::runtime_error(w.error());
+      train::Result res;
+      std::string train_s;
+      if (c.reuse && fs::exists(file)) {  // trained before (a pilot): the same file, scored again
+        train_s = "reused";
+      } else {
+        const train::Example ex{&target, {}};
+        res = train::train(h, std::span(&ex, 1), o);
+        res.model.effect = r.effect;
+        res.model.fps = ref.fps;
+        res.model.feature_bits = cf.bits;
+        res.model.feature_trim = cf.trim;
+        if (h.arch == Arch::multi) res.model.mlp_bits = cf.mlp8 ? 8 : 16;
+        fs::create_directories(models);
+        if (auto w = save_model(file, res.model); !w) throw std::runtime_error(w.error());
+        train_s = std::format("{:.1f}", res.seconds);
+      }
       std::map<std::string, std::string> row = {{"set", c.set}, {"clip", r.name}, {"effect", r.effect}, {"config", name},
-                                                {"arch", h.arch == Arch::grid ? "grid" : "conv"},
+                                                {"arch", h.arch == Arch::grid ? "grid" : h.arch == Arch::multi ? "multi" : "conv"},
                                                 {"bits", cf.mixed > 0.f ? std::format("{}", cf.mixed) : std::to_string(cf.bits)},
                                                 {"qat", cf.qat || cf.mixed > 0.f ? std::format("{}", cf.qat_start) : cf.vq_bits ? std::format("vq{}x{}", cf.vq_bits, cf.vq_dim) : "-"}, {"lambda", std::format("{}", cf.lambda)},
-                                                {"iters", std::to_string(cf.iters)}, {"train_s", std::format("{:.1f}", res.seconds)},
+                                                {"iters", std::to_string(cf.iters)}, {"train_s", train_s},
                                                 {"alloc_s", std::format("{:.1f}", res.alloc_seconds)}};
-      score_and_pack(ref, file, row);
+      if (c.pilot) score_pilot(c, ref, file, row);
+      else score_and_pack(ref, file, row);
       csv.add(row);
       std::println("train {} {}: {:.0f} s, {} -> {} bytes packed, active {}, est {} bits/value {}", r.name, name, res.seconds, row["stored_bytes"],
                    row["packed_bytes"], row["active_psnr"], row["est_bits_per_value"], row["plane_bits"]);
@@ -859,6 +925,19 @@ void write_figure(const fs::path& path, const std::string& title, const Family& 
   f << o.str();
 }
 
+// The network tables a report and the pairs read: F2's, those of --also (e.g. f3), and this study's (with --pilot, its
+// pilot table).
+std::vector<fs::path> net_tables(const Ctx& c) {
+  std::vector<fs::path> v = {c.out / std::format("f2_nets_{}.csv", c.set)};
+  for (const std::string& s : c.also) {
+    if (s != "f2" && s != c.study) v.push_back(c.out / std::format("{}_nets_{}.csv", s, c.set));
+  }
+  if (c.study != "f2" || c.pilot) v.push_back(c.out / std::format("{}_{}_{}.csv", c.study, c.pilot ? "pilot" : "nets", c.set));
+  return v;
+}
+
+double number(const std::string& s) { return s.empty() ? std::nan("") : std::stod(s); }
+
 void step_report(const Ctx& c, const std::vector<std::string>& only_configs, const std::string& figure) {
   const auto clips = clip_set(c);
   std::map<std::string, std::size_t> ci;
@@ -911,10 +990,7 @@ void step_report(const Ctx& c, const std::vector<std::string>& only_configs, con
   // Networks.
   std::map<std::string, Point> nets;
   std::map<std::string, std::map<std::string, double>> net_extra;  // config -> resident, scratch means
-  std::vector<std::string> net_studies = {"f2"};
-  if (c.study != "f2") net_studies.push_back(c.study);  // a later study's report shows F2's networks beside its own
-  for (const std::string& study : net_studies) {
-    const fs::path table = c.out / std::format("{}_nets_{}.csv", study, c.set);
+  for (const fs::path& table : net_tables(c)) {
     if (!fs::exists(table)) continue;
     Csv f(table, kNetCols);
     for (const auto& r : f.rows()) {
@@ -926,9 +1002,9 @@ void step_report(const Ctx& c, const std::vector<std::string>& only_configs, con
       for (const std::string m : {"stored", "packed", "resident"}) {
         auto& v = p.b[m];
         if (v.empty()) v.assign(n, std::nan(""));
-        v[i] = std::stod(r.at(m + "_bytes"));
+        v[i] = number(r.at(m + "_bytes"));  // a pilot's rows have no packed or resident size
       }
-      net_extra[r.at("config")]["scratch"] = std::stod(r.at("scratch_bytes"));
+      net_extra[r.at("config")]["scratch"] = number(r.at("scratch_bytes"));
     }
   }
   const auto complete = [&](const Point& p) {
@@ -1083,12 +1159,11 @@ void step_report(const Ctx& c, const std::vector<std::string>& only_configs, con
 // KB, each a - b with a 95% bootstrap interval (10,000 resamples). Networks from F2's table and this study's.
 void step_pairs(const Ctx& c, const std::vector<std::string>& pairs) {
   std::map<std::string, std::map<std::string, std::map<std::string, double>>> v;  // config -> clip -> column -> value
-  for (const std::string& study : {std::string("f2"), c.study}) {
-    const fs::path table = c.out / std::format("{}_nets_{}.csv", study, c.set);
+  for (const fs::path& table : net_tables(c)) {
     if (!fs::exists(table)) continue;
     Csv f(table, kNetCols);
     for (const auto& r : f.rows()) {
-      for (const std::string col : {"active_psnr", "stored_bytes", "packed_bytes"}) v[r.at("config")][r.at("clip")][col] = std::stod(r.at(col));
+      for (const std::string col : {"active_psnr", "stored_bytes", "packed_bytes"}) v[r.at("config")][r.at("clip")][col] = number(r.at(col));
     }
   }
   const auto clips = clip_set(c);
@@ -1427,7 +1502,7 @@ std::vector<std::string> split(const std::string& s) {
 }  // namespace
 
 int main(int argc, char** argv) try {
-  const tools::Args a(argc, argv, {"help", "pareto"});
+  const tools::Args a(argc, argv, {"help", "pareto", "pilot", "reuse"});
   const auto& pos = a.positional();
   if (a.flag("help") || pos.empty()) {
     std::println("nvfx_f2 data | flipbooks | train --configs A,B | rescore --name N --pattern P | video [--codecs ...] | report | timing --models a,b\n"
@@ -1448,6 +1523,9 @@ int main(int argc, char** argv) try {
   for (const auto& f : split(a.str("flipbooks", ""))) c.flipbooks.emplace_back(f);
   c.suffix = a.str("suffix", "");
   tools::pareto_envelope = a.flag("pareto");
+  c.pilot = a.flag("pilot");
+  c.reuse = a.flag("reuse");
+  c.also = split(a.str("also", ""));
   const std::string step = pos[0];
   if (step == "data") step_data(c);
   else if (step == "flipbooks") step_flipbooks(c);

@@ -4,6 +4,7 @@
 #include "net.hpp"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstring>
 #include <stdexcept>
@@ -156,7 +157,14 @@ void down_sum(const float* dpad, float* d, int c, int s) {
 
 }  // namespace
 
-Grads::Grads(const Model& m) : g(m), touched(static_cast<std::size_t>(m.h.grid_t), 0) { zero(); }
+namespace {
+std::size_t total_slices(const Hyper& h) {
+  const Volume last = volumes(h).back();
+  return last.slice0 + static_cast<std::size_t>(last.slices);
+}
+}  // namespace
+
+Grads::Grads(const Model& m) : g(m), touched(total_slices(m.h), 0) { zero(); }
 
 void Grads::zero() {
   std::ranges::fill(g.features, 0.f);
@@ -175,13 +183,15 @@ void Grads::zero() {
 
 void Grads::add(const Grads& o) {
   const Hyper& h = g.h;
-  const std::size_t plane = static_cast<std::size_t>(h.feature_channels()) * h.feature_side() * h.feature_side();
-  for (int s = 0; s < h.grid_t; ++s) {
-    if (!o.touched[static_cast<std::size_t>(s)]) continue;
-    touched[static_cast<std::size_t>(s)] = 1;
-    for (int k = 0; k < h.bases; ++k) {
-      const std::size_t off = (static_cast<std::size_t>(k) * h.grid_t + s) * plane;
-      for (std::size_t i = 0; i < plane; ++i) g.features[off + i] += o.g.features[off + i];
+  for (const Volume& v : volumes(h)) {
+    const std::size_t plane = static_cast<std::size_t>(v.channels) * v.plane_values();
+    for (int s = 0; s < v.slices; ++s) {
+      if (!o.touched[v.slice0 + static_cast<std::size_t>(s)]) continue;
+      touched[v.slice0 + static_cast<std::size_t>(s)] = 1;
+      for (int k = 0; k < h.bases; ++k) {
+        const std::size_t off = v.value0 + (static_cast<std::size_t>(k) * v.slices + static_cast<std::size_t>(s)) * plane;
+        for (std::size_t i = 0; i < plane; ++i) g.features[off + i] += o.g.features[off + i];
+      }
     }
   }
   const auto add_dense = [](Dense& a, const Dense& b) {
@@ -195,14 +205,30 @@ void Grads::add(const Grads& o) {
 
 Net::Net(const Model& m) {
   const Hyper& h = m.h;
-  const std::size_t plane = static_cast<std::size_t>(h.feature_channels()) * h.feature_side() * h.feature_side();
-  slice_.resize(plane);
-  dslice_.resize(plane);
-  if (h.arch == Arch::grid) {
+  if (h.arch == Arch::multi) {
+    vols_ = volumes(h);
+    std::size_t total = 0;
+    for (const Volume& v : vols_) {
+      loff_.push_back(total);
+      total += static_cast<std::size_t>(v.channels) * v.plane_values();
+    }
+    slice_.resize(total);
+    dslice_.resize(total);
+    li0_.resize(vols_.size());
+    li1_.resize(vols_.size());
+    lft_.resize(vols_.size());
+    tpe_.resize(static_cast<std::size_t>(2 * h.pe_t));
+  } else {
+    const std::size_t plane = static_cast<std::size_t>(h.feature_channels()) * h.feature_side() * h.feature_side();
+    slice_.resize(plane);
+    dslice_.resize(plane);
+  }
+  if (h.arch == Arch::grid || h.arch == Arch::multi) {
     const auto n = static_cast<std::size_t>(kChunk);
-    const std::size_t widest = static_cast<std::size_t>(std::max({h.channels, h.hidden, 4}));
-    x0_.resize(static_cast<std::size_t>(h.channels) * n);
-    dx_.resize(static_cast<std::size_t>(h.channels) * n);
+    const int inputs = h.arch == Arch::grid ? h.channels : h.mlp_in();
+    const std::size_t widest = static_cast<std::size_t>(std::max({inputs, h.hidden, 4}));
+    x0_.resize(static_cast<std::size_t>(inputs) * n);
+    dx_.resize(static_cast<std::size_t>(inputs) * n);
     z1_.resize(static_cast<std::size_t>(h.hidden) * n);
     a1_.resize(static_cast<std::size_t>(h.hidden) * n);
     dz_.resize(widest * n);
@@ -210,10 +236,11 @@ Net::Net(const Model& m) {
     dy_.resize(widest * n);
     out_.resize(4 * n);
     hs_.assign(static_cast<std::size_t>(h.layers), std::vector<float>(static_cast<std::size_t>(h.hidden) * n));
-    cx_.resize(n);
-    cy_.resize(n);
-    cfx_.resize(n);
-    cfy_.resize(n);
+    const std::size_t L = h.arch == Arch::multi ? vols_.size() : 1;  // bilinear corners per pixel and level
+    cx_.resize(n * L);
+    cy_.resize(n * L);
+    cfx_.resize(n * L);
+    cfy_.resize(n * L);
   } else {
     const std::size_t l = static_cast<std::size_t>(h.latent), s1 = 2 * l, s2 = 4 * l, s3 = 8 * l;
     const std::size_t c0 = static_cast<std::size_t>(h.c0), c1 = static_cast<std::size_t>(h.c1), c2 = static_cast<std::size_t>(h.c2);
@@ -240,6 +267,24 @@ void Net::begin_frame(const Model& m, float t, std::span<const float> c) {
     film_.insert(film_.end(), v.begin(), v.end());
   }
   dfilm_.assign(film_.size(), 0.f);
+  if (h.arch == Arch::multi) {
+    std::ranges::fill(slice_, 0.f);
+    std::ranges::fill(dslice_, 0.f);
+    for (std::size_t l = 0; l < vols_.size(); ++l) {
+      const Volume& v = vols_[l];
+      slice_lerp(v.slices, h.loop, t, li0_[l], li1_[l], lft_[l]);
+      const std::size_t plane = static_cast<std::size_t>(v.channels) * v.plane_values();
+      float* s = slice_.data() + loff_[l];
+      for (int k = 0; k < h.bases; ++k) {
+        const float* a = m.features.data() + v.value0 + (static_cast<std::size_t>(k) * v.slices + static_cast<std::size_t>(li0_[l])) * plane;
+        const float* b = m.features.data() + v.value0 + (static_cast<std::size_t>(k) * v.slices + static_cast<std::size_t>(li1_[l])) * plane;
+        const float wk = w_[static_cast<std::size_t>(k)], ft = lft_[l];
+        for (std::size_t i = 0; i < plane; ++i) s[i] += wk * (a[i] + ft * (b[i] - a[i]));
+      }
+    }
+    time_features(h.pe_t, h.loop, t, tpe_.data());
+    return;
+  }
   if (h.loop) {
     const float u = (t - std::floor(t)) * static_cast<float>(h.grid_t);
     i0_ = std::min(static_cast<int>(u), h.grid_t - 1);
@@ -266,10 +311,34 @@ void Net::end_frame(const Model& m, Grads& g, std::span<const float> c, std::spa
   const Hyper& h = m.h;
   const std::size_t plane = slice_.size();
   const int D = h.dims();
-  g.touched[static_cast<std::size_t>(i0_)] = 1;
-  g.touched[static_cast<std::size_t>(i1_)] = 1;
   std::vector<float> dw(static_cast<std::size_t>(h.bases), 0.f);
-  for (int k = 0; k < h.bases; ++k) {
+  if (h.arch == Arch::multi) {
+    for (std::size_t l = 0; l < vols_.size(); ++l) {
+      const Volume& v = vols_[l];
+      const std::size_t lp = static_cast<std::size_t>(v.channels) * v.plane_values();
+      const std::size_t s0 = static_cast<std::size_t>(li0_[l]), s1 = static_cast<std::size_t>(li1_[l]);
+      g.touched[v.slice0 + s0] = 1;
+      g.touched[v.slice0 + s1] = 1;
+      const float ft = lft_[l];
+      const float* ds = dslice_.data() + loff_[l];
+      for (int k = 0; k < h.bases; ++k) {
+        const std::size_t o0 = v.value0 + (static_cast<std::size_t>(k) * v.slices + s0) * lp, o1 = v.value0 + (static_cast<std::size_t>(k) * v.slices + s1) * lp;
+        const float wk = w_[static_cast<std::size_t>(k)];
+        const float* a = m.features.data() + o0;
+        const float* b = m.features.data() + o1;
+        axpy(wk * (1.f - ft), ds, g.g.features.data() + o0, static_cast<int>(lp));
+        axpy(wk * ft, ds, g.g.features.data() + o1, static_cast<int>(lp));
+        float sum_k = 0;
+        for (std::size_t i = 0; i < lp; ++i) sum_k += ds[i] * (a[i] + ft * (b[i] - a[i]));
+        dw[static_cast<std::size_t>(k)] += sum_k;
+      }
+    }
+  }
+  for (int k = 0; k < h.bases && h.arch != Arch::multi; ++k) {
+    if (k == 0) {
+      g.touched[static_cast<std::size_t>(i0_)] = 1;
+      g.touched[static_cast<std::size_t>(i1_)] = 1;
+    }
     const std::size_t o0 = (static_cast<std::size_t>(k) * h.grid_t + i0_) * plane, o1 = (static_cast<std::size_t>(k) * h.grid_t + i1_) * plane;
     const float wk = w_[static_cast<std::size_t>(k)];
     const float* a = m.features.data() + o0;
@@ -298,11 +367,74 @@ void Net::end_frame(const Model& m, Grads& g, std::span<const float> c, std::spa
   }
 }
 
+bool Net::mlp_chunk(const Model& m, Grads* g, std::span<const int> pixels, std::size_t start, int n, std::span<const std::uint8_t> target,
+                    float scale, std::span<float> out, double& sse) {
+  const int H = m.h.hidden;
+  const std::size_t L = m.layers.size();  // hidden layers + head
+  // layer 0 with FiLM, then the hidden stack, then the head
+  dense_fwd(m.layers[0], x0_.data(), z1_.data(), n);
+  for (int o = 0; o < H; ++o) {
+    const float gm = 1.f + film_[static_cast<std::size_t>(o)], bt = film_[static_cast<std::size_t>(H + o)];
+    float* z = z1_.data() + static_cast<std::size_t>(o) * n;
+    float* a = a1_.data() + static_cast<std::size_t>(o) * n;
+    float* hh = hs_[0].data() + static_cast<std::size_t>(o) * n;
+    for (int p = 0; p < n; ++p) {
+      a[p] = gm * z[p] + bt;
+      hh[p] = std::max(0.f, a[p]);
+    }
+  }
+  for (std::size_t l = 1; l + 1 < L; ++l) {
+    dense_fwd(m.layers[l], hs_[l - 1].data(), hs_[l].data(), n);
+    for (float& v : std::span(hs_[l].data(), static_cast<std::size_t>(H) * n)) v = std::max(0.f, v);
+  }
+  dense_fwd(m.layers[L - 1], hs_[L - 2].data(), out_.data(), n);
+  if (!out.empty()) {
+    for (int j = 0; j < n; ++j) {
+      for (int ch = 0; ch < 4; ++ch) out[static_cast<std::size_t>(pixels[start + static_cast<std::size_t>(j)]) * 4 + static_cast<std::size_t>(ch)] = out_[static_cast<std::size_t>(ch) * n + static_cast<std::size_t>(j)];
+    }
+  }
+  if (target.empty()) return false;
+  for (int ch = 0; ch < 4; ++ch) {
+    for (int j = 0; j < n; ++j) {
+      const std::size_t pix = static_cast<std::size_t>(pixels[start + static_cast<std::size_t>(j)]);
+      const float d = out_[static_cast<std::size_t>(ch) * n + static_cast<std::size_t>(j)] - static_cast<float>(target[pix * 4 + static_cast<std::size_t>(ch)]) * (1.f / 255.f);
+      sse += static_cast<double>(d) * d;
+      dy_[static_cast<std::size_t>(ch) * n + static_cast<std::size_t>(j)] = 2.f * d * scale;
+    }
+  }
+  if (!g) return false;
+  // backward through the head and the hidden stack
+  dense_bwd(m.layers[L - 1], g->g.layers[L - 1], hs_[L - 2].data(), dy_.data(), dh_.data(), n);
+  for (std::size_t l = L - 2; l >= 1; --l) {
+    const float* hh = hs_[l].data();
+    for (std::size_t i = 0; i < static_cast<std::size_t>(H) * n; ++i) dh_[i] = hh[i] > 0.f ? dh_[i] : 0.f;
+    dense_bwd(m.layers[l], g->g.layers[l], hs_[l - 1].data(), dh_.data(), dz_.data(), n);
+    std::swap(dh_, dz_);
+  }
+  // layer 0: relu, FiLM, dense
+  for (int o = 0; o < H; ++o) {
+    const float gm = 1.f + film_[static_cast<std::size_t>(o)];
+    const float* a = a1_.data() + static_cast<std::size_t>(o) * n;
+    const float* z = z1_.data() + static_cast<std::size_t>(o) * n;
+    float* d = dh_.data() + static_cast<std::size_t>(o) * n;
+    float dg = 0, db = 0;
+    for (int p = 0; p < n; ++p) {
+      const float da = a[p] > 0.f ? d[p] : 0.f;
+      dg += da * z[p];
+      db += da;
+      d[p] = da * gm;
+    }
+    dfilm_[static_cast<std::size_t>(o)] += dg;
+    dfilm_[static_cast<std::size_t>(H + o)] += db;
+  }
+  dense_bwd(m.layers[0], g->g.layers[0], x0_.data(), dh_.data(), dx_.data(), n);
+  return true;
+}
+
 double Net::grid_pixels(const Model& m, Grads* g, std::span<const int> pixels, int size, std::span<const std::uint8_t> target,
                         float scale, std::span<float> out) {
   const Hyper& h = m.h;
-  const int G = h.grid, C = h.channels, H = h.hidden;
-  const std::size_t L = m.layers.size();  // hidden layers + head
+  const int G = h.grid, C = h.channels;
   const float gmax = static_cast<float>(G - 1);
   double sse = 0;
   for (std::size_t start = 0; start < pixels.size(); start += kChunk) {
@@ -324,63 +456,7 @@ double Net::grid_pixels(const Model& m, Grads* g, std::span<const int> pixels, i
         x0_[static_cast<std::size_t>(ch) * n + static_cast<std::size_t>(j)] = a + fy * (b - a);
       }
     }
-    // layer 0 with FiLM, then the hidden stack, then the head
-    dense_fwd(m.layers[0], x0_.data(), z1_.data(), n);
-    for (int o = 0; o < H; ++o) {
-      const float gm = 1.f + film_[static_cast<std::size_t>(o)], bt = film_[static_cast<std::size_t>(H + o)];
-      float* z = z1_.data() + static_cast<std::size_t>(o) * n;
-      float* a = a1_.data() + static_cast<std::size_t>(o) * n;
-      float* hh = hs_[0].data() + static_cast<std::size_t>(o) * n;
-      for (int p = 0; p < n; ++p) {
-        a[p] = gm * z[p] + bt;
-        hh[p] = std::max(0.f, a[p]);
-      }
-    }
-    for (std::size_t l = 1; l + 1 < L; ++l) {
-      dense_fwd(m.layers[l], hs_[l - 1].data(), hs_[l].data(), n);
-      for (float& v : std::span(hs_[l].data(), static_cast<std::size_t>(H) * n)) v = std::max(0.f, v);
-    }
-    dense_fwd(m.layers[L - 1], hs_[L - 2].data(), out_.data(), n);
-    if (!out.empty()) {
-      for (int j = 0; j < n; ++j) {
-        for (int ch = 0; ch < 4; ++ch) out[static_cast<std::size_t>(pixels[start + static_cast<std::size_t>(j)]) * 4 + static_cast<std::size_t>(ch)] = out_[static_cast<std::size_t>(ch) * n + static_cast<std::size_t>(j)];
-      }
-    }
-    if (target.empty()) continue;
-    for (int ch = 0; ch < 4; ++ch) {
-      for (int j = 0; j < n; ++j) {
-        const std::size_t pix = static_cast<std::size_t>(pixels[start + static_cast<std::size_t>(j)]);
-        const float d = out_[static_cast<std::size_t>(ch) * n + static_cast<std::size_t>(j)] - static_cast<float>(target[pix * 4 + static_cast<std::size_t>(ch)]) * (1.f / 255.f);
-        sse += static_cast<double>(d) * d;
-        dy_[static_cast<std::size_t>(ch) * n + static_cast<std::size_t>(j)] = 2.f * d * scale;
-      }
-    }
-    if (!g) continue;
-    // backward through the head and the hidden stack
-    dense_bwd(m.layers[L - 1], g->g.layers[L - 1], hs_[L - 2].data(), dy_.data(), dh_.data(), n);
-    for (std::size_t l = L - 2; l >= 1; --l) {
-      const float* hh = hs_[l].data();
-      for (std::size_t i = 0; i < static_cast<std::size_t>(H) * n; ++i) dh_[i] = hh[i] > 0.f ? dh_[i] : 0.f;
-      dense_bwd(m.layers[l], g->g.layers[l], hs_[l - 1].data(), dh_.data(), dz_.data(), n);
-      std::swap(dh_, dz_);
-    }
-    // layer 0: relu, FiLM, dense
-    for (int o = 0; o < H; ++o) {
-      const float gm = 1.f + film_[static_cast<std::size_t>(o)];
-      const float* a = a1_.data() + static_cast<std::size_t>(o) * n;
-      const float* z = z1_.data() + static_cast<std::size_t>(o) * n;
-      float* d = dh_.data() + static_cast<std::size_t>(o) * n;
-      float dg = 0, db = 0;
-      for (int p = 0; p < n; ++p) {
-        const float da = a[p] > 0.f ? d[p] : 0.f;
-        dg += da * z[p];
-        db += da;
-        d[p] = da * gm;
-      }
-      dfilm_[static_cast<std::size_t>(o)] += dg;
-      dfilm_[static_cast<std::size_t>(H + o)] += db;
-    }
-    dense_bwd(m.layers[0], g->g.layers[0], x0_.data(), dh_.data(), dx_.data(), n);
+    if (!mlp_chunk(m, g, pixels, start, n, target, scale, out, sse)) continue;
     for (int j = 0; j < n; ++j) {  // scatter to the four bilinear corners
       const int x0 = cx_[static_cast<std::size_t>(j)], y0 = cy_[static_cast<std::size_t>(j)];
       const float fx = cfx_[static_cast<std::size_t>(j)], fy = cfy_[static_cast<std::size_t>(j)];
@@ -393,6 +469,75 @@ double Net::grid_pixels(const Model& m, Grads* g, std::span<const int> pixels, i
         p[G] += w01 * d;
         p[G + 1] += w11 * d;
       }
+    }
+  }
+  return sse;
+}
+
+// The multi family: every level's features sampled as grid_pixels samples the grid's, one after another in x0_, then
+// the Fourier features of the pixel and of the frame; the backward pass scatters each level's gradient to its corners.
+double Net::multi_pixels(const Model& m, Grads* g, std::span<const int> pixels, int size, std::span<const std::uint8_t> target,
+                         float scale, std::span<float> out) {
+  const Hyper& h = m.h;
+  const std::size_t NL = vols_.size();
+  const int C = h.feature_channels();
+  double sse = 0;
+  std::array<float, 48> pf{};
+  for (std::size_t start = 0; start < pixels.size(); start += kChunk) {
+    const int n = static_cast<int>(std::min<std::size_t>(kChunk, pixels.size() - start));
+    const auto N = static_cast<std::size_t>(n);
+    for (int j = 0; j < n; ++j) {
+      const int pix = pixels[start + static_cast<std::size_t>(j)];
+      const int px = pix % size, py = pix / size;
+      std::size_t ch0 = 0;
+      for (std::size_t l = 0; l < NL; ++l) {
+        const int G = vols_[l].side;
+        const float gmax = static_cast<float>(G - 1);
+        const float gx = std::clamp((static_cast<float>(px) + 0.5f) / static_cast<float>(size) * static_cast<float>(G) - 0.5f, 0.f, gmax);
+        const float gy = std::clamp((static_cast<float>(py) + 0.5f) / static_cast<float>(size) * static_cast<float>(G) - 0.5f, 0.f, gmax);
+        const int x0 = std::min(static_cast<int>(gx), G - 2), y0 = std::min(static_cast<int>(gy), G - 2);
+        const float fx = gx - static_cast<float>(x0), fy = gy - static_cast<float>(y0);
+        const std::size_t at = l * kChunk + static_cast<std::size_t>(j);
+        cx_[at] = x0;
+        cy_[at] = y0;
+        cfx_[at] = fx;
+        cfy_[at] = fy;
+        const float* base = slice_.data() + loff_[l];
+        for (int ch = 0; ch < vols_[l].channels; ++ch) {
+          const float* p = base + (static_cast<std::size_t>(ch) * G + y0) * G + x0;
+          const float a = p[0] + fx * (p[1] - p[0]), b = p[G] + fx * (p[G + 1] - p[G]);
+          x0_[(ch0 + static_cast<std::size_t>(ch)) * N + static_cast<std::size_t>(j)] = a + fy * (b - a);
+        }
+        ch0 += static_cast<std::size_t>(vols_[l].channels);
+      }
+      if (h.pe_xy > 0) {
+        position_features(h.pe_xy, (static_cast<float>(px) + 0.5f) / static_cast<float>(size), (static_cast<float>(py) + 0.5f) / static_cast<float>(size), pf.data());
+        for (int k = 0; k < 4 * h.pe_xy; ++k) x0_[(static_cast<std::size_t>(C) + static_cast<std::size_t>(k)) * N + static_cast<std::size_t>(j)] = pf[static_cast<std::size_t>(k)];
+      }
+      for (int k = 0; k < 2 * h.pe_t; ++k) {
+        x0_[(static_cast<std::size_t>(C + 4 * h.pe_xy) + static_cast<std::size_t>(k)) * N + static_cast<std::size_t>(j)] = tpe_[static_cast<std::size_t>(k)];
+      }
+    }
+    if (!mlp_chunk(m, g, pixels, start, n, target, scale, out, sse)) continue;
+    std::size_t ch0 = 0;
+    for (std::size_t l = 0; l < NL; ++l) {  // scatter to the four bilinear corners of every level
+      const int G = vols_[l].side;
+      float* base = dslice_.data() + loff_[l];
+      for (int j = 0; j < n; ++j) {
+        const std::size_t at = l * kChunk + static_cast<std::size_t>(j);
+        const int x0 = cx_[at], y0 = cy_[at];
+        const float fx = cfx_[at], fy = cfy_[at];
+        const float w00 = (1 - fx) * (1 - fy), w10 = fx * (1 - fy), w01 = (1 - fx) * fy, w11 = fx * fy;
+        for (int ch = 0; ch < vols_[l].channels; ++ch) {
+          const float d = dx_[(ch0 + static_cast<std::size_t>(ch)) * N + static_cast<std::size_t>(j)];
+          float* p = base + (static_cast<std::size_t>(ch) * G + y0) * G + x0;
+          p[0] += w00 * d;
+          p[1] += w10 * d;
+          p[G] += w01 * d;
+          p[G + 1] += w11 * d;
+        }
+      }
+      ch0 += static_cast<std::size_t>(vols_[l].channels);
     }
   }
   return sse;
@@ -464,18 +609,20 @@ double Net::conv_frame(const Model& m, Grads* g, std::span<const std::uint8_t> t
 double Net::step(const Model& m, Grads& g, float t, std::span<const float> c, std::span<const std::uint8_t> target,
                  std::span<const int> pixels, int size, float scale, std::span<float> dc) {
   begin_frame(m, t, c);
-  const double sse = m.h.arch == Arch::grid ? grid_pixels(m, &g, pixels, size, target, scale, {})
-                                            : conv_frame(m, &g, target, scale, {});
+  const double sse = m.h.arch == Arch::grid    ? grid_pixels(m, &g, pixels, size, target, scale, {})
+                     : m.h.arch == Arch::multi ? multi_pixels(m, &g, pixels, size, target, scale, {})
+                                               : conv_frame(m, &g, target, scale, {});
   end_frame(m, g, c, dc);
   return sse;
 }
 
 void Net::render(const Model& m, float t, std::span<const float> c, int size, std::span<float> rgba) {
   begin_frame(m, t, c);
-  if (m.h.arch == Arch::grid) {
+  if (m.h.arch == Arch::grid || m.h.arch == Arch::multi) {
     std::vector<int> all(static_cast<std::size_t>(size) * size);
     for (std::size_t i = 0; i < all.size(); ++i) all[i] = static_cast<int>(i);
-    grid_pixels(m, nullptr, all, size, {}, 0.f, rgba);
+    if (m.h.arch == Arch::grid) grid_pixels(m, nullptr, all, size, {}, 0.f, rgba);
+    else multi_pixels(m, nullptr, all, size, {}, 0.f, rgba);
   } else {
     if (size != m.h.size) throw std::invalid_argument("render: the conv family renders at its native size only");
     conv_frame(m, nullptr, {}, 0.f, rgba);

@@ -57,6 +57,24 @@ Hyper tiny_conv() {
   return h;
 }
 
+// The multi family (study F4): a still level, two time-varying ones, and Fourier features of position and time.
+Hyper tiny_multi(bool loop) {
+  Hyper h;
+  h.arch = Arch::multi;
+  h.size = 8;
+  h.frames = 4;
+  h.loop = loop;
+  h.n_controls = 2;
+  h.n_latent = 1;
+  h.bases = 2;
+  h.levels = {{4, 3, 2}, {3, 1, 2}, {6, 4, 1}};
+  h.pe_xy = 2;
+  h.pe_t = 1;
+  h.hidden = 5;
+  h.layers = 2;
+  return h;
+}
+
 // Give the zero-initialised FiLM layers some weight so their gradients are exercised away from identity.
 Model randomised(const Hyper& h, std::uint64_t seed) {
   Model m = init_model(h, seed);
@@ -116,10 +134,11 @@ void gradient_check(const Hyper& h) {
   all_params(m, pp);
   all_params(gm, gp);
   ASSERT_EQ(pp.size(), gp.size());
-  // Central differences at three step sizes. Float round-off spoils small steps and relu kinks spoil large ones, so a
+  // Central differences at four step sizes. Float round-off spoils small steps and relu kinks spoil large ones, so a
   // parameter passes when the analytic gradient matches at one of them; a wrong gradient is wrong at every step and
-  // fails. Where the three estimates scatter by more than 10% without a match, the parameter sits on a kink and is
-  // skipped (at most a tenth may be).
+  // fails. Where the estimates scatter by more than 10% without a match, the parameter sits on a kink and is skipped
+  // (at most a tenth may be). (The smallest step was added for the multi family, whose test model has a unit within
+  // about 1e-3 of its kink at one grid point: there the larger steps are 1 to 3% off and 3e-4 matches.)
   const auto numeric = [&](float& slot, float eps, auto&& eval) {
     const float keep = slot;
     slot = keep + eps;
@@ -132,7 +151,7 @@ void gradient_check(const Hyper& h) {
   const auto near = [](double a, double b) { return std::abs(a - b) <= 1e-2 * std::max(std::abs(a), std::abs(b)) + 3e-4; };
   int checked = 0, bad = 0, live = 0, kinks = 0;
   const auto check_one = [&](float& slot, double ana, std::string_view what, auto&& eval) {
-    const std::array<double, 3> n = {numeric(slot, 1e-2f, eval), numeric(slot, 3e-3f, eval), numeric(slot, 1e-3f, eval)};
+    const std::array<double, 4> n = {numeric(slot, 1e-2f, eval), numeric(slot, 3e-3f, eval), numeric(slot, 1e-3f, eval), numeric(slot, 3e-4f, eval)};
     if (std::ranges::any_of(n, [&](double v) { return near(v, ana); })) {
       ++checked;
       live += std::abs(n[0]) > 1e-3;
@@ -144,7 +163,7 @@ void gradient_check(const Hyper& h) {
       return;
     }
     ++checked;
-    if (++bad <= 6) ADD_FAILURE() << std::format("{}: analytic {} numeric {} {} {}", what, ana, n[0], n[1], n[2]);
+    if (++bad <= 6) ADD_FAILURE() << std::format("{}: analytic {} numeric {} {} {} {}", what, ana, n[0], n[1], n[2], n[3]);
   };
   const auto model_loss = [&] { return loss(m, c); };
   for (std::size_t i = 0; i < pp.size(); i += std::max<std::size_t>(1, pp.size() / 300)) {
@@ -457,7 +476,7 @@ TEST(Train, SparseFeaturesKeepWhatTheFramesNeed) {
 }
 
 TEST(Train, ForwardMatchesTheReference) {
-  for (const Hyper& h : {tiny_grid(), tiny_conv()}) {
+  for (const Hyper& h : {tiny_grid(), tiny_conv(), tiny_multi(true), tiny_multi(false)}) {
     const Model m = randomised(h, 11);
     const std::vector<float> c = {0.2f, 0.9f, -0.4f};
     std::vector<float> ref(static_cast<std::size_t>(h.size) * h.size * 4), got(ref.size());
@@ -470,6 +489,138 @@ TEST(Train, ForwardMatchesTheReference) {
 
 TEST(Train, GridGradientsMatchFiniteDifferences) { gradient_check(tiny_grid()); }
 TEST(Train, ConvGradientsMatchFiniteDifferences) { gradient_check(tiny_conv()); }
+TEST(Train, MultiLevelGradientsMatchFiniteDifferences) {
+  gradient_check(tiny_multi(true));
+  gradient_check(tiny_multi(false));
+}
+
+TEST(Model, MaskRunsRoundTripAndRefuseMalformedInput) {
+  std::mt19937_64 rng(7);
+  for (const std::size_t n : {1u, 2u, 7u, 200u, 4096u}) {
+    for (int pattern = 0; pattern < 4; ++pattern) {
+      std::vector<std::uint8_t> mask(n);
+      for (std::size_t j = 0; j < n; ++j) mask[j] = pattern == 0 ? 0 : pattern == 1 ? 1 : pattern == 2 ? static_cast<std::uint8_t>(rng() % 2) : static_cast<std::uint8_t>(j > n / 3);
+      const auto runs = mask_runs(mask);
+      std::vector<std::uint8_t> back(n, 9);
+      ASSERT_EQ(read_mask_runs(runs, back), runs.size()) << n << " " << pattern;
+      EXPECT_EQ(back, mask);
+      if (runs.size() > 1) {
+        std::vector<std::uint8_t> cut(runs.begin(), runs.end() - 1);
+        EXPECT_EQ(read_mask_runs(cut, back), 0u) << "truncated runs";
+      }
+    }
+  }
+  std::vector<std::uint8_t> m4(4);
+  EXPECT_EQ(read_mask_runs(std::vector<std::uint8_t>{5}, m4), 0u);        // longer than the mask
+  EXPECT_EQ(read_mask_runs(std::vector<std::uint8_t>{1, 0, 3}, m4), 0u);  // an empty run after the first
+  EXPECT_EQ(read_mask_runs(std::vector<std::uint8_t>{0, 4}, m4), 2u);     // starting with stored points
+  EXPECT_EQ(m4, (std::vector<std::uint8_t>{1, 1, 1, 1}));
+  EXPECT_EQ(mask_runs(std::vector<std::uint8_t>(300, 0)), (std::vector<std::uint8_t>{0xac, 0x02}));  // 300 as a varint
+}
+
+TEST(Model, MultiLevelFilesRoundTrip) {
+  // File version 4: levels, a width per level, masks as runs, the MLP at 8 or 16 bits. Saving what was loaded gives the
+  // same bytes; the loaded model computes what quantise_like_storage computes; damaged files are refused.
+  for (const bool masked : {false, true}) {
+    for (const int mlp_bits : {16, 8}) {
+      Model m = randomised(tiny_multi(false), 4);
+      m.mlp_bits = mlp_bits;
+      const auto vols = volumes(m.h);
+      for (std::size_t l = 0; l < vols.size(); ++l) {
+        const std::size_t n = static_cast<std::size_t>(m.h.bases) * vols[l].slices * vols[l].channels;
+        for (std::size_t k = 0; k < n; ++k) m.plane_bits.push_back(static_cast<std::uint8_t>(l == 0 ? 3 : l == 1 ? 8 : 5));
+      }
+      if (masked) {
+        m.feature_mask.resize(vols.back().mask0 + static_cast<std::size_t>(vols.back().slices) * vols.back().plane_values());
+        for (std::size_t j = 0; j < m.feature_mask.size(); ++j) m.feature_mask[j] = static_cast<std::uint8_t>((j * 5 / 3) % 2);
+      }
+      std::stringstream ss;
+      ASSERT_TRUE(save_model(ss, m).has_value());
+      const std::string bytes = ss.str();
+      std::stringstream in(bytes);
+      const auto back = load_model(in);
+      ASSERT_TRUE(back.has_value()) << back.error();
+      Model q = m;
+      quantise_like_storage(q);
+      EXPECT_EQ(back->features, q.features);
+      for (std::size_t l = 0; l < q.layers.size(); ++l) EXPECT_EQ(back->layers[l].w, q.layers[l].w) << "layer " << l;
+      EXPECT_EQ(back->plane_bits, m.plane_bits);
+      EXPECT_EQ(back->feature_mask, m.feature_mask);
+      EXPECT_EQ(back->h.levels, m.h.levels);
+      EXPECT_EQ(back->storage_bytes(), m.storage_bytes());
+      std::stringstream again;
+      ASSERT_TRUE(save_model(again, *back).has_value());
+      EXPECT_EQ(again.str(), bytes);
+      for (const std::size_t cut : {bytes.size() - 1, bytes.size() / 2, std::size_t{80}}) {
+        std::stringstream part(bytes.substr(0, cut));
+        EXPECT_FALSE(load_model(part).has_value()) << "truncated at " << cut;
+      }
+      std::string bad = bytes;
+      bad[12] = 1;  // the grid family's code in a version 4 file
+      std::stringstream bs(bad);
+      EXPECT_FALSE(load_model(bs).has_value());
+      if (mlp_bits == 8) {
+        Model wide = m;
+        wide.mlp_bits = 16;
+        EXPECT_LT(m.storage_bytes(), wide.storage_bytes());
+      }
+    }
+  }
+  Model bad = randomised(tiny_multi(true), 5);
+  bad.plane_bits.assign(3, 4);  // not one width per plane
+  std::stringstream ss;
+  EXPECT_FALSE(save_model(ss, bad).has_value());
+}
+
+TEST(Train, MultiLevelSparseQuantisedTrainingWorks) {
+  // Two levels at their own widths, sparse, the MLP trained for 8-bit weights: the model keeps one mask per level, its
+  // file renders what the trainer saw, and it learns the clip.
+  const Clip clip = smooth_clip(32, 8, 0.f);
+  Clip holes = clip;  // empty corners, so that the masks drop points
+  for (int f = 0; f < 8; ++f) {
+    auto fr = holes.frame(f);
+    for (int y = 0; y < 32; ++y) {
+      for (int x = 0; x < 32; ++x) {
+        if (x + y < 14 || x + y > 50) std::fill_n(fr.begin() + (static_cast<std::ptrdiff_t>(y) * 32 + x) * 4, 4, std::uint8_t{0});
+      }
+    }
+  }
+  Hyper h;
+  h.arch = Arch::multi;
+  h.size = 32;
+  h.frames = 8;
+  h.levels = {{8, 4, 4}, {16, 8, 2}};
+  h.hidden = 16;
+  h.layers = 2;
+  h.pe_xy = 1;
+  const train::Example ex{&holes, {}};
+  train::Options o;
+  o.iterations = 500;
+  o.batch_frames = 4;
+  o.pixels = 512;
+  o.threads = 2;
+  o.log_every = 0;
+  o.qat_bits = 4;
+  o.level_bits = {6, 3};
+  o.mlp_qat = true;
+  o.sparse = true;
+  const auto r = train::train(h, std::span(&ex, 1), o);
+  EXPECT_EQ(r.model.feature_mask, train::feature_support(h, std::span(&ex, 1), 0));
+  ASSERT_EQ(r.model.plane_bits.size(), 4u * 4u + 8u * 2u);
+  EXPECT_EQ(r.model.plane_bits.front(), 6);
+  EXPECT_EQ(r.model.plane_bits.back(), 3);
+  Model m = r.model;
+  m.mlp_bits = 8;
+  std::stringstream ss;
+  ASSERT_TRUE(save_model(ss, m).has_value());
+  const auto back = load_model(ss);
+  ASSERT_TRUE(back.has_value()) << back.error();
+  Model seen = r.model;
+  train::store_planes(seen, seen.plane_bits);
+  EXPECT_EQ(back->features, seen.features);
+  const double psnr = metrics::score(holes, train::render_clip(*back, {}, {}, 8, 32, 2)).active_psnr;
+  EXPECT_GT(psnr, 24.0);
+}
 
 TEST(Train, LearnsASmoothClip) {
   const Clip clip = smooth_clip(32, 8, 0.f);

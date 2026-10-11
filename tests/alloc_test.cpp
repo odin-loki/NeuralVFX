@@ -132,6 +132,60 @@ int run_per_plane(nfx::Hyper h, int size, const char* name, bool masked) {
   return n == 0 ? 0 : 1;
 }
 
+// A multi-level frame model (study F4): three levels at their own widths, optionally masked (stored as runs), the MLP
+// at 8 bits, Fourier features of position and time.
+int run_multi(int size, bool masked) {
+  nfx::Hyper h;
+  h.arch = nfx::Arch::multi;
+  h.size = 64;
+  h.frames = 16;
+  h.n_controls = 3;
+  h.n_latent = 4;
+  h.bases = 2;
+  h.levels = {{16, 4, 4}, {8, 1, 4}, {32, 8, 2}};
+  h.pe_xy = 2;
+  h.pe_t = 2;
+  h.hidden = 16;
+  nfx::Model m = nfx::init_model(h, 1);
+  m.effect = "multi";
+  m.mlp_bits = 8;
+  const auto vols = nfx::volumes(h);
+  for (std::size_t l = 0; l < vols.size(); ++l) {
+    const std::size_t n = static_cast<std::size_t>(h.bases) * vols[l].slices * vols[l].channels;
+    for (std::size_t k = 0; k < n; ++k) m.plane_bits.push_back(static_cast<std::uint8_t>(3 + l * 2));
+  }
+  if (masked) {
+    m.feature_mask.resize(vols.back().mask0 + static_cast<std::size_t>(vols.back().slices) * vols.back().plane_values());
+    for (std::size_t j = 0; j < m.feature_mask.size(); ++j) m.feature_mask[j] = static_cast<std::uint8_t>((j * 7 / 3) % 2);
+  }
+  m.z_train = {std::vector<float>(static_cast<std::size_t>(h.n_latent), 0.1f)};
+  m.z_mean.assign(static_cast<std::size_t>(h.n_latent), 0.f);
+  m.z_std.assign(static_cast<std::size_t>(h.n_latent), 0.1f);
+  std::ostringstream os;
+  if (!nfx::save_model(os, m)) return 1;
+  const std::string bytes = os.str();
+  nvfx_effect* e = nullptr;
+  nvfx_instance* in = nullptr;
+  if (nvfx_effect_load_memory(bytes.data(), bytes.size(), &e) != NVFX_OK) return 1;
+  if (nvfx_instance_create(e, size, &in) != NVFX_OK) return 1;
+  const float controls[3] = {0.7f, 0.2f, 0.9f};
+  nvfx_instance_set_controls(in, controls, 3);
+  nvfx_instance_set_seed(in, 99);
+  nvfx_instance_set_drift(in, 0.5f);
+  nvfx_instance_set_colour(in, 0.4f, 1.2f);
+  std::vector<std::uint8_t> rgba(static_cast<std::size_t>(size) * size * 4);
+  nvfx_render(in, 0.0, rgba.data(), static_cast<std::size_t>(size) * 4);  // warm-up outside the count
+  g_allocations = 0;
+  g_counting = true;
+  for (int f = 0; f < 200; ++f) nvfx_render(in, f / 30.0, rgba.data(), static_cast<std::size_t>(size) * 4);
+  g_counting = false;
+  const long n = g_allocations.load();
+  std::printf("multi-level %dx%d%s: %ld allocations in 200 frames\n", size, size, masked ? ", sparse" : "", n);
+  nvfx_instance_free(in);
+  nvfx_effect_free(e);
+  return n == 0 ? 0 : 1;
+}
+
 // A rollout effect: the counted frames include a seek backwards (a restart from a start point, with warm-up steps).
 // With `handoff`, an explosion whose first 30 frames are drawn in the simulator's look, crossfading over 10
 // (docs/COMPOSE.md §10).
@@ -428,6 +482,7 @@ int main() {
   failures += run(g, 128, "grid", 8, 6) + run(c, 64, "conv", 8, 8);  // vector-quantised features
   failures += run_per_plane(g, 128, "grid", false) + run_per_plane(c, 64, "conv", false);  // a width per feature plane
   failures += run_per_plane(g, 128, "grid", true) + run_per_plane(g, 64, "grid", true);       // sparse features
+  failures += run_multi(128, false) + run_multi(64, true) + run_multi(128, true);                // multi-level models (study F4)
   std::printf("%s\n", failures ? "FAILED: nvfx_render allocated" : "ok: no allocation per frame");
   return failures ? 1 : 0;
 }

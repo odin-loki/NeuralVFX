@@ -71,6 +71,11 @@ struct Options {
   // forward pass sees the features that way from the first step; with qat_bits (or mixed_bits) the stored points are
   // also quantised. The result carries the mask (Model::feature_mask) and the widths (Model::plane_bits).
   bool sparse = false;
+  // The multi family (study F4): with qat_bits, every feature plane is trained at qat_bits, or at level_bits[l] for the
+  // planes of level l when given; with mlp_qat the forward pass also sees the first, hidden and output layers' weights
+  // as stored at 8 bits (Model::mlp_bits; per output unit a scale, straight-through gradients) once quantisation starts.
+  std::vector<int> level_bits;
+  bool mlp_qat = false;
   int sparse_threshold = 0;  // a pixel counts when a channel is above this (0 to 255)
   int sparse_dilate = 0;     // grow the mask by this many grid points
   std::function<void(int iteration, double loss)> progress;
@@ -89,8 +94,9 @@ struct Result {
 // Throws std::invalid_argument for inconsistent data, std::runtime_error without AVX2 + FMA.
 Result train(const Hyper& h, std::span<const Example> data, const Options& options);
 
-// Render a whole clip with the trainer's (fast, float) forward pass, quantised to RGBA8.
-Clip render_clip(const Model& m, std::span<const float> controls, std::span<const float> z, int frames, int size);
+// Render a whole clip with the trainer's (fast, float) forward pass, quantised to RGBA8, on `threads` threads (0: every
+// hardware thread).
+Clip render_clip(const Model& m, std::span<const float> controls, std::span<const float> z, int frames, int size, int threads = 0);
 
 bool cpu_supported();
 

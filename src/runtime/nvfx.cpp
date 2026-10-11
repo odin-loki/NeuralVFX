@@ -124,6 +124,7 @@ std::unique_ptr<Renderer> make_frame_renderer(const nfx::rt::Effect& e, int size
 std::size_t resident_bytes(const nfx::Model& m) {
   std::size_t n = m.raw_f16.size() * 2 + m.raw_u8.size() + m.raw_ranges.size() * 4 + m.raw_codebook.size() * 4;
   n += m.plane_bits.size() + m.raw_offsets.size() * 4 + m.raw_mask.size() + m.raw_fill.size() * 4;  // per-plane storage
+  n += m.raw_mask_at.size() * 4;  // the multi family: where each slice's mask runs start
   n += (m.basis.w.size() + m.basis.b.size()) * 4;
   for (const auto* group : {&m.layers, &m.films}) {
     for (const auto& d : *group) n += (d.w.size() + d.b.size()) * 4;
@@ -494,7 +495,7 @@ nvfx_status nvfx_instance_create(const nvfx_effect* e, int size, nvfx_instance**
     }
   }
   const nfx::Hyper& h = e->e.m.h;
-  if (h.arch == nfx::Arch::grid) {
+  if (h.arch == nfx::Arch::grid || h.arch == nfx::Arch::multi) {
     if (size < 16 || size > 1024 || size % 16) return NVFX_ERROR_UNSUPPORTED;
   } else if (size != h.size && size * 2 != h.size && size * 4 != h.size) {
     return NVFX_ERROR_UNSUPPORTED;
