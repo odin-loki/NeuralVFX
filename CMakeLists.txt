@@ -170,6 +170,7 @@ if(NEURALFX_BUILD_TOOLS)
   target_link_libraries(nvfx_experiment PRIVATE neuralfx_dcm neuralfx_dcm_fine neuralfx_ddpm)
   # study I (docs/COMPOSE.md §9): couplings in training; tracking drives the runtime's runner as compose does
   target_sources(nvfx_experiment PRIVATE tools/experiment_i.cpp)
+  target_sources(nvfx_experiment PRIVATE tools/experiment_int8.cpp)  # the frame models' int8 path (docs/REPORT.md §7)
   target_link_libraries(nvfx_experiment PRIVATE neuralfx_compose)
   # DCM: the mixer search on synthetic problems, version stamps of released mixers, DCM-fine (G1) and the coarse-state
   # denoiser (G2).

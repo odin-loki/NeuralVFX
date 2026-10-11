@@ -2,11 +2,12 @@
 //
 //   nvfx_scene_script --script FILE [--models DIR] [--out scene.mp4 | --no-video] [--keyframes DIR] [--sheet sheet.png]
 //                     [--threads 2] [--isa avx2|avx512|baseline] [--frames N] [--profile profile.csv]
-//                     [--verify frozen.csv] [--check] [--print] [--no-overlap]
+//                     [--verify frozen.csv] [--check] [--print] [--no-overlap] [--own-scratch]
 //
 // Each frame's picture is drawn on a thread of its own while the next frame's state is computed (Options::overlap,
 // with 2 or more threads; --threads counts that thread); --no-overlap draws it after the state. The frames are the
-// same. The profile has every frame's stages, its wall time and the checksum of its RGB (FNV-1a, 64 bits, as
+// same. --own-scratch gives every module its own step working memory instead of one set per thread (Options::
+// shared_scratch; the same frames). The profile has every frame's stages, its wall time and the checksum of its RGB (FNV-1a, 64 bits, as
 // nvfx_fireball's: the hand-written and the scripted fireball can be compared frame by frame).
 //
 // --check parses and checks the script without loading any effect; --print writes it back in canonical form.
@@ -63,7 +64,7 @@ struct Args {
   std::filesystem::path script, models, out = "scene.mp4", keyframes, sheet, profile, verify;
   int threads = 2, frames = -1;
   std::string isa;
-  bool video = true, check = false, print = false, overlap = true;
+  bool video = true, check = false, print = false, overlap = true, own_scratch = false;
 };
 
 Args parse(int argc, char** argv) {
@@ -88,6 +89,7 @@ Args parse(int argc, char** argv) {
     else if (k == "--check") a.check = true;
     else if (k == "--print") a.print = true;
     else if (k == "--no-overlap") a.overlap = false;
+    else if (k == "--own-scratch") a.own_scratch = true;
     else throw std::invalid_argument("unknown option " + k + " (see the source header)");
   }
   if (a.script.empty()) throw std::invalid_argument("--script FILE is needed");
@@ -137,6 +139,7 @@ int main(int argc, char** argv) try {
   opt.threads = A.threads;
   opt.isa = compose::best_isa();
   opt.overlap = A.overlap;
+  opt.shared_scratch = !A.own_scratch;
   sc::Scene scene(script, sc::load_from(A.models), opt);
   const double setup_ms = std::chrono::duration<double, std::milli>(Clock::now() - setup0).count();
   const int W = scene.width(), H = scene.height();

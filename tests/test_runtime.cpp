@@ -152,6 +152,7 @@ TEST(Runtime, MatchesTheReferenceOnEveryIsaFamilyPrecisionAndSize) {  // precisi
       const Model m = make_model(c.h, c.bits);
       auto e = load(m);
       auto in = instance(e.get(), c.size);
+      ASSERT_EQ(nvfx_instance_set_precision(in.get(), NVFX_PRECISION_FLOAT), NVFX_OK);  // the float network (int8: below)
       nvfx_instance_set_controls(in.get(), controls, 3);
       nvfx_instance_set_variation(in.get(), 1);
       for (const int f : {0, 5, 11}) {
@@ -187,6 +188,7 @@ TEST(Runtime, VectorQuantisedFeaturesMatchTheReference) {
       quantise_like_storage(m);
       auto e = load(m);
       auto in = instance(e.get(), c.size);
+      ASSERT_EQ(nvfx_instance_set_precision(in.get(), NVFX_PRECISION_FLOAT), NVFX_OK);
       nvfx_instance_set_controls(in.get(), controls, 3);
       nvfx_instance_set_variation(in.get(), 1);
       for (const int f : {0, 7}) {
@@ -200,6 +202,82 @@ TEST(Runtime, VectorQuantisedFeaturesMatchTheReference) {
     }
   }
   nvfx_set_isa(NVFX_ISA_AUTO);
+}
+
+// The int8 path (nvfx_instance_set_precision; src/runtime/rt_int8.hpp) is not the float network: the hidden layers'
+// activations and weights are rounded to 8 bits (activations to 7 with AVX2's pmaddubsw). It is held to the float
+// reference within a stated tolerance on models whose every weight is non-trivial (larger outputs than trained models,
+// so larger errors): no channel more than kInt8Max levels of 255 away, and on average less than kInt8Mean levels. The
+// worst case here is two hidden layers with AVX2's 7-bit activations (8 levels, 0.51 on average); with one hidden
+// layer, as every trained grid model has, the mean stays below 0.3. Shapes: hidden widths that are not a multiple of 4
+// (the words are padded), one and two hidden layers and none, the first layer projected (frame at least as wide as the
+// grid) or per pixel (narrower), 16- and 8-bit features. On the trained models of studies A to C the measured changes
+// are in results/experiments/int8_summary.csv.
+constexpr int kInt8Max = 8;
+constexpr double kInt8Mean = 0.6;
+
+TEST(Runtime, Int8StaysWithinItsToleranceOfTheFloatReferenceOnEveryIsa) {
+  const float controls[3] = {0.8f, 0.1f, 0.6f};
+  struct Case {
+    Hyper h;
+    int bits, size;
+  };
+  Hyper deep = grid_hyper(), shallow = grid_hyper(), wide = grid_hyper(), quad = grid_hyper(), odd = grid_hyper();
+  deep.layers = 3;
+  shallow.layers = 1;
+  wide.grid = 40;  // more grid points across than pixels at 32: the first layer per pixel
+  quad.hidden = 24;
+  odd.hidden = 21;  // a last word in part (pairs and quads)
+  const Case cases[] = {{grid_hyper(), 16, 32}, {grid_hyper(), 8, 48}, {grid_hyper(), 16, 16}, {deep, 16, 32}, {shallow, 8, 32},
+                        {wide, 16, 32},         {wide, 8, 64},         {quad, 16, 48},         {odd, 16, 32}};
+  int compared = 0;
+  for (const nvfx_isa isa : kIsas) {
+    if (nvfx_set_isa(isa) != NVFX_OK) continue;
+    for (const Case& c : cases) {
+      const Model m = make_model(c.h, c.bits);
+      auto e = load(m);
+      auto in = instance(e.get(), c.size);
+      ASSERT_EQ(nvfx_instance_set_precision(in.get(), NVFX_PRECISION_INT8), NVFX_OK);
+      nvfx_instance_set_controls(in.get(), controls, 3);
+      nvfx_instance_set_variation(in.get(), 1);
+      for (const int f : {0, 5, 11}) {
+        const auto got = render(in.get(), f / static_cast<double>(m.fps), c.size);
+        const auto want = reference(m, f, controls, 1, c.size);
+        double sum = 0;
+        for (std::size_t i = 0; i < got.size(); ++i) sum += std::abs(int(got[i]) - int(want[i]));
+        EXPECT_LE(max_diff(got, want), kInt8Max) << m.h.describe() << " size " << c.size << " frame " << f << " isa " << isa;
+        EXPECT_LE(sum / static_cast<double>(got.size()), kInt8Mean) << m.h.describe() << " size " << c.size << " frame " << f << " isa " << isa;
+        ++compared;
+      }
+    }
+  }
+  nvfx_set_isa(NVFX_ISA_AUTO);
+  EXPECT_GE(compared, 24);
+}
+
+TEST(Runtime, PrecisionIsASettingOfTheInstance) {
+  const Model g = make_model(grid_hyper(), 16), c = make_model(conv_hyper(), 16);
+  auto eg = load(g), ec = load(c);
+  auto def = instance(eg.get(), 32), q = instance(eg.get(), 32), fl = instance(eg.get(), 32);
+  ASSERT_EQ(nvfx_instance_set_precision(q.get(), NVFX_PRECISION_INT8), NVFX_OK);
+  ASSERT_EQ(nvfx_instance_set_precision(fl.get(), NVFX_PRECISION_FLOAT), NVFX_OK);
+  for (auto* in : {def.get(), q.get(), fl.get()}) nvfx_instance_set_variation(in, 1);
+  EXPECT_EQ(render(def.get(), 0.1, 32), render(q.get(), 0.1, 32));  // the default for the grid family is int8
+  const auto f0 = render(fl.get(), 0.1, 32);
+  EXPECT_NE(render(q.get(), 0.1, 32), f0);  // (the test model's weights make the difference visible)
+  ASSERT_EQ(nvfx_instance_set_precision(q.get(), NVFX_PRECISION_FLOAT), NVFX_OK);  // and back: the float network exactly
+  EXPECT_EQ(render(q.get(), 0.1, 32), f0);
+  EXPECT_GT(nvfx_instance_scratch_bytes(def.get()), 0u);
+  // the conv family and rollout effects have no int8 path
+  auto cv = instance(ec.get(), 32);
+  nvfx_instance_set_variation(cv.get(), 0);
+  const auto conv_default = render(cv.get(), 0.1, 32);
+  EXPECT_EQ(nvfx_instance_set_precision(cv.get(), NVFX_PRECISION_INT8), NVFX_ERROR_UNSUPPORTED);
+  EXPECT_EQ(nvfx_instance_set_precision(cv.get(), NVFX_PRECISION_FLOAT), NVFX_OK);
+  EXPECT_EQ(render(cv.get(), 0.1, 32), conv_default);
+  const int bad = 3;  // not a precision
+  EXPECT_EQ(nvfx_instance_set_precision(cv.get(), static_cast<nvfx_precision>(bad)), NVFX_ERROR_ARGUMENT);
+  EXPECT_EQ(nvfx_instance_set_precision(nullptr, NVFX_PRECISION_FLOAT), NVFX_ERROR_ARGUMENT);
 }
 
 TEST(Runtime, InfoNamesAndMemory) {

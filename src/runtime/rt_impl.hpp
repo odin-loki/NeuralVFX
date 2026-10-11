@@ -17,6 +17,7 @@
 #include <bit>
 #include <cmath>
 #include <cstring>
+#include <immintrin.h>
 #include <limits>
 #include <memory>
 #include <stdexcept>
@@ -345,13 +346,17 @@ class ConvRenderer final : public Renderer {
   Dense k0_, k1_;
 };
 
+#include "rt_int8.hpp"
 #include "rt_rollout.hpp"
 
 }  // namespace
 
-std::unique_ptr<Renderer> make_renderer(const Effect& e, int size) {
-  if (e.m.h.arch == Arch::grid) return std::make_unique<GridRenderer>(e, size);
-  return std::make_unique<ConvRenderer>(e, size);
+std::unique_ptr<Renderer> make_renderer(const Effect& e, int size, Precision p) {
+  if (e.m.h.arch == Arch::grid) {
+    if (p == Precision::int8) return std::make_unique<GridRendererQ>(e, size);
+    return std::make_unique<GridRenderer>(e, size);
+  }
+  return std::make_unique<ConvRenderer>(e, size);  // the conv family has no int8 path
 }
 
 std::unique_ptr<RolloutRunner> make_rollout(const RolloutEffect& e, int size) { return std::make_unique<Rollout>(e, size); }

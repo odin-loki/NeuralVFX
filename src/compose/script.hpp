@@ -123,6 +123,9 @@ struct Options {
   // Starting values of inputs (`input NAME = value`) instead of the script's; a name the script lacks throws
   // std::invalid_argument.
   std::vector<std::pair<std::string, float>> inputs = {};
+  // The modules step with working memory shared per thread (StepScratch, docs/COMPOSE.md §7.3) rather than their own:
+  // the same frames, less memory.
+  bool shared_scratch = true;
 };
 
 // A scene built from a script: every module, buffer and list is created here, so render() allocates nothing.

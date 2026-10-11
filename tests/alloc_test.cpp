@@ -1,9 +1,10 @@
 // nvfx_render must not allocate (docs/PLAN.md §5.4), nor may a frame of a composed scene (docs/COMPOSE.md). This
 // program replaces the global operator new to count heap allocations, builds small grid, conv and rollout effects in
-// memory, and renders 200 frames of each with every feature switched on (controls, seeded drift, colour), a rollout
-// effect as one continuous rollout with the prior against drift, then 99 frames of a small composed scene, 44 frames
-// of a scripted one, and the scripted one through the scene C API (nvfx_scene.h) with the game's calls between frames:
-// steps, field reads, inputs, triggers, module moves and controls. Exit code 0 = no allocation during rendering.
+// memory, and renders 200 frames of each with every feature switched on (controls, seeded drift, colour; grid models at
+// float and int8 precision), a rollout effect as one continuous rollout with the prior against drift, then 99 frames of
+// a small composed scene (its modules with their own step scratch, and sharing one per thread), 44 frames of a scripted
+// one, and the scripted one through the scene C API (nvfx_scene.h) with the game's calls between frames: steps, field
+// reads, inputs, triggers, module moves and controls. Exit code 0 = no allocation during rendering.
 #include "compose_scene.hpp"
 #include "script.hpp"
 
@@ -52,7 +53,7 @@ void operator delete[](void* p, std::size_t) noexcept { std::free(p); }
 
 namespace {
 
-int run(nfx::Hyper h, int size, const char* name, int bits = 16, int vq_bits = 0) {
+int run(nfx::Hyper h, int size, const char* name, int bits = 16, int vq_bits = 0, nvfx_precision precision = NVFX_PRECISION_DEFAULT) {
   nfx::Model m = nfx::init_model(h, 1);
   m.effect = name;
   m.feature_bits = bits;
@@ -72,6 +73,7 @@ int run(nfx::Hyper h, int size, const char* name, int bits = 16, int vq_bits = 0
   nvfx_instance* in = nullptr;
   if (nvfx_effect_load_memory(bytes.data(), bytes.size(), &e) != NVFX_OK) return 1;
   if (nvfx_instance_create(e, size, &in) != NVFX_OK) return 1;
+  if (nvfx_instance_set_precision(in, precision) != NVFX_OK) return 1;
   const float controls[3] = {0.7f, 0.2f, 0.9f};
   nvfx_instance_set_controls(in, controls, 3);
   nvfx_instance_set_seed(in, 99);
@@ -84,7 +86,8 @@ int run(nfx::Hyper h, int size, const char* name, int bits = 16, int vq_bits = 0
   for (int f = 0; f < 200; ++f) nvfx_render(in, f / 30.0, rgba.data(), static_cast<std::size_t>(size) * 4);
   g_counting = false;
   const long n = g_allocations.load();
-  std::printf("%s %dx%d, %d-bit features%s: %ld allocations in 200 frames\n", name, size, size, bits, vq_bits ? " (vector-quantised)" : "", n);
+  std::printf("%s %dx%d, %d-bit features%s%s: %ld allocations in 200 frames\n", name, size, size, bits, vq_bits ? " (vector-quantised)" : "",
+              precision == NVFX_PRECISION_FLOAT ? ", float" : precision == NVFX_PRECISION_INT8 ? ", int8" : "", n);
   nvfx_instance_free(in);
   nvfx_effect_free(e);
   return n == 0 ? 0 : 1;
@@ -213,8 +216,8 @@ int run_rollout_prior(int size) {
 }
 
 // A composed scene (src/compose): stepping, couplings, the bus, light, particles and the whole frame, on 2 threads.
-int run_compose() {
-  nfx::compose::testing::MiniScene scene(2);
+int run_compose(bool shared_scratch) {
+  nfx::compose::testing::MiniScene scene(2, shared_scratch);
   std::vector<std::uint8_t> rgb(160 * 90 * 3);
   scene.step(0, rgb);  // warm-up outside the count
   g_allocations = 0;
@@ -222,9 +225,9 @@ int run_compose() {
   for (int f = 1; f < 100; ++f) scene.step(f, rgb);
   g_counting = false;
   const long n = g_allocations.load();
-  std::printf("composed scene 160x90: %ld allocations in 99 frames\n", n);
+  std::printf("composed scene 160x90%s: %ld allocations in 99 frames\n", shared_scratch ? ", step scratch shared" : "", n);
   // the same with the picture drawn on its own thread while the next frame's state is computed
-  nfx::compose::testing::MiniScene over(2);
+  nfx::compose::testing::MiniScene over(2, shared_scratch);
   nfx::compose::PictureThread picture(over.frame, over.pool);
   std::array<std::vector<std::uint8_t>, 2> bufs{rgb, rgb};
   const auto frame = [&](int f, bool count_from_start) {
@@ -243,7 +246,7 @@ int run_compose() {
   for (int f = 1; f < 100; ++f) frame(f, false);
   g_counting = false;
   const long m = g_allocations.load();
-  std::printf("composed scene 160x90, picture overlapped: %ld allocations in 100 pictures and 99 frames\n", m);
+  std::printf("composed scene 160x90%s, picture overlapped: %ld allocations in 100 pictures and 99 frames\n", shared_scratch ? ", step scratch shared" : "", m);
   return n == 0 && m == 0 ? 0 : 1;
 }
 
@@ -368,7 +371,14 @@ int main() {
   c.c0 = 8;
   c.c1 = 8;
   c.c2 = 8;
-  int failures = run(g, 64, "grid") + run(g, 128, "grid") + run(c, 64, "conv") + run(c, 32, "conv") + run_rollout(64) + run_rollout(128) + run_compose() + run_script();
+  int failures = run(g, 64, "grid") + run(g, 128, "grid") + run(c, 64, "conv") + run(c, 32, "conv") + run_rollout(64) + run_rollout(128) + run_compose(false) +
+                 run_compose(true) + run_script();
+  nfx::Hyper deep = g;  // int8 with two hidden layers, and with the first layer per pixel (a grid wider than the frame)
+  deep.layers = 3;
+  nfx::Hyper wide = g;
+  wide.grid = 40;
+  failures += run(g, 128, "grid", 16, 0, NVFX_PRECISION_FLOAT) + run(g, 128, "grid", 16, 0, NVFX_PRECISION_INT8) + run(deep, 64, "grid", 8, 0, NVFX_PRECISION_INT8) +
+              run(wide, 32, "grid", 16, 0, NVFX_PRECISION_INT8);
   failures += run_scene_api();
   failures += run_rollout_prior(64) + run_rollout_prior(128);  // the prior against drift
   failures += run(g, 128, "grid", 8) + run(g, 128, "grid", 5) + run(g, 64, "grid", 4) + run(c, 64, "conv", 4);  // packed features

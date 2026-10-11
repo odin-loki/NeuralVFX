@@ -403,7 +403,7 @@ The video itself is not in git (data rules): it is written where `--out` says.
 
 Measured with `nvfx_fireball --profile`, which times every stage of every frame. The machine is the report's
 4-core machine, with AVX2 unless the row says otherwise. The figures are medians over the frames after the detonation,
-when everything runs. §7.3 has the second optimisation round.
+when everything runs. §7.3 has the second optimisation round, §7.4 the modules' working memory.
 
 ### 7.1 After the first optimisation round
 
@@ -583,11 +583,9 @@ Tried and not kept:
   blends two of its rows per pixel. Nothing left to gain.
 - **Bloom's last pass resampled once per row of mip 0** (as the light): it cost bloom more than it saved tone mapping.
 
-Not done: **the modules' working memory** is unchanged (127 MB at 1280 x 720, 294 MB at 1920 x 1080). Of the 127 MB,
-102 MB are the rollout runners' rings of padded rows and row records, which hold a lag of up to the whole tile
-because the flow's speed is not bounded. Rings shared by the threads that step (one set per thread, 31 MB for four)
-would bring the modules to about 56 MB, but the runner would have to take its scratch from outside. Peak resident
-memory grew from 247 to 257 MB (the copies the capture takes and the per-row lookups).
+Not done in this round: **the modules' working memory** stayed at 127 MB at 1280 x 720 and 294 MB at 1920 x 1080, and
+peak resident memory grew from 247 to 257 MB (the copies the capture takes and the per-row lookups). §7.4 shares the
+runners' step buffers between modules: 51 and 103 MB.
 
 Configurations (the least of three runs' medians, frames after the detonation; before: commit d41adff, the code of
 §7.1, with its frame time the sum of its stages; after: the time between finished frames, overlapped; the CPU columns
@@ -657,6 +655,57 @@ tools/opt2/verify.sh ../before/build/nvfx_fireball build/nvfx_fireball /tmp/v2  
 
 The summaries come from `tools/opt2/summary.sh` (medians from frame 36 on); `--raw` writes every frame's RGB for PSNR
 comparisons.
+
+### 7.4 The modules' working memory
+
+Of the 127 MB that the 16 modules took at 1280 x 720, 102 MB were the rollout runners' step buffers: rings of padded
+rows and row records, which hold a lag of up to the whole tile because the flow's speed is not bounded, plus the
+coarse step's activations. A step leaves nothing in them that the next step reads. So (11 October 2026):
+- **Runners take their step buffers from outside** (`rt::RolloutScratch`, `RolloutRunner::use_scratch`). A runner
+  zeroes the border columns and planes it relies on in every step, and reads nothing else that it has not written in
+  the same step. Tests fill the scratch with garbage (NaN, ±3e38, noise) between the steps of runners of other effects,
+  grids and sizes, and compare every field and pixel bit for bit with runners that have their own.
+- **A scene holds one scratch per thread that steps** (`compose::StepScratch`). A module takes a free one for each step
+  (or start) and gives it back, lock-free and without allocating; which one it gets changes nothing. The hand-written
+  fireball, scripted scenes and the test scene use it; `--own-scratch` (`Options::shared_scratch = false`) gives every
+  module its own, as before.
+- **The rings hold the rows a frame uses**, S + 3 of them instead of the next power of two plus one: 7.2 MB per scratch
+  for a 384-pixel tile instead of 8.0 MB.
+
+Every frame is the same to the bit. `tools/opt2/verify.sh` (the old code's 270 frame checksums against the new) passes
+at 1280 x 720 on 1, 2, 3 and 4 threads, stage by stage, captured and overlapped, and with the baseline row kernels; and
+with the baseline and AVX-512 runtimes, tiles at half size, 640 x 360 and 1920 x 1080 on 1 and 4 threads: 18 runs, all
+270 frames each. `ctest -R ScriptedFireballBitExact` passes, and the frame loop still allocates nothing.
+
+Memory (`nvfx_fireball` prints it; the old code's does not depend on the number of threads):
+
+| configuration | modules before | modules after | of which shared step buffers | peak resident before | after |
+|---|---:|---:|---:|---:|---:|
+| 1280 x 720, 4 threads | 126.9 MB | **50.6 MB** | 28.9 MB (4 x 7.2) | 257.2 MB | **189.2 MB** |
+| 1280 x 720, 2 threads | 126.9 MB | 36.2 MB | 14.4 MB | 257.1 MB | 174.8 MB |
+| 1280 x 720, 1 thread | 126.9 MB | 29.0 MB | 7.2 MB | 257.1 MB | 167.6 MB |
+| 1920 x 1080, 4 threads | 293.7 MB | **103.2 MB** | 62.7 MB (4 x 15.7) | 565.0 MB | **397.1 MB** |
+| 1920 x 1080, 1 thread | 293.7 MB | 56.2 MB | 15.7 MB | 564.9 MB | 349.8 MB |
+| 1280 x 720, tiles at half size, 4 threads | 41.7 MB | 18.8 MB | 8.5 MB | 144.2 MB | 121.2 MB |
+| 640 x 360, 4 threads | 41.7 MB | 18.8 MB | 8.5 MB | 85.9 MB | 63.6 MB |
+
+- What is left per module is its own: fine fields, coarse state, pressure, noise caches and the shader's buffers
+  (21.8 MB for the 16 modules at 1280 x 720). The step buffers are now about a third of the modules' memory on four
+  threads; most of each set is the row records (4.7 MB of the 7.2), which still hold a lag of up to the whole tile.
+- Time: no measurable change on the busy machine (the model step's CPU time per frame at 1280 x 720 on one thread:
+  12.0 to 14.3 ms before, 13.0 to 13.5 ms after, three interleaved runs each). Provisional; to be re-timed on a quiet
+  machine (`tools/opt2/table.sh` with the old build beside the new).
+- An nvfx rollout instance's two runners (the shard on screen and the next one) step one after the other, so they
+  share one scratch too: `nvfx_instance_scratch_bytes` is 2.4 MB at 128 px instead of 4.0 MB (1.5 instead of 2.3 MB at
+  64 px, 5.6 instead of 11.1 MB at 256 px).
+
+To check and measure again (old build beside the new, as in §7.3):
+
+```sh
+tools/opt2/verify.sh ../before/build/nvfx_fireball build/nvfx_fireball /tmp/v4        # the same frames
+build/nvfx_fireball --models $MODELS --no-video --threads 4 --profile /tmp/m.csv       # the 'memory:' line; /tmp/m.csv.meta
+build/nvfx_fireball --models $MODELS --no-video --threads 4 --own-scratch --profile /tmp/o.csv   # every module its own
+```
 
 ## 8. Limits and what a product feature needs
 

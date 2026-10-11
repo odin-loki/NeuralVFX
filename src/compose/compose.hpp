@@ -114,6 +114,26 @@ Isa best_isa();
 const char* isa_name(Isa isa);
 std::unique_ptr<rt::RolloutRunner> make_runner(const rt::RolloutEffect& e, int size, Isa isa);
 
+// The working memory of the modules' steps (rt::RolloutScratch: the detail layer's rings and row records, the coarse
+// step's activations), shared: a module that shares it takes a scratch for each step (or start) and gives it back,
+// so a scene holds one per thread that steps at once instead of one per module (docs/COMPOSE.md §7.3). Taking and
+// giving back are lock-free and allocate nothing; which scratch a step takes changes nothing in its result.
+class StepScratch {
+ public:
+  explicit StepScratch(int slots);  // slots: the threads that may step modules at the same time
+  StepScratch(const StepScratch&) = delete;
+  StepScratch& operator=(const StepScratch&) = delete;
+  void fit(const rt::RolloutRunner& r);  // room for r in every slot (a set-up call: allocates)
+  rt::RolloutScratch& take();            // a free slot (if every one is taken, waits for one)
+  void give(rt::RolloutScratch& s);
+  int slots() const { return static_cast<int>(s_.size()); }
+  std::size_t bytes() const;
+
+ private:
+  std::vector<rt::RolloutScratch> s_;
+  std::unique_ptr<std::atomic<bool>[]> busy_;
+};
+
 // Where a module's tile is in the world: its top-left corner and world pixels per tile pixel. World y points down.
 struct Placement {
   float x = 0, y = 0, scale = 1;
@@ -157,6 +177,9 @@ class Module {
 
   void start(int index, std::uint64_t run_seed);
   void start_empty(float seconds, std::uint64_t run_seed);  // nothing in the domain, at an age (receives material)
+  // From now on, step (and start) with working memory taken from `shared` (made room for this module) instead of the
+  // runner's own, which is freed. A set-up call; `shared` must outlive the module's steps.
+  void share_scratch(StepScratch& shared);
   void take_over(const Module& from);                         // the other's physical state and fine fields
   void step();
   void shade(const Light* light);  // into image(): learned renderer or field shader, tile space
@@ -199,6 +222,7 @@ class Module {
   int size_;
   Isa isa_;
   std::unique_ptr<rt::RolloutRunner> r_;
+  StepScratch* shared_ = nullptr;
   Image4 img_;
   std::vector<std::uint8_t> rgba8_;
   std::vector<float> shadow_;  // coarse: soot summed towards the sky

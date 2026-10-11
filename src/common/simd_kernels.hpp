@@ -15,11 +15,10 @@ typedef float vfu __attribute__((vector_size(kW * 4), aligned(4)));  // unaligne
 
 inline vf load(const float* p) { return *reinterpret_cast<const vfu*>(p); }
 inline void store(float* p, vf v) { *reinterpret_cast<vfu*>(p) = v; }
-inline vf splat(float x) {
-  vf v;
-  for (int k = 0; k < kW; ++k) v[k] = x;
-  return v;
-}
+// x in every lane, written so that it compiles to one broadcast (x - 0 is x, -0 included). Filling the lanes one by one
+// made GCC build 512-bit vectors from four 128-bit stores and one load, a store-forwarding stall each time (most of the
+// AVX-512 build's dense layers' time with one vector per block).
+inline vf splat(float x) { return x - vf{}; }
 inline vf relu(vf v) { return v > 0.f ? v : vf{}; }
 
 // out[o][k] = act(b[o] + sum_i W[o][i] * in[i][k]) for one block of 16 pixels; rows are `stride` floats apart.

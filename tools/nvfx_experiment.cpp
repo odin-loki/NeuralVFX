@@ -10,6 +10,8 @@
 //   c       variation: one model per effect trained on 24 seeds with learned variation codes; new seeds against
 //           held-out real clips by distribution statistics, diversity and copying checks
 //   report  bootstrap intervals and tables: results/experiments/SUMMARY.md (generated)
+//   int8    the frame models' int8 path against their float path on studies A to C (experiment_int8.hpp)
+//   int8-timing   its cost per frame, float against int8 per ISA and size (on a quiet machine; --runs 5 --core 3)
 //
 // Everything trained is scored through the shipping runtime (nvfx.h) at its stored precision. Clips, models,
 // sheets and videos go under the data root (never git); CSVs and the summary go under results/experiments.
@@ -17,6 +19,7 @@
 #include "experiment_d.hpp"
 #include "experiment_g.hpp"
 #include "experiment_i.hpp"
+#include "experiment_int8.hpp"
 
 #include <neuralfx/flipbook.hpp>
 #include <neuralfx/image_io.hpp>
@@ -154,11 +157,13 @@ struct RtEffect {
   RtEffect& operator=(const RtEffect&) = delete;
 };
 
-// Render a clip through the runtime: controls, then a training variation (>= 0) or a seed (drift off).
+// Render a clip through the runtime: controls, then a training variation (>= 0) or a seed (drift off). The studies
+// score the float network (the runtime's int8 default for the grid family is measured against it by the int8 step).
 Clip runtime_clip(const Model& m, std::span<const float> controls, int variation, std::uint64_t seed) {
   RtEffect fx(m);
   nvfx_instance* in = nullptr;
   if (nvfx_instance_create(fx.e, kSize, &in) != NVFX_OK) throw std::runtime_error("runtime instance failed");
+  nvfx_instance_set_precision(in, NVFX_PRECISION_FLOAT);
   nvfx_instance_set_controls(in, controls.data(), static_cast<int>(controls.size()));
   nvfx_instance_set_drift(in, 0.f);
   if (variation >= 0) nvfx_instance_set_variation(in, variation);
@@ -182,6 +187,7 @@ double runtime_ms(const Model& m) {
   RtEffect fx(m);
   nvfx_instance* in = nullptr;
   nvfx_instance_create(fx.e, kSize, &in);
+  nvfx_instance_set_precision(in, NVFX_PRECISION_FLOAT);  // the float network, as runtime_clip()
   std::vector<std::uint8_t> buf(kSize * kSize * 4);
   std::vector<double> ms;
   for (int f = 0; f < 140; ++f) {
@@ -619,6 +625,7 @@ std::pair<double, double> measure(const fs::path& model, int size, nvfx_isa isa,
     sched_setaffinity(0, sizeof(old), &old);
     return {-1, -1};
   }
+  nvfx_instance_set_precision(in, NVFX_PRECISION_FLOAT);  // the float network (int8: the int8-timing step)
   macs = nvfx_instance_macs_per_pixel(in);
   std::vector<std::uint8_t> buf(static_cast<std::size_t>(size) * size * 4);
   std::vector<double> ms;
@@ -1101,7 +1108,7 @@ void step_report(const Ctx& c) {
 int main(int argc, char** argv) try {
   const tools::Args a(argc, argv, {"quick", "help"});
   if (a.flag("help") || a.positional().empty()) {
-    std::println("nvfx_experiment data|a|b|c|media|timing|report|all|d|d-chaos|d-train|d-tune|d-finish|d-eval|d-timing|g-data|g-pilot|g-search|g-eval|g-timing|g-fine|g-diff|g-diff-test|g-prior|g-prior-test|i-data|i-probe|i-train|i-val|i-test [--root DIR] [--results DIR] [--threads 4] [--quick]");
+    std::println("nvfx_experiment data|a|b|c|media|timing|report|all|d|d-chaos|d-train|d-tune|d-finish|d-eval|d-timing|g-data|g-pilot|g-search|g-eval|g-timing|g-fine|g-diff|g-diff-test|g-prior|g-prior-test|i-data|i-probe|i-train|i-val|i-test|int8|int8-timing [--root DIR] [--results DIR] [--threads 4] [--quick]");
     return 0;
   }
   Ctx c;
@@ -1175,6 +1182,15 @@ int main(int argc, char** argv) try {
     if (step == "i-train") study_i::step_train(ic);
     if (step == "i-val") study_i::step_val(ic);
     if (step == "i-test") study_i::step_test(ic);
+  }
+  {  // the int8 path of the frame models (docs/REPORT.md §7)
+    study_int8::Ctx q;
+    q.data = c.data;
+    q.results = c.results;
+    q.runs = a.i("runs", 5);
+    q.core = a.i("core", 3);
+    if (step == "int8") study_int8::step_quality(q);
+    if (step == "int8-timing") study_int8::step_timing(q);  // separately, on a quiet machine
   }
   if (step == "report" || step == "all") step_report(c);
   std::println("{} finished in {:.1f} min", step, std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count() / 60.0);
