@@ -166,6 +166,13 @@ add_library(neuralfx_codec STATIC src/codec/rcoder.cpp src/codec/run_codec.cpp s
 target_link_libraries(neuralfx_codec PUBLIC neuralfx_core)
 neuralfx_defaults(neuralfx_codec)
 
+# From footage to rollout effects (docs/FOOTAGE.md, study J): an inverse of the renderer trained on the simulator's
+# (frame, fields) pairs, refinement through the effect's learned renderer, block-matched motion and assimilation through
+# the effect's stepper, and effect files with estimated start points.
+add_library(neuralfx_footage STATIC src/footage/footage.cpp src/footage/footage_sim.cpp)
+target_link_libraries(neuralfx_footage PUBLIC neuralfx_train)
+neuralfx_defaults(neuralfx_footage)
+
 if(NEURALFX_BUILD_TOOLS)
   foreach(tool nvfx_sim nvfx_train nvfx_eval nvfx_experiment nvfx_ingest)
     add_executable(${tool} tools/${tool}.cpp)
@@ -235,6 +242,14 @@ if(NEURALFX_BUILD_TOOLS)
   target_include_directories(nvfx_prior PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src/runtime")
   target_link_libraries(nvfx_prior PRIVATE nvfx neuralfx_ddpm)
   neuralfx_defaults(nvfx_prior)
+  # Study J (docs/FOOTAGE.md): start points estimated from frames. nvfx_estimate writes an effect with start points
+  # estimated from footage; nvfx_study_j trains the inverse networks and runs the study's validation and test.
+  add_executable(nvfx_estimate tools/nvfx_estimate.cpp)
+  target_link_libraries(nvfx_estimate PRIVATE neuralfx_footage neuralfx_io nvfx)
+  neuralfx_defaults(nvfx_estimate)
+  add_executable(nvfx_study_j tools/nvfx_study_j.cpp)
+  target_link_libraries(nvfx_study_j PRIVATE neuralfx_footage neuralfx_io nvfx)
+  neuralfx_defaults(nvfx_study_j)
   add_executable(nvfx_scene examples/scene_bench.cpp)
   target_link_libraries(nvfx_scene PRIVATE nvfx)
   neuralfx_defaults(nvfx_scene)
@@ -267,6 +282,11 @@ if(NEURALFX_BUILD_TESTS)
   neuralfx_defaults(neuralfx_tests)
   target_compile_definitions(neuralfx_tests PRIVATE NEURALFX_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
   gtest_discover_tests(neuralfx_tests TEST_PREFIX "neuralfx." DISCOVERY_MODE PRE_TEST PROPERTIES LABELS neuralfx)
+  # Study J's estimation path (docs/FOOTAGE.md): its own test program, so the shared test list stays as it is.
+  add_executable(neuralfx_footage_tests tests/test_footage.cpp)
+  target_link_libraries(neuralfx_footage_tests PRIVATE neuralfx_footage nvfx GTest::gtest_main)
+  neuralfx_defaults(neuralfx_footage_tests)
+  gtest_discover_tests(neuralfx_footage_tests TEST_PREFIX "neuralfx." DISCOVERY_MODE PRE_TEST PROPERTIES LABELS neuralfx)
   # Counts heap allocations around nvfx_render (replaces the global operator new, so it is its own program).
   add_executable(nvfx_alloc_test tests/alloc_test.cpp)
   target_link_libraries(nvfx_alloc_test PRIVATE nvfx neuralfx_compose nvfx_scene_api neuralfx_ddpm)  # the trainer's format writer makes a test prior
