@@ -51,3 +51,26 @@ The evaluation never scores a model on what it trained on (see [REPORT.md](REPOR
 - Task C holds out whole seeds; generated variations come from new seeds.
 
 For owner footage: hold out whole clips (never frames of a training clip), and record the split next to the register.
+
+## 5. Third-party code fetched at build time
+
+None of it is in git and none of it is in the runtime library (`nvfx`, `libnvfx.so`): the runtime has no third-party
+dependency. The configure step fetches each item at a pinned commit (git, or a file checked by its SHA-256), in a child
+CMake process, so a failed download only leaves that item out.
+
+| component | from | pinned at | licence | used for | built into |
+|---|---|---|---|---|---|
+| bc7e (plain C++ port of `bc7e.ispc`), `basisu_bc7e_scalar.cpp/.h` | github.com/BinomialLLC/basis_universal, `encoder/` | commit `99f52d63aa6799cbdaecfe977111dc5ec3b31d47` (1 September 2026), files checked by SHA-256 | Apache-2.0 | BC7 encoding of the flipbook baselines | `neuralfx_bc7`, linked by `neuralfx_core` (study tools and tests) |
+| bc7enc_rdo: `bc7decomp.cpp`, `bc7decomp_ref.cpp` | github.com/richgel999/bc7enc_rdo | commit `b9438627eef73a1157e84201b6fa6eb2ffd6d9f0` (30 July 2026) | MIT or public domain (Unlicense), the author's choice of two; its `bc7e.ispc` (not used) is Apache-2.0 | BC7 decoding (the reference decoder) | `neuralfx_bc7` |
+| astc-encoder (the core library, `Source/astcenc_*.cpp`) | github.com/ARM-software/astc-encoder | tag 5.7.0, commit `baff485b0ff36d2f95d28961605106502c653966` (31 July 2026) | Apache-2.0 | ASTC encoding and decoding of the flipbook baselines | `neuralfx_astc`, linked by `neuralfx_core` |
+| Dear ImGui | github.com/ocornut/imgui | tag v1.91.8 | MIT | the optional viewer (`NEURALFX_BUILD_VIEWER`) | `nvfx_viewer` only |
+
+- `NEURALFX_FETCH_ENCODERS` (default ON) fetches the encoders (`cmake/encoders.cmake`). Without them, or when the
+  download fails, the BC7 and ASTC flipbooks are not built: `flipbook::available()` says so, the study tools leave
+  those rows out and the tests that need them skip. The original BC3-layout and raw flipbooks never need them.
+- Third-party sources are compiled with their own language level (C++17) and without this project's warning flags.
+  astc-encoder is built as its invariant build (no floating-point contraction), for SSE4.1 on x86-64, so it writes the
+  same blocks on every x86-64 machine.
+- System packages, not fetched: GoogleTest (BSD-3-Clause; the tests), zlib (zlib licence; PNG figures and the zlib
+  references of study F), GLFW and OpenGL (the viewer), ffmpeg (a separate program, run through a pipe for video
+  ingest and the video-codec baselines).

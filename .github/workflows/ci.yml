@@ -1,6 +1,8 @@
 # Build and test on Ubuntu 24.04 with warnings as errors.
-#   build   the libraries, tools and tests (ffmpeg installed so the video-ingest test runs), plus a benchmark smoke run
-#   viewer  the Dear ImGui viewer (fetched at a pinned tag) and its headless screenshot test under Xvfb
+#   build   the libraries, tools and tests (ffmpeg installed so the video-ingest test runs; the BC7 and ASTC encoders of
+#           the flipbook baselines fetched at pinned commits), plus a benchmark smoke run
+#   viewer  the Dear ImGui viewer (fetched at a pinned tag) and its headless screenshot test under Xvfb; configured
+#           without the encoders (the build that does without them)
 name: CI
 
 on:
@@ -57,7 +59,7 @@ jobs:
       - name: Configure
         run: >-
           cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_COMPILER=g++-14 -DCMAKE_C_COMPILER=gcc-14
-          -DNEURALFX_WERROR=ON -DNEURALFX_BUILD_VIEWER=ON
+          -DNEURALFX_WERROR=ON -DNEURALFX_BUILD_VIEWER=ON -DNEURALFX_FETCH_ENCODERS=OFF
 
       - name: Build
         run: cmake --build build --target nvfx_viewer

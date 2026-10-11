@@ -1,10 +1,11 @@
 // nvfx_experiment: the Phase 3 evaluation (docs/PLAN.md §6, docs/REPORT.md), end to end and cached.
 //
-//   nvfx_experiment data | a | b | c | report | all   [--root DIR] [--threads 4] [--quick]
+//   nvfx_experiment data | a | a-flipbooks | b | c | report | all   [--root DIR] [--threads 4] [--quick]
 //
 //   data    simulate every clip (fire, smoke, explosion at 128 px, 64 frames)
 //   a       compression: one model per clip, a ladder of model sizes against the flipbook ladder at matched memory,
 //           plus the frame-interpolation test (only even frames available)
+//   a-flipbooks  only the flipbook rows of A still missing (the production formats, BC7 and ASTC, when added)
 //   b       controls: one model per effect trained on a 3 x 5 x 3 grid of control settings, scored on held-out
 //           settings against nearest-setting and two-setting-blend flipbook libraries
 //   c       variation: one model per effect trained on 24 seeds with learned variation codes; new seeds against
@@ -14,6 +15,7 @@
 // Everything trained is scored through the shipping runtime (nvfx.h) at its stored precision. Clips, models,
 // sheets and videos go under the data root (never git); CSVs and the summary go under results/experiments.
 #include "args.hpp"
+#include "baselines.hpp"
 #include "experiment_d.hpp"
 #include "experiment_g.hpp"
 #include "experiment_i.hpp"
@@ -224,6 +226,11 @@ class Csv {
   bool has(const std::string& key_col, const std::string& key) const {
     return std::ranges::any_of(rows_, [&](const Row& r) { return r.v.contains(key_col) && r.v.at(key_col) == key; });
   }
+  bool has(std::initializer_list<std::pair<std::string, std::string>> key) const {
+    return std::ranges::any_of(rows_, [&](const Row& r) {
+      return std::ranges::all_of(key, [&](const auto& kv) { return r.v.contains(kv.first) && r.v.at(kv.first) == kv.second; });
+    });
+  }
   void add(Row r) {
     rows_.push_back(std::move(r));
     save();
@@ -308,7 +315,53 @@ std::vector<Config> a_configs(const Ctx& c) {
   };
 }
 
-void step_a(const Ctx& c) {
+// The flipbook baselines of one clip: the ladder (tools/baselines.hpp: our BC3 layout and raw, then the production
+// formats this build has) and the frame-interpolation flipbooks (only even frames kept; odd frames scored): BC3, BC3
+// with motion vectors, raw, and BC7 and ASTC 4x4 with and without motion vectors. Rows already in the CSV are kept;
+// the missing ones are computed on c.threads threads and appended in order.
+void a_flipbooks(const Ctx& c, Csv& csv, const std::string& name, const std::string& effect, const Clip& ref) {
+  struct Job {
+    flipbook::Spec spec;
+    bool interp = false;
+  };
+  std::vector<Job> jobs;
+  for (const auto& spec : tools::flipbook_ladder(kSize, kFrames)) {
+    if (!csv.has({{"task", "a"}, {"clip", name}, {"config", spec.describe()}})) jobs.push_back({spec, false});
+  }
+  std::vector<flipbook::Spec> interp = {{0, 128, flipbook::Codec::bc3, 0}, {0, 128, flipbook::Codec::bc3, 32}, {0, 128, flipbook::Codec::raw, 0}};
+  for (const auto codec : {flipbook::Codec::bc7, flipbook::Codec::astc4x4}) {
+    if (!flipbook::available(codec)) continue;
+    interp.push_back({0, 128, codec, 0});
+    interp.push_back({0, 128, codec, 32});
+  }
+  const std::string ikey = std::format("{}|interp", name);
+  for (const auto& spec : interp) {
+    if (!csv.has("method", ikey + "|" + spec.describe())) jobs.push_back({spec, true});
+  }
+  if (jobs.empty()) return;
+  std::vector<int> even, odd;
+  for (int f = 0; f < kFrames; ++f) (f % 2 ? odd : even).push_back(f);
+  const auto ref_stats = metrics::stats(ref);
+  flipbook::FrameCache cache;
+  std::vector<Row> rows(jobs.size());
+  tools::parallel_for(jobs.size(), c.threads, [&](std::size_t i) {
+    const auto& [spec, is_interp] = jobs[i];
+    if (is_interp) {
+      const auto fb = flipbook::build(ref, spec, even, &cache);
+      rows[i] = score_row("a_interp", effect, name, ikey + "|" + spec.describe(), spec.flow_res > 0 ? "flipbook_mv" : "flipbook", spec.describe(),
+                          fb.bytes, metrics::score(ref, flipbook::play(fb), odd), 0, 0);
+      return;
+    }
+    const auto fb = flipbook::build(ref, spec, {}, &cache);
+    const Clip played = flipbook::play(fb);
+    rows[i] = score_row("a", effect, name, "flipbook", spec.family(), spec.describe(), fb.bytes, metrics::score(ref, played), 0, 0);
+    add_stats(rows[i], ref_stats, played);
+  });
+  for (Row& r : rows) csv.add(std::move(r));
+  std::println("A {}: {} flipbook rows", name, jobs.size());
+}
+
+void step_a(const Ctx& c, bool flipbooks_only) {
   Csv csv(c.results / "a_scores.csv", kScoreCols);
   const auto configs = a_configs(c);
   std::map<std::string, double> ms_cache;
@@ -316,17 +369,8 @@ void step_a(const Ctx& c) {
     const Clip ref = get_clip(c, "a", name, p);
     const std::string effect = ename(p.effect);
     const auto ref_stats = metrics::stats(ref);
-    // baselines
-    if (!csv.has("clip", name)) {
-      for (const auto& spec : flipbook::ladder(kSize, kFrames)) {
-        const auto fb = flipbook::build(ref, spec);
-        const Clip played = flipbook::play(fb);
-        Row row = score_row("a", effect, name, "flipbook", spec.flow_res > 0 ? "flipbook_mv" : spec.codec == flipbook::Codec::raw ? "flipbook_raw" : "flipbook_bc3",
-                            spec.describe(), fb.bytes, metrics::score(ref, played), 0, 0);
-        add_stats(row, ref_stats, played);
-        csv.add(row);
-      }
-    }
+    a_flipbooks(c, csv, name, effect, ref);
+    if (flipbooks_only) continue;
     // models
     for (const Config& cfg : configs) {
       const std::string key = std::format("{}|{}", name, cfg.name);
@@ -358,17 +402,11 @@ void step_a(const Ctx& c) {
       }
       std::println("A {} {}: {:.1f} s", name, cfg.name, r.seconds);
     }
-    // frame interpolation: only even frames available to both
+    // frame interpolation: only even frames available to both (the flipbooks above)
     const std::string ikey = std::format("{}|interp", name);
     if (!csv.has("method", ikey + "|grid_m")) {
       std::vector<int> even, odd;
       for (int f = 0; f < kFrames; ++f) (f % 2 ? odd : even).push_back(f);
-      for (const auto& spec : {flipbook::Spec{0, 128, flipbook::Codec::bc3, 0}, flipbook::Spec{0, 128, flipbook::Codec::bc3, 32},
-                               flipbook::Spec{0, 128, flipbook::Codec::raw, 0}}) {
-        const auto fb = flipbook::build(ref, spec, even);
-        csv.add(score_row("a_interp", effect, name, ikey + "|" + spec.describe(), spec.flow_res > 0 ? "flipbook_mv" : "flipbook", spec.describe(),
-                          fb.bytes, metrics::score(ref, flipbook::play(fb), odd), 0, 0));
-      }
       train::Options o;
       o.iterations = c.iters(2000);
       o.threads = c.threads;
@@ -829,82 +867,144 @@ void step_report(const Ctx& c) {
       aggs.push_back(g);
     }
     std::ranges::sort(aggs, {}, &Agg::kb);
+    using tools::Baseline;
+    constexpr std::array kBaselines = {Baseline::bc3_layout, Baseline::desktop, Baseline::all};
+    const auto in = [](const Agg& g, Baseline b) { return g.family.starts_with("neural") || tools::in_baseline(g.key, b); };
     md << "## A. Compression: one model per clip against flipbooks of the same clip\n\n";
     md << std::format("Means over {} clips (fire, smoke, explosion; 128 x 128, 64 frames). ms = median per frame through the runtime on one AVX2 core{}.\n\n",
                       by_cfg.begin()->second.size(), have_timing ? ", measured on a quiet machine (timing step)" : ", measured between training runs");
     md << "Spectrum = mean |log power difference| of the radially averaged luminance spectrum against the reference (0 = same "
           "sharpness; blur raises it); motion = frame-to-frame change relative to the reference (1 = same).\n\n";
-    md << "| method | family | KB | PSNR | active PSNR | SSIM | temporal PSNR | flicker | spectrum | motion | ms |\n|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|\n";
-    for (const Agg& g : aggs) {
-      md << std::format("| {} | {} | {:.1f} | {:.2f} | {:.2f} | {:.4f} | {:.2f} | {:.2f} | {:.3f} | {:.2f} | {} |\n", g.key, g.family, g.kb, g.psnr, g.active, g.ssim,
-                        g.tpsnr, g.flicker, g.spec, g.mot, g.family.starts_with("neural") ? std::format("{:.3f}", g.ms) : "-");
+    md << "Flipbooks come in three baselines: **our BC3 layout and raw RGBA8** (the original ladder, our own BC1 + BC4 encoder), "
+          "**with BC7** (bc7e, the formats desktop GPUs sample), and **with BC7 and ASTC** (Arm's astc-encoder, 4x4 to 12x12 "
+          "blocks: every format, the strongest flipbook at each size). The first table has the networks and the original ladder; "
+          "the production formats follow it.\n\n";
+    const auto agg_table = [&](const auto& keep) {
+      md << "| method | family | KB | PSNR | active PSNR | SSIM | temporal PSNR | flicker | spectrum | motion | ms |\n|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|\n";
+      for (const Agg& g : aggs) {
+        if (!keep(g)) continue;
+        md << std::format("| {} | {} | {:.1f} | {:.2f} | {:.2f} | {:.4f} | {:.2f} | {:.2f} | {:.3f} | {:.2f} | {} |\n", g.key, g.family, g.kb, g.psnr, g.active,
+                          g.ssim, g.tpsnr, g.flicker, g.spec, g.mot, g.family.starts_with("neural") ? std::format("{:.3f}", g.ms) : "-");
+      }
+    };
+    agg_table([&](const Agg& g) { return in(g, Baseline::bc3_layout); });
+    if (std::ranges::any_of(aggs, [&](const Agg& g) { return !in(g, Baseline::bc3_layout); })) {
+      md << "\n### Flipbooks in production block formats (BC7, ASTC)\n\n";
+      agg_table([&](const Agg& g) { return !in(g, Baseline::bc3_layout); });
     }
     // Matched-memory comparison: the best neural and the best flipbook configuration (by mean active PSNR) within
-    // each budget, paired over clips.
-    md << "\n### Matched memory\n\nWithin each budget, the neural configuration and the flipbook configuration with the best mean active PSNR "
-          "(chosen on the same clips they are scored on, which favours neither), compared clip by clip.\n\n";
-    md << "| budget | neural | KB | flipbook | KB | delta active PSNR | delta PSNR | delta SSIM |\n|---|---|---:|---|---:|---:|---:|---:|\n";
-    for (const double budget : {64.0, 128.0, 160.0, 256.0, 320.0, 512.0}) {
-      const Agg* bn = nullptr;
-      const Agg* bf = nullptr;
-      for (const Agg& g : aggs) {
-        if (g.kb > budget * 1.02) continue;
-        auto& slot = g.family.starts_with("neural") ? bn : bf;
-        if (!slot || g.active > slot->active) slot = &g;
-      }
-      if (!bn || !bf) continue;
-      std::vector<double> na, fa, np, fp, ns, fs2;
-      for (const Row* r : by_cfg[bn->key]) {
-        for (const Row* q : by_cfg[bf->key]) {
-          if (q->s("clip") != r->s("clip")) continue;
-          na.push_back(r->d("active_psnr"));
-          fa.push_back(q->d("active_psnr"));
-          np.push_back(r->d("psnr"));
-          fp.push_back(q->d("psnr"));
-          ns.push_back(r->d("ssim"));
-          fs2.push_back(q->d("ssim"));
+    // each budget, paired over clips; once per flipbook baseline.
+    for (const Baseline b : kBaselines) {
+      if (b != Baseline::bc3_layout && std::ranges::none_of(aggs, [&](const Agg& g) { return in(g, b) && !in(g, Baseline::bc3_layout); })) continue;
+      md << std::format("\n### Matched memory, flipbooks {}\n\nWithin each budget, the neural configuration and the flipbook configuration with the best "
+                        "mean active PSNR (chosen on the same clips they are scored on, which favours neither), compared clip by clip.\n\n",
+                        tools::baseline_name(b));
+      md << "| budget | neural | KB | flipbook | KB | delta active PSNR | delta PSNR | delta SSIM |\n|---|---|---:|---|---:|---:|---:|---:|\n";
+      for (const double budget : {64.0, 128.0, 160.0, 256.0, 320.0, 512.0}) {
+        const Agg* bn = nullptr;
+        const Agg* bf = nullptr;
+        for (const Agg& g : aggs) {
+          if (g.kb > budget * 1.02 || !in(g, b)) continue;
+          auto& slot = g.family.starts_with("neural") ? bn : bf;
+          if (!slot || g.active > slot->active) slot = &g;
         }
+        if (!bn || !bf) continue;
+        std::vector<double> na, fa, np, fp, ns, fs2;
+        for (const Row* r : by_cfg[bn->key]) {
+          for (const Row* q : by_cfg[bf->key]) {
+            if (q->s("clip") != r->s("clip")) continue;
+            na.push_back(r->d("active_psnr"));
+            fa.push_back(q->d("active_psnr"));
+            np.push_back(r->d("psnr"));
+            fp.push_back(q->d("psnr"));
+            ns.push_back(r->d("ssim"));
+            fs2.push_back(q->d("ssim"));
+          }
+        }
+        md << std::format("| {:.0f} KB | {} | {:.0f} | {} | {:.0f} | {} | {} | {} |\n", budget, bn->key, bn->kb, bf->key, bf->kb,
+                          fmt_iv(metrics::paired_bootstrap(na, fa)), fmt_iv(metrics::paired_bootstrap(np, fp)), fmt_iv(metrics::paired_bootstrap(ns, fs2), 4));
       }
-      md << std::format("| {:.0f} KB | {} | {:.0f} | {} | {:.0f} | {} | {} | {} |\n", budget, bn->key, bn->kb, bf->key, bf->kb,
-                        fmt_iv(metrics::paired_bootstrap(na, fa)), fmt_iv(metrics::paired_bootstrap(np, fp)), fmt_iv(metrics::paired_bootstrap(ns, fs2), 4));
     }
-    // Memory ratio at equal quality: flipbook envelope (best active PSNR at or below each size), log-interpolated.
-    std::vector<std::pair<double, double>> env;  // (kb, best active psnr at <= kb), one point per size
-    for (const Agg& g : aggs) {
-      if (!g.family.starts_with("flipbook")) continue;
-      const double best = env.empty() ? g.active : std::max(env.back().second, g.active);
-      // Flipbooks of equal size are one point at their best quality; two points at one size would interpolate to
-      // that size for every quality between them.
-      if (!env.empty() && env.back().first == g.kb) {
-        env.back().second = best;
-      } else {
-        env.emplace_back(g.kb, best);
+    // Memory ratio at equal quality, against each baseline: the flipbook memory for the network's mean active PSNR
+    // along the best-flipbook envelope (best at or below each size, one point per size, log-linear between sizes), with
+    // a 95% bootstrap interval over clips (network and flipbooks resampled together).
+    std::vector<std::string> clip_order;
+    for (const auto& [name, p] : a_clips()) clip_order.push_back(name);
+    const auto point_of = [&](const std::string& key) {
+      tools::Point pt;
+      pt.q.assign(clip_order.size(), std::nan(""));
+      auto& b = pt.b["memory"];
+      b.assign(clip_order.size(), std::nan(""));
+      for (const Row* r : by_cfg[key]) {
+        const auto at = static_cast<std::size_t>(std::ranges::find(clip_order, r->s("clip")) - clip_order.begin());
+        if (at >= clip_order.size()) continue;
+        pt.q[at] = r->d("active_psnr");
+        b[at] = r->d("bytes");
       }
+      return pt;
+    };
+    const auto complete = [](const tools::Point& pt) { return std::ranges::none_of(pt.q, [](double v) { return std::isnan(v); }); };
+    std::map<Baseline, tools::Family> fams;
+    for (const Agg& g : aggs) {
+      if (g.family.starts_with("neural")) continue;
+      auto pt = point_of(g.key);
+      if (!complete(pt)) continue;
+      for (const Baseline b : kBaselines) {
+        if (tools::in_baseline(g.key, b)) fams[b][g.key] = pt;
+      }
+    }
+    std::vector<Baseline> shown;
+    for (const Baseline b : kBaselines) {
+      if (b == Baseline::bc3_layout || fams[b].size() > fams[Baseline::bc3_layout].size()) shown.push_back(b);
     }
     md << "\n### Memory at equal quality\n\nFor each neural configuration: the flipbook memory needed for the same mean active PSNR "
-          "(log-linear interpolation along the best-flipbook-at-each-size envelope; \">\" when no flipbook up to 1 MB reaches it).\n\n";
-    md << "| neural | KB | active PSNR | flipbook KB for equal quality | ratio |\n|---|---:|---:|---:|---:|\n";
+          "(log-linear interpolation along the best-flipbook-at-each-size envelope, one point per size), and the ratio with its 95% "
+          "bootstrap interval over clips (10,000 resamples; network and flipbooks resampled together). \">\" when no flipbook in the "
+          "ladder reaches it (the ratio is then at least that), \"<\" when every flipbook is as good.\n\n";
+    md << "| neural | KB | active PSNR |";
+    for (const Baseline b : shown) md << std::format(" flipbook KB, {} | ratio |", tools::baseline_name(b));
+    md << "\n|---|---:|---:|";
+    for (std::size_t i = 0; i < shown.size(); ++i) md << "---:|---|";
+    md << "\n";
     for (const Agg& g : aggs) {
       if (!g.family.starts_with("neural")) continue;
-      std::string fkb = std::format("> {:.0f}", env.back().first), ratio = std::format("> {:.1f}x", env.back().first / g.kb);
-      for (std::size_t i = 1; i < env.size(); ++i) {
-        if (env[i].second >= g.active && env[i - 1].second < g.active) {
-          const double u = (g.active - env[i - 1].second) / (env[i].second - env[i - 1].second);
-          const double kb = std::exp(std::log(env[i - 1].first) + u * (std::log(env[i].first) - std::log(env[i - 1].first)));
-          fkb = std::format("{:.0f}", kb);
-          ratio = std::format("{:.1f}x", kb / g.kb);
-          break;
-        }
-        if (i == 1 && env[0].second >= g.active) {
-          fkb = std::format("< {:.0f}", env[0].first);
-          ratio = std::format("< {:.1f}x", env[0].first / g.kb);
-          break;
-        }
+      const auto pt = point_of(g.key);
+      if (!complete(pt)) continue;
+      md << std::format("| {} | {:.0f} | {:.2f} |", g.key, g.kb, g.active);
+      for (const Baseline b : shown) {
+        const auto r = tools::equal_quality(pt, "memory", fams[b], "memory");
+        md << std::format(" {}{:.0f} | {} |", r.censor > 0 ? "> " : r.censor < 0 ? "< " : "", r.other_kb, tools::ratio_cell(r));
       }
-      md << std::format("| {} | {:.0f} | {:.2f} | {} | {} |\n", g.key, g.kb, g.active, fkb, ratio);
+      md << "\n";
+    }
+    for (const Baseline b : shown) {
+      md << std::format("\nEnvelope, flipbooks {} (KB: mean active PSNR):", tools::baseline_name(b));
+      std::vector<std::size_t> all(clip_order.size());
+      std::iota(all.begin(), all.end(), 0);
+      for (const auto& [bytes, q] : tools::envelope(fams[b], "memory", all)) md << std::format(" {:.0f}: {:.2f};", bytes / 1024, q);
+      md << "\n";
     }
     // per effect for the headline configs
-    md << "\n### By effect (grid_m 8-bit against BC3 16 frames 128 px and BC3 all frames)\n\n| effect | grid_m 8-bit active | bc3 16f 128px active | bc3 64f 128px active |\n|---|---:|---:|---:|\n";
+    // The best flipbook of every format within grid_m's memory (2% slack, as the matched-memory budgets), and the full
+    // BC7 flipbook, when the production formats are there.
+    std::string near_m, full7;
+    if (by_cfg.contains("bc7 64f 128px")) full7 = "bc7 64f 128px";
+    {
+      const Agg* best = nullptr;
+      const auto m = std::ranges::find(aggs, std::string("grid_m|8"), &Agg::key);
+      for (const Agg& g : aggs) {
+        if (m == aggs.end() || g.family.starts_with("neural") || tools::in_baseline(g.key, Baseline::bc3_layout) || g.kb > m->kb * 1.02) continue;
+        if (!best || g.active > best->active) best = &g;
+      }
+      if (best) near_m = best->key;
+    }
+    md << "\n### By effect (grid_m 8-bit against BC3 16 frames 128 px and BC3 all frames";
+    if (!near_m.empty()) md << std::format("; {}, the best production-format flipbook within grid_m's memory", near_m);
+    if (!full7.empty()) md << "; BC7 all frames";
+    md << ")\n\n| effect | grid_m 8-bit active | bc3 16f 128px active | bc3 64f 128px active |";
+    if (!near_m.empty()) md << std::format(" {} active |", near_m);
+    if (!full7.empty()) md << std::format(" {} active |", full7);
+    md << "\n|---|---:|---:|---:|" << (near_m.empty() ? "" : "---:|") << (full7.empty() ? "" : "---:|") << "\n";
     for (const auto e : sim::kEffects) {
       const auto mean_of = [&](const std::string& key) {
         double s = 0;
@@ -917,7 +1017,10 @@ void step_report(const Ctx& c) {
         }
         return n ? s / n : 0.0;
       };
-      md << std::format("| {} | {:.2f} | {:.2f} | {:.2f} |\n", ename(e), mean_of("grid_m|8"), mean_of("bc3 16f 128px"), mean_of("bc3 64f 128px"));
+      md << std::format("| {} | {:.2f} | {:.2f} | {:.2f} |", ename(e), mean_of("grid_m|8"), mean_of("bc3 16f 128px"), mean_of("bc3 64f 128px"));
+      if (!near_m.empty()) md << std::format(" {:.2f} |", mean_of(near_m));
+      if (!full7.empty()) md << std::format(" {:.2f} |", mean_of(full7));
+      md << "\n";
     }
     // interpolation
     std::map<std::string, std::vector<double>> interp;
@@ -1116,7 +1219,8 @@ int main(int argc, char** argv) try {
   const std::string step = a.positional()[0];
   const auto t0 = std::chrono::steady_clock::now();
   if (step == "data" || step == "all") step_data(c);
-  if (step == "a" || step == "all") step_a(c);
+  if (step == "a" || step == "all") step_a(c, false);
+  if (step == "a-flipbooks") step_a(c, true);  // only the flipbook rows still missing (new formats), no training
   if (step == "b" || step == "all") step_b(c);
   if (step == "c" || step == "all") step_c(c);
   if (step == "media" || step == "all") step_media(c);

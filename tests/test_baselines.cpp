@@ -9,6 +9,7 @@
 #include <random>
 #include <algorithm>
 #include <ranges>
+#include <thread>
 
 using namespace nfx;
 
@@ -187,4 +188,141 @@ TEST(Flipbook, LadderCoversRawBc3AndMotionVectors) {
   EXPECT_TRUE(std::ranges::any_of(l, [](const auto& s) { return s.codec == flipbook::Codec::raw; }));
   EXPECT_TRUE(std::ranges::any_of(l, [](const auto& s) { return s.flow_res > 0; }));
   EXPECT_TRUE(std::ranges::any_of(l, [](const auto& s) { return s.frames == 64 && s.res == 128; }));
+}
+
+// --- production block formats (BC7, ASTC; encoders fetched at build time) ---------------------------------------------
+
+namespace {
+
+std::vector<std::uint8_t> smoke_frame(int size) {
+  sim::Params p;
+  p.effect = sim::Effect::smoke;
+  p.size = size;
+  p.frames = 1;
+  p.warmup = 40;
+  const Clip c = sim::simulate(p);
+  return {c.frame(0).begin(), c.frame(0).end()};
+}
+
+double round_trip_psnr(flipbook::Codec codec, const std::vector<std::uint8_t>& img, int w, int h) {
+  const auto back = flipbook::decode(codec, flipbook::encode(codec, img, w, h), w, h);
+  return metrics::psnr_from_mse(metrics::mse(img, back));
+}
+
+}  // namespace
+
+TEST(Formats, NamesSizesAndFamilies) {
+  using flipbook::Codec;
+  EXPECT_EQ(flipbook::frame_bytes(Codec::raw, 32), 32u * 32 * 4);
+  EXPECT_EQ(flipbook::frame_bytes(Codec::bc3, 128), 128u * 128);
+  EXPECT_EQ(flipbook::frame_bytes(Codec::bc7, 128), 128u * 128);      // 8 bits per pixel
+  EXPECT_EQ(flipbook::frame_bytes(Codec::astc4x4, 64), 64u * 64);
+  EXPECT_EQ(flipbook::frame_bytes(Codec::astc6x6, 128), 22u * 22 * 16);  // partial blocks are whole blocks in memory
+  EXPECT_EQ(flipbook::frame_bytes(Codec::astc8x8, 128), 16u * 16 * 16);  // 2 bits per pixel
+  EXPECT_EQ(flipbook::frame_bytes(Codec::astc12x12, 32), 3u * 3 * 16);
+  EXPECT_EQ(flipbook::memory_bytes({16, 64, Codec::astc8x8, 16}, 16), 16u * (8 * 8 * 16 + 16 * 16 * 2));
+  EXPECT_EQ((flipbook::Spec{64, 128, Codec::bc7, 0}.describe()), "bc7 64f 128px");
+  EXPECT_EQ((flipbook::Spec{16, 64, Codec::astc10x10, 16}.describe()), "astc10x10 16f 64px +mv16");
+  EXPECT_EQ((flipbook::Spec{16, 64, Codec::bc3, 16}.family()), "flipbook_mv");  // the original names stay
+  EXPECT_EQ((flipbook::Spec{16, 64, Codec::raw, 0}.family()), "flipbook_raw");
+  EXPECT_EQ((flipbook::Spec{16, 64, Codec::bc7, 16}.family()), "flipbook_bc7_mv");
+  EXPECT_EQ((flipbook::Spec{16, 64, Codec::astc5x5, 0}.family()), "flipbook_astc");
+  EXPECT_FALSE(flipbook::production(Codec::bc3));
+  EXPECT_TRUE(flipbook::available(Codec::bc3));
+  EXPECT_EQ(flipbook::ladder(128, 64).size(), 31u);  // the studies' original ladder is unchanged
+}
+
+TEST(Formats, LadderHasEveryAvailableFormatAndUnavailableOnesRefuse) {
+  const auto l = flipbook::ladder_production(128, 64);
+  std::size_t have = 0;
+  for (const auto codec : flipbook::production_codecs()) {
+    const auto n = std::ranges::count_if(l, [&](const auto& s) { return s.codec == codec; });
+    if (flipbook::available(codec)) {
+      ++have;
+      EXPECT_EQ(n, 21);  // the BC3 rows' frame counts and resolutions, with motion vectors where they have them
+    } else {
+      EXPECT_EQ(n, 0);
+      const std::vector<std::uint8_t> img(16 * 16 * 4, 0);
+      EXPECT_THROW((void)flipbook::encode(codec, img, 16, 16), std::runtime_error);
+    }
+  }
+  EXPECT_EQ(l.size(), 21 * have);
+  std::vector<std::string> names;
+  for (const auto& s : l) names.push_back(s.describe());
+  std::ranges::sort(names);
+  EXPECT_EQ(std::ranges::adjacent_find(names), names.end());  // every configuration has its own name
+}
+
+TEST(Formats, Bc7BeatsOurBc3AtTheSameSize) {
+  if (!flipbook::available(flipbook::Codec::bc7)) GTEST_SKIP() << "no BC7 encoder in this build (NEURALFX_FETCH_ENCODERS)";
+  const auto img = smoke_frame(64);
+  const auto blocks = flipbook::encode(flipbook::Codec::bc7, img, 64, 64);
+  EXPECT_EQ(blocks.size(), 64u * 64u);
+  EXPECT_EQ(blocks, flipbook::encode(flipbook::Codec::bc7, img, 64, 64));  // deterministic
+  const double bc7 = round_trip_psnr(flipbook::Codec::bc7, img, 64, 64), bc3 = round_trip_psnr(flipbook::Codec::bc3, img, 64, 64);
+  EXPECT_GT(bc7, 40.0);
+  EXPECT_GT(bc7, bc3 + 3.0);
+}
+
+TEST(Formats, AstcBlockSizesTradeBitsForQuality) {
+  using flipbook::Codec;
+  if (!flipbook::available(Codec::astc4x4)) GTEST_SKIP() << "no ASTC encoder in this build (NEURALFX_FETCH_ENCODERS)";
+  const auto img = smoke_frame(64);
+  double prev = 1e9;
+  for (const Codec c : {Codec::astc4x4, Codec::astc5x5, Codec::astc6x6, Codec::astc8x8, Codec::astc10x10, Codec::astc12x12}) {
+    const auto blocks = flipbook::encode(c, img, 64, 64);
+    EXPECT_EQ(blocks.size(), flipbook::frame_bytes(c, 64));
+    EXPECT_EQ(blocks, flipbook::encode(c, img, 64, 64));
+    const double q = round_trip_psnr(c, img, 64, 64);
+    EXPECT_LT(q, prev) << flipbook::codec_name(c);  // fewer bits, lower quality
+    EXPECT_GT(q, 24.0) << flipbook::codec_name(c);
+    prev = q;
+  }
+  EXPECT_GT(round_trip_psnr(Codec::astc4x4, img, 64, 64), round_trip_psnr(Codec::bc3, img, 64, 64));
+  // An image that is not a whole number of blocks is padded to one.
+  std::vector<std::uint8_t> odd(60 * 60 * 4);
+  for (int y = 0; y < 60; ++y) std::copy_n(img.begin() + y * 64 * 4, 60 * 4, odd.begin() + y * 60 * 4);
+  EXPECT_EQ(flipbook::encode(Codec::astc8x8, odd, 60, 60).size(), 8u * 8 * 16);
+  EXPECT_GT(round_trip_psnr(Codec::astc8x8, odd, 60, 60), 24.0);
+}
+
+TEST(Formats, EncodersGiveTheSameBlocksOnSeveralThreads) {
+  std::vector<flipbook::Codec> codecs;
+  for (const auto c : flipbook::production_codecs()) {
+    if (flipbook::available(c)) codecs.push_back(c);
+  }
+  if (codecs.empty()) GTEST_SKIP() << "no production encoder in this build";
+  const auto img = smoke_frame(32);
+  std::vector<std::vector<std::uint8_t>> serial, a(codecs.size()), b(codecs.size());
+  for (const auto c : codecs) serial.push_back(flipbook::encode(c, img, 32, 32));
+  {
+    std::jthread t1([&] { for (std::size_t i = 0; i < codecs.size(); ++i) a[i] = flipbook::encode(codecs[i], img, 32, 32); });
+    std::jthread t2([&] { for (std::size_t i = codecs.size(); i-- > 0;) b[i] = flipbook::encode(codecs[i], img, 32, 32); });
+  }
+  EXPECT_EQ(a, serial);
+  EXPECT_EQ(b, serial);
+}
+
+TEST(Formats, ProductionFlipbooksPlayLikeTheOthers) {
+  using flipbook::Codec;
+  sim::Params p;
+  p.effect = sim::Effect::fire;
+  p.size = 32;
+  p.frames = 8;
+  p.warmup = 20;
+  const Clip c = sim::simulate(p);
+  for (const Codec codec : {Codec::bc7, Codec::astc8x8}) {
+    if (!flipbook::available(codec)) continue;
+    const auto fb = flipbook::build(c, {8, 32, codec, 0});
+    EXPECT_EQ(fb.bytes, 8 * flipbook::frame_bytes(codec, 32));
+    const Clip out = flipbook::play(fb);
+    for (int f = 0; f < 8; ++f) {  // every frame kept: playback is each frame's decode
+      const auto img = std::vector<std::uint8_t>(c.frame(f).begin(), c.frame(f).end());
+      const auto back = flipbook::decode(codec, flipbook::encode(codec, img, 32, 32), 32, 32);
+      EXPECT_TRUE(std::ranges::equal(out.frame(f), back)) << flipbook::codec_name(codec) << " frame " << f;
+    }
+    const auto mv = flipbook::build(c, {4, 32, codec, 8});
+    EXPECT_EQ(mv.bytes, 4 * (flipbook::frame_bytes(codec, 32) + 8 * 8 * 2));
+    EXPECT_GT(metrics::score(c, flipbook::play(mv)).psnr, 20.0);
+  }
 }

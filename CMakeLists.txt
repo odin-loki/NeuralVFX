@@ -1,7 +1,8 @@
 # NeuralVFX: CPU-only neural visual effects for games (docs/PLAN.md).
 #   cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_COMPILER=g++-14
 # No third-party runtime dependency. GoogleTest for the tests, zlib for PNG figures, GLFW and Dear ImGui (fetched)
-# for the optional viewer. Can also be added to another build with add_subdirectory().
+# for the optional viewer, BC7 and ASTC encoders (fetched; cmake/encoders.cmake) for the flipbook baselines. Can also
+# be added to another build with add_subdirectory().
 cmake_minimum_required(VERSION 3.25)
 project(neuralfx VERSION 0.1.0 DESCRIPTION "CPU-only neural visual effects (C++23)" LANGUAGES C CXX)
 
@@ -24,6 +25,7 @@ option(NEURALFX_BUILD_TOOLS "Build the command-line tools" ON)
 option(NEURALFX_BUILD_SHARED "Build libnvfx as a shared library for engines" ON)
 option(NEURALFX_BUILD_VIEWER "Build the Dear ImGui viewer (needs GLFW and OpenGL; fetches Dear ImGui)" OFF)
 option(NEURALFX_WERROR "Treat warnings in neuralfx targets as errors (CI)" OFF)
+option(NEURALFX_FETCH_ENCODERS "Fetch open-source BC7 and ASTC encoders (pinned commits) for the flipbook baselines; study code only, never the runtime" ON)
 
 function(neuralfx_defaults target)
   if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
@@ -79,9 +81,13 @@ if(NEURALFX_BUILD_SHARED)
 endif()
 
 # Core: clips, the simulation, metrics and flipbook baselines. Baseline ISA, no contraction: the simulation is
-# deterministic and identical across machines with the same compiler.
-add_library(neuralfx_core STATIC src/core/clip.cpp src/core/metrics.cpp src/core/flipbook.cpp src/sim/sim.cpp)
-target_link_libraries(neuralfx_core PUBLIC neuralfx_model)
+# deterministic and identical across machines with the same compiler. The flipbooks' production formats (BC7, ASTC) use
+# encoders fetched at configure time (cmake/encoders.cmake); without them those formats report themselves unavailable.
+include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/encoders.cmake")
+add_library(neuralfx_core STATIC src/core/clip.cpp src/core/metrics.cpp src/core/flipbook.cpp src/core/block_formats.cpp
+                                 src/sim/sim.cpp)
+target_link_libraries(neuralfx_core PUBLIC neuralfx_model PRIVATE ${NEURALFX_ENCODER_LIBS})
+target_compile_definitions(neuralfx_core PRIVATE ${NEURALFX_ENCODER_DEFS})
 neuralfx_defaults(neuralfx_core)
 
 # Trainer: hand-written gradients; its hot loops switch on AVX2 + FMA (train() checks the CPU).

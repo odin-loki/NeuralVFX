@@ -1,12 +1,14 @@
 // nvfx_f2: study F2, compression of effects pushed as far as it honestly goes (results/compression/README.md, F2).
 //
 //   nvfx_f2 data                                    validation clips (2 per effect, settings and seeds not in study A)
-//   nvfx_f2 flipbooks --set val|test                the study A flipbook ladder on every clip: scores, memory, packed bytes
+//   nvfx_f2 flipbooks --set val|test                the study A flipbook ladder on every clip (our BC3 layout and raw, then
+//                                                   BC7 and ASTC): scores, memory, packed bytes
 //   nvfx_f2 train --set val|test --configs A,B,...  train, save, score through the runtime, pack (lossless coder)
 //   nvfx_f2 rescore --set test --name N --pattern P score and pack existing models ("{clip}" in P is the clip name)
 //   nvfx_f2 video --set val|test [--codecs x264,...] the video codecs' quality ladders on every clip
-//   nvfx_f2 report --set val|test [--configs ...]   equal-quality ratios against flipbooks and each codec, memory and
-//                                                   disk, with 95% bootstrap intervals over clips
+//   nvfx_f2 report --set val|test [--configs ...]   equal-quality ratios against flipbooks (every format, and the BC3
+//                                                   layout alone as first measured) and each codec, memory and disk,
+//                                                   with 95% bootstrap intervals over clips
 //   nvfx_f2 g3c --split val|test [--variants v1,b6_d,...] [--base DIR --tag NAME]  (another base than the v1 files)
 //                                                   design G3c: study D's rollout effects with quantised, dithered and
 //                                                   fewer start points, scored as study D's endless runs
@@ -34,6 +36,7 @@
 //   s<seed>                  training seed (default 1)
 //   e.g. g32c8h32l2t16_b8 is study A's grid_m at 8 bits; g32c8h32l2t16_b4_q_r3e-5 adds 4-bit QAT and a rate term.
 #include "args.hpp"
+#include "baselines.hpp"
 
 #include <neuralfx/clip.hpp>
 #include <neuralfx/cm.hpp>
@@ -198,21 +201,21 @@ void step_data(const Ctx& c0) {
 
 // --- flipbooks -------------------------------------------------------------------------------------------------------
 
-// The stored form of a flipbook as tensors, exactly as tools/nvfx_pack.cpp codes them.
-std::vector<cm::Tensor> flipbook_tensors(const Clip& ref, const flipbook::Flipbook& fb) {
+// The stored form of a flipbook as tensors, exactly as tools/nvfx_pack.cpp codes them: 16-byte blocks of any block
+// format (BC3 layout, BC7, ASTC) as [frame][block row][block column][16], raw RGBA as [frame][y][x][4], motion vectors
+// as [frame][y][x][2]. The coder's block kind was written for the BC3 layout: its contexts of the same byte in the
+// neighbouring blocks suit any 16-byte block, its endpoint contexts only BC3's.
+std::vector<cm::Tensor> flipbook_tensors(const flipbook::Flipbook& fb) {
   const flipbook::Spec& spec = fb.spec;
   const auto F = static_cast<std::uint32_t>(fb.kept.size()), R = static_cast<std::uint32_t>(spec.res);
   cm::Tensor img;
   img.shape.width = 1;
   img.shape.channels = true;
-  for (const int f : fb.kept) {
-    auto small = flipbook::downsample(ref.frame(f), ref.size, spec.res);
-    if (spec.codec == flipbook::Codec::bc3) small = flipbook::compress_bc3(small, spec.res, spec.res);
-    img.values.insert(img.values.end(), small.begin(), small.end());
-  }
-  if (spec.codec == flipbook::Codec::bc3) {
+  for (const auto& stored : fb.stored) img.values.insert(img.values.end(), stored.begin(), stored.end());
+  if (spec.codec != flipbook::Codec::raw) {
+    const auto B = static_cast<std::uint32_t>((spec.res + flipbook::block_dim(spec.codec) - 1) / flipbook::block_dim(spec.codec));
     img.shape.kind = cm::Kind::bc3;
-    img.shape.dims = {F, R / 4, R / 4, 16};
+    img.shape.dims = {F, B, B, 16};
   } else {
     img.shape.kind = cm::Kind::rgba;
     img.shape.dims = {F, R, R, 4};
@@ -236,26 +239,39 @@ std::vector<cm::Tensor> flipbook_tensors(const Clip& ref, const flipbook::Flipbo
 const std::vector<std::string> kFlipCols = {"set", "clip", "effect", "config", "family", "memory_bytes", "packed_bytes", "psnr",
                                             "active_psnr", "ssim", "tpsnr", "flicker"};
 
+// The ladder (tools/baselines.hpp: our BC3 layout and raw RGBA8, then the production formats this build has). Rows
+// already in the CSV are skipped; each clip's missing rows are computed on --threads threads, then appended in ladder
+// order.
 void step_flipbooks(const Ctx& c) {
   Csv csv(c.out / std::format("f2_flipbooks_{}.csv", c.set), kFlipCols);
+  const auto specs = tools::flipbook_ladder(kSize, kFrames);
   for (const ClipRef& r : clip_set(c)) {
+    std::vector<flipbook::Spec> todo;
+    for (const auto& spec : specs) {
+      if (!csv.has({{"set", c.set}, {"clip", r.name}, {"config", spec.describe()}})) todo.push_back(spec);
+    }
+    if (todo.empty()) continue;
     const Clip ref = load_clip(r);
-    for (const auto& spec : flipbook::ladder(kSize, kFrames)) {
-      if (csv.has({{"set", c.set}, {"clip", r.name}, {"config", spec.describe()}})) continue;
-      const auto fb = flipbook::build(ref, spec);
-      const auto tensors = flipbook_tensors(ref, fb);
+    flipbook::FrameCache cache;
+    std::vector<std::map<std::string, std::string>> rows(todo.size());
+    tools::parallel_for(todo.size(), c.threads, [&](std::size_t i) {
+      const flipbook::Spec& spec = todo[i];
+      const auto fb = flipbook::build(ref, spec, {}, &cache);
+      const auto tensors = flipbook_tensors(fb);
       std::size_t bytes = 0;
       for (const auto& t : tensors) bytes += t.values.size();
       if (bytes != fb.bytes) throw std::runtime_error("flipbook: stored size does not match");
       const cm::Packed p = cm::pack_tensors(tensors);
       const auto back = cm::unpack_tensors(p.data);
       if (!back || back->size() != tensors.size() || (*back)[0].values != tensors[0].values) throw std::runtime_error("flipbook round trip failed");
-      std::map<std::string, std::string> row = {{"set", c.set}, {"clip", r.name}, {"effect", r.effect}, {"config", spec.describe()},
-                                                {"family", spec.flow_res > 0 ? "flipbook_mv" : spec.codec == flipbook::Codec::raw ? "flipbook_raw" : "flipbook_bc3"},
-                                                {"memory_bytes", std::to_string(fb.bytes)}, {"packed_bytes", std::to_string(p.data.size())}};
+      auto& row = rows[i];
+      row = {{"set", c.set}, {"clip", r.name}, {"effect", r.effect}, {"config", spec.describe()}, {"family", spec.family()},
+             {"memory_bytes", std::to_string(fb.bytes)}, {"packed_bytes", std::to_string(p.data.size())}};
       put_scores(row, metrics::score(ref, flipbook::play(fb)));
-      csv.add(row);
-      std::println("flipbook {} {}: {} -> {} bytes, active {}", r.name, spec.describe(), fb.bytes, p.data.size(), row["active_psnr"]);
+    });
+    for (auto& row : rows) {
+      std::println("flipbook {} {}: {} -> {} bytes, active {}", r.name, row["config"], row["memory_bytes"], row["packed_bytes"], row["active_psnr"]);
+      csv.add(std::move(row));
     }
   }
 }
@@ -497,146 +513,14 @@ void step_video(const Ctx& c, const std::set<std::string>& which) {
 
 // --- report ---------------------------------------------------------------------------------------------------------
 
-// One method's points on a set: per clip (bytes, quality) for one or more size measures.
-struct Point {
-  std::vector<double> q;                         // active PSNR per clip (clip order of the set)
-  std::map<std::string, std::vector<double>> b;  // size measure -> bytes per clip
-};
-
-// A family of configurations (a flipbook ladder, a codec's quality ladder): config -> point.
-using Family = std::map<std::string, Point>;
-
-double mean_at(const std::vector<double>& v, const std::vector<std::size_t>& idx) {
-  double s = 0;
-  for (const std::size_t i : idx) s += v[i];
-  return s / static_cast<double>(idx.size());
-}
-
-// The best-of-family envelope: best mean quality at or below each mean size, one point per size.
-std::vector<std::pair<double, double>> envelope(const Family& fam, const std::string& measure, const std::vector<std::size_t>& idx) {
-  std::vector<std::pair<double, double>> pts;
-  for (const auto& [k, p] : fam) {
-    if (!p.b.contains(measure)) continue;
-    pts.emplace_back(mean_at(p.b.at(measure), idx), mean_at(p.q, idx));
-  }
-  std::ranges::sort(pts);
-  std::vector<std::pair<double, double>> env;
-  for (const auto& [kb, q] : pts) {
-    const double best = env.empty() ? q : std::max(env.back().second, q);
-    if (!env.empty() && env.back().first == kb) env.back().second = best;
-    else env.emplace_back(kb, best);
-  }
-  return env;
-}
-
-// Size along an envelope for a quality: log-linear between points. censor: -1 below the smallest, +1 above the largest.
-double size_for(const std::vector<std::pair<double, double>>& env, double q, int& censor) {
-  censor = 0;
-  if (env.empty()) return std::nan("");
-  if (env.front().second >= q) {
-    censor = -1;
-    return env.front().first;
-  }
-  for (std::size_t i = 1; i < env.size(); ++i) {
-    if (env[i].second >= q && env[i - 1].second < q) {
-      const double u = (q - env[i - 1].second) / (env[i].second - env[i - 1].second);
-      return std::exp(std::log(env[i - 1].first) + u * (std::log(env[i].first) - std::log(env[i - 1].first)));
-    }
-  }
-  censor = 1;
-  return env.back().first;
-}
-
-// Quality along an envelope at a size (the best at or below it, log-linear between points); NaN below the smallest.
-double quality_at(const std::vector<std::pair<double, double>>& env, double bytes) {
-  if (env.empty() || bytes < env.front().first) return std::nan("");
-  for (std::size_t i = 1; i < env.size(); ++i) {
-    if (bytes < env[i].first) {
-      const double u = (std::log(bytes) - std::log(env[i - 1].first)) / (std::log(env[i].first) - std::log(env[i - 1].first));
-      return env[i - 1].second + u * (env[i].second - env[i - 1].second);
-    }
-  }
-  return env.back().second;
-}
-
-struct Ratio {
-  double point = 0, lo = 0, hi = 0;
-  int censor = 0;            // of the point estimate
-  double censored_share = 0; // share of resamples outside the envelope
-  double other_kb = 0;       // the baseline's size at equal quality (point estimate)
-  double dq = 0, dq_lo = 0, dq_hi = 0;  // quality difference at the network's size (network minus baseline envelope)
-};
-
-// Equal-quality ratio of a network against a family, with a bootstrap over clips (the same resample on both sides).
-// With several families (the video codecs), the best of them: the smallest size at the network's quality, and the
-// best quality at its size, each codec along its own ladder.
-Ratio equal_quality(const Point& net, const std::string& net_measure, const std::vector<const Family*>& fams, const std::string& fam_measure,
-                    int resamples = 10000) {
-  const std::size_t n = net.q.size();
-  std::vector<std::size_t> all(n);
-  std::iota(all.begin(), all.end(), 0);
-  Ratio r;
-  const auto one = [&](const std::vector<std::size_t>& idx, int& censor, double& other, double& dq) {
-    const double nb = mean_at(net.b.at(net_measure), idx), nq = mean_at(net.q, idx);
-    other = std::numeric_limits<double>::infinity();
-    double best_q = -std::numeric_limits<double>::infinity();
-    for (const Family* fam : fams) {
-      const auto env = envelope(*fam, fam_measure, idx);
-      int ce = 0;
-      const double kb = size_for(env, nq, ce);
-      if (!std::isnan(kb) && kb < other) {
-        other = kb;
-        censor = ce;
-      }
-      const double q = quality_at(env, nb);
-      if (!std::isnan(q)) best_q = std::max(best_q, q);
-    }
-    if (std::isinf(other)) other = std::nan("");
-    dq = std::isinf(best_q) ? std::nan("") : nq - best_q;
-    return other / nb;
-  };
-  double dq0 = 0;
-  r.point = one(all, r.censor, r.other_kb, dq0);
-  r.other_kb /= 1024.0;
-  r.dq = dq0;
-  std::mt19937_64 rng(1);
-  std::uniform_int_distribution<std::size_t> pick(0, n - 1);
-  std::vector<double> ratios, dqs;
-  int cens = 0;
-  std::vector<std::size_t> idx(n);
-  for (int b = 0; b < resamples; ++b) {
-    for (auto& i : idx) i = pick(rng);
-    int ce = 0;
-    double other = 0, dq = 0;
-    const double ratio = one(idx, ce, other, dq);
-    if (!std::isnan(ratio)) ratios.push_back(ratio);
-    if (!std::isnan(dq)) dqs.push_back(dq);
-    cens += ce != 0;
-  }
-  std::ranges::sort(ratios);
-  std::ranges::sort(dqs);
-  const auto pct = [](const std::vector<double>& v, double p) {
-    return v.empty() ? std::nan("") : v[static_cast<std::size_t>(p * static_cast<double>(v.size() - 1) + 0.5)];
-  };
-  r.lo = pct(ratios, 0.025);
-  r.hi = pct(ratios, 0.975);
-  r.dq_lo = pct(dqs, 0.025);
-  r.dq_hi = pct(dqs, 0.975);
-  r.censored_share = static_cast<double>(cens) / resamples;
-  return r;
-}
-
-Ratio equal_quality(const Point& net, const std::string& net_measure, const Family& fam, const std::string& fam_measure) {
-  return equal_quality(net, net_measure, std::vector<const Family*>{&fam}, fam_measure);
-}
-
-std::string ratio_cell(const Ratio& r) {
-  const std::string mark = r.censor > 0 ? ">" : r.censor < 0 ? "<" : "";
-  const int prec = r.point < 1 ? 2 : 1;  // the codecs' side: 0.13x reads better than 0.1x
-  std::string s = std::format("{}{:.{}f}x [{:.{}f}, {:.{}f}]", mark, r.point, prec, r.lo, prec, r.hi, prec);
-  if (r.censored_share > 0.025) s += std::format(" ({:.0f}% censored)", 100 * r.censored_share);
-  return s;
-}
+// Equal-quality ratios with bootstrap intervals: tools/baselines.hpp.
+using tools::envelope;
+using tools::equal_quality;
+using tools::Family;
+using tools::mean_at;
+using tools::Point;
+using tools::Ratio;
+using tools::ratio_cell;
 
 // A short label for a network configuration ("G32 4-bit", "G48 VQ 8 bits / 8 ch, rate 1e-4").
 std::string short_label(const std::string& config) {
@@ -658,7 +542,7 @@ std::string short_label(const std::string& config) {
 
 // Two panels as SVG: memory against quality (flipbooks, networks) and disk against quality (flipbooks and networks
 // packed by the lossless coder, video codecs' payload). Log size axis; one quality axis per panel.
-void write_figure(const fs::path& path, const std::string& title, const Family& flips, const std::map<std::string, Family>& videos,
+void write_figure(const fs::path& path, const std::string& title, const Family& flips, const Family& old_flips, const std::map<std::string, Family>& videos,
                   const std::vector<std::pair<std::string, const Point*>>& nets, const std::vector<std::size_t>& idx) {
   constexpr double W = 1040, H = 470, top = 74, bottom = 58, left = 62, gap = 70;
   const double pw = (W - left - gap - 24) / 2, ph = H - top - bottom;
@@ -697,18 +581,23 @@ void write_figure(const fs::path& path, const std::string& title, const Family& 
     }
     o << std::format("<text x=\"{}\" y=\"{}\" font-size=\"12\" fill=\"{}\" text-anchor=\"middle\">KB per effect (log scale)</text>\n", x0 + pw / 2, y0 + ph + 36, ink2);
     o << std::format("<text transform=\"translate({},{}) rotate(-90)\" font-size=\"12\" fill=\"{}\" text-anchor=\"middle\">mean active PSNR (dB)</text>\n", x0 - 42, y0 + ph / 2, ink2);
-    const auto line = [&](const std::vector<std::pair<double, double>>& env, const char* colour) {
+    const auto line = [&](const std::vector<std::pair<double, double>>& env, const char* colour, bool dashed = false) {
       std::string d;
       for (std::size_t i = 0; i < env.size(); ++i) {
         const double kb = env[i].first / 1024;
         if (kb < klo || kb > khi || env[i].second < qlo || env[i].second > qhi) continue;  // drawn inside the frame only
         d += std::format("{}{:.1f},{:.1f} ", d.empty() ? "M" : "L", X(kb), Y(env[i].second));
       }
-      o << std::format("<path d=\"{}\" fill=\"none\" stroke=\"{}\" stroke-width=\"2\" stroke-linejoin=\"round\"/>\n", d, colour);
+      o << std::format("<path d=\"{}\" fill=\"none\" stroke=\"{}\" stroke-width=\"2\" stroke-linejoin=\"round\"{}/>\n", d, colour,
+                       dashed ? " stroke-dasharray=\"5 4\" opacity=\"0.6\"" : "");
     };
     // legend
     std::vector<std::pair<std::string, const char*>> legend = {{panel == 0 ? "best flipbook at each size" : "best packed flipbook", slot[0]}, {"networks (F2)", slot[1]}};
     line(envelope(flips, panel == 0 ? "memory" : "packed", idx), slot[0]);
+    if (old_flips.size() < flips.size()) {
+      line(envelope(old_flips, panel == 0 ? "memory" : "packed", idx), slot[0], true);
+      legend.emplace_back("dashed: our BC3 layout and raw only", slot[0]);
+    }
     if (panel == 1) {
       for (std::size_t v = 0; v < shown.size(); ++v) {
         if (!videos.contains(shown[v]) || videos.at(shown[v]).empty()) continue;
@@ -813,6 +702,16 @@ void step_report(const Ctx& c, const std::vector<std::string>& only_configs, con
     return std::ranges::none_of(p.q, [](double v) { return std::isnan(v); });
   };
   std::erase_if(flips, [&](const auto& kv) { return !complete(kv.second); });
+  // The flipbook baselines: the original (our BC3 layout and raw), with BC7, and with BC7 and ASTC (`flips`, the
+  // strongest, which the ratios without a qualifier are against).
+  using tools::Baseline;
+  constexpr std::array kBaselines = {Baseline::bc3_layout, Baseline::desktop, Baseline::all};
+  std::map<Baseline, Family> by_baseline;
+  for (const Baseline b : kBaselines) {
+    for (const auto& [k, p] : flips) {
+      if (tools::in_baseline(k, b)) by_baseline[b][k] = p;
+    }
+  }
   for (auto& [k, fam] : videos) std::erase_if(fam, [&](const auto& kv) { return !complete(kv.second); });
   std::erase_if(all_video, [&](const auto& kv) { return !complete(kv.second); });
   std::vector<std::size_t> idx(n);
@@ -820,10 +719,12 @@ void step_report(const Ctx& c, const std::vector<std::string>& only_configs, con
 
   std::println("## Study F2 on the {} set ({} clips)\n", c.set, n);
   if (!flips.empty()) {
-    for (const std::string m : {"memory", "packed"}) {
-      std::string s;
-      for (const auto& [kb, q] : envelope(flips, m, idx)) s += std::format(" {:.1f}:{:.2f}", kb / 1024, q);
-      std::println("Flipbook envelope ({}, KB:dB):{}", m, s);
+    for (const Baseline b : kBaselines) {
+      for (const std::string m : {"memory", "packed"}) {
+        std::string s;
+        for (const auto& [kb, q] : envelope(by_baseline[b], m, idx)) s += std::format(" {:.1f}:{:.2f}", kb / 1024, q);
+        std::println("Flipbook envelope, {} ({}, KB:dB):{}", tools::baseline_name(b), m, s);
+      }
     }
   }
   for (const auto& [name, fam] : videos) {
@@ -831,7 +732,8 @@ void step_report(const Ctx& c, const std::vector<std::string>& only_configs, con
     for (const auto& [kb, q] : envelope(fam, "payload", idx)) s += std::format(" {:.1f}:{:.2f}", kb / 1024, q);
     std::println("{} envelope (payload, KB:dB):{}", name, s);
   }
-  std::println("\n| network | active PSNR | stored KB | resident KB | packed KB | memory vs flipbooks | disk: packed vs packed flipbooks | dB vs flipbooks at equal memory |");
+  std::println("\nFlipbooks below: every format (BC3 layout, raw, BC7, ASTC), the best at each size.\n");
+  std::println("| network | active PSNR | stored KB | resident KB | packed KB | memory vs flipbooks | disk: packed vs packed flipbooks | dB vs flipbooks at equal memory |");
   std::println("|---|---:|---:|---:|---:|---|---|---|");
   std::ofstream eq(c.out / std::format("f2_equal_quality_{}.csv", c.set));
   eq << "set,network,clips,active_psnr,stored_kb,resident_kb,scratch_kb,packed_kb,baseline,net_measure,baseline_measure,baseline_kb,ratio,ratio_lo,ratio_hi,censor,censored_share,"
@@ -847,6 +749,7 @@ void step_report(const Ctx& c, const std::vector<std::string>& only_configs, con
                       net_extra[k]["scratch"] / 1024, mean_at(p.b.at("packed"), idx) / 1024, base, nm, bm, r.other_kb, r.point, r.lo, r.hi, r.censor,
                       r.censored_share, r.dq, r.dq_lo, r.dq_hi);
   };
+  std::map<std::string, std::map<Baseline, std::pair<Ratio, Ratio>>> per_baseline;  // network -> (memory, disk)
   for (const auto& [k, pp] : order) {
     const Point& p = *pp;
     std::string mem = "-", disk = "-", ddb = "-";
@@ -858,12 +761,43 @@ void step_report(const Ctx& c, const std::vector<std::string>& only_configs, con
       ddb = std::format("{:+.2f} [{:+.2f}, {:+.2f}]", rm.dq, rm.dq_lo, rm.dq_hi);
       write(k, p, "flipbook", "stored", "memory", rm);
       write(k, p, "flipbook", "packed", "packed", rd);
+      per_baseline[k][Baseline::all] = {rm, rd};
+      for (const Baseline b : {Baseline::bc3_layout, Baseline::desktop}) {
+        const std::string name = std::format("flipbook_{}", tools::baseline_key(b));
+        auto& [m, d] = per_baseline[k][b];
+        m = equal_quality(p, "stored", by_baseline[b], "memory");
+        d = equal_quality(p, "packed", by_baseline[b], "packed");
+        write(k, p, name, "stored", "memory", m);
+        write(k, p, name, "packed", "packed", d);
+      }
     }
     std::println("| {} | {:.2f} | {:.1f} | {:.1f} | {:.1f} | {} | {} | {} |", k, mean_at(p.q, idx), mean_at(p.b.at("stored"), idx) / 1024,
                  mean_at(p.b.at("resident"), idx) / 1024, mean_at(p.b.at("packed"), idx) / 1024, mem, disk, ddb);
   }
+  if (!flips.empty()) {
+    std::println("\nAgainst each flipbook baseline (equal mean active PSNR; memory, then disk with both sides packed):\n");
+    std::string head = "| network |", rule = "|---|";
+    for (const std::string m : {"memory", "disk"}) {
+      for (const Baseline b : kBaselines) {
+        head += std::format(" {}: {} |", m, tools::baseline_name(b));
+        rule += "---|";
+      }
+    }
+    std::println("{}\n{}", head, rule);
+    for (const auto& [k, pp] : order) {
+      std::string line = std::format("| {} |", k);
+      for (const int disk : {0, 1}) {
+        for (const Baseline b : kBaselines) {
+          const auto& rr = per_baseline[k][b];
+          line += " " + ratio_cell(disk ? rr.second : rr.first) + " |";
+        }
+      }
+      std::println("{}", line);
+    }
+  }
   if (!figure.empty()) {
-    write_figure(figure, std::format("Study F2, {} clips ({} set): quality against bytes", n, c.set), flips, videos, order, idx);
+    write_figure(figure, std::format("Study F2, {} clips ({} set): quality against bytes", n, c.set), flips, by_baseline[Baseline::bc3_layout], videos,
+                 order, idx);
     std::println("figure: {}", figure);
   }
   if (!videos.empty()) {

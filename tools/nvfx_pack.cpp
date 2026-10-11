@@ -4,12 +4,14 @@
 //   nvfx_pack --unpack in.nvfz out.nvfx       restore the exact bytes
 //   nvfx_pack --report DIR                    every .nvfx under DIR: sizes, ratio, bits per stored value, zlib -9 as a
 //                                             general-purpose reference, decoding speed; every round trip is checked
-//   nvfx_pack --study [--data DATA] [--scores CSV] [--out OUT]
+//   nvfx_pack --study [--data DATA] [--scores CSV] [--out OUT] [--threads N] [--flipbooks-only]
 //                                             the measurement of results/compression: the models of studies A to D,
 //                                             the study A flipbooks coded the same way, and the equal-quality ratios of
 //                                             docs/REPORT.md §3 on disk; writes OUT/cm.csv and OUT/cm_equal_quality.csv
 //                                             and prints the tables. DATA defaults to $NEURALVFX_DATA/experiments, CSV
-//                                             to results/experiments/a_scores.csv, OUT to results/compression
+//                                             to results/experiments/a_scores.csv, OUT to results/compression.
+//                                             --flipbooks-only keeps OUT/cm.csv and adds the flipbooks it lacks (the
+//                                             BC7 and ASTC ladders); --threads codes that many flipbooks at a time
 //   nvfx_pack --tables [--scores CSV] [--out OUT]
 //                                             the tables again from OUT/cm.csv, without coding anything
 //   nvfx_pack in.nvfx out.nvfz [--light | --fast] [--lz] [--seekable [--segment N]]
@@ -21,6 +23,7 @@
 // Packing changes the bytes on disk only: the runtime loads the unpacked .nvfx, so resident memory is unchanged.
 // Single-threaded throughout; decoding speed is the unpacked size over the time to unpack.
 #include "args.hpp"
+#include "baselines.hpp"
 
 #include <neuralfx/clip.hpp>
 #include <neuralfx/cm.hpp>
@@ -121,22 +124,21 @@ std::vector<std::string> a_clip_names() {
   return v;
 }
 
-// The stored form of a flipbook as tensors: BC3 blocks [frame][block row][block column][16] or RGBA pixels
-// [frame][y][x][4], and motion vectors [frame][y][x][2] (quarter pixels, offset by 128), as flipbook.cpp keeps them.
-std::vector<cm::Tensor> flipbook_tensors(const Clip& ref, const flipbook::Spec& spec, std::size_t& bytes) {
-  const flipbook::Flipbook fb = flipbook::build(ref, spec);
+// The stored form of a flipbook as tensors: 16-byte blocks of any block format (our BC3 layout, BC7, ASTC) as
+// [frame][block row][block column][16] (the coder's block kind; its endpoint contexts are BC3's, its contexts of the
+// same byte in the neighbouring blocks suit any format), RGBA pixels as [frame][y][x][4], and motion vectors as
+// [frame][y][x][2] (quarter pixels, offset by 128), as flipbook.cpp keeps them.
+std::vector<cm::Tensor> flipbook_tensors(const Clip& ref, const flipbook::Spec& spec, std::size_t& bytes, flipbook::FrameCache* cache) {
+  const flipbook::Flipbook fb = flipbook::build(ref, spec, {}, cache);
   const auto F = static_cast<std::uint32_t>(fb.kept.size()), R = static_cast<std::uint32_t>(spec.res);
   cm::Tensor img;
   img.shape.width = 1;
   img.shape.channels = true;
-  for (const int f : fb.kept) {
-    auto small = flipbook::downsample(ref.frame(f), ref.size, spec.res);
-    if (spec.codec == flipbook::Codec::bc3) small = flipbook::compress_bc3(small, spec.res, spec.res);
-    img.values.insert(img.values.end(), small.begin(), small.end());
-  }
-  if (spec.codec == flipbook::Codec::bc3) {
+  for (const auto& stored : fb.stored) img.values.insert(img.values.end(), stored.begin(), stored.end());
+  if (spec.codec != flipbook::Codec::raw) {
+    const auto B = static_cast<std::uint32_t>((spec.res + flipbook::block_dim(spec.codec) - 1) / flipbook::block_dim(spec.codec));
     img.shape.kind = cm::Kind::bc3;
-    img.shape.dims = {F, R / 4, R / 4, 16};
+    img.shape.dims = {F, B, B, 16};
   } else {
     img.shape.kind = cm::Kind::rgba;
     img.shape.dims = {F, R, R, 4};
@@ -160,12 +162,12 @@ std::vector<cm::Tensor> flipbook_tensors(const Clip& ref, const flipbook::Spec& 
   return out;
 }
 
-Item measure_flipbook(const std::string& clip, const Clip& ref, const flipbook::Spec& spec) {
+Item measure_flipbook(const std::string& clip, const Clip& ref, const flipbook::Spec& spec, flipbook::FrameCache* cache = nullptr) {
   Item it;
   it.set = "flipbook";
   it.name = clip;
   it.config = spec.describe();
-  const auto tensors = flipbook_tensors(ref, spec, it.original);
+  const auto tensors = flipbook_tensors(ref, spec, it.original, cache);
   const cm::Packed p = cm::pack_tensors(tensors);
   it.packed = p.data.size();
   const auto t0 = std::chrono::steady_clock::now();
@@ -300,13 +302,20 @@ std::pair<std::string, double> envelope_kb(const std::vector<std::pair<double, d
 
 int tables(const fs::path& out, const fs::path& scores);
 
+std::vector<Item> read_csv(const fs::path& path);
+
 int study(const tools::Args& a) {
   const fs::path data = a.has("data") ? fs::path(a.str("data")) : data_root() / "experiments";
   const fs::path scores = a.str("scores", "results/experiments/a_scores.csv");
   const fs::path out = a.str("out", "results/compression");
+  const int threads = a.i("threads", 1);
+  // --flipbooks-only: keep cm.csv as it is and add the flipbooks it lacks (the production formats, when added).
+  const bool flipbooks_only = a.flag("flipbooks-only");
   std::vector<Item> items;
+  if (flipbooks_only) items = read_csv(out / "cm.csv");
   // Models of every study.
   for (const std::string g : {"a", "b", "c", "d"}) {
+    if (flipbooks_only) break;
     const fs::path dir = data / "models" / g;
     if (!fs::exists(dir)) continue;
     std::vector<fs::path> files;
@@ -324,16 +333,25 @@ int study(const tools::Args& a) {
       items.push_back(std::move(it));
     }
   }
-  // The study A flipbook ladder, every clip.
+  // The study A flipbook ladder (tools/baselines.hpp: our BC3 layout and raw, then BC7 and ASTC when this build has
+  // them), every clip; --threads flipbooks at a time (their decode speeds are then measured side by side).
   for (const std::string& clip : a_clip_names()) {
     const auto ref = read_clip(data / "clips" / "a" / (clip + ".nfxclip"));
     if (!ref) throw std::runtime_error(ref.error());
-    for (const auto& spec : flipbook::ladder(ref->size, ref->frames)) {
-      items.push_back(measure_flipbook(clip, *ref, spec));
-      const Item& it = items.back();
+    std::vector<flipbook::Spec> todo;
+    for (const auto& spec : tools::flipbook_ladder(ref->size, ref->frames)) {
+      const bool have = std::ranges::any_of(items, [&](const Item& it) { return it.set == "flipbook" && it.name == clip && it.config == spec.describe(); });
+      if (!have) todo.push_back(spec);
+    }
+    std::vector<Item> done(todo.size());
+    flipbook::FrameCache cache;
+    tools::parallel_for(todo.size(), threads, [&](std::size_t i) { done[i] = measure_flipbook(clip, *ref, todo[i], &cache); });
+    for (Item& it : done) {
       std::println(stderr, "flipbook {} {}: {} -> {} ({:.2f}x), zlib {:.2f}x", clip, it.config, it.original, it.packed,
                    static_cast<double>(it.original) / static_cast<double>(it.packed), static_cast<double>(it.original) / static_cast<double>(it.zlib));
+      items.push_back(std::move(it));
     }
+    if (!todo.empty()) write_csv(out / "cm.csv", items);  // a stopped run keeps what it measured
   }
   write_csv(out / "cm.csv", items);
   return tables(out, scores);
@@ -434,10 +452,13 @@ int tables(const fs::path& out, const fs::path& scores) {
   };
   std::map<std::string, Side> fsize;  // flipbook config -> mean sizes in KB
   for (const auto& [config, g] : fbs) fsize[config] = {g->orig.get() / 1024, g->packed.get() / 1024, g->zlib.get() / 1024};
-  const auto envelope = [&](double Side::*field) {
+  // One envelope per flipbook baseline (tools/baselines.hpp): the original ladder (our BC3 layout and raw), with BC7,
+  // with BC7 and ASTC.
+  using tools::Baseline;
+  const auto envelope = [&](double Side::*field, Baseline b) {
     std::vector<std::pair<double, double>> pts;
     for (const auto& [config, s] : fsize) {
-      if (quality.contains(config)) pts.emplace_back(s.*field, quality.at(config).get());
+      if (quality.contains(config) && tools::in_baseline(config, b)) pts.emplace_back(s.*field, quality.at(config).get());
     }
     std::ranges::sort(pts);
     std::vector<std::pair<double, double>> env;  // one point per size: the best quality at or below it
@@ -448,38 +469,43 @@ int tables(const fs::path& out, const fs::path& scores) {
     }
     return env;
   };
-  const auto env_mem = envelope(&Side::mem), env_cm = envelope(&Side::cm), env_z = envelope(&Side::zlib);
   std::ofstream eq(out / "cm_equal_quality.csv");
-  eq << "network,files,active_psnr,net_kb,net_cm_kb,net_zlib_kb,flipbook_kb,flipbook_cm_kb,flipbook_zlib_kb,ratio_memory,ratio_cm,ratio_zlib\n";
-  std::println("\n### Equal quality: flipbook size for the network's mean active PSNR, and the ratio\n");
-  std::println("| network | files | active PSNR | in memory: net / flipbook KB, ratio | packed (this coder): net / flipbook KB, ratio | zlib -9: net / flipbook KB, ratio |");
-  std::println("|---|---:|---:|---|---|---|");
-  for (const auto& [key, g] : agg) {
-    if (key.first != "model_a") continue;
-    // "grid_m8" -> "grid_m|8"
-    const std::string& c = key.second;
-    const std::size_t digits = c.find_first_of("0123456789");
-    if (digits == std::string::npos) continue;
-    const std::string qkey = c.substr(0, digits) + "|" + c.substr(digits);
-    if (!quality.contains(qkey)) continue;
-    const double q = quality.at(qkey).get();
-    // The networks: every saved file of this configuration (grid_m 8-bit: all 12 clips; the others: clip 0 of
-    // each effect), sizes as stored, packed and zlib.
-    const Side net{g.orig.get() / 1024, g.packed.get() / 1024, g.zlib.get() / 1024};
-    const auto [om, fm] = envelope_kb(env_mem, q);
-    const auto [oc, fc] = envelope_kb(env_cm, q);
-    const auto [oz, fz] = envelope_kb(env_z, q);
-    const auto cell = [](double n, const std::string& o, double f) { return std::format("{:.0f} / {}{:.0f}, {}{:.1f}x", n, o, f, o, f / n); };
-    std::println("| {} | {} | {:.2f} | {} | {} | {} |", qkey, g.n, q, cell(net.mem, om, fm), cell(net.cm, oc, fc), cell(net.zlib, oz, fz));
-    eq << std::format("{},{},{:.3f},{:.1f},{:.1f},{:.1f},{}{:.1f},{}{:.1f},{}{:.1f},{:.3f},{:.3f},{:.3f}\n", qkey, g.n, q, net.mem, net.cm, net.zlib, om, fm, oc, fc, oz,
-                      fz, fm / net.mem, fc / net.cm, fz / net.zlib);
-  }
-  std::println("\n(\"<\": every flipbook in the ladder is at least as good, so the ratio is at most that; \">\": none up to the largest is as good.)");
-  std::println("\nFlipbook envelope (KB in memory, packed, zlib; best mean active PSNR at or below): ");
-  for (const auto* e : {&env_mem, &env_cm, &env_z}) {
-    std::string s;
-    for (const auto& [kb, qq] : *e) s += std::format(" {:.0f}:{:.2f}", kb, qq);
-    std::println("  {}", s);
+  eq << "network,files,active_psnr,net_kb,net_cm_kb,net_zlib_kb,flipbook_kb,flipbook_cm_kb,flipbook_zlib_kb,ratio_memory,ratio_cm,ratio_zlib,baseline\n";
+  for (const Baseline b : {Baseline::bc3_layout, Baseline::desktop, Baseline::all}) {
+    const bool more = std::ranges::any_of(fsize, [&](const auto& kv) { return quality.contains(kv.first) && !tools::in_baseline(kv.first, Baseline::bc3_layout) &&
+                                                                              tools::in_baseline(kv.first, b); });
+    if (b != Baseline::bc3_layout && !more) continue;
+    const auto env_mem = envelope(&Side::mem, b), env_cm = envelope(&Side::cm, b), env_z = envelope(&Side::zlib, b);
+    std::println("\n### Equal quality, flipbooks {}: flipbook size for the network's mean active PSNR, and the ratio\n", tools::baseline_name(b));
+    std::println("| network | files | active PSNR | in memory: net / flipbook KB, ratio | packed (this coder): net / flipbook KB, ratio | zlib -9: net / flipbook KB, ratio |");
+    std::println("|---|---:|---:|---|---|---|");
+    for (const auto& [key, g] : agg) {
+      if (key.first != "model_a") continue;
+      // "grid_m8" -> "grid_m|8"
+      const std::string& c = key.second;
+      const std::size_t digits = c.find_first_of("0123456789");
+      if (digits == std::string::npos) continue;
+      const std::string qkey = c.substr(0, digits) + "|" + c.substr(digits);
+      if (!quality.contains(qkey)) continue;
+      const double q = quality.at(qkey).get();
+      // The networks: every saved file of this configuration (grid_m 8-bit: all 12 clips; the others: clip 0 of
+      // each effect), sizes as stored, packed and zlib.
+      const Side net{g.orig.get() / 1024, g.packed.get() / 1024, g.zlib.get() / 1024};
+      const auto [om, fm] = envelope_kb(env_mem, q);
+      const auto [oc, fc] = envelope_kb(env_cm, q);
+      const auto [oz, fz] = envelope_kb(env_z, q);
+      const auto cell = [](double n, const std::string& o, double f) { return std::format("{:.0f} / {}{:.0f}, {}{:.1f}x", n, o, f, o, f / n); };
+      std::println("| {} | {} | {:.2f} | {} | {} | {} |", qkey, g.n, q, cell(net.mem, om, fm), cell(net.cm, oc, fc), cell(net.zlib, oz, fz));
+      eq << std::format("{},{},{:.3f},{:.1f},{:.1f},{:.1f},{}{:.1f},{}{:.1f},{}{:.1f},{:.3f},{:.3f},{:.3f},{}\n", qkey, g.n, q, net.mem, net.cm, net.zlib, om, fm, oc, fc,
+                        oz, fz, fm / net.mem, fc / net.cm, fz / net.zlib, tools::baseline_key(b));
+    }
+    std::println("\n(\"<\": every flipbook in the ladder is at least as good, so the ratio is at most that; \">\": none up to the largest is as good.)");
+    std::println("\nFlipbook envelope (KB in memory, packed, zlib; best mean active PSNR at or below): ");
+    for (const auto* e : {&env_mem, &env_cm, &env_z}) {
+      std::string s;
+      for (const auto& [kb, qq] : *e) s += std::format(" {:.0f}:{:.2f}", kb, qq);
+      std::println("  {}", s);
+    }
   }
   return 0;
 }
@@ -632,11 +658,11 @@ int h3(const tools::Args& a) {
 }  // namespace
 
 int main(int argc, char** argv) try {
-  const tools::Args a(argc, argv, {"help", "unpack", "study", "tables", "h3", "light", "fast", "lz", "seekable"});
+  const tools::Args a(argc, argv, {"help", "unpack", "study", "tables", "h3", "light", "fast", "lz", "seekable", "flipbooks-only"});
   const auto& pos = a.positional();
   if (a.flag("help") || (pos.empty() && !a.has("report") && !a.flag("study") && !a.flag("tables"))) {
     std::println("nvfx_pack in.nvfx out.nvfz [--light | --fast] [--lz] [--seekable [--segment N]] | --unpack in.nvfz out.nvfx | --report DIR | "
-                 "--study [--data DIR] [--scores CSV] [--out DIR] | --tables [--scores CSV] [--out DIR] | "
+                 "--study [--data DIR] [--scores CSV] [--out DIR] [--threads N] [--flipbooks-only] | --tables [--scores CSV] [--out DIR] | "
                  "--h3 [--reps N] [--segment N] [--out DIR] [--csv NAME] FILES_OR_DIRS");
     return 0;
   }

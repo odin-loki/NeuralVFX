@@ -3,23 +3,30 @@
 #include <algorithm>
 #include <cmath>
 #include <format>
+#include <future>
 #include <limits>
+#include <map>
+#include <mutex>
 #include <ranges>
 #include <stdexcept>
+#include <tuple>
 
 namespace nfx::flipbook {
 
 std::string Spec::describe() const {
-  std::string s = std::format("{} {}f {}px", codec == Codec::raw ? "raw" : "bc3", frames, res);
+  std::string s = std::format("{} {}f {}px", codec_name(codec), frames, res);
   if (flow_res > 0) s += std::format(" +mv{}", flow_res);
   return s;
 }
 
+std::string Spec::family() const {
+  if (!production(codec)) return flow_res > 0 ? "flipbook_mv" : codec == Codec::raw ? "flipbook_raw" : "flipbook_bc3";
+  return std::string(codec == Codec::bc7 ? "flipbook_bc7" : "flipbook_astc") + (flow_res > 0 ? "_mv" : "");
+}
+
 std::size_t memory_bytes(const Spec& spec, int kept) {
-  const std::size_t px = static_cast<std::size_t>(spec.res) * spec.res;
-  const std::size_t per_frame = spec.codec == Codec::raw ? px * 4 : px;
   const std::size_t flow = spec.flow_res > 0 ? static_cast<std::size_t>(spec.flow_res) * spec.flow_res * 2 : 0;
-  return static_cast<std::size_t>(kept) * (per_frame + flow);
+  return static_cast<std::size_t>(kept) * (frame_bytes(spec.codec, spec.res) + flow);
 }
 
 // --- block compression ------------------------------------------------------------------------------------------
@@ -352,7 +359,51 @@ std::vector<float> estimate_flow(std::span<const std::uint8_t> a, std::span<cons
 
 }  // namespace
 
-Flipbook build(const Clip& ref, const Spec& spec, std::span<const int> keep) {
+struct FrameCache::Impl {
+  std::mutex m;
+  std::map<std::tuple<Codec, int, int>, std::shared_future<std::shared_ptr<const Frame>>> frames;
+};
+
+FrameCache::FrameCache() : impl_(std::make_unique<Impl>()) {}
+FrameCache::~FrameCache() = default;
+
+namespace {
+
+std::shared_ptr<const FrameCache::Frame> make_frame(const Clip& ref, Codec codec, int res, int f) {
+  auto fr = std::make_shared<FrameCache::Frame>();
+  auto small = downsample(ref.frame(f), ref.size, res);
+  fr->stored = encode(codec, small, res, res);
+  fr->decoded = codec == Codec::raw ? std::move(small) : decode(codec, fr->stored, res, res);
+  return fr;
+}
+
+}  // namespace
+
+std::shared_ptr<const FrameCache::Frame> FrameCache::get(const Clip& ref, Codec codec, int res, int frame) {
+  // The first caller of a key computes it outside the lock; later callers wait for its result.
+  std::promise<std::shared_ptr<const Frame>> mine;
+  std::shared_future<std::shared_ptr<const Frame>> result;
+  bool compute = false;
+  {
+    const std::lock_guard lock(impl_->m);
+    auto [it, fresh] = impl_->frames.try_emplace({codec, res, frame});
+    if (fresh) {
+      it->second = mine.get_future().share();
+      compute = true;
+    }
+    result = it->second;
+  }
+  if (compute) {
+    try {
+      mine.set_value(make_frame(ref, codec, res, frame));
+    } catch (...) {
+      mine.set_exception(std::current_exception());
+    }
+  }
+  return result.get();
+}
+
+Flipbook build(const Clip& ref, const Spec& spec, std::span<const int> keep, FrameCache* cache) {
   if (spec.res <= 0 || ref.size % spec.res) throw std::invalid_argument("flipbook: res must divide the clip size");
   Flipbook fb;
   fb.spec = spec;
@@ -374,9 +425,9 @@ Flipbook build(const Clip& ref, const Spec& spec, std::span<const int> keep) {
   fb.kept.erase(std::ranges::unique(fb.kept).begin(), fb.kept.end());
   fb.spec.frames = static_cast<int>(fb.kept.size());
   for (const int f : fb.kept) {
-    auto small = downsample(ref.frame(f), ref.size, spec.res);
-    if (spec.codec == Codec::bc3) small = decompress_bc3(compress_bc3(small, spec.res, spec.res), spec.res, spec.res);
-    fb.frames.push_back(std::move(small));
+    const auto fr = cache ? cache->get(ref, spec.codec, spec.res, f) : make_frame(ref, spec.codec, spec.res, f);
+    fb.stored.push_back(fr->stored);
+    fb.frames.push_back(fr->decoded);
   }
   if (spec.flow_res > 0) {
     const std::size_t k = fb.kept.size();
@@ -471,6 +522,20 @@ std::vector<Spec> ladder(int size, int frames) {
   }
   for (const int res : {size, size / 2}) {
     for (int k = frames / 4; k >= 4; k /= 2) v.push_back({k, res, Codec::bc3, std::max(4, res / 4)});
+  }
+  return v;
+}
+
+std::vector<Spec> ladder_production(int size, int frames) {
+  std::vector<Spec> v;
+  for (const Codec c : production_codecs()) {
+    if (!available(c)) continue;
+    for (const int res : {size, size / 2, size / 4}) {
+      for (int k = frames; k >= 4; k /= 2) v.push_back({k, res, c, 0});
+    }
+    for (const int res : {size, size / 2}) {
+      for (int k = frames / 4; k >= 4; k /= 2) v.push_back({k, res, c, std::max(4, res / 4)});
+    }
   }
   return v;
 }
