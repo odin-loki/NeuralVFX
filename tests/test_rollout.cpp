@@ -250,13 +250,14 @@ Run tiny_forced_run(const Hyper& h, int frames) {
   return r;
 }
 
-void rollout_gradient_check(int unroll, int burn, float profile, float activity = 0.f, bool forced = false) {
+void rollout_gradient_check(int unroll, int burn, float profile, float activity = 0.f, bool forced = false, const Model* anchor = nullptr,
+                            float anchor_weight = 0.f) {
   Model m = tiny_model(11 + static_cast<std::uint64_t>(unroll + burn));
   const auto r = forced ? tiny_forced_run(m.h, 12) : tiny_run(m.h, 12);
   std::vector<float> grad(m.step_w.size(), 0.f);
-  const double l0 = window_loss(m, r, 1, unroll, burn, 0.f, profile, 5, &grad, activity);
+  const double l0 = window_loss(m, r, 1, unroll, burn, 0.f, profile, 5, &grad, activity, anchor, anchor_weight);
   ASSERT_GT(l0, 0.0);
-  const auto eval = [&] { return window_loss(m, r, 1, unroll, burn, 0.f, profile, 5, nullptr, activity); };
+  const auto eval = [&] { return window_loss(m, r, 1, unroll, burn, 0.f, profile, 5, nullptr, activity, anchor, anchor_weight); };
   // Central differences at three step sizes, and one-sided differences at the two smaller ones. A parameter passes
   // when one of them matches within 3%: the loss is summed in float, and ReLUs, clamps and bilinear interpolation make
   // it only piecewise smooth, so a kink just beside the current point spoils the central differences while the
@@ -313,6 +314,68 @@ TEST(Rollout, GradientsMatchFiniteDifferencesWithProfiles) { rollout_gradient_ch
 TEST(Rollout, GradientsMatchFiniteDifferencesWithActivity) { rollout_gradient_check(4, 0, 0.5f, 50.f); }
 // Through the couplings: the push is added and taken out, forces and material added, v and material multiplied.
 TEST(Rollout, GradientsMatchFiniteDifferencesWithCouplings) { rollout_gradient_check(4, 0, 0.5f, 50.f, true); }
+
+// Round 2 (docs/COMPOSE.md §10): the anchor to another model's first step, alone and with couplings.
+TEST(Rollout, GradientsMatchFiniteDifferencesWithTheAnchor) {
+  const Model a = tiny_model(99);
+  rollout_gradient_check(3, 0, 0.5f, 20.f, false, &a, 5.f);
+}
+TEST(Rollout, GradientsMatchFiniteDifferencesWithTheAnchorAndCouplings) {
+  const Model a = tiny_model(98);
+  rollout_gradient_check(2, 0, 0.f, 0.f, true, &a, 3.f);
+}
+
+TEST(Rollout, AnchorAddsTheFirstStepsDistanceFromATrueState) {
+  const Model m = tiny_model(), other = tiny_model(42);
+  const auto r = tiny_run(m.h, 12);
+  const double plain = window_loss(m, r, 1, 3, 0, 0.f, 0.5f, 5, nullptr);
+  EXPECT_EQ(window_loss(m, r, 1, 3, 0, 0.f, 0.5f, 5, nullptr, 0.f, &m, 7.f), plain);  // anchored to itself: no distance
+  const double d1 = window_loss(m, r, 1, 3, 0, 0.f, 0.5f, 5, nullptr, 0.f, &other, 1.f) - plain;
+  const double d4 = window_loss(m, r, 1, 3, 0, 0.f, 0.5f, 5, nullptr, 0.f, &other, 4.f) - plain;
+  EXPECT_GT(d1, 0.0);
+  EXPECT_NEAR(d4, 4.0 * d1, 1e-6 * std::abs(plain) + 1e-9);
+  // after a burn-in the window does not start at a true state: no anchor
+  EXPECT_EQ(window_loss(m, r, 1, 3, 2, 0.f, 0.5f, 5, nullptr, 0.f, &other, 4.f), window_loss(m, r, 1, 3, 2, 0.f, 0.5f, 5, nullptr));
+}
+
+TEST(Rollout, WindowsKnowWhereCouplingsAct) {
+  const Hyper h = tiny_hyper();
+  const auto forced = tiny_forced_run(h, 12), plain = tiny_run(h, 12);
+  // forced_run leaves out every third state (0, 3, 6, 9): steps that produce states 3 and 4 include state 4's coupling
+  EXPECT_TRUE(window_has_coupling(forced, 2, 2));
+  EXPECT_FALSE(window_has_coupling(forced, 2, 1));
+  EXPECT_FALSE(window_has_coupling(plain, 0, 10));
+}
+
+TEST(Rollout, SceneForcingIsDeterministicAndStrong) {
+  int rings = 0, removes = 0;
+  for (std::uint64_t seed = 1; seed <= 200; ++seed) {
+    for (const auto e : {sim::Effect::fire, sim::Effect::smoke}) {
+      const ForcingSpec a = scene_forcing(e, 240, seed, 15, 180), b = scene_forcing(e, 240, seed, 15, 180);
+      ASSERT_EQ(a.events.size(), b.events.size());
+      ASSERT_GE(a.events.size(), 1u);
+      const Coupling& gale = a.events[0];
+      EXPECT_EQ(gale.kind, Coupling::Kind::push);
+      EXPECT_EQ(gale.shape, Coupling::Shape::wave);
+      EXPECT_GE(gale.onset, 15);
+      EXPECT_LE(gale.onset, 25);
+      EXPECT_LE(gale.amp, e == sim::Effect::fire ? 0.6f : 0.4f);
+      for (std::size_t k = 0; k < a.events.size(); ++k) {
+        const Coupling& c = a.events[k];
+        EXPECT_EQ(c.onset, b.events[k].onset);
+        EXPECT_EQ(c.amp, b.events[k].amp);
+        EXPECT_LE(c.onset + c.duration, 240);
+        if (c.shape == Coupling::Shape::vortex) {
+          EXPECT_LE(std::abs(c.amp), 0.7f);
+          ++rings;
+        }
+        removes += c.kind == Coupling::Kind::remove;
+      }
+    }
+  }
+  EXPECT_GT(rings, 300);  // two vortices per ring, in about 60% of 400 specs
+  EXPECT_GT(removes, 50);
+}
 
 TEST(Rollout, CouplingsChangeTheWindowAndBurnInFollowsThem) {
   const Model m = tiny_model();

@@ -133,7 +133,9 @@ int run_per_plane(nfx::Hyper h, int size, const char* name, bool masked) {
 }
 
 // A rollout effect: the counted frames include a seek backwards (a restart from a start point, with warm-up steps).
-int run_rollout(int size) {
+// With `handoff`, an explosion whose first 30 frames are drawn in the simulator's look, crossfading over 10
+// (docs/COMPOSE.md §10).
+int run_rollout(int size, bool handoff = false) {
   nfx::rollout::Hyper h;
   h.res = 16;
   h.hidden = 8;
@@ -142,7 +144,7 @@ int run_rollout(int size) {
   h.render_hidden = 6;
   h.warmup = 4;
   nfx::rollout::Model m = nfx::rollout::init_model(h, 3);
-  m.effect = "rollout";
+  m.effect = handoff ? "explosion" : "rollout";
   m.control_names = {"intensity", "wind", "turbulence"};
   m.scale = {0.2f, 0.2f, 0.4f, 0.3f};
   m.lo = {-2.f, -2.f, 0.f, 0.f};
@@ -166,6 +168,7 @@ int run_rollout(int size) {
   nvfx_instance_set_controls(in, controls, 3);
   nvfx_instance_set_seed(in, 99);
   nvfx_instance_set_colour(in, 0.4f, 1.2f);
+  if (handoff && nvfx_instance_set_handoff(in, 30, 10) != NVFX_OK) return 1;
   std::vector<std::uint8_t> rgba(static_cast<std::size_t>(size) * size * 4);
   nvfx_render(in, 0.0, rgba.data(), static_cast<std::size_t>(size) * 4);  // warm-up outside the count
   g_allocations = 0;
@@ -176,7 +179,7 @@ int run_rollout(int size) {
   nvfx_render(in, 1.5, rgba.data(), static_cast<std::size_t>(size) * 4);
   g_counting = false;
   const long n = g_allocations.load();
-  std::printf("rollout %dx%d: %ld allocations in 202 frames (with a restart)\n", size, size, n);
+  std::printf("rollout %dx%d%s: %ld allocations in 202 frames (with a restart)\n", size, size, handoff ? " with the hand-off" : "", n);
   nvfx_instance_free(in);
   nvfx_effect_free(e);
   return n == 0 ? 0 : 1;
@@ -420,6 +423,7 @@ int main() {
               run(wide, 32, "grid", 16, 0, NVFX_PRECISION_INT8);
   failures += run_scene_api();
   failures += run_rollout_prior(64) + run_rollout_prior(128);  // the prior against drift
+  failures += run_rollout(64, true);                             // the simulator's look for the first frames
   failures += run(g, 128, "grid", 8) + run(g, 128, "grid", 5) + run(g, 64, "grid", 4) + run(c, 64, "conv", 4);  // packed features
   failures += run(g, 128, "grid", 8, 6) + run(c, 64, "conv", 8, 8);  // vector-quantised features
   failures += run_per_plane(g, 128, "grid", false) + run_per_plane(c, 64, "conv", false);  // a width per feature plane

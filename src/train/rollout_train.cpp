@@ -723,10 +723,95 @@ ForcingSpec random_forcing(sim::Effect e, int frames, std::uint64_t seed, int fi
   return spec;
 }
 
+// Strong pushes as scenes give them (study I round 2, docs/COMPOSE.md §10). In cells of the 32-cell grid per frame:
+// the wall of examples/scenes/firewall.nvfxs feels the vortex ring at up to 0.67 (4 world pixels a frame at 6 pixels a
+// cell) and its sky 0.67 from the ring and 0.2 +- 70% from the gale; the fireball's wreck is pushed by up to 0.49 and
+// loses half of its top rows to the sky every frame; a sustained gust of a fraction of a cell per frame weakens the
+// learned fire within seconds (§5). Here a gale always blows (a wave 2 to 6 domain lengths long, so it varies slowly
+// across the domain and drifts like gusts; within 20 degrees of sideways; for 60 to 150 frames), a ring rolls through
+// in 60% of the runs (in 22 to 44 frames), a blast (a broad gust of 5 to 20 frames) comes in 30%, and the material
+// leaves through the top in 50% (fire) or 30% (smoke and explosions).
+ForcingSpec scene_forcing(sim::Effect e, int frames, std::uint64_t seed, int first, int last) {
+  std::mt19937_64 rng(seed * 0xD1B54A32D192ED03ULL + 0x5CE7E5ULL);
+  const auto U = [&](float a, float b) { return std::uniform_real_distribution<float>(a, b)(rng); };
+  const auto I = [&](int a, int b) { return a + static_cast<int>(rng() % static_cast<std::uint64_t>(std::max(1, b - a + 1))); };
+  const bool fire = e == sim::Effect::fire;
+  // Rings stop at 0.7 on both: stronger ones (up to 1.0 was tried on fire) are spun up by the simulator's vorticity
+  // confinement to flows of 1.5 to 3.8 cells per frame, beyond anything v1 saw and beyond its clamp.
+  const float gale_max = fire ? 0.6f : 0.4f, ring_max = 0.7f;
+  last = std::clamp(last, first, frames - 2);
+  ForcingSpec spec;
+  const auto clip = [&](Coupling& c) {
+    c.duration = std::max(1, std::min(c.duration, frames - c.onset));
+    spec.events.push_back(c);
+  };
+  const float side = U(0.f, 1.f) < 0.5f ? 0.f : 3.14159265f;  // the wind blows to the right or to the left
+  {  // the gale
+    Coupling c;
+    c.kind = Coupling::Kind::push;
+    c.shape = Coupling::Shape::wave;
+    c.onset = I(first, std::min(first + 10, last));
+    c.duration = I(60, 150);
+    c.angle = side + U(-0.35f, 0.35f);
+    c.across = U(0.f, 6.2831853f);
+    c.wavelength = U(2.f, 6.f);
+    c.speed = U(-0.01f, 0.01f);
+    c.x = U(0.f, 1.f);
+    c.y = U(0.f, 1.f);
+    c.amp = U(0.15f, gale_max);
+    clip(c);
+  }
+  if (U(0.f, 1.f) < 0.6f) {  // a vortex ring seen from the side: two opposite vortices travelling with the wind
+    // It rolls through the domain at 0.03 to 0.06 of its width per frame (the firewall's ring crosses a tile of the wall
+    // at 0.05), entering at one side and leaving at the other.
+    const float speed = U(0.03f, 0.06f), sep = U(0.08f, 0.15f), core = U(0.05f, 0.1f), y = U(0.3f, 0.75f), amp = U(0.3f, ring_max);
+    const int onset = I(first, last), duration = static_cast<int>(std::ceil(1.3f / speed));
+    const float dir = side == 0.f ? 1.f : -1.f, x0 = dir > 0.f ? U(-0.15f, 0.f) : U(1.f, 1.15f);
+    for (const float sgn : {1.f, -1.f}) {
+      Coupling c;
+      c.kind = Coupling::Kind::push;
+      c.shape = Coupling::Shape::vortex;
+      c.onset = onset;
+      c.duration = duration;
+      c.x = x0;
+      c.y = y + sgn * sep;
+      c.dx = dir * speed;
+      c.radius = core;
+      c.amp = sgn * dir * amp;  // the upper core turns so that the pair blows along the travel between the cores
+      clip(c);
+    }
+  }
+  if (U(0.f, 1.f) < 0.3f) {  // a blast: a broad gust for a few frames
+    Coupling c;
+    c.kind = Coupling::Kind::push;
+    c.shape = Coupling::Shape::gust;
+    c.onset = I(first, last);
+    c.duration = I(5, 20);
+    c.x = U(0.2f, 0.8f);
+    c.y = U(0.2f, 0.8f);
+    c.radius = U(0.3f, 0.6f);
+    c.angle = U(0.f, 6.2831853f);
+    c.amp = U(0.2f, fire ? 0.5f : 0.3f);
+    clip(c);
+  }
+  if (U(0.f, 1.f) < (fire ? 0.5f : 0.3f)) {  // material out through the top (a transfer to the sky), for good
+    Coupling c;
+    c.kind = Coupling::Kind::remove;
+    c.band = true;
+    c.onset = I(first, last);
+    c.duration = frames;
+    c.amp = U(0.2f, 0.6f);
+    c.height = U(0.75f, 0.88f);
+    c.soft = U(0.03f, 0.08f);
+    clip(c);
+  }
+  return spec;
+}
+
 // --- stepper ------------------------------------------------------------------------------------------------------------
 
 double window_loss(const Model& m, const Run& r, int first, int unroll, int burn, float sigma, float profile, std::uint64_t noise_seed,
-                   std::vector<float>* grad, float activity) {
+                   std::vector<float>* grad, float activity, const Model* anchor, float anchor_weight) {
   const Hyper& h = m.h;
   const StepLayout L = step_layout(h);
   const int R = h.res, N = R * R, C = h.channels();
@@ -791,6 +876,14 @@ double window_loss(const Model& m, const Run& r, int first, int unroll, int burn
       }
       apply_forcing(S, C, f);
     }
+    Vec anchored;  // the anchor model's first step from the same input (round 2: plain windows from a true state)
+    if (s == 0 && burn == 0 && anchor && anchor_weight > 0.f) {
+      Vec ap(pressure);
+      Cache ca;
+      forward(*anchor, L, S.data(), noise.data(), conds[0], ap, ca);
+      anchored = std::move(ca.next);
+      if (!fs[0].empty()) remove_push(anchored, C, fs[0]);
+    }
     forward(m, L, S.data(), noise.data(), conds[sz(s)], pressure, cs[sz(s)]);
     S = cs[sz(s)].next;
     if (!fs[sz(s)].empty()) remove_push(S, C, fs[sz(s)]);
@@ -803,6 +896,16 @@ double window_loss(const Model& m, const Run& r, int first, int unroll, int burn
         const float e = S[sz(j) * sz(C) + sz(k)] - t[sz(j) * kPhys + sz(k)];
         loss += static_cast<double>(wch[sz(k)] * e * e * inv);
         g[sz(j) * sz(C) + sz(k)] = 2.f * wch[sz(k)] * e * inv;
+      }
+    }
+    if (!anchored.empty()) {  // anchor_weight * mean over cells and physical channels of the scaled squared difference
+      const float ainv = anchor_weight / (fl(N) * kPhys);
+      for (int j = 0; j < N; ++j) {
+        for (int k = 0; k < kPhys; ++k) {
+          const float e = S[sz(j) * sz(C) + sz(k)] - anchored[sz(j) * sz(C) + sz(k)];
+          loss += static_cast<double>(wch[sz(k)] * e * e * ainv);
+          g[sz(j) * sz(C) + sz(k)] += 2.f * wch[sz(k)] * e * ainv;
+        }
       }
     }
     if (profile > 0.f) {  // where the heat and soot are: row and column sums
@@ -875,6 +978,13 @@ double window_loss(const Model& m, const Run& r, int first, int unroll, int burn
     }
   }
   return loss;
+}
+
+bool window_has_coupling(const Run& r, int first, int unroll) {
+  for (int i = first + 1; i <= first + unroll; ++i) {
+    if (i >= 0 && sz(i) < r.forcing_at.size() && r.forcing_at[sz(i)] >= 0) return true;
+  }
+  return false;
 }
 
 namespace {
@@ -958,12 +1068,18 @@ StepperResult train_stepper(Model& m, std::span<const Run> runs, const StepperOp
         pool.emplace_back([&, t] {
           std::mt19937_64 rng(o.seed * 1000003ULL + static_cast<std::uint64_t>(it) * 977ULL + static_cast<std::uint64_t>(t));
           for (int b = t; b < o.batch; b += threads) {
-            const Run& r = o.plain_runs < 0 ? runs[rng() % runs.size()] : runs[pick_run(rng)];
+            const std::size_t ri = o.plain_runs < 0 ? rng() % runs.size() : pick_run(rng);
+            const Run& r = runs[ri];
             const int burn = fine && o.burn_max > 0 && (b & 1) ? static_cast<int>(rng() % static_cast<std::uint64_t>(o.burn_max + 1)) : 0;
             const int span = r.frames - unroll - burn - 1;
             if (span <= 0) continue;
-            const int first = static_cast<int>(rng() % static_cast<std::uint64_t>(span));
-            losses[sz(t)] += window_loss(m, r, first, unroll, burn, o.sigma, fine ? o.profile : 0.f, rng(), &grads[sz(t)], act ? o.activity : 0.f);
+            int first = static_cast<int>(rng() % static_cast<std::uint64_t>(span));
+            if (o.aim_couplings && !r.forcing_at.empty()) {  // round 2: a window in which a coupling acts
+              for (int k = 0; k < 16 && !window_has_coupling(r, first + burn, unroll); ++k) first = static_cast<int>(rng() % static_cast<std::uint64_t>(span));
+            }
+            const bool anchored = o.anchor > 0.f && o.anchor_model && o.plain_runs >= 0 && ri < n_plain;
+            losses[sz(t)] += window_loss(m, r, first, unroll, burn, o.sigma, fine ? o.profile : 0.f, rng(), &grads[sz(t)], act ? o.activity : 0.f,
+                                         anchored ? o.anchor_model : nullptr, anchored ? o.anchor : 0.f);
           }
         });
       }
