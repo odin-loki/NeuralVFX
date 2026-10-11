@@ -300,7 +300,15 @@ if(NEURALFX_BUILD_TESTS)
                      --expect ${CMAKE_CURRENT_BINARY_DIR}/fireball_script_profile.csv)
     set_tests_properties(neuralfx.SceneApiFireballBitExact PROPERTIES LABELS "neuralfx;data" SKIP_RETURN_CODE 77 TIMEOUT 1200
                          FIXTURES_REQUIRED fireball_profile)
-    foreach(scene fireball firewall)
+    # The portal (docs/EFFECTS.md): the effects added after study D with study D's v2 fire and explosion, all in
+    # NEURALFX_MODELS_FX (outside git); its keyframes have the SHA-256 recorded in results/experiments/fx_frozen.csv.
+    set(NEURALFX_MODELS_FX "${_nvfx_data}/fx/models/scene" CACHE PATH "steam.nvfx, magic.nvfx and v2's fire.nvfx and explosion.nvfx")
+    add_test(NAME neuralfx.ScriptedPortalFrozen
+             COMMAND nvfx_scene_script --script ${CMAKE_CURRENT_SOURCE_DIR}/examples/scenes/portal.nvfxs --models ${NEURALFX_MODELS_FX}
+                     --keyframes ${CMAKE_CURRENT_BINARY_DIR}/portal_script_keyframes --no-video --threads 2
+                     --verify ${CMAKE_CURRENT_SOURCE_DIR}/results/experiments/fx_frozen.csv)
+    set_tests_properties(neuralfx.ScriptedPortalFrozen PROPERTIES LABELS "neuralfx;data" SKIP_RETURN_CODE 77 TIMEOUT 1200)
+    foreach(scene fireball firewall portal)
       add_test(NAME neuralfx.SceneScriptChecks.${scene} COMMAND nvfx_scene_script --script ${CMAKE_CURRENT_SOURCE_DIR}/examples/scenes/${scene}.nvfxs --check)
       set_tests_properties(neuralfx.SceneScriptChecks.${scene} PROPERTIES LABELS neuralfx)
     endforeach()

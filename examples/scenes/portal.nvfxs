@@ -1,0 +1,84 @@
+# A magic portal in a dark hall, written as a script (docs/COMPOSE.md §4 and §5) to show the effects added after study D
+# (docs/EFFECTS.md) with the study's own:
+#
+#   nvfx_scene_script --script examples/scenes/portal.nvfxs --models DIR --out portal.mp4
+#
+# DIR holds steam.nvfx and magic.nvfx (docs/EFFECTS.md) and study D's fire.nvfx and explosion.nvfx (v2).
+#
+# Night. Two steam vents hiss in the floor of a hall between two cold braziers. A portal opens between the vents: its
+# violet light falls on the steam, its swirl drags the steam in, and a pulse from it lights the braziers. Then it
+# collapses in a burst that bends the flames and blows the steam away.
+
+scene      size 1280 x 720, fps 30, length 10 s, ground 610
+bus        at (-128, -360), size 1536 x 1100, cell 8
+particles  capacity 8000, flow 0.9
+keyframes  0.9, 2.5, 3.9, 4.6, 6.2, 7.5, 7.9, 9.3
+
+effect steam     = "steam.nvfx"
+effect magic     = "magic.nvfx"
+effect fire      = "fire.nvfx"
+effect explosion = "explosion.nvfx", swirl 2.2, swirl_scale 9, contrast 1
+
+# Vapour lit by the scene (the portal's violet, the braziers' orange, the moon), and the burst's cloud as the
+# fireball's.
+look vapour = shader, emission 0, soot_density 2.2, soot_albedo 0.8, sky 0.3, shadow 0.25, scene_light 1.3, relief 1.5,
+              tint (0.94, 0.96, 1)
+look cloud  = shader, heat_scale 1.6, emission 1.6, emission_power 3, soot_density 3, relief 4, soot_albedo 0.3,
+              sky 0.18, shadow 0.3, scene_light 0.6, tint (1, 0.93, 0.86)
+
+let open    = smooth((t - 1.5) / 2)              # the portal opens
+let gone    = smooth((t - collapse) / 0.35)      # and collapses (0 until it does)
+let alive   = open * (1 - gone)
+let since   = t - collapse
+let flash   = if(since >= 0, exp(-since / 0.12), 0)
+let hiss_l  = 0.55 + 0.3 * noise(0.6 * t, 1.5, 0)
+let hiss_r  = 0.55 + 0.3 * noise(0.6 * t, 7.5, 0)
+
+# The portal: the magic effect, its light violet, growing as it opens and spinning faster.
+module portal  = magic, size 256, width 420, at (640, 600), feather 0.08, start 0, seed 31, glow (0.45, 0.25, 1.1),
+                 controls (0.2, 0.3, 0.5), intensity 0.15 + 0.8 * open, spin 0.3 + 0.6 * open, opacity alive
+# The vents, either side of it.
+module vent_l  = steam, size 128, width 220, at (400, ground), sink 0.04, feather 0.1, look vapour, start 0, seed 21,
+                 controls (0.6, 0.5, 0.5), intensity hiss_l
+module vent_r  = steam, size 128, width 220, at (880, ground), sink 0.04, feather 0.1, look vapour, start 3, seed 22,
+                 controls (0.6, 0.5, 0.5), intensity hiss_r
+# The braziers, cold until the portal's pulse reaches them.
+module fire_l  = fire, size 128, width 150, at (170, ground), sink 0.08, feather 0.15, start 0, seed 41, waiting,
+                 controls (0.45, 0.5, 0.5), intensity 0.15 + 0.4 * smooth(fire_l.age / 1.2), opacity smooth(fire_l.age / 0.3)
+module fire_r  = fire, size 128, width 150, at (1110, ground), sink 0.08, feather 0.15, start 4, seed 42, waiting,
+                 controls (0.45, 0.5, 0.5), intensity 0.15 + 0.4 * smooth(fire_r.age / 1.2), opacity smooth(fire_r.age / 0.3)
+# The burst when the portal collapses.
+module blast   = explosion, size 256, width 360, at (640, 520), sink 0.32, feather 0.12, look cloud, start 0, seed 51,
+                 waiting, opacity 1 - smooth((since - 1.6) / 0.8)
+
+# The portal draws the steam in, swirling.
+field pull = attract, at (640, 390), radius 380, strength 2.5 * alive, swirl 2 * alive, on vent_l, vent_r, particles
+
+light   gain 0.14, flash (0.5 * flash, 0.35 * flash, 0.8 * flash)
+frame   exposure 1.3 * (1 + 0.4 * flash), fade smooth(t / 0.4) * smooth((length - t) / 0.6), haze 1, bloom 1, bloom_threshold 1
+camera  x (rand - 0.5) * 8 * flash, y (rand - 0.5) * 8 * flash
+
+# A pulse when the portal is open lights the braziers.
+at 3.6 as pulse:
+  shock at (640, 390), speed 650, decay 0.5, amp 4, width 24
+when shock 1 reaches fire_l:
+  wake fire_l
+  scorch at (170, ground + 4), radius 70, glow 0.25
+when shock 1 reaches fire_r:
+  wake fire_r
+  scorch at (1110, ground + 4), radius 70, glow 0.25
+
+# It collapses.
+at 7.4 as collapse:
+  wake blast
+  shock at (640, 420), speed 1100, decay 0.3, amp 6, width 28
+  burst at (640, 420), radius 40, embers 500, debris 0, speed 700
+when since > 2.6:
+  stop blast
+  stop portal
+
+every frame:
+  push vent_l, gain 0.3      # the portal's swirl and the burst move the steam
+  push vent_r, gain 0.3
+  push fire_l, gain 0.15     # and bend the flames
+  push fire_r, gain 0.15
