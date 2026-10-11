@@ -60,7 +60,8 @@ Plan and decisions: [PLAN.md](PLAN.md).
   fire play one continuous run; its fine-detail mixer fails twice. Computing on compressed data is slower than dense
   code here, but LZ tokens and lighter models make the coder decode 4 to 38 times faster. Training with couplings
   improves the explosion inside scenes. The composed fireball runs at 80 frames per second at 720p on 4 threads.
-- **Not done:** owner footage (none supplied), a BC7 baseline, int8 kernels, an engine plugin (§9, §10).
+- **Not done:** owner footage (none supplied), a BC7 baseline, int8 kernels, engine plugins other than Godot's (§9,
+  §10; the Godot 4 plugin and a C API for scenes: [ENGINES.md](ENGINES.md) §7, §8).
 
 ## 2. How it was measured
 
@@ -596,7 +597,8 @@ Against traditional methods:
 6. **One cloud VM.** Timings carry VM jitter (90th percentiles usually 4-10% above the medians, up to 70% in a few cells; scene p99 three times the mean), and the same code ran 1.2 to 1.4 times faster in a later session than in the first (§7).
 7. **Small samples.** 12 clips (A) and 30 settings (B) from one simulator; intervals are over those, not over the
    variety of effects a game has.
-8. **No engine plugin was built or tested in an engine.** The C API is engine-neutral and its example host is tested.
+8. **One engine plugin, tested headless only.** A Godot 4 GDExtension plays effects and composed scenes and passes its
+   test in Godot 4.4.1 without a display ([ENGINES.md](ENGINES.md) §8); no plugin for Unreal or Unity was built.
 9. **Rollout effects (D) cost about a frame model's time per frame** (0.8 to 0.9 ms at 128 px) **but 4.0 MB per
    instance**, and they are not yet at the real floor (detail 0.07 to 0.12 further than a second real seed, motion 10-13% low on fire and smoke), and:
    - The explosion's first frames are poorly drawn by the learned renderer.
@@ -627,7 +629,8 @@ Against traditional methods:
   3. Owner footage, with start points estimated from it.
   4. A BC7 baseline (an open-source encoder fetched at build time).
   5. Faster frame-model kernels (int8, a projected first layer, a cheaper conv level of detail).
-  6. An engine plugin (Godot is the cheapest to test).
+  6. An engine plugin (Godot is the cheapest to test): done for Godot 4, over a C API for scenes as well as effects
+     ([ENGINES.md](ENGINES.md) §7, §8).
 
 ## 11. Reproduce
 

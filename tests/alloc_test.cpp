@@ -1,16 +1,19 @@
 // nvfx_render must not allocate (docs/PLAN.md §5.4), nor may a frame of a composed scene (docs/COMPOSE.md). This
 // program replaces the global operator new to count heap allocations, builds small grid, conv and rollout effects in
 // memory, and renders 200 frames of each with every feature switched on (controls, seeded drift, colour), a rollout
-// effect as one continuous rollout with the prior against drift, then 99 frames of a small composed scene and 44 frames
-// of a scripted one. Exit code 0 = no allocation during rendering.
+// effect as one continuous rollout with the prior against drift, then 99 frames of a small composed scene, 44 frames
+// of a scripted one, and the scripted one through the scene C API (nvfx_scene.h) with the game's calls between frames:
+// steps, field reads, inputs, triggers, module moves and controls. Exit code 0 = no allocation during rendering.
 #include "compose_scene.hpp"
 #include "script.hpp"
 
 #include <neuralfx/dcm/ddpm.hpp>
 #include <neuralfx/model.hpp>
 #include <neuralfx/nvfx.h>
+#include <neuralfx/nvfx_scene.h>
 #include <neuralfx/rollout.hpp>
 
+#include <algorithm>
 #include <array>
 #include <atomic>
 #include <cstdio>
@@ -268,6 +271,76 @@ int run_script() {
   return failures;
 }
 
+// The scene C API: a scripted scene with an input and a rule the game fires, driven as a game drives it. Everything
+// is made by nvfx_scene_create; the frames, at 30 Hz and at 60 Hz (a frame every other step), allocate nothing.
+int run_scene_api() {
+  std::string tiny, other;
+  for (const auto& [seed, bytes] : {std::pair<std::uint64_t, std::string*>{3, &tiny}, {4, &other}}) {
+    std::ostringstream os;
+    if (!nfx::rollout::save_model(os, nfx::compose::testing::tiny_effect(seed).m)) return 1;
+    *bytes = os.str();
+  }
+  nvfx_effect* et = nullptr;
+  nvfx_effect* eo = nullptr;
+  if (nvfx_effect_load_memory(tiny.data(), tiny.size(), &et) != NVFX_OK || nvfx_effect_load_memory(other.data(), other.size(), &eo) != NVFX_OK) return 1;
+  const nvfx_scene_effect list[] = {{"tiny", et}, {"other", eo}};
+  const std::string script = std::string(nfx::compose::testing::kEverything) +
+                             "input breeze_in = 0.3\nfield breeze2 = wind, velocity (breeze_in, 0), on fire\nwhen 0 as poke, repeat:\n  shock at (80, 50)\n";
+  int failures = 0;
+  for (const int overlap : {0, 1}) {
+    nvfx_scene_desc d;
+    nvfx_scene_desc_init(&d);
+    d.script = script.c_str();
+    d.effects = list;
+    d.n_effects = 2;
+    d.threads = 2;
+    d.overlap = overlap;
+    nvfx_scene* s = nullptr;
+    nvfx_scene_error err;
+    if (nvfx_scene_create(&d, &s, &err) != NVFX_OK) {
+      std::printf("scene API: %s\n", err.message);
+      return 1;
+    }
+    nvfx_scene_info info{};
+    nvfx_scene_get_info(s, &info);
+    std::vector<std::uint8_t> rgba(static_cast<std::size_t>(info.width) * static_cast<std::size_t>(info.height) * 4);
+    std::vector<float> grid(8 * 4);
+    nvfx_scene_render(s, rgba.data(), static_cast<std::size_t>(info.width) * 4);  // warm-up outside the count
+    g_allocations = 0;
+    g_counting = true;
+    float heat = 0.f;
+    for (int f = 1; f < 2 * info.frames; ++f) {
+      nvfx_scene_step(s, 1.0 / 60.0, nullptr);
+      nvfx_scene_fields sm{};
+      nvfx_scene_sample(s, 66.f, 70.f, &sm);
+      heat = std::max(heat, sm.heat);
+      nvfx_scene_sample_grid(s, NVFX_FIELD_HEAT, 10.f, 10.f, 20.f, 20.f, 8, 4, grid.data(), 8);
+      float mx = 0.f;
+      nvfx_scene_field_region(s, NVFX_FIELD_SOOT, 0.f, 0.f, 160.f, 80.f, &mx, nullptr);
+      nvfx_scene_set_input(s, "breeze_in", 0.01f * static_cast<float>(f % 50));
+      if (f % 20 == 0) nvfx_scene_trigger(s, "poke");
+      if (f == 30) nvfx_scene_module_place(s, "spare", 50.f, 80.f);
+      if (f == 31) nvfx_scene_module_set_control(s, "spare", "wind", 0.7f);
+      int count = 0;
+      nvfx_scene_rule_state(s, "poke", &count, nullptr);
+      nvfx_scene_module_info mi{};
+      nvfx_scene_module_get_info(s, "fire", &mi);
+      nvfx_scene_render(s, rgba.data(), static_cast<std::size_t>(info.width) * 4);
+    }
+    g_counting = false;
+    const long n = g_allocations.load();
+    int pokes = 0;
+    nvfx_scene_rule_state(s, "poke", &pokes, nullptr);
+    std::printf("scene API %dx%d%s: %ld allocations in %d steps at 60 Hz (%d frames; %d triggered rules fired; most heat %.2f)\n", info.width, info.height,
+                overlap ? ", overlapped" : "", n, 2 * info.frames - 1, nvfx_scene_frame(s), pokes, static_cast<double>(heat));
+    failures += n == 0 && pokes >= 4 ? 0 : 1;
+    nvfx_scene_free(s);
+  }
+  nvfx_effect_free(et);
+  nvfx_effect_free(eo);
+  return failures;
+}
+
 }  // namespace
 
 int main() {
@@ -296,6 +369,7 @@ int main() {
   c.c1 = 8;
   c.c2 = 8;
   int failures = run(g, 64, "grid") + run(g, 128, "grid") + run(c, 64, "conv") + run(c, 32, "conv") + run_rollout(64) + run_rollout(128) + run_compose() + run_script();
+  failures += run_scene_api();
   failures += run_rollout_prior(64) + run_rollout_prior(128);  // the prior against drift
   failures += run(g, 128, "grid", 8) + run(g, 128, "grid", 5) + run(g, 64, "grid", 4) + run(c, 64, "conv", 4);  // packed features
   failures += run(g, 128, "grid", 8, 6) + run(c, 64, "conv", 8, 8);  // vector-quantised features

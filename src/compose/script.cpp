@@ -7,7 +7,7 @@
 //   statement   := setting | declaration | emitter | rule | 'every' 'frame' ':' actions
 //   setting     := ('scene' | 'bus' | 'light' | 'particles' | 'frame' | 'camera') props | 'keyframes' expr {',' expr}
 //   declaration := 'effect' NAME '=' STRING props | 'look' NAME '=' ('shader' | 'like' NAME) props
-//                | 'let' NAME '=' expr | 'module' NAME '=' EFFECT props | 'field' NAME '=' KIND props
+//                | 'let' NAME '=' expr | 'input' NAME '=' expr | 'module' NAME '=' EFFECT props | 'field' NAME '=' KIND props
 //   emitter     := 'emit' ('sparks' | 'embers' | 'flakes') props
 //   rule        := ('at' expr ['s'] | 'when' condition) {modifier} ':' [action {';' action}]
 //   condition   := 'shock' expr 'reaches' (point | NAME) | ('ember' | 'debris') 'lands' ['where' expr] | expr
@@ -96,7 +96,7 @@ constexpr Schema kSchemas[] = {
     {"emit", kEmit},       {"transfer", kTransfer}, {"push", kPush},      {"suppress", kSuppress},   {"hand_over", kHandOver},
     {"start", kStart},     {"wake", kWake},       {"stop", kStop},        {"shock", kShock},         {"scorch", kScorch},
     {"burst", kBurst},     {"let", {}},           {"keyframes", {}},      {"every", {}},             {"at", {}},
-    {"when", {}}};
+    {"when", {}},          {"input", {}}};
 
 std::span<const Key> keys_of(std::string_view keyword) {
   for (const Schema& s : kSchemas)
@@ -112,7 +112,7 @@ const Key* find_key(std::span<const Key> keys, std::string_view k) {
 
 constexpr std::string_view kActions[] = {"transfer", "push", "suppress", "hand_over", "start", "wake", "stop", "shock", "scorch", "burst"};
 constexpr std::string_view kTop[] = {"scene", "bus", "light", "particles", "frame", "camera", "keyframes", "effect", "look",
-                                     "let", "module", "field", "emit", "every", "at", "when"};
+                                     "let", "input", "module", "field", "emit", "every", "at", "when"};
 constexpr std::string_view kFieldKinds[] = {"ceiling", "vortex", "wind", "gust", "ring", "attract", "heat", "cold"};
 constexpr std::string_view kEmitKinds[] = {"sparks", "embers", "flakes"};
 constexpr std::string_view kWords[] = {
@@ -722,6 +722,9 @@ Statement parse_statement(Parser& p, std::string_view source) {
   } else if (w == "let") {
     declared("value");
     s.args.push_back(p.expr());
+  } else if (w == "input") {
+    declared("input");
+    s.args.push_back(p.expr());
   } else if (w == "module") {
     declared("module");
     s.kind = p.name("the module's effect");
@@ -782,7 +785,7 @@ Statement parse_statement(Parser& p, std::string_view source) {
     p.fail(k.pos, std::format("'{}' is an action: put it in a rule (at ..., when ...) or under 'every frame:', indented", w));
   } else {
     const std::string hint = did_you_mean(w, strings(kTop));
-    p.fail(k.pos, hint.empty() ? std::format("unknown statement '{}' (expected scene, bus, light, particles, frame, camera, keyframes, effect, look, let, module, field, emit, every, at or when)", w)
+    p.fail(k.pos, hint.empty() ? std::format("unknown statement '{}' (expected scene, bus, light, particles, frame, camera, keyframes, effect, look, let, input, module, field, emit, every, at or when)", w)
                                : std::format("unknown statement '{}'{}", w, hint));
   }
   if (!p.done()) p.fail(p.pos(), std::format("unexpected {} at the end of the {} statement", p.found(), w));
@@ -935,7 +938,7 @@ std::string statement_text(const Statement& s) {
     o += std::format(" {} = \"{}\"", s.name, file) + props_text(s);
   } else if (w == "look") {
     o += std::format(" {} = {}", s.name, s.kind == "shader" ? std::string("shader") : "like " + s.kind) + props_text(s);
-  } else if (w == "let") {
+  } else if (w == "let" || w == "input") {
     o += std::format(" {} = {}", s.name, ex(s.args[0]));
   } else if (w == "module" || w == "field") {
     o += std::format(" {} = {}", s.name, s.kind) + props_text(s);

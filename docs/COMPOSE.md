@@ -1,9 +1,10 @@
 # Composed effects: modules on modules
 
-Status: **future feature, with a working prototype** (10 October 2026). Audience: dev, research, artists. The prototype
+Status: **future feature, with a working prototype** (11 October 2026). Audience: dev, research, artists. The prototype
 lives in `src/compose` (a library over the runtime's internals, with a script format and its runner) and two tools:
-`nvfx_fireball` (the fireball scene, written in C++) and `nvfx_scene_script` (plays scene scripts, §4). It is not part
-of the C API yet. Section 8 sketches what would make it a product feature.
+`nvfx_fireball` (the fireball scene, written in C++) and `nvfx_scene_script` (plays scene scripts, §4). Scene scripts
+are reachable from the C API (`include/neuralfx/nvfx_scene.h`, [ENGINES.md](ENGINES.md) §7) and from Godot 4
+(`engines/godot`, [ENGINES.md](ENGINES.md) §8). Section 8 says what else would make it a product feature.
 
 ## 1. The idea
 
@@ -138,6 +139,7 @@ points, hand-overs between tiles of the same size).
 | `effect NAME = "FILE"` | a rollout effect, loaded once | the detail layer's settings: `swirl`, `swirl_scale`, `swirl_rate`, `swirl_ramp`, `contrast`, `grow` |
 | `look NAME = shader` or `= like LOOK` | a field-shader look (§2) | `heat_scale`, `emission`, `emission_power`, `soot_density`, `soot_albedo`, `sky`, `shadow`, `scene_light`, `relief`, `tint (r, g, b)`: the fields of `ShaderSpec` |
 | `let NAME = EXPR` | a named value, computed where it is used (so it may change over time) | |
+| `input NAME = EXPR` | a value the game sets while the scene plays (`nvfx_scene_set_input`, [ENGINES.md](ENGINES.md) §7); EXPR, a constant, is its starting value | |
 | `module NAME = EFFECT` | a module (§4.3) | |
 | `field NAME = KIND` | a force field (§5) | per kind, and `on M, ..., particles`, `weight`, `if`, `from`, `until` |
 | `emit KIND` | particles every frame (§4.6) | |
@@ -187,6 +189,7 @@ Arithmetic in single-precision float, one operation at a time, as C++ computes i
 | `t`, `length`, `fps`, `ground` | the scene's time (s), length, frame rate and ground |
 | `infinity` | infinity |
 | a `let` | its expression |
+| an `input` | its value, as the game last set it (never a constant: it cannot size, tile or place tiles) |
 | a rule's name | when it last fired (infinity before: so `smooth((t - boom) / 1)` is 0 until `boom`) |
 | `M.x`, `M.y`, `M.started`, `M.age`, `M.active` | a module (§4.3) |
 | `x`, `temp` | in a rule `when ember lands`: where the ember landed and how hot it was |
@@ -203,7 +206,8 @@ Arithmetic in single-precision float, one operation at a time, as C++ computes i
 
 A rule runs its actions when its condition holds: **once** by default, **every time** with `repeat` (a time or field
 condition: every frame it holds; a landing: every landing), or **at most N times** with `at most N`. `as NAME` names it
-(its time is then a value).
+(its time is then a value). The game can also fire a rule by its name (`nvfx_scene_trigger`): at the start of the next
+frame, as if its condition held, if it has firings left; a rule only the game fires is written `when 0 as NAME:`.
 
 | condition | holds when |
 |---|---|
@@ -245,7 +249,7 @@ All take `from`, `until` and `if`.
 ### 4.7 The order of a frame
 
 Every frame runs in this order (`src/compose/script_run.cpp`):
-1. rules on time, shocks and fields, in script order; their actions run at once;
+1. rules on time, shocks and fields (and rules the game triggered), in script order; their actions run at once;
 2. emitters, in script order;
 3. settings that change over time: modules (controls, opacity, look, place), scorch marks, frame, light, camera;
 4. every active module steps (in parallel);
@@ -298,8 +302,8 @@ Getting every float the same forced a few things, all visible in the script:
 - The parser stops at the first error; `--print` drops comments (it is for round trips and checks, not for editing).
 - Seeds are whole numbers up to 16 777 216 (they pass through a float).
 - There is no live reload or viewer yet; `--check` is the quick loop.
-- Scripts and the runner are a prototype over the runtime's internals, like the rest of this page, not part of the C
-  API.
+- The game drives a scene through inputs, rule triggers and module moves and controls (the C API, [ENGINES.md](ENGINES.md)
+  §7); it cannot add modules, couplings or fields while the scene plays: those are the script's.
 
 ## 5. Field effects
 
@@ -679,10 +683,14 @@ comparisons.
   compositing still runs on every pixel at full resolution.
 
 What it needs to become a product feature:
-1. A C API: `nvfx_scene_create`, modules placed in it, `nvfx_scene_couple(...)`, `nvfx_scene_field(...)`, one
-   `nvfx_scene_step` and `nvfx_scene_render` per frame, and fields readable by the game (for gameplay: is this tile
-   on fire?).
-2. A viewer to edit scripts live (the format and its runner exist, §4), and scripts reachable from the C API.
+1. A C API: done for scenes from scripts (`include/neuralfx/nvfx_scene.h`, [ENGINES.md](ENGINES.md) §7):
+   `nvfx_scene_create` from a script and its effects, one `nvfx_scene_step` and `nvfx_scene_render` per frame (to the
+   bit the script runner's frames, allocating nothing), the fields readable by the game (a point, a grid for a tile map,
+   a region), and the game driving the scene with inputs, rule triggers and module moves and controls. Not done:
+   modules, couplings and fields added from C (`nvfx_scene_couple(...)`, `nvfx_scene_field(...)`); they are written in
+   the script. A Godot 4 plugin plays scenes and effects and is tested headless ([ENGINES.md](ENGINES.md) §8).
+2. A viewer to edit scripts live (the format and its runner exist, §4; `nvfx_scene_check` is the quick loop). Scripts
+   are reachable from the C API (done).
 3. Training with couplings in the loop: done for the explosion (§9); smoke and fire need another round.
 4. A cheaper compositor: the engine's own renderer doing the drawing (the fields can be uploaded as textures). The
    CPU compositor has had its SIMD and fewer passes (§7.3); distortion at half resolution did not pay.

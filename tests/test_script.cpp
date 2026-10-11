@@ -221,6 +221,59 @@ TEST(Script, OverlapGivesTheSameFrames) {
   EXPECT_EQ(three.rule_count("boom"), 1);
 }
 
+// Inputs (`input NAME = value`): values the game sets while the scene plays, read like t, never where a constant is
+// needed; a rule on an input fires when the game sets it.
+TEST(Script, InputsAreValuesTheGameSets) {
+  const Bad cases[] = {
+      {"input a = t", 1, 11, "an input's starting value must be a constant"},
+      {"input a = 1\nscene length a", 2, 14, "the scene's settings cannot depend on inputs"},
+      {"effect e = \"e\"\ninput a = 1\nmodule m = e, size 32, tiles 2 x 1, band 4, at (a, 0)", 3, 49, "cannot depend on time, rules, modules, inputs or rand"},
+      {"input a = 1\ninput a = 2", 2, 7, "'a' is already the name of an input (line 1)"},
+      {"input t = 1", 1, 7, "'t' is a word of the script language"},
+      {"input wind_in = 1\nlet b = wind_im + 1", 2, 9, "(did you mean 'wind_in'?)"},
+  };
+  for (const Bad& b : cases) {
+    try {
+      sc::validate(sc::parse(b.text, "t"));
+      ADD_FAILURE() << "no error for: " << b.text;
+    } catch (const sc::Error& e) {
+      EXPECT_EQ(e.pos.line, b.line) << b.text << "\n  " << e.what();
+      EXPECT_EQ(e.pos.col, b.col) << b.text << "\n  " << e.what();
+      EXPECT_NE(e.message.find(b.says), std::string::npos) << b.text << "\n  " << e.what();
+    }
+  }
+  EXPECT_EQ(sc::print(sc::parse("input wind_in = 0.5 * 2   # from the game\nlet w = wind_in + 1", "t")), "input wind_in = 0.5 * 2\nlet w = wind_in + 1\n");
+  constexpr const char* text = R"(
+scene size 160 x 90, fps 30, length 1, ground 80
+effect tiny = "tiny"
+input spot = 40
+input go = 0
+module fire = tiny, size 32, at (spot, ground), start 1, seed 5
+when go > 0 as lit:
+  shock at (80, 50)
+)";
+  sc::Scene scene(sc::parse(text, "t"), tiny_loader(), {1, Isa::base});
+  ASSERT_EQ(scene.inputs(), 2);
+  EXPECT_EQ(scene.input_name(1), "go");
+  EXPECT_EQ(scene.input_index("spot"), 0);
+  EXPECT_EQ(scene.input_index("nope"), -1);
+  EXPECT_EQ(scene.input(0), 40.f);
+  std::vector<std::uint8_t> rgb(160 * 90 * 3);
+  scene.render(0, rgb);
+  scene.render(1, rgb);
+  EXPECT_EQ(scene.rule_count("lit"), 0);
+  EXPECT_EQ(scene.module_info(0).x, 40.f);
+  scene.set_input(0, 100.f);
+  scene.set_input(1, 1.f);
+  scene.render(2, rgb);
+  EXPECT_EQ(scene.module_info(0).x, 100.f);
+  EXPECT_EQ(scene.rule_count("lit"), 1);
+  EXPECT_EQ(scene.rule_time("lit"), 2.f / 30.f);
+  sc::Scene started(sc::parse(text, "t"), tiny_loader(), {1, Isa::base, false, {{"spot", 70.f}}});
+  EXPECT_EQ(started.module_info(0).x, 70.f);
+  EXPECT_THROW(sc::Scene(sc::parse(text, "t"), tiny_loader(), {1, Isa::base, false, {{"spto", 70.f}}}), std::invalid_argument);
+}
+
 // --- the runner matches the same scene written in C++ ------------------------------------------------------------------
 
 constexpr const char* kMini = R"(

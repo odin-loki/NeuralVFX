@@ -1,0 +1,12 @@
+{
+	"enabled_classes": [
+		"Engine",
+		"FileAccess",
+		"Image",
+		"ImageTexture",
+		"Mutex",
+		"Node",
+		"OS",
+		"ProjectSettings"
+	]
+}

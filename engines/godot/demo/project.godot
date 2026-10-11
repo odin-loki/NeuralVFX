@@ -1,0 +1,20 @@
+; The NeuralVFX demo project (docs/ENGINES.md §8): the GDExtension in bin/ (built by engines/godot/test.sh, or by CMake
+; with NEURALFX_BUILD_GODOT=ON), the fireball scene script played full screen (main.tscn), and the headless test
+; (test.gd).
+
+config_version=5
+
+[application]
+
+config/name="NeuralVFX demo"
+run/main_scene="res://main.tscn"
+config/features=PackedStringArray("4.4")
+
+[display]
+
+window/size/viewport_width=1280
+window/size/viewport_height=720
+
+[rendering]
+
+renderer/rendering_method="gl_compatibility"
