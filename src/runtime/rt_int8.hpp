@@ -3,16 +3,19 @@
 // one differs from it in three ways:
 //   - the hidden layers (H -> H) multiply 8-bit activations by 8-bit weights and add in 32-bit integers. Weights have
 //     one scale per output unit (its largest |w| maps to 127), activations one scale per pixel (its largest unit maps
-//     to 255; they follow a ReLU, so none is negative). The sums are dequantised (the unit's scale times the pixel's,
-//     plus the bias) and go through the ReLU in float. The first and the output layer stay in float. One scale for
-//     all pixels lost 0.46 dB on study A's clips; one per pixel loses about 0.01 dB (docs/REPORT.md §7);
+//     to 255, or 127 on AVX2, below; they follow a ReLU, so none is negative). The sums are dequantised (the unit's
+//     scale times the pixel's, plus the bias) and go through the ReLU in float. The first and the output layer stay in
+//     float. One scale for all pixels lost 0.46 dB on study A's clips; one per pixel loses 0.008 dB, 0.018 dB at 7 bits
+//     (docs/REPORT.md §7);
 //   - the first layer is projected: it is linear in the features, which reach a pixel by bilinear interpolation, so it
 //     is evaluated once per grid point and frame (FiLM folded in) and its H outputs are interpolated instead of the C
 //     features. A pixel then pays H interpolations instead of C interpolations and C x H multiply-adds. Used when the
 //     frame has at least as many pixels across as the grid has points, on AVX2 and AVX-512 (the interpolation
 //     permutes a vector of grid values per vector of pixels); otherwise the first layer runs per pixel as in float;
-//   - the integer products: AVX-512 VNNI (vpdpbusd: four u8 x s8 products added per 32-bit lane) where the CPU has it,
-//     otherwise pairs of 16-bit values (pmaddwd: SSE2, AVX2, AVX-512BW). Both give the same 32-bit sums.
+//   - the integer products: AVX-512 VNNI (vpdpbusd: four u8 x s8 products added per 32-bit lane) where the CPU has it;
+//     on AVX2, pmaddubsw (pairs of products added in 16 bits) with activations of 7 bits (0 to 127, so that no pair
+//     saturates; 0.01 dB more lost on study A's clips, 10% faster than pairs of 16-bit values); elsewhere (SSE2,
+//     AVX-512 without VNNI) pairs of 16-bit values (pmaddwd), which give VNNI's sums.
 // Every buffer is allocated in the constructor; render() allocates nothing.
 
 typedef std::int32_t qi __attribute__((vector_size(kW * 4)));
@@ -22,8 +25,8 @@ inline qi load_q(const std::int32_t* p) { return *reinterpret_cast<const qiu*>(p
 inline void store_q(std::int32_t* p, qi v) { *reinterpret_cast<qiu*>(p) = v; }
 
 // One hidden layer in 8 bits: the weights of output unit o in words [o * words, (o + 1) * words), four 8-bit weights
-// per word (quads, for VNNI) or two 16-bit ones (pairs, for pmaddwd), input i in byte or half i % 4 (i % 2) of word
-// i / 4 (i / 2); the scale of each output unit and its bias.
+// per word (quads, for VNNI and pmaddubsw) or two 16-bit ones (pairs, for pmaddwd), input i in byte or half i % 4
+// (i % 2) of word i / 4 (i / 2); the scale of each output unit and its bias.
 struct QLayer {
   int in = 0, out = 0, words = 0;
   std::vector<std::uint32_t> w;
@@ -92,13 +95,14 @@ inline void block_max(const float* h, int n, float* mx) {
 // The ReLU outputs of a block of kB pixels, h [n][kB] (none negative; mx [kB] the largest per pixel), to 8 bits with one
 // scale per pixel: act [words][kB] (four values per 32-bit lane for quads, two 16-bit ones otherwise) and the scales
 // sa [kB] (the pixel's largest value / 255; 0 for a pixel whose values are all 0).
-template <int Per>
+template <int Per, int Levels>
 inline void quantise_block_(const float* h, int n, const float* mxp, std::int32_t* act, float* sa) {
   const int whole = n / Per;
+  constexpr float L = static_cast<float>(Levels);
   for (int v = 0; v < kV; ++v) {
     const vf mx = load(mxp + v * kW);
-    const vf inv = mx > 0.f ? 255.f / mx : vf{};
-    store(sa + v * kW, mx * (1.f / 255.f));
+    const vf inv = mx > 0.f ? L / mx : vf{};
+    store(sa + v * kW, mx * (1.f / L));
     const auto q = [&](int c) { return __builtin_convertvector(load(h + c * kB + v * kW) * inv + 0.5f, qi); };  // round (>= 0)
     for (int wd = 0; wd < whole; ++wd) {
       qi word = q(wd * Per);
@@ -112,20 +116,27 @@ inline void quantise_block_(const float* h, int n, const float* mxp, std::int32_
     }
   }
 }
-inline void quantise_block(const float* h, int n, const float* mxp, bool quads, std::int32_t* act, float* sa) {
-  if (quads) quantise_block_<4>(h, n, mxp, act, sa);
-  else quantise_block_<2>(h, n, mxp, act, sa);
+// Words of four 8-bit values (VNNI: 0 to 255; AVX2's pmaddubsw: 0 to 127, so that two products and their sum fit in
+// 16 bits) or of two 16-bit ones (pmaddwd: 0 to 255).
+enum class Pack { quads255, quads127, pairs255 };
+inline void quantise_block(const float* h, int n, const float* mxp, Pack pack, std::int32_t* act, float* sa) {
+  if (pack == Pack::quads255) quantise_block_<4, 255>(h, n, mxp, act, sa);
+  else if (pack == Pack::quads127) quantise_block_<4, 127>(h, n, mxp, act, sa);
+  else quantise_block_<2, 255>(h, n, mxp, act, sa);
 }
 
-// The integer layer, compiled twice: with pmaddwd (pairs of 16-bit values: SSE2, AVX2, AVX-512BW) and, in the AVX-512
-// build, with VNNI switched on for it alone (vpdpbusd: four u8 x s8 products per 32-bit lane), which the renderer uses
-// only where the CPU has it. Both give the same 32-bit sums.
+// The integer layer, compiled twice: with this build's own instructions (pmaddubsw on AVX2, pmaddwd on SSE2 and
+// AVX-512BW) and, in the AVX-512 build, with VNNI switched on for it alone (vpdpbusd: four u8 x s8 products per 32-bit
+// lane), which the renderer uses only where the CPU has it.
 namespace qmadd {
 [[gnu::always_inline]] inline qi qdot(qi acc, qi a, std::uint32_t w) {
 #if NFX_VW == 16 && defined(__AVX512BW__)
   return acc + reinterpret_cast<qi>(_mm512_madd_epi16(reinterpret_cast<__m512i>(a), _mm512_set1_epi32(static_cast<int>(w))));
 #elif NFX_VW == 8 && defined(__AVX2__)
-  return acc + reinterpret_cast<qi>(_mm256_madd_epi16(reinterpret_cast<__m256i>(a), _mm256_set1_epi32(static_cast<int>(w))));
+  // quads of 7-bit activations (Pack::quads127) times 8-bit weights: pairs of products added in 16 bits without
+  // saturating (2 x 127 x 127 < 32768), then the two pairs in 32 bits
+  const __m256i p = _mm256_maddubs_epi16(reinterpret_cast<__m256i>(a), _mm256_set1_epi32(static_cast<int>(w)));
+  return acc + reinterpret_cast<qi>(_mm256_madd_epi16(p, _mm256_set1_epi16(1)));
 #elif NFX_VW == 4 && defined(__SSE2__)
   return acc + reinterpret_cast<qi>(_mm_madd_epi16(reinterpret_cast<__m128i>(a), _mm_set1_epi32(static_cast<int>(w))));
 #else
@@ -240,7 +251,8 @@ class GridRendererQ final : public Renderer {
       __builtin_cpu_init();
       vnni_ = __builtin_cpu_supports("avx512vnni");
     }
-    for (std::size_t l = 1; l + 1 < m_.layers.size(); ++l) ql_.push_back(quantise_layer(m_.layers[l], vnni_));
+    pack_ = vnni_ ? Pack::quads255 : kW == 8 ? Pack::quads127 : Pack::pairs255;
+    for (std::size_t l = 1; l + 1 < m_.layers.size(); ++l) ql_.push_back(quantise_layer(m_.layers[l], pack_ != Pack::pairs255));
     if (!ql_.empty()) fold_head(ql_.back(), m_.layers.back());
     w_.resize(static_cast<std::size_t>(h.bases));
     film_.resize(static_cast<std::size_t>(2 * H));
@@ -349,7 +361,7 @@ class GridRendererQ final : public Renderer {
         for (std::size_t l = 0; l < ql_.size(); ++l) {
           const QLayer& L = ql_[l];
           if (l > 0) block_max(src, L.in, mx_.data());
-          quantise_block(src, L.in, mx_.data(), vnni_, act_.data(), sa_.data());
+          quantise_block(src, L.in, mx_.data(), pack_, act_.data(), sa_.data());
           if (l + 1 < ql_.size()) {
             if (vnni_) qvnni::qlayer<false>(L, act_.data(), sa_.data(), dst);
             else qmadd::qlayer<false>(L, act_.data(), sa_.data(), dst);
@@ -437,6 +449,7 @@ class GridRendererQ final : public Renderer {
   const Model& m_;
   int S_, Gp_ = 0;
   bool vnni_ = false, proj_ = false;
+  Pack pack_ = Pack::pairs255;
   std::vector<QLayer> ql_;
   std::vector<float> w_, film_, slice_, proj_grid_, rowg_, rowd_, rowf_, fx_, buf_a_, buf_b_, sa_, mx_, head_wt_;
   std::vector<int> x0_, base_;

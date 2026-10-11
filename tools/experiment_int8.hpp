@@ -13,10 +13,11 @@ struct Ctx {
   int core = 3;                   // timing: the core the thread is pinned to
 };
 
-// Every frame of every model of studies A, B and C that has a target, through the runtime at float and at int8:
-// active PSNR, PSNR and SSIM against the clips, the largest and mean pixel difference between the two, and whether the
-// int8 frames are the same on every ISA. Paired bootstrap of the change; the rule for the default (results/experiments/
-// int8_summary.csv): A's 12 clips, mean change within -0.05 dB and its interval not entirely below that.
+// Every frame of every model of studies A, B and C that has a target, through the runtime at float and at int8 (the
+// runtime's choice of ISA, and AVX2 forced: 7-bit activations): active PSNR, PSNR and SSIM against the clips, the
+// largest and mean pixel difference to float, and how far the int8 frames of the ISAs differ. Paired bootstrap of the
+// change; the rule for the default (results/experiments/int8_summary.csv): A's 12 clips, mean change within -0.05 dB
+// and its interval not entirely below that.
 void step_quality(const Ctx& c);
 // ms per frame, thread CPU time on one pinned core, the least of `runs` runs' medians (200 frames, the first 20 left
 // out), float and int8, per ISA and size, for the fire models of studies A to C. Wall-clock medians beside them.

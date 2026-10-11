@@ -54,10 +54,11 @@ Plan and decisions: [PLAN.md](PLAN.md).
   These are from a later session of the same cloud VM type, in which unchanged code ran 1.2 to 1.4 times faster than
   in the first; the first session's figures were 0.38 to 1.1 ms, with only the small grid model under 0.5 ms.
 - **int8 (since 11 October 2026; timings provisional, from a busy machine).** The grid models now run their hidden
-  layers in 8-bit integers, with the first layer evaluated per grid point and interpolated, by default. Where the CPU
-  has AVX-512 VNNI, grid_m, grid_l, grid_mt and the B and C models take 0.43 to 0.50 ms per 128 x 128 frame, against
-  0.74 to 0.78 ms for the float network measured alongside; with AVX2 alone 0.52 to 0.59 ms. Study A's 12 clips lose
-  **−0.008 [−0.015, −0.001] dB** of active PSNR, within the −0.05 dB set for a default (§7).
+  layers in 8-bit integers, with the first layer evaluated per grid point and interpolated, by default. grid_m,
+  grid_mt and the B and C models take 0.41 to 0.48 ms per 128 x 128 frame (grid_l 0.51 ms), with AVX-512 VNNI or with
+  AVX2 alone, against 0.75 to 0.78 ms for the float network measured alongside. Study A's 12 clips lose
+  **−0.008 [−0.015, −0.001] dB** of active PSNR with VNNI and −0.018 [−0.031, −0.008] dB with AVX2, both within the
+  −0.05 dB set for a default (§7).
 - **The plan's continuation rule is met** (PLAN.md §7: beat the flipbook of equal memory on held-out data, interval above
   zero, within 1 ms per 128² frame): on held-out settings (study B, against a 45 times larger flipbook library) and on
   held-out frames against a BC3 flipbook with four times the memory (study A; motion-vector flipbooks still win
@@ -542,9 +543,8 @@ effects (D) after the runtime's rollout code was optimised; the first session's 
 - **The 0.5 ms budget is met by grid_s (0.25 ms) and conv_s (0.43 ms).** In the first session only grid_s met it
   (conv_s 0.57 ms). grid_m takes 0.78 ms (0.33 ms at 64 px). conv_s costs about the same at every size: its level of
   detail renders the native frame and filters it down, so distant copies save nothing. With int8 (below, now the
-  default) grid_m, grid_l, grid_mt and the B and C models meet it too where the CPU has AVX-512 VNNI (0.43 to 0.50 ms,
-  provisional), not with AVX2 alone (0.52 to 0.59 ms).
-- AVX-512 is slower than AVX2 on this machine for the float network (grid_m 1.41 against 0.78 ms; 0.93 ms since a
+  default) grid_m, grid_mt and the B and C models meet it too (0.41 to 0.48 ms, provisional), grid_l nearly (0.51 ms).
+- AVX-512 is slower than AVX2 on this machine for the float network (grid_m 1.41 against 0.78 ms; 0.92 ms since a
   broadcast in the shared kernels compiles to one instruction, provisional, below); the baseline SSE2 build is 1.8 to
   2.7 times slower. The default is AVX2, and the AVX-512 build for int8 where the CPU has VNNI.
 - The networks are 8 to 37 times cheaper per frame than running the simulation, and 35 to 125 times more expensive
@@ -562,9 +562,10 @@ one pinned core of a machine shared with other jobs, the least of five runs' med
 `int8_summary.csv`. The code is `src/runtime/rt_int8.hpp`.
 - **The hidden layers** (32 to 32 units in grid_m) multiply 8-bit activations by 8-bit weights and add in 32-bit
   integers. Weights have one scale per unit, activations one per pixel (its largest unit maps to 255; they follow a
-  ReLU). With AVX-512 VNNI one instruction does 64 multiply-adds; with AVX2 alone, pairs of 16-bit products
-  (`pmaddwd`) give the same sums at a quarter of the rate. The first and output layers stay in float; the last hidden
-  layer feeds the output layer directly.
+  ReLU). With AVX-512 VNNI one instruction does 64 multiply-adds. With AVX2 alone, `pmaddubsw` adds pairs of products
+  in 16 bits, so the activations get 7 bits (0 to 127) to keep a pair from saturating; this was 10% faster than exact
+  pairs of 16-bit products (`pmaddwd`, which the SSE2 build and AVX-512 without VNNI use) for 0.01 dB. The first and
+  output layers stay in float; the last hidden layer feeds the output layer directly.
 - **The first layer is projected.** It is linear in the features, which reach a pixel by bilinear interpolation, so it
   is evaluated at the grid points once per frame (FiLM folded in) and its 32 outputs are interpolated instead of the 8
   features: 256 multiply-adds per pixel fewer, for 24 more interpolations done with a vector permute. Used where the
@@ -574,32 +575,37 @@ one pinned core of a machine shared with other jobs, the least of five runs' med
   a hidden layer take the AVX-512 build where the CPU has VNNI. The studies' tables stay those of the float network
   (`nvfx_experiment` scores at float; its `int8` step measures the difference).
 
-| model, 128 px | float, AVX2 | int8, AVX2 | int8, AVX-512 VNNI | active PSNR change, int8 - float |
-|---|---:|---:|---:|---|
-| grid_s (no hidden layer: the projection alone) | 0.249 | **0.090** | 0.114 | 0.000 (3 clips) |
-| grid_m | 0.760 | 0.528 | **0.459** | **−0.008 [−0.015, −0.001]** (A, 12 clips) |
-| grid_l | 0.783 | 0.594 | **0.497** | −0.017 [−0.034, −0.004] (3 clips) |
-| grid_mt | 0.770 | 0.524 | **0.430** | −0.005 [−0.007, −0.002] (3 clips) |
-| control model k8 (B) | 0.737 | 0.522 | **0.456** | −0.004 [−0.013, +0.005] (30 held-out settings, a tie) |
-| variation model k8 (C) | 0.771 | 0.534 | **0.455** | −0.027 [−0.033, −0.022] (72 training seeds replayed) |
+ms per frame, and the change in active PSNR, int8 minus float (paired over the clips, 95% intervals):
+
+| model, 128 px | float, AVX2 | int8, AVX2 | int8, AVX-512 VNNI | change, VNNI | change, AVX2 |
+|---|---:|---:|---:|---|---|
+| grid_s (no hidden layer: the projection alone) | 0.252 | **0.091** | 0.117 | 0.000 (3 clips) | 0.000 |
+| grid_m | 0.751 | **0.468** | **0.463** | **−0.008 [−0.015, −0.001]** (A, 12 clips) | −0.018 [−0.031, −0.008] |
+| grid_l | 0.747 | 0.511 | 0.509 | −0.017 [−0.034, −0.004] (3 clips) | −0.036 [−0.069, −0.013] |
+| grid_mt | 0.779 | **0.468** | **0.414** | −0.005 [−0.007, −0.002] (3 clips) | −0.015 [−0.019, −0.010] |
+| control model k8 (B) | 0.776 | **0.476** | **0.453** | −0.004 [−0.013, +0.005] (30 held-out settings) | −0.004 [−0.013, +0.005] |
+| variation model k8 (C) | 0.753 | **0.481** | **0.457** | −0.027 [−0.033, −0.022] (72 training seeds) | −0.031 [−0.037, −0.025] |
 
 - **Quality.** The rule, set before measuring: int8 becomes the default if study A's mean change in active PSNR is
-  within −0.05 dB with an interval not entirely below that. grid_m on the 12 clips: 32.619 to 32.611 dB, **−0.008
-  [−0.015, −0.001]**: met. Elsewhere: B's k16 +0.005 [−0.007, +0.014], C's k24 −0.028 [−0.034, −0.022], study A's
-  grid_m at fp16 features −0.005 [−0.012, −0.001]. No channel of study A's frames moves by more than 6 levels of 255
-  (0.05 on average); on B and C up to 16 (0.11 to 0.15 on average). The int8 frames of the three ISAs agree within 1
-  to 3 levels (their float parts round differently).
+  within −0.05 dB with an interval not entirely below that. grid_m on the 12 clips: 32.619 to 32.611 dB with VNNI,
+  **−0.008 [−0.015, −0.001]**, and 32.602 dB with AVX2, −0.018 [−0.031, −0.008]: met either way. B's control models
+  tie (k16: +0.005 [−0.007, +0.014]); C's variation models lose 0.03 dB with intervals below zero (k24: −0.028
+  [−0.034, −0.022] with VNNI). No channel of study A's frames moves by more than 6 levels of 255 with VNNI and 10 with
+  AVX2 (0.05 and 0.06 on average); on B and C up to 16 and 20 (0.11 to 0.16 on average). The int8 frames of the ISAs
+  differ by up to 9 levels on A and 22 on B and C, mostly AVX2's 7-bit activations against VNNI's 8 bits.
 - **One scale per pixel is what makes 8 bits enough.** In a scalar simulation on the same 12 clips (outside the
   repository), one activation scale for the whole clip lost 0.46 dB (at 7 bits); per pixel, 7-bit activations lost
   0.018 dB and 8-bit 0.008 dB, and 7-bit weights 0.03 dB; quantising the output layer too cost 0.02 dB more.
-- **Cost.** With VNNI the better models meet 0.5 ms (grid_l just). With AVX2 alone they do not: the integer layer is
-  half of the time there. At 64 px the gain is smaller (grid_m 0.20 to 0.14 ms; grid_l 0.20 to 0.18: the projection's
-  per-frame work over 48 x 48 points weighs more), at 256 px larger (grid_m 2.99 to 1.63 ms). The baseline SSE2 build
-  takes 1.44 ms against 2.04 ms in float. An int8 instance holds the projected grid: 0.18 MB for grid_m and 0.38 MB for
-  grid_l, against 0.04 and 0.08 MB in float.
+- **Cost.** The better models meet 0.5 ms except grid_l (0.51 ms: with its 48 x 48 grid the rows blended per frame
+  row are half as long again and the projection costs twice as much). The integer layer is still the largest part,
+  about half of the time.
+  At 64 px the gain is smaller (grid_m 0.20 to 0.13 ms; grid_l 0.19 to 0.18: the projection's work per frame weighs
+  more), at 256 px larger (grid_m 3.01 to 1.63 ms). The baseline SSE2 build takes 1.44 ms against 2.06 ms in float. An
+  int8 instance holds the projected grid: 0.18 MB for grid_m and 0.38 MB for grid_l, against 0.04 and 0.08 MB in
+  float.
 - **AVX-512 float, found on the way:** the shared kernels' broadcast of a weight (`splat`) filled a 512-bit vector
   through the stack (four 128-bit stores, then a load: a store-forwarding stall per tile of outputs). It now compiles to
-  one broadcast: the AVX-512 build's float grid_m went from 1.41 to 0.93 ms, with the same values. AVX2 is still faster.
+  one broadcast: the AVX-512 build's float grid_m went from 1.41 to 0.92 ms, with the same values. AVX2 is still faster.
 - To re-time on a quiet machine: `build/nvfx_experiment int8-timing --runs 5 --core 3` (two minutes; float and int8
   per ISA at 64, 128 and 256 px), and `build/nvfx_experiment int8` for the quality (eight minutes on one core).
 
@@ -652,11 +658,11 @@ Against traditional methods:
    which say whether it looks like the effect, not whether it matches a given run; they can miss artefacts that a
    person would see.
 4. **Variations are morphs of the training seeds**, softer than real ones, not new turbulence.
-5. **The better models meet the 0.5 ms target only with int8 and AVX-512 VNNI** (grid_m 0.46 ms, grid_l 0.50 ms;
-   provisional, measured on a busy machine). With AVX2 alone the int8 path takes 0.52 to 0.59 ms: its integer layer
-   uses pairs of 16-bit products (AVX-VNNI, on newer CPUs without AVX-512, is not used: none was at hand to test). The
-   float network takes 0.78 ms (1.06 ms in the first session). The conv family has no int8 path, and its level of
-   detail saves no time.
+5. **The better models meet the 0.5 ms target only at int8**, the default since 11 October 2026 (grid_m 0.46 to
+   0.47 ms with AVX-512 VNNI or AVX2, grid_l 0.51 ms; provisional, measured on a busy machine), for 0.01 to 0.04 dB of
+   active PSNR. The float network takes 0.78 ms (1.06 ms in the first session). AVX-VNNI, on newer CPUs without
+   AVX-512, is not used (none was at hand to test). The conv family has no int8 path, and its level of detail saves no
+   time.
 6. **One cloud VM.** Timings carry VM jitter (90th percentiles usually 4-10% above the medians, up to 70% in a few cells; scene p99 three times the mean), and the same code ran 1.2 to 1.4 times faster in a later session than in the first (§7).
 7. **Small samples.** 12 clips (A) and 30 settings (B) from one simulator; intervals are over those, not over the
    variety of effects a game has.
@@ -678,8 +684,8 @@ Against traditional methods:
   updated at 30 Hz, and 2.4 MB of working memory each. Keep the number of copies small, and use the frame models or
   flipbooks for the rest.
 - For a game today: use **grid_s** (73 KB, 0.25 ms; 0.09 ms with the int8 path's projected first layer) where memory
-  matters most and some softness is acceptable, or **grid_m** (132 KB, 0.78 ms at 128 px in float, 0.46 ms at int8
-  with VNNI, provisional) when quality matters, evaluated at 20-30 Hz and shared between instances; keep motion-vector
+  matters most and some softness is acceptable, or **grid_m** (132 KB, 0.78 ms at 128 px in float, about 0.47 ms at
+  int8, provisional) when quality matters, evaluated at 20-30 Hz and shared between instances; keep motion-vector
   flipbooks where per-frame cost must be near zero.
 - Train one model per effect *and* setting for hero effects (study A quality); use one controllable model per effect
   (study B) where artists need sliders, accepting softer detail.

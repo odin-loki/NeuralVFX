@@ -205,16 +205,16 @@ TEST(Runtime, VectorQuantisedFeaturesMatchTheReference) {
 }
 
 // The int8 path (nvfx_instance_set_precision; src/runtime/rt_int8.hpp) is not the float network: the hidden layers'
-// activations and weights are rounded to 8 bits. It is held to the float reference within a stated tolerance on
-// models whose every weight is non-trivial (larger outputs than trained models, so larger errors): no channel more
-// than kInt8Max levels of 255 away, and on average less than kInt8Mean levels (worst case here: two hidden layers, 5
-// and 0.37; one hidden layer, as every trained grid model has, stays within 4 and 0.25). Shapes: hidden widths that
-// are not a multiple of 4 (the VNNI words are padded), one and two hidden layers and none, the first layer projected
-// (frame at least as wide as the grid) or per pixel (narrower), 16- and 8-bit features. On study A's trained models
-// the int8 path is within 6 levels of the float path and 0.05 levels on average; on B's and C's, within 16 and 0.15
-// (results/experiments/int8_summary.csv).
-constexpr int kInt8Max = 6;
-constexpr double kInt8Mean = 0.4;
+// activations and weights are rounded to 8 bits (activations to 7 with AVX2's pmaddubsw). It is held to the float
+// reference within a stated tolerance on models whose every weight is non-trivial (larger outputs than trained models,
+// so larger errors): no channel more than kInt8Max levels of 255 away, and on average less than kInt8Mean levels. The
+// worst case here is two hidden layers with AVX2's 7-bit activations (8 levels, 0.51 on average); with one hidden
+// layer, as every trained grid model has, the mean stays below 0.3. Shapes: hidden widths that are not a multiple of 4
+// (the words are padded), one and two hidden layers and none, the first layer projected (frame at least as wide as the
+// grid) or per pixel (narrower), 16- and 8-bit features. On the trained models of studies A to C the measured changes
+// are in results/experiments/int8_summary.csv.
+constexpr int kInt8Max = 8;
+constexpr double kInt8Mean = 0.6;
 
 TEST(Runtime, Int8StaysWithinItsToleranceOfTheFloatReferenceOnEveryIsa) {
   const float controls[3] = {0.8f, 0.1f, 0.6f};

@@ -91,11 +91,12 @@ NVFX_API nvfx_status nvfx_instance_set_colour(nvfx_instance* instance, float hue
  * and interpolated; AVX-512 VNNI where the CPU has it (with no ISA forced, int8 instances of models with a hidden
  * layer then use the AVX-512 build).
  * FLOAT: the float network (the reference). DEFAULT is INT8 for the grid family: on study A's 12 clips it changes
- * active PSNR by -0.008 dB [-0.015, -0.001] (within the -0.05 dB allowed for a default), no pixel channel by more than
- * 6 levels of 255 (0.05 on average; up to 16 on studies B and C), and costs 0.43 to 0.50 ms instead of 0.74 to
- * 0.78 ms per 128 x 128 frame for the larger models with VNNI (provisional). The conv family and rollout effects are
- * float either way (INT8 returns NVFX_ERROR_UNSUPPORTED for them). A set-up call: a change allocates the instance's new
- * buffers (at INT8 an instance holds the first layer at every grid point: 0.2 to 0.4 MB). */
+ * active PSNR by -0.008 dB [-0.015, -0.001] with VNNI and -0.018 dB [-0.031, -0.008] with AVX2 (whose activations get
+ * 7 bits), within the -0.05 dB allowed for a default; no pixel channel moves by more than 6 to 10 levels of 255 there
+ * (up to 20 on studies B and C). It costs 0.41 to 0.51 ms instead of 0.75 to 0.78 ms per 128 x 128 frame for the
+ * larger models (provisional). The conv family and rollout effects are float either way (INT8 returns
+ * NVFX_ERROR_UNSUPPORTED for them). A set-up call: a change allocates the instance's new buffers (at INT8 an instance
+ * holds the first layer at every grid point: 0.2 to 0.4 MB). */
 typedef enum nvfx_precision { NVFX_PRECISION_DEFAULT = 0, NVFX_PRECISION_FLOAT = 1, NVFX_PRECISION_INT8 = 2 } nvfx_precision;
 NVFX_API nvfx_status nvfx_instance_set_precision(nvfx_instance* instance, nvfx_precision precision);
 

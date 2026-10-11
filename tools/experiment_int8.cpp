@@ -155,8 +155,10 @@ void step_quality(const Ctx& c) {
   fs::create_directories(c.results);
   const fs::path out = c.results / "int8_quality.csv";
   std::ofstream csv(out);
+  // int8: the runtime's choice (AVX-512 VNNI where the CPU has it, 8-bit activations); int8_avx2: AVX2 forced (7-bit
+  // activations, pmaddubsw), what a CPU without AVX-512 gets
   csv << "study,model,clip,float_active_psnr,int8_active_psnr,change_db,float_psnr,int8_psnr,float_ssim,int8_ssim,max_diff,mean_abs_diff,"
-         "int8_max_diff_across_isas\n";
+         "int8_avx2_active_psnr,change_avx2_db,max_diff_avx2,mean_abs_diff_avx2,int8_max_diff_across_isas\n";
   struct Pair {
     std::vector<double> f, q;
     int max_diff = 0, isa_diff = 0;
@@ -173,6 +175,7 @@ void step_quality(const Ctx& c) {
   for (const nvfx_isa i : {NVFX_ISA_BASELINE, NVFX_ISA_AVX2, NVFX_ISA_AVX512})
     if (nvfx_set_isa(i) == NVFX_OK) isas.push_back(i);
   nvfx_set_isa(NVFX_ISA_AUTO);
+  const bool avx2 = std::ranges::find(isas, NVFX_ISA_AVX2) != isas.end();
   const auto all = cases(c.data);
   if (all.empty()) throw std::runtime_error("no models under " + (c.data / "models").string());
   std::string last;
@@ -186,19 +189,26 @@ void step_quality(const Ctx& c) {
     }
     const Clip fl = render(e.get(), {NVFX_PRECISION_FLOAT, NVFX_ISA_AUTO}, k.controls, k.variation, 0);
     const Clip q8 = render(e.get(), {NVFX_PRECISION_INT8, NVFX_ISA_AUTO}, k.controls, k.variation, 0);
+    const Clip q2 = avx2 ? render(e.get(), {NVFX_PRECISION_INT8, NVFX_ISA_AVX2}, k.controls, k.variation, 0) : q8;
     int across = 0;
     for (const nvfx_isa i : isas) across = std::max(across, diff(q8, render(e.get(), {NVFX_PRECISION_INT8, i}, k.controls, k.variation, 0)).max);
     const auto sf = metrics::score(*ref, fl), sq = metrics::score(*ref, q8);
-    const Diff d = diff(fl, q8);
-    csv << std::format("{},{},{},{:.4f},{:.4f},{:+.4f},{:.4f},{:.4f},{:.5f},{:.5f},{},{:.4f},{}\n", k.study, k.model, k.clip, sf.active_psnr, sq.active_psnr,
-                       sq.active_psnr - sf.active_psnr, sf.psnr, sq.psnr, sf.ssim, sq.ssim, d.max, d.mean, across);
+    const double a2 = metrics::active_psnr(*ref, q2);
+    const Diff d = diff(fl, q8), d2 = diff(fl, q2);
+    csv << std::format("{},{},{},{:.4f},{:.4f},{:+.4f},{:.4f},{:.4f},{:.5f},{:.5f},{},{:.4f},{:.4f},{:+.4f},{},{:.4f},{}\n", k.study, k.model, k.clip,
+                       sf.active_psnr, sq.active_psnr, sq.active_psnr - sf.active_psnr, sf.psnr, sq.psnr, sf.ssim, sq.ssim, d.max, d.mean, a2,
+                       a2 - sf.active_psnr, d2.max, d2.mean, across);
     csv.flush();
-    Pair& p = set(k.study + ":" + k.model);
-    p.f.push_back(sf.active_psnr);
-    p.q.push_back(sq.active_psnr);
-    p.max_diff = std::max(p.max_diff, d.max);
-    p.isa_diff = std::max(p.isa_diff, across);
-    p.mean_diff += d.mean;
+    const auto add = [&](const std::string& name, double q, const Diff& dd) {
+      Pair& p = set(name);
+      p.f.push_back(sf.active_psnr);
+      p.q.push_back(q);
+      p.max_diff = std::max(p.max_diff, dd.max);
+      p.isa_diff = std::max(p.isa_diff, across);
+      p.mean_diff += dd.mean;
+    };
+    add(k.study + ":" + k.model, sq.active_psnr, d);
+    if (avx2) add(k.study + ":" + k.model + " avx2", a2, d2);
   }
   std::ofstream sum(c.results / "int8_summary.csv");
   sum << "set,clips,float_active_psnr,int8_active_psnr,change_db,lo,hi,max_diff,mean_abs_diff,int8_max_diff_across_isas,rule\n";
@@ -210,8 +220,9 @@ void step_quality(const Ctx& c) {
       mq += p.q[i];
     }
     const double n = static_cast<double>(p.f.size());
-    // the rule (A's grid_m only): mean change within -0.05 dB and the interval not entirely below it
-    const std::string rule = name == "a:grid_m8" ? (iv.mean >= -0.05 && iv.hi >= -0.05 ? "met: int8 is the default" : "not met: int8 is opt-in") : "";
+    // the rule (A's grid_m only, at the runtime's choice and with AVX2 forced): mean change within -0.05 dB and the
+    // interval not entirely below it
+    const std::string rule = name.starts_with("a:grid_m8") ? (iv.mean >= -0.05 && iv.hi >= -0.05 ? "met: int8 can be the default" : "not met: int8 opt-in") : "";
     sum << std::format("{},{},{:.4f},{:.4f},{:+.4f},{:+.4f},{:+.4f},{},{:.4f},{},{}\n", name, p.f.size(), mf / n, mq / n, iv.mean, iv.lo, iv.hi, p.max_diff,
                        p.mean_diff / n, p.isa_diff, rule);
     std::println("{:18} {:3} clips: active PSNR {:.3f} -> {:.3f} dB, change {:+.4f} [{:+.4f}, {:+.4f}], max diff {}, mean {:.4f}, ISAs agree to {} {}", name,

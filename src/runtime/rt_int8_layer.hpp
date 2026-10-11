@@ -1,6 +1,7 @@
 // One hidden layer of rt_int8.hpp's renderer at int8, for one block of kB pixels. Included twice by rt_int8.hpp, into
-// namespace NFX_QNS, each time after a qdot() of its own: pmaddwd (namespace qmadd) and, in the AVX-512 build with VNNI
-// switched on for these functions alone, vpdpbusd (namespace qvnni). No include guard on purpose.
+// namespace NFX_QNS, each time after a qdot() of its own: the build's own instructions (namespace qmadd: pmaddubsw on
+// AVX2, pmaddwd elsewhere) and, in the AVX-512 build with VNNI switched on for these functions alone, vpdpbusd
+// (namespace qvnni). No include guard on purpose.
 #if !defined(NFX_QNS)
 #error "define NFX_QNS (and a qdot() in it) before including rt_int8_layer.hpp"
 #endif
