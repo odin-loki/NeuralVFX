@@ -15,6 +15,8 @@ struct Ctx {
   bool quick = false;
   std::string effects;  // comma-separated effects ("fire,smoke", or later ones: "steam,magic"); empty = study D's three
   std::filesystem::path figures = "docs/figures";  // d-eval's comparison sheets
+  bool stages12 = false;  // d-train: stepper stages 1 and 2 only, as study D's models were first trained (then d-tune,
+                          // d-finish), so each step's result is saved
   int iters(int full) const { return quick ? std::max(50, full / 20) : full; }
 };
 

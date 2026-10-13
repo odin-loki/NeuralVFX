@@ -216,9 +216,10 @@ void step_train(const Ctx& c) {
     const double sim_seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
     rollout::Model m = rollout::recipe_model(r);
     rollout::StepperOptions so = r.stepper;
+    if (c.stages12) so.activity_stage = 0;  // stage 3 by d-tune, the rest by d-finish (each step saves the model)
     so.progress = [&](int it, int unroll, double loss) { std::println("  {} stepper {:5d} unroll {:2d} loss {:.5f}", m.effect, it, unroll, loss); };
     const rollout::StepperResult sr = rollout::train_stepper(m, runs, so);
-    const rollout::FinishResult fin = rollout::finish_model(m, r, runs);
+    const rollout::FinishResult fin = c.stages12 ? rollout::FinishResult{} : rollout::finish_model(m, r, runs);
     fs::create_directories(model_path(c, r.effect).parent_path());
     if (auto w = rollout::save_model(model_path(c, r.effect), m); !w) throw std::runtime_error(w.error());
     const double total = std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
