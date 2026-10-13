@@ -3,7 +3,8 @@
 //
 //   nvfx_estimate --effect fire.nvfx --clip take3.nfxclip --out fire_take3.nvfx
 //                 [--at 63[,40,...]] [--context 8] [--controls 0.5,0.5,0.5] [--age 0.033] [--alpha auto|yes|no]
-//                 [--inverse FILE | --train-inverse FILE] [--fine 64] [--keep-starts] [--no-refine] [--preview sheet.png]
+//                 [--inverse FILE | --train-inverse FILE] [--fine 64] [--keep-starts] [--no-refine] [--motion auto|yes|no]
+//                 [--preview sheet.png]
 //                 [--threads 1]
 //   Footage straight from a video or a folder of frames goes through the ingest path, with its licence check and a row in
 //   the licence register (docs/DATA.md §3):
@@ -14,11 +15,13 @@
 // --controls: the effect's controls that match the footage (the start point's controls; the runtime picks start points
 //   by the nearest controls). --age (one-shot effects): seconds since the effect began at the footage's first frame
 //   (default: one frame, footage that starts at the detonation).
+// --motion: measure velocity with the motion network (auto: for looping effects only, as chosen on validation).
 // --alpha: whether the footage has a real alpha channel; auto: no when alpha is max(r, g, b) everywhere (nvfx_ingest
 //   --alpha luma) or zero everywhere.
 // The inverse network maps frames to fine heat and soot. It is trained from the built-in simulation for fire, smoke and
 // explosion effects, with the motion network that measures velocity (--train-inverse FILE, about 6 minutes on one core;
-// cached at <data root>/j/inverse/ by nvfx_study_j inverse and motion). Validated on simulated renders only: real footage is untested (docs/FOOTAGE.md §6).
+// cached at <data root>/j/inverse/ by nvfx_study_j inverse and motion). Validated on simulated renders only: real
+// footage is untested (docs/FOOTAGE.md §7).
 #include "args.hpp"
 
 #include <neuralfx/footage.hpp>
@@ -139,6 +142,8 @@ int main(int argc, char** argv) try {
   footage::EstimateOptions eo;
   eo.context = a.i("context", eo.context);
   eo.refine = !a.flag("no-refine");
+  const std::string motion = a.str("motion", "auto");
+  eo.motion = motion == "yes" ? 1 : motion == "no" ? 0 : -1;
   eo.assim.controls = controls;
   std::vector<footage::Frame> frames;
   for (int i = 0; i < clip.frames; ++i) frames.push_back(footage::to_float(clip.frame(i)));

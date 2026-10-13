@@ -218,7 +218,10 @@ struct EstimateOptions {
   RefineOptions refine_opt;
   FlowOptions flow_opt;
   int flow_pairs = 1;  // frame pairs averaged into the measured flow before each step (1: the last pair only)
-  bool motion = true;  // the motion network measures velocity where it has three frames (if the inverse file has one)
+  // The motion network measures velocity where it has three frames (if the inverse file has one): -1 for looping effects
+  // only (the choice on validation, docs/FOOTAGE.md §4: one-shot explosions assimilate better from block matching), 0
+  // never, 1 always.
+  int motion = -1;
   AssimOptions assim;
 };
 struct Estimate {

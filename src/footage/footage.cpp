@@ -1131,7 +1131,8 @@ Estimate estimate_start(const rollout::Model& m, const Inverse& inv, std::span<c
     const int first = std::max(1, i - std::max(1, o.flow_pairs) + 1);
     e.flows[sz(i)] = mean_flow(std::span<const Flow>(raw).subspan(sz(first), sz(i - first + 1)));
     finish_flow(e.flows[sz(i)], o.flow_opt);
-    if (o.motion && !inv.motion.empty() && i >= 2) {  // the motion network where three frames are at hand
+    const bool use_motion = o.motion > 0 || (o.motion < 0 && m.loop);
+    if (use_motion && !inv.motion.empty() && i >= 2) {  // the motion network where three frames are at hand
       const std::vector<float> in = motion_inputs(inv.motion, std::span<const Fields>(e.fields).subspan(sz(i - 2), 3), raw[sz(i - 1)], raw[sz(i)], m.h.res);
       e.flows[sz(i)] = apply_motion(inv.motion, in, m.h.res);
     }

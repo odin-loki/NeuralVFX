@@ -55,6 +55,8 @@ struct Ctx {
   std::string effects;
   int threads = 1;
   int runs = 0;
+  int fine = kFine;  // the size of the fine fields kept with an estimated (or true) start point
+  std::string tag;   // appended to the output file names
   bool quick = false;
 };
 
@@ -137,8 +139,8 @@ Clip runtime_clip(nvfx_effect* e, std::span<const float> controls, int variation
 }
 
 // One continuous rollout from a single start point (its seed and time), as the tool would store it.
-Clip track(const rollout::Model& M, const rollout::StartPoint& sp, std::span<const float> controls, int frames) {
-  const rollout::Model m = footage::with_starts(M, std::span(&sp, 1), kFine, false);
+Clip track(const rollout::Model& M, const rollout::StartPoint& sp, std::span<const float> controls, int frames, int fine = kFine) {
+  const rollout::Model m = footage::with_starts(M, std::span(&sp, 1), fine, false);
   Effect fx(m);
   return runtime_clip(fx.e, controls, 0, 0, frames, false);
 }
@@ -611,13 +613,15 @@ void run_tracking(const Ctx& c, const std::string& split) {
   const std::uint64_t salt = test ? 2 : 3;
   const int runs = c.runs > 0 ? c.runs : (c.quick ? 2 : (test ? 16 : 12));
   std::vector<Config> configs;
-  if (test) {  // the choice made on validation (docs/FOOTAGE.md §3)
+  if (test) {  // the choice made on validation (docs/FOOTAGE.md §4): eight frames, refined, assimilated with the
+              // velocity relaxed halfway to the measured one; measured by the motion network for looping effects
     Config est;
     est.name = "estimated";
     est.K = 8;
     est.refine = true;
     est.vel = Vel::assim;
     est.beta = 0.5f;
+    est.motion = true;  // looping effects; one-shot effects below
     configs.push_back(est);
     Config tr;
     tr.name = "true";
@@ -667,11 +671,12 @@ void run_tracking(const Ctx& c, const std::string& split) {
         const footage::Inverse& inv = invs.at({job.e, has_alpha(cond)});
         const auto frames = footage_of(t, cond, M, c.data / "scratch", (salt * 1000 + static_cast<std::uint64_t>(job.run)) * 16 + static_cast<std::uint64_t>(cond));
         const Shared s = prepare(M, inv, frames, &raw_true, true);
-        for (const Config& cf : configs) {
+        for (Config cf : configs) {
+          if (cf.name == "estimated") cf.motion = M.loop;
           const bool oracle_fields = cf.fields_truth;
           if (oracle_fields && oracles_done) continue;  // true fields do not depend on the footage
           auto [sp, fine] = config_start(M, cf, t, s);
-          const Clip clip = track(M, sp, controls, kLast + 1);
+          const Clip clip = track(M, sp, controls, kLast + 1, c.fine);
           out.push_back(std::format("{},{},{},{},{}{}{}", split, en, job.run, oracle_fields ? "any" : cname(cond), cf.name, track_cells(clip, t, 0),
                                     err_cells(state_error(M, sp.coarse, t.coarse.back(), &fine, &t.fields.back()))));
         }
@@ -682,7 +687,9 @@ void run_tracking(const Ctx& c, const std::string& split) {
           eo.assim.controls = controls;
           eo.assim.time = t.time;
           const footage::Estimate est = footage::estimate_start(M, inv, frames, kSize, eo);
-          auto [sp, fine] = config_start(M, configs[0], t, s);
+          Config chosen = configs[0];
+          chosen.motion = M.loop;
+          auto [sp, fine] = config_start(M, chosen, t, s);
           double d = 0;
           for (std::size_t q = 0; q < sp.coarse.size(); ++q) d = std::max(d, static_cast<double>(std::abs(sp.coarse[q] - est.start.coarse[q])));
           if (d > 1e-5) std::println(stderr, "warning: the tool's estimate differs from the study's by {}", d);
@@ -699,7 +706,7 @@ void run_tracking(const Ctx& c, const std::string& split) {
   }
   std::vector<std::string> all;
   for (auto& r : rows) all.insert(all.end(), r.begin(), r.end());
-  write_csv(c.results / std::format("j_{}{}.csv", split, c.effects.empty() ? "" : "_" + c.effects), kTrackHeader, all);
+  write_csv(c.results / std::format("j_{}{}{}.csv", split, c.effects.empty() ? "" : "_" + c.effects, c.tag.empty() ? "" : "_" + c.tag), kTrackHeader, all);
 }
 
 // --- endless statistics -----------------------------------------------------------------------------------------
@@ -799,9 +806,13 @@ void run_endless(const Ctx& c, const std::string& split) {
           eo.assim.time = t.time;
           footage::Estimate est = footage::estimate_start(M, invs.at({e, has_alpha(cond)}), frames, kSize, eo);
           est.start.seed = 4242 + static_cast<std::uint64_t>(starts.size());
+          if (c.fine == 0) {  // diagnostic: keep the coarse state only; the runtime grows fine fields by its warm-up
+            est.start.fine_t.clear();
+            est.start.fine_d.clear();
+          }
           starts.push_back(std::move(est.start));
         }
-        const rollout::Model me = footage::with_starts(M, starts, kFine, false);
+        const rollout::Model me = footage::with_starts(M, starts, c.fine > 0 ? c.fine : kFine, false);
         est_clips[std::format("estimated_{}", cname(cond))] = runtime_clip(Effect(me).e, ctl, -1, s_play + static_cast<std::uint64_t>(si), F, true);
       }
       // explosions: real frame i is age warm + 1 + i; the stored start's frame f is its age + f; the estimate's t0 + f
@@ -844,7 +855,7 @@ void run_endless(const Ctx& c, const std::string& split) {
   }
   std::vector<std::string> all;
   for (auto& r : rows) all.insert(all.end(), r.begin(), r.end());
-  write_csv(c.results / std::format("j_{}_endless{}.csv", split, c.effects.empty() ? "" : "_" + c.effects),
+  write_csv(c.results / std::format("j_{}_endless{}{}.csv", split, c.effects.empty() ? "" : "_" + c.effects, c.tag.empty() ? "" : "_" + c.tag),
             "split,effect,setting,method,spectrum_l1,motion_ratio,coverage_l1,emission_l1,mean_frame_psnr", all);
 }
 
@@ -1012,7 +1023,7 @@ void step_report(const Ctx& c) {
 int main(int argc, char** argv) try {
   const tools::Args a(argc, argv, {"quick", "help"});
   if (a.flag("help") || a.positional().empty()) {
-    std::println("nvfx_study_j inverse|motion|val|val-endless|test|test-endless|report [--models DIR] [--data DIR] [--results DIR] [--effects fire,smoke] [--threads 1] [--runs N] [--quick]");
+    std::println("nvfx_study_j inverse|motion|val|val-endless|test|test-endless|report [--models DIR] [--data DIR] [--results DIR] [--effects fire,smoke] [--threads 1] [--runs N] [--fine 64] [--tag T] [--quick]");
     return 0;
   }
   Ctx c;
@@ -1022,6 +1033,8 @@ int main(int argc, char** argv) try {
   c.effects = a.str("effects");
   c.threads = a.i("threads", 1);
   c.runs = a.i("runs", 0);
+  c.fine = a.i("fine", kFine);
+  c.tag = a.str("tag");
   c.quick = a.flag("quick");
   if (c.quick) c.results /= "quick";
   const std::string step = a.positional()[0];
