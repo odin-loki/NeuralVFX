@@ -536,17 +536,43 @@ class MultiRendererQ final : public Renderer {
       }
     }
     if (proj_) {
-      for (const Volume& v : vols_) {
+      // A level of at most 3 channels is cheaper per pixel as its interpolated features times the first layer's weights
+      // (C multiply-adds per unit) than as an interpolated projection (two permutes and a multiply-add per unit), and
+      // needs no projection per frame: such levels are "direct".
+      std::size_t ch0 = 0;
+      for (std::size_t l = 0; l < vols_.size(); ++l) {
+        const Volume& v = vols_[l];
         const std::size_t G = static_cast<std::size_t>(v.side), Gp = G + static_cast<std::size_t>(kW), Hs = static_cast<std::size_t>(H);
+        direct_.push_back(v.channels <= 3 ? 1 : 0);
         poff_.push_back(proj_grid_.size());
-        proj_grid_.resize(proj_grid_.size() + Hs * G * G + (Hs + 1) * G + static_cast<std::size_t>(kW) + 1, 0.f);  // padded as GridRendererQ's
         roff_.push_back(rowg_.size());
-        rowg_.resize(rowg_.size() + Hs * Gp, 0.f);
-        rowd_.resize(rowg_.size(), 0.f);
+        if (direct_.back()) {
+          for (int c = 0; c < v.channels; ++c) dch_.push_back(static_cast<int>(ch0) + c);
+        } else {
+          plev_.push_back(l);
+          proj_grid_.resize(proj_grid_.size() + Hs * G * G + (Hs + 1) * G + static_cast<std::size_t>(kW) + 1, 0.f);  // padded as GridRendererQ's
+          rowg_.resize(rowg_.size() + Hs * Gp, 0.f);
+          rowd_.resize(rowg_.size(), 0.f);
+        }
+        ch0 += static_cast<std::size_t>(v.channels);
       }
+      if (dch_.size() > 16) proj_ = false;  // (more direct channels than expand_block keeps: the per-pixel first layer below)
+    }
+    if (proj_) {
+      rowgf_.resize(widest);
+      rowf_.assign(dch_.size() * S, 0.f);  // the direct levels' channels, expanded per row
+      dw_.assign(static_cast<std::size_t>(H) * dch_.size(), 0.f);
       xpe_ = std::move(xpe);
       ax_.assign(static_cast<std::size_t>(H) * S, 0.f);  // per frame: the x features' part of the first layer, [H][S]
     } else {
+      poff_.clear();
+      roff_.clear();
+      direct_.clear();
+      dch_.clear();
+      plev_.clear();
+      proj_grid_.clear();
+      rowg_.clear();
+      rowd_.clear();
       rowgf_.resize(widest);
       rowf_.assign(static_cast<std::size_t>(in_) * S, 0.f);
       for (int x = 0; x < S_; ++x) {  // the x features as constant input rows
@@ -603,6 +629,11 @@ class MultiRendererQ final : public Renderer {
     }
     if (proj_) {
       project();
+      for (int o = 0; o < H; ++o) {  // the direct channels' weights, unit by unit
+        for (std::size_t k = 0; k < dch_.size(); ++k) {
+          dw_[static_cast<std::size_t>(o) * dch_.size() + k] = l0_.w[static_cast<std::size_t>(o) * static_cast<std::size_t>(in_) + static_cast<std::size_t>(dch_[k])];
+        }
+      }
       for (int o = 0; o < H; ++o) {  // the x features' part per column
         float* a = ax_.data() + static_cast<std::size_t>(o) * S;
         const float* wr = l0_.w.data() + static_cast<std::size_t>(o) * static_cast<std::size_t>(in_) + CT_;
@@ -623,13 +654,20 @@ class MultiRendererQ final : public Renderer {
         for (int k = 0; k < h.pe_xy; ++k) b += gain_[static_cast<std::size_t>(o)] * (wr[4 * k + 2] * py[2 * k] + wr[4 * k + 3] * py[2 * k + 1]);
         rowb_[static_cast<std::size_t>(o)] = b;
       }
-      std::size_t ch0 = 0;
+      std::size_t ch0 = 0, dk = 0;
       for (std::size_t l = 0; l < vols_.size(); ++l) {
         const int G = vols_[l].side;
         const float gy = std::clamp((static_cast<float>(y) + 0.5f) / static_cast<float>(S_) * static_cast<float>(G) - 0.5f, 0.f, static_cast<float>(G - 1));
         const int y0 = std::min(static_cast<int>(gy), G - 2);
         const float fy = gy - static_cast<float>(y0);
-        if (proj_) {  // the level's projected rows y0 and y0 + 1 blended, and the steps along x (as GridRendererQ)
+        if (proj_ && direct_[l]) {  // the level's features: two grid rows blended, then expanded along x
+          for (int c = 0; c < vols_[l].channels; ++c, ++dk) {
+            const float* a = slice_.data() + loff_[l] + (static_cast<std::size_t>(c) * static_cast<std::size_t>(G) + static_cast<std::size_t>(y0)) * static_cast<std::size_t>(G);
+            float* r = rowgf_.data() + static_cast<std::size_t>(c) * static_cast<std::size_t>(G);
+            for (int gx = 0; gx < G; ++gx) r[gx] = a[gx] + fy * (a[gx + G] - a[gx]);
+            expand_row(r, xi_.data() + l * S, xf_.data() + l * S, rowf_.data() + dk * S, S_);
+          }
+        } else if (proj_) {  // the level's projected rows y0 and y0 + 1 blended, and the steps along x (as GridRendererQ)
           const std::size_t HG = static_cast<std::size_t>(H) * static_cast<std::size_t>(G), Gp = static_cast<std::size_t>(G + kW);
           for (int o = 0; o < H; ++o) {
             const float* a = proj_grid_.data() + poff_[l] + static_cast<std::size_t>(y0) * HG + static_cast<std::size_t>(o) * static_cast<std::size_t>(G);
@@ -686,7 +724,7 @@ class MultiRendererQ final : public Renderer {
     std::size_t n = 4 * (w_.size() + film_.size() + gain_.size() + bias0_.size() + rowb_.size() + tpe_.size() + slice_.size() + proj_grid_.size() +
                          rowg_.size() + rowd_.size() + rowgf_.size() + rowf_.size() + xf_.size() + xi_.size() + base_.size() + idx_.size() +
                          ype_.size() + xpe_.size() + ax_.size() + l0_.w.size() + l0_.b.size() + buf_a_.size() + buf_b_.size() + act_.size() +
-                         sa_.size() + mx_.size() + head_wt_.size());
+                         sa_.size() + mx_.size() + head_wt_.size() + dw_.size() + dch_.size()) + direct_.size() + sizeof(std::size_t) * plev_.size();
     n += sizeof(std::size_t) * (loff_.size() + poff_.size() + roff_.size());
     for (const QLayer& L : ql_) n += 4 * (L.w.size() + L.scale.size() + L.bias.size() + L.head.size());
     return n;
@@ -702,7 +740,7 @@ class MultiRendererQ final : public Renderer {
     for (std::size_t l = 0; l < vols_.size(); ++l) {
       const int G = vols_[l].side, C = vols_[l].channels;
       const std::size_t n = static_cast<std::size_t>(G) * static_cast<std::size_t>(G);
-      for (int gy = 0; gy < G; ++gy) {
+      for (int gy = 0; gy < G && !direct_[l]; ++gy) {
         const float* s = slice_.data() + loff_[l] + static_cast<std::size_t>(gy) * static_cast<std::size_t>(G);
         float* p = proj_grid_.data() + poff_[l] + static_cast<std::size_t>(gy) * static_cast<std::size_t>(H) * static_cast<std::size_t>(G);
         int gx = 0;
@@ -727,43 +765,49 @@ class MultiRendererQ final : public Renderer {
     }
   }
 
-  // The first layer's outputs (ReLU) for the block at x0: the row's bias, the x features' part and every level's
-  // interpolated projection; h [H][kB], and their largest per pixel.
+  // The first layer's outputs (ReLU) for the block at x0: the row's bias, the x features' part, every projected level's
+  // interpolated projection and the direct levels' features times their weights; h [H][kB], and their largest per pixel.
   void expand_block(int x0, float* h, float* mx) const {
-    switch (vols_.size()) {  // the levels' loop unrolled for the usual counts
+    switch (plev_.size()) {  // the projected levels' loop unrolled for the usual counts
+      case 0: expand_block_<0>(x0, h, mx); break;
       case 1: expand_block_<1>(x0, h, mx); break;
       case 2: expand_block_<2>(x0, h, mx); break;
       case 3: expand_block_<3>(x0, h, mx); break;
-      default: expand_block_<0>(x0, h, mx); break;
+      default: expand_block_<-1>(x0, h, mx); break;
     }
   }
-  template <int NL>  // NL levels (0: any number, at most 16)
+  template <int NP>  // NP projected levels (-1: any number, at most 16)
   void expand_block_(int x0, float* h, float* mx) const {
     const int H = m_.h.hidden;
-    const std::size_t S = static_cast<std::size_t>(S_), L = NL > 0 ? static_cast<std::size_t>(NL) : vols_.size(), per = S / static_cast<std::size_t>(kW);
+    const std::size_t S = static_cast<std::size_t>(S_), P = NP >= 0 ? static_cast<std::size_t>(NP) : plev_.size(), per = S / static_cast<std::size_t>(kW);
+    const std::size_t D = dch_.size();
     const bool px = m_.h.pe_xy > 0;
     for (int v = 0; v < kV; ++v) {
       const int x = x0 + v * kW;
-      std::array<qi, 16> idx;  // per level: the lanes' grid points, weights and rows (the same for every unit)
-      std::array<vf, 16> f;
+      std::array<qi, 16> idx;  // per projected level: the lanes' grid points, weights and rows (the same for every unit)
+      std::array<vf, 16> f, dv;
       std::array<const float*, 16> r, d;
       std::array<std::size_t, 16> gp;
-      for (std::size_t l = 0; l < L; ++l) {
-        gp[l] = static_cast<std::size_t>(vols_[l].side + kW);
+      for (std::size_t j = 0; j < P; ++j) {
+        const std::size_t l = plev_[j];
+        gp[j] = static_cast<std::size_t>(vols_[l].side + kW);
         const std::size_t b = static_cast<std::size_t>(base_[l * per + static_cast<std::size_t>(x / kW)]);
-        idx[l] = load_q(idx_.data() + l * S + static_cast<std::size_t>(x));
-        f[l] = load(xf_.data() + l * S + static_cast<std::size_t>(x));
-        r[l] = rowg_.data() + roff_[l] + b;
-        d[l] = rowd_.data() + roff_[l] + b;
+        idx[j] = load_q(idx_.data() + l * S + static_cast<std::size_t>(x));
+        f[j] = load(xf_.data() + l * S + static_cast<std::size_t>(x));
+        r[j] = rowg_.data() + roff_[l] + b;
+        d[j] = rowd_.data() + roff_[l] + b;
       }
+      for (std::size_t k = 0; k < D; ++k) dv[k] = load(rowf_.data() + k * S + static_cast<std::size_t>(x));  // direct features
       vf m0{}, m1{};
       for (int o = 0; o < H; ++o) {
         vf acc = splat(rowb_[static_cast<std::size_t>(o)]);
         if (px) acc += load(ax_.data() + static_cast<std::size_t>(o) * S + static_cast<std::size_t>(x));
-        for (std::size_t l = 0; l < L; ++l) {
-          const std::size_t at = static_cast<std::size_t>(o) * gp[l];
-          acc += take(r[l] + at, idx[l]) + f[l] * take(d[l] + at, idx[l]);
+        for (std::size_t j = 0; j < P; ++j) {
+          const std::size_t at = static_cast<std::size_t>(o) * gp[j];
+          acc += take(r[j] + at, idx[j]) + f[j] * take(d[j] + at, idx[j]);
         }
+        const float* w = dw_.data() + static_cast<std::size_t>(o) * D;
+        for (std::size_t k = 0; k < D; ++k) acc += w[k] * dv[k];
         const vf y = relu(acc);
         store(h + o * kB + v * kW, y);
         if (o & 1) m1 = vmaxf(m1, y);
@@ -781,7 +825,10 @@ class MultiRendererQ final : public Renderer {
   std::vector<QLayer> ql_;
   std::vector<std::size_t> loff_, poff_, roff_;
   std::vector<float> w_, film_, gain_, bias0_, rowb_, tpe_, slice_, proj_grid_, rowg_, rowd_, rowgf_, rowf_, xf_, ype_, xpe_, ax_, buf_a_, buf_b_, sa_, mx_,
-      head_wt_;
+      head_wt_, dw_;
+  std::vector<std::uint8_t> direct_;  // per level (projected mode): its features enter the first layer per pixel
+  std::vector<int> dch_;              // the direct levels' channels (their columns of the first layer)
+  std::vector<std::size_t> plev_;     // the projected levels
   std::vector<int> xi_, base_;
   std::vector<std::int32_t> idx_;
   std::vector<std::int32_t> act_;

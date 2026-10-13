@@ -526,18 +526,21 @@ TEST(Runtime, MultiLevelModelsMatchTheReference) {
 }
 
 TEST(Runtime, MultiLevelInt8StaysWithinItsToleranceOfTheFloatReference) {
-  // The int8 path of the multi family: each level's projected first layer interpolated (a level wider than the frame,
-  // and the baseline ISA, take the first layer per pixel instead), the hidden layers in integers; as the grid family's
+  // The int8 path of the multi family: the first layer projected per grid point and interpolated for levels of 4 or more
+  // channels, per pixel from the interpolated features for levels of up to 3 (a level wider than the frame, and the
+  // baseline ISA, take the whole first layer per pixel instead), the hidden layers in integers; as the grid family's
   // int8 path, within its tolerance of the float reference. It is the default precision.
   const float controls[3] = {0.3f, 0.7f, 0.5f};
   Hyper wide = multi_hyper(true);
   wide.levels.push_back({40, 3, 2});
   Hyper deep = multi_hyper(false);
   deep.layers = 3;
+  Hyper mixed = multi_hyper(true);  // levels of 4 and 5 channels are projected, those of 2 and 3 enter per pixel
+  mixed.levels = {{8, 4, 5}, {16, 9, 2}, {12, 1, 4}, {6, 3, 3}};
   int compared = 0;
   for (const nvfx_isa isa : kIsas) {
     if (nvfx_set_isa(isa) != NVFX_OK) continue;
-    for (const Hyper& h : {multi_hyper(true), multi_hyper(false), wide, deep}) {
+    for (const Hyper& h : {multi_hyper(true), multi_hyper(false), wide, deep, mixed}) {
       Model m = make_model(h, 16);
       m.mlp_bits = 8;
       const auto vols = volumes(m.h);
@@ -566,5 +569,5 @@ TEST(Runtime, MultiLevelInt8StaysWithinItsToleranceOfTheFloatReference) {
     }
   }
   nvfx_set_isa(NVFX_ISA_AUTO);
-  EXPECT_GE(compared, 48);
+  EXPECT_GE(compared, 60);
 }
