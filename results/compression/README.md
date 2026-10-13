@@ -5,7 +5,9 @@ added 10 October 2026 [below](#study-f2-compression-pushed-further-10-october-20
 every ratio against them, added 11 October 2026
 [below](#flipbooks-in-production-formats-bc7-and-astc-11-october-2026); study F3, sparse features and flipbooks
 without their empty space, added 11 October 2026
-[at the end](#study-f3-sparse-features-and-flipbooks-without-their-empty-space-11-october-2026)). Ratios in the older
+[below](#study-f3-sparse-features-and-flipbooks-without-their-empty-space-11-october-2026); study F4, a multi-level
+feature representation, added 13 October 2026
+[at the end](#study-f4-a-multi-level-feature-representation-13-october-2026)). Ratios in the older
 sections are against our own BC3-layout encoder and raw RGBA, as first measured. Audience: owner, research, dev. Data:
 [cm.csv](cm.csv) (every file, flipbook and part) and [cm_equal_quality.csv](cm_equal_quality.csv). Code:
 `include/neuralfx/cm.hpp`, `src/core/cm.cpp`, `tools/nvfx_pack.cpp`.
@@ -17,8 +19,12 @@ sections are against our own BC3-layout encoder and raw RGBA, as first measured.
   measured: 3.6 to 5.9 times). Disk, both sides packed: 8-bit networks tie or lose against packed ASTC flipbooks (0.4
   to 0.9x); trained for 4 bits with a rate term they keep 2.2x [1.7, 3.2] (4.5x against BC7). Study F3's sparse
   features reach 13.8x against BC7 and 4.7x against every format, 2.2x when the flipbooks keep only their non-empty
-  blocks ([F3](#study-f3-sparse-features-and-flipbooks-without-their-empty-space-11-october-2026)). The bullets below
-  are against our BC3-layout encoder and raw, as first measured.
+  blocks ([F3](#study-f3-sparse-features-and-flipbooks-without-their-empty-space-11-october-2026)). Study F4's
+  multi-level features (a coarse 16 x 16 grid plus a fine 64 x 64 grid of 2 channels) lift the ratios against every
+  format to 5.2x [4.0, 7.8] as stored, 3.5x [3.0, 4.5] trimmed and 2.4x [2.0, 2.9] block-sparse (14.6x against BC7),
+  +0.7 dB at the same memory, a tie by its interval
+  ([F4](#study-f4-a-multi-level-feature-representation-13-october-2026)). The bullets below are against our BC3-layout
+  encoder and raw, as first measured.
 - **The network files shrink by 1.2 to 1.7 times (frame models) and 1.8 to 4.9 times (rollout effects), losslessly.**
   zlib -9 manages 1.07 to 1.23 times on the frame models and 1.3 to 2.6 times on the rollout effects.
 - **Flipbooks shrink far more: 2.9 to 6.9 times in BC3 layout and 6.9 to 12.9 times as raw RGBA** (zlib -9: 2.5 to
@@ -882,7 +888,7 @@ formats):
   [f3_flipbooks_sparse_test.csv](f3_flipbooks_sparse_test.csv), ratios in
   [f3_equal_quality_test.csv](f3_equal_quality_test.csv), `_trim` and `_sparse` (baselines `flipbook` = every format,
   `flipbook_bc7`, `flipbook_bc3layout`). The validation tables were not re-run (no choice depends on them here): their
-  trimmed and block-sparse ladders are BC3 layout and raw.
+  trimmed and block-sparse ladders were BC3 layout and raw (study F4 added BC7 and ASTC to them, to choose by).
 
 ### Validation clips
 
@@ -977,4 +983,294 @@ build/nvfx_f2 report --pareto --study f3 --set test --suffix _fig --flipbooks re
   --figure results/compression/f3_rate_quality.svg                                # the figure (its table is not kept)
 build/nvfx_f2 pairs --study f3 --set test --pairs g32c8h32l2t16_b4_q_sp:g32c8h32l2t16_b4_q,...
 build/nvfx_f2 timing --models a.nvfx,b.nvfx --core 3 --reps 5
+```
+
+## Study F4: a multi-level feature representation (13 October 2026)
+
+Status: **results**. Audience: owner, research, dev. Data: [f4_pilot_val.csv](f4_pilot_val.csv) (every configuration
+tried, 2,000 steps, scored through the trainer's forward pass), [f4_nets_val.csv](f4_nets_val.csv) and
+[f4_nets_test.csv](f4_nets_test.csv) (the chosen networks through the runtime and the coder),
+[f4_equal_quality_test.csv](f4_equal_quality_test.csv), [f4_equal_quality_test_trim.csv](f4_equal_quality_test_trim.csv)
+and [f4_equal_quality_test_sparse.csv](f4_equal_quality_test_sparse.csv) (every ratio with its interval against each
+flipbook baseline and each video codec; `val` twins, and the pilots' in
+[f4_equal_quality_val_pilot.csv](f4_equal_quality_val_pilot.csv)), the figure [f4_rate_quality.svg](f4_rate_quality.svg). Code: the
+multi family in `include/neuralfx/model.hpp` and `src/core/model.cpp` (`.nvfx` version 4), the trainer
+(`src/train/net.cpp`, `train.cpp`), the runtime (`src/runtime/rt_impl.hpp`, `rt_int8.hpp`), the coder
+(`src/core/cm.cpp`), `tools/nvfx_f2.cpp` (`--study f4`, `--pilot`, `int8`, `timing --precision`).
+
+The question: can a better feature representation than F3's single sparse grid (32 x 32 points, 8 channels, 16 time
+slices, 4 bits; 36.3 KB and 31.06 dB on the test clips, 4.7x [3.3, 7.7] less memory than the best flipbook of any
+format) give more quality per byte? Tried: several grids of different resolutions (as Instant-NGP and NVIDIA's Neural
+Texture Compression use), coarse levels with a fine time axis (a level of every frame), Fourier features of position
+and time, a larger decoder, and cheaper storage of what is not features.
+
+### Bottom line
+
+- **One finer level is what helps.** The best representation found keeps two grids instead of one: a coarse
+  16 x 16 grid (4 or 8 channels) and a fine 64 x 64 grid with only 2 channels, both with 16 time slices, 4-bit
+  features, sparse where the clip is empty, concatenated before the same small MLP. The fine grid's points are 2 pixels
+  apart (F3's were 4), and its sparse mask hugs the effect more tightly (33 to 43% of its points stored).
+- **Test clips, chosen on validation by the memory ratio against every format: G16 C4 + G64 C2, 36.6 KB, 31.77 dB**
+  (F3: 36.3 KB, 31.06 dB). Against the best flipbook of any format (BC3 layout, raw, BC7, ASTC 4x4 to 12x12), memory at
+  equal quality: **5.2x [4.0, 7.8] as stored** (F3: 4.7x [3.3, 7.7]), **3.5x [3.0, 4.5] trimmed** (3.1x [2.4, 4.4]),
+  **2.4x [2.0, 2.9] block-sparse** (2.2x [1.6, 2.8]). Against BC7 alone: 14.6x [9.7, 17.2] as stored, 10.2x
+  [6.4, 12.5] trimmed, 6.4x [4.2, 8.2] block-sparse.
+- **Paired with F3's network: +0.71 dB [-0.07, +1.59] at the same memory (+0.27 KB [-0.27, +0.85]): a tie by its
+  interval.** It gains on smoke (+0.53 to +0.90 dB) and on three explosions (+2.4 to +3.8 dB), and loses on every fire
+  clip (-0.38 to -0.74 dB) and on the small explosion (-0.96 dB).
+- **The steadier choice (best quality over the flipbooks at equal memory on validation), G16 C8 + G64 C2: 41.7 KB,
+  32.78 dB**, better than F3's network on every test clip (+1.72 dB [+0.96, +2.62] for +5.4 KB [+4.3, +6.4]): **5.4x
+  [4.2, 7.7] as stored, 3.6x [3.1, 4.4] trimmed, 2.5x [2.1, 3.0] block-sparse.** The quality difference at the network's
+  own size, the steadier number, grows from +4.52 dB [+3.77, +5.58] (F3) to +5.22 [+4.34, +6.18] and +6.07
+  [+5.15, +7.05] as stored; block-sparse from +2.65 [+1.50, +4.04] to +3.34 [+2.10, +4.74] and +4.08 [+2.71, +5.46].
+- **So: a better representation, worth about 1 dB at equal memory, or 9 to 16% on the ratios.** It does not change
+  the picture: 5x against every format as stored, 3.5x trimmed, about 2.5x against block-sparse flipbooks. The ratios'
+  intervals overlap F3's.
+- **Cheaper storage of what is not features** (file version 4, any network): the sparse mask as runs instead of one
+  bit per point, and the MLP's weights at 8 bits (trained for them): -2.4 KB (7%) on F3's network at -0.01 dB
+  [-0.04, +0.02]; both are in the networks above.
+- **Disk: 2.3x [1.9, 3.0] less than packed flipbooks of every format** (F3's best sparse network: 2.0x [1.5, 2.7]);
+  23.9 KB packed. AV1 still needs 2.5 times less (0.40x [0.36, 0.45]).
+- **Cost per frame:** 0.58 ms per 128 x 128 frame through the int8 path, the default (F3's network: 0.47 ms), 0.87 to
+  1.04 ms in float (0.95 ms), with less working memory (108 to 112 KB at int8 against 187 KB); one core of the busy
+  machine. The int8 path loses 0.002 dB.
+- **Longer training** adds a little more than it added to F3's network (+0.22 dB [+0.13, +0.33] against +0.15): G16
+  C4 + G64 C2 with 12,000 steps holds 31.99 dB, 5.4x [4.1, 7.9] as stored, 3.6x [3.1, 4.6] trimmed, 2.5x [2.1, 3.0]
+  block-sparse.
+- **Null results** (validation, with their numbers below): a coarse level of every frame (G16 with 64 slices) beside
+  a G32 level (-0.50 to -0.88 dB for +5.4 to +5.9 KB); Fourier features of position (-0.96 dB) or of time (-1.33 dB,
+  both stopped after 2 clips); the fine level at 3 bits (-1.41 dB for -6.4 KB), at 48 x 48 points (-1.74 dB for
+  -11.2 KB), with 8 slices (-2.01 dB for -13.2 KB) or 1 channel (-1.99 dB for -13.0 KB); a coarser 8 x 8 level
+  (-0.90 dB for -3.1 KB); a third level between them (+0.03 dB for +3.6 KB); a wider MLP of 48 units (+0.20 dB
+  [-0.12, +0.55] for +1.6 KB and twice the work per pixel, stopped after 3 clips).
+
+![Study F4 on the 12 test clips: mean active PSNR against KB. Left, memory: the best flipbook of any format at each size as stored (dashed: BC3 layout and raw only) and trimmed to its content, and the networks (F2's dense G32, F3's sparse G32, F4's two multi-level networks). Right, disk: packed flipbooks, three video codecs and the networks packed](f4_rate_quality.svg)
+
+### What was built
+
+- **The multi family (`Arch::multi`, `.nvfx` version 4).** A frame model of several feature volumes ("levels"), each with
+  its own side, time slices and channels. Each level is blended and sliced like the grid family's single volume and
+  sampled bilinearly at the pixel; the levels' features are concatenated and go through the grid family's MLP with
+  FiLM. Optional Fourier features of the pixel's position and of time join the MLP's inputs. A level may be a still
+  plane (one slice). Configuration names: `p16.8.16+64.2.16h32l2` is a 16 x 16 level with 8 channels and 16 slices plus
+  a 64 x 64 level with 2 channels and 16 slices, then 32 hidden units in 2 layers.
+- **Storage.** One width per level (1 to 8 bits, per plane its fp16 range as before). Sparse levels store only the grid
+  points their slices need (F3's mask, per level), the mask as **runs** (alternating lengths of unstored and stored
+  points in raster order, LEB128 varints) instead of one bit per point: 2.3 KB instead of 8 KB for a 64 x 64 level of
+  16 slices, 1.0 KB instead of 2 KB for F3's G32. The first, hidden and output layers' weights can be stored at
+  **8 bits** (per output unit an fp16 scale, codes in excess 128), trained for them (`wq`: the forward pass sees them
+  as stored once quantisation starts, straight-through gradients). Older files are unchanged to the byte (a G32 sparse
+  model retrained with this code is byte-identical to F3's file).
+- **Trainer** (`src/train`): the multi family's forward and backward passes (gradients checked against finite
+  differences, loops and one-shot effects, a still level, Fourier features), per-level sparse support and widths
+  (`train::Options::level_bits`), 8-bit MLP training (`mlp_qat`). The grid family's training is unchanged to the bit.
+- **Runtime** (`src/runtime/rt_impl.hpp`, `rt_int8.hpp`, every ISA build): a float renderer (the reference for parity
+  tests) and an **int8 renderer, the default as for the grid family**: the part of the first layer of a level of 4 or
+  more channels is evaluated once per grid point and frame and interpolated at the pixel (H interpolations instead of
+  C x H multiply-adds), a level of up to 3 channels (the fine level) enters per pixel as its interpolated features
+  times the weights, the hidden layers in 8-bit integers as before. Mask runs are decoded while the frame's slices are
+  blended; nothing is allocated per frame (`nvfx_alloc_test`). `nvfx_effect_info.arch` is 4.
+- **Coder** (`src/core/cm.cpp`): version 4 is parsed (per level its ranges and fills as tensors and its codes at its
+  width; whole planes with 2-D contexts when unmasked, the stored points one plane after another when masked; mask runs
+  as plain bytes; 8-bit weights as a tensor), so disk sizes are the coder's, not plain bytes.
+- **`nvfx_f2`**: `--pilot` (train and score through the trainer's float forward pass, no runtime and no coder:
+  `f4_pilot_val.csv`; the runtime reproduces those scores to 0.001 dB), `--reuse`, `--also f3` (a report with F3's
+  networks), `int8` (the int8 path against the float network, paired), `timing --precision both`.
+
+### Protocol
+
+As F3: study A's 12 test clips and F2's 6 validation clips, scored through the runtime (float, as every study scores),
+every choice on validation, the test clips once, 95% paired bootstrap intervals over clips (10,000 resamples), F3's
+Pareto envelopes. Three changes:
+
+- **The choice is made against every format.** F2 and F3 chose by the memory ratio against our BC3 layout; F4 chooses
+  by the memory ratio against the best flipbook of any format (BC3 layout, raw, BC7, ASTC 4x4 to 12x12) as stored, the
+  headline baseline. The validation tables of flipbooks without their empty space now include BC7 and ASTC too
+  (`nvfx_f2 trim --set val`; F3 had them for the test clips only).
+- **Pilots.** Configurations were first trained for 2,000 steps on the 6 validation clips and scored through the
+  trainer's float forward pass (`--pilot`, [f4_pilot_val.csv](f4_pilot_val.csv): memory and quality, no packed size);
+  clear nulls were stopped after 2 to 4 clips. The two best went through the full pipeline (runtime, coder) at 6,000
+  steps on validation ([f4_nets_val.csv](f4_nets_val.csv)), then to the test clips once ([f4_nets_test.csv](f4_nets_test.csv)).
+- **CPU.** One thread per job, two jobs, `nice 10`, on the shared machine (load average 4 to 13); about 8.5
+  CPU-hours, 6.4 of them training (2.3 for the pilots, 0.9 for validation at 6,000 steps, 3.3 for the test clips).
+
+### Test clips
+
+Study A's 12 clips, once, for the two configurations chosen on validation, against F3's best sparse networks. Memory at
+equal mean active PSNR against the best flipbook of every format (BC3 layout, raw, BC7, ASTC 4x4 to 12x12), Pareto
+envelopes, 95% bootstrap intervals over the 12 clips:
+
+| test | active PSNR | memory KB (resident) | packed KB | memory vs flipbooks as stored | vs trimmed flipbooks | vs block-sparse flipbooks | dB over stored flipbooks at equal memory | disk vs packed flipbooks |
+|---|---:|---:|---:|---|---|---|---|---|
+| G32 4-bit sparse, 6,000 steps (F3) | 31.06 | 36.3 (40.6) | 25.1 | 4.7x [3.3, 7.7] | 3.1x [2.4, 4.4] | 2.2x [1.6, 2.8] | +4.52 [+3.77, +5.58] | 2.0x [1.5, 2.7] |
+| G32 4-bit sparse, 12,000 steps (F3) | 31.21 | 36.3 (40.6) | 25.0 | 4.8x [3.4, 7.7] | 3.2x [2.4, 4.5] | 2.2x [1.7, 2.9] | +4.67 [+3.89, +5.71] | 2.0x [1.6, 2.8] |
+| **G16 C4 + G64 C2, 6,000 steps** | 31.77 | 36.6 (41.8) | 23.9 | **5.2x [4.0, 7.8]** | **3.5x [3.0, 4.5]** | **2.4x [2.0, 2.9]** | +5.22 [+4.34, +6.18] | 2.3x [1.9, 3.0] |
+| G16 C4 + G64 C2, 12,000 steps | 31.99 | 36.6 (41.8) | 24.0 | 5.4x [4.1, 7.9] | 3.6x [3.1, 4.6] | 2.5x [2.1, 3.0] | +5.44 [+4.52, +6.45] | 2.4x [2.0, 3.1] |
+| G16 C8 + G64 C2, 6,000 steps | 32.78 | 41.7 (47.9) | 28.4 | 5.4x [4.2, 7.7] | 3.6x [3.1, 4.4] | 2.5x [2.1, 3.0] | +6.07 [+5.15, +7.05] | 2.3x [1.9, 2.9] |
+
+Against each set of formats (as stored, trimmed, block-sparse; memory):
+
+| test | as stored: BC3 layout | with BC7 | with BC7 and ASTC | trimmed: BC3 layout | with BC7 | with BC7 and ASTC | block-sparse: BC3 layout | with BC7 | with BC7 and ASTC |
+|---|---|---|---|---|---|---|---|---|---|
+| G32 4-bit sparse, 6,000 steps (F3) | 16.8x [11.2, 22.7] | 13.8x [7.9, 16.6] | 4.7x [3.3, 7.7] | 10.7x [7.3, 14.3] | 8.8x [5.1, 11.3] | 3.1x [2.4, 4.4] | 6.7x [4.7, 8.1] | 5.6x [3.4, 7.3] | 2.2x [1.6, 2.8] |
+| G32 4-bit sparse, 12,000 steps (F3) | 17.1x [12.3, 23.4] | 14.2x [8.1, 16.7] | 4.8x [3.4, 7.7] | 10.9x [8.1, 14.7] | 9.1x [5.3, 11.7] | 3.2x [2.4, 4.5] | 6.8x [5.1, 8.3] | 5.7x [3.4, 7.5] | 2.2x [1.7, 2.9] |
+| **G16 C4 + G64 C2, 6,000 steps** | 18.5x [14.5, 24.3] | 14.6x [9.7, 17.2] | **5.2x [4.0, 7.8]** | 11.8x [9.8, 14.5] | 10.2x [6.4, 12.5] | **3.5x [3.0, 4.5]** | 7.4x [5.9, 8.8] | 6.4x [4.2, 8.2] | **2.4x [2.0, 2.9]** |
+| G16 C4 + G64 C2, 12,000 steps | 19.2x [14.9, 25.7] | 14.9x [10.6, 17.6] | 5.4x [4.1, 7.9] | 12.2x [10.1, 15.4] | 10.7x [7.0, 13.1] | 3.6x [3.1, 4.6] | 7.6x [6.2, 9.2] | 6.7x [4.7, 8.6] | 2.5x [2.1, 3.0] |
+| G16 C8 + G64 C2, 6,000 steps | 19.0x [14.6, 26.2] | 13.8x [11.8, 16.4] | 5.4x [4.2, 7.7] | 12.1x [10.0, 14.9] | 11.0x [8.0, 13.9] | 3.6x [3.1, 4.4] | 7.6x [6.1, 9.2] | 6.9x [5.0, 9.1] | 2.5x [2.1, 3.0] |
+
+Paired over the 12 test clips:
+
+| a - b | active PSNR dB | stored KB | packed KB |
+|---|---|---|---|
+| G16 C4 + G64 C2 - F3's G32 sparse, both 6,000 steps | +0.71 [-0.07, +1.59] | +0.27 [-0.27, +0.85] | -1.12 [-1.40, -0.84] |
+| G16 C4 + G64 C2 - F3's G32 sparse, both 12,000 steps | +0.78 [+0.04, +1.62] | +0.27 [-0.27, +0.85] | -1.03 [-1.34, -0.74] |
+| G16 C4 + G64 C2, 12,000 - 6,000 steps | +0.22 [+0.13, +0.33] | 0 | +0.03 [-0.09, +0.17] |
+| G16 C8 + G64 C2 - F3's G32 sparse, both 6,000 steps | +1.72 [+0.96, +2.62] | +5.37 [+4.28, +6.43] | +3.32 [+2.70, +3.84] |
+| G16 C8 + G64 C2 - G16 C4 + G64 C2, both 6,000 steps | +1.01 [+0.85, +1.18] | +5.09 [+4.55, +5.60] | +4.44 [+3.99, +4.89] |
+
+By effect (active PSNR, F4 minus F3's sparse network at 6,000 steps, per clip):
+
+| | fire 0 to 3 | smoke 0 to 3 | explosion 0 to 3 |
+|---|---|---|---|
+| G16 C4 + G64 C2 | -0.62, -0.74, -0.38, -0.72 | +0.77, +0.53, +0.79, +0.90 | +3.84, +2.41, -0.96, +2.66 |
+| G16 C8 + G64 C2 | +0.39, +0.49, +1.09, +0.31 | +1.29, +1.61, +1.82, +1.50 | +5.30, +3.35, +0.16, +3.33 |
+
+On disk against the video codecs (network packed, codec payload, equal mean active PSNR):
+
+| test, disk | packed KB | AV1 libaom | HEVC x265 | VP9 alpha (4:2:0) | best codec |
+|---|---:|---|---|---|---|
+| G32 4-bit sparse, 6,000 steps (F3) | 25.1 | 0.34x [0.30, 0.40] | 0.54x [0.47, 0.63] | 0.85x [0.67, 1.31] | 0.34x [0.30, 0.40] |
+| G16 C4 + G64 C2, 6,000 steps | 23.9 | 0.40x [0.36, 0.45] | 0.63x [0.57, 0.70] | 1.0x [0.8, 1.6] | 0.40x [0.36, 0.45] |
+| G16 C4 + G64 C2, 12,000 steps | 24.0 | 0.41x [0.37, 0.46] | 0.65x [0.59, 0.72] | 1.1x [0.9, 1.8] | 0.41x [0.37, 0.46] |
+| G16 C8 + G64 C2, 6,000 steps | 28.4 | 0.39x [0.35, 0.44] | 0.62x [0.56, 0.69] | 1.1x [0.8, 2.3] | 0.39x [0.35, 0.44] |
+
+- **The configuration chosen by the rule gains 0.7 dB on average at the same memory, and that is a tie by its interval
+  over the 12 clips** (+0.71 dB [-0.07, +1.59] at 6,000 steps; +0.78 [+0.04, +1.62] at 12,000, just above zero). Its
+  ratios against every format are 10 to 15% above F3's, with overlapping intervals; its lower bounds are higher (4.0x
+  against 3.3x as stored, 3.0x against 2.4x trimmed, 2.0x against 1.6x block-sparse) because no clip loses much.
+- **With 8 coarse channels the gain is clear on every clip** (+0.31 to +5.30 dB), at 15% more memory: the ratios move
+  a little further (5.4x, 3.6x, 2.5x) and the quality over the flipbooks at equal memory gains 1.55 dB as stored
+  (+6.07 dB [+5.15, +7.05] against +4.52 [+3.77, +5.58]).
+- **Longer training helps as it did for F3** (12,000 against 6,000 steps: +0.22 dB [+0.13, +0.33]; F3: +0.15).
+- **Disk:** the fine level packs a little better than F3's grid (-1.1 KB [-1.4, -0.8] at the same memory), 2.3x
+  [1.9, 3.0] less disk than packed flipbooks of every format; AV1 still needs 2.5 times less; VP9 with alpha
+  now ties (1.0x [0.8, 1.6]).
+- **Through the int8 path** (the runtime's default): -0.002 dB [-0.003, -0.001] for both configurations against the
+  float network the study scores (F3's network: -0.014 [-0.025, -0.005]); `nvfx_f2 int8 --set test`.
+
+### Validation clips
+
+**Pilots** (2,000 steps, 4-bit features with quantisation-aware training, sparse, scored through the trainer's float
+forward pass; [f4_pilot_val.csv](f4_pilot_val.csv)). Memory ratio against the best flipbook of any format as stored
+and the quality difference at the network's own size, 95% intervals over the 6 clips. F3's network (G32, 8 channels, 16
+slices) is the first row; the next two are the same network in the new file version. From the third row on the MLP's
+weights are trained for 8 bits (`wq`), except in the last three rows (run before that choice):
+
+| validation, 2,000 steps | active PSNR | stored KB | memory vs flipbooks (every format) | dB over flipbooks at equal memory |
+|---|---:|---:|---|---|
+| F3's G32 C8 T16 (file version 3) | 30.23 | 35.0 | 4.1x [2.1, 7.5] | +3.92 [+2.88, +4.91] |
+| the same network, version 4 (mask as runs) | 30.23 | 33.9 | 4.2x [2.2, 7.8] | +3.97 [+2.91, +4.98] |
+| the same, MLP at 8 bits (`wq`) | 30.22 | 32.6 | 4.4x [2.3, 8.1] | +4.01 [+2.94, +5.03] |
+| G16 C8 T16 + G32 C4 T16 | 29.98 | 27.9 | 4.7x [2.5, 8.6] | +4.01 [+3.06, +4.93] |
+| G16 C4 T16 + G64 C1 T16 | 29.29 | 22.0 | 4.1x [2.8, 7.1] | +4.00 [+3.03, +5.28] |
+| G16 C4 T16 + G64 C2 T8 | 29.26 | 21.9 | 4.2x [2.9, 7.0] | +4.02 [+3.23, +5.19] |
+| G16 C4 T16 + G48 C2 T16 | 29.54 | 23.8 | 4.0x [2.8, 7.1] | +3.83 [+3.09, +5.10] |
+| G16 C4 T16 + G64 C2 T16, the G64 level at 3 bits | 29.86 | 28.6 | 4.5x [2.5, 6.1] | +3.86 [+3.03, +4.77] |
+| **G16 C4 T16 + G64 C2 T16** | 31.27 | 35.0 | **7.0x [2.7, 7.6]** | +4.96 [+4.14, +5.87] |
+| **G16 C8 T16 + G64 C2 T16** | 32.24 | 39.9 | 6.2x [3.5, 7.4] | **+5.74 [+4.95, +6.64]** |
+| G16 C4 T16 + G32 C2 T16 + G64 C2 T16 | 32.28 | 43.6 | 5.7x [3.4, 6.7] | +5.67 [+4.93, +6.55] |
+| G32 C4 T16 + G64 C2 T16 | 32.08 | 45.7 | 5.4x [3.0, 6.3] | +5.42 [+4.57, +6.27] |
+| G16 C8 T16 + G32 C8 T16 | 31.11 | 44.4 | 5.5x [2.0, 6.3] | +4.49 [+3.34, +5.45] |
+| G32 C4 T16 + G16 C4 T64 (a coarse level of every frame) | 29.35 | 39.2 | 2.3x [1.6, 5.0] | +2.87 [+2.03, +3.71] |
+| G32 C8 T8 + G16 C4 T64 | 29.73 | 39.8 | 2.7x [1.7, 5.7] | +3.24 [+2.45, +4.03] |
+
+Stopped early as clear nulls (paired against the same network without them, on the clips run): Fourier features of
+position, 4 frequencies, -0.96 dB [-1.16, -0.75] (2 clips); of time, 4 frequencies, -1.33 dB [-1.54, -1.12] (2 clips);
+a wider MLP (48 units) on G16 C4 + G64 C2, +0.20 dB [-0.12, +0.55] for 1.6 KB more and twice the work per pixel
+(3 clips); a coarser 8 x 8 level, G8 C4 + G64 C2, -0.90 dB [-1.04, -0.75] for 3.1 KB less (4 clips).
+
+- **A coarse level of every frame does not help**: a 16 x 16 level with 64 slices beside a 32 x 32 one costs 5 to 6 KB
+  and loses 0.5 to 0.9 dB against G32 C8 alone. The error of F3's network is not concentrated between its time slices
+  (on 4 validation clips it is within 0.9 dB at every phase between two slices, and midway is not consistently the
+  worst), so finer time does not buy quality; finer space does.
+- **The fine level wants 4 bits, 16 slices and 2 channels.** At 3 bits, with 8 slices, with one channel or at 48 x 48
+  points it saves 6 to 13 KB and loses 1.4 to 2.0 dB (paired over the 6 clips), and every such ratio is lower.
+- **The MLP at 8 bits costs nothing** when trained for it (-0.01 dB [-0.04, +0.02], -1.24 KB); the mask as runs neither
+  (the same network to the bit, -1.1 KB [-1.2, -1.0]).
+- **The choice.** By the rule (the memory ratio against every format, as stored) G16 C4 + G64 C2 is best, 7.0x against
+  6.2x for G16 C8 + G64 C2, and also against trimmed (4.5x against 4.2x) and block-sparse flipbooks (2.7x against 2.6x).
+  The quality over the flipbooks at equal memory, the steadier number, prefers G16 C8 + G64 C2 (+5.74 dB [+4.95, +6.64]
+  against +4.96), which is better than G32 C8 on every validation clip, while G16 C4 + G64 C2 loses on fire. Both went
+  on at 6,000 steps, and the order held; both went to the test clips, G16 C4 + G64 C2 as the rule's choice (also at
+  12,000 steps) and G16 C8 + G64 C2 as the steadier one. Recorded before the test was run.
+
+At 6,000 steps, through the runtime and the coder ([f4_nets_val.csv](f4_nets_val.csv)), against F3's networks:
+
+| validation | active PSNR | memory KB (resident) | packed KB | memory vs flipbooks as stored | vs trimmed | vs block-sparse | dB over stored flipbooks at equal memory | disk vs packed flipbooks |
+|---|---:|---:|---:|---|---|---|---|---|
+| G32 4-bit sparse, 6,000 steps (F3) | 30.65 | 35.0 (39.2) | 24.1 | 4.6x [2.3, 7.8] | 3.1x [1.7, 4.9] | 2.1x [1.2, 2.9] | +4.34 [+3.24, +5.41] | 1.7x [0.8, 2.7] |
+| G32 4-bit sparse, 12,000 steps (F3) | 30.79 | 35.0 (39.2) | 24.0 | 4.8x [2.3, 7.9] | 3.3x [1.7, 4.9] | 2.1x [1.3, 2.9] | +4.48 [+3.37, +5.57] | 1.9x [0.8, 2.8] |
+| **G16 C4 + G64 C2, 6,000 steps** | 31.79 | 35.0 (40.2) | 22.7 | **7.1x [3.0, 7.9]** | 4.6x [2.1, 4.8] | 2.8x [1.5, 3.0] | +5.48 [+4.41, +6.69] | 3.0x [1.0, 3.2] |
+| G16 C8 + G64 C2, 6,000 steps | 32.90 | 39.9 (46.2) | 26.8 | 6.3x [4.1, 8.3] | 4.3x [2.8, 4.7] | 2.7x [1.8, 3.2] | +6.40 [+5.43, +7.54] | 2.6x [1.4, 3.3] |
+
+Paired over the 6 validation clips: G16 C4 + G64 C2 minus F3's network, both 6,000 steps, +1.14 dB [-0.41, +3.19] at
++0.06 KB [-0.48, +0.82] (packed -1.37 KB [-1.64, -1.10]); G16 C8 + G64 C2 minus F3's, +2.24 dB [+0.88, +4.13] for
++4.97 KB [+3.87, +6.49].
+
+### Timing
+
+Thread CPU time per 128 x 128 frame through the runtime (AVX2 float; int8 on AVX-512 VNNI, the default where the CPU has
+it), median of 200 frames, least of 7 runs, pinned to one core, on the shared machine (load average 4.5): the fire_0
+test models.
+
+| model | stored KB | resident KB | working memory KB, float / int8 | ms per frame, float | ms per frame, int8 |
+|---|---:|---:|---:|---:|---:|
+| G32 4-bit sparse (F3) | 32.5 | 36.7 | 43 / 187 | 0.951 | 0.472 |
+| G16 C4 + G64 C2 | 31.8 | 37.0 | 47 / 108 | 0.867 | 0.576 |
+| G16 C8 + G64 C2 | 36.5 | 42.7 | 54 / 112 | 1.041 | 0.572 |
+
+- The int8 path projects the coarse level's first layer per grid point, as the grid family's does, but takes the fine
+  level's two channels per pixel: a level of up to 3 channels costs fewer operations per pixel as features times
+  weights than as an interpolated projection, and needs no projection of its 4,096 points per frame (projected, it
+  took 0.64 to 0.72 ms and 650 KB of working memory). The extra level costs about 0.1 ms per frame over F3's network
+  at int8; both are within the 1 ms budget at either precision. These timings were taken on a busy machine
+  (provisional, as F3's first ones).
+
+`nvfx_f2 timing --models $NEURALVFX_DATA/f3/models/test/fire_0__g32c8h32l2t16_b4_q_sp_i6000.nvfx,$NEURALVFX_DATA/f4/models/test/fire_0__p16.4.16+64.2.16h32l2_b4_q_sp_wq_i6000.nvfx,$NEURALVFX_DATA/f4/models/test/fire_0__p16.8.16+64.2.16h32l2_b4_q_sp_wq_i6000.nvfx --core 2 --reps 7 --precision both`
+
+### What limits it
+
+- **Where the bytes go.** In G16 C8 + G64 C2 the fine level's codes are 60 to 70% of the file (21 to 40 KB on the
+  validation clips), the coarse level's 20 to 23%, the mask runs 4 to 7% (1.5 to 2.4 KB), the MLP 3 to 5% (1.7 KB at 8
+  bits). The fine level is what buys the quality, and it is what costs: at 3 bits, with 8 slices, with one channel or
+  at 48 x 48 points it saves 6 to 13 KB and loses 1.4 to 2.0 dB, about 0.15 dB per KB, close to the trade that leaves
+  the ratio unchanged (about 0.16 dB per KB at 36 KB on the test envelope, below).
+- **Fire.** Fire changes fastest and fills its sprite with mid-sized detail: it prefers F3's G32 with 8 channels to a
+  coarse 16 x 16 level with 4 channels (-0.4 to -0.7 dB on every fire clip), and needs the 8-channel coarse level to
+  gain (+0.3 to +1.1 dB). Explosions gain most from the fine level (up to +5.3 dB), except the small one (explosion_2),
+  where it loses 1 dB with 4 coarse channels and gains 0.16 dB with 8.
+- **The envelope's steps.** On the test clips the best flipbook of any format holds 31.0 dB at 169 KB (ASTC 10x10,
+  every frame) and 33.5 dB at 256 KB (ASTC 8x8): about 4.2 dB per doubling of memory. A dB at the network's side is
+  worth about 18% on the ratio there, a KB about 3%. The 0.7 to 1.7 dB gained here move the ratio from 4.7x to 5.2 to
+  5.4x; doubling it would take about 4 dB more at the same memory.
+- **Not tried, or not finished:** a hashed level (a table smaller than the fine grid's stored points; the sparse mask
+  already stores only what the clip needs), a separate configuration per effect (fire with F3's grid, smoke and
+  explosions with the fine level; 2 validation clips per effect are too few to choose by), the coarse level at 5 or 6
+  bits, 12,000 steps for the second configuration, and a coder context for masked planes (disk only).
+
+### Reproduce
+
+```sh
+export NEURALVFX_DATA=/root/nvfx-data   # F2's clips, flipbook and video tables as in study F2
+build/nvfx_f2 trim --set val --threads 2       # the validation flipbooks without their empty space, BC7 and ASTC too: 3 minutes
+build/nvfx_f2 train --pilot --study f4 --set val --threads 1 --configs p32.8.16h32l2_b4_q_sp,p16.4.16+64.2.16h32l2_b4_q_sp_wq,...   # f4_pilot_val.csv
+build/nvfx_f2 report --pareto --pilot --study f4 --set val --also f3 --suffix _pilot --configs ...   # f4_equal_quality_val_pilot.csv
+build/nvfx_f2 train --study f4 --set val --threads 1 --configs p16.4.16+64.2.16h32l2_b4_q_sp_wq_i6000,p16.8.16+64.2.16h32l2_b4_q_sp_wq_i6000
+build/nvfx_f2 train --study f4 --set test --threads 1 --configs p16.4.16+64.2.16h32l2_b4_q_sp_wq_i6000,p16.8.16+64.2.16h32l2_b4_q_sp_wq_i6000,p16.4.16+64.2.16h32l2_b4_q_sp_wq_i12000
+build/nvfx_f2 report --pareto --study f4 --set test --also f3 --configs g32c8h32l2t16_b8,g32c8h32l2t16_b4_q_i6000,g32c8h32l2t16_b4_q_sp_i6000,g32c8h32l2t16_b4_q_sp_i12000,p16.4.16+64.2.16h32l2_b4_q_sp_wq_i6000,p16.4.16+64.2.16h32l2_b4_q_sp_wq_i12000,p16.8.16+64.2.16h32l2_b4_q_sp_wq_i6000
+#   the same with --flipbooks results/compression/f3_flipbooks_trim_test.csv --suffix _trim, and f3_flipbooks_sparse_test.csv --suffix _sparse;
+#   the validation tables with --set val; the figure with --suffix _fig --flipbooks (trimmed) --figure results/compression/f4_rate_quality.svg
+build/nvfx_f2 pairs --study f4 --set test --also f3 --pairs p16.4.16+64.2.16h32l2_b4_q_sp_wq_i6000:g32c8h32l2t16_b4_q_sp_i6000,...
+build/nvfx_f2 int8 --study f4 --set test --configs p16.4.16+64.2.16h32l2_b4_q_sp_wq_i6000,p16.8.16+64.2.16h32l2_b4_q_sp_wq_i6000
+build/nvfx_f2 timing --models a.nvfx,b.nvfx --core 2 --reps 7 --precision both
 ```

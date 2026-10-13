@@ -49,7 +49,8 @@ typedef struct nvfx_effect nvfx_effect;
 typedef struct nvfx_instance nvfx_instance;
 
 typedef struct nvfx_effect_info {
-  int arch;            /* 1 = grid (any size), 2 = conv (native size and native / 2, / 4), 3 = rollout (multiples of 32) */
+  int arch;            /* 1 = grid (any size), 2 = conv (native size and native / 2, / 4), 3 = rollout (multiples of 32),
+                          4 = multi-level grid (any size) */
   int native_size;     /* training sprite size in pixels */
   int frames;          /* frames of the training clip */
   float fps;           /* frames per second of the training clip */

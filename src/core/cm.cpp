@@ -1531,11 +1531,183 @@ bool walk_dense(IO& io, size_t& pos) {
   return true;
 }
 
+// A frame model of the multi family (NVFXMDL1 version 4, study F4, model.cpp): the header and the level table (plain
+// bytes), the mask runs (plain bytes), then per level its planes' ranges and fills (tensors in the coding order [C][K][T])
+// and codes (whole planes [planes][S][S] at the level's width in the order [C][K][T] when they fill whole bytes, else
+// and when masked their codes one plane after another), then the layers (8-bit weights in excess 128 as a tensor
+// [out][in], their fp16 scales), the films and the codes as version 1.
+template <class IO>
+bool walk_multi(IO& io, size_t& pos) {
+  const auto i32 = [&](size_t off) { return static_cast<std::int32_t>(io.le(off, 4)); };
+  const int n_controls = i32(28), n_latent = i32(32), bases = i32(36);
+  if (n_controls < 0 || n_controls > 64 || n_latent < 0 || n_latent > 64 || bases < 1 || bases > 64) return false;
+  pos = 76;
+  if (!io.raw(pos, 20)) return false;
+  const uint64_t L = io.le(pos, 4), flags = io.le(pos + 12, 4), mask_bytes = io.le(pos + 16, 4);
+  if (L < 1 || L > 16 || (flags & ~uint64_t{3}) != 0) return false;
+  pos += 20;
+  if (!io.raw(pos, 16 * L)) return false;
+  struct Lv {
+    size_t S, T, C;
+    int bits;
+  };
+  std::vector<Lv> lv;
+  for (uint64_t l = 0; l < L; ++l) {
+    const uint64_t S = io.le(pos + 16 * l, 4), T = io.le(pos + 16 * l + 4, 4), C = io.le(pos + 16 * l + 8, 4), b = io.le(pos + 16 * l + 12, 4);
+    if (S < 2 || S > 1024 || T < 1 || T > 4096 || C < 1 || C > 256 || b < 1 || b > 8) return false;
+    lv.push_back({static_cast<size_t>(S), static_cast<size_t>(T), static_cast<size_t>(C), static_cast<int>(b)});
+  }
+  pos += 16 * L;
+  if (!io.raw(pos, 36 + 16 * static_cast<size_t>(n_controls))) return false;  // effect, fps, feature bits, control names
+  pos += 36 + 16 * static_cast<size_t>(n_controls);
+  const bool masked = (flags & 1) != 0, w8 = (flags & 2) != 0;
+  const size_t K = static_cast<size_t>(bases);
+  std::vector<std::vector<size_t>> points;  // per level, per slice: stored points
+  if (masked) {
+    if (!io.raw(pos, mask_bytes)) return false;
+    size_t at = pos;
+    for (const Lv& v : lv) {
+      std::vector<std::uint8_t> mask(v.S * v.S);
+      std::vector<size_t> pts;
+      for (size_t t = 0; t < v.T; ++t) {
+        const size_t used = read_mask_runs(std::span(io.data() + at, pos + mask_bytes - at), mask);
+        if (used == 0) return false;
+        at += used;
+        pts.push_back(static_cast<size_t>(std::ranges::count(mask, std::uint8_t{1})));
+      }
+      points.push_back(std::move(pts));
+    }
+    if (at != pos + mask_bytes) return false;
+    pos += mask_bytes;
+  } else if (mask_bytes != 0) {
+    return false;
+  }
+  for (size_t l = 0; l < lv.size(); ++l) {
+    const Lv& v = lv[l];
+    const size_t plane = v.S * v.S, planes = K * v.T * v.C;
+    const auto count = [&](size_t p) { return masked ? points[l][(p / v.C) % v.T] : plane; };  // p in [K][T][C] order
+    std::vector<size_t> start(planes);
+    size_t end = pos;
+    for (size_t k = 0; k < planes; ++k) {
+      start[k] = end;
+      end += 4 + (masked ? 2 : 0) + packed_plane_bytes(count(k), v.bits);
+    }
+    if (!io.fits(pos, end - pos)) return false;
+    const auto index = [&](size_t c, size_t k, size_t t) { return (k * v.T + t) * v.C + c; };
+    std::vector<size_t> at;
+    for (size_t c = 0; c < v.C; ++c) {
+      for (size_t k = 0; k < K; ++k) {
+        for (size_t t = 0; t < v.T; ++t) {
+          at.push_back(start[index(c, k, t)]);
+          at.push_back(start[index(c, k, t)] + 2);
+        }
+      }
+    }
+    if (!io.tensor(shape(Kind::ranges, 2, {static_cast<uint32_t>(v.C), static_cast<uint32_t>(K), static_cast<uint32_t>(v.T), 2}, true), at)) return false;
+    if (masked) {
+      at.clear();
+      for (size_t c = 0; c < v.C; ++c) {
+        for (size_t k = 0; k < K; ++k) {
+          for (size_t t = 0; t < v.T; ++t) at.push_back(start[index(c, k, t)] + 4);
+        }
+      }
+      if (!io.tensor(shape(Kind::ranges, 2, {static_cast<uint32_t>(v.C), static_cast<uint32_t>(K), static_cast<uint32_t>(v.T)}), at)) return false;
+    }
+    const size_t code_at = masked ? 6 : 4;
+    std::vector<size_t> order;  // planes in the coding order [C][K][T]
+    for (size_t c = 0; c < v.C; ++c) {
+      for (size_t k = 0; k < K; ++k) {
+        for (size_t t = 0; t < v.T; ++t) {
+          if (count(index(c, k, t)) > 0) order.push_back(index(c, k, t));
+        }
+      }
+    }
+    if (!order.empty()) {
+      at.clear();
+      const bool whole = !masked && (v.bits == 8 || (plane * static_cast<size_t>(v.bits)) % 8 == 0);
+      if (whole) {
+        Shape fs = shape(Kind::features, 1, {static_cast<uint32_t>(order.size()), static_cast<uint32_t>(v.S), static_cast<uint32_t>(v.S)});
+        fs.bits = v.bits;
+        for (const size_t p : order) {
+          fs.lo.push_back(f16_lin(static_cast<uint16_t>(io.le(start[p], 2))));
+          fs.hi.push_back(f16_lin(static_cast<uint16_t>(io.le(start[p] + 2, 2))));
+          if (v.bits == 8) {
+            for (size_t j = 0; j < plane; ++j) at.push_back(start[p] + code_at + j);
+          } else {
+            at.push_back(start[p] + code_at);
+          }
+        }
+        if (v.bits == 8 ? !io.tensor(fs, at) : !io.tensor_bits(fs, at, plane)) return false;
+      } else {
+        std::vector<size_t> counts;
+        size_t total = 0;
+        for (const size_t p : order) {
+          counts.push_back(count(p));
+          total += count(p);
+        }
+        Shape fs = shape(Kind::features, 1, {static_cast<uint32_t>(total)});
+        fs.bits = v.bits;
+        if (v.bits == 8) {
+          for (const size_t p : order) {
+            for (size_t j = 0; j < count(p); ++j) at.push_back(start[p] + code_at + j);
+          }
+          if (!io.tensor(fs, at)) return false;
+        } else {
+          for (const size_t p : order) at.push_back(start[p] + code_at);
+          if (!io.tensor_bits_runs(fs, at, counts)) return false;
+        }
+      }
+    }
+    pos = end;
+  }
+  if (!walk_dense(io, pos)) return false;  // basis
+  if (!io.raw(pos, 4)) return false;
+  const uint64_t layers = io.le(pos, 4);
+  pos += 4;
+  if (layers > 64) return false;
+  for (uint64_t l = 0; l < layers; ++l) {
+    if (!w8) {
+      if (!walk_dense(io, pos)) return false;
+      continue;
+    }
+    if (!io.raw(pos, 8)) return false;
+    const uint64_t in = io.le(pos, 4), out = io.le(pos + 4, 4);
+    pos += 8;
+    if (in < 1 || out < 1 || in > 100000 || out > 100000 || !io.fits(pos, 2 * out + in * out + 2 * out)) return false;
+    if (!io.tensor(shape(Kind::scales, 2, {static_cast<uint32_t>(out)}), run(pos, out, 2))) return false;
+    pos += 2 * out;
+    if (!io.tensor(shape(Kind::weights, 1, {static_cast<uint32_t>(out), static_cast<uint32_t>(in)}), run(pos, in * out, 1))) return false;
+    pos += in * out;
+    if (!io.tensor(shape(Kind::biases, 2, {static_cast<uint32_t>(out)}), run(pos, out, 2))) return false;
+    pos += 2 * out;
+  }
+  if (!io.raw(pos, 4)) return false;
+  const uint64_t films = io.le(pos, 4);
+  pos += 4;
+  if (films > 64) return false;
+  for (uint64_t l = 0; l < films; ++l) {
+    if (!walk_dense(io, pos)) return false;
+  }
+  const size_t nl = static_cast<size_t>(n_latent);
+  for (int stat = 0; stat < 2; ++stat) {  // z_mean, z_std
+    if (nl > 0 && !io.tensor(shape(Kind::codes, 2, {static_cast<uint32_t>(nl)}), run(pos, nl, 2))) return false;
+    pos += 2 * nl;
+  }
+  if (!io.raw(pos, 4)) return false;
+  const uint64_t nz = io.le(pos, 4);
+  pos += 4;
+  if (nz > 1000000 || !io.fits(pos, 2 * nz * nl)) return false;
+  if (nz * nl > 0 && !io.tensor(shape(Kind::codes, 2, {static_cast<uint32_t>(nz), static_cast<uint32_t>(nl)}), run(pos, nz * nl, 2))) return false;
+  pos += 2 * nz * nl;
+  return true;
+}
+
 // A frame model (NVFXMDL1, model.cpp): header, features, dense layers, codes.
 template <class IO>
 bool walk_frame(IO& io, size_t& pos) {
   pos = 0;
   if (!io.raw(0, 76)) return false;
+  if (io.le(8, 4) == 4 && io.le(12, 4) == 4) return walk_multi(io, pos);  // version 4: the multi family
   const auto i32 = [&](size_t off) { return static_cast<std::int32_t>(io.le(off, 4)); };
   const std::uint32_t arch = static_cast<std::uint32_t>(io.le(12, 4));
   const int n_controls = i32(28), n_latent = i32(32), bases = i32(36), grid_t = i32(40), grid = i32(44), channels = i32(48);

@@ -58,6 +58,24 @@ Hyper conv_hyper() {
   return h;
 }
 
+// The multi family (study F4): three levels (one a still plane), Fourier features of position and time.
+Hyper multi_hyper(bool loop) {
+  Hyper h;
+  h.arch = Arch::multi;
+  h.size = 32;
+  h.frames = 12;
+  h.loop = loop;
+  h.n_controls = 3;
+  h.n_latent = 2;
+  h.bases = 3;
+  h.levels = {{12, 5, 3}, {7, 1, 2}, {16, 9, 2}};
+  h.pe_xy = 2;
+  h.pe_t = 2;
+  h.hidden = 20;
+  h.layers = 2;
+  return h;
+}
+
 // A model with every weight non-trivial, codes kept, and weights rounded to their storage precision.
 Model make_model(const Hyper& h, int bits) {
   Model m = init_model(h, 21);
@@ -457,4 +475,99 @@ TEST(Runtime, SparseFeaturesMatchTheReference) {
     }
   }
   nvfx_set_isa(NVFX_ISA_AUTO);
+}
+
+TEST(Runtime, MultiLevelModelsMatchTheReference) {
+  // The multi family (study F4): every level blended and sampled at its own resolution and time slices, with a width
+  // per level, masked levels decoded along their runs (one slice of the first level stores no point), the MLP's weights
+  // at 8 or 16 bits, Fourier features folded into the first layer; on every ISA, loops and one-shot effects, two sizes.
+  const float controls[3] = {0.6f, 0.2f, 0.8f};
+  for (const nvfx_isa isa : kIsas) {
+    if (nvfx_set_isa(isa) != NVFX_OK) continue;
+    for (const bool loop : {true, false}) {
+      for (const bool masked : {false, true}) {
+        for (const int mlp_bits : {16, 8}) {
+          Model m = make_model(multi_hyper(loop), 16);
+          m.mlp_bits = mlp_bits;
+          const auto vols = volumes(m.h);
+          const std::array<std::uint8_t, 3> widths = {4, 8, 3};
+          for (std::size_t l = 0; l < vols.size(); ++l) {
+            const std::size_t n = static_cast<std::size_t>(m.h.bases) * vols[l].slices * vols[l].channels;
+            for (std::size_t k = 0; k < n; ++k) m.plane_bits.push_back(widths[l]);
+          }
+          if (masked) {
+            std::mt19937_64 rng(41);
+            const Volume& last = vols.back();
+            m.feature_mask.resize(last.mask0 + static_cast<std::size_t>(last.slices) * last.plane_values());
+            for (std::size_t j = 0; j < m.feature_mask.size(); ++j) m.feature_mask[j] = j < 144 ? 0 : static_cast<std::uint8_t>(rng() % 3 != 0);
+          }
+          quantise_like_storage(m);
+          auto e = load(m);
+          for (const int size : {32, 48}) {
+            auto in = instance(e.get(), size);
+            ASSERT_EQ(nvfx_instance_set_precision(in.get(), NVFX_PRECISION_FLOAT), NVFX_OK);
+            nvfx_instance_set_controls(in.get(), controls, 3);
+            nvfx_instance_set_variation(in.get(), 1);
+            for (const int f : {0, 5, 11}) {
+              const auto got = render(in.get(), f / static_cast<double>(m.fps), size);
+              EXPECT_LE(max_diff(got, reference(m, f, controls, 1, size)), 2)
+                  << "multi loop " << loop << " masked " << masked << " mlp " << mlp_bits << " size " << size << " frame " << f << " isa " << isa;
+            }
+          }
+          nvfx_effect_info info{};
+          nvfx_effect_get_info(e.get(), &info);
+          EXPECT_EQ(info.arch, 4);
+          EXPECT_EQ(info.stored_bytes, m.storage_bytes());
+        }
+      }
+    }
+  }
+  nvfx_set_isa(NVFX_ISA_AUTO);
+}
+
+TEST(Runtime, MultiLevelInt8StaysWithinItsToleranceOfTheFloatReference) {
+  // The int8 path of the multi family: the first layer projected per grid point and interpolated for levels of 4 or more
+  // channels, per pixel from the interpolated features for levels of up to 3 (a level wider than the frame, and the
+  // baseline ISA, take the whole first layer per pixel instead), the hidden layers in integers; as the grid family's
+  // int8 path, within its tolerance of the float reference. It is the default precision.
+  const float controls[3] = {0.3f, 0.7f, 0.5f};
+  Hyper wide = multi_hyper(true);
+  wide.levels.push_back({40, 3, 2});
+  Hyper deep = multi_hyper(false);
+  deep.layers = 3;
+  Hyper mixed = multi_hyper(true);  // levels of 4 and 5 channels are projected, those of 2 and 3 enter per pixel
+  mixed.levels = {{8, 4, 5}, {16, 9, 2}, {12, 1, 4}, {6, 3, 3}};
+  int compared = 0;
+  for (const nvfx_isa isa : kIsas) {
+    if (nvfx_set_isa(isa) != NVFX_OK) continue;
+    for (const Hyper& h : {multi_hyper(true), multi_hyper(false), wide, deep, mixed}) {
+      Model m = make_model(h, 16);
+      m.mlp_bits = 8;
+      const auto vols = volumes(m.h);
+      for (std::size_t l = 0; l < vols.size(); ++l) {
+        const std::size_t n = static_cast<std::size_t>(m.h.bases) * vols[l].slices * vols[l].channels;
+        for (std::size_t k = 0; k < n; ++k) m.plane_bits.push_back(static_cast<std::uint8_t>(4 + l));
+      }
+      quantise_like_storage(m);
+      auto e = load(m);
+      for (const int size : {32, 48}) {
+        auto in = instance(e.get(), size);  // the default precision: int8
+        nvfx_instance_set_controls(in.get(), controls, 3);
+        nvfx_instance_set_variation(in.get(), 2);
+        for (const int f : {0, 5, 11}) {
+          const auto got = render(in.get(), f / static_cast<double>(m.fps), size);
+          const auto want = reference(m, f, controls, 2, size);
+          double sum = 0;
+          for (std::size_t i = 0; i < got.size(); ++i) sum += std::abs(int(got[i]) - int(want[i]));
+          EXPECT_LE(max_diff(got, want), kInt8Max) << m.h.describe() << " size " << size << " frame " << f << " isa " << isa;
+          EXPECT_LE(sum / static_cast<double>(got.size()), kInt8Mean) << m.h.describe() << " size " << size << " frame " << f << " isa " << isa;
+          ++compared;
+        }
+        ASSERT_EQ(nvfx_instance_set_precision(in.get(), NVFX_PRECISION_FLOAT), NVFX_OK);
+        EXPECT_LE(max_diff(render(in.get(), 4 / static_cast<double>(m.fps), size), reference(m, 4, controls, 2, size)), 2);
+      }
+    }
+  }
+  nvfx_set_isa(NVFX_ISA_AUTO);
+  EXPECT_GE(compared, 60);
 }

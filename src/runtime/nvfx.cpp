@@ -100,9 +100,9 @@ nvfx_isa resolved_isa() {
   return NVFX_ISA_BASELINE;
 }
 
-// The precision a frame model's instance runs at: DEFAULT is int8 for the grid family (docs/REPORT.md §7).
+// The precision a frame model's instance runs at: DEFAULT is int8 for the grid and multi families (docs/REPORT.md §7).
 nfx::rt::Precision frame_precision(const nfx::Model& m, nvfx_precision p) {
-  if (m.h.arch != nfx::Arch::grid || p == NVFX_PRECISION_FLOAT) return nfx::rt::Precision::float32;
+  if ((m.h.arch != nfx::Arch::grid && m.h.arch != nfx::Arch::multi) || p == NVFX_PRECISION_FLOAT) return nfx::rt::Precision::float32;
   return nfx::rt::Precision::int8;
 }
 
@@ -124,6 +124,7 @@ std::unique_ptr<Renderer> make_frame_renderer(const nfx::rt::Effect& e, int size
 std::size_t resident_bytes(const nfx::Model& m) {
   std::size_t n = m.raw_f16.size() * 2 + m.raw_u8.size() + m.raw_ranges.size() * 4 + m.raw_codebook.size() * 4;
   n += m.plane_bits.size() + m.raw_offsets.size() * 4 + m.raw_mask.size() + m.raw_fill.size() * 4;  // per-plane storage
+  n += m.raw_mask_at.size() * 4;  // the multi family: where each slice's mask runs start
   n += (m.basis.w.size() + m.basis.b.size()) * 4;
   for (const auto* group : {&m.layers, &m.films}) {
     for (const auto& d : *group) n += (d.w.size() + d.b.size()) * 4;
@@ -494,7 +495,7 @@ nvfx_status nvfx_instance_create(const nvfx_effect* e, int size, nvfx_instance**
     }
   }
   const nfx::Hyper& h = e->e.m.h;
-  if (h.arch == nfx::Arch::grid) {
+  if (h.arch == nfx::Arch::grid || h.arch == nfx::Arch::multi) {
     if (size < 16 || size > 1024 || size % 16) return NVFX_ERROR_UNSUPPORTED;
   } else if (size != h.size && size * 2 != h.size && size * 4 != h.size) {
     return NVFX_ERROR_UNSUPPORTED;
@@ -639,7 +640,7 @@ nvfx_status nvfx_instance_set_precision(nvfx_instance* in, nvfx_precision precis
   if (!in || (precision != NVFX_PRECISION_DEFAULT && precision != NVFX_PRECISION_FLOAT && precision != NVFX_PRECISION_INT8)) {
     return NVFX_ERROR_ARGUMENT;
   }
-  const bool grid = !in->a.r && in->effect->e.m.h.arch == nfx::Arch::grid;
+  const bool grid = !in->a.r && (in->effect->e.m.h.arch == nfx::Arch::grid || in->effect->e.m.h.arch == nfx::Arch::multi);
   if (precision == NVFX_PRECISION_INT8 && !grid) return NVFX_ERROR_UNSUPPORTED;
   if (in->a.r) return NVFX_OK;  // rollout effects: float
   const nfx::Model& m = in->effect->e.m;

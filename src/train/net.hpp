@@ -13,7 +13,7 @@ namespace nfx::train::detail {
 // Gradients have the shape of the model; feature gradients are tracked by touched time slice.
 struct Grads {
   Model g;
-  std::vector<std::uint8_t> touched;  // per time slice: 1 if any feature gradient was written
+  std::vector<std::uint8_t> touched;  // per time slice (of every volume, in volume order): 1 if any feature gradient was written
   explicit Grads(const Model& m);
   void zero();
   void add(const Grads& o);  // this += o (features: touched slices only)
@@ -37,11 +37,24 @@ class Net {
   void end_frame(const Model& m, Grads& g, std::span<const float> c, std::span<float> dc);
   double grid_pixels(const Model& m, Grads* g, std::span<const int> pixels, int size, std::span<const std::uint8_t> target,
                      float scale, std::span<float> out);
+  // The MLP of the grid and multi families on a chunk of n pixels whose inputs are in x0_ ([inputs][n]): outputs (into
+  // `out` when not empty), the squared error against `target` (added to sse), and with `g` the backward pass down to
+  // dx_ (then returns true).
+  bool mlp_chunk(const Model& m, Grads* g, std::span<const int> pixels, std::size_t start, int n, std::span<const std::uint8_t> target,
+                 float scale, std::span<float> out, double& sse);
+  double multi_pixels(const Model& m, Grads* g, std::span<const int> pixels, int size, std::span<const std::uint8_t> target,
+                      float scale, std::span<float> out);
   double conv_frame(const Model& m, Grads* g, std::span<const std::uint8_t> target, float scale, std::span<float> out);
 
   // per-frame state
   int i0_ = 0, i1_ = 0;
   float ft_ = 0;
+  // multi family: the levels, each one's time slices and weight, and where its slice starts in slice_ and dslice_
+  std::vector<Volume> vols_;
+  std::vector<int> li0_, li1_;
+  std::vector<float> lft_;
+  std::vector<std::size_t> loff_;
+  std::vector<float> tpe_;  // the frame's Fourier features of time
   std::vector<float> w_, film_, slice_, dslice_, dfilm_;
   // grid workspace (chunk of pixels, SoA [features][chunk])
   std::vector<float> x0_, z1_, a1_, dx_, dz_;

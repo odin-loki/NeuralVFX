@@ -15,7 +15,8 @@
 //                                                   design G3c: study D's rollout effects with quantised, dithered and
 //                                                   fewer start points, scored as study D's endless runs
 //   nvfx_f2 g3c-report --split val|test             each variant against v1, paired over the settings
-//   nvfx_f2 timing --models a.nvfx,b.nvfx [--core 3] [--reps 5]
+//   nvfx_f2 int8 --set val|test --configs A,B       the runtime's int8 path against the float network, paired over clips
+//   nvfx_f2 timing --models a.nvfx,b.nvfx [--core 3] [--reps 5] [--precision float|int8|both]
 //                                                   thread CPU time per 128 x 128 frame, least of the repetitions
 //   options: --root DIR (data root, default $NEURALVFX_DATA), --out DIR (results/compression), --threads 2,
 //            --clips a,b (a subset of the set), --study NAME (default f2: networks in $NEURALVFX_DATA/NAME/models and
@@ -23,7 +24,10 @@
 //            distillation teacher, a configuration trained by the same study or F2; default the same architecture at
 //            8 bits), --flipbooks a.csv,b.csv (report: more flipbook rows, e.g. other encoders, besides f2_flipbooks_<set>.csv),
 //            --suffix S (report: its table as <study>_equal_quality_<set>S.csv), --pareto (report: envelopes of the points
-//            that improve on every smaller one only; see tools::pareto_envelope)
+//            that improve on every smaller one only; see tools::pareto_envelope), --pilot (train: score with the trainer's
+//            forward pass, no runtime and no coder, into <study>_pilot_<set>.csv; report, pairs: read that table),
+//            --reuse (train: score a model file saved before instead of training it again), --also f3 (report, pairs:
+//            another study's networks too)
 //
 // Sets: "test" is study A's 12 clips (docs/REPORT.md §3), scored exactly as study A scores them (the network trained
 // on the clip, rendered through the runtime at its stored precision, active-region PSNR over all 64 frames). "val"
@@ -48,6 +52,10 @@
 //                            stored (the clip's support, grown by d points, default 0); the others take a fill per plane
 //   d<alpha>                 distillation (study F3): the target is (1 - alpha) x the clip + alpha x the teacher's frames
 //                            (for a squared error, the same as weighting the two losses); scored against the clip
+//   p<G>.<C>.<T>[+...]h<H>l<L>  the multi family (study F4): levels of G x G points, C channels, T time slices, their features
+//                            concatenated, then the MLP; file version 4. Its options: lb<b1>.<b2>... (bits per level, with
+//                            q), pe<n> and pt<n> (Fourier features of position and time), w8 (MLP weights stored at 8
+//                            bits), wq (and trained for them); b, q, sp, i and s as above
 //   e.g. g32c8h32l2t16_b8 is study A's grid_m at 8 bits; g32c8h32l2t16_b4_q_r3e-5 adds 4-bit QAT and a rate term.
 #include "args.hpp"
 #include "baselines.hpp"
@@ -103,6 +111,9 @@ struct Ctx {
   std::string teacher;         // distillation teacher configuration (empty: the architecture at 8 bits)
   std::vector<fs::path> flipbooks;  // report: more flipbook tables
   std::string suffix;          // report: written as <study>_equal_quality_<set><suffix>.csv
+  bool pilot = false;          // train: score with the trainer's forward pass (no runtime, no coder): <study>_pilot_<set>.csv
+  bool reuse = false;          // train: score a model file already saved (by a pilot) instead of training it again
+  std::vector<std::string> also;  // report, pairs: more studies' network tables (e.g. f3 beside f4)
 };
 
 // --- clips --------------------------------------------------------------------------------------------------------
@@ -419,6 +430,8 @@ struct Config {
   float distill = 0.f;
   bool sparse = false;
   int sparse_dilate = 0;
+  std::vector<int> level_bits;  // multi: per level (empty: `bits` for all)
+  bool mlp8 = false, mlp_qat = false;
   std::string arch;   // the architecture field
 };
 
@@ -442,6 +455,19 @@ Config parse_config(const std::string& name) {
     h.layers = L;
     h.grid_t = T;
     cf.iters = 2000;
+  } else if (a.size() > 1 && a[0] == 'p' && a.find('h') != std::string::npos) {  // multi: p<G>.<C>.<T>[+<G>.<C>.<T>...]h<H>l<L>
+    h.arch = Arch::multi;
+    const std::string lv = a.substr(1, a.find('h') - 1);
+    for (const auto part : std::views::split(lv, '+')) {
+      const std::string one(std::string_view(part).begin(), std::string_view(part).end());
+      Level l;
+      if (std::sscanf(one.c_str(), "%d.%d.%d", &l.grid, &l.channels, &l.grid_t) != 3) throw std::invalid_argument("configuration: level <G>.<C>.<T>");
+      h.levels.push_back(l);
+    }
+    if (std::sscanf(a.c_str() + a.find('h'), "h%dl%d", &H, &L) != 2) throw std::invalid_argument("configuration: p...h<H>l<L>");
+    h.hidden = H;
+    h.layers = L;
+    cf.iters = 2000;
   } else if (std::sscanf(a.c_str(), "v%d.%d.%dt%d", &c0, &c1, &c2, &T) == 4) {
     h.arch = Arch::conv;
     h.latent = kSize / 8;
@@ -457,6 +483,23 @@ Config parse_config(const std::string& name) {
   bool q_flag = false;
   for (std::size_t k = 1; k < parts.size(); ++k) {
     const std::string& p = parts[k];
+    if (p.starts_with("lb")) {  // multi: bits per level, "lb6.4"
+      for (const auto b : std::views::split(std::string_view(p).substr(2), '.')) cf.level_bits.push_back(std::stoi(std::string(std::string_view(b))));
+      continue;
+    }
+    if (p.starts_with("pe")) {
+      h.pe_xy = std::stoi(p.substr(2));
+      continue;
+    }
+    if (p.starts_with("pt")) {
+      h.pe_t = std::stoi(p.substr(2));
+      continue;
+    }
+    if (p == "w8" || p == "wq") {  // multi: the MLP's weights at 8 bits (wq: and trained for them)
+      cf.mlp8 = true;
+      cf.mlp_qat = cf.mlp_qat || p == "wq";
+      continue;
+    }
     if (p == "q") {
       cf.qat = true;
       q_flag = true;
@@ -490,8 +533,14 @@ Config parse_config(const std::string& name) {
     throw std::invalid_argument("configuration: m<bits> within mr<lo>-<hi>, without q or vq");
   }
   if (cf.distill < 0.f || cf.distill > 1.f) throw std::invalid_argument("configuration: d<alpha> with alpha in [0, 1]");
-  if (cf.sparse && (h.arch != Arch::grid || cf.vq_bits || cf.lambda > 0.f || (!cf.qat && cf.mixed == 0.f))) {
-    throw std::invalid_argument("configuration: sp needs the grid family and q or m<bits>, without vq or a rate term");
+  if (cf.sparse && ((h.arch != Arch::grid && h.arch != Arch::multi) || cf.vq_bits || cf.lambda > 0.f || (!cf.qat && cf.mixed == 0.f))) {
+    throw std::invalid_argument("configuration: sp needs the grid or multi family and q or m<bits>, without vq or a rate term");
+  }
+  if (h.arch == Arch::multi) {
+    if (cf.mixed > 0.f || cf.vq_bits || cf.bits > 8) throw std::invalid_argument("configuration: the multi family stores 1 to 8 bits per level");
+    if (!cf.level_bits.empty() && (cf.level_bits.size() != h.levels.size() || !cf.qat)) throw std::invalid_argument("configuration: lb needs a width per level and q");
+  } else if (!cf.level_bits.empty() || cf.mlp8 || h.pe_xy || h.pe_t) {
+    throw std::invalid_argument("configuration: lb, pe, pt, w8 and wq are options of the multi family");
   }
   return cf;
 }
@@ -507,10 +556,10 @@ struct RtEffect {
 };
 
 // The clip through the runtime, as study A renders it (training variation 0, no drift).
-Clip runtime_clip(const RtEffect& fx, const Model& m, std::size_t& scratch) {
+Clip runtime_clip(const RtEffect& fx, const Model& m, std::size_t& scratch, nvfx_precision precision = NVFX_PRECISION_FLOAT) {
   nvfx_instance* in = nullptr;
   if (nvfx_instance_create(fx.e, kSize, &in) != NVFX_OK) throw std::runtime_error("runtime instance failed");
-  nvfx_instance_set_precision(in, NVFX_PRECISION_FLOAT);  // the float network, as the study scored it
+  nvfx_instance_set_precision(in, precision);  // the float network, as the study scores it (int8: step_int8)
   nvfx_instance_set_drift(in, 0.f);
   nvfx_instance_set_variation(in, 0);
   scratch = nvfx_instance_scratch_bytes(in);
@@ -597,8 +646,22 @@ Clip teacher_clip(const Ctx& c, const ClipRef& r, const std::string& teacher) {
   throw std::runtime_error(std::format("distillation: no teacher {} for {} (train it first)", teacher, r.name));
 }
 
+// A pilot's score (study F4): the saved model loaded back and rendered by the trainer's float forward pass (what the
+// runtime computes, to rounding), its stored size; no packing.
+void score_pilot(const Ctx& c, const Clip& ref, const fs::path& file, std::map<std::string, std::string>& row) {
+  auto loaded = load_model(file);
+  if (!loaded) throw std::runtime_error(loaded.error());
+  const Clip out = train::render_clip(*loaded, {}, {}, kFrames, kSize, c.threads);
+  put_scores(row, metrics::score(ref, out));
+  row["stored_bytes"] = std::to_string(loaded->storage_bytes());
+  row["file_bytes"] = std::to_string(fs::file_size(file));
+  if (loaded->masked()) {
+    row["mask_share"] = f4(static_cast<double>(std::ranges::count(loaded->feature_mask, std::uint8_t{1})) / static_cast<double>(loaded->feature_mask.size()));
+  }
+}
+
 void step_train(const Ctx& c, const std::vector<std::string>& configs) {
-  Csv csv(c.out / std::format("{}_nets_{}.csv", c.study, c.set), kNetCols);
+  Csv csv(c.out / std::format("{}_{}_{}.csv", c.study, c.pilot ? "pilot" : "nets", c.set), kNetCols);
   const fs::path models = c.root / c.study / "models" / c.set;
   for (const std::string& name : configs) {
     const Config cf = parse_config(name);
@@ -632,6 +695,8 @@ void step_train(const Ctx& c, const std::vector<std::string>& configs) {
         o.sparse = true;
         o.sparse_dilate = cf.sparse_dilate;
       }
+      o.level_bits = cf.level_bits;
+      o.mlp_qat = cf.mlp_qat;
       if (cf.mixed > 0.f) {
         o.mixed_bits = cf.mixed;
         o.mixed_min = cf.mixed_min;
@@ -641,22 +706,31 @@ void step_train(const Ctx& c, const std::vector<std::string>& configs) {
       }
       Hyper h = cf.h;
       h.loop = ref.loop;
-      const train::Example ex{&target, {}};
-      auto res = train::train(h, std::span(&ex, 1), o);
-      res.model.effect = r.effect;
-      res.model.fps = ref.fps;
-      res.model.feature_bits = cf.bits;
-      res.model.feature_trim = cf.trim;
       const fs::path file = models / std::format("{}__{}.nvfx", r.name, name);
-      fs::create_directories(models);
-      if (auto w = save_model(file, res.model); !w) throw std::runtime_error(w.error());
+      train::Result res;
+      std::string train_s;
+      if (c.reuse && fs::exists(file)) {  // trained before (a pilot): the same file, scored again
+        train_s = "reused";
+      } else {
+        const train::Example ex{&target, {}};
+        res = train::train(h, std::span(&ex, 1), o);
+        res.model.effect = r.effect;
+        res.model.fps = ref.fps;
+        res.model.feature_bits = cf.bits;
+        res.model.feature_trim = cf.trim;
+        if (h.arch == Arch::multi) res.model.mlp_bits = cf.mlp8 ? 8 : 16;
+        fs::create_directories(models);
+        if (auto w = save_model(file, res.model); !w) throw std::runtime_error(w.error());
+        train_s = std::format("{:.1f}", res.seconds);
+      }
       std::map<std::string, std::string> row = {{"set", c.set}, {"clip", r.name}, {"effect", r.effect}, {"config", name},
-                                                {"arch", h.arch == Arch::grid ? "grid" : "conv"},
+                                                {"arch", h.arch == Arch::grid ? "grid" : h.arch == Arch::multi ? "multi" : "conv"},
                                                 {"bits", cf.mixed > 0.f ? std::format("{}", cf.mixed) : std::to_string(cf.bits)},
                                                 {"qat", cf.qat || cf.mixed > 0.f ? std::format("{}", cf.qat_start) : cf.vq_bits ? std::format("vq{}x{}", cf.vq_bits, cf.vq_dim) : "-"}, {"lambda", std::format("{}", cf.lambda)},
-                                                {"iters", std::to_string(cf.iters)}, {"train_s", std::format("{:.1f}", res.seconds)},
+                                                {"iters", std::to_string(cf.iters)}, {"train_s", train_s},
                                                 {"alloc_s", std::format("{:.1f}", res.alloc_seconds)}};
-      score_and_pack(ref, file, row);
+      if (c.pilot) score_pilot(c, ref, file, row);
+      else score_and_pack(ref, file, row);
       csv.add(row);
       std::println("train {} {}: {:.0f} s, {} -> {} bytes packed, active {}, est {} bits/value {}", r.name, name, res.seconds, row["stored_bytes"],
                    row["packed_bytes"], row["active_psnr"], row["est_bits_per_value"], row["plane_bits"]);
@@ -684,6 +758,39 @@ void step_rescore(const Ctx& c, const std::string& name, const std::string& patt
     score_and_pack(ref, p, row);
     csv.add(row);
     std::println("rescore {} {}: {} bytes, {} packed, active {}", r.name, name, row["stored_bytes"], row["packed_bytes"], row["active_psnr"]);
+  }
+}
+
+// The int8 path (the runtime's default for the grid and multi families) against the float network the study scores:
+// every saved model of the configurations on the set rendered both ways, active PSNR int8 minus float, paired over the
+// clips with a 95% bootstrap interval. Models from this study's folder, else F3's or F2's.
+void step_int8(const Ctx& c, const std::vector<std::string>& configs) {
+  std::println("| configuration ({} set) | clips | float active PSNR | int8 active PSNR | int8 - float dB |", c.set);
+  std::println("|---|---:|---:|---:|---|");
+  for (const std::string& name : configs) {
+    std::vector<double> fl, q8;
+    for (const ClipRef& r : clip_set(c)) {
+      fs::path file;
+      for (const std::string& study : {c.study, std::string("f3"), std::string("f2")}) {
+        const fs::path f = c.root / study / "models" / c.set / std::format("{}__{}.nvfx", r.name, name);
+        if (fs::exists(f)) {
+          file = f;
+          break;
+        }
+      }
+      if (file.empty()) continue;
+      const Clip ref = load_clip(r);
+      auto loaded = load_model(file);
+      if (!loaded) throw std::runtime_error(loaded.error());
+      RtEffect fx(read_bytes(file));
+      std::size_t scratch = 0;
+      fl.push_back(metrics::score(ref, runtime_clip(fx, *loaded, scratch, NVFX_PRECISION_FLOAT)).active_psnr);
+      q8.push_back(metrics::score(ref, runtime_clip(fx, *loaded, scratch, NVFX_PRECISION_INT8)).active_psnr);
+    }
+    if (fl.empty()) continue;
+    const auto iv = metrics::paired_bootstrap(q8, fl);
+    std::println("| {} | {} | {:.3f} | {:.3f} | {:+.3f} [{:+.3f}, {:+.3f}] |", name, fl.size(), std::accumulate(fl.begin(), fl.end(), 0.0) / static_cast<double>(fl.size()),
+                 std::accumulate(q8.begin(), q8.end(), 0.0) / static_cast<double>(q8.size()), iv.mean, iv.lo, iv.hi);
   }
 }
 
@@ -736,17 +843,18 @@ std::string short_label(const std::string& config) {
   } catch (const std::exception&) {
     return config;  // a rescored file (e.g. study A's own models)
   }
-  std::string s = cf.h.arch == Arch::grid ? std::format("G{}", cf.h.grid) : std::string("conv");
+  std::string s = cf.h.arch == Arch::grid ? std::format("G{}", cf.h.grid) : cf.h.arch == Arch::conv ? std::string("conv") : std::string();
+  for (const Level& l : cf.h.levels) s += std::format("{}G{} C{}{}", s.empty() ? "" : " + ", l.grid, l.channels, l.grid_t != 16 ? std::format(" T{}", l.grid_t) : "");
   if (cf.h.arch == Arch::grid && cf.h.channels != 8) s += std::format(" C{}", cf.h.channels);
-  if (cf.h.grid_t != 16) s += std::format(" T{}", cf.h.grid_t);
-  if (cf.h.arch == Arch::grid && cf.h.hidden != 32) s += std::format(" H{}", cf.h.hidden);
+  if (cf.h.arch != Arch::multi && cf.h.grid_t != 16) s += std::format(" T{}", cf.h.grid_t);
+  if (cf.h.arch != Arch::conv && cf.h.hidden != 32) s += std::format(" H{}", cf.h.hidden);
   if (cf.vq_bits) s += std::format(" VQ{}/{}", cf.vq_bits, cf.vq_dim);
   else if (cf.mixed > 0.f) s += std::format(" mixed {:g}-bit", cf.mixed);
   else s += std::format(" {}-bit", cf.bits);
   if (cf.sparse) s += " sparse";
   if (cf.distill > 0.f) s += std::format(" distil {:g}", cf.distill);
   if (cf.lambda > 0) s += " + rate";
-  if ((cf.h.arch == Arch::grid && cf.iters != 2000) || (cf.h.arch == Arch::conv && cf.iters != 1500)) s += std::format(" {}k it", cf.iters / 1000);
+  if ((cf.h.arch != Arch::conv && cf.iters != 2000) || (cf.h.arch == Arch::conv && cf.iters != 1500)) s += std::format(" {}k it", cf.iters / 1000);
   return s;
 }
 
@@ -859,6 +967,19 @@ void write_figure(const fs::path& path, const std::string& title, const Family& 
   f << o.str();
 }
 
+// The network tables a report and the pairs read: F2's, those of --also (e.g. f3), and this study's (with --pilot, its
+// pilot table).
+std::vector<fs::path> net_tables(const Ctx& c) {
+  std::vector<fs::path> v = {c.out / std::format("f2_nets_{}.csv", c.set)};
+  for (const std::string& s : c.also) {
+    if (s != "f2" && s != c.study) v.push_back(c.out / std::format("{}_nets_{}.csv", s, c.set));
+  }
+  if (c.study != "f2" || c.pilot) v.push_back(c.out / std::format("{}_{}_{}.csv", c.study, c.pilot ? "pilot" : "nets", c.set));
+  return v;
+}
+
+double number(const std::string& s) { return s.empty() ? std::nan("") : std::stod(s); }
+
 void step_report(const Ctx& c, const std::vector<std::string>& only_configs, const std::string& figure) {
   const auto clips = clip_set(c);
   std::map<std::string, std::size_t> ci;
@@ -911,10 +1032,7 @@ void step_report(const Ctx& c, const std::vector<std::string>& only_configs, con
   // Networks.
   std::map<std::string, Point> nets;
   std::map<std::string, std::map<std::string, double>> net_extra;  // config -> resident, scratch means
-  std::vector<std::string> net_studies = {"f2"};
-  if (c.study != "f2") net_studies.push_back(c.study);  // a later study's report shows F2's networks beside its own
-  for (const std::string& study : net_studies) {
-    const fs::path table = c.out / std::format("{}_nets_{}.csv", study, c.set);
+  for (const fs::path& table : net_tables(c)) {
     if (!fs::exists(table)) continue;
     Csv f(table, kNetCols);
     for (const auto& r : f.rows()) {
@@ -926,9 +1044,9 @@ void step_report(const Ctx& c, const std::vector<std::string>& only_configs, con
       for (const std::string m : {"stored", "packed", "resident"}) {
         auto& v = p.b[m];
         if (v.empty()) v.assign(n, std::nan(""));
-        v[i] = std::stod(r.at(m + "_bytes"));
+        v[i] = number(r.at(m + "_bytes"));  // a pilot's rows have no packed or resident size
       }
-      net_extra[r.at("config")]["scratch"] = std::stod(r.at("scratch_bytes"));
+      net_extra[r.at("config")]["scratch"] = number(r.at("scratch_bytes"));
     }
   }
   const auto complete = [&](const Point& p) {
@@ -1083,12 +1201,11 @@ void step_report(const Ctx& c, const std::vector<std::string>& only_configs, con
 // KB, each a - b with a 95% bootstrap interval (10,000 resamples). Networks from F2's table and this study's.
 void step_pairs(const Ctx& c, const std::vector<std::string>& pairs) {
   std::map<std::string, std::map<std::string, std::map<std::string, double>>> v;  // config -> clip -> column -> value
-  for (const std::string& study : {std::string("f2"), c.study}) {
-    const fs::path table = c.out / std::format("{}_nets_{}.csv", study, c.set);
+  for (const fs::path& table : net_tables(c)) {
     if (!fs::exists(table)) continue;
     Csv f(table, kNetCols);
     for (const auto& r : f.rows()) {
-      for (const std::string col : {"active_psnr", "stored_bytes", "packed_bytes"}) v[r.at("config")][r.at("clip")][col] = std::stod(r.at(col));
+      for (const std::string col : {"active_psnr", "stored_bytes", "packed_bytes"}) v[r.at("config")][r.at("clip")][col] = number(r.at(col));
     }
   }
   const auto clips = clip_set(c);
@@ -1377,7 +1494,7 @@ double thread_seconds() {
   return static_cast<double>(ts.tv_sec) + 1e-9 * static_cast<double>(ts.tv_nsec);
 }
 
-void step_timing(const std::vector<std::string>& models, int core, int reps) {
+void step_timing(const std::vector<std::string>& models, int core, int reps, const std::string& precision) {
   cpu_set_t one;
   CPU_ZERO(&one);
   CPU_SET(core, &one);
@@ -1388,16 +1505,24 @@ void step_timing(const std::vector<std::string>& models, int core, int reps) {
     la >> load[0] >> load[1] >> load[2];
   }
   std::println("timing on core {}, load average {:.2f} {:.2f} {:.2f} (provisional: the machine is shared)", core, load[0], load[1], load[2]);
-  std::println("| model | stored KB | resident KB | ms per 128 x 128 frame (thread CPU, median of 200 frames, least of {} runs) |", reps);
-  std::println("|---|---:|---:|---:|");
+  std::println("| model | precision | stored KB | resident KB | scratch KB | ms per 128 x 128 frame (thread CPU, median of 200 frames, least of {} runs) |", reps);
+  std::println("|---|---|---:|---:|---:|---:|");
+  std::vector<nvfx_precision> precisions;  // float as first timed; int8 (the default of the grid and multi families) on request
+  if (precision == "float" || precision == "both") precisions.push_back(NVFX_PRECISION_FLOAT);
+  if (precision == "int8" || precision == "both") precisions.push_back(NVFX_PRECISION_INT8);
+  if (precisions.empty()) throw std::invalid_argument("--precision float, int8 or both");
   for (const std::string& path : models) {
+  for (const nvfx_precision prec : precisions) {
     const auto bytes = read_bytes(path);
     RtEffect fx(bytes);
     nvfx_effect_info info{};
     nvfx_effect_get_info(fx.e, &info);
     nvfx_instance* in = nullptr;
     if (nvfx_instance_create(fx.e, kSize, &in) != NVFX_OK) throw std::runtime_error("instance failed");
-    nvfx_instance_set_precision(in, NVFX_PRECISION_FLOAT);  // the float network, as first timed (int8: nvfx_experiment int8-timing)
+    if (nvfx_instance_set_precision(in, prec) != NVFX_OK) {
+      nvfx_instance_free(in);
+      continue;  // the conv family has no int8 path
+    }
     std::vector<std::uint8_t> buf(static_cast<std::size_t>(kSize) * kSize * 4);
     double best = 1e9;
     for (int r = 0; r < reps; ++r) {
@@ -1410,9 +1535,11 @@ void step_timing(const std::vector<std::string>& models, int core, int reps) {
       std::ranges::sort(ms);
       best = std::min(best, ms[ms.size() / 2]);
     }
+    const double scratch = static_cast<double>(nvfx_instance_scratch_bytes(in)) / 1024;
     nvfx_instance_free(in);
-    std::println("| {} | {:.1f} | {:.1f} | {:.3f} |", fs::path(path).filename().string(), static_cast<double>(info.stored_bytes) / 1024,
-                 static_cast<double>(info.resident_bytes) / 1024, best);
+    std::println("| {} | {} | {:.1f} | {:.1f} | {:.1f} | {:.3f} |", fs::path(path).filename().string(), prec == NVFX_PRECISION_FLOAT ? "float" : "int8",
+                 static_cast<double>(info.stored_bytes) / 1024, static_cast<double>(info.resident_bytes) / 1024, scratch, best);
+  }
   }
 }
 
@@ -1427,7 +1554,7 @@ std::vector<std::string> split(const std::string& s) {
 }  // namespace
 
 int main(int argc, char** argv) try {
-  const tools::Args a(argc, argv, {"help", "pareto"});
+  const tools::Args a(argc, argv, {"help", "pareto", "pilot", "reuse"});
   const auto& pos = a.positional();
   if (a.flag("help") || pos.empty()) {
     std::println("nvfx_f2 data | flipbooks | train --configs A,B | rescore --name N --pattern P | video [--codecs ...] | report | timing --models a,b\n"
@@ -1448,6 +1575,9 @@ int main(int argc, char** argv) try {
   for (const auto& f : split(a.str("flipbooks", ""))) c.flipbooks.emplace_back(f);
   c.suffix = a.str("suffix", "");
   tools::pareto_envelope = a.flag("pareto");
+  c.pilot = a.flag("pilot");
+  c.reuse = a.flag("reuse");
+  c.also = split(a.str("also", ""));
   const std::string step = pos[0];
   if (step == "data") step_data(c);
   else if (step == "flipbooks") step_flipbooks(c);
@@ -1459,7 +1589,8 @@ int main(int argc, char** argv) try {
     const auto v = split(a.str("codecs", ""));
     step_video(c, std::set<std::string>(v.begin(), v.end()));
   } else if (step == "report") step_report(c, split(a.str("configs", "")), a.str("figure", ""));
-  else if (step == "timing") step_timing(split(a.need("models")), a.i("core", 3), a.i("reps", 5));
+  else if (step == "int8") step_int8(c, split(a.need("configs")));
+  else if (step == "timing") step_timing(split(a.need("models")), a.i("core", 3), a.i("reps", 5), a.str("precision", "float"));
   else if (step == "g3c") step_g3c(c, a.str("split", "val"), split(a.str("variants", "v1,b8,b6,b6_d,b4_d,h,b6_d_h")));
   else if (step == "g3c-report") step_g3c_report(c, a.str("split", "val"));
   else throw std::invalid_argument("unknown step " + step);
