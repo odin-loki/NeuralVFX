@@ -1163,7 +1163,8 @@ On disk against the video codecs (network packed, codec payload, equal mean acti
 **Pilots** (2,000 steps, 4-bit features with quantisation-aware training, sparse, scored through the trainer's float
 forward pass; [f4_pilot_val.csv](f4_pilot_val.csv)). Memory ratio against the best flipbook of any format as stored
 and the quality difference at the network's own size, 95% intervals over the 6 clips. F3's network (G32, 8 channels, 16
-slices) is the first row; the next two are the same network in the new file version:
+slices) is the first row; the next two are the same network in the new file version. From the third row on the MLP's
+weights are trained for 8 bits (`wq`), except in the last three rows (run before that choice):
 
 | validation, 2,000 steps | active PSNR | stored KB | memory vs flipbooks (every format) | dB over flipbooks at equal memory |
 |---|---:|---:|---|---|
