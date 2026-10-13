@@ -15,6 +15,7 @@ when it is unset. Nothing under it is ever committed; `.gitignore` also blocks c
 | `experiments/clips/{a,b,c}/` | simulated clips of the evaluation (`nvfx_experiment data`) |
 | `experiments/models/` | trained models of the evaluation |
 | `experiments/media/` | comparison sheets and side-by-side videos |
+| `j/inverse/` | study J's inverse and motion networks, one file per effect and kind of footage (`nvfx_estimate` reads them; [FOOTAGE.md](FOOTAGE.md)) |
 
 ## 2. Simulated clips
 

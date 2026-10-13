@@ -29,6 +29,8 @@ C++23, no third-party runtime dependencies, a C API for engines, no Python.
 - **Engine integration:** [docs/ENGINES.md](docs/ENGINES.md) (C API for effects and scenes, threading, Unreal, Unity,
   the Godot 4 plugin).
 - **Data and licences:** [docs/DATA.md](docs/DATA.md).
+- **Footage:** [docs/FOOTAGE.md](docs/FOOTAGE.md): start points estimated from frames (study J), so a rollout effect
+  continues what footage shows (`nvfx_estimate`); validated on simulated renders only.
 - **Viewer:** [docs/VIEWER.md](docs/VIEWER.md).
 
 ## Results in brief
@@ -85,6 +87,7 @@ From [docs/REPORT.md](docs/REPORT.md), measured on simulated fire, smoke and exp
 |---|---|---|
 | simulation | `src/sim`, `nvfx_sim` | a 2D stable-fluids solver (temperature, soot, vorticity, curl noise, combustion expansion) that renders fire, smoke and explosions to premultiplied RGBA clips with labelled controls: unlimited training and test data |
 | ingest | `src/core/ingest.cpp`, `nvfx_ingest` | owner footage into clips via ffmpeg, with a licence check and a licence register |
+| footage to start points | `src/footage`, `nvfx_estimate` | a rollout effect's state estimated from a few frames: an inverse renderer (a per-pixel MLP over a pyramid of the frame), refinement through the effect's learned renderer, a motion network and assimilation through the effect's stepper; writes a copy of the effect with start points from the footage ([docs/FOOTAGE.md](docs/FOOTAGE.md), study J; validated on simulated renders only) |
 | models | `src/core/model.cpp` | a **grid** family (learned feature volumes over x, y and t, blended by the controls, sampled bilinearly, then a small MLP with FiLM conditioning) and a **conv** family (a learned latent, three upsampling convolutions); `.nvfx` files store features at 16 bits, 2 to 8 bits (bit-packed below 8) or vector-quantised |
 | rollout effects | `src/core/rollout.cpp`, `src/train/rollout_train.cpp`, `src/runtime/rt_rollout.hpp` | start points plus a learned stepper on a 32 x 32 grid (advection and pressure projection built in; the network supplies forces and the sub-grid closure, conditioned on the controls and fed the simulation's kind of noise), a detail layer that carries full-resolution heat and soot with the learned flow, and a per-pixel renderer; trained by backpropagation through time, then on its own rollouts with statistical losses |
 | trainer | `src/train`, `nvfx_train` | hand-written gradients (checked against finite differences), Adam, multithreaded; per-clip variation codes |
@@ -107,7 +110,7 @@ Ubuntu 24.04: `g++-14`, CMake 3.25+, Ninja, `libgtest-dev`, `zlib1g-dev` (and `f
 ```sh
 cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_COMPILER=g++-14
 cmake --build build
-ctest --test-dir build                     # 251 tests: sim, metrics, codecs, gradients, runtime parity, composition, scene scripts, field effects, context mixing, denoiser, lossless coder, low-bit and vector-quantised features, video codecs, BC7 and ASTC flipbooks, allocation, C API for effects and scenes
+ctest --test-dir build                     # 260 tests: sim, metrics, codecs, gradients, runtime parity, composition, scene scripts, field effects, context mixing, denoiser, lossless coder, low-bit and vector-quantised features, video codecs, BC7 and ASTC flipbooks, allocation, C API for effects and scenes, start points from footage
 ```
 
 Options: `NEURALFX_BUILD_VIEWER` (GLFW + OpenGL; fetches Dear ImGui), `NEURALFX_BUILD_SHARED` (libnvfx.so for engines),
@@ -140,6 +143,8 @@ training, evaluation; about three hours), then `d-timing` on an idle machine and
 |---|---|
 | `nvfx_sim` | simulate one clip; `--bench` reports the solver's cost per frame |
 | `nvfx_ingest` | footage into a clip, after a licence check; adds a row to the licence register |
+| `nvfx_estimate` | start points for a rollout effect estimated from footage (a clip, a video or frames, after the same licence check): writes a copy of the effect that continues from the footage; `--preview` draws the footage frame and the effect from it ([docs/FOOTAGE.md](docs/FOOTAGE.md) §8) |
+| `nvfx_study_j` | study J: `inverse`, `motion` (the networks), `val`, `val-endless`, `test`, `test-endless`, `report` ([docs/FOOTAGE.md](docs/FOOTAGE.md) §9) |
 | `nvfx_train` | train a frame model from one or more clips (controls and variation codes come from the clips), or with `--rollout` a rollout effect from the simulation |
 | `nvfx_eval` | score the flipbook ladder or a model against a reference clip |
 | `nvfx_experiment` | the full study: `data`, `a` (`a-flipbooks`: only the flipbook rows still missing), `b`, `c`, `media`, `timing`, `report`; study D: `d-chaos`, `d-train`, `d-tune`, `d-finish`, `d-eval`, `d-timing`; study G: `g-fine` (design G1, DCM-fine, end to end); to come: `g-data`, `g-pilot`, `g-search`, `g-eval`, `g-timing` |
@@ -160,12 +165,12 @@ training, evaluation; about three hours), then `d-timing` on an idle machine and
 
 | path | what |
 |---|---|
-| `include/neuralfx/` | public headers: `nvfx.h` (C API), `nvfx_scene.h` (C API for scenes), `clip`, `sim`, `model`, `train`, `rollout`, `rollout_train`, `metrics`, `flipbook`, `ingest`, `image_io`, `noise`, `cm` (lossless coder), `video_codec` (video baselines); `dcm/` (context mixing) |
+| `include/neuralfx/` | public headers: `nvfx.h` (C API), `nvfx_scene.h` (C API for scenes), `clip`, `sim`, `model`, `train`, `rollout`, `rollout_train`, `footage`, `metrics`, `flipbook`, `ingest`, `image_io`, `noise`, `cm` (lossless coder), `video_codec` (video baselines); `dcm/` (context mixing) |
 | `src/core`, `src/sim`, `src/train`, `src/runtime`, `src/compose`, `src/dcm`, `src/codec`, `src/common`, `src/proto` | libraries (see the table above); `src/codec` runs video codecs through ffmpeg as baselines; `src/proto` holds the Phase 0 prototypes |
 | `tools/`, `examples/`, `viewer/`, `bench/` | executables |
 | `engines/godot/` | the Godot 4 GDExtension, its demo project and its headless test |
 | `tests/` | GoogleTest suites, the allocation test, the C host self-test (the viewer's tests are in `viewer/`) |
-| `docs/` | plan, report, composed effects, engines, data, viewer, figures |
+| `docs/` | plan, report, composed effects, footage, engines, data, viewer, figures |
 | `results/` | small text results (CSVs and generated summaries); no images, clips or weights |
 
 ## Rules
