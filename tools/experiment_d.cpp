@@ -220,6 +220,7 @@ void step_train(const Ctx& c) {
     so.progress = [&](int it, int unroll, double loss) { std::println("  {} stepper {:5d} unroll {:2d} loss {:.5f}", m.effect, it, unroll, loss); };
     const rollout::StepperResult sr = rollout::train_stepper(m, runs, so);
     const rollout::FinishResult fin = c.stages12 ? rollout::FinishResult{} : rollout::finish_model(m, r, runs);
+    if (c.stages12) rollout::choose_starts(m, runs, r.starts, r.start_frame);  // a model file needs start points (d-finish chooses them again)
     fs::create_directories(model_path(c, r.effect).parent_path());
     if (auto w = rollout::save_model(model_path(c, r.effect), m); !w) throw std::runtime_error(w.error());
     const double total = std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
