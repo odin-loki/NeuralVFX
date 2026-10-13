@@ -48,7 +48,9 @@ Plan and decisions: [PLAN.md](PLAN.md).
   the grid points a clip needs (study F3: 36 KB instead of 67.5 KB, same quality) lifts this to **13.8x [7.9, 16.6]
   against BC7 and 4.7x [3.3, 7.7] against every format**. Flipbooks can drop their empty space too: trimmed to their
   content, 8.8x [5.1, 11.3] and 3.1x [2.4, 4.4]; keeping only their non-empty blocks, 5.6x [3.4, 7.3] and **2.2x
-  [1.6, 2.8]**. Against our BC3 layout, as first reported: 9.1x (F2), and 16.8x, 10.7x and 6.7x (F3).
+  [1.6, 2.8]**. Against our BC3 layout, as first reported: 9.1x (F2), and 16.8x, 10.7x and 6.7x (F3). Two feature
+  grids at different resolutions (study F4) move these to 5.2x, 3.5x and 2.4x against every format (about +1 dB at
+  equal memory, intervals overlapping F3's).
 - **On disk, video codecs win, and packed ASTC flipbooks beat the 8-bit networks.** With both sides packed by a
   lossless coder, 8-bit networks need more disk than the best packed flipbook of any format (0.75x [0.65, 0.89]); 4-bit
   features with a rate term and 6,000 training steps need 2.2x [1.8, 2.9] less (5.1x against BC7, 4.4x against our
@@ -327,6 +329,23 @@ no point estimate). Memory at equal quality, the 12 test clips, 95% bootstrap in
   dense 4-bit with 6,000 steps 2.5x instead of 3.6x with F2's envelope, the 8-bit network 1.7x instead of 1.9x (memory)
   and 0.75x instead of 0.86x (disk). The tables of F2 and study A above keep F2's envelope; both are in
   `results/compression`.
+
+**A better feature representation (study F4).** Several grids at different resolutions before the same decoder (as
+Instant-NGP and Neural Texture Compression do), coarse grids of every frame, positional encodings and a wider decoder
+were tried on the 6 validation clips; the test clips were used once. One finer grid is what helps: a 16 x 16 grid with
+4 channels plus a 64 x 64 grid with 2 channels, both 4-bit and sparse, with the mask stored as runs and the decoder at
+8 bits (file version 4).
+- **The configuration chosen by the rule (36.6 KB, 31.77 dB) needs 5.2x [4.0, 7.8] less memory than the best flipbook
+  of any format as stored, 3.5x [3.0, 4.5] against trimmed flipbooks and 2.4x [2.0, 2.9] against block-sparse ones**
+  (F3: 4.7x, 3.1x, 2.2x); against BC7 alone 14.6x as stored and 10.2x trimmed.
+- Paired with F3's network at the same memory it gains +0.71 dB [-0.07, +1.59], a tie: better on smoke and explosions,
+  0.4 to 0.7 dB worse on fire. With 8 coarse channels (41.7 KB, 32.78 dB) it is better on every clip, +1.72 dB
+  [+0.96, +2.62], at 5.4x, 3.6x and 2.5x.
+- So the better representation is worth about 1 dB at equal memory, or 9 to 16% on the ratios: about 5x against every
+  format as stored, 3.5x trimmed and 2.5x block-sparse. On disk 2.3x [1.9, 3.0] less than packed flipbooks; AV1 still
+  needs 2.5 times less. It costs 0.58 ms per 128 x 128 frame at int8 (F3's network 0.47 ms; busy machine).
+- Nulls: positional encodings (-0.96 dB for x and y, -1.33 dB for t), a coarse grid of every frame (-0.5 to -0.9 dB),
+  cheaper fine grids (-1.4 to -2.0 dB), a third grid in between (+0.03 dB for 3.6 KB).
 
 ![A: smoke. Rows: reference; neural grid_m, 132 KB; BC3 32 frames at 64 px, 128 KB; BC3 8 frames at 128 px with motion vectors, 144 KB](figures/a_smoke_compare.png)
 

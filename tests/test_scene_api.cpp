@@ -13,6 +13,8 @@
 
 #include <gtest/gtest.h>
 
+#include <unistd.h>
+
 #include <cmath>
 #include <cstdlib>
 #include <filesystem>
@@ -535,7 +537,8 @@ TEST(SceneApi, FireballKeyframesMatchTheFrozenOnes) {
   const nvfx_scene_info i = info_of(s);
   ASSERT_EQ(i.width, 1280);
   std::vector<std::uint8_t> rgba(z(i.width) * z(i.height) * 4);
-  const std::filesystem::path tmp = std::filesystem::temp_directory_path() / "nvfx_scene_api_keyframe.png";
+  // A name of this process alone: several builds may run this test at once.
+  const std::filesystem::path tmp = std::filesystem::temp_directory_path() / std::format("nvfx_scene_api_keyframe_{}.png", ::getpid());
   int same = 0;
   for (const int f : {27, 38, 45, 60, 87, 126, 180, 246}) {  // the keyframes 0.9, 1.27, ..., 8.2 s at 30 fps
     ASSERT_EQ(nvfx_scene_seek(s, f / 30.0), NVFX_OK);
