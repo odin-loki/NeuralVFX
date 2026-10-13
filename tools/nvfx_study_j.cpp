@@ -892,6 +892,7 @@ std::string iv(const metrics::Interval& v, int prec = 2) {
 }
 
 // Tracking tables of one split: mean per method and condition, and paired differences.
+// full: every configuration under clean_rgba; the other conditions show `order` only.
 void report_tracking(const fs::path& csv, std::ostream& md, const std::string& title, const std::vector<std::string>& order, bool full) {
   if (!fs::exists(csv)) return;
   // effect -> (condition, method) -> run -> values (h0..h60, then state columns)
@@ -912,7 +913,7 @@ void report_tracking(const fs::path& csv, std::ostream& md, const std::string& t
       for (const auto& m : order) {
         if (methods.contains({cnd, m})) keys.push_back({cnd, m});
       }
-      if (full) {
+      if (full && (cnd == "clean_rgba" || cnd == "any")) {
         for (const auto& [k, v] : methods) {
           if (k.first == cnd && std::ranges::find(order, k.second) == order.end()) keys.push_back(k);
         }
@@ -955,7 +956,7 @@ void report_tracking(const fs::path& csv, std::ostream& md, const std::string& t
     for (const auto& cnd : conds) {
       if (cnd == "any") continue;
       for (const auto& m : order) {
-        if (m == "stored_nearest" || m == "true" || m.starts_with("oracle")) continue;
+        if (m == "stored_nearest" || m == "true" || m.starts_with("oracle") || m == "k1_zero") continue;
         if (!methods.contains({cnd, m})) continue;
         pair_row(cnd, m, cnd, "stored_nearest", "any");
         pair_row(cnd, m, cnd, "true", "any");
@@ -1008,11 +1009,12 @@ void step_report(const Ctx& c) {
         "against the real run's clean frames; `0` is the start frame itself redrawn by the effect.\n";
   report_tracking(c.results / "j_test.csv", md, "Test: tracking from the start frame (salt-2 runs)", {"true", "estimated", "stored_nearest"}, false);
   report_endless(c.results / "j_test_endless.csv", md, "Test: endless statistics at study B's held-out settings");
-  std::vector<std::string> order = {"true", "stored_nearest"};
-  for (const auto& cf : val_configs()) {
-    if (cf.name != "true") order.push_back(cf.name);
-  }
-  report_tracking(c.results / "j_val.csv", md, "Validation: tracking (salt-3 runs), every configuration", order, true);
+  // validation: every configuration under clean_rgba; under the other conditions the oracles, the chosen
+  // configurations (motion network + assimilation for looping effects, block matching + assimilation for one-shots)
+  // and their simpler versions
+  const std::vector<std::string> order = {"true", "stored_nearest", "oracle_vel", "k8_assim_motion_b05", "k3_motion", "k8_assim_b05", "k8_assim_b0",
+                                          "k2_flow", "k1_zero"};
+  report_tracking(c.results / "j_val.csv", md, "Validation: tracking (salt-3 runs); every configuration under clean_rgba", order, true);
   report_endless(c.results / "j_val_endless.csv", md, "Validation: endless statistics (6 settings of salt-3 runs)");
   std::ofstream(c.results / "j_summary.md") << md.str();
   std::print("{}", md.str());

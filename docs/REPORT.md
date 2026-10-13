@@ -84,7 +84,10 @@ Plan and decisions: [PLAN.md](PLAN.md).
   code here, but LZ tokens and lighter models make the coder decode 4 to 38 times faster. Training with couplings
   improves the explosion inside scenes. The composed fireball runs at 80 frames per second at 720p on 4 threads.
 - **Not done:** owner footage (none supplied), rate-optimised block encoding for disk, engine plugins other than
-  Godot's (§9, §10; the Godot 4 plugin and a C API for scenes: [ENGINES.md](ENGINES.md) §7, §8).
+  Godot's (§9, §10; the Godot 4 plugin and a C API for scenes: [ENGINES.md](ENGINES.md) §7, §8). The path from footage
+  to rollout effects is built and measured on simulated renders (study J, [FOOTAGE.md](FOOTAGE.md)): start points
+  estimated from 8 frames continue smoke and explosions 6.5 to 7.0 dB better at 8 frames and 2.6 to 3.2 dB better at
+  1 s than today's nearest stored start point; fire only for the first frames (a tie at 1 s).
 
 ## 2. How it was measured
 
@@ -820,7 +823,9 @@ Against traditional methods:
    - At the lowest turbulence setting the coarse flow overshoots: 1.7 times the simulation's kinetic energy, in a
      diagnostic run during development that is not part of the committed evaluation.
    - The 6 s shards crossfade between two runs.
-   - Their start points come from the simulation; footage would need its states estimated first.
+   - Their start points come from the simulation. Estimating them from frames works on simulated renders (study J,
+     [FOOTAGE.md](FOOTAGE.md)): within 1.3 to 2.8 dB of the true state at 8 frames, ahead of the nearest stored start
+     point by 3.0 to 7.0 dB; velocity is the gap (26 to 32% error). Real footage is untested.
    - Each effect took 1 to 1.3 hours to train on 4 cores, and the detail constants were set by a grid search.
 
 ## 10. Recommendations
@@ -844,7 +849,9 @@ Against traditional methods:
      shards sharing their step buffers; the row records still hold a lag of up to the whole tile).
   2. Close the gap to the real floor: a statistics loss (spectrum and motion) through the detail layer, and the
      renderer trained on more first frames of explosions.
-  3. Owner footage, with start points estimated from it.
+  3. Owner footage, with start points estimated from it: the path is built and passes its rule on smoke and
+     explosions with simulated footage (study J, [FOOTAGE.md](FOOTAGE.md); `nvfx_estimate`). Left: real footage, colour
+     calibration for footage graded unlike the simulator, and a better velocity estimate.
   4. Disk baselines with rate-optimised block encoding (RDO BC7 and ASTC, supercompressed), and the low-bit networks
      chosen again against the new envelope (on validation 5 bits now beat 4).
   5. Faster frame-model kernels: AVX-VNNI for CPUs with AVX2 but not AVX-512, and a cheaper conv level of detail
@@ -881,7 +888,7 @@ the D steps to some effects.
 Clips are deterministic, so the data regenerates identically; training uses fixed seeds, but thread scheduling makes
 the last digits of trained weights, and so of the scores, vary slightly between runs.
 
-## 12. Later studies: G, H, I, and v2
+## 12. Later studies: G, H, I, J, and v2
 
 These came after the report's main studies, each with its own rules fixed before its test. The full write-ups are
 in [DCM.md](DCM.md) (study G and its stages, study H, v2) and [COMPOSE.md](COMPOSE.md) (composed effects, scripts,
@@ -929,6 +936,16 @@ explosion with the coupled stepper, smoke unchanged, and fire's prior against dr
 6-bit start states on the coupled explosion as well failed the start-state rule by a hair, so the explosion keeps
 16-bit ones. In the fireball, v2 and v1 give the same scene: frames differ by 31 to 35 dB after the detonation, as two
 runs of a chaotic effect must, and neither looks better.
+
+**Study J: start points from footage** ([FOOTAGE.md](FOOTAGE.md)). A rollout effect's state estimated from 8 frames:
+fine heat and soot by an inverse renderer (a per-pixel MLP over a pyramid of the frame, trained on the simulator's
+frames), refined through the effect's own renderer; velocity by a motion network (looping effects) or block matching,
+assimilated through the effect's stepper. Measured where the truth is known, on the simulator's frames with blur, noise,
+H.264 and no alpha as a separate axis. The rule (8 and 30 frames better than the nearest stored start point, intervals
+above zero) passes for smoke (+6.45 [+6.09, +6.82] and +2.55 [+1.97, +3.21] dB) and the explosion (+7.04 [+5.67, +8.37]
+and +3.24 [+1.73, +4.74]); fire leads at 8 frames (+3.05 [+2.50, +3.59]) and ties at 30 (+0.40 [−0.15, +0.92]). Effects
+made only from estimated start points play endlessly with no statistic worse than the stored ones. `nvfx_estimate`
+writes such an effect from a clip, a video or frames. Validated on simulated renders only.
 
 **Composed effects.** The fireball (16 coupled modules, particles, light, distortion, bloom) runs at **12.5 ms per frame
 at 1280 x 720 (80 frames per second) and 27.2 ms at 1920 x 1080 on 4 threads** after two optimisation rounds, 10.6 and

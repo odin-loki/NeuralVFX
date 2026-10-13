@@ -19,7 +19,7 @@
 // --alpha: whether the footage has a real alpha channel; auto: no when alpha is max(r, g, b) everywhere (nvfx_ingest
 //   --alpha luma) or zero everywhere.
 // The inverse network maps frames to fine heat and soot. It is trained from the built-in simulation for fire, smoke and
-// explosion effects, with the motion network that measures velocity (--train-inverse FILE, about 6 minutes on one core;
+// explosion effects, with the motion network that measures velocity (--train-inverse FILE, about 8 minutes on one core;
 // cached at <data root>/j/inverse/ by nvfx_study_j inverse and motion). Validated on simulated renders only: real
 // footage is untested (docs/FOOTAGE.md §7).
 #include "args.hpp"
