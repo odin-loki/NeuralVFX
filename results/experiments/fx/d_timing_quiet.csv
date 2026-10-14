@@ -1,0 +1,16 @@
+model,isa,size,rounds,least_median_ms,greatest_median_ms,least_restart_ms
+rollout_steam,avx2,64,4,0.6564,0.6959,14.98
+rollout_steam,avx2,128,4,1.1409,1.7647,20.19
+rollout_steam,avx2,256,4,2.9441,3.1820,32.60
+rollout_magic,avx2,64,4,0.6721,0.8903,13.87
+rollout_magic,avx2,128,4,1.5470,1.6054,16.43
+rollout_magic,avx2,256,4,2.1960,2.3727,26.11
+rollout_fire,avx2,64,4,0.6641,1.0986,15.20
+rollout_fire,avx2,128,4,1.2238,1.2645,19.76
+rollout_fire,avx2,256,4,3.0369,3.3357,32.29
+rollout_smoke,avx2,64,4,0.6433,0.8966,0.19
+rollout_smoke,avx2,128,4,1.1174,1.1329,0.46
+rollout_smoke,avx2,256,4,2.9304,3.1062,1.37
+rollout_explosion,avx2,64,4,0.6344,0.6834,0.15
+rollout_explosion,avx2,128,4,1.0507,1.6983,0.34
+rollout_explosion,avx2,256,4,2.1937,2.3241,1.06

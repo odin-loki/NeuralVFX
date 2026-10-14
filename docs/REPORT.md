@@ -350,7 +350,7 @@ were tried on the 6 validation clips; the test clips were used once. One finer g
   [+0.96, +2.62], at 5.4x, 3.6x and 2.5x.
 - So the better representation is worth about 1 dB at equal memory, or 9 to 16% on the ratios: about 5x against every
   format as stored, 3.5x trimmed and 2.5x block-sparse. On disk 2.3x [1.9, 3.0] less than packed flipbooks; AV1 still
-  needs 2.5 times less. It costs 0.58 ms per 128 x 128 frame at int8 (F3's network 0.47 ms; busy machine).
+  needs 2.5 times less. It costs 0.56 ms per 128 x 128 frame at int8 (F3's network 0.49 ms, measured together on a quiet machine).
 - Nulls: positional encodings (-0.96 dB for x and y, -1.33 dB for t), a coarse grid of every frame (-0.5 to -0.9 dB),
   cheaper fine grids (-1.4 to -2.0 dB), a third grid in between (+0.03 dB for 3.6 KB).
 
@@ -979,8 +979,9 @@ game, on one core, in the later session: grid_s 1.7 ms per game frame on average
 99th percentiles are 24 to 39 ms because all copies change shards in the same frame, which a game would stagger.
 Sharing instances between copies with the same controls and seed lowers this further; the game's other CPU work has
 to fit around it. These are the float network's figures (`nvfx_scene --float` since int8 became the default); at int8
-grid_m's scene took 4.0 to 4.2 ms per game frame against 5.0 to 6.6 ms in float, in two interleaved runs on the busy
-machine (wall-clock time; not re-run on the quiet machine).
+grid_m's scene took 3.1 to 3.5 ms per game frame (99th percentile 9.1 to 10.1 ms) against 6.4 to 6.5 ms in float
+(20.8 to 21.2 ms), in three interleaved runs on a quiet machine (wall-clock time, in a session slower than the one
+above; the busy machine's first two runs gave 4.0 to 4.2 against 5.0 to 6.6 ms).
 
 ## 8. Against NVIDIA's published claims and traditional methods
 

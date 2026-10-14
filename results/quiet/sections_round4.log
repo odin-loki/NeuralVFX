@@ -1,0 +1,5 @@
+== fireball 720p, 4 threads, 2 rounds (session speed against rounds 2 and 3)  00:34:51  1.82 2.31 2.57 1/110 4989
+== F4 frame models against F3's, float and int8  00:35:02  1.91 2.31 2.57 1/108 5015
+== scene of grid_m copies, int8 against float, interleaved, 3 rounds  00:35:17  1.71 2.25 2.54 1/112 5031
+== extra (round 4 studies)  00:35:35  1.55 2.19 2.52 1/112 5041
+== done  00:36:23  1.74 2.12 2.47 1/108 5070

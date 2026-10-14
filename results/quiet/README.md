@@ -21,3 +21,22 @@ simulation within a few percent of the tables, so the tables stand.
 §7.4), and the sparse F3 models cost the same per frame as their dense twins. This session's machine ran about 1.35
 times slower than the first quiet session's (the end-of-round-2 build of the fireball took 16.8 to 18.2 ms per frame at
 1280 x 720 beside the current one's 17.0 to 17.4 ms), so absolute times are compared only within a session.
+
+## Round 4 (14 October 2026)
+
+`sections_round4.log`. This session's machine was slower again: the fireball took 19 to 20 ms per frame at 1280 x 720
+on 4 threads. `round4_fireball_pairs.csv` has it from the build before steam, magic and study D2 were merged (6bffc93)
+and from the build with them (e2ac518), alternately, nine pairs (the first three old first, the rest new first): the
+merged build took +0.23 ms per frame [-0.04, +0.48] more (paired, 95% bootstrap; about 1%), a tie, so the slowdown
+against round 3 is the machine's.
+The same holds for study D's rollout effects (two alternating rounds of `d-timing` each).
+
+| file | what | used in |
+|---|---|---|
+| `round4_fireball_pairs.csv` | the fireball before and after the round-4 merges, alternately | this note |
+| `round4_scene_int8.csv` | `nvfx_scene` with 8 + 16 copies of grid_m, int8 against float, three interleaved runs | `docs/REPORT.md` §7 |
+| `../compression/f4_timing_quiet.md` | F4's networks against F3's, float and int8 (`nvfx_f2 timing`, two runs) | `results/compression/README.md` (F4), `docs/REPORT.md` §3 |
+| `../experiments/fx/d_timing_quiet.csv` | steam and magic with study D's effects in the same rounds (`d-timing`, four rounds) | `docs/EFFECTS.md` §5 |
+
+The portal scene (`examples/scenes/portal.nvfxs`) took 22 ms per frame (median of its stages' sum) on 2 threads and
+13 ms on 4, two runs each, without an allocation in the frame loop (`docs/EFFECTS.md` §6).

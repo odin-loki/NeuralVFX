@@ -22,8 +22,8 @@ flipbook. A scene script shows them with study D's fire and explosion (§6).
   pictures show why: the detail layer turns the fast, smooth spiral arms into saw-toothed scales. Its look is still a
   usable portal (§6), but it is the weakest of the five rollout effects so far.
 - Each is **82 KB** stored (8 start points; fine fields grown at instance start, as fire's), 2.4 MB per instance at
-  128 px, and costs what fire costs per frame: 1.2 and 1.5 ms at 128 px on a shared machine where fire took 1.3 ms
-  in the same session (0.9 ms on a quiet one, [REPORT.md](REPORT.md) §6.7).
+  128 px. Steam costs what fire costs per frame and magic about a quarter more: 1.14 and 1.55 ms at 128 px on a
+  quiet machine where fire took 1.22 ms in the same rounds (§5).
 - A **scene script** (`examples/scenes/portal.nvfxs`) plays both with study D's fire and explosion: a portal opens
   between two steam vents, its violet light falls on the steam, a pulse lights two braziers, and it collapses in a
   burst. The compositor gained one thing for it: a module may light the scene in its own colour (`glow`). Every
@@ -189,21 +189,30 @@ drifts over a minute of shards.
 ## 5. Memory and cost
 
 The same network as study D's, so the same memory: 82 KB stored, 163 KB resident, 2.4 MB of working memory per
-instance at 128 px. Per frame through `nvfx_render` on one pinned core, measured on the shared machine (load about 3),
-with fire and smoke measured in the same session for comparison
-([d_timing.csv](../results/experiments/fx/d_timing.csv),
+instance at 128 px. Per frame through `nvfx_render` on one pinned core (AVX2), with study D's three effects measured in
+the same rounds, on a quiet machine: four rounds, the least of them and the range
+([d_timing_quiet.csv](../results/experiments/fx/d_timing_quiet.csv); the first figures, from the shared machine, are in
+[d_timing.csv](../results/experiments/fx/d_timing.csv) and
 [d_timing_fire_smoke_same_session.csv](../results/experiments/fx/d_timing_fire_smoke_same_session.csv)):
 
 | effect | 64 px | 128 px | 256 px | restart |
 |---|---:|---:|---:|---:|
-| steam | 0.66 ms | 1.15 ms | 2.93 ms | 23 ms (1 s warm-up) |
-| magic | 0.68 ms | 1.54 ms | 2.13 ms | 25 ms (1 s warm-up) |
-| fire (same session) | 0.69 ms | 1.26 ms | 2.96 ms | 27 ms |
-| smoke (same session) | 0.66 ms | 1.10 ms | 3.13 ms | 0.4 ms |
+| steam | 0.66 ms (to 0.70) | 1.14 ms (to 1.76) | 2.94 ms (to 3.18) | 20 ms (1 s warm-up) |
+| magic | 0.67 ms (to 0.89) | 1.55 ms (to 1.61) | 2.20 ms (to 2.37) | 16 ms (1 s warm-up) |
+| fire (same rounds) | 0.66 ms (to 1.10) | 1.22 ms (to 1.26) | 3.04 ms (to 3.34) | 20 ms |
+| smoke (same rounds) | 0.64 ms (to 0.90) | 1.12 ms (to 1.13) | 2.93 ms (to 3.11) | 0.5 ms |
+| explosion (same rounds) | 0.63 ms (to 0.68) | 1.05 ms (to 1.70) | 2.19 ms (to 2.32) | 0.3 ms |
 
-The differences are within this session's noise; on a quiet machine fire took 0.91 ms at 128 px
-([REPORT.md](REPORT.md) §6.7). Like fire, both grow their fine fields at instance start, so a restart costs a 1 s
-warm-up (23 to 25 ms); storing 64-pixel fine fields as smoke does would make it 0.4 ms for 64 KB more.
+Steam costs what fire costs (its 128 px rounds fell at 1.14 to 1.20 ms or at 1.65 to 1.76 ms; single slow rounds
+like these hit every effect in turn, from the virtual machine); magic costs about a quarter more at 128 px, and less
+at 256 px. This session ran slower than earlier quiet ones: study D's effects took 1.05 to 1.22 ms at 128 px against
+0.8 to 0.9 ms ([REPORT.md](REPORT.md) §6.7), and the fireball 19 to 20 ms per frame against 14 to 16 ms in round 3's
+quiet session. The build before these effects and study D2 were merged gave the same times as the build with them,
+measured alternately in this session (the fireball +0.23 ms [-0.04, +0.48] with them, a tie;
+[round4_fireball_pairs.csv](../results/quiet/round4_fireball_pairs.csv)), so the difference is the machine.
+
+Like fire, both grow their fine fields at instance start, so a restart costs a 1 s warm-up (16 to 20 ms); storing
+64-pixel fine fields as smoke does would make it 0.4 ms for 64 KB more.
 
 ## 6. The scene
 
@@ -219,7 +228,8 @@ root's `fx/` (outside git); the keyframes' SHA-256 are in `results/experiments/f
 
 ![The portal: keyframes at 0.9, 2.4, 3.8, 5.0, 6.4, 7.5, 7.9 and 9.3 s](figures/portal_keyframes.png)
 
-It plays without an allocation in its frame loop, in 51 ms per frame (median) on 2 threads on the shared machine.
+It plays without an allocation in its frame loop. On a quiet machine its stages take 22 ms per frame (median of the
+sum, two runs) on 2 threads and 13 ms on 4; on the shared machine, 51 ms on 2 threads.
 
 **One thing was added to the compositor for it** ([COMPOSE.md](COMPOSE.md) §4.3): a module's `glow (r, g, b)`.
 The scene's light was made only from the bus's heat in fire colours, so the portal would have lit the steam orange.

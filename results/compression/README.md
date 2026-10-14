@@ -1031,9 +1031,9 @@ and time, a larger decoder, and cheaper storage of what is not features.
   [-0.04, +0.02]; both are in the networks above.
 - **Disk: 2.3x [1.9, 3.0] less than packed flipbooks of every format** (F3's best sparse network: 2.0x [1.5, 2.7]);
   23.9 KB packed. AV1 still needs 2.5 times less (0.40x [0.36, 0.45]).
-- **Cost per frame:** 0.58 ms per 128 x 128 frame through the int8 path, the default (F3's network: 0.47 ms), 0.87 to
-  1.04 ms in float (0.95 ms), with less working memory (108 to 112 KB at int8 against 187 KB); one core of the busy
-  machine. The int8 path loses 0.002 dB.
+- **Cost per frame:** 0.56 ms per 128 x 128 frame through the int8 path, the default (F3's network: 0.49 ms; 0.58 ms
+  with 8 coarse channels), 0.85 to 1.03 ms in float (0.94 ms), with less working memory (108 to 112 KB at int8 against
+  187 KB); one core of a quiet machine, measured together. The int8 path loses 0.002 dB.
 - **Longer training** adds a little more than it added to F3's network (+0.22 dB [+0.13, +0.33] against +0.15): G16
   C4 + G64 C2 with 12,000 steps holds 31.99 dB, 5.4x [4.1, 7.9] as stored, 3.6x [3.1, 4.6] trimmed, 2.5x [2.1, 3.0]
   block-sparse.
@@ -1225,16 +1225,17 @@ test models.
 
 | model | stored KB | resident KB | working memory KB, float / int8 | ms per frame, float | ms per frame, int8 |
 |---|---:|---:|---:|---:|---:|
-| G32 4-bit sparse (F3) | 32.5 | 36.7 | 43 / 187 | 0.951 | 0.472 |
-| G16 C4 + G64 C2 | 31.8 | 37.0 | 47 / 108 | 0.867 | 0.576 |
-| G16 C8 + G64 C2 | 36.5 | 42.7 | 54 / 112 | 1.041 | 0.572 |
+| G32 4-bit sparse (F3) | 32.5 | 36.7 | 43 / 187 | 0.943 | 0.489 |
+| G16 C4 + G64 C2 | 31.8 | 37.0 | 47 / 108 | 0.848 | 0.556 |
+| G16 C8 + G64 C2 | 36.5 | 42.7 | 54 / 112 | 1.033 | 0.579 |
 
 - The int8 path projects the coarse level's first layer per grid point, as the grid family's does, but takes the fine
   level's two channels per pixel: a level of up to 3 channels costs fewer operations per pixel as features times
   weights than as an interpolated projection, and needs no projection of its 4,096 points per frame (projected, it
-  took 0.64 to 0.72 ms and 650 KB of working memory). The extra level costs about 0.1 ms per frame over F3's network
-  at int8; both are within the 1 ms budget at either precision. These timings were taken on a busy machine
-  (provisional, as F3's first ones).
+  took 0.64 to 0.72 ms and 650 KB of working memory). The extra level costs about 0.07 ms per frame over F3's network
+  at int8; both are within the 1 ms budget at either precision. These timings are from a quiet machine: two runs of the
+  command below, the lesser of each ([f4_timing_quiet.md](f4_timing_quiet.md)); the first figures, from the busy
+  machine, were 0.951 / 0.472, 0.867 / 0.576 and 1.041 / 0.572 ms.
 
 `nvfx_f2 timing --models $NEURALVFX_DATA/f3/models/test/fire_0__g32c8h32l2t16_b4_q_sp_i6000.nvfx,$NEURALVFX_DATA/f4/models/test/fire_0__p16.4.16+64.2.16h32l2_b4_q_sp_wq_i6000.nvfx,$NEURALVFX_DATA/f4/models/test/fire_0__p16.8.16+64.2.16h32l2_b4_q_sp_wq_i6000.nvfx --core 2 --reps 7 --precision both`
 
