@@ -192,7 +192,7 @@ Dictionary NeuralVFXStage::get_effect_info(const String& effect) const {
   d["models"] = String::utf8(e.models);
   d["elements"] = String::utf8(e.elements);
   d["size"] = Vector2(e.width, e.height);
-  d["anchor"] = e.anchor == NVFX_ANCHOR_CENTRE ? "centre" : "base";
+  d["anchor"] = e.anchor == NVFX_ANCHOR_CENTRE ? "centre" : e.anchor == NVFX_ANCHOR_LEFT ? "left" : "base";
   d["looping"] = e.looping != 0;
   d["duration"] = e.duration;
   d["show"] = e.show;

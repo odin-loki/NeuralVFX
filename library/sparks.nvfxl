@@ -1,4 +1,4 @@
-# Sparks and debris: particles, lightning and electric arcs (procedural, not learned).
+# Sparks and debris: particles, lightning and electric arcs (procedural, not learned), and the orb model as ball lightning.
 
 entry sparks, category sparks, size 200 x 220, anchor base, loop, show 1,
       about "A fountain of sparks thrown up from a point, falling back (a fuse, a broken cable; procedural)"
@@ -63,3 +63,18 @@ param power = 1, range (0.4, 1.6), about "how many and how high"
 at 0:
   burst at (X, Y - 10 * scale), radius 25 * scale, embers 220 * power, speed 300 * scale * power
 field warmth = lamp, at (X, Y - 30 * scale), radius 80 * scale, strength 0.4 * power * exp(-t / 0.5), colour (1, 0.5, 0.15)
+
+entry ball_lightning, category sparks, size 200 x 200, anchor centre, loop, show 2,
+      about "Ball lightning: a crackling ball of plasma drifting about, throwing short arcs (the orb model with procedural arcs)"
+param intensity = 0.5, range (0.3, 0.9), about "size and brightness"
+let ballx = X + 25 * scale * noise(0.3 * t, 1.5 + 9 * variant, 0)
+let bally = Y + 15 * scale * noise(0.4 * t, 4.5 + 9 * variant, 0)
+let a1 = 2.4 * floor(9 * t)
+let a2 = 3.7 * floor(7 * t) + 1
+module ball = orb, size 64, width 150 * scale, at (ballx, bally + 75 * scale), feather 0.1, start 6, seed 831,
+              controls (0.5, 0.8, 0.8), intensity intensity, pulse 0.8, glow (0.6, 1, 2)
+emit arc, along (ballx, bally) to (ballx + 80 * scale * cos(a1), bally + 80 * scale * sin(a1)), rate 9, seed 83, width 1.2 * scale,
+     jitter 0.25, branches 1, colour (0.7, 0.85, 1), brightness 2.5
+emit arc, along (ballx, bally) to (ballx + 65 * scale * cos(a2), bally + 65 * scale * sin(a2)), rate 7, seed 84, width 1 * scale,
+     jitter 0.25, branches 1, colour (0.7, 0.85, 1), brightness 2
+field crackle = lamp, at (ballx, bally), radius 120 * scale, strength 0.6 * (0.8 + 0.2 * noise(15 * t, 3, 0)), colour (0.6, 0.8, 1)

@@ -1,0 +1,81 @@
+# Weather: fog and cloud (docs/EFFECTS_ATMOSPHERE.md). They carry no heat: their material is soot, drawn by
+# field-shader looks lit by the scene (their colours are the looks'). Fog lies in the bottom quarter of its tile, so
+# ground fog is several narrow releases side by side (a wide one stands up like a cloud); the cloud model's mass sits in
+# the middle of its tile and never fades.
+
+look fogbank = like frost, soot_density 1.1, sky 0.7                                  # white fog, thick enough to read at night
+look rime    = like frost, tint (0.78, 0.88, 1), soot_density 0.8, sky 0.9, scene_light 1.2   # pale blue
+look marsh   = like frost, tint (0.7, 0.8, 0.62), soot_density 1.1, soot_albedo 0.6, sky 0.5  # murky grey-green
+look fleece  = shader, emission 0, soot_density 3, soot_albedo 0.9, sky 1, shadow 0.4, scene_light 1, relief 2.5,
+               tint (0.95, 0.96, 1)                                                     # a white cloud
+look grit    = like storm, tint (0.85, 0.66, 0.45), soot_density 2, sky 0.5, relief 1.5  # blown dust
+
+entry ground_fog, category weather, size 900 x 120, anchor base, loop, show 6,
+      about "Ground fog: a low white bank of fog lying along the ground and rolling slowly, four releases of the fog model"
+param intensity = 0.7, range (0.3, 1), about "how thick"
+param wind = 0.55, range (0, 1), about "drift: 0.5 still air"
+module a = fog, size 128, width 320 * scale, at (X - 335 * scale, Y), sink 0.03, feather 0.1, look fogbank, start 0, seed 501,
+           controls (0.7, 0.55, 0.4), intensity 0.85 * intensity, wind wind
+module b = fog, size 128, width 360 * scale, at (X - 100 * scale, Y), sink 0.03, feather 0.1, look fogbank, start 6, seed 502,
+           controls (0.7, 0.55, 0.4), intensity intensity, wind wind
+module c = fog, size 128, width 330 * scale, at (X + 125 * scale, Y), sink 0.03, feather 0.1, look fogbank, start 7, seed 503,
+           controls (0.7, 0.55, 0.4), intensity 0.75 * intensity, wind wind
+module d = fog, size 128, width 340 * scale, at (X + 330 * scale, Y), sink 0.03, feather 0.1, look fogbank, start 1, seed 504,
+           controls (0.7, 0.55, 0.4), intensity 0.9 * intensity, wind wind
+
+entry frost_mist, category weather, size 560 x 100, anchor base, loop, show 6,
+      about "Frost mist: a thin, pale blue mist creeping over frozen ground, calm and slow"
+param intensity = 0.5, range (0.2, 0.8), about "how thick"
+module a = fog, size 128, width 300 * scale, at (X - 150 * scale, Y), sink 0.03, feather 0.12, look rime, start 0, seed 511,
+           controls (0.5, 0.5, 0.2), intensity intensity, turbulence 0.2
+module b = fog, size 128, width 300 * scale, at (X, Y), sink 0.03, feather 0.12, look rime, start 4, seed 513,
+           controls (0.5, 0.5, 0.2), intensity intensity, turbulence 0.2
+module c = fog, size 128, width 300 * scale, at (X + 150 * scale, Y), sink 0.03, feather 0.12, look rime, start 7, seed 512,
+           controls (0.5, 0.5, 0.2), intensity intensity, turbulence 0.2
+
+entry swamp_mist, category weather, size 760 x 140, anchor base, loop, show 6,
+      about "Swamp mist: a murky grey-green mist hanging over still water, with a few faint marsh lights drifting in it"
+param intensity = 0.6, range (0.3, 1), about "how thick"
+module a = fog, size 128, width 320 * scale, at (X - 240 * scale, Y), sink 0.03, feather 0.1, look marsh, start 0, seed 521,
+           controls (0.6, 0.55, 0.6), intensity intensity
+module b = fog, size 128, width 320 * scale, at (X, Y), sink 0.03, feather 0.1, look marsh, start 6, seed 522,
+           controls (0.6, 0.55, 0.6), intensity intensity
+module c = fog, size 128, width 320 * scale, at (X + 240 * scale, Y), sink 0.03, feather 0.1, look marsh, start 7, seed 523,
+           controls (0.6, 0.55, 0.6), intensity intensity
+emit glow, at (X, Y - 40 * scale), radius 2.5 * scale, count 3, spread 220 * scale, rate 0.12, seed 52,
+     colour (0.6, 1, 0.55), brightness 1.4
+
+entry sky_cloud, category weather, size 520 x 260, anchor centre, loop, show 6,
+      about "A cloud: a white mass that boils slowly and drifts, lit by the moon and the scene"
+param wind = 0.6, range (0, 1), about "drift: 0.5 still air, more to the right"
+param intensity = 0.8, range (0.4, 1), about "how dense"
+module mass = cloud, size 128, width 600 * scale, at (X, Y + 300 * scale), feather 0.1, look fleece, start 0, seed 541,
+              controls (0.8, 0.6, 0.5), intensity intensity, wind wind
+
+entry storm_cloud, category weather, size 1100 x 360, anchor centre, loop, show 2.56,
+      about "A storm cloud: a dark bank of cloud drifting, lit from inside by lightning every few seconds, a bolt below it"
+param wind = 0.62, range (0, 1), about "drift"
+param every = 5, range (2, 15), about "seconds between flashes"
+let k = t - every * floor(t / every)
+let strike = if(k > 2.5 and k < 2.62, 1, if(k > 2.7 and k < 2.8, 0.7, 0))
+module a = cloud, size 128, width 700 * scale, at (X - 300 * scale, Y + 340 * scale), feather 0.1, look storm, start 0,
+           seed 551, controls (0.9, 0.62, 0.5), wind wind
+module b = cloud, size 128, width 760 * scale, at (X, Y + 360 * scale), feather 0.1, look storm, start 3, seed 552,
+           controls (0.95, 0.62, 0.6), wind wind
+module c = cloud, size 128, width 700 * scale, at (X + 300 * scale, Y + 340 * scale), feather 0.1, look storm, start 5,
+           seed 553, controls (0.9, 0.62, 0.5), wind wind
+field inside = lamp, at (X + 120 * scale, Y), radius 280 * scale, strength 3 * strike, colour (0.75, 0.8, 1)
+emit arc, along (X + 120 * scale, Y + 80 * scale) to (X + 60 * scale, Y + 420 * scale), rate 3, seed 55, width 2 * scale,
+     jitter 0.14, branches 3, colour (0.75, 0.82, 1), brightness 3 * strike
+light flash (0.25 * strike, 0.28 * strike, 0.35 * strike)
+
+entry dust_storm, category weather, size 1300 x 300, anchor base, loop, show 6,
+      about "A dust storm: a wall of brown dust rolling past, puffs forming upwind and thinning downwind (the cloud model)"
+param intensity = 0.95, range (0.6, 1), about "how dense"
+param wind = 0.85, range (0.5, 1), about "how fast it blows (to the right)"
+module a = cloud, size 128, width 800 * scale, at (X - 420 * scale, Y + 330 * scale), feather 0.1, look grit, start 1,
+           seed 571, controls (0.95, 0.85, 0.6), intensity intensity, wind wind
+module b = cloud, size 128, width 820 * scale, at (X, Y + 320 * scale), feather 0.1, look grit, start 7, seed 572,
+           controls (0.95, 0.85, 0.6), intensity intensity, wind wind
+module c = cloud, size 128, width 800 * scale, at (X + 420 * scale, Y + 330 * scale), feather 0.1, look grit, start 1,
+           seed 573, controls (0.95, 0.85, 0.6), intensity intensity, wind wind

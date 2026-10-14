@@ -1,4 +1,5 @@
-# Light: flashes, glows and lamps (procedural, not learned): what lights a scene for a moment or for good.
+# Light: flashes, glows and lamps (procedural, not learned): what lights a scene for a moment or for good. And the orb
+# model, a ball of cyan plasma whose energy lights the scene in its own colour (`glow`).
 
 entry muzzle_flash, category light, size 160 x 100, anchor centre, once 0.12, show 0.02,
       about "A muzzle flash: a white-hot core, a long spike along the barrel and short side spikes, sparks, a flash of light (procedural)"
@@ -56,3 +57,19 @@ emit ring, at (X, Y - 2 * scale), radius r, squash 0.22, width 4 * scale, colour
 at 0:
   shock at (X, Y - 30 * scale), speed 1200 * scale * power, decay 0.3, amp 6, width 26 * scale
   scorch at (X, Y + 2 * scale), radius 70 * scale, glow 0.6 * exp(-t / 0.6)
+
+entry plasma_orb, category light, size 140 x 140, anchor centre, loop, show 2,
+      about "A plasma orb: a ball of cyan plasma that boils inside a soft edge and breathes, lighting what is near in cyan"
+param intensity = 0.5, range (0.2, 1), about "size and brightness"
+param pulse = 0.4, range (0, 1), about "how strongly it breathes"
+module ball = orb, size 128, width 220 * scale, at (X, Y + 110 * scale), feather 0.1, start 0, seed 801,
+              controls (0.5, 0.4, 0.5), intensity intensity, pulse pulse, glow (0.5, 1.2, 2)
+
+entry energy_core, category light, size 200 x 200, anchor centre, loop, show 2,
+      about "An energy core: a bright ball of plasma that throbs hard, inside a ring of light"
+param intensity = 0.85, range (0.4, 1), about "size and brightness"
+let throb = 0.85 + 0.15 * noise(2 * t, 7.5, 0)
+module heart = orb, size 128, width 260 * scale, at (X, Y + 130 * scale), feather 0.1, start 6, seed 811,
+              controls (0.85, 0.9, 0.6), intensity intensity, pulse 0.9, glow (0.5, 1.2, 2)
+emit ring, at (X, Y), radius 95 * scale * throb, width 2 * scale, colour (0.5, 0.9, 1), brightness 1.4
+field cyan = lamp, at (X, Y), radius 150 * scale, strength 0.5 * intensity, colour (0.4, 0.9, 1)

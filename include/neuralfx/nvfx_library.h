@@ -70,8 +70,9 @@ NVFX_API nvfx_status nvfx_library_open(const nvfx_library_desc* desc, nvfx_libra
 NVFX_API void nvfx_library_free(nvfx_library* library);
 
 typedef enum nvfx_anchor {
-  NVFX_ANCHOR_BASE = 0,  /* the spawn point is the bottom centre of the effect's box (a fire on the ground) */
-  NVFX_ANCHOR_CENTRE = 1 /* the spawn point is the box's centre (a burst in the air, a portal) */
+  NVFX_ANCHOR_BASE = 0,   /* the spawn point is the bottom centre of the effect's box (a fire on the ground) */
+  NVFX_ANCHOR_CENTRE = 1, /* the spawn point is the box's centre (a burst in the air, a portal) */
+  NVFX_ANCHOR_LEFT = 2    /* the spawn point is the middle of the box's left edge (a jet's nozzle: it blows right) */
 } nvfx_anchor;
 
 /* An effect of the catalogue. The strings belong to the library. */

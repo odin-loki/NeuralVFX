@@ -1,5 +1,5 @@
 # The headless test of the effect library in Godot (engines/godot/test.sh): a NeuralVFXStage lists the catalogue,
-# spawns four effects (learned and procedural) at given times, plays 45 frames and saves the frame as PNG. Checks: the
+# spawns five effects (learned and procedural) at given times, plays 45 frames and saves the frame as PNG. Checks: the
 # catalogue's listing and an effect's description; spawns, an unknown effect and a full room refused; given
 # nvfx_gallery's frame of the same stage and spawns (--reference), the same pixels to the byte; heat over the campfire;
 # the instances' states, a stop and a stale handle. Exit code: the number of failed checks.
@@ -29,7 +29,7 @@ func _initialize() -> void:
 	stage.effects_dir = args.library_models
 	stage.stage_size = Vector2i(960, 540)
 	stage.ground = 470
-	stage.rooms = {"campfire": 1, "steam_vent": 1, "magic_burst": 1, "electric_arc": 1}
+	stage.rooms = {"campfire": 1, "steam_vent": 1, "magic_burst": 1, "electric_arc": 1, "plasma_orb": 1}
 	stage.threads = 2
 	stage.playing = false  # the frames are stepped here
 	root.add_child(stage)
@@ -45,12 +45,15 @@ func _initialize() -> void:
 	var info := stage.get_effect_info("campfire")
 	print("  campfire: ", info)
 	check(info.category == "fire" and info.looping and info.params.size() == 2 and info.params[0].name == "intensity", "an effect's description")
+	var jet := stage.get_effect_info("flamethrower")
+	check(jet.anchor == "left" and jet.models == "jet", "a jet is anchored at its nozzle, on the left of its box")
 
 	var fire: int = stage.spawn("campfire", Vector2(220, 470), 1.0, 0.3)
 	var vent: int = stage.spawn("steam_vent", Vector2(480, 470), 0.8, 0.4)
 	var burst: int = stage.spawn("magic_burst", Vector2(760, 260), 1.0, 0.6)
 	var arc: int = stage.spawn("electric_arc", Vector2(620, 470), 1.0, 0.2)
-	check(fire != 0 and vent != 0 and burst != 0 and arc != 0, "four spawns")
+	var orb: int = stage.spawn("plasma_orb", Vector2(110, 150), 0.8, 0.5)
+	check(fire != 0 and vent != 0 and burst != 0 and arc != 0 and orb != 0, "five spawns")
 	check(stage.spawn("campfire", Vector2(300, 470)) == 0, "no second campfire: its one room is taken")
 	check(stage.spawn("no_such_effect", Vector2(300, 470)) == 0, "an unknown effect is refused")
 	check(stage.get_fx_info(fire).state == "waiting", "the campfire waits for its time")

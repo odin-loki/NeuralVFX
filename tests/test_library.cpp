@@ -79,7 +79,7 @@ entry pop, category explosions, size 64 x 64, anchor centre, once 0.5, about "a 
 module m = tiny, size 32, width 40 * scale, at (X, Y + 20 * scale), start 0, seed 3
 at 0: shock at (X, Y), speed 300
 
-entry zap, category sparks, size 80 x 40, anchor base, loop, about "a procedural arc"
+entry zap, category sparks, size 80 x 40, anchor left, loop, about "a procedural arc"
 emit arc, along (X - 30, Y - 10) to (X + 30, Y - 10), rate 10, seed 2
 field shine = lamp, at (X, Y - 10), radius 20, strength 0.5
 )";
@@ -136,7 +136,7 @@ TEST(Library, TheCatalogueParsesAndEveryEntryChecks) {
   const lib::Catalogue c = lib::load_dir(kDir);
   EXPECT_GE(c.entries.size(), 30u);
   const std::vector<std::string> cats = c.categories();
-  for (const char* want : {"fire", "smoke", "explosions", "steam", "magic", "ambient", "sparks", "light"})
+  for (const char* want : {"fire", "smoke", "explosions", "steam", "magic", "ambient", "sparks", "light", "dust", "weather"})
     EXPECT_NE(std::ranges::find(cats, want), cats.end()) << want;
   for (const lib::Entry& e : c.entries) {
     EXPECT_FALSE(e.about.empty()) << e.name;
@@ -313,6 +313,20 @@ TEST(Library, TheSameCallsGiveTheSameFramesOnAnyThreads) {
     }
   }
   for (std::size_t i = 1; i < frames.size(); ++i) EXPECT_EQ(frames[i], frames[0]) << "run " << i;
+}
+
+TEST(Library, AnchorsAreTheBaseTheCentreOrTheLeftEdge) {
+  TinyLibrary t;
+  const auto anchor = [&](const char* name) {
+    nvfx_library_effect e{};
+    EXPECT_EQ(nvfx_library_get_effect(t.library.get(), nvfx_library_find(t.library.get(), name), &e), NVFX_OK) << name;
+    return e.anchor;
+  };
+  EXPECT_EQ(anchor("blob"), NVFX_ANCHOR_BASE);
+  EXPECT_EQ(anchor("pop"), NVFX_ANCHOR_CENTRE);
+  EXPECT_EQ(anchor("zap"), NVFX_ANCHOR_LEFT);  // a jet's nozzle: the box lies to the right of the spawn point
+  EXPECT_EQ(parse_error("entry torch, category fire, size 90 x 190, anchor top, loop, about \"x\"\n"),
+            "t.nvfxl:1:51: an anchor is 'base' (X, Y at the bottom centre of its box), 'centre' or 'left' (the middle of its left edge), not 'top'");
 }
 
 TEST(Library, AnEntryAloneIsItsOwnScene) {

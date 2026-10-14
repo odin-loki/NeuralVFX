@@ -1,11 +1,12 @@
-# The effect library in a window (docs/LIBRARY.md): a NeuralVFXStage with room for a dozen of the catalogue's effects.
+# The effect library in a window (docs/LIBRARY.md): a NeuralVFXStage with room for a score of the catalogue's effects.
 # Left and right choose an effect, a click spawns it under the mouse (looping ones play until a right click stops the
 # last), and the label says what it is. Run: godot --path engines/godot/demo res://library.tscn
 extends Node2D
 
 const Paths = preload("res://paths.gd")
 const EFFECTS := ["campfire", "torch", "bonfire", "witch_fire", "steam_vent", "chimney_smoke", "grenade", "large_blast",
-		"magic_burst", "portal", "healing_circle", "electric_arc", "lightning_strike", "muzzle_flash", "fireflies", "sparks"]
+		"magic_burst", "portal", "healing_circle", "electric_arc", "lightning_strike", "muzzle_flash", "fireflies", "sparks",
+		"flamethrower", "dust_impact", "ground_fog", "plasma_orb", "fire_whirl", "dust_devil"]
 
 var stage := NeuralVFXStage.new()
 var sprite := Sprite2D.new()

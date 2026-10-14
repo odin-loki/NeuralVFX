@@ -1,44 +1,54 @@
 # The effect library
 
-A catalogue of 48 named, ready-to-use effects that a game lists, places and drives without training anything: a
-campfire, a grenade, a steam vent, a portal, a lightning strike. Each plays the five trained rollout models (fire,
-smoke, explosion v2, steam, magic) and the compositor's procedural elements (embers, sparks, shock fronts, scorch marks,
-flashes, lights, bolts, rings), at a size, with parameters mapped onto the models' controls and looks.
+A catalogue of 70 named, ready-to-use effects that a game lists, places and drives without training anything: a
+campfire, a grenade, a steam vent, a portal, a lightning strike, ground fog, a dust impact, a flamethrower, a plasma
+orb, a dust devil. Each plays the eleven trained rollout models (fire, smoke, explosion v2, steam and magic; fog, dust
+and cloud, [EFFECTS_ATMOSPHERE.md](EFFECTS_ATMOSPHERE.md); jet, orb and vortex, [EFFECTS_ENERGY.md](EFFECTS_ENERGY.md))
+and the compositor's procedural elements (embers, sparks, shock fronts, scorch marks, flashes, lights, bolts, rings), at
+a size, with parameters mapped onto the models' controls and looks. The 23 entries of the six newer models were added
+with the recipe of §6, in text; the only code they needed is a third anchor, for the jet's nozzle.
 
-![The library's contact sheet](figures/library_sheet.png)
+![The library's contact sheet: the entries of the first five models](figures/library_sheet.png)
+
+![The library's contact sheet: the 23 entries of fog, dust, cloud, jet, orb and vortex](figures/library_sheet_new.png)
 
 *Every entry alone on a stage fitted to its box, at the moment its catalogue says shows it well (`nvfx_gallery`).*
 
-| category | entries | learned | procedural only |
-|---|---|---|---|
-| fire | 10 | 10 | 0 |
-| smoke | 6 | 6 | 0 |
-| explosions | 5 | 4 | 1 |
-| steam (and water) | 5 | 5 | 0 |
-| magic | 5 | 3 | 2 |
-| ambient | 5 | 3 | 2 |
-| sparks (and debris) | 7 | 1 | 6 |
-| light | 5 | 1 | 4 |
-| **all** | **48** | **33** | **15** |
+| category | entries | of them new (round 5's models) | learned | procedural only |
+|---|---|---|---|---|
+| fire | 14 | 4 | 14 | 0 |
+| smoke | 7 | 2 | 7 | 0 |
+| explosions | 5 | 0 | 4 | 1 |
+| steam (and water) | 5 | 0 | 5 | 0 |
+| magic | 8 | 3 | 6 | 2 |
+| ambient | 5 | 0 | 3 | 2 |
+| sparks (and debris) | 8 | 1 | 2 | 6 |
+| light | 7 | 2 | 3 | 4 |
+| dust | 5 | 5 | 5 | 0 |
+| weather | 6 | 6 | 6 | 0 |
+| **all** | **70** | **23** | **55** | **15** |
 
-**What is learned and what is not.** Only five things move by a trained model: fire, smoke, an explosion, steam and
-magic. Everything else in an entry is the compositor's: particles (embers, sparks, debris), shock fronts, scorch marks,
-flashes, camera shakes, and the glows this library adds (lightning and electric arcs, rings, discs and motes of light,
-lamps). Entries that use no model at all say *(procedural)* in their description. **A recolour is a look, not new
-dynamics**: blue gas, green witch fire, the violet magic burst, the red dark portal and the coloured smokes move exactly
-as their model's orange fire, grey smoke or explosion does; a field-shader look draws them in another colour (`hue`,
-`tint`). Nothing here was trained for the library.
+**What is learned and what is not.** Only eleven things move by a trained model: fire, smoke, an explosion, steam,
+magic, fog, dust, cloud, a jet, an orb and a vortex. Everything else in an entry is the compositor's: particles (embers,
+sparks, debris), shock fronts, scorch marks, flashes, camera shakes, and the glows this library adds (lightning and
+electric arcs, rings, discs and motes of light, lamps). Entries that use no model at all say *(procedural)* in their
+description. **A recolour is a look, not new dynamics**: blue gas, green witch fire, the violet magic burst, the red
+dark portal, the coloured smokes and fogs, the blue rocket exhaust and the violet dragon breath and magic vortex move
+exactly as their model's orange fire, grey smoke, explosion, white fog, jet or dust column does; a field-shader look
+draws them in another colour (`hue`, `tint`). Nothing here was trained for the library. Entries marked *(new)* are those
+of round 5's six models.
 
 ## 1. The catalogue
 
 `library/*.nvfxl`, one file per category plus `models.nvfxl` (the learned effects and shared looks). Sizes are the
 effect's box in world pixels at scale 1; *base* anchors stand on the spawn point (bottom centre), *centre* anchors are
-centred on it. *Plays* lists the learned models first, then the looks and procedural elements. The last column is
-how each looks in the gallery and its video, judged by eye: **good** (usable as it is), **fair** (usable, with the
-flaw named), **weak** (kept because it is still the best the models give for it, flaw named). Entries that looked bad
-were changed (start points, sizes, smoke placed where the flames are) or replaced: §8 says which.
+centred on it, *left* anchors (the jets) have the spawn point at the middle of the box's left edge, their nozzle.
+*Plays* lists the learned models first, then the looks and procedural elements. The last column is how each looks in the
+gallery and its video, judged by eye: **good** (usable as it is), **fair** (usable, with the flaw named), **weak** (kept
+because it is still the best the models give for it, flaw named). Entries that looked bad were changed (start points,
+sizes, smoke placed where the flames are) or replaced: §8 says which.
 
-### Fire (10)
+### Fire (14)
 
 | effect | what it is | plays | box, anchor | runs | parameters (default) | how it looks |
 |---|---|---|---|---|---|---|
@@ -52,8 +62,12 @@ were changed (start points, sizes, smoke placed where the flames are) or replace
 | `blue_gas_flame` | A blue gas flame: the fire model, calm, recoloured blue by a field-shader look, with a blue light | fire; look gas, lamp | 120 x 190, base | loop | intensity (0.55) | Good: a believable blue flame (the orange fire's motion, recoloured). |
 | `witch_fire` | Witch fire: two flames of the fire model recoloured green by a field-shader look, green motes, a green light | fire; look witch, glow, lamp | 220 x 300, base | loop | intensity (0.75) | Good: green flames and motes (a recolour). |
 | `burning_wreck` | A burning wreck: a strong, ragged fire under a column of dark smoke, embers and a red light | fire, smoke; look sooty, embers, lamp | 340 x 520, base | loop | intensity (0.8), wind (0.6) | Good: dark smoke rising out of a ragged fire; the smoke is thin at 128 pixels. |
+| `flamethrower` (new) | A flamethrower: a roaring jet of burning gas from its nozzle (the anchor), widening, breaking up and curling into smoke; it blows to the right | jet; lamp | 520 x 300, left | loop | intensity (0.8), aim (0) | Good: a roaring jet that widens, breaks up and curls into smoke at its end; it blows to the right only. |
+| `gas_leak_fire` (new) | A burning gas leak: a roaring, flickering jet of flame from a broken pipe (the anchor), angled up; it blows to the right | jet; lamp | 300 x 240, left | loop | intensity (0.55) | Good: a small, flickering jet angled up. |
+| `rocket_thruster` (new) | A rocket thruster: a fierce blue-white exhaust with a white-hot core at the nozzle (the anchor), the jet recoloured; it blows to the right | jet; look thrust, glow, lamp | 420 x 200, left | loop | intensity (0.9) | Fair: a blue exhaust behind a white-hot core, but its tail curls up as a flame does rather than streaming straight. |
+| `fire_whirl` (new) | A fire whirl: a spinning column of flame rising from burning ground, swaying (the vortex model, its warm air drawn as flame) | whirlwind; look whirl_fire, embers, lamp | 320 x 480, base | loop | intensity (0.85), sway (0.7) | Fair: a thin swaying column of flame under a wide orange haze, which can show its tile's square edge. |
 
-### Smoke (6)
+### Smoke (7)
 
 | effect | what it is | plays | box, anchor | runs | parameters (default) | how it looks |
 |---|---|---|---|---|---|---|
@@ -61,8 +75,9 @@ were changed (start points, sizes, smoke placed where the flames are) or replace
 | `smoke_column` | A column of smoke: the smoke model at its largest, rising from its base (a distant fire, a burning town) | smoke; look smoke | 560 x 680, base | loop | intensity (0.8), wind (0.5) | Fair: a large plume, but wispy rather than a dense column, and its swirly detail shows at this size. |
 | `smoke_grenade` | A smoke grenade: a hiss of sparks, then thick white smoke billows out low for eight seconds and thins | smoke; look smoke_white, ceiling, sparks | 520 x 360, base | once, 12 s | intensity (0.9) | Fair: billows and spreads under its ceiling, but late in its life the cloud turns streaked and marbled, and it rises more than grenade smoke. |
 | `black_oil_smoke` | Black oil smoke: a dark, rolling column of smoke over burning oil, lit red from below by its flames | smoke, fire; look oil, lamp | 520 x 620, base | loop | intensity (1), wind (0.55) | Fair: dark, and lit red from below, but thinner than real oil smoke: the model's plume is narrow. |
-| `poison_smoke` | Poison gas: a green cloud that rises a little and spreads out low, held down by still air | smoke; look poison, ceiling | 520 x 300, base | loop | intensity (0.55) | Weak: the ceiling flattens the plume into a mushroom with marbled, hard-edged layers; passable at a distance. |
+| `poison_gas` (new) | Poison gas: a heavy green gas that pours out low and rolls along the ground (the fog model, recoloured) | fog; look toxic, lamp | 600 x 120, base | loop | intensity (0.8), wind (0.5) | Good: a heavy green gas that stays on the ground (it replaced poison_smoke, whose smoke always rose); its three releases show as humps. |
 | `signal_smoke` | Signal smoke: a plume of red smoke from a flare on the ground | smoke; look signal, glow, lamp | 300 x 480, base | loop | intensity (0.6), wind (0.6) | Good: a red plume over a glowing flare. |
+| `smoke_screen` (new) | A smoke screen: a thick white wall of smoke that lingers where it was laid and boils slowly (the cloud model) | cloud; look screen | 700 x 240, base | loop | intensity (0.9), wind (0.5) | Good: a thick white wall of smoke that lingers and boils. |
 
 ### Explosions (5)
 
@@ -84,7 +99,7 @@ were changed (start points, sizes, smoke placed where the flames are) or replace
 | `kettle_steam` | Steam from a kettle or a cooking pot: a small, slow wisp; its anchor is the spout | steam; look vapour | 90 x 140, base | loop | intensity (0.3) | Good: a small wisp. |
 | `hot_springs` | Hot springs: wisps of steam rising from pools across the ground and drifting with the air, five steam modules | steam; look mist, wind | 700 x 300, base | loop | intensity (0.5) | Fair: five wisps across the ground; it was waterfall mist, renamed because the steam model makes plumes, not a veil. |
 
-### Magic (5)
+### Magic (8)
 
 | effect | what it is | plays | box, anchor | runs | parameters (default) | how it looks |
 |---|---|---|---|---|---|---|
@@ -93,6 +108,9 @@ were changed (start points, sizes, smoke placed where the flames are) or replace
 | `healing_circle` | A healing circle: a green ring of light on the ground, motes rising through it and a soft green light (procedural) | ring, glow, lamp | 320 x 260, base | loop | intensity (0.8) | Good: a clean ring and rising motes. |
 | `magic_orb` | A magic orb: a small spinning knot of the magic model with a bright core and a violet light | magic; glow, lamp | 140 x 140, centre | loop | spin (0.7) | Good: a small spinning knot with a bright core. |
 | `summoning_circle` | A summoning circle: a violet ring on the ground with arcs of energy leaping up from it and a portal's light (procedural) | ring, arc, lamp | 420 x 360, base | loop | intensity (0.9) | Good: lively arcs over the ring. |
+| `dragon_breath` (new) | Dragon breath: a long, wide gout of violet fire from the anchor (the jet's flame recoloured: it moves as the orange one); it blows to the right | jet; look drake, lamp | 640 x 340, left | loop | intensity (0.95), aim (5) | Good: a long violet gout of fire (the jet, recoloured). |
+| `wisp` (new) | A wisp: a small pale ball of cyan light that bobs and drifts about its place (the orb model, small) | orb; lamp | 120 x 120, centre | loop | intensity (0.3) | Fair: a small cyan ball that bobs about; it reads as a wisp in motion, and only in the orb's cyan. |
+| `magic_vortex` (new) | A magic vortex: a swaying column of violet fire rising from the ground (the vortex model recoloured), motes circling it | whirlwind; look arcane, glow, lamp | 320 x 480, base | loop | intensity (0.8), sway (0.5) | Fair: a swaying violet column, at times split in two. |
 
 ### Ambient (5)
 
@@ -104,7 +122,7 @@ were changed (start points, sizes, smoke placed where the flames are) or replace
 | `smouldering_ground` | Smouldering ground: thin smoke and a dull red glow where a fire has burnt out | smoke; look smoke, lamp, burst | 420 x 300, base | loop | intensity (0.18) | Fair: a thin wisp and a dull red glow; the wisp rises higher than smoulder smoke would. |
 | `dust_motes` | Dust motes: specks of dust drifting slowly through a beam of light (procedural) | glow, lamp | 300 x 300, centre | loop | count (24) | Fair: faint by design; needs a dark scene. |
 
-### Sparks and debris (7)
+### Sparks and debris (8)
 
 | effect | what it is | plays | box, anchor | runs | parameters (default) | how it looks |
 |---|---|---|---|---|---|---|
@@ -115,8 +133,9 @@ were changed (start points, sizes, smoke placed where the flames are) or replace
 | `electric_arc` | An electric arc jumping between two points 200 world pixels apart, flickering, with sparks (procedural) | arc, sparks, lamp | 260 x 120, base | loop | intensity (1) | Good: a lively flickering arc. |
 | `lightning_strike` | A lightning strike: a branching bolt from the sky to its anchor, struck three times, a flash and a scorch (procedural) | arc, flash, lamp, scorch, shock, burst | 360 x 700, base | once, 1.2 s | power (1) | Good: a branching bolt struck three times, a flash and a scorch. |
 | `ember_burst` | An ember burst: a log collapsing in a fire, a puff of embers thrown up that drift and cool (procedural) | burst, lamp | 360 x 360, base | once, 3.5 s | power (1) | Good: a puff of embers that drift and cool. |
+| `ball_lightning` (new) | Ball lightning: a crackling ball of plasma drifting about, throwing short arcs (the orb model with procedural arcs) | orb; arc, lamp | 200 x 200, centre | loop | intensity (0.5) | Good: a boiling ball with arcs crackling off it. |
 
-### Light (5)
+### Light (7)
 
 | effect | what it is | plays | box, anchor | runs | parameters (default) | how it looks |
 |---|---|---|---|---|---|---|
@@ -125,6 +144,29 @@ were changed (start points, sizes, smoke placed where the flames are) or replace
 | `lantern` | A lantern: a steady warm point of light with a soft halo and a gentle flicker (procedural) | glow, lamp | 120 x 120, centre | loop | intensity (1) | Good: a warm point with a soft halo. |
 | `flashbang` | A flashbang: a white flash that blinds the whole scene for a moment, a bang (a shock front) and sparks (procedural) | flash, glow, shake, shock, burst | 400 x 300, centre | once, 1.5 s | power (1) | Good: the whole picture whites out, as it should. |
 | `shockwave_ring` | A shockwave ring: a glowing ring racing out along the ground and a shock front bending the air (procedural) | ring, shock, scorch | 600 x 260, base | once, 1.2 s | power (1) | Good: the ring and the bending air read well. |
+| `plasma_orb` (new) | A plasma orb: a ball of cyan plasma that boils inside a soft edge and breathes, lighting what is near in cyan | orb | 140 x 140, centre | loop | intensity (0.5), pulse (0.4) | Good: a boiling cyan ball that lights what is near it. |
+| `energy_core` (new) | An energy core: a bright ball of plasma that throbs hard, inside a ring of light | orb; ring, lamp | 200 x 200, centre | loop | intensity (0.85) | Good: a bright ball that throbs hard inside a ring of light. |
+
+### Dust (5)
+
+| effect | what it is | plays | box, anchor | runs | parameters (default) | how it looks |
+|---|---|---|---|---|---|---|
+| `dust_impact` (new) | A dust impact: dust thrown up where something heavy hits the ground, rolling out low both ways and settling | dust; look dirt, burst | 480 x 200, base | once, 3.5 s | power (0.85) | Good: the dust model's burst rolls out low and settles; the finest detail of the new entries. |
+| `landing_dust` (new) | Landing dust: a small puff of dust where someone lands, running out low both ways | dust; look dirt | 240 x 80, base | once, 2.5 s | power (0.4) | Good: small and quick. |
+| `ground_slam` (new) | A ground slam: a heavy blow on the ground: a shock front, a ring racing out, flying rocks, a camera shake and a wide wall of dust | dust; look dirt, ring, shake, shock, burst | 680 x 260, base | once, 3.5 s | power (1) | Good: the ring, the shake, the rocks and a wide wall of dust read as one heavy blow. |
+| `sand_burst` (new) | A sand burst: a shell or a heavy blow in sand throws up a tall spray of pale sand that rolls out and settles | dust; look sand, burst | 560 x 280, base | once, 3.5 s | power (1) | Good: a tall pale spray that rolls out; the rocks thrown are the compositor's dark debris, not sand. |
+| `dust_devil` (new) | A dust devil: a column of dust rising from hot ground, swaying and spreading towards its top (the vortex model) | whirlwind; look devil_dust | 300 x 420, base | loop | intensity (0.65), sway (0.6) | Fair: the column sways and spreads at its top into a haze; its intensity is kept at 0.5 or more, as the model can lose a thin column. |
+
+### Weather (6)
+
+| effect | what it is | plays | box, anchor | runs | parameters (default) | how it looks |
+|---|---|---|---|---|---|---|
+| `ground_fog` (new) | Ground fog: a low white bank of fog lying along the ground and rolling slowly, four releases of the fog model | fog; look fogbank | 900 x 120, base | loop | intensity (0.7), wind (0.55) | Good: a continuous low bank that rolls slowly; its four releases still show as gentle humps. |
+| `frost_mist` (new) | Frost mist: a thin, pale blue mist creeping over frozen ground, calm and slow | fog; look rime | 560 x 100, base | loop | intensity (0.5) | Fair: pale and thin by design; it needs a dark ground to read. |
+| `swamp_mist` (new) | Swamp mist: a murky grey-green mist hanging over still water, with a few faint marsh lights drifting in it | fog; look marsh, glow | 760 x 140, base | loop | intensity (0.6) | Fair: murky and faint, and its marsh lights are small. |
+| `sky_cloud` (new) | A cloud: a white mass that boils slowly and drifts, lit by the moon and the scene | cloud; look fleece | 520 x 260, centre | loop | wind (0.6), intensity (0.8) | Good: a soft white cloud that boils slowly (drawn by a look: the cloud model's own renderer gave colour fringes). |
+| `storm_cloud` (new) | A storm cloud: a dark bank of cloud drifting, lit from inside by lightning every few seconds, a bolt below it | cloud; look storm, lamp, arc, flash | 1100 x 360, centre | loop | wind (0.62), every (5) | Fair: a flash lights the bank from inside and the bolt reads, but between flashes the bank is dark and thin. |
+| `dust_storm` (new) | A dust storm: a wall of brown dust rolling past, puffs forming upwind and thinning downwind (the cloud model) | cloud; look grit | 1300 x 300, base | loop | intensity (0.95), wind (0.85) | Fair: a low brown band rolling past, not a towering wall. |
 
 ## 2. The format
 
@@ -146,7 +188,7 @@ field cool = lamp, at (X, Y - 20 * scale), radius 50 * scale, strength 0.6 * int
 
 | statement | keys |
 |---|---|
-| `entry NAME` | `category C` (fire, smoke, explosions, steam, magic, ambient, sparks, light, or a new one), `size W x H` (its box at scale 1, world pixels), `anchor base` or `centre`, `loop` (plays until stopped) or `once S` (a one-shot of S seconds), `show S` (a moment that shows it, seconds after the spawn; the gallery's), `about "..."` (one line) |
+| `entry NAME` | `category C` (fire, smoke, explosions, steam, magic, ambient, sparks, light, dust, weather, or a new one), `size W x H` (its box at scale 1, world pixels), `anchor base`, `centre` or `left` (the middle of the box's left edge: a jet's nozzle), `loop` (plays until stopped) or `once S` (a one-shot of S seconds), `show S` (a moment that shows it, seconds after the spawn; the gallery's), `about "..."` (one line) |
 | `param NAME = DEFAULT` | `range (LO, HI)` (values set are clamped to it), `about "..."` |
 
 In an entry, `t` is the time since the spawn, `X` and `Y` the anchor, `scale` the scale it was spawned at, `variant`
@@ -209,7 +251,7 @@ All in the compositor (`src/compose`), allocation-free (pre-sized pools), determ
 nvfx_library_desc ld;
 nvfx_library_desc_init(&ld);
 ld.catalogue_dir = "library/";                         /* every *.nvfxl in it */
-ld.models_dir = "effects/";                            /* fire.nvfx, smoke.nvfx, explosion.nvfx, steam.nvfx, magic.nvfx */
+ld.models_dir = "effects/";                            /* fire.nvfx, smoke.nvfx, ... vortex.nvfx */
 nvfx_library* lib;
 nvfx_scene_error err;
 if (nvfx_library_open(&ld, &lib, &err) != NVFX_OK) printf("%s\n", err.message);   /* "fire.nvfxl:12:7: ..." */
@@ -252,25 +294,29 @@ nvfx_stage_stop(stage, fire, -1.0);
   (`bad.nvfxl:3:47: ...`).
 
 `examples/library_host.c` is the same in plain C (built as `nvfx_library_host`): given a catalogue and the models'
-folder it lists the catalogue and plays a stage of a few effects (spawned, a parameter set, one moved, one stopped,
-the cost per frame and the heat under each), and with `--self-test` it checks the API without data (listing, a catalogue error, spawns, no
-room, steal, stop, rooms freed, camera, clear, the same frames on 1 and 3 threads).
+folder it lists the catalogue and plays a stage of a few effects (spawned, a parameter set, one moved, one stopped, the
+cost per frame and the heat under each), and with `--self-test` it checks the API without data (listing, a catalogue
+error, spawns, no room, steal, stop, rooms freed, camera, clear, the same frames on 1 and 3 threads).
 
 ## 4. The gallery
 
-The models' folder, `$NEURALVFX_DATA/library/models` by default, holds the five learned effects under the names
-`models.nvfxl` gives them: the v2 fire, smoke and explosion and study D's steam and magic. Links are enough:
+The models' folder, `$NEURALVFX_DATA/library/models` by default, holds the eleven learned effects under the names
+`models.nvfxl` gives them: the v2 fire, smoke and explosion, study D's steam and magic, and round 5's fog, dust, cloud,
+jet, orb and vortex. Links are enough:
 
 ```sh
 mkdir -p $NEURALVFX_DATA/library/models && cd $NEURALVFX_DATA/library/models
 ln -s ../../v2/models/fire.nvfx ../../v2/models/smoke.nvfx ../../v2/models/explosion.nvfx .
 ln -s ../../fx/models/d/steam.nvfx ../../fx/models/d/magic.nvfx .
+ln -s ../../fx_atmos/models/d/fog.nvfx ../../fx_atmos/models/d/dust.nvfx ../../fx_atmos/models/d/cloud.nvfx .
+ln -s ../../fx_energy/models/d/jet.nvfx ../../fx_energy/models/d/orb.nvfx ../../fx_energy/models/d/vortex.nvfx .
 ```
 
 `tools/nvfx_gallery.cpp` plays every entry through the C API, each alone on a stage fitted to its box:
 
 ```
 nvfx_gallery --library library --models DATA/library/models --sheet sheet.png --video walk.mp4 --threads 2
+nvfx_gallery --library library --models DATA/library/models --video new.mp4 --clip 2.4 --only a,b,c   # 2.4 s each
 nvfx_gallery --library library --models DATA/library/models --keyframes DIR --verify results/library/frozen.csv --only a,b
 nvfx_gallery --library library [--models DIR] --check [--require-models]
 nvfx_gallery --library library --list [--markdown]        # the catalogue (the table above comes from it)
@@ -280,25 +326,27 @@ nvfx_gallery --library library --models DIR --shot 960x540 --ground 470 --spawn 
 ```
 
 - `--sheet`: a labelled contact sheet (name, category, one-shot or loop), each cell at the entry's `show` moment.
-- `--video`: a walk through every entry, 4 seconds each (one-shots: their length), with its name.
+- `--video`: a walk through every entry (or those of `--only`), 4 seconds each (one-shots: their length; `--clip S`:
+  S seconds each), with its name.
 - `--check`: the catalogue parsed and every entry checked as a stage of its own; every entry whose models are present
   (procedural ones always) played as two instances, its parameters set to both ends of their ranges, one moved, one
   stopped and spawned again, heap allocations counted in the frame loop and in those calls (0 for each), and something
   drawn.
 - `--keyframes` and `--verify`: each entry's `show` frame as PNG, compared by SHA-256 with frozen rows
-  (`library_keyframe,NAME,file,bytes,sha256`; `results/library/frozen.csv` also records the SHA-256 of the five model
+  (`library_keyframe,NAME,file,bytes,sha256`; `results/library/frozen.csv` also records the SHA-256 of the eleven model
   files they were made with).
 - `--shot`: a stage played as a game would (frame 0 drawn, the spawns, then N frames): the Godot test's reference.
 
-Outputs go under `$NEURALVFX_DATA/library` (the sheet, the video, keyframes); only `docs/figures/library_sheet.png`
-is in git.
+Outputs go under `$NEURALVFX_DATA/library` (the sheet, the video, keyframes); only the two sheets in `docs/figures`
+(`library_sheet.png`, `library_sheet_new.png`, scaled down) are in git.
 
 **Tests** (`ctest`): `neuralfx.LibraryCatalogueCheck` (no data: the catalogue and every procedural entry);
 `neuralfx.LibraryHostExample` (the C example's self-test); `neuralfx.LibraryCataloguePlays` (every entry, with the
-five models in `NEURALFX_MODELS_LIBRARY`, by default `$NEURALVFX_DATA/library/models`; skipped without them);
-`neuralfx.LibraryKeyframesFrozen` (the keyframes of `campfire`, `blue_gas_flame`, `grenade`, `steam_vent`, `portal`
-and `lightning_strike` against `results/library/frozen.csv`; skipped without the models); the `Library.*`, `Glows.*`,
-`Lamps.*` unit tests and the library stage in `nvfx_alloc_test`.
+eleven models in `NEURALFX_MODELS_LIBRARY`, by default `$NEURALVFX_DATA/library/models`; skipped without them);
+`neuralfx.LibraryKeyframesFrozen` (the keyframes of `campfire`, `blue_gas_flame`, `grenade`, `steam_vent`, `portal`,
+`lightning_strike`, `ground_fog`, `dust_impact`, `flamethrower`, `plasma_orb` and `dust_devil` against
+`results/library/frozen.csv`; skipped without the models); the `Library.*`, `Glows.*`, `Lamps.*` unit tests and the
+library stage in `nvfx_alloc_test`.
 
 ## 5. Godot
 
@@ -319,26 +367,31 @@ stage.move_fx(fx, Vector2(320, 470))
 stage.stop(fx)
 ```
 
-`demo/library.tscn` (`library.gd`) is the same in a window: left and right choose one of sixteen effects, a click
-spawns it under the mouse, a right click stops the last. The headless test
-(`engines/godot/test.sh`, step 5) has `nvfx_gallery --shot` draw a stage with four library effects (a campfire, a steam
-vent, a magic burst, an electric arc) spawned at given times, and `demo/test_library.gd` play the same stage in a
-`NeuralVFXStage` in Godot 4.4.1: the listing, the spawns, a full room and an unknown effect refused, the frame the same
-to the byte as `nvfx_gallery`'s, heat over the campfire, a parameter, a move, a stop, a stale handle.
+`demo/library.tscn` (`library.gd`) is the same in a window: left and right choose one of 22 effects, a click spawns it
+under the mouse, a right click stops the last. The headless test (`engines/godot/test.sh`, step 5) has `nvfx_gallery
+--shot` draw a stage with five library effects (a campfire, a steam vent, a magic burst, an electric arc and a plasma
+orb) spawned at given times, and `demo/test_library.gd` play the same stage in a `NeuralVFXStage` in Godot 4.4.1: the
+listing, an effect's description and a jet's anchor, the spawns, a full room and an unknown effect refused, the frame
+the same to the byte as `nvfx_gallery`'s, heat over the campfire, a parameter, a move, a stop, a stale handle.
 
 ## 6. Adding effects
 
-**A new trained model** (fog, dust, cloud, jet, orb, vortex): one line in `library/models.nvfxl` and entries that play
-it, in a new or existing file; no code, no rebuild.
+**A new trained model**: one line in `library/models.nvfxl` and entries that play it, in a new or existing file; no
+code, no rebuild. This is how fog, dust, cloud, jet, orb and vortex joined (23 entries; the jet also needed an anchor
+at the left edge of the box, below); for example the dust impact:
 
 ```
-effect fog = "fog.nvfx"                                       # models.nvfxl; the file goes into the models folder
+effect dust = "dust.nvfx"                                     # models.nvfxl; the file goes into the models folder
+look dirt = shader, emission 0, soot_density 2.2, soot_albedo 0.6, sky 0.45, shadow 0.4, scene_light 1.2, relief 3,
+            tint (0.8, 0.62, 0.42)                            # (the moor scene's look: dust has no heat to draw)
 
-entry valley_fog, category ambient, size 800 x 200, anchor base, loop, show 6,
-      about "Valley fog: a low bank of fog drifting along the ground"
-param density = 0.6, range (0.2, 1), about "how thick"
-module bank = fog, size 128, width 800 * scale, at (X, Y), feather 0.3, look mist, start 0, seed 501,
-              controls (0.6, 0.5, 0.4), intensity density
+entry dust_impact, category dust, size 480 x 200, anchor base, once 3.5, show 0.8,
+      about "A dust impact: dust thrown up where something heavy hits the ground, rolling out low both ways and settling"
+param power = 0.85, range (0.3, 1), about "how hard the hit"
+module heap = dust, size 128, width 480 * scale, at (X, Y), sink 0.03, feather 0.1, look dirt, start 9, seed 601,
+              controls (0.85, 0.5, 0.4), intensity power, opacity 1 - smooth((t - 2.4) / 1)
+at 0:
+  burst at (X, Y - 4 * scale), radius 8 * scale, embers 0, debris 12, speed 260 * scale * power
 ```
 
 Then:
@@ -347,14 +400,37 @@ Then:
    `start N` should have controls near the ones it plays at (a start point of a weak fire played at full intensity
    grows slowly and looks young, one of a strong side wind leans for its first seconds); the shards pick the nearest
    start point by controls for every later shard anyway;
-3. look at it: `nvfx_gallery --sheet ... --only valley_fog` and `--video`; adjust the size, the look, the parameters'
-   ranges (a range that reaches controls the model never saw in training gives what it gives);
+3. look at it: `nvfx_gallery --sheet ... --only dust_impact` and `--video`, and play loops for half a minute or more
+   (`--shot ... --frames 900`); adjust the size, the look, the parameters' ranges (a range that reaches controls the
+   model never saw in training gives what it gives);
 4. if the entry should be guarded against changes, add it to `--only` of `neuralfx.LibraryKeyframesFrozen` and its
    row to `results/library/frozen.csv` (`nvfx_gallery --keyframes DIR --only NAME` writes the rows to copy into
    `DIR/keyframes.csv`).
 
-A model with other control names is used by them (`spin 0.8` for magic). A new category is just a new name in
-`category`.
+A model with other control names is used by them (`spin 0.8` for magic, `aim`, `pulse` and `sway` for the jet, the
+orb and the vortex). A new category is just a new name in `category` (`dust` and `weather` came with round 5).
+
+**What adding six models taught** (no step of the recipe changed; these are things to know):
+- **Read the model's document first**: where its material sits in the tile decides where the module stands. Fog lies
+  in the bottom quarter of its tile and spreads along it, so ground fog is several narrow releases side by side (one
+  wide release stands up like a cumulus); the cloud's mass sits in the middle of its tile, so a smoke screen's tiles
+  stand half below the ground; the orb is a ball in the middle of its tile; the jet's nozzle is 5% in from the left
+  edge and 40% up.
+- **A model that blows one way needs its own anchor.** The jet always blows to the right, as fire always rises (a tile
+  cannot be mirrored), so its entries are `anchor left`: the spawn point is the nozzle and the box lies to its right.
+  Their `aim` parameter is in degrees (-20 to 30) and mapped onto the control (`aim (aim + 20) / 50`).
+- **Models without heat need a look.** Fog, dust and cloud carry soot only; their entries draw them with field-shader
+  looks lit by the scene (the moor scene's frost, storm and dirt; at night a denser one than the moor's for fog). The
+  cloud model's own renderer gave colour fringes, so even the white cloud has a look.
+- **A one-shot model plays as the explosion does**: `once`, and its module faded out by `opacity` before the end.
+- **Names**: `vortex` is a field of the language, so the vortex model is `effect whirlwind = "vortex.nvfx"`; locals such
+  as `core` and `by` are words of the language too, and the checker says so with the line and column.
+- **The start point by controls matters most for the control you can see.** A rocket exhaust at low turbulence
+  started its later shards from the start point of a jet aimed down (the nearest by all three controls); a turbulence
+  of 0.45 made the level one nearest.
+- **Keep a model inside the range where it holds up.** The vortex can lose a thin column at low intensity
+  ([EFFECTS_ENERGY.md](EFFECTS_ENERGY.md) §4.4), so its entries' intensity ranges start at 0.5. Fog lifted high stays up
+  as pale plumes ([EFFECTS_ATMOSPHERE.md](EFFECTS_ATMOSPHERE.md) §6), so no entry pushes fog.
 
 **A new look** (a recolour) is a `look` line before the first entry of a file (shared) or inside an entry (its own).
 It changes colours, not motion; say so in the entry's description.
@@ -379,6 +455,13 @@ It changes colours, not motion; say so in the entry's description.
   close they read as separate tongues.
 - **One-shot explosions** use the explosion model's medium start points; the strongest fill their tile and square off
   at its edges.
+- **Jets blow to the right only** (the model's direction; a tile cannot be mirrored), between 20 degrees down and 30
+  up. A game that needs a flame to the left has none yet.
+- **The vortex** can lose its column at low intensity, so its entries stay at 0.5 or above; its column and the orb's
+  ball follow their training runs no better than a coarse simulation (the test of [EFFECTS_ENERGY.md](EFFECTS_ENERGY.md)),
+  but both play endlessly without trouble, which is what a library entry does.
+- **Fog stays where it is put**: nothing in the library pushes it, as fog lifted by a blast stays up as pale plumes.
+  Fog, dust and cloud give no light and no heat haze.
 
 ## 8. Judged by eye: what changed
 
@@ -401,5 +484,18 @@ Every entry was looked at in the contact sheet and the walk-through video, and t
   `hot_springs`, which is what they look like); `spark_shower` (sparks pouring down from a point died before they had
   fallen far: now `grinder_sparks`, a sideways spray); `drifting_embers` (procedural embers fell straight back to the
   ground: they now ride the flow of an invisible fire, so they rise).
-- **Kept although weak**: `poison_smoke` (the smoke model always rises; held down by a ceiling it spreads into a
-  mushroom with marbled layers) and the faint `drifting_embers` and `heat_haze`, which read in motion only.
+- **Kept although weak**: the faint `drifting_embers` and `heat_haze`, which read in motion only.
+
+The six newer models' entries (round 5) were judged the same way, from sheets, a 30-second play of every loop and a
+walk-through video:
+- **`poison_smoke` was replaced by `poison_gas`**: the smoke model always rises, and held down by a ceiling it spread
+  into a marbled mushroom; the fog model is a heavy gas that stays on the ground.
+- **Fog at night** was nearly invisible with the moor's look (the moor's ground is lighter): the fog entries use a
+  denser look, releases closer together and of different sizes, so they join into one bank.
+- **The smoke screen** stood above the ground until its tiles were set half below it (the cloud's mass is in the
+  middle of its tile); **the dust storm** became three large tiles low down, from three small floating puffs.
+- **The white cloud** is drawn by a look: the cloud model's own renderer gave pink and green fringes.
+- **The rocket thruster** lost its exhaust after half a minute: its later shards started from a jet aimed down (see
+  §6); a higher turbulence fixed it.
+- **The fire whirl** glowed as a large orange square (the warm air at the top of its tile drawn as flame); a dimmer
+  look keeps the column and a softer haze.
