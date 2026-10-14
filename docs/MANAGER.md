@@ -1,6 +1,6 @@
 # The effect manager: many rollout effects within a CPU budget
 
-Status: **current** (14 October 2026). Audience: dev. The C API is `include/neuralfx/nvfx_manager.h` (in libnvfx);
+Status: **current** (14 October 2026; the benchmark in §7 is provisional). Audience: dev. The C API is `include/neuralfx/nvfx_manager.h` (in libnvfx);
 the code is `src/manager/`; the tools are `nvfx_crowd` (§7) and `nvfx_lod` (§5).
 
 One rollout effect playing on its own costs about 0.75 to 1.1 ms per 128 x 128 frame on one core and 2.4 MB of working
@@ -11,7 +11,34 @@ is off screen, and, when the budget is short, shows unimportant effects from a f
 
 ## 1. Bottom line
 
-TO BE FILLED
+- **A battlefield of 165 effects fits a 4 ms budget per 60 Hz frame on one core** (provisional, §7): fires, smoke
+  columns, steam vents, rows of torches and explosions, 133 on screen on average in a fly-through, took 4.2 ms of CPU
+  per tick (105% of the budget; 99th percentile 9.0 ms) and 120 MB. Playing every one of them with `nvfx.h` alone, each
+  its own instance at 64 px, took 47.7 ms per tick (11 times as much) and 257 MB (398 MB resident). At 8 ms on two
+  threads and 16 ms on four the manager used 8.5 and 16.7 ms.
+- **What it looks like at 4 ms**: about 13 simulations run at once (plus 9 paused off screen); the 5 or so nearest or
+  largest effects (explosions among them) have their own, at the size they are seen and mostly 30 Hz, and the other 148 instances are shown
+  from 8 or so proxies, copies of a few runs at 64 px and 7.5 Hz, offset in time so that they do not move in step but
+  plainly the same shapes when several are in view (rows of identical torches, smoke columns that repeat). At 16 ms on
+  four threads 46 simulations run, 15 of them proxies, and the far field looks varied. The sheets and videos are in
+  `$NEURALVFX_DATA/scale/crowd`.
+- **The floor is the coarse step**: every simulation steps 30 times a second whatever its size and rate (0.32 ms a
+  step on one core), so a core runs 15 to 18 simulations within 4 ms per 60 Hz tick, and a crowd beyond that is
+  sharing. A lower update rate saves only the pictures: 8 to 18% of a simulation at 64 px and below, 19 to 41% at 128
+  and 256 px; a smaller size saves 16 to 67%.
+- **Quality** (test run once, held-out settings, fresh seeds, §5.4): between updates the default **crossfade** draws
+  frames 40, 36 and 34 dB (active PSNR per frame) from the full-rate frames at 32 px for 15, 10 and 7.5 Hz, and 35,
+  32 and 29 dB at 128 px, keeping the motion within 4 to 11% and softening detail a little. It beats holding the last
+  update by 7.74 dB [+7.31, +8.21] and the motion-compensated warp along the effect's own flow by 3.44 dB [+1.87,
+  +5.11] (the warp moves a flame's base with the gas; it tied only on the explosion). A smaller picture at its own size
+  is statistically the same effect (spectrum and motion close) but drawn larger than itself it blurs, the largest loss
+  measured. A proxy's picture ties another run of the effect on fire and smoke on every statistic; steam's average
+  picture is 2.6 dB further (snapped controls) and magic's proxies are worse.
+- **Exact where it can be**: at a locked level the manager's frames are `nvfx_render`'s to the bit; the pictures are
+  the same on any number of threads (the plan comes from a cost model, never from measured time); a tick allocates
+  nothing; planning costs 0.03 to 0.08 ms of the calling thread.
+- **New in the runtime**: a runner can take another's state at another size (the coarse state exactly), and lean
+  runners keep only state (186 KB less each): a simulation slot is 0.5 MB at 32 px against 1.3 MB for an `nvfx_instance`.
 
 ## 2. Design
 
@@ -101,7 +128,7 @@ room, or if they matter more than what the planner last sent to proxies; else to
 
 - **Copies** (same effect, controls and seed, `share` on) view one simulation, at the largest size any of them needs.
 - **Copies offset in time** view it `time_offset` seconds behind, from a **ring** of its past keyframes kept at
-  `copy_size` (64 px; `history` keyframes, default 16, so up to 16 updates back: 0.5 s at 30 Hz, 2 s at 7.5 Hz). A
+  `copy_size` (64 px; `history` keyframes, default 16, so up to about 14 updates back: 0.5 s at 30 Hz, 1.9 s at 7.5 Hz). A
   simulation gets a ring from the effect's pool (`offset_sims`, default 8) when a copy with an offset joins it; a new
   one pre-rolls far enough to fill it before it is shown. Offsets are capped at the ring's span. At 30 Hz and the
   copy's size the copy shows exactly the frame its simulation showed that many frames before
@@ -111,8 +138,8 @@ room, or if they matter more than what the planner last sent to proxies; else to
   snapped to one of `proxy_steps` = 3 values), with a seed of the proxy's own, at an offset in its ring drawn from the
   instance's seed, so the copies of a proxy do not move in step. The number of proxies follows the budget (§2.4): a
   new cell gets a proxy of its own only if there is room for one more (else its instances view the nearest cell's),
-  proxies merge when over budget and split when under. A new proxy pre-rolls its ring (about 2 s of simulation, at
-  most 8 steps a tick) before anyone sees it. An instance changes source with a **fade** of `fade_frames` (8) from a
+  proxies merge when over budget and split when under. A new proxy pre-rolls its ring (1.9 s of simulation, after a
+  1 s warm-up for the effects that grow their fine fields; at most 8 steps a tick) before anyone sees it. An instance changes source with a **fade** of `fade_frames` (8) from a
   snapshot of its last picture.
 
 ### 2.6 Off screen
@@ -149,10 +176,11 @@ threads and on the engine's: 0 allocations).
 - **Per slot** (two lean runners and four pictures): 0.50 MB at 32 px, 0.61 MB at 64, 1.0 MB at 128, 2.6 MB at 256
   (an `nvfx_instance`, which also holds its own step scratch: 1.3, 1.6, 2.4 and 5.7 MB).
 - **Per effect** (`nvfx_manager_add_model`): `slots[level]` slots per size (default `max_sims` = 16, 8, 4 and 1), 8
-  more at the proxies' size, rings for the proxies and `offset_sims` (0.29 MB each at the defaults): 33 to 41 MB at the
-  defaults (fire 40.6 MB, the explosion, which has no proxies, 33.4 MB).
-- **Per thread**: one step scratch for the largest runner (3.7 MB at 256 px); **per instance**: two 64-px pictures for
-  offset copies, proxies and fades (32 KB).
+  more at the proxies' size, rings for the proxies and `offset_sims` (0.29 MB each at the defaults): about 29 MB at the
+  defaults for a looping effect, 21 MB for a one-shot (no proxies).
+- **Per manager**: one step scratch per thread for the largest runner (3.7 MB at 256 px), and two 64-px pictures per
+  instance for offset copies, proxies and fades (32 KB; 8 MB for the default 256 instances). A manager with one fire at
+  the defaults takes 40.6 MB in all.
 
 ### 2.9 What is new in the runtime
 
@@ -372,12 +400,71 @@ The defaults that follow:
 - **Under a short budget**, least important first: a simulation of 64 px or less goes to a proxy (a lower rate would
   save little; a proxy saves nearly all of it, and its picture is statistically the effect's: §5); a larger one lowers
   its rate to 15, 10, then 7.5 Hz (29 to 35 dB per frame between updates), then its size (blur), then goes to a proxy.
-- **Crossfade** between updates (the rule, §5.3), for every effect. Motion was better on the explosion only (§5.3,
-  §5.4); an engine can set it per effect (`nvfx_manager_model_desc.interp`), at about the cost of a keyframe picture.
+- **Crossfade** between updates (the rule, §5.3), for every effect. Motion was ahead on the explosion in validation
+  and tied with crossfade on the test (§5.4); an engine can set it per effect (`nvfx_manager_model_desc.interp`), at
+  about the cost of a keyframe picture per picture composed, which a crowd of proxied copies cannot afford (§7).
 - **Proxies**: 64 px, 7.5 Hz, controls snapped to three cells per control, eight proxies per effect, a ring of 16
   keyframes (offsets spread over 1.7 s between the copies).
 - **Budget** 4 ms per tick, one thread; **burst** 1.5; **fade** 8 frames; **pause** off screen, **park** after 1 s,
   **cull** after 30 s.
+
+## 7. The crowd benchmark (provisional)
+
+`nvfx_crowd`: 160 instances to start with: rows of 8 identical torches (15%, offset in time by 0.37 s each) and fires,
+smoke columns and steam vents (53, 29 and 18% of the rest) with random controls and seeds, over a field 80 m wide and
+160 m deep; a camera 2 m up flies through at 2 m/s, yawing 25 degrees either way every 12 s, so effects come close,
+leave the screen and come back. Explosions go off ahead at 1.5 a second and are stopped when they finish; a fire dies
+and another starts every half second. 60 Hz, 20 s (the first second not counted), default pools (`max_sims` 16 and 8
+proxies per effect). CPU is the process's CPU time per tick (every thread), wall the tick's elapsed time.
+
+**Provisional**: measured on the shared 4-core machine while two other agents trained (load average 9 to 14), three
+interleaved rounds per configuration with pinned cores (`tools/manager/time_crowd.sh build OUT 3 20`; every run in
+results/manager/crowd_timing_runs_provisional.csv, the summary in crowd_timing_summary_provisional.csv); the median of
+the three rounds, with the least and greatest in brackets. The planner's figures (plan, simulations, proxied) were the same
+in every round: the plan does not depend on timing. Re-time on a quiet machine with the same script.
+
+| configuration | CPU per tick, mean | CPU p99 | wall, median | wall p99 | plan | simulations (paused) | proxied | memory (resident) |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| 2 ms, 1 thread | 2.22 [2.14, 2.26] | 6.0 | 2.1 | 13.0 | 2.03 | 15.3 (7.0) | 153 | 120 MB (133) |
+| 4 ms, 1 thread | **4.19 [4.19, 4.27]** | 9.0 | 5.6 | 23.3 | 3.71 | 22.2 (9.1) | 148 | 120 MB (133) |
+| 4 ms, 1 thread, hold | 4.44 [4.43, 4.56] | 10.2 | 5.6 | 20.0 | 3.69 | 23.9 (10.1) | 147 | 120 MB (133) |
+| 4 ms, 1 thread, motion | 6.19 [6.17, 6.26] | 10.6 | 7.8 | 22.7 | 12.10 | 12.1 (5.4) | 155 | 120 MB (133) |
+| 8 ms, 2 threads | 8.52 [8.29, 8.78] | 17.2 | 12.8 | 35.1 | 7.11 | 38.4 (16.6) | 133 | 124 MB (137) |
+| 16 ms, 4 threads | 16.68 [16.48, 16.69] | 30.9 | 27.8 | 62.7 | 13.89 | 62.7 (16.5) | 107 | 131 MB (144) |
+| no budget, default pools, 4 threads | 22.78 [22.37, 22.91] | 37.1 | 36.2 | 71.8 | 21.07 | 70.2 (5.2) | 69 | 131 MB (144) |
+| every instance its own `nvfx_instance` at 64 px, 30 Hz while on screen, 1 thread | **47.67 [47.54, 49.07]** | 140.6 | 61.5 | 211.0 | - | 134 instances | - | 257 MB (398) |
+
+Simulations running at once by size and rate (mean over the ticks; the rest are paused off screen):
+
+| configuration | 32 px | 64 px | 128 px | 256 px |
+|---|---|---|---|---|
+| 4 ms | 1.4 at 30 Hz, 0.9 at 7.5 | 0.8 at 30, 0.3 at 10, 7.5 at 7.5 (the proxies) | 0.9 at 30, 0.2 at 15, 0.7 at 7.5 | 0.3 |
+| 8 ms, 2 threads | 3.1 at 30 | 4.6 at 30, 0.2 at 10, 7.5 at 7.5 | 3.7 at 30, 1.0 at 15, 0.9 slower | 0.8 |
+| 16 ms, 4 threads | 5.3 at 30, 2.3 slower | 13.5 at 30, 16.0 slower (15.5 proxies) | 8.3 at 30 | 0.8 |
+
+What the figures say:
+- **The budget holds, with the cost model's error.** The jobs took 6 to 16% more CPU than the plan (the defaults
+  were measured one simulation at a time; a crowd shares the caches, and the machine was loaded), so the manager used
+  104 to 111% of its budget. `nvfx_manager_calibrate` measures this machine; a quiet machine should land closer.
+- **Wall time on several threads** was far above CPU / threads here because the other agents' training held two of the
+  four cores; on a quiet machine the jobs (one per simulation with work, largest first) spread over the threads.
+- **Motion-compensated interpolation does not fit a crowd**: every proxied copy composes its own picture, 0.08 ms
+  each at 64 px against 0.002 ms for a crossfade; its plan alone was 12 ms against the 4 ms budget, and the planner sent
+  fewer simulations to their own runs to pay for it.
+- **Spikes**: the 99th percentile is 2 to 3 times the mean, from spawns (a fire's 1 s warm-up spreads over four
+  ticks at 8 steps each), explosions coming on screen, proxies pre-rolling and the next shard's pre-roll lining up.
+  `burst` (1.5) caps what a tick admits; updates beyond it wait a tick.
+- **Memory** is the pools: 120 MB for four effects at the default pools (three looping effects' slots, proxies and
+  rings at about 29 MB each, the explosion's 21 MB, and 12 MB for the instances' pictures and the thread scratch),
+  against 257 MB for 134 instances of `nvfx.h` at 64 px (1.6 MB each with its own step scratch; 2.4 MB at 128 px).
+
+The pictures: `$NEURALVFX_DATA/scale/crowd/crowd_b4.mp4`, `crowd_b8.mp4` and `crowd_b16.mp4` (the composited view at 30
+fps), `b4_view_10s.png` and the like (the view at 5, 10 and 15 s) and `b4_sheet_10s.png` and the like (every visible
+instance's picture, largest on screen first, with a bar for its level: its length the size, its colour the rate, green
+30 Hz to red 7.5 Hz, blue a proxy). At 4 ms the near effects are sharp but the far field repeats a handful of runs
+(identical torches in a row; smoke columns of one shape); at 16 ms the far fires differ from one another. Some
+sprites show a hard edge where a plume leaves the 128-pixel domain the effect was trained in (smoke's top, the
+explosion's), as with `nvfx_render`.
 
 ## 8. Limits
 

@@ -1,4 +1,4 @@
-// Pictures between a rollout effect's updates (docs/MANAGER.md §3): the effect manager renders keyframes and draws the
+// Pictures between a rollout effect's updates (docs/MANAGER.md §2.3): the effect manager renders keyframes and draws the
 // frames between them by temporal interpolation, and resamples pictures between its levels of detail. Premultiplied
 // RGBA8, rows top to bottom, tightly packed (size * 4 bytes per row). Nothing here allocates.
 #pragma once

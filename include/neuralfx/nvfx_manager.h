@@ -72,7 +72,7 @@ typedef struct nvfx_manager_model_desc {
                          none free starts as a proxy, takes one paused longest, or waits */
   int slots[4];       /* simulations at once at 32, 64, 128 and 256 px (-1: the default max_sims, max_sims / 2,
                          max_sims / 4, max_sims / 16, at least 1; 0: never that size). What a level costs in memory is
-                         mostly these: docs/MANAGER.md §7 */
+                         mostly these: docs/MANAGER.md §2.8 */
   int history;        /* keyframes kept at copy_size by proxies and by simulations with copies offset in time
                          (default 16; 0: none: offsets are ignored and the effect has no proxies) */
   int proxy_sims;     /* proxy simulations at once (default 8; at most proxy_steps ^ controls) */
@@ -81,8 +81,9 @@ typedef struct nvfx_manager_model_desc {
   int proxy_size;     /* picture size of proxy simulations (default 64) */
   int proxy_rate_div; /* proxy simulations update every this many frames (default 4: 7.5 Hz) */
   float shard_seconds; /* looping effects: seconds per shard (default 6, as nvfx_instance_set_drift) */
-  nvfx_interp interp; /* this effect's drawing between updates (default NVFX_INTERP_DEFAULT: the manager's); the quality
-                         study found motion better than crossfade on explosions only (docs/MANAGER.md §5) */
+  nvfx_interp interp; /* this effect's drawing between updates (default NVFX_INTERP_DEFAULT: the manager's); in the
+                         quality study motion was ahead of crossfade only on the explosion, in validation, and tied on
+                         the test (docs/MANAGER.md §5) */
 } nvfx_manager_model_desc;
 
 NVFX_API void nvfx_manager_model_desc_init(nvfx_manager_model_desc* desc);
