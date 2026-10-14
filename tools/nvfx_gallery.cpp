@@ -10,6 +10,8 @@
 //   nvfx_gallery --starts FILE.nvfx                     a learned effect's start points and their controls
 //   nvfx_gallery --library DIR --models DIR --shot 960x540 [--ground 470] --spawn NAME@X,Y[,SCALE[,AT]] ...
 //                --frames N --png frame.png [--print-stage]
+//   --pack FILE in place of --library and --models: the catalogue and its models from an effect pack (nvfx_pack.h;
+//                exit 77 with --verify when the pack is not there)
 //
 // Each effect plays alone on a stage fitted to its box (its catalogue size, at scale 1): spawned at 0.2 s, its
 // thumbnail and keyframe taken `show` seconds later, its clip in the video 4 s long (one-shots: their length; --clip S:
@@ -31,6 +33,7 @@
 #include <neuralfx/dcm/mixer.hpp>
 #include <neuralfx/image_io.hpp>
 #include <neuralfx/nvfx_library.h>
+#include <neuralfx/nvfx_pack.h>
 
 #include <algorithm>
 #include <atomic>
@@ -75,7 +78,7 @@ struct Spawn {
 };
 
 struct Args {
-  fs::path library, models, sheet, video, keyframes, verify, png, starts;
+  fs::path library, models, sheet, video, keyframes, verify, png, starts, pack;
   std::vector<std::string> only;
   std::string print;
   int threads = 2, columns = 6, cell_w = 320, cell_h = 240, frames = 45, shot_w = 0, shot_h = 0;
@@ -107,6 +110,7 @@ Args parse(int argc, char** argv) {
       h = std::stoi(v[1]);
     };
     if (k == "--library") a.library = next();
+    else if (k == "--pack") a.pack = next();
     else if (k == "--models") a.models = next();
     else if (k == "--sheet") a.sheet = next();
     else if (k == "--video") a.video = next();
@@ -143,7 +147,7 @@ Args parse(int argc, char** argv) {
     else if (k == "--print-stage") a.print_stage = true;
     else throw std::invalid_argument("unknown option " + k + " (see the source header)");
   }
-  if (a.library.empty() && a.starts.empty()) throw std::invalid_argument("--library DIR is needed");
+  if (a.library.empty() && a.starts.empty() && a.pack.empty()) throw std::invalid_argument("--library DIR (or --pack FILE) is needed");
   if (a.models.empty()) {
     if (const char* d = std::getenv("NEURALVFX_DATA")) a.models = fs::path(d) / "library" / "models";
   }
@@ -241,7 +245,24 @@ bool write(const fs::path& p, const Rgba& img) {
   std::exit(1);
 }
 
+bool g_from_pack = false;  // the library and its models come from a pack: nothing is missing
+
 nvfx_library* open(const Args& A) {
+  if (!A.pack.empty()) {
+    nvfx_pack_desc pd;
+    nvfx_pack_desc_init(&pd);
+    const std::string path = A.pack.string();
+    pd.path = path.c_str();
+    nvfx_pack* pack = nullptr;
+    nvfx_library* lib = nullptr;
+    nvfx_scene_error err;
+    if (nvfx_pack_open(&pd, &pack, &err) != NVFX_OK) die(err.message);
+    const nvfx_status st = nvfx_library_open_pack(pack, &lib, &err);
+    nvfx_pack_free(pack);  // the library keeps what it needs
+    if (st != NVFX_OK) die(err.message);
+    g_from_pack = true;
+    return lib;
+  }
   nvfx_library_desc d;
   nvfx_library_desc_init(&d);
   const std::string dir = A.library.string(), models = A.models.string();
@@ -259,6 +280,7 @@ std::vector<std::string> missing(const nvfx_library* lib, int i, const fs::path&
   nvfx_library_list_models(lib, i, [](void* u, const char* n, const char* f) { static_cast<std::vector<std::pair<std::string, std::string>>*>(u)->emplace_back(n, f); },
                            &files);
   std::vector<std::string> out;
+  if (g_from_pack) return out;
   for (const auto& [n, f] : files) {
     const fs::path p = fs::path(f).is_absolute() ? fs::path(f) : models / f;
     if (models.empty() || !fs::exists(p)) out.push_back(f);
@@ -640,6 +662,10 @@ int main(int argc, char** argv) try {
     nfx::library::StageSpec spec;
     std::print("{}", nfx::library::single(c, i, spec).text());
     return 0;
+  }
+  if (!A.pack.empty() && !A.verify.empty() && !fs::exists(A.pack)) {
+    std::println("nvfx_gallery: {} is not there: skipped", A.pack.string());
+    return 77;
   }
   nvfx_library* lib = open(A);
   int status = 0;

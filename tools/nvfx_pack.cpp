@@ -19,11 +19,14 @@
 //   nvfx_pack --h3 [--reps N] [--segment N] [--out OUT] [--csv NAME] FILES_OR_DIRS
 //                                             study H, H3: every configuration of the coder on each file, decode
 //                                             times (thread CPU time, interleaved repetitions), one-slice decodes
+//   nvfx_pack pack | list | verify | extract | measure ...
+//                                             effect packs (.nvfxp, docs/INTEGRATION.md §5): tools/pack_files.cpp
 //
 // Packing changes the bytes on disk only: the runtime loads the unpacked .nvfx, so resident memory is unchanged.
 // Single-threaded throughout; decoding speed is the unpacked size over the time to unpack.
 #include "args.hpp"
 #include "baselines.hpp"
+#include "pack_files.hpp"
 
 #include <neuralfx/clip.hpp>
 #include <neuralfx/cm.hpp>
@@ -658,12 +661,16 @@ int h3(const tools::Args& a) {
 }  // namespace
 
 int main(int argc, char** argv) try {
-  const tools::Args a(argc, argv, {"help", "unpack", "study", "tables", "h3", "light", "fast", "lz", "seekable", "flipbooks-only"});
+  const tools::Args a(argc, argv, {"help", "unpack", "study", "tables", "h3", "light", "fast", "lz", "seekable", "flipbooks-only", "manifest", "all-models",
+                                   "require-models", "calibrate"});
   const auto& pos = a.positional();
+  if (!pos.empty() && tools::is_pack_mode(pos[0])) return tools::pack_mode(a);
   if (a.flag("help") || (pos.empty() && !a.has("report") && !a.flag("study") && !a.flag("tables"))) {
     std::println("nvfx_pack in.nvfx out.nvfz [--light | --fast] [--lz] [--seekable [--segment N]] | --unpack in.nvfz out.nvfx | --report DIR | "
                  "--study [--data DIR] [--scores CSV] [--out DIR] [--threads N] [--flipbooks-only] | --tables [--scores CSV] [--out DIR] | "
-                 "--h3 [--reps N] [--segment N] [--out DIR] [--csv NAME] FILES_OR_DIRS");
+                 "--h3 [--reps N] [--segment N] [--out DIR] [--csv NAME] FILES_OR_DIRS | "
+                 "pack OUT.nvfxp --library DIR [--models DIR] [--add FILES] [--licence FILES] [--costs CSV | --calibrate] [--coder fast] | list PACK [--manifest] | "
+                 "verify PACK | extract PACK DIR | measure --library DIR --models DIR [--reps 7] [--threads 3] [--out results/pack]");
     return 0;
   }
   if (a.flag("h3")) {
