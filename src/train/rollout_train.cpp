@@ -237,6 +237,9 @@ void advect_back(int R, const float* S, int C, const float* g, float* gS) {
   }
 }
 
+// StepperOptions::floor_gradient for the training running in this process (set by train_stepper).
+bool g_floor_gradient = false;
+
 // Study L's MacCormack advection (Hyper::advection = 1), as rollout::advect_maccormack, keeping what the gradient needs:
 // the forward samples `a` and, per value, which corner bounded it (0: none; 1 to 4: clamped to the low corner
 // 00, 10, 01, 11; 5 to 8: to the high one).
@@ -425,8 +428,8 @@ void forward(const Model& m, const StepLayout& L, const float* in, const float* 
     for (int k = 0; k < kPhys; ++k) {
       float& v = c.next[sz(i) * sz(C) + sz(k)];
       if (v < m.lo[sz(k)] || v > m.hi[sz(k)]) {
+        c.clamped[sz(i) * kPhys + sz(k)] = v < m.lo[sz(k)] ? 1 : 2;  // 1: held at the floor, 2: at the ceiling
         v = std::clamp(v, m.lo[sz(k)], m.hi[sz(k)]);
-        c.clamped[sz(i) * kPhys + sz(k)] = 1;
       }
     }
   }
@@ -440,7 +443,10 @@ void backward(const Model& m, const StepLayout& L, const Cache& c, std::span<con
   const float* w = m.step_w.data();
   for (int i = 0; i < N; ++i) {
     for (int k = 0; k < kPhys; ++k) {
-      if (c.clamped[sz(i) * kPhys + sz(k)]) gS[sz(i) * sz(C) + sz(k)] = 0;
+      const std::uint8_t q = c.clamped[sz(i) * kPhys + sz(k)];
+      float& g = gS[sz(i) * sz(C) + sz(k)];
+      // a value held at the floor passes a gradient that would raise it (StepperOptions::floor_gradient, study L)
+      if (q && !(q == 1 && g_floor_gradient && g < 0.f)) g = 0;
     }
   }
   Vec gproj(sz(N) * sz(C), 0.f);
@@ -1156,6 +1162,7 @@ StepperResult train_stepper(Model& m, std::span<const Run> runs, const StepperOp
   }
   const StepLayout L = step_layout(h);
   if (m.step_w.size() != L.size) throw std::invalid_argument("rollout: weights do not match the hyperparameters");
+  g_floor_gradient = o.floor_gradient;
   const int threads = thread_count(o.threads);
   Adam adam(L.size);
   StepperResult res;
@@ -1230,6 +1237,7 @@ StepperResult train_stepper(Model& m, std::span<const Run> runs, const StepperOp
   }
   for (const double v : tail) res.final_loss += v / static_cast<double>(tail.size());
   res.seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
+  g_floor_gradient = false;
   return res;
 }
 

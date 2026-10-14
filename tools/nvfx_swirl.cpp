@@ -1152,6 +1152,7 @@ void step_train(const Ctx& c, sim::Effect e, const tools::Args& a) {
   so.batch = a.i("batch", 16);
   so.seed = a.u64("seed", 11);
   so.keep_normalisation = true;
+  so.floor_gradient = a.flag("floor-gradient");
   so.threads = c.threads;
   so.log_every = 50;
   so.progress = [&](int it, int unroll, double loss) {
@@ -2255,7 +2256,7 @@ void step_look(const Ctx& c, sim::Effect e, const tools::Args& a) {
 
 int main(int argc, char** argv) {
   try {
-    tools::Args a(argc, argv, {"no-neural", "no-csd", "only-neural", "empty-start"});
+    tools::Args a(argc, argv, {"no-neural", "no-csd", "only-neural", "empty-start", "floor-gradient"});
     if (a.positional().empty()) {
       std::println("nvfx_swirl diag|dstats|column --effect E [--root DIR] [--results DIR] [--threads N]");
       return 2;
