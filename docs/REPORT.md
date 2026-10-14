@@ -1237,3 +1237,142 @@ at 1280 x 720 (80 frames per second) and 27.2 ms at 1920 x 1080 on 4 threads** a
 10.3 times faster than first written (measured in one session on a quiet machine), with every frame the same to the
 bit. The second round draws each picture while the next frame's state is computed. Scenes are written as text
 scripts; the scripted fireball reproduces the hand-written one to the bit.
+
+## 13. Study K: rollout effects in 8-bit integers
+
+Status: **design and rule committed before validation**; the results follow in this section once the test has run.
+
+**The question.** The frame models run their hidden layers in 8-bit integers by default (§7) and lose 0.008 dB. The
+rollout runtime (`src/runtime/rt_rollout.hpp`) was all float, at about 1 ms per 128 x 128 frame on one AVX2 core. Where
+does a rollout frame's time go, can an int8 path make the parts where it pays cheaper, and what does it cost in quality
+on held-out data? Unlike a frame model's, a rollout effect's network feeds its own next step, and the effects are
+chaotic (§6.1): whatever int8 changes in the stepper, int8 and float runs drift apart, as two seeds do. So the question
+is not whether the pixels match float's but whether int8 follows a real run as well as float does (tracking from the
+true state) and plays as realistically (the endless statistics), judged by a rule fixed before validation.
+
+### 13.1 Where a frame's time goes
+
+Each stage of a runner's step and picture timed in thread CPU time on one pinned core (`nvfx_study_k profile`; the
+runtime's runners take a profile, `RolloutRunner::set_profile`, which reads the clock only while one is attached),
+fire at controls (0.6, 0.5, 0.6), medians over 150 frames, on the shared machine (provisional):
+
+| stage | AVX2, 64 px | 128 px | 256 px | AVX-512, 64 px | 128 px | 256 px |
+|---|---:|---:|---:|---:|---:|---:|
+| noise inputs, condition, FiLM folding | 0.004 | 0.005 | 0.006 | 0.004 | 0.004 | 0.005 |
+| the stepper's network (inputs, two 3 x 3 convolutions 12 -> 24 -> 24, output layer) | **0.23** | **0.24** | 0.25 | 0.15 | 0.16 | 0.16 |
+| state update, divergence, 60 Jacobi iterations, coarse advection | 0.045 | 0.045 | 0.047 | 0.042 | 0.044 | 0.043 |
+| detail layer (fine fields carried and locked) | 0.06 | 0.17 | 0.76 | 0.06 | 0.17 | 0.71 |
+| renderer per coarse cell (directional sums, the first layer's coarse part) | 0.042 | 0.042 | 0.041 | 0.040 | 0.040 | 0.040 |
+| renderer per pixel (first layer's rest, 16 x 16 hidden layer, output, gate) | 0.064 | 0.26 | 1.40 | 0.049 | 0.21 | 1.09 |
+| the runner, step and picture | 0.47 | 0.78 | 2.52 | 0.37 | 0.66 | 2.06 |
+
+- **The stepper's two convolutions are the largest single part below 256 px**: 8 million multiply-adds per step at
+  every size, half the frame at 64 px and 30% at 128 px. Two thirds of them are in the second convolution (24 x 24
+  channels, 3 x 3), whose inputs follow a ReLU.
+- **The renderer per pixel** is the largest part at 256 px. A profile with its two dense layers kept out of line puts
+  the 16 x 16 hidden layer and the 16 x 4 output layer at 17% of the frame at 128 px (about 0.16 ms) and 24% at 256 px;
+  the first layer's per-pixel rest, the gate and the conversion to bytes take as much again.
+- **The detail layer** (gathers, interpolation, the lock) is float work int8 cannot take.
+- **Shards and crossfades**: through `nvfx_render` a frame costs 0.1 to 0.2 ms more than the runner alone at 128 px on
+  average (the next shard's steps during its roll-ahead, fire's 1 s warm-up among them, and the crossfade's second
+  picture), a step's worth spread over the shard.
+- **AVX-512, found on the way**: the float runner in the AVX-512 build is now 15 to 25% faster than in the AVX2 build
+  (0.66 against 0.78 ms at 128 px), the convolutions 1.5 times. The runtime still takes AVX2 by default for float, as
+  measured before the broadcast fix of §7 (§7: "AVX-512 is slower"); this study does not change that default.
+
+**What int8 can win**, worked out before it was written: a layer pays in 8 bits when its multiply-adds outnumber the
+work of quantising its inputs and dequantising its outputs. The second convolution does 216 multiply-adds per output
+and cell against one quantisation per input (24 per cell): with VNNI, one instruction does 64 of them where a float
+FMA does 16. The renderer's hidden layer does 16 per output and pixel against a quantisation and a dequantisation per
+unit: about as much work as its float FMAs. AVX2 without VNNI (pmaddubsw, then pmaddwd to widen) does 32
+multiply-adds in three instructions where FMAs do 8 in one: at best a third fewer instructions.
+
+### 13.2 What was built
+
+`Precision::int8` for rollout runners (`make_rollout(..., Precision, Int8Convs)`), selected with
+`nvfx_instance_set_precision` for rollout instances, `nvfx_scene_desc.precision` for scenes, `nvfx_stage_desc.precision`
+for the library's stages and `nvfx_manager_model_desc.precision` for the effect manager's simulations
+(`compose::Options::precision` inside); `nvfx_fireball`, `nvfx_scene_script` and `nvfx_crowd` take `--precision`.
+- **The second convolution in 8 bits** (`src/runtime/rt_int8_conv.hpp`). Each step, its inputs get one scale per
+  channel over the grid (the largest value maps to 127) and its weights, with FiLM and those scales folded in, one
+  scale per output channel (the largest |w| maps to 127); the sums are integers, then the output's scale, the bias and
+  the ReLU in float. Activations are 7-bit on every ISA (pmaddubsw's limit: two products of 127 x 127 must fit 16 bits),
+  so the AVX-512 VNNI kernel (vpdpbusd), the AVX2 kernel (pmaddubsw) and the 16-bit pairs of the baseline build
+  (pmaddwd) compute the same codes and the same integer sums. Scales are dynamic: one pass of 24 x 1,024 maxima and a
+  vectorised requantisation of 5,184 weights per step, about 5 µs, so they follow the state rather than a calibration.
+- **A second candidate, both convolutions** (`Int8Convs::both`): the first convolution's inputs (the state, the noise,
+  the position) are signed, so they get 8-bit codes with a zero point per channel (128, or 0 for a channel with nothing
+  below zero) and the weights 7 bits (+-63), so that pmaddubsw still cannot saturate (2 x 255 x 63 < 32,768); the
+  zero points' share of the sums is taken off per output channel.
+- **With int8 and no ISA forced, the AVX-512 build is used where the CPU has VNNI** (as for the frame models); the
+  codes and integer sums are those of every other ISA.
+- **The renderer's hidden layer in 8 bits was built and measured, and taken out**: with the frame models' kernels
+  (per-pixel scales, the last layer folded into the output layer) it cost the same as float: 0.227 against 0.227 ms per
+  picture at 128 px with VNNI, 1.12 against 1.14 at 256 px, 0.286 against 0.284 on AVX2 (six interleaved runs of fire
+  and smoke; `DATA/k_int8/renderer_int8_probe.csv`). It would have cost quality for nothing.
+- **A scalar reference** (`rollout::Int8` in `src/core/rollout.cpp`: the same quantisation in plain C++), and parity
+  tests on every ISA (`RolloutRuntime.Int8MatchesItsReferenceOnEveryIsa`): the ISAs' frames are held to one another
+  with the float path's tolerance (3 levels, at most 1% of channels more than one); against the reference, which applies
+  FiLM after the convolution where the runtime folds it in, a code can move by one on a rounding boundary (5 levels in
+  2 channels of 16,384 once), so at most 8 levels, 1% of channels and 0.05 levels on average. Deterministic: a scene
+  at int8 gives the same frames on 1, 2 and 4 threads (`SceneApi.Int8ScenesAreTheSameOnAnyThreadCount`), the manager's
+  int8 simulations are `nvfx_render`'s to the bit (`Manager.FixedLevelIsNvfxRenderAtInt8`), and no frame allocates
+  (`nvfx_alloc_test`).
+
+First costs (fire, provisional, stage medians): the network's stage takes 0.10 ms with the second convolution in 8 bits
+and 0.07 ms with both on AVX-512 VNNI, against 0.155 ms in float on AVX-512 and 0.23 ms on AVX2; on AVX2 without VNNI
+0.21 to 0.23 ms against 0.23 to 0.25 ms: int8 barely pays there.
+
+### 13.3 The rule (fixed before validation; the test runs once)
+
+Code: `tools/nvfx_study_k.cpp` (`track`, `endless`, `decide`, `timing`); every number goes to `DATA/k_int8`.
+
+**Candidates.** `int8_second` (the second convolution in 8 bits) and `int8_both` (both). Float is the reference they
+are compared with, played through the same runtime with the same seeds.
+
+**Measures**, each candidate minus float, paired, 95% bootstrap interval (10,000 resamples):
+- *Tracking from the true state* (study D's protocol, §6.4): a held-out run is simulated; its state after the warm-up
+  (100 frames; one-shots 1), with its fine fields at full size, becomes the effect's only start point; the runtime plays
+  it with the run's own seed as one continuous rollout; active PSNR against the simulation at 8 frames, 1 s and 2 s.
+  Paired over runs.
+- *Endless statistics* (study D2's pooled protocol, §6.9): per setting 8 real runs and 8 plays of the effect as shipped
+  (shards from the stored start points), 10 s each after a 5 s warm-up for the real runs (one-shots: their 89 frames),
+  statistics pooled per setting, then the distances from the real runs: detail spectrum distance, |ln motion ratio|,
+  coverage distance, emission distance, mean-frame PSNR. Paired over settings.
+
+**Non-inferiority margins.** A candidate passes for an effect when every one of these holds:
+1. tracking: the interval's lower end at least **-0.10 dB at 8 frames and at 1 s, and -0.20 dB at 2 s** (by 2 s chaos
+   has turned any difference into noise the size of a run's own, so the margin is wider there);
+2. detail spectrum distance: the upper end at most **+0.02** (a fifth of v2's own distance, 0.1 to 0.15, and half the
+   distance between two sets of eight real runs; study D2 counted 0.013 to 0.032 as a clear gain);
+3. |ln motion ratio|: the upper end at most **+0.02** (2% of motion);
+4. coverage and emission distances: the upper end at most **+10% of float's own mean distance** for the effect;
+5. mean-frame PSNR: the lower end at least **-0.10 dB**.
+
+The strict reading "no endless statistic with its interval entirely on the worse side" is reported beside as `worse`,
+but does not decide: study D2's smoke showed that a consistent 0.04 dB in the mean frame, which no one would see, gives
+an interval entirely on the worse side when every setting agrees (§6.9.4). The margins were set from what matters, then
+checked for power on training settings only (`nvfx_study_k track|endless --split train`, fire, smoke, explosion,
+magic and fog: 8 runs, 4 per setting): there `int8_second` moved every measure by a few hundredths of a dB or
+thousandths of a distance, and `int8_both` by up to a tenth of a dB with a spread up to 0.5 dB at 2 s.
+
+**Validation (the choice).** Tracking: the salt-3 validation runs 0 to 15 (16 per effect, as studies I and J). Endless:
+study G's 10 validation settings (DCM §4), real runs 5,300,000 + 100 s + k, plays 5,400,000 + 100 s + k (s the
+setting, k = 0 to 7). All eleven effects. The choice: `int8_both` if it passes on all eleven, else `int8_second` if it
+does; if neither does, the candidate that passes on more effects (a tie: `int8_second`), tested on those effects only.
+If no candidate passes on any effect, the study stops at validation.
+
+**The test (once).** Study B's 10 held-out settings with fresh seeds. Tracking: a run at each setting with seeds
+5,900,000 + 100 s + k, k = 0, 1 (20 runs per effect). Endless: real runs 5,700,000 + 100 s + k, plays 5,800,000 + 100 s
++ k (k = 0 to 7). The chosen candidate, on the effects chosen on validation; each effect is judged alone.
+
+**The default.** The chosen int8 candidate becomes the default precision of rollout effects (the DEFAULT of
+`nvfx_instance_set_precision`, scenes, the library's stages and the manager) only if
+1. it passes the test on all eleven effects, and
+2. it is faster than float in the same build: on the AVX-512 build at 128 x 128, the mean over the eleven effects of its
+   frame time over float's (each effect's ratio the median over interleaved rounds of `nvfx_study_k timing`) has its 95%
+   bootstrap interval entirely below 0.95.
+
+Otherwise float stays the default and int8 an option. If int8 becomes the default, the frozen-keyframe tests (the
+fireball, the scene scripts, the library, Godot) are pinned to float, so that they keep checking the float path, and a
+few int8 keyframes are frozen beside them. Ties are ties; a null is reported with its numbers.
