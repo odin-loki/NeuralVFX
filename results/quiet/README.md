@@ -40,3 +40,13 @@ The same holds for study D's rollout effects (two alternating rounds of `d-timin
 
 The portal scene (`examples/scenes/portal.nvfxs`) took 22 ms per frame (median of its stages' sum) on 2 threads and
 13 ms on 4, two runs each, without an allocation in the frame loop (`docs/EFFECTS.md` §6).
+
+## Round 5 (14 October 2026)
+
+`/root/nvfx-data/quiet5` (outside git) has the printouts. This session's machine was slower again: the fireball took
+26.2 to 26.7 ms per frame at 1280 x 720 on 4 threads (19 to 20 ms in round 4). The rollout effects, all eleven in the
+same four rounds: `../experiments/round5_effect_timing_quiet.csv` (used in `docs/EFFECTS_ENERGY.md` and
+`docs/EFFECTS_ATMOSPHERE.md` §5). The effect manager's crowd benchmark (`tools/manager/time_crowd.sh build OUT 3 20`):
+`../manager/crowd_timing_runs_quiet.csv` and `crowd_timing_summary_quiet.csv`, and three alternating pairs with and
+without `--calibrate`: `../manager/crowd_calibrate_quiet.csv` (`docs/MANAGER.md` §7.1). The moor and fire-whirl scenes:
+25 to 29 ms per frame on 2 threads and 15 to 17 ms on 4.

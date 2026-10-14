@@ -309,6 +309,15 @@ smoke's and the explosion's memory, and their restarts cost what smoke's do: 0.3
 warm-up. Within the noise of this machine all three cost what fire and smoke cost per frame, fog a little less
 (probably because much of its frame is empty). They should be re-timed on a quiet machine with study D's effects, as steam and magic were.
 
+**Re-timed on a quiet machine** (14 October 2026, one job at a time, four rounds with every rollout effect in them;
+least of the rounds: [round5_effect_timing_quiet.csv](../results/experiments/round5_effect_timing_quiet.csv)): at
+128 px fog 0.88 ms, dust 1.05 ms and cloud 1.08 ms, against fire's 1.26 ms and smoke's 1.14 ms in the same rounds;
+at 64 px 0.59 to 0.71 ms (fire 0.69); at 256 px fog 1.63, dust 2.66 and cloud 2.06 ms (fire 3.07, smoke 3.16). All
+three cost no more than fire and smoke, fog clearly less. This session's machine was slower than earlier ones (the
+fireball took 26 ms per frame at 720p on 4 threads, against 19 to 20 ms in round 4's quiet session), so compare these
+with fire's in the same rounds. The moor scene took 25.1 to 25.9 ms per frame on 2 threads and 14.9 to 15.5 ms on 4
+(two runs each), without an allocation in its frame loop.
+
 ## 6. The scene
 
 `examples/scenes/moor.nvfxs` (10 s at 1280 x 720 and 30 fps, about 90 lines). Night on a moor, under a bank of storm

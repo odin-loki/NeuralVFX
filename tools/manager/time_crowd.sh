@@ -23,6 +23,7 @@ b4_t1|--budget 4 --threads 1 --cores 3
 b4_t1_hold|--budget 4 --threads 1 --cores 3 --interp hold
 b4_t1_crossfade|--budget 4 --threads 1 --cores 3 --interp crossfade
 b4_t1_motion|--budget 4 --threads 1 --cores 3 --interp motion
+b4_t1_calibrated|--budget 4 --threads 1 --cores 3 --calibrate
 b8_t2|--budget 8 --threads 2 --cores 2,3
 b16_t4|--budget 16 --threads 4 --cores 0,1,2,3
 unlimited_t4|--unlimited --threads 4 --cores 0,1,2,3

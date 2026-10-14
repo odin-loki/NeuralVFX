@@ -313,6 +313,16 @@ fire, all three grow their fine fields at instance start, so a restart costs a 1
 32-cell simulation of each with its own renderer costs 2.9 (jet), 1.7 (orb) and 6.4 ms (vortex) in our scalar code,
 against 1.5 ms for fire's.
 
+**Re-timed on a quiet machine** (14 October 2026, one job at a time, the same four rounds with every rollout effect in
+them; least of the rounds, and the greatest: [round5_effect_timing_quiet.csv](../results/experiments/round5_effect_timing_quiet.csv)):
+at 128 px the jet 1.04 ms (to 1.38), the orb 1.31 ms (to 1.47), the vortex 1.01 ms (to 1.30), against fire's 1.26 ms
+(to 1.64); at 64 px all four 0.64 to 0.69 ms; at 256 px 2.50, 3.80, 2.38 and 3.07 ms. So the jet and the vortex cost a
+little less than fire and the orb about as much at 128 px and a quarter more at 256 px, as on the shared machine.
+This session's machine was slower than earlier ones (the fireball took 26 ms per frame at 720p on 4 threads, against
+19 to 20 ms in round 4's quiet session), so compare these with fire's in the same rounds, not with older tables.
+The fire whirl scene took 26.8 to 28.8 ms per frame on 2 threads and 15.0 to 16.6 ms on 4 (two runs each), without an
+allocation in its frame loop.
+
 ## 6. The scene
 
 `examples/scenes/firewhirl.nvfxs` (10 s at 1280 x 720 and 30 fps, about 50 lines). A desert at night. A dust devil

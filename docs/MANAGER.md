@@ -1,6 +1,6 @@
 # The effect manager: many rollout effects within a CPU budget
 
-Status: **current** (14 October 2026; the benchmark in §7 is provisional). Audience: dev. The C API is `include/neuralfx/nvfx_manager.h` (in libnvfx);
+Status: **current** (14 October 2026; the benchmark in §7 was provisional, §7.1 re-times it on a quiet machine). Audience: dev. The C API is `include/neuralfx/nvfx_manager.h` (in libnvfx);
 the code is `src/manager/`; the tools are `nvfx_crowd` (§7) and `nvfx_lod` (§5).
 
 One rollout effect playing on its own costs about 0.75 to 1.1 ms per 128 x 128 frame on one core and 2.4 MB of working
@@ -11,7 +11,9 @@ is off screen, and, when the budget is short, shows unimportant effects from a f
 
 ## 1. Bottom line
 
-- **A battlefield of 165 effects fits a 4 ms budget per 60 Hz frame on one core** (provisional, §7): fires, smoke
+- **A battlefield of 165 effects fits a 4 ms budget per 60 Hz frame on one core, once the manager has measured the
+  machine** (§7.1: with `nvfx_manager_calibrate`, 3.8 to 4.3 ms of CPU per tick on a quiet machine; with the default
+  costs on a machine 1.8 times slower than they assume, 6.7 ms). First measured on the shared machine (§7): fires, smoke
   columns, steam vents, rows of torches and explosions, 133 on screen on average in a fly-through, took 4.2 ms of CPU
   per tick (105% of the budget; 99th percentile 9.0 ms) and 120 MB. Playing every one of them with `nvfx.h` alone, each
   its own instance at 64 px, took 47.7 ms per tick (11 times as much) and 257 MB (398 MB resident). At 8 ms on two
@@ -465,6 +467,36 @@ instance's picture, largest on screen first, with a bar for its level: its lengt
 (identical torches in a row; smoke columns of one shape); at 16 ms the far fires differ from one another. Some
 sprites show a hard edge where a plume leaves the 128-pixel domain the effect was trained in (smoke's top, the
 explosion's), as with `nvfx_render`.
+
+
+### 7.1 Re-timed on a quiet machine
+
+The same script one job at a time (14 October 2026; `results/manager/crowd_timing_runs_quiet.csv`, summary in
+`crowd_timing_summary_quiet.csv`), on a session of the machine that ran slower than the one the cost model's defaults
+were measured in (the fireball took 26 ms per frame at 720p on 4 threads, against 19 to 20 ms on 13 October). Median of
+three rounds, least and greatest in brackets:
+
+| configuration | CPU per tick, mean | CPU p99 | wall, median | plan | simulations | proxied |
+|---|---:|---:|---:|---:|---:|---:|
+| 2 ms, 1 thread | 3.27 [3.03, 3.37] | 8.5 | 2.9 | 2.03 | 15.3 | 153 |
+| 4 ms, 1 thread | 6.71 [6.18, 7.17] | 14.8 | 6.5 | 3.71 | 22.2 | 148 |
+| 4 ms, 1 thread, hold | 6.45 [6.41, 6.91] | 14.8 | 6.6 | 3.69 | 23.9 | 147 |
+| 4 ms, 1 thread, motion | 8.96 [8.20, 9.07] | 16.6 | 8.6 | 12.10 | 12.1 | 155 |
+| 8 ms, 2 threads | 13.09 [12.62, 15.38] | 27.6 | 6.5 | 7.11 | 38.4 | 133 |
+| 16 ms, 4 threads | 26.66 [25.17, 26.96] | 51.9 | 7.3 | 13.89 | 62.7 | 107 |
+| no budget, default pools, 4 threads | 36.51 [35.97, 36.67] | 65.8 | 9.6 | 21.07 | 70.2 | 69 |
+| every instance its own `nvfx_instance` at 64 px, 1 thread | 69.91 [69.00, 70.66] | 195.3 | 63.5 | - | 134 instances | - |
+
+- **Without calibration the budget is exceeded on a slower machine, by as much as the machine is slower.** The plan is
+  the same as before (it does not depend on timing), but every job took about 1.8 times its default cost here, so the
+  4 ms budget used 6.7 ms. The managed crowd still took a tenth of the unmanaged one's CPU (6.7 against 69.9 ms).
+- **With `nvfx_manager_calibrate` it holds.** `nvfx_crowd --calibrate` measures each model's step and pictures on this
+  machine before the run (`results/manager/crowd_calibrate_quiet.csv`, three alternating pairs, 4 ms on one thread):
+  calibrated, 3.77, 4.29 and 3.88 ms of CPU per tick (94 to 107% of the budget); with the defaults, 6.07 to 6.24 ms. An
+  engine should calibrate once at start (here it added 1.2 s to the start for the benchmark's four effects) or set costs measured on its target
+  hardware with `nvfx_manager_set_cost`; the defaults are one core of the project's machine on a fast day.
+- **On several threads the wall time now spreads**: 6.5 ms per tick on 2 threads for 13.1 ms of CPU and 7.3 ms on 4
+  for 26.7 ms, where the shared machine's other jobs had held two cores.
 
 ## 8. Limits
 
