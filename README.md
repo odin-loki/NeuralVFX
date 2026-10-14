@@ -18,7 +18,8 @@ blast bends a fire, its cloud is handed to the smoke model, embers light new fir
 gusts, vortex rings, attractors, heat sources, extinguishers) shape them. Scenes are written as small text scripts
 that `nvfx_scene_script` plays without allocating per frame; `nvfx_fireball` renders the 9-second fireball scene in
 C++ and profiles every stage, and its script version gives the same frames to the bit. Engines play scene scripts
-through a C API (`nvfx_scene.h`) and read their fields for gameplay; a Godot 4 plugin does so and is tested headless.
+through a C API (`nvfx_scene.h`) and read their fields for gameplay, or take the effects alone as lit sprites (colour,
+albedo, emission, normal and thickness) to light with their own lights; a Godot 4 plugin does so and is tested headless.
 
 C++23, no third-party runtime dependencies, a C API for engines, no Python.
 
@@ -27,11 +28,13 @@ C++23, no third-party runtime dependencies, a C API for engines, no Python.
   [results/experiments/SUMMARY.md](results/experiments/SUMMARY.md).
 - **Plan and decisions:** [docs/PLAN.md](docs/PLAN.md).
 - **Engine integration:** [docs/ENGINES.md](docs/ENGINES.md) (C API for effects and scenes, threading, Unreal, Unity,
-  the Godot 4 plugin).
+  the Godot 4 plugin, lit sprites for an engine's own lighting: §11).
 - **More effects:** [docs/EFFECTS.md](docs/EFFECTS.md) (steam and magic: presets, training, the test, a scene).
-- **Effect library:** [docs/LIBRARY.md](docs/LIBRARY.md): 70 named effects ready to place (fires, smokes, explosions,
-  steam, magic, ambient, sparks, lights, dust, weather) from the eleven trained models and procedural elements, with a
-  C API to spawn and drive them, a gallery, and the Godot node `NeuralVFXStage`.
+- **Effect library:** [docs/LIBRARY.md](docs/LIBRARY.md): 79 named effects ready to place (fires, smokes, explosions,
+  steam, magic, ambient, sparks, lights, dust, trails, weather) from the eleven trained models and procedural elements,
+  with a C API to spawn and drive them, a gallery, and the Godot node `NeuralVFXStage`. Trails (a rocket's smoke, a
+  vehicle's dust wake, a carried torch, a comet) move with the game's object and leave their material in the world
+  behind it; rain, snow, ash and leaves are procedural and ride the effects' air.
 - **Energy effects:** [docs/EFFECTS_ENERGY.md](docs/EFFECTS_ENERGY.md) (a flamethrower's jet, a plasma orb and a dust
   devil: presets, training, the test, a fire-whirl scene).
 - **Atmosphere effects:** [docs/EFFECTS_ATMOSPHERE.md](docs/EFFECTS_ATMOSPHERE.md) (fog, dust and cloud: presets, training, the test, a scene).
@@ -110,11 +113,11 @@ From [docs/REPORT.md](docs/REPORT.md), measured on simulated fire, smoke and exp
 | metrics | `src/core/metrics.cpp` | PSNR (full and active-region), SSIM, temporal PSNR, flicker, spectrum and motion statistics, paired bootstrap |
 | evaluation | `nvfx_experiment` | the whole study end to end: compression, controls, variation, timing, figures, report |
 | viewer | `viewer/`, `nvfx_viewer` | Dear ImGui: sliders for every control, side by side with the reference, a flipbook and the live simulation; a scene mode that edits scene scripts live (rebuilt off the frame as you type, errors at their line, the last good scene playing on, inputs, rule buttons and a field probe); [docs/VIEWER.md](docs/VIEWER.md) |
-| composed effects | `src/compose`, `nvfx_fireball`, `nvfx_scene_script` | a prototype: rollout effects coupled through their fields (tiles of one domain, hand-over between models, pushes, transfers, force fields and field effects), with particles, light, distortion and bloom; scene scripts (a text format with a hand-written parser and a runner that allocates nothing per frame, `examples/scenes`); [docs/COMPOSE.md](docs/COMPOSE.md) |
-| scene C API | `include/neuralfx/nvfx_scene.h`, `src/compose/nvfx_scene.cpp` | scene scripts for engines, in libnvfx: a clock in seconds, the picture as RGBA, the fields for gameplay (a point, a tile grid, a region), inputs, rule triggers and module moves and controls; the script runner's frames to the bit, no allocation per frame; [docs/ENGINES.md](docs/ENGINES.md) §7 |
-| effect library | `library/*.nvfxl`, `src/library`, `include/neuralfx/nvfx_library.h` | 70 named, ready-to-use effects (campfire, grenade, steam vent, portal, lightning strike, ground fog, dust impact, flamethrower, plasma orb, dust devil, ...) built from the eleven trained models and the compositor's procedural elements, written in the scene-script language; a C API to list them and spawn, drive and stop instances on a stage (a scene with rooms), no allocation per frame; [docs/LIBRARY.md](docs/LIBRARY.md) |
+| composed effects | `src/compose`, `nvfx_fireball`, `nvfx_scene_script` | a prototype: rollout effects coupled through their fields (tiles of one domain, hand-over between models, pushes, transfers, force fields and field effects), with particles, light, distortion and bloom; scene scripts (a text format with a hand-written parser and a runner that allocates nothing per frame, `examples/scenes`); trails (a moving source leaving heat and soot in world-space tiles that fade and are recycled) and procedural weather (rain that thins smoke, snow that melts over fire); [docs/COMPOSE.md](docs/COMPOSE.md) |
+| scene C API | `include/neuralfx/nvfx_scene.h`, `src/compose/nvfx_scene.cpp` | scene scripts for engines, in libnvfx: a clock in seconds, the picture as RGBA, the fields for gameplay (a point, a tile grid, a region), inputs, rule triggers and module moves and controls; optionally the effects alone as engine layers (lit sprites: colour, albedo, emission, normal and thickness, as RGBA8, RGBA16F or RGBA32F; §11); the script runner's frames to the bit, no allocation per frame; [docs/ENGINES.md](docs/ENGINES.md) §7 |
+| effect library | `library/*.nvfxl`, `src/library`, `include/neuralfx/nvfx_library.h` | 79 named, ready-to-use effects (campfire, grenade, steam vent, portal, lightning strike, ground fog, dust impact, flamethrower, plasma orb, dust devil, rocket trail, rain, ...) built from the eleven trained models and the compositor's procedural elements, written in the scene-script language; a C API to list them and spawn, drive, move (trails stay in the world) and stop instances on a stage (a scene with rooms), no allocation per frame; [docs/LIBRARY.md](docs/LIBRARY.md) |
 | effect manager | `include/neuralfx/nvfx_manager.h`, `src/manager` | many rollout effects within a CPU budget per frame, in libnvfx: sizes and update rates from on-screen size and priority with hysteresis, frames between updates by crossfade, copies sharing a simulation (optionally offset in time), pauses off screen, proxies for the far field when the budget is short, the engine's threads or its own with the same pictures on any number, no allocation per frame; [docs/MANAGER.md](docs/MANAGER.md) |
-| Godot 4 plugin | `engines/godot` | a GDExtension (godot-cpp at a pinned tag): `NeuralVFXScene`, `NeuralVFXStage` (the effect library) and `NeuralVFXEffect` nodes into textures, demo projects and a headless test in Godot 4.4.1 (`engines/godot/test.sh`); [docs/ENGINES.md](docs/ENGINES.md) §8 |
+| Godot 4 plugin | `engines/godot` | a GDExtension (godot-cpp at a pinned tag): `NeuralVFXScene`, `NeuralVFXStage` (the effect library) and `NeuralVFXEffect` nodes into textures (and the lit-sprite layers as four more), demo projects and a headless test in Godot 4.4.1 (`engines/godot/test.sh`); [docs/ENGINES.md](docs/ENGINES.md) §8 |
 | context mixing | `src/dcm`, `nvfx_dcm` | the owner's diffusion-context mixing (DCM) from CameraDetector: a PAQ8-style mixer with a frozen, versioned inference copy and a nested mixer search, k-means contexts without LibTorch, and a value-domain mixer (a value and a Laplace scale per prediction) for generating and coding effects; docs/DCM.md (study G) |
 
 ## Build and test
@@ -124,7 +127,7 @@ Ubuntu 24.04: `g++-14`, CMake 3.25+, Ninja, `libgtest-dev`, `zlib1g-dev` (and `f
 ```sh
 cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_COMPILER=g++-14
 cmake --build build
-ctest --test-dir build                     # 325 tests: sim, metrics, codecs, gradients, runtime parity, composition, scene scripts, field effects, context mixing, denoiser, lossless coder, low-bit, vector-quantised, sparse and multi-level features, video codecs, BC7 and ASTC flipbooks, allocation, C API for effects and scenes, the effect library, the effect manager, start points from footage
+ctest --test-dir build                     # 343 tests: sim, metrics, codecs, gradients, runtime parity, composition, scene scripts, field effects, trails, engine layers, weather, context mixing, denoiser, lossless coder, low-bit, vector-quantised, sparse and multi-level features, video codecs, BC7 and ASTC flipbooks, allocation, C API for effects and scenes, the effect library, the effect manager, start points from footage
 ```
 
 Options: `NEURALFX_BUILD_VIEWER` (GLFW + OpenGL; fetches Dear ImGui), `NEURALFX_BUILD_SHARED` (libnvfx.so for engines),
@@ -165,7 +168,8 @@ training, evaluation; about three hours), then `d-timing` on an idle machine and
 | `nvfx_experiment` | the full study: `data`, `a` (`a-flipbooks`: only the flipbook rows still missing), `b`, `c`, `media`, `timing`, `report`; study D: `d-chaos`, `d-train`, `d-tune`, `d-finish`, `d-eval`, `d-timing`, `d-report` (with `--effects steam,magic` for the effects added later, [docs/EFFECTS.md](docs/EFFECTS.md)); study G: `g-fine` (design G1, DCM-fine, end to end); to come: `g-data`, `g-pilot`, `g-search`, `g-eval`, `g-timing` |
 | `nvfx_c_host` | the engine loop in plain C, with timings; `--scene` plays a scene script through the scene API (and with `--expect` compares every frame with `nvfx_scene_script --profile`); `--self-test` checks the error paths |
 | `nvfx_library_host` | the effect library from plain C: lists a catalogue, plays a stage of spawned effects; `--self-test` checks the API ([docs/LIBRARY.md](docs/LIBRARY.md) §3) |
-| `nvfx_gallery` | the effect library's gallery: a labelled contact sheet, a walk-through video (`--clip` seconds each), keyframes against frozen SHA-256, `--check` (every entry parsed, played, zero allocations), `--list`, `--print`, `--starts`, `--shot` ([docs/LIBRARY.md](docs/LIBRARY.md) §4) |
+| `nvfx_lit_host` | lit sprites from plain C: reads a stage's engine layers every frame and relights them with a moving light, writing PNG; `--self-test` checks the layers ([docs/ENGINES.md](docs/ENGINES.md) §11) |
+| `nvfx_gallery` | the effect library's gallery: a labelled contact sheet, a walk-through video (`--clip` seconds each), keyframes against frozen SHA-256, `--check` (every entry parsed, played, zero allocations; moving ones moved), `--list`, `--print`, `--starts`, `--shot` (spawns may move) ([docs/LIBRARY.md](docs/LIBRARY.md) §4) |
 | `nvfx_viewer` | live viewer with sliders; `--scene FILE` edits a scene script live |
 | `nvfx_fireball` | a scene of composed effects written in C++ (a fireball with smoke, fires and embers) to video, with a profile of every stage |
 | `nvfx_scene_script` | plays a scene script (`examples/scenes/*.nvfxs`) to video, keyframes and a sheet; `--check` and `--print` check and reformat a script; `--verify` compares keyframes with frozen SHA-256 |

@@ -1,8 +1,9 @@
 # Using NeuralVFX effects in a game engine
 
 Status: **current**. Audience: dev. The API is `include/neuralfx/nvfx.h` (C, no dependencies) for single effects and
-`include/neuralfx/nvfx_scene.h` for composed scenes played from scripts (§7); the reference host is `examples/c_host.c`,
-and a Godot 4 plugin is in `engines/godot` (§8).
+`include/neuralfx/nvfx_scene.h` for composed scenes played from scripts (§7), which can also give their effects alone
+as lit sprites for the engine to light (§11); the reference host is `examples/c_host.c`, and a Godot 4 plugin is in
+`engines/godot` (§8).
 
 ## 1. What the runtime does
 
@@ -176,7 +177,7 @@ upload_to_texture(rgba);
 | create | `nvfx_scene_desc_init`, `nvfx_scene_create` (script text or file; effects from a folder or passed in; threads, overlap, output size), `nvfx_scene_free`, `nvfx_scene_get_info` (sizes, fps, length, the bus's grid, counts, memory) |
 | check | `nvfx_scene_check` (parse and check without effects, for an editor's quick loop), `nvfx_scene_list_effects` (the files a script names, for hosts that read them from a package and pass them in) |
 | clock | `nvfx_scene_step(dt)`, `nvfx_scene_step_frames(n)`, `nvfx_scene_seek(seconds)`, `nvfx_scene_restart`, `nvfx_scene_time`, `nvfx_scene_frame` |
-| picture | `nvfx_scene_render(rgba, stride)` |
+| picture | `nvfx_scene_render(rgba, stride)`; with `desc.layers`, the effects alone for the engine to light: `nvfx_scene_render_layer(layer, format, pixels, stride)`, `nvfx_pixel_format_bytes` (§11) |
 | fields | `nvfx_scene_sample` (heat, soot, velocity at a point), `nvfx_scene_sample_grid` (a field on a grid of points: a tile map), `nvfx_scene_field_region` (largest and mean value in a rectangle), `nvfx_scene_camera` (where the screen's top-left corner is in the world, so a pointer over the picture maps to the world) |
 | inputs | `nvfx_scene_set_input`, `nvfx_scene_get_input`, `nvfx_scene_input_name` |
 | rules | `nvfx_scene_trigger`, `nvfx_scene_rule_state` (times fired, last time), `nvfx_scene_rule_name` |
@@ -294,12 +295,20 @@ premultiplied alpha. Properties `effect_path`, `size` (128), `controls` (a `Pack
 (seconds; negative: the effect's default), `hue`, `brightness`, `playing`, `speed`, `time`; methods `load_effect()`,
 `render_at(seconds)`, `get_control_names()`, `get_info()`.
 
+**Engine layers** (§11): with `layers = true` (set before the scene loads) the node also fills `colour_texture`,
+`albedo_texture`, `emission_texture` and `normal_texture` (or `get_layer_texture(LAYER_COLOUR ...)`, and
+`get_layer_image(...)` for the CPU images) with every frame drawn: colour and emission as `FORMAT_RGBAH` (half floats,
+linear, HDR), albedo and normal-and-thickness as `FORMAT_RGBA8` (§11's encodings). A material that lights them is a
+`CanvasItem` or spatial shader that reads the four textures (§11 has the formula).
+
 **`NeuralVFXStage`** (a `NeuralVFXScene`): a stage of the effect library (§9, [LIBRARY.md](LIBRARY.md) §5) instead of a
 script. Properties `library_dir` (the catalogue), `effects_dir` (its models), `stage_size`, `ground` and `rooms` (a
 Dictionary: effect name to a count, or to `[count, steal]`); methods `list_effects()`, `get_categories()`,
 `get_effect_info(name)`, `spawn(effect, position, scale = 1, time = -1)` (a handle, 0 when there is no room),
 `set_param`, `get_param`, `move_fx`, `stop(fx, time = -1)`, `get_fx_info(fx)`, `free_rooms(effect)`, `set_camera`,
-`get_stage_script()`; everything else (stepping, the texture, the fields) is the scene node's.
+`get_stage_script()`; everything else (stepping, the texture, the layers, the fields) is the scene node's. A moving
+effect (`get_effect_info(name).moving` is not zero: a rocket, a vehicle, a carried torch, a comet) is moved with
+`move_fx` every frame; its trail stays in the world behind it.
 
 The nodes read files with `FileAccess` and pass them to the C API in memory, so they work from an exported package:
 the scene node lists the script's effects (`nvfx_scene_list_effects`) and reads each from `effects_dir`. They do not
@@ -334,11 +343,16 @@ registers the extension) and runs `demo/test.gd` headless: a `NeuralVFXScene` pl
 
 When the effect library's models are in `$NEURALVFX_DATA/library/models`, the test goes on (step 5, §9): `nvfx_gallery
 --shot` draws a 960 x 540 stage with a campfire, a steam vent, a magic burst, an electric arc and a plasma orb
-spawned at given times, and `demo/test_library.gd` plays the same stage in a `NeuralVFXStage`. Its 19 checks passed:
-the catalogue's listing, an effect's description and a jet's anchor (`left`, its nozzle); the spawns, a full room and
-an unknown effect refused; **frame 45 the same as
-`nvfx_gallery`'s, byte for byte**; heat over the campfire; the instances' states, a parameter, a move, a stop, the room
-freed and a stale handle; the stage's script.
+spawned at given times and a rocket trail moved every frame (`--spawn rocket_trail@100,330,0.8,0.1,250,-60`), and
+`demo/test_library.gd` plays the same stage in a `NeuralVFXStage` with `layers` on, moving the rocket before each frame
+as `nvfx_gallery` does. Its 24 checks passed: the catalogue's listing, an effect's description and a jet's anchor
+(`left`, its nozzle), the rocket's `moving` velocity; the spawns, a full room and an unknown effect refused; **frame 45
+the same as `nvfx_gallery`'s, byte for byte** (the moved rocket and its trail included: the layers do not change the
+picture); heat over the campfire; smoke left in the world where the rocket passed a second before (0.52 soot; the rocket is
+at x = 450 by then); the four layer
+textures in their formats, thickness wherever the effects cover (6800 sampled pixels covered, none without), the
+campfire's emission; the instances' states, a parameter, a move, a stop, the room freed and a stale handle; the stage's
+script.
 
 The 45 frames took 17 to 45 ms each on 2 threads in Godot, depending on what else ran on the shared machine. The
 saved frame is `$NEURALVFX_DATA/godot/fireball_godot.png`. `demo/main.tscn` is the same scene for a window: the
@@ -346,16 +360,26 @@ fireball full screen, looping, with the heat under the mouse shown in a label.
 
 What the plugin does not do yet: other platforms than Linux x86-64; drawing in the editor; uploading the fields as
 textures for the engine's own renderer (the picture is composed on the CPU and uploaded: 3.7 MB per frame at
-1280 x 720); a transparent background, so that a scene could be drawn over the game's world.
+1280 x 720, and with the layers on 4 x 2 + 2 x 4 bytes a pixel more, 22 MB per frame at 1280 x 720). The picture's
+background is opaque; the layers (§11) are the effects alone, which is what drawing a scene over the game's world needs.
+The `layers` textures are filled through Godot's `Image.set_data`, which copies (the C API underneath allocates
+nothing).
 
 ## 9. The effect library
 
-[LIBRARY.md](LIBRARY.md) is a catalogue of 70 named effects (a campfire, a grenade, a steam vent, a portal, a lightning
-strike, ground fog, a dust impact, a flamethrower, a plasma orb, ...) built from the eleven trained models and the
-compositor's procedural elements, ready to place without training. `include/neuralfx/nvfx_library.h`, in `libnvfx`, lists them and plays them on a **stage**: a scene (§7) with
+[LIBRARY.md](LIBRARY.md) is a catalogue of 79 named effects (a campfire, a grenade, a steam vent, a portal, a lightning
+strike, ground fog, a dust impact, a flamethrower, a plasma orb, a rocket's trail, rain, ...) built from the eleven
+trained models and the compositor's procedural elements, ready to place without training. Four are **trails**
+(`rocket_trail`, `vehicle_dust_wake`, `carried_torch`, `comet_trail`): the game moves them every frame with
+`nvfx_stage_move`, and their smoke, dust or glow stays in the world behind them ([LIBRARY.md](LIBRARY.md) §9); five are
+**procedural weather** (`rain`, `snow`, `falling_ash`, `falling_leaves`, `cherry_petals`) that rides the effects' air,
+melts over fires (snow) and thins smoke (rain). `include/neuralfx/nvfx_library.h`, in `libnvfx`, lists them and plays them on a **stage**: a scene (§7) with
 room for a number of instances of chosen effects, which the game spawns at a position, scale and time, drives through
 named parameters, moves and stops while it plays, without allocating per frame. A stage is an ordinary `nvfx_scene`
-for stepping, drawing and reading fields, so the threading, overlap and exactness of §7 hold for it. In Godot the node
+for stepping, drawing and reading fields, so the threading, overlap and exactness of §7 hold for it, and
+`nvfx_stage_desc.layers` gives its effects as lit sprites (§11). A move, like an input, acts on the next frame computed:
+with overlap that is one frame later than without, so a trail moved every frame gives the same pictures on any number
+of threads for one overlap setting, and pictures a move apart between the two. In Godot the node
 is `NeuralVFXStage` (§8); `engines/godot/test.sh` checks that it draws the same pixels as the library's gallery tool.
 
 ## 10. Many effects: the effect manager
@@ -367,3 +391,128 @@ between copies (optionally offset in time), pauses what is off screen, shows uni
 proxy simulations when the budget is short, and runs the work on its own threads or the engine's job system, with the
 same pictures on any number of threads and no allocation per frame. At a locked level its frames are `nvfx_render`'s
 to the bit. What it costs and what it looks like at a given budget: MANAGER.md §1 and §7.
+
+## 11. Lit sprites: the effects alone, for the engine to light
+
+A scene's picture (§7) is finished and opaque: its sky, its ground and its effects, lit by the scene's own lights and
+tone mapped. An engine that draws effects in its own world wants them alone, lit by its own lights, with the light
+they give for its bloom and a normal for its shading. With `nvfx_scene_desc.layers = 1` (a library stage:
+`nvfx_stage_desc.layers`; Godot: `layers`, §8) every picture also draws the effects alone into four **layers** of the
+output's size, rows top to bottom, read with `nvfx_scene_render_layer`:
+
+```c
+nvfx_scene_desc d;
+nvfx_scene_desc_init(&d);
+d.script_path = "campfire.nvfxs";
+d.layers = 1;                                       /* the picture is the same with them or without */
+nvfx_scene_create(&d, &scene, &err);
+/* every game frame: */
+nvfx_scene_step(scene, dt, NULL);
+nvfx_scene_render_layer(scene, NVFX_LAYER_COLOUR, NVFX_FORMAT_RGBA16F, colour, w * 8);     /* no allocation */
+nvfx_scene_render_layer(scene, NVFX_LAYER_EMISSION, NVFX_FORMAT_RGBA16F, emission, w * 8);
+nvfx_scene_render_layer(scene, NVFX_LAYER_ALBEDO, NVFX_FORMAT_RGBA8, albedo, w * 4);
+nvfx_scene_render_layer(scene, NVFX_LAYER_NORMAL, NVFX_FORMAT_RGBA8, normal, w * 4);
+upload(colour, emission, albedo, normal);           /* nvfx_pixel_format_bytes(format): 4, 8 or 16 bytes a pixel */
+```
+
+| layer | what it holds | RGBA16F, RGBA32F | RGBA8 | what the engine does with it |
+|---|---|---|---|---|
+| `NVFX_LAYER_COLOUR` | the effects as the scene lights them (its lights, its lamps, a fire's light on its own smoke), premultiplied; rgb may exceed a (light); a is coverage | linear, premultiplied, HDR | rgb clamped to [0, 1] and gamma-encoded (2.2), premultiplied; a linear | draws them as the scene would, without its sky: a premultiplied sprite (ONE, ONE_MINUS_SRC_ALPHA) over its world |
+| `NVFX_LAYER_ALBEDO` | what they reflect, unlit: smoke's grey, dust's brown, a flake's white; premultiplied; a = the colour's | linear, premultiplied | gamma 2.2, premultiplied; a linear | lights them with its own lights (below) |
+| `NVFX_LAYER_EMISSION` | the light they give: flames, hot gas, embers, sparks, glows, arcs, rings; a = 0 | linear HDR rgb | RGBM: light = rgb x a x 8 (up to 8) | adds it (ONE, ONE), feeds it to its bloom; its bright spots are where to put real lights |
+| `NVFX_LAYER_NORMAL` | the normal (x right, y up, z towards the viewer; (0, 0, 1) where nothing is) and in a the thickness, an optical depth | xyz in [-1, 1], a = thickness | rgb = n x 0.5 + 0.5, a = thickness / (1 + thickness) | shades them (n . l), and uses the thickness for soft particles, refraction strength or a volume's opacity, 1 - exp(-thickness) |
+
+What holds, and is tested (`Layers.*`, `neuralfx.LitHostExample`): the picture is the same, to the bit, with the
+layers on or off; the layers are the same for the same calls and on any number of threads; the albedo's alpha is the
+colour's; the thickness is 0 exactly where alpha is 0, and positive wherever something covers; the normals are unit
+vectors; the albedo is at most its alpha (a reflectance at most 1); a field-shader look's albedo and emission are its
+own (`Layers.AShaderLooksAlbedoAndEmissionAreItsOwn`); and the encodings are the ones above (decoded, RGBA16F and RGBA8
+give the float layers back within their precision).
+
+**How an engine lights them** (per pixel, premultiplied; `examples/lit_host.c` does this on the CPU, a shader does the
+same):
+
+```
+n      = normal.xyz (RGBA8: normal.rgb * 2 - 1)
+diffuse = sum over lights of colour_l * attenuation_l * max(0, (dot(n, l) + w) / (1 + w))   (w ~ 0.6: smoke is not a hard surface)
+out    = albedo.rgb * (ambient + diffuse) + emission.rgb + background * (1 - albedo.a)
+bloom  += emission.rgb
+```
+
+The colour layer alone, `out = colour.rgb + background * (1 - colour.a)`, gives the scene's own lighting of its
+effects over the engine's background. The emission is premultiplied light: it is added whether or not anything covers.
+
+![Lit sprites: three frames relit by a moving light (top), and the colour, albedo, emission and normal layers of the last](figures/lit_sprites.png)
+
+*`nvfx_lit_host` (top): a stage with chimney smoke, a campfire and a rocket trail moved across it, its layers read
+every frame as RGBA32F and relit over a background of the host's own by an orbiting warm point light and a cool
+ambient, at frames 40, 80 and 120: the smoke and the trail brighten as the light passes them. Bottom: frame 120's
+colour layer and albedo over grey, its emission (the campfire's flames and embers, the rocket's hot exhaust) and its
+normals.*
+
+**What is in them, and what is not.** In: the modules (learned or drawn by a field-shader look), trails, and the
+particles (embers, sparks, debris, flakes, weather, glows, arcs, rings). Not in: the sky, the ground and its scorch
+marks, the light the scene throws on its ground, shock fronts and heat haze (they bend the picture behind them, which
+is the engine's own distortion pass), bloom, flashes and tone mapping. A camera shake moves the layers as it moves the
+picture. How each effect fills them:
+- **drawn by a field-shader look** (smoke, steam, fog, dust, the trails, ...): the albedo is the look's soot albedo and
+  tint, the emission its heat ramp, the thickness the soot's optical depth (density x soot), the normal that of the
+  fine soot field read as a height field (its slopes times the look's `relief`, as the shader's own relief lighting);
+- **drawn by its learned renderer** (a fire's, an orb's own picture): the colour is the picture; for the models that
+  give light (fire, explosion, magic, jet, orb) it is emission too and the albedo is the colour clamped to its alpha,
+  for the others it is albedo; the thickness is -ln(1 - alpha), the normal from the soot field's slopes;
+- **particles**: embers, sparks, glows, arcs and rings are light (colour and emission); debris, flakes and weather
+  cover what is under them (albedo, a flat normal facing the viewer, their thickness), with glowing debris and ash as
+  emission too. Weather is drawn unlit in the picture, so its colour layer is its albedo (and a glowing flake's light).
+
+**Units.** The colour and the emission are linear, in the scene's units times its exposure and fade, before its tone
+mapping: an engine applies its own exposure and tone mapping (the picture's look is the scene's tone map of them over
+its sky). The albedo is a reflectance (0 to 1).
+
+**Formats for upload.** All are tightly packed RGBA, rows top to bottom, at the output's size (resampled as the
+picture is), with a stride of your choice:
+
+| `nvfx_pixel_format` | bytes | upload as | decode |
+|---|---|---|---|
+| `NVFX_FORMAT_RGBA16F` | 8 | GL `RGBA16F` / `GL_HALF_FLOAT`; D3D `DXGI_FORMAT_R16G16B16A16_FLOAT`; Vulkan `VK_FORMAT_R16G16B16A16_SFLOAT`; Unity `RGBAHalf`; Unreal `PF_FloatRGBA`; Godot `Image.FORMAT_RGBAH` | none: linear floats (IEEE half, rounded to the nearest even) |
+| `NVFX_FORMAT_RGBA32F` | 16 | `RGBA32F` / `R32G32B32A32_FLOAT`; Godot `FORMAT_RGBAF` | none |
+| `NVFX_FORMAT_RGBA8` | 4 | `RGBA8` / `R8G8B8A8_UNORM`; Godot `FORMAT_RGBA8` (not an sRGB format: decode in the shader) | colour, albedo: rgb^2.2 (premultiplied, a linear); emission: rgb x a x 8; normal: rgb x 2 - 1, thickness a / (1 - a) |
+
+RGBA16F suits the colour and the emission (HDR); RGBA8 suits the albedo and the normal (the Godot nodes use these:
+24 bytes a pixel for the four). A gamma of 2.2 is close to the sRGB curve, so an sRGB texture format decodes the
+colour and albedo within a few levels if the shader cannot.
+
+**When.** `nvfx_scene_render_layer` gives the layers of the current frame: drawn with the picture (it draws them if the
+picture has not been drawn), so `nvfx_scene_render` and the four reads of one game frame see one frame. With overlap
+the layers are drawn on the picture thread with the picture, while the next frame's state is computed; the reads run
+on the calling thread.
+
+**Cost and memory.** On one thread of the busy shared machine, a 960 x 540 stage with chimney smoke, a campfire and a
+moving rocket trail: drawing the layers added 3.5 to 6 ms to a picture of 12.5 to 17.6 ms (medians of 120 frames,
+stages with and without layers interleaved); reading all four took about 7 ms as RGBA16F (the processor's F16C
+conversion where it has one) and about 7 ms as RGBA8 in a game loop (cache-cold), 5 to 7 ms warm in any of the three
+formats: mostly memory bandwidth, as empty pixels are written without being computed. Only what was drawn in last
+frame is cleared before the layers are drawn again. The layers
+take 4 x 16 bytes a pixel (33 MB at 960 x 540, 59 MB at 1280 x 720) plus three rows per task of the compositor; nothing
+is allocated after creation (`nvfx_alloc_test` reads a layer every frame, cycling through the four and the three
+formats: 0 allocations).
+
+**The example.** `examples/lit_host.c` (built as `nvfx_lit_host`, plain C over `libnvfx`):
+
+```sh
+build/nvfx_lit_host library $NEURALVFX_DATA/library/models out/ --frames 120 --threads 2
+build/nvfx_lit_host --self-test library        # ctest neuralfx.LitHostExample: no learned effects needed
+```
+
+It plays the stage of the figure, reads the four layers every frame and relights them as above with a light that
+circles the scene, writing every 20th frame as PNG with its four layers (RGBA8). Its self-test plays procedural
+effects (sparks, a healing circle and snow, one moved) and checks that the layers are the same for the same calls and
+on 2 and 3 threads, that the picture is the same with the layers on and off, that thickness is 0 exactly where alpha
+is 0, that the albedo's alpha is the colour's and that the normals are unit vectors.
+
+**Limits.** The layers are screen-space images of the output's size, not textures per effect: an engine draws them
+as one full-screen sprite (or a sprite over the stage's area), not as separate billboards. The normal is a shading
+normal made from the soot field's slopes, not a surface's; thick smoke has a rounded normal at its edges and a flat
+one inside. Shock fronts and heat haze are not in them, and the scene's own flashes and ground light are not either.
+Thickness is the effects' optical depth as drawn, not their depth in the world, so soft particles from it fade by how
+thick the smoke is, not by how far it is from the geometry.
