@@ -6,7 +6,9 @@
 // one, and the scripted one through the scene C API (nvfx_scene.h) with the game's calls between frames: steps, field
 // reads, inputs, triggers, module moves and controls; then a stage of the effect library (nvfx_library.h): learned and
 // procedural effects (glows, lamps, bursts of sparks, shards) spawned, moved, set, stopped and stolen between frames,
-// overlapped and not. Exit code 0 = no allocation during rendering.
+// overlapped and not; and the effect manager (nvfx_manager.h) ticking a crowd on its threads and on the engine's,
+// with spawns, stops, controls, camera moves, a tight budget, proxies, copies offset in time, pauses and culls.
+// Exit code 0 = no allocation during rendering.
 #include "compose_scene.hpp"
 #include "script.hpp"
 
@@ -14,6 +16,7 @@
 #include <neuralfx/model.hpp>
 #include <neuralfx/nvfx.h>
 #include <neuralfx/nvfx_library.h>
+#include <neuralfx/nvfx_manager.h>
 #include <neuralfx/nvfx_scene.h>
 #include <neuralfx/rollout.hpp>
 
@@ -554,6 +557,136 @@ field shine = lamp, at (X, Y - 10), radius 20, strength 0.5, colour (0.5, 0.7, 1
   return failures;
 }
 
+// The effect manager: everything is made by nvfx_manager_create and nvfx_manager_add_model; 400 ticks at 60 Hz of a
+// crowd of two looping effects and a one-shot, with every call a game makes between ticks, allocate nothing. Run with
+// its own threads (2), and with the engine running the jobs (here both job slots on the calling thread).
+int run_manager(bool external) {
+  std::string loop_bytes, shot_bytes;
+  for (const bool loop : {true, false}) {
+    nfx::rollout::Hyper h;
+    h.res = 16;
+    h.hidden = 8;
+    h.memory = 2;
+    h.jacobi = 10;
+    h.render_hidden = 6;
+    h.warmup = 4;
+    if (!loop) {
+      h.n_age = 2;
+      h.frames = 50;
+    }
+    nfx::rollout::Model m = nfx::rollout::init_model(h, loop ? 3 : 4);
+    m.effect = "rollout";
+    m.loop = loop;
+    m.control_names = {"intensity", "wind", "turbulence"};
+    m.scale = {0.2f, 0.2f, 0.4f, 0.3f};
+    m.lo = {-2.f, -2.f, 0.f, 0.f};
+    m.hi = {2.f, 2.f, 3.f, 3.f};
+    for (int k = 0; k < 3; ++k) {
+      nfx::rollout::StartPoint sp;
+      sp.controls = {0.2f * static_cast<float>(k), 0.5f, 0.5f};
+      sp.seed = static_cast<std::uint64_t>(k);
+      sp.coarse.assign(static_cast<std::size_t>(h.res) * h.res * nfx::rollout::kPhys, 0.2f);
+      m.starts.push_back(sp);
+    }
+    std::ostringstream os;
+    if (!nfx::rollout::save_model(os, m)) return 1;
+    (loop ? loop_bytes : shot_bytes) = os.str();
+  }
+  nvfx_effect* fl = nullptr;
+  nvfx_effect* fs = nullptr;
+  if (nvfx_effect_load_memory(loop_bytes.data(), loop_bytes.size(), &fl) != NVFX_OK) return 1;
+  if (nvfx_effect_load_memory(shot_bytes.data(), shot_bytes.size(), &fs) != NVFX_OK) return 1;
+  nvfx_manager_desc d;
+  nvfx_manager_desc_init(&d);
+  d.threads = external ? 0 : 2;
+  d.job_slots = 2;
+  d.max_instances = 48;
+  d.budget_ms = 1.5f;
+  d.proxy_dwell = 0.3f;
+  d.min_dwell = 0.2f;
+  d.park_after = 0.3f;
+  d.cull_after = 2.f;
+  d.interp = NVFX_INTERP_MOTION;
+  nvfx_manager* g = nullptr;
+  if (nvfx_manager_create(&d, &g) != NVFX_OK) return 1;
+  nvfx_manager_model_desc md;
+  nvfx_manager_model_desc_init(&md);
+  md.max_sims = 24;
+  md.shard_seconds = 2.f;
+  int ml = -1, ms = -1;
+  if (nvfx_manager_add_model(g, fl, &md, &ml) != NVFX_OK || nvfx_manager_add_model(g, fs, &md, &ms) != NVFX_OK) return 1;
+  const float pos0[3] = {0.f, 0.f, 0.f}, fwd[3] = {0.f, 0.f, 1.f}, up[3] = {0.f, 1.f, 0.f};
+  nvfx_manager_set_camera(g, pos0, fwd, up, 1.f, 640.f, 360.f);
+  std::array<nvfx_handle, 48> hs{};
+  int n = 0;
+  const auto add = [&](int model, std::uint64_t seed, float x, float zz, float offset) {
+    nvfx_spawn_desc s;
+    nvfx_spawn_desc_init(&s);
+    const float c[3] = {0.3f + 0.1f * static_cast<float>(seed % 3), 0.5f, 0.6f};
+    s.model = model;
+    s.controls = c;
+    s.n_controls = 3;
+    s.seed = seed % 4;
+    s.time_offset = offset;
+    s.position[0] = x;
+    s.position[2] = zz;
+    s.world_size = 2.f;
+    nvfx_handle h = 0;
+    if (n < 48 && nvfx_manager_spawn(g, &s, &h) == NVFX_OK) hs[static_cast<std::size_t>(n++)] = h;
+  };
+  for (int i = 0; i < 20; ++i) add(ml, static_cast<std::uint64_t>(i), -10.f + static_cast<float>(i), 4.f + static_cast<float>(i % 7) * 3.f, i % 5 == 4 ? 0.3f : 0.f);
+  const auto tick = [&](int t) {
+    const float cam[3] = {2.f * std::sin(0.01f * static_cast<float>(t)), 0.f, -2.f + 0.02f * static_cast<float>(t % 200)};
+    nvfx_manager_set_camera(g, cam, fwd, up, 1.f, 640.f, 360.f);
+    if (t % 37 == 5) add(ms, static_cast<std::uint64_t>(t), static_cast<float>(t % 9) - 4.f, 6.f, 0.f);
+    if (t % 53 == 20 && n > 25) {
+      nvfx_manager_stop(g, hs[static_cast<std::size_t>(n - 1)]);
+      --n;
+    }
+    if (t % 41 == 7) {
+      const float c[3] = {0.8f, 0.3f + 0.001f * static_cast<float>(t), 0.5f};
+      nvfx_manager_set_controls(g, hs[static_cast<std::size_t>(t % 20)], c, 3);
+    }
+    if (t % 29 == 3) nvfx_manager_set_priority(g, hs[static_cast<std::size_t>(t % 20)], 1.f + static_cast<float>(t % 4));
+    if (t % 31 == 0) nvfx_manager_set_screen_size(g, hs[static_cast<std::size_t>(t % 20)], static_cast<float>(t % 140), t % 3 != 0);
+    if (external) {
+      int jobs = 0;
+      nvfx_manager_tick_begin(g, 1.0 / 60.0, &jobs);
+      nvfx_manager_run_jobs(g, 0);
+      nvfx_manager_run_jobs(g, 1);
+      nvfx_manager_tick_end(g);
+    } else {
+      nvfx_manager_tick(g, 1.0 / 60.0);
+    }
+    for (int i = 0; i < n; ++i) {
+      nvfx_manager_picture p;
+      nvfx_manager_get_picture(g, hs[static_cast<std::size_t>(i)], &p);
+    }
+    nvfx_manager_stats st;
+    nvfx_manager_get_stats(g, &st);
+    return st;
+  };
+  tick(0);  // the first tick outside the count
+  g_allocations = 0;
+  g_counting = true;
+  int proxied = 0, skipped = 0, paused = 0, interpolated = 0;
+  for (int t = 1; t < 400; ++t) {
+    const nvfx_manager_stats st = tick(t);
+    proxied = std::max(proxied, st.proxied);
+    skipped += st.skipped;
+    paused = std::max(paused, st.sims_paused);
+    interpolated += st.interpolated;
+  }
+  g_counting = false;
+  const long a = g_allocations.load();
+  std::printf("effect manager, %s: %ld allocations in 399 ticks (most proxied %d, skipped updates %d, most paused %d, interpolated pictures %d)\n",
+              external ? "jobs on the engine's thread" : "2 threads", a, proxied, skipped, paused, interpolated);
+  nvfx_manager_free(g);
+  nvfx_effect_free(fl);
+  nvfx_effect_free(fs);
+  return a == 0 && proxied > 0 && interpolated > 0 ? 0 : 1;
+}
+
 }  // namespace
 
 int main() {
@@ -600,6 +733,7 @@ int main() {
   failures += run_per_plane(g, 128, "grid", true) + run_per_plane(g, 64, "grid", true);       // sparse features
   failures += run_multi(128, false) + run_multi(64, true) + run_multi(128, true);                // multi-level models (study F4), int8
   failures += run_multi(128, false, NVFX_PRECISION_FLOAT) + run_multi(64, true, NVFX_PRECISION_FLOAT);  // and float
+  failures += run_manager(false) + run_manager(true);                                                    // the effect manager
   std::printf("%s\n", failures ? "FAILED: nvfx_render allocated" : "ok: no allocation per frame");
   return failures ? 1 : 0;
 }

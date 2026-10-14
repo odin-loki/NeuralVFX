@@ -356,3 +356,13 @@ room for a number of instances of chosen effects, which the game spawns at a pos
 named parameters, moves and stops while it plays, without allocating per frame. A stage is an ordinary `nvfx_scene`
 for stepping, drawing and reading fields, so the threading, overlap and exactness of §7 hold for it. In Godot the node
 is `NeuralVFXStage` (§8); `engines/godot/test.sh` checks that it draws the same pixels as the library's gallery tool.
+
+## 10. Many effects: the effect manager
+
+For more than a handful of rollout effects, `include/neuralfx/nvfx_manager.h` plays a scene's instances within a CPU
+budget per game frame ([MANAGER.md](MANAGER.md)): it picks each simulation's picture size (32 to 256 px, from the
+on-screen size) and update rate (30 down to 7.5 Hz, drawing the frames between by crossfade), shares one simulation
+between copies (optionally offset in time), pauses what is off screen, shows unimportant far effects from a few shared
+proxy simulations when the budget is short, and runs the work on its own threads or the engine's job system, with the
+same pictures on any number of threads and no allocation per frame. At a locked level its frames are `nvfx_render`'s
+to the bit. What it costs and what it looks like at a given budget: MANAGER.md §1 and §7.

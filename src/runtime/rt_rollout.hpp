@@ -388,7 +388,9 @@ class RowPair {
 
 class Rollout final : public RolloutRunner {
  public:
-  Rollout(const RolloutEffect& e, int size) : m_(e.m), h_(e.m.h), S_(size) {
+  // lean: the buffers that hold nothing from one step (or picture) to the next live in the step scratch rather than in
+  // the runner (rt_common.hpp, make_rollout): a smaller runner, the same frames to the bit; render() then needs one too.
+  Rollout(const RolloutEffect& e, int size, bool lean = false) : m_(e.m), h_(e.m.h), S_(size), lean_(lean) {
     using namespace rollout;
     R_ = h_.res;
     N_ = R_ * R_;
@@ -405,20 +407,22 @@ class Rollout final : public RolloutRunner {
     b2_.resize(z(H_));
     cond_.assign(z(h_.cond()), 0.f);
     folded_cond_.assign(z(h_.cond()), std::numeric_limits<float>::quiet_NaN());
-    next_.resize(z(N_) * z(C_));
+    if (!lean_) next_.resize(z(N_) * z(C_));
     coarse_.resize(z(N_) * z(C_));
     flow_.resize(z(N_) * 2);
-    div_.resize(z(N_));
+    if (!lean_) div_.resize(z(N_));
     p_.assign(z(R_ + 2) * z(R_ + 2), 0.f);  // pressure with a zero border (written inside only)
-    tmp_.assign(p_.size(), 0.f);
+    if (!lean_) tmp_.assign(p_.size(), 0.f);
     wot_.resize(z(O_) * z(H_));  // the output layer's weights [out][in], for the dense kernel
     for (int j = 0; j < H_; ++j) {
       for (int k = 0; k < O_; ++k) wot_[z(k) * z(H_) + z(j)] = m_.step_w[L.wo + z(j) * z(O_) + z(k)];
     }
-    noise_.resize(z(N_) * kNoise);
-    dirsum_.resize(z(N_) * kDirs);
-    soot_.assign(z(R_ + 2 * kDirSteps) * z(R_ + 2 * kDirSteps), 0.f);  // zero border, written inside only
-    fac_.resize(z(N_) * 4);
+    if (!lean_) {
+      noise_.resize(z(N_) * kNoise);
+      dirsum_.resize(z(N_) * kDirs);
+      soot_.assign(z(R_ + 2 * kDirSteps) * z(R_ + 2 * kDirSteps), 0.f);  // zero border, written inside only
+      fac_.resize(z(N_) * 4);
+    }
     any_.resize(z(R_));
     nm_.assign(z(R_) * 2, 0);
     const std::size_t S2 = z(S_) * z(S_);
@@ -454,6 +458,18 @@ class Rollout final : public RolloutRunner {
     map_.act = carve(ni, z(S_) * 2);
     map_.qmin = carve(ni, z(S_));
     map_.qmax = carve(ni, z(S_));
+    if (lean_) {  // the runner's own buffers that keep nothing between steps or pictures
+      map_.next = carve(nf, z(N_) * z(C_));
+      map_.div = carve(nf, z(N_));
+      map_.tmp = carve(nf, z(R_ + 2) * z(R_ + 2));
+      map_.noise = carve(nf, z(N_) * kNoise);
+      map_.fac = carve(nf, z(N_) * 4);
+      map_.dirsum = carve(nf, z(N_) * kDirs);
+      map_.soot = carve(nf, z(R_ + 2 * kDirSteps) * z(R_ + 2 * kDirSteps));
+      map_.g1 = carve(nf, z(N_) * z(h_.render_hidden));
+      sw_n_ = static_cast<int>(std::ceil(130.f / (0.5f * m_.detail.swirl_scale))) + 3;  // as set below
+      map_.swl = carve(nf, z(sw_n_) * z(sw_n_) * 2);
+    }
     need_ = {nf, ni};
     own_ = std::make_unique<RolloutScratch>();
     own_->fit(*this);
@@ -471,7 +487,7 @@ class Rollout final : public RolloutRunner {
     sw_spacing_ = 0.5f * m_.detail.swirl_scale;
     sw_n_ = static_cast<int>(std::ceil(130.f / sw_spacing_)) + 3;
     swirl_.init(z(sw_n_) * z(sw_n_), 0);
-    swl_.resize(z(sw_n_) * z(sw_n_) * 2);
+    if (!lean_) swl_.resize(z(sw_n_) * z(sw_n_) * 2);
     ax_ = axis(S_, R_, static_cast<float>(R_) / static_cast<float>(S_), -0.5f);
     // fine pixels whose lock reads coarse cell j (as the first or second cell of their interpolation): [cell_lo, cell_hi)
     cell_lo_.assign(z(R_), S_);
@@ -486,7 +502,7 @@ class Rollout final : public RolloutRunner {
     const int Sb = (S_ + kB - 1) / kB * kB;  // a row padded to whole blocks of 16 pixels
     frow_.assign(2 * z(Sb), 0.f);
     if (m_.detail.soften > 0.f) soft_.assign(3 * z(S_ + 2), 0.f);  // study D2: two padded rows and a zero row
-    g1_.resize(z(N_) * z(h_.render_hidden));
+    if (!lean_) g1_.resize(z(N_) * z(h_.render_hidden));
     render_rows_.init(S_, h_.render_hidden, Sb);
     flow_rows_.init(S_);
     swirl_rows_.init(S_);
@@ -563,19 +579,21 @@ class Rollout final : public RolloutRunner {
 
   void render(const FrameInput& in, std::uint8_t* rgba, std::size_t stride) override {
     using namespace rollout;
+    bind_render();
     // directional soot sums on the coarse grid, planar [direction][cell], from the soot with a zero border as wide as
     // the sums are long (zero outside, as the reference)
     static constexpr int dirs[kDirs][2] = {{1, 0}, {1, 1}, {0, 1}, {-1, 1}, {-1, 0}, {-1, -1}, {0, -1}, {1, -1}};
     const int Ps = R_ + 2 * kDirSteps;
+    if (lean_) std::fill(so_.begin(), so_.end(), 0.f);  // the zero border (the scratch holds anything)
     for (int y = 0; y < R_; ++y) {
-      for (int x = 0; x < R_; ++x) soot_[z(y + kDirSteps) * z(Ps) + z(x + kDirSteps)] = coarse_[(z(y) * z(R_) + z(x)) * z(C_) + 3];
+      for (int x = 0; x < R_; ++x) so_[z(y + kDirSteps) * z(Ps) + z(x + kDirSteps)] = coarse_[(z(y) * z(R_) + z(x)) * z(C_) + 3];
     }
     for (int j = 0; j < kDirs; ++j) {
       for (int y = 0; y < R_; ++y) {
-        float* __restrict o = dirsum_.data() + z(j) * z(N_) + z(y) * z(R_);
+        float* __restrict o = ds_.data() + z(j) * z(N_) + z(y) * z(R_);
         std::fill_n(o, R_, 0.f);
         for (int st = 1; st <= kDirSteps; ++st) {
-          const float* __restrict a = soot_.data() + z(y + kDirSteps + st * dirs[j][1]) * z(Ps) + z(kDirSteps + st * dirs[j][0]);
+          const float* __restrict a = so_.data() + z(y + kDirSteps + st * dirs[j][1]) * z(Ps) + z(kDirSteps + st * dirs[j][0]);
           for (int x = 0; x < R_; ++x) o[x] += a[x];
         }
       }
@@ -590,12 +608,12 @@ class Rollout final : public RolloutRunner {
       std::array<float, 2 + kDirs> f{};
       f[0] = coarse_[z(i) * z(C_) + 2] * it;
       f[1] = coarse_[z(i) * z(C_) + 3] * id;
-      for (int j = 0; j < kDirs; ++j) f[z(2 + j)] = dirsum_[z(j) * z(N_) + z(i)] * id;
+      for (int j = 0; j < kDirs; ++j) f[z(2 + j)] = ds_[z(j) * z(N_) + z(i)] * id;
       for (int j = 0; j < RH; ++j) {
         const float* wj = w + RL_.w1 + z(j) * kRenderIn + 2;
         float s = w[RL_.b1 + z(j)];
         for (std::size_t q = 0; q < f.size(); ++q) s += wj[q] * f[q];
-        g1_[z(i) * z(RH) + z(j)] = s;
+        g1s_[z(i) * z(RH) + z(j)] = s;
       }
     }
     render_rows_.reset();
@@ -604,7 +622,7 @@ class Rollout final : public RolloutRunner {
     float* fdn = frow_.data() + Sb;
     float* h1 = r1_.data();
     for (int y = 0; y < S_; ++y) {
-      const auto g = render_rows_.get(g1_.data(), R_, ax_, ax_.i[z(y)]);
+      const auto g = render_rows_.get(g1s_.data(), R_, ax_, ax_.i[z(y)]);
       const float wy = ax_.w[z(y)];
       const float* tf = ft_.data() + z(y) * S;
       const float* df = fd_.data() + z(y) * S;
@@ -724,6 +742,50 @@ class Rollout final : public RolloutRunner {
     scratch_ = own_.get();
   }
   std::array<std::size_t, 2> scratch_need() const override { return need_; }
+  void transfer_from(const RolloutRunner& other) override {
+    const auto* o = dynamic_cast<const Rollout*>(&other);
+    if (!o || &o->m_ != &m_) throw std::invalid_argument("rollout: transfer_from needs a runner of the same effect and ISA");
+    if (o == this) return;
+    std::copy(o->coarse_.begin(), o->coarse_.end(), coarse_.begin());
+    std::copy(o->p_.begin(), o->p_.end(), p_.begin());
+    std::copy(o->flow_.begin(), o->flow_.end(), flow_.begin());
+    time_ = o->time_;
+    since_start_ = o->since_start_;
+    computed_ = o->computed_;
+    dense_steps_ = o->dense_steps_;
+    if (o->seeded_) reseed(o->seed_);
+    const int from = o->S_;
+    if (from == S_) {
+      std::copy(o->ft_.begin(), o->ft_.end(), ft_.begin());
+      std::copy(o->fd_.begin(), o->fd_.end(), fd_.begin());
+    } else if (from > S_ && from % S_ == 0) {  // block averages
+      const int f = from / S_;
+      const float inv = 1.f / static_cast<float>(f * f);
+      for (int y = 0; y < S_; ++y) {
+        for (int x = 0; x < S_; ++x) {
+          float t = 0.f, d = 0.f;
+          for (int j = 0; j < f; ++j) {
+            const std::size_t row = z(y * f + j) * z(from) + z(x * f);
+            for (int i = 0; i < f; ++i) {
+              t += o->ft_[row + z(i)];
+              d += o->fd_[row + z(i)];
+            }
+          }
+          ft_[z(y) * z(S_) + z(x)] = t * inv;
+          fd_[z(y) * z(S_) + z(x)] = d * inv;
+        }
+      }
+    } else {  // bilinear at pixel centres, as begin() spreads stored fine fields
+      const float k = static_cast<float>(S_) / static_cast<float>(from);
+      for (int y = 0; y < S_; ++y) {
+        for (int x = 0; x < S_; ++x) {
+          const float xs = (static_cast<float>(x) + 0.5f) / k - 0.5f, ys = (static_cast<float>(y) + 0.5f) / k - 0.5f;
+          ft_[z(y) * z(S_) + z(x)] = bilinear(o->ft_.data(), from, 1, 0, xs, ys);
+          fd_[z(y) * z(S_) + z(x)] = bilinear(o->fd_.data(), from, 1, 0, xs, ys);
+        }
+      }
+    }
+  }
   void adopt(float seconds) override {
     time_ = seconds;
     since_start_ = m_.detail.swirl_ramp;
@@ -758,6 +820,35 @@ class Rollout final : public RolloutRunner {
     act_ = Q(map_.act);
     qmin_ = Q(map_.qmin);
     qmax_ = Q(map_.qmax);
+    if (lean_) {
+      nx_ = F(map_.next);
+      dv_ = F(map_.div);
+      tp_ = F(map_.tmp);
+      nz_ = F(map_.noise);
+      fc_ = F(map_.fac);
+      sl_ = F(map_.swl);
+    } else {
+      nx_ = next_;
+      dv_ = div_;
+      tp_ = tmp_;
+      nz_ = noise_;
+      fc_ = fac_;
+      sl_ = swl_;
+    }
+  }
+  // The renderer's per-picture buffers: the runner's own, or (lean) the scratch's. A runner that is not lean reads no
+  // scratch here, so it may draw while another runner steps with its scratch.
+  void bind_render() {
+    if (!lean_) {
+      ds_ = dirsum_;
+      so_ = soot_;
+      g1s_ = g1_;
+      return;
+    }
+    float* f = scratch_->floats.data();
+    ds_ = std::span<float>(f + map_.dirsum.at, map_.dirsum.n);
+    so_ = std::span<float>(f + map_.soot.at, map_.soot.n);
+    g1s_ = std::span<float>(f + map_.g1.at, map_.g1.n);
   }
 
   // The zero border of `count` planes of (R + 2)^2 values (the scratch may hold another runner's values there).
@@ -819,14 +910,14 @@ class Rollout final : public RolloutRunner {
       zt *= 2.f;
     }
     for (int i = 0; i < N_; ++i) {
-      noise_[z(i) * 2] = curl_.value(z(i));
+      nz_[z(i) * 2] = curl_.value(z(i));
       float sum = 0.f, amp = 1.f, norm = 0.f;
       for (int o = 0; o < ns.flicker_octaves; ++o) {
         sum += amp * flicker_[z(o)].value(z(i));
         norm += amp;
         amp *= 0.5f;
       }
-      noise_[z(i) * 2 + 1] = sum / norm;
+      nz_[z(i) * 2 + 1] = sum / norm;
     }
   }
 
@@ -864,8 +955,8 @@ class Rollout final : public RolloutRunner {
       for (int x = 0; x < R_; ++x) {
         const std::size_t i = z(y) * z(R_) + z(x), q = z(y + 1) * z(Pw) + z(x + 1), plane = z(Pw) * z(Pw);
         for (int k = 0; k < C_; ++k) X_[z(k) * plane + q] = coarse_[i * z(C_) + z(k)] / (k < kPhys ? m_.scale[z(k)] : 1.f);
-        X_[z(C_) * plane + q] = noise_[i * 2];
-        X_[z(C_ + 1) * plane + q] = noise_[i * 2 + 1];
+        X_[z(C_) * plane + q] = nz_[i * 2];
+        X_[z(C_ + 1) * plane + q] = nz_[i * 2 + 1];
         X_[z(C_ + 2) * plane + q] = (static_cast<float>(x) + 0.5f) / static_cast<float>(R_) * 2.f - 1.f;
         X_[z(C_ + 3) * plane + q] = (static_cast<float>(y) + 0.5f) / static_cast<float>(R_) * 2.f - 1.f;
       }
@@ -899,18 +990,34 @@ class Rollout final : public RolloutRunner {
     const auto U = [&](int x, int y, int c) { return mid_[(z(std::clamp(y, 0, R_ - 1)) * z(R_) + z(std::clamp(x, 0, R_ - 1))) * z(C_) + z(c)]; };
     for (int y = 0; y < R_; ++y) {
       for (int x = 0; x < R_; ++x) {
-        div_[z(y) * z(R_) + z(x)] = -0.5f * (U(x + 1, y, 0) - U(x - 1, y, 0) + U(x, y + 1, 1) - U(x, y - 1, 1)) + m_.qscale * d_[z(C_) * z(N_) + z(y) * z(R_) + z(x)];
+        dv_[z(y) * z(R_) + z(x)] = -0.5f * (U(x + 1, y, 0) - U(x - 1, y, 0) + U(x, y + 1, 1) - U(x, y - 1, 1)) + m_.qscale * d_[z(C_) * z(N_) + z(y) * z(R_) + z(x)];
       }
     }
     const int Pr = R_ + 2;  // pressure rows, with the zero border
-    for (int it = 0; it < h_.jacobi; ++it) {
-      for (int y = 0; y < R_; ++y) {
-        const float* __restrict row = p_.data() + z(y + 1) * z(Pr) + 1;
-        float* __restrict t = tmp_.data() + z(y + 1) * z(Pr) + 1;
-        const float* __restrict dv = div_.data() + z(y) * z(R_);
-        for (int x = 0; x < R_; ++x) t[x] = 0.25f * (dv[x] + (row[x - 1] + row[x + 1] + row[x - Pr] + row[x + Pr]));
+    if (!lean_) {
+      for (int it = 0; it < h_.jacobi; ++it) {
+        for (int y = 0; y < R_; ++y) {
+          const float* __restrict row = p_.data() + z(y + 1) * z(Pr) + 1;
+          float* __restrict t = tmp_.data() + z(y + 1) * z(Pr) + 1;
+          const float* __restrict dv = div_.data() + z(y) * z(R_);
+          for (int x = 0; x < R_; ++x) t[x] = 0.25f * (dv[x] + (row[x - 1] + row[x + 1] + row[x - Pr] + row[x + Pr]));
+        }
+        p_.swap(tmp_);
       }
-      p_.swap(tmp_);
+    } else {  // the same iterations between p_ and a buffer of the scratch (its zero border set here)
+      std::fill(tp_.begin(), tp_.end(), 0.f);
+      float* pa = p_.data();
+      float* pb = tp_.data();
+      for (int it = 0; it < h_.jacobi; ++it) {
+        for (int y = 0; y < R_; ++y) {
+          const float* __restrict row = pa + z(y + 1) * z(Pr) + 1;
+          float* __restrict t = pb + z(y + 1) * z(Pr) + 1;
+          const float* __restrict dv = dv_.data() + z(y) * z(R_);
+          for (int x = 0; x < R_; ++x) t[x] = 0.25f * (dv[x] + (row[x - 1] + row[x + 1] + row[x - Pr] + row[x + Pr]));
+        }
+        std::swap(pa, pb);
+      }
+      if (pa != p_.data()) std::copy(pa, pa + p_.size(), p_.data());
     }
     const auto P = [&](int x, int y) { return p_[z(y + 1) * z(Pr) + z(x + 1)]; };  // zero outside
     for (int y = 0; y < R_; ++y) {
@@ -933,7 +1040,7 @@ class Rollout final : public RolloutRunner {
         const float* b = a + C_;
         const float* c = a + z(R_) * z(C_);
         const float* d = c + C_;
-        float* o = next_.data() + i * z(C_);
+        float* o = nx_.data() + i * z(C_);
         for (int k = 0; k < C_; ++k) {
           float v = (1.f - fy) * ((1.f - fx) * a[k] + fx * b[k]) + fy * ((1.f - fx) * c[k] + fx * d[k]);
           if (k < kPhys) v = std::clamp(v, m_.lo[z(k)], m_.hi[z(k)]);
@@ -941,7 +1048,11 @@ class Rollout final : public RolloutRunner {
         }
       }
     }
-    coarse_.swap(next_);
+    if (lean_) {
+      std::copy(nx_.begin(), nx_.end(), coarse_.begin());
+    } else {
+      coarse_.swap(next_);
+    }
   }
 
   // The stepper's 3x3 convolutions (with ReLU) on the coarse grid: the shared kernel, with six output channels per
@@ -1053,9 +1164,9 @@ class Rollout final : public RolloutRunner {
       fhi = std::max(fhi, flow_[z(i) * 2 + 1]);
     }
     if (amp > 0.f) {
-      for (std::size_t q = 1; q < swl_.size(); q += 2) {
-        slo = std::min(slo, swl_[q]);
-        shi = std::max(shi, swl_[q]);
+      for (std::size_t q = 1; q < sl_.size(); q += 2) {
+        slo = std::min(slo, sl_[q]);
+        shi = std::max(shi, sl_[q]);
       }
     }
     const int lead = static_cast<int>(std::min(edge, std::max(0.f, -(k * flo + amp * slo)))) + 3;
@@ -1073,9 +1184,9 @@ class Rollout final : public RolloutRunner {
         uhi = std::max(uhi, flow_[z(i) * 2]);
       }
       if (amp > 0.f) {
-        for (std::size_t q = 0; q < swl_.size(); q += 2) {
-          sulo = std::min(sulo, swl_[q]);
-          suhi = std::max(suhi, swl_[q]);
+        for (std::size_t q = 0; q < sl_.size(); q += 2) {
+          sulo = std::min(sulo, sl_[q]);
+          suhi = std::max(suhi, sl_[q]);
         }
       }
       // a pixel at x samples x - u: it can see material in [first, last] only if x is in [first + ulo - 1, last + uhi + 1]
@@ -1150,12 +1261,12 @@ class Rollout final : public RolloutRunner {
   void swirl_lattice(float zt) {
     swirl_.at(zt);
     const int n = sw_n_;
-    std::fill(swl_.begin(), swl_.end(), 0.f);
+    std::fill(sl_.begin(), sl_.end(), 0.f);
     for (int j = 1; j < n - 1; ++j) {
       for (int i = 1; i < n - 1; ++i) {
         const std::size_t q = z(j) * z(n) + z(i);
-        swl_[2 * q] = swirl_.value(q + z(n)) - swirl_.value(q - z(n));
-        swl_[2 * q + 1] = swirl_.value(q - 1) - swirl_.value(q + 1);
+        sl_[2 * q] = swirl_.value(q + z(n)) - swirl_.value(q - z(n));
+        sl_[2 * q + 1] = swirl_.value(q - 1) - swirl_.value(q + 1);
       }
     }
   }
@@ -1236,7 +1347,7 @@ class Rollout final : public RolloutRunner {
     const float *su0 = u0, *sv0 = u0, *su1 = u0, *sv1 = u0;
     float sy = 0.f;
     if (swirl) {
-      const auto s = swirl_rows_.get(swl_.data(), sw_n_, sx_, sx_.i[z(y)]);
+      const auto s = swirl_rows_.get(sl_.data(), sw_n_, sx_, sx_.i[z(y)]);
       sy = sx_.w[z(y)];
       su0 = s[0];
       sv0 = s[0] + S;
@@ -1355,7 +1466,7 @@ class Rollout final : public RolloutRunner {
       const float bt = st * inv, tt = coarse_[i * z(C_) + 2];
       const float bd = sd * inv, td = coarse_[i * z(C_) + 3];
       const float rt = (tt + eps) / (bt + eps), rd = (td + eps) / (bd + eps);
-      float* f = fac_.data() + i * 4;  // new heat, heat scale, new soot, soot scale
+      float* f = fc_.data() + i * 4;  // new heat, heat scale, new soot, soot scale
       f[1] = rt <= 1.f ? rt : std::min(rt, dt.grow);
       f[0] = std::max(0.f, tt - bt * f[1]);
       f[3] = rd <= 1.f ? rd : std::min(rd, dt.grow);
@@ -1377,7 +1488,7 @@ class Rollout final : public RolloutRunner {
     const std::size_t S = z(S_);
     const int c = ax_.i[z(y)];
     const float wy = ax_.w[z(y)];
-    const auto f = fac_rows_.get(fac_.data(), R_, ax_, c);
+    const auto f = fac_rows_.get(fc_.data(), R_, ax_, c);
     const float *at0 = f[0], *rt0 = f[0] + S, *ad0 = f[0] + 2 * S, *rd0 = f[0] + 3 * S;
     const float *at1 = f[1], *rt1 = f[1] + S, *ad1 = f[1] + 2 * S, *rd1 = f[1] + 3 * S;
     const bool noisy = dt.contrast > 0.f && (any_[z(c)] || any_[z(c + 1)]);
@@ -1452,6 +1563,7 @@ class Rollout final : public RolloutRunner {
   struct {
     Part X, h1p, h1, h2, d, mid, rec, td, fg, cs_t, cs_d, wx, wy;  // floats
     Part off, ext, act, qmin, qmax;                                 // integers
+    Part next, div, tmp, noise, fac, swl, dirsum, soot, g1;         // lean runners only (floats)
   } map_;
   std::array<std::size_t, 2> need_{};
   std::unique_ptr<RolloutScratch> own_;  // null while a shared one is used
@@ -1479,6 +1591,10 @@ class Rollout final : public RolloutRunner {
   int dense_steps_ = 0;              // steps since then
   int lead_ = 0, lag_ = 0, reach_lo_ = 0, reach_hi_ = 0;
   AlignedFloats swl_;                                  // the swirl lattice's velocity, (u, v) interleaved
+  bool lean_ = false;
+  // The buffers above that keep nothing between steps (or pictures), wherever they are (the runner's, or the scratch's
+  // for a lean runner): bound by bind() and bind_render().
+  std::span<float> nx_, dv_, tp_, nz_, fc_, sl_, ds_, so_, g1s_;
   AlignedFloats r1_, r2_, out_;                        // the renderer's activations for one block
   Axis ax_, sx_;                     // fine pixel -> coarse cell, fine pixel -> swirl lattice
   std::vector<Axis> nax_;            // fine pixel -> flicker lattice, per octave (smooth5 weights)

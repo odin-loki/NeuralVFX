@@ -587,7 +587,7 @@ std::unique_ptr<Renderer> make_renderer(const Effect& e, int size, Precision p) 
   return std::make_unique<ConvRenderer>(e, size);  // the conv family has no int8 path
 }
 
-std::unique_ptr<RolloutRunner> make_rollout(const RolloutEffect& e, int size) { return std::make_unique<Rollout>(e, size); }
+std::unique_ptr<RolloutRunner> make_rollout(const RolloutEffect& e, int size, bool lean) { return std::make_unique<Rollout>(e, size, lean); }
 
 }  // namespace nfx::rt::NFX_NS
 

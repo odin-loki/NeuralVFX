@@ -81,6 +81,12 @@ class RolloutRunner {
   // Study H (H2): the detail step and the renderer skip the parts of a row where the fine fields are zero and nothing
   // can reach them, which leaves every value as it was to the bit. On by default; off computes every pixel (tests).
   virtual void skip_empty(bool on) = 0;
+  // Continue from `other`, a runner of the same effect built for the same ISA, of any size (the effect manager's level
+  // of detail, docs/MANAGER.md): its coarse state, pressure, flow, time, swirl ramp and seed exactly, and its fine
+  // fields resampled to this runner's size (block averages down, bilinear up). The coarse state does not depend on the
+  // size, so from here it evolves exactly as it would have in `other`. No allocation. std::invalid_argument for a
+  // runner of another effect or ISA.
+  virtual void transfer_from(const RolloutRunner& other) = 0;
 
   // The working memory of step() (RolloutScratch): the runner's own by default. use_scratch(s) makes it step with s
   // from then on (s fit() for this runner, else std::invalid_argument) and frees its own; s must outlive the runner's
@@ -116,17 +122,21 @@ struct RolloutScratch {
 enum class Precision { float32, int8 };
 
 // One factory per ISA build (rt_base.cpp, rt_avx2.cpp, rt_avx512.cpp). Allocates every buffer the renderer will use.
+// A lean rollout runner keeps in itself only what lasts from one step to the next (state, noise caches, folded
+// weights); the buffers a step or a picture fills and uses up come from its RolloutScratch, which render() then needs
+// too (use_scratch before rendering when the scratch is shared). Its frames are those of a runner that is not lean, to
+// the bit; it is about 190 KB smaller (the effect manager's simulations, docs/MANAGER.md).
 namespace isa_base {
 std::unique_ptr<Renderer> make_renderer(const Effect& e, int size, Precision p = Precision::float32);
-std::unique_ptr<RolloutRunner> make_rollout(const RolloutEffect& e, int size);
+std::unique_ptr<RolloutRunner> make_rollout(const RolloutEffect& e, int size, bool lean = false);
 }  // namespace isa_base
 namespace isa_avx2 {
 std::unique_ptr<Renderer> make_renderer(const Effect& e, int size, Precision p = Precision::float32);
-std::unique_ptr<RolloutRunner> make_rollout(const RolloutEffect& e, int size);
+std::unique_ptr<RolloutRunner> make_rollout(const RolloutEffect& e, int size, bool lean = false);
 }  // namespace isa_avx2
 namespace isa_avx512 {
 std::unique_ptr<Renderer> make_renderer(const Effect& e, int size, Precision p = Precision::float32);
-std::unique_ptr<RolloutRunner> make_rollout(const RolloutEffect& e, int size);
+std::unique_ptr<RolloutRunner> make_rollout(const RolloutEffect& e, int size, bool lean = false);
 }  // namespace isa_avx512
 
 }  // namespace nfx::rt

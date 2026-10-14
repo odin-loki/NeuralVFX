@@ -66,9 +66,11 @@ neuralfx_defaults(neuralfx_model)
 # The runtime (what ships in a game): C API, per-ISA renderers, no allocation per frame.
 set(NVFX_RUNTIME_SOURCES src/runtime/nvfx.cpp src/runtime/rt_base.cpp src/runtime/rt_avx2.cpp src/runtime/rt_avx512.cpp
                          src/runtime/rt_prior.cpp src/runtime/rt_prior_base.cpp src/runtime/rt_prior_avx2.cpp src/runtime/rt_prior_avx512.cpp
-                         src/runtime/rt_handoff.cpp)
+                         src/runtime/rt_handoff.cpp
+                         src/manager/interp.cpp src/manager/manager.cpp src/manager/nvfx_manager.cpp)  # the effect manager (docs/MANAGER.md)
+find_package(Threads REQUIRED)  # the effect manager's worker threads
 add_library(nvfx STATIC ${NVFX_RUNTIME_SOURCES})
-target_link_libraries(nvfx PUBLIC neuralfx_model)
+target_link_libraries(nvfx PUBLIC neuralfx_model Threads::Threads)
 set_target_properties(nvfx PROPERTIES POSITION_INDEPENDENT_CODE ON)
 neuralfx_defaults(nvfx)
 neuralfx_simd(nvfx)
@@ -276,6 +278,13 @@ if(NEURALFX_BUILD_TOOLS)
   add_executable(nvfx_scene examples/scene_bench.cpp)
   target_link_libraries(nvfx_scene PRIVATE nvfx)
   neuralfx_defaults(nvfx_scene)
+  # The effect manager (docs/MANAGER.md): a crowd of rollout effects within a CPU budget (nvfx_crowd), and the quality
+  # of its levels of detail against full-rate, full-resolution playback (nvfx_lod).
+  foreach(tool nvfx_crowd nvfx_lod)
+    add_executable(${tool} tools/${tool}.cpp)
+    target_link_libraries(${tool} PRIVATE nvfx neuralfx_io)
+    neuralfx_defaults(${tool})
+  endforeach()
   # Study D2 (docs/REPORT.md §6.9): the detail layer's constants tuned on the endless statistics.
   add_executable(nvfx_d2 tools/nvfx_d2.cpp)
   target_link_libraries(nvfx_d2 PRIVATE neuralfx_train nvfx)
@@ -314,6 +323,12 @@ if(NEURALFX_BUILD_TESTS)
   target_link_libraries(neuralfx_footage_tests PRIVATE neuralfx_footage nvfx GTest::gtest_main)
   neuralfx_defaults(neuralfx_footage_tests)
   gtest_discover_tests(neuralfx_footage_tests TEST_PREFIX "neuralfx." DISCOVERY_MODE PRE_TEST PROPERTIES LABELS neuralfx)
+  # The effect manager (docs/MANAGER.md): its own test program, so the shared test list stays as it is.
+  add_executable(neuralfx_manager_tests tests/test_manager.cpp)
+  target_link_libraries(neuralfx_manager_tests PRIVATE nvfx GTest::gtest_main)
+  target_include_directories(neuralfx_manager_tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src")
+  neuralfx_defaults(neuralfx_manager_tests)
+  gtest_discover_tests(neuralfx_manager_tests TEST_PREFIX "neuralfx." DISCOVERY_MODE PRE_TEST PROPERTIES LABELS neuralfx)
   # Counts heap allocations around nvfx_render (replaces the global operator new, so it is its own program).
   add_executable(nvfx_alloc_test tests/alloc_test.cpp)
   target_link_libraries(nvfx_alloc_test PRIVATE nvfx neuralfx_compose nvfx_scene_api nvfx_library_api neuralfx_ddpm)  # the trainer's format writer makes a test prior
