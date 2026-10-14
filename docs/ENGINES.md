@@ -333,9 +333,10 @@ registers the extension) and runs `demo/test.gd` headless: a `NeuralVFXScene` pl
 - a `NeuralVFXEffect` loads `fire.nvfx` and draws a fire at 128 x 128.
 
 When the effect library's models are in `$NEURALVFX_DATA/library/models`, the test goes on (step 5, §9): `nvfx_gallery
---shot` draws a 960 x 540 stage with a campfire, a steam vent, a magic burst and an electric arc spawned at given
-times, and `demo/test_library.gd` plays the same stage in a `NeuralVFXStage`. Its 18 checks passed: the catalogue's
-listing and an effect's description; the spawns, a full room and an unknown effect refused; **frame 45 the same as
+--shot` draws a 960 x 540 stage with a campfire, a steam vent, a magic burst, an electric arc and a plasma orb
+spawned at given times, and `demo/test_library.gd` plays the same stage in a `NeuralVFXStage`. Its 19 checks passed:
+the catalogue's listing, an effect's description and a jet's anchor (`left`, its nozzle); the spawns, a full room and
+an unknown effect refused; **frame 45 the same as
 `nvfx_gallery`'s, byte for byte**; heat over the campfire; the instances' states, a parameter, a move, a stop, the room
 freed and a stale handle; the stage's script.
 
@@ -349,9 +350,9 @@ textures for the engine's own renderer (the picture is composed on the CPU and u
 
 ## 9. The effect library
 
-[LIBRARY.md](LIBRARY.md) is a catalogue of 48 named effects (a campfire, a grenade, a steam vent, a portal, a lightning
-strike, ...) built from the five trained models and the compositor's procedural elements, ready to place without
-training. `include/neuralfx/nvfx_library.h`, in `libnvfx`, lists them and plays them on a **stage**: a scene (§7) with
+[LIBRARY.md](LIBRARY.md) is a catalogue of 70 named effects (a campfire, a grenade, a steam vent, a portal, a lightning
+strike, ground fog, a dust impact, a flamethrower, a plasma orb, ...) built from the eleven trained models and the
+compositor's procedural elements, ready to place without training. `include/neuralfx/nvfx_library.h`, in `libnvfx`, lists them and plays them on a **stage**: a scene (§7) with
 room for a number of instances of chosen effects, which the game spawns at a position, scale and time, drives through
 named parameters, moves and stops while it plays, without allocating per frame. A stage is an ordinary `nvfx_scene`
 for stepping, drawing and reading fields, so the threading, overlap and exactness of §7 hold for it. In Godot the node
