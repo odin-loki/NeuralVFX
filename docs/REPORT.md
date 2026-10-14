@@ -1237,3 +1237,100 @@ at 1280 x 720 (80 frames per second) and 27.2 ms at 1920 x 1080 on 4 threads** a
 10.3 times faster than first written (measured in one session on a quiet machine), with every frame the same to the
 bit. The second round draws each picture while the next frame's state is computed. Scenes are written as text
 scripts; the scripted fireball reproduces the hand-written one to the bit.
+
+### 12.1 Study L: fast and regular swirls (magic, the orb, the vortex)
+
+Status: **in progress** (14 October 2026). The diagnosis below was made on training settings only; the design and the
+rule were committed before any validation number (this commit). Code: `tools/nvfx_swirl.cpp` (`nvfx_swirl diag | dstats
+| coarse | advect | column | train | set | val | test | collapse | cost`); every run is logged under the data root's
+`l_swirl`.
+
+**The question.** Eight rollout effects follow a held-out run 2 to 4.7 dB better than the coarse simulation with the same
+detail layer at 1 s. Three only tie it: magic (a spinning portal, whose fast smooth arms come out saw-toothed), the orb (a
+plasma ball, which loses before 1 s) and the vortex (a dust devil, which also loses its column at low intensity at 4 of 10
+held-out settings, [EFFECTS_ENERGY.md](EFFECTS_ENERGY.md) §4.4). The fire whirl scene's burning column shows the same
+braided teeth as magic's arms. What makes fast or regular swirls fail, and does a fix beat the current models?
+
+#### 12.1.1 Diagnosis (training settings)
+
+Tracking from the true state (as study D's test, §6.4) on 8 training runs of each effect (salt 1, runs 0 to 7), with the
+error taken apart by swapping one part at a time: the learned renderer drawing the true fields; the neural dynamics drawn
+by the simulation's renderer; the neural coarse state alone, upsampled; and an **oracle stepper**: the true 32-cell state
+of every frame (block averages of the real run), its velocity moving the detail layer, drawn by the simulation's renderer.
+Active PSNR (dB) at 1 s, means over the 8 runs (`nvfx_swirl diag`; the data root's `l_swirl/diag`):
+
+| effect | neural (as shipped) | neural dynamics, simulation's renderer | neural coarse state alone | oracle coarse state alone | oracle coarse + current detail layer | coarse simulation + detail | learned renderer on the true fields |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| magic | 17.54 | 17.51 | 18.58 | 21.27 | 22.10 | 17.50 | 35.5 |
+| orb | 16.15 | 16.11 | 17.18 | 22.85 | 23.45 | 15.09 | 33.9 |
+| vortex | 20.90 | 20.87 | 21.25 | 24.62 | 25.80 | 19.80 | 34.2 |
+
+- **The stepper is the largest part for all three**: with the true coarse state in its place the same detail layer gains
+  4.6 dB (magic), 7.3 dB (orb) and 4.9 dB (vortex) at 1 s. The renderer is not the problem at 1 s (33.9 to 35.5 dB on the
+  true fields; the neural dynamics score the same with either renderer); it costs only the first frame (orb 1.3 dB, vortex
+  2.8 dB).
+- **The 32-cell state limits these flows more than plume-like ones.** The coarse simulation itself, started from the
+  block-averaged true state, tracks at 1 s with 32 / 48 / 64 cells: magic 18.3 / 20.5 / 22.9 dB, orb 17.5 / 20.1 / 22.8,
+  vortex 20.5 / 21.9 / 22.1 (`nvfx_swirl coarse`). The learned 32-cell stepper beats the 32-cell simulation's coarse heat
+  only a little (relative error at 1 s: magic 0.225 against 0.275, orb 0.212 against 0.246, vortex 0.425 against 0.517)
+  and stays far from 48 cells (0.169, 0.145, 0.428). It shows no bias in total heat or radius for magic and the orb; the
+  vortex's heat fades (total heat at 8 s 0.052 per cell against the truth's 0.071).
+- **For a fast rotation, the stepper's built-in advection is worse than no change at all.** One semi-Lagrangian step of
+  the true 32-cell heat by the true coarse velocity misses the next true heat by 0.166 (relative) for magic, three times
+  what simply keeping the heat misses (0.056): at 1.3 to 1.9 coarse cells a frame around a ring 6 to 9 cells across,
+  bilinear back-traces smear the ring radially every frame, and the network has to undo it. MacCormack misses by 0.109,
+  a straight back-trace corrected to the midpoint (second order) by 0.151 (`nvfx_swirl advect`). For the orb (slow,
+  boiling) the schemes differ little (0.054 against 0.050; keeping: 0.042); for the vortex advection helps (0.071 against
+  keeping's 0.111).
+- **The saw-teeth are made by the detail layer, once a frame.** With the oracle stepper, magic's arms still break into
+  teeth within a second. Each frame the lock scales the advected fine fields to the coarse state and adds the rest as new
+  material broken up by the flicker noise; neither pattern moves with the flow. Where the flow carries material more than
+  a coarse cell in a frame (magic's ring: 5 to 8 pixels at 128 px; the whirl's rising foot: about 4), the patterns of
+  successive frames land side by side, one frame's travel apart, and line up into teeth whose spacing is that travel.
+  Locking twice a frame, after each half of the frame's flow, removes them (figures in the data root's `l_swirl/diag`):
+  with the oracle stepper magic tracks 4.8 dB better at 1 s on a fast run, and the teeth are gone. A smaller breakup
+  contrast tracks better but leaves the neural magic's endless motion at 0.72 of the real (contrast 1: 1.12), because
+  the breakup is most of what moves in it.
+- **The vortex loses its column through its stepper, not its start points.** At 8 low-intensity training settings (55 of
+  the 160 training runs have intensity below 0.4, so they are not rare), played from the run's own true state (a perfect
+  start point, its own seed) for 20 s the learned column dies at 4 of the 8 (26% to 98% of frames); played from each
+  stored start point alone, 31 of 64 plays lose it; in shards of 6 s, 5 of 8 settings lose 4% to 13% of their frames. The
+  stepper is trained on windows of 16 frames after at most 48 of its own (2.1 s); a shard is 6 s, and in longer rollouts
+  its heat fades.
+
+#### 12.1.2 Design and the rule (committed before validation)
+
+Candidates are built on training settings (`nvfx_swirl dstats` and a probe split of training settings with their own
+seeds), chosen on validation, and tested once. Each changes one thing, or two that were each tried alone:
+- **Detail layer in passes** (`DetailSpec::passes`, new; file version 5, written only when it is not 1): the advection
+  and the lock in N passes a frame, each moving the fine fields by 1/N of the frame's flow and swirl.
+- **MacCormack advection in the stepper** (`Hyper::advection = 1`, new, version 5 likewise), the stepper fine-tuned to it.
+- **Stepper fine-tuning** from the current weights: longer unrolls (30 frames, the horizon of the rule), or own rollouts as
+  long as a shard (burn-in up to 180 frames) for the vortex; the training runs are the recipe's own (salt 1).
+- A finer coarse grid (48 cells) was not built: the diagnosis shows the learned stepper far from even the 32-cell oracle,
+  and 48 does not divide 128-pixel tiles (the lock needs whole blocks), so it is a new runtime path, not a setting.
+
+**Validation** (the choice): study G's 10 validation settings for the endless statistics, 8 runs pooled per setting as
+study D2 did (real runs 5,300,000 + 100 s + k, the floor 5,300,050 + 100 s + k, the models' plays 5,400,000 + 100 s + k);
+tracking from the true state at 1 s on the studies' validation runs (salt 3, runs 0 to 15, each its own setting).
+
+**The test, once, on fresh seeds** no earlier study used: study B's 10 held-out settings; the endless statistics with 8
+runs pooled per setting (real runs **5,700,000 + 100 s + k**, the floor **5,700,050 + 100 s + k**, plays **5,800,000 +
+100 s + k**); tracking from the true state on 4 runs per setting (seeds **5,900,000 + 100 s + k**, each simulated from an
+empty grid for 100 frames, then followed for 240), averaged per setting. Candidates are frozen by SHA-256
+(`results/experiments/swirl_frozen.csv`) before it; the tool refuses another file and runs it once per effect.
+
+**The rule.** A candidate replaces the current model if, candidate minus current, paired over the settings (tracking:
+over the tracking runs on validation, over the 10 settings in the test), 95% bootstrap with 10,000 resamples
+(`metrics::paired_bootstrap`, seed 2026):
+1. it is **better on tracking at 1 s** (active PSNR, interval above zero) **or on the detail spectrum distance**
+   (interval below zero);
+2. **no statistic is worse**: tracking at 1 s; spectrum distance, |ln motion ratio|, coverage distance and emission
+   distance (no interval above zero); mean-frame PSNR (no interval below zero);
+3. for the vortex, **it loses its column in no larger share of frames** than the current model in the column-loss check of
+   [EFFECTS_ENERGY.md](EFFECTS_ENERGY.md) §4.4 (60 s at each of the 10 held-out settings), run with the published seeds
+   (950,000 + k) and with fresh ones (5,950,000 + k).
+
+On validation, among the candidates that meet the rule the one with the largest gain in tracking at 1 s is chosen; an
+effect with none stops there and is not tested (as study D2). The cost is measured beside fire in the same session and
+reported, not part of the rule.
