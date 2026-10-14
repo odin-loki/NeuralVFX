@@ -1,0 +1,16 @@
+effect,search,model,evaluations,training_objective,spectrum_l1,abs_ln_motion_ratio,motion_ratio,coverage_l1,emission_l1,mean_frame_psnr,values
+fire,all,v2,122,2.00000,0.116303,0.129329,0.90010,0.0026596,0.0023555,37.4965,contrast=1;edge0=-0.25;edge1=0.6;swirl=0.5;swirl_scale=6;swirl_rate=1.5;grow=1.5;advect=1;soften=0;kappa=3.101
+fire,all,all_best,122,1.75303,0.097512,0.111092,0.92658,0.0026599,0.0023414,37.4857,contrast=1;edge0=-0.1772;edge1=0.7073;swirl=0.3036;swirl_scale=9.64;swirl_rate=0.8733;grow=1.445;advect=0.7566;soften=0.02349;kappa=4.239
+fire,all,all_feasible,122,1.75614,0.094821,0.116266,0.91901,0.0026558,0.0023411,37.5752,contrast=1;edge0=-0.1948;edge1=0.591;swirl=0.2639;swirl_scale=10.26;swirl_rate=0.928;grow=1.478;advect=0.7645;soften=0.02213;kappa=3.399
+fire,old,v2,81,2.00000,0.116303,0.129329,0.90010,0.0026596,0.0023555,37.4965,contrast=1;edge0=-0.25;edge1=0.6;swirl=0.5;swirl_scale=6;swirl_rate=1.5;grow=1.5;advect=1;soften=0;kappa=3.101
+fire,old,old_best,81,1.95267,0.098677,0.131782,0.89776,0.0026553,0.0023552,37.5288,contrast=1;edge0=-0.2837;edge1=0.6844;swirl=0.4163;swirl_scale=7.318;swirl_rate=1.897;grow=1.548;advect=1;soften=0;kappa=3.287
+smoke,all,v2,122,2.00000,0.101417,0.130769,0.88622,0.0166629,0.0000999,31.5441,contrast=1;edge0=-0.25;edge1=0.6;swirl=0.5;swirl_scale=6;swirl_rate=1.5;grow=4;advect=1;soften=0;kappa=3.303
+smoke,all,all_best,122,1.91551,0.102796,0.100744,0.92074,0.0166172,0.0000996,31.5416,contrast=1;edge0=-0.3242;edge1=0.6563;swirl=0.325;swirl_scale=5.898;swirl_rate=1.438;grow=6.011;advect=1.093;soften=0;kappa=3.088
+smoke,all,all_feasible,122,1.97074,0.100248,0.127638,0.89194,0.0166419,0.0000987,31.5465,contrast=1;edge0=-0.2393;edge1=0.7034;swirl=0.2261;swirl_scale=5.927;swirl_rate=1.331;grow=4.371;advect=0.9907;soften=0;kappa=3.981
+smoke,old,v2,81,2.00000,0.101417,0.130769,0.88622,0.0166629,0.0000999,31.5441,contrast=1;edge0=-0.25;edge1=0.6;swirl=0.5;swirl_scale=6;swirl_rate=1.5;grow=4;advect=1;soften=0;kappa=3.303
+smoke,old,old_best,81,1.90635,0.099000,0.114925,0.90392,0.0166441,0.0000996,31.5434,contrast=1;edge0=-0.2376;edge1=0.7433;swirl=0.4455;swirl_scale=8.691;swirl_rate=2.258;grow=4.451;advect=1;soften=0;kappa=4.249
+smoke,old,old_feasible,81,1.92783,0.099818,0.118078,0.90125,0.0166502,0.0000992,31.5449,contrast=1;edge0=-0.2527;edge1=0.7718;swirl=0.339;swirl_scale=8.658;swirl_rate=1.81;grow=4.63;advect=1;soften=0;kappa=4.271
+explosion,all,v2,122,2.00000,0.227295,0.163746,1.00065,0.0426307,0.0000216,28.2521,contrast=0.5;edge0=-0.25;edge1=0.6;swirl=0.5;swirl_scale=6;swirl_rate=1.5;grow=1;advect=1;soften=0;kappa=3.303
+explosion,all,all_best,122,1.97078,0.217135,0.162996,0.99957,0.0425919,0.0000216,28.2561,contrast=0.6226;edge0=-0.2887;edge1=0.6108;swirl=0.473;swirl_scale=8.597;swirl_rate=1.085;grow=1;advect=1;soften=0;kappa=3.099
+explosion,old,v2,81,2.00000,0.227295,0.163746,1.00065,0.0426307,0.0000216,28.2521,contrast=0.5;edge0=-0.25;edge1=0.6;swirl=0.5;swirl_scale=6;swirl_rate=1.5;grow=1;advect=1;soften=0;kappa=3.303
+explosion,old,old_best,81,1.96873,0.214161,0.163486,1.00160,0.0425070,0.0000215,28.2731,contrast=0.7005;edge0=-0.1778;edge1=0.5883;swirl=0.3952;swirl_scale=8.665;swirl_rate=1.776;grow=1;advect=1;soften=0;kappa=3.832

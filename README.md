@@ -116,7 +116,7 @@ Ubuntu 24.04: `g++-14`, CMake 3.25+, Ninja, `libgtest-dev`, `zlib1g-dev` (and `f
 ```sh
 cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_COMPILER=g++-14
 cmake --build build
-ctest --test-dir build                     # 274 tests: sim, metrics, codecs, gradients, runtime parity, composition, scene scripts, field effects, context mixing, denoiser, lossless coder, low-bit, vector-quantised, sparse and multi-level features, video codecs, BC7 and ASTC flipbooks, allocation, C API for effects and scenes, start points from footage
+ctest --test-dir build                     # 278 tests: sim, metrics, codecs, gradients, runtime parity, composition, scene scripts, field effects, context mixing, denoiser, lossless coder, low-bit, vector-quantised, sparse and multi-level features, video codecs, BC7 and ASTC flipbooks, allocation, C API for effects and scenes, start points from footage
 ```
 
 Options: `NEURALFX_BUILD_VIEWER` (GLFW + OpenGL; fetches Dear ImGui), `NEURALFX_BUILD_SHARED` (libnvfx.so for engines),
@@ -151,6 +151,7 @@ training, evaluation; about three hours), then `d-timing` on an idle machine and
 | `nvfx_ingest` | footage into a clip, after a licence check; adds a row to the licence register |
 | `nvfx_estimate` | start points for a rollout effect estimated from footage (a clip, a video or frames, after the same licence check): writes a copy of the effect that continues from the footage; `--preview` draws the footage frame and the effect from it ([docs/FOOTAGE.md](docs/FOOTAGE.md) §8) |
 | `nvfx_study_j` | study J: `inverse`, `motion` (the networks), `val`, `val-endless`, `test`, `test-endless`, `report` ([docs/FOOTAGE.md](docs/FOOTAGE.md) §9) |
+| `nvfx_d2` | study D2: the detail layer's constants tuned on pooled endless statistics: `probe`, `tune` (CMA-ES), `candidates`, `val`, `test`, `write`, `cost` ([docs/REPORT.md](docs/REPORT.md) §6.9; nothing kept) |
 | `nvfx_train` | train a frame model from one or more clips (controls and variation codes come from the clips), or with `--rollout` a rollout effect from the simulation |
 | `nvfx_eval` | score the flipbook ladder or a model against a reference clip |
 | `nvfx_experiment` | the full study: `data`, `a` (`a-flipbooks`: only the flipbook rows still missing), `b`, `c`, `media`, `timing`, `report`; study D: `d-chaos`, `d-train`, `d-tune`, `d-finish`, `d-eval`, `d-timing`, `d-report` (with `--effects steam,magic` for the effects added later, [docs/EFFECTS.md](docs/EFFECTS.md)); study G: `g-fine` (design G1, DCM-fine, end to end); to come: `g-data`, `g-pilot`, `g-search`, `g-eval`, `g-timing` |

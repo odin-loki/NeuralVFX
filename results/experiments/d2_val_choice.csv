@@ -1,0 +1,13 @@
+effect,model,spectrum_better,motion_better,others_not_worse,meets_rule,val_spec_plus_lnmot,values
+fire,all_best,1,0,1,0,0.23842,contrast=1;edge0=-0.1772;edge1=0.7073;swirl=0.3036;swirl_scale=9.64;swirl_rate=0.8733;grow=1.445;advect=0.7566;soften=0.02349;kappa=4.239
+fire,all_feasible,1,0,1,0,0.23420,contrast=1;edge0=-0.1948;edge1=0.591;swirl=0.2639;swirl_scale=10.26;swirl_rate=0.928;grow=1.478;advect=0.7645;soften=0.02213;kappa=3.399
+fire,old_best,1,0,1,0,0.25402,contrast=1;edge0=-0.2837;edge1=0.6844;swirl=0.4163;swirl_scale=7.318;swirl_rate=1.897;grow=1.548;advect=1;soften=0;kappa=3.287
+fire,chosen,,,,,,none
+smoke,all_best,0,0,0,0,0.21581,contrast=1;edge0=-0.3242;edge1=0.6563;swirl=0.325;swirl_scale=5.898;swirl_rate=1.438;grow=6.011;advect=1.093;soften=0;kappa=3.088
+smoke,all_feasible,1,0,0,0,0.21075,contrast=1;edge0=-0.2393;edge1=0.7034;swirl=0.2261;swirl_scale=5.927;swirl_rate=1.331;grow=4.371;advect=0.9907;soften=0;kappa=3.981
+smoke,old_best,0,1,0,0,0.21500,contrast=1;edge0=-0.2376;edge1=0.7433;swirl=0.4455;swirl_scale=8.691;swirl_rate=2.258;grow=4.451;advect=1;soften=0;kappa=4.249
+smoke,old_feasible,1,1,0,0,0.21147,contrast=1;edge0=-0.2527;edge1=0.7718;swirl=0.339;swirl_scale=8.658;swirl_rate=1.81;grow=4.63;advect=1;soften=0;kappa=4.271
+smoke,chosen,,,,,,none
+explosion,all_best,0,1,1,0,0.33522,contrast=0.6226;edge0=-0.2887;edge1=0.6108;swirl=0.473;swirl_scale=8.597;swirl_rate=1.085;grow=1;advect=1;soften=0;kappa=3.099
+explosion,old_best,0,0,1,0,0.32973,contrast=0.7005;edge0=-0.1778;edge1=0.5883;swirl=0.3952;swirl_scale=8.665;swirl_rate=1.776;grow=1;advect=1;soften=0;kappa=3.832
+explosion,chosen,,,,,,none
