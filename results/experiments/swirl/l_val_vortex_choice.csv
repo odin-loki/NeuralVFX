@@ -1,0 +1,4 @@
+effect,model,better,none_worse,meets_rule,track_1s_gain_db,sha256
+vortex,grow3,1,1,1,0.3008,1102b8cffdf74b739b0725ed6c10dbe31816ad4c07222fd8cd57dbf7499bf240
+vortex,grow3_p2,1,0,0,0.2664,b6a6c96aa77844823aa65fc1f1773aa94ab042f02b7b39f406b45cdbdfc80e48
+vortex,chosen,,,,,grow3
