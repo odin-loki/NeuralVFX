@@ -871,6 +871,18 @@ simulation and its detail is worse than the nearest flipbook's: the 32-cell stat
 serrate its arms. Both are 82 KB. The full account, with a scene script that plays them with fire and an explosion, is
 in [EFFECTS.md](EFFECTS.md).
 
+### 6.12 Energy and motion effects
+
+Three more presets were trained and tested the same way: a **jet** (a flamethrower's burning jet), an **orb** (a ball of
+plasma that boils and breathes) and a **vortex** (a dust devil), designed so the 32-cell state can carry them (moderate
+speeds, broad structures, detail from turbulence). The jet came out as steam did: it tracks a run 2.6 dB [2.0, 3.2]
+better than the coarse simulation at 1 s, and at unseen settings and seeds its average picture is 1.9 dB closer than
+the nearest flipbook's with motion tied with it. The orb and the vortex only tie the coarse simulation at 1 s, so by
+the rule set before their test they are weak at tracking; played endlessly both are sound (motion tied with the
+flipbook, average picture closer, detail tied with it), but the vortex sometimes loses its column at low intensity.
+Each is 82 KB. The full account, with a scene in which a flamethrower sets a dust devil alight, is in
+[EFFECTS_ENERGY.md](EFFECTS_ENERGY.md).
+
 ## 7. Runtime cost and budget
 
 Median ms per frame through `nvfx_render`, one pinned AVX2 core (90th percentiles and every configuration in
