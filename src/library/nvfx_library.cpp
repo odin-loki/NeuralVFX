@@ -6,6 +6,7 @@
 
 #include "library.hpp"
 #include "nvfx_internal.hpp"
+#include "nvfx_library_internal.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -70,7 +71,12 @@ struct nvfx_library {
   lib::Catalogue cat;
   std::filesystem::path models_dir;
   std::vector<std::string> models, elements;  // per entry, joined (the strings nvfx_library_get_effect gives)
+  nfx::library::ModelSource model_source;     // where stages load the learned effects from, if not models_dir (a pack)
 };
+
+void nfx::library::set_model_source(nvfx_library* l, ModelSource source) {
+  if (l) l->model_source = std::move(source);
+}
 
 struct nvfx_stage {
   const nvfx_library* library = nullptr;
@@ -302,9 +308,9 @@ nvfx_status nvfx_stage_create(const nvfx_library* l, const nvfx_stage_desc* d, n
       if (given) continue;
       const std::filesystem::path p = std::filesystem::path(file).is_absolute() ? std::filesystem::path(file) : l->models_dir / file;
       nvfx_effect* e = nullptr;
-      const nvfx_status st = nvfx_effect_load(p.string().c_str(), &e);
+      const nvfx_status st = l->model_source ? l->model_source(file, &e) : nvfx_effect_load(p.string().c_str(), &e);
       if (st != NVFX_OK) {
-        set_error(err, 0, 0, std::format("cannot load {}: {}", p.string(), nvfx_status_string(st)));
+        set_error(err, 0, 0, std::format("cannot load {}: {}", l->model_source ? file : p.string(), nvfx_status_string(st)));
         return st;
       }
       loaded.push_back(e);
