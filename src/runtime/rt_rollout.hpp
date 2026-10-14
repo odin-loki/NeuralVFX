@@ -724,6 +724,50 @@ class Rollout final : public RolloutRunner {
     scratch_ = own_.get();
   }
   std::array<std::size_t, 2> scratch_need() const override { return need_; }
+  void transfer_from(const RolloutRunner& other) override {
+    const auto* o = dynamic_cast<const Rollout*>(&other);
+    if (!o || &o->m_ != &m_) throw std::invalid_argument("rollout: transfer_from needs a runner of the same effect and ISA");
+    if (o == this) return;
+    std::copy(o->coarse_.begin(), o->coarse_.end(), coarse_.begin());
+    std::copy(o->p_.begin(), o->p_.end(), p_.begin());
+    std::copy(o->flow_.begin(), o->flow_.end(), flow_.begin());
+    time_ = o->time_;
+    since_start_ = o->since_start_;
+    computed_ = o->computed_;
+    dense_steps_ = o->dense_steps_;
+    if (o->seeded_) reseed(o->seed_);
+    const int from = o->S_;
+    if (from == S_) {
+      std::copy(o->ft_.begin(), o->ft_.end(), ft_.begin());
+      std::copy(o->fd_.begin(), o->fd_.end(), fd_.begin());
+    } else if (from > S_ && from % S_ == 0) {  // block averages
+      const int f = from / S_;
+      const float inv = 1.f / static_cast<float>(f * f);
+      for (int y = 0; y < S_; ++y) {
+        for (int x = 0; x < S_; ++x) {
+          float t = 0.f, d = 0.f;
+          for (int j = 0; j < f; ++j) {
+            const std::size_t row = z(y * f + j) * z(from) + z(x * f);
+            for (int i = 0; i < f; ++i) {
+              t += o->ft_[row + z(i)];
+              d += o->fd_[row + z(i)];
+            }
+          }
+          ft_[z(y) * z(S_) + z(x)] = t * inv;
+          fd_[z(y) * z(S_) + z(x)] = d * inv;
+        }
+      }
+    } else {  // bilinear at pixel centres, as begin() spreads stored fine fields
+      const float k = static_cast<float>(S_) / static_cast<float>(from);
+      for (int y = 0; y < S_; ++y) {
+        for (int x = 0; x < S_; ++x) {
+          const float xs = (static_cast<float>(x) + 0.5f) / k - 0.5f, ys = (static_cast<float>(y) + 0.5f) / k - 0.5f;
+          ft_[z(y) * z(S_) + z(x)] = bilinear(o->ft_.data(), from, 1, 0, xs, ys);
+          fd_[z(y) * z(S_) + z(x)] = bilinear(o->fd_.data(), from, 1, 0, xs, ys);
+        }
+      }
+    }
+  }
   void adopt(float seconds) override {
     time_ = seconds;
     since_start_ = m_.detail.swirl_ramp;

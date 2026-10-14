@@ -81,6 +81,12 @@ class RolloutRunner {
   // Study H (H2): the detail step and the renderer skip the parts of a row where the fine fields are zero and nothing
   // can reach them, which leaves every value as it was to the bit. On by default; off computes every pixel (tests).
   virtual void skip_empty(bool on) = 0;
+  // Continue from `other`, a runner of the same effect built for the same ISA, of any size (the effect manager's level
+  // of detail, docs/MANAGER.md): its coarse state, pressure, flow, time, swirl ramp and seed exactly, and its fine
+  // fields resampled to this runner's size (block averages down, bilinear up). The coarse state does not depend on the
+  // size, so from here it evolves exactly as it would have in `other`. No allocation. std::invalid_argument for a
+  // runner of another effect or ISA.
+  virtual void transfer_from(const RolloutRunner& other) = 0;
 
   // The working memory of step() (RolloutScratch): the runner's own by default. use_scratch(s) makes it step with s
   // from then on (s fit() for this runner, else std::invalid_argument) and frees its own; s must outlive the runner's
