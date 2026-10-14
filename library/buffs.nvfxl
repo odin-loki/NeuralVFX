@@ -1,0 +1,194 @@
+# Magic and buffs (docs/LIBRARY.md §10): auras on a character (heal, buff, fire, frost, lightning, curse), a level-up
+# pillar, teleports, holy light, ice shards, a poison cloud, spirit wisps. Anchors are a character's feet (base) unless
+# the entry says otherwise. The light is the compositor's (beams, rings, glows, glints, arcs and lamps; docs/COMPOSE.md
+# §4.10); the curse's smoke, the poison's cloud, the frost's mist and the fire aura's flames are the smoke, cloud, fog and
+# fire models, the first three recoloured by looks (a recolour is a look, not new dynamics).
+
+look curse       = like smoke, tint (0.56, 0.3, 0.7), soot_albedo 0.38, soot_density 5, sky 0.85, scene_light 1.5, relief 1.4  # dark violet
+look toxic_cloud = shader, emission 0, soot_density 2.4, soot_albedo 0.75, sky 0.7, shadow 0.3, scene_light 1.3, relief 2,
+                   tint (0.55, 1, 0.35)                                                                          # poison green
+
+entry heal_aura, category magic, size 220 x 300, anchor base, loop, show 2,
+      about "A healing aura (procedural): a green ring of light at the feet, sparkles drifting up around the body, a soft green glow"
+param intensity = 0.8, range (0.2, 1.2), about "brightness"
+let pulse = 0.8 + 0.2 * sin(4 * t)
+emit ring, at (X, Y - 3 * scale), radius 72 * scale, squash 0.28, width 2.5 * scale, colour (0.45, 1, 0.5),
+     brightness 1.6 * intensity * pulse * smooth(t / 0.4)
+emit ring, at (X, Y - 3 * scale), radius 52 * scale, squash 0.28, width 1.2 * scale, colour (0.55, 1, 0.6), brightness 1 * intensity * smooth(t / 0.6)
+emit glow, at (X, Y - 95 * scale), radius 80 * scale, colour (0.35, 1, 0.45), brightness 0.1 * intensity * pulse
+emit glints, in (X - 60 * scale, Y - 210 * scale), size 120 * scale x 200 * scale, count 22, rate 0.8, radius 4.5 * scale, fade 1,
+     speed 55 * scale, direction (0, -1), colour (0.6, 1, 0.6), brightness 2 * intensity, seed 1501
+field green = lamp, at (X, Y - 60 * scale), radius 120 * scale, strength 0.6 * intensity * pulse, colour (0.4, 1, 0.45)
+
+entry buff_glow, category magic, size 220 x 300, anchor base, loop, show 2,
+      about "A buff (procedural): a warm golden glow pulsing about a character, a ring at the feet, golden motes rising slowly"
+param intensity = 0.8, range (0.2, 1.2), about "brightness"
+let pulse = 0.75 + 0.25 * sin(3 * t)
+emit glow, at (X, Y - 95 * scale), radius 90 * scale, colour (1, 0.75, 0.3), brightness 0.16 * intensity * pulse
+emit glow, at (X, Y - 95 * scale), radius 45 * scale, colour (1, 0.85, 0.45), brightness 0.12 * intensity * pulse
+emit ring, at (X, Y - 3 * scale), radius 64 * scale * (0.95 + 0.05 * pulse), squash 0.28, width 2 * scale, colour (1, 0.8, 0.35),
+     brightness 1.5 * intensity * pulse
+emit glints, in (X - 55 * scale, Y - 200 * scale), size 110 * scale x 190 * scale, count 14, rate 0.6, radius 4 * scale, fade 1,
+     speed 35 * scale, direction (0, -1), colour (1, 0.85, 0.45), brightness 2 * intensity, seed 1502
+field gold = lamp, at (X, Y - 70 * scale), radius 120 * scale, strength 0.7 * intensity * pulse, colour (1, 0.75, 0.35)
+
+entry level_up, category magic, size 280 x 540, anchor base, once 2.6, show 0.35,
+      about "A level-up (procedural): a pillar of golden light bursts up from the feet, a ring of light races out, sparkles stream up, all fading"
+param power = 1, range (0.5, 1.5), about "how bright"
+let rise = smooth(t / 0.15) * (1 - smooth((t - 0.8) / 1.3))
+emit beam, along (X, Y - 2 * scale) to (X, Y - 500 * scale), width 13 * scale * (0.4 + 0.6 * rise), colour (1, 0.82, 0.38),
+     brightness 1.8 * power * rise, jitter 0.12, rate 3, flare 0, fade 0, seed 1503
+emit ring, at (X, Y - 3 * scale), radius 20 * scale + 170 * scale * (1 - exp(-t / 0.25)), squash 0.28, width 3 * scale,
+     colour (1, 0.85, 0.45), brightness 2.4 * power * exp(-t / 0.6)
+emit glints, in (X - 70 * scale, Y - 360 * scale), size 140 * scale x 340 * scale, count 34, rate 1.6, radius 6 * scale, fade 1,
+     speed 160 * scale, direction (0, -1), colour (1, 0.9, 0.55), brightness 2.6 * power * (1 - smooth((t - 1.4) / 1)), seed 1504
+field gold = lamp, at (X, Y - 120 * scale), radius 200 * scale, strength 1.4 * power * rise, colour (1, 0.8, 0.4)
+light flash (0.25 * power * exp(-t / 0.12), 0.2 * power * exp(-t / 0.12), 0.08 * power * exp(-t / 0.12))
+
+entry teleport_arrive, category magic, size 280 x 400, anchor base, once 1.5, show 0.55,
+      about "A teleport arrival (procedural): sparkles gather and a ring closes in at the feet, then a column of cyan light and a flash, fading"
+param power = 1, range (0.5, 1.5), about "how bright"
+let gather = smooth(t / 0.5)
+let col = smooth((t - 0.45) / 0.08) * (1 - smooth((t - 0.6) / 0.7))
+emit ring, at (X, Y - 3 * scale), radius 12 * scale + 140 * scale * (1 - gather), squash 0.28, width 2.5 * scale, colour (0.5, 0.9, 1),
+     brightness 2 * power * (gather + 0.2) * (1 - smooth((t - 0.5) / 0.3))
+emit glints, in (X - 80 * scale * (1 - 0.6 * gather), Y - 300 * scale), size 160 * scale * (1 - 0.6 * gather) x 300 * scale, count 26, rate 3,
+     radius 5 * scale, colour (0.7, 0.95, 1), brightness 2.4 * power * gather * (1 - smooth((t - 0.6) / 0.4)), seed 1505
+emit beam, along (X, Y - 2 * scale) to (X, Y - 360 * scale), width 11 * scale * col, colour (0.45, 0.9, 1), brightness 2.4 * power * col,
+     jitter 0.2, flare 0, fade 0.1, seed 1506
+emit glow, at (X, Y - 90 * scale), radius 120 * scale, colour (0.5, 0.9, 1), brightness 0.8 * power * col
+emit ring, at (X, Y - 3 * scale), radius 20 * scale + 180 * scale * (1 - exp(-(t - 0.5) / 0.2)), squash 0.28, width 3 * scale,
+     colour (0.6, 0.95, 1), brightness 2 * power * exp(-(t - 0.5) / 0.3), from 0.5
+field shine = lamp, at (X, Y - 90 * scale), radius 160 * scale, strength 1.6 * power * col + 0.3 * gather, colour (0.45, 0.85, 1)
+light flash (0.15 * power * col, 0.3 * power * col, 0.38 * power * col)
+
+entry teleport_vanish, category magic, size 280 x 400, anchor base, once 1.4, show 0.12,
+      about "A teleport departure (procedural): a flash, a violet column of light that narrows to nothing, sparkles streaming up, a ring spreading at the feet"
+param power = 1, range (0.5, 1.5), about "how bright"
+let narrow = 1 - smooth(t / 0.7)
+emit beam, along (X, Y - 2 * scale) to (X, Y - 380 * scale), width 16 * scale * narrow, colour (0.75, 0.45, 1),
+     brightness 2.4 * power * narrow, jitter 0.3, rate 6, flare 0, fade 0.1, seed 1507
+emit glow, at (X, Y - 90 * scale), radius 110 * scale, colour (0.75, 0.5, 1), brightness 1.2 * power * exp(-t / 0.15)
+emit glints, in (X - 50 * scale, Y - 260 * scale), size 100 * scale x 260 * scale, count 30, rate 2.2, radius 5 * scale, fade 1,
+     speed 220 * scale, direction (0, -1), colour (0.85, 0.65, 1), brightness 2.4 * power * (1 - smooth((t - 0.6) / 0.7)), seed 1508
+emit ring, at (X, Y - 3 * scale), radius 16 * scale + 170 * scale * (1 - exp(-t / 0.25)), squash 0.28, width 2.5 * scale,
+     colour (0.75, 0.5, 1), brightness 2 * power * exp(-t / 0.45)
+field shine = lamp, at (X, Y - 90 * scale), radius 160 * scale, strength 1.6 * power * narrow, colour (0.7, 0.45, 1)
+light flash (0.3 * power * exp(-t / 0.08), 0.18 * power * exp(-t / 0.08), 0.4 * power * exp(-t / 0.08))
+
+entry holy_beam, category magic, size 320 x 720, anchor base, loop, show 2,
+      about "A holy beam (procedural): a shaft of warm white light falling from the sky onto the anchor, motes drifting in it, a ring of light where it lands"
+param intensity = 1, range (0.3, 1.5), about "brightness"
+let on = smooth(t / 0.6)
+let breathe = 0.85 + 0.15 * sin(2.2 * t)
+emit beam, along (X, Y) to (X, Y - 700 * scale), width 17 * scale * on, colour (1, 0.9, 0.62), brightness 1.6 * intensity * on * breathe,
+     jitter 0.07, rate 2, flare 0, fade 0.12, seed 1509
+emit ring, at (X, Y - 2 * scale), radius 70 * scale, squash 0.25, width 2.5 * scale, colour (1, 0.9, 0.6), brightness 1.4 * intensity * on
+emit glints, in (X - 40 * scale, Y - 640 * scale), size 80 * scale x 620 * scale, count 26, rate 0.5, radius 4 * scale, fade 1,
+     speed 30 * scale, direction (0, 1), colour (1, 0.95, 0.75), brightness 1.6 * intensity * on, seed 1510
+field holy = lamp, at (X, Y - 80 * scale), radius 180 * scale, strength 1.2 * intensity * on * breathe, colour (1, 0.88, 0.6)
+
+entry resurrection_light, category magic, size 320 x 720, anchor base, once 4, show 1.2,
+      about "A resurrection (procedural): light gathers from above, a shaft of white-gold light grows and blazes, rings of light spread from the body, sparkles rise"
+param power = 1, range (0.5, 1.5), about "how bright"
+let grow = smooth(t / 1) * (1 - smooth((t - 2.4) / 1.4))
+let blaze = exp(-(t - 1.1) * (t - 1.1) / 0.03)
+emit beam, along (X, Y) to (X, Y - 700 * scale), width (6 + 16 * grow + 14 * blaze) * scale, colour (1, 0.92, 0.7),
+     brightness (1.3 * grow + 2 * blaze) * power, jitter 0.07, rate 2, flare 0, fade 0.12, seed 1511
+emit ring, at (X, Y - 3 * scale), radius 20 * scale + 190 * scale * (1 - exp(-(t - 1.1) / 0.3)), squash 0.28, width 3 * scale,
+     colour (1, 0.92, 0.65), brightness 2.4 * power * exp(-(t - 1.1) / 0.6), from 1.1
+emit ring, at (X, Y - 3 * scale), radius 20 * scale + 150 * scale * (1 - exp(-(t - 1.6) / 0.3)), squash 0.28, width 2 * scale,
+     colour (1, 0.92, 0.65), brightness 1.6 * power * exp(-(t - 1.6) / 0.6), from 1.6
+emit glints, in (X - 70 * scale, Y - 320 * scale), size 140 * scale x 320 * scale, count 34, rate 1.2, radius 6 * scale, fade 1,
+     speed 90 * scale, direction (0, -1), colour (1, 0.95, 0.75), brightness 2.4 * power * grow, seed 1512
+field holy = lamp, at (X, Y - 100 * scale), radius 220 * scale, strength (1.2 * grow + 2 * blaze) * power, colour (1, 0.9, 0.65)
+light flash (0.3 * power * blaze, 0.28 * power * blaze, 0.2 * power * blaze)
+
+entry curse, category magic, size 260 x 340, anchor base, loop, show 4,
+      about "A curse: dark violet smoke welling up around a character (the smoke model, recoloured), red motes in it and a dim, sickly light"
+param intensity = 0.6, range (0.2, 0.9), about "how much smoke"
+module murk = smoke, size 128, width 230 * scale, at (X, Y), sink 0.05, feather 0.25, look curse, start 0, seed 1513,
+              controls (0.4, 0.5, 0.75), intensity intensity
+emit glow, at (X, Y - 80 * scale), radius 2.2 * scale, count 10, spread 70 * scale, rate 0.4, seed 1514, colour (1, 0.2, 0.25),
+     brightness 2.2
+emit ring, at (X, Y - 3 * scale), radius 60 * scale, squash 0.28, width 2 * scale, colour (0.7, 0.15, 0.35),
+     brightness 0.8 * (0.7 + 0.3 * sin(2 * t))
+field sick = lamp, at (X, Y - 40 * scale), radius 110 * scale, strength 0.35, colour (0.6, 0.15, 0.6)
+
+entry poison_cloud, category magic, size 380 x 300, anchor base, loop, show 5,
+      about "A poison cloud: a lingering cloud of green poison hanging at head height and boiling slowly (the cloud model, recoloured), a faint green light"
+param intensity = 0.85, range (0.5, 1), about "how dense"
+module mass = cloud, size 128, width 400 * scale, at (X, Y + 60 * scale), feather 0.12, look toxic_cloud, start 0, seed 1515,
+              controls (0.85, 0.52, 0.6), intensity intensity, wind 0.52
+emit glow, at (X, Y - 140 * scale), radius 2 * scale, count 8, spread 120 * scale, rate 0.2, seed 1516, colour (0.6, 1, 0.35),
+     brightness 1.6
+field sick = lamp, at (X, Y - 140 * scale), radius 180 * scale, strength 0.3, colour (0.45, 1, 0.3)
+
+entry fire_aura, category magic, size 240 x 220, anchor base, loop, show 2,
+      about "A fire aura: small flames (the fire model) dancing in a ring around a character's feet, embers rising and a warm light"
+param intensity = 0.6, range (0.3, 0.9), about "how big the flames"
+module f1 = fire, size 64, width 90 * scale, at (X - 62 * scale, Y - 6 * scale), sink 0.06, feather 0.15, start 0, seed 1517,
+            controls (0.6, 0.5, 0.7), intensity intensity
+module f2 = fire, size 64, width 96 * scale, at (X - 24 * scale, Y + 3 * scale), sink 0.06, feather 0.15, start 6, seed 1518,
+            controls (0.6, 0.5, 0.7), intensity intensity
+module f3 = fire, size 64, width 96 * scale, at (X + 24 * scale, Y + 3 * scale), sink 0.06, feather 0.15, start 7, seed 1519,
+            controls (0.6, 0.5, 0.7), intensity intensity
+module f4 = fire, size 64, width 90 * scale, at (X + 62 * scale, Y - 6 * scale), sink 0.06, feather 0.15, start 2, seed 1520,
+            controls (0.6, 0.5, 0.7), intensity intensity
+emit embers, on f2, f3, tries 1, chance 0.4, spread 90 * scale
+emit ring, at (X, Y - 2 * scale), radius 70 * scale, squash 0.25, width 2 * scale, colour (1, 0.5, 0.15), brightness 0.9
+field warm = lamp, at (X, Y - 30 * scale), radius 110 * scale, strength 0.8 * intensity, colour (1, 0.55, 0.2)
+
+entry ice_shards, category magic, size 360 x 300, anchor base, once 2.4, show 0.15,
+      about "Ice shards (procedural, with the fog model's frost): a burst of glinting ice splinters thrown up and out, a cold flash, a ring of frost and a puff of icy mist"
+param power = 1, range (0.5, 1.5), about "how many and how far"
+module mist = fog, size 128, width 300 * scale, at (X, Y), sink 0.03, feather 0.12, look rime, start 0, seed 1521,
+              controls (0.7, 0.5, 0.6), intensity 0.7, opacity smooth(t / 0.2) * (1 - smooth((t - 1.4) / 0.9))
+emit glow, at (X, Y - 30 * scale), radius 40 * scale, colour (0.6, 0.85, 1), brightness 1.8 * power * exp(-t / 0.08)
+emit ring, at (X, Y - 3 * scale), radius 16 * scale + 140 * scale * (1 - exp(-t / 0.2)), squash 0.28, width 3 * scale,
+     colour (0.7, 0.9, 1), brightness 2 * power * exp(-t / 0.5)
+emit glints, at (X, Y - 40 * scale), spread 90 * scale, count 12, rate 2, radius 7 * scale, colour (0.8, 0.95, 1), brightness 2.2,
+     until 1.6, seed 1522
+field chill = lamp, at (X, Y - 30 * scale), radius 140 * scale, strength 1.4 * power * exp(-t / 0.2), colour (0.5, 0.8, 1)
+at 0:
+  burst at (X, Y - 20 * scale), radius 8 * scale, embers 0, shards 46 * power, speed 480 * scale * power, direction (0, -1), cone 200,
+        grain 11 * scale
+
+entry frost_aura, category magic, size 260 x 300, anchor base, loop, show 3,
+      about "A frost aura: an icy mist creeping round a character's feet (the fog model), ice glinting, fine snow drifting down, a cold blue light"
+param intensity = 0.7, range (0.3, 1), about "how strong"
+module mist = fog, size 128, width 260 * scale, at (X, Y), sink 0.03, feather 0.12, look rime, start 4, seed 1523,
+              controls (0.6, 0.5, 0.3), intensity intensity, turbulence 0.3
+emit snow, in (X - 100 * scale, Y - 260 * scale), size 200 * scale x 260 * scale, density 2, wind (0, -20 * scale), radius 1.1 * scale,
+     colour (0.85, 0.92, 1), seed 1524
+emit glints, in (X - 80 * scale, Y - 190 * scale), size 160 * scale x 190 * scale, count 12, rate 0.7, radius 5 * scale,
+     colour (0.75, 0.92, 1), brightness 2 * intensity, seed 1525
+emit ring, at (X, Y - 2 * scale), radius 66 * scale, squash 0.26, width 2 * scale, colour (0.6, 0.85, 1), brightness 1.1 * intensity
+field chill = lamp, at (X, Y - 50 * scale), radius 130 * scale, strength 0.5 * intensity, colour (0.5, 0.8, 1)
+
+entry electric_aura, category magic, size 240 x 280, anchor base, loop, show 1.5,
+      about "An electric aura (procedural): arcs of lightning crackling over and around a character, a blue glow, sparks now and then"
+param intensity = 1, range (0.3, 1.5), about "brightness"
+let cy = Y - 100 * scale
+let a1 = 2.4 * floor(10 * t)
+let a2 = 3.7 * floor(8 * t) + 1
+let a3 = 5.3 * floor(12 * t) + 2.5
+let flick = 0.6 + 0.4 * noise(17 * t, 4.5, 0)
+emit arc, along (X + 55 * scale * cos(a1), cy + 100 * scale * sin(a1)) to (X + 55 * scale * cos(a1 + 0.8), cy + 100 * scale * sin(a1 + 0.8)),
+     rate 10, seed 1526, width 1.3 * scale, jitter 0.22, branches 1, colour (0.6, 0.8, 1), brightness 2.6 * intensity
+emit arc, along (X + 55 * scale * cos(a2), cy + 100 * scale * sin(a2)) to (X + 55 * scale * cos(a2 + 0.7), cy + 100 * scale * sin(a2 + 0.7)),
+     rate 8, seed 1527, width 1.1 * scale, jitter 0.22, branches 1, colour (0.6, 0.8, 1), brightness 2.2 * intensity
+emit arc, along (X + 50 * scale * cos(a3), cy + 95 * scale * sin(a3)) to (X + 70 * scale * cos(a3 + 0.7), cy + 110 * scale * sin(a3 + 0.7)),
+     rate 12, seed 1528, width 1 * scale, jitter 0.35, branches 1, colour (0.75, 0.9, 1), brightness 2 * intensity
+emit glow, at (X, cy), radius 85 * scale, colour (0.4, 0.6, 1), brightness 0.12 * intensity * flick
+field blue = lamp, at (X, cy), radius 130 * scale, strength 0.7 * intensity * flick, colour (0.5, 0.7, 1)
+when rand < 0.06, repeat:
+  burst at (X + (rand - 0.5) * 100 * scale, Y - 4 * scale), radius 2 * scale, embers 0, sparks 6, speed 260 * scale
+
+entry spirit_wisps, category magic, size 360 x 300, anchor centre, loop, show 3,
+      about "Spirit wisps (procedural): pale blue lights drifting slowly about a place, each with a soft halo, now and then a glint"
+param count = 6, range (2, 16), about "how many"
+emit glow, at (X, Y), radius 3.2 * scale, count count, spread 130 * scale, rate 0.12, seed 1529, colour (0.7, 0.92, 1), brightness 2.4
+emit glow, at (X, Y), radius 16 * scale, count count, spread 130 * scale, rate 0.12, seed 1529, colour (0.4, 0.75, 1), brightness 0.35
+emit glints, at (X, Y), spread 140 * scale, count 4, rate 0.6, radius 5 * scale, colour (0.8, 0.95, 1), brightness 1.4, seed 1530
+field pale = lamp, at (X, Y), radius 160 * scale, strength 0.25, colour (0.5, 0.8, 1)

@@ -1,0 +1,226 @@
+# Weather and sky (docs/LIBRARY.md §10): drizzle and downpours, hail, sleet, blizzards and flurries, thunderstorms,
+# dust and sand storms, a tornado and a waterspout, an aurora, a rainbow, meteors, gusts of wind, heat shimmer and mist.
+# Most are procedural: the compositor's weather, hail, aurora, rainbow and meteors (docs/COMPOSE.md §4.6 and
+# §4.10). The clouds, the fog, the columns of the tornado and the waterspout and the heat are the cloud, fog, vortex,
+# fire and jet models, drawn by field-shader looks where they are not their own colour (a recolour is a look, not new
+# dynamics: the red dust storm moves as the brown one does).
+
+look sand_storm  = like storm, tint (1, 0.78, 0.46), soot_albedo 0.62, soot_density 2, sky 0.6, relief 1.5  # pale sand
+look red_dust    = like storm, tint (0.86, 0.42, 0.24), soot_density 2.2, sky 0.5, relief 1.5  # red, Martian dust
+look funnel      = shader, emission 0, soot_density 8, soot_albedo 0.36, sky 0.4, shadow 0.35, scene_light 1.3, relief 2,
+                   tint (0.6, 0.62, 0.66)                                                      # a tornado's grey
+look spout       = shader, emission 0, soot_density 2.6, soot_albedo 0.85, sky 0.9, shadow 0.25, scene_light 1.3, relief 1.5,
+                   tint (0.84, 0.92, 1)                                                        # a waterspout's spray
+look dawn_mist   = like frost, tint (1, 0.95, 0.88), soot_density 0.75, sky 0.85, scene_light 1.2  # warm white mist
+look snow_haze   = like frost, tint (0.92, 0.95, 1), soot_density 1.1, sky 1, scene_light 1.2   # blown snow
+look spray_mist  = like frost, tint (0.85, 0.92, 1), soot_density 0.9, sky 1, scene_light 1.3   # spray at a waterspout's foot
+
+# --- rain ------------------------------------------------------------------------------------------------------------
+
+entry drizzle, category weather, size 960 x 540, anchor base, loop, show 2,
+      about "Drizzle (procedural): fine, short streaks of light rain drifting down slowly"
+param density = 2.5, range (0.5, 6), about "drops in each 100 x 100 pixels at once"
+param wind = 40, range (-300, 300), about "sideways drift, world pixels a second"
+emit rain, in (X - 480 * scale, Y - 540 * scale), size 960 * scale x 540 * scale, density density, wind (wind * scale, -380 * scale),
+     radius 0.55 * scale, colour (0.62, 0.67, 0.76), seed 1201
+
+entry downpour, category weather, size 960 x 540, anchor base, loop, show 2,
+      about "A downpour (procedural): heavy, wind-driven rain in long streaks; it thins the smoke it falls through"
+param density = 9, range (3, 16), about "drops in each 100 x 100 pixels at once"
+param wind = 180, range (-500, 500), about "sideways drift, world pixels a second"
+emit rain, in (X - 480 * scale, Y - 540 * scale), size 960 * scale x 540 * scale, density density, wind (wind * scale, 250 * scale),
+     radius 0.95 * scale, wash 0.25, seed 1203
+
+# --- hail, sleet, snow -------------------------------------------------------------------------------------------------
+
+entry hailstorm, category weather, size 960 x 540, anchor base, loop, show 2,
+      about "A hailstorm (procedural): white pellets hammering down through rain, bouncing once or twice and lying a moment"
+param density = 1.6, range (0.3, 5), about "pellets in each 100 x 100 pixels at once"
+param size = 1, range (0.5, 2.5), about "how big the hailstones"
+param wind = 60, range (-300, 300), about "sideways drift, world pixels a second"
+emit hail, in (X - 480 * scale, Y - 540 * scale), size 960 * scale x 540 * scale, density density, wind (wind * scale, 0),
+     radius 1.5 * size * scale, seed 1207
+emit rain, in (X - 480 * scale, Y - 540 * scale), size 960 * scale x 540 * scale, density 1.2, wind (wind * scale, 0), radius 0.7 * scale,
+     seed 1208
+
+entry sleet, category weather, size 960 x 540, anchor base, loop, show 2,
+      about "Sleet (procedural): rain mixed with small ice pellets and wet flakes, slanting in a cold wind"
+param density = 3, range (0.5, 8), about "how heavy"
+param wind = 140, range (-400, 400), about "sideways drift, world pixels a second"
+emit rain, in (X - 480 * scale, Y - 540 * scale), size 960 * scale x 540 * scale, density density, wind (wind * scale, 0),
+     radius 0.75 * scale, colour (0.62, 0.68, 0.78), seed 1209
+emit hail, in (X - 480 * scale, Y - 540 * scale), size 960 * scale x 540 * scale, density 0.4 * density, wind (wind * scale, -120 * scale),
+     radius 0.9 * scale, seed 1210
+emit snow, in (X - 480 * scale, Y - 540 * scale), size 960 * scale x 540 * scale, density 0.4 * density, wind (wind * scale, 90 * scale),
+     radius 1.8 * scale, colour (0.78, 0.82, 0.88), seed 1211
+
+entry blizzard, category weather, size 960 x 540, anchor base, loop, show 4,
+      about "A blizzard: dense snow driven sideways by a gusting gale, blown snow swirling low along the ground (the fog model)"
+param density = 7, range (2, 14), about "flakes in each 100 x 100 pixels at once"
+param wind = 280, range (60, 500), about "how hard it blows (to the right), world pixels a second"
+module a = fog, size 128, width 320 * scale, at (X - 335 * scale, Y), sink 0.03, feather 0.1, look snow_haze, start 0, seed 1212,
+           controls (0.7, 0.85, 0.5), intensity 0.8, wind 0.85
+module b = fog, size 128, width 360 * scale, at (X - 100 * scale, Y), sink 0.03, feather 0.1, look snow_haze, start 6, seed 1213,
+           controls (0.7, 0.85, 0.5), intensity 0.9, wind 0.85
+module c = fog, size 128, width 330 * scale, at (X + 125 * scale, Y), sink 0.03, feather 0.1, look snow_haze, start 7, seed 1253,
+           controls (0.7, 0.85, 0.5), intensity 0.75, wind 0.85
+module d = fog, size 128, width 340 * scale, at (X + 330 * scale, Y), sink 0.03, feather 0.1, look snow_haze, start 1, seed 1254,
+           controls (0.7, 0.85, 0.5), intensity 0.85, wind 0.85
+emit snow, in (X - 480 * scale, Y - 540 * scale), size 960 * scale x 540 * scale, density density, wind (wind * scale, 60 * scale),
+     radius 1.9 * scale, seed 1214
+field gale = gust, velocity (3 * scale, 0.4 * scale), amount 0.8, scale 220 * scale, rate 0.9, seed 1215, on particles
+
+entry snow_flurry, category weather, size 700 x 500, anchor base, loop, show 3,
+      about "A snow flurry (procedural): a light fall of big flakes, eddying in a swirl of wind"
+param density = 1.6, range (0.3, 5), about "flakes in each 100 x 100 pixels at once"
+emit snow, in (X - 350 * scale, Y - 500 * scale), size 700 * scale x 500 * scale, density density, wind (20 * scale, -15 * scale),
+     radius 2.6 * scale, seed 1216
+field eddy = vortex, at (X + 60 * scale * sin(0.4 * t), Y - 260 * scale), radius 180 * scale, strength 1.6 * scale, on particles
+field puff = gust, velocity (0.6 * scale, 0), amount 1, scale 150 * scale, rate 0.6, seed 1217, on particles
+
+# --- storms ------------------------------------------------------------------------------------------------------------
+
+entry thunderstorm, category weather, size 1100 x 700, anchor base, loop, show 0.5,
+      about "A thunderstorm: a dark bank of cloud (the cloud model) pouring rain, struck by lightning every few seconds that lights the cloud from inside"
+param every = 4, range (2, 15), about "seconds between strikes"
+param density = 6, range (1, 12), about "how hard it rains"
+let k = t - every * floor(t / every)                                  # a strike 0.45 s into every period
+let strike = if(k > 0.45 and k < 0.57, 1, if(k > 0.65 and k < 0.75, 0.7, if(k > 0.81 and k < 0.87, 0.5, 0)))
+let side = 320 * scale * noise(floor(t / every), 3.5, 0.5)
+module a = cloud, size 128, width 700 * scale, at (X - 300 * scale, Y - 280 * scale), feather 0.1, look storm, start 0,
+           seed 1218, controls (0.9, 0.62, 0.5), wind 0.62
+module b = cloud, size 128, width 760 * scale, at (X, Y - 260 * scale), feather 0.1, look storm, start 3, seed 1219,
+           controls (0.95, 0.62, 0.6), wind 0.62
+module c = cloud, size 128, width 700 * scale, at (X + 300 * scale, Y - 280 * scale), feather 0.1, look storm, start 5,
+           seed 1220, controls (0.9, 0.62, 0.5), wind 0.62
+emit rain, in (X - 520 * scale, Y - 470 * scale), size 1040 * scale x 470 * scale, density density, wind (90 * scale, 150 * scale),
+     radius 0.85 * scale, wash 0.1, seed 1221
+emit arc, along (X + side, Y - 560 * scale) to (X + side - 50 * scale, Y), rate 3, seed 1223, width 2.2 * scale, jitter 0.13, branches 4,
+     colour (0.78, 0.84, 1), brightness 3.2 * strike
+field inside = lamp, at (X + side, Y - 560 * scale), radius 320 * scale, strength 3 * strike, colour (0.75, 0.8, 1)
+field below = lamp, at (X + side, Y - 120 * scale), radius 260 * scale, strength 1.2 * strike, colour (0.75, 0.8, 1)
+light flash (0.3 * strike, 0.33 * strike, 0.42 * strike)
+
+entry distant_lightning, category weather, size 1000 x 400, anchor base, loop, show 0.35,
+      about "Distant lightning (procedural): silent flashes and faint forked bolts low on the horizon, now here, now there"
+param every = 3, range (1, 12), about "seconds between flashes"
+let k = t - every * floor(t / every)                                  # a flash 0.3 s into every period
+let strike = if(k > 0.3 and k < 0.4, 1, if(k > 0.48 and k < 0.54, 0.6, 0))
+let at_x = X + 420 * scale * noise(floor(t / every), 7.5, 1.5)
+emit arc, along (at_x, Y - 380 * scale) to (at_x + 30 * scale, Y), rate 2, seed 1224, width 1.2 * scale, jitter 0.16, branches 3,
+     colour (0.7, 0.76, 1), brightness 1.6 * strike
+field glare = lamp, at (at_x, Y - 300 * scale), radius 300 * scale, strength 1 * strike, colour (0.7, 0.75, 1)
+light flash (0.06 * strike, 0.07 * strike, 0.1 * strike)
+
+entry sandstorm, category weather, size 1300 x 360, anchor base, loop, show 6,
+      about "A sandstorm: a pale wall of sand rolling past (the cloud model, recoloured), sand streaming low and fast in front of it"
+param intensity = 0.95, range (0.6, 1), about "how dense"
+module a = cloud, size 128, width 800 * scale, at (X - 420 * scale, Y + 330 * scale), feather 0.1, look sand_storm, start 1,
+           seed 1225, controls (0.95, 0.92, 0.6), intensity intensity, wind 0.92
+module b = cloud, size 128, width 820 * scale, at (X, Y + 320 * scale), feather 0.1, look sand_storm, start 7, seed 1226,
+           controls (0.95, 0.92, 0.6), intensity intensity, wind 0.92
+module c = cloud, size 128, width 800 * scale, at (X + 420 * scale, Y + 330 * scale), feather 0.1, look sand_storm, start 1,
+           seed 1227, controls (0.95, 0.92, 0.6), intensity intensity, wind 0.92
+emit ash, in (X - 650 * scale, Y - 160 * scale), size 1300 * scale x 160 * scale, density 6, wind (520 * scale, -20 * scale),
+     radius 1.1 * scale, colour (0.85, 0.72, 0.5), glowing 0, flow 0.3, seed 1228
+
+entry red_dust_storm, category weather, size 1300 x 300, anchor base, loop, show 6,
+      about "A red dust storm: a wall of rust-red dust rolling past, as on Mars (the dust storm's cloud model, recoloured)"
+param intensity = 0.95, range (0.6, 1), about "how dense"
+param wind = 0.8, range (0.5, 1), about "how fast it blows (to the right)"
+module a = cloud, size 128, width 800 * scale, at (X - 420 * scale, Y + 330 * scale), feather 0.1, look red_dust, start 1,
+           seed 1229, controls (0.95, 0.8, 0.6), intensity intensity, wind wind
+module b = cloud, size 128, width 820 * scale, at (X, Y + 320 * scale), feather 0.1, look red_dust, start 7, seed 1230,
+           controls (0.95, 0.8, 0.6), intensity intensity, wind wind
+module c = cloud, size 128, width 800 * scale, at (X + 420 * scale, Y + 330 * scale), feather 0.1, look red_dust, start 1,
+           seed 1231, controls (0.95, 0.8, 0.6), intensity intensity, wind wind
+field red = lamp, at (X, Y - 80 * scale), radius 400 * scale, strength 0.08, colour (1, 0.45, 0.25)
+
+entry tornado, category weather, size 560 x 760, anchor base, loop, show 5,
+      about "A tornado: a tall grey funnel swaying over the ground (the vortex model, large, recoloured), debris and dust whirling round its foot"
+param intensity = 0.9, range (0.5, 1), about "strength and width"
+param sway = 0.6, range (0, 1), about "how far and fast it wanders"
+module funnel = whirlwind, size 128, width 760 * scale, at (X, Y), sink 0.02, feather 0.15, look funnel, start 0, seed 1232,
+                controls (0.85, 0.6, 0.6), intensity intensity, sway sway
+emit ash, in (X - 200 * scale, Y - 220 * scale), size 400 * scale x 220 * scale, density 1.2, wind (0, -60 * scale), radius 1.2 * scale,
+     colour (0.42, 0.39, 0.36), glowing 0, flow 0.6, seed 1234
+field whirl = vortex, at (X, Y - 110 * scale), radius 170 * scale, strength 3 * scale, on particles
+when rand < 0.08, repeat:
+  burst at (X + (rand - 0.5) * 120 * scale, Y - 4 * scale), radius 10 * scale, embers 0, debris 3, speed 380 * scale
+
+entry waterspout, category weather, size 460 x 700, anchor base, loop, show 5,
+      about "A waterspout: a pale column of spray twisting up from the sea (the vortex model, recoloured), mist at its foot (the fog model)"
+param intensity = 0.75, range (0.5, 1), about "strength and width"
+param sway = 0.5, range (0, 1), about "how far and fast it wanders"
+module column = whirlwind, size 128, width 700 * scale, at (X, Y), sink 0.02, feather 0.15, look spout, start 0, seed 1235,
+                controls (0.75, 0.5, 0.6), intensity intensity, sway sway
+module foot = fog, size 128, width 380 * scale, at (X, Y), sink 0.03, feather 0.12, look spray_mist, start 0, seed 1236,
+              controls (0.8, 0.5, 0.8), intensity 0.75, turbulence 0.8
+
+# --- sky -----------------------------------------------------------------------------------------------------------------
+
+entry aurora, category weather, size 1200 x 420, anchor centre, loop, show 3,
+      about "An aurora (procedural): curtains of green light rippling slowly across the night sky, fading into violet above"
+param brightness = 0.5, range (0.1, 1.5), about "how bright"
+param hue = 0, range (0, 1), about "colour: 0 green, 1 red and violet"
+param pace = 1, range (0.2, 4), about "how fast the curtains move"
+emit aurora, in (X - 600 * scale, Y - 210 * scale), size 1200 * scale x 420 * scale, brightness brightness, rate pace, seed 1239,
+     colour (0.25 + 0.7 * hue, 1 - 0.65 * hue, 0.55 - 0.1 * hue), top (0.65 + 0.3 * hue, 0.3, 1 - 0.55 * hue)
+field sky_glow = lamp, at (X, Y + 100 * scale), radius 500 * scale, strength 0.06 * brightness, colour (0.3 + 0.6 * hue, 1 - 0.6 * hue, 0.6)
+
+entry rainbow, category weather, size 1000 x 520, anchor base, loop, show 2.5,
+      about "A rainbow (procedural): a bow of seven colours standing on the ground, and a fainter second bow outside it"
+param brightness = 0.35, range (0.05, 1), about "how bright"
+emit rainbow, at (X, Y + 8 * scale), radius 460 * scale, width 46 * scale, brightness brightness * smooth(t / 1.5), count 2
+
+entry meteor_shower, category weather, size 1000 x 500, anchor centre, loop, show 2,
+      about "A meteor shower (procedural): shooting stars streaking down across the sky from one direction, several a second"
+param rate = 3, range (0.2, 15), about "meteors a second"
+emit meteors, in (X - 520 * scale, Y - 260 * scale), size 700 * scale x 220 * scale, rate rate, speed 700 * scale,
+     direction (1, 0.42), length 150 * scale, width 1.5 * scale, seed 1240
+
+entry shooting_star, category weather, size 1000 x 500, anchor centre, loop, show 1.3,
+      about "A shooting star (procedural): now and then a single bright meteor crosses the sky, its long tail fading behind it"
+param rate = 0.35, range (0.05, 2), about "meteors a second"
+emit meteors, in (X - 500 * scale, Y - 250 * scale), size 600 * scale x 160 * scale, rate rate, speed 820 * scale,
+     direction (1, 0.32), length 260 * scale, width 2.2 * scale, brightness 3.5, colour (1, 0.95, 0.85), seed 1241
+
+# --- wind, heat, mist --------------------------------------------------------------------------------------------------
+
+entry wind_gust, category weather, size 900 x 400, anchor base, loop, show 3,
+      about "A gust of wind (procedural): leaves and specks of dust swept along low over the ground, the wind rising and falling"
+param strength = 1, range (0.3, 2), about "how hard it blows (to the right)"
+emit leaves, in (X - 450 * scale, Y - 300 * scale), size 900 * scale x 300 * scale, density 0.7, wind (220 * strength * scale, -15 * scale),
+     radius 4.2 * scale, seed 1242
+emit ash, in (X - 450 * scale, Y - 140 * scale), size 900 * scale x 140 * scale, density 4, wind (330 * strength * scale, -10 * scale),
+     radius 1.5 * scale, colour (0.7, 0.6, 0.46), glowing 0, seed 1243
+field blow = gust, velocity (4 * strength * scale, -0.3 * scale), amount 0.9, scale 260 * scale, rate 0.7, seed 1244, on particles
+
+entry desert_shimmer, category weather, size 900 x 160, anchor base, loop, show 2,
+      about "Desert shimmer: the air over hot sand or a sunlit road wavering low and wide (heat from the fire model, drawn invisible)"
+param intensity = 0.5, range (0.2, 0.9), about "how hot: how much it shimmers"
+module a = fire, size 64, width 340 * scale, at (X - 280 * scale, Y + 60 * scale), sink 0.05, look invisible, start 0, seed 1245,
+           controls (0.5, 0.5, 0.4), intensity intensity
+module b = fire, size 64, width 360 * scale, at (X, Y + 60 * scale), sink 0.05, look invisible, start 6, seed 1246,
+           controls (0.5, 0.5, 0.4), intensity intensity
+module c = fire, size 64, width 340 * scale, at (X + 280 * scale, Y + 60 * scale), sink 0.05, look invisible, start 7, seed 1247,
+           controls (0.5, 0.5, 0.4), intensity intensity
+
+entry exhaust_shimmer, category weather, size 360 x 140, anchor left, loop, show 2,
+      about "Exhaust shimmer: hot air streaming out of an exhaust or a vent (the anchor), bending what is seen through it (the jet model, drawn invisible); it blows to the right"
+param intensity = 0.6, range (0.3, 1), about "how hot and how far"
+let w = 360 * scale
+module hot = jet, size 64, width w, at (X + 0.45 * w, Y + 0.4 * w), look invisible, start 0, seed 1248, controls (0.6, 0.5, 0.6),
+             intensity intensity
+
+entry morning_mist, category weather, size 900 x 120, anchor base, loop, show 6,
+      about "Morning mist: a pale, warm white mist lying low over fields at dawn, barely moving (the fog model)"
+param intensity = 0.7, range (0.3, 1), about "how thick"
+module a = fog, size 128, width 320 * scale, at (X - 335 * scale, Y), sink 0.03, feather 0.1, look dawn_mist, start 0, seed 1249,
+           controls (0.7, 0.52, 0.3), intensity 0.85 * intensity, wind 0.52
+module b = fog, size 128, width 360 * scale, at (X - 100 * scale, Y), sink 0.03, feather 0.1, look dawn_mist, start 6, seed 1250,
+           controls (0.7, 0.52, 0.3), intensity intensity, wind 0.52
+module c = fog, size 128, width 330 * scale, at (X + 125 * scale, Y), sink 0.03, feather 0.1, look dawn_mist, start 7, seed 1251,
+           controls (0.7, 0.52, 0.3), intensity 0.75 * intensity, wind 0.52
+module d = fog, size 128, width 340 * scale, at (X + 330 * scale, Y), sink 0.03, feather 0.1, look dawn_mist, start 1, seed 1252,
+           controls (0.7, 0.52, 0.3), intensity 0.9 * intensity, wind 0.52

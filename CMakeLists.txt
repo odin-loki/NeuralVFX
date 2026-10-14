@@ -451,6 +451,20 @@ if(NEURALFX_BUILD_TESTS)
                      --keyframes ${CMAKE_CURRENT_BINARY_DIR}/library_keyframes --verify ${CMAKE_CURRENT_SOURCE_DIR}/results/library/frozen.csv --threads 2
                      --precision float)
     set_tests_properties(neuralfx.LibraryKeyframesFrozen PROPERTIES LABELS "neuralfx;data" SKIP_RETURN_CODE 77 TIMEOUT 1200)
+    # The third round's entries (docs/LIBRARY.md §10) against their SHA-256 in results/library/frozen_round3.csv, float
+    # pinned as above: the procedural ones need no data; those that also play learned models are skipped without them.
+    add_test(NAME neuralfx.LibraryProceduralKeyframesFrozen
+             COMMAND nvfx_gallery --library ${CMAKE_CURRENT_SOURCE_DIR}/library
+                     --only hailstorm,aurora,rainbow,meteor_shower,blood_spray,laser_beam,shield_hit,emp_blast,level_up,holy_beam,bullet_impact_metal,pickup_sparkle
+                     --keyframes ${CMAKE_CURRENT_BINARY_DIR}/library_procedural_keyframes --verify ${CMAKE_CURRENT_SOURCE_DIR}/results/library/frozen_round3.csv
+                     --threads 2 --precision float)
+    set_tests_properties(neuralfx.LibraryProceduralKeyframesFrozen PROPERTIES LABELS neuralfx TIMEOUT 1200)
+    add_test(NAME neuralfx.LibraryRound3KeyframesFrozen
+             COMMAND nvfx_gallery --library ${CMAKE_CURRENT_SOURCE_DIR}/library --models ${NEURALFX_MODELS_LIBRARY}
+                     --only thunderstorm,blizzard,ice_shards,plasma_bolt,bullet_impact_stone
+                     --keyframes ${CMAKE_CURRENT_BINARY_DIR}/library_round3_keyframes --verify ${CMAKE_CURRENT_SOURCE_DIR}/results/library/frozen_round3.csv
+                     --threads 2 --precision float)
+    set_tests_properties(neuralfx.LibraryRound3KeyframesFrozen PROPERTIES LABELS "neuralfx;data" SKIP_RETURN_CODE 77 TIMEOUT 1200)
     # The fire whirl (docs/EFFECTS_ENERGY.md): jet, orb and vortex, all in NEURALFX_MODELS_ENERGY (outside git); its
     # keyframes have the SHA-256 recorded in results/experiments/fx_energy_frozen.csv.
     set(NEURALFX_MODELS_ENERGY "${_nvfx_data}/fx_energy/models/scene" CACHE PATH "jet.nvfx, orb.nvfx and vortex.nvfx")
