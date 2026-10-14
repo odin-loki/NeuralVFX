@@ -29,6 +29,9 @@ C++23, no third-party runtime dependencies, a C API for engines, no Python.
 - **Engine integration:** [docs/ENGINES.md](docs/ENGINES.md) (C API for effects and scenes, threading, Unreal, Unity,
   the Godot 4 plugin).
 - **More effects:** [docs/EFFECTS.md](docs/EFFECTS.md) (steam and magic: presets, training, the test, a scene).
+- **Effect library:** [docs/LIBRARY.md](docs/LIBRARY.md): 48 named effects ready to place (fires, smokes, explosions,
+  steam, magic, ambient, sparks, lights) from the five trained models and procedural elements, with a C API to spawn
+  and drive them, a gallery, and the Godot node `NeuralVFXStage`.
 - **Data and licences:** [docs/DATA.md](docs/DATA.md).
 - **Footage:** [docs/FOOTAGE.md](docs/FOOTAGE.md): start points estimated from frames (study J), so a rollout effect
   continues what footage shows (`nvfx_estimate`); validated on simulated renders only.
@@ -106,7 +109,8 @@ From [docs/REPORT.md](docs/REPORT.md), measured on simulated fire, smoke and exp
 | viewer | `viewer/`, `nvfx_viewer` | Dear ImGui: sliders for every control, side by side with the reference, a flipbook and the live simulation; a scene mode that edits scene scripts live (rebuilt off the frame as you type, errors at their line, the last good scene playing on, inputs, rule buttons and a field probe); [docs/VIEWER.md](docs/VIEWER.md) |
 | composed effects | `src/compose`, `nvfx_fireball`, `nvfx_scene_script` | a prototype: rollout effects coupled through their fields (tiles of one domain, hand-over between models, pushes, transfers, force fields and field effects), with particles, light, distortion and bloom; scene scripts (a text format with a hand-written parser and a runner that allocates nothing per frame, `examples/scenes`); [docs/COMPOSE.md](docs/COMPOSE.md) |
 | scene C API | `include/neuralfx/nvfx_scene.h`, `src/compose/nvfx_scene.cpp` | scene scripts for engines, in libnvfx: a clock in seconds, the picture as RGBA, the fields for gameplay (a point, a tile grid, a region), inputs, rule triggers and module moves and controls; the script runner's frames to the bit, no allocation per frame; [docs/ENGINES.md](docs/ENGINES.md) §7 |
-| Godot 4 plugin | `engines/godot` | a GDExtension (godot-cpp at a pinned tag): `NeuralVFXScene` and `NeuralVFXEffect` nodes into textures, a demo project and a headless test in Godot 4.4.1 (`engines/godot/test.sh`); [docs/ENGINES.md](docs/ENGINES.md) §8 |
+| effect library | `library/*.nvfxl`, `src/library`, `include/neuralfx/nvfx_library.h` | 48 named, ready-to-use effects (campfire, grenade, steam vent, portal, lightning strike, ...) built from the five trained models and the compositor's procedural elements, written in the scene-script language; a C API to list them and spawn, drive and stop instances on a stage (a scene with rooms), no allocation per frame; [docs/LIBRARY.md](docs/LIBRARY.md) |
+| Godot 4 plugin | `engines/godot` | a GDExtension (godot-cpp at a pinned tag): `NeuralVFXScene`, `NeuralVFXStage` (the effect library) and `NeuralVFXEffect` nodes into textures, demo projects and a headless test in Godot 4.4.1 (`engines/godot/test.sh`); [docs/ENGINES.md](docs/ENGINES.md) §8 |
 | context mixing | `src/dcm`, `nvfx_dcm` | the owner's diffusion-context mixing (DCM) from CameraDetector: a PAQ8-style mixer with a frozen, versioned inference copy and a nested mixer search, k-means contexts without LibTorch, and a value-domain mixer (a value and a Laplace scale per prediction) for generating and coding effects; docs/DCM.md (study G) |
 
 ## Build and test
@@ -116,7 +120,7 @@ Ubuntu 24.04: `g++-14`, CMake 3.25+, Ninja, `libgtest-dev`, `zlib1g-dev` (and `f
 ```sh
 cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_COMPILER=g++-14
 cmake --build build
-ctest --test-dir build                     # 278 tests: sim, metrics, codecs, gradients, runtime parity, composition, scene scripts, field effects, context mixing, denoiser, lossless coder, low-bit, vector-quantised, sparse and multi-level features, video codecs, BC7 and ASTC flipbooks, allocation, C API for effects and scenes, start points from footage
+ctest --test-dir build                     # 297 tests: sim, metrics, codecs, gradients, runtime parity, composition, scene scripts, field effects, context mixing, denoiser, lossless coder, low-bit, vector-quantised, sparse and multi-level features, video codecs, BC7 and ASTC flipbooks, allocation, C API for effects and scenes, the effect library, start points from footage
 ```
 
 Options: `NEURALFX_BUILD_VIEWER` (GLFW + OpenGL; fetches Dear ImGui), `NEURALFX_BUILD_SHARED` (libnvfx.so for engines),
@@ -156,6 +160,8 @@ training, evaluation; about three hours), then `d-timing` on an idle machine and
 | `nvfx_eval` | score the flipbook ladder or a model against a reference clip |
 | `nvfx_experiment` | the full study: `data`, `a` (`a-flipbooks`: only the flipbook rows still missing), `b`, `c`, `media`, `timing`, `report`; study D: `d-chaos`, `d-train`, `d-tune`, `d-finish`, `d-eval`, `d-timing`, `d-report` (with `--effects steam,magic` for the effects added later, [docs/EFFECTS.md](docs/EFFECTS.md)); study G: `g-fine` (design G1, DCM-fine, end to end); to come: `g-data`, `g-pilot`, `g-search`, `g-eval`, `g-timing` |
 | `nvfx_c_host` | the engine loop in plain C, with timings; `--scene` plays a scene script through the scene API (and with `--expect` compares every frame with `nvfx_scene_script --profile`); `--self-test` checks the error paths |
+| `nvfx_library_host` | the effect library from plain C: lists a catalogue, plays a stage of spawned effects; `--self-test` checks the API ([docs/LIBRARY.md](docs/LIBRARY.md) §3) |
+| `nvfx_gallery` | the effect library's gallery: a labelled contact sheet, a walk-through video, keyframes against frozen SHA-256, `--check` (every entry parsed, played, zero allocations), `--list`, `--print`, `--starts`, `--shot` ([docs/LIBRARY.md](docs/LIBRARY.md) §4) |
 | `nvfx_viewer` | live viewer with sliders; `--scene FILE` edits a scene script live |
 | `nvfx_fireball` | a scene of composed effects written in C++ (a fireball with smoke, fires and embers) to video, with a profile of every stage |
 | `nvfx_scene_script` | plays a scene script (`examples/scenes/*.nvfxs`) to video, keyframes and a sheet; `--check` and `--print` check and reformat a script; `--verify` compares keyframes with frozen SHA-256 |
@@ -172,9 +178,10 @@ training, evaluation; about three hours), then `d-timing` on an idle machine and
 
 | path | what |
 |---|---|
-| `include/neuralfx/` | public headers: `nvfx.h` (C API), `nvfx_scene.h` (C API for scenes), `clip`, `sim`, `model`, `train`, `rollout`, `rollout_train`, `footage`, `metrics`, `flipbook`, `ingest`, `image_io`, `noise`, `cm` (lossless coder), `video_codec` (video baselines); `dcm/` (context mixing) |
-| `src/core`, `src/sim`, `src/train`, `src/runtime`, `src/compose`, `src/dcm`, `src/codec`, `src/common`, `src/proto` | libraries (see the table above); `src/codec` runs video codecs through ffmpeg as baselines; `src/proto` holds the Phase 0 prototypes |
+| `include/neuralfx/` | public headers: `nvfx.h` (C API), `nvfx_scene.h` (C API for scenes), `nvfx_library.h` (C API for the effect library), `clip`, `sim`, `model`, `train`, `rollout`, `rollout_train`, `footage`, `metrics`, `flipbook`, `ingest`, `image_io`, `noise`, `cm` (lossless coder), `video_codec` (video baselines); `dcm/` (context mixing) |
+| `src/core`, `src/sim`, `src/train`, `src/runtime`, `src/compose`, `src/library`, `src/dcm`, `src/codec`, `src/common`, `src/proto` | libraries (see the table above); `src/codec` runs video codecs through ffmpeg as baselines; `src/proto` holds the Phase 0 prototypes |
 | `tools/`, `examples/`, `viewer/`, `bench/` | executables |
+| `library/` | the effect library's catalogue (`.nvfxl` files in the scene-script language; the models are in the data folder) |
 | `engines/godot/` | the Godot 4 GDExtension, its demo project and its headless test |
 | `tests/` | GoogleTest suites, the allocation test, the C host self-test (the viewer's tests are in `viewer/`) |
 | `docs/` | plan, report, composed effects, footage, engines, data, viewer, figures |
