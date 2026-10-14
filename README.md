@@ -50,6 +50,11 @@ From [docs/REPORT.md](docs/REPORT.md), measured on simulated fire, smoke and exp
   the same resolution for the first second. Played in 6 s shards from the start points, a minute looks like the
   first 10 s. The price is **0.8 to 0.9 ms per 128 x 128 frame** (0.4 to 0.5 ms at 64 x 64) and 4.0 MB per playing
   instance.
+- **Rollout effects in 8-bit integers (study K, [docs/REPORT.md](docs/REPORT.md) §13):** the stepper's second
+  convolution runs in 8-bit integers by default since its rule passed: on held-out settings and seeds it followed real
+  runs and played as float does on all eleven effects, and with AVX-512 VNNI a frame costs about a tenth less than float
+  on the same build (18% less at 64 px; 0.54 against 0.75 ms at 128 px against the float default on AVX2, most of
+  that the AVX-512 build's; provisional). Without VNNI it barely pays (1 to 5%).
 - **More effects** ([docs/EFFECTS.md](docs/EFFECTS.md)): steam and a magic portal, new presets of the simulator
   trained with study D's recipe (82 KB each). Steam plays as well as fire and smoke: at unseen settings and seeds its
   motion is right and its average picture ties a second real run, 4.3 dB closer than the nearest flipbook. Magic is
@@ -160,6 +165,7 @@ training, evaluation; about three hours), then `d-timing` on an idle machine and
 | `nvfx_estimate` | start points for a rollout effect estimated from footage (a clip, a video or frames, after the same licence check): writes a copy of the effect that continues from the footage; `--preview` draws the footage frame and the effect from it ([docs/FOOTAGE.md](docs/FOOTAGE.md) §8) |
 | `nvfx_study_j` | study J: `inverse`, `motion` (the networks), `val`, `val-endless`, `test`, `test-endless`, `report` ([docs/FOOTAGE.md](docs/FOOTAGE.md) §9) |
 | `nvfx_d2` | study D2: the detail layer's constants tuned on pooled endless statistics: `probe`, `tune` (CMA-ES), `candidates`, `val`, `test`, `write`, `cost` ([docs/REPORT.md](docs/REPORT.md) §6.9; nothing kept) |
+| `nvfx_study_k` | study K: the rollout runner's stage profile (`profile`), tracking and endless statistics at float and int8 (`track`, `endless`), the rule (`decide`) and the cost (`timing`); `tools/study_k/time.sh` re-times it ([docs/REPORT.md](docs/REPORT.md) §13) |
 | `nvfx_train` | train a frame model from one or more clips (controls and variation codes come from the clips), or with `--rollout` a rollout effect from the simulation |
 | `nvfx_eval` | score the flipbook ladder or a model against a reference clip |
 | `nvfx_experiment` | the full study: `data`, `a` (`a-flipbooks`: only the flipbook rows still missing), `b`, `c`, `media`, `timing`, `report`; study D: `d-chaos`, `d-train`, `d-tune`, `d-finish`, `d-eval`, `d-timing`, `d-report` (with `--effects steam,magic` for the effects added later, [docs/EFFECTS.md](docs/EFFECTS.md)); study G: `g-fine` (design G1, DCM-fine, end to end); to come: `g-data`, `g-pilot`, `g-search`, `g-eval`, `g-timing` |

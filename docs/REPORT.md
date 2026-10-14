@@ -103,6 +103,11 @@ Plan and decisions: [PLAN.md](PLAN.md).
   improves the explosion inside scenes. Tuning the detail layer on the endless statistics (D2) gains detail without
   calming the effects but met none of its rules, so v2 is unchanged. The composed fireball runs at 80 frames per
   second at 720p on 4 threads.
+- **Rollout effects in 8 bits (study K, §13):** the stepper's second convolution now runs in 8-bit integers by
+  default. On held-out settings and seeds it tracked real runs and played as float does on all eleven effects (every
+  difference a tie or far inside its margin; the lowest tracking interval reaches -0.07 dB). With AVX-512 VNNI a
+  128 x 128 frame costs 0.90 [0.89, 0.92] of float's on the same build and 0.72 of the float default on AVX2 (most of
+  that the AVX-512 build's); without VNNI it barely pays. Provisional timings, from a shared machine.
 - **Not done:** owner footage (none supplied), rate-optimised block encoding for disk, engine plugins other than
   Godot's (§9, §10; the Godot 4 plugin and a C API for scenes: [ENGINES.md](ENGINES.md) §7, §8). The path from footage
   to rollout effects is built and measured on simulated renders (study J, [FOOTAGE.md](FOOTAGE.md)): start points
@@ -968,8 +973,9 @@ least of five runs' medians over 180 frames
   features: 256 multiply-adds per pixel fewer, for 24 more interpolations done with a vector permute. Used where the
   frame has at least as many pixels across as the grid has points, on AVX2 and AVX-512.
 - **It is the default for the grid family** (`nvfx_instance_set_precision`; `NVFX_PRECISION_FLOAT` gives the float
-  network, unchanged). The conv family and rollout effects stay float. With no ISA forced, int8 instances of models with
-  a hidden layer take the AVX-512 build where the CPU has VNNI. The studies' tables stay those of the float network
+  network, unchanged). The conv family stays float; rollout effects run their stepper's second convolution in 8 bits by
+  default since study K (§13). With no ISA forced, int8 instances of models with a hidden layer, and int8 rollout
+  effects, take the AVX-512 build where the CPU has VNNI. The studies' tables stay those of the float network
   (`nvfx_experiment` scores at float; its `int8` step measures the difference).
 
 ms per frame, and the change in active PSNR, int8 minus float (paired over the clips, 95% intervals):
@@ -1240,7 +1246,10 @@ scripts; the scripted fireball reproduces the hand-written one to the bit.
 
 ## 13. Study K: rollout effects in 8-bit integers
 
-Status: **design and rule committed before validation**; the results follow in this section once the test has run.
+Status: **done.** The design and the rule (§13.3) were committed before validation; the test ran once. The stepper's
+second convolution in 8 bits passed on all eleven effects and is faster than float on the AVX-512 build, so by the rule
+it is the rollout effects' default precision; float stays one setting away and is what the frozen tests check.
+Timings are provisional (a shared machine; `tools/study_k/time.sh` re-times them).
 
 **The question.** The frame models run their hidden layers in 8-bit integers by default (§7) and lose 0.008 dB. The
 rollout runtime (`src/runtime/rt_rollout.hpp`) was all float, at about 1 ms per 128 x 128 frame on one AVX2 core. Where
@@ -1333,8 +1342,8 @@ The network's stage (the same profile, mean over the eleven effects at 128 px; t
 
 With VNNI the second convolution in 8 bits takes 0.067 ms off the step at every size, both 0.091 ms; on AVX2 without
 VNNI int8 takes off 0.02 ms: it barely pays there. A frame at 128 px with VNNI: 0.60 ms (`int8_second`) and 0.57 ms
-(`int8_both`) against 0.71 ms in float on the same build and 0.83 ms in float on AVX2, the shipped default (§13.6 has
-the interleaved timing).
+(`int8_both`) against 0.71 ms in float on the same build and 0.83 ms in float on AVX2, the default before this study
+(§13.6 has the interleaved timing).
 
 ### 13.3 The rule (fixed before validation; the test runs once)
 
@@ -1431,3 +1440,150 @@ are left out):
 **The choice: `int8_second`**, the rule's second branch (`int8_both` does not pass on all eleven); tested on all eleven
 effects. `DATA/k_int8` holds every run's statistics; `results/experiments/k_int8/` the CSVs (`k_track_val.csv`,
 `k_stats_val.csv`, `k_rule_val.csv`) and the development probes on training settings (`*_train_probe.csv`).
+
+### 13.5 The test (run once)
+
+`int8_second` minus float on study B's 10 held-out settings with fresh seeds (20 tracked runs per effect; 8 runs per
+setting for the endless statistics; `k_track_test.csv`, `k_stats_test.csv`, `k_rule_test.csv`). Coverage and emission
+distances changed by less than 0.0003 everywhere:
+
+| effect | 8 frames (dB) | 1 s | 2 s | spectrum distance | \|ln motion ratio\| | mean-frame PSNR (dB) |
+|---|---|---|---|---|---|---|
+| fire | -0.00 [-0.02, +0.01] | -0.01 [-0.03, +0.01] | -0.00 [-0.02, +0.02] | -0.000 [-0.001, +0.000] | -0.002 [-0.004, +0.000] | +0.01 [-0.02, +0.03] |
+| smoke | -0.01 [-0.02, +0.00] | +0.00 [-0.01, +0.02] | +0.01 [-0.01, +0.02] | -0.000 [-0.001, +0.000] | +0.001 [+0.000, +0.002] | -0.01 [-0.02, +0.00] |
+| explosion | +0.03 [-0.01, +0.06] | -0.02 [-0.04, +0.00] | -0.02 [-0.04, -0.01] | +0.000 [-0.000, +0.001] | -0.000 [-0.001, +0.001] | +0.02 [+0.01, +0.04] |
+| steam | -0.00 [-0.01, +0.01] | -0.00 [-0.02, +0.01] | +0.03 [+0.00, +0.07] | -0.000 [-0.001, +0.000] | +0.002 [-0.000, +0.004] | -0.01 [-0.05, +0.05] |
+| magic | -0.02 [-0.03, -0.00] | -0.02 [-0.04, +0.00] | -0.02 [-0.07, +0.02] | -0.001 [-0.001, +0.000] | +0.010 [+0.009, +0.012] | -0.03 [-0.08, +0.02] |
+| jet | +0.00 [-0.00, +0.00] | +0.01 [-0.01, +0.02] | -0.01 [-0.03, +0.01] | -0.000 [-0.001, +0.000] | -0.001 [-0.003, +0.001] | -0.01 [-0.03, +0.02] |
+| orb | -0.00 [-0.01, +0.01] | -0.00 [-0.02, +0.02] | +0.01 [-0.01, +0.02] | +0.000 [-0.000, +0.001] | +0.000 [-0.000, +0.001] | -0.02 [-0.08, +0.03] |
+| vortex | -0.00 [-0.01, +0.00] | +0.00 [-0.01, +0.01] | -0.01 [-0.02, +0.01] | -0.000 [-0.001, +0.001] | -0.002 [-0.003, -0.000] | +0.01 [-0.00, +0.03] |
+| fog | +0.01 [-0.00, +0.01] | +0.01 [-0.00, +0.02] | +0.01 [-0.01, +0.02] | -0.000 [-0.000, +0.000] | +0.004 [-0.006, +0.012] | +0.01 [+0.00, +0.01] |
+| dust | +0.03 [-0.00, +0.05] | -0.00 [-0.02, +0.01] | -0.00 [-0.01, +0.01] | -0.000 [-0.001, +0.000] | +0.000 [-0.000, +0.001] | -0.00 [-0.02, +0.01] |
+| cloud | -0.00 [-0.01, +0.00] | +0.00 [-0.01, +0.01] | +0.01 [-0.01, +0.03] | -0.001 [-0.001, -0.000] | +0.008 [+0.004, +0.011] | +0.01 [-0.01, +0.02] |
+
+- **It passes on all eleven effects.** The lowest end of any tracking interval is -0.07 dB (magic at 2 s, against a
+  margin of -0.20); at 8 frames and 1 s the lowest is -0.04 dB (against -0.10). The detail spectrum distance moves by
+  at most 0.001, |ln motion ratio| by at most 0.012 (against +0.02), the mean frame by at most 0.08 dB at an
+  interval's end (against -0.10). Every measure of every effect is a tie or a non-inferior difference far inside its
+  margin.
+- **The strict reading** finds nine intervals entirely on the worse side, as on validation and as small: magic's and
+  cloud's |ln motion ratio| (+0.010 [+0.009, +0.012] and +0.008 [+0.004, +0.011]: the same two effects as on
+  validation, so this is real: int8 moves their motion 1% further from the real runs'), smoke's (+0.001), magic's
+  8-frame tracking (-0.016 dB [-0.030, -0.003]) and the explosion's at 2 s (-0.021 dB [-0.035, -0.007]), and emission
+  distances changed by at most 0.000016 on smoke, jet, vortex and fog. Six are entirely on the better side (the
+  explosion's coverage and mean frame, steam's tracking at 2 s, vortex's motion, fog's mean frame, cloud's spectrum).
+
+**The default: int8**, by the rule: the chosen candidate passes the test on all eleven effects, and on the AVX-512
+build at 128 x 128 its frame costs 0.903 [0.885, 0.923] of float's (mean over the effects of each effect's median over
+five interleaved rounds; below 0.95, §13.6).
+
+### 13.6 Cost (provisional)
+
+Thread CPU time per frame through `nvfx_render` on one pinned core of the shared machine (three other agents' jobs, one
+of them training; load average 4 to 10), the median over 200 frames (one-shots: their 88) in each of five rounds that
+ran every configuration once in turn, then the median of the rounds; the mean over the eleven effects, with the least
+and greatest effect in brackets (`nvfx_study_k timing`; every effect and round in
+`results/experiments/k_int8/timing_session1.csv`, the table in `timing_session1_summary.md`):
+
+| size | float, AVX2 (the default before) | float, AVX-512 | **int8, AVX-512 VNNI** (the default now) | int8, AVX2 |
+|---|---:|---:|---:|---:|
+| 64 px | 0.481 (0.430-0.541) | 0.381 (0.338-0.449) | **0.321** (0.284-0.377) | 0.456 (0.415-0.534) |
+| 128 px | 0.750 (0.582-0.877) | 0.601 (0.457-0.755) | **0.543** (0.415-0.743) | 0.740 (0.580-0.878) |
+| 256 px | 1.773 (1.063-2.504) | 1.436 (0.867-2.031) | **1.366** (0.812-1.965) | 1.759 (1.052-2.527) |
+
+Ratios, the mean over the effects of each effect's median over the rounds, 95% bootstrap:
+
+| size | int8 / float, AVX-512 (int8's own) | int8 / float, AVX2 | float AVX-512 / float AVX2 (the build's) | int8 AVX-512 / float AVX2 (what the default change gives) |
+|---|---|---|---|---|
+| 64 px | 0.821 [0.794, 0.839] | 0.950 [0.941, 0.959] | 0.795 [0.773, 0.824] | **0.669 [0.654, 0.684]** |
+| 128 px | **0.903 [0.885, 0.923]** | 0.989 [0.970, 1.012] | 0.797 [0.785, 0.812] | **0.719 [0.698, 0.749]** |
+| 256 px | 0.958 [0.943, 0.972] | 0.994 [0.984, 1.004] | 0.812 [0.804, 0.820] | 0.772 [0.758, 0.786] |
+
+- **int8 pays with VNNI, and only there.** On the AVX-512 build its frame is 18% cheaper than float's at 64 px, 10% at
+  128 px and 4% at 256 px, where the renderer and the detail layer, which stay float, take most of the frame. On AVX2
+  (pmaddubsw, no VNNI) it saves 5% at 64 px and ties float at 128 and 256 px (intervals over 1).
+- **Most of what the default change gives is the AVX-512 build's**: float alone is 0.80 of its AVX2 time there at every
+  size, and int8 multiplies that by 0.82 to 0.96. The change from the float default (AVX2) to the int8 default (AVX-512
+  where the CPU has VNNI) is 0.67 of the frame at 64 px and 0.72 at 128 px.
+- `int8_both` was faster still (0.852 [0.834, 0.871] of float on the AVX-512 build at 128 px, 0.762 at 64 px) but failed
+  validation on seven effects (§13.4).
+- **Memory**: an instance holds 85 KB more at int8 (2,496 against 2,411 KB at 128 px; 1,643 against 1,558 at 64 px):
+  the quantised activations and weights. The effect's weights do not change.
+
+**The fireball** (study D's v1 fire, smoke and explosion composed as COMPOSE.md §7; 1280 x 720, `nvfx_fireball
+--no-video --profile`, medians over the frames from 36 on, then the median of three alternating rounds with the least
+and greatest; float takes the AVX2 build, int8 the AVX-512 one; `results/experiments/k_int8/fireball_session1_summary.txt`):
+
+| threads | float: frame | int8: frame | float: the models' steps, CPU | int8: the models' steps, CPU |
+|---|---:|---:|---:|---:|
+| 1 | 48.2 ms (48.2-48.8) | 45.8 ms (42.5-45.8) | 10.8 ms (10.7-10.8) | 8.8 ms (8.4-9.0) |
+| 4 | 24.2 ms (23.8-24.3) | 23.1 ms (22.9-23.5) | 10.9 ms (10.5-11.0) | 8.9 ms (8.7-8.9) |
+
+The models' steps take 18% less CPU (2 ms a frame of the fireball's 16 modules); the rest of the frame (drawing,
+distortion, bloom) is the compositor's and does not change. On 4 threads the other agents' jobs kept the fireball's
+threads waiting for a core 45% of the time, so its frame is twice the quiet machine's (§12; 80 frames per second
+there).
+
+**The crowd** (the effect manager's benchmark of MANAGER.md §7: 165 effects at a 4 ms budget per 60 Hz tick on one
+core, 20 s; `nvfx_crowd`, as `tools/manager/time_crowd.sh`, float and int8 alternately, three rounds; CPU per tick, the
+median with the least and greatest; `results/experiments/k_int8/crowd_runs_session1.csv`):
+
+| configuration | float | int8 |
+|---|---|---|
+| the default plan (the planner's costs are float's on AVX2, so both run the same jobs) | 4.07 ms (3.73-4.11), p99 8.8 | **2.81 ms** (2.71-2.85), p99 6.1 |
+| calibrated (`nvfx_manager_calibrate` measures the machine and spends the budget) | 3.88 ms (3.01-4.09) with 20 simulations | 3.47 ms (3.06-4.47) with 25 (25-31) |
+| unmanaged: every effect its own instance at 64 px | 46.9 ms (46.8-47.4) | 32.8 ms (32.5-32.8) |
+
+With the same plan a tick costs 0.69 of float's; calibrated, the manager spends what int8 saves on more simulations of
+their own (25 instead of 20; fewer shown by proxies). The manager's memory grows from 119.9 to 128.9 MB (the
+instances' int8 buffers).
+
+### 13.7 The default and the frozen tests
+
+By the rule (§13.3, §13.5) **rollout effects play at int8 by default**: `rt::kRolloutPrecision` is `Precision::int8`,
+which `NVFX_PRECISION_DEFAULT` resolves to for rollout instances, scenes, the library's stages, the effect manager's
+models and the tools (`--precision float` gives the float path). With no ISA forced an int8 instance takes the AVX-512
+build where the CPU has VNNI, else the CPU's best build, as before; float instances keep the AVX2 build. The float path
+is unchanged to the bit: its frozen keyframes still match.
+
+- **The frozen tests are pinned to float**, so that they keep checking the float path: `ScriptedFireballBitExact`,
+  `SceneApiFireballBitExact`, `ScriptedPortalFrozen`, `ScriptedMoorFrozen`, `ScriptedFireWhirlFrozen`,
+  `LibraryKeyframesFrozen` (`--precision float`), `SceneApi.FireballKeyframesMatchTheFrozenOnes`
+  (`nvfx_scene_desc.precision`), and Godot's demo tests (`engines/godot/demo/test.gd` and `test_library.gd` set
+  `precision = 1`, `engines/godot/test.sh` draws its references with `--precision float`). Unit tests whose reference
+  is the float runner are pinned too (the rollout runtime's parity tests, study D2's and the prior's instance tests, the
+  hand-off test).
+- **New int8 frozen keyframes**: the fireball's eight keyframes (frames 27 to 246) from `nvfx_scene_script --precision
+  int8 --isa avx512`, with the effects' checksums, in `results/experiments/k_int8_frozen.csv`, checked by
+  `neuralfx.ScriptedFireballInt8Frozen` (skipped on a CPU without AVX-512). They are the same on 1 and 2 threads. Bit
+  for bit they belong to one build: the integer sums are equal on every ISA, but the float parts around them (the
+  float convolution, the renderer) round differently between builds, as float's frames do.
+- **Against float's keyframes** the int8 fireball starts at 69.8 dB PSNR (frame 27, largest difference 16 levels) and
+  drifts as two runs of a chaotic effect do: 62.5, 56.7, 48.5, 46.9 and 47.7 dB by frame 126, 38.4 and 38.6 dB at
+  frames 180 and 246. This is why the study measured tracking and the endless statistics instead of pixels.
+- **Not checked here**: the Godot extension (its precision property on `NeuralVFXScene` and `NeuralVFXStage`, and the
+  pinned demo tests) was neither built nor run, since this machine has no Godot; `engines/godot/test.sh` should be run
+  once before a release.
+
+### 13.8 What it means
+
+- **The stepper's second convolution in 8 bits is free in quality and worth having with VNNI.** On held-out settings
+  and seeds every measure of every effect is a tie or a difference far inside its margin; the only consistent effect
+  is magic's and cloud's motion, 1% further from the real runs' on validation and test alike. With VNNI it takes 40%
+  off the network's stage (0.168 to 0.101 ms) and 10% off a 128 x 128 frame.
+- **Without VNNI it does not pay** (1 to 5% on AVX2). The default follows the committed rule, which asked for a gain on
+  the AVX-512 build only; on a CPU without VNNI the default int8 costs its small quality difference for nothing, and an
+  engine there can set `NVFX_PRECISION_FLOAT`. Resolving the default per CPU (int8 with VNNI, float without) would be
+  the natural next step; it was not part of the rule, so it is not done.
+- **Most of the speed of the change is the AVX-512 build.** Float on the AVX-512 build is 0.80 of float on AVX2 at
+  every size, more than int8 adds on top. Float rollouts still take AVX2 by default, a choice made before the broadcast
+  fix of §7. They should be re-timed on a quiet machine and moved to the AVX-512 build if this holds; float would then
+  be 0.80 of today's float default with no change to its frames' quality.
+- **The renderer and the detail layer are the floor now**: at 256 px they take over 80% of the frame. The renderer's hidden
+  layer in 8 bits tied float (§13.2), and the detail layer's gathers and interpolation are not multiply-adds. A cheaper
+  renderer would need fewer units or a coarser evaluation, which change the pictures and need their own study.
+- **Quantising the state costs what quantising features does not**: `int8_both` lost up to 0.2 dB of tracking and
+  2.8% of motion on seven effects.
+- **Timings are provisional**: one session on a machine shared with three other agents (load average 4 to 12).
+  `tools/study_k/time.sh [BUILD] [OUT] [ROUNDS]` re-runs every timing of this section (the eleven effects, the stages,
+  the fireball on 4 threads and on 1, the crowd), interleaved, on a quiet machine; about 30 minutes at five rounds.

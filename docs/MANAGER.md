@@ -503,8 +503,10 @@ three rounds, least and greatest in brackets:
 - **The coarse step is the floor.** Every simulation steps 30 times a second at any size and rate (0.32 ms a step on
   one core): at 4 ms per 60 Hz tick a core runs about 15 to 18 simulations, however small. Beyond that the manager can
   only share: copies, and proxies, which are copies of a few runs at snapped controls. A battlefield of a hundred
-  distinct-looking effects needs more CPU, a cheaper stepper (fewer channels, or int8 like the frame models, which
-  would change the runs and need its own study), or a learned stepper that takes longer steps (not trained).
+  distinct-looking effects needs more CPU, a cheaper stepper (fewer channels; study K's int8 path, now the default,
+  takes a 64 px step from 0.36 to 0.20 ms with AVX-512 VNNI, 0.07 ms of it int8's and the rest the AVX-512 build's,
+  and the 4 ms crowd's CPU from 4.1 to 2.8 ms per tick with the same plan; docs/REPORT.md §13), or a learned stepper
+  that takes longer steps (not trained).
 - **Proxies are copies.** Their copies are offset in time, but near one another they repeat; their controls are
   snapped (2.6 to 3.2 dB of mean-frame PSNR lost against another run at the instance's own controls, §5); magic's
   proxies are visibly worse (its spin at 7.5 Hz). One-shot effects have none.
