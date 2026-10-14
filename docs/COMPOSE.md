@@ -140,7 +140,7 @@ points, hand-overs between tiles of the same size).
 | `scene` | the picture and the clock | `size W x H` (1280 x 720), `fps` (30), `length` (10 s), `ground` (600: world y of the ground) |
 | `bus` | the field bus's rectangle (§2) | `at (x, y)` top-left corner, `size W x H`, `cell` (8 world pixels); default: the screen with an eighth of its width each side and half its height above |
 | `effect NAME = "FILE"` | a rollout effect, loaded once | the detail layer's settings: `swirl`, `swirl_scale`, `swirl_rate`, `swirl_ramp`, `contrast`, `grow` |
-| `look NAME = shader` or `= like LOOK` | a field-shader look (§2) | `heat_scale`, `emission`, `emission_power`, `soot_density`, `soot_albedo`, `sky`, `shadow`, `scene_light`, `relief`, `tint (r, g, b)`: the fields of `ShaderSpec` |
+| `look NAME = shader` or `= like LOOK` | a field-shader look (§2) | `heat_scale`, `emission`, `emission_power`, `soot_density`, `soot_albedo`, `sky`, `shadow`, `scene_light`, `relief`, `tint (r, g, b)`, `hue` (degrees: the emitted colours turned about the grey axis, a recolour; 0): the fields of `ShaderSpec` |
 | `let NAME = EXPR` | a named value, computed where it is used (so it may change over time) | |
 | `input NAME = EXPR` | a value the game sets while the scene plays (`nvfx_scene_set_input`, [ENGINES.md](ENGINES.md) §7); EXPR, a constant, is its starting value | |
 | `module NAME = EFFECT` | a module (§4.3) | |
@@ -151,6 +151,7 @@ points, hand-overs between tiles of the same size).
 | `frame` | the picture | `exposure` (1), `fade` (1), `haze` (1: heat haze), `bloom` (1: strength), `bloom_threshold` (1) |
 | `camera` | the screen's top-left corner in the world | `x`, `y` (0) |
 | `keyframes T, T, ...` | frames the tool writes as PNG (`--keyframes`) and to the sheet | |
+| `entry`, `param` | an effect of the library's catalogue and its parameters ([LIBRARY.md](LIBRARY.md)); a scene rejects them | |
 | `at T:` / `when ...:` | a rule (§4.5) | |
 | `every frame:` | couplings applied every frame (§4.5) | |
 
@@ -163,7 +164,7 @@ A module is one rollout effect in a square tile, or a domain of several tiles of
 |---|---|---|
 | `= EFFECT` | the effect it runs | (required) |
 | `size N` | pixels of its tile (what the model renders at); a multiple of the effect's grid (32 cells) | (required) |
-| `width W` | world pixels the tile covers | `size` |
+| `width W` | world pixels the tile covers; a single module's may change over time (a library effect's scale), a domain's is constant | `size` |
 | `tiles C x R`, `band B` | a domain of C x R tiles overlapping by B cells; the band blending runs every frame while the tiles are active | one tile |
 | `at (X, Y)` | where it stands: the bottom centre of its tile (or domain). A single module's place may change over time | its tile's top-left corner at (0, 0) |
 | `sink F` | how far the tile reaches below Y, as a fraction of its width (a fire's base sits a little under the ground) | 0 |
@@ -176,6 +177,7 @@ A module is one rollout effect in a square tile, or a domain of several tiles of
 | `start N`, `seed S` | started at setup from start point N with seed S (its warm-up runs then, not in a frame); a domain's bottom middle tile starts from it with seed S, the others start empty at its age with seed S + 10 r + c (column c, row r from the bottom) | not started |
 | `empty` | with `start`: nothing in it, at start point N's age (a domain that only receives material) | |
 | `waiting` | with `start`: started now, but asleep until a rule wakes it | |
+| `shards S` | a single looping module plays shards of S seconds (1 or more): every S seconds a second rollout of the same effect starts, from the start point whose controls are nearest the module's, and takes over in a blend of half a second; a shard that dies early (its heat and soot under a sixth of their peak) is replaced at once. Long loops neither drift nor die out (§4.9) | none: one rollout |
 | `glow (r, g, b)` | its heat lights the scene in this colour (times heat squared and the light's gain) instead of the fire colours; its heat stays on the bus for rules and haze (a magic portal's violet light, [EFFECTS.md](EFFECTS.md)) | fire colours |
 
 A module without its own controls takes the controls of the start point it starts from. Expressions can read a module:
@@ -211,7 +213,8 @@ Arithmetic in single-precision float, one operation at a time, as C++ computes i
 A rule runs its actions when its condition holds: **once** by default, **every time** with `repeat` (a time or field
 condition: every frame it holds; a landing: every landing), or **at most N times** with `at most N`. `as NAME` names it
 (its time is then a value). The game can also fire a rule by its name (`nvfx_scene_trigger`): at the start of the next
-frame, as if its condition held, if it has firings left; a rule only the game fires is written `when 0 as NAME:`.
+frame, as if its condition held, if it has firings left; a rule only the game fires is written `when 0 as NAME:`. A named rule may have no actions: it only records when its
+condition last held (`when t >= spawn_at as began, repeat` without a colon or with an empty body).
 
 | condition | holds when |
 |---|---|
@@ -222,16 +225,16 @@ frame, as if its condition held, if it has firings left; a rule only the game fi
 
 | action | what it does | keys |
 |---|---|---|
-| `start M` | start M from a start point (a domain: one tile from it, the others empty at its age) | `from N` (0), `in (c, r)` (the tile with the start point; bottom middle), `seed`, `at (x, y)` (move first), `empty` |
-| `wake M1, M2, ...` | wake the first of them that is asleep (`waiting`), where it is or `at (x, y)` | `at` |
+| `start M` | start M from a start point (a domain: one tile from it, the others empty at its age) | `from N` (0), `in (c, r)` (the tile with the start point; bottom middle), `seed`, `at (x, y)` (move first), `empty`, `if` |
+| `wake M1, M2, ...` | wake the first of them that is asleep (`waiting`), where it is or `at (x, y)` | `at`, `if` |
 | `stop M, ...` | stop them (no longer stepped, drawn or published) | `if` |
-| `hand_over A -> B` | B continues from A's physical state, tile by tile (`hand_over`, §3); A stops | `seed` (B's tiles take seed + 10 r + c) |
+| `hand_over A -> B` | B continues from A's physical state, tile by tile (`hand_over`, §3); A stops | `seed` (B's tiles take seed + 10 r + c), `if` |
 | `transfer A -> B, C, ...` | move material from A into the active tiles of B, C, ... that cover it (`transfer`, §3) | `fraction` (1), `top N` (only the top N rows), `heat` and `soot` (gains, 1), `if` |
 | `push M` | the other modules' flow moves M's material for one step (`push`, §3) | `gain` (1), `if` |
 | `suppress M` | remove material in a rectangle of cells (y up), in all tiles or some | `cells (x0, y0) to (x1, y1)`, `tiles (c, r), ...`, `if` |
-| `shock` | a shock front: distortion ring, and `when shock N reaches` | `at (x, y)`, `speed` (900), `decay` (0.35), `amp` (6), `width` (26) |
-| `scorch` | a glowing mark on the ground | `at`, `radius` (100), `glow` (1; may change over time) |
-| `burst` | an explosion's embers and debris | `at`, `radius` (50), `embers` (200), `debris` (0), `speed` (600) |
+| `shock` | a shock front: distortion ring, and `when shock N reaches` (a repeating rule's shocks take the place of fronts that have faded, so the count stays bounded) | `at (x, y)`, `speed` (900), `decay` (0.35), `amp` (6), `width` (26), `if` |
+| `scorch` | a glowing mark on the ground (a repeating rule's marks take turns in the room there is) | `at`, `radius` (100), `glow` (1; may change over time), `if` |
+| `burst` | an explosion's embers and debris, and sparks: short fast bright embers thrown within `cone` degrees of `direction` (after the embers' and debris' random draws, which stay as they were) | `at`, `radius` (50), `embers` (200), `debris` (0), `speed` (600), `sparks` (0), `direction (dx, dy)` (up), `cone` (360), `if` |
 
 `every frame:` holds couplings that run every frame, in order: `transfer`, `suppress` and `stop` right after the
 modules step, `push` after the bus is published (it reads the bus). `start`, `wake`, `hand_over`, `shock`, `scorch` and
@@ -239,14 +242,20 @@ modules step, `push` after the bus is published (it reads the bus). `start`, `wa
 
 ### 4.6 Emitters
 
-Three kinds, each a transcription of what the hand-written fireball does (the same formulas and the same order of
-random draws), with its constants as defaults:
+Three kinds of particles, each a transcription of what the hand-written fireball does (the same formulas and the same
+order of random draws), with its constants as defaults; and three **procedural glows**, which are not learned: soft
+lines of light drawn additively over the picture and remade every frame (they live for that frame). Their shapes come
+from a hash of their seed and the time, not from the particles' generator, so a scene draws the same random numbers
+with or without them:
 
 | emitter | particles | keys (defaults) |
 |---|---|---|
 | `emit sparks` | a fuse: a point runs from one end to the other between `from` and `until`, throwing sparks | `along (x0, y0) to (x1, y1)`, `from` (0), `until` (the end), `count` per frame (22) |
 | `emit embers` | embers from the base of burning modules (each active tile), rising and cooling | `on M, ...`, `tries` per tile and frame (2), `chance` (0.6), `spread` (40 pixels) |
 | `emit flakes` | soot flakes falling out of thick smoke on the bus | `in (x, y)`, `size W x H`, `tries` (40), `chance` (0.25), `soot` (0.35: the least soot) |
+| `emit arc` (procedural) | a lightning bolt or an electric arc between two points: midpoint displacement down to pieces of about 10 pixels, a core and a faint halo, flickering, with forks; a new shape every frame, or `rate` times a second | `along (x0, y0) to (x1, y1)`, `colour` (0.55, 0.7, 1), `width` (1.5), `brightness` (2.5), `jitter` (0.2 of its length), `branches` (2), `rate` (0: every frame), `seed` (1) |
+| `emit ring` (procedural) | a glowing ring, an ellipse when squashed (a shock ring seen on the ground), with a faint halo | `at`, `radius`, `squash` (1), `colour` (1, 0.75, 0.45), `width` (3), `brightness` (1.5) |
+| `emit glow` (procedural) | a soft disc of light, or `count` of them wandering within `spread` of the point, each flickering (fireflies, motes) | `at`, `radius`, `colour` (1, 0.7, 0.4), `brightness` (1.5), `count` (1), `spread` (0), `rate` (0.5), `seed` (1) |
 
 All take `from`, `until` and `if`.
 
@@ -302,7 +311,12 @@ Getting every float the same forced a few things, all visible in the script:
 ### 4.9 What scripts cannot do yet
 
 - The order of a frame is fixed (§4.7); a script cannot, say, publish the bus twice.
-- Emitters are the three kinds above, with few parameters; there is no general particle system or ember colour.
+- Emitters are the kinds above, with few parameters; there is no general particle system or ember colour. The
+  procedural glows are lines and discs of light: they light nothing and are not on the bus (a `lamp` field lights
+  the scene where they are).
+- A looping module's rollout drifts from the data it was trained on as it runs for minutes: smoke breaks up after
+  half a minute, and some fire seeds die out. `shards` hides this by starting fresh rollouts and blending them in; the
+  blend is visible as a slow cross-fade of the shapes, and each new shard's warm-up costs a few milliseconds.
 - The parser stops at the first error; `--print` drops comments (it is for round trips and checks, not for editing).
 - Seeds are whole numbers up to 16 777 216 (they pass through a float).
 - Live editing is the viewer's scene mode ([VIEWER.md](VIEWER.md)): an edit is checked once typing pauses and rebuilt off
@@ -328,6 +342,7 @@ Every field takes `weight` (multiplies its effect, 1), `if`, `from` and `until`,
 | `attract` | draws material within about `radius` towards a point by up to `strength` pixels a frame (negative: pushes it away), moving it directly and keeping its amount; `swirl` adds a swirl around the point. An implosion is a short strong pull | `at`, `radius`, `strength`, `swirl` (0) | `Fields.AttractorPullsMaterialInAndKeepsTheAmount` |
 | `heat` | a heat source (a burning object from gameplay): adds `strength` heat a frame at a point, falling off over `radius`; the fire models turn heat into flames, and a rule on `heat(x, y)` can light fuel there | `at`, `radius`, `strength` | `Fields.HeatSourceAddsHeatWhereItIs`, `Fields.HeatSourceIgnitesFuelThroughARule` |
 | `cold` | an extinguisher: removes a fraction `strength` of the heat a frame at a point (falling off over `radius`) and turns a fraction `steam` of what it removes into soot | `at`, `radius`, `strength`, `steam` (0) | `Fields.ColdPutsOutHeatAndMakesSteam` |
+| `lamp` | a light that is not on the bus (procedural): lights the scene's smoke and steam in `colour`, falling off over `radius`, like the light from heat; it acts on no module (no `on`) | `at`, `radius` (40), `strength`, `colour` (1, 0.6, 0.3) | `Lamps.ALampLightsAroundItInItsColour` |
 
 The flows (`wind`, `gust`, `vortex`, `ring`, `attract`) can also act on particles (`on ..., particles`): a particle's
 velocity relaxes towards the field's flow with a drag of 1.1 per second, on top of the bus's flow.

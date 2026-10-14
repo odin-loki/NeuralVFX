@@ -188,11 +188,12 @@ class Module {
   void share_scratch(StepScratch& shared);
   void take_over(const Module& from);                         // the other's physical state and fine fields
   // Shards, so that a looping effect plays for good (docs/COMPOSE.md §4.3): one continuous rollout wanders off within
-  // tens of seconds (a flame dies, smoke breaks up), so every `period` frames of its life a second runner starts from
-  // the module's start point with a new seed, `fade` frames before the change, and steps beside it while the module's
-  // state is blended into it (every coarse channel and the fine fields, the last frame taking the second's whole);
-  // then the second runner is the module's. `offset` frames shift the changes (instances apart). A set-up call (it
-  // makes the second runner); a module started empty or taken over plays on without. 0: off.
+  // tens of seconds (a flame dies, smoke breaks up), so every `period` frames of its life a second runner starts with
+  // a new seed from the start point nearest the module's controls, `fade` frames before the change, and steps beside
+  // it while the module's state is blended into it (every coarse channel and the fine fields, the last frame taking
+  // the second's whole); then the second runner is the module's. `offset` frames shift the changes (instances apart).
+  // A shard whose heat and soot fall below a sixth of the most it had (a flame gone out) is replaced at once.
+  // A set-up call (it makes the second runner); a module started empty or taken over plays on without. 0: off.
   void use_shards(int period, int fade, int offset);
   int shards() const { return shard_; }  // shard changes since the module started
   std::size_t shard_bytes() const;       // the second runner's own memory
@@ -242,7 +243,8 @@ class Module {
   Isa isa_;
   std::unique_ptr<rt::RolloutRunner> r_;
   std::unique_ptr<rt::RolloutRunner> next_;  // shards: the next one, rolled ahead
-  int shard_period_ = 0, shard_fade_ = 0, shard_offset_ = 0, next_frames_ = -1, shard_ = 0, start_index_ = 0;
+  int shard_period_ = 0, shard_fade_ = 0, shard_offset_ = 0, next_frames_ = -1, shard_ = 0, start_index_ = 0, shard_start_ = 0;
+  float shard_peak_ = 0.f;  // the most heat and soot the shard has had (a shard far below it is replaced early)
   bool shardable_ = false;
   std::uint64_t next_seed_ = 0;
   StepScratch* shared_ = nullptr;

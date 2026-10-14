@@ -9,6 +9,7 @@
 #include <chrono>
 #include <cmath>
 #include <cstring>
+#include <limits>
 #include <numbers>
 #include <stdexcept>
 
@@ -446,6 +447,8 @@ void Module::start(int index, std::uint64_t run_seed) {
   shardable_ = true;
   next_frames_ = -1;
   shard_ = 0;
+  shard_peak_ = 0.f;
+  shard_start_ = 0;
 }
 
 void Module::start_empty(float seconds, std::uint64_t run_seed) {
@@ -500,11 +503,36 @@ void Module::step() {
     has_push_ = false;
   }
   if (shard_period_ > 0 && shardable_) {  // shards: roll the next one ahead, blend into it, then take it
-    if (next_frames_ < 0 && (frames + 1 + shard_offset_) % shard_period_ == shard_period_ - shard_fade_) {
+    // A shard that loses its material (an unlucky seed: a flame goes out, a vent stops) is replaced at once: every
+    // half second its heat and soot are summed, and below a sixth of the most it had it rolls the next one ahead.
+    bool heal = false;
+    if (next_frames_ < 0 && (frames + 1) % 15 == 0) {
+      auto co = r_->coarse();
+      const int C = channels(), N = res() * res();
+      float sum = 0.f;
+      for (int i = 0; i < N; ++i) sum += std::max(0.f, co[zs(i) * zs(C) + 2]) + std::max(0.f, co[zs(i) * zs(C) + 3]);
+      shard_peak_ = std::max(shard_peak_, sum);
+      heal = frames - shard_start_ >= 30 && sum < shard_peak_ / 6.f;
+    }
+    if (next_frames_ < 0 && (heal || (frames + 1 + shard_offset_) % shard_period_ == shard_period_ - shard_fade_)) {
       next_seed_ = seed * 0x9E3779B97F4A7C15ULL + 0x632BE59BD9B4E019ULL;
+      // from the start point nearest the module's controls now (as the runtime's shards choose theirs): a start
+      // point is a run at its own controls, and one far from them regrows its look for seconds
+      int from = start_index_;
+      float best = std::numeric_limits<float>::infinity();
+      for (std::size_t i = 0; i < e_.m.starts.size(); ++i) {
+        const auto& c = e_.m.starts[i].controls;
+        if (c.size() != controls.size()) continue;
+        float d = 0.f;
+        for (std::size_t k = 0; k < c.size(); ++k) d += (c[k] - controls[k]) * (c[k] - controls[k]);
+        if (d < best) {
+          best = d;
+          from = static_cast<int>(i);
+        }
+      }
       rt::RolloutScratch* sn = shared_ ? &shared_->take() : nullptr;
       if (sn) next_->use_scratch(sn);
-      next_->start(start_index_, controls, next_seed_);
+      next_->start(from, controls, next_seed_);
       if (sn) shared_->give(*sn);
       next_frames_ = 0;
     }
@@ -529,6 +557,8 @@ void Module::step() {
         seed = next_seed_;
         next_frames_ = -1;
         ++shard_;
+        shard_peak_ = 0.f;
+        shard_start_ = frames + 1;
       }
     }
   }

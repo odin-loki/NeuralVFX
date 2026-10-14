@@ -1327,7 +1327,7 @@ struct Scene::Impl {
     for (int i = 0; i < sparks; ++i) {
       const float a = aim + (P.uniform() - 0.5f) * spread;
       const float s = speed * (0.4f + 0.8f * P.uniform());
-      const float life = 0.15f + 0.4f * P.uniform();
+      const float life = 0.3f + 0.8f * P.uniform();
       P.spawn(Kind::spark, x, y, s * std::cos(a), s * std::sin(a), 1.f, 1.2f, life);
     }
   }
@@ -1787,9 +1787,10 @@ void Scene::Impl::build(const EffectLoader& load, const Options& o) {
         m->group = r.group;
         if (mc.tiled) m->band = {c > 0 ? mc.band : 0, c < mc.cols - 1 ? mc.band : 0, row > 0 ? mc.band : 0, row < mc.rows - 1 ? mc.band : 0};
         m->feather = mc.feather * static_cast<float>(mc.size);
-        if (mc.shards > 0.f) {  // changes half a second long, offset by the seed so that instances change apart
+        if (mc.shards > 0.f) {  // changes half a second long, the first after half a period or more (by the seed)
           const int period = std::max(2, static_cast<int>(std::lround(mc.shards * prog.fps)));
-          m->use_shards(period, static_cast<int>(std::lround(0.5f * prog.fps)), static_cast<int>((mc.seed * 2654435761ULL) % static_cast<std::uint64_t>(period)));
+          m->use_shards(period, static_cast<int>(std::lround(0.5f * prog.fps)),
+                        static_cast<int>((mc.seed * 2654435761ULL) % static_cast<std::uint64_t>(std::max(1, period / 2))));
         }
         m->glows = mc.glows;
         m->glow = mc.glow;
