@@ -140,7 +140,7 @@ void step_chaos(const Ctx& c) {
   std::vector<std::string> rows;
   for (const auto e : effects_of(c)) {
     const bool ex = !sim::effect_loops(e);  // the explosion
-    const int N = ex ? 90 : 240, warm = ex ? 1 : 100, seeds = c.quick ? 1 : 4;
+    const int N = ex ? sim::one_shot_frames(e) : 240, warm = ex ? 1 : 100, seeds = c.quick ? 1 : 4;
     // curves: perturbed start (1e-3, 1e-1 of the velocity RMS) with the same seed; same start with another seed;
     // another start with the same seed
     const std::vector<std::string> names = {"start+1e-3_same_seed", "start+1e-1_same_seed", "same_start_other_seed", "other_start_same_seed"};
@@ -463,7 +463,7 @@ void step_eval(const Ctx& c) {
     const rollout::Model M = std::move(*loaded);
     const std::string en = ename(e);
     // ---- tracking from true start points (held-out runs, their own seeds)
-    const int n_runs = c.quick ? 2 : 8, KE = ex ? 89 : (c.quick ? 60 : 240), warm = ex ? 1 : 100;
+    const int n_runs = c.quick ? 2 : 8, KE = ex ? sim::one_shot_frames(e) - 1 : (c.quick ? 60 : 240), warm = ex ? 1 : 100;
     const std::vector<std::string> methods = {"neural", "neural_dynamics_true_renderer", "coarse_sim_detail", "coarse_sim", "frozen"};
     std::vector<std::vector<std::vector<double>>> curves(methods.size(), std::vector<std::vector<double>>(static_cast<std::size_t>(n_runs)));
     std::vector<std::vector<double>> renderer_only(static_cast<std::size_t>(n_runs));
@@ -573,7 +573,7 @@ void step_eval(const Ctx& c) {
     {  // figure: truth, neural, coarse sim + detail, coarse sim at frames 1, 8, 30, 60, (120, 240)
       std::vector<int> cols = {0, 7, 29, 59};
       if (KE >= 240) cols = {0, 7, 29, 59, 119, 239};
-      if (ex) cols = {0, 7, 29, 59, 88};
+      if (ex) cols = {0, 7, 29, 59, KE - 1};
       const auto pick = [&](const Clip& src) { return pick_frames(src, cols); };
       const Clip a = pick(shown_ref), b = pick(shown[0][0]), cc = pick(shown[0][1]), d = pick(shown[0][2]);
       std::vector<const Clip*> rows = {&a, &b, &cc, &d};
@@ -585,7 +585,7 @@ void step_eval(const Ctx& c) {
     // ---- endless runs at held-out settings, new seeds: statistics against real runs
     const auto settings = b_test_settings();
     const int n_set = c.quick ? 2 : static_cast<int>(settings.size());
-    const int F = ex ? 89 : (c.quick ? 90 : 300), real_warm = ex ? 1 : 150;
+    const int F = ex ? sim::one_shot_frames(e) - 1 : (c.quick ? 90 : 300), real_warm = ex ? 1 : 150;
     std::unique_ptr<Effect> grid;
     if (fs::exists(c.data / "models" / "b" / std::format("{}_grid_k8.nvfx", en))) grid = std::make_unique<Effect>(c.data / "models" / "b" / std::format("{}_grid_k8.nvfx", en));
     const auto library_clip = [&](const std::array<float, 3>& tb) {
@@ -606,7 +606,9 @@ void step_eval(const Ctx& c) {
       return train[best];
     };
     // Effects added after study B (sim::kNewEffects) have no flipbook library yet: the clips this test needs are made
-    // as study B made its library (nvfx_experiment data: 64 frames at 128 pixels, seed 1).
+    // as study B made its library (nvfx_experiment data: 64 frames at 128 pixels, seed 1). A one-shot more than twice
+    // that long (the mushroom's 150 frames, docs/EFFECTS_BLAZE.md) gets flipbooks of its whole length instead: 64
+    // frames held on the last would leave more than half of it still.
     if (std::ranges::find(sim::kNewEffects, e) != sim::kNewEffects.end()) {
       for (int si = 0; si < n_set; ++si) {
         const auto tb = nearest_training_setting(settings[static_cast<std::size_t>(si)]);
@@ -618,7 +620,7 @@ void step_eval(const Ctx& c) {
         p.turbulence = tb[2];
         p.seed = 1;
         p.size = kSize;
-        p.frames = 64;
+        p.frames = ex && sim::one_shot_frames(e) > 128 ? sim::one_shot_frames(e) : 64;
         fs::create_directories(library_clip(tb).parent_path());
         if (auto w = write_clip(library_clip(tb), sim::simulate(p)); !w) throw std::runtime_error(w.error());
       }

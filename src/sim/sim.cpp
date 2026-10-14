@@ -22,6 +22,9 @@ std::string_view effect_name(Effect e) {
     case Effect::fog: return "fog";
     case Effect::dust: return "dust";
     case Effect::cloud: return "cloud";
+    case Effect::wildfire: return "wildfire";
+    case Effect::coals: return "coals";
+    case Effect::mushroom: return "mushroom";
   }
   std::unreachable();
 }
@@ -33,7 +36,12 @@ bool parse_effect(std::string_view text, Effect& out) {
   return true;
 }
 
-bool effect_loops(Effect e) { return e != Effect::explosion && e != Effect::dust; }
+bool effect_loops(Effect e) { return e != Effect::explosion && e != Effect::dust && e != Effect::mushroom; }
+
+int one_shot_frames(Effect e) {
+  if (effect_loops(e)) return 0;
+  return e == Effect::mushroom ? 150 : 90;
+}
 
 std::array<std::string_view, kControls> control_names(Effect e) {
   if (e == Effect::magic) return {"intensity", "spin", "turbulence"};
@@ -56,6 +64,9 @@ float flicker_rate(Effect e) {
     case Effect::fog: return 1.0f;     // a slow, uneven release
     case Effect::dust: return 1.4f;    // the burst's shape, as the explosion's
     case Effect::cloud: return 0.6f;   // slow billows
+    case Effect::wildfire: return 2.2f;  // a front of flickering flames
+    case Effect::coals: return 0.8f;     // a glow that crawls
+    case Effect::mushroom: return 1.4f;  // the burst's shape, as the explosion's
   }
   std::unreachable();
 }
@@ -107,6 +118,14 @@ Tune tune(const Params& p) {
     case Effect::fog: return {0.f, 20.f, 1.f, 0.12f, 20.f, 1.5f, 0.2f + 1.2f * turb, 3.f + 14.f * turb, 0.4f};
     case Effect::dust: return {0.f, 150.f, 1.f, 0.25f, 50.f, 1.5f, 1.5f + 4.0f * turb, 20.f + 80.f * turb, 0.6f};
     case Effect::cloud: return {0.f, -20.f, 1.f, 0.10f, 40.f, 1.0f, 0.2f + 0.8f * turb, 3.f + 16.f * turb, 1.3f};
+    // wildfire, coals and mushroom (docs/EFFECTS_BLAZE.md); their sources, the coals' still bed, the mushroom's burst,
+    // ceiling and sheared wind are in add_blaze_sources, add_blaze_forces and add_blaze_divergence. wildfire: fire's
+    // buoyancy, its flames shorter at low intensity, smoke from what burns. coals: little rise, short flames that cool
+    // fast, thin smoke. mushroom: a hot cloud that cools slowly into smoke; its wind is its own (sheared).
+    case Effect::wildfire:
+      return {115.f, 6.f, 3.2f - 1.0f * p.intensity, 0.3f, 70.f, 2.0f, 0.6f + 3.0f * turb, 10.f + 55.f * turb, 0.2f};
+    case Effect::coals: return {90.f, 2.f, 4.5f, 3.0f, 45.f, 1.8f, 0.3f + 1.5f * turb, 5.f + 30.f * turb, 0.6f};
+    case Effect::mushroom: return {45.f, 2.f, 0.45f, 0.12f, 0.f, 0.f, 0.3f + 1.0f * turb, 5.f + 25.f * turb, 0.5f};
   }
   std::unreachable();
 }
@@ -230,6 +249,7 @@ void Fluid::step(float dt) {
   std::ranges::for_each(temp_.values(), [cool](float& x) { x *= cool; });
   std::ranges::for_each(soot_.values(), [decay](float& x) { x *= decay; });
   energy_decay(dt);  // jet, orb and vortex
+  blaze_decay(dt);   // wildfire and mushroom
   time_ += dt;
 }
 
@@ -263,6 +283,7 @@ void Fluid::add_sources(float dt) {
     add_atmos_sources(dt);
     return;
   }
+  if (add_blaze_sources(dt)) return;  // wildfire, coals and mushroom
   const bool fire = p_.effect == Effect::fire;
   const float cx = 0.5f * n, cy = (fire ? 0.10f : 0.09f) * n;
   const float hw = (fire ? 0.10f + 0.08f * I : 0.09f + 0.07f * I) * n, hh = 0.035f * n;
@@ -373,6 +394,7 @@ void Fluid::add_forces(float dt) {
   }
   add_energy_forces(dt);  // jet, orb and vortex
   if (atmos(p_.effect)) add_atmos_forces(dt);
+  add_blaze_forces(dt);  // wildfire, coals and mushroom
 }
 
 void Fluid::project() {
@@ -402,9 +424,10 @@ void Fluid::project() {
   }
   add_energy_divergence();  // jet, orb and vortex
   if (p_.effect == Effect::dust) add_atmos_divergence();
+  add_blaze_divergence();  // the mushroom's burst
   // Open boundaries: p = 0 on the border, which is never written. Warm-started from the last solve.
   constexpr float w = 1.7f;
-  const bool ground = on_ground(p_.effect);
+  const bool ground = on_ground(p_.effect) || p_.effect == Effect::mushroom;  // the mushroom stands on the ground too
   for (int it = 0; it < p_.pressure_iters; ++it) {
     for (const int colour : {0, 1}) {
       for (int y = 1; y <= n; ++y) {
@@ -505,6 +528,7 @@ void Fluid::render(std::span<std::uint8_t> out) const {
     render_atmos(out);
     return;
   }
+  if (render_blaze(out)) return;  // wildfire, coals and mushroom
   const float n = f(n_), sc = n / f(S);
   constexpr float lx = -0.45f, ly = 0.89f;  // towards the light: up and to the left
   for (int py = 0; py < S; ++py) {
@@ -936,6 +960,228 @@ void Fluid::render_atmos(std::span<std::uint8_t> out) const {
       o[3] = q8(cover);
     }
   }
+}
+
+// --- wildfire, coals and mushroom (docs/EFFECTS_BLAZE.md) ---------------------------------------------------------------
+//
+// Three presets kept apart from the other effects' code: their sources, forces, divergence, decay and drawing. As for the
+// energy effects, every force is a function of the state where it acts, the position, the controls and the run's two
+// noise fields (curl_potential, source_flicker); the mushroom, which plays once, also follows the time since its start,
+// but only through the two decays a learned one-shot sees as inputs (exp(-t / 0.15 s) and exp(-t / 1 s)).
+
+namespace {
+
+bool blaze_effect(Effect e) { return e == Effect::wildfire || e == Effect::coals || e == Effect::mushroom; }
+
+// wildfire: a burning front along the bottom of the frame, 84% of its width (the ends taper), its base 6% up.
+constexpr float kFrontHalfWidth = 0.42f, kFrontBase = 0.06f;
+
+// coals: a bed along the ground, 90% of the frame wide (its ends taper), its top 10 to 18% up and undulating with the
+// flicker noise where it is (cells).
+constexpr float kBedHalfWidth = 0.45f;
+float bed_top(const Params& p, float n, float fl) { return (0.12f + 0.04f * p.intensity) * n * (0.8f + 0.35f * fl); }
+
+// mushroom: the burst's centre and radius (cells), and the height from which the air is stable (the cap stops rising
+// there and spreads).
+float mushroom_radius(const Params& p, float n) { return (0.075f + 0.04f * p.intensity) * n; }
+float mushroom_ceiling(const Params& p, float n) { return (0.55f + 0.1f * p.intensity) * n; }
+
+}  // namespace
+
+bool Fluid::add_blaze_sources(float dt) {
+  if (!blaze_effect(p_.effect)) return false;
+  const float n = f(n_), s = n / 128.f, I = p_.intensity;
+  const auto flick = [&](int x, int y) { return source_flicker(p_, f(x) / s, f(y) / s, time_); };
+  const auto psi = [&](int x, int y) { return curl_potential(p_, f(x) / s, f(y) / s, time_); };
+  if (p_.effect == Effect::wildfire) {
+    // The whole width burns: tongues where the flicker is high, in stronger and weaker stretches that move along the
+    // front with the curl noise, so tongues merge and part.
+    const float cx = 0.5f * n, hw = kFrontHalfWidth * n, cy = kFrontBase * n, hh = (0.03f + 0.02f * I) * n;
+    const float heat = 1.0f + 0.6f * I, lift = (16.f + 18.f * I) * s;
+    const int y_lo = std::max(1, static_cast<int>(cy - hh)), y_hi = std::min(n_, static_cast<int>(cy + hh) + 1);
+    for (int y = y_lo; y <= y_hi; ++y) {
+      for (int x = 1; x <= n_; ++x) {
+        const float along = 1.f - smoothstep(0.78f, 1.f, std::abs(f(x) - cx) / hw);
+        const float shape = along * (1.f - smoothstep(0.5f, 1.f, std::abs(f(y) - cy) / hh));
+        if (shape <= 0.f) continue;
+        const float k = shape * (0.35f + 0.65f * smoothstep(-0.25f, 0.6f, flick(x, y))) * (0.6f + 0.4f * psi(x, y));
+        if (k <= 0.f) continue;
+        temp_[x, y] = std::max(temp_[x, y], heat * k);
+        soot_[x, y] += dt * (0.3f + 0.3f * I) * k;
+        v_[x, y] = std::max(v_[x, y], lift * k);
+      }
+    }
+    return true;
+  }
+  if (p_.effect == Effect::coals) {
+    // The bed glows in a pattern the flicker noise draws (hot cracks and dull patches that crawl) and that brightens
+    // and dims with the curl noise there (the glow pulses); dark char fills it. Where it glows most, short flames lick
+    // up from its top.
+    const float cx = 0.5f * n, hw = kBedHalfWidth * n, rate = 1.f - std::exp(-5.f * dt);
+    const float level = 0.9f + 0.7f * I, lick_heat = 0.8f + 0.5f * I, lick_lift = (14.f + 20.f * I) * s;
+    const int y_hi = std::min(n_, static_cast<int>(0.2f * n) + 1);
+    for (int y = 1; y <= y_hi; ++y) {
+      for (int x = 1; x <= n_; ++x) {
+        const float along = 1.f - smoothstep(0.7f, 1.f, std::abs(f(x) - cx) / hw);
+        if (along <= 0.f) continue;
+        const float fl = flick(x, y), top = bed_top(p_, n, fl);
+        const float inside = along * (1.f - smoothstep(0.75f * top, top, f(y)));
+        if (inside > 0.f) {
+          const float glow = (0.08f + 0.92f * smoothstep(-0.1f, 0.6f, fl)) * (1.f + 0.4f * psi(x, y));
+          temp_[x, y] += inside * rate * (level * glow - temp_[x, y]);
+          soot_[x, y] += inside * rate * std::max(0.f, 0.9f - soot_[x, y]);
+        }
+        const float lick = along * smoothstep(0.35f - 0.25f * I, 0.75f - 0.15f * I, fl) * smoothstep(0.7f * top, top, f(y)) *
+                           (1.f - smoothstep(top, top + 3.f * s, f(y)));
+        if (lick <= 0.f) continue;
+        temp_[x, y] = std::max(temp_[x, y], lick_heat * lick);
+        soot_[x, y] += dt * 0.1f * lick;
+        v_[x, y] = std::max(v_[x, y], lick_lift * lick);
+      }
+    }
+    return true;
+  }
+  // mushroom: one burst at the start, a fireball on the ground (its edge and lumps from the flicker noise); then the
+  // base keeps glowing and throwing up dust, which the draught under the rising fireball draws up as its stem.
+  const float cx = 0.5f * n, r = mushroom_radius(p_, n), by = 0.1f * n;
+  if (time_ <= 0.f) {
+    const int y_hi = std::min(n_, static_cast<int>(by + 1.4f * r) + 1);
+    const int x_lo = std::max(1, static_cast<int>(cx - 1.4f * r)), x_hi = std::min(n_, static_cast<int>(cx + 1.4f * r) + 1);
+    for (int y = 1; y <= y_hi; ++y) {
+      for (int x = x_lo; x <= x_hi; ++x) {
+        const float dx = f(x) - cx, dy = f(y) - by, fl = flick(x, y);
+        const float fall = 1.f - smoothstep(0.5f * r, r * (1.f + 0.3f * fl), std::sqrt(dx * dx + dy * dy));
+        if (fall <= 0.f) continue;
+        const float m = 0.75f + 0.25f * fl;
+        temp_[x, y] = std::max(temp_[x, y], (2.2f + 0.8f * I) * fall * m);
+        soot_[x, y] = std::max(soot_[x, y], (0.3f + 0.2f * I) * fall * m);
+        v_[x, y] += 15.f * s * fall;
+      }
+    }
+    return true;
+  }
+  // the base's heat fades with the second age input's decay (1 s); the dust it throws up, and the draught that lifts it
+  // into the stem, keep on at a third of their first strength
+  const float hot = std::exp(-time_ / 1.f), lift = 0.3f + 0.7f * hot, ws = (0.06f + 0.03f * I) * n, hs = 0.08f * n;
+  const int y_hi = std::min(n_, static_cast<int>(hs) + 1);
+  const int x_lo = std::max(1, static_cast<int>(cx - ws)), x_hi = std::min(n_, static_cast<int>(cx + ws) + 1);
+  for (int y = 1; y <= y_hi; ++y) {
+    for (int x = x_lo; x <= x_hi; ++x) {
+      const float shape = (1.f - smoothstep(0.4f * ws, ws, std::abs(f(x) - cx))) * (1.f - smoothstep(0.5f * hs, hs, f(y)));
+      const float k = shape * (0.5f + 0.5f * smoothstep(-0.3f, 0.5f, flick(x, y)));
+      if (k <= 0.f) continue;
+      temp_[x, y] = std::max(temp_[x, y], (1.4f + 0.5f * I) * (0.12f + 0.88f * hot) * k);
+      soot_[x, y] += dt * (3.f + 1.f * I) * lift * k;
+      v_[x, y] = std::max(v_[x, y], (25.f + 20.f * I) * s * lift * k);
+    }
+  }
+  return true;
+}
+
+void Fluid::add_blaze_forces(float dt) {
+  if (!blaze_effect(p_.effect)) return;
+  const float n = f(n_), s = n / 128.f;
+  if (p_.effect == Effect::coals) {  // the bed's air is still: its glow stays where it is, only the flames rise
+    const float cx = 0.5f * n, hw = kBedHalfWidth * n;
+    const int y_hi = std::min(n_, static_cast<int>(0.2f * n) + 1);
+    for (int y = 1; y <= y_hi; ++y) {
+      for (int x = 1; x <= n_; ++x) {
+        const float along = 1.f - smoothstep(0.7f, 1.f, std::abs(f(x) - cx) / hw);
+        if (along <= 0.f) continue;
+        const float top = bed_top(p_, n, source_flicker(p_, f(x) / s, f(y) / s, time_));
+        const float hold = along * (1.f - smoothstep(0.6f * top, 0.9f * top, f(y)));
+        u_[x, y] *= 1.f - hold;
+        v_[x, y] *= 1.f - hold;
+      }
+    }
+    return;
+  }
+  if (p_.effect != Effect::mushroom) return;
+  // The wind leans the cloud and shears it: the air drags it towards a wind that grows with height. Above the ceiling
+  // the air is stable: hot gas there is pushed back down, so the cap stops rising and spreads.
+  const float W = (2.f * p_.wind - 1.f) * 45.f * s, drag = 1.f - std::exp(-1.2f * dt), ceil = mushroom_ceiling(p_, n);
+  const float stable = 3.f * tune(p_).buoyancy * s;
+  for (int y = 1; y <= n_; ++y) {
+    const float shear = W * f(y) / n, above = smoothstep(ceil, ceil + 0.15f * n, f(y));
+    for (int x = 1; x <= n_; ++x) {
+      const float mat = std::min(1.f, 2.f * (temp_[x, y] + soot_[x, y]));
+      u_[x, y] += drag * (shear - u_[x, y]) * mat;
+      v_[x, y] -= dt * stable * above * temp_[x, y];
+    }
+  }
+}
+
+// mushroom: the burst's hot gas expands for its first moments, as the explosion's does.
+void Fluid::add_blaze_divergence() {
+  if (p_.effect != Effect::mushroom) return;
+  const float rate = (6.f + 6.f * p_.intensity) * std::exp(-time_ / 0.15f);
+  if (rate <= 0.05f) return;
+  for (int y = 1; y <= n_; ++y) {
+    for (int x = 1; x <= n_; ++x) div_[x, y] += rate * smoothstep(0.4f, 1.2f, temp_[x, y]);
+  }
+}
+
+// wildfire and mushroom: the burning gas turns to smoke as it cools.
+void Fluid::blaze_decay(float dt) {
+  if (p_.effect != Effect::wildfire && p_.effect != Effect::mushroom) return;
+  const float k = dt * (p_.effect == Effect::wildfire ? 1.5f : 0.45f);
+  for (int y = 1; y <= n_; ++y) {
+    for (int x = 1; x <= n_; ++x) soot_[x, y] += k * temp_[x, y];
+  }
+}
+
+namespace {
+
+// coals' glow: deep red where it is dull, through red and orange to yellow where it is hottest
+Rgb coal_ramp(float t) {
+  static constexpr std::array<float, 6> at{0.f, 0.12f, 0.32f, 0.58f, 0.9f, 1.3f};
+  static constexpr std::array<Rgb, 6> c{{{0.f, 0.f, 0.f}, {0.28f, 0.02f, 0.f}, {0.78f, 0.12f, 0.01f}, {1.f, 0.42f, 0.05f}, {1.f, 0.72f, 0.22f}, {1.f, 0.92f, 0.62f}}};
+  return ramp(at, c, t);
+}
+
+}  // namespace
+
+// Emitted light by heat over smoke shaded towards the light (up and to the left). wildfire: fire's colours over grey
+// smoke; coals: a glow from deep red to yellow over dark char, whose thin smoke is pale; mushroom: the explosion's
+// colours over brown-grey smoke.
+bool Fluid::render_blaze(std::span<std::uint8_t> out) const {
+  if (!blaze_effect(p_.effect)) return false;
+  const int S = p_.size;
+  const float n = f(n_), sc = n / f(S);
+  constexpr float lx = -0.45f, ly = 0.89f;
+  for (int py = 0; py < S; ++py) {
+    for (int px = 0; px < S; ++px) {
+      const float gx = (f(px) + 0.5f) * sc + 0.5f;
+      const float gy = n - (f(py) + 0.5f) * sc + 0.5f;
+      const float T = temp_.sample(gx, gy), D = soot_.sample(gx, gy);
+      float tau = 0.f;  // optical depth towards the light
+      for (int k = 1; k <= 12; ++k) tau += soot_.sample(gx + lx * 2.f * f(k) * sc, gy + ly * 2.f * f(k) * sc);
+      const float light = std::exp(-0.5f * tau);
+      Rgb c{};
+      float a = 0.f;
+      if (p_.effect == Effect::coals) {
+        const Rgb e = coal_ramp(T);
+        const float as = 1.f - std::exp(-2.5f * D), dense = smoothstep(0.15f, 0.6f, D);
+        const float g = (0.32f - 0.24f * dense) * (0.45f + 0.55f * light), keep = 1.f - 0.3f * as;
+        c = {e.r * keep + g * as, e.g * keep + 0.96f * g * as, e.b * keep + 0.92f * g * as};
+        a = clamp01(as + 0.3f * std::max(e.r, e.g));
+      } else {
+        const bool wild = p_.effect == Effect::wildfire;
+        const Rgb e = fire_ramp(wild ? T : 0.75f * T);
+        const float as = 1.f - std::exp(-(wild ? 2.2f : 3.f) * D), keep = 1.f - (wild ? 0.55f : 0.6f) * as;
+        const float g = (wild ? 0.3f : 0.55f) * (0.3f + 0.7f * light);
+        const Rgb tint = wild ? Rgb{1.f, 0.96f, 0.92f} : Rgb{1.f, 0.9f, 0.78f};
+        c = {e.r * keep + tint.r * g * as, e.g * keep + tint.g * g * as, e.b * keep + tint.b * g * as};
+        a = clamp01(as + 0.25f * std::max(e.r, e.g));
+      }
+      auto o = out.subspan((static_cast<std::size_t>(py) * S + px) * 4, 4);
+      o[0] = q8(c.r);
+      o[1] = q8(c.g);
+      o[2] = q8(c.b);
+      o[3] = q8(a);
+    }
+  }
+  return true;
 }
 
 void stamp(Clip& clip, const Params& p) {

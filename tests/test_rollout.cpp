@@ -117,6 +117,29 @@ TEST(Rollout, OneShotEffectsTakeTheExplosionsRecipe) {
     EXPECT_EQ(r.starts, fire.starts);
     EXPECT_TRUE(recipe_model(r).loop);
   }
+  // The mushroom (docs/EFFECTS_BLAZE.md) takes the same branch at its own length (5 s); wildfire and coals take fire's
+  // recipe as it is.
+  const SimRecipe mush = recipe_for(sim::Effect::mushroom);
+  EXPECT_EQ(mush.runs, ex.runs);
+  EXPECT_EQ(mush.frames, 150);
+  EXPECT_EQ(mush.frames, sim::one_shot_frames(sim::Effect::mushroom));
+  EXPECT_EQ(mush.start_frame, 0);
+  EXPECT_EQ(mush.start_fine, ex.start_fine);
+  EXPECT_EQ(mush.starts, ex.starts);
+  EXPECT_EQ(mush.stepper.burn_max, ex.stepper.burn_max);
+  EXPECT_EQ(ex.frames, 90);
+  const Model mm = recipe_model(mush);
+  EXPECT_FALSE(mm.loop);
+  EXPECT_EQ(mm.h.frames, 150);
+  EXPECT_EQ(mm.h.n_age, 2);
+  for (const sim::Effect e : {sim::Effect::wildfire, sim::Effect::coals}) {
+    const SimRecipe r = recipe_for(e), fire = recipe_for(sim::Effect::fire);
+    EXPECT_EQ(r.start_fine, fire.start_fine);
+    EXPECT_EQ(r.runs, fire.runs);
+    EXPECT_EQ(r.frames, fire.frames);
+    EXPECT_EQ(r.starts, fire.starts);
+    EXPECT_TRUE(recipe_model(r).loop);
+  }
 }
 TEST(Rollout, CoarseFromSimAveragesBlocks) {
   sim::State st;

@@ -1458,7 +1458,7 @@ SimRecipe recipe_for(sim::Effect e) {
   if (e == sim::Effect::fog || e == sim::Effect::cloud) r.start_fine = 64;  // they linger too (docs/EFFECTS_ATMOSPHERE.md)
   if (!sim::effect_loops(e)) {  // the explosion, and dust (docs/EFFECTS_ATMOSPHERE.md), which plays once as it does
     r.runs = 240;
-    r.frames = 90;
+    r.frames = sim::one_shot_frames(e);  // 90 (3 s); the mushroom's 150 (docs/EFFECTS_BLAZE.md)
     r.start_frame = 0;
     r.start_fine = 64;  // the burst's shape is the look
     r.starts = 16;
@@ -1466,7 +1466,7 @@ SimRecipe recipe_for(sim::Effect e) {
   }
   // steam and magic (docs/EFFECTS.md) take fire's recipe: their vapour and energy are gone within a second or two, so
   // like fire's flames they grow their fine fields at instance start instead of storing them
-  // and so do jet, orb and vortex (docs/EFFECTS_ENERGY.md)
+  // and so do jet, orb and vortex (docs/EFFECTS_ENERGY.md), and wildfire and coals (docs/EFFECTS_BLAZE.md)
   return r;
 }
 
@@ -1555,7 +1555,8 @@ FinishResult finish_model(Model& m, const SimRecipe& r, std::span<const Run> run
   // detail layer, as deployed (from start points, new seeds), at the controls of four training runs
   std::vector<sim::Params> cal;
   for (std::size_t i = 0; i < std::min<std::size_t>(4, runs.size()); ++i) cal.push_back(runs[i].p);
-  out.detail_score = one_shot ? calibrate_detail(m, cal, 1, 0, std::min(89, r.frames - 1)) : calibrate_detail(m, cal, 150, 60, 180);
+  // a one-shot over its whole length (the explosion's and dust's 89 frames after the first; the mushroom's 149)
+  out.detail_score = one_shot ? calibrate_detail(m, cal, 1, 0, r.frames - 1) : calibrate_detail(m, cal, 150, 60, 180);
   return out;
 }
 
