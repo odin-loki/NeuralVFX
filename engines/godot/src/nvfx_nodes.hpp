@@ -43,6 +43,10 @@ class NeuralVFXScene : public Node {
   int get_threads() const { return threads_; }
   void set_overlap(bool on) { overlap_ = on; }
   bool get_overlap() const { return overlap_; }
+  // The learned effects' precision (nvfx_scene_desc.precision): 0 the runtime's default, 1 float, 2 int8 (the stepper's
+  // convolutions in 8-bit integers; docs/REPORT.md §13).
+  void set_precision(int p) { precision_ = p; }
+  int get_precision() const { return precision_; }
   void set_output_size(const Vector2i& size) { output_size_ = size; }
   Vector2i get_output_size() const { return output_size_; }
   void set_playing(bool on) { playing_ = on; }
@@ -108,7 +112,7 @@ class NeuralVFXScene : public Node {
   void draw();
   String scene_script_, effects_dir_, error_;
   int error_line_ = 0, error_column_ = 0;
-  int threads_ = 2;
+  int threads_ = 2, precision_ = 0;
   bool overlap_ = true, playing_ = true, looping_ = false, finished_ = false, tried_ = false;
   double speed_ = 1.0;
   Vector2i output_size_;

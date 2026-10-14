@@ -1,0 +1,12 @@
+kind,name,file,bytes,sha256
+rollout_effect,fire,models/d/fire.nvfx,83719,c5277ffaf08c2ec79decd0e744ec281b0a4b16d868d71d4b29cfcefdcbd7d4f9
+rollout_effect,smoke,models/d/smoke.nvfx,149287,dfa2b546a5e035b87166d48dbb535d1e6540c8fcf7d483f9df73043ac26d4b52
+rollout_effect,explosion,models/d/explosion.nvfx,280927,fcc31a82daa485b30e4b08b490b245014649e5a9c270bd0212f8703a99aa58c5
+fireball_int8_keyframe,frame_027,nvfx_scene_script --precision int8 --isa avx512 --keyframes,1083482,287f59d00d9016e8e9c817b5bf8be4d7ba3fdb1197f14fee950d56a36c8f5bbc
+fireball_int8_keyframe,frame_038,nvfx_scene_script --precision int8 --isa avx512 --keyframes,960996,9eb48db303f69c6b24a53e81dc7fa88359e302f23b9e201d415dbe7c6301a933
+fireball_int8_keyframe,frame_045,nvfx_scene_script --precision int8 --isa avx512 --keyframes,1256919,2ff70b29a6e24c7c97a044fe4fea7befd57038311d5dc4cf72552e23c19087a8
+fireball_int8_keyframe,frame_060,nvfx_scene_script --precision int8 --isa avx512 --keyframes,1322249,fbe126b7d4f3c2dc7a66cd56ce3e6bc090255fba434f3a94f25c243a12520388
+fireball_int8_keyframe,frame_087,nvfx_scene_script --precision int8 --isa avx512 --keyframes,1240609,879ab216022ca882da18f37c0eb71e38d720521fcf03c82587ac5d4618e1dd65
+fireball_int8_keyframe,frame_126,nvfx_scene_script --precision int8 --isa avx512 --keyframes,1118671,df42f250c15408dc72bf14b3f6eeb5faa020edda534f276f2a7d401aa0ac7a63
+fireball_int8_keyframe,frame_180,nvfx_scene_script --precision int8 --isa avx512 --keyframes,1071207,af186324ae4bf1fb186e0166bba92307e7c712ba6884c14e8f2ffc937df60d9c
+fireball_int8_keyframe,frame_246,nvfx_scene_script --precision int8 --isa avx512 --keyframes,1049303,050972ab9372a9f9dba7b40590af5059ce6a4935025a153a4f7ccedc7fc4b2f1

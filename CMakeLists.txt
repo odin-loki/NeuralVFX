@@ -414,5 +414,13 @@ if(NEURALFX_BUILD_TESTS)
     set_tests_properties(neuralfx.ScriptedFireWhirlFrozen PROPERTIES LABELS "neuralfx;data" SKIP_RETURN_CODE 77 TIMEOUT 1200)
     add_test(NAME neuralfx.SceneScriptChecks.firewhirl COMMAND nvfx_scene_script --script ${CMAKE_CURRENT_SOURCE_DIR}/examples/scenes/firewhirl.nvfxs --check)
     set_tests_properties(neuralfx.SceneScriptChecks.firewhirl PROPERTIES LABELS neuralfx)
+    # Study K (docs/REPORT.md §13): the fireball's keyframes with its modules at int8 on the AVX-512 build (the build int8
+    # takes where the CPU has VNNI; without VNNI it computes the same integer sums, so the same frames), against their
+    # SHA-256 in results/experiments/k_int8_frozen.csv. Skipped without AVX-512 or without the study D effects.
+    add_test(NAME neuralfx.ScriptedFireballInt8Frozen
+             COMMAND nvfx_scene_script --script ${CMAKE_CURRENT_SOURCE_DIR}/examples/scenes/fireball.nvfxs --models ${NEURALFX_MODELS_D}
+                     --keyframes ${CMAKE_CURRENT_BINARY_DIR}/fireball_int8_keyframes --no-video --threads 2 --precision int8 --isa avx512
+                     --verify ${CMAKE_CURRENT_SOURCE_DIR}/results/experiments/k_int8_frozen.csv)
+    set_tests_properties(neuralfx.ScriptedFireballInt8Frozen PROPERTIES LABELS "neuralfx;data" SKIP_RETURN_CODE 77 TIMEOUT 1200)
   endif()
 endif()

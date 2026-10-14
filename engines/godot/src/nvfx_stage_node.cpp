@@ -144,6 +144,7 @@ nvfx_scene* NeuralVFXStage::create_scene() {
   d.n_effects = static_cast<int>(list.size());
   d.threads = get_threads() > 0 ? get_threads() : 2;
   d.overlap = get_overlap() ? 1 : 0;
+  d.precision = get_precision();
   nvfx_scene_error err{};
   const nvfx_status s = nvfx_stage_create(library_, &d, &stage_, &err);
   free_loaded();  // the stage's scene keeps copies

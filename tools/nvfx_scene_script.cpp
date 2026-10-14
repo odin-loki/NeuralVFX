@@ -123,7 +123,13 @@ int main(int argc, char** argv) try {
   if (A.print) return 0;
   if (!A.isa.empty()) {
     const nvfx_isa want = A.isa == "avx512" ? NVFX_ISA_AVX512 : A.isa == "avx2" ? NVFX_ISA_AVX2 : NVFX_ISA_BASELINE;
-    if (nvfx_set_isa(want) != NVFX_OK) throw std::runtime_error("this CPU cannot run --isa " + A.isa);
+    if (nvfx_set_isa(want) != NVFX_OK) {
+      if (!A.verify.empty()) {  // keyframes frozen for an ISA this CPU lacks: skipped, not failed
+        std::println("nvfx_scene_script: this CPU cannot run --isa {}: skipped", A.isa);
+        return 77;
+      }
+      throw std::runtime_error("this CPU cannot run --isa " + A.isa);
+    }
   }
   if (!A.verify.empty()) {  // a check against frozen keyframes is skipped, not failed, without the effects
     for (const sc::Statement& s : script.statements) {

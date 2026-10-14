@@ -112,6 +112,7 @@ nvfx_scene* NeuralVFXScene::create_scene() {
   d.n_effects = static_cast<int>(list.size());
   d.threads = threads_ > 0 ? threads_ : 2;
   d.overlap = overlap_ ? 1 : 0;
+  d.precision = precision_;
   d.width = output_size_.x > 0 ? output_size_.x : 0;
   d.height = output_size_.y > 0 ? output_size_.y : 0;
   nvfx_scene* scene = nullptr;
@@ -315,6 +316,8 @@ void NeuralVFXScene::_bind_methods() {
   ClassDB::bind_method(D_METHOD("get_threads"), &NeuralVFXScene::get_threads);
   ClassDB::bind_method(D_METHOD("set_overlap", "on"), &NeuralVFXScene::set_overlap);
   ClassDB::bind_method(D_METHOD("get_overlap"), &NeuralVFXScene::get_overlap);
+  ClassDB::bind_method(D_METHOD("set_precision", "precision"), &NeuralVFXScene::set_precision);
+  ClassDB::bind_method(D_METHOD("get_precision"), &NeuralVFXScene::get_precision);
   ClassDB::bind_method(D_METHOD("set_output_size", "size"), &NeuralVFXScene::set_output_size);
   ClassDB::bind_method(D_METHOD("get_output_size"), &NeuralVFXScene::get_output_size);
   ClassDB::bind_method(D_METHOD("set_playing", "on"), &NeuralVFXScene::set_playing);
@@ -329,6 +332,7 @@ void NeuralVFXScene::_bind_methods() {
   ADD_PROPERTY(PropertyInfo(Variant::STRING, "effects_dir", PROPERTY_HINT_DIR), "set_effects_dir", "get_effects_dir");
   ADD_PROPERTY(PropertyInfo(Variant::INT, "threads", PROPERTY_HINT_RANGE, "1,64"), "set_threads", "get_threads");
   ADD_PROPERTY(PropertyInfo(Variant::BOOL, "overlap"), "set_overlap", "get_overlap");
+  ADD_PROPERTY(PropertyInfo(Variant::INT, "precision", PROPERTY_HINT_ENUM, "Default,Float,Int8"), "set_precision", "get_precision");
   ADD_PROPERTY(PropertyInfo(Variant::VECTOR2I, "output_size"), "set_output_size", "get_output_size");
   ADD_PROPERTY(PropertyInfo(Variant::BOOL, "playing"), "set_playing", "is_playing");
   ADD_PROPERTY(PropertyInfo(Variant::BOOL, "looping"), "set_looping", "is_looping");
