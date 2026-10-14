@@ -710,8 +710,17 @@ void detail_step(const Model& m, State& s, std::uint64_t seed, std::span<const f
     soften_field(s.fine_t, s.size, dt.soften);
     soften_field(s.fine_d, s.size, dt.soften);
   }
-  // study L: the advection and the lock in `passes` passes, each moving the fields by a share of the frame's flow
-  for (int pass = 0; pass < dt.passes; ++pass) detail_pass(m, s, seed, controls, dt.passes > 1 ? 1.f / fl(dt.passes) : 1.f);
+  // study L: the advection and the lock in `passes` passes, each moving the fields by a share of the frame's flow; with
+  // more than one, values below kFlush are set to zero after each pass (the lock's repeated scaling otherwise leaves
+  // subnormal floats, which are invisible and very slow)
+  for (int pass = 0; pass < dt.passes; ++pass) {
+    detail_pass(m, s, seed, controls, dt.passes > 1 ? 1.f / fl(dt.passes) : 1.f);
+    if (dt.passes > 1) {
+      for (std::vector<float>* q : {&s.fine_t, &s.fine_d}) {
+        for (float& v : *q) v = v < kFlush ? 0.f : v;
+      }
+    }
+  }
 }
 
 void detail_pass(const Model& m, State& s, std::uint64_t seed, std::span<const float> controls, float share) {

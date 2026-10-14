@@ -79,6 +79,8 @@ struct DetailSpec {
   // the stamps line up into saw-teeth; locking every cell of travel or less blends them.
   int passes = 1;
 };
+// With DetailSpec::passes > 1, fine values below this are set to zero after each pass (study L).
+inline constexpr float kFlush = 1e-20f;
 
 // Study D2's softening of a fine field (DetailSpec::soften): q + s (mean of the four neighbours - q), zero outside.
 void soften_field(std::span<float> q, int size, float s);

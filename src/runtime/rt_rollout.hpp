@@ -1295,7 +1295,15 @@ class Rollout final : public RolloutRunner {
   // and swirl and locking them again (rollout::detail_pass). Kept out of step() (and not inlined), as soften_fields().
   [[gnu::noinline]] void detail_passes(std::span<const float> controls) {
     share_ = 1.f / static_cast<float>(m_.detail.passes);
-    for (pass_ = 0; pass_ < m_.detail.passes; ++pass_) detail_step(controls);
+    for (pass_ = 0; pass_ < m_.detail.passes; ++pass_) {
+      detail_step(controls);
+      for (float* q : {ft_.data(), fd_.data()}) {  // values below rollout::kFlush to zero (as the reference)
+        each_block(S_ * S_, [&]<class V>(int i) {
+          const V v = ld<V>(q + i);
+          st<V>(q + i, v < bc<V>(rollout::kFlush) ? V{} : v);
+        });
+      }
+    }
     pass_ = 0;
     share_ = 1.f;
   }
