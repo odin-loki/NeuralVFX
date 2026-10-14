@@ -1,0 +1,3 @@
+effect,runs,frames,sim_minutes,record_s,stepper_loss,stepper_s,renderer_psnr,contrast,swirl,detail_score,starts,start_fine,stored_bytes,total_s
+jet,160,240,21.33,345,0.08516,7274,0.00,1,0.8,0.000,8,0,83594,7619
+orb,160,240,21.33,506,0.09065,7211,0.00,1,0.8,0.000,8,0,83594,7717
