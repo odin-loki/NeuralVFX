@@ -630,6 +630,16 @@ What did not work, or is not done:
 - A gap of 0.07 to 0.12 in detail to the real floor, with motion 10-13% low on fire and smoke.
 - A crossfade every 6 s. It is smooth, but it is a blend of two runs.
 
+### 6.10 More effects
+
+Two effects a game would want, **steam** (a vent's jet of white vapour) and **magic** (a spinning portal of light), were
+added to the simulator as presets and trained and tested with this study's recipe and protocol. Steam came out as fire
+and smoke did: it tracks a run 2.6 dB better than the coarse simulation at 1 s, and at unseen settings and seeds its
+motion is right and its average picture ties a second real run. Magic, a fast regular swirl, only ties the coarse
+simulation and its detail is worse than the nearest flipbook's: the 32-cell state and the detail layer smear and
+serrate its arms. Both are 82 KB. The full account, with a scene script that plays them with fire and an explosion, is
+in [EFFECTS.md](EFFECTS.md).
+
 ## 7. Runtime cost and budget
 
 Median ms per frame through `nvfx_render`, one pinned AVX2 core (90th percentiles and every configuration in

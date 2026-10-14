@@ -1,0 +1,13 @@
+model,isa,size,median_ms,p90_ms,restart_ms,macs_px,stored_kb,resident_kb,scratch_kb
+rollout_fire,avx2,64,0.6945,1.4751,24.96,2510,81.6,162.8,1558.1
+rollout_fire,avx2,128,1.2573,2.0585,27.31,1012,81.6,162.8,2410.9
+rollout_fire,avx2,256,2.9596,5.1638,32.25,637,81.6,162.8,5748.4
+rollout_fire,baseline,128,2.6155,4.0664,51.49,1012,81.6,162.8,2410.9
+rollout_fire,avx512,128,1.1599,1.5586,18.05,1012,81.6,162.8,2410.9
+coarse_sim_fire,scalar,128,1.5704,1.9273,,,,,
+rollout_smoke,avx2,64,0.6568,1.0334,0.19,2510,145.7,418.8,1558.1
+rollout_smoke,avx2,128,1.1037,1.4193,0.43,1012,145.7,418.8,2410.9
+rollout_smoke,avx2,256,3.1305,5.3159,1.39,637,145.7,418.8,5748.4
+rollout_smoke,baseline,128,2.4551,2.7870,0.99,1012,145.7,418.8,2410.9
+rollout_smoke,avx512,128,1.1363,1.7377,0.45,1012,145.7,418.8,2410.9
+coarse_sim_smoke,scalar,128,3.9130,6.8790,,,,,

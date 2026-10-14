@@ -1,0 +1,13 @@
+model,isa,size,median_ms,p90_ms,restart_ms,macs_px,stored_kb,resident_kb,scratch_kb
+rollout_steam,avx2,64,0.6633,1.2291,15.45,2510,81.6,162.8,1558.1
+rollout_steam,avx2,128,1.1548,1.7956,23.25,1012,81.6,162.8,2410.9
+rollout_steam,avx2,256,2.9321,4.7378,33.57,637,81.6,162.8,5748.4
+rollout_steam,baseline,128,2.6320,4.1645,61.75,1012,81.6,162.8,2410.9
+rollout_steam,avx512,128,1.3508,2.1548,18.17,1012,81.6,162.8,2410.9
+coarse_sim_steam,scalar,128,4.8318,6.9655,,,,,
+rollout_magic,avx2,64,0.6765,1.1563,13.78,2510,81.6,162.8,1558.1
+rollout_magic,avx2,128,1.5361,2.9166,24.77,1012,81.6,162.8,2410.9
+rollout_magic,avx2,256,2.1266,3.4889,26.00,637,81.6,162.8,5748.4
+rollout_magic,baseline,128,2.8377,5.4178,42.71,1012,81.6,162.8,2410.9
+rollout_magic,avx512,128,1.5258,2.4644,15.94,1012,81.6,162.8,2410.9
+coarse_sim_magic,scalar,128,1.4207,1.8009,,,,,
