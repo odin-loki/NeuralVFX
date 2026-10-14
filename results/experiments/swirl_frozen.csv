@@ -1,0 +1,2 @@
+kind,name,file,bytes,sha256,source
+rollout_effect,magic,l_swirl/models/cand/magic_mc_p2.nvfx,83743,f1d9d57e75935d0a671483a130a821e529b53ab4e2390b501031aff490d2a5ee,study L candidate chosen on validation: the current magic stepper fine-tuned with MacCormack advection (Hyper::advection 1; nvfx_swirl train --advection 1 --iterations 1000 --lr 7e-4 --activity-stage 600 --unroll 30 --seed 24) and the detail layer in two passes (DetailSpec::passes 2)
