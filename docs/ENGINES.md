@@ -52,7 +52,7 @@ smoke (colour at most alpha).
 | variation | `nvfx_instance_set_seed`, `nvfx_instance_set_variation` (replay a training clip), `nvfx_instance_set_drift` | learned |
 | playback speed | scale the time you pass to `nvfx_render` | exact |
 | hue and brightness | `nvfx_instance_set_colour` | exact (applied to the output colour) |
-| precision (grid frame models) | `nvfx_instance_set_precision`: `NVFX_PRECISION_INT8` (the default for the grid family) or `NVFX_PRECISION_FLOAT` | int8 changes a few pixels by a few levels (REPORT.md §7); float is the reference network |
+| precision | `nvfx_instance_set_precision`: `NVFX_PRECISION_INT8` (the default for grid frame models and rollout effects) or `NVFX_PRECISION_FLOAT` | frame models: int8 changes a few pixels by a few levels (REPORT.md §7); rollout effects: an int8 run is another run of the same effect, which tracked and played as float does on held-out data (REPORT.md §13, §5 below); float is the reference network |
 
 Looping effects wrap time; one-shot effects (explosions) hold their last frame after their duration
 (`info.frames / info.fps` seconds).
@@ -135,6 +135,20 @@ is the same; what differs:
 - **Memory**: the effect holds the weights and the start points (stored and resident sizes in `nvfx_effect_info`);
   each instance holds two shards' states and one set of work buffers that both shards' steps share
   (`nvfx_instance_scratch_bytes`: about 2.4 MB at 128 x 128, 1.5 MB at 64 x 64; 4.0 and 2.3 MB before they shared it).
+- **Precision** (study K, [REPORT.md](REPORT.md) §13). By default (`NVFX_PRECISION_DEFAULT`, which is
+  `NVFX_PRECISION_INT8` for rollout effects) the stepper's second convolution, two thirds of its multiply-adds, runs in
+  8-bit integers: 7-bit activations with one scale per channel, 8-bit weights with one per output channel, requantised
+  every step; with no ISA forced the instance then takes the AVX-512 build where the CPU has VNNI. The renderer and the
+  detail layer stay float. Its frames are not float's: the effect is chaotic, so an int8 run and a float run of the
+  same seed drift apart after a few seconds, as two runs do. On held-out settings and seeds it followed real runs as
+  float does (within 0.03 dB at 8 frames, 1 s and 2 s; no interval's lower end below -0.07 dB) and played as
+  realistically (the detail spectrum within 0.001, motion within about 1%, the average picture within 0.03 dB) on all
+  eleven trained effects. It pays with VNNI: a 128 x 128 frame costs about a tenth less than float on the same build
+  (18% less at 64 px, 4% at 256 px), and the AVX-512 build itself is a fifth faster than the AVX2 build float runs on
+  by default; without VNNI (AVX2 alone) int8 saves 1 to 5%, so an engine on such a CPU may as well set FLOAT.
+  `nvfx_instance_set_precision(inst, NVFX_PRECISION_FLOAT)` plays the float network (the reference, on AVX2 by
+  default); a change starts the instance's timeline again. Scenes (`nvfx_scene_desc.precision`), the library's stages
+  (`nvfx_stage_desc.precision`) and the effect manager (`nvfx_manager_model_desc.precision`) choose it the same way.
 - `nvfx_bake` renders consecutive frames from a fresh start and crossfades a few extra frames into the first ones, so
   the flipbook loops.
 
@@ -143,7 +157,7 @@ is the same; what differs:
 | what | where | size |
 |---|---|---|
 | effect weights | `nvfx_effect` | `info.resident_bytes`: features stay at their stored precision (8 or 16 bits); the small MLP is widened to floats |
-| per instance | `nvfx_instance` | `nvfx_instance_scratch_bytes`: a few tens of KB at float precision; at int8 (the grid family's default) 60 to 400 KB, most of it the first layer evaluated at every grid point (grid_m 0.18 MB, grid_l 0.38 MB); rollout effects about 2.4 MB at 128 x 128, 1.1 MB more with a prior |
+| per instance | `nvfx_instance` | `nvfx_instance_scratch_bytes`: a few tens of KB at float precision; at int8 (the grid family's default) 60 to 400 KB, most of it the first layer evaluated at every grid point (grid_m 0.18 MB, grid_l 0.38 MB); rollout effects about 2.4 MB at 128 x 128 (85 KB more at int8), 1.1 MB more with a prior |
 | prior against drift (optional, rollout effects) | `nvfx_effect`, after `nvfx_effect_attach_prior` | the denoiser's weights as floats: 1.57 MB for fire; counted in `info.resident_bytes` |
 | output | the engine's buffer | size x size x 4 bytes |
 
@@ -176,7 +190,7 @@ upload_to_texture(rgba);
 
 | what | calls |
 |---|---|
-| create | `nvfx_scene_desc_init`, `nvfx_scene_create` (script text or file; effects from a folder or passed in; threads, overlap, output size), `nvfx_scene_free`, `nvfx_scene_get_info` (sizes, fps, length, the bus's grid, counts, memory) |
+| create | `nvfx_scene_desc_init`, `nvfx_scene_create` (script text or file; effects from a folder or passed in; threads, overlap, output size, the modules' precision), `nvfx_scene_free`, `nvfx_scene_get_info` (sizes, fps, length, the bus's grid, counts, memory) |
 | check | `nvfx_scene_check` (parse and check without effects, for an editor's quick loop), `nvfx_scene_list_effects` (the files a script names, for hosts that read them from a package and pass them in) |
 | clock | `nvfx_scene_step(dt)`, `nvfx_scene_step_frames(n)`, `nvfx_scene_seek(seconds)`, `nvfx_scene_restart`, `nvfx_scene_time`, `nvfx_scene_frame` |
 | picture | `nvfx_scene_render(rgba, stride)`; with `desc.layers`, the effects alone for the engine to light: `nvfx_scene_render_layer(layer, format, pixels, stride)`, `nvfx_pixel_format_bytes` (§11) |
@@ -279,8 +293,8 @@ engines/godot/test.sh          # downloads Godot 4.4.1 (checked), builds, and ru
 **`NeuralVFXScene`** (a `Node`): plays a scene script into `texture` (an `ImageTexture`, updated when a new frame is
 drawn; `get_image()` gives the CPU image).
 - Properties: `scene_script` (a `.nvfxs`: `res://`, `user://` or an absolute path), `effects_dir` (default: the
-  script's folder), `threads` (2), `overlap` (on), `output_size` (0: the script's), `playing` (on), `looping`,
-  `speed`.
+  script's folder), `threads` (2), `overlap` (on), `output_size` (0: the script's), `precision` (Default, Float or
+  Int8: `nvfx_scene_desc.precision`, §5), `playing` (on), `looping`, `speed`.
 - The scene: `load_scene()` (done in `_ready` when `scene_script` is set), `advance(seconds)`, `seek(seconds)`,
   `restart()`, `get_time()`, `get_frame()`, `get_length()`, `get_fps()`, `get_scene_size()`; errors in `get_error()`,
   `get_error_line()`, `get_error_column()` (and pushed to Godot's error log).
@@ -378,7 +392,8 @@ trained models and the compositor's procedural elements, ready to place without 
 melts over fires (snow) and thins smoke (rain). `include/neuralfx/nvfx_library.h`, in `libnvfx`, lists them and plays them on a **stage**: a scene (§7) with
 room for a number of instances of chosen effects, which the game spawns at a position, scale and time, drives through
 named parameters, moves and stops while it plays, without allocating per frame. A stage is an ordinary `nvfx_scene`
-for stepping, drawing and reading fields, so the threading, overlap and exactness of §7 hold for it, and
+for stepping, drawing and reading fields, so the threading, overlap and exactness of §7 hold for it
+(`nvfx_stage_desc.precision` sets its learned effects' precision, as `nvfx_scene_desc.precision`), and
 `nvfx_stage_desc.layers` gives its effects as lit sprites (§11). A move, like an input, acts on the next frame computed:
 with overlap that is one frame later than without, so a trail moved every frame gives the same pictures on any number
 of threads for one overlap setting, and pictures a move apart between the two. In Godot the node
@@ -392,7 +407,10 @@ on-screen size) and update rate (30 down to 7.5 Hz, drawing the frames between b
 between copies (optionally offset in time), pauses what is off screen, shows unimportant far effects from a few shared
 proxy simulations when the budget is short, and runs the work on its own threads or the engine's job system, with the
 same pictures on any number of threads and no allocation per frame. At a locked level its frames are `nvfx_render`'s
-to the bit. What it costs and what it looks like at a given budget: MANAGER.md §1 and §7.
+to the bit. What it costs and what it looks like at a given budget: MANAGER.md §1 and §7. Each model's simulations
+run at `nvfx_manager_model_desc.precision` (int8 by default, as instances; REPORT.md §13); the planner's default costs
+are float's on AVX2, so at int8 a crowd uses less than its budget unless `nvfx_manager_calibrate` measures the machine
+(the 4 ms crowd of MANAGER.md §7 took 2.8 instead of 4.1 ms per tick with the same plan, provisional).
 
 ## 11. Lit sprites: the effects alone, for the engine to light
 

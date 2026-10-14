@@ -68,6 +68,9 @@ typedef struct nvfx_scene_desc {
   int layers;               /* 1: every picture also draws the effects alone into the engine layers
                                (nvfx_scene_render_layer: lit sprites for an engine to light and composite); 0 (default):
                                not. The picture is the same either way */
+  int precision;            /* the modules' nvfx_precision (as nvfx_instance_set_precision for rollout effects): 0
+                               (NVFX_PRECISION_DEFAULT), NVFX_PRECISION_FLOAT or NVFX_PRECISION_INT8 (the stepper's
+                               convolutions in 8-bit integers; docs/REPORT.md §13) */
 } nvfx_scene_desc;
 
 /* Where and why a scene could not be created. */

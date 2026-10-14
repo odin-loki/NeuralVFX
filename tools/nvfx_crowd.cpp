@@ -3,6 +3,7 @@
 //   nvfx_crowd [--instances 160] [--seconds 20] [--fps 60] [--budget 4] [--threads 1] [--cores 2,3]
 //              [--interp default|hold|crossfade|motion] [--proxies 1] [--max-size 256] [--rates 96,48,24]
 //              [--no-share] [--unlimited] [--calibrate] [--max-sims 16] [--proxy-sims 8] [--seed 1] [--root DATA]
+//              [--precision float|int8]
 //              [--video FILE.mp4] [--sheet DIR] [--csv FILE] [--summary FILE] [--label NAME]
 //
 // The scene: fires, smoke columns, steam vents and rows of torches (identical copies, offset in time) spread over a
@@ -216,7 +217,7 @@ int main(int argc, char** argv) try {
   const int unmanaged = a.i("unmanaged", 0);
   if (a.flag("help")) {
     std::println("nvfx_crowd [--instances 160] [--seconds 20] [--fps 60] [--budget 4] [--threads 1] [--cores 2,3] [--interp default] [--proxies 1] "
-                 "[--max-size 256] [--rates 96,48,24] [--no-share] [--unlimited] [--calibrate] [--seed 1] [--video F.mp4] [--sheet DIR] [--csv F] [--summary F] [--label L]");
+                 "[--max-size 256] [--rates 96,48,24] [--no-share] [--unlimited] [--calibrate] [--precision float|int8] [--seed 1] [--video F.mp4] [--sheet DIR] [--csv F] [--summary F] [--label L]");
     return 0;
   }
   const int count = a.i("instances", 160), fps = a.i("fps", 60), threads = a.i("threads", 1);
@@ -257,6 +258,10 @@ int main(int argc, char** argv) try {
       p = q + 1;
     }
   }
+  // --precision: the simulations' (and --unmanaged instances') precision (study K, docs/REPORT.md §13); default the runtime's.
+  const std::string pn = a.str("precision", "");
+  if (!pn.empty() && pn != "float" && pn != "int8") throw std::invalid_argument("--precision float or int8");
+  const nvfx_precision precision = pn.empty() ? NVFX_PRECISION_DEFAULT : pn == "int8" ? NVFX_PRECISION_INT8 : NVFX_PRECISION_FLOAT;
   nvfx_manager* m = nullptr;
   if (nvfx_manager_create(&d, &m) != NVFX_OK) throw std::runtime_error("cannot create the manager");
   std::array<int, kKinds> model{};
@@ -265,6 +270,7 @@ int main(int argc, char** argv) try {
     nvfx_manager_model_desc_init(&md);
     md.max_sims = a.i("max-sims", 16);
     md.proxy_sims = a.i("proxy-sims", 8);
+    md.precision = precision;
     if (nvfx_manager_add_model(m, fx[sz(k)], &md, &model[sz(k)]) != NVFX_OK) throw std::runtime_error("cannot add a model");
     if (a.flag("calibrate")) nvfx_manager_calibrate(m, model[sz(k)], 24);
   }
@@ -295,6 +301,7 @@ int main(int argc, char** argv) try {
     t.serial = serial++;
     if (unmanaged > 0) {
       if (nvfx_instance_create(fx[sz(kind)], unmanaged, &t.in) != NVFX_OK) return;
+      nvfx_instance_set_precision(t.in, precision);
       nvfx_instance_set_controls(t.in, c.data(), 3);
       nvfx_instance_set_seed(t.in, seed);
       things.push_back(t);

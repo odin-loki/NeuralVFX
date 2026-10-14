@@ -1,7 +1,7 @@
 // nvfx_scene_script: play a scene script of composed effects (docs/COMPOSE.md §4) to video, keyframes and a profile.
 //
 //   nvfx_scene_script --script FILE [--models DIR] [--out scene.mp4 | --no-video] [--keyframes DIR] [--sheet sheet.png]
-//                     [--threads 2] [--isa avx2|avx512|baseline] [--frames N] [--profile profile.csv]
+//                     [--threads 2] [--isa avx2|avx512|baseline] [--precision float|int8] [--frames N] [--profile profile.csv]
 //                     [--verify frozen.csv] [--check] [--print] [--no-overlap] [--own-scratch]
 //
 // Each frame's picture is drawn on a thread of its own while the next frame's state is computed (Options::overlap,
@@ -63,7 +63,7 @@ using Clock = std::chrono::steady_clock;
 struct Args {
   std::filesystem::path script, models, out = "scene.mp4", keyframes, sheet, profile, verify;
   int threads = 2, frames = -1;
-  std::string isa;
+  std::string isa, precision;  // precision: the modules' (study K), float, int8, or the runtime's default
   bool video = true, check = false, print = false, overlap = true, own_scratch = false;
 };
 
@@ -85,6 +85,7 @@ Args parse(int argc, char** argv) {
     else if (k == "--threads") a.threads = std::stoi(next());
     else if (k == "--frames") a.frames = std::stoi(next());
     else if (k == "--isa") a.isa = next();
+    else if (k == "--precision") a.precision = next();
     else if (k == "--no-video") a.video = false;
     else if (k == "--check") a.check = true;
     else if (k == "--print") a.print = true;
@@ -122,7 +123,13 @@ int main(int argc, char** argv) try {
   if (A.print) return 0;
   if (!A.isa.empty()) {
     const nvfx_isa want = A.isa == "avx512" ? NVFX_ISA_AVX512 : A.isa == "avx2" ? NVFX_ISA_AVX2 : NVFX_ISA_BASELINE;
-    if (nvfx_set_isa(want) != NVFX_OK) throw std::runtime_error("this CPU cannot run --isa " + A.isa);
+    if (nvfx_set_isa(want) != NVFX_OK) {
+      if (!A.verify.empty()) {  // keyframes frozen for an ISA this CPU lacks: skipped, not failed
+        std::println("nvfx_scene_script: this CPU cannot run --isa {}: skipped", A.isa);
+        return 77;
+      }
+      throw std::runtime_error("this CPU cannot run --isa " + A.isa);
+    }
   }
   if (!A.verify.empty()) {  // a check against frozen keyframes is skipped, not failed, without the effects
     for (const sc::Statement& s : script.statements) {
@@ -137,7 +144,9 @@ int main(int argc, char** argv) try {
   const auto setup0 = Clock::now();
   sc::Options opt;
   opt.threads = A.threads;
-  opt.isa = compose::best_isa();
+  if (!A.precision.empty() && A.precision != "float" && A.precision != "int8") throw std::invalid_argument("--precision float or int8");
+  opt.precision = A.precision.empty() ? nfx::rt::kRolloutPrecision : A.precision == "int8" ? nfx::rt::Precision::int8 : nfx::rt::Precision::float32;
+  opt.isa = compose::best_isa(opt.precision);
   opt.overlap = A.overlap;
   opt.shared_scratch = !A.own_scratch;
   sc::Scene scene(script, sc::load_from(A.models), opt);

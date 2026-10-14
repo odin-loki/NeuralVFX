@@ -15,6 +15,7 @@
 #include <algorithm>
 #include <array>
 #include <bit>
+#include <chrono>
 #include <cmath>
 #include <cstring>
 #include <immintrin.h>
@@ -25,6 +26,9 @@
 #include <type_traits>
 #include <utility>
 #include <vector>
+#if defined(__linux__)
+#include <time.h>  // clock_gettime (rt_rollout.hpp: study K's profile)
+#endif
 
 #if defined(NFX_ARCH) && defined(__GNUC__) && !defined(__clang__)
 #pragma GCC push_options
@@ -587,7 +591,9 @@ std::unique_ptr<Renderer> make_renderer(const Effect& e, int size, Precision p) 
   return std::make_unique<ConvRenderer>(e, size);  // the conv family has no int8 path
 }
 
-std::unique_ptr<RolloutRunner> make_rollout(const RolloutEffect& e, int size, bool lean) { return std::make_unique<Rollout>(e, size, lean); }
+std::unique_ptr<RolloutRunner> make_rollout(const RolloutEffect& e, int size, bool lean, Precision p, Int8Convs convs) {
+  return std::make_unique<Rollout>(e, size, lean, p, convs);
+}
 
 }  // namespace nfx::rt::NFX_NS
 

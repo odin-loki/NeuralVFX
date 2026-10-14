@@ -286,7 +286,7 @@ TEST(Runtime, PrecisionIsASettingOfTheInstance) {
   ASSERT_EQ(nvfx_instance_set_precision(q.get(), NVFX_PRECISION_FLOAT), NVFX_OK);  // and back: the float network exactly
   EXPECT_EQ(render(q.get(), 0.1, 32), f0);
   EXPECT_GT(nvfx_instance_scratch_bytes(def.get()), 0u);
-  // the conv family and rollout effects have no int8 path
+  // the conv family has no int8 path (rollout effects: tests/test_rollout.cpp)
   auto cv = instance(ec.get(), 32);
   nvfx_instance_set_variation(cv.get(), 0);
   const auto conv_default = render(cv.get(), 0.1, 32);

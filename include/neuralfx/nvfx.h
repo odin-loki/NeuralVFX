@@ -31,7 +31,7 @@
 extern "C" {
 #endif
 
-#define NVFX_VERSION 4 /* 2: scenes (nvfx_scene.h); 3: nvfx_version(), effect packs (nvfx_pack.h); 4: engine layers and trails */
+#define NVFX_VERSION 5 /* 2: scenes (nvfx_scene.h); 3: nvfx_version(), effect packs (nvfx_pack.h); 4: engine layers and trails; 5: precision (study K) */
 
 typedef enum nvfx_status {
   NVFX_OK = 0,
@@ -89,17 +89,25 @@ NVFX_API nvfx_status nvfx_instance_set_drift(nvfx_instance* instance, float seco
 /* Exact colour controls applied to the output: hue rotation in radians, brightness multiplier (default 0, 1). */
 NVFX_API nvfx_status nvfx_instance_set_colour(nvfx_instance* instance, float hue_radians, float brightness);
 
-/* Precision of a frame model's network (docs/REPORT.md §7). INT8: the hidden layers multiply 8-bit activations (one
- * scale per pixel) by 8-bit weights (one scale per unit) in integers, and the first layer is evaluated per grid point
- * and interpolated; AVX-512 VNNI where the CPU has it (with no ISA forced, int8 instances of models with a hidden
- * layer then use the AVX-512 build).
- * FLOAT: the float network (the reference). DEFAULT is INT8 for the grid family: on study A's 12 clips it changes
- * active PSNR by -0.008 dB [-0.015, -0.001] with VNNI and -0.018 dB [-0.031, -0.008] with AVX2 (whose activations get
- * 7 bits), within the -0.05 dB allowed for a default; no pixel channel moves by more than 6 to 10 levels of 255 there
- * (up to 20 on studies B and C). It costs 0.41 to 0.51 ms instead of 0.75 to 0.78 ms per 128 x 128 frame for the
- * larger models (provisional). The conv family and rollout effects are float either way (INT8 returns
- * NVFX_ERROR_UNSUPPORTED for them). A set-up call: a change allocates the instance's new buffers (at INT8 an instance
- * holds the first layer at every grid point: 0.2 to 0.4 MB). */
+/* Precision of an instance's network.
+ * Frame models (docs/REPORT.md §7). INT8: the hidden layers multiply 8-bit activations (one scale per pixel) by 8-bit
+ * weights (one scale per unit) in integers, and the first layer is evaluated per grid point and interpolated; AVX-512
+ * VNNI where the CPU has it (with no ISA forced, int8 instances of models with a hidden layer then use the AVX-512
+ * build). FLOAT: the float network (the reference). DEFAULT is INT8 for the grid family: on study A's 12 clips it
+ * changes active PSNR by -0.008 dB [-0.015, -0.001] with VNNI and -0.018 dB [-0.031, -0.008] with AVX2 (whose
+ * activations get 7 bits), within the -0.05 dB allowed for a default; no pixel channel moves by more than 6 to 10
+ * levels of 255 there (up to 20 on studies B and C). It costs 0.41 to 0.51 ms instead of 0.75 to 0.78 ms per 128 x 128
+ * frame for the larger models (provisional). The conv family is float either way (INT8 returns NVFX_ERROR_UNSUPPORTED).
+ * Rollout effects (study K, docs/REPORT.md §13). INT8: the stepper's second 3 x 3 convolution (two thirds of its
+ * multiply-adds) multiplies 7-bit activations (one scale per channel over the grid) by 8-bit weights (one scale per
+ * output channel) in integers; every ISA computes the same integer sums, and with no ISA forced the AVX-512 build is
+ * used where the CPU has VNNI. The renderer and the detail layer stay float. Its frames are not float's: the effects
+ * are chaotic, so int8 and float runs drift apart after a while, as two seeds do. DEFAULT is INT8 for rollout effects:
+ * on held-out settings and seeds it tracked real runs and played as float does on all eleven trained effects (study
+ * K's rule), and a frame costs about a tenth less than float in the same build at 128 x 128 (VNNI); FLOAT is the
+ * reference. A change starts the instance's timeline again.
+ * A set-up call: a change allocates the instance's new buffers (at INT8 a frame model's instance holds the first layer
+ * at every grid point: 0.2 to 0.4 MB). */
 typedef enum nvfx_precision { NVFX_PRECISION_DEFAULT = 0, NVFX_PRECISION_FLOAT = 1, NVFX_PRECISION_INT8 = 2 } nvfx_precision;
 NVFX_API nvfx_status nvfx_instance_set_precision(nvfx_instance* instance, nvfx_precision precision);
 

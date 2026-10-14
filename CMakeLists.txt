@@ -329,6 +329,11 @@ if(NEURALFX_BUILD_TOOLS)
   add_executable(nvfx_d2 tools/nvfx_d2.cpp)
   target_link_libraries(nvfx_d2 PRIVATE neuralfx_train nvfx)
   neuralfx_defaults(nvfx_d2)
+  # Study K (docs/REPORT.md §13): rollout effects in 8-bit integers: the profile, the quality and the cost.
+  add_executable(nvfx_study_k tools/nvfx_study_k.cpp)
+  target_include_directories(nvfx_study_k PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src/runtime")
+  target_link_libraries(nvfx_study_k PRIVATE neuralfx_train neuralfx_io nvfx)
+  neuralfx_defaults(nvfx_study_k)
 endif()
 
 if(NEURALFX_BUILD_BENCH)
@@ -383,7 +388,9 @@ if(NEURALFX_BUILD_TESTS)
     add_test(NAME neuralfx.CHostExample COMMAND nvfx_c_host --self-test)
     set_tests_properties(neuralfx.CHostExample PROPERTIES LABELS neuralfx)
     # The fireball as a script reproduces the hand-written scene's frozen keyframes to the bit (about a minute on 2
-    # threads). Needs the study D effects (outside git): skipped when they are not in NEURALFX_MODELS_D.
+    # threads). Needs the study D effects (outside git): skipped when they are not in NEURALFX_MODELS_D. The frozen
+    # keyframes here and below are the float path's (--precision float); rollout effects run at int8 by default since
+    # study K (docs/REPORT.md §13), whose own frozen keyframes are checked by ScriptedFireballInt8Frozen.
     if(DEFINED ENV{NEURALVFX_DATA})
       set(_nvfx_data "$ENV{NEURALVFX_DATA}")
     else()
@@ -392,14 +399,14 @@ if(NEURALFX_BUILD_TESTS)
     set(NEURALFX_MODELS_D "${_nvfx_data}/experiments/models/d" CACHE PATH "The study D rollout effects (fire, smoke, explosion .nvfx)")
     add_test(NAME neuralfx.ScriptedFireballBitExact
              COMMAND nvfx_scene_script --script ${CMAKE_CURRENT_SOURCE_DIR}/examples/scenes/fireball.nvfxs --models ${NEURALFX_MODELS_D}
-                     --keyframes ${CMAKE_CURRENT_BINARY_DIR}/fireball_script_keyframes --no-video --threads 2
+                     --keyframes ${CMAKE_CURRENT_BINARY_DIR}/fireball_script_keyframes --no-video --threads 2 --precision float
                      --verify ${CMAKE_CURRENT_SOURCE_DIR}/results/experiments/v1_frozen.csv --profile ${CMAKE_CURRENT_BINARY_DIR}/fireball_script_profile.csv)
     set_tests_properties(neuralfx.ScriptedFireballBitExact PROPERTIES LABELS "neuralfx;data" SKIP_RETURN_CODE 77 TIMEOUT 1200
                          FIXTURES_SETUP fireball_profile)
     # The same fireball through the scene C API of the shared library, from C (nvfx_c_host --scene): every one of its 270
     # frames has the RGB checksum the script runner's profile above has.
     add_test(NAME neuralfx.SceneApiFireballBitExact
-             COMMAND nvfx_c_host --scene ${CMAKE_CURRENT_SOURCE_DIR}/examples/scenes/fireball.nvfxs --effects ${NEURALFX_MODELS_D} --threads 2
+             COMMAND nvfx_c_host --scene ${CMAKE_CURRENT_SOURCE_DIR}/examples/scenes/fireball.nvfxs --effects ${NEURALFX_MODELS_D} --threads 2 --precision float
                      --expect ${CMAKE_CURRENT_BINARY_DIR}/fireball_script_profile.csv)
     set_tests_properties(neuralfx.SceneApiFireballBitExact PROPERTIES LABELS "neuralfx;data" SKIP_RETURN_CODE 77 TIMEOUT 1200
                          FIXTURES_REQUIRED fireball_profile)
@@ -408,7 +415,7 @@ if(NEURALFX_BUILD_TESTS)
     set(NEURALFX_MODELS_FX "${_nvfx_data}/fx/models/scene" CACHE PATH "steam.nvfx, magic.nvfx and v2's fire.nvfx and explosion.nvfx")
     add_test(NAME neuralfx.ScriptedPortalFrozen
              COMMAND nvfx_scene_script --script ${CMAKE_CURRENT_SOURCE_DIR}/examples/scenes/portal.nvfxs --models ${NEURALFX_MODELS_FX}
-                     --keyframes ${CMAKE_CURRENT_BINARY_DIR}/portal_script_keyframes --no-video --threads 2
+                     --keyframes ${CMAKE_CURRENT_BINARY_DIR}/portal_script_keyframes --no-video --threads 2 --precision float
                      --verify ${CMAKE_CURRENT_SOURCE_DIR}/results/experiments/fx_frozen.csv)
     set_tests_properties(neuralfx.ScriptedPortalFrozen PROPERTIES LABELS "neuralfx;data" SKIP_RETURN_CODE 77 TIMEOUT 1200)
     # The moor (docs/EFFECTS_ATMOSPHERE.md): fog, dust and cloud with study D's v2 fire, all in NEURALFX_MODELS_ATMOS
@@ -416,7 +423,7 @@ if(NEURALFX_BUILD_TESTS)
     set(NEURALFX_MODELS_ATMOS "${_nvfx_data}/fx_atmos/models/scene" CACHE PATH "fog.nvfx, dust.nvfx, cloud.nvfx and v2's fire.nvfx")
     add_test(NAME neuralfx.ScriptedMoorFrozen
              COMMAND nvfx_scene_script --script ${CMAKE_CURRENT_SOURCE_DIR}/examples/scenes/moor.nvfxs --models ${NEURALFX_MODELS_ATMOS}
-                     --keyframes ${CMAKE_CURRENT_BINARY_DIR}/moor_script_keyframes --no-video --threads 2
+                     --keyframes ${CMAKE_CURRENT_BINARY_DIR}/moor_script_keyframes --no-video --threads 2 --precision float
                      --verify ${CMAKE_CURRENT_SOURCE_DIR}/results/experiments/fx_atmos_frozen.csv)
     set_tests_properties(neuralfx.ScriptedMoorFrozen PROPERTIES LABELS "neuralfx;data" SKIP_RETURN_CODE 77 TIMEOUT 1200)
     foreach(scene fireball firewall campfire portal moor weather)
@@ -440,18 +447,27 @@ if(NEURALFX_BUILD_TESTS)
     add_test(NAME neuralfx.LibraryKeyframesFrozen
              COMMAND nvfx_gallery --library ${CMAKE_CURRENT_SOURCE_DIR}/library --models ${NEURALFX_MODELS_LIBRARY}
                      --only campfire,blue_gas_flame,grenade,steam_vent,portal,lightning_strike,ground_fog,dust_impact,flamethrower,plasma_orb,dust_devil,rocket_trail,vehicle_dust_wake
-                     --keyframes ${CMAKE_CURRENT_BINARY_DIR}/library_keyframes --verify ${CMAKE_CURRENT_SOURCE_DIR}/results/library/frozen.csv --threads 2)
+                     --keyframes ${CMAKE_CURRENT_BINARY_DIR}/library_keyframes --verify ${CMAKE_CURRENT_SOURCE_DIR}/results/library/frozen.csv --threads 2
+                     --precision float)
     set_tests_properties(neuralfx.LibraryKeyframesFrozen PROPERTIES LABELS "neuralfx;data" SKIP_RETURN_CODE 77 TIMEOUT 1200)
     # The fire whirl (docs/EFFECTS_ENERGY.md): jet, orb and vortex, all in NEURALFX_MODELS_ENERGY (outside git); its
     # keyframes have the SHA-256 recorded in results/experiments/fx_energy_frozen.csv.
     set(NEURALFX_MODELS_ENERGY "${_nvfx_data}/fx_energy/models/scene" CACHE PATH "jet.nvfx, orb.nvfx and vortex.nvfx")
     add_test(NAME neuralfx.ScriptedFireWhirlFrozen
              COMMAND nvfx_scene_script --script ${CMAKE_CURRENT_SOURCE_DIR}/examples/scenes/firewhirl.nvfxs --models ${NEURALFX_MODELS_ENERGY}
-                     --keyframes ${CMAKE_CURRENT_BINARY_DIR}/firewhirl_script_keyframes --no-video --threads 2
+                     --keyframes ${CMAKE_CURRENT_BINARY_DIR}/firewhirl_script_keyframes --no-video --threads 2 --precision float
                      --verify ${CMAKE_CURRENT_SOURCE_DIR}/results/experiments/fx_energy_frozen.csv)
     set_tests_properties(neuralfx.ScriptedFireWhirlFrozen PROPERTIES LABELS "neuralfx;data" SKIP_RETURN_CODE 77 TIMEOUT 1200)
     add_test(NAME neuralfx.SceneScriptChecks.firewhirl COMMAND nvfx_scene_script --script ${CMAKE_CURRENT_SOURCE_DIR}/examples/scenes/firewhirl.nvfxs --check)
     set_tests_properties(neuralfx.SceneScriptChecks.firewhirl PROPERTIES LABELS neuralfx)
+    # Study K (docs/REPORT.md §13): the fireball's keyframes with its modules at int8 on the AVX-512 build (the build int8
+    # takes where the CPU has VNNI; without VNNI it computes the same integer sums, so the same frames), against their
+    # SHA-256 in results/experiments/k_int8_frozen.csv. Skipped without AVX-512 or without the study D effects.
+    add_test(NAME neuralfx.ScriptedFireballInt8Frozen
+             COMMAND nvfx_scene_script --script ${CMAKE_CURRENT_SOURCE_DIR}/examples/scenes/fireball.nvfxs --models ${NEURALFX_MODELS_D}
+                     --keyframes ${CMAKE_CURRENT_BINARY_DIR}/fireball_int8_keyframes --no-video --threads 2 --precision int8 --isa avx512
+                     --verify ${CMAKE_CURRENT_SOURCE_DIR}/results/experiments/k_int8_frozen.csv)
+    set_tests_properties(neuralfx.ScriptedFireballInt8Frozen PROPERTIES LABELS "neuralfx;data" SKIP_RETURN_CODE 77 TIMEOUT 1200)
     # Effect packs (docs/INTEGRATION.md §5), with the library's eleven models (outside git; skipped without them): the
     # full library packed by the tool, checked as an engine's load checks it, and the gallery's keyframes of the frozen
     # entries played from the pack against their SHA-256 in results/library/frozen.csv (the folder's frames).
@@ -464,7 +480,8 @@ if(NEURALFX_BUILD_TESTS)
     add_test(NAME neuralfx.PackLibraryKeyframesFrozen
              COMMAND nvfx_gallery --pack ${CMAKE_CURRENT_BINARY_DIR}/library.nvfxp
                      --only campfire,blue_gas_flame,grenade,steam_vent,portal,lightning_strike,ground_fog,dust_impact,flamethrower,plasma_orb,dust_devil
-                     --keyframes ${CMAKE_CURRENT_BINARY_DIR}/library_pack_keyframes --verify ${CMAKE_CURRENT_SOURCE_DIR}/results/library/frozen.csv --threads 2)
+                     --keyframes ${CMAKE_CURRENT_BINARY_DIR}/library_pack_keyframes --verify ${CMAKE_CURRENT_SOURCE_DIR}/results/library/frozen.csv --threads 2
+                     --precision float)
     set_tests_properties(neuralfx.PackLibraryKeyframesFrozen PROPERTIES LABELS "neuralfx;data" SKIP_RETURN_CODE 77 TIMEOUT 1200 FIXTURES_REQUIRED library_pack)
     add_test(NAME neuralfx.PackHostExample COMMAND nvfx_pack_host ${CMAKE_CURRENT_BINARY_DIR}/library.nvfxp --out ${CMAKE_CURRENT_BINARY_DIR}/pack_host_sheet.png --seconds 2)
     set_tests_properties(neuralfx.PackHostExample PROPERTIES LABELS "neuralfx;data" SKIP_RETURN_CODE 77 TIMEOUT 600 FIXTURES_REQUIRED library_pack)

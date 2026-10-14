@@ -64,7 +64,7 @@ struct Tiny {
   }
 };
 
-ScenePtr make(const Tiny& fx, const char* text, int threads, int overlap, nvfx_scene_error* err = nullptr, int w = 0, int h = 0) {
+ScenePtr make(const Tiny& fx, const char* text, int threads, int overlap, nvfx_scene_error* err = nullptr, int w = 0, int h = 0, int precision = 0) {
   const auto list = fx.list();
   nvfx_scene_desc d;
   nvfx_scene_desc_init(&d);
@@ -76,6 +76,7 @@ ScenePtr make(const Tiny& fx, const char* text, int threads, int overlap, nvfx_s
   d.overlap = overlap;
   d.width = w;
   d.height = h;
+  d.precision = precision;
   nvfx_scene* s = nullptr;
   nvfx_scene_error e;
   const nvfx_status st = nvfx_scene_create(&d, &s, err ? err : &e);
@@ -151,6 +152,31 @@ TEST(SceneApi, PlaysTheSameFramesAsTheScriptRunner) {
     EXPECT_EQ(count, 1);
     EXPECT_NEAR(when, 3.f / 30.f, 1e-6f);
   }
+}
+
+// Study K (docs/REPORT.md §13): a scene's modules at int8 (nvfx_scene_desc.precision) give the same frames on 1, 2 and 4
+// threads, overlapped or not, as at float; and other frames than at float.
+TEST(SceneApi, Int8ScenesAreTheSameOnAnyThreadCount) {
+  const Tiny fx;
+  ScenePtr one = make(fx, kEverything, 1, 0, nullptr, 0, 0, NVFX_PRECISION_INT8);
+  ScenePtr two = make(fx, kEverything, 2, 1, nullptr, 0, 0, NVFX_PRECISION_INT8);
+  ScenePtr four = make(fx, kEverything, 4, 1, nullptr, 0, 0, NVFX_PRECISION_INT8);
+  ScenePtr fl = make(fx, kEverything, 2, 1, nullptr, 0, 0, NVFX_PRECISION_FLOAT);
+  ASSERT_TRUE(one && two && four && fl);
+  const int frames = info_of(one.get()).frames;
+  int differ = 0;
+  for (int f = 0; f < frames; ++f) {
+    if (f > 0) {
+      for (nvfx_scene* s : {one.get(), two.get(), four.get(), fl.get()}) ASSERT_EQ(nvfx_scene_step_frames(s, 1), NVFX_OK);
+    }
+    const auto a = picture(one.get());
+    ASSERT_EQ(picture(two.get()), a) << "frame " << f;
+    ASSERT_EQ(picture(four.get()), a) << "frame " << f;
+    differ += picture(fl.get()) != a;
+  }
+  EXPECT_GT(differ, 0);
+  nvfx_scene_error err;
+  EXPECT_FALSE(make(fx, kEverything, 1, 0, &err, 0, 0, 3));  // not a precision
 }
 
 // Frames computed and not drawn change nothing in the frames drawn after them; drawing a frame twice copies it.
@@ -509,7 +535,7 @@ std::filesystem::path models_d() {
 
 // The fireball script played through the API, drawing only its eight keyframes (the other frames computed without
 // pictures), gives the hand-written scene's frozen keyframes to the bit (results/experiments/v1_frozen.csv).
-TEST(SceneApi, FireballKeyframesMatchTheFrozenOnes) {
+TEST(SceneApi, FireballKeyframesMatchTheFrozenOnes) {  // at float: the frozen keyframes are the float path's
   const std::filesystem::path models = models_d(), src = NEURALFX_SOURCE_DIR;
   for (const char* f : {"fire.nvfx", "smoke.nvfx", "explosion.nvfx"})
     if (!std::filesystem::exists(models / f)) GTEST_SKIP() << "the study D effects are not in " << models.string();
@@ -530,6 +556,7 @@ TEST(SceneApi, FireballKeyframesMatchTheFrozenOnes) {
   d.script_path = script.c_str();
   d.effects_dir = dir.c_str();
   d.threads = 2;
+  d.precision = NVFX_PRECISION_FLOAT;
   nvfx_scene* s = nullptr;
   nvfx_scene_error err;
   ASSERT_EQ(nvfx_scene_create(&d, &s, &err), NVFX_OK) << err.message;

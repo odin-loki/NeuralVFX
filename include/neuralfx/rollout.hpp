@@ -177,18 +177,27 @@ struct State {
   std::vector<float> fine_t, fine_d;  // size * size
 };
 
+// Study K (docs/REPORT.md §13): the stepper's convolutions in 8-bit integers, as the runtime computes them at
+// NVFX_PRECISION_INT8 (src/runtime/rt_rollout.hpp; the reference for its parity tests). second: the second convolution,
+// its inputs (after FiLM and the ReLU) to 7-bit codes with one scale per channel over the grid, its weights (FiLM and
+// those scales folded in) to 8 bits (+-127) with one scale per output channel, integer sums, then the output's scale,
+// the bias and the ReLU in float. both: the first too, its inputs (signed) to 8-bit codes with a zero point per channel
+// (128, or 0 for a channel with nothing below 0) and its weights to 7 bits (+-63). Codes and weights round half away
+// from zero (activations of the second convolution, which are not negative, as floor(x + 0.5)).
+enum class Int8 { off, second, both };
+
 // Start an effect at `size` pixels from start point `index` (time and coarse state from it; fine fields from it or
 // grown from the coarse state by h.warmup frames with `seed`).
-State start(const Model& m, int index, int size, std::span<const float> controls, std::uint64_t seed);
+State start(const Model& m, int index, int size, std::span<const float> controls, std::uint64_t seed, Int8 q = Int8::off);
 // One frame: the stepper on the coarse grid, then the detail layer.
-void step(const Model& m, State& s, std::span<const float> controls, std::uint64_t seed);
+void step(const Model& m, State& s, std::span<const float> controls, std::uint64_t seed, Int8 q = Int8::off);
 // Premultiplied RGBA floats [size][size][4], rows top to bottom.
 void render(const Model& m, const State& s, std::span<float> rgba);
 
 // Pieces of step(), exposed for the trainer and the tests.
 // Coarse: in (res*res*channels), pressure in/out, out (res*res*channels), flow (res*res*2).
 void coarse_step(const Model& m, std::span<const float> in, std::span<const float> noise, std::span<const float> cond,
-                 std::span<float> pressure, std::span<float> out, std::span<float> flow);
+                 std::span<float> pressure, std::span<float> out, std::span<float> flow, Int8 q = Int8::off);
 // Detail: advect the fine fields by the flow (plus swirl), lock their coarse averages to the coarse heat and soot.
 void detail_step(const Model& m, State& s, std::uint64_t seed, std::span<const float> controls);
 // Renderer input features for one pixel (kRenderIn values), from fine fields and the coarse state.

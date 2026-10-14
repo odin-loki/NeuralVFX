@@ -129,6 +129,9 @@ struct Options {
   // Engine layers (Frame::use_layers, docs/ENGINES.md §11): every picture also draws the effects alone into four layers
   // for an engine to light and composite (frame().layer()). The pictures are the same with them or without.
   bool layers = false;
+  // The modules' precision (study K, docs/REPORT.md §13): rt::Precision::int8 runs the stepper's convolutions in 8-bit
+  // integers. Give `isa` best_isa(precision) to have the runtime's choice for it.
+  rt::Precision precision = rt::kRolloutPrecision;
 };
 
 // A scene built from a script: every module, buffer and list is created here, so render() allocates nothing.

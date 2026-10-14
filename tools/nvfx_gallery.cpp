@@ -3,7 +3,7 @@
 // frozen SHA-256, and a check of the whole catalogue.
 //
 //   nvfx_gallery --library DIR --models DIR [--sheet sheet.png] [--video walk.mp4 [--clip S]] [--keyframes DIR]
-//                [--verify frozen.csv] [--only a,b,c] [--threads 2] [--cell 320x240] [--columns 6]
+//                [--verify frozen.csv] [--only a,b,c] [--threads 2] [--cell 320x240] [--columns 6] [--precision float|int8]
 //   nvfx_gallery --library DIR [--models DIR] --check [--require-models]
 //   nvfx_gallery --library DIR --list [--markdown]
 //   nvfx_gallery --library DIR --print NAME            the stage script of an effect alone (as the gallery plays it)
@@ -80,6 +80,9 @@ struct Spawn {  // (doubles: a moving spawn's places are computed in double and 
   double x = 0, y = 0, scale = 1, at = -1, vx = 0, vy = 0;
 };
 
+// --precision: the stages' learned effects' (nvfx_stage_desc.precision; study K, docs/REPORT.md §13); default the runtime's.
+int g_precision = NVFX_PRECISION_DEFAULT;
+
 struct Args {
   fs::path library, models, sheet, video, keyframes, verify, png, starts, pack;
   std::vector<std::string> only;
@@ -124,7 +127,11 @@ Args parse(int argc, char** argv) {
     else if (k == "--print") a.print = next();
     else if (k == "--starts") a.starts = next();
     else if (k == "--threads") a.threads = std::stoi(next());
-    else if (k == "--columns") a.columns = std::stoi(next());
+    else if (k == "--precision") {
+      const std::string p = next();
+      if (p != "float" && p != "int8") throw std::invalid_argument("--precision float or int8");
+      g_precision = p == "int8" ? NVFX_PRECISION_INT8 : NVFX_PRECISION_FLOAT;
+    } else if (k == "--columns") a.columns = std::stoi(next());
     else if (k == "--cell") dims(a.cell_w, a.cell_h);
     else if (k == "--shot") dims(a.shot_w, a.shot_h);
     else if (k == "--ground") a.ground = std::stof(next());
@@ -337,6 +344,7 @@ void make_stage(Stage& s, const nvfx_library* lib, int w, int h, float ground, c
   d.rooms = rooms.data();
   d.n_rooms = static_cast<int>(rooms.size());
   d.threads = threads;
+  d.precision = g_precision;
   nvfx_scene_error err;
   if (nvfx_stage_create(lib, &d, &s.stage, &err) != NVFX_OK) die(err.message);
   s.scene = nvfx_stage_scene(s.stage);

@@ -723,9 +723,9 @@ TEST(Rollout, DetailLayerCarriesFieldsWithTheFlow) {
 namespace {
 
 // A small rollout effect with two start points: one grown from its coarse state, one with fine fields.
-Model runtime_model() {
+Model runtime_model(int res = 16) {
   Hyper h;
-  h.res = 16;
+  h.res = res;
   h.hidden = 8;
   h.memory = 2;
   h.jacobi = 10;
@@ -788,9 +788,9 @@ struct Fx {
   Fx& operator=(const Fx&) = delete;
 };
 
-std::vector<std::uint8_t> reference_frame(const Model& m, int start_index, int size, int frames) {
-  State s = rollout::start(m, start_index, size, m.starts[static_cast<std::size_t>(start_index)].controls, m.starts[static_cast<std::size_t>(start_index)].seed);
-  for (int f = 0; f < frames; ++f) rollout::step(m, s, m.starts[static_cast<std::size_t>(start_index)].controls, m.starts[static_cast<std::size_t>(start_index)].seed);
+std::vector<std::uint8_t> reference_frame(const Model& m, int start_index, int size, int frames, Int8 q = Int8::off) {
+  State s = rollout::start(m, start_index, size, m.starts[static_cast<std::size_t>(start_index)].controls, m.starts[static_cast<std::size_t>(start_index)].seed, q);
+  for (int f = 0; f < frames; ++f) rollout::step(m, s, m.starts[static_cast<std::size_t>(start_index)].controls, m.starts[static_cast<std::size_t>(start_index)].seed, q);
   std::vector<float> rgba(static_cast<std::size_t>(size) * size * 4);
   rollout::render(m, s, rgba);
   std::vector<std::uint8_t> out(rgba.size());
@@ -828,6 +828,7 @@ TEST(RolloutRuntime, MatchesTheReferenceOnEveryIsa) {
       for (const int size : {32, 64}) {
         nvfx_instance* in = nullptr;
         ASSERT_EQ(nvfx_instance_create(fx.e, size, &in), NVFX_OK);
+        ASSERT_EQ(nvfx_instance_set_precision(in, NVFX_PRECISION_FLOAT), NVFX_OK);  // the float path (int8: below)
         nvfx_instance_set_controls(in, m.starts[static_cast<std::size_t>(start_index)].controls.data(), 3);
         ASSERT_EQ(nvfx_instance_set_variation(in, start_index), NVFX_OK);
         std::vector<std::uint8_t> rt(static_cast<std::size_t>(size) * size * 4);
@@ -864,6 +865,7 @@ TEST(RolloutRuntime, MatchesTheReferenceWithStudyD2sConstants) {
       const int size = 64;
       nvfx_instance* in = nullptr;
       ASSERT_EQ(nvfx_instance_create(fx.e, size, &in), NVFX_OK);
+      ASSERT_EQ(nvfx_instance_set_precision(in, NVFX_PRECISION_FLOAT), NVFX_OK);
       nvfx_instance_set_controls(in, m.starts[static_cast<std::size_t>(start_index)].controls.data(), 3);
       ASSERT_EQ(nvfx_instance_set_variation(in, start_index), NVFX_OK);
       std::vector<std::uint8_t> rt(static_cast<std::size_t>(size) * size * 4);
@@ -968,4 +970,141 @@ TEST(RolloutRuntime, OneShotsHoldTheirLastFrameAndBakesLoop) {
   nvfx_render(in, 15 / 30.0, one.data(), size * 4);
   EXPECT_TRUE(std::equal(one.begin(), one.end(), baked.begin() + static_cast<std::ptrdiff_t>(one.size() * 15)));
   nvfx_instance_free(in);
+}
+
+// --- study K: the int8 path of rollout effects (docs/REPORT.md §13) -----------------------------------------------------
+
+#include "nvfx_internal.hpp"
+
+namespace {
+
+struct Diff {
+  int worst = 0;
+  std::size_t off = 0;  // channels more than one level away
+  double mean = 0;
+};
+Diff diff(const std::vector<std::uint8_t>& a, const std::vector<std::uint8_t>& b) {
+  Diff d;
+  for (std::size_t i = 0; i < a.size(); ++i) {
+    const int x = std::abs(int(a[i]) - int(b[i]));
+    d.worst = std::max(d.worst, x);
+    d.off += x > 1;
+    d.mean += x;
+  }
+  d.mean /= static_cast<double>(a.size());
+  return d;
+}
+
+// An instance of start point `start_index` at int8 with study K's candidate `convs`, frame `frames` of its timeline.
+std::vector<std::uint8_t> int8_frame(nvfx_effect* e, const rollout::Model& m, int start_index, int size, int frames, nfx::rt::Int8Convs convs) {
+  nvfx_instance* in = nullptr;
+  EXPECT_EQ(nvfx_instance_create(e, size, &in), NVFX_OK);
+  EXPECT_EQ(nfx::rt::set_rollout_int8_convs(in, convs), NVFX_OK);
+  EXPECT_EQ(nvfx_instance_set_precision(in, NVFX_PRECISION_INT8), NVFX_OK);
+  nvfx_instance_set_controls(in, m.starts[static_cast<std::size_t>(start_index)].controls.data(), 3);
+  EXPECT_EQ(nvfx_instance_set_variation(in, start_index), NVFX_OK);
+  std::vector<std::uint8_t> rt(static_cast<std::size_t>(size) * size * 4);
+  EXPECT_EQ(nvfx_render(in, frames / 30.0, rt.data(), static_cast<std::size_t>(size) * 4), NVFX_OK);
+  nvfx_instance_free(in);
+  return rt;
+}
+
+}  // namespace
+
+// The int8 path against its scalar reference (rollout::Int8: the same quantisation in plain C++), on every ISA and for
+// both of study K's candidates. Every kernel computes the same codes and integer sums, so the ISAs' frames are held to
+// one another with the float path's tolerance (no channel more than 3 levels apart, at most 1% more than one). Against
+// the reference, which applies FiLM after the convolution where the runtime folds it into the weights, a last-bit
+// difference can move a code by one on a rounding boundary, which shows in a few channels (5 levels in 2 channels of
+// 16,384 once here); so there: at most 8 levels, at most 1% of channels more than one level away, and less than 0.05
+// of a level on average. Grids of 16 and 32 cells (the AVX-512 kernel's two vectors per row), sizes 32 and 64, a start
+// point grown from its coarse state and one with fine fields, frames 0 (with the warm-up), 4 and 12.
+TEST(RolloutRuntime, Int8MatchesItsReferenceOnEveryIsa) {
+  int compared = 0, isas = 0;
+  for (const int res : {16, 32}) {
+    const rollout::Model m = runtime_model(res);
+    Fx fx(m);
+    for (const auto convs : {nfx::rt::Int8Convs::second, nfx::rt::Int8Convs::both}) {
+      const Int8 q = convs == nfx::rt::Int8Convs::both ? Int8::both : Int8::second;
+      for (const int start_index : {0, 1}) {
+        for (const int size : {32, 64}) {
+          for (const int frames : {0, 4, 12}) {
+            const auto ref = reference_frame(m, start_index, size, frames, q);
+            std::vector<std::uint8_t> first;
+            for (const nvfx_isa isa : {NVFX_ISA_BASELINE, NVFX_ISA_AVX2, NVFX_ISA_AVX512}) {
+              if (nvfx_set_isa(isa) != NVFX_OK) continue;
+              const auto rt = int8_frame(fx.e, m, start_index, size, frames, convs);
+              const std::string at = std::format("res {} convs {} isa {} start {} size {} frame {}", res, static_cast<int>(convs), static_cast<int>(isa), start_index, size, frames);
+              const Diff d = diff(rt, ref);
+              EXPECT_LE(d.worst, 8) << at;
+              EXPECT_LE(d.off, rt.size() / 100) << at;
+              EXPECT_LT(d.mean, 0.05) << at;
+              if (first.empty()) {
+                first = rt;
+              } else {
+                const Diff x = diff(rt, first);
+                EXPECT_LE(x.worst, 3) << at << " (against the baseline ISA)";
+                EXPECT_LE(x.off, rt.size() / 100) << at << " (against the baseline ISA)";
+                ++isas;
+              }
+              ++compared;
+            }
+          }
+        }
+      }
+    }
+  }
+  nvfx_set_isa(NVFX_ISA_AUTO);
+  EXPECT_GE(compared, 48);
+  EXPECT_GE(isas, 24);
+}
+
+// The int8 reference is not the float one, but close to it on the test model (whose weights are larger than a trained
+// model's): the quantisation's effect after 12 frames, every channel within a few levels on average.
+TEST(RolloutRuntime, Int8ReferenceStaysCloseToFloat) {
+  const rollout::Model m = runtime_model(32);
+  for (const Int8 q : {Int8::second, Int8::both}) {
+    for (const int start_index : {0, 1}) {
+      const auto fl = reference_frame(m, start_index, 64, 12);
+      const auto q8 = reference_frame(m, start_index, 64, 12, q);
+      const Diff d = diff(fl, q8);
+      EXPECT_GT(d.worst, 0) << static_cast<int>(q);
+      EXPECT_LT(d.mean, 2.0) << static_cast<int>(q) << " start " << start_index;
+    }
+  }
+}
+
+// nvfx_instance_set_precision on rollout instances: DEFAULT is int8 (the frames of INT8 to the bit, study K's rule), INT8
+// the int8 path (the candidate Precision::int8 means), FLOAT the float path, and back to INT8 gives the int8 frames
+// again; a change starts a new timeline. Two int8 instances give the same frames, seeks included.
+TEST(RolloutRuntime, PrecisionIsASettingOfRolloutInstances) {
+  const rollout::Model m = runtime_model(32);
+  Fx fx(m);
+  const int size = 64;
+  std::vector<std::uint8_t> a(static_cast<std::size_t>(size) * size * 4), b(a.size()), c(a.size());
+  nvfx_instance *def = nullptr, *fl = nullptr, *q = nullptr, *q2 = nullptr;
+  for (nvfx_instance** in : {&def, &fl, &q, &q2}) {
+    ASSERT_EQ(nvfx_instance_create(fx.e, size, in), NVFX_OK);
+    nvfx_instance_set_seed(*in, 31);
+  }
+  ASSERT_EQ(nvfx_instance_set_precision(fl, NVFX_PRECISION_FLOAT), NVFX_OK);
+  ASSERT_EQ(nvfx_instance_set_precision(q, NVFX_PRECISION_INT8), NVFX_OK);
+  ASSERT_EQ(nvfx_instance_set_precision(q2, NVFX_PRECISION_INT8), NVFX_OK);
+  nvfx_render(def, 20 / 30.0, a.data(), size * 4);
+  nvfx_render(q, 20 / 30.0, c.data(), size * 4);
+  EXPECT_EQ(a, c);  // the default for rollout effects is int8
+  nvfx_render(fl, 20 / 30.0, b.data(), size * 4);
+  EXPECT_NE(b, c);
+  for (int f = 0; f <= 20; ++f) nvfx_render(q2, f / 30.0, b.data(), size * 4);  // played frame by frame
+  EXPECT_EQ(b, c);
+  EXPECT_GT(nvfx_instance_scratch_bytes(q), 0u);
+  ASSERT_EQ(nvfx_instance_set_precision(q, NVFX_PRECISION_FLOAT), NVFX_OK);  // float, and back
+  nvfx_render(q, 20 / 30.0, b.data(), size * 4);
+  nvfx_render(fl, 20 / 30.0, c.data(), size * 4);
+  EXPECT_EQ(b, c);
+  ASSERT_EQ(nvfx_instance_set_precision(q, NVFX_PRECISION_DEFAULT), NVFX_OK);
+  nvfx_render(q, 20 / 30.0, c.data(), size * 4);
+  EXPECT_EQ(a, c);
+  EXPECT_EQ(nfx::rt::set_rollout_int8_convs(nullptr, nfx::rt::Int8Convs::both), NVFX_ERROR_ARGUMENT);
+  for (nvfx_instance* in : {def, fl, q, q2}) nvfx_instance_free(in);
 }

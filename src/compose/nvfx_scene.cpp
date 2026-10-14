@@ -333,6 +333,7 @@ nvfx_status nvfx_scene_create(const nvfx_scene_desc* d, nvfx_scene** out, nvfx_s
   if (!d || !out) return NVFX_ERROR_ARGUMENT;
   *out = nullptr;
   if ((!d->script && !d->script_path) || d->threads < 0 || d->threads > 256 || d->width < 0 || d->height < 0 || d->n_effects < 0 || d->n_inputs < 0 ||
+      d->precision < NVFX_PRECISION_DEFAULT || d->precision > NVFX_PRECISION_INT8 ||
       (d->n_effects > 0 && !d->effects) || (d->n_inputs > 0 && !d->inputs)) {
     set_error(err, 0, 0, "invalid scene description");
     return NVFX_ERROR_ARGUMENT;
@@ -386,7 +387,8 @@ nvfx_status nvfx_scene_create(const nvfx_scene_desc* d, nvfx_scene** out, nvfx_s
     }
     // the scene
     s->opt.threads = d->threads > 0 ? d->threads : 2;
-    s->opt.isa = nfx::compose::best_isa();
+    s->opt.precision = nfx::rt::rollout_precision(static_cast<nvfx_precision>(d->precision));
+    s->opt.isa = nfx::compose::best_isa(s->opt.precision);
     s->opt.overlap = s->opt.threads > 1 && d->overlap != 0;  // default (-1) and 1: on, given a second thread
     s->opt.layers = d->layers != 0;
     for (int i = 0; i < d->n_inputs; ++i) {

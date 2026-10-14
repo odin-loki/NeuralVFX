@@ -12,6 +12,10 @@
 //     run row by row a few rows apart (see detail_step), so their intermediate rows stay in cache;
 //   - the renderer's first layer is linear in features that are themselves interpolated from the coarse grid, so its
 //     coarse part is evaluated per coarse cell; the rest runs on blocks of 16 pixels with the shared dense kernel.
+// At Precision::int8 (study K, docs/REPORT.md §13) the stepper's second convolution (24 x 24 x 9 multiply-adds per cell:
+// two thirds of the stepper's), and with Int8Convs::both its first too, multiply 8-bit integers instead
+// (rt_int8_conv.hpp). Every ISA computes the same codes and integer sums (AVX-512 VNNI, AVX2's pmaddubsw, pairs of 16-bit
+// values elsewhere). (The renderer's 16-unit hidden layer in 8 bits cost as much as in float, so it stays float.)
 // Every buffer is allocated in the constructor.
 
 using rollout::kDirSteps;
@@ -178,6 +182,9 @@ inline V vtanh(V x) {
   const V small = q * z * x + x;
   return a < 0.625f ? small : (x < 0.f ? -big : big);
 }
+
+// Rounding half away from zero, as the reference's int8 path (src/core/rollout.cpp) rounds quantised weights.
+inline int round_away(float x) { return x >= 0.f ? static_cast<int>(x + 0.5f) : -static_cast<int>(0.5f - x); }
 
 // f.template operator()<vf>(x) for the whole blocks of a row of `width` pixels, f.template operator()<float>(x) for the
 // pixels left over.
@@ -390,7 +397,8 @@ class Rollout final : public RolloutRunner {
  public:
   // lean: the buffers that hold nothing from one step (or picture) to the next live in the step scratch rather than in
   // the runner (rt_common.hpp, make_rollout): a smaller runner, the same frames to the bit; render() then needs one too.
-  Rollout(const RolloutEffect& e, int size, bool lean = false) : m_(e.m), h_(e.m.h), S_(size), lean_(lean) {
+  Rollout(const RolloutEffect& e, int size, bool lean = false, Precision prec = Precision::float32, Int8Convs convs = kInt8Convs)
+      : m_(e.m), h_(e.m.h), S_(size), lean_(lean), int8_(prec == Precision::int8), int8_conv1_(int8_ && convs == Int8Convs::both) {
     using namespace rollout;
     R_ = h_.res;
     N_ = R_ * R_;
@@ -458,6 +466,41 @@ class Rollout final : public RolloutRunner {
     map_.act = carve(ni, z(S_) * 2);
     map_.qmin = carve(ni, z(S_));
     map_.qmax = carve(ni, z(S_));
+    if (int8_ && (H_ > 64 || I_ > 64)) throw std::invalid_argument("rollout: int8 takes at most 64 channels");
+    if (int8_) {  // study K: the second convolution's inputs as 7-bit words, planar with a zero border
+      if constexpr (kVnniBuild) {
+        __builtin_cpu_init();
+        vnni_ = __builtin_cpu_supports("avx512vnni");
+      }
+      const bool quads = vnni_ || kW == 8;  // vpdpbusd and pmaddubsw: four values per word; pmaddwd: two
+      const int per = quads ? 4 : 2;
+      qc2_.in = qc2_.out = H_;
+      qc2_.quads = quads;
+      qc2_.words = (H_ + per - 1) / per;
+      qc2_.w.assign(z(H_) * 9 * z(qc2_.words), 0u);
+      qc2_.scale.assign(z(H_), 0.f);
+      qc2_.bias.assign(z(H_), 0.f);
+      qc2_.corr.assign(z(H_), 0);
+      hv_ = (qc2_.words * per + kW - 1) / kW * kW;  // input channels padded to whole words and vectors
+      s1_.assign(z(hv_), 0.f);
+      w2t_.assign(z(H_) * 9 * z(hv_), 0.f);
+      map_.qa = carve(ni, z(qc2_.words) * z(R_ + 2) * z(R_ + 2));
+      if (int8_conv1_) {
+        qc1_.in = I_;
+        qc1_.out = H_;
+        qc1_.quads = quads;
+        qc1_.words = (I_ + per - 1) / per;
+        qc1_.w.assign(z(H_) * 9 * z(qc1_.words), 0u);
+        qc1_.scale.assign(z(H_), 0.f);
+        qc1_.bias.assign(z(H_), 0.f);
+        qc1_.corr.assign(z(H_), 0);
+        iv_ = (qc1_.words * per + kW - 1) / kW * kW;
+        s0_.assign(z(iv_), 0.f);
+        zp0_.assign(z(iv_), 0.f);
+        w1t_.assign(z(H_) * 9 * z(iv_), 0.f);
+        map_.qa1 = carve(ni, z(qc1_.words) * z(R_ + 2) * z(R_ + 2));
+      }
+    }
     if (lean_) {  // the runner's own buffers that keep nothing between steps or pictures
       map_.next = carve(nf, z(N_) * z(C_));
       map_.div = carve(nf, z(N_));
@@ -566,13 +609,17 @@ class Rollout final : public RolloutRunner {
 
   void step(std::span<const float> controls, std::uint64_t seed) override {
     bind();
+    lap_begin();
     reseed(seed);
     rollout::condition(m_, controls, time_, cond_);
     fold();
     coarse_noise(time_ + 0.5f / m_.fps);
+    lap(RolloutProfile::noise);
     coarse_step();
+    lap(RolloutProfile::project);
     if (m_.detail.soften > 0.f) soften_fields();  // study D2: the fine-scale diffusion, before the advection
     detail_step(controls);
+    lap(RolloutProfile::detail);
     time_ += 1.f / m_.fps;
     since_start_ += 1.f / m_.fps;
   }
@@ -580,6 +627,7 @@ class Rollout final : public RolloutRunner {
   void render(const FrameInput& in, std::uint8_t* rgba, std::size_t stride) override {
     using namespace rollout;
     bind_render();
+    lap_begin();
     // directional soot sums on the coarse grid, planar [direction][cell], from the soot with a zero border as wide as
     // the sums are long (zero outside, as the reference)
     static constexpr int dirs[kDirs][2] = {{1, 0}, {1, 1}, {0, 1}, {-1, 1}, {-1, 0}, {-1, -1}, {0, -1}, {1, -1}};
@@ -616,6 +664,7 @@ class Rollout final : public RolloutRunner {
         g1s_[z(i) * z(RH) + z(j)] = s;
       }
     }
+    lap(RolloutProfile::shade_cells);
     render_rows_.reset();
     const std::size_t S = z(S_), Sb = frow_.size() / 2;  // a row, and a row padded to whole blocks
     float* ftn = frow_.data();  // the row's normalised fine features (zero past the end of the row)
@@ -665,6 +714,7 @@ class Rollout final : public RolloutRunner {
         rgba_block(out_.data(), std::min(kB, S_ - x0), in, out_row + 4 * z(x0));
       }
     }
+    lap(RolloutProfile::shade_pixels);
   }
 
   // Premultiplied RGBA floats of a block (planes r, g, b, a of 16) to RGBA8 for its first n pixels, with the optional
@@ -708,6 +758,8 @@ class Rollout final : public RolloutRunner {
     n += curl_.bytes() + swirl_.bytes() + fine_flicker_.bytes();
     for (const auto& f : flicker_) n += f.bytes();
     n += flow_rows_.bytes() + swirl_rows_.bytes() + fac_rows_.bytes() + render_rows_.bytes();
+    n += 4 * (qc2_.w.size() + qc2_.scale.size() + qc2_.bias.size() + qc2_.corr.size() + s1_.size() + w2t_.size());
+    n += 4 * (qc1_.w.size() + qc1_.scale.size() + qc1_.bias.size() + qc1_.corr.size() + s0_.size() + zp0_.size() + w1t_.size());
     for (const auto& r : noise_rows_) n += r.bytes();
     return n;
   }
@@ -742,6 +794,7 @@ class Rollout final : public RolloutRunner {
     scratch_ = own_.get();
   }
   std::array<std::size_t, 2> scratch_need() const override { return need_; }
+  void set_profile(RolloutProfile* p) override { prof_ = p; }
   void transfer_from(const RolloutRunner& other) override {
     const auto* o = dynamic_cast<const Rollout*>(&other);
     if (!o || &o->m_ != &m_) throw std::invalid_argument("rollout: transfer_from needs a runner of the same effect and ISA");
@@ -796,6 +849,26 @@ class Rollout final : public RolloutRunner {
  private:
   static std::size_t z(int v) { return static_cast<std::size_t>(v); }
 
+  // Study K's profile (set_profile): the thread CPU time since the last mark goes to stage s. Nothing without one.
+  static double thread_ms() {
+#if defined(__linux__)
+    timespec t{};
+    clock_gettime(CLOCK_THREAD_CPUTIME_ID, &t);
+    return static_cast<double>(t.tv_sec) * 1e3 + static_cast<double>(t.tv_nsec) * 1e-6;
+#else
+    return std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now().time_since_epoch()).count();
+#endif
+  }
+  void lap_begin() {
+    if (prof_) mark_ = thread_ms();
+  }
+  void lap(RolloutProfile::Stage s) {
+    if (!prof_) return;
+    const double t = thread_ms();
+    prof_->ms[static_cast<std::size_t>(s)] += t - mark_;
+    mark_ = t;
+  }
+
   // The buffers of step() in the scratch in use (which may have been reallocated by fit() since the last step).
   void bind() {
     float* f = scratch_->floats.data();
@@ -820,6 +893,8 @@ class Rollout final : public RolloutRunner {
     act_ = Q(map_.act);
     qmin_ = Q(map_.qmin);
     qmax_ = Q(map_.qmax);
+    qa_ = Q(map_.qa);
+    qa1_ = Q(map_.qa1);
     if (lean_) {
       nx_ = F(map_.next);
       dv_ = F(map_.div);
@@ -941,6 +1016,14 @@ class Rollout final : public RolloutRunner {
     };
     one(L_.w1, L_.b1, L_.g1, L_.e1, I_, w1_, b1_);
     one(L_.w2, L_.b2, L_.g2, L_.e2, H_, w2_, b2_);
+    if (int8_) {  // study K: the folded weights by output, tap and input, for quantise_conv
+      for (int o = 0; o < H_; ++o) {
+        for (int tap = 0; tap < 9; ++tap) {
+          for (int c = 0; c < H_; ++c) w2t_[(z(o) * 9 + z(tap)) * z(hv_) + z(c)] = w2_[(z(o) * z(H_) + z(c)) * 9 + z(tap)];
+          for (int c = 0; c < I_ && int8_conv1_; ++c) w1t_[(z(o) * 9 + z(tap)) * z(iv_) + z(c)] = w1_[(z(o) * z(I_) + z(c)) * 9 + z(tap)];
+        }
+      }
+    }
     std::copy(cond_.begin(), cond_.end(), folded_cond_.begin());
   }
 
@@ -961,13 +1044,26 @@ class Rollout final : public RolloutRunner {
         X_[z(C_ + 3) * plane + q] = (static_cast<float>(y) + 0.5f) / static_cast<float>(R_) * 2.f - 1.f;
       }
     }
-    conv(X_.data(), w1_.data(), b1_.data(), h1_.data(), I_, H_);
-    for (int c = 0; c < H_; ++c) {  // into a zero-bordered buffer for the second convolution
-      for (int y = 0; y < R_; ++y) {
-        std::copy_n(h1_.data() + (z(c) * z(R_) + z(y)) * z(R_), R_, h1p_.data() + (z(c) * z(Pw) + z(y + 1)) * z(Pw) + 1);
-      }
+    constexpr int T = kW == 16 ? 8 : 4;  // study K: output channels per tile of the int8 kernel, two vectors of cells each
+    if (int8_conv1_) {  // study K, Int8Convs::both: the first convolution in 8 bits too
+      quantise_conv1();
+      if (vnni_) qvnni::qconv<T, 2>(qc1_, qa1_.data(), R_, h1_.data());
+      else qmadd::qconv<T, 2>(qc1_, qa1_.data(), R_, h1_.data());
+    } else {
+      conv(X_.data(), w1_.data(), b1_.data(), h1_.data(), I_, H_);
     }
-    conv(h1p_.data(), w2_.data(), b2_.data(), h2_.data(), H_, H_);
+    if (int8_) {  // study K: the second convolution in 8 bits (rt_int8_conv.hpp)
+      quantise_conv2();
+      if (vnni_) qvnni::qconv<T, 2>(qc2_, qa_.data(), R_, h2_.data());
+      else qmadd::qconv<T, 2>(qc2_, qa_.data(), R_, h2_.data());
+    } else {
+      for (int c = 0; c < H_; ++c) {  // into a zero-bordered buffer for the second convolution
+        for (int y = 0; y < R_; ++y) {
+          std::copy_n(h1_.data() + (z(c) * z(R_) + z(y)) * z(R_), R_, h1p_.data() + (z(c) * z(Pw) + z(y + 1)) * z(Pw) + 1);
+        }
+      }
+      conv(h1p_.data(), w2_.data(), b2_.data(), h2_.data(), H_, H_);
+    }
     // the 1x1 output layer, planar: d[k][cell], blocks of 16 cells with the dense kernel, then the cells left over
     int i0 = 0;
     for (; i0 + kB <= N_; i0 += kB) dense(wot_.data(), w + L_.bo, h2_.data() + i0, N_, d_.data() + i0, N_, H_, O_, false);
@@ -987,6 +1083,7 @@ class Rollout final : public RolloutRunner {
       each_block(N_, [&]<class V>(int i) { st<V>(q + i, vtanh<V>(ld<V>(q + i))); });
       for (int i = 0; i < N_; ++i) mid_[z(i) * z(C_) + z(k)] = q[i];
     }
+    lap(RolloutProfile::conv);
     const auto U = [&](int x, int y, int c) { return mid_[(z(std::clamp(y, 0, R_ - 1)) * z(R_) + z(std::clamp(x, 0, R_ - 1))) * z(C_) + z(c)]; };
     for (int y = 0; y < R_; ++y) {
       for (int x = 0; x < R_; ++x) {
@@ -1053,6 +1150,162 @@ class Rollout final : public RolloutRunner {
     } else {
       coarse_.swap(next_);
     }
+  }
+
+  // Study K, Int8Convs::both: the first convolution's inputs (X_: the state over its scales, the noise and the position)
+  // to 8-bit codes with one scale and zero point per channel: a channel with nothing below 0 maps [0, max] to 0 to 255;
+  // any other maps [-a, a] to 1 to 255 around 128, a its largest |value|. The border holds the zero points' codes (the
+  // zero outside the grid), and every weight's share of them is taken off the sums (qc1_.corr). The weights get 7 bits
+  // (+-63), so that AVX2's pairs of products cannot saturate. The reference quantises the same way.
+  void quantise_conv1() {
+    const int I = I_, R = R_, Pw = R + 2, per = qc1_.quads ? 4 : 2, words = qc1_.words, shift = 32 / per;
+    const std::size_t plane = z(Pw) * z(Pw);
+    float inv[64];
+    for (int c = 0; c < I; ++c) {
+      vf vlo{}, vhi{};
+      float lo = 0.f, hi = 0.f;
+      for (int y = 0; y < R; ++y) {
+        const float* r = X_.data() + z(c) * plane + z(y + 1) * z(Pw) + 1;
+        int x = 0;
+        for (; x + kW <= R; x += kW) {
+          const vf v = load(r + x);
+          vlo = vmin<vf>(vlo, v);
+          vhi = vmax<vf>(vhi, v);
+        }
+        for (; x < R; ++x) {
+          lo = std::min(lo, r[x]);
+          hi = std::max(hi, r[x]);
+        }
+      }
+      for (int k = 0; k < kW; ++k) {
+        lo = std::min(lo, vlo[k]);
+        hi = std::max(hi, vhi[k]);
+      }
+      const float a = lo < 0.f ? std::max(-lo, hi) : hi, L = lo < 0.f ? 127.f : 255.f;
+      zp0_[z(c)] = lo < 0.f ? 128.f : 0.f;
+      s0_[z(c)] = a / L;
+      inv[c] = a > 0.f ? L / a : 0.f;
+    }
+    std::int32_t* qa = qa1_.data();
+    for (int wd = 0; wd < words; ++wd) {
+      const int c0 = wd * per, cn = std::min(per, I - c0);
+      std::int32_t border = 0;
+      for (int k = 0; k < cn; ++k) border |= static_cast<std::int32_t>(zp0_[z(c0 + k)]) << (shift * k);
+      std::fill_n(qa + z(wd) * plane, plane, border);
+      for (int y = 0; y < R; ++y) {
+        std::int32_t* o = qa + z(wd) * plane + z(y + 1) * z(Pw) + 1;
+        const float* h = X_.data() + z(c0) * plane + z(y + 1) * z(Pw) + 1;
+        int x = 0;
+        for (; x + kW <= R; x += kW) {
+          vi word{};
+          for (int k = 0; k < cn; ++k) {
+            const vf v = load(h + z(k) * plane + z(x)) * inv[c0 + k];
+            const vi a = __builtin_convertvector(vmax<vf>(v, -v) + 0.5f, vi);  // round_away(v), as the reference
+            word |= ((v < 0.f ? -a : a) + static_cast<std::int32_t>(zp0_[z(c0 + k)])) << (shift * k);
+          }
+          std::memcpy(o + x, &word, sizeof word);
+        }
+        for (; x < R; ++x) {
+          std::int32_t word = 0;
+          for (int k = 0; k < cn; ++k) word |= (round_away(h[z(k) * plane + z(x)] * inv[c0 + k]) + static_cast<std::int32_t>(zp0_[z(c0 + k)])) << (shift * k);
+          o[x] = word;
+        }
+      }
+    }
+    quantise_weights(qc1_, w1t_.data(), iv_, s0_.data(), zp0_.data(), b1_.data(), 63);
+  }
+
+  // The weights of a convolution at int8 (qc): the folded weights wt [out][tap][n] (n input channels padded to whole
+  // vectors) times the activations' scales s, to `top` levels either side with one scale per output channel, rounded
+  // half away from zero (as the reference), packed in the words' order; and the zero points' share zp of the sums.
+  void quantise_weights(QConv& qc, const float* wt0, int n, const float* s, const float* zp, const float* bias, int top) {
+    typedef std::int8_t vq8 __attribute__((vector_size(kW)));
+    typedef std::int16_t vq16 __attribute__((vector_size(2 * kW)));
+    auto* bytes = reinterpret_cast<unsigned char*>(qc.w.data());
+    const std::size_t lane = qc.quads ? 1 : 2, row = z(qc.words) * 4;  // bytes per code, bytes per (output, tap)
+    const vi lo = vi{} - top, hi = vi{} + top;
+    const float L = static_cast<float>(top);
+    for (int o = 0; o < qc.out; ++o) {
+      const float* wt = wt0 + z(o) * 9 * z(n);
+      vf m{};
+      for (int tap = 0; tap < 9; ++tap) {
+        for (int c = 0; c < n; c += kW) {
+          const vf w = load(wt + z(tap) * z(n) + z(c)) * load(s + c);
+          m = vmax<vf>(m, vmax<vf>(w, -w));
+        }
+      }
+      float mx = 0.f;
+      for (int k = 0; k < kW; ++k) mx = std::max(mx, m[k]);
+      const float r = mx > 0.f ? L / mx : 0.f;
+      qc.scale[z(o)] = mx / L;
+      qc.bias[z(o)] = bias[o];
+      vf corr{};
+      for (int tap = 0; tap < 9; ++tap) {
+        unsigned char* q = bytes + (z(o) * 9 + z(tap)) * row;
+        for (int c = 0; c < n; c += kW) {
+          const vf x = load(wt + z(tap) * z(n) + z(c)) * load(s + c) * r;
+          const vi a = __builtin_convertvector(vmax<vf>(x, -x) + 0.5f, vi);  // round_away(x)
+          vi v = x < 0.f ? -a : a;
+          v = v < lo ? lo : v > hi ? hi : v;
+          if (zp) corr += __builtin_convertvector(v, vf) * load(zp + c);  // exact: small integers
+          const std::size_t at = z(c) * lane;
+          if (at >= row) continue;
+          const std::size_t len = std::min(z(kW) * lane, row - at);
+          if (qc.quads) {
+            const vq8 b = __builtin_convertvector(v, vq8);
+            std::memcpy(q + at, &b, len);
+          } else {
+            const vq16 b = __builtin_convertvector(v, vq16);
+            std::memcpy(q + at, &b, len);
+          }
+        }
+      }
+      float k = 0.f;
+      for (int l = 0; l < kW; ++l) k += corr[l];
+      qc.corr[z(o)] = static_cast<std::int32_t>(k);
+    }
+  }
+
+  // Study K: the second convolution's inputs (h1_, after the ReLU) to 7-bit codes with one scale per channel (its largest
+  // value maps to 127), four (quads) or two (pairs) to a word, planar with a zero border (qa_); and its weights with
+  // those scales folded in, to 8 bits with one scale per output channel (its largest |w| maps to 127; qc2_). The
+  // reference (rollout::coarse_step with rollout::Int8) quantises the same way. Every step: the scales follow the state.
+  void quantise_conv2() {
+    const int H = H_, R = R_, N = N_, Pw = R + 2, per = qc2_.quads ? 4 : 2, words = qc2_.words, shift = 32 / per;
+    const std::size_t plane = z(Pw) * z(Pw);
+    float inv[64];  // 1 / scale per channel (H <= 64)
+    for (int c = 0; c < H; ++c) {
+      const float* h = h1_.data() + z(c) * z(N);
+      vf m{};
+      int i = 0;
+      for (; i + kW <= N; i += kW) m = vmax<vf>(m, load(h + i));
+      float mx = 0.f;
+      for (int k = 0; k < kW; ++k) mx = std::max(mx, m[k]);
+      for (; i < N; ++i) mx = std::max(mx, h[i]);
+      s1_[z(c)] = mx / 127.f;
+      inv[c] = mx > 0.f ? 127.f / mx : 0.f;
+    }
+    std::int32_t* qa = qa_.data();
+    std::fill_n(qa, z(words) * plane, 0);
+    for (int wd = 0; wd < words; ++wd) {
+      const int c0 = wd * per, cn = std::min(per, H - c0);
+      for (int y = 0; y < R; ++y) {
+        std::int32_t* o = qa + z(wd) * plane + z(y + 1) * z(Pw) + 1;
+        const float* h = h1_.data() + z(c0) * z(N) + z(y) * z(R);
+        int x = 0;
+        for (; x + kW <= R; x += kW) {
+          vi word{};
+          for (int k = 0; k < cn; ++k) word |= __builtin_convertvector(load(h + z(k) * z(N) + z(x)) * inv[c0 + k] + 0.5f, vi) << (shift * k);
+          std::memcpy(o + x, &word, sizeof word);
+        }
+        for (; x < R; ++x) {
+          std::int32_t word = 0;
+          for (int k = 0; k < cn; ++k) word |= static_cast<std::int32_t>(h[z(k) * z(N) + z(x)] * inv[c0 + k] + 0.5f) << (shift * k);
+          o[x] = word;
+        }
+      }
+    }
+    quantise_weights(qc2_, w2t_.data(), hv_, s1_.data(), nullptr, b2_.data(), 127);
   }
 
   // The stepper's 3x3 convolutions (with ReLU) on the coarse grid: the shared kernel, with six output channels per
@@ -1562,7 +1815,7 @@ class Rollout final : public RolloutRunner {
   };
   struct {
     Part X, h1p, h1, h2, d, mid, rec, td, fg, cs_t, cs_d, wx, wy;  // floats
-    Part off, ext, act, qmin, qmax;                                 // integers
+    Part off, ext, act, qmin, qmax, qa, qa1;                        // integers (qa, qa1: study K's int8 words)
     Part next, div, tmp, noise, fac, swl, dirsum, soot, g1;         // lean runners only (floats)
   } map_;
   std::array<std::size_t, 2> need_{};
@@ -1614,4 +1867,19 @@ class Rollout final : public RolloutRunner {
   std::uint64_t seed_ = 0;
   bool seeded_ = false;
   float time_ = 0.f, since_start_ = 0.f;
+  RolloutProfile* prof_ = nullptr;  // study K's profile (set_profile), or none
+  double mark_ = 0.0;
+  // Study K: Precision::int8. The second convolution in 8 bits: qc2_ its weights, quantised every step with the
+  // activations' per-channel scales folded in; qa_ its inputs as words (in the scratch).
+  bool int8_ = false, int8_conv1_ = false, vnni_ = false;
+  QConv qc2_;
+  int hv_ = 0;           // input channels padded to whole words and vectors
+  AlignedFloats s1_;     // the activations' scale per input channel (hv_; 0 past H_)
+  AlignedFloats w2t_;    // the folded weights [out][tap][hv_] (0 past H_), rebuilt with them
+  std::span<std::int32_t> qa_;
+  // Int8Convs::both: the first convolution too (as the second; s0_ and zp0_ its inputs' scales and zero points).
+  QConv qc1_;
+  int iv_ = 0;
+  AlignedFloats s0_, zp0_, w1t_;
+  std::span<std::int32_t> qa1_;
 };

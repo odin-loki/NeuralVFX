@@ -138,6 +138,7 @@ typedef struct nvfx_stage_desc {
   int n_effects;
   int layers;                 /* 1: the engine layers too (nvfx_scene_render_layer on nvfx_stage_scene: lit sprites,
                                  docs/ENGINES.md §11); 0 (default): the picture alone */
+  int precision;              /* the learned effects' nvfx_precision, as nvfx_scene_desc's (default 0: the runtime's) */
 } nvfx_stage_desc;
 
 typedef enum nvfx_fx_state {

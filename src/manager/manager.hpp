@@ -155,6 +155,7 @@ struct Model {
   float fps = 30.f, advect = 1.f;
   bool loop = true;
   nvfx_interp interp = NVFX_INTERP_CROSSFADE;  // drawing between keyframes (the manager's, or the model's own)
+  rt::Precision precision = rt::Precision::float32;  // its simulations' (study K)
   std::int64_t shard = 0;      // frames per shard (0: one continuous rollout)
   float step_factor = 1.f;     // steps per frame on average (the next shard's warm-up and pre-roll)
   float render_factor = 1.f;   // pictures per keyframe on average (the shard crossfades)

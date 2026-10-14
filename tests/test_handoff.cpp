@@ -155,6 +155,7 @@ TEST(Handoff, RuntimeShowsTheSimulatorsLookFirst) {
   EXPECT_EQ(nvfx_instance_set_handoff(with, -1, 2), NVFX_ERROR_ARGUMENT);
   ASSERT_EQ(nvfx_instance_set_handoff(with, N, M), NVFX_OK);
   for (nvfx_instance* in : {with, without}) {
+    ASSERT_EQ(nvfx_instance_set_precision(in, NVFX_PRECISION_FLOAT), NVFX_OK);  // the reference below is the float runner
     nvfx_instance_set_controls(in, m.starts[0].controls.data(), 3);
     ASSERT_EQ(nvfx_instance_set_variation(in, 0), NVFX_OK);
   }
