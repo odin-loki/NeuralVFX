@@ -15,7 +15,7 @@ const RolloutEffect* rollout_of(const nvfx_effect* e);
 // it changes what the instance runs. NVFX_ERROR_ARGUMENT for a frame model's instance.
 nvfx_status set_rollout_int8_convs(nvfx_instance* in, Int8Convs convs);
 
-// The precision an nvfx_precision asks of a rollout effect (DEFAULT: kRolloutPrecision), and the ISA a rollout runner
+// The precision an nvfx_precision asks of a rollout effect (DEFAULT: default_rollout_precision()), and the ISA a rollout runner
 // at a precision takes: the one forced (nvfx_set_isa), else AVX2; at int8 with no ISA forced, the AVX-512 build where
 // the CPU has VNNI. Scenes and the effect manager create their runners with these, as instances do.
 Precision rollout_precision(nvfx_precision p);

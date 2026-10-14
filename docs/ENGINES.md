@@ -145,7 +145,8 @@ is the same; what differs:
   realistically (the detail spectrum within 0.001, motion within about 1%, the average picture within 0.03 dB) on all
   eleven trained effects. It pays with VNNI: a 128 x 128 frame costs about a tenth less than float on the same build
   (18% less at 64 px, 4% at 256 px), and the AVX-512 build itself is a fifth faster than the AVX2 build float runs on
-  by default; without VNNI (AVX2 alone) int8 saves 1 to 5%, so an engine on such a CPU may as well set FLOAT.
+  by default; without VNNI (AVX2 alone) int8 saves 1 to 5%, so there the default is FLOAT (the default is resolved per
+  CPU: int8 where the CPU has AVX-512 VNNI and no other ISA is forced, float elsewhere).
   `nvfx_instance_set_precision(inst, NVFX_PRECISION_FLOAT)` plays the float network (the reference, on AVX2 by
   default); a change starts the instance's timeline again. Scenes (`nvfx_scene_desc.precision`), the library's stages
   (`nvfx_stage_desc.precision`) and the effect manager (`nvfx_manager_model_desc.precision`) choose it the same way.
@@ -408,7 +409,7 @@ between copies (optionally offset in time), pauses what is off screen, shows uni
 proxy simulations when the budget is short, and runs the work on its own threads or the engine's job system, with the
 same pictures on any number of threads and no allocation per frame. At a locked level its frames are `nvfx_render`'s
 to the bit. What it costs and what it looks like at a given budget: MANAGER.md §1 and §7. Each model's simulations
-run at `nvfx_manager_model_desc.precision` (int8 by default, as instances; REPORT.md §13); the planner's default costs
+run at `nvfx_manager_model_desc.precision` (the instances' default: int8 where the CPU has AVX-512 VNNI, float elsewhere; REPORT.md §13); the planner's default costs
 are float's on AVX2, so at int8 a crowd uses less than its budget unless `nvfx_manager_calibrate` measures the machine
 (the 4 ms crowd of MANAGER.md §7 took 2.8 instead of 4.1 ms per tick with the same plan, provisional).
 

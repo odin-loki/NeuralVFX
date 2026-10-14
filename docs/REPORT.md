@@ -1540,8 +1540,8 @@ instances' int8 buffers).
 
 ### 13.7 The default and the frozen tests
 
-By the rule (§13.3, §13.5) **rollout effects play at int8 by default**: `rt::kRolloutPrecision` is `Precision::int8`,
-which `NVFX_PRECISION_DEFAULT` resolves to for rollout instances, scenes, the library's stages, the effect manager's
+By the rule (§13.3, §13.5) **rollout effects play at int8 by default where the CPU has AVX-512 VNNI**:
+`rt::default_rollout_precision()` is `Precision::int8` there (and float elsewhere, below), which `NVFX_PRECISION_DEFAULT` resolves to for rollout instances, scenes, the library's stages, the effect manager's
 models and the tools (`--precision float` gives the float path). With no ISA forced an int8 instance takes the AVX-512
 build where the CPU has VNNI, else the CPU's best build, as before; float instances keep the AVX2 build. The float path
 is unchanged to the bit: its frozen keyframes still match.
@@ -1573,8 +1573,11 @@ is unchanged to the bit: its frozen keyframes still match.
   off the network's stage (0.168 to 0.101 ms) and 10% off a 128 x 128 frame.
 - **Without VNNI it does not pay** (1 to 5% on AVX2). The default follows the committed rule, which asked for a gain on
   the AVX-512 build only; on a CPU without VNNI the default int8 costs its small quality difference for nothing, and an
-  engine there can set `NVFX_PRECISION_FLOAT`. Resolving the default per CPU (int8 with VNNI, float without) would be
-  the natural next step; it was not part of the rule, so it is not done.
+  engine there would set `NVFX_PRECISION_FLOAT`. **So the default is resolved per CPU** (14 October 2026, after the
+  study): the rule's cost condition is about the build int8 runs on, and it holds only where that build is AVX-512
+  with VNNI (0.903 [0.885, 0.923] at 128 px; 0.989 on AVX2, a tie). Where the CPU lacks VNNI, or another ISA is forced
+  with `nvfx_set_isa`, `NVFX_PRECISION_DEFAULT` is float. The frozen tests name their precision, so none changed;
+  `RolloutRuntime.PrecisionIsASettingOfRolloutInstances` checks that DEFAULT gives the frames of the one chosen.
 - **Most of the speed of the change is the AVX-512 build.** Float on the AVX-512 build is 0.80 of float on AVX2 at
   every size, more than int8 adds on top. Float rollouts still take AVX2 by default, a choice made before the broadcast
   fix of §7. They should be re-timed on a quiet machine and moved to the AVX-512 build if this holds; float would then

@@ -145,7 +145,7 @@ int main(int argc, char** argv) try {
   sc::Options opt;
   opt.threads = A.threads;
   if (!A.precision.empty() && A.precision != "float" && A.precision != "int8") throw std::invalid_argument("--precision float or int8");
-  opt.precision = A.precision.empty() ? nfx::rt::kRolloutPrecision : A.precision == "int8" ? nfx::rt::Precision::int8 : nfx::rt::Precision::float32;
+  opt.precision = A.precision.empty() ? nfx::rt::default_rollout_precision() : A.precision == "int8" ? nfx::rt::Precision::int8 : nfx::rt::Precision::float32;
   opt.isa = compose::best_isa(opt.precision);
   opt.overlap = A.overlap;
   opt.shared_scratch = !A.own_scratch;

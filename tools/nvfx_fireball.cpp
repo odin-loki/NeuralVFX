@@ -253,7 +253,7 @@ int main(int argc, char** argv) try {
     if (nvfx_set_isa(want) != NVFX_OK) throw std::runtime_error("this CPU cannot run --isa " + A.isa);
   }
   if (!A.precision.empty() && A.precision != "float" && A.precision != "int8") throw std::invalid_argument("--precision float or int8");
-  const rt::Precision prec = A.precision.empty() ? rt::kRolloutPrecision : A.precision == "int8" ? rt::Precision::int8 : rt::Precision::float32;
+  const rt::Precision prec = A.precision.empty() ? rt::default_rollout_precision() : A.precision == "int8" ? rt::Precision::int8 : rt::Precision::float32;
   const Isa isa = best_isa(prec);
   const auto setup0 = Clock::now();
   rt::RolloutEffect EX = load(A.models / "explosion.nvfx"), SM = load(A.models / "smoke.nvfx"), FI = load(A.models / "fire.nvfx");

@@ -414,7 +414,13 @@ float prepare(nvfx_instance& in, double seconds, bool allow_drift) {
 nfx::rt::Precision nfx::rt::rollout_precision(nvfx_precision p) {
   if (p == NVFX_PRECISION_FLOAT) return Precision::float32;
   if (p == NVFX_PRECISION_INT8) return Precision::int8;
-  return kRolloutPrecision;
+  return default_rollout_precision();
+}
+
+nfx::rt::Precision nfx::rt::default_rollout_precision() {
+  const auto forced = static_cast<nvfx_isa>(g_forced_isa.load());
+  const bool vnni = (forced == NVFX_ISA_AUTO || forced == NVFX_ISA_AVX512) && cpu_has(NVFX_ISA_AVX512) && cpu_has_vnni();
+  return vnni ? Precision::int8 : Precision::float32;
 }
 
 nvfx_isa nfx::rt::rollout_isa(Precision p) { return runner_isa(p, static_cast<nvfx_isa>(g_forced_isa.load())); }
