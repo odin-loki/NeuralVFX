@@ -1,16 +1,20 @@
 // The NeuralVFX nodes for Godot 4 (docs/ENGINES.md §8), over the C API of libnvfx:
 //   NeuralVFXScene   plays a scene script (docs/COMPOSE.md §4) into an ImageTexture; GDScript reads its fields (heat,
 //                    soot, velocity) and drives it (inputs, rules, modules) while it plays;
+//   NeuralVFXStage   a NeuralVFXScene whose scene is a stage of the effect library (docs/LIBRARY.md): it lists the
+//                    catalogue's effects and spawns, moves, drives and stops them while it plays;
 //   NeuralVFXEffect  plays one effect (an .nvfx file: a frame model or a rollout effect) into an ImageTexture.
 // Files are read with FileAccess (res://, user:// or absolute paths), so the nodes work from an exported package too.
 #pragma once
 
 #include <neuralfx/nvfx.h>
+#include <neuralfx/nvfx_library.h>
 #include <neuralfx/nvfx_scene.h>
 
 #include <godot_cpp/classes/image.hpp>
 #include <godot_cpp/classes/image_texture.hpp>
 #include <godot_cpp/classes/node.hpp>
+#include <godot_cpp/variant/array.hpp>
 #include <godot_cpp/variant/dictionary.hpp>
 #include <godot_cpp/variant/packed_byte_array.hpp>
 #include <godot_cpp/variant/packed_float32_array.hpp>
@@ -92,11 +96,16 @@ class NeuralVFXScene : public Node {
 
  protected:
   static void _bind_methods();
+  // What a subclass changes: where the scene comes from (the script, by default) and how it goes.
+  virtual bool can_load() const { return !scene_script_.is_empty(); }
+  virtual nvfx_scene* create_scene();  // nullptr after fail()
+  virtual void release_scene();        // frees scene_
+  virtual void restart_scene();        // back to time 0
+  void fail(const String& message, int line = 0, int column = 0);
+  nvfx_scene* scene_ = nullptr;
 
  private:
-  void fail(const String& message, int line = 0, int column = 0);
   void draw();
-  nvfx_scene* scene_ = nullptr;
   String scene_script_, effects_dir_, error_;
   int error_line_ = 0, error_column_ = 0;
   int threads_ = 2;
@@ -107,6 +116,59 @@ class NeuralVFXScene : public Node {
   PackedByteArray pixels_;
   Ref<Image> image_;
   Ref<ImageTexture> texture_;
+};
+
+class NeuralVFXStage : public NeuralVFXScene {
+  GDCLASS(NeuralVFXStage, NeuralVFXScene)
+
+ public:
+  NeuralVFXStage() = default;
+  ~NeuralVFXStage() override;
+
+  // Properties (a change takes effect at the next load_scene()): the catalogue (a folder of .nvfxl files), its effects'
+  // folder (effects_dir, the scene's), the picture and the ground, and the rooms: {"campfire": 4, "grenade": [8, true]}
+  // (how many of each may play at once; with true, a spawn when all play replaces the oldest).
+  void set_library_dir(const String& path) { library_dir_ = path; }
+  String get_library_dir() const { return library_dir_; }
+  void set_stage_size(const Vector2i& size) { stage_size_ = size; }
+  Vector2i get_stage_size() const { return stage_size_; }
+  void set_ground(double y) { ground_ = y; }
+  double get_ground() const { return ground_; }
+  void set_rooms(const Dictionary& rooms) { rooms_ = rooms; }
+  Dictionary get_rooms() const { return rooms_; }
+
+  // The catalogue (read by open_library(), or by load_scene()).
+  bool open_library();
+  PackedStringArray list_effects() const;
+  PackedStringArray get_categories() const;
+  Dictionary get_effect_info(const String& effect) const;  // category, description, models, elements, size, ...
+
+  // Instances (handles: 0 is none).
+  int64_t spawn(const String& effect, const Vector2& at, double scale = 1.0, double time = -1.0);
+  bool set_param(int64_t fx, const String& param, double value);
+  double get_param(int64_t fx, const String& param) const;
+  bool move_fx(int64_t fx, const Vector2& at);
+  bool stop(int64_t fx, double time = -1.0);
+  Dictionary get_fx_info(int64_t fx) const;  // state ("waiting", "playing", "ended", "none"), effect, position, ...
+  int free_rooms(const String& effect) const;
+  bool set_camera(const Vector2& at);
+  String get_stage_script() const;
+
+ protected:
+  static void _bind_methods();
+  bool can_load() const override { return !library_dir_.is_empty(); }
+  nvfx_scene* create_scene() override;
+  void release_scene() override;
+  void restart_scene() override;
+
+ private:
+  void close_library();
+  nvfx_library* library_ = nullptr;
+  nvfx_stage* stage_ = nullptr;
+  String library_dir_;
+  Vector2i stage_size_{960, 540};
+  double ground_ = 0.0;
+  Dictionary rooms_;
 };
 
 class NeuralVFXEffect : public Node {

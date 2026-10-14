@@ -1,4 +1,4 @@
-// The GDExtension's entry point: registers NeuralVFXScene and NeuralVFXEffect (nvfx_nodes.hpp).
+// The GDExtension's entry point: registers NeuralVFXScene, NeuralVFXStage and NeuralVFXEffect (nvfx_nodes.hpp).
 #include "nvfx_nodes.hpp"
 
 #include <gdextension_interface.h>
@@ -14,6 +14,7 @@ namespace {
 void initialize(ModuleInitializationLevel level) {
   if (level != MODULE_INITIALIZATION_LEVEL_SCENE) return;
   GDREGISTER_CLASS(NeuralVFXScene);
+  GDREGISTER_CLASS(NeuralVFXStage);
   GDREGISTER_CLASS(NeuralVFXEffect);
 }
 

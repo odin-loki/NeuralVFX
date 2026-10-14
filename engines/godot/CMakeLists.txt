@@ -1,4 +1,5 @@
-# The Godot 4 GDExtension (docs/ENGINES.md §8): the NeuralVFXScene and NeuralVFXEffect nodes over libnvfx's C API.
+# The Godot 4 GDExtension (docs/ENGINES.md §8): the NeuralVFXScene, NeuralVFXStage and NeuralVFXEffect nodes over libnvfx's
+# C API (the scene API and the effect library's).
 # Optional (NEURALFX_BUILD_GODOT=ON): godot-cpp is fetched at a pinned tag and built with a build profile (only the
 # engine classes the nodes use); its binding generator needs Python 3. The extension and libnvfx are copied into the
 # demo project's bin/ (NEURALFX_GODOT_BIN), where demo/neuralvfx.gdextension finds them. engines/godot/test.sh builds
@@ -19,7 +20,7 @@ FetchContent_Declare(godot-cpp
   SYSTEM)
 FetchContent_MakeAvailable(godot-cpp)
 
-add_library(nvfx_godot SHARED src/register_types.cpp src/nvfx_scene_node.cpp src/nvfx_effect_node.cpp)
+add_library(nvfx_godot SHARED src/register_types.cpp src/nvfx_scene_node.cpp src/nvfx_stage_node.cpp src/nvfx_effect_node.cpp)
 target_link_libraries(nvfx_godot PRIVATE godot::cpp nvfx_shared)
 # C++17 as godot-cpp; hidden symbols but the entry point; libnvfx found next to the extension.
 set_target_properties(nvfx_godot PROPERTIES CXX_STANDARD 17 CXX_EXTENSIONS OFF CXX_VISIBILITY_PRESET hidden VISIBILITY_INLINES_HIDDEN ON

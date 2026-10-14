@@ -1,6 +1,6 @@
 # Where the demo's files are: the arguments after "--" on Godot's command line (--script FILE --models DIR --out PNG
-# --frames N --reference PNG), else the repository's fireball script and the study D effects in $NEURALVFX_DATA (default
-# ~/nvfx-data).
+# --frames N --reference PNG --library DIR --library_models DIR), else the repository's fireball script and effect
+# library, the study D effects and the library's effects in $NEURALVFX_DATA (default ~/nvfx-data).
 extends RefCounted
 
 
@@ -15,6 +15,8 @@ static func args() -> Dictionary:
 		"out": "user://neuralvfx_frame.png",
 		"frames": 45,
 		"reference": "",
+		"library": repo.path_join("library"),
+		"library_models": data.path_join("library/models"),
 	}
 	var a := OS.get_cmdline_user_args()
 	var i := 0
