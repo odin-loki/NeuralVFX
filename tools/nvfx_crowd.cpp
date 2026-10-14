@@ -129,14 +129,25 @@ void composite(const nvfx_manager* m, const std::vector<Thing>& things, const Ca
     if (nvfx_manager_get_picture(m, dr.t->h, &p) != NVFX_OK || !p.rgba || !p.visible) continue;
     const int x0 = static_cast<int>(std::floor(dr.sx - 0.5f * dr.px)), y0 = static_cast<int>(std::floor(dr.sy - 0.5f * dr.px));
     const int n = std::max(1, static_cast<int>(dr.px));
+    const float k = static_cast<float>(p.size) / static_cast<float>(n);
     for (int j = std::max(0, -y0); j < n && y0 + j < kH; ++j) {
-      const int sy = std::min(p.size - 1, j * p.size / n);
-      for (int i = std::max(0, -x0); i < n && x0 + i < kW; ++i) {
-        const int sx = std::min(p.size - 1, i * p.size / n);
-        const std::uint8_t* s = p.rgba + sz(sy) * p.stride + sz(sx) * 4;
-        if (s[3] == 0 && s[0] == 0 && s[1] == 0 && s[2] == 0) continue;
+      const float fy = std::clamp((static_cast<float>(j) + 0.5f) * k - 0.5f, 0.f, static_cast<float>(p.size - 1));
+      const int y = std::min(static_cast<int>(fy), p.size - 2);
+      const float wy = fy - static_cast<float>(y);
+      for (int i = std::max(0, -x0); i < n && x0 + i < kW; ++i) {  // bilinear, as a GPU draws a sprite
+        const float fx = std::clamp((static_cast<float>(i) + 0.5f) * k - 0.5f, 0.f, static_cast<float>(p.size - 1));
+        const int x = std::min(static_cast<int>(fx), p.size - 2);
+        const float wx = fx - static_cast<float>(x);
+        const std::uint8_t* q = p.rgba + sz(y) * p.stride + sz(x) * 4;
+        const std::uint8_t* r = q + p.stride;
+        float s[4];
+        for (int c = 0; c < 4; ++c) {
+          const float top = q[c] + wx * static_cast<float>(q[4 + c] - q[c]), bot = r[c] + wx * static_cast<float>(r[4 + c] - r[c]);
+          s[c] = top + wy * (bot - top);
+        }
+        if (s[3] < 0.5f && s[0] < 0.5f && s[1] < 0.5f && s[2] < 0.5f) continue;
         std::uint8_t* d = img.pixel(x0 + i, y0 + j);
-        for (int c = 0; c < 3; ++c) d[c] = static_cast<std::uint8_t>(std::min(255, s[c] + d[c] * (255 - s[3]) / 255));
+        for (int c = 0; c < 3; ++c) d[c] = static_cast<std::uint8_t>(std::min(255.f, s[c] + static_cast<float>(d[c]) * (255.f - s[3]) / 255.f));
       }
     }
   }
@@ -327,7 +338,7 @@ int main(int argc, char** argv) try {
     csv << "tick,wall_ms,cpu_ms,jobs_ms,planned_ms,plan_ms,instances,visible,sims,paused,proxy_sims,proxied,shared,updated,skipped,held,interpolated,steps,renders\n";
   }
   const int ticks = static_cast<int>(seconds * fps);
-  std::vector<double> wall, cpu, jobs, planned, plan;
+  std::vector<double> wall, cpu, jobs, planned, plan, overhead;
   std::array<std::array<double, 4>, 4> lod{};
   double visible = 0, proxied = 0, sharedv = 0, sims = 0, paused = 0, skipped = 0, held = 0, interp = 0, steps = 0, inst = 0;
   std::size_t memory = 0;
@@ -399,6 +410,7 @@ int main(int argc, char** argv) try {
       jobs.push_back(st.jobs_ms);
       planned.push_back(st.planned_ms);
       plan.push_back(st.plan_ms);
+      overhead.push_back(st.overhead_ms);
       for (int i = 0; i < 4; ++i) {
         for (int j = 0; j < 4; ++j) lod[sz(i)][sz(j)] += st.lod[i][j];
       }
@@ -440,11 +452,11 @@ int main(int argc, char** argv) try {
   const std::string label = a.str("label", "crowd");
   std::println(
       "{}: {:.0f} instances ({:.0f} visible), {:.0f} s at {} Hz, budget {} ms, {} thread(s): tick wall median {:.2f} ms, p99 {:.2f}; CPU per tick median "
-      "{:.2f}, p99 {:.2f}, mean {:.2f} ms ({:.0f}% of the budget); jobs {:.2f} ms; planned {:.2f}; plan {:.2f}",
+      "{:.2f}, p99 {:.2f}, mean {:.2f} ms ({:.0f}% of the budget); jobs {:.2f} ms; planned {:.2f}; plan {:.2f}; planning on the calling thread {:.3f} ms",
       label, inst / n, visible / n, seconds, fps, d.budget_ms > 1e8f ? std::string("unlimited") : std::format("{:.1f}", d.budget_ms), threads, percentile(wall, 0.5),
       percentile(wall, 0.99), percentile(cpu, 0.5), percentile(cpu, 0.99), std::ranges::fold_left(cpu, 0.0, std::plus{}) / n,
       d.budget_ms > 1e8f ? 0.0 : 100.0 * (std::ranges::fold_left(cpu, 0.0, std::plus{}) / n) / d.budget_ms, std::ranges::fold_left(jobs, 0.0, std::plus{}) / n,
-      std::ranges::fold_left(planned, 0.0, std::plus{}) / n, mean_plan);
+      std::ranges::fold_left(planned, 0.0, std::plus{}) / n, mean_plan, std::ranges::fold_left(overhead, 0.0, std::plus{}) / n);
   std::println("{}: simulations {:.1f} ({:.1f} paused), proxied instances {:.1f}, sharing {:.1f}; per second: {:.0f} steps, {:.1f} updates skipped, {:.1f} held, "
                "{:.0f} pictures interpolated; levels (sims at 30/15/10/7.5 Hz): {}; memory {:.1f} MB (manager), peak RSS {:.1f} MB",
                label, sims / n, paused / n, proxied / n, sharedv / n, steps / n * fps, skipped / n * fps, held / n * fps, interp / n * fps, lods,
@@ -455,7 +467,7 @@ int main(int argc, char** argv) try {
     std::ofstream o(sp, std::ios::app);
     if (fresh) {
       o << "label,instances,visible,seconds,fps,budget_ms,threads,wall_median,wall_p99,cpu_median,cpu_p99,cpu_mean,jobs_mean,planned_mean,plan_mean,sims,paused,"
-           "proxied,sharing,steps_per_s,skipped_per_s,held_per_s,interpolated_per_s";
+           "proxied,sharing,steps_per_s,skipped_per_s,held_per_s,interpolated_per_s,overhead_mean";
       for (int i = 0; i < 4; ++i) {
         for (const char* r : {"30", "15", "10", "7.5"}) o << std::format(",lod{}_{}", 32 << i, r);
       }
@@ -466,6 +478,7 @@ int main(int argc, char** argv) try {
                      percentile(cpu, 0.5), percentile(cpu, 0.99), std::ranges::fold_left(cpu, 0.0, std::plus{}) / n, std::ranges::fold_left(jobs, 0.0, std::plus{}) / n,
                      std::ranges::fold_left(planned, 0.0, std::plus{}) / n, mean_plan, sims / n, paused / n, proxied / n, sharedv / n, steps / n * fps,
                      skipped / n * fps, held / n * fps, interp / n * fps);
+    o << std::format(",{:.4f}", std::ranges::fold_left(overhead, 0.0, std::plus{}) / n);
     for (int i = 0; i < 4; ++i) {
       for (int j = 0; j < 4; ++j) o << std::format(",{:.2f}", lod[sz(i)][sz(j)] / n);
     }

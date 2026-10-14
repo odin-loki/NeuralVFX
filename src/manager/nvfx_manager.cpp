@@ -37,9 +37,7 @@ void nvfx_manager_desc_init(nvfx_manager_desc* d) {
   d->interp = NVFX_INTERP_DEFAULT;
   d->max_size = 256;
   d->texel_scale = 1.f;
-  d->rate_px[0] = 96.f;
-  d->rate_px[1] = 48.f;
-  d->rate_px[2] = 24.f;
+  d->rate_px[0] = d->rate_px[1] = d->rate_px[2] = 0.f;  // 30 Hz wherever the budget allows (docs/MANAGER.md §6)
   d->hysteresis = 0.15f;
   d->min_dwell = 1.f;
   d->catchup_frames = 8.f;
@@ -83,6 +81,7 @@ void nvfx_manager_model_desc_init(nvfx_manager_model_desc* d) {
   d->proxy_size = 64;
   d->proxy_rate_div = 4;
   d->shard_seconds = 6.f;
+  d->interp = NVFX_INTERP_DEFAULT;
 }
 
 nvfx_status nvfx_manager_add_model(nvfx_manager* m, const nvfx_effect* effect, const nvfx_manager_model_desc* desc, int* model) {

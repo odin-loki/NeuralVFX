@@ -44,8 +44,7 @@ constexpr std::array<float, kLevels> kStepMs{0.33f, 0.36f, 0.48f, 1.05f};
 constexpr std::array<float, kLevels> kRenderMs{0.064f, 0.11f, 0.30f, 1.30f};
 constexpr std::array<float, kLevels> kFadeMs{0.0007f, 0.0023f, 0.009f, 0.031f};
 constexpr std::array<float, kLevels> kMotionMs{0.021f, 0.082f, 0.335f, 1.35f};
-constexpr nvfx_interp kDefaultInterp = NVFX_INTERP_CROSSFADE;
-constexpr std::array<float, 3> kRatePx{96.f, 48.f, 24.f};
+constexpr nvfx_interp kDefaultInterp = NVFX_INTERP_CROSSFADE;  // the quality study's choice (docs/MANAGER.md §5.3)
 
 struct ShardPlan {
   int index = 0;
@@ -159,7 +158,7 @@ nvfx_status Manager::add_model(const nvfx_effect* fx, const nvfx_manager_model_d
   if (!re) return NVFX_ERROR_UNSUPPORTED;
   if (d.max_sims < 1 || d.max_sims > 4096 || d.history < 0 || d.history > 256 || d.proxy_steps < 1 || d.proxy_steps > 16 || d.proxy_rate_div < 1 ||
       d.proxy_rate_div > kMaxDiv || !(d.shard_seconds > 0.f) || level_of_size(d.proxy_size) < 0 || d.proxy_sims < 0 || d.proxy_sims > 4096 ||
-      d.offset_sims < 0 || d.offset_sims > 4096) {
+      d.offset_sims < 0 || d.offset_sims > 4096 || d.interp < NVFX_INTERP_DEFAULT || d.interp > NVFX_INTERP_MOTION) {
     return NVFX_ERROR_ARGUMENT;
   }
   const auto& m = re->m;
@@ -198,6 +197,7 @@ nvfx_status Manager::add_model(const nvfx_effect* fx, const nvfx_manager_model_d
   M.proxy_level = std::clamp(level_of_size(d.proxy_size), M.min_level, M.max_level);
   while (M.proxy_level > M.min_level && M.slots_n[z(M.proxy_level)] == 0) --M.proxy_level;
   M.proxy_div = d.proxy_rate_div;
+  M.interp = d.interp == NVFX_INTERP_DEFAULT ? interp_ : d.interp;
   std::size_t ncell = 1;
   for (int k = 0; k < M.nc && ncell <= 4096; ++k) ncell *= z(M.proxy_steps);
   if (ncell > 4096 || M.history == 0 || !M.loop) ncell = 0;  // no proxies: too many controls, no history, or a one-shot
@@ -771,10 +771,10 @@ void Manager::want(Model& M, Sim& s) {
   }
 }
 
-float Manager::compose_ms(int size) const {
+float Manager::compose_ms(const Model& M, int size) const {
   const int L = std::max(0, level_of_size(size));
-  if (interp_ == NVFX_INTERP_HOLD) return 0.f;
-  return interp_ == NVFX_INTERP_MOTION ? motion_ms_[z(L)] : fade_ms_[z(L)];
+  if (M.interp == NVFX_INTERP_HOLD) return 0.f;
+  return M.interp == NVFX_INTERP_MOTION ? motion_ms_[z(L)] : fade_ms_[z(L)];
 }
 
 // Mean milliseconds per tick of a simulation at a level: its steps and keyframe pictures per second, and the pictures
@@ -782,14 +782,13 @@ float Manager::compose_ms(int size) const {
 float Manager::cost(const Model& M, int level, int div) const {
   const float hz = static_cast<float>(hz_);
   const float steps = M.fps * M.step_factor / hz, pictures = M.fps / static_cast<float>(div) * M.render_factor / hz;
-  const float between = div > 1 ? std::min(M.fps, hz) / hz * compose_ms(kSizes[z(level)]) : 0.f;
+  const float between = div > 1 ? std::min(M.fps, hz) / hz * compose_ms(M, kSizes[z(level)]) : 0.f;
   return steps * M.step_ms[z(level)] + pictures * M.render_ms[z(level)] + between;
 }
 
 void Manager::plan() {
   order_.clear();
   float total = 0.f;
-  const float copy_ms = compose_ms(desc_.copy_size);
   for (Model& M : models_) std::fill(M.planned.begin(), M.planned.end(), std::uint8_t{0});
   for (Model& M : models_) {
     for (Sim& s : M.sims) {
@@ -819,7 +818,7 @@ void Manager::plan() {
     }
   }
   for (const Inst& in : insts_) {  // pictures composed for offset copies, proxies and fades
-    if (in.used && in.alive && in.visible && (in.offset > 0 || in.proxied || in.fade > 0.f)) total += copy_ms;
+    if (in.used && in.alive && in.visible && (in.offset > 0 || in.proxied || in.fade > 0.f)) total += compose_ms(models_[z(in.model)], desc_.copy_size);
   }
   const float budget = desc_.budget_ms;
   float proxied_cut = 0.f;
@@ -850,7 +849,7 @@ void Manager::plan() {
           // a proxy, if every viewer allows it and has kept its source long enough
           if (!proxy_ok(M, s)) break;
           int cell = proxy_cell(M, insts_[z(s.first_viewer)]);
-          next = static_cast<float>(s.viewers) * copy_ms;
+          next = static_cast<float>(s.viewers) * compose_ms(M, desc_.copy_size);
           if (M.proxy_sim[z(cell)] < 0 && !M.planned[z(cell)]) {
             // a proxy of its own cell if the budget has room for one more, else the nearest one there is
             const float c = cost(M, M.proxy_level, M.proxy_div);
@@ -980,6 +979,25 @@ void Manager::plan() {
       s.cost = 0.f;
     }
   }
+  // a proxied instance that is locked to a level gets a simulation of its own whatever the budget
+  for (Inst& in : insts_) {
+    if (!in.used || !in.alive || !in.proxied || in.lock_level < 0 || in.own_wait >= 0) continue;
+    Model& M = models_[z(in.model)];
+    int i = in.share ? find_shared(M, in) : -1;
+    if (i < 0) {
+      if (M.free_sims.empty() && !evict(M)) continue;
+      i = new_sim(M, in.model);
+      if (i < 0) continue;
+      Sim& w = M.sims[z(i)];
+      w.controls = in.controls;
+      w.seed = in.seed;
+      w.shareable = in.share;
+      w.plan_level = in.lock_level;
+      w.plan_div = in.lock_div;
+    }
+    M.sims[z(i)].refs++;
+    in.own_wait = i;
+  }
   plan_total_ = total;
   // new instances below this importance start as proxies while the budget is short
   proxy_cut_ = total <= 0.85f * budget ? 0.f : std::max(0.99f * proxy_cut_, proxied_cut);
@@ -1101,7 +1119,6 @@ void Manager::schedule(double dt) {
   jobs_.clear();
   float compose_only = 0.f;
   order_.clear();
-  const float copy_ms = compose_ms(desc_.copy_size);
   for (Model& M : models_) {
     const double fps = static_cast<double>(M.fps);
     for (Sim& s : M.sims) {
@@ -1140,7 +1157,7 @@ void Manager::schedule(double dt) {
         const float steps = s.ready ? static_cast<float>(s.div) * M.step_factor : std::min(desc_.catchup_frames, static_cast<float>(M.re->m.h.warmup + s.div));
         c = steps * M.step_ms[z(L)] + M.render_factor * M.render_ms[z(L)] * (s.started ? 1.f : 2.f);
       }
-      const float comp = (moved && s.div > 1 ? compose_ms(kSizes[z(L)]) : 0.f) + (views ? copy_ms : 0.f);
+      const float comp = (moved && s.div > 1 ? compose_ms(M, kSizes[z(L)]) : 0.f) + (views ? compose_ms(M, desc_.copy_size) : 0.f);
       s.cost = c + comp;
       s.compose_cost = comp;
       if (s.due) {
@@ -1187,8 +1204,8 @@ void Manager::schedule(double dt) {
 nvfx_status Manager::begin(double dt, int* jobs) {
   if (in_tick_ || !std::isfinite(dt) || dt < 0.0) return NVFX_ERROR_ARGUMENT;
   in_tick_ = true;
-  t_begin_ = static_cast<std::int64_t>(now_ms() * 1000.0);
-  const double t0 = now_ms();
+  t_begin_ = now_ms();
+  const double t0 = t_begin_;
   stats_ = nvfx_manager_stats{};
   dt_ = dt;
   now_ += dt;
@@ -1252,7 +1269,8 @@ nvfx_status Manager::begin(double dt, int* jobs) {
     Model& M = models_[z(in.model)];
     const int mi = in.model;
     in.culled = false;
-    const auto off = static_cast<std::int64_t>(std::llround(static_cast<double>(in.offset_s) * static_cast<double>(M.fps)));
+    // an offset needs a ring (the effect's history) and a simulation to share: otherwise it is ignored
+    const auto off = M.history > 0 && in.share ? static_cast<std::int64_t>(std::llround(static_cast<double>(in.offset_s) * static_cast<double>(M.fps))) : 0;
     int i = in.share ? find_shared(M, in) : -1;
     if (i >= 0) {
       attach(in, mi, i, off);
@@ -1371,7 +1389,7 @@ nvfx_status Manager::begin(double dt, int* jobs) {
   next_job_.store(0);
   for (Work& w : work_) w.ms = 0.0;
   if (jobs) *jobs = n_jobs_;
-  (void)t0;
+  plan_wall_ = now_ms() - t0;
   return NVFX_OK;
 }
 
@@ -1417,6 +1435,7 @@ void Manager::worker(int index) {
 
 nvfx_status Manager::end() {
   if (!in_tick_) return NVFX_ERROR_ARGUMENT;
+  const double t_end0 = now_ms();
   for (Model& M : models_) {
     for (Sim& s : M.sims) {
       free_slot(M, s.old_slot);
@@ -1485,7 +1504,9 @@ nvfx_status Manager::end() {
   st.threads = desc_.threads > 0 ? desc_.threads : desc_.job_slots;
   st.plan_ms = static_cast<double>(plan_total_);
   st.planned_ms = static_cast<double>(planned_);
-  st.wall_ms = now_ms() - static_cast<double>(t_begin_) / 1000.0;
+  const double t_end = now_ms();
+  st.wall_ms = t_end - t_begin_;
+  st.overhead_ms = plan_wall_ + (t_end - t_end0);
   in_tick_ = false;
   return NVFX_OK;
 }
@@ -1677,7 +1698,7 @@ int Manager::update(Model& M, Sim& s, Work& w) {
 }
 
 void Manager::interpolate(Model& M, const std::uint8_t* a, const std::uint8_t* b, int size, float wt, const float* uv, std::uint8_t* out) const {
-  switch (interp_) {
+  switch (M.interp) {
     case NVFX_INTERP_MOTION:
       motion_blend(a, b, size, wt, Motion{uv, M.res, static_cast<float>(size) / static_cast<float>(M.res) * M.advect}, out);
       break;
@@ -1696,7 +1717,7 @@ void Manager::compose_main(Model& M, Sim& s, Work& w) {
   s.composed = true;
   if (f >= s.fb && s.fb > s.fa) {
     s.pic = L.key[z(s.ka ^ 1)].data();
-  } else if (f <= s.fa || s.fb <= s.fa || interp_ == NVFX_INTERP_HOLD) {
+  } else if (f <= s.fa || s.fb <= s.fa || M.interp == NVFX_INTERP_HOLD) {
     s.pic = L.key[z(s.ka)].data();
   } else {
     const float wt = static_cast<float>(f - s.fa) / static_cast<float>(s.fb - s.fa);
@@ -1728,7 +1749,7 @@ int Manager::ring_view(Model& M, Sim& s, std::int64_t f, std::uint8_t* out, Work
   const float wt = static_cast<float>(f - f1) / static_cast<float>(f2 - f1);
   const std::uint8_t* a = R.px.data() + z(e1) * bytes;
   const std::uint8_t* b = R.px.data() + z(e2) * bytes;
-  if (wt <= 0.f || interp_ == NVFX_INTERP_HOLD) {
+  if (wt <= 0.f || M.interp == NVFX_INTERP_HOLD) {
     std::memcpy(out, a, bytes);
     return 1;
   }

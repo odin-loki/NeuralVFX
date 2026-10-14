@@ -421,6 +421,45 @@ TEST(Manager, PausedSimulationsResumeWarm) {
   EXPECT_EQ(straight, resumed);
 }
 
+// Off screen long enough, a simulation is culled (released); seen again, a looping instance starts a new run. With no
+// simulation free, a new instance takes the one paused longest.
+TEST(Manager, CullAndEvict) {
+  const Effect e(tiny_effect(true));
+  nvfx_manager_desc d = small_desc();
+  d.cull_after = 0.5f;
+  d.proxies = 0;
+  Mgr g(d);
+  int model = -1;
+  auto md = small_model();
+  md.max_sims = 2;
+  ASSERT_EQ(nvfx_manager_add_model(g.m, e.fx, &md, &model), NVFX_OK);
+  const nvfx_handle a = spawn(g.m, model, 1, 64.f), b = spawn(g.m, model, 2, 64.f);
+  for (int t = 0; t < 10; ++t) ASSERT_EQ(nvfx_manager_tick(g.m, 1.0 / 30.0), NVFX_OK);
+  nvfx_manager_set_screen_size(g.m, a, 64.f, 0);  // a leaves the screen
+  for (int t = 0; t < 5; ++t) ASSERT_EQ(nvfx_manager_tick(g.m, 1.0 / 30.0), NVFX_OK);
+  nvfx_manager_stats st;
+  nvfx_manager_get_stats(g.m, &st);
+  EXPECT_EQ(st.sims, 2);
+  EXPECT_EQ(st.sims_paused, 1);
+  const nvfx_handle c = spawn(g.m, model, 3, 64.f);  // none free: takes a's
+  for (int t = 0; t < 5; ++t) ASSERT_EQ(nvfx_manager_tick(g.m, 1.0 / 30.0), NVFX_OK);
+  nvfx_manager_picture pa, pc;
+  nvfx_manager_get_picture(g.m, a, &pa);
+  nvfx_manager_get_picture(g.m, c, &pc);
+  EXPECT_EQ(pa.rgba, nullptr);
+  EXPECT_NE(pc.rgba, nullptr);
+  nvfx_manager_set_screen_size(g.m, b, 64.f, 0);  // b leaves and stays away past cull_after
+  for (int t = 0; t < 30; ++t) ASSERT_EQ(nvfx_manager_tick(g.m, 1.0 / 30.0), NVFX_OK);
+  nvfx_manager_get_stats(g.m, &st);
+  EXPECT_EQ(st.sims, 1);  // only c's
+  nvfx_manager_set_screen_size(g.m, b, 64.f, 1);  // back: a new run
+  for (int t = 0; t < 5; ++t) ASSERT_EQ(nvfx_manager_tick(g.m, 1.0 / 30.0), NVFX_OK);
+  nvfx_manager_picture pb;
+  nvfx_manager_get_picture(g.m, b, &pb);
+  EXPECT_NE(pb.rgba, nullptr);
+  EXPECT_LT(pb.effect_time, 0.5);
+}
+
 // The planner keeps the plan within the budget by lowering the least important simulations first.
 TEST(Manager, TheBudgetLowersTheLeastImportantFirst) {
   const Effect e(tiny_effect(true));
@@ -474,11 +513,22 @@ TEST(Manager, ProxiesTakeTheUnimportantWhenTheBudgetIsShort) {
   EXPECT_GT(st.proxied, 0);
   EXPECT_GT(st.proxy_sims, 0);
   EXPECT_LE(st.plan_ms, 1.5 * 1.05);
+  nvfx_handle locked = 0;
   for (const nvfx_handle h : hs) {
     nvfx_manager_picture p;
     nvfx_manager_get_picture(g.m, h, &p);
     EXPECT_NE(p.rgba, nullptr);  // everyone is shown
+    if ((p.flags & NVFX_PICTURE_PROXY) && !locked) locked = h;
   }
+  // a proxied instance locked to a level gets a simulation of its own (and fades across once it is ready)
+  ASSERT_NE(locked, 0u);
+  ASSERT_EQ(nvfx_manager_set_lod_lock(g.m, locked, 64, 2), NVFX_OK);
+  for (int t = 0; t < 30; ++t) ASSERT_EQ(nvfx_manager_tick(g.m, 1.0 / 30.0), NVFX_OK);
+  nvfx_manager_picture p;
+  nvfx_manager_get_picture(g.m, locked, &p);
+  EXPECT_EQ(p.flags & NVFX_PICTURE_PROXY, 0);
+  EXPECT_EQ(p.lod_size, 64);
+  EXPECT_EQ(p.lod_rate_hz, 15.f);
 }
 
 // A size wobbling around a threshold, within the hysteresis, does not change the level.

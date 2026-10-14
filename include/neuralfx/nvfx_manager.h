@@ -47,8 +47,9 @@ typedef struct nvfx_manager_desc {
   nvfx_interp interp;   /* default: NVFX_INTERP_DEFAULT */
   int max_size;         /* largest picture size the planner uses: 32, 64, 128 or 256 (default 256) */
   float texel_scale;    /* picture pixels wanted per on-screen pixel (default 1) */
-  float rate_px[3];     /* on-screen sizes in pixels from which 30, 15 and 10 Hz updates are wanted; below the last,
-                           7.5 Hz (defaults in docs/MANAGER.md §6) */
+  float rate_px[3];     /* on-screen sizes in pixels from which 30, 15 and 10 Hz are wanted when the budget allows;
+                           below the last, 7.5 Hz (default 0, 0, 0: 30 Hz at every size; a short budget lowers rates
+                           where that saves the most, docs/MANAGER.md §6) */
   float hysteresis;     /* a level changes only when the size is this fraction past its threshold (default 0.15) */
   float min_dwell;      /* seconds between upward level changes of a simulation (default 1) */
   float catchup_frames; /* simulation steps per tick at most for one simulation (a spawn's warm-up, a pre-roll) (8) */
@@ -80,6 +81,8 @@ typedef struct nvfx_manager_model_desc {
   int proxy_size;     /* picture size of proxy simulations (default 64) */
   int proxy_rate_div; /* proxy simulations update every this many frames (default 4: 7.5 Hz) */
   float shard_seconds; /* looping effects: seconds per shard (default 6, as nvfx_instance_set_drift) */
+  nvfx_interp interp; /* this effect's drawing between updates (default NVFX_INTERP_DEFAULT: the manager's); the quality
+                         study found motion better than crossfade on explosions only (docs/MANAGER.md §5) */
 } nvfx_manager_model_desc;
 
 NVFX_API void nvfx_manager_model_desc_init(nvfx_manager_model_desc* desc);
@@ -167,6 +170,7 @@ NVFX_API nvfx_status nvfx_manager_get_picture(const nvfx_manager* manager, nvfx_
 
 typedef struct nvfx_manager_stats {
   double wall_ms;          /* the last tick, from tick_begin to tick_end */
+  double overhead_ms;      /* of that, the planning on the calling thread (tick_begin and tick_end, without the jobs) */
   double jobs_ms;          /* time spent in its jobs, summed over threads */
   double planned_ms;       /* the cost model's estimate of its jobs */
   double plan_ms;          /* the cost model's mean cost per tick of the levels chosen */

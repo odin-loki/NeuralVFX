@@ -332,3 +332,13 @@ fireball full screen, looping, with the heat under the mouse shown in a label.
 What the plugin does not do yet: other platforms than Linux x86-64; drawing in the editor; uploading the fields as
 textures for the engine's own renderer (the picture is composed on the CPU and uploaded: 3.7 MB per frame at
 1280 x 720); a transparent background, so that a scene could be drawn over the game's world.
+
+## 9. Many effects: the effect manager
+
+For more than a handful of rollout effects, `include/neuralfx/nvfx_manager.h` plays a scene's instances within a CPU
+budget per game frame ([MANAGER.md](MANAGER.md)): it picks each simulation's picture size (32 to 256 px, from the
+on-screen size) and update rate (30 down to 7.5 Hz, drawing the frames between by crossfade), shares one simulation
+between copies (optionally offset in time), pauses what is off screen, shows unimportant far effects from a few shared
+proxy simulations when the budget is short, and runs the work on its own threads or the engine's job system, with the
+same pictures on any number of threads and no allocation per frame. At a locked level its frames are `nvfx_render`'s
+to the bit. What it costs and what it looks like at a given budget: MANAGER.md §1 and §7.

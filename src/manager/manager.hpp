@@ -153,6 +153,7 @@ struct Model {
   int res = 32, nc = 0, frames = 0, history = 0, proxy_steps = 3, proxy_level = 1, proxy_div = 4;
   float fps = 30.f, advect = 1.f;
   bool loop = true;
+  nvfx_interp interp = NVFX_INTERP_CROSSFADE;  // drawing between keyframes (the manager's, or the model's own)
   std::int64_t shard = 0;      // frames per shard (0: one continuous rollout)
   float step_factor = 1.f;     // steps per frame on average (the next shard's warm-up and pre-roll)
   float render_factor = 1.f;   // pictures per keyframe on average (the shard crossfades)
@@ -234,7 +235,7 @@ class Manager {
   void view(Inst& in);
   void want(Model& M, Sim& s);
   float cost(const Model& M, int level, int div) const;
-  float compose_ms(int size) const;
+  float compose_ms(const Model& M, int size) const;
   std::array<float, 3> rate_px() const { return {desc_.rate_px[0], desc_.rate_px[1], desc_.rate_px[2]}; }
   void plan();
   void apply();
@@ -279,7 +280,7 @@ class Manager {
   std::atomic<int> active_{0};
   std::atomic<bool> stop_{false};
   // the tick
-  std::int64_t t_begin_ = 0;
+  double t_begin_ = 0.0, plan_wall_ = 0.0;
   nvfx_manager_stats stats_{};
   float planned_ = 0.f, plan_total_ = 0.f;
   std::size_t memory_ = 0;
