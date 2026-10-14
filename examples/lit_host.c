@@ -293,7 +293,7 @@ static Run play(const nvfx_library* lib, int threads, int layers) {
   scene = nvfx_stage_scene(stage);
   nvfx_stage_spawn(stage, "sparks", 80.f, 170.f, 1.f, -1.0, &fx);
   nvfx_stage_spawn(stage, "healing_circle", 220.f, 170.f, 0.6f, 0.2, &fx);
-  nvfx_stage_spawn(stage, "snow", 160.f, 170.f, 0.4f, -1.0, &fx);
+  nvfx_stage_spawn(stage, "snow", 160.f, 170.f, 1.f, -1.0, &fx);
   for (f = 1; f <= F; ++f) {
     if (f == 20) nvfx_stage_move(stage, fx, 150.f, 170.f);
     nvfx_scene_step_frames(scene, 1);

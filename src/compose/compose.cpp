@@ -1727,13 +1727,23 @@ void Particles::draw(Image4& screen, float cam_x, float cam_y) const {
   }
 }
 
-void Particles::draw_layers(Image4& C, Image4& A, Image4& E, Image4& N, float cam_x, float cam_y) const {
+void Particles::draw_layers(Image4& C, Image4& A, Image4& E, Image4& N, float cam_x, float cam_y, std::span<std::array<int, 2>> spans) const {
   const int W = C.w, H = C.h;
+  const auto mark = [&](int xa, int xb, int ya, int yb) {  // the columns [xa, xb] of rows [ya, yb] are drawn in
+    xa = std::max(xa, 0);
+    xb = std::min(xb + 1, W);
+    for (int y = std::max(ya, 0); y <= std::min(yb, H - 1); ++y) {
+      std::array<int, 2>& sp = spans[zs(y)];
+      sp[0] = std::min(sp[0], xa);
+      sp[1] = std::max(sp[1], xb);
+    }
+  };
   // splatted bilinearly as draw() splats: light added (colour and emission), or something laid over everything under it
   const auto splat = [&](float x, float y, auto&& f) {
     const int x0 = ifloor(x - 0.5f), y0 = ifloor(y - 0.5f);
     const float fx = x - 0.5f - fl(x0), fy = y - 0.5f - fl(y0);
     const float w[4] = {(1 - fx) * (1 - fy), fx * (1 - fy), (1 - fx) * fy, fx * fy};
+    mark(x0, x0 + 1, y0, y0 + 1);
     for (int q = 0; q < 4; ++q) {
       const int xx = x0 + (q & 1), yy = y0 + (q >> 1);
       if (xx < 0 || yy < 0 || xx >= W || yy >= H) continue;
@@ -1777,6 +1787,8 @@ void Particles::draw_layers(Image4& C, Image4& A, Image4& E, Image4& N, float ca
     const float m = k == Kind::glow ? size_[q] + 1.f : 4.f;
     if (std::max(x, ox) < -m || std::min(x, ox) > fl(W) + m || std::max(y, oy) < -m || std::min(y, oy) > fl(H) + m) continue;
     if (k == Kind::glow) {
+      const float r = size_[q];  // draw_glow's box
+      mark(ifloor(std::min(x, ox) - r), ifloor(std::max(x, ox) + r), ifloor(std::min(y, oy) - r), ifloor(std::max(y, oy) + r));
       for (Image4* im : {&C, &E}) draw_glow(*im, ox, oy, x, y, size_[q], temp_[q], {r_[q], g_[q], b_[q]}, static_cast<int>(cool_[q]));
       continue;
     }
@@ -1786,6 +1798,8 @@ void Particles::draw_layers(Image4& C, Image4& A, Image4& E, Image4& N, float ca
       const auto hc = heat_colour(hot);
       const float glow = 2.5f * hot * hot;
       weather_pixels(q, cam_x, cam_y, W, H, [&](std::size_t at, float c) {
+        const int px = static_cast<int>(at / 4 % zs(W)), py = static_cast<int>(at / 4 / zs(W));
+        mark(px, px, py, py);
         const float a = al * c, kk = 1.f - a;
         float* p = C.px.data() + at;
         float* al2 = A.px.data() + at;
@@ -1909,7 +1923,8 @@ void Frame::use_layers(bool on) {
   layers_on_ = on;
   if (!on || layers_[0].w == w_) return;
   for (Image4& l : layers_) l.allocate(w_, h_);
-  for (Image4& l : layer_acc_) l.allocate(w_, h_);
+  for (Image4& l : layer_acc_) l.allocate(w_, (h_ + kChunk - 1) / kChunk);  // a row per task of compose()
+  layer_span_.assign(zs(h_), {0, w_});
 }
 
 void Frame::reserve(int modules, int shocks, int scorch, int particles) {
@@ -2268,9 +2283,9 @@ void Frame::compose(const Params& P, const LightView* L, std::span<const std::ar
         // The engine layers of row y (use_layers): each tile's layers summed by its weight, as the colour is in acc, then
         // laid over the layers' row as the colour is over the screen (alpha kept, optical depth added).
         const auto layer_row = [&](int y, const Group& g, const auto& rows, const float* acc, int ux0, int ux1, float clip) {
-          float* alb = layer_acc_[0].row(y);
-          float* em = layer_acc_[1].row(y);
-          float* nm = layer_acc_[2].row(y);
+          float* alb = layer_acc_[0].row(task);  // this task's rows: it draws its screen rows one after another
+          float* em = layer_acc_[1].row(task);
+          float* nm = layer_acc_[2].row(task);
           for (float* r : {alb, em, nm}) std::fill(r + zs(ux0) * 4, r + zs(ux1) * 4, 0.f);
           for (int q = g.first - base; q < g.first - base + g.count; ++q) {
             const auto& r = rows[zs(q)];
@@ -2322,12 +2337,19 @@ void Frame::compose(const Params& P, const LightView* L, std::span<const std::ar
             LA[i + 3] = LC[i + 3];
             LN[i + 3] += em[i + 3];  // the optical depth, added through the layers (the modules keep it in their emission's a)
           }
+          std::array<int, 2>& sp = layer_span_[zs(y)];
+          sp[0] = std::min(sp[0], ux0);
+          sp[1] = std::max(sp[1], ux1);
           (void)clip;
         };
         for (int y = rows0 + task * kChunk; y < std::min(rows1, rows0 + (task + 1) * kChunk); ++y) {
           if (bg) background_row(y, P, *L, scorch, stars);
-          if (bg && layers_on_)
-            for (Image4& l : layers_) std::fill(l.row(y), l.row(y) + zs(w_) * 4, 0.f);
+          if (bg && layers_on_) {  // cleared where the last frame drew in them
+            std::array<int, 2>& sp = layer_span_[zs(y)];
+            if (sp[0] < sp[1])
+              for (Image4& l : layers_) std::fill(l.row(y) + zs(sp[0]) * 4, l.row(y) + zs(sp[1]) * 4, 0.f);
+            sp = {w_, 0};
+          }
           const float wy = P.cam_y + fl(y) + 0.5f;
           const float clip = smooth01((P.ground_y + 2.f - wy) / 3.f);  // the ground hides what is below it
           if (clip <= 0.f) continue;
@@ -2977,7 +2999,7 @@ void Frame::render(std::span<std::uint8_t> rgb, float bloom_threshold, float blo
   }
   const auto t1 = Clock::now();
   parts_.draw(screen_, P_.cam_x, P_.cam_y);
-  if (layers_on_) parts_.draw_layers(layers_[kColour], layers_[kAlbedo], layers_[kEmission], layers_[kNormal], P_.cam_x, P_.cam_y);
+  if (layers_on_) parts_.draw_layers(layers_[kColour], layers_[kAlbedo], layers_[kEmission], layers_[kNormal], P_.cam_x, P_.cam_y, layer_span_);
   const auto t2 = Clock::now();
   distort_impl(P_, shocks_, heat_cap_, pool);
   const auto t3 = Clock::now();

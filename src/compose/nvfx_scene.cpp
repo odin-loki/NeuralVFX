@@ -26,6 +26,11 @@
 #include <string_view>
 #include <vector>
 
+#if defined(__x86_64__) && (defined(__GNUC__) || defined(__clang__))
+#include <immintrin.h>
+#define NVFX_HAVE_F16C 1
+#endif
+
 namespace sc = nfx::compose::script;
 using nfx::rt::RolloutEffect;
 
@@ -88,17 +93,111 @@ std::uint16_t to_half(float f) {
   return static_cast<std::uint16_t>(sign | h);
 }
 
-// Linear [0, 1] to 8-bit display values (gamma 2.2, as the runtime's sprites), in 4096 steps.
-std::uint8_t display8(float v) {
-  static const std::array<std::uint8_t, 4096> table = [] {
-    std::array<std::uint8_t, 4096> t{};
-    for (int i = 0; i < 4096; ++i) t[zs(i)] = static_cast<std::uint8_t>(std::lround(255.f * std::pow(static_cast<float>(i) / 4095.f, 1.f / 2.2f)));
-    return t;
-  }();
-  return table[zs(static_cast<int>(std::clamp(v, 0.f, 1.f) * 4095.f + 0.5f))];
+// n floats to half floats (unaligned output). With the processor's F16C instructions where it has them (the same
+// bits: both round to the nearest even), else to_half.
+#ifdef NVFX_HAVE_F16C
+__attribute__((target("f16c"))) void halves_f16c(const float* v, std::size_t n, std::uint8_t* out) {
+  std::size_t i = 0;
+  for (; i + 4 <= n; i += 4) {
+    const __m128i h = _mm_cvtps_ph(_mm_loadu_ps(v + i), _MM_FROUND_TO_NEAREST_INT | _MM_FROUND_NO_EXC);
+    _mm_storel_epi64(reinterpret_cast<__m128i*>(out + i * 2), h);
+  }
+  for (; i < n; ++i) {
+    const std::uint16_t h = to_half(v[i]);
+    std::memcpy(out + i * 2, &h, 2);
+  }
+}
+const bool kF16C = __builtin_cpu_supports("f16c");
+#endif
+
+void halves(const float* v, std::size_t n, std::uint8_t* out) {
+#ifdef NVFX_HAVE_F16C
+  if (kF16C) {
+    halves_f16c(v, n, out);
+    return;
+  }
+#endif
+  for (std::size_t i = 0; i < n; ++i) {
+    const std::uint16_t h = to_half(v[i]);
+    std::memcpy(out + i * 2, &h, 2);
+  }
 }
 
-std::uint8_t unit8(float v) { return static_cast<std::uint8_t>(std::lround(255.f * std::clamp(v, 0.f, 1.f))); }
+// Linear [0, 1] to 8-bit display values (gamma 2.2, as the runtime's sprites), in 4096 steps.
+const std::array<std::uint8_t, 4096> kDisplay8 = [] {
+  std::array<std::uint8_t, 4096> t{};
+  for (int i = 0; i < 4096; ++i) t[zs(i)] = static_cast<std::uint8_t>(std::lround(255.f * std::pow(static_cast<float>(i) / 4095.f, 1.f / 2.2f)));
+  return t;
+}();
+inline std::uint8_t display8(float v) { return kDisplay8[zs(static_cast<int>(std::clamp(v, 0.f, 1.f) * 4095.f + 0.5f))]; }
+
+std::uint8_t unit8(float v) { return static_cast<std::uint8_t>(255.f * std::clamp(v, 0.f, 1.f) + 0.5f); }  // rounded
+
+// One row of an engine layer (n pixels of 4 floats) in a pixel format (nvfx_scene.h): colour and emission times the
+// scene's exposure and fade, emission's alpha 0, the normal made a unit vector again (it is summed through the layers
+// times alpha) with the thickness in alpha. Specialised per layer and format: the loops have no branch on either.
+template <nvfx_scene_layer Layer, nvfx_pixel_format Format>
+  requires(Format == NVFX_FORMAT_RGBA8 || Format == NVFX_FORMAT_RGBA32F)  // RGBA16F: RGBA32F, then halves
+void layer_row(const float* src, int n, float gain, std::uint8_t* out) {
+  constexpr bool lit = Layer == NVFX_LAYER_COLOUR || Layer == NVFX_LAYER_EMISSION;
+  // where nothing is (all four +0: most of a layer), what the code below writes for it, without computing it
+  constexpr float empty32[4] = {0.f, 0.f, Layer == NVFX_LAYER_NORMAL ? 1.f : 0.f, 0.f};
+  constexpr std::uint8_t empty8[4] = {static_cast<std::uint8_t>(Layer == NVFX_LAYER_NORMAL ? 128 : 0),
+                                      static_cast<std::uint8_t>(Layer == NVFX_LAYER_NORMAL ? 128 : 0),
+                                      static_cast<std::uint8_t>(Layer == NVFX_LAYER_NORMAL ? 255 : 0), 0};
+  for (int x = 0; x < n; ++x, src += 4) {
+    std::uint32_t bits[4];
+    std::memcpy(bits, src, 16);
+    if ((bits[0] | bits[1] | bits[2] | bits[3]) == 0u) {
+      if constexpr (Format == NVFX_FORMAT_RGBA32F) std::memcpy(out + zs(x) * 16, empty32, 16);
+      else std::memcpy(out + zs(x) * 4, empty8, 4);
+      continue;
+    }
+    float v[4] = {src[0], src[1], src[2], src[3]};
+    if constexpr (lit) {
+      v[0] *= gain;
+      v[1] *= gain;
+      v[2] *= gain;
+    }
+    if constexpr (Layer == NVFX_LAYER_EMISSION) v[3] = 0.f;
+    if constexpr (Layer == NVFX_LAYER_NORMAL) {
+      v[3] = std::max(0.f, v[3]);
+      const float len = std::sqrt(v[0] * v[0] + v[1] * v[1] + v[2] * v[2]);
+      if (len > 1e-6f) {
+        v[0] /= len;
+        v[1] /= len;
+        v[2] /= len;
+      } else {
+        v[0] = 0.f;
+        v[1] = 0.f;
+        v[2] = 1.f;
+      }
+    }
+    if constexpr (Format == NVFX_FORMAT_RGBA32F) {
+      std::memcpy(out + zs(x) * 16, v, 16);
+    } else {
+      std::uint8_t* o = out + zs(x) * 4;
+      if constexpr (Layer == NVFX_LAYER_NORMAL) {
+        for (int c = 0; c < 3; ++c) o[c] = unit8(0.5f * v[c] + 0.5f);
+        o[3] = unit8(v[3] / (1.f + v[3]));
+      } else if constexpr (Layer == NVFX_LAYER_EMISSION) {  // RGBM: light = rgb * m * 8
+        const float top = std::max({v[0], v[1], v[2], 0.f});
+        const float m = std::min(1.f, std::ceil(top / 8.f * 255.f) / 255.f);
+        for (int c = 0; c < 3; ++c) o[c] = m > 0.f ? unit8(v[c] / (8.f * m)) : 0;
+        o[3] = unit8(m);
+      } else {
+        for (int c = 0; c < 3; ++c) o[c] = display8(v[c]);
+        o[3] = unit8(v[3]);
+      }
+    }
+  }
+}
+
+using LayerRow = void (*)(const float*, int, float, std::uint8_t*);
+template <nvfx_scene_layer Layer>
+constexpr std::array<LayerRow, 2> layer_rows{layer_row<Layer, NVFX_FORMAT_RGBA8>, layer_row<Layer, NVFX_FORMAT_RGBA32F>};
+constexpr std::array<std::array<LayerRow, 2>, 4> kLayerRows{layer_rows<NVFX_LAYER_COLOUR>, layer_rows<NVFX_LAYER_ALBEDO>,
+                                                            layer_rows<NVFX_LAYER_EMISSION>, layer_rows<NVFX_LAYER_NORMAL>};
 
 }  // namespace
 
@@ -114,6 +213,8 @@ struct nvfx_scene {
   double time = 0.0;
   std::vector<std::uint8_t> rgb;  // the scene's picture, sw x sh x 3
   Axis ax, ay;                    // resampling, when the output's size differs
+  std::vector<float> layer_row;   // an engine layer's row, resampled (layers on and the output's size differs)
+  std::vector<float> layer_out;   // and encoded, before it is made half floats (layers on)
   std::vector<std::string> modules, rules, inputs;
   std::vector<std::vector<std::string>> controls;  // per module: its effect's control names
 
@@ -301,9 +402,11 @@ nvfx_status nvfx_scene_create(const nvfx_scene_desc* d, nvfx_scene** out, nvfx_s
     if (s->ow > 16384 || s->oh > 16384) throw std::invalid_argument("the output is larger than 16384 pixels");
     s->fps = s->scene->fps();
     s->rgb.assign(zs(s->sw) * zs(s->sh) * 3, 0);
+    if (s->opt.layers) s->layer_out.assign(zs(s->ow) * 4, 0.f);
     if (s->ow != s->sw || s->oh != s->sh) {
       s->ax.build(s->sw, s->ow);
       s->ay.build(s->sh, s->oh);
+      if (s->opt.layers) s->layer_row.assign(zs(s->ow) * 4, 0.f);
     }
     for (int i = 0; i < s->scene->script_modules(); ++i) {
       const sc::Scene::ModuleInfo m = s->scene->module_info(i);
@@ -450,56 +553,34 @@ nvfx_status nvfx_scene_render_layer(nvfx_scene* s, nvfx_scene_layer layer, nvfx_
     const nc::Image4& L = F.layer(static_cast<nc::Frame::Layer>(layer));
     const bool lit = layer == NVFX_LAYER_COLOUR || layer == NVFX_LAYER_EMISSION;
     const float gain = lit ? F.layer_exposure() * F.layer_fade() : 1.f;
+    const bool half = format == NVFX_FORMAT_RGBA16F;
+    const LayerRow encode = kLayerRows[zs(static_cast<int>(layer))][format == NVFX_FORMAT_RGBA8 ? 0 : 1];
     const bool same = s->ow == s->sw && s->oh == s->sh;
+    auto put = [&](const float* src, std::uint8_t* out) {
+      if (!half) return encode(src, s->ow, gain, out);
+      encode(src, s->ow, gain, reinterpret_cast<std::uint8_t*>(s->layer_out.data()));
+      halves(s->layer_out.data(), zs(s->ow) * 4, out);
+    };
     for (int y = 0; y < s->oh; ++y) {
-      std::uint8_t* row = static_cast<std::uint8_t*>(pixels) + zs(y) * stride;
-      for (int x = 0; x < s->ow; ++x) {
-        std::array<float, 4> v;
-        if (same) {
-          const float* p = L.row(y) + zs(x) * 4;
-          v = {p[0], p[1], p[2], p[3]};
-        } else {  // bilinear, as the picture is resampled
-          const float* r0 = L.row(s->ay.i0[zs(y)]);
-          const float* r1 = L.row(s->ay.i1[zs(y)]);
-          const std::size_t c0 = zs(s->ax.i0[zs(x)]) * 4, c1 = zs(s->ax.i1[zs(x)]) * 4;
-          const float fx = s->ax.f[zs(x)], fy = s->ay.f[zs(y)];
-          for (std::size_t c = 0; c < 4; ++c) {
-            const float top = r0[c0 + c] + fx * (r0[c1 + c] - r0[c0 + c]), bot = r1[c0 + c] + fx * (r1[c1 + c] - r1[c0 + c]);
-            v[c] = top + fy * (bot - top);
-          }
-        }
-        if (lit)
-          for (int c = 0; c < 3; ++c) v[zs(c)] *= gain;
-        if (layer == NVFX_LAYER_EMISSION) v[3] = 0.f;
-        float thick = 0.f;
-        if (layer == NVFX_LAYER_NORMAL) {  // the normal times alpha, summed through the layers: made a unit vector again
-          thick = std::max(0.f, v[3]);
-          const float n = std::sqrt(v[0] * v[0] + v[1] * v[1] + v[2] * v[2]);
-          if (n > 1e-6f) v = {v[0] / n, v[1] / n, v[2] / n, thick};
-          else v = {0.f, 0.f, 1.f, thick};
-        }
-        if (format == NVFX_FORMAT_RGBA32F) {
-          std::memcpy(row + zs(x) * 16, v.data(), 16);
-        } else if (format == NVFX_FORMAT_RGBA16F) {
-          std::uint16_t h[4];
-          for (int c = 0; c < 4; ++c) h[c] = to_half(v[zs(c)]);
-          std::memcpy(row + zs(x) * 8, h, 8);
-        } else {
-          std::uint8_t* o = row + zs(x) * 4;
-          if (layer == NVFX_LAYER_NORMAL) {
-            for (int c = 0; c < 3; ++c) o[c] = unit8(0.5f * v[zs(c)] + 0.5f);
-            o[3] = unit8(thick / (1.f + thick));
-          } else if (layer == NVFX_LAYER_EMISSION) {  // RGBM: light = rgb * m * 8
-            const float top = std::max({v[0], v[1], v[2], 0.f});
-            const float m = std::min(1.f, std::ceil(top / 8.f * 255.f) / 255.f);
-            for (int c = 0; c < 3; ++c) o[c] = m > 0.f ? unit8(v[zs(c)] / (8.f * m)) : 0;
-            o[3] = unit8(m);
-          } else {
-            for (int c = 0; c < 3; ++c) o[c] = display8(v[zs(c)]);
-            o[3] = unit8(v[3]);
-          }
+      std::uint8_t* out = static_cast<std::uint8_t*>(pixels) + zs(y) * stride;
+      if (same) {
+        put(L.row(y), out);
+        continue;
+      }
+      // bilinear, as the picture is resampled, into a row kept for it
+      const float* r0 = L.row(s->ay.i0[zs(y)]);
+      const float* r1 = L.row(s->ay.i1[zs(y)]);
+      const float fy = s->ay.f[zs(y)];
+      float* v = s->layer_row.data();
+      for (int x = 0; x < s->ow; ++x, v += 4) {
+        const std::size_t c0 = zs(s->ax.i0[zs(x)]) * 4, c1 = zs(s->ax.i1[zs(x)]) * 4;
+        const float fx = s->ax.f[zs(x)];
+        for (std::size_t c = 0; c < 4; ++c) {
+          const float top = r0[c0 + c] + fx * (r0[c1 + c] - r0[c0 + c]), bot = r1[c0 + c] + fx * (r1[c1 + c] - r1[c0 + c]);
+          v[c] = top + fy * (bot - top);
         }
       }
+      put(s->layer_row.data(), out);
     }
     return NVFX_OK;
   });

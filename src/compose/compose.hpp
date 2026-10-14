@@ -581,7 +581,9 @@ class Particles {
   // The same particles into the engine layers (Frame::use_layers): what draw() adds (sparks, embers, glows) is light,
   // added to the colour and the emission; what it lays over (debris, flakes, weather) covers what is under it in every
   // layer, with its colour lit as draw() lights it, its albedo, its glow as emission, a flat normal and its optical depth.
-  void draw_layers(Image4& colour, Image4& albedo, Image4& emission, Image4& normal, float cam_x, float cam_y) const;
+  // `spans` (one per row) grows to the columns drawn in each row.
+  void draw_layers(Image4& colour, Image4& albedo, Image4& emission, Image4& normal, float cam_x, float cam_y,
+                   std::span<std::array<int, 2>> spans) const;
   // The live particles into `to`, as far as draw() needs them (`to` holds at least alive() particles).
   void copy_to(Particles& to) const;
   std::uint64_t rng = 0x9E3779B97F4A7C15ULL;
@@ -779,7 +781,8 @@ class Frame {
   bool moved_rows_ = false;
   bool layers_on_ = false;
   std::array<Image4, kLayers> layers_;     // use_layers()
-  std::array<Image4, 3> layer_acc_;        // per row: a group's albedo, emission and normals summed by weight
+  std::array<Image4, 3> layer_acc_;        // per task of compose(), a row: a group's albedo, emission, normals by weight
+  std::vector<std::array<int, 2>> layer_span_;  // per row: the columns [a, b) the layers were drawn in (cleared there next)
   bool bloom_pending_ = false;  // bloom's last pass: the screen += bloom_gain_ * mip 0 (bilinear) / bloom_div_
   float bloom_gain_ = 0.f, bloom_div_ = 1.f;
   // capture()
