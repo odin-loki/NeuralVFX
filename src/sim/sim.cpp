@@ -19,6 +19,9 @@ std::string_view effect_name(Effect e) {
     case Effect::jet: return "jet";
     case Effect::orb: return "orb";
     case Effect::vortex: return "vortex";
+    case Effect::fog: return "fog";
+    case Effect::dust: return "dust";
+    case Effect::cloud: return "cloud";
   }
   std::unreachable();
 }
@@ -30,7 +33,7 @@ bool parse_effect(std::string_view text, Effect& out) {
   return true;
 }
 
-bool effect_loops(Effect e) { return e != Effect::explosion; }
+bool effect_loops(Effect e) { return e != Effect::explosion && e != Effect::dust; }
 
 std::array<std::string_view, kControls> control_names(Effect e) {
   if (e == Effect::magic) return {"intensity", "spin", "turbulence"};
@@ -50,6 +53,9 @@ float flicker_rate(Effect e) {
     case Effect::jet: return 3.0f;     // a roaring burner
     case Effect::orb: return 2.2f;     // a crackle
     case Effect::vortex: return 1.5f;  // gusts of dust
+    case Effect::fog: return 1.0f;     // a slow, uneven release
+    case Effect::dust: return 1.4f;    // the burst's shape, as the explosion's
+    case Effect::cloud: return 0.6f;   // slow billows
   }
   std::unreachable();
 }
@@ -94,9 +100,20 @@ Tune tune(const Params& p) {
     case Effect::jet: return {38.f, 3.f, 1.1f, 0.4f, 0.f, 0.f, 0.8f + 3.2f * turb, 12.f + 55.f * turb, 0.45f};
     case Effect::orb: return {0.f, 0.f, 1.0f, 1.2f, 0.f, 0.f, 1.5f + 3.5f * turb, 20.f + 60.f * turb, 1.0f};
     case Effect::vortex: return {115.f, 2.f, 0.4f, 0.75f, 0.f, 0.f, 0.3f + 0.5f * turb, 4.f + 8.f * turb, 0.35f};
+    // fog, dust and cloud (docs/EFFECTS_ATMOSPHERE.md) carry no heat: their material is the solver's soot, and its
+    // weight moves them. fog: heavy, thins slowly, drifts with a light wind. dust: very heavy, so the burst falls back
+    // and spreads along the ground. cloud: light (its thick parts rise a little), slow and well damped. Their sources,
+    // the ground under fog and dust and dust's burst are in add_atmos_sources, add_atmos_forces, add_atmos_divergence.
+    case Effect::fog: return {0.f, 20.f, 1.f, 0.12f, 20.f, 1.5f, 0.2f + 1.2f * turb, 3.f + 14.f * turb, 0.4f};
+    case Effect::dust: return {0.f, 150.f, 1.f, 0.25f, 50.f, 1.5f, 1.5f + 4.0f * turb, 20.f + 80.f * turb, 0.6f};
+    case Effect::cloud: return {0.f, -20.f, 1.f, 0.10f, 40.f, 1.0f, 0.2f + 0.8f * turb, 3.f + 16.f * turb, 1.3f};
   }
   std::unreachable();
 }
+
+// fog, dust and cloud (docs/EFFECTS_ATMOSPHERE.md)
+bool atmos(Effect e) { return e == Effect::fog || e == Effect::dust || e == Effect::cloud; }
+bool on_ground(Effect e) { return e == Effect::fog || e == Effect::dust; }  // lie on a ground (add_atmos_forces)
 
 // magic: a ring of energy around the middle of the frame, spun by a force that peaks at the ring (radius in cells).
 float magic_radius(const Params& p, float n) { return (0.19f + 0.09f * p.intensity) * n; }
@@ -242,6 +259,10 @@ void Fluid::add_sources(float dt) {
     return;
   }
   if (add_energy_sources(dt)) return;  // jet, orb and vortex
+  if (atmos(p_.effect)) {
+    add_atmos_sources(dt);
+    return;
+  }
   const bool fire = p_.effect == Effect::fire;
   const float cx = 0.5f * n, cy = (fire ? 0.10f : 0.09f) * n;
   const float hw = (fire ? 0.10f + 0.08f * I : 0.09f + 0.07f * I) * n, hh = 0.035f * n;
@@ -351,6 +372,7 @@ void Fluid::add_forces(float dt) {
     }
   }
   add_energy_forces(dt);  // jet, orb and vortex
+  if (atmos(p_.effect)) add_atmos_forces(dt);
 }
 
 void Fluid::project() {
@@ -379,8 +401,10 @@ void Fluid::project() {
     }
   }
   add_energy_divergence();  // jet, orb and vortex
+  if (p_.effect == Effect::dust) add_atmos_divergence();
   // Open boundaries: p = 0 on the border, which is never written. Warm-started from the last solve.
   constexpr float w = 1.7f;
+  const bool ground = on_ground(p_.effect);
   for (int it = 0; it < p_.pressure_iters; ++it) {
     for (const int colour : {0, 1}) {
       for (int y = 1; y <= n; ++y) {
@@ -388,6 +412,9 @@ void Fluid::project() {
           const float g = 0.25f * (div_[x, y] + pressure_[x - 1, y] + pressure_[x + 1, y] + pressure_[x, y - 1] + pressure_[x, y + 1]);
           pressure_[x, y] += w * (g - pressure_[x, y]);
         }
+      }
+      if (ground) {  // fog and dust: the bottom border is closed (no flow through the ground)
+        for (int x = 1; x <= n; ++x) pressure_[x, 0] = pressure_[x, 1];
       }
     }
   }
@@ -474,6 +501,10 @@ void Fluid::render(std::span<std::uint8_t> out) const {
   const int S = p_.size;
   if (out.size() < static_cast<std::size_t>(S) * S * 4) throw std::invalid_argument("sim: render buffer too small");
   if (render_energy(out)) return;  // jet, orb and vortex
+  if (atmos(p_.effect)) {
+    render_atmos(out);
+    return;
+  }
   const float n = f(n_), sc = n / f(S);
   constexpr float lx = -0.45f, ly = 0.89f;  // towards the light: up and to the left
   for (int py = 0; py < S; ++py) {
@@ -784,6 +815,129 @@ bool Fluid::render_energy(std::span<std::uint8_t> out) const {
   return true;
 }
 
+// --- fog, dust and cloud (docs/EFFECTS_ATMOSPHERE.md) -------------------------------------------------------------------
+//
+// None of them has heat: their material is the solver's soot, and they give no light. Fog and dust lie on a ground: a
+// band of still air three cells high at the bottom of the frame (add_atmos_forces) over a closed bottom border (project),
+// so what sinks onto it spreads sideways. Cloud has no ground and no source to be seen.
+
+namespace {
+
+constexpr float kGround = 3.f;  // the top of the ground, in cells of a 128-cell frame
+
+}  // namespace
+
+// fog: heavy gas released a little above the ground, poured downwards. dust: one burst at the start, a mound of dust
+// over the point of impact. cloud: inside the cloud's extent (wide, flatter below than above, its edge moved by the
+// flicker noise) the density is drawn gently towards a target that the flicker noise breaks into puffs; outside it,
+// what the flow carries out thins away. All are broken up by the flicker noise (source_flicker), as fire's source is.
+void Fluid::add_atmos_sources(float dt) {
+  const float n = f(n_), s = n / 128.f, I = p_.intensity;
+  const float tt = time_ * flicker_rate(p_.effect);
+  const auto flicker = [&](int x, int y) { return fbm(f(x) * 0.10f / s, f(y) * 0.10f / s, tt, p_.seed, 3); };
+  if (p_.effect == Effect::fog) {
+    const float cx = 0.5f * n, cy = 0.2f * n, hw = (0.10f + 0.08f * I) * n, hh = 0.07f * n;
+    const float level = 0.5f + 0.5f * I, pour = (4.f + 8.f * I) * s;
+    const int y_lo = std::max(1, static_cast<int>(cy - 2.f * hh)), y_hi = std::min(n_, static_cast<int>(cy + 2.f * hh) + 1);
+    const int x_lo = std::max(1, static_cast<int>(cx - 1.5f * hw)), x_hi = std::min(n_, static_cast<int>(cx + 1.5f * hw) + 1);
+    for (int y = y_lo; y <= y_hi; ++y) {
+      for (int x = x_lo; x <= x_hi; ++x) {
+        const float ex = (f(x) - cx) / hw, ey = (f(y) - cy) / hh;
+        const float shape = 1.f - smoothstep(0.6f, 1.f, std::sqrt(ex * ex + ey * ey));
+        if (shape <= 0.f) continue;
+        const float k = shape * smoothstep(-0.3f, 0.5f, flicker(x, y));
+        soot_[x, y] = std::max(soot_[x, y], level * k);
+        v_[x, y] = std::min(v_[x, y], -pour * k);
+      }
+    }
+    return;
+  }
+  if (p_.effect == Effect::dust) {
+    if (time_ > 0.f) return;  // one burst at the start, as the explosion's; add_atmos_divergence throws it out
+    const float cx = 0.5f * n, g = kGround * s, a = (0.06f + 0.03f * I) * n, b = (0.05f + 0.02f * I) * n;
+    const float level = 1.f + 0.6f * I;
+    const int y_lo = std::max(1, static_cast<int>(g)), y_hi = std::min(n_, static_cast<int>(g + 1.5f * b) + 1);
+    const int x_lo = std::max(1, static_cast<int>(cx - 1.5f * a)), x_hi = std::min(n_, static_cast<int>(cx + 1.5f * a) + 1);
+    for (int y = y_lo; y <= y_hi; ++y) {
+      for (int x = x_lo; x <= x_hi; ++x) {
+        if (f(y) < g) continue;
+        const float ex = (f(x) - cx) / a, ey = (f(y) - g) / b, fl = flicker(x, y);
+        const float fall = 1.f - smoothstep(0.5f, 1.f + 0.4f * fl, std::sqrt(ex * ex + ey * ey));
+        if (fall <= 0.f) continue;
+        soot_[x, y] = std::max(soot_[x, y], level * fall * (0.7f + 0.3f * smoothstep(-0.6f, 0.6f, fl)));
+      }
+    }
+    return;
+  }
+  const float cx = 0.5f * n, cy = 0.5f * n, a = (0.26f + 0.14f * I) * n, b = (0.13f + 0.07f * I) * n;
+  const float level = 0.6f + 0.6f * I, rate = 1.f - std::exp(-0.4f * dt), out = 1.f - std::exp(-1.5f * dt);
+  for (int y = 1; y <= n_; ++y) {
+    for (int x = 1; x <= n_; ++x) {
+      const float ex = (f(x) - cx) / a, ey = (f(y) - cy) / b * (f(y) < cy ? 1.6f : 1.f), fl = flicker(x, y);
+      const float inside = 1.f - smoothstep(0.55f, 1.f, std::sqrt(ex * ex + ey * ey) - 0.25f * fl);
+      soot_[x, y] -= out * (1.f - inside) * soot_[x, y];
+      if (inside <= 0.f) continue;
+      const float target = level * inside * (0.25f + 0.75f * smoothstep(-0.2f, 0.5f, fl));
+      soot_[x, y] += rate * std::max(0.f, target - soot_[x, y]);
+    }
+  }
+}
+
+// The ground under fog and dust: the air in it is still, and what comes down onto it stops (the closed bottom border
+// of the pressure solve does the rest). It acts like the other forces, before the pressure solve.
+void Fluid::add_atmos_forces(float dt) {
+  (void)dt;
+  if (!on_ground(p_.effect)) return;
+  const float s = f(n_) / 128.f, g = kGround * s, top = g + 4.f * s;
+  const int y_hi = std::min(n_, static_cast<int>(top) + 1);
+  for (int y = 1; y <= y_hi; ++y) {
+    const float hold = 1.f - smoothstep(g - 2.f * s, g + 2.f * s, f(y)), stop = 1.f - smoothstep(g, top, f(y));
+    for (int x = 1; x <= n_; ++x) {
+      u_[x, y] *= 1.f - hold;
+      v_[x, y] *= 1.f - (v_[x, y] < 0.f ? std::max(hold, stop) : hold);
+    }
+  }
+}
+
+// dust: the burst throws the dust out where it is thick, for its first moments (the explosion's hot gas expands in the
+// same way). The dust is heavy, so it falls back and runs out along the ground.
+void Fluid::add_atmos_divergence() {
+  const float rate = (22.f + 12.f * p_.intensity) * std::exp(-time_ / 0.1f);
+  if (rate <= 0.05f) return;
+  for (int y = 1; y <= n_; ++y) {
+    for (int x = 1; x <= n_; ++x) div_[x, y] += rate * smoothstep(0.15f, 0.6f, soot_[x, y]);
+  }
+}
+
+// Reflected light only, no emission: lit from above and to the left, shaded by the material towards the light.
+// fog: pale, soft mist, barely shaded; dust: brown-grey and deeply self-shadowed; cloud: white with grey-blue shade.
+void Fluid::render_atmos(std::span<std::uint8_t> out) const {
+  const int S = p_.size;
+  const float n = f(n_), sc = n / f(S);
+  constexpr float lx = -0.45f, ly = 0.89f;
+  struct Look {
+    float density, shade;  // cover 1 - exp(-density D); light exp(-shade tau)
+    Rgb lit, dark;         // the colour in full light and in full shade (times the cover)
+  };
+  const Look look = p_.effect == Effect::fog    ? Look{1.0f, 0.08f, {0.86f, 0.88f, 0.90f}, {0.56f, 0.59f, 0.64f}}
+                    : p_.effect == Effect::dust ? Look{2.0f, 0.45f, {0.62f, 0.54f, 0.43f}, {0.19f, 0.17f, 0.14f}}
+                                                : Look{2.6f, 0.45f, {0.97f, 0.97f, 0.96f}, {0.42f, 0.45f, 0.52f}};
+  for (int py = 0; py < S; ++py) {
+    for (int px = 0; px < S; ++px) {
+      const float gx = (f(px) + 0.5f) * sc + 0.5f;
+      const float gy = n - (f(py) + 0.5f) * sc + 0.5f;
+      float tau = 0.f;  // optical depth towards the light
+      for (int k = 1; k <= 12; ++k) tau += soot_.sample(gx + lx * 2.f * f(k) * sc, gy + ly * 2.f * f(k) * sc);
+      const float light = std::exp(-look.shade * tau), cover = 1.f - std::exp(-look.density * soot_.sample(gx, gy));
+      auto o = out.subspan((static_cast<std::size_t>(py) * S + px) * 4, 4);
+      o[0] = q8((look.dark.r + (look.lit.r - look.dark.r) * light) * cover);
+      o[1] = q8((look.dark.g + (look.lit.g - look.dark.g) * light) * cover);
+      o[2] = q8((look.dark.b + (look.lit.b - look.dark.b) * light) * cover);
+      o[3] = q8(cover);
+    }
+  }
+}
+
 void stamp(Clip& clip, const Params& p) {
   clip.effect = effect_name(p.effect);
   clip.source = "sim";
@@ -815,8 +969,9 @@ Clip simulate(const Params& p) {
   const bool loops = effect_loops(p.effect);
   const int blend = loops ? std::clamp(p.loop_blend, 0, p.frames / 2) : 0;
   if (loops) {
-    // Long enough for the plume to reach a statistically steady state, so the loop crossfade joins similar frames.
-    const int warmup = p.warmup >= 0 ? p.warmup : (p.effect == Effect::smoke ? 180 : 90);
+    // Long enough for the plume to reach a statistically steady state, so the loop crossfade joins similar frames
+    // (fog takes about 5 s to cover the ground; cloud as long to grow from nothing).
+    const int warmup = p.warmup >= 0 ? p.warmup : (p.effect == Effect::smoke ? 180 : atmos(p.effect) ? 150 : 90);
     for (int i = 0; i < warmup; ++i) fluid.step_frame();
   }
   Clip raw;

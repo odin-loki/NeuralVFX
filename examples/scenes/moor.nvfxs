@@ -1,0 +1,93 @@
+# A lightning strike on a foggy moor, written as a script (docs/COMPOSE.md §4) to show the atmosphere effects
+# (docs/EFFECTS_ATMOSPHERE.md) together, with study D's fire:
+#
+#   nvfx_scene_script --script examples/scenes/moor.nvfxs --models DIR --out moor.mp4
+#
+# DIR holds fog.nvfx, dust.nvfx and cloud.nvfx (docs/EFFECTS_ATMOSPHERE.md) and study D's fire.nvfx (v2).
+#
+# Night under a bank of storm cloud drifting to the right. Frost-white fog lies along the ground, released in five
+# places, and a campfire burns in it. Lightning flashes in the cloud and strikes the moor: the strike kicks up dust,
+# which rolls out through the fog and pushes it aside (the blast lifts some of it). A second strike lands nearer the
+# fire; its dust bends the flames.
+
+scene      size 1280 x 720, fps 30, length 10 s, ground 600
+bus        at (-128, -300), size 1536 x 1040, cell 8
+particles  capacity 6000, flow 0.9
+keyframes  0.8, 2.4, 2.53, 3.2, 4.4, 5.83, 6.9, 9.0
+
+effect fog   = "fog.nvfx"
+effect dust  = "dust.nvfx"
+effect cloud = "cloud.nvfx"
+effect fire  = "fire.nvfx"
+
+# All three lit by the scene (the fire, the lightning, the night sky): the fog frost white, the storm cloud dark and
+# heavy, the dust brown.
+look frost = shader, emission 0, soot_density 0.6, soot_albedo 0.8, sky 0.4, shadow 0.1, scene_light 1.4, relief 0.3,
+             tint (0.86, 0.93, 1)
+look storm = shader, emission 0, soot_density 3, soot_albedo 0.45, sky 0.25, shadow 0.35, scene_light 1.2, relief 2.5,
+             tint (0.62, 0.66, 0.78)
+look dirt  = shader, emission 0, soot_density 2.2, soot_albedo 0.6, sky 0.45, shadow 0.4, scene_light 1.2, relief 3,
+             tint (0.8, 0.62, 0.42)
+
+let one     = t - strike1                                   # since each strike (negative before it)
+let two     = t - strike2
+let flash   = if(one >= 0, exp(-one / 0.08), 0) + if(two >= 0, 0.8 * exp(-two / 0.08), 0)
+let drift   = 0.62 + 0.06 * noise(0.3 * t, 2.5, 0)          # the wind aloft
+let blast   = max(if(one >= 0, 1 - smooth((one - 2) / 1), 0), if(two >= 0, 1 - smooth((two - 2) / 1), 0))  # dust moving
+
+# The cloud bank, three masses of the cloud model drifting to the right.
+module cloud_a = cloud, size 128, width 640, at (230, 430), feather 0.1, look storm, start 0, seed 61,
+                 controls (0.8, 0.62, 0.5), wind drift
+module cloud_b = cloud, size 128, width 700, at (700, 420), feather 0.1, look storm, start 3, seed 62,
+                 controls (0.95, 0.62, 0.6), wind drift
+module cloud_c = cloud, size 128, width 640, at (1140, 440), feather 0.1, look storm, start 5, seed 63,
+                 controls (0.75, 0.62, 0.4), wind drift
+# The fog along the ground, five releases of the fog model side by side, drifting a little to the right.
+module fog_1   = fog, size 128, width 340, at (110, ground), sink 0.03, feather 0.1, look frost, start 0, seed 71,
+                 controls (0.8, 0.6, 0.4)
+module fog_2   = fog, size 128, width 340, at (370, ground), sink 0.03, feather 0.1, look frost, start 4, seed 72,
+                 controls (0.6, 0.55, 0.5)
+module fog_3   = fog, size 128, width 340, at (640, ground), sink 0.03, feather 0.1, look frost, start 2, seed 73,
+                 controls (0.7, 0.6, 0.4)
+module fog_4   = fog, size 128, width 340, at (900, ground), sink 0.03, feather 0.1, look frost, start 6, seed 74,
+                 controls (0.6, 0.5, 0.5)
+module fog_5   = fog, size 128, width 340, at (1170, ground), sink 0.03, feather 0.1, look frost, start 1, seed 75,
+                 controls (0.8, 0.6, 0.4)
+# The campfire.
+module camp    = fire, size 128, width 220, at (1060, ground), sink 0.08, feather 0.15, start 0, seed 41,
+                 controls (0.6, 0.5, 0.5)
+# The dust of the two strikes, waiting for them.
+module dust_a  = dust, size 128, width 640, at (520, ground), sink 0.03, feather 0.1, look dirt, start 0, seed 81, waiting,
+                 controls (0.9, 0.55, 0.6), opacity 1 - smooth((dust_a.age - 2.6) / 1.2)
+module dust_b  = dust, size 128, width 460, at (860, ground), sink 0.03, feather 0.1, look dirt, start 7, seed 82, waiting,
+                 controls (0.6, 0.6, 0.5), opacity 1 - smooth((dust_b.age - 2.6) / 1.2)
+
+light   gain 0.14, flash (0.55 * flash, 0.6 * flash, 0.8 * flash)
+frame   exposure 1.4 * (1 + 0.6 * flash), fade smooth(t / 0.4) * smooth((length - t) / 0.6), haze 1, bloom 1, bloom_threshold 1
+camera  x (rand - 0.5) * 10 * flash, y (rand - 0.5) * 10 * flash
+
+# The first strike.
+at 2.5 as strike1:
+  wake dust_a
+  shock at (520, ground - 10), speed 1000, decay 0.35, amp 5, width 26
+  burst at (520, ground - 6), radius 12, embers 120, debris 40, speed 520
+  scorch at (520, ground + 4), radius 70, glow 0.6
+# The second, nearer the fire.
+at 5.8 as strike2:
+  wake dust_b
+  shock at (860, ground - 10), speed 1000, decay 0.35, amp 4, width 24
+  burst at (860, ground - 6), radius 10, embers 80, debris 25, speed 460
+  scorch at (860, ground + 4), radius 55, glow 0.5
+
+when dust_a.age > 4:
+  stop dust_a
+when dust_b.age > 4:
+  stop dust_b
+
+every frame:
+  push fog_1, gain 0.25 * blast   # while the dust runs out, it moves the fog aside
+  push fog_2, gain 0.25 * blast
+  push fog_3, gain 0.25 * blast
+  push fog_4, gain 0.25 * blast
+  push fog_5, gain 0.25 * blast
+  push camp, gain 0.15 * blast   # and bends the flames

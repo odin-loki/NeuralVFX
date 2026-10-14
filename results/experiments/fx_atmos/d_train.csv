@@ -1,0 +1,4 @@
+effect,runs,frames,sim_minutes,record_s,stepper_loss,stepper_s,renderer_psnr,contrast,swirl,detail_score,starts,start_fine,stored_bytes,total_s
+fog,160,240,21.33,353,0.01692,7028,0.00,1,0.8,0.000,8,64,149162,7388
+dust,240,90,12.00,141,0.02564,7107,0.00,1,0.8,0.000,16,64,280826,7248
+cloud,160,240,21.33,537,0.01065,8147,0.00,1,0.8,0.000,8,64,149162,8701

@@ -181,8 +181,9 @@ TEST(Sim, LoopSeamIsNoWorseThanAnOrdinaryFrameStep) {
   EXPECT_LE(mean_abs_diff(c.frame(c.frames - 1), c.frame(0)), 1.5 * step + 0.5);
 }
 
-// Adding effects (docs/EFFECTS.md, docs/EFFECTS_ENERGY.md) must not change the earlier ones: these hashes are of clips
-// made before steam and magic existed (fire, smoke, explosion) and before jet, orb and vortex existed (steam, magic).
+// Adding effects (docs/EFFECTS.md, docs/EFFECTS_ENERGY.md, docs/EFFECTS_ATMOSPHERE.md) must not change the earlier
+// ones: these hashes are of clips made before steam and magic existed (fire, smoke, explosion) and before jet, orb,
+// vortex, fog, dust and cloud existed (steam, magic).
 // FNV-1a of the RGBA bytes; the solver is built at the baseline ISA without contraction.
 TEST(Sim, StudyEffectsAreUnchangedByTheNewOnes) {
   const auto fnv = [](std::span<const std::uint8_t> b) {
@@ -213,7 +214,7 @@ TEST(Sim, NewEffectsAreNamedAndLoop) {
     sim::Effect back{};
     ASSERT_TRUE(sim::parse_effect(sim::effect_name(e), back));
     EXPECT_EQ(back, e);
-    EXPECT_TRUE(sim::effect_loops(e));
+    EXPECT_EQ(sim::effect_loops(e), e != sim::Effect::dust);  // dust plays once, as the explosion
     EXPECT_EQ(sim::simulate(small(e)).rgba, sim::simulate(small(e)).rgba) << sim::effect_name(e);
   }
   EXPECT_EQ(sim::kAllEffects.size(), sim::kEffects.size() + sim::kNewEffects.size());
@@ -298,7 +299,7 @@ TEST(Sim, JetOrbAndVortexHaveTheirOwnControls) {
     EXPECT_EQ(names[1], name);
     EXPECT_EQ(names[2], "turbulence");
   }
-  EXPECT_EQ(sim::kAllEffects.back(), sim::Effect::vortex);
+  EXPECT_TRUE(std::ranges::contains(sim::kAllEffects, sim::Effect::vortex));
 }
 
 TEST(Sim, JetIsAFlameFromTheLeftThatItsAimRaises) {
@@ -423,6 +424,148 @@ TEST(Sim, VortexIsAColumnOfDustThatSwaysWithItsControl) {
   EXPECT_EQ(bad, 0);
   EXPECT_GT(dust, 1000);
   EXPECT_GT(r, 1.2 * b);  // brown-grey
+}
+
+// --- fog, dust and cloud (docs/EFFECTS_ATMOSPHERE.md) ---------------------------------------------------------------
+
+namespace {
+
+// Where the material (soot) is, as fractions of the frame (y up): its amount, centroid, and the extent of cells above
+// a tenth of its peak.
+struct Spread {
+  double amount = 0, cx = 0, cy = 0, left = 1, right = 0, top = 0;
+  double width() const { return right - left; }
+};
+
+Spread spread_of(const sim::State& s) {
+  Spread o;
+  float peak = 0.f;
+  for (const float d : s.soot) peak = std::max(peak, d);
+  const double n = s.n;
+  for (int y = 0; y < s.n; ++y) {
+    for (int x = 0; x < s.n; ++x) {
+      const double d = s.soot[static_cast<std::size_t>(y * s.n + x)];
+      o.amount += d;
+      o.cx += d * (x + 0.5) / n;
+      o.cy += d * (y + 0.5) / n;
+      if (d > 0.1 * peak) {
+        o.left = std::min(o.left, x / n);
+        o.right = std::max(o.right, (x + 1) / n);
+        o.top = std::max(o.top, (y + 1) / n);
+      }
+    }
+  }
+  if (o.amount > 0) {
+    o.cx /= o.amount;
+    o.cy /= o.amount;
+  }
+  return o;
+}
+
+sim::Params atmos_params(sim::Effect e, float intensity, float wind, float turbulence) {
+  auto p = small(e);
+  p.size = 64;
+  p.intensity = intensity;
+  p.wind = wind;
+  p.turbulence = turbulence;
+  return p;
+}
+
+// The spread after each of `frames` frames.
+std::vector<Spread> spreads(const sim::Params& p, int frames) {
+  sim::Fluid f(p);
+  std::vector<Spread> v;
+  for (int i = 0; i < frames; ++i) {
+    f.step_frame();
+    v.push_back(spread_of(f.state()));
+  }
+  return v;
+}
+
+}  // namespace
+
+TEST(Sim, AtmosphereEffectsHaveNoHeatAndGiveNoLight) {
+  for (const sim::Effect e : {sim::Effect::fog, sim::Effect::dust, sim::Effect::cloud}) {
+    const auto name = sim::effect_name(e);
+    EXPECT_EQ(sim::control_names(e), sim::kControlNames) << name;
+    const Clip c = sim::simulate(atmos_params(e, 0.7f, 0.5f, 0.5f));
+    EXPECT_EQ(c.loop, e != sim::Effect::dust) << name;
+    long bad = 0, covered = 0;
+    double r = 0, g = 0, b = 0, a = 0;
+    for (std::size_t i = 0; i < c.rgba.size(); i += 4) {
+      for (int k = 0; k < 3; ++k) bad += c.rgba[i + static_cast<std::size_t>(k)] > c.rgba[i + 3] + 1;  // reflected light only
+      if (c.rgba[i + 3] > 64) {
+        ++covered;
+        r += c.rgba[i];
+        g += c.rgba[i + 1];
+        b += c.rgba[i + 2];
+        a += c.rgba[i + 3];
+      }
+    }
+    EXPECT_EQ(bad, 0) << name;
+    ASSERT_GT(covered, 100) << name;
+    if (e == sim::Effect::dust) {  // brown-grey: warmer than grey, and darker than the white vapours
+      EXPECT_GT(r, 1.25 * b) << name;
+      EXPECT_LT(r, 0.65 * a) << name;
+    } else {  // pale: near grey, bright
+      EXPECT_LT(std::abs(r - b), 0.1 * b) << name;
+      EXPECT_GT(g, 0.6 * a) << name;
+    }
+    sim::Fluid f(atmos_params(e, 0.7f, 0.5f, 0.5f));
+    for (int i = 0; i < 20; ++i) f.step_frame();
+    const sim::State st = f.state();
+    EXPECT_TRUE(std::ranges::all_of(st.temp, [](float t) { return t == 0.f; })) << name;  // no heat
+  }
+}
+
+TEST(Sim, FogSinksAndSpreadsAlongTheGround) {
+  const auto v = spreads(atmos_params(sim::Effect::fog, 0.6f, 0.5f, 0.4f), 150);
+  EXPECT_LT(v[149].cy, 0.15);                 // below its release (a fifth of the frame up)
+  EXPECT_LT(v[149].top, 0.4);                 // a layer on the ground
+  EXPECT_GT(v[149].width(), 0.42);            // spread beyond the release (about 0.3 of the frame wide)
+  EXPECT_GT(v[149].width(), v[29].width() + 0.1) << v[29].width();
+  EXPECT_GT(v[149].amount, 0.5 * v[99].amount);  // released all the time
+  // the wind control carries it to one side or the other
+  const auto left = spreads(atmos_params(sim::Effect::fog, 0.6f, 0.f, 0.4f), 120);
+  const auto right = spreads(atmos_params(sim::Effect::fog, 0.6f, 1.f, 0.4f), 120);
+  EXPECT_LT(left[119].cx, 0.45);
+  EXPECT_GT(right[119].cx, 0.55);
+}
+
+TEST(Sim, DustRisesSpreadsAndSettles) {
+  const auto v = spreads(atmos_params(sim::Effect::dust, 0.6f, 0.5f, 0.5f), 90);  // its 3 s
+  const auto highest = std::ranges::max_element(v, {}, &Spread::top);
+  EXPECT_GT(highest->top, v[0].top + 0.05);  // thrown up a little
+  EXPECT_LT(highest->top, 0.5);              // but stays low
+  EXPECT_LT(v[89].top, highest->top);        // and settles
+  EXPECT_LT(v[89].cy, 0.12);
+  EXPECT_GT(v[89].width(), 2.5 * v[0].width());  // running out along the ground
+  EXPECT_GT(v[89].width(), 0.6);
+  EXPECT_LT(v[89].amount, std::ranges::max_element(v, {}, &Spread::amount)->amount);  // and thinning
+  // more energy, a bigger burst
+  const auto weak = spreads(atmos_params(sim::Effect::dust, 0.f, 0.5f, 0.5f), 30);
+  const auto strong = spreads(atmos_params(sim::Effect::dust, 1.f, 0.5f, 0.5f), 30);
+  EXPECT_GT(strong[29].amount, 2.0 * weak[29].amount);
+  EXPECT_GT(strong[29].top, weak[29].top);
+}
+
+TEST(Sim, CloudStaysAliveAndDriftsWithTheWind) {
+  const auto v = spreads(atmos_params(sim::Effect::cloud, 0.5f, 0.5f, 0.5f), 360);
+  for (const int i : {149, 239, 359}) {
+    EXPECT_GT(v[static_cast<std::size_t>(i)].amount, 0.8 * v[149].amount) << i;  // it does not fade away
+    EXPECT_GT(v[static_cast<std::size_t>(i)].cy, 0.4) << i;                       // and stays in the middle of the frame
+    EXPECT_LT(v[static_cast<std::size_t>(i)].cy, 0.65) << i;
+    EXPECT_GT(v[static_cast<std::size_t>(i)].width(), 0.4) << i;
+  }
+  // more intensity, more cover
+  const auto thin = spreads(atmos_params(sim::Effect::cloud, 0.f, 0.5f, 0.5f), 150);
+  const auto thick = spreads(atmos_params(sim::Effect::cloud, 1.f, 0.5f, 0.5f), 150);
+  EXPECT_GT(thick[149].amount, 2.0 * thin[149].amount);
+  EXPECT_GT(thick[149].width(), thin[149].width() + 0.1);
+  // the wind drifts it
+  const auto left = spreads(atmos_params(sim::Effect::cloud, 0.5f, 0.f, 0.5f), 150);
+  const auto right = spreads(atmos_params(sim::Effect::cloud, 0.5f, 1.f, 0.5f), 150);
+  EXPECT_GT(right[149].cx, left[149].cx + 0.04);
 }
 
 TEST(Sim, ParamsRoundTripThroughClipMetadata) {

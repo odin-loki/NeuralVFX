@@ -94,6 +94,30 @@ TEST(Rollout, NoiseIsTheSimulationsForcing) {
   }
 }
 
+
+// Effects that play once take the explosion's branch of study D's recipe; fog and cloud keep fine fields with their start
+// points as smoke does (docs/EFFECTS_ATMOSPHERE.md).
+TEST(Rollout, OneShotEffectsTakeTheExplosionsRecipe) {
+  const SimRecipe ex = recipe_for(sim::Effect::explosion), dust = recipe_for(sim::Effect::dust);
+  EXPECT_EQ(dust.runs, ex.runs);
+  EXPECT_EQ(dust.frames, ex.frames);
+  EXPECT_EQ(dust.start_frame, 0);
+  EXPECT_EQ(dust.start_fine, ex.start_fine);
+  EXPECT_EQ(dust.starts, ex.starts);
+  EXPECT_EQ(dust.stepper.burn_max, ex.stepper.burn_max);
+  const Model m = recipe_model(dust);
+  EXPECT_FALSE(m.loop);
+  EXPECT_EQ(m.h.frames, ex.frames);
+  EXPECT_EQ(m.h.n_age, 2);
+  for (const sim::Effect e : {sim::Effect::fog, sim::Effect::cloud}) {
+    const SimRecipe r = recipe_for(e), fire = recipe_for(sim::Effect::fire);
+    EXPECT_EQ(r.start_fine, recipe_for(sim::Effect::smoke).start_fine);
+    EXPECT_EQ(r.runs, fire.runs);
+    EXPECT_EQ(r.frames, fire.frames);
+    EXPECT_EQ(r.starts, fire.starts);
+    EXPECT_TRUE(recipe_model(r).loop);
+  }
+}
 TEST(Rollout, CoarseFromSimAveragesBlocks) {
   sim::State st;
   st.n = 16;

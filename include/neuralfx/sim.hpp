@@ -19,16 +19,19 @@ namespace nfx::sim {
 
 // fire, smoke and explosion are the effects of studies A to I, whose tools loop over kEffects. steam and magic came
 // later (docs/EFFECTS.md): the same solver with other sources, forces and drawing, trained and tested as study D's.
-// jet, orb and vortex came after them (docs/EFFECTS_ENERGY.md), the same way.
-enum class Effect { fire, smoke, explosion, steam, magic, jet, orb, vortex };
+// jet, orb and vortex (docs/EFFECTS_ENERGY.md) and fog, dust and cloud (docs/EFFECTS_ATMOSPHERE.md) came after them,
+// the same way.
+enum class Effect { fire, smoke, explosion, steam, magic, jet, orb, vortex, fog, dust, cloud };
 inline constexpr std::array kEffects{Effect::fire, Effect::smoke, Effect::explosion};  // the studies' effects
-inline constexpr std::array kNewEffects{Effect::steam, Effect::magic, Effect::jet, Effect::orb, Effect::vortex};  // added since
+inline constexpr std::array kNewEffects{Effect::steam, Effect::magic, Effect::jet, Effect::orb, Effect::vortex,  // added since
+                                        Effect::fog,   Effect::dust,  Effect::cloud};
 inline constexpr std::array kAllEffects{Effect::fire, Effect::smoke, Effect::explosion, Effect::steam, Effect::magic,
-                                        Effect::jet, Effect::orb, Effect::vortex};
+                                        Effect::jet,  Effect::orb,   Effect::vortex,    Effect::fog,   Effect::dust,
+                                        Effect::cloud};
 
 std::string_view effect_name(Effect e);
 bool parse_effect(std::string_view text, Effect& out);  // any effect of kAllEffects
-bool effect_loops(Effect e);                            // an explosion plays once; the others loop
+bool effect_loops(Effect e);                            // an explosion and dust play once; the others loop
 
 // The learned controls, all normalised to [0, 1].
 inline constexpr int kControls = 3;
@@ -117,6 +120,12 @@ class Fluid {
   void add_energy_divergence();
   void energy_decay(float dt);
   bool render_energy(std::span<std::uint8_t> rgba) const;
+  // fog, dust and cloud (docs/EFFECTS_ATMOSPHERE.md): their sources, the ground that fog and dust lie on, dust's burst
+  // and their drawing, kept apart from the other effects' code
+  void add_atmos_sources(float dt);
+  void add_atmos_forces(float dt);
+  void add_atmos_divergence();
+  void render_atmos(std::span<std::uint8_t> rgba) const;
   void add_forces(float dt);
   void project();
   void advect_velocity(float dt);
