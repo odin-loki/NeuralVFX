@@ -55,7 +55,7 @@ module mass = cloud, size 128, width 600 * scale, at (X, Y + 300 * scale), feath
 entry storm_cloud, category weather, size 1100 x 360, anchor centre, loop, show 2.56,
       about "A storm cloud: a dark bank of cloud drifting, lit from inside by lightning every few seconds, a bolt below it"
 param wind = 0.62, range (0, 1), about "drift"
-param every = 5, range (2, 15), about "seconds between flashes"
+param every = 5, range (3, 15), about "seconds between flashes (each comes 2.5 s into its period, so at least 3)"
 let k = t - every * floor(t / every)
 let strike = if(k > 2.5 and k < 2.62, 1, if(k > 2.7 and k < 2.8, 0.7, 0))
 module a = cloud, size 128, width 700 * scale, at (X - 300 * scale, Y + 340 * scale), feather 0.1, look storm, start 0,
