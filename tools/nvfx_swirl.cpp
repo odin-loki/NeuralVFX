@@ -28,6 +28,7 @@
 #include <cmath>
 #include <cstdlib>
 #include <ctime>
+#include <xmmintrin.h>
 #include <memory>
 #include <filesystem>
 #include <format>
@@ -2175,6 +2176,9 @@ void step_cost(const Ctx& c, sim::Effect e, const tools::Args& a) {
   auto models = read_entries(a.need("current"), a.str("cand", ""));
   if (a.has("fire")) models.push_back({"fire", a.str("fire"), load_or_throw(a.str("fire")), file_sha256(a.str("fire"))});
   const int reps = a.i("reps", 7), size = a.i("size", 128), frames = 200;
+  // --ftz: subnormal floats flushed to zero in this thread (FTZ and DAZ), as many engines run; without it the runtime's
+  // own arithmetic (some rollout effects leave subnormal values in their fine fields)
+  if (a.flag("ftz")) _mm_setcsr(_mm_getcsr() | 0x8040);
   std::vector<std::unique_ptr<Runtime>> rts;
   for (const auto& m : models) rts.push_back(std::make_unique<Runtime>(m.m));
   std::vector<std::vector<double>> med(models.size());
@@ -2209,9 +2213,15 @@ void step_cost(const Ctx& c, sim::Effect e, const tools::Args& a) {
     const auto [lo, hi] = std::ranges::minmax(med[k]);
     std::println("cost {} {} at {} px: {:.3f} ms (range {:.3f} to {:.3f}), minus current {:+.3f} ms (median of {} paired repetitions)", ename(e), models[k].name, size,
                  median(med[k]), lo, hi, median(d), reps);
-    rows.push_back(std::format("{},{},{},{:.4f},{:.4f},{:.4f},{:+.4f},{}", ename(e), models[k].name, size, median(med[k]), lo, hi, median(d), reps));
+    rows.push_back(std::format("{},{},{},{},{:.4f},{:.4f},{:.4f},{:+.4f},{}", ename(e), models[k].name, size, a.flag("ftz") ? 1 : 0, median(med[k]), lo, hi,
+                               median(d), reps));
   }
-  if (a.has("out")) merge_rows(a.str("out"), "effect,model,size,median_ms,min_ms,max_ms,minus_current_ms,reps", rows, ename(e));
+  if (a.has("out")) {  // appended: one session's rounds in order
+    const bool fresh = !fs::exists(a.str("out"));
+    std::ofstream o(a.str("out"), std::ios::app);
+    if (fresh) o << "effect,model,size,ftz,median_ms,min_ms,max_ms,minus_current_ms,reps\n";
+    for (const auto& r : rows) o << r << "\n";
+  }
 }
 
 // --- look: a sheet of frames played as shipped, a real run first ---------------------------------------------------------
@@ -2256,7 +2266,7 @@ void step_look(const Ctx& c, sim::Effect e, const tools::Args& a) {
 
 int main(int argc, char** argv) {
   try {
-    tools::Args a(argc, argv, {"no-neural", "no-csd", "only-neural", "empty-start", "floor-gradient"});
+    tools::Args a(argc, argv, {"no-neural", "no-csd", "only-neural", "empty-start", "floor-gradient", "ftz"});
     if (a.positional().empty()) {
       std::println("nvfx_swirl diag|dstats|column --effect E [--root DIR] [--results DIR] [--threads N]");
       return 2;
