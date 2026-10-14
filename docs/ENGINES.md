@@ -2,7 +2,9 @@
 
 Status: **current**. Audience: dev. The API is `include/neuralfx/nvfx.h` (C, no dependencies) for single effects and
 `include/neuralfx/nvfx_scene.h` for composed scenes played from scripts (§7); the reference host is `examples/c_host.c`,
-and a Godot 4 plugin is in `engines/godot` (§8).
+and a Godot 4 plugin is in `engines/godot` (§8). **To put it in your own engine**, start with
+[INTEGRATION.md](INTEGRATION.md): which API when, the frame loop, textures, effect packs (`nvfx_pack.h`: one checked
+file with the models and the catalogue), calibration, and the C++ wrapper `include/neuralfx/nvfx.hpp`.
 
 ## 1. What the runtime does
 
