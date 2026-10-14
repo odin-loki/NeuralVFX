@@ -332,7 +332,15 @@ if(NEURALFX_BUILD_TESTS)
                      --keyframes ${CMAKE_CURRENT_BINARY_DIR}/portal_script_keyframes --no-video --threads 2
                      --verify ${CMAKE_CURRENT_SOURCE_DIR}/results/experiments/fx_frozen.csv)
     set_tests_properties(neuralfx.ScriptedPortalFrozen PROPERTIES LABELS "neuralfx;data" SKIP_RETURN_CODE 77 TIMEOUT 1200)
-    foreach(scene fireball firewall campfire portal)
+    # The moor (docs/EFFECTS_ATMOSPHERE.md): fog, dust and cloud with study D's v2 fire, all in NEURALFX_MODELS_ATMOS
+    # (outside git); its keyframes have the SHA-256 recorded in results/experiments/fx_atmos_frozen.csv.
+    set(NEURALFX_MODELS_ATMOS "${_nvfx_data}/fx_atmos/models/scene" CACHE PATH "fog.nvfx, dust.nvfx, cloud.nvfx and v2's fire.nvfx")
+    add_test(NAME neuralfx.ScriptedMoorFrozen
+             COMMAND nvfx_scene_script --script ${CMAKE_CURRENT_SOURCE_DIR}/examples/scenes/moor.nvfxs --models ${NEURALFX_MODELS_ATMOS}
+                     --keyframes ${CMAKE_CURRENT_BINARY_DIR}/moor_script_keyframes --no-video --threads 2
+                     --verify ${CMAKE_CURRENT_SOURCE_DIR}/results/experiments/fx_atmos_frozen.csv)
+    set_tests_properties(neuralfx.ScriptedMoorFrozen PROPERTIES LABELS "neuralfx;data" SKIP_RETURN_CODE 77 TIMEOUT 1200)
+    foreach(scene fireball firewall campfire portal moor)
       add_test(NAME neuralfx.SceneScriptChecks.${scene} COMMAND nvfx_scene_script --script ${CMAKE_CURRENT_SOURCE_DIR}/examples/scenes/${scene}.nvfxs --check)
       set_tests_properties(neuralfx.SceneScriptChecks.${scene} PROPERTIES LABELS neuralfx)
     endforeach()

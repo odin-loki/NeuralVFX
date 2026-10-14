@@ -2,3 +2,11 @@ kind,name,file,bytes,sha256,source
 rollout_effect,fog,fx_atmos/models/d/fog.nvfx,149287,bcb5466137e5684c409ae57321e2faf898c273ae40556641be75bfb3a012da49,study D's recipe (docs/EFFECTS_ATMOSPHERE.md): d-train --stages12 1 then d-tune then d-finish
 rollout_effect,dust,fx_atmos/models/d/dust.nvfx,280927,e18c287b7b5ecc9975da526c94a0b6aaf548981a0b488fde1853a689aeef02f5,study D's recipe (docs/EFFECTS_ATMOSPHERE.md): d-train --stages12 1 then d-tune then d-finish
 rollout_effect,cloud,fx_atmos/models/d/cloud.nvfx,149287,b1a886dd038a8e88f4461e5fbd3b0830d9c54e764b0977f9fded225b57e221c8,study D's recipe (docs/EFFECTS_ATMOSPHERE.md): d-train --stages12 1 then d-tune then d-finish
+moor_keyframe,frame_024,nvfx_scene_script --keyframes (examples/scenes/moor.nvfxs),1058557,5511049327e57dd8b6183a579c51f7d7b673bbf29799ca464e028b0ef0b9041b,
+moor_keyframe,frame_072,nvfx_scene_script --keyframes (examples/scenes/moor.nvfxs),1058461,b1d58fa43468d44dd69a7621f4de9c01add5cf11d480a8f7120c3374c2dc73f8,
+moor_keyframe,frame_076,nvfx_scene_script --keyframes (examples/scenes/moor.nvfxs),768666,5500c66e511dc78a506053261c67b610d63ef328a01179932817305928d5bcaf,
+moor_keyframe,frame_096,nvfx_scene_script --keyframes (examples/scenes/moor.nvfxs),1084036,fa7eae897653c4207d6b62dfe4e6d80320068d79de16567d1065378ce9e65638,
+moor_keyframe,frame_132,nvfx_scene_script --keyframes (examples/scenes/moor.nvfxs),1077668,b8cd0967a38f050d9f1c6ea657e9f0c741733a91e5d912a1c67b04da646395d1,
+moor_keyframe,frame_175,nvfx_scene_script --keyframes (examples/scenes/moor.nvfxs),809166,c10a635d61fdb1e1132fb68f9f2295d4cdc2eb9eaf2274a76034b74b5c065ea2,
+moor_keyframe,frame_207,nvfx_scene_script --keyframes (examples/scenes/moor.nvfxs),1077651,590ec6364f394889f4af954e1d07472efa61213a0664802f1202abbc95540d12,
+moor_keyframe,frame_270,nvfx_scene_script --keyframes (examples/scenes/moor.nvfxs),1071140,89f591d3fd560ff86d25a99b59f8b827c63313a3a2da4703c064e46232560b96,
