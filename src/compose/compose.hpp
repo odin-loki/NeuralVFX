@@ -203,6 +203,24 @@ class Module {
   // Per row of image(), [lo, hi): every pixel outside is +0 in every channel (written by shade()). [size][2]
   std::span<const int> drawn_spans() const { return drawn_; }
 
+  // Engine layers (docs/ENGINES.md §11): with use_layers(true) (a set-up call: allocates), shade() also writes, beside
+  // image(), emission(): the light each pixel gives (rgb, premultiplied as image() is) and its optical depth (a: 0 where
+  // image()'s alpha is 0), and normals(): its normal times its alpha (x right, y up, z towards the viewer; a 0), from the
+  // fine soot's slopes as the field shader's relief reads them. albedo() says what the pixel reflects, unlit: `rgb` times
+  // image()'s alpha, or (`from_rgb`) image()'s colour itself. The field shader's looks give their soot colour and their
+  // emission exactly; a learned look's picture is split by its model: light-giving models (fire, explosion, magic, jet,
+  // orb) give all of it as emission and reflect nothing, the others (smoke, steam, fog, dust, cloud, vortex) reflect
+  // all of it (its learned shading kept, as baked light) and give none. image() is the same with layers or without.
+  void use_layers(bool on);
+  bool layers() const { return layers_; }
+  const Image4& emission() const { return emit_; }
+  const Image4& normals() const { return norm_; }
+  struct Albedo {
+    std::array<float, 3> rgb{};
+    bool from_rgb = false;
+  };
+  Albedo albedo() const;
+
   // Ownership weight of a tile pixel (x right, y up, tile pixels) or coarse cell for tiling groups: 1 inside, shared
   // with the neighbour across a band (the weights of the tiles of a group sum to 1 everywhere).
   float weight_px(float x, float y) const;
@@ -261,6 +279,9 @@ class Module {
   std::vector<int> drawn_;           // [size][2]: per row of the image, the pixels that may not be zero (the rest are)
   std::vector<float> pushed_;
   bool has_push_ = false;
+  bool layers_ = false;
+  Image4 emit_, norm_;  // the engine layers (use_layers)
+  void shade_layers();
   friend void push(Module&, const struct FieldBus&, float);
   friend void apply(Module&, const struct ForceField&, float);
 };
@@ -364,6 +385,9 @@ void apply(Module& m, const ForceField& f, float weight = 1.f);
 std::array<float, 2> field_flow(const ForceField& f, float wx, float wy, float weight);
 // heat and cold: change the module's heat (and soot) in place, coarse and fine (fields.cpp; apply() calls it).
 void apply_heat(Module& m, const ForceField& f, float weight);
+// Rain washing smoke out (fields.cpp): within the world rectangle [x0, x1) x [y0, y1), the module's soot (coarse and fine)
+// is multiplied by `soot`, its heat by `heat`.
+void wash(Module& m, float x0, float y0, float x1, float y1, float soot, float heat);
 // attract: move the module's material (heat and soot, coarse and fine) towards (f.x, f.y) by up to f.strength world
 // pixels, conserving the amount (each cell and pixel is splatted bilinearly at its new place). `scratch` holds at least
 // pull_scratch(m) floats. apply() does only the swirl; this does the pull.
@@ -373,6 +397,93 @@ void pull(Module& m, const ForceField& f, float weight, std::span<float> scratch
 // `to` that cover it (by their ownership weights; fine fields follow). Material that lands outside them stays. What
 // arrives is scaled by the gains (one model's thin soot can be another's smoke; 1 conserves the amount).
 void transfer(Module& from, std::span<Module* const> to, float fraction, int row0 = 0, float heat_gain = 1.f, float soot_gain = 1.f);
+
+// --- trails ------------------------------------------------------------------------------------------------------------
+
+// A trail (docs/COMPOSE.md §5.3): a source that moves through the world (a rocket, a vehicle, a carried torch) leaves
+// material in a learned effect's state along its path, and that material stays where it was left. The effect plays in
+// tiles that lie on a grid fixed in the world: tile (i, j) has its top-left corner at (x0 + i s, y0 + j s), s the stride
+// (the tile's width less the band of cells it shares with its neighbours). Each frame the source's footprint along the
+// segment from its last place to its new one switches on the tiles it touches (a tile is started with nothing in it, at
+// an age; the cells it shares with tiles already playing are copied from them), and deposits heat and soot there (as
+// `heat` fields and `transfer` do, coarse and fine fields alike) with a velocity of its own (a kick along or against the
+// source's motion, as `push` gives material a flow). Tiles that share a band are blended every frame as a domain's are
+// (blend_band), and drawn and published as one group by ownership weights. A tile the source has not fed for `hold`
+// seconds fades (its material falls by e every `fade` seconds) and is switched off once it has faded; when every tile is
+// in use and another is needed, the one fed longest ago is taken. Nothing allocates after construction.
+struct TrailSpec {
+  float width = 256.f;          // world pixels a tile covers
+  int band = 8;                 // cells two neighbouring tiles share
+  float x0 = 0.f, y0 = 0.f;     // the grid's origin: tile (0, 0)'s top-left corner
+  int row_lo = -(1 << 20), row_hi = 1 << 20;  // the rows of tiles it may use (j, downwards)
+  float age = 3.f;              // the age a tile starts empty at (seconds since its effect began)
+  float hold = 1.f;             // seconds a tile keeps its material after the source last fed it
+  float fade = 1.5f;            // then: e-folding time of its material, seconds
+  float jump = 512.f;           // a move longer than this in one frame is a jump: nothing is left along it
+  bool has_quiet = false;       // cells [quiet[0], quiet[2]) x [quiet[1], quiet[3]) (y up) cleared every frame in tiles
+  std::array<int, 4> quiet{};   // with no tile below them (a model's learned source, as `suppress` removes it)
+  float feather = 0.f;          // tile pixels: outer edges fade when drawn
+  // A tile whose material reaches an outer edge (heat or soot above `spread` in its outer two cells there) gets the
+  // neighbour on that side, from the tiles not playing (none is taken from elsewhere for this), fed when it was: smoke
+  // that rises or drifts out of the tiles the source touched is not cut off. 0: off.
+  float spread = 0.05f;
+};
+
+// What the source leaves in one frame, spread along its path: `heat` and `soot` at the centre of a Gaussian of `radius`
+// world pixels, and a velocity (world pixels per frame, y down) the material there takes on: `kick` times the source's
+// own velocity plus (u, v).
+struct Deposit {
+  float heat = 0.f, soot = 0.f, radius = 12.f, kick = 0.f, u = 0.f, v = 0.f;
+};
+
+class Trail {
+ public:
+  // `tiles`: modules of one effect and size (the trail places them, switches them on and off, and sets their bands);
+  // they take `group`. At most 64.
+  Trail(std::span<Module* const> tiles, const TrailSpec& spec, int group, std::uint64_t seed);
+  // Before the frame's step: the source is at (x, y); `on` false: it leaves nothing (and its next place starts a new
+  // path). Switches on the tiles its footprint (of `radius`) touches along its path, and off those that have faded.
+  void move(float x, float y, bool on, float radius, float t, float fps);
+  // After the step: shared bands blended, quiet cells cleared, the deposit left along the path, faded tiles dimmed.
+  void couple(const Deposit& d, float t, float fps);
+  void clear();                               // every tile off, no path
+  float x() const { return x_; }
+  float y() const { return y_; }
+  float vx() const { return vx_; }            // the source's velocity, smoothed over 0.15 s (world pixels per second)
+  float vy() const { return vy_; }
+  int active() const;                         // tiles playing
+  int recycled() const { return recycled_; }  // tiles taken from where they were (the pool ran out) since construction
+  const TrailSpec& spec() const { return spec_; }
+  float stride() const { return stride_; }
+  std::span<Module* const> tiles() const { return tiles_; }
+
+ private:
+  struct Cell {
+    int i = 0, j = 0;
+    float fed = 0.f;     // the last time the source left something in it
+    bool on = false;
+  };
+  int find(int i, int j) const;                 // the tile at (i, j), or -1
+  // Switch a tile on at (i, j), fed at t; with `recycle`, the one fed longest ago if none is free (need: tiles that must
+  // not be taken). -1: none.
+  int take(int i, int j, float t, std::uint64_t need, bool recycle = true);
+  float edge(int k, int dir) const;             // the most heat or soot in tile k's outer two cells on a side
+  void bands();                                 // every tile's shared sides from its neighbours
+  void off(int k);
+  std::vector<Module*> tiles_;
+  std::vector<Cell> cells_;
+  TrailSpec spec_;
+  float stride_ = 0.f;
+  std::uint64_t seed_ = 1, starts_ = 0;
+  float x_ = 0.f, y_ = 0.f, px_ = 0.f, py_ = 0.f, vx_ = 0.f, vy_ = 0.f;
+  bool on_ = false, had_ = false;  // depositing this frame; the last frame's place is a path's start
+  int recycled_ = 0;
+};
+
+// Heat and soot added at world (x, y) over a Gaussian of `radius` world pixels (coarse cells and fine pixels alike),
+// times `amount`; and the velocity there drawn towards (u, v) (world pixels per frame, y down) by up to `pull` (0 to 1,
+// times the Gaussian). Only within three radii of the point.
+void deposit(Module& m, float x, float y, float radius, float heat, float soot, float u, float v, float pull);
 
 // --- light -------------------------------------------------------------------------------------------------------------
 
@@ -424,7 +535,9 @@ std::array<float, 3> heat_colour(float t);
 
 // --- particles ---------------------------------------------------------------------------------------------------------
 
-enum class Kind : std::uint8_t { spark, ember, debris, flake, glow };
+// rain, snow, ash and leaf: weather (procedural, not learned; docs/COMPOSE.md §4.6).
+enum class Kind : std::uint8_t { spark, ember, debris, flake, glow, rain, snow, ash, leaf };
+inline bool weather(Kind k) { return k >= Kind::rain; }
 
 // Particles in world pixels and seconds, a fixed capacity (spawns beyond it are dropped). Embers and sparks glow by
 // temperature and are drawn additively with motion blur; debris and flakes are dark and drawn over. Glows (procedural
@@ -442,6 +555,13 @@ class Particles {
   // its start (`cap_start`) and only the last the cap at its end (`cap_end`); a disc is a piece of length 0 with both.
   bool spawn_glow(float x0, float y0, float x1, float y1, float radius, std::array<float, 3> colour, float brightness, float life,
                   bool cap_start, bool cap_end);
+  // A weather particle (procedural): rain, snow, ash or a leaf (or a petal) at (x, y), drifting at (du, dv) world pixels a
+  // second (its fall and the wind), carried by `flow` of the bus's flow, fluttering at `freq` radians a second from
+  // `phase`, of `size` (world pixels) and `colour`, drawn with coverage `alpha`. `aux`: snow melts where the bus's heat
+  // is above it (0: never); ash glows at that temperature, cooling. It lives `life` seconds or until it reaches the
+  // ground. Its random numbers are the caller's: the generator rng is not used.
+  bool spawn_weather(Kind k, float x, float y, float du, float dv, float size, float life, float phase, float freq, std::array<float, 3> colour,
+                     float alpha, float flow, float aux);
   struct Landing {
     float x = 0, temp = 0;
     Kind kind = Kind::ember;
@@ -458,6 +578,10 @@ class Particles {
   }
   // Draw into a screen image (camera offset: world minus screen).
   void draw(Image4& screen, float cam_x, float cam_y) const;
+  // The same particles into the engine layers (Frame::use_layers): what draw() adds (sparks, embers, glows) is light,
+  // added to the colour and the emission; what it lays over (debris, flakes, weather) covers what is under it in every
+  // layer, with its colour lit as draw() lights it, its albedo, its glow as emission, a flat normal and its optical depth.
+  void draw_layers(Image4& colour, Image4& albedo, Image4& emission, Image4& normal, float cam_x, float cam_y) const;
   // The live particles into `to`, as far as draw() needs them (`to` holds at least alive() particles).
   void copy_to(Particles& to) const;
   std::uint64_t rng = 0x9E3779B97F4A7C15ULL;
@@ -465,9 +589,14 @@ class Particles {
 
  private:
   void kill(int i);
+  // The pixels a weather particle covers on a screen of W x H: f(index of the pixel's first channel, coverage).
+  template <class F>
+  void weather_pixels(std::size_t q, float cam_x, float cam_y, int W, int H, F&& f) const;
   int n_ = 0;
   // cool_ is a glow's caps (1: start, 2: end); temp_ its brightness; size_ its radius; r_, g_, b_ its colour.
-  std::vector<float> x_, y_, px_, py_, vx_, vy_, temp_, size_, life_, age_, cool_, r_, g_, b_;
+  // Weather: temp_ its flutter's phase, cool_ its frequency, (wu_, wv_) its drift, aux_ its melting heat or glow, wa_ its
+  // coverage, wf_ how much it follows the bus's flow.
+  std::vector<float> x_, y_, px_, py_, vx_, vy_, temp_, size_, life_, age_, cool_, r_, g_, b_, wu_, wv_, aux_, wa_, wf_;
   std::vector<Kind> kind_;
   std::vector<Landing> landed_;
   int n_landed_ = 0;
@@ -527,6 +656,20 @@ class Frame {
   // The row kernels for the baseline ISA or AVX2 (by default, AVX2 when the runtime's ISA is AVX2 or better): the same
   // frames either way.
   void use_avx2(bool on) { avx2_ = on; }
+  // Engine layers (docs/ENGINES.md §11): with use_layers(true) (a set-up call: allocates four screen-sized images),
+  // render() also draws the modules (whose layers are on: Module::use_layers) and the particles over a transparent
+  // screen into layer(): kColour, the premultiplied colour as the picture lights it (alpha: coverage); kAlbedo, the
+  // premultiplied colour it reflects, unlit (the same alpha); kEmission, the light it gives (rgb; a 0); kNormal, its
+  // normal times its alpha (x right, y up, z towards the viewer) and its optical depth (a, added through the layers). Linear,
+  // the scene's units, before exposure, bloom and tone mapping; no sky, ground, distortion or bloom. The picture is the
+  // same with layers or without. Only render() draws them (not the stage-by-stage calls).
+  enum Layer { kColour, kAlbedo, kEmission, kNormal, kLayers };
+  void use_layers(bool on);
+  bool layers() const { return layers_on_; }
+  const Image4& layer(Layer l) const { return layers_[static_cast<std::size_t>(l)]; }
+  // The exposure and fade of the last render() (what the layers are drawn before).
+  float layer_exposure() const { return P_.exposure; }
+  float layer_fade() const { return P_.fade; }
   // The stages of the last render(), wall ms.
   enum RenderStage { kCompose, kParticles, kDistort, kBloom, kFinish, kRenderStages };
   const std::array<double, kRenderStages>& render_ms() const { return render_ms_; }
@@ -557,6 +700,9 @@ class Frame {
   struct Tile {  // a module as draw() reads it
     const Image4* img = nullptr;
     const int* spans = nullptr;  // Module::drawn_spans()
+    const Image4* emission = nullptr;  // its layers (Module::use_layers), or none
+    const Image4* normals = nullptr;
+    Module::Albedo albedo;
     Placement at;
     float opacity = 0, feather = 0;
     int group = -1, size = 0, res = 0;
@@ -631,6 +777,9 @@ class Frame {
   // are), copied back into the screen by the next stage that reads it (pending: moved_rows_).
   std::vector<std::array<int, 2>> moved_;
   bool moved_rows_ = false;
+  bool layers_on_ = false;
+  std::array<Image4, kLayers> layers_;     // use_layers()
+  std::array<Image4, 3> layer_acc_;        // per row: a group's albedo, emission and normals summed by weight
   bool bloom_pending_ = false;  // bloom's last pass: the screen += bloom_gain_ * mip 0 (bilinear) / bloom_div_
   float bloom_gain_ = 0.f, bloom_div_ = 1.f;
   // capture()

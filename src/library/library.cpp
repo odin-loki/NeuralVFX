@@ -9,7 +9,9 @@
 //   - _alive (a let) holds from the spawn until a stop or the end of a one-shot; every rule, emitter, field, coupling,
 //     flash and shake of the entry is gated by it, and a rule that fires once fires once per spawn;
 //   - modules with a start point are started and put to sleep when the stage is made (their warm-up runs then), woken
-//     at the first spawn and started afresh at later ones; when the instance ends, they stop.
+//     at the first spawn and started afresh at later ones; when the instance ends, they stop;
+//   - a trail's source follows the instance (moves included) and leaves material only while it is alive; its tiles stay
+//     in the world and fade by themselves after it ends, so a trail is never stopped.
 // The stage's flash and camera shake are the sums of its instances'.
 #include "library.hpp"
 
@@ -231,6 +233,11 @@ Entry header(const Statement& st, const std::string& file) {
   const Prop* about = st.prop("about");
   if (!about || about->value.names[0].empty()) fail(st.pos, std::format("entry '{}' needs a line about it (about \"...\")", e.name));
   e.about = about->value.names[0];
+  if (const Prop* mv = st.prop("moving")) {  // a moving effect: how fast the gallery moves it (world pixels a second)
+    e.move_x = constant(mv->value.exprs[0], "a velocity", file);
+    e.move_y = constant(mv->value.exprs[1], "a velocity", file);
+    if (!std::isfinite(e.move_x) || !std::isfinite(e.move_y) || (e.move_x == 0.f && e.move_y == 0.f)) fail(mv->pos, "a moving effect's velocity is a finite one, not (0, 0)");
+  }
   return e;
 }
 
@@ -262,8 +269,9 @@ void inventory(Entry& e) {
     if (a.keyword == "shock" || a.keyword == "scorch" || a.keyword == "burst") add_unique(e.elements, a.keyword);
   };
   for (const Statement& st : e.body) {
-    if (st.keyword == "module") {
+    if (st.keyword == "module" || st.keyword == "trail") {
       add_unique(e.effects, st.kind);
+      if (st.keyword == "trail") add_unique(e.elements, "trail");
       if (const Prop* l = st.prop("look")) {
         for (const std::string& n : l->value.names)
           if (n != "learned") add_unique(e.elements, "look " + n);
@@ -384,7 +392,7 @@ Catalogue parse(std::span<const std::pair<std::string, std::string>> files) {
       if (c.effect_file(f).empty()) {
         const Statement* m = nullptr;
         for (const Statement& st : c.entries[i].body)
-          if (st.keyword == "module" && st.kind == f && !m) m = &st;
+          if ((st.keyword == "module" || st.keyword == "trail") && st.kind == f && !m) m = &st;
         throw Error(m ? m->pos : c.entries[i].pos, std::format("unknown effect '{}' (declare it before the entries: effect {} = \"FILE\")", f, f), c.entries[i].file);
       }
     }
@@ -431,7 +439,7 @@ class Instance {
         if (builtin(n) || n.front() == '_') fail(at, std::format("'{}' is the instance's own (X, Y, scale, variant, alive) or starts with '_': choose another name", n));
         into.insert(n);
       };
-      if (st.keyword == "module") local(modules_, st.name, st.name_pos);
+      if (st.keyword == "module" || st.keyword == "trail") local(modules_, st.name, st.name_pos);
       else if (st.keyword == "let") local(values_, st.name, st.name_pos);
       else if (st.keyword == "field") local(fields_, st.name, st.name_pos);
       else if (st.keyword == "look") {
@@ -615,6 +623,17 @@ class Instance {
       if (st.prop("start") && !st.prop("waiting")) s.props.push_back(prop("waiting", vflag()));
       // a looping entry's learned effects play for good in shards (Module::use_shards), unless it says otherwise
       if (e_.loop && st.prop("start") && !st.prop("empty") && !st.prop("shards")) s.props.push_back(prop("shards", vexpr(num(kShards))));
+      out.push_back(std::move(s));
+    } else if (w == "trail") {  // its source follows the instance and leaves material while it is alive
+      if (!st.prop("at")) fail(st.pos, std::format("trail '{}' has its source at the anchor: give it 'at (X, Y)' (or an offset from it)", st.name));
+      s.name = p_ + st.name;
+      props(s);
+      if (Prop* seed = find_prop(s, "seed")) {
+        if (seed_offset_ != 0) seed->value.exprs[0] = bin("+", seed->value.exprs[0], num(static_cast<float>(seed_offset_)));
+      } else {
+        s.props.push_back(prop("seed", vexpr(num(static_cast<float>(1 + seed_offset_)))));
+      }
+      gated(s, false);
       out.push_back(std::move(s));
     } else if (w == "let" || w == "look") {
       s.name = w == "let" ? p_ + st.name : look(st.name);

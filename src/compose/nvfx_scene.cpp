@@ -10,6 +10,8 @@
 #include "script.hpp"
 
 #include <algorithm>
+#include <array>
+#include <bit>
 #include <cmath>
 #include <cstring>
 #include <filesystem>
@@ -62,6 +64,42 @@ void set_error(nvfx_scene_error* err, int line, int col, std::string_view messag
 
 void clear_error(nvfx_scene_error* err) { set_error(err, 0, 0, ""); }
 
+// IEEE 754 binary16 of a float, rounded to the nearest even (overflow to infinity, NaN kept).
+std::uint16_t to_half(float f) {
+  const std::uint32_t x = std::bit_cast<std::uint32_t>(f);
+  const std::uint32_t sign = (x >> 16) & 0x8000u;
+  std::uint32_t mant = x & 0x007fffffu;
+  const int exp = static_cast<int>((x >> 23) & 0xffu);
+  if (exp == 0xff) return static_cast<std::uint16_t>(sign | 0x7c00u | (mant ? 0x200u : 0u));
+  const int e = exp - 127 + 15;
+  if (e >= 0x1f) return static_cast<std::uint16_t>(sign | 0x7c00u);
+  if (e <= 0) {  // a subnormal half, or zero
+    if (e < -10) return static_cast<std::uint16_t>(sign);
+    mant |= 0x00800000u;
+    const int shift = 14 - e;
+    std::uint32_t h = mant >> shift;
+    const std::uint32_t rem = mant & ((1u << shift) - 1u), half = 1u << (shift - 1);
+    if (rem > half || (rem == half && (h & 1u))) ++h;
+    return static_cast<std::uint16_t>(sign | h);
+  }
+  std::uint32_t h = (static_cast<std::uint32_t>(e) << 10) | (mant >> 13);
+  const std::uint32_t rem = mant & 0x1fffu;
+  if (rem > 0x1000u || (rem == 0x1000u && (h & 1u))) ++h;  // a carry into the exponent is the right rounding
+  return static_cast<std::uint16_t>(sign | h);
+}
+
+// Linear [0, 1] to 8-bit display values (gamma 2.2, as the runtime's sprites), in 4096 steps.
+std::uint8_t display8(float v) {
+  static const std::array<std::uint8_t, 4096> table = [] {
+    std::array<std::uint8_t, 4096> t{};
+    for (int i = 0; i < 4096; ++i) t[zs(i)] = static_cast<std::uint8_t>(std::lround(255.f * std::pow(static_cast<float>(i) / 4095.f, 1.f / 2.2f)));
+    return t;
+  }();
+  return table[zs(static_cast<int>(std::clamp(v, 0.f, 1.f) * 4095.f + 0.5f))];
+}
+
+std::uint8_t unit8(float v) { return static_cast<std::uint8_t>(std::lround(255.f * std::clamp(v, 0.f, 1.f))); }
+
 }  // namespace
 
 struct nvfx_scene {
@@ -79,6 +117,12 @@ struct nvfx_scene {
   std::vector<std::string> modules, rules, inputs;
   std::vector<std::vector<std::string>> controls;  // per module: its effect's control names
 
+  void draw() {  // the current frame's picture (and layers), if it is not drawn yet
+    if (drawn != frame) {
+      scene->render(frame, rgb);
+      drawn = frame;
+    }
+  }
   void build() {
     scene.reset();
     scene = std::make_unique<sc::Scene>(script, [this](const std::string& file) { return effects.at(file); }, opt);
@@ -243,6 +287,7 @@ nvfx_status nvfx_scene_create(const nvfx_scene_desc* d, nvfx_scene** out, nvfx_s
     s->opt.threads = d->threads > 0 ? d->threads : 2;
     s->opt.isa = nfx::compose::best_isa();
     s->opt.overlap = s->opt.threads > 1 && d->overlap != 0;  // default (-1) and 1: on, given a second thread
+    s->opt.layers = d->layers != 0;
     for (int i = 0; i < d->n_inputs; ++i) {
       if (!d->inputs[i].name) throw std::invalid_argument("an input without a name");
       s->opt.inputs.emplace_back(d->inputs[i].name, d->inputs[i].value);
@@ -298,6 +343,7 @@ nvfx_status nvfx_scene_get_info(const nvfx_scene* s, nvfx_scene_info* info) {
   info->threads = s->opt.threads;
   info->overlap = s->opt.overlap ? 1 : 0;
   info->scratch_bytes = S.scratch_bytes();
+  info->layers = s->opt.layers ? 1 : 0;
   return NVFX_OK;
 }
 
@@ -347,10 +393,7 @@ int nvfx_scene_frame(const nvfx_scene* s) { return s ? s->frame : 0; }
 nvfx_status nvfx_scene_render(nvfx_scene* s, uint8_t* rgba, size_t stride) {
   if (!s || !s->scene || !rgba || stride < zs(s->ow) * 4) return NVFX_ERROR_ARGUMENT;
   return guarded(nullptr, [&] {
-    if (s->drawn != s->frame) {
-      s->scene->render(s->frame, s->rgb);
-      s->drawn = s->frame;
-    }
+    s->draw();
     const std::uint8_t* src = s->rgb.data();
     const std::size_t sstride = zs(s->sw) * 3;
     if (s->ow == s->sw && s->oh == s->sh) {
@@ -380,6 +423,82 @@ nvfx_status nvfx_scene_render(nvfx_scene* s, uint8_t* rgba, size_t stride) {
           o[c] = static_cast<std::uint8_t>(std::clamp(top + fy * (bot - top) + 0.5f, 0.f, 255.f));
         }
         o[3] = 255;
+      }
+    }
+    return NVFX_OK;
+  });
+}
+
+size_t nvfx_pixel_format_bytes(nvfx_pixel_format f) {
+  switch (f) {
+    case NVFX_FORMAT_RGBA8: return 4;
+    case NVFX_FORMAT_RGBA16F: return 8;
+    case NVFX_FORMAT_RGBA32F: return 16;
+  }
+  return 0;
+}
+
+nvfx_status nvfx_scene_render_layer(nvfx_scene* s, nvfx_scene_layer layer, nvfx_pixel_format format, void* pixels, size_t stride) {
+  const std::size_t bpp = nvfx_pixel_format_bytes(format);
+  if (!s || !s->scene || !pixels || bpp == 0 || layer < NVFX_LAYER_COLOUR || layer > NVFX_LAYER_NORMAL || stride < zs(s->ow) * bpp || !s->opt.layers) {
+    return NVFX_ERROR_ARGUMENT;
+  }
+  return guarded(nullptr, [&] {
+    s->draw();
+    namespace nc = nfx::compose;
+    const nc::Frame& F = s->scene->frame();
+    const nc::Image4& L = F.layer(static_cast<nc::Frame::Layer>(layer));
+    const bool lit = layer == NVFX_LAYER_COLOUR || layer == NVFX_LAYER_EMISSION;
+    const float gain = lit ? F.layer_exposure() * F.layer_fade() : 1.f;
+    const bool same = s->ow == s->sw && s->oh == s->sh;
+    for (int y = 0; y < s->oh; ++y) {
+      std::uint8_t* row = static_cast<std::uint8_t*>(pixels) + zs(y) * stride;
+      for (int x = 0; x < s->ow; ++x) {
+        std::array<float, 4> v;
+        if (same) {
+          const float* p = L.row(y) + zs(x) * 4;
+          v = {p[0], p[1], p[2], p[3]};
+        } else {  // bilinear, as the picture is resampled
+          const float* r0 = L.row(s->ay.i0[zs(y)]);
+          const float* r1 = L.row(s->ay.i1[zs(y)]);
+          const std::size_t c0 = zs(s->ax.i0[zs(x)]) * 4, c1 = zs(s->ax.i1[zs(x)]) * 4;
+          const float fx = s->ax.f[zs(x)], fy = s->ay.f[zs(y)];
+          for (std::size_t c = 0; c < 4; ++c) {
+            const float top = r0[c0 + c] + fx * (r0[c1 + c] - r0[c0 + c]), bot = r1[c0 + c] + fx * (r1[c1 + c] - r1[c0 + c]);
+            v[c] = top + fy * (bot - top);
+          }
+        }
+        if (lit)
+          for (int c = 0; c < 3; ++c) v[zs(c)] *= gain;
+        if (layer == NVFX_LAYER_EMISSION) v[3] = 0.f;
+        float thick = 0.f;
+        if (layer == NVFX_LAYER_NORMAL) {  // the normal times alpha, summed through the layers: made a unit vector again
+          thick = std::max(0.f, v[3]);
+          const float n = std::sqrt(v[0] * v[0] + v[1] * v[1] + v[2] * v[2]);
+          if (n > 1e-6f) v = {v[0] / n, v[1] / n, v[2] / n, thick};
+          else v = {0.f, 0.f, 1.f, thick};
+        }
+        if (format == NVFX_FORMAT_RGBA32F) {
+          std::memcpy(row + zs(x) * 16, v.data(), 16);
+        } else if (format == NVFX_FORMAT_RGBA16F) {
+          std::uint16_t h[4];
+          for (int c = 0; c < 4; ++c) h[c] = to_half(v[zs(c)]);
+          std::memcpy(row + zs(x) * 8, h, 8);
+        } else {
+          std::uint8_t* o = row + zs(x) * 4;
+          if (layer == NVFX_LAYER_NORMAL) {
+            for (int c = 0; c < 3; ++c) o[c] = unit8(0.5f * v[zs(c)] + 0.5f);
+            o[3] = unit8(thick / (1.f + thick));
+          } else if (layer == NVFX_LAYER_EMISSION) {  // RGBM: light = rgb * m * 8
+            const float top = std::max({v[0], v[1], v[2], 0.f});
+            const float m = std::min(1.f, std::ceil(top / 8.f * 255.f) / 255.f);
+            for (int c = 0; c < 3; ++c) o[c] = m > 0.f ? unit8(v[zs(c)] / (8.f * m)) : 0;
+            o[3] = unit8(m);
+          } else {
+            for (int c = 0; c < 3; ++c) o[c] = display8(v[zs(c)]);
+            o[3] = unit8(v[3]);
+          }
+        }
       }
     }
     return NVFX_OK;

@@ -631,6 +631,7 @@ void Module::shade(const Light* light) {
       drawn_[zs(2 * y)] = 0;
       drawn_[zs(2 * y + 1)] = S;
     }
+    if (layers_) shade_layers();
     shade_ms = ms_since(t0);
     return;
   }
@@ -760,7 +761,99 @@ void Module::shade(const Light* light) {
       x0 = x1;
     }
   }
+  if (layers_) shade_layers();
   shade_ms = ms_since(t0);
+}
+
+namespace {
+// Models whose learned renderer draws light (their picture is emission); the others draw lit material.
+bool gives_light(std::string_view effect) {
+  return effect == "fire" || effect == "explosion" || effect == "magic" || effect == "jet" || effect == "orb";
+}
+}  // namespace
+
+void Module::use_layers(bool on) {
+  layers_ = on;
+  if (on && emit_.w != size_) {
+    emit_.allocate(size_, size_);
+    norm_.allocate(size_, size_);
+  }
+}
+
+Module::Albedo Module::albedo() const {
+  Albedo a;
+  if (look == Look::shader) {
+    for (int c = 0; c < 3; ++c) a.rgb[zs(c)] = spec.soot_albedo * spec.tint[zs(c)];
+  } else {
+    a.from_rgb = !gives_light(e_.m.effect);
+  }
+  return a;
+}
+
+// The engine layers of the image shade() has just drawn (use_layers): pixel for pixel, the light it gives and its optical
+// depth, and its normal times its alpha. Pixels image() leaves empty are empty here too.
+void Module::shade_layers() {
+  const int S = size_;
+  const bool learned = look == Look::learned, light = learned && gives_light(e_.m.effect);
+  const ShaderSpec& sp = spec;
+  const float relief = learned ? 3.f : sp.relief, density = sp.soot_density, inv_hs = 1.f / sp.heat_scale, p = sp.emission_power;
+  const std::array<float, 9> hm = hue_matrix(sp.hue);
+  auto ft = r_->fine_heat();
+  auto fd = r_->fine_soot();
+  for (int y = 0; y < S; ++y) {  // y up, as the fine fields; image row S - 1 - y
+    const int iy = S - 1 - y;
+    const float* c = img_.row(iy);
+    float* E = emit_.row(iy);
+    float* N = norm_.row(iy);
+    const int lo = std::clamp(drawn_[zs(2 * iy)], 0, S), hi = std::clamp(drawn_[zs(2 * iy + 1)], lo, S);
+    std::fill(E, E + zs(lo) * 4, 0.f);
+    std::fill(N, N + zs(lo) * 4, 0.f);
+    std::fill(E + zs(hi) * 4, E + zs(S) * 4, 0.f);
+    std::fill(N + zs(hi) * 4, N + zs(S) * 4, 0.f);
+    const float* fs = fd.data() + zs(y) * zs(S);
+    const float* fh = ft.data() + zs(y) * zs(S);
+    const float* up = fd.data() + zs(std::min(y + 2, S - 1)) * zs(S);
+    const float* dn = fd.data() + zs(std::max(y - 2, 0)) * zs(S);
+    for (int x = lo; x < hi; ++x) {
+      const float* px = c + zs(x) * 4;
+      float* e = E + zs(x) * 4;
+      float* n = N + zs(x) * 4;
+      if (px[0] == 0.f && px[1] == 0.f && px[2] == 0.f && px[3] == 0.f) {
+        std::fill(e, e + 4, 0.f);
+        std::fill(n, n + 4, 0.f);
+        continue;
+      }
+      const float a = std::clamp(px[3], 0.f, 1.f);
+      // optical depth: the shader's soot (alpha = 1 - exp(-density soot)); a learned picture's from its alpha
+      e[3] = a <= 0.f ? 0.f : learned ? -std::log(1.f - std::min(a, 0.9975f)) : std::max(density * std::max(0.f, fs[x]), 1e-6f);
+      if (learned) {
+        for (int k = 0; k < 3; ++k) e[k] = light ? px[k] : 0.f;
+      } else {
+        const float t = std::max(0.f, fh[x]) * inv_hs;
+        const float ramp = p == 2.f ? t * t : p == 3.f ? t * t * t : std::pow(t, p);
+        float hr, hg, hb;
+        heat_rgb(t, hr, hg, hb);
+        if (sp.hue != 0.f) {
+          const float r2 = std::max(0.f, hm[0] * hr + hm[1] * hg + hm[2] * hb), g2 = std::max(0.f, hm[3] * hr + hm[4] * hg + hm[5] * hb);
+          const float b2 = std::max(0.f, hm[6] * hr + hm[7] * hg + hm[8] * hb);
+          hr = r2;
+          hg = g2;
+          hb = b2;
+        }
+        const float em = sp.emission * ramp * (1.f - 0.55f * a);
+        e[0] = em * hr;
+        e[1] = em * hg;
+        e[2] = em * hb;
+      }
+      // the soot as a height field, as the shader's relief reads it: x right, y up, z towards the viewer
+      const float sx = 0.5f * (fs[std::min(x + 2, S - 1)] - fs[std::max(x - 2, 0)]);
+      const float nx = -relief * sx, ny = -relief * (0.5f * (up[x] - dn[x])), inv = 1.f / std::sqrt(nx * nx + ny * ny + 1.f);
+      n[0] = a * nx * inv;
+      n[1] = a * ny * inv;
+      n[2] = a * inv;
+      n[3] = 0.f;
+    }
+  }
 }
 
 // --- couplings ---------------------------------------------------------------------------------------------------------
@@ -1293,7 +1386,7 @@ std::array<float, 3> Light::at(float x, float y) const {
 // --- particles ---------------------------------------------------------------------------------------------------------
 
 Particles::Particles(int capacity) {
-  for (auto* v : {&x_, &y_, &px_, &py_, &vx_, &vy_, &temp_, &size_, &life_, &age_, &cool_, &r_, &g_, &b_}) v->assign(zs(capacity), 0.f);
+  for (auto* v : {&x_, &y_, &px_, &py_, &vx_, &vy_, &temp_, &size_, &life_, &age_, &cool_, &r_, &g_, &b_, &wu_, &wv_, &aux_, &wa_, &wf_}) v->assign(zs(capacity), 0.f);
   kind_.assign(zs(capacity), Kind::ember);
   landed_.assign(zs(capacity), Landing{});
 }
@@ -1342,10 +1435,33 @@ bool Particles::spawn_glow(float x0, float y0, float x1, float y1, float radius,
   return true;
 }
 
+bool Particles::spawn_weather(Kind k, float x, float y, float du, float dv, float size, float life, float phase, float freq, std::array<float, 3> colour,
+                              float alpha, float flow, float aux) {
+  if (n_ >= capacity() || !weather(k)) return false;
+  const std::size_t i = zs(n_++);
+  kind_[i] = k;
+  x_[i] = px_[i] = x;
+  y_[i] = py_[i] = y;
+  vx_[i] = wu_[i] = du;
+  vy_[i] = wv_[i] = dv;
+  size_[i] = std::max(size, 0.25f);
+  life_[i] = life;
+  age_[i] = 0.f;
+  temp_[i] = phase;
+  cool_[i] = freq;
+  r_[i] = colour[0];
+  g_[i] = colour[1];
+  b_[i] = colour[2];
+  wa_[i] = alpha;
+  wf_[i] = flow;
+  aux_[i] = aux;
+  return true;
+}
+
 void Particles::kill(int i) {
   const int last = --n_;
   if (i == last) return;
-  for (auto* v : {&x_, &y_, &px_, &py_, &vx_, &vy_, &temp_, &size_, &life_, &age_, &cool_, &r_, &g_, &b_}) (*v)[zs(i)] = (*v)[zs(last)];
+  for (auto* v : {&x_, &y_, &px_, &py_, &vx_, &vy_, &temp_, &size_, &life_, &age_, &cool_, &r_, &g_, &b_, &wu_, &wv_, &aux_, &wa_, &wf_}) (*v)[zs(i)] = (*v)[zs(last)];
   kind_[zs(i)] = kind_[zs(last)];
 }
 
@@ -1360,6 +1476,34 @@ void Particles::update(float dt, const FieldBus* bus, float flow_gain, float gro
     }
     const Kind k = kind_[q];
     if (k == Kind::glow) {  // glows stay where they were made, for their life
+      ++i;
+      continue;
+    }
+    if (weather(k)) {  // falling at its drift, carried by the bus's flow, fluttering; gone at the ground
+      float fu = 0.f, fv = 0.f;
+      if (bus) {
+        const auto s = bus->at(x_[q], y_[q]);
+        if (k == Kind::snow && aux_[q] > 0.f && s.heat > aux_[q]) {  // snow melts over a fire
+          kill(i);
+          continue;
+        }
+        fu = s.u * 30.f * flow_gain * wf_[q];
+        fv = s.v * 30.f * flow_gain * wf_[q];
+      }
+      const float swing = k == Kind::leaf ? 55.f : k == Kind::rain ? 0.f : 18.f, w = temp_[q] + cool_[q] * age_[q];
+      const float tu = wu_[q] + fu + swing * std::sin(w), tv = wv_[q] + fv + (k == Kind::leaf ? 18.f * std::cos(1.7f * w) : 0.f);
+      const float drag = std::min(1.f, (k == Kind::rain ? 6.f : 2.2f) * dt);
+      vx_[q] += (tu - vx_[q]) * drag;
+      vy_[q] += (tv - vy_[q]) * drag;
+      px_[q] = x_[q];
+      py_[q] = y_[q];
+      x_[q] += vx_[q] * dt;
+      y_[q] += vy_[q] * dt;
+      if (k == Kind::ash) aux_[q] *= std::exp(-0.6f * dt);  // its glow cools
+      if (y_[q] >= ground_y) {
+        kill(i);
+        continue;
+      }
       ++i;
       continue;
     }
@@ -1407,7 +1551,7 @@ void Particles::copy_to(Particles& to) const {
   const auto n = static_cast<std::ptrdiff_t>(n_);
   for (auto [src, dst] : {std::pair{&x_, &to.x_}, std::pair{&y_, &to.y_}, std::pair{&px_, &to.px_}, std::pair{&py_, &to.py_}, std::pair{&temp_, &to.temp_},
                           std::pair{&size_, &to.size_}, std::pair{&life_, &to.life_}, std::pair{&age_, &to.age_}, std::pair{&cool_, &to.cool_},
-                          std::pair{&r_, &to.r_}, std::pair{&g_, &to.g_}, std::pair{&b_, &to.b_}}) {
+                          std::pair{&r_, &to.r_}, std::pair{&g_, &to.g_}, std::pair{&b_, &to.b_}, std::pair{&aux_, &to.aux_}, std::pair{&wa_, &to.wa_}}) {
     std::copy(src->begin(), src->begin() + n, dst->begin());
   }
   std::copy(kind_.begin(), kind_.begin() + n, to.kind_.begin());
@@ -1457,6 +1601,60 @@ void draw_glow(Image4& screen, float x0, float y0, float x1, float y1, float rad
 
 }  // namespace
 
+template <class F>
+void Particles::weather_pixels(std::size_t q, float cam_x, float cam_y, int W, int H, F&& f) const {
+  const Kind k = kind_[q];
+  const float x = x_[q] - cam_x, y = y_[q] - cam_y, size = size_[q];
+  const auto splat = [&](float sx, float sy, float cover) {  // bilinear, as draw() splats a point
+    const int x0 = ifloor(sx - 0.5f), y0 = ifloor(sy - 0.5f);
+    const float fx = sx - 0.5f - fl(x0), fy = sy - 0.5f - fl(y0);
+    const float w[4] = {(1 - fx) * (1 - fy), fx * (1 - fy), (1 - fx) * fy, fx * fy};
+    for (int c = 0; c < 4; ++c) {
+      const int xx = x0 + (c & 1), yy = y0 + (c >> 1);
+      if (xx < 0 || yy < 0 || xx >= W || yy >= H) continue;
+      f((zs(yy) * zs(W) + zs(xx)) * 4, std::min(1.f, w[c] * cover));
+    }
+  };
+  if (k == Kind::rain) {  // a streak along its last step and a half (motion blur), `size` pixels wide
+    const float sx = x + 1.5f * (px_[q] - cam_x - x), sy = y + 1.5f * (py_[q] - cam_y - y);
+    const float len = std::hypot(x - sx, y - sy);
+    const int n = std::clamp(static_cast<int>(std::ceil(len / 0.75f)), 1, 256);
+    const float step = len / fl(n);
+    for (int s = 0; s < n; ++s) {
+      const float u = (fl(s) + 0.5f) / fl(n);
+      splat(sx + u * (x - sx), sy + u * (y - sy), std::max(step, 0.75f) * size);
+    }
+    return;
+  }
+  if (k == Kind::snow || k == Kind::ash) {  // a soft disc
+    if (size <= 1.2f) {
+      splat(x, y, 3.14159265f * size * size);
+      return;
+    }
+    const int x0 = std::max(0, ifloor(x - size - 1.f)), x1 = std::min(W - 1, ifloor(x + size + 1.f));
+    const int y0 = std::max(0, ifloor(y - size - 1.f)), y1 = std::min(H - 1, ifloor(y + size + 1.f));
+    for (int yy = y0; yy <= y1; ++yy) {
+      for (int xx = x0; xx <= x1; ++xx) {
+        const float d = std::hypot(fl(xx) + 0.5f - x, fl(yy) + 0.5f - y), c = std::clamp(size + 0.5f - d, 0.f, 1.f);
+        if (c > 0.f) f((zs(yy) * zs(W) + zs(xx)) * 4, c);
+      }
+    }
+    return;
+  }
+  // a leaf or a petal: an ellipse that tumbles (its width turns with it)
+  const float th = temp_[q] + 0.6f * cool_[q] * age_[q], a = 1.7f * size, b = size * (0.3f + 0.7f * std::abs(std::cos(1.3f * th)));
+  const float cs = std::cos(th), sn = std::sin(th), r = a + 1.f;
+  const int x0 = std::max(0, ifloor(x - r)), x1 = std::min(W - 1, ifloor(x + r)), y0 = std::max(0, ifloor(y - r)), y1 = std::min(H - 1, ifloor(y + r));
+  for (int yy = y0; yy <= y1; ++yy) {
+    for (int xx = x0; xx <= x1; ++xx) {
+      const float dx = fl(xx) + 0.5f - x, dy = fl(yy) + 0.5f - y;
+      const float u = (dx * cs + dy * sn) / a, v = (-dx * sn + dy * cs) / b, e = std::sqrt(u * u + v * v);
+      const float c = std::clamp((1.f - e) * std::min(a, b) + 0.5f, 0.f, 1.f);
+      if (c > 0.f) f((zs(yy) * zs(W) + zs(xx)) * 4, c);
+    }
+  }
+}
+
 void Particles::draw(Image4& screen, float cam_x, float cam_y) const {
   const int W = screen.w, H = screen.h;
   const auto add = [&](float x, float y, float r, float g, float b, float a) {  // bilinear splat
@@ -1490,6 +1688,21 @@ void Particles::draw(Image4& screen, float cam_x, float cam_y) const {
       draw_glow(screen, ox, oy, x, y, size_[q], temp_[q], {r_[q], g_[q], b_[q]}, static_cast<int>(cool_[q]));
       continue;
     }
+    if (weather(k)) {  // laid over what is under it (ash may glow too)
+      const float al = wa_[q] * std::min(1.f, (life_[q] - age_[q]) * 4.f), cr = r_[q], cg = g_[q], cb = b_[q];
+      const float hot = k == Kind::ash ? aux_[q] : 0.f;
+      const auto hc = heat_colour(hot);
+      const float glow = 2.5f * hot * hot;
+      weather_pixels(q, cam_x, cam_y, W, H, [&](std::size_t at, float c) {
+        float* p = screen.px.data() + at;
+        const float a = al * c, kk = 1.f - a;
+        p[0] = p[0] * kk + a * cr + c * glow * hc[0];
+        p[1] = p[1] * kk + a * cg + c * glow * hc[1];
+        p[2] = p[2] * kk + a * cb + c * glow * hc[2];
+        p[3] = 1.f - (1.f - p[3]) * kk;
+      });
+      continue;
+    }
     const float fade = std::min(1.f, (life_[q] - age_[q]) * 4.f);
     if (k == Kind::spark || k == Kind::ember) {
       const float t = temp_[q];
@@ -1509,6 +1722,112 @@ void Particles::draw(Image4& screen, float cam_x, float cam_y) const {
       const int r = std::max(1, static_cast<int>(size_[q]));
       for (int dy = -r / 2; dy <= r / 2; ++dy) {
         for (int dx = -r / 2; dx <= r / 2; ++dx) add(x + fl(dx), y + fl(dy), a * (base + glow * c[0]), a * (base + glow * c[1]), a * (base + glow * c[2]), a);
+      }
+    }
+  }
+}
+
+void Particles::draw_layers(Image4& C, Image4& A, Image4& E, Image4& N, float cam_x, float cam_y) const {
+  const int W = C.w, H = C.h;
+  // splatted bilinearly as draw() splats: light added (colour and emission), or something laid over everything under it
+  const auto splat = [&](float x, float y, auto&& f) {
+    const int x0 = ifloor(x - 0.5f), y0 = ifloor(y - 0.5f);
+    const float fx = x - 0.5f - fl(x0), fy = y - 0.5f - fl(y0);
+    const float w[4] = {(1 - fx) * (1 - fy), fx * (1 - fy), (1 - fx) * fy, fx * fy};
+    for (int q = 0; q < 4; ++q) {
+      const int xx = x0 + (q & 1), yy = y0 + (q >> 1);
+      if (xx < 0 || yy < 0 || xx >= W || yy >= H) continue;
+      f(zs(yy) * zs(W) * 4 + zs(xx) * 4, w[q]);
+    }
+  };
+  const auto add = [&](float x, float y, float r, float g, float b) {
+    splat(x, y, [&](std::size_t i, float w) {
+      for (Image4* im : {&C, &E}) {
+        im->px[i] += w * r;
+        im->px[i + 1] += w * g;
+        im->px[i + 2] += w * b;
+      }
+    });
+  };
+  // colour as draw() lays it (premultiplied), albedo (premultiplied), emission (premultiplied), coverage a
+  const auto over = [&](float x, float y, std::array<float, 3> col, std::array<float, 3> alb, std::array<float, 3> em, float a) {
+    splat(x, y, [&](std::size_t i, float w) {
+      const float k = 1.f - a * w;
+      float* c = C.px.data() + i;
+      float* al = A.px.data() + i;
+      float* e = E.px.data() + i;
+      float* n = N.px.data() + i;
+      for (int ch = 0; ch < 3; ++ch) {
+        c[ch] = c[ch] * k + w * col[zs(ch)];
+        al[ch] = al[ch] * k + w * alb[zs(ch)];
+        e[ch] = e[ch] * k + w * em[zs(ch)];
+      }
+      c[3] = 1.f - (1.f - c[3]) * k;
+      al[3] = c[3];
+      n[3] += k > 0.f ? -std::log(k) : 6.f;
+      n[0] *= k;
+      n[1] *= k;
+      n[2] = n[2] * k + w * a;
+    });
+  };
+  for (int i = 0; i < n_; ++i) {
+    const std::size_t q = zs(i);
+    const float x = x_[q] - cam_x, y = y_[q] - cam_y, ox = px_[q] - cam_x, oy = py_[q] - cam_y;
+    const Kind k = kind_[q];
+    const float m = k == Kind::glow ? size_[q] + 1.f : 4.f;
+    if (std::max(x, ox) < -m || std::min(x, ox) > fl(W) + m || std::max(y, oy) < -m || std::min(y, oy) > fl(H) + m) continue;
+    if (k == Kind::glow) {
+      for (Image4* im : {&C, &E}) draw_glow(*im, ox, oy, x, y, size_[q], temp_[q], {r_[q], g_[q], b_[q]}, static_cast<int>(cool_[q]));
+      continue;
+    }
+    if (weather(k)) {
+      const float al = wa_[q] * std::min(1.f, (life_[q] - age_[q]) * 4.f), cr = r_[q], cg = g_[q], cb = b_[q];
+      const float hot = k == Kind::ash ? aux_[q] : 0.f;
+      const auto hc = heat_colour(hot);
+      const float glow = 2.5f * hot * hot;
+      weather_pixels(q, cam_x, cam_y, W, H, [&](std::size_t at, float c) {
+        const float a = al * c, kk = 1.f - a;
+        float* p = C.px.data() + at;
+        float* al2 = A.px.data() + at;
+        float* e = E.px.data() + at;
+        float* n = N.px.data() + at;
+        const float col[3] = {cr, cg, cb};
+        for (int ch = 0; ch < 3; ++ch) {
+          p[ch] = p[ch] * kk + a * col[ch] + c * glow * hc[zs(ch)];
+          al2[ch] = al2[ch] * kk + a * std::min(col[ch], 1.f);  // a reflectance, at most 1
+          e[ch] = e[ch] * kk + c * glow * hc[zs(ch)];
+        }
+        p[3] = 1.f - (1.f - p[3]) * kk;
+        al2[3] = p[3];
+        n[0] *= kk;
+        n[1] *= kk;
+        n[2] = n[2] * kk + a;
+        n[3] += kk > 0.f ? -std::log(kk) : 6.f;
+      });
+      continue;
+    }
+    const float fade = std::min(1.f, (life_[q] - age_[q]) * 4.f);
+    if (k == Kind::spark || k == Kind::ember) {
+      const float t = temp_[q];
+      const auto c = heat_colour(t * 1.3f);
+      const float bright = (k == Kind::spark ? 9.f : 3.2f) * t * t * fade * size_[q];
+      const float len = std::hypot(x - ox, y - oy);
+      const int n = std::max(1, static_cast<int>(std::ceil(len / 1.f)));
+      for (int s = 0; s < n; ++s) {
+        const float u = (fl(s) + 0.5f) / fl(n);
+        add(ox + u * (x - ox), oy + u * (y - oy), bright * c[0] / fl(n), bright * c[1] / fl(n), bright * c[2] / fl(n));
+      }
+    } else if (k == Kind::debris || k == Kind::flake) {
+      const float a = (k == Kind::debris ? 0.95f : 0.55f) * fade;
+      const float glow = k == Kind::debris ? 1.5f * temp_[q] * temp_[q] : 0.f;
+      const auto c = heat_colour(temp_[q]);
+      const float base = k == Kind::debris ? 0.015f : 0.03f, refl = k == Kind::debris ? 0.12f : 0.08f;
+      const int r = std::max(1, static_cast<int>(size_[q]));
+      for (int dy = -r / 2; dy <= r / 2; ++dy) {
+        for (int dx = -r / 2; dx <= r / 2; ++dx) {
+          over(x + fl(dx), y + fl(dy), {a * (base + glow * c[0]), a * (base + glow * c[1]), a * (base + glow * c[2])}, {a * refl, a * refl, a * refl},
+               {a * glow * c[0], a * glow * c[1], a * glow * c[2]}, a);
+        }
       }
     }
   }
@@ -1584,6 +1903,13 @@ Frame::Frame(int width, int height) : w_(width), h_(height), blocks_((width + kB
     up_y_.push_back(std::move(ty));
   }
   reserve(16, 16, 16, 0);
+}
+
+void Frame::use_layers(bool on) {
+  layers_on_ = on;
+  if (!on || layers_[0].w == w_) return;
+  for (Image4& l : layers_) l.allocate(w_, h_);
+  for (Image4& l : layer_acc_) l.allocate(w_, h_);
 }
 
 void Frame::reserve(int modules, int shocks, int scorch, int particles) {
@@ -1788,6 +2114,9 @@ void Frame::take_tiles(std::span<Module* const> modules) {
     Tile t;
     t.img = &m->image();
     t.spans = m->drawn_spans().data();
+    t.emission = m->layers() ? &m->emission() : nullptr;
+    t.normals = m->layers() ? &m->normals() : nullptr;
+    t.albedo = m->albedo();
     t.at = m->at;
     t.opacity = m->opacity;
     t.feather = m->feather;
@@ -1936,8 +2265,69 @@ void Frame::compose(const Params& P, const LightView* L, std::span<const std::ar
         };
         std::array<TileRow, kMaxTiles> tr;
         StarCache stars;
+        // The engine layers of row y (use_layers): each tile's layers summed by its weight, as the colour is in acc, then
+        // laid over the layers' row as the colour is over the screen (alpha kept, optical depth added).
+        const auto layer_row = [&](int y, const Group& g, const auto& rows, const float* acc, int ux0, int ux1, float clip) {
+          float* alb = layer_acc_[0].row(y);
+          float* em = layer_acc_[1].row(y);
+          float* nm = layer_acc_[2].row(y);
+          for (float* r : {alb, em, nm}) std::fill(r + zs(ux0) * 4, r + zs(ux1) * 4, 0.f);
+          for (int q = g.first - base; q < g.first - base + g.count; ++q) {
+            const auto& r = rows[zs(q)];
+            if (r.xa >= r.xb) continue;
+            const Tile& t = tiles_[zs(order_[zs(q + base)])];
+            const float* c0 = t.img->row(r.ty.i0);
+            const float* c1 = t.img->row(r.ty.i1);
+            const float* e0 = t.emission ? t.emission->row(r.ty.i0) : nullptr;
+            const float* e1 = t.emission ? t.emission->row(r.ty.i1) : nullptr;
+            const float* n0 = t.normals ? t.normals->row(r.ty.i0) : nullptr;
+            const float* n1 = t.normals ? t.normals->row(r.ty.i1) : nullptr;
+            const TileColumn* cols = tile_cols_.data() + zs(q) * zs(w_);
+            const px4 kalb{t.albedo.rgb[0], t.albedo.rgb[1], t.albedo.rgb[2], 0.f};
+            for (int x = r.xa; x < r.xb; ++x) {
+              const TileColumn& c = cols[zs(x)];
+              float w = c.band * r.band_b;
+              w *= r.band_t;
+              w *= c.feather_left;
+              w *= c.feather_right;
+              w *= r.feather_b;
+              w *= r.feather_t;
+              w = w * t.opacity * clip;
+              if (w <= 0.f) continue;
+              const px4 col = blend4(c0 + zs(c.t.i0) * 4, c0 + zs(c.t.i1) * 4, c1 + zs(c.t.i0) * 4, c1 + zs(c.t.i1) * 4, c.t, r.ty);
+              px4 a = col[3] * kalb;  // a reflectance: at most 1, so a learned picture's colour at most its alpha
+              if (t.albedo.from_rgb)
+                for (int ch = 0; ch < 3; ++ch) a[ch] = std::min(col[ch], col[3]);
+              a[3] = col[3];
+              store4(alb + zs(x) * 4, load4(alb + zs(x) * 4) + w * a);
+              if (e0) store4(em + zs(x) * 4, load4(em + zs(x) * 4) + w * blend4(e0 + zs(c.t.i0) * 4, e0 + zs(c.t.i1) * 4, e1 + zs(c.t.i0) * 4, e1 + zs(c.t.i1) * 4, c.t, r.ty));
+              if (n0) store4(nm + zs(x) * 4, load4(nm + zs(x) * 4) + w * blend4(n0 + zs(c.t.i0) * 4, n0 + zs(c.t.i1) * 4, n1 + zs(c.t.i0) * 4, n1 + zs(c.t.i1) * 4, c.t, r.ty));
+            }
+          }
+          float* LC = layers_[kColour].row(y);
+          float* LA = layers_[kAlbedo].row(y);
+          float* LE = layers_[kEmission].row(y);
+          float* LN = layers_[kNormal].row(y);
+          for (int x = ux0; x < ux1; ++x) {
+            const std::size_t i = zs(x) * 4;
+            const float* o = acc + i;
+            const float k = 1.f - std::clamp(o[3], 0.f, 1.f);
+            for (int ch = 0; ch < 4; ++ch) LC[i + zs(ch)] = LC[i + zs(ch)] * k + o[ch];
+            LC[i + 3] = std::min(LC[i + 3], 1.f);
+            for (int ch = 0; ch < 3; ++ch) {
+              LA[i + zs(ch)] = LA[i + zs(ch)] * k + alb[i + zs(ch)];
+              LE[i + zs(ch)] = LE[i + zs(ch)] * k + em[i + zs(ch)];
+              LN[i + zs(ch)] = LN[i + zs(ch)] * k + nm[i + zs(ch)];
+            }
+            LA[i + 3] = LC[i + 3];
+            LN[i + 3] += em[i + 3];  // the optical depth, added through the layers (the modules keep it in their emission's a)
+          }
+          (void)clip;
+        };
         for (int y = rows0 + task * kChunk; y < std::min(rows1, rows0 + (task + 1) * kChunk); ++y) {
           if (bg) background_row(y, P, *L, scorch, stars);
+          if (bg && layers_on_)
+            for (Image4& l : layers_) std::fill(l.row(y), l.row(y) + zs(w_) * 4, 0.f);
           const float wy = P.cam_y + fl(y) + 0.5f;
           const float clip = smooth01((P.ground_y + 2.f - wy) / 3.f);  // the ground hides what is below it
           if (clip <= 0.f) continue;
@@ -2020,6 +2410,7 @@ void Frame::compose(const Params& P, const LightView* L, std::span<const std::ar
               v[3] = p[3];
               store4(p, v);
             }
+            if (layers_on_) layer_row(y, g, tr, acc, ux0, ux1, clip);
           }
         }
       });
@@ -2586,6 +2977,7 @@ void Frame::render(std::span<std::uint8_t> rgb, float bloom_threshold, float blo
   }
   const auto t1 = Clock::now();
   parts_.draw(screen_, P_.cam_x, P_.cam_y);
+  if (layers_on_) parts_.draw_layers(layers_[kColour], layers_[kAlbedo], layers_[kEmission], layers_[kNormal], P_.cam_x, P_.cam_y);
   const auto t2 = Clock::now();
   distort_impl(P_, shocks_, heat_cap_, pool);
   const auto t3 = Clock::now();

@@ -130,6 +130,37 @@ void apply_heat(Module& m, const ForceField& f, float weight) {
   }
 }
 
+void wash(Module& m, float x0, float y0, float x1, float y1, float soot, float heat) {
+  if (!m.active || (soot == 1.f && heat == 1.f)) return;
+  const int R = m.res(), S = m.size(), C = m.channels();
+  const float k = fl(S) / fl(R), sc = m.at.scale;
+  auto co = m.runner().coarse_mut();
+  for (int cy = 0; cy < R; ++cy) {
+    const float wy = m.at.y + (fl(S) - (fl(cy) + 0.5f) * k) * sc;
+    if (wy < y0 || wy >= y1) continue;
+    for (int cx = 0; cx < R; ++cx) {
+      const float wx = m.at.x + (fl(cx) + 0.5f) * k * sc;
+      if (wx < x0 || wx >= x1) continue;
+      float* c = co.data() + (zs(cy) * zs(R) + zs(cx)) * zs(C);
+      c[2] *= heat;
+      c[3] *= soot;
+    }
+  }
+  auto ft = m.runner().fine_heat_mut();
+  auto fd = m.runner().fine_soot_mut();
+  for (int py = 0; py < S; ++py) {
+    const float wy = m.at.y + (fl(S - py) - 0.5f) * sc;
+    if (wy < y0 || wy >= y1) continue;
+    for (int px = 0; px < S; ++px) {
+      const float wx = m.at.x + (fl(px) + 0.5f) * sc;
+      if (wx < x0 || wx >= x1) continue;
+      const std::size_t i = zs(py) * zs(S) + zs(px);
+      ft[i] *= heat;
+      fd[i] *= soot;
+    }
+  }
+}
+
 std::size_t pull_scratch(const Module& m) { return 2 * zs(m.res()) * zs(m.res()) + 2 * zs(m.size()) * zs(m.size()); }
 
 void pull(Module& m, const ForceField& f, float weight, std::span<float> scratch) {

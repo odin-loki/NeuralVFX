@@ -8,12 +8,14 @@
 //   nvfx_gallery --library DIR --list [--markdown]
 //   nvfx_gallery --library DIR --print NAME            the stage script of an effect alone (as the gallery plays it)
 //   nvfx_gallery --starts FILE.nvfx                     a learned effect's start points and their controls
-//   nvfx_gallery --library DIR --models DIR --shot 960x540 [--ground 470] --spawn NAME@X,Y[,SCALE[,AT]] ...
+//   nvfx_gallery --library DIR --models DIR --shot 960x540 [--ground 470] --spawn NAME@X,Y[,SCALE[,AT[,VX,VY]]] ...
 //                --frames N --png frame.png [--print-stage]
 //
 // Each effect plays alone on a stage fitted to its box (its catalogue size, at scale 1): spawned at 0.2 s, its
 // thumbnail and keyframe taken `show` seconds later, its clip in the video 4 s long (one-shots: their length; --clip S:
-// S seconds each). The keyframes are PNG files named after the effects, with their rows for a frozen CSV in
+// S seconds each). A moving effect (`moving (vx, vy)`, a trail) is moved every frame (nvfx_stage_move) at that velocity
+// through its box: half its `show` time before the anchor point at the spawn, half of it after at the show, and back
+// and forth after that. The keyframes are PNG files named after the effects, with their rows for a frozen CSV in
 // DIR/keyframes.csv; --verify compares their SHA-256 with the rows
 // "library_keyframe,NAME,file,bytes,sha256" of a CSV (exit 1 on a difference, 77 when the effects' files are missing).
 //
@@ -24,7 +26,8 @@
 // missing (a test that needs the data).
 //
 // --shot plays a stage the way a game does (engines/godot's test does the same): created, its frame 0 drawn, the
-// spawns given, then N frames stepped and drawn one at a time; the last frame is written as PNG.
+// spawns given, then N frames stepped and drawn one at a time; the last frame is written as PNG. A spawn with VX, VY is
+// moved before each frame to (X + VX s, Y + VY s), s the seconds since its spawn (world pixels a second).
 #include "label_font.hpp"
 #include "library.hpp"
 
@@ -71,7 +74,7 @@ namespace fs = std::filesystem;
 
 struct Spawn {
   std::string name;
-  float x = 0, y = 0, scale = 1, at = -1;
+  float x = 0, y = 0, scale = 1, at = -1, vx = 0, vy = 0;
 };
 
 struct Args {
@@ -126,15 +129,19 @@ Args parse(int argc, char** argv) {
     else if (k == "--spawn") {
       const std::string v = next();
       const auto at = v.find('@');
-      if (at == std::string::npos) throw std::invalid_argument("--spawn takes NAME@X,Y[,SCALE[,AT]]");
+      if (at == std::string::npos) throw std::invalid_argument("--spawn takes NAME@X,Y[,SCALE[,AT[,VX,VY]]]");
       Spawn s;
       s.name = v.substr(0, at);
       const auto n = split(v.substr(at + 1), ',');
-      if (n.size() < 2) throw std::invalid_argument("--spawn takes NAME@X,Y[,SCALE[,AT]]");
+      if (n.size() < 2 || n.size() == 5) throw std::invalid_argument("--spawn takes NAME@X,Y[,SCALE[,AT[,VX,VY]]]");
       s.x = std::stof(n[0]);
       s.y = std::stof(n[1]);
       if (n.size() > 2) s.scale = std::stof(n[2]);
       if (n.size() > 3) s.at = std::stof(n[3]);
+      if (n.size() > 5) {
+        s.vx = std::stof(n[4]);
+        s.vy = std::stof(n[5]);
+      }
       a.spawns.push_back(s);
     } else if (k == "--check") a.check = true;
     else if (k == "--require-models") a.require_models = true;
@@ -317,6 +324,16 @@ void make_stage(Stage& s, const nvfx_library* lib, int w, int h, float ground, c
 
 constexpr float kSpawnAt = 0.2f;  // when the gallery spawns an effect (frame 6)
 
+// Where the gallery has a moving effect `s` seconds after its spawn: through its box at its velocity, half its show time
+// before the anchor point at the spawn and half after it at the show, then back and forth between the two.
+std::array<float, 2> path(const nvfx_library_effect& e, float x, float y, float s) {
+  const float T = std::max(e.show, 0.5f), half = 0.5f * T;
+  float u = std::fmod(std::max(s, 0.f), 2.f * T);
+  if (u > T) u = 2.f * T - u;
+  return {x + e.move_x * (u - half), y + e.move_y * (u - half)};
+}
+bool moving(const nvfx_library_effect& e) { return e.move_x != 0.f || e.move_y != 0.f; }
+
 // --- the gallery ---------------------------------------------------------------------------------------------------
 
 struct Shown {
@@ -374,7 +391,8 @@ int gallery(const Args& A, nvfx_library* lib) {
     const float fps = st.info.fps;
     const int spawn_f = static_cast<int>(std::lround(kSpawnAt * fps));
     nvfx_fx fx = 0;
-    if (nvfx_stage_spawn(st.stage, s.e.name, sh.x, sh.y, 1.f, static_cast<double>(static_cast<float>(spawn_f) / fps), &fx) != NVFX_OK) die("spawn failed");
+    const auto start = moving(s.e) ? path(s.e, sh.x, sh.y, 0.f) : std::array<float, 2>{sh.x, sh.y};
+    if (nvfx_stage_spawn(st.stage, s.e.name, start[0], start[1], 1.f, static_cast<double>(static_cast<float>(spawn_f) / fps), &fx) != NVFX_OK) die("spawn failed");
     const int show_f = spawn_f + static_cast<int>(std::lround(s.e.show * fps));
     const float clip = A.clip > 0.f ? A.clip : s.e.looping ? 4.f : std::min(s.e.duration + 0.6f, 6.f);
     const int clip0 = spawn_f, clip1 = spawn_f + static_cast<int>(std::lround(clip * fps));
@@ -383,6 +401,10 @@ int gallery(const Args& A, nvfx_library* lib) {
     for (int f = 0; f <= last; ++f) {
       if (f == 2) g_counting.store(true);
       const long a0 = g_allocations.load();
+      if (moving(s.e) && f > spawn_f) {  // where it is in the frame about to be computed
+        const auto p = path(s.e, sh.x, sh.y, static_cast<float>(f - spawn_f) / fps);
+        nvfx_stage_move(st.stage, fx, p[0], p[1]);
+      }
       if (f > 0) nvfx_scene_step_frames(st.scene, 1);
       st.render();
       s.allocs += g_allocations.load() - a0;
@@ -502,6 +524,10 @@ int check(const Args& A, nvfx_library* lib) {
         if (nvfx_stage_spawn(st.stage, e.name, 240.f, y, 1.f, 0.1, &a) != NVFX_OK) why = "spawn failed";
         if (nvfx_stage_spawn(st.stage, e.name, 300.f, y, 0.7f, 0.4, &b) != NVFX_OK) why = "a second spawn failed";
       } else {
+        if (moving(e)) {  // a moving effect moves (its trail, tiles taken and given back)
+          const auto p = path(e, 240.f, y, static_cast<float>(f) / fps - 0.1f);
+          nvfx_stage_move(st.stage, a, p[0], p[1]);
+        }
         nvfx_scene_step_frames(st.scene, 1);
       }
       if (f == static_cast<int>(std::lround((0.1f + 0.5f * life) * fps))) {  // every parameter to its ends, the second moved
@@ -573,11 +599,20 @@ int shot(const Args& A, nvfx_library* lib) {
     std::print("{}", text.c_str());
   }
   st.render();  // frame 0, as an engine draws it when the stage is made
+  std::vector<nvfx_fx> fxs;
   for (const Spawn& s : A.spawns) {
     nvfx_fx fx = 0;
     if (nvfx_stage_spawn(st.stage, s.name.c_str(), s.x, s.y, s.scale, s.at, &fx) != NVFX_OK) die("spawn of " + s.name + " failed");
+    fxs.push_back(fx);
   }
   for (int f = 1; f <= A.frames; ++f) {
+    const float t = static_cast<float>(f) / st.info.fps;  // the time of the frame about to be computed
+    for (std::size_t k = 0; k < A.spawns.size(); ++k) {
+      const Spawn& s = A.spawns[k];
+      if (s.vx == 0.f && s.vy == 0.f) continue;
+      const float since = std::max(0.f, t - std::max(0.f, s.at));
+      nvfx_stage_move(st.stage, fxs[k], s.x + s.vx * since, s.y + s.vy * since);
+    }
     nvfx_scene_step_frames(st.scene, 1);
     st.render();
   }
