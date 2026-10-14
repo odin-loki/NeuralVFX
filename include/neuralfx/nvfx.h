@@ -31,7 +31,7 @@
 extern "C" {
 #endif
 
-#define NVFX_VERSION 3 /* 2: scenes (nvfx_scene.h); 3: nvfx_version(), effect packs (nvfx_pack.h) */
+#define NVFX_VERSION 4 /* 2: scenes (nvfx_scene.h); 3: nvfx_version(), effect packs (nvfx_pack.h); 4: engine layers and trails */
 
 typedef enum nvfx_status {
   NVFX_OK = 0,

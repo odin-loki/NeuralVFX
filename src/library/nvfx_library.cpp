@@ -191,6 +191,8 @@ nvfx_status nvfx_library_get_effect(const nvfx_library* l, int i, nvfx_library_e
   o->duration = e.duration;
   o->show = e.show;
   o->n_params = static_cast<int>(e.params.size());
+  o->move_x = e.move_x;
+  o->move_y = e.move_y;
   return NVFX_OK;
 }
 
@@ -325,6 +327,7 @@ nvfx_status nvfx_stage_create(const nvfx_library* l, const nvfx_stage_desc* d, n
     sd.n_effects = static_cast<int>(list.size());
     sd.threads = d->threads > 0 ? d->threads : 2;
     sd.overlap = d->overlap;
+    sd.layers = d->layers;
     const nvfx_status st = nvfx_scene_create(&sd, &s->scene, err);
     if (st == NVFX_ERROR_SCRIPT) {
       // An entry checks without its effects (nvfx_library_open) but not with them (a control it does not have, a start

@@ -1,6 +1,7 @@
 // The NeuralVFX nodes for Godot 4 (docs/ENGINES.md §8), over the C API of libnvfx:
 //   NeuralVFXScene   plays a scene script (docs/COMPOSE.md §4) into an ImageTexture; GDScript reads its fields (heat,
-//                    soot, velocity) and drives it (inputs, rules, modules) while it plays;
+//                    soot, velocity) and drives it (inputs, rules, modules) while it plays; with `layers`, also the
+//                    engine layers (docs/ENGINES.md §11) into four more textures, for Godot to light the effects itself;
 //   NeuralVFXStage   a NeuralVFXScene whose scene is a stage of the effect library (docs/LIBRARY.md): it lists the
 //                    catalogue's effects and spawns, moves, drives and stops them while it plays;
 //   NeuralVFXEffect  plays one effect (an .nvfx file: a frame model or a rollout effect) into an ImageTexture.
@@ -23,6 +24,8 @@
 #include <godot_cpp/variant/vector2.hpp>
 #include <godot_cpp/variant/vector2i.hpp>
 
+#include <array>
+
 namespace godot {
 
 class NeuralVFXScene : public Node {
@@ -30,6 +33,7 @@ class NeuralVFXScene : public Node {
 
  public:
   enum Field { FIELD_HEAT = NVFX_FIELD_HEAT, FIELD_SOOT = NVFX_FIELD_SOOT, FIELD_U = NVFX_FIELD_U, FIELD_V = NVFX_FIELD_V };
+  enum Layer { LAYER_COLOUR = NVFX_LAYER_COLOUR, LAYER_ALBEDO = NVFX_LAYER_ALBEDO, LAYER_EMISSION = NVFX_LAYER_EMISSION, LAYER_NORMAL = NVFX_LAYER_NORMAL };
 
   NeuralVFXScene() = default;
   ~NeuralVFXScene() override;
@@ -53,6 +57,18 @@ class NeuralVFXScene : public Node {
   double get_speed() const { return speed_; }
   Ref<ImageTexture> get_texture() const { return texture_; }
   Ref<Image> get_image() const { return image_; }
+  // The engine layers (a change takes effect at the next load_scene()): the effects alone, for Godot to light and
+  // composite: colour_texture (FORMAT_RGBAH, premultiplied, lit as the scene lights it, HDR), albedo_texture (FORMAT_RGBA8,
+  // premultiplied, unlit, gamma-encoded), emission_texture (FORMAT_RGBAH, HDR light, a = 0) and normal_texture
+  // (FORMAT_RGBA8: rgb = normal * 0.5 + 0.5, x right, y up, z towards the viewer; a = thickness / (1 + thickness)).
+  void set_layers(bool on) { layers_ = on; }
+  bool get_layers() const { return layers_; }
+  Ref<ImageTexture> get_layer_texture(Layer layer) const;
+  Ref<Image> get_layer_image(Layer layer) const;
+  Ref<ImageTexture> get_colour_texture() const { return get_layer_texture(LAYER_COLOUR); }
+  Ref<ImageTexture> get_albedo_texture() const { return get_layer_texture(LAYER_ALBEDO); }
+  Ref<ImageTexture> get_emission_texture() const { return get_layer_texture(LAYER_EMISSION); }
+  Ref<ImageTexture> get_normal_texture() const { return get_layer_texture(LAYER_NORMAL); }
 
   // The scene.
   bool load_scene();
@@ -116,6 +132,10 @@ class NeuralVFXScene : public Node {
   PackedByteArray pixels_;
   Ref<Image> image_;
   Ref<ImageTexture> texture_;
+  bool layers_ = false;
+  std::array<PackedByteArray, 4> layer_pixels_;
+  std::array<Ref<Image>, 4> layer_images_;
+  std::array<Ref<ImageTexture>, 4> layer_textures_;
 };
 
 class NeuralVFXStage : public NeuralVFXScene {
@@ -233,3 +253,4 @@ class NeuralVFXEffect : public Node {
 }  // namespace godot
 
 VARIANT_ENUM_CAST(NeuralVFXScene::Field);
+VARIANT_ENUM_CAST(NeuralVFXScene::Layer);

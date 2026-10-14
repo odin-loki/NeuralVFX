@@ -65,6 +65,9 @@ typedef struct nvfx_scene_desc {
                                nvfx_scene_render); 0: off; -1 (default): on with 2 threads or more */
   int width, height;        /* the output's size in pixels (0: the script's `scene size`). The scene is drawn at its
                                own size and resampled (bilinear) when they differ: this does not make it cheaper */
+  int layers;               /* 1: every picture also draws the effects alone into the engine layers
+                               (nvfx_scene_render_layer: lit sprites for an engine to light and composite); 0 (default):
+                               not. The picture is the same either way */
 } nvfx_scene_desc;
 
 /* Where and why a scene could not be created. */
@@ -85,6 +88,7 @@ typedef struct nvfx_scene_info {
   int n_modules, n_rules, n_inputs;
   int threads, overlap;
   size_t scratch_bytes;          /* the modules' working memory */
+  int layers;                    /* 1: the engine layers are drawn (nvfx_scene_desc.layers) */
 } nvfx_scene_info;
 
 /* Fields at a point of the world (world pixels, y down). */
@@ -144,6 +148,30 @@ NVFX_API int nvfx_scene_frame(const nvfx_scene* scene);    /* floor(time * fps) 
  * calling thread, while the picture is drawn on another): field reads then see frame f + 1, and inputs, triggers and
  * module settings given after this call act from frame f + 2. Without overlap they act from the next frame. */
 NVFX_API nvfx_status nvfx_scene_render(nvfx_scene* scene, uint8_t* rgba, size_t stride_bytes);
+
+/* Lit sprites for engines (docs/ENGINES.md §11) ---------------------------------------------------------------------
+ * With nvfx_scene_desc.layers, each picture also draws the effects alone (no sky, ground, distortion, bloom or tone
+ * mapping) into four layers of the output's size, rows top to bottom, for an engine that lights and composites them:
+ *   NVFX_LAYER_COLOUR    the effects as the scene lights them, premultiplied (rgb may exceed a: light), alpha = coverage;
+ *   NVFX_LAYER_ALBEDO    what they reflect, unlit, premultiplied, the same alpha (light it with the engine's lights);
+ *   NVFX_LAYER_EMISSION  the light they give (HDR rgb; add it, and feed it to the engine's bloom);
+ *   NVFX_LAYER_NORMAL    their normal (x right, y up, z towards the viewer; (0, 0, 1) where nothing is) and their
+ *                        thickness (optical depth: 0 exactly where alpha is 0; 1 - exp(-thickness) is how much they cover
+ *                        on their own), for lighting and soft particles.
+ * The colour and the emission are linear, in the scene's units times its exposure and fade (before its tone mapping).
+ * Formats (the pixel layout an engine uploads directly):
+ *   NVFX_FORMAT_RGBA16F  half floats, linear: colour and albedo premultiplied, emission rgb (a 0), normal xyz in [-1, 1]
+ *                        and thickness in a;
+ *   NVFX_FORMAT_RGBA32F  the same in floats;
+ *   NVFX_FORMAT_RGBA8    colour and albedo: rgb clamped to [0, 1] and gamma-encoded (2.2, as the runtime's sprites),
+ *                        premultiplied, alpha linear; emission: RGBM, light = rgb * a * 8; normal: rgb = n * 0.5 + 0.5,
+ *                        a = thickness / (1 + thickness) (thickness = a / (1 - a)).
+ * The layers are those of the current frame: drawn (with the picture) if it has not been, else read from the last
+ * drawing. NVFX_ERROR_ARGUMENT when the scene was made without layers. No allocation. */
+typedef enum nvfx_scene_layer { NVFX_LAYER_COLOUR = 0, NVFX_LAYER_ALBEDO = 1, NVFX_LAYER_EMISSION = 2, NVFX_LAYER_NORMAL = 3 } nvfx_scene_layer;
+typedef enum nvfx_pixel_format { NVFX_FORMAT_RGBA8 = 0, NVFX_FORMAT_RGBA16F = 1, NVFX_FORMAT_RGBA32F = 2 } nvfx_pixel_format;
+NVFX_API nvfx_status nvfx_scene_render_layer(nvfx_scene* scene, nvfx_scene_layer layer, nvfx_pixel_format format, void* pixels, size_t stride_bytes);
+NVFX_API size_t nvfx_pixel_format_bytes(nvfx_pixel_format format); /* bytes per pixel: 4, 8 or 16 (0: unknown) */
 
 /* Fields, for gameplay ----------------------------------------------------------------------------------------------
  * The field bus of the last frame computed: every active module's velocity, heat and soot in world space, cells of

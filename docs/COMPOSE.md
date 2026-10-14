@@ -4,7 +4,10 @@ Status: **future feature, with a working prototype** (11 October 2026). Audience
 lives in `src/compose` (a library over the runtime's internals, with a script format and its runner) and two tools:
 `nvfx_fireball` (the fireball scene, written in C++) and `nvfx_scene_script` (plays scene scripts, §4). Scene scripts
 are reachable from the C API (`include/neuralfx/nvfx_scene.h`, [ENGINES.md](ENGINES.md) §7) and from Godot 4
-(`engines/godot`, [ENGINES.md](ENGINES.md) §8). Section 8 says what else would make it a product feature.
+(`engines/godot`, [ENGINES.md](ENGINES.md) §8). Section 8 says what else would make it a product feature. Added for
+engines (14 October 2026): **trails** (§5.3: a moving source leaves material in tiles that stay in the world),
+procedural **weather** (§4.6 and §5.4: rain, snow, ash, leaves) and the **engine layers** (lit sprites, drawn beside
+the picture for an engine to light; [ENGINES.md](ENGINES.md) §11).
 
 ## 1. The idea
 
@@ -37,7 +40,8 @@ composed scene they can still appear as decoration.
 | rollout effect (`compose::Module`) | a learned effect in a square tile of the world, stepped with its controls and seed | its own state | its state (velocity, heat, soot; fine fields), published to the bus |
 | field bus (`FieldBus`) | every module's velocity, heat and soot resampled into world space, kept per group | all modules | (read by everything else) |
 | force field (`ForceField`) | a force the script places in the world: `ceiling`, `vortex`, `wind`, `gust`, `ring`, `attract`, `heat`, `cold` (§5) | the bus position | the velocity (or heat and soot) of the modules it covers, and particles |
-| particles (`Particles`) | sparks, embers, debris and soot flakes, carried by the bus flow, cooling, landing | the bus flow | landing events (for triggers) |
+| particles (`Particles`) | sparks, embers, debris and soot flakes, carried by the bus flow, cooling, landing; and procedural weather (rain, snow, ash, leaves, §5.4) | the bus flow (and heat: snow melts) | landing events (for triggers); rain washes soot out of modules |
+| trail (`Trail`) | a pool of tiles of one rollout effect laid on a grid fixed in the world, switched on along a moving source's path, which deposits material in them (§5.3) | its source's place | its tiles' state (heat, soot, velocity), drawn and published as one domain |
 | light (`Light`) | light from everything hot on the bus, spread by a pyramid of blurs, plus flashes; in fire colours, or in a module's own colour if it glows (§4.3) | the bus heat | the light that lights soot and the ground |
 | distortion | shock fronts and heat haze, bending what is seen through hot air | the bus heat, shocks | the picture |
 | look | each module's learned renderer, or the field shader (light from heat, soot that absorbs and is lit by the scene and the moon) | the module's fields, light | the picture |
@@ -63,11 +67,11 @@ These are applied between steps. Each reads and writes the runners' states throu
 A scene is a text file (`.nvfxs`) that an artist edits and `nvfx_scene_script` plays: modules, how they couple, force
 fields, particles, light and camera, and rules that change the scene over time. The runner (`src/compose/script.hpp`)
 builds every compose object up front, so a frame allocates nothing (`nvfx_alloc_test` plays a scripted scene with
-every kind of statement and counts 0 allocations; the tool counts them too). Four scenes are in `examples/scenes`: the
+every kind of statement and counts 0 allocations; the tool counts them too). Scenes in `examples/scenes` include the
 fireball of §6 (`fireball.nvfxs`, which reproduces the hand-written C++ scene to the bit, §4.8), a wall of fire in a
 gale (`firewall.nvfxs`, §5.2), written only as a script, a campfire the game drives with inputs and rules only the
 game fires (`campfire.nvfxs`), and a magic portal with steam vents (`portal.nvfxs`), which shows the effects added
-later with study D's ([EFFECTS.md](EFFECTS.md)). The viewer edits scripts live ([VIEWER.md](VIEWER.md)): a scene
+later with study D's ([EFFECTS.md](EFFECTS.md)); and trails and weather (`weather.nvfxs`, §5.4). The viewer edits scripts live ([VIEWER.md](VIEWER.md)): a scene
 rebuilt as you type, errors at their line and column, the last good scene playing on.
 
 ```sh
@@ -144,6 +148,7 @@ points, hand-overs between tiles of the same size).
 | `let NAME = EXPR` | a named value, computed where it is used (so it may change over time) | |
 | `input NAME = EXPR` | a value the game sets while the scene plays (`nvfx_scene_set_input`, [ENGINES.md](ENGINES.md) §7); EXPR, a constant, is its starting value | |
 | `module NAME = EFFECT` | a module (§4.3) | |
+| `trail NAME = EFFECT` | a trail: tiles of an effect left in the world along a moving source's path (§5.3) | |
 | `field NAME = KIND` | a force field (§5) | per kind, and `on M, ..., particles`, `weight`, `if`, `from`, `until` |
 | `emit KIND` | particles every frame (§4.6) | |
 | `light` | light from the bus's heat | `gain` (0.14), `flash (r, g, b)` (0) |
@@ -182,7 +187,9 @@ A module is one rollout effect in a square tile, or a domain of several tiles of
 
 A module without its own controls takes the controls of the start point it starts from. Expressions can read a module:
 `M.x` (the centre of its tile or domain), `M.y` (the y it stands on), `M.started` (when it was last started, woken or
-taken over; infinity before), `M.age` (`t - M.started`) and `M.active` (1 or 0).
+taken over; infinity before), `M.age` (`t - M.started`) and `M.active` (1 or 0). A trail (§5.3) is read the same way
+(`T.x`, `T.y`: its source; `T.active`: a tile of it plays), and also `T.vx`, `T.vy`: its source's velocity in world
+pixels a second, smoothed over 0.15 s (a torch's flame leans with it).
 
 ### 4.4 Expressions
 
@@ -197,7 +204,7 @@ Arithmetic in single-precision float, one operation at a time, as C++ computes i
 | a `let` | its expression |
 | an `input` | its value, as the game last set it (never a constant: it cannot size, tile or place tiles) |
 | a rule's name | when it last fired (infinity before: so `smooth((t - boom) / 1)` is 0 until `boom`) |
-| `M.x`, `M.y`, `M.started`, `M.age`, `M.active` | a module (§4.3) |
+| `M.x`, `M.y`, `M.started`, `M.age`, `M.active` | a module (§4.3); a trail's `T.vx`, `T.vy` too |
 | `x`, `temp` | in a rule `when ember lands`: where the ember landed and how hot it was |
 | `rand` | a random number in [0, 1), from the particles' generator (deterministic: the same script gives the same frames) |
 | `smooth(v)` | 0 below 0, 1 above 1, smooth in between (`3v² - 2v³`) |
@@ -256,22 +263,33 @@ with or without them:
 | `emit arc` (procedural) | a lightning bolt or an electric arc between two points: midpoint displacement down to pieces of about 10 pixels, a core and a faint halo, flickering, with forks; a new shape every frame, or `rate` times a second | `along (x0, y0) to (x1, y1)`, `colour` (0.55, 0.7, 1), `width` (1.5), `brightness` (2.5), `jitter` (0.2 of its length), `branches` (2), `rate` (0: every frame), `seed` (1) |
 | `emit ring` (procedural) | a glowing ring, an ellipse when squashed (a shock ring seen on the ground), with a faint halo | `at`, `radius`, `squash` (1), `colour` (1, 0.75, 0.45), `width` (3), `brightness` (1.5) |
 | `emit glow` (procedural) | a soft disc of light, or `count` of them wandering within `spread` of the point, each flickering (fireflies, motes) | `at`, `radius`, `colour` (1, 0.7, 0.4), `brightness` (1.5), `count` (1), `spread` (0), `rate` (0.5), `seed` (1) |
+| `emit rain` (procedural) | rain falling through the rectangle `in`, `size` (850 px/s, a streak along its last step and a half), slanted by `wind`; with `wash`, it washes the soot of every module it falls on out (§5.4) | `in (x, y)`, `size W x H` (both required), `density` (3: drops in each 100 x 100 pixels at once), `wind (u, v)` (world pixels a second), `radius` (0.8: the streak's width), `colour` (0.55, 0.6, 0.7), `brightness` (1), `flow` (0.15: how much it follows the bus's flow), `wash` (0: soot washed out a second), `seed` |
+| `emit snow` (procedural) | flakes falling at 55 px/s and fluttering, carried by the bus's flow; they melt where the bus's heat is above `melt` | as rain, and `density` (1.5), `radius` (1.6), `colour` (0.85, 0.87, 0.92), `flow` (1), `melt` (0.15; 0: never) |
+| `emit ash` (procedural) | grey flakes falling at 32 px/s, fluttering, a share of them glowing and cooling | as rain, and `density` (1), `radius` (1.1), `colour` (0.3, 0.28, 0.27), `flow` (1), `glowing` (0.08: the share that glows) |
+| `emit leaves` (procedural) | leaves (or, with a `colour`, petals) tumbling and swaying down at 45 px/s, in autumn colours | as rain, and `density` (0.15), `radius` (2.6), `flow` (0.8) |
 
-All take `from`, `until` and `if`.
+All take `from`, `until` and `if`. The four weather emitters fill their rectangle at once when they start (or start
+again), then feed it from its top edge and from upwind of it, so a steady wind leaves no gap; each particle lives until
+it reaches the ground or falls through the rectangle's bottom. Their random numbers, like the glows', come from a hash of
+the emitter, its seed and the frame. `rain`, `snow`, `ash` and `leaves` are not reserved words (nor is `trail`): scripts
+that use them as names still work.
 
 ### 4.7 The order of a frame
 
 Every frame runs in this order (`src/compose/script_run.cpp`):
 1. rules on time, shocks and fields (and rules the game triggered), in script order; their actions run at once;
-2. emitters, in script order;
-3. settings that change over time: modules (controls, opacity, look, place), scorch marks, frame, light, camera;
+2. emitters, in script order (rain washes the modules under it here, before they step);
+3. settings that change over time: modules (controls, opacity, look, place), scorch marks, frame, light, camera; then
+   the trails' sources move: the tiles their footprints touch are switched on, faded ones off (§5.3);
 4. every active module steps (in parallel);
-5. tiles of a domain share their bands; the couplings of `every frame` (transfer, suppress, stop), in order;
+5. tiles of a domain share their bands; the trails share theirs, clear their quiet cells, take what their sources leave
+   and fade; the couplings of `every frame` (transfer, suppress, stop), in order;
 6. the field bus is cleared and every active module publishes to it;
 7. the pushes of `every frame`, then the force fields, in order;
 8. light;
 9. fields that act on particles, then the particles move; rules on landings;
-10. shading, background, modules, particles, distortion, bloom, tone mapping.
+10. shading, background, modules, particles, distortion, bloom, tone mapping (and, with the engine layers on, the
+    modules and particles again into the four layers, [ENGINES.md](ENGINES.md) §11).
 
 A module woken by a landing in step 9 is drawn from the next frame (it has not stepped yet).
 
@@ -324,6 +342,8 @@ Getting every float the same forced a few things, all visible in the script:
   command line.
 - The game drives a scene through inputs, rule triggers and module moves and controls (the C API, [ENGINES.md](ENGINES.md)
   §7); it cannot add modules, couplings or fields while the scene plays: those are the script's.
+- Weather particles are drawn unlit, in their own colours: the scene's light (fires, lamps) does not light snow or rain.
+  Rain makes no splashes and leaves nothing on the ground; nothing settles (snow does not lie).
 
 ## 5. Field effects
 
@@ -397,6 +417,115 @@ does visibly what it says. What does not, yet: the fire model makes one flame pe
 flames rather than a sheet of fire; the smoke model's look on thin, stretched smoke shows banding from the shader's
 relief; and smoke that reaches the sky domain's outer wall piles up there (its feather hides most of it). The video is
 not in git (data rules); it is written where `--out` says.
+
+### 5.3 Trails: a moving source
+
+A library entry's modules follow their anchor, so a fire carried by a moving torch moves with it, but nothing it makes
+can stay behind: a rocket could not leave a smoke trail, nor a vehicle a dust wake. A **trail** leaves material in the
+world. Its source (`at`, which may move: an expression of time, or an input the game sets) deposits heat and soot into
+the state of a learned effect along its path, as a `heat` field and `transfer` add material, and gives that material a
+velocity of its own, as a push gives it a flow. The effect plays in tiles that stay where they are:
+- **A grid fixed in the world.** Tile (i, j) has its top-left corner at (i s, y0 + j s), s the stride (the tile's
+  `width` less the `band` of cells it shares with a neighbour); row 0 stands on the `base` (by default the ground),
+  sunk `sink` of its width below it, as a module stands. `rows N` keeps the trail to the N rows from the base up (a
+  vehicle's dust: 1).
+- **Tiles are switched on along the path.** Each frame, before the step, the source's footprint (two `radius` around
+  it, sampled every half stride from its last place to its new one) switches on every tile it touches that is not
+  playing: one of the trail's pool of `tiles`, started with nothing in it at `age` seconds of its effect's life. The cells
+  it shares with tiles already playing are copied from them, so the first blend of their band keeps what is there.
+- **Tiles that share a band are one domain**: blended every frame as a domain's tiles are (`blend_band`), drawn and
+  published as one group by ownership weights; a side without a neighbour is an outer edge (feathered with `feather`).
+- **The deposit.** After the step, `heat` and `soot` (per frame, at the centre of a Gaussian of `radius` world pixels,
+  coarse cells and fine pixels alike) are spread along the frame's path in steps of half a radius, into every tile that
+  reaches them, and the velocity there is drawn towards `kick` times the source's velocity plus `velocity` (world pixels
+  a frame): a rocket's exhaust thrown back (`kick -0.2`), dust thrown up (`velocity (0, -2.5)`).
+- **Tiles grow where their material goes.** A tile whose heat or soot reaches an outer edge (more than 0.05 in its two
+  outer cells there) gets the neighbour on that side, from the tiles not playing, fed when it was: smoke that rises or
+  drifts out of the tiles the source touched is not cut off.
+- **Fading, and taking tiles again.** A tile the source has not fed for `hold` seconds loses its material by e every
+  `fade` seconds, and is switched off after `hold + 5 fade`. When every tile plays and the path needs another, the one
+  fed longest ago is taken (its material vanishes at once: give the pool enough tiles for the path's length over
+  `hold` + two or three `fade`).
+- **Jumps.** A move longer than `jump` world pixels in one frame (by default two tile widths), or the first frame after
+  `if` turned on, leaves nothing along the way: a teleport or a respawn starts a new path.
+- **Learned sources.** A model whose learned source never stops (fire, smoke, steam) adds its own material at the
+  bottom of every tile; `quiet (x0, y0) to (x1, y1)` clears those cells (as `suppress`) in the tiles with no tile below
+  them, and a tile with one below takes its bottom band from it anyway. The trails of the library use the explosion and
+  dust models started late in their lives, which add nothing of their own.
+
+| key | meaning | default |
+|---|---|---|
+| `= EFFECT` | the effect its tiles play | (required) |
+| `size N`, `width W` | pixels of a tile, and world pixels it covers (constant) | (required), `size` |
+| `band B` | cells neighbouring tiles share | 8 |
+| `tiles N` | the pool: tiles that may play at once (1 to 64; all are made when the scene is built) | 8 |
+| `at (x, y)` | the source (may move) | (required) |
+| `base Y`, `sink F`, `rows N` | the grid's row 0 stands on Y, sunk F of its width; N rows from it up (0 or none: any) | the ground, 0, any |
+| `heat H`, `soot D` | what the source leaves a frame (may change: an entry's grow with its speed) | 0, 0 |
+| `radius R` | its footprint, world pixels | a 20th of `width` |
+| `kick K`, `velocity (u, v)` | the deposit's velocity: K times the source's, plus (u, v) world pixels a frame | 0, (0, 0) |
+| `age A` | the age its tiles start at (seconds of their effect's life) | 3 s |
+| `hold H`, `fade F` | seconds a tile keeps its material once left; then its e-folding time | 1 s, 1.5 s |
+| `jump J` | a longer move in one frame is a jump | 2 x `width` |
+| `quiet (x0, y0) to (x1, y1)` | cells (y up) cleared in tiles with no tile below (a learned source) | none |
+| `if` | it leaves something only while this holds (an entry's `alive`) | always |
+| `look`, `controls`, `CONTROL value`, `opacity`, `seed`, `glow`, `feather` | as a module's | |
+
+```text
+let rx = -60 + 230 * t
+trail exhaust = explosion, size 64, width 192, band 8, tiles 24, at (rx, 330 - 40 * t), look exhaust, age 3, hold 1.2,
+      fade 1.5, soot 0.55, heat 0.2, radius 9, kick -0.2, seed 701
+trail tracks = dust, size 64, width 192, tiles 16, rows 1, sink 0.03, at (tx - 30, ground - 8), look dirt, hold 1.5, fade 2,
+      soot 0.5, radius 16, kick -0.3, velocity (0, -2.5)
+module flame = fire, size 128, width 130, at (X, Y), look flame, start 0, wind 0.5 - clamp(smoke.vx / 900, -0.18, 0.18)
+```
+
+A trail is a module for the rest of the script: couplings and fields act on its tiles (`transfer fire -> exhaust`,
+`field gale = gust, ..., on exhaust`), `stop T` clears it, `start`, `wake`, `hand_over` and `over` do not apply to it
+(the checker says so). In the C API (`nvfx_scene_module_place`) and in an entry of the effect library, moving the trail
+moves its source ([LIBRARY.md](LIBRARY.md) §9). Tested by `Trails.*` (`tests/test_engine_features.cpp`): the grid, the
+material left behind in the world, a short pool taken again, fading, the same frames on any number of threads (scripted
+and through a stage moved every frame), and the checker.
+
+Notes from building them, with the library's models:
+- **The models drop thin material.** A deposit of 0.06 soot a frame from a source that stands still piles up; spread
+  along a path 4 to 9 pixels a frame long, the dust and explosion models kept only a fifth of it within a second (their
+  sub-grid closure never saw such thin, isolated material). So what a source leaves should grow with its speed: about
+  the same amount per pixel of path, dense enough (peaks of 0.3 to 1) to be kept. The library's entries scale it by the
+  trail's own speed (`hypot(T.vx, T.vy)`).
+- **Hot deposits rise and glow.** In the explosion model the heat lifts the material (a rocket's exhaust rises a little)
+  and a field-shader look draws it as flame while it is hot: the glowing part behind a rocket or a torch is the trail
+  itself, cooling into smoke.
+- **Fresh dust is too even.** Dust left at a steady rate makes a flat band behind a vehicle until the model breaks it
+  into puffs about a second later; varying the amount with smooth noise of the place (`noise(X / 45, ...)`) helps.
+- **Cost:** what a module of the same size costs, per tile playing. A rocket of 64-pixel tiles 192 pixels wide at 260
+  pixels a second keeps about a dozen tiles playing; their steps took 5.5 ms a frame (median, one thread of a busy
+  shared machine), the trail's own couplings (bands, deposits, fading) 0.07 ms.
+
+### 5.4 Weather
+
+Rain, snow, ash and leaves (or petals) are procedural particles (`emit rain`, `snow`, `ash`, `leaves`, §4.6), not
+learned, and couple to the bus as the other particles do:
+- **They ride the flow.** Each is drawn towards its fall and the wind, plus `flow` times the bus's flow where it is:
+  snow and ash (flow 1) are lifted by a fire's rising air and swirl in a vortex, rain (0.15) hardly; fields that act on
+  particles (`on ..., particles`) blow them too.
+- **Snow melts** where the bus's heat is above `melt` (0.15 by default): over a fire there is none.
+- **Rain washes smoke out**: with `wash W`, every module it falls on loses W of its soot a second (and half that of its
+  heat) inside the rain's rectangle, before it steps (the extinguisher, `cold`, is the field for putting fire out).
+- **They keep the scene's random numbers** (a hash of the emitter, its seed and the frame): a scene draws the same
+  numbers for its sparks and embers with weather or without (`Weather.ItKeepsTheScenesRandomNumbers`).
+
+`examples/scenes/weather.nvfxs` uses both: rain washing the right half of a smoke column, a campfire under snow that
+melts in its hot air, a rocket's trail across the sky and a truck's dust wake on the ground (8 s at 1280 x 720, about
+70 lines; keyframes at 1, 3, 5 and 7.5 s):
+
+![Trails and weather: keyframes at 1, 3, 5 and 7.5 s](figures/weather_keyframes.png)
+
+By eye: the rocket's smoke stays where it was left, billows and fades, and the dust wake rolls out low behind the
+truck; the rain reads as streaks and the snow as flakes, the rain's washing of the column shows as a thinner right half
+only after a few seconds and is subtle in a still; snow and rain are drawn unlit, so near the campfire they do not glow.
+Tested by `Weather.*`: the region filled and fed, the random numbers kept, rain washing a module's soot (and nothing
+without `wash`), snow melting where the bus is hot, a wind field carrying leaves.
 
 ## 6. The demonstration: a fireball
 

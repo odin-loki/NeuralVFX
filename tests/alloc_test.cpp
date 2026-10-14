@@ -6,7 +6,9 @@
 // one, and the scripted one through the scene C API (nvfx_scene.h) with the game's calls between frames: steps, field
 // reads, inputs, triggers, module moves and controls; then a stage of the effect library (nvfx_library.h): learned and
 // procedural effects (glows, lamps, bursts of sparks, shards) spawned, moved, set, stopped and stolen between frames,
-// overlapped and not; and the effect manager (nvfx_manager.h) ticking a crowd on its threads and on the engine's,
+// overlapped and not; a stage with the engine layers on (read every frame in every format), a trail moved every frame
+// (its tiles switched on, grown, faded and taken again) and procedural weather (rain washing, snow melting); and the
+// effect manager (nvfx_manager.h) ticking a crowd on its threads and on the engine's,
 // with spawns, stops, controls, camera moves, a tight budget, proxies, copies offset in time, pauses and culls.
 // Exit code 0 = no allocation during rendering.
 #include "compose_scene.hpp"
@@ -21,6 +23,7 @@
 #include <neuralfx/rollout.hpp>
 
 #include <algorithm>
+#include <cmath>
 #include <array>
 #include <atomic>
 #include <cstdio>
@@ -557,6 +560,103 @@ field shine = lamp, at (X, Y - 10), radius 20, strength 0.5, colour (0.5, 0.7, 1
   return failures;
 }
 
+// The engine features (docs/ENGINES.md §11, docs/COMPOSE.md §5.3 and §4.6): a stage with the engine layers on, read every
+// frame in every format; a trail whose instance is moved every frame along a path long enough for its pool of tiles to
+// be taken again, stopped and spawned again; rain that washes a smoke module, snow that melts over it, ash and leaves.
+int run_engine_features() {
+  std::string bytes;
+  {
+    std::ostringstream os;
+    if (!nfx::rollout::save_model(os, nfx::compose::testing::tiny_effect(3).m)) return 1;
+    bytes = os.str();
+  }
+  nvfx_effect* et = nullptr;
+  if (nvfx_effect_load_memory(bytes.data(), bytes.size(), &et) != NVFX_OK) return 1;
+  const char* catalogue = R"(
+effect tiny = "tiny.nvfx"
+look gas = shader, heat_scale 1, emission 2, relief 2
+entry streak, category trails, size 160 x 60, anchor centre, loop, moving (150, 0), about "a moving source"
+param density = 0.5, range (0, 1), about "how much"
+let lean = clamp(smoke.vx / 400, -0.3, 0.3)
+module head = tiny, size 32, width 40 * scale, at (X, Y + 20 * scale), start 1, seed 7, wind 0.5 - lean
+trail smoke = tiny, size 32, width 48, band 4, tiles 6, at (X, Y), look gas, hold 0.3, fade 0.3, soot density, heat 0.1,
+      radius 5 * scale, kick -0.2, velocity (0, -0.3)
+entry storm, category weather, size 160 x 96, anchor base, loop, about "weather over a smoke"
+module puff = tiny, size 32, width 64, at (X, Y), look gas, start 1, seed 9
+emit rain, in (X - 80, Y - 96), size 160 x 96, density 4, wind (60, 0), wash 0.5, seed 3
+emit snow, in (X - 80, Y - 96), size 160 x 96, density 4, melt 0.05, seed 4
+emit ash, in (X - 80, Y - 96), size 160 x 96, density 2, glowing 0.3, seed 5
+emit leaves, in (X - 80, Y - 96), size 160 x 96, density 0.5, seed 6
+)";
+  const nvfx_library_file file{"engine.nvfxl", catalogue};
+  nvfx_library_desc ld;
+  nvfx_library_desc_init(&ld);
+  ld.files = &file;
+  ld.n_files = 1;
+  nvfx_library* lib = nullptr;
+  nvfx_scene_error err;
+  if (nvfx_library_open(&ld, &lib, &err) != NVFX_OK) {
+    std::printf("engine features: %s\n", err.message);
+    return 1;
+  }
+  int failures = 0;
+  const nvfx_scene_effect fx{"tiny.nvfx", et};
+  const nvfx_stage_room rooms[] = {{"streak", 1, 1}, {"storm", 1, 0}};
+  for (const int overlap : {0, 1}) {
+    nvfx_stage_desc sd;
+    nvfx_stage_desc_init(&sd);
+    sd.width = 160;
+    sd.height = 96;
+    sd.ground = 90;
+    sd.rooms = rooms;
+    sd.n_rooms = 2;
+    sd.effects = &fx;
+    sd.n_effects = 1;
+    sd.overlap = overlap;
+    sd.layers = 1;
+    nvfx_stage* st = nullptr;
+    if (nvfx_stage_create(lib, &sd, &st, &err) != NVFX_OK) {
+      std::printf("engine features stage: %s\n", err.message);
+      ++failures;
+      continue;
+    }
+    nvfx_scene* scene = nvfx_stage_scene(st);
+    std::vector<std::uint8_t> rgba(160 * 96 * 4);
+    std::vector<float> f32(160 * 96 * 4);
+    nvfx_scene_render(scene, rgba.data(), 160 * 4);  // warm-up outside the count
+    for (int l = 0; l < 4; ++l) nvfx_scene_render_layer(scene, static_cast<nvfx_scene_layer>(l), NVFX_FORMAT_RGBA32F, f32.data(), 160 * 16);
+    g_allocations.store(0);
+    g_counting.store(true);
+    nvfx_fx a = 0, w = 0;
+    int spawned = 0, layers = 0;
+    spawned += nvfx_stage_spawn(st, "streak", 10.f, 50.f, 1.f, -1.0, &a) == NVFX_OK;
+    spawned += nvfx_stage_spawn(st, "storm", 80.f, 90.f, 1.f, -1.0, &w) == NVFX_OK;
+    for (int f = 1; f < 150; ++f) {
+      const float t = static_cast<float>(f) / 30.f;
+      nvfx_stage_move(st, a, 10.f + 60.f * std::fmod(t, 3.f), 50.f + 12.f * std::sin(2.f * t));  // a jump back every 3 s
+      if (f == 100) nvfx_stage_stop(st, a, -1.0);
+      if (f == 110) spawned += nvfx_stage_spawn(st, "streak", 20.f, 40.f, 1.f, -1.0, &a) == NVFX_OK;
+      nvfx_scene_step_frames(scene, 1);
+      const auto layer = static_cast<nvfx_scene_layer>(f % 4);
+      if (f % 3 == 0) layers += nvfx_scene_render_layer(scene, layer, NVFX_FORMAT_RGBA8, rgba.data(), 160 * 4) == NVFX_OK;
+      else if (f % 3 == 1) layers += nvfx_scene_render_layer(scene, layer, NVFX_FORMAT_RGBA16F, f32.data(), 160 * 8) == NVFX_OK;
+      else layers += nvfx_scene_render_layer(scene, layer, NVFX_FORMAT_RGBA32F, f32.data(), 160 * 16) == NVFX_OK;
+      nvfx_scene_render(scene, rgba.data(), 160 * 4);
+    }
+    g_counting.store(false);
+    const long n = g_allocations.load();
+    nvfx_scene_module_info mi{};
+    nvfx_scene_module_get_info(scene, "s0_smoke", &mi);
+    std::printf("engine features%s: %ld allocations in 149 frames (a trail moved every frame, %d of its tiles, %d spawns; weather; %d layers read)\n",
+                overlap ? ", overlapped" : "", n, mi.tiles, spawned, layers);
+    failures += n == 0 && spawned == 3 && layers == 149 ? 0 : 1;
+    nvfx_stage_free(st);
+  }
+  nvfx_library_free(lib);
+  nvfx_effect_free(et);
+  return failures;
+}
+
 // The effect manager: everything is made by nvfx_manager_create and nvfx_manager_add_model; 400 ticks at 60 Hz of a
 // crowd of two looping effects and a one-shot, with every call a game makes between ticks, allocate nothing. Run with
 // its own threads (2), and with the engine running the jobs (here both job slots on the calling thread).
@@ -724,6 +824,7 @@ int main() {
               run(wide, 32, "grid", 16, 0, NVFX_PRECISION_INT8);
   failures += run_scene_api();
   failures += run_library();
+  failures += run_engine_features();
   failures += run_rollout_prior(64) + run_rollout_prior(128);  // the prior against drift
   failures += run_rollout(64, true);                             // the simulator's look for the first frames
   failures += run_rollout(64, false, true);                      // study D2's advection gain and softening

@@ -89,6 +89,9 @@ typedef struct nvfx_library_effect {
   float duration;
   float show;              /* a moment that shows it well, seconds after its spawn */
   int n_params;
+  float move_x, move_y;    /* a moving effect (a trail: a rocket, a vehicle, a carried torch; docs/LIBRARY.md §9): the
+                              velocity it is shown at, world pixels a second at scale 1; 0, 0 for one that stands. Move it
+                              with nvfx_stage_move every frame: its trail stays in the world behind it */
 } nvfx_library_effect;
 
 /* A parameter of an effect: a value the game sets per instance (intensity, wind, colour, ...). */
@@ -133,6 +136,8 @@ typedef struct nvfx_stage_desc {
   int threads, overlap;       /* as nvfx_scene_desc (default 2, -1) */
   const nvfx_scene_effect* effects; /* learned effects passed in (by their file's name), instead of read */
   int n_effects;
+  int layers;                 /* 1: the engine layers too (nvfx_scene_render_layer on nvfx_stage_scene: lit sprites,
+                                 docs/ENGINES.md §11); 0 (default): the picture alone */
 } nvfx_stage_desc;
 
 typedef enum nvfx_fx_state {

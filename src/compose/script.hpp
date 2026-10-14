@@ -126,6 +126,9 @@ struct Options {
   // The modules step with working memory shared per thread (StepScratch, docs/COMPOSE.md §7.3) rather than their own:
   // the same frames, less memory.
   bool shared_scratch = true;
+  // Engine layers (Frame::use_layers, docs/ENGINES.md §11): every picture also draws the effects alone into four layers
+  // for an engine to light and composite (frame().layer()). The pictures are the same with them or without.
+  bool layers = false;
 };
 
 // A scene built from a script: every module, buffer and list is created here, so render() allocates nothing.

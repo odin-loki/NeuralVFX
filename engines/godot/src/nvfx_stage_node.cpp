@@ -144,6 +144,7 @@ nvfx_scene* NeuralVFXStage::create_scene() {
   d.n_effects = static_cast<int>(list.size());
   d.threads = get_threads() > 0 ? get_threads() : 2;
   d.overlap = get_overlap() ? 1 : 0;
+  d.layers = get_layers() ? 1 : 0;
   nvfx_scene_error err{};
   const nvfx_status s = nvfx_stage_create(library_, &d, &stage_, &err);
   free_loaded();  // the stage's scene keeps copies
@@ -196,6 +197,7 @@ Dictionary NeuralVFXStage::get_effect_info(const String& effect) const {
   d["looping"] = e.looping != 0;
   d["duration"] = e.duration;
   d["show"] = e.show;
+  d["moving"] = Vector2(e.move_x, e.move_y);  // a moving effect (a trail): move it every frame (move_fx)
   Array params;
   for (int p = 0; p < e.n_params; ++p) {
     nvfx_library_param pr;

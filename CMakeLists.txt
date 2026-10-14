@@ -109,7 +109,7 @@ neuralfx_defaults(neuralfx_io)
 # Composed effects (docs/COMPOSE.md): rollout effects coupled through their fields, with particles, light, distortion
 # and bloom for whole scenes, field effects, and scene scripts (a text format, its parser and runner), over the
 # runtime's internals.
-set(NEURALFX_COMPOSE_SOURCES src/compose/compose.cpp src/compose/fields.cpp src/compose/script.cpp src/compose/script_run.cpp)
+set(NEURALFX_COMPOSE_SOURCES src/compose/compose.cpp src/compose/fields.cpp src/compose/trail.cpp src/compose/script.cpp src/compose/script_run.cpp)
 add_library(neuralfx_compose STATIC ${NEURALFX_COMPOSE_SOURCES})
 target_include_directories(neuralfx_compose PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src/compose" "${CMAKE_CURRENT_SOURCE_DIR}/src/runtime")
 target_link_libraries(neuralfx_compose PUBLIC nvfx)
@@ -253,6 +253,16 @@ if(NEURALFX_BUILD_TOOLS)
     target_link_libraries(nvfx_pack_host PRIVATE nvfx_pack_api)
   endif()
   neuralfx_defaults(nvfx_pack_host)
+  # Lit sprites for engines (docs/ENGINES.md §11): a stage's engine layers read as an engine reads them and relit by a
+  # light that moves, written as PNG; its self-test checks the layers without any learned effect.
+  add_executable(nvfx_lit_host examples/lit_host.c)
+  if(NEURALFX_BUILD_SHARED)
+    target_link_libraries(nvfx_lit_host PRIVATE nvfx_shared)
+  else()
+    target_link_libraries(nvfx_lit_host PRIVATE nvfx_library_api)
+  endif()
+  set_target_properties(nvfx_lit_host PROPERTIES LINKER_LANGUAGE CXX)
+  neuralfx_defaults(nvfx_lit_host)
   # Every effect of a library catalogue: a contact sheet, a video, keyframes against frozen ones, and the check.
   add_executable(nvfx_gallery tools/nvfx_gallery.cpp)
   target_link_libraries(nvfx_gallery PRIVATE nvfx_library_api nvfx_pack_api neuralfx_io neuralfx_dcm)  # --pack: nvfx_pack.h
@@ -342,7 +352,8 @@ if(NEURALFX_BUILD_TESTS)
                                 tests/test_runtime.cpp tests/test_ingest.cpp tests/test_rollout.cpp tests/test_compose.cpp
                                 tests/test_dcm.cpp tests/test_cm.cpp tests/test_dcm_fine.cpp tests/test_dcm_ddpm.cpp tests/test_script.cpp
                                 tests/test_g3_codec.cpp tests/test_video_codec.cpp tests/test_runtime_prior.cpp
-                                tests/test_dcm_extras.cpp tests/test_scene_api.cpp tests/test_handoff.cpp tests/test_library.cpp)
+                                tests/test_dcm_extras.cpp tests/test_scene_api.cpp tests/test_handoff.cpp tests/test_library.cpp
+                                tests/test_engine_features.cpp)
   target_link_libraries(neuralfx_tests PRIVATE neuralfx_proto neuralfx_io neuralfx_train nvfx neuralfx_compose nvfx_scene_api nvfx_library_api neuralfx_dcm
                                                neuralfx_dcm_fine neuralfx_ddpm neuralfx_codec neuralfx_dcm_extras GTest::gtest_main)
   neuralfx_defaults(neuralfx_tests)
@@ -408,7 +419,7 @@ if(NEURALFX_BUILD_TESTS)
                      --keyframes ${CMAKE_CURRENT_BINARY_DIR}/moor_script_keyframes --no-video --threads 2
                      --verify ${CMAKE_CURRENT_SOURCE_DIR}/results/experiments/fx_atmos_frozen.csv)
     set_tests_properties(neuralfx.ScriptedMoorFrozen PROPERTIES LABELS "neuralfx;data" SKIP_RETURN_CODE 77 TIMEOUT 1200)
-    foreach(scene fireball firewall campfire portal moor)
+    foreach(scene fireball firewall campfire portal moor weather)
       add_test(NAME neuralfx.SceneScriptChecks.${scene} COMMAND nvfx_scene_script --script ${CMAKE_CURRENT_SOURCE_DIR}/examples/scenes/${scene}.nvfxs --check)
       set_tests_properties(neuralfx.SceneScriptChecks.${scene} PROPERTIES LABELS neuralfx)
     endforeach()
@@ -421,12 +432,14 @@ if(NEURALFX_BUILD_TESTS)
     set_tests_properties(neuralfx.LibraryCatalogueCheck PROPERTIES LABELS neuralfx TIMEOUT 600)
     add_test(NAME neuralfx.LibraryHostExample COMMAND nvfx_library_host --self-test ${CMAKE_CURRENT_SOURCE_DIR}/library)
     set_tests_properties(neuralfx.LibraryHostExample PROPERTIES LABELS neuralfx)
+    add_test(NAME neuralfx.LitHostExample COMMAND nvfx_lit_host --self-test ${CMAKE_CURRENT_SOURCE_DIR}/library)
+    set_tests_properties(neuralfx.LitHostExample PROPERTIES LABELS neuralfx)
     add_test(NAME neuralfx.LibraryCataloguePlays
              COMMAND nvfx_gallery --library ${CMAKE_CURRENT_SOURCE_DIR}/library --models ${NEURALFX_MODELS_LIBRARY} --check --require-models --threads 2)
     set_tests_properties(neuralfx.LibraryCataloguePlays PROPERTIES LABELS "neuralfx;data" SKIP_RETURN_CODE 77 TIMEOUT 1800)
     add_test(NAME neuralfx.LibraryKeyframesFrozen
              COMMAND nvfx_gallery --library ${CMAKE_CURRENT_SOURCE_DIR}/library --models ${NEURALFX_MODELS_LIBRARY}
-                     --only campfire,blue_gas_flame,grenade,steam_vent,portal,lightning_strike,ground_fog,dust_impact,flamethrower,plasma_orb,dust_devil
+                     --only campfire,blue_gas_flame,grenade,steam_vent,portal,lightning_strike,ground_fog,dust_impact,flamethrower,plasma_orb,dust_devil,rocket_trail,vehicle_dust_wake
                      --keyframes ${CMAKE_CURRENT_BINARY_DIR}/library_keyframes --verify ${CMAKE_CURRENT_SOURCE_DIR}/results/library/frozen.csv --threads 2)
     set_tests_properties(neuralfx.LibraryKeyframesFrozen PROPERTIES LABELS "neuralfx;data" SKIP_RETURN_CODE 77 TIMEOUT 1200)
     # The fire whirl (docs/EFFECTS_ENERGY.md): jet, orb and vortex, all in NEURALFX_MODELS_ENERGY (outside git); its

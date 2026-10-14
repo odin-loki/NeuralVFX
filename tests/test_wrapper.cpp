@@ -370,6 +370,39 @@ TEST(Wrapper, ScenesAreTheCApis) {
   nvfx_scene_free(c);
 }
 
+TEST(Wrapper, EngineLayersAreTheCApi) {
+  auto tiny = nvfx::Effect::load_memory(tiny_model(3));
+  ASSERT_TRUE(tiny);
+  const nvfx_scene_effect fx{"tiny.nvfx", tiny->get()};
+  nvfx_scene_desc d = nvfx::scene_desc();
+  d.script = kScript;
+  d.effects = &fx;
+  d.n_effects = 1;
+  d.threads = 1;
+  d.layers = 1;
+  auto scene = nvfx::Scene::create(d);
+  ASSERT_TRUE(scene) << scene.error().message;
+  nvfx_scene* c = nullptr;
+  ASSERT_EQ(nvfx_scene_create(&d, &c, nullptr), NVFX_OK);
+  ASSERT_TRUE(scene->step_frames(12));
+  ASSERT_EQ(nvfx_scene_step_frames(c, 12), NVFX_OK);
+  const auto info = scene->get_info();
+  ASSERT_TRUE(info);
+  const auto w = static_cast<std::size_t>(info->width), h = static_cast<std::size_t>(info->height);
+  for (const nvfx_pixel_format format : {NVFX_FORMAT_RGBA8, NVFX_FORMAT_RGBA16F, NVFX_FORMAT_RGBA32F}) {
+    const std::size_t px = nvfx_pixel_format_bytes(format);
+    std::vector<std::byte> a(w * h * px), b(w * h * px);
+    for (const nvfx_scene_layer layer : {NVFX_LAYER_COLOUR, NVFX_LAYER_ALBEDO, NVFX_LAYER_EMISSION, NVFX_LAYER_NORMAL}) {
+      ASSERT_TRUE(scene->render_layer(layer, format, a));
+      ASSERT_EQ(nvfx_scene_render_layer(c, layer, format, b.data(), w * px), NVFX_OK);
+      EXPECT_EQ(a, b) << "layer " << static_cast<int>(layer) << ", format " << static_cast<int>(format);
+    }
+    same(scene->render_layer(NVFX_LAYER_COLOUR, format, std::span(a).first(a.size() - 1)), NVFX_ERROR_ARGUMENT,
+         "render a layer into too small a buffer");
+  }
+  nvfx_scene_free(c);
+}
+
 TEST(Wrapper, TheLibraryAndStagesAreTheCApis) {
   auto tiny = nvfx::Effect::load_memory(tiny_model(3));
   ASSERT_TRUE(tiny);

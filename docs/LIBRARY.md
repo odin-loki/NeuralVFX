@@ -1,42 +1,51 @@
 # The effect library
 
-A catalogue of 70 named, ready-to-use effects that a game lists, places and drives without training anything: a
+A catalogue of 79 named, ready-to-use effects that a game lists, places and drives without training anything: a
 campfire, a grenade, a steam vent, a portal, a lightning strike, ground fog, a dust impact, a flamethrower, a plasma
-orb, a dust devil. Each plays the eleven trained rollout models (fire, smoke, explosion v2, steam and magic; fog, dust
-and cloud, [EFFECTS_ATMOSPHERE.md](EFFECTS_ATMOSPHERE.md); jet, orb and vortex, [EFFECTS_ENERGY.md](EFFECTS_ENERGY.md))
-and the compositor's procedural elements (embers, sparks, shock fronts, scorch marks, flashes, lights, bolts, rings), at
+orb, a dust devil, a rocket's smoke trail, rain. Each plays the eleven trained rollout models (fire, smoke, explosion
+v2, steam and magic; fog, dust and cloud, [EFFECTS_ATMOSPHERE.md](EFFECTS_ATMOSPHERE.md); jet, orb and vortex,
+[EFFECTS_ENERGY.md](EFFECTS_ENERGY.md)) and the compositor's procedural elements (embers, sparks, shock fronts, scorch marks, flashes, lights, bolts, rings), at
 a size, with parameters mapped onto the models' controls and looks. The 23 entries of the six newer models were added
-with the recipe of §6, in text; the only code they needed is a third anchor, for the jet's nozzle.
+with the recipe of §6, in text; the only code they needed is a third anchor, for the jet's nozzle. The nine newest
+entries needed two features of the compositor: **trails** (`rocket_trail`, `vehicle_dust_wake`, `carried_torch`,
+`comet_trail`: effects that move and leave their smoke, dust or glow in the world behind them, §9) and **procedural
+weather** (`rain`, `snow`, `falling_ash`, `falling_leaves`, `cherry_petals`, §2.1).
 
 ![The library's contact sheet: the entries of the first five models](figures/library_sheet.png)
 
 ![The library's contact sheet: the 23 entries of fog, dust, cloud, jet, orb and vortex](figures/library_sheet_new.png)
 
+![The library's contact sheet: the four trails, moved through their boxes, and the five procedural weathers](figures/library_sheet_engine.png)
+
 *Every entry alone on a stage fitted to its box, at the moment its catalogue says shows it well (`nvfx_gallery`).*
 
-| category | entries | of them new (round 5's models) | learned | procedural only |
-|---|---|---|---|---|
-| fire | 14 | 4 | 14 | 0 |
-| smoke | 7 | 2 | 7 | 0 |
-| explosions | 5 | 0 | 4 | 1 |
-| steam (and water) | 5 | 0 | 5 | 0 |
-| magic | 8 | 3 | 6 | 2 |
-| ambient | 5 | 0 | 3 | 2 |
-| sparks (and debris) | 8 | 1 | 2 | 6 |
-| light | 7 | 2 | 3 | 4 |
-| dust | 5 | 5 | 5 | 0 |
-| weather | 6 | 6 | 6 | 0 |
-| **all** | **70** | **23** | **55** | **15** |
+| category | entries | of them round 5's models | of them trails and weather | learned | procedural only |
+|---|---|---|---|---|---|
+| fire | 14 | 4 | 0 | 14 | 0 |
+| smoke | 7 | 2 | 0 | 7 | 0 |
+| explosions | 5 | 0 | 0 | 4 | 1 |
+| steam (and water) | 5 | 0 | 0 | 5 | 0 |
+| magic | 8 | 3 | 0 | 6 | 2 |
+| ambient | 5 | 0 | 0 | 3 | 2 |
+| sparks (and debris) | 8 | 1 | 0 | 2 | 6 |
+| light | 7 | 2 | 0 | 3 | 4 |
+| dust | 5 | 5 | 0 | 5 | 0 |
+| trails | 4 | 0 | 4 | 4 | 0 |
+| weather | 11 | 6 | 5 | 6 | 5 |
+| **all** | **79** | **23** | **9** | **59** | **20** |
 
 **What is learned and what is not.** Only eleven things move by a trained model: fire, smoke, an explosion, steam,
 magic, fog, dust, cloud, a jet, an orb and a vortex. Everything else in an entry is the compositor's: particles (embers,
 sparks, debris), shock fronts, scorch marks, flashes, camera shakes, and the glows this library adds (lightning and
-electric arcs, rings, discs and motes of light, lamps). Entries that use no model at all say *(procedural)* in their
-description. **A recolour is a look, not new dynamics**: blue gas, green witch fire, the violet magic burst, the red
-dark portal, the coloured smokes and fogs, the blue rocket exhaust and the violet dragon breath and magic vortex move
-exactly as their model's orange fire, grey smoke, explosion, white fog, jet or dust column does; a field-shader look
-draws them in another colour (`hue`, `tint`). Nothing here was trained for the library. Entries marked *(new)* are those
-of round 5's six models.
+electric arcs, rings, discs and motes of light, lamps; rain, snow, ash and leaves). Entries that use no model at all
+say *(procedural)* in their description. A trail's material is learned (it plays in the explosion or dust model's
+tiles), but where it appears is the compositor's: it is put into the model's state along the source's path, as a
+script's `heat` field and `transfer` add material. **A recolour is a look, not new dynamics**: blue gas, green witch
+fire, the violet magic burst, the red dark portal, the coloured smokes and fogs, the blue rocket exhaust, the cyan
+comet's tail and the violet dragon breath and magic vortex move exactly as their model's orange fire, grey smoke,
+explosion, white fog, jet or dust column does; a field-shader look draws them in another colour (`hue`, `tint`).
+Nothing here was trained for the library. Entries marked *(new)* are those of round 5's six models, *(trail)* and
+*(weather)* the nine newest.
 
 ## 1. The catalogue
 
@@ -157,7 +166,20 @@ sizes, smoke placed where the flames are) or replaced: §8 says which.
 | `sand_burst` (new) | A sand burst: a shell or a heavy blow in sand throws up a tall spray of pale sand that rolls out and settles | dust; look sand, burst | 560 x 280, base | once, 3.5 s | power (1) | Good: a tall pale spray that rolls out; the rocks thrown are the compositor's dark debris, not sand. |
 | `dust_devil` (new) | A dust devil: a column of dust rising from hot ground, swaying and spreading towards its top (the vortex model) | whirlwind; look devil_dust | 300 x 420, base | loop | intensity (0.65), sway (0.6) | Fair: the column sways and spreads at its top into a haze; its intensity is kept at 0.5 or more, as the model can lose a thin column. |
 
-### Weather (6)
+### Trails (4)
+
+Effects that move: the game moves the instance every frame (`nvfx_stage_move`) and what it leaves stays in the world
+behind it (§9). *Runs* gives the velocity the gallery moves it at (`moving`, world pixels a second, at scale 1);
+the gallery's thumbnail shows each after `show` seconds of travel through its box.
+
+| effect | what it is | plays | box, anchor | runs | parameters (default) | how it looks |
+|---|---|---|---|---|---|---|
+| `rocket_trail` (trail) | A rocket's trail: a white-hot exhaust at the source and smoke left behind it in the world, billowing, spreading and fading (move it every frame) | explosion; trail, look exhaust, glow, lamp, burst | 900 x 420, centre | loop, moving (280, -90) | density (0.7), fire (0.6) | Good: a white-hot point with a short glowing exhaust, and a long white trail that billows, widens and drifts up a little where it was left, then fades over two or three seconds; a turn leaves a bent trail, as it should. Near the source the smoke is a narrow, even line for a few frames before the model breaks it up. |
+| `vehicle_dust_wake` (trail) | A vehicle's dust wake: dust thrown up behind it as it drives, rolling out low along the ground and settling where it was left (move it every frame) | dust; trail, look dirt | 900 x 220, base | loop, moving (220, 0) | density (0.7), height (0.5) | Fair to good: a low brown wake that rolls into puffs and settles where it was left. The freshest dust, right behind the vehicle, is a flat even band for about a second before the model breaks it into puffs (noise in the amount helps a little), and once in the walk-through a faint straight seam showed between two tiles. |
+| `carried_torch` (trail) | A carried torch: its flame leans away from the way it moves, its hot gas and smoke stream out behind it and stay in the world; its anchor is the torch's head (move it every frame) | fire, explosion; look flame, trail, look torch_smoke, embers, lamp | 700 x 320, centre | loop, moving (180, 0) | intensity (0.65) | Fair: the hot gas glows orange behind the flame and streams back into a wavy grey smoke trail, which reads well. The flame itself is small, thin and ragged, with curling tongues, and leans only a little: the fire model leans with its wind control, and pushed further (to show a fast torch) it became a thin red streak. |
+| `comet_trail` (trail) | A comet or a spell's trail: a ball of cyan plasma that leaves a glowing tail behind it, cooling and fading (the orb and the explosion's tail, recoloured; move it every frame) | orb, explosion; trail, look comet, glow, lamp | 900 x 360, centre | loop, moving (300, 40) | intensity (0.7) | Good: a bright cyan head and a glowing tail that frays and fades behind it (the explosion's hot gas, recoloured); the head is the orb model, small at this size. |
+
+### Weather (11)
 
 | effect | what it is | plays | box, anchor | runs | parameters (default) | how it looks |
 |---|---|---|---|---|---|---|
@@ -167,6 +189,11 @@ sizes, smoke placed where the flames are) or replaced: §8 says which.
 | `sky_cloud` (new) | A cloud: a white mass that boils slowly and drifts, lit by the moon and the scene | cloud; look fleece | 520 x 260, centre | loop | wind (0.6), intensity (0.8) | Good: a soft white cloud that boils slowly (drawn by a look: the cloud model's own renderer gave colour fringes). |
 | `storm_cloud` (new) | A storm cloud: a dark bank of cloud drifting, lit from inside by lightning every few seconds, a bolt below it | cloud; look storm, lamp, arc, flash | 1100 x 360, centre | loop | wind (0.62), every (5) | Fair: a flash lights the bank from inside and the bolt reads, but between flashes the bank is dark and thin. |
 | `dust_storm` (new) | A dust storm: a wall of brown dust rolling past, puffs forming upwind and thinning downwind (the cloud model) | cloud; look grit | 1300 x 300, base | loop | intensity (0.95), wind (0.85) | Fair: a low brown band rolling past, not a towering wall. |
+| `rain` (weather) | Rain (procedural): streaks falling through the box, slanted by the wind; it thins the smoke it falls through | rain | 960 x 540, base | loop | density (3), wind (120), size (1) | Good: thin slanted streaks of different lengths falling fast; reads in a still and in motion. How it thins smoke is subtle (§9, `weather.nvfxs`). |
+| `snow` (weather) | Snow (procedural): flakes drifting down and fluttering, carried by the wind and by the air of effects around them; they melt over fires | snow | 960 x 540, base | loop | density (2.5), wind (30), size (1) | Fair: flakes that fall slowly, flutter and drift, lifted by a fire's air and gone over it; in motion it is snow, but in a still at night the flakes look like stars. |
+| `falling_ash` (weather) | Falling ash (procedural): grey flakes drifting down after a fire, a few still glowing, carried by the air | ash | 960 x 540, base | loop | density (2), wind (20), size (1) | Weak to fair: slow grey flakes with a few glowing ones; at night it reads as grey snow, and the glowing flecks are few and small. Better over a burnt, lit scene than in the gallery's dark one. |
+| `falling_leaves` (weather) | Falling leaves (procedural): autumn leaves tumbling and swaying down, blown by the wind | leaves | 960 x 540, base | loop | density (0.35), wind (60), size (1) | Fair: leaves in four autumn colours that tumble (they narrow and widen as they turn) and swing as they fall; small and few at the defaults, and flat shapes, not leaf shapes. |
+| `cherry_petals` (weather) | Cherry petals (procedural): small pink petals drifting and tumbling on a light breeze | leaves | 960 x 540, base | loop | density (0.6), wind (70), size (1) | Fair: small pink petals that tumble and drift; pleasant in motion, specks in a still. |
 
 ## 2. The format
 
@@ -188,13 +215,14 @@ field cool = lamp, at (X, Y - 20 * scale), radius 50 * scale, strength 0.6 * int
 
 | statement | keys |
 |---|---|
-| `entry NAME` | `category C` (fire, smoke, explosions, steam, magic, ambient, sparks, light, dust, weather, or a new one), `size W x H` (its box at scale 1, world pixels), `anchor base`, `centre` or `left` (the middle of the box's left edge: a jet's nozzle), `loop` (plays until stopped) or `once S` (a one-shot of S seconds), `show S` (a moment that shows it, seconds after the spawn; the gallery's), `about "..."` (one line) |
+| `entry NAME` | `category C` (fire, smoke, explosions, steam, magic, ambient, sparks, light, dust, trails, weather, or a new one), `size W x H` (its box at scale 1, world pixels), `anchor base`, `centre` or `left` (the middle of the box's left edge: a jet's nozzle), `loop` (plays until stopped) or `once S` (a one-shot of S seconds), `show S` (a moment that shows it, seconds after the spawn; the gallery's), `moving (VX, VY)` (it is meant to move: the velocity, world pixels a second at scale 1, that the gallery and its checks move it at and that the catalogue reports; a trail, §9), `about "..."` (one line) |
 | `param NAME = DEFAULT` | `range (LO, HI)` (values set are clamped to it), `about "..."` |
 
 In an entry, `t` is the time since the spawn, `X` and `Y` the anchor, `scale` the scale it was spawned at, `variant`
 a number in [0, 1) that differs from spawn to spawn, and `alive` 1 while it plays (0 once stopped or ended). A
 parameter is a value by its name. An entry may declare modules (single ones: tiles stay where they are declared),
-fields, emitters, `let`s, its own looks, rules (`at T:` and `when ...:`, which fire once per spawn, or every time
+fields, emitters, trails (`trail NAME = EFFECT ...`, [COMPOSE.md](COMPOSE.md) §5.3: material left in the world
+along a moving source's path), `let`s, its own looks, rules (`at T:` and `when ...:`, which fire once per spawn, or every time
 with `repeat`), `every frame:` couplings, a flash (`light flash (r, g, b)`) and a camera shake (`camera x ..., y ...`).
 The stage owns the picture, the clock, the bus, the particles and the camera's place; an entry cannot set them, read
 another instance, or wait for a shock front by number (fronts are counted over the whole stage). The parser and checker
@@ -225,6 +253,9 @@ is rewritten so that:
 - looping modules play in **shards** of 8 seconds (`shards`, [COMPOSE.md](COMPOSE.md) §4.3): a fresh rollout starts
   ahead of time and takes over in a half-second blend, so a fire or a smoke plume never drifts or dies however long it
   plays; a shard that fades early is replaced at once;
+- a trail's pool of tiles is made with the stage; it leaves material only while its instance is `alive`, so a stop
+  leaves what is there to fade where it is, and a new spawn starts a new path (a jump: nothing is drawn between where
+  the last one ended and where this one starts);
 - flashes and camera shakes of all instances add up.
 
 `nvfx_gallery --library library --print NAME` prints an entry alone as the stage plays it.
@@ -232,7 +263,8 @@ is rewritten so that:
 ### 2.1 Procedural elements added for the library
 
 All in the compositor (`src/compose`), allocation-free (pre-sized pools), deterministic, and tested
-(`tests/test_library.cpp`). None is learned: they are drawn, and say so in the entries that use them.
+(`tests/test_library.cpp`, `tests/test_engine_features.cpp`). None is learned but the trail's material: they are
+drawn, and say so in the entries that use them.
 
 | element | what it is | used by |
 |---|---|---|
@@ -242,6 +274,8 @@ All in the compositor (`src/compose`), allocation-free (pre-sized pools), determ
 | `field lamp` | a light that is not on the bus: lights smoke and steam around it in its colour | most entries (the warm light of a fire, a portal's violet) |
 | `hue` (look) | the field shader's emitted colours turned about the grey axis: recolours | `blue_gas_flame`, `witch_fire`, `magic_burst`, `dark_portal` |
 | `burst ... sparks` | short fast bright embers thrown within a cone | `muzzle_flash`, `grinder_sparks`, `lightning_strike`, `flashbang` |
+| `emit rain`, `snow`, `ash`, `leaves` | weather (allocation-free, deterministic, tested by `Weather.*` in `tests/test_engine_features.cpp`): particles that fill a rectangle at a `density` (per 100 x 100 world pixels) and fall through it with a `wind`, riding the bus's flow; rain is drawn as streaks and can `wash` smoke out of the modules it falls on, snow `melt`s over heat, ash has a few `glowing` flakes, leaves (and petals) tumble and swing as they fall ([COMPOSE.md](COMPOSE.md) §4.6 and §5.4) | `rain`, `snow`, `falling_ash`, `falling_leaves`, `cherry_petals` |
+| `trail` | not procedural: tiles of a learned effect laid on a grid in the world, fed along a moving source's path ([COMPOSE.md](COMPOSE.md) §5.3, §9 here) | `rocket_trail`, `vehicle_dust_wake`, `carried_torch`, `comet_trail` |
 
 ## 3. The API
 
@@ -273,7 +307,8 @@ nvfx_stage_stop(stage, fire, -1.0);
 ```
 
 - **Listing**: `nvfx_library_count`, `_find`, `_get_effect` (name, category, description, the models and procedural
-  elements it uses, its box, anchor, loop or duration, a moment to show it), `_get_param` (name, description,
+  elements it uses, its box, anchor, loop or duration, a moment to show it, and for a moving effect the velocity it is
+  shown at, `move_x` and `move_y`), `_get_param` (name, description,
   default, range), `_category_count` and `_category`, `_list_models` (the model files an effect needs).
 - **Stages**: `nvfx_stage_create` builds the scene with the rooms asked for and loads the models they need;
   `nvfx_stage_scene` is an ordinary `nvfx_scene` (step, render, sample fields, overlap). `nvfx_stage_spawn` (position,
@@ -281,11 +316,21 @@ nvfx_stage_stop(stage, fire, -1.0);
   (clamped to the range), `_move`, `_stop` (now or at a time; a pending spawn is cancelled), `_get_fx` (waiting,
   playing, ended; where, its scale, its age), `_free_rooms`, `_set_camera`, `_clear`. A handle is a room and a
   generation: it goes stale when its room is used again.
+- **Moving effects** (trails, §9): call `nvfx_stage_move` every frame, before stepping, with where the instance is;
+  its modules follow it and its trail's material stays in the world. A move acts on the next frame computed (with
+  overlap, the frame after: [ENGINES.md](ENGINES.md) §7), as any input.
+- **Engine layers**: with `nvfx_stage_desc.layers = 1` the stage's scene also draws its effects alone into colour,
+  albedo, emission and normal-and-thickness layers, read with `nvfx_scene_render_layer` (lit sprites:
+  [ENGINES.md](ENGINES.md) §11).
 - **No allocation per frame**, and none in spawn, move, parameters or stop (they set the scene's inputs):
-  `nvfx_alloc_test` counts them (a stage with 21 spawns over 149 frames, with and without overlap: 0), as does
-  `nvfx_gallery --check` for every entry.
+  `nvfx_alloc_test` counts them (a stage with 21 spawns over 149 frames, with and without overlap: 0; a stage with the
+  engine layers read every frame, a trail moved every frame, jumping, stopped and spawned again, and weather: 0), as
+  does `nvfx_gallery --check` for every entry (a moving one moved every frame).
 - **Deterministic**: the same calls at the same times give the same frames, on any number of threads and with or
-  without overlap (`Library.TheSameCallsGiveTheSameFramesOnAnyThreads`). An instance's random choices come from its
+  without overlap (`Library.TheSameCallsGiveTheSameFramesOnAnyThreads`). Moves are the exception to "with or without":
+  a move made every frame acts a frame later with overlap, so a moving trail gives the same frames on any number of
+  threads for one overlap setting (`Trails.AMovedInstanceGivesTheSameFramesOnAnyNumberOfThreads`), and slightly
+  different ones between the two. An instance's random choices come from its
   room's seeds and its `variant` (from the spawn count), not from the clock.
 - **Threads**: as scenes. A library is read-only once opened and may be shared; a stage is used from one thread at a
   time and runs `threads` workers of its own.
@@ -323,7 +368,13 @@ nvfx_gallery --library library --list [--markdown]        # the catalogue (the t
 nvfx_gallery --library library --print NAME               # an entry alone, as the stage plays it
 nvfx_gallery --starts DATA/library/models/fire.nvfx       # a model's start points and their controls
 nvfx_gallery --library library --models DIR --shot 960x540 --ground 470 --spawn campfire@220,470,1,0.3 ... --frames 45 --png f.png
+nvfx_gallery --library library --models DIR --shot 960x540 --spawn rocket_trail@100,330,0.8,0.1,250,-60 --frames 45 --png f.png
 ```
+
+A moving entry (`moving (VX, VY)`) is moved every frame, in the sheet, the video, the keyframes and the check: through
+its box at its velocity, half its `show` time before the anchor point at the spawn and half after it at the show, then
+back and forth. In `--shot`, `--spawn NAME@X,Y,SCALE,AT,VX,VY` moves the instance before each frame to
+(X + VX s, Y + VY s), s the seconds since its spawn (the Godot test does the same).
 
 - `--sheet`: a labelled contact sheet (name, category, one-shot or loop), each cell at the entry's `show` moment.
 - `--video`: a walk through every entry (or those of `--only`), 4 seconds each (one-shots: their length; `--clip S`:
@@ -337,16 +388,19 @@ nvfx_gallery --library library --models DIR --shot 960x540 --ground 470 --spawn 
   files they were made with).
 - `--shot`: a stage played as a game would (frame 0 drawn, the spawns, then N frames): the Godot test's reference.
 
-Outputs go under `$NEURALVFX_DATA/library` (the sheet, the video, keyframes); only the two sheets in `docs/figures`
-(`library_sheet.png`, `library_sheet_new.png`, scaled down) are in git.
+Outputs go under `$NEURALVFX_DATA/library` (the sheet, the video, keyframes); only the sheets in `docs/figures`
+(`library_sheet.png`, `library_sheet_new.png`, `library_sheet_engine.png`, scaled down, and the trails' strip
+`trails_over_time.png`) are in git.
 
 **Tests** (`ctest`): `neuralfx.LibraryCatalogueCheck` (no data: the catalogue and every procedural entry);
 `neuralfx.LibraryHostExample` (the C example's self-test); `neuralfx.LibraryCataloguePlays` (every entry, with the
 eleven models in `NEURALFX_MODELS_LIBRARY`, by default `$NEURALVFX_DATA/library/models`; skipped without them);
 `neuralfx.LibraryKeyframesFrozen` (the keyframes of `campfire`, `blue_gas_flame`, `grenade`, `steam_vent`, `portal`,
-`lightning_strike`, `ground_fog`, `dust_impact`, `flamethrower`, `plasma_orb` and `dust_devil` against
-`results/library/frozen.csv`; skipped without the models); the `Library.*`, `Glows.*`, `Lamps.*` unit tests and the
-library stage in `nvfx_alloc_test`.
+`lightning_strike`, `ground_fog`, `dust_impact`, `flamethrower`, `plasma_orb`, `dust_devil`, and two moving ones,
+`rocket_trail` and `vehicle_dust_wake`, against `results/library/frozen.csv`, on 2 threads; skipped without the
+models); the `Library.*`, `Glows.*`, `Lamps.*`, `Trails.*`, `Layers.*` and `Weather.*` unit
+tests; the library stage and the engine features' stage in `nvfx_alloc_test`; `neuralfx.LitHostExample` (lit sprites,
+[ENGINES.md](ENGINES.md) §11).
 
 ## 5. Godot
 
@@ -365,14 +419,26 @@ var fx := stage.spawn("campfire", Vector2(300, 470))      # scale 1, now; 0 when
 stage.set_param(fx, "intensity", 0.4)
 stage.move_fx(fx, Vector2(320, 470))
 stage.stop(fx)
+
+var rocket := stage.spawn("rocket_trail", Vector2(100, 330), 0.8)
+func _process(delta):                                        # a moving effect: moved every frame
+    stage.move_fx(rocket, rocket_position)                  # its smoke stays in the world behind it
 ```
 
-`demo/library.tscn` (`library.gd`) is the same in a window: left and right choose one of 22 effects, a click spawns it
-under the mouse, a right click stops the last. The headless test (`engines/godot/test.sh`, step 5) has `nvfx_gallery
+`get_effect_info(name).moving` is the velocity a moving effect is shown at (`Vector2.ZERO` for one that stands). With
+`layers = true` (set before it is added to the tree) the stage also gives the engine layers as textures
+(`get_layer_texture(LAYER_EMISSION)`, ...: [ENGINES.md](ENGINES.md) §11).
+
+`demo/library.tscn` (`library.gd`) is the same in a window: left and right choose one of 29 effects, a click spawns it
+under the mouse, a right click stops the last; a comet flies a loop over the scene all the while, moved every frame,
+and a moving effect spawned with a click then follows the mouse, leaving its trail. The headless test (`engines/godot/test.sh`, step 5) has `nvfx_gallery
 --shot` draw a stage with five library effects (a campfire, a steam vent, a magic burst, an electric arc and a plasma
-orb) spawned at given times, and `demo/test_library.gd` play the same stage in a `NeuralVFXStage` in Godot 4.4.1: the
-listing, an effect's description and a jet's anchor, the spawns, a full room and an unknown effect refused, the frame
-the same to the byte as `nvfx_gallery`'s, heat over the campfire, a parameter, a move, a stop, a stale handle.
+orb) spawned at given times and a rocket trail moved every frame, and `demo/test_library.gd` play the same stage in a
+`NeuralVFXStage` in Godot 4.4.1, with the engine layers on: the listing, an effect's description and a jet's anchor,
+the rocket's `moving` velocity, the spawns, a full room and an unknown effect refused, the frame the same to the byte as
+`nvfx_gallery`'s (the rocket moved before each frame in both), heat over the campfire, the rocket's smoke left behind
+it in the world, the four layer textures and their formats, thickness wherever the effects cover, the campfire's
+emission, a parameter, a move, a stop, a stale handle.
 
 ## 6. Adding effects
 
@@ -408,7 +474,8 @@ Then:
    `DIR/keyframes.csv`).
 
 A model with other control names is used by them (`spin 0.8` for magic, `aim`, `pulse` and `sway` for the jet, the
-orb and the vortex). A new category is just a new name in `category` (`dust` and `weather` came with round 5).
+orb and the vortex). A new category is just a new name in `category` (`dust` and `weather` came with round 5,
+`trails` with the trails).
 
 **What adding six models taught** (no step of the recipe changed; these are things to know):
 - **Read the model's document first**: where its material sits in the tile decides where the module stands. Fog lies
@@ -462,6 +529,15 @@ It changes colours, not motion; say so in the entry's description.
   but both play endlessly without trouble, which is what a library entry does.
 - **Fog stays where it is put**: nothing in the library pushes it, as fog lifted by a blast stays up as pale plumes.
   Fog, dust and cloud give no light and no heat haze.
+- **Trails** cost what their playing tiles cost: a rocket at its speed keeps about a dozen 64-pixel tiles playing
+  (their steps 5.5 ms a frame on one thread; with their drawing 12 to 20 ms, §9). Their pools are fixed when the stage is made: a source much faster than the entry's
+  `moving` velocity, or a game that moves it far each frame, runs out of tiles and takes the oldest, so its trail is
+  shorter; a move of more than two tile widths in a frame is a jump and leaves nothing between. A trail's tiles keep
+  their size at any scale. Trail media are the explosion and dust models: fire, smoke and steam have learned sources of
+  their own at the bottom of every tile, which a trail would have to quiet.
+- **Weather is drawn unlit** (its own colours, not lit by the scene's lights or lamps: snow by a campfire does not glow)
+  and fills a rectangle (the entry's box at its scale); a game that wants rain over the whole screen spawns it with a
+  box as large as the screen, or several. Rain thins smoke inside its rectangle only.
 
 ## 8. Judged by eye: what changed
 
@@ -499,3 +575,85 @@ walk-through video:
   §6); a higher turbulence fixed it.
 - **The fire whirl** glowed as a large orange square (the warm air at the top of its tile drawn as flame); a dimmer
   look keeps the column and a softer haze.
+
+The trails and the weather were judged the same way, from the sheet, a strip of each trail over time (below) and
+walk-through videos:
+- **Thin material was lost.** A source that left a fixed, small amount a frame left almost nothing once it moved: spread
+  along its path, the deposit was too thin and the models dropped it (their closure never saw thin, isolated material).
+  The entries' deposits grow with the trail's speed and are dense where they land (§9).
+- **The torch's flame** leaned so far at first (the fire's wind control from its speed) that it became a thin red streak,
+  and its smoke rose from far above the flame, so the two looked unrelated (a "jellyfish"). Now the lean is small, the
+  flame larger, and the trail starts at the flame as hot gas that glows and cools into smoke; still only fair.
+- **The dust wake** was a flat even band; noise in how much it leaves breaks it a little earlier.
+- **Ash, snow and petals** were too faint at night: bigger, lighter and denser now; ash still reads as grey snow.
+
+## 9. Trails
+
+A trail entry is an effect that moves: a rocket, a vehicle, a carried torch, a comet. The game moves its instance
+every frame with `nvfx_stage_move` (Godot: `move_fx`); the parts that follow the anchor (a torch's flame, the comet's
+head, glows, sparks) move with it, and its **trail** leaves material in the world along the path, where it stays,
+billows, spreads, fades and is taken again further along ([COMPOSE.md](COMPOSE.md) §5.3 has the mechanism: tiles of a
+learned effect on a grid fixed in the world, switched on along the path, sharing bands as a domain's tiles do, fading
+once left and recycled).
+
+![The four trails over time: each moved back and forth through its box (1.5, 3 and 4.5 s after its spawn)](figures/trails_over_time.png)
+
+*Each trail moved through its box at its `moving` velocity and back (the gallery's path); left to right, 1.5, 3 and
+4.5 s after the spawn: the trail is drawn behind the source, stays where it was left, and fades while the source comes
+back past it.*
+
+**How the entries are written** (`library/trails.nvfxl`):
+
+```
+entry rocket_trail, category trails, size 900 x 420, anchor centre, loop, show 3, moving (280, -90), about "..."
+param density = 0.7, range (0.2, 1), about "how much smoke"
+param fire = 0.6, range (0, 1), about "how hot the exhaust: the glowing part just behind the rocket"
+let speed = hypot(smoke.vx, smoke.vy)                           # the trail's own velocity, world pixels a second
+let pace = min(2, speed / 260)
+trail smoke = explosion, size 64, width 192, band 8, tiles 20, at (X, Y), look exhaust, age 3, hold 1.2, fade 1.5,
+      soot 0.6 * density * pace, heat (0.05 + 0.3 * fire) * pace, radius 10 * scale, kick -0.2, controls (0.5, 0.5, 0.5),
+      seed 701
+emit glow, at (X, Y), radius 5 * scale, colour (1, 0.92, 0.75), brightness 3.5
+field glare = lamp, at (X, Y), radius 60 * scale, strength 1.1, colour (1, 0.7, 0.4)
+at 0, repeat:
+  burst at (X, Y), radius 2 * scale, embers 0, sparks 1, speed 260 * scale, direction (-smoke.vx, 0.01 - smoke.vy), cone 35,
+        if speed > 40
+```
+
+- **`moving (VX, VY)`** says the entry is meant to move, and at what speed it is shown; the catalogue reports it
+  (`move_x`, `move_y`; Godot's `moving`).
+- **The source** is `at (X, Y)`: the anchor, so moving the instance moves it. A trail's velocity, `smoke.vx` and
+  `smoke.vy` (world pixels a second, smoothed over about 0.15 s), drives the rest: how much is left (`pace`), the
+  sparks thrown back, the torch's lean (`wind 0.5 - lean`).
+- **What it leaves grows with its speed** (`pace`): about the same per world pixel of path, dense enough that the
+  model keeps it. A source standing still leaves nothing (the torch a little smoke).
+- **Media without a learned source.** The trails play the explosion model (rocket, torch, comet) and the dust model
+  (vehicle) started empty at `age 3`: neither has a learned source left then, so nothing appears but what the source
+  puts there. The explosion's heat makes the fresh material rise a little and glow under a field-shader look (the
+  exhaust behind the rocket, the torch's hot gas, the comet's cyan tail: recolours of the explosion's hot gas).
+- **The pool** (`tiles`) is sized for the path's length over `hold` plus two or three `fade` at the `moving` speed;
+  when every tile plays, the one fed longest ago is taken again (its material vanishes).
+- **Stop and spawn**: a stop leaves the trail to fade where it is; a spawn starts a new path (§2).
+
+**What they cost.** Each entry alone on a 960 x 540 stage, moved at its `moving` velocity, one thread of the busy
+shared machine (two runs, medians of 120 frames, step and picture): the stage alone took 9 to 11 ms a frame; on top of
+it `rocket_trail` 12 to 20 ms, `comet_trail` 6 to 13, `carried_torch` 7 to 12 (its flame included) and
+`vehicle_dust_wake` 2 to 7. The weather entries cost little: over 300 frames rain added 0.9 ms a frame and leaves 0.2
+to 0.6 ms. A trail is as dear as the tiles it keeps playing, steps and drawing; a faster source, a longer `hold` or
+`fade`, or a wider `radius` keep more.
+
+**Testing.** `Trails.*` (`tests/test_engine_features.cpp`, no data: a small model made in the test): tiles on a grid
+in the world along the path, material that stays where it was left and fades, a short pool taking the tiles fed
+longest ago, the same frames on any number of threads (a script and a stage's instance moved every frame), the
+trail's velocity and the checker's messages, and a stage's instance moved every frame leaving its trail behind;
+`nvfx_alloc_test` moves a trail every frame (with a jump, a stop and a new spawn) without allocating;
+`nvfx_gallery --check` moves every moving entry; the frozen keyframes of `rocket_trail` and `vehicle_dust_wake`
+(`neuralfx.LibraryKeyframesFrozen`, 2 threads: a move acts a frame later with overlap, so the keyframes depend on
+overlap, not on the number of threads); the Godot test moves a rocket trail every frame and compares its frame with
+`nvfx_gallery --shot`'s, byte for byte.
+
+**Writing a new trail entry**: pick a medium without a learned source of its own (the explosion or dust started late;
+or quiet a fire's or smoke's source with `quiet`), a tile `width` about the size of what it leaves a second or two
+after, `radius` about the source's size, a deposit that scales with speed, `hold` and `fade` for how long it should
+stay, a pool big enough, then look at it moving (`nvfx_gallery --sheet`, `--video`, `--shot ... --spawn
+NAME@X,Y,SCALE,AT,VX,VY`), and at a still source and a fast one.

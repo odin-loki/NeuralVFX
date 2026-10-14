@@ -228,7 +228,7 @@ measuring. Check the result in play: `get_stats()->jobs_ms` against `planned_ms`
 
 ## 8. Version and ABI
 
-`nvfx_version(&features)` returns the library's `NVFX_VERSION` (3: packs and `nvfx_version`), which changes whenever
+`nvfx_version(&features)` returns the library's `NVFX_VERSION` (4: engine layers and trails; 3: packs and `nvfx_version`), which changes whenever
 a call or a public struct changes: an engine that loads `libnvfx.so` / `nvfx.dll` checks it against the header's
 (`nvfx::version().matches_headers()`). `features` says what the build holds (`NVFX_FEATURE_SCENE`, `_LIBRARY`,
 `_MANAGER`, `_PACK`, `_SHARED`) and what this CPU runs (`_AVX2`, `_AVX512`, `_VNNI`). The headers compile as C99 and
@@ -240,10 +240,10 @@ as C++ (with `-fno-exceptions -fno-rtti` for the wrapper). On 64-bit platforms (
 |---|---:|---|---:|---|---:|
 | `nvfx_effect_info` | 80 | `nvfx_library_file` | 16 | `nvfx_manager_desc` | 88 |
 | `nvfx_scene_effect` | 16 | `nvfx_library_desc` | 32 | `nvfx_manager_model_desc` | 52 |
-| `nvfx_scene_input` | 16 | `nvfx_library_effect` | 80 | `nvfx_spawn_desc` | 72 |
+| `nvfx_scene_input` | 16 | `nvfx_library_effect` | 88 | `nvfx_spawn_desc` | 72 |
 | `nvfx_scene_desc` | 80 | `nvfx_library_param` | 32 | `nvfx_manager_picture` | 56 |
 | `nvfx_scene_error` | 1032 | `nvfx_stage_room` | 16 | `nvfx_manager_stats` | 184 |
-| `nvfx_scene_info` | 80 | `nvfx_stage_desc` | 88 | `nvfx_pack_desc` | 40 |
+| `nvfx_scene_info` | 88 | `nvfx_stage_desc` | 88 | `nvfx_pack_desc` | 40 |
 | `nvfx_scene_fields` | 16 | `nvfx_stage_fx_info` | 28 | `nvfx_pack_info` | 48 |
 | `nvfx_scene_module_info` | 60 | enums, `nvfx_fx`, `nvfx_handle` | 4 | `nvfx_pack_member` | 48 |
 

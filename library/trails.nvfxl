@@ -1,0 +1,66 @@
+# Trails (docs/LIBRARY.md §9): effects that move. A trail's source follows the instance, which the game moves every
+# frame (nvfx_stage_move); it leaves material in tiles of a learned effect that stay where they are in the world, fade
+# once the source has gone on, and are taken again further along (docs/COMPOSE.md §5.3). The learned models drop thin
+# material, so what a source leaves grows with its speed (about the same amount per world pixel of its path). The
+# trails' media are the explosion and dust models started empty late in their life: neither has a learned source left
+# then, so nothing appears in a tile but what the source puts there. A trail's tiles keep their size at any scale: the
+# scale changes the source's footprint and the parts that follow the anchor.
+
+look exhaust     = shader, heat_scale 1.2, emission 2.4, emission_power 2, soot_density 2.6, soot_albedo 0.55, sky 0.75,
+                   shadow 0.3, scene_light 0.9, relief 1.2, tint (0.9, 0.9, 0.92)                 # white smoke, hot behind the rocket
+look torch_smoke = shader, heat_scale 0.5, emission 2.2, emission_power 2.5, soot_density 3, soot_albedo 0.35, sky 0.55,
+                   shadow 0.3, scene_light 1.1, relief 1.2, tint (0.82, 0.8, 0.79)                # hot gas that glows, then grey smoke
+look comet       = shader, heat_scale 0.8, emission 3, emission_power 2, soot_density 0.7, soot_albedo 0.6, sky 0.3,
+                   shadow 0.2, scene_light 0.5, relief 0.8, tint (0.7, 0.8, 1), hue 195              # cyan glow, a recolour
+
+entry rocket_trail, category trails, size 900 x 420, anchor centre, loop, show 3, moving (280, -90),
+      about "A rocket's trail: a white-hot exhaust at the source and smoke left behind it in the world, billowing, spreading and fading (move it every frame)"
+param density = 0.7, range (0.2, 1), about "how much smoke"
+param fire = 0.6, range (0, 1), about "how hot the exhaust: the glowing part just behind the rocket"
+let speed = hypot(smoke.vx, smoke.vy)
+let pace = min(2, speed / 260)
+trail smoke = explosion, size 64, width 192, band 8, tiles 20, at (X, Y), look exhaust, age 3, hold 1.2, fade 1.5,
+      soot 0.6 * density * pace, heat (0.05 + 0.3 * fire) * pace, radius 10 * scale, kick -0.2, controls (0.5, 0.5, 0.5),
+      seed 701
+emit glow, at (X, Y), radius 5 * scale, colour (1, 0.92, 0.75), brightness 3.5
+emit glow, at (X, Y), radius 15 * scale, colour (1, 0.55, 0.25), brightness 0.6
+field glare = lamp, at (X, Y), radius 60 * scale, strength 1.1, colour (1, 0.7, 0.4)
+at 0, repeat:
+  burst at (X, Y), radius 2 * scale, embers 0, sparks 1, speed 260 * scale, direction (-smoke.vx, 0.01 - smoke.vy), cone 35,
+        if speed > 40
+
+entry vehicle_dust_wake, category trails, size 900 x 220, anchor base, loop, show 3, moving (220, 0),
+      about "A vehicle's dust wake: dust thrown up behind it as it drives, rolling out low along the ground and settling where it was left (move it every frame)"
+param density = 0.7, range (0.2, 1), about "how dusty the ground"
+param height = 0.5, range (0, 1), about "how high the dust is thrown"
+let speed = abs(dust.vx)
+let back = clamp(dust.vx / 60, -1, 1)
+trail dust = dust, size 64, width 192, band 8, tiles 16, rows 1, sink 0.03, at (X - 34 * scale * back, Y - 8 * scale),
+      look dirt, age 3, hold 1.5, fade 2, soot 0.55 * density * min(1.5, speed / 220) * (1 + 0.8 * noise(X / 45, 0.5, 0.3 * t)),
+      radius 16 * scale, kick -0.3,
+      velocity (0, -1 - 3 * height), controls (0.6, 0.5, 0.4), seed 721
+
+entry carried_torch, category trails, size 700 x 320, anchor centre, loop, show 3, moving (180, 0),
+      about "A carried torch: its flame leans away from the way it moves, its hot gas and smoke stream out behind it and stay in the world; its anchor is the torch's head (move it every frame)"
+param intensity = 0.65, range (0.3, 1), about "how big it burns"
+let lean = clamp(smoke.vx / 900, -0.18, 0.18)
+let pace = min(1.2, abs(smoke.vx) / 200)
+module flame = fire, size 128, width 130 * scale, at (X, Y), sink 0.06, feather 0.15, look flame, start 0, seed 711,
+               controls (0.65, 0.5, 0.6), intensity intensity, wind 0.5 - lean
+trail smoke = explosion, size 64, width 160, band 8, tiles 14, at (X - 70 * lean * scale, Y - 52 * scale), look torch_smoke,
+      age 3, hold 1, fade 1.4, soot 0.3 * intensity * (0.4 + pace) * (1 + 0.9 * noise(X / 30, 1.5, t)),
+      heat 0.12 * intensity * (0.5 + pace), radius 8 * scale, velocity (0, -1.2), controls (0.5, 0.5, 0.6), seed 712
+emit embers, on flame, tries 1, chance 0.35, spread 12 * scale
+field warm = lamp, at (X, Y - 30 * scale), radius 60 * scale, strength 0.7 * intensity, colour (1, 0.6, 0.25)
+
+entry comet_trail, category trails, size 900 x 360, anchor centre, loop, show 3, moving (300, 40),
+      about "A comet or a spell's trail: a ball of cyan plasma that leaves a glowing tail behind it, cooling and fading (the orb and the explosion's tail, recoloured; move it every frame)"
+param intensity = 0.7, range (0.3, 1), about "how bright"
+let speed = hypot(tail.vx, tail.vy)
+module head = orb, size 64, width 80 * scale, at (X, Y + 40 * scale), feather 0.1, start 0, seed 731,
+              controls (0.5, 0.5, 0.5), intensity 0.3 + 0.4 * intensity, glow (0.4, 0.9, 1.6)
+trail tail = explosion, size 64, width 192, band 8, tiles 20, at (X, Y), look comet, age 3, hold 0.5, fade 0.8,
+      heat 0.35 * intensity * min(2, speed / 300), soot 0.12 * min(2, speed / 300), radius 9 * scale, kick -0.1,
+      controls (0.5, 0.5, 0.5), seed 732
+emit glow, at (X, Y), radius 2.5 * scale, colour (0.7, 0.92, 1), brightness 2.5, count 6, spread 16 * scale, rate 2, seed 73
+field shine = lamp, at (X, Y), radius 70 * scale, strength 0.9 * intensity, colour (0.4, 0.75, 1)

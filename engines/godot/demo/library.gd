@@ -1,18 +1,24 @@
 # The effect library in a window (docs/LIBRARY.md): a NeuralVFXStage with room for a score of the catalogue's effects.
 # Left and right choose an effect, a click spawns it under the mouse (looping ones play until a right click stops the
-# last), and the label says what it is. Run: godot --path engines/godot/demo res://library.tscn
+# last; a moving one, a trail, then follows the mouse), and the label says what it is. A comet flies a loop over the
+# scene all the while, moved every frame: its tail stays in the world behind it. Run:
+# godot --path engines/godot/demo res://library.tscn
 extends Node2D
 
 const Paths = preload("res://paths.gd")
 const EFFECTS := ["campfire", "torch", "bonfire", "witch_fire", "steam_vent", "chimney_smoke", "grenade", "large_blast",
 		"magic_burst", "portal", "healing_circle", "electric_arc", "lightning_strike", "muzzle_flash", "fireflies", "sparks",
-		"flamethrower", "dust_impact", "ground_fog", "plasma_orb", "fire_whirl", "dust_devil"]
+		"flamethrower", "dust_impact", "ground_fog", "plasma_orb", "fire_whirl", "dust_devil", "rocket_trail",
+		"carried_torch", "vehicle_dust_wake", "comet_trail", "rain", "snow", "falling_leaves"]
 
 var stage := NeuralVFXStage.new()
 var sprite := Sprite2D.new()
 var label := Label.new()
 var chosen := 0
 var spawned: Array[int] = []
+var comet := 0      # flies a loop, moved every frame
+var follower := 0   # the last moving effect spawned: it follows the mouse
+var clock := 0.0
 
 
 func _ready() -> void:
@@ -33,9 +39,16 @@ func _ready() -> void:
 	add_child(label)
 	if not stage.is_loaded():
 		label.text = stage.get_error()
+	else:
+		comet = stage.spawn("comet_trail", Vector2(640, 200), 0.9)
 
 
-func _process(_delta: float) -> void:
+func _process(delta: float) -> void:
+	clock += delta
+	if comet != 0:  # a loop over the scene: the comet moves, its tail stays where it was left
+		stage.move_fx(comet, Vector2(640 + 420 * cos(0.6 * clock), 230 + 120 * sin(1.2 * clock)))
+	if follower != 0:
+		stage.move_fx(follower, get_local_mouse_position())
 	if stage.is_loaded():
 		var info := stage.get_effect_info(EFFECTS[chosen])
 		label.text = "%s (%s): %s\nleft/right: choose, click: spawn, right click: stop the last" % [info.name, info.category, info.description]
@@ -52,5 +65,7 @@ func _unhandled_input(event: InputEvent) -> void:
 			var fx: int = stage.spawn(EFFECTS[chosen], get_local_mouse_position())
 			if fx != 0:
 				spawned.push_back(fx)
+				if stage.get_effect_info(EFFECTS[chosen]).moving != Vector2.ZERO:
+					follower = fx
 		elif event.button_index == MOUSE_BUTTON_RIGHT and not spawned.is_empty():
 			stage.stop(spawned.pop_back())

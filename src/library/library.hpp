@@ -48,6 +48,8 @@ struct Entry {
   bool loop = true;                 // plays until stopped; else a one-shot of `duration` seconds
   float duration = 0.f;
   float show = 1.f;                 // a moment that shows it well, seconds after the spawn (the gallery's)
+  float move_x = 0.f, move_y = 0.f; // a moving effect (`moving (vx, vy)`): the velocity the gallery shows it at, world
+                                    // pixels a second at scale 1 (0, 0: it stands where it is spawned)
   std::vector<Param> params;
   std::vector<std::string> effects;   // the learned effects it plays (names of `effect` statements), in order
   std::vector<std::string> elements;  // the procedural elements it uses (embers, lamp, arc, shock, ...), in order

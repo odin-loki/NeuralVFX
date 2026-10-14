@@ -1,0 +1,50 @@
+# Trails and weather (docs/COMPOSE.md §5.3 and §4.6), written only as a script:
+#
+#   nvfx_scene_script --script examples/scenes/weather.nvfxs --models $NEURALVFX_DATA/library/models --out weather.mp4
+#
+# Night. A smoke column rises on the left; rain falls over its right half from 1.5 s and washes the smoke there out. A
+# campfire burns on the right under falling snow, which melts in its hot air and is lifted by it. A rocket crosses the
+# sky, leaving smoke that stays where it was left and fades; a truck drives along the ground, leaving a dust wake. The
+# effects are the library's (fire, smoke, explosion and dust: library/models.nvfxl's files).
+
+scene      size 1280 x 720, fps 30, length 8 s, ground 630
+bus        at (-160, -360), size 1600 x 1080, cell 8
+particles  capacity 20000, flow 0.9
+keyframes  1, 3, 5, 7.5
+
+effect fire      = "fire.nvfx"
+effect smoke     = "smoke.nvfx", swirl 1.4, swirl_scale 9
+effect explosion = "explosion.nvfx", swirl 2.2, swirl_scale 9, contrast 1
+effect dust      = "dust.nvfx"
+
+look smoke   = shader, heat_scale 2.5, emission 0.6, emission_power 3, soot_density 4, soot_albedo 0.5, sky 0.85,
+               shadow 0.3, scene_light 0.9, relief 1.2, tint (0.9, 0.9, 0.93)
+look exhaust = shader, heat_scale 1.2, emission 2.4, emission_power 2, soot_density 2.6, soot_albedo 0.55, sky 0.75,
+               shadow 0.3, scene_light 0.9, relief 1.2, tint (0.9, 0.9, 0.92)
+look dirt    = shader, emission 0, soot_density 2.2, soot_albedo 0.6, sky 0.45, shadow 0.4, scene_light 1.2, relief 3,
+               tint (0.8, 0.62, 0.42)
+
+# the smoke column, and the rain that thins it (over its right half only, from x = 300: compare the two halves)
+module column = smoke, size 256, width 560, at (300, ground), sink 0.05, feather 0.1, look smoke, start 1, seed 31,
+                controls (0.8, 0.5, 0.5), shards 8
+emit rain, in (300, -40), size 400 x 670, density 5, wind (40, 0), wash 0.8, from 1.5, seed 7
+
+# the campfire under snow: the flakes ride its rising air and melt where it is hot
+module camp = fire, size 128, width 200, at (1010, ground), sink 0.08, start 0, seed 41, controls (0.8, 0.5, 0.5), shards 8
+emit embers, on camp, tries 2, chance 0.5, spread 50
+field warm = lamp, at (1010, 600), radius 120, strength 0.8, colour (1, 0.6, 0.25)
+emit snow, in (760, -40), size 520 x 670, density 2.5, wind (-20, 0), radius 2.2, melt 0.15, seed 8
+
+# a rocket across the sky, and a truck along the ground: their trails stay in the world behind them
+let rx = -60 + 230 * t
+let ry = 330 - 40 * t + 25 * sin(1.5 * t)
+trail exhaust = explosion, size 64, width 192, band 8, tiles 24, at (rx, ry), look exhaust, age 3, hold 1.2, fade 1.5,
+      soot 0.55, heat 0.2, radius 9, kick -0.2, seed 701
+emit glow, at (rx, ry), radius 5, colour (1, 0.92, 0.75), brightness 3.5
+field glare = lamp, at (rx, ry), radius 60, strength 1.1, colour (1, 0.7, 0.4)
+let tx = -80 + 210 * t
+trail tracks = dust, size 64, width 192, band 8, tiles 16, rows 1, sink 0.03, at (tx - 30, ground - 8), look dirt, age 3,
+      hold 1.5, fade 2, soot 0.5 * (1 + 0.8 * noise(tx / 45, 0.5, 0.3 * t)), radius 16, kick -0.3, velocity (0, -2.5), seed 721
+
+light   gain 0.14
+frame   exposure 1.2, fade smooth(t / 0.4) * smooth((length - t) / 0.5), haze 1, bloom 1

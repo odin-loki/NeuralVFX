@@ -61,7 +61,7 @@ struct Code {
 
 // Slots: values the runner keeps up to date and expressions read.
 enum : int { s_t, s_length, s_fps, s_ground, s_land_x, s_land_temp, s_first };
-enum : int { m_x, m_y, m_started, m_active, m_slots };  // per module
+enum : int { m_x, m_y, m_started, m_active, m_vx, m_vy, m_slots };  // per module (vx, vy: a trail's source)
 
 struct Env {
   float* slots = nullptr;
@@ -171,7 +171,8 @@ enum P : int {
   p_x, p_y, p_x1, p_y1, p_w, p_h, p_fraction, p_top, p_heat, p_soot, p_gain, p_from, p_until, p_seed, p_speed, p_decay,
   p_amp, p_width, p_radius, p_glow, p_embers, p_debris, p_count, p_tries, p_chance, p_spread, p_level, p_strength,
   p_soft, p_damping, p_swirl, p_steam, p_amount, p_scale, p_rate, p_u, p_v, p_core, p_weight, p_if, p_start,
-  p_cr, p_cg, p_cb, p_bright, p_jitter, p_branches, p_squash, p_sparks, p_dx, p_dy, p_cone, kParams
+  p_cr, p_cg, p_cb, p_bright, p_jitter, p_branches, p_squash, p_sparks, p_dx, p_dy, p_cone,
+  p_density, p_wu, p_wv, p_flowk, p_wash, p_melt, p_glowing, kParams
 };
 using Params = std::array<Code, kParams>;
 
@@ -205,6 +206,15 @@ struct ModC {
   std::uint64_t seed = 1;
   bool declared_controls = false;
   int slot = 0;
+  // A trail (docs/COMPOSE.md §5.3): `tiles` tiles laid in the world along its source's path (ax, ay).
+  bool trail = false;
+  struct TrailC {
+    int count = 8, band = 8, rows = 0;  // rows 0: any
+    float age = 3.f, hold = 1.f, fade = 1.5f, jump = 0.f, base = 0.f;
+    bool has_base = false, has_quiet = false;
+    std::array<int, 4> quiet{};
+    Code heat, soot, radius, kick, u, v, on;
+  } tr;
 };
 
 struct ActC {
@@ -415,6 +425,7 @@ class Compiler {
 
   void scene(const Statement& s);
   void module(const Statement& s, ModC& m);
+  void trail(const Statement& s, ModC& m);
   void field(const Statement& s);
   void emitter(const Statement& s);
   void rule(const Statement& s, RuleC& r);
@@ -489,13 +500,17 @@ void Compiler::emit(const Expr& e, const Ctx& c, Code& code, std::vector<std::st
       if (e.member == "y") return slot(m.slot + m_y, true);
       if (e.member == "started") return slot(m.slot + m_started, true);
       if (e.member == "active") return slot(m.slot + m_active, true);
+      if (e.member == "vx" || e.member == "vy") {
+        if (!m.trail) fail(e.pos, std::format("only a trail has a velocity ({}.{}): '{}' is a module", e.name, e.member, e.name));
+        return slot(m.slot + (e.member == "vx" ? m_vx : m_vy), true);
+      }
       if (e.member == "age") {
         slot(s_t, true);
         slot(m.slot + m_started, true);
         op(Op::sub);
         return;
       }
-      fail(e.pos, std::format("a module has no '{}' (x, y, started, age or active)", e.member));
+      fail(e.pos, std::format("a module has no '{}' (x, y, started, age or active; a trail also vx and vy)", e.member));
     }
     case Expr::Kind::unary:
       emit(e.args[0], c, code, open);
@@ -668,6 +683,7 @@ void Compiler::module(const Statement& s, ModC& m) {
     m.over = module_index(p->value.names[0], p->value.pos);
     if (m.over >= self) fail(p->value.pos, std::format("'{}' must be declared before '{}' to be under it", p->value.names[0], s.name));
     const ModC& o = prog_.modules[zs(m.over)];
+    if (o.trail) fail(p->value.pos, std::format("'{}' is a trail: its tiles move with its source, so nothing can be over them", o.name));
     for (const char* k : {"tiles", "band", "width", "at", "sink", "size"})
       if (s.prop(k)) fail(s.prop(k)->pos, std::format("'{}' comes from '{}' (the module this one is over)", k, o.name));
     m.tiled = o.tiled;
@@ -780,6 +796,122 @@ void Compiler::module(const Statement& s, ModC& m) {
   }
 }
 
+constexpr std::string_view kTrailKeys[] = {"size",  "width", "band", "tiles",  "at",     "sink",     "base", "rows",  "look",
+                                           "controls", "opacity", "seed", "age", "hold", "fade",     "heat",     "soot", "radius",
+                                           "kick",  "velocity", "jump", "quiet", "feather", "glow", "if"};
+
+void Compiler::trail(const Statement& s, ModC& m) {
+  m.trail = true;
+  for (std::size_t i = 0; i < prog_.effects.size(); ++i)
+    if (prog_.effects[i].name == s.kind) m.effect = static_cast<int>(i);
+  if (m.effect < 0) {
+    std::vector<std::string> effects;
+    for (const EffectC& e : prog_.effects) effects.push_back(e.name);
+    const std::string hint = did_you_mean(s.kind, effects);
+    fail(s.pos, hint.empty() ? std::format("unknown effect '{}' (declare it with 'effect {} = \"FILE\"')", s.kind, s.kind) : std::format("unknown effect '{}'{}", s.kind, hint));
+  }
+  ModC::TrailC& T = m.tr;
+  const Prop* size = s.prop("size");
+  if (!size) fail(s.pos, std::format("trail '{}' needs a size (pixels of its tiles, as in 'size 64')", s.name));
+  m.size = integer(size->value.exprs[0], "the size", 8, 4096);
+  m.has_size = true;
+  m.width = static_cast<float>(m.size);
+  if (const Prop* p = s.prop("width")) {
+    m.width = constant(p->value.exprs[0], "the width of a trail's tiles");
+    if (!(m.width > 0.f)) fail(p->pos, "the width must be positive");
+  }
+  m.has_width = true;
+  if (const Prop* p = s.prop("band")) T.band = integer(p->value.exprs[0], "the band", 0);
+  if (const Prop* p = s.prop("tiles")) T.count = integer(p->value.exprs[0], "the number of a trail's tiles", 1, 64);
+  if (const Prop* p = s.prop("rows")) T.rows = integer(p->value.exprs[0], "the rows of tiles", 1);
+  const Prop* at = s.prop("at");
+  if (!at) fail(s.pos, std::format("trail '{}' needs its source: 'at (x, y)', which may move", s.name));
+  {
+    Ctx c;
+    c.what = "the trail's source";
+    m.ax = code(at->value.exprs[0], c);
+    m.ay = code(at->value.exprs[1], c);
+    m.has_at = true;
+  }
+  if (const Prop* p = s.prop("sink")) m.sink = constant(p->value.exprs[0], "the sink");
+  if (const Prop* p = s.prop("base")) {
+    T.base = constant(p->value.exprs[0], "the base");
+    T.has_base = true;
+  }
+  if (const Prop* p = s.prop("feather")) m.feather = constant(p->value.exprs[0], "the feather");
+  const auto seconds = [&](const char* key, float& v, bool positive) {
+    if (const Prop* p = s.prop(key)) {
+      v = constant(p->value.exprs[0], std::format("'{}'", key));
+      if (positive ? !(v > 0.f) : !(v >= 0.f)) fail(p->pos, std::format("'{}' must be {}", key, positive ? "positive" : "zero or more"));
+    }
+  };
+  seconds("age", T.age, false);
+  seconds("hold", T.hold, false);
+  seconds("fade", T.fade, true);
+  seconds("jump", T.jump, true);
+  if (const Prop* p = s.prop("quiet")) {
+    for (int i = 0; i < 4; ++i) T.quiet[zs(i)] = integer(p->value.exprs[zs(i)], "a cell", 0, 4096);
+    T.has_quiet = true;
+  }
+  if (const Prop* p = s.prop("glow")) {
+    if (p->value.exprs.size() != 3) fail(p->pos, "a glow has three values (red, green, blue)");
+    for (int i = 0; i < 3; ++i) {
+      m.glow[zs(i)] = constant(p->value.exprs[zs(i)], "a glow");
+      if (!(m.glow[zs(i)] >= 0.f)) fail(p->value.exprs[zs(i)].pos, "a glow's colour cannot be negative");
+    }
+    m.glows = true;
+  }
+  if (const Prop* p = s.prop("look")) {
+    const Value& v = p->value;
+    if (v.names[0] == "learned") {
+      if (v.names.size() > 1) fail(v.pos, "the learned renderer cannot be blended with a shader look");
+    } else {
+      m.look_a = look_index(v.names[0], v.pos);
+      if (v.names.size() > 1) {
+        m.look_b = look_index(v.names[1], v.pos);
+        Ctx c;
+        c.what = "the look's blend";
+        m.look_w = code(v.exprs[0], c);
+      }
+    }
+  }
+  if (const Prop* p = s.prop("controls")) {
+    for (const Expr& e : p->value.exprs) m.controls.push_back(constant(e, "a control"));
+    m.declared_controls = true;
+  }
+  if (const Prop* p = s.prop("opacity")) {
+    Ctx c;
+    c.what = "the opacity";
+    m.opacity = code(p->value.exprs[0], c);
+  }
+  if (const Prop* p = s.prop("seed")) m.seed = static_cast<std::uint64_t>(integer(p->value.exprs[0], "the seed", 0, 1 << 24));
+  Ctx c;
+  const auto expr = [&](const char* key, Code& out) {
+    if (const Prop* p = s.prop(key)) {
+      const std::string what = std::format("'{}'", key);
+      c.what = what;
+      out = code(p->value.exprs[0], c);
+    }
+  };
+  expr("heat", T.heat);
+  expr("soot", T.soot);
+  expr("radius", T.radius);
+  expr("kick", T.kick);
+  expr("if", T.on);
+  if (const Prop* p = s.prop("velocity")) {
+    c.what = "the velocity";
+    T.u = code(p->value.exprs[0], c);
+    T.v = code(p->value.exprs[1], c);
+  }
+  for (const Prop& p : s.props) {  // the effect's controls, by name
+    if (std::ranges::find(kTrailKeys, p.key) != std::end(kTrailKeys)) continue;
+    Ctx cc;
+    cc.what = "a control";
+    m.named.push_back({p.key, p.pos, code(p.value.exprs[0], cc)});
+    m.declared_controls = true;
+  }
+}
+
 void Compiler::field(const Statement& s) {
   FieldC f;
   f.name = s.name;
@@ -884,6 +1016,20 @@ void Compiler::emitter(const Statement& s) {
     e.p[p_y] = code(a->value.exprs[1], c);
     e.p[p_x1] = code(a->value.exprs[2], c);
     e.p[p_y1] = code(a->value.exprs[3], c);
+  } else if (s.kind == "rain" || s.kind == "snow" || s.kind == "ash" || s.kind == "leaves") {  // procedural weather
+    if (s.kind == "rain") only(s, {"in", "size", "density", "wind", "radius", "colour", "brightness", "flow", "wash", "seed", "from", "until", "if"}, what);
+    else if (s.kind == "snow") only(s, {"in", "size", "density", "wind", "radius", "colour", "brightness", "flow", "melt", "seed", "from", "until", "if"}, what);
+    else if (s.kind == "ash") only(s, {"in", "size", "density", "wind", "radius", "colour", "brightness", "flow", "glowing", "seed", "from", "until", "if"}, what);
+    else only(s, {"in", "size", "density", "wind", "radius", "colour", "brightness", "flow", "seed", "from", "until", "if"}, what);
+    need("in");
+    need("size");
+    Ctx c;
+    take(e.p, s, "density", p_density, kParams, c);
+    take(e.p, s, "wind", p_wu, p_wv, c);
+    take(e.p, s, "flow", p_flowk, kParams, c);
+    take(e.p, s, "wash", p_wash, kParams, c);
+    take(e.p, s, "melt", p_melt, kParams, c);
+    take(e.p, s, "glowing", p_glowing, kParams, c);
   } else if (s.kind == "ring") {  // procedural: a glowing ring (an ellipse when squashed: a shock ring on the ground)
     only(s, {"at", "radius", "squash", "colour", "width", "brightness", "from", "until", "if"}, what);
     need("at");
@@ -941,9 +1087,11 @@ ActC Compiler::action(const Statement& a, const Ctx& c, bool every, int limit) {
   } else if (k == "hand_over") {
     const ModC& f = prog_.modules[zs(out.subjects[0])];
     const ModC& t = prog_.modules[zs(out.targets[0])];
+    if (f.trail || t.trail) fail(a.pos, std::format("'{}' is a trail: its tiles cannot be handed over", f.trail ? f.name : t.name));
     if (f.tiled != t.tiled || f.cols != t.cols || f.rows != t.rows) fail(a.pos, std::format("'{}' and '{}' must have the same tiles to hand over", f.name, t.name));
   } else if (k == "start") {
     const ModC& m = prog_.modules[zs(out.subjects[0])];
+    if (m.trail) fail(a.pos, std::format("'{}' is a trail: its tiles start by themselves where its source goes", m.name));
     if (const Prop* p = a.prop("from")) out.from = integer(p->value.exprs[0], "the start point", 0);
     if (const Prop* p = a.prop("in")) {
       if (!m.tiled) fail(p->pos, "'in (column, row)' picks the tile that starts from the start point: only for tiles");
@@ -1042,10 +1190,11 @@ Program Compiler::compile() {
       declare(st.name, st.name_pos, "input");
       input_slots_[st.name] = prog_.slots;
       prog_.inputs.push_back({st.name, st.pos, prog_.slots++, 0.f});
-    } else if (w == "module") {
+    } else if (w == "module" || w == "trail") {
       declare(st.name, st.name_pos, "module");
       ModC m;
       m.name = st.name;
+      m.trail = w == "trail";  // (known before any expression is compiled: a trail's velocity)
       m.pos = st.pos;
       m.slot = prog_.slots;
       prog_.slots += m_slots;
@@ -1108,6 +1257,8 @@ Program Compiler::compile() {
       ++look_i;
     } else if (st.keyword == "module") {
       module(st, prog_.modules[module_i++]);
+    } else if (st.keyword == "trail") {
+      trail(st, prog_.modules[module_i++]);
     }
   }
   // 3. settings that may change over time
@@ -1195,9 +1346,10 @@ EffectLoader load_from(const std::filesystem::path& dir) {
 namespace {
 
 struct ModR {
-  std::vector<Module*> tiles;  // row by row from the bottom, each row left to right
+  std::vector<Module*> tiles;  // row by row from the bottom, each row left to right (a trail: its pool of tiles)
   float W = 0, Wd = 0, stride = 0, ax = 0, ay = 0;
   int group = -1;
+  int trail = -1;          // a trail: its index in Impl::trails (ax, ay: its source)
   std::vector<int> named;  // the control index of each named setting
 };
 
@@ -1220,6 +1372,9 @@ struct Scene::Impl {
   std::unique_ptr<Pool> pool;
   std::unique_ptr<PictureThread> picture;  // Options::overlap
   std::unique_ptr<StepScratch> step_scratch;  // Options::shared_scratch
+  std::vector<std::unique_ptr<Trail>> trails;  // trail statements, in order
+  std::vector<char> emit_on;                   // per emitter: it emitted in the last frame (weather fills its region when it starts)
+  std::vector<Deposit> deposits;               // what each trail's source leaves this frame
   std::vector<Shock> shocks;
   std::vector<std::array<float, 4>> scorch;
   std::vector<const Code*> scorch_glow;
@@ -1249,6 +1404,15 @@ struct Scene::Impl {
   void sync(int mi) {
     const ModR& r = mods[zs(mi)];
     const ModC& mc = prog.modules[zs(mi)];
+    if (r.trail >= 0) {  // a trail: where its source is, and whether a tile plays
+      const Trail& T = *trails[zs(r.trail)];
+      slots[zs(mc.slot + m_x)] = r.ax;
+      slots[zs(mc.slot + m_y)] = r.ay;
+      slots[zs(mc.slot + m_active)] = T.active() > 0 ? 1.f : 0.f;
+      slots[zs(mc.slot + m_vx)] = T.vx();
+      slots[zs(mc.slot + m_vy)] = T.vy();
+      return;
+    }
     const Module* m0 = r.tiles[0];
     slots[zs(mc.slot + m_x)] = mc.tiled ? (r.ax - 0.5f * r.Wd) + 0.5f * r.Wd : m0->at.x + 0.5f * r.W;
     slots[zs(mc.slot + m_y)] = r.ay;
@@ -1261,6 +1425,10 @@ struct Scene::Impl {
     const ModC& mc = prog.modules[zs(mi)];
     r.ax = X;
     r.ay = Y;
+    if (r.trail >= 0) {  // a trail's source: its tiles stay where they are
+      sync(mi);
+      return;
+    }
     if (mc.tiled) {
       const float left = X - 0.5f * r.Wd, bottom = Y + mc.sink * r.W - r.W;
       for (int row = 0; row < mc.rows; ++row) {
@@ -1299,6 +1467,11 @@ struct Scene::Impl {
   }
 
   void set_active(int mi, bool on) {
+    if (const int ti = mods[zs(mi)].trail; ti >= 0) {  // a trail is stopped by clearing it (and started by its source)
+      if (!on) trails[zs(ti)]->clear();
+      sync(mi);
+      return;
+    }
     for (Module* m : mods[zs(mi)].tiles) m->active = on;
     sync(mi);
   }
@@ -1440,7 +1613,7 @@ struct Scene::Impl {
   }
 
   // Emitters, each a transcription of the hand-written scene's (random numbers drawn in the order it drew them).
-  void emit(const EmitC& e, float t) {
+  void emit(const EmitC& e, std::size_t ei, float t) {
     Particles& P = *parts;
     if (e.kind == "sparks") {  // a fuse: a point running from one end to the other over [from, until)
       const float t0 = eval_or(e.p[p_from], 0.f), t1 = eval_or(e.p[p_until], prog.length);
@@ -1458,8 +1631,12 @@ struct Scene::Impl {
       }
       return;
     }
-    if (!window(e.p, t)) return;
+    if (!window(e.p, t)) {
+      emit_on[ei] = 0;
+      return;
+    }
     if (e.kind == "arc" || e.kind == "ring" || e.kind == "glow") return glows(e, t);
+    if (e.kind == "rain" || e.kind == "snow" || e.kind == "ash" || e.kind == "leaves") return weather(e, ei, t);
     const int tries = static_cast<int>(eval_or(e.p[p_tries], e.kind == "embers" ? 2.f : 40.f));
     if (e.kind == "embers") {  // embers shed by burning modules, from their base
       const float chance = eval_or(e.p[p_chance], 0.6f), spread = eval_or(e.p[p_spread], 40.f);
@@ -1555,6 +1732,73 @@ struct Scene::Impl {
       const float ox = spread * value_noise(7.31f * k, rate * t, 0.5f, seed), oy = spread * value_noise(3.17f * k + 50.f, rate * t, 1.5f, seed);
       const float f = 0.55f + 0.45f * value_noise(2.17f * k, 3.f * rate * t, 9.5f, seed + 1);
       P.spawn_glow(x + ox, y + oy, x + ox, y + oy, radius, col, bright * f, life, true, true);
+    }
+  }
+
+  // Weather (procedural, not learned): rain, snow, ash, leaves or petals falling through the region `in`, `size`, with
+  // `density` of them in each 100 x 100 world pixels at once, drifting with the `wind` (world pixels a second) and the
+  // bus's flow (`flow` of it), fluttering; the region is filled at once when the emitter starts, then fed from its top
+  // edge (and from upwind of it). Their random numbers come from a hash of the emitter, its seed and the frame, not from
+  // the particles' generator, so the rest of the scene draws the same numbers with or without them. Rain washes the
+  // modules it falls on: `wash` of their soot a second (and half that of their heat).
+  void weather(const EmitC& e, std::size_t ei, float t) {
+    Particles& P = *parts;
+    struct Def {
+      Kind kind;
+      float fall, size, density, alpha, flow, freq;
+      std::array<float, 3> colour;
+    };
+    const Def d = e.kind == "rain"   ? Def{Kind::rain, 850.f, 0.8f, 3.f, 0.35f, 0.15f, 0.f, {0.55f, 0.6f, 0.7f}}
+                  : e.kind == "snow" ? Def{Kind::snow, 55.f, 1.6f, 1.5f, 0.9f, 1.f, 2.f, {0.85f, 0.87f, 0.92f}}
+                  : e.kind == "ash"  ? Def{Kind::ash, 32.f, 1.1f, 1.f, 0.85f, 1.f, 1.5f, {0.3f, 0.28f, 0.27f}}
+                                     : Def{Kind::leaf, 45.f, 2.6f, 0.15f, 0.95f, 0.8f, 2.5f, {0.8f, 0.4f, 0.1f}};
+    const float x0 = eval(e.p[p_x]), y0 = eval(e.p[p_y]), W = std::max(1.f, eval(e.p[p_w])), H = std::max(1.f, eval(e.p[p_h]));
+    const float density = std::max(0.f, eval_or(e.p[p_density], d.density));
+    const float wu = eval_or(e.p[p_wu], 0.f), wv = eval_or(e.p[p_wv], 0.f);
+    const float size = std::max(0.25f, eval_or(e.p[p_radius], d.size)), bright = std::max(0.f, eval_or(e.p[p_bright], 1.f));
+    const bool coloured = e.p[p_cr].present();
+    const std::array<float, 3> col{eval_or(e.p[p_cr], d.colour[0]) * bright, eval_or(e.p[p_cg], d.colour[1]) * bright, eval_or(e.p[p_cb], d.colour[2]) * bright};
+    const float flowk = eval_or(e.p[p_flowk], d.flow);
+    const float melt = d.kind == Kind::snow ? std::max(0.f, eval_or(e.p[p_melt], 0.15f)) : 0.f;
+    const float glowing = d.kind == Kind::ash ? std::clamp(eval_or(e.p[p_glowing], 0.08f), 0.f, 1.f) : 0.f;
+    const auto seed = static_cast<std::uint64_t>(std::max(0.f, eval_or(e.p[p_seed], 1.f)));
+    const float vy = std::max(5.f, d.fall + wv);                       // its fall, world pixels a second
+    const float shift = wu * H / vy;                                   // how far the wind takes it across the region
+    const float xa = x0 - std::max(0.f, shift), span = W + std::abs(shift);
+    const auto now = static_cast<std::int32_t>(std::lround(t * prog.fps));
+    std::uint32_t h = hash_cell(now, 29 + static_cast<std::int32_t>(ei), 3, seed);
+    const auto rnd = [&h] {  // [0, 1)
+      h = hash32(h + 0x9e3779b9U);
+      return static_cast<float>(h >> 8) * (1.f / 16777216.f);
+    };
+    const bool fresh = emit_on[ei] == 0;
+    emit_on[ei] = 1;
+    const float live = density * span * H / 10000.f;  // at once in the region
+    const float count = fresh ? live : live * vy / H / prog.fps;
+    const int n = std::min(8192, static_cast<int>(count) + (rnd() < count - std::floor(count) ? 1 : 0));
+    static constexpr std::array<std::array<float, 3>, 4> autumn{{{0.78f, 0.33f, 0.08f}, {0.86f, 0.56f, 0.1f}, {0.55f, 0.17f, 0.06f}, {0.62f, 0.47f, 0.13f}}};
+    for (int i = 0; i < n; ++i) {
+      const float x = xa + rnd() * span;
+      const float y = fresh ? y0 + rnd() * H : y0 - rnd() * vy / prog.fps;
+      const float phase = 6.2831853f * rnd(), freq = d.freq * (0.7f + 0.6f * rnd()), s = size * (0.7f + 0.6f * rnd());
+      const float fall = vy * (0.85f + 0.3f * rnd());
+      std::array<float, 3> c = col;
+      if (d.kind == Kind::leaf && !coloured) c = autumn[std::min<std::size_t>(3, static_cast<std::size_t>(4.f * rnd()))];
+      const float tone = 0.85f + 0.3f * rnd();
+      for (float& v : c) v *= tone;
+      const float aux = d.kind == Kind::snow ? melt : d.kind == Kind::ash && rnd() < glowing ? 0.5f + 0.5f * rnd() : 0.f;
+      const float life = (y0 + H - y) / fall * 1.25f + 0.5f;
+      P.spawn_weather(d.kind, x, y, wu, fall, s, life, phase, freq, c, d.alpha, flowk, aux);
+    }
+    const float washk = d.kind == Kind::rain ? std::max(0.f, eval_or(e.p[p_wash], 0.f)) : 0.f;
+    if (washk > 0.f) {  // the rain washes the smoke out where it falls
+      const float ks = std::max(0.f, 1.f - washk / prog.fps), kh = std::max(0.f, 1.f - 0.5f * washk / prog.fps);
+      for (Module* m : all) {
+        if (!m->active) continue;
+        const float span_m = static_cast<float>(m->size()) * m->at.scale;
+        if (m->at.x > xa + span || m->at.x + span_m < xa || m->at.y > y0 + H || m->at.y + span_m < y0) continue;
+        compose::wash(*m, xa, y0, xa + span, y0 + H, ks, kh);
+      }
     }
   }
 
@@ -1762,6 +2006,7 @@ void Scene::Impl::build(const EffectLoader& load, const Options& o) {
     const int res = e.m.h.res;
     if (mc.size % res != 0) fail(mc.pos, std::format("the size of '{}' must be a multiple of its effect's grid ({} cells)", mc.name, res));
     if (mc.tiled && 2 * mc.band >= res) fail(mc.pos, std::format("the band of '{}' must be less than half its effect's grid ({} cells)", mc.name, res));
+    if (mc.trail && 2 * mc.tr.band >= res) fail(mc.pos, std::format("the band of trail '{}' must be less than half its effect's grid ({} cells)", mc.name, res));
     ModR r;
     r.W = mc.width_code.varying ? std::max(1.f, eval(mc.width_code)) : mc.width;
     if (mc.tiled) {
@@ -1778,9 +2023,10 @@ void Scene::Impl::build(const EffectLoader& load, const Options& o) {
       r.group = groups++;
     }
     const float scale = r.W / static_cast<float>(mc.size);
-    for (int row = 0; row < mc.rows; ++row) {
+    const int rows = mc.trail ? mc.tr.count : mc.rows;  // a trail: its pool of tiles, one per "row"
+    for (int row = 0; row < rows; ++row) {
       for (int c = 0; c < mc.cols; ++c) {
-        const std::string name = mc.tiled ? std::format("{}_r{}c{}", mc.name, row, c) : mc.name;
+        const std::string name = mc.tiled ? std::format("{}_r{}c{}", mc.name, row, c) : mc.trail ? std::format("{}_t{}", mc.name, row) : mc.name;
         owned.push_back(std::make_unique<Module>(name, e, mc.size, Placement{0.f, 0.f, scale}, o.isa));
         Module* m = owned.back().get();
         if (step_scratch) m->share_scratch(*step_scratch);
@@ -1815,8 +2061,13 @@ void Scene::Impl::build(const EffectLoader& load, const Options& o) {
         for (const auto& s : names) list += (list.empty() ? "" : ", ") + s;
         std::vector<std::string> keys(names.begin(), names.end());
         for (const std::string_view k : kModuleKeys) keys.emplace_back(k);
+        if (mc.trail) {
+          keys.assign(names.begin(), names.end());
+          for (const std::string_view k : kTrailKeys) keys.emplace_back(k);
+        }
         const std::string hint = did_you_mean(n.name, keys);
-        fail(n.pos, std::format("'{}' is not a property of a module nor a control of effect '{}' (its controls: {}){}", n.name, prog.effects[zs(mc.effect)].name, list, hint));
+        fail(n.pos, std::format("'{}' is not a property of a {} nor a control of effect '{}' (its controls: {}){}", n.name, mc.trail ? "trail" : "module",
+                                prog.effects[zs(mc.effect)].name, list, hint));
       }
       r.named.push_back(static_cast<int>(it - names.begin()));
     }
@@ -1850,6 +2101,30 @@ void Scene::Impl::build(const EffectLoader& load, const Options& o) {
       for (Module* m : rr.tiles) m->spec = mix;
     }
     const int i = static_cast<int>(mi);
+    if (mc.trail) {  // its tiles lie on a grid whose row 0 stands on the base (by default the ground), as a module stands
+      TrailSpec ts;
+      ts.width = rr.W;
+      ts.band = mc.tr.band;
+      const float base = mc.tr.has_base ? mc.tr.base : prog.ground;
+      ts.y0 = base + mc.sink * rr.W - rr.W;
+      if (mc.tr.rows > 0) {
+        ts.row_lo = 1 - mc.tr.rows;
+        ts.row_hi = 0;
+      }
+      ts.age = mc.tr.age;
+      ts.hold = mc.tr.hold;
+      ts.fade = mc.tr.fade;
+      ts.jump = mc.tr.jump > 0.f ? mc.tr.jump : 2.f * rr.W;
+      ts.has_quiet = mc.tr.has_quiet;
+      ts.quiet = mc.tr.quiet;
+      ts.feather = mc.feather * static_cast<float>(mc.size);
+      rr.trail = static_cast<int>(trails.size());
+      trails.push_back(std::make_unique<Trail>(rr.tiles, ts, rr.group, mc.seed));
+      deposits.emplace_back();
+      slots[zs(mc.slot + m_started)] = 0.f;  // it plays from the start (its tiles start where its source goes)
+      place(i, eval(mc.ax), eval(mc.ay));
+      continue;
+    }
     if (mc.has_at) place(i, eval(mc.ax), eval(mc.ay));
     else place(i, 0.5f * rr.Wd, rr.W - mc.sink * rr.W);
     slots[zs(mc.slot + m_started)] = kNever;
@@ -1888,6 +2163,10 @@ void Scene::Impl::build(const EffectLoader& load, const Options& o) {
   if (o.overlap && o.threads > 1) picture = std::make_unique<PictureThread>(*frame, *pool);
   frame->reserve(static_cast<int>(all.size()), std::max(1, prog.shock_capacity), std::max(1, prog.scorch_capacity), prog.capacity);
   frame->ground_y = prog.ground;
+  if (o.layers) {  // the engine layers: the frame's, and every module's beside its image
+    frame->use_layers(true);
+    for (Module* m : all) m->use_layers(true);
+  }
   env.bus = bus.get();
   env.parts = parts.get();
   // every list a frame fills, at its largest
@@ -1919,6 +2198,7 @@ void Scene::Impl::build(const EffectLoader& load, const Options& o) {
   scratch.assign(pull, 0.f);
   fired.assign(prog.rules.size(), 0);
   pending.assign(prog.rules.size(), 0);
+  emit_on.assign(prog.emitters.size(), 0);
   for (const RuleC& r : prog.rules) first.push_back({r.name, kNever});
 }
 
@@ -1980,8 +2260,24 @@ void Scene::Impl::state(int f) {
     if (triggered || eval(r.cond) != 0.f) fire(r, i, t);
   }
   // 2. emitters; 3. settings that change over time
-  for (const EmitC& e : prog.emitters) emit(e, t);
+  for (std::size_t ei = 0; ei < prog.emitters.size(); ++ei) emit(prog.emitters[ei], ei, t);
   live(t);
+  // 3b. trails: their sources' places; the tiles their paths touch switched on (before the step), faded ones off
+  for (std::size_t mi = 0; mi < mods.size(); ++mi) {
+    const ModR& r = mods[mi];
+    if (r.trail < 0) continue;
+    const ModC::TrailC& T = prog.modules[mi].tr;
+    Deposit& d = deposits[zs(r.trail)];
+    const bool on = !T.on.present() || eval(T.on) != 0.f;
+    d.heat = eval_or(T.heat, 0.f);
+    d.soot = eval_or(T.soot, 0.f);
+    d.radius = std::max(0.5f, eval_or(T.radius, 0.05f * r.W));
+    d.kick = eval_or(T.kick, 0.f);
+    d.u = eval_or(T.u, 0.f);
+    d.v = eval_or(T.v, 0.f);
+    trails[zs(r.trail)]->move(r.ax, r.ay, on, d.radius, t, prog.fps);
+    sync(static_cast<int>(mi));
+  }
   const auto c1 = Clock::now();
   // 4. step every active module
   active.clear();
@@ -1998,6 +2294,12 @@ void Scene::Impl::state(int f) {
       for (int c = 0; c + 1 < mc.cols; ++c) blend_band(*tile(i, c, row), *tile(i, c + 1, row), Side::right, mc.band);
     for (int c = 0; c < mc.cols; ++c)
       for (int row = 0; row + 1 < mc.rows; ++row) blend_band(*tile(i, c, row), *tile(i, c, row + 1), Side::top, mc.band);
+  }
+  for (std::size_t mi = 0; mi < mods.size(); ++mi) {  // trails: shared bands, what their sources leave, fading
+    if (const int ti = mods[mi].trail; ti >= 0) {
+      trails[zs(ti)]->couple(deposits[zs(ti)], t, prog.fps);
+      sync(static_cast<int>(mi));
+    }
   }
   for (ActC& a : prog.every)
     if (a.kind != "push") act(a, t);
@@ -2131,7 +2433,7 @@ Scene::ModuleInfo Scene::module_info(int i) const {
   out.y = impl_->slots[zs(mc.slot + m_y)];
   out.width = r.Wd;
   out.started = impl_->slots[zs(mc.slot + m_started)];
-  out.active = r.tiles[0]->active;
+  out.active = r.trail >= 0 ? impl_->trails[zs(r.trail)]->active() > 0 : r.tiles[0]->active;
   out.tiled = mc.tiled;
   out.controls = std::span<const float>(r.tiles[0]->controls);
   out.control_names = std::span<const std::string>(impl_->effects[zs(mc.effect)]->m.control_names);

@@ -241,6 +241,18 @@ class SceneView {
     if (rgba.size() < detail::picture_bytes(i.width, i.height, stride) || stride == 0) return detail::fail(NVFX_ERROR_ARGUMENT);
     return detail::check(nvfx_scene_render(s_, rgba.data(), stride));
   }
+  // One of the engine layers (docs/ENGINES.md §11; the scene or stage must have been created with it in its `layers`)
+  // into `pixels`: info.width x info.height pixels of nvfx_pixel_format_bytes(format) bytes, rows `stride` bytes apart
+  // (0: width times the pixel size).
+  Result<> render_layer(nvfx_scene_layer layer, nvfx_pixel_format format, std::span<std::byte> pixels, std::size_t stride = 0) {
+    nvfx_scene_info i{};
+    if (const nvfx_status s = nvfx_scene_get_info(s_, &i); s != NVFX_OK) return detail::fail(s);
+    const std::size_t px = nvfx_pixel_format_bytes(format), row = static_cast<std::size_t>(i.width) * px;
+    if (px == 0 || i.width <= 0 || i.height <= 0) return detail::fail(NVFX_ERROR_ARGUMENT);
+    if (stride == 0) stride = row;
+    if (stride < row || pixels.size() < stride * static_cast<std::size_t>(i.height - 1) + row) return detail::fail(NVFX_ERROR_ARGUMENT);
+    return detail::check(nvfx_scene_render_layer(s_, layer, format, pixels.data(), stride));
+  }
   // Fields, for gameplay.
   Result<nvfx_scene_fields> sample(float x, float y) const {
     nvfx_scene_fields f{};
