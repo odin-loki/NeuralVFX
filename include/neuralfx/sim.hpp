@@ -19,10 +19,12 @@ namespace nfx::sim {
 
 // fire, smoke and explosion are the effects of studies A to I, whose tools loop over kEffects. steam and magic came
 // later (docs/EFFECTS.md): the same solver with other sources, forces and drawing, trained and tested as study D's.
-enum class Effect { fire, smoke, explosion, steam, magic };
+// jet, orb and vortex came after them (docs/EFFECTS_ENERGY.md), the same way.
+enum class Effect { fire, smoke, explosion, steam, magic, jet, orb, vortex };
 inline constexpr std::array kEffects{Effect::fire, Effect::smoke, Effect::explosion};  // the studies' effects
-inline constexpr std::array kNewEffects{Effect::steam, Effect::magic};                // added since (docs/EFFECTS.md)
-inline constexpr std::array kAllEffects{Effect::fire, Effect::smoke, Effect::explosion, Effect::steam, Effect::magic};
+inline constexpr std::array kNewEffects{Effect::steam, Effect::magic, Effect::jet, Effect::orb, Effect::vortex};  // added since
+inline constexpr std::array kAllEffects{Effect::fire, Effect::smoke, Effect::explosion, Effect::steam, Effect::magic,
+                                        Effect::jet, Effect::orb, Effect::vortex};
 
 std::string_view effect_name(Effect e);
 bool parse_effect(std::string_view text, Effect& out);  // any effect of kAllEffects
@@ -31,7 +33,8 @@ bool effect_loops(Effect e);                            // an explosion plays on
 // The learned controls, all normalised to [0, 1].
 inline constexpr int kControls = 3;
 inline constexpr std::array<std::string_view, kControls> kControlNames{"intensity", "wind", "turbulence"};
-// The names an effect gives its controls: kControlNames, except that magic's second control is its spin.
+// The names an effect gives its controls: kControlNames, except that magic's second control is its spin (and the
+// jet's its aim, the orb's its pulse, the vortex's its sway).
 std::array<std::string_view, kControls> control_names(Effect e);
 // How fast the source flicker changes (its time axis per second: source_flicker, rollout::NoiseSpec::flicker_rate).
 float flicker_rate(Effect e);
@@ -39,7 +42,8 @@ float flicker_rate(Effect e);
 struct Params {
   Effect effect = Effect::fire;
   float intensity = 0.5f;   // source size and strength
-  float wind = 0.5f;        // lateral wind: 0 = full left, 0.5 = none, 1 = full right (magic: spin, slow to fast)
+  float wind = 0.5f;        // lateral wind: 0 = full left, 0.5 = none, 1 = full right (magic: spin, slow to fast;
+                            // jet: aim, low to high; orb: pulse, calm to strong; vortex: sway, still to wandering)
   float turbulence = 0.5f;  // vorticity confinement and curl-noise strength
   std::uint64_t seed = 1;   // source noise and turbulence field
   int size = 128;           // output pixels (square)
@@ -107,6 +111,12 @@ class Fluid {
   void step(float dt);
   void add_sources(float dt);
   void add_new_sources(float dt);  // steam and magic
+  // jet, orb and vortex (docs/EFFECTS_ENERGY.md); each does nothing for the other effects (false: not handled)
+  bool add_energy_sources(float dt);
+  void add_energy_forces(float dt);
+  void add_energy_divergence();
+  void energy_decay(float dt);
+  bool render_energy(std::span<std::uint8_t> rgba) const;
   void add_forces(float dt);
   void project();
   void advect_velocity(float dt);

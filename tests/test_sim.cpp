@@ -15,6 +15,8 @@
 #include <fstream>
 #include <numeric>
 #include <span>
+#include <utility>
+#include <vector>
 #include <unistd.h>
 
 using namespace nfx;
@@ -179,8 +181,9 @@ TEST(Sim, LoopSeamIsNoWorseThanAnOrdinaryFrameStep) {
   EXPECT_LE(mean_abs_diff(c.frame(c.frames - 1), c.frame(0)), 1.5 * step + 0.5);
 }
 
-// Adding effects (docs/EFFECTS.md) must not change the studies' effects: these hashes are of clips made before steam
-// and magic existed (FNV-1a of the RGBA bytes; the solver is built at the baseline ISA without contraction).
+// Adding effects (docs/EFFECTS.md, docs/EFFECTS_ENERGY.md) must not change the earlier ones: these hashes are of clips
+// made before steam and magic existed (fire, smoke, explosion) and before jet, orb and vortex existed (steam, magic).
+// FNV-1a of the RGBA bytes; the solver is built at the baseline ISA without contraction.
 TEST(Sim, StudyEffectsAreUnchangedByTheNewOnes) {
   const auto fnv = [](std::span<const std::uint8_t> b) {
     std::uint64_t h = 1469598103934665603ULL;
@@ -190,14 +193,18 @@ TEST(Sim, StudyEffectsAreUnchangedByTheNewOnes) {
     }
     return h;
   };
-  const std::array<std::uint64_t, 3> want{0xecb25de8e62e7379ULL, 0xea602bfa2409bf3fULL, 0xbb823d31fd8c4eb4ULL};
-  for (std::size_t k = 0; k < sim::kEffects.size(); ++k) {
-    auto p = small(sim::kEffects[k]);
+  const std::array<std::pair<sim::Effect, std::uint64_t>, 5> want{{{sim::Effect::fire, 0xecb25de8e62e7379ULL},
+                                                                    {sim::Effect::smoke, 0xea602bfa2409bf3fULL},
+                                                                    {sim::Effect::explosion, 0xbb823d31fd8c4eb4ULL},
+                                                                    {sim::Effect::steam, 0xa57b2dc109882ec3ULL},
+                                                                    {sim::Effect::magic, 0xf79b687a9614f399ULL}}};
+  for (const auto& [e, h] : want) {
+    auto p = small(e);
     p.intensity = 0.8f;
     p.wind = 0.3f;
     p.turbulence = 0.7f;
     p.seed = 7;
-    EXPECT_EQ(fnv(sim::simulate(p).rgba), want[k]) << sim::effect_name(sim::kEffects[k]);
+    EXPECT_EQ(fnv(sim::simulate(p).rgba), h) << sim::effect_name(e);
   }
 }
 
@@ -260,6 +267,162 @@ TEST(Sim, MagicSpinsFasterWithItsSpinControl) {
   const double slow = momentum(0.f), fast = momentum(1.f);
   EXPECT_GT(slow, 0.0);
   EXPECT_GT(fast, 2.0 * slow);
+}
+
+// jet, orb and vortex (docs/EFFECTS_ENERGY.md): named, with their own second control, and drawn as what they are.
+namespace {
+
+sim::Params energy(sim::Effect e, float second, std::uint64_t seed = 3) {
+  sim::Params p;
+  p.effect = e;
+  p.size = 64;
+  p.wind = second;
+  p.seed = seed;
+  p.pressure_iters = 16;
+  return p;
+}
+
+}  // namespace
+
+TEST(Sim, JetOrbAndVortexHaveTheirOwnControls) {
+  const std::array<std::pair<sim::Effect, std::string_view>, 3> second{{{sim::Effect::jet, "aim"}, {sim::Effect::orb, "pulse"}, {sim::Effect::vortex, "sway"}}};
+  for (const auto& [e, name] : second) {
+    sim::Effect back{};
+    ASSERT_TRUE(sim::parse_effect(sim::effect_name(e), back));
+    EXPECT_EQ(back, e);
+    EXPECT_TRUE(sim::effect_loops(e));
+    EXPECT_NE(std::ranges::find(sim::kNewEffects, e), sim::kNewEffects.end());
+    EXPECT_FALSE(std::ranges::contains(sim::kEffects, e));
+    const auto names = sim::control_names(e);
+    EXPECT_EQ(names[0], "intensity");
+    EXPECT_EQ(names[1], name);
+    EXPECT_EQ(names[2], "turbulence");
+  }
+  EXPECT_EQ(sim::kAllEffects.back(), sim::Effect::vortex);
+}
+
+TEST(Sim, JetIsAFlameFromTheLeftThatItsAimRaises) {
+  // the jet's heat: where it is (mean x and y over the frame, cells from the bottom left) and its light
+  const auto heat_centre = [](float aim) {
+    sim::Fluid f(energy(sim::Effect::jet, aim));
+    for (int i = 0; i < 40; ++i) f.step_frame();
+    const sim::State s = f.state();
+    double w = 0, x = 0, y = 0;
+    for (int j = 0; j < s.n; ++j) {
+      for (int i = 0; i < s.n; ++i) {
+        const double t = s.temp[static_cast<std::size_t>(j * s.n + i)];
+        w += t;
+        x += t * i;
+        y += t * j;
+      }
+    }
+    return std::make_pair(x / w / s.n, y / w / s.n);
+  };
+  const auto [x_low, y_low] = heat_centre(0.f);
+  const auto [x_high, y_high] = heat_centre(1.f);
+  EXPECT_LT(x_low, 0.5);  // it comes from the left
+  EXPECT_LT(x_high, 0.5);
+  EXPECT_GT(y_high, y_low + 0.08);  // aimed higher
+  const Clip c = sim::simulate(energy(sim::Effect::jet, 0.5f));
+  double r = 0, b = 0;
+  long lit = 0, smoke = 0;
+  for (std::size_t i = 0; i < c.rgba.size(); i += 4) {
+    if (std::max({c.rgba[i], c.rgba[i + 1], c.rgba[i + 2]}) > 96) {
+      ++lit;
+      r += c.rgba[i];
+      b += c.rgba[i + 2];
+    }
+    smoke += c.rgba[i + 3] > 64 && c.rgba[i] < 48;  // dark smoke
+  }
+  EXPECT_GT(lit, 500);
+  EXPECT_GT(r, 1.5 * b);  // fire colours
+  EXPECT_GT(smoke, 100);
+}
+
+TEST(Sim, OrbIsAContainedBallOfCyanLightThatBreathesWithItsPulse) {
+  // lit pixels per frame (more than a quarter of full brightness), and how far they reach from the middle
+  const auto run = [](float pulse) {
+    auto p = energy(sim::Effect::orb, pulse);
+    p.frames = 90;
+    const Clip c = sim::simulate(p);
+    std::vector<double> area;
+    long lit = 0, outside = 0;
+    double r = 0, g = 0, b = 0;
+    for (int k = 0; k < c.frames; ++k) {
+      const auto fr = c.frame(k);
+      double a = 0;
+      for (int y = 0; y < c.size; ++y) {
+        for (int x = 0; x < c.size; ++x) {
+          const auto* q = &fr[static_cast<std::size_t>((y * c.size + x) * 4)];
+          if (std::max({q[0], q[1], q[2]}) <= 64) continue;
+          ++lit;
+          ++a;
+          r += q[0];
+          g += q[1];
+          b += q[2];
+          outside += std::hypot(x - 31.5, y - 31.5) > 0.45 * c.size;
+        }
+      }
+      area.push_back(a);
+    }
+    const double mean = std::accumulate(area.begin(), area.end(), 0.0) / static_cast<double>(area.size());
+    double var = 0;
+    for (const double a : area) var += (a - mean) * (a - mean) / static_cast<double>(area.size());
+    return std::array<double, 7>{static_cast<double>(lit), static_cast<double>(outside), r, g, b, mean, std::sqrt(var) / mean};
+  };
+  const auto calm = run(0.f), strong = run(1.f);
+  EXPECT_GT(calm[0], 2000);
+  EXPECT_LT(calm[1], calm[0] / 50);  // contained
+  EXPECT_GT(calm[4], 1.2 * calm[2]);  // blue and green over red: cyan
+  EXPECT_GT(calm[3], 1.2 * calm[2]);
+  EXPECT_GT(strong[6], 1.5 * calm[6]);  // the lit area swings more with a strong pulse
+}
+
+TEST(Sim, VortexIsAColumnOfDustThatSwaysWithItsControl) {
+  // dust (soot) per row: its spread across the frame over time, in the upper half
+  const auto run = [](float sway) {
+    sim::Fluid f(energy(sim::Effect::vortex, sway, 5));
+    for (int i = 0; i < 120; ++i) f.step_frame();
+    std::vector<double> xs;
+    double low = 0, high = 0;
+    for (int i = 0; i < 90; ++i) {
+      f.step_frame();
+      const sim::State s = f.state();
+      double w = 0, x = 0;
+      for (int y = 0; y < s.n; ++y) {
+        for (int k = 0; k < s.n; ++k) {
+          const double d = s.soot[static_cast<std::size_t>(y * s.n + k)];
+          (y < s.n / 2 ? low : high) += d;
+          if (y >= s.n / 2) {
+            w += d;
+            x += d * k;
+          }
+        }
+      }
+      xs.push_back(x / w / s.n);
+    }
+    const double mean = std::accumulate(xs.begin(), xs.end(), 0.0) / static_cast<double>(xs.size());
+    double dev = 0;
+    for (const double x : xs) dev += std::abs(x - mean) / static_cast<double>(xs.size());
+    return std::array<double, 3>{dev, low, high};
+  };
+  const auto still = run(0.f), wandering = run(1.f);
+  EXPECT_GT(still[2], 0.1 * still[1]);    // the dust reaches the upper half
+  EXPECT_GT(wandering[0], 1.5 * still[0]);  // and wanders more with its sway
+  const Clip c = sim::simulate(energy(sim::Effect::vortex, 0.5f));
+  long bad = 0, dust = 0;
+  double r = 0, b = 0;
+  for (std::size_t i = 0; i < c.rgba.size(); i += 4) {
+    for (int k = 0; k < 3; ++k) bad += c.rgba[i + k] > c.rgba[i + 3] + 1;  // reflected light only
+    if (c.rgba[i + 3] > 64) {
+      ++dust;
+      r += c.rgba[i];
+      b += c.rgba[i + 2];
+    }
+  }
+  EXPECT_EQ(bad, 0);
+  EXPECT_GT(dust, 1000);
+  EXPECT_GT(r, 1.2 * b);  // brown-grey
 }
 
 TEST(Sim, ParamsRoundTripThroughClipMetadata) {

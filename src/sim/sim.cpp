@@ -16,6 +16,9 @@ std::string_view effect_name(Effect e) {
     case Effect::explosion: return "explosion";
     case Effect::steam: return "steam";
     case Effect::magic: return "magic";
+    case Effect::jet: return "jet";
+    case Effect::orb: return "orb";
+    case Effect::vortex: return "vortex";
   }
   std::unreachable();
 }
@@ -31,6 +34,9 @@ bool effect_loops(Effect e) { return e != Effect::explosion; }
 
 std::array<std::string_view, kControls> control_names(Effect e) {
   if (e == Effect::magic) return {"intensity", "spin", "turbulence"};
+  if (e == Effect::jet) return {"intensity", "aim", "turbulence"};
+  if (e == Effect::orb) return {"intensity", "pulse", "turbulence"};
+  if (e == Effect::vortex) return {"intensity", "sway", "turbulence"};
   return kControlNames;
 }
 
@@ -41,6 +47,9 @@ float flicker_rate(Effect e) {
     case Effect::explosion: return 1.4f;
     case Effect::steam: return 2.0f;   // puffs from a vent
     case Effect::magic: return 1.8f;   // a shimmer
+    case Effect::jet: return 3.0f;     // a roaring burner
+    case Effect::orb: return 2.2f;     // a crackle
+    case Effect::vortex: return 1.5f;  // gusts of dust
   }
   std::unreachable();
 }
@@ -81,6 +90,10 @@ Tune tune(const Params& p) {
     case Effect::steam: return {70.f, 0.2f, 0.9f, 0.65f, 75.f, 2.5f, 0.4f + 2.6f * turb, 10.f + 55.f * turb, 0.35f};
     // no buoyancy and no wind: the spin force (add_forces) and a sink in the middle (project) drive it
     case Effect::magic: return {0.f, 0.f, 1.3f, 1.0f, 0.f, 0.f, 1.0f + 4.0f * turb, 10.f + 70.f * turb, 1.2f};
+    // jet, orb and vortex: their own forces are in add_energy_forces (docs/EFFECTS_ENERGY.md); no wind
+    case Effect::jet: return {38.f, 3.f, 1.1f, 0.4f, 0.f, 0.f, 0.8f + 3.2f * turb, 12.f + 55.f * turb, 0.45f};
+    case Effect::orb: return {0.f, 0.f, 1.0f, 1.2f, 0.f, 0.f, 1.5f + 3.5f * turb, 20.f + 60.f * turb, 1.0f};
+    case Effect::vortex: return {115.f, 2.f, 0.4f, 0.75f, 0.f, 0.f, 0.3f + 0.5f * turb, 4.f + 8.f * turb, 0.35f};
   }
   std::unreachable();
 }
@@ -199,6 +212,7 @@ void Fluid::step(float dt) {
   const float cool = std::exp(-t.cooling * dt), decay = std::exp(-t.soot_decay * dt);
   std::ranges::for_each(temp_.values(), [cool](float& x) { x *= cool; });
   std::ranges::for_each(soot_.values(), [decay](float& x) { x *= decay; });
+  energy_decay(dt);  // jet, orb and vortex
   time_ += dt;
 }
 
@@ -227,6 +241,7 @@ void Fluid::add_sources(float dt) {
     add_new_sources(dt);
     return;
   }
+  if (add_energy_sources(dt)) return;  // jet, orb and vortex
   const bool fire = p_.effect == Effect::fire;
   const float cx = 0.5f * n, cy = (fire ? 0.10f : 0.09f) * n;
   const float hw = (fire ? 0.10f + 0.08f * I : 0.09f + 0.07f * I) * n, hh = 0.035f * n;
@@ -335,6 +350,7 @@ void Fluid::add_forces(float dt) {
       u_[x, y] += wdrag * (wind - u_[x, y]) * mat;  // air drags material towards the wind speed
     }
   }
+  add_energy_forces(dt);  // jet, orb and vortex
 }
 
 void Fluid::project() {
@@ -362,6 +378,7 @@ void Fluid::project() {
       }
     }
   }
+  add_energy_divergence();  // jet, orb and vortex
   // Open boundaries: p = 0 on the border, which is never written. Warm-started from the last solve.
   constexpr float w = 1.7f;
   for (int it = 0; it < p_.pressure_iters; ++it) {
@@ -456,6 +473,7 @@ std::uint8_t q8(float v) { return static_cast<std::uint8_t>(clamp01(v) * 255.f +
 void Fluid::render(std::span<std::uint8_t> out) const {
   const int S = p_.size;
   if (out.size() < static_cast<std::size_t>(S) * S * 4) throw std::invalid_argument("sim: render buffer too small");
+  if (render_energy(out)) return;  // jet, orb and vortex
   const float n = f(n_), sc = n / f(S);
   constexpr float lx = -0.45f, ly = 0.89f;  // towards the light: up and to the left
   for (int py = 0; py < S; ++py) {
@@ -503,6 +521,267 @@ void Fluid::render(std::span<std::uint8_t> out) const {
       o[3] = q8(a);  // rgb may exceed alpha: emission adds light
     }
   }
+}
+
+// --- jet, orb and vortex (docs/EFFECTS_ENERGY.md) ---------------------------------------------------------------------
+//
+// Three presets kept apart from the other effects' code: their sources, forces, decay and drawing. Every force is a
+// function of the state where it acts, the position, the controls and the run's two noise fields (curl_potential,
+// source_flicker), which learned dynamics see as inputs; nothing follows a clock of its own.
+
+namespace {
+
+bool energy_effect(Effect e) { return e == Effect::jet || e == Effect::orb || e == Effect::vortex; }
+
+// jet: a nozzle at the left edge, aimed from 20 degrees below to 30 degrees above horizontal (the second control).
+struct JetNozzle {
+  float x, y, c, s;  // position (cells), direction (cos, sin)
+};
+JetNozzle jet_nozzle(const Params& p, float n) {
+  const float a = (-20.f + 50.f * p.wind) * 0.017453293f;
+  return {0.05f * n, 0.40f * n, std::cos(a), std::sin(a)};
+}
+
+// orb: a ball of plasma in the middle of the frame (radius in cells), breathing with the curl noise where it is.
+float orb_radius(const Params& p, float n) { return (0.16f + 0.10f * p.intensity) * n; }
+float orb_beat(const Params& p, float psi) { return std::tanh((1.f + 4.f * p.wind) * psi); }  // pulse: sharper beats
+
+// vortex: a column of warm air rising from the ground in the middle of the frame; half-width of its base (cells).
+float vortex_base(const Params& p, float n) { return (0.035f + 0.03f * p.intensity) * n; }
+
+}  // namespace
+
+bool Fluid::add_energy_sources(float dt) {
+  if (!energy_effect(p_.effect)) return false;
+  const float n = f(n_), s = n / 128.f, I = p_.intensity;
+  const auto flicker = [&](int x, int y) {
+    return smoothstep(-0.25f, 0.6f, source_flicker(p_, f(x) / s, f(y) / s, time_));
+  };
+  if (p_.effect == Effect::jet) {
+    const JetNozzle g = jet_nozzle(p_, n);
+    const float hl = 0.045f * n, hw = (0.032f + 0.016f * I) * n, speed = (85.f + 65.f * I) * s;
+    const float ext = hl + hw + 2.f;
+    const int x_lo = std::max(1, static_cast<int>(g.x - ext)), x_hi = std::min(n_, static_cast<int>(g.x + ext) + 1);
+    const int y_lo = std::max(1, static_cast<int>(g.y - ext)), y_hi = std::min(n_, static_cast<int>(g.y + ext) + 1);
+    for (int y = y_lo; y <= y_hi; ++y) {
+      for (int x = x_lo; x <= x_hi; ++x) {
+        const float dx = f(x) - g.x, dy = f(y) - g.y;
+        const float ea = (dx * g.c + dy * g.s) / hl, ec = (dy * g.c - dx * g.s) / hw;
+        const float shape = 1.f - smoothstep(0.6f, 1.f, std::sqrt(ea * ea + ec * ec));
+        if (shape <= 0.f) continue;
+        const float k = shape * (0.35f + 0.65f * flicker(x, y));
+        temp_[x, y] = std::max(temp_[x, y], (1.5f + 0.7f * I) * k);
+        soot_[x, y] += dt * (0.4f + 0.3f * I) * k;
+        u_[x, y] += k * (speed * g.c - u_[x, y]);
+        v_[x, y] += k * (speed * g.s - v_[x, y]);
+      }
+    }
+    return true;
+  }
+  if (p_.effect == Effect::orb) {
+    const float c = 0.5f * (n + 1.f), R = orb_radius(p_, n);
+    const int lo = std::max(1, static_cast<int>(c - R)), hi = std::min(n_, static_cast<int>(c + R) + 1);
+    for (int y = lo; y <= hi; ++y) {
+      for (int x = lo; x <= hi; ++x) {
+        const float dx = f(x) - c, dy = f(y) - c;
+        const float r = std::sqrt(dx * dx + dy * dy) / R, shape = 1.f - smoothstep(0.5f, 0.9f, r);
+        if (shape <= 0.f) continue;
+        const float beat = orb_beat(p_, curl_potential(p_, f(x) / s, f(y) / s, time_));
+        const float e = (1.1f + 0.5f * I) * (1.f - 0.35f * r * r) * (1.f + 0.4f * p_.wind * beat);
+        const float k = shape * (0.4f + 0.6f * flicker(x, y));
+        temp_[x, y] = std::max(temp_[x, y], e * k);
+        soot_[x, y] = std::max(soot_[x, y], 0.35f * e * k);
+      }
+    }
+    return true;
+  }
+  // vortex: warm air from a patch of hot ground, and dust lifted where the air rushes in along the ground
+  const float x0 = 0.5f * (n + 1.f), wb = vortex_base(p_, n), g0 = 0.06f * n;
+  const int y_hi = std::min(n_, static_cast<int>(g0) + 1);
+  for (int y = 1; y <= y_hi; ++y) {
+    for (int x = 1; x <= n_; ++x) {
+      const float ax = std::abs(f(x) - x0), ground = 1.f - smoothstep(0.4f * g0, g0, f(y));
+      const float warm = (1.f - smoothstep(0.5f * wb, wb, ax)) * ground;
+      if (warm > 0.f) temp_[x, y] = std::max(temp_[x, y], (0.5f + 0.3f * I) * warm);
+      const float skirt = (1.f - smoothstep(1.2f * wb, 3.5f * wb, ax)) * ground;
+      if (skirt <= 0.f) continue;
+      const float rush = std::min(1.f, std::abs(u_[x, y]) / (12.f * s) + warm);
+      soot_[x, y] += dt * (14.f + 10.f * I) * skirt * rush * (0.3f + 0.7f * flicker(x, y));
+    }
+  }
+  return true;
+}
+
+void Fluid::add_energy_forces(float dt) {
+  if (!energy_effect(p_.effect)) return;
+  const float n = f(n_), s = n / 128.f;
+  if (p_.effect == Effect::orb) {  // hot plasma is drawn to the middle; the air around it is still
+    const float c = 0.5f * (n + 1.f), R = orb_radius(p_, n), G = 140.f * s;
+    for (int y = 1; y <= n_; ++y) {
+      for (int x = 1; x <= n_; ++x) {
+        const float dx = f(x) - c, dy = f(y) - c, r = std::sqrt(dx * dx + dy * dy) + 1e-3f;
+        const float pull = G * temp_[x, y] * smoothstep(0.2f * R, 0.6f * R, r) / r;
+        const float hold = std::exp(-4.f * dt * smoothstep(1.05f * R, 1.6f * R, r));
+        u_[x, y] = (u_[x, y] - dt * pull * dx) * hold;
+        v_[x, y] = (v_[x, y] - dt * pull * dy) * hold;
+      }
+    }
+    return;
+  }
+  if (p_.effect == Effect::vortex) {
+    // Gusts: the air is dragged towards a wind that swings with the curl noise where it is (sway: how strongly), so
+    // the column leans and wanders. Above the ground the column is stirred more the higher it gets (its own vorticity
+    // confinement and curl noise, on top of tune()'s small amounts): smooth at its foot, eddying at its top.
+    const float G = (8.f + 42.f * p_.wind) * s, drag = 1.f - std::exp(-1.5f * dt), turb = p_.turbulence;
+    const float L = 14.f * s, e = 0.25f, tt = time_ * 0.8f;
+    const std::uint64_t cseed = p_.seed * 0x2545F4914F6CDD1DULL + 77;  // as curl_potential
+    for (int y = 1; y <= n_; ++y) {
+      const float h = smoothstep(0.1f * n, 0.85f * n, f(y));
+      for (int x = 1; x <= n_; ++x) {
+        u_[x, y] += drag * (G * curl_potential(p_, f(x) / s, f(y) / s, time_) - u_[x, y]);
+        const float w = std::min(1.f, 4.f * temp_[x, y] + 2.f * soot_[x, y]);
+        if (w <= 0.01f || h <= 0.f || x == 1 || x == n_ || y == 1 || y == n_) continue;
+        const float gx = 0.5f * (std::fabs(curl_[x + 1, y]) - std::fabs(curl_[x - 1, y]));
+        const float gy = 0.5f * (std::fabs(curl_[x, y + 1]) - std::fabs(curl_[x, y - 1]));
+        const float len = std::sqrt(gx * gx + gy * gy) + 1e-5f, conf = h * (0.5f + 3.f * turb);
+        u_[x, y] += dt * conf * (gy / len) * curl_[x, y];
+        v_[x, y] -= dt * conf * (gx / len) * curl_[x, y];
+        const float px = f(x) / L, py = f(y) / L, amp = h * w * (8.f + 50.f * turb) * s;
+        u_[x, y] += dt * amp * (value_noise(px, py + e, tt, cseed) - value_noise(px, py - e, tt, cseed)) / (2.f * e);
+        v_[x, y] -= dt * amp * (value_noise(px + e, py, tt, cseed) - value_noise(px - e, py, tt, cseed)) / (2.f * e);
+      }
+    }
+  }
+}
+
+void Fluid::add_energy_divergence() {
+  if (p_.effect == Effect::vortex) {
+    // The warm column draws air in at its foot and spreads as it rises (more at higher intensity): a funnel.
+    const float n = f(n_);
+    for (int y = 1; y <= n_; ++y) {
+      const float up = 3.f * (0.6f + 0.8f * p_.intensity) * clamp01(f(y) / n);
+      const float foot = 6.f * (1.f - smoothstep(0.03f * n, 0.15f * n, f(y)));
+      for (int x = 1; x <= n_; ++x) div_[x, y] += (up - foot) * std::min(1.f, 2.f * temp_[x, y]);
+    }
+    return;
+  }
+  if (p_.effect != Effect::orb) return;
+  // the orb breathes: a source of divergence in its core, driven by the curl noise there (pulse: how strongly)
+  const float n = f(n_), s = n / 128.f, c = 0.5f * (n + 1.f), R = orb_radius(p_, n), D = 1.f + 5.f * p_.wind;
+  const int lo = std::max(1, static_cast<int>(c - 0.5f * R)), hi = std::min(n_, static_cast<int>(c + 0.5f * R) + 1);
+  for (int y = lo; y <= hi; ++y) {
+    for (int x = lo; x <= hi; ++x) {
+      const float dx = f(x) - c, dy = f(y) - c;
+      const float core = 1.f - smoothstep(0.2f * R, 0.45f * R, std::sqrt(dx * dx + dy * dy));
+      if (core <= 0.f) continue;
+      div_[x, y] += D * core * orb_beat(p_, curl_potential(p_, f(x) / s, f(y) / s, time_));
+    }
+  }
+}
+
+void Fluid::energy_decay(float dt) {
+  if (p_.effect == Effect::jet) {  // the burning gas turns to smoke as it burns
+    for (int y = 1; y <= n_; ++y) {
+      for (int x = 1; x <= n_; ++x) soot_[x, y] += dt * 0.7f * temp_[x, y];
+    }
+    return;
+  }
+  if (p_.effect == Effect::vortex) {  // dust spreads sideways as it rises: the funnel widens towards the top
+    const float n = f(n_), s = n / 128.f;
+    for (int y = 1; y <= n_; ++y) {  // explicit diffusion along rows, 25 (y / n)^2 cells^2 per second
+      const float h = f(y) / n, k = std::min(0.45f, 25.f * s * s * h * h * dt);
+      if (k <= 0.f) continue;
+      for (int x = 1; x <= n_; ++x) tmp_a_[x, y] = soot_[x - 1, y] + soot_[x + 1, y] - 2.f * soot_[x, y];
+      for (int x = 1; x <= n_; ++x) soot_[x, y] = std::max(0.f, soot_[x, y] + k * tmp_a_[x, y]);
+    }
+    return;
+  }
+  if (p_.effect != Effect::orb) return;
+  // the orb's soft boundary: plasma thrown out of it fades within a few frames
+  const float n = f(n_), c = 0.5f * (n + 1.f), R = orb_radius(p_, n);
+  for (int y = 1; y <= n_; ++y) {
+    for (int x = 1; x <= n_; ++x) {
+      const float dx = f(x) - c, dy = f(y) - c;
+      const float out = smoothstep(0.95f * R, 1.5f * R, std::sqrt(dx * dx + dy * dy));
+      if (out <= 0.f) continue;
+      const float k = std::exp(-3.5f * dt * out);
+      temp_[x, y] *= k;
+      soot_[x, y] *= k;
+    }
+  }
+}
+
+namespace {
+
+// A colour ramp through stops (t, colour); black below the first.
+template <std::size_t N>
+Rgb ramp(const std::array<float, N>& at, const std::array<Rgb, N>& c, float t) {
+  if (t <= at[0]) return c[0];
+  for (std::size_t k = 1; k < N; ++k) {
+    if (t < at[k]) {
+      const float w = (t - at[k - 1]) / (at[k] - at[k - 1]);
+      return {c[k - 1].r + w * (c[k].r - c[k - 1].r), c[k - 1].g + w * (c[k].g - c[k - 1].g), c[k - 1].b + w * (c[k].b - c[k - 1].b)};
+    }
+  }
+  return c[N - 1];
+}
+
+// the jet's flame: dark red where it is cooling, through orange and yellow to white, bluish white at its hottest
+Rgb jet_ramp(float t) {
+  static constexpr std::array<float, 6> at{0.f, 0.2f, 0.45f, 0.8f, 1.25f, 1.8f};
+  static constexpr std::array<Rgb, 6> c{{{0.f, 0.f, 0.f}, {0.45f, 0.05f, 0.f}, {1.f, 0.42f, 0.04f}, {1.f, 0.82f, 0.3f}, {1.f, 0.97f, 0.88f}, {0.78f, 0.9f, 1.f}}};
+  return ramp(at, c, t);
+}
+
+// the orb's light: deep blue where it is faint, through cyan to white
+Rgb orb_ramp(float t) {
+  static constexpr std::array<float, 5> at{0.f, 0.15f, 0.35f, 0.65f, 1.f};
+  static constexpr std::array<Rgb, 5> c{{{0.f, 0.f, 0.f}, {0.03f, 0.14f, 0.42f}, {0.10f, 0.58f, 0.95f}, {0.55f, 0.97f, 1.f}, {0.95f, 1.f, 1.f}}};
+  return ramp(at, c, t);
+}
+
+}  // namespace
+
+bool Fluid::render_energy(std::span<std::uint8_t> out) const {
+  if (!energy_effect(p_.effect)) return false;
+  const int S = p_.size;
+  const float n = f(n_), sc = n / f(S);
+  constexpr float lx = -0.45f, ly = 0.89f;  // towards the light: up and to the left
+  for (int py = 0; py < S; ++py) {
+    for (int px = 0; px < S; ++px) {
+      const float gx = (f(px) + 0.5f) * sc + 0.5f;
+      const float gy = n - (f(py) + 0.5f) * sc + 0.5f;
+      const float T = temp_.sample(gx, gy), D = soot_.sample(gx, gy);
+      Rgb c{};
+      float a = 0.f;
+      if (p_.effect == Effect::orb) {  // light, with a faint blue haze where it has been
+        const Rgb e = orb_ramp(T);
+        const float h = 1.f - std::exp(-1.5f * D);
+        c = {e.r + 0.02f * h, e.g + 0.12f * h, e.b + 0.30f * h};
+        a = clamp01(0.35f * std::max({e.r, e.g, e.b}) + 0.15f * h);
+      } else {
+        float tau = 0.f;  // optical depth towards the light
+        for (int k = 1; k <= 12; ++k) tau += soot_.sample(gx + lx * 2.f * f(k) * sc, gy + ly * 2.f * f(k) * sc);
+        const float light = std::exp(-0.5f * tau);
+        if (p_.effect == Effect::jet) {  // flame over dark smoke
+          const Rgb e = jet_ramp(T);
+          const float as = 1.f - std::exp(-2.2f * D), keep = 1.f - 0.55f * as, g = 0.22f * (0.35f + 0.65f * light);
+          c = {e.r * keep + g * as, e.g * keep + 0.95f * g * as, e.b * keep + 0.9f * g * as};
+          a = clamp01(as + 0.25f * std::max(e.r, e.g));
+        } else {  // vortex: brown-grey dust, lit from above and shaded by itself
+          const float as = 1.f - std::exp(-2.5f * D), g = 0.32f + 0.68f * light;
+          c = {0.70f * g * as, 0.60f * g * as, 0.48f * g * as};
+          a = as;
+        }
+      }
+      auto o = out.subspan((static_cast<std::size_t>(py) * S + px) * 4, 4);
+      o[0] = q8(c.r);
+      o[1] = q8(c.g);
+      o[2] = q8(c.b);
+      o[3] = q8(a);
+    }
+  }
+  return true;
 }
 
 void stamp(Clip& clip, const Params& p) {
