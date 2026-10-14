@@ -390,5 +390,15 @@ if(NEURALFX_BUILD_TESTS)
              COMMAND nvfx_gallery --library ${CMAKE_CURRENT_SOURCE_DIR}/library --models ${NEURALFX_MODELS_LIBRARY} --only campfire,blue_gas_flame,grenade,steam_vent,portal,lightning_strike
                      --keyframes ${CMAKE_CURRENT_BINARY_DIR}/library_keyframes --verify ${CMAKE_CURRENT_SOURCE_DIR}/results/library/frozen.csv --threads 2)
     set_tests_properties(neuralfx.LibraryKeyframesFrozen PROPERTIES LABELS "neuralfx;data" SKIP_RETURN_CODE 77 TIMEOUT 1200)
+    # The fire whirl (docs/EFFECTS_ENERGY.md): jet, orb and vortex, all in NEURALFX_MODELS_ENERGY (outside git); its
+    # keyframes have the SHA-256 recorded in results/experiments/fx_energy_frozen.csv.
+    set(NEURALFX_MODELS_ENERGY "${_nvfx_data}/fx_energy/models/scene" CACHE PATH "jet.nvfx, orb.nvfx and vortex.nvfx")
+    add_test(NAME neuralfx.ScriptedFireWhirlFrozen
+             COMMAND nvfx_scene_script --script ${CMAKE_CURRENT_SOURCE_DIR}/examples/scenes/firewhirl.nvfxs --models ${NEURALFX_MODELS_ENERGY}
+                     --keyframes ${CMAKE_CURRENT_BINARY_DIR}/firewhirl_script_keyframes --no-video --threads 2
+                     --verify ${CMAKE_CURRENT_SOURCE_DIR}/results/experiments/fx_energy_frozen.csv)
+    set_tests_properties(neuralfx.ScriptedFireWhirlFrozen PROPERTIES LABELS "neuralfx;data" SKIP_RETURN_CODE 77 TIMEOUT 1200)
+    add_test(NAME neuralfx.SceneScriptChecks.firewhirl COMMAND nvfx_scene_script --script ${CMAKE_CURRENT_SOURCE_DIR}/examples/scenes/firewhirl.nvfxs --check)
+    set_tests_properties(neuralfx.SceneScriptChecks.firewhirl PROPERTIES LABELS neuralfx)
   endif()
 endif()

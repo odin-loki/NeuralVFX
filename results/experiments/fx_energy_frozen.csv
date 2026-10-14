@@ -1,0 +1,12 @@
+kind,name,file,bytes,sha256,source
+rollout_effect,jet,fx_energy/models/d/jet.nvfx,83719,2b2707401acf8eca154ab5c745e70d5d6ba35a2a92a7fe3a2e9ee35a1a464a2f,study D's recipe (docs/EFFECTS_ENERGY.md): d-train --stages12 1 then d-tune then d-finish
+rollout_effect,orb,fx_energy/models/d/orb.nvfx,83719,9395caad14be5f3e45319a26ecdb867c6037ae15473b17be9766d2df2acdc5e9,study D's recipe (docs/EFFECTS_ENERGY.md): d-train --stages12 1 then d-tune then d-finish
+rollout_effect,vortex,fx_energy/models/d/vortex.nvfx,83719,f5b4be3690fe0107da6747af6917eee8aadf98323bb2edff7331ad3afb3f348f,study D's recipe (docs/EFFECTS_ENERGY.md): d-train --stages12 1 then d-tune then d-finish (stages 1-2 restarted once after a container restart)
+firewhirl_keyframe,frame_024,nvfx_scene_script --keyframes (examples/scenes/firewhirl.nvfxs),1103798,683cad5cffe00c3ed7691fbb91190c174fd4a6209f173c0932d2ed0dbb339ae5,
+firewhirl_keyframe,frame_066,nvfx_scene_script --keyframes (examples/scenes/firewhirl.nvfxs),1108675,1c7567148146ac92fa0837b54bab0dc8f632e6921003dfaecbe2c42e0cd38d01,
+firewhirl_keyframe,frame_102,nvfx_scene_script --keyframes (examples/scenes/firewhirl.nvfxs),1212139,bc5169dcb40e4411477ef7291fb46b095d3be3b2ab53c21ec1928af8afd9bacd,
+firewhirl_keyframe,frame_138,nvfx_scene_script --keyframes (examples/scenes/firewhirl.nvfxs),1238797,a84b115ad31a85cde957b2f8e1b9967bf1e24d1e3ae7c2d7fd511e0d9aec1a7f,
+firewhirl_keyframe,frame_168,nvfx_scene_script --keyframes (examples/scenes/firewhirl.nvfxs),1308906,cb15c00bbbbc099404c010d4c15d9c50646d3a44859be5d45c49364d15a1eaee,
+firewhirl_keyframe,frame_204,nvfx_scene_script --keyframes (examples/scenes/firewhirl.nvfxs),1280200,6bef470075f5011ebdcf5d7c6076e8728447565635bf62acc194900185274d21,
+firewhirl_keyframe,frame_240,nvfx_scene_script --keyframes (examples/scenes/firewhirl.nvfxs),1292709,7020cf02fd96cb7ab18b8178a9b568cc7cd2c46460424a2587d112bf493587a4,
+firewhirl_keyframe,frame_282,nvfx_scene_script --keyframes (examples/scenes/firewhirl.nvfxs),1147665,b933a1e418f827dd25088d28eec803deceb36ad9821ff61829ddf4aafa7852e5,

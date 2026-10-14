@@ -1,0 +1,54 @@
+# A fire whirl in the desert at night, written as a script (docs/COMPOSE.md §4 and §5) to show the jet, the orb and
+# the vortex (docs/EFFECTS_ENERGY.md) together:
+#
+#   nvfx_scene_script --script examples/scenes/firewhirl.nvfxs --models DIR --out firewhirl.mp4
+#
+# DIR holds jet.nvfx, orb.nvfx and vortex.nvfx (docs/EFFECTS_ENERGY.md).
+#
+# A dust devil wanders in across the sand between two plasma lamps, whose cyan light falls on its dust. A flamethrower
+# opens up from the left; its flame bends into the whirl's wind, and when it reaches the whirl the whirl catches: it
+# burns as a column of fire, the lamps flare, and the flame and the fire die down to dust again.
+
+scene      size 1280 x 720, fps 30, length 10 s, ground 610
+bus        at (-128, -360), size 1536 x 1100, cell 8
+particles  capacity 6000, flow 0.9
+keyframes  0.8, 2.2, 3.4, 4.6, 5.6, 6.8, 8.0, 9.4
+
+effect jet    = "jet.nvfx"
+effect orb    = "orb.nvfx"
+effect devil  = "vortex.nvfx"   # (vortex is a field kind of the language, so the effect takes another name)
+
+# The dust lit by the scene (the lamps' cyan, the fire's orange, the sky), and the same column burning: its warm air
+# glows as flame.
+look dust  = shader, emission 0, soot_density 2.6, soot_albedo 0.5, sky 0.3, shadow 0.3, scene_light 1.6, relief 2,
+             tint (1, 0.78, 0.55)
+look blaze = shader, heat_scale 0.9, emission 2.6, emission_power 2, soot_density 2.6, soot_albedo 0.35, sky 0.2,
+             shadow 0.3, scene_light 0.8, relief 1, tint (1, 0.8, 0.6)
+
+let fire_on = smooth((t - 2.6) / 0.4) * (1 - smooth((t - 8.2) / 0.6))   # the flamethrower's trigger
+let caught  = smooth((t - lit) / 0.8) * (1 - smooth((t - 8.6) / 1.2))   # the whirl burning (0 until it catches)
+let drift   = 900 - 48 * t + 25 * noise(0.25 * t, 3.5, 0)              # where the whirl stands
+
+# The dust devil, wandering in from the right.
+module whirl  = devil, size 256, width 640, at (drift, ground), sink 0.02, feather 0.15, look dust to blaze by caught,
+                start 0, seed 61, controls (0.6, 0.6, 0.5), intensity 0.55 + 0.3 * caught, sway 0.5 + 0.2 * caught
+# The plasma lamps either side, breathing; they flare when the whirl catches.
+module lamp_l = orb, size 128, width 280, at (330, 280 + 10 * sin(1.3 * t)), feather 0.1, start 0, seed 71,
+                glow (0.5, 1.2, 2), controls (0.4, 0.3, 0.5), intensity 0.35 + 0.4 * caught, pulse 0.3 + 0.6 * caught
+module lamp_r = orb, size 128, width 300, at (930, 250 + 10 * sin(1.1 * t + 2)), feather 0.1, start 3, seed 72,
+                glow (0.5, 1.2, 2), controls (0.4, 0.3, 0.5), intensity 0.3 + 0.4 * caught, pulse 0.3 + 0.6 * caught
+# The flamethrower, from the left edge, almost level.
+module flame  = jet, size 128, width 640, at (300, ground), sink 0.25, feather 0.06, start 0, seed 81,
+                controls (0.2, 0.45, 0.5), intensity 0.15 + 0.8 * fire_on, opacity fire_on
+
+light   gain 0.2
+frame   exposure 1.2, fade smooth(t / 0.4) * smooth((length - t) / 0.6), haze 1, bloom 1, bloom_threshold 1
+
+# The flame reaches the whirl and it catches (by 6.5 s at the latest).
+when (t > 3.5 and heat(drift - 120, 470) > 0.15) or t > 6.5 as lit:   # the flame's heat, a little before the whirl
+  burst at (drift, 480), radius 50, embers 150, debris 0, speed 350
+
+every frame:
+  push flame, gain 0.35                            # the whirl's wind bends the flame
+  push lamp_l, gain 0.2                            # and tugs at the lamps' wisps
+  push lamp_r, gain 0.2

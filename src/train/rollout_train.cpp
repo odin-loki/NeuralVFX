@@ -1465,6 +1465,7 @@ SimRecipe recipe_for(sim::Effect e) {
   }
   // steam and magic (docs/EFFECTS.md) take fire's recipe: their vapour and energy are gone within a second or two, so
   // like fire's flames they grow their fine fields at instance start instead of storing them
+  // and so do jet, orb and vortex (docs/EFFECTS_ENERGY.md)
   return r;
 }
 

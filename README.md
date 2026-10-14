@@ -32,6 +32,8 @@ C++23, no third-party runtime dependencies, a C API for engines, no Python.
 - **Effect library:** [docs/LIBRARY.md](docs/LIBRARY.md): 48 named effects ready to place (fires, smokes, explosions,
   steam, magic, ambient, sparks, lights) from the five trained models and procedural elements, with a C API to spawn
   and drive them, a gallery, and the Godot node `NeuralVFXStage`.
+- **Energy effects:** [docs/EFFECTS_ENERGY.md](docs/EFFECTS_ENERGY.md) (a flamethrower's jet, a plasma orb and a dust
+  devil: presets, training, the test, a fire-whirl scene).
 - **Data and licences:** [docs/DATA.md](docs/DATA.md).
 - **Footage:** [docs/FOOTAGE.md](docs/FOOTAGE.md): start points estimated from frames (study J), so a rollout effect
   continues what footage shows (`nvfx_estimate`); validated on simulated renders only.
@@ -121,7 +123,7 @@ Ubuntu 24.04: `g++-14`, CMake 3.25+, Ninja, `libgtest-dev`, `zlib1g-dev` (and `f
 ```sh
 cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_COMPILER=g++-14
 cmake --build build
-ctest --test-dir build                     # 311 tests: sim, metrics, codecs, gradients, runtime parity, composition, scene scripts, field effects, context mixing, denoiser, lossless coder, low-bit, vector-quantised, sparse and multi-level features, video codecs, BC7 and ASTC flipbooks, allocation, C API for effects and scenes, the effect library, the effect manager, start points from footage
+ctest --test-dir build                     # 317 tests: sim, metrics, codecs, gradients, runtime parity, composition, scene scripts, field effects, context mixing, denoiser, lossless coder, low-bit, vector-quantised, sparse and multi-level features, video codecs, BC7 and ASTC flipbooks, allocation, C API for effects and scenes, the effect library, the effect manager, start points from footage
 ```
 
 Options: `NEURALFX_BUILD_VIEWER` (GLFW + OpenGL; fetches Dear ImGui), `NEURALFX_BUILD_SHARED` (libnvfx.so for engines),
