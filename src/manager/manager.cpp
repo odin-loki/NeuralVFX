@@ -673,11 +673,11 @@ void Manager::start_fade(Inst& in) {
 
 // An instance leaves a shared simulation with new controls: a simulation of its own continues from a copy of the shared
 // one's state at the same size (or a smaller one), so nothing restarts.
-void Manager::fork(Inst& in) {
+bool Manager::fork(Inst& in) {
   Model& M = models_[z(in.model)];
   Sim& src = M.sims[z(in.sim)];
   const int i = new_sim(M, in.model);
-  if (i < 0) return;  // no simulation free: it stays in the group until one is
+  if (i < 0) return false;
   Sim& s = M.sims[z(i)];
   s.controls = in.controls;
   s.seed = in.seed;
@@ -718,6 +718,7 @@ void Manager::fork(Inst& in) {
   in.offset_s = 0.f;
   detach(in);
   attach(in, in.model, i, 0);
+  return true;
 }
 
 // --- planning -----------------------------------------------------------------------------------------------------------------
@@ -1138,9 +1139,9 @@ void Manager::schedule(double dt) {
       if (s.ready) {
         s.clock += dt;
         auto f = static_cast<std::int64_t>(std::floor(s.clock * fps + 1e-9));
-        if (f > s.fb) {  // behind (its updates waited): it holds its last keyframe and its clock waits too
-          f = s.fb;
-          s.clock = (static_cast<double>(s.fb) + 0.5) / fps;
+        if (f > s.fb) {  // behind (its updates waited): it holds its last keyframe and its clock waits too (keeping
+          f = s.fb;      // its phase within a frame, which staggers the simulations' updates over the ticks)
+          s.clock = static_cast<double>(s.fb) / fps + s.subframe;
         }
         const bool ended = !M.loop && M.frames > 0 && s.fb >= M.frames - 1;
         s.show = f;
@@ -1235,8 +1236,11 @@ nvfx_status Manager::begin(double dt, int* jobs) {
     if (in.sim < 0) continue;
     Sim& s = M.sims[z(in.sim)];
     if (in.proxied) {
-      const int cell = proxy_cell(M, in);
-      if (cell != s.proxy_cell) {
+      int cell = proxy_cell(M, in);
+      if (cell >= 0 && M.proxy_sim[z(cell)] < 0 && plan_total_ + cost(M, M.proxy_level, M.proxy_div) > desc_.budget_ms) {
+        if (const int near = nearest_proxy(M, cell); near >= 0) cell = near;  // no room for another proxy
+      }
+      if (cell >= 0 && cell != s.proxy_cell) {
         const int p = ensure_proxy(in.model, cell);
         if (p >= 0 && M.sims[z(p)].ready) {
           start_fade(in);
@@ -1249,8 +1253,8 @@ nvfx_status Manager::begin(double dt, int* jobs) {
       }
     } else if (s.refs == 1) {
       s.controls = in.controls;
-    } else {
-      fork(in);
+    } else if (!fork(in)) {
+      in.controls_dirty = true;  // no simulation free: it stays in its group, and tries again next tick
     }
   }
   // new instances, most important first, join a simulation of the same effect, controls and seed; or get their own

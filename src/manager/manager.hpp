@@ -229,7 +229,7 @@ class Manager {
   bool proxy_ok(const Model& M, const Sim& s) const;
   bool evict(Model& M);
   void start_fade(Inst& in);
-  void fork(Inst& in);
+  bool fork(Inst& in);
 
   // planning
   void view(Inst& in);
