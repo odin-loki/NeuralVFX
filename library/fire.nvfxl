@@ -2,9 +2,13 @@
 # a look, not new dynamics: blue and green fire move as the orange one does). The fire model makes one flame per tile,
 # so wider fires are several flames side by side, each with its own start point and seed. In an entry, t is the time
 # since the spawn, (X, Y) the anchor, scale the size it was spawned at and alive 1 while it plays (docs/LIBRARY.md).
+# Also the jet (a flame from a nozzle at the left of its tile: it always blows to the right, as fire always rises, so
+# its entries are anchored at the nozzle, `anchor left`) and the vortex as a fire whirl.
 
-look gas   = like flame, hue 225, emission 2.8, soot_density 0.4     # blue: a gas flame
-look witch = like flame, hue 118, emission 2.6                        # green: witch fire
+look gas        = like flame, hue 225, emission 2.8, soot_density 0.4   # blue: a gas flame
+look witch      = like flame, hue 118, emission 2.6                      # green: witch fire
+look thrust     = like flame, hue 200, emission 3.2, soot_density 0.3   # blue-white: a rocket's exhaust
+look whirl_fire = like blaze, heat_scale 1.6, emission 2.4               # the vortex's warm air as flame, dimmer above
 
 entry campfire, category fire, size 240 x 300, anchor base, loop, show 2.5,
       about "A campfire: three flames of the fire model over glowing coals, embers and a warm light on the ground"
@@ -154,3 +158,38 @@ emit embers, on flame, tries 3, chance 0.6, spread 90 * scale
 field warm = lamp, at (X, Y - 50 * scale), radius 100 * scale, strength 0.7 * intensity, colour (1, 0.45, 0.15)
 every frame:
   transfer flame -> fumes, top 4, fraction 0.6, heat 0, soot 30
+
+entry flamethrower, category fire, size 520 x 300, anchor left, loop, show 2,
+      about "A flamethrower: a roaring jet of burning gas from its nozzle (the anchor), widening, breaking up and curling into smoke; it blows to the right"
+param intensity = 0.8, range (0.2, 1), about "how far it reaches"
+param aim = 0, range (-20, 30), about "its angle above level, degrees"
+let w = 520 * scale
+module flame = jet, size 128, width w, at (X + 0.45 * w, Y + 0.4 * w), feather 0.06, start 0, seed 701,
+               controls (0.8, 0.4, 0.6), intensity intensity, aim (aim + 20) / 50
+field glare = lamp, at (X + 60 * scale, Y), radius 140 * scale, strength 0.5 * intensity, colour (1, 0.55, 0.2)
+
+entry gas_leak_fire, category fire, size 300 x 240, anchor left, loop, show 2,
+      about "A burning gas leak: a roaring, flickering jet of flame from a broken pipe (the anchor), angled up; it blows to the right"
+param intensity = 0.55, range (0.2, 0.9), about "how hard it leaks"
+let w = 300 * scale
+module flame = jet, size 64, width w, at (X + 0.45 * w, Y + 0.4 * w), feather 0.08, start 7, seed 711,
+               controls (0.55, 1, 0.7), intensity intensity * (0.85 + 0.2 * noise(1.3 * t, 4.5 + 9 * variant, 0)), aim 1
+field glare = lamp, at (X + 40 * scale, Y - 20 * scale), radius 90 * scale, strength 0.45 * intensity, colour (1, 0.55, 0.2)
+
+entry rocket_thruster, category fire, size 420 x 200, anchor left, loop, show 2,
+      about "A rocket thruster: a fierce blue-white exhaust with a white-hot core at the nozzle (the anchor), the jet recoloured; it blows to the right"
+param intensity = 0.9, range (0.4, 1), about "thrust"
+let w = 420 * scale
+module exhaust = jet, size 128, width w, at (X + 0.45 * w, Y + 0.4 * w), feather 0.06, look thrust, start 0, seed 721,
+                 controls (0.9, 0.4, 0.45), intensity intensity, aim 0.4, glow (0.4, 0.6, 1.4)
+emit glow, at (X + 6 * scale, Y), radius 9 * scale, colour (0.8, 0.9, 1), brightness 2.5 * (0.9 + 0.1 * noise(30 * t, 2, 0))
+field blue = lamp, at (X + 40 * scale, Y), radius 120 * scale, strength 0.5 * intensity, colour (0.5, 0.7, 1)
+
+entry fire_whirl, category fire, size 320 x 480, anchor base, loop, show 4,
+      about "A fire whirl: a spinning column of flame rising from burning ground, swaying (the vortex model, its warm air drawn as flame)"
+param intensity = 0.85, range (0.5, 1), about "strength and width"
+param sway = 0.7, range (0, 1), about "how far and fast it wanders"
+module column = whirlwind, size 128, width 480 * scale, at (X, Y), sink 0.02, feather 0.15, look whirl_fire, start 7, seed 911,
+                controls (0.85, 0.7, 0.6), intensity intensity, sway sway
+emit embers, on column, tries 2, chance 0.5, spread 60 * scale
+field warm = lamp, at (X, Y - 80 * scale), radius 160 * scale, strength 0.7 * intensity, colour (1, 0.5, 0.18)

@@ -21,3 +21,25 @@ look vapour = shader, emission 0, soot_density 2.2, soot_albedo 0.8, sky 1.2, sh
 # The fire model's flames drawn by the field shader, so that a look can recolour them (hue).
 look flame  = shader, heat_scale 1.3, emission 2.4, emission_power 2, soot_density 1.2, soot_albedo 0.25, sky 0.08,
               shadow 0.3, scene_light 0.5, relief 2
+
+# Round 5's six (docs/EFFECTS_ATMOSPHERE.md, docs/EFFECTS_ENERGY.md). Fog, dust and cloud carry no heat: their material
+# is soot, drawn by the looks below. The vortex takes another name, as `vortex` is a field of the language.
+effect fog       = "fog.nvfx"                                         # intensity, wind, turbulence
+effect dust      = "dust.nvfx"                                        # plays once (3 s): 16 start points
+effect cloud     = "cloud.nvfx"                                       # intensity, wind, turbulence
+effect jet       = "jet.nvfx"                                         # intensity, aim (0: 20 degrees down, 1: 30 up), turbulence
+effect orb       = "orb.nvfx"                                         # intensity, pulse, turbulence
+effect whirlwind = "vortex.nvfx"                                      # intensity, sway, turbulence
+
+# The moor's looks (examples/scenes/moor.nvfxs): frost-white fog, a dark storm cloud, brown dust; all lit by the scene.
+look frost = shader, emission 0, soot_density 0.6, soot_albedo 0.8, sky 0.4, shadow 0.1, scene_light 1.4, relief 0.3,
+             tint (0.86, 0.93, 1)
+look storm = shader, emission 0, soot_density 3, soot_albedo 0.45, sky 0.25, shadow 0.35, scene_light 1.2, relief 2.5,
+             tint (0.62, 0.66, 0.78)
+look dirt  = shader, emission 0, soot_density 2.2, soot_albedo 0.6, sky 0.45, shadow 0.4, scene_light 1.2, relief 3,
+             tint (0.8, 0.62, 0.42)
+# The fire whirl's (examples/scenes/firewhirl.nvfxs): a dust devil's dust, and the same column burning.
+look devil_dust = shader, emission 0, soot_density 2.6, soot_albedo 0.5, sky 0.3, shadow 0.3, scene_light 1.6, relief 2,
+                  tint (1, 0.78, 0.55)
+look blaze = shader, heat_scale 0.9, emission 2.6, emission_power 2, soot_density 2.6, soot_albedo 0.35, sky 0.2,
+             shadow 0.3, scene_light 0.8, relief 1, tint (1, 0.8, 0.6)

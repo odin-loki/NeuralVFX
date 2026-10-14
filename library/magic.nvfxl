@@ -1,9 +1,14 @@
 # Magic: the magic model (a spinning ring of energy drawn into its centre), by its learned renderer (violet to white)
-# or recoloured by a field-shader look; and procedural circles of light.
+# or recoloured by a field-shader look; and procedural circles of light. Also the jet, the orb and the vortex, recoloured
+# or small.
 
 # The magic model's energy and mist drawn by the field shader: dark red energy over black mist (a recolour).
 look void = shader, heat_scale 1.5, emission 1.6, emission_power 2.5, soot_density 4, soot_albedo 0.05, sky 0.05,
             shadow 0.2, scene_light 0.2, relief 1, tint (0.25, 0.04, 0.06), hue 345
+
+# The jet's flame and the vortex's warm air drawn violet (recolours).
+look drake  = like flame, hue 250, emission 2.8, soot_density 0.8
+look arcane = like blaze, hue 250, heat_scale 1.4, emission 2.6, tint (0.75, 0.6, 1)
 
 entry portal, category magic, size 440 x 440, anchor centre, loop, show 3,
       about "A magic portal: the magic model opening over two seconds, spinning, its violet light on everything around"
@@ -61,3 +66,31 @@ emit arc, along (X, Y + 30 * scale) to (X + 10 * scale, Y - 280 * scale), rate 1
      jitter 0.15, branches 2, colour (0.85, 0.65, 1), brightness 2.6 * intensity, from 1.2
 field violet = lamp, at (X, Y - 80 * scale), radius 140 * scale, strength 0.8 * intensity * smooth(t / 0.8),
       colour (0.65, 0.4, 1)
+
+entry dragon_breath, category magic, size 640 x 340, anchor left, loop, show 2,
+      about "Dragon breath: a long, wide gout of violet fire from the anchor (the jet's flame recoloured: it moves as the orange one); it blows to the right"
+param intensity = 0.95, range (0.4, 1), about "how far it reaches"
+param aim = 5, range (-20, 30), about "its angle above level, degrees"
+let w = 640 * scale
+module breath = jet, size 128, width w, at (X + 0.45 * w, Y + 0.4 * w), feather 0.06, look drake, start 6, seed 731,
+                controls (0.95, 0.5, 0.8), intensity intensity, aim (aim + 20) / 50, turbulence 0.8, glow (0.7, 0.4, 1.4)
+field glare = lamp, at (X + 120 * scale, Y), radius 180 * scale, strength 0.5 * intensity, colour (0.7, 0.4, 1)
+
+entry wisp, category magic, size 120 x 120, anchor centre, loop, show 2,
+      about "A wisp: a small pale ball of cyan light that bobs and drifts about its place (the orb model, small)"
+param intensity = 0.3, range (0.1, 0.6), about "size and brightness"
+let wx = X + 30 * scale * noise(0.35 * t, 2.5 + 9 * variant, 0)
+let wy = Y + 18 * scale * noise(0.5 * t, 6.5 + 9 * variant, 0)
+module ball = orb, size 64, width 100 * scale, at (wx, wy + 50 * scale), feather 0.1, start 0, seed 821,
+              controls (0.3, 0.5, 0.5), intensity intensity, pulse 0.5, glow (0.4, 1, 1.6)
+field faint = lamp, at (wx, wy), radius 60 * scale, strength 0.3, colour (0.4, 0.9, 1)
+
+entry magic_vortex, category magic, size 320 x 480, anchor base, loop, show 4,
+      about "A magic vortex: a swaying column of violet fire rising from the ground (the vortex model recoloured), motes circling it"
+param intensity = 0.8, range (0.5, 1), about "strength and width"
+param sway = 0.5, range (0, 1), about "how far and fast it wanders"
+module column = whirlwind, size 128, width 480 * scale, at (X, Y), sink 0.02, feather 0.15, look arcane, start 0, seed 921,
+                controls (0.8, 0.5, 0.5), intensity intensity, sway sway, glow (0.7, 0.4, 1.4)
+emit glow, at (X, Y - 160 * scale), radius 2 * scale, count 10, spread 110 * scale, rate 0.6, seed 92, colour (0.8, 0.6, 1),
+     brightness 1.6
+field violet = lamp, at (X, Y - 80 * scale), radius 160 * scale, strength 0.6 * intensity, colour (0.7, 0.4, 1)

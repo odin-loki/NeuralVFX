@@ -1,12 +1,15 @@
 # Smoke: the smoke model (v2), drawn by field-shader looks lit by the scene (its colour is the look's: a recolour,
-# not new dynamics).
+# not new dynamics). Also the fog model as a heavy gas that stays low (the smoke model always rises) and the cloud model
+# as a smoke screen that lingers.
 
 look smoke_white = like smoke, tint (0.97, 0.97, 1), soot_albedo 0.85, soot_density 4.5, sky 1.1, relief 1.5
 look sooty       = like smoke, tint (0.5, 0.47, 0.45), soot_albedo 0.35, soot_density 5, sky 0.9, relief 1.6
 look oil         = like smoke, tint (0.3, 0.28, 0.27), soot_albedo 0.18, soot_density 12, sky 0.6, scene_light 1.6, relief 2
-look poison      = like smoke, tint (0.55, 1, 0.35), soot_albedo 0.7, soot_density 3, sky 0.9, scene_light 1
 look signal      = like smoke, tint (1, 0.32, 0.25), soot_albedo 0.8, soot_density 4, sky 0.95
 look dust        = like smoke, tint (0.62, 0.5, 0.38), soot_albedo 0.6, soot_density 3, sky 0.9, relief 1
+look toxic       = like frost, tint (0.55, 1, 0.3), soot_density 1.4, soot_albedo 0.75, sky 0.5, scene_light 1.3
+look screen      = shader, emission 0, soot_density 3, soot_albedo 0.85, sky 0.9, shadow 0.3, scene_light 1.2, relief 2,
+                   tint (0.93, 0.93, 0.95)                  # the cloud model as thick white smoke
 
 entry chimney_smoke, category smoke, size 260 x 440, anchor base, loop, show 4,
       about "Chimney smoke: a thin grey plume that leans with the wind; its anchor is the chimney's top"
@@ -43,12 +46,17 @@ module pool2  = fire, size 64, width 130 * scale, at (X - 50 * scale, Y), sink 0
                 controls (0.45, 0.55, 0.8), intensity 0.5 * intensity, wind wind
 field glare = lamp, at (X, Y - 40 * scale), radius 110 * scale, strength 0.6, colour (1, 0.4, 0.12)
 
-entry poison_smoke, category smoke, size 520 x 300, anchor base, loop, show 4,
-      about "Poison gas: a green cloud that rises a little and spreads out low, held down by still air"
-param intensity = 0.55, range (0.2, 0.9), about "how much smoke"
-module cloud = smoke, size 128, width 440 * scale, at (X, Y), sink 0.05, feather 0.25, look poison, start 0, seed 151,
-               controls (0.55, 0.5, 0.8), intensity intensity
-field low = ceiling, level Y - 160 * scale, soft 120 * scale, damping 0.2, on cloud
+entry poison_gas, category smoke, size 600 x 120, anchor base, loop, show 6,
+      about "Poison gas: a heavy green gas that pours out low and rolls along the ground (the fog model, recoloured)"
+param intensity = 0.8, range (0.3, 1), about "how much gas"
+param wind = 0.5, range (0, 1), about "drift: 0.5 still air"
+module a = fog, size 128, width 300 * scale, at (X - 185 * scale, Y), sink 0.03, feather 0.1, look toxic, start 6, seed 531,
+           controls (0.8, 0.5, 0.5), intensity 0.85 * intensity, wind wind
+module b = fog, size 128, width 350 * scale, at (X - 15 * scale, Y), sink 0.03, feather 0.1, look toxic, start 0, seed 532,
+           controls (0.8, 0.5, 0.5), intensity intensity, wind wind
+module c = fog, size 128, width 290 * scale, at (X + 175 * scale, Y), sink 0.03, feather 0.1, look toxic, start 7, seed 533,
+           controls (0.8, 0.5, 0.5), intensity 0.75 * intensity, wind wind
+field sick = lamp, at (X, Y - 20 * scale), radius 160 * scale, strength 0.25, colour (0.4, 1, 0.25)
 
 entry signal_smoke, category smoke, size 300 x 480, anchor base, loop, show 4,
       about "Signal smoke: a plume of red smoke from a flare on the ground"
@@ -58,3 +66,14 @@ module plume = smoke, size 128, width 300 * scale, at (X, Y), sink 0.04, feather
                controls (0.6, 0.6, 0.6), intensity intensity, wind wind
 emit glow, at (X, Y - 3 * scale), radius 7 * scale, colour (1, 0.25, 0.15), brightness 2.5
 field red = lamp, at (X, Y - 10 * scale), radius 50 * scale, strength 0.35, colour (1, 0.2, 0.12)
+
+entry smoke_screen, category smoke, size 700 x 240, anchor base, loop, show 6,
+      about "A smoke screen: a thick white wall of smoke that lingers where it was laid and boils slowly (the cloud model)"
+param intensity = 0.9, range (0.4, 1), about "how dense"
+param wind = 0.5, range (0, 1), about "drift"
+module a = cloud, size 128, width 460 * scale, at (X - 220 * scale, Y + 200 * scale), feather 0.1, look screen, start 6,
+           seed 561, controls (0.9, 0.5, 0.5), intensity intensity, wind wind
+module b = cloud, size 128, width 460 * scale, at (X, Y + 190 * scale), feather 0.1, look screen, start 0,
+           seed 562, controls (0.9, 0.5, 0.5), intensity intensity, wind wind
+module c = cloud, size 128, width 460 * scale, at (X + 220 * scale, Y + 200 * scale), feather 0.1, look screen, start 7,
+           seed 563, controls (0.9, 0.5, 0.5), intensity intensity, wind wind
