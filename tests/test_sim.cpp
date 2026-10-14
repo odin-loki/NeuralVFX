@@ -16,6 +16,7 @@
 #include <numeric>
 #include <span>
 #include <unistd.h>
+#include <utility>
 
 using namespace nfx;
 
@@ -179,8 +180,9 @@ TEST(Sim, LoopSeamIsNoWorseThanAnOrdinaryFrameStep) {
   EXPECT_LE(mean_abs_diff(c.frame(c.frames - 1), c.frame(0)), 1.5 * step + 0.5);
 }
 
-// Adding effects (docs/EFFECTS.md) must not change the studies' effects: these hashes are of clips made before steam
-// and magic existed (FNV-1a of the RGBA bytes; the solver is built at the baseline ISA without contraction).
+// Adding effects (docs/EFFECTS.md, docs/EFFECTS_ATMOSPHERE.md) must not change the earlier ones: these hashes are of
+// clips made before the later effects existed (fire, smoke and explosion before steam and magic; steam and magic before
+// fog, dust and cloud). FNV-1a of the RGBA bytes; the solver is built at the baseline ISA without contraction.
 TEST(Sim, StudyEffectsAreUnchangedByTheNewOnes) {
   const auto fnv = [](std::span<const std::uint8_t> b) {
     std::uint64_t h = 1469598103934665603ULL;
@@ -190,14 +192,19 @@ TEST(Sim, StudyEffectsAreUnchangedByTheNewOnes) {
     }
     return h;
   };
-  const std::array<std::uint64_t, 3> want{0xecb25de8e62e7379ULL, 0xea602bfa2409bf3fULL, 0xbb823d31fd8c4eb4ULL};
-  for (std::size_t k = 0; k < sim::kEffects.size(); ++k) {
-    auto p = small(sim::kEffects[k]);
+  const std::array<std::pair<sim::Effect, std::uint64_t>, 5> want{{{sim::Effect::fire, 0xecb25de8e62e7379ULL},
+                                                                   {sim::Effect::smoke, 0xea602bfa2409bf3fULL},
+                                                                   {sim::Effect::explosion, 0xbb823d31fd8c4eb4ULL},
+                                                                   {sim::Effect::steam, 0xa57b2dc109882ec3ULL},
+                                                                   {sim::Effect::magic, 0xf79b687a9614f399ULL}}};
+  for (const auto& [e, hash] : want) {
+    auto p = small(e);
     p.intensity = 0.8f;
     p.wind = 0.3f;
     p.turbulence = 0.7f;
     p.seed = 7;
-    EXPECT_EQ(fnv(sim::simulate(p).rgba), want[k]) << sim::effect_name(sim::kEffects[k]);
+    const std::uint64_t got = fnv(sim::simulate(p).rgba);
+    EXPECT_EQ(got, hash) << sim::effect_name(e) << std::format(": 0x{:016x}", got);
   }
 }
 
