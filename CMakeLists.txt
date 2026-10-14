@@ -119,10 +119,17 @@ neuralfx_defaults(neuralfx_compose)
 add_library(nvfx_scene_api STATIC src/compose/nvfx_scene.cpp)
 target_link_libraries(nvfx_scene_api PUBLIC neuralfx_compose)
 neuralfx_defaults(nvfx_scene_api)
+# The effect library (include/neuralfx/nvfx_library.h, docs/LIBRARY.md): catalogues of named effects written in the
+# scene-script language (library/*.nvfxl), and stages that spawn them, over the scene API. In libnvfx too.
+set(NEURALFX_LIBRARY_SOURCES src/library/library.cpp src/library/nvfx_library.cpp)
+add_library(nvfx_library_api STATIC ${NEURALFX_LIBRARY_SOURCES})
+target_include_directories(nvfx_library_api PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src/library")
+target_link_libraries(nvfx_library_api PUBLIC nvfx_scene_api)
+neuralfx_defaults(nvfx_library_api)
 if(NEURALFX_BUILD_SHARED)
-  add_library(nvfx_shared_scene OBJECT ${NEURALFX_COMPOSE_SOURCES} src/compose/nvfx_scene.cpp)
+  add_library(nvfx_shared_scene OBJECT ${NEURALFX_COMPOSE_SOURCES} src/compose/nvfx_scene.cpp ${NEURALFX_LIBRARY_SOURCES})
   target_include_directories(nvfx_shared_scene PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/include" "${CMAKE_CURRENT_SOURCE_DIR}/src/compose"
-                                                       "${CMAKE_CURRENT_SOURCE_DIR}/src/runtime")
+                                                       "${CMAKE_CURRENT_SOURCE_DIR}/src/runtime" "${CMAKE_CURRENT_SOURCE_DIR}/src/library")
   target_compile_definitions(nvfx_shared_scene PRIVATE NVFX_SHARED_BUILD)
   set_target_properties(nvfx_shared_scene PROPERTIES POSITION_INDEPENDENT_CODE ON CXX_VISIBILITY_PRESET hidden VISIBILITY_INLINES_HIDDEN ON)
   neuralfx_defaults(nvfx_shared_scene)
@@ -205,6 +212,22 @@ if(NEURALFX_BUILD_TOOLS)
   endif()
   set_target_properties(nvfx_c_host PROPERTIES LINKER_LANGUAGE CXX)
   neuralfx_defaults(nvfx_c_host)
+  # The effect library from plain C (nvfx_library.h): list a catalogue, spawn effects on a stage, drive and stop them.
+  add_executable(nvfx_library_host examples/library_host.c)
+  if(NEURALFX_BUILD_SHARED)
+    target_link_libraries(nvfx_library_host PRIVATE nvfx_shared)
+  else()
+    target_link_libraries(nvfx_library_host PRIVATE nvfx_library_api)
+  endif()
+  set_target_properties(nvfx_library_host PROPERTIES LINKER_LANGUAGE CXX)
+  neuralfx_defaults(nvfx_library_host)
+  # Every effect of a library catalogue: a contact sheet, a video, keyframes against frozen ones, and the check.
+  add_executable(nvfx_gallery tools/nvfx_gallery.cpp)
+  target_link_libraries(nvfx_gallery PRIVATE nvfx_library_api neuralfx_io neuralfx_dcm)
+  neuralfx_defaults(nvfx_gallery)
+  if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+    target_compile_options(nvfx_gallery PRIVATE -Wno-mismatched-new-delete)  # counts allocations (replaces operator new)
+  endif()
   # A scripted scene of composed effects (a fireball with smoke, fires, embers), rendered to video and profiled.
   add_executable(nvfx_fireball tools/nvfx_fireball.cpp)
   target_link_libraries(nvfx_fireball PRIVATE neuralfx_compose neuralfx_io)
@@ -280,8 +303,8 @@ if(NEURALFX_BUILD_TESTS)
                                 tests/test_runtime.cpp tests/test_ingest.cpp tests/test_rollout.cpp tests/test_compose.cpp
                                 tests/test_dcm.cpp tests/test_cm.cpp tests/test_dcm_fine.cpp tests/test_dcm_ddpm.cpp tests/test_script.cpp
                                 tests/test_g3_codec.cpp tests/test_video_codec.cpp tests/test_runtime_prior.cpp
-                                tests/test_dcm_extras.cpp tests/test_scene_api.cpp tests/test_handoff.cpp)
-  target_link_libraries(neuralfx_tests PRIVATE neuralfx_proto neuralfx_io neuralfx_train nvfx neuralfx_compose nvfx_scene_api neuralfx_dcm
+                                tests/test_dcm_extras.cpp tests/test_scene_api.cpp tests/test_handoff.cpp tests/test_library.cpp)
+  target_link_libraries(neuralfx_tests PRIVATE neuralfx_proto neuralfx_io neuralfx_train nvfx neuralfx_compose nvfx_scene_api nvfx_library_api neuralfx_dcm
                                                neuralfx_dcm_fine neuralfx_ddpm neuralfx_codec neuralfx_dcm_extras GTest::gtest_main)
   neuralfx_defaults(neuralfx_tests)
   target_compile_definitions(neuralfx_tests PRIVATE NEURALFX_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
@@ -293,7 +316,7 @@ if(NEURALFX_BUILD_TESTS)
   gtest_discover_tests(neuralfx_footage_tests TEST_PREFIX "neuralfx." DISCOVERY_MODE PRE_TEST PROPERTIES LABELS neuralfx)
   # Counts heap allocations around nvfx_render (replaces the global operator new, so it is its own program).
   add_executable(nvfx_alloc_test tests/alloc_test.cpp)
-  target_link_libraries(nvfx_alloc_test PRIVATE nvfx neuralfx_compose nvfx_scene_api neuralfx_ddpm)  # the trainer's format writer makes a test prior
+  target_link_libraries(nvfx_alloc_test PRIVATE nvfx neuralfx_compose nvfx_scene_api nvfx_library_api neuralfx_ddpm)  # the trainer's format writer makes a test prior
   neuralfx_defaults(nvfx_alloc_test)
   if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
     target_compile_options(nvfx_alloc_test PRIVATE -Wno-mismatched-new-delete)  # replacing operator new is the point
@@ -336,5 +359,21 @@ if(NEURALFX_BUILD_TESTS)
       add_test(NAME neuralfx.SceneScriptChecks.${scene} COMMAND nvfx_scene_script --script ${CMAKE_CURRENT_SOURCE_DIR}/examples/scenes/${scene}.nvfxs --check)
       set_tests_properties(neuralfx.SceneScriptChecks.${scene} PROPERTIES LABELS neuralfx)
     endforeach()
+    # The effect library (docs/LIBRARY.md). Without data: every entry of the catalogue parsed and checked, and the
+    # procedural ones played with zero allocations; the C example's checks of the API. With the five learned effects
+    # in NEURALFX_MODELS_LIBRARY (outside git; skipped without them): every entry played with zero allocations, and the
+    # keyframes of a handful of entries against their SHA-256 in results/library/frozen.csv.
+    set(NEURALFX_MODELS_LIBRARY "${_nvfx_data}/library/models" CACHE PATH "The library's learned effects: fire, smoke, explosion (v2), steam, magic .nvfx")
+    add_test(NAME neuralfx.LibraryCatalogueCheck COMMAND nvfx_gallery --library ${CMAKE_CURRENT_SOURCE_DIR}/library --check --threads 2)
+    set_tests_properties(neuralfx.LibraryCatalogueCheck PROPERTIES LABELS neuralfx TIMEOUT 600)
+    add_test(NAME neuralfx.LibraryHostExample COMMAND nvfx_library_host --self-test ${CMAKE_CURRENT_SOURCE_DIR}/library)
+    set_tests_properties(neuralfx.LibraryHostExample PROPERTIES LABELS neuralfx)
+    add_test(NAME neuralfx.LibraryCataloguePlays
+             COMMAND nvfx_gallery --library ${CMAKE_CURRENT_SOURCE_DIR}/library --models ${NEURALFX_MODELS_LIBRARY} --check --require-models --threads 2)
+    set_tests_properties(neuralfx.LibraryCataloguePlays PROPERTIES LABELS "neuralfx;data" SKIP_RETURN_CODE 77 TIMEOUT 1800)
+    add_test(NAME neuralfx.LibraryKeyframesFrozen
+             COMMAND nvfx_gallery --library ${CMAKE_CURRENT_SOURCE_DIR}/library --models ${NEURALFX_MODELS_LIBRARY} --only campfire,blue_gas_flame,grenade,steam_vent,portal,lightning_strike
+                     --keyframes ${CMAKE_CURRENT_BINARY_DIR}/library_keyframes --verify ${CMAKE_CURRENT_SOURCE_DIR}/results/library/frozen.csv --threads 2)
+    set_tests_properties(neuralfx.LibraryKeyframesFrozen PROPERTIES LABELS "neuralfx;data" SKIP_RETURN_CODE 77 TIMEOUT 1200)
   endif()
 endif()

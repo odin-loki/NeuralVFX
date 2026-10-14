@@ -1,0 +1,63 @@
+# Magic: the magic model (a spinning ring of energy drawn into its centre), by its learned renderer (violet to white)
+# or recoloured by a field-shader look; and procedural circles of light.
+
+# The magic model's energy and mist drawn by the field shader: dark red energy over black mist (a recolour).
+look void = shader, heat_scale 1.5, emission 1.6, emission_power 2.5, soot_density 4, soot_albedo 0.05, sky 0.05,
+            shadow 0.2, scene_light 0.2, relief 1, tint (0.25, 0.04, 0.06), hue 345
+
+entry portal, category magic, size 440 x 440, anchor centre, loop, show 3,
+      about "A magic portal: the magic model opening over two seconds, spinning, its violet light on everything around"
+param spin = 0.8, range (0.2, 1), about "how fast it turns"
+param intensity = 0.95, range (0.3, 1), about "how big and bright, once open"
+module gate = magic, size 256, width 420 * scale, at (X, Y + 210 * scale), feather 0.08, start 0, seed 261,
+              glow (1.2, 0.7, 3), controls (0.2, 0.3, 0.5), intensity 0.15 + (intensity - 0.15) * smooth(t / 2),
+              spin 0.3 + (spin - 0.3) * smooth(t / 2)
+emit glow, at (X, Y), radius 2.5 * scale, count 16, spread 170 * scale, rate 0.6, seed 26, colour (0.8, 0.6, 1),
+     brightness 1.8 * smooth(t / 2)
+field violet = lamp, at (X, Y), radius 160 * scale, strength 0.5 * smooth(t / 2), colour (0.6, 0.4, 1)
+
+entry dark_portal, category magic, size 440 x 440, anchor centre, loop, show 3,
+      about "A dark portal: the magic model recoloured blood red over black mist, crackling with red arcs"
+param spin = 0.6, range (0.2, 1), about "how fast it turns"
+module gate = magic, size 256, width 420 * scale, at (X, Y + 210 * scale), feather 0.08, look void, start 6, seed 271,
+              glow (1.6, 0.15, 0.25), controls (0.2, 0.3, 0.6), intensity 0.15 + 0.8 * smooth(t / 2),
+              spin 0.3 + (spin - 0.3) * smooth(t / 2)
+emit arc, along (X - 150 * scale, Y + 40 * scale) to (X - 60 * scale, Y - 60 * scale), rate 7, seed 1, width 1.4 * scale,
+     jitter 0.25, branches 1, colour (1, 0.25, 0.3), brightness 2.2, from 1.5
+emit arc, along (X + 150 * scale, Y - 30 * scale) to (X + 50 * scale, Y + 70 * scale), rate 5, seed 2, width 1.4 * scale,
+     jitter 0.25, branches 1, colour (1, 0.25, 0.3), brightness 2.2, from 1.8
+field blood = lamp, at (X, Y), radius 160 * scale, strength 0.5 * smooth(t / 2), colour (1, 0.15, 0.2)
+
+entry healing_circle, category magic, size 320 x 260, anchor base, loop, show 2.5,
+      about "A healing circle: a green ring of light on the ground, motes rising through it and a soft green light (procedural)"
+param intensity = 0.8, range (0.2, 1), about "brightness"
+let pulse = 0.8 + 0.2 * sin(3 * t)
+emit ring, at (X, Y - 4 * scale), radius 130 * scale, squash 0.28, width 3 * scale, colour (0.45, 1, 0.5),
+     brightness 1.6 * intensity * pulse * smooth(t / 0.6)
+emit ring, at (X, Y - 4 * scale), radius 95 * scale, squash 0.28, width 1.5 * scale, colour (0.45, 1, 0.5),
+     brightness 1.1 * intensity * smooth((t - 0.3) / 0.6)
+emit glow, at (X, Y - 90 * scale), radius 2.5 * scale, count 22, spread 110 * scale, rate 0.35, seed 33,
+     colour (0.5, 1, 0.55), brightness 2.2 * intensity * smooth(t / 1)
+field green = lamp, at (X, Y - 30 * scale), radius 110 * scale, strength 0.8 * intensity * pulse, colour (0.4, 1, 0.45)
+
+entry magic_orb, category magic, size 140 x 140, anchor centre, loop, show 2,
+      about "A magic orb: a small spinning knot of the magic model with a bright core and a violet light"
+param spin = 0.7, range (0.2, 1), about "how fast it turns"
+module gate = magic, size 64, width 120 * scale, at (X, Y + 60 * scale), feather 0.1, start 0, seed 281,
+              glow (1.2, 0.7, 3), controls (0.6, 0.7, 0.5), spin spin
+emit glow, at (X, Y), radius 10 * scale, colour (0.85, 0.7, 1), brightness 1.6 + 0.3 * sin(9 * t)
+field violet = lamp, at (X, Y), radius 70 * scale, strength 0.7, colour (0.7, 0.45, 1)
+
+entry summoning_circle, category magic, size 420 x 360, anchor base, loop, show 2.5,
+      about "A summoning circle: a violet ring on the ground with arcs of energy leaping up from it and a portal's light (procedural)"
+param intensity = 0.9, range (0.3, 1), about "brightness"
+emit ring, at (X, Y - 4 * scale), radius 170 * scale, squash 0.28, width 3.5 * scale, colour (0.7, 0.4, 1),
+     brightness 1.8 * intensity * smooth(t / 0.8)
+emit arc, along (X - 150 * scale, Y - 10 * scale) to (X - 60 * scale, Y - 220 * scale), rate 9, seed 3, width 1.3 * scale,
+     jitter 0.2, branches 1, colour (0.75, 0.5, 1), brightness 2.4 * intensity, from 0.6
+emit arc, along (X + 160 * scale, Y - 10 * scale) to (X + 50 * scale, Y - 240 * scale), rate 8, seed 4, width 1.3 * scale,
+     jitter 0.2, branches 1, colour (0.75, 0.5, 1), brightness 2.4 * intensity, from 0.9
+emit arc, along (X, Y + 30 * scale) to (X + 10 * scale, Y - 280 * scale), rate 11, seed 5, width 1.6 * scale,
+     jitter 0.15, branches 2, colour (0.85, 0.65, 1), brightness 2.6 * intensity, from 1.2
+field violet = lamp, at (X, Y - 80 * scale), radius 140 * scale, strength 0.8 * intensity * smooth(t / 0.8),
+      colour (0.65, 0.4, 1)

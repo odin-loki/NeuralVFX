@@ -1,0 +1,39 @@
+# Ambient: effects that set a mood rather than happen. Heat haze is the fire model drawn invisible: only its heat is
+# on the field bus, which bends what is seen through it.
+
+look invisible = shader, emission 0, soot_density 0, soot_albedo 0, sky 0, scene_light 0, relief 0
+
+entry heat_haze, category ambient, size 320 x 320, anchor base, loop, show 2,
+      about "Heat haze: shimmering air over hot ground or an engine, the fire model's heat with nothing drawn"
+param intensity = 0.6, range (0.2, 1), about "how hot: how much it shimmers"
+module hot_air = fire, size 64, width 260 * scale, at (X, Y), sink 0.05, look invisible, start 0, seed 291,
+              controls (0.6, 0.5, 0.4), intensity intensity
+
+entry fireflies, category ambient, size 360 x 240, anchor centre, loop, show 3,
+      about "Fireflies: small yellow-green lights wandering and blinking in the dark (procedural)"
+param count = 16, range (4, 48), about "how many"
+emit glow, at (X, Y), radius 2.2 * scale, count count, spread 160 * scale, rate 0.18, seed 41, colour (0.75, 1, 0.3),
+     brightness 2.6
+
+entry drifting_embers, category ambient, size 360 x 360, anchor base, loop, show 3,
+      about "Drifting embers: embers rising on warm air and drifting away, as over a burnt-out fire (carried by the flow of an invisible fire)"
+param density = 1, range (0.1, 3), about "how many embers"
+module updraft = fire, size 64, width 360 * scale, at (X, Y), sink 0.1, look invisible, start 1, seed 291,
+                 controls (0.9, 0.5, 0.5), intensity 0.9
+emit embers, on updraft, tries 3, chance 0.3 * density, spread 150 * scale
+
+entry smouldering_ground, category ambient, size 420 x 300, anchor base, loop, show 4,
+      about "Smouldering ground: thin smoke and a dull red glow where a fire has burnt out"
+param intensity = 0.18, range (0.05, 0.4), about "how much smoke"
+module smoulder = smoke, size 128, width 260 * scale, at (X, Y), sink 0.05, feather 0.2, look smoke, start 0, seed 301,
+                  controls (0.25, 0.55, 0.6), intensity intensity, opacity 0.75
+field coals = lamp, at (X, Y - 6 * scale), radius 110 * scale, strength 0.12, colour (1, 0.3, 0.08)
+when rand < 0.15, repeat:
+  burst at (X + (rand - 0.5) * 260 * scale, Y - 2 * scale), radius 3 * scale, embers 1, speed 40 * scale
+
+entry dust_motes, category ambient, size 300 x 300, anchor centre, loop, show 3,
+      about "Dust motes: specks of dust drifting slowly through a beam of light (procedural)"
+param count = 24, range (6, 64), about "how many"
+emit glow, at (X, Y), radius 1.4 * scale, count count, spread 140 * scale, rate 0.08, seed 51, colour (1, 0.92, 0.75),
+     brightness 1.2
+field beam = lamp, at (X, Y), radius 110 * scale, strength 0.12, colour (1, 0.9, 0.7)

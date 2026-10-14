@@ -1,0 +1,58 @@
+# Light: flashes, glows and lamps (procedural, not learned): what lights a scene for a moment or for good.
+
+entry muzzle_flash, category light, size 160 x 100, anchor centre, once 0.12, show 0.02,
+      about "A muzzle flash: a white-hot core, a long spike along the barrel and short side spikes, sparks, a flash of light (procedural)"
+param direction = 1, range (-1, 1), about "which way the barrel points: 1 right, -1 left"
+let fade = exp(-t / 0.03)
+let d = direction
+emit glow, at (X + 8 * d * scale, Y), radius 11 * scale, colour (1, 0.92, 0.7), brightness 3.2 * fade
+emit arc, along (X, Y) to (X + 68 * d * scale, Y), width 2.2 * scale * fade + 0.3, jitter 0, branches 0,
+     colour (1, 0.8, 0.45), brightness 2.6 * fade
+emit arc, along (X, Y) to (X + 34 * d * scale, Y), width 4 * scale * fade + 0.3, jitter 0, branches 0,
+     colour (1, 0.85, 0.55), brightness 2.4 * fade
+emit arc, along (X + 6 * d * scale, Y) to (X + 20 * d * scale, Y - 16 * scale), width 1.8 * scale * fade + 0.3, jitter 0,
+     branches 0, colour (1, 0.75, 0.4), brightness 2 * fade
+emit arc, along (X + 6 * d * scale, Y) to (X + 20 * d * scale, Y + 16 * scale), width 1.8 * scale * fade + 0.3, jitter 0,
+     branches 0, colour (1, 0.75, 0.4), brightness 2 * fade
+field blast = lamp, at (X + 20 * d * scale, Y), radius 100 * scale, strength 2 * fade, colour (1, 0.75, 0.4)
+at 0:
+  burst at (X + 20 * d * scale, Y), radius 4 * scale, embers 0, sparks 16, direction (d, 0), cone 35, speed 750 * scale
+
+entry signal_flare, category light, size 200 x 320, anchor base, loop, show 2,
+      about "A burning signal flare on the ground: a red glare that flickers, sparks and a trail of pink smoke"
+param intensity = 1, range (0.4, 1.4), about "brightness"
+let flick = 0.75 + 0.25 * noise(14 * t, 5, 0)
+module trail = smoke, size 64, width 140 * scale, at (X, Y - 4 * scale), sink 0.04, feather 0.2, look signal, start 0,
+               seed 321, controls (0.35, 0.6, 0.6)
+emit glow, at (X, Y - 4 * scale), radius 8 * scale, colour (1, 0.3, 0.2), brightness 3 * intensity * flick
+emit sparks, along (X, Y - 4 * scale) to (X, Y - 4 * scale), count 3
+field glare = lamp, at (X, Y - 10 * scale), radius 120 * scale, strength 1.1 * intensity * flick, colour (1, 0.18, 0.1)
+
+entry lantern, category light, size 120 x 120, anchor centre, loop, show 1,
+      about "A lantern: a steady warm point of light with a soft halo and a gentle flicker (procedural)"
+param intensity = 1, range (0.2, 2), about "brightness"
+let flick = 0.92 + 0.08 * noise(5 * t, 2, 0)
+emit glow, at (X, Y), radius 9 * scale, colour (1, 0.75, 0.4), brightness 1.6 * intensity * flick
+emit glow, at (X, Y), radius 30 * scale, colour (1, 0.6, 0.3), brightness 0.25 * intensity * flick
+field warm = lamp, at (X, Y), radius 80 * scale, strength 0.8 * intensity * flick, colour (1, 0.65, 0.35)
+
+entry flashbang, category light, size 400 x 300, anchor centre, once 1.5, show 0.05,
+      about "A flashbang: a white flash that blinds the whole scene for a moment, a bang (a shock front) and sparks (procedural)"
+param power = 1, range (0.5, 1.5), about "how blinding"
+let fade = exp(-t / 0.18)
+light flash (2 * power * fade, 2 * power * fade, 2.1 * power * fade)
+emit glow, at (X, Y), radius 60 * scale, colour (1, 1, 1), brightness 3 * power * fade
+camera x (rand - 0.5) * 8 * power * exp(-t / 0.15), y (rand - 0.5) * 8 * power * exp(-t / 0.15)
+at 0:
+  shock at (X, Y), speed 1300 * scale, decay 0.25, amp 6, width 26 * scale
+  burst at (X, Y), radius 6 * scale, embers 0, sparks 30, speed 500 * scale
+
+entry shockwave_ring, category light, size 600 x 260, anchor base, once 1.2, show 0.25,
+      about "A shockwave ring: a glowing ring racing out along the ground and a shock front bending the air (procedural)"
+param power = 1, range (0.4, 1.6), about "size and brightness"
+let r = 30 * scale + 300 * scale * power * (1 - exp(-t / 0.3))
+emit ring, at (X, Y - 2 * scale), radius r, squash 0.22, width 4 * scale, colour (1, 0.8, 0.55),
+     brightness 2.2 * power * exp(-t / 0.4)
+at 0:
+  shock at (X, Y - 30 * scale), speed 1200 * scale * power, decay 0.3, amp 6, width 26 * scale
+  scorch at (X, Y + 2 * scale), radius 70 * scale, glow 0.6 * exp(-t / 0.6)

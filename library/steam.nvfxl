@@ -1,0 +1,45 @@
+# Steam and water: the steam model, drawn by the vapour look (white, lit by the scene).
+
+look mist = like vapour, soot_density 0.9, soot_albedo 0.9, relief 0.4, shadow 0.1, sky 1.4
+
+entry steam_vent, category steam, size 280 x 400, anchor base, loop, show 3,
+      about "A steam vent: a jet of white vapour from a hole in the ground, hissing unevenly"
+param intensity = 0.6, range (0.2, 1), about "how hard it blows"
+param wind = 0.5, range (0, 1), about "lean"
+module jet = steam, size 128, width 260 * scale, at (X, Y), sink 0.04, feather 0.25, look vapour, start 0, seed 213,
+             controls (0.6, 0.5, 0.5), intensity intensity * (0.8 + 0.25 * noise(0.6 * t, 1.5 + 9 * variant, 0)), wind wind
+
+entry geyser, category steam, size 420 x 700, anchor base, loop, show 4,
+      about "A geyser: a gentle hiss that erupts into a tall column of steam every eight seconds, then dies down"
+param period = 8, range (4, 20), about "seconds between eruptions"
+module column = steam, size 256, width 420 * scale, at (X, Y), sink 0.03, feather 0.25, look vapour, start 0, seed 221,
+                controls (0.3, 0.5, 0.6), intensity 0.25 + 0.75 * smooth((t - period * floor(t / period) - 1.5) / 0.6) *
+                (1 - smooth((t - period * floor(t / period) - 4.5) / 1.5))
+
+entry pipe_leak, category steam, size 200 x 200, anchor base, loop, show 2,
+      about "A leaking pipe: a small, fast jet of steam bent sideways; its anchor is the leak"
+param intensity = 0.5, range (0.2, 1), about "how hard it leaks"
+param wind = 0.95, range (0, 1), about "which way it bends: 1 right, 0 left"
+module jet = steam, size 64, width 140 * scale, at (X, Y), sink 0.04, feather 0.25, look vapour, start 5, seed 231,
+             controls (0.5, 0.95, 0.7), intensity intensity, wind wind
+
+entry kettle_steam, category steam, size 90 x 140, anchor base, loop, show 2,
+      about "Steam from a kettle or a cooking pot: a small, slow wisp; its anchor is the spout"
+param intensity = 0.3, range (0.1, 0.6), about "how much"
+module wisp = steam, size 64, width 80 * scale, at (X, Y), sink 0.04, feather 0.2, look vapour, start 0, seed 241,
+              controls (0.3, 0.5, 0.4), intensity intensity
+
+entry hot_springs, category steam, size 700 x 300, anchor base, loop, show 4,
+      about "Hot springs: wisps of steam rising from pools across the ground and drifting with the air, five steam modules"
+param intensity = 0.5, range (0.2, 0.9), about "how thick"
+module m1 = steam, size 128, width 320 * scale, at (X - 240 * scale, Y + 20 * scale), sink 0.04, feather 0.35, look mist,
+            start 0, seed 251, controls (0.5, 0.5, 0.9), intensity intensity
+module m2 = steam, size 128, width 320 * scale, at (X - 120 * scale, Y + 20 * scale), sink 0.04, feather 0.35, look mist,
+            start 6, seed 252, controls (0.5, 0.5, 0.9), intensity intensity
+module m3 = steam, size 128, width 320 * scale, at (X, Y + 20 * scale), sink 0.04, feather 0.35, look mist, start 0,
+            seed 253, controls (0.5, 0.5, 0.9), intensity intensity
+module m4 = steam, size 128, width 320 * scale, at (X + 120 * scale, Y + 20 * scale), sink 0.04, feather 0.35, look mist,
+            start 6, seed 254, controls (0.5, 0.5, 0.9), intensity intensity
+module m5 = steam, size 128, width 320 * scale, at (X + 240 * scale, Y + 20 * scale), sink 0.04, feather 0.35, look mist,
+            start 0, seed 255, controls (0.5, 0.5, 0.9), intensity intensity
+field drift = wind, velocity (0.4 * scale, 0), on m1, m2, m3, m4, m5
