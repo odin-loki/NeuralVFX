@@ -120,8 +120,8 @@ Tune tune(const Params& p) {
     // steam, which rises; the wind drifts it. puffs: warm smoke, no wind (the second control is the rate; a fixed
     // drift instead). ink: no heat, dye barely lighter than the water, slow and damped; the current is its own force.
     case Effect::launch: return {20.f, -8.f, 1.6f, 0.15f, 30.f, 1.0f, 0.4f + 1.6f * turb, 8.f + 30.f * turb, 0.3f};
-    case Effect::puffs: return {32.f, 0.5f, 0.9f, 0.22f, 0.f, 0.f, 0.2f + 1.2f * turb, 5.f + 25.f * turb, 0.4f};
-    case Effect::ink: return {0.f, -3.f, 1.f, 0.05f, 0.f, 0.f, 0.1f + 0.7f * turb, 3.f + 12.f * turb, 0.6f};
+    case Effect::puffs: return {40.f, 0.5f, 0.6f, 0.22f, 0.f, 0.f, 0.2f + 1.2f * turb, 5.f + 25.f * turb, 0.4f};
+    case Effect::ink: return {0.f, -3.f, 1.f, 0.05f, 0.f, 0.f, 0.05f + 0.35f * turb, 3.f + 8.f * turb, 0.6f};
   }
   std::unreachable();
 }
@@ -980,15 +980,17 @@ LaunchNozzle launch_nozzle(const Params& p, float n) { return {0.5f * (n + 1.f),
 
 // puffs: the mouth of a chimney at the bottom of the frame, a little left of the middle (its trail drifts right). The
 // pulses are timed by the flicker noise at the middle of the mouth (a coarse cell's centre, where a learned stepper
-// sees exactly that value): a puff whenever it is above a level that the rate control lowers.
+// sees exactly that value): a puff whenever its size |f| rises above a level, which the rate control lowers (from
+// about 0.5 pulses a second to 2.6, irregularly; docs/EFFECTS_FLOW.md §2).
 constexpr float kPuffX = 46.5f, kPuffY = 6.5f;  // the middle of the mouth, in cells of a 128-cell frame
 float puff_gate(const Params& p, float time) {
   const float level = 0.40f - 0.26f * p.wind;  // rate: lower, more pulses per second
   return smoothstep(level, level + 0.05f, std::abs(source_flicker(p, kPuffX, kPuffY, time)));
 }
 
-// ink: a slow release of dye low in the middle of the frame, aimed by the curl noise where it is (it wanders).
-constexpr float kInkX = 64.5f, kInkY = 34.5f;
+// ink: a slow release of dye a quarter of the way up the middle of the frame, aimed by the curl noise where it is (it
+// wanders); a coarse cell's centre, as puffs' mouth.
+constexpr float kInkX = 62.5f, kInkY = 34.5f;
 
 }  // namespace
 
@@ -1028,7 +1030,7 @@ bool Fluid::add_flow_sources(float dt) {
         const float shape = 1.f - smoothstep(0.6f, 1.f, std::sqrt(ex * ex + ey * ey));
         if (shape <= 0.f) continue;
         const float k = g * shape;
-        temp_[x, y] = std::max(temp_[x, y], (0.4f + 0.3f * I) * k);
+        temp_[x, y] = std::max(temp_[x, y], (0.5f + 0.3f * I) * k);
         soot_[x, y] = std::max(soot_[x, y], (1.2f + 0.8f * I) * g * k);
         v_[x, y] = std::max(v_[x, y], kick * k);
       }
@@ -1055,9 +1057,10 @@ bool Fluid::add_flow_sources(float dt) {
   return true;
 }
 
-// launch: the ground the exhaust hits (as fog's and dust's, add_atmos_forces). puffs: a gentle fixed drift to the right
-// on the smoke. ink: the water drifts as a whole with the current (left or right), and is stirred everywhere, not only
-// where the dye is.
+// launch: the ground the exhaust hits (as fog's and dust's, add_atmos_forces). puffs: a light, fixed breeze to the right
+// that carries the smoke (as the wind of tune() does the other effects').
+// ink: the water drifts as a whole with the current (left or right), and is stirred everywhere, not only where the dye
+// is.
 void Fluid::add_flow_forces(float dt) {
   if (!flow_effect(p_.effect)) return;
   const float n = f(n_), s = n / 128.f;
@@ -1073,18 +1076,15 @@ void Fluid::add_flow_forces(float dt) {
     }
     return;
   }
-  if (p_.effect == Effect::puffs) {
-    const float drift = 20.f * s, drag = 1.f - std::exp(-1.0f * dt);
+  if (p_.effect == Effect::puffs) {  // a light breeze to the right, carrying the smoke
+    const float drift = 14.f * s, drag = 1.f - std::exp(-1.0f * dt);
     for (int y = 1; y <= n_; ++y) {
-      for (int x = 1; x <= n_; ++x) {
-        const float mat = std::min(1.f, 2.f * (temp_[x, y] + soot_[x, y]));
-        u_[x, y] += drag * (drift - u_[x, y]) * mat;
-      }
+      for (int x = 1; x <= n_; ++x) u_[x, y] += drag * (drift - u_[x, y]) * std::min(1.f, 2.f * (temp_[x, y] + soot_[x, y]));
     }
     return;
   }
   const float current = (2.f * p_.wind - 1.f) * 22.f * s, drag = 1.f - std::exp(-0.7f * dt);
-  const float L = 14.f * s, e = 0.25f, tt = time_ * 0.8f, amp = (3.f + 12.f * p_.turbulence) * s;
+  const float L = 14.f * s, e = 0.25f, tt = time_ * 0.8f, amp = (2.f + 6.f * p_.turbulence) * s;
   const std::uint64_t cseed = p_.seed * 0x2545F4914F6CDD1DULL + 77;  // as curl_potential
   for (int y = 1; y <= n_; ++y) {
     for (int x = 1; x <= n_; ++x) {
