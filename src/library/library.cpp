@@ -212,7 +212,8 @@ Entry header(const Statement& st, const std::string& file) {
     const std::string& v = a->value.names[0];
     if (v == "base") e.anchor = Anchor::base;
     else if (v == "centre") e.anchor = Anchor::centre;
-    else fail(a->value.pos, std::format("an anchor is 'base' (X, Y at the bottom centre of its box) or 'centre', not '{}'", v));
+    else if (v == "left") e.anchor = Anchor::left;
+    else fail(a->value.pos, std::format("an anchor is 'base' (X, Y at the bottom centre of its box), 'centre' or 'left' (the middle of its left edge), not '{}'", v));
   }
   const Prop* loop = st.prop("loop");
   const Prop* once = st.prop("once");

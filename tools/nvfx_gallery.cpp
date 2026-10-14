@@ -2,7 +2,7 @@
 // (nvfx_library.h): a labelled contact sheet, a video that walks through them, keyframes and their check against
 // frozen SHA-256, and a check of the whole catalogue.
 //
-//   nvfx_gallery --library DIR --models DIR [--sheet sheet.png] [--video walk.mp4] [--keyframes DIR]
+//   nvfx_gallery --library DIR --models DIR [--sheet sheet.png] [--video walk.mp4 [--clip S]] [--keyframes DIR]
 //                [--verify frozen.csv] [--only a,b,c] [--threads 2] [--cell 320x240] [--columns 6]
 //   nvfx_gallery --library DIR [--models DIR] --check [--require-models]
 //   nvfx_gallery --library DIR --list [--markdown]
@@ -12,9 +12,9 @@
 //                --frames N --png frame.png [--print-stage]
 //
 // Each effect plays alone on a stage fitted to its box (its catalogue size, at scale 1): spawned at 0.2 s, its
-// thumbnail and keyframe taken `show` seconds later, its clip in the video 4 s long (one-shots: their length). The
-// keyframes are PNG files named after the effects, with their rows for a frozen CSV in DIR/keyframes.csv; --verify
-// compares their SHA-256 with the rows
+// thumbnail and keyframe taken `show` seconds later, its clip in the video 4 s long (one-shots: their length; --clip S:
+// S seconds each). The keyframes are PNG files named after the effects, with their rows for a frozen CSV in
+// DIR/keyframes.csv; --verify compares their SHA-256 with the rows
 // "library_keyframe,NAME,file,bytes,sha256" of a CSV (exit 1 on a difference, 77 when the effects' files are missing).
 //
 // --check opens the catalogue (every entry parsed and checked as a stage of its own) and plays every entry whose
@@ -79,7 +79,7 @@ struct Args {
   std::vector<std::string> only;
   std::string print;
   int threads = 2, columns = 6, cell_w = 320, cell_h = 240, frames = 45, shot_w = 0, shot_h = 0;
-  float ground = 0.f;
+  float ground = 0.f, clip = 0.f;
   std::vector<Spawn> spawns;
   bool check = false, require_models = false, list = false, markdown = false, print_stage = false;
 };
@@ -121,6 +121,7 @@ Args parse(int argc, char** argv) {
     else if (k == "--cell") dims(a.cell_w, a.cell_h);
     else if (k == "--shot") dims(a.shot_w, a.shot_h);
     else if (k == "--ground") a.ground = std::stof(next());
+    else if (k == "--clip") a.clip = std::stof(next());
     else if (k == "--frames") a.frames = std::stoi(next());
     else if (k == "--spawn") {
       const std::string v = next();
@@ -280,7 +281,7 @@ Shot shot_for(const nvfx_library_effect& e) {
   if (static_cast<float>(s.w) < 4.f / 3.f * static_cast<float>(s.h)) s.w = ceil8(4.f / 3.f * static_cast<float>(s.h));
   else s.h = ceil8(0.75f * static_cast<float>(s.w));
   s.ground = std::round(0.9f * static_cast<float>(s.h));
-  s.x = 0.5f * static_cast<float>(s.w);
+  s.x = e.anchor == NVFX_ANCHOR_LEFT ? std::round(0.5f * (static_cast<float>(s.w) - e.width)) : 0.5f * static_cast<float>(s.w);
   s.y = e.anchor == NVFX_ANCHOR_BASE ? s.ground : std::round(s.ground - 0.5f * e.height - 0.05f * static_cast<float>(s.h));
   return s;
 }
@@ -352,7 +353,7 @@ int gallery(const Args& A, nvfx_library* lib) {
   constexpr int kVW = 960, kVH = 540;
   std::FILE* video = nullptr;
   if (!A.video.empty()) {
-    const std::string cmd = std::format("ffmpeg -loglevel error -y -f rawvideo -pix_fmt rgb24 -s {}x{} -r 30 -i - -c:v libx264 -preset slow -crf 20 "
+    const std::string cmd = std::format("ffmpeg -loglevel error -y -f rawvideo -pix_fmt rgb24 -s {}x{} -r 30 -i - -c:v libx264 -preset slow -crf 20 -threads 2 "
                                         "-pix_fmt yuv420p -movflags +faststart \"{}\"",
                                         kVW, kVH, A.video.string());
     video = popen(cmd.c_str(), "w");
@@ -375,7 +376,7 @@ int gallery(const Args& A, nvfx_library* lib) {
     nvfx_fx fx = 0;
     if (nvfx_stage_spawn(st.stage, s.e.name, sh.x, sh.y, 1.f, static_cast<double>(static_cast<float>(spawn_f) / fps), &fx) != NVFX_OK) die("spawn failed");
     const int show_f = spawn_f + static_cast<int>(std::lround(s.e.show * fps));
-    const float clip = s.e.looping ? 4.f : std::min(s.e.duration + 0.6f, 6.f);
+    const float clip = A.clip > 0.f ? A.clip : s.e.looping ? 4.f : std::min(s.e.duration + 0.6f, 6.f);
     const int clip0 = spawn_f, clip1 = spawn_f + static_cast<int>(std::lround(clip * fps));
     const int last = video ? std::max(show_f, clip1) : show_f;
     const auto t0 = Clock::now();
@@ -603,7 +604,7 @@ int list(const Args& A, nvfx_library* lib) {
       }
       const std::string plays = std::string(e.models) + (e.models[0] && e.elements[0] ? "; " : "") + e.elements;
       const std::string life = e.looping ? "loop" : std::format("once, {:g} s", e.duration);
-      const std::string size = std::format("{:g} x {:g}, {}", e.width, e.height, e.anchor == NVFX_ANCHOR_BASE ? "base" : "centre");
+      const std::string size = std::format("{:g} x {:g}, {}", e.width, e.height, e.anchor == NVFX_ANCHOR_BASE ? "base" : e.anchor == NVFX_ANCHOR_LEFT ? "left" : "centre");
       if (A.markdown) std::println("| `{}` | {} | {} | {} | {} | {} | {} |", e.name, e.category, plays, size, life, params.empty() ? "-" : params, e.description);
       else std::println("{:<20} {:<10} {:<34} {:<20} {:<12} {}", e.name, e.category, plays, size, life, params);
     }

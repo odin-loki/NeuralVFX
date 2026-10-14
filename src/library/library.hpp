@@ -37,7 +37,8 @@ struct Param {
   sc::Pos pos;
 };
 
-enum class Anchor { base, centre };  // (X, Y) is the bottom centre of the effect's box, or its centre
+// (X, Y) is the bottom centre of the effect's box, its centre, or the middle of its left edge (a jet's nozzle)
+enum class Anchor { base, centre, left };
 
 struct Entry {
   std::string name, category, about, file;  // file: the catalogue file it is in

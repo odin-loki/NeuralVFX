@@ -180,7 +180,7 @@ nvfx_status nvfx_library_get_effect(const nvfx_library* l, int i, nvfx_library_e
   o->file = e.file.c_str();
   o->width = e.width;
   o->height = e.height;
-  o->anchor = e.anchor == lib::Anchor::centre ? NVFX_ANCHOR_CENTRE : NVFX_ANCHOR_BASE;
+  o->anchor = e.anchor == lib::Anchor::centre ? NVFX_ANCHOR_CENTRE : e.anchor == lib::Anchor::left ? NVFX_ANCHOR_LEFT : NVFX_ANCHOR_BASE;
   o->looping = e.loop ? 1 : 0;
   o->duration = e.duration;
   o->show = e.show;
