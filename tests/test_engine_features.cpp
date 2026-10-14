@@ -215,6 +215,67 @@ trail smoke = tiny, size 32, width 64, band 4, tiles 10, at (X, Y), look gas, ho
   nvfx_library_free(lib);
 }
 
+TEST(Trails, AMovedInstanceGivesTheSameFramesOnAnyNumberOfThreads) {
+  // Moves are inputs: they act from the next frame computed, and with overlap (a frame's state computed while the last
+  // picture is drawn) from the frame after (docs/ENGINES.md §7). For one overlap setting, the frames do not depend on
+  // the number of threads.
+  const EffectPtr tiny = tiny_nvfx(3);
+  const char* catalogue = R"(
+effect tiny = "tiny.nvfx"
+look gas = shader, heat_scale 1, emission 2, relief 2
+entry streak, category trails, size 160 x 60, anchor centre, loop, moving (120, 0), about "a moving source"
+let lean = clamp(smoke.vx / 400, -0.3, 0.3)
+module head = tiny, size 32, width 40 * scale, at (X, Y + 20 * scale), start 1, seed 7, wind 0.5 - lean
+trail smoke = tiny, size 32, width 64, band 4, tiles 6, at (X, Y), look gas, hold 0.3, fade 0.3, soot 0.5, heat 0.1, radius 6,
+      kick -0.2
+at 0, repeat: burst at (X, Y), embers 0, sparks 1, speed 100, direction (-smoke.vx, 0.01), cone 30
+)";
+  const nvfx_library_file file{"t.nvfxl", catalogue};
+  nvfx_library_desc ld;
+  nvfx_library_desc_init(&ld);
+  ld.files = &file;
+  ld.n_files = 1;
+  nvfx_library* lib = nullptr;
+  nvfx_scene_error err;
+  ASSERT_EQ(nvfx_library_open(&ld, &lib, &err), NVFX_OK) << err.message;
+  const auto frames = [&](int threads, int overlap) {
+    const nvfx_scene_effect fx{"tiny.nvfx", tiny.get()};
+    const nvfx_stage_room room{"streak", 1, 0};
+    nvfx_stage_desc sd;
+    nvfx_stage_desc_init(&sd);
+    sd.width = 240;
+    sd.height = 120;
+    sd.ground = 110;
+    sd.rooms = &room;
+    sd.n_rooms = 1;
+    sd.effects = &fx;
+    sd.n_effects = 1;
+    sd.threads = threads;
+    sd.overlap = overlap;
+    nvfx_stage* st = nullptr;
+    EXPECT_EQ(nvfx_stage_create(lib, &sd, &st, &err), NVFX_OK) << err.message;
+    nvfx_scene* scene = nvfx_stage_scene(st);
+    std::vector<std::uint8_t> rgba(240 * 120 * 4), all;
+    nvfx_fx a = 0;
+    nvfx_stage_spawn(st, "streak", 20.f, 60.f, 1.f, -1.0, &a);
+    for (int f = 1; f <= 45; ++f) {
+      nvfx_stage_move(st, a, 20.f + 4.f * static_cast<float>(f), 60.f + 10.f * std::sin(0.2f * static_cast<float>(f)));
+      nvfx_scene_step_frames(scene, 1);
+      nvfx_scene_render(scene, rgba.data(), 240 * 4);
+      all.insert(all.end(), rgba.begin(), rgba.end());
+    }
+    nvfx_stage_free(st);
+    return all;
+  };
+  const auto one = frames(1, 0);
+  EXPECT_EQ(one, frames(2, 0));
+  EXPECT_EQ(one, frames(3, 0));
+  const auto two = frames(2, 1);
+  EXPECT_EQ(two, frames(3, 1));
+  EXPECT_EQ(two, frames(4, 1));
+  nvfx_library_free(lib);
+}
+
 // --- engine layers -----------------------------------------------------------------------------------------------------
 
 namespace {

@@ -62,8 +62,25 @@ bool NeuralVFXScene::load_scene() {
   pixels_.resize(static_cast<int64_t>(width_) * height_ * 4);
   image_ = Image::create_empty(width_, height_, false, Image::FORMAT_RGBA8);
   texture_ = ImageTexture::create_from_image(image_);
+  for (int l = 0; l < 4; ++l) {
+    layer_images_[static_cast<std::size_t>(l)] = Ref<Image>();
+    layer_textures_[static_cast<std::size_t>(l)] = Ref<ImageTexture>();
+    if (!info.layers) continue;
+    const bool hdr = l == LAYER_COLOUR || l == LAYER_EMISSION;  // half floats; the others 8 bits a channel
+    layer_pixels_[static_cast<std::size_t>(l)].resize(static_cast<int64_t>(width_) * height_ * (hdr ? 8 : 4));
+    layer_images_[static_cast<std::size_t>(l)] = Image::create_empty(width_, height_, false, hdr ? Image::FORMAT_RGBAH : Image::FORMAT_RGBA8);
+    layer_textures_[static_cast<std::size_t>(l)] = ImageTexture::create_from_image(layer_images_[static_cast<std::size_t>(l)]);
+  }
   draw();
   return true;
+}
+
+Ref<ImageTexture> NeuralVFXScene::get_layer_texture(Layer layer) const {
+  return layer >= 0 && layer < 4 ? layer_textures_[static_cast<std::size_t>(layer)] : Ref<ImageTexture>();
+}
+
+Ref<Image> NeuralVFXScene::get_layer_image(Layer layer) const {
+  return layer >= 0 && layer < 4 ? layer_images_[static_cast<std::size_t>(layer)] : Ref<Image>();
 }
 
 nvfx_scene* NeuralVFXScene::create_scene() {
@@ -114,6 +131,7 @@ nvfx_scene* NeuralVFXScene::create_scene() {
   d.overlap = overlap_ ? 1 : 0;
   d.width = output_size_.x > 0 ? output_size_.x : 0;
   d.height = output_size_.y > 0 ? output_size_.y : 0;
+  d.layers = layers_ ? 1 : 0;
   nvfx_scene* scene = nullptr;
   const nvfx_status s = nvfx_scene_create(&d, &scene, &err);
   free_loaded();  // the scene keeps copies
@@ -129,6 +147,16 @@ void NeuralVFXScene::draw() {
   nvfx_scene_render(scene_, pixels_.ptrw(), static_cast<size_t>(width_) * 4);
   image_->set_data(width_, height_, false, Image::FORMAT_RGBA8, pixels_);
   texture_->update(image_);
+  for (int l = 0; l < 4; ++l) {  // the engine layers of the same frame
+    Ref<Image>& img = layer_images_[static_cast<std::size_t>(l)];
+    if (img.is_null()) continue;
+    const bool hdr = l == LAYER_COLOUR || l == LAYER_EMISSION;
+    PackedByteArray& px = layer_pixels_[static_cast<std::size_t>(l)];
+    nvfx_scene_render_layer(scene_, static_cast<nvfx_scene_layer>(l), hdr ? NVFX_FORMAT_RGBA16F : NVFX_FORMAT_RGBA8, px.ptrw(),
+                            static_cast<size_t>(width_) * (hdr ? 8 : 4));
+    img->set_data(width_, height_, false, hdr ? Image::FORMAT_RGBAH : Image::FORMAT_RGBA8, px);
+    layer_textures_[static_cast<std::size_t>(l)]->update(img);
+  }
   drawn_ = nvfx_scene_frame(scene_);
   emit_signal("frame_drawn", drawn_);
 }
@@ -325,6 +353,14 @@ void NeuralVFXScene::_bind_methods() {
   ClassDB::bind_method(D_METHOD("get_speed"), &NeuralVFXScene::get_speed);
   ClassDB::bind_method(D_METHOD("get_texture"), &NeuralVFXScene::get_texture);
   ClassDB::bind_method(D_METHOD("get_image"), &NeuralVFXScene::get_image);
+  ClassDB::bind_method(D_METHOD("set_layers", "on"), &NeuralVFXScene::set_layers);
+  ClassDB::bind_method(D_METHOD("get_layers"), &NeuralVFXScene::get_layers);
+  ClassDB::bind_method(D_METHOD("get_layer_texture", "layer"), &NeuralVFXScene::get_layer_texture);
+  ClassDB::bind_method(D_METHOD("get_layer_image", "layer"), &NeuralVFXScene::get_layer_image);
+  ClassDB::bind_method(D_METHOD("get_colour_texture"), &NeuralVFXScene::get_colour_texture);
+  ClassDB::bind_method(D_METHOD("get_albedo_texture"), &NeuralVFXScene::get_albedo_texture);
+  ClassDB::bind_method(D_METHOD("get_emission_texture"), &NeuralVFXScene::get_emission_texture);
+  ClassDB::bind_method(D_METHOD("get_normal_texture"), &NeuralVFXScene::get_normal_texture);
   ADD_PROPERTY(PropertyInfo(Variant::STRING, "scene_script", PROPERTY_HINT_FILE, "*.nvfxs"), "set_scene_script", "get_scene_script");
   ADD_PROPERTY(PropertyInfo(Variant::STRING, "effects_dir", PROPERTY_HINT_DIR), "set_effects_dir", "get_effects_dir");
   ADD_PROPERTY(PropertyInfo(Variant::INT, "threads", PROPERTY_HINT_RANGE, "1,64"), "set_threads", "get_threads");
@@ -334,6 +370,11 @@ void NeuralVFXScene::_bind_methods() {
   ADD_PROPERTY(PropertyInfo(Variant::BOOL, "looping"), "set_looping", "is_looping");
   ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "speed"), "set_speed", "get_speed");
   ADD_PROPERTY(PropertyInfo(Variant::OBJECT, "texture", PROPERTY_HINT_RESOURCE_TYPE, "ImageTexture", PROPERTY_USAGE_NONE), "", "get_texture");
+  ADD_PROPERTY(PropertyInfo(Variant::BOOL, "layers"), "set_layers", "get_layers");
+  ADD_PROPERTY(PropertyInfo(Variant::OBJECT, "colour_texture", PROPERTY_HINT_RESOURCE_TYPE, "ImageTexture", PROPERTY_USAGE_NONE), "", "get_colour_texture");
+  ADD_PROPERTY(PropertyInfo(Variant::OBJECT, "albedo_texture", PROPERTY_HINT_RESOURCE_TYPE, "ImageTexture", PROPERTY_USAGE_NONE), "", "get_albedo_texture");
+  ADD_PROPERTY(PropertyInfo(Variant::OBJECT, "emission_texture", PROPERTY_HINT_RESOURCE_TYPE, "ImageTexture", PROPERTY_USAGE_NONE), "", "get_emission_texture");
+  ADD_PROPERTY(PropertyInfo(Variant::OBJECT, "normal_texture", PROPERTY_HINT_RESOURCE_TYPE, "ImageTexture", PROPERTY_USAGE_NONE), "", "get_normal_texture");
 
   ClassDB::bind_method(D_METHOD("load_scene"), &NeuralVFXScene::load_scene);
   ClassDB::bind_method(D_METHOD("unload_scene"), &NeuralVFXScene::unload_scene);
@@ -373,6 +414,10 @@ void NeuralVFXScene::_bind_methods() {
   BIND_ENUM_CONSTANT(FIELD_SOOT);
   BIND_ENUM_CONSTANT(FIELD_U);
   BIND_ENUM_CONSTANT(FIELD_V);
+  BIND_ENUM_CONSTANT(LAYER_COLOUR);
+  BIND_ENUM_CONSTANT(LAYER_ALBEDO);
+  BIND_ENUM_CONSTANT(LAYER_EMISSION);
+  BIND_ENUM_CONSTANT(LAYER_NORMAL);
 }
 
 }  // namespace godot

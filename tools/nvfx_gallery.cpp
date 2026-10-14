@@ -72,9 +72,9 @@ namespace {
 using Clock = std::chrono::steady_clock;
 namespace fs = std::filesystem;
 
-struct Spawn {
+struct Spawn {  // (doubles: a moving spawn's places are computed in double and rounded to float, as GDScript does)
   std::string name;
-  float x = 0, y = 0, scale = 1, at = -1, vx = 0, vy = 0;
+  double x = 0, y = 0, scale = 1, at = -1, vx = 0, vy = 0;
 };
 
 struct Args {
@@ -134,13 +134,13 @@ Args parse(int argc, char** argv) {
       s.name = v.substr(0, at);
       const auto n = split(v.substr(at + 1), ',');
       if (n.size() < 2 || n.size() == 5) throw std::invalid_argument("--spawn takes NAME@X,Y[,SCALE[,AT[,VX,VY]]]");
-      s.x = std::stof(n[0]);
-      s.y = std::stof(n[1]);
-      if (n.size() > 2) s.scale = std::stof(n[2]);
-      if (n.size() > 3) s.at = std::stof(n[3]);
+      s.x = std::stod(n[0]);
+      s.y = std::stod(n[1]);
+      if (n.size() > 2) s.scale = std::stod(n[2]);
+      if (n.size() > 3) s.at = std::stod(n[3]);
       if (n.size() > 5) {
-        s.vx = std::stof(n[4]);
-        s.vy = std::stof(n[5]);
+        s.vx = std::stod(n[4]);
+        s.vy = std::stod(n[5]);
       }
       a.spawns.push_back(s);
     } else if (k == "--check") a.check = true;
@@ -602,16 +602,18 @@ int shot(const Args& A, nvfx_library* lib) {
   std::vector<nvfx_fx> fxs;
   for (const Spawn& s : A.spawns) {
     nvfx_fx fx = 0;
-    if (nvfx_stage_spawn(st.stage, s.name.c_str(), s.x, s.y, s.scale, s.at, &fx) != NVFX_OK) die("spawn of " + s.name + " failed");
+    if (nvfx_stage_spawn(st.stage, s.name.c_str(), static_cast<float>(s.x), static_cast<float>(s.y), static_cast<float>(s.scale), s.at, &fx) != NVFX_OK) {
+      die("spawn of " + s.name + " failed");
+    }
     fxs.push_back(fx);
   }
   for (int f = 1; f <= A.frames; ++f) {
-    const float t = static_cast<float>(f) / st.info.fps;  // the time of the frame about to be computed
+    const double t = static_cast<double>(f) / static_cast<double>(st.info.fps);  // the time of the frame about to be computed
     for (std::size_t k = 0; k < A.spawns.size(); ++k) {
       const Spawn& s = A.spawns[k];
-      if (s.vx == 0.f && s.vy == 0.f) continue;
-      const float since = std::max(0.f, t - std::max(0.f, s.at));
-      nvfx_stage_move(st.stage, fxs[k], s.x + s.vx * since, s.y + s.vy * since);
+      if (s.vx == 0.0 && s.vy == 0.0) continue;
+      const double since = std::max(0.0, t - std::max(0.0, s.at));
+      nvfx_stage_move(st.stage, fxs[k], static_cast<float>(s.x + s.vx * since), static_cast<float>(s.y + s.vy * since));
     }
     nvfx_scene_step_frames(st.scene, 1);
     st.render();

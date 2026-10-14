@@ -1,8 +1,10 @@
 # The headless test of the effect library in Godot (engines/godot/test.sh): a NeuralVFXStage lists the catalogue,
-# spawns five effects (learned and procedural) at given times, plays 45 frames and saves the frame as PNG. Checks: the
-# catalogue's listing and an effect's description; spawns, an unknown effect and a full room refused; given
-# nvfx_gallery's frame of the same stage and spawns (--reference), the same pixels to the byte; heat over the campfire;
-# the instances' states, a stop and a stale handle. Exit code: the number of failed checks.
+# spawns five effects (learned and procedural) at given times and a rocket trail moved every frame, plays 45 frames with
+# the engine layers on and saves the frame as PNG. Checks: the catalogue's listing and an effect's description; spawns,
+# an unknown effect and a full room refused; given nvfx_gallery's frame of the same stage, spawns and moves
+# (--reference), the same pixels to the byte; heat over the campfire; smoke left behind the rocket; the four layer
+# textures (their formats, thickness 0 where alpha is 0); the instances' states, a stop and a stale handle. Exit code:
+# the number of failed checks.
 #
 #   godot --headless --path engines/godot/demo --script res://test_library.gd -- --library DIR --library_models DIR
 #         --out PNG --frames 45 [--reference library_frame.png]
@@ -29,8 +31,9 @@ func _initialize() -> void:
 	stage.effects_dir = args.library_models
 	stage.stage_size = Vector2i(960, 540)
 	stage.ground = 470
-	stage.rooms = {"campfire": 1, "steam_vent": 1, "magic_burst": 1, "electric_arc": 1, "plasma_orb": 1}
+	stage.rooms = {"campfire": 1, "steam_vent": 1, "magic_burst": 1, "electric_arc": 1, "plasma_orb": 1, "rocket_trail": 1}
 	stage.threads = 2
+	stage.layers = true  # the engine layers too (the picture is the same)
 	stage.playing = false  # the frames are stepped here
 	root.add_child(stage)
 	stage.load_scene()
@@ -47,19 +50,26 @@ func _initialize() -> void:
 	check(info.category == "fire" and info.looping and info.params.size() == 2 and info.params[0].name == "intensity", "an effect's description")
 	var jet := stage.get_effect_info("flamethrower")
 	check(jet.anchor == "left" and jet.models == "jet", "a jet is anchored at its nozzle, on the left of its box")
+	var trail := stage.get_effect_info("rocket_trail")
+	check(trail.moving == Vector2(280, -90) and trail.elements.contains("trail"), "a rocket trail moves (its trail stays in the world)")
 
 	var fire: int = stage.spawn("campfire", Vector2(220, 470), 1.0, 0.3)
 	var vent: int = stage.spawn("steam_vent", Vector2(480, 470), 0.8, 0.4)
 	var burst: int = stage.spawn("magic_burst", Vector2(760, 260), 1.0, 0.6)
 	var arc: int = stage.spawn("electric_arc", Vector2(620, 470), 1.0, 0.2)
 	var orb: int = stage.spawn("plasma_orb", Vector2(110, 150), 0.8, 0.5)
-	check(fire != 0 and vent != 0 and burst != 0 and arc != 0 and orb != 0, "five spawns")
+	var rocket: int = stage.spawn("rocket_trail", Vector2(100, 330), 0.8, 0.1)
+	check(fire != 0 and vent != 0 and burst != 0 and arc != 0 and orb != 0 and rocket != 0, "six spawns")
 	check(stage.spawn("campfire", Vector2(300, 470)) == 0, "no second campfire: its one room is taken")
 	check(stage.spawn("no_such_effect", Vector2(300, 470)) == 0, "an unknown effect is refused")
 	check(stage.get_fx_info(fire).state == "waiting", "the campfire waits for its time")
 
 	var frames: int = args.frames
 	for f in range(frames):
+		# the rocket flies at (250, -60) pixels a second from its spawn: moved before the frame is computed, as
+		# nvfx_gallery --shot moves it (in double, then rounded to float)
+		var since := maxf(0.0, float(f + 1) / stage.get_fps() - 0.1)
+		stage.move_fx(rocket, Vector2(100.0 + 250.0 * since, 330.0 - 60.0 * since))
 		stage.advance(1.0 / stage.get_fps())
 	print("  %d frames, frame %d at t %.2f s" % [frames, stage.get_frame(), stage.get_time()])
 
@@ -77,6 +87,27 @@ func _initialize() -> void:
 	var heat := stage.get_field_max(NeuralVFXScene.FIELD_HEAT, Rect2(180, 300, 80, 170))
 	print("  heat over the campfire (max) %.2f" % heat)
 	check(heat > 0.1, "heat where the campfire burns")
+	var smoke := stage.get_field_max(NeuralVFXScene.FIELD_SOOT, Rect2(120, 290, 120, 60))
+	print("  smoke behind the rocket (max) %.2f, the rocket at %s" % [smoke, stage.get_fx_info(rocket).position])
+	check(smoke > 0.05 and stage.get_fx_info(rocket).position.x > 420, "the rocket left its smoke behind it, in the world")
+	var colour: Image = stage.get_layer_image(NeuralVFXScene.LAYER_COLOUR)
+	var albedo: Image = stage.get_layer_image(NeuralVFXScene.LAYER_ALBEDO)
+	var emission: Image = stage.get_layer_image(NeuralVFXScene.LAYER_EMISSION)
+	var normal: Image = stage.get_layer_image(NeuralVFXScene.LAYER_NORMAL)
+	check(colour != null and colour.get_format() == Image.FORMAT_RGBAH and emission.get_format() == Image.FORMAT_RGBAH \
+			and albedo.get_format() == Image.FORMAT_RGBA8 and normal.get_format() == Image.FORMAT_RGBA8 and normal.get_width() == 960, "the four layer textures")
+	if colour != null:
+		var covered := 0
+		var mismatched := 0
+		for y in range(0, 540, 3):
+			for x in range(0, 960, 3):
+				var a := colour.get_pixel(x, y).a
+				var thick := normal.get_pixel(x, y).a
+				covered += 1 if a > 0.0 else 0
+				mismatched += 1 if (a > 0.004) != (thick > 0.0) and a > 0.004 else 0
+		print("  layers: %d pixels covered (sampled), %d without thickness" % [covered, mismatched])
+		check(covered > 1000 and mismatched == 0, "thickness where the effects cover")
+		check(emission.get_pixel(220, 455).r > 0.0 or emission.get_pixel(222, 450).r > 0.0, "the campfire gives light (emission)")
 	var fi := stage.get_fx_info(fire)
 	print("  the campfire: ", fi)
 	check(fi.state == "playing" and fi.effect == "campfire" and absf(fi.spawned - 0.3) < 0.02, "the campfire plays since its time")

@@ -61,7 +61,7 @@ TEST(Script, ParserErrorsHaveLineAndColumn) {
       {"let a = (1 +\n 2", 1, 9, "this '(' is not closed"},
       {"module m = fire, size 64, size 32", 1, 27, "'size' is given twice"},
       {"effect e = fire.nvfx", 1, 12, "expected the effect's file in quotes"},
-      {"emit rain, in (0, 0)", 1, 6, "'rain' cannot be emitted"},
+      {"emit hail, in (0, 0)", 1, 6, "'hail' cannot be emitted"},  // (rain, snow, ash and leaves can: weather)
       {"when ember lands where x > 1, at most:\n  stop m", 1, 38, "expected a value"},
   };
   for (const Bad& b : cases) {

@@ -8,8 +8,9 @@
 #      frames, the frame saved as PNG and checked (not empty, the same pixels as the reference, heat where the fire
 #      is), a script error with its line and column, and one effect drawn;
 #   5. the effect library (docs/LIBRARY.md), when its effects are in DATA/library/models: nvfx_gallery --shot draws a
-#      stage with five library effects spawned at given times as the reference, and demo/test_library.gd plays the
-#      same stage in a NeuralVFXStage (listing, spawns, a parameter, a move, a stop, the same pixels to the byte).
+#      stage with five library effects spawned at given times and a rocket trail moved every frame as the reference,
+#      and demo/test_library.gd plays the same stage in a NeuralVFXStage with the engine layers on (listing, spawns, a
+#      parameter, a move, a stop, the moving trail, the layer textures, the same pixels to the byte).
 #
 #   engines/godot/test.sh [--frames 45] [--out DIR] [--jobs 2]
 #
@@ -85,7 +86,8 @@ library_models=$data/library/models
 if [[ -f $library_models/fire.nvfx && -f $library_models/steam.nvfx && -f $library_models/explosion.nvfx && -f $library_models/orb.nvfx ]]; then
   nice -n 10 "$build/nvfx_gallery" --library "$repo/library" --models "$library_models" --shot 960x540 --ground 470 \
     --spawn campfire@220,470,1,0.3 --spawn steam_vent@480,470,0.8,0.4 --spawn magic_burst@760,260,1,0.6 \
-    --spawn electric_arc@620,470,1,0.2 --spawn plasma_orb@110,150,0.8,0.5 --frames "$frames" --threads 2 --png "$out/library_reference.png" > "$out/library_reference.log"
+    --spawn electric_arc@620,470,1,0.2 --spawn plasma_orb@110,150,0.8,0.5 --spawn rocket_trail@100,330,0.8,0.1,250,-60 \
+    --frames "$frames" --threads 2 --png "$out/library_reference.png" > "$out/library_reference.log"
   set +e
   nice -n 10 "$godot" --headless --path . --script res://test_library.gd -- --library "$repo/library" --library_models "$library_models" \
     --out "$out/library_godot.png" --frames "$frames" --reference "$out/library_reference.png" 2>&1

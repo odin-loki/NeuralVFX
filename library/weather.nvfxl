@@ -104,11 +104,11 @@ emit snow, in (X - 480 * scale, Y - 540 * scale), size 960 * scale x 540 * scale
 
 entry falling_ash, category weather, size 960 x 540, anchor base, loop, show 3,
       about "Falling ash (procedural): grey flakes drifting down after a fire, a few still glowing, carried by the air"
-param density = 1.2, range (0.2, 6), about "flakes in each 100 x 100 pixels at once"
+param density = 2, range (0.2, 6), about "flakes in each 100 x 100 pixels at once"
 param wind = 20, range (-250, 250), about "sideways drift, world pixels a second"
 param size = 1, range (0.4, 2.5), about "how big the flakes"
 emit ash, in (X - 480 * scale, Y - 540 * scale), size 960 * scale x 540 * scale, density density, wind (wind * scale, 0),
-     radius 1.4 * size * scale, colour (0.46, 0.44, 0.42), glowing 0.12, seed 43
+     radius 1.8 * size * scale, colour (0.56, 0.54, 0.52), glowing 0.15, seed 43
 
 entry falling_leaves, category weather, size 960 x 540, anchor base, loop, show 3,
       about "Falling leaves (procedural): autumn leaves tumbling and swaying down, blown by the wind"
@@ -124,4 +124,4 @@ param density = 0.6, range (0.05, 3), about "petals in each 100 x 100 pixels at 
 param wind = 70, range (-300, 300), about "sideways drift, world pixels a second"
 param size = 1, range (0.5, 2), about "how big the petals"
 emit leaves, in (X - 480 * scale, Y - 540 * scale), size 960 * scale x 540 * scale, density density, wind (wind * scale, 0),
-     radius 2.2 * size * scale, colour (1, 0.72, 0.8), seed 45
+     radius 2.8 * size * scale, colour (1, 0.66, 0.78), seed 45
