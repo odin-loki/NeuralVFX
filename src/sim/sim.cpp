@@ -22,6 +22,9 @@ std::string_view effect_name(Effect e) {
     case Effect::fog: return "fog";
     case Effect::dust: return "dust";
     case Effect::cloud: return "cloud";
+    case Effect::launch: return "launch";
+    case Effect::puffs: return "puffs";
+    case Effect::ink: return "ink";
   }
   std::unreachable();
 }
@@ -40,6 +43,8 @@ std::array<std::string_view, kControls> control_names(Effect e) {
   if (e == Effect::jet) return {"intensity", "aim", "turbulence"};
   if (e == Effect::orb) return {"intensity", "pulse", "turbulence"};
   if (e == Effect::vortex) return {"intensity", "sway", "turbulence"};
+  if (e == Effect::puffs) return {"intensity", "rate", "turbulence"};  // docs/EFFECTS_FLOW.md
+  if (e == Effect::ink) return {"intensity", "current", "turbulence"};
   return kControlNames;
 }
 
@@ -56,6 +61,9 @@ float flicker_rate(Effect e) {
     case Effect::fog: return 1.0f;     // a slow, uneven release
     case Effect::dust: return 1.4f;    // the burst's shape, as the explosion's
     case Effect::cloud: return 0.6f;   // slow billows
+    case Effect::launch: return 3.0f;  // a roaring engine, as the jet's burner
+    case Effect::puffs: return 4.0f;   // the pulses' timing (puff_gate)
+    case Effect::ink: return 0.8f;     // a slow, uneven release
   }
   std::unreachable();
 }
@@ -107,6 +115,13 @@ Tune tune(const Params& p) {
     case Effect::fog: return {0.f, 20.f, 1.f, 0.12f, 20.f, 1.5f, 0.2f + 1.2f * turb, 3.f + 14.f * turb, 0.4f};
     case Effect::dust: return {0.f, 150.f, 1.f, 0.25f, 50.f, 1.5f, 1.5f + 4.0f * turb, 20.f + 80.f * turb, 0.6f};
     case Effect::cloud: return {0.f, -20.f, 1.f, 0.10f, 40.f, 1.0f, 0.2f + 0.8f * turb, 3.f + 16.f * turb, 1.3f};
+    // launch, puffs and ink (docs/EFFECTS_FLOW.md); their own sources and forces are in add_flow_sources and
+    // add_flow_forces. launch: hot exhaust (little buoyancy, so it reaches the ground) that turns into light smoke and
+    // steam, which rises; the wind drifts it. puffs: warm smoke, no wind (the second control is the rate; a fixed
+    // drift instead). ink: no heat, dye barely lighter than the water, slow and damped; the current is its own force.
+    case Effect::launch: return {20.f, -8.f, 1.6f, 0.15f, 30.f, 1.0f, 0.4f + 1.6f * turb, 8.f + 30.f * turb, 0.3f};
+    case Effect::puffs: return {32.f, 0.5f, 0.9f, 0.22f, 0.f, 0.f, 0.2f + 1.2f * turb, 5.f + 25.f * turb, 0.4f};
+    case Effect::ink: return {0.f, -3.f, 1.f, 0.05f, 0.f, 0.f, 0.1f + 0.7f * turb, 3.f + 12.f * turb, 0.6f};
   }
   std::unreachable();
 }
@@ -230,6 +245,7 @@ void Fluid::step(float dt) {
   std::ranges::for_each(temp_.values(), [cool](float& x) { x *= cool; });
   std::ranges::for_each(soot_.values(), [decay](float& x) { x *= decay; });
   energy_decay(dt);  // jet, orb and vortex
+  flow_decay(dt);    // launch
   time_ += dt;
 }
 
@@ -263,6 +279,7 @@ void Fluid::add_sources(float dt) {
     add_atmos_sources(dt);
     return;
   }
+  if (add_flow_sources(dt)) return;  // launch, puffs and ink
   const bool fire = p_.effect == Effect::fire;
   const float cx = 0.5f * n, cy = (fire ? 0.10f : 0.09f) * n;
   const float hw = (fire ? 0.10f + 0.08f * I : 0.09f + 0.07f * I) * n, hh = 0.035f * n;
@@ -373,6 +390,7 @@ void Fluid::add_forces(float dt) {
   }
   add_energy_forces(dt);  // jet, orb and vortex
   if (atmos(p_.effect)) add_atmos_forces(dt);
+  add_flow_forces(dt);  // launch, puffs and ink
 }
 
 void Fluid::project() {
@@ -404,7 +422,7 @@ void Fluid::project() {
   if (p_.effect == Effect::dust) add_atmos_divergence();
   // Open boundaries: p = 0 on the border, which is never written. Warm-started from the last solve.
   constexpr float w = 1.7f;
-  const bool ground = on_ground(p_.effect);
+  const bool ground = on_ground(p_.effect) || p_.effect == Effect::launch;  // launch: docs/EFFECTS_FLOW.md
   for (int it = 0; it < p_.pressure_iters; ++it) {
     for (const int colour : {0, 1}) {
       for (int y = 1; y <= n; ++y) {
@@ -501,6 +519,7 @@ void Fluid::render(std::span<std::uint8_t> out) const {
   const int S = p_.size;
   if (out.size() < static_cast<std::size_t>(S) * S * 4) throw std::invalid_argument("sim: render buffer too small");
   if (render_energy(out)) return;  // jet, orb and vortex
+  if (render_flow(out)) return;    // launch, puffs and ink
   if (atmos(p_.effect)) {
     render_atmos(out);
     return;
@@ -938,6 +957,191 @@ void Fluid::render_atmos(std::span<std::uint8_t> out) const {
   }
 }
 
+// --- launch, puffs and ink (docs/EFFECTS_FLOW.md) ------------------------------------------------------------------------
+//
+// Three presets kept apart from the other effects' code: their sources, forces, decay and drawing. As in the energy and
+// atmosphere blocks, every force is a function of the state where it acts, the position, the controls and the run's two
+// noise fields (curl_potential, source_flicker), which learned dynamics see as inputs; nothing follows a clock of its own.
+// launch lies on the atmosphere effects' ground (kGround, the closed bottom border); puffs and ink have none.
+
+namespace {
+
+bool flow_effect(Effect e) { return e == Effect::launch || e == Effect::puffs || e == Effect::ink; }
+
+// Frames simulated before a clip is recorded (simulate): launch's billows take about 4 s to reach the frame's edges,
+// ink's dye as long to spread; the effects before them warm up for 90 frames.
+int flow_warmup(Effect e) { return flow_effect(e) ? 150 : 90; }
+
+// launch: the nozzle of an engine above the ground, blowing straight down at it.
+struct LaunchNozzle {
+  float x, y, hw;  // centre and half-width (cells)
+};
+LaunchNozzle launch_nozzle(const Params& p, float n) { return {0.5f * (n + 1.f), 0.56f * n, (0.035f + 0.02f * p.intensity) * n}; }
+
+// puffs: the mouth of a chimney at the bottom of the frame, a little left of the middle (its trail drifts right). The
+// pulses are timed by the flicker noise at the middle of the mouth (a coarse cell's centre, where a learned stepper
+// sees exactly that value): a puff whenever it is above a level that the rate control lowers.
+constexpr float kPuffX = 46.5f, kPuffY = 6.5f;  // the middle of the mouth, in cells of a 128-cell frame
+float puff_gate(const Params& p, float time) {
+  const float level = 0.40f - 0.26f * p.wind;  // rate: lower, more pulses per second
+  return smoothstep(level, level + 0.05f, std::abs(source_flicker(p, kPuffX, kPuffY, time)));
+}
+
+// ink: a slow release of dye low in the middle of the frame, aimed by the curl noise where it is (it wanders).
+constexpr float kInkX = 64.5f, kInkY = 34.5f;
+
+}  // namespace
+
+bool Fluid::add_flow_sources(float dt) {
+  if (!flow_effect(p_.effect)) return false;
+  const float n = f(n_), s = n / 128.f, I = p_.intensity;
+  const auto flicker = [&](int x, int y) { return source_flicker(p_, f(x) / s, f(y) / s, time_); };
+  if (p_.effect == Effect::launch) {  // hot gas blown down at 100 to 160 cells per second, broken up by the flicker
+    const LaunchNozzle g = launch_nozzle(p_, n);
+    const float hl = 0.04f * n, speed = (100.f + 60.f * I) * s;
+    const int x_lo = std::max(1, static_cast<int>(g.x - g.hw - 2.f)), x_hi = std::min(n_, static_cast<int>(g.x + g.hw + 2.f) + 1);
+    const int y_lo = std::max(1, static_cast<int>(g.y - hl - 2.f)), y_hi = std::min(n_, static_cast<int>(g.y + hl + 2.f) + 1);
+    for (int y = y_lo; y <= y_hi; ++y) {
+      for (int x = x_lo; x <= x_hi; ++x) {
+        const float ex = (f(x) - g.x) / g.hw, ey = (f(y) - g.y) / hl;
+        const float shape = 1.f - smoothstep(0.6f, 1.f, std::sqrt(ex * ex + ey * ey));
+        if (shape <= 0.f) continue;
+        const float k = shape * (0.45f + 0.55f * smoothstep(-0.3f, 0.5f, flicker(x, y)));
+        temp_[x, y] = std::max(temp_[x, y], (1.6f + 0.6f * I) * k);
+        soot_[x, y] += dt * (0.3f + 0.3f * I) * k;
+        u_[x, y] += k * (0.f - u_[x, y]);
+        v_[x, y] += k * (-speed - v_[x, y]);
+      }
+    }
+    return true;
+  }
+  if (p_.effect == Effect::puffs) {  // warm smoke kicked up out of the mouth while the gate is open
+    const float g = puff_gate(p_, time_);
+    if (g <= 0.f) return true;
+    const float cx = kPuffX * s, cy = kPuffY * s, hw = (0.05f + 0.03f * I) * n, hh = 0.035f * n;
+    const float kick = (60.f + 40.f * I) * s;
+    const int y_lo = std::max(1, static_cast<int>(cy - 2.f * hh)), y_hi = std::min(n_, static_cast<int>(cy + 2.f * hh) + 1);
+    const int x_lo = std::max(1, static_cast<int>(cx - 1.5f * hw)), x_hi = std::min(n_, static_cast<int>(cx + 1.5f * hw) + 1);
+    for (int y = y_lo; y <= y_hi; ++y) {
+      for (int x = x_lo; x <= x_hi; ++x) {
+        const float ex = (f(x) - cx) / hw, ey = (f(y) - cy) / hh;
+        const float shape = 1.f - smoothstep(0.6f, 1.f, std::sqrt(ex * ex + ey * ey));
+        if (shape <= 0.f) continue;
+        const float k = g * shape;
+        temp_[x, y] = std::max(temp_[x, y], (0.4f + 0.3f * I) * k);
+        soot_[x, y] = std::max(soot_[x, y], (1.2f + 0.8f * I) * g * k);
+        v_[x, y] = std::max(v_[x, y], kick * k);
+      }
+    }
+    return true;
+  }
+  // ink: dye released from a small round source, pushed out slowly in a direction the curl noise there turns
+  const float cx = kInkX * s, cy = kInkY * s, r = (0.045f + 0.035f * I) * n;
+  const float psi = curl_potential(p_, kInkX, kInkY, time_), a = 1.5707963f + 1.1f * psi;
+  const float speed = (12.f + 12.f * I) * s, ux = speed * std::cos(a), uy = speed * std::sin(a);
+  const int lo_x = std::max(1, static_cast<int>(cx - 1.5f * r)), hi_x = std::min(n_, static_cast<int>(cx + 1.5f * r) + 1);
+  const int lo_y = std::max(1, static_cast<int>(cy - 1.5f * r)), hi_y = std::min(n_, static_cast<int>(cy + 1.5f * r) + 1);
+  for (int y = lo_y; y <= hi_y; ++y) {
+    for (int x = lo_x; x <= hi_x; ++x) {
+      const float dx = f(x) - cx, dy = f(y) - cy;
+      const float shape = 1.f - smoothstep(0.5f, 1.f, std::sqrt(dx * dx + dy * dy) / r);
+      if (shape <= 0.f) continue;
+      const float k = shape * smoothstep(-0.4f, 0.4f, flicker(x, y));
+      soot_[x, y] = std::max(soot_[x, y], (1.0f + 0.8f * I) * k);
+      u_[x, y] += k * (ux - u_[x, y]);
+      v_[x, y] += k * (uy - v_[x, y]);
+    }
+  }
+  return true;
+}
+
+// launch: the ground the exhaust hits (as fog's and dust's, add_atmos_forces). puffs: a gentle fixed drift to the right
+// on the smoke. ink: the water drifts as a whole with the current (left or right), and is stirred everywhere, not only
+// where the dye is.
+void Fluid::add_flow_forces(float dt) {
+  if (!flow_effect(p_.effect)) return;
+  const float n = f(n_), s = n / 128.f;
+  if (p_.effect == Effect::launch) {
+    const float g = kGround * s, top = g + 4.f * s;
+    const int y_hi = std::min(n_, static_cast<int>(top) + 1);
+    for (int y = 1; y <= y_hi; ++y) {
+      const float hold = 1.f - smoothstep(g - 2.f * s, g + 2.f * s, f(y)), stop = 1.f - smoothstep(g, top, f(y));
+      for (int x = 1; x <= n_; ++x) {
+        u_[x, y] *= 1.f - hold;
+        v_[x, y] *= 1.f - (v_[x, y] < 0.f ? std::max(hold, stop) : hold);
+      }
+    }
+    return;
+  }
+  if (p_.effect == Effect::puffs) {
+    const float drift = 20.f * s, drag = 1.f - std::exp(-1.0f * dt);
+    for (int y = 1; y <= n_; ++y) {
+      for (int x = 1; x <= n_; ++x) {
+        const float mat = std::min(1.f, 2.f * (temp_[x, y] + soot_[x, y]));
+        u_[x, y] += drag * (drift - u_[x, y]) * mat;
+      }
+    }
+    return;
+  }
+  const float current = (2.f * p_.wind - 1.f) * 22.f * s, drag = 1.f - std::exp(-0.7f * dt);
+  const float L = 14.f * s, e = 0.25f, tt = time_ * 0.8f, amp = (3.f + 12.f * p_.turbulence) * s;
+  const std::uint64_t cseed = p_.seed * 0x2545F4914F6CDD1DULL + 77;  // as curl_potential
+  for (int y = 1; y <= n_; ++y) {
+    for (int x = 1; x <= n_; ++x) {
+      u_[x, y] += drag * (current - u_[x, y]);
+      const float px = f(x) / L, py = f(y) / L;
+      u_[x, y] += dt * amp * (value_noise(px, py + e, tt, cseed) - value_noise(px, py - e, tt, cseed)) / (2.f * e);
+      v_[x, y] -= dt * amp * (value_noise(px + e, py, tt, cseed) - value_noise(px - e, py, tt, cseed)) / (2.f * e);
+    }
+  }
+}
+
+// launch: the exhaust turns to smoke and steam as it cools (as the jet's burning gas does), grey-white clouds.
+void Fluid::flow_decay(float dt) {
+  if (p_.effect != Effect::launch) return;
+  for (int y = 1; y <= n_; ++y) {
+    for (int x = 1; x <= n_; ++x) soot_[x, y] += dt * 2.2f * temp_[x, y];
+  }
+}
+
+bool Fluid::render_flow(std::span<std::uint8_t> out) const {
+  if (!flow_effect(p_.effect)) return false;
+  const int S = p_.size;
+  const float n = f(n_), sc = n / f(S);
+  constexpr float lx = -0.45f, ly = 0.89f;  // towards the light: up and to the left
+  for (int py = 0; py < S; ++py) {
+    for (int px = 0; px < S; ++px) {
+      const float gx = (f(px) + 0.5f) * sc + 0.5f;
+      const float gy = n - (f(py) + 0.5f) * sc + 0.5f;
+      const float T = temp_.sample(gx, gy), D = soot_.sample(gx, gy);
+      float tau = 0.f;  // optical depth towards the light
+      for (int k = 1; k <= 12; ++k) tau += soot_.sample(gx + lx * 2.f * f(k) * sc, gy + ly * 2.f * f(k) * sc);
+      Rgb c{};
+      float a = 0.f;
+      if (p_.effect == Effect::launch) {  // the exhaust's light over grey-white clouds
+        const Rgb e = jet_ramp(1.1f * T);
+        const float as = 1.f - std::exp(-2.2f * D), keep = 1.f - 0.5f * as, g = 0.97f * (0.6f + 0.4f * std::exp(-0.2f * tau));
+        c = {e.r * keep + g * as, e.g * keep + 0.97f * g * as, e.b * keep + 0.95f * g * as};
+        a = clamp01(as + 0.25f * std::max(e.r, e.g));
+      } else if (p_.effect == Effect::puffs) {  // grey smoke, lit from above and shaded by itself
+        const float as = 1.f - std::exp(-2.5f * D), g = 0.86f * (0.4f + 0.6f * std::exp(-0.35f * tau));
+        c = {g * as, 0.98f * g * as, 0.95f * g * as};
+        a = as;
+      } else {  // ink: dark, barely shaded, thin where it is thin
+        const float as = 1.f - std::exp(-1.6f * D), g = 0.6f + 0.4f * std::exp(-0.2f * tau);
+        c = {0.10f * g * as, 0.11f * g * as, 0.16f * g * as};
+        a = as;
+      }
+      auto o = out.subspan((static_cast<std::size_t>(py) * S + px) * 4, 4);
+      o[0] = q8(c.r);
+      o[1] = q8(c.g);
+      o[2] = q8(c.b);
+      o[3] = q8(a);
+    }
+  }
+  return true;
+}
+
 void stamp(Clip& clip, const Params& p) {
   clip.effect = effect_name(p.effect);
   clip.source = "sim";
@@ -971,7 +1175,7 @@ Clip simulate(const Params& p) {
   if (loops) {
     // Long enough for the plume to reach a statistically steady state, so the loop crossfade joins similar frames
     // (fog takes about 5 s to cover the ground; cloud as long to grow from nothing).
-    const int warmup = p.warmup >= 0 ? p.warmup : (p.effect == Effect::smoke ? 180 : atmos(p.effect) ? 150 : 90);
+    const int warmup = p.warmup >= 0 ? p.warmup : (p.effect == Effect::smoke ? 180 : atmos(p.effect) ? 150 : flow_warmup(p.effect));
     for (int i = 0; i < warmup; ++i) fluid.step_frame();
   }
   Clip raw;

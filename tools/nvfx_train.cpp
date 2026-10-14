@@ -1,6 +1,6 @@
 // nvfx_train: train a neural effect from clips and save it as .nvfx.
 //
-//   nvfx_train --rollout fire|smoke|explosion|steam|magic|jet|orb|vortex|fog|dust|cloud --out effect.nvfx [--runs 160] [--frames 240] [--iters 2500]
+//   nvfx_train --rollout fire|smoke|explosion|steam|magic|jet|orb|vortex|fog|dust|cloud|launch|puffs|ink --out effect.nvfx [--runs 160] [--frames 240] [--iters 2500]
 //              [--finetune 1500] [--render-iters 2500] [--starts 8] [--threads 0]
 //     trains a rollout effect (include/neuralfx/rollout.hpp) from runs of the built-in simulation instead: start
 //     points, a learned coarse stepper, the detail layer and a renderer (about 40 minutes per effect on 4 cores).
@@ -39,12 +39,12 @@ int main(int argc, char** argv) try {
   const tools::Args a(argc, argv, {"no-controls", "help", "quiet", "qat", "trim"});
   if (a.flag("help")) {
     std::println("nvfx_train --clips a,b | --clip-dir DIR --out model.nvfx [--arch grid|conv ...]");
-    std::println("nvfx_train --rollout fire|smoke|explosion|steam|magic|jet|orb|vortex|fog|dust|cloud --out effect.nvfx [--runs N --iters N ...] (see the source header)");
+    std::println("nvfx_train --rollout fire|smoke|explosion|steam|magic|jet|orb|vortex|fog|dust|cloud|launch|puffs|ink --out effect.nvfx [--runs N --iters N ...] (see the source header)");
     return 0;
   }
   if (a.has("rollout")) {
     sim::Effect e;
-    if (!sim::parse_effect(a.str("rollout"), e)) throw std::invalid_argument("--rollout: fire, smoke, explosion, steam, magic, jet, orb, vortex, fog, dust or cloud");
+    if (!sim::parse_effect(a.str("rollout"), e)) throw std::invalid_argument("--rollout: fire, smoke, explosion, steam, magic, jet, orb, vortex, fog, dust, cloud, launch, puffs or ink");
     if (!train::cpu_supported()) throw std::runtime_error("training needs AVX2 + FMA");
     rollout::SimRecipe r = rollout::recipe_for(e);
     r.runs = a.i("runs", r.runs);

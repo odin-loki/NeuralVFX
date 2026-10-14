@@ -118,6 +118,27 @@ TEST(Rollout, OneShotEffectsTakeTheExplosionsRecipe) {
     EXPECT_TRUE(recipe_model(r).loop);
   }
 }
+// launch, puffs and ink keep fine fields with their start points as smoke does (docs/EFFECTS_FLOW.md); otherwise they
+// take fire's recipe.
+TEST(Rollout, FlowEffectsKeepFineFieldsAsSmokeDoes) {
+  const SimRecipe fire = recipe_for(sim::Effect::fire), smoke = recipe_for(sim::Effect::smoke);
+  for (const sim::Effect e : {sim::Effect::launch, sim::Effect::puffs, sim::Effect::ink}) {
+    const SimRecipe r = recipe_for(e);
+    EXPECT_EQ(r.start_fine, smoke.start_fine) << sim::effect_name(e);
+    EXPECT_EQ(r.runs, fire.runs);
+    EXPECT_EQ(r.frames, fire.frames);
+    EXPECT_EQ(r.start_frame, fire.start_frame);
+    EXPECT_EQ(r.starts, fire.starts);
+    EXPECT_EQ(r.stepper.activity_stage, fire.stepper.activity_stage);
+    const Model m = recipe_model(r);
+    EXPECT_TRUE(m.loop);
+    EXPECT_EQ(m.h.n_age, 0);
+    EXPECT_EQ(m.noise.flicker_rate, sim::flicker_rate(e));
+  }
+  EXPECT_EQ(recipe_model(recipe_for(sim::Effect::puffs)).control_names[1], "rate");
+  EXPECT_EQ(recipe_model(recipe_for(sim::Effect::ink)).control_names[1], "current");
+}
+
 TEST(Rollout, CoarseFromSimAveragesBlocks) {
   sim::State st;
   st.n = 16;
