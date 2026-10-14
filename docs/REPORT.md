@@ -1253,32 +1253,37 @@ true state) and plays as realistically (the endless statistics), judged by a rul
 ### 13.1 Where a frame's time goes
 
 Each stage of a runner's step and picture timed in thread CPU time on one pinned core (`nvfx_study_k profile`; the
-runtime's runners take a profile, `RolloutRunner::set_profile`, which reads the clock only while one is attached),
-fire at controls (0.6, 0.5, 0.6), medians over 150 frames, on the shared machine (provisional):
+runtime's runners take a profile, `RolloutRunner::set_profile`, which reads the clock only while one is attached), at
+controls (0.6, 0.5, 0.6): each effect's median over 200 frames, then the median of three interleaved rounds, then the
+mean over the eleven effects (least and greatest in `DATA/k_int8/profile_session1.csv`); float, on the shared machine
+(provisional):
 
-| stage | AVX2, 64 px | 128 px | 256 px | AVX-512, 64 px | 128 px | 256 px |
+| stage, ms per frame | AVX2, 64 px | 128 px | 256 px | AVX-512, 64 px | 128 px | 256 px |
 |---|---:|---:|---:|---:|---:|---:|
-| noise inputs, condition, FiLM folding | 0.004 | 0.005 | 0.006 | 0.004 | 0.004 | 0.005 |
-| the stepper's network (inputs, two 3 x 3 convolutions 12 -> 24 -> 24, output layer) | **0.23** | **0.24** | 0.25 | 0.15 | 0.16 | 0.16 |
-| state update, divergence, 60 Jacobi iterations, coarse advection | 0.045 | 0.045 | 0.047 | 0.042 | 0.044 | 0.043 |
-| detail layer (fine fields carried and locked) | 0.06 | 0.17 | 0.76 | 0.06 | 0.17 | 0.71 |
-| renderer per coarse cell (directional sums, the first layer's coarse part) | 0.042 | 0.042 | 0.041 | 0.040 | 0.040 | 0.040 |
-| renderer per pixel (first layer's rest, 16 x 16 hidden layer, output, gate) | 0.064 | 0.26 | 1.40 | 0.049 | 0.21 | 1.09 |
-| the runner, step and picture | 0.47 | 0.78 | 2.52 | 0.37 | 0.66 | 2.06 |
+| noise inputs, condition, FiLM folding | 0.005 | 0.006 | 0.007 | 0.005 | 0.007 | 0.008 |
+| **the stepper's network** (inputs, two 3 x 3 convolutions 12 -> 24 -> 24, the output layer) | **0.245** | **0.242** | **0.251** | 0.162 | 0.168 | 0.175 |
+| state update, divergence, 60 Jacobi iterations, coarse advection | 0.047 | 0.046 | 0.048 | 0.044 | 0.046 | 0.045 |
+| detail layer (fine fields carried and locked) | 0.063 | 0.173 | 0.523 | 0.062 | 0.169 | 0.503 |
+| renderer per coarse cell (directional sums, the first layer's coarse part) | 0.043 | 0.042 | 0.042 | 0.041 | 0.044 | 0.044 |
+| **renderer per pixel** (the first layer's rest, the 16 x 16 hidden layer, the output, the gate) | 0.080 | 0.292 | **0.991** | 0.065 | 0.251 | 0.804 |
+| the runner: a step and a picture | 0.502 | 0.825 | 1.882 | 0.402 | 0.708 | 1.602 |
 
-- **The stepper's two convolutions are the largest single part below 256 px**: 8 million multiply-adds per step at
-  every size, half the frame at 64 px and 30% at 128 px. Two thirds of them are in the second convolution (24 x 24
-  channels, 3 x 3), whose inputs follow a ReLU.
-- **The renderer per pixel** is the largest part at 256 px. A profile with its two dense layers kept out of line puts
-  the 16 x 16 hidden layer and the 16 x 4 output layer at 17% of the frame at 128 px (about 0.16 ms) and 24% at 256 px;
-  the first layer's per-pixel rest, the gate and the conversion to bytes take as much again.
-- **The detail layer** (gathers, interpolation, the lock) is float work int8 cannot take.
-- **Shards and crossfades**: through `nvfx_render` a frame costs 0.1 to 0.2 ms more than the runner alone at 128 px on
-  average (the next shard's steps during its roll-ahead, fire's 1 s warm-up among them, and the crossfade's second
-  picture), a step's worth spread over the shard.
-- **AVX-512, found on the way**: the float runner in the AVX-512 build is now 15 to 25% faster than in the AVX2 build
-  (0.66 against 0.78 ms at 128 px), the convolutions 1.5 times. The runtime still takes AVX2 by default for float, as
-  measured before the broadcast fix of §7 (§7: "AVX-512 is slower"); this study does not change that default.
+- **The stepper's two convolutions are the largest part below 256 px**: 8 million multiply-adds per step at every
+  size, half the frame at 64 px and 30% at 128 px (0.23 to 0.26 ms on AVX2 for every effect). Two thirds of them are
+  in the second convolution (24 x 24 channels, 3 x 3), whose inputs follow a ReLU.
+- **The renderer per pixel** is the largest part at 256 px. A profile of fire with its two dense layers kept out of
+  line puts the 16 x 16 hidden layer and the 16 x 4 output layer at 17% of the frame at 128 px (about 0.16 ms) and
+  24% at 256 px; the first layer's per-pixel rest, the gate and the conversion to bytes take as much again.
+- **The detail layer** (gathers, interpolation, the lock) is float work that int8 cannot take.
+- **Shards and crossfades** add a step for each frame of the next shard's roll-ahead (15 frames before each change;
+  45 for the six effects whose start points grow their fine fields in a 1 s warm-up) and a picture for each of the 15
+  crossfade frames: at 128 px on AVX2 about 0.07 ms per frame on average over a 6 s shard, 0.15 ms for the six with a
+  warm-up. (Measured through `nvfx_render` the difference from the runner alone is that size but drowns in the shared
+  machine's noise: -0.26 to +0.16 ms between effects.)
+- **AVX-512, found on the way**: the float runner is faster in the AVX-512 build than in the AVX2 build, 0.71 against
+  0.83 ms at 128 px (0.40 against 0.50 at 64 px, 1.60 against 1.88 at 256), the convolutions 1.5 times. The runtime still
+  takes AVX2 by default for float, as measured before the broadcast fix of §7 (the d-timing rows of SUMMARY.md have
+  the AVX-512 rollout slower then); this study does not change that default, but it should be re-timed.
 
 **What int8 can win**, worked out before it was written: a layer pays in 8 bits when its multiply-adds outnumber the
 work of quantising its inputs and dequantising its outputs. The second convolution does 216 multiply-adds per output
@@ -1319,9 +1324,17 @@ for the library's stages and `nvfx_manager_model_desc.precision` for the effect 
   int8 simulations are `nvfx_render`'s to the bit (`Manager.FixedLevelIsNvfxRenderAtInt8`), and no frame allocates
   (`nvfx_alloc_test`).
 
-First costs (fire, provisional, stage medians): the network's stage takes 0.10 ms with the second convolution in 8 bits
-and 0.07 ms with both on AVX-512 VNNI, against 0.155 ms in float on AVX-512 and 0.23 ms on AVX2; on AVX2 without VNNI
-0.21 to 0.23 ms against 0.23 to 0.25 ms: int8 barely pays there.
+The network's stage (the same profile, mean over the eleven effects at 128 px; the other stages do not change):
+
+| ISA | float | int8_second | int8_both |
+|---|---:|---:|---:|
+| AVX-512 (VNNI) | 0.168 ms | **0.101 ms** | **0.077 ms** |
+| AVX2 | 0.242 ms | 0.221 ms | 0.222 ms |
+
+With VNNI the second convolution in 8 bits takes 0.067 ms off the step at every size, both 0.091 ms; on AVX2 without
+VNNI int8 takes off 0.02 ms: it barely pays there. A frame at 128 px with VNNI: 0.60 ms (`int8_second`) and 0.57 ms
+(`int8_both`) against 0.71 ms in float on the same build and 0.83 ms in float on AVX2, the shipped default (§13.6 has
+the interleaved timing).
 
 ### 13.3 The rule (fixed before validation; the test runs once)
 
@@ -1376,3 +1389,45 @@ If no candidate passes on any effect, the study stops at validation.
 Otherwise float stays the default and int8 an option. If int8 becomes the default, the frozen-keyframe tests (the
 fireball, the scene scripts, the library, Godot) are pinned to float, so that they keep checking the float path, and a
 few int8 keyframes are frozen beside them. Ties are ties; a null is reported with its numbers.
+
+### 13.4 Validation (the choice)
+
+Each candidate minus float, paired, 95% bootstrap (16 tracked runs per effect; 10 settings with 8 runs each, pooled,
+for the endless statistics). `int8_second` (coverage and emission distances changed by less than 0.0002 everywhere and
+are left out):
+
+| effect | 8 frames (dB) | 1 s | 2 s | spectrum distance | \|ln motion ratio\| | mean-frame PSNR (dB) |
+|---|---|---|---|---|---|---|
+| fire | -0.00 [-0.02, +0.01] | -0.01 [-0.04, +0.02] | +0.02 [-0.00, +0.04] | -0.001 [-0.001, -0.000] | -0.003 [-0.005, -0.001] | +0.04 [-0.00, +0.09] |
+| smoke | +0.01 [-0.01, +0.02] | -0.00 [-0.02, +0.01] | +0.01 [-0.01, +0.03] | +0.000 [-0.000, +0.001] | +0.000 [-0.001, +0.001] | -0.01 [-0.02, +0.01] |
+| explosion | +0.02 [-0.00, +0.04] | +0.00 [-0.02, +0.03] | -0.00 [-0.02, +0.02] | +0.000 [-0.000, +0.001] | -0.000 [-0.001, +0.001] | +0.02 [+0.00, +0.04] |
+| steam | -0.01 [-0.02, +0.00] | -0.01 [-0.03, +0.01] | -0.00 [-0.02, +0.02] | +0.000 [-0.000, +0.001] | +0.001 [-0.001, +0.003] | +0.01 [-0.05, +0.05] |
+| magic | -0.01 [-0.02, -0.00] | -0.04 [-0.08, +0.01] | -0.03 [-0.10, +0.03] | +0.000 [-0.000, +0.001] | +0.009 [+0.006, +0.010] | +0.02 [-0.05, +0.09] |
+| jet | +0.00 [-0.00, +0.00] | +0.00 [-0.01, +0.01] | -0.00 [-0.03, +0.02] | -0.001 [-0.001, -0.000] | -0.002 [-0.005, +0.000] | -0.00 [-0.03, +0.03] |
+| orb | +0.01 [-0.00, +0.02] | -0.00 [-0.02, +0.01] | -0.02 [-0.04, +0.00] | -0.000 [-0.000, +0.000] | +0.000 [-0.001, +0.001] | +0.00 [-0.02, +0.03] |
+| vortex | +0.00 [-0.00, +0.01] | +0.01 [-0.00, +0.02] | +0.02 [+0.00, +0.03] | +0.001 [+0.000, +0.001] | +0.001 [-0.001, +0.003] | +0.01 [-0.02, +0.04] |
+| fog | -0.00 [-0.02, +0.01] | +0.01 [-0.02, +0.04] | -0.02 [-0.04, +0.00] | +0.000 [-0.000, +0.000] | +0.008 [-0.000, +0.016] | +0.01 [+0.00, +0.02] |
+| dust | +0.00 [-0.03, +0.03] | -0.00 [-0.01, +0.01] | -0.01 [-0.02, +0.01] | -0.000 [-0.000, +0.000] | +0.000 [-0.001, +0.001] | -0.01 [-0.02, +0.01] |
+| cloud | +0.00 [-0.01, +0.01] | -0.01 [-0.02, +0.02] | -0.02 [-0.04, +0.00] | -0.001 [-0.001, -0.000] | +0.009 [+0.005, +0.011] | +0.01 [-0.01, +0.02] |
+
+- **`int8_second` passes on all eleven effects**, with every interval far inside its margin: tracking within
+  0.04 dB of float at every horizon (the largest lower end -0.10 dB, magic at 2 s, against a margin of -0.20), the
+  detail spectrum within 0.001, motion within 0.009 (1%), the mean frame within 0.04 dB. For scale, the learned
+  dynamics lead the coarse simulation by 2 to 5 dB at these horizons (§6.4), and two sets of eight real runs differ by
+  0.02 to 0.04 in spectrum distance (§6.9.2).
+- The strict reading counts **six intervals entirely on the worse side**, all small: magic's |ln motion ratio|
+  +0.009 [+0.006, +0.010] and its 8-frame tracking -0.012 dB [-0.024, -0.002], cloud's |ln motion ratio| +0.009
+  [+0.005, +0.011], vortex's spectrum distance +0.0006, and emission distances changed by 0.000003 to 0.000014 on
+  smoke, jet, vortex and fog. Eight intervals are entirely on the better side (fire's motion and spectrum, explosion's
+  and fog's mean frame, jet's and cloud's spectrum, vortex's tracking at 2 s).
+- **`int8_both` passes on four effects only** (fire, smoke, steam, jet) and fails on seven: tracking at 8 frames or
+  1 s on explosion (-0.14 dB [-0.28, -0.02] at 8 frames), fog and dust, tracking at 1 s and 2 s on magic, orb and cloud
+  (orb -0.21 dB [-0.40, -0.04] at 2 s), |ln motion ratio| on magic (+0.024 [+0.016, +0.030]), fog and cloud (+0.028),
+  and the mean frame's interval reaching below -0.1 dB on magic, orb, vortex, dust and cloud (dust -0.13 dB
+  [-0.24, -0.04]). Quantising the state itself, the first convolution's input, costs what quantising its features
+  does not. (On fire, steam and jet its mean frame is closer to the real runs' than float's, +0.13 to +0.19 dB, intervals
+  above zero; not a reason to choose it.)
+
+**The choice: `int8_second`**, the rule's second branch (`int8_both` does not pass on all eleven); tested on all eleven
+effects. `DATA/k_int8` holds every run's statistics; `results/experiments/k_int8/` the CSVs (`k_track_val.csv`,
+`k_stats_val.csv`, `k_rule_val.csv`) and the development probes on training settings (`*_train_probe.csv`).
