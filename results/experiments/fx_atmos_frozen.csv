@@ -1,3 +1,4 @@
 kind,name,file,bytes,sha256,source
 rollout_effect,fog,fx_atmos/models/d/fog.nvfx,149287,bcb5466137e5684c409ae57321e2faf898c273ae40556641be75bfb3a012da49,study D's recipe (docs/EFFECTS_ATMOSPHERE.md): d-train --stages12 1 then d-tune then d-finish
 rollout_effect,dust,fx_atmos/models/d/dust.nvfx,280927,e18c287b7b5ecc9975da526c94a0b6aaf548981a0b488fde1853a689aeef02f5,study D's recipe (docs/EFFECTS_ATMOSPHERE.md): d-train --stages12 1 then d-tune then d-finish
+rollout_effect,cloud,fx_atmos/models/d/cloud.nvfx,149287,b1a886dd038a8e88f4461e5fbd3b0830d9c54e764b0977f9fded225b57e221c8,study D's recipe (docs/EFFECTS_ATMOSPHERE.md): d-train --stages12 1 then d-tune then d-finish

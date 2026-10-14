@@ -1,3 +1,4 @@
 effect,renderer_psnr,contrast,swirl,detail_score,starts,stored_bytes,grow
 fog,43.08,1,0,0.516,8,149162,1
 dust,38.06,1,0,0.710,16,280826,2
+cloud,38.34,1,0,0.618,8,149162,1

@@ -1,6 +1,6 @@
 # More effects: fog, dust and cloud
 
-Status: **in progress** (14 October 2026): the design of the test is fixed; fog and dust are frozen; cloud is training. Audience: dev, research, artists. Three atmosphere effects for a game
+Status: **in progress** (14 October 2026): the design of the test is fixed; all three models are frozen; fog and dust are tested. Audience: dev, research, artists. Three atmosphere effects for a game
 engine's library, after steam and magic ([EFFECTS.md](EFFECTS.md)): **fog** (a cold, heavy gas that sinks and rolls
 along the ground), **dust** (an impact's burst that rolls out low along the ground and settles; it plays once) and
 **cloud** (a persistent, slowly boiling mass with no source to be seen). All three come from the project's own 2D fluid
@@ -101,17 +101,19 @@ explosion and smoke:
 Each was trained in study D's three saved steps (`d-train --stages12 1`, `d-tune` for stage 3, `d-finish`), one thread
 each, `nice 10`, two at a time, on a machine shared with three other agents (load 6 to 13 on 4 cores while fog and
 dust trained). The container restarted once, during cloud's stages 1 and 2 (at iteration 1250 of 4000); nothing of that
-step was saved, so it ran again from the start.
+step was saved, so it ran again from the start (about 40 minutes lost; the logs under the data root's
+`fx_atmos/logs` record it).
 
 | effect | runs x frames | simulation | stages 1-2 (loss, s) | stage 3 (loss, s) | renderer (training samples) | contrast, swirl, grow | detail score | start points | stored |
 |---|---|---:|---|---|---:|---|---:|---:|---:|
 | fog | 160 x 240 | 21.3 min, recorded in 353 s | 0.0169, 7028 | 0.0156, 1395 | 43.1 dB | 1, 0, 1 | 0.52 | 8 (64 px fine) | 146 KB |
 | dust | 240 x 90 | 12.0 min, recorded in 141 s | 0.0256, 7107 | 0.0382, 1256 | 38.1 dB | 1, 0, 2 | 0.71 | 16 (64 px fine) | 274 KB |
-| cloud | 160 x 240 | (training) | | | | | | | |
+| cloud | 160 x 240 | 21.3 min, recorded in 537 s | 0.0107, 8147 | 0.0100, 2172 | 38.3 dB | 1, 0, 1 | 0.62 | 8 (64 px fine) | 146 KB |
 
-The last step (renderer, detail constants, start points) took 17 minutes for fog, 10 for dust and (to come) for
-cloud. About 2.6 CPU-hours per effect in all, less than the 3.5 of steam and magic (the same iterations, on a faster or
-quieter share of the machine). The loss columns are not comparable between effects (each is normalised by its own
+The last step (renderer, detail constants, start points) took 17 minutes for fog, 10 for dust and 32 for cloud
+(pinned to one core, as its calibration starts a thread per core). In all 2.8, 2.6 and 3.7 CPU-hours (cloud's without
+the lost attempt), against 3.5 for steam and magic: the same iterations, on shares of the machine that changed with its
+load. The loss columns are not comparable between effects (each is normalised by its own
 state's scale), and dust's stage 3 adds the activity term, so its loss rises. The detail calibration chose no sub-grid
 swirl for all three, as it did for magic; fog keeps existing structure as it is (grow 1).
 
