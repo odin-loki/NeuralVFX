@@ -289,6 +289,11 @@ if(NEURALFX_BUILD_TOOLS)
   add_executable(nvfx_d2 tools/nvfx_d2.cpp)
   target_link_libraries(nvfx_d2 PRIVATE neuralfx_train nvfx)
   neuralfx_defaults(nvfx_d2)
+  # Study K (docs/REPORT.md §13): rollout effects in 8-bit integers: the profile, the quality and the cost.
+  add_executable(nvfx_study_k tools/nvfx_study_k.cpp)
+  target_include_directories(nvfx_study_k PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src/runtime")
+  target_link_libraries(nvfx_study_k PRIVATE neuralfx_train neuralfx_io nvfx)
+  neuralfx_defaults(nvfx_study_k)
 endif()
 
 if(NEURALFX_BUILD_BENCH)

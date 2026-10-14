@@ -138,18 +138,21 @@ std::uint64_t hash(const Bytes& b, std::uint64_t h = 1469598103934665603ULL) {
 }
 
 // At a fixed level (locked) and 30 Hz in a 30 Hz game, the manager's frames are nvfx_render's to the bit: the same
-// shard timeline, keyframe by keyframe (through shard changes and their crossfades, and warm-ups).
-void expect_like_render(bool loop, int size) {
+// shard timeline, keyframe by keyframe (through shard changes and their crossfades, and warm-ups). At a precision: the
+// model's (nvfx_manager_model_desc.precision) and the instance's (study K's int8 path, docs/REPORT.md §13).
+void expect_like_render(bool loop, int size, nvfx_precision precision = NVFX_PRECISION_DEFAULT) {
   const Effect e(tiny_effect(loop));
   Mgr g(small_desc());
   int model = -1;
-  const auto md = small_model(2.5f);
+  auto md = small_model(2.5f);
+  md.precision = precision;
   ASSERT_EQ(nvfx_manager_add_model(g.m, e.fx, &md, &model), NVFX_OK);
   const std::array<float, 3> c{0.45f, 0.55f, 0.6f};
   const nvfx_handle h = spawn(g.m, model, 77, static_cast<float>(size), c);
   ASSERT_EQ(nvfx_manager_set_lod_lock(g.m, h, size, 1), NVFX_OK);
   nvfx_instance* in = nullptr;
   ASSERT_EQ(nvfx_instance_create(e.fx, size, &in), NVFX_OK);
+  ASSERT_EQ(nvfx_instance_set_precision(in, precision), NVFX_OK);
   nvfx_instance_set_controls(in, c.data(), 3);
   nvfx_instance_set_seed(in, 77);
   nvfx_instance_set_drift(in, 2.5f);
@@ -220,6 +223,10 @@ TEST(Manager, TrainedEffectsAreNvfxRender) {
 TEST(Manager, FixedLevelIsNvfxRenderLooping) { expect_like_render(true, 64); }
 TEST(Manager, FixedLevelIsNvfxRenderOneShot) { expect_like_render(false, 32); }
 TEST(Manager, FixedLevelIsNvfxRender128) { expect_like_render(true, 128); }
+TEST(Manager, FixedLevelIsNvfxRenderAtInt8) {
+  expect_like_render(true, 64, NVFX_PRECISION_INT8);
+  expect_like_render(false, 32, NVFX_PRECISION_INT8);
+}
 
 // A scene that exercises everything (sizes moving across levels, a tight budget, proxies, copies offset in time,
 // pauses, spawns and stops, controls changed on shared and own simulations) gives the same pictures on 1 and 3 threads

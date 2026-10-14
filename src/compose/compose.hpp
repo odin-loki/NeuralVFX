@@ -110,9 +110,11 @@ struct Image4 {
 // --- modules -----------------------------------------------------------------------------------------------------------
 
 enum class Isa { base, avx2, avx512 };
-Isa best_isa();
+// The ISA the runtime gives a rollout runner at a precision (nvfx_set_isa's, else AVX2; at int8 the AVX-512 build where
+// the CPU has VNNI: study K, docs/REPORT.md §13).
+Isa best_isa(rt::Precision p = rt::kRolloutPrecision);
 const char* isa_name(Isa isa);
-std::unique_ptr<rt::RolloutRunner> make_runner(const rt::RolloutEffect& e, int size, Isa isa);
+std::unique_ptr<rt::RolloutRunner> make_runner(const rt::RolloutEffect& e, int size, Isa isa, rt::Precision p = rt::kRolloutPrecision);
 
 // The working memory of the modules' steps (rt::RolloutScratch: the detail layer's rings and row records, the coarse
 // step's activations), shared: a module that shares it takes a scratch for each step (or start) and gives it back,
@@ -166,7 +168,8 @@ class Light;
 
 class Module {
  public:
-  Module(std::string name, const rt::RolloutEffect& e, int size, Placement at, Isa isa);
+  // `precision`: the runner's (rt::Precision::int8: study K's int8 path, docs/REPORT.md §13).
+  Module(std::string name, const rt::RolloutEffect& e, int size, Placement at, Isa isa, rt::Precision precision = rt::kRolloutPrecision);
 
   const std::string& name() const { return name_; }
   const rt::RolloutEffect& effect() const { return e_; }
@@ -241,6 +244,7 @@ class Module {
   const rt::RolloutEffect& e_;
   int size_;
   Isa isa_;
+  rt::Precision prec_;
   std::unique_ptr<rt::RolloutRunner> r_;
   std::unique_ptr<rt::RolloutRunner> next_;  // shards: the next one, rolled ahead
   int shard_period_ = 0, shard_fade_ = 0, shard_offset_ = 0, next_frames_ = -1, shard_ = 0, start_index_ = 0, shard_start_ = 0;

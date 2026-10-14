@@ -36,6 +36,19 @@ struct QLayer {
   std::vector<float> head;
 };
 
+// A 3x3 convolution in 8 bits (rt_int8_conv.hpp; the rollout stepper's, rt_rollout.hpp): the weights of output channel o
+// and tap k (3 ky + kx) in words [(9 o + k) * words, (9 o + k + 1) * words), packed as QLayer's (quads: input channel c
+// in byte c % 4 of word c / 4; pairs: in half c % 2 of word c / 2); the scale of each output channel and its bias. The
+// activations' scales are folded into the weights before they are quantised, so out = ReLU(scale * (sum - corr) +
+// bias), where corr is the sum of the weights times the activations' zero points (0 where they have none).
+struct QConv {
+  int in = 0, out = 0, words = 0;
+  bool quads = true;
+  std::vector<std::uint32_t> w;
+  std::vector<float> scale, bias;
+  std::vector<std::int32_t> corr;
+};
+
 // Fold unit o's scale s into the output layer: ReLU(s (sa acc + b / s)) = s ReLU(sa acc + b / s) for s > 0 (a unit with
 // no weights keeps s = 1: its sum is 0).
 inline void fold_head(QLayer& q, const Dense& head) {
@@ -152,6 +165,7 @@ namespace qmadd {
 }  // namespace qmadd
 #define NFX_QNS qmadd
 #include "rt_int8_layer.hpp"
+#include "rt_int8_conv.hpp"
 #undef NFX_QNS
 
 #if NFX_VW == 16 && defined(NFX_PUSHED)
@@ -164,6 +178,7 @@ namespace qvnni {
 }  // namespace qvnni
 #define NFX_QNS qvnni
 #include "rt_int8_layer.hpp"
+#include "rt_int8_conv.hpp"
 #undef NFX_QNS
 #pragma GCC pop_options
 constexpr bool kVnniBuild = true;  // the AVX-512 build has the VNNI kernel (used where the CPU has VNNI)

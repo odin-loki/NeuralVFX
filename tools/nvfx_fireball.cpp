@@ -1,7 +1,7 @@
 // nvfx_fireball: a scripted scene of composed effects (docs/COMPOSE.md), rendered to video and profiled.
 //
 //   nvfx_fireball --models DIR [--out fireball.mp4] [--width 1280 --height 720] [--quality 1] [--threads 4]
-//                 [--isa avx2|avx512|baseline] [--seconds 9] [--profile profile.csv] [--keyframes DIR]
+//                 [--isa avx2|avx512|baseline] [--precision float|int8] [--seconds 9] [--profile profile.csv] [--keyframes DIR]
 //                 [--sheet sheet.png] [--no-video] [--no-skip] [--occupancy occupancy.csv]
 //                 [--stages | --no-overlap] [--no-checksums] [--baseline-kernels] [--raw frames.rgb] [--own-scratch]
 //
@@ -101,6 +101,7 @@ struct Args {
   int width = 1280, height = 720, threads = 4;
   float quality = 1.f, seconds = 9.f;
   std::string isa;
+  std::string precision;  // the modules' (study K): float, int8, or the runtime's default
   bool video = true;
 };
 
@@ -124,6 +125,7 @@ Args parse(int argc, char** argv) {
     else if (k == "--quality") a.quality = std::stof(next());
     else if (k == "--seconds") a.seconds = std::stof(next());
     else if (k == "--isa") a.isa = next();
+    else if (k == "--precision") a.precision = next();
     else if (k == "--no-video") a.video = false;
     else if (k == "--no-skip") a.skip = false;
     else if (k == "--occupancy") a.occupancy = next();
@@ -250,7 +252,9 @@ int main(int argc, char** argv) try {
     const nvfx_isa want = A.isa == "avx512" ? NVFX_ISA_AVX512 : A.isa == "avx2" ? NVFX_ISA_AVX2 : NVFX_ISA_BASELINE;
     if (nvfx_set_isa(want) != NVFX_OK) throw std::runtime_error("this CPU cannot run --isa " + A.isa);
   }
-  const Isa isa = best_isa();
+  if (!A.precision.empty() && A.precision != "float" && A.precision != "int8") throw std::invalid_argument("--precision float or int8");
+  const rt::Precision prec = A.precision.empty() ? rt::kRolloutPrecision : A.precision == "int8" ? rt::Precision::int8 : rt::Precision::float32;
+  const Isa isa = best_isa(prec);
   const auto setup0 = Clock::now();
   rt::RolloutEffect EX = load(A.models / "explosion.nvfx"), SM = load(A.models / "smoke.nvfx"), FI = load(A.models / "fire.nvfx");
   // Scripted settings of the models' detail layers (the script may set any of them): at this size the cloud wants
@@ -271,7 +275,7 @@ int main(int argc, char** argv) try {
   constexpr int kBand = 8;
   std::vector<std::unique_ptr<Module>> owned;
   const auto make = [&](std::string name, const rt::RolloutEffect& e, int size, Placement p) {
-    owned.push_back(std::make_unique<Module>(std::move(name), e, size, p, isa));
+    owned.push_back(std::make_unique<Module>(std::move(name), e, size, p, isa, prec));
     owned.back()->runner().skip_empty(A.skip);
     return owned.back().get();
   };

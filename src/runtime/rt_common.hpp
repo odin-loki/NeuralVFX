@@ -48,6 +48,22 @@ struct RolloutEffect {
 
 struct RolloutScratch;
 
+// Study K (docs/REPORT.md §13): where a rollout frame's time goes. While a profile is attached
+// (RolloutRunner::set_profile), step() and render() add the thread CPU time of each of their stages to it, in ms;
+// detached (the default) nothing is timed and the frames are the same.
+struct RolloutProfile {
+  enum Stage {
+    noise,         // the step's noise inputs, condition and FiLM folding
+    conv,          // the stepper's network: inputs, two 3x3 convolutions, the output layer
+    project,       // the state update, divergence, pressure projection and the coarse advection
+    detail,        // the detail layer: the fine fields carried by the flow and locked to the coarse state
+    shade_cells,   // the renderer's per-cell part: directional soot sums, the first layer's coarse part
+    shade_pixels,  // the renderer per pixel: the rest of the first layer, the hidden layer, the output, the gate
+    kStages
+  };
+  std::array<double, kStages> ms{};
+};
+
 // A running rollout effect: the coarse state, pressure and fine fields of one instance. Every buffer is allocated at
 // construction; start(), step() and render() allocate nothing. Same operations as the reference in
 // src/core/rollout.cpp (tests/test_runtime.cpp holds them to it).
@@ -95,6 +111,8 @@ class RolloutRunner {
   // an earlier step left in its scratch, so the frames are the same to the bit whichever scratch, and whichever order.
   virtual void use_scratch(RolloutScratch* s) = 0;
   virtual std::array<std::size_t, 2> scratch_need() const = 0;  // floats and 32-bit integers that step() uses
+  // Study K: time the stages of step() and render() into *p from now on (nullptr: stop). The runner does not own it.
+  virtual void set_profile(RolloutProfile* p) = 0;
 };
 
 // What a rollout runner's step() uses and leaves nothing in for the next step: the detail layer's rings of padded rows,
@@ -117,9 +135,18 @@ struct RolloutScratch {
   std::size_t bytes() const { return 4 * (floats.size() + ints.size()); }
 };
 
-// Precision of a frame model's network (nvfx_instance_set_precision): float throughout, or the grid family's hidden
-// layers in 8-bit integers with a projected first layer (rt_int8.hpp). The conv family is float either way.
+// Precision of a network (nvfx_instance_set_precision): float throughout, or 8-bit integers where they pay. Frame
+// models: the grid family's hidden layers with a projected first layer (rt_int8.hpp; the conv family is float either
+// way). Rollout effects: the stepper's second convolution (rt_rollout.hpp, rt_int8_conv.hpp; docs/REPORT.md §13).
 enum class Precision { float32, int8 };
+// Study K's candidates for a rollout effect's int8 path: the stepper's second convolution in 8 bits (its inputs follow a
+// ReLU: 7-bit codes), or both (the first one's inputs are the state, the noise and the position, signed: 8-bit codes
+// with a zero point, and 7-bit weights). kInt8Convs is the one Precision::int8 means.
+enum class Int8Convs { second, both };
+inline constexpr Int8Convs kInt8Convs = Int8Convs::second;
+// The precision a rollout effect runs at unless asked otherwise (nvfx_instance_set_precision's DEFAULT; scenes, the
+// library's stages and the effect manager too): study K's rule decides it (docs/REPORT.md §13).
+inline constexpr Precision kRolloutPrecision = Precision::float32;
 
 // One factory per ISA build (rt_base.cpp, rt_avx2.cpp, rt_avx512.cpp). Allocates every buffer the renderer will use.
 // A lean rollout runner keeps in itself only what lasts from one step to the next (state, noise caches, folded
@@ -128,15 +155,15 @@ enum class Precision { float32, int8 };
 // the bit; it is about 190 KB smaller (the effect manager's simulations, docs/MANAGER.md).
 namespace isa_base {
 std::unique_ptr<Renderer> make_renderer(const Effect& e, int size, Precision p = Precision::float32);
-std::unique_ptr<RolloutRunner> make_rollout(const RolloutEffect& e, int size, bool lean = false);
+std::unique_ptr<RolloutRunner> make_rollout(const RolloutEffect& e, int size, bool lean = false, Precision p = Precision::float32, Int8Convs convs = kInt8Convs);
 }  // namespace isa_base
 namespace isa_avx2 {
 std::unique_ptr<Renderer> make_renderer(const Effect& e, int size, Precision p = Precision::float32);
-std::unique_ptr<RolloutRunner> make_rollout(const RolloutEffect& e, int size, bool lean = false);
+std::unique_ptr<RolloutRunner> make_rollout(const RolloutEffect& e, int size, bool lean = false, Precision p = Precision::float32, Int8Convs convs = kInt8Convs);
 }  // namespace isa_avx2
 namespace isa_avx512 {
 std::unique_ptr<Renderer> make_renderer(const Effect& e, int size, Precision p = Precision::float32);
-std::unique_ptr<RolloutRunner> make_rollout(const RolloutEffect& e, int size, bool lean = false);
+std::unique_ptr<RolloutRunner> make_rollout(const RolloutEffect& e, int size, bool lean = false, Precision p = Precision::float32, Int8Convs convs = kInt8Convs);
 }  // namespace isa_avx512
 
 }  // namespace nfx::rt

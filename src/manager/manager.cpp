@@ -30,11 +30,12 @@ double now_ms() { return std::chrono::duration<double, std::milli>(std::chrono::
 
 // Lean runners (rt_common.hpp): what a step or a picture uses up lives in the step scratch of the thread that runs the
 // job, so a simulation holds only its state.
-std::unique_ptr<rt::RolloutRunner> make_runner(const rt::RolloutEffect& e, int size) {
-  switch (nvfx_get_isa()) {
-    case NVFX_ISA_AVX512: return rt::isa_avx512::make_rollout(e, size, true);
-    case NVFX_ISA_AVX2: return rt::isa_avx2::make_rollout(e, size, true);
-    default: return rt::isa_base::make_rollout(e, size, true);
+// At a precision (study K), on the ISA an instance would take for it.
+std::unique_ptr<rt::RolloutRunner> make_runner(const rt::RolloutEffect& e, int size, rt::Precision p) {
+  switch (rt::rollout_isa(p)) {
+    case NVFX_ISA_AVX512: return rt::isa_avx512::make_rollout(e, size, true, p);
+    case NVFX_ISA_AVX2: return rt::isa_avx2::make_rollout(e, size, true, p);
+    default: return rt::isa_base::make_rollout(e, size, true, p);
   }
 }
 
@@ -158,7 +159,8 @@ nvfx_status Manager::add_model(const nvfx_effect* fx, const nvfx_manager_model_d
   if (!re) return NVFX_ERROR_UNSUPPORTED;
   if (d.max_sims < 1 || d.max_sims > 4096 || d.history < 0 || d.history > 256 || d.proxy_steps < 1 || d.proxy_steps > 16 || d.proxy_rate_div < 1 ||
       d.proxy_rate_div > kMaxDiv || !(d.shard_seconds > 0.f) || level_of_size(d.proxy_size) < 0 || d.proxy_sims < 0 || d.proxy_sims > 4096 ||
-      d.offset_sims < 0 || d.offset_sims > 4096 || d.interp < NVFX_INTERP_DEFAULT || d.interp > NVFX_INTERP_MOTION) {
+      d.offset_sims < 0 || d.offset_sims > 4096 || d.interp < NVFX_INTERP_DEFAULT || d.interp > NVFX_INTERP_MOTION || d.precision < NVFX_PRECISION_DEFAULT ||
+      d.precision > NVFX_PRECISION_INT8) {
     return NVFX_ERROR_ARGUMENT;
   }
   const auto& m = re->m;
@@ -167,6 +169,7 @@ nvfx_status Manager::add_model(const nvfx_effect* fx, const nvfx_manager_model_d
   Model M;
   M.fx = fx;
   M.re = re;
+  M.precision = rt::rollout_precision(static_cast<nvfx_precision>(d.precision));
   M.res = h.res;
   M.nc = h.n_controls;
   M.fps = m.fps;
@@ -219,7 +222,7 @@ nvfx_status Manager::add_model(const nvfx_effect* fx, const nvfx_manager_model_d
         S->size = size;
         S->proxy_pool = i >= M.slots_n[z(L)];
         for (Track& t : S->t) {
-          t.r = make_runner(*re, size);
+          t.r = make_runner(*re, size, M.precision);
           fit_work(*t.r, h.res);
           t.r->use_scratch(work_[0].scratch.get());  // frees its own; each job binds its thread's
           bytes += t.r->scratch_bytes();
@@ -303,7 +306,7 @@ nvfx_status Manager::calibrate(int model, int frames) {
     for (int L = M.min_level; L <= M.max_level; ++L) {
       if (M.slots_n[z(L)] == 0) continue;
       const int size = kSizes[z(L)];
-      auto r = make_runner(*M.re, size);
+      auto r = make_runner(*M.re, size, M.precision);
       rt::RolloutScratch sc;
       sc.fit(*r);
       r->use_scratch(&sc);

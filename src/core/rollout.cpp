@@ -497,10 +497,72 @@ void conv3(int R, const float* in, int ci, const float* W, const float* b, int c
   }
 }
 
+// Study K (Int8): a 3x3 convolution in 8-bit integers. x [cell][ci] its inputs, W [tap][ci][co] and b its weights, g
+// and e its FiLM gain and shift (folded in: g W, g b + e), as the runtime folds them. `top`: the weights' levels either
+// side (127 or 63); signed: the inputs have a zero point (Int8::both's first convolution), else they are not negative.
+int round_away(float x) { return x >= 0.f ? static_cast<int>(x + 0.5f) : -static_cast<int>(0.5f - x); }
+void conv3_int8(int R, const float* x, int ci, const float* W, const float* b, const std::vector<float>& g, const std::vector<float>& e, int co,
+                int top, bool signed_inputs, float* out) {
+  const int N = R * R;
+  std::vector<float> s(sz(ci)), zp(sz(ci), 0.f);
+  std::vector<int> q(sz(N) * sz(ci));
+  for (int c = 0; c < ci; ++c) {
+    float lo = 0.f, hi = 0.f;
+    for (int i = 0; i < N; ++i) {
+      lo = std::min(lo, x[sz(i) * sz(ci) + sz(c)]);
+      hi = std::max(hi, x[sz(i) * sz(ci) + sz(c)]);
+    }
+    float a = hi, L = 127.f;
+    if (signed_inputs) {
+      a = lo < 0.f ? std::max(-lo, hi) : hi;
+      L = lo < 0.f ? 127.f : 255.f;
+      zp[sz(c)] = lo < 0.f ? 128.f : 0.f;
+    }
+    s[sz(c)] = a / L;
+    const float inv = a > 0.f ? L / a : 0.f;
+    for (int i = 0; i < N; ++i) {
+      const float v = x[sz(i) * sz(ci) + sz(c)] * inv;
+      q[sz(i) * sz(ci) + sz(c)] = signed_inputs ? round_away(v) + static_cast<int>(zp[sz(c)]) : static_cast<int>(v + 0.5f);
+    }
+  }
+  std::vector<int> Q(sz(co) * 9 * sz(ci));
+  for (int o = 0; o < co; ++o) {
+    const auto wf = [&](int tap, int c) { return g[sz(o)] * W[(sz(tap) * sz(ci) + sz(c)) * sz(co) + sz(o)] * s[sz(c)]; };
+    float mx = 0.f;
+    for (int tap = 0; tap < 9; ++tap) {
+      for (int c = 0; c < ci; ++c) mx = std::max(mx, std::abs(wf(tap, c)));
+    }
+    const float L = static_cast<float>(top), r = mx > 0.f ? L / mx : 0.f, t = mx / L;
+    long corr = 0;
+    for (int tap = 0; tap < 9; ++tap) {
+      for (int c = 0; c < ci; ++c) {
+        const int v = std::clamp(round_away(wf(tap, c) * r), -top, top);
+        Q[(sz(o) * 9 + sz(tap)) * sz(ci) + sz(c)] = v;
+        corr += static_cast<long>(v) * static_cast<long>(zp[sz(c)]);
+      }
+    }
+    const float bias = g[sz(o)] * b[sz(o)] + e[sz(o)];
+    for (int y = 0; y < R; ++y) {
+      for (int xx = 0; xx < R; ++xx) {
+        long acc = 0;
+        for (int tap = 0; tap < 9; ++tap) {
+          const int yy = y + tap / 3 - 1, xc = xx + tap % 3 - 1;
+          const bool inside = yy >= 0 && yy < R && xc >= 0 && xc < R;
+          for (int c = 0; c < ci; ++c) {
+            const int code = inside ? q[(sz(yy) * sz(R) + sz(xc)) * sz(ci) + sz(c)] : static_cast<int>(zp[sz(c)]);
+            acc += static_cast<long>(Q[(sz(o) * 9 + sz(tap)) * sz(ci) + sz(c)]) * code;
+          }
+        }
+        out[(sz(y) * sz(R) + sz(xx)) * sz(co) + sz(o)] = std::max(0.f, static_cast<float>(acc - corr) * t + bias);
+      }
+    }
+  }
+}
+
 }  // namespace
 
 void coarse_step(const Model& m, std::span<const float> in, std::span<const float> noise, std::span<const float> cond,
-                 std::span<float> pressure, std::span<float> out, std::span<float> flow) {
+                 std::span<float> pressure, std::span<float> out, std::span<float> flow, Int8 q) {
   const Hyper& h = m.h;
   const int R = h.res, N = R * R, C = h.channels(), I = h.inputs(), H = h.hidden, O = h.outputs();
   const StepLayout L = step_layout(h);
@@ -517,14 +579,19 @@ void coarse_step(const Model& m, std::span<const float> in, std::span<const floa
       xi[C + 3] = (fl(y) + 0.5f) / fl(R) * 2.f - 1.f;
     }
   }
-  const auto film_relu = [&](std::vector<float>& v, std::size_t G, std::size_t E) {
-    std::vector<float> g(sz(H), 1.f), e(sz(H), 0.f);
+  const auto film = [&](std::size_t G, std::size_t E, std::vector<float>& g, std::vector<float>& e) {
+    g.assign(sz(H), 1.f);
+    e.assign(sz(H), 0.f);
     for (int k = 0; k < h.cond(); ++k) {
       for (int j = 0; j < H; ++j) {
         g[sz(j)] += w[G + sz(k) * sz(H) + sz(j)] * cond[sz(k)];
         e[sz(j)] += w[E + sz(k) * sz(H) + sz(j)] * cond[sz(k)];
       }
     }
+  };
+  const auto film_relu = [&](std::vector<float>& v, std::size_t G, std::size_t E) {
+    std::vector<float> g, e;
+    film(G, E, g, e);
     for (int i = 0; i < N; ++i) {
       for (int j = 0; j < H; ++j) {
         float& z = v[sz(i) * sz(H) + sz(j)];
@@ -532,10 +599,21 @@ void coarse_step(const Model& m, std::span<const float> in, std::span<const floa
       }
     }
   };
-  conv3(R, X.data(), I, w + L.w1, w + L.b1, H, y1.data());
-  film_relu(y1, L.g1, L.e1);
-  conv3(R, y1.data(), H, w + L.w2, w + L.b2, H, y2.data());
-  film_relu(y2, L.g2, L.e2);
+  std::vector<float> g, e;
+  if (q == Int8::both) {  // study K
+    film(L.g1, L.e1, g, e);
+    conv3_int8(R, X.data(), I, w + L.w1, w + L.b1, g, e, H, 63, true, y1.data());
+  } else {
+    conv3(R, X.data(), I, w + L.w1, w + L.b1, H, y1.data());
+    film_relu(y1, L.g1, L.e1);
+  }
+  if (q != Int8::off) {  // study K
+    film(L.g2, L.e2, g, e);
+    conv3_int8(R, y1.data(), H, w + L.w2, w + L.b2, g, e, H, 127, false, y2.data());
+  } else {
+    conv3(R, y1.data(), H, w + L.w2, w + L.b2, H, y2.data());
+    film_relu(y2, L.g2, L.e2);
+  }
   for (int i = 0; i < N; ++i) {
     float* o = d.data() + sz(i) * sz(O);
     for (int k = 0; k < O; ++k) {
@@ -785,7 +863,7 @@ void render(const Model& m, const State& s, std::span<float> rgba) {
   }
 }
 
-State start(const Model& m, int index, int size, std::span<const float> controls, std::uint64_t seed) {
+State start(const Model& m, int index, int size, std::span<const float> controls, std::uint64_t seed, Int8 q) {
   const Hyper& h = m.h;
   const StartPoint& sp = m.starts.at(sz(index));
   const int R = h.res, C = h.channels();
@@ -814,18 +892,18 @@ State start(const Model& m, int index, int size, std::span<const float> controls
   }
   if (!fine) {  // grow detail: material flows through and picks up filaments and flicker
     s.since_start = m.detail.swirl_ramp;
-    for (int f = 0; f < h.warmup; ++f) step(m, s, controls, seed);
+    for (int f = 0; f < h.warmup; ++f) step(m, s, controls, seed, q);
     s.since_start = m.detail.swirl_ramp;
   }
   return s;
 }
 
-void step(const Model& m, State& s, std::span<const float> controls, std::uint64_t seed) {
+void step(const Model& m, State& s, std::span<const float> controls, std::uint64_t seed, Int8 q) {
   const Hyper& h = m.h;
   std::vector<float> cond(sz(h.cond())), noise(sz(h.res) * sz(h.res) * kNoise), next(s.coarse.size());
   condition(m, controls, s.time, cond);
   coarse_noise(m, seed, s.time, noise);
-  coarse_step(m, s.coarse, noise, cond, s.pressure, next, s.flow);
+  coarse_step(m, s.coarse, noise, cond, s.pressure, next, s.flow, q);
   s.coarse.swap(next);
   detail_step(m, s, seed, controls);
   s.time += 1.f / m.fps;

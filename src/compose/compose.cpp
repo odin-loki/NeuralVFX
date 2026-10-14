@@ -4,6 +4,8 @@
 #include <neuralfx/noise.hpp>
 #include <neuralfx/nvfx.h>
 
+#include "nvfx_internal.hpp"
+
 #include <algorithm>
 #include <bit>
 #include <chrono>
@@ -335,8 +337,8 @@ void Pool::work() {
 
 // --- modules -----------------------------------------------------------------------------------------------------------
 
-Isa best_isa() {
-  switch (nvfx_get_isa()) {
+Isa best_isa(rt::Precision p) {
+  switch (rt::rollout_isa(p)) {
     case NVFX_ISA_AVX512: return Isa::avx512;
     case NVFX_ISA_AVX2: return Isa::avx2;
     default: return Isa::base;
@@ -352,11 +354,11 @@ const char* isa_name(Isa isa) {
   return "?";
 }
 
-std::unique_ptr<rt::RolloutRunner> make_runner(const rt::RolloutEffect& e, int size, Isa isa) {
+std::unique_ptr<rt::RolloutRunner> make_runner(const rt::RolloutEffect& e, int size, Isa isa, rt::Precision p) {
   switch (isa) {
-    case Isa::avx512: return rt::isa_avx512::make_rollout(e, size);
-    case Isa::avx2: return rt::isa_avx2::make_rollout(e, size);
-    case Isa::base: return rt::isa_base::make_rollout(e, size);
+    case Isa::avx512: return rt::isa_avx512::make_rollout(e, size, false, p);
+    case Isa::avx2: return rt::isa_avx2::make_rollout(e, size, false, p);
+    case Isa::base: return rt::isa_base::make_rollout(e, size, false, p);
   }
   return nullptr;
 }
@@ -385,8 +387,8 @@ std::size_t StepScratch::bytes() const {
   return n;
 }
 
-Module::Module(std::string name, const rt::RolloutEffect& e, int size, Placement p, Isa isa)
-    : at(p), name_(std::move(name)), e_(e), size_(size), isa_(isa), r_(make_runner(e, size, isa)) {
+Module::Module(std::string name, const rt::RolloutEffect& e, int size, Placement p, Isa isa, rt::Precision precision)
+    : at(p), name_(std::move(name)), e_(e), size_(size), isa_(isa), prec_(precision), r_(make_runner(e, size, isa, precision)) {
   img_.allocate(size, size);
   rgba8_.assign(zs(size) * zs(size) * 4, 0);
   shadow_.assign(zs(res()) * zs(res()), 0.f);
@@ -423,7 +425,7 @@ void Module::use_shards(int period, int fade, int offset) {
   shard_fade_ = std::clamp(fade, 1, std::max(1, shard_period_ / 2));
   shard_offset_ = shard_period_ > 0 ? ((offset % shard_period_) + shard_period_) % shard_period_ : 0;
   if (shard_period_ > 0 && !next_) {
-    next_ = make_runner(e_, size_, isa_);
+    next_ = make_runner(e_, size_, isa_, prec_);
     if (shared_) {
       shared_->fit(*next_);
       rt::RolloutScratch& s = shared_->take();

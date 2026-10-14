@@ -84,6 +84,9 @@ typedef struct nvfx_manager_model_desc {
   nvfx_interp interp; /* this effect's drawing between updates (default NVFX_INTERP_DEFAULT: the manager's); in the
                          quality study motion was ahead of crossfade only on the explosion, in validation, and tied on
                          the test (docs/MANAGER.md §5) */
+  int precision;      /* its simulations' nvfx_precision, as nvfx_instance_set_precision's (default 0: the runtime's;
+                         NVFX_PRECISION_INT8: the stepper's convolutions in 8-bit integers, docs/REPORT.md §13). The
+                         planner's default costs are float's: nvfx_manager_calibrate measures the model as it runs */
 } nvfx_manager_model_desc;
 
 NVFX_API void nvfx_manager_model_desc_init(nvfx_manager_model_desc* desc);

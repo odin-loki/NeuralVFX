@@ -319,6 +319,7 @@ nvfx_status nvfx_stage_create(const nvfx_library* l, const nvfx_stage_desc* d, n
     sd.n_effects = static_cast<int>(list.size());
     sd.threads = d->threads > 0 ? d->threads : 2;
     sd.overlap = d->overlap;
+    sd.precision = d->precision;
     const nvfx_status st = nvfx_scene_create(&sd, &s->scene, err);
     if (st == NVFX_ERROR_SCRIPT) {
       // An entry checks without its effects (nvfx_library_open) but not with them (a control it does not have, a start

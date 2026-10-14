@@ -56,8 +56,9 @@ struct nvfx_instance {
   float hue = 0.f, brightness = 1.f;
   std::array<float, 9> colour{};
   bool apply_colour = false;
-  nvfx_precision precision = NVFX_PRECISION_DEFAULT;  // frame models (nvfx_instance_set_precision)
+  nvfx_precision precision = NVFX_PRECISION_DEFAULT;  // nvfx_instance_set_precision
   nvfx_isa isa = NVFX_ISA_AUTO;                        // the ISA forced when the instance was created
+  nfx::rt::Int8Convs convs = nfx::rt::kInt8Convs;      // rollout effects at int8: study K's candidate
   // The prior against drift (docs/DCM.md G2.13): its work buffers, its condition, and when and how strongly it acts.
   std::unique_ptr<nfx::rt::Prior> prior;
   std::vector<float> prior_cond;
@@ -104,6 +105,38 @@ nvfx_isa resolved_isa() {
 nfx::rt::Precision frame_precision(const nfx::Model& m, nvfx_precision p) {
   if ((m.h.arch != nfx::Arch::grid && m.h.arch != nfx::Arch::multi) || p == NVFX_PRECISION_FLOAT) return nfx::rt::Precision::float32;
   return nfx::rt::Precision::int8;
+}
+
+// The ISA of a rollout runner at a precision: `forced`, else the default; at int8 with no ISA forced, the AVX-512 build
+// where the CPU has VNNI: its kernel (vpdpbusd) is what makes int8 pay (study K, docs/REPORT.md §13); the codes and
+// integer sums are those of every other ISA.
+nvfx_isa runner_isa(nfx::rt::Precision q, nvfx_isa forced) {
+  if (forced != NVFX_ISA_AUTO) return forced;
+  if (q == nfx::rt::Precision::int8 && cpu_has(NVFX_ISA_AVX512) && cpu_has_vnni()) return NVFX_ISA_AVX512;
+  return resolved_isa();
+}
+
+// A rollout runner on the instances' ISA (`forced`, else the default), at a precision.
+std::unique_ptr<RolloutRunner> make_rollout_runner(const RolloutEffect& e, int size, nfx::rt::Precision q, nfx::rt::Int8Convs c, nvfx_isa forced) {
+  switch (runner_isa(q, forced)) {
+    case NVFX_ISA_AVX512: return nfx::rt::isa_avx512::make_rollout(e, size, false, q, c);
+    case NVFX_ISA_AVX2: return nfx::rt::isa_avx2::make_rollout(e, size, false, q, c);
+    default: return nfx::rt::isa_base::make_rollout(e, size, false, q, c);
+  }
+}
+
+// A rollout instance's two runners at a precision, sharing one step scratch (a set-up call: allocates).
+// The instance is unchanged if this throws.
+void make_rollout_runners(nvfx_instance& in, nfx::rt::Precision q) {
+  std::array<std::unique_ptr<RolloutRunner>, 2> r{make_rollout_runner(*in.effect->roll, in.size, q, in.convs, in.isa),
+                                                  make_rollout_runner(*in.effect->roll, in.size, q, in.convs, in.isa)};
+  auto scratch = std::make_unique<nfx::rt::RolloutScratch>();
+  for (auto& x : r) scratch->fit(*x);
+  for (auto& x : r) x->use_scratch(scratch.get());  // frees their own
+  in.a.r = std::move(r[0]);
+  in.b.r = std::move(r[1]);
+  in.a.shard = in.b.shard = -1;
+  in.step_scratch = std::move(scratch);
 }
 
 // A frame model's renderer on the instances' ISA. With int8, a hidden layer to run in integers and no ISA forced, the
@@ -376,6 +409,31 @@ float prepare(nvfx_instance& in, double seconds, bool allow_drift) {
 
 }  // namespace
 
+// --- study K's internal API (nvfx_internal.hpp) ---------------------------------------------------------------------
+
+nfx::rt::Precision nfx::rt::rollout_precision(nvfx_precision p) {
+  if (p == NVFX_PRECISION_FLOAT) return Precision::float32;
+  if (p == NVFX_PRECISION_INT8) return Precision::int8;
+  return kRolloutPrecision;
+}
+
+nvfx_isa nfx::rt::rollout_isa(Precision p) { return runner_isa(p, static_cast<nvfx_isa>(g_forced_isa.load())); }
+
+nvfx_status nfx::rt::set_rollout_int8_convs(nvfx_instance* in, Int8Convs convs) {
+  if (!in || !in->a.r) return NVFX_ERROR_ARGUMENT;
+  if (convs == in->convs) return NVFX_OK;
+  const Int8Convs old = in->convs;
+  in->convs = convs;
+  if (rollout_precision(in->precision) != Precision::int8) return NVFX_OK;
+  try {
+    make_rollout_runners(*in, Precision::int8);
+  } catch (const std::bad_alloc&) {
+    in->convs = old;
+    return NVFX_ERROR_MEMORY;
+  }
+  return NVFX_OK;
+}
+
 extern "C" {
 
 const char* nvfx_status_string(nvfx_status s) {
@@ -472,16 +530,8 @@ nvfx_status nvfx_instance_create(const nvfx_effect* e, int size, nvfx_instance**
       in->effect = e;
       in->size = size;
       in->controls.assign(static_cast<std::size_t>(h.n_controls), 0.5f);
-      for (auto* t : {&in->a, &in->b}) {
-        switch (resolved_isa()) {
-          case NVFX_ISA_AVX512: t->r = nfx::rt::isa_avx512::make_rollout(*e->roll, size); break;
-          case NVFX_ISA_AVX2: t->r = nfx::rt::isa_avx2::make_rollout(*e->roll, size); break;
-          default: t->r = nfx::rt::isa_base::make_rollout(*e->roll, size); break;
-        }
-      }
-      in->step_scratch = std::make_unique<nfx::rt::RolloutScratch>();
-      for (auto* t : {&in->a, &in->b}) in->step_scratch->fit(*t->r);
-      for (auto* t : {&in->a, &in->b}) t->r->use_scratch(in->step_scratch.get());  // frees their own
+      in->isa = static_cast<nvfx_isa>(g_forced_isa.load());
+      make_rollout_runners(*in, nfx::rt::rollout_precision(in->precision));
       in->mix.assign(static_cast<std::size_t>(size) * size * 4, 0);
       in->drift_seconds = e->roll->m.loop ? 6.f : 0.f;
       in->prior_cond.assign(static_cast<std::size_t>(h.cond()), 0.f);
@@ -640,9 +690,19 @@ nvfx_status nvfx_instance_set_precision(nvfx_instance* in, nvfx_precision precis
   if (!in || (precision != NVFX_PRECISION_DEFAULT && precision != NVFX_PRECISION_FLOAT && precision != NVFX_PRECISION_INT8)) {
     return NVFX_ERROR_ARGUMENT;
   }
-  const bool grid = !in->a.r && (in->effect->e.m.h.arch == nfx::Arch::grid || in->effect->e.m.h.arch == nfx::Arch::multi);
+  if (in->a.r) {  // rollout effects (study K): a new precision, new runners and a new timeline
+    if (nfx::rt::rollout_precision(precision) != nfx::rt::rollout_precision(in->precision)) {
+      try {  // a set-up call: the new runners' buffers
+        make_rollout_runners(*in, nfx::rt::rollout_precision(precision));
+      } catch (const std::bad_alloc&) {
+        return NVFX_ERROR_MEMORY;
+      }
+    }
+    in->precision = precision;
+    return NVFX_OK;
+  }
+  const bool grid = in->effect->e.m.h.arch == nfx::Arch::grid || in->effect->e.m.h.arch == nfx::Arch::multi;
   if (precision == NVFX_PRECISION_INT8 && !grid) return NVFX_ERROR_UNSUPPORTED;
-  if (in->a.r) return NVFX_OK;  // rollout effects: float
   const nfx::Model& m = in->effect->e.m;
   if (frame_precision(m, precision) != frame_precision(m, in->precision)) {
     try {  // a set-up call: the new renderer's buffers

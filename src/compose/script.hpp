@@ -126,6 +126,9 @@ struct Options {
   // The modules step with working memory shared per thread (StepScratch, docs/COMPOSE.md §7.3) rather than their own:
   // the same frames, less memory.
   bool shared_scratch = true;
+  // The modules' precision (study K, docs/REPORT.md §13): rt::Precision::int8 runs the stepper's convolutions in 8-bit
+  // integers. Give `isa` best_isa(precision) to have the runtime's choice for it.
+  rt::Precision precision = rt::kRolloutPrecision;
 };
 
 // A scene built from a script: every module, buffer and list is created here, so render() allocates nothing.

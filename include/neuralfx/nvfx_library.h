@@ -133,6 +133,7 @@ typedef struct nvfx_stage_desc {
   int threads, overlap;       /* as nvfx_scene_desc (default 2, -1) */
   const nvfx_scene_effect* effects; /* learned effects passed in (by their file's name), instead of read */
   int n_effects;
+  int precision;              /* the learned effects' nvfx_precision, as nvfx_scene_desc's (default 0: the runtime's) */
 } nvfx_stage_desc;
 
 typedef enum nvfx_fx_state {

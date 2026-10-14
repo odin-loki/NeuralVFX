@@ -65,6 +65,9 @@ typedef struct nvfx_scene_desc {
                                nvfx_scene_render); 0: off; -1 (default): on with 2 threads or more */
   int width, height;        /* the output's size in pixels (0: the script's `scene size`). The scene is drawn at its
                                own size and resampled (bilinear) when they differ: this does not make it cheaper */
+  int precision;            /* the modules' nvfx_precision (as nvfx_instance_set_precision for rollout effects): 0
+                               (NVFX_PRECISION_DEFAULT), NVFX_PRECISION_FLOAT or NVFX_PRECISION_INT8 (the stepper's
+                               convolutions in 8-bit integers; docs/REPORT.md §13) */
 } nvfx_scene_desc;
 
 /* Where and why a scene could not be created. */

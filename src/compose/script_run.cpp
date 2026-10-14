@@ -1781,7 +1781,7 @@ void Scene::Impl::build(const EffectLoader& load, const Options& o) {
     for (int row = 0; row < mc.rows; ++row) {
       for (int c = 0; c < mc.cols; ++c) {
         const std::string name = mc.tiled ? std::format("{}_r{}c{}", mc.name, row, c) : mc.name;
-        owned.push_back(std::make_unique<Module>(name, e, mc.size, Placement{0.f, 0.f, scale}, o.isa));
+        owned.push_back(std::make_unique<Module>(name, e, mc.size, Placement{0.f, 0.f, scale}, o.isa, o.precision));
         Module* m = owned.back().get();
         if (step_scratch) m->share_scratch(*step_scratch);
         m->group = r.group;

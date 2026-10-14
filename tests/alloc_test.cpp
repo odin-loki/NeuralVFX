@@ -10,6 +10,7 @@
 // with spawns, stops, controls, camera moves, a tight budget, proxies, copies offset in time, pauses and culls.
 // Exit code 0 = no allocation during rendering.
 #include "compose_scene.hpp"
+#include "nvfx_internal.hpp"
 #include "script.hpp"
 
 #include <neuralfx/dcm/ddpm.hpp>
@@ -197,7 +198,8 @@ int run_multi(int size, bool masked, nvfx_precision precision = NVFX_PRECISION_D
 // A rollout effect: the counted frames include a seek backwards (a restart from a start point, with warm-up steps).
 // With `handoff`, an explosion whose first 30 frames are drawn in the simulator's look, crossfading over 10
 // (docs/COMPOSE.md §10). With `d2`, study D2's detail constants (advection gain and softening, docs/REPORT.md §6.9).
-int run_rollout(int size, bool handoff = false, bool d2 = false) {
+// With `int8`, study K's int8 path (both convolutions with `both`; docs/REPORT.md §13).
+int run_rollout(int size, bool handoff = false, bool d2 = false, bool int8 = false, bool both = false) {
   nfx::rollout::Hyper h;
   h.res = 16;
   h.hidden = 8;
@@ -230,6 +232,8 @@ int run_rollout(int size, bool handoff = false, bool d2 = false) {
   nvfx_instance* in = nullptr;
   if (nvfx_effect_load_memory(bytes.data(), bytes.size(), &e) != NVFX_OK) return 1;
   if (nvfx_instance_create(e, size, &in) != NVFX_OK) return 1;
+  if (int8 && both && nfx::rt::set_rollout_int8_convs(in, nfx::rt::Int8Convs::both) != NVFX_OK) return 1;
+  if (int8 && nvfx_instance_set_precision(in, NVFX_PRECISION_INT8) != NVFX_OK) return 1;
   const float controls[3] = {0.7f, 0.2f, 0.9f};
   nvfx_instance_set_controls(in, controls, 3);
   nvfx_instance_set_seed(in, 99);
@@ -246,7 +250,7 @@ int run_rollout(int size, bool handoff = false, bool d2 = false) {
   g_counting = false;
   const long n = g_allocations.load();
   std::printf("rollout %dx%d%s: %ld allocations in 202 frames (with a restart)\n", size, size,
-              handoff ? " with the hand-off" : (d2 ? " with study D2's detail constants" : ""), n);
+              handoff ? " with the hand-off" : (d2 ? " with study D2's detail constants" : int8 ? (both ? " at int8 (both convolutions)" : " at int8") : ""), n);
   nvfx_instance_free(in);
   nvfx_effect_free(e);
   return n == 0 ? 0 : 1;
@@ -727,6 +731,7 @@ int main() {
   failures += run_rollout_prior(64) + run_rollout_prior(128);  // the prior against drift
   failures += run_rollout(64, true);                             // the simulator's look for the first frames
   failures += run_rollout(64, false, true);                      // study D2's advection gain and softening
+  failures += run_rollout(64, false, false, true) + run_rollout(128, false, false, true) + run_rollout(64, false, false, true, true);  // study K
   failures += run(g, 128, "grid", 8) + run(g, 128, "grid", 5) + run(g, 64, "grid", 4) + run(c, 64, "conv", 4);  // packed features
   failures += run(g, 128, "grid", 8, 6) + run(c, 64, "conv", 8, 8);  // vector-quantised features
   failures += run_per_plane(g, 128, "grid", false) + run_per_plane(c, 64, "conv", false);  // a width per feature plane
