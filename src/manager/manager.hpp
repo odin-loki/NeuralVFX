@@ -225,6 +225,7 @@ class Manager {
   int ensure_proxy(int model, int cell);
   std::int64_t proxy_offset(const Model& M, const Inst& in, int p) const;
   int nearest_proxy(const Model& M, int cell) const;
+  bool proxy_ok(const Model& M, const Sim& s) const;
   bool evict(Model& M);
   void start_fade(Inst& in);
   void fork(Inst& in);

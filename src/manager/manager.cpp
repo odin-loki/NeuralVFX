@@ -28,20 +28,22 @@ std::uint64_t mix64(std::uint64_t x) {  // splitmix64's finaliser
 
 double now_ms() { return std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now().time_since_epoch()).count(); }
 
+// Lean runners (rt_common.hpp): what a step or a picture uses up lives in the step scratch of the thread that runs the
+// job, so a simulation holds only its state.
 std::unique_ptr<rt::RolloutRunner> make_runner(const rt::RolloutEffect& e, int size) {
   switch (nvfx_get_isa()) {
-    case NVFX_ISA_AVX512: return rt::isa_avx512::make_rollout(e, size);
-    case NVFX_ISA_AVX2: return rt::isa_avx2::make_rollout(e, size);
-    default: return rt::isa_base::make_rollout(e, size);
+    case NVFX_ISA_AVX512: return rt::isa_avx512::make_rollout(e, size, true);
+    case NVFX_ISA_AVX2: return rt::isa_avx2::make_rollout(e, size, true);
+    default: return rt::isa_base::make_rollout(e, size, true);
   }
 }
 
 // The planner's defaults (docs/MANAGER.md §6): one AVX2 core of the project's machine, milliseconds per simulation step
 // and per keyframe picture at 32, 64, 128 and 256 px, and per composed picture.
-constexpr std::array<float, kLevels> kStepMs{0.32f, 0.36f, 0.47f, 1.10f};
-constexpr std::array<float, kLevels> kRenderMs{0.063f, 0.11f, 0.28f, 1.35f};
-constexpr std::array<float, kLevels> kFadeMs{0.002f, 0.006f, 0.025f, 0.10f};
-constexpr std::array<float, kLevels> kMotionMs{0.006f, 0.02f, 0.08f, 0.32f};
+constexpr std::array<float, kLevels> kStepMs{0.33f, 0.36f, 0.48f, 1.05f};
+constexpr std::array<float, kLevels> kRenderMs{0.064f, 0.11f, 0.30f, 1.30f};
+constexpr std::array<float, kLevels> kFadeMs{0.0007f, 0.0023f, 0.009f, 0.031f};
+constexpr std::array<float, kLevels> kMotionMs{0.021f, 0.082f, 0.335f, 1.35f};
 constexpr nvfx_interp kDefaultInterp = NVFX_INTERP_CROSSFADE;
 constexpr std::array<float, 3> kRatePx{96.f, 48.f, 24.f};
 
@@ -646,6 +648,17 @@ int Manager::nearest_proxy(const Model& M, int cell) const {
   return best;
 }
 
+// Whether a simulation's viewers may all go to a proxy now: looping, proxies on, every viewer allows it, is not locked,
+// and has kept its source for proxy_dwell (or has not been shown yet).
+bool Manager::proxy_ok(const Model& M, const Sim& s) const {
+  if (!s.all_proxy || !M.loop || M.history < 3 || !desc_.proxies || s.first_viewer < 0 || M.proxy_sim.empty()) return false;
+  for (int v = s.first_viewer; v >= 0; v = insts_[z(v)].next_viewer) {
+    const Inst& in = insts_[z(v)];
+    if (!(now_ - in.switched_at >= static_cast<double>(desc_.proxy_dwell) || !s.started) || proxy_cell(M, in) < 0) return false;
+  }
+  return true;
+}
+
 // A proxy's viewers play it at offsets of their own (from their seed) within its ring, so they do not move in step.
 std::int64_t Manager::proxy_offset(const Model& M, const Inst& in, int p) const {
   const std::int64_t span = std::max<std::int64_t>(1, static_cast<std::int64_t>(M.history - 3) * M.proxy_div + 1);
@@ -818,12 +831,16 @@ void Manager::plan() {
       Sim& s = *sp;
       if (s.locked || s.proxy_cell >= 0) continue;
       Model& M = models_[z(s.model)];
+      // At the proxies' size or smaller a lower rate saves little (the steps cost the same at every rate): such a
+      // simulation goes to a proxy at once if it can (docs/MANAGER.md §6); larger ones lower their rate, then size.
+      const bool small = s.plan_level <= M.proxy_level;
       while (total > budget) {
         float next = 0.f;
-        if (s.plan_div < kMaxDiv) {
+        const bool try_proxy = small && proxy_ok(M, s);
+        if (s.plan_div < kMaxDiv && !try_proxy) {
           next = cost(M, s.plan_level, s.plan_div + 1);
           ++s.plan_div;
-        } else if (s.plan_level > M.min_level) {
+        } else if (s.plan_level > M.min_level && !try_proxy) {
           int L = s.plan_level - 1;
           while (L > M.min_level && M.slots_n[z(L)] == 0) --L;
           if (M.slots_n[z(L)] == 0) break;
@@ -831,15 +848,8 @@ void Manager::plan() {
           s.plan_level = L;
         } else {
           // a proxy, if every viewer allows it and has kept its source long enough
-          bool ok = s.all_proxy && M.loop && M.history >= 3 && desc_.proxies;
-          int cell = -1;
-          for (int v = s.first_viewer; ok && v >= 0; v = insts_[z(v)].next_viewer) {
-            const Inst& in = insts_[z(v)];
-            ok = now_ - in.switched_at >= static_cast<double>(desc_.proxy_dwell) || !s.started;
-            cell = proxy_cell(M, in);
-            ok = ok && cell >= 0;
-          }
-          if (!ok || cell < 0) break;
+          if (!proxy_ok(M, s)) break;
+          int cell = proxy_cell(M, insts_[z(s.first_viewer)]);
           next = static_cast<float>(s.viewers) * copy_ms;
           if (M.proxy_sim[z(cell)] < 0 && !M.planned[z(cell)]) {
             // a proxy of its own cell if the budget has room for one more, else the nearest one there is

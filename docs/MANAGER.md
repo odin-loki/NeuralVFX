@@ -47,3 +47,20 @@ Paired bootstrap over the 50 pairs (ten settings of five effects).
 
 The rate thresholds and sizes (§6) are chosen on validation from the same tables and the cost model, and reported on the
 test.
+
+### 5.3 Validation and the choice
+
+`nvfx_lod val` (results/manager/lod_val.csv and lod_val_summary.md; 50 pairs: five effects at ten settings), the rule's
+comparisons, mean over the six cells, paired over settings:
+
+| comparison | active PSNR per frame (dB) | motion error, abs(ln ratio) | spectrum L1 |
+|---|---|---|---|
+| motion - crossfade, pooled | -3.10 [-4.85, -1.49] | +0.208 [+0.101, +0.326] | +0.087 [+0.072, +0.102] |
+| crossfade - hold, pooled | +7.73 [+7.31, +8.17] | -0.003 [-0.003, -0.002] | +0.049 [+0.046, +0.052] |
+
+Motion fails the rule's first condition (its interval is below zero), so by rule 2 **crossfade is the default**
+(`NVFX_INTERP_DEFAULT`). Per effect, motion loses on fire (-1.10 [-2.05, -0.30]), smoke, steam and magic (-14.46
+[-15.28, -13.67]) and wins on the explosion (+2.19 [+1.21, +3.03]): the flow carries an expanding fireball's picture,
+but a flame or a plume keeps its shape where the gas flows through it (warping along the gas shifts the flame's base),
+and the magic portal spins faster than a straight warp over four frames can follow. The test (§5.4) runs once with this
+choice.

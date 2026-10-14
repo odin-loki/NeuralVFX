@@ -3,7 +3,7 @@
 //   nvfx_crowd [--instances 160] [--seconds 20] [--fps 60] [--budget 4] [--threads 1] [--cores 2,3]
 //              [--interp default|hold|crossfade|motion] [--proxies 1] [--max-size 256] [--rates 96,48,24]
 //              [--no-share] [--unlimited] [--calibrate] [--max-sims 16] [--proxy-sims 8] [--seed 1] [--root DATA]
-//              [--video FILE.mp4] [--sheet DIR] [--csv FILE] [--label NAME]
+//              [--video FILE.mp4] [--sheet DIR] [--csv FILE] [--summary FILE] [--label NAME]
 //
 // The scene: fires, smoke columns, steam vents and rows of torches (identical copies, offset in time) spread over a
 // field of 80 x 160 m; a camera 2 m up flies through it at 2 m/s, yawing +-25 degrees, so effects come near, shrink,
@@ -64,6 +64,9 @@ constexpr std::array<float, kKinds> kWorld{2.5f, 6.f, 2.f, 6.f};  // metres
 
 struct Thing {
   nvfx_handle h = 0;
+  nvfx_instance* in = nullptr;  // --unmanaged: its own instance
+  float offset = 0.f;
+  int serial = 0;
   int kind = 0;
   bool torch = false;
   std::array<float, 3> pos{};
@@ -197,9 +200,12 @@ double percentile(std::vector<double> v, double q) {
 
 int main(int argc, char** argv) try {
   const nfx::tools::Args a(argc, argv, {"help", "no-share", "unlimited", "calibrate"});
+  // --unmanaged SIZE: no manager; every instance its own nvfx_instance at SIZE px, updated at 30 Hz (staggered over the
+  // ticks) while on screen, as an engine would play them with nvfx.h alone
+  const int unmanaged = a.i("unmanaged", 0);
   if (a.flag("help")) {
     std::println("nvfx_crowd [--instances 160] [--seconds 20] [--fps 60] [--budget 4] [--threads 1] [--cores 2,3] [--interp default] [--proxies 1] "
-                 "[--max-size 256] [--rates 96,48,24] [--no-share] [--unlimited] [--calibrate] [--seed 1] [--video F.mp4] [--sheet DIR] [--csv F] [--label L]");
+                 "[--max-size 256] [--rates 96,48,24] [--no-share] [--unlimited] [--calibrate] [--seed 1] [--video F.mp4] [--sheet DIR] [--csv F] [--summary F] [--label L]");
     return 0;
   }
   const int count = a.i("instances", 160), fps = a.i("fps", 60), threads = a.i("threads", 1);
@@ -273,7 +279,21 @@ int main(int argc, char** argv) try {
     std::copy(t.pos.begin(), t.pos.end(), s.position);
     s.world_size = t.size;
     t.born = now;
+    t.offset = offset;
+    static int serial = 0;
+    t.serial = serial++;
+    if (unmanaged > 0) {
+      if (nvfx_instance_create(fx[sz(kind)], unmanaged, &t.in) != NVFX_OK) return;
+      nvfx_instance_set_controls(t.in, c.data(), 3);
+      nvfx_instance_set_seed(t.in, seed);
+      things.push_back(t);
+      return;
+    }
     if (nvfx_manager_spawn(m, &s, &t.h) == NVFX_OK) things.push_back(t);
+  };
+  const auto stop = [&](Thing& t) {
+    if (t.in) nvfx_instance_free(t.in);
+    else nvfx_manager_stop(m, t.h);
   };
   const auto random_controls = [&] { return std::array<float, 3>{0.15f + 0.7f * u01(rng), 0.15f + 0.7f * u01(rng), 0.15f + 0.7f * u01(rng)}; };
   // the field: 15% torches in rows of 8 identical copies; the rest fires, smoke and steam
@@ -289,10 +309,11 @@ int main(int argc, char** argv) try {
     const int kind = r < 0.53f ? kFire : r < 0.82f ? kSmoke : kSteam;
     spawn(kind, {-40.f + 80.f * u01(rng), 0.f, 5.f + 155.f * u01(rng)}, random_controls(), rng(), 0.f, false, 0.0);
   }
+  std::vector<std::uint8_t> upx(sz(std::max(unmanaged, 1)) * sz(std::max(unmanaged, 1)) * 4);
   std::FILE* video = nullptr;
   nfx::Image canvas;
   canvas.allocate(kW, kH);
-  if (a.has("video")) {
+  if (a.has("video") && unmanaged <= 0) {
     const fs::path vp = a.str("video");
     fs::create_directories(vp.parent_path());
     const std::string cmd = std::format("ffmpeg -loglevel error -y -f rawvideo -pix_fmt rgba -s {}x{} -r 30 -i - -c:v libx264 -pix_fmt yuv420p -crf 20 '{}'", kW, kH, vp.string());
@@ -327,17 +348,17 @@ int main(int argc, char** argv) try {
         const std::size_t k = rng() % things.size();
         if (things[k].torch || things[k].kind == kExplosion) continue;
         const int kind = things[k].kind;
-        nvfx_manager_stop(m, things[k].h);
+        stop(things[k]);
         things.erase(things.begin() + static_cast<std::ptrdiff_t>(k));
         spawn(kind, {-40.f + 80.f * u01(rng), 0.f, cam.pos[2] + 10.f + 150.f * u01(rng)}, random_controls(), rng(), 0.f, false, now);
         break;
       }
     }
     for (std::size_t k = 0; k < things.size();) {
-      nvfx_manager_picture p;
-      nvfx_manager_get_picture(m, things[k].h, &p);
+      nvfx_manager_picture p{};
+      if (!things[k].in) nvfx_manager_get_picture(m, things[k].h, &p);
       if (things[k].kind == kExplosion && ((p.flags & NVFX_PICTURE_FINISHED) || now - things[k].born > 3.5)) {
-        nvfx_manager_stop(m, things[k].h);
+        stop(things[k]);
         things.erase(things.begin() + static_cast<std::ptrdiff_t>(k));
         continue;
       }
@@ -345,11 +366,32 @@ int main(int argc, char** argv) try {
     }
     const double c0 = cpu_ms();
     const auto w0 = std::chrono::steady_clock::now();
-    if (nvfx_manager_tick(m, 1.0 / fps) != NVFX_OK) throw std::runtime_error("tick");
+    nvfx_manager_stats st{};
+    if (unmanaged > 0) {
+      const float focal = static_cast<float>(kH) / (2.f * std::tan(0.5f * kFov));
+      for (Thing& th : things) {
+        const std::array<float, 3> r{th.pos[0] - cam.pos[0], th.pos[1] - cam.pos[1], th.pos[2] - cam.pos[2]};
+        const float dd = r[0] * cam.fwd[0] + r[1] * cam.fwd[1] + r[2] * cam.fwd[2];
+        if (dd <= 1e-4f) continue;
+        const float px = th.size * focal / dd;
+        const float sx = (r[0] * cam.right[0] + r[1] * cam.right[1] + r[2] * cam.right[2]) * focal / dd;
+        const float sy = (r[0] * cam.up[0] + r[1] * cam.up[1] + r[2] * cam.up[2]) * focal / dd;
+        if (std::abs(sx) - 0.5f * px > 0.5f * kW || std::abs(sy) - 0.5f * px > 0.5f * kH) continue;
+        st.visible++;
+        const long before = (static_cast<long>(t) * 30 + th.serial) / fps, after = (static_cast<long>(t + 1) * 30 + th.serial) / fps;
+        if (after == before) continue;
+        nvfx_render(th.in, now - th.born + static_cast<double>(th.offset), upx.data(), sz(unmanaged) * 4);
+        st.renders++;
+      }
+      st.instances = static_cast<int>(things.size());
+      st.memory_bytes = 0;
+      for (const Thing& th : things) st.memory_bytes += nvfx_instance_scratch_bytes(th.in);
+    } else {
+      if (nvfx_manager_tick(m, 1.0 / fps) != NVFX_OK) throw std::runtime_error("tick");
+    }
     const double wall_ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - w0).count();
     const double cpu_tick = cpu_ms() - c0;
-    nvfx_manager_stats st;
-    nvfx_manager_get_stats(m, &st);
+    if (unmanaged <= 0) nvfx_manager_get_stats(m, &st);
     const bool warm = t >= fps;  // the first second (every simulation warming up) is not counted
     if (warm) {
       wall.push_back(wall_ms);
@@ -376,7 +418,7 @@ int main(int argc, char** argv) try {
       csv << std::format("{},{:.3f},{:.3f},{:.3f},{:.3f},{:.3f},{},{},{},{},{},{},{},{},{},{},{},{},{}\n", t, wall_ms, cpu_tick, st.jobs_ms, st.planned_ms, st.plan_ms, st.instances,
                          st.visible, st.sims, st.sims_paused, st.proxy_sims, st.proxied, st.shared_viewers, st.updated, st.skipped, st.held, st.interpolated, st.steps, st.renders);
     }
-    const bool snap = !sheet_dir.empty() && (t == ticks / 4 || t == ticks / 2 || t == 3 * ticks / 4);
+    const bool snap = !sheet_dir.empty() && unmanaged <= 0 && (t == ticks / 4 || t == ticks / 2 || t == 3 * ticks / 4);
     if ((video && t % std::max(1, fps / 30) == 0) || snap) composite(m, things, cam, canvas);
     if (video && t % std::max(1, fps / 30) == 0) std::fwrite(canvas.rgba.data(), 1, canvas.rgba.size(), video);
     if (snap) {
@@ -407,6 +449,31 @@ int main(int argc, char** argv) try {
                "{:.0f} pictures interpolated; levels (sims at 30/15/10/7.5 Hz): {}; memory {:.1f} MB (manager), peak RSS {:.1f} MB",
                label, sims / n, paused / n, proxied / n, sharedv / n, steps / n * fps, skipped / n * fps, held / n * fps, interp / n * fps, lods,
                static_cast<double>(memory) / 1048576.0, peak_rss_mb());
+  if (a.has("summary")) {  // one CSV line per run, for tools/manager/time_crowd.sh
+    const fs::path sp = a.str("summary");
+    const bool fresh = !fs::exists(sp);
+    std::ofstream o(sp, std::ios::app);
+    if (fresh) {
+      o << "label,instances,visible,seconds,fps,budget_ms,threads,wall_median,wall_p99,cpu_median,cpu_p99,cpu_mean,jobs_mean,planned_mean,plan_mean,sims,paused,"
+           "proxied,sharing,steps_per_s,skipped_per_s,held_per_s,interpolated_per_s";
+      for (int i = 0; i < 4; ++i) {
+        for (const char* r : {"30", "15", "10", "7.5"}) o << std::format(",lod{}_{}", 32 << i, r);
+      }
+      o << ",memory_mb,rss_mb\n";
+    }
+    o << std::format("{},{:.1f},{:.1f},{:.0f},{},{},{},{:.3f},{:.3f},{:.3f},{:.3f},{:.3f},{:.3f},{:.3f},{:.3f},{:.2f},{:.2f},{:.2f},{:.2f},{:.0f},{:.2f},{:.2f},{:.0f}", label,
+                     inst / n, visible / n, seconds, fps, d.budget_ms > 1e8f ? -1.f : d.budget_ms, threads, percentile(wall, 0.5), percentile(wall, 0.99),
+                     percentile(cpu, 0.5), percentile(cpu, 0.99), std::ranges::fold_left(cpu, 0.0, std::plus{}) / n, std::ranges::fold_left(jobs, 0.0, std::plus{}) / n,
+                     std::ranges::fold_left(planned, 0.0, std::plus{}) / n, mean_plan, sims / n, paused / n, proxied / n, sharedv / n, steps / n * fps,
+                     skipped / n * fps, held / n * fps, interp / n * fps);
+    for (int i = 0; i < 4; ++i) {
+      for (int j = 0; j < 4; ++j) o << std::format(",{:.2f}", lod[sz(i)][sz(j)] / n);
+    }
+    o << std::format(",{:.1f},{:.1f}\n", static_cast<double>(memory) / 1048576.0, peak_rss_mb());
+  }
+  for (Thing& th : things) {
+    if (th.in) nvfx_instance_free(th.in);
+  }
   nvfx_manager_free(m);
   for (auto* f : fx) nvfx_effect_free(f);
   return 0;

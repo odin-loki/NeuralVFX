@@ -13,6 +13,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdlib>
 #include <cstring>
 #include <map>
 #include <sstream>
@@ -167,6 +168,53 @@ void expect_like_render(bool loop, int size) {
   }
   EXPECT_GT(shown, 150);
   nvfx_instance_free(in);
+}
+
+// The same on the project's trained effects (outside git; skipped without them): the manager's lean runners and level
+// transfers against nvfx_render's runners, at three sizes, through a shard change for the looping ones.
+TEST(Manager, TrainedEffectsAreNvfxRender) {
+  const char* env = std::getenv("NEURALVFX_DATA");
+  const std::string root = env ? env : "/root/nvfx-data";
+  int checked = 0;
+  for (const std::string file : {"v2/models/fire.nvfx", "v2/models/explosion.nvfx", "fx/models/d/steam.nvfx"}) {
+    nvfx_effect* fx = nullptr;
+    if (nvfx_effect_load((root + "/" + file).c_str(), &fx) != NVFX_OK) continue;
+    nvfx_effect_info info{};
+    nvfx_effect_get_info(fx, &info);
+    for (const int size : {32, 128}) {
+      Mgr g(small_desc());
+      int model = -1;
+      nvfx_manager_model_desc md;
+      nvfx_manager_model_desc_init(&md);
+      md.max_sims = 2;
+      md.shard_seconds = 2.5f;
+      ASSERT_EQ(nvfx_manager_add_model(g.m, fx, &md, &model), NVFX_OK);
+      const std::array<float, 3> c{0.62f, 0.31f, 0.55f};
+      const nvfx_handle h = spawn(g.m, model, 4242, static_cast<float>(size), c);
+      ASSERT_EQ(nvfx_manager_set_lod_lock(g.m, h, size, 1), NVFX_OK);
+      nvfx_instance* in = nullptr;
+      ASSERT_EQ(nvfx_instance_create(fx, size, &in), NVFX_OK);
+      nvfx_instance_set_controls(in, c.data(), 3);
+      nvfx_instance_set_seed(in, 4242);
+      nvfx_instance_set_drift(in, 2.5f);
+      Bytes ref(static_cast<std::size_t>(size) * static_cast<std::size_t>(size) * 4);
+      int frame = 0;
+      for (int t = 0; t < 110; ++t) {
+        ASSERT_EQ(nvfx_manager_tick(g.m, 1.0 / 30.0), NVFX_OK);
+        nvfx_manager_picture p;
+        ASSERT_EQ(nvfx_manager_get_picture(g.m, h, &p), NVFX_OK);
+        if (!p.rgba) continue;
+        nvfx_render(in, frame / 30.0, ref.data(), static_cast<std::size_t>(size) * 4);
+        ASSERT_EQ(std::memcmp(ref.data(), p.rgba, ref.size()), 0) << file << " " << size << " frame " << frame;
+        ++frame;
+      }
+      EXPECT_GT(frame, 80);
+      nvfx_instance_free(in);
+      ++checked;
+    }
+    nvfx_effect_free(fx);
+  }
+  if (checked == 0) GTEST_SKIP() << "no trained effects under " << root;
 }
 
 TEST(Manager, FixedLevelIsNvfxRenderLooping) { expect_like_render(true, 64); }
