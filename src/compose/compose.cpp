@@ -1481,6 +1481,10 @@ void Particles::update(float dt, const FieldBus* bus, float flow_gain, float gro
       ++i;
       continue;
     }
+    if (fx_kind(k)) {  // drops, ripples, bubbles, hail, shards, streaks (fx_particles.cpp)
+      if (update_fx(i, dt, bus, flow_gain, ground_y)) ++i;
+      continue;
+    }
     if (weather(k)) {  // falling at its drift, carried by the bus's flow, fluttering; gone at the ground
       float fu = 0.f, fv = 0.f;
       if (bus) {
@@ -1553,7 +1557,8 @@ void Particles::copy_to(Particles& to) const {
   const auto n = static_cast<std::ptrdiff_t>(n_);
   for (auto [src, dst] : {std::pair{&x_, &to.x_}, std::pair{&y_, &to.y_}, std::pair{&px_, &to.px_}, std::pair{&py_, &to.py_}, std::pair{&temp_, &to.temp_},
                           std::pair{&size_, &to.size_}, std::pair{&life_, &to.life_}, std::pair{&age_, &to.age_}, std::pair{&cool_, &to.cool_},
-                          std::pair{&r_, &to.r_}, std::pair{&g_, &to.g_}, std::pair{&b_, &to.b_}, std::pair{&aux_, &to.aux_}, std::pair{&wa_, &to.wa_}}) {
+                          std::pair{&r_, &to.r_}, std::pair{&g_, &to.g_}, std::pair{&b_, &to.b_}, std::pair{&aux_, &to.aux_}, std::pair{&wa_, &to.wa_},
+                          std::pair{&wu_, &to.wu_}, std::pair{&wv_, &to.wv_}, std::pair{&wf_, &to.wf_}}) {  // (the last three: fx kinds)
     std::copy(src->begin(), src->begin() + n, dst->begin());
   }
   std::copy(kind_.begin(), kind_.begin() + n, to.kind_.begin());
@@ -1684,6 +1689,10 @@ void Particles::draw(Image4& screen, float cam_x, float cam_y) const {
     const std::size_t q = zs(i);
     const float x = x_[q] - cam_x, y = y_[q] - cam_y, ox = px_[q] - cam_x, oy = py_[q] - cam_y;
     const Kind k = kind_[q];
+    if (fx_kind(k)) {  // fx_particles.cpp
+      draw_fx(q, screen, cam_x, cam_y);
+      continue;
+    }
     const float m = k == Kind::glow ? size_[q] + 1.f : 4.f;  // how far outside the screen it may still draw
     if (std::max(x, ox) < -m || std::min(x, ox) > fl(W) + m || std::max(y, oy) < -m || std::min(y, oy) > fl(H) + m) continue;
     if (k == Kind::glow) {
@@ -1786,6 +1795,10 @@ void Particles::draw_layers(Image4& C, Image4& A, Image4& E, Image4& N, float ca
     const std::size_t q = zs(i);
     const float x = x_[q] - cam_x, y = y_[q] - cam_y, ox = px_[q] - cam_x, oy = py_[q] - cam_y;
     const Kind k = kind_[q];
+    if (fx_kind(k)) {  // fx_particles.cpp
+      draw_fx_layers(q, C, A, E, N, cam_x, cam_y, spans);
+      continue;
+    }
     const float m = k == Kind::glow ? size_[q] + 1.f : 4.f;
     if (std::max(x, ox) < -m || std::min(x, ox) > fl(W) + m || std::max(y, oy) < -m || std::min(y, oy) > fl(H) + m) continue;
     if (k == Kind::glow) {

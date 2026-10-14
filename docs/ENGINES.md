@@ -485,6 +485,8 @@ picture. How each effect fills them:
 - **particles**: embers, sparks, glows, arcs and rings are light (colour and emission); debris, flakes and weather
   cover what is under them (albedo, a flat normal facing the viewer, their thickness), with glowing debris and ash as
   emission too. Weather is drawn unlit in the picture, so its colour layer is its albedo (and a glowing flake's light).
+  The third round's elements ([COMPOSE.md](COMPOSE.md) §4.10) follow the same split: hail, spatter, its stains and
+  shards cover (a shard's glint is light); beams, aurora, rainbow, meteors, shields and glints are light only.
 
 **Units.** The colour and the emission are linear, in the scene's units times its exposure and fade, before its tone
 mapping: an engine applies its own exposure and tone mapping (the picture's look is the scene's tone map of them over

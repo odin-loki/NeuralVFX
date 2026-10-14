@@ -9,7 +9,8 @@
 //   declaration := 'effect' NAME '=' STRING props | 'look' NAME '=' ('shader' | 'like' NAME) props
 //                | 'let' NAME '=' expr | 'input' NAME '=' expr | 'module' NAME '=' EFFECT props | 'field' NAME '=' KIND props
 //                | 'trail' NAME '=' EFFECT props
-//   emitter     := 'emit' ('sparks' | 'embers' | 'flakes' | 'arc' | 'ring' | 'glow' | 'rain' | 'snow' | 'ash' | 'leaves') props
+//   emitter     := 'emit' ('sparks' | 'embers' | 'flakes' | 'arc' | 'ring' | 'glow' | 'rain' | 'snow' | 'ash' | 'leaves'
+//                         | 'hail' | 'aurora' | 'rainbow' | 'meteors' | 'beam' | 'shield' | 'glints') props
 //   catalogue   := 'entry' NAME props | 'param' NAME '=' expr props   (library catalogues only, docs/LIBRARY.md)
 //   rule        := ('at' expr ['s'] | 'when' condition) {modifier} ':' [action {';' action}]
 //   condition   := 'shock' expr 'reaches' (point | NAME) | ('ember' | 'debris') 'lands' ['where' expr] | expr
@@ -26,6 +27,8 @@
 //   prod        := unary {('*' | '/') unary};  unary := '-' unary | primary
 //   primary     := NUMBER | NAME | NAME '.' NAME | NAME '(' [expr {',' expr}] ')' | '(' expr ')'
 #include "script.hpp"
+
+#include "fx.hpp"
 
 #include <algorithm>
 #include <charconv>
@@ -89,6 +92,14 @@ constexpr Key kEmit[] = {{"along", VT::range},    {"from", VT::time},   {"until"
                          {"colour", VT::tuple},   {"width", VT::expr},  {"brightness", VT::expr}, {"jitter", VT::expr}, {"branches", VT::expr},
                          {"rate", VT::expr},      {"seed", VT::expr},   {"density", VT::expr},    {"wind", VT::point},  {"flow", VT::expr},
                          {"wash", VT::expr},      {"melt", VT::expr},   {"glowing", VT::expr}};
+// The emitters of the procedural elements added for the library (fx.hpp, docs/COMPOSE.md §4.10) take these keys too. They
+// are their own, not `emit`'s: they reserve no word (a module may still be named `top` or `flare`).
+constexpr Key kEmitFx[] = {{"along", VT::range},    {"from", VT::time},     {"until", VT::time},      {"count", VT::expr},   {"in", VT::point},
+                           {"size", VT::dims},      {"if", VT::expr},       {"at", VT::point},        {"radius", VT::expr},  {"squash", VT::expr},
+                           {"colour", VT::tuple},   {"width", VT::expr},    {"brightness", VT::expr}, {"jitter", VT::expr},  {"rate", VT::expr},
+                           {"seed", VT::expr},      {"density", VT::expr},  {"wind", VT::point},      {"flow", VT::expr},    {"spread", VT::expr},
+                           {"speed", VT::expr},     {"direction", VT::point}, {"top", VT::tuple},     {"length", VT::expr},  {"flare", VT::expr},
+                           {"fade", VT::expr},      {"hit", VT::expr},      {"angle", VT::expr}};
 constexpr Key kTransfer[] = {{"fraction", VT::expr}, {"top", VT::expr}, {"heat", VT::expr}, {"soot", VT::expr}, {"if", VT::expr}};
 constexpr Key kPush[] = {{"gain", VT::expr}, {"if", VT::expr}};
 constexpr Key kSuppress[] = {{"tiles", VT::points}, {"cells", VT::range}, {"if", VT::expr}};
@@ -99,7 +110,10 @@ constexpr Key kStop[] = {{"if", VT::expr}};
 constexpr Key kShock[] = {{"at", VT::point}, {"speed", VT::expr}, {"decay", VT::expr}, {"amp", VT::expr}, {"width", VT::expr}, {"if", VT::expr}};
 constexpr Key kScorch[] = {{"at", VT::point}, {"radius", VT::expr}, {"glow", VT::expr}, {"if", VT::expr}};
 constexpr Key kBurst[] = {{"at", VT::point},  {"radius", VT::expr},    {"embers", VT::expr}, {"debris", VT::expr}, {"speed", VT::expr},
-                          {"sparks", VT::expr}, {"direction", VT::point}, {"cone", VT::expr},  {"if", VT::expr}};
+                          {"sparks", VT::expr}, {"direction", VT::point}, {"cone", VT::expr},  {"if", VT::expr},
+                          // spatter and shards (fx.hpp, docs/COMPOSE.md §4.10)
+                          {"spatter", VT::expr}, {"shards", VT::expr},   {"colour", VT::tuple}, {"grain", VT::expr},  {"stain", VT::expr},
+                          {"floor", VT::expr}};
 // Library catalogues (docs/LIBRARY.md): an entry's header and its parameters. A scene rejects them (Compiler).
 constexpr Key kEntry[] = {{"category", VT::name}, {"size", VT::dims}, {"anchor", VT::name}, {"loop", VT::flag},
                           {"once", VT::time},     {"show", VT::time}, {"about", VT::text},  {"moving", VT::point}};
@@ -621,7 +635,8 @@ Value parse_value(Parser& p, VT type, std::span<const Key> keys) {
 // Properties until the end of the line (or ':' or ';'). Keys not in the schema are an error, except for a module,
 // whose other keys name its effect's controls (checked when the effect is loaded).
 void parse_props(Parser& p, Statement& s, bool controls_allowed) {
-  const std::span<const Key> keys = keys_of(s.keyword);
+  compose::fx::Emitter fx_kind{};
+  const std::span<const Key> keys = s.keyword == "emit" && compose::fx::emitter_of(s.kind, fx_kind) ? std::span<const Key>(kEmitFx) : keys_of(s.keyword);
   while (!p.done()) {
     if (p.punct(",")) {
       p.next();
@@ -780,8 +795,11 @@ Statement parse_statement(Parser& p, std::string_view source) {
     parse_props(p, s, false);
   } else if (w == "emit") {
     const Pos at = p.pos();
-    s.kind = p.name("what to emit (sparks, embers, flakes, arc, ring, glow, rain, snow, ash or leaves)");
-    if (!in(kEmitKinds, s.kind) && !in(kEmitLater, s.kind)) p.fail(at, std::format("'{}' cannot be emitted (sparks, embers, flakes, arc, ring, glow, rain, snow, ash or leaves)", s.kind));
+    s.kind = p.name("what to emit (sparks, embers, flakes, arc, ring, glow, rain, snow, ash, leaves, hail, aurora, rainbow, meteors, beam, shield or glints)");
+    compose::fx::Emitter fx_kind{};
+    if (!in(kEmitKinds, s.kind) && !in(kEmitLater, s.kind) && !compose::fx::emitter_of(s.kind, fx_kind)) {
+      p.fail(at, std::format("'{}' cannot be emitted (sparks, embers, flakes, arc, ring, glow, rain, snow, ash, leaves, hail, aurora, rainbow, meteors, beam, shield or glints)", s.kind));
+    }
     parse_props(p, s, false);
   } else if (w == "every") {
     p.expect_word("frame", "after 'every'");

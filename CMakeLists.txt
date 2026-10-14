@@ -109,7 +109,8 @@ neuralfx_defaults(neuralfx_io)
 # Composed effects (docs/COMPOSE.md): rollout effects coupled through their fields, with particles, light, distortion
 # and bloom for whole scenes, field effects, and scene scripts (a text format, its parser and runner), over the
 # runtime's internals.
-set(NEURALFX_COMPOSE_SOURCES src/compose/compose.cpp src/compose/fields.cpp src/compose/trail.cpp src/compose/script.cpp src/compose/script_run.cpp)
+set(NEURALFX_COMPOSE_SOURCES src/compose/compose.cpp src/compose/fields.cpp src/compose/trail.cpp src/compose/script.cpp src/compose/script_run.cpp
+                             src/compose/fx_particles.cpp src/compose/fx_emit.cpp)
 add_library(neuralfx_compose STATIC ${NEURALFX_COMPOSE_SOURCES})
 target_include_directories(neuralfx_compose PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src/compose" "${CMAKE_CURRENT_SOURCE_DIR}/src/runtime")
 target_link_libraries(neuralfx_compose PUBLIC nvfx)
@@ -357,7 +358,7 @@ if(NEURALFX_BUILD_TESTS)
                                 tests/test_runtime.cpp tests/test_ingest.cpp tests/test_rollout.cpp tests/test_compose.cpp
                                 tests/test_dcm.cpp tests/test_cm.cpp tests/test_dcm_fine.cpp tests/test_dcm_ddpm.cpp tests/test_script.cpp
                                 tests/test_g3_codec.cpp tests/test_video_codec.cpp tests/test_runtime_prior.cpp
-                                tests/test_dcm_extras.cpp tests/test_scene_api.cpp tests/test_handoff.cpp tests/test_library.cpp
+                                tests/test_dcm_extras.cpp tests/test_scene_api.cpp tests/test_handoff.cpp tests/test_library.cpp tests/test_fx_elements.cpp
                                 tests/test_engine_features.cpp)
   target_link_libraries(neuralfx_tests PRIVATE neuralfx_proto neuralfx_io neuralfx_train nvfx neuralfx_compose nvfx_scene_api nvfx_library_api neuralfx_dcm
                                                neuralfx_dcm_fine neuralfx_ddpm neuralfx_codec neuralfx_dcm_extras GTest::gtest_main)
