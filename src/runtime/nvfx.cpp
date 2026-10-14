@@ -721,6 +721,20 @@ nvfx_status nvfx_bake(nvfx_instance* in, int frames, uint8_t* rgba) {
 
 nvfx_isa nvfx_get_isa(void) { return resolved_isa(); }
 
+uint32_t nvfx_version(uint32_t* features) {
+  if (features) {
+    std::uint32_t f = NVFX_FEATURE_SCENE | NVFX_FEATURE_LIBRARY | NVFX_FEATURE_MANAGER | NVFX_FEATURE_PACK;  // built with every API
+#ifdef NVFX_SHARED_BUILD
+    f |= NVFX_FEATURE_SHARED;
+#endif
+    if (cpu_has(NVFX_ISA_AVX2)) f |= NVFX_FEATURE_AVX2;
+    if (cpu_has(NVFX_ISA_AVX512)) f |= NVFX_FEATURE_AVX512;
+    if (cpu_has_vnni()) f |= NVFX_FEATURE_VNNI;
+    *features = f;
+  }
+  return NVFX_VERSION;
+}
+
 nvfx_status nvfx_set_isa(nvfx_isa isa) {
   if (isa != NVFX_ISA_AUTO && !cpu_has(isa)) return NVFX_ERROR_UNSUPPORTED;
   g_forced_isa.store(isa);

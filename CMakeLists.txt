@@ -244,6 +244,15 @@ if(NEURALFX_BUILD_TOOLS)
   endif()
   set_target_properties(nvfx_library_host PROPERTIES LINKER_LANGUAGE CXX)
   neuralfx_defaults(nvfx_library_host)
+  # An engine's start and frame loop in C++ (include/neuralfx/nvfx.hpp): an effect pack, the library on a stage, the
+  # effect manager, a PNG sheet. Linked as the C hosts are.
+  add_executable(nvfx_pack_host examples/pack_host.cpp)
+  if(NEURALFX_BUILD_SHARED)
+    target_link_libraries(nvfx_pack_host PRIVATE nvfx_shared)
+  else()
+    target_link_libraries(nvfx_pack_host PRIVATE nvfx_pack_api)
+  endif()
+  neuralfx_defaults(nvfx_pack_host)
   # Every effect of a library catalogue: a contact sheet, a video, keyframes against frozen ones, and the check.
   add_executable(nvfx_gallery tools/nvfx_gallery.cpp)
   target_link_libraries(nvfx_gallery PRIVATE nvfx_library_api nvfx_pack_api neuralfx_io neuralfx_dcm)  # --pack: nvfx_pack.h
@@ -444,6 +453,8 @@ if(NEURALFX_BUILD_TESTS)
                      --only campfire,blue_gas_flame,grenade,steam_vent,portal,lightning_strike,ground_fog,dust_impact,flamethrower,plasma_orb,dust_devil
                      --keyframes ${CMAKE_CURRENT_BINARY_DIR}/library_pack_keyframes --verify ${CMAKE_CURRENT_SOURCE_DIR}/results/library/frozen.csv --threads 2)
     set_tests_properties(neuralfx.PackLibraryKeyframesFrozen PROPERTIES LABELS "neuralfx;data" SKIP_RETURN_CODE 77 TIMEOUT 1200 FIXTURES_REQUIRED library_pack)
+    add_test(NAME neuralfx.PackHostExample COMMAND nvfx_pack_host ${CMAKE_CURRENT_BINARY_DIR}/library.nvfxp --out ${CMAKE_CURRENT_BINARY_DIR}/pack_host_sheet.png --seconds 2)
+    set_tests_properties(neuralfx.PackHostExample PROPERTIES LABELS "neuralfx;data" SKIP_RETURN_CODE 77 TIMEOUT 600 FIXTURES_REQUIRED library_pack)
   endif()
   # Effect packs (include/neuralfx/nvfx_pack.h, docs/INTEGRATION.md §5): their own test program. With the library's models
   # (outside git) the full library is also packed and played from the pack; skipped without them.
@@ -455,4 +466,26 @@ if(NEURALFX_BUILD_TESTS)
   target_compile_definitions(neuralfx_pack_tests PRIVATE NEURALFX_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}" NEURALFX_MODELS_LIBRARY="${NEURALFX_MODELS_LIBRARY}")
   neuralfx_defaults(neuralfx_pack_tests)
   gtest_discover_tests(neuralfx_pack_tests TEST_PREFIX "neuralfx." DISCOVERY_MODE PRE_TEST PROPERTIES LABELS neuralfx)
+  # The C++ wrapper (include/neuralfx/nvfx.hpp): every wrapped call against the C call, and a frame through it allocating
+  # nothing (the program replaces operator new).
+  add_executable(neuralfx_wrapper_tests tests/test_wrapper.cpp)
+  target_link_libraries(neuralfx_wrapper_tests PRIVATE nvfx_pack_api neuralfx_compose GTest::gtest_main)
+  neuralfx_defaults(neuralfx_wrapper_tests)
+  if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+    target_compile_options(neuralfx_wrapper_tests PRIVATE -Wno-mismatched-new-delete)  # replacing operator new is the point
+  endif()
+  gtest_discover_tests(neuralfx_wrapper_tests TEST_PREFIX "neuralfx." DISCOVERY_MODE PRE_TEST PROPERTIES LABELS neuralfx)
+  # The headers as C99 and as C++ without exceptions, the struct sizes engines depend on (docs/INTEGRATION.md §8), and the
+  # shared library's version against the headers.
+  if(NEURALFX_BUILD_SHARED)
+    add_executable(nvfx_abi_test tests/abi_c99.c tests/abi_cpp.cpp)
+    target_link_libraries(nvfx_abi_test PRIVATE nvfx_shared)
+    if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+      set_source_files_properties(tests/abi_c99.c PROPERTIES COMPILE_OPTIONS "-std=c99;-pedantic-errors")
+      set_source_files_properties(tests/abi_cpp.cpp PROPERTIES COMPILE_OPTIONS "-fno-exceptions;-fno-rtti")
+    endif()
+    neuralfx_defaults(nvfx_abi_test)
+    add_test(NAME neuralfx.AbiHeadersAndSizes COMMAND nvfx_abi_test)
+    set_tests_properties(neuralfx.AbiHeadersAndSizes PROPERTIES LABELS neuralfx)
+  endif()
 endif()

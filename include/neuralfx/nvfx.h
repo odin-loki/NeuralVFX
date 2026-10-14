@@ -31,7 +31,7 @@
 extern "C" {
 #endif
 
-#define NVFX_VERSION 2 /* 2: scenes (nvfx_scene.h) */
+#define NVFX_VERSION 3 /* 2: scenes (nvfx_scene.h); 3: nvfx_version(), effect packs (nvfx_pack.h) */
 
 typedef enum nvfx_status {
   NVFX_OK = 0,
@@ -139,6 +139,21 @@ NVFX_API nvfx_status nvfx_render(nvfx_instance* instance, double time_seconds, u
 /* Bake `frames` frames covering one loop (or the whole one-shot effect) into a flipbook: frame f at
  * rgba + f * size * size * 4. The instance's controls, seed and colour are used. For engines that prefer textures. */
 NVFX_API nvfx_status nvfx_bake(nvfx_instance* instance, int frames, uint8_t* rgba);
+
+/* Version and features -------------------------------------------------------------------------------------------
+ * For an engine to check, at start, a shared library against the headers it was built with (docs/INTEGRATION.md §8):
+ * returns the library's NVFX_VERSION, which changes whenever a call or a public struct changes (require it to equal
+ * the header's), and sets `features` (may be NULL) to NVFX_FEATURE_* bits: the APIs the library holds and the
+ * instruction sets this CPU runs. */
+#define NVFX_FEATURE_SCENE 0x1u     /* nvfx_scene.h */
+#define NVFX_FEATURE_LIBRARY 0x2u   /* nvfx_library.h */
+#define NVFX_FEATURE_MANAGER 0x4u   /* nvfx_manager.h */
+#define NVFX_FEATURE_PACK 0x8u      /* nvfx_pack.h (packs of format NVFX_PACK_FORMAT and older) */
+#define NVFX_FEATURE_SHARED 0x10u   /* this is the shared library (libnvfx.so, nvfx.dll) */
+#define NVFX_FEATURE_AVX2 0x100u    /* this CPU runs the AVX2 code (used by default when present) */
+#define NVFX_FEATURE_AVX512 0x200u  /* this CPU runs the AVX-512 code (nvfx_set_isa) */
+#define NVFX_FEATURE_VNNI 0x400u    /* this CPU has AVX-512 VNNI (int8 frame models use it) */
+NVFX_API uint32_t nvfx_version(uint32_t* features);
 
 /* Testing and benchmarking -------------------------------------------------------------------------------------- */
 NVFX_API nvfx_isa nvfx_get_isa(void);                 /* the ISA instances are created with (see nvfx_instance_set_precision) */
