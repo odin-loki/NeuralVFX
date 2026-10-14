@@ -49,7 +49,7 @@ smoke (colour at most alpha).
 | variation | `nvfx_instance_set_seed`, `nvfx_instance_set_variation` (replay a training clip), `nvfx_instance_set_drift` | learned |
 | playback speed | scale the time you pass to `nvfx_render` | exact |
 | hue and brightness | `nvfx_instance_set_colour` | exact (applied to the output colour) |
-| precision (grid frame models) | `nvfx_instance_set_precision`: `NVFX_PRECISION_INT8` (the default for the grid family) or `NVFX_PRECISION_FLOAT` | int8 changes a few pixels by a few levels (REPORT.md §7); float is the reference network |
+| precision | `nvfx_instance_set_precision`: grid frame models `NVFX_PRECISION_INT8` (their default) or `NVFX_PRECISION_FLOAT`; rollout effects `NVFX_PRECISION_FLOAT` (their default) or `NVFX_PRECISION_INT8` (§5) | frame models: int8 changes a few pixels by a few levels (REPORT.md §7); rollout effects: an int8 run is another run of the same effect, as good by study K's measures (REPORT.md §13); float is the reference network |
 
 Looping effects wrap time; one-shot effects (explosions) hold their last frame after their duration
 (`info.frames / info.fps` seconds).

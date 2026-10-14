@@ -1415,11 +1415,11 @@ are left out):
   detail spectrum within 0.001, motion within 0.009 (1%), the mean frame within 0.04 dB. For scale, the learned
   dynamics lead the coarse simulation by 2 to 5 dB at these horizons (§6.4), and two sets of eight real runs differ by
   0.02 to 0.04 in spectrum distance (§6.9.2).
-- The strict reading counts **six intervals entirely on the worse side**, all small: magic's |ln motion ratio|
+- The strict reading counts **eight intervals entirely on the worse side**, all small: magic's |ln motion ratio|
   +0.009 [+0.006, +0.010] and its 8-frame tracking -0.012 dB [-0.024, -0.002], cloud's |ln motion ratio| +0.009
-  [+0.005, +0.011], vortex's spectrum distance +0.0006, and emission distances changed by 0.000003 to 0.000014 on
-  smoke, jet, vortex and fog. Eight intervals are entirely on the better side (fire's motion and spectrum, explosion's
-  and fog's mean frame, jet's and cloud's spectrum, vortex's tracking at 2 s).
+  [+0.005, +0.011], vortex's spectrum distance +0.0006, and emission distances changed by at most 0.000014 on smoke,
+  jet, vortex and fog. Nine are entirely on the better side (fire's spectrum, motion and coverage, magic's emission,
+  explosion's and fog's mean frame, jet's and cloud's spectrum, vortex's tracking at 2 s).
 - **`int8_both` passes on four effects only** (fire, smoke, steam, jet) and fails on seven: tracking at 8 frames or
   1 s on explosion (-0.14 dB [-0.28, -0.02] at 8 frames), fog and dust, tracking at 1 s and 2 s on magic, orb and cloud
   (orb -0.21 dB [-0.40, -0.04] at 2 s), |ln motion ratio| on magic (+0.024 [+0.016, +0.030]), fog and cloud (+0.028),

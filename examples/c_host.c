@@ -2,7 +2,7 @@
  *
  *   nvfx_c_host effect.nvfx [size] [seconds] [frame.pam]   play the effect for `seconds` at 30 Hz, print the cost per
  *                                                         frame, and optionally write the last frame
- *   nvfx_c_host --scene script.nvfxs [--effects DIR] [--threads 2] [--no-overlap] [--frames N] [--out frame.pam]
+ *   nvfx_c_host --scene script.nvfxs [--effects DIR] [--threads 2] [--no-overlap] [--precision float|int8] [--frames N] [--out frame.pam]
  *               [--expect profile.csv]
  *                                                play a scene script (nvfx_scene.h) one frame at a time: print the
  *                                                cost per frame and the heat on screen, write the last frame, and
@@ -134,6 +134,7 @@ static int play_scene(int argc, char** argv) {
     else if (strcmp(argv[i], "--out") == 0 && more) out = argv[++i];
     else if (strcmp(argv[i], "--expect") == 0 && more) expect = argv[++i];
     else if (strcmp(argv[i], "--no-overlap") == 0) d.overlap = 0;
+    else if (strcmp(argv[i], "--precision") == 0 && more) d.precision = strcmp(argv[++i], "int8") == 0 ? NVFX_PRECISION_INT8 : NVFX_PRECISION_FLOAT;
     else {
       fprintf(stderr, "nvfx_c_host --scene: unknown option %s\n", argv[i]);
       return 2;

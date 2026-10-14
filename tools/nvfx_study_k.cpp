@@ -33,7 +33,8 @@
 //          (docs/DCM.md §4), real 5,300,000, plays 5,400,000;
 //   test   study B's 10 held-out settings: tracking from runs at them with fresh seeds 5,900,000 + 100 s + k (k = 0, 1);
 //          endless: real 5,700,000, plays 5,800,000.
-// Candidates: float, int8_second (the stepper's second convolution in 8 bits), int8_both (both convolutions).
+// Candidates: float, int8_second (the stepper's second convolution in 8 bits), int8_both (both convolutions);
+// --candidates LIST keeps only those (with float) in track, endless, decide and timing.
 //
 // Options: --root DATA (default $NEURALVFX_DATA or /root/nvfx-data), --out DIR (CSVs; default DATA/k_int8).
 #include "args.hpp"
@@ -188,7 +189,7 @@ void step_profile(const tools::Args& a, const fs::path& root) {
   const rt::Int8Convs convs = parse_convs(cname);
   const fs::path out = a.str("out", (root / "k_int8" / "profile.csv").string());
   pin(a.i("core", 3));
-  fs::create_directories(out.parent_path());
+  if (out.has_parent_path()) fs::create_directories(out.parent_path());
   const bool fresh = !fs::exists(out);
   std::ofstream csv(out, std::ios::app);
   if (fresh) {
@@ -377,11 +378,18 @@ struct Candidate {
   nvfx_precision precision;
   rt::Int8Convs convs;
 };
-const std::vector<Candidate>& candidates() {
-  static const std::vector<Candidate> v = {{"float", NVFX_PRECISION_FLOAT, rt::Int8Convs::second},
-                                           {"int8_second", NVFX_PRECISION_INT8, rt::Int8Convs::second},
-                                           {"int8_both", NVFX_PRECISION_INT8, rt::Int8Convs::both}};
+std::vector<Candidate>& candidate_list() {
+  static std::vector<Candidate> v = {{"float", NVFX_PRECISION_FLOAT, rt::Int8Convs::second},
+                                     {"int8_second", NVFX_PRECISION_INT8, rt::Int8Convs::second},
+                                     {"int8_both", NVFX_PRECISION_INT8, rt::Int8Convs::both}};
   return v;
+}
+const std::vector<Candidate>& candidates() { return candidate_list(); }
+// --candidates a,b: only these (and float, the reference), e.g. the test of the candidate chosen on validation.
+void keep_candidates(const std::string& list) {
+  if (list.empty()) return;
+  std::erase_if(candidate_list(), [&](const Candidate& c) { return c.name != "float" && ("," + list + ",").find("," + c.name + ",") == std::string::npos; });
+  if (candidate_list().size() < 2) throw std::invalid_argument("--candidates: none of int8_second, int8_both");
 }
 
 struct Loaded {
@@ -435,7 +443,7 @@ double apsnr(std::span<const std::uint8_t> r, std::span<const std::uint8_t> t) {
 }
 
 void append_rows(const fs::path& path, const std::string& header, const std::vector<std::string>& rows) {
-  fs::create_directories(path.parent_path());
+  if (path.has_parent_path()) fs::create_directories(path.parent_path());
   const bool fresh = !fs::exists(path) || fs::file_size(path) == 0;
   std::ofstream o(path, std::ios::app);
   if (fresh) o << header << "\n";
@@ -756,14 +764,15 @@ void step_timing(const tools::Args& a, const fs::path& root, const fs::path& out
             }
             double mean = 0;
             for (const double x : ms) mean += x / static_cast<double>(ms.size());
-            rows.push_back(std::format("{},{},{},{},{},{},{:.4f},{:.4f}", label, r, ename(e), size, isa_name(isa), c.name, median(ms), mean));
+            rows.push_back(std::format("{},{},{},{},{},{},{:.4f},{:.4f},{:.1f}", label, r, ename(e), size, isa_name(isa), c.name, median(ms), mean,
+                                       static_cast<double>(nvfx_instance_scratch_bytes(in)) / 1024.0));
             nvfx_instance_free(in);
           }
         }
       }
       nvfx_set_isa(NVFX_ISA_AUTO);
     }
-    append_rows(csv, "label,round,effect,size,isa,candidate,median_ms,mean_ms", rows);
+    append_rows(csv, "label,round,effect,size,isa,candidate,median_ms,mean_ms,scratch_kb", rows);
     std::println("timing: round {} done", r + 1);
   }
 }
@@ -816,6 +825,15 @@ void step_timing_summary(const tools::Args& a, const fs::path& out) {
       }
       std::println("{}", line);
     }
+  }
+  std::map<std::pair<int, std::string>, std::vector<double>> mem;  // (size, candidate) -> KB per effect and ISA
+  for (const auto& r : rows) {
+    if (r[0] == label && r[1] == "0" && r.size() > 8) mem[{std::stoi(r[3]), r[5]}].push_back(std::stod(r[8]));
+  }
+  for (const auto& [k, v] : mem) {
+    double m = 0;
+    for (const double x : v) m += x / static_cast<double>(v.size());
+    std::println("instance memory, {} px, {}: {:.0f} KB (mean over effects and ISAs)", k.first, k.second, m);
   }
   std::println("\nratios (median over rounds), mean over the effects [95% bootstrap]:");
   for (const int size : sizes) {
@@ -890,6 +908,7 @@ int main(int argc, char** argv) {
     const fs::path root = a.str("root", env ? env : "/root/nvfx-data");
     const std::string step = a.positional()[0];
     const fs::path out = a.str("out", (root / "k_int8").string());
+    keep_candidates(a.str("candidates", ""));
     if (step == "profile") step_profile(a, root);
     else if (step == "profile-summary") step_profile_summary(a, root);
     else if (step == "track") step_track(a, root, out);
