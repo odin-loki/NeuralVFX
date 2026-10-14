@@ -1103,12 +1103,40 @@ std::vector<rollout::Run> training_runs(const Ctx& c, sim::Effect e, int extra_l
   return runs;
 }
 
+// Study L (the vortex): every training run starts from a state after its first frame, so no window ever starts from an
+// empty grid, and the stepper never learns to grow its column from nothing. With empty_start each run gets the empty grid
+// as its state 0 (t0 one frame earlier: the step from it is the simulation's first frame); with growth > 0, that many
+// more runs hold only the first `growth_frames` states of runs (the lowest intensities first), so windows in the growth
+// from nothing are common.
+std::vector<rollout::Run> with_growth(std::vector<rollout::Run> runs, bool empty_start, int growth, int growth_frames) {
+  const std::size_t per = sz(kRes) * kRes * rollout::kPhys;
+  if (empty_start || growth > 0) {
+    for (auto& r : runs) {
+      r.coarse.insert(r.coarse.begin(), per, 0.f);
+      ++r.frames;
+      r.t0 -= 1.f / r.p.fps;
+    }
+  }
+  std::vector<std::size_t> order(runs.size());
+  std::iota(order.begin(), order.end(), std::size_t{0});
+  std::ranges::stable_sort(order, [&](std::size_t x, std::size_t y) { return runs[x].p.intensity < runs[y].p.intensity; });
+  const std::size_t n = runs.size();
+  for (int g = 0; g < growth; ++g) {
+    rollout::Run r = runs[order[sz(g) % n]];
+    r.frames = std::min(r.frames, growth_frames);
+    r.coarse.resize(sz(r.frames) * per);
+    runs.push_back(std::move(r));
+  }
+  return runs;
+}
+
 void step_train(const Ctx& c, sim::Effect e, const tools::Args& a) {
   rollout::Model m = load_or_throw(a.need("model"));
   if (a.has("advection")) m.h.advection = a.i("advection", 0);  // study L: MacCormack advection of the coarse state
   const fs::path out = a.need("out");
   const auto t0 = std::chrono::steady_clock::now();
-  const auto runs = training_runs(c, e, a.i("extra-low", 0), a.f("low-max", 0.4f), c.threads);
+  const auto runs = with_growth(training_runs(c, e, a.i("extra-low", 0), a.f("low-max", 0.4f), c.threads), a.flag("empty-start"), a.i("growth", 0),
+                                a.i("growth-frames", 40));
   std::println("train: {} {} runs ready ({:.0f} s)", ename(e), runs.size(), seconds_since(t0));
   rollout::StepperOptions so = rollout::recipe_for(e).stepper;
   so.iterations = a.i("iterations", 0);
@@ -1438,6 +1466,68 @@ double real_cover(const sim::Params& p, int warm, int frames) {
   return s;
 }
 
+// A sheet of one low-intensity training run (vortex): the real run, shards, its own true state, each start point alone;
+// every 2 s for 20 s.
+void step_column_figure(const Ctx& c, sim::Effect e, const tools::Args& a) {
+  (void)c;
+  const rollout::Model M = load_or_throw(a.need("model"));
+  const int run = a.i("run", 4);
+  const sim::Params p = run_params(e, 1, static_cast<std::uint64_t>(run));
+  const std::vector<float> ctl{p.intensity, p.wind, p.turbulence};
+  const int F = 600;
+  std::vector<int> cols;
+  for (int f = 59; f < F; f += 60) cols.push_back(f);
+  const auto pick = [&](const Clip& src) {
+    Clip o;
+    o.allocate(kSize, static_cast<int>(cols.size()));
+    for (std::size_t q = 0; q < cols.size(); ++q) std::ranges::copy(src.frame(cols[q]), o.frame(static_cast<int>(q)).begin());
+    return o;
+  };
+  std::vector<Clip> rows;
+  {
+    sim::Params q = p;
+    q.seed = 5'160'000 + static_cast<std::uint64_t>(run);
+    sim::Fluid f(q);
+    for (int i = 0; i < 150; ++i) f.step_frame();
+    Clip real;
+    real.allocate(kSize, F);
+    for (int i = 0; i < F; ++i) {
+      f.step_frame();
+      f.render(real.frame(i));
+    }
+    rows.push_back(pick(real));
+  }
+  {
+    Runtime rt(M);
+    rows.push_back(pick(runtime_clip(rt.e, ctl, -1, 5'160'050 + static_cast<std::uint64_t>(run), F)));
+  }
+  {
+    sim::Fluid f(p);
+    for (int i = 0; i < 100; ++i) f.step_frame();
+    const sim::State st = f.state();
+    rollout::Model m1 = M;
+    rollout::StartPoint sp;
+    sp.controls = ctl;
+    sp.seed = p.seed;
+    sp.time = st.time;
+    sp.coarse.resize(sz(kRes) * kRes * rollout::kPhys);
+    rollout::coarse_from_sim(st, kRes, p.fps, sp.coarse);
+    m1.starts = {sp};
+    Runtime r1(m1);
+    rows.push_back(pick(runtime_clip(r1.e, ctl, 0, 0, F, false)));
+  }
+  for (std::size_t k = 0; k < M.starts.size(); ++k) {
+    rollout::Model m1 = M;
+    m1.starts = {M.starts[k]};
+    m1.starts[0].seed = 5'160'060 + k;
+    Runtime r1(m1);
+    rows.push_back(pick(runtime_clip(r1.e, ctl, 0, 0, F, false)));
+  }
+  std::vector<const Clip*> rp;
+  for (const auto& r : rows) rp.push_back(&r);
+  if (auto w = write_png(a.need("out"), comparison_sheet(rp, static_cast<int>(cols.size()), Background::black, 1)); !w) throw std::runtime_error(w.error());
+}
+
 // Training coverage at low intensity, the start points, and three ways to play at low-intensity training settings: as
 // shipped (shards), from each start point alone, and from the run's own true state (a perfect start point).
 void step_column(const Ctx& c, sim::Effect e, const tools::Args& a) {
@@ -1485,6 +1575,41 @@ void step_column(const Ctx& c, sim::Effect e, const tools::Args& a) {
       const CoverRun cr = cover_run(runtime_clip(r1.e, ctl, 0, 0, 20 * 30, false), rc);
       out.push_back(std::format("{},{},{:.2f},{:.2f},{:.2f},start{},{},{:.3f},{:.3f},{:.1f},{:.1f},{}", ename(e), run, ctl[0], ctl[1], ctl[2], k, k, rc, cr.mean,
                                 100 * cr.below, cr.longest, cr.first_loss));
+    }
+    {  // an empty grid as the only start point (as every training run begins), the run's own seed: does the column grow?
+      rollout::Model m1 = M;
+      rollout::StartPoint sp;
+      sp.controls = ctl;
+      sp.seed = p.seed;
+      sp.time = 0.f;
+      sp.coarse.assign(sz(kRes) * kRes * rollout::kPhys, 0.f);
+      m1.starts = {sp};
+      Runtime r1(m1);
+      const Clip cl = runtime_clip(r1.e, ctl, 0, 0, 20 * 30, false);
+      const CoverRun cr = cover_run(cl, rc);
+      int grown = -1;  // the first frame from which the cover stays above half the real mean for a second
+      for (int i = 0; i + 30 <= cl.frames && grown < 0; ++i) {
+        bool ok = true;
+        for (int j = i; j < i + 30 && ok; ++j) ok = cover_of(cl.frame(j)) >= 0.5 * rc;
+        if (ok) grown = i;
+      }
+      out.push_back(std::format("{},{},{:.2f},{:.2f},{:.2f},empty,{},{:.3f},{:.3f},{:.1f},{:.1f},{}", ename(e), run, ctl[0], ctl[1], ctl[2], grown, rc, cr.mean,
+                                100 * cr.below, cr.longest, cr.first_loss));
+      sim::Fluid f(p);  // and the simulation's own growth from empty, with the same seed
+      std::vector<std::uint8_t> fr(sz(kSize) * kSize * 4);
+      std::vector<double> covers;
+      for (int i = 0; i < 20 * 30; ++i) {
+        f.step_frame();
+        f.render(fr);
+        covers.push_back(cover_of(fr));
+      }
+      int sgrown = -1;
+      for (int i = 0; i + 30 <= static_cast<int>(covers.size()) && sgrown < 0; ++i) {
+        bool ok = true;
+        for (int j = i; j < i + 30 && ok; ++j) ok = covers[sz(j)] >= 0.5 * rc;
+        if (ok) sgrown = i;
+      }
+      out.push_back(std::format("{},{},{:.2f},{:.2f},{:.2f},empty_simulation,{},{:.3f},,,,", ename(e), run, ctl[0], ctl[1], ctl[2], sgrown, rc));
     }
     {  // the run's own state at frame 100 as the only start point (coarse only, as the stored ones), its own seed
       sim::Fluid f(p);
@@ -1999,10 +2124,14 @@ void step_collapse(const Ctx& c, sim::Effect e, const tools::Args& a) {
   const auto models = read_entries(a.need("current"), a.str("cand", ""));
   const std::uint64_t base = a.u64("seed-base", 950000);
   const int seconds = a.i("seconds", 60);
-  const auto settings = test_settings();
+  // test: study B's held-out settings, the real run of d-eval (seed 900000 + k); val: study G's validation settings, the
+  // first real run of this study's validation (seed 5,300,000 + 100 k)
+  const bool val = a.str("settings", "test") == "val";
+  const auto settings = val ? validation_settings() : test_settings();
   std::vector<double> rc(settings.size());
   parallel(c.threads, static_cast<int>(settings.size()), [&](int k) {
-    rc[sz(k)] = real_cover(setting_params(e, settings[sz(k)], 900000 + static_cast<std::uint64_t>(k)), 150, 300);
+    const std::uint64_t seed = val ? 5'300'000 + 100 * static_cast<std::uint64_t>(k) : 900000 + static_cast<std::uint64_t>(k);
+    rc[sz(k)] = real_cover(setting_params(e, settings[sz(k)], seed), 150, 300);
   });
   std::vector<std::string> rows;
   for (const auto& m : models) {
@@ -2026,7 +2155,7 @@ void step_collapse(const Ctx& c, sim::Effect e, const tools::Args& a) {
     }
     std::println("{} {} (seeds {} + k): {} of {} settings, {:.1f}% of all frames, longest {:.1f} s", ename(e), m.name, base, hit, settings.size(), 100 * all, longest);
   }
-  merge_rows(c.results / std::format("l_collapse_{}.csv", base), "effect,model,seed_base,setting,intensity,second,turbulence,real_cover,cover,pct_below_quarter,longest_s",
+  merge_rows(c.results / std::format("l_collapse_{}{}.csv", val ? "val_" : "", base), "effect,model,seed_base,setting,intensity,second,turbulence,real_cover,cover,pct_below_quarter,longest_s",
              rows, ename(e));
 }
 
@@ -2083,11 +2212,50 @@ void step_cost(const Ctx& c, sim::Effect e, const tools::Args& a) {
   }
   if (a.has("out")) merge_rows(a.str("out"), "effect,model,size,median_ms,min_ms,max_ms,minus_current_ms,reps", rows, ename(e));
 }
+
+// --- look: a sheet of frames played as shipped, a real run first ---------------------------------------------------------
+
+void step_look(const Ctx& c, sim::Effect e, const tools::Args& a) {
+  (void)c;
+  const auto ctl = tools::parse_floats(a.need("setting"));
+  if (ctl.size() != 3) throw std::invalid_argument("--setting i,w,t");
+  const std::uint64_t seed = a.u64("seed", 123);
+  const int frames = a.i("frames", 300), step = a.i("every", 30), scale = a.i("scale", 1);
+  std::vector<int> cols;
+  for (int f = step - 1; f < frames; f += step) cols.push_back(f);
+  const auto pick = [&](const Clip& src) {
+    Clip o;
+    o.allocate(kSize, static_cast<int>(cols.size()));
+    for (std::size_t q = 0; q < cols.size(); ++q) std::ranges::copy(src.frame(cols[q]), o.frame(static_cast<int>(q)).begin());
+    return o;
+  };
+  std::vector<Clip> rows;
+  {
+    sim::Fluid f(setting_params(e, {ctl[0], ctl[1], ctl[2]}, seed));
+    for (int i = 0; i < 150; ++i) f.step_frame();
+    Clip real;
+    real.allocate(kSize, frames);
+    for (int i = 0; i < frames; ++i) {
+      f.step_frame();
+      f.render(real.frame(i));
+    }
+    rows.push_back(pick(real));
+  }
+  for (const auto& item : split_list(a.need("models"), ',')) {
+    const auto eq = item.find('=');
+    Runtime rt(load_or_throw(item.substr(eq + 1)));
+    rows.push_back(pick(runtime_clip(rt.e, ctl, -1, seed + 1, frames)));
+    std::println("look: {} {}", ename(e), item.substr(0, eq));
+  }
+  std::vector<const Clip*> rp;
+  for (const auto& r : rows) rp.push_back(&r);
+  if (auto w = write_png(a.need("out"), comparison_sheet(rp, static_cast<int>(cols.size()), Background::black, scale)); !w) throw std::runtime_error(w.error());
+}
 }  // namespace
 
 int main(int argc, char** argv) {
   try {
-    tools::Args a(argc, argv, {"no-neural", "no-csd", "only-neural"});
+    tools::Args a(argc, argv, {"no-neural", "no-csd", "only-neural", "empty-start"});
     if (a.positional().empty()) {
       std::println("nvfx_swirl diag|dstats|column --effect E [--root DIR] [--results DIR] [--threads N]");
       return 2;
@@ -2110,10 +2278,12 @@ int main(int argc, char** argv) {
     else if (step == "train") step_train(c, e, a);
     else if (step == "advect") step_advect(c, e, a);
     else if (step == "column") step_column(c, e, a);
+    else if (step == "column-figure") step_column_figure(c, e, a);
     else if (step == "val") step_val(c, e, a);
     else if (step == "test") step_test(c, e, a);
     else if (step == "collapse") step_collapse(c, e, a);
     else if (step == "cost") step_cost(c, e, a);
+    else if (step == "look") step_look(c, e, a);
     else throw std::invalid_argument("unknown step " + step);
     a.warn_unused();
   } catch (const std::exception& e) {
