@@ -871,6 +871,17 @@ simulation and its detail is worse than the nearest flipbook's: the 32-cell stat
 serrate its arms. Both are 82 KB. The full account, with a scene script that plays them with fire and an explosion, is
 in [EFFECTS.md](EFFECTS.md).
 
+### 6.11 Atmosphere effects
+
+Three atmosphere effects, **fog** (a heavy gas that sinks and rolls along the ground), **dust** (an impact's burst that
+rolls out low and settles; it plays once) and **cloud** (a persistent, slowly boiling mass), were added to the simulator
+as presets and trained and tested with this study's recipe and protocol. All three follow a held-out run better than
+the coarse simulation with the same detail layer (+2.1 to +3.4 dB at 1 s), and played endlessly at unseen settings their
+motion is close to a second real run's. Dust's detail ties a second real run's, which none of study D's effects, steam or magic did; fog
+ties the nearest flipbook on every statistic; cloud's average picture beats the flipbook's but its detail is the
+weakest of the three (its puffs streak along its drift). 146 to 274 KB each. The full account, with a scene script that
+plays them with fire under a lightning storm, is in [EFFECTS_ATMOSPHERE.md](EFFECTS_ATMOSPHERE.md).
+
 ## 7. Runtime cost and budget
 
 Median ms per frame through `nvfx_render`, one pinned AVX2 core (90th percentiles and every configuration in

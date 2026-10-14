@@ -29,6 +29,7 @@ C++23, no third-party runtime dependencies, a C API for engines, no Python.
 - **Engine integration:** [docs/ENGINES.md](docs/ENGINES.md) (C API for effects and scenes, threading, Unreal, Unity,
   the Godot 4 plugin).
 - **More effects:** [docs/EFFECTS.md](docs/EFFECTS.md) (steam and magic: presets, training, the test, a scene).
+- **Atmosphere effects:** [docs/EFFECTS_ATMOSPHERE.md](docs/EFFECTS_ATMOSPHERE.md) (fog, dust and cloud: presets, training, the test, a scene).
 - **Data and licences:** [docs/DATA.md](docs/DATA.md).
 - **Footage:** [docs/FOOTAGE.md](docs/FOOTAGE.md): start points estimated from frames (study J), so a rollout effect
   continues what footage shows (`nvfx_estimate`); validated on simulated renders only.
