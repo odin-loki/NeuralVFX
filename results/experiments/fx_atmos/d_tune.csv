@@ -1,0 +1,3 @@
+effect,iterations,activity_weight,loss,seconds
+fog,800,100,0.01564,1395
+dust,800,100,0.03818,1256
