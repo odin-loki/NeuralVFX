@@ -1,3 +1,4 @@
 kind,name,file,bytes,sha256,source
 rollout_effect,jet,fx_energy/models/d/jet.nvfx,83719,2b2707401acf8eca154ab5c745e70d5d6ba35a2a92a7fe3a2e9ee35a1a464a2f,study D's recipe (docs/EFFECTS_ENERGY.md): d-train --stages12 1 then d-tune then d-finish
 rollout_effect,orb,fx_energy/models/d/orb.nvfx,83719,9395caad14be5f3e45319a26ecdb867c6037ae15473b17be9766d2df2acdc5e9,study D's recipe (docs/EFFECTS_ENERGY.md): d-train --stages12 1 then d-tune then d-finish
+rollout_effect,vortex,fx_energy/models/d/vortex.nvfx,83719,f5b4be3690fe0107da6747af6917eee8aadf98323bb2edff7331ad3afb3f348f,study D's recipe (docs/EFFECTS_ENERGY.md): d-train --stages12 1 then d-tune then d-finish (stages 1-2 restarted once after a container restart)
