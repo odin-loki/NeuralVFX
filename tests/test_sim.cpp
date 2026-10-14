@@ -182,8 +182,9 @@ TEST(Sim, LoopSeamIsNoWorseThanAnOrdinaryFrameStep) {
 }
 
 // Adding effects (docs/EFFECTS.md, docs/EFFECTS_ENERGY.md, docs/EFFECTS_ATMOSPHERE.md) must not change the earlier
-// ones: these hashes are of clips made before steam and magic existed (fire, smoke, explosion) and before jet, orb,
-// vortex, fog, dust and cloud existed (steam, magic).
+// ones: these hashes are of clips made before steam and magic existed (fire, smoke, explosion), before jet, orb,
+// vortex, fog, dust and cloud existed (steam, magic), and before the water effects (docs/EFFECTS_WATER.md) were begun
+// (jet, orb, vortex, fog, dust, cloud).
 // FNV-1a of the RGBA bytes; the solver is built at the baseline ISA without contraction.
 TEST(Sim, StudyEffectsAreUnchangedByTheNewOnes) {
   const auto fnv = [](std::span<const std::uint8_t> b) {
@@ -194,11 +195,17 @@ TEST(Sim, StudyEffectsAreUnchangedByTheNewOnes) {
     }
     return h;
   };
-  const std::array<std::pair<sim::Effect, std::uint64_t>, 5> want{{{sim::Effect::fire, 0xecb25de8e62e7379ULL},
-                                                                    {sim::Effect::smoke, 0xea602bfa2409bf3fULL},
-                                                                    {sim::Effect::explosion, 0xbb823d31fd8c4eb4ULL},
-                                                                    {sim::Effect::steam, 0xa57b2dc109882ec3ULL},
-                                                                    {sim::Effect::magic, 0xf79b687a9614f399ULL}}};
+  const std::array<std::pair<sim::Effect, std::uint64_t>, 11> want{{{sim::Effect::fire, 0xecb25de8e62e7379ULL},
+                                                                     {sim::Effect::smoke, 0xea602bfa2409bf3fULL},
+                                                                     {sim::Effect::explosion, 0xbb823d31fd8c4eb4ULL},
+                                                                     {sim::Effect::steam, 0xa57b2dc109882ec3ULL},
+                                                                     {sim::Effect::magic, 0xf79b687a9614f399ULL},
+                                                                     {sim::Effect::jet, 0x9cdcde02a8631bf6ULL},
+                                                                     {sim::Effect::orb, 0x5fef6cca235e06f1ULL},
+                                                                     {sim::Effect::vortex, 0xfa46f5fc13b9cb20ULL},
+                                                                     {sim::Effect::fog, 0x36573f12c43055b2ULL},
+                                                                     {sim::Effect::dust, 0xa20af83462f66930ULL},
+                                                                     {sim::Effect::cloud, 0x8e6664474fe37d58ULL}}};
   for (const auto& [e, h] : want) {
     auto p = small(e);
     p.intensity = 0.8f;
