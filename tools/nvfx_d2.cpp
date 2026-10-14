@@ -783,13 +783,20 @@ std::vector<Candidate> read_candidates(const fs::path& p) {
 }
 fs::path candidates_path(const Ctx& c, sim::Effect e) { return c.data / "d2" / "cand" / std::format("{}_candidates.csv", ename(e)); }
 
+void merge_rows(const fs::path& path, const std::string& header, const std::vector<std::string>& rows, const std::string& effect);
+
 // From each search's evaluations (knob sets "all" and "old"): the one with the lowest training objective, and the
 // lowest among those no worse than v2 in any of the five statistics on the training settings (when it is another).
+// Also the searches' summary, results/experiments/d2_search.csv.
 void step_candidates(const Ctx& c, sim::Effect e) {
   const rollout::Model base = load_or_throw(v2_path(c, e));
   const std::string v2key = values_str(base);
-  std::vector<std::string> rows;
+  std::vector<std::string> rows, search_rows;
   std::vector<std::string> summary;
+  const auto search_row = [&](const std::string& set, const std::string& name, std::size_t n, double j, const EvalRow& r) {
+    search_rows.push_back(std::format("{},{},{},{},{:.5f},{:.6f},{:.6f},{:.5f},{:.7f},{:.7f},{:.4f},{}", ename(e), set, name, n, j, r.s.spec, r.s.lnmot, r.s.mot,
+                                      r.s.cov, r.s.emi, r.s.psnr, r.values));
+  };
   for (const std::string set : {"all", "old"}) {
     const auto evals = read_evals(c.data / "d2" / "cand" / std::format("{}_{}_evals.csv", ename(e), set));
     const auto it = evals.find(v2key);
@@ -810,11 +817,14 @@ void step_candidates(const Ctx& c, sim::Effect e) {
         feasible = &r;
       }
     }
+    search_row(set, "v2", evals.size(), objective(v2, v2), it->second);
     if (best) {
+      search_row(set, set + "_best", evals.size(), fb, *best);
       rows.push_back(std::format("{}_best,{},{:.5f},{}", set, best->values, fb, evals.size()));
       summary.push_back(std::format("{} best {:.4f} ({}): {}", set, fb, summary_str(best->s), best->values));
     }
     if (feasible && feasible != best) {
+      search_row(set, set + "_feasible", evals.size(), ff, *feasible);
       rows.push_back(std::format("{}_feasible,{},{:.5f},{}", set, feasible->values, ff, evals.size()));
       summary.push_back(std::format("{} feasible {:.4f} ({}): {}", set, ff, summary_str(feasible->s), feasible->values));
     }
@@ -824,6 +834,9 @@ void step_candidates(const Ctx& c, sim::Effect e) {
   o << "name,values,training_objective,evaluations\n";
   for (const auto& r : rows) o << r << "\n";
   for (const auto& s : summary) std::println("candidates: {}: {}", ename(e), s);
+  merge_rows(c.results / "d2_search.csv",
+             "effect,search,model,evaluations,training_objective,spectrum_l1,abs_ln_motion_ratio,motion_ratio,coverage_l1,emission_l1,mean_frame_psnr,values",
+             search_rows, ename(e));
 }
 
 // --- validation and test ----------------------------------------------------------------------------------------------
