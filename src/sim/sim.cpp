@@ -14,18 +14,36 @@ std::string_view effect_name(Effect e) {
     case Effect::fire: return "fire";
     case Effect::smoke: return "smoke";
     case Effect::explosion: return "explosion";
+    case Effect::steam: return "steam";
+    case Effect::magic: return "magic";
   }
   std::unreachable();
 }
 
 bool parse_effect(std::string_view text, Effect& out) {
-  const auto it = std::ranges::find(kEffects, text, effect_name);
-  if (it == kEffects.end()) return false;
+  const auto it = std::ranges::find(kAllEffects, text, effect_name);
+  if (it == kAllEffects.end()) return false;
   out = *it;
   return true;
 }
 
 bool effect_loops(Effect e) { return e != Effect::explosion; }
+
+std::array<std::string_view, kControls> control_names(Effect e) {
+  if (e == Effect::magic) return {"intensity", "spin", "turbulence"};
+  return kControlNames;
+}
+
+float flicker_rate(Effect e) {
+  switch (e) {
+    case Effect::fire: return 2.6f;
+    case Effect::smoke: return 1.4f;
+    case Effect::explosion: return 1.4f;
+    case Effect::steam: return 2.0f;   // puffs from a vent
+    case Effect::magic: return 1.8f;   // a shimmer
+  }
+  std::unreachable();
+}
 
 float Field::sample(float x, float y) const {
   const float lim = static_cast<float>(n_) + 0.5f;
@@ -59,9 +77,17 @@ Tune tune(const Params& p) {
     case Effect::fire: return {150.f, 8.f, 1.25f, 0.7f, 90.f, 2.5f, 0.6f + 3.5f * turb, 10.f + 60.f * turb, 0.15f};
     case Effect::smoke: return {150.f, 0.6f, 0.30f, 0.30f, 70.f, 2.0f, 0.4f + 2.5f * turb, 6.f + 40.f * turb, 0.10f};
     case Effect::explosion: return {110.f, 3.f, 0.75f, 0.30f, 60.f, 1.5f, 0.6f + 3.0f * turb, 8.f + 50.f * turb, 0.9f};
+    // vapour: a fast jet that slows, little buoyancy, gone within a second or two, bent by the wind
+    case Effect::steam: return {70.f, 0.2f, 0.9f, 0.65f, 75.f, 2.5f, 0.4f + 2.6f * turb, 10.f + 55.f * turb, 0.35f};
+    // no buoyancy and no wind: the spin force (add_forces) and a sink in the middle (project) drive it
+    case Effect::magic: return {0.f, 0.f, 1.3f, 1.0f, 0.f, 0.f, 1.0f + 4.0f * turb, 10.f + 70.f * turb, 1.2f};
   }
   std::unreachable();
 }
+
+// magic: a ring of energy around the middle of the frame, spun by a force that peaks at the ring (radius in cells).
+float magic_radius(const Params& p, float n) { return (0.19f + 0.09f * p.intensity) * n; }
+float magic_spin_speed(const Params& p, float s) { return (40.f + 120.f * p.wind) * s; }  // cells per second at the ring
 
 }  // namespace
 
@@ -70,7 +96,7 @@ float curl_potential(const Params& p, float X, float Y, float time) {
 }
 
 float source_flicker(const Params& p, float X, float Y, float time) {
-  return fbm(X * 0.10f, Y * 0.10f, time * (p.effect == Effect::fire ? 2.6f : 1.4f), p.seed, 3);  // as in add_sources
+  return fbm(X * 0.10f, Y * 0.10f, time * flicker_rate(p.effect), p.seed, 3);  // as in add_sources
 }
 
 State Fluid::state() const {
@@ -197,6 +223,10 @@ void Fluid::add_sources(float dt) {
     }
     return;
   }
+  if (p_.effect == Effect::steam || p_.effect == Effect::magic) {
+    add_new_sources(dt);
+    return;
+  }
   const bool fire = p_.effect == Effect::fire;
   const float cx = 0.5f * n, cy = (fire ? 0.10f : 0.09f) * n;
   const float hw = (fire ? 0.10f + 0.08f * I : 0.09f + 0.07f * I) * n, hh = 0.035f * n;
@@ -222,6 +252,44 @@ void Fluid::add_sources(float dt) {
   }
 }
 
+// steam: a narrow vent at the bottom blowing a jet of vapour. magic: a ring of energy (heat) and a little dark mist
+// (soot) around the middle. Both are broken up by the flicker noise, as the fire's source is.
+void Fluid::add_new_sources(float dt) {
+  (void)dt;
+  const float n = f(n_), s = n / 128.f, I = p_.intensity;
+  const float tt = time_ * flicker_rate(p_.effect);
+  const auto flicker = [&](int x, int y) { return smoothstep(-0.25f, 0.6f, fbm(f(x) * 0.10f / s, f(y) * 0.10f / s, tt, p_.seed, 3)); };
+  if (p_.effect == Effect::steam) {
+    const float cx = 0.5f * n, cy = 0.06f * n, hw = (0.045f + 0.035f * I) * n, hh = 0.03f * n;
+    const int y_lo = std::max(1, static_cast<int>(cy - 2.f * hh)), y_hi = std::min(n_, static_cast<int>(cy + 2.f * hh) + 1);
+    const int x_lo = std::max(1, static_cast<int>(cx - 1.5f * hw)), x_hi = std::min(n_, static_cast<int>(cx + 1.5f * hw) + 1);
+    for (int y = y_lo; y <= y_hi; ++y) {
+      for (int x = x_lo; x <= x_hi; ++x) {
+        const float ex = (f(x) - cx) / hw, ey = (f(y) - cy) / hh;
+        const float shape = 1.f - smoothstep(0.6f, 1.f, std::sqrt(ex * ex + ey * ey));
+        if (shape <= 0.f) continue;
+        const float k = shape * flicker(x, y);
+        temp_[x, y] = std::max(temp_[x, y], (0.35f + 0.25f * I) * k);
+        soot_[x, y] = std::max(soot_[x, y], (1.2f + 0.8f * I) * k);
+        v_[x, y] = std::max(v_[x, y], (85.f + 75.f * I) * s * k);
+      }
+    }
+    return;
+  }
+  const float c = 0.5f * (n + 1.f), R = magic_radius(p_, n), w = 0.035f * n;
+  const int lo = std::max(1, static_cast<int>(c - R - 2.f * w)), hi = std::min(n_, static_cast<int>(c + R + 2.f * w) + 1);
+  for (int y = lo; y <= hi; ++y) {
+    for (int x = lo; x <= hi; ++x) {
+      const float dx = f(x) - c, dy = f(y) - c;
+      const float shape = 1.f - smoothstep(0.5f, 1.f, std::abs(std::sqrt(dx * dx + dy * dy) - R) / w);
+      if (shape <= 0.f) continue;
+      const float k = shape * flicker(x, y);
+      temp_[x, y] = std::max(temp_[x, y], (0.8f + 0.5f * I) * k);
+      soot_[x, y] = std::max(soot_[x, y], (0.25f + 0.15f * I) * k);
+    }
+  }
+}
+
 void Fluid::add_forces(float dt) {
   const Tune t = tune(p_);
   const float s = f(n_) / 128.f;
@@ -234,6 +302,8 @@ void Fluid::add_forces(float dt) {
   const float amp = t.curl_force * s;
   const float tt = time_ * 0.8f;
   const std::uint64_t cseed = p_.seed * 0x2545F4914F6CDD1DULL + 77;
+  const bool spin = p_.effect == Effect::magic;
+  const float sc = 0.5f * (f(n_) + 1.f), sR = magic_radius(p_, f(n_)), sU = magic_spin_speed(p_, s);
   for (int y = 1; y <= n_; ++y) {
     for (int x = 1; x <= n_; ++x) {
       float fx = 0.f;
@@ -254,6 +324,12 @@ void Fluid::add_forces(float dt) {
         fx += mat * amp * dpsi_dy;
         fy -= mat * amp * dpsi_dx;
       }
+      if (spin) {  // magic: a swirl around the middle, strongest at the ring; the damping sets its speed
+        const float dx = f(x) - sc, dy = f(y) - sc, r = std::sqrt(dx * dx + dy * dy) / sR;
+        const float a = t.vel_damp * sU * std::exp(0.5f * (1.f - r * r)) / sR;  // (r / R) exp(...) along the tangent
+        fx -= a * dy;
+        fy += a * dx;
+      }
       u_[x, y] = (u_[x, y] + dt * fx) * damp;
       v_[x, y] = (v_[x, y] + dt * fy) * damp;
       u_[x, y] += wdrag * (wind - u_[x, y]) * mat;  // air drags material towards the wind speed
@@ -273,6 +349,16 @@ void Fluid::project() {
     if (rate > 0.05f) {
       for (int y = 1; y <= n; ++y) {
         for (int x = 1; x <= n; ++x) div_[x, y] += rate * smoothstep(0.4f, 1.2f, temp_[x, y]);
+      }
+    }
+  }
+  // magic: a sink in the middle draws the swirl inwards, so the ring's arms spiral into the centre.
+  if (p_.effect == Effect::magic) {
+    const float c = 0.5f * (f(n) + 1.f), a = 0.07f * f(n);
+    for (int y = 1; y <= n; ++y) {
+      for (int x = 1; x <= n; ++x) {
+        const float dx = f(x) - c, dy = f(y) - c;
+        div_[x, y] -= 25.f * (1.f - smoothstep(0.3f * a, a, std::sqrt(dx * dx + dy * dy)));
       }
     }
   }
@@ -349,6 +435,20 @@ Rgb fire_ramp(float t) {
   return {clamp01((t - 0.10f) * 2.2f), clamp01((t - 0.36f) * 1.8f) * 0.92f, clamp01((t - 0.85f) * 2.0f) * 0.85f};
 }
 
+// magic's light: violet where it is faint, through blue and cyan to white where it is strongest.
+Rgb magic_ramp(float t) {
+  static constexpr std::array<float, 5> at{0.f, 0.25f, 0.55f, 0.85f, 1.2f};
+  static constexpr std::array<Rgb, 5> c{{{0.f, 0.f, 0.f}, {0.30f, 0.05f, 0.55f}, {0.25f, 0.35f, 0.95f}, {0.35f, 0.85f, 1.f}, {0.9f, 1.f, 1.f}}};
+  if (t <= 0.f) return c[0];
+  for (std::size_t k = 1; k < at.size(); ++k) {
+    if (t < at[k]) {
+      const float w = (t - at[k - 1]) / (at[k] - at[k - 1]);
+      return {c[k - 1].r + w * (c[k].r - c[k - 1].r), c[k - 1].g + w * (c[k].g - c[k - 1].g), c[k - 1].b + w * (c[k].b - c[k - 1].b)};
+    }
+  }
+  return c[4];
+}
+
 std::uint8_t q8(float v) { return static_cast<std::uint8_t>(clamp01(v) * 255.f + 0.5f); }
 
 }  // namespace
@@ -370,6 +470,11 @@ void Fluid::render(std::span<std::uint8_t> out) const {
         const float as = 1.f - std::exp(-2.5f * D), keep = 1.f - 0.5f * as;
         c = {e.r * keep + 0.06f * as, e.g * keep + 0.05f * as, e.b * keep + 0.05f * as};
         a = clamp01(as + 0.25f * std::max(e.r, e.g));
+      } else if (p_.effect == Effect::magic) {  // light, over a thin dark violet mist
+        const Rgb e = magic_ramp(T);
+        const float as = 1.f - std::exp(-2.f * D), keep = 1.f - 0.4f * as;
+        c = {e.r * keep + 0.08f * as, e.g * keep + 0.03f * as, e.b * keep + 0.14f * as};
+        a = clamp01(as + 0.3f * std::max({e.r, e.g, e.b}));
       } else {
         float tau = 0.f;  // optical depth towards the light
         for (int k = 1; k <= 12; ++k) tau += soot_.sample(gx + lx * 2.f * f(k) * sc, gy + ly * 2.f * f(k) * sc);
@@ -379,6 +484,11 @@ void Fluid::render(std::span<std::uint8_t> out) const {
           const float g = 0.80f * (0.32f + 0.68f * light);
           c = {g * as, 0.98f * g * as, 0.95f * g * as};
           a = as;
+        } else if (p_.effect == Effect::steam) {  // white vapour, softly shadowed, a little blue in its shade
+          const float g = 0.97f * (0.55f + 0.45f * std::exp(-0.11f * tau));  // vapour shades itself less than smoke
+          const float vs = 1.f - std::exp(-2.f * D);
+          c = {0.95f * g * vs, 0.98f * g * vs, g * vs};
+          a = vs;
         } else {
           const Rgb e = fire_ramp(0.75f * T);
           const float g = 0.42f * (0.30f + 0.70f * light), keep = 1.f - 0.6f * as;

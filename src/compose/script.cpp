@@ -66,7 +66,7 @@ constexpr Key kLook[] = {{"heat_scale", VT::expr}, {"emission", VT::expr}, {"emi
 constexpr Key kModule[] = {{"tiles", VT::dims},   {"band", VT::expr},   {"size", VT::expr},       {"width", VT::expr},
                            {"at", VT::point},     {"sink", VT::expr},   {"over", VT::name},       {"feather", VT::expr},
                            {"look", VT::look},    {"controls", VT::tuple}, {"opacity", VT::expr}, {"start", VT::expr},
-                           {"seed", VT::expr},    {"waiting", VT::flag}, {"empty", VT::flag}};
+                           {"seed", VT::expr},    {"waiting", VT::flag}, {"empty", VT::flag},   {"glow", VT::tuple}};
 constexpr Key kField[] = {{"at", VT::point},     {"level", VT::expr},    {"radius", VT::expr},    {"strength", VT::expr},
                           {"soft", VT::expr},    {"damping", VT::expr},  {"swirl", VT::expr},     {"steam", VT::expr},
                           {"amount", VT::expr},  {"scale", VT::expr},    {"rate", VT::expr},      {"seed", VT::expr},

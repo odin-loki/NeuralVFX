@@ -1463,6 +1463,8 @@ SimRecipe recipe_for(sim::Effect e) {
     r.starts = 16;
     r.stepper.burn_max = 32;
   }
+  // steam and magic (docs/EFFECTS.md) take fire's recipe: their vapour and energy are gone within a second or two, so
+  // like fire's flames they grow their fine fields at instance start instead of storing them
   return r;
 }
 
@@ -1505,8 +1507,9 @@ Model recipe_model(const SimRecipe& r) {
   m.effect = std::string(sim::effect_name(r.effect));
   m.fps = 30.f;
   m.loop = !one_shot;
-  m.control_names.assign(sim::kControlNames.begin(), sim::kControlNames.end());
-  m.noise.flicker_rate = r.effect == sim::Effect::fire ? 2.6f : 1.4f;  // as the simulation's source flicker
+  const auto names = sim::control_names(r.effect);
+  m.control_names.assign(names.begin(), names.end());
+  m.noise.flicker_rate = sim::flicker_rate(r.effect);  // as the simulation's source flicker
   m.detail.swirl_control = 2;                                            // turbulence
   return m;
 }

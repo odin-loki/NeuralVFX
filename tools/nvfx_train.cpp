@@ -1,6 +1,6 @@
 // nvfx_train: train a neural effect from clips and save it as .nvfx.
 //
-//   nvfx_train --rollout fire|smoke|explosion --out effect.nvfx [--runs 160] [--frames 240] [--iters 2500]
+//   nvfx_train --rollout fire|smoke|explosion|steam|magic --out effect.nvfx [--runs 160] [--frames 240] [--iters 2500]
 //              [--finetune 1500] [--render-iters 2500] [--starts 8] [--threads 0]
 //     trains a rollout effect (include/neuralfx/rollout.hpp) from runs of the built-in simulation instead: start
 //     points, a learned coarse stepper, the detail layer and a renderer (about 40 minutes per effect on 4 cores).
@@ -39,12 +39,12 @@ int main(int argc, char** argv) try {
   const tools::Args a(argc, argv, {"no-controls", "help", "quiet", "qat", "trim"});
   if (a.flag("help")) {
     std::println("nvfx_train --clips a,b | --clip-dir DIR --out model.nvfx [--arch grid|conv ...]");
-    std::println("nvfx_train --rollout fire|smoke|explosion --out effect.nvfx [--runs N --iters N ...] (see the source header)");
+    std::println("nvfx_train --rollout fire|smoke|explosion|steam|magic --out effect.nvfx [--runs N --iters N ...] (see the source header)");
     return 0;
   }
   if (a.has("rollout")) {
     sim::Effect e;
-    if (!sim::parse_effect(a.str("rollout"), e)) throw std::invalid_argument("--rollout: fire, smoke or explosion");
+    if (!sim::parse_effect(a.str("rollout"), e)) throw std::invalid_argument("--rollout: fire, smoke, explosion, steam or magic");
     if (!train::cpu_supported()) throw std::runtime_error("training needs AVX2 + FMA");
     rollout::SimRecipe r = rollout::recipe_for(e);
     r.runs = a.i("runs", r.runs);
@@ -152,8 +152,9 @@ int main(int argc, char** argv) try {
   r.model.fps = first.fps;
   r.model.feature_bits = bits;
   r.model.feature_trim = o.qat_trim;
-  if (first.source == "sim" && h.n_controls == sim::kControls) {
-    r.model.control_names.assign(sim::kControlNames.begin(), sim::kControlNames.end());
+  if (sim::Effect se{}; first.source == "sim" && h.n_controls == sim::kControls && sim::parse_effect(first.effect, se)) {
+    const auto names = sim::control_names(se);
+    r.model.control_names.assign(names.begin(), names.end());
   }
   const auto out = a.need("out");
   if (auto s = save_model(out, r.model); !s) throw std::runtime_error(s.error());

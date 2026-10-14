@@ -183,6 +183,8 @@ struct ModC {
   int size = 0;
   float width = 0, sink = 0, feather = 0;
   bool has_size = false, has_width = false;
+  bool glows = false;
+  std::array<float, 3> glow{};  // the colour of its light (Module::glows)
   Code ax, ay;  // where it stands (bottom centre of the tile or domain); varying: it moves
   bool has_at = false;
   int look_a = -1, look_b = -1;  // -1: the learned renderer
@@ -596,7 +598,7 @@ void Compiler::emit(const Expr& e, const Ctx& c, Code& code, std::vector<std::st
   }
 }
 
-constexpr std::string_view kModuleKeys[] = {"tiles", "band", "size", "width", "at", "sink", "over", "feather", "look", "controls", "opacity", "start", "seed", "waiting", "empty"};
+constexpr std::string_view kModuleKeys[] = {"tiles", "band", "size", "width", "at", "sink", "over", "feather", "look", "controls", "opacity", "start", "seed", "waiting", "empty", "glow"};
 bool module_key(std::string_view k) { return std::ranges::find(kModuleKeys, k) != std::end(kModuleKeys); }
 
 std::vector<int> Compiler::modules_of(const std::vector<std::string>& names, Pos pos, bool particles_ok, bool* particles) const {
@@ -682,6 +684,14 @@ void Compiler::module(const Statement& s, ModC& m) {
   if (!m.has_width) m.width = static_cast<float>(m.size);
   if (const Prop* p = s.prop("sink")) m.sink = constant(p->value.exprs[0], "the sink");
   if (const Prop* p = s.prop("feather")) m.feather = constant(p->value.exprs[0], "the feather");
+  if (const Prop* p = s.prop("glow")) {
+    if (p->value.exprs.size() != 3) fail(p->pos, "a glow has three values (red, green, blue)");
+    for (int i = 0; i < 3; ++i) {
+      m.glow[zs(i)] = constant(p->value.exprs[zs(i)], "a glow");
+      if (!(m.glow[zs(i)] >= 0.f)) fail(p->value.exprs[zs(i)].pos, "a glow's colour cannot be negative");
+    }
+    m.glows = true;
+  }
   if (const Prop* p = s.prop("at")) {
     Ctx c;
     c.what = "the place of tiles";
@@ -1561,6 +1571,8 @@ void Scene::Impl::build(const EffectLoader& load, const Options& o) {
         m->group = r.group;
         if (mc.tiled) m->band = {c > 0 ? mc.band : 0, c < mc.cols - 1 ? mc.band : 0, row > 0 ? mc.band : 0, row < mc.rows - 1 ? mc.band : 0};
         m->feather = mc.feather * static_cast<float>(mc.size);
+        m->glows = mc.glows;
+        m->glow = mc.glow;
         if (mc.look_a >= 0) {
           m->look = Look::shader;
           m->spec = prog.looks[zs(mc.look_a)];

@@ -213,6 +213,10 @@ class Module {
   int group = -1;                 // tiles of one domain share a group (drawn and published as one)
   std::array<int, 4> band{};      // band cells shared with a neighbour: left, right, bottom, top (0: an outer edge)
   float feather = 0.f;            // outer edges fade over this many tile pixels when drawn (hides a domain's walls)
+  // A light of its own colour: its heat lights the scene in `glow` (times heat squared and the light's gain, as the fires'
+  // light) instead of in the fire colours (a magic portal's violet light). Its heat is on the bus as any module's.
+  bool glows = false;
+  std::array<float, 3> glow{};
   double step_ms = 0, shade_ms = 0;
   int frames = 0;                 // frames stepped since start
 
@@ -273,6 +277,10 @@ struct FieldBus {
   float y0() const { return y0_; }
   std::span<const float> heat() const { return heat_; }  // all groups, [ny][nx]
   std::span<const float> soot() const { return soot_; }
+  // The heat of modules that glow in their own colour (Module::glows), [ny][nx][4]: their heat, then their heat times
+  // their colour. glowing(): some module that glows published since the last clear (otherwise glow() is all zero).
+  std::span<const float> glow() const { return glow_; }
+  bool glowing() const { return glowing_; }
 
  private:
   Sample sample(const float* f, float x, float y) const;
@@ -285,6 +293,8 @@ struct FieldBus {
     int i0 = 0, i1 = -1, j0 = 0, j1 = -1;
   };
   std::vector<Rect> dirty_;  // [group], then all groups
+  std::vector<float> glow_;  // [ny][nx][4]
+  bool glowing_ = false;
   struct Column {            // publish(): what a column of bus cells takes from the module's tile
     Module::WeightX w;       // its factors of the ownership weight
     int x0 = 0, x1 = 0;      // the coarse columns it falls between

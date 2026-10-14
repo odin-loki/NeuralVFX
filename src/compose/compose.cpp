@@ -724,6 +724,7 @@ FieldBus::FieldBus(float x0, float y0, int nx, int ny, float cell, int groups) :
   layer_.assign(zs(groups) * all_.size(), 0.f);
   heat_.assign(zs(nx) * zs(ny), 0.f);
   soot_.assign(heat_.size(), 0.f);
+  glow_.assign(all_.size(), 0.f);
   dirty_.assign(zs(groups) + 1, Rect{});
   cols_.assign(zs(nx), Column{});
 }
@@ -738,6 +739,8 @@ void FieldBus::clear() {
   zero(all_, 0, 4, r);
   zero(heat_, 0, 1, r);
   zero(soot_, 0, 1, r);
+  if (glowing_) zero(glow_, 0, 4, r);
+  glowing_ = false;
   std::ranges::fill(dirty_, Rect{});
 }
 
@@ -769,6 +772,9 @@ void FieldBus::publish(const Module& m) {
     c.fx = t.f;
   }
   float* L = layer_.data() + zs(m.group) * all_.size();
+  const bool glows = m.glows;
+  const std::array<float, 3> tint = m.glow;
+  glowing_ = glowing_ || glows;
   for (int j = j0; j <= j1; ++j) {
     const float wy = y0_ + (fl(j) + 0.5f) * cell_;
     const float ty = fl(S) - (wy - m.at.y) / sc;  // tile pixels, y up
@@ -798,6 +804,11 @@ void FieldBus::publish(const Module& m) {
       }
       heat_[q / 4] += w * s[2];
       soot_[q / 4] += w * s[3];
+      if (glows) {
+        const float h = w * s[2];
+        glow_[q] += h;
+        for (int ch = 0; ch < 3; ++ch) glow_[q + 1 + zs(ch)] += h * tint[zs(ch)];
+      }
     }
   }
 }
@@ -1062,6 +1073,8 @@ void Light::update(const FieldBus& bus, float gain, std::array<float, 3> flash, 
   static constexpr float kw[5] = {1.f / 16, 4.f / 16, 6.f / 16, 4.f / 16, 1.f / 16};
   const int L = static_cast<int>(levels_.size());
   auto heat = bus.heat();
+  auto glow = bus.glow();
+  const bool glowing = bus.glowing();
   // 1. the finest level: each cell's heat emits; then the blur along x, row by row
   Level& l0 = levels_[0];
   const int chunk = 8;
@@ -1069,7 +1082,16 @@ void Light::update(const FieldBus& bus, float gain, std::array<float, 3> flash, 
     for (int y = task * chunk; y < std::min(ny_, (task + 1) * chunk); ++y) {
       float* a = l0.a.data() + zs(y) * zs(nx_) * 3;
       for (int x = 0; x < nx_; ++x) {
-        const float h = std::max(0.f, heat[zs(y) * zs(nx_) + zs(x)]);
+        const std::size_t i = zs(y) * zs(nx_) + zs(x);
+        if (glowing) {  // modules of their own colour (Module::glows): their heat in it, the rest in the fire colours
+          const float* g = glow.data() + i * 4;
+          const float h = std::max(0.f, heat[i] - g[0]), hg = std::max(0.f, g[0]);
+          const auto c = heat_colour(h / 1.2f);
+          const float e = gain * h * h;
+          for (int ch = 0; ch < 3; ++ch) a[zs(x) * 3 + zs(ch)] = e * c[zs(ch)] + gain * hg * std::max(0.f, g[1 + ch]);
+          continue;
+        }
+        const float h = std::max(0.f, heat[i]);
         const auto c = heat_colour(h / 1.2f);
         const float e = gain * h * h;
         for (int ch = 0; ch < 3; ++ch) a[zs(x) * 3 + zs(ch)] = e * c[zs(ch)];

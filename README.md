@@ -1,7 +1,7 @@
 # NeuralVFX
 
-Neural visual effects for games that run on **one CPU core**. Each effect (fire, smoke, an explosion) is small and
-trained offline. At run time it draws sprites (64-256 px) from time, artist controls (intensity, wind, turbulence) and
+Neural visual effects for games that run on **one CPU core**. Each effect (fire, smoke, an explosion; later steam and a
+magic portal) is small and trained offline. At run time it draws sprites (64-256 px) from time, artist controls (intensity, wind, turbulence) and
 a seed, with no GPU. The idea follows NVIDIA's small-network-per-asset work (RTX Neural Shaders, Neural Texture
 Compression), but runs on a CPU instead of tensor cores.
 
@@ -28,6 +28,7 @@ C++23, no third-party runtime dependencies, a C API for engines, no Python.
 - **Plan and decisions:** [docs/PLAN.md](docs/PLAN.md).
 - **Engine integration:** [docs/ENGINES.md](docs/ENGINES.md) (C API for effects and scenes, threading, Unreal, Unity,
   the Godot 4 plugin).
+- **More effects:** [docs/EFFECTS.md](docs/EFFECTS.md) (steam and magic: presets, training, the test, a scene).
 - **Data and licences:** [docs/DATA.md](docs/DATA.md).
 - **Footage:** [docs/FOOTAGE.md](docs/FOOTAGE.md): start points estimated from frames (study J), so a rollout effect
   continues what footage shows (`nvfx_estimate`); validated on simulated renders only.
@@ -43,6 +44,11 @@ From [docs/REPORT.md](docs/REPORT.md), measured on simulated fire, smoke and exp
   the same resolution for the first second. Played in 6 s shards from the start points, a minute looks like the
   first 10 s. The price is **0.8 to 0.9 ms per 128 x 128 frame** (0.4 to 0.5 ms at 64 x 64) and 4.0 MB per playing
   instance.
+- **More effects** ([docs/EFFECTS.md](docs/EFFECTS.md)): steam and a magic portal, new presets of the simulator
+  trained with study D's recipe (82 KB each). Steam plays as well as fire and smoke: at unseen settings and seeds its
+  motion is right and its average picture ties a second real run, 4.3 dB closer than the nearest flipbook. Magic is
+  weaker: it only ties a coarse simulation and its detail is worse than a flipbook's. A scene script plays both with
+  fire and an explosion.
 - **Memory, against production block compression:** for equal quality, a network per effect clip needs **2.4 to
   4.3 times less memory than a BC7 flipbook** at 8 bits, and 7.5 times less [4.2, 8.3] with features trained for 4
   bits. **Against ASTC** (mobile GPUs; 8x8 to 12x12 blocks hold every frame at full size in 121 to 256 KB) the ratios
@@ -85,7 +91,7 @@ From [docs/REPORT.md](docs/REPORT.md), measured on simulated fire, smoke and exp
 
 | piece | where | what |
 |---|---|---|
-| simulation | `src/sim`, `nvfx_sim` | a 2D stable-fluids solver (temperature, soot, vorticity, curl noise, combustion expansion) that renders fire, smoke and explosions to premultiplied RGBA clips with labelled controls: unlimited training and test data |
+| simulation | `src/sim`, `nvfx_sim` | a 2D stable-fluids solver (temperature, soot, vorticity, curl noise, combustion expansion) that renders fire, smoke and explosions, and since study D steam and a magic portal ([docs/EFFECTS.md](docs/EFFECTS.md)), to premultiplied RGBA clips with labelled controls: unlimited training and test data |
 | ingest | `src/core/ingest.cpp`, `nvfx_ingest` | owner footage into clips via ffmpeg, with a licence check and a licence register |
 | footage to start points | `src/footage`, `nvfx_estimate` | a rollout effect's state estimated from a few frames: an inverse renderer (a per-pixel MLP over a pyramid of the frame), refinement through the effect's learned renderer, a motion network and assimilation through the effect's stepper; writes a copy of the effect with start points from the footage ([docs/FOOTAGE.md](docs/FOOTAGE.md), study J; validated on simulated renders only) |
 | models | `src/core/model.cpp` | a **grid** family (learned feature volumes over x, y and t, blended by the controls, sampled bilinearly, then a small MLP with FiLM conditioning) and a **conv** family (a learned latent, three upsampling convolutions); `.nvfx` files store features at 16 bits, 2 to 8 bits (bit-packed below 8) or vector-quantised |
@@ -110,7 +116,7 @@ Ubuntu 24.04: `g++-14`, CMake 3.25+, Ninja, `libgtest-dev`, `zlib1g-dev` (and `f
 ```sh
 cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_COMPILER=g++-14
 cmake --build build
-ctest --test-dir build                     # 267 tests: sim, metrics, codecs, gradients, runtime parity, composition, scene scripts, field effects, context mixing, denoiser, lossless coder, low-bit, vector-quantised, sparse and multi-level features, video codecs, BC7 and ASTC flipbooks, allocation, C API for effects and scenes, start points from footage
+ctest --test-dir build                     # 274 tests: sim, metrics, codecs, gradients, runtime parity, composition, scene scripts, field effects, context mixing, denoiser, lossless coder, low-bit, vector-quantised, sparse and multi-level features, video codecs, BC7 and ASTC flipbooks, allocation, C API for effects and scenes, start points from footage
 ```
 
 Options: `NEURALFX_BUILD_VIEWER` (GLFW + OpenGL; fetches Dear ImGui), `NEURALFX_BUILD_SHARED` (libnvfx.so for engines),
@@ -141,13 +147,13 @@ training, evaluation; about three hours), then `d-timing` on an idle machine and
 
 | tool | what |
 |---|---|
-| `nvfx_sim` | simulate one clip; `--bench` reports the solver's cost per frame |
+| `nvfx_sim` | simulate one clip (fire, smoke, explosion, steam, magic); `--bench` reports the solver's cost per frame |
 | `nvfx_ingest` | footage into a clip, after a licence check; adds a row to the licence register |
 | `nvfx_estimate` | start points for a rollout effect estimated from footage (a clip, a video or frames, after the same licence check): writes a copy of the effect that continues from the footage; `--preview` draws the footage frame and the effect from it ([docs/FOOTAGE.md](docs/FOOTAGE.md) §8) |
 | `nvfx_study_j` | study J: `inverse`, `motion` (the networks), `val`, `val-endless`, `test`, `test-endless`, `report` ([docs/FOOTAGE.md](docs/FOOTAGE.md) §9) |
 | `nvfx_train` | train a frame model from one or more clips (controls and variation codes come from the clips), or with `--rollout` a rollout effect from the simulation |
 | `nvfx_eval` | score the flipbook ladder or a model against a reference clip |
-| `nvfx_experiment` | the full study: `data`, `a` (`a-flipbooks`: only the flipbook rows still missing), `b`, `c`, `media`, `timing`, `report`; study D: `d-chaos`, `d-train`, `d-tune`, `d-finish`, `d-eval`, `d-timing`; study G: `g-fine` (design G1, DCM-fine, end to end); to come: `g-data`, `g-pilot`, `g-search`, `g-eval`, `g-timing` |
+| `nvfx_experiment` | the full study: `data`, `a` (`a-flipbooks`: only the flipbook rows still missing), `b`, `c`, `media`, `timing`, `report`; study D: `d-chaos`, `d-train`, `d-tune`, `d-finish`, `d-eval`, `d-timing`, `d-report` (with `--effects steam,magic` for the effects added later, [docs/EFFECTS.md](docs/EFFECTS.md)); study G: `g-fine` (design G1, DCM-fine, end to end); to come: `g-data`, `g-pilot`, `g-search`, `g-eval`, `g-timing` |
 | `nvfx_c_host` | the engine loop in plain C, with timings; `--scene` plays a scene script through the scene API (and with `--expect` compares every frame with `nvfx_scene_script --profile`); `--self-test` checks the error paths |
 | `nvfx_viewer` | live viewer with sliders; `--scene FILE` edits a scene script live |
 | `nvfx_fireball` | a scene of composed effects written in C++ (a fireball with smoke, fires and embers) to video, with a profile of every stage |
