@@ -1,6 +1,6 @@
 # The effect library
 
-A catalogue of 79 named, ready-to-use effects that a game lists, places and drives without training anything: a
+A catalogue of 149 named, ready-to-use effects that a game lists, places and drives without training anything: a
 campfire, a grenade, a steam vent, a portal, a lightning strike, ground fog, a dust impact, a flamethrower, a plasma
 orb, a dust devil, a rocket's smoke trail, rain. Each plays the eleven trained rollout models (fire, smoke, explosion
 v2, steam and magic; fog, dust and cloud, [EFFECTS_ATMOSPHERE.md](EFFECTS_ATMOSPHERE.md); jet, orb and vortex,
@@ -9,7 +9,9 @@ a size, with parameters mapped onto the models' controls and looks. The 23 entri
 with the recipe of §6, in text; the only code they needed is a third anchor, for the jet's nozzle. The nine newest
 entries needed two features of the compositor: **trails** (`rocket_trail`, `vehicle_dust_wake`, `carried_torch`,
 `comet_trail`: effects that move and leave their smoke, dust or glow in the world behind them, §9) and **procedural
-weather** (`rain`, `snow`, `falling_ash`, `falling_leaves`, `cherry_petals`, §2.1).
+weather** (`rain`, `snow`, `falling_ash`, `falling_leaves`, `cherry_petals`, §2.1). The **third round** (70 entries,
+§10) adds weather and sky, combat, magic and props, half of them from new procedural elements (hail, an aurora, a
+rainbow, meteors, beams, shields, glints, spatter and shards; [COMPOSE.md](COMPOSE.md) §4.10).
 
 ![The library's contact sheet: the entries of the first five models](figures/library_sheet.png)
 
@@ -33,6 +35,9 @@ weather** (`rain`, `snow`, `falling_ash`, `falling_leaves`, `cherry_petals`, §2
 | trails | 4 | 0 | 4 | 4 | 0 |
 | weather | 11 | 6 | 5 | 6 | 5 |
 | **all** | **79** | **23** | **9** | **59** | **20** |
+
+With the third round's 70 (§10: 20 weather, 23 combat, 14 magic, 13 fire, smoke, steam and light; 34 learned, 36
+procedural only) the catalogue holds **149** entries, 93 of them learned and 56 procedural only.
 
 **What is learned and what is not.** Only eleven things move by a trained model: fire, smoke, an explosion, steam,
 magic, fog, dust, cloud, a jet, an orb and a vortex. Everything else in an entry is the compositor's: particles (embers,
@@ -195,6 +200,96 @@ the gallery's thumbnail shows each after `show` seconds of travel through its bo
 | `falling_leaves` (weather) | Falling leaves (procedural): autumn leaves tumbling and swaying down, blown by the wind | leaves | 960 x 540, base | loop | density (0.35), wind (60), size (1) | Fair: leaves in four autumn colours that tumble (they narrow and widen as they turn) and swing as they fall; small and few at the defaults, and flat shapes, not leaf shapes. |
 | `cherry_petals` (weather) | Cherry petals (procedural): small pink petals drifting and tumbling on a light breeze | leaves | 960 x 540, base | loop | density (0.6), wind (70), size (1) | Fair: small pink petals that tumble and drift; pleasant in motion, specks in a still. |
 
+### Weather and sky (20, round 3: `library/storms.nvfxl`)
+
+| effect | category | what it is | plays | box, anchor | runs | parameters (default) | how it looks |
+|---|---|---|---|---|---|---|---|
+| `drizzle` | weather | Drizzle (procedural): fine, short streaks of light rain drifting down slowly | rain | 960 x 540, base | loop | density (2.5), wind (40) | Good: fine, short, slow streaks; a light rain. |
+| `downpour` | weather | A downpour (procedural): heavy, wind-driven rain in long streaks; it thins the smoke it falls through | rain | 960 x 540, base | loop | density (9), wind (180) | Good: dense, slanted rain in long streaks; it thins the smoke it falls through. |
+| `hailstorm` | weather | A hailstorm (procedural): white pellets hammering down through rain, bouncing once or twice and lying a moment | hail, rain | 960 x 540, base | loop | density (1.6), size (1), wind (60) | Good: white pellets hammering down, bouncing once or twice and lying a moment; reads in a still and in motion. |
+| `sleet` | weather | Sleet (procedural): rain mixed with small ice pellets and wet flakes, slanting in a cold wind | rain, hail, snow | 960 x 540, base | loop | density (3), wind (140) | Fair: rain with small pellets and wet flakes slanting in the wind; in a still it is hard to tell from rain. |
+| `blizzard` | weather | A blizzard: dense snow driven sideways by a gusting gale, blown snow swirling low along the ground (the fog model) | fog; look snow_haze, snow, gust | 960 x 540, base | loop | density (7), wind (280) | Fair: dense driven snow over a low bank of blown snow (the ground fog's four releases, white), whose releases still show as humps. |
+| `snow_flurry` | weather | A snow flurry (procedural): a light fall of big flakes, eddying in a swirl of wind | snow, vortex, gust | 700 x 500, base | loop | density (1.6) | Fair: big flakes eddying in a swirl of wind; in a still at night they look like stars, as `snow`'s do. |
+| `thunderstorm` | weather | A thunderstorm: a dark bank of cloud (the cloud model) pouring rain, struck by lightning every few seconds that lights the cloud from inside | cloud; look storm, rain, arc, lamp, flash | 1100 x 700, base | loop | every (4), density (6) | Good: each strike lights the cloud bank from inside and the ground below and the bolt forks, in heavy rain; between strikes the bank is dark and thin (as `storm_cloud`'s). Heavy: three cloud modules and a large rain. |
+| `distant_lightning` | weather | Distant lightning (procedural): silent flashes and faint forked bolts low on the horizon, now here, now there | arc, lamp, flash | 1000 x 400, base | loop | every (3) | Good: faint forked bolts and the light they throw, low on the horizon, now here, now there. |
+| `sandstorm` | weather | A sandstorm: a pale wall of sand rolling past (the cloud model, recoloured), sand streaming low and fast in front of it | cloud; look sand_storm, ash | 1300 x 360, base | loop | intensity (0.95) | Fair: a sand-coloured band rolling past (the dust storm's cloud tiles, recoloured and faster) with sand streaming low; a band, not a towering wall, and the streaming sand is faint. |
+| `red_dust_storm` | weather | A red dust storm: a wall of rust-red dust rolling past, as on Mars (the dust storm's cloud model, recoloured) | cloud; look red_dust, lamp | 1300 x 300, base | loop | intensity (0.95), wind (0.8) | Fair: `dust_storm` in rust red (a recolour): a low red band rolling past. |
+| `tornado` | weather | A tornado: a tall grey funnel swaying over the ground (the vortex model, large, recoloured), debris and dust whirling round its foot | whirlwind; look funnel, ash, vortex, burst | 560 x 760, base | loop | intensity (0.9), sway (0.6) | Weak: a swaying grey column spreading into a haze above, with debris whirling at its foot; the vortex model makes a giant dust devil, not a funnel cloud. Kept as the best the models give for it. |
+| `waterspout` | weather | A waterspout: a pale column of spray twisting up from the sea (the vortex model, recoloured), mist at its foot (the fog model) | whirlwind, fog; look spout, look spray_mist | 460 x 700, base | loop | intensity (0.75), sway (0.5) | Fair: a pale twisting column with mist at its foot; its top spreads into a mushroom-like cap. |
+| `aurora` | weather | An aurora (procedural): curtains of green light rippling slowly across the night sky, fading into violet above | aurora, lamp | 1200 x 420, centre | loop | brightness (0.5), hue (0), pace (1) | Good: curtains of green light with a sharp lower edge, fading into violet above, their folds drifting and their rays shimmering; reads in a still and in motion. |
+| `rainbow` | weather | A rainbow (procedural): a bow of seven colours standing on the ground, and a fainter second bow outside it | rainbow | 1000 x 520, base | loop | brightness (0.35) | Good: a double bow fading into the ground at its feet; drawn as light, so at night it glows rather than tints the sky. |
+| `meteor_shower` | weather | A meteor shower (procedural): shooting stars streaking down across the sky from one direction, several a second | meteors | 1000 x 500, centre | loop | rate (3) | Good: meteors streaking down from one direction, brief and thin; a still shows one or two. |
+| `shooting_star` | weather | A shooting star (procedural): now and then a single bright meteor crosses the sky, its long tail fading behind it | meteors | 1000 x 500, centre | loop | rate (0.35) | Good: a single bright meteor with a long tail now and then; most stills show an empty sky. |
+| `wind_gust` | weather | A gust of wind (procedural): leaves and specks of dust swept along low over the ground, the wind rising and falling | leaves, ash, gust | 900 x 400, base | loop | strength (1) | Fair: leaves and specks of dust swept along in gusts; reads in motion, sparse in a still. |
+| `desert_shimmer` | weather | Desert shimmer: the air over hot sand or a sunlit road wavering low and wide (heat from the fire model, drawn invisible) | fire; look invisible | 900 x 160, base | loop | intensity (0.5) | Works in motion only: as `heat_haze`, a still shows nothing; the shimmer is subtle. |
+| `exhaust_shimmer` | weather | Exhaust shimmer: hot air streaming out of an exhaust or a vent (the anchor), bending what is seen through it (the jet model, drawn invisible); it blows to the right | jet; look invisible | 360 x 140, left | loop | intensity (0.6) | Works in motion only: the bent air reads over a background; the invisible jet's heat lights the scene a little red. |
+| `morning_mist` | weather | Morning mist: a pale, warm white mist lying low over fields at dawn, barely moving (the fog model) | fog; look dawn_mist | 900 x 120, base | loop | intensity (0.7) | Fair: a thin, warm white bank (the ground fog's four releases with a warm look), whose releases show as humps. |
+
+### Combat and impacts (23, round 3: `library/combat.nvfxl`)
+
+| effect | category | what it is | plays | box, anchor | runs | parameters (default) | how it looks |
+|---|---|---|---|---|---|---|---|
+| `bullet_impact_stone` | combat | A bullet hitting stone: chips of rock flying, a few sparks, a flash and a puff of grey dust (the dust model) | dust; look stone_dust, glow, lamp, burst | 180 x 140, base | once, 1.6 s | power (1) | Fair: grey chips flying, a few sparks and a flash; the dust model's first moment is a smooth dome of dust. |
+| `bullet_impact_dirt` | combat | A bullet hitting dirt: a spurt of earth thrown up, clods falling back, and a puff of brown dust (the dust model) | dust; look dirt, burst | 200 x 140, base | once, 2 s | power (1) | Fair: clods thrown up and a brown puff, the same smooth dome at first. |
+| `bullet_impact_metal` | combat | A bullet hitting metal (procedural): a white-hot flash and a hard spray of sparks bouncing off | glow, glints, lamp, burst | 180 x 160, base | once, 0.8 s | power (1), direction (0) | Good: a white flash and a hard spray of bouncing sparks. |
+| `bullet_impact_wood` | combat | A bullet hitting wood: splinters flying, spinning and falling, and a puff of pale sawdust (the dust model) | dust; look wood_dust, burst | 180 x 140, base | once, 1.6 s | power (1) | Fair: splinters spinning and a pale puff; the splinters are small at scale 1. |
+| `blood_spray` | combat | A spray of blood (procedural): dark red spatter thrown out from a hit 60 world pixels up, falling and staining the ground | burst | 260 x 180, base | once, 3 s | power (1), direction (1) | Good: dark red spatter flying out and staining the ground where it lands (simple drops, no splash). |
+| `sparks_on_metal` | combat | Sparks on metal (procedural): a damaged machine or a blade scraping steel, spitting sparks in fits, with a flickering light | glow, burst, lamp | 260 x 200, base | loop | rate (0.5) | Good: fits of sparks and a flickering light; nearly dark between fits, as it should be. |
+| `muzzle_flash_rifle` | combat | A rifle's muzzle flash (procedural): a long narrow tongue of fire from the barrel (the anchor), a bright core, small side spikes | glow, arc, lamp, burst | 220 x 90, centre | once, 0.1 s | direction (1) | Good: a long narrow tongue of flame; it lasts 0.1 s. |
+| `muzzle_flash_shotgun` | combat | A shotgun's muzzle flash: a wide, short burst of flame from the barrel (the anchor), a spray of sparks and a puff of grey smoke (the explosion model) | explosion; look gun_smoke, glow, arc, lamp, burst | 240 x 160, centre | once, 1.6 s | direction (1) | Good: a wide burst of flame and a spray of sparks; the grey puff after it is small. |
+| `muzzle_flash_energy` | combat | An energy weapon's discharge (procedural): a cyan flash at the emitter (the anchor), a ring snapping out and a short bolt of light | glow, ring, beam, glints, lamp | 200 x 140, centre | once, 0.35 s | direction (1) | Good: a cyan flash, a ring snapping out and a short bolt. |
+| `tracer` | combat | A tracer round (procedural): a bright orange streak of light, its head at the anchor and its tail behind along `aim` (move it every frame) | beam, lamp | 900 x 160, centre | loop, moving (1300, -60) | aim (2.6) | Good: a bright orange streak; it must be moved fast along its `aim` (a still shows a short line). |
+| `laser_beam` | combat | A laser beam (procedural): a red beam from the emitter (the anchor) to a hit `reach` away, its edges flickering, sparks and a flare where it hits | beam, sparks, lamp | 560 x 160, left | loop | reach (460), aim (0) | Good: a red beam with flickering edges, a flare and sparks where it hits. |
+| `plasma_bolt` | combat | A plasma bolt: a ball of green plasma (the orb model) leaving a short glowing tail (the explosion's hot gas), both recoloured, throwing sparks (move it every frame) | orb, explosion; look plasma_head, trail, look plasma_tail, glow, lamp, burst | 900 x 300, centre | loop, moving (560, -30) | intensity (0.7) | Fair: a green ball with a short glowing tail and sparks (the orb and the explosion's hot gas, recoloured); the head is small. |
+| `frag_grenade` | combat | A fragmentation grenade: a ball of fire (the explosion model), a hard shock, and a storm of sparks and dark metal fragments | explosion; look cloud, flash, shake, shock, scorch, burst | 360 x 380, base | once, 3 s | power (1) | Good: a fireball, a hard shock, sparks and dark fragments flying; the fireball is the explosion model's, blobby. |
+| `incendiary_grenade` | combat | An incendiary grenade: a bright flash and a small burst of fire, then flames (the fire model) that catch and burn on the ground for six seconds | explosion, fire; look cloud, embers, lamp, flash, shock, scorch, burst | 420 x 360, base | once, 8 s | power (1) | Good: a flash and a small burst, then flames that catch and burn for six seconds; the burst's fading gas shows red for a moment. |
+| `small_explosion` | combat | A small explosion: a quick ball of fire (the explosion model, small), a flash, a crack of shock and a few embers | explosion; look cloud, flash, shock, scorch, burst | 220 x 220, base | once, 2 s | power (1) | Fair: a quick small fireball with sparks; blobby at 128 pixels. |
+| `medium_explosion` | combat | A medium explosion: a fireball that rises and cools into smoke (the explosion model handed to the smoke model), a shock, a flash and debris | explosion, smoke; look cloud, look smoke, flash, shake, shock, scorch, burst | 480 x 560, base | once, 6 s | power (1) | Fair: a fireball that rises and turns to smoke; it starts small in its box. |
+| `emp_blast` | combat | An EMP blast (procedural): a pale blue flash, a ring of energy racing out, arcs crackling across it and a shock bending the air | glow, ring, arc, lamp, flash, shock, burst | 420 x 320, centre | once, 1.4 s | power (1) | Good: a blue flash and a ring racing out with arcs crackling across it. |
+| `shield_bubble` | combat | A shield bubble (procedural): a sphere of blue energy with a bright shimmering rim, rippling and flaring where it is hit | shield, lamp | 300 x 300, centre | loop | hits (0.8), radius (120) | Good: a blue sphere with a shimmering rim; hits flare and ripple over it. |
+| `shield_hit` | combat | A shield hit (procedural): an unseen shield (the anchor its centre) flashes into view where a shot strikes it, ripples racing over it, and fades | shield, lamp, burst | 300 x 300, centre | once, 0.9 s | angle (180), radius (120) | Good: the shield flashes into view where it is struck, ripples run over it, and it fades. |
+| `force_field` | combat | A force field (procedural): a tall barrier of blue energy standing on the ground, its rim shimmering, rippling where it is struck | shield, ring, lamp | 260 x 420, base | loop | hits (1.2) | Fair: a tall ellipse of energy over a ring on the ground, rippling where struck; it reads as a lens or a portal rather than a flat wall. |
+| `smoke_grenade_red` | combat | A red smoke grenade: a hiss of sparks, then thick red smoke billows out low and thins (the smoke grenade, recoloured) | smoke; look smoke_red, ceiling, sparks | 520 x 360, base | once, 12 s | intensity (0.9) | Fair: as `smoke_grenade`, red (a recolour): billows out under its ceiling, streaked and marbled late in its life. |
+| `smoke_grenade_green` | combat | A green smoke grenade: a hiss of sparks, then thick green smoke billows out low and thins (the smoke grenade, recoloured) | smoke; look smoke_green, ceiling, sparks | 520 x 360, base | once, 12 s | intensity (0.9) | Fair: as `smoke_grenade`, green (a recolour). |
+| `smoke_grenade_violet` | combat | A violet smoke grenade: a hiss of sparks, then thick violet smoke billows out low and thins (the smoke grenade, recoloured) | smoke; look smoke_violet, ceiling, sparks | 520 x 360, base | once, 12 s | intensity (0.9) | Fair: as `smoke_grenade`, violet (a recolour). |
+
+### Magic and buffs (14, round 3: `library/buffs.nvfxl`)
+
+| effect | category | what it is | plays | box, anchor | runs | parameters (default) | how it looks |
+|---|---|---|---|---|---|---|---|
+| `heal_aura` | magic | A healing aura (procedural): a green ring of light at the feet, sparkles drifting up around the body, a soft green glow | ring, glow, glints, lamp | 220 x 300, base | loop | intensity (0.8) | Good: a green ring at the feet, sparkles drifting up and a soft glow. |
+| `buff_glow` | magic | A buff (procedural): a warm golden glow pulsing about a character, a ring at the feet, golden motes rising slowly | glow, ring, glints, lamp | 220 x 300, base | loop | intensity (0.8) | Good: a warm glow pulsing, a ring and golden motes rising; the glow is a soft disc. |
+| `level_up` | magic | A level-up (procedural): a pillar of golden light bursts up from the feet, a ring of light races out, sparkles stream up, all fading | beam, ring, glints, lamp, flash | 280 x 540, base | once, 2.6 s | power (1) | Good: a golden pillar bursting up, a ring racing out, sparkles streaming up, all fading. |
+| `teleport_arrive` | magic | A teleport arrival (procedural): sparkles gather and a ring closes in at the feet, then a column of cyan light and a flash, fading | ring, glints, beam, glow, lamp, flash | 280 x 400, base | once, 1.5 s | power (1) | Good: sparkles gather and the ring closes in, then a column of light and a flash; the glow at its foot is a large soft disc. |
+| `teleport_vanish` | magic | A teleport departure (procedural): a flash, a violet column of light that narrows to nothing, sparkles streaming up, a ring spreading at the feet | beam, glow, glints, ring, lamp, flash | 280 x 400, base | once, 1.4 s | power (1) | Good: a flash and a violet column narrowing to nothing, sparkles streaming up. |
+| `holy_beam` | magic | A holy beam (procedural): a shaft of warm white light falling from the sky onto the anchor, motes drifting in it, a ring of light where it lands | beam, ring, glints, lamp | 320 x 720, base | loop | intensity (1) | Good: a soft shaft of warm light fading upwards, motes drifting down in it, a ring and a glow where it lands. |
+| `resurrection_light` | magic | A resurrection (procedural): light gathers from above, a shaft of white-gold light grows and blazes, rings of light spread from the body, sparkles rise | beam, ring, glints, lamp, flash | 320 x 720, base | once, 4 s | power (1) | Good: light gathers, a shaft blazes and fades, two rings spread and sparkles rise. |
+| `curse` | magic | A curse: dark violet smoke welling up around a character (the smoke model, recoloured), red motes in it and a dim, sickly light | smoke; look curse, glow, ring, lamp | 260 x 340, base | loop | intensity (0.6) | Fair: violet smoke welling up with red motes and a dim light; it rises as smoke does rather than clinging to the body, and is faint at night. |
+| `poison_cloud` | magic | A poison cloud: a lingering cloud of green poison hanging at head height and boiling slowly (the cloud model, recoloured), a faint green light | cloud; look toxic_cloud, glow, lamp | 380 x 300, base | loop | intensity (0.85) | Good: a green cloud boiling slowly at head height (the cloud model, recoloured). |
+| `fire_aura` | magic | A fire aura: small flames (the fire model) dancing in a ring around a character's feet, embers rising and a warm light | fire; embers, ring, lamp | 240 x 220, base | loop | intensity (0.6) | Good: four small flames dancing in a ring at the feet, embers rising. |
+| `ice_shards` | magic | Ice shards (procedural, with the fog model's frost): a burst of glinting ice splinters thrown up and out, a cold flash, a ring of frost and a puff of icy mist | fog; look rime, glow, ring, glints, lamp, burst | 360 x 300, base | once, 2.4 s | power (1) | Good: glinting splinters thrown up and out, a cold flash, a frost ring and a puff of icy mist. |
+| `frost_aura` | magic | A frost aura: an icy mist creeping round a character's feet (the fog model), ice glinting, fine snow drifting down, a cold blue light | fog; look rime, snow, glints, ring, lamp | 260 x 300, base | loop | intensity (0.7) | Fair: icy mist at the feet, glints and fine snow; the mist is one release and lies to one side. |
+| `electric_aura` | magic | An electric aura (procedural): arcs of lightning crackling over and around a character, a blue glow, sparks now and then | arc, glow, lamp, burst | 240 x 280, base | loop | intensity (1) | Fair: short arcs crackling about the upper body and a blue glow; bolts here and there rather than a cage around the body. |
+| `spirit_wisps` | magic | Spirit wisps (procedural): pale blue lights drifting slowly about a place, each with a soft halo, now and then a glint | glow, glints, lamp | 360 x 300, centre | loop | count (6) | Fair: pale lights drifting with soft halos and a glint now and then; simple. |
+
+### Ambient and props (13, round 3: `library/ambient2.nvfxl`)
+
+| effect | category | what it is | plays | box, anchor | runs | parameters (default) | how it looks |
+|---|---|---|---|---|---|---|---|
+| `incense` | smoke | Incense: a thin thread of pale smoke curling up from a glowing tip (the smoke model at its smallest) | smoke; look incense_smoke, glow, lamp | 80 x 220, base | loop | intensity (0.16) | Fair: a thin thread of smoke curling up from a glowing tip; small. |
+| `chimney_smoke_white` | smoke | Wood smoke on a cold day: a thick white plume from a chimney top (the anchor), leaning with the wind (the smoke model, a white look) | smoke; look smoke_white | 300 x 480, base | loop | intensity (0.5), wind (0.7) | Good: a thick white plume leaning with the wind. |
+| `chimney_smoke_dark` | smoke | Coal smoke: a dark, sooty plume rolling from a chimney top (the anchor) (the smoke model, a dark look) | smoke; look coal_smoke | 300 x 480, base | loop | intensity (0.55), wind (0.62) | Fair: a dark grey plume, hard to see against the night sky (as `black_oil_smoke`'s). |
+| `steaming_cup` | steam | A steaming cup: two faint, slow wisps of steam rising from a hot drink (the steam model at its smallest) | steam; look vapour | 70 x 120, base | loop | intensity (0.25) | Good: two faint, slow wisps; tiny by design. |
+| `sewer_steam` | steam | Steam from a sewer grate: soft clouds of steam welling up from a grate in the street and drifting, lit warm by a street lamp | steam; look mist, lamp | 300 x 300, base | loop | intensity (0.45) | Good: two soft steam plumes welling up, lit warm on one side. |
+| `candle_cluster` | fire | A cluster of candles: five small flames (the fire model) at different heights on the game's candles, each with a bright wick, and their warm light | fire; glow, lamp | 200 x 120, base | loop | intensity (0.48) | Fair: five small flames with bright wicks and a warm light; at this size the fire model's flames are thin and red at their tips. |
+| `torch_blue` | fire | A magic torch: a lively blue flame with a few sparks and a cold blue light (the torch, recoloured by a look); its anchor is the torch's head | fire; look gas, glints, lamp | 100 x 190, base | loop | intensity (0.6), wind (0.5) | Good: a lively blue flame (a recolour) with a few blue sparks. |
+| `torch_green` | fire | A cursed torch: a sickly green flame and green light (the torch, recoloured by a look); its anchor is the torch's head | fire; look witch, glow, lamp | 100 x 190, base | loop | intensity (0.6), wind (0.5) | Good: a green flame (a recolour) with green motes. |
+| `beacon` | light | A beacon (procedural): a bright light on a post or a mast top that flares every second and a half, a pale shaft of light above it | glow, beam, ring, lamp | 160 x 420, base | loop | period (1.5), hue (0) | Good: a bright flare every second and a half with a ring and a pale shaft. |
+| `quest_marker` | light | A quest marker (procedural): a golden light bobbing over the anchor, a ring turning on the ground beneath it and a faint shaft between them | glow, glints, beam, ring, lamp | 140 x 260, base | loop | intensity (1) | Good: a bobbing golden light, a shaft and a ring on the ground. |
+| `pickup_sparkle` | light | A pickup's sparkle (procedural): stars of light twinkling in turn around an item on the ground, a soft glow pulsing under them | glints, glow, lamp | 120 x 120, centre | loop | intensity (1) | Good: stars of light twinkling in turn about the item, a soft glow. |
+| `coin_glint` | light | A coin's glint (procedural): now and then a single star of light flashes on a coin or a gem (the anchor) | glints | 60 x 60, centre | loop | every (1.6) | Good: one star of light flashing now and then. |
+| `gold_glitter` | light | Glittering gold (procedural): a heap of treasure twinkling all over with small warm glints | glints, lamp | 300 x 80, base | loop | sparkle (1) | Fair: small warm glints twinkling over a heap; it needs the treasure under it. |
+
 ## 2. The format
 
 A catalogue is written in the scene-script language ([COMPOSE.md](COMPOSE.md) §4), with two more statements. Each
@@ -276,6 +371,7 @@ drawn, and say so in the entries that use them.
 | `burst ... sparks` | short fast bright embers thrown within a cone | `muzzle_flash`, `grinder_sparks`, `lightning_strike`, `flashbang` |
 | `emit rain`, `snow`, `ash`, `leaves` | weather (allocation-free, deterministic, tested by `Weather.*` in `tests/test_engine_features.cpp`): particles that fill a rectangle at a `density` (per 100 x 100 world pixels) and fall through it with a `wind`, riding the bus's flow; rain is drawn as streaks and can `wash` smoke out of the modules it falls on, snow `melt`s over heat, ash has a few `glowing` flakes, leaves (and petals) tumble and swing as they fall ([COMPOSE.md](COMPOSE.md) §4.6 and §5.4) | `rain`, `snow`, `falling_ash`, `falling_leaves`, `cherry_petals` |
 | `trail` | not procedural: tiles of a learned effect laid on a grid in the world, fed along a moving source's path ([COMPOSE.md](COMPOSE.md) §5.3, §9 here) | `rocket_trail`, `vehicle_dust_wake`, `carried_torch`, `comet_trail` |
+| the third round's (§10) | hail, an aurora, a rainbow, meteors, beams, shields, glints, and a burst's spatter (coloured drops that stain) and shards ([COMPOSE.md](COMPOSE.md) §4.10; tested by `FxElements.*`, `tests/test_fx_elements.cpp`) | the 70 entries of §10 |
 
 ## 3. The API
 
@@ -400,7 +496,7 @@ eleven models in `NEURALFX_MODELS_LIBRARY`, by default `$NEURALVFX_DATA/library/
 `rocket_trail` and `vehicle_dust_wake`, against `results/library/frozen.csv`, on 2 threads; skipped without the
 models); the `Library.*`, `Glows.*`, `Lamps.*`, `Trails.*`, `Layers.*` and `Weather.*` unit
 tests; the library stage and the engine features' stage in `nvfx_alloc_test`; `neuralfx.LitHostExample` (lit sprites,
-[ENGINES.md](ENGINES.md) §11).
+[ENGINES.md](ENGINES.md) §11). The third round's entries have their own frozen keyframes and tests (§10.4).
 
 ## 5. Godot
 
@@ -657,3 +753,106 @@ or quiet a fire's or smoke's source with `quiet`), a tile `width` about the size
 after, `radius` about the source's size, a deposit that scales with speed, `hold` and `fade` for how long it should
 stay, a pool big enough, then look at it moving (`nvfx_gallery --sheet`, `--video`, `--shot ... --spawn
 NAME@X,Y,SCALE,AT,VX,VY`), and at a still source and a fast one.
+
+## 10. The third round: weather, sky, combat, magic and props
+
+70 entries in four new files (`storms.nvfxl`, `combat.nvfxl`, `buffs.nvfxl`, `ambient2.nvfxl`; the tables of §1),
+towards a library a game can furnish most scenes from: drizzle and downpours, hail, sleet, blizzards and flurries,
+thunderstorms and distant lightning, sand and dust storms, a tornado and a waterspout, an aurora, a rainbow, meteors,
+gusts of wind, heat shimmer and morning mist; bullet impacts on four materials, blood, sparks on metal, muzzle flashes,
+a tracer, a laser, a plasma bolt, grenades and explosions of three sizes, an EMP, shields and coloured smoke; auras, a
+level-up, two teleports, holy light, ice shards, a curse, a poison cloud and spirit wisps; incense, chimneys, a steaming
+cup, sewer steam, candles, magic torches, a beacon, a quest marker, a pickup's sparkle and glinting gold. Nothing was
+trained for them: they use the eleven models of §4 and the compositor. Water's details (drips, leaks, splashes,
+bubbles, puddles, wakes, rain on puddles and on stone, bullets hitting water) are the water system's, with its own
+models and entries, and are not here.
+
+| category | entries | learned | procedural only | of them recolours (looks) |
+|---|---|---|---|---|
+| weather | 20 | 9 | 11 | 5 (sandstorm, red dust storm, tornado, waterspout, morning mist) |
+| combat | 23 | 12 | 11 | 4 (the three smoke grenades, the plasma bolt) |
+| magic | 14 | 5 | 9 | 2 (curse, poison cloud) |
+| fire, smoke, steam, light | 13 | 8 | 5 | 4 (the blue and green torches, the white and dark chimney smoke) |
+| **all** | **70** | **34** | **36** | **15** |
+
+![The third round's contact sheet: weather and sky](figures/library_sheet_storms.png)
+
+![The third round's contact sheet: combat and impacts](figures/library_sheet_combat.png)
+
+![The third round's contact sheet: magic and buffs](figures/library_sheet_magic.png)
+
+![The third round's contact sheet: ambient effects and props](figures/library_sheet_ambient2.png)
+
+*Each entry alone on a stage fitted to its box, at its `show` moment (`nvfx_gallery --sheet`). Glints, meteors and
+strikes are lit for a moment, so a still catches some and not others; the walk-through video
+(`$NEURALVFX_DATA/library3/library_round3_walk.mp4`, 70 entries, 1.25 s each, 88.7 s; not in git) shows them moving.*
+
+**What is learned and what is not.** 36 of the 70 are procedural only: the new elements of [COMPOSE.md](COMPOSE.md)
+§4.10 (hail, an aurora, a rainbow, meteors, beams, shields, glints, and a burst's spatter and shards) with the older
+ones (rain, snow, ash, leaves, arcs, rings, glows, lamps, sparks, flashes, shocks). The other 34 play a learned model for
+what moves as a fluid: clouds for the storms and the poison, fog for blown snow, mist and frost, the vortex for the
+tornado and the waterspout, fire for flames and heat shimmer, the jet for exhaust shimmer, smoke and steam for plumes,
+the explosion for fireballs and a plasma bolt's tail, the dust model for bullets' puffs, the orb for the plasma bolt's
+head. A recolour is a look, not new dynamics, and each says so.
+
+### 10.1 The procedural elements, by entry
+
+| element ([COMPOSE.md](COMPOSE.md) §4.10) | used by |
+|---|---|
+| `emit hail` | `hailstorm`, `sleet` |
+| `emit aurora`, `emit rainbow`, `emit meteors` | `aurora`; `rainbow`; `meteor_shower`, `shooting_star` |
+| `emit beam` | `laser_beam`, `tracer`, `holy_beam`, `level_up`, `resurrection_light`, both teleports, `beacon`, `quest_marker`, `muzzle_flash_energy` |
+| `emit shield` | `shield_bubble`, `shield_hit`, `force_field` |
+| `emit glints` (stars that twinkle, drift or stay lit) | `pickup_sparkle`, `coin_glint`, `gold_glitter`, the auras and buffs, `level_up`, both teleports, `holy_beam`, `ice_shards`, `spirit_wisps`, `torch_blue`, `bullet_impact_metal`, `muzzle_flash_energy` |
+| `burst ... spatter` (coloured drops that stain) | `blood_spray` |
+| `burst ... shards` (splinters that spin, glint and lie) | `ice_shards`, `bullet_impact_stone`, `bullet_impact_dirt`, `bullet_impact_wood`, `frag_grenade` |
+
+### 10.2 Judged by eye: what changed
+
+Every entry was looked at in contact sheets, in full-size keyframes enlarged, and in strips of the walk-through video
+(three moments of each); the bad ones were changed:
+- **Blood was bright red.** The picture is unlit, so blood is drawn dark, (0.2, 0.01, 0.01), and its drops smaller.
+- **Beams from the sky beaded and capped.** A wide beam whose width wobbles is drawn piece by piece and showed a string
+  of beads, with a round blob where it started; the holy beams now start on the ground and fade upwards, wobbling
+  little.
+- **The coin's glint was not lit in its still**: glints twinkle at moments of their own, so the coin's is now steady
+  (`rate 0`) and the entry flashes it.
+- **Fog stood up as tufts** in the blizzard and the morning mist (two or four narrow releases); both now use the ground
+  fog's four releases, which still show as humps.
+- **The tornado's foot** was two brown humps (fog) and a dark knot of debris; it is now the column alone, with lighter,
+  sparser debris. It stays weak: the vortex model makes a giant dust devil, not a funnel cloud.
+- **Lightning came late.** The thunderstorm and the distant lightning struck 2.5 s into each period, so a short clip or
+  an early still showed none, and with the shortest period allowed the storm never struck; they now strike 0.45 and
+  0.3 s into every period. Distant lightning also drew a disc of light like a moon; it is now the bolt and the light it
+  throws.
+- **The shotgun's flame** was five wavy lines; its tongues are now straight. **The plasma bolt** had flown out of its
+  box by its `show` moment; it is shown earlier.
+- **Faint**: the curse's smoke and the coal smoke (dark on a dark sky) were made lighter; the candles' flames, red and
+  thin at 32 pixels, play at 64 pixels with bright wicks, and stay only fair.
+- **Kept although weak**: `tornado`. Works in motion only: `desert_shimmer`, `exhaust_shimmer`.
+
+### 10.3 Costs
+
+The procedural elements cost little next to the stage's own picture: in the gallery, on two threads of the busy shared
+machine, a stage of 1104 x 832 alone takes about 30 ms a frame (§7), `drizzle` and `hailstorm` 30 to 37 ms, `downpour`
+40 ms; the small procedural entries 2 to 8 ms at 320 x 240 to 560 x 420. The heaviest entries are those with several
+learned tiles: `thunderstorm` (three cloud tiles and rain) about 50 ms at 1256 x 944, `sandstorm` and `red_dust_storm`
+(three cloud tiles) 75 to 84 ms at 1480 x 1112, `tornado` and `waterspout` 50 to 60 ms. The aurora remakes about 500
+streaks a frame (70 ms at 1368 x 1032 with the stage), a double rainbow about 1700 glow pieces: both draw every pixel
+they cover, additively, so their cost grows with their size on screen.
+
+### 10.4 Tests
+
+- `nvfx_gallery --check`: every one of the 149 entries parses and checks; with the models every one plays, two
+  instances, its parameters at both ends of their ranges, moved, stopped and spawned again, with zero allocations.
+- Frozen keyframes, float pinned as the others, against `results/library/frozen_round3.csv`:
+  `neuralfx.LibraryProceduralKeyframesFrozen` (twelve procedural entries: `hailstorm`, `aurora`, `rainbow`,
+  `meteor_shower`, `blood_spray`, `laser_beam`, `shield_hit`, `emp_blast`, `level_up`, `holy_beam`,
+  `bullet_impact_metal`, `pickup_sparkle`; no data needed) and `neuralfx.LibraryRound3KeyframesFrozen` (`thunderstorm`,
+  `blizzard`, `ice_shards`, `plasma_bolt` moved every frame, `bullet_impact_stone`; with the models).
+- `FxElements.*` (`tests/test_fx_elements.cpp`): what each element does, the scene's random numbers kept, the layers
+  (thickness 0 exactly where alpha is 0, albedo at most its alpha, lines of light as light only), the same frames and
+  layers on any number of threads and with the layers on or off, the checker's messages, a catalogue entry using them.
+- `nvfx_alloc_test`: a stage of every new element with the engine layers read every frame, spawns, stops and one-shots
+  again, overlapped and not: 0 allocations.
+- No C API call was added, so the Godot node and its test are unchanged.

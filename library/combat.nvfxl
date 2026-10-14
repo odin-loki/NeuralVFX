@@ -1,0 +1,316 @@
+# Combat and impacts (docs/LIBRARY.md §10): bullet impacts on stone, dirt, metal and wood (on water: the water
+# system's); a spray of blood; sparks on metal; muzzle flashes; a tracer, a laser and a plasma bolt; grenades and explosions of three sizes; an EMP; shields
+# and force fields; coloured smoke grenades. The puffs of dust are the dust model, the fireballs the explosion model,
+# the smoke the smoke model; the rest is the compositor's: sparks, debris, spatter and shards thrown by bursts, beams,
+# shields, rings, arcs, flashes and lamps (docs/COMPOSE.md §4.10). A recolour is a look, not new dynamics: the red,
+# green and violet smoke grenades move as the white one does, and the plasma bolt's green as the comet's cyan.
+
+look stone_dust   = like dirt, tint (0.7, 0.68, 0.66), soot_albedo 0.65                    # grey rock dust
+look wood_dust    = like dirt, tint (0.82, 0.64, 0.44)                                     # pale sawdust
+look gun_smoke    = like smoke, heat_scale 3, emission 0.8, tint (0.86, 0.86, 0.88), soot_density 3   # a grey puff, hot for a moment
+look smoke_red    = like smoke_white, tint (1, 0.3, 0.25), soot_albedo 0.8
+look smoke_green  = like smoke_white, tint (0.35, 1, 0.35), soot_albedo 0.75
+look smoke_violet = like smoke_white, tint (0.7, 0.4, 1), soot_albedo 0.75
+look plasma_head  = like flame, hue 100, emission 3, soot_density 0.3                       # the orb drawn green
+look plasma_tail  = like comet, hue 85                                                      # the explosion's tail drawn green
+
+# --- bullet impacts ----------------------------------------------------------------------------------------------------
+
+entry bullet_impact_stone, category combat, size 180 x 140, anchor base, once 1.6, show 0.12,
+      about "A bullet hitting stone: chips of rock flying, a few sparks, a flash and a puff of grey dust (the dust model)"
+param power = 1, range (0.5, 1.5), about "how hard the hit"
+module puff = dust, size 64, width 150 * scale, at (X, Y), sink 0.03, feather 0.12, look stone_dust, start 13, seed 1401,
+              controls (0.35, 0.5, 0.3), intensity 0.35 * power, opacity 1 - smooth((t - 0.9) / 0.6)
+emit glow, at (X, Y - 5 * scale), radius 7 * scale, colour (1, 0.85, 0.6), brightness 2.5 * exp(-t / 0.035), until 0.15
+field flash = lamp, at (X, Y - 8 * scale), radius 40 * scale, strength 1.2 * exp(-t / 0.05), colour (1, 0.8, 0.5)
+at 0:
+  burst at (X, Y - 4 * scale), radius 2 * scale, embers 0, sparks 5 * power, shards 12 * power, speed 300 * scale * power,
+        direction (0, -1), cone 140, colour (0.55, 0.54, 0.52), grain 4 * scale
+
+entry bullet_impact_dirt, category combat, size 200 x 140, anchor base, once 2, show 0.25,
+      about "A bullet hitting dirt: a spurt of earth thrown up, clods falling back, and a puff of brown dust (the dust model)"
+param power = 1, range (0.5, 1.5), about "how hard the hit"
+module puff = dust, size 64, width 180 * scale, at (X, Y), sink 0.03, feather 0.12, look dirt, start 13, seed 1402,
+              controls (0.45, 0.5, 0.4), intensity 0.45 * power, opacity 1 - smooth((t - 1.2) / 0.7)
+at 0:
+  burst at (X, Y - 3 * scale), radius 3 * scale, embers 0, shards 16 * power, speed 260 * scale * power, direction (0, -1), cone 50,
+        colour (0.3, 0.22, 0.15), grain 3.5 * scale
+
+entry bullet_impact_metal, category combat, size 180 x 160, anchor base, once 0.8, show 0.06,
+      about "A bullet hitting metal (procedural): a white-hot flash and a hard spray of sparks bouncing off"
+param power = 1, range (0.5, 1.5), about "how hard the hit"
+param direction = 0, range (-60, 60), about "which way the sparks fly, degrees from straight up (positive: to the right)"
+let a = direction * 0.0174533
+emit glow, at (X, Y - 4 * scale), radius 9 * scale, colour (1, 0.92, 0.8), brightness 3 * exp(-t / 0.03), until 0.12
+emit glints, at (X, Y - 4 * scale), count 1, rate 6, radius 18 * scale, brightness 3 * power, fade 1, until 0.16, seed 1403
+field flash = lamp, at (X, Y - 8 * scale), radius 70 * scale, strength 2 * exp(-t / 0.05), colour (1, 0.8, 0.5)
+at 0:
+  burst at (X, Y - 4 * scale), radius 2 * scale, embers 0, sparks 28 * power, speed 700 * scale * power, direction (sin(a), -cos(a)),
+        cone 110
+
+entry bullet_impact_wood, category combat, size 180 x 140, anchor base, once 1.6, show 0.12,
+      about "A bullet hitting wood: splinters flying, spinning and falling, and a puff of pale sawdust (the dust model)"
+param power = 1, range (0.5, 1.5), about "how hard the hit"
+module puff = dust, size 64, width 130 * scale, at (X, Y), sink 0.03, feather 0.12, look wood_dust, start 13, seed 1404,
+              controls (0.3, 0.5, 0.3), intensity 0.3 * power, opacity 1 - smooth((t - 0.9) / 0.6)
+at 0:
+  burst at (X, Y - 4 * scale), radius 3 * scale, embers 0, shards 14 * power, speed 280 * scale * power, direction (0, -1), cone 120,
+        colour (0.66, 0.48, 0.3), grain 7 * scale
+
+# --- blood and sparks ------------------------------------------------------------------------------------------------
+
+entry blood_spray, category combat, size 260 x 180, anchor base, once 3, show 0.2,
+      about "A spray of blood (procedural): dark red spatter thrown out from a hit 60 world pixels up, falling and staining the ground"
+param power = 1, range (0.4, 1.6), about "how much"
+param direction = 1, range (-1, 1), about "which way: 1 to the right, -1 to the left"
+at 0:
+  burst at (X, Y - 60 * scale), radius 3 * scale, embers 0, spatter 55 * power, speed 260 * scale * power, direction (direction, -0.4),
+        cone 55, colour (0.2, 0.008, 0.012), grain 1.25 * scale, stain 2.2
+  burst at (X, Y - 60 * scale), radius 2 * scale, embers 0, spatter 25 * power, speed 120 * scale * power, direction (direction, -0.2),
+        cone 90, colour (0.17, 0.006, 0.01), grain 0.8 * scale, stain 1.8
+
+entry sparks_on_metal, category combat, size 260 x 200, anchor base, loop, show 1,
+      about "Sparks on metal (procedural): a damaged machine or a blade scraping steel, spitting sparks in fits, with a flickering light"
+param rate = 0.5, range (0.05, 1), about "how often it sparks"
+let flick = 0.4 + 0.6 * noise(19 * t, 2.5, 0)
+emit glow, at (X, Y - 30 * scale), radius 5 * scale, colour (1, 0.9, 0.7), brightness 2 * flick * smooth((noise(3 * t, 5.5, 0) + 0.2) / 0.3)
+when rand < 0.25 * rate, repeat:
+  burst at (X, Y - 30 * scale), radius 2 * scale, embers 0, sparks 12, speed 420 * scale, direction ((rand - 0.5) * 2, -0.6), cone 70
+field hot = lamp, at (X, Y - 30 * scale), radius 60 * scale, strength 0.5 * flick, colour (1, 0.75, 0.4)
+
+# --- muzzle flashes and shots ------------------------------------------------------------------------------------------
+
+entry muzzle_flash_rifle, category combat, size 220 x 90, anchor centre, once 0.1, show 0.02,
+      about "A rifle's muzzle flash (procedural): a long narrow tongue of fire from the barrel (the anchor), a bright core, small side spikes"
+param direction = 1, range (-1, 1), about "which way the barrel points: 1 right, -1 left"
+let fade = exp(-t / 0.025)
+let d = direction
+emit glow, at (X + 6 * d * scale, Y), radius 9 * scale, colour (1, 0.92, 0.72), brightness 3.4 * fade
+emit arc, along (X, Y) to (X + 110 * d * scale, Y), width 2.4 * scale * fade + 0.3, jitter 0.02, branches 0, colour (1, 0.78, 0.42),
+     brightness 2.8 * fade
+emit arc, along (X, Y) to (X + 50 * d * scale, Y), width 4.5 * scale * fade + 0.3, jitter 0, branches 0, colour (1, 0.86, 0.56),
+     brightness 2.4 * fade
+emit arc, along (X + 8 * d * scale, Y) to (X + 22 * d * scale, Y - 11 * scale), width 1.4 * scale * fade + 0.3, jitter 0, branches 0,
+     colour (1, 0.75, 0.4), brightness 2 * fade
+emit arc, along (X + 8 * d * scale, Y) to (X + 22 * d * scale, Y + 11 * scale), width 1.4 * scale * fade + 0.3, jitter 0, branches 0,
+     colour (1, 0.75, 0.4), brightness 2 * fade
+field blast = lamp, at (X + 30 * d * scale, Y), radius 110 * scale, strength 2 * fade, colour (1, 0.75, 0.4)
+at 0:
+  burst at (X + 30 * d * scale, Y), radius 3 * scale, embers 0, sparks 8, direction (d, 0), cone 15, speed 900 * scale
+
+entry muzzle_flash_shotgun, category combat, size 240 x 160, anchor centre, once 1.6, show 0.03,
+      about "A shotgun's muzzle flash: a wide, short burst of flame from the barrel (the anchor), a spray of sparks and a puff of grey smoke (the explosion model)"
+param direction = 1, range (-1, 1), about "which way the barrel points: 1 right, -1 left"
+let fade = exp(-t / 0.04)
+let d = direction
+module puff = explosion, size 64, width 120 * scale, at (X + 50 * d * scale, Y + 40 * scale), feather 0.15, look gun_smoke, start 14,
+              seed 1407, opacity 0.9 * (1 - smooth((t - 0.7) / 0.8))
+emit glow, at (X + 10 * d * scale, Y), radius 16 * scale, colour (1, 0.9, 0.65), brightness 3.2 * fade
+emit arc, along (X, Y) to (X + 70 * d * scale, Y - 22 * scale), width 4 * scale * fade + 0.3, jitter 0.015, branches 0,
+     colour (1, 0.72, 0.36), brightness 2.6 * fade
+emit arc, along (X, Y) to (X + 78 * d * scale, Y), width 5 * scale * fade + 0.3, jitter 0.015, branches 0, colour (1, 0.8, 0.45),
+     brightness 2.8 * fade
+emit arc, along (X, Y) to (X + 70 * d * scale, Y + 22 * scale), width 4 * scale * fade + 0.3, jitter 0.015, branches 0,
+     colour (1, 0.72, 0.36), brightness 2.6 * fade
+emit arc, along (X, Y) to (X + 45 * d * scale, Y - 34 * scale), width 2.5 * scale * fade + 0.3, jitter 0.015, branches 0,
+     colour (1, 0.68, 0.3), brightness 2 * fade
+emit arc, along (X, Y) to (X + 45 * d * scale, Y + 34 * scale), width 2.5 * scale * fade + 0.3, jitter 0.015, branches 0,
+     colour (1, 0.68, 0.3), brightness 2 * fade
+field blast = lamp, at (X + 30 * d * scale, Y), radius 140 * scale, strength 2.6 * fade, colour (1, 0.7, 0.35)
+at 0:
+  burst at (X + 20 * d * scale, Y), radius 5 * scale, embers 0, sparks 34, direction (d, 0), cone 32, speed 950 * scale
+
+entry muzzle_flash_energy, category combat, size 200 x 140, anchor centre, once 0.35, show 0.04,
+      about "An energy weapon's discharge (procedural): a cyan flash at the emitter (the anchor), a ring snapping out and a short bolt of light"
+param direction = 1, range (-1, 1), about "which way it fires: 1 right, -1 left"
+let fade = exp(-t / 0.06)
+let d = direction
+emit glow, at (X, Y), radius 14 * scale, colour (0.6, 0.95, 1), brightness 3 * fade
+emit ring, at (X + 6 * d * scale, Y), radius 6 * scale + 50 * scale * (1 - exp(-t / 0.06)), squash 1, width 2 * scale,
+     colour (0.45, 0.9, 1), brightness 2.4 * exp(-t / 0.1)
+emit beam, along (X, Y) to (X + 90 * d * scale, Y), width 2.4 * scale, colour (0.35, 0.85, 1), brightness 2.6 * fade, flare 0, fade 0.2,
+     seed 1408
+emit glints, at (X + 20 * d * scale, Y), spread 18 * scale, count 6, rate 5, radius 6 * scale, colour (0.7, 0.95, 1), brightness 2.5,
+     until 0.25, seed 1409
+field blast = lamp, at (X, Y), radius 120 * scale, strength 2 * fade, colour (0.4, 0.85, 1)
+
+entry tracer, category combat, size 900 x 160, anchor centre, loop, show 0.35, moving (1300, -60),
+      about "A tracer round (procedural): a bright orange streak of light, its head at the anchor and its tail behind along `aim` (move it every frame)"
+param aim = 2.6, range (-180, 180), about "the way it flies, degrees counter-clockwise from the right"
+let a = aim * 0.0174533
+emit beam, along (X, Y) to (X - 170 * cos(a) * scale, Y + 170 * sin(a) * scale), width 1.5 * scale, colour (1, 0.62, 0.25),
+     brightness 3, jitter 0, flare 0, fade 0, seed 1410
+field shine = lamp, at (X, Y), radius 60 * scale, strength 0.8, colour (1, 0.6, 0.3)
+
+entry laser_beam, category combat, size 560 x 160, anchor left, loop, show 1,
+      about "A laser beam (procedural): a red beam from the emitter (the anchor) to a hit `reach` away, its edges flickering, sparks and a flare where it hits"
+param reach = 460, range (60, 900), about "how far the beam reaches, world pixels at scale 1"
+param aim = 0, range (-60, 60), about "its angle above level, degrees"
+let a = aim * 0.0174533
+let hx = X + reach * scale * cos(a)
+let hy = Y - reach * scale * sin(a)
+emit beam, along (X, Y) to (hx, hy), width 2.4 * scale, colour (1, 0.18, 0.12), brightness 2.6, jitter 0.3, rate 10, flare 13 * scale,
+     seed 1411
+emit sparks, along (hx, hy) to (hx, hy), count 2
+field glare = lamp, at (hx, hy), radius 80 * scale, strength 1, colour (1, 0.25, 0.15)
+field source = lamp, at (X, Y), radius 50 * scale, strength 0.5, colour (1, 0.25, 0.15)
+
+entry plasma_bolt, category combat, size 900 x 300, anchor centre, loop, show 1.2, moving (560, -30),
+      about "A plasma bolt: a ball of green plasma (the orb model) leaving a short glowing tail (the explosion's hot gas), both recoloured, throwing sparks (move it every frame)"
+param intensity = 0.7, range (0.3, 1), about "how bright"
+let speed = hypot(tail.vx, tail.vy)
+module head = orb, size 64, width 70 * scale, at (X, Y + 35 * scale), feather 0.1, look plasma_head, start 0, seed 1412,
+              controls (0.5, 0.8, 0.6), intensity 0.3 + 0.4 * intensity, pulse 0.8, glow (0.5, 1.6, 0.6)
+trail tail = explosion, size 64, width 192, band 8, tiles 20, at (X, Y), look plasma_tail, age 3, hold 0.25, fade 0.5,
+      heat 0.45 * intensity * min(2, speed / 400), soot 0.1 * min(2, speed / 400), radius 7 * scale, kick -0.1, controls (0.5, 0.5, 0.5),
+      seed 1413
+emit glow, at (X, Y), radius 6 * scale, colour (0.75, 1, 0.65), brightness 2.6
+emit glow, at (X, Y), radius 18 * scale, colour (0.4, 1, 0.4), brightness 0.4
+field shine = lamp, at (X, Y), radius 80 * scale, strength 1 * intensity, colour (0.4, 1, 0.4)
+when rand < 0.3, repeat:
+  burst at (X, Y), radius 2 * scale, embers 0, sparks 1, speed 200 * scale, direction (-tail.vx, -tail.vy), cone 60, if speed > 40
+
+# --- grenades and explosions -------------------------------------------------------------------------------------------
+
+entry frag_grenade, category combat, size 360 x 380, anchor base, once 3, show 0.3,
+      about "A fragmentation grenade: a ball of fire (the explosion model), a hard shock, and a storm of sparks and dark metal fragments"
+param power = 1, range (0.5, 1.5), about "the blast's size"
+module ball = explosion, size 256, width 330 * scale, at (X, Y + 80 * scale), feather 0.15, look cloud, start 5, seed 1414,
+              opacity 1 - smooth((t - 1.6) / 1.2)
+let flash = exp(-t / 0.07)
+light flash (0.9 * power * flash, 0.7 * power * flash, 0.5 * power * flash)
+camera x (rand - 0.5) * 12 * power * exp(-t / 0.2), y (rand - 0.5) * 12 * power * exp(-t / 0.2)
+at 0:
+  shock at (X, Y - 40 * scale), speed 1300 * scale, decay 0.22, amp 6, width 24 * scale
+  scorch at (X, Y + 5 * scale), radius 100 * scale, glow 0.7 * exp(-t / 1.2)
+  burst at (X, Y - 30 * scale), radius 20 * scale, embers 120 * power, sparks 60 * power, shards 45 * power, speed 760 * scale,
+        colour (0.3, 0.3, 0.32), grain 5 * scale
+
+entry incendiary_grenade, category combat, size 420 x 360, anchor base, once 8, show 1.6,
+      about "An incendiary grenade: a bright flash and a small burst of fire, then flames (the fire model) that catch and burn on the ground for six seconds"
+param power = 1, range (0.5, 1.5), about "how big"
+let burn = smooth((t - 0.15) / 0.6) * (1 - smooth((t - 6) / 1.6))
+module ball = explosion, size 128, width 220 * scale, at (X, Y + 50 * scale), feather 0.15, look cloud, start 4, seed 1415,
+              opacity 1 - smooth((t - 0.8) / 0.8)
+module f1 = fire, size 64, width 150 * scale, at (X - 70 * scale, Y), sink 0.08, feather 0.15, start 0, seed 1416,
+            controls (0.7, 0.5, 0.7), intensity 0.75 * burn, opacity burn
+module f2 = fire, size 128, width 200 * scale, at (X, Y), sink 0.08, feather 0.15, start 6, seed 1417, controls (0.85, 0.5, 0.7),
+            intensity 0.9 * burn, opacity burn
+module f3 = fire, size 64, width 140 * scale, at (X + 75 * scale, Y), sink 0.08, feather 0.15, start 7, seed 1418,
+            controls (0.7, 0.5, 0.7), intensity 0.7 * burn, opacity burn
+emit embers, on f2, tries 2, chance 0.5 * burn, spread 120 * scale
+field warm = lamp, at (X, Y - 40 * scale), radius 150 * scale, strength 1.1 * burn + 2 * exp(-t / 0.1), colour (1, 0.55, 0.2)
+light flash (exp(-t / 0.06), 0.85 * exp(-t / 0.06), 0.6 * exp(-t / 0.06))
+at 0:
+  shock at (X, Y - 20 * scale), speed 900 * scale, decay 0.2, amp 3, width 18 * scale
+  scorch at (X, Y + 4 * scale), radius 130 * scale, glow 0.9 * (burn + exp(-t / 0.3))
+  burst at (X, Y - 10 * scale), radius 10 * scale, embers 160 * power, sparks 20, speed 420 * scale
+
+entry small_explosion, category combat, size 220 x 220, anchor base, once 2, show 0.25,
+      about "A small explosion: a quick ball of fire (the explosion model, small), a flash, a crack of shock and a few embers"
+param power = 1, range (0.5, 1.5), about "flash, embers and shock"
+module ball = explosion, size 128, width 200 * scale, at (X, Y + 48 * scale), feather 0.15, look cloud, start 4, seed 1419,
+              opacity 1 - smooth((t - 1) / 0.9)
+let flash = exp(-t / 0.06)
+light flash (0.5 * power * flash, 0.38 * power * flash, 0.25 * power * flash)
+at 0:
+  shock at (X, Y - 25 * scale), speed 800 * scale, decay 0.2, amp 3, width 16 * scale
+  scorch at (X, Y + 3 * scale), radius 55 * scale, glow 0.6 * exp(-t / 0.8)
+  burst at (X, Y - 20 * scale), radius 10 * scale, embers 90 * power, debris 6, speed 380 * scale
+
+entry medium_explosion, category combat, size 480 x 560, anchor base, once 6, show 0.6,
+      about "A medium explosion: a fireball that rises and cools into smoke (the explosion model handed to the smoke model), a shock, a flash and debris"
+param power = 1, range (0.5, 1.5), about "shock, flash, embers and debris"
+module ball  = explosion, size 256, width 470 * scale, at (X, Y + 115 * scale), feather 0.15, look cloud, start 10, seed 1420,
+               opacity 1 - smooth((t - 4.6) / 1.3)
+module cloud = smoke, over ball, look cloud to smoke by smooth((t - 1.5) / 1), controls (0.6, 0.55, 0.55),
+               intensity 0.45 - 0.4 * smooth((t - 1.5) / 3), opacity 1 - smooth((t - 4.6) / 1.3)
+let flash = exp(-t / 0.09)
+light flash (0.8 * power * flash, 0.6 * power * flash, 0.4 * power * flash)
+camera x (rand - 0.5) * 12 * power * exp(-t / 0.22), y (rand - 0.5) * 12 * power * exp(-t / 0.22)
+at 0:
+  shock at (X, Y - 60 * scale), speed 1300 * scale, decay 0.28, amp 6, width 26 * scale
+  scorch at (X, Y + 5 * scale), radius 150 * scale, glow 0.85 * exp(-t / 2)
+  burst at (X, Y - 60 * scale), radius 45 * scale, embers 500 * power, debris 70 * power, speed 760 * scale
+at 1.5:
+  hand_over ball -> cloud, seed 1421
+
+entry emp_blast, category combat, size 420 x 320, anchor centre, once 1.4, show 0.15,
+      about "An EMP blast (procedural): a pale blue flash, a ring of energy racing out, arcs crackling across it and a shock bending the air"
+param power = 1, range (0.5, 1.5), about "size and brightness"
+let r = 16 * scale + 190 * scale * power * (1 - exp(-t / 0.18))
+let fade = exp(-t / 0.35)
+let a1 = 2.4 * floor(14 * t)
+let a2 = 3.9 * floor(11 * t) + 1.3
+let a3 = 5.1 * floor(9 * t) + 2.2
+emit glow, at (X, Y), radius 50 * scale, colour (0.6, 0.85, 1), brightness 2.2 * exp(-t / 0.07)
+emit ring, at (X, Y), radius r, width 3.5 * scale, colour (0.55, 0.85, 1), brightness 2.2 * power * fade
+emit ring, at (X, Y), radius 0.8 * r, width 8 * scale, colour (0.4, 0.7, 1), brightness 0.4 * power * fade
+emit arc, along (X + r * cos(a1), Y + r * sin(a1)) to (X + r * cos(a1 + 1.1), Y + r * sin(a1 + 1.1)), rate 14, seed 1422,
+     width 1.4 * scale, jitter 0.3, branches 1, colour (0.7, 0.9, 1), brightness 2.6 * fade
+emit arc, along (X + r * cos(a2), Y + r * sin(a2)) to (X + 0.3 * r * cos(a2 + 2), Y + 0.3 * r * sin(a2 + 2)), rate 11, seed 1423,
+     width 1.2 * scale, jitter 0.3, branches 1, colour (0.7, 0.9, 1), brightness 2.2 * fade
+emit arc, along (X + r * cos(a3), Y + r * sin(a3)) to (X + r * cos(a3 + 0.8), Y + r * sin(a3 + 0.8)), rate 9, seed 1424,
+     width 1.2 * scale, jitter 0.3, branches 1, colour (0.7, 0.9, 1), brightness 2.2 * fade
+field blue = lamp, at (X, Y), radius 220 * scale, strength 1.8 * exp(-t / 0.15), colour (0.5, 0.8, 1)
+light flash (0.25 * power * exp(-t / 0.08), 0.35 * power * exp(-t / 0.08), 0.5 * power * exp(-t / 0.08))
+at 0:
+  shock at (X, Y), speed 1100 * scale * power, decay 0.25, amp 6, width 24 * scale
+  burst at (X, Y), radius 10 * scale, embers 0, sparks 30, speed 500 * scale
+
+# --- shields -----------------------------------------------------------------------------------------------------------
+
+entry shield_bubble, category combat, size 300 x 300, anchor centre, loop, show 1.6,
+      about "A shield bubble (procedural): a sphere of blue energy with a bright shimmering rim, rippling and flaring where it is hit"
+param hits = 0.8, range (0, 5), about "hits a second, at random places"
+param radius = 120, range (40, 300), about "its radius, world pixels at scale 1"
+emit shield, at (X, Y), radius radius * scale * (0.6 + 0.4 * smooth(t / 0.4)), width 2.2 * scale, rate hits,
+     brightness 1.3 * smooth(t / 0.3), seed 1425
+field blue = lamp, at (X, Y), radius 1.3 * radius * scale, strength 0.35, colour (0.4, 0.75, 1)
+
+entry shield_hit, category combat, size 300 x 300, anchor centre, once 0.9, show 0.08,
+      about "A shield hit (procedural): an unseen shield (the anchor its centre) flashes into view where a shot strikes it, ripples racing over it, and fades"
+param angle = 180, range (-180, 180), about "where it is struck: degrees counter-clockwise from the right"
+param radius = 120, range (40, 300), about "its radius, world pixels at scale 1"
+let seen = smooth(t / 0.03) * (1 - smooth((t - 0.3) / 0.55))
+let a = angle * 0.0174533
+emit shield, at (X, Y), radius radius * scale, width 2.2 * scale, brightness 1.6 * seen, hit t, angle angle, seed 1426
+field flash = lamp, at (X + radius * scale * cos(a), Y - radius * scale * sin(a)), radius 80 * scale, strength 1.6 * exp(-t / 0.1),
+      colour (0.5, 0.8, 1)
+at 0:
+  burst at (X + radius * scale * cos(a), Y - radius * scale * sin(a)), radius 2 * scale, embers 0, sparks 14,
+        speed 380 * scale, direction (cos(a), -sin(a)), cone 80
+
+entry force_field, category combat, size 260 x 420, anchor base, loop, show 1.5,
+      about "A force field (procedural): a tall barrier of blue energy standing on the ground, its rim shimmering, rippling where it is struck"
+param hits = 1.2, range (0, 6), about "hits a second, at random places"
+emit shield, at (X, Y - 190 * scale), radius 95 * scale, squash 2, width 2 * scale, rate hits, colour (0.45, 0.65, 1), brightness 1.2,
+     seed 1427
+emit ring, at (X, Y - 2 * scale), radius 95 * scale, squash 0.2, width 2 * scale, colour (0.45, 0.65, 1), brightness 1.2
+field blue = lamp, at (X, Y - 190 * scale), radius 200 * scale, strength 0.35, colour (0.4, 0.6, 1)
+
+# --- smoke grenades ----------------------------------------------------------------------------------------------------
+
+entry smoke_grenade_red, category combat, size 520 x 360, anchor base, once 12, show 5,
+      about "A red smoke grenade: a hiss of sparks, then thick red smoke billows out low and thins (the smoke grenade, recoloured)"
+param intensity = 0.9, range (0.3, 1), about "how thick"
+module cloud = smoke, size 128, width 420 * scale, at (X, Y), sink 0.05, feather 0.3, look smoke_red, start 6, seed 1428,
+               controls (0.9, 0.5, 0.7), intensity intensity * (1 - smooth((t - 7) / 3)), opacity 1 - smooth((t - 10.5) / 1.5)
+field low = ceiling, level Y - 170 * scale, soft 80 * scale, damping 0.5, on cloud
+emit sparks, along (X, Y - 4 * scale) to (X, Y - 4 * scale), from 0, until 1.2, count 6
+
+entry smoke_grenade_green, category combat, size 520 x 360, anchor base, once 12, show 5,
+      about "A green smoke grenade: a hiss of sparks, then thick green smoke billows out low and thins (the smoke grenade, recoloured)"
+param intensity = 0.9, range (0.3, 1), about "how thick"
+module cloud = smoke, size 128, width 420 * scale, at (X, Y), sink 0.05, feather 0.3, look smoke_green, start 6, seed 1429,
+               controls (0.9, 0.5, 0.7), intensity intensity * (1 - smooth((t - 7) / 3)), opacity 1 - smooth((t - 10.5) / 1.5)
+field low = ceiling, level Y - 170 * scale, soft 80 * scale, damping 0.5, on cloud
+emit sparks, along (X, Y - 4 * scale) to (X, Y - 4 * scale), from 0, until 1.2, count 6
+
+entry smoke_grenade_violet, category combat, size 520 x 360, anchor base, once 12, show 5,
+      about "A violet smoke grenade: a hiss of sparks, then thick violet smoke billows out low and thins (the smoke grenade, recoloured)"
+param intensity = 0.9, range (0.3, 1), about "how thick"
+module cloud = smoke, size 128, width 420 * scale, at (X, Y), sink 0.05, feather 0.3, look smoke_violet, start 6, seed 1430,
+               controls (0.9, 0.5, 0.7), intensity intensity * (1 - smooth((t - 7) / 3)), opacity 1 - smooth((t - 10.5) / 1.5)
+field low = ceiling, level Y - 170 * scale, soft 80 * scale, damping 0.5, on cloud
+emit sparks, along (X, Y - 4 * scale) to (X, Y - 4 * scale), from 0, until 1.2, count 6

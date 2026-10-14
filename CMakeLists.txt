@@ -109,7 +109,8 @@ neuralfx_defaults(neuralfx_io)
 # Composed effects (docs/COMPOSE.md): rollout effects coupled through their fields, with particles, light, distortion
 # and bloom for whole scenes, field effects, and scene scripts (a text format, its parser and runner), over the
 # runtime's internals.
-set(NEURALFX_COMPOSE_SOURCES src/compose/compose.cpp src/compose/fields.cpp src/compose/trail.cpp src/compose/script.cpp src/compose/script_run.cpp)
+set(NEURALFX_COMPOSE_SOURCES src/compose/compose.cpp src/compose/fields.cpp src/compose/trail.cpp src/compose/script.cpp src/compose/script_run.cpp
+                             src/compose/fx_particles.cpp src/compose/fx_emit.cpp)
 add_library(neuralfx_compose STATIC ${NEURALFX_COMPOSE_SOURCES})
 target_include_directories(neuralfx_compose PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src/compose" "${CMAKE_CURRENT_SOURCE_DIR}/src/runtime")
 target_link_libraries(neuralfx_compose PUBLIC nvfx)
@@ -357,7 +358,7 @@ if(NEURALFX_BUILD_TESTS)
                                 tests/test_runtime.cpp tests/test_ingest.cpp tests/test_rollout.cpp tests/test_compose.cpp
                                 tests/test_dcm.cpp tests/test_cm.cpp tests/test_dcm_fine.cpp tests/test_dcm_ddpm.cpp tests/test_script.cpp
                                 tests/test_g3_codec.cpp tests/test_video_codec.cpp tests/test_runtime_prior.cpp
-                                tests/test_dcm_extras.cpp tests/test_scene_api.cpp tests/test_handoff.cpp tests/test_library.cpp
+                                tests/test_dcm_extras.cpp tests/test_scene_api.cpp tests/test_handoff.cpp tests/test_library.cpp tests/test_fx_elements.cpp
                                 tests/test_engine_features.cpp)
   target_link_libraries(neuralfx_tests PRIVATE neuralfx_proto neuralfx_io neuralfx_train nvfx neuralfx_compose nvfx_scene_api nvfx_library_api neuralfx_dcm
                                                neuralfx_dcm_fine neuralfx_ddpm neuralfx_codec neuralfx_dcm_extras GTest::gtest_main)
@@ -450,6 +451,20 @@ if(NEURALFX_BUILD_TESTS)
                      --keyframes ${CMAKE_CURRENT_BINARY_DIR}/library_keyframes --verify ${CMAKE_CURRENT_SOURCE_DIR}/results/library/frozen.csv --threads 2
                      --precision float)
     set_tests_properties(neuralfx.LibraryKeyframesFrozen PROPERTIES LABELS "neuralfx;data" SKIP_RETURN_CODE 77 TIMEOUT 1200)
+    # The third round's entries (docs/LIBRARY.md §10) against their SHA-256 in results/library/frozen_round3.csv, float
+    # pinned as above: the procedural ones need no data; those that also play learned models are skipped without them.
+    add_test(NAME neuralfx.LibraryProceduralKeyframesFrozen
+             COMMAND nvfx_gallery --library ${CMAKE_CURRENT_SOURCE_DIR}/library
+                     --only hailstorm,aurora,rainbow,meteor_shower,blood_spray,laser_beam,shield_hit,emp_blast,level_up,holy_beam,bullet_impact_metal,pickup_sparkle
+                     --keyframes ${CMAKE_CURRENT_BINARY_DIR}/library_procedural_keyframes --verify ${CMAKE_CURRENT_SOURCE_DIR}/results/library/frozen_round3.csv
+                     --threads 2 --precision float)
+    set_tests_properties(neuralfx.LibraryProceduralKeyframesFrozen PROPERTIES LABELS neuralfx TIMEOUT 1200)
+    add_test(NAME neuralfx.LibraryRound3KeyframesFrozen
+             COMMAND nvfx_gallery --library ${CMAKE_CURRENT_SOURCE_DIR}/library --models ${NEURALFX_MODELS_LIBRARY}
+                     --only thunderstorm,blizzard,ice_shards,plasma_bolt,bullet_impact_stone
+                     --keyframes ${CMAKE_CURRENT_BINARY_DIR}/library_round3_keyframes --verify ${CMAKE_CURRENT_SOURCE_DIR}/results/library/frozen_round3.csv
+                     --threads 2 --precision float)
+    set_tests_properties(neuralfx.LibraryRound3KeyframesFrozen PROPERTIES LABELS "neuralfx;data" SKIP_RETURN_CODE 77 TIMEOUT 1200)
     # The fire whirl (docs/EFFECTS_ENERGY.md): jet, orb and vortex, all in NEURALFX_MODELS_ENERGY (outside git); its
     # keyframes have the SHA-256 recorded in results/experiments/fx_energy_frozen.csv.
     set(NEURALFX_MODELS_ENERGY "${_nvfx_data}/fx_energy/models/scene" CACHE PATH "jet.nvfx, orb.nvfx and vortex.nvfx")

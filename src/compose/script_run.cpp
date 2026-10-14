@@ -16,6 +16,8 @@
 //   8. light; 9. fields on particles, particles move, rules on landings; 10. shading and the picture.
 #include "script.hpp"
 
+#include "fx.hpp"
+
 #include <neuralfx/noise.hpp>
 #include <neuralfx/rollout.hpp>
 
@@ -172,7 +174,7 @@ enum P : int {
   p_amp, p_width, p_radius, p_glow, p_embers, p_debris, p_count, p_tries, p_chance, p_spread, p_level, p_strength,
   p_soft, p_damping, p_swirl, p_steam, p_amount, p_scale, p_rate, p_u, p_v, p_core, p_weight, p_if, p_start,
   p_cr, p_cg, p_cb, p_bright, p_jitter, p_branches, p_squash, p_sparks, p_dx, p_dy, p_cone,
-  p_density, p_wu, p_wv, p_flowk, p_wash, p_melt, p_glowing, kParams
+  p_density, p_wu, p_wv, p_flowk, p_wash, p_melt, p_glowing, p_spatter, p_shards, p_grain, p_stain, p_floor, kParams
 };
 using Params = std::array<Code, kParams>;
 
@@ -254,6 +256,10 @@ struct EmitC {
   Pos pos;
   Params p;
   std::vector<int> mods;
+  // the procedural elements of fx.hpp: which, and its values (fx::V)
+  bool is_fx = false;
+  fx::Emitter fx_kind = fx::Emitter::hail;
+  std::array<Code, fx::kValues> fxv;
 };
 
 struct EffectC {
@@ -988,6 +994,34 @@ void Compiler::emitter(const Statement& s) {
   const auto need = [&](std::string_view key) {
     if (!s.prop(key)) fail(s.pos, std::format("{} needs '{}'", what, key));
   };
+  if (fx::emitter_of(s.kind, e.fx_kind)) {  // the procedural elements of fx_emit.cpp (docs/COMPOSE.md §4.10)
+    e.is_fx = true;
+    const auto allowed = fx::keys(e.fx_kind);
+    for (const Prop& pr : s.props) {
+      if (pr.key == "from" || pr.key == "until" || pr.key == "if" || std::ranges::find(allowed, pr.key) != allowed.end()) continue;
+      std::string list;
+      for (const std::string_view k : allowed) list += std::format("{}, ", k);
+      fail(pr.pos, std::format("'{}' does not apply to {} (it takes: {}from, until, if)", pr.key, what, list));
+    }
+    for (const std::string_view k : fx::needs(e.fx_kind)) need(k);
+    if (e.fx_kind == fx::Emitter::glints && !s.prop("at") && !(s.prop("in") && s.prop("size"))) fail(s.pos, "emit glints needs 'at' (and 'spread'), or 'in' and 'size'");
+    if (e.fx_kind == fx::Emitter::glints && s.prop("at") && s.prop("in")) fail(s.prop("in")->pos, "emit glints takes 'at' (and 'spread') or 'in' and 'size', not both");
+    for (const Prop& pr : s.props) {
+      fx::Slot slot;
+      if (!fx::slot_of(pr.key, slot)) continue;
+      if (static_cast<int>(pr.value.exprs.size()) != slot.n) fail(pr.pos, std::format("'{}' has {} values", pr.key, slot.n));
+      Ctx c;
+      const std::string w = std::format("'{}'", pr.key);
+      c.what = w;
+      for (int i = 0; i < slot.n; ++i) e.fxv[zs(slot.first + i)] = code(pr.value.exprs[zs(i)], c);
+    }
+    Ctx c;
+    take(e.p, s, "from", p_from, kParams, c);
+    take(e.p, s, "until", p_until, kParams, c);
+    take(e.p, s, "if", p_if, kParams, c);
+    prog_.emitters.push_back(std::move(e));
+    return;
+  }
   if (s.kind == "sparks") {
     only(s, {"along", "from", "until", "count", "if"}, what);
     need("along");
@@ -1128,8 +1162,17 @@ ActC Compiler::action(const Statement& a, const Ctx& c, bool every, int limit) {
            {"soot", p_soot, kParams}, {"gain", p_gain, kParams},        {"seed", p_seed, kParams},   {"speed", p_speed, kParams},
            {"decay", p_decay, kParams}, {"amp", p_amp, kParams},        {"width", p_width, kParams}, {"radius", p_radius, kParams},
            {"glow", p_glow, kParams}, {"embers", p_embers, kParams},    {"debris", p_debris, kParams}, {"if", p_if, kParams},
-           {"sparks", p_sparks, kParams}, {"direction", p_dx, p_dy},    {"cone", p_cone, kParams}}) {
+           {"sparks", p_sparks, kParams}, {"direction", p_dx, p_dy},    {"cone", p_cone, kParams}, {"spatter", p_spatter, kParams},
+           {"shards", p_shards, kParams}, {"grain", p_grain, kParams},  {"stain", p_stain, kParams},     {"floor", p_floor, kParams}}) {
     take(out.p, a, key, pa, pb, c);
+  }
+  if (const Prop* col = a.prop("colour")) {  // a burst's spatter and shards
+    if (col->value.exprs.size() != 3) fail(col->pos, "a colour has three values (red, green, blue)");
+    Ctx cc = c;
+    cc.what = "a colour";
+    out.p[p_cr] = code(col->value.exprs[0], cc);
+    out.p[p_cg] = code(col->value.exprs[1], cc);
+    out.p[p_cb] = code(col->value.exprs[2], cc);
   }
   return out;
 }
@@ -1596,6 +1639,25 @@ struct Scene::Impl {
       const int sparks = std::max(0, static_cast<int>(eval_or(a.p[p_sparks], 0.f)));
       const float dx = eval_or(a.p[p_dx], 0.f), dy = eval_or(a.p[p_dy], -1.f), cone = eval_or(a.p[p_cone], 360.f);
       burst(x, y, r, embers, debris, speed, sparks, dx, dy, cone);
+      const int spatter = std::max(0, static_cast<int>(eval_or(a.p[p_spatter], 0.f))), shards = std::max(0, static_cast<int>(eval_or(a.p[p_shards], 0.f)));
+      if (spatter > 0 || shards > 0) {  // spatter and shards (fx_emit.cpp), after the sparks: the draws before them stay as they were
+        constexpr float kNaN = std::numeric_limits<float>::quiet_NaN();
+        fx::Burst b;
+        b.x = x;
+        b.y = y;
+        b.radius = r;
+        b.speed = speed;
+        b.dx = dx;
+        b.dy = dy;
+        b.cone = cone;
+        b.spatter = spatter;
+        b.shards = shards;
+        b.colour = {eval_or(a.p[p_cr], kNaN), eval_or(a.p[p_cg], kNaN), eval_or(a.p[p_cb], kNaN)};
+        b.grain = eval_or(a.p[p_grain], kNaN);
+        b.stain = std::max(0.f, eval_or(a.p[p_stain], 0.f));
+        b.floor = eval_or(a.p[p_floor], kNaN);
+        fx::burst(b, *parts, prog.ground);
+      }
     }
   }
 
@@ -1635,6 +1697,7 @@ struct Scene::Impl {
       emit_on[ei] = 0;
       return;
     }
+    if (e.is_fx) return fx_emit(e, ei, t);
     if (e.kind == "arc" || e.kind == "ring" || e.kind == "glow") return glows(e, t);
     if (e.kind == "rain" || e.kind == "snow" || e.kind == "ash" || e.kind == "leaves") return weather(e, ei, t);
     const int tries = static_cast<int>(eval_or(e.p[p_tries], e.kind == "embers" ? 2.f : 40.f));
@@ -1667,6 +1730,17 @@ struct Scene::Impl {
       const float y = y0 + P.uniform() * h;
       if (bus->at(x, y).soot > soot && P.uniform() < chance) P.spawn(Kind::flake, x, y, 0.f, 15.f, 0.f, 1.f + P.uniform(), 5.f);
     }
+  }
+
+  // The procedural elements of fx_emit.cpp (docs/COMPOSE.md §4.10): their values this frame (NaN: not given), then they
+  // make their particles. Like the weather, the ones that fill a region do it when they start (or start again).
+  void fx_emit(const EmitC& e, std::size_t ei, float t) {
+    fx::Emit f;
+    f.kind = e.fx_kind;
+    for (std::size_t k = 0; k < f.v.size(); ++k) f.v[k] = e.fxv[k].present() ? eval(e.fxv[k]) : std::numeric_limits<float>::quiet_NaN();
+    const bool fresh = emit_on[ei] == 0;
+    emit_on[ei] = 1;
+    fx::emit(f, *parts, t, prog.fps, fresh, static_cast<std::uint32_t>(ei));
   }
 
   // Procedural glows (not learned; Particles::spawn_glow): a lightning bolt or an electric arc, a ring, discs of light.

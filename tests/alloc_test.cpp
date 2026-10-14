@@ -7,9 +7,11 @@
 // reads, inputs, triggers, module moves and controls; then a stage of the effect library (nvfx_library.h): learned and
 // procedural effects (glows, lamps, bursts of sparks, shards) spawned, moved, set, stopped and stolen between frames,
 // overlapped and not; a stage with the engine layers on (read every frame in every format), a trail moved every frame
-// (its tiles switched on, grown, faded and taken again) and procedural weather (rain washing, snow melting); and the
-// effect manager (nvfx_manager.h) ticking a crowd on its threads and on the engine's,
-// with spawns, stops, controls, camera moves, a tight budget, proxies, copies offset in time, pauses and culls.
+// (its tiles switched on, grown, faded and taken again) and procedural weather (rain washing, snow melting); a stage of
+// the third round's procedural elements (hail, aurora, rainbow, meteors, a beam, a shield, glints, bursts of spatter
+// and shards), its layers read every frame; and the effect manager (nvfx_manager.h) ticking a
+// crowd on its threads and on the engine's, with spawns, stops, controls, camera moves, a tight budget, proxies, copies
+// offset in time, pauses and culls.
 // Exit code 0 = no allocation during rendering.
 #include "compose_scene.hpp"
 #include "nvfx_internal.hpp"
@@ -661,6 +663,85 @@ emit leaves, in (X - 80, Y - 96), size 160 x 96, density 0.5, seed 6
   return failures;
 }
 
+// The procedural elements of the library's third round (docs/COMPOSE.md §4.10): a stage with the engine layers on, read
+// every frame, playing hail, an aurora, a rainbow, meteors, a beam, a shield hit again and again, glints, and bursts of
+// spatter and shards, spawned, stopped and spawned again.
+int run_fx_elements() {
+  const char* catalogue = R"(
+entry pellets, category weather, size 160 x 96, anchor base, loop, about "hail"
+emit hail, in (X - 80, Y - 96), size 160 x 96, density 2, seed 6
+entry sky, category weather, size 160 x 96, anchor base, loop, about "light"
+emit aurora, in (X - 80, Y - 96), size 160 x 50, seed 7
+emit rainbow, at (X, Y), radius 70, count 2
+emit meteors, in (X - 80, Y - 96), size 100 x 20, rate 5, seed 8
+emit glints, in (X - 80, Y - 30), size 160 x 20, count 20, rate 2, seed 9
+entry hit, category combat, size 160 x 96, anchor base, once 1.2, show 0.3, about "a beam, a shield, bursts"
+emit beam, along (X - 70, Y - 50) to (X + 60, Y - 40), seed 10
+emit shield, at (X, Y - 48), radius 40, rate 3, hit t - 0.1, angle 180, seed 11
+at 0, repeat:
+  burst at (X, Y - 30), radius 4, embers 0, spatter 6, shards 3, speed 160, stain 1, if rand < 0.3
+)";
+  const nvfx_library_file file{"fx.nvfxl", catalogue};
+  nvfx_library_desc ld;
+  nvfx_library_desc_init(&ld);
+  ld.files = &file;
+  ld.n_files = 1;
+  nvfx_library* lib = nullptr;
+  nvfx_scene_error err;
+  if (nvfx_library_open(&ld, &lib, &err) != NVFX_OK) {
+    std::printf("fx elements: %s\n", err.message);
+    return 1;
+  }
+  int failures = 0;
+  const nvfx_stage_room rooms[] = {{"pellets", 1, 0}, {"sky", 1, 0}, {"hit", 2, 1}};
+  for (const int overlap : {0, 1}) {
+    nvfx_stage_desc sd;
+    nvfx_stage_desc_init(&sd);
+    sd.width = 160;
+    sd.height = 96;
+    sd.ground = 92;
+    sd.rooms = rooms;
+    sd.n_rooms = 3;
+    sd.overlap = overlap;
+    sd.layers = 1;
+    nvfx_stage* st = nullptr;
+    if (nvfx_stage_create(lib, &sd, &st, &err) != NVFX_OK) {
+      std::printf("fx elements stage: %s\n", err.message);
+      ++failures;
+      continue;
+    }
+    nvfx_scene* scene = nvfx_stage_scene(st);
+    std::vector<std::uint8_t> rgba(160 * 96 * 4);
+    std::vector<float> f32(160 * 96 * 4);
+    nvfx_scene_render(scene, rgba.data(), 160 * 4);  // warm-up outside the count
+    for (int l = 0; l < 4; ++l) nvfx_scene_render_layer(scene, static_cast<nvfx_scene_layer>(l), NVFX_FORMAT_RGBA32F, f32.data(), 160 * 16);
+    g_allocations.store(0);
+    g_counting.store(true);
+    nvfx_fx w = 0, s = 0, h = 0;
+    int spawned = 0, layers = 0;
+    spawned += nvfx_stage_spawn(st, "pellets", 80.f, 92.f, 1.f, -1.0, &w) == NVFX_OK;
+    spawned += nvfx_stage_spawn(st, "sky", 80.f, 92.f, 1.f, -1.0, &s) == NVFX_OK;
+    for (int f = 1; f < 150; ++f) {
+      if (f % 25 == 1) spawned += nvfx_stage_spawn(st, "hit", 60.f + static_cast<float>(f % 40), 92.f, 1.f, -1.0, &h) == NVFX_OK;
+      if (f == 70) nvfx_stage_stop(st, w, -1.0);
+      if (f == 90) spawned += nvfx_stage_spawn(st, "pellets", 70.f, 92.f, 0.8f, -1.0, &w) == NVFX_OK;
+      if (f == 100) nvfx_stage_stop(st, s, -1.0);
+      nvfx_scene_step_frames(scene, 1);
+      const auto layer = static_cast<nvfx_scene_layer>(f % 4);
+      layers += nvfx_scene_render_layer(scene, layer, f % 2 ? NVFX_FORMAT_RGBA8 : NVFX_FORMAT_RGBA16F, f % 2 ? static_cast<void*>(rgba.data()) : f32.data(),
+                                        f % 2 ? 160 * 4 : 160 * 8) == NVFX_OK;
+      nvfx_scene_render(scene, rgba.data(), 160 * 4);
+    }
+    g_counting.store(false);
+    const long n = g_allocations.load();
+    std::printf("fx elements%s: %ld allocations in 149 frames (hail, sky and hits; %d spawns; %d layers read)\n", overlap ? ", overlapped" : "", n, spawned, layers);
+    failures += n == 0 && spawned == 9 && layers == 149 ? 0 : 1;
+    nvfx_stage_free(st);
+  }
+  nvfx_library_free(lib);
+  return failures;
+}
+
 // The effect manager: everything is made by nvfx_manager_create and nvfx_manager_add_model; 400 ticks at 60 Hz of a
 // crowd of two looping effects and a one-shot, with every call a game makes between ticks, allocate nothing. Run with
 // its own threads (2), and with the engine running the jobs (here both job slots on the calling thread).
@@ -829,6 +910,7 @@ int main() {
   failures += run_scene_api();
   failures += run_library();
   failures += run_engine_features();
+  failures += run_fx_elements();  // the procedural elements of the library's third round
   failures += run_rollout_prior(64) + run_rollout_prior(128);  // the prior against drift
   failures += run_rollout(64, true);                             // the simulator's look for the first frames
   failures += run_rollout(64, false, true);                      // study D2's advection gain and softening

@@ -539,9 +539,11 @@ std::array<float, 3> heat_colour(float t);
 
 // --- particles ---------------------------------------------------------------------------------------------------------
 
-// rain, snow, ash and leaf: weather (procedural, not learned; docs/COMPOSE.md §4.6).
-enum class Kind : std::uint8_t { spark, ember, debris, flake, glow, rain, snow, ash, leaf };
-inline bool weather(Kind k) { return k >= Kind::rain; }
+// rain, snow, ash and leaf: weather (procedural, not learned; docs/COMPOSE.md §4.6). hail, spatter, shard and streak: the
+// procedural elements of fx_particles.cpp (docs/COMPOSE.md §4.10).
+enum class Kind : std::uint8_t { spark, ember, debris, flake, glow, rain, snow, ash, leaf, hail, spatter, shard, streak };
+inline bool weather(Kind k) { return k >= Kind::rain && k <= Kind::leaf; }
+inline bool fx_kind(Kind k) { return k >= Kind::hail; }
 
 // Particles in world pixels and seconds, a fixed capacity (spawns beyond it are dropped). Embers and sparks glow by
 // temperature and are drawn additively with motion blur; debris and flakes are dark and drawn over. Glows (procedural
@@ -552,6 +554,7 @@ class Particles {
   explicit Particles(int capacity);
   int alive() const { return n_; }
   int capacity() const { return static_cast<int>(x_.size()); }
+  Kind kind(int i) const { return kind_[zs(i)]; }  // of a live particle, in the order each() visits them
   // One particle; returns false when full.
   bool spawn(Kind k, float x, float y, float vx, float vy, float temp, float size, float life);
   // A glow from (x0, y0) to (x1, y1): `radius` world pixels either side of the line, `brightness` times `colour` at its
@@ -566,6 +569,24 @@ class Particles {
   // ground. Its random numbers are the caller's: the generator rng is not used.
   bool spawn_weather(Kind k, float x, float y, float du, float dv, float size, float life, float phase, float freq, std::array<float, 3> colour,
                      float alpha, float flow, float aux);
+  // The procedural elements of fx_particles.cpp (docs/COMPOSE.md §4.10; not learned). Each returns false when full.
+  //   hail     a pellet falling at (du, dv) (carried by `flow` of the bus), bouncing up to `bounces` times where it reaches
+  //            `floor` (or the ground), then lying a moment.
+  //   spatter  a drop of a coloured liquid (blood, oil, paint) of `radius`, thrown at (vx, vy) world pixels a second and
+  //            falling with `gravity`, drawn over what is under it with coverage `alpha`; where it reaches `floor` (or the
+  //            ground, if higher) it lies as a stain for `stain` seconds, or (0) is gone. It makes no splash.
+  //   shard    a splinter (of ice, glass, stone or wood) of `length` thrown at (vx, vy), spinning at `spin` radians a second
+  //            from `angle`, falling with `gravity`, bouncing and lying where it lands; it glints (`shine`) as it turns.
+  //   streak   a line of light (procedural, as a glow): from (x0, y0) to (x1, y1), its radius, brightness and colour going
+  //            from the first to the second along it; `caps` as a glow's (1 start, 2 end). It lives `life` seconds.
+  bool spawn_hail(float x, float y, float du, float dv, float radius, std::array<float, 3> colour, float alpha, float flow, float floor, int bounces,
+                  float life);
+  bool spawn_spatter(float x, float y, float vx, float vy, float radius, std::array<float, 3> colour, float alpha, float gravity, float floor, float stain,
+                     float life);
+  bool spawn_shard(float x, float y, float vx, float vy, float length, float angle, float spin, std::array<float, 3> colour, float alpha, float gravity,
+                   float floor, float shine, float life);
+  bool spawn_streak(float x0, float y0, float x1, float y1, float r0, float r1, float b0, float b1, std::array<float, 3> c0, std::array<float, 3> c1,
+                    int caps, float life);
   struct Landing {
     float x = 0, temp = 0;
     Kind kind = Kind::ember;
@@ -595,6 +616,11 @@ class Particles {
 
  private:
   void kill(int i);
+  // fx_particles.cpp: particle i of an fx kind moves (false: it is gone, killed), and is drawn into the picture or the
+  // engine layers.
+  bool update_fx(int i, float dt, const FieldBus* bus, float flow_gain, float ground_y);
+  void draw_fx(std::size_t q, Image4& screen, float cam_x, float cam_y) const;
+  void draw_fx_layers(std::size_t q, Image4& C, Image4& A, Image4& E, Image4& N, float cam_x, float cam_y, std::span<std::array<int, 2>> spans) const;
   // The pixels a weather particle covers on a screen of W x H: f(index of the pixel's first channel, coverage).
   template <class F>
   void weather_pixels(std::size_t q, float cam_x, float cam_y, int W, int H, F&& f) const;

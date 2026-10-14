@@ -7,7 +7,9 @@ are reachable from the C API (`include/neuralfx/nvfx_scene.h`, [ENGINES.md](ENGI
 (`engines/godot`, [ENGINES.md](ENGINES.md) §8). Section 8 says what else would make it a product feature. Added for
 engines (14 October 2026): **trails** (§5.3: a moving source leaves material in tiles that stay in the world),
 procedural **weather** (§4.6 and §5.4: rain, snow, ash, leaves) and the **engine layers** (lit sprites, drawn beside
-the picture for an engine to light; [ENGINES.md](ENGINES.md) §11).
+the picture for an engine to light; [ENGINES.md](ENGINES.md) §11). Added for the effect library's third round: the
+**procedural elements of §4.10** (hail, aurora, rainbow, meteors, beams, shields, glints, and a burst's spatter and
+shards).
 
 ## 1. The idea
 
@@ -150,7 +152,7 @@ points, hand-overs between tiles of the same size).
 | `module NAME = EFFECT` | a module (§4.3) | |
 | `trail NAME = EFFECT` | a trail: tiles of an effect left in the world along a moving source's path (§5.3) | |
 | `field NAME = KIND` | a force field (§5) | per kind, and `on M, ..., particles`, `weight`, `if`, `from`, `until` |
-| `emit KIND` | particles every frame (§4.6) | |
+| `emit KIND` | particles every frame (§4.6; hail, aurora, rainbow, meteors, beams, shields and glints: §4.10) | |
 | `light` | light from the bus's heat | `gain` (0.14), `flash (r, g, b)` (0) |
 | `particles` | the particle pool | `capacity` (4096), `flow` (0.9: how much particles follow the bus's flow) |
 | `frame` | the picture | `exposure` (1), `fade` (1), `haze` (1: heat haze), `bloom` (1: strength), `bloom_threshold` (1) |
@@ -241,7 +243,7 @@ condition last held (`when t >= spawn_at as began, repeat` without a colon or wi
 | `suppress M` | remove material in a rectangle of cells (y up), in all tiles or some | `cells (x0, y0) to (x1, y1)`, `tiles (c, r), ...`, `if` |
 | `shock` | a shock front: distortion ring, and `when shock N reaches` (a repeating rule's shocks take the place of fronts that have faded, so the count stays bounded) | `at (x, y)`, `speed` (900), `decay` (0.35), `amp` (6), `width` (26), `if` |
 | `scorch` | a glowing mark on the ground (a repeating rule's marks take turns in the room there is) | `at`, `radius` (100), `glow` (1; may change over time), `if` |
-| `burst` | an explosion's embers and debris, and sparks: short fast bright embers thrown within `cone` degrees of `direction` (after the embers' and debris' random draws, which stay as they were) | `at`, `radius` (50), `embers` (200), `debris` (0), `speed` (600), `sparks` (0), `direction (dx, dy)` (up), `cone` (360), `if` |
+| `burst` | an explosion's embers and debris, and sparks: short fast bright embers thrown within `cone` degrees of `direction` (after the embers' and debris' random draws, which stay as they were); then spatter and shards (§4.10) | `at`, `radius` (50), `embers` (200), `debris` (0), `speed` (600), `sparks` (0), `direction (dx, dy)` (up), `cone` (360), `if`; `spatter` (0), `shards` (0), `colour`, `grain`, `stain` (0), `floor` (the ground) (§4.10) |
 
 `every frame:` holds couplings that run every frame, in order: `transfer`, `suppress` and `stop` right after the
 modules step, `push` after the bus is published (it reads the bus). `start`, `wake`, `hand_over`, `shock`, `scorch` and
@@ -272,7 +274,8 @@ All take `from`, `until` and `if`. The four weather emitters fill their rectangl
 again), then feed it from its top edge and from upwind of it, so a steady wind leaves no gap; each particle lives until
 it reaches the ground or falls through the rectangle's bottom. Their random numbers, like the glows', come from a hash of
 the emitter, its seed and the frame. `rain`, `snow`, `ash` and `leaves` are not reserved words (nor is `trail`): scripts
-that use them as names still work.
+that use them as names still work. The emitters added for the library's third round (hail, aurora, rainbow, meteors, beam,
+shield, glints) are in §4.10.
 
 ### 4.7 The order of a frame
 
@@ -344,6 +347,66 @@ Getting every float the same forced a few things, all visible in the script:
   §7); it cannot add modules, couplings or fields while the scene plays: those are the script's.
 - Weather particles are drawn unlit, in their own colours: the scene's light (fires, lamps) does not light snow or rain.
   Rain makes no splashes and leaves nothing on the ground; nothing settles (snow does not lie).
+
+### 4.10 Procedural elements for the sky, combat and magic
+
+Added for the effect library's third round ([LIBRARY.md](LIBRARY.md) §10): seven emitters and a burst's spatter and
+shards. None is learned. They are particles of the scene's pool (`src/compose/fx_particles.cpp`: hail, spatter, shards)
+or lines of light remade every frame as the glows of §4.6 are (`src/compose/fx_emit.cpp`: streaks, whose radius,
+brightness and colour change along them, and glows), so a frame allocates nothing (`nvfx_alloc_test` plays them all on a
+stage with the engine layers read every frame). Their shapes and timings come from a hash of the emitter's place in the
+script, its seed and the frame (or the time slot of a meteor or a hit), never from the scene's generator, so a scene
+draws the same random numbers with them or without them; a burst's spatter and shards draw from the generator after its
+sparks, as the sparks do. Their names and keys reserve no word: a module may still be called `flare` or `hit`, and the
+older emitters do not take the new keys. Water's droplets, drips, ripples and bubbles are not among them: they belong to
+the water system.
+
+| emitter | what it makes | keys (defaults) |
+|---|---|---|
+| `emit hail` | hail, as the weather of §4.6 (the rectangle filled at once, then fed from its top edge and from upwind): pellets falling at 560 world pixels a second, bouncing once or twice on the rectangle's bottom edge (or the ground), lying a moment | `in`, `size` (required), `density` (1.2), `wind` (0, 0), `radius` (1.3), `colour`, `brightness` (1: times the colour), `flow` (0.1), `seed` |
+| `emit aurora` | curtains of rays over the rectangle `in`, `size`: their lower edge wanders across its lower part, their folds drift (`jitter`), their brightness shimmers along them, at `rate` times the natural pace; bright in `colour` at the lower edge, fading upwards into `top` | `in`, `size` (required), `colour` (green), `top` (violet), `brightness` (0.5), `rate` (1), `jitter` (1), `seed` |
+| `emit rainbow` | seven bands of an arc about `at` (red outside at `radius`, `width` across all seven), fading into the ground at its feet; `count 2` adds the fainter second bow, its colours reversed | `at`, `radius` (required), `width` (a tenth of the radius), `brightness` (0.35), `squash` (1), `count` (1) |
+| `emit meteors` | shooting stars: `rate` a second, each starting in the rectangle `in`, `size` in a time slot of its own and crossing along `direction` at about `speed` for under a second, its tail `length` long and its head `width` | `in`, `size` (required), `rate` (0.5), `speed` (650), `direction` (1, 0.45), `length` (140), `width` (1.6), `colour` (white), `brightness` (2.5), `seed` |
+| `emit beam` | a beam along a line: a white-hot core and a wide glow in `colour`, their width wobbling by `jitter` in a pattern that runs along it at `rate`; its brightness goes to `fade` of itself at the far end, where a flare of `flare` (four spikes and a disc) shows the hit | `along` (required), `width` (2.5), `colour` (red), `brightness` (2.5), `jitter` (0.35), `rate` (8), `flare` (5 times the width; 0: none), `fade` (1), `seed` |
+| `emit shield` | a bubble of energy: an ellipse with a bright shimmering rim, fainter rings inside it and a sheen at its upper left; where it is hit, a flash, its rim lit and ripples of light running out over it (only over it). Hits: `rate` a second at random places, and one the script places: `hit` its age in seconds (shown from 0 to 0.7 s), `angle` where (degrees, counter-clockwise from the right) | `at`, `radius` (required), `squash` (1), `width` (2.2), `colour` (blue), `brightness` (1.4), `rate` (0), `hit`, `angle` (200), `seed` |
+| `emit glints` | `count` places that twinkle in turn, `rate` times a second each, lit for `fade` of the time (1: a slow pulse), each time at a new place within `spread` of `at` (or in the rectangle `in`, `size`), drifting at `speed` along `direction` while lit: a four-pointed star of `radius` with fainter diagonals. `rate 0`: always lit, in place, for a script to drive (a coin's glint now and then) | `at` and `spread`, or `in` and `size`; `count` (12), `rate` (0.7), `fade` (0.24), `radius` (7), `colour` (warm white), `brightness` (2.2), `speed` (0), `direction` (up), `seed` |
+
+A **burst** (§4.5) also throws `spatter` and `shards`. Spatter is a coloured liquid (blood by default, dark red; oil,
+paint): simple ballistic drops of `grain` radius (1.6) that fall and, where they reach `floor` (or the ground), lie as a
+flat stain for `stain` seconds or, with no stain, are gone; it makes no splash and no ripple. Shards are splinters of
+`grain` length (9) that spin, fall, bounce and lie a moment, glinting as they turn: ice when no `colour` is given (a
+bright glint), stone, wood or metal with one (a faint glint).
+
+```text
+emit shield, at (X, Y), radius 120, rate 0.8, seed 3                                                 # hit at random
+emit beam, along (X, Y) to (X + 460, Y), width 2.4, colour (1, 0.18, 0.12), flare 13                 # a laser
+emit aurora, in (X - 600, Y - 210), size 1200 x 420, brightness 0.5, seed 9
+at 0:
+  burst at (X, Y - 60), embers 0, spatter 55, speed 260, direction (1, -0.4), cone 55, stain 2.2     # blood
+  burst at (X, Y - 20), embers 0, shards 46, speed 480, direction (0, -1), cone 200, grain 11       # ice
+```
+
+**How they are drawn, and in the engine layers** ([ENGINES.md](ENGINES.md) §11). What covers is drawn over what is under
+it, as weather is (unlit, in its own colour: the colour layer is its albedo, a flat normal facing the viewer, its
+optical depth -ln(1 - coverage)): hail, spatter and its stains, shards. What gives light is added to the colour and the
+emission layers and covers nothing (alpha and thickness 0): beams, aurora, rainbow, meteors, shield, glints, and the
+glints of shards. Hail and flying spatter are blurred along half their last step, as a camera's shutter blurs them, their
+coverage spread over the blur.
+
+**Tested** by `FxElements.*` (`tests/test_fx_elements.cpp`): hail bouncing and lying; spatter flying, falling and
+staining its floor, or gone without a stain; a burst's debris and sparks the same with spatter and shards after them;
+the scene's random numbers kept; the lines of light as light only; the layers (thickness 0 exactly where alpha is 0,
+the albedo at most its alpha, the normals no longer than alpha); the same frames and layers on any number of threads
+and with the layers on or off; the checker's messages (a missing `at`, a key another emitter takes, a misspelt key, a
+colour of two values) and the canonical form; an entry of the library using them.
+
+Notes from building them:
+- **A coloured liquid must be dark.** The picture is unlit, so blood drawn in a lit red (0.42, 0.02, 0.03) read bright
+  red at night; (0.2, 0.01, 0.01) reads as blood.
+- **A wide beam beads.** A beam whose width wobbles is drawn as pieces whose radius changes linearly between their ends;
+  wide and wobbling much, it shows a string of beads, so the holy beams wobble by 0.07, a laser by 0.3.
+- **Stills and timing.** Glints and meteors are lit for a moment; a sheet or a keyframe catches them only if its moment
+  falls in one, so a coin's glint is `rate 0` with its brightness driven by the entry.
 
 ## 5. Field effects
 

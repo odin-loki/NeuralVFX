@@ -1,0 +1,137 @@
+# Ambient effects and props (docs/LIBRARY.md §10): incense, chimneys, a steaming cup, steam from a sewer grate, a
+# cluster of candles, magic torches, a beacon, a quest marker, a pickup's sparkle, a coin's glint and glittering gold.
+# The smoke, steam and flames are the smoke, steam and fire models (a recolour is a look, not new dynamics: the blue
+# and green torches burn as the orange one does); the lights and glints are the compositor's (docs/COMPOSE.md §4.10).
+
+look incense_smoke = like smoke, tint (0.82, 0.84, 0.9), soot_albedo 0.65, soot_density 3, sky 1, relief 0.8   # a pale blue-grey thread
+look coal_smoke    = like smoke, tint (0.46, 0.44, 0.43), soot_albedo 0.32, soot_density 6, sky 0.95, relief 1.6  # dark grey coal smoke
+
+entry incense, category smoke, size 80 x 220, anchor base, loop, show 4,
+      about "Incense: a thin thread of pale smoke curling up from a glowing tip (the smoke model at its smallest)"
+param intensity = 0.16, range (0.08, 0.35), about "how much smoke"
+module thread = smoke, size 64, width 70 * scale, at (X, Y), sink 0.04, feather 0.25, look incense_smoke, start 0, seed 1601,
+                controls (0.16, 0.5, 0.35), intensity intensity, turbulence 0.35
+emit glow, at (X, Y - 2 * scale), radius 1.6 * scale, colour (1, 0.45, 0.15), brightness 2.4 * (0.8 + 0.2 * noise(3 * t, 1.5, 0))
+field tip = lamp, at (X, Y - 4 * scale), radius 14 * scale, strength 0.3, colour (1, 0.45, 0.15)
+
+entry chimney_smoke_white, category smoke, size 300 x 480, anchor base, loop, show 4,
+      about "Wood smoke on a cold day: a thick white plume from a chimney top (the anchor), leaning with the wind (the smoke model, a white look)"
+param intensity = 0.5, range (0.2, 0.8), about "how much smoke"
+param wind = 0.7, range (0, 1), about "lean: 0.5 still air"
+module plume = smoke, size 128, width 300 * scale, at (X, Y), sink 0.04, feather 0.25, look smoke_white, start 0, seed 1602,
+               controls (0.5, 0.7, 0.5), intensity intensity, wind wind
+
+entry chimney_smoke_dark, category smoke, size 300 x 480, anchor base, loop, show 4,
+      about "Coal smoke: a dark, sooty plume rolling from a chimney top (the anchor) (the smoke model, a dark look)"
+param intensity = 0.55, range (0.2, 0.9), about "how much smoke"
+param wind = 0.62, range (0, 1), about "lean: 0.5 still air"
+module plume = smoke, size 128, width 300 * scale, at (X, Y), sink 0.04, feather 0.25, look coal_smoke, start 0, seed 1603,
+               controls (0.55, 0.62, 0.6), intensity intensity, wind wind
+
+entry steaming_cup, category steam, size 70 x 120, anchor base, loop, show 3,
+      about "A steaming cup: two faint, slow wisps of steam rising from a hot drink (the steam model at its smallest)"
+param intensity = 0.25, range (0.1, 0.5), about "how much steam"
+module wisp_a = steam, size 32, width 46 * scale, at (X - 6 * scale, Y), sink 0.04, feather 0.25, look vapour, start 0, seed 1604,
+                controls (0.25, 0.5, 0.4), intensity intensity
+module wisp_b = steam, size 32, width 42 * scale, at (X + 7 * scale, Y), sink 0.04, feather 0.25, look vapour, start 6, seed 1605,
+                controls (0.25, 0.5, 0.4), intensity 0.8 * intensity
+
+entry sewer_steam, category steam, size 300 x 300, anchor base, loop, show 4,
+      about "Steam from a sewer grate: soft clouds of steam welling up from a grate in the street and drifting, lit warm by a street lamp"
+param intensity = 0.45, range (0.2, 0.8), about "how much steam"
+module a = steam, size 128, width 220 * scale, at (X - 50 * scale, Y + 10 * scale), sink 0.04, feather 0.35, look mist, start 0, seed 1606,
+           controls (0.45, 0.55, 0.8), intensity intensity
+module b = steam, size 128, width 220 * scale, at (X + 50 * scale, Y + 10 * scale), sink 0.04, feather 0.35, look mist, start 6, seed 1607,
+           controls (0.45, 0.55, 0.8), intensity 0.9 * intensity
+field street = lamp, at (X + 140 * scale, Y - 260 * scale), radius 260 * scale, strength 0.45, colour (1, 0.75, 0.45)
+
+entry candle_cluster, category fire, size 200 x 120, anchor base, loop, show 2,
+      about "A cluster of candles: five small flames (the fire model) at different heights on the game's candles, each with a bright wick, and their warm light"
+param intensity = 0.48, range (0.25, 0.65), about "how big the flames"
+module c1 = fire, size 64, width 40 * scale, at (X - 60 * scale, Y - 34 * scale), sink 0.04, feather 0.2, start 0, seed 1608,
+            controls (0.3, 0.5, 0.15), intensity intensity, turbulence 0.15
+module c2 = fire, size 64, width 44 * scale, at (X - 25 * scale, Y - 56 * scale), sink 0.04, feather 0.2, start 3, seed 1609,
+            controls (0.3, 0.5, 0.15), intensity intensity, turbulence 0.15
+module c3 = fire, size 64, width 46 * scale, at (X + 8 * scale, Y - 40 * scale), sink 0.04, feather 0.2, start 6, seed 1610,
+            controls (0.3, 0.5, 0.15), intensity 1.1 * intensity, turbulence 0.15
+module c4 = fire, size 64, width 40 * scale, at (X + 38 * scale, Y - 68 * scale), sink 0.04, feather 0.2, start 1, seed 1611,
+            controls (0.3, 0.5, 0.15), intensity intensity, turbulence 0.15
+module c5 = fire, size 64, width 38 * scale, at (X + 64 * scale, Y - 28 * scale), sink 0.04, feather 0.2, start 7, seed 1612,
+            controls (0.3, 0.5, 0.15), intensity 0.9 * intensity, turbulence 0.15
+emit glow, at (X - 60 * scale, Y - 36 * scale), radius 2.4 * scale, colour (1, 0.85, 0.55), brightness 1.6
+emit glow, at (X - 25 * scale, Y - 58 * scale), radius 2.4 * scale, colour (1, 0.85, 0.55), brightness 1.6
+emit glow, at (X + 8 * scale, Y - 42 * scale), radius 2.6 * scale, colour (1, 0.85, 0.55), brightness 1.6
+emit glow, at (X + 38 * scale, Y - 70 * scale), radius 2.4 * scale, colour (1, 0.85, 0.55), brightness 1.6
+emit glow, at (X + 64 * scale, Y - 30 * scale), radius 2.2 * scale, colour (1, 0.85, 0.55), brightness 1.6
+field warm = lamp, at (X, Y - 60 * scale), radius 90 * scale, strength 0.8, colour (1, 0.68, 0.35)
+
+entry torch_blue, category fire, size 100 x 190, anchor base, loop, show 2,
+      about "A magic torch: a lively blue flame with a few sparks and a cold blue light (the torch, recoloured by a look); its anchor is the torch's head"
+param intensity = 0.6, range (0.2, 1), about "how big it burns"
+param wind = 0.5, range (0, 1), about "lean: 0.5 still air"
+module flame = fire, size 64, width 100 * scale, at (X, Y), sink 0.06, feather 0.15, look gas, start 0, seed 1613,
+               controls (0.6, 0.5, 0.7), intensity intensity, wind wind, glow (0.35, 0.55, 1.6)
+emit glints, at (X, Y - 30 * scale), spread 22 * scale, count 3, rate 1.2, radius 3 * scale, colour (0.6, 0.8, 1), brightness 1.6,
+     speed 40 * scale, direction (0, -1), seed 1614
+field chill = lamp, at (X, Y - 24 * scale), radius 50 * scale, strength 0.6 * intensity, colour (0.35, 0.55, 1)
+
+entry torch_green, category fire, size 100 x 190, anchor base, loop, show 2,
+      about "A cursed torch: a sickly green flame and green light (the torch, recoloured by a look); its anchor is the torch's head"
+param intensity = 0.6, range (0.2, 1), about "how big it burns"
+param wind = 0.5, range (0, 1), about "lean: 0.5 still air"
+module flame = fire, size 64, width 100 * scale, at (X, Y), sink 0.06, feather 0.15, look witch, start 0, seed 1615,
+               controls (0.6, 0.5, 0.7), intensity intensity, wind wind, glow (0.4, 1.4, 0.4)
+emit glow, at (X, Y - 30 * scale), radius 2 * scale, count 4, spread 26 * scale, rate 0.5, seed 1616, colour (0.6, 1, 0.4), brightness 1.6
+field sick = lamp, at (X, Y - 24 * scale), radius 50 * scale, strength 0.6 * intensity, colour (0.4, 1, 0.35)
+
+entry beacon, category light, size 160 x 420, anchor base, loop, show 0.7,
+      about "A beacon (procedural): a bright light on a post or a mast top that flares every second and a half, a pale shaft of light above it"
+param period = 1.5, range (0.4, 5), about "seconds between flares"
+param hue = 0, range (0, 1), about "colour: 0 white, 1 red"
+let k = t - period * floor(t / period)
+let blink = 0.15 + 0.85 * exp(-k / 0.25)
+let r = 1
+let g = 1 - 0.8 * hue
+let b = 0.9 - 0.8 * hue
+emit glow, at (X, Y - 30 * scale), radius 7 * scale, colour (r, g, b), brightness 3 * blink
+emit glow, at (X, Y - 30 * scale), radius 34 * scale, colour (r, g, b), brightness 0.5 * blink
+emit beam, along (X, Y - 30 * scale) to (X, Y - 400 * scale), width 5 * scale, colour (r, g, b), brightness 0.6 * blink, jitter 0.1,
+     flare 0, fade 0, seed 1617
+emit ring, at (X, Y - 30 * scale), radius 10 * scale + 60 * scale * (k / period), width 1.5 * scale, colour (r, g, b),
+     brightness 1.2 * exp(-k / 0.4)
+field shine = lamp, at (X, Y - 30 * scale), radius 140 * scale, strength 1.2 * blink, colour (r, g, b)
+
+entry quest_marker, category light, size 140 x 260, anchor base, loop, show 1,
+      about "A quest marker (procedural): a golden light bobbing over the anchor, a ring turning on the ground beneath it and a faint shaft between them"
+param intensity = 1, range (0.3, 1.5), about "brightness"
+let bob = Y - 170 * scale + 8 * scale * sin(2.4 * t)
+emit glow, at (X, bob), radius 8 * scale, colour (1, 0.85, 0.35), brightness 2.6 * intensity
+emit glow, at (X, bob), radius 26 * scale, colour (1, 0.75, 0.3), brightness 0.5 * intensity
+emit glints, at (X, bob), count 1, rate 0.8, radius 16 * scale, colour (1, 0.92, 0.6), brightness 2 * intensity, fade 0.5, seed 1618
+emit beam, along (X, bob + 10 * scale) to (X, Y - 2 * scale), width 3 * scale, colour (1, 0.8, 0.35), brightness 0.45 * intensity,
+     jitter 0.2, rate 3, flare 0, fade 0.5, seed 1619
+emit ring, at (X, Y - 2 * scale), radius 34 * scale * (0.9 + 0.1 * sin(2.4 * t)), squash 0.3, width 2 * scale, colour (1, 0.8, 0.35),
+     brightness 1.4 * intensity
+field gold = lamp, at (X, bob), radius 80 * scale, strength 0.6 * intensity, colour (1, 0.8, 0.4)
+
+entry pickup_sparkle, category light, size 120 x 120, anchor centre, loop, show 1.2,
+      about "A pickup's sparkle (procedural): stars of light twinkling in turn around an item on the ground, a soft glow pulsing under them"
+param intensity = 1, range (0.3, 2), about "brightness"
+emit glints, at (X, Y), spread 34 * scale, count 7, rate 1.4, radius 8 * scale, colour (1, 0.97, 0.85), brightness 2.6 * intensity,
+     seed 1620
+emit glow, at (X, Y), radius 24 * scale, colour (1, 0.9, 0.6), brightness 0.3 * intensity * (0.7 + 0.3 * sin(4 * t))
+field shine = lamp, at (X, Y), radius 50 * scale, strength 0.3 * intensity, colour (1, 0.9, 0.6)
+
+entry coin_glint, category light, size 60 x 60, anchor centre, loop, show 0.3,
+      about "A coin's glint (procedural): now and then a single star of light flashes on a coin or a gem (the anchor)"
+param every = 1.6, range (0.3, 6), about "seconds between glints"
+let k = t - every * floor(t / every)
+let flash = exp(-(k - 0.3) * (k - 0.3) / 0.004)
+emit glints, at (X, Y), count 1, rate 0, radius 14 * scale * (0.3 + 0.7 * flash), colour (1, 0.95, 0.75), brightness 3 * flash, seed 1621
+
+entry gold_glitter, category light, size 300 x 80, anchor base, loop, show 1,
+      about "Glittering gold (procedural): a heap of treasure twinkling all over with small warm glints"
+param sparkle = 1, range (0.2, 3), about "how many glints"
+emit glints, in (X - 140 * scale, Y - 60 * scale), size 280 * scale x 56 * scale, count 30 * sparkle, rate 1, radius 6 * scale,
+     colour (1, 0.85, 0.45), brightness 2.4, seed 1622
+field gold = lamp, at (X, Y - 30 * scale), radius 140 * scale, strength 0.25, colour (1, 0.8, 0.4)
