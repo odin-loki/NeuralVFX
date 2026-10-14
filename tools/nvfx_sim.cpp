@@ -1,6 +1,6 @@
 // nvfx_sim: simulate one effect clip and write it (.nfxclip), a contact sheet (PNG) and/or a video (mp4 via ffmpeg).
 //
-//   nvfx_sim --effect fire|smoke|explosion|steam|magic [--intensity 0.5] [--wind 0.5] [--turbulence 0.5] [--seed 1]
+//   nvfx_sim --effect fire|smoke|explosion|steam|magic|fog|dust|cloud [--intensity 0.5] [--wind 0.5] [--turbulence 0.5] [--seed 1]
 //            [--size 128] [--frames 64] [--sim-res 0] [--out clip.nfxclip] [--sheet sheet.png] [--video v.mp4]
 //            [--bg black|grey|checker] [--bench]
 //
@@ -21,12 +21,12 @@ using namespace nfx;
 int main(int argc, char** argv) try {
   const tools::Args a(argc, argv, {"bench", "help"});
   if (a.flag("help")) {
-    std::println("nvfx_sim --effect fire|smoke|explosion|steam|magic [--intensity --wind|--spin --turbulence --seed --size --frames "
+    std::println("nvfx_sim --effect fire|smoke|explosion|steam|magic|fog|dust|cloud [--intensity --wind|--spin --turbulence --seed --size --frames "
                  "--sim-res --substeps --pressure-iters --out --sheet --video --bg --bench]");
     return 0;
   }
   sim::Params p;
-  if (!sim::parse_effect(a.str("effect", "fire"), p.effect)) throw std::invalid_argument("--effect: fire, smoke, explosion, steam or magic");
+  if (!sim::parse_effect(a.str("effect", "fire"), p.effect)) throw std::invalid_argument("--effect: fire, smoke, explosion, steam, magic, fog, dust or cloud");
   p.intensity = a.f("intensity", p.intensity);
   p.wind = a.f("wind", p.wind);
   p.wind = a.f("spin", p.wind);

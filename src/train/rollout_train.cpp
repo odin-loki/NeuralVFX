@@ -1455,7 +1455,8 @@ SimRecipe recipe_for(sim::Effect e) {
   r.stepper.activity_stage = 800;
   r.stepper.activity = 100.f;
   if (e == sim::Effect::smoke) r.start_fine = 64;  // smoke lingers: growing its detail would take seconds
-  if (e == sim::Effect::explosion) {
+  if (e == sim::Effect::fog || e == sim::Effect::cloud) r.start_fine = 64;  // they linger too (docs/EFFECTS_ATMOSPHERE.md)
+  if (!sim::effect_loops(e)) {  // the explosion, and dust (docs/EFFECTS_ATMOSPHERE.md), which plays once as it does
     r.runs = 240;
     r.frames = 90;
     r.start_frame = 0;
