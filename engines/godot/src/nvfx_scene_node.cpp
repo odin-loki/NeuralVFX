@@ -32,8 +32,17 @@ void NeuralVFXScene::fail(const String& message, int line, int column) {
   UtilityFunctions::push_error("NeuralVFXScene: ", message);
 }
 
-void NeuralVFXScene::unload_scene() {
+void NeuralVFXScene::release_scene() {
   if (scene_) nvfx_scene_free(scene_);
+  scene_ = nullptr;
+}
+
+void NeuralVFXScene::restart_scene() {
+  if (scene_) nvfx_scene_restart(scene_);
+}
+
+void NeuralVFXScene::unload_scene() {
+  release_scene();
   scene_ = nullptr;
   drawn_ = -1;
 }
@@ -44,22 +53,36 @@ bool NeuralVFXScene::load_scene() {
   error_ = String();
   error_line_ = error_column_ = 0;
   finished_ = false;
+  scene_ = create_scene();
+  if (!scene_) return false;
+  nvfx_scene_info info{};
+  nvfx_scene_get_info(scene_, &info);
+  width_ = info.width;
+  height_ = info.height;
+  pixels_.resize(static_cast<int64_t>(width_) * height_ * 4);
+  image_ = Image::create_empty(width_, height_, false, Image::FORMAT_RGBA8);
+  texture_ = ImageTexture::create_from_image(image_);
+  draw();
+  return true;
+}
+
+nvfx_scene* NeuralVFXScene::create_scene() {
   if (scene_script_.is_empty()) {
     fail("no scene_script");
-    return false;
+    return nullptr;
   }
   // The script and its effects are read here (FileAccess: res://, user:// or absolute paths) and passed in memory.
   const String text = FileAccess::get_file_as_string(scene_script_);
   if (text.is_empty()) {
     fail("cannot read " + scene_script_);
-    return false;
+    return nullptr;
   }
   const CharString script = utf8(text), source = utf8(scene_script_.get_file());
   std::vector<std::pair<std::string, std::string>> files;
   nvfx_scene_error err{};
   if (nvfx_scene_list_effects(script.get_data(), source.get_data(), collect_effect, &files, &err) != NVFX_OK) {
     fail(String::utf8(err.message), err.line, err.column);
-    return false;
+    return nullptr;
   }
   const String dir = effects_dir_.is_empty() ? scene_script_.get_base_dir() : effects_dir_;
   std::vector<nvfx_effect*> loaded;
@@ -76,7 +99,7 @@ bool NeuralVFXScene::load_scene() {
     if (s != NVFX_OK) {
       free_loaded();
       fail(vformat("effect '%s': cannot load %s (%s)", String::utf8(name.c_str()), path, String(nvfx_status_string(s))));
-      return false;
+      return nullptr;
     }
     loaded.push_back(e);
     list.push_back({file.c_str(), e});
@@ -91,22 +114,14 @@ bool NeuralVFXScene::load_scene() {
   d.overlap = overlap_ ? 1 : 0;
   d.width = output_size_.x > 0 ? output_size_.x : 0;
   d.height = output_size_.y > 0 ? output_size_.y : 0;
-  const nvfx_status s = nvfx_scene_create(&d, &scene_, &err);
+  nvfx_scene* scene = nullptr;
+  const nvfx_status s = nvfx_scene_create(&d, &scene, &err);
   free_loaded();  // the scene keeps copies
   if (s != NVFX_OK) {
-    scene_ = nullptr;
     fail(String::utf8(err.message), err.line, err.column);
-    return false;
+    return nullptr;
   }
-  nvfx_scene_info info{};
-  nvfx_scene_get_info(scene_, &info);
-  width_ = info.width;
-  height_ = info.height;
-  pixels_.resize(static_cast<int64_t>(width_) * height_ * 4);
-  image_ = Image::create_empty(width_, height_, false, Image::FORMAT_RGBA8);
-  texture_ = ImageTexture::create_from_image(image_);
-  draw();
-  return true;
+  return scene;
 }
 
 void NeuralVFXScene::draw() {
@@ -142,7 +157,7 @@ void NeuralVFXScene::seek(double seconds) {
 
 void NeuralVFXScene::restart() {
   if (!scene_) return;
-  nvfx_scene_restart(scene_);
+  restart_scene();
   finished_ = false;
   draw();
 }
@@ -283,7 +298,7 @@ void NeuralVFXScene::_ready() {
     set_process(false);  // nothing plays in the editor
     return;
   }
-  if (!tried_ && !scene_script_.is_empty()) load_scene();  // unless the game loaded it (or tried) before
+  if (!tried_ && can_load()) load_scene();  // unless the game loaded it (or tried) before
   set_process(true);
 }
 

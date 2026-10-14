@@ -259,7 +259,7 @@ build/nvfx_c_host --scene examples/scenes/fireball.nvfxs --effects $NEURALVFX_DA
 
 ## 8. Godot 4
 
-`engines/godot` is a GDExtension over the C API: two nodes, a demo project and a headless test. It is built against
+`engines/godot` is a GDExtension over the C API: three nodes, demo projects and a headless test. It is built against
 godot-cpp at the pinned tag `godot-4.4.1-stable` (fetched by CMake) and tested with the official Godot 4.4.1 Linux
 binary. It is outside the default build: `-DNEURALFX_BUILD_GODOT=ON` (needs Python 3 for godot-cpp's binding
 generator; a build profile, `engines/godot/build_profile.json`, binds only the engine classes the nodes use, so
@@ -294,6 +294,13 @@ premultiplied alpha. Properties `effect_path`, `size` (128), `controls` (a `Pack
 (seconds; negative: the effect's default), `hue`, `brightness`, `playing`, `speed`, `time`; methods `load_effect()`,
 `render_at(seconds)`, `get_control_names()`, `get_info()`.
 
+**`NeuralVFXStage`** (a `NeuralVFXScene`): a stage of the effect library (§9, [LIBRARY.md](LIBRARY.md) §5) instead of a
+script. Properties `library_dir` (the catalogue), `effects_dir` (its models), `stage_size`, `ground` and `rooms` (a
+Dictionary: effect name to a count, or to `[count, steal]`); methods `list_effects()`, `get_categories()`,
+`get_effect_info(name)`, `spawn(effect, position, scale = 1, time = -1)` (a handle, 0 when there is no room),
+`set_param`, `get_param`, `move_fx`, `stop(fx, time = -1)`, `get_fx_info(fx)`, `free_rooms(effect)`, `set_camera`,
+`get_stage_script()`; everything else (stepping, the texture, the fields) is the scene node's.
+
 The nodes read files with `FileAccess` and pass them to the C API in memory, so they work from an exported package:
 the scene node lists the script's effects (`nvfx_scene_list_effects`) and reads each from `effects_dir`. They do not
 play in the editor.
@@ -325,6 +332,13 @@ registers the extension) and runs `demo/test.gd` headless: a `NeuralVFXScene` pl
   'strength'?)`, line 2, column 34;
 - a `NeuralVFXEffect` loads `fire.nvfx` and draws a fire at 128 x 128.
 
+When the effect library's models are in `$NEURALVFX_DATA/library/models`, the test goes on (step 5, §9): `nvfx_gallery
+--shot` draws a 960 x 540 stage with a campfire, a steam vent, a magic burst and an electric arc spawned at given
+times, and `demo/test_library.gd` plays the same stage in a `NeuralVFXStage`. Its 18 checks passed: the catalogue's
+listing and an effect's description; the spawns, a full room and an unknown effect refused; **frame 45 the same as
+`nvfx_gallery`'s, byte for byte**; heat over the campfire; the instances' states, a parameter, a move, a stop, the room
+freed and a stale handle; the stage's script.
+
 The 45 frames took 17 to 45 ms each on 2 threads in Godot, depending on what else ran on the shared machine. The
 saved frame is `$NEURALVFX_DATA/godot/fireball_godot.png`. `demo/main.tscn` is the same scene for a window: the
 fireball full screen, looping, with the heat under the mouse shown in a label.
@@ -332,3 +346,13 @@ fireball full screen, looping, with the heat under the mouse shown in a label.
 What the plugin does not do yet: other platforms than Linux x86-64; drawing in the editor; uploading the fields as
 textures for the engine's own renderer (the picture is composed on the CPU and uploaded: 3.7 MB per frame at
 1280 x 720); a transparent background, so that a scene could be drawn over the game's world.
+
+## 9. The effect library
+
+[LIBRARY.md](LIBRARY.md) is a catalogue of 48 named effects (a campfire, a grenade, a steam vent, a portal, a lightning
+strike, ...) built from the five trained models and the compositor's procedural elements, ready to place without
+training. `include/neuralfx/nvfx_library.h`, in `libnvfx`, lists them and plays them on a **stage**: a scene (§7) with
+room for a number of instances of chosen effects, which the game spawns at a position, scale and time, drives through
+named parameters, moves and stops while it plays, without allocating per frame. A stage is an ordinary `nvfx_scene`
+for stepping, drawing and reading fields, so the threading, overlap and exactness of §7 hold for it. In Godot the node
+is `NeuralVFXStage` (§8); `engines/godot/test.sh` checks that it draws the same pixels as the library's gallery tool.

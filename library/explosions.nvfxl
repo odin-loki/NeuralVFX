@@ -1,0 +1,78 @@
+# Explosions: the explosion model (v2, coupled), a one-shot from one of its 16 start points, with a shock front, a
+# flash, embers, debris and a scorch mark; recoloured by a field-shader look for magic (a look, not new dynamics).
+# A single tile holds the medium start points (4, 5, 10 to 14); the strongest (1, 2, 6, 7, 9, 15) fill their tile and
+# square off against its walls within a second, as they need the fireball's six tiles (docs/COMPOSE.md §6).
+
+look burst_violet = like cloud, hue 250, emission 2.4, soot_density 1.6, soot_albedo 0.5, tint (0.75, 0.6, 1)
+
+entry grenade, category explosions, size 340 x 360, anchor base, once 3, show 0.35,
+      about "A grenade: a ball of fire from the explosion model, a shock front, a flash, embers, debris and a scorch mark"
+param power = 1, range (0.5, 1.5), about "the blast's size: shock, flash, embers and debris"
+module ball = explosion, size 256, width 340 * scale, at (X, Y + 80 * scale), feather 0.15, look cloud, start 0,
+              seed 171, opacity 1 - smooth((t - 1.8) / 1.2)
+let flash = exp(-t / 0.08)
+light flash (0.8 * power * flash, 0.6 * power * flash, 0.4 * power * flash)
+camera x (rand - 0.5) * 10 * power * exp(-t / 0.2), y (rand - 0.5) * 10 * power * exp(-t / 0.2)
+at 0:
+  shock at (X, Y - 40 * scale), speed 1100 * scale, decay 0.25, amp 5, width 24 * scale
+  scorch at (X, Y + 5 * scale), radius 110 * scale, glow 0.8 * exp(-t / 1.5)
+  burst at (X, Y - 30 * scale), radius 30 * scale, embers 300 * power, debris 50 * power, speed 650 * scale
+
+entry large_blast, category explosions, size 640 x 700, anchor base, once 9, show 1,
+      about "A large blast: a big fireball that rises and cools, handed over to the smoke model, which carries the smoke on"
+param power = 1, range (0.5, 1.5), about "shock, flash, embers and debris"
+module ball  = explosion, size 384, width 720 * scale, at (X, Y + 180 * scale), feather 0.15, look cloud, start 0,
+               seed 181, opacity 1 - smooth((t - 7.5) / 1.5)
+module cloud = smoke, over ball, look cloud to smoke by smooth((t - 1.8) / 1.2), controls (0.7, 0.56, 0.55),
+               intensity 0.55 - 0.45 * smooth((t - 1.8) / 4), opacity 1 - smooth((t - 7.5) / 1.5)
+let flash = exp(-t / 0.1)
+light flash (0.85 * power * flash, 0.62 * power * flash, 0.42 * power * flash)
+camera x (rand - 0.5) * 16 * power * exp(-t / 0.25), y (rand - 0.5) * 16 * power * exp(-t / 0.25)
+at 0:
+  shock at (X, Y - 90 * scale), speed 1500 * scale, decay 0.3, amp 7, width 30 * scale
+  scorch at (X, Y + 6 * scale), radius 220 * scale, glow 0.9 * exp(-t / 2.5)
+  burst at (X, Y - 90 * scale), radius 70 * scale, embers 900 * power, debris 120 * power, speed 900 * scale
+at 1.8:
+  hand_over ball -> cloud, seed 182
+
+entry magic_burst, category explosions, size 360 x 360, anchor centre, once 2.2, show 0.3,
+      about "A magic burst: the explosion model recoloured violet, a ring of light, a violet flash and glowing motes"
+param power = 1, range (0.5, 1.5), about "the burst's brightness"
+module ball = explosion, size 256, width 300 * scale, at (X, Y + 96 * scale), feather 0.15, look burst_violet, start 14,
+              seed 191, glow (0.8, 0.5, 1.8), opacity 1 - smooth((t - 1.2) / 0.9)
+let flash = exp(-t / 0.1)
+light flash (0.5 * power * flash, 0.3 * power * flash, 0.9 * power * flash)
+emit ring, at (X, Y), radius 20 * scale + 170 * scale * (1 - exp(-t / 0.2)), width 2.5 * scale, colour (0.7, 0.5, 1),
+     brightness 2 * power * exp(-t / 0.35), until 1.4
+emit glow, at (X, Y), radius 3 * scale, count 24, spread 150 * scale * smooth(t / 0.4), rate 0.8, seed 19,
+     colour (0.8, 0.6, 1), brightness 2.5 * power * exp(-t / 0.8)
+at 0:
+  shock at (X, Y), speed 900 * scale, decay 0.25, amp 4, width 22 * scale
+
+entry teleport_flash, category explosions, size 240 x 360, anchor base, once 1.2, show 0.12,
+      about "A teleport flash: a column of light, a flash, an expanding ring on the ground and sparkles (procedural)"
+param hue_shift = 0, range (0, 1), about "colour: 0 cyan, 1 violet"
+let fade = exp(-t / 0.18)
+let r = 0.4 + 0.5 * hue_shift
+let g = 0.85 - 0.45 * hue_shift
+emit arc, along (X, Y) to (X, Y - 320 * scale), width 6 * scale * fade + 1, jitter 0.01, branches 0,
+     colour (r, g, 1), brightness 3 * fade, until 0.5
+emit glow, at (X, Y - 60 * scale), radius 70 * scale * (0.5 + t), colour (r, g, 1), brightness 1.6 * fade, until 0.7
+emit ring, at (X, Y), radius 20 * scale + 220 * scale * (1 - exp(-t / 0.2)), squash 0.25, width 3 * scale,
+     colour (r, g, 1), brightness 2 * exp(-t / 0.3)
+emit glow, at (X, Y - 120 * scale), radius 2.5 * scale, count 20, spread 90 * scale, rate 1.2, seed 7,
+     colour (r, g, 1), brightness 2 * exp(-t / 0.5)
+field shine = lamp, at (X, Y - 60 * scale), radius 120 * scale, strength 1.2 * fade, colour (r, g, 1)
+light flash (0.25 * r * fade, 0.25 * g * fade, 0.3 * fade)
+
+entry airburst, category explosions, size 380 x 380, anchor centre, once 3, show 0.4,
+      about "An airburst: an explosion in the air (no scorch), its embers falling as it fades"
+param power = 1, range (0.5, 1.5), about "flash, embers and shake"
+module ball = explosion, size 256, width 320 * scale, at (X, Y + 102 * scale), feather 0.15, look cloud, start 13,
+              seed 201, opacity 1 - smooth((t - 1.8) / 1.2)
+let flash = exp(-t / 0.08)
+light flash (0.7 * power * flash, 0.5 * power * flash, 0.35 * power * flash)
+camera x (rand - 0.5) * 6 * power * exp(-t / 0.2), y (rand - 0.5) * 6 * power * exp(-t / 0.2)
+at 0:
+  shock at (X, Y), speed 1000 * scale, decay 0.25, amp 5, width 24 * scale
+  burst at (X, Y), radius 40 * scale, embers 500 * power, speed 600 * scale

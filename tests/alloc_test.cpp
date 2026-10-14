@@ -4,13 +4,16 @@
 // float and int8 precision), a rollout effect as one continuous rollout with the prior against drift, then 99 frames of
 // a small composed scene (its modules with their own step scratch, and sharing one per thread), 44 frames of a scripted
 // one, and the scripted one through the scene C API (nvfx_scene.h) with the game's calls between frames: steps, field
-// reads, inputs, triggers, module moves and controls. Exit code 0 = no allocation during rendering.
+// reads, inputs, triggers, module moves and controls; then a stage of the effect library (nvfx_library.h): learned and
+// procedural effects (glows, lamps, bursts of sparks, shards) spawned, moved, set, stopped and stolen between frames,
+// overlapped and not. Exit code 0 = no allocation during rendering.
 #include "compose_scene.hpp"
 #include "script.hpp"
 
 #include <neuralfx/dcm/ddpm.hpp>
 #include <neuralfx/model.hpp>
 #include <neuralfx/nvfx.h>
+#include <neuralfx/nvfx_library.h>
 #include <neuralfx/nvfx_scene.h>
 #include <neuralfx/rollout.hpp>
 
@@ -449,6 +452,108 @@ int run_scene_api() {
   return failures;
 }
 
+// A stage of the effect library: a looping learned effect in shards, a one-shot, procedural glows and a lamp. Every
+// call a game makes while it plays (spawn, set_param, move, stop, get_fx, a stolen room) and every frame allocate nothing.
+int run_library() {
+  std::string bytes;
+  {
+    std::ostringstream os;
+    if (!nfx::rollout::save_model(os, nfx::compose::testing::tiny_effect(3).m)) return 1;
+    bytes = os.str();
+  }
+  nvfx_effect* et = nullptr;
+  if (nvfx_effect_load_memory(bytes.data(), bytes.size(), &et) != NVFX_OK) return 1;
+  const char* catalogue = R"(
+effect tiny = "tiny.nvfx"
+look hot = shader, heat_scale 1, emission 2, hue 200
+entry blob, category fire, size 64 x 64, loop, about "a loop in shards"
+param intensity = 0.5, range (0, 1), about "its control"
+module m = tiny, size 32, width 48 * scale, at (X, Y), look hot, start 1, seed 7, controls (0.5, 0.5, 0.5), intensity intensity,
+           shards 1
+emit embers, on m, tries 1, chance 0.5, spread 10
+at 0.2: scorch at (X, Y), radius 10 * scale, glow 0.5 * alive
+entry pop, category explosions, size 64 x 64, anchor centre, once 0.6, about "a one-shot"
+module m = tiny, size 32, width 40 * scale, at (X, Y + 20 * scale), start 0, seed 3
+light flash (exp(-t / 0.1), 0, 0)
+camera x (rand - 0.5) * 4 * exp(-t / 0.2), y 0
+at 0:
+  shock at (X, Y), speed 300
+  burst at (X, Y), embers 20, debris 5, sparks 20, direction (1, 0), cone 40, speed 200
+entry zap, category sparks, size 80 x 40, loop, about "glows"
+emit arc, along (X - 30, Y - 10) to (X + 30, Y - 10), rate 10, seed 2, branches 2
+emit ring, at (X, Y), radius 10 + 40 * t, squash 0.3
+emit glow, at (X, Y - 20), radius 3, count 8, spread 20
+field shine = lamp, at (X, Y - 10), radius 20, strength 0.5, colour (0.5, 0.7, 1)
+)";
+  const nvfx_library_file file{"alloc.nvfxl", catalogue};
+  nvfx_library_desc ld;
+  nvfx_library_desc_init(&ld);
+  ld.files = &file;
+  ld.n_files = 1;
+  nvfx_library* lib = nullptr;
+  nvfx_scene_error err;
+  if (nvfx_library_open(&ld, &lib, &err) != NVFX_OK) {
+    std::printf("library: %s\n", err.message);
+    return 1;
+  }
+  int failures = 0;
+  const nvfx_scene_effect fx{"tiny.nvfx", et};
+  const nvfx_stage_room rooms[] = {{"blob", 2, 0}, {"pop", 2, 1}, {"zap", 1, 0}};
+  for (const int overlap : {0, 1}) {
+    nvfx_stage_desc sd;
+    nvfx_stage_desc_init(&sd);
+    sd.width = 160;
+    sd.height = 96;
+    sd.ground = 80;
+    sd.rooms = rooms;
+    sd.n_rooms = 3;
+    sd.effects = &fx;
+    sd.n_effects = 1;
+    sd.overlap = overlap;
+    nvfx_stage* st = nullptr;
+    if (nvfx_stage_create(lib, &sd, &st, &err) != NVFX_OK) {
+      std::printf("stage: %s\n", err.message);
+      ++failures;
+      continue;
+    }
+    nvfx_scene* scene = nvfx_stage_scene(st);
+    std::vector<std::uint8_t> rgba(160 * 96 * 4);
+    nvfx_scene_render(scene, rgba.data(), 160 * 4);  // warm-up outside the count
+    g_allocations.store(0);
+    g_counting.store(true);
+    nvfx_fx a = 0, b = 0, z = 0;
+    int spawned = 0;
+    for (int f = 1; f < 150; ++f) {
+      if (f == 2) spawned += nvfx_stage_spawn(st, "blob", 40.f, 80.f, 1.f, -1.0, &a) == NVFX_OK;
+      if (f == 3) spawned += nvfx_stage_spawn(st, "zap", 120.f, 70.f, 1.f, 0.3, &z) == NVFX_OK;
+      if (f % 9 == 4) {  // two rooms: the third and later spawns steal the oldest
+        nvfx_fx p = 0;
+        spawned += nvfx_stage_spawn(st, "pop", 80.f + static_cast<float>(f % 30), 40.f, 1.f, -1.0, &p) == NVFX_OK;
+      }
+      if (f == 20) nvfx_stage_set_param(st, a, "intensity", 0.9f);
+      if (f == 25) nvfx_stage_move(st, a, 50.f, 80.f);
+      if (f == 40) spawned += nvfx_stage_spawn(st, "blob", 100.f, 80.f, 1.2f, -1.0, &b) == NVFX_OK;
+      if (f == 70) nvfx_stage_stop(st, a, -1.0);
+      if (f == 90) spawned += nvfx_stage_spawn(st, "blob", 60.f, 80.f, 0.8f, -1.0, &a) == NVFX_OK;
+      if (f == 120) nvfx_stage_stop(st, z, 4.5);
+      nvfx_stage_fx_info info{};
+      nvfx_stage_get_fx(st, b, &info);
+      (void)nvfx_stage_free_rooms(st, "pop");
+      nvfx_stage_set_camera(st, 0.f, 0.f);
+      nvfx_scene_step_frames(scene, 1);
+      if (f % 2 == 0) nvfx_scene_render(scene, rgba.data(), 160 * 4);
+    }
+    g_counting.store(false);
+    const long n = g_allocations.load();
+    std::printf("library stage%s: %ld allocations in 149 frames with %d spawns, moves, parameters and stops\n", overlap ? ", overlapped" : "", n, spawned);
+    failures += n == 0 && spawned >= 18 ? 0 : 1;
+    nvfx_stage_free(st);
+  }
+  nvfx_library_free(lib);
+  nvfx_effect_free(et);
+  return failures;
+}
+
 }  // namespace
 
 int main() {
@@ -485,6 +590,7 @@ int main() {
   failures += run(g, 128, "grid", 16, 0, NVFX_PRECISION_FLOAT) + run(g, 128, "grid", 16, 0, NVFX_PRECISION_INT8) + run(deep, 64, "grid", 8, 0, NVFX_PRECISION_INT8) +
               run(wide, 32, "grid", 16, 0, NVFX_PRECISION_INT8);
   failures += run_scene_api();
+  failures += run_library();
   failures += run_rollout_prior(64) + run_rollout_prior(128);  // the prior against drift
   failures += run_rollout(64, true);                             // the simulator's look for the first frames
   failures += run_rollout(64, false, true);                      // study D2's advection gain and softening

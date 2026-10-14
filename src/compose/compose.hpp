@@ -154,7 +154,13 @@ struct ShaderSpec {
   float scene_light = 1.f;    // how much of the scene's light (fires, flash) lights the soot
   float relief = 6.f;         // soot read as a height field for lighting (0: flat)
   std::array<float, 3> tint{1.f, 1.f, 1.f};  // soot colour
+  // The emitted colours turned around the grey axis by this many degrees (a recolour, not new dynamics: 120 turns the
+  // fire ramp's reds green, 240 blue to violet). 0 draws them as they are, by exactly the code without it.
+  float hue = 0.f;
 };
+
+// The 3 x 3 matrix that turns a colour `degrees` around the grey axis (rows: output red, green, blue).
+std::array<float, 9> hue_matrix(float degrees);
 
 class Light;
 
@@ -181,6 +187,16 @@ class Module {
   // runner's own, which is freed. A set-up call; `shared` must outlive the module's steps.
   void share_scratch(StepScratch& shared);
   void take_over(const Module& from);                         // the other's physical state and fine fields
+  // Shards, so that a looping effect plays for good (docs/COMPOSE.md §4.3): one continuous rollout wanders off within
+  // tens of seconds (a flame dies, smoke breaks up), so every `period` frames of its life a second runner starts with
+  // a new seed from the start point nearest the module's controls, `fade` frames before the change, and steps beside
+  // it while the module's state is blended into it (every coarse channel and the fine fields, the last frame taking
+  // the second's whole); then the second runner is the module's. `offset` frames shift the changes (instances apart).
+  // A shard whose heat and soot fall below a sixth of the most it had (a flame gone out) is replaced at once.
+  // A set-up call (it makes the second runner); a module started empty or taken over plays on without. 0: off.
+  void use_shards(int period, int fade, int offset);
+  int shards() const { return shard_; }  // shard changes since the module started
+  std::size_t shard_bytes() const;       // the second runner's own memory
   void step();
   void shade(const Light* light);  // into image(): learned renderer or field shader, tile space
   const Image4& image() const { return img_; }
@@ -226,6 +242,11 @@ class Module {
   int size_;
   Isa isa_;
   std::unique_ptr<rt::RolloutRunner> r_;
+  std::unique_ptr<rt::RolloutRunner> next_;  // shards: the next one, rolled ahead
+  int shard_period_ = 0, shard_fade_ = 0, shard_offset_ = 0, next_frames_ = -1, shard_ = 0, start_index_ = 0, shard_start_ = 0;
+  float shard_peak_ = 0.f;  // the most heat and soot the shard has had (a shard far below it is replaced early)
+  bool shardable_ = false;
+  std::uint64_t next_seed_ = 0;
   StepScratch* shared_ = nullptr;
   Image4 img_;
   std::vector<std::uint8_t> rgba8_;
@@ -328,12 +349,14 @@ void push(Module& m, const FieldBus& bus, float gain);
 //            burning object; the fire models turn the heat into flames);
 //   cold     an extinguisher: removes a fraction `strength` of the heat per frame at (x, y), falling off over
 //            `radius`, and turns a fraction `damping` of what it removes into soot (steam and smoke).
+//   lamp     a light at (x, y) of `strength` and `radius` in `colour` (a Lamp for Light::update): acts on no module.
 struct ForceField {
-  enum class Kind { ceiling, vortex, wind, gust, ring, attract, heat, cold } kind = Kind::ceiling;
+  enum class Kind { ceiling, vortex, wind, gust, ring, attract, heat, cold, lamp } kind = Kind::ceiling;
   float x = 0, y = 0, radius = 100.f, strength = 0.f, soft = 80.f, u = 0, v = 0;
   float damping = 0.25f;  // ceiling: fraction of vertical velocity removed per frame at full depth
   float amount = 0.5f, rate = 0.5f, time = 0.f;  // gust
   std::uint64_t seed = 1;                        // gust
+  std::array<float, 3> colour{1.f, 0.6f, 0.3f};  // lamp
 };
 void apply(Module& m, const ForceField& f, float weight = 1.f);
 // The flow of the fields that push (gust, ring, attract's swirl) at world (wx, wy), world pixels per frame, y down,
@@ -353,13 +376,22 @@ void transfer(Module& from, std::span<Module* const> to, float fraction, int row
 
 // --- light -------------------------------------------------------------------------------------------------------------
 
+// A light placed in the world that is not on the bus (procedural, not learned): it emits like hot cells of the bus do,
+// `strength` (a fire's heat, about 1) at its centre falling off as a Gaussian of `radius` world pixels, in `colour`.
+// It lights the ground and the smoke; it is not heat (no haze, nothing for rules or gameplay to read).
+struct Lamp {
+  float x = 0, y = 0, radius = 40.f, strength = 1.f;
+  std::array<float, 3> colour{1.f, 0.6f, 0.3f};
+};
+
 // Light in the world from everything hot on the bus: each bus cell's heat emits a blackbody-like colour, spread by a
 // pyramid of blurs (a wide, soft falloff), plus a global flash. Sampled by the field shader and the ground.
 class Light {
  public:
   explicit Light(const FieldBus& bus);
-  // Rows are spread over the pool; the light is the same on any number of threads.
-  void update(const FieldBus& bus, float gain, std::array<float, 3> flash, Pool& pool);
+  // Rows are spread over the pool; the light is the same on any number of threads. Lamps add their emission to the
+  // bus's before the blurs (none: the light of the bus alone, by exactly the code without them).
+  void update(const FieldBus& bus, float gain, std::array<float, 3> flash, Pool& pool, std::span<const Lamp> lamps = {});
   std::array<float, 3> at(float x, float y) const;  // world position
   // The grid at() samples: field() is [ny][nx][3] cells of `cell` world pixels from (x0, y0); at() adds flash().
   std::span<const float> field() const { return L_; }
@@ -392,10 +424,12 @@ std::array<float, 3> heat_colour(float t);
 
 // --- particles ---------------------------------------------------------------------------------------------------------
 
-enum class Kind : std::uint8_t { spark, ember, debris, flake };
+enum class Kind : std::uint8_t { spark, ember, debris, flake, glow };
 
 // Particles in world pixels and seconds, a fixed capacity (spawns beyond it are dropped). Embers and sparks glow by
-// temperature and are drawn additively with motion blur; debris and flakes are dark and drawn over.
+// temperature and are drawn additively with motion blur; debris and flakes are dark and drawn over. Glows (procedural
+// elements: lightning, arcs, rings, flares; not learned) are soft lines of light of their own colour that do not move:
+// pieces of a bolt or of a ring, or a disc where both ends meet, drawn additively (bloom spreads them).
 class Particles {
  public:
   explicit Particles(int capacity);
@@ -403,6 +437,11 @@ class Particles {
   int capacity() const { return static_cast<int>(x_.size()); }
   // One particle; returns false when full.
   bool spawn(Kind k, float x, float y, float vx, float vy, float temp, float size, float life);
+  // A glow from (x0, y0) to (x1, y1): `radius` world pixels either side of the line, `brightness` times `colour` at its
+  // core, for `life` seconds. Pieces of one line join without overlapping: only the first piece draws the round cap at
+  // its start (`cap_start`) and only the last the cap at its end (`cap_end`); a disc is a piece of length 0 with both.
+  bool spawn_glow(float x0, float y0, float x1, float y1, float radius, std::array<float, 3> colour, float brightness, float life,
+                  bool cap_start, bool cap_end);
   struct Landing {
     float x = 0, temp = 0;
     Kind kind = Kind::ember;
@@ -427,7 +466,8 @@ class Particles {
  private:
   void kill(int i);
   int n_ = 0;
-  std::vector<float> x_, y_, px_, py_, vx_, vy_, temp_, size_, life_, age_, cool_;
+  // cool_ is a glow's caps (1: start, 2: end); temp_ its brightness; size_ its radius; r_, g_, b_ its colour.
+  std::vector<float> x_, y_, px_, py_, vx_, vy_, temp_, size_, life_, age_, cool_, r_, g_, b_;
   std::vector<Kind> kind_;
   std::vector<Landing> landed_;
   int n_landed_ = 0;
