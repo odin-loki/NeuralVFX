@@ -549,6 +549,7 @@ void Manager::attach(Inst& in, int model, int sim, std::int64_t offset) {
   in.model = model;
   in.sim = sim;
   in.offset = offset;
+  in.buf_frame = -1;
   models_[z(model)].sims[z(sim)].refs++;
 }
 
@@ -1127,11 +1128,6 @@ void Manager::schedule(double dt) {
       s.steps = s.renders = 0;
       s.transfer_job = s.next_slot != nullptr;
       if (!s.used || !s.slot) continue;
-      bool views = false;  // a viewer needs its own picture composed
-      for (int v = s.first_viewer; v >= 0; v = insts_[z(v)].next_viewer) {
-        const Inst& in = insts_[z(v)];
-        views |= in.visible && (in.offset > 0 || in.proxied || in.fade > 0.f);
-      }
       if (s.paused) {
         if (s.transfer_job) jobs_.push_back(&s);
         continue;
@@ -1150,15 +1146,20 @@ void Manager::schedule(double dt) {
         s.due = true;
         s.show = s.fa;
       }
+      int views = 0;  // viewers with a picture of their own to compose (a new frame for them, or a fade)
+      for (int v = s.first_viewer; v >= 0; v = insts_[z(v)].next_viewer) {
+        const Inst& in = insts_[z(v)];
+        if (in.visible && (in.offset > 0 || in.proxied || in.fade > 0.f) && (in.fade > 0.f || s.show - in.offset != in.buf_frame)) ++views;
+      }
       const int L = s.slot->level;
       const bool moved = s.show != s.shown;
-      s.compose = moved || s.transfer_job || views;
+      s.compose = moved || s.transfer_job || views > 0;
       float c = 0.f;
       if (s.due) {
         const float steps = s.ready ? static_cast<float>(s.div) * M.step_factor : std::min(desc_.catchup_frames, static_cast<float>(M.re->m.h.warmup + s.div));
         c = steps * M.step_ms[z(L)] + M.render_factor * M.render_ms[z(L)] * (s.started ? 1.f : 2.f);
       }
-      const float comp = (moved && s.div > 1 ? compose_ms(M, kSizes[z(L)]) : 0.f) + (views ? compose_ms(M, desc_.copy_size) : 0.f);
+      const float comp = (moved && s.div > 1 ? compose_ms(M, kSizes[z(L)]) : 0.f) + static_cast<float>(views) * compose_ms(M, desc_.copy_size);
       s.cost = c + comp;
       s.compose_cost = comp;
       if (s.due) {
@@ -1475,7 +1476,7 @@ nvfx_status Manager::end() {
     if (in.fade > 0.f) flags |= NVFX_PICTURE_FADING;
     if (in.finished) flags |= NVFX_PICTURE_FINISHED;
     in.pic_flags = flags;
-    in.buf_new = in.buf_interp = false;
+    in.buf_new = false;  // (buf_interp stays: the picture is still the one composed)
     if (in.visible) st.visible++;
     if (in.finished) st.finished++;
     if (in.proxied) st.proxied++;
@@ -1769,6 +1770,7 @@ int Manager::ring_view(Model& M, Sim& s, std::int64_t f, std::uint8_t* out, Work
 void Manager::compose_view(Model& M, Sim& s, Inst& in, Work& w) {
   const int C = desc_.copy_size;
   const std::int64_t f = s.show - in.offset;
+  if (f == in.buf_frame && in.fade <= 0.f) return;  // the same frame as last time (a 60 Hz game: every other tick)
   bool interp = false;
   if (in.offset > 0 || in.proxied) {
     const int r = ring_view(M, s, f, in.buf.data(), w);
@@ -1788,6 +1790,7 @@ void Manager::compose_view(Model& M, Sim& s, Inst& in, Work& w) {
   }
   in.buf_new = true;
   in.buf_interp = interp;
+  in.buf_frame = in.fade > 0.f ? -1 : f;
 }
 
 }  // namespace nfx::mgr

@@ -142,6 +142,7 @@ struct Inst {
   std::vector<std::uint8_t> buf, snap;
   float fade = 0.f;  // seconds left of a fade from snap
   bool use_buf = false, buf_new = false, buf_interp = false;
+  std::int64_t buf_frame = -1;  // the frame its buffer holds (-1: none, or a fade in progress)
   const std::uint8_t* pic = nullptr;
   int pic_size = 0, pic_flags = 0;
   double pic_time = 0.0;
