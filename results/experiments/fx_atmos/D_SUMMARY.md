@@ -28,12 +28,28 @@ Stepper loss: stages 1-2 (normalised squared error plus profiles) and stage 3 (p
 |---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
 | fog | 160 x 240 | 21.33 | 0.01692 | 7028 | 0.01564 | 1395 | 43.08 | 1 | 0 | 1 | 8 | 145.7 |
 | dust | 240 x 90 | 12.00 | 0.02564 | 7107 | 0.03818 | 1256 | 38.06 | 1 | 0 | 2 | 16 | 274.2 |
+| cloud | 160 x 240 | 21.33 | 0.01065 | 8147 | 0.01000 | 2172 | 38.34 | 1 | 0 | 1 | 8 | 145.7 |
 
 Renderer, detail constants and start points from `d-finish` on the trained steppers; stage 3 from `d-tune`.
 
 ### Tracking a held-out run from its true start point
 
 Active PSNR against the true run, mean over held-out runs (other seeds and settings), by frames after the start point. `neural`: the rollout effect through the runtime, started from the true state (coarse and fine) with the run's noise seed. `coarse_sim_detail`: the simulation on the same 32-cell grid with the same detail layer, drawn by the simulation's own renderer. `neural_dynamics_true_renderer`: the neural dynamics drawn by that renderer too (separates dynamics from rendering). `renderer_on_true_fields`: the learned renderer on the true fields (frames 1-30, then their mean).
+
+**cloud**
+
+| method | 1 | 4 | 8 | 16 | 30 | 60 | 120 | 240 |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| neural | 33.53 | 32.32 | 30.41 | 27.88 | 25.43 | 23.45 | 21.91 | 21.13 |
+| neural_dynamics_true_renderer | 43.99 | 36.70 | 32.23 | 28.40 | 25.36 | 23.14 | 21.59 | 20.97 |
+| coarse_sim_detail | 45.62 | 36.66 | 31.02 | 26.14 | 22.83 | 20.38 | 19.52 | 19.25 |
+| coarse_sim | 28.39 | 28.01 | 27.26 | 25.85 | 24.32 | 22.69 | 22.16 | 21.92 |
+| frozen | 46.15 | 34.98 | 29.60 | 24.73 | 20.95 | 17.18 | 16.55 | 16.78 |
+| renderer_on_true_fields | 33.88 | 33.76 | 33.60 | 33.36 | 33.41 | 33.49 | 33.49 | 33.49 |
+
+neural - coarse_sim_detail, paired over runs: frame 1: -12.09 [-13.30, -10.71]; frame 8: -0.62 [-1.15, -0.11]; frame 30: +2.59 [+1.81, +3.28]; frame 60: +3.08 [+2.31, +3.87]; frame 240: +1.88 [+1.39, +2.40];
+
+neural_dynamics_true_renderer - coarse_sim_detail, paired over runs: frame 1: -1.63 [-2.71, -0.49]; frame 8: +1.21 [+0.88, +1.53]; frame 30: +2.52 [+1.88, +3.07]; frame 60: +2.76 [+2.07, +3.44]; frame 240: +1.72 [+1.24, +2.21];
 
 **dust**
 
@@ -68,6 +84,20 @@ neural_dynamics_true_renderer - coarse_sim_detail, paired over runs: frame 1: +4
 ### Endless runs at held-out settings
 
 The ten held-out settings of study B, a new seed each, 10 s per run (explosions: their 3 s). Distances of each method's frame statistics to a real run of the simulation at that setting; `real_other_seed` is a second real run with another seed, the floor. Lower is better except motion ratio (1 is right) and mean-frame PSNR (higher is closer).
+
+**cloud**
+
+| method | spectrum L1 | motion ratio | coverage L1 | emission L1 | mean-frame PSNR |
+|---|---:|---:|---:|---:|---:|
+| real_other_seed | 0.066 | 0.99 | 0.0039 | 0.0000 | 31.71 |
+| neural | 0.345 | 1.19 | 0.0069 | 0.0002 | 29.56 |
+| flipbook_nearest | 0.132 | 1.44 | 0.0082 | 0.0000 | 28.08 |
+| coarse_sim_detail | 0.677 | 1.22 | 0.0052 | 0.0000 | 29.16 |
+| coarse_sim | 0.688 | 0.72 | 0.0046 | 0.0000 | 30.13 |
+
+Spectrum distance, paired over settings: neural - grid_k8 -; neural - flipbook_nearest +0.212 [+0.119, +0.310]; neural - coarse_sim_detail -0.333 [-0.388, -0.278]; neural - real_other_seed +0.278 [+0.201, +0.355].
+
+Mean-frame PSNR (dB), paired: neural - flipbook_nearest +1.49 [+0.33, +2.41]; neural - coarse_sim_detail +0.40 [-0.58, +1.24] (tie); neural - real_other_seed -2.14 [-3.35, -1.12]. Motion error |ln(motion ratio)|, paired: neural - flipbook_nearest -0.179 [-0.323, -0.028]; neural - coarse_sim_detail -0.020 [-0.069, +0.039] (tie); neural - real_other_seed +0.075 [-0.010, +0.173] (tie). Coverage distance, paired: neural - flipbook_nearest -0.0013 [-0.0037, +0.0011] (tie); neural - real_other_seed +0.0030 [+0.0018, +0.0043].
 
 **dust**
 
@@ -115,3 +145,15 @@ Statistics of each 10 s window of a 60 s neural run (shards of 6 s from start po
 | fog | 1 | 3 | 0.7028 | 1.6361 | 0.0065 | 30.552 |
 | fog | 1 | 4 | 0.5295 | 2.1964 | 0.0057 | 29.463 |
 | fog | 1 | 5 | 0.5075 | 1.7777 | 0.0026 | 33.311 |
+| cloud | 0 | 0 | 0.2777 | 1.2297 | 0.0073 | 32.254 |
+| cloud | 0 | 1 | 0.3676 | 1.1085 | 0.0039 | 32.532 |
+| cloud | 0 | 2 | 0.3029 | 1.1355 | 0.0038 | 31.348 |
+| cloud | 0 | 3 | 0.3644 | 1.3118 | 0.0103 | 30.010 |
+| cloud | 0 | 4 | 0.3395 | 1.0417 | 0.0058 | 27.838 |
+| cloud | 0 | 5 | 0.3699 | 0.9201 | 0.0073 | 29.611 |
+| cloud | 1 | 0 | 0.4775 | 1.5395 | 0.0019 | 30.219 |
+| cloud | 1 | 1 | 0.4716 | 1.6023 | 0.0045 | 29.874 |
+| cloud | 1 | 2 | 0.5283 | 1.5150 | 0.0024 | 32.467 |
+| cloud | 1 | 3 | 0.5008 | 1.5262 | 0.0061 | 29.423 |
+| cloud | 1 | 4 | 0.5077 | 1.9564 | 0.0070 | 29.244 |
+| cloud | 1 | 5 | 0.5646 | 1.6915 | 0.0029 | 32.320 |
