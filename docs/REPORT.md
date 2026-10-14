@@ -21,11 +21,22 @@ Plan and decisions: [PLAN.md](PLAN.md).
     40 s.
 - **The learned dynamics follow a held-out run better than the simulation at the same resolution**: +2.1 to +4.7 dB
   of active PSNR after 1 s (intervals above zero), until the chaos makes every method equal.
-- **The recipe carries to new effects, but not to every kind of motion** (§6.10, [EFFECTS.md](EFFECTS.md)). Steam,
-  added later and trained and tested the same way, came out as fire and smoke did: +2.6 dB [+2.1, +3.0] over the
-  coarse simulation at 1 s, the right motion, an average picture tied with a second real run. Magic, a fast regular
-  swirl, only ties the coarse simulation and its detail is worse than the nearest flipbook's. A scene script plays
-  both with fire and an explosion (`examples/scenes/portal.nvfxs`).
+- **The recipe carries to new effects, but not to every kind of motion** (§6.10 to §6.12). Eight more effects were
+  added to the simulator and trained and tested the same way, each once on held-out settings and seeds, at about 3
+  CPU-hours each and no new code in the trainer or the runtime:
+  - **as good as fire and smoke or better:** steam, a flamethrower's jet, fog, dust and cloud follow a held-out run
+    2.1 to 3.4 dB better than the coarse simulation at 1 s (intervals above zero). Dust's detail ties a second real
+    run, which no earlier effect's did; fog ties the 45 MB flipbook library on every statistic;
+  - **weak:** magic (a fast regular swirl) only ties the coarse simulation and its detail is worse than a flipbook's;
+    the plasma orb and the dust devil also only tie it at 1 s, though they play endlessly with the right motion and
+    an average picture closer than a flipbook's; the dust devil sometimes loses its column at low intensity.
+  Scene scripts play them together: a portal ([EFFECTS.md](EFFECTS.md)), a stormy moor
+  ([EFFECTS_ATMOSPHERE.md](EFFECTS_ATMOSPHERE.md)), a fire whirl ([EFFECTS_ENERGY.md](EFFECTS_ENERGY.md)).
+- **For engines:** an effect library of named, ready-to-place effects built from the trained models and procedural
+  elements, with a C API and a Godot node ([LIBRARY.md](LIBRARY.md)); and an effect manager that keeps a scene's
+  rollout effects within a CPU budget by size and update rate, shared runs and proxies ([MANAGER.md](MANAGER.md)): a
+  crowd of 165 effects in 3.8 to 4.3 ms of one core per 60 Hz frame once it has measured the machine, against 70 ms
+  with every effect its own instance at 64 px.
 - **The price is CPU: 0.8 to 0.9 ms per 128 x 128 frame (0.4 to 0.5 ms at 64 px) and 2.4 MB of working memory per
   playing instance**, after the runtime's rollout code was optimised (2.0 to 2.4 ms before, measured in the same
   session; §7). The memory was 4.0 MB until the instance's two shards shared their step buffers (§7). That suits a
