@@ -139,9 +139,11 @@ struct ShadeSpan {
   std::array<float, 3> flash;
   int size;
   float* out;                             // RGBA, the row's first pixel
+  const float* hue = nullptr;             // the look's hue matrix (ShaderSpec::hue), or none
 };
 
 // (The rows are restrict-qualified parameters: GCC then knows the output overlaps none of them.)
+template <bool kHue>
 [[gnu::always_inline]] inline void shade_pixels(const float* __restrict fh, const float* __restrict fs, const float* __restrict up, const float* __restrict dn,
                                     const float* __restrict sx, const float* __restrict pw, const float* __restrict s0, const float* __restrict s1,
                                     const float* __restrict l0, const float* __restrict l1, float* __restrict o, const ShadeSpan& s, const ShaderSpec& sp,
@@ -172,6 +174,14 @@ struct ShadeSpan {
     const float Lb = 1.1f * moon + scene * lb / (1.f + lb) * under;
     float hr, hg, hb;
     heat_rgb(T * inv_hs, hr, hg, hb);
+    if constexpr (kHue) {  // the emitted colour turned around the grey axis (a recolour)
+      const float* m = s.hue;
+      const float r2 = std::max(0.f, m[0] * hr + m[1] * hg + m[2] * hb), g2 = std::max(0.f, m[3] * hr + m[4] * hg + m[5] * hb);
+      const float b2 = std::max(0.f, m[6] * hr + m[7] * hg + m[8] * hb);
+      hr = r2;
+      hg = g2;
+      hb = b2;
+    }
     const float e = emission * pw[x] * (1.f - 0.55f * a);
     const float c[4] = {a * albedo * tr * Lr + e * hr, a * albedo * tg * Lg + e * hg, a * albedo * tb * Lb + e * hb, a};
     for (int k = 0; k < 4; ++k) o[zs(x) * 4 + zs(k)] = std::bit_cast<float>(std::bit_cast<std::uint32_t>(c[k]) & keep);
@@ -181,13 +191,15 @@ struct ShadeSpan {
 // Compiled twice: for the baseline ISA and, when the module's runner uses it, for AVX2 (wider vectors, and multiply-adds
 // fused, so the two differ in the last bit or so, as the runtime's ISAs do).
 [[gnu::noinline]] void shade_span_base(const ShadeSpan& s, const ShaderSpec& sp, int x0, int x1) {
-  shade_pixels(s.heat, s.soot, s.soot_up, s.soot_down, s.slope_x, s.ramp, s.shadow0, s.shadow1, s.light0, s.light1, s.out, s, sp, x0, x1);
+  if (s.hue) return shade_pixels<true>(s.heat, s.soot, s.soot_up, s.soot_down, s.slope_x, s.ramp, s.shadow0, s.shadow1, s.light0, s.light1, s.out, s, sp, x0, x1);
+  shade_pixels<false>(s.heat, s.soot, s.soot_up, s.soot_down, s.slope_x, s.ramp, s.shadow0, s.shadow1, s.light0, s.light1, s.out, s, sp, x0, x1);
 }
 
 #if defined(__GNUC__) && !defined(__clang__) && defined(__x86_64__)
 #define NFX_COMPOSE_AVX2 1
 [[gnu::noinline, gnu::target("arch=x86-64-v3")]] void shade_span_avx2(const ShadeSpan& s, const ShaderSpec& sp, int x0, int x1) {
-  shade_pixels(s.heat, s.soot, s.soot_up, s.soot_down, s.slope_x, s.ramp, s.shadow0, s.shadow1, s.light0, s.light1, s.out, s, sp, x0, x1);
+  if (s.hue) return shade_pixels<true>(s.heat, s.soot, s.soot_up, s.soot_down, s.slope_x, s.ramp, s.shadow0, s.shadow1, s.light0, s.light1, s.out, s, sp, x0, x1);
+  shade_pixels<false>(s.heat, s.soot, s.soot_up, s.soot_down, s.slope_x, s.ramp, s.shadow0, s.shadow1, s.light0, s.light1, s.out, s, sp, x0, x1);
 }
 #endif
 
@@ -400,9 +412,27 @@ void Module::share_scratch(StepScratch& shared) {
   shared.fit(*r_);
   rt::RolloutScratch& s = shared.take();
   r_->use_scratch(&s);  // frees the runner's own
+  if (next_) next_->use_scratch(&s);
   shared.give(s);
   shared_ = &shared;
 }
+
+void Module::use_shards(int period, int fade, int offset) {
+  shard_period_ = std::max(0, period);
+  shard_fade_ = std::clamp(fade, 1, std::max(1, shard_period_ / 2));
+  shard_offset_ = shard_period_ > 0 ? ((offset % shard_period_) + shard_period_) % shard_period_ : 0;
+  if (shard_period_ > 0 && !next_) {
+    next_ = make_runner(e_, size_, isa_);
+    if (shared_) {
+      shared_->fit(*next_);
+      rt::RolloutScratch& s = shared_->take();
+      next_->use_scratch(&s);
+      shared_->give(s);
+    }
+  }
+}
+
+std::size_t Module::shard_bytes() const { return next_ ? next_->scratch_bytes() : 0; }
 
 void Module::start(int index, std::uint64_t run_seed) {
   seed = run_seed;
@@ -412,6 +442,10 @@ void Module::start(int index, std::uint64_t run_seed) {
   if (s) shared_->give(*s);
   active = true;
   frames = 0;
+  start_index_ = index;
+  shardable_ = true;
+  next_frames_ = -1;
+  shard_ = 0;
 }
 
 void Module::start_empty(float seconds, std::uint64_t run_seed) {
@@ -423,6 +457,8 @@ void Module::start_empty(float seconds, std::uint64_t run_seed) {
   r_->adopt(seconds);
   active = true;
   frames = 0;
+  shardable_ = false;
+  next_frames_ = -1;
 }
 
 void hand_over(const Module& from, Module& to) {
@@ -443,6 +479,8 @@ void Module::take_over(const Module& from) {
   hand_over(from, *this);
   active = true;
   frames = 0;
+  shardable_ = false;
+  next_frames_ = -1;
 }
 
 void Module::step() {
@@ -460,6 +498,39 @@ void Module::step() {
     }
     std::ranges::fill(pushed_, 0.f);
     has_push_ = false;
+  }
+  if (shard_period_ > 0 && shardable_) {  // shards: roll the next one ahead, blend into it, then take it
+    if (next_frames_ < 0 && (frames + 1 + shard_offset_) % shard_period_ == shard_period_ - shard_fade_) {
+      next_seed_ = seed * 0x9E3779B97F4A7C15ULL + 0x632BE59BD9B4E019ULL;
+      rt::RolloutScratch* sn = shared_ ? &shared_->take() : nullptr;
+      if (sn) next_->use_scratch(sn);
+      next_->start(start_index_, controls, next_seed_);
+      if (sn) shared_->give(*sn);
+      next_frames_ = 0;
+    }
+    if (next_frames_ >= 0) {
+      rt::RolloutScratch* sn = shared_ ? &shared_->take() : nullptr;
+      if (sn) next_->use_scratch(sn);
+      next_->step(controls, next_seed_);
+      if (sn) shared_->give(*sn);
+      ++next_frames_;
+      const bool whole = next_frames_ >= shard_fade_;
+      const float w = static_cast<float>(next_frames_) / static_cast<float>(shard_fade_);
+      const auto blend = [&](std::span<float> a, std::span<const float> b) {
+        if (whole) std::ranges::copy(b, a.begin());
+        else
+          for (std::size_t i = 0; i < a.size(); ++i) a[i] += w * (b[i] - a[i]);
+      };
+      blend(r_->coarse_mut(), next_->coarse());
+      blend(r_->fine_heat_mut(), next_->fine_heat());
+      blend(r_->fine_soot_mut(), next_->fine_soot());
+      if (whole) {  // the next shard is the module's now
+        std::swap(r_, next_);
+        seed = next_seed_;
+        next_frames_ = -1;
+        ++shard_;
+      }
+    }
   }
   ++frames;
   step_ms = ms_since(t0);
@@ -551,6 +622,7 @@ void Module::shade(const Light* light) {
   auto ft = r_->fine_heat();
   auto fd = r_->fine_soot();
   const float k = fl(S) / fl(R), inv_hs = 1.f / sp.heat_scale, p = sp.emission_power;
+  const std::array<float, 9> hue_m = hue_matrix(sp.hue);
   for (int cy = 0; cy < R; ++cy) {  // every coarse row of the shadow sum resampled at the pixels' x
     const float* s = shadow_.data() + zs(cy) * zs(R);
     float* o = shadow_x_.data() + zs(cy) * zs(S);
@@ -632,6 +704,7 @@ void Module::shade(const Light* light) {
         sp_row.ramp = ramp;
         sp_row.size = S;
         sp_row.out = out;
+        sp_row.hue = sp.hue != 0.f ? hue_m.data() : nullptr;
         ready = true;
       }
       const int xa = std::clamp(x0, 2, std::max(2, S - 2)), xb = std::clamp(x1, xa, std::max(2, S - 2));  // [xa, xb): both neighbours inside
@@ -856,7 +929,7 @@ void push(Module& m, const FieldBus& bus, float gain) {
 }
 
 void apply(Module& m, const ForceField& f, float weight) {
-  if (!m.active || weight <= 0.f) return;
+  if (!m.active || weight <= 0.f || f.kind == ForceField::Kind::lamp) return;  // a lamp lights; it does not push
   if (f.kind == ForceField::Kind::heat || f.kind == ForceField::Kind::cold) return apply_heat(m, f, weight);  // fields.cpp
   const int R = m.res(), S = m.size(), C = m.channels();
   const float k = fl(S) / fl(R), sc = m.at.scale, to_cells = 1.f / (k * sc);
@@ -1008,6 +1081,16 @@ std::array<float, 3> heat_colour(float t) {
   return {stops[i][1] + u * (stops[i + 1][1] - stops[i][1]), stops[i][2] + u * (stops[i + 1][2] - stops[i][2]), stops[i][3] + u * (stops[i + 1][3] - stops[i][3])};
 }
 
+std::array<float, 9> hue_matrix(float degrees) {
+  // Rodrigues' rotation about (1, 1, 1) / sqrt(3): whole thirds of a turn permute the channels exactly.
+  const double a = static_cast<double>(degrees) * 3.14159265358979323846 / 180.0;
+  const double c = std::cos(a), s = std::sin(a) * std::sqrt(1.0 / 3.0), k = (1.0 - c) / 3.0;
+  const double m[9] = {c + k, k - s, k + s, k + s, c + k, k - s, k - s, k + s, c + k};
+  std::array<float, 9> out{};
+  for (int i = 0; i < 9; ++i) out[zs(i)] = std::abs(m[i]) < 1e-9 ? 0.f : static_cast<float>(m[i]);
+  return out;
+}
+
 Light::Light(const FieldBus& bus) : x0_(bus.x0()), y0_(bus.y0()), cell_(bus.cell()), nx_(bus.nx()), ny_(bus.ny()) {
   L_.assign(zs(nx_) * zs(ny_) * 3, 0.f);
   int nx = nx_, ny = ny_;
@@ -1066,7 +1149,7 @@ void blur_row(const float* __restrict src, float* __restrict dst, int n) {
 
 }  // namespace
 
-void Light::update(const FieldBus& bus, float gain, std::array<float, 3> flash, Pool& pool) {
+void Light::update(const FieldBus& bus, float gain, std::array<float, 3> flash, Pool& pool, std::span<const Lamp> lamps) {
   // Every value is computed as a plain pass over the levels would compute it, in the same order of operations, so the
   // light does not depend on the number of threads. Rows are spread over the pool in four passes.
   flash_ = flash;
@@ -1095,6 +1178,17 @@ void Light::update(const FieldBus& bus, float gain, std::array<float, 3> flash, 
         const auto c = heat_colour(h / 1.2f);
         const float e = gain * h * h;
         for (int ch = 0; ch < 3; ++ch) a[zs(x) * 3 + zs(ch)] = e * c[zs(ch)];
+      }
+      for (const Lamp& lamp : lamps) {  // lamps (procedural): a Gaussian of emission, over the cells within 3 radii
+        const float r = std::max(lamp.radius, 1.f), wy = y0_ + (fl(y) + 0.5f) * cell_, dy = wy - lamp.y;
+        if (std::abs(dy) > 3.f * r || !(lamp.strength > 0.f)) continue;
+        const int xa = std::max(0, ifloor((lamp.x - 3.f * r - x0_) / cell_)), xb = std::min(nx_ - 1, ifloor((lamp.x + 3.f * r - x0_) / cell_));
+        const float inv = -0.5f / (r * r);
+        for (int x = xa; x <= xb; ++x) {
+          const float dx = x0_ + (fl(x) + 0.5f) * cell_ - lamp.x;
+          const float e = gain * lamp.strength * std::exp((dx * dx + dy * dy) * inv);
+          for (int ch = 0; ch < 3; ++ch) a[zs(x) * 3 + zs(ch)] += e * lamp.colour[zs(ch)];
+        }
       }
       blur_row(a, l0.b.data() + zs(y) * zs(nx_) * 3, nx_);
     }
@@ -1169,7 +1263,7 @@ std::array<float, 3> Light::at(float x, float y) const {
 // --- particles ---------------------------------------------------------------------------------------------------------
 
 Particles::Particles(int capacity) {
-  for (auto* v : {&x_, &y_, &px_, &py_, &vx_, &vy_, &temp_, &size_, &life_, &age_, &cool_}) v->assign(zs(capacity), 0.f);
+  for (auto* v : {&x_, &y_, &px_, &py_, &vx_, &vy_, &temp_, &size_, &life_, &age_, &cool_, &r_, &g_, &b_}) v->assign(zs(capacity), 0.f);
   kind_.assign(zs(capacity), Kind::ember);
   landed_.assign(zs(capacity), Landing{});
 }
@@ -1197,10 +1291,31 @@ bool Particles::spawn(Kind k, float x, float y, float vx, float vy, float temp, 
   return true;
 }
 
+bool Particles::spawn_glow(float x0, float y0, float x1, float y1, float radius, std::array<float, 3> colour, float brightness, float life,
+                           bool cap_start, bool cap_end) {
+  if (n_ >= capacity()) return false;
+  const std::size_t i = zs(n_++);
+  kind_[i] = Kind::glow;
+  px_[i] = x0;
+  py_[i] = y0;
+  x_[i] = x1;
+  y_[i] = y1;
+  vx_[i] = vy_[i] = 0.f;
+  temp_[i] = brightness;
+  size_[i] = std::max(radius, 0.25f);
+  life_[i] = life;
+  age_[i] = 0.f;
+  cool_[i] = (cap_start ? 1.f : 0.f) + (cap_end ? 2.f : 0.f);
+  r_[i] = colour[0];
+  g_[i] = colour[1];
+  b_[i] = colour[2];
+  return true;
+}
+
 void Particles::kill(int i) {
   const int last = --n_;
   if (i == last) return;
-  for (auto* v : {&x_, &y_, &px_, &py_, &vx_, &vy_, &temp_, &size_, &life_, &age_, &cool_}) (*v)[zs(i)] = (*v)[zs(last)];
+  for (auto* v : {&x_, &y_, &px_, &py_, &vx_, &vy_, &temp_, &size_, &life_, &age_, &cool_, &r_, &g_, &b_}) (*v)[zs(i)] = (*v)[zs(last)];
   kind_[zs(i)] = kind_[zs(last)];
 }
 
@@ -1214,6 +1329,10 @@ void Particles::update(float dt, const FieldBus* bus, float flow_gain, float gro
       continue;
     }
     const Kind k = kind_[q];
+    if (k == Kind::glow) {  // glows stay where they were made, for their life
+      ++i;
+      continue;
+    }
     const float gravity = k == Kind::spark ? 380.f : k == Kind::ember ? 70.f : k == Kind::debris ? 900.f : 30.f;
     const float drag = k == Kind::spark ? 1.5f : k == Kind::ember ? 1.1f : k == Kind::debris ? 0.25f : 3.f;
     float fu = 0.f, fv = 0.f;
@@ -1257,12 +1376,56 @@ void Particles::update(float dt, const FieldBus* bus, float flow_gain, float gro
 void Particles::copy_to(Particles& to) const {
   const auto n = static_cast<std::ptrdiff_t>(n_);
   for (auto [src, dst] : {std::pair{&x_, &to.x_}, std::pair{&y_, &to.y_}, std::pair{&px_, &to.px_}, std::pair{&py_, &to.py_}, std::pair{&temp_, &to.temp_},
-                          std::pair{&size_, &to.size_}, std::pair{&life_, &to.life_}, std::pair{&age_, &to.age_}}) {
+                          std::pair{&size_, &to.size_}, std::pair{&life_, &to.life_}, std::pair{&age_, &to.age_}, std::pair{&cool_, &to.cool_},
+                          std::pair{&r_, &to.r_}, std::pair{&g_, &to.g_}, std::pair{&b_, &to.b_}}) {
     std::copy(src->begin(), src->begin() + n, dst->begin());
   }
   std::copy(kind_.begin(), kind_.begin() + n, to.kind_.begin());
   to.n_ = n_;
 }
+
+namespace {
+
+// A glow (Particles::spawn_glow) on the screen: every pixel within `radius` of the line from (x0, y0) to (x1, y1) gets
+// brightness * colour * (1 - (d / radius)^2)^2 added, d its distance from the line. Pixels beside the line's ends get the
+// round caps only when asked (`caps`: 1 start, 2 end), so the pieces of one polyline do not overlap where they join.
+void draw_glow(Image4& screen, float x0, float y0, float x1, float y1, float radius, float brightness, std::array<float, 3> colour, int caps) {
+  const int W = screen.w, H = screen.h;
+  const float r = radius, inv_r2 = 1.f / (r * r);
+  const int xa = std::max(0, ifloor(std::min(x0, x1) - r)), xb = std::min(W - 1, ifloor(std::max(x0, x1) + r));
+  const int ya = std::max(0, ifloor(std::min(y0, y1) - r)), yb = std::min(H - 1, ifloor(std::max(y0, y1) + r));
+  if (xa > xb || ya > yb || !(brightness > 0.f)) return;
+  const float dx = x1 - x0, dy = y1 - y0, len2 = dx * dx + dy * dy, inv_len2 = len2 > 1e-12f ? 1.f / len2 : 0.f;
+  const float cr = brightness * colour[0], cg = brightness * colour[1], cb = brightness * colour[2];
+  for (int py = ya; py <= yb; ++py) {
+    float* row = screen.row(py);
+    const float qy = fl(py) + 0.5f - y0;
+    for (int px = xa; px <= xb; ++px) {
+      const float qx = fl(px) + 0.5f - x0;
+      float u = (qx * dx + qy * dy) * inv_len2;  // along the line, 0 at its start and 1 at its end
+      if (len2 > 1e-12f) {
+        if (u < 0.f) {
+          if (!(caps & 1)) continue;
+          u = 0.f;
+        } else if (u >= 1.f) {
+          if (!(caps & 2)) continue;
+          u = 1.f;
+        }
+      } else {
+        u = 0.f;
+      }
+      const float ex = qx - u * dx, ey = qy - u * dy, d2 = (ex * ex + ey * ey) * inv_r2;
+      if (d2 >= 1.f) continue;
+      const float w = (1.f - d2) * (1.f - d2);
+      float* p = row + zs(px) * 4;
+      p[0] += w * cr;
+      p[1] += w * cg;
+      p[2] += w * cb;
+    }
+  }
+}
+
+}  // namespace
 
 void Particles::draw(Image4& screen, float cam_x, float cam_y) const {
   const int W = screen.w, H = screen.h;
@@ -1290,9 +1453,14 @@ void Particles::draw(Image4& screen, float cam_x, float cam_y) const {
   for (int i = 0; i < n_; ++i) {
     const std::size_t q = zs(i);
     const float x = x_[q] - cam_x, y = y_[q] - cam_y, ox = px_[q] - cam_x, oy = py_[q] - cam_y;
-    if (std::max(x, ox) < -4.f || std::min(x, ox) > fl(W) + 4.f || std::max(y, oy) < -4.f || std::min(y, oy) > fl(H) + 4.f) continue;
-    const float fade = std::min(1.f, (life_[q] - age_[q]) * 4.f);
     const Kind k = kind_[q];
+    const float m = k == Kind::glow ? size_[q] + 1.f : 4.f;  // how far outside the screen it may still draw
+    if (std::max(x, ox) < -m || std::min(x, ox) > fl(W) + m || std::max(y, oy) < -m || std::min(y, oy) > fl(H) + m) continue;
+    if (k == Kind::glow) {
+      draw_glow(screen, ox, oy, x, y, size_[q], temp_[q], {r_[q], g_[q], b_[q]}, static_cast<int>(cool_[q]));
+      continue;
+    }
+    const float fade = std::min(1.f, (life_[q] - age_[q]) * 4.f);
     if (k == Kind::spark || k == Kind::ember) {
       const float t = temp_[q];
       const auto c = heat_colour(t * 1.3f);
@@ -1690,7 +1858,8 @@ void Frame::compose(const Params& P, const LightView* L, std::span<const std::ar
           c.feather_right = t.feather > 0.f && t.band[1] == 0 ? smooth01((S - px) / t.feather) : 1.f;
           c.x_weight = c.band * c.feather_left * c.feather_right;
         }
-        seen_cols_[zs(q - base)] = fc <= lc ? std::array<int, 2>{fc, lc + 1} : std::array<int, 2>{0, 0};
+        // (none: a tile wholly off the screen, whose x1 may be below 0 and so below the empty run's start)
+        seen_cols_[zs(q - base)] = fc <= lc && lc >= x0 ? std::array<int, 2>{fc, lc + 1} : std::array<int, 2>{0, 0};
       }
     }
     const bool bg = first && L;

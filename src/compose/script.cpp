@@ -8,7 +8,8 @@
 //   setting     := ('scene' | 'bus' | 'light' | 'particles' | 'frame' | 'camera') props | 'keyframes' expr {',' expr}
 //   declaration := 'effect' NAME '=' STRING props | 'look' NAME '=' ('shader' | 'like' NAME) props
 //                | 'let' NAME '=' expr | 'input' NAME '=' expr | 'module' NAME '=' EFFECT props | 'field' NAME '=' KIND props
-//   emitter     := 'emit' ('sparks' | 'embers' | 'flakes') props
+//   emitter     := 'emit' ('sparks' | 'embers' | 'flakes' | 'arc' | 'ring' | 'glow') props
+//   catalogue   := 'entry' NAME props | 'param' NAME '=' expr props   (library catalogues only, docs/LIBRARY.md)
 //   rule        := ('at' expr ['s'] | 'when' condition) {modifier} ':' [action {';' action}]
 //   condition   := 'shock' expr 'reaches' (point | NAME) | ('ember' | 'debris') 'lands' ['where' expr] | expr
 //   modifier    := 'as' NAME | 'repeat' | 'at' 'most' expr
@@ -16,7 +17,7 @@
 //                | 'hand_over' NAME '->' NAME props | 'start' NAME props | 'wake' names props | 'stop' names
 //                | ('shock' | 'scorch' | 'burst') props
 //   props       := {[','] KEY value}          (the keys, and the shape of each value, depend on the statement)
-//   value       := expr | point | '(' expr {',' expr} ')' | expr 'x' expr | NAME | names | point 'to' point
+//   value       := expr | point | '(' expr {',' expr} ')' | expr 'x' expr | NAME | names | point 'to' point | STRING
 //   point       := '(' expr ',' expr ')'
 //   names       := NAME {',' NAME}
 //   expr        := or;  or := and {'or' and};  and := not {'and' not};  not := 'not' not | cmp
@@ -46,7 +47,7 @@ namespace {
 
 // --- the vocabulary ----------------------------------------------------------------------------------------------------
 
-enum class VT { expr, time, point, tuple, dims, name, names, points, range, look, flag };
+enum class VT { expr, time, point, tuple, dims, name, names, points, range, look, flag, text };
 struct Key {
   std::string_view key;
   VT type;
@@ -62,29 +63,38 @@ constexpr Key kEffect[] = {{"swirl", VT::expr}, {"swirl_scale", VT::expr}, {"swi
                            {"contrast", VT::expr}, {"grow", VT::expr}};
 constexpr Key kLook[] = {{"heat_scale", VT::expr}, {"emission", VT::expr}, {"emission_power", VT::expr}, {"soot_density", VT::expr},
                          {"soot_albedo", VT::expr}, {"sky", VT::expr},      {"shadow", VT::expr},         {"scene_light", VT::expr},
-                         {"relief", VT::expr},     {"tint", VT::tuple}};
+                         {"relief", VT::expr},     {"tint", VT::tuple},     {"hue", VT::expr}};
 constexpr Key kModule[] = {{"tiles", VT::dims},   {"band", VT::expr},   {"size", VT::expr},       {"width", VT::expr},
                            {"at", VT::point},     {"sink", VT::expr},   {"over", VT::name},       {"feather", VT::expr},
                            {"look", VT::look},    {"controls", VT::tuple}, {"opacity", VT::expr}, {"start", VT::expr},
-                           {"seed", VT::expr},    {"waiting", VT::flag}, {"empty", VT::flag},   {"glow", VT::tuple}};
+                           {"seed", VT::expr},    {"waiting", VT::flag}, {"empty", VT::flag},   {"glow", VT::tuple},
+                           {"shards", VT::time}};
 constexpr Key kField[] = {{"at", VT::point},     {"level", VT::expr},    {"radius", VT::expr},    {"strength", VT::expr},
                           {"soft", VT::expr},    {"damping", VT::expr},  {"swirl", VT::expr},     {"steam", VT::expr},
                           {"amount", VT::expr},  {"scale", VT::expr},    {"rate", VT::expr},      {"seed", VT::expr},
                           {"velocity", VT::point}, {"direction", VT::point}, {"core", VT::expr},  {"on", VT::names},
-                          {"weight", VT::expr},  {"if", VT::expr},       {"from", VT::time},      {"until", VT::time}};
-constexpr Key kEmit[] = {{"along", VT::range}, {"from", VT::time}, {"until", VT::time}, {"count", VT::expr}, {"tries", VT::expr},
-                         {"chance", VT::expr}, {"spread", VT::expr}, {"in", VT::point}, {"size", VT::dims}, {"soot", VT::expr},
-                         {"on", VT::names},    {"if", VT::expr}};
+                          {"weight", VT::expr},  {"if", VT::expr},       {"from", VT::time},      {"until", VT::time},
+                          {"colour", VT::tuple}};
+constexpr Key kEmit[] = {{"along", VT::range},    {"from", VT::time},   {"until", VT::time},      {"count", VT::expr},  {"tries", VT::expr},
+                         {"chance", VT::expr},    {"spread", VT::expr}, {"in", VT::point},        {"size", VT::dims},   {"soot", VT::expr},
+                         {"on", VT::names},       {"if", VT::expr},     {"at", VT::point},        {"radius", VT::expr}, {"squash", VT::expr},
+                         {"colour", VT::tuple},   {"width", VT::expr},  {"brightness", VT::expr}, {"jitter", VT::expr}, {"branches", VT::expr},
+                         {"rate", VT::expr},      {"seed", VT::expr}};
 constexpr Key kTransfer[] = {{"fraction", VT::expr}, {"top", VT::expr}, {"heat", VT::expr}, {"soot", VT::expr}, {"if", VT::expr}};
 constexpr Key kPush[] = {{"gain", VT::expr}, {"if", VT::expr}};
 constexpr Key kSuppress[] = {{"tiles", VT::points}, {"cells", VT::range}, {"if", VT::expr}};
-constexpr Key kHandOver[] = {{"seed", VT::expr}};
-constexpr Key kStart[] = {{"from", VT::expr}, {"in", VT::point}, {"seed", VT::expr}, {"at", VT::point}, {"empty", VT::flag}};
-constexpr Key kWake[] = {{"at", VT::point}};
+constexpr Key kHandOver[] = {{"seed", VT::expr}, {"if", VT::expr}};
+constexpr Key kStart[] = {{"from", VT::expr}, {"in", VT::point}, {"seed", VT::expr}, {"at", VT::point}, {"empty", VT::flag}, {"if", VT::expr}};
+constexpr Key kWake[] = {{"at", VT::point}, {"if", VT::expr}};
 constexpr Key kStop[] = {{"if", VT::expr}};
-constexpr Key kShock[] = {{"at", VT::point}, {"speed", VT::expr}, {"decay", VT::expr}, {"amp", VT::expr}, {"width", VT::expr}};
-constexpr Key kScorch[] = {{"at", VT::point}, {"radius", VT::expr}, {"glow", VT::expr}};
-constexpr Key kBurst[] = {{"at", VT::point}, {"radius", VT::expr}, {"embers", VT::expr}, {"debris", VT::expr}, {"speed", VT::expr}};
+constexpr Key kShock[] = {{"at", VT::point}, {"speed", VT::expr}, {"decay", VT::expr}, {"amp", VT::expr}, {"width", VT::expr}, {"if", VT::expr}};
+constexpr Key kScorch[] = {{"at", VT::point}, {"radius", VT::expr}, {"glow", VT::expr}, {"if", VT::expr}};
+constexpr Key kBurst[] = {{"at", VT::point},  {"radius", VT::expr},    {"embers", VT::expr}, {"debris", VT::expr}, {"speed", VT::expr},
+                          {"sparks", VT::expr}, {"direction", VT::point}, {"cone", VT::expr},  {"if", VT::expr}};
+// Library catalogues (docs/LIBRARY.md): an entry's header and its parameters. A scene rejects them (Compiler).
+constexpr Key kEntry[] = {{"category", VT::name}, {"size", VT::dims}, {"anchor", VT::name}, {"loop", VT::flag},
+                          {"once", VT::time},     {"show", VT::time}, {"about", VT::text}};
+constexpr Key kParam[] = {{"range", VT::tuple}, {"about", VT::text}};
 
 struct Schema {
   std::string_view keyword;
@@ -96,7 +106,7 @@ constexpr Schema kSchemas[] = {
     {"emit", kEmit},       {"transfer", kTransfer}, {"push", kPush},      {"suppress", kSuppress},   {"hand_over", kHandOver},
     {"start", kStart},     {"wake", kWake},       {"stop", kStop},        {"shock", kShock},         {"scorch", kScorch},
     {"burst", kBurst},     {"let", {}},           {"keyframes", {}},      {"every", {}},             {"at", {}},
-    {"when", {}},          {"input", {}}};
+    {"when", {}},          {"input", {}},         {"entry", kEntry},      {"param", kParam}};
 
 std::span<const Key> keys_of(std::string_view keyword) {
   for (const Schema& s : kSchemas)
@@ -111,10 +121,10 @@ const Key* find_key(std::span<const Key> keys, std::string_view k) {
 }
 
 constexpr std::string_view kActions[] = {"transfer", "push", "suppress", "hand_over", "start", "wake", "stop", "shock", "scorch", "burst"};
-constexpr std::string_view kTop[] = {"scene", "bus", "light", "particles", "frame", "camera", "keyframes", "effect", "look",
-                                     "let", "input", "module", "field", "emit", "every", "at", "when"};
-constexpr std::string_view kFieldKinds[] = {"ceiling", "vortex", "wind", "gust", "ring", "attract", "heat", "cold"};
-constexpr std::string_view kEmitKinds[] = {"sparks", "embers", "flakes"};
+constexpr std::string_view kTop[] = {"scene", "bus", "light", "particles", "frame", "camera", "keyframes", "effect", "look", "let",
+                                     "input", "module", "field", "emit", "every", "at", "when", "entry", "param"};
+constexpr std::string_view kFieldKinds[] = {"ceiling", "vortex", "wind", "gust", "ring", "attract", "heat", "cold", "lamp"};
+constexpr std::string_view kEmitKinds[] = {"sparks", "embers", "flakes", "arc", "ring", "glow"};
 constexpr std::string_view kWords[] = {
     // expressions
     "and", "or", "not", "if", "t", "x", "y", "temp", "rand", "length", "fps", "ground", "smooth", "exp", "sqrt", "sin",
@@ -583,6 +593,13 @@ Value parse_value(Parser& p, VT type, std::span<const Key> keys) {
       }
       break;
     case VT::flag: v.type = Value::Type::flag; break;
+    case VT::text: {
+      const Tok* t = p.peek();
+      if (!t || t->type != Tok::string) p.fail(p.pos(), std::format("expected a text in quotes, found {}", p.found()));
+      v.type = Value::Type::text;
+      v.names.push_back(p.next().text);
+      break;
+    }
   }
   return v;
 }
@@ -725,6 +742,14 @@ Statement parse_statement(Parser& p, std::string_view source) {
   } else if (w == "input") {
     declared("input");
     s.args.push_back(p.expr());
+  } else if (w == "entry") {  // library catalogues: entry NAME, category C, size W x H, ... (docs/LIBRARY.md)
+    s.name_pos = p.pos();
+    s.name = p.name("the entry's name");
+    parse_props(p, s, false);
+  } else if (w == "param") {  // library catalogues: param NAME = default, range (lo, hi), about "..."
+    declared("param");
+    s.args.push_back(p.expr());
+    parse_props(p, s, false);
   } else if (w == "module") {
     declared("module");
     s.kind = p.name("the module's effect");
@@ -733,12 +758,12 @@ Statement parse_statement(Parser& p, std::string_view source) {
     declared("field");
     const Pos at = p.pos();
     s.kind = p.name("the field's kind");
-    if (!in(kFieldKinds, s.kind)) p.fail(at, std::format("'{}' is not a kind of field (ceiling, vortex, wind, gust, ring, attract, heat, cold){}", s.kind, did_you_mean(s.kind, strings(kFieldKinds))));
+    if (!in(kFieldKinds, s.kind)) p.fail(at, std::format("'{}' is not a kind of field (ceiling, vortex, wind, gust, ring, attract, heat, cold, lamp){}", s.kind, did_you_mean(s.kind, strings(kFieldKinds))));
     parse_props(p, s, false);
   } else if (w == "emit") {
     const Pos at = p.pos();
-    s.kind = p.name("what to emit (sparks, embers or flakes)");
-    if (!in(kEmitKinds, s.kind)) p.fail(at, std::format("'{}' cannot be emitted (sparks, embers or flakes)", s.kind));
+    s.kind = p.name("what to emit (sparks, embers, flakes, arc, ring or glow)");
+    if (!in(kEmitKinds, s.kind)) p.fail(at, std::format("'{}' cannot be emitted (sparks, embers, flakes, arc, ring or glow)", s.kind));
     parse_props(p, s, false);
   } else if (w == "every") {
     p.expect_word("frame", "after 'every'");
@@ -785,7 +810,7 @@ Statement parse_statement(Parser& p, std::string_view source) {
     p.fail(k.pos, std::format("'{}' is an action: put it in a rule (at ..., when ...) or under 'every frame:', indented", w));
   } else {
     const std::string hint = did_you_mean(w, strings(kTop));
-    p.fail(k.pos, hint.empty() ? std::format("unknown statement '{}' (expected scene, bus, light, particles, frame, camera, keyframes, effect, look, let, input, module, field, emit, every, at or when)", w)
+    p.fail(k.pos, hint.empty() ? std::format("unknown statement '{}' (expected scene, bus, light, particles, frame, camera, keyframes, effect, look, let, input, module, field, emit, every, at or when; entry and param in a library catalogue)", w)
                                : std::format("unknown statement '{}'{}", w, hint));
   }
   if (!p.done()) p.fail(p.pos(), std::format("unexpected {} at the end of the {} statement", p.found(), w));
@@ -815,8 +840,10 @@ Script parse(std::string_view text, std::string_view source) {
     out.statements.push_back(parse_statement(p, source));
     block = is_block(out.statements.back()) ? &out.statements.back() : nullptr;
   }
-  for (const Statement& s : out.statements) {
-    if (is_block(s) && s.body.empty()) throw Error(s.pos, std::format("this {} has no actions (indent them under it)", s.keyword == "every" ? "'every frame:'" : "rule"), source);
+  for (const Statement& s : out.statements) {  // a named rule may have none: it records when its condition held (its name)
+    if (is_block(s) && s.body.empty() && (s.keyword == "every" || s.name.empty())) {
+      throw Error(s.pos, std::format("this {} has no actions (indent them under it)", s.keyword == "every" ? "'every frame:'" : "rule"), source);
+    }
   }
   return out;
 }
@@ -911,6 +938,11 @@ std::string value_text(const Value& v) {
     case Value::Type::range: return pt(0) + " to " + pt(2);
     case Value::Type::look: return v.names.size() == 1 ? v.names[0] : std::format("{} to {} by {}", v.names[0], v.names[1], ex(v.exprs[0]));
     case Value::Type::flag: return {};
+    case Value::Type::text: {
+      std::string o = "\"";
+      for (const char c : v.names[0]) o += (c == '"' || c == '\\') ? std::string("\\") + c : std::string(1, c);
+      return o + "\"";
+    }
   }
   return {};
 }
@@ -940,6 +972,10 @@ std::string statement_text(const Statement& s) {
     o += std::format(" {} = {}", s.name, s.kind == "shader" ? std::string("shader") : "like " + s.kind) + props_text(s);
   } else if (w == "let" || w == "input") {
     o += std::format(" {} = {}", s.name, ex(s.args[0]));
+  } else if (w == "param") {
+    o += std::format(" {} = {}", s.name, ex(s.args[0])) + props_text(s);
+  } else if (w == "entry") {
+    o += " " + s.name + props_text(s);
   } else if (w == "module" || w == "field") {
     o += std::format(" {} = {}", s.name, s.kind) + props_text(s);
   } else if (w == "emit") {

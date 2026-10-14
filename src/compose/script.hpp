@@ -51,10 +51,10 @@ struct Expr {
 
 // A property's value. Which fields are used depends on the type.
 struct Value {
-  enum class Type { expr, point, tuple, dims, name, names, points, range, look, flag };
+  enum class Type { expr, point, tuple, dims, name, names, points, range, look, flag, text };
   Type type = Type::flag;
   std::vector<Expr> exprs;          // expr 1, point 2, tuple n, dims 2, points 2n, range 4, look 0 or 1 (the weight)
-  std::vector<std::string> names;   // name 1, names n, look 1 or 2
+  std::vector<std::string> names;   // name 1, names n, look 1 or 2, text 1 (the string, without its quotes)
   Pos pos;
 };
 
@@ -66,9 +66,9 @@ struct Prop {
 
 // One statement: a declaration, a setting, a rule (with its actions in body) or an action.
 struct Statement {
-  std::string keyword;                // scene, module, when, transfer, ...
+  std::string keyword;                // scene, module, when, transfer, ... (and entry, param: library catalogues only)
   Pos pos;
-  std::string name;                   // declarations: NAME = ...; rules: `as NAME`
+  std::string name;                   // declarations: NAME = ...; rules: `as NAME`; entry: its name
   Pos name_pos;
   std::string kind;                   // module: its effect; field and emit: the kind; look: "shader" or the look it is like;
                                       // effect: the file; when: "time", "shock", "lands" or "condition"

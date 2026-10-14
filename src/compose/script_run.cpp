@@ -170,7 +170,8 @@ float run(const Code& c, const Env& env) {
 enum P : int {
   p_x, p_y, p_x1, p_y1, p_w, p_h, p_fraction, p_top, p_heat, p_soot, p_gain, p_from, p_until, p_seed, p_speed, p_decay,
   p_amp, p_width, p_radius, p_glow, p_embers, p_debris, p_count, p_tries, p_chance, p_spread, p_level, p_strength,
-  p_soft, p_damping, p_swirl, p_steam, p_amount, p_scale, p_rate, p_u, p_v, p_core, p_weight, p_if, p_start, kParams
+  p_soft, p_damping, p_swirl, p_steam, p_amount, p_scale, p_rate, p_u, p_v, p_core, p_weight, p_if, p_start,
+  p_cr, p_cg, p_cb, p_bright, p_jitter, p_branches, p_squash, p_sparks, p_dx, p_dy, p_cone, kParams
 };
 using Params = std::array<Code, kParams>;
 
@@ -182,9 +183,11 @@ struct ModC {
   int cols = 1, rows = 1, band = 0, over = -1;
   int size = 0;
   float width = 0, sink = 0, feather = 0;
+  Code width_code;  // a single module's width may change over time (a spawned effect's scale); tiles' is constant
   bool has_size = false, has_width = false;
   bool glows = false;
   std::array<float, 3> glow{};  // the colour of its light (Module::glows)
+  float shards = 0.f;           // seconds per shard (Module::use_shards); 0: one continuous rollout
   Code ax, ay;  // where it stands (bottom centre of the tile or domain); varying: it moves
   bool has_at = false;
   int look_a = -1, look_b = -1;  // -1: the learned renderer
@@ -315,8 +318,15 @@ class Compiler {
     Code out;
     std::vector<std::string> open;
     emit(e, c, out, open);
-    int h = 0, hmax = 0;  // an upper bound of the stack depth: each op's effect, walked in a line
-    for (const Instr& in : out.ops) {
+    // The stack's depth: each op's effect, along every path (jumps only go forward, so one pass sees every way into
+    // an op before the op). Both sides of an if() or an `and` are not on the stack at once.
+    std::vector<int> depth_in(out.ops.size() + 1, -1);
+    depth_in[0] = 0;
+    int hmax = 0;
+    for (std::size_t pc = 0; pc < out.ops.size(); ++pc) {
+      if (depth_in[pc] < 0) continue;  // nothing falls or jumps here
+      const Instr& in = out.ops[pc];
+      int h = depth_in[pc];
       switch (in.op) {
         case Op::num:
         case Op::slot:
@@ -328,6 +338,17 @@ class Compiler {
         default: break;
       }
       hmax = std::max(hmax, h + 1);
+      const auto flow = [&](std::size_t to) {
+        if (to < depth_in.size()) depth_in[to] = std::max(depth_in[to], h);
+      };
+      if (in.op == Op::jz || in.op == Op::jnz) {
+        flow(zs(in.arg));
+        flow(pc + 1);
+      } else if (in.op == Op::jmp) {
+        flow(zs(in.arg));
+      } else {
+        flow(pc + 1);
+      }
     }
     if (hmax >= kMaxStack) fail(e.pos, "this expression is too deeply nested");
     if (c.constant && out.varying) fail(e.pos, std::format("{} must be a constant: it cannot depend on time, rules, modules, inputs or rand", c.what));
@@ -598,7 +619,8 @@ void Compiler::emit(const Expr& e, const Ctx& c, Code& code, std::vector<std::st
   }
 }
 
-constexpr std::string_view kModuleKeys[] = {"tiles", "band", "size", "width", "at", "sink", "over", "feather", "look", "controls", "opacity", "start", "seed", "waiting", "empty", "glow"};
+constexpr std::string_view kModuleKeys[] = {"tiles", "band", "size",  "width", "at",    "sink",    "over", "feather", "look",
+                                            "controls", "opacity", "start", "seed", "waiting", "empty", "glow", "shards"};
 bool module_key(std::string_view k) { return std::ranges::find(kModuleKeys, k) != std::end(kModuleKeys); }
 
 std::vector<int> Compiler::modules_of(const std::vector<std::string>& names, Pos pos, bool particles_ok, bool* particles) const {
@@ -655,6 +677,7 @@ void Compiler::module(const Statement& s, ModC& m) {
     m.size = o.size;
     m.has_size = true;
     m.width = o.width;
+    m.width_code = o.width_code;
     m.has_width = true;
     m.ax = o.ax;
     m.ay = o.ay;
@@ -676,9 +699,15 @@ void Compiler::module(const Statement& s, ModC& m) {
     m.has_size = true;
   }
   if (!m.has_size) fail(s.pos, std::format("module '{}' needs a size (pixels of its tile, as in 'size 192')", s.name));
-  if (const Prop* p = s.prop("width")) {
-    m.width = constant(p->value.exprs[0], "the width");
-    if (!(m.width > 0.f)) fail(p->pos, "the width must be positive");
+  if (const Prop* p = s.prop("width")) {  // a single module's may change over time (it is then at least a world pixel)
+    Ctx c;
+    c.what = "the width of tiles";
+    c.constant = m.tiled;
+    m.width_code = code(p->value.exprs[0], c);
+    if (!m.width_code.varying) {
+      m.width = constant(p->value.exprs[0], "the width");
+      if (!(m.width > 0.f)) fail(p->pos, "the width must be positive");
+    }
     m.has_width = true;
   }
   if (!m.has_width) m.width = static_cast<float>(m.size);
@@ -691,6 +720,11 @@ void Compiler::module(const Statement& s, ModC& m) {
       if (!(m.glow[zs(i)] >= 0.f)) fail(p->value.exprs[zs(i)].pos, "a glow's colour cannot be negative");
     }
     m.glows = true;
+  }
+  if (const Prop* p = s.prop("shards")) {
+    m.shards = constant(p->value.exprs[0], "the shards' length");
+    if (m.shards != 0.f && !(m.shards >= 1.f)) fail(p->pos, "a shard lasts a second or more (0: none)");
+    if (m.shards > 0.f && m.tiled) fail(p->pos, "tiles play one continuous rollout: shards are for single modules");
   }
   if (const Prop* p = s.prop("at")) {
     Ctx c;
@@ -752,7 +786,8 @@ void Compiler::field(const Statement& s) {
   f.pos = s.pos;
   using K = ForceField::Kind;
   static constexpr std::pair<std::string_view, K> kinds[] = {{"ceiling", K::ceiling}, {"vortex", K::vortex}, {"wind", K::wind}, {"gust", K::gust},
-                                                             {"ring", K::ring},       {"attract", K::attract}, {"heat", K::heat}, {"cold", K::cold}};
+                                                             {"ring", K::ring},       {"attract", K::attract}, {"heat", K::heat}, {"cold", K::cold},
+                                                             {"lamp", K::lamp}};
   for (const auto& [n, k] : kinds)
     if (n == s.kind) f.kind = k;
   const std::string what = std::format("a {} field", s.kind);
@@ -765,6 +800,7 @@ void Compiler::field(const Statement& s) {
     case K::attract: only(s, {"at", "radius", "strength", "swirl", "on", "weight", "if", "from", "until"}, what); break;
     case K::heat: only(s, {"at", "radius", "strength", "on", "weight", "if", "from", "until"}, what); break;
     case K::cold: only(s, {"at", "radius", "strength", "steam", "on", "weight", "if", "from", "until"}, what); break;
+    case K::lamp: only(s, {"at", "radius", "strength", "colour", "weight", "if", "from", "until"}, what); break;
   }
   const auto need = [&](std::string_view key) {
     if (!s.prop(key)) fail(s.pos, std::format("{} needs '{}'", what, key));
@@ -778,7 +814,7 @@ void Compiler::field(const Statement& s) {
       need("strength");
       break;
   }
-  need("on");
+  if (f.kind != K::lamp) need("on");  // a lamp lights the scene; it acts on no module
   Ctx c;
   take(f.p, s, "at", p_x, p_y, c);
   take(f.p, s, "level", p_level, kParams, c);
@@ -799,8 +835,16 @@ void Compiler::field(const Statement& s) {
   take(f.p, s, "if", p_if, kParams, c);
   take(f.p, s, "from", p_from, kParams, c);
   take(f.p, s, "until", p_until, kParams, c);
+  if (const Prop* col = s.prop("colour")) {
+    if (col->value.exprs.size() != 3) fail(col->pos, "a colour has three values (red, green, blue)");
+    Ctx cc;
+    cc.what = "a colour";
+    f.p[p_cr] = code(col->value.exprs[0], cc);
+    f.p[p_cg] = code(col->value.exprs[1], cc);
+    f.p[p_cb] = code(col->value.exprs[2], cc);
+  }
   const bool flow = f.kind == K::wind || f.kind == K::gust || f.kind == K::vortex || f.kind == K::ring || f.kind == K::attract;
-  f.mods = modules_of(s.prop("on")->value.names, s.prop("on")->value.pos, flow, &f.particles);
+  if (const Prop* on = s.prop("on")) f.mods = modules_of(on->value.names, on->value.pos, flow, &f.particles);
   prog_.fields.push_back(std::move(f));
 }
 
@@ -826,10 +870,36 @@ void Compiler::emitter(const Statement& s) {
     only(s, {"on", "tries", "chance", "spread", "from", "until", "if"}, what);
     need("on");
     e.mods = modules_of(s.prop("on")->value.names, s.prop("on")->value.pos, false);
-  } else {
+  } else if (s.kind == "flakes") {
     only(s, {"in", "size", "tries", "chance", "soot", "from", "until", "if"}, what);
     need("in");
     need("size");
+  } else if (s.kind == "arc") {  // procedural: a lightning bolt or an electric arc between two points
+    only(s, {"along", "colour", "width", "brightness", "jitter", "branches", "rate", "seed", "from", "until", "if"}, what);
+    need("along");
+    const Prop* a = s.prop("along");
+    Ctx c;
+    c.what = "'along'";
+    e.p[p_x] = code(a->value.exprs[0], c);
+    e.p[p_y] = code(a->value.exprs[1], c);
+    e.p[p_x1] = code(a->value.exprs[2], c);
+    e.p[p_y1] = code(a->value.exprs[3], c);
+  } else if (s.kind == "ring") {  // procedural: a glowing ring (an ellipse when squashed: a shock ring on the ground)
+    only(s, {"at", "radius", "squash", "colour", "width", "brightness", "from", "until", "if"}, what);
+    need("at");
+    need("radius");
+  } else {  // glow, procedural: a soft disc of light, or `count` of them wandering within `spread`
+    only(s, {"at", "radius", "colour", "brightness", "count", "spread", "rate", "seed", "from", "until", "if"}, what);
+    need("at");
+    need("radius");
+  }
+  if (const Prop* col = s.prop("colour")) {
+    if (col->value.exprs.size() != 3) fail(col->pos, "a colour has three values (red, green, blue)");
+    Ctx cc;
+    cc.what = "a colour";
+    e.p[p_cr] = code(col->value.exprs[0], cc);
+    e.p[p_cg] = code(col->value.exprs[1], cc);
+    e.p[p_cb] = code(col->value.exprs[2], cc);
   }
   Ctx c;
   take(e.p, s, "from", p_from, kParams, c);
@@ -842,6 +912,15 @@ void Compiler::emitter(const Statement& s) {
   take(e.p, s, "size", p_w, p_h, c);
   take(e.p, s, "soot", p_soot, kParams, c);
   take(e.p, s, "if", p_if, kParams, c);
+  take(e.p, s, "at", p_x, p_y, c);
+  take(e.p, s, "radius", p_radius, kParams, c);
+  take(e.p, s, "squash", p_squash, kParams, c);
+  take(e.p, s, "width", p_width, kParams, c);
+  take(e.p, s, "brightness", p_bright, kParams, c);
+  take(e.p, s, "jitter", p_jitter, kParams, c);
+  take(e.p, s, "branches", p_branches, kParams, c);
+  take(e.p, s, "rate", p_rate, kParams, c);
+  take(e.p, s, "seed", p_seed, kParams, c);
   prog_.emitters.push_back(std::move(e));
 }
 
@@ -900,7 +979,8 @@ ActC Compiler::action(const Statement& a, const Ctx& c, bool every, int limit) {
            {"at", p_x, p_y},         {"fraction", p_fraction, kParams}, {"top", p_top, kParams},     {"heat", p_heat, kParams},
            {"soot", p_soot, kParams}, {"gain", p_gain, kParams},        {"seed", p_seed, kParams},   {"speed", p_speed, kParams},
            {"decay", p_decay, kParams}, {"amp", p_amp, kParams},        {"width", p_width, kParams}, {"radius", p_radius, kParams},
-           {"glow", p_glow, kParams}, {"embers", p_embers, kParams},    {"debris", p_debris, kParams}, {"if", p_if, kParams}}) {
+           {"glow", p_glow, kParams}, {"embers", p_embers, kParams},    {"debris", p_debris, kParams}, {"if", p_if, kParams},
+           {"sparks", p_sparks, kParams}, {"direction", p_dx, p_dy},    {"cone", p_cone, kParams}}) {
     take(out.p, a, key, pa, pb, c);
   }
   return out;
@@ -946,6 +1026,7 @@ Program Compiler::compile() {
   std::set<std::string> once;
   for (const Statement& st : s_.statements) {
     const std::string& w = st.keyword;
+    if (w == "entry" || w == "param") fail(st.pos, std::format("'{}' belongs in a library catalogue (docs/LIBRARY.md), not in a scene", w));
     if (w == "scene" || w == "bus" || w == "light" || w == "particles" || w == "frame" || w == "camera" || w == "keyframes") {
       if (!once.insert(w).second) fail(st.pos, std::format("'{}' is given twice (put all its settings on one line)", w));
     } else if (w == "effect") {
@@ -1020,6 +1101,7 @@ Program Compiler::compile() {
         else if (p.key == "shadow") spec.shadow = v;
         else if (p.key == "scene_light") spec.scene_light = v;
         else if (p.key == "relief") spec.relief = v;
+        else if (p.key == "hue") spec.hue = v;
       }
       if (!(spec.heat_scale > 0.f)) fail(st.pos, "heat_scale must be positive");
       prog_.looks.push_back(spec);
@@ -1141,6 +1223,8 @@ struct Scene::Impl {
   std::vector<Shock> shocks;
   std::vector<std::array<float, 4>> scorch;
   std::vector<const Code*> scorch_glow;
+  std::size_t next_shock = 0, next_scorch = 0;  // the oldest, once the lists are full
+  std::vector<Lamp> lamps;                      // this frame's lamp fields
   std::vector<float> slots;
   std::vector<int> fired;
   std::vector<char> pending;  // per rule: triggered by the game, to fire at the start of the next frame
@@ -1221,7 +1305,7 @@ struct Scene::Impl {
 
   // The bursts of the hand-written scene, to the bit: its spawn() arguments were evaluated right to left (GCC), so the
   // random numbers are drawn here in that order.
-  void burst(float x, float y, float r, int embers, int debris, float speed) {
+  void burst(float x, float y, float r, int embers, int debris, float speed, int sparks = 0, float dir_x = 0.f, float dir_y = -1.f, float cone = 360.f) {
     Particles& P = *parts;
     for (int i = 0; i < embers; ++i) {
       const float a = P.uniform() * 6.2831853f, d = std::sqrt(P.uniform()) * r;
@@ -1236,6 +1320,15 @@ struct Scene::Impl {
       const float size = 2.f + 3.f * P.uniform();
       const float temp = 0.5f + 0.4f * P.uniform();
       P.spawn(Kind::debris, x, y, s * std::cos(a), s * std::sin(a), temp, size, 6.f);
+    }
+    // sparks (after the hand-written scene's draws, which they leave as they were): thrown within `cone` degrees of
+    // the direction, fast and short-lived
+    const float aim = std::atan2(dir_y, dir_x), spread = cone * 3.1415927f / 180.f;
+    for (int i = 0; i < sparks; ++i) {
+      const float a = aim + (P.uniform() - 0.5f) * spread;
+      const float s = speed * (0.4f + 0.8f * P.uniform());
+      const float life = 0.15f + 0.4f * P.uniform();
+      P.spawn(Kind::spark, x, y, s * std::cos(a), s * std::sin(a), 1.f, 1.2f, life);
     }
   }
 
@@ -1306,19 +1399,30 @@ struct Scene::Impl {
       s.decay = eval_or(a.p[p_decay], s.decay);
       s.amp = eval_or(a.p[p_amp], s.amp);
       s.width = eval_or(a.p[p_width], s.width);
-      if (shocks.size() < shocks.capacity()) shocks.push_back(s);
+      if (shocks.size() < shocks.capacity()) {
+        shocks.push_back(s);
+      } else if (!shocks.empty()) {  // full (a rule that repeats): the oldest makes room
+        shocks[next_shock % shocks.size()] = s;
+        ++next_shock;
+      }
     } else if (k == "scorch") {
       const float x = eval(a.p[p_x]), y = eval(a.p[p_y]);
       const float r = eval_or(a.p[p_radius], 100.f), g = eval_or(a.p[p_glow], 1.f);
       if (scorch.size() < scorch.capacity()) {
         scorch.push_back({x, y, r, g});
         scorch_glow.push_back(a.p[p_glow].present() ? &a.p[p_glow] : nullptr);
+      } else if (!scorch.empty()) {  // full (a rule that repeats): the oldest mark makes room
+        const std::size_t i = next_scorch++ % scorch.size();
+        scorch[i] = {x, y, r, g};
+        scorch_glow[i] = a.p[p_glow].present() ? &a.p[p_glow] : nullptr;
       }
     } else if (k == "burst") {
       const float x = eval(a.p[p_x]), y = eval(a.p[p_y]);
       const float r = eval_or(a.p[p_radius], 50.f), speed = eval_or(a.p[p_speed], 600.f);
       const int embers = std::max(0, static_cast<int>(eval_or(a.p[p_embers], 200.f))), debris = std::max(0, static_cast<int>(eval_or(a.p[p_debris], 0.f)));
-      burst(x, y, r, embers, debris, speed);
+      const int sparks = std::max(0, static_cast<int>(eval_or(a.p[p_sparks], 0.f)));
+      const float dx = eval_or(a.p[p_dx], 0.f), dy = eval_or(a.p[p_dy], -1.f), cone = eval_or(a.p[p_cone], 360.f);
+      burst(x, y, r, embers, debris, speed, sparks, dx, dy, cone);
     }
   }
 
@@ -1355,6 +1459,7 @@ struct Scene::Impl {
       return;
     }
     if (!window(e.p, t)) return;
+    if (e.kind == "arc" || e.kind == "ring" || e.kind == "glow") return glows(e, t);
     const int tries = static_cast<int>(eval_or(e.p[p_tries], e.kind == "embers" ? 2.f : 40.f));
     if (e.kind == "embers") {  // embers shed by burning modules, from their base
       const float chance = eval_or(e.p[p_chance], 0.6f), spread = eval_or(e.p[p_spread], 40.f);
@@ -1387,6 +1492,105 @@ struct Scene::Impl {
     }
   }
 
+  // Procedural glows (not learned; Particles::spawn_glow): a lightning bolt or an electric arc, a ring, discs of light.
+  // Each is made again every frame and lives for that frame. Their shapes come from a hash of the emitter's seed and
+  // the strike, not from the particles' generator: a bolt keeps its shape until the next strike, and the rest of the
+  // scene draws the same random numbers with or without them.
+  void glows(const EmitC& e, float t) {
+    Particles& P = *parts;
+    const float life = 1.5f / prog.fps;
+    const bool arc = e.kind == "arc", ring = e.kind == "ring";
+    const std::array<float, 3> dc = arc ? std::array<float, 3>{0.55f, 0.7f, 1.f} : ring ? std::array<float, 3>{1.f, 0.75f, 0.45f} : std::array<float, 3>{1.f, 0.7f, 0.4f};
+    const std::array<float, 3> col{eval_or(e.p[p_cr], dc[0]), eval_or(e.p[p_cg], dc[1]), eval_or(e.p[p_cb], dc[2])};
+    const float bright = eval_or(e.p[p_bright], arc ? 2.5f : 1.5f);
+    if (!(bright > 0.f)) return;
+    if (arc) {
+      const float ax = eval(e.p[p_x]), ay = eval(e.p[p_y]), bx = eval(e.p[p_x1]), by = eval(e.p[p_y1]);
+      const float width = std::max(0.3f, eval_or(e.p[p_width], 1.5f)), jitter = eval_or(e.p[p_jitter], 0.2f);
+      const int branches = std::clamp(static_cast<int>(eval_or(e.p[p_branches], 2.f)), 0, 8);
+      const float rate = eval_or(e.p[p_rate], 0.f);
+      const auto seed = static_cast<std::uint64_t>(std::max(0.f, eval_or(e.p[p_seed], 1.f)));
+      const auto now = static_cast<std::uint32_t>(std::lround(t * prog.fps));  // the frame
+      const std::uint32_t strike = rate > 0.f ? static_cast<std::uint32_t>(std::floor(t * rate)) : now;
+      std::uint32_t h = hash_cell(static_cast<std::int32_t>(strike), 17, 0, seed);
+      const auto rnd = [&h] {  // [0, 1)
+        h = hash32(h + 0x9e3779b9U);
+        return static_cast<float>(h >> 8) * (1.f / 16777216.f);
+      };
+      const float flicker = 0.7f + 0.3f * (0.5f + 0.5f * cell_value(static_cast<std::int32_t>(now), 3, 1, seed));
+      bolt(ax, ay, bx, by, width, jitter, col, bright * flicker, life, rnd, 6);
+      const float dx = bx - ax, dy = by - ay, len = std::sqrt(dx * dx + dy * dy);
+      for (int b = 0; b < branches && len > 8.f; ++b) {  // forks: from a point of the main bolt, shorter and fainter
+        const float u = 0.2f + 0.6f * rnd(), turn = (rnd() < 0.5f ? -1.f : 1.f) * (0.35f + 0.5f * rnd()), l = (0.2f + 0.3f * rnd()) * len;
+        const float sx = ax + u * dx + (rnd() - 0.5f) * jitter * len, sy = ay + u * dy + (rnd() - 0.5f) * jitter * len;
+        const float c = std::cos(turn), sn = std::sin(turn), ux = dx / len, uy = dy / len;
+        bolt(sx, sy, sx + l * (c * ux - sn * uy), sy + l * (sn * ux + c * uy), 0.7f * width, jitter, col, 0.55f * bright * flicker, life, rnd, 5);
+      }
+      return;
+    }
+    const float x = eval(e.p[p_x]), y = eval(e.p[p_y]), radius = eval(e.p[p_radius]);
+    if (!(radius > 0.f)) return;
+    if (ring) {
+      const float squash = eval_or(e.p[p_squash], 1.f), width = std::max(0.3f, eval_or(e.p[p_width], 3.f));
+      const int n = std::clamp(static_cast<int>(6.2831853f * radius / 8.f), 12, 256);
+      for (int pass = 0; pass < 2; ++pass) {  // the ring, then a wide faint halo around it
+        const float w = pass == 0 ? width : 3.f * width, b = pass == 0 ? bright : 0.3f * bright;
+        for (int i = 0; i < n; ++i) {
+          const float a0 = 6.2831853f * static_cast<float>(i) / static_cast<float>(n), a1 = 6.2831853f * static_cast<float>(i + 1) / static_cast<float>(n);
+          P.spawn_glow(x + radius * std::cos(a0), y + squash * radius * std::sin(a0), x + radius * std::cos(a1), y + squash * radius * std::sin(a1), w, col, b, life,
+                       false, false);
+        }
+      }
+      return;
+    }
+    const int count = std::clamp(static_cast<int>(eval_or(e.p[p_count], 1.f)), 1, 512);
+    const float spread = eval_or(e.p[p_spread], 0.f), rate = eval_or(e.p[p_rate], 0.5f);
+    const auto seed = static_cast<std::uint64_t>(std::max(0.f, eval_or(e.p[p_seed], 1.f)));
+    if (count == 1 && spread == 0.f) {
+      P.spawn_glow(x, y, x, y, radius, col, bright, life, true, true);
+      return;
+    }
+    for (int i = 0; i < count; ++i) {  // motes wandering within `spread` of the point, each flickering
+      const float k = static_cast<float>(i);
+      const float ox = spread * value_noise(7.31f * k, rate * t, 0.5f, seed), oy = spread * value_noise(3.17f * k + 50.f, rate * t, 1.5f, seed);
+      const float f = 0.55f + 0.45f * value_noise(2.17f * k, 3.f * rate * t, 9.5f, seed + 1);
+      P.spawn_glow(x + ox, y + oy, x + ox, y + oy, radius, col, bright * f, life, true, true);
+    }
+  }
+
+  // A bolt from (ax, ay) to (bx, by): its middle points moved across it by up to `jitter` of its length, then the halves'
+  // middles by half as much, and so on, down to pieces of about 10 world pixels (at most 2^levels of them); drawn as a
+  // core, and a faint halo two and a half times wider along every other point (smoother, so its pieces meet cleanly).
+  template <class R>
+  void bolt(float ax, float ay, float bx, float by, float width, float jitter, std::array<float, 3> col, float bright, float life, R& rnd, int levels) {
+    std::array<std::array<float, 2>, 65> pt;
+    const float dx = bx - ax, dy = by - ay, len = std::sqrt(dx * dx + dy * dy);
+    if (!(len > 0.5f)) return;
+    const int L = std::clamp(static_cast<int>(std::ceil(std::log2(len / 10.f))), 1, std::min(levels, 6));
+    const float px = -dy / len, py = dx / len;
+    pt[0] = {ax, ay};
+    pt[1] = {bx, by};
+    int n = 2;
+    float amp = jitter * len;
+    for (int l = 0; l < L; ++l) {
+      for (int i = n - 1; i >= 0; --i) pt[zs(2 * i)] = pt[zs(i)];
+      for (int i = 0; i + 1 < n; ++i) {
+        const auto& p0 = pt[zs(2 * i)];
+        const auto& p1 = pt[zs(2 * i + 2)];
+        const float o = (rnd() - 0.5f) * 2.f * amp;
+        pt[zs(2 * i + 1)] = {0.5f * (p0[0] + p1[0]) + o * px, 0.5f * (p0[1] + p1[1]) + o * py};
+      }
+      n = 2 * n - 1;
+      amp *= 0.5f;
+    }
+    Particles& P = *parts;
+    for (int i = 0; i + 1 < n; ++i) P.spawn_glow(pt[zs(i)][0], pt[zs(i)][1], pt[zs(i + 1)][0], pt[zs(i + 1)][1], width, col, bright, life, i == 0, i + 2 == n);
+    const int step = n > 2 ? 2 : 1;  // (n - 1 is even when it is more than 1)
+    for (int i = 0; i + step < n; i += step) {
+      P.spawn_glow(pt[zs(i)][0], pt[zs(i)][1], pt[zs(i + step)][0], pt[zs(i + step)][1], 2.5f * width, col, 0.22f * bright, life, i == 0, i + step + 1 == n);
+    }
+  }
+
   void update_field(std::size_t fi, float t) {
     const FieldC& fc = prog.fields[fi];
     ForceField& F = fstate[fi];
@@ -1410,6 +1614,7 @@ struct Scene::Impl {
     if (fc.p[p_swirl].present()) F.damping = eval(fc.p[p_swirl]);
     if (fc.p[p_steam].present()) F.damping = eval(fc.p[p_steam]);
     if (fc.p[p_seed].present()) F.seed = static_cast<std::uint64_t>(eval(fc.p[p_seed]));
+    if (fc.p[p_cr].present()) F.colour = {eval(fc.p[p_cr]), eval(fc.p[p_cg]), eval(fc.p[p_cb])};
   }
 
   // A flow field's velocity at a world point (world pixels per frame, y down), for particles.
@@ -1449,6 +1654,7 @@ struct Scene::Impl {
         mix.shadow = lerp(a.shadow, mix.shadow);
         mix.scene_light = lerp(a.scene_light, mix.scene_light);
         mix.relief = lerp(a.relief, mix.relief);
+        mix.hue = lerp(a.hue, mix.hue);
         for (int c = 0; c < 3; ++c) mix.tint[zs(c)] = lerp(a.tint[zs(c)], mix.tint[zs(c)]);
         for (Module* m : r.tiles) m->spec = mix;
       }
@@ -1461,7 +1667,17 @@ struct Scene::Impl {
         const float v = eval(mc.opacity);
         for (Module* m : r.tiles) m->opacity = v;
       }
+      bool resized = false;  // a single module whose width changes over time (a spawned effect's scale)
+      if (!mc.tiled && mc.width_code.varying) {
+        const float w = std::max(1.f, eval(mc.width_code));
+        if (w != r.W) {
+          r.W = r.Wd = w;
+          for (Module* m : r.tiles) m->at.scale = w / static_cast<float>(mc.size);
+          resized = true;
+        }
+      }
       if (mc.has_at && !mc.tiled && (mc.ax.varying || mc.ay.varying)) place(static_cast<int>(mi), eval(mc.ax), eval(mc.ay));
+      else if (resized) place(static_cast<int>(mi), r.ax, r.ay);
     }
     for (std::size_t i = 0; i < scorch.size(); ++i)
       if (scorch_glow[i]) scorch[i][3] = eval(*scorch_glow[i]);
@@ -1547,7 +1763,7 @@ void Scene::Impl::build(const EffectLoader& load, const Options& o) {
     if (mc.size % res != 0) fail(mc.pos, std::format("the size of '{}' must be a multiple of its effect's grid ({} cells)", mc.name, res));
     if (mc.tiled && 2 * mc.band >= res) fail(mc.pos, std::format("the band of '{}' must be less than half its effect's grid ({} cells)", mc.name, res));
     ModR r;
-    r.W = mc.width;
+    r.W = mc.width_code.varying ? std::max(1.f, eval(mc.width_code)) : mc.width;
     if (mc.tiled) {
       r.stride = r.W * static_cast<float>(res - mc.band) / static_cast<float>(res);
       r.Wd = r.W + r.stride * static_cast<float>(mc.cols - 1);
@@ -1571,6 +1787,10 @@ void Scene::Impl::build(const EffectLoader& load, const Options& o) {
         m->group = r.group;
         if (mc.tiled) m->band = {c > 0 ? mc.band : 0, c < mc.cols - 1 ? mc.band : 0, row > 0 ? mc.band : 0, row < mc.rows - 1 ? mc.band : 0};
         m->feather = mc.feather * static_cast<float>(mc.size);
+        if (mc.shards > 0.f) {  // changes half a second long, offset by the seed so that instances change apart
+          const int period = std::max(2, static_cast<int>(std::lround(mc.shards * prog.fps)));
+          m->use_shards(period, static_cast<int>(std::lround(0.5f * prog.fps)), static_cast<int>((mc.seed * 2654435761ULL) % static_cast<std::uint64_t>(period)));
+        }
         m->glows = mc.glows;
         m->glow = mc.glow;
         if (mc.look_a >= 0) {
@@ -1624,6 +1844,7 @@ void Scene::Impl::build(const EffectLoader& load, const Options& o) {
       mix.shadow = lerp(a.shadow, mix.shadow);
       mix.scene_light = lerp(a.scene_light, mix.scene_light);
       mix.relief = lerp(a.relief, mix.relief);
+      mix.hue = lerp(a.hue, mix.hue);
       for (int c = 0; c < 3; ++c) mix.tint[zs(c)] = lerp(a.tint[zs(c)], mix.tint[zs(c)]);
       for (Module* m : rr.tiles) m->spec = mix;
     }
@@ -1686,12 +1907,14 @@ void Scene::Impl::build(const EffectLoader& load, const Options& o) {
     ForceField F;
     F.kind = f.kind;
     if (f.kind == ForceField::Kind::attract || f.kind == ForceField::Kind::cold) F.damping = 0.f;  // swirl and steam: none unless given
+    if (f.kind == ForceField::Kind::lamp) F.radius = 40.f;
     fstate.push_back(F);
     if (f.kind == ForceField::Kind::attract)
       for (const int mi : f.mods)
         for (const Module* m : mods[zs(mi)].tiles) pull = std::max(pull, pull_scratch(*m));
   }
   fweight.assign(prog.fields.size(), 0.f);
+  lamps.reserve(prog.fields.size());
   scratch.assign(pull, 0.f);
   fired.assign(prog.rules.size(), 0);
   pending.assign(prog.rules.size(), 0);
@@ -1741,6 +1964,12 @@ void Scene::Impl::state(int f) {
   const float t = static_cast<float>(f) / prog.fps;
   slots[s_t] = t;
   const auto c0 = Clock::now();
+  // Shock fronts that have died away (40 times their decay: their rings move pixels by less than a millionth) are
+  // dropped, so a long game's repeating rules keep the list short; no scene of the examples lives that long.
+  if (std::ranges::any_of(shocks, [t](const Shock& s) { return t - s.t0 > 40.f * s.decay; })) {
+    std::erase_if(shocks, [t](const Shock& s) { return t - s.t0 > 40.f * s.decay; });
+    next_shock = 0;
+  }
   // 1. rules on time, shocks and fields (and rules the game triggered)
   for (std::size_t i = 0; i < prog.rules.size(); ++i) {
     RuleC& r = prog.rules[i];
@@ -1789,9 +2018,14 @@ void Scene::Impl::state(int f) {
       }
     }
   }
+  lamps.clear();  // lamps: lights that are not on the bus (procedural)
+  for (std::size_t fi = 0; fi < prog.fields.size(); ++fi) {
+    const ForceField& F = fstate[fi];
+    if (F.kind == ForceField::Kind::lamp && fweight[fi] > 0.f) lamps.push_back({F.x, F.y, F.radius, fweight[fi] * F.strength, F.colour});
+  }
   const auto c4 = Clock::now();
   // 8. light
-  light->update(*bus, light_gain, flash, *pool);
+  light->update(*bus, light_gain, flash, *pool, lamps);
   const auto c5 = Clock::now();
   // 9. particles: fields that act on them, the flow of the bus, landings
   const float dt = 1.f / prog.fps;
@@ -1935,7 +2169,7 @@ const Frame& Scene::frame() const { return *impl_->frame; }
 int Scene::active_modules() const { return static_cast<int>(impl_->active.size()); }
 std::size_t Scene::scratch_bytes() const {
   std::size_t n = impl_->step_scratch ? impl_->step_scratch->bytes() : 0;
-  for (const Module* m : impl_->all) n += m->runner().scratch_bytes();
+  for (const Module* m : impl_->all) n += m->runner().scratch_bytes() + m->shard_bytes();
   return n;
 }
 
