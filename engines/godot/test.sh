@@ -3,7 +3,8 @@
 #   1. the official Godot 4.4.1 Linux binary, downloaded once (pinned, SHA-512 checked) into $DATA/godot (not git);
 #   2. libnvfx, the extension (NEURALFX_BUILD_GODOT=ON: godot-cpp fetched at its pinned tag) and nvfx_scene_script,
 #      built in build-godot/ (the extension and libnvfx are copied into demo/bin/);
-#   3. the script runner's frame N of the fireball (when N is a keyframe), as the reference;
+#   3. the script runner's frame N of the fireball (when N is a keyframe), as the reference; the references and the
+#      nodes run their effects at float (rollout effects run at int8 by default since docs/REPORT.md §13);
 #   4. the demo project imported (which registers the extension), then demo/test.gd run headless: the fireball for N
 #      frames, the frame saved as PNG and checked (not empty, the same pixels as the reference, heat where the fire
 #      is), a script error with its line and column, and one effect drawn;
@@ -65,7 +66,7 @@ ls -l "$here/demo/bin"
 # 3. the reference: the script runner's keyframes up to frame N (frame_NNN.png exists when N is a keyframe)
 rm -rf "$out/reference"
 nice -n 10 "$build/nvfx_scene_script" --script "$repo/examples/scenes/fireball.nvfxs" --models "$models" --keyframes "$out/reference" \
-  --no-video --frames $((frames + 1)) --threads 2 > "$out/reference.log"
+  --no-video --frames $((frames + 1)) --threads 2 --precision float > "$out/reference.log"
 reference=$(printf '%s/reference/frame_%03d.png' "$out" "$frames")
 [[ -f $reference ]] || { echo "frame $frames is not a keyframe of the script: no reference"; reference=""; }
 
@@ -85,7 +86,7 @@ library_models=$data/library/models
 if [[ -f $library_models/fire.nvfx && -f $library_models/steam.nvfx && -f $library_models/explosion.nvfx && -f $library_models/orb.nvfx ]]; then
   nice -n 10 "$build/nvfx_gallery" --library "$repo/library" --models "$library_models" --shot 960x540 --ground 470 \
     --spawn campfire@220,470,1,0.3 --spawn steam_vent@480,470,0.8,0.4 --spawn magic_burst@760,260,1,0.6 \
-    --spawn electric_arc@620,470,1,0.2 --spawn plasma_orb@110,150,0.8,0.5 --frames "$frames" --threads 2 --png "$out/library_reference.png" > "$out/library_reference.log"
+    --spawn electric_arc@620,470,1,0.2 --spawn plasma_orb@110,150,0.8,0.5 --frames "$frames" --threads 2 --precision float --png "$out/library_reference.png" > "$out/library_reference.log"
   set +e
   nice -n 10 "$godot" --headless --path . --script res://test_library.gd -- --library "$repo/library" --library_models "$library_models" \
     --out "$out/library_godot.png" --frames "$frames" --reference "$out/library_reference.png" 2>&1

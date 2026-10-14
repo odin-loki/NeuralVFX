@@ -145,8 +145,8 @@ enum class Precision { float32, int8 };
 enum class Int8Convs { second, both };
 inline constexpr Int8Convs kInt8Convs = Int8Convs::second;
 // The precision a rollout effect runs at unless asked otherwise (nvfx_instance_set_precision's DEFAULT; scenes, the
-// library's stages and the effect manager too): study K's rule decides it (docs/REPORT.md §13).
-inline constexpr Precision kRolloutPrecision = Precision::float32;
+// library's stages and the effect manager too): int8, since study K's test passed its rule (docs/REPORT.md §13).
+inline constexpr Precision kRolloutPrecision = Precision::int8;
 
 // One factory per ISA build (rt_base.cpp, rt_avx2.cpp, rt_avx512.cpp). Allocates every buffer the renderer will use.
 // A lean rollout runner keeps in itself only what lasts from one step to the next (state, noise caches, folded

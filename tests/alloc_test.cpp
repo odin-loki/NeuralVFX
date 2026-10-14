@@ -233,7 +233,7 @@ int run_rollout(int size, bool handoff = false, bool d2 = false, bool int8 = fal
   if (nvfx_effect_load_memory(bytes.data(), bytes.size(), &e) != NVFX_OK) return 1;
   if (nvfx_instance_create(e, size, &in) != NVFX_OK) return 1;
   if (int8 && both && nfx::rt::set_rollout_int8_convs(in, nfx::rt::Int8Convs::both) != NVFX_OK) return 1;
-  if (int8 && nvfx_instance_set_precision(in, NVFX_PRECISION_INT8) != NVFX_OK) return 1;
+  if (nvfx_instance_set_precision(in, int8 ? NVFX_PRECISION_INT8 : NVFX_PRECISION_FLOAT) != NVFX_OK) return 1;
   const float controls[3] = {0.7f, 0.2f, 0.9f};
   nvfx_instance_set_controls(in, controls, 3);
   nvfx_instance_set_seed(in, 99);

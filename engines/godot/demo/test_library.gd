@@ -31,6 +31,7 @@ func _initialize() -> void:
 	stage.ground = 470
 	stage.rooms = {"campfire": 1, "steam_vent": 1, "magic_burst": 1, "electric_arc": 1, "plasma_orb": 1}
 	stage.threads = 2
+	stage.precision = 1  # float, as the reference
 	stage.playing = false  # the frames are stepped here
 	root.add_child(stage)
 	stage.load_scene()

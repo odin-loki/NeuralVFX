@@ -828,6 +828,7 @@ TEST(RolloutRuntime, MatchesTheReferenceOnEveryIsa) {
       for (const int size : {32, 64}) {
         nvfx_instance* in = nullptr;
         ASSERT_EQ(nvfx_instance_create(fx.e, size, &in), NVFX_OK);
+        ASSERT_EQ(nvfx_instance_set_precision(in, NVFX_PRECISION_FLOAT), NVFX_OK);  // the float path (int8: below)
         nvfx_instance_set_controls(in, m.starts[static_cast<std::size_t>(start_index)].controls.data(), 3);
         ASSERT_EQ(nvfx_instance_set_variation(in, start_index), NVFX_OK);
         std::vector<std::uint8_t> rt(static_cast<std::size_t>(size) * size * 4);
@@ -864,6 +865,7 @@ TEST(RolloutRuntime, MatchesTheReferenceWithStudyD2sConstants) {
       const int size = 64;
       nvfx_instance* in = nullptr;
       ASSERT_EQ(nvfx_instance_create(fx.e, size, &in), NVFX_OK);
+      ASSERT_EQ(nvfx_instance_set_precision(in, NVFX_PRECISION_FLOAT), NVFX_OK);
       nvfx_instance_set_controls(in, m.starts[static_cast<std::size_t>(start_index)].controls.data(), 3);
       ASSERT_EQ(nvfx_instance_set_variation(in, start_index), NVFX_OK);
       std::vector<std::uint8_t> rt(static_cast<std::size_t>(size) * size * 4);
@@ -1072,9 +1074,9 @@ TEST(RolloutRuntime, Int8ReferenceStaysCloseToFloat) {
   }
 }
 
-// nvfx_instance_set_precision on rollout instances: DEFAULT is float (the frames of FLOAT to the bit), INT8 the int8
-// path (the candidate Precision::int8 means), and back to FLOAT gives the float frames again; a change starts a new
-// timeline. Two int8 instances give the same frames, seeks included.
+// nvfx_instance_set_precision on rollout instances: DEFAULT is int8 (the frames of INT8 to the bit, study K's rule), INT8
+// the int8 path (the candidate Precision::int8 means), FLOAT the float path, and back to INT8 gives the int8 frames
+// again; a change starts a new timeline. Two int8 instances give the same frames, seeks included.
 TEST(RolloutRuntime, PrecisionIsASettingOfRolloutInstances) {
   const rollout::Model m = runtime_model(32);
   Fx fx(m);
@@ -1089,14 +1091,18 @@ TEST(RolloutRuntime, PrecisionIsASettingOfRolloutInstances) {
   ASSERT_EQ(nvfx_instance_set_precision(q, NVFX_PRECISION_INT8), NVFX_OK);
   ASSERT_EQ(nvfx_instance_set_precision(q2, NVFX_PRECISION_INT8), NVFX_OK);
   nvfx_render(def, 20 / 30.0, a.data(), size * 4);
-  nvfx_render(fl, 20 / 30.0, b.data(), size * 4);
-  EXPECT_EQ(a, b);  // the default for rollout effects is float
   nvfx_render(q, 20 / 30.0, c.data(), size * 4);
-  EXPECT_NE(a, c);
+  EXPECT_EQ(a, c);  // the default for rollout effects is int8
+  nvfx_render(fl, 20 / 30.0, b.data(), size * 4);
+  EXPECT_NE(b, c);
   for (int f = 0; f <= 20; ++f) nvfx_render(q2, f / 30.0, b.data(), size * 4);  // played frame by frame
   EXPECT_EQ(b, c);
   EXPECT_GT(nvfx_instance_scratch_bytes(q), 0u);
-  ASSERT_EQ(nvfx_instance_set_precision(q, NVFX_PRECISION_FLOAT), NVFX_OK);  // and back
+  ASSERT_EQ(nvfx_instance_set_precision(q, NVFX_PRECISION_FLOAT), NVFX_OK);  // float, and back
+  nvfx_render(q, 20 / 30.0, b.data(), size * 4);
+  nvfx_render(fl, 20 / 30.0, c.data(), size * 4);
+  EXPECT_EQ(b, c);
+  ASSERT_EQ(nvfx_instance_set_precision(q, NVFX_PRECISION_DEFAULT), NVFX_OK);
   nvfx_render(q, 20 / 30.0, c.data(), size * 4);
   EXPECT_EQ(a, c);
   EXPECT_EQ(nfx::rt::set_rollout_int8_convs(nullptr, nfx::rt::Int8Convs::both), NVFX_ERROR_ARGUMENT);

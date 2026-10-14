@@ -342,6 +342,7 @@ TEST(RuntimePrior, ContinuousInstanceMatchesTheReferenceRolloutWithThePrior) {
       const auto& sp = m.starts[static_cast<std::size_t>(start)];
       nvfx_instance* in = nullptr;
       ASSERT_EQ(nvfx_instance_create(fx.e, size, &in), NVFX_OK);
+      ASSERT_EQ(nvfx_instance_set_precision(in, NVFX_PRECISION_FLOAT), NVFX_OK);  // the reference is float
       ASSERT_EQ(nvfx_instance_set_variation(in, start), NVFX_OK);  // start point `start` with its run's seed
       nvfx_instance_set_controls(in, sp.controls.data(), 3);
       ASSERT_EQ(nvfx_instance_set_drift(in, 0.f), NVFX_OK);

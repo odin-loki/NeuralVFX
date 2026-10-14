@@ -535,7 +535,7 @@ std::filesystem::path models_d() {
 
 // The fireball script played through the API, drawing only its eight keyframes (the other frames computed without
 // pictures), gives the hand-written scene's frozen keyframes to the bit (results/experiments/v1_frozen.csv).
-TEST(SceneApi, FireballKeyframesMatchTheFrozenOnes) {
+TEST(SceneApi, FireballKeyframesMatchTheFrozenOnes) {  // at float: the frozen keyframes are the float path's
   const std::filesystem::path models = models_d(), src = NEURALFX_SOURCE_DIR;
   for (const char* f : {"fire.nvfx", "smoke.nvfx", "explosion.nvfx"})
     if (!std::filesystem::exists(models / f)) GTEST_SKIP() << "the study D effects are not in " << models.string();
@@ -556,6 +556,7 @@ TEST(SceneApi, FireballKeyframesMatchTheFrozenOnes) {
   d.script_path = script.c_str();
   d.effects_dir = dir.c_str();
   d.threads = 2;
+  d.precision = NVFX_PRECISION_FLOAT;
   nvfx_scene* s = nullptr;
   nvfx_scene_error err;
   ASSERT_EQ(nvfx_scene_create(&d, &s, &err), NVFX_OK) << err.message;
