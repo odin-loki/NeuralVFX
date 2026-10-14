@@ -28,6 +28,7 @@ Stepper loss: stages 1-2 (normalised squared error plus profiles) and stage 3 (p
 |---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
 | jet | 160 x 240 | 21.33 | 0.08516 | 7274 | 0.09965 | 1436 | 34.87 | 1 | 3 | 1 | 8 | 81.6 |
 | orb | 160 x 240 | 21.33 | 0.09065 | 7211 | 0.08587 | 1370 | 36.18 | 0.5 | 0.5 | 1 | 8 | 81.6 |
+| vortex | 160 x 240 | 21.33 | 0.10816 | 8172 | 0.14500 | 2184 | 35.26 | 0.5 | 1 | 1 | 8 | 81.6 |
 
 Renderer, detail constants and start points from `d-finish` on the trained steppers; stage 3 from `d-tune`.
 
@@ -65,6 +66,21 @@ neural - coarse_sim_detail, paired over runs: frame 1: -3.42 [-4.60, -2.43]; fra
 
 neural_dynamics_true_renderer - coarse_sim_detail, paired over runs: frame 1: -1.70 [-2.85, -0.75]; frame 8: -2.08 [-3.18, -1.11]; frame 30: -0.50 [-1.83, +0.79] (tie); frame 60: -0.52 [-1.83, +0.77] (tie); frame 240: -1.08 [-2.84, +0.48] (tie);
 
+**vortex**
+
+| method | 1 | 4 | 8 | 16 | 30 | 60 | 120 | 240 |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| neural | 30.27 | 27.20 | 25.06 | 23.06 | 20.95 | 20.42 | 19.28 | 18.16 |
+| neural_dynamics_true_renderer | 33.07 | 28.00 | 25.34 | 23.01 | 20.78 | 20.30 | 18.96 | 17.94 |
+| coarse_sim_detail | 33.07 | 27.00 | 23.90 | 21.62 | 20.33 | 19.45 | 17.52 | 16.60 |
+| coarse_sim | 24.38 | 23.74 | 22.89 | 21.98 | 20.88 | 20.05 | 17.82 | 16.92 |
+| frozen | 34.22 | 25.36 | 22.78 | 20.59 | 19.06 | 18.41 | 18.11 | 17.55 |
+| renderer_on_true_fields | 33.37 | 33.56 | 33.87 | 34.50 | 35.02 | 34.34 | 34.34 | 34.34 |
+
+neural - coarse_sim_detail, paired over runs: frame 1: -2.81 [-3.98, -1.66]; frame 8: +1.16 [+0.43, +1.88]; frame 30: +0.62 [-0.25, +1.52] (tie); frame 60: +0.98 [-0.28, +2.15] (tie); frame 240: +1.56 [+0.82, +2.26];
+
+neural_dynamics_true_renderer - coarse_sim_detail, paired over runs: frame 1: -0.00 [-1.34, +1.32] (tie); frame 8: +1.44 [+0.69, +2.17]; frame 30: +0.45 [-0.42, +1.28] (tie); frame 60: +0.85 [-0.36, +1.98] (tie); frame 240: +1.35 [+0.58, +2.07];
+
 ### Endless runs at held-out settings
 
 The ten held-out settings of study B, a new seed each, 10 s per run (explosions: their 3 s). Distances of each method's frame statistics to a real run of the simulation at that setting; `real_other_seed` is a second real run with another seed, the floor. Lower is better except motion ratio (1 is right) and mean-frame PSNR (higher is closer).
@@ -97,6 +113,20 @@ Spectrum distance, paired over settings: neural - grid_k8 -; neural - flipbook_n
 
 Mean-frame PSNR (dB), paired: neural - flipbook_nearest +1.28 [+0.23, +2.32]; neural - coarse_sim_detail -1.40 [-3.42, +0.61] (tie); neural - real_other_seed -1.48 [-3.68, +0.39] (tie). Motion error |ln(motion ratio)|, paired: neural - flipbook_nearest -0.010 [-0.100, +0.086] (tie); neural - coarse_sim_detail +0.038 [-0.041, +0.121] (tie); neural - real_other_seed +0.059 [-0.021, +0.139] (tie). Coverage distance, paired: neural - flipbook_nearest -0.0002 [-0.0018, +0.0017] (tie); neural - real_other_seed -0.0001 [-0.0016, +0.0013] (tie).
 
+**vortex**
+
+| method | spectrum L1 | motion ratio | coverage L1 | emission L1 | mean-frame PSNR |
+|---|---:|---:|---:|---:|---:|
+| real_other_seed | 0.190 | 1.01 | 0.0268 | 0.0000 | 29.32 |
+| neural | 0.186 | 0.81 | 0.0450 | 0.0009 | 27.39 |
+| flipbook_nearest | 0.235 | 0.86 | 0.0403 | 0.0000 | 24.30 |
+| coarse_sim_detail | 0.306 | 0.12 | 0.1012 | 0.0000 | 20.70 |
+| coarse_sim | 0.283 | 0.07 | 0.0981 | 0.0000 | 20.72 |
+
+Spectrum distance, paired over settings: neural - grid_k8 -; neural - flipbook_nearest -0.050 [-0.147, +0.055] (tie); neural - coarse_sim_detail -0.120 [-0.189, -0.050]; neural - real_other_seed -0.004 [-0.063, +0.059] (tie).
+
+Mean-frame PSNR (dB), paired: neural - flipbook_nearest +3.09 [+1.77, +4.21]; neural - coarse_sim_detail +6.70 [+4.43, +8.60]; neural - real_other_seed -1.93 [-3.74, -0.23]. Motion error |ln(motion ratio)|, paired: neural - flipbook_nearest -0.094 [-0.328, +0.143] (tie); neural - coarse_sim_detail -2.267 [-2.678, -1.774]; neural - real_other_seed +0.104 [-0.006, +0.226] (tie). Coverage distance, paired: neural - flipbook_nearest +0.0047 [-0.0105, +0.0201] (tie); neural - real_other_seed +0.0182 [+0.0071, +0.0293].
+
 ### One minute of play
 
 Statistics of each 10 s window of a 60 s neural run (shards of 6 s from start points, the default) against a real 10 s run at the same setting (two held-out settings): if the effect drifted, the distances would grow window by window.
@@ -127,3 +157,15 @@ Statistics of each 10 s window of a 60 s neural run (shards of 6 s from start po
 | orb | 1 | 3 | 0.3064 | 1.0476 | 0.0047 | 27.847 |
 | orb | 1 | 4 | 0.3122 | 1.0962 | 0.0039 | 28.418 |
 | orb | 1 | 5 | 0.2595 | 1.0840 | 0.0051 | 28.906 |
+| vortex | 0 | 0 | 0.1531 | 1.1993 | 0.0524 | 23.204 |
+| vortex | 0 | 1 | 0.0685 | 0.7975 | 0.0322 | 28.694 |
+| vortex | 0 | 2 | 0.0713 | 0.5366 | 0.0551 | 25.151 |
+| vortex | 0 | 3 | 0.1574 | 1.1823 | 0.0397 | 24.945 |
+| vortex | 0 | 4 | 0.1052 | 1.0831 | 0.0268 | 27.398 |
+| vortex | 0 | 5 | 0.0711 | 0.8851 | 0.0254 | 28.641 |
+| vortex | 1 | 0 | 0.0891 | 1.0587 | 0.0231 | 26.176 |
+| vortex | 1 | 1 | 0.0843 | 1.3608 | 0.0148 | 27.525 |
+| vortex | 1 | 2 | 0.1098 | 0.8476 | 0.0050 | 28.293 |
+| vortex | 1 | 3 | 0.1027 | 1.0674 | 0.0109 | 26.028 |
+| vortex | 1 | 4 | 0.1034 | 0.9852 | 0.0176 | 29.763 |
+| vortex | 1 | 5 | 0.0943 | 0.6438 | 0.0114 | 27.145 |
