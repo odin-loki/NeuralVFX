@@ -237,12 +237,126 @@ void advect_back(int R, const float* S, int C, const float* g, float* gS) {
   }
 }
 
+// Study L's MacCormack advection (Hyper::advection = 1), as rollout::advect_maccormack, keeping what the gradient needs:
+// the forward samples `a` and, per value, which corner bounded it (0: none; 1 to 4: clamped to the low corner
+// 00, 10, 01, 11; 5 to 8: to the high one).
+void advect_mc(int R, const float* S, int C, float* out, Vec& a, std::vector<std::uint8_t>& code) {
+  const std::size_t N = sz(R) * sz(R);
+  a.resize(N * sz(C));
+  code.assign(N * sz(C), 0);
+  std::vector<float> lo(N * sz(C)), hi(N * sz(C));
+  std::vector<std::uint8_t> ilo(N * sz(C)), ihi(N * sz(C));
+  for (int y = 0; y < R; ++y) {
+    for (int x = 0; x < R; ++x) {
+      const std::size_t i = sz(y) * sz(R) + sz(x);
+      const float px = std::clamp(fl(x) - S[i * sz(C)], 0.f, fl(R - 1)), py = std::clamp(fl(y) - S[i * sz(C) + 1], 0.f, fl(R - 1));
+      const int x0 = std::min(static_cast<int>(px), R - 2), y0 = std::min(static_cast<int>(py), R - 2);
+      const float fx = px - fl(x0), fy = py - fl(y0);
+      const float* p[4] = {S + (sz(y0) * sz(R) + sz(x0)) * sz(C), S + (sz(y0) * sz(R) + sz(x0) + 1) * sz(C), S + (sz(y0 + 1) * sz(R) + sz(x0)) * sz(C),
+                           S + (sz(y0 + 1) * sz(R) + sz(x0) + 1) * sz(C)};
+      for (int c = 0; c < C; ++c) {
+        const std::size_t q = i * sz(C) + sz(c);
+        a[q] = (1.f - fy) * ((1.f - fx) * p[0][c] + fx * p[1][c]) + fy * ((1.f - fx) * p[2][c] + fx * p[3][c]);
+        std::uint8_t kl = 0, kh = 0;
+        for (std::uint8_t k = 1; k < 4; ++k) {
+          if (p[k][c] < p[kl][c]) kl = k;
+          if (p[k][c] > p[kh][c]) kh = k;
+        }
+        lo[q] = p[kl][c];
+        hi[q] = p[kh][c];
+        ilo[q] = kl;
+        ihi[q] = kh;
+      }
+    }
+  }
+  for (int y = 0; y < R; ++y) {
+    for (int x = 0; x < R; ++x) {
+      const std::size_t i = sz(y) * sz(R) + sz(x);
+      const float px = std::clamp(fl(x) + S[i * sz(C)], 0.f, fl(R - 1)), py = std::clamp(fl(y) + S[i * sz(C) + 1], 0.f, fl(R - 1));
+      const int x0 = std::min(static_cast<int>(px), R - 2), y0 = std::min(static_cast<int>(py), R - 2);
+      const float fx = px - fl(x0), fy = py - fl(y0);
+      const float* p00 = a.data() + (sz(y0) * sz(R) + sz(x0)) * sz(C);
+      const float* p10 = p00 + C;
+      const float* p01 = p00 + sz(R) * sz(C);
+      const float* p11 = p01 + C;
+      for (int c = 0; c < C; ++c) {
+        const std::size_t q = i * sz(C) + sz(c);
+        const float b = (1.f - fy) * ((1.f - fx) * p00[c] + fx * p10[c]) + fy * ((1.f - fx) * p01[c] + fx * p11[c]);
+        const float v = a[q] + 0.5f * (S[q] - b);
+        if (v < lo[q]) {
+          out[q] = lo[q];
+          code[q] = static_cast<std::uint8_t>(1 + ilo[q]);
+        } else if (v > hi[q]) {
+          out[q] = hi[q];
+          code[q] = static_cast<std::uint8_t>(5 + ihi[q]);
+        } else {
+          out[q] = v;
+        }
+      }
+    }
+  }
+}
+// The gradient of advect_mc: g (wrt out) -> gS (accumulated), through the clamp, the round trip and both samples (the
+// positions depend on the velocity in channels 0 and 1).
+void advect_mc_back(int R, const float* S, int C, const Vec& a, const std::vector<std::uint8_t>& code, const float* g, float* gS) {
+  const std::size_t N = sz(R) * sz(R);
+  Vec ga(N * sz(C), 0.f), gb(N * sz(C), 0.f);
+  // the clamp: a bounded value takes its corner's gradient; otherwise out = a + (S - b) / 2
+  for (int y = 0; y < R; ++y) {
+    for (int x = 0; x < R; ++x) {
+      const std::size_t i = sz(y) * sz(R) + sz(x);
+      const float px = std::clamp(fl(x) - S[i * sz(C)], 0.f, fl(R - 1)), py = std::clamp(fl(y) - S[i * sz(C) + 1], 0.f, fl(R - 1));
+      const int x0 = std::min(static_cast<int>(px), R - 2), y0 = std::min(static_cast<int>(py), R - 2);
+      const std::size_t corner[4] = {sz(y0) * sz(R) + sz(x0), sz(y0) * sz(R) + sz(x0) + 1, sz(y0 + 1) * sz(R) + sz(x0), sz(y0 + 1) * sz(R) + sz(x0) + 1};
+      for (int c = 0; c < C; ++c) {
+        const std::size_t q = i * sz(C) + sz(c);
+        const float gq = g[q];
+        if (code[q] == 0) {
+          ga[q] += gq;
+          gS[q] += 0.5f * gq;
+          gb[q] = -0.5f * gq;
+        } else {
+          gS[corner[(code[q] - 1) % 4] * sz(C) + sz(c)] += gq;
+        }
+      }
+    }
+  }
+  // b = a at x + u
+  for (int y = 0; y < R; ++y) {
+    for (int x = 0; x < R; ++x) {
+      const std::size_t i = sz(y) * sz(R) + sz(x);
+      const float rx = fl(x) + S[i * sz(C)], ry = fl(y) + S[i * sz(C) + 1];
+      const float px = std::clamp(rx, 0.f, fl(R - 1)), py = std::clamp(ry, 0.f, fl(R - 1));
+      const int x0 = std::min(static_cast<int>(px), R - 2), y0 = std::min(static_cast<int>(py), R - 2);
+      const float fx = px - fl(x0), fy = py - fl(y0);
+      const std::size_t ia = (sz(y0) * sz(R) + sz(x0)) * sz(C), ib = ia + sz(C), ic = ia + sz(R) * sz(C), id = ic + sz(C);
+      float dpx = 0, dpy = 0;
+      for (int k = 0; k < C; ++k) {
+        const float gk = gb[i * sz(C) + sz(k)];
+        if (gk == 0.f) continue;
+        ga[ia + sz(k)] += gk * (1.f - fx) * (1.f - fy);
+        ga[ib + sz(k)] += gk * fx * (1.f - fy);
+        ga[ic + sz(k)] += gk * (1.f - fx) * fy;
+        ga[id + sz(k)] += gk * fx * fy;
+        dpx += gk * ((1.f - fy) * (a[ib + sz(k)] - a[ia + sz(k)]) + fy * (a[id + sz(k)] - a[ic + sz(k)]));
+        dpy += gk * ((1.f - fx) * (a[ic + sz(k)] - a[ia + sz(k)]) + fx * (a[id + sz(k)] - a[ib + sz(k)]));
+      }
+      if (rx > 0.f && rx < fl(R - 1)) gS[i * sz(C)] += dpx;
+      if (ry > 0.f && ry < fl(R - 1)) gS[i * sz(C) + 1] += dpy;
+    }
+  }
+  // a = S at x - u: as the semi-Lagrangian step's gradient
+  advect_back(R, S, C, ga.data(), gS);
+}
+
 // --- one differentiable coarse step ------------------------------------------------------------------------------------
 
 struct Cache {
   Vec X, y1, a1, y2, a2, out, mid, div, p, proj, next;
   Vec g1, e1, g2, e2;
   std::vector<std::uint8_t> clamped;
+  Vec mca;                          // study L's MacCormack advection: the forward samples
+  std::vector<std::uint8_t> mccode;  // and which corner bounded each value
 };
 
 void film(const Model& m, const StepLayout& L, std::span<const float> cond, std::size_t G, std::size_t E, Vec& g, Vec& e) {
@@ -304,7 +418,8 @@ void forward(const Model& m, const StepLayout& L, const float* in, const float* 
   c.proj = c.mid;
   subtract_grad(R, c.p.data(), c.proj.data(), C);
   c.next.resize(sz(N) * sz(C));
-  advect(R, c.proj.data(), C, c.next.data());
+  if (h.advection == 1) advect_mc(R, c.proj.data(), C, c.next.data(), c.mca, c.mccode);
+  else advect(R, c.proj.data(), C, c.next.data());
   c.clamped.assign(sz(N) * kPhys, 0);
   for (int i = 0; i < N; ++i) {
     for (int k = 0; k < kPhys; ++k) {
@@ -329,7 +444,8 @@ void backward(const Model& m, const StepLayout& L, const Cache& c, std::span<con
     }
   }
   Vec gproj(sz(N) * sz(C), 0.f);
-  advect_back(R, c.proj.data(), C, gS.data(), gproj.data());
+  if (h.advection == 1) advect_mc_back(R, c.proj.data(), C, c.mca, c.mccode, gS.data(), gproj.data());
+  else advect_back(R, c.proj.data(), C, gS.data(), gproj.data());
   Vec gp(gp_out);
   subtract_grad_back(R, gproj.data(), C, gp.data());
   Vec gdiv(sz(N)), wk(sz(N)), tmp(sz(N));

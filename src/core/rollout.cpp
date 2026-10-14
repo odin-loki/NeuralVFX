@@ -17,10 +17,12 @@ namespace nfx::rollout {
 
 namespace {
 
-constexpr std::uint32_t kVersion = 4;  // 2 added DetailSpec::grow (version 1 files load with grow = 1); 3 quantised
+constexpr std::uint32_t kVersion = 5;  // 2 added DetailSpec::grow (version 1 files load with grow = 1); 3 quantised
                                        // start states (written only when start_bits < 16); 4 DetailSpec::advect and
                                        // soften (study D2; written only when either differs from its default; the
-                                       // start storage fields are then always present, 16 meaning fp16)
+                                       // start storage fields are then always present, 16 meaning fp16); 5
+                                       // Hyper::advection and DetailSpec::passes (study L; written only when either
+                                       // is not at its default, after the version 4 fields)
 
 float round_f16(float v) { return static_cast<float>(static_cast<std::float16_t>(v)); }
 
@@ -258,8 +260,12 @@ std::expected<void, std::string> save_model(std::ostream& o, const Model& m) {
   if (moved && (!(d.advect > 0.f && d.advect <= 8.f) || !(d.soften >= 0.f && d.soften <= 1.f))) {
     return std::unexpected("rollout: advect must be in (0, 8] and soften in [0, 1]");
   }
-  // Files keep the oldest layout that holds them: 2 without quantised starts, 3 with, 4 with study D2's constants.
-  const std::uint32_t version = moved ? 4u : (quantised ? 3u : 2u);
+  if (h.advection < 0 || h.advection > 1) return std::unexpected("rollout: advection must be 0 or 1");
+  if (d.passes < 1 || d.passes > 8) return std::unexpected("rollout: passes must be 1 to 8");
+  // Files keep the oldest layout that holds them: 2 without quantised starts, 3 with, 4 with study D2's constants, 5
+  // with study L's advection or passes.
+  const bool study_l = h.advection != 0 || d.passes != 1;
+  const std::uint32_t version = study_l ? 5u : (moved ? 4u : (quantised ? 3u : 2u));
   o.write(kMagic, sizeof(kMagic));
   bin::put(o, version);
   for (const int v : {h.res, h.hidden, h.memory, h.jacobi, h.n_controls, h.n_age, h.frames, h.render_hidden, h.start_fine, h.warmup}) {
@@ -286,6 +292,10 @@ std::expected<void, std::string> save_model(std::ostream& o, const Model& m) {
   if (version >= 4) {
     bin::put(o, d.advect);
     bin::put(o, d.soften);
+  }
+  if (version >= 5) {
+    bin::put(o, static_cast<std::int32_t>(h.advection));
+    bin::put(o, static_cast<std::int32_t>(d.passes));
   }
   for (const auto* a : {&m.scale, &m.lo, &m.hi}) bin::put_array(o, std::span<const float>(*a));
   put_f16(o, m.step_w);
@@ -376,6 +386,13 @@ std::expected<Model, std::string> load_model(std::istream& i) {
     if (!adv || !soft || !(*adv > 0.f && *adv <= 8.f) || !(*soft >= 0.f && *soft <= 1.f)) return std::unexpected("rollout: bad detail spec");
     d.advect = *adv;
     d.soften = *soft;
+  }
+  if (*version >= 5) {
+    auto adv = bin::get<std::int32_t>(i);
+    auto passes = bin::get<std::int32_t>(i);
+    if (!adv || *adv < 0 || *adv > 1 || !passes || *passes < 1 || *passes > 8) return std::unexpected("rollout: bad study L fields");
+    h.advection = *adv;
+    d.passes = *passes;
   }
   if (!(d.swirl_scale > 0.f) || !(d.edge1 > d.edge0)) return std::unexpected("rollout: bad detail spec");
   for (auto* a : {&m.scale, &m.lo, &m.hi}) {
@@ -572,7 +589,15 @@ void coarse_step(const Model& m, std::span<const float> in, std::span<const floa
       flow[i * 2 + 1] = mid[i * sz(C) + 1];
     }
   }
-  // Semi-Lagrangian advection of every channel by the projected velocity, then the state is kept in range.
+  // Semi-Lagrangian advection of every channel by the projected velocity (study L: or MacCormack), then the state is
+  // kept in range.
+  if (h.advection == 1) {
+    advect_maccormack(mid, R, C, out);
+    for (int i = 0; i < N; ++i) {
+      for (int c = 0; c < kPhys; ++c) out[sz(i) * sz(C) + sz(c)] = std::clamp(out[sz(i) * sz(C) + sz(c)], m.lo[sz(c)], m.hi[sz(c)]);
+    }
+    return;
+  }
   for (int y = 0; y < R; ++y) {
     for (int x = 0; x < R; ++x) {
       const std::size_t i = sz(y) * sz(R) + sz(x);
@@ -581,6 +606,47 @@ void coarse_step(const Model& m, std::span<const float> in, std::span<const floa
         float v = bilinear_ch(mid.data(), R, C, c, bx, by);
         if (c < kPhys) v = std::clamp(v, m.lo[sz(c)], m.hi[sz(c)]);
         out[i * sz(C) + sz(c)] = v;
+      }
+    }
+  }
+}
+
+void advect_maccormack(std::span<const float> S, int R, int C, std::span<float> out) {
+  // forward: a = S at x - u (u: the cell's own velocity, channels 0 and 1), clamped to the grid as the semi-Lagrangian
+  // step; back: b = a at x + u; out = a + (S - b) / 2, clamped to the range of the four corners a was read from
+  const std::size_t N = sz(R) * sz(R);
+  std::vector<float> a(N * sz(C)), lo(N * sz(C)), hi(N * sz(C));
+  for (int y = 0; y < R; ++y) {
+    for (int x = 0; x < R; ++x) {
+      const std::size_t i = sz(y) * sz(R) + sz(x);
+      const float px = std::clamp(fl(x) - S[i * sz(C)], 0.f, fl(R - 1)), py = std::clamp(fl(y) - S[i * sz(C) + 1], 0.f, fl(R - 1));
+      const int x0 = std::min(static_cast<int>(px), R - 2), y0 = std::min(static_cast<int>(py), R - 2);
+      const float fx = px - fl(x0), fy = py - fl(y0);
+      const float* p00 = S.data() + (sz(y0) * sz(R) + sz(x0)) * sz(C);
+      const float* p10 = p00 + C;
+      const float* p01 = p00 + sz(R) * sz(C);
+      const float* p11 = p01 + C;
+      for (int c = 0; c < C; ++c) {
+        a[i * sz(C) + sz(c)] = (1.f - fy) * ((1.f - fx) * p00[c] + fx * p10[c]) + fy * ((1.f - fx) * p01[c] + fx * p11[c]);
+        lo[i * sz(C) + sz(c)] = std::min(std::min(p00[c], p10[c]), std::min(p01[c], p11[c]));
+        hi[i * sz(C) + sz(c)] = std::max(std::max(p00[c], p10[c]), std::max(p01[c], p11[c]));
+      }
+    }
+  }
+  for (int y = 0; y < R; ++y) {
+    for (int x = 0; x < R; ++x) {
+      const std::size_t i = sz(y) * sz(R) + sz(x);
+      const float px = std::clamp(fl(x) + S[i * sz(C)], 0.f, fl(R - 1)), py = std::clamp(fl(y) + S[i * sz(C) + 1], 0.f, fl(R - 1));
+      const int x0 = std::min(static_cast<int>(px), R - 2), y0 = std::min(static_cast<int>(py), R - 2);
+      const float fx = px - fl(x0), fy = py - fl(y0);
+      const float* p00 = a.data() + (sz(y0) * sz(R) + sz(x0)) * sz(C);
+      const float* p10 = p00 + C;
+      const float* p01 = p00 + sz(R) * sz(C);
+      const float* p11 = p01 + C;
+      for (int c = 0; c < C; ++c) {
+        const float b = (1.f - fy) * ((1.f - fx) * p00[c] + fx * p10[c]) + fy * ((1.f - fx) * p01[c] + fx * p11[c]);
+        const std::size_t q = i * sz(C) + sz(c);
+        out[q] = std::clamp(a[q] + 0.5f * (S[q] - b), lo[q], hi[q]);
       }
     }
   }
@@ -639,16 +705,26 @@ void soften_field(std::span<float> q, int size, float s) {
 }
 
 void detail_step(const Model& m, State& s, std::uint64_t seed, std::span<const float> controls) {
-  const Hyper& h = m.h;
   const DetailSpec& dt = m.detail;
   if (dt.soften > 0.f) {  // study D2: the fine-scale diffusion, before the advection
     soften_field(s.fine_t, s.size, dt.soften);
     soften_field(s.fine_d, s.size, dt.soften);
   }
+  // study L: the advection and the lock in `passes` passes, each moving the fields by a share of the frame's flow
+  for (int pass = 0; pass < dt.passes; ++pass) detail_pass(m, s, seed, controls, dt.passes > 1 ? 1.f / fl(dt.passes) : 1.f);
+}
+
+void detail_pass(const Model& m, State& s, std::uint64_t seed, std::span<const float> controls, float share) {
+  const Hyper& h = m.h;
+  const DetailSpec& dt = m.detail;
   const int R = h.res, S = s.size, C = h.channels();
   const float k = fl(S) / fl(R), px128 = fl(S) / 128.f, t = s.time + 0.5f / m.fps;
-  const float ka = k * dt.advect;  // coarse cells per frame to pixels per frame, times the advection gain
+  float ka = k * dt.advect;  // coarse cells per frame to pixels per frame, times the advection gain
   float amp = dt.swirl * px128;
+  if (share != 1.f) {
+    ka *= share;
+    amp *= share;
+  }
   if (dt.swirl_control >= 0 && sz(dt.swirl_control) < controls.size()) amp *= 0.3f + controls[sz(dt.swirl_control)];
   if (dt.swirl_ramp > 0.f) amp *= std::min(1.f, s.since_start / dt.swirl_ramp);
   Swirl sw;

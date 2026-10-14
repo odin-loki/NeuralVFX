@@ -289,6 +289,10 @@ if(NEURALFX_BUILD_TOOLS)
   add_executable(nvfx_d2 tools/nvfx_d2.cpp)
   target_link_libraries(nvfx_d2 PRIVATE neuralfx_train nvfx)
   neuralfx_defaults(nvfx_d2)
+  # Study L (docs/REPORT.md §12): fast and regular swirling flows (magic, the orb, the vortex), diagnosed and tested.
+  add_executable(nvfx_swirl tools/nvfx_swirl.cpp)
+  target_link_libraries(nvfx_swirl PRIVATE neuralfx_io neuralfx_train neuralfx_dcm nvfx)
+  neuralfx_defaults(nvfx_swirl)
 endif()
 
 if(NEURALFX_BUILD_BENCH)

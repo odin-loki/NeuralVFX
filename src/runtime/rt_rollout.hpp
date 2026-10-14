@@ -408,6 +408,7 @@ class Rollout final : public RolloutRunner {
     cond_.assign(z(h_.cond()), 0.f);
     folded_cond_.assign(z(h_.cond()), std::numeric_limits<float>::quiet_NaN());
     if (!lean_) next_.resize(z(N_) * z(C_));
+    if (h_.advection == 1) mca_.resize(z(N_) * z(C_));  // study L's MacCormack advection: its forward samples
     coarse_.resize(z(N_) * z(C_));
     flow_.resize(z(N_) * 2);
     if (!lean_) div_.resize(z(N_));
@@ -572,7 +573,11 @@ class Rollout final : public RolloutRunner {
     coarse_noise(time_ + 0.5f / m_.fps);
     coarse_step();
     if (m_.detail.soften > 0.f) soften_fields();  // study D2: the fine-scale diffusion, before the advection
-    detail_step(controls);
+    if (m_.detail.passes > 1) {
+      detail_passes(controls);  // study L: the advection and the lock in passes
+    } else {
+      detail_step(controls);
+    }
     time_ += 1.f / m_.fps;
     since_start_ += 1.f / m_.fps;
   }
@@ -701,7 +706,7 @@ class Rollout final : public RolloutRunner {
   std::size_t scratch_bytes() const override {
     std::size_t n = own_ ? own_->bytes() : 0;
     for (const auto* v : {&w1_, &b1_, &w2_, &b2_, &cond_, &folded_cond_, &next_, &coarse_, &flow_, &div_, &p_,
-                          &tmp_, &wot_, &noise_, &dirsum_, &soot_, &fac_, &ft_, &fd_, &swl_, &g1_, &frow_, &soft_, &r1_, &r2_, &out_}) {
+                          &tmp_, &wot_, &noise_, &dirsum_, &soot_, &fac_, &ft_, &fd_, &swl_, &g1_, &frow_, &soft_, &mca_, &r1_, &r2_, &out_}) {
       n += v->size() * 4;
     }
     n += any_.size() + 4 * (nm_.size() + cell_lo_.size() + cell_hi_.size());
@@ -1029,6 +1034,9 @@ class Rollout final : public RolloutRunner {
         flow_[i * 2 + 1] = mid_[i * z(C_) + 1];
       }
     }
+    if (h_.advection == 1) {
+      advect_maccormack();
+    } else {
     for (int y = 0; y < R_; ++y) {
       for (int x = 0; x < R_; ++x) {
         const std::size_t i = z(y) * z(R_) + z(x);
@@ -1048,10 +1056,61 @@ class Rollout final : public RolloutRunner {
         }
       }
     }
+    }
     if (lean_) {
       std::copy(nx_.begin(), nx_.end(), coarse_.begin());
     } else {
       coarse_.swap(next_);
+    }
+  }
+
+  // Study L's MacCormack advection of every channel (Hyper::advection = 1; rollout::advect_maccormack): forward samples
+  // into mca_, then the round trip, the correction, the clamp to the forward sample's corners and the physical range.
+  // Kept out of coarse_step (and not inlined) so that the semi-Lagrangian path compiles as before.
+  [[gnu::noinline]] void advect_maccormack() {
+    using namespace rollout;
+    const float edge = static_cast<float>(R_ - 1);
+    const auto corners = [&](const float* src, float px, float py, const float*(&p)[4], float& fx, float& fy) {
+      px = std::clamp(px, 0.f, edge);
+      py = std::clamp(py, 0.f, edge);
+      const int x0 = std::min(static_cast<int>(px), R_ - 2), y0 = std::min(static_cast<int>(py), R_ - 2);
+      fx = px - static_cast<float>(x0);
+      fy = py - static_cast<float>(y0);
+      p[0] = src + (z(y0) * z(R_) + z(x0)) * z(C_);
+      p[1] = p[0] + C_;
+      p[2] = p[0] + z(R_) * z(C_);
+      p[3] = p[2] + C_;
+    };
+    for (int y = 0; y < R_; ++y) {
+      for (int x = 0; x < R_; ++x) {
+        const std::size_t i = z(y) * z(R_) + z(x);
+        const float* p[4];
+        float fx, fy;
+        corners(mid_.data(), static_cast<float>(x) - mid_[i * z(C_)], static_cast<float>(y) - mid_[i * z(C_) + 1], p, fx, fy);
+        float* o = mca_.data() + i * z(C_);
+        for (int k = 0; k < C_; ++k) o[k] = (1.f - fy) * ((1.f - fx) * p[0][k] + fx * p[1][k]) + fy * ((1.f - fx) * p[2][k] + fx * p[3][k]);
+      }
+    }
+    for (int y = 0; y < R_; ++y) {
+      for (int x = 0; x < R_; ++x) {
+        const std::size_t i = z(y) * z(R_) + z(x);
+        const float* f[4];
+        const float* q[4];
+        float fx, fy, bx, by;
+        corners(mid_.data(), static_cast<float>(x) - mid_[i * z(C_)], static_cast<float>(y) - mid_[i * z(C_) + 1], f, fx, fy);
+        corners(mca_.data(), static_cast<float>(x) + mid_[i * z(C_)], static_cast<float>(y) + mid_[i * z(C_) + 1], q, bx, by);
+        const float* a = mca_.data() + i * z(C_);
+        const float* s = mid_.data() + i * z(C_);
+        float* o = nx_.data() + i * z(C_);
+        for (int k = 0; k < C_; ++k) {
+          const float b = (1.f - by) * ((1.f - bx) * q[0][k] + bx * q[1][k]) + by * ((1.f - bx) * q[2][k] + bx * q[3][k]);
+          const float lo = std::min(std::min(f[0][k], f[1][k]), std::min(f[2][k], f[3][k]));
+          const float hi = std::max(std::max(f[0][k], f[1][k]), std::max(f[2][k], f[3][k]));
+          float v = std::clamp(a[k] + 0.5f * (s[k] - b), lo, hi);
+          if (k < kPhys) v = std::clamp(v, m_.lo[z(k)], m_.hi[z(k)]);
+          o[k] = v;
+        }
+      }
     }
   }
 
@@ -1144,11 +1203,12 @@ class Rollout final : public RolloutRunner {
     const DetailSpec& dt = m_.detail;
     const float t = time_ + 0.5f / m_.fps, px128 = static_cast<float>(S_) / 128.f;
     float amp = dt.swirl * px128;
+    if (share_ != 1.f) amp *= share_;  // study L: one of several passes
     if (dt.swirl_control >= 0 && z(dt.swirl_control) < controls.size()) amp *= 0.3f + controls[z(dt.swirl_control)];
     if (dt.swirl_ramp > 0.f) amp *= std::min(1.f, since_start_ / dt.swirl_ramp);
     amp_ = amp;
-    if (amp > 0.f) swirl_lattice(t * dt.swirl_rate);
-    if (dt.contrast > 0.f) fine_flicker_.at(t);
+    if (amp > 0.f && pass_ == 0) swirl_lattice(t * dt.swirl_rate);  // (study L: a frame's passes share them)
+    if (dt.contrast > 0.f && pass_ == 0) fine_flicker_.at(t);
     flow_rows_.reset();
     swirl_rows_.reset();
     fac_rows_.reset();
@@ -1157,7 +1217,9 @@ class Rollout final : public RolloutRunner {
     std::fill(cs_d_.begin(), cs_d_.end(), 0.f);
     // How far the samples reach up and down: from the range of the vertical velocity (interpolation stays within the
     // range of what it interpolates, and the margin covers rounding).
-    const float k = static_cast<float>(S_) / static_cast<float>(R_) * dt.advect, edge = static_cast<float>(S_);
+    float k = static_cast<float>(S_) / static_cast<float>(R_) * dt.advect;
+    if (share_ != 1.f) k *= share_;
+    const float edge = static_cast<float>(S_);
     float flo = 0.f, fhi = 0.f, slo = 0.f, shi = 0.f;
     for (int i = 0; i < N_; ++i) {
       flo = std::min(flo, flow_[z(i) * 2 + 1]);
@@ -1227,6 +1289,15 @@ class Rollout final : public RolloutRunner {
       for (int y = 0; y < S_; ++y) n += act_[z(y) * 2 + 1] - act_[z(y) * 2];
       computed_ = static_cast<double>(n) / (static_cast<double>(S_) * static_cast<double>(S_));
     }
+  }
+
+  // Study L (DetailSpec::passes): the detail step `passes` times, each moving the fields by 1 / passes of the frame's flow
+  // and swirl and locking them again (rollout::detail_pass). Kept out of step() (and not inlined), as soften_fields().
+  [[gnu::noinline]] void detail_passes(std::span<const float> controls) {
+    share_ = 1.f / static_cast<float>(m_.detail.passes);
+    for (pass_ = 0; pass_ < m_.detail.passes; ++pass_) detail_step(controls);
+    pass_ = 0;
+    share_ = 1.f;
   }
 
   // Study D2: a fine field moves the fraction s of the way to the mean of its four neighbours, zero outside the frame
@@ -1338,7 +1409,9 @@ class Rollout final : public RolloutRunner {
   void forward_row(int y, std::array<int, 2> span) {
     const std::size_t S = z(S_);
     const int Pw = S_ + 3;
-    const float k = static_cast<float>(S_) / static_cast<float>(R_) * m_.detail.advect, edge = static_cast<float>(S_), yf = static_cast<float>(y);
+    float k = static_cast<float>(S_) / static_cast<float>(R_) * m_.detail.advect;
+    if (share_ != 1.f) k *= share_;  // study L: one of several passes
+    const float edge = static_cast<float>(S_), yf = static_cast<float>(y);
     const auto f = flow_rows_.get(flow_.data(), R_, ax_, ax_.i[z(y)]);
     const float wy0 = ax_.w[z(y)];
     const float *u0 = f[0], *v0 = f[0] + S, *u1 = f[1], *v1 = f[1] + S;
@@ -1604,12 +1677,15 @@ class Rollout final : public RolloutRunner {
   RowPair<> render_rows_;              // expanded rows of the renderer's first layer (its coarse part)
   AlignedFloats g1_;              // the renderer's first layer per coarse cell: bias and coarse part [cell][unit]
   AlignedFloats soft_;            // study D2's softening: two padded rows and a zero row (empty without it)
+  AlignedFloats mca_;             // study L's MacCormack advection: the forward samples [cell][channel] (empty without it)
   AlignedFloats frow_;            // one row of the renderer's fine features, planar [feature][padded size]
   SliceNoise curl_, swirl_;
   LatticeFbm fine_flicker_;
   std::vector<SliceNoise> flicker_;
   float sw_spacing_ = 1.f;
   float amp_ = 0.f;  // the swirl's amplitude in this frame
+  float share_ = 1.f;  // study L: the share of the frame's flow that this pass of the detail step moves (DetailSpec::passes)
+  int pass_ = 0;       // and which pass it is (the noise lattices are made in the first)
   int sw_n_ = 0;
   std::uint64_t seed_ = 0;
   bool seeded_ = false;
