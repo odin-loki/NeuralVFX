@@ -57,3 +57,7 @@ effect mushroom = "mushroom.nvfx"                                     # plays on
 effect launch    = "launch.nvfx", swirl 1, swirl_scale 9                # intensity (thrust), wind, turbulence
 effect puffs     = "puffs.nvfx"                                       # intensity, rate (pulses a second), turbulence
 effect ink       = "ink.nvfx"                                         # intensity, current, turbulence
+
+# The air effects (docs/EFFECTS_AIR.md): a candle (with the gentler sub-grid swirl the library plays it with, as launch), a
+# smoke ring (plays once, 4 s: 16 start points and study M3's mean state) and heavy gas. The ring and the gas carry no light.
+effect candle    = "candle.nvfx", swirl 1, swirl_scale 9                # intensity, draught, turbulence (its calibration chose swirl 3)

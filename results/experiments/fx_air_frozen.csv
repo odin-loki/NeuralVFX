@@ -1,0 +1,2 @@
+kind,name,file,bytes,sha256,source
+rollout_effect,candle,fx_air/models/d/candle.nvfx,83719,3f3c6bdbfcb954305b8f16a86839e8f5a8f49a7aa120c13c73632d514a0564ad,study D's recipe (docs/EFFECTS_AIR.md): d-train --stages12 1 then d-tune then d-finish

@@ -1,0 +1,81 @@
+# A crypt at night, written as a script (docs/COMPOSE.md §4) to show the air effects (docs/EFFECTS_AIR.md) together:
+#
+#   nvfx_scene_script --script examples/scenes/crypt.nvfxs --models DIR --out crypt.mp4
+#
+# DIR holds candle.nvfx, smokering.nvfx (with study M3's mean state) and heavygas.nvfx (docs/EFFECTS_AIR.md).
+#
+# The floor of a ruined crypt, open to the night. A row of candles burns on the left; in the middle a cold vapour spills
+# out of a broken tomb and flows along the floor both ways; on the right a censer puffs rings of incense that rise and
+# break up. At 2.5 s the door on the left is thrown open: a draught blows in, the candles lean and gutter, the vapour is
+# driven across the floor to the right and the rings drift with it. At 6.2 s the door swings to, and the air calms.
+
+scene      size 1280 x 720, fps 30, length 9 s, ground 610
+bus        at (-128, -360), size 1536 x 1100, cell 8
+particles  capacity 4000, flow 0.9
+keyframes  0.8, 2.2, 3.0, 3.8, 4.8, 5.8, 7.0, 8.4
+
+effect candle    = "candle.nvfx", swirl 1, swirl_scale 9   # a gentler sub-grid swirl than its calibration chose (3)
+effect smokering = "smokering.nvfx"
+effect heavygas  = "heavygas.nvfx"
+
+# The tomb's vapour: pale and cold, lit by the candles and the moonlight; the censer's incense, blue-grey.
+look miasma  = shader, emission 0, soot_density 1.6, soot_albedo 0.8, sky 0.55, shadow 0.2, scene_light 1.3, relief 1.2,
+               tint (0.82, 0.95, 0.9)
+look incense = shader, emission 0, soot_density 2.4, soot_albedo 0.75, sky 0.7, shadow 0.3, scene_light 1.2, relief 1.4,
+               tint (0.86, 0.88, 0.95)
+
+let door    = smooth((t - opened) / 0.5) * (1 - smooth((t - 6.2) / 1.2))   # the door open (0 shut, 1 wide open)
+let opened  = 2.5
+let blow    = noise(0.9 * t, 3.1, 0)                                      # the draught's gusts
+let draught = 0.5 + door * (0.3 + 0.08 * blow)                            # it blows from the left, to the right
+let censer  = 1080                                                         # the censer (world x), its mouth 150 up
+
+# A row of five candles on the left, each its own start and seed.
+module c1 = candle, size 64, width 120, at (150, ground - 4), sink 0.125, feather 0.2, start 0, seed 11,
+            controls (0.4, 0.5, 0.15), draught draught, turbulence 0.15 + 0.45 * door
+module c2 = candle, size 64, width 130, at (215, ground - 10), sink 0.125, feather 0.2, start 0, seed 12,
+            controls (0.5, 0.5, 0.15), draught draught, turbulence 0.15 + 0.45 * door
+module c3 = candle, size 64, width 120, at (280, ground - 2), sink 0.125, feather 0.2, start 4, seed 13,
+            controls (0.3, 0.5, 0.15), draught draught, turbulence 0.15 + 0.45 * door
+module c4 = candle, size 64, width 140, at (345, ground - 14), sink 0.125, feather 0.2, start 0, seed 14,
+            controls (0.55, 0.5, 0.2), draught draught, turbulence 0.2 + 0.45 * door
+module c5 = candle, size 64, width 120, at (410, ground - 6), sink 0.125, feather 0.2, start 4, seed 15,
+            controls (0.35, 0.5, 0.15), draught draught, turbulence 0.15 + 0.45 * door
+# The tomb's vapour, spilling out over its broken lid (the tile's mound) and along the floor.
+module gas = heavygas, size 128, width 640, at (700, ground), sink 0.09, feather 0.12, look miasma, start 0, seed 21,
+             controls (0.7, 0.5, 0.4), intensity 0.7, flow 0.5 + 0.4 * door, turbulence 0.35 + 0.2 * door
+# The censer's rings: three modules started in turn, one every 1.6 s.
+module r1 = smokering, size 128, width 300, at (censer, ground - 150), sink 0.11, feather 0.15, look incense, start 3, seed 31,
+            waiting, controls (0.5, 0.5, 0.3), wind 0.5 + 0.3 * door, opacity 1 - smooth((r1.age - 3.3) / 0.7)
+module r2 = smokering, size 128, width 300, at (censer, ground - 150), sink 0.11, feather 0.15, look incense, start 5, seed 32,
+            waiting, controls (0.5, 0.5, 0.3), wind 0.5 + 0.3 * door, opacity 1 - smooth((r2.age - 3.3) / 0.7)
+module r3 = smokering, size 128, width 300, at (censer, ground - 150), sink 0.11, feather 0.15, look incense, start 7, seed 33,
+            waiting, controls (0.5, 0.5, 0.3), wind 0.5 + 0.3 * door, opacity 1 - smooth((r3.age - 3.3) / 0.7)
+
+# The candles' light and their wicks, the censer's coals, the moonlight through the door.
+emit glow, at (150, ground - 6), radius 3, colour (1, 0.8, 0.5), brightness 1.2
+emit glow, at (215, ground - 12), radius 3, colour (1, 0.8, 0.5), brightness 1.2
+emit glow, at (280, ground - 4), radius 3, colour (1, 0.8, 0.5), brightness 1.2
+emit glow, at (345, ground - 16), radius 3, colour (1, 0.8, 0.5), brightness 1.2
+emit glow, at (410, ground - 8), radius 3, colour (1, 0.8, 0.5), brightness 1.2
+emit glow, at (censer, ground - 148), radius 8, colour (1, 0.45, 0.2), brightness 1.4 * (0.85 + 0.15 * noise(3 * t, 1, 0))
+field candles = lamp, at (280, ground - 40), radius 380, strength 0.9 * (1 - 0.25 * door), colour (1, 0.65, 0.32)
+field coals   = lamp, at (censer, ground - 150), radius 220, strength 0.5, colour (1, 0.5, 0.25)
+field moon    = lamp, at (40, ground - 200), radius 700, strength 0.55 * door, colour (0.6, 0.72, 1)
+light   gain 0.12
+frame   exposure 1.25, fade smooth(t / 0.4) * smooth((length - t) / 0.6), haze 1, bloom 1, bloom_threshold 1
+emit leaves, in (-40, 380), size 900 x 230, density 0.03 * door, wind (420, -20), colour (0.32, 0.27, 0.2), from 2.5, until 7
+
+# The censer's rings, one every 1.6 s.
+at 0.3:
+  wake r1
+at 1.9:
+  wake r2
+at 3.5:
+  wake r3
+at 5.1:
+  start r1 from 3, seed 34
+at 6.7:
+  start r2 from 5, seed 35
+at 8.3:
+  start r3 from 7, seed 36
