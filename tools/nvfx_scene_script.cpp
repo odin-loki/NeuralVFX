@@ -3,6 +3,11 @@
 //   nvfx_scene_script --script FILE [--models DIR] [--out scene.mp4 | --no-video] [--keyframes DIR] [--sheet sheet.png]
 //                     [--threads 2] [--isa avx2|avx512|baseline] [--precision float|int8] [--frames N] [--profile profile.csv]
 //                     [--verify frozen.csv] [--check] [--print] [--no-overlap] [--own-scratch]
+//                     [--trigger RULE@SECONDS ...] [--set INPUT=VALUE@SECONDS ...]
+//
+// --trigger and --set do what a game does through the scene C API (nvfx_scene_trigger, nvfx_scene_set_input): a rule
+// fired, or an input set, before the frame at that time is drawn; they act from the next frame computed. A scene the
+// game drives (examples/scenes/campfire.nvfxs) can so be shown with its rules fired.
 //
 // Each frame's picture is drawn on a thread of its own while the next frame's state is computed (Options::overlap,
 // with 2 or more threads; --threads counts that thread); --no-overlap draws it after the state. The frames are the
@@ -65,7 +70,29 @@ struct Args {
   int threads = 2, frames = -1;
   std::string isa, precision;  // precision: the modules' (study K), float, int8, or the runtime's default
   bool video = true, check = false, print = false, overlap = true, own_scratch = false;
+  struct Event {  // --trigger RULE@S (value unused) or --set INPUT=V@S
+    std::string name;
+    bool input = false;
+    float value = 0.f, seconds = 0.f;
+  };
+  std::vector<Event> events;
 };
+
+Args::Event parse_event(const std::string& text, bool input) {
+  const auto at = text.rfind('@');
+  if (at == std::string::npos) throw std::invalid_argument(input ? "--set takes INPUT=VALUE@SECONDS" : "--trigger takes RULE@SECONDS");
+  Args::Event e;
+  e.input = input;
+  e.name = text.substr(0, at);
+  e.seconds = std::stof(text.substr(at + 1));
+  if (input) {
+    const auto eq = e.name.find('=');
+    if (eq == std::string::npos) throw std::invalid_argument("--set takes INPUT=VALUE@SECONDS");
+    e.value = std::stof(e.name.substr(eq + 1));
+    e.name.resize(eq);
+  }
+  return e;
+}
 
 Args parse(int argc, char** argv) {
   Args a;
@@ -91,6 +118,8 @@ Args parse(int argc, char** argv) {
     else if (k == "--print") a.print = true;
     else if (k == "--no-overlap") a.overlap = false;
     else if (k == "--own-scratch") a.own_scratch = true;
+    else if (k == "--trigger") a.events.push_back(parse_event(next(), false));
+    else if (k == "--set") a.events.push_back(parse_event(next(), true));
     else throw std::invalid_argument("unknown option " + k + " (see the source header)");
   }
   if (a.script.empty()) throw std::invalid_argument("--script FILE is needed");
@@ -174,6 +203,18 @@ int main(int argc, char** argv) try {
   std::vector<std::uint64_t> sums(static_cast<std::size_t>(frames));
   for (int f = 0; f < frames; ++f) {
     if (f == 1) g_counting.store(true);  // the first frame may still touch lazily sized buffers
+    for (const Args::Event& e : A.events) {  // the game's calls before this frame
+      if (static_cast<int>(std::lround(e.seconds * scene.fps())) != f) continue;
+      if (!e.input) {
+        if (!scene.trigger(e.name)) throw std::invalid_argument("no rule '" + e.name + "' to trigger");
+      } else if (const int i = scene.input_index(e.name); i >= 0) {
+        scene.set_input(i, e.value);
+      } else {
+        throw std::invalid_argument("no input '" + e.name + "'");
+      }
+      std::println("  t {:4.1f} s: {} {}", static_cast<double>(f) / static_cast<double>(scene.fps()), e.input ? "set" : "trigger",
+                   e.input ? std::format("{} = {}", e.name, e.value) : e.name);
+    }
     const long a0 = g_allocations.load();
     const auto c0 = Clock::now();
     scene.render(f, rgb);

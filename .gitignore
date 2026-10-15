@@ -35,6 +35,9 @@ cache/
 *.safetensors
 !docs/**/*.png
 !docs/**/*.svg
+# The one exception for videos (docs/PLAN.md §10, decision 6): the demo videos and their posters in videos/
+!videos/*.mp4
+!videos/*.jpg
 *.pam
 *.ppm
 *.pgm

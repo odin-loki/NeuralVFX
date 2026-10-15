@@ -303,6 +303,11 @@ answers below were chosen on that instruction; each can be revisited.
    No engine plugin is built here (none can be tested in this environment).
 5. **Python.** No. Training is C++23 with hand-written gradients (no LibTorch, no Python), checked against finite
    differences; the repository keeps its "no Python" rule.
+6. **Demo videos in git** (the owner's request, 15 October 2026: "make a video folder and make a whole bunch of
+   effects videos and upload to git. I want to demo this."). Demo videos are allowed in `videos/` only: H.264 files of
+   at most 5 MB each with one JPEG poster each, about 120 MB in all, indexed in [videos/README.md](../videos/README.md)
+   (`.gitignore` un-ignores `videos/*.mp4` and `videos/*.jpg` and nothing else). Raw data, frames and weights still
+   never go in git, and every other video (study comparisons, scene renders) stays under the data root.
 
 Language: C++23 throughout (owner's instruction, 8 October 2026): `std::print`, `std::expected`, `std::span`, ranges
 and views, multidimensional `operator[]`, `std::float16_t`, `std::byteswap`, `std::ispanstream`, `std::jthread`. The

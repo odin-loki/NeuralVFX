@@ -2,11 +2,13 @@
  * effects into the engine layers (colour, albedo, emission, normal and thickness) beside its picture; this program reads
  * them as an engine would and lights them itself, over a background of its own, with a light that moves.
  *
- *   nvfx_lit_host CATALOGUE_DIR MODELS_DIR OUT_DIR [--frames 120] [--threads 2]
+ *   nvfx_lit_host CATALOGUE_DIR MODELS_DIR OUT_DIR [--frames 120] [--threads 2] [--raw FILE]
  *       a stage of smoke, a campfire and a rocket trail moved across it, with the layers on; every frame its four
  *       layers are read (RGBA32F) and relit: albedo times (ambient light + a light that circles the scene, by the
  *       normals), plus the emission, over the background by alpha; every 20th frame is written as PNG to OUT_DIR
- *       (lit_NNN.png, and the four layers as RGBA8: colour_, albedo_, emission_, normal_NNN.png)
+ *       (lit_NNN.png, and the four layers as RGBA8: colour_, albedo_, emission_, normal_NNN.png). --raw FILE ("-":
+ *       standard output) also writes every frame as raw RGB24, 1280 x 720: the relit picture and the three layers it
+ *       is lit from (top: lit, albedo over grey; bottom: emission, normals), for a video (ffmpeg -f rawvideo)
  *   nvfx_lit_host --self-test CATALOGUE_DIR
  *       procedural effects only (no learned effect needed): the layers are the same for the same calls and on any
  *       number of threads; the picture is the same with the layers on or off; thickness is 0 exactly where alpha is 0,
@@ -205,7 +207,28 @@ static void relight(const float* albedo, const float* emission, const float* nor
   }
 }
 
-static int demo(const char* catalogue, const char* models, const char* out_dir, int frames, int threads) {
+/* One frame for --raw: 2 x 2 quadrants of w x h (lit; albedo over grey; emission; normals as a normal map, flat = (0.5, 0.5, 1)). */
+static void quadrants(const unsigned char* lit, const float* albedo, const float* emission, const float* normal, int w, int h, unsigned char* out) {
+  int x, y, c;
+  for (y = 0; y < h; ++y) {
+    for (x = 0; x < w; ++x) {
+      const size_t i = (size_t)y * (size_t)w + (size_t)x, row = (size_t)w * 2 * 3;
+      unsigned char* q[4];
+      q[0] = out + (size_t)y * row + (size_t)x * 3;
+      q[1] = q[0] + (size_t)w * 3;
+      q[2] = q[0] + (size_t)h * row;
+      q[3] = q[2] + (size_t)w * 3;
+      for (c = 0; c < 3; ++c) {
+        q[0][c] = lit[i * 4 + (size_t)c];
+        q[1][c] = to8(albedo[i * 4 + (size_t)c] + 0.18f * (1.f - clampf(albedo[i * 4 + 3], 0.f, 1.f)));
+        q[2][c] = to8(emission[i * 4 + (size_t)c]);
+        q[3][c] = (unsigned char)(127.5f + 127.5f * clampf(normal[i * 4 + (size_t)c], -1.f, 1.f));
+      }
+    }
+  }
+}
+
+static int demo(const char* catalogue, const char* models, const char* out_dir, int frames, int threads, const char* raw_path) {
   const int W = 640, H = 360;
   const float ground = 313.f;
   nvfx_stage_room rooms[3] = {{"chimney_smoke", 1, 0}, {"campfire", 1, 0}, {"rocket_trail", 1, 0}};
@@ -213,11 +236,23 @@ static int demo(const char* catalogue, const char* models, const char* out_dir, 
   nvfx_stage* stage;
   nvfx_scene* scene;
   float *albedo, *emission, *normal, *colour;
-  unsigned char *lit, *rgba;
+  unsigned char *lit, *rgba, *quad = NULL;
+  FILE* raw = NULL;
   nvfx_fx rocket = 0, fx = 0;
   char path[1024];
   int f, written = 0;
   if (!lib) return 1;
+  if (raw_path) { /* before anything else is made, so that a failure leaves nothing to free but the catalogue */
+    raw = strcmp(raw_path, "-") == 0 ? stdout : fopen(raw_path, "wb");
+    quad = (unsigned char*)malloc((size_t)W * H * 12);
+    if (!raw || !quad) {
+      fprintf(stderr, "nvfx_lit_host: cannot write %s\n", raw_path);
+      if (raw && raw != stdout) fclose(raw);
+      free(quad);
+      nvfx_library_free(lib);
+      return 1;
+    }
+  }
   stage = make_stage(lib, rooms, 3, W, H, threads, 1);
   if (!stage) return 1;
   scene = nvfx_stage_scene(stage);
@@ -241,6 +276,10 @@ static int demo(const char* catalogue, const char* models, const char* out_dir, 
     nvfx_scene_render_layer(scene, NVFX_LAYER_EMISSION, NVFX_FORMAT_RGBA32F, emission, (size_t)W * 16);
     nvfx_scene_render_layer(scene, NVFX_LAYER_NORMAL, NVFX_FORMAT_RGBA32F, normal, (size_t)W * 16);
     relight(albedo, emission, normal, W, H, ground, lx, ly, 120.f, 260.f, lit);
+    if (raw) {
+      quadrants(lit, albedo, emission, normal, W, H, quad);
+      fwrite(quad, 1, (size_t)W * H * 12, raw);
+    }
     if (f % 20 == 0 && out_dir) {
       static const char* names[4] = {"colour", "albedo", "emission", "normal"};
       int l;
@@ -253,7 +292,10 @@ static int demo(const char* catalogue, const char* models, const char* out_dir, 
       }
     }
   }
-  printf("lit sprites: %d frames of %dx%d relit by a moving light; %d PNG files in %s\n", frames, W, H, written, out_dir ? out_dir : "(none)");
+  fprintf(raw == stdout ? stderr : stdout, "lit sprites: %d frames of %dx%d relit by a moving light; %d PNG files in %s\n", frames, W, H, written,
+          out_dir ? out_dir : "(none)");
+  if (raw && raw != stdout) fclose(raw);
+  free(quad);
   free(colour);
   free(albedo);
   free(emission);
@@ -348,15 +390,17 @@ static int self_test(const char* catalogue) {
 
 int main(int argc, char** argv) {
   int frames = 120, threads = 2, i;
+  const char* raw = NULL;
   crc_init();
   if (argc >= 3 && strcmp(argv[1], "--self-test") == 0) return self_test(argv[2]);
   if (argc < 4) {
-    fprintf(stderr, "usage: nvfx_lit_host CATALOGUE_DIR MODELS_DIR OUT_DIR [--frames N] [--threads N] | --self-test CATALOGUE_DIR\n");
+    fprintf(stderr, "usage: nvfx_lit_host CATALOGUE_DIR MODELS_DIR OUT_DIR [--frames N] [--threads N] [--raw FILE] | --self-test CATALOGUE_DIR\n");
     return 2;
   }
   for (i = 4; i + 1 < argc; i += 2) {
     if (strcmp(argv[i], "--frames") == 0) frames = atoi(argv[i + 1]);
     else if (strcmp(argv[i], "--threads") == 0) threads = atoi(argv[i + 1]);
+    else if (strcmp(argv[i], "--raw") == 0) raw = argv[i + 1];
   }
-  return demo(argv[1], argv[2], argv[3], frames, threads);
+  return demo(argv[1], argv[2], argv[3], frames, threads, raw);
 }
