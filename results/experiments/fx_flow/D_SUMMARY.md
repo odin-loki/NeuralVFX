@@ -169,3 +169,34 @@ Statistics of each 10 s window of a 60 s neural run (shards of 6 s from start po
 | puffs | 1 | 3 | 0.1063 | 1.7258 | 0.0203 | 23.907 |
 | puffs | 1 | 4 | 0.1394 | 1.5723 | 0.0380 | 23.570 |
 | puffs | 1 | 5 | 0.1233 | 1.5112 | 0.0221 | 28.017 |
+
+### Cost
+
+Median (90th percentile) ms per frame through `nvfx_render` on one pinned core; `restart` is a seek (a restart from a start point, including any warm-up). The coarse simulation row is the 32-cell solver plus its renderer at 128 px (scalar code).
+
+| model | ISA | size | ms | restart ms | MAC/px | KB stored / resident | KB scratch |
+|---|---|---:|---:|---:|---:|---|---:|
+| rollout_fire | avx2 | 64 | 0.4579 (0.9258) | 18.61 | 2510 | 81.6 / 162.8 | 1636.6 |
+| rollout_fire | avx2 | 128 | 1.0228 (1.6496) | 14.43 | 1012 | 81.6 / 162.8 | 2489.4 |
+| rollout_fire | avx2 | 256 | 2.5613 (3.8502) | 23.20 | 637 | 81.6 / 162.8 | 5826.9 |
+| rollout_fire | baseline | 128 | 1.7580 (3.1610) | 30.62 | 1012 | 81.6 / 162.8 | 2526.5 |
+| rollout_fire | avx512 | 128 | 0.7181 (1.0856) | 13.52 | 1012 | 81.6 / 162.8 | 2502.9 |
+| coarse_sim_fire | scalar | 128 | 1.7979 (2.3757) | - | - | - | - |
+| rollout_launch | avx2 | 64 | 0.4601 (0.8759) | 0.12 | 2510 | 145.7 / 418.8 | 1636.6 |
+| rollout_launch | avx2 | 128 | 0.7370 (4.7085) | 0.31 | 1012 | 145.7 / 418.8 | 2489.4 |
+| rollout_launch | avx2 | 256 | 1.6755 (2.8221) | 0.98 | 637 | 145.7 / 418.8 | 5826.9 |
+| rollout_launch | baseline | 128 | 1.4193 (2.1468) | 0.62 | 1012 | 145.7 / 418.8 | 2526.5 |
+| rollout_launch | avx512 | 128 | 0.7507 (0.9190) | 0.27 | 1012 | 145.7 / 418.8 | 2502.9 |
+| coarse_sim_launch | scalar | 128 | 2.2820 (2.6119) | - | - | - | - |
+| rollout_puffs | avx2 | 64 | 0.4714 (0.5971) | 0.14 | 2510 | 145.7 / 418.8 | 1636.6 |
+| rollout_puffs | avx2 | 128 | 0.7463 (1.1096) | 0.39 | 1012 | 145.7 / 418.8 | 2489.4 |
+| rollout_puffs | avx2 | 256 | 1.6876 (3.3664) | 0.89 | 637 | 145.7 / 418.8 | 5826.9 |
+| rollout_puffs | baseline | 128 | 1.6371 (2.6901) | 0.47 | 1012 | 145.7 / 418.8 | 2526.5 |
+| rollout_puffs | avx512 | 128 | 0.5314 (1.0597) | 0.29 | 1012 | 145.7 / 418.8 | 2502.9 |
+| coarse_sim_puffs | scalar | 128 | 2.0217 (5.9547) | - | - | - | - |
+| rollout_ink | avx2 | 64 | 0.4397 (0.8546) | 0.10 | 2510 | 145.7 / 418.8 | 1636.6 |
+| rollout_ink | avx2 | 128 | 0.6823 (1.2369) | 0.24 | 1012 | 145.7 / 418.8 | 2489.4 |
+| rollout_ink | avx2 | 256 | 1.6577 (5.7526) | 4.79 | 637 | 145.7 / 418.8 | 5826.9 |
+| rollout_ink | baseline | 128 | 1.3739 (5.2785) | 0.33 | 1012 | 145.7 / 418.8 | 2526.5 |
+| rollout_ink | avx512 | 128 | 0.4968 (0.8852) | 0.22 | 1012 | 145.7 / 418.8 | 2502.9 |
+| coarse_sim_ink | scalar | 128 | 3.1368 (6.9985) | - | - | - | - |
