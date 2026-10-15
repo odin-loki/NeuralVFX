@@ -1709,7 +1709,7 @@ std::vector<Setting> validation_settings(int n = 10, int n_test = 10) {
 //   test3  study B's held-out settings extended to kM3Settings (test_settings(kM3Settings)): real 8,700,000, plays
 //          8,800,000, tracking 8,850,000 (study M2's test block, never used).
 constexpr int kM3ProbeSettings = 40;
-constexpr int kM3Settings = 0;  // fixed by the probe (REPORT §14.9.2) before validation; 0: not yet
+constexpr int kM3Settings = 30;  // fixed by the probe (REPORT §14.9.2) before validation
 struct Split {
   std::string name;
   std::vector<Setting> settings;
@@ -2223,8 +2223,16 @@ constexpr double kM3Track = -0.20, kM3Spectrum = 0.02, kM3Motion = 0.02, kM3Shar
 // The margins of the rule, per effect: m3_margins.csv from the probe's null (§14.9.2), copied here before validation.
 MarginsM3 margins_m3(sim::Effect e) {
   const std::string en = ename(e);
-  if (en == "explosion") return {};
-  if (en == "dust") return {};
+  if (en == "explosion") return {-0.20, 0.0543097, 0.1168187, 0.0183427, 0.0001};
+  if (en == "dust") return {-0.20, 0.0246263, 0.1186974, 0.0057053, 0.0001};
+  return {};
+}
+// Study K's margins at the same scales (m3_margins.csv's k_margin: coverage and emission 10% of the current model's mean
+// distance on the probe, at least 0.0001), reported beside as a second reading; they do not decide.
+MarginsM3 margins_k_m3(sim::Effect e) {
+  const std::string en = ename(e);
+  if (en == "explosion") return {-0.20, 0.02, 0.02, 0.0032937, 0.0001};
+  if (en == "dust") return {-0.20, 0.02, 0.02, 0.0010551, 0.0001};
   return {};
 }
 double mean_of(const std::vector<double>& v) { return std::accumulate(v.begin(), v.end(), 0.0) / static_cast<double>(v.size()); }
@@ -2263,9 +2271,10 @@ struct RuleM3 {
   MarginsM3 mg;
   bool better = false, none_worse = false;
   std::array<bool, 6> within{}, strict_worse{};
+  std::array<bool, 6> within_k{true, true, true, true, true, true};  // study K's margins: a second reading, not deciding
   bool pass() const { return better && none_worse; }
 };
-RuleM3 apply_rule_m3(const Scores& cand, const Scores& cur, const MarginsM3& mg) {
+RuleM3 apply_rule_m3(const Scores& cand, const Scores& cur, const MarginsM3& mg, const MarginsM3& mk = {}) {
   RuleM3 r;
   r.mg = mg;
   for (int k = 0; k < 6; ++k) r.iv[sz(k)] = metrics::paired_bootstrap(cmp_stat(cand, k), cmp_stat(cur, k), 10000, 2026);
@@ -2276,21 +2285,27 @@ RuleM3 apply_rule_m3(const Scores& cand, const Scores& cur, const MarginsM3& mg)
   r.none_worse = std::ranges::all_of(r.within, [](bool b) { return b; });
   r.strict_worse[0] = r.iv[0].hi < 0;
   for (int k = 1; k < 5; ++k) r.strict_worse[sz(k)] = r.iv[sz(k)].lo > 0;
+  if (mk.set()) {
+    r.within_k[0] = r.iv[0].lo >= mk.track;
+    for (int k = 1; k < 5; ++k) r.within_k[sz(k)] = r.iv[sz(k)].hi <= mk.of(k);
+  }
   r.strict_worse[5] = r.iv[5].hi < 0;
   return r;
 }
 const std::string kRuleM3Header =
     "effect,model,better,none_worse,meets_rule,mean_frame_gain_db,mean_frame_lo,spectrum_change,spectrum_hi,motion_hi,coverage_hi,emission_hi,track_lo,"
-    "margin_spectrum,margin_motion,margin_coverage,margin_emission,margin_track,outside_margin,strict_worse,sha256";
+    "margin_spectrum,margin_motion,margin_coverage,margin_emission,margin_track,outside_margin,outside_k_margin,strict_worse,sha256";
 std::string rule_m3_row(const std::string& en, const Entry& m, const RuleM3& r) {
-  std::string within, strict;
+  std::string within, within_k, strict;
   for (int k = 0; k < 6; ++k) {
     if (!r.within[sz(k)]) within += (within.empty() ? "" : ";") + kCmpNames[sz(k)];
+    if (!r.within_k[sz(k)]) within_k += (within_k.empty() ? "" : ";") + kCmpNames[sz(k)];
     if (r.strict_worse[sz(k)]) strict += (strict.empty() ? "" : ";") + kCmpNames[sz(k)];
   }
-  return std::format("{},{},{},{},{},{:.4f},{:.4f},{:.5f},{:.5f},{:.5f},{:.6f},{:.7f},{:.4f},{:.5f},{:.5f},{:.6f},{:.7f},{:.2f},{},{},{}", en, m.name, r.better ? 1 : 0,
+  return std::format("{},{},{},{},{},{:.4f},{:.4f},{:.5f},{:.5f},{:.5f},{:.6f},{:.7f},{:.4f},{:.5f},{:.5f},{:.6f},{:.7f},{:.2f},{},{},{},{}", en, m.name, r.better ? 1 : 0,
                      r.none_worse ? 1 : 0, r.pass() ? 1 : 0, r.iv[5].mean, r.iv[5].lo, r.iv[1].mean, r.iv[1].hi, r.iv[2].hi, r.iv[3].hi, r.iv[4].hi, r.iv[0].lo,
-                     r.mg.spectrum, r.mg.motion, r.mg.coverage, r.mg.emission, r.mg.track, within.empty() ? "none" : within, strict.empty() ? "none" : strict, m.sha);
+                     r.mg.spectrum, r.mg.motion, r.mg.coverage, r.mg.emission, r.mg.track, within.empty() ? "none" : within,
+                     within_k.empty() ? "none" : within_k, strict.empty() ? "none" : strict, m.sha);
 }
 void print_rule_m3(const std::string& split, const std::string& en, const Entry& m, const RuleM3& r) {
   std::println("{} {} {} (target: the mean frame): better on its target {}, within every margin {} -> {}", split, en, m.name, r.better ? "yes" : "no",
@@ -2298,7 +2313,7 @@ void print_rule_m3(const std::string& split, const std::string& en, const Entry&
   for (int k = 0; k < 6; ++k) {
     std::println("    {:<20} {:+.5f} [{:+.5f}, {:+.5f}]{}{}{}", kCmpNames[sz(k)], r.iv[sz(k)].mean, r.iv[sz(k)].lo, r.iv[sz(k)].hi,
                  k == 5 ? "  (target)" : std::format("  margin {:+.5f}", r.mg.of(k)), r.within[sz(k)] ? "" : "  OUTSIDE its margin",
-                 r.strict_worse[sz(k)] ? "  (strictly worse)" : "");
+                 std::string(r.within_k[sz(k)] ? "" : "  (outside study K's)") + (r.strict_worse[sz(k)] ? "  (strictly worse)" : ""));
   }
 }
 void decide_m3(const Ctx& c, sim::Effect e, const Split& sp, const std::vector<Entry>& models, const std::vector<Scores>& sc, const std::string& prefix) {
@@ -2309,7 +2324,7 @@ void decide_m3(const Ctx& c, sim::Effect e, const Split& sp, const std::vector<E
   int chosen = -1;
   double best = -1e9;
   for (std::size_t mi = 1; mi < models.size(); ++mi) {
-    const RuleM3 r = apply_rule_m3(sc[mi], sc[0], mg);
+    const RuleM3 r = apply_rule_m3(sc[mi], sc[0], mg, margins_k_m3(e));
     print_rule_m3(sp.name, en, models[mi], r);
     rows.push_back(rule_m3_row(en, models[mi], r));
     if (r.pass() && r.iv[5].mean > best) {
@@ -2317,7 +2332,7 @@ void decide_m3(const Ctx& c, sim::Effect e, const Split& sp, const std::vector<E
       chosen = static_cast<int>(mi);
     }
   }
-  rows.push_back(std::format("{},chosen,,,,,,,,,,,,,,,,,,,{}", en, chosen > 0 ? models[sz(chosen)].name : "none"));
+  rows.push_back(std::format("{},chosen,,,,,,,,,,,,,,,,,,,,{}", en, chosen > 0 ? models[sz(chosen)].name : "none"));  // 22 columns
   merge_rows(c.results / std::format("{}_choice.csv", prefix), kRuleM3Header, rows, en);
   std::println("{} {}: {}", sp.name, en, chosen > 0 ? "chosen " + models[sz(chosen)].name : std::string("none meets the rule"));
 }
@@ -2375,7 +2390,7 @@ void probe_m3(const Ctx& c, sim::Effect e, const Split& sp, const std::vector<En
       sd[sz(k)] = sd_of(d[sz(k)]);
       sdu[sz(k)] = sd_upper80(sd[sz(k)], P);
     }
-    if (static_cast<int>(mi) != null_i) print_rule_m3("probe3", en, models[mi], apply_rule_m3(sc[mi], sc[0], mg));
+    if (static_cast<int>(mi) != null_i) print_rule_m3("probe3", en, models[mi], apply_rule_m3(sc[mi], sc[0], mg, margins_k_m3(e)));
     std::println("\nprobe3 {} {} - current: power by resampling the probe's {} settings (pass: unchanged / a loss of the margin's size; the target as measured)", en,
                  models[mi].name, P);
     std::println("{:<20}{:>10}{:>10}{:>10}{:>10}{:>8}{:>8} | pass at N settings: {}", "measure", "mean", "SD", "SD up80", "margin", "N90", "N90up",
@@ -2497,7 +2512,7 @@ void step_test(const Ctx& c, sim::Effect e, const tools::Args& a) {
   const auto sc = evaluate(c, e, sp, models);
   if (c.m3) {  // study M3: its rule, once
     report_split(c, e, sp, models, sc, "m3_test");
-    const RuleM3 r = apply_rule_m3(sc[1], sc[0], mg3);
+    const RuleM3 r = apply_rule_m3(sc[1], sc[0], mg3, margins_k_m3(e));
     print_rule_m3("test3", ename(e), models[1], r);
     std::println("test3 {} {}: {}", ename(e), models[1].name, r.pass() ? "MEETS the rule: replace" : "does not meet it: keep the current model");
     merge_rows(c.results / "m3_test_decision.csv", kRuleM3Header, {rule_m3_row(ename(e), models[1], r)}, ename(e));

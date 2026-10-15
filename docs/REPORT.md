@@ -2739,8 +2739,8 @@ before validation.
 ordered coarse state) brought the explosion's average picture 4.3 dB (study M) and 3.4 dB (study M2) closer to a real
 run's on validation, and dust's 1.1 dB (M2), but neither was tested: under study M's strict reading the explosion's
 spectrum tied, and under M2's margins the explosion's spectrum interval and dust's coverage interval reached past
-margins that were far tighter than those measures' paired spread over 10 settings (§14.8.7). Is the mean state better on
-held-out settings, with nothing worse by more than matters, when the rule is planned for power? Code: `nvfx_ordered
+margins that were far tighter than those measures' paired spread over 10 settings (§14.8.7). Is the mean state better
+on held-out settings, with nothing worse by more than matters, when the rule is planned for power? Code: `nvfx_ordered
 --study m3` (the same tool; every file under the data root's `m3`; studies M's and M2's data are only read).
 
 **Candidates**: the explosion's `ms` (study M's file, SHA-256 `b0ee6f05...`, v2 with the mean state fitted to the first
@@ -2770,8 +2770,8 @@ the null's RMS change at a setting** (the current model with fresh seeds minus t
 the RMS over the probe's 40 settings), computed from the current model and the null alone, before `ms` is played on the
 probe. K's margin stands where the measure is steadier than that; the null widens it only where K's margin is smaller
 than what re-seeding does. Tracking has no null (a tracked run takes its own seed, so the same model plays the same
-frames; `ms` moves a start at its own controls by nothing), so it keeps -0.20 dB. The margins are fixed as numbers
-from the probe; they are not functions of the validation or test data.
+frames; `ms` moves a start at its own controls by nothing), so it keeps -0.20 dB. The margins are fixed as numbers from
+the probe; they are not functions of the validation or test data.
 
 **The number of settings comes from the spread.** The interval's worse end lies about 1.96 SD / sqrt(N) beyond the mean
 difference over N settings. A measure that the candidate leaves truly unchanged on average passes a margin d with
@@ -2784,23 +2784,137 @@ other than the target, a truly unchanged measure passes its margin with probabil
 probe's settings (4,000 sets of N settings drawn with replacement, each measure's paired differences centred on zero)
 and in the normal form with the SD at the upper end of its one-sided 80% interval (M2's probe, at 4 runs and 10
 settings, had narrower intervals than its validation: this guards against an underestimate). The null passes its own
-margins with at least 0.9 at N >= 11 and 0.99 at N >= 20 (each margin is at least its RMS). N is capped by the time a validation and a test
-take on this machine, measured on the probe (one-shots are cheap: 89 frames a run); if the cap binds, N is the cap and
-the power at it is stated before validation. The same N for validation and the test.
+margins with at least 0.9 at N >= 11 and 0.99 at N >= 20 (each margin is at least its RMS). N is capped by the time a
+validation and a test take on this machine, measured on the probe (one-shots are cheap: 89 frames a run); if the cap
+binds, N is the cap and the power at it is stated before validation. The same N for validation and the test.
 
 **Validation settings**: study G's 10 and more drawn the same way (the same random stream, seed 2027, uniform in 0.05 to
 0.95 off the training grid, at least 0.05 from every test setting), the first N; **test settings**: study B's 10 and
 more drawn the same way (seed 2026), the first N. Seeds: validation real 8,350,000 + 100 s + k (the floor + 50), plays
-8,400,000, tracking 8,450,000 (k = 0, 1); the test real 8,700,000 + 100 s + k (the floor + 50), plays 8,800,000, tracking
-8,850,000 (study M2's test block, never used).
+8,400,000, tracking 8,450,000 (k = 0, 1); the test real 8,700,000 + 100 s + k (the floor + 50), plays 8,800,000,
+tracking 8,850,000 (study M2's test block, never used).
 
 **The rule's form** (its numbers follow the probe): candidate minus current model, paired over the settings (tracking:
 each setting's mean over its 2 runs), 95% bootstrap with 10,000 resamples (`metrics::paired_bootstrap`, seed 2026), the
 measures of studies M and M2 (8 runs pooled per setting; one-shots their 89 frames from the first). The candidate
 replaces the current model when its **mean-frame PSNR interval is above zero** and every other measure's interval has
-its worse end within its margin. The strict reading is reported beside and does not decide. The chosen file is written to
-the data root's `m3/models/<effect>.nvfx` and frozen by SHA-256 in `results/experiments/ordered/m3_frozen.csv` before
+its worse end within its margin. The strict reading is reported beside and does not decide. The chosen file is written
+to the data root's `m3/models/<effect>.nvfx` and frozen by SHA-256 in `results/experiments/ordered/m3_frozen.csv` before
 its test, which runs once (`nvfx_ordered --study m3 test`, a marker under `m3`).
+
+#### 14.9.2 The probe (training settings): the null, the margins and the number of settings
+
+The controls of salt-1 training runs 0 to 39, 8 runs pooled per setting, tracking 2 runs per setting
+([m3_probe_compare.csv](../results/experiments/ordered/m3_probe_compare.csv),
+[m3_probe_stats.csv](../results/experiments/ordered/m3_probe_stats.csv)). The current model and the null were played
+first and the margins written ([m3_margins.csv](../results/experiments/ordered/m3_margins.csv), commit `dd601eb`) before
+`ms` was played on the probe.
+
+**The null** (the current model with fresh seeds minus the current model, over the 40 settings) and the margins it
+gives:
+
+| effect | measure | study K's margin | the null's RMS change at a setting | the floor (two sets of 8 real runs) | the current model's distance | **margin** |
+|---|---|---:|---:|---:|---:|---:|
+| explosion | spectrum distance | 0.02 | 0.054 | 0.035 | 0.215 | **+0.0543** |
+| explosion | \|ln motion ratio\| | 0.02 | 0.117 | 0.034 | 0.139 | **+0.1168** |
+| explosion | coverage distance | 0.0033 | 0.0183 | 0.0054 | 0.0329 | **+0.0183** |
+| explosion | emission distance | 0.0001 | 0.000007 | 0.000000 | 0.000023 | **+0.0001** |
+| dust | spectrum distance | 0.02 | 0.025 | 0.033 | 0.098 | **+0.0246** |
+| dust | \|ln motion ratio\| | 0.02 | 0.119 | 0.057 | 0.157 | **+0.1187** |
+| dust | coverage distance | 0.0011 | 0.0057 | 0.0033 | 0.0106 | **+0.0057** |
+| dust | emission distance | 0.0001 | 0.000002 | 0.000000 | 0.000010 | **+0.0001** |
+| both | tracking at 1 s | -0.20 dB | none (the same frames) | - | 19.4, 18.1 dB | **-0.20 dB** |
+
+- **The current one-shots vary a lot from one set of seeds to the next.** Re-seeding the current explosion moves its
+  spectrum distance at a setting by 0.054 (RMS), its motion by 12% and its coverage distance by 0.018, more than the
+  floor (two sets of real runs differ by 0.035, 3% and 0.005). Its plays begin from one of 16 stored first states taken
+  at other intensities, and which one a seed picks changes the explosion's size: that variety is the very fault the mean
+  state addresses, and it is what a viewer sees of the current model from one set of runs to the next. So by the rule
+  committed before these numbers every margin but tracking's and emission's is the null's, 1.2 to 6 times study K's:
+  they are wide, and they say so plainly. Study K's margins are reported beside each decision as a second reading (not
+  deciding), with the strict one.
+- The mean frame itself moves under the null by 2.6 dB (the explosion) and 1.8 dB (dust) between two sets of 8 plays at
+  a setting (its SD over the settings); over 40 settings the null's mean-frame difference is +0.19 [-0.59, +1.00] and
+  -0.07 [-0.60, +0.47] dB.
+
+**The mean state on the probe** (candidate minus current model;
+[m3_power.csv](../results/experiments/ordered/m3_power.csv)):
+
+| effect | tracking at 1 s (dB) | spectrum distance | \|ln motion ratio\| | coverage | emission | mean-frame PSNR (dB) |
+|---|---|---|---|---|---|---|
+| explosion `ms` | -0.0001 [-0.0011, +0.0009] | -0.011 [-0.036, +0.014] | -0.044 [-0.082, -0.009] | -0.0188 [-0.0255, -0.0131] | -0.000000 | **+3.14 [+2.36, +3.97]** |
+| dust `ms` | +0.0002 [-0.0003, +0.0007] | +0.004 [-0.006, +0.013] | -0.059 [-0.101, -0.019] | -0.0046 [-0.0074, -0.0023] | -0.000000 | **+1.21 [+0.68, +1.80]** |
+
+Means: the explosion's mean-frame PSNR 29.48 → 32.62 dB (the floor 36.60), coverage 0.033 → 0.014 (0.005), motion
+0.98 → 0.92 of the real runs' (0.99), spectrum 0.215 → 0.204 (0.035); dust's 31.93 → 33.14 dB (37.66), coverage
+0.0106 → 0.0059 (0.0033), motion 1.04 → 0.98 (1.00), spectrum 0.098 → 0.102 (0.033). Both meet the rule's form on
+the probe with these margins, and also within study K's.
+
+**Their spread, and the number of settings.** The paired spread of `ms` minus the current model over the 40 settings
+(SD; at the upper end of its 80% interval) and the settings a truly unchanged measure needs to pass its margin with
+probability 0.9 (normal form with that SD; and by resampling the probe's settings, the probability at 30 settings):
+
+| effect | measure | SD of `ms` - current (up80) | the null's SD | settings for 0.9 | pass at 30 settings, unchanged | pass at 30 if worse by the margin |
+|---|---|---|---:|---:|---:|---:|
+| explosion | spectrum distance | 0.082 (0.091) | 0.055 | **30** | 0.96 | 0.02 |
+| explosion | \|ln motion ratio\| | 0.121 (0.135) | 0.118 | 15 | 1.00 | 0.02 |
+| explosion | coverage distance | 0.021 (0.023) | 0.019 | 17 | 1.00 | 0.01 |
+| dust | spectrum distance | 0.031 (0.035) | 0.024 | 21 | 1.00 | 0.02 |
+| dust | \|ln motion ratio\| | 0.134 (0.150) | 0.119 | 17 | 1.00 | 0.02 |
+| dust | coverage distance | 0.0083 (0.0093) | 0.0058 | 28 | 1.00 | 0.01 |
+
+Tracking (SD 0.003 dB) and emission (SD under 10⁻⁵ against a margin of 10⁻⁴) need one setting. The mean state's
+spread exceeds the null's where it changes the effect most from setting to setting (the explosion's spectrum: 0.082
+against 0.055; its spectrum distance moves by -0.27 to +0.17 from setting to setting as its size is corrected, while its
+mean frame gains up to 10.8 dB). **N = 30** is the smallest multiple of 10 that meets the plan's condition for both
+effects (the explosion's spectrum needs 29.8 at the upper SD); there, by resampling, the whole rule passes with
+probability 0.96 (the explosion) and 0.99 (dust) if every other measure is truly unchanged and the mean frame gains as
+on the probe, and a measure truly worse by its margin passes with probability 0.01 to 0.03 (0.025 nominal; the normal
+form is slightly narrow at 30). At 10 settings, as in study M2, the same rule would have passed with probability 0.59
+and 0.45. The cap did not bind: a validation of both effects at 30 settings takes about 20 minutes here (the probe: real
+runs 0.7 s, plays 0.17 s each on 2 threads of the shared machine).
+
+**The candidates are study M's and M2's files**, unchanged: nothing on the probe points to a refit (where the mean state
+loses on the spectrum it gains most on the mean frame, as the size is corrected; its mean frame is worse at 5 of 40
+settings for the explosion, by at most 1.0 dB, and at 9 for dust, by at most 1.2 dB, against gains up to 10.8 and 7.6
+dB).
+
+#### 14.9.3 The rule (committed before validation; the test runs once)
+
+**Candidates**: the explosion `ms` (SHA-256 `b0ee6f053b4b83594fe9cb26d5b496b3ba829fe32d246ab24297796e032a7bc5`), dust
+`ms` (`938440a486c21c393aa4af74951284ab53e32468099f9f14073876ddc5292af9`), each against its current model (the explosion
+`b8e7aa42...`, dust `e18c287b...`).
+
+**Measures**: as studies M and M2 (§14.8.1): tracking at 1 s from the true state (2 runs per setting, each from an
+empty grid, averaged per setting), and the endless statistics of the runtime as shipped, 8 runs pooled per setting, the
+one-shots' 89 frames from the first: detail spectrum distance, |ln motion ratio|, coverage and emission distances and
+mean-frame PSNR against the pooled real runs. Candidate minus current model, paired over the 30 settings, 95% bootstrap
+with 10,000 resamples (`metrics::paired_bootstrap`, seed 2026).
+
+**The rule.** The candidate replaces the current model for its effect when
+1. its **mean-frame PSNR interval is above zero**, and
+2. every other measure's interval has its worse end within its margin: tracking at 1 s at least **-0.20 dB**; the
+   explosion's spectrum distance at most **+0.0543**, |ln motion ratio| **+0.1168**, coverage distance **+0.0183**,
+   emission distance **+0.0001**; dust's **+0.0246**, **+0.1187**, **+0.0057** and **+0.0001**.
+
+Each effect is judged alone. Beside each decision (not deciding): study K's margins (spectrum and motion +0.02; coverage
++0.0033 for the explosion and +0.0011 for dust, 10% of the current model's distance on the probe; emission +0.0001;
+tracking -0.20) and the strict reading (no interval entirely on the worse side of zero). On validation an effect whose
+candidate meets the rule goes to the test; one whose candidate does not stops there (a null, with its numbers).
+
+**Validation**: study G's 10 validation settings and 20 more drawn the same way (`validation_settings(30, 30)`: the same
+stream, seed 2027, each at least 0.05 from all 30 test settings; G's 10 are its first 10; the closest to a test setting
+is 0.085 away); real runs **8,350,000 + 100 s + k**, the floor 8,350,050 + 100 s + k, plays **8,400,000 + 100 s + k** (k
+= 0 to 7), tracking **8,450,000 + 100 s + k** (k = 0, 1).
+
+**The test, once per effect that meets the rule on validation**: study B's 10 held-out settings and 20 more drawn the
+same way (`test_settings(30)`); real runs **8,700,000 + 100 s + k**, the floor 8,700,050 + 100 s + k, plays **8,800,000
++ 100 s + k**, tracking **8,850,000 + 100 s + k**. Before it, the candidate is copied to the data root's
+`m3/models/<effect>.nvfx` and frozen by SHA-256 in `results/experiments/ordered/m3_frozen.csv`; `nvfx_ordered --study m3
+test` refuses any other file and runs once (a marker under `m3`). An effect that meets the rule on the test is replaced
+(the shared links repointed at the end, after the full ctest passes with them in private copies of the folders; every
+frozen hash that changes updated in the same change). Distance to the floor is reported before and after; the cost is
+measured and reported, not part of the rule.
 
 ## 15. Study N: a small 3D demo
 
