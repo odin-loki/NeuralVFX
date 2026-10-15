@@ -1,6 +1,6 @@
 # To do: every effect in 3D — a small demo here first, then big on a PC
 
-**Status:** stage 1 is done (study N, `docs/STUDY_3D.md`); stage 2 is planned, not started.
+**Status:** stage 1 is done (study N, `docs/STUDY_3D.md`, and its follow-up N2, §14); stage 2 is planned, not started.
 
 - **Stage 1, here and now (study N): done.** A small 3D demo in this container ([docs/STUDY_3D.md](docs/STUDY_3D.md),
   REPORT §15). What it built:
@@ -21,10 +21,21 @@
   - **Cost (provisional):** a step takes about 60 to 70 ms on one core, 33 ms on four. The detail layer is 59 ms of
     that and the network 15. A 256² picture takes about 49 ms on the CPU.
 
+  What study N2 found (STUDY_3D.md §14):
+  - **The fault is fixed.** With ambient air at the open edges and a training stage of long rollouts, the same small
+    model has no runaway over 30 s at any wind; study N's model fills the box at every wind given 30 s without shards.
+  - **It beats study N's model on a new held-out test**: +1.95 dB in pictures at 1 s, better on four of five endless
+    statistics, and it beats holding the first frame. Against the coarse simulation it is too calm (motion 0.68 of the
+    real runs').
+  - **By its rule it did not pass**: an edge bound set from one simulated run per wind was 3% too tight on one side, so
+    study N's model and videos stay the demo. Calibrate such bounds on the teacher's run-to-run spread.
+  - Study N's smoke also runs away given 30 s; with the fix it does not. Threads scale: a step is 23 ms on four.
+
   What stage 2 takes from it:
   - choose models on endless play as well as tracking;
-  - bring ambient air in at open edges (zero heat, soot and memory) and check with `nvfx_3d edge`;
-  - train on long rollouts at the controls' extremes and with controls that change;
+  - bring ambient air in at open edges (zero heat, soot and memory) and check with `nvfx_3d edge` (done in N2);
+  - train on long rollouts at the controls' extremes and with controls that change (done in N2: the long stage is
+    what made the model hold over 30 s);
   - make the detail layer cheap (SIMD, sparse bricks) and draw pictures on the GPU;
   - use a finer state (32³) or a smoother lock against blocky flames;
   - start from a validated teacher (FDS);

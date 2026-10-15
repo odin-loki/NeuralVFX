@@ -14,6 +14,13 @@ what it does worse. A step costs about
 70 ms and a 256 x 256 picture about 50 ms on one busy core (provisional), most of it the detail layer. Smoke was
 trained as a demo only (§10), not validated or tested.
 
+**Study N2** (§14) fixed the runaway: the model's advection now brings in ambient air at the open sides and top, and the
+same small model retrained with it and with long rollouts has no runaway over 30 s at any wind, and on a new held-out
+test it tracks better than study N's model (+1.95 dB in pictures at 1 s) and plays better on four of five endless
+statistics.
+By its rule, written before validation, it still did not pass (its edge check failed on validation by 3% on one side),
+so study N's model and videos remain the demo.
+
 The owner's plan ([TODO.md](../TODO.md)) is to take every effect to 3D on a big PC later: accurate 3D simulations and
 large 3D rollout models. The owner: "we will do a small model here. First we demo and then we go big." This study is
 the demo: a small but real, honestly measured 3D learned effect (a fire), playable from any camera, with demo videos.
@@ -527,11 +534,22 @@ What to do differently on the PC:
 
 ## 14. Study N2: ambient air at the open edges
 
-Status: **in progress**. Study N's demo has one fault that spoils it: the runaway at the box's sides (§11). Study N2
-fixes it in the model's advection, retrains the same small model on data that holds long rollouts, the controls'
-extremes and controls that change, chooses on tracking *and* endless play (study N's first lesson, §13), and tests
-once. §14.1 to §14.5 (the fix, the data, the training, the seeds, the settings and the rule) were written and committed
-before any validation number.
+Status: **done** (15 October 2026). Study N's demo has one fault that spoils it: the runaway at the box's sides (§11).
+Study N2 fixes it in the model's advection, retrains the same small model on data that holds long rollouts, the
+controls' extremes and controls that change, chooses on tracking *and* endless play (study N's first lesson, §13), and
+tests once. §14.1 to §14.5 (the fix, the data, the training, the seeds, the settings and the rule) were written and
+committed before any validation number; the results follow them (§14.6 to §14.11).
+
+**In short.** The fix works and the retrained model (C4, after a new stage of long rollouts) has **no runaway**: over
+30 s at five constant winds its upwind side and the sides along the wind hold at most 0.2 (study N's model: about 600,
+the box white), on validation's seeds and the test's. On the test, run once, it **tracks better than study N's model**
+(at 1 s: temperature +1.24 dB [+0.89, +1.56], picture +1.95 dB [+1.30, +2.64]) and **plays better** (better on four
+of the five endless statistics, a tie on motion), it beats holding the first frame at every horizon, and against the
+coarse simulation it follows real runs better but moves less than the real runs (|ln motion ratio| worse, +0.165
+[+0.007, +0.329]). **But by the rule it does not pass**: on validation every candidate failed the edge check, C4 by
+3% on one side (its downwind side at a wind of 0.75 peaked at 5.29 where the bound was 5.12), and the rule declared
+that the chosen model then fails the test's first condition. So **study N's model and videos stay**; the numbers are
+below, and whether to adopt C4 anyway is the owner's call (§14.11).
 
 ### 14.1 The fault and the fix
 
@@ -660,3 +678,227 @@ the test; the tool refuses the test's learned runs on any file not listed there.
 
 Soot, 8 frames and 2 s, holding the first frame and the floor are reported beside, not judged. **Cost**, as §5:
 provisional.
+
+### 14.6 Training and the candidates
+
+As planned (§14.3). The 24 new runs took 0.82 CPU-hours to simulate (two jobs, 20 minutes); none of the held-out
+settings is a training run's (the nearest training control to any of them, over every frame of the runs whose controls
+change, is 0.03 to 0.17 away in the control cube). The stepper trained in 3.2 hours of wall time and 4.55 CPU-hours on
+three threads: stage 1 1.2 CPU-hours, stages 2 and 3 1.2, **stage 4 (the long rollouts) 2.2**, as much as the other
+three together. Every stage was snapshot (`ckpt/n2_stage1..4.ckpt` in the data root); the candidates' files are
+`models/C2.nvfx3`, `C3.nvfx3` and `C4.nvfx3` (274,760 bytes each, `.nvfx3` version 2, ambient edges), with the same
+8 start points.
+
+### 14.7 Validation
+
+**The edge check** (`results/3d/n2/edge_val.csv`, `edgecheck_val.md`): the largest coarse heat over 5 to 30 s summed
+over a side's 384 cells (the upwind side: x = max when the wind blows towards -x, x = 0 towards +x; the box: all of it):
+
+| model | upwind side | downwind side | x sides, no wind | z sides | top | the box | the check |
+|---|---:|---:|---:|---:|---:|---:|---|
+| the simulation (64 x 96 x 64) | 0.00 | 8.50 | 0.01 | 0.46 | 3.31 | 19 to 59 | (the reference) |
+| study N's model (clamped edges) | 630 | 642 | 635 | 686 | 337 | 5 to 9,573 | runs away at every wind |
+| study N's model with the fix alone | 14.6 | 6.8 | 6.9 | 27.0 | 5.1 | 4 to 132 | fails at 0.05, 0.25, 0.5 |
+| C2 (after stage 2) | 3.6 | 17.8 | 5.4 | 4.8 | 4.3 | 2 to 62 | fails at every wind |
+| C3 (after stage 3) | 1.7 | 4.9 | 1.2 | 0.2 | 0.2 | 0.5 to 42 | fails at 0.5 and 0.75, narrowly |
+| **C4 (after stage 4)** | **0.09** | 8.5 | 0.16 | 0.17 | 0.95 | 15 to 45 | **fails at 0.75 only, by 3%** |
+
+- **Study N's model fills the box at every wind within 30 s** played in one rollout (its heat reaches the range
+  clamp); its 8 s shards are what hid this at most winds in study N's 8 s check (§11). Without shards it whites out
+  ([figures/n2_edges.png](figures/n2_edges.png), top row).
+- **The fix alone helps but does not cure it**: the box's heat stays under 132, but second and third fires still grow
+  at the sides at winds of 0.05 to 0.5 (the figure's middle row). Its tracking is study N's (within 0.03 dB) and its
+  endless play is better (spectrum, coverage and emission distances and the mean picture). It was trained with clamped
+  edges, so its stepper still adds heat at the sides.
+- **Retraining with the fix** removes most of it, and **the long-rollout stage removes the rest**: C4 keeps the upwind
+  side and the sides along the wind under 0.2 at every wind and its box's heat within the simulation's range. **It
+  fails the check on one count**: at a constant wind of 0.75 its downwind side (where the plume leans, x = max)
+  peaked at 5.29 where the bound, twice the simulation's largest there (2.06) plus 1, was 5.12. That side does not grow
+  (mean 3.4 over 5 to 15 s, 4.4 over 20 to 30 s); the plume leans against it a little harder than the one simulated run
+  did. C3 fails as narrowly (an x side reaching 1.2 to 1.7 at 0.5 and 0.75 where the bound is about 1) and its fire
+  fades out at a wind of 0.25 after 25 s (the box's heat 0.5); C2 sends puffs of heat to sides where the simulation has
+  none.
+
+**The rest of validation** (`compare_val_*.md`; 15 tracking runs at 5 settings, 2 real runs and 2 plays pooled per
+setting), means:
+
+| | C2 | C3 | **C4** | study N's model | N + fix | coarse simulation | holding the first frame |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| tracking, picture, 1 s (dB) | 17.74 | 17.28 | **19.21** | 17.81 | 17.81 | 13.61 | 18.54 |
+| tracking, temperature, 1 s (dB) | 19.22 | 18.88 | **20.56** | 19.41 | 19.38 | 17.42 | 20.36 |
+| endless: 3D spectrum distance | 0.316 | 0.301 | **0.262** | 0.774 | 0.353 | 0.772 | |
+| endless: \|ln motion ratio\| (motion ratio) | 0.424 (0.72) | 0.485 (0.65) | **0.373** (0.75) | 0.440 (1.59) | 0.379 (0.79) | 0.316 (1.34) | |
+| endless: coverage distance | 0.0044 | 0.0046 | **0.0028** | 0.0285 | 0.0040 | 0.0035 | |
+| endless: emission distance | 0.0045 | 0.0043 | **0.0040** | 0.0271 | 0.0047 | 0.0173 | |
+| endless: mean picture PSNR (dB) | 28.84 | 28.91 | **31.56** | 24.15 | 28.05 | 23.62 | |
+
+Differences with 95% intervals, C4 minus study N's model and minus the coarse simulation:
+
+| measure | C4 - study N's model | C4 - coarse simulation |
+|---|---|---|
+| tracking, temperature, 1 s / 2 s (dB) | +1.16 [+0.72, +1.59] / +1.80 [+1.31, +2.25] | +3.14 [+2.43, +3.80] / +3.39 [+2.87, +3.96] |
+| tracking, picture, 8 frames (dB) | +0.17 [-0.31, +0.65] | +5.09 [+3.76, +6.60] |
+| tracking, picture, 1 s / 2 s (dB) | +1.40 [+0.49, +2.26] / +1.59 [+1.11, +2.05] | +5.60 [+4.33, +6.75] / +4.69 [+3.85, +5.58] |
+| endless: 3D spectrum distance | -0.512 [-0.948, -0.109] (better) | -0.510 [-0.596, -0.428] (better) |
+| endless: \|ln motion ratio\| | -0.067 [-0.543, +0.382] (tie) | +0.057 [-0.238, +0.372] (tie) |
+| endless: coverage distance | -0.0257 [-0.0570, -0.0026] (better) | -0.0007 [-0.0012, -0.0002] (better) |
+| endless: emission distance | -0.0231 [-0.0518, -0.0027] (better) | -0.0132 [-0.0192, -0.0063] (better) |
+| endless: mean picture PSNR (dB) | +7.41 [+2.59, +13.60] (better) | +7.94 [+5.96, +10.48] (better) |
+
+- **The choice, by the rule** (`choice_val.md`): **no candidate passes the edge check**, so steps 2 and 3 chose among
+  all three: only C4 tracks within 0.5 dB of the best (it is the best, by 1.5 dB in the picture at 1 s), so **C4**,
+  which also ranks first on every endless statistic. Its file was frozen before the test (`results/3d/n2/frozen.csv`:
+  274,760 bytes, SHA-256 5a22b5c1722eae2fff07417daea6ba60f7a3c602e41517d199ed4d6fabd11b80, with study N's file for its
+  own test runs). By the rule it already fails the test's first condition.
+- **Stage 4 is what made C4**: against C3, the same model before the long rollouts, it tracks 1.9 dB better in the
+  picture at 1 s and its means are better on every endless statistic. Stages 2 and 3 alone (C2, C3) track like study N's model and play
+  better than it (no runaway at the validation settings' winds), but run off at the sides over 30 s.
+- C4 is **calmer than the real runs** (motion 0.75 of theirs; study N's 1.59, the coarse simulation's 1.34): every N2
+  candidate is (0.65 to 0.75), so the long rollouts are not the only cause.
+
+### 14.8 The test
+
+Run once, on the frozen C4 (`compare_test_*.md`, `edgecheck_test.md`, per-run rows in `results/3d/n2/test_track/`): 18
+tracking runs at the 6 held-out settings; 3 real runs, 3 plays of each method and 3 other real runs (the floor) pooled
+per setting; the edge check with the test's seeds.
+
+| measure | C4 | study N's model | coarse simulation | holding | floor | C4 - study N's model | C4 - coarse simulation |
+|---|---:|---:|---:|---:|---:|---|---|
+| tracking, temperature, 8 frames (dB) | 21.90 | 21.81 | 19.73 | 20.41 | | +0.09 [-0.16, +0.32] | +2.17 [+1.83, +2.52] |
+| **tracking, temperature, 1 s (dB)** | **20.80** | 19.56 | 18.00 | 19.94 | | **+1.24 [+0.89, +1.56]** | **+2.79 [+2.20, +3.36]** |
+| tracking, temperature, 2 s (dB) | 21.11 | 18.95 | 17.55 | 19.72 | | +2.16 [+1.77, +2.57] | +3.56 [+3.06, +4.09] |
+| tracking, soot, 1 s (dB) | 25.67 | 24.70 | 19.29 | 24.55 | | +0.97 [+0.67, +1.26] | +6.38 [+5.58, +7.18] |
+| tracking, picture, 8 frames (dB) | 21.19 | 20.83 | 16.89 | 19.67 | | +0.36 [-0.04, +0.74] | +4.30 [+3.21, +5.47] |
+| **tracking, picture, 1 s (dB)** | **19.40** | 17.45 | 14.24 | 18.08 | | **+1.95 [+1.30, +2.64]** | **+5.15 [+3.88, +6.38]** |
+| tracking, picture, 2 s (dB) | 19.93 | 17.57 | 14.80 | 18.38 | | +2.36 [+1.85, +2.92] | +5.13 [+4.31, +5.89] |
+| **endless: 3D spectrum distance** | 0.258 | 0.626 | 0.750 | | 0.044 | -0.368 [-0.751, -0.098] (better) | -0.492 [-0.550, -0.424] (better) |
+| **endless: \|ln motion ratio\|** | 0.392 | 0.433 | 0.227 | | 0.099 | -0.041 [-0.254, +0.171] (tie) | **+0.165 [+0.007, +0.329] (worse)** |
+| endless: motion ratio (context) | 0.682 | 1.480 | 1.171 | | 0.925 | -0.798 [-1.358, -0.314] | -0.489 [-0.716, -0.264] |
+| **endless: coverage distance** | 0.0032 | 0.0272 | 0.0036 | | 0.0019 | -0.0240 [-0.0600, -0.0027] (better) | -0.0004 [-0.0019, +0.0010] (tie) |
+| **endless: emission distance** | 0.0049 | 0.0238 | 0.0189 | | 0.0012 | -0.0189 [-0.0460, -0.0032] (better) | -0.0140 [-0.0217, -0.0071] (better) |
+| **endless: mean picture PSNR (dB)** | 31.89 | 24.41 | 22.81 | | 41.51 | +7.49 [+3.86, +12.56] (better) | +9.08 [+7.85, +10.59] (better) |
+
+**By the rule** (§14.5):
+1. **It fixes study N's fault: no, by the rule.** No candidate passed the edge check on validation, so the rule had
+   already declared this condition failed. With the test's seeds C4 *does* pass it: nothing runs away at any wind (its
+   upwind side at most 0.18, the sides along the wind 0.14, the top 0.91, the box 13 to 53; study N's model fills the
+   box again, `edgecheck_test.md`). That does not change the verdict; it is reported beside it.
+2. **Against study N's model**: tracking is non-inferior, and better (temperature at 1 s +1.24 dB [+0.89, +1.56] with
+   a lower bound far above -0.5; picture +1.95 dB [+1.30, +2.64], far above -1); endless play is **not worse and
+   better** (the spectrum, coverage, emission and mean picture better; the motion a tie). At the strong -x wind, where
+   study N's model ran away, its mean picture is 31.7 dB against 12.7.
+3. **It does not pass**, because condition 1 failed. Study N's model stays the demo model and its videos stay. (Had the
+   edge check held on validation, it would have passed and "played better than study N's model".)
+4. **Against the coarse simulation**, study N's rule: tracking better (temperature +2.79 dB [+2.20, +3.36], picture
+   +5.15 dB [+3.88, +6.38] at 1 s); look: worse in one statistic, **how much it moves** (|ln motion ratio| +0.165
+   [+0.007, +0.329]): it moves 0.68 times as much as the real runs where the coarse simulation moves 1.17 times; the
+   coverage ties, and the spectrum, emission and mean picture are better. **The verdict: it follows real runs better
+   than running the cheap simulation, but looks worse in how much it moves** (calmer than the real fire, at every
+   setting: motion ratios 0.54 to 0.76). Study N's model was worse there in motion and coverage, mostly by running
+   away; C4 is worse in motion only, by being too calm.
+
+Beside the rule: **C4 beats holding the first frame at every horizon** (temperature at 1 s +0.85 dB [+0.12, +1.58], at
+2 s +1.39 [+0.60, +2.20]; picture at 1 s +1.32 [+0.43, +2.28]), which study N's model did not (it lost to it after a
+second, §7). The floor (other real runs) is still far closer to the real runs than any method (spectrum 0.044, mean
+picture 41.5 dB). Validation's ordering held on the test.
+
+### 14.9 The smoke (optional)
+
+Study N's smoke demo (§10) was retrained with the fix on study N's 40 smoke runs (study N's schedule of 600, 250 and
+150 iterations plus a 150-iteration long stage with burn-ins of 48 to 200 frames; trainer seed 9,200,100; 2.9
+CPU-hours; `models/smoke2.nvfx3` in the data root), and both were put through the edge check against the smoke
+simulation (seeds 9,950,100 + j and 9,950,200 + j; `results/3d/n2/edge_smoke.csv`, `edgecheck_smoke.md`). **Study N's
+smoke runs away too, given time**: over 30 s its box's heat climbs from 13 to 1,114 at a wind of 0.05 and to 3,128 at
+0.25 (the smoke simulation's stays 6 to 20); study N checked it for 8 s only, where it held, and its 8 s shards hide
+it. **The retrained smoke does not run away** (its box 8 to 40), but it fails the same strict check: a side along the
+wind collects up to 5.2 where the simulation has 0.1. Neither is validated or tested; the smoke video stays study N's.
+
+### 14.10 Videos, the figure and the demo
+
+**The demo videos are not re-rendered**: by the rule C4 did not pass, so `videos/3d_*` stay study N's
+([videos/README.md](../videos/README.md) §9). No `3d_wind_fixed` clip was added either: **the fix alone does not
+visibly remove the runaway**. Study N's model with the fix, rendered as `3d_wind` with seed 9,950,002, still grows a
+small second flame at the box's side at 6.5 to 7 s (where study N's own model grows three), and played without shards
+at a held wind of 0.05 it grows second and third fires.
+
+**[figures/n2_edges.png](figures/n2_edges.png)**: the wind held at 0.05, one continuous rollout (no shards), seed
+9,950,010, from the side and from above at 3, 8, 14 and 20 s. Top: study N's model, white by 8 s. Middle: the same
+with the fix alone, three fires by 14 s. Bottom: C4, one fire leaning with the wind for the whole 20 s.
+
+**C4's demo renders, for the owner to look at** (not in git; in the data root's `videos/`, seeds 9,950,000 to
+9,950,002, the same kinds and controls as §10): the orbit shows one small fire under a straight grey column (study N's
+leaned in still air for seconds); the flame base is still broken into bright blocky spots (the detail layer's lock, as
+in study N). Real against learned: they part after a second or two, the learned flame shorter and more broken than the
+simulation's orange tongue. The wind sweep: **one fire throughout, no second fire anywhere**; the plume still follows
+the control slowly: smoke blown towards -x keeps trailing that way well into the +x half of the sweep.
+
+### 14.11 What it means
+
+- **The runaway's cause is confirmed and fixed.** Clamped edges were the cause: with ambient air at the open sides
+  and top the side cells cannot feed themselves, and the same model trained with it does not run away over 30 s at any
+  wind. The simulator never had the fault. The fix is in the reference, the trainer and the runtime, and old files play
+  as before.
+- **Long rollouts in training are what make it hold over time.** Stages 2 and 3 with the fix (windows after at most 24
+  frames of the stepper's own rollout) still let heat reach the sides over 30 s; 250 iterations with burn-ins of 48 to
+  240 frames (half the training's cost) removed that and also improved tracking (+1.9 dB in the picture at 1 s against
+  C3) and every endless statistic's mean.
+- **The rule's edge bound was too tight for its reference.** The "holds too much" bound used one simulated run per wind
+  as the teacher's range; the downwind side's heat varies from run to run (C4's largest there was 5.29 on validation's
+  seed and 2.37 on the test's). Study M2 learned the same about margins set tighter than the measures' spread. Next
+  time: calibrate such bounds on several simulated runs (the teacher's own spread) before writing them into the rule.
+  The rule stands as written: C4 does not pass, and study N's model stays the demo.
+- **Whether to adopt C4 anyway is the owner's call.** Everything measured favours it over study N's model (tracking,
+  four endless statistics, no runaway on either seed set, beating holding the first frame), and its file and demo
+  renders are ready in the data root. Adopting it would set aside a rule written before the numbers; this study does
+  not.
+- **What still falls short**: it is calmer than the real fire (motion 0.68 to 0.75 of the real runs'), it follows a
+  live wind change slowly, its flame base is blocky, and the teacher is still our own solver. Study N's smoke model
+  also runs away given 30 s.
+
+### 14.12 Cost (provisional)
+
+`nvfx_3d timing` on C4 (`results/3d/n2/timing.csv`), the same procedure as §8, at nice 15 on the shared machine, **this
+time quiet** (load 1.0 to 1.7, so threads found free cores). Milliseconds per frame, median (minimum):
+
+| what | 1 thread | 2 threads | 4 threads |
+|---|---:|---:|---:|
+| a step (one frame) | 70 (64) | 37 (34) | 23 (20) |
+| a picture, 256 x 256 | 61 (52) | 30 (27) | 16 (14) |
+| a picture, 512 x 512 | 219 (202) | 110 (104) | 59 (55) |
+| a start (the start point and the 24-frame warm-up) | 1,866 | 953 | 602 |
+
+On one thread a step splits into the noise inputs 2.5 ms, the coarse step 12.0, **the detail layer 54.5**, the
+renderer's preparation 15.8, and a 256 x 256 picture 47.7; the simulator's frame is 165 ms at 64 x 96 x 64 and 5.6 ms
+at 16 x 24 x 16. The ambient edges cost nothing measurable (the coarse step 12 ms, study N's 15 on a busier machine).
+**Threads scale** where study N could not show it: a step and a picture are 3 to 4 times faster on four threads than
+on one. Training cost is in §14.6.
+
+### 14.13 Reproduce
+
+Data under `NEURALVFX_DATA/n2_3d` (default `/root/nvfx-data/n2_3d`); every step resumes from what it has written (the
+job scripts used are in the data root's `jobs/`). Study N's training runs are read from its own root (`--also`).
+
+```sh
+B=build/nvfx_3d; N2="--study n2"; ALSO="--also /root/nvfx-data/n_3d/runs/train"; R=results/3d/n2; W="--winds 0.05,0.25,0.5,0.75,0.95 --seconds 30"
+$B record $N2 --runs 24 --frames 540 --threads 2               # the 24 new runs (--from 12 for a second job)
+$B train $N2 --name n2 $ALSO --iterations 900 --finetune 350 --activity 250 --long 250 --batch 8 --unroll 12 --burn 24 \
+   --burn-long-min 48 --burn-long-max 240 --seed 9200000 --threads 3            # snapshots ckpt/n2_stage1..4.ckpt
+for k in 2 3 4; do $B finish $N2 --ckpt n2_stage$k --out C$k $ALSO; done
+cp /root/nvfx-data/n_3d/models/chosen.nvfx3 models/N.nvfx3; $B reedge --model models/N.nvfx3 --edges ambient --out models/Nfix.nvfx3
+$B truth $N2 --split val; $B real $N2 --split val
+$B edge $N2 --sim $W --out results/edge_sim.csv                  # the simulation's sides (seeds 9,510,900 + j)
+for m in N Nfix C2 C3 C4; do $B edge $N2 --model models/$m.nvfx3 --label $m $W --out results/edge_val_$m.csv; done
+for m in N Nfix C2 C3 C4; do $B track $N2 --split val --method $m --model models/$m.nvfx3; $B play $N2 --split val --method $m --model models/$m.nvfx3; done
+$B track $N2 --split val --method coarse --model models/C4.nvfx3; $B play $N2 --split val --method coarse --model models/C4.nvfx3
+$B track $N2 --split val --method hold --model models/N.nvfx3
+$B edgecheck --csv $R/edge_val.csv                               # edge_sim.csv and the models' rows in one file
+$B compare $N2 --split val --a C4 --b N --results $R             # and the other pairs (jobs/val_cands.sh)
+$B choose $N2 --split val --cands C2,C3,C4 --edge $R/edge_val.csv
+cp models/C4.nvfx3 models/chosen.nvfx3; $B freeze --model models/chosen.nvfx3 --frozen $R/frozen.csv; $B freeze --model models/N.nvfx3 --frozen $R/frozen.csv
+$B truth $N2 --split test; $B real $N2 --split test              # the test (jobs/test.sh), once:
+$B edge $N2 --model models/chosen.nvfx3 --label learned --seed-base 9820900 $W --out results/edge_test_learned.csv
+$B track $N2 --split test --method learned --model models/chosen.nvfx3 --frozen $R/frozen.csv   # and play; N, coarse, hold
+$B compare $N2 --split test --a learned --b N --results $R; $B compare $N2 --split test --a learned --b coarse --results $R
+$B timing $N2 --model models/chosen.nvfx3 --threads 1,2,4 --out $R/timing.csv
+$B video --kind wind --wind-fixed 0.05 --shard 0 --seconds 20 --width 640 --height 360 --controls 0.7,0.05,0.5 --seed 9950010 --model models/C4.nvfx3 --out fig_C4.mp4   # the figure (and N, Nfix)
+```

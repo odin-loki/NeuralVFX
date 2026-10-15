@@ -600,4 +600,8 @@ busy core, so a volume suits one hero effect, or baking; an engine draws the tex
 **What it is not.** No int8 path, no SIMD beyond an AVX2 convolution, no scenes, library, manager or Godot node for
 volumes yet; one trained effect. Its teacher is our own 3D solver, not a validated fire code. The trained fire runs
 away when the wind blows towards -x (a wind control of 0.3 or below: a second fire grows at the box's upwind edge
-until the next shard; STUDY_3D.md §11); keep the wind control between 0.4 and 0.8, where it was seen to behave.
+until the next shard; STUDY_3D.md §11); keep the wind control between 0.4 and 0.8, where it was seen to behave, and
+keep its shards (played as one continuous rollout, `nvfx_volume_set_shard(vol, 0)`, it fills its box at every wind
+within 30 s; STUDY_3D.md §14.7). Study N2 fixed the cause (ambient air at the model's open edges; such files are
+`.nvfx3` version 2, which this library loads) and trained a model that does not run away, but by its rule it did not
+replace this one (§14).

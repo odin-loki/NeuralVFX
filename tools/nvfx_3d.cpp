@@ -1667,7 +1667,9 @@ int edge(const Args& a) {
     const double t0 = now();
     SideHeat last;
     if (sim) {
-      nfx::sim3d::Fluid f(fine_params(c, seed, threads));
+      auto fp = fine_params(c, seed, threads);
+      if (!nfx::sim3d::parse_effect(a.str("effect", "fire"), fp.effect)) throw std::invalid_argument("--effect fire|smoke");
+      nfx::sim3d::Fluid f(fp);
       for (int fr = 0; fr < kEndlessWarm; ++fr) f.step_frame();
       for (int fr = 0; fr <= frames; ++fr) {
         if (fr > 0) f.step_frame();

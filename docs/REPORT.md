@@ -3155,3 +3155,29 @@ swept live, runaway included (and smoke walked around, a demo trained but not te
 simulation; for the PC, choose on how a model plays as well as how it tracks, bring ambient air in at open edges, train
 on long rollouts at the controls' extremes, spend the cost on the detail layer (SIMD, sparse bricks) and the GPU for
 pictures, use a finer state or a smoother lock, and start from a validated teacher.
+
+**Study N2, an addendum** (15 October 2026; [STUDY_3D.md](STUDY_3D.md) §14). The runaway's cause is confirmed and fixed:
+the model's coarse advection now brings in ambient air (still, with no heat, soot or memory) at the open sides and top
+instead of clamping to the edge cell, in the reference, the trainer (gradients checked against finite differences) and
+the runtime; `.nvfx3` version 2 stores the edge mode and study N's files play exactly as before. The simulator never had
+the fault. The same small model was retrained with the fix on study N's 40 runs and 24 new 18 s runs (the wind at its
+extremes, controls that change during the run), with a new stage of long rollouts (windows after 48 to 240 frames of
+its own play), snapshot at every stage, and chosen on tracking *and* endless play by a rule written before validation.
+`nvfx_3d edge` now plays 30 s at five constant winds beside the simulation:
+- **Study N's model fills the box at every wind** within 30 s when played without its 8 s shards; with the fix alone it
+  no longer whites out but still grows second fires at the sides; **retrained with the fix and the long rollouts (C4),
+  nothing runs away**: its upwind side and the sides along the wind hold at most 0.2 (study N's model about 600), on
+  validation's seeds and the test's.
+- **On the test, run once, against study N's model**: tracking at 1 s +1.24 dB [+0.89, +1.56] in temperature and
+  +1.95 dB [+1.30, +2.64] in pictures; endless play better in the 3D spectrum, coverage, emission and mean picture
+  (+7.5 dB), a tie in motion. Against the coarse simulation it follows real runs better (+5.15 dB in pictures at 1 s)
+  but moves less than the real runs (|ln motion ratio| +0.165 [+0.007, +0.329], a motion ratio of 0.68). It beats
+  holding the first frame at every horizon, which study N's model did not.
+- **By the rule it does not pass.** On validation every candidate failed the edge check, C4 by 3% on one count (its
+  downwind side at a wind of 0.75 peaked at 5.29 where the bound, twice one simulated run's largest plus 1, was 5.12),
+  and the rule declared the chosen model failed. So study N's model and videos remain the demo; C4's file and demo
+  renders are in the data root if the owner chooses to adopt it. The lesson: calibrate such bounds on the teacher's own
+  run-to-run spread before writing them into a rule.
+- Study N's smoke demo also runs away given 30 s (its box's heat to 3,128); retrained with the fix it does not.
+- **Cost** (provisional, now on a quiet machine): a step 70, 37 and 23 ms on 1, 2 and 4 threads; a 256 x 256 picture
+  61, 30 and 16 ms. The detail layer is still three quarters of a step.

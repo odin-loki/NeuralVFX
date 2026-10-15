@@ -191,6 +191,14 @@ over a floor grid and sky the tool draws; 1280 x 720, 30 fps, CRF 24 (`-preset s
 which no measured run uses. **The look (colour, glow, smoke shading) is physics-based rendering of the fields, not
 learned; what is learned is how the fields move.**
 
+**Study N2 left these videos as they are** ([STUDY_3D.md](../docs/STUDY_3D.md) §14). It fixed the runaway the wind video
+shows (ambient air at the model's open edges, and a retrained model, C4, that runs away at no wind over 30 s and beats
+this model on a new held-out test), but by its rule, written before validation, C4 did not pass: its edge check failed
+on validation by 3% on one side. So every video here is still study N's model, runaway included. What C4 does at a
+held wind of 0.05 against this model, with and without the fix: [docs/figures/n2_edges.png](../docs/figures/n2_edges.png).
+No `3d_wind_fixed` clip was made: study N's model with the edge fix alone still grows a smaller second fire in the wind
+sweep. Study N's smoke model (the last row) also runs away when played for 30 s without shards; its 8 s shards hide it.
+
 | | Video | What it shows | Learned / procedural | Models, precision | Rendered | How it looks |
 |---|---|---|---|---|---|---|
 | <a href="3d_fire_orbit.mp4"><img src="3d_fire_orbit.jpg" width="200" alt="The 3D fire, walked around"></a> | **The 3D fire, walked around** | The camera circles the fire once, rising and falling a little; controls 0.7, 0.5, 0.6 (no wind), seed 9,900,001 | Learned: the fire's motion (the coarse state); seeded: the 64 x 96 x 64 detail; rendered: the volume renderer. Procedural: the floor and sky | `chosen.nvfx3` (study N, 268 KB); float | `--kind orbit`, 12 s, 1.2 MB | A small flame under a grey smoke column from every side. The flame's base breaks into bright, blocky spots (the detail layer's 4-cell blocks show), whiter and shorter than the simulation's; the plume leans in still air for a few seconds before the 8 s shard change straightens it |
