@@ -1,8 +1,11 @@
-# Water (docs/EFFECTS_WATER.md): the composer's deterministic water. Its motion is a seeded simulation (strands of
-# nodes for falling sheets and jets, drops, crowns, a damped wave equation for each pool's surface), its look is drawn
-# (glassy water whitening as air gets in, a dark surface that mirrors the sky and glints, foam, ripple rings), and its
-# mist and spray clouds are a learned effect fed where the water lands (deposit(): the fog model for cold spray, the
-# steam model for a geyser's). No new learned effect.
+# Water (docs/EFFECTS_WATER.md) in two layers. The ordered body of water is learned: the water models (waterfall,
+# fountain, splash, rainshaft: the simulator's presets trained with study D's recipe), played as modules like fire.
+# The random detail around it is the composer's seeded water: spray thrown off the body's water (the field bus's soot),
+# pools whose surface it churns, ripples, foam, drops, crowns, drips, bubbles and streaks; a seeded simulation whose
+# look is drawn and whose mist goes into a learned module where it lands (deposit(): the fog model for cold spray, the
+# steam model for a geyser's). Entries drawn entirely by the seeded layer say so (*drawn*).
+
+effect waterfall_fx = "waterfall.nvfx", swirl 0    # the learned waterfall; no sub-grid swirl (it marbles the sheet)
 
 look spray  = shader, emission 0, soot_density 0.7, soot_albedo 0.9, sky 1.1, shadow 0.1, scene_light 1.3, relief 0.4,
               tint (0.9, 0.95, 1)                                                       # white spray and mist
@@ -11,8 +14,19 @@ look geyser = shader, emission 0, soot_density 1.8, soot_albedo 0.85, sky 1.2, s
 
 # --- falling water --------------------------------------------------------------------------------------------------
 
-entry waterfall, category water, size 400 x 560, anchor base, loop, show 3,
-      about "A waterfall: a sheet of water pouring over a lip, tearing into streaks and drops as it falls into a pool it stirs, mist rising where it lands"
+entry waterfall, category water, size 480 x 560, anchor base, loop, show 3,
+      about "A waterfall: a sheet of water pouring over a lip and plunging into a churning pool under its own mist (the waterfall model), spray thrown off it and the pool's ripples and foam seeded"
+param flow = 0.6, range (0.1, 1), about "how much water"
+param wind = 0.5, range (0, 1), about "where its mist drifts: 0.5 still air"
+module falls = waterfall_fx, size 128, width 480 * scale, at (X, Y), sink 0.055, feather 0.3, start 0, seed 600,
+               controls (0.6, 0.5, 0.5), intensity flow, wind wind
+water pool = pool, along (X - 230 * scale, Y - 4 * scale) to (X + 230 * scale, Y - 4 * scale), depth 22 * scale,
+             surface 22 * scale, cells 128, churn 1, seed 602
+water flecks = spray, in (X - 140 * scale, Y - 290 * scale), size 280 * scale x 280 * scale, threshold 0.3,
+               speed 140 * scale, radius 1.6 * scale, gravity 700 * scale, onto pool, seed 603
+
+entry waterfall_drawn, category water, size 400 x 560, anchor base, loop, show 3,
+      about "A waterfall, drawn: a sheet of water pouring over a lip, tearing into streaks and drops as it falls into a pool it stirs, mist rising where it lands (the seeded layer alone, its mist the fog model)"
 param flow = 0.8, range (0.3, 1.4), about "how much water"
 param mist = 1, range (0, 2), about "how much mist"
 module haze = fog, size 128, width 400 * scale, at (X, Y), sink 0.03, feather 0.1, look spray, start 0, seed 601,
