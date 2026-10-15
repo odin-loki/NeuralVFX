@@ -32,7 +32,7 @@ C++23, no third-party runtime dependencies, a C API for engines, no Python.
   [results/experiments/SUMMARY.md](results/experiments/SUMMARY.md).
 - **Plan and decisions:** [docs/PLAN.md](docs/PLAN.md).
 - **3D, the plan:** [TODO.md](TODO.md): every effect in 3D. First a small demo here (study N: a 3D fire from our own
-  3D solver, a small 3D rollout model, a volume renderer and API, videos), then big on a PC: 157 effects in 3D (fire,
+  3D solver, a small 3D rollout model, a volume renderer and API, videos), then big on a PC: 158 effects in 3D (fire,
   smoke, blasts, engines, clouds, rain, snow, fog, storms, wind, water, liquids, granular flows, volcanoes, ice,
   lightning, optics, designed effects), each simulated as accurately as the PC allows and checked against
   measurements where a real counterpart exists, a full weather system with regimes and transitions, 3D scenes and the

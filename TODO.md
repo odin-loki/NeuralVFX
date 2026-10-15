@@ -27,8 +27,9 @@
   - **It beats study N's model on a new held-out test**: +1.95 dB in pictures at 1 s, better on four of five endless
     statistics, and it beats holding the first frame. Against the coarse simulation it is too calm (motion 0.68 of the
     real runs').
-  - **By its rule it did not pass**: an edge bound set from one simulated run per wind was 3% too tight on one side, so
-    study N's model and videos stay the demo. Calibrate such bounds on the teacher's run-to-run spread.
+  - **By its rule it did not pass**: an edge bound set from one simulated run per wind was 3% too tight on one side.
+    The owner chose to show C4 as the demo anyway (15 October 2026); `videos/3d_*` say so. Calibrate such bounds on the
+    teacher's run-to-run spread.
   - Study N's smoke also runs away given 30 s; with the fix it does not. Threads scale: a step is 23 ms on four.
 
   What stage 2 takes from it:
@@ -45,6 +46,44 @@
   library and a full weather system.
 
 First we demo, then we go big.
+
+## Here, until the PC
+
+Work that runs in this container meanwhile, in 2D and in small 3D, measured as every study is.
+
+**Under way (15 October 2026):**
+- **Round 9's effects**:
+  - earth: lava, a volcanic eruption and a powder-snow avalanche;
+  - air: a candle flame, smoke rings and heavy gas spilling along the ground;
+  - library entries, a volcano scene and a crypt scene, and demo videos.
+- **Study O**, the most visible flaws:
+  - the learned waterfall's banding;
+  - launch's boxy billows;
+  - the mushroom cloud's lost stem and cap;
+  - the rocket thruster's curling exhaust;
+  - the weak splash.
+- **Float on AVX-512.** Float rollouts take the AVX-512 build by default where the CPU has it: 0.80 of AVX2's time on
+  a quiet machine (`results/quiet`, round 6). The frozen float tests are pinned to AVX2.
+
+**Next:**
+- **Study P, cheaper big effects.** Draw an effect that fills much of the screen at a lower resolution, then upscale
+  it with a learned 2x and seeded micro-detail. Measure it against native resolution in quality and milliseconds.
+- **The detail layer's cost.** It is three quarters of a 3D step and much of a 2D frame at 256 px. Try SIMD and
+  skipping empty rows and bricks.
+- **More 2D effects**, from the catalogue rows the 2D solver can carry:
+  - fire and smoke: a forest crown fire (#6), fire out of a window (#8), coloured smoke grenades (#18);
+  - blasts and engines: a dust explosion (#31), contrails (#36), helicopter downwash (#37);
+  - weather: blizzard and drifting snow (#54, #75), steam fog (#61), a haboob or sandstorm wall (#70, #71), sea spray
+    (#77);
+  - water and volcanic: a geyser (#88), a pyroclastic flow (#110).
+- **A weather director in 2D**, ahead of the 3D weather system:
+  - regimes: clear, overcast, rain, storm, snow, fog and dust storm;
+  - each regime a scene that blends the learned effects with the procedural weather;
+  - moving between regimes deterministically from a seed and a target.
+- **Small 3D:**
+  - a second 3D effect: smoke, validated this time, with bounds calibrated on several teacher runs;
+  - 3D fire and smoke coupled.
+- **For FUSE:** a sample integration in C++, with the effect pack and the volume API side by side.
 
 ## Contents
 
@@ -117,6 +156,8 @@ Today's 2D effects map onto these rows:
 | magic | 139 | cloud | 41 | fountain | 83 |
 | jet | 4 | wildfire | 5 | splash | 85 |
 | coals | 11 | mushroom | 28 | rainshaft | 51 |
+| lava | 94 | eruption | 109 | avalanche | 105 |
+| candle | 2 | smoke ring | 157 | heavy gas | 118, 19 |
 
 The water system's sheets, jets, drips, bubbles and pools are rows 82 to 91.
 
@@ -152,6 +193,7 @@ The water system's sheets, jets, drips, bubbles and pools are rows 82 to 91.
 | 20 | chimney and exhaust puffs (a steam train) | pulsed releases rising as thermals | FDS | puff rise and growth against Scorer's thermals | 2 |
 | 21 | cigarette and incense wisps | a laminar plume that turns turbulent | a DNS (PeleLM or MicroHH) | transition height against measured laminar plumes | 3 |
 | 22 | smouldering | smoke without flame: thin, pale, slow | FDS | smoke yield against measurements | 3 |
+| 157 | smoke and vortex rings | a ring puffed from an opening, rising and growing as it rolls, then breaking up | PeleLM or MicroHH (a DNS) | the formation number (about 4) against Gharib, Rambod and Shariff's experiments; ring speed against vortex-ring theory | 2 |
 
 ### Explosions, blasts and impacts
 
@@ -559,10 +601,17 @@ For every effect:
   - memory per instance.
 - **Demo videos** in `videos/`: each effect walked around, swept through its settings, and beside its simulation.
 
+What the later studies here taught the rules:
+- **Size margins and the number of settings from a null probe first** (study M3, REPORT §14.9): re-run the current
+  model with fresh seeds, measure how much each measure moves, and choose margins and settings with known power.
+  Margins tighter than the measures' own noise reject unchanged models (study M2).
+- **Calibrate any bound on the teacher's run-to-run spread**, from several runs, never one (study N2).
+- **Choose on endless play as well as tracking** (studies N and N2).
+
 ## Order of work
 
-0. **Stage 1, here:** study N's fire, and smoke if time allows. It establishes the 3D code, the model, the renderer,
-   the volume API and the videos.
+0. **Stage 1, here (done):** study N's fire and smoke, and N2's fix. They established the 3D code, the model, the
+   renderer, the volume API and the videos.
 1. **Wave 1 (PC, tier 1)** proves every model family once:
    - pool fire (#0), campfire (#1), grass fire (#5), smoke column (#16) and ground-burst explosion (#23);
    - fair-weather cumulus (#41), overcast (#44), rain (#51), snow (#53), radiation fog (#58) and haze (#62);
@@ -611,13 +660,15 @@ plus every effect's kept grids.
 ## Seeds
 
 - **Stage 1 (study N):** 9,000,000 to 9,999,999.
-- **Stage 2:** catalogue row # owns 10,000,000 + 100,000 x #, up to 25,699,999 for row 156. The weather regimes take
+- **Stage 2:** catalogue row # owns 10,000,000 + 100,000 x #, up to 25,799,999 for row 157. The weather regimes take
   30,000,000 + 100,000 x their row in the regimes table.
 
 Ranges already used elsewhere:
 - 5.3 to 5.9 million: studies G, K and L;
+- 3.0 to 3.5 million: study O;
+- 6.0 to 6.8 million: round 9's effects (earth 6.0 to 6.4, air 6.4 to 6.8); 6.9 million: an earlier smoke test;
 - 7 million: water;
-- 8 million: study M.
+- 8 million: studies M, M2 and M3.
 
 ## What goes in git
 
