@@ -1,5 +1,9 @@
 # NeuralVFX
 
+**[Demo videos](videos/README.md):** the showcase scenes, each learned effect at three settings, its controls swept
+live, a minute without a loop, the simulator against the learned effect, the whole library by category, a crowd of
+165 effects and lit sprites, all rendered on the CPU.
+
 Neural visual effects for games that run on **one CPU core**. Each effect (fire, smoke, an explosion; later steam and a
 magic portal) is small and trained offline. At run time it draws sprites (64-256 px) from time, artist controls (intensity, wind, turbulence) and
 a seed, with no GPU. The idea follows NVIDIA's small-network-per-asset work (RTX Neural Shaders, Neural Texture
