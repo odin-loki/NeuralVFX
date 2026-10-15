@@ -53,7 +53,8 @@ Tune tune(const Params& p) {
   const float turb = p.turbulence, I = p.intensity;
   switch (p.effect) {
     case Effect::fire: return {260.f, 8.f, 0.9f, 0.6f, 90.f, 2.5f, 1.2f + 6.f * turb, 10.f + 60.f * turb, 0.15f, 1.5f + 1.5f * I};
-    case Effect::smoke: return {150.f, 0.6f, 0.30f, 0.30f, 70.f, 2.0f, 0.8f + 4.f * turb, 6.f + 40.f * turb, 0.10f, 0.f};
+    // smoke: warm, not hot (it does not glow), so more buoyancy per unit of heat; a stronger push at the source
+    case Effect::smoke: return {420.f, 0.6f, 0.30f, 0.30f, 70.f, 2.0f, 0.8f + 4.f * turb, 6.f + 40.f * turb, 0.10f, 0.f};
   }
   std::unreachable();
 }
@@ -252,9 +253,9 @@ void Fluid::add_sources(float dt) {
           soot_.at(x, y, z) += dt * (0.35f + 0.25f * I) * k;
           v_.at(x, y, z) = std::max(v_.at(x, y, z), (40.f + 20.f * I) * s * k);
         } else {
-          temp_.at(x, y, z) = std::max(temp_.at(x, y, z), (0.55f + 0.30f * I) * k);
+          temp_.at(x, y, z) = std::max(temp_.at(x, y, z), (0.30f + 0.15f * I) * k);
           soot_.at(x, y, z) = std::max(soot_.at(x, y, z), (0.7f + 0.5f * I) * k);
-          v_.at(x, y, z) = std::max(v_.at(x, y, z), (45.f + 15.f * I) * s * k);
+          v_.at(x, y, z) = std::max(v_.at(x, y, z), (55.f + 20.f * I) * s * k);
         }
       }
     }

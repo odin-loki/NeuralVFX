@@ -463,29 +463,34 @@ std::vector<r3::Run> load_runs(const fs::path& dir) {
 }
 
 int record(const Args& a) {
-  const fs::path root = data_root(a), dir = root / "runs" / "train";
+  const fs::path root = data_root(a), dir = root / "runs" / a.str("runs-dir", "train");
   fs::create_directories(dir);
   const int runs = a.i("runs", 40), frames = a.i("frames", 240), threads = a.i("threads", 3);
+  const std::uint64_t base = a.u64("seed-base", kTrainBase);  // fire 9,000,000; smoke 9,100,000
+  nfx::sim3d::Effect effect = nfx::sim3d::Effect::fire;
+  if (!nfx::sim3d::parse_effect(a.str("effect", "fire"), effect)) throw std::invalid_argument("--effect fire|smoke");
   const r3::Hyper h = study_hyper();
   for (int i = 0; i < runs; ++i) {
     const fs::path f = dir / std::format("run_{:04}.n3run", i);
     if (fs::exists(f)) continue;
-    const std::uint64_t seed = kTrainBase + static_cast<std::uint64_t>(i);
+    const std::uint64_t seed = base + static_cast<std::uint64_t>(i);
     const auto c = train_controls(seed);
     const double t0 = now(), c0 = cpu_now();
-    const r3::Run r = r3::record_run(fine_params(c, seed, threads), frames, h);
+    auto p = fine_params(c, seed, threads);
+    p.effect = effect;
+    const r3::Run r = r3::record_run(p, frames, h);
     if (auto e = r3::save_run(f, r); !e) throw std::runtime_error(e.error());
-    log_line(root / "logs" / "record.log", std::format("run {} seed {} controls {:.3f} {:.3f} {:.3f}: {:.1f} s wall, {:.1f} s CPU", i, seed, c[0], c[1], c[2],
+    log_line(root / "logs" / ("record_" + a.str("runs-dir", "train") + ".log"), std::format("run {} seed {} controls {:.3f} {:.3f} {:.3f}: {:.1f} s wall, {:.1f} s CPU", i, seed, c[0], c[1], c[2],
                                                        now() - t0, cpu_now() - c0));
   }
   return 0;
 }
 
-r3::Model fresh_model() {
+r3::Model fresh_model(nfx::sim3d::Effect e = nfx::sim3d::Effect::fire) {
   r3::Model m = r3::init_model(study_hyper(), 9'000'777);
-  m.effect = "fire3d";
+  m.effect = e == nfx::sim3d::Effect::fire ? "fire3d" : "smoke3d";
   m.fps = 30.f;
-  m.noise = nfx::sim3d::forcing(nfx::sim3d::Effect::fire);
+  m.noise = nfx::sim3d::forcing(e);
   m.control_names = {"intensity", "wind", "turbulence"};
   return m;
 }
@@ -512,9 +517,9 @@ int train(const Args& a) {
   const std::string name = a.str("name", "base");
   const fs::path ck = root / "ckpt" / (name + ".ckpt"), log = root / "logs" / ("train_" + name + ".log");
   fs::create_directories(ck.parent_path());
-  const auto runs = load_runs(root / "runs" / "train");
+  const auto runs = load_runs(root / "runs" / a.str("runs-dir", "train"));
   if (runs.empty()) throw std::runtime_error("no training runs: nvfx_3d record first");
-  r3::Model m = fresh_model();
+  r3::Model m = fresh_model(runs.at(0).p.effect);
   r3::set_normalisation(m, runs);
   r3::TrainState s;
   if (fs::exists(ck)) {
@@ -543,8 +548,8 @@ int train(const Args& a) {
 int finish(const Args& a) {
   const fs::path root = data_root(a);
   const std::string ckname = a.need("ckpt"), out = a.need("out");
-  const auto runs = load_runs(root / "runs" / "train");
-  r3::Model m = fresh_model();
+  const auto runs = load_runs(root / "runs" / a.str("runs-dir", "train"));
+  r3::Model m = fresh_model(runs.at(0).p.effect);
   r3::set_normalisation(m, runs);
   r3::TrainState s;
   if (auto e = r3::load_checkpoint(root / "ckpt" / (ckname + ".ckpt"), m, s); !e) throw std::runtime_error(e.error());
