@@ -2655,6 +2655,9 @@ The one consistent cost is the swirl at 16 pixels on the orb at 256 px: +0.4 to 
 repetition (not studied: at a larger scale the swirl's lattice has fewer points and its work per pixel is the same, so
 subnormal floats or memory access are the suspects, as in §12.1.6). The mean state adds 20 KB to a file (280,927 to 301,443 bytes).
 
+The branch with main merged (study N's 3D code and the water effects) builds with `-DNEURALFX_WERROR=ON`, passes all
+451 tests of `ctest` with the shared model folders as they are, and `nvfx_alloc_test` counts no allocation per frame.
+
 #### 14.8.7 What it means
 
 On validation (candidate minus current; the full tables are §14.8.3 and §14.8.5):
