@@ -5,8 +5,9 @@
 //     saved from training runs at 8 bits per value;
 //   - a stepper: two learned 3 x 3 x 3 convolutions with FiLM on the controls, fed the state, the simulation's own
 //     seeded noise (the curl force and the flicker, noise4.hpp) and the position; it supplies the change of every
-//     channel and a divergence source. Advection (semi-Lagrangian, trilinear) and a pressure projection (Jacobi,
-//     warm-started from the last frame; closed floor, open top and sides) are built in;
+//     channel and a divergence source. Advection (semi-Lagrangian, trilinear; ambient air flows in at the open sides
+//     and top, see Edges) and a pressure projection (Jacobi, warm-started from the last frame; closed floor, open top
+//     and sides) are built in;
 //   - a detail layer: fine fields of heat and soot (4 fine cells per coarse cell along each axis) carried by the
 //     up-sampled coarse flow plus a seeded sub-grid swirl, locked to the coarse state block by block; material the
 //     coarse state adds arrives broken up by the flicker noise. What is ordered (the plume, its lean, its puffing) is
@@ -78,6 +79,12 @@ struct DetailSpec {
   float grow = 1.5f;               // the lock may scale a block's existing structure up by this much
 };
 
+// What the coarse advection samples where a back-traced position leaves the grid through an open side or the top
+// (the floor is closed: there it always clamps). Study N's models clamped to the edge cell, so a side where air flows
+// in kept and fed its own heat (docs/STUDY_3D.md §11); study N2's bring in ambient air: still, with no heat, soot or
+// memory (§14). Files of version 1 are study N's (clamp); version 2 stores the mode.
+enum class Edges : std::uint32_t { clamp = 0, ambient = 1 };
+
 struct StartPoint {
   std::vector<float> controls;
   std::uint64_t seed = 0;
@@ -95,6 +102,7 @@ struct Model {
   std::array<float, kPhys> scale{1, 1, 1, 1, 1};  // typical size of each physical channel (network units)
   std::array<float, kPhys> lo{}, hi{};            // the state is kept inside the range seen in training
   float qscale = 0.05f;                           // divergence source units
+  Edges edges = Edges::ambient;                   // the coarse advection's open sides and top
   std::vector<float> step_w;
   std::vector<StartPoint> starts;
   std::size_t storage_bytes() const;  // as saved: weights fp16, start states 8-bit
@@ -102,7 +110,8 @@ struct Model {
 
 Model init_model(const Hyper& h, std::uint64_t seed);
 
-// .nvfx3 files: magic NVFXVOL1.
+// .nvfx3 files: magic NVFXVOL1. Version 1 (study N): clamped edges; version 2 adds the edge mode. A model with clamped
+// edges is saved as version 1, so study N's files load and save as they were.
 inline constexpr char kMagic[8] = {'N', 'V', 'F', 'X', 'V', 'O', 'L', '1'};
 std::expected<void, std::string> save_model(const std::filesystem::path& path, const Model& m);
 std::expected<void, std::string> save_model(std::ostream& out, const Model& m);

@@ -17,7 +17,7 @@ namespace nfx::rollout3d {
 
 namespace {
 
-constexpr std::uint32_t kVersion = 1;
+constexpr std::uint32_t kVersion = 2;  // 1: study N (clamped edges); 2: the edge mode follows the header
 
 std::size_t zu(int v) { return static_cast<std::size_t>(v); }
 float fl(int v) { return static_cast<float>(v); }
@@ -70,6 +70,28 @@ float trilinear(const float* f, int nx, int ny, int nz, int channels, int c, flo
   const float* p = f + zu(y0) * sy + zu(z0) * sz + zu(x0) * sx + zu(c);
   const float a00 = p[0] + fx * (p[sx] - p[0]), a10 = p[sz] + fx * (p[sz + sx] - p[sz]);
   const float a01 = p[sy] + fx * (p[sy + sx] - p[sy]), a11 = p[sy + sz] + fx * (p[sy + sz + sx] - p[sy + sz]);
+  const float b0 = a00 + fz * (a10 - a00), b1 = a01 + fz * (a11 - a01);
+  return b0 + fy * (b1 - b0);
+}
+
+// The coarse advection's sample with ambient edges (Edges::ambient): beyond the open sides (x, z) and the top lies still,
+// empty air, 0 in every channel (velocity, heat, soot and memory), one ghost cell deep; below the floor, which is
+// closed, the position is clamped to the floor cells' centres as trilinear() clamps it. The same arithmetic as
+// trilinear() (x, then z, then y); the trainer's advect() mirrors it.
+float trilinear_ambient(const float* f, int nx, int ny, int nz, int channels, int c, float x, float y, float z) {
+  x = std::clamp(x, -1.f, fl(nx));
+  y = std::clamp(y, 0.f, fl(ny));
+  z = std::clamp(z, -1.f, fl(nz));
+  const int x0 = std::min(static_cast<int>(std::floor(x)), nx - 1), y0 = std::min(static_cast<int>(y), ny - 1),
+            z0 = std::min(static_cast<int>(std::floor(z)), nz - 1);
+  const float fx = x - fl(x0), fy = y - fl(y0), fz = z - fl(z0);
+  float v[8];
+  for (int k = 0; k < 8; ++k) {
+    const int xx = x0 + (k & 1), zz = z0 + ((k >> 1) & 1), yy = y0 + ((k >> 2) & 1);
+    v[k] = (xx < 0 || zz < 0 || xx >= nx || yy >= ny || zz >= nz) ? 0.f : f[((zu(yy) * zu(nz) + zu(zz)) * zu(nx) + zu(xx)) * zu(channels) + zu(c)];
+  }
+  const float a00 = v[0] + fx * (v[1] - v[0]), a10 = v[2] + fx * (v[3] - v[2]);
+  const float a01 = v[4] + fx * (v[5] - v[4]), a11 = v[6] + fx * (v[7] - v[6]);
   const float b0 = a00 + fz * (a10 - a00), b1 = a01 + fz * (a11 - a01);
   return b0 + fy * (b1 - b0);
 }
@@ -152,7 +174,12 @@ Model init_model(const Hyper& h, std::uint64_t seed) {
 std::expected<void, std::string> save_model(std::ostream& o, const Model& m) {
   const Hyper& h = m.h;
   o.write(kMagic, sizeof(kMagic));
-  bin::put(o, kVersion);
+  if (m.edges == Edges::clamp) {
+    bin::put(o, std::uint32_t{1});  // study N's format, unchanged
+  } else {
+    bin::put(o, kVersion);
+    bin::put(o, static_cast<std::uint32_t>(m.edges));
+  }
   for (const int v : {h.rx, h.ry, h.rz, h.fine, h.hidden, h.memory, h.jacobi, h.n_controls, h.warmup}) bin::put(o, static_cast<std::int32_t>(v));
   bin::put_str(o, m.effect, 32);
   bin::put(o, m.fps);
@@ -195,8 +222,14 @@ std::expected<Model, std::string> load_model(std::istream& i) {
   i.read(magic, 8);
   if (!i || std::memcmp(magic, kMagic, 8) != 0) return std::unexpected("not a 3D rollout effect");
   auto version = bin::get<std::uint32_t>(i);
-  if (!version || *version != kVersion) return std::unexpected("unsupported 3D rollout version");
+  if (!version || *version < 1 || *version > kVersion) return std::unexpected("unsupported 3D rollout version");
   Model m;
+  m.edges = Edges::clamp;
+  if (*version >= 2) {
+    auto e = bin::get<std::uint32_t>(i);
+    if (!e || *e > static_cast<std::uint32_t>(Edges::ambient)) return std::unexpected("rollout3d: bad edge mode");
+    m.edges = static_cast<Edges>(*e);
+  }
   Hyper& h = m.h;
   for (int* v : {&h.rx, &h.ry, &h.rz, &h.fine, &h.hidden, &h.memory, &h.jacobi, &h.n_controls, &h.warmup}) {
     auto r = bin::get<std::int32_t>(i);
@@ -482,7 +515,9 @@ void coarse_step(const Model& m, std::span<const float> in, std::span<const floa
       }
     }
   });
-  // semi-Lagrangian advection of every channel by the projected velocity, then the state is kept in range
+  // semi-Lagrangian advection of every channel by the projected velocity (at the open sides and the top, clamped to the
+  // edge cell or ambient air: Model::edges), then the state is kept in range
+  const bool ambient = m.edges == Edges::ambient;
   parallel_for(pool, ry, [&](int y) {
     for (int z = 0; z < rz; ++z) {
       for (int x = 0; x < rx; ++x) {
@@ -490,7 +525,7 @@ void coarse_step(const Model& m, std::span<const float> in, std::span<const floa
         const float* s = ws.mid.data() + i * zu(C);
         const float bx = fl(x) - s[0], by = fl(y) - s[1], bz = fl(z) - s[2];
         for (int c = 0; c < C; ++c) {
-          float v = trilinear(ws.mid.data(), rx, ry, rz, C, c, bx, by, bz);
+          float v = ambient ? trilinear_ambient(ws.mid.data(), rx, ry, rz, C, c, bx, by, bz) : trilinear(ws.mid.data(), rx, ry, rz, C, c, bx, by, bz);
           if (c < kPhys) v = std::clamp(v, m.lo[zu(c)], m.hi[zu(c)]);
           out[i * zu(C) + zu(c)] = v;
         }

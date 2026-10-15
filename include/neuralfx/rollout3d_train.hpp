@@ -28,7 +28,15 @@ struct Run {
   sim3d::Params p;
   int frames = 0;                     // state i is after i + 1 simulated frames (time (i + 1) / fps)
   std::vector<std::float16_t> coarse;  // frames * cells * kPhys
+  // Controls that change during the run (study N2): frames * 3, the controls of the frame that made state i. Empty: the
+  // run held p's controls throughout.
+  std::vector<float> schedule;
   std::vector<float> controls() const { return {p.intensity, p.wind, p.turbulence}; }
+  std::vector<float> controls_at(int state) const {
+    if (schedule.empty()) return controls();
+    const std::size_t i = static_cast<std::size_t>(state) * 3;
+    return {schedule[i], schedule[i + 1], schedule[i + 2]};
+  }
   float time(int state) const { return static_cast<float>(state + 1) / p.fps; }
   void state(int i, std::size_t per, std::span<float> out) const {  // per = cells * kPhys
     for (std::size_t j = 0; j < per; ++j) out[j] = static_cast<float>(coarse[static_cast<std::size_t>(i) * per + j]);
@@ -38,7 +46,8 @@ struct Run {
 // Block averages of the simulation's fields on the model's coarse grid (the simulation's grid must be the fine grid):
 // velocity in coarse cells per frame. out: cells * kPhys.
 void coarse_from_sim(const sim3d::Fluid& f, const Hyper& h, std::span<float> out);
-Run record_run(const sim3d::Params& p, int frames, const Hyper& h);
+// schedule: empty (p's controls throughout) or frames * 3, the controls of each frame (Run::schedule).
+Run record_run(const sim3d::Params& p, int frames, const Hyper& h, std::span<const float> schedule = {});
 std::expected<void, std::string> save_run(const std::filesystem::path& path, const Run& r);
 std::expected<Run, std::string> load_run(const std::filesystem::path& path);
 
@@ -49,9 +58,12 @@ struct TrainOptions {
   int iterations = 1500;     // stage 1: windows from true states, the unroll growing to max_unroll over its first half
   int finetune = 600;        // stage 2: half the windows start after up to burn_max frames of the stepper's own rollout
   int activity_stage = 300;  // stage 3: as stage 2, plus matching how much the state changes per frame
+  int long_stage = 0;        // stage 4 (study N2): as stage 3, every window after burn_long_min to burn_long_max frames
+                             // of the stepper's own rollout (from runs long enough to hold it)
   int batch = 8;
   int max_unroll = 12;
   int burn_max = 24;
+  int burn_long_min = 48, burn_long_max = 240;
   float sigma = 0.03f;       // input noise, in channel scales
   float profile = 1.f;       // weight of the profile loss in stages 2 and 3
   float activity = 100.f;    // weight of the activity loss in stage 3
@@ -77,6 +89,8 @@ std::expected<void, std::string> load_checkpoint(const std::filesystem::path& pa
 
 // Trains m.step_w from s.iteration to the end of the schedule (or to stop_at); calls checkpoint(model, state) every
 // checkpoint_every iterations, at the end of each stage and where it stops. m.scale, m.lo and m.hi must be set (set_normalisation).
+// Windows are drawn from the runs in proportion to their frames. A window steps with the controls of each frame
+// (Run::controls_at).
 void train_stepper(Model& m, std::span<const Run> runs, const TrainOptions& o, TrainState& s,
                    const std::function<void(const Model&, const TrainState&)>& checkpoint = {});
 
@@ -85,7 +99,12 @@ void train_stepper(Model& m, std::span<const Run> runs, const TrainOptions& o, T
 double window_loss(const Model& m, const Run& run, int first, int unroll, int burn, float sigma, float profile, std::uint64_t noise_seed,
                    std::vector<float>* grad, float activity = 0.f);
 
-// `count` start points from the runs: spread over the control space (farthest-point order), at state `frame`.
+// The stage (1 to 4) an iteration belongs to, and the iteration that ends stage k (1 to 4).
+int train_stage(const TrainOptions& o, int iteration);
+int stage_end(const TrainOptions& o, int stage);
+
+// `count` start points from the runs: spread over the control space (farthest-point order, by the controls at state
+// `frame`), at state `frame`.
 void choose_starts(Model& m, std::span<const Run> runs, int count, int frame);
 
 }  // namespace nfx::rollout3d
