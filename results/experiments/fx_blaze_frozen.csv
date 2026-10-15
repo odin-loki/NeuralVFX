@@ -2,11 +2,12 @@ kind,name,file,bytes,sha256,source
 rollout_effect,wildfire,fx_blaze/models/d/wildfire.nvfx,83719,ada7ce4af7496237c7cdabcf27efb739bef1b0b5e57c4cdc65dd1f2c6eba2585,study D's recipe (docs/EFFECTS_BLAZE.md): d-train --stages12 1 then d-tune then d-finish
 rollout_effect,coals,fx_blaze/models/d/coals.nvfx,83719,f042745cc2cebfc9c890b4d14ad1594186f7112cf90218177c60e80ea5aecdd2,study D's recipe (docs/EFFECTS_BLAZE.md): d-train --stages12 1 then d-tune then d-finish
 rollout_effect,mushroom,fx_blaze/models/d/mushroom.nvfx,280927,505bdfe80ce38c684617eb7da7ca681c0fc507a155285a19251ea0fd8b25a5f3,study D's recipe (docs/EFFECTS_BLAZE.md): d-train --stages12 1 then d-tune then d-finish (the one-shot branch, 150 frames)
+rollout_effect,mushroom_o,o_fix/models/mushroom.nvfx,301443,4a2f08a05eed33a85584b670eb009b606ecb1443089429b15beca703a46c97cc,study O (docs/REPORT.md §16.3): the mushroom with the mean state and the stepper fine-tuned on 30-frame windows (ms_u30); replaces it after its test; the prairie keyframes below from frame 063 are drawn with it
 prairie_keyframe,frame_024,nvfx_scene_script --keyframes (examples/scenes/prairie.nvfxs),1268593,036dd532a241cab143301189663d322b7751c33cd9411380515c95c8b2c850ee,
-prairie_keyframe,frame_063,nvfx_scene_script --keyframes (examples/scenes/prairie.nvfxs),877417,5b5cecf66e02b938dc5265db405e9e1f036b0127529fccdd9323834e4f8cfce8,
-prairie_keyframe,frame_078,nvfx_scene_script --keyframes (examples/scenes/prairie.nvfxs),1134860,4c33f87cbff21c41ab642959194c4877a5aba0c28176329e2bd71085f3c51aff,
-prairie_keyframe,frame_102,nvfx_scene_script --keyframes (examples/scenes/prairie.nvfxs),1242221,b43bab1dea4defa12ac94715099ee34b1fd3779acad5fb25e6e1c8b8bf96abc9,
-prairie_keyframe,frame_123,nvfx_scene_script --keyframes (examples/scenes/prairie.nvfxs),1288514,d584c5722ed72151df46eadfbe41838e7415939ab8735e4029ac6138f765943f,
-prairie_keyframe,frame_138,nvfx_scene_script --keyframes (examples/scenes/prairie.nvfxs),1296937,46f70f039ed3fafbdb44dc6938b3da51da0cbe2c4b9ba4283f561971dab76d70,
-prairie_keyframe,frame_174,nvfx_scene_script --keyframes (examples/scenes/prairie.nvfxs),1324248,489fea74cdc2e2b5f2f104ec03473f3182105424f5986bcec14e148d708367fb,
-prairie_keyframe,frame_216,nvfx_scene_script --keyframes (examples/scenes/prairie.nvfxs),1328275,90f6a1f8bd333fd6b2584088fed561e65a3129578096ca4359cfed9d76261133,
+prairie_keyframe,frame_063,nvfx_scene_script --keyframes (examples/scenes/prairie.nvfxs),880328,5ced4df0e9c4ab285dcf9be0b762004693eb0cf40044ce53c1167dceb9adfc74,
+prairie_keyframe,frame_078,nvfx_scene_script --keyframes (examples/scenes/prairie.nvfxs),1136189,b084243947871504690f19cd75aaccee9a39d8c66ecdd8507fc566d1301e3a2b,
+prairie_keyframe,frame_102,nvfx_scene_script --keyframes (examples/scenes/prairie.nvfxs),1256023,bcb76c6055625fbeb5eb9183f97d5ed0d13ad360a50927e068a731ed593f1624,
+prairie_keyframe,frame_123,nvfx_scene_script --keyframes (examples/scenes/prairie.nvfxs),1312104,8a1e6f058e54a996c382d1b0c04cb6208f73915d61a3d2f0c0c942c7242d63c2,
+prairie_keyframe,frame_138,nvfx_scene_script --keyframes (examples/scenes/prairie.nvfxs),1324735,8af9785cfaff034ed35b840a7f350ff490f802c2aaaa99f70007d2b21f18dca4,
+prairie_keyframe,frame_174,nvfx_scene_script --keyframes (examples/scenes/prairie.nvfxs),1361862,f56545b582a3c60e01b5806e0c99788613e964af5f38653621853b207b748b59,
+prairie_keyframe,frame_216,nvfx_scene_script --keyframes (examples/scenes/prairie.nvfxs),1346085,c3503705f617d857eb6cb857919bb1ace1c94212b4392dadcc85c55813dc4de6,

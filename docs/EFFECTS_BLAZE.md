@@ -372,8 +372,8 @@ now that file (`o_fix/models/mushroom.nvfx` under the data root, 301,443 bytes, 
 untouched). What is still wrong: its mean frame is still 5.75 dB below a second set of real runs (it was 6.93) and its
 detail six times the floor's; its tracking at 1 s, 14.43 dB on the test, has gained most of the 1.1 dB it lost to the
 coarse simulation with the detail layer in this round's test, but this round's rule was not run again, so it is still
-counted weak. By eye the cap keeps its lobes a little longer and the stem is the same; the cap still turns ragged after
-3 to 4 s (the figure of REPORT §16.3.4).
+counted weak. By eye the old and the new are hard to tell apart: the same stem and cap at 2 s, the same ragged cap
+hanging down in lobes after 3 to 4 s, the new cap a little more of one piece at 5 s (the figure of REPORT §16.3.4).
 
 ## 5. Memory and cost
 

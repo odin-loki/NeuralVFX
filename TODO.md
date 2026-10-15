@@ -69,15 +69,16 @@ then merge it into main.
     other two may have run on. Check `/root/nvfx-data/fx_air/jobs/state` and the logs before resuming.
   - Left: the smoke ring's and heavy gas's models, all tests, timing, the library file, the crypt scene, videos and
     REPORT §6.17.
-- **Study O, the most visible flaws** (`study-fix`, REPORT §16):
+- **Study O, the most visible flaws** (`study-fix`, REPORT §16): **finished**, waiting to be merged into main.
   - Done, by eye, with no model change:
     - the waterfall's and rain shaft's banding (the detail layer locking once a frame; effects take `passes N`, and
       the library and the falls scene use 2);
     - launch's square block (the lift-off scene uses a three-tile domain);
     - the thruster's curling exhaust (a `cold` field on its tail).
-  - The mushroom and splash fixes: the rule is committed (§16.3.1) and the candidates are frozen. On validation the
-    mushroom gained +1.12 dB [0.79, 1.45] in the mean picture and the splash +0.62 dB [0.40, 0.86].
-  - **The held-out test has not run; its seeds (3,200,000 to 3,299,999) are unspent.** No model has been replaced.
+  - The mushroom and the splash, by the rule committed before validation (§16.3.1), tested once on seeds 3,200,000
+    to 3,299,999: both meet it and are **replaced** (the library's links point at `o_fix/models/`). The mushroom's
+    mean picture +1.18 dB [0.91, 1.45], tracking at 1 s +0.85 dB [0.73, 0.97]; the splash's mean picture +0.40 dB
+    [0.21, 0.60]. Still short: the mushroom's cap turns ragged after 3 to 4 s (§16.7).
 - **Study P, cheaper big effects** (`study-upscale`, docs/STUDY_P.md):
   - The idea: draw a large effect at half size, then upscale it 2x with a learned net and seeded micro-detail.
   - Found: the render size enters only the detail layer and the renderer, so a half-size instance shares the native

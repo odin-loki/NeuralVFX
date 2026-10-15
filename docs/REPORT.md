@@ -3565,6 +3565,20 @@ Distance to the floor (a second set of 8 real runs per setting), before and afte
 | splash | test (30) | 6.08 → **5.68** (the floor 39.32) | 0.070 → 0.068 (0.028) | 0.0028 → **0.0021** (0.0008) |
 | splash | validation (30) | 5.93 → **5.31** | 0.073 → **0.070** (0.029) | 0.0025 → **0.0017** (0.0008) |
 
+### 16.3.4 How the replaced mushroom looks
+
+The numbers move more than the picture. Below, the mushroom as shipped and as replaced (the model's own renderer, 256
+px, seed 3,100,000, at 1, 2, 3.5 and 5 s; `nvfx_fix strip`): rows 1 and 2 at controls (0.5, 0.1, 0.6), rows 3 and 4 at
+`distant_mushroom`'s (0.9, 0.6, 0.3), the old model above the new each time. By eye the two are hard to tell apart: the
+same fireball at 1 s, the same stem and cap at 2 s, the same ragged cap hanging down in lobes by 3.5 s; at 5 s the new
+cap holds together a little more. What the test measured (an average picture 1.18 dB closer, a run followed better) is
+a matter of where and how much smoke there is over many runs, not of a shape one sees in one. The stem and the rolled
+cap that the simulator keeps are still lost after 3 to 4 s; the mushroom stays weak to the eye, if less weak by the rule.
+The library's and the prairie's mushroom are drawn with the explosions' look (`cloud`), which hides the fringes seen
+here; `library_round7`, `scene_prairie`, `effect_mushroom` and `real_vs_learned_round7` were rendered again with it.
+
+![The mushroom before (rows 1 and 3) and after study O (rows 2 and 4), at 1, 2, 3.5 and 5 s](figures/o_mushroom.png)
+
 ### 16.4 The rocket thruster's exhaust: a cold field on its tail (a library entry)
 
 **The flaw** ([LIBRARY.md](LIBRARY.md)): `rocket_thruster`'s exhaust (the jet model, recoloured blue) curls up at its

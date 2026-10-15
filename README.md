@@ -99,6 +99,13 @@ From [docs/REPORT.md](docs/REPORT.md), measured on simulated fire, smoke and exp
   closer on validation but failed margins narrower than those measures' spread, and the rest tied or traded. Study M3
   retried the mean state with a rule planned for power (margins from the null, 30 settings) and **replaced the explosion
   and dust**: on held-out settings their average pictures came 2.9 and 1.3 dB closer to a real run's, nothing worse.
+- **The most visible flaws (study O, [docs/REPORT.md](docs/REPORT.md) §16):** the learned waterfall's horizontal bands
+  were its detail layer's once-a-frame lock, stamped one frame's fall apart (effects take `passes N`; the falls and the
+  library play the water in 2); the lift-off's square blast was its tile, the effect's whole domain, which the
+  simulator's billows fill too (the scene plays it as three tiles); the rocket thruster's exhaust no longer curls up (a
+  cold field on its tail). The mushroom cloud and the splash, retrained under a rule planned for power and tested once,
+  were **replaced**: on held-out settings their average pictures came 1.18 and 0.40 dB closer to a real run's, and the
+  mushroom follows a run 0.85 dB better at 1 s.
 - **Memory, against production block compression:** for equal quality, a network per effect clip needs **2.4 to
   4.3 times less memory than a BC7 flipbook** at 8 bits, and 7.5 times less [4.2, 8.3] with features trained for 4
   bits. **Against ASTC** (mobile GPUs; 8x8 to 12x12 blocks hold every frame at full size in 121 to 256 KB) the ratios
