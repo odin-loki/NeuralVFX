@@ -65,9 +65,13 @@ From [docs/REPORT.md](docs/REPORT.md), measured on simulated fire, smoke and exp
   that the AVX-512 build's; provisional). Without VNNI it barely pays (1 to 5%).
 - **More effects** ([docs/EFFECTS.md](docs/EFFECTS.md)): steam and a magic portal, new presets of the simulator
   trained with study D's recipe (82 KB each). Steam plays as well as fire and smoke: at unseen settings and seeds its
-  motion is right and its average picture ties a second real run, 4.3 dB closer than the nearest flipbook. Magic is
-  weaker: it only ties a coarse simulation and its detail is worse than a flipbook's. A scene script plays both with
+  motion is right and its average picture ties a second real run, 4.3 dB closer than the nearest flipbook. Magic was
+  weaker: it only tied a coarse simulation and its detail was worse than a flipbook's. A scene script plays both with
   fire and an explosion.
+- **Fast swirls (study L, [docs/REPORT.md](docs/REPORT.md) §12.1):** why magic, the plasma orb and the dust devil only
+  tied a coarse simulation (the 32-cell stepper first; a once-a-frame lock in the detail layer made magic's saw-teeth;
+  a sink hidden by a clamp kept the dust devil from regrowing its column), and three replacements that passed a rule
+  set before validation, tested once on fresh seeds: +0.94, +0.45 and +0.21 dB at 1 s.
 - **Memory, against production block compression:** for equal quality, a network per effect clip needs **2.4 to
   4.3 times less memory than a BC7 flipbook** at 8 bits, and 7.5 times less [4.2, 8.3] with features trained for 4
   bits. **Against ASTC** (mobile GPUs; 8x8 to 12x12 blocks hold every frame at full size in 121 to 256 KB) the ratios
@@ -138,7 +142,7 @@ Ubuntu 24.04: `g++-14`, CMake 3.25+, Ninja, `libgtest-dev`, `zlib1g-dev` (and `f
 ```sh
 cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_COMPILER=g++-14
 cmake --build build
-ctest --test-dir build                     # 381 tests: sim, metrics, codecs, gradients, runtime parity, composition, scene scripts, field effects, trails, engine layers, weather, procedural sky, combat and magic elements, context mixing, denoiser, lossless coder, low-bit, vector-quantised, sparse and multi-level features, video codecs, BC7 and ASTC flipbooks, allocation, C API for effects and scenes, the effect library, the effect manager, effect packs and the C++ wrapper, start points from footage
+ctest --test-dir build                     # 389 tests: sim, metrics, codecs, gradients, runtime parity, composition, scene scripts, field effects, trails, engine layers, weather, procedural sky, combat and magic elements, context mixing, denoiser, lossless coder, low-bit, vector-quantised, sparse and multi-level features, video codecs, BC7 and ASTC flipbooks, allocation, C API for effects and scenes, the effect library, the effect manager, effect packs and the C++ wrapper, start points from footage
 ```
 
 Options: `NEURALFX_BUILD_VIEWER` (GLFW + OpenGL; fetches Dear ImGui), `NEURALFX_BUILD_SHARED` (libnvfx.so for engines),
@@ -173,6 +177,7 @@ training, evaluation; about three hours), then `d-timing` on an idle machine and
 | `nvfx_ingest` | footage into a clip, after a licence check; adds a row to the licence register |
 | `nvfx_estimate` | start points for a rollout effect estimated from footage (a clip, a video or frames, after the same licence check): writes a copy of the effect that continues from the footage; `--preview` draws the footage frame and the effect from it ([docs/FOOTAGE.md](docs/FOOTAGE.md) §8) |
 | `nvfx_study_j` | study J: `inverse`, `motion` (the networks), `val`, `val-endless`, `test`, `test-endless`, `report` ([docs/FOOTAGE.md](docs/FOOTAGE.md) §9) |
+| `nvfx_swirl` | study L: why fast and regular swirls (magic, the orb, the vortex) failed and their replacements: `diag`, `dstats`, `coarse`, `advect`, `column` (diagnosis), `train`, `set`, `val`, `test`, `collapse`, `cost`, `look` ([docs/REPORT.md](docs/REPORT.md) §12.1) |
 | `nvfx_d2` | study D2: the detail layer's constants tuned on pooled endless statistics: `probe`, `tune` (CMA-ES), `candidates`, `val`, `test`, `write`, `cost` ([docs/REPORT.md](docs/REPORT.md) §6.9; nothing kept) |
 | `nvfx_study_k` | study K: the rollout runner's stage profile (`profile`), tracking and endless statistics at float and int8 (`track`, `endless`), the rule (`decide`) and the cost (`timing`); `tools/study_k/time.sh` re-times it ([docs/REPORT.md](docs/REPORT.md) §13) |
 | `nvfx_train` | train a frame model from one or more clips (controls and variation codes come from the clips), or with `--rollout` a rollout effect from the simulation |

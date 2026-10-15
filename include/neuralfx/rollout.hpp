@@ -72,7 +72,15 @@ struct DetailSpec {
                               // of their four neighbours (zero outside the frame): the fine-scale diffusion of the
                               // simulation, which the detail layer otherwise lacks
   bool d2() const { return advect != 1.f || soften != 0.f; }
+  // Study L (docs/REPORT.md §12; file version 5, written only when it is not 1): the detail layer runs in this many
+  // passes a frame, each moving the fine fields by 1 / passes of the frame's flow and locking them to the coarse state
+  // again. Where the flow moves material more than a coarse cell a frame (a fast swirl), one lock a frame stamps its
+  // pattern (new material and the block factors, which do not move with the flow) once per frame's displacement, and
+  // the stamps line up into saw-teeth; locking every cell of travel or less blends them.
+  int passes = 1;
 };
+// With DetailSpec::passes > 1, fine values below this are set to zero after each pass (study L).
+inline constexpr float kFlush = 1e-20f;
 
 // Study D2's softening of a fine field (DetailSpec::soften): q + s (mean of the four neighbours - q), zero outside.
 void soften_field(std::span<float> q, int size, float s);
@@ -88,6 +96,12 @@ struct Hyper {
   int render_hidden = 16;  // renderer MLP width (two hidden layers)
   int start_fine = 0;      // side of the fine fields kept with each start point (0: grown from the coarse state)
   int warmup = 30;         // frames run at instance start when a start point has no fine fields
+  // Study L (docs/REPORT.md §12; file version 5, written only when it or DetailSpec::passes is not at its default): how
+  // the stepper advects its state.
+  // 0: semi-Lagrangian, bilinear, a straight back-trace (studies D to K). 1: MacCormack, the semi-Lagrangian step
+  // corrected by its round trip and clamped to the range of the forward sample's four corners (as the simulation advects
+  // its scalars): far less numerical diffusion where the flow moves a cell or more a frame (a fast swirl).
+  int advection = 0;
 
   int channels() const { return kPhys + memory; }
   int inputs() const { return channels() + kNoise + kCoords; }
@@ -198,8 +212,13 @@ void render(const Model& m, const State& s, std::span<float> rgba);
 // Coarse: in (res*res*channels), pressure in/out, out (res*res*channels), flow (res*res*2).
 void coarse_step(const Model& m, std::span<const float> in, std::span<const float> noise, std::span<const float> cond,
                  std::span<float> pressure, std::span<float> out, std::span<float> flow, Int8 q = Int8::off);
-// Detail: advect the fine fields by the flow (plus swirl), lock their coarse averages to the coarse heat and soot.
+// Study L's coarse advection (Hyper::advection = 1): MacCormack on a [cell][C] state S (velocity in channels 0 and 1, coarse
+// cells per frame), clamped to the forward sample's corners; out has S's size. The physical range is applied after it.
+void advect_maccormack(std::span<const float> S, int R, int C, std::span<float> out);
+// Detail: advect the fine fields by the flow (plus swirl), lock their coarse averages to the coarse heat and soot (in
+// DetailSpec::passes passes; one pass moves the fields by `share` of the frame's flow and swirl).
 void detail_step(const Model& m, State& s, std::uint64_t seed, std::span<const float> controls);
+void detail_pass(const Model& m, State& s, std::uint64_t seed, std::span<const float> controls, float share);
 // Renderer input features for one pixel (kRenderIn values), from fine fields and the coarse state.
 void render_features(const Model& m, const State& s, int x, int y, std::span<float> out);
 // The renderer MLP on one feature vector, times the material gate.

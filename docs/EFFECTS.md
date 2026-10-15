@@ -1,6 +1,6 @@
 # More effects: steam and magic
 
-Status: **done** (13 October 2026). Audience: dev, research, artists. Two effects that a game would want joined fire,
+Status: **done** (13 October 2026; magic replaced by study L, 14 October 2026, §9). Audience: dev, research, artists. Two effects that a game would want joined fire,
 smoke and the explosion: **steam** (a vent's jet of white vapour) and **magic** (a spinning portal of violet to white
 light). Both come from the project's own 2D fluid simulator with new sources, forces and drawing. They were trained
 as rollout effects with study D's recipe ([REPORT.md](REPORT.md) §6) and tested as study D was: on held-out settings
@@ -20,7 +20,9 @@ flipbook. A scene script shows them with study D's fire and explosion (§6).
   3.8 dB closer than the nearest flipbook's but 7 dB from a second real run, its motion is 17% high, and its detail is
   worse than both the flipbook's and the coarse simulation's (spectrum 0.16 against 0.10 and 0.12; floor 0.02). The
   pictures show why: the detail layer turns the fast, smooth spiral arms into saw-toothed scales. Its look is still a
-  usable portal (§6), but it is the weakest of the five rollout effects so far.
+  usable portal (§6), but it is the weakest of the five rollout effects so far. **Study L replaced it** (§9): with the
+  detail layer locking twice a frame and a stepper with less diffusive advection, the teeth are gone and it tracks
+  0.94 dB [0.59, 1.32] better at 1 s on held-out settings, ahead of the coarse simulation.
 - Each is **82 KB** stored (8 start points; fine fields grown at instance start, as fire's), 2.4 MB per instance at
   128 px. Steam costs what fire costs per frame and magic about a quarter more: 1.14 and 1.55 ms at 128 px on a
   quiet machine where fire took 1.22 ms in the same rounds (§5).
@@ -241,7 +243,7 @@ by its learned renderer (light it emits is not lit by the scene), and steam by t
 no emission (`look vapour` in the script).
 
 What works: the effects read as steam and a portal, they couple with study D's through the bus (the burst moves the
-steam), and the light ties them together. What does not, yet: the portal's arms show the saw-toothed detail of §4.2;
+steam), and the light ties them together. What does not, yet: the portal's arms show the saw-toothed detail of §4.2 (gone with study L's magic, §9);
 the explosion drawn small with the cloud look is a flat ball in its first frames; the braziers are small flames, as
 fire's tiles make one flame each.
 
@@ -257,7 +259,8 @@ fire's tiles make one flame each.
   by the coarse flow, new material broken up by flicker noise) smear and serrate them, so the learned dynamics gain
   nothing over a coarse simulation and the detail is worse than a flipbook's. Fixes worth trying, none tested here: a
   finer coarse grid for magic, a detail layer advected in rotating coordinates or with a smaller contrast for it, or
-  start points with fine fields (as smoke's).
+  start points with fine fields (as smoke's). Study L tried them and found the teeth come from locking once a frame;
+  what replaced this magic is in §9.
 - The detail calibration picked swirl 0 and grow 1 for magic (no sub-grid swirl, no rescaling of existing structure),
   the most conservative setting, which is consistent with the detail layer fighting the effect rather than helping it.
 
@@ -277,3 +280,31 @@ build/nvfx_sim --effect magic --spin 0.8 --sheet magic.png    # the simulator's 
 ```
 
 `DIR` for the scene holds `steam.nvfx` and `magic.nvfx` and study D's v2 `fire.nvfx` and `explosion.nvfx`.
+
+## 9. Study L: magic replaced (14 October 2026)
+
+Study L ([REPORT.md](REPORT.md) §12.1) took magic's failure apart on training settings and fixed two of its causes; the
+new magic replaced the one above after a test on study B's held-out settings with fresh seeds.
+- **Why it failed.** The learned stepper is the largest part (with the true 32-cell state in its place the same detail
+  layer tracks 4.6 dB better at 1 s), and for a fast rotation its built-in semi-Lagrangian advection does worse than no
+  change at all (one step of the true coarse heat by the true coarse velocity misses the next heat by three times what
+  keeping it misses). The **saw-teeth are the detail layer's**: it locks the fine fields to the coarse state once a frame,
+  and the patterns of the lock (the block factors and the breakup of new material, which do not move with the flow) land
+  one frame's travel apart (5 to 8 pixels at the ring), where they line up into teeth; with the true coarse state the
+  teeth are still there.
+- **The fix.** The detail layer in two passes a frame, each moving the fields half the frame's flow and locking them
+  again (`DetailSpec::passes = 2`), and the stepper fine-tuned with MacCormack advection (`Hyper::advection = 1`) on
+  30-frame windows (file version 5, 82 KB; under the data root's `l_swirl/models/v3`). The teeth are gone: the arms are
+  smooth and the ring has its bright rim again.
+- **The test** (study L's rule: better at tracking at 1 s or in detail spectrum, nothing worse): tracking at 1 s **+0.94 dB
+  [+0.59, +1.32]** over the old magic, and it now leads the coarse simulation with its own detail layer by +0.61 dB
+  [+0.15, +1.03] (the old one tied it); endless, its average picture is 1.5 dB closer to a real run, coverage and light
+  closer, detail and motion tied (motion 0.92 of the real against 1.16). Its detail is still far from a second real
+  run's (spectrum distance 0.149 against 0.012).
+- **Cost** (provisional, shared machine, the same session as fire): at 128 px 0.81 ms against the old magic's 0.61 ms and
+  fire's 0.74 ms with subnormal floats flushed in the playing thread; without that, 0.82 ms against 1.01 ms (the old
+  magic spends a third of its frame on subnormal floats that the new one flushes).
+- The portal scene and the library's portal, dark_portal and magic_orb were drawn again with it; their frozen keyframes
+  are updated.
+
+![The portal scene with the new magic (study L): keyframes at 0.9, 2.4, 3.8, 5.0, 6.4, 7.5, 7.9 and 9.3 s](figures/portal_keyframes_l.png)

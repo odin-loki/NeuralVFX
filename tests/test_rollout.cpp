@@ -290,6 +290,154 @@ TEST(Rollout, StudyD2ConstantsRoundTripInVersion4) {
   EXPECT_EQ(ss.str()[8], 4);
 }
 
+TEST(Rollout, StudyLAdvectionRoundTripsInVersion5) {
+  // Study L: Hyper::advection. At 0 the file keeps its old layout; otherwise it is version 5 (with the version 4 fields),
+  // and other values are refused.
+  Model m = tiny_model();
+  const auto r = tiny_run(m.h, 4);
+  StartPoint sp;
+  sp.controls = r.controls();
+  sp.seed = 5;
+  sp.time = 1.f;
+  sp.coarse.assign(r.coarse.begin(), r.coarse.begin() + 8 * 8 * kPhys);
+  m.starts.push_back(sp);
+  quantise_like_storage(m);
+  std::stringstream old_ss;
+  ASSERT_TRUE(save_model(old_ss, m));
+  EXPECT_EQ(old_ss.str()[8], 2);
+  for (const int bits : {16, 6}) {
+    Model q = m;
+    q.h.advection = 1;
+    q.start_bits = bits;
+    q.start_dither = bits < 16;
+    q.detail.soften = bits < 16 ? 0.25f : 0.f;
+    std::stringstream ss;
+    ASSERT_TRUE(save_model(ss, q));
+    EXPECT_EQ(ss.str()[8], 5);
+    auto back = load_model(ss);
+    ASSERT_TRUE(back) << back.error();
+    EXPECT_EQ(back->h.advection, 1);
+    EXPECT_EQ(back->detail.soften, q.detail.soften);
+    EXPECT_EQ(back->start_bits, bits);
+    EXPECT_EQ(back->step_w, q.step_w);
+    std::stringstream again;
+    ASSERT_TRUE(save_model(again, *back));
+    if (bits == 16) {
+      EXPECT_EQ(again.str(), ss.str());
+    }
+  }
+  Model bad = m;
+  bad.h.advection = 2;
+  std::stringstream ss;
+  EXPECT_FALSE(save_model(ss, bad));
+  Model passes = m;  // DetailSpec::passes alone also needs version 5
+  passes.detail.passes = 3;
+  std::stringstream ps;
+  ASSERT_TRUE(save_model(ps, passes));
+  EXPECT_EQ(ps.str()[8], 5);
+  auto pb = load_model(ps);
+  ASSERT_TRUE(pb) << pb.error();
+  EXPECT_EQ(pb->detail.passes, 3);
+  EXPECT_EQ(pb->h.advection, 0);
+  for (const int bad_passes : {0, 9}) {
+    Model q = m;
+    q.detail.passes = bad_passes;
+    std::stringstream qs;
+    EXPECT_FALSE(save_model(qs, q));
+  }
+}
+
+TEST(Rollout, DetailPassesSplitTheFramesFlow) {
+  // Study L: with passes = 2 the detail layer moves the fields by half the flow and locks them, twice. A blob carried by
+  // two pixels a frame towards a coarse state that holds it two pixels on ends there in one pass or in two, by another
+  // path (the two results differ).
+  Model m = tiny_model();
+  m.detail.contrast = 0.f;
+  m.detail.swirl = 0.f;
+  m.detail.passes = 2;
+  State s;
+  s.res = 8;
+  s.size = 32;
+  const std::size_t C = static_cast<std::size_t>(m.h.channels());
+  s.coarse.assign(8 * 8 * C, 0.f);
+  s.flow.assign(8 * 8 * 2, 0.f);
+  for (std::size_t i = 0; i < 64; ++i) s.flow[i * 2] = 0.5f;  // half a coarse cell a frame: 2 pixels
+  const auto blob = [](float cx) {
+    std::vector<float> f(32 * 32);
+    for (int y = 0; y < 32; ++y) {
+      for (int x = 0; x < 32; ++x) {
+        const float dx = static_cast<float>(x) - cx, dy = static_cast<float>(y) - 16.f;
+        f[static_cast<std::size_t>(y) * 32 + static_cast<std::size_t>(x)] = std::exp(-(dx * dx + dy * dy) / 8.f);
+      }
+    }
+    return f;
+  };
+  s.fine_t = blob(12.f);
+  s.fine_d.assign(32 * 32, 0.f);
+  const std::vector<float> target = blob(14.f);
+  for (std::size_t c = 0; c < 64; ++c) {  // the coarse heat: block averages of the blob two pixels on
+    float sum = 0.f;
+    for (std::size_t j = 0; j < 16; ++j) sum += target[((c / 8) * 4 + j / 4) * 32 + (c % 8) * 4 + j % 4];
+    s.coarse[c * C + 2] = sum / 16.f;
+  }
+  const auto centre = [](const State& st) {
+    double sx = 0, sw = 0;
+    for (std::size_t i = 0; i < st.fine_t.size(); ++i) {
+      sx += static_cast<double>(i % 32) * st.fine_t[i];
+      sw += st.fine_t[i];
+    }
+    return sx / sw;
+  };
+  State one = s;
+  Model m1 = m;
+  m1.detail.passes = 1;
+  const std::vector<float> ctl{0.5f, 0.5f, 0.5f};
+  detail_step(m, s, 1, ctl);
+  detail_step(m1, one, 1, ctl);
+  EXPECT_NEAR(centre(s), 14.0, 0.3);
+  EXPECT_NEAR(centre(one), 14.0, 0.3);
+  EXPECT_NE(s.fine_t, one.fine_t);
+}
+
+TEST(Rollout, MacCormackAdvectionKeepsARotatingRingSharper) {
+  // A ring of heat in a solid rotation of 1.5 cells a frame at its radius: after 8 steps the semi-Lagrangian step has
+  // smeared it more than MacCormack, whose values stay inside the range of what they were read from.
+  const int R = 32, C = 4;
+  std::vector<float> s(static_cast<std::size_t>(R) * R * C, 0.f);
+  for (int y = 0; y < R; ++y) {
+    for (int x = 0; x < R; ++x) {
+      const float dx = static_cast<float>(x) - 15.5f, dy = static_cast<float>(y) - 15.5f, rr = std::sqrt(dx * dx + dy * dy);
+      float* c = s.data() + (static_cast<std::size_t>(y) * R + static_cast<std::size_t>(x)) * C;
+      c[0] = -dy * 1.5f / 8.f;
+      c[1] = dx * 1.5f / 8.f;
+      c[2] = std::exp(-(rr - 8.f) * (rr - 8.f) / 2.f);
+    }
+  }
+  std::vector<float> sl = s, mc = s, tmp(s.size());
+  const auto peak = [&](const std::vector<float>& v) {
+    float p = 0.f;
+    for (std::size_t i = 2; i < v.size(); i += C) p = std::max(p, v[i]);
+    return p;
+  };
+  for (int it = 0; it < 8; ++it) {
+    advect_maccormack(mc, R, C, tmp);
+    for (std::size_t i = 2; i < mc.size(); i += C) mc[i] = tmp[i];  // the flow is held fixed
+    for (int y = 0; y < R; ++y) {
+      for (int x = 0; x < R; ++x) {
+        const std::size_t i = (static_cast<std::size_t>(y) * R + static_cast<std::size_t>(x)) * C;
+        const float px = std::clamp(static_cast<float>(x) - sl[i], 0.f, 31.f), py = std::clamp(static_cast<float>(y) - sl[i + 1], 0.f, 31.f);
+        const int x0 = std::min(static_cast<int>(px), 30), y0 = std::min(static_cast<int>(py), 30);
+        const float fx = px - static_cast<float>(x0), fy = py - static_cast<float>(y0);
+        const auto at = [&](int xx, int yy) { return sl[(static_cast<std::size_t>(yy) * R + static_cast<std::size_t>(xx)) * C + 2]; };
+        tmp[i + 2] = (1 - fy) * ((1 - fx) * at(x0, y0) + fx * at(x0 + 1, y0)) + fy * ((1 - fx) * at(x0, y0 + 1) + fx * at(x0 + 1, y0 + 1));
+      }
+    }
+    for (std::size_t i = 2; i < sl.size(); i += C) sl[i] = tmp[i];
+  }
+  EXPECT_GT(peak(mc), peak(sl) + 0.1f);
+  EXPECT_LE(peak(mc), 1.f + 1e-5f);
+}
+
 TEST(Rollout, SoftenMovesTowardsTheNeighboursMean) {
   // q + s (mean of the four neighbours - q), zero outside: a single spike keeps 1 - s and gives s / 4 to each
   // neighbour; a uniform field is unchanged inside and loses s / 4 per missing neighbour at the edges.
@@ -367,6 +515,36 @@ TEST(Rollout, TrainerForwardMatchesTheReference) {
   EXPECT_NEAR(tr, ref, 1e-5 * ref + 1e-9);
 }
 
+TEST(Rollout, TrainerForwardMatchesTheReferenceWithMacCormack) {
+  // Study L's advection (Hyper::advection = 1): the trainer's step is the reference's, and it is not the
+  // semi-Lagrangian one.
+  Model m = tiny_model();
+  m.h.advection = 1;
+  const auto r = tiny_run(m.h, 6);
+  const int R = m.h.res, N = R * R, C = m.h.channels();
+  std::vector<float> in(static_cast<std::size_t>(N) * C, 0.f), out(in.size()), flow(static_cast<std::size_t>(N) * 2), p(static_cast<std::size_t>(N), 0.f);
+  for (int j = 0; j < N; ++j) {
+    for (int k = 0; k < kPhys; ++k) in[static_cast<std::size_t>(j) * C + k] = r.coarse[(2 * static_cast<std::size_t>(N) + j) * kPhys + k];
+  }
+  std::vector<float> cond(static_cast<std::size_t>(m.h.cond())), noise(static_cast<std::size_t>(N) * kNoise);
+  condition(m, r.controls(), 3.f / r.p.fps, cond);
+  coarse_noise(m, r.p.seed, 3.f / r.p.fps, noise);
+  coarse_step(m, in, noise, cond, p, out, flow);
+  double ref = 0;
+  for (int j = 0; j < N; ++j) {
+    for (int k = 0; k < kPhys; ++k) {
+      const double e = out[static_cast<std::size_t>(j) * C + k] - r.coarse[(3 * static_cast<std::size_t>(N) + j) * kPhys + k];
+      ref += e * e / (static_cast<double>(m.scale[k]) * m.scale[k]);
+    }
+  }
+  ref /= N * kPhys;
+  const double tr = window_loss(m, r, 2, 1, 0, 0.f, 0.f, 1, nullptr);
+  EXPECT_NEAR(tr, ref, 1e-5 * ref + 1e-9);
+  Model sl = m;
+  sl.h.advection = 0;
+  EXPECT_GT(std::abs(window_loss(sl, r, 2, 1, 0, 0.f, 0.f, 1, nullptr) - tr), 1e-4 * tr);
+}
+
 namespace {
 
 // Couplings on the tiny run (docs/COMPOSE.md §9): every operation before two steps in three, small enough that the
@@ -388,8 +566,9 @@ Run tiny_forced_run(const Hyper& h, int frames) {
 }
 
 void rollout_gradient_check(int unroll, int burn, float profile, float activity = 0.f, bool forced = false, const Model* anchor = nullptr,
-                            float anchor_weight = 0.f) {
+                            float anchor_weight = 0.f, int advection = 0) {
   Model m = tiny_model(11 + static_cast<std::uint64_t>(unroll + burn));
+  m.h.advection = advection;
   const auto r = forced ? tiny_forced_run(m.h, 12) : tiny_run(m.h, 12);
   std::vector<float> grad(m.step_w.size(), 0.f);
   const double l0 = window_loss(m, r, 1, unroll, burn, 0.f, profile, 5, &grad, activity, anchor, anchor_weight);
@@ -451,6 +630,9 @@ TEST(Rollout, GradientsMatchFiniteDifferencesWithProfiles) { rollout_gradient_ch
 TEST(Rollout, GradientsMatchFiniteDifferencesWithActivity) { rollout_gradient_check(4, 0, 0.5f, 50.f); }
 // Through the couplings: the push is added and taken out, forces and material added, v and material multiplied.
 TEST(Rollout, GradientsMatchFiniteDifferencesWithCouplings) { rollout_gradient_check(4, 0, 0.5f, 50.f, true); }
+// Study L's MacCormack advection: through its round trip, its clamp and both samples' positions.
+TEST(Rollout, GradientsMatchFiniteDifferencesWithMacCormackOneStep) { rollout_gradient_check(1, 0, 0.f, 0.f, false, nullptr, 0.f, 1); }
+TEST(Rollout, GradientsMatchFiniteDifferencesWithMacCormackThroughTime) { rollout_gradient_check(4, 0, 0.5f, 50.f, false, nullptr, 0.f, 1); }
 
 // Round 2 (docs/COMPOSE.md §10): the anchor to another model's first step, alone and with couplings.
 TEST(Rollout, GradientsMatchFiniteDifferencesWithTheAnchor) {
@@ -892,6 +1074,50 @@ TEST(RolloutRuntime, MatchesTheReferenceWithStudyD2sConstants) {
   EXPECT_NE(reference_frame(m, 1, 64, 12), reference_frame(plain, 1, 64, 12));
 }
 
+TEST(RolloutRuntime, MatchesTheReferenceWithStudyLsAdvection) {
+  // MacCormack advection of the coarse state (Hyper::advection = 1) and the detail layer in passes (DetailSpec::passes,
+  // with the swirl and the advection gain, which each pass shares) in the runtime, as in the reference, on every ISA.
+  Model m = runtime_model();
+  m.h.advection = 1;
+  m.detail.passes = 2;
+  m.detail.swirl = 1.2f;
+  m.detail.advect = 1.3f;
+  Fx fx(m);
+  for (const nvfx_isa isa : {NVFX_ISA_BASELINE, NVFX_ISA_AVX2, NVFX_ISA_AVX512}) {
+    if (nvfx_set_isa(isa) != NVFX_OK) continue;
+    for (const int start_index : {0, 1}) {
+      const int size = 64;
+      nvfx_instance* in = nullptr;
+      ASSERT_EQ(nvfx_instance_create(fx.e, size, &in), NVFX_OK);
+      ASSERT_EQ(nvfx_instance_set_precision(in, NVFX_PRECISION_FLOAT), NVFX_OK);  // the float reference (int8: below)
+      nvfx_instance_set_controls(in, m.starts[static_cast<std::size_t>(start_index)].controls.data(), 3);
+      ASSERT_EQ(nvfx_instance_set_variation(in, start_index), NVFX_OK);
+      std::vector<std::uint8_t> rt(static_cast<std::size_t>(size) * size * 4);
+      for (const int frames : {4, 12}) {
+        ASSERT_EQ(nvfx_render(in, frames / 30.0, rt.data(), static_cast<std::size_t>(size) * 4), NVFX_OK);
+        const auto ref = reference_frame(m, start_index, size, frames);
+        int worst = 0;
+        std::size_t off = 0;
+        for (std::size_t i = 0; i < ref.size(); ++i) {
+          const int d = std::abs(int(ref[i]) - int(rt[i]));
+          worst = std::max(worst, d);
+          off += d > 1;
+        }
+        EXPECT_LE(worst, 3) << "isa " << isa << " start " << start_index << " frame " << frames;
+        EXPECT_LE(off, ref.size() / 100) << "isa " << isa << " start " << start_index << " frame " << frames;
+      }
+      nvfx_instance_free(in);
+    }
+  }
+  nvfx_set_isa(NVFX_ISA_AUTO);
+  Model one_pass = m;
+  one_pass.detail.passes = 1;
+  EXPECT_NE(reference_frame(m, 1, 64, 12), reference_frame(one_pass, 1, 64, 12));
+  Model sl = m;
+  sl.h.advection = 0;
+  EXPECT_NE(reference_frame(m, 1, 64, 12), reference_frame(sl, 1, 64, 12));
+}
+
 TEST(RolloutRuntime, ShardsMakeEveryFrameAFunctionOfTime) {
   const Model m = runtime_model();
   Fx fx(m);
@@ -1110,4 +1336,34 @@ TEST(RolloutRuntime, PrecisionIsASettingOfRolloutInstances) {
   EXPECT_EQ(a, c);
   EXPECT_EQ(nfx::rt::set_rollout_int8_convs(nullptr, nfx::rt::Int8Convs::both), NVFX_ERROR_ARGUMENT);
   for (nvfx_instance* in : {def, fl, q, q2}) nvfx_instance_free(in);
+}
+
+// Study L's options at int8 (study K): MacCormack advection and the detail layer in two passes (the new magic has
+// both) with the stepper's second convolution in 8 bits, against the int8 reference on every ISA, with the tolerances
+// of Int8MatchesItsReferenceOnEveryIsa.
+TEST(RolloutRuntime, Int8MatchesItsReferenceWithStudyLsOptions) {
+  rollout::Model m = runtime_model(32);
+  m.h.advection = 1;
+  m.detail.passes = 2;
+  m.detail.swirl = 1.2f;
+  m.detail.advect = 1.3f;
+  Fx fx(m);
+  int compared = 0;
+  for (const int start_index : {0, 1}) {
+    for (const int frames : {4, 12}) {
+      const auto ref = reference_frame(m, start_index, 64, frames, Int8::second);
+      for (const nvfx_isa isa : {NVFX_ISA_BASELINE, NVFX_ISA_AVX2, NVFX_ISA_AVX512}) {
+        if (nvfx_set_isa(isa) != NVFX_OK) continue;
+        const auto rt = int8_frame(fx.e, m, start_index, 64, frames, nfx::rt::Int8Convs::second);
+        const Diff d = diff(rt, ref);
+        const std::string at = std::format("isa {} start {} frame {}", static_cast<int>(isa), start_index, frames);
+        EXPECT_LE(d.worst, 8) << at;
+        EXPECT_LE(d.off, rt.size() / 100) << at;
+        EXPECT_LT(d.mean, 0.05) << at;
+        ++compared;
+      }
+    }
+  }
+  nvfx_set_isa(NVFX_ISA_AUTO);
+  EXPECT_GE(compared, 8);
 }

@@ -1,0 +1,6 @@
+effect,model,better,none_worse,meets_rule,track_1s_gain_db,sha256
+magic,p2,1,0,0,0.6737,65274a0922f577f0e429c12d3f0dd331ced8ff0aec5a5433c10b123b56631ddb
+magic,p3,1,0,0,0.7291,f7eef799f4e957be8e57b0538cb9766a5672ab6e26e817c97181373d2bdd276f
+magic,mc_p2,1,1,1,1.0941,f1d9d57e75935d0a671483a130a821e529b53ab4e2390b501031aff490d2a5ee
+magic,u30_p2,1,1,1,0.4827,b646c0550a6513bb3d9b31d11aef9f58602ad9f8fd3c902cfdf3967b1d7bf389
+magic,chosen,,,,,mc_p2

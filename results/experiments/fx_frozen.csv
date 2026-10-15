@@ -1,11 +1,12 @@
 kind,name,file,bytes,sha256,source
 rollout_effect,steam,fx/models/d/steam.nvfx,83719,2d4b624845051eb46e8b2ed630a928327f4b95f13e11ded7797da68ee217775e,study D's recipe (docs/EFFECTS.md): d-train --stages12 1 then d-tune then d-finish
 rollout_effect,magic,fx/models/d/magic.nvfx,83719,5390fae43b117a6e30e1dc2964af2be465aeca08b525d469aaf962dab25842b9,study D's recipe (docs/EFFECTS.md): d-train --stages12 1 then d-tune then d-finish
+rollout_effect,magic_v3,l_swirl/models/v3/magic.nvfx,83743,f1d9d57e75935d0a671483a130a821e529b53ab4e2390b501031aff490d2a5ee,study L (docs/REPORT.md §12.1): replaces magic after its test; the portal keyframes below are drawn with it
 portal_keyframe,frame_027,nvfx_scene_script --keyframes (examples/scenes/portal.nvfxs),1070877,f19e6b95449df97b3c8c75a7c89b369bbb19dd3192fb133015fefd3b40f06d37,
-portal_keyframe,frame_072,nvfx_scene_script --keyframes (examples/scenes/portal.nvfxs),1123431,26f80a3a16b8cf2ed5e06932c5f8ba0225becaa5fcae4c9958ef5bbdba9b1913,
-portal_keyframe,frame_114,nvfx_scene_script --keyframes (examples/scenes/portal.nvfxs),1157307,049e0523984a9a3d617d33dad8731c861d165a9fd3dbe56b3413f567ba39079b,
-portal_keyframe,frame_150,nvfx_scene_script --keyframes (examples/scenes/portal.nvfxs),1191856,4f32e127c13ff45ffda858accc568777cf4673f39d883a9c9fb5a6859e0f061e,
-portal_keyframe,frame_192,nvfx_scene_script --keyframes (examples/scenes/portal.nvfxs),1205018,d88df9ab88416d4c1766bd8100d048b1af868e9af037a971f4a6080c8bba76c7,
-portal_keyframe,frame_225,nvfx_scene_script --keyframes (examples/scenes/portal.nvfxs),1018782,69ecbdfe4eea1c68936257cbab6adb61a071d23230b7ea12d892aef58edba5dd,
-portal_keyframe,frame_237,nvfx_scene_script --keyframes (examples/scenes/portal.nvfxs),1168943,a03d6cd50dea6d0478e320821e78181b588536b10741a923dca80f850baf55d7,
-portal_keyframe,frame_279,nvfx_scene_script --keyframes (examples/scenes/portal.nvfxs),1125114,a4d6143d03646a4731a4028b377d4c38bd5e441c076ede92e7e2fbbe7a45528d,
+portal_keyframe,frame_072,nvfx_scene_script --keyframes (examples/scenes/portal.nvfxs),1120214,a82f812086e7e52bd9c052b10e550f3de7a5b88a00374d1f594f386cfca9a066,
+portal_keyframe,frame_114,nvfx_scene_script --keyframes (examples/scenes/portal.nvfxs),1146280,ffd7ccd57ad7a75e2b798807aec89f5416c8a7cd89606e38a4e648cda9fbb0fa,
+portal_keyframe,frame_150,nvfx_scene_script --keyframes (examples/scenes/portal.nvfxs),1178206,38f0f07b5c6cb9c2329330da99c0fd6cb59cd3d33552e8bded5bffa889e99b47,
+portal_keyframe,frame_192,nvfx_scene_script --keyframes (examples/scenes/portal.nvfxs),1183097,1d03c98bf414911ced799e6bd32202ad4037e7c587536798b4d405270169e809,
+portal_keyframe,frame_225,nvfx_scene_script --keyframes (examples/scenes/portal.nvfxs),1007649,67193f7eb2b39b46b9fae8e45064edce450e0e41afc84163cfe7367c95b48c83,
+portal_keyframe,frame_237,nvfx_scene_script --keyframes (examples/scenes/portal.nvfxs),1168637,542745e59afcaa276675f19f93a356581f7b43570d4949b9a06f75da34cd821f,
+portal_keyframe,frame_279,nvfx_scene_script --keyframes (examples/scenes/portal.nvfxs),1123480,75a96e0931a5ca3844c3783e1ac3f6f2ac4bab4b121cef6ec9f93e8c5e0629f8,

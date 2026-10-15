@@ -148,6 +148,10 @@ struct StepperOptions {
   const Model* anchor_model = nullptr;
   float anchor = 0.f;
   bool aim_couplings = false;
+  // Study L (docs/REPORT.md §12.1): heat and soot held at their floor (zero) pass the gradient that would raise them.
+  // Without it a stepper that asks for less than nothing in an empty cell gets no gradient there and can never learn to
+  // grow material from nothing (the vortex's column). Off by default.
+  bool floor_gradient = false;
   int checkpoint_every = 0;                    // call checkpoint(iterations done) this often (0: never)
   int stop_after = 0;                          // stop after this many iterations, on the full schedule (0: run it all)
   std::function<void(int done)> checkpoint;

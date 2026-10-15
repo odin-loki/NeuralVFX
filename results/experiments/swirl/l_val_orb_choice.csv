@@ -1,0 +1,4 @@
+effect,model,better,none_worse,meets_rule,track_1s_gain_db,sha256
+orb,u30,1,1,1,0.2953,3077ae9d0d2981fe02271666b7b62d812f28da1ef32aba05b1502818cb4bc366
+orb,u30b,1,1,1,0.4577,1d4cab793cafbfec08db4d3206de684c917f2af3abc46d040df6537ad630782d
+orb,chosen,,,,,u30b

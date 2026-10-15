@@ -335,6 +335,10 @@ if(NEURALFX_BUILD_TOOLS)
   target_include_directories(nvfx_study_k PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src/runtime")
   target_link_libraries(nvfx_study_k PRIVATE neuralfx_train neuralfx_io nvfx)
   neuralfx_defaults(nvfx_study_k)
+  # Study L (docs/REPORT.md §12): fast and regular swirling flows (magic, the orb, the vortex), diagnosed and tested.
+  add_executable(nvfx_swirl tools/nvfx_swirl.cpp)
+  target_link_libraries(nvfx_swirl PRIVATE neuralfx_io neuralfx_train neuralfx_dcm nvfx)
+  neuralfx_defaults(nvfx_swirl)
 endif()
 
 if(NEURALFX_BUILD_BENCH)
