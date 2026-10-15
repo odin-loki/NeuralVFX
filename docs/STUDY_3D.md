@@ -832,6 +832,12 @@ in study N). Real against learned: they part after a second or two, the learned 
 simulation's orange tongue. The wind sweep: **one fire throughout, no second fire anywhere**; the plume still follows
 the control slowly: smoke blown towards -x keeps trailing that way well into the +x half of the sweep.
 
+**The owner's decision (15 October 2026).** Shown the comparison, the owner chose to make C4 the demo. Since then
+`videos/3d_fire_orbit.mp4`, `3d_real_vs_learned.mp4` and `3d_wind.mp4` are C4's renders above, labelled in
+[videos/README.md](../videos/README.md) §9 as shown by that decision and not by the rule; study N's renders are in the git
+history. The rule's verdict above stands as written: C4 did not pass N2's edge check on validation (by 3%), and nothing
+in the study changed.
+
 ### 14.11 What it means
 
 - **The runaway's cause is confirmed and fixed.** Clamped edges were the cause: with ambient air at the open sides
