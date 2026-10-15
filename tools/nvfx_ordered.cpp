@@ -1396,6 +1396,46 @@ void step_fitbias(const Ctx& c, sim::Effect e, const tools::Args& a) {
   std::println("fitbias: -> {}", a.need("out"));
 }
 
+// --- train: the stepper fine-tuned with the ensemble-mean loss (training runs) ----------------------------------------------
+
+void step_train(const Ctx& c, sim::Effect e, const tools::Args& a) {
+  rollout::Model m = load_or_throw(a.need("model"));
+  const fs::path out = a.need("out");
+  const auto t0 = std::chrono::steady_clock::now();
+  const auto runs = training_runs(c, e, c.threads);
+  std::println("train: {} {} runs ready ({:.0f} s)", ename(e), runs.size(), seconds_since(t0));
+  rollout::StepperOptions so = rollout::recipe_for(e).stepper;
+  so.iterations = 0;
+  so.finetune = 0;
+  so.activity_stage = 0;
+  so.mean_stage = a.i("mean-stage", 600);
+  so.mean_weight = a.f("mean-weight", 4.f);
+  so.mean_burn_min = a.i("mean-burn-min", 0);
+  so.mean_burn_max = a.i("mean-burn-max", 90);
+  so.mean_pool = a.i("mean-pool", 4);
+  so.activity = a.f("activity", 100.f);
+  so.max_unroll = a.i("unroll", 16);
+  so.lr_finetune = a.f("lr-ft", 3e-4f);
+  so.seed = a.u64("seed", 41);
+  so.keep_normalisation = true;
+  so.threads = c.threads;
+  so.log_every = 25;
+  so.progress = [&](int it, int unroll, double loss) {
+    std::println("  {} it {:5d} unroll {:2d} loss {:.5f} ({:.0f} s)", ename(e), it, unroll, loss, seconds_since(t0));
+    std::fflush(stdout);
+  };
+  so.checkpoint_every = a.i("checkpoint-every", 100);
+  so.checkpoint = [&](int done) {
+    rollout::Model ck = m;
+    rollout::quantise_like_storage(ck);
+    if (auto w = rollout::save_model(out.string() + std::format(".it{}", done), ck); !w) throw std::runtime_error(w.error());
+  };
+  const rollout::StepperResult r = rollout::train_stepper(m, runs, so);
+  rollout::quantise_like_storage(m);
+  if (auto w = rollout::save_model(out, m); !w) throw std::runtime_error(w.error());
+  std::println("train: {} -> {}: loss {:.5f} in {:.0f} s", ename(e), out.string(), r.final_loss, r.seconds);
+}
+
 // --- sstart: start points moved to the controls by the mean state (training settings) ------------------------------------------
 
 // The diagnosis's neural_one_lr (one continuous reference rollout from one of the three nearest start points, the same index
@@ -1972,6 +2012,7 @@ int main(int argc, char** argv) {
     else if (step == "fitmean") step_fitmean(c, e, a);
     else if (step == "sstart") step_sstart(c, e, a);
     else if (step == "fitbias") step_fitbias(c, e, a);
+    else if (step == "train") step_train(c, e, a);
     else throw std::invalid_argument("unknown step " + step);
     a.warn_unused();
   } catch (const std::exception& e) {

@@ -622,6 +622,59 @@ void rollout_gradient_check(int unroll, int burn, float profile, float activity 
 
 }  // namespace
 
+TEST(Rollout, StudyMMeanLossGradientsMatchFiniteDifferences) {
+  // mean_window_loss: two rollouts with their own seeds, the product of their pooled differences from the run; its
+  // gradient through both rollouts against finite differences (the same acceptance as the window loss's). Without a
+  // burn-in: the burn-in is not differentiated (as the window loss's), so finite differences would see it.
+  Model m = tiny_model(31);
+  const auto r = tiny_run(m.h, 14);
+  std::vector<float> grad(m.step_w.size(), 0.f);
+  const auto eval = [&](std::vector<float>* g) { return mean_window_loss(m, r, 1, 0, 5, 2, 101, 202, g, 1.f); };
+  const double l0 = eval(&grad);
+  EXPECT_NE(l0, 0.0);
+  int checked = 0, bad = 0, live = 0, kinks = 0;
+  const auto near = [](double a, double b) { return std::abs(a - b) <= 3e-2 * std::max(std::abs(a), std::abs(b)) + 2e-5; };
+  for (std::size_t i = 0; i < m.step_w.size(); i += std::max<std::size_t>(1, m.step_w.size() / 250)) {
+    float& slot = m.step_w[i];
+    const float keep = slot;
+    const double base = eval(nullptr);
+    std::vector<double> n;
+    for (const float eps : {1e-2f, 3e-3f, 1e-3f}) {
+      slot = keep + eps;
+      const double lp = eval(nullptr);
+      slot = keep - eps;
+      const double lm = eval(nullptr);
+      slot = keep;
+      n.push_back((lp - lm) / (2.0 * static_cast<double>(eps)));
+      if (eps < 5e-3f) {
+        n.push_back((lp - base) / static_cast<double>(eps));
+        n.push_back((base - lm) / static_cast<double>(eps));
+      }
+    }
+    const double ana = grad[i];
+    if (std::ranges::any_of(n, [&](double v) { return near(v, ana); })) {
+      ++checked;
+      live += std::abs(n[0]) > 2e-5;
+      continue;
+    }
+    const auto [lo, hi] = std::ranges::minmax(n);
+    if (hi - lo > 0.1 * std::max(std::abs(lo), std::abs(hi)) + 1e-6) {
+      ++kinks;
+      continue;
+    }
+    ++checked;
+    if (++bad <= 6) ADD_FAILURE() << std::format("param {}: analytic {} central {} {} {}", i, ana, n[0], n[1], n[4]);
+  }
+  EXPECT_GT(checked, 100);
+  EXPECT_LE(kinks, (checked + kinks) / 10) << "too many parameters at kinks";
+  EXPECT_GT(live, checked / 2) << "most gradients are zero: the check would be vacuous";
+  // the seeds matter (each rollout is driven by its own noise), the same seeds give the same loss, and a burn-in moves
+  // the window
+  EXPECT_EQ(eval(nullptr), mean_window_loss(m, r, 1, 0, 5, 2, 101, 202, nullptr, 1.f));
+  EXPECT_NE(eval(nullptr), mean_window_loss(m, r, 1, 0, 5, 2, 101, 303, nullptr, 1.f));
+  EXPECT_NE(mean_window_loss(m, r, 1, 3, 5, 2, 101, 202, nullptr, 1.f), mean_window_loss(m, r, 4, 0, 5, 2, 101, 202, nullptr, 1.f));
+}
+
 TEST(Rollout, GradientsMatchFiniteDifferencesOneStep) { rollout_gradient_check(1, 0, 0.f); }
 TEST(Rollout, GradientsMatchFiniteDifferencesThroughTime) { rollout_gradient_check(4, 0, 0.f); }
 // The burn-in frames of a fine-tuning window are a stop-gradient by design (the window starts from wherever the
