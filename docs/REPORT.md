@@ -3502,6 +3502,34 @@ setting 0.085 away) and for the test (study B's 10 and 20 more, `test_settings(3
 the rule as written above. Every model plays through the runtime at float on the build's default float ISA (this
 branch's, AVX2), the same tool binary for the probe, validation and the test.
 
+### 16.3.2 Validation (the choice): every candidate meets the rule
+
+Candidate minus current model on study G's 10 validation settings and 20 more, the study's seeds, 8 runs pooled per
+setting, tracking 2 runs per setting ([o_val_compare.csv](../results/experiments/fix/o_val_compare.csv),
+[o_val_stats.csv](../results/experiments/fix/o_val_stats.csv), [o_val_choice.csv](../results/experiments/fix/o_val_choice.csv)).
+Bold: better; "K": past study K's margin (a second reading); "strict": the interval entirely on the worse side:
+
+| effect | candidate | tracking at 1 s (dB) | spectrum distance | \|ln motion ratio\| | coverage | mean-frame PSNR (dB) | rule |
+|---|---|---|---|---|---|---|---|
+| mushroom | `ms` | -0.000 [-0.001, +0.000] | +0.009 [-0.002, +0.020] | +0.054 [+0.012, +0.094] (K; strict) | **-0.0054 [-0.0088, -0.0020]** | **+0.24 [+0.02, +0.46]** | meets |
+| mushroom | `u30` | **+0.89 [+0.76, +1.02]** | **-0.011 [-0.017, -0.005]** | **-0.046 [-0.057, -0.033]** | -0.0005 [-0.0015, +0.0004] | **+0.46 [+0.10, +0.80]** | meets |
+| mushroom | `mt4` | +0.07 [-0.01, +0.14] | **-0.011 [-0.015, -0.006]** | **-0.032 [-0.039, -0.023]** | **-0.0010 [-0.0019, -0.0002]** | **+0.68 [+0.43, +0.95]** | meets |
+| mushroom | **`ms_u30`** | **+0.89 [+0.76, +1.02]** | -0.004 [-0.017, +0.009] | -0.005 [-0.046, +0.035] (K) | **-0.0055 [-0.0091, -0.0021]** | **+1.12 [+0.79, +1.45]** | **chosen** |
+| mushroom | `ms_mt4` | +0.07 [-0.01, +0.14] | -0.002 [-0.014, +0.008] | +0.014 [-0.027, +0.054] (K) | **-0.0063 [-0.0096, -0.0030]** | **+1.07 [+0.74, +1.41]** | meets |
+| splash | **`ms`** | -0.000 [-0.000, +0.000] | **-0.003 [-0.005, -0.001]** | **-0.019 [-0.034, -0.004]** | **-0.0008 [-0.0012, -0.0005]** | **+0.62 [+0.40, +0.86]** | **chosen** |
+
+Emission moved by at most 1 x 10^-5 everywhere (within its margin; the fine-tuned steppers' strictly worse). Means over
+the 30 settings (current → candidate; the floor, a second set of 8 real runs): the mushroom's mean-frame PSNR 28.13 dB
+→ 29.25 (`ms_u30`) (34.76), its tracking at 1 s 13.85 → 14.74 dB, its motion ratio 0.82 → 0.81 (1.00), its coverage
+0.0173 → 0.0118 (0.0046), its spectrum 0.182 → 0.179 (0.032); the splash's mean frame 33.53 → 34.15 dB (39.46), its
+motion 0.98 → 0.96 (1.00), its coverage 0.0025 → 0.0017 (0.0008).
+
+**The choice:** among the mushroom's five, all meeting the rule, the largest mean-frame gain is `ms_u30`'s (+1.12 dB;
+`ms_mt4` +1.07), which also follows a run 0.89 dB better at 1 s; the splash's `ms`. As on the probe, the fine-tune on
+30-frame windows is what follows a run better (`mt4`'s tracking gain of the probe, +0.22 dB, was +0.07 here, a tie), and
+the mean state is what moves the average picture most. Both chosen files were copied to the data root's
+`o_fix/models/` and frozen in [o_frozen.csv](../results/experiments/fix/o_frozen.csv) before the test.
+
 ### 16.4 The rocket thruster's exhaust: a cold field on its tail (a library entry)
 
 **The flaw** ([LIBRARY.md](LIBRARY.md)): `rocket_thruster`'s exhaust (the jet model, recoloured blue) curls up at its
