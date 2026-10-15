@@ -1,0 +1,5 @@
+effect,model,better,none_worse,meets_rule,mean_frame_gain_db,mean_frame_lo,spectrum_change,spectrum_hi,motion_hi,coverage_hi,emission_hi,track_lo,margin_spectrum,margin_motion,margin_coverage,margin_emission,margin_track,outside_margin,outside_k_margin,strict_worse,sha256
+explosion,ms,1,1,1,3.3101,2.3575,-0.00079,0.02049,0.01682,-0.010026,0.0000002,-0.0011,0.05431,0.11682,0.018343,0.0001000,-0.20,none,spectrum_l1,none,b0ee6f053b4b83594fe9cb26d5b496b3ba829fe32d246ab24297796e032a7bc5
+explosion,chosen,,,,,,,,,,,,,,,,,,,,ms
+dust,ms,1,1,1,1.0326,0.3826,0.00862,0.01767,-0.03421,-0.001066,-0.0000002,-0.0004,0.02463,0.11870,0.005705,0.0001000,-0.20,none,none,spectrum_l1,938440a486c21c393aa4af74951284ab53e32468099f9f14073876ddc5292af9
+dust,chosen,,,,,,,,,,,,,,,,,,,,ms

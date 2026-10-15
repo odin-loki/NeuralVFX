@@ -2916,6 +2916,45 @@ test` refuses any other file and runs once (a marker under `m3`). An effect that
 frozen hash that changes updated in the same change). Distance to the floor is reported before and after; the cost is
 measured and reported, not part of the rule.
 
+#### 14.9.4 Validation: both mean states meet the rule
+
+Candidate minus current model on study G's 10 validation settings and 20 more, with the study's seeds, 8 runs pooled
+per setting, tracking 2 runs per setting ([m3_val_compare.csv](../results/experiments/ordered/m3_val_compare.csv),
+[m3_val_stats.csv](../results/experiments/ordered/m3_val_stats.csv),
+[m3_val_choice.csv](../results/experiments/ordered/m3_val_choice.csv)). Bold: better (interval clear of zero); "K":
+past study K's margin (a second reading); "strict": the interval entirely on the worse side.
+
+| effect | tracking at 1 s (dB) | spectrum distance (margin) | \|ln motion ratio\| (margin) | coverage (margin) | emission | mean-frame PSNR (dB) | rule |
+|---|---|---|---|---|---|---|---|
+| explosion `ms` | -0.0003 [-0.0011, +0.0004] | -0.001 [-0.024, +0.020] (0.054; K) | -0.040 [-0.103, +0.017] (0.117) | **-0.0166 [-0.0234, -0.0100]** (0.018) | -0.000000 | **+3.31 [+2.36, +4.30]** | **meets** |
+| dust `ms` | -0.0000 [-0.0004, +0.0004] | +0.009 [+0.000, +0.018] (0.025; strict) | **-0.076 [-0.120, -0.034]** (0.119) | **-0.0029 [-0.0048, -0.0011]** (0.0057) | **-0.0000002** | **+1.03 [+0.38, +1.74]** | **meets** |
+
+Means over the 30 settings (current → `ms`; the floor, a second set of 8 real runs; the mean frame's distance below the
+floor in brackets):
+
+| effect | mean-frame PSNR (dB) | spectrum distance | motion ratio | coverage |
+|---|---|---:|---:|---:|
+| explosion | 29.98 (6.58 below) → **33.29 (3.27 below)** (36.56) | 0.197 → 0.197 (0.036) | 1.00 → 0.90 (1.00) | 0.030 → 0.013 (0.005) |
+| dust | 32.72 (5.93 below) → **33.75 (4.90 below)** (38.65) | 0.111 → 0.120 (0.030) | 1.06 → 0.97 (1.01) | 0.0078 → 0.0050 (0.0022) |
+
+- **The explosion's mean state** brings its average picture 3.3 dB closer to a real run's (better at 27 of 30 settings,
+  worst -2.8 dB), halves its distance below the floor, and covers the frame much more like the real explosion; its
+  detail spectrum is unchanged on average and its motion's error smaller on average (the interval crosses zero). The
+  spectrum's interval's worse end (+0.020) is inside the null's margin and a hair past study K's (+0.02); under the
+  strict reading nothing is worse.
+- **Dust's mean state** brings its average picture 1.0 dB closer (better at 19 of 30 settings, worst -1.8 dB), moves its
+  motion from 6% too lively to 3% too calm (closer), and its coverage closer. Its detail spectrum distance rises by 0.009
+  (8%), an interval just clear of zero on the worse side, within both its margin (0.025) and study K's (0.02).
+- Study M2's setting 2 (counting from 0; controls 0.61, 0.32, 0.72), where both mean states lost with M2's seeds, is a
+  gain with these (+4.6 dB the explosion, +1.5 dB dust): that loss was its seeds'.
+- The paired spreads were as the probe said or smaller, except the explosion's motion: SD 0.063 (spectrum; the probe
+  0.082), 0.171 (motion; 0.121, up80 0.135), 0.019 (coverage; 0.021); dust's 0.025, 0.122 and 0.0053 (0.031, 0.134,
+  0.0083).
+
+**Both go to the test.** The chosen files are study M's and M2's `ms` files copied to the data root's
+`m3/models/explosion.nvfx` (SHA-256 `b0ee6f05...`) and `m3/models/dust.nvfx` (`938440a4...`), frozen in
+[m3_frozen.csv](../results/experiments/ordered/m3_frozen.csv) before the test.
+
 ## 15. Study N: a small 3D demo
 
 Status: **done** (15 October 2026). The full write-up is [STUDY_3D.md](STUDY_3D.md); this is its summary. It is stage 1
