@@ -150,6 +150,7 @@ points, hand-overs between tiles of the same size).
 | `module NAME = EFFECT` | a module (§4.3) | |
 | `trail NAME = EFFECT` | a trail: tiles of an effect left in the world along a moving source's path (§5.3) | |
 | `field NAME = KIND` | a force field (§5) | per kind, and `on M, ..., particles`, `weight`, `if`, `from`, `until` |
+| `water NAME = KIND` | water: a pool, a falling sheet, jets, drips, bubbles or a rain shaft (§5.5, [EFFECTS_WATER.md](EFFECTS_WATER.md)) | per kind (§5.5) |
 | `emit KIND` | particles every frame (§4.6) | |
 | `light` | light from the bus's heat | `gain` (0.14), `flash (r, g, b)` (0) |
 | `particles` | the particle pool | `capacity` (4096), `flow` (0.9: how much particles follow the bus's flow) |
@@ -242,10 +243,12 @@ condition last held (`when t >= spawn_at as began, repeat` without a colon or wi
 | `shock` | a shock front: distortion ring, and `when shock N reaches` (a repeating rule's shocks take the place of fronts that have faded, so the count stays bounded) | `at (x, y)`, `speed` (900), `decay` (0.35), `amp` (6), `width` (26), `if` |
 | `scorch` | a glowing mark on the ground (a repeating rule's marks take turns in the room there is) | `at`, `radius` (100), `glow` (1; may change over time), `if` |
 | `burst` | an explosion's embers and debris, and sparks: short fast bright embers thrown within `cone` degrees of `direction` (after the embers' and debris' random draws, which stay as they were) | `at`, `radius` (50), `embers` (200), `debris` (0), `speed` (600), `sparks` (0), `direction (dx, dy)` (up), `cone` (360), `if` |
+| `splash` | water: a crown, a jet from the crater, drops, waves, rings and foam where something hits a pool (or the ground), and a burst of mist (§5.5) | `at` (required), `power` (1), `onto` a pool, `mist` a module, `mist_amount` (1), `mist_heat` (0.2), `seed` (1), `if` |
+| `wave P` | water: pool P's surface pushed down at a point (and up to its sides), with foam where it pushes hard; every frame along a path, a wake (§5.5) | `at` (required), `amount` (200: world pixels a second), `width` (20), `if` |
 
 `every frame:` holds couplings that run every frame, in order: `transfer`, `suppress` and `stop` right after the
-modules step, `push` after the bus is published (it reads the bus). `start`, `wake`, `hand_over`, `shock`, `scorch` and
-`burst` happen once, so they belong to rules; the checker says so.
+modules step, `push` after the bus is published (it reads the bus). `start`, `wake`, `hand_over`, `shock`, `scorch`,
+`burst` and `splash` happen once, so they belong to rules; the checker says so. `wave` may be in either.
 
 ### 4.6 Emitters
 
@@ -287,7 +290,8 @@ Every frame runs in this order (`src/compose/script_run.cpp`):
 6. the field bus is cleared and every active module publishes to it;
 7. the pushes of `every frame`, then the force fields, in order;
 8. light;
-9. fields that act on particles, then the particles move; rules on landings;
+9. fields that act on particles, then the particles move; rules on landings; then the water steps (§5.5): its settings
+   for the frame, emission, motion, landing, and the mist it gives its modules (deposited for their next step);
 10. shading, background, modules, particles, distortion, bloom, tone mapping (and, with the engine layers on, the
     modules and particles again into the four layers, [ENGINES.md](ENGINES.md) §11).
 
@@ -526,6 +530,33 @@ truck; the rain reads as streaks and the snow as flakes, the rain's washing of t
 only after a few seconds and is subtle in a still; snow and rain are drawn unlit, so near the campfire they do not glow.
 Tested by `Weather.*`: the region filled and fed, the random numbers kept, rain washing a module's soot (and nothing
 without `wash`), snow melting where the bus is hot, a wind field carrying leaves.
+
+### 5.5 Water
+
+Water ([EFFECTS_WATER.md](EFFECTS_WATER.md)) is the composer's own, not learned: a seeded simulation of strands, drops,
+crowns, pools, foam, rings, bubbles and streaks, drawn over the background and under the modules (and into the engine
+layers), whose mist goes into a module of a learned effect (fog, steam) through `deposit()` where it lands. Every random
+number is a hash of the element's seed, the frame and an index, and it moves on the scene's thread in script order, so
+its frames are the same on any number of threads. Capacities are constants: everything is made when the scene is.
+
+| kind | what it is | keys (defaults) |
+|---|---|---|
+| `pool` | a water surface along a line: a 1D height field (a damped wave equation) stirred by what lands, `wave` and rain, with foam on its current and ripple rings | `along (x0, y0) to (x1, y1)` (required), `depth` (60: the body below the line), `surface` (0: edge-on; else the surface seen from above, this tall, where rings show), `cells` (96; 8 to 4096), `speed` (140: the waves'), `damping` (1.2), `drift` (0: its current), `rate` (0: rain drops a second per 100 pixels), `swell`, `wavelength`, `period` (0, 120, 3: steady waves), `clarity` (0.5), `capacity` (256 foam pieces) |
+| `sheet` | water pouring over a lip: strands across it that fall, tear into tongues and streaks, and break into drops and spray | `along` (the lip, required), `flow` (0.6: 0 to about 1.5), `velocity (u, v)` at the lip (0, 40), `strands` (24; 1 to 256), `capacity` (72 nodes in flight a strand: frames of fall; 8 to 512), `breakup` (1: 2 breaks twice as soon) |
+| `jet` | water thrown from a nozzle: `jets` strands fanned `fan` degrees apart, aimed `angle` degrees from upright, wandering by `spread` and swinging by `pulse` | `at` (required), `speed` (required), `angle` (0), `spread` (3), `fan` (0), `jets` (1; 1 to 64), `pulse` (0), `flow` (0.6), `capacity` (72), `breakup` (1) |
+| `drips` | drops that swell at random points along a line, let go and fall | `along` (required), `rate` (1 a second), `radius` (2), `capacity` (64 forming at once) |
+| `bubbles` | bubbles rising through a region, wobbling and growing, popping at the pool's surface | `in (x, y)`, `size W x H` (required), `rate` (4 a second), `radius` (3: the largest), `speed` (45: their rise), `capacity` (256) |
+| `shaft` | a rain shaft seen from afar: streaks in a curtain whose density swells and thins in gusts across it, slanted by a swaying wind, and a veil | `in`, `size` (required), `density` (20 streaks in each 100 x 100 pixels), `speed` (520), `wind (u, v)`, `sway` (0: how far the wind swings), `gust` (0.6), `clarity` (0.4), `colour` (0.55, 0.6, 0.68), `capacity` (2048) |
+
+All kinds take `colour` (what the water reflects: 0.62, 0.8, 0.95), `brightness` (1), `seed` (1), `from`, `until` and
+`if` (it emits only while on; a pool is drawn only while on). What falls (sheets, jets, drips) also takes `gravity`
+(700), `wind (u, v)` (the drops' and spray's drift), `floor` (where it lands off its pool: the ground), `onto` (the pool
+it lands on, bubbles' pool) and `mist` (the module its landing water feeds), `mist_amount` (1) and `mist_heat` (0.2: the
+warmth deposited with the mist, a fraction of it; a fog takes 0); a shaft takes `mist` too. The settings may change
+over time (expressions), except `strands`, `jets`, `cells`, `capacity` and `seed`, which are constants, and `onto` and
+`mist`, which are names. In a library entry an element follows the instance (its prefix, its seed offset, alive only
+while the instance is). Tested by `Water.*` (`tests/test_water.cpp`): the same frames on 1, 2 and 3 threads, the layers,
+the simulation, the checker; and by `nvfx_alloc_test`. `examples/scenes/falls.nvfxs` is the demonstration.
 
 ## 6. The demonstration: a fireball
 
