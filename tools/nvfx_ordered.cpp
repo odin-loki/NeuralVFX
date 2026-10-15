@@ -30,8 +30,15 @@
 //                     [--precision float|int8|default] [--ftz] [--out CSV]
 //       thread CPU time per frame through nvfx_render, the models interleaved (the cost of §14.6).
 //
+//   nvfx_ordered info --model F
+//       a model file's constants: the detail layer's, the stepper's advection and forcing, its start points, a mean state.
+//
 // Options: --root DATA (default $NEURALVFX_DATA or /root/nvfx-data; this study's files are under DATA/m_ordered),
 // --results DIR (results/experiments/ordered), --threads N (1).
+//
+// Study M2 (docs/REPORT.md §14.8): --study m2 keeps every file under DATA/m2 instead, caches the plain statistics with
+// their mean frame in single precision, and gives `val` and `test` study M2's splits (probe2, val2, test2: fresh seeds
+// in 8,500,000 to 8,999,999) and its rule (non-inferiority margins fixed before validation; `val --split val2`, `test`).
 #include "args.hpp"
 
 #include <neuralfx/clip.hpp>
@@ -81,7 +88,8 @@ double seconds_since(std::chrono::steady_clock::time_point t0) { return std::chr
 struct Ctx {
   fs::path data, results;
   int threads = 1;
-  fs::path dir() const { return data / "m_ordered"; }
+  bool m2 = false;  // study M2 (--study m2): files under DATA/m2, its splits and its rule
+  fs::path dir() const { return data / (m2 ? "m2" : "m_ordered"); }
 };
 
 template <class F>
@@ -1675,6 +1683,12 @@ std::vector<Setting> validation_settings() {
 //   val    study G's validation settings, with study D2's seeds (real 4,300,000, plays 4,400,000), so that v2's numbers
 //          are §6.9.2's; tracking: the studies' salt-3 validation runs 0 to 15.
 //   test   study B's held-out settings, seeds no study has used: real 8,000,000, plays 8,100,000, tracking 8,200,000.
+// Study M2 (docs/REPORT.md §14.8; its own range, 8,500,000 to 8,999,999; tracking runs k < 8 per setting, each from an empty
+// grid as the test's):
+//   probe2 development only (training settings, salt-1 runs 0 to 9; 4 runs pooled): real 8,900,000, plays 8,930,000,
+//          tracking 8,960,000 (2 runs per setting).
+//   val2   study G's validation settings: real 8,500,000, plays 8,600,000, tracking 8,650,000.
+//   test2  study B's held-out settings: real 8,700,000, plays 8,800,000, tracking 8,850,000.
 struct Split {
   std::string name;
   std::vector<Setting> settings;
@@ -1703,6 +1717,25 @@ Split split_of(const std::string& name, sim::Effect e) {
     s.real = 8'000'000;
     s.model = 8'100'000;
     s.track = 8'200'000;
+  } else if (name == "probe2") {
+    s.settings = training_settings(e, 10);
+    s.reps = 4;
+    s.track_reps = 2;
+    s.real = 8'900'000;
+    s.model = 8'930'000;
+    s.track = 8'960'000;
+  } else if (name == "val2") {
+    s.settings = validation_settings();
+    s.track_reps = 8;
+    s.real = 8'500'000;
+    s.model = 8'600'000;
+    s.track = 8'650'000;
+  } else if (name == "test2") {
+    s.settings = test_settings();
+    s.track_reps = 8;
+    s.real = 8'700'000;
+    s.model = 8'800'000;
+    s.track = 8'850'000;
   } else {
     throw std::invalid_argument("unknown split " + name);
   }
@@ -1738,22 +1771,44 @@ std::vector<Entry> read_entries(const std::string& current, const std::string& c
 }
 
 // Plain statistics of a run, cached (real runs under vt/real, the models' plays under vt/plays/<first 16 of the file's
-// SHA-256>), so every step resumes and a model is never played twice with a seed.
+// SHA-256>), so every step resumes and a model is never played twice with a seed. Study M2's caches (.fst) hold the mean
+// frame as the floats it is (half the disk; the same numbers).
+bool get_stats_f(std::istream& i, metrics::ClipStats& s) {
+  std::uint32_t n = 0;
+  if (!get_vec(i, s.coverage) || !get_vec(i, s.emission) || !get_vec(i, s.spectrum)) return false;
+  i.read(reinterpret_cast<char*>(&n), 4);
+  if (!i || n > 1000000) return false;
+  s.mean_frame.resize(n);
+  i.read(reinterpret_cast<char*>(s.mean_frame.data()), static_cast<std::streamsize>(n * sizeof(float)));
+  i.read(reinterpret_cast<char*>(&s.motion), sizeof(double));
+  return static_cast<bool>(i);
+}
+void put_stats_f(std::ostream& o, const metrics::ClipStats& s) {
+  put_vec(o, s.coverage);
+  put_vec(o, s.emission);
+  put_vec(o, s.spectrum);
+  const auto n = static_cast<std::uint32_t>(s.mean_frame.size());
+  o.write(reinterpret_cast<const char*>(&n), 4);
+  o.write(reinterpret_cast<const char*>(s.mean_frame.data()), static_cast<std::streamsize>(s.mean_frame.size() * sizeof(float)));
+  o.write(reinterpret_cast<const char*>(&s.motion), sizeof(double));
+}
 bool load_stats(const fs::path& p, metrics::ClipStats& s) {
   std::ifstream i(p, std::ios::binary);
-  return i && get_stats(i, s);
+  return i && (p.extension() == ".fst" ? get_stats_f(i, s) : get_stats(i, s));
 }
 void save_stats(const fs::path& p, const metrics::ClipStats& s) {
   fs::create_directories(p.parent_path());
   const fs::path tmp = p.string() + ".tmp";
   {
     std::ofstream o(tmp, std::ios::binary);
-    put_stats(o, s);
+    if (p.extension() == ".fst") put_stats_f(o, s);
+    else put_stats(o, s);
   }
   fs::rename(tmp, p);
 }
+std::string stats_ext(const Ctx& c) { return c.m2 ? "fst" : "stats"; }
 metrics::ClipStats real_stats(const Ctx& c, sim::Effect e, const Setting& s, std::uint64_t seed) {
-  const fs::path p = c.dir() / "vt" / "real" / std::format("{}_{}.stats", ename(e), seed);
+  const fs::path p = c.dir() / "vt" / "real" / std::format("{}_{}.{}", ename(e), seed, stats_ext(c));
   metrics::ClipStats st;
   if (load_stats(p, st)) return st;
   sim::Fluid f(setting_params(e, s, seed));
@@ -1770,7 +1825,7 @@ metrics::ClipStats real_stats(const Ctx& c, sim::Effect e, const Setting& s, std
   return st;
 }
 metrics::ClipStats play_stats(const Ctx& c, sim::Effect e, const Entry& m, nvfx_effect* fx, const Setting& s, std::uint64_t seed) {
-  const fs::path p = c.dir() / "vt" / "plays" / m.sha.substr(0, 16) / std::format("{}_{}.stats", ename(e), seed);
+  const fs::path p = c.dir() / "vt" / "plays" / m.sha.substr(0, 16) / std::format("{}_{}.{}", ename(e), seed, stats_ext(c));
   metrics::ClipStats st;
   if (load_stats(p, st)) return st;
   const std::vector<float> ctl(s.begin(), s.end());
@@ -2026,15 +2081,104 @@ void decide(const Ctx& c, sim::Effect e, const Split& sp, const std::vector<Entr
   std::println("{} {}: {}", sp.name, en, chosen > 0 ? "chosen " + models[sz(chosen)].name : std::string("none meets the rule"));
 }
 
+// Study M2's rule (docs/REPORT.md §14.8; committed before any of its numbers). Candidate minus current model, paired, 95%
+// bootstrap with 10,000 resamples (metrics::paired_bootstrap, seed 2026), as study M's. A candidate meets it when
+//   1. it is better on its targets, the parts it changes on purpose: the mean-frame PSNR (interval above zero) for every
+//      candidate (the ordered part: the fine-tune, the mean state), and the detail spectrum distance (interval below zero)
+//      when it changes the sub-grid swirl's scale (the random part's scale); and
+//   2. it is non-inferior on every other measure, by margins fixed in advance (the interval's worse end within them):
+//      tracking at 1 s at least -0.20 dB; the spectrum distance, when it is not a target, at most +0.02; |ln motion
+//      ratio| at most +0.02; coverage and emission distances at most +10% of the current model's own mean distance on
+//      the split.
+// The strict reading (no interval entirely on the worse side of zero; study M's) is reported beside and does not decide.
+// On validation, among the candidates that meet it, the one with the largest mean-frame gain is chosen.
+constexpr double kM2Track = -0.20, kM2Spectrum = 0.02, kM2Motion = 0.02, kM2Share = 0.10;
+struct RuleM2 {
+  std::array<metrics::Interval, 6> iv{};  // kCmpNames' order
+  bool spectrum_target = false;           // the spectrum is a target (the swirl's scale changed)
+  bool better = false, none_worse = false;
+  std::array<bool, 6> within{};           // per measure: a target, or within its margin
+  std::array<bool, 6> strict_worse{};     // per measure: the interval entirely on the worse side of zero
+  double margin_cov = 0, margin_emi = 0;
+  bool pass() const { return better && none_worse; }
+};
+RuleM2 apply_rule_m2(const Scores& cand, const Scores& cur, bool spectrum_target) {
+  RuleM2 r;
+  r.spectrum_target = spectrum_target;
+  for (int k = 0; k < 6; ++k) r.iv[sz(k)] = metrics::paired_bootstrap(cmp_stat(cand, k), cmp_stat(cur, k), 10000, 2026);
+  const auto mean_of = [](const std::vector<double>& v) { return std::accumulate(v.begin(), v.end(), 0.0) / static_cast<double>(v.size()); };
+  r.margin_cov = kM2Share * mean_of(cmp_stat(cur, 3));
+  r.margin_emi = kM2Share * mean_of(cmp_stat(cur, 4));
+  // kCmpNames: track_1s, spectrum_l1, abs_ln_motion_ratio, coverage_l1, emission_l1, mean_frame_psnr
+  const bool psnr_better = r.iv[5].lo > 0, spec_better = r.iv[1].hi < 0;
+  r.better = psnr_better && (!spectrum_target || spec_better);
+  r.within[0] = r.iv[0].lo >= kM2Track;
+  r.within[1] = spectrum_target || r.iv[1].hi <= kM2Spectrum;  // a target: in `better`
+  r.within[2] = r.iv[2].hi <= kM2Motion;
+  r.within[3] = r.iv[3].hi <= r.margin_cov;
+  r.within[4] = r.iv[4].hi <= r.margin_emi;
+  r.within[5] = true;  // a target (in `better`)
+  r.none_worse = std::ranges::all_of(r.within, [](bool b) { return b; });
+  r.strict_worse[0] = r.iv[0].hi < 0;
+  for (int k = 1; k < 5; ++k) r.strict_worse[sz(k)] = r.iv[sz(k)].lo > 0;
+  r.strict_worse[5] = r.iv[5].hi < 0;
+  return r;
+}
+std::string rule_m2_row(const std::string& en, const Entry& m, const RuleM2& r) {
+  std::string within, strict;
+  for (int k = 0; k < 6; ++k) {
+    if (!r.within[sz(k)]) within += (within.empty() ? "" : ";") + kCmpNames[sz(k)];
+    if (r.strict_worse[sz(k)]) strict += (strict.empty() ? "" : ";") + kCmpNames[sz(k)];
+  }
+  return std::format("{},{},{},{},{},{},{:.4f},{:.5f},{:.6f},{:.6f},{},{},{}", en, m.name, r.spectrum_target ? "mean_frame;spectrum_l1" : "mean_frame", r.better ? 1 : 0,
+                     r.none_worse ? 1 : 0, r.pass() ? 1 : 0, r.iv[5].mean, r.iv[1].mean, r.margin_cov, r.margin_emi, within.empty() ? "none" : within,
+                     strict.empty() ? "none" : strict, m.sha);
+}
+const std::string kRuleM2Header =
+    "effect,model,targets,better,none_worse,meets_rule,mean_frame_gain_db,spectrum_change,coverage_margin,emission_margin,outside_margin,strict_worse,sha256";
+bool targets_spectrum(const Entry& cand, const Entry& cur) { return cand.m.detail.swirl_scale != cur.m.detail.swirl_scale; }
+void print_rule_m2(const std::string& split, const std::string& en, const Entry& m, const RuleM2& r) {
+  std::println("{} {} {} (targets: {}): better on its targets {}, within every margin {} -> {}", split, en, m.name,
+               r.spectrum_target ? "the mean frame and the spectrum" : "the mean frame", r.better ? "yes" : "no", r.none_worse ? "yes" : "no",
+               r.pass() ? "MEETS the rule" : "does not meet it");
+  for (int k = 0; k < 6; ++k) {
+    std::println("    {:<20} {:+.5f} [{:+.5f}, {:+.5f}]{}{}", kCmpNames[sz(k)], r.iv[sz(k)].mean, r.iv[sz(k)].lo, r.iv[sz(k)].hi,
+                 r.within[sz(k)] ? "" : "  OUTSIDE its margin", r.strict_worse[sz(k)] ? "  (strictly worse)" : "");
+  }
+}
+void decide_m2(const Ctx& c, sim::Effect e, const Split& sp, const std::vector<Entry>& models, const std::vector<Scores>& sc, const std::string& prefix) {
+  const std::string en = ename(e);
+  std::vector<std::string> rows;
+  int chosen = -1;
+  double best = -1e9;
+  for (std::size_t mi = 1; mi < models.size(); ++mi) {
+    const RuleM2 r = apply_rule_m2(sc[mi], sc[0], targets_spectrum(models[mi], models[0]));
+    print_rule_m2(sp.name, en, models[mi], r);
+    rows.push_back(rule_m2_row(en, models[mi], r));
+    if (r.pass() && r.iv[5].mean > best) {
+      best = r.iv[5].mean;
+      chosen = static_cast<int>(mi);
+    }
+  }
+  rows.push_back(std::format("{},chosen,,,,,,,,,,,{}", en, chosen > 0 ? models[sz(chosen)].name : "none"));
+  merge_rows(c.results / std::format("{}_choice.csv", prefix), kRuleM2Header, rows, en);
+  std::println("{} {}: {}", sp.name, en, chosen > 0 ? "chosen " + models[sz(chosen)].name : std::string("none meets the rule"));
+}
+
 void step_val(const Ctx& c, sim::Effect e, const tools::Args& a) {
   const auto models = read_entries(a.need("current"), a.str("cand", ""));
-  const Split sp = split_of(a.str("split", "probe"), e);
-  if (sp.name == "test") throw std::invalid_argument("val: the test runs once, through `test`");
+  const Split sp = split_of(a.str("split", c.m2 ? "probe2" : "probe"), e);
+  if (sp.name == "test" || sp.name == "test2") throw std::invalid_argument("val: the test runs once, through `test`");
+  if (c.m2 != (sp.name == "probe2" || sp.name == "val2")) throw std::invalid_argument("val: study M2's splits are probe2 and val2, with --study m2");
   for (const auto& m : models) std::println("{}: {} {} {} sha256 {}", sp.name, ename(e), m.name, m.path.string(), m.sha);
   const auto sc = evaluate(c, e, sp, models);
   const std::string prefix = a.str("prefix", std::format("m_{}", sp.name));
   report_split(c, e, sp, models, sc, prefix);
   if (sp.name == "val") decide(c, e, sp, models, sc, prefix);
+  if (sp.name == "val2") decide_m2(c, e, sp, models, sc, prefix);
+  if (sp.name == "probe2") {  // the rule's reading on training settings, for development only (not a decision)
+    for (std::size_t mi = 1; mi < models.size(); ++mi) print_rule_m2(sp.name, ename(e), models[mi], apply_rule_m2(sc[mi], sc[0], targets_spectrum(models[mi], models[0])));
+  }
 }
 
 // The test, once per effect: the current model and the chosen candidate, whose SHA-256 must be in --frozen (with the
@@ -2054,9 +2198,18 @@ void step_test(const Ctx& c, sim::Effect e, const tools::Args& a) {
     if (!ok) throw std::runtime_error("test: the candidate's SHA-256 is not frozen for " + ename(e) + " in " + a.need("frozen"));
   }
   std::ofstream(done) << "started " << models[1].sha << "\n";
-  const Split sp = split_of("test", e);
+  const Split sp = split_of(c.m2 ? "test2" : "test", e);
   for (const auto& m : models) std::println("test: {} {} {} sha256 {}", ename(e), m.name, m.path.string(), m.sha);
   const auto sc = evaluate(c, e, sp, models);
+  if (c.m2) {  // study M2: its rule, once
+    report_split(c, e, sp, models, sc, "m2_test");
+    const RuleM2 r = apply_rule_m2(sc[1], sc[0], targets_spectrum(models[1], models[0]));
+    print_rule_m2("test2", ename(e), models[1], r);
+    std::println("test2 {} {}: {}", ename(e), models[1].name, r.pass() ? "MEETS the rule: replace" : "does not meet it: keep the current model");
+    merge_rows(c.results / "m2_test_decision.csv", kRuleM2Header, {rule_m2_row(ename(e), models[1], r)}, ename(e));
+    std::ofstream(done) << "done " << models[1].sha << " " << (r.pass() ? "met" : "not met") << "\n";
+    return;
+  }
   report_split(c, e, sp, models, sc, "m_test");
   const RuleM r = apply_rule_m(sc[1], sc[0]);
   std::println("test {} {}: better on both targets {}, worse on none {} -> {}", ename(e), models[1].name, r.better ? "yes" : "no", r.none_worse ? "yes" : "no",
@@ -2136,6 +2289,23 @@ void step_cost(sim::Effect e, const tools::Args& a) {
   }
 }
 
+// --- info: a model file's constants ------------------------------------------------------------------------------------------
+
+void step_info(const tools::Args& a) {
+  const fs::path p = a.need("model");
+  const rollout::Model m = load_or_throw(p);
+  const rollout::DetailSpec& d = m.detail;
+  std::println("{}: {} ({} bytes, sha256 {}), {} controls, {} age inputs, loop {}", p.string(), m.effect, fs::file_size(p), file_sha256(p), m.h.n_controls,
+               m.h.n_age, m.loop ? "yes" : "no");
+  std::println("  stepper: res {}, hidden {}, memory {}, advection {}, force {}; start points {} (fine fields {} px, coarse bits {})", m.h.res, m.h.hidden,
+               m.h.memory, m.h.advection, m.h.force, m.starts.size(), m.h.start_fine, m.start_bits);
+  std::println("  detail: contrast {}, kappa {}, edges {} {}, swirl {}, swirl_scale {}, swirl_rate {}, swirl_ramp {}, swirl_control {}, grow {}, advect {}, "
+               "soften {}, passes {}",
+               d.contrast, d.kappa, d.edge0, d.edge1, d.swirl, d.swirl_scale, d.swirl_rate, d.swirl_ramp, d.swirl_control, d.grow, d.advect, d.soften, d.passes);
+  std::println("  mean state: {}; bias correction: {}", m.mean.empty() ? "none" : std::format("blocks of {} cells, {} coefficients", m.mean.block, m.mean.beta.size()),
+               m.bias.empty() ? "none" : std::format("blocks of {} cells", m.bias.block));
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -2150,9 +2320,13 @@ int main(int argc, char** argv) {
     c.data = a.str("root", env ? env : "/root/nvfx-data");
     c.results = a.str("results", "results/experiments/ordered");
     c.threads = a.i("threads", 1);
+    const std::string study = a.str("study", "m");
+    if (study != "m" && study != "m2") throw std::invalid_argument("--study m or m2");
+    c.m2 = study == "m2";
     const std::string step = a.positional()[0];
-    if (step == "setmean" || step == "set") {
+    if (step == "setmean" || step == "set" || step == "info") {
       if (step == "set") step_set(a);
+      else if (step == "info") step_info(a);
       else step_setmean(a);
       return 0;
     }

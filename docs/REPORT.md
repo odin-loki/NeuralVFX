@@ -2295,3 +2295,91 @@ nvfx_ordered val --effect fire --split probe|val --current v2/models/fire.nvfx -
 nvfx_ordered test --effect fire --current v2/models/fire.nvfx --cand mt4_s16=mt4_s16.nvfx --frozen results/experiments/ordered/m_frozen.csv
 nvfx_ordered cost --effect fire --current v2/models/fire.nvfx --cand v3=m_ordered/models/v3/fire.nvfx --reps 15 --precision float [--ftz]
 ```
+
+### 14.8 Study M2: the same fixes on more effects
+
+Status: **in progress.** The rule below (§14.8.1) was committed before any number of this study (probe, validation or
+test).
+
+**The question.** Study M's two fixes, applied where §14.7 says they should carry over: the ensemble-mean fine-tune of
+the stepper with the swirl at 16 pixels to **steam and jet** (emitters with a source at the bottom and a rising column,
+trained with study D's squared error against single runs, which teaches calm), then to **the orb, the vortex and magic**
+(study L's steppers) if time allows; the mean state to **the explosion and dust** (one-shots that play from start points
+that are their first states). Does each bring the effect closer to the real one on held-out settings, with nothing
+worse? Code: `nvfx_ordered --study m2` (the same tool; every file under the data root's `m2`, never study M's
+`m_ordered`, which is only read: the explosion's mean state and its candidate file are study M's).
+
+**The current models** are the library's: steam (`fx/models/d`), jet (`fx_energy/models/d`), the explosion (v2,
+`v2/models`), dust (`fx_atmos/models/d`), and study L's orb, vortex and magic (`l_swirl/models/v3`). Every model plays
+through the runtime at float, as in study M (the precision of the frozen tests; the orb plays at float in the library
+anyway, §13.9).
+
+#### 14.8.1 The rule (committed before any of the study's numbers; the test runs once)
+
+**Candidates**, each a file built from the current model's (the list is completed by the probe, below, and committed
+before validation):
+- steam and jet: `mtW_s16`, the stepper fine-tuned with study M's ensemble-mean loss (600 iterations, burn-in 0 to 90
+  frames, 16 frames with gradient, blocks of 4 cells, half the windows the activity stage's, as `nvfx_ordered train`
+  ran it for fire) at weight W = 4 or 8, with the swirl at 16 pixels; and `s16`, the swirl at 16 pixels alone, as study M
+  validated it for fire;
+- the explosion: `ms`, study M's file (v2 with the mean state fitted to the first states of its 240 training runs; the
+  same bytes as study M validated, SHA-256 `b0ee6f05...`), now on fresh seeds;
+- dust: `ms`, the same construction (`fitmean` on dust's 240 training runs, blocks of 2 cells; `setmean`);
+- the orb and the vortex as steam; magic `mtW` alone (its sub-grid swirl is 0, so the swirl's scale changes nothing).
+
+**The probe (development, training settings).** The weight W of each fine-tuned effect is chosen on a probe as study M
+chose its candidates (§14.2): the controls of the effect's salt-1 training runs 0 to 9, 4 real runs and 4 plays pooled
+per setting, tracking 2 runs per setting. The weight is the one whose `mtW_s16` (magic: `mtW`) reads better by the rule
+below on the probe: meeting it, then the larger mean-frame gain; if neither meets it, fewer measures outside their
+margins, then the larger mean-frame gain. The probe chooses what is validated; it decides nothing about replacing.
+
+**Measures** (study M's, §14.3): tracking at 1 s from the true state (study D's active PSNR, one continuous rollout of
+the runtime); and the endless statistics of the runtime as shipped (shards from the stored start points), 8 runs pooled
+per setting, 10 s after a 5 s warm-up for the real runs (one-shots: their 89 frames from the first): detail spectrum
+distance, |ln motion ratio|, coverage distance, emission distance and mean-frame PSNR against the pooled real runs.
+Candidate minus current model, paired over the 10 settings (tracking: each setting's mean over its tracking runs), 95%
+bootstrap with 10,000 resamples (`metrics::paired_bootstrap`, seed 2026).
+
+**The rule.** A candidate replaces the current model for an effect when
+1. it is **better on its targets**, the parts it changes on purpose (interval clear of zero): the **mean-frame PSNR**
+   for every candidate (the ordered part, which the fine-tune and the mean state address), and the **detail spectrum
+   distance** for a candidate that changes the sub-grid swirl's scale (the random part's scale: `s16`, `mtW_s16`); and
+2. it is **non-inferior on every other measure**, the worse end of its interval within a margin fixed now:
+   - tracking at 1 s: at least **-0.20 dB**;
+   - detail spectrum distance, where it is not a target (`ms`, magic's `mtW`): at most **+0.02**;
+   - |ln motion ratio|: at most **+0.02** (2% of motion);
+   - coverage and emission distances: at most **+10% of the current model's own mean distance** on the split.
+
+On validation, among an effect's candidates that meet it, the one with the largest mean-frame gain is chosen; an effect
+with none stops there and is not tested (a null, reported with its numbers). The strict reading of study M (no interval
+entirely on the worse side of zero) is reported beside each decision and does not decide.
+
+**Why margins instead of the strict reading.** Study M's nulls showed that the strict reading tests noise, or rather
+whether any change can be detected at all, not whether a change matters: smoke's `s16` failed on an emission distance
+that moved by less than 10⁻⁵ (smoke gives almost no light) with every setting agreeing (§14.4). Study K met the same
+thing on smoke's mean frame (§13.3) and replaced the strict reading by non-inferiority margins set from what matters;
+these are study K's margins for the spectrum (a fifth of the models' own distances, 0.1 to 0.15, and half the distance
+between two sets of eight real runs), motion, coverage and emission. Tracking's margin is study K's at 2 s rather than
+its -0.10 dB at 1 s: a retrained stepper changes every frame of a rollout, as chaos does by 2 s, where int8 changed
+them by a few hundredths of a dB; a fifth of a dB at 1 s (about 18 dB of active PSNR) is a tenth of what a run's seed
+moves it. A margin works both ways: a change that matters fails even when the interval crosses zero, so the margins are
+stricter than the strict reading where the measure is noisy and more lenient only where a change is too small to
+matter. Study M's own validation data are not revisited with this rule.
+
+**Validation (the choice).** Study G's 10 validation settings (DCM §4) with seeds no study has used: real runs
+**8,500,000 + 100 s + k**, the floor (a second set of real runs) 8,500,050 + 100 s + k, the models' plays **8,600,000 +
+100 s + k** (k = 0 to 7), tracking runs **8,650,000 + 100 s + k** (k = 0 to 7; each simulated from an empty grid for 100
+frames, the one-shots 1, and followed from its true state; averaged per setting). The probe's seeds: real 8,900,000,
+plays 8,930,000, tracking 8,960,000 (+ 100 s + k).
+
+**The test, once per chosen candidate**, on study B's 10 held-out settings: real runs **8,700,000 + 100 s + k**, the
+floor 8,700,050 + 100 s + k, plays **8,800,000 + 100 s + k**, tracking runs **8,850,000 + 100 s + k** (k = 0 to 7). The
+chosen file is written to the data root's `m2/models/<effect>.nvfx` and frozen by SHA-256 in
+`results/experiments/ordered/m2_frozen.csv` before its test; `nvfx_ordered --study m2 test` refuses any other file and
+runs once per effect (a marker under `m2`). Each effect is judged alone by the rule above; it is replaced when it meets
+the rule on the test. Distance to the floor is reported before and after. The cost (ms per frame at 128 and 256 px,
+float and int8, against the current model in the same session) is measured and reported, not part of the rule.
+
+**What a replacement changes.** The shared model links (the library's and the scenes' model folders) are repointed at
+the new file only at the end, after the full ctest passes with them in a private copy of the folders; every frozen
+hash that changes (the library's, the scenes') is updated in the same change and noted here and in the effect's doc.
