@@ -65,6 +65,8 @@ class Fluid {
   Fluid& operator=(const Fluid&) = delete;
 
   void step_frame();  // one output frame: `substeps` solver steps
+  // Change the controls from the next frame on (study N2's training runs whose controls change during the run).
+  void set_controls(float intensity, float wind, float turbulence);
   int frame_index() const { return frame_; }
   float time() const { return time_; }
   const Params& params() const { return p_; }

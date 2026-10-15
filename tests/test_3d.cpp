@@ -3,7 +3,10 @@
 // number of threads), the 3D rollout model (its format, its reference on any number of threads), the trainer (its
 // forward pass is the reference's; its gradients match finite differences through time, with the profile and activity
 // losses), and the volume C API (parity with the reference: exact at the baseline ISA, within float rounding with AVX2;
-// the same fields and pictures on any number of threads; shards; texel formats; errors).
+// the same fields and pictures on any number of threads; shards; texel formats; errors). Study N2 (§14): ambient air at
+// the open sides and top of the coarse advection (what flows in, the reference against the trainer, gradients through
+// it with inflow at every side and the top, study N's clamped files unchanged), controls that change during a run (the
+// simulator's, the runs' format, gradients with them) and the long training stage (resumes to the bit).
 #include <neuralfx/nvfx_volume.h>
 #include <neuralfx/render3d.hpp>
 #include <neuralfx/rollout3d.hpp>
@@ -15,6 +18,8 @@
 #include <algorithm>
 #include <bit>
 #include <cmath>
+#include <cstring>
+#include <filesystem>
 #include <format>
 #include <random>
 #include <sstream>
@@ -251,7 +256,8 @@ TEST(Render3d, SamePicturesOnAnyNumberOfThreads) {
 
 // --- the 3D rollout model -----------------------------------------------------------------------------------------------
 
-std::vector<float> smooth_state(const r3::Hyper& h, float phase, std::uint64_t seed) {
+// vbase: the mean upward flow (0.25: up everywhere; near 0, air also comes down through the top)
+std::vector<float> smooth_state(const r3::Hyper& h, float phase, std::uint64_t seed, float vbase = 0.25f) {
   std::vector<float> c(zu(h.cells()) * r3::kPhys);
   std::mt19937 rng(static_cast<unsigned>(seed));
   std::uniform_real_distribution<float> u(-1.f, 1.f);
@@ -262,7 +268,7 @@ std::vector<float> smooth_state(const r3::Hyper& h, float phase, std::uint64_t s
         float* s = c.data() + ((zu(y) * zu(h.rz) + zu(z)) * zu(h.rx) + zu(x)) * r3::kPhys;
         const float X = (fl(x) + 0.5f) / fl(h.rx), Y = (fl(y) + 0.5f) / fl(h.ry), Z = (fl(z) + 0.5f) / fl(h.rz);
         s[0] = 0.12f * std::sin(6.f * Y + phase + a) * std::cos(3.f * Z);
-        s[1] = 0.25f + 0.15f * std::sin(5.f * X + 2.f * phase + b);
+        s[1] = vbase + 0.15f * std::sin(5.f * X + 2.f * phase + b);
         s[2] = 0.1f * std::cos(4.f * X + 3.f * Y - phase);
         s[3] = std::max(0.f, 1.2f * std::exp(-8.f * ((X - 0.5f) * (X - 0.5f) + (Z - 0.5f) * (Z - 0.5f))) * (1.f - 0.6f * Y) + 0.1f * std::sin(7.f * Y + phase));
         s[4] = std::max(0.f, 0.15f * Y * std::exp(-5.f * ((X - 0.45f) * (X - 0.45f) + (Z - 0.55f) * (Z - 0.55f))) + 0.02f * std::cos(5.f * X - phase));
@@ -272,7 +278,7 @@ std::vector<float> smooth_state(const r3::Hyper& h, float phase, std::uint64_t s
   return c;
 }
 
-r3::Model tiny_model(std::uint64_t seed = 3, int hidden = 8) {
+r3::Model tiny_model(std::uint64_t seed = 3, int hidden = 8, r3::Edges edges = r3::Edges::ambient) {
   r3::Hyper h;
   h.rx = 4;
   h.ry = 6;
@@ -283,6 +289,7 @@ r3::Model tiny_model(std::uint64_t seed = 3, int hidden = 8) {
   h.jacobi = 6;
   h.warmup = 3;
   r3::Model m = r3::init_model(h, seed);
+  m.edges = edges;
   m.effect = "tiny";
   m.scale = {0.08f, 0.15f, 0.08f, 0.4f, 0.06f};
   m.lo = {-0.6f, -0.6f, -0.6f, 0.f, 0.f};
@@ -301,6 +308,25 @@ r3::Model tiny_model(std::uint64_t seed = 3, int hidden = 8) {
 }
 
 TEST(Rollout3d, SaveLoadRoundTripsAsStorageRounds) {
+  // study N's files (clamped edges) are version 1, as they were; ambient edges make version 2
+  for (const r3::Edges e : {r3::Edges::clamp, r3::Edges::ambient}) {
+    const r3::Model m = tiny_model(3, 8, e);
+    std::stringstream ss;
+    ASSERT_TRUE(r3::save_model(ss, m));
+    const std::string bytes = ss.str();
+    std::uint32_t version = 0;
+    std::memcpy(&version, bytes.data() + 8, 4);
+    EXPECT_EQ(version, e == r3::Edges::clamp ? 1u : 2u);
+    auto back = r3::load_model(ss);
+    ASSERT_TRUE(back) << back.error();
+    EXPECT_EQ(back->edges, e);
+    std::string bad = bytes;
+    if (e == r3::Edges::ambient) {
+      bad[12] = 7;  // no such edge mode
+      std::stringstream sb(bad);
+      EXPECT_FALSE(r3::load_model(sb));
+    }
+  }
   r3::Model m = tiny_model();
   m.detail.swirl = 0.7f;
   m.noise.flicker_rate = 1.9f;
@@ -368,7 +394,7 @@ TEST(Rollout3d, DetailLockFollowsTheCoarseState) {
 
 // --- the trainer ---------------------------------------------------------------------------------------------------------
 
-r3::Run tiny_run(const r3::Hyper& h, int frames) {
+r3::Run tiny_run(const r3::Hyper& h, int frames, float vbase = 0.25f, bool changing = false) {
   r3::Run r;
   r.p.intensity = 0.6f;
   r.p.wind = 0.4f;
@@ -376,15 +402,86 @@ r3::Run tiny_run(const r3::Hyper& h, int frames) {
   r.p.seed = 9'000'777;
   r.frames = frames;
   for (int i = 0; i < frames; ++i) {
-    const auto c = smooth_state(h, 0.3f * fl(i), 21);
+    const auto c = smooth_state(h, 0.3f * fl(i), 21, vbase);
     for (const float v : c) r.coarse.push_back(static_cast<std::float16_t>(v));
+    if (changing) {  // the wind sweeps, the intensity and turbulence wander
+      r.schedule.push_back(0.6f + 0.3f * std::sin(0.7f * fl(i)));
+      r.schedule.push_back(std::clamp(0.1f * fl(i), 0.f, 1.f));
+      r.schedule.push_back(0.7f - 0.4f * std::cos(0.5f * fl(i)));
+    }
   }
   return r;
 }
 
-TEST(Rollout3d, TrainerForwardMatchesTheReference) {
-  const r3::Model m = tiny_model();
-  const auto r = tiny_run(m.h, 6);
+// What flows in at a side: with no learned change (the output layer zero), a uniform state moving at half a cell per
+// frame towards +x and up. Ambient edges: the cells at x = 0 take in half a cell of still, empty air (heat, soot, memory
+// and velocity halve); clamped edges (study N): they keep their own. The floor is closed either way (it clamps), the far
+// side and the interior are untouched.
+TEST(Rollout3d, AmbientAirFlowsInAtTheOpenSides) {
+  for (const r3::Edges e : {r3::Edges::clamp, r3::Edges::ambient}) {
+    r3::Model m = tiny_model(3, 8, e);
+    const r3::StepLayout L = r3::step_layout(m.h);
+    std::fill(m.step_w.begin() + static_cast<std::ptrdiff_t>(L.wo), m.step_w.begin() + static_cast<std::ptrdiff_t>(L.bo + zu(m.h.outputs())), 0.f);
+    const int N = m.h.cells(), C = m.h.channels();
+    std::vector<float> in(zu(N) * zu(C)), out(in.size()), flow(zu(N) * 3), p(zu(N), 0.f), noise(zu(N) * r3::kNoise, 0.f);
+    for (int j = 0; j < N; ++j) {
+      float* s = in.data() + zu(j) * zu(C);
+      s[0] = 0.5f;   // u: towards +x
+      s[1] = 0.5f;   // v: up
+      s[2] = 0.f;
+      s[3] = 1.f;    // heat
+      s[4] = 0.25f;  // soot
+      for (int k = r3::kPhys; k < C; ++k) s[k] = 0.8f;  // memory (tanh(0.8) after the step's tanh)
+    }
+    r3::Workspace ws(m);
+    r3::coarse_step(m, in, noise, std::vector<float>{0.5f, 0.5f, 0.5f}, p, out, flow, ws);
+    const float mem = std::tanh(0.8f);
+    for (int y = 0; y < m.h.ry; ++y) {
+      for (int z = 0; z < m.h.rz; ++z) {
+        for (int x = 0; x < m.h.rx; ++x) {
+          const float* o = out.data() + ((zu(y) * zu(m.h.rz) + zu(z)) * zu(m.h.rx) + zu(x)) * zu(C);
+          const float k = e == r3::Edges::ambient && x == 0 ? 0.5f : 1.f;  // the floor (y = 0) clamps: nothing comes from below it
+          ASSERT_NEAR(o[3], 1.f * k, 1e-6f) << "heat at " << x << " " << y << " " << z;
+          ASSERT_NEAR(o[4], 0.25f * k, 1e-6f);
+          ASSERT_NEAR(o[0], 0.5f * k, 1e-6f) << "ambient air is still";
+          ASSERT_NEAR(o[r3::kPhys], mem * k, 1e-6f);
+        }
+      }
+    }
+  }
+}
+
+// Down through the top and in at every side: the same with the flow reversed (towards -x, -z and down) at the far
+// sides and the top (the floor now outflow).
+TEST(Rollout3d, AmbientAirFlowsInThroughTheTopAndTheFarSides) {
+  r3::Model m = tiny_model(3, 8, r3::Edges::ambient);
+  const r3::StepLayout L = r3::step_layout(m.h);
+  std::fill(m.step_w.begin() + static_cast<std::ptrdiff_t>(L.wo), m.step_w.begin() + static_cast<std::ptrdiff_t>(L.bo + zu(m.h.outputs())), 0.f);
+  const int N = m.h.cells(), C = m.h.channels();
+  std::vector<float> in(zu(N) * zu(C), 0.f), out(in.size()), flow(zu(N) * 3), p(zu(N), 0.f), noise(zu(N) * r3::kNoise, 0.f);
+  for (int j = 0; j < N; ++j) {
+    float* s = in.data() + zu(j) * zu(C);
+    s[0] = -0.25f;
+    s[1] = -0.25f;
+    s[2] = -0.25f;
+    s[3] = 1.f;
+  }
+  r3::Workspace ws(m);
+  r3::coarse_step(m, in, noise, std::vector<float>{0.5f, 0.5f, 0.5f}, p, out, flow, ws);
+  for (int y = 0; y < m.h.ry; ++y) {
+    for (int z = 0; z < m.h.rz; ++z) {
+      for (int x = 0; x < m.h.rx; ++x) {
+        const float* o = out.data() + ((zu(y) * zu(m.h.rz) + zu(z)) * zu(m.h.rx) + zu(x)) * zu(C);
+        const float kx = x == m.h.rx - 1 ? 0.75f : 1.f, ky = y == m.h.ry - 1 ? 0.75f : 1.f, kz = z == m.h.rz - 1 ? 0.75f : 1.f;
+        ASSERT_NEAR(o[3], kx * ky * kz, 1e-5f) << x << " " << y << " " << z;
+      }
+    }
+  }
+}
+
+void forward_matches(r3::Edges edges, float vbase) {
+  const r3::Model m = tiny_model(3, 8, edges);
+  const auto r = tiny_run(m.h, 6, vbase);
   const int N = m.h.cells(), C = m.h.channels();
   std::vector<float> in(zu(N) * zu(C), 0.f), out(in.size()), flow(zu(N) * 3), p(zu(N), 0.f), phys(zu(N) * r3::kPhys);
   r.state(2, phys.size(), phys);
@@ -408,10 +505,17 @@ TEST(Rollout3d, TrainerForwardMatchesTheReference) {
   EXPECT_NEAR(tr, ref, 1e-4 * ref + 1e-9);
 }
 
-void gradient_check(int unroll, float profile, float activity) {
-  const r3::Model m0 = tiny_model(11 + static_cast<std::uint64_t>(unroll), 4);
+TEST(Rollout3d, TrainerForwardMatchesTheReference) {
+  forward_matches(r3::Edges::ambient, 0.25f);
+  forward_matches(r3::Edges::ambient, 0.02f);  // air also comes down through the top
+  forward_matches(r3::Edges::clamp, 0.25f);    // study N's edges
+  forward_matches(r3::Edges::clamp, 0.02f);
+}
+
+void gradient_check(int unroll, float profile, float activity, r3::Edges edges = r3::Edges::ambient, float vbase = 0.25f, bool changing = false) {
+  const r3::Model m0 = tiny_model(11 + static_cast<std::uint64_t>(unroll), 4, edges);
   r3::Model m = m0;
-  const auto r = tiny_run(m.h, 10);
+  const auto r = tiny_run(m.h, 10, vbase, changing);
   std::vector<float> grad(m.step_w.size(), 0.f);
   const double l0 = r3::window_loss(m, r, 1, unroll, 0, 0.f, profile, 5, &grad, activity);
   ASSERT_GT(l0, 0.0);
@@ -462,9 +566,25 @@ void gradient_check(int unroll, float profile, float activity) {
 TEST(Rollout3d, GradientsMatchFiniteDifferencesOneStep) { gradient_check(1, 0.f, 0.f); }
 TEST(Rollout3d, GradientsMatchFiniteDifferencesThroughTime) { gradient_check(4, 0.f, 0.f); }
 TEST(Rollout3d, GradientsMatchFiniteDifferencesWithProfilesAndActivity) { gradient_check(3, 1.f, 50.f); }
+// air flowing in through every side and the top (ambient edges), study N's clamped edges, and controls that change
+TEST(Rollout3d, GradientsMatchFiniteDifferencesWithInflowEverywhere) { gradient_check(3, 1.f, 50.f, r3::Edges::ambient, 0.02f); }
+TEST(Rollout3d, GradientsMatchFiniteDifferencesWithClampedEdges) { gradient_check(3, 1.f, 50.f, r3::Edges::clamp, 0.02f); }
+TEST(Rollout3d, GradientsMatchFiniteDifferencesWithChangingControls) { gradient_check(3, 1.f, 50.f, r3::Edges::ambient, 0.02f, true); }
 
 TEST(Rollout3d, RunsAndCheckpointsRoundTrip) {
   const r3::Model m = tiny_model();
+  {  // a run whose controls change keeps its schedule
+    r3::Run rs = tiny_run(m.h, 5, 0.25f, true);
+    const auto dir = std::filesystem::temp_directory_path() / std::format("nvfx3d_sched_{}", ::testing::UnitTest::GetInstance()->random_seed());
+    std::filesystem::create_directories(dir);
+    ASSERT_TRUE(r3::save_run(dir / "s.n3run", rs));
+    auto back = r3::load_run(dir / "s.n3run");
+    ASSERT_TRUE(back) << back.error();
+    EXPECT_EQ(back->schedule, rs.schedule);
+    EXPECT_EQ(back->controls_at(3), rs.controls_at(3));
+    EXPECT_NE(back->controls_at(0), back->controls_at(4));
+    std::filesystem::remove_all(dir);
+  }
   r3::Run r = tiny_run(m.h, 5);
   r.p.width = 8;
   r.p.height = 12;
@@ -538,6 +658,79 @@ TEST(Rollout3d, TrainingResumesAsIfItNeverStopped) {
   EXPECT_EQ(cs.iteration, sa.iteration);
 }
 
+// Study N2's schedule: runs of two lengths (windows drawn by frames), one with controls that change, and a fourth stage
+// of long burn-ins; stopped in stage 4 and resumed on another thread count, it ends as a run that never stopped. A
+// snapshot is taken at every stage's end.
+TEST(Rollout3d, TrainingWithALongStageResumesAsIfItNeverStopped) {
+  r3::Model a = tiny_model(6, 8);
+  const std::vector<r3::Run> runs{tiny_run(a.h, 14), tiny_run(a.h, 22, 0.1f, true), tiny_run(a.h, 9)};
+  r3::set_normalisation(a, runs);
+  r3::Model b = a;
+  r3::TrainOptions o;
+  o.iterations = 3;
+  o.finetune = 2;
+  o.activity_stage = 2;
+  o.long_stage = 3;
+  o.burn_long_min = 6;
+  o.burn_long_max = 12;
+  o.batch = 3;
+  o.max_unroll = 3;
+  o.burn_max = 2;
+  o.threads = 2;
+  EXPECT_EQ(r3::train_stage(o, 6), 3);
+  EXPECT_EQ(r3::train_stage(o, 7), 4);
+  EXPECT_EQ(r3::stage_end(o, 4), 10);
+  r3::TrainState sa;
+  std::vector<int> snaps;
+  r3::train_stepper(a, runs, o, sa, [&](const r3::Model&, const r3::TrainState& ss) { snaps.push_back(ss.iteration); });
+  EXPECT_EQ(snaps, (std::vector<int>{3, 5, 7, 10}));
+  r3::Model ck;
+  r3::TrainState cs;
+  {
+    r3::TrainOptions ob = o;
+    ob.stop_at = 8;
+    r3::train_stepper(b, runs, ob, cs);
+    ck = b;
+  }
+  EXPECT_EQ(cs.iteration, 8);
+  r3::TrainOptions oc = o;
+  oc.threads = 1;
+  r3::train_stepper(ck, runs, oc, cs);
+  EXPECT_EQ(ck.step_w, a.step_w);
+  EXPECT_EQ(cs.iteration, 10);
+  for (const float w : a.step_w) ASSERT_TRUE(std::isfinite(w));
+}
+
+// The simulator's controls changed during a run (study N2's training runs): a schedule that holds the controls gives the
+// fixed run to the bit, one that moves the wind does not.
+TEST(Sim3d, ASteadyScheduleIsTheFixedRun) {
+  r3::Hyper h;
+  h.rx = 4;
+  h.ry = 6;
+  h.rz = 4;
+  h.fine = 2;
+  nfx::sim3d::Params p = small_fire(2);
+  p.width = 8;
+  p.height = 12;
+  const int frames = 5;
+  const r3::Run fixed = r3::record_run(p, frames, h);
+  std::vector<float> hold, sweep;
+  for (int i = 0; i < frames; ++i) {
+    for (const float c : {p.intensity, p.wind, p.turbulence}) hold.push_back(c);
+    for (const float c : {p.intensity, 0.1f * fl(i), p.turbulence}) sweep.push_back(c);
+  }
+  const r3::Run held = r3::record_run(p, frames, h, hold), swept = r3::record_run(p, frames, h, sweep);
+  const auto bits = [](const r3::Run& r) {
+    std::vector<std::uint16_t> v;
+    for (const auto x : r.coarse) v.push_back(std::bit_cast<std::uint16_t>(x));
+    return v;
+  };
+  EXPECT_EQ(bits(fixed), bits(held));
+  EXPECT_NE(bits(fixed), bits(swept));
+  EXPECT_EQ(swept.controls_at(3)[1], 0.3f);
+  EXPECT_THROW(r3::record_run(p, frames, h, std::vector<float>(3, 0.5f)), std::invalid_argument);
+}
+
 // --- the volume C API ------------------------------------------------------------------------------------------------
 
 struct Loaded {
@@ -602,13 +795,19 @@ std::vector<float> play(const nvfx_volume_effect* e, int threads, nvfx_isa isa, 
 }
 
 TEST(VolumeApi, MatchesTheReferenceExactlyAtTheBaselineIsa) {
-  const r3::Model m = tiny_model();
-  Loaded l(m);
-  const std::vector<float> c{0.6f, 0.4f, 0.7f};
-  std::vector<float> soot;
-  const auto ref = reference_heat(m, 1, c, 42, 5, &soot);
-  const auto got = play(l.e, 1, NVFX_ISA_BASELINE, 5, 42, 1, 0.f);
-  EXPECT_EQ(got, ref);
+  for (const r3::Edges e : {r3::Edges::ambient, r3::Edges::clamp}) {  // study N2's edges and study N's
+    const r3::Model m = tiny_model(3, 8, e);
+    Loaded l(m);
+    const std::vector<float> c{0.6f, 0.4f, 0.7f};
+    std::vector<float> soot;
+    const auto ref = reference_heat(m, 1, c, 42, 5, &soot);
+    const auto got = play(l.e, 1, NVFX_ISA_BASELINE, 5, 42, 1, 0.f);
+    EXPECT_EQ(got, ref);
+  }
+  // the two edges play differently
+  const auto amb = play(Loaded(tiny_model(3, 8, r3::Edges::ambient)).e, 1, NVFX_ISA_BASELINE, 5, 42, 1, 0.f);
+  const auto clp = play(Loaded(tiny_model(3, 8, r3::Edges::clamp)).e, 1, NVFX_ISA_BASELINE, 5, 42, 1, 0.f);
+  EXPECT_NE(amb, clp);
 }
 
 TEST(VolumeApi, MatchesTheReferenceWithAvx2WithinRounding) {

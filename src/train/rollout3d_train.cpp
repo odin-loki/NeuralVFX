@@ -237,52 +237,78 @@ void subtract_grad_back(const Grid& g, const float* gS, int C, float* gp) {
 }
 
 struct Tri {
-  std::size_t c[8];  // corner cells: bit 0 x, bit 1 z, bit 2 y
+  std::size_t c[8];      // corner cells: bit 0 x, bit 1 z, bit 2 y
+  std::uint8_t in;       // the corners inside the grid (with ambient edges the others are still, empty air: 0)
   float fx, fy, fz;
-  bool inx, iny, inz;  // the back-traced position is inside the grid (not clamped) along each axis
+  bool inx, iny, inz;  // the back-traced position is inside its clamped range along each axis (it has a derivative)
 };
-Tri tri_at(const Grid& g, float rxp, float ryp, float rzp) {
+Tri tri_at(const Grid& g, Edges e, float rxp, float ryp, float rzp) {
   Tri t{};
-  const float px = std::clamp(rxp, 0.f, fl(g.rx - 1)), py = std::clamp(ryp, 0.f, fl(g.ry - 1)), pz = std::clamp(rzp, 0.f, fl(g.rz - 1));
-  t.inx = rxp > 0.f && rxp < fl(g.rx - 1);
-  t.iny = ryp > 0.f && ryp < fl(g.ry - 1);
-  t.inz = rzp > 0.f && rzp < fl(g.rz - 1);
-  const int x0 = std::min(static_cast<int>(px), g.rx - 2), y0 = std::min(static_cast<int>(py), g.ry - 2), z0 = std::min(static_cast<int>(pz), g.rz - 2);
+  if (e == Edges::clamp) {  // study N: clamped to the grid
+    const float px = std::clamp(rxp, 0.f, fl(g.rx - 1)), py = std::clamp(ryp, 0.f, fl(g.ry - 1)), pz = std::clamp(rzp, 0.f, fl(g.rz - 1));
+    t.inx = rxp > 0.f && rxp < fl(g.rx - 1);
+    t.iny = ryp > 0.f && ryp < fl(g.ry - 1);
+    t.inz = rzp > 0.f && rzp < fl(g.rz - 1);
+    const int x0 = std::min(static_cast<int>(px), g.rx - 2), y0 = std::min(static_cast<int>(py), g.ry - 2), z0 = std::min(static_cast<int>(pz), g.rz - 2);
+    t.fx = px - fl(x0);
+    t.fy = py - fl(y0);
+    t.fz = pz - fl(z0);
+    for (int k = 0; k < 8; ++k) t.c[k] = g.at(x0 + (k & 1), y0 + ((k >> 2) & 1), z0 + ((k >> 1) & 1));
+    t.in = 0xff;
+    return t;
+  }
+  // ambient (rollout3d.cpp's trilinear_ambient): one ghost cell of empty air beyond the open sides and the top; the
+  // floor is closed (clamped to the floor cells' centres)
+  const float px = std::clamp(rxp, -1.f, fl(g.rx)), py = std::clamp(ryp, 0.f, fl(g.ry)), pz = std::clamp(rzp, -1.f, fl(g.rz));
+  t.inx = rxp > -1.f && rxp < fl(g.rx);
+  t.iny = ryp > 0.f && ryp < fl(g.ry);
+  t.inz = rzp > -1.f && rzp < fl(g.rz);
+  const int x0 = std::min(static_cast<int>(std::floor(px)), g.rx - 1), y0 = std::min(static_cast<int>(py), g.ry - 1),
+            z0 = std::min(static_cast<int>(std::floor(pz)), g.rz - 1);
   t.fx = px - fl(x0);
   t.fy = py - fl(y0);
   t.fz = pz - fl(z0);
-  for (int k = 0; k < 8; ++k) t.c[k] = g.at(x0 + (k & 1), y0 + ((k >> 2) & 1), z0 + ((k >> 1) & 1));
+  t.in = 0;
+  for (int k = 0; k < 8; ++k) {
+    const int xx = x0 + (k & 1), yy = y0 + ((k >> 2) & 1), zz = z0 + ((k >> 1) & 1);
+    if (xx < 0 || zz < 0 || xx >= g.rx || yy >= g.ry || zz >= g.rz) {
+      t.c[k] = 0;
+      continue;
+    }
+    t.c[k] = g.at(xx, yy, zz);
+    t.in = static_cast<std::uint8_t>(t.in | (1u << k));
+  }
   return t;
 }
 
-// The same arithmetic as rollout3d.cpp's trilinear(): x, then z, then y.
+// The same arithmetic as rollout3d.cpp's trilinear() and trilinear_ambient(): x, then z, then y.
 float tri_value(const Tri& t, const float* S, int C, int c) {
-  const auto v = [&](int k) { return S[t.c[k] * zu(C) + zu(c)]; };
+  const auto v = [&](int k) { return (t.in >> k) & 1u ? S[t.c[k] * zu(C) + zu(c)] : 0.f; };
   const float a00 = v(0) + t.fx * (v(1) - v(0)), a10 = v(2) + t.fx * (v(3) - v(2));
   const float a01 = v(4) + t.fx * (v(5) - v(4)), a11 = v(6) + t.fx * (v(7) - v(6));
   const float b0 = a00 + t.fz * (a10 - a00), b1 = a01 + t.fz * (a11 - a01);
   return b0 + t.fy * (b1 - b0);
 }
 
-void advect(const Grid& g, const float* S, int C, float* out) {
+void advect(const Grid& g, Edges e, const float* S, int C, float* out) {
   for (int y = 0; y < g.ry; ++y) {
     for (int z = 0; z < g.rz; ++z) {
       for (int x = 0; x < g.rx; ++x) {
         const float* s = S + g.at(x, y, z) * zu(C);
-        const Tri t = tri_at(g, fl(x) - s[0], fl(y) - s[1], fl(z) - s[2]);
+        const Tri t = tri_at(g, e, fl(x) - s[0], fl(y) - s[1], fl(z) - s[2]);
         float* o = out + g.at(x, y, z) * zu(C);
         for (int c = 0; c < C; ++c) o[c] = tri_value(t, S, C, c);
       }
     }
   }
 }
-void advect_back(const Grid& g, const float* S, int C, const float* gout, float* gS) {
+void advect_back(const Grid& g, Edges e, const float* S, int C, const float* gout, float* gS) {
   for (int y = 0; y < g.ry; ++y) {
     for (int z = 0; z < g.rz; ++z) {
       for (int x = 0; x < g.rx; ++x) {
         const std::size_t i = g.at(x, y, z);
         const float* s = S + i * zu(C);
-        const Tri t = tri_at(g, fl(x) - s[0], fl(y) - s[1], fl(z) - s[2]);
+        const Tri t = tri_at(g, e, fl(x) - s[0], fl(y) - s[1], fl(z) - s[2]);
         const float fx = t.fx, fy = t.fy, fz = t.fz;
         const float w[8] = {(1 - fx) * (1 - fz) * (1 - fy), fx * (1 - fz) * (1 - fy), (1 - fx) * fz * (1 - fy), fx * fz * (1 - fy),
                             (1 - fx) * (1 - fz) * fy,       fx * (1 - fz) * fy,       (1 - fx) * fz * fy,       fx * fz * fy};
@@ -293,6 +319,10 @@ void advect_back(const Grid& g, const float* S, int C, const float* gout, float*
           if (gc == 0.f) continue;
           float v[8];
           for (int k = 0; k < 8; ++k) {
+            if (!((t.in >> k) & 1u)) {  // ambient air: a constant
+              v[k] = 0.f;
+              continue;
+            }
             v[k] = S[t.c[k] * zu(C) + zu(c)];
             gS[t.c[k] * zu(C) + zu(c)] += gc * w[k];
           }
@@ -313,6 +343,7 @@ void advect_back(const Grid& g, const float* S, int C, const float* gout, float*
 
 struct Cache {
   Vec X, y1, a1, y2, a2, out, mid, div, p, proj, next;
+  std::vector<float> cond;  // the controls of this step
   std::array<float, 128> g1{}, e1{}, g2{}, e2{};
   std::vector<std::uint8_t> clamped;
 };
@@ -355,6 +386,7 @@ void forward(const Model& m, const StepLayout& L, const float* in, const float* 
     }
   }
   film(m, L, cond, c);
+  c.cond.assign(cond.begin(), cond.end());
   c.y1.resize(zu(N) * zu(H));
   c.a1.resize(zu(N) * zu(H));
   conv3(g, c.X.data(), I, w + L.w1, w + L.b1, H, c.y1.data());
@@ -382,7 +414,7 @@ void forward(const Model& m, const StepLayout& L, const float* in, const float* 
   c.proj = c.mid;
   subtract_grad(g, c.p.data(), c.proj.data(), C);
   c.next.resize(zu(N) * zu(C));
-  advect(g, c.proj.data(), C, c.next.data());
+  advect(g, m.edges, c.proj.data(), C, c.next.data());
   c.clamped.assign(zu(N) * kPhys, 0);
   for (int i = 0; i < N; ++i) {
     for (int k = 0; k < kPhys; ++k) {
@@ -396,8 +428,8 @@ void forward(const Model& m, const StepLayout& L, const float* in, const float* 
 }
 
 // gS (wrt c.next, consumed), gp_out (wrt c.p) -> gS_in, gp_in (wrt the warm start); grad accumulated.
-void backward(const Model& m, const StepLayout& L, const Cache& c, std::span<const float> cond, Vec& gS, const Vec& gp_out, Vec& gS_in, Vec& gp_in,
-              float* grad) {
+void backward(const Model& m, const StepLayout& L, const Cache& c, Vec& gS, const Vec& gp_out, Vec& gS_in, Vec& gp_in, float* grad) {
+  const std::vector<float>& cond = c.cond;
   const Hyper& h = m.h;
   const Grid g{h.rx, h.ry, h.rz};
   const int N = g.n(), C = h.channels(), I = h.inputs(), H = h.hidden, O = h.outputs();
@@ -408,7 +440,7 @@ void backward(const Model& m, const StepLayout& L, const Cache& c, std::span<con
     }
   }
   Vec gproj(zu(N) * zu(C), 0.f);
-  advect_back(g, c.proj.data(), C, gS.data(), gproj.data());
+  advect_back(g, m.edges, c.proj.data(), C, gS.data(), gproj.data());
   Vec gp(gp_out);
   subtract_grad_back(g, gproj.data(), C, gp.data());
   Vec gdiv(zu(N)), wk(zu(N)), tmp(zu(N));
@@ -492,15 +524,18 @@ void coarse_from_sim(const sim3d::Fluid& f, const Hyper& h, std::span<float> out
   }
 }
 
-Run record_run(const sim3d::Params& p, int frames, const Hyper& h) {
+Run record_run(const sim3d::Params& p, int frames, const Hyper& h, std::span<const float> schedule) {
+  if (!schedule.empty() && schedule.size() != zu(frames) * 3) throw std::invalid_argument("rollout3d: a schedule needs 3 controls per frame");
   Run r;
   r.p = p;
   r.frames = frames;
+  r.schedule.assign(schedule.begin(), schedule.end());
   const std::size_t per = zu(h.cells()) * kPhys;
   r.coarse.resize(zu(frames) * per);
   sim3d::Fluid f(p);
   std::vector<float> c(per);
   for (int i = 0; i < frames; ++i) {
+    if (!schedule.empty()) f.set_controls(schedule[zu(i) * 3], schedule[zu(i) * 3 + 1], schedule[zu(i) * 3 + 2]);
     f.step_frame();
     coarse_from_sim(f, h, c);
     for (std::size_t j = 0; j < per; ++j) r.coarse[zu(i) * per + j] = static_cast<std::float16_t>(c[j]);
@@ -509,7 +544,8 @@ Run record_run(const sim3d::Params& p, int frames, const Hyper& h) {
 }
 
 namespace {
-constexpr char kRunMagic[8] = {'N', 'V', '3', 'R', 'U', 'N', '0', '1'};
+constexpr char kRunMagic[8] = {'N', 'V', '3', 'R', 'U', 'N', '0', '1'};   // fixed controls
+constexpr char kRunMagic2[8] = {'N', 'V', '3', 'R', 'U', 'N', '0', '2'};  // and a schedule of controls after the states
 constexpr char kCkptMagic[8] = {'N', 'V', '3', 'C', 'K', 'P', 'T', '1'};
 }  // namespace
 
@@ -518,13 +554,17 @@ std::expected<void, std::string> save_run(const std::filesystem::path& path, con
   {
     std::ofstream o(tmp, std::ios::binary);
     if (!o) return std::unexpected("cannot write " + tmp.string());
-    o.write(kRunMagic, 8);
+    o.write(r.schedule.empty() ? kRunMagic : kRunMagic2, 8);
     bin::put(o, static_cast<std::int32_t>(r.p.effect == sim3d::Effect::smoke ? 1 : 0));
     for (const float v : {r.p.intensity, r.p.wind, r.p.turbulence, r.p.fps}) bin::put(o, v);
     bin::put(o, r.p.seed);
     for (const int v : {r.p.width, r.p.height, r.p.substeps, r.p.pressure_iters, r.frames}) bin::put(o, static_cast<std::int32_t>(v));
     bin::put(o, static_cast<std::uint64_t>(r.coarse.size()));
     for (const std::float16_t v : r.coarse) bin::put(o, std::bit_cast<std::uint16_t>(v));
+    if (!r.schedule.empty()) {
+      bin::put(o, static_cast<std::uint64_t>(r.schedule.size()));
+      bin::put_array(o, std::span<const float>(r.schedule));
+    }
     if (!o) return std::unexpected("write failed: " + tmp.string());
   }
   std::filesystem::rename(tmp, path);
@@ -536,7 +576,8 @@ std::expected<Run, std::string> load_run(const std::filesystem::path& path) {
   if (!i) return std::unexpected("cannot open " + path.string());
   char magic[8];
   i.read(magic, 8);
-  if (!i || std::memcmp(magic, kRunMagic, 8) != 0) return std::unexpected("not a 3D run: " + path.string());
+  const bool v2 = i && std::memcmp(magic, kRunMagic2, 8) == 0;
+  if (!i || (!v2 && std::memcmp(magic, kRunMagic, 8) != 0)) return std::unexpected("not a 3D run: " + path.string());
   Run r;
   auto e = bin::get<std::int32_t>(i);
   if (!e) return std::unexpected(e.error());
@@ -561,6 +602,12 @@ std::expected<Run, std::string> load_run(const std::filesystem::path& path) {
   i.read(reinterpret_cast<char*>(raw.data()), static_cast<std::streamsize>(raw.size() * 2));
   if (!i) return std::unexpected("truncated run: " + path.string());
   for (std::size_t k = 0; k < raw.size(); ++k) r.coarse[k] = std::bit_cast<std::float16_t>(raw[k]);
+  if (v2) {
+    auto ns = bin::get<std::uint64_t>(i);
+    if (!ns || *ns != zu(r.frames) * 3) return std::unexpected("bad schedule: " + path.string());
+    r.schedule.resize(*ns);
+    if (auto got = bin::get_array(i, std::span<float>(r.schedule)); !got) return std::unexpected(got.error());
+  }
   return r;
 }
 
@@ -596,7 +643,6 @@ double window_loss(const Model& m, const Run& r, int first, int unroll, int burn
   const std::size_t per = zu(N) * kPhys;
   Vec S, phys, pressure(zu(N), 0.f), noise(zu(N) * kNoise), tmp;
   state_of(m, r, first, S, phys);
-  const std::vector<float> cond = r.controls();
   Model noise_model;  // the coarse noise needs a workspace without fine fields
   noise_model.h = h;
   noise_model.h.fine = 1;
@@ -610,7 +656,7 @@ double window_loss(const Model& m, const Run& r, int first, int unroll, int burn
     Cache cb;
     for (int s = 0; s < burn; ++s) {
       noise_at(i0 + s);
-      forward(m, L, S.data(), noise.data(), cond, pressure, cb, tmp);
+      forward(m, L, S.data(), noise.data(), r.controls_at(i0 + s + 1), pressure, cb, tmp);
       S = cb.next;
     }
     i0 += burn;
@@ -636,7 +682,7 @@ double window_loss(const Model& m, const Run& r, int first, int unroll, int burn
         }
       }
     }
-    forward(m, L, S.data(), noise.data(), cond, pressure, cs[zu(s)], tmp);
+    forward(m, L, S.data(), noise.data(), r.controls_at(i0 + s + 1), pressure, cs[zu(s)], tmp);
     S = cs[zu(s)].next;
     if (activity > 0.f) outs[zu(s)] = S;
     r.state(i0 + s + 1, per, t);
@@ -708,7 +754,7 @@ double window_loss(const Model& m, const Run& r, int first, int unroll, int burn
       if (activity > 0.f) {
         for (std::size_t j = 0; j < gS.size(); ++j) gS[j] += gprev[zu(s)][j];
       }
-      backward(m, L, cs[zu(s)], cond, gS, gp, gS_in, gp_in, grad->data());
+      backward(m, L, cs[zu(s)], gS, gp, gS_in, gp_in, grad->data());
       gS.swap(gS_in);
       gp.swap(gp_in);
     }
@@ -774,6 +820,19 @@ std::expected<void, std::string> load_checkpoint(const std::filesystem::path& pa
   return {};
 }
 
+int train_stage(const TrainOptions& o, int iteration) {
+  if (iteration < o.iterations) return 1;
+  if (iteration < o.iterations + o.finetune) return 2;
+  if (iteration < o.iterations + o.finetune + o.activity_stage) return 3;
+  return 4;
+}
+
+int stage_end(const TrainOptions& o, int stage) {
+  const int ends[4] = {o.iterations, o.iterations + o.finetune, o.iterations + o.finetune + o.activity_stage,
+                       o.iterations + o.finetune + o.activity_stage + o.long_stage};
+  return ends[std::clamp(stage, 1, 4) - 1];
+}
+
 void train_stepper(Model& m, std::span<const Run> runs, const TrainOptions& o, TrainState& s,
                    const std::function<void(const Model&, const TrainState&)>& checkpoint) {
   if (runs.empty()) throw std::invalid_argument("rollout3d: no runs");
@@ -782,24 +841,50 @@ void train_stepper(Model& m, std::span<const Run> runs, const TrainOptions& o, T
   const std::size_t per = zu(m.h.cells()) * kPhys;
   for (const Run& r : runs) {
     if (r.coarse.size() != zu(r.frames) * per || r.frames < o.max_unroll + o.burn_max + 2) throw std::invalid_argument("rollout3d: a run has the wrong shape");
+    if (!r.schedule.empty() && r.schedule.size() != zu(r.frames) * 3) throw std::invalid_argument("rollout3d: a run's schedule has the wrong size");
   }
+  // windows are drawn in proportion to the runs' frames (stage 4: among the runs that hold its burn-in)
+  const auto table = [&](int min_frames) {
+    std::vector<std::uint64_t> cum;
+    std::uint64_t t = 0;
+    for (const Run& r : runs) {
+      t += r.frames >= min_frames ? static_cast<std::uint64_t>(r.frames) : 0;
+      cum.push_back(t);
+    }
+    return cum;
+  };
+  const std::vector<std::uint64_t> cum_all = table(0), cum_long = table(o.burn_long_min + o.max_unroll + 2);
+  if (o.long_stage > 0 && cum_long.back() == 0) throw std::invalid_argument("rollout3d: no run is long enough for stage 4");
+  // (runs of one length: drawn as study N drew them, so its training reproduces to the bit)
+  const bool one_length = std::ranges::all_of(runs, [&](const Run& r) { return r.frames == runs[0].frames; });
+  const auto pick = [&](const std::vector<std::uint64_t>& cum, std::uint64_t u) {
+    if (one_length) return static_cast<std::size_t>(u % runs.size());
+    const std::uint64_t k = u % cum.back();
+    return static_cast<std::size_t>(std::ranges::upper_bound(cum, k) - cum.begin());
+  };
   if (s.m1.size() != L.size) {
     s.m1.assign(L.size, 0.f);
     s.m2.assign(L.size, 0.f);
   }
   Pool pool(o.threads);
-  const int total = o.iterations + o.finetune + o.activity_stage;
+  const int total = stage_end(o, 4);
   const auto t0 = std::chrono::steady_clock::now();
   std::vector<Vec> grads(zu(o.batch), Vec(L.size, 0.f));
   std::vector<double> losses(zu(o.batch), 0.0);
   for (int it = s.iteration; it < total; ++it) {
-    const bool fine = it >= o.iterations;
-    const bool act = it >= o.iterations + o.finetune;
+    const int stage = train_stage(o, it);
+    const bool fine = stage >= 2, act = stage >= 3, lng = stage == 4;
     const int unroll = fine ? o.max_unroll : std::min(o.max_unroll, 1 + it * o.max_unroll / std::max(1, o.iterations / 2));
     pool.run(o.batch, [&](int b) {
       std::mt19937_64 rng(o.seed * 1000003ULL + static_cast<std::uint64_t>(it) * 977ULL + static_cast<std::uint64_t>(b) * 7919ULL);
-      const Run& r = runs[rng() % runs.size()];
-      const int burn = fine && o.burn_max > 0 && (b & 1) ? static_cast<int>(rng() % static_cast<std::uint64_t>(o.burn_max + 1)) : 0;
+      const Run& r = runs[pick(lng ? cum_long : cum_all, rng())];
+      int burn = 0;
+      if (lng) {
+        const int hi = std::min(o.burn_long_max, r.frames - unroll - 2);
+        burn = o.burn_long_min + static_cast<int>(rng() % static_cast<std::uint64_t>(std::max(1, hi - o.burn_long_min + 1)));
+      } else if (fine && o.burn_max > 0 && (b & 1)) {
+        burn = static_cast<int>(rng() % static_cast<std::uint64_t>(o.burn_max + 1));
+      }
       const int span = r.frames - unroll - burn - 1;
       const int first = static_cast<int>(rng() % static_cast<std::uint64_t>(std::max(1, span)));
       std::ranges::fill(grads[zu(b)], 0.f);
@@ -822,8 +907,8 @@ void train_stepper(Model& m, std::span<const Run> runs, const TrainOptions& o, T
       const float k = static_cast<float>(o.clip / gn);
       for (float& v : gsum) v *= k;
     }
-    const int stage_it = act ? it - o.iterations - o.finetune : (fine ? it - o.iterations : it);
-    const int stage_n = act ? o.activity_stage : (fine ? o.finetune : o.iterations);
+    const int stage_first = stage == 1 ? 0 : stage_end(o, stage - 1);
+    const int stage_it = it - stage_first, stage_n = stage_end(o, stage) - stage_first;
     const float base = fine ? o.lr_finetune : o.lr;
     const float lr = base * (0.05f + 0.95f * 0.5f * (1.f + std::cos(3.14159265f * static_cast<float>(stage_it) / static_cast<float>(std::max(1, stage_n)))));
     ++s.adam_t;
@@ -839,9 +924,10 @@ void train_stepper(Model& m, std::span<const Run> runs, const TrainOptions& o, T
       s.curve.emplace_back(it, loss);
       if (o.progress) o.progress(it, unroll, loss, std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count());
     }
-    const bool stage_end = s.iteration == o.iterations || s.iteration == o.iterations + o.finetune || s.iteration == total;
+    bool at_stage_end = false;
+    for (int k = 1; k <= 4; ++k) at_stage_end = at_stage_end || s.iteration == stage_end(o, k);
     const bool stop = o.stop_at > 0 && s.iteration >= o.stop_at;
-    if (checkpoint && ((o.checkpoint_every > 0 && s.iteration % o.checkpoint_every == 0) || stage_end || stop)) checkpoint(m, s);
+    if (checkpoint && ((o.checkpoint_every > 0 && s.iteration % o.checkpoint_every == 0) || at_stage_end || stop)) checkpoint(m, s);
     if (stop) break;
   }
 }
@@ -852,8 +938,9 @@ void choose_starts(Model& m, std::span<const Run> runs, int count, int frame) {
   const std::size_t per = zu(m.h.cells()) * kPhys;
   // farthest-point order in control space, from the run nearest the middle
   std::vector<int> chosen;
+  const auto at = [&](const Run& r) { return r.controls_at(std::min(frame, r.frames - 1)); };
   const auto dist = [&](const Run& a, const std::vector<float>& c) {
-    const auto x = a.controls();
+    const auto x = at(a);
     float d = 0;
     for (std::size_t k = 0; k < x.size(); ++k) d += (x[k] - c[k]) * (x[k] - c[k]);
     return d;
@@ -869,7 +956,7 @@ void choose_starts(Model& m, std::span<const Run> runs, int count, int frame) {
     for (int i = 0; i < static_cast<int>(runs.size()); ++i) {
       if (std::ranges::find(chosen, i) != chosen.end()) continue;
       float d = 1e30f;
-      for (const int c : chosen) d = std::min(d, dist(runs[zu(i)], runs[zu(c)].controls()));
+      for (const int c : chosen) d = std::min(d, dist(runs[zu(i)], at(runs[zu(c)])));
       if (d > best_d) {
         best_d = d;
         best = i;
@@ -880,7 +967,7 @@ void choose_starts(Model& m, std::span<const Run> runs, int count, int frame) {
   for (const int i : chosen) {
     const Run& r = runs[zu(i)];
     StartPoint sp;
-    sp.controls = r.controls();
+    sp.controls = at(r);
     sp.seed = r.p.seed;
     const int f = std::min(frame, r.frames - 1);
     sp.time = r.time(f);

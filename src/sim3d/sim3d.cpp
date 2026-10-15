@@ -203,6 +203,12 @@ void Fluid::velocity_border() {
   }
 }
 
+void Fluid::set_controls(float intensity, float wind, float turbulence) {
+  p_.intensity = intensity;
+  p_.wind = wind;
+  p_.turbulence = turbulence;
+}
+
 void Fluid::step_frame() {
   const float dt = 1.f / (p_.fps * fl(p_.substeps));
   for (int s = 0; s < p_.substeps; ++s) step(dt);
