@@ -27,12 +27,29 @@ Stepper loss: stages 1-2 (normalised squared error plus profiles) and stage 3 (p
 | effect | runs x frames | minutes of simulation | stepper loss 1-2 | stepper s | stage 3 loss | stage 3 s | renderer dB | contrast | swirl | grow | start points | KB stored |
 |---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
 | launch | 160 x 240 | 21.33 | 0.04987 | 6773 | 0.05152 | 1203 | 31.20 | 1 | 3 | 1 | 8 | 145.7 |
+| puffs | 160 x 240 | 21.33 | 0.18094 | 8472 | 0.50446 | 2096 | 31.95 | 1 | 1.5 | 1 | 8 | 145.7 |
+| ink | 160 x 240 | 21.33 | 0.01820 | 8307 | 0.01694 | 2176 | 42.90 | 0.5 | 1.5 | 1 | 8 | 145.7 |
 
 Renderer, detail constants and start points from `d-finish` on the trained steppers; stage 3 from `d-tune`.
 
 ### Tracking a held-out run from its true start point
 
 Active PSNR against the true run, mean over held-out runs (other seeds and settings), by frames after the start point. `neural`: the rollout effect through the runtime, started from the true state (coarse and fine) with the run's noise seed. `coarse_sim_detail`: the simulation on the same 32-cell grid with the same detail layer, drawn by the simulation's own renderer. `neural_dynamics_true_renderer`: the neural dynamics drawn by that renderer too (separates dynamics from rendering). `renderer_on_true_fields`: the learned renderer on the true fields (frames 1-30, then their mean).
+
+**ink**
+
+| method | 1 | 4 | 8 | 16 | 30 | 60 | 120 | 240 |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| neural | 35.26 | 29.95 | 25.92 | 23.13 | 21.93 | 20.14 | 18.70 | 17.38 |
+| neural_dynamics_true_renderer | 39.28 | 30.78 | 26.15 | 23.22 | 22.05 | 20.19 | 18.69 | 17.35 |
+| coarse_sim_detail | 29.36 | 27.83 | 24.61 | 21.81 | 19.76 | 18.34 | 17.22 | 17.82 |
+| coarse_sim | 23.15 | 23.22 | 23.03 | 22.22 | 20.83 | 19.44 | 18.36 | 18.69 |
+| frozen | 37.68 | 26.16 | 20.95 | 16.80 | 14.36 | 12.97 | 12.54 | 12.87 |
+| renderer_on_true_fields | 37.84 | 37.81 | 37.81 | 37.85 | 37.81 | 37.82 | 37.82 | 37.82 |
+
+neural - coarse_sim_detail, paired over runs: frame 1: +5.89 [+3.10, +8.34]; frame 8: +1.31 [+1.01, +1.61]; frame 30: +2.18 [+1.86, +2.50]; frame 60: +1.80 [+1.62, +1.99]; frame 240: -0.44 [-1.41, +0.46] (tie);
+
+neural_dynamics_true_renderer - coarse_sim_detail, paired over runs: frame 1: +9.92 [+7.26, +12.24]; frame 8: +1.54 [+1.19, +1.90]; frame 30: +2.29 [+1.95, +2.64]; frame 60: +1.85 [+1.64, +2.06]; frame 240: -0.47 [-1.41, +0.39] (tie);
 
 **launch**
 
@@ -52,6 +69,20 @@ neural_dynamics_true_renderer - coarse_sim_detail, paired over runs: frame 1: -1
 ### Endless runs at held-out settings
 
 The ten held-out settings of study B, a new seed each, 10 s per run (explosions: their 3 s). Distances of each method's frame statistics to a real run of the simulation at that setting; `real_other_seed` is a second real run with another seed, the floor. Lower is better except motion ratio (1 is right) and mean-frame PSNR (higher is closer).
+
+**ink**
+
+| method | spectrum L1 | motion ratio | coverage L1 | emission L1 | mean-frame PSNR |
+|---|---:|---:|---:|---:|---:|
+| real_other_seed | 0.088 | 0.95 | 0.0092 | 0.0000 | 28.24 |
+| neural | 0.198 | 1.08 | 0.0246 | 0.0000 | 24.79 |
+| flipbook_nearest | 0.226 | 1.14 | 0.0251 | 0.0000 | 24.25 |
+| coarse_sim_detail | 0.164 | 1.04 | 0.0103 | 0.0000 | 27.84 |
+| coarse_sim | 1.026 | 0.42 | 0.0087 | 0.0000 | 27.98 |
+
+Spectrum distance, paired over settings: neural - grid_k8 -; neural - flipbook_nearest -0.028 [-0.094, +0.034] (tie); neural - coarse_sim_detail +0.034 [-0.011, +0.086] (tie); neural - real_other_seed +0.110 [+0.079, +0.149].
+
+Mean-frame PSNR (dB), paired: neural - flipbook_nearest +0.54 [-1.08, +2.01] (tie); neural - coarse_sim_detail -3.05 [-4.46, -1.89]; neural - real_other_seed -3.45 [-5.17, -2.00]. Motion error |ln(motion ratio)|, paired: neural - flipbook_nearest -0.112 [-0.241, +0.026] (tie); neural - coarse_sim_detail +0.072 [+0.014, +0.136]; neural - real_other_seed +0.074 [-0.027, +0.202] (tie). Coverage distance, paired: neural - flipbook_nearest -0.0005 [-0.0108, +0.0085] (tie); neural - real_other_seed +0.0154 [+0.0113, +0.0193].
 
 **launch**
 
@@ -85,3 +116,15 @@ Statistics of each 10 s window of a 60 s neural run (shards of 6 s from start po
 | launch | 1 | 3 | 0.0551 | 1.5217 | 0.0505 | 18.186 |
 | launch | 1 | 4 | 0.0942 | 1.2530 | 0.1369 | 15.135 |
 | launch | 1 | 5 | 0.0640 | 1.2115 | 0.1095 | 17.228 |
+| ink | 0 | 0 | 0.1972 | 1.2448 | 0.0311 | 25.552 |
+| ink | 0 | 1 | 0.1921 | 0.9312 | 0.0160 | 28.601 |
+| ink | 0 | 2 | 0.1883 | 0.9506 | 0.0139 | 28.269 |
+| ink | 0 | 3 | 0.1626 | 1.2139 | 0.0277 | 25.804 |
+| ink | 0 | 4 | 0.1662 | 0.9129 | 0.0128 | 26.772 |
+| ink | 0 | 5 | 0.2151 | 0.8744 | 0.0151 | 28.274 |
+| ink | 1 | 0 | 0.1838 | 1.0328 | 0.0123 | 25.407 |
+| ink | 1 | 1 | 0.1492 | 1.8954 | 0.0130 | 26.941 |
+| ink | 1 | 2 | 0.1424 | 1.4241 | 0.0114 | 28.658 |
+| ink | 1 | 3 | 0.2424 | 1.7549 | 0.0054 | 26.980 |
+| ink | 1 | 4 | 0.1529 | 2.0410 | 0.0106 | 26.995 |
+| ink | 1 | 5 | 0.1407 | 1.8880 | 0.0172 | 28.274 |
