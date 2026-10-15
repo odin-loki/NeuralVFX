@@ -556,6 +556,16 @@ if(NEURALFX_BUILD_TESTS)
     set_tests_properties(neuralfx.ScriptedLiftoffFrozen PROPERTIES LABELS "neuralfx;data" SKIP_RETURN_CODE 77 TIMEOUT 1200)
     add_test(NAME neuralfx.SceneScriptChecks.liftoff COMMAND nvfx_scene_script --script ${CMAKE_CURRENT_SOURCE_DIR}/examples/scenes/liftoff.nvfxs --check)
     set_tests_properties(neuralfx.SceneScriptChecks.liftoff PROPERTIES LABELS neuralfx)
+    # The volcano (docs/EFFECTS_EARTH.md): lava and the eruption, both in NEURALFX_MODELS_EARTH (outside git); its
+    # keyframes have the SHA-256 recorded in results/experiments/fx_earth_frozen.csv.
+    set(NEURALFX_MODELS_EARTH "${_nvfx_data}/fx_earth/models/scene" CACHE PATH "lava.nvfx, eruption.nvfx and avalanche.nvfx")
+    add_test(NAME neuralfx.ScriptedVolcanoFrozen
+             COMMAND nvfx_scene_script --script ${CMAKE_CURRENT_SOURCE_DIR}/examples/scenes/volcano.nvfxs --models ${NEURALFX_MODELS_EARTH}
+                     --keyframes ${CMAKE_CURRENT_BINARY_DIR}/volcano_script_keyframes --no-video --threads 2 --precision float
+                     --verify ${CMAKE_CURRENT_SOURCE_DIR}/results/experiments/fx_earth_frozen.csv)
+    set_tests_properties(neuralfx.ScriptedVolcanoFrozen PROPERTIES LABELS "neuralfx;data" SKIP_RETURN_CODE 77 TIMEOUT 1200)
+    add_test(NAME neuralfx.SceneScriptChecks.volcano COMMAND nvfx_scene_script --script ${CMAKE_CURRENT_SOURCE_DIR}/examples/scenes/volcano.nvfxs --check)
+    set_tests_properties(neuralfx.SceneScriptChecks.volcano PROPERTIES LABELS neuralfx)
     # Study K (docs/REPORT.md §13): the fireball's keyframes with its modules at int8 on the AVX-512 build (the build int8
     # takes where the CPU has VNNI; without VNNI it computes the same integer sums, so the same frames), against their
     # SHA-256 in results/experiments/k_int8_frozen.csv. Skipped without AVX-512 or without the study D effects.

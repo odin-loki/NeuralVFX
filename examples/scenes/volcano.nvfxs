@@ -1,0 +1,72 @@
+# A volcano erupting on the horizon at night, with lava flowing in the foreground, written as a script (docs/COMPOSE.md
+# §4) to show the earth effects (docs/EFFECTS_EARTH.md) together:
+#
+#   nvfx_scene_script --script examples/scenes/volcano.nvfxs --models DIR --out volcano.mp4
+#
+# DIR holds lava.nvfx and eruption.nvfx (docs/EFFECTS_EARTH.md).
+#
+# Night. A volcano on the horizon smokes, its summit glowing; in the foreground a river of lava creeps from left to
+# right under a cracking crust, lighting the ground red. At 2.5 s the volcano blasts: a flash, a shock wave that rolls
+# across the plain and shakes the camera, bombs of lava thrown high, and the ash column surges up into an umbrella
+# cloud. Lightning flickers in the plume; ash begins to fall over everything, some of it still glowing; the lava, shaken,
+# bubbles harder.
+
+scene      size 1280 x 720, fps 30, length 9 s, ground 620
+bus        at (-128, -300), size 1536 x 1100, cell 8
+particles  capacity 9000, flow 0.9
+keyframes  1.0, 2.6, 3.2, 4.0, 5.0, 6.2, 7.3, 8.4
+
+effect lava     = "lava.nvfx"
+effect eruption = "eruption.nvfx"
+
+# The ash lit by the scene (the lightning, the vent, the lava), glowing where it is still hot (at the vent).
+look ash = shader, heat_scale 1.0, emission 1.8, emission_power 2.5, soot_density 3.2, soot_albedo 0.28, sky 0.22,
+           shadow 0.4, scene_light 1.2, relief 2.5, tint (0.82, 0.76, 0.7)
+
+let blast = t - boom                                                   # since the blast (negative before it)
+let flash = if(blast >= 0, exp(-blast / 0.25), 0)
+let surge = smooth(blast / 1.2)                                        # the eruption's rate, rising after the blast
+let wave  = if(t >= hit, smooth((t - hit) / 0.15) * exp(-(t - hit) / 0.8), 0)   # the shock wave passing the lava
+# Lightning in the plume: a flash now and then once the column has risen, its place wandering.
+let k      = t - 1.1 * floor(t / 1.1)
+let strike = if(t > 4, 1, 0) * if(k > 0.15 and k < 0.24, 1, if(k > 0.3 and k < 0.35, 0.5, 0)) * if(noise(floor(t / 1.1), 2.5, 0.5) > -0.2, 1, 0)
+let bx     = 860 + 170 * noise(floor(t / 1.1), 4.5, 1.5)
+
+# The volcano on the horizon: one large eruption tile, its vent at the summit (5% up the tile), behind everything.
+module plume = eruption, size 256, width 820, at (860, ground + 20), sink 0.02, feather 0.12, look ash, start 0,
+               seed 6310001, controls (0.35, 0.62, 0.5), intensity 0.35 + 0.6 * surge, wind 0.62
+# The lava river in the foreground: four tiles of the lava model, overlapping by a third, flowing to the right.
+module l1 = lava, size 128, width 420, at (60, ground), sink 0.04, feather 0.15, start 0, seed 6310011,
+            controls (0.6, 0.8, 0.5), turbulence 0.5 + 0.4 * wave
+module l2 = lava, size 128, width 420, at (340, ground), sink 0.04, feather 0.15, start 0, seed 6310012,
+            controls (0.7, 0.8, 0.5), turbulence 0.5 + 0.4 * wave
+module l3 = lava, size 128, width 420, at (620, ground), sink 0.04, feather 0.15, start 0, seed 6310013,
+            controls (0.6, 0.85, 0.5), turbulence 0.5 + 0.4 * wave
+module l4 = lava, size 128, width 420, at (900, ground), sink 0.04, feather 0.15, start 0, seed 6310014,
+            controls (0.5, 0.85, 0.5), turbulence 0.5 + 0.4 * wave
+
+light   gain 0.18, flash (1.2 * flash + 0.5 * strike, 0.9 * flash + 0.55 * strike, 0.6 * flash + 0.75 * strike)
+frame   exposure 1.25 * (1 + 0.6 * flash), fade smooth(t / 0.4) * smooth((length - t) / 0.6), haze 1, bloom 1,
+        bloom_threshold 1
+camera  x (rand - 0.5) * 14 * wave, y (rand - 0.5) * 14 * wave
+
+field summit = lamp, at (860, 560), radius 300, strength 0.5 + 0.8 * surge + 1.5 * flash, colour (1, 0.45, 0.15)
+field river  = lamp, at (460, 600), radius 560, strength 0.7, colour (1, 0.42, 0.12)
+field bolt   = lamp, at (bx, 160), radius 340, strength 1.4 * strike, colour (0.7, 0.75, 1)
+emit arc, along (bx, 90) to (bx + 50, 300), rate 4, seed 6310021, width 2, jitter 0.2, branches 3, colour (0.75, 0.8, 1),
+     brightness 2.6 * strike
+emit ash, in (0, -40), size 1280 x 680, density 1.6 * smooth((t - boom - 1.5) / 2), wind (45, 0), glowing 0.12,
+     seed 6310022, from 3.5
+
+# The blast: a flash, bombs of lava thrown high from the summit, the shock wave rolling out across the plain.
+at 2.5 as boom:
+  shock at (860, 560), speed 900, decay 0.6, amp 6, width 34
+  burst at (860, 555), radius 18, embers 120, debris 40, sparks 40, speed 620, direction (0, -1), cone 55
+at 3.3 as hit:
+  burst at (300, 612), radius 60, embers 30, sparks 12, speed 200, direction (0, -1), cone 40
+  burst at (640, 612), radius 60, embers 30, sparks 12, speed 200, direction (0, -1), cone 40
+# Bombs keep coming while it erupts, and the lava spits now and then.
+when t > 3 and rand < 0.12, repeat:
+  burst at (860, 555), radius 10, embers 8, debris 4, sparks 3, speed 520, direction (0, -1), cone 45
+when rand < 0.08, repeat:
+  burst at (rand * 1000, 606), radius 5, embers 3, sparks 2, speed 130, direction (0, -1), cone 40
