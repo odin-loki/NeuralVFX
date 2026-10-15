@@ -542,3 +542,59 @@ normal made from the soot field's slopes, not a surface's; thick smoke has a rou
 one inside. Shock fronts and heat haze are not in them, and the scene's own flashes and ground light are not either.
 Thickness is the effects' optical depth as drawn, not their depth in the world, so soft particles from it fade by how
 thick the smoke is, not by how far it is from the geometry.
+
+## 12. Volumes: learned 3D effects (experimental, study N)
+
+`include/neuralfx/nvfx_volume.h` plays a learned **3D** effect: a 3D rollout model ([STUDY_3D.md](STUDY_3D.md)) whose
+state is a coarse 16 x 24 x 16 grid moved by a learned stepper, with 64 x 96 x 64 fields of temperature and soot carried
+by its flow and broken up by seeded noise. It is a small demo of the PC plan's 3D effects ([TODO.md](../TODO.md)), not a
+finished product: one effect (a fire), trained on our own 3D simulator, measured as STUDY_3D.md says. An engine gets the
+same state two ways:
+
+- **as 3D textures**, for its own volume renderer (a GPU ray marcher or a fog volume): temperature, soot, extinction per
+  world unit (as this library's renderer has it) and velocity (world units per second), float or half, x fastest, then
+  y (up), then z;
+- **as a picture for a camera**, ray-marched on the CPU (emission by Planck's law through the CIE 1931 colour matching
+  functions, soot's absorption and single scattering, one fixed exposure and tone curve) into premultiplied RGBA8:
+  blend with `dst = src.rgb + dst * (1 - src.a)`.
+
+```c
+#include <neuralfx/nvfx_volume.h>
+
+nvfx_volume_effect* fx;  nvfx_volume* vol;
+nvfx_volume_effect_load("fire3d.nvfx3", &fx);      /* immutable; share it between volumes and threads */
+nvfx_volume_create(fx, 4, &vol);                  /* 4 threads of its own (the caller's included); 1 = only the caller */
+const float c[3] = {0.7f, 0.5f, 0.6f};            /* intensity, wind (along x; 0.5 none), turbulence */
+nvfx_volume_set_controls(vol, c, 3);
+nvfx_volume_set_seed(vol, 42);
+nvfx_volume_info info;
+nvfx_volume_effect_get_info(fx, &info);           /* size[3]: the textures; extent[3]: the box in world units */
+
+/* every game frame */
+nvfx_volume_step_to(vol, game_time);              /* frame floor(t * 30); no allocation */
+nvfx_volume_read(vol, NVFX_VOLUME_EXTINCTION, NVFX_VOLUME_HALF, texels, bytes);  /* a 3D texture for the GPU */
+/* or a CPU picture for any camera: */
+nvfx_volume_look_at la = {{2.f, 1.f, 1.5f}, {0.f, 0.6f, 0.f}, {0.f, 1.f, 0.f}, 45.f, 16.f / 9.f, 0.f, 0.f};
+nvfx_volume_camera cam;
+nvfx_volume_camera_look_at(&la, &cam);            /* or fill cam.view and cam.proj from the engine's camera */
+nvfx_volume_render(vol, &cam, 640, 360, rgba, 640 * 4);
+```
+
+**Space.** The volume fills `[-ex/2, ex/2] x [0, ey] x [-ez/2, ez/2]` of its own units (`info.extent`: 1 x 1.5 x 1),
+its floor at y = 0; place it by folding its transform into the view matrix. Cameras are column-major OpenGL-style
+matrices, so an engine passes its own (after converting its conventions), from any side.
+
+**Time and variety.** Every frame is a function of the time, the seed, the controls and the variation, as the 2D
+rollout effects' are: 8 s shards, each a fresh rollout from one of the stored start points nearest the controls (chosen
+by the seed and the shard) with noise of its own, rolled ahead and crossfaded in over 0.5 s. It plays forever without
+repeating. `nvfx_volume_set_shard(vol, 0)` plays one continuous rollout; `nvfx_volume_set_variation` fixes the start
+point. Going back in time or far ahead restarts the shard's rollout (a start runs a 24-frame warm-up).
+
+**Threads and memory.** A volume owns its worker threads (`threads` at creation); the fields and the pictures are the
+same to the bit on any number (tested), and nothing is allocated after creation (`nvfx_alloc_test`). A volume needs
+about 40 MB (two shards' fine fields, one shared set of step buffers, the renderer's prepared volume); the effect file is
+about 0.27 MB. The cost per frame is in STUDY_3D.md §8 (provisional): a step is tens of milliseconds, so a volume suits
+one hero effect updated at 30 Hz, or baking.
+
+**What it is not.** No int8 path, no SIMD beyond an AVX2 convolution, no scenes, library, manager or Godot node for
+volumes yet; one trained effect. Its teacher is our own 3D solver, not a validated fire code.

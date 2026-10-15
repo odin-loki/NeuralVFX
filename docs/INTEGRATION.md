@@ -15,6 +15,7 @@ Unreal, Unity, Godot), [LIBRARY.md](LIBRARY.md) (the 70 effects), [MANAGER.md](M
 | named, ready-made effects spawned at run time (campfire, grenade, portal) | `nvfx_library.h`: `Library`, `Stage` | a stage: a scene with rooms; spawn, move, set parameters, stop; same picture and fields as a scene |
 | many rollout effects (tens to hundreds) within a CPU budget | `nvfx_manager.h`: `Manager` | one premultiplied sprite per instance, levels of detail chosen per tick to fit the budget |
 | one file with the models and the catalogue | `nvfx_pack.h`: `Pack` | the models for all of the above, checked at load (§5) |
+| a learned **3D** effect (experimental: one fire, study N) | `nvfx_volume.h` (C only) | its fields as 3D textures (float or half) for your volume renderer, or a CPU-drawn RGBA8 picture for any camera ([ENGINES.md](ENGINES.md) §12) |
 
 A stage or scene draws a finished picture (it composites its effects, particles and light itself); `Instance` and
 `Manager` give sprites that your renderer composites. The library's entries exist only as stages.
@@ -228,10 +229,10 @@ measuring. Check the result in play: `get_stats()->jobs_ms` against `planned_ms`
 
 ## 8. Version and ABI
 
-`nvfx_version(&features)` returns the library's `NVFX_VERSION` (5: precision in the scene, stage and manager descs, study K; 4: engine layers and trails; 3: packs and `nvfx_version`), which changes whenever
+`nvfx_version(&features)` returns the library's `NVFX_VERSION` (6: 3D volumes, `nvfx_volume.h`, study N; 5: precision in the scene, stage and manager descs, study K; 4: engine layers and trails; 3: packs and `nvfx_version`), which changes whenever
 a call or a public struct changes: an engine that loads `libnvfx.so` / `nvfx.dll` checks it against the header's
 (`nvfx::version().matches_headers()`). `features` says what the build holds (`NVFX_FEATURE_SCENE`, `_LIBRARY`,
-`_MANAGER`, `_PACK`, `_SHARED`) and what this CPU runs (`_AVX2`, `_AVX512`, `_VNNI`). The headers compile as C99 and
+`_MANAGER`, `_PACK`, `_VOLUME`, `_SHARED`) and what this CPU runs (`_AVX2`, `_AVX512`, `_VNNI`). The headers compile as C99 and
 as C++ (with `-fno-exceptions -fno-rtti` for the wrapper). On 64-bit platforms (x86-64 Linux and Windows alike: no
 `long` in any struct) the structs a binding declares have these sizes in bytes, checked at compile time by
 `nvfx_abi_test` (`ctest -R Abi`):
@@ -246,6 +247,7 @@ as C++ (with `-fno-exceptions -fno-rtti` for the wrapper). On 64-bit platforms (
 | `nvfx_scene_info` | 88 | `nvfx_stage_desc` | 96 | `nvfx_pack_desc` | 40 |
 | `nvfx_scene_fields` | 16 | `nvfx_stage_fx_info` | 28 | `nvfx_pack_info` | 48 |
 | `nvfx_scene_module_info` | 60 | enums, `nvfx_fx`, `nvfx_handle` | 4 | `nvfx_pack_member` | 48 |
+| `nvfx_volume_info` | 96 | `nvfx_volume_camera` | 128 | `nvfx_volume_look_at` | 52 |
 
 Always fill a desc with its `_desc_init` (the wrapper's `scene_desc()`, `stage_desc()`, ...) before setting fields.
 

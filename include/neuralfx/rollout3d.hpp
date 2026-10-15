@@ -124,8 +124,14 @@ struct Workspace {
   std::vector<float> X, y1, y2, d, mid, div, tmp, noise, cond, next;
   std::vector<float> ufine;            // fine velocity [fine cell][3]
   std::vector<float> fa, fb, lo, hi;   // MacCormack
-  std::vector<float> B, rr, aa;        // the lock, per coarse cell
+  std::vector<float> rr, aa;           // the lock, per coarse cell: heat's and soot's factors and new material
   CurlField3 curl, swirl;
+  FlickerLattice flicker;              // the flicker at the fine cells' centres, for the breakup of new material
+  struct Axis {                        // where a fine cell's centre falls on a coarser grid, per axis
+    std::vector<int> i;
+    std::vector<float> f;
+  };
+  std::array<Axis, 3> coarse_axis, swirl_axis;
   Conv3Fn conv = conv3_reference;
 };
 

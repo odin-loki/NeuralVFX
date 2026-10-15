@@ -328,15 +328,31 @@ Workspace::Workspace(const Model& m) {
   fb.assign(F, 0.f);
   lo.assign(F, 0.f);
   hi.assign(F, 0.f);
-  B.assign(N, 0.f);
-  rr.assign(N, 0.f);
-  aa.assign(N, 0.f);
-  const float H = 128.f * fl(h.ry) / fl(h.rx), D = 128.f * fl(h.rz) / fl(h.rx);
+  rr.assign(2 * N, 0.f);
+  aa.assign(2 * N, 0.f);
+  const float H = 128.f * fl(h.ry) / fl(h.rx), D = 128.f * fl(h.rz) / fl(h.rx), u128 = 128.f / fl(h.fx());
   curl.resize(m.noise, 128.f, H, D);
   Forcing3 sw = m.noise;
   sw.curl_length = m.detail.swirl_scale;
   sw.curl_rate = m.detail.swirl_rate;
   swirl.resize(sw, 128.f, H, D);
+  flicker.resize(m.noise, h.fx(), h.fy(), h.fz(), u128);
+  const int n[3] = {h.rx, h.ry, h.rz}, nf[3] = {h.fx(), h.fy(), h.fz()};
+  const float kf = fl(h.fine);
+  for (int a = 0; a < 3; ++a) {
+    Axis& c = coarse_axis[zu(a)];
+    Axis& w = swirl_axis[zu(a)];
+    c.i.resize(zu(nf[a]));
+    c.f.resize(zu(nf[a]));
+    w.i.resize(zu(nf[a]));
+    w.f.resize(zu(nf[a]));
+    for (int x = 0; x < nf[a]; ++x) {  // as trilinear(): the cell-centre coordinate clamped to the grid
+      const float cc = std::clamp((fl(x) + 0.5f) / kf - 0.5f, 0.f, fl(n[a] - 1));
+      c.i[zu(x)] = std::min(static_cast<int>(cc), n[a] - 2);
+      c.f[zu(x)] = cc - fl(c.i[zu(x)]);
+      swirl.coord((fl(x) + 0.5f) * u128, a, w.i[zu(x)], w.f[zu(x)]);
+    }
+  }
 }
 
 State make_state(const Model& m) {
@@ -483,12 +499,51 @@ void coarse_step(const Model& m, std::span<const float> in, std::span<const floa
   });
 }
 
+namespace {
+
+// trilinear_zero() where all eight corners are inside the field (most cells), else the general one.
+inline float sample_zero(const float* f, int nx, int ny, int nz, float x, float y, float z, float* lo, float* hi) {
+  const float fx0 = std::floor(x), fy0 = std::floor(y), fz0 = std::floor(z);
+  const int x0 = static_cast<int>(fx0), y0 = static_cast<int>(fy0), z0 = static_cast<int>(fz0);
+  if (x0 < 0 || y0 < 0 || z0 < 0 || x0 + 1 >= nx || y0 + 1 >= ny || z0 + 1 >= nz) return trilinear_zero(f, nx, ny, nz, x, y, z, lo, hi);
+  const float fx = x - fx0, fy = y - fy0, fz = z - fz0;
+  const std::size_t sz = zu(nx), sy = zu(nx) * zu(nz);
+  const float* p = f + zu(y0) * sy + zu(z0) * sz + zu(x0);
+  const float v0 = p[0], v1 = p[1], v2 = p[sz], v3 = p[sz + 1], v4 = p[sy], v5 = p[sy + 1], v6 = p[sy + sz], v7 = p[sy + sz + 1];
+  if (lo) *lo = std::min({v0, v1, v2, v3, v4, v5, v6, v7});
+  if (hi) *hi = std::max({v0, v1, v2, v3, v4, v5, v6, v7});
+  const float a0 = v0 + fx * (v1 - v0), a1 = v2 + fx * (v3 - v2), a2 = v4 + fx * (v5 - v4), a3 = v6 + fx * (v7 - v6);
+  const float b0 = a0 + fz * (a1 - a0), b1 = a2 + fz * (a3 - a2);
+  return b0 + fy * (b1 - b0);
+}
+
+// A coarse field [cell][channels], channel c, trilinear at a fine cell's centre from the per-axis tables (the same
+// arithmetic as trilinear()).
+struct CoarseTap {
+  std::size_t base, sx, sz, sy;
+  float fx, fy, fz;
+  float operator()(const float* f, int c) const {
+    const float* p = f + base + zu(c);
+    const float a00 = p[0] + fx * (p[sx] - p[0]), a10 = p[sz] + fx * (p[sz + sx] - p[sz]);
+    const float a01 = p[sy] + fx * (p[sy + sx] - p[sy]), a11 = p[sy + sz] + fx * (p[sy + sz + sx] - p[sy + sz]);
+    const float b0 = a00 + fz * (a10 - a00), b1 = a01 + fz * (a11 - a01);
+    return b0 + fy * (b1 - b0);
+  }
+};
+CoarseTap coarse_tap(const Hyper& h, const Workspace& ws, int x, int y, int z, int channels) {
+  const int i = ws.coarse_axis[0].i[zu(x)], j = ws.coarse_axis[1].i[zu(y)], k = ws.coarse_axis[2].i[zu(z)];
+  const std::size_t sx = zu(channels), sz = zu(h.rx) * sx, sy = zu(h.rz) * sz;
+  return {zu(j) * sy + zu(k) * sz + zu(i) * sx, sx, sz, sy, ws.coarse_axis[0].f[zu(x)], ws.coarse_axis[1].f[zu(y)], ws.coarse_axis[2].f[zu(z)]};
+}
+
+}  // namespace
+
 void detail_step(const Model& m, State& s, std::uint64_t seed, std::span<const float> controls, Workspace& ws, Pool* pool) {
   (void)controls;
   const Hyper& h = m.h;
   const DetailSpec& dt = m.detail;
   const int k = h.fine, FX = h.fx(), FY = h.fy(), FZ = h.fz(), rx = h.rx, ry = h.ry, rz = h.rz, C = h.channels();
-  const float t = s.time + 0.5f / m.fps, u128 = 128.f / fl(FX);
+  const float t = s.time + 0.5f / m.fps;
   float amp = dt.swirl * fl(FX) / 64.f;
   if (dt.swirl_ramp > 0.f) amp *= std::min(1.f, s.since_start / dt.swirl_ramp);
   if (amp > 0.f) {
@@ -497,17 +552,19 @@ void detail_step(const Model& m, State& s, std::uint64_t seed, std::span<const f
     sw.curl_rate = dt.swirl_rate;
     ws.swirl.build(sw, seed * 0x9E3779B97F4A7C15ULL + 5, t, pool);
   }
+  if (dt.contrast > 0.f) ws.flicker.build(m.noise, seed, t, pool);
   const auto fi = [&](int x, int y, int z) { return (zu(y) * zu(FZ) + zu(z)) * zu(FX) + zu(x); };
   const float kf = fl(k);
   // the fine velocity: the coarse flow up-sampled (fine cells per frame), plus the swirl
   parallel_for(pool, FY, [&](int y) {
     for (int z = 0; z < FZ; ++z) {
       for (int x = 0; x < FX; ++x) {
-        const float cx = (fl(x) + 0.5f) / kf - 0.5f, cy = (fl(y) + 0.5f) / kf - 0.5f, cz = (fl(z) + 0.5f) / kf - 0.5f;
         float* u = ws.ufine.data() + fi(x, y, z) * 3;
-        for (int c = 0; c < 3; ++c) u[c] = kf * trilinear(s.flow.data(), rx, ry, rz, 3, c, cx, cy, cz);
+        const CoarseTap tap = coarse_tap(h, ws, x, y, z, 3);
+        for (int c = 0; c < 3; ++c) u[c] = kf * tap(s.flow.data(), c);
         if (amp > 0.f) {
-          const auto v = ws.swirl.sample((fl(x) + 0.5f) * u128, (fl(y) + 0.5f) * u128, (fl(z) + 0.5f) * u128);
+          const auto v = ws.swirl.at(ws.swirl_axis[0].i[zu(x)], ws.swirl_axis[1].i[zu(y)], ws.swirl_axis[2].i[zu(z)], ws.swirl_axis[0].f[zu(x)],
+                                     ws.swirl_axis[1].f[zu(y)], ws.swirl_axis[2].f[zu(z)]);
           for (int c = 0; c < 3; ++c) u[c] += amp * v[zu(c)];
         }
       }
@@ -521,7 +578,7 @@ void detail_step(const Model& m, State& s, std::uint64_t seed, std::span<const f
         for (int x = 0; x < FX; ++x) {
           const std::size_t i = fi(x, y, z);
           const float* u = ws.ufine.data() + i * 3;
-          ws.fa[i] = trilinear_zero(Q.data(), FX, FY, FZ, fl(x) - u[0], fl(y) - u[1], fl(z) - u[2], &ws.lo[i], &ws.hi[i]);
+          ws.fa[i] = sample_zero(Q.data(), FX, FY, FZ, fl(x) - u[0], fl(y) - u[1], fl(z) - u[2], &ws.lo[i], &ws.hi[i]);
         }
       }
     });
@@ -530,7 +587,7 @@ void detail_step(const Model& m, State& s, std::uint64_t seed, std::span<const f
         for (int x = 0; x < FX; ++x) {
           const std::size_t i = fi(x, y, z);
           const float* u = ws.ufine.data() + i * 3;
-          ws.fb[i] = trilinear_zero(ws.fa.data(), FX, FY, FZ, fl(x) + u[0], fl(y) + u[1], fl(z) + u[2]);
+          ws.fb[i] = sample_zero(ws.fa.data(), FX, FY, FZ, fl(x) + u[0], fl(y) + u[1], fl(z) + u[2], nullptr, nullptr);
         }
       }
     });
@@ -541,44 +598,49 @@ void detail_step(const Model& m, State& s, std::uint64_t seed, std::span<const f
     });
   }
   // the lock: where a block holds more than its coarse cell, scale it down; where less, scale it up (by at most
-  // `grow`) and add the rest, broken up by the flicker noise
+  // `grow`) and add the rest, broken up by the flicker noise (heat in channel 0, soot in channel 1 of rr and aa)
   const float inv = 1.f / (kf * kf * kf);
-  for (int ch = 0; ch < 2; ++ch) {
-    std::vector<float>& Q = ch == 0 ? s.fine_t : s.fine_d;
-    parallel_for(pool, ry, [&](int cy) {
-      for (int cz = 0; cz < rz; ++cz) {
-        for (int cx = 0; cx < rx; ++cx) {
-          float b = 0.f;
-          for (int y = cy * k; y < (cy + 1) * k; ++y) {
-            for (int z = cz * k; z < (cz + 1) * k; ++z) {
-              for (int x = cx * k; x < (cx + 1) * k; ++x) b += Q[fi(x, y, z)];
+  parallel_for(pool, ry, [&](int cy) {
+    for (int cz = 0; cz < rz; ++cz) {
+      for (int cx = 0; cx < rx; ++cx) {
+        float b[2] = {0.f, 0.f};
+        for (int y = cy * k; y < (cy + 1) * k; ++y) {
+          for (int z = cz * k; z < (cz + 1) * k; ++z) {
+            for (int x = cx * k; x < (cx + 1) * k; ++x) {
+              b[0] += s.fine_t[fi(x, y, z)];
+              b[1] += s.fine_d[fi(x, y, z)];
             }
           }
-          const std::size_t c = (zu(cy) * zu(rz) + zu(cz)) * zu(rx) + zu(cx);
-          b *= inv;
-          const float target = s.coarse[c * zu(C) + 3 + zu(ch)];
+        }
+        const std::size_t c = (zu(cy) * zu(rz) + zu(cz)) * zu(rx) + zu(cx);
+        for (int ch = 0; ch < 2; ++ch) {
+          const float bb = b[ch] * inv, target = s.coarse[c * zu(C) + 3 + zu(ch)];
           constexpr float eps = 1e-4f;
-          const float r = (target + eps) / (b + eps);
-          ws.rr[c] = r <= 1.f ? r : std::min(r, dt.grow);
-          ws.aa[c] = std::max(0.f, target - b * ws.rr[c]);
+          const float r = (target + eps) / (bb + eps);
+          const float rv = r <= 1.f ? r : std::min(r, dt.grow);
+          ws.rr[2 * c + zu(ch)] = rv;
+          ws.aa[2 * c + zu(ch)] = std::max(0.f, target - bb * rv);
         }
       }
-    });
-    parallel_for(pool, FY, [&](int y) {
-      for (int z = 0; z < FZ; ++z) {
-        for (int x = 0; x < FX; ++x) {
-          const float cx = (fl(x) + 0.5f) / kf - 0.5f, cy = (fl(y) + 0.5f) / kf - 0.5f, cz = (fl(z) + 0.5f) / kf - 0.5f;
-          float add = trilinear(ws.aa.data(), rx, ry, rz, 1, 0, cx, cy, cz);
-          if (add > 0.f && dt.contrast > 0.f) {
-            const float phi = flicker3(m.noise, seed, (fl(x) + 0.5f) * u128, (fl(y) + 0.5f) * u128, (fl(z) + 0.5f) * u128, t);
-            add *= (1.f - dt.contrast) + dt.contrast * dt.kappa * smoothstep01((phi - dt.edge0) / (dt.edge1 - dt.edge0));
-          }
-          float& q = Q[fi(x, y, z)];
-          q = q * trilinear(ws.rr.data(), rx, ry, rz, 1, 0, cx, cy, cz) + add;
+    }
+  });
+  parallel_for(pool, FY, [&](int y) {
+    for (int z = 0; z < FZ; ++z) {
+      for (int x = 0; x < FX; ++x) {
+        const CoarseTap tap = coarse_tap(h, ws, x, y, z, 2);
+        float add_t = tap(ws.aa.data(), 0), add_d = tap(ws.aa.data(), 1);
+        if ((add_t > 0.f || add_d > 0.f) && dt.contrast > 0.f) {
+          const float phi = ws.flicker.at(x, y, z);
+          const float g = (1.f - dt.contrast) + dt.contrast * dt.kappa * smoothstep01((phi - dt.edge0) / (dt.edge1 - dt.edge0));
+          add_t *= g;
+          add_d *= g;
         }
+        const std::size_t i = fi(x, y, z);
+        s.fine_t[i] = s.fine_t[i] * tap(ws.rr.data(), 0) + add_t;
+        s.fine_d[i] = s.fine_d[i] * tap(ws.rr.data(), 1) + add_d;
       }
-    });
-  }
+    }
+  });
 }
 
 void step(const Model& m, State& s, std::span<const float> controls, std::uint64_t seed, Workspace& ws, Pool* pool) {

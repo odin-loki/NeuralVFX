@@ -13,6 +13,8 @@
 //   nvfx_3d play   --split S --method NAME [--model F]              endless statistics of a model's plays, or coarse
 //   nvfx_3d compare --split S --a NAME --b NAME                     paired differences with 95% bootstrap intervals
 //   nvfx_3d freeze --model F                                        the model the test runs on (results/3d/frozen.csv)
+//   nvfx_3d video  --kind orbit|wind|real-vs-learned --out F.mp4    demo videos (videos/README.md)
+//   nvfx_3d timing --threads 1,2,4                                  ms per step and per picture (results/3d/timing.csv)
 #include "args.hpp"
 #include "label_font.hpp"
 
@@ -32,6 +34,7 @@
 #include <cmath>
 #include <complex>
 #include <cstdio>
+#include <cstring>
 #include <ctime>
 #include <filesystem>
 #include <format>
@@ -121,15 +124,24 @@ std::array<float, 3> train_controls(std::uint64_t seed) {
   return {u01(h), u01(mix64(h + 1)), u01(mix64(h + 2))};
 }
 
+// Smoke tests only (--max-settings, --max-runs): fewer settings and runs than the protocol's.
+int g_max_settings = 1 << 20, g_max_runs = 1 << 20;
+
+std::vector<std::array<float, 3>> settings_all(const std::string& split);
 std::vector<std::array<float, 3>> settings(const std::string& split) {
+  auto s = settings_all(split);
+  if (static_cast<int>(s.size()) > g_max_settings) s.resize(zu(g_max_settings));
+  return s;
+}
+std::vector<std::array<float, 3>> settings_all(const std::string& split) {
   if (split == "val") return {{0.35f, 0.30f, 0.40f}, {0.65f, 0.70f, 0.60f}, {0.50f, 0.15f, 0.75f}, {0.80f, 0.55f, 0.25f}};
   if (split == "test") {
     return {{0.30f, 0.60f, 0.55f}, {0.45f, 0.25f, 0.30f}, {0.55f, 0.80f, 0.70f}, {0.70f, 0.40f, 0.85f}, {0.85f, 0.65f, 0.45f}, {0.60f, 0.50f, 0.20f}};
   }
   throw std::invalid_argument("split must be val or test");
 }
-int track_runs(const std::string&) { return 3; }
-int endless_runs(const std::string& split) { return split == "test" ? 3 : 2; }
+int track_runs(const std::string&) { return std::min(3, g_max_runs); }
+int endless_runs(const std::string& split) { return std::min(split == "test" ? 3 : 2, g_max_runs); }
 std::uint64_t base_of(const std::string& split, const std::string& what) {
   const bool t = split == "test";
   if (what == "track") return t ? kTestTrack : kValTrack;
@@ -1064,6 +1076,369 @@ int freeze(const Args& a) {
   return 0;
 }
 
+// --- videos ----------------------------------------------------------------------------------------------------------
+
+struct Canvas {
+  int w = 0, h = 0;
+  std::vector<std::uint8_t> rgb;
+  void fill(int x0, int y0, int fw, int fh, std::array<std::uint8_t, 3> c) {
+    for (int y = std::max(0, y0); y < std::min(h, y0 + fh); ++y) {
+      for (int x = std::max(0, x0); x < std::min(w, x0 + fw); ++x) {
+        std::uint8_t* d = rgb.data() + (zu(y) * zu(w) + zu(x)) * 3;
+        d[0] = c[0];
+        d[1] = c[1];
+        d[2] = c[2];
+      }
+    }
+  }
+  void text(std::string_view t, int x, int y, int scale, std::array<std::uint8_t, 3> c) {
+    nfx::tools::draw_text(t, x + 1, y + 1, scale, [&](int px, int py) {  // a shadow, then the text
+      if (px >= 0 && py >= 0 && px < w && py < h) std::fill_n(rgb.data() + (zu(py) * zu(w) + zu(px)) * 3, 3, std::uint8_t{0});
+    });
+    nfx::tools::draw_text(t, x, y, scale, [&](int px, int py) {
+      if (px < 0 || py < 0 || px >= w || py >= h) return;
+      std::uint8_t* d = rgb.data() + (zu(py) * zu(w) + zu(px)) * 3;
+      d[0] = c[0];
+      d[1] = c[1];
+      d[2] = c[2];
+    });
+  }
+};
+
+struct View {
+  std::array<float, 3> eye, target, up;
+  float fov = 40.f;
+  rd::Camera camera(float aspect) const { return rd::look_at(eye, target, up, fov, aspect); }
+};
+
+// The fire's light in a picture: the mean light it adds beyond its cover (for the glow on the ground).
+float picture_glow(const std::vector<std::uint8_t>& rgba) {
+  double e = 0;
+  for (std::size_t i = 0; i < rgba.size(); i += 4) {
+    const double a = rgba[i + 3];
+    e += std::max(0.0, (rgba[i] + rgba[i + 1] + rgba[i + 2]) / 3.0 - a) / 255.0;
+  }
+  return static_cast<float>(e / static_cast<double>(rgba.size() / 4));
+}
+
+// The effect (premultiplied RGBA, w x h) over a dark sky and a ground grid (y = 0) lit by the fire, into the canvas at
+// (x0, y0). The sky, the ground and its light are the tool's (procedural), not the model's.
+void composite(Canvas& cv, int x0, int y0, int w, int h, const std::vector<std::uint8_t>& rgba, const View& v, float glow) {
+  const auto norm = [](std::array<float, 3> a) {
+    const float l = std::sqrt(a[0] * a[0] + a[1] * a[1] + a[2] * a[2]);
+    return std::array<float, 3>{a[0] / l, a[1] / l, a[2] / l};
+  };
+  const auto cross = [](std::array<float, 3> a, std::array<float, 3> b) {
+    return std::array<float, 3>{a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]};
+  };
+  const auto f = norm({v.target[0] - v.eye[0], v.target[1] - v.eye[1], v.target[2] - v.eye[2]});
+  const auto r = norm(cross(f, v.up));
+  const auto u = cross(r, f);
+  const float th = std::tan(0.5f * v.fov * std::numbers::pi_v<float> / 180.f), aspect = fl(w) / fl(h);
+  for (int y = 0; y < h; ++y) {
+    for (int x = 0; x < w; ++x) {
+      const float nx = ((fl(x) + 0.5f) / fl(w) * 2.f - 1.f) * th * aspect, ny = (1.f - (fl(y) + 0.5f) / fl(h) * 2.f) * th;
+      const auto d = norm({f[0] + nx * r[0] + ny * u[0], f[1] + nx * r[1] + ny * u[1], f[2] + nx * r[2] + ny * u[2]});
+      float bg[3];
+      const float sky = std::clamp(d[1] * 2.f, 0.f, 1.f);
+      for (int c = 0; c < 3; ++c) bg[c] = (std::array{26.f, 26.f, 31.f}[zu(c)] * (1.f - sky) + std::array{7.f, 9.f, 17.f}[zu(c)] * sky);
+      if (d[1] < -1e-4f && v.eye[1] > 0.f) {
+        const float t = -v.eye[1] / d[1], px = v.eye[0] + t * d[0], pz = v.eye[2] + t * d[2];
+        const float gx = std::abs(px / 0.25f - std::round(px / 0.25f)), gz = std::abs(pz / 0.25f - std::round(pz / 0.25f));
+        const float wline = std::min(0.5f, 0.012f * (1.f + t));
+        const float line = std::max(1.f - std::clamp(gx / wline, 0.f, 1.f), 1.f - std::clamp(gz / wline, 0.f, 1.f));
+        const float fade = std::exp(-0.12f * t);
+        const float rr = px * px + pz * pz, light = glow * 90.f / (1.f + 10.f * rr);
+        const std::array<float, 3> ground{20.f, 18.f, 17.f}, warm{1.f, 0.55f, 0.25f};
+        for (int c = 0; c < 3; ++c) {
+          const float g = (ground[zu(c)] + 14.f * line) * fade + light * warm[zu(c)] * (0.6f + 0.4f * line);
+          bg[c] = g + (bg[c] - g) * (1.f - fade) * 0.6f;
+        }
+      }
+      const std::uint8_t* s = rgba.data() + (zu(y) * zu(w) + zu(x)) * 4;
+      const float a = s[3] / 255.f;
+      std::uint8_t* o = cv.rgb.data() + (zu(y0 + y) * zu(cv.w) + zu(x0 + x)) * 3;
+      for (int c = 0; c < 3; ++c) o[c] = static_cast<std::uint8_t>(std::clamp(s[c] + bg[c] * (1.f - a), 0.f, 255.f));
+    }
+  }
+}
+
+struct Video {
+  std::FILE* pipe = nullptr;
+  Video(const std::string& out, int w, int h, int crf) {
+    const std::string cmd = std::format("ffmpeg -loglevel error -y -f rawvideo -pix_fmt rgb24 -s {}x{} -r 30 -i - -an -c:v libx264 -preset slow -crf {} "
+                                        "-threads 2 -pix_fmt yuv420p -movflags +faststart \"{}\"",
+                                        w, h, crf, out);
+    pipe = popen(cmd.c_str(), "w");
+    if (!pipe) throw std::runtime_error("cannot start ffmpeg");
+  }
+  void put(const Canvas& c) {
+    if (std::fwrite(c.rgb.data(), 1, c.rgb.size(), pipe) != c.rgb.size()) throw std::runtime_error("ffmpeg stopped reading");
+  }
+  void close() {
+    if (pclose(pipe) != 0) throw std::runtime_error("ffmpeg failed");
+    pipe = nullptr;
+  }
+};
+
+struct VolumeHandle {
+  nvfx_volume_effect* e = nullptr;
+  nvfx_volume* v = nullptr;
+  VolumeHandle(const fs::path& f, int threads) {
+    if (nvfx_volume_effect_load(f.string().c_str(), &e) != NVFX_OK) throw std::runtime_error("cannot load " + f.string());
+    if (nvfx_volume_create(e, threads, &v) != NVFX_OK) throw std::runtime_error("cannot create a volume");
+  }
+  ~VolumeHandle() {
+    nvfx_volume_free(v);
+    nvfx_volume_effect_free(e);
+  }
+  void draw(const View& view, int w, int h, std::vector<std::uint8_t>& rgba) {
+    rgba.resize(zu(w) * zu(h) * 4);
+    nvfx_volume_camera cam{};
+    const auto c = view.camera(fl(w) / fl(h));
+    std::memcpy(cam.view, c.view.data(), sizeof(cam.view));
+    std::memcpy(cam.proj, c.proj.data(), sizeof(cam.proj));
+    if (nvfx_volume_render(v, &cam, w, h, rgba.data(), zu(w) * 4) != NVFX_OK) throw std::runtime_error("render failed");
+  }
+};
+
+int video(const Args& a) {
+  const fs::path root = data_root(a);
+  const std::string kind = a.need("kind"), out = a.need("out");
+  const fs::path model = a.has("model") ? fs::path(a.str("model")) : root / "models" / "chosen.nvfx3";
+  const int W = a.i("width", 1280), H = a.i("height", 720), threads = a.i("threads", 3), crf = a.i("crf", 24);
+  const float seconds = a.f("seconds", 12.f);
+  const int frames = static_cast<int>(std::lround(seconds * 30.f));
+  const auto cs = nfx::tools::parse_floats(a.str("controls", "0.7,0.5,0.6"));
+  std::array<float, 3> c{cs.at(0), cs.at(1), cs.at(2)};
+  const std::uint64_t seed = a.u64("seed", 9'900'000);
+  Canvas cv{W, H, std::vector<std::uint8_t>(zu(W) * zu(H) * 3)};
+  Video vid(out, W, H, crf);
+  std::vector<std::uint8_t> pic, pic2;
+  float glow1 = 0, glow2 = 0;
+  const double t0 = now();
+  if (kind == "orbit") {
+    VolumeHandle vol(model, threads);
+    nvfx_volume_set_controls(vol.v, c.data(), 3);
+    nvfx_volume_set_seed(vol.v, seed);
+    for (int f = 0; f < frames; ++f) {
+      const float t = static_cast<float>(f) / 30.f, az = 2.f * std::numbers::pi_v<float> * t / seconds;
+      const View view{{2.1f * std::sin(az), 0.8f + 0.2f * std::sin(0.5f * az), 2.1f * std::cos(az)}, {0.f, 0.62f, 0.f}, {0.f, 1.f, 0.f}, 40.f};
+      if (nvfx_volume_step_to(vol.v, t) != NVFX_OK) throw std::runtime_error("step failed");
+      vol.draw(view, W, H, pic);
+      glow1 = 0.7f * glow1 + 0.3f * picture_glow(pic);
+      composite(cv, 0, 0, W, H, pic, view, glow1);
+      cv.text("LEARNED 3D FIRE", 24, 20, 3, {255, 255, 255});
+      cv.text("A 16X24X16 LEARNED STATE DRIVES 64X96X64 SEEDED DETAIL. PLAYED AND RAY-MARCHED ON THE CPU.", 24, 52, 1, {190, 190, 196});
+      cv.text(std::format("INTENSITY {:.2f}  WIND {:.2f}  TURBULENCE {:.2f}", c[0], c[1], c[2]), 24, H - 30, 2, {200, 200, 206});
+      vid.put(cv);
+      if (f % 60 == 0) std::println("  frame {} ({:.0f} s)", f, now() - t0);
+    }
+  } else if (kind == "wind") {
+    VolumeHandle vol(model, threads);
+    nvfx_volume_set_seed(vol.v, seed);
+    const int pw = W / 2;
+    for (int f = 0; f < frames; ++f) {
+      const float t = static_cast<float>(f) / 30.f, u = t / seconds;
+      // wind: still, full towards -x, full towards +x, still again
+      const float w = u < 0.15f ? 0.5f : u < 0.4f ? 0.5f - 0.5f * (u - 0.15f) / 0.25f : u < 0.75f ? (u - 0.4f) / 0.35f : 1.f - 0.5f * (u - 0.75f) / 0.25f;
+      c[1] = std::clamp(w, 0.f, 1.f);
+      nvfx_volume_set_controls(vol.v, c.data(), 3);
+      if (nvfx_volume_step_to(vol.v, t) != NVFX_OK) throw std::runtime_error("step failed");
+      const View side{{0.f, 0.75f, 2.3f}, {0.f, 0.62f, 0.f}, {0.f, 1.f, 0.f}, 42.f};
+      const View top{{0.f, 3.0f, 0.02f}, {0.f, 0.f, 0.f}, {0.f, 0.f, -1.f}, 40.f};
+      vol.draw(side, pw, H, pic);
+      glow1 = 0.7f * glow1 + 0.3f * picture_glow(pic);
+      composite(cv, 0, 0, pw, H, pic, side, glow1);
+      vol.draw(top, pw, H, pic2);
+      glow2 = 0.7f * glow2 + 0.3f * picture_glow(pic2);
+      composite(cv, pw, 0, pw, H, pic2, top, glow2);
+      cv.fill(pw - 1, 0, 2, H, {0, 0, 0});
+      cv.text("FROM THE SIDE", 24, 20, 2, {255, 255, 255});
+      cv.text("FROM ABOVE", pw + 24, 20, 2, {255, 255, 255});
+      cv.text("LEARNED 3D FIRE: THE WIND CONTROL SWEPT LIVE", 24, H - 64, 2, {230, 230, 236});
+      const int bx = 24, by = H - 36, bw = W - 220;
+      cv.fill(bx, by, bw, 16, {40, 40, 46});
+      const int mid = bx + bw / 2, end = bx + static_cast<int>(std::lround(c[1] * static_cast<float>(bw)));
+      cv.fill(std::min(mid, end), by + 2, std::max(2, std::abs(end - mid)), 12, {255, 170, 70});
+      cv.fill(mid, by - 3, 1, 22, {150, 150, 156});
+      cv.text(std::format("WIND {:.2f}", c[1]), bx + bw + 16, by, 2, {255, 225, 150});
+      vid.put(cv);
+      if (f % 60 == 0) std::println("  frame {} ({:.0f} s)", f, now() - t0);
+    }
+  } else if (kind == "real-vs-learned") {
+    // a held-out run (a demo seed, at a setting no training run had): the simulation from an empty grid for 100 frames,
+    // then the simulation and the learned model from that same state with the same noise seed, side by side
+    r3::Model m = load_study_model(model);
+    r3::quantise_like_storage(m);
+    r3::Workspace ws(m);
+    fast_conv(ws);
+    nfx::Pool pool(threads);
+    nfx::sim3d::Fluid sim(fine_params(c, seed, threads));
+    for (int f = 0; f < kTrackWarm; ++f) sim.step_frame();
+    r3::State st = r3::make_state(m);
+    const std::vector<float> cv3(c.begin(), c.end());
+    r3::start_from(m, coarse_of(m.h, sim), sim.time(), cv3, seed, st, ws, &pool, false);
+    sim.fields(st.fine_t, st.fine_d);
+    rd::Renderer rs(kWidth, kHeight, kWidth), rl(m.h.fx(), m.h.fy(), m.h.fz());
+    const int pw = W / 2;
+    std::vector<float> T(m.h.fine_cells()), D(m.h.fine_cells());
+    for (int f = 0; f < frames; ++f) {
+      if (f > 0) {
+        sim.step_frame();
+        r3::step(m, st, cv3, seed, ws, &pool);
+      }
+      const float t = static_cast<float>(f) / 30.f, az = 0.5f * std::numbers::pi_v<float> * t / seconds - 0.25f * std::numbers::pi_v<float>;
+      const View view{{2.2f * std::sin(az), 0.85f, 2.2f * std::cos(az)}, {0.f, 0.62f, 0.f}, {0.f, 1.f, 0.f}, 44.f};
+      const auto cam = view.camera(fl(pw) / fl(H));
+      sim.fields(T, D);
+      rs.prepare(T, D, &pool);
+      pic.resize(zu(pw) * zu(H) * 4);
+      rs.render(cam, pw, H, pic.data(), zu(pw) * 4, &pool);
+      glow1 = 0.7f * glow1 + 0.3f * picture_glow(pic);
+      composite(cv, 0, 0, pw, H, pic, view, glow1);
+      rl.prepare(st.fine_t, st.fine_d, &pool);
+      pic2.resize(pic.size());
+      rl.render(cam, pw, H, pic2.data(), zu(pw) * 4, &pool);
+      glow2 = 0.7f * glow2 + 0.3f * picture_glow(pic2);
+      composite(cv, pw, 0, pw, H, pic2, view, glow2);
+      cv.fill(pw - 1, 0, 2, H, {0, 0, 0});
+      cv.text("SIMULATION", 24, 20, 3, {255, 255, 255});
+      cv.text("64X96X64 CELLS", 24, 52, 2, {190, 190, 196});
+      cv.text("LEARNED", pw + 24, 20, 3, {255, 255, 255});
+      cv.text("16X24X16 LEARNED STATE, SEEDED DETAIL", pw + 24, 52, 2, {190, 190, 196});
+      cv.text("SAME START STATE, SAME NOISE SEED. BOTH ARE CHAOTIC: THEY PART AFTER A SECOND OR TWO.", 24, H - 52, 2, {230, 230, 236});
+      cv.text(std::format("HELD-OUT RUN, SEED {}; INTENSITY {:.2f} WIND {:.2f} TURBULENCE {:.2f}", seed, c[0], c[1], c[2]), 24, H - 26, 1, {170, 170, 176});
+      const std::string ts = std::format("{:.1f} S", t);
+      cv.text(ts, W - 24 - nfx::tools::text_width(ts, 3), 20, 3, {255, 225, 150});
+      vid.put(cv);
+      if (f % 60 == 0) std::println("  frame {} ({:.0f} s)", f, now() - t0);
+    }
+  } else {
+    throw std::invalid_argument("--kind orbit | wind | real-vs-learned");
+  }
+  vid.close();
+  std::println("wrote {} ({:.0f} s)", out, now() - t0);
+  return 0;
+}
+
+// --- timing ----------------------------------------------------------------------------------------------------------
+
+double median(std::vector<double> v) {
+  std::ranges::sort(v);
+  return v.empty() ? 0.0 : v[v.size() / 2];
+}
+
+int timing(const Args& a) {
+  const fs::path root = data_root(a);
+  const fs::path model = a.has("model") ? fs::path(a.str("model")) : root / "models" / "chosen.nvfx3";
+  const int frames = a.i("frames", 60), reps = a.i("reps", 5);
+  const fs::path out = a.str("out", "results/3d/timing.csv");
+  fs::create_directories(out.parent_path());
+  const bool fresh = !fs::exists(out);
+  std::ofstream csv(out, std::ios::app);
+  if (fresh) csv << "what,threads,ms_median,ms_min,ms_max,n,load\n";
+  const auto load = [] {
+    std::ifstream i("/proc/loadavg");
+    double l = 0;
+    i >> l;
+    return l;
+  };
+  const auto row = [&](const std::string& what, int threads, std::vector<double> ms) {
+    const double md = median(ms), mn = *std::ranges::min_element(ms), mx = *std::ranges::max_element(ms);
+    const std::string r = std::format("{},{},{:.2f},{:.2f},{:.2f},{},{:.1f}", what, threads, md, mn, mx, ms.size(), load());
+    csv << r << "\n";
+    csv.flush();
+    std::println("{}", r);
+  };
+  for (const float tf : nfx::tools::parse_floats(a.str("threads", "1,2,4"))) {
+    const int threads = static_cast<int>(tf);
+    VolumeHandle vol(model, threads);
+    const std::array<float, 3> c{0.7f, 0.5f, 0.6f};
+    nvfx_volume_set_controls(vol.v, c.data(), 3);
+    nvfx_volume_set_seed(vol.v, 9'990'000);
+    nvfx_volume_set_shard(vol.v, 0.f);
+    std::vector<double> start, step, p256, p512;
+    for (int r = 0; r < reps; ++r) {
+      nvfx_volume_set_seed(vol.v, 9'990'000 + static_cast<std::uint64_t>(r));
+      double t0 = now();
+      nvfx_volume_step_to(vol.v, 0.0);  // a start: the start point and the fine fields' warm-up
+      start.push_back(1000.0 * (now() - t0));
+      for (int f = 1; f <= frames; ++f) {
+        t0 = now();
+        nvfx_volume_step_to(vol.v, f / 30.0);
+        step.push_back(1000.0 * (now() - t0));
+      }
+      const View view{{1.6f, 0.9f, 1.4f}, {0.f, 0.62f, 0.f}, {0.f, 1.f, 0.f}, 42.f};
+      std::vector<std::uint8_t> pic;
+      for (int k = 0; k < 4; ++k) {
+        t0 = now();
+        vol.draw(view, 256, 256, pic);
+        p256.push_back(1000.0 * (now() - t0));
+        t0 = now();
+        vol.draw(view, 512, 512, pic);
+        p512.push_back(1000.0 * (now() - t0));
+      }
+    }
+    row("start (warm-up of 24 frames)", threads, start);
+    row("step", threads, step);
+    row("picture 256x256", threads, p256);
+    row("picture 512x512", threads, p512);
+  }
+  // where a step's time goes (the reference as the runtime runs it, on 1 thread): the noise inputs, the coarse step, the
+  // detail layer, the renderer's preparation and one 256 x 256 picture
+  {
+    r3::Model m = load_study_model(model);
+    r3::quantise_like_storage(m);
+    r3::Workspace ws(m);
+    fast_conv(ws);
+    r3::State st = r3::make_state(m);
+    const std::vector<float> c{0.7f, 0.5f, 0.6f};
+    r3::start(m, 0, c, 9'990'200, st, ws, nullptr);
+    rd::Renderer rend(m.h.fx(), m.h.fy(), m.h.fz());
+    std::vector<double> tn, tc, td, tp, tr;
+    std::vector<std::uint8_t> pic(256 * 256 * 4);
+    for (int f = 0; f < frames; ++f) {
+      double t0 = now();
+      r3::coarse_noise(m, 9'990'200, st.time, ws, ws.noise);
+      tn.push_back(1000.0 * (now() - t0));
+      t0 = now();
+      r3::coarse_step(m, st.coarse, ws.noise, c, st.pressure, ws.next, st.flow, ws);
+      st.coarse.swap(ws.next);
+      tc.push_back(1000.0 * (now() - t0));
+      t0 = now();
+      r3::detail_step(m, st, 9'990'200, c, ws);
+      st.time += 1.f / m.fps;
+      st.since_start += 1.f / m.fps;
+      td.push_back(1000.0 * (now() - t0));
+      t0 = now();
+      rend.prepare(st.fine_t, st.fine_d);
+      tp.push_back(1000.0 * (now() - t0));
+      t0 = now();
+      rend.render(study_camera(0, 1.f, 1.5f), 256, 256, pic.data(), 256 * 4);
+      tr.push_back(1000.0 * (now() - t0));
+    }
+    row("stage: noise inputs (curl lattice, flicker)", 1, tn);
+    row("stage: coarse step (convolutions, projection, advection)", 1, tc);
+    row("stage: detail layer (64x96x64)", 1, td);
+    row("stage: renderer preparation", 1, tp);
+    row("stage: one 256x256 picture", 1, tr);
+  }
+  // the simulation itself, for scale: a frame at 64 x 96 x 64 and at the coarse 16 x 24 x 16
+  for (const int w : {kWidth, kWidth / 4}) {
+    nfx::sim3d::Fluid f(fine_params({0.7f, 0.5f, 0.6f}, 9'990'100, 1, w, w * 3 / 2));
+    for (int k = 0; k < 30; ++k) f.step_frame();
+    std::vector<double> ms;
+    for (int k = 0; k < (w == kWidth ? 20 : 60); ++k) {
+      const double t0 = now();
+      f.step_frame();
+      ms.push_back(1000.0 * (now() - t0));
+    }
+    row(std::format("simulation {}x{}x{}", w, w * 3 / 2, w), 1, ms);
+  }
+  return 0;
+}
+
 // --- pilot and look ------------------------------------------------------------------------------------------------
 
 void put_over(nfx::Image& img, const std::vector<std::uint8_t>& rgba, int w, int h, int x0, int y0) {
@@ -1218,10 +1593,12 @@ int main(int argc, char** argv) {
   try {
     const Args a(argc, argv, {"floor"});
     if (a.positional().empty()) {
-      std::println(stderr, "usage: nvfx_3d pilot|look|record|train|finish|truth|track|real|play|compare|freeze [options] (see tools/nvfx_3d.cpp)");
+      std::println(stderr, "usage: nvfx_3d pilot|look|record|train|finish|truth|track|real|play|compare|freeze|video|timing [options] (see tools/nvfx_3d.cpp)");
       return 2;
     }
     const std::string cmd = a.positional()[0];
+    g_max_settings = a.i("max-settings", g_max_settings);
+    g_max_runs = a.i("max-runs", g_max_runs);
     int rc = 2;
     if (cmd == "pilot") rc = pilot(a);
     else if (cmd == "look") rc = look(a);
@@ -1234,6 +1611,8 @@ int main(int argc, char** argv) {
     else if (cmd == "play") rc = play(a);
     else if (cmd == "compare") rc = compare(a);
     else if (cmd == "freeze") rc = freeze(a);
+    else if (cmd == "video") rc = video(a);
+    else if (cmd == "timing") rc = timing(a);
     else std::println(stderr, "unknown command {}", cmd);
     a.warn_unused();
     return rc;

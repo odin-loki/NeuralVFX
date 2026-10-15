@@ -52,6 +52,7 @@ std::array<double, 3> xyz_to_srgb(const std::array<double, 3>& c) {
 }
 
 constexpr float kTableStep = 5.f;  // kelvin
+constexpr float kEmpty = 1e-3f;    // extinction (per world unit) below which a macro cell is skipped
 constexpr int kTableSize = 1601;   // 0 to 8000 K
 
 float srgb_encode(float v) { return v <= 0.0031308f ? 12.92f * v : 1.055f * std::pow(v, 1.f / 2.4f) - 0.055f; }
@@ -360,8 +361,9 @@ void Renderer::render_rows(const std::array<double, 16>& inv, int width, int hei
           const float p[3] = {o[0] + t * d[0], o[1] + t * d[1], o[2] + t * d[2]};
           const int mxi = std::clamp(static_cast<int>(p[0]) / kMacro, 0, mx_ - 1), myi = std::clamp(static_cast<int>(p[1]) / kMacro, 0, my_ - 1),
                     mzi = std::clamp(static_cast<int>(p[2]) / kMacro, 0, mz_ - 1);
-          if (macro_[(zu(myi) * zu(mz_) + zu(mzi)) * zu(mx_) + zu(mxi)] <= 0.f) {
-            // empty: jump to the first step past this macro cell
+          const float mmax = macro_[(zu(myi) * zu(mz_) + zu(mzi)) * zu(mx_) + zu(mxi)];
+          if (mmax <= kEmpty) {
+            // empty (an optical depth below 1e-3 per world unit): jump to the first step past this macro cell
             const int mi[3] = {mxi, myi, mzi};
             float te = t1;
             for (int k = 0; k < 3; ++k) {
@@ -373,7 +375,12 @@ void Renderer::render_rows(const std::array<double, 16>& inv, int width, int hei
             t += jump * h;
             continue;
           }
-          const float cx = std::clamp(p[0] - 0.5f, 0.f, lim_x), cy = std::clamp(p[1] - 0.5f, 0.f, lim_y), cz = std::clamp(p[2] - 0.5f, 0.f, lim_z);
+          // in a thin block (less than 0.004 optical depth per step at its densest) three steps are taken as one, sampled
+          // at their middle
+          const int steps = mmax * h < 0.004f * N ? 3 : 1;
+          const float tm = t + 0.5f * static_cast<float>(steps - 1) * h;
+          const float pm[3] = {o[0] + tm * d[0], o[1] + tm * d[1], o[2] + tm * d[2]};
+          const float cx = std::clamp(pm[0] - 0.5f, 0.f, lim_x), cy = std::clamp(pm[1] - 0.5f, 0.f, lim_y), cz = std::clamp(pm[2] - 0.5f, 0.f, lim_z);
           const int x0 = std::min(static_cast<int>(cx), nx_ - 2), y0i = std::min(static_cast<int>(cy), ny_ - 2), z0 = std::min(static_cast<int>(cz), nz_ - 2);
           const float fx = cx - fl(x0), fy = cy - fl(y0i), fz = cz - fl(z0);
           const float* c000 = vol_.data() + 4 * ((zu(y0i) * zu(nz_) + zu(z0)) * zu(nx_) + zu(x0));
@@ -388,7 +395,7 @@ void Renderer::render_rows(const std::array<double, 16>& inv, int width, int hei
           }
           if (s[0] > 0.f) {
             // the sample stands for the segment [t - h/2, t + h/2], clipped at the box's far side
-            const float seg = std::min(h, t1 - (t - 0.5f * h)) / N;
+            const float seg = std::min(static_cast<float>(steps) * h, t1 - (t - 0.5f * h)) / N;
             const float tau = s[0] * seg, e = std::exp(-tau);
             const float w = tau > 1e-4f ? T * (1.f - e) / s[0] : T * seg * (1.f - 0.5f * tau);
             L[0] += w * s[1];
@@ -400,7 +407,7 @@ void Renderer::render_rows(const std::array<double, 16>& inv, int width, int hei
               break;
             }
           }
-          t += h;
+          t += static_cast<float>(steps) * h;
         }
       }
       if constexpr (kTone) {

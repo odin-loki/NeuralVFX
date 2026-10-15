@@ -220,7 +220,7 @@ std::size_t nvfx_volume_scratch_bytes(const nvfx_volume* v) {
   const auto vb = [](const std::vector<float>& x) { return x.size() * sizeof(float); };
   std::size_t n = v->renderer.bytes() + vb(v->out_t) + vb(v->out_d) + vb(v->out_flow);
   const r3::Workspace& w = v->ws;
-  for (const auto* x : {&w.X, &w.y1, &w.y2, &w.d, &w.mid, &w.div, &w.tmp, &w.noise, &w.cond, &w.next, &w.ufine, &w.fa, &w.fb, &w.lo, &w.hi, &w.B, &w.rr, &w.aa}) n += vb(*x);
+  for (const auto* x : {&w.X, &w.y1, &w.y2, &w.d, &w.mid, &w.div, &w.tmp, &w.noise, &w.cond, &w.next, &w.ufine, &w.fa, &w.fb, &w.lo, &w.hi, &w.rr, &w.aa}) n += vb(*x);
   for (const auto& r : v->run) {
     for (const auto* x : {&r.s.coarse, &r.s.pressure, &r.s.flow, &r.s.fine_t, &r.s.fine_d}) n += vb(*x);
   }

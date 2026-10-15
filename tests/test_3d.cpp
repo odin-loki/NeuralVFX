@@ -129,6 +129,26 @@ TEST(Noise4, CurlFieldIsNearlyDivergenceFree) {
   }
 }
 
+TEST(Noise4, FlickerLatticeIsTheFlickerToTheBit) {
+  const nfx::Forcing3 f = nfx::sim3d::forcing(nfx::sim3d::Effect::fire);
+  nfx::FlickerLattice lat;
+  const int nx = 12, ny = 18, nz = 10;
+  const float unit = 128.f / 12.f;
+  lat.resize(f, nx, ny, nz, unit);
+  nfx::Pool pool(2);
+  for (const float t : {0.f, 1.37f, 12.9f}) {
+    lat.build(f, 9'000'123, t, &pool);
+    for (int y = 0; y < ny; ++y) {
+      for (int z = 0; z < nz; ++z) {
+        for (int x = 0; x < nx; ++x) {
+          const float want = nfx::flicker3(f, 9'000'123, (fl(x) + 0.5f) * unit, (fl(y) + 0.5f) * unit, (fl(z) + 0.5f) * unit, t);
+          ASSERT_EQ(std::bit_cast<std::uint32_t>(lat.at(x, y, z)), std::bit_cast<std::uint32_t>(want)) << x << " " << y << " " << z << " t " << t;
+        }
+      }
+    }
+  }
+}
+
 // --- renderer --------------------------------------------------------------------------------------------------------
 
 rd::Optics bare_optics() {
