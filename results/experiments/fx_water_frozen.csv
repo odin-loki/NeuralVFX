@@ -8,3 +8,4 @@ falls_keyframe,frame_210,nvfx_scene_script --keyframes (examples/scenes/falls.nv
 falls_keyframe,frame_271,nvfx_scene_script --keyframes (examples/scenes/falls.nvfxs),1067986,99aca90176d9a4cfe28dd674277f1c875064c9fc8e698fe74866645cc1709e12,
 falls_keyframe,frame_345,nvfx_scene_script --keyframes (examples/scenes/falls.nvfxs),1382570,ffbf538fc307b49b3537edaffe4b7ed2db6350bb3e990d5c23e020195a3f1e40,
 rollout_effect,waterfall,fx_water/models/d/waterfall.nvfx,83719,ffc894995d47325aa883787188e4defeb001ebb76e848152b72f128b06e70a0c,study D's recipe (docs/EFFECTS_WATER.md): d-train --stages12 1 then d-tune then d-finish; frozen before its test
+rollout_effect,fountain,fx_water/models/d/fountain.nvfx,83719,a4dd81de4d939b763ecf3b87118c40043e4487a57e89dd65b39f394f28782034,study D's recipe (docs/EFFECTS_WATER.md): d-train --stages12 1 then d-tune then d-finish; frozen before its test
