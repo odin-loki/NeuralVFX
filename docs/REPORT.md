@@ -2343,9 +2343,10 @@ on the saturated machine.
 chosen model runs away: a second fire grows at the box's upwind edge and can fill the box within a few seconds, until
 the next shard clears it. Its heat grows exponentially at the box's sides at every wind tried (doubling about every half
 second once it starts), at once when the wind blows towards -x, after about 4.5 s without wind; the 8 s shards are what
-keep the effect playable. The most likely cause is the coarse advection, which samples clamped to the grid, so a side
-where air flows in keeps and feeds the heat that reaches it (STUDY_3D.md §11). Per setting (context, not judged), it is most of what
-the test found worse: at the test's lowest wind (0.25) the learned fire moves 2.4 times as much as the real runs and
+keep the effect playable; candidate B, passed over by the rule, grows far less (its activity loss holds it back). The
+most likely cause is the coarse advection, which samples clamped to the grid, so a side where air flows in keeps and
+feeds the heat that reaches it (STUDY_3D.md §11). Per setting (context, not judged), it is most of what the test found
+worse: at the test's lowest wind (0.25) the learned fire moves 2.4 times as much as the real runs and
 covers far more; at the five other settings it is calmer than the real runs and better than the coarse simulation in
 the spectrum, the emission and the mean picture. It is also why the rule's choice, A, played so much worse than B on
 validation (winds 0.30 and 0.15). The wind video shows it.

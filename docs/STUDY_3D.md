@@ -382,6 +382,14 @@ light, colour and smoke are physics-based pictures of the fields, not learned.
   upwind edge and fills a corner of the box with a bright mass by 7.5 s**, until the shard change at 8 s clears it: the
   runaway of §11. A second render with the next seed (9,900,003) did the same, and so do constant winds of 0.05 and
   0.25, so the planned render is kept, as it is.
+- **`3d_smoke_orbit`** (12 s), **a demo only**: §2 says the smoke preset was not trained; once the test was done there
+  was time, so it was, on the same recipe and a shorter schedule (40 runs of 8 s, seeds 9,100,000 + i; 600, 250 and
+  150 iterations; the model at the end of stage 3, which played better than stage 2's for the fire on validation;
+  0.63 CPU-hours to simulate and 1.6 to train, on the shared machine). It was not validated or tested: no number in
+  this study is about it. The camera circles it once at controls (0.7, 0.5, 0.5), seed 9,900,005. A thick grey column
+  that billows and rises out of the frame, seen from every side; **small orange specks glow at its base, which the
+  simulated smoke does not have** (its gas is too cool to glow; the detail layer's lock concentrates the learned heat
+  into a few hot cells). Its sides do not heat up at winds of 0.05 or 0.5 in 8 s (`results/3d/edge.csv`; §11).
 
 ## 11. Limits
 
@@ -389,8 +397,8 @@ light, colour and smoke are physics-based pictures of the fields, not learned.
   puffs at a steady rate, but at 0.5 to 0.65 Hz, several times slower than a real pool fire of this size would. The
   learned model can only be as real as its teacher. The PC plan's validated teachers (FDS) are what would change that.
 - **One effect, one small model.** A fire, with a 16 x 24 x 16 learned state, 16 channels and 14,218 weights, trained
-  for 1,500 iterations on 40 runs (5.3 minutes of simulated fire). The smoke preset exists but was not
-  trained. No hyperparameter was searched.
+  for 1,500 iterations on 40 runs (5.3 minutes of simulated fire). The smoke was trained after the test as a demo
+  only (§10): not validated, not tested. No hyperparameter was searched.
 - **Small samples.** The test pairs 18 tracked runs and 6 settings (3 runs pooled per setting); study D2 pooled 8.
   Intervals over 6 settings are wide.
 - **The picture is a fixed physical model, not a learned one**: emission and absorption with single scattering of one
@@ -412,7 +420,11 @@ light, colour and smoke are physics-based pictures of the fields, not learned.
   5 s; the two sides along the wind (z = 0 and z = max) follow, and the box's total heat goes from 37 to 1,848 by
   6.5 s. **With no wind (0.5) the same growth starts later**: the z = max side holds 0.001 at the start, 0.09 at
   4.5 s and 35 at 8 s, the box's total heat goes from 19 to 105 between 4.5 and 8 s, and the hottest side cell reaches
-  0.67 (about 1,570 K in the renderer) just as the shard ends. At 0.95 it is slower again (4.5 at z = max after 8 s). So the 8 s shards are what keeps the effect playable at most settings.
+  0.67 (about 1,570 K in the renderer) just as the shard ends. At 0.95 it is slower again (4.5 at z = max after
+  8 s). So the 8 s shards are what keeps the effect playable at most settings. **Candidate B** (stage 3's activity
+  loss, passed over by the rule) grows far less: at 0.05 its side heat peaks at 23 and the box's total at 95 after
+  5 s, then falls back to 60; without wind nothing grows in 8 s. The smoke (stage 3 too) grows at neither wind. The
+  activity loss, which matches how much the state changes per frame, holds most of it back.
 
   **The most likely cause** is the coarse advection: it samples clamped to the grid, so at a side where air flows in
   (upwind, and wherever the plume draws air in from its sides) a cell traces back to itself and keeps its heat every
@@ -462,7 +474,13 @@ $B timing --threads 1,2,4                                           # §8 (resul
 $B video --kind orbit --out 3d_fire_orbit.mp4 --seconds 12 --controls 0.7,0.5,0.6 --seed 9900001                  # §10
 $B video --kind real-vs-learned --out 3d_real_vs_learned.mp4 --seconds 10 --controls 0.65,0.45,0.55 --seed 9900000
 $B video --kind wind --out 3d_wind.mp4 --seconds 12 --controls 0.7,0.5,0.5 --seed 9900002
-for w in 0.05 0.5 0.95; do $B edge --controls 0.7,$w,0.5; done                 # §11 (results/3d/edge.csv)
+for w in 0.05 0.5 0.95; do $B edge --controls 0.7,$w,0.5; done                 # §11 (results/3d/edge.csv); also
+for w in 0.05 0.5; do $B edge --model .../candB.nvfx3 --controls 0.7,$w,0.5; done  # with candB and smoke3d
+# the smoke, a demo only (§10)
+$B record --effect smoke --runs-dir smoke --seed-base 9100000 --runs 40 --frames 240 --threads 3
+$B train --name smoke --runs-dir smoke --iterations 600 --finetune 250 --activity 150 --batch 8 --unroll 12 --burn 24
+$B finish --runs-dir smoke --ckpt smoke --out smoke3d
+$B video --kind orbit --model .../smoke3d.nvfx3 --title "LEARNED 3D SMOKE" --out 3d_smoke_orbit.mp4 --seconds 12 --controls 0.7,0.5,0.5 --seed 9900005
 ```
 
 The per-run tracking rows (`results/3d/val_track/*.csv`, `results/3d/test_track/*.csv`) have no header: the setting,
@@ -486,7 +504,7 @@ The plan's stage 1 asked three questions ([TODO.md](../TODO.md)). The answers, f
 
 What to do differently on the PC:
 1. **Choose on how it plays, not only on how it tracks.** The rule here chose on tracking at 1 s, and the candidate it
-   chose plays worse than the one it passed over (§6). For effects that are played endlessly the choice should require
+   chose plays worse than the one it passed over (§6) and runs away where that one mostly does not (§11). For effects that are played endlessly the choice should require
    the endless statistics not to be worse, then rank by tracking.
 2. **Let nothing flow in at an open edge, and train on long rollouts.** The runaway (§11) grows at the box's sides at
    every wind and most likely comes from advection that samples clamped to the grid, so a side where air flows in
