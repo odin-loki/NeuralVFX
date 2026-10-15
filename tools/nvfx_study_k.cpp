@@ -19,7 +19,7 @@
 //   nvfx_study_k decide  --split val|test [--effects LIST]
 //       the rule (docs/REPORT.md §13): each candidate minus float, paired, 95% bootstrap (10,000 resamples), against
 //       the margins fixed in advance (k_rule_<split>.csv; a table on stdout).
-//   nvfx_study_k timing  [--effects LIST] [--sizes 64,128,256] [--isas avx2,avx512] [--rounds 3] [--frames 200]
+//   nvfx_study_k timing  [--effects LIST|all|every] [--models DIR] [--sizes 64,128,256] [--isas avx2,avx512] [--rounds 3] [--frames 200]
 //                        [--core 3] [--csv k_timing.csv] [--label NAME]
 //       ms per frame through nvfx_render, float and each candidate on each ISA, every configuration once per round
 //       (interleaved), thread CPU time on one pinned core: the median and the mean over the frames (k_timing.csv).
@@ -113,16 +113,36 @@ const std::vector<Shipped>& shipped() {
   };
   return v;
 }
+// The ten trained after study K (EFFECTS_BLAZE.md, EFFECTS_FLOW.md, EFFECTS_WATER.md): named one by one, or all with
+// `--effects every`; `all` stays study K's eleven.
+const std::vector<Shipped>& later() {
+  static const std::vector<Shipped> v = {
+      {sim::Effect::wildfire, "fx_blaze/models/d"},   {sim::Effect::coals, "fx_blaze/models/d"},  {sim::Effect::mushroom, "fx_blaze/models/d"},
+      {sim::Effect::launch, "fx_flow/models/d"},      {sim::Effect::puffs, "fx_flow/models/d"},   {sim::Effect::ink, "fx_flow/models/d"},
+      {sim::Effect::waterfall, "fx_water/models/d"},  {sim::Effect::fountain, "fx_water/models/d"}, {sim::Effect::splash, "fx_water/models/d"},
+      {sim::Effect::rainshaft, "fx_water/models/d"},
+  };
+  return v;
+}
+// --models DIR: every effect's file from one folder (e.g. the library's, DATA/library/models: the models as shipped
+// now) instead of each study's own.
+fs::path g_models;
 fs::path model_path(const fs::path& root, sim::Effect e) {
-  for (const Shipped& s : shipped()) {
-    if (s.e == e) return root / s.dir / std::format("{}.nvfx", ename(e));
+  if (!g_models.empty()) return g_models / std::format("{}.nvfx", ename(e));
+  for (const auto* list : {&shipped(), &later()}) {
+    for (const Shipped& s : *list) {
+      if (s.e == e) return root / s.dir / std::format("{}.nvfx", ename(e));
+    }
   }
   throw std::invalid_argument("not a rollout effect");
 }
 std::vector<sim::Effect> effects_of(const std::string& list) {
   std::vector<sim::Effect> v;
-  if (list.empty() || list == "all") {
+  if (list.empty() || list == "all" || list == "every") {
     for (const Shipped& s : shipped()) v.push_back(s.e);
+    if (list == "every") {
+      for (const Shipped& s : later()) v.push_back(s.e);
+    }
     return v;
   }
   std::size_t a = 0;
@@ -909,6 +929,7 @@ int main(int argc, char** argv) {
     const std::string step = a.positional()[0];
     const fs::path out = a.str("out", (root / "k_int8").string());
     keep_candidates(a.str("candidates", ""));
+    g_models = a.str("models", "");
     if (step == "profile") step_profile(a, root);
     else if (step == "profile-summary") step_profile_summary(a, root);
     else if (step == "track") step_track(a, root, out);
