@@ -7,6 +7,7 @@
 #include <neuralfx/nvfx_manager.h>
 #include <neuralfx/nvfx_pack.h>
 #include <neuralfx/nvfx_scene.h>
+#include <neuralfx/nvfx_volume.h>
 
 #include <stdint.h>
 #include <stdio.h>
@@ -37,10 +38,14 @@ NVFX_ABI_CHECK(manager_stats, sizeof(nvfx_manager_stats) == 184);
 NVFX_ABI_CHECK(pack_desc, sizeof(nvfx_pack_desc) == 40);
 NVFX_ABI_CHECK(pack_info, sizeof(nvfx_pack_info) == 48);
 NVFX_ABI_CHECK(pack_member, sizeof(nvfx_pack_member) == 48);
+NVFX_ABI_CHECK(volume_info, sizeof(nvfx_volume_info) == 96);
+NVFX_ABI_CHECK(volume_camera, sizeof(nvfx_volume_camera) == 128);
+NVFX_ABI_CHECK(volume_look_at, sizeof(nvfx_volume_look_at) == 52);
 #endif
 NVFX_ABI_CHECK(status, sizeof(nvfx_status) == 4);
 NVFX_ABI_CHECK(fx, sizeof(nvfx_fx) == 4);
 NVFX_ABI_CHECK(handle, sizeof(nvfx_handle) == 4);
+NVFX_ABI_CHECK(volume_field, sizeof(nvfx_volume_field) == 4);
 
 int nvfx_abi_c99(void);
 
@@ -49,7 +54,7 @@ int nvfx_abi_c99(void) {
   int failures = 0;
   uint32_t features = 0;
   const uint32_t version = nvfx_version(&features);
-  const uint32_t apis = NVFX_FEATURE_SCENE | NVFX_FEATURE_LIBRARY | NVFX_FEATURE_MANAGER | NVFX_FEATURE_PACK;
+  const uint32_t apis = NVFX_FEATURE_SCENE | NVFX_FEATURE_LIBRARY | NVFX_FEATURE_MANAGER | NVFX_FEATURE_PACK | NVFX_FEATURE_VOLUME;
   if (version != NVFX_VERSION) {
     fprintf(stderr, "abi: the library is version %u, the headers %d\n", (unsigned)version, NVFX_VERSION);
     ++failures;
