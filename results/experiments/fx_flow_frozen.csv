@@ -1,3 +1,4 @@
 kind,name,file,bytes,sha256,source
 rollout_effect,launch,fx_flow/models/d/launch.nvfx,149287,9d8f5fb639cbdb682e8bf764873a53bdc734220ffc78705a3f24827768c5ef81,study D's recipe (docs/EFFECTS_FLOW.md): d-train --stages12 1 then d-tune then d-finish
+rollout_effect,puffs,fx_flow/models/d/puffs.nvfx,149287,200fa35d01167f3ab56634c1ea26a1a8b50cbefe97058d1406c75585e135b9a5,study D's recipe (docs/EFFECTS_FLOW.md): d-train --stages12 1 then d-tune then d-finish
 rollout_effect,ink,fx_flow/models/d/ink.nvfx,149287,22c06ce159bbfde31118c9ec92155c2cf1371afc235599ceb43acd5c22d1e92d,study D's recipe (docs/EFFECTS_FLOW.md): d-train --stages12 1 then d-tune then d-finish
