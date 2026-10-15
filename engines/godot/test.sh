@@ -4,7 +4,9 @@
 #   2. libnvfx, the extension (NEURALFX_BUILD_GODOT=ON: godot-cpp fetched at its pinned tag) and nvfx_scene_script,
 #      built in build-godot/ (the extension and libnvfx are copied into demo/bin/);
 #   3. the script runner's frame N of the fireball (when N is a keyframe), as the reference; the references and the
-#      nodes run their effects at float (rollout effects run at int8 by default since docs/REPORT.md §13);
+#      nodes run their effects at float (rollout effects run at int8 by default since docs/REPORT.md §13), and on one
+#      build: neither forces an ISA, so both take the runtime's float build for this CPU (AVX-512 where it has it, else
+#      AVX2, §13.10), from the same code (keep it so: the nodes have no ISA setting, so the references take none);
 #   4. the demo project imported (which registers the extension), then demo/test.gd run headless: the fireball for N
 #      frames, the frame saved as PNG and checked (not empty, the same pixels as the reference, heat where the fire
 #      is), a script error with its line and column, and one effect drawn;
@@ -68,6 +70,7 @@ ls -l "$here/demo/bin"
 rm -rf "$out/reference"
 nice -n 10 "$build/nvfx_scene_script" --script "$repo/examples/scenes/fireball.nvfxs" --models "$models" --keyframes "$out/reference" \
   --no-video --frames $((frames + 1)) --threads 2 --precision float > "$out/reference.log"
+head -1 "$out/reference.log"  # the build the reference ran on (the nodes take the same)
 reference=$(printf '%s/reference/frame_%03d.png' "$out" "$frames")
 [[ -f $reference ]] || { echo "frame $frames is not a keyframe of the script: no reference"; reference=""; }
 

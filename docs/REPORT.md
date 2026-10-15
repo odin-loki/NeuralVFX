@@ -1850,7 +1850,8 @@ By the rule (§13.3, §13.5) **rollout effects play at int8 by default where the
 `rt::default_rollout_precision()` is `Precision::int8` there (and float elsewhere, below), which `NVFX_PRECISION_DEFAULT` resolves to for rollout instances, scenes, the library's stages, the effect manager's
 models and the tools (`--precision float` gives the float path). With no ISA forced an int8 instance takes the AVX-512
 build where the CPU has VNNI, else the CPU's best build, as before; float instances keep the AVX2 build. The float path
-is unchanged to the bit: its frozen keyframes still match.
+is unchanged to the bit: its frozen keyframes still match. (15 October 2026: float instances now take the AVX-512
+build where the CPU has AVX-512, and the frozen float tests below name the AVX2 build they were frozen on, §13.10.)
 
 - **The frozen tests are pinned to float**, so that they keep checking the float path: `ScriptedFireballBitExact`,
   `SceneApiFireballBitExact`, `ScriptedPortalFrozen`, `ScriptedMoorFrozen`, `ScriptedFireWhirlFrozen`,
@@ -1858,7 +1859,8 @@ is unchanged to the bit: its frozen keyframes still match.
   (`nvfx_scene_desc.precision`), and Godot's demo tests (`engines/godot/demo/test.gd` and `test_library.gd` set
   `precision = 1`, `engines/godot/test.sh` draws its references with `--precision float`). Unit tests whose reference
   is the float runner are pinned too (the rollout runtime's parity tests, study D2's and the prior's instance tests, the
-  hand-off test).
+  hand-off test). Since 15 October 2026 the frozen tests are also pinned to the AVX2 build (`--isa avx2`,
+  `nvfx_set_isa`), since float takes the AVX-512 build where the CPU has it (§13.10).
 - **New int8 frozen keyframes**: the fireball's eight keyframes (frames 27 to 246) from `nvfx_scene_script --precision
   int8 --isa avx512`, with the effects' checksums, in `results/experiments/k_int8_frozen.csv`, checked by
   `neuralfx.ScriptedFireballInt8Frozen` (skipped on a CPU without AVX-512). They are the same on 1 and 2 threads. Bit
@@ -1887,7 +1889,8 @@ is unchanged to the bit: its frozen keyframes still match.
 - **Most of the speed of the change is the AVX-512 build.** Float on the AVX-512 build is 0.80 of float on AVX2 at
   every size, more than int8 adds on top. Float rollouts still take AVX2 by default, a choice made before the broadcast
   fix of §7. They should be re-timed on a quiet machine and moved to the AVX-512 build if this holds; float would then
-  be 0.80 of today's float default with no change to its frames' quality.
+  be 0.80 of today's float default with no change to its frames' quality. **It held on a quiet machine, and they were
+  moved** (15 October 2026, §13.10).
 - **The renderer and the detail layer are the floor now**: at 256 px they take over 80% of the frame. The renderer's hidden
   layer in 8 bits tied float (§13.2), and the detail layer's gathers and interpolation are not multiply-adds. A cheaper
   renderer would need fewer units or a coarser evaluation, which change the pictures and need their own study.
@@ -1930,6 +1933,67 @@ Int8 minus float, 95% paired bootstrap intervals; the spectrum, coverage and emi
   whirl scene give the orb `precision float`, so every library entry with the orb and the scene play it at float. An
   engine that creates orb instances or registers the orb with the effect manager itself should set
   `NVFX_PRECISION_FLOAT` for it. The frozen keyframes did not change: they were pinned to float already (§13.7).
+
+### 13.10 Float rollouts on the AVX-512 build (15 October 2026)
+
+**What changed.** With no ISA forced, float rollout instances, the float modules of scenes and library stages, and the
+effect manager's float simulations take the AVX-512 build where the CPU has AVX-512 (VNNI is not needed for float),
+else AVX2, else the baseline; until now they took AVX2 (§13.7). One function decides it for all of them (`runner_isa`
+in `src/runtime/nvfx.cpp`, behind `rt::rollout_isa` and `compose::best_isa`). Int8 keeps its rule (the AVX-512 build
+only where the CPU has VNNI), `nvfx_set_isa` still forces any ISA, and frame models are untouched: they have their own
+path, and `nvfx_get_isa()` still answers AVX2. The prior against drift stays on the default build; its steps give the
+AVX-512 build's floats to the bit (`rt_prior.hpp`).
+
+**Why.** §13.8 asked for it if the 0.80 held on a quiet machine. It held. Round 6 of the quiet re-timing
+(`results/quiet/README.md`) measured all 21 models as the library ships them, five interleaved rounds with nothing else
+running. Float on the AVX-512 build took 0.788 [0.778, 0.800] of float on AVX2 at 64 px, 0.806 [0.785, 0.838] at 128
+px and 0.800 [0.787, 0.815] at 256 px (the mean of each model's ratio, 95% bootstrap). Study K's provisional figures
+on the shared machine were 0.795, 0.797 and 0.812 (§13.6). The gain goes to every float run on a CPU with AVX-512:
+the default on a CPU without VNNI (§13.8), the orb everywhere (§13.9), and engines that set `NVFX_PRECISION_FLOAT`.
+Where the CPU has VNNI the default stays int8 on the same build, so nothing changes there.
+
+**The frames did not change.** The move was expected to change the float frames, since the code lets the builds round
+differently. It did not. Every one of the 24 rollout models (the library's 21 and study D's three), played as one
+continuous rollout for 300 frames at 64, 128 and 256 px, gave the same frames to the bit with AVX2 and with AVX-512
+forced, at float and at int8 (128 px). Every frozen float check also passed unpinned, on the AVX-512 build: the seven
+scenes' keyframes and the library's 28. Both builds do the same multiply-adds on each value in the same order, only more
+values at once, and this build (GCC 14) contracts them the same way. The baseline (SSE2, no FMA) differs, by one level
+in a few hundred of the 20 million channels (fire, magic). Nothing in the code promises the AVX2 and AVX-512 bits stay
+equal: another compiler or a change to a kernel may contract differently. So §13.7's remark that the float parts round
+differently between builds holds for the baseline only, as far as measured. Quality cannot differ either way: it is the
+same network, and the parity tests hold every build to the float reference within the same tolerances.
+
+**The frozen tests** are pinned anyway, so that they keep checking one path on every machine, whatever a compiler does:
+the AVX2 float path their keyframes were frozen on. No frozen hash changed. The scene tool's seven scenes
+(`nvfx_scene_script`), `SceneApiFireballBitExact` (`nvfx_c_host --scene`) and the library's and the pack's keyframes
+(`nvfx_gallery`) take `--isa avx2`; the C host and the gallery gained the option.
+`SceneApi.FireballKeyframesMatchTheFrozenOnes` calls `nvfx_set_isa(NVFX_ISA_AVX2)`. On a CPU without AVX2 they are
+skipped rather than run on another build. `LibraryProceduralKeyframesFrozen` is not pinned: it plays no learned model,
+and the compositor gives the same bits on every ISA. The Godot test's references and nodes force no ISA, so both take
+the runtime's float build for the CPU (`engines/godot/test.sh`).
+
+**New tests.** `RolloutRuntime.FloatTakesTheAvx512BuildWhereTheCpuHasIt` checks the ISA the runtime gives a float
+runner and the one a new instance reports (`rt::rollout_instance_isa`), at FLOAT, DEFAULT and INT8, forced and not.
+`RolloutRuntime.DefaultFloatMatchesTheReference` holds an instance with no ISA forced to the float reference within
+the parity tests' tolerances, and to the frames of its build forced, to the bit.
+`SceneApi.FloatScenesTakeTheRuntimesFloatBuild` checks that a float scene through the API plays the script runner's
+frames on that build.
+
+**The fireball** (study D's v1 models composed as COMPOSE.md §7; 1280 x 720, 4 threads, float; `nvfx_fireball
+--no-video --no-checksums --profile`, medians over the frames from 36 on). The build before the change and the build
+after it ran alternately, three pairs (`tools/opt2/time_fireball.sh`). **Provisional**: the machine was busy (load
+average 7 to 10; the fireball's threads waited for a core 24 to 75% of the time).
+
+| pair | frame, before (AVX2) | frame, after (AVX-512) | the models' steps, CPU, before | after |
+|---|---:|---:|---:|---:|
+| 1 | 28.3 ms | 43.5 ms | 14.3 ms | 15.7 ms |
+| 2 | 46.7 ms | 41.1 ms | 11.4 ms | 9.6 ms |
+| 3 | 16.6 ms | 15.1 ms | 10.6 ms | 9.2 ms |
+
+The frame times follow the other agents' load, not the build: they vary by a factor of 2 to 3 within each build. In
+the least loaded pair (waiting 24 to 32%) the models' steps took 0.87 of their CPU time and the frame 0.91 of its time.
+The quiet machine's 0.80 is the models' alone; the compositor's share of the frame (drawing, distortion, bloom) does
+not change. `tools/study_k/time.sh` on a quiet machine would settle the fireball's figure.
 
 ## 14. Study M: model what's ordered, leave random to random
 

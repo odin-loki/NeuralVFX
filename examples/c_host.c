@@ -3,12 +3,14 @@
  *   nvfx_c_host effect.nvfx [size] [seconds] [frame.pam]   play the effect for `seconds` at 30 Hz, print the cost per
  *                                                         frame, and optionally write the last frame
  *   nvfx_c_host --scene script.nvfxs [--effects DIR] [--threads 2] [--no-overlap] [--precision float|int8] [--frames N] [--out frame.pam]
- *               [--expect profile.csv]
+ *               [--expect profile.csv] [--isa avx2|avx512|baseline]
  *                                                play a scene script (nvfx_scene.h) one frame at a time: print the
  *                                                cost per frame and the heat on screen, write the last frame, and
  *                                                compare every frame's RGB checksum with the rgb_fnv column of a
  *                                                profile written by nvfx_scene_script --profile (exit 1 when one
- *                                                differs; 77, skipped, when the effects or the profile are missing)
+ *                                                differs; 77, skipped, when the effects or the profile are missing).
+ *                                                --isa forces the modules' ISA (nvfx_set_isa), the build a profile
+ *                                                was made on (77 with --expect on a CPU without it)
  *   nvfx_c_host --self-test                      check the error paths of the API (no model needed)
  */
 #include <neuralfx/nvfx.h>
@@ -118,8 +120,8 @@ static int play_scene(int argc, char** argv) {
   nvfx_scene_error err;
   nvfx_scene_info info;
   nvfx_scene* scene = NULL;
-  const char *out = NULL, *expect = NULL;
-  int frames = -1, differ = 0, compared = 0, have = 0;
+  const char *out = NULL, *expect = NULL, *isa_name = NULL;
+  int frames = -1, differ = 0, compared = 0, have = 0, isa_missing = 0;
   double total = 0, worst = 0, t_create, t_copy, t_restart;
   uint64_t* want = NULL;
   uint8_t* rgba;
@@ -135,10 +137,23 @@ static int play_scene(int argc, char** argv) {
     else if (strcmp(argv[i], "--expect") == 0 && more) expect = argv[++i];
     else if (strcmp(argv[i], "--no-overlap") == 0) d.overlap = 0;
     else if (strcmp(argv[i], "--precision") == 0 && more) d.precision = strcmp(argv[++i], "int8") == 0 ? NVFX_PRECISION_INT8 : NVFX_PRECISION_FLOAT;
-    else {
+    else if (strcmp(argv[i], "--isa") == 0 && more) {
+      const char* name = argv[++i];
+      const nvfx_isa isa = strcmp(name, "avx512") == 0 ? NVFX_ISA_AVX512 : strcmp(name, "avx2") == 0 ? NVFX_ISA_AVX2 : NVFX_ISA_BASELINE;
+      if (isa == NVFX_ISA_BASELINE && strcmp(name, "baseline") != 0) {
+        fprintf(stderr, "nvfx_c_host --scene: --isa avx2, avx512 or baseline\n");
+        return 2;
+      }
+      isa_name = name;
+      if (nvfx_set_isa(isa) != NVFX_OK) isa_missing = 1;
+    } else {
       fprintf(stderr, "nvfx_c_host --scene: unknown option %s\n", argv[i]);
       return 2;
     }
+  }
+  if (isa_missing) {
+    fprintf(stderr, "this CPU cannot run --isa %s%s\n", isa_name, expect ? ": skipped" : "");
+    return expect ? 77 : 1;
   }
   t_create = now_ms();
   s = nvfx_scene_create(&d, &scene, &err);

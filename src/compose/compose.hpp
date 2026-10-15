@@ -111,8 +111,8 @@ struct Image4 {
 // --- modules -----------------------------------------------------------------------------------------------------------
 
 enum class Isa { base, avx2, avx512 };
-// The ISA the runtime gives a rollout runner at a precision (nvfx_set_isa's, else AVX2; at int8 the AVX-512 build where
-// the CPU has VNNI: study K, docs/REPORT.md §13).
+// The ISA the runtime gives a rollout runner at a precision (rt::rollout_isa: nvfx_set_isa's, else the AVX-512 build
+// where the CPU has AVX-512, at int8 only with VNNI, else AVX2: study K and docs/REPORT.md §13.10).
 Isa best_isa(rt::Precision p = rt::default_rollout_precision());
 const char* isa_name(Isa isa);
 std::unique_ptr<rt::RolloutRunner> make_runner(const rt::RolloutEffect& e, int size, Isa isa, rt::Precision p = rt::default_rollout_precision());
