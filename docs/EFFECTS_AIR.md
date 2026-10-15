@@ -1,8 +1,29 @@
 # Air effects: a candle, smoke rings and heavy gas
 
-Status: **in progress** (15 October 2026). The design of the test and the rule below (§4) were written and committed
-before any model was trained, and so was the one method of a later study that this round uses (§3): nothing below §4's
-design has been run yet. Audience: dev, research, artists.
+**Status: paused** (15 October 2026, about 22:00 UTC), on the coordinator's word; nothing below §4's design has been run.
+- **Done:** the three presets (`src/sim/sim.cpp`, final at commit ce716ef; every earlier effect's clips the same to the
+  byte), their sim and recipe tests, the hash test extended, §2 below, and the test's design and rule (§4), committed
+  before any training.
+- **Not done:** the smoke ring's and heavy gas's training, the mean state for the ring, `d-chaos`, the one test of each
+  effect, timing, the library entries (`library/air.nvfxl`; a draft of its looks is under the data root's
+  `fx_air/libdev`), the crypt scene, the videos, REPORT §6.17 and the README, LIBRARY and ENGINES counts.
+- **Models:** only the candle. Its stages 1-2 (`fx_air/jobs/state/candle.train12.nvfx`, 92 min) and 3
+  (`candle.tune.nvfx`) are done; its last step (`d-finish`: renderer, detail constants, start points) was still running
+  at the pause, writing `fx_air/models/d/candle.nvfx` and then `jobs/state/candle.finish.nvfx` and `candle.all.done`
+  (log: `fx_air/logs/train_candle.log`). Under it, `fx_air/jobs/pipeline.sh` (pid 14829) was waiting for the candle; it
+  could not be stopped from this session, and when the candle finishes it runs the candle's `d-chaos`, freezes it,
+  runs its test once and then trains the smoke ring and heavy gas. Stop it (`kill 14829`) if no new work is wanted.
+- **Resume** (one heavy job at a time; each step leaves a marker in `fx_air/jobs/state` and is skipped when done; the
+  frozen tool is `fx_air/jobs/nvfx_experiment_train`, built at ce716ef):
+  `cd /root/nvfx-data/fx_air/jobs && EFFECTS=candle ./queue.sh` (finishes the candle if its training was cut), then
+  `nohup setsid ./pipeline.sh &` (for each effect: train, the ring's mean state, `d-chaos`, freeze into
+  `results/experiments/fx_air_frozen.csv`, the test once with `--seed-base 6400000` into `fx_air/test/EFFECT`). Then merge
+  each test's `d_track.csv`, `d_stats.csv` and `d_long.csv` into `results/experiments/fx_air` and run
+  `nvfx_experiment d-report --root /root/nvfx-data/fx_air --results results/experiments/fx_air`.
+
+Status before the pause: **in progress**. The design of the test and the rule below (§4) were written and committed
+before any model was trained, and so was the one method of a later study that this round uses (§3). Audience: dev,
+research, artists.
 
 Three effects of the air, after the water round ([EFFECTS_WATER.md](EFFECTS_WATER.md)): a **candle** (a small, calm,
 teardrop flame on a wick, mostly steady, flickering and leaning in a draught, with a thin wisp of smoke; it must read
