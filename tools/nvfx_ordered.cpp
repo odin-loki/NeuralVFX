@@ -1975,13 +1975,87 @@ void report_split(const Ctx& c, sim::Effect e, const Split& sp, const std::vecto
   merge_rows(c.results / std::format("{}_compare.csv", prefix), "effect,model,statistic,mean_difference,lo,hi,candidate_mean,current_mean,sha256", cmp_rows, en);
 }
 
+// The rule (docs/REPORT.md §14.3; committed before validation). Candidate minus current model, paired (tracking at 1 s
+// over the tracking units, the endless statistics over the 10 settings, 8 runs pooled per setting), 95% bootstrap with
+// 10,000 resamples (metrics::paired_bootstrap, seed 2026). A candidate meets the rule when
+//   1. the mean-frame PSNR is better (interval above zero) and the detail spectrum distance is better (interval below
+//      zero), and
+//   2. it is not worse on tracking at 1 s (no interval below zero), |ln motion ratio|, coverage distance or emission
+//      distance (no interval above zero).
+// On validation, among the candidates that meet it, the one with the largest mean-frame gain is chosen; an effect with none
+// stops there. The test runs once, on the chosen candidate frozen by SHA-256.
+struct RuleM {
+  std::array<metrics::Interval, 6> iv{};  // kCmpNames' order
+  bool better = false, none_worse = false;
+  bool pass() const { return better && none_worse; }
+};
+RuleM apply_rule_m(const Scores& cand, const Scores& cur) {
+  RuleM r;
+  for (int k = 0; k < 6; ++k) r.iv[sz(k)] = metrics::paired_bootstrap(cmp_stat(cand, k), cmp_stat(cur, k), 10000, 2026);
+  // kCmpNames: track_1s, spectrum_l1, abs_ln_motion_ratio, coverage_l1, emission_l1, mean_frame_psnr
+  r.better = r.iv[5].lo > 0 && r.iv[1].hi < 0;
+  r.none_worse = !(r.iv[0].hi < 0) && !(r.iv[2].lo > 0) && !(r.iv[3].lo > 0) && !(r.iv[4].lo > 0);
+  return r;
+}
+void decide(const Ctx& c, sim::Effect e, const Split& sp, const std::vector<Entry>& models, const std::vector<Scores>& sc, const std::string& prefix) {
+  const std::string en = ename(e);
+  std::vector<std::string> rows;
+  int chosen = -1;
+  double best = -1e9;
+  for (std::size_t mi = 1; mi < models.size(); ++mi) {
+    const RuleM r = apply_rule_m(sc[mi], sc[0]);
+    std::println("{} {} {}: better on both targets {}, worse on none {} -> {}", sp.name, en, models[mi].name, r.better ? "yes" : "no", r.none_worse ? "yes" : "no",
+                 r.pass() ? "MEETS the rule" : "does not meet it");
+    rows.push_back(std::format("{},{},{},{},{},{:.4f},{:.5f},{}", en, models[mi].name, r.better ? 1 : 0, r.none_worse ? 1 : 0, r.pass() ? 1 : 0, r.iv[5].mean,
+                               r.iv[1].mean, models[mi].sha));
+    if (r.pass() && r.iv[5].mean > best) {
+      best = r.iv[5].mean;
+      chosen = static_cast<int>(mi);
+    }
+  }
+  rows.push_back(std::format("{},chosen,,,,,,{}", en, chosen > 0 ? models[sz(chosen)].name : "none"));
+  merge_rows(c.results / std::format("{}_choice.csv", prefix), "effect,model,better,none_worse,meets_rule,mean_frame_gain_db,spectrum_change,sha256", rows, en);
+  std::println("{} {}: {}", sp.name, en, chosen > 0 ? "chosen " + models[sz(chosen)].name : std::string("none meets the rule"));
+}
+
 void step_val(const Ctx& c, sim::Effect e, const tools::Args& a) {
   const auto models = read_entries(a.need("current"), a.str("cand", ""));
   const Split sp = split_of(a.str("split", "probe"), e);
   if (sp.name == "test") throw std::invalid_argument("val: the test runs once, through `test`");
   for (const auto& m : models) std::println("{}: {} {} {} sha256 {}", sp.name, ename(e), m.name, m.path.string(), m.sha);
   const auto sc = evaluate(c, e, sp, models);
-  report_split(c, e, sp, models, sc, a.str("prefix", std::format("m_{}", sp.name)));
+  const std::string prefix = a.str("prefix", std::format("m_{}", sp.name));
+  report_split(c, e, sp, models, sc, prefix);
+  if (sp.name == "val") decide(c, e, sp, models, sc, prefix);
+}
+
+// The test, once per effect: the current model and the chosen candidate, whose SHA-256 must be in --frozen (with the
+// effect's name) before it runs; a marker under DATA/m_ordered keeps it from running twice.
+void step_test(const Ctx& c, sim::Effect e, const tools::Args& a) {
+  const fs::path done = c.dir() / std::format("test_{}.done", ename(e));
+  if (fs::exists(done)) throw std::runtime_error("the test of " + ename(e) + " has run (it runs once)");
+  const auto models = read_entries(a.need("current"), a.need("cand"));
+  if (models.size() != 2) throw std::invalid_argument("test: one candidate");
+  {
+    std::ifstream in(a.need("frozen"));
+    std::string line;
+    bool ok = false;
+    while (std::getline(in, line)) {
+      if (line.find(models[1].sha) != std::string::npos && line.rfind(ename(e) + ",", 0) == 0) ok = true;
+    }
+    if (!ok) throw std::runtime_error("test: the candidate's SHA-256 is not frozen for " + ename(e) + " in " + a.need("frozen"));
+  }
+  std::ofstream(done) << "started " << models[1].sha << "\n";
+  const Split sp = split_of("test", e);
+  for (const auto& m : models) std::println("test: {} {} {} sha256 {}", ename(e), m.name, m.path.string(), m.sha);
+  const auto sc = evaluate(c, e, sp, models);
+  report_split(c, e, sp, models, sc, "m_test");
+  const RuleM r = apply_rule_m(sc[1], sc[0]);
+  std::println("test {} {}: better on both targets {}, worse on none {} -> {}", ename(e), models[1].name, r.better ? "yes" : "no", r.none_worse ? "yes" : "no",
+               r.pass() ? "MEETS the rule: replace" : "does not meet it: keep the current model");
+  merge_rows(c.results / "m_test_decision.csv", "effect,model,better,none_worse,meets_rule,sha256",
+             {std::format("{},{},{},{},{},{}", ename(e), models[1].name, r.better ? 1 : 0, r.none_worse ? 1 : 0, r.pass() ? 1 : 0, models[1].sha)}, ename(e));
+  std::ofstream(done) << "done " << models[1].sha << " " << (r.pass() ? "met" : "not met") << "\n";
 }
 
 }  // namespace
@@ -2007,6 +2081,7 @@ int main(int argc, char** argv) {
     const sim::Effect e = effect_of(a.need("effect"));
     if (step == "diag") step_diag(c, e, a);
     else if (step == "val") step_val(c, e, a);
+    else if (step == "test") step_test(c, e, a);
     else if (step == "dvar") step_dvar(c, e, a);
     else if (step == "where") step_where(c, e, a);
     else if (step == "fitmean") step_fitmean(c, e, a);

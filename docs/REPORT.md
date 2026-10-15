@@ -2062,3 +2062,48 @@ setting). The chosen candidate is frozen by SHA-256 in `results/experiments/orde
 `nvfx_ordered test` refuses any other file and runs once per effect. Each effect is judged alone. **Distance to the
 floor** is reported before and after (v2's and the chosen model's mean-frame PSNR and spectrum distance beside two sets
 of real runs'). The cost is measured and reported, not part of the rule.
+
+### 14.4 Validation (the choice)
+
+Candidate minus v2 on study G's 10 validation settings, 8 runs pooled per setting, tracking over the 16 salt-3 runs
+([m_val_compare.csv](../results/experiments/ordered/m_val_compare.csv), [m_val_choice.csv](../results/experiments/ordered/m_val_choice.csv)).
+v2's own numbers are §6.9.2's to the digit (fire 0.134 / 0.95 / 38.41 dB, smoke 0.123 / 0.92 / 33.06, explosion
+0.154 / 1.08 / 28.44), so the machinery is study D2's. Bold: better; struck: worse.
+
+| effect | candidate | tracking at 1 s (dB) | spectrum distance | \|ln motion ratio\| | coverage | emission | mean-frame PSNR (dB) | rule |
+|---|---|---|---|---|---|---|---|---|
+| fire | `s16` | **+0.38 [+0.02, +0.81]** | **-0.013 [-0.024, -0.003]** | **-0.004 [-0.007, -0.001]** | tie | tie | **+0.02 [+0.00, +0.04]** | meets |
+| fire | `mt4` | -0.00 [-0.18, +0.16] | +0.003 [-0.005, +0.011] | -0.005 (tie) | tie | tie | **+0.43 [+0.14, +0.72]** | spectrum ties |
+| fire | `mt8` | +0.12 [-0.07, +0.31] | +0.007 [-0.004, +0.017] | -0.022 (tie) | tie | tie | **+0.55 [+0.12, +0.98]** | spectrum ties |
+| fire | **`mt4_s16`** | **+0.43 [+0.02, +0.89]** | **-0.011 [-0.022, -0.000]** | -0.009 (tie) | tie | tie | **+0.45 [+0.15, +0.76]** | **chosen** |
+| fire | `mt8_s16` | **+0.52 [+0.14, +0.96]** | -0.006 [-0.018, +0.006] | -0.026 (tie) | tie | tie | **+0.57 [+0.13, +1.00]** | spectrum ties |
+| smoke | `s16` | +0.08 [-0.05, +0.18] | **-0.013 [-0.021, -0.005]** | -0.006 (tie) | tie | ~~+0.000005~~ | +0.00 [-0.02, +0.02] | mean frame ties |
+| explosion | `ms` | -0.00 (tie) | +0.018 [-0.023, +0.061] | **-0.085 [-0.159, -0.016]** | **-0.025 [-0.034, -0.017]** | **better** | **+4.32 [+3.40, +5.32]** | spectrum ties |
+| explosion | `ms_sw0` | +0.02 (tie) | +0.031 [-0.028, +0.097] | **-0.086** | **-0.025** | tie | **+4.31 [+3.39, +5.30]** | spectrum ties |
+| explosion | `ms_s16` | +0.01 (tie) | +0.042 [-0.023, +0.113] | **-0.083** | **-0.025** | **better** | **+4.32 [+3.39, +5.32]** | spectrum ties |
+
+Means over the settings (v2; the chosen or best candidate; the floor, a second set of 8 real runs):
+
+| effect | model | tracking at 1 s | spectrum distance | motion ratio | coverage | mean-frame PSNR |
+|---|---|---:|---:|---:|---:|---:|
+| fire | v2 | 17.88 | 0.134 | 0.95 | 0.0017 | 38.41 |
+| fire | `mt4_s16` | 18.31 | 0.123 | 0.96 | 0.0016 | 38.86 |
+| fire | floor | - | 0.031 | 1.00 | 0.0015 | 45.26 |
+| smoke | v2 | 17.19 | 0.123 | 0.92 | 0.0101 | 33.06 |
+| smoke | `s16` | 17.27 | 0.111 | 0.93 | 0.0101 | 33.06 |
+| smoke | floor | - | 0.018 | 1.03 | 0.0077 | 39.57 |
+| explosion | v2 | 18.65 | 0.154 | 1.08 | 0.0406 | 28.44 |
+| explosion | `ms` | 18.65 | 0.172 | 0.91 | 0.0159 | 32.76 |
+| explosion | floor | - | 0.035 | 1.03 | 0.0050 | 36.36 |
+
+**The choice: fire `mt4_s16`** (the stepper fine-tuned with the ensemble-mean loss, the swirl at 16 pixels), the
+candidate meeting the rule with the largest mean-frame gain; frozen by SHA-256 (`51fce5d5...`,
+[m_frozen.csv](../results/experiments/ordered/m_frozen.csv)) before its test. **Smoke and the explosion stop at
+validation**, and their test seeds are unspent:
+- smoke's only candidate improves the detail spectrum but not the average picture (+0.001 dB), and its emission
+  distance (smoke gives almost no light; the learned renderer a little) moves by less than 10⁻⁵ with every setting
+  agreeing, which the strict reading counts as worse;
+- **the explosion's mean state halves its distance to the floor in the average picture** (7.9 dB to 3.6 dB), with
+  coverage (0.041 to 0.016, the floor 0.005), motion (1.08 to 0.91 of the real runs') and emission better and tracking
+  unchanged; but its detail spectrum distance is a tie (0.154 to 0.172, interval across zero), so by the rule fixed in
+  advance it is not tested and v2's explosion stays.
