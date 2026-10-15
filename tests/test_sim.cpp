@@ -221,7 +221,7 @@ TEST(Sim, NewEffectsAreNamedAndLoop) {
     sim::Effect back{};
     ASSERT_TRUE(sim::parse_effect(sim::effect_name(e), back));
     EXPECT_EQ(back, e);
-    EXPECT_EQ(sim::effect_loops(e), e != sim::Effect::dust);  // dust plays once, as the explosion
+    EXPECT_EQ(sim::effect_loops(e), e != sim::Effect::dust && e != sim::Effect::splash);  // dust and a splash play once, as the explosion
     EXPECT_EQ(sim::simulate(small(e)).rgba, sim::simulate(small(e)).rgba) << sim::effect_name(e);
   }
   EXPECT_EQ(sim::kAllEffects.size(), sim::kEffects.size() + sim::kNewEffects.size());
@@ -573,6 +573,160 @@ TEST(Sim, CloudStaysAliveAndDriftsWithTheWind) {
   const auto left = spreads(atmos_params(sim::Effect::cloud, 0.5f, 0.f, 0.5f), 150);
   const auto right = spreads(atmos_params(sim::Effect::cloud, 0.5f, 1.f, 0.5f), 150);
   EXPECT_GT(right[149].cx, left[149].cx + 0.04);
+}
+
+// --- waterfall, fountain, splash and rainshaft (docs/EFFECTS_WATER.md) -----------------------------------------------
+
+namespace {
+
+sim::Params water_params(sim::Effect e, float intensity, float second, float turbulence, std::uint64_t seed = 3) {
+  sim::Params p;
+  p.effect = e;
+  p.size = 64;
+  p.intensity = intensity;
+  p.wind = second;
+  p.turbulence = turbulence;
+  p.seed = seed;
+  p.pressure_iters = 16;
+  return p;
+}
+
+// Where the water (soot) and the mist (heat) are, as fractions of the frame (y up), after `frames` frames.
+struct WaterSpread {
+  double water = 0, mist = 0, wx = 0, wy = 0, mx = 0, my = 0, top = 0, low_x = 0, low = 0;
+};
+
+WaterSpread water_spread(const sim::Params& p, int frames) {
+  sim::Fluid f(p);
+  for (int i = 0; i < frames; ++i) f.step_frame();
+  const sim::State s = f.state();
+  WaterSpread o;
+  float peak = 0.f;
+  for (const float d : s.soot) peak = std::max(peak, d);
+  const double n = s.n;
+  for (int y = 0; y < s.n; ++y) {
+    for (int x = 0; x < s.n; ++x) {
+      const std::size_t i = static_cast<std::size_t>(y * s.n + x);
+      const double d = s.soot[i], t = s.temp[i];
+      o.water += d;
+      o.wx += d * (x + 0.5) / n;
+      o.wy += d * (y + 0.5) / n;
+      o.mist += t;
+      o.mx += t * (x + 0.5) / n;
+      o.my += t * (y + 0.5) / n;
+      if (d > 0.1 * peak) o.top = std::max(o.top, (y + 1) / n);
+      if (y < s.n / 2) {  // the lower half: water and mist
+        o.low += d + t;
+        o.low_x += (d + t) * (x + 0.5) / n;
+      }
+    }
+  }
+  if (o.water > 0) {
+    o.wx /= o.water;
+    o.wy /= o.water;
+  }
+  if (o.mist > 0) {
+    o.mx /= o.mist;
+    o.my /= o.mist;
+  }
+  if (o.low > 0) o.low_x /= o.low;
+  return o;
+}
+
+}  // namespace
+
+TEST(Sim, WaterEffectsAreNamedWithTheirControls) {
+  for (const sim::Effect e : {sim::Effect::waterfall, sim::Effect::fountain, sim::Effect::splash, sim::Effect::rainshaft}) {
+    const auto name = sim::effect_name(e);
+    sim::Effect back{};
+    ASSERT_TRUE(sim::parse_effect(name, back));
+    EXPECT_EQ(back, e);
+    EXPECT_EQ(sim::effect_loops(e), e != sim::Effect::splash) << name;  // a splash plays once, as the explosion and dust
+    EXPECT_TRUE(std::ranges::contains(sim::kNewEffects, e)) << name;
+    EXPECT_FALSE(std::ranges::contains(sim::kEffects, e)) << name;
+    EXPECT_EQ(sim::control_names(e)[1], e == sim::Effect::fountain ? "aim" : "wind") << name;
+  }
+  // after cloud, in this order
+  EXPECT_EQ(sim::kAllEffects[11], sim::Effect::waterfall);
+  EXPECT_EQ(sim::kAllEffects[14], sim::Effect::rainshaft);
+}
+
+TEST(Sim, WaterIsReflectedLightBlueWhiteAndTranslucent) {
+  for (const sim::Effect e : {sim::Effect::waterfall, sim::Effect::fountain, sim::Effect::splash, sim::Effect::rainshaft}) {
+    const auto name = sim::effect_name(e);
+    auto p = water_params(e, 0.7f, 0.5f, 0.5f);
+    p.frames = e == sim::Effect::splash ? 30 : 24;
+    const Clip c = sim::simulate(p);
+    long bad = 0, covered = 0, translucent = 0;
+    double r = 0, b = 0, a = 0;
+    for (std::size_t i = 0; i < c.rgba.size(); i += 4) {
+      for (std::size_t k = 0; k < 3; ++k) bad += c.rgba[i + k] > c.rgba[i + 3] + 1;  // no emission
+      if (c.rgba[i + 3] > 32) {
+        ++covered;
+        translucent += c.rgba[i + 3] < 230;
+        r += c.rgba[i];
+        b += c.rgba[i + 2];
+        a += c.rgba[i + 3];
+      }
+    }
+    EXPECT_EQ(bad, 0) << name;
+    ASSERT_GT(covered, 200) << name;
+    EXPECT_GT(b, 1.05 * r) << name;           // blue-white (the rain grey-blue)
+    EXPECT_GT(b, 0.6 * a) << name;            // and light, not dark
+    EXPECT_GT(translucent, covered / 2) << name;  // mostly see-through
+  }
+}
+
+TEST(Sim, WaterfallPoursFromItsLipIntoAMistThatTheWindCarries) {
+  const auto v = water_spread(water_params(sim::Effect::waterfall, 0.6f, 0.5f, 0.5f), 150);
+  EXPECT_GT(v.top, 0.85);    // the water comes over the lip near the top of the frame
+  EXPECT_LT(v.my, 0.4);      // the mist is where it lands, low down
+  EXPECT_LT(v.my, v.wy);
+  EXPECT_GT(v.mist, 0.2 * v.water);
+  EXPECT_NEAR(v.wx, 0.5, 0.06);  // the curtain falls straight
+  const auto left = water_spread(water_params(sim::Effect::waterfall, 0.6f, 0.f, 0.5f), 150);
+  const auto right = water_spread(water_params(sim::Effect::waterfall, 0.6f, 1.f, 0.5f), 150);
+  EXPECT_GT(right.mx, left.mx + 0.04);  // the wind carries the mist
+  const auto thin = water_spread(water_params(sim::Effect::waterfall, 0.f, 0.5f, 0.5f), 150);
+  const auto heavy = water_spread(water_params(sim::Effect::waterfall, 1.f, 0.5f, 0.5f), 150);
+  EXPECT_GT(heavy.water, 1.5 * thin.water);  // more flow
+}
+
+TEST(Sim, FountainRisesFallsBackAndLeansWithItsAim) {
+  const auto low = water_spread(water_params(sim::Effect::fountain, 0.f, 0.5f, 0.5f), 120);
+  const auto high = water_spread(water_params(sim::Effect::fountain, 1.f, 0.5f, 0.5f), 120);
+  EXPECT_GT(low.top, 0.3);
+  EXPECT_GT(high.top, low.top + 0.15);  // intensity: how high
+  EXPECT_GT(high.mist, 0.f);            // it falls back as spray
+  const auto left = water_spread(water_params(sim::Effect::fountain, 0.6f, 0.f, 0.5f), 120);
+  const auto right = water_spread(water_params(sim::Effect::fountain, 0.6f, 1.f, 0.5f), 120);
+  EXPECT_LT(left.wx, 0.47);  // aim: leaning left or right
+  EXPECT_GT(right.wx, 0.53);
+}
+
+TEST(Sim, SplashThrowsUpACrownThatFallsBackIntoMist) {
+  const auto p = water_params(sim::Effect::splash, 0.7f, 0.5f, 0.5f);
+  const auto crown = water_spread(p, 12), late = water_spread(p, 90);
+  EXPECT_GT(crown.top, 0.3);                  // the crown stands up within half a second
+  EXPECT_LT(late.water, 0.3 * crown.water);   // and falls back
+  EXPECT_GT(late.mist, 0.f);                  // leaving mist
+  EXPECT_LT(late.my, 0.3);                    // low down
+  const auto small_one = water_spread(water_params(sim::Effect::splash, 0.f, 0.5f, 0.5f), 12);
+  const auto big_one = water_spread(water_params(sim::Effect::splash, 1.f, 0.5f, 0.5f), 12);
+  EXPECT_GT(big_one.top, small_one.top + 0.1);  // intensity: size
+  EXPECT_GT(big_one.water, 1.5 * small_one.water);
+}
+
+TEST(Sim, RainFallsFromTheCloudBaseAndTheWindSlantsIt) {
+  const auto v = water_spread(water_params(sim::Effect::rainshaft, 0.6f, 0.5f, 0.5f), 120);
+  EXPECT_GT(v.top, 0.9);        // from the top of the frame
+  EXPECT_NEAR(v.wy, 0.5, 0.15);  // all the way down
+  const auto left = water_spread(water_params(sim::Effect::rainshaft, 0.6f, 0.f, 0.5f), 120);
+  const auto right = water_spread(water_params(sim::Effect::rainshaft, 0.6f, 1.f, 0.5f), 120);
+  EXPECT_GT(right.low_x, left.low_x + 0.1);  // blown aside lower down
+  const auto light = water_spread(water_params(sim::Effect::rainshaft, 0.f, 0.5f, 0.5f), 120);
+  const auto heavy = water_spread(water_params(sim::Effect::rainshaft, 1.f, 0.5f, 0.5f), 120);
+  EXPECT_GT(heavy.water, 2.0 * light.water);  // intensity: how heavy
 }
 
 TEST(Sim, ParamsRoundTripThroughClipMetadata) {

@@ -22,6 +22,10 @@ std::string_view effect_name(Effect e) {
     case Effect::fog: return "fog";
     case Effect::dust: return "dust";
     case Effect::cloud: return "cloud";
+    case Effect::waterfall: return "waterfall";
+    case Effect::fountain: return "fountain";
+    case Effect::splash: return "splash";
+    case Effect::rainshaft: return "rainshaft";
   }
   std::unreachable();
 }
@@ -33,13 +37,14 @@ bool parse_effect(std::string_view text, Effect& out) {
   return true;
 }
 
-bool effect_loops(Effect e) { return e != Effect::explosion && e != Effect::dust; }
+bool effect_loops(Effect e) { return e != Effect::explosion && e != Effect::dust && e != Effect::splash; }
 
 std::array<std::string_view, kControls> control_names(Effect e) {
   if (e == Effect::magic) return {"intensity", "spin", "turbulence"};
   if (e == Effect::jet) return {"intensity", "aim", "turbulence"};
   if (e == Effect::orb) return {"intensity", "pulse", "turbulence"};
   if (e == Effect::vortex) return {"intensity", "sway", "turbulence"};
+  if (e == Effect::fountain) return {"intensity", "aim", "turbulence"};
   return kControlNames;
 }
 
@@ -56,6 +61,10 @@ float flicker_rate(Effect e) {
     case Effect::fog: return 1.0f;     // a slow, uneven release
     case Effect::dust: return 1.4f;    // the burst's shape, as the explosion's
     case Effect::cloud: return 0.6f;   // slow billows
+    case Effect::waterfall: return 1.2f;  // the streaks across the lip
+    case Effect::fountain: return 2.4f;   // a fluttering jet
+    case Effect::splash: return 1.4f;     // the crown's shape, as the burst of dust
+    case Effect::rainshaft: return 0.7f;  // slow gusts: the shafts thin and thicken
   }
   std::unreachable();
 }
@@ -107,6 +116,15 @@ Tune tune(const Params& p) {
     case Effect::fog: return {0.f, 20.f, 1.f, 0.12f, 20.f, 1.5f, 0.2f + 1.2f * turb, 3.f + 14.f * turb, 0.4f};
     case Effect::dust: return {0.f, 150.f, 1.f, 0.25f, 50.f, 1.5f, 1.5f + 4.0f * turb, 20.f + 80.f * turb, 0.6f};
     case Effect::cloud: return {0.f, -20.f, 1.f, 0.10f, 40.f, 1.0f, 0.2f + 0.8f * turb, 3.f + 16.f * turb, 1.3f};
+    // waterfall, fountain, splash and rainshaft (docs/EFFECTS_WATER.md): water is the solver's soot, heavy, so it falls;
+    // spray and mist are its heat, light, so they rise and fade (the cooling is the mist's). Their wind blows the mist
+    // and the rain, not the falling water, so it is in add_water_forces with how their water falls and their pools.
+    // Water does not roll up in the air as gas does: little confinement and curl noise, and still air keeps little
+    // momentum of its own (vel_damp), so its sheets and arcs stay whole; the mist churns by its own force.
+    case Effect::waterfall: return {120.f, 0.f, 0.6f, 0.05f, 0.f, 0.f, 0.1f + 0.5f * turb, 2.f + 12.f * turb, 1.0f};
+    case Effect::fountain: return {20.f, 30.f, 0.6f, 0.05f, 0.f, 0.f, 0.05f + 0.3f * turb, 2.f + 10.f * turb, 1.6f};
+    case Effect::splash: return {10.f, 60.f, 0.6f, 0.05f, 0.f, 0.f, 0.1f + 0.4f * turb, 2.f + 10.f * turb, 1.6f};
+    case Effect::rainshaft: return {25.f, 0.f, 0.6f, 0.10f, 0.f, 0.f, 0.1f + 0.5f * turb, 3.f + 12.f * turb, 0.5f};
   }
   std::unreachable();
 }
@@ -114,6 +132,8 @@ Tune tune(const Params& p) {
 // fog, dust and cloud (docs/EFFECTS_ATMOSPHERE.md)
 bool atmos(Effect e) { return e == Effect::fog || e == Effect::dust || e == Effect::cloud; }
 bool on_ground(Effect e) { return e == Effect::fog || e == Effect::dust; }  // lie on a ground (add_atmos_forces)
+// waterfall, fountain, splash and rainshaft (docs/EFFECTS_WATER.md): they fall onto a pool or the ground
+bool water(Effect e) { return e == Effect::waterfall || e == Effect::fountain || e == Effect::splash || e == Effect::rainshaft; }
 
 // magic: a ring of energy around the middle of the frame, spun by a force that peaks at the ring (radius in cells).
 float magic_radius(const Params& p, float n) { return (0.19f + 0.09f * p.intensity) * n; }
@@ -230,6 +250,7 @@ void Fluid::step(float dt) {
   std::ranges::for_each(temp_.values(), [cool](float& x) { x *= cool; });
   std::ranges::for_each(soot_.values(), [decay](float& x) { x *= decay; });
   energy_decay(dt);  // jet, orb and vortex
+  water_decay(dt);   // waterfall, fountain, splash and rainshaft
   time_ += dt;
 }
 
@@ -259,6 +280,7 @@ void Fluid::add_sources(float dt) {
     return;
   }
   if (add_energy_sources(dt)) return;  // jet, orb and vortex
+  if (add_water_sources(dt)) return;   // waterfall, fountain, splash and rainshaft
   if (atmos(p_.effect)) {
     add_atmos_sources(dt);
     return;
@@ -373,6 +395,7 @@ void Fluid::add_forces(float dt) {
   }
   add_energy_forces(dt);  // jet, orb and vortex
   if (atmos(p_.effect)) add_atmos_forces(dt);
+  add_water_forces(dt);  // waterfall, fountain, splash and rainshaft
 }
 
 void Fluid::project() {
@@ -404,7 +427,7 @@ void Fluid::project() {
   if (p_.effect == Effect::dust) add_atmos_divergence();
   // Open boundaries: p = 0 on the border, which is never written. Warm-started from the last solve.
   constexpr float w = 1.7f;
-  const bool ground = on_ground(p_.effect);
+  const bool ground = on_ground(p_.effect) || water(p_.effect);
   for (int it = 0; it < p_.pressure_iters; ++it) {
     for (const int colour : {0, 1}) {
       for (int y = 1; y <= n; ++y) {
@@ -413,7 +436,7 @@ void Fluid::project() {
           pressure_[x, y] += w * (g - pressure_[x, y]);
         }
       }
-      if (ground) {  // fog and dust: the bottom border is closed (no flow through the ground)
+      if (ground) {  // fog, dust and the water effects: the bottom border is closed (no flow through the ground)
         for (int x = 1; x <= n; ++x) pressure_[x, 0] = pressure_[x, 1];
       }
     }
@@ -501,6 +524,7 @@ void Fluid::render(std::span<std::uint8_t> out) const {
   const int S = p_.size;
   if (out.size() < static_cast<std::size_t>(S) * S * 4) throw std::invalid_argument("sim: render buffer too small");
   if (render_energy(out)) return;  // jet, orb and vortex
+  if (render_water(out)) return;   // waterfall, fountain, splash and rainshaft
   if (atmos(p_.effect)) {
     render_atmos(out);
     return;
@@ -938,6 +962,288 @@ void Fluid::render_atmos(std::span<std::uint8_t> out) const {
   }
 }
 
+// --- waterfall, fountain, splash and rainshaft (docs/EFFECTS_WATER.md) ------------------------------------------------
+//
+// The solver has no liquid with a free surface, so water is made of the channels it has. Water is the solver's soot:
+// heavy, so it falls under its weight (as dust does), and without heat. Spray and mist are its heat: light, so they
+// rise (as steam's vapour does) and fade (the cooling is the mist's). Water breaks into spray where it falls fast and
+// turns into foam and mist where it lands: on a pool (waterfall, fountain, splash) or the ground (rainshaft) at the
+// bottom of the frame, over a closed bottom border as fog's and dust's ground. Every force is a function of the state
+// where it acts, the position, the controls and the run's two noise fields (curl_potential, source_flicker); the
+// splash's crown and its jet also of its age, as the explosion's expansion is.
+
+namespace {
+
+constexpr float kPool = 7.f;  // the pool's surface (the ground under the rain), in cells of a 128-cell frame
+
+// The fountain's nozzle: on the pool in the middle of the frame, aimed from 12 degrees left of upright to 12 degrees
+// right (the second control, aim).
+struct Nozzle {
+  float x, y, sx, cy;  // position (cells), direction (sine and cosine of the angle from upright)
+};
+Nozzle fountain_nozzle(const Params& p, float n) {
+  const float a = (-12.f + 24.f * p.wind) * 0.017453293f;
+  return {0.5f * (n + 1.f), (kPool + 2.f) * n / 128.f, std::sin(a), std::cos(a)};
+}
+// How fast the fountain's water leaves the nozzle (cells per second; s = cells per cell of a 128-cell frame), and the
+// pull that slows it (cells per second squared): its arc peaks 45 to 95 cells above the nozzle (intensity: height).
+constexpr float kFountainGravity = 70.f;
+float fountain_speed(const Params& p, float s) { return (80.f + 35.f * p.intensity) * s; }
+
+}  // namespace
+
+// waterfall: the lip, a band across the top of the frame where the water comes over the ledge and pours down, broken
+// into streaks by the flicker noise. fountain: a jet of water from the nozzle. splash: the crown, held up for half a
+// second, then a jet of water thrown up from the middle of the crater. rainshaft: rain from the base of the cloud,
+// across the top of the frame, thick where the flicker noise is high: shafts that thin and thicken.
+bool Fluid::add_water_sources(float dt) {
+  (void)dt;
+  if (!water(p_.effect)) return false;
+  const float n = f(n_), s = n / 128.f, I = p_.intensity, c = 0.5f * (n + 1.f);
+  const auto flicker = [&](int x, int y) { return source_flicker(p_, f(x) / s, f(y) / s, time_); };
+  const auto box = [&](float x0, float x1, float y0, float y1, auto&& fn) {
+    const int xl = std::max(1, static_cast<int>(x0)), xh = std::min(n_, static_cast<int>(x1) + 1);
+    const int yl = std::max(1, static_cast<int>(y0)), yh = std::min(n_, static_cast<int>(y1) + 1);
+    for (int y = yl; y <= yh; ++y) {
+      for (int x = xl; x <= xh; ++x) fn(x, y);
+    }
+  };
+  if (p_.effect == Effect::waterfall) {
+    const float cy = 0.90f * n, hw = (0.07f + 0.09f * I) * n, hh = 0.025f * n;
+    const float level = 0.9f + 0.5f * I, pour = (60.f + 30.f * I) * s;
+    box(c - 1.2f * hw, c + 1.2f * hw, cy - hh, cy + hh, [&](int x, int y) {
+      const float shape = (1.f - smoothstep(0.75f, 1.f, std::abs(f(x) - c) / hw)) * (1.f - smoothstep(0.5f, 1.f, std::abs(f(y) - cy) / hh));
+      if (shape <= 0.f) return;
+      const float k = shape * (0.15f + 0.85f * smoothstep(-0.3f, 0.35f, flicker(x, y)));
+      soot_[x, y] = std::max(soot_[x, y], level * k);
+      v_[x, y] = std::min(v_[x, y], -pour * k);
+      u_[x, y] *= 1.f - shape;
+    });
+    return true;
+  }
+  if (p_.effect == Effect::fountain) {
+    const Nozzle z = fountain_nozzle(p_, n);
+    const float hl = 0.035f * n, hw = (0.03f + 0.015f * I) * n, speed = fountain_speed(p_, s), ext = hl + hw + 2.f;
+    box(z.x - ext, z.x + ext, z.y - ext, z.y + ext, [&](int x, int y) {
+      const float dx = f(x) - z.x, dy = f(y) - z.y;
+      const float ea = (dx * z.sx + dy * z.cy) / hl, ec = (dx * z.cy - dy * z.sx) / hw;
+      const float shape = 1.f - smoothstep(0.6f, 1.f, std::sqrt(ea * ea + ec * ec));
+      if (shape <= 0.f) return;
+      const float k = shape * (0.7f + 0.3f * smoothstep(-0.4f, 0.5f, flicker(x, y)));
+      soot_[x, y] = std::max(soot_[x, y], (1.0f + 0.3f * I) * k);
+      u_[x, y] += k * (speed * z.sx - u_[x, y]);
+      v_[x, y] += k * (speed * z.cy - v_[x, y]);
+    });
+    return true;
+  }
+  if (p_.effect == Effect::splash) {
+    // The crown: for its first half second the impact holds up two walls of water (a ring seen from the side) leaning
+    // out from the crater's rim, growing to their height, thinning towards their ragged top, where the flicker noise
+    // breaks them into fingers and drops; their water moves up and out. Then they are let go and fall back.
+    const float g = kPool * s, t = time_;
+    const float grow = smoothstep(0.f, 0.4f, t), hold = 1.f - smoothstep(0.42f, 0.5f, t);
+    if (hold > 0.f) {
+      const float r0 = (0.05f + 0.03f * I) * n, H = (0.22f + 0.28f * I) * n * (0.25f + 0.75f * grow);
+      const float w = (0.04f + 0.02f * I) * n, lean = 0.5f, speed = (40.f + 40.f * I) * s * (1.f - grow);
+      const float level = 1.2f + 0.4f * I;
+      box(c - r0 - H * lean - 2.f * w, c + r0 + H * lean + 2.f * w, g, g + 1.2f * H, [&](int x, int y) {
+        const float h = (f(y) - g) / H, fl = flicker(x, y), side = f(x) < c ? -1.f : 1.f;
+        const float top = 1.f - smoothstep(0.6f + 0.3f * fl, 1.f + 0.3f * fl, h);  // a ragged top
+        const float off = std::abs(std::abs(f(x) - c) - (r0 + lean * (f(y) - g))) / (w * (1.f - 0.5f * clamp01(h)));
+        const float wall = (1.f - smoothstep(0.5f, 1.f, off)) * top * hold;
+        if (wall <= 0.f) return;
+        const float m = level * wall * (0.35f + 0.65f * smoothstep(-0.3f, 0.3f, fl));  // broken into fingers and drops
+        soot_[x, y] = std::max(soot_[x, y], m);
+        temp_[x, y] = std::max(temp_[x, y], 0.4f * m * clamp01(h));  // spray, more towards its top
+        u_[x, y] += wall * (side * lean * speed - u_[x, y]);
+        v_[x, y] += wall * (speed - v_[x, y]);
+      });
+    }
+    // then the jet from the middle of the crater (a Worthington jet), from 0.45 to 0.85 seconds
+    const float on = smoothstep(0.42f, 0.5f, t) * (1.f - smoothstep(0.75f, 0.85f, t));
+    if (on <= 0.f) return true;
+    const float hw = (0.02f + 0.012f * I) * n, hh = 0.03f * n, cy = g + hh, speed = (55.f + 45.f * I) * s;
+    box(c - hw, c + hw, cy - hh, cy + hh, [&](int x, int y) {
+      const float ex = (f(x) - c) / hw, ey = (f(y) - cy) / hh;
+      const float shape = 1.f - smoothstep(0.5f, 1.f, std::sqrt(ex * ex + ey * ey));
+      if (shape <= 0.f) return;
+      const float k = on * shape * (0.6f + 0.4f * smoothstep(-0.4f, 0.5f, flicker(x, y)));
+      soot_[x, y] = std::max(soot_[x, y], (0.9f + 0.4f * I) * k);
+      v_[x, y] = std::max(v_[x, y], speed * k);
+    });
+    return true;
+  }
+  // rainshaft
+  const float cy = 0.93f * n, hw = (0.12f + 0.14f * I) * n, hh = 0.04f * n;
+  const float level = 0.40f + 0.50f * I, fall = (70.f + 30.f * I) * s;
+  box(c - 1.2f * hw, c + 1.2f * hw, cy - hh, cy + hh, [&](int x, int y) {
+    const float shape = (1.f - smoothstep(0.7f, 1.f, std::abs(f(x) - c) / hw)) * (1.f - smoothstep(0.5f, 1.f, std::abs(f(y) - cy) / hh));
+    if (shape <= 0.f) return;
+    const float k = shape * (0.1f + 0.9f * smoothstep(-0.2f, 0.4f, flicker(x, y)));  // shafts, thick and thin
+    soot_[x, y] = std::max(soot_[x, y], level * k);
+    v_[x, y] = std::min(v_[x, y], -fall * k);
+  });
+  return true;
+}
+
+// Falling water (waterfall, rainshaft) falls at its terminal speed: its velocity is drawn towards straight down at that
+// speed (the rain's towards the wind as well), so a curtain stays a curtain and its streaks are carried down whole. The
+// wind blows the mist and spray (waterfall, splash) or the rain and its mist (rainshaft), not the falling water; the
+// rain's wind also swings with the curl noise where it is (gusts, more with turbulence), so the shaft sways. The pool
+// (the ground under the rain): what comes down onto it stops and spreads sideways (the closed bottom border of the
+// pressure solve does the rest), as on fog's and dust's ground; over the waterfall's pool the air moves with the wind.
+void Fluid::add_water_forces(float dt) {
+  if (!water(p_.effect)) return;
+  const float n = f(n_), s = n / 128.f, g = kPool * s, top = g + 5.f * s, I = p_.intensity;
+  const bool rain = p_.effect == Effect::rainshaft, falls = rain || p_.effect == Effect::waterfall;
+  const float fall = rain ? (80.f + 30.f * I) * s : (85.f + 30.f * I) * s;  // terminal speed, cells per second
+  const float relax = falls ? 1.f - std::exp(-(rain ? 6.f : 14.f) * dt) : 0.f;
+  const float rough = p_.effect == Effect::waterfall ? 1.f - std::exp(-4.f * dt) : 0.f;  // the air over the pool moves with the wind
+  const float drift = p_.effect == Effect::fountain ? 0.f : (2.f * p_.wind - 1.f) * (rain ? 40.f : 60.f) * s;
+  const float drag = p_.effect == Effect::fountain ? 0.f : 1.f - std::exp(-(rain ? 1.5f : 4.f) * dt);
+  const float sway = rain ? (6.f + 30.f * p_.turbulence) * s : 0.f;
+  // water thrown up (fountain, splash) rises against its weight and, once it falls, falls at its terminal speed; the
+  // bare air around it keeps little momentum of its own, so it does not carry the water round in eddies
+  const bool thrown = p_.effect == Effect::fountain || p_.effect == Effect::splash;
+  const float drop = (p_.effect == Effect::fountain ? 55.f + 20.f * I : 60.f + 20.f * I) * s, settle = thrown ? 1.f - std::exp(-3.f * dt) : 0.f;
+  const float calm = thrown ? 1.f - std::exp(-(p_.effect == Effect::splash ? 4.f : 1.5f) * dt) : 0.f;
+  // the fountain's water follows its arc: rising, its speed is drawn towards what a drop thrown from the nozzle has at
+  // that height; past the top it falls, spreading to either side of where the arc peaks
+  const bool arc = p_.effect == Effect::fountain;
+  const Nozzle z = fountain_nozzle(p_, n);
+  const float V = fountain_speed(p_, s), G = kFountainGravity * s, vx = V * z.sx, vy = V * z.cy;
+  const float peak_x = z.x + vx * vy / G, spread = (12.f + 12.f * p_.turbulence) * s, follow = arc ? 1.f - std::exp(-6.f * dt) : 0.f;
+  const float scatter = (8.f + 24.f * p_.turbulence) * s;  // the falling spray is scattered by the curl noise
+  // the mist churns: curl noise of its own (on top of tune()'s, which stirs all material alike), more with turbulence
+  const float churn = rain ? 0.f : (10.f + 40.f * p_.turbulence) * s, L = 14.f * s, e = 0.25f, tt = time_ * 0.8f;
+  const std::uint64_t cseed = p_.seed * 0x2545F4914F6CDD1DULL + 77;  // as curl_potential
+  for (int y = 1; y <= n_; ++y) {
+    const float hold = 1.f - smoothstep(g - 2.f * s, g + s, f(y)), stop = 1.f - smoothstep(g, top, f(y));
+    const float above = smoothstep(g + 2.f * s, g + 10.f * s, f(y));  // away from the pool, where water still falls
+    const float near = rough * (1.f - smoothstep(g + 4.f * s, g + 14.f * s, f(y)));
+    for (int x = 1; x <= n_; ++x) {
+      const float T = temp_[x, y], D = soot_[x, y];
+      const float wind = drift + (sway > 0.f ? sway * curl_potential(p_, f(x) / s, f(y) / s, time_) : 0.f);
+      if (relax > 0.f && D > 0.f) {
+        const float w = relax * std::min(1.f, 4.f * D) * above;
+        u_[x, y] += w * ((rain ? wind : 0.f) - u_[x, y]);
+        v_[x, y] += w * (-fall - v_[x, y]);
+      }
+      if (follow > 0.f && D + T > 0.f) {  // rising (b = 1) or falling (b = 0), blended around the top of the arc; the spray
+                                          // falls with the water
+        const float b = smoothstep(-0.3f * drop, 0.3f * drop, v_[x, y]);
+        const float w = follow * std::min(1.f, 4.f * D + 2.f * (1.f - b) * T) * above;
+        const float fu = 0.3f * vx + spread * std::clamp((f(x) - peak_x) / (0.06f * n), -1.f, 1.f) + scatter * curl_potential(p_, f(x) / s, f(y) / s, time_);
+        const float ru = vx, rv = std::sqrt(std::max(0.f, vy * vy - 2.f * G * (f(y) - z.y)));
+        u_[x, y] += w * (fu + b * (ru - fu) - u_[x, y]);
+        v_[x, y] += w * (-drop + b * (rv + drop) - v_[x, y]);
+      } else if (settle > 0.f && D > 0.f && v_[x, y] < 0.f) {
+        v_[x, y] += settle * std::min(1.f, 4.f * D) * above * (-drop - v_[x, y]);
+      }
+      if (calm > 0.f) {
+        const float bare = calm * (1.f - std::min(1.f, 4.f * (D + T)));
+        u_[x, y] *= 1.f - bare;
+        v_[x, y] *= 1.f - bare;
+      }
+      const float m = rain ? std::min(1.f, 3.f * T) : std::min(1.f, 3.f * T) * (1.f - std::min(1.f, 0.7f * D));
+      if (drag > 0.f && m > 0.f) u_[x, y] += drag * m * (wind - u_[x, y]);
+      if (churn > 0.f && m > 0.f) {
+        const float px = f(x) / L, py = f(y) / L, a = dt * churn * m;
+        u_[x, y] += a * (value_noise(px, py + e, tt, cseed) - value_noise(px, py - e, tt, cseed)) / (2.f * e);
+        v_[x, y] -= a * (value_noise(px + e, py, tt, cseed) - value_noise(px - e, py, tt, cseed)) / (2.f * e);
+      }
+      if (near > 0.f) u_[x, y] += near * (drift - u_[x, y]);
+      if (f(y) <= top && v_[x, y] < 0.f) v_[x, y] *= 1.f - std::max(hold, stop);
+    }
+  }
+}
+
+// Water breaks up into spray as it falls: the waterfall's curtain more the further down it is (and with turbulence) and
+// where it is thrown sideways, the fountain's and the splash's water at the top of its arc and as it falls back. The
+// spray is heat, so it whitens the water it is in. Water that reaches the pool or the ground turns into foam and mist.
+void Fluid::water_decay(float dt) {
+  if (!water(p_.effect)) return;
+  const float n = f(n_), s = n / 128.f, g = kPool * s;
+  struct Turn {
+    float spray, v0, v1;   // spray per second per unit of water, from falling speed v0 to v1 (cells per second)
+    float land, reach, mist;  // how fast water near the pool turns over (per second), within how many cells of it, and
+                              // the mist it gives per unit
+  };
+  const float turb = p_.turbulence;
+  const Turn t = p_.effect == Effect::waterfall ? Turn{0.25f + 0.5f * turb, 0.f, 0.f, 12.f, 8.f, 1.2f}
+                 : p_.effect == Effect::fountain ? Turn{0.f, 0.f, 20.f, 4.f, 6.f, 0.8f}
+                 : p_.effect == Effect::splash   ? Turn{0.5f, 20.f, 90.f, 3.f, 6.f, 1.0f}
+                                                 : Turn{0.f, 0.f, 0.f, 6.f, 6.f, 0.4f};
+  const bool curtain = p_.effect == Effect::waterfall;
+  for (int y = 1; y <= n_; ++y) {
+    const float plunge = 1.f - smoothstep(g, g + t.reach * s, f(y));
+    const float turn = plunge > 0.f ? 1.f - std::exp(-t.land * dt * plunge) : 0.f;
+    const float low = curtain ? smoothstep(0.85f * n, 0.25f * n, f(y)) : 0.f;  // how far down the curtain
+    for (int x = 1; x <= n_; ++x) {
+      const float D = soot_[x, y];
+      if (D <= 0.f) continue;
+      if (turn > 0.f) {
+        soot_[x, y] -= turn * D;
+        temp_[x, y] += t.mist * turn * D;
+      }
+      if ((p_.effect == Effect::fountain || p_.effect == Effect::splash) && v_[x, y] < 15.f * s) {  // top of the arc, falling
+        const float c = D * (1.f - std::exp(-dt * 1.5f * smoothstep(15.f * s, -15.f * s, v_[x, y])));
+        soot_[x, y] -= c;
+        temp_[x, y] += c;
+      }
+      if (curtain) {  // the curtain breaks up: water turns into spray lower down, and where it is thrown sideways
+        const float c = D * (1.f - std::exp(-dt * (t.spray * low + 1.5f * smoothstep(8.f * s, 40.f * s, std::abs(u_[x, y])))));
+        soot_[x, y] -= c;
+        temp_[x, y] += c;
+      } else if (t.spray > 0.f && v_[x, y] < 0.f) {  // the splash's falling water sprays as well
+        temp_[x, y] += dt * t.spray * D * smoothstep(t.v0 * s, t.v1 * s, -v_[x, y]);
+      }
+    }
+  }
+}
+
+// Reflected light only, no emission, lit from above and to the left. Water is translucent, blue-white, lit where the
+// light reaches it and bluer in its own shade; spray in it makes it white and opaque (foam); mist is soft and white.
+// The rain is grey-blue and its mist pale grey.
+bool Fluid::render_water(std::span<std::uint8_t> out) const {
+  if (!water(p_.effect)) return false;
+  const int S = p_.size;
+  const float n = f(n_), sc = n / f(S);
+  constexpr float lx = -0.45f, ly = 0.89f;
+  struct Look {
+    float density, clear, shading;  // water's cover 1 - exp(-density D); its alpha where clear; light exp(-shading tau)
+    Rgb lit, shade, foam;           // the water's colour in full light and in its shade, and the foam's
+    float mist_density;             // mist's cover 1 - exp(-mist_density T)
+    Rgb mist;
+  };
+  const Look look = p_.effect == Effect::rainshaft
+                        ? Look{2.2f, 0.65f, 0.10f, {0.70f, 0.76f, 0.84f}, {0.40f, 0.47f, 0.58f}, {0.82f, 0.86f, 0.90f}, 2.0f, {0.76f, 0.80f, 0.85f}}
+                        : Look{1.6f, 0.70f, 0.10f, {0.92f, 0.97f, 1.00f}, {0.30f, 0.50f, 0.66f}, {0.97f, 0.99f, 1.00f}, 2.5f, {0.92f, 0.95f, 0.98f}};
+  for (int py = 0; py < S; ++py) {
+    for (int px = 0; px < S; ++px) {
+      const float gx = (f(px) + 0.5f) * sc + 0.5f;
+      const float gy = n - (f(py) + 0.5f) * sc + 0.5f;
+      const float T = temp_.sample(gx, gy), D = soot_.sample(gx, gy);
+      float tau = 0.f;  // optical depth of the water towards the light
+      for (int k = 1; k <= 12; ++k) tau += soot_.sample(gx + lx * 2.f * f(k) * sc, gy + ly * 2.f * f(k) * sc);
+      const float light = std::exp(-look.shading * tau);
+      const float cw = 1.f - std::exp(-look.density * D), froth = 1.f - std::exp(-4.f * T);
+      const float aw = cw * (look.clear + (1.f - look.clear) * froth);
+      const float b = (0.3f + 0.7f * cw) * (0.75f + 0.25f * light);  // thick water is bright, thin water shows its tint
+      const Rgb w{look.shade.r + (look.lit.r - look.shade.r) * b, look.shade.g + (look.lit.g - look.shade.g) * b,
+                  look.shade.b + (look.lit.b - look.shade.b) * b};
+      const Rgb cwc{w.r + (look.foam.r - w.r) * froth, w.g + (look.foam.g - w.g) * froth, w.b + (look.foam.b - w.b) * froth};
+      const float am = 0.85f * (1.f - std::exp(-look.mist_density * T)) * (1.f - aw), gm = 0.8f + 0.2f * light;
+      auto o = out.subspan((static_cast<std::size_t>(py) * S + px) * 4, 4);
+      o[0] = q8(cwc.r * aw + look.mist.r * gm * am);
+      o[1] = q8(cwc.g * aw + look.mist.g * gm * am);
+      o[2] = q8(cwc.b * aw + look.mist.b * gm * am);
+      o[3] = q8(aw + am);
+    }
+  }
+  return true;
+}
+
 void stamp(Clip& clip, const Params& p) {
   clip.effect = effect_name(p.effect);
   clip.source = "sim";
@@ -970,8 +1276,8 @@ Clip simulate(const Params& p) {
   const int blend = loops ? std::clamp(p.loop_blend, 0, p.frames / 2) : 0;
   if (loops) {
     // Long enough for the plume to reach a statistically steady state, so the loop crossfade joins similar frames
-    // (fog takes about 5 s to cover the ground; cloud as long to grow from nothing).
-    const int warmup = p.warmup >= 0 ? p.warmup : (p.effect == Effect::smoke ? 180 : atmos(p.effect) ? 150 : 90);
+    // (fog takes about 5 s to cover the ground; cloud as long to grow from nothing; the water effects' mist as long).
+    const int warmup = p.warmup >= 0 ? p.warmup : (p.effect == Effect::smoke ? 180 : atmos(p.effect) || water(p.effect) ? 150 : 90);
     for (int i = 0; i < warmup; ++i) fluid.step_frame();
   }
   Clip raw;
