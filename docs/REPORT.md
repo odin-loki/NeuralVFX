@@ -2955,6 +2955,36 @@ floor in brackets):
 `m3/models/explosion.nvfx` (SHA-256 `b0ee6f05...`) and `m3/models/dust.nvfx` (`938440a4...`), frozen in
 [m3_frozen.csv](../results/experiments/ordered/m3_frozen.csv) before the test.
 
+#### 14.9.5 The test (once): both mean states meet the rule
+
+Study B's 10 held-out settings and 20 more, with the test's seeds, each candidate frozen before it ran
+([m3_test_compare.csv](../results/experiments/ordered/m3_test_compare.csv),
+[m3_test_stats.csv](../results/experiments/ordered/m3_test_stats.csv),
+[m3_test_decision.csv](../results/experiments/ordered/m3_test_decision.csv)). Candidate minus current model, 95%
+intervals:
+
+| statistic | explosion: v2 → `ms` | difference [95% interval] (margin) | dust: current → `ms` | difference [95% interval] (margin) |
+|---|---|---|---|---|
+| mean-frame PSNR (dB) | 30.48 → 33.40 | **+2.92 [+1.74, +4.12]** (better at 22 of 30 settings) | 32.07 → 33.39 | **+1.32 [+0.75, +1.91]** (better at 23 of 30) |
+| detail spectrum distance | 0.194 → 0.170 | **-0.024 [-0.047, -0.002]** (0.054) | 0.114 → 0.105 | -0.009 [-0.020, +0.002] (0.025) |
+| \|ln motion ratio\| (motion ratio) | 0.179 (0.94) → 0.110 (0.90) | **-0.069 [-0.126, -0.015]** (0.117) | 0.199 (0.99) → 0.110 (0.93) | **-0.089 [-0.138, -0.043]** (0.119) |
+| coverage distance | 0.0291 → 0.0132 | **-0.0159 [-0.0222, -0.0097]** (0.018) | 0.0096 → 0.0051 | **-0.0045 [-0.0063, -0.0027]** (0.0057) |
+| emission distance | 0.00002 → 0.00002 | +0.000001 [-0.000001, +0.000004] (0.0001) | 0.00001 → 0.00001 | +0.000000 [-0.000001, +0.000001] (0.0001) |
+| tracking at 1 s (dB) | 19.12 → 19.12 | +0.0000 [-0.0006, +0.0006] (-0.20) | 18.05 → 18.05 | +0.0003 [-0.0003, +0.0010] (-0.20) |
+
+**Both meet the rule on the test, and both are replaced.** Every measure but the target is within its margin; both are
+also within study K's margins, and under the strict reading nothing is worse. On the explosion the test is better than
+validation on every measure: its detail spectrum and motion are better too, not only tied.
+
+Distance to the floor (a second set of 8 real runs per setting), before and after:
+
+| effect | split | mean-frame PSNR below the floor (dB), current → now | spectrum distance, current → now (the floor's) | coverage distance (the floor's) |
+|---|---|---|---|---|
+| explosion | test (30 settings) | 6.04 → **3.12** | 0.194 → **0.170** (0.036) | 0.029 → **0.013** (0.006) |
+| explosion | validation (30) | 6.58 → **3.27** | 0.197 → 0.197 (0.036) | 0.030 → **0.013** (0.005) |
+| dust | test (30) | 5.72 → **4.40** | 0.114 → 0.105 (0.036) | 0.0096 → **0.0051** (0.0033) |
+| dust | validation (30) | 5.93 → **4.90** | 0.111 → 0.120 (0.030) | 0.0078 → **0.0050** (0.0022) |
+
 ## 15. Study N: a small 3D demo
 
 Status: **done** (15 October 2026). The full write-up is [STUDY_3D.md](STUDY_3D.md); this is its summary. It is stage 1
