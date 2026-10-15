@@ -3248,31 +3248,16 @@ its own play), snapshot at every stage, and chosen on tracking *and* endless pla
 
 ## 16. Study O: the most visible flaws of the shipped effects, fixed and measured
 
-**Status: paused** (15 October 2026, stopped by the owner's usage limit). Done and judged by eye (no model change):
-the waterfall's and rain shaft's bands (§16.1, `passes 2`), launch's square block in the lift-off (§16.2, a three-tile
-domain and `passes 2`), the rocket thruster (§16.4, a cold field); their frozen hashes are updated and their videos
-re-rendered. The mushroom and splash study (§16.3): the plan, the margins, N = 30 and the rule's numbers are committed
-(§16.3.1); validation ran (o_val_*.csv): every candidate met the rule, chosen **mushroom `ms_u30`** (mean frame +1.12 dB
-[+0.79, +1.45], tracking at 1 s +0.89 dB [+0.76, +1.02], nothing past its margin) and **splash `ms`** (mean frame +0.62 dB
-[+0.40, +0.86], every other measure better or tied); both are frozen in `results/experiments/fix/o_frozen.csv`. **The
-test has not run; its seeds (3,200,000 to 3,299,999) are unspent. No model is replaced, no shared link is moved.** No job
-is running. Data under `/root/nvfx-data/o_fix` (candidates `cand/`, frozen copies `models/`, statistics caches `vt/`,
-logs `logs/`, the tool binary used throughout `bin/nvfx_ordered_v2`). To resume (the test once per effect, from
-`/home/user/wt-fix`):
-
-```sh
-O="nice -n 15 /root/nvfx-data/o_fix/bin/nvfx_ordered_v2 --study o --root /root/nvfx-data --results results/experiments/fix --threads 2"
-$O test --effect splash --current /root/nvfx-data/fx_water/models/d/splash.nvfx --cand ms=/root/nvfx-data/o_fix/models/splash.nvfx --frozen results/experiments/fix/o_frozen.csv
-$O test --effect mushroom --current /root/nvfx-data/fx_blaze/models/d/mushroom.nvfx --cand ms_u30=/root/nvfx-data/o_fix/models/mushroom.nvfx --frozen results/experiments/fix/o_frozen.csv
-```
-
-Then, for an effect that meets the rule: private copies of the model folders, the full ctest with them, the frozen
-hashes that change (the prairie's keyframes, `distant_mushroom`, the library's model rows), the videos (effect_mushroom,
-scene_prairie, library_round7, real_vs_learned_round7; effect_splash, real_vs_learned_water, library_water), the docs, and
-last the shared links (`library/models`, `fx_blaze/models/scene`). Still to do as well: §16.5 to §16.7 (what changed,
-cost of the lift-off's three tiles, what it means), merging main (its float default moves to AVX-512; the frozen tests
-are pinned to AVX2 there, which these hashes were computed on), the full build and ctest, `nvfx_alloc_test`,
-`nvfx_gallery --check`, README's test count. The rest of this section was written as the work went.
+**Status: finished** (15 October 2026; paused once by the owner's usage limit and resumed). Fixed and judged by eye,
+with no model change: the waterfall's and rain shaft's bands (§16.1, `passes 2`), launch's square block in the lift-off
+(§16.2, a three-tile domain and `passes 2`) and the rocket thruster's curling exhaust (§16.4, a cold field). The mushroom
+and the splash (§16.3): the margins, N = 30 and the rule committed before validation, which chose **mushroom `ms_u30`**
+(the mean state and a 30-frame fine-tune) and **splash `ms`** (the mean state); the test, run once on seeds 3,200,000
+to 3,299,999, found **both meet the rule**: the mushroom's mean frame +1.18 dB [+0.91, +1.45] and tracking at 1 s
++0.85 dB [+0.73, +0.97], the splash's mean frame +0.40 dB [+0.21, +0.60], nothing past a margin (§16.3.3). **Both are
+replaced** and the library's and the prairie's links moved to them (§16.5); by eye the mushroom changes little (§16.3.4).
+Cost in §16.6, what it means in §16.7. Data under `/root/nvfx-data/o_fix` (candidates `cand/`, the files now shipped
+`models/`, logs `logs/`). The section was written as the work went.
 
 Study O takes the flaws that show most in the demos and the library, finds
 each one's cause with evidence, and fixes what it can: a fix in the compositor, a look or a library entry is judged by
@@ -3608,3 +3593,75 @@ exhaust streams to the right and fades in all of them. It is a look and a force,
 not among the frozen ones. Re-rendered: `library_fire`.
 
 ![rocket_thruster over 34 s: before study O (top), after (bottom)](figures/o_thruster.png)
+
+### 16.5 What changed
+
+- **Code** (no runtime or API change; `NVFX_VERSION` as main's): an `effect` line takes `passes N` (`src/compose/script.cpp`,
+  `script_run.cpp`; the detail layer in N passes a frame, a whole number from 1 to 8; `Script.AnEffectsPassesSplitItsDetailLayer`),
+  `nvfx_reel`'s DETAIL field takes it too; `tools/nvfx_fix.cpp` (`bands`, `peaks`, `cover`, `strip`: §16.1 and §16.2's
+  evidence and the figures); `nvfx_ordered --study o` (the probe with its null, validation and the test, by §16.3.1's
+  rule).
+- **Catalogue and scenes:** `library/water.nvfxl` (the waterfall and the rain shaft in 2 passes), `library/models.nvfxl`
+  (launch in 2 passes), `library/fire.nvfxl` (`rocket_thruster`: a cold field, aim 0.45, turbulence 0.5),
+  `examples/scenes/falls.nvfxs` (2 passes) and `liftoff.nvfxs` (the blast a domain of three tiles, 2 passes).
+- **Models replaced** (both met the rule on the test, §16.3.3): the **mushroom** is now `o_fix/models/mushroom.nvfx`
+  under the data root (`ms_u30`: the mean state and the stepper fine-tuned on 30-frame windows; 301,443 bytes, SHA-256
+  `4a2f08a05eed33a85584b670eb009b606ecb1443089429b15beca703a46c97cc`) and the **splash** `o_fix/models/splash.nvfx`
+  (`ms`: the mean state; 301,443 bytes, `806a7a6cf27d73bb84b602cbe8f11e9b4ca4ce071bad50a4b9224bfb9131e82a`), each 20,516
+  bytes larger than before (the mean state's coefficients). The shared links moved last, after the full ctest had passed
+  with private copies of the folders: `library/models/mushroom.nvfx`, `library/models/splash.nvfx` and
+  `fx_blaze/models/scene/mushroom.nvfx`. The round's files are untouched under `fx_blaze/models/d` and
+  `fx_water/models/d`.
+- **Frozen hashes** (all at float, pinned to the AVX2 build with `--isa avx2`): the falls' six keyframes and the
+  lift-off's 078 to 282 (§16.1, §16.2); in `results/library/frozen.csv` `rain_shaft`, `rocket_launch`,
+  `distant_mushroom` and the mushroom's and splash's model rows; the prairie's keyframes 063 to 216
+  (`fx_blaze_frozen.csv`; 024, before the blast, is unchanged, and the old file still gives the old 063 and 078 on this
+  build, so the change is the model's); rows for the new files (`mushroom_o`, `splash_o`). No other frozen keyframe
+  plays the mushroom or the splash (`boulder_splash` is seeded water over the fog model: unchanged).
+- **Videos re-rendered** (videos/README.md): `effect_waterfall`, `effect_rainshaft`, `scene_falls`,
+  `real_vs_learned_water`, `library_water` (§16.1, and its `splash` again for the new model), `scene_liftoff`,
+  `effect_launch` (§16.2), `library_fire` (§16.4), `effect_mushroom`, `effect_splash`, `scene_prairie`,
+  `library_round7` (the mushroom entries and `rocket_launch`'s 2 passes) and `real_vs_learned_round7` (the mushroom, and
+  launch in 2 passes). `real_vs_learned_water`'s splash starts from a run's true state, where the mean state moves
+  nothing, and its stepper is the round's: unchanged.
+- **Checks** (after merging main at 6845415): the full build with warnings as errors; the full ctest, @@CTEST@@;
+  `nvfx_alloc_test`; `nvfx_gallery --check` over the whole library; the Godot test (`engines/godot/test.sh`).
+
+### 16.6 Cost
+
+The detail layer's second pass (`nvfx_ordered cost`, thread CPU time a frame through `nvfx_render`, the models
+interleaved, the median of 9 paired repetitions; `o_cost_passes.csv`; measured on the shared machine at a load of about
+13 on 4 cores, so provisional):
+
+| effect | size | int8: one pass → two (ms) | difference | float: one pass → two (ms) | difference |
+|---|---|---|---|---|---|
+| waterfall (swirl 0) | 128 | 0.574 → 0.583 | +0.004 | 0.798 → 0.788 | -0.015 |
+| waterfall (swirl 0) | 256 | 1.412 → 1.450 | +0.061 | 1.829 → 1.836 | +0.036 |
+| launch (swirl 1, scale 9) | 128 | 0.539 → 0.649 | +0.099 | 0.785 → 0.871 | +0.090 |
+| launch (swirl 1, scale 9) | 256 | 1.387 → 1.656 | +0.233 | 1.964 → 2.104 | +0.165 |
+
+A second pass skips the empty spans as the first does, so the waterfall's sheet (a narrow band of the frame) costs
+almost nothing more; the launch's billows fill the tile, and the second pass costs it 8 to 18% (the paired differences over the medians). @@COST_MODELS@@
+
+**The lift-off's three tiles** (`nvfx_scene_script --no-video --profile`, the scene's 300 frames at 1280 x 720 on 2
+threads, int8, the wall time a frame; before, three tiles with one pass, and three tiles with two, interleaved; the same
+load): @@COST_LIFTOFF@@
+
+### 16.7 What it means
+
+- **Two of the five flaws were not the models'.** The waterfall's bands were the detail layer's once-a-frame lock seen
+  through a fast, straight fall, and launch's block was its domain, which the simulator's billows fill as well. Both are
+  fixed in how the effects are played, with no model change: `passes` for any effect whose material moves a few pixels
+  a frame (study L met the same stamp as magic's saw-teeth), and a tiled domain where an effect must outgrow its tile.
+- **The thruster's curl is the jet model's physics** (a burning jet's hot end rises); a force in the entry takes it off.
+  A recoloured model keeps the physics it was trained on, and a library entry can steer it with the compositor's fields.
+- **A model fix that the test confirms can still look much the same.** The mushroom's average picture is 1.18 dB closer
+  to a real run's and it follows a run better, but its stem and rolled cap are still lost after 3 to 4 s, and by eye the
+  new file differs mostly where a scene asks a start point for other controls (the mean state). The splash's gain,
+  0.40 dB, is small and was only visible as a gain because the rule's margins and N were sized from the null's spread
+  (study M3's lesson).
+- **Not fixed:** the mushroom's ragged cap and its detail (still 5.6 times the floor's spectrum distance on the test);
+  the library's launch entries, spawned and so not tiled, still fill one tile; the bare launch reel shows its tile; the
+  splash's crown still reads as two horns in the library. What would fix them: tiled domains for spawned entries in the
+  compositor; for the mushroom, a stepper that sees the cap's whole life (longer windows than 30 frames, or more coarse
+  cells over the cap).
