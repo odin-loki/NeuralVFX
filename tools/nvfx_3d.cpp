@@ -1153,10 +1153,10 @@ void composite(Canvas& cv, int x0, int y0, int w, int h, const std::vector<std::
         const float wline = std::min(0.5f, 0.012f * (1.f + t));
         const float line = std::max(1.f - std::clamp(gx / wline, 0.f, 1.f), 1.f - std::clamp(gz / wline, 0.f, 1.f));
         const float fade = std::exp(-0.12f * t);
-        const float rr = px * px + pz * pz, light = glow * 90.f / (1.f + 10.f * rr);
-        const std::array<float, 3> ground{20.f, 18.f, 17.f}, warm{1.f, 0.55f, 0.25f};
+        const float rr = px * px + pz * pz, light = glow * 260.f / (1.f + 12.f * rr);
+        const std::array<float, 3> ground{26.f, 24.f, 23.f}, warm{1.f, 0.55f, 0.25f};
         for (int c = 0; c < 3; ++c) {
-          const float g = (ground[zu(c)] + 14.f * line) * fade + light * warm[zu(c)] * (0.6f + 0.4f * line);
+          const float g = (ground[zu(c)] + 26.f * line) * fade + light * warm[zu(c)] * (0.7f + 0.3f * line);
           bg[c] = g + (bg[c] - g) * (1.f - fade) * 0.6f;
         }
       }
