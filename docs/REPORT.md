@@ -1935,7 +1935,8 @@ Int8 minus float, 95% paired bootstrap intervals; the spectrum, coverage and emi
 
 Status: **done.** The diagnosis (§14.1) and what was built and tried (§14.2) were done on training settings only; the
 rule (§14.3) was committed before any validation number. **Fire is replaced** (better on both targets on the held-out
-test, worse on nothing); smoke and the explosion keep v2's (none of their candidates met the rule on validation).
+test, worse on nothing); smoke and the explosion keep v2's (none of their candidates met the rule on validation). Study
+M2 (§14.8) applied the fixes to seven more effects with fresh seeds and replaced none.
 
 **The question.** Pooled over 8 runs per setting at study G's validation settings (§6.9.2), v2's average picture over
 time is 6.9 dB (fire), 6.5 dB (smoke) and 7.9 dB (explosion) further from a real run's than a second real run's is, and
@@ -2308,6 +2309,424 @@ nvfx_ordered set --model mt4.nvfx --values swirl_scale=16 --out mt4_s16.nvfx
 nvfx_ordered val --effect fire --split probe|val --current v2/models/fire.nvfx --cand mt4_s16=mt4_s16.nvfx --prefix m_val
 nvfx_ordered test --effect fire --current v2/models/fire.nvfx --cand mt4_s16=mt4_s16.nvfx --frozen results/experiments/ordered/m_frozen.csv
 nvfx_ordered cost --effect fire --current v2/models/fire.nvfx --cand v3=m_ordered/models/v3/fire.nvfx --reps 15 --precision float [--ftz]
+```
+
+### 14.8 Study M2: the same fixes on more effects
+
+Status: **done** (15 October 2026). The rule (§14.8.1) was committed before any number of this study, and amended
+once, before validation, for a degenerate margin (stated there). **Nothing is replaced: no candidate met the rule on
+validation for any of the seven effects, so none was tested.** The explosion's mean state again brought its average
+picture 3.4 dB closer to a real run's and dust's 1.1 dB, but failed non-inferiority margins that turned out to be far
+tighter than these measures' spread (§14.8.7); the fine-tune helped magic's average picture at a cost in tracking and
+left steam's and the jet's unchanged; the swirl at 16 pixels helped the detail of effects with a weak swirl and hurt
+those with a strong one.
+
+**The question.** Study M's two fixes, applied where §14.7 says they should carry over: the ensemble-mean fine-tune of
+the stepper with the swirl at 16 pixels to **steam and jet** (emitters with a source at the bottom and a rising column,
+trained with study D's squared error against single runs, which teaches calm), then to **the orb, the vortex and magic**
+(study L's steppers) if time allows; the mean state to **the explosion and dust** (one-shots that play from start points
+that are their first states). Does each bring the effect closer to the real one on held-out settings, with nothing
+worse? Code: `nvfx_ordered --study m2` (the same tool; every file under the data root's `m2`, never study M's
+`m_ordered`, which is only read: the explosion's mean state and its candidate file are study M's).
+
+**The current models** are the library's: steam (`fx/models/d`), jet (`fx_energy/models/d`), the explosion (v2,
+`v2/models`), dust (`fx_atmos/models/d`), and study L's orb, vortex and magic (`l_swirl/models/v3`). Every model plays
+through the runtime at float, as in study M (the precision of the frozen tests; the orb plays at float in the library
+anyway, §13.9).
+
+#### 14.8.1 The rule (committed before any of the study's numbers; the test runs once)
+
+**Candidates**, each a file built from the current model's (the list is completed by the probe, below, and committed
+before validation):
+- steam and jet: `mtW_s16`, the stepper fine-tuned with study M's ensemble-mean loss (600 iterations, burn-in 0 to 90
+  frames, 16 frames with gradient, blocks of 4 cells, half the windows the activity stage's, as `nvfx_ordered train`
+  ran it for fire) at weight W = 4 or 8, with the swirl at 16 pixels; and `s16`, the swirl at 16 pixels alone, as study M
+  validated it for fire;
+- the explosion: `ms`, study M's file (v2 with the mean state fitted to the first states of its 240 training runs; the
+  same bytes as study M validated, SHA-256 `b0ee6f05...`), now on fresh seeds;
+- dust: `ms`, the same construction (`fitmean` on dust's 240 training runs, blocks of 2 cells; `setmean`);
+- the orb and the vortex as steam; magic `mtW` alone (its sub-grid swirl is 0, so the swirl's scale changes nothing).
+
+**The probe (development, training settings).** The weight W of each fine-tuned effect is chosen on a probe as study M
+chose its candidates (§14.2): the controls of the effect's salt-1 training runs 0 to 9, 4 real runs and 4 plays pooled
+per setting, tracking 2 runs per setting. The weight is the one whose `mtW_s16` (magic: `mtW`) reads better by the rule
+below on the probe: meeting it, then the larger mean-frame gain; if neither meets it, fewer measures outside their
+margins, then the larger mean-frame gain. The probe chooses what is validated; it decides nothing about replacing.
+
+**Measures** (study M's, §14.3): tracking at 1 s from the true state (study D's active PSNR, one continuous rollout of
+the runtime); and the endless statistics of the runtime as shipped (shards from the stored start points), 8 runs pooled
+per setting, 10 s after a 5 s warm-up for the real runs (one-shots: their 89 frames from the first): detail spectrum
+distance, |ln motion ratio|, coverage distance, emission distance and mean-frame PSNR against the pooled real runs.
+Candidate minus current model, paired over the 10 settings (tracking: each setting's mean over its tracking runs), 95%
+bootstrap with 10,000 resamples (`metrics::paired_bootstrap`, seed 2026).
+
+**The rule.** A candidate replaces the current model for an effect when
+1. it is **better on its targets**, the parts it changes on purpose (interval clear of zero): the **mean-frame PSNR**
+   for every candidate (the ordered part, which the fine-tune and the mean state address), and the **detail spectrum
+   distance** for a candidate that changes the sub-grid swirl's scale (the random part's scale: `s16`, `mtW_s16`); and
+2. it is **non-inferior on every other measure**, the worse end of its interval within a margin fixed now:
+   - tracking at 1 s: at least **-0.20 dB**;
+   - detail spectrum distance, where it is not a target (`ms`, magic's `mtW`): at most **+0.02**;
+   - |ln motion ratio|: at most **+0.02** (2% of motion);
+   - coverage and emission distances: at most **+10% of the current model's own mean distance** on the split, and
+     never less than **0.0001** (amended after the probe, before validation: below).
+
+On validation, among an effect's candidates that meet it, the one with the largest mean-frame gain is chosen; an effect
+with none stops there and is not tested (a null, reported with its numbers). The strict reading of study M (no interval
+entirely on the worse side of zero) is reported beside each decision and does not decide.
+
+**Why margins instead of the strict reading.** Study M's nulls showed that the strict reading tests noise, or rather
+whether any change can be detected at all, not whether a change matters: smoke's `s16` failed on an emission distance
+that moved by less than 10⁻⁵ (smoke gives almost no light) with every setting agreeing (§14.4). Study K met the same
+thing on smoke's mean frame (§13.3) and replaced the strict reading by non-inferiority margins set from what matters;
+these are study K's margins for the spectrum (a fifth of the models' own distances, 0.1 to 0.15, and half the distance
+between two sets of eight real runs), motion, coverage and emission. Tracking's margin is study K's at 2 s rather than
+its -0.10 dB at 1 s: a retrained stepper changes every frame of a rollout, as chaos does by 2 s, where int8 changed
+them by a few hundredths of a dB; a fifth of a dB at 1 s, where the active PSNR is about 18 dB, is a sixth of the
+spread of single runs (a standard deviation of 1.1 to 1.3 dB over study M's 16 validation runs,
+[m_val_track.csv](../results/experiments/ordered/m_val_track.csv)). A margin works both ways: a change that matters
+fails even when the interval crosses zero, so the margins are stricter than the strict reading where the measure is
+noisy and more lenient only where a change is too small to matter. Study M's own validation data are not revisited with this rule.
+
+**One amendment, after the probe and before any validation number.** The coverage and emission margins have a least
+value of 0.0001 (in the units of the curves: the frame's mean alpha, and its mean light added, max(0, rgb - alpha), on
+a scale of 0 to 1; 0.0001 is a fortieth of one 8-bit level). On the probe (training settings, §14.8.2) the explosion's
+emission distance was about 2 × 10⁻⁵ (the explosion and dust add almost no light to their colour; dust's distance is
+10⁻⁵) and its mean state moved it by +1 × 10⁻⁶ [-3 × 10⁻⁶, +4 × 10⁻⁶], outside a margin of 10% of it: a relative margin
+on a distance that is almost zero is the size of its noise, which re-creates the null the margins were meant to remove
+(smoke's in study M). The least value matters only where the current model's distance is under 0.001, which in
+study M's validation ([m_val_stats.csv](../results/experiments/ordered/m_val_stats.csv)) is smoke's and the
+explosion's light alone (fire's coverage and light and every coverage distance there are above it, where 10%
+governs). The rule as first committed is commit `f996878`; nothing else was
+changed.
+
+**Validation (the choice).** Study G's 10 validation settings (DCM §4) with seeds no study has used: real runs
+**8,500,000 + 100 s + k**, the floor (a second set of real runs) 8,500,050 + 100 s + k, the models' plays **8,600,000 +
+100 s + k** (k = 0 to 7), tracking runs **8,650,000 + 100 s + k** (k = 0 to 7; each simulated from an empty grid for 100
+frames, the one-shots 1, and followed from its true state; averaged per setting). The probe's seeds: real 8,900,000,
+plays 8,930,000, tracking 8,960,000 (+ 100 s + k).
+
+**The test, once per chosen candidate**, on study B's 10 held-out settings: real runs **8,700,000 + 100 s + k**, the
+floor 8,700,050 + 100 s + k, plays **8,800,000 + 100 s + k**, tracking runs **8,850,000 + 100 s + k** (k = 0 to 7). The
+chosen file is written to the data root's `m2/models/<effect>.nvfx` and frozen by SHA-256 in
+`results/experiments/ordered/m2_frozen.csv` before its test; `nvfx_ordered --study m2 test` refuses any other file and
+runs once per effect (a marker under `m2`). Each effect is judged alone by the rule above; it is replaced when it meets
+the rule on the test. Distance to the floor is reported before and after. The cost (ms per frame at 128 and 256 px,
+float and int8, against the current model in the same session) is measured and reported, not part of the rule.
+
+**What a replacement changes.** The shared model links (the library's and the scenes' model folders) are repointed at
+the new file only at the end, after the full ctest passes with them in a private copy of the folders; every frozen
+hash that changes (the library's, the scenes') is updated in the same change and noted here and in the effect's doc.
+
+#### 14.8.2 The probe (training settings) and the candidates
+
+Candidate minus current model on the probe (the controls of salt-1 training runs 0 to 9, 4 runs pooled per setting,
+tracking 2 runs per setting; [m2_probe1_compare.csv](../results/experiments/ordered/m2_probe1_compare.csv)), development
+only. "Outside" marks a measure whose interval's worse end is beyond its margin (§14.8.1).
+
+| effect | candidate | tracking at 1 s (dB) | spectrum distance | \|ln motion ratio\| | coverage | mean-frame PSNR (dB) | the rule's reading |
+|---|---|---|---|---|---|---|---|
+| explosion | `ms` | -0.00 [-0.00, +0.00] | -0.038 [-0.061, -0.016] | -0.068 [-0.146, +0.001] | -0.020 [-0.027, -0.014] | **+2.76 [+1.70, +3.95]** | meets (as amended) |
+| dust | `ms` | +0.00 [-0.00, +0.00] | +0.007 [-0.005, +0.019] | -0.072 [-0.153, +0.000] | -0.0035 [-0.0063, -0.0012] | +0.58 [-0.27, +1.40] | the mean frame ties |
+| steam | `s16` | -0.01 [-0.13, +0.11] | -0.006 [-0.016, +0.003] | -0.006 [-0.011, -0.001] | -0.0000 | -0.00 [-0.02, +0.01] | both targets tie |
+| steam | `mt4` | +0.01 [-0.11, +0.10] | +0.009 [+0.001, +0.018] | -0.021 [-0.048, +0.008] | +0.0002 [-0.0009, +0.0016] | +0.16 [-0.33, +0.65] | the mean frame ties; coverage outside |
+| steam | `mt4_s16` | -0.02 [-0.16, +0.12] | -0.002 [-0.011, +0.008] | -0.026 [-0.055, +0.006] | +0.0002 [-0.0009, +0.0016] | +0.15 [-0.32, +0.63] | both targets tie; coverage outside |
+| steam | `mt8` | -0.09 [-0.22, +0.03] | +0.006 [-0.002, +0.014] | -0.048 [-0.081, -0.016] | -0.0001 [-0.0019, +0.0016] | +0.06 [-0.47, +0.68] | the mean frame ties; tracking, coverage outside |
+| steam | `mt8_s16` | -0.10 [-0.29, +0.08] | -0.004 [-0.015, +0.006] | -0.053 [-0.088, -0.018] | -0.0001 [-0.0019, +0.0016] | +0.06 [-0.47, +0.67] | both targets tie; tracking, coverage outside |
+
+The emission distances moved by less than 2 × 10⁻⁵ everywhere (within the amended margins; steam, the explosion and
+dust add almost no light). Means over the settings (current → candidate; the floor, a second set of 4 real runs):
+the explosion's mean-frame PSNR 29.41 → 32.18 dB (floor 34.16), coverage 0.033 → 0.013 (0.009), motion 0.98 → 0.88 of
+the real runs' (0.99); dust's 31.69 → 32.26 dB (35.48), coverage 0.0099 → 0.0063 (0.0040), motion 1.00 → 0.90 (0.98);
+steam's 31.88 → 32.03 dB with `mt4_s16` (37.43), motion 0.85 → 0.89 (`mt4_s16`) and 0.91 (`mt8_s16`) (0.99), spectrum
+0.155 → 0.153 (0.044).
+
+- **The explosion's mean state repeats study M's probe** (+2.8 dB then and now on training settings), and on these
+  settings its spectrum is better too.
+- **Dust's mean state moves the right way** (coverage closer, motion's error smaller, the mean frame +0.6 dB) but its
+  average picture only ties at 4 runs pooled.
+- **Steam behaves as smoke did in study M**, not as fire: the fine-tune makes it livelier (motion's error -0.026 at
+  weight 4, -0.053 at weight 8) but leaves its average picture tied, and the swirl at 16 pixels moves its detail spectrum
+  by less than fire's (-0.006, a tie). Neither weight meets the rule here; weight 4 has fewer measures outside their
+  margins (coverage; weight 8 also tracking), so **W = 4**.
+
+**Candidates for validation** (committed before it): steam `mt4_s16` (SHA-256 `65ac1277...`) and `s16` (`c2c24f39...`);
+the explosion `ms` (`b0ee6f05...`); dust `ms` (`938440a4...`). Jet's follow its probe.
+
+The jet's probe (committed with its candidates, before its validation and after the three above):
+
+| effect | candidate | tracking at 1 s (dB) | spectrum distance | \|ln motion ratio\| | coverage | emission | mean-frame PSNR (dB) | the rule's reading |
+|---|---|---|---|---|---|---|---|---|
+| jet | `s16` | +0.17 [-0.02, +0.34] | ~~+0.097 [+0.046, +0.150]~~ | ~~+0.032 [+0.017, +0.047]~~ | +0.0001 [-0.0001, +0.0003] | +0.00001 | +0.01 [-0.03, +0.04] | worse |
+| jet | `mt4` | +0.03 [-0.04, +0.12] | -0.003 [-0.010, +0.003] | -0.035 [-0.070, +0.001] | +0.0012 [-0.0028, +0.0062] | +0.00009 [+0.00001, +0.00018] | **+0.39 [+0.08, +0.72]** | better; coverage, emission outside |
+| jet | `mt4_s16` | +0.24 [+0.06, +0.44] | ~~+0.080 [+0.029, +0.133]~~ | -0.020 [-0.041, +0.006] | +0.0011 [-0.0028, +0.0059] | +0.00008 [+0.00001, +0.00017] | **+0.40 [+0.07, +0.75]** | spectrum worse; coverage, emission outside |
+| jet | `mt8` | +0.04 [+0.01, +0.08] | -0.002 [-0.008, +0.003] | -0.028 [-0.043, -0.012] | -0.0004 [-0.0033, +0.0029] | +0.00008 [-0.00001, +0.00019] | +0.41 [-0.01, +0.83] | the mean frame ties; coverage, emission outside |
+| jet | `mt8_s16` | +0.22 [+0.00, +0.42] | ~~+0.083 [+0.032, +0.136]~~ | +0.005 [-0.014, +0.023] | -0.0005 [-0.0033, +0.0027] | +0.00008 [-0.00001, +0.00018] | +0.41 [-0.02, +0.85] | spectrum worse; motion, coverage, emission outside |
+
+Means: the jet's mean-frame PSNR 27.02 dB (`mt4` 27.41, `mt8` 27.42; the floor 36.90), spectrum 0.153 (`s16` 0.250,
+`mt4` 0.150; the floor 0.016), motion 0.93 (`mt4` 1.00, `mt8` 0.95; the floor 1.02), coverage 0.0154 (the floor 0.0054),
+emission 0.00085 (`mt4` 0.00093; the floor 0.00027).
+
+- **The fine-tune works on the jet as on fire**: its average picture 0.4 dB closer at both weights, motion closer to the
+  real (0.93 to 1.00 at weight 4), tracking and detail unchanged. (On training settings; on validation the average
+  picture tied, §14.8.3.)
+- **The swirl at 16 pixels is wrong for the jet.** Its sub-grid swirl is the strongest of the seven here (3 pixels a frame,
+  as the launch's and three water effects'; steam's 0.5, fire's 0.5), chosen by study D's calibration at 6 pixels; moved to 16 pixels, eddies of that
+  strength move whole tongues of the flame: the detail spectrum distance rises from 0.15 to 0.25 and motion moves away
+  from the real. Study M's pairing of the two changes came from fire, whose swirl is a sixth of the jet's.
+- So the jet's fine-tune is also validated alone, `mtW`, as magic's is (its target the mean frame; the spectrum held to
+  its margin). Its weight by the same procedure applied to `mtW`: neither meets the rule here and both have two measures
+  outside their margins (coverage, emission), so the larger mean-frame gain: **W = 8** (+0.41 against +0.39 dB). For
+  `mtW_s16` the procedure gives W = 4 (two measures outside against three).
+
+**The jet's candidates for validation**: `mt4_s16` (SHA-256 `e69a087b...`), `mt8` (`5e98f8c0...`) and `s16` (as
+committed).
+
+#### 14.8.3 Validation: no candidate meets the rule
+
+Candidate minus current model on study G's 10 validation settings with the study's fresh seeds, 8 runs pooled per
+setting, tracking 8 runs per setting ([m2_val_compare.csv](../results/experiments/ordered/m2_val_compare.csv),
+[m2_val_choice.csv](../results/experiments/ordered/m2_val_choice.csv)). Bold: better (interval clear of zero); struck:
+strictly worse; "outside": the worse end beyond the measure's margin.
+
+| effect | candidate | tracking at 1 s (dB) | spectrum distance | \|ln motion ratio\| | coverage (margin) | mean-frame PSNR (dB) | rule |
+|---|---|---|---|---|---|---|---|
+| explosion | `ms` | +0.00 [-0.00, +0.00] | -0.003 [-0.049, **+0.044**] outside | -0.053 [-0.122, +0.003] | **-0.016 [-0.029, -0.003]** (0.0031) | **+3.37 [+1.13, +5.53]** | spectrum outside |
+| dust | `ms` | +0.00 [-0.00, +0.00] | -0.008 [-0.025, +0.005] | **-0.124 [-0.189, -0.059]** | -0.0024 [-0.0057, **+0.0009**] outside (0.00075) | **+1.09 [+0.00, +2.27]** | coverage outside |
+| steam | `mt4_s16` | -0.05 [-0.15, +0.06] | -0.003 [-0.016, +0.008] | **-0.038 [-0.069, -0.004]** | +0.0008 [-0.0000, **+0.0016**] outside (0.00073) | -0.07 [-0.48, +0.37] | targets tie; coverage outside |
+| steam | `s16` | +0.04 [-0.02, +0.10] | **-0.016 [-0.031, -0.006]** | **-0.007 [-0.011, -0.003]** | +0.0000 [-0.0000, +0.0000] | +0.01 [-0.01, +0.04] | the mean frame ties |
+| jet | `mt4_s16` | **+0.14 [+0.07, +0.20]** | ~~+0.095 [+0.041, +0.142]~~ | **-0.024 [-0.040, -0.006]** | +0.0000 [-0.0032, **+0.0034**] outside (0.00086) | +0.21 [-0.14, +0.61] | spectrum worse; coverage, emission outside |
+| jet | `mt8` | -0.04 [-0.10, +0.02] | -0.003 [-0.009, +0.002] | **-0.018 [-0.031, -0.002]** | -0.0002 [-0.0031, **+0.0025**] outside (0.00086) | +0.03 [-0.27, +0.41] | the mean frame ties; coverage outside |
+| jet | `s16` | **+0.19 [+0.14, +0.23]** | ~~+0.114 [+0.059, +0.159]~~ | ~~+0.031 [+0.017, +0.047]~~ outside | +0.0000 [-0.0001, +0.0001] | **+0.05 [+0.00, +0.12]** | spectrum, motion worse |
+
+Emission moved by at most 1.3 × 10⁻⁴ (the jet's `mt4_s16`, outside its margin of 10⁻⁴; every other candidate within).
+The amendment's least value decided nothing here: with 10% of the current model's distance alone every emission
+reading would be the same.
+
+Means over the settings (current → candidate; the floor, a second set of 8 real runs; the mean-frame PSNR's distance
+below the floor in brackets):
+
+| effect | model | mean-frame PSNR (dB) | spectrum distance | motion ratio | coverage |
+|---|---|---|---:|---:|---:|
+| explosion | v2 → `ms` (floor) | 28.98 (7.03 below) → **32.35 (3.66 below)** (36.01) | 0.170 → 0.167 (0.036) | 1.02 → 0.90 (0.98) | 0.031 → 0.015 (0.007) |
+| dust | current → `ms` (floor) | 32.66 (6.59 below) → 33.74 (5.51 below) (39.25) | 0.098 → 0.090 (0.029) | 1.06 → 0.96 (0.97) | 0.0075 → 0.0051 (0.0021) |
+| steam | current → `mt4_s16`, `s16` (floor) | 33.17 → 33.10, 33.18 (39.99) | 0.181 → 0.178, 0.164 (0.028) | 0.83 → 0.87, 0.83 (1.00) | 0.0073 → 0.0080, 0.0073 (0.0057) |
+| jet | current → `mt8`, `mt4_s16` (floor) | 29.34 → 29.37, 29.55 (39.84) | 0.149 → 0.145, 0.244 (0.014) | 0.85 → 0.87, 0.88 (1.01) | 0.0086 → 0.0083, 0.0086 (0.0034) |
+
+**No candidate meets the rule; none of the four effects is tested, and their test seeds (8,700,000 to 8,899,999) are
+unspent.**
+- **The explosion's mean state is a null for the second time**, for a reason the margin makes plain: its average picture
+  is 3.4 dB closer to a real run's (its distance below the floor nearly halved, 7.0 to 3.7 dB, as in study M), its
+  coverage error halved and its motion's error smaller, and its detail spectrum distance unchanged on average
+  (-0.003), but the paired difference of the explosion's spectrum distance ranges from -0.14 to +0.12 over the settings, so
+  the interval (±0.046) is more than twice the margin's width and cannot show that it stays within 0.02. Under study M's strict
+  reading (no measure's interval entirely on the worse side) it would have met the rule.
+- **Dust's mean state** is better on its target by a hair (+1.09 dB [+0.00, +2.27]), its motion is much closer to the
+  real (1.06 to 0.96 of the real runs', the floor's 0.97), and its coverage closer on average (0.0075 to 0.0051), but the
+  coverage interval's worse end (+0.0009) is past its margin (+0.00075, 10% of 0.0075). It too would have met the strict
+  reading. At one setting of the ten, setting 2 (counting from 0; controls 0.61, 0.32, 0.72, inside the control space), both
+  one-shots' mean state is clearly worse (dust -1.4 dB, the explosion -3.8 dB). It is also the setting where two sets of
+  real runs differ most from each other (the floor's mean-frame PSNR 33.2 dB for dust and 31.4 dB for the explosion,
+  against 34 to 44 dB at the others); why the mean state loses there was not studied.
+- **Steam gained nothing from the fine-tune**, as smoke did not in study M: it is livelier (motion 0.83 to 0.87 of the
+  real) but its average picture is unchanged (-0.07 dB [-0.48, +0.37]) and its coverage error grows a little. The swirl
+  at 16 pixels improves its detail spectrum (-0.016) with the average picture tied (+0.01 dB [-0.01, +0.04]): the same
+  null as smoke's `s16` in study M, now without the emission artefact.
+- **The jet's probe gain did not hold**: its fine-tune's average picture was +0.4 dB on training settings and is +0.03
+  dB [-0.27, +0.41] here (weight 8); it is livelier (motion's error -0.018) and tracking ties. With the swirl at 16 pixels
+  its detail is clearly worse, as on the probe.
+
+#### 14.8.4 The orb, the vortex and magic: probe and candidates
+
+Study L's steppers were fine-tuned as study M's fire was (600 iterations of the ensemble-mean stage at weights 4 and 8),
+each with its own training's options from study L (§12.1): the orb and magic on 30-frame windows (their training
+horizon), the vortex with the floor's gradient passed (`--floor-gradient`) on study M's 16 frames. Magic's file keeps its
+MacCormack advection and two detail passes. On the probe ([m2_probe2_compare.csv](../results/experiments/ordered/m2_probe2_compare.csv)):
+
+| effect | candidate | tracking at 1 s (dB) | spectrum distance | \|ln motion ratio\| | coverage | emission | mean-frame PSNR (dB) | the rule's reading |
+|---|---|---|---|---|---|---|---|---|
+| orb | `s16` | +0.05 [-0.02, +0.11] | **-0.073 [-0.106, -0.032]** | ~~+0.015 [+0.001, +0.027]~~ | ~~+0.00003~~ | +0.00002 | -0.01 [-0.04, +0.02] | the mean frame ties; motion outside |
+| orb | `mt4` | ~~-0.16 [-0.24, -0.09]~~ | -0.001 [-0.006, +0.004] | -0.007 [-0.014, -0.000] | +0.0003 [-0.0001, +0.0007] | +0.0005 [-0.0001, +0.0010] | -0.50 [-1.23, +0.34] | tracking, coverage, emission outside |
+| orb | `mt4_s16` | ~~-0.13 [-0.22, -0.04]~~ | **-0.070 [-0.104, -0.029]** | +0.006 [-0.002, +0.015] | +0.0004 [-0.0001, +0.0008] | +0.0006 [-0.0001, +0.0011] | -0.51 [-1.27, +0.35] | the mean frame ties; tracking, coverage, emission outside |
+| orb | `mt8` | -0.08 [-0.22, +0.02] | **-0.007 [-0.011, -0.002]** | +0.007 [-0.006, +0.019] | +0.0001 [-0.0003, +0.0004] | +0.0001 [-0.0003, +0.0005] | -0.03 [-0.67, +0.58] | tracking, coverage, emission outside |
+| orb | `mt8_s16` | -0.05 [-0.22, +0.09] | **-0.074 [-0.119, -0.016]** | +0.024 [-0.003, +0.046] | +0.0001 [-0.0003, +0.0005] | +0.0001 [-0.0003, +0.0005] | -0.04 [-0.70, +0.59] | the mean frame ties; four outside |
+
+Means: the orb's mean-frame PSNR 31.02 dB (the floor 36.38), spectrum 0.253 (`s16` 0.180; the floor 0.018), motion 0.93
+(`s16` 0.91; the floor 1.02).
+
+- **The fine-tune does not help the orb**: at weight 4 its average picture is half a dB further from the real one (a
+  tie at 4 runs) and it tracks 0.16 dB worse at 1 s; at weight 8 both tie. The orb's boiling is decided below the 32-cell
+  scale (study L), and its v3 stepper was already fine-tuned on 30-frame windows for the horizon it is judged on.
+- **The swirl at 16 pixels takes a quarter off the orb's detail spectrum distance** (0.253 to 0.180), the largest
+  spectrum gain of any change in studies M and M2, with the average picture tied, but it calms the orb by 2% of motion.
+- The weight for `mtW_s16` by the procedure: neither meets the rule; weight 4 has three measures outside (tracking,
+  coverage, emission), weight 8 four, so **W = 4**.
+
+**The orb's candidates for validation**: `mt4_s16` (SHA-256 `77ec5707...`) and `s16` (`003de375...`), as committed.
+
+The vortex's and magic's probes (committed with their candidates, after the orb's and before their validation;
+magic's in [m2_probe3_compare.csv](../results/experiments/ordered/m2_probe3_compare.csv)):
+
+| effect | candidate | tracking at 1 s (dB) | spectrum distance | \|ln motion ratio\| | coverage | emission | mean-frame PSNR (dB) | the rule's reading |
+|---|---|---|---|---|---|---|---|---|
+| vortex | `s16` | +0.12 [-0.04, +0.24] | ~~+0.079 [+0.056, +0.106]~~ | +0.009 [-0.002, +0.021] | ~~+0.0001~~ | ~~+0.000002~~ | ~~-0.04 [-0.06, -0.01]~~ | worse |
+| vortex | `mt4` | **+0.23 [+0.09, +0.38]** | ~~+0.009 [+0.002, +0.017]~~ | **-0.061 [-0.099, -0.017]** | ~~+0.0063 [+0.0039, +0.0084]~~ | ~~+0.0003 [+0.0001, +0.0004]~~ | ~~-1.33 [-1.60, -1.03]~~ | worse |
+| vortex | `mt4_s16` | **+0.36 [+0.18, +0.53]** | ~~+0.099 [+0.071, +0.129]~~ | **-0.047 [-0.080, -0.012]** | ~~+0.0065 [+0.0040, +0.0087]~~ | ~~+0.0003 [+0.0001, +0.0005]~~ | ~~-1.36 [-1.64, -1.05]~~ | worse |
+| vortex | `mt8` | **+0.36 [+0.22, +0.51]** | ~~+0.013 [+0.003, +0.024]~~ | -0.033 [-0.065, +0.000] | ~~+0.0091 [+0.0040, +0.0130]~~ | ~~+0.0004 [+0.0002, +0.0006]~~ | ~~-1.81 [-2.36, -1.22]~~ | worse |
+| vortex | `mt8_s16` | **+0.48 [+0.31, +0.66]** | ~~+0.102 [+0.078, +0.127]~~ | -0.016 [-0.047, +0.015] | ~~+0.0094 [+0.0042, +0.0133]~~ | ~~+0.0004 [+0.0002, +0.0006]~~ | ~~-1.84 [-2.39, -1.24]~~ | worse |
+| magic | `mt4` | ~~-0.23 [-0.29, -0.17]~~ | +0.001 [-0.005, +0.006] | ~~+0.007 [+0.002, +0.013]~~ | **-0.0009 [-0.0015, -0.0003]** | **-0.0002 [-0.0003, -0.0002]** | **+0.79 [+0.35, +1.29]** | better; tracking outside |
+| magic | `mt8` | ~~-0.35 [-0.46, -0.25]~~ | **-0.012 [-0.017, -0.007]** | +0.002 [-0.003, +0.007] | -0.0002 [-0.0006, +0.0001] | **-0.0002 [-0.0003, -0.0001]** | **+0.73 [+0.27, +1.26]** | better; tracking outside |
+
+Means: the vortex's mean-frame PSNR 31.28 dB (`mt4` 29.94; the floor 36.07), coverage 0.0183 (`mt4` 0.0246; the floor
+0.0102), motion 0.86 (`mt4` 0.94; the floor 0.98); magic's mean-frame PSNR 30.52 dB (`mt4` 31.31; the floor 39.44),
+tracking at 1 s 18.31 dB (`mt4` 18.08).
+
+- **The fine-tune makes the vortex's average picture clearly worse** (-1.3 dB at weight 4, -1.8 at 8) and its coverage
+  error larger, while it tracks a run from its true state better (+0.2 to +0.5 dB at 1 s) and moves more like the real
+  one. The vortex's v3 was trained with windows that start from an empty grid so it could regrow its column (§12.1);
+  the ensemble-mean stage, whose windows start from true states, may undo some of that, which is where its picture
+  differs. The swirl at 16 pixels hurts its detail (its swirl is 1 pixel a frame, twice steam's).
+- **Magic shows the trade the loss makes**: its average picture is 0.7 to 0.8 dB closer to the real one, its coverage
+  and light closer, but it follows a run from its true state 0.2 to 0.35 dB worse at 1 s. The ensemble-mean loss fits
+  where the effect goes on average from a start, not a single run; magic, whose look after a second is decided by its
+  seed ([EFFECTS.md](EFFECTS.md) §2), has a predictable mean that the loss reaches and a single run it then follows less closely.
+- Weights by the procedure: the vortex's `mtW_s16` both have two measures outside (coverage, emission), so the larger
+  mean-frame gain (the smaller loss): **W = 4**; magic's `mtW` both have one (tracking), so the larger mean-frame gain:
+  **W = 4**.
+
+**Candidates for validation**: the vortex `mt4_s16` (SHA-256 `269630fa...`) and `s16` (`9fd900d0...`), as committed
+(both clearly worse here); magic `mt4` (`0d35e089...`).
+
+#### 14.8.5 Validation of the orb, the vortex and magic: no candidate meets the rule
+
+As §14.8.3, on study G's validation settings with the study's seeds
+([m2_valc_compare.csv](../results/experiments/ordered/m2_valc_compare.csv),
+[m2_valc_choice.csv](../results/experiments/ordered/m2_valc_choice.csv)):
+
+| effect | candidate | tracking at 1 s (dB) | spectrum distance | \|ln motion ratio\| | coverage | emission | mean-frame PSNR (dB) | rule |
+|---|---|---|---|---|---|---|---|---|
+| orb | `mt4_s16` | ~~-0.19 [-0.28, -0.10]~~ outside | **-0.063 [-0.094, -0.026]** | ~~+0.011 [+0.002, +0.019]~~ | +0.0001 [-0.0004, +0.0007] outside | +0.0003 [-0.0002, +0.0008] outside | -0.96 [-2.02, +0.11] | the mean frame ties; three outside |
+| orb | `s16` | **+0.07 [+0.03, +0.12]** | **-0.066 [-0.101, -0.025]** | +0.009 [-0.007, +0.024] outside | -0.0000 | -0.0000 | -0.01 [-0.04, +0.02] | the mean frame ties; motion outside |
+| vortex | `mt4_s16` | **+0.51 [+0.36, +0.66]** | ~~+0.089 [+0.058, +0.122]~~ | -0.045 [-0.103, +0.003] | ~~+0.0078 [+0.0013, +0.0138]~~ outside | ~~+0.0005 [+0.0003, +0.0007]~~ outside | ~~-1.38 [-2.06, -0.66]~~ | worse |
+| vortex | `s16` | **+0.08 [+0.03, +0.14]** | ~~+0.073 [+0.039, +0.109]~~ | +0.003 [-0.012, +0.017] | ~~+0.0001~~ | ~~+0.000002~~ | ~~-0.02 [-0.05, -0.00]~~ | worse |
+| magic | `mt4` | ~~-0.26 [-0.33, -0.18]~~ outside | +0.004 [-0.002, +0.009] | ~~+0.012 [+0.005, +0.018]~~ | **-0.0008 [-0.0014, -0.0002]** | **-0.0003 [-0.0004, -0.0002]** | **+0.96 [+0.46, +1.51]** | tracking outside |
+
+Means (current → candidate; the floor): the orb's mean-frame PSNR 33.29 → 32.33 (`mt4_s16`), 33.28 (`s16`) dB (38.86),
+spectrum 0.238 → 0.175, 0.172 (0.018), motion 0.93 → 0.93, 0.91 (1.01); the vortex's 31.77 → 30.39 (`mt4_s16`) dB
+(37.91), coverage 0.018 → 0.026 (0.011), motion 0.79 → 0.83 (0.97); magic's 30.21 → 31.17 dB (44.35), coverage 0.0042 →
+0.0034 (0.0025), light 0.0010 → 0.0007 (0.0002), tracking at 1 s 18.42 → 18.16 dB.
+
+**No candidate meets the rule; none is tested.**
+- **Magic's fine-tune trades tracking for the average picture**, as on the probe: 0.96 dB closer to the real average
+  picture, coverage and light closer, but 0.26 dB worse at following a run from its true state, past the margin and
+  worse under the strict reading too.
+- **The orb's swirl at 16 pixels** improves its detail spectrum by more than a quarter (0.238 to 0.172) and its tracking
+  a little, with its average picture tied; it fails on the average picture, which is a target, and on motion (2% calmer,
+  the interval's worse end +0.024 against +0.02). The orb's fine-tune is worse on tracking and motion.
+- **The vortex is worse with either change**: the fine-tune follows a run better (+0.5 dB at 1 s) but its average picture
+  is 1.4 dB further from the real one and it covers more than the real vortex.
+
+#### 14.8.6 What was replaced, and the cost
+
+**Nothing is replaced.** No candidate met the rule on validation, so no file was written to the data root's
+`m2/models`, nothing was frozen (`m2_frozen.csv` does not exist), no test ran (the test seeds 8,700,000 to 8,899,999
+are unspent), and the shared model links, the scenes, the library and every frozen hash are as they were. The
+candidate files stay under `m2/cand` for whoever takes this further.
+
+**Cost, provisional** (thread CPU time per frame through `nvfx_render`, the median of 9 interleaved repetitions of 200
+frames, the one-shots their 88, at controls (0.6, 0.5, 0.6), on the shared machine with other agents' jobs running;
+`nvfx_ordered cost`, [m2_cost.csv](../results/experiments/ordered/m2_cost.csv)). Current model → candidate, ms per frame,
+and the median of the paired differences:
+
+| effect | candidate | 128 px float | 256 px float | 128 px int8 | 256 px int8 |
+|---|---|---|---|---|---|
+| explosion | `ms` | 0.63 → 0.50 (-0.08) | 1.89 → 2.04 (+0.16) | 0.38 → 0.33 (-0.05) | 1.26 → 1.31 (+0.04) |
+| dust | `ms` | 0.58 → 0.52 (-0.03) | 1.50 → 1.54 (+0.05) | 0.39 → 0.40 (+0.00) | 1.21 → 1.23 (+0.01) |
+| steam | `mt4_s16` | 0.86 → 0.84 (+0.02) | 2.66 → 2.58 (-0.08) | 0.61 → 0.62 (+0.02) | 1.74 → 1.81 (+0.05) |
+| steam | `s16` | 0.86 → 0.94 (+0.11) | 2.66 → 2.51 (+0.04) | 0.61 → 0.70 (+0.08) | 1.74 → 2.05 (+0.08) |
+| jet | `mt8` | 0.79 → 0.82 (-0.00) | 1.91 → 1.77 (+0.05) | 0.52 → 0.52 (+0.00) | 1.32 → 1.31 (-0.03) |
+| orb | `s16` | 0.86 → 0.98 (+0.12) | 2.62 → 3.15 (+0.53) | 0.75 → 0.72 (+0.05) | 1.97 → 2.43 (+0.42) |
+| vortex | `mt4_s16` | 0.75 → 0.73 (-0.01) | 1.70 → 1.71 (-0.02) | 0.52 → 0.50 (-0.01) | 1.30 → 1.33 (-0.00) |
+| magic | `mt4` | 0.84 → 0.91 (+0.03) | 1.55 → 1.45 (-0.02) | 0.67 → 0.68 (+0.00) | 1.22 → 1.23 (-0.00) |
+
+The fine-tuned steppers have the current ones' shape and the mean state is applied once per shard, so their paired
+differences are within about ±0.1 ms, the noise of this session (the ranges over repetitions are 0.1 to 0.5 ms wide).
+The one consistent cost is the swirl at 16 pixels on the orb at 256 px: +0.4 to +0.5 ms at both precisions, in every
+repetition (not studied: at a larger scale the swirl's lattice has fewer points and its work per pixel is the same, so
+subnormal floats or memory access are the suspects, as in §12.1.6). The mean state adds 20 KB to a file (280,927 to 301,443 bytes).
+
+The branch with main merged (study N's 3D code and the water effects) builds with `-DNEURALFX_WERROR=ON`, passes all
+451 tests of `ctest` with the shared model folders as they are, and `nvfx_alloc_test` counts no allocation per frame.
+
+#### 14.8.7 What it means
+
+On validation (candidate minus current; the full tables are §14.8.3 and §14.8.5):
+
+| effect | change | average picture | detail spectrum | motion | tracking at 1 s | the rule |
+|---|---|---|---|---|---|---|
+| explosion | mean state | **+3.37 dB** | tie (-0.003, wide) | closer | the same | spectrum's interval past its margin |
+| dust | mean state | **+1.09 dB** | tie | **closer** | the same | coverage's interval past its margin |
+| magic | fine-tune | **+0.96 dB** | tie | ~~1% further~~ (within its margin) | ~~-0.26 dB~~ | tracking worse |
+| steam | fine-tune, swirl 16 px | tie | tie | **closer** | tie | targets tie |
+| steam | swirl 16 px | tie | **better** | **closer** | tie | the average picture ties |
+| jet | fine-tune | tie (+0.4 dB on the probe) | tie | **closer** | tie | the average picture ties |
+| jet | swirl 16 px (± fine-tune) | +0.05 dB alone (barely clear), tie with the fine-tune | ~~worse~~ | mixed | **better** | spectrum worse |
+| orb | swirl 16 px | tie | **better (a quarter)** | 1% further | **better** | the average picture ties |
+| orb | fine-tune, swirl 16 px | tie (-0.96 dB) | **better** | ~~further~~ | ~~worse~~ | tracking worse |
+| vortex | fine-tune, swirl 16 px | ~~-1.38 dB~~ | ~~worse~~ | closer | **better** | worse |
+
+- **Nothing is replaced, and study M's two fixes do not carry over as a pair.** Fire, where both helped, is so far the
+  only effect where they did together.
+- **The ensemble-mean fine-tune does what it was built for on some effects, not all.** It did not teach calm where
+  study D's squared error had: steam, the jet and the vortex move 2 to 5% more like the real effect after it (magic and
+  the orb, trained by study L on longer windows, 1% less). It brought the average picture closer on magic (+0.96 dB), as
+  on fire in study M (+0.43 dB); on steam (as on smoke in study M) and on the jet it moved the average picture by nothing
+  measurable on held-out settings. On study L's orb and vortex it made things worse; a likely reason, not tested, is that
+  their v3 steppers had been fine-tuned for something else (30-frame windows; windows that start from an empty grid, so
+  the vortex regrows its column) and 600 iterations of the mean stage, whose windows start from true states, give part
+  of that back. Magic shows the loss's trade plainly: it fits where an effect goes on average from a start, and a single
+  run is then followed a little less closely (-0.26 dB at 1 s).
+- **The swirl's scale is a property of the swirl's strength.** At 16 pixels it improves the detail spectrum where the
+  sub-grid swirl is weak (steam's and the orb's 0.5 pixels a frame, fire's and smoke's in study M: by up to a quarter for
+  the orb) and makes it clearly worse where it is strong (the jet's 3 and the vortex's 1). It never moved the average
+  picture by more than about 0.05 dB, so under a rule that makes the average picture a target for every candidate it cannot be
+  replaced on its own; a change that only touches the random part needs a rule whose target is the random part.
+- **The mean state is again the strongest ordered result, and again it is not tested.** It nearly halves the
+  explosion's distance from the real average picture (7.0 to 3.7 dB below the floor), brings dust 1.1 dB closer, and
+  makes both cover the frame and move more like the real effects, with tracking unchanged. The rule failed it on
+  measures where it was better or the same on average (the explosion's spectrum -0.003, dust's coverage -0.0024) because
+  their intervals are wider than the margins.
+- **The margins were too tight for changes of this kind, and this study did not check that before fixing them.** Study
+  K's margins were sized for int8, where a candidate plays the same seeds to nearly the same frames and paired
+  differences are tiny; every candidate here changes the trajectories, and the paired differences spread over the
+  settings: the explosion's spectrum distance by a standard deviation of 0.079 against a margin of 0.02, dust's coverage
+  by 0.0056 against 0.00075. A measure that is truly unchanged would need about 60 (the explosion's spectrum) to 220
+  (dust's coverage) settings to show it is within those margins. Study K checked its margins for power on training
+  settings before fixing them; this study did not, and the probe's 4-run intervals were narrower than validation's (the
+  explosion's spectrum ±0.022 there, ±0.046 here), which hid it. Under study M's strict reading (no interval entirely on
+  the worse side), reported beside every decision, the explosion's and dust's mean state would have met the rule. A
+  margin has to be fixed from what matters **and** checked for power on the probe for the kind of change being judged.
+- **What to do next.** (1) The mean state for the explosion and dust a third time, with a rule planned for power: the
+  one-shots are cheap (89 frames a run), so 40 to 60 validation settings cost little, and margins on coverage and
+  spectrum should be sized to their paired spread on the probe; first look, on training settings, at why it loses at a
+  setting like validation setting 2. (2) Magic's fine-tune with a smaller weight or fewer iterations, which may keep
+  most of the +0.96 dB at less tracking cost. (3) The swirl's scale chosen per effect with its strength, judged by a
+  rule whose target is the detail spectrum.
+
+Reproduce (data root `$NEURALVFX_DATA`; this study's files under `m2`; every step caches and resumes; the job lists are
+`m2/jobs/queue.txt` and `queue2.txt`):
+
+```sh
+O="nvfx_ordered --study m2"
+$O fitmean --effect dust ; nvfx_ordered setmean --model fx_atmos/models/d/dust.nvfx --meanstate m2/meanstate/dust_b2.txt --out ms.nvfx
+$O train --effect steam --model fx/models/d/steam.nvfx --out mt4.nvfx --mean-stage 600 --mean-weight 4 --threads 2   # mt8: --mean-weight 8 --seed 43
+#   orb and magic: --unroll 30 (study L's horizon); the vortex: --floor-gradient
+nvfx_ordered set --model mt4.nvfx --values swirl_scale=16 --out mt4_s16.nvfx
+$O val --effect steam --split probe2 --current fx/models/d/steam.nvfx --cand s16=...,mt4=...,mt4_s16=...,mt8=...,mt8_s16=... --prefix m2_probe1
+$O val --effect steam --split val2 --current fx/models/d/steam.nvfx --cand mt4_s16=...,s16=... --prefix m2_val
+$O test --effect E --current F --cand name=G --frozen results/experiments/ordered/m2_frozen.csv   # once; not run (no candidate met the rule)
+nvfx_ordered cost --effect explosion --current v2/models/explosion.nvfx --cand ms=ms.nvfx --sizes 128,256 --precision float|int8 --reps 9
+nvfx_ordered info --model F                                                                        # a file's constants
 ```
 
 ## 15. Study N: a small 3D demo
