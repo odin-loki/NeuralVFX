@@ -32,6 +32,9 @@ std::string_view effect_name(Effect e) {
     case Effect::fountain: return "fountain";
     case Effect::splash: return "splash";
     case Effect::rainshaft: return "rainshaft";
+    case Effect::candle: return "candle";
+    case Effect::smokering: return "smokering";
+    case Effect::heavygas: return "heavygas";
   }
   std::unreachable();
 }
@@ -44,10 +47,11 @@ bool parse_effect(std::string_view text, Effect& out) {
 }
 
 bool effect_loops(Effect e) { return e != Effect::explosion && e != Effect::dust && e != Effect::mushroom &&
-                                   e != Effect::splash; }
+                                   e != Effect::splash && e != Effect::smokering; }
 
 int one_shot_frames(Effect e) {
   if (effect_loops(e)) return 0;
+  if (e == Effect::smokering) return 120;  // 4 s: a smoke ring's rise, roll and break-up (docs/EFFECTS_AIR.md)
   return e == Effect::mushroom ? 150 : 90;
 }
 
@@ -59,6 +63,8 @@ std::array<std::string_view, kControls> control_names(Effect e) {
   if (e == Effect::puffs) return {"intensity", "rate", "turbulence"};  // docs/EFFECTS_FLOW.md
   if (e == Effect::ink) return {"intensity", "current", "turbulence"};
   if (e == Effect::fountain) return {"intensity", "aim", "turbulence"};
+  if (e == Effect::candle) return {"intensity", "draught", "turbulence"};  // docs/EFFECTS_AIR.md
+  if (e == Effect::heavygas) return {"intensity", "flow", "turbulence"};
   return kControlNames;
 }
 
@@ -85,6 +91,9 @@ float flicker_rate(Effect e) {
     case Effect::fountain: return 2.4f;   // a fluttering jet
     case Effect::splash: return 1.4f;     // the crown's shape, as the burst of dust
     case Effect::rainshaft: return 0.7f;  // slow gusts: the shafts thin and thicken
+    case Effect::candle: return 1.2f;     // a flame that breathes and gutters
+    case Effect::smokering: return 1.4f;  // the puff's lumps, as the explosion's
+    case Effect::heavygas: return 0.8f;   // a slow, uneven release, as ink's
   }
   std::unreachable();
 }
@@ -160,6 +169,13 @@ Tune tune(const Params& p) {
     case Effect::fountain: return {20.f, 30.f, 0.6f, 0.05f, 0.f, 0.f, 0.05f + 0.3f * turb, 2.f + 10.f * turb, 1.6f};
     case Effect::splash: return {10.f, 60.f, 0.6f, 0.05f, 0.f, 0.f, 0.1f + 0.4f * turb, 2.f + 10.f * turb, 1.6f};
     case Effect::rainshaft: return {25.f, 0.f, 0.6f, 0.10f, 0.f, 0.f, 0.1f + 0.5f * turb, 3.f + 12.f * turb, 0.5f};
+    // candle, smokering and heavygas (docs/EFFECTS_AIR.md); their sources, the candle's gusty draught, heavy gas's floor and
+    // its draught are in add_air_sources and add_air_forces. candle: a small flame whose heat cools fast (its visible
+    // length), a warm plume above it, calm air. smokering: warm smoke, little buoyancy, its own vortices; the wind
+    // drifts it. heavygas: no heat, heavy, thins slowly.
+    case Effect::candle: return {200.f, 0.f, 0.3f, 0.8f, 0.f, 0.f, 0.15f + 0.9f * turb, 2.f + 22.f * turb, 0.3f};
+    case Effect::smokering: return {30.f, 0.f, 0.8f, 0.25f, 0.f, 0.f, 0.2f + 1.0f * turb, 4.f + 26.f * turb, 0.35f};
+    case Effect::heavygas: return {0.f, 18.f, 1.f, 0.08f, 0.f, 0.f, 0.2f + 1.2f * turb, 3.f + 14.f * turb, 0.2f};
   }
   std::unreachable();
 }
@@ -288,6 +304,7 @@ void Fluid::step(float dt) {
   blaze_decay(dt);   // wildfire and mushroom
   flow_decay(dt);    // launch
   water_decay(dt);   // waterfall, fountain, splash and rainshaft
+  air_decay(dt);     // candle, smokering and heavygas
   time_ += dt;
 }
 
@@ -324,6 +341,7 @@ void Fluid::add_sources(float dt) {
   }
   if (add_blaze_sources(dt)) return;  // wildfire, coals and mushroom
   if (add_flow_sources(dt)) return;  // launch, puffs and ink
+  if (add_air_sources(dt)) return;   // candle, smokering and heavygas
   const bool fire = p_.effect == Effect::fire;
   const float cx = 0.5f * n, cy = (fire ? 0.10f : 0.09f) * n;
   const float hw = (fire ? 0.10f + 0.08f * I : 0.09f + 0.07f * I) * n, hh = 0.035f * n;
@@ -437,6 +455,7 @@ void Fluid::add_forces(float dt) {
   add_blaze_forces(dt);  // wildfire, coals and mushroom
   add_flow_forces(dt);  // launch, puffs and ink
   add_water_forces(dt);  // waterfall, fountain, splash and rainshaft
+  add_air_forces(dt);    // candle, smokering and heavygas
 }
 
 void Fluid::project() {
@@ -471,7 +490,7 @@ void Fluid::project() {
   constexpr float w = 1.7f;
   // the mushroom and launch stand on the ground too (docs/EFFECTS_BLAZE.md, docs/EFFECTS_FLOW.md), and water falls onto it
   const bool ground = on_ground(p_.effect) || p_.effect == Effect::mushroom || p_.effect == Effect::launch ||
-                    water(p_.effect);
+                    water(p_.effect) || p_.effect == Effect::heavygas;  // heavy gas too (docs/EFFECTS_AIR.md)
   for (int it = 0; it < p_.pressure_iters; ++it) {
     for (const int colour : {0, 1}) {
       for (int y = 1; y <= n; ++y) {
@@ -570,6 +589,7 @@ void Fluid::render(std::span<std::uint8_t> out) const {
   if (render_energy(out)) return;  // jet, orb and vortex
   if (render_flow(out)) return;    // launch, puffs and ink
   if (render_water(out)) return;   // waterfall, fountain, splash and rainshaft
+  if (render_air(out)) return;     // candle, smokering and heavygas
   if (atmos(p_.effect)) {
     render_atmos(out);
     return;
@@ -1697,6 +1717,287 @@ bool Fluid::render_water(std::span<std::uint8_t> out) const {
   return true;
 }
 
+// --- candle, smokering and heavygas (docs/EFFECTS_AIR.md) ---------------------------------------------------------------
+//
+// Three presets kept apart from the other effects' code: their sources, forces, decay and drawing. As in the other blocks,
+// every force is a function of the state where it acts, the position, the controls and the run's two noise fields
+// (curl_potential, source_flicker), which learned dynamics see as inputs; nothing follows a clock of its own. The smoke
+// ring, which plays once, is made at its first step (as the explosion's burst) and also follows the time since its start,
+// but only through the faster of the two decays a learned one-shot sees as inputs (exp(-t / 0.15 s)).
+
+namespace {
+
+bool air_effect(Effect e) { return e == Effect::candle || e == Effect::smokering || e == Effect::heavygas; }
+
+// candle: the wick in the middle of the frame, 12% up (cells of a 128-cell frame); the flame burns above it.
+constexpr float kWickX = 64.5f, kWickY = 16.f;
+
+// smokering: the opening the ring is puffed from, in the middle near the bottom of the frame.
+constexpr float kOpeningY = 14.f;
+
+// heavygas: the floor (cells of a 128-cell frame): a mound in the middle, 12 cells up, sloping down on either side into
+// a hollow 4 cells up, a quarter of the frame wide, with a lip rising to 12 cells at the frame's edges; the gas is
+// released over the mound, flows down into the hollows and pools there.
+float gas_floor(float X) {
+  const float d = std::abs(X - 64.5f);
+  return 4.f + 8.f * smoothstep(28.f, 16.f, d) + 8.f * smoothstep(46.f, 60.f, d);
+}
+constexpr float kGasX = 64.5f, kGasY = 26.5f;  // the release, over the mound (a coarse cell's centre)
+
+}  // namespace
+
+bool Fluid::add_air_sources(float dt) {
+  if (!air_effect(p_.effect)) return false;
+  const float n = f(n_), s = n / 128.f, I = p_.intensity;
+  const auto flicker = [&](int x, int y) { return source_flicker(p_, f(x) / s, f(y) / s, time_); };
+  const auto box = [&](float x0, float x1, float y0, float y1, auto&& fn) {
+    const int xl = std::max(1, static_cast<int>(x0)), xh = std::min(n_, static_cast<int>(x1) + 1);
+    const int yl = std::max(1, static_cast<int>(y0)), yh = std::min(n_, static_cast<int>(y1) + 1);
+    for (int y = yl; y <= yh; ++y) {
+      for (int x = xl; x <= xh; ++x) fn(x, y);
+    }
+  };
+  if (p_.effect == Effect::candle) {
+    // The flame: a teardrop of hot gas standing on the wick (rounded below, pointed above), its heat and an upward flow
+    // drawn in quickly, so it is fed and steady. It leans with the draught, in gusts that follow the curl noise where it
+    // is, and its height breathes with the flicker noise (more with turbulence). Above its tip the gas burns out fast
+    // (air_decay) and goes on rising as a warm, invisible plume that carries the flame's soot up as a thin wisp.
+    const float cx = kWickX * s, y0 = kWickY * s, W = (4.f + 3.5f * I) * s, H = (20.f + 16.f * I) * s;
+    const float level = 1.6f + 0.25f * I, breathe = 0.05f + 0.3f * p_.turbulence, lift = (16.f + 10.f * I) * s;
+    const float d = 2.f * p_.wind - 1.f, rate = 1.f - std::exp(-12.f * dt);
+    box(cx - W - 0.8f * H, cx + W + 0.8f * H, y0 - 0.2f * H, y0 + 1.4f * H, [&](int x, int y) {
+      const float lean = 0.5f * d * (1.f + 0.5f * curl_potential(p_, f(x) / s, f(y) / s, time_));
+      const float h = (f(y) - y0) / (H * (1.f + breathe * (flicker(x, y) - 0.15f)));
+      if (h <= -0.1f || h >= 1.f) return;
+      const float hc = std::max(h, 0.f);
+      const float w = W * (h < 0.35f ? std::sqrt(std::max(0.f, 1.f - (0.35f - h) * (0.35f - h) / (0.45f * 0.45f)))
+                                     : std::pow(1.f - (h - 0.35f) / 0.65f, 1.2f));
+      if (w <= 0.f) return;
+      const float k = 1.f - smoothstep(0.55f, 1.f, std::abs(f(x) - cx - lean * (f(y) - y0)) / w);
+      if (k <= 0.f) return;
+      const float r = rate * k;
+      temp_[x, y] += r * (level * k * (0.85f + 0.15f * hc) - temp_[x, y]);
+      v_[x, y] += r * (lift - v_[x, y]);
+      u_[x, y] += r * (lean * lift - u_[x, y]);
+    });
+    return true;
+  }
+  if (p_.effect == Effect::smokering) {
+    const float cx = 0.5f * (n + 1.f), oy = kOpeningY * s;
+    if (time_ <= 0.f) {
+      // The ring, just puffed: two vortices turning in opposite senses (a ring seen from the side), so the air between
+      // them moves up and carries them with it, each core full of smoke (warm, lumpy with the flicker noise) out to
+      // where it turns as a whole, so the smoke rolls as a broad blob rather than winding into thin spirals.
+      const float R = (11.f + 5.f * I) * s, a = 0.7f * R, yc = oy + 0.7f * R, U = (24.f + 16.f * I) * s;
+      const float G = 2.f * 3.14159265f * 2.f * R * U, level = 1.0f + 0.4f * I;
+      for (int y = 1; y <= n_; ++y) {
+        for (int x = 1; x <= n_; ++x) {
+          float du = 0.f, dv = 0.f, m = 0.f;
+          for (const float side : {-1.f, 1.f}) {  // left core turns anticlockwise, right core clockwise
+            const float dx = f(x) - (cx + side * R), dy = f(y) - yc, r2 = dx * dx + dy * dy + 1e-6f;
+            const float w = -side * G / (2.f * 3.14159265f * r2) * (1.f - std::exp(-r2 / (a * a)));
+            du -= w * dy;
+            dv += w * dx;
+            m += std::exp(-r2 / (0.7f * 0.7f * a * a));
+          }
+          u_[x, y] += du;
+          v_[x, y] += dv;
+          if (m < 0.01f) continue;
+          const float d = level * std::min(1.f, 1.3f * m) * (0.7f + 0.3f * smoothstep(-0.5f, 0.5f, flicker(x, y)));
+          soot_[x, y] = std::max(soot_[x, y], d);
+          temp_[x, y] = std::max(temp_[x, y], 0.3f * d);
+        }
+      }
+      return true;
+    }
+    // For a moment after the puff a little smoke trails out of the opening behind the ring (the faster age decay).
+    const float trail = std::exp(-time_ / 0.15f);
+    if (trail < 0.02f) return true;
+    const float hw = (5.f + 3.f * I) * s, hh = 3.f * s, up = (25.f + 15.f * I) * s;
+    box(cx - hw, cx + hw, oy - hh, oy + hh, [&](int x, int y) {
+      const float ex = (f(x) - cx) / hw, ey = (f(y) - oy) / hh;
+      const float shape = 1.f - smoothstep(0.5f, 1.f, std::sqrt(ex * ex + ey * ey));
+      if (shape <= 0.f) return;
+      const float k = trail * shape;
+      soot_[x, y] = std::max(soot_[x, y], 0.5f * k);
+      temp_[x, y] = std::max(temp_[x, y], 0.15f * k);
+      v_[x, y] = std::max(v_[x, y], up * k);
+    });
+    return true;
+  }
+  // heavygas: poured out over the mound, in the direction of the flow (left at 0, straight down at 0.5, right at 1), at
+  // a rate set by the intensity that surges and slackens with the curl noise at the release (a spill is uneven), broken
+  // up by the flicker noise
+  const float cx = kGasX * s, cy = kGasY * s, hw = (8.f + 6.f * I) * s, hh = 7.f * s;
+  const float surge = 0.2f + 0.8f * smoothstep(-0.35f, 0.35f, curl_potential(p_, kGasX, kGasY, time_));
+  const float level = (1.2f + 0.8f * I) * surge, dir = 2.f * p_.wind - 1.f, rate = 1.f - std::exp(-6.f * dt);
+  const float pu = dir * (14.f + 18.f * I) * s, pv = -(10.f + 8.f * I) * s;
+  box(cx - 1.5f * hw, cx + 1.5f * hw, cy - 1.5f * hh, cy + 1.5f * hh, [&](int x, int y) {
+    const float ex = (f(x) - cx) / hw, ey = (f(y) - cy) / hh;
+    const float shape = 1.f - smoothstep(0.6f, 1.f, std::sqrt(ex * ex + ey * ey));
+    if (shape <= 0.f) return;
+    const float k = rate * shape * (0.3f + 0.7f * smoothstep(-0.3f, 0.5f, flicker(x, y)));
+    soot_[x, y] += k * std::max(0.f, level - soot_[x, y]);
+    u_[x, y] += k * (pu - u_[x, y]);
+    v_[x, y] += k * (pv - v_[x, y]);
+  });
+  return true;
+}
+
+// candle: the draught blows the flame and its plume sideways, in gusts that the curl noise where it blows makes (more
+// flicker the stronger it blows). smokering: nothing beyond tune()'s (its vortices are its own). heavygas: its floor (the
+// air in it is still and what comes down onto it stops, as fog's ground but following the hollows) and a draught along
+// it in the flow's direction.
+void Fluid::add_air_forces(float dt) {
+  if (!air_effect(p_.effect)) return;
+  const float n = f(n_), s = n / 128.f;
+  if (p_.effect == Effect::candle) {
+    const float d = 2.f * p_.wind - 1.f, W = d * 40.f * s, drag = 1.f - std::exp(-3.f * dt);
+    const float stir = 18.f * std::abs(d) * s, L = 14.f * s, e = 0.25f, tt = time_ * 0.8f;
+    const std::uint64_t cseed = p_.seed * 0x2545F4914F6CDD1DULL + 77;  // as curl_potential
+    for (int y = 1; y <= n_; ++y) {
+      for (int x = 1; x <= n_; ++x) {
+        const float mat = std::min(1.f, 2.f * (temp_[x, y] + soot_[x, y]));
+        if (mat <= 0.01f) continue;
+        const float px = f(x) / L, py = f(y) / L, psi = value_noise(px, py, tt, cseed);
+        u_[x, y] += drag * mat * (W * (1.f + 0.6f * psi) - u_[x, y]);
+        if (stir > 0.f) {
+          u_[x, y] += dt * stir * mat * (value_noise(px, py + e, tt, cseed) - value_noise(px, py - e, tt, cseed)) / (2.f * e);
+          v_[x, y] -= dt * stir * mat * (value_noise(px + e, py, tt, cseed) - value_noise(px - e, py, tt, cseed)) / (2.f * e);
+        }
+      }
+    }
+    return;
+  }
+  if (p_.effect == Effect::smokering) {
+    // The wind moves the air, and the air carries the ring: the clear air is drawn towards the wind's speed, the smoky
+    // cores (whose turning is the ring) much less. As the ring slows it breaks up: the curl noise stirs its smoke harder
+    // as it ages (the slower age decay, exp(-t / 1 s)), more with turbulence.
+    const float W = (2.f * p_.wind - 1.f) * 18.f * s, drag = 1.f - std::exp(-0.8f * dt);
+    const float amp = (10.f + 40.f * p_.turbulence) * s * (1.f - std::exp(-time_ / 1.f)), L = 14.f * s, e = 0.25f, tt = time_ * 0.8f;
+    const std::uint64_t cseed = p_.seed * 0x2545F4914F6CDD1DULL + 77;  // as curl_potential
+    for (int y = 1; y <= n_; ++y) {
+      for (int x = 1; x <= n_; ++x) {
+        const float mat = std::min(1.f, 2.f * (temp_[x, y] + soot_[x, y]));
+        u_[x, y] += drag * (1.f - 0.8f * mat) * (W - u_[x, y]);
+        if (mat <= 0.01f) continue;
+        const float px = f(x) / L, py = f(y) / L;
+        u_[x, y] += dt * amp * mat * (value_noise(px, py + e, tt, cseed) - value_noise(px, py - e, tt, cseed)) / (2.f * e);
+        v_[x, y] -= dt * amp * mat * (value_noise(px + e, py, tt, cseed) - value_noise(px - e, py, tt, cseed)) / (2.f * e);
+      }
+    }
+    return;
+  }
+  if (p_.effect != Effect::heavygas) return;
+  const float dir = 2.f * p_.wind - 1.f, draught = dir * 16.f * s, drag = 1.f - std::exp(-0.8f * dt);
+  for (int x = 1; x <= n_; ++x) {
+    const float g = gas_floor(f(x) / s) * s, top = g + 4.f * s, low = g + 25.f * s;
+    for (int y = 1; y <= n_; ++y) {
+      const float Y = f(y);
+      if (Y > low) break;
+      const float hold = 1.f - smoothstep(g - 2.f * s, g + 2.f * s, Y), stop = 1.f - smoothstep(g, top, Y);
+      u_[x, y] *= 1.f - hold;
+      v_[x, y] *= 1.f - (v_[x, y] < 0.f ? std::max(hold, stop) : hold);
+      u_[x, y] += drag * (1.f - smoothstep(g + 10.f * s, low, Y)) * std::min(1.f, 2.f * soot_[x, y]) * (draught - u_[x, y]);
+    }
+  }
+}
+
+// candle: the flame's gas burns out fast (its heat above a fifth falls at up to 9 per second, on top of tune()'s slow
+// cooling of the warm plume) and leaves soot as it burns: the wisp, more in a draught or with turbulence, when it gutters.
+// smokering: its smoke (and warmth) spreads a little, as smoke in still air does (4 cells squared per second), so the
+// ring's cores stay broad blobs rather than winding into thin spirals.
+// heavygas: what the flow has carried into the floor is gone.
+void Fluid::air_decay(float dt) {
+  if (p_.effect == Effect::smokering) {
+    const float k = 4.f * dt * (f(n_) / 128.f) * (f(n_) / 128.f);
+    for (Field* q : {&soot_, &temp_}) {
+      Field& a = *q;
+      for (int y = 1; y <= n_; ++y) {
+        for (int x = 1; x <= n_; ++x) {
+          const float l = a[std::max(1, x - 1), y] + a[std::min(n_, x + 1), y] + a[x, std::max(1, y - 1)] + a[x, std::min(n_, y + 1)] - 4.f * a[x, y];
+          tmp_a_[x, y] = a[x, y] + k * l;
+        }
+      }
+      for (int y = 1; y <= n_; ++y) {
+        for (int x = 1; x <= n_; ++x) a[x, y] = tmp_a_[x, y];
+      }
+    }
+    return;
+  }
+  if (p_.effect == Effect::candle) {
+    const float soot = 0.07f + 0.15f * p_.turbulence + 0.15f * std::abs(2.f * p_.wind - 1.f);
+    for (int y = 1; y <= n_; ++y) {
+      for (int x = 1; x <= n_; ++x) {
+        const float T = temp_[x, y];
+        if (T <= 0.2f) continue;
+        const float burnt = T * (1.f - std::exp(-9.f * dt * smoothstep(0.2f, 0.45f, T)));
+        temp_[x, y] = T - burnt;
+        soot_[x, y] += soot * burnt;
+      }
+    }
+    return;
+  }
+  if (p_.effect != Effect::heavygas) return;
+  (void)dt;
+  const float s = f(n_) / 128.f;
+  for (int x = 1; x <= n_; ++x) {
+    const float g = gas_floor(f(x) / s) * s;
+    for (int y = 1; y <= n_ && f(y) < g - 2.f * s; ++y) soot_[x, y] = 0.f;
+  }
+}
+
+namespace {
+
+// the candle's light: dull orange-red at its edge, through orange and yellow to a pale yellow-white core
+Rgb candle_ramp(float t) {
+  static constexpr std::array<float, 6> at{0.3f, 0.38f, 0.48f, 0.64f, 0.82f, 1.05f};
+  static constexpr std::array<Rgb, 6> c{{{0.f, 0.f, 0.f}, {0.40f, 0.10f, 0.01f}, {0.90f, 0.38f, 0.06f}, {1.f, 0.68f, 0.20f}, {1.f, 0.87f, 0.48f}, {1.f, 0.97f, 0.82f}}};
+  return ramp(at, c, t);
+}
+
+}  // namespace
+
+// candle: emitted light over its thin grey smoke; smokering: pale grey smoke, lit from above and to the left and shaded
+// by itself; heavygas: a cold white vapour, barely shaded, faintly blue in its depth. The floor is the scene's to draw.
+bool Fluid::render_air(std::span<std::uint8_t> out) const {
+  if (!air_effect(p_.effect)) return false;
+  const int S = p_.size;
+  const float n = f(n_), sc = n / f(S);
+  constexpr float lx = -0.45f, ly = 0.89f;  // towards the light: up and to the left
+  for (int py = 0; py < S; ++py) {
+    for (int px = 0; px < S; ++px) {
+      const float gx = (f(px) + 0.5f) * sc + 0.5f;
+      const float gy = n - (f(py) + 0.5f) * sc + 0.5f;
+      const float T = temp_.sample(gx, gy), D = soot_.sample(gx, gy);
+      float tau = 0.f;  // optical depth towards the light
+      for (int k = 1; k <= 12; ++k) tau += soot_.sample(gx + lx * 2.f * f(k) * sc, gy + ly * 2.f * f(k) * sc);
+      Rgb c{};
+      float a = 0.f;
+      if (p_.effect == Effect::candle) {
+        const Rgb e = candle_ramp(T);
+        const float as = 1.f - std::exp(-2.5f * D), g = 0.5f * (0.5f + 0.5f * std::exp(-0.3f * tau)), keep = 1.f - 0.4f * as;
+        c = {e.r * keep + g * as, e.g * keep + 0.98f * g * as, e.b * keep + 0.96f * g * as};
+        a = clamp01(as + 0.3f * std::max(e.r, e.g));
+      } else if (p_.effect == Effect::smokering) {
+        const float as = 1.f - std::exp(-2.2f * D), g = 0.84f * (0.42f + 0.58f * std::exp(-0.3f * tau));
+        c = {0.97f * g * as, 0.97f * g * as, g * as};
+        a = as;
+      } else {
+        const float as = 1.f - std::exp(-1.8f * D), g = 0.56f + 0.42f * std::exp(-0.1f * tau);
+        c = {(0.9f + 0.06f * g) * g * as, (0.94f + 0.04f * g) * g * as, g * as};
+        a = as;
+      }
+      auto o = out.subspan((static_cast<std::size_t>(py) * S + px) * 4, 4);
+      o[0] = q8(c.r);
+      o[1] = q8(c.g);
+      o[2] = q8(c.b);
+      o[3] = q8(a);
+    }
+  }
+  return true;
+}
+
 void stamp(Clip& clip, const Params& p) {
   clip.effect = effect_name(p.effect);
   clip.source = "sim";
@@ -1730,7 +2031,10 @@ Clip simulate(const Params& p) {
   if (loops) {
     // Long enough for the plume to reach a statistically steady state, so the loop crossfade joins similar frames
     // (fog takes about 5 s to cover the ground; cloud as long to grow from nothing; the water effects' mist as long).
-    const int warmup = p.warmup >= 0 ? p.warmup : (p.effect == Effect::smoke ? 180 : atmos(p.effect) || water(p.effect) ? 150 : flow_warmup(p.effect));
+    const int warmup = p.warmup >= 0 ? p.warmup
+                       : (p.effect == Effect::smoke                                                    ? 180
+                          : atmos(p.effect) || water(p.effect) || p.effect == Effect::heavygas ? 150  // heavy gas pools as fog does
+                                                                                               : flow_warmup(p.effect));
     for (int i = 0; i < warmup; ++i) fluid.step_frame();
   }
   Clip raw;

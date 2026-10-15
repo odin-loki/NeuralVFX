@@ -1679,9 +1679,10 @@ SimRecipe recipe_for(sim::Effect e) {
   if (e == sim::Effect::smoke) r.start_fine = 64;  // smoke lingers: growing its detail would take seconds
   if (e == sim::Effect::fog || e == sim::Effect::cloud) r.start_fine = 64;  // they linger too (docs/EFFECTS_ATMOSPHERE.md)
   if (e == sim::Effect::launch || e == sim::Effect::puffs || e == sim::Effect::ink) r.start_fine = 64;  // and these (docs/EFFECTS_FLOW.md)
+  if (e == sim::Effect::heavygas) r.start_fine = 64;  // heavy gas pools and lingers, as fog does (docs/EFFECTS_AIR.md)
   if (!sim::effect_loops(e)) {  // the explosion, and dust (docs/EFFECTS_ATMOSPHERE.md), which plays once as it does
     r.runs = 240;
-    r.frames = sim::one_shot_frames(e);  // 90 (3 s); the mushroom's 150 (docs/EFFECTS_BLAZE.md)
+    r.frames = sim::one_shot_frames(e);  // 90 (3 s); the mushroom's 150 (docs/EFFECTS_BLAZE.md); a smoke ring's 120 (docs/EFFECTS_AIR.md)
     r.start_frame = 0;
     r.start_fine = 64;  // the burst's shape is the look
     r.starts = 16;
@@ -1689,7 +1690,8 @@ SimRecipe recipe_for(sim::Effect e) {
   }
   // steam and magic (docs/EFFECTS.md) take fire's recipe: their vapour and energy are gone within a second or two, so
   // like fire's flames they grow their fine fields at instance start instead of storing them
-  // and so do jet, orb and vortex (docs/EFFECTS_ENERGY.md), and wildfire and coals (docs/EFFECTS_BLAZE.md)
+  // and so do jet, orb and vortex (docs/EFFECTS_ENERGY.md), wildfire and coals (docs/EFFECTS_BLAZE.md), and the candle
+  // (docs/EFFECTS_AIR.md), whose flame is gone within a second and its thin wisp within two
   return r;
 }
 
