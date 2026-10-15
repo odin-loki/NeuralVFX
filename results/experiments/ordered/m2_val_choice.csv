@@ -1,0 +1,12 @@
+effect,model,targets,better,none_worse,meets_rule,mean_frame_gain_db,spectrum_change,coverage_margin,emission_margin,outside_margin,strict_worse,sha256
+explosion,ms,mean_frame,1,0,0,3.3696,-0.00341,0.003109,0.000100,spectrum_l1,none,b0ee6f053b4b83594fe9cb26d5b496b3ba829fe32d246ab24297796e032a7bc5
+explosion,chosen,,,,,,,,,,,none
+dust,ms,mean_frame,1,0,0,1.0866,-0.00843,0.000747,0.000100,coverage_l1,none,938440a486c21c393aa4af74951284ab53e32468099f9f14073876ddc5292af9
+dust,chosen,,,,,,,,,,,none
+steam,mt4_s16,mean_frame;spectrum_l1,0,0,0,-0.0693,-0.00283,0.000726,0.000100,coverage_l1,emission_l1,65ac127738eab25bfab5deee116125364500d31886a752d954feb0529e5364c8
+steam,s16,mean_frame;spectrum_l1,0,1,0,0.0138,-0.01624,0.000726,0.000100,none,none,c2c24f39d08b8c7ce4373682111b774847c7fa6e3d9e433e6c4bb4ced790ca12
+steam,chosen,,,,,,,,,,,none
+jet,mt4_s16,mean_frame;spectrum_l1,0,0,0,0.2147,0.09546,0.000855,0.000100,coverage_l1;emission_l1,spectrum_l1,e69a087befb3b5bd11393355ef5f3faf4c4cb2dd27a57cfef847f01c219acce7
+jet,mt8,mean_frame,0,0,0,0.0294,-0.00318,0.000855,0.000100,coverage_l1,none,5e98f8c01f99b10a500d4277ff75bf5c5a05756298fd00b3cd7c6dde3b24ecbd
+jet,s16,mean_frame;spectrum_l1,0,0,0,0.0533,0.11358,0.000855,0.000100,abs_ln_motion_ratio,spectrum_l1;abs_ln_motion_ratio,4fdb4b8967a446325854fd8ddd11f93b8d6a861f90d2f48ade685c53020af1bb
+jet,chosen,,,,,,,,,,,none
