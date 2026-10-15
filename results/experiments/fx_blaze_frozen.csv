@@ -1,0 +1,2 @@
+kind,name,file,bytes,sha256,source
+rollout_effect,wildfire,fx_blaze/models/d/wildfire.nvfx,83719,ada7ce4af7496237c7cdabcf27efb739bef1b0b5e57c4cdc65dd1f2c6eba2585,study D's recipe (docs/EFFECTS_BLAZE.md): d-train --stages12 1 then d-tune then d-finish
