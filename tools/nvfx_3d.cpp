@@ -15,6 +15,7 @@
 //   nvfx_3d freeze --model F                                        the model the test runs on (results/3d/frozen.csv)
 //   nvfx_3d video  --kind orbit|wind|real-vs-learned --out F.mp4    demo videos (videos/README.md)
 //   nvfx_3d timing --threads 1,2,4                                  ms per step and per picture (results/3d/timing.csv)
+//   nvfx_3d edge   --controls I,W,T                                 the heat at the box's sides as the model plays (the runaway)
 #include "args.hpp"
 #include "label_font.hpp"
 
@@ -1463,6 +1464,50 @@ int timing(const Args& a) {
   return 0;
 }
 
+// --- the runaway's diagnosis (STUDY_3D.md §11) ---------------------------------------------------------------------
+
+// The reference model played from the start point nearest the controls: every 15 frames, the coarse heat summed in each
+// side slab of the box (the cells at x = 0, x = rx - 1, z = 0, z = rz - 1) and in the whole box, and the hottest side cell.
+int edge(const Args& a) {
+  const fs::path root = data_root(a);
+  const fs::path model = a.has("model") ? fs::path(a.str("model")) : root / "models" / "chosen.nvfx3";
+  const auto cs = nfx::tools::parse_floats(a.str("controls", "0.7,0.05,0.5"));
+  const std::array<float, 3> c{cs.at(0), cs.at(1), cs.at(2)};
+  const std::uint64_t seed = a.u64("seed", 9'900'004);
+  const int frames = a.i("frames", 240);
+  nfx::Pool pool(a.i("threads", 3));
+  r3::Model m = load_study_model(model);
+  r3::quantise_like_storage(m);
+  r3::Workspace ws(m);
+  fast_conv(ws);
+  const std::vector<float> cv(c.begin(), c.end());
+  r3::State st = r3::make_state(m);
+  r3::start(m, nearest_start(m, c), cv, seed, st, ws, &pool);
+  const int rx = m.h.rx, ry = m.h.ry, rz = m.h.rz, C = m.h.channels();
+  std::println("frame,heat x=0,heat x=max,heat z=0,heat z=max,heat in all,hottest side cell");
+  for (int f = 0; f <= frames; ++f) {
+    if (f > 0) r3::step(m, st, cv, seed, ws, &pool);
+    if (f % 15 != 0) continue;
+    double side[4] = {0, 0, 0, 0}, all = 0, hot = 0;
+    for (int y = 0; y < ry; ++y) {
+      for (int z = 0; z < rz; ++z) {
+        for (int x = 0; x < rx; ++x) {
+          const double t = st.coarse[((zu(y) * zu(rz) + zu(z)) * zu(rx) + zu(x)) * zu(C) + 3];
+          all += t;
+          const bool sx0 = x == 0, sx1 = x == rx - 1, sz0 = z == 0, sz1 = z == rz - 1;
+          if (sx0) side[0] += t;
+          if (sx1) side[1] += t;
+          if (sz0) side[2] += t;
+          if (sz1) side[3] += t;
+          if (sx0 || sx1 || sz0 || sz1) hot = std::max(hot, t);
+        }
+      }
+    }
+    std::println("{},{:.3f},{:.3f},{:.3f},{:.3f},{:.3f},{:.4f}", f, side[0], side[1], side[2], side[3], all, hot);
+  }
+  return 0;
+}
+
 // --- pilot and look ------------------------------------------------------------------------------------------------
 
 void put_over(nfx::Image& img, const std::vector<std::uint8_t>& rgba, int w, int h, int x0, int y0) {
@@ -1637,6 +1682,7 @@ int main(int argc, char** argv) {
     else if (cmd == "freeze") rc = freeze(a);
     else if (cmd == "video") rc = video(a);
     else if (cmd == "timing") rc = timing(a);
+    else if (cmd == "edge") rc = edge(a);
     else std::println(stderr, "unknown command {}", cmd);
     a.warn_unused();
     return rc;

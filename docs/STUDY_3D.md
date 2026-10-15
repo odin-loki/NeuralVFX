@@ -402,11 +402,23 @@ light, colour and smoke are physics-based pictures of the fields, not learned.
   the next shard change (8 s) clears it ([figures/n_wind_runaway.png](figures/n_wind_runaway.png): constant controls
   0.7, 0.05, 0.5, seed 9,900,004, at 2, 3.5, 5 and 6.5 s). It was seen at winds of 0.05 and 0.25 in renders, and the
   endless statistics show it at 0.15, 0.25 and 0.30 (the per-setting rows below); not at 0.4 to 0.8. The wind video
-  shows it (§10). The most likely cause is the coarse advection: it samples clamped to the grid, so at an edge where
-  the flow comes in, the edge cell's heat and soot are carried inwards and kept at the edge every frame; whatever the
-  stepper adds there feeds itself, and only the range clamp bounds it. The simulator's edge has no heat to keep; the
-  stepper's, under a strong wind and at zero padding, does. Training windows (at most 24 frames of burn-in and 12 of
-  loss) are too short to see a slow build-up. Why only towards -x is not known.
+  shows it (§10).
+
+  **Where it grows** (`nvfx_3d edge`, `results/3d/edge.csv`: the reference model played for 8 s from the start point
+  nearest the controls (0.7, *wind*, 0.5), seed 9,900,004, the coarse heat summed over each side of the box every
+  15 frames): the heat grows at the box's sides, not at the burner, and grows exponentially, doubling about every half
+  second once it starts. At a wind of 0.05 the upwind side (x = max) holds 0.003 at the start, 0.5 after 2 s, 64 after
+  5 s; the two sides along the wind (z = 0 and z = max) follow, and the box's total heat goes from 37 to 1,848 by
+  6.5 s. **With no wind (0.5) the same growth starts later**: the z = max side holds 0.001 at the start, 0.09 at
+  4.5 s and 35 at 8 s, the box's total heat goes from 19 to 105 between 4.5 and 8 s, and the hottest side cell reaches
+  0.67 (about 1,570 K in the renderer) just as the shard ends. At 0.95 it is slower again (4.5 at z = max after 8 s). So the 8 s shards are what keeps the effect playable at most settings.
+
+  **The most likely cause** is the coarse advection: it samples clamped to the grid, so at a side where air flows in
+  (upwind, and wherever the plume draws air in from its sides) a cell traces back to itself and keeps its heat every
+  frame; whatever the stepper adds there feeds itself, and only the range clamp bounds it. The simulator's sides have
+  no heat to keep. Training windows (at most 24 frames of burn-in and 12 of loss) are far shorter than the 4 to 5 s
+  the growth takes to show at most winds. Why the upwind side starts at once only when the wind blows towards -x is
+  not known.
 - **It is most of what the rule found worse.** Per setting (`compare_test_learned_vs_coarse.md`; context, not judged):
   at the test's lowest wind, (0.45, 0.25, 0.30), the learned fire moves 2.4 times as much as the real runs (the coarse
   simulation 1.44 times), its coverage distance is 0.022 (coarse 0.001) and its mean picture 2.9 dB worse than the
@@ -449,6 +461,7 @@ $B timing --threads 1,2,4                                           # §8 (resul
 $B video --kind orbit --out 3d_fire_orbit.mp4 --seconds 12 --controls 0.7,0.5,0.6 --seed 9900001                  # §10
 $B video --kind real-vs-learned --out 3d_real_vs_learned.mp4 --seconds 10 --controls 0.65,0.45,0.55 --seed 9900000
 $B video --kind wind --out 3d_wind.mp4 --seconds 12 --controls 0.7,0.5,0.5 --seed 9900002
+for w in 0.05 0.5 0.95; do $B edge --controls 0.7,$w,0.5; done                 # §11 (results/3d/edge.csv)
 ```
 
 The per-run tracking rows (`results/3d/val_track/*.csv`, `results/3d/test_track/*.csv`) have no header: the setting,
@@ -474,9 +487,10 @@ What to do differently on the PC:
 1. **Choose on how it plays, not only on how it tracks.** The rule here chose on tracking at 1 s, and the candidate it
    chose plays worse than the one it passed over (§6). For effects that are played endlessly the choice should require
    the endless statistics not to be worse, then rank by tracking.
-2. **Let nothing flow in at an open edge, and train on long rollouts.** The runaway (§11) most likely comes from
-   advection that samples clamped to the grid, so an upwind edge keeps and feeds whatever heat reaches it; open
-   boundaries should bring in ambient air (zero heat, soot and memory). And a slow build-up like it is invisible to
+2. **Let nothing flow in at an open edge, and train on long rollouts.** The runaway (§11) grows at the box's sides at
+   every wind and most likely comes from advection that samples clamped to the grid, so a side where air flows in
+   keeps and feeds whatever heat reaches it; open boundaries should bring in ambient air (zero heat, soot and memory),
+   and `nvfx_3d edge` is the check. And a slow build-up like it is invisible to
    windows of 12 frames after at most 24 of burn-in: train with burn-in from the stepper's own long rollouts (hundreds of
    frames), at the controls' extremes, and with controls that move.
 3. **Spend the cost where it is.** The detail layer is the cost: SIMD and sparse bricks for it first (only blocks with
