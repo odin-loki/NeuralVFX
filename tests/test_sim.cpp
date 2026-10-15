@@ -181,9 +181,10 @@ TEST(Sim, LoopSeamIsNoWorseThanAnOrdinaryFrameStep) {
   EXPECT_LE(mean_abs_diff(c.frame(c.frames - 1), c.frame(0)), 1.5 * step + 0.5);
 }
 
-// Adding effects (docs/EFFECTS.md, docs/EFFECTS_ENERGY.md, docs/EFFECTS_ATMOSPHERE.md) must not change the earlier
-// ones: these hashes are of clips made before steam and magic existed (fire, smoke, explosion) and before jet, orb,
-// vortex, fog, dust and cloud existed (steam, magic).
+// Adding effects (docs/EFFECTS.md, docs/EFFECTS_ENERGY.md, docs/EFFECTS_ATMOSPHERE.md, docs/EFFECTS_BLAZE.md) must not
+// change the earlier ones: these hashes are of clips made before steam and magic existed (fire, smoke, explosion),
+// before jet, orb, vortex, fog, dust and cloud existed (steam, magic), and before wildfire, coals and mushroom existed
+// (jet, orb, vortex, fog, dust, cloud).
 // FNV-1a of the RGBA bytes; the solver is built at the baseline ISA without contraction.
 TEST(Sim, StudyEffectsAreUnchangedByTheNewOnes) {
   const auto fnv = [](std::span<const std::uint8_t> b) {
@@ -194,18 +195,25 @@ TEST(Sim, StudyEffectsAreUnchangedByTheNewOnes) {
     }
     return h;
   };
-  const std::array<std::pair<sim::Effect, std::uint64_t>, 5> want{{{sim::Effect::fire, 0xecb25de8e62e7379ULL},
-                                                                    {sim::Effect::smoke, 0xea602bfa2409bf3fULL},
-                                                                    {sim::Effect::explosion, 0xbb823d31fd8c4eb4ULL},
-                                                                    {sim::Effect::steam, 0xa57b2dc109882ec3ULL},
-                                                                    {sim::Effect::magic, 0xf79b687a9614f399ULL}}};
+  const std::array<std::pair<sim::Effect, std::uint64_t>, 11> want{{{sim::Effect::fire, 0xecb25de8e62e7379ULL},
+                                                                     {sim::Effect::smoke, 0xea602bfa2409bf3fULL},
+                                                                     {sim::Effect::explosion, 0xbb823d31fd8c4eb4ULL},
+                                                                     {sim::Effect::steam, 0xa57b2dc109882ec3ULL},
+                                                                     {sim::Effect::magic, 0xf79b687a9614f399ULL},
+                                                                     {sim::Effect::jet, 0x9cdcde02a8631bf6ULL},
+                                                                     {sim::Effect::orb, 0x5fef6cca235e06f1ULL},
+                                                                     {sim::Effect::vortex, 0xfa46f5fc13b9cb20ULL},
+                                                                     {sim::Effect::fog, 0x36573f12c43055b2ULL},
+                                                                     {sim::Effect::dust, 0xa20af83462f66930ULL},
+                                                                     {sim::Effect::cloud, 0x8e6664474fe37d58ULL}}};
   for (const auto& [e, h] : want) {
     auto p = small(e);
     p.intensity = 0.8f;
     p.wind = 0.3f;
     p.turbulence = 0.7f;
     p.seed = 7;
-    EXPECT_EQ(fnv(sim::simulate(p).rgba), h) << sim::effect_name(e);
+    const std::uint64_t got = fnv(sim::simulate(p).rgba);
+    EXPECT_EQ(got, h) << sim::effect_name(e) << std::format(": 0x{:016x}", got);
   }
 }
 
@@ -214,7 +222,7 @@ TEST(Sim, NewEffectsAreNamedAndLoop) {
     sim::Effect back{};
     ASSERT_TRUE(sim::parse_effect(sim::effect_name(e), back));
     EXPECT_EQ(back, e);
-    EXPECT_EQ(sim::effect_loops(e), e != sim::Effect::dust);  // dust plays once, as the explosion
+    EXPECT_EQ(sim::effect_loops(e), e != sim::Effect::dust && e != sim::Effect::mushroom);  // they play once, as the explosion
     EXPECT_EQ(sim::simulate(small(e)).rgba, sim::simulate(small(e)).rgba) << sim::effect_name(e);
   }
   EXPECT_EQ(sim::kAllEffects.size(), sim::kEffects.size() + sim::kNewEffects.size());
@@ -566,6 +574,200 @@ TEST(Sim, CloudStaysAliveAndDriftsWithTheWind) {
   const auto left = spreads(atmos_params(sim::Effect::cloud, 0.5f, 0.f, 0.5f), 150);
   const auto right = spreads(atmos_params(sim::Effect::cloud, 0.5f, 1.f, 0.5f), 150);
   EXPECT_GT(right[149].cx, left[149].cx + 0.04);
+}
+
+// --- wildfire, coals and mushroom (docs/EFFECTS_BLAZE.md) ---------------------------------------------------------------
+
+namespace {
+
+// Where the heat and the soot are, as fractions of the frame (y up): amounts, centroids, and for the heat the share of
+// columns between 12% and 88% of the width that burn in the bottom rows (below `low`), the height under which 98% of it
+// lies, and its extent along x (cells above a tenth of its peak).
+struct Blaze {
+  double heat = 0, soot = 0, hx = 0, hy = 0, sx = 0, sy = 0, burning = 0, heat_top = 0, left = 1, right = 0;
+};
+
+Blaze blaze_of(const sim::State& s, double low = 0.12) {
+  Blaze o;
+  const double n = s.n;
+  float peak = 0.f;
+  for (const float t : s.temp) peak = std::max(peak, t);
+  std::vector<double> rows(static_cast<std::size_t>(s.n), 0.0);
+  int cols = 0, lit = 0;
+  for (int x = 0; x < s.n; ++x) {
+    double base = 0;
+    for (int y = 0; y < s.n; ++y) {
+      const auto i = static_cast<std::size_t>(y * s.n + x);
+      const double t = s.temp[i], d = s.soot[i];
+      o.heat += t;
+      o.soot += d;
+      o.hx += t * (x + 0.5) / n;
+      o.hy += t * (y + 0.5) / n;
+      o.sx += d * (x + 0.5) / n;
+      o.sy += d * (y + 0.5) / n;
+      rows[static_cast<std::size_t>(y)] += t;
+      if ((y + 0.5) / n < low) base = std::max(base, t);
+      if (t > 0.1 * peak) {
+        o.left = std::min(o.left, x / n);
+        o.right = std::max(o.right, (x + 1) / n);
+      }
+    }
+    if ((x + 0.5) / n > 0.12 && (x + 0.5) / n < 0.88) {
+      ++cols;
+      lit += base > 0.15;
+    }
+  }
+  o.burning = static_cast<double>(lit) / cols;
+  double acc = 0;
+  for (int y = 0; y < s.n; ++y) {
+    acc += rows[static_cast<std::size_t>(y)];
+    if (acc >= 0.98 * o.heat) {
+      o.heat_top = (y + 1) / n;
+      break;
+    }
+  }
+  if (o.heat > 0) {
+    o.hx /= o.heat;
+    o.hy /= o.heat;
+  }
+  if (o.soot > 0) {
+    o.sx /= o.soot;
+    o.sy /= o.soot;
+  }
+  return o;
+}
+
+// The state after each of `frames` frames, at 64 cells.
+std::vector<sim::State> blaze_run(sim::Effect e, float intensity, float wind, float turbulence, int frames) {
+  sim::Fluid f(atmos_params(e, intensity, wind, turbulence));
+  std::vector<sim::State> v;
+  for (int i = 0; i < frames; ++i) {
+    f.step_frame();
+    v.push_back(f.state());
+  }
+  return v;
+}
+
+}  // namespace
+
+TEST(Sim, BlazeEffectsAreNamedAndOnlyTheMushroomPlaysOnce) {
+  const std::array blaze{sim::Effect::wildfire, sim::Effect::coals, sim::Effect::mushroom};
+  for (const sim::Effect e : blaze) {
+    sim::Effect back{};
+    ASSERT_TRUE(sim::parse_effect(sim::effect_name(e), back));
+    EXPECT_EQ(back, e);
+    EXPECT_TRUE(std::ranges::contains(sim::kNewEffects, e));
+    EXPECT_FALSE(std::ranges::contains(sim::kEffects, e));
+    EXPECT_EQ(sim::control_names(e), sim::kControlNames);
+  }
+  EXPECT_EQ(sim::effect_name(sim::Effect::wildfire), "wildfire");
+  EXPECT_EQ(sim::effect_name(sim::Effect::coals), "coals");
+  EXPECT_EQ(sim::effect_name(sim::Effect::mushroom), "mushroom");
+  // after cloud, in this order
+  EXPECT_TRUE(std::ranges::equal(std::span(sim::kAllEffects).last(4), std::array{sim::Effect::cloud, sim::Effect::wildfire, sim::Effect::coals, sim::Effect::mushroom}));
+  EXPECT_TRUE(sim::effect_loops(sim::Effect::wildfire));
+  EXPECT_TRUE(sim::effect_loops(sim::Effect::coals));
+  EXPECT_FALSE(sim::effect_loops(sim::Effect::mushroom));
+  EXPECT_EQ(sim::one_shot_frames(sim::Effect::explosion), 90);
+  EXPECT_EQ(sim::one_shot_frames(sim::Effect::dust), 90);
+  EXPECT_EQ(sim::one_shot_frames(sim::Effect::mushroom), 150);
+  EXPECT_EQ(sim::one_shot_frames(sim::Effect::fire), 0);
+  EXPECT_EQ(sim::one_shot_frames(sim::Effect::wildfire), 0);
+  // all three give light: emission (colour above alpha) somewhere
+  for (const sim::Effect e : blaze) {
+    auto p = atmos_params(e, 0.7f, 0.5f, 0.5f);
+    p.frames = 20;
+    const Clip c = sim::simulate(p);
+    long glowing = 0;
+    for (std::size_t i = 0; i < c.rgba.size(); i += 4) glowing += c.rgba[i] > c.rgba[i + 3] + 8;
+    EXPECT_GT(glowing, 200) << sim::effect_name(e);
+  }
+}
+
+TEST(Sim, WildfireBurnsAcrossTheWholeWidthWithSmokeAboveAndLeansWithTheWind) {
+  const auto v = blaze_run(sim::Effect::wildfire, 0.6f, 0.5f, 0.5f, 150);
+  double burning = 0;
+  for (int i = 90; i < 150; ++i) {
+    const Blaze b = blaze_of(v[static_cast<std::size_t>(i)]);
+    burning += b.burning / 60.0;
+    EXPECT_GT(b.sy, b.hy + 0.1) << i;  // the smoke rolls off above the flames
+  }
+  EXPECT_GT(burning, 0.85);  // the whole width burns, not one flame
+  const Blaze late = blaze_of(v[149]);
+  EXPECT_LT(late.left, 0.15);
+  EXPECT_GT(late.right, 0.85);
+  // more intensity, taller flames
+  const auto low = blaze_run(sim::Effect::wildfire, 0.f, 0.5f, 0.5f, 120), high = blaze_run(sim::Effect::wildfire, 1.f, 0.5f, 0.5f, 120);
+  double top_low = 0, top_high = 0;
+  for (int i = 60; i < 120; ++i) {
+    top_low += blaze_of(low[static_cast<std::size_t>(i)]).heat_top / 60.0;
+    top_high += blaze_of(high[static_cast<std::size_t>(i)]).heat_top / 60.0;
+  }
+  EXPECT_GT(top_high, top_low + 0.1);
+  // the wind leans the flames and carries the smoke to its side
+  const auto left = blaze_run(sim::Effect::wildfire, 0.6f, 0.f, 0.5f, 120), right = blaze_run(sim::Effect::wildfire, 0.6f, 1.f, 0.5f, 120);
+  EXPECT_GT(blaze_of(right[119]).sx, blaze_of(left[119]).sx + 0.15);
+  EXPECT_GT(blaze_of(right[119]).hx, blaze_of(left[119]).hx + 0.03);
+}
+
+TEST(Sim, CoalsGlowLowAndWideAndTheirGlowCrawls) {
+  const auto v = blaze_run(sim::Effect::coals, 0.6f, 0.5f, 0.5f, 240);
+  double above = 0;
+  for (int i = 120; i < 240; ++i) {
+    const sim::State& s = v[static_cast<std::size_t>(i)];
+    const Blaze b = blaze_of(s, 0.1);
+    EXPECT_LT(b.hy, 0.12) << i;       // low: the glow stays in the bed
+    EXPECT_LT(b.sy, 0.12) << i;       // and so does its char
+    EXPECT_LT(b.heat_top, 0.3) << i;  // the flames are short
+    EXPECT_LT(b.left, 0.2) << i;      // and wide
+    EXPECT_GT(b.right, 0.8) << i;
+    for (int y = s.n / 5; y < s.n; ++y) {
+      for (int x = 0; x < s.n; ++x) above += s.temp[static_cast<std::size_t>(y * s.n + x)];
+    }
+  }
+  EXPECT_GT(above, 1.0);  // small flames lick up from the bed now and then
+  // the glow crawls: the bed's heat a second apart differs by a good part of itself
+  const auto bed_change = [&](std::size_t a, std::size_t b) {
+    double diff = 0, sum = 0;
+    for (std::size_t i = 0; i < v[a].temp.size(); ++i) {
+      diff += std::abs(v[a].temp[i] - v[b].temp[i]);
+      sum += v[a].temp[i];
+    }
+    return diff / sum;
+  };
+  EXPECT_GT(bed_change(150, 180), 0.25);
+  // hotter and livelier with intensity
+  const auto cool = blaze_run(sim::Effect::coals, 0.f, 0.5f, 0.5f, 120), hot = blaze_run(sim::Effect::coals, 1.f, 0.5f, 0.5f, 120);
+  EXPECT_GT(blaze_of(hot[119]).heat, 1.5 * blaze_of(cool[119]).heat);
+}
+
+TEST(Sim, MushroomRisesIntoACapThatSpreadsAndDarkens) {
+  const auto v = blaze_run(sim::Effect::mushroom, 0.6f, 0.5f, 0.5f, 150);  // its 5 s
+  const Blaze first = blaze_of(v[14]), last = blaze_of(v[149]);
+  EXPECT_LT(first.sy, 0.3);  // a fireball near the ground
+  EXPECT_GT(last.sy, 0.5);   // that rose
+  EXPECT_LT(last.heat / last.soot, 0.3 * first.heat / first.soot);  // and turned to smoke
+  // a cap wider than its stem: soot above 60% of the height spans more than twice as many columns as at 15 to 30%
+  const auto span = [](const sim::State& s, double lo, double hi) {
+    int cols = 0;
+    for (int x = 0; x < s.n; ++x) {
+      double m = 0;
+      for (int y = 0; y < s.n; ++y) {
+        const double h = (y + 0.5) / s.n;
+        if (h >= lo && h < hi) m = std::max(m, static_cast<double>(s.soot[static_cast<std::size_t>(y * s.n + x)]));
+      }
+      cols += m > 0.2;
+    }
+    return cols;
+  };
+  EXPECT_GT(span(v[119], 0.6, 1.0), 2 * span(v[119], 0.15, 0.3));
+  EXPECT_GT(span(v[119], 0.15, 0.3), 0);  // with a stem
+  // a bigger yield, a bigger cloud; the wind leans it
+  const auto small_one = blaze_run(sim::Effect::mushroom, 0.f, 0.5f, 0.5f, 90), big = blaze_run(sim::Effect::mushroom, 1.f, 0.5f, 0.5f, 90);
+  EXPECT_GT(blaze_of(big[89]).soot, 2.0 * blaze_of(small_one[89]).soot);
+  EXPECT_GT(blaze_of(big[89]).sy, blaze_of(small_one[89]).sy);
+  const auto left = blaze_run(sim::Effect::mushroom, 0.6f, 0.f, 0.5f, 120), right = blaze_run(sim::Effect::mushroom, 0.6f, 1.f, 0.5f, 120);
+  EXPECT_GT(blaze_of(right[119]).sx, blaze_of(left[119]).sx + 0.1);
 }
 
 TEST(Sim, ParamsRoundTripThroughClipMetadata) {

@@ -1,0 +1,4 @@
+effect,iterations,activity_weight,loss,seconds
+wildfire,800,100,0.02772,1218
+coals,800,100,0.05294,2363
+mushroom,800,100,0.04843,2300

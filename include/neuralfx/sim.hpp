@@ -20,18 +20,23 @@ namespace nfx::sim {
 // fire, smoke and explosion are the effects of studies A to I, whose tools loop over kEffects. steam and magic came
 // later (docs/EFFECTS.md): the same solver with other sources, forces and drawing, trained and tested as study D's.
 // jet, orb and vortex (docs/EFFECTS_ENERGY.md) and fog, dust and cloud (docs/EFFECTS_ATMOSPHERE.md) came after them,
-// the same way.
-enum class Effect { fire, smoke, explosion, steam, magic, jet, orb, vortex, fog, dust, cloud };
+// the same way, and then wildfire, coals and mushroom (docs/EFFECTS_BLAZE.md).
+enum class Effect { fire, smoke, explosion, steam, magic, jet, orb, vortex, fog, dust, cloud, wildfire, coals, mushroom };
 inline constexpr std::array kEffects{Effect::fire, Effect::smoke, Effect::explosion};  // the studies' effects
 inline constexpr std::array kNewEffects{Effect::steam, Effect::magic, Effect::jet, Effect::orb, Effect::vortex,  // added since
-                                        Effect::fog,   Effect::dust,  Effect::cloud};
+                                        Effect::fog,   Effect::dust,  Effect::cloud,
+                                        Effect::wildfire, Effect::coals, Effect::mushroom};
 inline constexpr std::array kAllEffects{Effect::fire, Effect::smoke, Effect::explosion, Effect::steam, Effect::magic,
                                         Effect::jet,  Effect::orb,   Effect::vortex,    Effect::fog,   Effect::dust,
-                                        Effect::cloud};
+                                        Effect::cloud,
+                                        Effect::wildfire, Effect::coals, Effect::mushroom};
 
 std::string_view effect_name(Effect e);
 bool parse_effect(std::string_view text, Effect& out);  // any effect of kAllEffects
-bool effect_loops(Effect e);                            // an explosion and dust play once; the others loop
+bool effect_loops(Effect e);                            // an explosion, dust and the mushroom play once; the others loop
+// How many frames (at 30 per second) an effect that plays once lasts: 90 (3 s) for the explosion and dust, 150 (5 s) for
+// the mushroom, whose cap needs that long to rise, roll over and darken; 0 for an effect that loops.
+int one_shot_frames(Effect e);
 
 // The learned controls, all normalised to [0, 1].
 inline constexpr int kControls = 3;
@@ -126,6 +131,13 @@ class Fluid {
   void add_atmos_forces(float dt);
   void add_atmos_divergence();
   void render_atmos(std::span<std::uint8_t> rgba) const;
+  // wildfire, coals and mushroom (docs/EFFECTS_BLAZE.md): their sources, forces, the mushroom's burst, decay and drawing,
+  // kept apart from the other effects' code; each does nothing for the other effects (false: not handled)
+  bool add_blaze_sources(float dt);
+  void add_blaze_forces(float dt);
+  void add_blaze_divergence();
+  void blaze_decay(float dt);
+  bool render_blaze(std::span<std::uint8_t> rgba) const;
   void add_forces(float dt);
   void project();
   void advect_velocity(float dt);

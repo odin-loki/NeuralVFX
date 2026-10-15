@@ -441,10 +441,10 @@ if(NEURALFX_BUILD_TESTS)
       set_tests_properties(neuralfx.SceneScriptChecks.${scene} PROPERTIES LABELS neuralfx)
     endforeach()
     # The effect library (docs/LIBRARY.md). Without data: every entry of the catalogue parsed and checked, and the
-    # procedural ones played with zero allocations; the C example's checks of the API. With the eleven learned effects
+    # procedural ones played with zero allocations; the C example's checks of the API. With the fourteen learned effects
     # in NEURALFX_MODELS_LIBRARY (outside git; skipped without them): every entry played with zero allocations, and the
     # keyframes of a handful of entries against their SHA-256 in results/library/frozen.csv.
-    set(NEURALFX_MODELS_LIBRARY "${_nvfx_data}/library/models" CACHE PATH "The library's learned effects: fire, smoke, explosion (v2), steam, magic, fog, dust, cloud, jet, orb, vortex .nvfx")
+    set(NEURALFX_MODELS_LIBRARY "${_nvfx_data}/library/models" CACHE PATH "The library's learned effects: fire, smoke, explosion (v2), steam, magic, fog, dust, cloud, jet, orb, vortex, wildfire, coals, mushroom .nvfx")
     add_test(NAME neuralfx.LibraryCatalogueCheck COMMAND nvfx_gallery --library ${CMAKE_CURRENT_SOURCE_DIR}/library --check --threads 2)
     set_tests_properties(neuralfx.LibraryCatalogueCheck PROPERTIES LABELS neuralfx TIMEOUT 600)
     add_test(NAME neuralfx.LibraryHostExample COMMAND nvfx_library_host --self-test ${CMAKE_CURRENT_SOURCE_DIR}/library)
@@ -456,7 +456,7 @@ if(NEURALFX_BUILD_TESTS)
     set_tests_properties(neuralfx.LibraryCataloguePlays PROPERTIES LABELS "neuralfx;data" SKIP_RETURN_CODE 77 TIMEOUT 1800)
     add_test(NAME neuralfx.LibraryKeyframesFrozen
              COMMAND nvfx_gallery --library ${CMAKE_CURRENT_SOURCE_DIR}/library --models ${NEURALFX_MODELS_LIBRARY}
-                     --only campfire,blue_gas_flame,grenade,steam_vent,portal,lightning_strike,ground_fog,dust_impact,flamethrower,plasma_orb,dust_devil,rocket_trail,vehicle_dust_wake
+                     --only campfire,blue_gas_flame,grenade,steam_vent,portal,lightning_strike,ground_fog,dust_impact,flamethrower,plasma_orb,dust_devil,rocket_trail,vehicle_dust_wake,wall_of_flames,distant_mushroom
                      --keyframes ${CMAKE_CURRENT_BINARY_DIR}/library_keyframes --verify ${CMAKE_CURRENT_SOURCE_DIR}/results/library/frozen.csv --threads 2
                      --precision float)
     set_tests_properties(neuralfx.LibraryKeyframesFrozen PROPERTIES LABELS "neuralfx;data" SKIP_RETURN_CODE 77 TIMEOUT 1200)
@@ -484,6 +484,16 @@ if(NEURALFX_BUILD_TESTS)
     set_tests_properties(neuralfx.ScriptedFireWhirlFrozen PROPERTIES LABELS "neuralfx;data" SKIP_RETURN_CODE 77 TIMEOUT 1200)
     add_test(NAME neuralfx.SceneScriptChecks.firewhirl COMMAND nvfx_scene_script --script ${CMAKE_CURRENT_SOURCE_DIR}/examples/scenes/firewhirl.nvfxs --check)
     set_tests_properties(neuralfx.SceneScriptChecks.firewhirl PROPERTIES LABELS neuralfx)
+    # The prairie (docs/EFFECTS_BLAZE.md): wildfire, coals and mushroom, all in NEURALFX_MODELS_BLAZE (outside git); its
+    # keyframes have the SHA-256 recorded in results/experiments/fx_blaze_frozen.csv.
+    set(NEURALFX_MODELS_BLAZE "${_nvfx_data}/fx_blaze/models/scene" CACHE PATH "wildfire.nvfx, coals.nvfx and mushroom.nvfx")
+    add_test(NAME neuralfx.ScriptedPrairieFrozen
+             COMMAND nvfx_scene_script --script ${CMAKE_CURRENT_SOURCE_DIR}/examples/scenes/prairie.nvfxs --models ${NEURALFX_MODELS_BLAZE}
+                     --keyframes ${CMAKE_CURRENT_BINARY_DIR}/prairie_script_keyframes --no-video --threads 2 --precision float
+                     --verify ${CMAKE_CURRENT_SOURCE_DIR}/results/experiments/fx_blaze_frozen.csv)
+    set_tests_properties(neuralfx.ScriptedPrairieFrozen PROPERTIES LABELS "neuralfx;data" SKIP_RETURN_CODE 77 TIMEOUT 1200)
+    add_test(NAME neuralfx.SceneScriptChecks.prairie COMMAND nvfx_scene_script --script ${CMAKE_CURRENT_SOURCE_DIR}/examples/scenes/prairie.nvfxs --check)
+    set_tests_properties(neuralfx.SceneScriptChecks.prairie PROPERTIES LABELS neuralfx)
     # Study K (docs/REPORT.md §13): the fireball's keyframes with its modules at int8 on the AVX-512 build (the build int8
     # takes where the CPU has VNNI; without VNNI it computes the same integer sums, so the same frames), against their
     # SHA-256 in results/experiments/k_int8_frozen.csv. Skipped without AVX-512 or without the study D effects.
@@ -503,7 +513,7 @@ if(NEURALFX_BUILD_TESTS)
     set_tests_properties(neuralfx.PackFullLibraryVerifies PROPERTIES LABELS "neuralfx;data" FIXTURES_REQUIRED library_pack)
     add_test(NAME neuralfx.PackLibraryKeyframesFrozen
              COMMAND nvfx_gallery --pack ${CMAKE_CURRENT_BINARY_DIR}/library.nvfxp
-                     --only campfire,blue_gas_flame,grenade,steam_vent,portal,lightning_strike,ground_fog,dust_impact,flamethrower,plasma_orb,dust_devil
+                     --only campfire,blue_gas_flame,grenade,steam_vent,portal,lightning_strike,ground_fog,dust_impact,flamethrower,plasma_orb,dust_devil,wall_of_flames,distant_mushroom
                      --keyframes ${CMAKE_CURRENT_BINARY_DIR}/library_pack_keyframes --verify ${CMAKE_CURRENT_SOURCE_DIR}/results/library/frozen.csv --threads 2
                      --precision float)
     set_tests_properties(neuralfx.PackLibraryKeyframesFrozen PROPERTIES LABELS "neuralfx;data" SKIP_RETURN_CODE 77 TIMEOUT 1200 FIXTURES_REQUIRED library_pack)

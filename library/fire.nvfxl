@@ -77,31 +77,6 @@ every frame:                                                    # the flames' sm
   transfer f2 -> plume, top 4, fraction 0.5, heat 0, soot 18
   transfer f3 -> plume, top 4, fraction 0.5, heat 0, soot 18
 
-entry wall_of_flames, category fire, size 900 x 360, anchor base, loop, show 2.5,
-      about "A wall of flames: nine flames of the fire model in a row, 900 world pixels wide, embers flying"
-param intensity = 0.9, range (0.3, 1), about "how high it burns"
-param wind = 0.5, range (0, 1), about "lean"
-module f1 = fire, size 128, width 230 * scale, at (X - 360 * scale, Y), sink 0.08, feather 0.2, start 0, seed 61,
-            controls (0.9, 0.5, 0.5), intensity intensity, wind wind
-module f2 = fire, size 128, width 200 * scale, at (X - 270 * scale, Y), sink 0.08, feather 0.2, start 6, seed 62,
-            controls (0.8, 0.5, 0.5), intensity 0.85 * intensity, wind wind
-module f3 = fire, size 128, width 230 * scale, at (X - 180 * scale, Y), sink 0.08, feather 0.2, start 7, seed 63,
-            controls (0.9, 0.5, 0.5), intensity intensity, wind wind
-module f4 = fire, size 128, width 200 * scale, at (X - 90 * scale, Y), sink 0.08, feather 0.2, start 0, seed 64,
-            controls (0.8, 0.5, 0.5), intensity 0.85 * intensity, wind wind
-module f5 = fire, size 128, width 230 * scale, at (X, Y), sink 0.08, feather 0.2, start 6, seed 65,
-            controls (0.9, 0.5, 0.5), intensity intensity, wind wind
-module f6 = fire, size 128, width 200 * scale, at (X + 90 * scale, Y), sink 0.08, feather 0.2, start 7, seed 66,
-            controls (0.8, 0.5, 0.5), intensity 0.85 * intensity, wind wind
-module f7 = fire, size 128, width 230 * scale, at (X + 180 * scale, Y), sink 0.08, feather 0.2, start 0, seed 67,
-            controls (0.9, 0.5, 0.5), intensity intensity, wind wind
-module f8 = fire, size 128, width 200 * scale, at (X + 270 * scale, Y), sink 0.08, feather 0.2, start 6, seed 68,
-            controls (0.8, 0.5, 0.5), intensity 0.85 * intensity, wind wind
-module f9 = fire, size 128, width 230 * scale, at (X + 360 * scale, Y), sink 0.08, feather 0.2, start 7, seed 69,
-            controls (0.9, 0.5, 0.5), intensity intensity, wind wind
-emit embers, on f1, f3, f5, f7, f9, tries 2, chance 0.6, spread 120 * scale
-field warm = lamp, at (X, Y - 60 * scale), radius 240 * scale, strength 0.45 * intensity, colour (1, 0.5, 0.2)
-
 entry burning_ground, category fire, size 640 x 140, anchor base, loop, show 2.5,
       about "Burning ground: a carpet of low flames (spilt oil, a burnt field), eight small flames of the fire model"
 param intensity = 0.45, range (0.15, 0.7), about "how high the flames"
