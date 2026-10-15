@@ -460,6 +460,16 @@ if(NEURALFX_BUILD_TESTS)
     set_tests_properties(neuralfx.ScriptedFireWhirlFrozen PROPERTIES LABELS "neuralfx;data" SKIP_RETURN_CODE 77 TIMEOUT 1200)
     add_test(NAME neuralfx.SceneScriptChecks.firewhirl COMMAND nvfx_scene_script --script ${CMAKE_CURRENT_SOURCE_DIR}/examples/scenes/firewhirl.nvfxs --check)
     set_tests_properties(neuralfx.SceneScriptChecks.firewhirl PROPERTIES LABELS neuralfx)
+    # The lift-off (docs/EFFECTS_FLOW.md): launch, puffs and ink, all in NEURALFX_MODELS_FLOW (outside git); its
+    # keyframes have the SHA-256 recorded in results/experiments/fx_flow_frozen.csv.
+    set(NEURALFX_MODELS_FLOW "${_nvfx_data}/fx_flow/models/scene" CACHE PATH "launch.nvfx, puffs.nvfx and ink.nvfx")
+    add_test(NAME neuralfx.ScriptedLiftoffFrozen
+             COMMAND nvfx_scene_script --script ${CMAKE_CURRENT_SOURCE_DIR}/examples/scenes/liftoff.nvfxs --models ${NEURALFX_MODELS_FLOW}
+                     --keyframes ${CMAKE_CURRENT_BINARY_DIR}/liftoff_script_keyframes --no-video --threads 2 --precision float
+                     --verify ${CMAKE_CURRENT_SOURCE_DIR}/results/experiments/fx_flow_frozen.csv)
+    set_tests_properties(neuralfx.ScriptedLiftoffFrozen PROPERTIES LABELS "neuralfx;data" SKIP_RETURN_CODE 77 TIMEOUT 1200)
+    add_test(NAME neuralfx.SceneScriptChecks.liftoff COMMAND nvfx_scene_script --script ${CMAKE_CURRENT_SOURCE_DIR}/examples/scenes/liftoff.nvfxs --check)
+    set_tests_properties(neuralfx.SceneScriptChecks.liftoff PROPERTIES LABELS neuralfx)
     # Study K (docs/REPORT.md §13): the fireball's keyframes with its modules at int8 on the AVX-512 build (the build int8
     # takes where the CPU has VNNI; without VNNI it computes the same integer sums, so the same frames), against their
     # SHA-256 in results/experiments/k_int8_frozen.csv. Skipped without AVX-512 or without the study D effects.
