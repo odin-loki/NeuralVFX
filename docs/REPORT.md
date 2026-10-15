@@ -3328,3 +3328,27 @@ test (tracking against the coarse simulation, endless against the nearest flipbo
 
 Code: `nvfx_ordered --study o` (`fitmean`, `setmean`, `train`, `val --split probeo|valo`, `test`); every file under the
 data root's `o_fix`, tables under `results/experiments/fix`.
+
+**The null and the margins (the probe's first step; committed before any candidate is played on the probe).** The
+current models and the same models with fresh seeds on the 40 training settings, 8 runs pooled each
+([o_margins.csv](../results/experiments/fix/o_margins.csv), [o_probe_stats.csv](../results/experiments/fix/o_probe_stats.csv)):
+
+| effect | measure | study K's margin | the null's RMS change at a setting | the floor (two sets of 8 real runs) | the current model | **margin** |
+|---|---|---:|---:|---:|---:|---:|
+| mushroom | tracking at 1 s (dB) | -0.20 | none (the same frames) | - | 13.95 | **-0.20** |
+| mushroom | spectrum distance | 0.02 | 0.039 | 0.027 | 0.184 | **+0.0387** |
+| mushroom | \|ln motion ratio\| | 0.02 | 0.095 | 0.037 | 0.215 | **+0.0945** |
+| mushroom | coverage distance | 0.0022 | 0.0117 | 0.0046 | 0.0222 | **+0.0117** |
+| mushroom | emission distance | 0.0001 | 0.000007 | 0.000009 | 0.000070 | **+0.0001** |
+| mushroom | mean-frame PSNR (dB) | -0.10 | 1.35 | 34.62 | 27.17 | **-1.35** |
+| splash | tracking at 1 s (dB) | -0.20 | none | - | 13.26 | **-0.20** |
+| splash | spectrum distance | 0.02 | 0.015 | 0.028 | 0.071 | **+0.02** |
+| splash | \|ln motion ratio\| | 0.02 | 0.072 | 0.030 | 0.093 | **+0.0719** |
+| splash | coverage distance | 0.00028 | 0.0017 | 0.0009 | 0.0028 | **+0.0017** |
+| splash | emission distance | 0.0001 | 0.000003 | 0.000000 | 0.000028 | **+0.0001** |
+| splash | mean-frame PSNR (dB) | -0.10 | 1.26 | 39.04 | 33.16 | **-1.26** |
+
+As for study M3's one-shots, re-seeding the current models moves their statistics at a setting by more than two sets of
+real runs differ (the mushroom's motion by 9.5% and its mean frame by 1.35 dB at a setting), because each play begins
+from one of 16 stored first states taken at other intensities: the margins are wide, and they are the effects' own
+seed-to-seed variety. The mean frame's margin applies only to a candidate whose better target is tracking.
