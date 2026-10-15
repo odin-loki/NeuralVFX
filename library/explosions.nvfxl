@@ -2,6 +2,9 @@
 # flash, embers, debris and a scorch mark; recoloured by a field-shader look for magic (a look, not new dynamics).
 # A single tile holds the medium start points (4, 5, 10 to 14); the strongest (1, 2, 6, 7, 9, 15) fill their tile and
 # square off against its walls within a second, as they need the fireball's six tiles (docs/COMPOSE.md §6).
+# Since study M3 (docs/REPORT.md §14.9) the model has a mean state: a module that gives controls of its own begins its
+# start point moved to them (its size made the controls'). These modules give none, so each plays its start point as it
+# is (at that start point's own controls), the same to the bit as before.
 
 look burst_violet = like cloud, hue 250, emission 2.4, soot_density 1.6, soot_albedo 0.5, tint (0.75, 0.6, 1)
 

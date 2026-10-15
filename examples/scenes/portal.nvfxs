@@ -3,8 +3,8 @@
 #
 #   nvfx_scene_script --script examples/scenes/portal.nvfxs --models DIR --out portal.mp4
 #
-# DIR holds steam.nvfx and magic.nvfx (docs/EFFECTS.md), study M's fire.nvfx (docs/REPORT.md §14) and study D's
-# explosion.nvfx (v2).
+# DIR holds steam.nvfx and magic.nvfx (docs/EFFECTS.md), study M's fire.nvfx (docs/REPORT.md §14) and study M3's
+# explosion.nvfx (v2 with a mean state, §14.9: the blast begins at its start point's own controls, so plays as v2's).
 #
 # Night. Two steam vents hiss in the ground between two cold braziers. A portal opens between the vents: its violet
 # light falls on the steam, the steam leans in towards it and its swirl stirs the steam, and a pulse from it lights the

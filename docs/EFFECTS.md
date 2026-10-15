@@ -279,7 +279,9 @@ build/nvfx_scene_script --script examples/scenes/portal.nvfxs --models DIR --out
 build/nvfx_sim --effect magic --spin 0.8 --sheet magic.png    # the simulator's presets alone
 ```
 
-`DIR` for the scene holds `steam.nvfx` and `magic.nvfx` and study D's v2 `fire.nvfx` and `explosion.nvfx`.
+`DIR` for the scene holds `steam.nvfx` and `magic.nvfx`, study M's `fire.nvfx` and study M3's `explosion.nvfx` (v2's
+with a mean state, [REPORT.md](REPORT.md) §14.9: the portal's blast begins at its start point's own controls, so it plays
+as v2's did, to the bit).
 
 ## 9. Study L: magic replaced (14 October 2026)
 
