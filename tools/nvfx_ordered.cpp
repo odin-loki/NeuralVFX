@@ -39,6 +39,13 @@
 // Study M2 (docs/REPORT.md §14.8): --study m2 keeps every file under DATA/m2 instead, caches the plain statistics with
 // their mean frame in single precision, and gives `val` and `test` study M2's splits (probe2, val2, test2: fresh seeds
 // in 8,500,000 to 8,999,999) and its rule (non-inferiority margins fixed before validation; `val --split val2`, `test`).
+//
+// Study M3 (docs/REPORT.md §14.9): --study m3 keeps every file under DATA/m3 and gives the mean state for the explosion and
+// dust a rule planned for power. `val --split probe3 [--null]` is the probe (training settings, 8 runs pooled; --null adds
+// the current model played with fresh seeds, the null) and writes each measure's paired spread, the margins the null gives
+// (m3_margins.csv) and the power at a number of settings by resampling the probe's settings (m3_power.csv); `val --split
+// val3` and `test` (once) use study G's and study B's settings extended to the number of settings the probe fixed, with
+// seeds in 8,300,000 to 8,499,999 and 8,700,000 to 8,899,999.
 #include "args.hpp"
 
 #include <neuralfx/clip.hpp>
@@ -89,7 +96,8 @@ struct Ctx {
   fs::path data, results;
   int threads = 1;
   bool m2 = false;  // study M2 (--study m2): files under DATA/m2, its splits and its rule
-  fs::path dir() const { return data / (m2 ? "m2" : "m_ordered"); }
+  bool m3 = false;  // study M3 (--study m3): files under DATA/m3, its splits and its rule
+  fs::path dir() const { return data / (m3 ? "m3" : m2 ? "m2" : "m_ordered"); }
 };
 
 template <class F>
@@ -1650,23 +1658,25 @@ bool off_grid(const Setting& s) {
   const auto off = [](float x, std::initializer_list<float> g) { return std::ranges::all_of(g, [x](float y) { return std::abs(x - y) >= 0.05f; }); };
   return off(s[0], {0.f, 0.5f, 1.f}) && off(s[1], {0.f, 0.25f, 0.5f, 0.75f, 1.f}) && off(s[2], {0.f, 0.5f, 1.f});
 }
-// Study B's ten held-out settings (the test) and study G's ten validation settings (docs/DCM.md §4), as nvfx_d2.
-std::vector<Setting> test_settings() {
+// Study B's ten held-out settings (the test) and study G's ten validation settings (docs/DCM.md §4), as nvfx_d2. Study M3
+// draws more the same way: the first n of the same streams, the validation settings at least 0.05 from every one of the
+// n_test test settings (with n = n_test = 10, studies B's and G's own).
+std::vector<Setting> test_settings(int n = 10) {
   std::mt19937_64 rng(2026);
   std::uniform_real_distribution<float> u(0.05f, 0.95f);
   std::vector<Setting> v;
-  while (v.size() < 10) {
+  while (v.size() < sz(n)) {
     const Setting s{u(rng), u(rng), u(rng)};
     if (off_grid(s)) v.push_back(s);
   }
   return v;
 }
-std::vector<Setting> validation_settings() {
-  const auto test = test_settings();
+std::vector<Setting> validation_settings(int n = 10, int n_test = 10) {
+  const auto test = test_settings(n_test);
   std::mt19937_64 rng(2027);
   std::uniform_real_distribution<float> u(0.05f, 0.95f);
   std::vector<Setting> v;
-  while (v.size() < 10) {
+  while (v.size() < sz(n)) {
     const Setting s{u(rng), u(rng), u(rng)};
     const bool far = std::ranges::all_of(test, [&](const Setting& t) {
       return std::sqrt((s[0] - t[0]) * (s[0] - t[0]) + (s[1] - t[1]) * (s[1] - t[1]) + (s[2] - t[2]) * (s[2] - t[2])) >= 0.05f;
@@ -1690,11 +1700,21 @@ std::vector<Setting> validation_settings() {
 //          tracking 8,960,000 (2 runs per setting).
 //   val2   study G's validation settings: real 8,500,000, plays 8,600,000, tracking 8,650,000.
 //   test2  study B's held-out settings: real 8,700,000, plays 8,800,000, tracking 8,850,000.
+// Study M3 (docs/REPORT.md §14.9; the blocks 8,300,000 to 8,499,999 and 8,700,000 to 8,899,999 of study M's range; 8 runs
+// pooled; tracking runs k < 2 per setting, each from an empty grid as the test's):
+//   probe3 development only (training settings: the controls of salt-1 training runs 0 to kM3ProbeSettings - 1): real
+//          8,300,000, plays 8,310,000, the null (the current model with fresh seeds) 8,320,000, tracking 8,330,000.
+//   val3   study G's validation settings extended to kM3Settings (validation_settings(kM3Settings, kM3Settings)): real
+//          8,350,000, plays 8,400,000, tracking 8,450,000.
+//   test3  study B's held-out settings extended to kM3Settings (test_settings(kM3Settings)): real 8,700,000, plays
+//          8,800,000, tracking 8,850,000 (study M2's test block, never used).
+constexpr int kM3ProbeSettings = 40;
+constexpr int kM3Settings = 0;  // fixed by the probe (REPORT §14.9.2) before validation; 0: not yet
 struct Split {
   std::string name;
   std::vector<Setting> settings;
   int reps = 8, track_reps = 4;
-  std::uint64_t real = 0, model = 0, track = 0;
+  std::uint64_t real = 0, model = 0, track = 0, null = 0;  // null: the plays of the current model with fresh seeds (probe3)
   int track_salt = 0, track_runs = 0;  // > 0: the tracking runs are recipe runs 0 .. track_runs - 1 of this salt instead
 };
 Split split_of(const std::string& name, sim::Effect e) {
@@ -1737,6 +1757,21 @@ Split split_of(const std::string& name, sim::Effect e) {
     s.real = 8'700'000;
     s.model = 8'800'000;
     s.track = 8'850'000;
+  } else if (name == "probe3") {
+    s.settings = training_settings(e, kM3ProbeSettings);
+    s.track_reps = 2;
+    s.real = 8'300'000;
+    s.model = 8'310'000;
+    s.null = 8'320'000;
+    s.track = 8'330'000;
+  } else if (name == "val3" || name == "test3") {
+    if (kM3Settings <= 0) throw std::invalid_argument("study M3: the probe has not fixed the number of settings (kM3Settings)");
+    const bool val = name == "val3";
+    s.settings = val ? validation_settings(kM3Settings, kM3Settings) : test_settings(kM3Settings);
+    s.track_reps = 2;
+    s.real = val ? 8'350'000 : 8'700'000;
+    s.model = val ? 8'400'000 : 8'800'000;
+    s.track = val ? 8'450'000 : 8'850'000;
   } else {
     throw std::invalid_argument("unknown split " + name);
   }
@@ -1748,6 +1783,7 @@ struct Entry {
   fs::path path;
   rollout::Model m;
   std::string sha;
+  std::uint64_t seed_base = 0;  // > 0: its plays take this seed base instead of the split's (study M3's null)
 };
 
 std::string file_sha256(const fs::path& p) {
@@ -1807,7 +1843,7 @@ void save_stats(const fs::path& p, const metrics::ClipStats& s) {
   }
   fs::rename(tmp, p);
 }
-std::string stats_ext(const Ctx& c) { return c.m2 ? "fst" : "stats"; }
+std::string stats_ext(const Ctx& c) { return c.m2 || c.m3 ? "fst" : "stats"; }
 metrics::ClipStats real_stats(const Ctx& c, sim::Effect e, const Setting& s, std::uint64_t seed) {
   const fs::path p = c.dir() / "vt" / "real" / std::format("{}_{}.{}", ename(e), seed, stats_ext(c));
   metrics::ClipStats st;
@@ -1905,6 +1941,7 @@ std::vector<Scores> evaluate(const Ctx& c, sim::Effect e, const Split& sp, const
     s0.fine_t = st.temp;
     s0.fine_d = st.soot;
     for (std::size_t mi = 0; mi < models.size(); ++mi) {
+      if (models[mi].seed_base > 0) continue;  // the null: tracking takes the run's own seed, so it is the current model's
       rollout::Model mt = models[mi].m;
       mt.h.start_fine = kSize;
       mt.starts = {s0};
@@ -1926,6 +1963,7 @@ std::vector<Scores> evaluate(const Ctx& c, sim::Effect e, const Split& sp, const
         out[mi].track[sz(si)][h] = s1;
       }
     }
+    if (models[mi].seed_base > 0) out[mi].track = out[0].track;
   }
   const auto seed = [&](std::uint64_t base, int si, int k) { return base + 100 * static_cast<std::uint64_t>(si) + static_cast<std::uint64_t>(k); };
   parallel(c.threads, n * sp.reps * 2, [&](int j) {
@@ -1947,7 +1985,7 @@ std::vector<Scores> evaluate(const Ctx& c, sim::Effect e, const Split& sp, const
     std::vector<metrics::ClipStats> runs(sz(n * sp.reps));
     parallel(c.threads, n * sp.reps, [&](int j) {
       const int si = j / sp.reps, k = j % sp.reps;
-      runs[sz(j)] = play_stats(c, e, models[mi], rt.e, sp.settings[sz(si)], seed(sp.model, si, k));
+      runs[sz(j)] = play_stats(c, e, models[mi], rt.e, sp.settings[sz(si)], seed(models[mi].seed_base > 0 ? models[mi].seed_base : sp.model, si, k));
     });
     for (int si = 0; si < n; ++si) {
       const metrics::ClipStats pl = pool(std::vector<metrics::ClipStats>(runs.begin() + si * sp.reps, runs.begin() + (si + 1) * sp.reps));
@@ -2167,17 +2205,269 @@ void decide_m2(const Ctx& c, sim::Effect e, const Split& sp, const std::vector<E
   std::println("{} {}: {}", sp.name, en, chosen > 0 ? "chosen " + models[sz(chosen)].name : std::string("none meets the rule"));
 }
 
+// Study M3's rule (docs/REPORT.md §14.9; its numbers fixed by the probe and committed before validation). Candidate minus
+// current model, paired, 95% bootstrap with 10,000 resamples (metrics::paired_bootstrap, seed 2026), as studies M's and
+// M2's. A candidate (the mean state) meets it when
+//   1. its mean-frame PSNR is better (the interval above zero), and
+//   2. every other measure is within its margin (the interval's worse end): tracking at 1 s at least margin.track; the
+//      detail spectrum distance, |ln motion ratio|, coverage and emission distances at most their margins.
+// Each margin is the larger of study K's at the measure's scale (as M2 used them) and the null's RMS change at a setting
+// (the current model against itself with fresh seeds, 8 runs pooled, over the probe's settings); §14.9.2 says why. The
+// strict reading (no interval entirely on the worse side of zero) is reported beside and does not decide.
+struct MarginsM3 {
+  double track = 0, spectrum = 0, motion = 0, coverage = 0, emission = 0;
+  bool set() const { return spectrum > 0; }
+  double of(int k) const { return std::array{track, spectrum, motion, coverage, emission, 0.0}[sz(k)]; }  // kCmpNames' order
+};
+constexpr double kM3Track = -0.20, kM3Spectrum = 0.02, kM3Motion = 0.02, kM3Share = 0.10, kM3Least = 1e-4;
+// The margins of the rule, per effect: m3_margins.csv from the probe's null (§14.9.2), copied here before validation.
+MarginsM3 margins_m3(sim::Effect e) {
+  const std::string en = ename(e);
+  if (en == "explosion") return {};
+  if (en == "dust") return {};
+  return {};
+}
+double mean_of(const std::vector<double>& v) { return std::accumulate(v.begin(), v.end(), 0.0) / static_cast<double>(v.size()); }
+std::vector<double> diff_of(const Scores& a, const Scores& b, int k) {
+  auto x = cmp_stat(a, k);
+  const auto y = cmp_stat(b, k);
+  for (std::size_t i = 0; i < x.size(); ++i) x[i] -= y[i];
+  return x;
+}
+double rms_of(const std::vector<double>& v) {
+  double s = 0;
+  for (const double x : v) s += x * x;
+  return std::sqrt(s / static_cast<double>(v.size()));
+}
+double sd_of(const std::vector<double>& v) {
+  const double m = mean_of(v);
+  double s = 0;
+  for (const double x : v) s += (x - m) * (x - m);
+  return std::sqrt(s / static_cast<double>(v.size() - 1));
+}
+// Study K's margins at the measures' scales, as study M2 used them (§14.8.1): tracking -0.20 dB at 1 s, spectrum and motion
+// +0.02, coverage and emission +10% of the current model's mean distance (here on the probe), at least 0.0001.
+MarginsM3 margins_k(const Scores& cur) {
+  return {kM3Track, kM3Spectrum, kM3Motion, std::max(kM3Least, kM3Share * mean_of(cmp_stat(cur, 3))), std::max(kM3Least, kM3Share * mean_of(cmp_stat(cur, 4)))};
+}
+// The margins the null gives: each the larger of study K's and the null's RMS change over the probe's settings (tracking
+// has no null: a tracked run takes its own seed, so the current model plays the same frames; it keeps study K's).
+MarginsM3 margins_from_null(const Scores& cur, const Scores& null) {
+  const MarginsM3 k = margins_k(cur);
+  return {k.track, std::max(k.spectrum, rms_of(diff_of(null, cur, 1))), std::max(k.motion, rms_of(diff_of(null, cur, 2))),
+          std::max(k.coverage, rms_of(diff_of(null, cur, 3))), std::max(k.emission, rms_of(diff_of(null, cur, 4)))};
+}
+
+struct RuleM3 {
+  std::array<metrics::Interval, 6> iv{};  // kCmpNames' order
+  MarginsM3 mg;
+  bool better = false, none_worse = false;
+  std::array<bool, 6> within{}, strict_worse{};
+  bool pass() const { return better && none_worse; }
+};
+RuleM3 apply_rule_m3(const Scores& cand, const Scores& cur, const MarginsM3& mg) {
+  RuleM3 r;
+  r.mg = mg;
+  for (int k = 0; k < 6; ++k) r.iv[sz(k)] = metrics::paired_bootstrap(cmp_stat(cand, k), cmp_stat(cur, k), 10000, 2026);
+  r.better = r.iv[5].lo > 0;
+  r.within[0] = r.iv[0].lo >= mg.track;
+  for (int k = 1; k < 5; ++k) r.within[sz(k)] = r.iv[sz(k)].hi <= mg.of(k);
+  r.within[5] = true;  // the target (in `better`)
+  r.none_worse = std::ranges::all_of(r.within, [](bool b) { return b; });
+  r.strict_worse[0] = r.iv[0].hi < 0;
+  for (int k = 1; k < 5; ++k) r.strict_worse[sz(k)] = r.iv[sz(k)].lo > 0;
+  r.strict_worse[5] = r.iv[5].hi < 0;
+  return r;
+}
+const std::string kRuleM3Header =
+    "effect,model,better,none_worse,meets_rule,mean_frame_gain_db,mean_frame_lo,spectrum_change,spectrum_hi,motion_hi,coverage_hi,emission_hi,track_lo,"
+    "margin_spectrum,margin_motion,margin_coverage,margin_emission,margin_track,outside_margin,strict_worse,sha256";
+std::string rule_m3_row(const std::string& en, const Entry& m, const RuleM3& r) {
+  std::string within, strict;
+  for (int k = 0; k < 6; ++k) {
+    if (!r.within[sz(k)]) within += (within.empty() ? "" : ";") + kCmpNames[sz(k)];
+    if (r.strict_worse[sz(k)]) strict += (strict.empty() ? "" : ";") + kCmpNames[sz(k)];
+  }
+  return std::format("{},{},{},{},{},{:.4f},{:.4f},{:.5f},{:.5f},{:.5f},{:.6f},{:.7f},{:.4f},{:.5f},{:.5f},{:.6f},{:.7f},{:.2f},{},{},{}", en, m.name, r.better ? 1 : 0,
+                     r.none_worse ? 1 : 0, r.pass() ? 1 : 0, r.iv[5].mean, r.iv[5].lo, r.iv[1].mean, r.iv[1].hi, r.iv[2].hi, r.iv[3].hi, r.iv[4].hi, r.iv[0].lo,
+                     r.mg.spectrum, r.mg.motion, r.mg.coverage, r.mg.emission, r.mg.track, within.empty() ? "none" : within, strict.empty() ? "none" : strict, m.sha);
+}
+void print_rule_m3(const std::string& split, const std::string& en, const Entry& m, const RuleM3& r) {
+  std::println("{} {} {} (target: the mean frame): better on its target {}, within every margin {} -> {}", split, en, m.name, r.better ? "yes" : "no",
+               r.none_worse ? "yes" : "no", r.pass() ? "MEETS the rule" : "does not meet it");
+  for (int k = 0; k < 6; ++k) {
+    std::println("    {:<20} {:+.5f} [{:+.5f}, {:+.5f}]{}{}{}", kCmpNames[sz(k)], r.iv[sz(k)].mean, r.iv[sz(k)].lo, r.iv[sz(k)].hi,
+                 k == 5 ? "  (target)" : std::format("  margin {:+.5f}", r.mg.of(k)), r.within[sz(k)] ? "" : "  OUTSIDE its margin",
+                 r.strict_worse[sz(k)] ? "  (strictly worse)" : "");
+  }
+}
+void decide_m3(const Ctx& c, sim::Effect e, const Split& sp, const std::vector<Entry>& models, const std::vector<Scores>& sc, const std::string& prefix) {
+  const std::string en = ename(e);
+  const MarginsM3 mg = margins_m3(e);
+  if (!mg.set()) throw std::runtime_error("study M3: the margins of " + en + " are not fixed (margins_m3)");
+  std::vector<std::string> rows;
+  int chosen = -1;
+  double best = -1e9;
+  for (std::size_t mi = 1; mi < models.size(); ++mi) {
+    const RuleM3 r = apply_rule_m3(sc[mi], sc[0], mg);
+    print_rule_m3(sp.name, en, models[mi], r);
+    rows.push_back(rule_m3_row(en, models[mi], r));
+    if (r.pass() && r.iv[5].mean > best) {
+      best = r.iv[5].mean;
+      chosen = static_cast<int>(mi);
+    }
+  }
+  rows.push_back(std::format("{},chosen,,,,,,,,,,,,,,,,,,,{}", en, chosen > 0 ? models[sz(chosen)].name : "none"));
+  merge_rows(c.results / std::format("{}_choice.csv", prefix), kRuleM3Header, rows, en);
+  std::println("{} {}: {}", sp.name, en, chosen > 0 ? "chosen " + models[sz(chosen)].name : std::string("none meets the rule"));
+}
+
+// The probe's power analysis (§14.9.2). For each candidate (and the null) and measure: the paired differences over the
+// probe's settings (mean, SD, RMS, the SD's upper 80% confidence bound by Wilson and Hilferty's chi-square), the number of
+// settings at which a measure truly unchanged on average with that spread passes its margin with probability 0.9 (normal
+// form: ((1.96 + 1.2816) sd / margin)^2; the target: to clear zero at the probe's mean), and the probability of passing at
+// N settings by resampling the probe's settings: 4,000 sets of N drawn with replacement, jointly over the measures, each
+// set's 95% interval in the bootstrap's normal form (mean +- 1.96 sd / sqrt(N), sd over N), with each measure's
+// differences centred on zero (unchanged), centred on its margin (a loss of the margin's size), or as measured (the
+// target), and the rule as a whole (every other measure unchanged, the target as measured).
+constexpr double kZ80 = 0.8416212335729143;                            // the standard normal's 80% quantile
+constexpr double kZPower = 1.959963984540054 + 1.2815515655446004;     // a 95% interval's end, and 90% power
+double sd_upper80(double sd, int n) {  // the upper end of the SD's one-sided 80% interval (chi-square's 20% quantile)
+  const double nu = n - 1, q = nu * std::pow(1.0 - 2.0 / (9.0 * nu) - kZ80 * std::sqrt(2.0 / (9.0 * nu)), 3.0);
+  return sd * std::sqrt(nu / q);
+}
+const std::array kM3PowerN = {10, 20, 30, 40, 50, 60, 70, 80, 100, 120};
+
+void probe_m3(const Ctx& c, sim::Effect e, const Split& sp, const std::vector<Entry>& models, const std::vector<Scores>& sc) {
+  const std::string en = ename(e);
+  const int P = static_cast<int>(sp.settings.size());
+  int null_i = -1;
+  for (std::size_t mi = 1; mi < models.size(); ++mi) {
+    if (models[mi].seed_base > 0) null_i = static_cast<int>(mi);
+  }
+  const Scores& floor = sc.back();
+  MarginsM3 mg = margins_m3(e);
+  if (null_i > 0) {
+    const Scores& nl = sc[sz(null_i)];
+    mg = margins_from_null(sc[0], nl);
+    const MarginsM3 mk = margins_k(sc[0]);
+    std::vector<std::string> rows;
+    std::println("\nprobe3 {}: the margins the null gives (each the larger of study K's and the null's RMS change at a setting, {} settings)", en, P);
+    std::println("{:<20}{:>12}{:>12}{:>12}{:>12}{:>12}{:>12}{:>12}", "measure", "K's", "null RMS", "null mean", "null SD", "floor", "current", "margin");
+    for (int k = 0; k < 5; ++k) {
+      const auto d = diff_of(nl, sc[0], k);
+      const double fl = k == 0 ? 0.0 : mean_of(cmp_stat(floor, k));
+      std::println("{:<20}{:>12.6f}{:>12.6f}{:>12.6f}{:>12.6f}{:>12.6f}{:>12.6f}{:>12.6f}", kCmpNames[sz(k)], mk.of(k), rms_of(d), mean_of(d), sd_of(d), fl,
+                   mean_of(cmp_stat(sc[0], k)), mg.of(k));
+      rows.push_back(std::format("{},{},{},{:.7f},{:.7f},{:.7f},{:.7f},{:.7f},{:.7f},{:.7f}", en, kCmpNames[sz(k)], P, mk.of(k), rms_of(d), mean_of(d), sd_of(d), fl,
+                                 mean_of(cmp_stat(sc[0], k)), mg.of(k)));
+    }
+    merge_rows(c.results / "m3_margins.csv", "effect,measure,settings,k_margin,null_rms,null_mean,null_sd,floor_mean,current_mean,margin", rows, en);
+  }
+  if (!mg.set()) throw std::runtime_error("probe3: no null (--null) and no margins fixed for " + en);
+  std::vector<std::string> rows;
+  for (std::size_t mi = 1; mi < models.size(); ++mi) {
+    std::array<std::vector<double>, 6> d;
+    std::array<double, 6> mean{}, sd{}, sdu{};
+    for (int k = 0; k < 6; ++k) {
+      d[sz(k)] = diff_of(sc[mi], sc[0], k);
+      mean[sz(k)] = mean_of(d[sz(k)]);
+      sd[sz(k)] = sd_of(d[sz(k)]);
+      sdu[sz(k)] = sd_upper80(sd[sz(k)], P);
+    }
+    if (static_cast<int>(mi) != null_i) print_rule_m3("probe3", en, models[mi], apply_rule_m3(sc[mi], sc[0], mg));
+    std::println("\nprobe3 {} {} - current: power by resampling the probe's {} settings (pass: unchanged / a loss of the margin's size; the target as measured)", en,
+                 models[mi].name, P);
+    std::println("{:<20}{:>10}{:>10}{:>10}{:>10}{:>8}{:>8} | pass at N settings: {}", "measure", "mean", "SD", "SD up80", "margin", "N90", "N90up",
+                 [] {
+                   std::string s;
+                   for (const int N : kM3PowerN) s += std::format("{:>6}", N);
+                   return s;
+                 }());
+    std::array<std::array<double, kM3PowerN.size()>, 6> pu{}, pl{};
+    std::array<double, kM3PowerN.size()> prule{}, pothers{};
+    std::mt19937_64 rng(2026 + mi);
+    std::uniform_int_distribution<int> pick(0, P - 1);
+    for (std::size_t ni = 0; ni < kM3PowerN.size(); ++ni) {
+      const int N = kM3PowerN[ni];
+      constexpr int R = 4000;
+      std::vector<int> idx(sz(N));
+      for (int r = 0; r < R; ++r) {
+        for (int& i : idx) i = pick(rng);
+        bool others = true, target = false;
+        for (int k = 0; k < 6; ++k) {
+          double s1 = 0, s2 = 0;
+          for (const int i : idx) {
+            const double x = d[sz(k)][sz(i)] - mean[sz(k)];
+            s1 += x;
+            s2 += x * x;
+          }
+          const double m = s1 / N, h = 1.959963984540054 * std::sqrt(std::max(0.0, s2 / N - m * m) / N);
+          if (k == 5) {  // the target, as measured
+            target = m + mean[5] - h > 0;
+            pu[5][ni] += target ? 1.0 / R : 0.0;
+            continue;
+          }
+          const double mk = mg.of(k);
+          const bool u = k == 0 ? m - h >= mk : m + h <= mk;  // unchanged: centred on zero
+          const bool l = k == 0 ? m - h >= 0 : m + h <= 0;    // a loss of the margin's size: centred on the margin
+          pu[sz(k)][ni] += u ? 1.0 / R : 0.0;
+          pl[sz(k)][ni] += l ? 1.0 / R : 0.0;
+          others = others && u;
+        }
+        pothers[ni] += others ? 1.0 / R : 0.0;
+        prule[ni] += others && target ? 1.0 / R : 0.0;
+      }
+    }
+    for (int k = 0; k < 6; ++k) {
+      const double scale = k == 5 ? mean[5] : std::abs(mg.of(k));
+      const double n90 = scale > 0 ? std::pow(kZPower * sd[sz(k)] / scale, 2) : 1e9, n90u = scale > 0 ? std::pow(kZPower * sdu[sz(k)] / scale, 2) : 1e9;
+      std::string line = std::format("{:<20}{:>+10.5f}{:>10.5f}{:>10.5f}{:>10.5f}{:>8.0f}{:>8.0f} |                     ", kCmpNames[sz(k)], mean[sz(k)], sd[sz(k)],
+                                     sdu[sz(k)], k == 5 ? 0.0 : mg.of(k), std::ceil(n90), std::ceil(n90u));
+      for (std::size_t ni = 0; ni < kM3PowerN.size(); ++ni) {
+        line += std::format("{:>6.2f}", pu[sz(k)][ni]);
+        rows.push_back(std::format("{},{},{},{},{},{:.7f},{:.7f},{:.7f},{:.7f},{:.1f},{:.1f},{:.4f},{}", en, models[mi].name, kCmpNames[sz(k)], P, kM3PowerN[ni],
+                                   mean[sz(k)], sd[sz(k)], sdu[sz(k)], k == 5 ? 0.0 : mg.of(k), n90, n90u, pu[sz(k)][ni],
+                                   k == 5 ? std::string("") : std::format("{:.4f}", pl[sz(k)][ni])));
+      }
+      std::println("{}", line);
+    }
+    std::string l1 = std::format("{:<84}", "every other measure unchanged"), l2 = std::format("{:<84}", "the rule (others unchanged, target as measured)");
+    for (std::size_t ni = 0; ni < kM3PowerN.size(); ++ni) {
+      l1 += std::format("{:>6.2f}", pothers[ni]);
+      l2 += std::format("{:>6.2f}", prule[ni]);
+      rows.push_back(std::format("{},{},others_unchanged,{},{},,,,,,,{:.4f},", en, models[mi].name, P, kM3PowerN[ni], pothers[ni]));
+      rows.push_back(std::format("{},{},rule,{},{},,,,,,,{:.4f},", en, models[mi].name, P, kM3PowerN[ni], prule[ni]));
+    }
+    std::println("{}\n{}", l1, l2);
+  }
+  merge_rows(c.results / "m3_power.csv", "effect,model,measure,probe_settings,n_settings,mean,sd,sd_up80,margin,n90,n90_up80,p_pass,p_pass_if_loss", rows, en);
+}
+
 void step_val(const Ctx& c, sim::Effect e, const tools::Args& a) {
-  const auto models = read_entries(a.need("current"), a.str("cand", ""));
-  const Split sp = split_of(a.str("split", c.m2 ? "probe2" : "probe"), e);
-  if (sp.name == "test" || sp.name == "test2") throw std::invalid_argument("val: the test runs once, through `test`");
+  auto models = read_entries(a.need("current"), a.str("cand", ""));
+  const Split sp = split_of(a.str("split", c.m3 ? "probe3" : c.m2 ? "probe2" : "probe"), e);
+  if (sp.name == "test" || sp.name == "test2" || sp.name == "test3") throw std::invalid_argument("val: the test runs once, through `test`");
   if (c.m2 != (sp.name == "probe2" || sp.name == "val2")) throw std::invalid_argument("val: study M2's splits are probe2 and val2, with --study m2");
-  for (const auto& m : models) std::println("{}: {} {} {} sha256 {}", sp.name, ename(e), m.name, m.path.string(), m.sha);
+  if (c.m3 != (sp.name == "probe3" || sp.name == "val3")) throw std::invalid_argument("val: study M3's splits are probe3 and val3, with --study m3");
+  if (a.flag("null")) {  // study M3's null: the current model played with fresh seeds (the probe only)
+    if (sp.name != "probe3") throw std::invalid_argument("val: --null is the probe's (probe3)");
+    Entry n = models[0];
+    n.name = "null";
+    n.seed_base = sp.null;
+    models.push_back(std::move(n));
+  }
+  for (const auto& m : models) {
+    std::println("{}: {} {} {} sha256 {}{}", sp.name, ename(e), m.name, m.path.string(), m.sha,
+                 m.seed_base > 0 ? std::format(" (its plays from seed {})", m.seed_base) : std::string());
+  }
   const auto sc = evaluate(c, e, sp, models);
   const std::string prefix = a.str("prefix", std::format("m_{}", sp.name));
   report_split(c, e, sp, models, sc, prefix);
   if (sp.name == "val") decide(c, e, sp, models, sc, prefix);
   if (sp.name == "val2") decide_m2(c, e, sp, models, sc, prefix);
+  if (sp.name == "val3") decide_m3(c, e, sp, models, sc, prefix);
+  if (sp.name == "probe3") probe_m3(c, e, sp, models, sc);
   if (sp.name == "probe2") {  // the rule's reading on training settings, for development only (not a decision)
     for (std::size_t mi = 1; mi < models.size(); ++mi) print_rule_m2(sp.name, ename(e), models[mi], apply_rule_m2(sc[mi], sc[0], targets_spectrum(models[mi], models[0])));
   }
@@ -2199,10 +2489,21 @@ void step_test(const Ctx& c, sim::Effect e, const tools::Args& a) {
     }
     if (!ok) throw std::runtime_error("test: the candidate's SHA-256 is not frozen for " + ename(e) + " in " + a.need("frozen"));
   }
+  const MarginsM3 mg3 = c.m3 ? margins_m3(e) : MarginsM3{};
+  if (c.m3 && !mg3.set()) throw std::runtime_error("test: study M3's margins of " + ename(e) + " are not fixed");
+  const Split sp = split_of(c.m3 ? "test3" : c.m2 ? "test2" : "test", e);  // throws before the marker if the settings are not fixed
   std::ofstream(done) << "started " << models[1].sha << "\n";
-  const Split sp = split_of(c.m2 ? "test2" : "test", e);
   for (const auto& m : models) std::println("test: {} {} {} sha256 {}", ename(e), m.name, m.path.string(), m.sha);
   const auto sc = evaluate(c, e, sp, models);
+  if (c.m3) {  // study M3: its rule, once
+    report_split(c, e, sp, models, sc, "m3_test");
+    const RuleM3 r = apply_rule_m3(sc[1], sc[0], mg3);
+    print_rule_m3("test3", ename(e), models[1], r);
+    std::println("test3 {} {}: {}", ename(e), models[1].name, r.pass() ? "MEETS the rule: replace" : "does not meet it: keep the current model");
+    merge_rows(c.results / "m3_test_decision.csv", kRuleM3Header, {rule_m3_row(ename(e), models[1], r)}, ename(e));
+    std::ofstream(done) << "done " << models[1].sha << " " << (r.pass() ? "met" : "not met") << "\n";
+    return;
+  }
   if (c.m2) {  // study M2: its rule, once
     report_split(c, e, sp, models, sc, "m2_test");
     const RuleM2 r = apply_rule_m2(sc[1], sc[0], targets_spectrum(models[1], models[0]));
@@ -2312,7 +2613,7 @@ void step_info(const tools::Args& a) {
 
 int main(int argc, char** argv) {
   try {
-    tools::Args a(argc, argv, {"play", "ftz", "floor-gradient"});
+    tools::Args a(argc, argv, {"play", "ftz", "floor-gradient", "null"});
     if (a.positional().empty()) {
       std::println("nvfx_ordered diag --effect E [--model F] [--settings 8] [--reps 4] [--root DIR] [--results DIR] [--threads N]");
       return 2;
@@ -2323,8 +2624,9 @@ int main(int argc, char** argv) {
     c.results = a.str("results", "results/experiments/ordered");
     c.threads = a.i("threads", 1);
     const std::string study = a.str("study", "m");
-    if (study != "m" && study != "m2") throw std::invalid_argument("--study m or m2");
+    if (study != "m" && study != "m2" && study != "m3") throw std::invalid_argument("--study m, m2 or m3");
     c.m2 = study == "m2";
+    c.m3 = study == "m3";
     const std::string step = a.positional()[0];
     if (step == "setmean" || step == "set" || step == "info") {
       if (step == "set") step_set(a);

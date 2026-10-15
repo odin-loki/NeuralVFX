@@ -2729,6 +2729,79 @@ nvfx_ordered cost --effect explosion --current v2/models/explosion.nvfx --cand m
 nvfx_ordered info --model F                                                                        # a file's constants
 ```
 
+### 14.9 Study M3: the mean state for the one-shots, with a rule planned for power
+
+Status: **in progress** (15 October 2026). This plan (the probe, how the margins and the number of settings follow from
+it, and the seeds) is committed before any of the study's numbers; the rule's numbers follow the probe and are committed
+before validation.
+
+**The question.** The mean state (§14.2: each start point moved to the requested controls by a quadratic fit of the
+ordered coarse state) brought the explosion's average picture 4.3 dB (study M) and 3.4 dB (study M2) closer to a real
+run's on validation, and dust's 1.1 dB (M2), but neither was tested: under study M's strict reading the explosion's
+spectrum tied, and under M2's margins the explosion's spectrum interval and dust's coverage interval reached past
+margins that were far tighter than those measures' paired spread over 10 settings (§14.8.7). Is the mean state better on
+held-out settings, with nothing worse by more than matters, when the rule is planned for power? Code: `nvfx_ordered
+--study m3` (the same tool; every file under the data root's `m3`; studies M's and M2's data are only read).
+
+**Candidates**: the explosion's `ms` (study M's file, SHA-256 `b0ee6f05...`, v2 with the mean state fitted to the first
+states of its 240 training runs) and dust's `ms` (study M2's, `938440a4...`, the same construction on dust's), each
+against the current model (the explosion v2, `v2/models`; dust `fx_atmos/models/d`). A rebuilt mean state is validated
+instead only if the probe shows a reason; the candidates are declared before validation.
+
+#### 14.9.1 The plan (committed before any of the study's numbers)
+
+**The probe (development, training settings only):** the controls of salt-1 training runs 0 to 39 (40 settings), with
+validation's pooling: 8 real runs (the reference) and 8 more (the floor) per setting, 8 plays per model, tracking 2 runs
+per setting. Three plays per setting: the current model, the current model again **with fresh seeds (the null)**, and
+`ms` with the current model's seeds (paired, as on validation). Run in two steps: the current model and the null first,
+which fix the margins (below), then `ms`, whose spread fixes the number of settings. Seeds (study M's range, the block
+8,300,000 to 8,349,999): real 8,300,000 + 100 s + k (the floor + 50), plays 8,310,000, the null's plays 8,320,000,
+tracking 8,330,000 (+ 100 s + k).
+
+**The margins come from the null.** Studies K and M2 set margins at what matters at each measure's scale (spectrum and
+motion +0.02; coverage and emission +10% of the current model's distance, at least 0.0001; tracking -0.20 dB at 1 s).
+K's were sized for int8, which plays the same seeds to nearly the same frames, so its paired differences were tiny. A
+mean state changes every trajectory: its plays differ from the current model's as two seeds' do, and a measure moves
+between two sets of eight plays of the **same** model by the null's spread. What a viewer sees of an effect at a setting
+is a set of its runs, and drawing another set of seeds from the unchanged model already moves each measure by that much;
+a candidate worse on average by less than the null's typical change at one setting is within the effect's own
+seed-to-seed variety, which no one watching could tell from a re-seed. So each margin is the **larger of study K's and
+the null's RMS change at a setting** (the current model with fresh seeds minus the current model, 8 runs pooled each,
+the RMS over the probe's 40 settings), computed from the current model and the null alone, before `ms` is played on the
+probe. K's margin stands where the measure is steadier than that; the null widens it only where K's margin is smaller
+than what re-seeding does. Tracking has no null (a tracked run takes its own seed, so the same model plays the same
+frames; `ms` moves a start at its own controls by nothing), so it keeps -0.20 dB. The margins are fixed as numbers
+from the probe; they are not functions of the validation or test data.
+
+**The number of settings comes from the spread.** The interval's worse end lies about 1.96 SD / sqrt(N) beyond the mean
+difference over N settings. A measure that the candidate leaves truly unchanged on average passes a margin d with
+probability about Phi(d sqrt(N) / SD - 1.96) (0.9 needs N >= (3.24 SD / d)^2), and a real loss of size d fails with
+probability 0.975 whatever N is, since the interval's worse end then lies beyond d unless chance puts the mean 1.96
+standard errors on the better side. The SD that matters is the candidate's own paired spread (`ms` minus the current
+model over settings, which includes how much its effect differs from setting to setting, larger than the null's), so N
+is sized on `ms`'s probe spread. **N** is the smallest multiple of 10 at which, for both effects and for every measure
+other than the target, a truly unchanged measure passes its margin with probability at least 0.9, both by resampling the
+probe's settings (4,000 sets of N settings drawn with replacement, each measure's paired differences centred on zero)
+and in the normal form with the SD at the upper end of its one-sided 80% interval (M2's probe, at 4 runs and 10
+settings, had narrower intervals than its validation: this guards against an underestimate). The null passes its own
+margins with at least 0.9 at N >= 11 and 0.99 at N >= 20 (each margin is at least its RMS). N is capped by the time a validation and a test
+take on this machine, measured on the probe (one-shots are cheap: 89 frames a run); if the cap binds, N is the cap and
+the power at it is stated before validation. The same N for validation and the test.
+
+**Validation settings**: study G's 10 and more drawn the same way (the same random stream, seed 2027, uniform in 0.05 to
+0.95 off the training grid, at least 0.05 from every test setting), the first N; **test settings**: study B's 10 and
+more drawn the same way (seed 2026), the first N. Seeds: validation real 8,350,000 + 100 s + k (the floor + 50), plays
+8,400,000, tracking 8,450,000 (k = 0, 1); the test real 8,700,000 + 100 s + k (the floor + 50), plays 8,800,000, tracking
+8,850,000 (study M2's test block, never used).
+
+**The rule's form** (its numbers follow the probe): candidate minus current model, paired over the settings (tracking:
+each setting's mean over its 2 runs), 95% bootstrap with 10,000 resamples (`metrics::paired_bootstrap`, seed 2026), the
+measures of studies M and M2 (8 runs pooled per setting; one-shots their 89 frames from the first). The candidate
+replaces the current model when its **mean-frame PSNR interval is above zero** and every other measure's interval has
+its worse end within its margin. The strict reading is reported beside and does not decide. The chosen file is written to
+the data root's `m3/models/<effect>.nvfx` and frozen by SHA-256 in `results/experiments/ordered/m3_frozen.csv` before
+its test, which runs once (`nvfx_ordered --study m3 test`, a marker under `m3`).
+
 ## 15. Study N: a small 3D demo
 
 Status: **done** (15 October 2026). The full write-up is [STUDY_3D.md](STUDY_3D.md); this is its summary. It is stage 1
