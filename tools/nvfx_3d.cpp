@@ -1068,7 +1068,7 @@ int compare(const Args& a) {
       csv << std::format("endless,{},,{:.5f},{:.5f},{:.5f},{:.5f},{:.5f}\n", name, ma, mb, iv.mean, iv.lo, iv.hi);
     };
     stat("3D spectrum distance", [](const Endless& e) { return e.spectrum; }, false, 3);
-    stat("|ln motion ratio|", [](const Endless& e) { return e.motion; }, false, 3);
+    stat("\\|ln motion ratio\\|", [](const Endless& e) { return e.motion; }, false, 3);
     stat("motion ratio", [](const Endless& e) { return e.motion_ratio; }, true, 3, false);
     stat("coverage distance", [](const Endless& e) { return e.coverage; }, false, 4);
     stat("emission distance", [](const Endless& e) { return e.emission; }, false, 4);
