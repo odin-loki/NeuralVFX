@@ -1,5 +1,29 @@
 # Earth effects: lava, an eruption and an avalanche
 
+> **Status: paused** (15 October 2026, 22:00 UTC; the week's compute ran out). **Done:** the three presets with their
+> tests and the byte-for-byte check of all 21 earlier effects (§2), `d-chaos` (§2), the test's design, committed before
+> any test (§4); **lava** trained (2.2 h: renderer 34.7 dB, 146 KB), frozen
+> (`results/experiments/fx_earth_frozen.csv`, SHA-256 `b291382b...`) and tested once: it **works** by the rule (tracking
+> at 1 s +1.09 dB [+0.70, +1.43] over `coarse_sim_detail`; endless mean frame +1.22 dB [+0.11, +2.45] over the nearest
+> flipbook, motion error tied, -0.069 [-0.205, +0.060]; spectrum +0.039 [+0.014, +0.061] worse than the flipbook's;
+> `results/experiments/fx_earth/D_SUMMARY.md`). **Not done:** the eruption's and the avalanche's training and tests, the
+> cost (`d-timing`), the library entries (`library/earth.nvfxl` is an unjudged draft), the volcano scene's look and frozen
+> keyframes (`examples/scenes/volcano.nvfxs` parses; `ScriptedVolcanoFrozen` has no rows yet), the videos, REPORT §6.16,
+> README/ENGINES counts, the merge of main and the final checks. **Models** (data root `/root/nvfx-data/fx_earth`):
+> `models/d/lava.nvfx` (frozen; a read-only copy in `models/frozen/`, linked into `library/models`); the eruption's
+> `d-train` started automatically at 21:57 UTC from the queue and was left running (`logs/eruption.d-train.log`;
+> `jobs/train.sh` then runs its `d-tune` and `d-finish`); the queue is paused (`jobs/PAUSED`), so the avalanche will not
+> start. **To resume:**
+> ```sh
+> D=/root/nvfx-data/fx_earth; cat $D/logs/queue.log                     # what ran
+> rm $D/jobs/PAUSED; $D/jobs/train.sh eruption                           # resumes at its first unfinished step
+> # freeze: sha256sum $D/models/d/eruption.nvfx, a row in results/experiments/fx_earth_frozen.csv, commit and push; then
+> $D/jobs/test.sh eruption                                               # the test, once (refuses an unfrozen model)
+> $D/jobs/train.sh avalanche && (freeze as above) && $D/jobs/test.sh avalanche
+> cp $D/test/*/d_{track,stats,long}.csv ...                              # merge each effect's rows into results/experiments/fx_earth
+> build/nvfx_experiment d-report --root $D --results results/experiments/fx_earth
+> ```
+
 Status: **in progress** (15 October 2026). The presets, their training plan and the test's design (§4) are written
 and committed before any test runs; the results follow them. Audience: dev, research, artists. Three effects a game
 would want next to fire, smoke and dust: **lava** (glowing molten rock that flows slowly along the ground and pools,
