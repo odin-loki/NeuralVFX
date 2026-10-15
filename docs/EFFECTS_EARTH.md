@@ -76,6 +76,8 @@ printed the amount, centroid, extent and speed of the material over time. What c
   moves fast and settling once it slows; tied to the slope's flow and fading with the second age input, it grows for
   two to three seconds and stops, where tied to the snow's own speed it ran away and filled the frame.
 
+![Lava, eruption and avalanche, the simulator's presets: two frames at each of three settings (low, middle and high controls), lava and the eruption a second apart, the avalanche at 1.5 and 3.5 s](figures/earth_presets.png)
+
 How fast they move, at two settings (all controls 0.5 and all 1; the avalanche also at (0.5, 0.85, 0.5), since at a
 direction of 0.5 it only slumps; cells of a 128-cell frame per second where there is material, median and 99th
 percentile; a coarse cell is 4 of them, a frame 1/30 s; looping effects in the steady state, frames 150 to 240; the
