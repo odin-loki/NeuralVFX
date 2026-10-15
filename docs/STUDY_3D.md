@@ -221,7 +221,21 @@ look-at description) into premultiplied RGBA8. How an engine uses it: [ENGINES.m
 
 ## 11. Limits
 
-(To come.)
+- **The teacher is our own solver, tuned by eye.** Nothing here is checked against a real fire: the plume rises and
+  puffs at a steady rate, but at 0.5 to 0.65 Hz, several times slower than a real pool fire of this size would. The
+  learned model can only be as real as its teacher. The PC plan's validated teachers (FDS) are what would change that.
+- **One effect, one small model.** A fire, with a 16 x 24 x 16 learned state, 16 channels and 14,218 weights, trained
+  for about two thousand iterations on 40 runs (5.3 minutes of simulated fire). The smoke preset exists but was not
+  trained. No hyperparameter was searched.
+- **Small samples.** The test pairs 18 tracked runs and 6 settings (3 runs pooled per setting); study D2 pooled 8.
+  Intervals over 6 settings are wide.
+- **The picture is a fixed physical model, not a learned one**: emission and absorption with single scattering of one
+  fixed key light, an ambient light and the fire's own light without shadows. No multiple scattering, no blue
+  chemiluminescent base (a soot-and-temperature model has none), one exposure for every picture.
+- **The measures see the fields at 64 x 96 x 64 and pictures at 128 x 128 from four fixed cameras**; the 3D spectrum
+  covers the lowest 64 cells of the box only.
+- **Cost is provisional**: measured on a shared 4-core machine at a load of 8 to 14, where nice-15 jobs get under a
+  core.
 
 ## 12. Reproduce
 
@@ -251,4 +265,4 @@ $B video --kind orbit --out 3d_fire_orbit.mp4 --seconds 12          # §10
 
 ## 13. What it means for the PC plan
 
-(To come.)
+(Completed after the test.)

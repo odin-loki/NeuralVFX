@@ -245,6 +245,15 @@ if(NEURALFX_BUILD_TOOLS)
   endif()
   set_target_properties(nvfx_c_host PROPERTIES LINKER_LANGUAGE CXX)
   neuralfx_defaults(nvfx_c_host)
+  # 3D volumes from plain C (nvfx_volume.h, study N): play a 3D effect, read its extinction texture, draw it for a camera.
+  add_executable(nvfx_volume_host examples/volume_host.c)
+  if(NEURALFX_BUILD_SHARED)
+    target_link_libraries(nvfx_volume_host PRIVATE nvfx_shared m)
+  else()
+    target_link_libraries(nvfx_volume_host PRIVATE nvfx m)
+  endif()
+  set_target_properties(nvfx_volume_host PROPERTIES LINKER_LANGUAGE CXX)
+  neuralfx_defaults(nvfx_volume_host)
   # The effect library from plain C (nvfx_library.h): list a catalogue, spawn effects on a stage, drive and stop them.
   add_executable(nvfx_library_host examples/library_host.c)
   if(NEURALFX_BUILD_SHARED)
@@ -417,6 +426,8 @@ if(NEURALFX_BUILD_TESTS)
   if(NEURALFX_BUILD_TOOLS)
     add_test(NAME neuralfx.CHostExample COMMAND nvfx_c_host --self-test)
     set_tests_properties(neuralfx.CHostExample PROPERTIES LABELS neuralfx)
+    add_test(NAME neuralfx.VolumeHostExample COMMAND nvfx_volume_host --self-test)
+    set_tests_properties(neuralfx.VolumeHostExample PROPERTIES LABELS neuralfx)
     # The fireball as a script reproduces the hand-written scene's frozen keyframes to the bit (about a minute on 2
     # threads). Needs the study D effects (outside git): skipped when they are not in NEURALFX_MODELS_D. The frozen
     # keyframes here and below are the float path's (--precision float); rollout effects run at int8 by default since
