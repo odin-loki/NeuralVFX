@@ -43,3 +43,10 @@ look devil_dust = shader, emission 0, soot_density 2.6, soot_albedo 0.5, sky 0.3
                   tint (1, 0.78, 0.55)
 look blaze = shader, heat_scale 0.9, emission 2.6, emission_power 2, soot_density 2.6, soot_albedo 0.35, sky 0.2,
              shadow 0.3, scene_light 0.8, relief 1, tint (1, 0.8, 0.6)
+
+# The fire effects (docs/EFFECTS_BLAZE.md): a burning front whose whole width burns, a bed of glowing coals, and a
+# mushroom cloud (plays once, 5 s). All three give light. The mushroom's entries draw it with the explosions' look
+# `cloud` (its own renderer gives colour fringes); the coals' own renderer or a look for a hotter bed.
+effect wildfire = "wildfire.nvfx"                                     # intensity, wind, turbulence
+effect coals    = "coals.nvfx"                                        # intensity, wind, turbulence
+effect mushroom = "mushroom.nvfx"                                     # plays once (5 s): 16 start points
