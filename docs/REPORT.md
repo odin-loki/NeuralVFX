@@ -1857,3 +1857,208 @@ is unchanged to the bit: its frozen keyframes still match.
 - **Timings are provisional**: one session on a machine shared with three other agents (load average 4 to 12).
   `tools/study_k/time.sh [BUILD] [OUT] [ROUNDS]` re-runs every timing of this section (the eleven effects, the stages,
   the fireball on 4 threads and on 1, the crowd), interleaved, on a quiet machine; about 30 minutes at five rounds.
+
+## 14. Study M: model what's ordered, leave random to random
+
+Status: **in progress.** The diagnosis (§14.1) and what was built and tried (§14.2) were done on training settings
+only; the rule (§14.3) was committed before any validation number.
+
+**The question.** Pooled over 8 runs per setting at study G's validation settings (§6.9.2), v2's average picture over
+time is 6.9 dB (fire), 6.5 dB (smoke) and 7.9 dB (explosion) further from a real run's than a second real run's is, and
+its detail spectrum distance is 4 to 7 times the floor's. The owner's principle: learn the ordered, predictable part of
+an effect (its average picture at given controls) and give the random part to seeded randomness with the right
+statistics, rather than asking a network to predict chaos. Where does each part's error lie, and does a fix by that
+principle bring v2 closer to the real effect without making it worse elsewhere? Code: `tools/nvfx_ordered.cpp`
+(`nvfx_ordered diag | dvar | where | fitmean | setmean | set | fitbias | train | val | test`); every run is cached and
+logged under the data root's `m_ordered`.
+
+### 14.1 Diagnosis (training settings)
+
+Each effect was taken apart on 8 training settings (the controls of salt-1 training runs 0 to 7), with 4 real runs A
+(the reference; seeds 7,100,000 + 100 s + k) and 4 real runs B (7,100,050 + 100 s + k) per setting, pooled per setting
+as study D2 pools (§6.9). Study L's oracle swaps (§12.1.1) were applied to the B runs, and every clip was split into its
+ordered part (its mean frame; the time- and ensemble-mean coarse fields) and its random part (the frames about their
+mean: RMS, spectrum, temporal correlation overall and by scale) (`nvfx_ordered diag`, `where`;
+[m_diag_*.csv](../results/experiments/ordered/)). Mean-frame PSNR (dB) against the pooled A runs, mean over the 8
+settings:
+
+| method | what it is | fire | smoke | explosion |
+|---|---|---:|---:|---:|
+| real_B | B's own frames: the floor (4 runs) | 41.29 | 36.42 | 34.38 |
+| rend_true | the learned renderer on B's true fields | 41.31 | 36.32 | 34.19 |
+| detail_sim | the detail layer on B's true coarse states, the simulation's renderer | 40.12 | 35.23 | 34.01 |
+| detail_lr | the same, the learned renderer | 40.11 | 35.19 | 33.92 |
+| neural_true_lr | the stepper and detail layer from B's true state (one rollout, B's seed) | 39.57 | 33.60 | 33.24 |
+| neural_one_lr | one rollout from one of the three stored start points nearest the controls | 38.14 | 32.97 | 29.51 |
+| neural_shards | the runtime as shipped | 37.91 | 32.27 | 27.40 |
+
+In squared error above the floor, the as-shipped picture's excess splits as: **fire** 59% from the start points and
+shards (shards against neural_true_lr), 27% from the detail layer, 15% from the stepper, nothing from the renderer;
+**smoke** 43%, 19% and 37%, the renderer 2%; **the explosion** 93% from the start points, 5% from the stepper, 2% from the
+detail layer and 1% from the renderer.
+
+- **Start points are the largest ordered error, and the stepper does not forget them.** A run of the learned fire
+  started from the stored start point nearest a setting stays different for the whole 10 s (setting 3: heat 0.025
+  against 0.035 per cell, motion 0.6), where a real fire forgets its start within a second. Coarse-only rollouts of
+  setting 3 (0.59 / 0.61 / 0.79) for 20 s: from its true state the heat follows the truth's level (0.03 to 0.05);
+  from start point 4 (0.12 / 0.11 / 0.01) the fire grows, then **dies** after 10 s (heat 0.0008, no activity), at an
+  intensity at which the real fire burns steadily. The 8 start points of fire and smoke sit at the corners of the
+  control cube, 0.2 to 0.8 from a typical setting. The explosion's 16 start points are its first states, and an
+  explosion played from one at another intensity stays the wrong size: from a stored start point its coverage distance
+  is 0.042 (0.006 from the true state), its alpha higher in every row of the frame.
+- **The detail layer's ordered error is at the source.** Its mean frame (with the true coarse states) differs from the
+  real one mostly in the rows of the source: for fire, rows 112 to 119 carry an RMS error of 24 against the floor's 15
+  (×10⁻³), about 90% of the detail layer's excess; for smoke the source rows carry 55% and the top rows (where smoke leaves
+  the frame) 15%. By eye, the real fire's time-averaged base is a solid band with a crisp lower edge; the detail layer's
+  breaks into two or three lobes with dark seams, a fixed pattern that none of the detail layer's constants removes (with
+  the true coarse states its mean-frame PSNR stays at 39.7 to 40.2 dB for every variant of `dvar`, below). The mean
+  frame lacks fine structure (log power of the mean frame at radial bins 17 to 64: -0.18 to -0.25 for fire) while the
+  fluctuations have too much (+0.14 to +0.31): ordered fine structure (a source of fixed shape) is missing and random
+  fine structure is made in its place.
+- **The stepper has less material and is too calm.** From the true state, its mean heat and soot are 10% (fire) and 9%
+  (smoke) below the real runs', the flame a little lower; it moves 0.82 (fire), 0.79 (smoke) and 0.87 (explosion) as
+  much as the real runs. Played as shipped, fire and smoke move more (0.88, 0.87), because each mismatched start point
+  relaxes towards the controls: part of v2's motion is that transient.
+
+The random part, against the pooled A runs (the floor at 4 runs: spectrum distance 0.036 to 0.044, fluctuation RMS ratio
+0.97 to 0.99):
+
+| effect | method | fluctuation RMS ratio | spectrum distance | log power, bins 5-16 | bins 17-32 | bins 33-64 | correlation over 4 frames, bins 17-32 (real) |
+|---|---|---:|---:|---:|---:|---:|---|
+| fire | detail_sim | 1.00 | 0.185 | +0.005 | +0.123 | +0.283 | - |
+| fire | neural_shards | 0.98 | 0.145 | -0.072 | +0.000 | +0.194 | - |
+| smoke | detail_sim | 1.01 | 0.150 | -0.005 | +0.122 | +0.219 | 0.22 (0.17) |
+| smoke | neural_shards | 1.00 | 0.111 | -0.151 | -0.056 | +0.097 | 0.32 (0.17) |
+| explosion | detail_sim | 0.99 | 0.141 | -0.039 | -0.039 | -0.070 | 0.11 (0.11) |
+| explosion | neural_shards | 1.07 | 0.239 | -0.188 | -0.142 | -0.010 | 0.20 (0.11) |
+
+- **The amplitude of the random part is right**: the fluctuations' RMS is within 3% of the real runs' for every method
+  except the explosion's play (+7%).
+- **Its scale is wrong in two opposite ways.** The detail layer makes too much power at the finest scales (2 to 8
+  pixels: +0.12 to +0.28 in log10 on fire and smoke, with the true coarse states), and the stepper's state too little at
+  8 to 25 pixels (-0.07 to -0.19).
+- **Its time is too slow at the stepper's scales**: structures of 4 to 8 pixels keep 0.32 of their correlation over 4
+  frames in smoke's play against 0.17 in real smoke (the explosion 0.20 against 0.11); with the true coarse states the
+  detail layer's own decorrelation is about right.
+- **The sub-grid swirl makes most of the fine-scale excess.** Fire's detail layer with the true coarse states (`dvar`,
+  one constant at a time): without the swirl its spectrum distance falls from 0.185 to 0.087 (played as shipped, 0.145
+  to 0.096) with motion unchanged at most settings (0.871 against 0.876 as shipped); softening (0.05) gives 0.107 (play
+  0.087) at 3% of motion; lower contrast, one-pass growth and two passes cost motion or the mean frame.
+
+### 14.2 What was built and tried (training settings)
+
+Each idea below follows from the diagnosis, and each is off unless a model file sets it (file version 6, written only
+when one of its fields is set; files without them keep their layout and play to the bit as before: every frozen test
+passes). They were measured as shipped, through the runtime, on a **probe split** of training settings (the controls of
+salt-1 runs 0 to 9; 4 real runs and 4 plays pooled per setting, seeds 7,300,000 and 7,400,000 + 100 s + k; tracking from
+the true state at 2 runs per setting, 7,450,000 + 100 s + k), candidate minus v2, paired over the 10 settings
+([m_probe*_compare.csv](../results/experiments/ordered/)):
+
+- **A mean state** (ordered: the start point's ordered part moved to the controls). `Model::mean`: the ordered coarse
+  state as a quadratic in the three controls per block of 2 x 2 cells (u, v, heat, soot), fitted by ridge regression to
+  the training runs' time means (looping effects: states 89 to 239 of each of the 160 runs; the explosion: the first
+  states of its 240 runs, which is what its start points are; `nvfx_ordered fitmean`). Cross-validated, it explains 65
+  to 68% of the variation of fire's 5 s means over the control space (smoke 58%, the explosion's first state 81 to 98%;
+  much of the rest is the single runs' own noise). A start point begun at controls c is moved by
+  mu(c) - mu(its own controls): its ordered part becomes c's and its fluctuations stay a sample. Applied in
+  `rollout::start_coarse` (the reference), the runtime's runners (once per shard, without allocating), `nvfx_render`'s
+  shard timeline and the effect manager's. Tracking from the true state is untouched (a start at its own controls is
+  moved by nothing). 20 KB more per effect (10,240 coefficients at fp16).
+- **A coarse stochastic forcing** (random: the stepper damps its fluctuations). `Hyper::force`: each step adds the
+  simulation's own curl-noise forcing at the coarse level, the curl of the stream function the stepper already sees (the
+  run's seed, scale and rate), scaled by force, (1 + 6 turbulence) / 4 and the material, before the projection.
+- **A bias correction** (ordered: the stepper's own mean). `Model::bias`, in the mean state's form: a constant source
+  added every step, fitted by iterating coarse-only rollouts at 80 training controls until their means match the
+  training runs' (`fitbias`).
+- **An ensemble-mean loss for the stepper** (ordered: learn the mean). `StepperOptions::mean_stage`: half the windows of
+  a fine-tuning stage start from a run's true state, play two rollouts with seeds of their own for a burn-in (0 to 90
+  frames), then 16 frames with gradient, and take (a - x)(a' - x) against the run's own states, averaged over blocks of 4
+  x 4 cells: an unbiased estimate of the squared bias of the model's mean from that start, which does not reward calm as
+  a squared error against one chaotic run does; the other half are the activity stage's. Gradients checked against finite
+  differences. 600 iterations from v2's stepper, weight 4 (`nvfx_ordered train`; 39 minutes on one thread for smoke).
+- **The swirl's scale** (random: the fine-scale excess). The existing constant `swirl_scale` at 16 pixels instead of 6:
+  the sub-grid swirl moves detail at 8 to 16 pixels rather than stirring it at 3.
+
+Candidate minus v2 on the probe split (bold: better, interval clear of zero; struck: worse):
+
+| effect | candidate | tracking at 1 s (dB) | spectrum distance | \|ln motion ratio\| | coverage | mean-frame PSNR (dB) |
+|---|---|---|---|---|---|---|
+| explosion | mean state (`ms`) | +0.00 | -0.033 [-0.066, +0.003] | **-0.108 [-0.180, -0.043]** | **-0.020 [-0.030, -0.009]** | **+2.80 [+1.47, +4.02]** |
+| explosion | `ms`, swirl 0 | +0.02 | -0.032 [-0.071, +0.020] | **-0.109** | **-0.020** | **+2.78 [+1.46, +4.00]** |
+| explosion | `ms`, swirl scale 16 | +0.01 | -0.022 [-0.064, +0.036] | **-0.108** | **-0.020** | **+2.80 [+1.47, +4.01]** |
+| explosion | `ms`, forcing 0.03 | ~~-1.90 [-2.43, -1.38]~~ | **-0.048** | **-0.131** | **-0.019** | **+1.71** |
+| fire | mean state (`ms`) | +0.00 | ~~+0.099 [+0.063, +0.140]~~ | ~~+0.087 [+0.043, +0.142]~~ | +0.000 | +0.33 [-0.92, +1.42] |
+| fire | forcing 0.03 / 0.1 | ~~-0.38~~ / ~~-1.42~~ | ~~+0.009~~ / ~~+0.054~~ | -0.000 / +0.012 | +0.000 | +0.04 / -0.67 |
+| fire | bias correction | -0.39 [-0.79, +0.04] | ~~+0.074~~ | +0.032 | +0.000 | -0.28 [-1.23, +0.78] |
+| fire | swirl scale 16 (`s16`) | +0.12 [-0.01, +0.27] | **-0.0125 [-0.0207, -0.0036]** | -0.002 | -0.000 | **+0.035 [+0.008, +0.069]** |
+| fire | ensemble-mean fine-tune (`mt4`) | -0.01 [-0.19, +0.18] | +0.005 [-0.002, +0.012] | **-0.013 [-0.021, -0.004]** | +0.000 | **+0.38 [+0.04, +0.75]** |
+| fire | `mt4`, swirl scale 16 | +0.15 [-0.03, +0.43] | -0.0075 [-0.0156, +0.0003] | **-0.014 [-0.026, -0.002]** | +0.000 | **+0.40 [+0.08, +0.76]** |
+| fire | the same at weight 8 (`mt8`) | -0.05 [-0.26, +0.24] | ~~+0.011 [+0.002, +0.021]~~ | -0.014 [-0.040, +0.012] | +0.000 | **+0.67 [+0.28, +1.09]** |
+| fire | `mt8`, swirl scale 16 | +0.09 [-0.21, +0.48] | +0.001 [-0.010, +0.010] | -0.017 [-0.046, +0.011] | +0.000 | **+0.71 [+0.32, +1.13]** |
+| fire | `mt4` with the mean state | -0.01 | ~~+0.115~~ | ~~+0.099~~ | +0.000 | -0.10 [-1.37, +0.97] |
+| smoke | `mt4` with the mean state | +0.02 | ~~+0.024~~ | ~~+0.057~~ | ~~+0.002~~ | -0.07 [-1.01, +0.90] |
+| smoke | mean state (`ms`) | -0.00 | ~~+0.019~~ | +0.025 [-0.001, +0.047] | ~~+0.0025~~ | -0.12 [-1.08, +0.87] |
+| smoke | forcing 0.03 / 0.1 | ~~-0.47~~ / ~~-2.18~~ | +0.002 / ~~+0.024~~ | -0.008 / -0.029 | -0.000 / +0.001 | -0.10 / ~~-0.81~~ |
+| smoke | bias correction | ~~-1.04 [-1.44, -0.66]~~ | ~~+0.016~~ | +0.009 | +0.001 | ~~-1.29 [-2.38, -0.37]~~ |
+| smoke | ensemble-mean fine-tune (`mt4`) | +0.02 | ~~+0.006~~ | ~~+0.039 [+0.019, +0.058]~~ | -0.000 | -0.02 [-0.22, +0.15] |
+| smoke | swirl scale 16 (`s16`) | +0.02 | **-0.0094 [-0.0192, -0.0004]** | -0.005 | -0.000 | +0.010 [-0.004, +0.026] |
+
+- **The mean state does what the diagnosis said where the start point is the error**: the explosion's mean frame comes
+  2.8 dB closer to the real one, its coverage error halves and its motion is right (1.06 to 0.94 of the real runs';
+  the floor's 1.00). Its tracking from the true state is unchanged.
+- **On fire and smoke it exposes the stepper instead.** Started at the right controls, the learned fire is calmer
+  (motion 0.83 against v2's 0.95; the diagnosis's neural_true_lr also moved 0.82) and its low-intensity settings drift
+  into the weak, dying state of §14.1 (setting 0 of the probe: -2.5 dB); its mean frame is better at 7 of 10 settings but a
+  tie overall. Part of v2's motion was each mismatched start relaxing. Smoke's coverage moves away from the real one.
+- **The coarse forcing is a negative result.** Stirring the coarse state with the simulation's own noise breaks the flame
+  up rather than giving it the real fire's fluctuations: tracking at 1 s is worse at every amplitude (-0.4 dB at the
+  smallest, -1.4 to -9 dB at the larger), and motion does not rise. A stepper trained to undo noise on its inputs is not
+  made livelier by noise added to them.
+- **The bias correction is a negative result too**, for two reasons that the probe shows: its targets (the training runs'
+  means over 3 to 8 s from an empty grid) are not smoke's settled picture, which keeps building for longer, so it pulls
+  smoke towards an unsettled one (-1.3 dB); and a constant source large enough to move the mean costs tracking (smoke
+  -1.0 dB at 1 s).
+- **The ensemble-mean fine-tune works on fire**: learning the mean from a true state with the unbiased loss brings fire's
+  picture as shipped 0.38 dB closer to the real one at weight 4 and 0.67 dB at weight 8, and it moves at least as much as
+  v2 (|ln motion ratio| -0.013 at weight 4), with tracking tied: the ordered part learned better without the calm that a
+  squared error teaches. The heavier weight costs detail (+0.011 in spectrum distance), which the larger swirl scale
+  takes back. On smoke it changes the mean frame by nothing (-0.02 [-0.22, +0.15] dB) and costs 4% of motion. With the
+  mean state's starts it is as calm as the mean state alone: the fine-tuned stepper still relaxes too slowly from a
+  start moved to the controls.
+- **Moving the swirl's energy to larger scales is the one change better on both targets for fire** (spectrum -0.0125,
+  mean frame +0.035 dB), and for smoke better on the spectrum with the mean frame tied: a random part with the right
+  scale, not more of it.
+
+### 14.3 The rule (committed before validation; the test runs once)
+
+**Candidates**, each a model file built from v2's (the probe's evidence above; nothing else is validated):
+- fire: `s16` (swirl scale 16), `mt4` and `mt8` (the stepper fine-tuned with the ensemble-mean loss at weight 4 and 8),
+  `mt4_s16` and `mt8_s16` (each with swirl scale 16);
+- smoke: `s16` (swirl scale 16);
+- explosion: `ms` (the mean state), `ms_sw0` (and swirl 0), `ms_s16` (and swirl scale 16).
+
+**Validation (the choice)**: study G's 10 validation settings with study D2's seeds, so that v2's numbers are §6.9.2's:
+real runs 4,300,000 + 100 s + k, the floor 4,300,050 + 100 s + k, the models' plays 4,400,000 + 100 s + k (k = 0 to 7),
+10 s each after 5 s of warm-up (the explosion: its 89 frames from the first); tracking at 1 s from the true state on the
+studies' salt-3 validation runs 0 to 15 (100 frames of warm-up, the explosion 1). Every model plays through the runtime
+at float, the precision of the frozen tests (study K's int8 default ties float on every statistic, §13.5).
+
+**The rule.** Candidate minus v2, paired (tracking over the 16 runs on validation and over the 10 settings in the test;
+the endless statistics over the 10 settings, 8 runs pooled per setting), 95% bootstrap with 10,000 resamples
+(`metrics::paired_bootstrap`, seed 2026). A candidate replaces v2 for an effect when
+1. it is **better on both target statistics**: the mean-frame PSNR (interval above zero) and the detail spectrum distance
+   (interval below zero); and
+2. it is **not worse** on tracking at 1 s (no interval below zero), |ln motion ratio|, coverage distance or emission
+   distance (no interval above zero).
+
+On validation, among an effect's candidates that meet it, the one with the largest mean-frame gain is chosen; an effect
+with none stops there and is not tested (a null, reported with its numbers). Ties are ties; the strict reading of
+"not worse" (no interval on the worse side) is studies D2's and L's.
+
+**The test, once**, on study B's 10 held-out settings with **seed bases no study has used**: real runs **8,000,000 +
+100 s + k**, the floor **8,000,050 + 100 s + k**, the models' plays **8,100,000 + 100 s + k** (k = 0 to 7), tracking runs
+**8,200,000 + 100 s + k** (k = 0 to 3, each simulated from an empty grid and followed from its true state, averaged per
+setting). The chosen candidate is frozen by SHA-256 in `results/experiments/ordered/m_frozen.csv` before the test;
+`nvfx_ordered test` refuses any other file and runs once per effect. Each effect is judged alone. **Distance to the
+floor** is reported before and after (v2's and the chosen model's mean-frame PSNR and spectrum distance beside two sets
+of real runs'). The cost is measured and reported, not part of the rule.
