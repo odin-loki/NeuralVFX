@@ -418,10 +418,8 @@ class Rollout final : public RolloutRunner {
     if (!lean_) next_.resize(z(N_) * z(C_));
     if (h_.advection == 1) mca_.resize(z(N_) * z(C_));  // study L's MacCormack advection: its forward samples
     coarse_.resize(z(N_) * z(C_));
-    if (!m_.mean.empty()) {  // study M: a start point begun at other controls is moved by the mean state
-      begun_.resize(z(N_) * kPhys);
-      mscratch_.resize(rollout::mean_scratch(m_));
-    }
+    if (!m_.mean.empty()) begun_.resize(z(N_) * kPhys);  // study M: a start point begun at other controls is moved
+    mscratch_.resize(rollout::mean_scratch(m_));          // by the mean state; the bias correction's scratch too
     flow_.resize(z(N_) * 2);
     if (!lean_) div_.resize(z(N_));
     p_.assign(z(R_ + 2) * z(R_ + 2), 0.f);  // pressure with a zero border (written inside only)
@@ -1099,6 +1097,7 @@ class Rollout final : public RolloutRunner {
       for (int i = 0; i < N_; ++i) mid_[z(i) * z(C_) + z(k)] = q[i];
     }
     if (h_.force > 0.f) rollout::coarse_force(m_, nz_, cond_, mid_);  // study M: the reference's own (scalar, no FMA)
+    if (!m_.bias.empty()) rollout::add_bias(m_, cond_, mid_, mscratch_);  // study M: likewise
     lap(RolloutProfile::conv);
     const auto U = [&](int x, int y, int c) { return mid_[(z(std::clamp(y, 0, R_ - 1)) * z(R_) + z(std::clamp(x, 0, R_ - 1))) * z(C_) + z(c)]; };
     for (int y = 0; y < R_; ++y) {

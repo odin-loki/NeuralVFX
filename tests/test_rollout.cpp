@@ -1019,7 +1019,7 @@ TEST(Rollout, StudyMMeanStateRoundTripsInVersion6) {
   std::stringstream ss;
   ASSERT_TRUE(save_model(ss, q));
   EXPECT_EQ(ss.str()[8], 6);
-  EXPECT_EQ(ss.str().size(), old_ss.str().size() + 8 + 8 + 8 + 4 + 2 * q.mean.beta.size() + 4);  // the version 3, 4, 5 and 6 fields
+  EXPECT_EQ(ss.str().size(), old_ss.str().size() + 8 + 8 + 8 + 4 + 2 * q.mean.beta.size() + 4 + 4);  // the version 3, 4, 5 and 6 fields
   auto back = load_model(ss);
   ASSERT_TRUE(back) << back.error();
   EXPECT_EQ(back->mean.block, 2);
@@ -1029,6 +1029,16 @@ TEST(Rollout, StudyMMeanStateRoundTripsInVersion6) {
   std::stringstream again;
   ASSERT_TRUE(save_model(again, *back));
   EXPECT_EQ(again.str(), ss.str());
+  Model qb = m;  // a bias correction alone
+  qb.bias = q.mean;
+  std::stringstream bss;
+  ASSERT_TRUE(save_model(bss, qb));
+  EXPECT_EQ(bss.str()[8], 6);
+  auto bback = load_model(bss);
+  ASSERT_TRUE(bback) << bback.error();
+  EXPECT_TRUE(bback->mean.empty());
+  EXPECT_EQ(bback->bias.block, 2);
+  EXPECT_EQ(bback->bias.beta, q.mean.beta);
   Model bad = q;
   bad.mean.block = 3;  // 8 cells are not whole blocks of 3
   std::stringstream bs;
@@ -1313,10 +1323,17 @@ TEST(RolloutRuntime, MatchesTheReferenceWithStudyMsMeanState) {
 }
 
 TEST(RolloutRuntime, MatchesTheReferenceWithStudyMsForce) {
-  // The coarse stochastic forcing (Hyper::force) with a mean state, in the runtime as in the reference, on every ISA.
+  // The coarse stochastic forcing (Hyper::force), a mean state and a bias correction, in the runtime as in the
+  // reference, on every ISA.
   Model m = runtime_model();
   m.h.force = 0.2f;
   add_mean_state(m, 2, 8);
+  {
+    Model b = runtime_model();
+    add_mean_state(b, 4, 12);
+    m.bias = b.mean;
+    for (float& v : m.bias.beta) v *= 0.1f;
+  }
   quantise_like_storage(m);
   Fx fx(m);
   for (const nvfx_isa isa : {NVFX_ISA_BASELINE, NVFX_ISA_AVX2, NVFX_ISA_AVX512}) {
@@ -1349,6 +1366,9 @@ TEST(RolloutRuntime, MatchesTheReferenceWithStudyMsForce) {
   Model calm = m;
   calm.h.force = 0.f;
   EXPECT_NE(reference_frame(m, 1, 64, 12), reference_frame(calm, 1, 64, 12));
+  Model unbiased = m;
+  unbiased.bias = {};
+  EXPECT_NE(reference_frame(m, 1, 64, 12), reference_frame(unbiased, 1, 64, 12));
 }
 
 TEST(RolloutRuntime, ShardsMakeEveryFrameAFunctionOfTime) {

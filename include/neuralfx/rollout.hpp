@@ -174,6 +174,11 @@ struct Model {
   int start_bits = 16;
   bool start_dither = false;
   MeanState mean;  // study M (docs/REPORT.md §14)
+  // Study M: a correction of the stepper's ordered bias, in the mean state's form (a quadratic in the controls per block of
+  // cells, bilinear to the cells): each step adds bias(controls) to the coarse state (u, v, heat, soot) before the
+  // projection, a constant source fitted so that the stepper's own mean at each training run's controls is the run's. It
+  // moves where the effect is on average; its fluctuations stay the stepper's. Version 6, written only when present.
+  MeanState bias;
 
   std::size_t storage_bytes() const;  // as saved: weights fp16, coarse states at start_bits, fine fields 8-bit
 };
@@ -229,7 +234,7 @@ enum class Int8 { off, second, both };
 void mean_state(const Model& m, std::span<const float> controls, std::span<float> out);
 void start_coarse(const Model& m, int index, std::span<const float> controls, std::span<float> out);
 // The same without allocating (the runtime): scratch holds at least mean_scratch(m) floats.
-std::size_t mean_scratch(const Model& m);
+std::size_t mean_scratch(const Model& m);  // for the mean state and the bias correction alike
 void mean_state(const Model& m, std::span<const float> controls, std::span<float> out, std::span<float> scratch);
 void start_coarse(const Model& m, int index, std::span<const float> controls, std::span<float> out, std::span<float> scratch);
 
@@ -245,6 +250,9 @@ void render(const Model& m, const State& s, std::span<float> rgba);
 // Coarse: in (res*res*channels), pressure in/out, out (res*res*channels), flow (res*res*2).
 void coarse_step(const Model& m, std::span<const float> in, std::span<const float> noise, std::span<const float> cond,
                  std::span<float> pressure, std::span<float> out, std::span<float> flow, Int8 q = Int8::off);
+// Study M (Model::bias): add the bias correction at the step's controls (the condition's first three values) to a
+// [cell][channels] state; scratch holds at least mean_scratch(m) floats (no allocation).
+void add_bias(const Model& m, std::span<const float> cond, std::span<float> state, std::span<float> scratch);
 // Study M (Hyper::force): the coarse stochastic forcing on a [cell][channels] state (velocity in channels 0 and 1) from
 // the step's noise inputs and condition; coarse_step applies it to the updated state before the projection.
 void coarse_force(const Model& m, std::span<const float> noise, std::span<const float> cond, std::span<float> state);

@@ -1276,6 +1276,126 @@ void step_setmean(const tools::Args& a) {
                m.mean.beta.size(), a.need("out"), m.storage_bytes());
 }
 
+// --- fitbias: a correction of the stepper's ordered bias (training runs' controls) ------------------------------------------
+
+// The model's own mean coarse state at controls: coarse-only reference rollouts (the coarse step does not read the fine
+// fields) from the start points the runtime would use (the three nearest, by rep; moved by the mean state if the model has
+// one), `frames` frames, the mean over frames [skip, frames), averaged over blocks of `block` cells as fitmean's.
+std::vector<double> model_mean(const rollout::Model& M, std::span<const float> ctl, int reps, int frames, int skip, int block, std::uint64_t seed0) {
+  const int G = kRes / block, C = M.h.channels(), N = kRes * kRes;
+  std::vector<double> out(sz(G) * sz(G) * rollout::kPhys, 0.0);
+  const auto near = nearest_starts(M, ctl);
+  std::vector<float> S(sz(N) * sz(C)), next(S.size()), pressure(sz(N)), flow(sz(N) * 2), cond(sz(M.h.cond())), noise(sz(N) * rollout::kNoise),
+      c0(sz(N) * rollout::kPhys);
+  for (int r = 0; r < reps; ++r) {
+    const int idx = near[sz(r) % near.size()];
+    rollout::start_coarse(M, idx, ctl, c0);
+    std::ranges::fill(S, 0.f);
+    for (int i = 0; i < N; ++i) {
+      for (int q = 0; q < rollout::kPhys; ++q) S[sz(i) * sz(C) + sz(q)] = c0[sz(i) * rollout::kPhys + sz(q)];
+    }
+    std::ranges::fill(pressure, 0.f);
+    float t = M.starts[sz(idx)].time;
+    const std::uint64_t seed = seed0 + static_cast<std::uint64_t>(r);
+    for (int f = 0; f < frames; ++f) {
+      rollout::condition(M, ctl, t, cond);
+      rollout::coarse_noise(M, seed, t, noise);
+      rollout::coarse_step(M, S, noise, cond, pressure, next, flow);
+      S.swap(next);
+      t += 1.f / M.fps;
+      if (f < skip) continue;
+      for (int y = 0; y < kRes; ++y) {
+        for (int x = 0; x < kRes; ++x) {
+          for (int q = 0; q < rollout::kPhys; ++q) {
+            out[(sz(y / block) * sz(G) + sz(x / block)) * rollout::kPhys + sz(q)] +=
+                static_cast<double>(S[(sz(y) * kRes + sz(x)) * sz(C) + sz(q)]) / (block * block * (frames - skip) * reps);
+          }
+        }
+      }
+    }
+  }
+  return out;
+}
+
+void step_fitbias(const Ctx& c, sim::Effect e, const tools::Args& a) {
+  rollout::Model M = load_or_throw(a.need("model"));
+  const MeanState target = load_meanstate(a.need("meanstate"));
+  const int n_runs = a.i("runs", 80), reps = a.i("reps", 2), frames = a.i("frames", 180), skip = a.i("skip", 30), iters = a.i("iters", 4);
+  const int block = target.block, G = kRes / block, cols = G * G * rollout::kPhys;
+  if (!sim::effect_loops(e)) throw std::invalid_argument("fitbias: looping effects (a one-shot's mean changes with its age)");
+  const auto runs = training_runs(c, e, c.threads);  // their controls (cached runs)
+  std::vector<std::vector<float>> ctls;
+  for (int j = 0; j < n_runs && j < static_cast<int>(runs.size()); ++j) ctls.push_back(runs[sz(j)].controls());
+  // the quadratic fit of the model's means over the controls (ridge, the target's lambda)
+  const auto fit = [&](const std::vector<std::vector<double>>& Y) {
+    std::vector<double> A(sz(kFeat) * kFeat, 0.0), B(sz(kFeat) * sz(cols), 0.0);
+    for (std::size_t i = 0; i < Y.size(); ++i) {
+      const auto f = features(ctls[i]);
+      for (int p = 0; p < kFeat; ++p) {
+        for (int q = 0; q < kFeat; ++q) A[sz(p) * kFeat + sz(q)] += f[sz(p)] * f[sz(q)];
+        for (int k = 0; k < cols; ++k) B[sz(p) * sz(cols) + sz(k)] += f[sz(p)] * Y[i][sz(k)];
+      }
+    }
+    return solve_ridge(A, B, kFeat, cols, 1e-4 * static_cast<double>(Y.size()));
+  };
+  const auto t0 = std::chrono::steady_clock::now();
+  std::vector<double> bias(sz(kFeat) * sz(cols), 0.0), prev_bias, prev_model;
+  if (!M.bias.empty()) {
+    if (M.bias.block != block) throw std::invalid_argument("fitbias: the model's bias has other blocks than the target");
+    bias.assign(M.bias.beta.begin(), M.bias.beta.end());
+  }
+  std::array<double, rollout::kPhys> gain{};  // per channel: change of the model's mean per unit of bias (secant)
+  const std::array<double, rollout::kPhys> gain0{a.f("gain-u", 20.f), a.f("gain-v", 20.f), a.f("gain-heat", 20.f), a.f("gain-soot", 40.f)};
+  for (int it = 0; it <= iters; ++it) {
+    M.bias.block = block;
+    M.bias.beta.assign(bias.begin(), bias.end());
+    std::vector<std::vector<double>> Y(ctls.size());
+    parallel(c.threads, static_cast<int>(ctls.size()), [&](int j) {
+      Y[sz(j)] = model_mean(M, ctls[sz(j)], reps, frames, skip, block, 7'500'000 + 10 * static_cast<std::uint64_t>(j));
+    });
+    const auto beta_model = fit(Y);
+    // the error of the model's mean against the target, over the training controls, per channel
+    std::array<double, rollout::kPhys> err{}, tot{};
+    for (std::size_t j = 0; j < ctls.size(); ++j) {
+      const auto f = features(ctls[j]);
+      for (int k = 0; k < cols; ++k) {
+        double tv = 0, mv = 0;
+        for (int p = 0; p < kFeat; ++p) {
+          tv += f[sz(p)] * target.beta[sz(p) * sz(cols) + sz(k)];
+          mv += f[sz(p)] * beta_model[sz(p) * sz(cols) + sz(k)];
+        }
+        err[sz(k % rollout::kPhys)] += (mv - tv) * (mv - tv);
+        tot[sz(k % rollout::kPhys)] += tv * tv;
+      }
+    }
+    std::println("fitbias: {} iteration {}: relative error of the model's mean against the training runs': u {:.4f} v {:.4f} heat {:.4f} soot {:.4f} ({:.0f} s)",
+                 ename(e), it, std::sqrt(err[0] / tot[0]), std::sqrt(err[1] / tot[1]), std::sqrt(err[2] / tot[2]), std::sqrt(err[3] / tot[3]), seconds_since(t0));
+    std::fflush(stdout);
+    if (it == iters) break;
+    if (!prev_model.empty()) {  // secant: how much the model's mean moved per unit of bias added, per channel
+      for (int q = 0; q < rollout::kPhys; ++q) {
+        double num = 0, den = 0;
+        for (std::size_t k = static_cast<std::size_t>(q); k < bias.size(); k += rollout::kPhys) {
+          const double db = bias[k] - prev_bias[k], dm = beta_model[k] - prev_model[k];
+          num += dm * db;
+          den += db * db;
+        }
+        gain[sz(q)] = den > 0 && num > 0 ? std::clamp(num / den, 0.25 * gain0[sz(q)], 4.0 * gain0[sz(q)]) : gain0[sz(q)];
+      }
+    } else {
+      gain = gain0;
+    }
+    prev_bias = bias;
+    prev_model = beta_model;
+    const double damp = a.f("damp", 0.7f);
+    for (std::size_t k = 0; k < bias.size(); ++k) bias[k] += damp * (target.beta[k] - beta_model[k]) / gain[k % rollout::kPhys];
+    std::println("fitbias: gains u {:.1f} v {:.1f} heat {:.1f} soot {:.1f}", gain[0], gain[1], gain[2], gain[3]);
+  }
+  rollout::quantise_like_storage(M);
+  if (auto w = rollout::save_model(a.need("out"), M); !w) throw std::runtime_error(w.error());
+  std::println("fitbias: -> {}", a.need("out"));
+}
+
 // --- sstart: start points moved to the controls by the mean state (training settings) ------------------------------------------
 
 // The diagnosis's neural_one_lr (one continuous reference rollout from one of the three nearest start points, the same index
@@ -1851,6 +1971,7 @@ int main(int argc, char** argv) {
     else if (step == "where") step_where(c, e, a);
     else if (step == "fitmean") step_fitmean(c, e, a);
     else if (step == "sstart") step_sstart(c, e, a);
+    else if (step == "fitbias") step_fitbias(c, e, a);
     else throw std::invalid_argument("unknown step " + step);
     a.warn_unused();
   } catch (const std::exception& e) {
