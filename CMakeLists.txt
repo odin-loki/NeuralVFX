@@ -339,6 +339,10 @@ if(NEURALFX_BUILD_TOOLS)
   add_executable(nvfx_swirl tools/nvfx_swirl.cpp)
   target_link_libraries(nvfx_swirl PRIVATE neuralfx_io neuralfx_train neuralfx_dcm nvfx)
   neuralfx_defaults(nvfx_swirl)
+
+  add_executable(nvfx_ordered tools/nvfx_ordered.cpp)
+  target_link_libraries(nvfx_ordered PRIVATE neuralfx_io neuralfx_train neuralfx_dcm nvfx)
+  neuralfx_defaults(nvfx_ordered)
 endif()
 
 if(NEURALFX_BUILD_BENCH)
