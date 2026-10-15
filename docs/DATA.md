@@ -6,7 +6,8 @@ Status: **current**. Audience: dev, research.
 
 Everything that is not code or a small text result lives under the data root: `$NEURALVFX_DATA`, or `~/nvfx-data`
 when it is unset. Nothing under it is ever committed; `.gitignore` also blocks clips (`*.nfxclip`), weights
-(`*.nvfx`, `*.pt`, `*.onnx`, ...), images outside `docs/` and videos.
+(`*.nvfx`, `*.pt`, `*.onnx`, ...), images outside `docs/` and videos. The one exception is `videos/`: the demo
+videos and their posters ([videos/README.md](../videos/README.md); [PLAN.md](PLAN.md) §10, decision 6).
 
 | path under the data root | what |
 |---|---|
