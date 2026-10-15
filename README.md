@@ -32,7 +32,7 @@ C++23, no third-party runtime dependencies, a C API for engines, no Python.
   [results/experiments/SUMMARY.md](results/experiments/SUMMARY.md).
 - **Plan and decisions:** [docs/PLAN.md](docs/PLAN.md).
 - **3D, the plan:** [TODO.md](TODO.md): every effect in 3D. First a small demo here (study N: a 3D fire from our own
-  3D solver, a small 3D rollout model, a volume renderer and API, videos), then big on a PC: 157 effects in 3D (fire,
+  3D solver, a small 3D rollout model, a volume renderer and API, videos), then big on a PC: 158 effects in 3D (fire,
   smoke, blasts, engines, clouds, rain, snow, fog, storms, wind, water, liquids, granular flows, volcanoes, ice,
   lightning, optics, designed effects), each simulated as accurately as the PC allows and checked against
   measurements where a real counterpart exists, a full weather system with regimes and transitions, 3D scenes and the
@@ -170,7 +170,7 @@ Ubuntu 24.04: `g++-14`, CMake 3.25+, Ninja, `libgtest-dev`, `zlib1g-dev` (and `f
 ```sh
 cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_COMPILER=g++-14
 cmake --build build
-ctest --test-dir build                     # 458 tests: sim, metrics, codecs, gradients, runtime parity, composition, scene scripts, field effects, trails, engine layers, weather, procedural sky, combat and magic elements, context mixing, denoiser, lossless coder, low-bit, vector-quantised, sparse and multi-level features, video codecs, BC7 and ASTC flipbooks, allocation, C API for effects and scenes, the effect library, the effect manager, effect packs and the C++ wrapper, start points from footage, 3D volumes (study N's simulator, renderer, model, gradients and C API; study N2's ambient edges, schedules and long stage)
+ctest --test-dir build                     # 461 tests: sim, metrics, codecs, gradients, runtime parity, composition, scene scripts, field effects, trails, engine layers, weather, procedural sky, combat and magic elements, context mixing, denoiser, lossless coder, low-bit, vector-quantised, sparse and multi-level features, video codecs, BC7 and ASTC flipbooks, allocation, C API for effects and scenes, the effect library, the effect manager, effect packs and the C++ wrapper, start points from footage, 3D volumes (study N's simulator, renderer, model, gradients and C API; study N2's ambient edges, schedules and long stage)
 ```
 
 Options: `NEURALFX_BUILD_VIEWER` (GLFW + OpenGL; fetches Dear ImGui), `NEURALFX_BUILD_SHARED` (libnvfx.so for engines),
