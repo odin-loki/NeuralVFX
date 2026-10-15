@@ -182,7 +182,7 @@ TEST(Water, ThePictureHasRoomForEverything) {
   sc::Scene scene = scene_of(cm::testing::kWaterScene, 2);
   std::vector<std::uint8_t> rgb(static_cast<std::size_t>(scene.width()) * static_cast<std::size_t>(scene.height()) * 3);
   cm::WaterPicture pic;
-  scene.water()->reserve(pic, scene.height());
+  scene.water()->reserve(pic, scene.width(), scene.height());
   const std::size_t room = pic.prims_.capacity();
   for (int f = 0; f < scene.frames(); ++f) {
     scene.render(f, rgb);

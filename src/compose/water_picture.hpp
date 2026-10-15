@@ -28,6 +28,7 @@ class WaterPicture {
     float ax = 0, ay = 0, bx = 0, by = 0, r = 1;  // screen pixels; a ring: centre (ax, ay), radius bx, squash by
     float cx = 0, cy = 0, dx = 0, dy = 0;         // a quad: its corners a, b, c, d in order
     float nx = 0, ny = 0;                         // a quad: its normal's x and y (up positive; z towards the viewer)
+    std::array<float, 4> inv{};                   // a quad: its winding over each edge's length (0: an edge of no length)
     float alpha = 1;                              // coverage at its core
     float red = 1, green = 1, blue = 1;           // what it reflects
     float glint = 0.5f;                           // specular
@@ -43,6 +44,12 @@ class WaterPicture {
     int foam = 0, foam_n = 0;             // its foam (x, size, alpha) in foam_
     int ring = 0, ring_n = 0;             // its rings (x, radius, alpha) in rings_
     int y0 = 0, y1 = 0;                   // screen rows
+    int xa = 0, xb = -1, col = 0;         // screen columns, and the first's in cols_
+  };
+  // A pool's surface at a screen column (found once per picture, not per row): its screen y, its slope (screen y per
+  // x, down positive), and the normals of its surface seen from above and of its body.
+  struct Col {
+    float top = 0, slope = 0, nx = 0, ny = 1, nz = 0, body_nx = 0, body_nz = 1;
   };
   struct Shaft {
     float x0 = 0, y0 = 0, w = 0, h = 0, slant = 0, veil = 0, brightness = 1;  // slant: x shift per pixel down
@@ -52,7 +59,7 @@ class WaterPicture {
   static constexpr int kProfile = 64;
   static constexpr int kBand = 16;  // rows per bin
 
-  void reserve(int prims, int pools, int cells, int foam, int rings, int shafts, int rows);
+  void reserve(int prims, int pools, int cells, int foam, int rings, int shafts, int rows, int columns);
   void clear(int rows);
   bool empty() const { return prims_.empty() && pools_.empty() && shafts_.empty(); }
   // Sorts the primitives into bins of kBand rows (after they are all added).
@@ -65,6 +72,7 @@ class WaterPicture {
   std::vector<Prim> prims_;
   std::vector<Pool> pools_;
   std::vector<float> heights_;               // screen y of each pool cell's surface
+  std::vector<Col> cols_;                    // each pool's screen columns
   std::vector<std::array<float, 3>> foam_;   // x, half-size, alpha
   std::vector<std::array<float, 3>> rings_;  // x, radius, alpha
   std::vector<Shaft> shafts_;

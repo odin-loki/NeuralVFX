@@ -7,8 +7,9 @@
 //   - drips: drops that swell at points along a line, let go and fall;
 //   - bubbles: rising, wobbling, popping at a pool's surface;
 //   - shafts: a rain shaft seen from afar, streaks in a curtain whose density swells and thins in gusts;
-//   - splashes (an action): a crown of drops thrown up where something hits the water, a jet from the crater, foam, waves.
-// What lands gives its mist to a module (a learned steam or fog effect, Water::Source::mist) through deposit().
+//   - splashes (an action): a crown (two walls and the faint face between them) and drops thrown up where something hits
+//     the water, a jet from the crater, foam, waves.
+// What lands gives its mist to a module (a learned steam or fog effect, WaterLayout::mist) through deposit().
 //
 // Determinism: every random number is a hash of the element's seed, the frame and a counter (a particle's index, a
 // strand's), never a shared generator, and the simulation runs on the scene's own thread in a fixed order, so the same
@@ -97,7 +98,7 @@ class Water {
   void stir(int pool, float x, float amount, float width, int frame);
   // The picture of the water now, in screen pixels (camera at cam).
   void picture(WaterPicture& out, float cam_x, float cam_y, int screen_w, int screen_h) const;
-  void reserve(WaterPicture& p, int screen_h) const;  // room in a picture for everything this water may draw
+  void reserve(WaterPicture& p, int screen_w, int screen_h) const;  // room in a picture for everything this water may draw
 
   // For tests and tools: live drops, and a pool's surface height at x (world pixels, up positive; 0 off it).
   int drops_alive() const;
@@ -154,7 +155,7 @@ class Water {
     std::array<float, 8> mass{};
   };
   static constexpr int kBins = 8;
-  // A splash's strands: the crown's two walls (kCrownWalls a side), thrown for its first tenth of a second, then the jet
+  // A splash's strands: the crown's two walls (kCrownWalls a side), thrown for its first 0.12 s, then the jet
   // from the crater.
   static constexpr int kCrownWalls = 1, kCrownStrands = 2 * kCrownWalls + 1, kCrownNodes = 32;
 

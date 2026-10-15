@@ -2984,7 +2984,7 @@ void Frame::finish_impl(const Params& P, std::span<std::uint8_t> rgb, Pool& pool
 
 // --- capture and render -----------------------------------------------------------------------------------------------
 
-void Frame::reserve_water(const Water& water) { water.reserve(water_, h_); }
+void Frame::reserve_water(const Water& water) { water.reserve(water_, w_, h_); }
 
 void Frame::capture(const Light& light, std::span<const std::array<float, 4>> scorch, std::span<Module* const> modules, const Particles& parts,
                     std::span<const Shock> shocks, const FieldBus& bus, const Water* water) {

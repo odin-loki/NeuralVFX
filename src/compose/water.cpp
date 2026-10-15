@@ -213,7 +213,7 @@ void Water::land(int source, int pool, float x, float y, float mass, float speed
     d.vy = -(0.12f + 0.2f * u(7)) * speed;
     d.r = 0.6f + 0.7f * u(8);
     d.life = 1.2f;
-    d.g = 700.f;
+    d.g = source >= 0 && source < elements() ? spec_[zs(source)].gravity : 700.f;
     d.floor = y + 2.f;
     d.pool = pool;
     d.source = -1;
@@ -799,7 +799,7 @@ Water::Counts Water::counts() const {
 
 // --- the picture -------------------------------------------------------------------------------------------------------
 
-void Water::reserve(WaterPicture& p, int screen_h) const {
+void Water::reserve(WaterPicture& p, int screen_w, int screen_h) const {
   int prims = 0, pools = 0, cells = 0, foam = 0, shafts = 0;
   for (const WaterLayout& L : layout_) {
     switch (L.kind) {
@@ -819,7 +819,7 @@ void Water::reserve(WaterPicture& p, int screen_h) const {
     }
   }
   prims += static_cast<int>(drops_.size() + crown_nodes_.size() + crowns_.size() * kCrownWalls * kCrownNodes);
-  p.reserve(prims, pools, cells, foam, static_cast<int>(rings_.size()), shafts, screen_h);
+  p.reserve(prims, pools, cells, foam, static_cast<int>(rings_.size()), shafts, screen_h, pools * screen_w);
 }
 
 namespace {
@@ -871,6 +871,11 @@ bool quad(WaterPicture::Prim& p, float ax, float ay, float bx, float by, float c
   p.dx = dx;
   p.dy = dy;
   p.r = area > 0.f ? 1.f : -1.f;  // its winding
+  for (int i = 0; i < 4; ++i) {
+    const int j = (i + 1) & 3;
+    const float l = std::hypot(xs[j] - xs[i], ys[j] - ys[i]);
+    p.inv[zs(i)] = l > 1e-4f ? p.r / l : 0.f;
+  }
   p.x0 = wfloor(std::min(std::min(ax, bx), std::min(cx, dx)) - 1.f);
   p.x1 = wfloor(std::max(std::max(ax, bx), std::max(cx, dx)) + 1.f);
   p.y0 = wfloor(std::min(std::min(ay, by), std::min(cy, dy)) - 1.f);
@@ -933,7 +938,29 @@ void Water::picture(WaterPicture& out, float cam_x, float cam_y, int screen_w, i
     p.ring_n = static_cast<int>(out.rings_.size()) - p.ring;
     p.y0 = std::max(0, wfloor(top - 3.f));
     p.y1 = std::min(screen_h - 1, wfloor(p.y + p.depth + 1.f));
-    if (p.y0 <= p.y1 && p.x1 >= 0.f && p.x0 < W) out.pools_.push_back(p);
+    p.xa = std::max(0, wfloor(p.x0));
+    p.xb = std::min(screen_w - 1, wfloor(p.x1));
+    if (!(p.y0 <= p.y1 && p.x1 >= 0.f && p.x0 < W && p.xa <= p.xb)) continue;
+    p.col = static_cast<int>(out.cols_.size());
+    if (out.cols_.size() + zs(p.xb - p.xa + 1) > out.cols_.capacity()) continue;  // (reserve() makes room for every pool)
+    const float span_x = std::max(1e-3f, p.x1 - p.x0);
+    const float* hs = out.heights_.data() + p.first;
+    for (int x = p.xa; x <= p.xb; ++x) {  // its surface and normals at each screen column
+      const float c = (fl(x) + 0.5f - p.x0) / span_x * fl(p.cells) - 0.5f;
+      const int c0 = std::clamp(wfloor(c), 0, p.cells - 1), c1 = std::min(c0 + 1, p.cells - 1);
+      const float fc = clamp01(c - fl(c0));
+      WaterPicture::Col k;
+      k.top = hs[c0] + fc * (hs[c1] - hs[c0]);
+      k.slope = (hs[c1] - hs[std::max(0, c0 - 1)]) / std::max(1.f, 2.f * span_x / fl(p.cells));
+      const float n = std::sqrt(k.slope * k.slope * 4.f + 1.f + 0.12f), m = std::sqrt(k.slope * k.slope * 0.09f + 1.f);
+      k.nx = k.slope * 2.f / n;
+      k.ny = 1.f / n;
+      k.nz = std::sqrt(0.12f) / n;
+      k.body_nx = 0.3f * k.slope / m;
+      k.body_nz = 1.f / m;
+      out.cols_.push_back(k);
+    }
+    out.pools_.push_back(p);
   }
   // rain shafts: their veils
   for (int i = 0; i < E; ++i) {
@@ -1144,8 +1171,9 @@ void Water::picture(WaterPicture& out, float cam_x, float cam_y, int screen_w, i
 
 // --- drawing -----------------------------------------------------------------------------------------------------------
 
-void WaterPicture::reserve(int prims, int pools, int cells, int foam, int rings, int shafts, int rows) {
+void WaterPicture::reserve(int prims, int pools, int cells, int foam, int rings, int shafts, int rows, int columns) {
   prims_.reserve(zs(std::max(1, prims)));
+  cols_.reserve(zs(std::max(1, columns)));
   pools_.reserve(zs(std::max(1, pools)));
   heights_.reserve(zs(std::max(1, cells)));
   foam_.reserve(zs(std::max(1, foam)));
@@ -1161,6 +1189,7 @@ void WaterPicture::clear(int rows) {
   prims_.clear();
   pools_.clear();
   heights_.clear();
+  cols_.clear();
   foam_.clear();
   rings_.clear();
   shafts_.clear();
@@ -1196,9 +1225,10 @@ void WaterPicture::bin() {
 
 namespace {
 
-// The light of the scene at a world point (bilinear in the light's grid, as the field shader samples it), and the flash.
+// The light of the scene at a world point (bilinear in the light's grid, as the field shader samples it), and the flash,
+// soft-limited (L / (1 + L)) as the water takes it.
 std::array<float, 3> light_at(const WaterLight& L, float wx, float wy) {
-  if (!L.L4 || L.nx <= 0 || L.ny <= 0) return L.flash;
+  if (!L.L4 || L.nx <= 0 || L.ny <= 0) return {L.flash[0] / (1.f + L.flash[0]), L.flash[1] / (1.f + L.flash[1]), L.flash[2] / (1.f + L.flash[2])};
   const float gx = std::clamp((wx - L.x0) / L.cell - 0.5f, 0.f, fl(L.nx - 1)), gy = std::clamp((wy - L.y0) / L.cell - 0.5f, 0.f, fl(L.ny - 1));
   const int x0 = std::min(wfloor(gx), L.nx - 1), y0 = std::min(wfloor(gy), L.ny - 1);
   const int x1 = std::min(x0 + 1, L.nx - 1), y1 = std::min(y0 + 1, L.ny - 1);
@@ -1207,7 +1237,8 @@ std::array<float, 3> light_at(const WaterLight& L, float wx, float wy) {
   for (int c = 0; c < 3; ++c) {
     const auto at = [&](int x, int y) { return L.L4[(zs(y) * zs(L.nx) + zs(x)) * 4 + zs(c)]; };
     const float a = at(x0, y0) + fx * (at(x1, y0) - at(x0, y0)), b = at(x0, y1) + fx * (at(x1, y1) - at(x0, y1));
-    o[zs(c)] = a + fy * (b - a) + L.flash[zs(c)];
+    const float v = a + fy * (b - a) + L.flash[zs(c)];
+    o[zs(c)] = v / (1.f + v);
   }
   return o;
 }
@@ -1224,7 +1255,7 @@ void lay(const Px& p, const std::array<float, 3>& L, float* s, float* C, float* 
   if (!(cov >= 1e-3f)) return;
   const float lambert = std::max(0.f, -0.45f * p.nx + 0.6f * p.ny + 0.66f * p.nz);
   const float moon = p.sky * (0.35f + 0.9f * lambert);
-  const float lr = p.light * L[0] / (1.f + L[0]), lg = p.light * L[1] / (1.f + L[1]), lb = p.light * L[2] / (1.f + L[2]);
+  const float lr = p.light * L[0], lg = p.light * L[1], lb = p.light * L[2];  // (soft-limited by light_at)
   // the highlight: the half vector between the sky's direction and the viewer's
   constexpr float hx = -0.2556f, hy = 0.3408f, hz = 0.9047f;
   const float nh = std::max(0.f, p.nx * hx + p.ny * hy + p.nz * hz);
@@ -1267,35 +1298,40 @@ std::array<int, 2> WaterPicture::draw_row(int y, float* screen, float* colour, f
   // pools: the body under the surface, the surface (seen from above when it has a depth of its own) with its rings, foam
   for (const Pool& p : pools_) {
     if (y < p.y0 || y > p.y1) continue;
-    const int xa = std::max(0, wfloor(p.x0)), xb = std::min(width - 1, wfloor(p.x1));
-    const float span_x = std::max(1e-3f, p.x1 - p.x0), bottom = p.y + p.depth;
+    const int xa = p.xa, xb = std::min(width - 1, p.xb);
+    const float span_x = std::max(1e-3f, p.x1 - p.x0), bottom = p.y + p.depth, inv_surface = 1.f / std::max(1.f, p.surface);
     const float* hs = heights_.data() + p.first;
+    const Col* cs = cols_.data() + p.col;
     std::array<float, 3> L = light_at(light, cam_x + 0.5f * (p.x0 + p.x1), wy);
+    // the sheen's noise along this row, sampled every 4 pixels and interpolated between (it is smooth over 17)
+    const auto sheen_at = [&](int x) { return value_noise(0.06f * (fl(x) + 0.5f + cam_x) - 0.4f * p.time, 0.45f * (py - p.y), 0.7f * p.time, 91); };
+    int sheen_x = -1 << 30;
+    float sheen0 = 0.f, sheen1 = 0.f;
     for (int x = xa; x <= xb; ++x) {
       const float px = fl(x) + 0.5f;
       if ((x & 15) == 0) L = light_at(light, px + cam_x, wy);
-      const float c = (px - p.x0) / span_x * fl(p.cells) - 0.5f;
-      const int c0 = std::clamp(wfloor(c), 0, p.cells - 1), c1 = std::min(c0 + 1, p.cells - 1);
-      const float f = clamp01(c - fl(c0));
-      const float top = hs[c0] + f * (hs[c1] - hs[c0]);
-      const float slope = (hs[c1] - hs[std::max(0, c0 - 1)]) / std::max(1.f, 2.f * span_x / fl(p.cells));  // screen y per x (down positive)
+      const Col& k = cs[x - xa];
+      const float top = k.top, slope = k.slope;
       if (py < top - 1.f || py > bottom + 0.5f) continue;
       const float edge = clamp01(py - top + 0.5f) * clamp01(bottom + 0.5f - py);
       Px q;
       q.sky = q.light = p.brightness;
       const float band = top + p.surface;
       if (py < band) {  // the surface seen from above: dark, mirroring the night sky (more of it far off), glinting
-        const float n = std::sqrt(slope * slope * 4.f + 1.f + 0.12f);
-        const float near = clamp01((py - top) / std::max(1.f, p.surface)), mirror = 0.2f - 0.13f * near;
-        q.nx = slope * 2.f / n;
-        q.ny = 1.f / n;
-        q.nz = std::sqrt(0.12f) / n;
+        const float near = clamp01((py - top) * inv_surface), mirror = 0.2f - 0.13f * near;
+        q.nx = k.nx;
+        q.ny = k.ny;
+        q.nz = k.nz;
         // the sheen: broken streaks of the sky's light along the surface, shimmering as the waves pass and drifting with
         // its current
-        const float wx = px + cam_x;
-        const float sheen = clamp01((value_noise(0.06f * wx - 0.4f * p.time, 0.45f * (py - top), 0.7f * p.time, 91) - 0.3f) * 2.5f) *
-                            (1.f - 0.6f * near) * (0.6f + 4.f * std::abs(slope));
-        const float lit = mirror + std::min(0.6f, 0.45f * sheen);
+        if ((x & ~3) != sheen_x) {
+          sheen_x = x & ~3;
+          sheen0 = sheen_at(sheen_x);
+          sheen1 = sheen_at(sheen_x + 4);
+        }
+        const float n4 = sheen0 + (sheen1 - sheen0) * 0.25f * fl(x - sheen_x);
+        const float sheen = clamp01((n4 - 0.3f) * 2.5f) * (1.f - 0.6f * near) * (0.6f + 4.f * std::abs(slope));
+        const float lit = mirror + std::min(0.35f, 0.25f * sheen);
         q.r = p.colour[0] * lit;
         q.g = p.colour[1] * lit;
         q.b = p.colour[2] * lit;
@@ -1303,10 +1339,9 @@ std::array<int, 2> WaterPicture::draw_row(int y, float* screen, float* colour, f
         q.glint = 1.2f;
       } else {  // the body (seen through its side): darker and denser deeper down
         const float d = clamp01((py - band) / std::max(1.f, bottom - band));
-        const float n = std::sqrt(slope * slope * 0.09f + 1.f);
-        q.nx = 0.3f * slope / n;
+        q.nx = k.body_nx;
         q.ny = 0.f;
-        q.nz = 1.f / n;
+        q.nz = k.body_nz;
         q.r = p.colour[0] * 0.12f * (1.f - 0.6f * d);
         q.g = p.colour[1] * 0.12f * (1.f - 0.5f * d);
         q.b = p.colour[2] * 0.12f * (1.f - 0.4f * d);
@@ -1407,9 +1442,9 @@ std::array<int, 2> WaterPicture::draw_row(int y, float* screen, float* colour, f
       const float xs[4] = {p.ax, p.bx, p.cx, p.dx}, ys[4] = {p.ay, p.by, p.cy, p.dy};
       float d = 1e9f;
       for (int i = 0; i < 4; ++i) {
+        if (p.inv[zs(i)] == 0.f) continue;
         const int j = (i + 1) & 3;
-        const float ex = xs[j] - xs[i], ey = ys[j] - ys[i], l = std::sqrt(ex * ex + ey * ey);
-        if (l > 1e-4f) d = std::min(d, p.r * (ex * (py - ys[i]) - ey * (px - xs[i])) / l);
+        d = std::min(d, p.inv[zs(i)] * ((xs[j] - xs[i]) * (py - ys[i]) - (ys[j] - ys[i]) * (px - xs[i])));
       }
       q.cov = p.alpha * clamp01(d + 1.f);  // half a pixel fuller: neighbouring quads meet without a seam
       q.nx = p.nx;
