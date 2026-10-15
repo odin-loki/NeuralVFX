@@ -2564,7 +2564,7 @@ tracking at 1 s 18.31 dB (`mt4` 18.08).
 - **Magic shows the trade the loss makes**: its average picture is 0.7 to 0.8 dB closer to the real one, its coverage
   and light closer, but it follows a run from its true state 0.2 to 0.35 dB worse at 1 s. The ensemble-mean loss fits
   where the effect goes on average from a start, not a single run; magic, whose look after a second is decided by its
-  seed (§6.10), has a predictable mean that the loss reaches and a single run it then follows less closely.
+  seed ([EFFECTS.md](EFFECTS.md) §2), has a predictable mean that the loss reaches and a single run it then follows less closely.
 - Weights by the procedure: the vortex's `mtW_s16` both have two measures outside (coverage, emission), so the larger
   mean-frame gain (the smaller loss): **W = 4**; magic's `mtW` both have one (tracking), so the larger mean-frame gain:
   **W = 4**.
