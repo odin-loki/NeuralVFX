@@ -7,6 +7,7 @@
 
 effect waterfall_fx = "waterfall.nvfx", swirl 0    # the learned waterfall; no sub-grid swirl (it marbles the sheet)
 effect fountain_fx  = "fountain.nvfx", swirl 0     # the learned fountain: intensity (height), aim, turbulence
+effect splash_fx    = "splash.nvfx", swirl 0       # the learned splash: plays once (3 s) from one of 16 stored starts
 
 look spray  = shader, emission 0, soot_density 0.7, soot_albedo 0.9, sky 1.1, shadow 0.1, scene_light 1.3, relief 0.4,
               tint (0.9, 0.95, 1)                                                       # white spray and mist
@@ -157,6 +158,18 @@ water column = jet, at (X, Y - 30 * scale), jets 3, fan 5, speed 640 * power * s
                mist_heat 0, seed 693
 
 # --- impacts --------------------------------------------------------------------------------------------------------
+
+entry splash, category water, size 480 x 420, anchor base, once 3, show 0.5,
+      about "A splash: the crown of water thrown up where something hits the water and the column from its crater, falling back into the pool (the splash model), its drops, rings, waves and foam seeded"
+param power = 0.6, range (0.3, 1), about "how big"
+module crown = splash_fx, size 128, width 480 * scale, at (X, Y), sink 0.055, feather 0.3, start 0, seed 800,
+               controls (0.44, 0.46, 0.58), intensity power, opacity 1 - smooth((t - 2.2) / 0.8)
+water lake = pool, along (X - 235 * scale, Y - 4 * scale) to (X + 235 * scale, Y - 4 * scale), depth 22 * scale,
+             surface 22 * scale, cells 160, churn 1, seed 802
+water flecks = spray, in (X - 200 * scale, Y - 410 * scale), size 400 * scale x 400 * scale, threshold 0.3,
+               speed 160 * scale, radius 1.5 * scale, gravity 700 * scale, onto lake, seed 803
+at 0:
+  splash at (X, Y - 4 * scale), power 0.5 * power, onto lake, seed 804
 
 entry boulder_splash, category water, size 560 x 420, anchor base, once 4, show 0.2,
       about "A boulder into a lake: a wide crown of water and spray, a column from the crater, waves rolling out and a cloud of spray"
