@@ -339,6 +339,11 @@ if(NEURALFX_BUILD_TOOLS)
   add_executable(nvfx_swirl tools/nvfx_swirl.cpp)
   target_link_libraries(nvfx_swirl PRIVATE neuralfx_io neuralfx_train neuralfx_dcm nvfx)
   neuralfx_defaults(nvfx_swirl)
+  # Demo videos (videos/README.md): learned effects side by side with their controls keyed over time, and the
+  # simulator's held-out run beside the learned effect started from its true state, labelled and piped to ffmpeg.
+  add_executable(nvfx_reel tools/nvfx_reel.cpp)
+  target_link_libraries(nvfx_reel PRIVATE neuralfx_train nvfx)
+  neuralfx_defaults(nvfx_reel)
 endif()
 
 if(NEURALFX_BUILD_BENCH)
