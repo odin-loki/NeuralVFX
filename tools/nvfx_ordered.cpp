@@ -1727,7 +1727,7 @@ constexpr int kM3Settings = 30;  // fixed by the probe (REPORT §14.9.2) before 
 //   checko a library setting's check, not a decision (training settings, salt-1 runs 0 to 9; 4 runs pooled): real
 //          3,040,000, plays 3,050,000, tracking 3,060,000 (2 runs per setting).
 constexpr int kOProbeSettings = 40;
-constexpr int kOSettings = 0;  // fixed by the probe (REPORT §16) before validation
+constexpr int kOSettings = 30;  // fixed by the probe (REPORT §16.3) before validation
 struct Split {
   std::string name;
   std::vector<Setting> settings;
@@ -2394,12 +2394,16 @@ void decide_m3(const Ctx& c, sim::Effect e, const Split& sp, const std::vector<E
 constexpr double kOMeanFrame = -0.10;
 // The margins of the rule, per effect: o_margins.csv from the probe's null, copied here before validation.
 MarginsM3 margins_o(sim::Effect e) {
-  (void)e;
+  const std::string en = ename(e);  // {track, spectrum, motion, coverage, emission, mean frame}
+  if (en == "mushroom") return {-0.20, 0.0386599, 0.0945322, 0.0116669, 0.0001, -1.3497991};
+  if (en == "splash") return {-0.20, 0.0200000, 0.0719209, 0.0017218, 0.0001, -1.2629790};
   return {};
 }
 // Study K's margins at the same scales (o_margins.csv's k_margin), reported beside as a second reading; they do not decide.
 MarginsM3 margins_k_o(sim::Effect e) {
-  (void)e;
+  const std::string en = ename(e);
+  if (en == "mushroom") return {-0.20, 0.02, 0.02, 0.0022196, 0.0001, -0.10};
+  if (en == "splash") return {-0.20, 0.02, 0.02, 0.0002844, 0.0001, -0.10};
   return {};
 }
 RuleM3 apply_rule_o(const Scores& cand, const Scores& cur, const MarginsM3& mg, const MarginsM3& mk = {}) {

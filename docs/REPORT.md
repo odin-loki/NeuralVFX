@@ -3354,6 +3354,64 @@ real runs differ (the mushroom's motion by 9.5% and its mean frame by 1.35 dB at
 from one of 16 stored first states taken at other intensities: the margins are wide, and they are the effects' own
 seed-to-seed variety. The mean frame's margin applies only to a candidate whose better target is tracking.
 
+**The probe's second step: the candidates on the training settings** (development only; candidate minus current
+model over the 40 settings, 8 runs pooled, tracking 2 runs per setting;
+[o_probe_compare.csv](../results/experiments/fix/o_probe_compare.csv),
+[o_power.csv](../results/experiments/fix/o_power.csv)). Bold: better (interval clear of zero); all within their margins:
+
+| effect | candidate | tracking at 1 s (dB) | spectrum distance | \|ln motion ratio\| | coverage | mean-frame PSNR (dB) | the rule's reading |
+|---|---|---|---|---|---|---|---|
+| mushroom | `ms` | -0.000 [-0.001, +0.000] | +0.006 [-0.005, +0.016] | +0.041 [+0.004, +0.077] | **-0.0062 [-0.0097, -0.0028]** | **+0.32 [+0.04, +0.60]** | meets (motion strictly worse, within its margin) |
+| mushroom | `u30` | **+0.84 [+0.72, +0.97]** | **-0.015 [-0.022, -0.009]** | **-0.044 [-0.055, -0.031]** | -0.0002 [-0.0013, +0.0008] | **+0.60 [+0.32, +0.88]** | meets |
+| mushroom | `mt4` | **+0.22 [+0.14, +0.30]** | **-0.014 [-0.019, -0.009]** | **-0.030 [-0.038, -0.022]** | **-0.0018 [-0.0030, -0.0006]** | **+0.91 [+0.67, +1.14]** | meets |
+| mushroom | `ms_u30` | **+0.84 [+0.72, +0.97]** | -0.008 [-0.023, +0.005] | -0.018 [-0.054, +0.018] | **-0.0061 [-0.0094, -0.0029]** | **+1.39 [+1.09, +1.68]** | meets |
+| mushroom | `ms_mt4` | **+0.22 [+0.14, +0.30]** | -0.009 [-0.021, +0.003] | +0.001 [-0.035, +0.036] | **-0.0088 [-0.0120, -0.0056]** | **+1.46 [+1.10, +1.80]** | meets |
+| splash | `ms` | -0.000 [-0.000, +0.000] | **-0.003 [-0.005, -0.001]** | **-0.021 [-0.034, -0.008]** | **-0.0008 [-0.0011, -0.0005]** | **+0.59 [+0.39, +0.80]** | meets |
+
+Emission moved by at most 1 x 10^-5 (within its margin of 10^-4; the fine-tuned steppers' strictly worse, as the
+strict reading counts it). Means (current → candidate; the floor): the mushroom's tracking at 1 s 13.95 dB → 14.79
+(`u30`, `ms_u30`) and 14.16 (`mt4`, `ms_mt4`); its mean-frame PSNR 27.17 → 27.49, 27.77, 28.08, 28.56 and 28.63 dB
+(34.62), its motion ratio 0.82 → 0.78, 0.87, 0.85, 0.82, 0.81 (1.00), its coverage 0.0222 → 0.0160, 0.0220, 0.0204,
+0.0161, 0.0134 (0.0046); the splash's mean frame 33.16 → 33.75 dB (39.04), its motion 0.98 → 0.97 (1.00).
+
+- **Longer windows help the mushroom most at following a run**: +0.84 dB at 1 s from the true state, where its round's
+  test found it 1.1 dB behind the coarse simulation; with the ensemble-mean loss, +0.22 dB. Both bring its detail and
+  motion closer to the real ones and its average picture 0.6 and 0.9 dB closer.
+- **The mean state brings both one-shots' average picture and coverage closer** (the mushroom +0.32 dB, the splash
+  +0.59 dB), as for the explosion and dust; on the mushroom it calms it (motion 0.82 to 0.78 of the real), within the
+  margin. With either fine-tune the two add: +1.39 and +1.46 dB.
+
+**The number of settings.** "Every measure but the target" is read, for each candidate, as the measures that are not
+a target it improves on the probe (the mean state leaves tracking unchanged by construction, so its only target is the
+mean frame; every fine-tuned candidate improves both). The margin measures then need, at a probability of 0.9 that a
+truly unchanged one passes (normal form, SD at the upper end of its 80% interval): `ms` 21 settings (motion), `ms_u30`
+and `ms_mt4` 21 (motion), 18 and 14 (spectrum), `u30` and `mt4` 5 or fewer, the splash's `ms` 5; by resampling the
+probe's settings, at 30 settings every one of them passes with probability 0.99 or more. **N = 30**, the smallest
+multiple of 10 that meets the plan's condition. (Read the other way, with tracking held to its margin as if unchanged
+for `u30` and `ms_u30`, whose tracking spread over settings is 0.40 dB, it would need 54; their tracking gain, 0.84 dB,
+is 11 standard errors above zero at 30 settings, so tracking will be their target.) At 30 settings, by resampling the
+probe, the whole rule passes with probability 0.51 for `ms` (its mean-frame gain is small against its spread: 0.32 dB,
+SD 0.92), 0.99 for `mt4` and `ms_mt4`, 0.80 and 0.76 for `ms_u30` and `u30` read with tracking unchanged, and 1.00 for
+the splash's `ms`.
+
+### 16.3.1 The rule's numbers (committed before validation; the test runs once)
+
+**Candidates** (SHA-256): the mushroom `ms` `d6e030a2a7c48e4ecedd285672a334b119be147b53d8dcd89086ccd36a715dcc`, `u30`
+`366abc8bf3e376eb319f5d99e25c1bb1aa0bdb7263c3d45986efc3d14af32bdf`, `mt4`
+`58e84914e7b9258143c9c748e1d72fef0082819646832b419929a26b58b19106`, `ms_u30`
+`4a2f08a05eed33a85584b670eb009b606ecb1443089429b15beca703a46c97cc`, `ms_mt4`
+`7ff95277d2d451c33e43fdaad5223e2156efbb1773db29d6a900c33462e34e55`, each against the current mushroom (`505bdfe8...`);
+the splash `ms` `806a7a6cf27d73bb84b602cbe8f11e9b4ca4ce071bad50a4b9224bfb9131e82a` against the current splash
+(`8705966a...`). Files under the data root's `o_fix/cand`.
+
+**Margins** (the larger of study K's and the null's RMS change; o_margins.csv): the mushroom tracking at 1 s **-0.20 dB**,
+spectrum **+0.0387**, |ln motion ratio| **+0.0945**, coverage **+0.0117**, emission **+0.0001**, mean frame **-1.35 dB**;
+the splash **-0.20 dB**, **+0.02**, **+0.0719**, **+0.0017**, **+0.0001**, **-1.26 dB**. **N = 30** settings for
+validation (study G's 10 and 20 more, `validation_settings(30, 30)`; G's ten are its first ten, the closest to a test
+setting 0.085 away) and for the test (study B's 10 and 20 more, `test_settings(30)`), with the seeds of §16.3. The rest of
+the rule as written above. Every model plays through the runtime at float on the build's default float ISA (this
+branch's, AVX2), the same tool binary for the probe, validation and the test.
+
 ### 16.4 The rocket thruster's exhaust: a cold field on its tail (a library entry)
 
 **The flaw** ([LIBRARY.md](LIBRARY.md)): `rocket_thruster`'s exhaust (the jet model, recoloured blue) curls up at its
