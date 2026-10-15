@@ -8,6 +8,7 @@
 #include "rt_upscale.hpp"
 
 #include <neuralfx/nvfx.h>
+#include <neuralfx/nvfx.hpp>
 #include <neuralfx/noise.hpp>
 #include <neuralfx/rollout.hpp>
 #include <neuralfx/upscale.hpp>
@@ -125,7 +126,7 @@ Diff diff(const Bytes& a, const Bytes& b) {
   return d;
 }
 
-[[maybe_unused]] std::uint64_t fnv(const Bytes& b) {
+std::uint64_t fnv(const Bytes& b) {
   std::uint64_t h = 1469598103934665603ULL;
   for (const std::uint8_t c : b) h = (h ^ c) * 1099511628211ULL;
   return h;
@@ -468,4 +469,63 @@ TEST(Upscale, NoAllocationPerFrame) {
     EXPECT_EQ(g_allocations.load(), 0) << "mode " << mode;
     nvfx_instance_free(in);
   }
+}
+
+TEST(Upscale, FrozenFramesOnAvx2AtFloat) {
+  // The tests' small effect and a fixed net, played at float on the AVX2 build (pinned, as the other frozen tests are), with
+  // a colour, shards and crossfades: the frames' FNV-1a hashes, frozen when this test was written (15 October 2026). A
+  // change to the upscaler, its noise or the instance's path changes them.
+  if (nvfx_set_isa(NVFX_ISA_AVX2) != NVFX_OK) GTEST_SKIP() << "no AVX2";
+  Fx fx;
+  const std::string b = net_bytes(test_net(8, 8, 1, 31));
+  ASSERT_EQ(nvfx_effect_attach_upscaler_memory(fx.e, b.data(), b.size()), NVFX_OK);
+  const std::array<std::pair<nvfx_upscale, std::array<std::uint64_t, 4>>, 2> frozen = {{
+      {NVFX_UPSCALE_LEARNED, {0x65a2dc09b4a0d627ULL, 0x4f3f67b1e041a015ULL, 0x15ed9451605f6ca6ULL, 0xd4d45d0624327b42ULL}},
+      {NVFX_UPSCALE_BILINEAR, {0x4ca7f1238f5cf9ceULL, 0x4a8cdcd83447eaf1ULL, 0xb0f2c0104352d43aULL, 0xac1d085ca557005dULL}},
+  }};
+  for (const auto& [mode, want] : frozen) {
+    nvfx_instance* in = make_instance(fx.e, 128, 2024);
+    ASSERT_EQ(nvfx_instance_set_precision(in, NVFX_PRECISION_FLOAT), NVFX_OK);
+    ASSERT_EQ(nvfx_instance_set_upscale(in, mode), NVFX_OK);
+    ASSERT_EQ(nvfx_instance_set_colour(in, 0.3f, 1.1f), NVFX_OK);
+    Bytes px(128 * 128 * 4);
+    const std::array<int, 4> at = {0, 37, 75, 119};
+    for (std::size_t k = 0; k < at.size(); ++k) {
+      ASSERT_EQ(nvfx_render(in, at[k] / 30.0, px.data(), 128 * 4), NVFX_OK);
+      EXPECT_EQ(fnv(px), want[k]) << "mode " << mode << " frame " << at[k] << ": 0x" << std::hex << fnv(px) << "ULL";
+    }
+    nvfx_instance_free(in);
+  }
+  nvfx_set_isa(NVFX_ISA_AUTO);
+}
+
+TEST(Upscale, TheCppWrapperCallsTheCApi) {
+  const auto t = nfx::compose::testing::tiny_effect(3);
+  std::ostringstream os;
+  ASSERT_TRUE(nfx::rollout::save_model(os, t.m));
+  const std::string mb = os.str(), nb = net_bytes(test_net());
+  const auto bytes = [](const std::string& s) { return std::span(reinterpret_cast<const std::uint8_t*>(s.data()), s.size()); };
+  auto e = nvfx::Effect::load_memory(bytes(mb));
+  ASSERT_TRUE(e);
+  EXPECT_FALSE(e->attach_upscaler("/nonexistent/p.nvfxup"));
+  ASSERT_TRUE(e->attach_upscaler_memory(bytes(nb)));
+  EXPECT_EQ(e->attach_upscaler_memory(bytes(nb)).error().status, NVFX_ERROR_ARGUMENT);
+  auto in = nvfx::Instance::create(*e, 128);
+  ASSERT_TRUE(in);
+  ASSERT_TRUE(in->set_seed(4));
+  ASSERT_TRUE(in->set_upscale(NVFX_UPSCALE_LEARNED));
+  EXPECT_EQ(in->set_upscale(static_cast<nvfx_upscale>(3)).error().status, NVFX_ERROR_ARGUMENT);
+  Fx fx;  // the same effect through the C API
+  ASSERT_EQ(nvfx_effect_attach_upscaler_memory(fx.e, nb.data(), nb.size()), NVFX_OK);
+  nvfx_instance* c = nullptr;
+  ASSERT_EQ(nvfx_instance_create(fx.e, 128, &c), NVFX_OK);
+  nvfx_instance_set_seed(c, 4);
+  ASSERT_EQ(nvfx_instance_set_upscale(c, NVFX_UPSCALE_LEARNED), NVFX_OK);
+  Bytes a(128 * 128 * 4), b(a.size());
+  for (const double s : {0.0, 0.7, 2.1}) {
+    ASSERT_TRUE(in->render(s, a, 128 * 4));
+    ASSERT_EQ(nvfx_render(c, s, b.data(), 128 * 4), NVFX_OK);
+    EXPECT_EQ(a, b);
+  }
+  nvfx_instance_free(c);
 }

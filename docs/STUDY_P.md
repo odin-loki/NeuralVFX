@@ -1,8 +1,50 @@
 # Study P: large effects drawn at half size and upscaled
 
-Status: **design and plan** (15 October 2026). Audience: dev, research, the owner. The design and the plan (§1 to §4) are
+Status: **paused** (15 October 2026; §0). Audience: dev, research, the owner. The design and the plan (§1 to §4) are
 committed before any validation or test number; the rule's numbers (§4.5) follow the null probe and validation and are
-committed before the test, which runs once.
+committed before the test, which runs once. **The test has not run; its seeds (3,800,000 on) are unspent.**
+
+## 0. Status: paused
+
+Paused when the owner's weekly usage ran low. Where it stands:
+
+- **Done**: the design (§1 to §3), the runtime path (`nvfx_effect_attach_upscaler`, `nvfx_instance_set_upscale`,
+  NVFX_VERSION 7, `tests/test_upscale.cpp`: 11 tests, frozen AVX2 float frames), the study tool, the six effects frozen
+  (launch for cloud, §3.1), training tiles, the candidates trained (one shared, one per effect, 8, 8, 1).
+- **Found** (§2): the render size enters only the detail layer and the renderer; the fine fields never feed back into
+  the coarse state, so N and the half-size instance share the macro motion to the bit (checked on all six). But the
+  half-size detail layer draws its own fine detail (its picture is 25 to 44 dB from N's averaged), so against N on the
+  same seed a learned 2x gains little over bilinear (+0.07 dB on held-out training tiles for the shared net; +0.06 to
+  +0.55 dB per effect), and micro-detail noise trades PSNR and SSIM for high-band energy. On one dev setting at 512 px
+  the teacher's frames (128 cells drawn at 512) have about a tenth of N's high-band power, so B is closer to them than
+  N. Cost probe (busy machine, 8 rounds): L at 0.45 to 0.56 of N at 512 px, 0.51 to 0.64 at 256 px.
+- **The rule**: its form (§4.4) is committed (commit 0108862); its numbers (§4.5: margins, the choice, the number of
+  test settings) are **not**, because the null probe has not finished.
+- **Still running when paused** (left alone): `jobs/train_calib.sh` (calibrating the candidates' micro-detail gain and
+  rate on the dev split, in place in `nets/`) and `jobs/probe.sh` (the null probe on validation: N, N with fresh seeds,
+  B and the real runs; rows to `results/experiments/upscale/p_eval_val.csv` in the worktree, not committed while being
+  written). Their logs end with `logs/train_calib.done` and `logs/probe.done`.
+- **Data** under `/root/nvfx-data/p_upscale` (about 0.4 GB): `models/` (the six frozen effects), `tiles/` (training
+  tiles, 393 MB, scratch: delete when the study ends), `nets/` (`cand_shared.nvfxup`, `cand_<effect>.nvfxup`, and
+  development nets `dev_*`, `arch_*`, `hf_*`, `s512_*`, `*_881`), `cache/` (the real runs pooled per setting), `logs/`,
+  `jobs/`, `bin/nvfx_study_p_v1` (the binary the probe runs), `scratch/`.
+
+**To resume** (from the worktree, `NEURALVFX_DATA=/root/nvfx-data`, `P="nice -n 10 build/nvfx_study_p"`):
+
+```sh
+cat /root/nvfx-data/p_upscale/logs/calib_cand_*.log /root/nvfx-data/p_upscale/logs/probe.log   # finished? (*.done)
+# if a job died, rerun it: both resume (training and calibration rewrite their nets; eval skips finished settings)
+/root/nvfx-data/p_upscale/jobs/train_calib.sh      # or only its calib lines
+/root/nvfx-data/p_upscale/jobs/probe.sh
+$P margins                                         # the margins from N and the null alone: p_margins.csv
+$P eval --split val --cands shared=cand_shared,effect=cand_{effect} --threads 2   # validation of the candidates
+$P choose                                          # the choice and the number of test settings: p_choice.txt, p_power.csv
+# write §4.5 (margins, choice, settings), commit and push, then once:
+$P eval --split test --settings N --cands chosen=cand_shared   # or cand_{effect}; refuses a second run
+$P decide --split test && $P cost --net cand_shared --rounds 30 --frames 20
+$P video --effect explosion --net cand_shared --out videos/upscale_explosion.mp4 --size 512
+```
+
 
 ## 1. The question
 
