@@ -43,3 +43,8 @@ look devil_dust = shader, emission 0, soot_density 2.6, soot_albedo 0.5, sky 0.3
                   tint (1, 0.78, 0.55)
 look blaze = shader, heat_scale 0.9, emission 2.6, emission_power 2, soot_density 2.6, soot_albedo 0.35, sky 0.2,
              shadow 0.3, scene_light 0.8, relief 1, tint (1, 0.8, 0.6)
+# Launch, puffs and ink (docs/EFFECTS_FLOW.md): an engine's exhaust blown down onto the ground, smoke in pulses, and a
+# plume with almost no buoyancy (underwater). Puffs and ink carry no light: their entries draw them with looks.
+effect launch    = "launch.nvfx", swirl 1, swirl_scale 9                # intensity (thrust), wind, turbulence
+effect puffs     = "puffs.nvfx"                                       # intensity, rate (pulses a second), turbulence
+effect ink       = "ink.nvfx"                                         # intensity, current, turbulence

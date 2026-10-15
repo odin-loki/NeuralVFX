@@ -1,0 +1,41 @@
+# Underwater (docs/EFFECTS_FLOW.md): the ink model, a plume with almost no buoyancy that curls and spreads slowly, as
+# ink, blood, silt or a dye does in water, carried by the current. It has no heat and gives no light: its colour is the
+# look's (a recolour, not new dynamics). The stage draws a night sky behind it; a game draws its own water, against
+# which a dark ink reads better than in the gallery.
+
+look squid_ink = shader, emission 0, soot_density 2.2, soot_albedo 0.3, sky 0.8, shadow 0.2, scene_light 1, relief 1,
+                 tint (0.55, 0.6, 0.85)                              # blue-black (lifted a little to read at night)
+look blood     = like squid_ink, tint (1, 0.12, 0.1), soot_albedo 0.5, soot_density 1.6   # dark red, thin
+look silt      = like squid_ink, tint (0.85, 0.72, 0.52), soot_albedo 0.6, soot_density 1.4, sky 0.9    # brown-grey
+look dye       = like squid_ink, tint (0.35, 1, 0.45), soot_albedo 0.8, soot_density 1.5, sky 1    # fluorescent green
+
+entry ink_cloud, category underwater, size 360 x 360, anchor centre, loop, show 5,
+      about "An ink cloud: a squid's ink spreading from where it was released (the anchor) into soft, slowly curling clouds and tendrils"
+param amount = 0.7, range (0.3, 1), about "how much ink"
+param current = 0.5, range (0, 1), about "drift: 0 left, 0.5 still water, 1 right"
+let w = 400 * scale
+module ink = ink, size 128, width w, at (X + 0.012 * w, Y + 0.27 * w), feather 0.15, look squid_ink, start 0, seed 1201,
+             controls (0.7, 0.5, 0.4), intensity amount, current current
+
+entry blood_in_water, category underwater, size 340 x 300, anchor centre, loop, show 5,
+      about "Blood in water: a thin red plume curling away from a wound (the anchor) and drifting with the current"
+param amount = 0.35, range (0.1, 0.7), about "how much blood"
+param current = 0.8, range (0, 1), about "drift: 0 left, 0.5 still water, 1 right"
+let w = 340 * scale
+module blood = ink, size 128, width w, at (X + 0.012 * w, Y + 0.27 * w), feather 0.15, look blood, start 0, seed 1211,
+               controls (0.35, 0.8, 0.2), intensity amount, current current, turbulence 0.2
+
+entry silt_cloud, category underwater, size 520 x 300, anchor base, loop, show 5,
+      about "Stirred silt: a brown cloud rising off the bottom where something disturbed it, spreading and drifting slowly"
+param amount = 0.8, range (0.3, 1), about "how much silt"
+param current = 0.6, range (0, 1), about "drift: 0 left, 0.5 still water, 1 right"
+let w = 520 * scale
+module silt = ink, size 128, width w, at (X, Y + 0.2 * w), feather 0.12, look silt, start 0, seed 1221,
+              controls (0.8, 0.6, 0.4), intensity amount, current current
+
+entry dye_plume, category underwater, size 300 x 400, anchor centre, loop, show 6,
+      about "A dye plume: a bright green tracer dye curling slowly out of a nozzle (the anchor) in still water"
+param amount = 0.5, range (0.2, 0.9), about "how much dye"
+let w = 360 * scale
+module dye = ink, size 128, width w, at (X + 0.012 * w, Y + 0.27 * w), feather 0.15, look dye, start 0, seed 1231,
+             controls (0.5, 0.5, 0.15), intensity amount, current 0.5, turbulence 0.15

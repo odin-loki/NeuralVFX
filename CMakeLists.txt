@@ -446,7 +446,7 @@ if(NEURALFX_BUILD_TESTS)
     set_tests_properties(neuralfx.LibraryCataloguePlays PROPERTIES LABELS "neuralfx;data" SKIP_RETURN_CODE 77 TIMEOUT 1800)
     add_test(NAME neuralfx.LibraryKeyframesFrozen
              COMMAND nvfx_gallery --library ${CMAKE_CURRENT_SOURCE_DIR}/library --models ${NEURALFX_MODELS_LIBRARY}
-                     --only campfire,blue_gas_flame,grenade,steam_vent,portal,lightning_strike,ground_fog,dust_impact,flamethrower,plasma_orb,dust_devil,rocket_trail,vehicle_dust_wake
+                     --only campfire,blue_gas_flame,grenade,steam_vent,portal,lightning_strike,ground_fog,dust_impact,flamethrower,plasma_orb,dust_devil,rocket_trail,vehicle_dust_wake,rocket_launch,ink_cloud
                      --keyframes ${CMAKE_CURRENT_BINARY_DIR}/library_keyframes --verify ${CMAKE_CURRENT_SOURCE_DIR}/results/library/frozen.csv --threads 2
                      --precision float)
     set_tests_properties(neuralfx.LibraryKeyframesFrozen PROPERTIES LABELS "neuralfx;data" SKIP_RETURN_CODE 77 TIMEOUT 1200)
