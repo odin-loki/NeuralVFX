@@ -910,6 +910,18 @@ flipbook, average picture closer, detail tied with it), but the vortex sometimes
 Each is 82 KB. The full account, with a scene in which a flamethrower sets a dust devil alight, is in
 [EFFECTS_ENERGY.md](EFFECTS_ENERGY.md).
 
+### 6.14 Flow effects
+
+Three more presets were trained and tested the same way, at the runtime's default int8: **launch** (a rocket's exhaust
+blown down onto the ground, billowing out both ways), **puffs** (smoke from a chimney in pulses, timed by the flicker
+noise the stepper sees, faster with a `rate` control) and **ink** (a slow plume with almost no buoyancy, for underwater
+scenes, carried by a `current`). Launch and ink track a held-out run better than the coarse simulation with the same
+detail layer at 1 s (+1.5 dB [+1.1, +2.0] and +2.2 [+1.9, +2.5]), but endless their average picture only ties the
+nearest flipbook's, so by the rule set before the test they fall short of working as steam did without being weak;
+puffs ties the coarse simulation at tracking (which has the same noise-timed source) and is weak, though endless its
+average picture is 1.6 dB [0.6, 2.5] closer than the flipbook's. Each is 146 KB and about 0.5 ms per 128 px frame. The
+full account, with a night launch scene and ten library entries, is in [EFFECTS_FLOW.md](EFFECTS_FLOW.md).
+
 ## 7. Runtime cost and budget
 
 Median ms per frame through `nvfx_render`, one pinned AVX2 core (90th percentiles and every configuration in

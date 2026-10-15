@@ -552,9 +552,9 @@ orb and the vortex). A new category is just a new name in `category` (`dust` and
 - **The ink model's shape depends on its turbulence**: at 0.2 or below the dye streams along the current; at the
   middle it curls into short, blocky arms set along the frame's axes (the curl noise's lattice, which the simulator
   has too). Blood and the dye plume play at low turbulence.
-- **Slow effects stay young.** Ink's start points come from 3 s into its training runs, when the dye is still near its
-  release, and every shard starts from one; ink in the library stays a compact cloud. Longer shards (20 s instead of 8)
-  did not spread it further: the model keeps it compact.
+- **Ink stays compact.** Its start points come from 5 s into its training runs and every shard starts from one, and the
+  learned stepper holds the dye together more than the simulation does: ink in the library stays a compact cloud.
+  Longer shards (20 s instead of 8) did not spread it further.
 - **Names**: `glow` and `wash` are words of the language; the signal fire's lamp is `warm` and the downwash's module
   `draught`.
 

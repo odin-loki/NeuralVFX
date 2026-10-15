@@ -41,6 +41,7 @@ C++23, no third-party runtime dependencies, a C API for engines, no Python.
 - **Energy effects:** [docs/EFFECTS_ENERGY.md](docs/EFFECTS_ENERGY.md) (a flamethrower's jet, a plasma orb and a dust
   devil: presets, training, the test, a fire-whirl scene).
 - **Atmosphere effects:** [docs/EFFECTS_ATMOSPHERE.md](docs/EFFECTS_ATMOSPHERE.md) (fog, dust and cloud: presets, training, the test, a scene).
+- **Flow effects:** [docs/EFFECTS_FLOW.md](docs/EFFECTS_FLOW.md) (a rocket launch's blast, smoke in puffs and ink in water: presets, training, the test, a lift-off scene).
 - **Data and licences:** [docs/DATA.md](docs/DATA.md).
 - **Footage:** [docs/FOOTAGE.md](docs/FOOTAGE.md): start points estimated from frames (study J), so a rollout effect
   continues what footage shows (`nvfx_estimate`); validated on simulated renders only.
