@@ -2495,13 +2495,13 @@ unspent.**
 - **The explosion's mean state is a null for the second time**, for a reason the margin makes plain: its average picture
   is 3.4 dB closer to a real run's (its distance below the floor nearly halved, 7.0 to 3.7 dB, as in study M), its
   coverage error halved and its motion's error smaller, and its detail spectrum distance unchanged on average
-  (-0.003), but the explosion's spectrum distance moves by up to ±0.14 from setting to setting, so the interval
-  (±0.046) is more than twice the margin's width and cannot show that it stays within 0.02. Under study M's strict
+  (-0.003), but the paired difference of the explosion's spectrum distance ranges from -0.14 to +0.12 over the settings, so
+  the interval (±0.046) is more than twice the margin's width and cannot show that it stays within 0.02. Under study M's strict
   reading (no measure's interval entirely on the worse side) it would have met the rule.
 - **Dust's mean state** is better on its target by a hair (+1.09 dB [+0.00, +2.27]), its motion is much closer to the
   real (1.06 to 0.96 of the real runs', the floor's 0.97), and its coverage closer on average (0.0075 to 0.0051), but the
   coverage interval's worse end (+0.0009) is past its margin (+0.00075, 10% of 0.0075). It too would have met the strict
-  reading. At one setting of the ten (the second) both one-shots' mean state is clearly worse (dust -1.4 dB, the
+  reading. At one setting of the ten (setting 2, counting from 0) both one-shots' mean state is clearly worse (dust -1.4 dB, the
   explosion -3.8 dB): the quadratic mean state does not hold everywhere in the control space.
 - **Steam gained nothing from the fine-tune**, as smoke did not in study M: it is livelier (motion 0.83 to 0.87 of the
   real) but its average picture is unchanged (-0.07 dB [-0.48, +0.37]) and its coverage error grows a little. The swirl
