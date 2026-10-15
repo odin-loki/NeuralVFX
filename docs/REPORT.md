@@ -3184,7 +3184,33 @@ its own play), snapshot at every stage, and chosen on tracking *and* endless pla
 
 ## 16. Study O: the most visible flaws of the shipped effects, fixed and measured
 
-Status: **in progress** (15 October 2026). Study O takes the flaws that show most in the demos and the library, finds
+**Status: paused** (15 October 2026, stopped by the owner's usage limit). Done and judged by eye (no model change):
+the waterfall's and rain shaft's bands (§16.1, `passes 2`), launch's square block in the lift-off (§16.2, a three-tile
+domain and `passes 2`), the rocket thruster (§16.4, a cold field); their frozen hashes are updated and their videos
+re-rendered. The mushroom and splash study (§16.3): the plan, the margins, N = 30 and the rule's numbers are committed
+(§16.3.1); validation ran (o_val_*.csv): every candidate met the rule, chosen **mushroom `ms_u30`** (mean frame +1.12 dB
+[+0.79, +1.45], tracking at 1 s +0.89 dB [+0.76, +1.02], nothing past its margin) and **splash `ms`** (mean frame +0.62 dB
+[+0.40, +0.86], every other measure better or tied); both are frozen in `results/experiments/fix/o_frozen.csv`. **The
+test has not run; its seeds (3,200,000 to 3,299,999) are unspent. No model is replaced, no shared link is moved.** No job
+is running. Data under `/root/nvfx-data/o_fix` (candidates `cand/`, frozen copies `models/`, statistics caches `vt/`,
+logs `logs/`, the tool binary used throughout `bin/nvfx_ordered_v2`). To resume (the test once per effect, from
+`/home/user/wt-fix`):
+
+```sh
+O="nice -n 15 /root/nvfx-data/o_fix/bin/nvfx_ordered_v2 --study o --root /root/nvfx-data --results results/experiments/fix --threads 2"
+$O test --effect splash --current /root/nvfx-data/fx_water/models/d/splash.nvfx --cand ms=/root/nvfx-data/o_fix/models/splash.nvfx --frozen results/experiments/fix/o_frozen.csv
+$O test --effect mushroom --current /root/nvfx-data/fx_blaze/models/d/mushroom.nvfx --cand ms_u30=/root/nvfx-data/o_fix/models/mushroom.nvfx --frozen results/experiments/fix/o_frozen.csv
+```
+
+Then, for an effect that meets the rule: private copies of the model folders, the full ctest with them, the frozen
+hashes that change (the prairie's keyframes, `distant_mushroom`, the library's model rows), the videos (effect_mushroom,
+scene_prairie, library_round7, real_vs_learned_round7; effect_splash, real_vs_learned_water, library_water), the docs, and
+last the shared links (`library/models`, `fx_blaze/models/scene`). Still to do as well: §16.5 to §16.7 (what changed,
+cost of the lift-off's three tiles, what it means), merging main (its float default moves to AVX-512; the frozen tests
+are pinned to AVX2 there, which these hashes were computed on), the full build and ctest, `nvfx_alloc_test`,
+`nvfx_gallery --check`, README's test count. The rest of this section was written as the work went.
+
+Study O takes the flaws that show most in the demos and the library, finds
 each one's cause with evidence, and fixes what it can: a fix in the compositor, a look or a library entry is judged by
 eye from before and after frames, and a fix that changes a model goes through a rule written here before any of its
 validation numbers, validated and tested once. Seeds: study O's range, 3,000,000 to 3,499,999. Code: `tools/nvfx_fix.cpp`
