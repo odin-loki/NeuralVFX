@@ -418,6 +418,10 @@ class Rollout final : public RolloutRunner {
     if (!lean_) next_.resize(z(N_) * z(C_));
     if (h_.advection == 1) mca_.resize(z(N_) * z(C_));  // study L's MacCormack advection: its forward samples
     coarse_.resize(z(N_) * z(C_));
+    if (!m_.mean.empty()) {  // study M: a start point begun at other controls is moved by the mean state
+      begun_.resize(z(N_) * kPhys);
+      mscratch_.resize(rollout::mean_scratch(m_));
+    }
     flow_.resize(z(N_) * 2);
     if (!lean_) div_.resize(z(N_));
     p_.assign(z(R_ + 2) * z(R_ + 2), 0.f);  // pressure with a zero border (written inside only)
@@ -574,23 +578,29 @@ class Rollout final : public RolloutRunner {
     }
   }
 
+  using RolloutRunner::begin;
   void start(int index, std::span<const float> controls, std::uint64_t seed) override {
-    begin(index, seed);
+    begin(index, seed, controls);
     if (!m_.starts[z(index)].fine_t.empty()) return;
     for (int f = 0; f < h_.warmup; ++f) step(controls, seed);
     since_start_ = m_.detail.swirl_ramp;
   }
 
-  void begin(int index, std::uint64_t seed) override {
+  void begin(int index, std::uint64_t seed, std::span<const float> controls) override {
     using namespace rollout;
     const StartPoint& sp = m_.starts[z(index)];
     computed_ = 0.0;
     dense_steps_ = 0;
     reseed(seed);
     time_ = sp.time;
+    // study M: the start point's coarse state moved to the controls by the mean state (rollout::start_coarse); without one,
+    // the start point's own
+    const bool moved = !m_.mean.empty() && !controls.empty();
+    if (moved) start_coarse(m_, index, controls, begun_, mscratch_);
+    const std::span<const float> c0 = moved ? std::span<const float>(begun_) : std::span<const float>(sp.coarse);
     std::fill(coarse_.begin(), coarse_.end(), 0.f);
     for (int i = 0; i < N_; ++i) {
-      for (int c = 0; c < kPhys; ++c) coarse_[z(i) * z(C_) + z(c)] = sp.coarse[z(i) * kPhys + z(c)];
+      for (int c = 0; c < kPhys; ++c) coarse_[z(i) * z(C_) + z(c)] = c0[z(i) * kPhys + z(c)];
     }
     std::fill(p_.begin(), p_.end(), 0.f);
     std::fill(flow_.begin(), flow_.end(), 0.f);
@@ -601,8 +611,8 @@ class Rollout final : public RolloutRunner {
       for (int x = 0; x < S_; ++x) {
         const float xs = (static_cast<float>(x) + 0.5f) / k - 0.5f, ys = (static_cast<float>(y) + 0.5f) / k - 0.5f;
         const std::size_t i = z(y) * z(S_) + z(x);
-        ft_[i] = fine ? bilinear(sp.fine_t.data(), n, 1, 0, xs, ys) : bilinear(sp.coarse.data(), R_, kPhys, 2, xs, ys);
-        fd_[i] = fine ? bilinear(sp.fine_d.data(), n, 1, 0, xs, ys) : bilinear(sp.coarse.data(), R_, kPhys, 3, xs, ys);
+        ft_[i] = fine ? bilinear(sp.fine_t.data(), n, 1, 0, xs, ys) : bilinear(c0.data(), R_, kPhys, 2, xs, ys);
+        fd_[i] = fine ? bilinear(sp.fine_d.data(), n, 1, 0, xs, ys) : bilinear(c0.data(), R_, kPhys, 3, xs, ys);
       }
     }
     since_start_ = fine ? 0.f : m_.detail.swirl_ramp;
@@ -759,7 +769,7 @@ class Rollout final : public RolloutRunner {
                           &tmp_, &wot_, &noise_, &dirsum_, &soot_, &fac_, &ft_, &fd_, &swl_, &g1_, &frow_, &soft_, &mca_, &r1_, &r2_, &out_}) {
       n += v->size() * 4;
     }
-    n += any_.size() + 4 * (nm_.size() + cell_lo_.size() + cell_hi_.size());
+    n += any_.size() + 4 * (nm_.size() + cell_lo_.size() + cell_hi_.size() + begun_.size() + mscratch_.size());
     n += curl_.bytes() + swirl_.bytes() + fine_flicker_.bytes();
     for (const auto& f : flicker_) n += f.bytes();
     n += flow_rows_.bytes() + swirl_rows_.bytes() + fac_rows_.bytes() + render_rows_.bytes();
@@ -1890,6 +1900,7 @@ class Rollout final : public RolloutRunner {
   AlignedFloats w1_, b1_, w2_, b2_, cond_, folded_cond_;
   AlignedFloats next_, coarse_, flow_, div_, p_, tmp_, wot_, noise_, dirsum_, soot_;
   AlignedFloats ft_, fd_;  // the fine fields
+  std::vector<float> begun_, mscratch_;  // study M: a start's coarse state moved by the mean state, and its scratch
   // step()'s working memory, in the scratch in use (bind()): where each buffer lies in it, and the spans themselves.
   struct Part {
     std::size_t at = 0, n = 0;

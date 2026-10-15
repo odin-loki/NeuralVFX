@@ -121,6 +121,20 @@ struct RenderLayout {
 };
 RenderLayout render_layout(const Hyper& h);
 
+// Study M (docs/REPORT.md §14): the ordered part of the coarse state as a function of the controls. A start point was
+// saved from a run at its own controls; played at others, the learned stepper keeps its look for seconds (the effect's size,
+// lean and amount). With a mean state, a start point begun at controls c is moved by mu(c) - mu(its own controls): its
+// ordered part becomes c's and what made it a sample (its fluctuations about its own mean) stays. mu is a quadratic in
+// the three controls per block of block x block coarse cells (u, v, heat, soot), interpolated bilinearly to the cells:
+// fitted to the time means of the training runs (looping effects) or to their first states (one-shot effects, whose
+// start points are first states). File version 6, written only when it is present.
+inline constexpr int kMeanFeatures = 10;  // 1, I, W, T, I^2, W^2, T^2, IW, IT, WT
+struct MeanState {
+  int block = 0;            // 0: none (start points are begun as they are)
+  std::vector<float> beta;  // [feature][block row][block column][kPhys]
+  bool empty() const { return block == 0; }
+};
+
 struct StartPoint {
   std::vector<float> controls;        // the run's controls
   std::uint64_t seed = 0;             // the run's noise seed (replaying it with this seed tracks the run)
@@ -151,6 +165,7 @@ struct Model {
   // and unrelated to the field; a zero code of a channel whose range starts at zero restores exactly zero.
   int start_bits = 16;
   bool start_dither = false;
+  MeanState mean;  // study M (docs/REPORT.md §14)
 
   std::size_t storage_bytes() const;  // as saved: weights fp16, coarse states at start_bits, fine fields 8-bit
 };
@@ -200,8 +215,18 @@ struct State {
 // from zero (activations of the second convolution, which are not negative, as floor(x + 0.5)).
 enum class Int8 { off, second, both };
 
-// Start an effect at `size` pixels from start point `index` (time and coarse state from it; fine fields from it or
-// grown from the coarse state by h.warmup frames with `seed`).
+// Study M: the mean state at controls c (res * res * kPhys, rows from the bottom; zeros without one), and start point
+// `index`'s coarse state begun at controls c: its own, moved by mu(c) - mu(its controls) when the model has a mean state
+// (heat and soot kept within the model's range), into out (res * res * kPhys).
+void mean_state(const Model& m, std::span<const float> controls, std::span<float> out);
+void start_coarse(const Model& m, int index, std::span<const float> controls, std::span<float> out);
+// The same without allocating (the runtime): scratch holds at least mean_scratch(m) floats.
+std::size_t mean_scratch(const Model& m);
+void mean_state(const Model& m, std::span<const float> controls, std::span<float> out, std::span<float> scratch);
+void start_coarse(const Model& m, int index, std::span<const float> controls, std::span<float> out, std::span<float> scratch);
+
+// Start an effect at `size` pixels from start point `index` (time and coarse state from it, moved to the controls by the
+// mean state when there is one; fine fields from it or grown from the coarse state by h.warmup frames with `seed`).
 State start(const Model& m, int index, int size, std::span<const float> controls, std::uint64_t seed, Int8 q = Int8::off);
 // One frame: the stepper on the coarse grid, then the detail layer.
 void step(const Model& m, State& s, std::span<const float> controls, std::uint64_t seed, Int8 q = Int8::off);

@@ -1575,14 +1575,14 @@ void Manager::transfer(Model& M, Sim& s) {
 
 // Shard timeline (src/runtime/nvfx.cpp's bring): track t to shard k at frame f, at most `limit` steps in all.
 bool Manager::bring(Model& M, Sim& s, Track& t, bool shown, std::int64_t k, std::int64_t f, int limit, int& steps) {
+  const std::span<const float> ctl(s.controls.data(), z(M.nc));
   if (t.shard != k || f < t.frame) {
     const ShardPlan p = plan_shard(M, s, k);
-    t.r->begin(p.index, p.seed);
+    t.r->begin(p.index, p.seed, ctl);  // study M: moved to the controls when the effect has a mean state, as nvfx_render's
     t.shard = k;
     t.frame = p.first;
     t.seed = p.seed;
   }
-  const std::span<const float> ctl(s.controls.data(), z(M.nc));
   while (t.frame < f) {
     if (steps >= limit) return false;
     t.r->step(ctl, t.seed);

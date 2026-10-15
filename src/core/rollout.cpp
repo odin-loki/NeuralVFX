@@ -17,12 +17,13 @@ namespace nfx::rollout {
 
 namespace {
 
-constexpr std::uint32_t kVersion = 5;  // 2 added DetailSpec::grow (version 1 files load with grow = 1); 3 quantised
+constexpr std::uint32_t kVersion = 6;  // 2 added DetailSpec::grow (version 1 files load with grow = 1); 3 quantised
                                        // start states (written only when start_bits < 16); 4 DetailSpec::advect and
                                        // soften (study D2; written only when either differs from its default; the
                                        // start storage fields are then always present, 16 meaning fp16); 5
                                        // Hyper::advection and DetailSpec::passes (study L; written only when either
-                                       // is not at its default, after the version 4 fields)
+                                       // is not at its default, after the version 4 fields); 6 Model::mean (study M;
+                                       // written only when there is one, after the version 5 fields)
 
 float round_f16(float v) { return static_cast<float>(static_cast<std::float16_t>(v)); }
 
@@ -214,7 +215,7 @@ float start_dither_value(std::uint64_t seed, int i, int c) {
 }
 
 std::size_t Model::storage_bytes() const {
-  std::size_t n = 64 + 16 * control_names.size() + 2 * (step_w.size() + render_w.size());
+  std::size_t n = 64 + 16 * control_names.size() + 2 * (step_w.size() + render_w.size()) + (mean.empty() ? 0 : 4 + 2 * mean.beta.size());
   for (const auto& s : starts) {
     const std::size_t coarse = start_bits >= 16 ? 2 * s.coarse.size()
                                                 : kPhys * (4 + packed_plane_bytes(s.coarse.size() / kPhys, start_bits));
@@ -265,7 +266,12 @@ std::expected<void, std::string> save_model(std::ostream& o, const Model& m) {
   // Files keep the oldest layout that holds them: 2 without quantised starts, 3 with, 4 with study D2's constants, 5
   // with study L's advection or passes.
   const bool study_l = h.advection != 0 || d.passes != 1;
-  const std::uint32_t version = study_l ? 5u : (moved ? 4u : (quantised ? 3u : 2u));
+  const bool study_m = !m.mean.empty();
+  if (study_m && (m.mean.block < 1 || h.res % m.mean.block != 0 || h.res / m.mean.block < 2 || h.n_controls != 3 ||
+                  m.mean.beta.size() != static_cast<std::size_t>(kMeanFeatures) * sz(h.res / m.mean.block) * sz(h.res / m.mean.block) * kPhys)) {
+    return std::unexpected("rollout: the mean state does not fit the model");
+  }
+  const std::uint32_t version = study_m ? 6u : (study_l ? 5u : (moved ? 4u : (quantised ? 3u : 2u)));
   o.write(kMagic, sizeof(kMagic));
   bin::put(o, version);
   for (const int v : {h.res, h.hidden, h.memory, h.jacobi, h.n_controls, h.n_age, h.frames, h.render_hidden, h.start_fine, h.warmup}) {
@@ -296,6 +302,10 @@ std::expected<void, std::string> save_model(std::ostream& o, const Model& m) {
   if (version >= 5) {
     bin::put(o, static_cast<std::int32_t>(h.advection));
     bin::put(o, static_cast<std::int32_t>(d.passes));
+  }
+  if (version >= 6) {
+    bin::put(o, static_cast<std::int32_t>(m.mean.block));
+    put_f16(o, m.mean.beta);
   }
   for (const auto* a : {&m.scale, &m.lo, &m.hi}) bin::put_array(o, std::span<const float>(*a));
   put_f16(o, m.step_w);
@@ -394,6 +404,13 @@ std::expected<Model, std::string> load_model(std::istream& i) {
     h.advection = *adv;
     d.passes = *passes;
   }
+  if (*version >= 6) {
+    auto block = bin::get<std::int32_t>(i);
+    if (!block || *block < 1 || h.res % *block != 0 || h.res / *block < 2 || h.n_controls != 3) return std::unexpected("rollout: bad mean state");
+    m.mean.block = *block;
+    m.mean.beta.resize(static_cast<std::size_t>(kMeanFeatures) * sz(h.res / *block) * sz(h.res / *block) * kPhys);
+    if (auto r = get_f16(i, m.mean.beta); !r) return std::unexpected(r.error());
+  }
   if (!(d.swirl_scale > 0.f) || !(d.edge1 > d.edge0)) return std::unexpected("rollout: bad detail spec");
   for (auto* a : {&m.scale, &m.lo, &m.hi}) {
     if (auto r = bin::get_array(i, std::span<float>(*a)); !r) return std::unexpected(r.error());
@@ -447,6 +464,7 @@ void quantise_like_storage(Model& m) {
   const auto r16 = [](std::vector<float>& v) { std::ranges::for_each(v, [](float& x) { x = round_f16(x); }); };
   r16(m.step_w);
   r16(m.render_w);
+  r16(m.mean.beta);
   for (StartPoint& s : m.starts) {
     r16(s.controls);
     if (m.start_bits < 16) {
@@ -948,6 +966,61 @@ void render(const Model& m, const State& s, std::span<float> rgba) {
   }
 }
 
+std::size_t mean_scratch(const Model& m) {
+  if (m.mean.empty()) return 0;
+  const std::size_t G = sz(m.h.res / m.mean.block), n = sz(m.h.res) * sz(m.h.res) * kPhys;
+  return G * G * kPhys + 2 * n;
+}
+
+void mean_state(const Model& m, std::span<const float> controls, std::span<float> out, std::span<float> scratch) {
+  const int R = m.h.res;
+  std::fill(out.begin(), out.end(), 0.f);
+  if (m.mean.empty()) return;
+  const int B = m.mean.block, G = R / B;
+  const auto ctl = [&](int k) { return sz(k) < controls.size() ? controls[sz(k)] : 0.5f; };
+  const float ci = ctl(0), cw = ctl(1), ct = ctl(2);
+  const std::array<float, kMeanFeatures> f{1.f, ci, cw, ct, ci * ci, cw * cw, ct * ct, ci * cw, ci * ct, cw * ct};
+  const std::size_t cols = sz(G) * sz(G) * kPhys;
+  float* g = scratch.data();  // the blocks' mean state
+  for (std::size_t k = 0; k < cols; ++k) {
+    float v = 0.f;
+    for (int p = 0; p < kMeanFeatures; ++p) v += f[sz(p)] * m.mean.beta[sz(p) * cols + k];
+    g[k] = v;
+  }
+  for (int y = 0; y < R; ++y) {  // bilinear from the block centres, clamped to them
+    for (int x = 0; x < R; ++x) {
+      for (int c = 0; c < kPhys; ++c) {
+        out[(sz(y) * sz(R) + sz(x)) * kPhys + sz(c)] = bilinear_ch(g, G, kPhys, c, (fl(x) + 0.5f) / fl(B) - 0.5f, (fl(y) + 0.5f) / fl(B) - 0.5f);
+      }
+    }
+  }
+}
+
+void start_coarse(const Model& m, int index, std::span<const float> controls, std::span<float> out, std::span<float> scratch) {
+  const StartPoint& sp = m.starts.at(sz(index));
+  const std::size_t n = sz(m.h.res) * sz(m.h.res) * kPhys;
+  std::copy_n(sp.coarse.begin(), n, out.begin());
+  if (m.mean.empty() || controls.empty()) return;
+  const std::size_t G = sz(m.h.res / m.mean.block);
+  const std::span<float> g = scratch.first(G * G * kPhys), to = scratch.subspan(G * G * kPhys, n), from = scratch.subspan(G * G * kPhys + n, n);
+  mean_state(m, controls, to, g);
+  mean_state(m, sp.controls, from, g);
+  for (std::size_t i = 0; i < n; ++i) {
+    const std::size_t c = i % kPhys;
+    out[i] = std::clamp(out[i] + (to[i] - from[i]), m.lo[c], m.hi[c]);
+  }
+}
+
+void mean_state(const Model& m, std::span<const float> controls, std::span<float> out) {
+  std::vector<float> scratch(mean_scratch(m));
+  mean_state(m, controls, out, scratch);
+}
+
+void start_coarse(const Model& m, int index, std::span<const float> controls, std::span<float> out) {
+  std::vector<float> scratch(mean_scratch(m));
+  start_coarse(m, index, controls, out, scratch);
+}
+
 State start(const Model& m, int index, int size, std::span<const float> controls, std::uint64_t seed, Int8 q) {
   const Hyper& h = m.h;
   const StartPoint& sp = m.starts.at(sz(index));
@@ -957,8 +1030,10 @@ State start(const Model& m, int index, int size, std::span<const float> controls
   s.size = size;
   s.time = sp.time;
   s.coarse.assign(sz(R) * sz(R) * sz(C), 0.f);
+  std::vector<float> c0(sz(R) * sz(R) * kPhys);
+  start_coarse(m, index, controls, c0);  // study M: moved to the controls by the mean state, if any
   for (int i = 0; i < R * R; ++i) {
-    for (int c = 0; c < kPhys; ++c) s.coarse[sz(i) * sz(C) + sz(c)] = sp.coarse[sz(i) * kPhys + sz(c)];
+    for (int c = 0; c < kPhys; ++c) s.coarse[sz(i) * sz(C) + sz(c)] = c0[sz(i) * kPhys + sz(c)];
   }
   s.pressure.assign(sz(R) * sz(R), 0.f);
   s.flow.assign(sz(R) * sz(R) * 2, 0.f);
@@ -971,8 +1046,8 @@ State start(const Model& m, int index, int size, std::span<const float> controls
     for (int x = 0; x < size; ++x) {
       const float xs = (fl(x) + 0.5f) / k - 0.5f, ys = (fl(y) + 0.5f) / k - 0.5f;
       const std::size_t i = sz(y) * sz(size) + sz(x);
-      s.fine_t[i] = fine ? bilinear(sp.fine_t.data(), n, xs, ys) : bilinear_ch(sp.coarse.data(), R, kPhys, 2, xs, ys);
-      s.fine_d[i] = fine ? bilinear(sp.fine_d.data(), n, xs, ys) : bilinear_ch(sp.coarse.data(), R, kPhys, 3, xs, ys);
+      s.fine_t[i] = fine ? bilinear(sp.fine_t.data(), n, xs, ys) : bilinear_ch(c0.data(), R, kPhys, 2, xs, ys);
+      s.fine_d[i] = fine ? bilinear(sp.fine_d.data(), n, xs, ys) : bilinear_ch(c0.data(), R, kPhys, 3, xs, ys);
     }
   }
   if (!fine) {  // grow detail: material flows through and picks up filaments and flicker
