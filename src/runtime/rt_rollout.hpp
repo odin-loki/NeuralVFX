@@ -1098,6 +1098,7 @@ class Rollout final : public RolloutRunner {
       each_block(N_, [&]<class V>(int i) { st<V>(q + i, vtanh<V>(ld<V>(q + i))); });
       for (int i = 0; i < N_; ++i) mid_[z(i) * z(C_) + z(k)] = q[i];
     }
+    if (h_.force > 0.f) rollout::coarse_force(m_, nz_, cond_, mid_);  // study M: the reference's own (scalar, no FMA)
     lap(RolloutProfile::conv);
     const auto U = [&](int x, int y, int c) { return mid_[(z(std::clamp(y, 0, R_ - 1)) * z(R_) + z(std::clamp(x, 0, R_ - 1))) * z(C_) + z(c)]; };
     for (int y = 0; y < R_; ++y) {

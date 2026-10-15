@@ -878,7 +878,7 @@ float contrast_kappa(const rollout::Model& m) {  // as rollout::calibrate_detail
 }
 
 // A variant: "name:k=v;k=v" with the detail layer's file constants (contrast, edge0, edge1, swirl, swirl_scale, swirl_rate,
-// grow, advect, soften, passes); kappa follows the edges as calibrate_detail sets it.
+// grow, advect, soften, passes) and study M's coarse forcing (force); kappa follows the edges as calibrate_detail sets it.
 struct Variant {
   std::string name, spec;
   rollout::Model m;
@@ -907,6 +907,7 @@ Variant make_variant(const rollout::Model& base, const std::string& spec) {
       else if (key == "advect") d.advect = val;
       else if (key == "soften") d.soften = val;
       else if (key == "passes") d.passes = static_cast<int>(val);
+      else if (key == "force") v.m.h.force = val;  // study M's coarse forcing (Hyper::force)
       else throw std::invalid_argument("variant: unknown key " + key);
     }
   }
@@ -1255,6 +1256,13 @@ void shift_start(const rollout::Model& M, const MeanState& ms, std::vector<float
 }
 
 // --- setmean: a model file with a fitted mean state (study M's candidate files) --------------------------------------------------
+
+// A model file with other constants: "k=v;k=v" (make_variant's keys).
+void step_set(const tools::Args& a) {
+  const Variant v = make_variant(load_or_throw(a.need("model")), "set:" + a.need("values"));
+  if (auto w = rollout::save_model(a.need("out"), v.m); !w) throw std::runtime_error(w.error());
+  std::println("set: {} with {} -> {}", a.need("model"), a.need("values"), a.need("out"));
+}
 
 void step_setmean(const tools::Args& a) {
   rollout::Model m = load_or_throw(a.need("model"));
@@ -1831,8 +1839,9 @@ int main(int argc, char** argv) {
     c.results = a.str("results", "results/experiments/ordered");
     c.threads = a.i("threads", 1);
     const std::string step = a.positional()[0];
-    if (step == "setmean") {
-      step_setmean(a);
+    if (step == "setmean" || step == "set") {
+      if (step == "set") step_set(a);
+      else step_setmean(a);
       return 0;
     }
     const sim::Effect e = effect_of(a.need("effect"));

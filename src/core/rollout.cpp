@@ -22,8 +22,9 @@ constexpr std::uint32_t kVersion = 6;  // 2 added DetailSpec::grow (version 1 fi
                                        // soften (study D2; written only when either differs from its default; the
                                        // start storage fields are then always present, 16 meaning fp16); 5
                                        // Hyper::advection and DetailSpec::passes (study L; written only when either
-                                       // is not at its default, after the version 4 fields); 6 Model::mean (study M;
-                                       // written only when there is one, after the version 5 fields)
+                                       // is not at its default, after the version 4 fields); 6 Model::mean and
+                                       // Hyper::force (study M; written only when either is set, after the version 5
+                                       // fields)
 
 float round_f16(float v) { return static_cast<float>(static_cast<std::float16_t>(v)); }
 
@@ -266,8 +267,9 @@ std::expected<void, std::string> save_model(std::ostream& o, const Model& m) {
   // Files keep the oldest layout that holds them: 2 without quantised starts, 3 with, 4 with study D2's constants, 5
   // with study L's advection or passes.
   const bool study_l = h.advection != 0 || d.passes != 1;
-  const bool study_m = !m.mean.empty();
-  if (study_m && (m.mean.block < 1 || h.res % m.mean.block != 0 || h.res / m.mean.block < 2 || h.n_controls != 3 ||
+  const bool study_m = !m.mean.empty() || h.force != 0.f;
+  if (!(h.force >= 0.f && h.force <= 16.f)) return std::unexpected("rollout: force must be in [0, 16]");
+  if (!m.mean.empty() && (m.mean.block < 1 || h.res % m.mean.block != 0 || h.res / m.mean.block < 2 || h.n_controls != 3 ||
                   m.mean.beta.size() != static_cast<std::size_t>(kMeanFeatures) * sz(h.res / m.mean.block) * sz(h.res / m.mean.block) * kPhys)) {
     return std::unexpected("rollout: the mean state does not fit the model");
   }
@@ -306,6 +308,7 @@ std::expected<void, std::string> save_model(std::ostream& o, const Model& m) {
   if (version >= 6) {
     bin::put(o, static_cast<std::int32_t>(m.mean.block));
     put_f16(o, m.mean.beta);
+    bin::put(o, h.force);
   }
   for (const auto* a : {&m.scale, &m.lo, &m.hi}) bin::put_array(o, std::span<const float>(*a));
   put_f16(o, m.step_w);
@@ -406,10 +409,13 @@ std::expected<Model, std::string> load_model(std::istream& i) {
   }
   if (*version >= 6) {
     auto block = bin::get<std::int32_t>(i);
-    if (!block || *block < 1 || h.res % *block != 0 || h.res / *block < 2 || h.n_controls != 3) return std::unexpected("rollout: bad mean state");
+    if (!block || *block < 0 || (*block > 0 && (h.res % *block != 0 || h.res / *block < 2 || h.n_controls != 3))) return std::unexpected("rollout: bad mean state");
     m.mean.block = *block;
-    m.mean.beta.resize(static_cast<std::size_t>(kMeanFeatures) * sz(h.res / *block) * sz(h.res / *block) * kPhys);
+    m.mean.beta.resize(*block > 0 ? static_cast<std::size_t>(kMeanFeatures) * sz(h.res / *block) * sz(h.res / *block) * kPhys : 0);
     if (auto r = get_f16(i, m.mean.beta); !r) return std::unexpected(r.error());
+    auto force = bin::get<float>(i);
+    if (!force || !(*force >= 0.f && *force <= 16.f)) return std::unexpected("rollout: bad force");
+    h.force = *force;
   }
   if (!(d.swirl_scale > 0.f) || !(d.edge1 > d.edge0)) return std::unexpected("rollout: bad detail spec");
   for (auto* a : {&m.scale, &m.lo, &m.hi}) {
@@ -596,6 +602,22 @@ void conv3_int8(int R, const float* x, int ci, const float* W, const float* b, c
 
 }  // namespace
 
+void coarse_force(const Model& m, std::span<const float> noise, std::span<const float> cond, std::span<float> state) {
+  const int R = m.h.res, C = m.h.channels();
+  const float turb = m.h.n_controls >= 3 ? cond[2] : 0.5f;
+  const float a = m.h.force * (1.f + 6.f * turb) * 0.25f;
+  const auto psi = [&](int x, int y) { return noise[(sz(std::clamp(y, 0, R - 1)) * sz(R) + sz(std::clamp(x, 0, R - 1))) * kNoise]; };
+  for (int y = 0; y < R; ++y) {
+    for (int x = 0; x < R; ++x) {
+      float* c = state.data() + (sz(y) * sz(R) + sz(x)) * sz(C);
+      const float mat = std::min(1.f, 2.f * (std::max(0.f, c[2]) + std::max(0.f, c[3])));
+      if (mat <= 0.f) continue;
+      c[0] += a * mat * 0.5f * (psi(x, y + 1) - psi(x, y - 1));
+      c[1] -= a * mat * 0.5f * (psi(x + 1, y) - psi(x - 1, y));
+    }
+  }
+}
+
 void coarse_step(const Model& m, std::span<const float> in, std::span<const float> noise, std::span<const float> cond,
                  std::span<float> pressure, std::span<float> out, std::span<float> flow, Int8 q) {
   const Hyper& h = m.h;
@@ -659,6 +681,7 @@ void coarse_step(const Model& m, std::span<const float> in, std::span<const floa
     for (int k = 0; k < kPhys; ++k) mid[sz(i) * sz(C) + sz(k)] = in[sz(i) * sz(C) + sz(k)] + m.scale[sz(k)] * o[k];
     for (int k = kPhys; k < C; ++k) mid[sz(i) * sz(C) + sz(k)] = std::tanh(in[sz(i) * sz(C) + sz(k)] + o[k]);
   }
+  if (h.force > 0.f) coarse_force(m, noise, cond, mid);  // study M: the coarse state's random part
   // Pressure projection: divergence (velocity replicated at the edges) plus the learned source, warm-started Jacobi
   // with p = 0 outside, then the pressure gradient is subtracted.
   const auto U = [&](int x, int y, int c) { return mid[(sz(std::clamp(y, 0, R - 1)) * sz(R) + sz(std::clamp(x, 0, R - 1))) * sz(C) + sz(c)]; };

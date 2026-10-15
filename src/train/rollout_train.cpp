@@ -1136,6 +1136,7 @@ int thread_count(int requested) {
 
 StepperResult train_stepper(Model& m, std::span<const Run> runs, const StepperOptions& o) {
   if (runs.empty()) throw std::invalid_argument("rollout: no runs");
+  if (m.h.force != 0.f) throw std::invalid_argument("rollout: the trainer does not model Hyper::force (study M)");
   const Hyper& h = m.h;
   const std::size_t per = sz(h.res) * sz(h.res) * kPhys;
   for (const Run& r : runs) {

@@ -1019,7 +1019,7 @@ TEST(Rollout, StudyMMeanStateRoundTripsInVersion6) {
   std::stringstream ss;
   ASSERT_TRUE(save_model(ss, q));
   EXPECT_EQ(ss.str()[8], 6);
-  EXPECT_EQ(ss.str().size(), old_ss.str().size() + 8 + 8 + 8 + 4 + 2 * q.mean.beta.size());  // the version 3, 4, 5 and 6 fields
+  EXPECT_EQ(ss.str().size(), old_ss.str().size() + 8 + 8 + 8 + 4 + 2 * q.mean.beta.size() + 4);  // the version 3, 4, 5 and 6 fields
   auto back = load_model(ss);
   ASSERT_TRUE(back) << back.error();
   EXPECT_EQ(back->mean.block, 2);
@@ -1077,6 +1077,52 @@ TEST(Rollout, StudyMMeanStateMovesStartsToTheControls) {
   for (int i = 0; i < 16 * 16; ++i) {
     for (int c = 0; c < kPhys; ++c) EXPECT_EQ(s.coarse[static_cast<std::size_t>(i * m.h.channels() + c)], out[static_cast<std::size_t>(i * kPhys + c)]);
   }
+}
+
+TEST(Rollout, StudyMForceRoundTripsAndStirsWhereThereIsMaterial) {
+  // Hyper::force alone also needs version 6; the forcing adds the curl of the noise's stream function to the velocity
+  // where there is heat or soot and nowhere else, scaled with turbulence.
+  Model m = runtime_model(16);
+  m.h.force = 0.05f;
+  std::stringstream ss;
+  ASSERT_TRUE(save_model(ss, m));
+  EXPECT_EQ(ss.str()[8], 6);
+  auto back = load_model(ss);
+  ASSERT_TRUE(back) << back.error();
+  EXPECT_EQ(back->h.force, 0.05f);
+  EXPECT_TRUE(back->mean.empty());
+  Model bad = m;
+  bad.h.force = -1.f;
+  std::stringstream bs;
+  EXPECT_FALSE(save_model(bs, bad));
+  const int R = 16, C = m.h.channels();
+  std::vector<float> noise(static_cast<std::size_t>(R) * R * kNoise);
+  coarse_noise(m, 7, 1.f, noise);
+  std::vector<float> state(static_cast<std::size_t>(R) * R * static_cast<std::size_t>(C), 0.f);
+  for (int i = 0; i < R * R / 2; ++i) state[static_cast<std::size_t>(i * C + 2)] = 0.6f;  // heat in the lower half only
+  std::vector<float> lo_t(3), hi_t(3);
+  condition(m, std::vector<float>{0.5f, 0.5f, 0.1f}, 1.f, lo_t);
+  condition(m, std::vector<float>{0.5f, 0.5f, 0.9f}, 1.f, hi_t);
+  auto a = state, b = state;
+  coarse_force(m, noise, lo_t, a);
+  coarse_force(m, noise, hi_t, b);
+  double moved = 0, ma = 0, mb = 0;
+  for (int i = 0; i < R * R; ++i) {
+    for (int c = 0; c < 2; ++c) {
+      const float da = a[static_cast<std::size_t>(i * C + c)], db = b[static_cast<std::size_t>(i * C + c)];
+      if (i >= R * R / 2) {
+        EXPECT_EQ(da, 0.f);
+        EXPECT_EQ(db, 0.f);
+      } else {
+        moved += da != 0.f;
+        ma += std::abs(da);
+        mb += std::abs(db);
+      }
+    }
+    EXPECT_EQ(a[static_cast<std::size_t>(i * C + 2)], state[static_cast<std::size_t>(i * C + 2)]);
+  }
+  EXPECT_GT(moved, R * R / 2);
+  EXPECT_NEAR(mb / ma, (1. + 6. * 0.9) / (1. + 6. * 0.1), 1e-3);
 }
 
 TEST(RolloutRuntime, InfoAndControls) {
@@ -1264,6 +1310,45 @@ TEST(RolloutRuntime, MatchesTheReferenceWithStudyMsMeanState) {
   plain.mean = {};
   EXPECT_NE(reference(m, 1, 64, 4), reference(plain, 1, 64, 4));
   EXPECT_NE(reference(m, 0, 64, 4), reference(plain, 0, 64, 4));
+}
+
+TEST(RolloutRuntime, MatchesTheReferenceWithStudyMsForce) {
+  // The coarse stochastic forcing (Hyper::force) with a mean state, in the runtime as in the reference, on every ISA.
+  Model m = runtime_model();
+  m.h.force = 0.2f;
+  add_mean_state(m, 2, 8);
+  quantise_like_storage(m);
+  Fx fx(m);
+  for (const nvfx_isa isa : {NVFX_ISA_BASELINE, NVFX_ISA_AVX2, NVFX_ISA_AVX512}) {
+    if (nvfx_set_isa(isa) != NVFX_OK) continue;
+    for (const int start_index : {0, 1}) {
+      const int size = 64;
+      nvfx_instance* in = nullptr;
+      ASSERT_EQ(nvfx_instance_create(fx.e, size, &in), NVFX_OK);
+      ASSERT_EQ(nvfx_instance_set_precision(in, NVFX_PRECISION_FLOAT), NVFX_OK);
+      nvfx_instance_set_controls(in, m.starts[static_cast<std::size_t>(start_index)].controls.data(), 3);
+      ASSERT_EQ(nvfx_instance_set_variation(in, start_index), NVFX_OK);
+      std::vector<std::uint8_t> rt(static_cast<std::size_t>(size) * size * 4);
+      for (const int frames : {4, 12}) {
+        ASSERT_EQ(nvfx_render(in, frames / 30.0, rt.data(), static_cast<std::size_t>(size) * 4), NVFX_OK);
+        const auto ref = reference_frame(m, start_index, size, frames);
+        int worst = 0;
+        std::size_t off = 0;
+        for (std::size_t i = 0; i < ref.size(); ++i) {
+          const int d = std::abs(int(ref[i]) - int(rt[i]));
+          worst = std::max(worst, d);
+          off += d > 1;
+        }
+        EXPECT_LE(worst, 3) << "isa " << isa << " start " << start_index << " frame " << frames;
+        EXPECT_LE(off, ref.size() / 100) << "isa " << isa << " start " << start_index << " frame " << frames;
+      }
+      nvfx_instance_free(in);
+    }
+  }
+  nvfx_set_isa(NVFX_ISA_AUTO);
+  Model calm = m;
+  calm.h.force = 0.f;
+  EXPECT_NE(reference_frame(m, 1, 64, 12), reference_frame(calm, 1, 64, 12));
 }
 
 TEST(RolloutRuntime, ShardsMakeEveryFrameAFunctionOfTime) {

@@ -102,6 +102,14 @@ struct Hyper {
   // corrected by its round trip and clamped to the range of the forward sample's four corners (as the simulation advects
   // its scalars): far less numerical diffusion where the flow moves a cell or more a frame (a fast swirl).
   int advection = 0;
+  // Study M (docs/REPORT.md §14; file version 6, written only when it or Model::mean is set): the coarse state's random
+  // part. Trained for squared error on noisy inputs, the stepper damps its own fluctuations: played from a start point at
+  // its own controls it moves about 0.8 as much as the simulation. With force > 0 each step adds the simulation's own
+  // stochastic forcing at the coarse level before the projection: the curl of the curl-noise input (the stream function
+  // the stepper already sees, with the run's seed, scale and rate) by central differences over cells, times force,
+  // (1 + 6 turbulence) / 4 (the simulation's curl force grows about so with turbulence) and min(1, 2 (heat + soot)) (where
+  // there is material, as the simulation's), in coarse cells per frame.
+  float force = 0.f;
 
   int channels() const { return kPhys + memory; }
   int inputs() const { return channels() + kNoise + kCoords; }
@@ -237,6 +245,9 @@ void render(const Model& m, const State& s, std::span<float> rgba);
 // Coarse: in (res*res*channels), pressure in/out, out (res*res*channels), flow (res*res*2).
 void coarse_step(const Model& m, std::span<const float> in, std::span<const float> noise, std::span<const float> cond,
                  std::span<float> pressure, std::span<float> out, std::span<float> flow, Int8 q = Int8::off);
+// Study M (Hyper::force): the coarse stochastic forcing on a [cell][channels] state (velocity in channels 0 and 1) from
+// the step's noise inputs and condition; coarse_step applies it to the updated state before the projection.
+void coarse_force(const Model& m, std::span<const float> noise, std::span<const float> cond, std::span<float> state);
 // Study L's coarse advection (Hyper::advection = 1): MacCormack on a [cell][C] state S (velocity in channels 0 and 1, coarse
 // cells per frame), clamped to the forward sample's corners; out has S's size. The physical range is applied after it.
 void advect_maccormack(std::span<const float> S, int R, int C, std::span<float> out);
