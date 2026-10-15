@@ -9,7 +9,8 @@ held-out test, run once, it **follows a real run better than running the simulat
 detail** (at 1 s: temperature +1.08 dB [+0.74, +1.39], picture from four cameras +2.20 dB [+1.09, +3.12]) **but looks
 worse when played on**, in how much it moves (|ln motion ratio| +0.229 [+0.063, +0.402]) and how much it covers
 (+0.0049 [+0.0006, +0.0116]); so by the rule it does not beat the cheap simulation outright. Holding the first frame
-still beats it after a second. In a strong wind, below the test's settings, it runs away (§11). A step costs about
+still beats it after a second. When the wind blows towards -x (0.3 or below) it runs away (§11), which is most of
+what it does worse. A step costs about
 70 ms and a 256 x 256 picture about 50 ms on one busy core (provisional), most of it the detail layer. Smoke was
 trained as a demo only (§10), not validated or tested.
 
@@ -243,7 +244,8 @@ with 2 real runs and 2 plays each pooled. Means, and differences with 95% interv
   ac94e05b189d17a8673044799a18e3494bb6347d438cf76d80115b9e182443e6) and is `models/chosen.nvfx3` in the data root.
 - **The rule chose the candidate that plays worse.** B (stage 3's activity loss) plays much more like the simulation:
   its spectrum distance is less than half A's, its motion 0.83 of the real runs' where A's is 1.73, and its mean picture
-  4.9 dB closer. A moves too much and spreads too wide when it plays on. The rule looked only at tracking at 1 s, where
+  4.9 dB closer. A moves too much and spreads too wide when it plays on; the per-setting rows (added to the comparison
+  tables after the test, for the write-up) put all of that at the two lowest winds, where A runs away (§11). The rule looked only at tracking at 1 s, where
   A leads by 0.29 dB with an interval that just clears zero. Choosing on tracking was a poor rule for a model that will
   mostly be played endlessly; it stands, and the test runs A.
 - **Against the baseline on validation**, both candidates follow a real run better than the coarse simulation at every
@@ -286,8 +288,9 @@ pooled per setting. Means, and the chosen model minus the coarse simulation with
 3. **The verdict: the learned 3D fire follows real runs better than running the cheap simulation, but looks worse in
    how much it moves (|ln motion ratio|) and in how much of the picture it covers (the coverage distance).** On
    average over the settings its motion is right (a ratio of 1.06 against the coarse simulation's 1.07), but it is off
-   in both directions from setting to setting (the per-setting rows in `compare_test_learned_vs_coarse.md`), where the
-   coarse simulation is off by less.
+   in both directions from setting to setting, where the coarse simulation is off by less: at the lowest wind it runs
+   away and moves 2.4 times as much as the real runs, at the others it is calmer than they are (§11 has the
+   per-setting rows).
 
 Beside the rule (not judged):
 - **Holding the first frame beats the learned model after a second**, as on validation: in temperature at 1 s by
@@ -296,8 +299,8 @@ Beside the rule (not judged):
   picture). At this grid a held-out fire changes so little in a second or two, against how fast the learned rollout's
   errors grow, that not moving at all scores better. Holding the first frame is not an effect (it does not move);
   it marks how far the learned rollout is from following a run.
-- **The floor** (other real runs at the same setting against the real runs) is far below both methods on every endless
-  statistic: the 3D spectrum distance 0.034 against 0.451, the mean picture 42.5 dB against 27.2. Neither the learned
+- **The floor** (other real runs at the same setting against the real runs) is far better than both methods on every
+  endless statistic: the 3D spectrum distance 0.034 against 0.451, the mean picture 42.5 dB against 27.2. Neither the learned
   model nor the coarse simulation plays like the 64 x 96 x 64 simulation.
 - Validation's ordering held: the learned model leads the coarse simulation in tracking by about the same margins
   (picture at 1 s: +2.60 on validation, +2.20 on the test), and on the test it also wins the spectrum and the mean
@@ -371,11 +374,13 @@ light, colour and smoke are physics-based pictures of the fields, not learned.
   hot spots where the simulation's is one orange tongue.
 - **`3d_wind`** (12 s): the side (left) and the top (right) at once, controls (0.7, *wind*, 0.5), seed 9,900,002,
   while the wind sweeps from none (0.5) to full towards -x (0) by 4.8 s, to full towards +x (1) by 9 s and back to none.
-  The plume and the smoke follow the wind with a lag of about a second (from the side it leans, from above the smoke
-  trails downwind). **From 5 s, after the wind has blown hard towards -x, a second fire grows on the floor at the box's
+  The plume follows the control slowly: as the wind drops to full towards -x it barely turns (from above, the smoke
+  still trails a little towards +x, as it did at the start), though held at a wind of 0.05 the model does lean towards
+  -x as the simulation does; after the 8 s shard change, which starts from a stored state near the controls of that
+  moment, it leans hard towards +x in the full +x wind and straightens as the wind falls back. **From 5 s, after the wind has blown hard towards -x, a second fire grows on the floor at the box's
   upwind edge and fills a corner of the box with a bright mass by 7.5 s**, until the shard change at 8 s clears it: the
-  runaway of §11. A second render with the next seed (9,900,003) did the same, and so does a constant wind of 0.05, so
-  the planned render is kept, as it is.
+  runaway of §11. A second render with the next seed (9,900,003) did the same, and so do constant winds of 0.05 and
+  0.25, so the planned render is kept, as it is.
 
 ## 11. Limits
 
@@ -392,16 +397,27 @@ light, colour and smoke are physics-based pictures of the fields, not learned.
   chemiluminescent base (a soot-and-temperature model has none), one exposure for every picture.
 - **The measures see the fields at 64 x 96 x 64 and pictures at 128 x 128 from four fixed cameras**; the 3D spectrum
   covers the lowest 64 cells of the box only.
-- **The chosen model runs away in a strong wind.** At a wind of 0.05 (blowing hard towards -x) a second fire starts on
-  the floor at the box's upwind edge after 2 to 3 s and grows into a bright mass that fills the box by 5 to 6 s, until
-  the 8 s shard change clears it ([figures/n_wind_runaway.png](figures/n_wind_runaway.png): constant controls 0.7, 0.05,
-  0.5, seed 9,900,004, at 2, 3.5, 5 and 6.5 s). The wind video shows it too, on two seeds (§10). The most likely cause
-  is the coarse advection: it samples clamped to the grid, so at an edge where the flow comes in, the edge cell's heat
-  and soot are carried inwards and kept at the edge every frame; whatever the stepper adds there feeds itself, and only
-  the range clamp bounds it. The simulator's edge has no heat to keep; the stepper's, under a strong wind and at zero
-  padding, does. Training windows (at most 24 frames of burn-in and 12 of loss) are too short to see a slow build-up.
-  None of the test's settings has a wind below 0.25, so the test did not meet it; validation's (0.50, 0.15, 0.75) may
-  have, which would explain much of A's poor coverage there (§6).
+- **The chosen model runs away when the wind blows towards -x** (a wind control of 0.3 or below). A second fire
+  starts on the floor at the box's upwind edge after 2 to 5 s and grows into a bright mass that can fill the box, until
+  the next shard change (8 s) clears it ([figures/n_wind_runaway.png](figures/n_wind_runaway.png): constant controls
+  0.7, 0.05, 0.5, seed 9,900,004, at 2, 3.5, 5 and 6.5 s). It was seen at winds of 0.05 and 0.25 in renders, and the
+  endless statistics show it at 0.15, 0.25 and 0.30 (the per-setting rows below); not at 0.4 to 0.8. The wind video
+  shows it (§10). The most likely cause is the coarse advection: it samples clamped to the grid, so at an edge where
+  the flow comes in, the edge cell's heat and soot are carried inwards and kept at the edge every frame; whatever the
+  stepper adds there feeds itself, and only the range clamp bounds it. The simulator's edge has no heat to keep; the
+  stepper's, under a strong wind and at zero padding, does. Training windows (at most 24 frames of burn-in and 12 of
+  loss) are too short to see a slow build-up. Why only towards -x is not known.
+- **It is most of what the rule found worse.** Per setting (`compare_test_learned_vs_coarse.md`; context, not judged):
+  at the test's lowest wind, (0.45, 0.25, 0.30), the learned fire moves 2.4 times as much as the real runs (the coarse
+  simulation 1.44 times), its coverage distance is 0.022 (coarse 0.001) and its mean picture 2.9 dB worse than the
+  coarse simulation's. At the five other settings it is calmer than the real runs (motion ratios 0.53 to 0.82, and
+  1.15) and better than the coarse simulation in the 3D spectrum, the emission and the mean picture at every one; its
+  coverage distance is still larger at four of the five, by less (0.0013 to 0.0051). On validation the same holds at
+  winds 0.30 and 0.15 (motion 3.1 and 2.8 times the real runs'), which is why A played so much worse than B there;
+  at the other two validation settings A and B are alike.
+- **Controls changed live are followed slowly.** Training runs held their controls fixed; in the wind video the plume
+  barely turns within three seconds of the wind dropping to full towards -x, and much of its later lean comes from the
+  shard change's fresh start (§10). Within a shard a control change acts only through the stepper's FiLM.
 - **The rule chose the candidate that plays worse** (§6): stage 3's model moves and spreads more like the simulation
   when it plays on, but tracked 0.29 dB worse at 1 s.
 - **Cost is provisional**: measured on a shared 4-core machine at a load of 8 to 14, where nice-15 jobs get under a
@@ -446,7 +462,7 @@ The plan's stage 1 asked three questions ([TODO.md](../TODO.md)). The answers, f
 - **Does a learned 3D rollout work at all?** Yes, as machinery: the 3D solver, the volume renderer, the model, its
   trainer with checked gradients, a resumable deterministic training run, the runtime and its C API all work end to
   end on a CPU, and the model follows a held-out fire for 2 s from any of four cameras. As an effect it is a start:
-  small blocky flames, too much motion at some settings, and a runaway in a strong wind.
+  small blocky flames, and a runaway when the wind blows towards -x.
 - **Does it beat simply running a cheap 3D simulation?** At following a real run, clearly (+1.1 dB in temperature and
   +2.2 dB in the picture at 1 s, every horizon better); at playing on, not by the rule (worse in motion and coverage,
   better in the spectrum and the mean picture). And holding the first frame still beats it after a second, so the

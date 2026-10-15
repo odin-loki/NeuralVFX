@@ -599,5 +599,5 @@ busy core, so a volume suits one hero effect, or baking; an engine draws the tex
 
 **What it is not.** No int8 path, no SIMD beyond an AVX2 convolution, no scenes, library, manager or Godot node for
 volumes yet; one trained effect. Its teacher is our own 3D solver, not a validated fire code. The trained fire runs
-away in a strong wind (a wind control of 0.05: a second fire grows at the box's upwind edge until the next shard;
-STUDY_3D.md §11); the test's settings, where it was measured, have winds of 0.25 to 0.8.
+away when the wind blows towards -x (a wind control of 0.3 or below: a second fire grows at the box's upwind edge
+until the next shard; STUDY_3D.md §11); keep the wind control between 0.4 and 0.8, where it was seen to behave.

@@ -2339,10 +2339,14 @@ layer and 15 ms the network's coarse step; a picture 50 ms at 256 x 256 and 190 
 full simulation's frame is 162 ms; the baseline costs about as much as the learned model. Threads could not be measured
 on the saturated machine.
 
-**A failure the test did not see.** In a strong wind (0.05, below every test setting's) the chosen model runs away: a
-second fire grows at the box's upwind edge and fills the box within a few seconds, until the next shard clears it. The
-most likely cause is the coarse advection, which samples clamped to the grid, so an inflow edge keeps and feeds the heat
-that reaches it (STUDY_3D.md §11). The wind video shows it.
+**A runaway, and most of what looks worse.** When the wind blows towards -x (a wind control of 0.3 or below) the
+chosen model runs away: a second fire grows at the box's upwind edge and can fill the box within a few seconds, until
+the next shard clears it. The most likely cause is the coarse advection, which samples clamped to the grid, so an inflow
+edge keeps and feeds the heat that reaches it (STUDY_3D.md §11). Per setting (context, not judged), it is most of what
+the test found worse: at the test's lowest wind (0.25) the learned fire moves 2.4 times as much as the real runs and
+covers far more; at the five other settings it is calmer than the real runs and better than the coarse simulation in
+the spectrum, the emission and the mean picture. It is also why the rule's choice, A, played so much worse than B on
+validation (winds 0.30 and 0.15). The wind video shows it.
 
 **Videos** ([videos/README.md](../videos/README.md) §9): the fire walked around, real against learned, and the wind
 swept live, runaway included (and smoke walked around, a demo trained but not tested).

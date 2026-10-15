@@ -26,3 +26,12 @@ Endless statistics against real runs (4 settings, 2 runs pooled per setting; low
 | coverage distance | 0.0262 | 0.0054 | +0.0208 [-0.0000, +0.0417] (tie) |
 | emission distance | 0.0270 | 0.0049 | +0.0221 [+0.0002, +0.0439] (worse) |
 | mean picture PSNR (dB) | 22.62 | 27.50 | -4.87 [-10.09, +0.34] (tie) |
+
+Per setting (A / B):
+
+| setting (intensity, wind, turbulence) | motion ratio | coverage distance | emission distance | 3D spectrum distance | mean picture PSNR (dB) |
+|---|---|---|---|---|---|
+| 0.35, 0.30, 0.40 | 3.08 / 1.49 | 0.0363 / 0.0042 | 0.0410 / 0.0078 | 1.369 / 0.564 | 18.38 / 26.77 |
+| 0.65, 0.70, 0.60 | 0.59 / 0.66 | 0.0038 / 0.0037 | 0.0034 / 0.0033 | 0.283 / 0.304 | 27.52 / 26.74 |
+| 0.50, 0.15, 0.75 | 2.83 / 0.75 | 0.0543 / 0.0031 | 0.0590 / 0.0044 | 1.417 / 0.268 | 17.30 / 29.09 |
+| 0.80, 0.55, 0.25 | 0.42 / 0.42 | 0.0105 / 0.0106 | 0.0044 / 0.0040 | 0.298 / 0.295 | 27.30 / 27.39 |
