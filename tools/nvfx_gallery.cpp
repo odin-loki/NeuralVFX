@@ -4,6 +4,7 @@
 //
 //   nvfx_gallery --library DIR --models DIR [--sheet sheet.png] [--video walk.mp4 [--clip S]] [--keyframes DIR]
 //                [--verify frozen.csv] [--only a,b,c] [--threads 2] [--cell 320x240] [--columns 6] [--precision float|int8]
+//                [--isa avx2|avx512|baseline]
 //   nvfx_gallery --library DIR [--models DIR] --check [--require-models]
 //   nvfx_gallery --library DIR --list [--markdown]
 //   nvfx_gallery --library DIR --print NAME            the stage script of an effect alone (as the gallery plays it)
@@ -20,6 +21,9 @@
 // and forth after that. The keyframes are PNG files named after the effects, with their rows for a frozen CSV in
 // DIR/keyframes.csv; --verify compares their SHA-256 with the rows
 // "library_keyframe,NAME,file,bytes,sha256" of a CSV (exit 1 on a difference, 77 when the effects' files are missing).
+// --isa forces the ISA of every stage (nvfx_set_isa; any mode): the float default is the AVX-512 build where the CPU
+// has it (docs/REPORT.md §13.10), whose floats may round differently from AVX2's, so the frozen keyframes name the
+// build they were frozen on (--isa avx2; with --verify, exit 77 on a CPU without it).
 //
 // --check opens the catalogue (every entry parsed and checked as a stage of its own) and plays every entry whose
 // learned effects are in --models (procedural ones always): two instances, parameters set to their ends, one moved,
@@ -86,7 +90,7 @@ int g_precision = NVFX_PRECISION_DEFAULT;
 struct Args {
   fs::path library, models, sheet, video, keyframes, verify, png, starts, pack;
   std::vector<std::string> only;
-  std::string print;
+  std::string print, isa;
   int threads = 2, columns = 6, cell_w = 320, cell_h = 240, frames = 45, shot_w = 0, shot_h = 0;
   float ground = 0.f, clip = 0.f;
   std::vector<Spawn> spawns;
@@ -127,7 +131,10 @@ Args parse(int argc, char** argv) {
     else if (k == "--print") a.print = next();
     else if (k == "--starts") a.starts = next();
     else if (k == "--threads") a.threads = std::stoi(next());
-    else if (k == "--precision") {
+    else if (k == "--isa") {
+      a.isa = next();
+      if (a.isa != "avx2" && a.isa != "avx512" && a.isa != "baseline") throw std::invalid_argument("--isa avx2, avx512 or baseline");
+    } else if (k == "--precision") {
       const std::string p = next();
       if (p != "float" && p != "int8") throw std::invalid_argument("--precision float or int8");
       g_precision = p == "int8" ? NVFX_PRECISION_INT8 : NVFX_PRECISION_FLOAT;
@@ -711,6 +718,16 @@ int main(int argc, char** argv) try {
   if (!A.pack.empty() && !A.verify.empty() && !fs::exists(A.pack)) {
     std::println("nvfx_gallery: {} is not there: skipped", A.pack.string());
     return 77;
+  }
+  if (!A.isa.empty()) {
+    const nvfx_isa want = A.isa == "avx512" ? NVFX_ISA_AVX512 : A.isa == "avx2" ? NVFX_ISA_AVX2 : NVFX_ISA_BASELINE;
+    if (nvfx_set_isa(want) != NVFX_OK) {
+      if (!A.verify.empty()) {  // keyframes frozen for an ISA this CPU lacks: skipped, not failed
+        std::println("nvfx_gallery: this CPU cannot run --isa {}: skipped", A.isa);
+        return 77;
+      }
+      die("this CPU cannot run --isa " + A.isa);
+    }
   }
   nvfx_library* lib = open(A);
   int status = 0;

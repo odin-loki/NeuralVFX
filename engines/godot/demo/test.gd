@@ -27,6 +27,7 @@ func _initialize() -> void:
 	scene.effects_dir = args.models
 	scene.threads = 2
 	scene.precision = 1  # float: the reference is the float path's (rollout effects run at int8 by default, docs/REPORT.md §13)
+	# no ISA is forced here or for the reference (test.sh): both take the runtime's float build for this CPU (§13.10)
 	scene.playing = false  # the frames are stepped here, not by the main loop
 	var drawn := [0]
 	scene.frame_drawn.connect(func(_frame: int) -> void: drawn[0] += 1)

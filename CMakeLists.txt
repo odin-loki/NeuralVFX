@@ -440,8 +440,11 @@ if(NEURALFX_BUILD_TESTS)
     set_tests_properties(neuralfx.VolumeHostExample PROPERTIES LABELS neuralfx)
     # The fireball as a script reproduces the hand-written scene's frozen keyframes to the bit (about a minute on 2
     # threads). Needs the study D effects (outside git): skipped when they are not in NEURALFX_MODELS_D. The frozen
-    # keyframes here and below are the float path's (--precision float); rollout effects run at int8 by default since
-    # study K (docs/REPORT.md §13), whose own frozen keyframes are checked by ScriptedFireballInt8Frozen.
+    # keyframes here and below are the float path's on the AVX2 build (--precision float --isa avx2; skipped on a CPU
+    # without AVX2): rollout effects run at int8 by default since study K (docs/REPORT.md §13), whose own frozen
+    # keyframes are checked by ScriptedFireballInt8Frozen, and float takes the AVX-512 build where the CPU has it
+    # (§13.10), whose floats may round differently (they measured the same), so these name the build they were frozen
+    # on.
     if(DEFINED ENV{NEURALVFX_DATA})
       set(_nvfx_data "$ENV{NEURALVFX_DATA}")
     else()
@@ -450,14 +453,14 @@ if(NEURALFX_BUILD_TESTS)
     set(NEURALFX_MODELS_D "${_nvfx_data}/experiments/models/d" CACHE PATH "The study D rollout effects (fire, smoke, explosion .nvfx)")
     add_test(NAME neuralfx.ScriptedFireballBitExact
              COMMAND nvfx_scene_script --script ${CMAKE_CURRENT_SOURCE_DIR}/examples/scenes/fireball.nvfxs --models ${NEURALFX_MODELS_D}
-                     --keyframes ${CMAKE_CURRENT_BINARY_DIR}/fireball_script_keyframes --no-video --threads 2 --precision float
+                     --keyframes ${CMAKE_CURRENT_BINARY_DIR}/fireball_script_keyframes --no-video --threads 2 --precision float --isa avx2
                      --verify ${CMAKE_CURRENT_SOURCE_DIR}/results/experiments/v1_frozen.csv --profile ${CMAKE_CURRENT_BINARY_DIR}/fireball_script_profile.csv)
     set_tests_properties(neuralfx.ScriptedFireballBitExact PROPERTIES LABELS "neuralfx;data" SKIP_RETURN_CODE 77 TIMEOUT 1200
                          FIXTURES_SETUP fireball_profile)
     # The same fireball through the scene C API of the shared library, from C (nvfx_c_host --scene): every one of its 270
     # frames has the RGB checksum the script runner's profile above has.
     add_test(NAME neuralfx.SceneApiFireballBitExact
-             COMMAND nvfx_c_host --scene ${CMAKE_CURRENT_SOURCE_DIR}/examples/scenes/fireball.nvfxs --effects ${NEURALFX_MODELS_D} --threads 2 --precision float
+             COMMAND nvfx_c_host --scene ${CMAKE_CURRENT_SOURCE_DIR}/examples/scenes/fireball.nvfxs --effects ${NEURALFX_MODELS_D} --threads 2 --precision float --isa avx2
                      --expect ${CMAKE_CURRENT_BINARY_DIR}/fireball_script_profile.csv)
     set_tests_properties(neuralfx.SceneApiFireballBitExact PROPERTIES LABELS "neuralfx;data" SKIP_RETURN_CODE 77 TIMEOUT 1200
                          FIXTURES_REQUIRED fireball_profile)
@@ -467,7 +470,7 @@ if(NEURALFX_BUILD_TESTS)
     set(NEURALFX_MODELS_FX "${_nvfx_data}/fx/models/scene" CACHE PATH "steam.nvfx, magic.nvfx, study M's fire.nvfx and study M3's explosion.nvfx")
     add_test(NAME neuralfx.ScriptedPortalFrozen
              COMMAND nvfx_scene_script --script ${CMAKE_CURRENT_SOURCE_DIR}/examples/scenes/portal.nvfxs --models ${NEURALFX_MODELS_FX}
-                     --keyframes ${CMAKE_CURRENT_BINARY_DIR}/portal_script_keyframes --no-video --threads 2 --precision float
+                     --keyframes ${CMAKE_CURRENT_BINARY_DIR}/portal_script_keyframes --no-video --threads 2 --precision float --isa avx2
                      --verify ${CMAKE_CURRENT_SOURCE_DIR}/results/experiments/fx_frozen.csv)
     set_tests_properties(neuralfx.ScriptedPortalFrozen PROPERTIES LABELS "neuralfx;data" SKIP_RETURN_CODE 77 TIMEOUT 1200)
     # The moor (docs/EFFECTS_ATMOSPHERE.md): fog, dust and cloud with study M's fire, all in NEURALFX_MODELS_ATMOS
@@ -475,7 +478,7 @@ if(NEURALFX_BUILD_TESTS)
     set(NEURALFX_MODELS_ATMOS "${_nvfx_data}/fx_atmos/models/scene" CACHE PATH "fog.nvfx, study M3's dust.nvfx, cloud.nvfx and study M's fire.nvfx")
     add_test(NAME neuralfx.ScriptedMoorFrozen
              COMMAND nvfx_scene_script --script ${CMAKE_CURRENT_SOURCE_DIR}/examples/scenes/moor.nvfxs --models ${NEURALFX_MODELS_ATMOS}
-                     --keyframes ${CMAKE_CURRENT_BINARY_DIR}/moor_script_keyframes --no-video --threads 2 --precision float
+                     --keyframes ${CMAKE_CURRENT_BINARY_DIR}/moor_script_keyframes --no-video --threads 2 --precision float --isa avx2
                      --verify ${CMAKE_CURRENT_SOURCE_DIR}/results/experiments/fx_atmos_frozen.csv)
     set_tests_properties(neuralfx.ScriptedMoorFrozen PROPERTIES LABELS "neuralfx;data" SKIP_RETURN_CODE 77 TIMEOUT 1200)
     foreach(scene fireball firewall campfire portal moor weather)
@@ -500,10 +503,12 @@ if(NEURALFX_BUILD_TESTS)
              COMMAND nvfx_gallery --library ${CMAKE_CURRENT_SOURCE_DIR}/library --models ${NEURALFX_MODELS_LIBRARY}
                      --only campfire,blue_gas_flame,grenade,steam_vent,portal,lightning_strike,ground_fog,dust_impact,flamethrower,plasma_orb,dust_devil,rocket_trail,vehicle_dust_wake,wall_of_flames,distant_mushroom,rocket_launch,ink_cloud,waterfall_drawn,garden_fountain,boulder_splash,rain_shaft_drawn,fountain,rain_shaft
                      --keyframes ${CMAKE_CURRENT_BINARY_DIR}/library_keyframes --verify ${CMAKE_CURRENT_SOURCE_DIR}/results/library/frozen.csv --threads 2
-                     --precision float)
+                     --precision float --isa avx2)
     set_tests_properties(neuralfx.LibraryKeyframesFrozen PROPERTIES LABELS "neuralfx;data" SKIP_RETURN_CODE 77 TIMEOUT 1200)
     # The third round's entries (docs/LIBRARY.md §10) against their SHA-256 in results/library/frozen_round3.csv, float
     # pinned as above: the procedural ones need no data; those that also play learned models are skipped without them.
+    # The procedural ones play no learned model, and the compositor gives the same bits on every ISA, so they need no
+    # --isa (and run on a CPU without AVX2 too).
     add_test(NAME neuralfx.LibraryProceduralKeyframesFrozen
              COMMAND nvfx_gallery --library ${CMAKE_CURRENT_SOURCE_DIR}/library
                      --only hailstorm,aurora,rainbow,meteor_shower,blood_spray,laser_beam,shield_hit,emp_blast,level_up,holy_beam,bullet_impact_metal,pickup_sparkle
@@ -514,14 +519,14 @@ if(NEURALFX_BUILD_TESTS)
              COMMAND nvfx_gallery --library ${CMAKE_CURRENT_SOURCE_DIR}/library --models ${NEURALFX_MODELS_LIBRARY}
                      --only thunderstorm,blizzard,ice_shards,plasma_bolt,bullet_impact_stone
                      --keyframes ${CMAKE_CURRENT_BINARY_DIR}/library_round3_keyframes --verify ${CMAKE_CURRENT_SOURCE_DIR}/results/library/frozen_round3.csv
-                     --threads 2 --precision float)
+                     --threads 2 --precision float --isa avx2)
     set_tests_properties(neuralfx.LibraryRound3KeyframesFrozen PROPERTIES LABELS "neuralfx;data" SKIP_RETURN_CODE 77 TIMEOUT 1200)
     # The falls (docs/EFFECTS_WATER.md): the learned waterfall and rainshaft with the composer's seeded water and the
     # library's cloud (NEURALFX_MODELS_LIBRARY, outside git, with the water models linked in; skipped without them); its
     # keyframes have the SHA-256 recorded in results/experiments/fx_water_frozen.csv.
     add_test(NAME neuralfx.ScriptedFallsFrozen
              COMMAND nvfx_scene_script --script ${CMAKE_CURRENT_SOURCE_DIR}/examples/scenes/falls.nvfxs --models ${NEURALFX_MODELS_LIBRARY}
-                     --keyframes ${CMAKE_CURRENT_BINARY_DIR}/falls_script_keyframes --no-video --threads 2 --precision float
+                     --keyframes ${CMAKE_CURRENT_BINARY_DIR}/falls_script_keyframes --no-video --threads 2 --precision float --isa avx2
                      --verify ${CMAKE_CURRENT_SOURCE_DIR}/results/experiments/fx_water_frozen.csv)
     set_tests_properties(neuralfx.ScriptedFallsFrozen PROPERTIES LABELS "neuralfx;data" SKIP_RETURN_CODE 77 TIMEOUT 1200)
     add_test(NAME neuralfx.SceneScriptChecks.falls COMMAND nvfx_scene_script --script ${CMAKE_CURRENT_SOURCE_DIR}/examples/scenes/falls.nvfxs --check)
@@ -531,7 +536,7 @@ if(NEURALFX_BUILD_TESTS)
     set(NEURALFX_MODELS_ENERGY "${_nvfx_data}/fx_energy/models/scene" CACHE PATH "jet.nvfx, orb.nvfx and vortex.nvfx")
     add_test(NAME neuralfx.ScriptedFireWhirlFrozen
              COMMAND nvfx_scene_script --script ${CMAKE_CURRENT_SOURCE_DIR}/examples/scenes/firewhirl.nvfxs --models ${NEURALFX_MODELS_ENERGY}
-                     --keyframes ${CMAKE_CURRENT_BINARY_DIR}/firewhirl_script_keyframes --no-video --threads 2 --precision float
+                     --keyframes ${CMAKE_CURRENT_BINARY_DIR}/firewhirl_script_keyframes --no-video --threads 2 --precision float --isa avx2
                      --verify ${CMAKE_CURRENT_SOURCE_DIR}/results/experiments/fx_energy_frozen.csv)
     set_tests_properties(neuralfx.ScriptedFireWhirlFrozen PROPERTIES LABELS "neuralfx;data" SKIP_RETURN_CODE 77 TIMEOUT 1200)
     add_test(NAME neuralfx.SceneScriptChecks.firewhirl COMMAND nvfx_scene_script --script ${CMAKE_CURRENT_SOURCE_DIR}/examples/scenes/firewhirl.nvfxs --check)
@@ -541,7 +546,7 @@ if(NEURALFX_BUILD_TESTS)
     set(NEURALFX_MODELS_BLAZE "${_nvfx_data}/fx_blaze/models/scene" CACHE PATH "wildfire.nvfx, coals.nvfx and mushroom.nvfx")
     add_test(NAME neuralfx.ScriptedPrairieFrozen
              COMMAND nvfx_scene_script --script ${CMAKE_CURRENT_SOURCE_DIR}/examples/scenes/prairie.nvfxs --models ${NEURALFX_MODELS_BLAZE}
-                     --keyframes ${CMAKE_CURRENT_BINARY_DIR}/prairie_script_keyframes --no-video --threads 2 --precision float
+                     --keyframes ${CMAKE_CURRENT_BINARY_DIR}/prairie_script_keyframes --no-video --threads 2 --precision float --isa avx2
                      --verify ${CMAKE_CURRENT_SOURCE_DIR}/results/experiments/fx_blaze_frozen.csv)
     set_tests_properties(neuralfx.ScriptedPrairieFrozen PROPERTIES LABELS "neuralfx;data" SKIP_RETURN_CODE 77 TIMEOUT 1200)
     add_test(NAME neuralfx.SceneScriptChecks.prairie COMMAND nvfx_scene_script --script ${CMAKE_CURRENT_SOURCE_DIR}/examples/scenes/prairie.nvfxs --check)
@@ -551,7 +556,7 @@ if(NEURALFX_BUILD_TESTS)
     set(NEURALFX_MODELS_FLOW "${_nvfx_data}/fx_flow/models/scene" CACHE PATH "launch.nvfx, puffs.nvfx and ink.nvfx")
     add_test(NAME neuralfx.ScriptedLiftoffFrozen
              COMMAND nvfx_scene_script --script ${CMAKE_CURRENT_SOURCE_DIR}/examples/scenes/liftoff.nvfxs --models ${NEURALFX_MODELS_FLOW}
-                     --keyframes ${CMAKE_CURRENT_BINARY_DIR}/liftoff_script_keyframes --no-video --threads 2 --precision float
+                     --keyframes ${CMAKE_CURRENT_BINARY_DIR}/liftoff_script_keyframes --no-video --threads 2 --precision float --isa avx2
                      --verify ${CMAKE_CURRENT_SOURCE_DIR}/results/experiments/fx_flow_frozen.csv)
     set_tests_properties(neuralfx.ScriptedLiftoffFrozen PROPERTIES LABELS "neuralfx;data" SKIP_RETURN_CODE 77 TIMEOUT 1200)
     add_test(NAME neuralfx.SceneScriptChecks.liftoff COMMAND nvfx_scene_script --script ${CMAKE_CURRENT_SOURCE_DIR}/examples/scenes/liftoff.nvfxs --check)
@@ -587,7 +592,7 @@ if(NEURALFX_BUILD_TESTS)
              COMMAND nvfx_gallery --pack ${CMAKE_CURRENT_BINARY_DIR}/library.nvfxp
                      --only campfire,blue_gas_flame,grenade,steam_vent,portal,lightning_strike,ground_fog,dust_impact,flamethrower,plasma_orb,dust_devil,wall_of_flames,distant_mushroom,waterfall_drawn,garden_fountain,boulder_splash,rain_shaft_drawn,fountain,rain_shaft
                      --keyframes ${CMAKE_CURRENT_BINARY_DIR}/library_pack_keyframes --verify ${CMAKE_CURRENT_SOURCE_DIR}/results/library/frozen.csv --threads 2
-                     --precision float)
+                     --precision float --isa avx2)
     set_tests_properties(neuralfx.PackLibraryKeyframesFrozen PROPERTIES LABELS "neuralfx;data" SKIP_RETURN_CODE 77 TIMEOUT 1200 FIXTURES_REQUIRED library_pack)
     add_test(NAME neuralfx.PackHostExample COMMAND nvfx_pack_host ${CMAKE_CURRENT_BINARY_DIR}/library.nvfxp --out ${CMAKE_CURRENT_BINARY_DIR}/pack_host_sheet.png --seconds 2)
     set_tests_properties(neuralfx.PackHostExample PROPERTIES LABELS "neuralfx;data" SKIP_RETURN_CODE 77 TIMEOUT 600 FIXTURES_REQUIRED library_pack)

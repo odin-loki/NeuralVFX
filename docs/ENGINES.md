@@ -52,7 +52,7 @@ smoke (colour at most alpha).
 | variation | `nvfx_instance_set_seed`, `nvfx_instance_set_variation` (replay a training clip), `nvfx_instance_set_drift` | learned |
 | playback speed | scale the time you pass to `nvfx_render` | exact |
 | hue and brightness | `nvfx_instance_set_colour` | exact (applied to the output colour) |
-| precision | `nvfx_instance_set_precision`: `NVFX_PRECISION_INT8` (the default for grid frame models and rollout effects) or `NVFX_PRECISION_FLOAT` | frame models: int8 changes a few pixels by a few levels (REPORT.md §7); rollout effects: an int8 run is another run of the same effect, which tracked and played as float does on held-out data (REPORT.md §13, §5 below); float is the reference network |
+| precision | `nvfx_instance_set_precision`: `NVFX_PRECISION_INT8` (the default for grid frame models, and for rollout effects where the CPU has AVX-512 VNNI) or `NVFX_PRECISION_FLOAT` (rollout effects: the default elsewhere; on the AVX-512 build where the CPU has AVX-512, else AVX2, §4 and §5) | frame models: int8 changes a few pixels by a few levels (REPORT.md §7); rollout effects: an int8 run is another run of the same effect, which tracked and played as float does on held-out data (REPORT.md §13, §5 below); float is the reference network (the AVX-512 and AVX2 builds may differ in the last bits; `nvfx_set_isa` forces one) |
 
 Looping effects wrap time; one-shot effects (explosions) hold their last frame after their duration
 (`info.frames / info.fps` seconds).
@@ -90,9 +90,14 @@ tested headless (§8); the Unreal and Unity notes are not built or tested.
 ### Custom engines
 
 `examples/c_host.c` is the whole integration: load, create, set controls, render in the update loop, upload. Build
-the static library with your engine's compiler flags, or link the shared one. The library needs x86-64; it picks
-AVX2 at run time when present and falls back to SSE2 code otherwise (AVX-512 code is included and can be forced
-with `nvfx_set_isa`, but it was not faster on the benchmark machine).
+the static library with your engine's compiler flags, or link the shared one. The library needs x86-64 and picks its
+code at run time. Frame models run the AVX2 code when the CPU has AVX2 and SSE2 code otherwise (int8 models with a
+hidden layer take the AVX-512 code where the CPU has VNNI, REPORT.md §7). Rollout effects (§5) take the AVX-512 code
+where the CPU has AVX-512 (at int8 only with VNNI; at float since 15 October 2026, 0.80 of the AVX2 code's time on a
+quiet machine, REPORT.md §13.10), else AVX2, else SSE2. `nvfx_set_isa` forces one ISA for every instance, scene, stage
+and manager created afterwards. The ISAs' floats may differ in the last bits (SSE2's do; AVX2's and AVX-512's measured
+the same to the bit on every shipped rollout model, REPORT.md §13.10, but the code does not promise it), so forcing one
+gives the same frames on every CPU that has it (lockstep, tests).
 
 ## 5. Rollout effects
 
@@ -136,7 +141,8 @@ is the same; what differs:
   each instance holds two shards' states and one set of work buffers that both shards' steps share
   (`nvfx_instance_scratch_bytes`: about 2.4 MB at 128 x 128, 1.5 MB at 64 x 64; 4.0 and 2.3 MB before they shared it).
 - **Precision** (study K, [REPORT.md](REPORT.md) §13). By default (`NVFX_PRECISION_DEFAULT`, which is
-  `NVFX_PRECISION_INT8` for rollout effects) the stepper's second convolution, two thirds of its multiply-adds, runs in
+  `NVFX_PRECISION_INT8` for rollout effects where the CPU has AVX-512 VNNI) the stepper's second convolution, two
+  thirds of its multiply-adds, runs in
   8-bit integers: 7-bit activations with one scale per channel, 8-bit weights with one per output channel, requantised
   every step; with no ISA forced the instance then takes the AVX-512 build where the CPU has VNNI. The renderer and the
   detail layer stay float. Its frames are not float's: the effect is chaotic, so an int8 run and a float run of the
@@ -144,11 +150,16 @@ is the same; what differs:
   float does (within 0.03 dB at 8 frames, 1 s and 2 s; no interval's lower end below -0.07 dB) and played as
   realistically (the detail spectrum within 0.001, motion within about 1%, the average picture within 0.03 dB) on all
   eleven trained effects. It pays with VNNI: a 128 x 128 frame costs about a tenth less than float on the same build
-  (18% less at 64 px, 4% at 256 px), and the AVX-512 build itself is a fifth faster than the AVX2 build float runs on
-  by default; without VNNI (AVX2 alone) int8 saves 1 to 5%, so there the default is FLOAT (the default is resolved per
-  CPU: int8 where the CPU has AVX-512 VNNI and no other ISA is forced, float elsewhere).
-  `nvfx_instance_set_precision(inst, NVFX_PRECISION_FLOAT)` plays the float network (the reference, on AVX2 by
-  default); a change starts the instance's timeline again. Scenes (`nvfx_scene_desc.precision`), the library's stages
+  (18% less at 64 px, 4% at 256 px), and the AVX-512 build itself is a fifth faster than the AVX2 build; without VNNI
+  (AVX2 alone) int8 saves 1 to 5%, so there the default is FLOAT (the default is resolved per CPU: int8 where the CPU
+  has AVX-512 VNNI and no other ISA is forced, float elsewhere).
+  `nvfx_instance_set_precision(inst, NVFX_PRECISION_FLOAT)` plays the float network (the reference). With no ISA forced
+  float takes the AVX-512 build where the CPU has AVX-512 (VNNI is not needed), else AVX2 (since 15 October 2026; AVX2
+  before): on a quiet machine a float frame there takes 0.80 of its time on AVX2 at 64, 128 and 256 px (REPORT.md
+  §13.10). Its frames were the AVX2 build's to the bit on every shipped model measured, but the builds may round
+  differently (another compiler may contract the multiply-adds differently); `nvfx_set_isa(NVFX_ISA_AVX2)` gives the
+  AVX2 frames on any CPU. A change of precision starts the instance's timeline again. Scenes
+  (`nvfx_scene_desc.precision`), the library's stages
   (`nvfx_stage_desc.precision`) and the effect manager (`nvfx_manager_model_desc.precision`) choose it the same way.
   The orb is the exception: study L's orb failed study K's rule at int8 (REPORT.md §13.9), so the library and the
   scenes play it at float (`precision float` on its `effect` statement); set `NVFX_PRECISION_FLOAT` for orb instances
@@ -412,8 +423,9 @@ between copies (optionally offset in time), pauses what is off screen, shows uni
 proxy simulations when the budget is short, and runs the work on its own threads or the engine's job system, with the
 same pictures on any number of threads and no allocation per frame. At a locked level its frames are `nvfx_render`'s
 to the bit. What it costs and what it looks like at a given budget: MANAGER.md §1 and §7. Each model's simulations
-run at `nvfx_manager_model_desc.precision` (the instances' default: int8 where the CPU has AVX-512 VNNI, float elsewhere; REPORT.md §13); the planner's default costs
-are float's on AVX2, so at int8 a crowd uses less than its budget unless `nvfx_manager_calibrate` measures the machine
+run at `nvfx_manager_model_desc.precision` (the instances' default: int8 where the CPU has AVX-512 VNNI, float elsewhere; REPORT.md §13), on the instances' ISA (§4); the planner's default costs
+are float's on AVX2, so at int8, or at float on the AVX-512 build, a crowd uses less than its budget unless
+`nvfx_manager_calibrate` measures the machine
 (the 4 ms crowd of MANAGER.md §7 took 2.8 instead of 4.1 ms per tick with the same plan, provisional).
 
 ## 11. Lit sprites: the effects alone, for the engine to light

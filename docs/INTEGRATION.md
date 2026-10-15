@@ -213,10 +213,13 @@ measuring. Check the result in play: `get_stats()->jobs_ms` against `planned_ms`
 - **Determinism.** The same calls at the same times give the same pictures, to the bit, on any number of threads and
   whoever runs the jobs: instances, scenes, stages (overlapped or not) and the manager. Across machines, on the same
   instruction set: the AVX2, AVX-512 and baseline code differ in the last bits (`nvfx_set_isa` forces one, for
-  lockstep). The manager's plan depends
-  only on the calls and its cost model: calibration makes it depend on the machine (and its load at that moment);
-  fixed costs (`set_cost`, a pack's costs) keep the plans the same everywhere, for replays or lockstep. Packs change
-  nothing: the members are the files.
+  lockstep). With no ISA forced, rollout effects take the AVX-512 code where the CPU has AVX-512 (float since 15
+  October 2026; int8 only with VNNI) and AVX2 elsewhere, so at one precision a machine with AVX-512 and one without may
+  play different frames (the shipped models measured the same to the bit, [REPORT.md](REPORT.md) §13.10, but the code
+  does not promise it); `nvfx_set_isa(NVFX_ISA_AVX2)` on both makes sure ([ENGINES.md](ENGINES.md) §4). The
+  manager's plan depends only on the calls and its cost model: calibration makes it depend on the machine (and its load
+  at that moment); fixed costs (`set_cost`, a pack's costs) keep the plans the same everywhere, for replays or lockstep.
+  Packs change nothing: the members are the files.
 - **Memory**, all of it allocated at creation:
 
 | what | size |

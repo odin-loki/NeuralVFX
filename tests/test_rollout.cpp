@@ -1723,6 +1723,118 @@ TEST(RolloutRuntime, PrecisionIsASettingOfRolloutInstances) {
   for (nvfx_instance* in : {def, fl, q, q2}) nvfx_instance_free(in);
 }
 
+namespace {
+
+// Forces an ISA (nvfx_set_isa) for the instances created while it lives, then gives the choice back to the runtime.
+struct ForcedIsa {
+  bool ok;
+  explicit ForcedIsa(nvfx_isa isa) : ok(nvfx_set_isa(isa) == NVFX_OK) {}
+  ~ForcedIsa() { nvfx_set_isa(NVFX_ISA_AUTO); }
+  ForcedIsa(const ForcedIsa&) = delete;
+  ForcedIsa& operator=(const ForcedIsa&) = delete;
+};
+
+// The builds this CPU runs, from nvfx_version's features.
+struct Cpu {
+  bool avx2 = false, avx512 = false, vnni = false;
+  Cpu() {
+    std::uint32_t f = 0;
+    nvfx_version(&f);
+    avx2 = (f & NVFX_FEATURE_AVX2) != 0;
+    avx512 = (f & NVFX_FEATURE_AVX512) != 0;
+    vnni = (f & NVFX_FEATURE_VNNI) != 0;
+  }
+  nvfx_isa best() const { return avx2 ? NVFX_ISA_AVX2 : NVFX_ISA_BASELINE; }
+  nvfx_isa float_isa() const { return avx512 ? NVFX_ISA_AVX512 : best(); }        // docs/REPORT.md §13.10
+  nvfx_isa int8_isa() const { return avx512 && vnni ? NVFX_ISA_AVX512 : best(); }  // study K
+};
+
+}  // namespace
+
+// With no ISA forced, float rollout instances take the AVX-512 build where the CPU has AVX-512 (VNNI is not needed),
+// else AVX2, else the baseline (docs/REPORT.md §13.10): the ISA the runtime gives a float runner (scenes, the
+// library's stages and the effect manager take theirs from it) and the one a new instance reports, at FLOAT and at
+// DEFAULT where that is float. Int8 keeps study K's rule (AVX-512 only with VNNI), a forced ISA wins at either
+// precision, and frame models keep theirs (nvfx_get_isa: AVX2, else the baseline).
+TEST(RolloutRuntime, FloatTakesTheAvx512BuildWhereTheCpuHasIt) {
+  const Cpu cpu;
+  ASSERT_EQ(nvfx_set_isa(NVFX_ISA_AUTO), NVFX_OK);
+  EXPECT_EQ(nfx::rt::rollout_isa(nfx::rt::Precision::float32), cpu.float_isa());
+  EXPECT_EQ(nfx::rt::rollout_isa(nfx::rt::Precision::int8), cpu.int8_isa());
+  EXPECT_EQ(nvfx_get_isa(), cpu.best());
+  const rollout::Model m = runtime_model(32);
+  Fx fx(m);
+  nvfx_instance* in = nullptr;
+  ASSERT_EQ(nvfx_instance_create(fx.e, 64, &in), NVFX_OK);
+  const bool int8_default = nfx::rt::default_rollout_precision() == nfx::rt::Precision::int8;
+  EXPECT_EQ(nfx::rt::rollout_instance_isa(in), int8_default ? cpu.int8_isa() : cpu.float_isa()) << "DEFAULT";
+  ASSERT_EQ(nvfx_instance_set_precision(in, NVFX_PRECISION_FLOAT), NVFX_OK);
+  EXPECT_EQ(nfx::rt::rollout_instance_isa(in), cpu.float_isa()) << "FLOAT";
+  ASSERT_EQ(nvfx_instance_set_precision(in, NVFX_PRECISION_INT8), NVFX_OK);
+  EXPECT_EQ(nfx::rt::rollout_instance_isa(in), cpu.int8_isa()) << "INT8";
+  nvfx_instance_free(in);
+  int forced = 0;
+  for (const nvfx_isa isa : {NVFX_ISA_BASELINE, NVFX_ISA_AVX2, NVFX_ISA_AVX512}) {
+    const ForcedIsa pin(isa);
+    if (!pin.ok) continue;
+    EXPECT_EQ(nfx::rt::rollout_isa(nfx::rt::Precision::float32), isa);
+    EXPECT_EQ(nfx::rt::rollout_isa(nfx::rt::Precision::int8), isa);
+    ASSERT_EQ(nvfx_instance_create(fx.e, 64, &in), NVFX_OK);
+    for (const nvfx_precision p : {NVFX_PRECISION_DEFAULT, NVFX_PRECISION_FLOAT, NVFX_PRECISION_INT8}) {
+      ASSERT_EQ(nvfx_instance_set_precision(in, p), NVFX_OK);
+      EXPECT_EQ(nfx::rt::rollout_instance_isa(in), isa) << "forced " << static_cast<int>(isa) << ", precision " << static_cast<int>(p);
+    }
+    nvfx_instance_free(in);
+    ++forced;
+  }
+  EXPECT_GE(forced, 1);
+  EXPECT_EQ(nfx::rt::rollout_instance_isa(nullptr), NVFX_ISA_AUTO);
+}
+
+// A float instance with no ISA forced, on the build it takes (AVX-512 where the CPU has it, docs/REPORT.md §13.10),
+// against the float reference with the tolerances of MatchesTheReferenceOnEveryIsa (no channel more than 3 levels off,
+// at most 1% more than one level), and to the bit the frames of an instance with that build forced. Grids of 16 and 32
+// cells (the AVX-512 kernels' one and two vectors per row), sizes 32 and 64, a start point grown from its coarse state
+// and one with fine fields, frames 0 (with the warm-up), 4 and 12.
+TEST(RolloutRuntime, DefaultFloatMatchesTheReference) {
+  const Cpu cpu;
+  ASSERT_EQ(nvfx_set_isa(NVFX_ISA_AUTO), NVFX_OK);
+  const auto float_frame = [](nvfx_effect* e, const rollout::Model& m, int start_index, int size, int frames, nvfx_isa isa) {
+    const ForcedIsa pin(isa);
+    EXPECT_TRUE(pin.ok);
+    nvfx_instance* in = nullptr;
+    EXPECT_EQ(nvfx_instance_create(e, size, &in), NVFX_OK);
+    std::vector<std::uint8_t> rt(static_cast<std::size_t>(size) * size * 4);
+    if (!in) return rt;
+    EXPECT_EQ(nvfx_instance_set_precision(in, NVFX_PRECISION_FLOAT), NVFX_OK);
+    nvfx_instance_set_controls(in, m.starts[static_cast<std::size_t>(start_index)].controls.data(), 3);
+    EXPECT_EQ(nvfx_instance_set_variation(in, start_index), NVFX_OK);
+    EXPECT_EQ(nvfx_render(in, frames / 30.0, rt.data(), static_cast<std::size_t>(size) * 4), NVFX_OK);
+    nvfx_instance_free(in);
+    return rt;
+  };
+  int compared = 0;
+  for (const int res : {16, 32}) {
+    const rollout::Model m = runtime_model(res);
+    Fx fx(m);
+    for (const int start_index : {0, 1}) {
+      for (const int size : {32, 64}) {
+        for (const int frames : {0, 4, 12}) {
+          const auto rt = float_frame(fx.e, m, start_index, size, frames, NVFX_ISA_AUTO);
+          const auto ref = reference_frame(m, start_index, size, frames);
+          const std::string at = std::format("res {} start {} size {} frame {}", res, start_index, size, frames);
+          const Diff d = diff(rt, ref);
+          EXPECT_LE(d.worst, 3) << at;
+          EXPECT_LE(d.off, rt.size() / 100) << at;
+          EXPECT_EQ(rt, float_frame(fx.e, m, start_index, size, frames, cpu.float_isa())) << at << ": not the build it takes";
+          ++compared;
+        }
+      }
+    }
+  }
+  EXPECT_EQ(compared, 24);
+}
+
 // Study L's options at int8 (study K): MacCormack advection and the detail layer in two passes (the new magic has
 // both) with the stepper's second convolution in 8 bits, against the int8 reference on every ISA, with the tolerances
 // of Int8MatchesItsReferenceOnEveryIsa.

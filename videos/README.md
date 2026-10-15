@@ -184,26 +184,27 @@ above).
 
 Study N's small 3D demo ([STUDY_3D.md](../docs/STUDY_3D.md)): a 3D fire learned as a 16 x 24 x 16 state that drives
 seeded 64 x 96 x 64 detail, from our own 3D simulator (not a validated fire code). `nvfx_3d video --kind KIND` plays the
-frozen chosen model (`chosen.nvfx3`, 268 KB, float: there is no int8 path for volumes) through the volume C API
+chosen model (`chosen.nvfx3`, 268 KB, float: there is no int8 path for volumes) through the volume C API
 (`nvfx_volume.h`: 8 s shards crossfaded over 0.5 s) and draws every frame with the study's volume renderer (Planck
 emission through the CIE 1931 colour matching functions, soot absorption and single scattering, one fixed exposure),
 over a floor grid and sky the tool draws; 1280 x 720, 30 fps, CRF 24 (`-preset slow`). Demo seeds 9,900,000 and up,
 which no measured run uses. **The look (colour, glow, smoke shading) is physics-based rendering of the fields, not
 learned; what is learned is how the fields move.**
 
-**Study N2 left these videos as they are** ([STUDY_3D.md](../docs/STUDY_3D.md) §14). It fixed the runaway the wind video
-shows (ambient air at the model's open edges, and a retrained model, C4, that runs away at no wind over 30 s and beats
-this model on a new held-out test), but by its rule, written before validation, C4 did not pass: its edge check failed
-on validation by 3% on one side. So every video here is still study N's model, runaway included. What C4 does at a
-held wind of 0.05 against this model, with and without the fix: [docs/figures/n2_edges.png](../docs/figures/n2_edges.png).
-No `3d_wind_fixed` clip was made: study N's model with the edge fix alone still grows a smaller second fire in the wind
-sweep. Study N's smoke model (the last row) also runs away when played for 30 s without shards; its 8 s shards hide it.
+**The fire videos play study N2's model C4, by the owner's decision (15 October 2026), not by the study's rule**
+([STUDY_3D.md](../docs/STUDY_3D.md) §14). N2 let ambient air in at the model's open edges and retrained it with long
+rollouts; C4 does not run away at any wind over 30 s, and on N2's held-out test it beat study N's model at tracking
+(+1.95 dB in pictures at 1 s) and on every endless statistic but motion (a tie). By N2's rule, written before
+validation, it did not pass: on validation its edge check missed by 3% on one side (a peak of 5.29 against a bound of
+5.12 taken from one simulated run). The owner chose to show it anyway; study N's videos are in the git history.
+Study N's smoke model (the last row) is unchanged; it runs away when played for 30 s without shards, which its 8 s
+shards hide.
 
 | | Video | What it shows | Learned / procedural | Models, precision | Rendered | How it looks |
 |---|---|---|---|---|---|---|
-| <a href="3d_fire_orbit.mp4"><img src="3d_fire_orbit.jpg" width="200" alt="The 3D fire, walked around"></a> | **The 3D fire, walked around** | The camera circles the fire once, rising and falling a little; controls 0.7, 0.5, 0.6 (no wind), seed 9,900,001 | Learned: the fire's motion (the coarse state); seeded: the 64 x 96 x 64 detail; rendered: the volume renderer. Procedural: the floor and sky | `chosen.nvfx3` (study N, 268 KB); float | `--kind orbit`, 12 s, 1.2 MB | A small flame under a grey smoke column from every side. The flame's base breaks into bright, blocky spots (the detail layer's 4-cell blocks show), whiter and shorter than the simulation's; the plume leans in still air for a few seconds before the 8 s shard change straightens it |
-| <a href="3d_real_vs_learned.mp4"><img src="3d_real_vs_learned.jpg" width="200" alt="Real against learned in 3D"></a> | **Real against learned, in 3D** | Left: the 3D simulator (64 x 96 x 64). Right: the learned model from the same state (a held-out run after 100 frames: controls 0.65, 0.45, 0.55, seed 9,900,000) with the same noise seed, one continuous rollout. One camera swings a quarter turn around both. **Both are chaotic: they part after a second or two**, as the caption says | Left: simulation. Right: learned (the reference model, not the runtime's shards). Both drawn by the same volume renderer | `chosen.nvfx3`; float | `--kind real-vs-learned`, 10 s, 0.9 MB | They part within two seconds and keep the same smoke column's height and lean; the learned flame is whiter at its base and broken into hot spots where the simulation's is one orange tongue |
-| <a href="3d_wind.mp4"><img src="3d_wind.jpg" width="200" alt="The 3D fire's wind swept live"></a> | **Wind, swept live** | Side (left) and top (right) at once while the wind control sweeps from none (0.5) to full towards -x (0) by 4.8 s, to full towards +x (1) by 9 s and back to none; intensity 0.7, turbulence 0.5, seed 9,900,002 | As the orbit | `chosen.nvfx3`; float | `--kind wind`, 12 s, 0.7 MB | The plume follows the control slowly: it barely turns as the wind drops towards -x (from above, the smoke still trails a little towards +x); after the 8 s shard change (a fresh start near the controls of that moment) it leans hard with the +x wind and straightens as the wind falls back. **A failure shows: from 5 s, after the hard wind towards -x, a second fire grows on the floor at the box's upwind edge and fills a corner with a bright mass by 7.5 s**, until the 8 s shard change clears it. The model runs away when the wind blows towards -x (STUDY_3D.md §11; a second seed and constant winds of 0.05 and 0.25 do the same); kept as rendered |
+| <a href="3d_fire_orbit.mp4"><img src="3d_fire_orbit.jpg" width="200" alt="The 3D fire, walked around"></a> | **The 3D fire, walked around** | The camera circles the fire once, rising and falling a little; controls 0.7, 0.5, 0.6 (no wind), seed 9,950,001 | Learned: the fire's motion (the coarse state); seeded: the 64 x 96 x 64 detail; rendered: the volume renderer. Procedural: the floor and sky | `chosen.nvfx3` of study N2 (C4, edges open; `$NEURALVFX_DATA/n2_3d/models`); float | `--kind orbit`, 12 s, 1.3 MB | One small flame under a straight grey smoke column from every side. The flame is smaller than the simulation's and its base still breaks into bright, blocky spots |
+| <a href="3d_real_vs_learned.mp4"><img src="3d_real_vs_learned.jpg" width="200" alt="Real against learned in 3D"></a> | **Real against learned, in 3D** | Left: the 3D simulator (64 x 96 x 64). Right: the learned model from the same state (a held-out run after 100 frames: controls 0.65, 0.45, 0.55, seed 9,950,000) with the same noise seed, one continuous rollout. **Both are chaotic: they part after a second or two**, as the caption says | Left: simulation. Right: learned (C4). Both drawn by the same volume renderer | C4; float | `--kind real-vs-learned`, 10 s, 1.0 MB | They part within two seconds and keep a similar smoke column; the simulation's flame is a tall orange tongue where the learned one is short, whiter and broken into hot spots |
+| <a href="3d_wind.mp4"><img src="3d_wind.jpg" width="200" alt="The 3D fire's wind swept live"></a> | **Wind, swept live** | Side (left) and top (right) at once while the wind control sweeps from none (0.5) to full towards -x (0) by 4.8 s, to full towards +x (1) by 9 s and back to none; intensity 0.7, turbulence 0.5, seed 9,950,002 | As the orbit | C4; float | `--kind wind`, 12 s, 0.6 MB | **One fire throughout: the second fire study N's model grew at the upwind edge is gone.** The plume still follows the control slowly, leaning with the wind a second or two late |
 | <a href="3d_smoke_orbit.mp4"><img src="3d_smoke_orbit.jpg" width="200" alt="3D smoke, walked around"></a> | **3D smoke, walked around** (a demo only) | The camera circles a learned 3D smoke column once; controls 0.7, 0.5, 0.5, seed 9,900,005. Trained after the study's test on the same recipe, **not validated or tested** | As the orbit | `smoke3d.nvfx3` (study N's smoke, 268 KB; `$NEURALVFX_DATA/n_3d/models`); float | `--kind orbit --model .../smoke3d.nvfx3 --title "LEARNED 3D SMOKE"`, 12 s, 1.2 MB | A thick grey column that billows and rises out of the frame from every side; small orange specks glow at its base, which the simulated smoke (too cool to glow) does not have |
 
 ## 10. Later
@@ -234,9 +235,9 @@ build/nvfx_gallery --library library --models $M --only campfire --video campfir
 build/nvfx_crowd --budget 16 --threads 4 --seconds 20 --video crowd.mp4
 build/nvfx_lit_host library $M OUT --frames 300 --raw - | ffmpeg -f rawvideo -pix_fmt rgb24 -s 1280x720 -r 30 -i - lit.mp4
 # study N's 3D videos (the model: $NEURALVFX_DATA/n_3d/models/chosen.nvfx3 unless --model says otherwise)
-build/nvfx_3d video --kind orbit --out 3d_fire_orbit.mp4 --seconds 12 --controls 0.7,0.5,0.6 --seed 9900001
-build/nvfx_3d video --kind real-vs-learned --out 3d_real_vs_learned.mp4 --seconds 10 --controls 0.65,0.45,0.55 --seed 9900000
-build/nvfx_3d video --kind wind --out 3d_wind.mp4 --seconds 12 --controls 0.7,0.5,0.5 --seed 9900002
+build/nvfx_3d video --kind orbit --model $NEURALVFX_DATA/n2_3d/models/chosen.nvfx3 --out 3d_fire_orbit.mp4 --seconds 12 --controls 0.7,0.5,0.6 --seed 9950001
+build/nvfx_3d video --kind real-vs-learned --model $NEURALVFX_DATA/n2_3d/models/chosen.nvfx3 --out 3d_real_vs_learned.mp4 --seconds 10 --controls 0.65,0.45,0.55 --seed 9950000
+build/nvfx_3d video --kind wind --model $NEURALVFX_DATA/n2_3d/models/chosen.nvfx3 --out 3d_wind.mp4 --seconds 12 --controls 0.7,0.5,0.5 --seed 9950002
 build/nvfx_3d video --kind orbit --model $NEURALVFX_DATA/n_3d/models/smoke3d.nvfx3 --title "LEARNED 3D SMOKE" \
     --out 3d_smoke_orbit.mp4 --seconds 12 --controls 0.7,0.5,0.5 --seed 9900005
 ```

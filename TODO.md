@@ -1,6 +1,7 @@
 # To do: every effect in 3D — a small demo here first, then big on a PC
 
 **Status:** stage 1 is done (study N, `docs/STUDY_3D.md`, and its follow-up N2, §14); stage 2 is planned, not started.
+Work here is paused (15 October 2026): four branches wait to be finished and merged ("Here, until the PC").
 
 - **Stage 1, here and now (study N): done.** A small 3D demo in this container ([docs/STUDY_3D.md](docs/STUDY_3D.md),
   REPORT §15). What it built:
@@ -27,8 +28,9 @@
   - **It beats study N's model on a new held-out test**: +1.95 dB in pictures at 1 s, better on four of five endless
     statistics, and it beats holding the first frame. Against the coarse simulation it is too calm (motion 0.68 of the
     real runs').
-  - **By its rule it did not pass**: an edge bound set from one simulated run per wind was 3% too tight on one side, so
-    study N's model and videos stay the demo. Calibrate such bounds on the teacher's run-to-run spread.
+  - **By its rule it did not pass**: an edge bound set from one simulated run per wind was 3% too tight on one side.
+    The owner chose to show C4 as the demo anyway (15 October 2026); `videos/3d_*` say so. Calibrate such bounds on the
+    teacher's run-to-run spread.
   - Study N's smoke also runs away given 30 s; with the fix it does not. Threads scale: a step is 23 ms on four.
 
   What stage 2 takes from it:
@@ -45,6 +47,89 @@
   library and a full weather system.
 
 First we demo, then we go big.
+
+## Here, until the PC
+
+Work that runs in this container meanwhile, in 2D and in small 3D, measured as every study is.
+
+**Paused (15 October 2026), each on its own branch, not merged into main.** Each branch's doc opens with a "Status:
+paused" note: what is done, where its data is under `/root/nvfx-data`, and the exact commands to resume. To finish one:
+merge main into it, finish its list, run the full ctest, `nvfx_alloc_test`, `nvfx_gallery --check` and the Godot test,
+then merge it into main.
+- **Round 9, earth** (`effects-earth`, docs/EFFECTS_EARTH.md): lava, a volcanic eruption and a powder-snow avalanche.
+  - Done: the three presets with sim tests (the 21 earlier effects' clips unchanged); the test design committed first.
+  - Lava is trained and tested once. It passes: tracking at 1 s is +1.09 dB [+0.70, +1.43] over the coarse simulation
+    with detail; its endless mean picture is closer than the nearest flipbook's and its motion ties it; its detail is
+    worse than the flipbook's.
+  - Left: the eruption's model (its training was running at the pause), the avalanche's, their tests, timing, library
+    entries, the volcano scene, videos and REPORT §6.16.
+- **Round 9, air** (`effects-air`, docs/EFFECTS_AIR.md): a candle flame, smoke rings and heavy gas along the ground.
+  - Done: the three presets with sim and recipe tests (earlier clips unchanged); the rule committed before training.
+  - The candle's model was in its last training stage at the pause; a follow-on job set to test it once and train the
+    other two may have run on. Check `/root/nvfx-data/fx_air/jobs/state` and the logs before resuming.
+  - Left: the smoke ring's and heavy gas's models, all tests, timing, the library file, the crypt scene, videos and
+    REPORT §6.17.
+- **Study O, the most visible flaws** (`study-fix`, REPORT §16):
+  - Done, by eye, with no model change:
+    - the waterfall's and rain shaft's banding (the detail layer locking once a frame; effects take `passes N`, and
+      the library and the falls scene use 2);
+    - launch's square block (the lift-off scene uses a three-tile domain);
+    - the thruster's curling exhaust (a `cold` field on its tail).
+  - The mushroom and splash fixes: the rule is committed (§16.3.1) and the candidates are frozen. On validation the
+    mushroom gained +1.12 dB [0.79, 1.45] in the mean picture and the splash +0.62 dB [0.40, 0.86].
+  - **The held-out test has not run; its seeds (3,200,000 to 3,299,999) are unspent.** No model has been replaced.
+- **Study P, cheaper big effects** (`study-upscale`, docs/STUDY_P.md):
+  - The idea: draw a large effect at half size, then upscale it 2x with a learned net and seeded micro-detail.
+  - Found: the render size enters only the detail layer and the renderer, so a half-size instance shares the native
+    one's motion bit for bit.
+  - Training tiles show the learned 2x only slightly better than bilinear against native: +0.08 dB shared, up to
+    +0.55 dB per effect.
+  - Built: an opt-in path (`nvfx_effect_attach_upscaler`, `nvfx_instance_set_upscale`, NVFX_VERSION 7, no allocation
+    per frame), costing 0.45 to 0.56 of native at 512 px (busy machine, provisional).
+  - The rule's form is committed; its margins wait on the null probe. **The test has not run; seeds 3.8 to 3.9
+    million are unspent.**
+- **Float on AVX-512 (done).** Float rollouts take the AVX-512 build by default where the CPU has it: 0.80 of AVX2's
+  time on a quiet machine (`results/quiet`, round 6). Its float frames turned out bit-identical to AVX2's for all 24
+  models with this compiler; the frozen float tests are pinned to AVX2 anyway (REPORT §13.10).
+
+**Next:**
+- **The detail layer's cost.** It is three quarters of a 3D step and much of a 2D frame at 256 px. Try SIMD and
+  skipping empty rows and bricks.
+- **More 2D effects**, from the catalogue rows the 2D solver can carry:
+  - fire and smoke: a forest crown fire (#6), fire out of a window (#8), coloured smoke grenades (#18);
+  - blasts and engines: a dust explosion (#31), contrails (#36), helicopter downwash (#37);
+  - weather: blizzard and drifting snow (#54, #75), steam fog (#61), a haboob or sandstorm wall (#70, #71), sea spray
+    (#77);
+  - water and volcanic: a geyser (#88), a pyroclastic flow (#110).
+- **A weather director in 2D**, ahead of the 3D weather system:
+  - regimes: clear, overcast, rain, storm, snow, fog and dust storm;
+  - a small weather state drives the layers that exist:
+    - the state: cloud cover, rain and snow rates, mean wind and gustiness, visibility, temperature, lightning rate
+      and dust load;
+    - the layers: rain, snow and hail emitters, the fog and cloud models, the storm entries, the wind every module
+      feels, the sky's light;
+  - moving between regimes deterministically from a seed and a target, in the order real weather keeps:
+    - clouds build before rain;
+    - the gust front arrives before the downpour;
+    - lightning comes with the heaviest rain;
+  - weather noise: gusts and rain cells as seeded random processes with real time scales;
+  - established relations instead of guesses:
+    - fog visibility from Koschmieder (3.912 / extinction);
+    - rain drop sizes from Marshall-Palmer (N0 = 8000 m^-3 mm^-1, slope 4.1 R^-0.21 mm^-1);
+    - drop fall speeds from Atlas and colleagues (9.65 - 10.3 exp(-0.6 D) m/s), so streak lengths follow the rate;
+    - wind from the Beaufort scale's descriptions (what leaves, smoke and dust do at each force);
+  - driven from a script or, in an engine, through the scene inputs that exist (no new C calls);
+  - checked by tests:
+    - determinism;
+    - no jumps in the state;
+    - each regime reaching its targets;
+    - the relations holding;
+    - the scene's random numbers kept.
+  - shown in a 40 s scene that clears, clouds over, rains, storms and clears again.
+- **Small 3D:**
+  - a second 3D effect: smoke, validated this time, with bounds calibrated on several teacher runs;
+  - 3D fire and smoke coupled.
+- **For FUSE:** a sample integration in C++, with the effect pack and the volume API side by side.
 
 ## Contents
 
@@ -117,6 +202,8 @@ Today's 2D effects map onto these rows:
 | magic | 139 | cloud | 41 | fountain | 83 |
 | jet | 4 | wildfire | 5 | splash | 85 |
 | coals | 11 | mushroom | 28 | rainshaft | 51 |
+| lava | 94 | eruption | 109 | avalanche | 105 |
+| candle | 2 | smoke ring | 157 | heavy gas | 118, 19 |
 
 The water system's sheets, jets, drips, bubbles and pools are rows 82 to 91.
 
@@ -152,6 +239,7 @@ The water system's sheets, jets, drips, bubbles and pools are rows 82 to 91.
 | 20 | chimney and exhaust puffs (a steam train) | pulsed releases rising as thermals | FDS | puff rise and growth against Scorer's thermals | 2 |
 | 21 | cigarette and incense wisps | a laminar plume that turns turbulent | a DNS (PeleLM or MicroHH) | transition height against measured laminar plumes | 3 |
 | 22 | smouldering | smoke without flame: thin, pale, slow | FDS | smoke yield against measurements | 3 |
+| 157 | smoke and vortex rings | a ring puffed from an opening, rising and growing as it rolls, then breaking up | PeleLM or MicroHH (a DNS) | the formation number (about 4) against Gharib, Rambod and Shariff's experiments; ring speed against vortex-ring theory | 2 |
 
 ### Explosions, blasts and impacts
 
@@ -559,10 +647,17 @@ For every effect:
   - memory per instance.
 - **Demo videos** in `videos/`: each effect walked around, swept through its settings, and beside its simulation.
 
+What the later studies here taught the rules:
+- **Size margins and the number of settings from a null probe first** (study M3, REPORT §14.9): re-run the current
+  model with fresh seeds, measure how much each measure moves, and choose margins and settings with known power.
+  Margins tighter than the measures' own noise reject unchanged models (study M2).
+- **Calibrate any bound on the teacher's run-to-run spread**, from several runs, never one (study N2).
+- **Choose on endless play as well as tracking** (studies N and N2).
+
 ## Order of work
 
-0. **Stage 1, here:** study N's fire, and smoke if time allows. It establishes the 3D code, the model, the renderer,
-   the volume API and the videos.
+0. **Stage 1, here (done):** study N's fire and smoke, and N2's fix. They established the 3D code, the model, the
+   renderer, the volume API and the videos.
 1. **Wave 1 (PC, tier 1)** proves every model family once:
    - pool fire (#0), campfire (#1), grass fire (#5), smoke column (#16) and ground-burst explosion (#23);
    - fair-weather cumulus (#41), overcast (#44), rain (#51), snow (#53), radiation fog (#58) and haze (#62);
@@ -611,13 +706,15 @@ plus every effect's kept grids.
 ## Seeds
 
 - **Stage 1 (study N):** 9,000,000 to 9,999,999.
-- **Stage 2:** catalogue row # owns 10,000,000 + 100,000 x #, up to 25,699,999 for row 156. The weather regimes take
+- **Stage 2:** catalogue row # owns 10,000,000 + 100,000 x #, up to 25,799,999 for row 157. The weather regimes take
   30,000,000 + 100,000 x their row in the regimes table.
 
 Ranges already used elsewhere:
 - 5.3 to 5.9 million: studies G, K and L;
+- 3.0 to 3.5 million: study O; 3.6 to 3.9 million: study P;
+- 6.0 to 6.8 million: round 9's effects (earth 6.0 to 6.4, air 6.4 to 6.8); 6.9 million: an earlier smoke test;
 - 7 million: water;
-- 8 million: study M.
+- 8 million: studies M, M2 and M3.
 
 ## What goes in git
 
