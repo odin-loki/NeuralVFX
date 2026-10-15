@@ -1,13 +1,13 @@
 # More effects: fog, dust and cloud
 
-Status: **done** (14 October 2026). Audience: dev, research, artists. Three atmosphere effects for a game engine's
-library, after steam and magic ([EFFECTS.md](EFFECTS.md)): **fog** (a cold, heavy gas that sinks and rolls
-along the ground), **dust** (an impact's burst that rolls out low along the ground and settles; it plays once) and
-**cloud** (a persistent, slowly boiling mass with no source to be seen). All three come from the project's own 2D fluid
-simulator with new sources, forces and drawing. They were trained as rollout effects with study D's recipe
-([REPORT.md](REPORT.md) §6) and tested as study D, steam and magic were: on held-out settings and seeds, by tracking from
-the true state and by endless statistics against real runs and the nearest training flipbook. A scene script shows them
-together with study D's fire (§6).
+Status: **done** (14 October 2026; dust replaced by study M3's, with a mean state, 15 October 2026, §9). Audience: dev,
+research, artists. Three atmosphere effects for a game engine's library, after steam and magic
+([EFFECTS.md](EFFECTS.md)): **fog** (a cold, heavy gas that sinks and rolls along the ground), **dust** (an impact's
+burst that rolls out low along the ground and settles; it plays once) and **cloud** (a persistent, slowly boiling mass
+with no source to be seen). All three come from the project's own 2D fluid simulator with new sources, forces and
+drawing. They were trained as rollout effects with study D's recipe ([REPORT.md](REPORT.md) §6) and tested as study D,
+steam and magic were: on held-out settings and seeds, by tracking from the true state and by endless statistics against
+real runs and the nearest training flipbook. A scene script shows them together with study D's fire (§6).
 
 ## 1. Bottom line
 
@@ -390,3 +390,24 @@ build/nvfx_scene_script --script examples/scenes/moor.nvfxs --models DIR3 --out 
 `DIR2/models/d` holds study D's `fire.nvfx` and `smoke.nvfx` and the three models; `DIR3` holds `fog.nvfx`,
 `dust.nvfx`, `cloud.nvfx` and study D's v2 `fire.nvfx` (`ctest -R ScriptedMoorFrozen` reads it from
 `NEURALFX_MODELS_ATMOS`, by default `$NEURALVFX_DATA/fx_atmos/models/scene`).
+
+## 9. Study M3: dust with a mean state (15 October 2026)
+
+Dust's average picture was 2 dB from the floor (§1), most likely because each run starts from the nearest of 16 stored
+bursts rather than one of the setting's own size. Study M3 ([REPORT.md](REPORT.md) §14.9) tested study M's **mean
+state** on it: the ordered coarse state (u, v and dust per block of 2 x 2 cells) fitted as a quadratic in the three
+controls to the first states of dust's 240 training runs, and each stored burst begun at controls c moved by
+mu(c) - mu(its own controls), so that its size is the controls' and its own fluctuations stay. Under a rule planned for
+power (margins from the null, 30 settings) it met the rule on validation and on its test, and **replaces round 5's
+dust**: on 30 held-out settings with fresh seeds its average picture is **1.32 dB [0.75, 1.91]** closer to a real
+run's (5.7 to 4.4 dB below the floor), its motion error smaller (|ln motion ratio| -0.089 [-0.138, -0.043]) and its
+coverage closer (-0.0045 [-0.0063, -0.0027]); its detail spectrum ties (-0.009 [-0.020, +0.002]) and tracking from the
+true state is the same (a run's own start is moved by nothing).
+- File: the data root's `m3/models/dust.nvfx` (301,443 bytes against 280,927: the mean state's 10,240 coefficients at
+  fp16; SHA-256 `938440a4...`). Cost (provisional): within about +0.15 ms per frame at 256 px and +0.05 ms at 128 px.
+- **The moor** was drawn again (its frozen keyframes after the first strike updated): the first strike, at controls
+  (0.9, 0.55, 0.6), throws up a wider and taller bank of dust than before, the size of a strong strike rather than of
+  stored burst 0; the second, at (0.6, 0.6, 0.5), a slightly smaller one than stored burst 7 gave. The same dust, its
+  rolling front and settling unchanged, no new artefacts.
+- The library's dust entries give controls, so their bursts change size the same way ([LIBRARY.md](LIBRARY.md) §4);
+  the dust devil (the vortex model) and the dust trail are unchanged.

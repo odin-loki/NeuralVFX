@@ -1,5 +1,7 @@
 # Dust: the dust model, an impact's burst that rolls out low along the ground and settles (it plays once, 3 s, from
 # one of 16 stored bursts), and the vortex model as a dust devil. Drawn by field-shader looks lit by the scene.
+# Since study M3 (docs/REPORT.md §14.9) the dust model has a mean state: each module here gives controls, so its stored
+# burst begins moved to them (the burst's size made the controls', its own fluctuations kept).
 
 look sand   = like dirt, tint (1, 0.86, 0.6), soot_albedo 0.75
 

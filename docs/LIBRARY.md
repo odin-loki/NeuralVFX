@@ -551,8 +551,9 @@ error, spawns, no room, steal, stop, rooms freed, camera, clear, the same frames
 ## 4. The gallery
 
 The models' folder, `$NEURALVFX_DATA/library/models` by default, holds the twenty-one learned effects under the names
-`models.nvfxl` gives them: study M's fire ([REPORT.md](REPORT.md) §14, which replaced v2's), the v2 smoke and explosion,
-study D's steam, round 5's fog, dust, cloud and jet, and
+`models.nvfxl` gives them: study M's fire ([REPORT.md](REPORT.md) §14, which replaced v2's), the v2 smoke, study
+M3's explosion and dust (v2's and round 5's with a mean state, [REPORT.md](REPORT.md) §14.9, which replaced them),
+study D's steam, round 5's fog, cloud and jet, and
 study L's magic, orb and vortex ([REPORT.md](REPORT.md) §12.1, which replaced study D's magic and round 5's orb and
 vortex), and round 7's wildfire, coals and mushroom ([EFFECTS_BLAZE.md](EFFECTS_BLAZE.md)) and launch, puffs and ink
 ([EFFECTS_FLOW.md](EFFECTS_FLOW.md)), and round 8's waterfall, fountain, splash and rainshaft
@@ -562,9 +563,9 @@ vortex), and round 7's wildfire, coals and mushroom ([EFFECTS_BLAZE.md](EFFECTS_
 ```sh
 mkdir -p $NEURALVFX_DATA/library/models && cd $NEURALVFX_DATA/library/models
 ln -s ../../m_ordered/models/v3/fire.nvfx .
-ln -s ../../v2/models/smoke.nvfx ../../v2/models/explosion.nvfx .
+ln -s ../../v2/models/smoke.nvfx ../../m3/models/explosion.nvfx .
 ln -s ../../fx/models/d/steam.nvfx .
-ln -s ../../fx_atmos/models/d/fog.nvfx ../../fx_atmos/models/d/dust.nvfx ../../fx_atmos/models/d/cloud.nvfx .
+ln -s ../../fx_atmos/models/d/fog.nvfx ../../m3/models/dust.nvfx ../../fx_atmos/models/d/cloud.nvfx .
 ln -s ../../fx_energy/models/d/jet.nvfx .
 ln -s ../../l_swirl/models/v3/magic.nvfx ../../l_swirl/models/v3/orb.nvfx ../../l_swirl/models/v3/vortex.nvfx .
 ln -s ../../fx_blaze/models/d/wildfire.nvfx ../../fx_blaze/models/d/coals.nvfx ../../fx_blaze/models/d/mushroom.nvfx .
@@ -572,6 +573,15 @@ ln -s ../../fx_flow/models/d/launch.nvfx ../../fx_flow/models/d/puffs.nvfx ../..
 ln -s ../../fx_water/models/d/waterfall.nvfx ../../fx_water/models/d/fountain.nvfx ../../fx_water/models/d/splash.nvfx .
 ln -s ../../fx_water/models/d/rainshaft.nvfx .
 ```
+
+**Study M3's explosion and dust** ([REPORT.md](REPORT.md) §14.9) carry a mean state: a module that gives controls of
+its own begins its start point moved to them (the burst's size made the controls', its own fluctuations kept). Every
+explosion entry gives none, so each plays its start point as it is, the same to the bit as before (grenade's frozen
+keyframes did not change), and trails, which lay their material down rather than begin from a start point, are unchanged
+too (rocket_trail's, plasma_bolt's and vehicle_dust_wake's). The dust modules give controls: dust_impact's bank is a
+little lower and flatter, ground_slam's (the strongest controls) taller and wider, out to its shock ring, and the small
+puffs barely change; dust_impact's and bullet_impact_stone's frozen keyframes were updated, with the two models' rows
+(`frozen.csv`, `frozen_round3.csv`).
 
 `tools/nvfx_gallery.cpp` plays every entry through the C API, each alone on a stage fitted to its box:
 

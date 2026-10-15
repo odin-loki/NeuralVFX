@@ -3,11 +3,12 @@ rollout_effect,fog,fx_atmos/models/d/fog.nvfx,149287,bcb5466137e5684c409ae57321e
 rollout_effect,dust,fx_atmos/models/d/dust.nvfx,280927,e18c287b7b5ecc9975da526c94a0b6aaf548981a0b488fde1853a689aeef02f5,study D's recipe (docs/EFFECTS_ATMOSPHERE.md): d-train --stages12 1 then d-tune then d-finish
 rollout_effect,cloud,fx_atmos/models/d/cloud.nvfx,149287,b1a886dd038a8e88f4461e5fbd3b0830d9c54e764b0977f9fded225b57e221c8,study D's recipe (docs/EFFECTS_ATMOSPHERE.md): d-train --stages12 1 then d-tune then d-finish
 rollout_effect,fire_v3,m_ordered/models/v3/fire.nvfx,42895,51fce5d5ec7b922c9107b63294237198ffbb6c5cc6a8f9de55470139902ec783,study M (docs/REPORT.md §14): replaces v2's fire after its test; the moor keyframes below are drawn with it
+rollout_effect,dust_m3,m3/models/dust.nvfx,301443,938440a486c21c393aa4af74951284ab53e32468099f9f14073876ddc5292af9,study M3 (docs/REPORT.md §14.9): round 5's dust with the mean state; replaces it after its test; the moor keyframes below are drawn with it
 moor_keyframe,frame_024,nvfx_scene_script --keyframes (examples/scenes/moor.nvfxs),1058628,fecb5b81d6518008260b9eab156e5d1d58ed103bbb43783ca95a62305592b498,
 moor_keyframe,frame_072,nvfx_scene_script --keyframes (examples/scenes/moor.nvfxs),1059152,42af5064dd32048dd83e129e351ce87ad0aab096fb1ed7de5575e6e8eb409ef7,
-moor_keyframe,frame_076,nvfx_scene_script --keyframes (examples/scenes/moor.nvfxs),769318,24c9364caed7c57bb0c8230ad7cf9529bb53cd8bbc38dd7c4c345246ee712e0f,
-moor_keyframe,frame_096,nvfx_scene_script --keyframes (examples/scenes/moor.nvfxs),1084102,143a0a7c16c094031ca866517842f8b45904e6de682005ce540feeb97bc83847,
-moor_keyframe,frame_132,nvfx_scene_script --keyframes (examples/scenes/moor.nvfxs),1078100,5a0808eb2ae7ecbbd85f4554801d1b14f5f35ed25cee39397df77ee6f1d3f22f,
-moor_keyframe,frame_175,nvfx_scene_script --keyframes (examples/scenes/moor.nvfxs),808431,40bc6dfa1be04afb4c1e1a8d9cc97f7e22b4f6cb4c01234de72af8ca079d951d,
-moor_keyframe,frame_207,nvfx_scene_script --keyframes (examples/scenes/moor.nvfxs),1077176,e0e1a4e2fa310348fb0c311032756588e1421b424351072be08fd4c6df7af01c,
-moor_keyframe,frame_270,nvfx_scene_script --keyframes (examples/scenes/moor.nvfxs),1070237,7f485f5a1e6fccf95a4d19f5d0e938d2937816500c57a65db3e4b1dbdef8ca9e,
+moor_keyframe,frame_076,nvfx_scene_script --keyframes (examples/scenes/moor.nvfxs),771657,025fccbea029d08aa992b4e02babe759e45ff0e62fe59f14a00d7a26fc13617a,
+moor_keyframe,frame_096,nvfx_scene_script --keyframes (examples/scenes/moor.nvfxs),1091690,a83884006c5f6afdac2aa79815deb3b3f9423235aef8c540761e6b1150431b32,
+moor_keyframe,frame_132,nvfx_scene_script --keyframes (examples/scenes/moor.nvfxs),1081306,26af7444234db44bfc30bd6f73b42cb49c02f94ef3c424cc89d96cef3d336404,
+moor_keyframe,frame_175,nvfx_scene_script --keyframes (examples/scenes/moor.nvfxs),814827,9b383af04f0fbb4241ca7be6ccc0c1fe7070b0470c556bcbc83ce83c1093fcfd,
+moor_keyframe,frame_207,nvfx_scene_script --keyframes (examples/scenes/moor.nvfxs),1082700,ff3059aa52e0331be4852ed0e2a43428f4b50f87f8aea15255c192e197e95fbb,
+moor_keyframe,frame_270,nvfx_scene_script --keyframes (examples/scenes/moor.nvfxs),1074299,d9b75fc27095a6e14be2a824adaa44a916452fc2797f97f1ac51ce231d468108,

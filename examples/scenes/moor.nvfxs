@@ -3,8 +3,8 @@
 #
 #   nvfx_scene_script --script examples/scenes/moor.nvfxs --models DIR --out moor.mp4
 #
-# DIR holds fog.nvfx, dust.nvfx and cloud.nvfx (docs/EFFECTS_ATMOSPHERE.md) and study M's fire.nvfx (docs/REPORT.md
-# §14).
+# DIR holds fog.nvfx, dust.nvfx (study M3's, with a mean state: docs/REPORT.md §14.9) and cloud.nvfx
+# (docs/EFFECTS_ATMOSPHERE.md) and study M's fire.nvfx (docs/REPORT.md §14).
 #
 # Night under a bank of storm cloud drifting to the right. Frost-white fog lies along the ground, released in five
 # places, and a campfire burns in it. Lightning flashes in the cloud and strikes the moor: the strike kicks up dust,
