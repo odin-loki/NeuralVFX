@@ -2348,7 +2348,8 @@ bootstrap with 10,000 resamples (`metrics::paired_bootstrap`, seed 2026).
    - tracking at 1 s: at least **-0.20 dB**;
    - detail spectrum distance, where it is not a target (`ms`, magic's `mtW`): at most **+0.02**;
    - |ln motion ratio|: at most **+0.02** (2% of motion);
-   - coverage and emission distances: at most **+10% of the current model's own mean distance** on the split.
+   - coverage and emission distances: at most **+10% of the current model's own mean distance** on the split, and
+     never less than **0.0001** (amended after the probe, before validation: below).
 
 On validation, among an effect's candidates that meet it, the one with the largest mean-frame gain is chosen; an effect
 with none stops there and is not tested (a null, reported with its numbers). The strict reading of study M (no interval
@@ -2365,6 +2366,17 @@ them by a few hundredths of a dB; a fifth of a dB at 1 s (about 18 dB of active 
 moves it. A margin works both ways: a change that matters fails even when the interval crosses zero, so the margins are
 stricter than the strict reading where the measure is noisy and more lenient only where a change is too small to
 matter. Study M's own validation data are not revisited with this rule.
+
+**One amendment, after the probe and before any validation number.** The coverage and emission margins have a least
+value of 0.0001 (in the units of the curves: the frame's mean alpha, and its mean light added, max(0, rgb - alpha), on
+a scale of 0 to 1; 0.0001 is a fortieth of one 8-bit level). On the probe (training settings, §14.8.2) the explosion's
+emission distance was about 2 × 10⁻⁵ (the explosion and dust add almost no light to their colour; dust's distance is
+10⁻⁵) and its mean state moved it by +1 × 10⁻⁶ [-3 × 10⁻⁶, +4 × 10⁻⁶], outside a margin of 10% of it: a relative margin
+on a distance that is almost zero is the size of its noise, which re-creates the null the margins were meant to remove
+(smoke's in study M). The least value matters only where the current model's distance is under 0.001, which in
+study M's tables (§14.4) is smoke's and the explosion's light alone (fire's coverage and light and every coverage
+distance there are above it, where 10% governs). The rule as first committed is commit `f996878`; nothing else was
+changed.
 
 **Validation (the choice).** Study G's 10 validation settings (DCM §4) with seeds no study has used: real runs
 **8,500,000 + 100 s + k**, the floor (a second set of real runs) 8,500,050 + 100 s + k, the models' plays **8,600,000 +

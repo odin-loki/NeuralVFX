@@ -1434,6 +1434,7 @@ void step_train(const Ctx& c, sim::Effect e, const tools::Args& a) {
   so.lr_finetune = a.f("lr-ft", 3e-4f);
   so.seed = a.u64("seed", 41);
   so.keep_normalisation = true;
+  so.floor_gradient = a.flag("floor-gradient");  // study L's vortex was trained with it (REPORT §12.1)
   so.threads = c.threads;
   so.log_every = 25;
   so.progress = [&](int it, int unroll, double loss) {
@@ -2089,10 +2090,11 @@ void decide(const Ctx& c, sim::Effect e, const Split& sp, const std::vector<Entr
 //   2. it is non-inferior on every other measure, by margins fixed in advance (the interval's worse end within them):
 //      tracking at 1 s at least -0.20 dB; the spectrum distance, when it is not a target, at most +0.02; |ln motion
 //      ratio| at most +0.02; coverage and emission distances at most +10% of the current model's own mean distance on
-//      the split.
+//      the split, and never less than 0.0001 (amended after the probe, before validation: an effect that adds almost no
+//      light has an emission distance of about 10^-5, and 10% of that is the size of its noise).
 // The strict reading (no interval entirely on the worse side of zero; study M's) is reported beside and does not decide.
 // On validation, among the candidates that meet it, the one with the largest mean-frame gain is chosen.
-constexpr double kM2Track = -0.20, kM2Spectrum = 0.02, kM2Motion = 0.02, kM2Share = 0.10;
+constexpr double kM2Track = -0.20, kM2Spectrum = 0.02, kM2Motion = 0.02, kM2Share = 0.10, kM2Least = 1e-4;
 struct RuleM2 {
   std::array<metrics::Interval, 6> iv{};  // kCmpNames' order
   bool spectrum_target = false;           // the spectrum is a target (the swirl's scale changed)
@@ -2107,8 +2109,8 @@ RuleM2 apply_rule_m2(const Scores& cand, const Scores& cur, bool spectrum_target
   r.spectrum_target = spectrum_target;
   for (int k = 0; k < 6; ++k) r.iv[sz(k)] = metrics::paired_bootstrap(cmp_stat(cand, k), cmp_stat(cur, k), 10000, 2026);
   const auto mean_of = [](const std::vector<double>& v) { return std::accumulate(v.begin(), v.end(), 0.0) / static_cast<double>(v.size()); };
-  r.margin_cov = kM2Share * mean_of(cmp_stat(cur, 3));
-  r.margin_emi = kM2Share * mean_of(cmp_stat(cur, 4));
+  r.margin_cov = std::max(kM2Least, kM2Share * mean_of(cmp_stat(cur, 3)));
+  r.margin_emi = std::max(kM2Least, kM2Share * mean_of(cmp_stat(cur, 4)));
   // kCmpNames: track_1s, spectrum_l1, abs_ln_motion_ratio, coverage_l1, emission_l1, mean_frame_psnr
   const bool psnr_better = r.iv[5].lo > 0, spec_better = r.iv[1].hi < 0;
   r.better = psnr_better && (!spectrum_target || spec_better);
@@ -2310,7 +2312,7 @@ void step_info(const tools::Args& a) {
 
 int main(int argc, char** argv) {
   try {
-    tools::Args a(argc, argv, {"play", "ftz"});
+    tools::Args a(argc, argv, {"play", "ftz", "floor-gradient"});
     if (a.positional().empty()) {
       std::println("nvfx_ordered diag --effect E [--model F] [--settings 8] [--reps 4] [--root DIR] [--results DIR] [--threads N]");
       return 2;
