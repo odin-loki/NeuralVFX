@@ -1,0 +1,9 @@
+kind,name,file,bytes,sha256,source
+rollout_effect,fog,fx_atmos/models/d/fog.nvfx,149287,bcb5466137e5684c409ae57321e2faf898c273ae40556641be75bfb3a012da49,the library's model (library/models.nvfxl; docs/EFFECTS_ATMOSPHERE.md)
+rollout_effect,cloud,fx_atmos/models/d/cloud.nvfx,149287,b1a886dd038a8e88f4461e5fbd3b0830d9c54e764b0977f9fded225b57e221c8,the library's model (library/models.nvfxl; docs/EFFECTS_ATMOSPHERE.md)
+falls_keyframe,frame_060,nvfx_scene_script --keyframes (examples/scenes/falls.nvfxs),1174737,06259ce2ff1c6d671d912905866a68532102412484f97bc239e83f8d771c6b61,
+falls_keyframe,frame_105,nvfx_scene_script --keyframes (examples/scenes/falls.nvfxs),1262968,e766973b6749f8bb590a4af821a8c89d490242d636db07e97394a32e1e622b8b,
+falls_keyframe,frame_169,nvfx_scene_script --keyframes (examples/scenes/falls.nvfxs),975855,5d4bd02da46d9dd9fd9e7d660701f237e070b4d771703f4170d90e59f7b463f0,
+falls_keyframe,frame_210,nvfx_scene_script --keyframes (examples/scenes/falls.nvfxs),1316509,55a75c6f23376aa36e1f4c3279c78593fac14f0a5766217907272f329fa3f292,
+falls_keyframe,frame_271,nvfx_scene_script --keyframes (examples/scenes/falls.nvfxs),1067986,99aca90176d9a4cfe28dd674277f1c875064c9fc8e698fe74866645cc1709e12,
+falls_keyframe,frame_345,nvfx_scene_script --keyframes (examples/scenes/falls.nvfxs),1382570,ffbf538fc307b49b3537edaffe4b7ed2db6350bb3e990d5c23e020195a3f1e40,
