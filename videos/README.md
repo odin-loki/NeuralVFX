@@ -33,6 +33,9 @@ violet burst) is such a look, not new dynamics. All learned effects play at the 
 The orb too: these were rendered before study K's rule on study L's orb sent it to float ([REPORT.md](../docs/REPORT.md)
 §13.9), so the fire whirl's lamps and the library's orb entries play at float from now on, a run that differs from
 these by about 0.08 dB in the average picture.
+The library's fire in these videos is v2's: study M replaced it afterwards ([REPORT.md](../docs/REPORT.md) §14) with a
+fire that is closer to real runs on average (+0.39 dB in the mean picture, a detail spectrum 0.023 nearer) but looks the
+same frame by frame, so the videos were not re-rendered.
 Every video is H.264 (yuv420p, +faststart, no audio). Click a poster to open its video.
 
 **47 videos, 59.0 MB in all**, each at most 5 MB, with 47 JPEG posters (583 KB in all).

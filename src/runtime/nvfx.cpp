@@ -260,7 +260,7 @@ void apply_prior(nvfx_instance& in, nvfx_instance::Track& t) {
 void bring(nvfx_instance& in, nvfx_instance::Track& t, std::int64_t k, std::int64_t f) {
   if (t.shard != k || f < t.frame || f - t.frame > kCatchUp) {
     const ShardPlan p = plan_shard(in, k);
-    t.r->begin(p.index, p.seed);
+    t.r->begin(p.index, p.seed, in.controls);  // study M: moved to the controls when the effect has a mean state
     t.shard = k;
     t.frame = p.first;
     t.seed = p.seed;

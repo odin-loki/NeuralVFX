@@ -493,7 +493,8 @@ error, spawns, no room, steal, stop, rooms freed, camera, clear, the same frames
 ## 4. The gallery
 
 The models' folder, `$NEURALVFX_DATA/library/models` by default, holds the seventeen learned effects under the names
-`models.nvfxl` gives them: the v2 fire, smoke and explosion, study D's steam, round 5's fog, dust, cloud and jet, and
+`models.nvfxl` gives them: study M's fire ([REPORT.md](REPORT.md) §14, which replaced v2's), the v2 smoke and explosion,
+study D's steam, round 5's fog, dust, cloud and jet, and
 study L's magic, orb and vortex ([REPORT.md](REPORT.md) §12.1, which replaced study D's magic and round 5's orb and
 vortex), and round 7's wildfire, coals and mushroom ([EFFECTS_BLAZE.md](EFFECTS_BLAZE.md)) and launch, puffs and ink
 ([EFFECTS_FLOW.md](EFFECTS_FLOW.md)). The orb plays at float whatever the stage's precision (`precision float` on its
@@ -501,7 +502,8 @@ vortex), and round 7's wildfire, coals and mushroom ([EFFECTS_BLAZE.md](EFFECTS_
 
 ```sh
 mkdir -p $NEURALVFX_DATA/library/models && cd $NEURALVFX_DATA/library/models
-ln -s ../../v2/models/fire.nvfx ../../v2/models/smoke.nvfx ../../v2/models/explosion.nvfx .
+ln -s ../../m_ordered/models/v3/fire.nvfx .
+ln -s ../../v2/models/smoke.nvfx ../../v2/models/explosion.nvfx .
 ln -s ../../fx/models/d/steam.nvfx .
 ln -s ../../fx_atmos/models/d/fog.nvfx ../../fx_atmos/models/d/dust.nvfx ../../fx_atmos/models/d/cloud.nvfx .
 ln -s ../../fx_energy/models/d/jet.nvfx .
