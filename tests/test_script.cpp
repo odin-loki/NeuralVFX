@@ -11,6 +11,7 @@
 #include <fstream>
 #include <numeric>
 #include <sstream>
+#include <tuple>
 
 namespace {
 
@@ -155,6 +156,48 @@ TEST(Script, BuildErrorsNameTheModule) {
       EXPECT_EQ(e.pos.col, b.col) << b.text << "\n  " << e.what();
       EXPECT_NE(e.message.find(b.says), std::string::npos) << b.text << "\n  " << e.what();
     }
+  }
+}
+
+// An effect's own precision (`precision float|int8` on the effect) is its modules' whatever the scene's: study K's rule
+// on study L's orb failed at int8 (docs/REPORT.md §13.9), so the library plays that one effect at float on every CPU.
+TEST(Script, AnEffectsPrecisionOverridesTheScenes) {
+  const auto played = [](const char* own, rt::Precision scene) {
+    const std::string text = std::format("scene size 160 x 90, fps 30, length 0.5\neffect tiny = \"tiny\"{}\n"
+                                         "module m = tiny, size 32, width 64, at (80, 74)", own);
+    sc::Options o{1, Isa::base};
+    o.precision = scene;
+    sc::Scene s(sc::parse(text, "p"), tiny_loader(), o);
+    std::vector<std::uint8_t> all, px(160 * 90 * 3);
+    for (int f = 0; f < s.frames(); ++f) {
+      s.render(f, px);
+      all.insert(all.end(), px.begin(), px.end());
+    }
+    EXPECT_EQ(s.module("m", 0)->isa(), Isa::base);  // the ISA the scene was given, not the runtime's choice
+    return std::pair{s.module("m", 0)->precision(), all};
+  };
+  const auto [scene_float, at_float] = played("", rt::Precision::float32);
+  const auto [scene_int8, at_int8] = played("", rt::Precision::int8);
+  EXPECT_EQ(scene_float, rt::Precision::float32);
+  EXPECT_EQ(scene_int8, rt::Precision::int8);
+  ASSERT_GT(std::accumulate(at_float.begin(), at_float.end(), 0L), 0L);
+  for (const auto& [own, scene, want] : {std::tuple{", precision float", rt::Precision::int8, rt::Precision::float32},
+                                         std::tuple{", precision float", rt::Precision::float32, rt::Precision::float32},
+                                         std::tuple{", precision int8", rt::Precision::float32, rt::Precision::int8}}) {
+    const auto [got, frames] = played(own, scene);
+    EXPECT_EQ(got, want) << own;
+    EXPECT_EQ(frames, want == rt::Precision::int8 ? at_int8 : at_float) << own;
+  }
+
+  const char* own = "effect e = \"e\", precision float\n";
+  EXPECT_EQ(sc::print(sc::parse(own, "p")), own);
+  try {
+    sc::Scene s(sc::parse("effect e = \"e\", precision fast\nmodule m = e, size 32", "p"), tiny_loader(), {1, Isa::base});
+    ADD_FAILURE() << "no error for precision fast";
+  } catch (const sc::Error& e) {
+    EXPECT_EQ(e.pos.line, 1);
+    EXPECT_EQ(e.pos.col, 27);
+    EXPECT_NE(e.message.find("'float' or 'int8', not 'fast'"), std::string::npos) << e.what();
   }
 }
 

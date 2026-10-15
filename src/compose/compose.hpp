@@ -176,6 +176,8 @@ class Module {
   rt::RolloutRunner& runner() { return *r_; }
   const rt::RolloutRunner& runner() const { return *r_; }
   int size() const { return size_; }
+  Isa isa() const { return isa_; }
+  rt::Precision precision() const { return prec_; }
   int res() const { return e_.m.h.res; }
   int channels() const { return e_.m.h.channels(); }
   float cell_px() const { return at.scale * fl(size_) / fl(res()); }  // world pixels per coarse cell

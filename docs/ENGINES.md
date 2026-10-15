@@ -150,6 +150,9 @@ is the same; what differs:
   `nvfx_instance_set_precision(inst, NVFX_PRECISION_FLOAT)` plays the float network (the reference, on AVX2 by
   default); a change starts the instance's timeline again. Scenes (`nvfx_scene_desc.precision`), the library's stages
   (`nvfx_stage_desc.precision`) and the effect manager (`nvfx_manager_model_desc.precision`) choose it the same way.
+  The orb is the exception: study L's orb failed study K's rule at int8 (REPORT.md §13.9), so the library and the
+  scenes play it at float (`precision float` on its `effect` statement); set `NVFX_PRECISION_FLOAT` for orb instances
+  and for the orb's `nvfx_manager_model_desc`.
 - `nvfx_bake` renders consecutive frames from a fresh start and crossfades a few extra frames into the first ones, so
   the flipbook loops.
 

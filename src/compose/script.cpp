@@ -64,7 +64,7 @@ constexpr Key kParticles[] = {{"capacity", VT::expr}, {"flow", VT::expr}};
 constexpr Key kFrame[] = {{"exposure", VT::expr}, {"fade", VT::expr}, {"haze", VT::expr}, {"bloom", VT::expr}, {"bloom_threshold", VT::expr}};
 constexpr Key kCamera[] = {{"x", VT::expr}, {"y", VT::expr}};
 constexpr Key kEffect[] = {{"swirl", VT::expr}, {"swirl_scale", VT::expr}, {"swirl_rate", VT::expr}, {"swirl_ramp", VT::expr},
-                           {"contrast", VT::expr}, {"grow", VT::expr}};
+                           {"contrast", VT::expr}, {"grow", VT::expr}, {"precision", VT::name}};
 constexpr Key kLook[] = {{"heat_scale", VT::expr}, {"emission", VT::expr}, {"emission_power", VT::expr}, {"soot_density", VT::expr},
                          {"soot_albedo", VT::expr}, {"sky", VT::expr},      {"shadow", VT::expr},         {"scene_light", VT::expr},
                          {"relief", VT::expr},     {"tint", VT::tuple},     {"hue", VT::expr}};

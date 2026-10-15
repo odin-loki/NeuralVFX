@@ -444,7 +444,8 @@ error, spawns, no room, steal, stop, rooms freed, camera, clear, the same frames
 The models' folder, `$NEURALVFX_DATA/library/models` by default, holds the eleven learned effects under the names
 `models.nvfxl` gives them: the v2 fire, smoke and explosion, study D's steam, round 5's fog, dust, cloud and jet, and
 study L's magic, orb and vortex ([REPORT.md](REPORT.md) §12.1, which replaced study D's magic and round 5's orb and
-vortex). Links are enough:
+vortex). The orb plays at float whatever the stage's precision (`precision float` on its `effect` line): study L's orb
+failed study K's int8 rule on its average picture ([REPORT.md](REPORT.md) §13.9). Links are enough:
 
 ```sh
 mkdir -p $NEURALVFX_DATA/library/models && cd $NEURALVFX_DATA/library/models

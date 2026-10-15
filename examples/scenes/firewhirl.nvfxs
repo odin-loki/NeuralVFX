@@ -15,7 +15,7 @@ particles  capacity 6000, flow 0.9
 keyframes  0.8, 2.2, 3.4, 4.6, 5.6, 6.8, 8.0, 9.4
 
 effect jet    = "jet.nvfx"
-effect orb    = "orb.nvfx"
+effect orb    = "orb.nvfx", precision float   # at float on every CPU: it failed study K's int8 rule (docs/REPORT.md §13.9)
 effect devil  = "vortex.nvfx"   # (vortex is a field kind of the language, so the effect takes another name)
 
 # The dust lit by the scene (the lamps' cyan, the fire's orange, the sky), and the same column burning: its warm air

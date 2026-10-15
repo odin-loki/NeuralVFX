@@ -1857,3 +1857,37 @@ is unchanged to the bit: its frozen keyframes still match.
 - **Timings are provisional**: one session on a machine shared with three other agents (load average 4 to 12).
   `tools/study_k/time.sh [BUILD] [OUT] [ROUNDS]` re-runs every timing of this section (the eleven effects, the stages,
   the fireball on 4 threads and on 1, the crowd), interleaved, on a quiet machine; about 30 minutes at five rounds.
+
+### 13.9 Study L's three models at int8 (15 October 2026)
+
+Study L (§12.1) replaced magic, the orb and the vortex after study K had chosen int8, so study K's rule had not been
+applied to the new models. It was applied here as committed, with nothing changed: `int8_second` against float, the
+same measures, margins, seeds and protocol (§13.3), validation then the test, `nvfx_study_k` on the v3 models
+(`DATA/k3/run.sh`; the real runs' statistics are the cached ones, which do not depend on the model; every play was
+recomputed). The script ran the test on all three effects after validation, so the orb's test row is reported beside
+the decision its validation had already made.
+
+| effect | split | tracking 8 frames | 1 s | 2 s | ln motion | mean frame (dB) | rule |
+|---|---|---|---|---|---|---|---|
+| magic | validation | -0.01 [-0.03, +0.01] | +0.01 [-0.01, +0.03] | -0.00 [-0.06, +0.05] | -0.004 [-0.007, -0.001] | -0.038 [-0.076, +0.004] | passes |
+| magic | test | -0.01 [-0.02, +0.01] | +0.01 [-0.03, +0.04] | -0.06 [-0.11, -0.02] | -0.005 [-0.008, -0.001] | -0.046 [-0.072, -0.017] | passes |
+| orb | validation | +0.00 [-0.01, +0.01] | -0.00 [-0.01, +0.01] | +0.01 [-0.00, +0.03] | -0.000 [-0.003, +0.002] | -0.074 [-0.165, +0.020] | **fails** (mean frame) |
+| orb | test | -0.02 [-0.05, +0.00] | +0.00 [-0.01, +0.02] | -0.01 [-0.02, +0.00] | -0.001 [-0.002, +0.001] | -0.081 [-0.153, -0.006] | **fails** (mean frame) |
+| vortex | validation | -0.00 [-0.01, +0.00] | -0.01 [-0.03, -0.00] | +0.00 [-0.01, +0.02] | -0.005 [-0.008, -0.002] | +0.007 [-0.018, +0.033] | passes |
+| vortex | test | +0.00 [-0.00, +0.01] | -0.01 [-0.02, +0.00] | +0.00 [-0.01, +0.02] | +0.001 [-0.002, +0.003] | -0.036 [-0.070, +0.001] | passes |
+
+Int8 minus float, 95% paired bootstrap intervals; the spectrum, coverage and emission distances moved by less than
+0.001 everywhere (within their margins; the full tables are `DATA/k3/decide_val.txt` and `decide_test.txt`).
+
+- **Magic and the vortex pass** on validation and the test, as the old models did; they play at int8 where the CPU has
+  VNNI, as every other rollout effect.
+- **The orb fails on its mean frame**: on the test the interval's lower end is -0.153 dB against the margin's -0.10
+  (validation: -0.165). The difference is small (0.08 dB in the average picture of a setting, which no one would see),
+  and tracking and the other statistics tie, but the rule is the rule. Why the orb and not the others was not
+  studied (the new orb is the one model trained on 30-frame windows, §12.1, but nothing here shows that is the cause).
+- **So the orb plays at float on every CPU in what this repository ships.** A scene script's `effect` statement takes
+  `precision float|int8` (docs/COMPOSE.md §4.2), the precision of that effect's modules whatever the scene's
+  (`Options::precision`, `nvfx_scene_desc.precision`); the library's catalogue (`library/models.nvfxl`) and the fire
+  whirl scene give the orb `precision float`, so every library entry with the orb and the scene play it at float. An
+  engine that creates orb instances or registers the orb with the effect manager itself should set
+  `NVFX_PRECISION_FLOAT` for it. The frozen keyframes did not change: they were pinned to float already (§13.7).

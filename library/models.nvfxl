@@ -28,7 +28,8 @@ effect fog       = "fog.nvfx"                                         # intensit
 effect dust      = "dust.nvfx"                                        # plays once (3 s): 16 start points
 effect cloud     = "cloud.nvfx"                                       # intensity, wind, turbulence
 effect jet       = "jet.nvfx"                                         # intensity, aim (0: 20 degrees down, 1: 30 up), turbulence
-effect orb       = "orb.nvfx"                                         # intensity, pulse, turbulence
+effect orb       = "orb.nvfx", precision float                        # intensity, pulse, turbulence; float: study K
+#                                                                      on the v3 orb (docs/REPORT.md §13.9)
 effect whirlwind = "vortex.nvfx"                                      # intensity, sway, turbulence
 
 # The moor's looks (examples/scenes/moor.nvfxs): frost-white fog, a dark storm cloud, brown dust; all lit by the scene.

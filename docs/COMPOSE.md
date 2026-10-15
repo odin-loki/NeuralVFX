@@ -145,7 +145,7 @@ points, hand-overs between tiles of the same size).
 |---|---|---|
 | `scene` | the picture and the clock | `size W x H` (1280 x 720), `fps` (30), `length` (10 s), `ground` (600: world y of the ground) |
 | `bus` | the field bus's rectangle (§2) | `at (x, y)` top-left corner, `size W x H`, `cell` (8 world pixels); default: the screen with an eighth of its width each side and half its height above |
-| `effect NAME = "FILE"` | a rollout effect, loaded once | the detail layer's settings: `swirl`, `swirl_scale`, `swirl_rate`, `swirl_ramp`, `contrast`, `grow` |
+| `effect NAME = "FILE"` | a rollout effect, loaded once | the detail layer's settings: `swirl`, `swirl_scale`, `swirl_rate`, `swirl_ramp`, `contrast`, `grow`; `precision float` or `int8`: its modules' precision whatever the scene's (default: the scene's; the library gives the orb `float`, [REPORT.md](REPORT.md) §13.9) |
 | `look NAME = shader` or `= like LOOK` | a field-shader look (§2) | `heat_scale`, `emission`, `emission_power`, `soot_density`, `soot_albedo`, `sky`, `shadow`, `scene_light`, `relief`, `tint (r, g, b)`, `hue` (degrees: the emitted colours turned about the grey axis, a recolour; 0): the fields of `ShaderSpec` |
 | `let NAME = EXPR` | a named value, computed where it is used (so it may change over time) | |
 | `input NAME = EXPR` | a value the game sets while the scene plays (`nvfx_scene_set_input`, [ENGINES.md](ENGINES.md) §7); EXPR, a constant, is its starting value | |

@@ -266,6 +266,7 @@ struct EffectC {
   std::string name, file;
   Pos pos;
   std::vector<std::pair<std::string, float>> detail;
+  int precision = -1;  // `precision float|int8` on the effect: its modules' precision; -1: the scene's (Options::precision)
 };
 
 struct InputC {  // `input NAME = value`: a value the game sets while the scene plays
@@ -1268,7 +1269,15 @@ Program Compiler::compile() {
   for (const Statement& st : s_.statements) {
     if (st.keyword == "effect") {
       EffectC& e = prog_.effects[effect_i++];
-      for (const Prop& p : st.props) e.detail.push_back({p.key, constant(p.value.exprs[0], std::format("'{}'", p.key))});
+      for (const Prop& p : st.props) {
+        if (p.key == "precision") {
+          const std::string& v = p.value.names[0];
+          if (v != "float" && v != "int8") fail(p.value.pos, std::format("an effect's precision is 'float' or 'int8', not '{}'", v));
+          e.precision = v == "int8" ? 1 : 0;
+          continue;
+        }
+        e.detail.push_back({p.key, constant(p.value.exprs[0], std::format("'{}'", p.key))});
+      }
     } else if (st.keyword == "look") {
       ShaderSpec spec;
       if (st.kind != "shader") {
@@ -2097,11 +2106,16 @@ void Scene::Impl::build(const EffectLoader& load, const Options& o) {
       r.group = groups++;
     }
     const float scale = r.W / static_cast<float>(mc.size);
+    // The module's precision: its effect's own (`precision float|int8`) or the scene's; with its own, the ISA the runtime
+    // takes for that precision, unless the scene was given another ISA than the runtime's choice for its own precision.
+    const int eprec = prog.effects[zs(mc.effect)].precision;
+    const rt::Precision prec = eprec < 0 ? o.precision : eprec == 1 ? rt::Precision::int8 : rt::Precision::float32;
+    const Isa isa = eprec < 0 || o.isa != best_isa(o.precision) ? o.isa : best_isa(prec);
     const int rows = mc.trail ? mc.tr.count : mc.rows;  // a trail: its pool of tiles, one per "row"
     for (int row = 0; row < rows; ++row) {
       for (int c = 0; c < mc.cols; ++c) {
         const std::string name = mc.tiled ? std::format("{}_r{}c{}", mc.name, row, c) : mc.trail ? std::format("{}_t{}", mc.name, row) : mc.name;
-        owned.push_back(std::make_unique<Module>(name, e, mc.size, Placement{0.f, 0.f, scale}, o.isa, o.precision));
+        owned.push_back(std::make_unique<Module>(name, e, mc.size, Placement{0.f, 0.f, scale}, isa, prec));
         Module* m = owned.back().get();
         if (step_scratch) m->share_scratch(*step_scratch);
         m->group = r.group;
