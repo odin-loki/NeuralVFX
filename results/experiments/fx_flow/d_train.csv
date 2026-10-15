@@ -1,2 +1,4 @@
 effect,runs,frames,sim_minutes,record_s,stepper_loss,stepper_s,renderer_psnr,contrast,swirl,detail_score,starts,start_fine,stored_bytes,total_s
 launch,160,240,21.33,477,0.04987,6773,0.00,1,0.8,0.000,8,64,149162,7257
+puffs,160,240,21.33,405,0.18094,8472,0.00,1,0.8,0.000,8,64,149162,8892
+ink,160,240,21.33,497,0.01820,8307,0.00,1,0.8,0.000,8,64,149162,8824
