@@ -2430,3 +2430,31 @@ steam's 31.88 → 32.03 dB with `mt4_s16` (37.43), motion 0.85 → 0.89 (`mt4_s1
 
 **Candidates for validation** (committed before it): steam `mt4_s16` (SHA-256 `65ac1277...`) and `s16` (`c2c24f39...`);
 the explosion `ms` (`b0ee6f05...`); dust `ms` (`938440a4...`). Jet's follow its probe.
+
+The jet's probe (committed with its candidates, before its validation and after the three above):
+
+| effect | candidate | tracking at 1 s (dB) | spectrum distance | \|ln motion ratio\| | coverage | emission | mean-frame PSNR (dB) | the rule's reading |
+|---|---|---|---|---|---|---|---|---|
+| jet | `s16` | +0.17 [-0.02, +0.34] | ~~+0.097 [+0.046, +0.150]~~ | ~~+0.032 [+0.017, +0.047]~~ | +0.0001 [-0.0001, +0.0003] | +0.00001 | +0.01 [-0.03, +0.04] | worse |
+| jet | `mt4` | +0.03 [-0.04, +0.12] | -0.003 [-0.010, +0.003] | -0.035 [-0.070, +0.001] | +0.0012 [-0.0028, +0.0062] | +0.00009 [+0.00001, +0.00018] | **+0.39 [+0.08, +0.72]** | better; coverage, emission outside |
+| jet | `mt4_s16` | +0.24 [+0.06, +0.44] | ~~+0.080 [+0.029, +0.133]~~ | -0.020 [-0.041, +0.006] | +0.0011 [-0.0028, +0.0059] | +0.00008 [+0.00001, +0.00017] | **+0.40 [+0.07, +0.75]** | spectrum worse; coverage, emission outside |
+| jet | `mt8` | +0.04 [+0.01, +0.08] | -0.002 [-0.008, +0.003] | -0.028 [-0.043, -0.012] | -0.0004 [-0.0033, +0.0029] | +0.00008 [-0.00001, +0.00019] | +0.41 [-0.01, +0.83] | the mean frame ties; coverage, emission outside |
+| jet | `mt8_s16` | +0.22 [+0.00, +0.42] | ~~+0.083 [+0.032, +0.136]~~ | +0.005 [-0.014, +0.023] | -0.0005 [-0.0033, +0.0027] | +0.00008 [-0.00001, +0.00018] | +0.41 [-0.02, +0.85] | spectrum worse; motion, coverage, emission outside |
+
+Means: the jet's mean-frame PSNR 27.02 dB (`mt4` 27.41, `mt8` 27.42; the floor 36.90), spectrum 0.153 (`s16` 0.250,
+`mt4` 0.150; the floor 0.016), motion 0.93 (`mt4` 1.00, `mt8` 0.95; the floor 1.02), coverage 0.0154 (the floor 0.0054),
+emission 0.00085 (`mt4` 0.00093; the floor 0.00027).
+
+- **The fine-tune works on the jet as on fire**: its average picture 0.4 dB closer at both weights, motion closer to the
+  real (0.93 to 1.00 at weight 4), tracking and detail unchanged.
+- **The swirl at 16 pixels is wrong for the jet.** Its sub-grid swirl is the strongest of any effect (3 pixels a frame,
+  steam's 0.5, fire's 0.5 before study M), chosen by study D's calibration at 6 pixels; moved to 16 pixels, eddies of that
+  strength move whole tongues of the flame: the detail spectrum distance rises from 0.15 to 0.25 and motion moves away
+  from the real. Study M's pairing of the two changes came from fire, whose swirl is a sixth of the jet's.
+- So the jet's fine-tune is also validated alone, `mtW`, as magic's is (its target the mean frame; the spectrum held to
+  its margin). Its weight by the same procedure applied to `mtW`: neither meets the rule here and both have two measures
+  outside their margins (coverage, emission), so the larger mean-frame gain: **W = 8** (+0.41 against +0.39 dB). For
+  `mtW_s16` the procedure gives W = 4 (two measures outside against three).
+
+**The jet's candidates for validation**: `mt4_s16` (SHA-256 `e69a087b...`), `mt8` (`5e98f8c0...`) and `s16` (as
+committed).
