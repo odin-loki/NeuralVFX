@@ -62,12 +62,14 @@ Work that runs in this container meanwhile, in 2D and in small 3D, measured as e
   - the mushroom cloud's lost stem and cap;
   - the rocket thruster's curling exhaust;
   - the weak splash.
-- **Float on AVX-512.** Float rollouts take the AVX-512 build by default where the CPU has it: 0.80 of AVX2's time on
-  a quiet machine (`results/quiet`, round 6). The frozen float tests are pinned to AVX2.
+- **Study P, cheaper big effects.** Draw an effect that fills much of the screen at half resolution, then bring it to
+  full size with a learned 2x upscale and seeded micro-detail. It is measured against native resolution and a plain
+  bilinear upscale, in quality and milliseconds, on six large effects at 256 and 512 px (seeds 3.6 to 3.9 million).
+- **Float on AVX-512 (done).** Float rollouts take the AVX-512 build by default where the CPU has it: 0.80 of AVX2's
+  time on a quiet machine (`results/quiet`, round 6). Its float frames turned out bit-identical to AVX2's for all 24
+  models with this compiler; the frozen float tests are pinned to AVX2 anyway (REPORT §13.10).
 
 **Next:**
-- **Study P, cheaper big effects.** Draw an effect that fills much of the screen at a lower resolution, then upscale
-  it with a learned 2x and seeded micro-detail. Measure it against native resolution in quality and milliseconds.
 - **The detail layer's cost.** It is three quarters of a 3D step and much of a 2D frame at 256 px. Try SIMD and
   skipping empty rows and bricks.
 - **More 2D effects**, from the catalogue rows the 2D solver can carry:
@@ -665,7 +667,7 @@ plus every effect's kept grids.
 
 Ranges already used elsewhere:
 - 5.3 to 5.9 million: studies G, K and L;
-- 3.0 to 3.5 million: study O;
+- 3.0 to 3.5 million: study O; 3.6 to 3.9 million: study P;
 - 6.0 to 6.8 million: round 9's effects (earth 6.0 to 6.4, air 6.4 to 6.8); 6.9 million: an earlier smoke test;
 - 7 million: water;
 - 8 million: studies M, M2 and M3.

@@ -95,7 +95,9 @@ These agree with study K's provisional figures (REPORT.md §13.6, §13.8): int8 
 frame), barely without it, and most of the gain over the float default is the AVX-512 build itself. Float on the
 AVX-512 build is 0.80 of float on AVX2 at every size, on a quiet machine too. Float rollouts still default to AVX2; moving
 them would change the float frames (the float convolution and the renderer round differently between builds) and so the
-frozen float keyframes, which would then depend on the CPU running the tests. That is left as a decision.
+frozen float keyframes, which would then depend on the CPU running the tests. That is left as a decision. (Decided the
+same day: float rollouts take the AVX-512 build where the CPU has it, and the frozen float tests name the AVX2 build.
+The float frames turned out the same to the bit on both builds; `docs/REPORT.md` §13.10.)
 
 The effect manager's crowd (165 effects, 4 ms budget, 1 thread): 3.95 ms CPU per frame at float and 2.70 ms at int8
 (medians of five runs), against 44.5 and 31.4 ms for every effect its own unmanaged 64 px instance.

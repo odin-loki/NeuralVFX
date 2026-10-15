@@ -58,6 +58,7 @@ struct nvfx_instance {
   bool apply_colour = false;
   nvfx_precision precision = NVFX_PRECISION_DEFAULT;  // nvfx_instance_set_precision
   nvfx_isa isa = NVFX_ISA_AUTO;                        // the ISA forced when the instance was created
+  nvfx_isa built_isa = NVFX_ISA_AUTO;                  // rollout effects: the ISA its runners were built for
   nfx::rt::Int8Convs convs = nfx::rt::kInt8Convs;      // rollout effects at int8: study K's candidate
   // The prior against drift (docs/DCM.md G2.13): its work buffers, its condition, and when and how strongly it acts.
   std::unique_ptr<nfx::rt::Prior> prior;
@@ -97,6 +98,7 @@ nvfx_isa resolved_isa() {
   const auto forced = static_cast<nvfx_isa>(g_forced_isa.load());
   if (forced != NVFX_ISA_AUTO) return forced;
   // AVX2 by default: AVX-512 measured as a tie on the benchmark machine (docs/PLAN.md §8) and lowers clocks on some CPUs.
+  // This is frame models' ISA and nvfx_get_isa()'s; rollout runners take AVX-512 where the CPU has it (runner_isa).
   if (cpu_has(NVFX_ISA_AVX2)) return NVFX_ISA_AVX2;
   return NVFX_ISA_BASELINE;
 }
@@ -107,12 +109,14 @@ nfx::rt::Precision frame_precision(const nfx::Model& m, nvfx_precision p) {
   return nfx::rt::Precision::int8;
 }
 
-// The ISA of a rollout runner at a precision: `forced`, else the default; at int8 with no ISA forced, the AVX-512 build
-// where the CPU has VNNI: its kernel (vpdpbusd) is what makes int8 pay (study K, docs/REPORT.md §13); the codes and
-// integer sums are those of every other ISA.
+// The ISA of a rollout runner at a precision: `forced`, else the AVX-512 build where the CPU has it, else the default
+// (AVX2, else the baseline). At float AVX-512 alone is enough: on a quiet machine a float frame there takes 0.80 of
+// its time on AVX2 at 64, 128 and 256 px (docs/REPORT.md §13.10; AVX2 until 15 October 2026). At int8 the CPU must
+// also have VNNI: its kernel (vpdpbusd) is what makes int8 pay (study K, §13); the codes and integer sums are those of
+// every other ISA. Frame models do not come here (make_frame_renderer).
 nvfx_isa runner_isa(nfx::rt::Precision q, nvfx_isa forced) {
   if (forced != NVFX_ISA_AUTO) return forced;
-  if (q == nfx::rt::Precision::int8 && cpu_has(NVFX_ISA_AVX512) && cpu_has_vnni()) return NVFX_ISA_AVX512;
+  if (cpu_has(NVFX_ISA_AVX512) && (q == nfx::rt::Precision::float32 || cpu_has_vnni())) return NVFX_ISA_AVX512;
   return resolved_isa();
 }
 
@@ -137,6 +141,7 @@ void make_rollout_runners(nvfx_instance& in, nfx::rt::Precision q) {
   in.b.r = std::move(r[1]);
   in.a.shard = in.b.shard = -1;
   in.step_scratch = std::move(scratch);
+  in.built_isa = runner_isa(q, in.isa);
 }
 
 // A frame model's renderer on the instances' ISA. With int8, a hidden layer to run in integers and no ISA forced, the
@@ -314,7 +319,8 @@ void rollout_frame(nvfx_instance& in, std::int64_t f, const FrameInput& fi, std:
   }
 }
 
-// The prior's work buffers for an instance, on the instance's ISA.
+// The prior's work buffers for an instance, on the default ISA (the one forced, else AVX2): a prior step gives the same
+// floats on AVX2 and AVX-512 (rt_prior.hpp), so the frames are the same whichever build the instance's runners take.
 std::unique_ptr<nfx::rt::Prior> make_prior(const nfx::rt::PriorNet& n) {
   switch (resolved_isa()) {
     case NVFX_ISA_AVX512: return nfx::rt::isa_avx512::make_prior(n);
@@ -424,6 +430,8 @@ nfx::rt::Precision nfx::rt::default_rollout_precision() {
 }
 
 nvfx_isa nfx::rt::rollout_isa(Precision p) { return runner_isa(p, static_cast<nvfx_isa>(g_forced_isa.load())); }
+
+nvfx_isa nfx::rt::rollout_instance_isa(const nvfx_instance* in) { return in && in->a.r ? in->built_isa : NVFX_ISA_AUTO; }
 
 nvfx_status nfx::rt::set_rollout_int8_convs(nvfx_instance* in, Int8Convs convs) {
   if (!in || !in->a.r) return NVFX_ERROR_ARGUMENT;

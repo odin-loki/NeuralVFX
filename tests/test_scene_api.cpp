@@ -86,6 +86,15 @@ ScenePtr make(const Tiny& fx, const char* text, int threads, int overlap, nvfx_s
   return ScenePtr(s);
 }
 
+// Forces an ISA (nvfx_set_isa) for the scenes created while it lives, then gives the choice back to the runtime.
+struct ForcedIsa {
+  bool ok;
+  explicit ForcedIsa(nvfx_isa isa) : ok(nvfx_set_isa(isa) == NVFX_OK) {}
+  ~ForcedIsa() { nvfx_set_isa(NVFX_ISA_AUTO); }
+  ForcedIsa(const ForcedIsa&) = delete;
+  ForcedIsa& operator=(const ForcedIsa&) = delete;
+};
+
 nvfx_scene_info info_of(const nvfx_scene* s) {
   nvfx_scene_info i{};
   EXPECT_EQ(nvfx_scene_get_info(s, &i), NVFX_OK);
@@ -177,6 +186,41 @@ TEST(SceneApi, Int8ScenesAreTheSameOnAnyThreadCount) {
   EXPECT_GT(differ, 0);
   nvfx_scene_error err;
   EXPECT_FALSE(make(fx, kEverything, 1, 0, &err, 0, 0, 3));  // not a precision
+}
+
+// A float scene's modules take the runtime's float build (docs/REPORT.md §13.10): with no ISA forced the AVX-512 build
+// where the CPU has AVX-512, else AVX2, so through the API its frames are the script runner's given that ISA, to the
+// bit; with AVX2 forced (nvfx_set_isa), the script runner's on AVX2.
+TEST(SceneApi, FloatScenesTakeTheRuntimesFloatBuild) {
+  using nfx::compose::Isa;
+  std::uint32_t features = 0;
+  nvfx_version(&features);
+  const Isa want = (features & NVFX_FEATURE_AVX512) != 0 ? Isa::avx512 : (features & NVFX_FEATURE_AVX2) != 0 ? Isa::avx2 : Isa::base;
+  ASSERT_EQ(nvfx_set_isa(NVFX_ISA_AUTO), NVFX_OK);
+  EXPECT_EQ(nfx::compose::best_isa(nfx::rt::Precision::float32), want);
+  const Tiny fx;
+  const sc::Script script = sc::parse(kEverything, "t");
+  int played = 0;
+  for (const nvfx_isa forced : {NVFX_ISA_AUTO, NVFX_ISA_AVX2}) {
+    const ForcedIsa pin(forced);
+    if (!pin.ok) continue;
+    ScenePtr api = make(fx, kEverything, 2, 1, nullptr, 0, 0, NVFX_PRECISION_FLOAT);
+    ASSERT_TRUE(api);
+    sc::Options o{2, forced == NVFX_ISA_AUTO ? want : Isa::avx2, true};
+    o.precision = nfx::rt::Precision::float32;
+    sc::Scene ref(script, fx.loader(), o);
+    std::vector<std::uint8_t> rgb(160 * 90 * 3);
+    const int frames = info_of(api.get()).frames;
+    for (int f = 0; f < frames; ++f) {
+      if (f > 0) {
+        ASSERT_EQ(nvfx_scene_step_frames(api.get(), 1), NVFX_OK);
+      }
+      ref.render(f, rgb);
+      ASSERT_EQ(picture(api.get()), rgb) << "frame " << f << ", forced ISA " << static_cast<int>(forced);
+    }
+    ++played;
+  }
+  EXPECT_GE(played, 1);
 }
 
 // Frames computed and not drawn change nothing in the frames drawn after them; drawing a frame twice copies it.
@@ -535,10 +579,14 @@ std::filesystem::path models_d() {
 
 // The fireball script played through the API, drawing only its eight keyframes (the other frames computed without
 // pictures), gives the hand-written scene's frozen keyframes to the bit (results/experiments/v1_frozen.csv).
-TEST(SceneApi, FireballKeyframesMatchTheFrozenOnes) {  // at float: the frozen keyframes are the float path's
+TEST(SceneApi, FireballKeyframesMatchTheFrozenOnes) {  // at float on AVX2: the frozen keyframes are that path's
   const std::filesystem::path models = models_d(), src = NEURALFX_SOURCE_DIR;
   for (const char* f : {"fire.nvfx", "smoke.nvfx", "explosion.nvfx"})
     if (!std::filesystem::exists(models / f)) GTEST_SKIP() << "the study D effects are not in " << models.string();
+  // and on the AVX2 build, the one they were frozen on: float takes the AVX-512 build where the CPU has it
+  // (docs/REPORT.md §13.10), whose float convolution and renderer may round differently
+  const ForcedIsa avx2(NVFX_ISA_AVX2);
+  if (!avx2.ok) GTEST_SKIP() << "the frozen keyframes are the AVX2 build's; this CPU lacks AVX2";
   std::map<std::string, std::string> frozen;  // frame_NNN -> sha256
   {
     std::ifstream in(src / "results/experiments/v1_frozen.csv");
