@@ -92,10 +92,12 @@ From [docs/REPORT.md](docs/REPORT.md), measured on simulated fire, smoke and exp
   tied a coarse simulation (the 32-cell stepper first; a once-a-frame lock in the detail layer made magic's saw-teeth;
   a sink hidden by a clamp kept the dust devil from regrowing its column), and three replacements that passed a rule
   set before validation, tested once on fresh seeds: +0.94, +0.45 and +0.21 dB at 1 s.
-- **Ordered and random (studies M and M2, [docs/REPORT.md](docs/REPORT.md) §14, `nvfx_ordered`):** fire's average
+- **Ordered and random (studies M, M2 and M3, [docs/REPORT.md](docs/REPORT.md) §14, `nvfx_ordered`):** fire's average
   picture came 0.39 dB closer to a real run's with an ensemble-mean fine-tune and a larger sub-grid swirl (replaced);
   the same fixes on seven more effects replaced nothing: the mean state brought the explosion 3.4 dB and dust 1.1 dB
-  closer on validation but failed margins narrower than those measures' spread, and the rest tied or traded.
+  closer on validation but failed margins narrower than those measures' spread, and the rest tied or traded. Study M3
+  retried the mean state with a rule planned for power (margins from the null, 30 settings) and **replaced the explosion
+  and dust**: on held-out settings their average pictures came 2.9 and 1.3 dB closer to a real run's, nothing worse.
 - **Memory, against production block compression:** for equal quality, a network per effect clip needs **2.4 to
   4.3 times less memory than a BC7 flipbook** at 8 bits, and 7.5 times less [4.2, 8.3] with features trained for 4
   bits. **Against ASTC** (mobile GPUs; 8x8 to 12x12 blocks hold every frame at full size in 121 to 256 KB) the ratios

@@ -1935,8 +1935,9 @@ Int8 minus float, 95% paired bootstrap intervals; the spectrum, coverage and emi
 
 Status: **done.** The diagnosis (§14.1) and what was built and tried (§14.2) were done on training settings only; the
 rule (§14.3) was committed before any validation number. **Fire is replaced** (better on both targets on the held-out
-test, worse on nothing); smoke and the explosion keep v2's (none of their candidates met the rule on validation). Study
-M2 (§14.8) applied the fixes to seven more effects with fresh seeds and replaced none.
+test, worse on nothing); smoke and the explosion kept v2's (none of their candidates met the rule on validation). Study
+M2 (§14.8) applied the fixes to seven more effects with fresh seeds and replaced none. Study M3 (§14.9) tested the mean
+state for the explosion and dust again under a rule planned for power, and **replaced both**.
 
 **The question.** Pooled over 8 runs per setting at study G's validation settings (§6.9.2), v2's average picture over
 time is 6.9 dB (fire), 6.5 dB (smoke) and 7.9 dB (explosion) further from a real run's than a second real run's is, and
@@ -2731,9 +2732,10 @@ nvfx_ordered info --model F                                                     
 
 ### 14.9 Study M3: the mean state for the one-shots, with a rule planned for power
 
-Status: **in progress** (15 October 2026). This plan (the probe, how the margins and the number of settings follow from
-it, and the seeds) is committed before any of the study's numbers; the rule's numbers follow the probe and are committed
-before validation.
+Status: **done** (15 October 2026). The plan (§14.9.1) was committed before any of the study's numbers and the rule's
+numbers (§14.9.3) after the probe and before validation. **The explosion and dust are replaced**: their mean states met
+the rule on validation and on a test run once on 30 held-out settings (the average picture +2.9 dB [+1.7, +4.1] and +1.3
+dB [+0.7, +1.9] closer to a real run's, nothing worse by more than its margin, and, on the test, nothing worse at all).
 
 **The question.** The mean state (§14.2: each start point moved to the requested controls by a quadratic fit of the
 ordered coarse state) brought the explosion's average picture 4.3 dB (study M) and 3.4 dB (study M2) closer to a real
@@ -2918,19 +2920,19 @@ measured and reported, not part of the rule.
 
 #### 14.9.4 Validation: both mean states meet the rule
 
-Candidate minus current model on study G's 10 validation settings and 20 more, with the study's seeds, 8 runs pooled
-per setting, tracking 2 runs per setting ([m3_val_compare.csv](../results/experiments/ordered/m3_val_compare.csv),
+Candidate minus current model on study G's 10 validation settings and 20 more, with the study's seeds, 8 runs pooled per
+setting, tracking 2 runs per setting ([m3_val_compare.csv](../results/experiments/ordered/m3_val_compare.csv),
 [m3_val_stats.csv](../results/experiments/ordered/m3_val_stats.csv),
-[m3_val_choice.csv](../results/experiments/ordered/m3_val_choice.csv)). Bold: better (interval clear of zero); "K":
-past study K's margin (a second reading); "strict": the interval entirely on the worse side.
+[m3_val_choice.csv](../results/experiments/ordered/m3_val_choice.csv)). Bold: better (interval clear of zero); "K": past
+study K's margin (a second reading); "strict": the interval entirely on the worse side.
 
 | effect | tracking at 1 s (dB) | spectrum distance (margin) | \|ln motion ratio\| (margin) | coverage (margin) | emission | mean-frame PSNR (dB) | rule |
 |---|---|---|---|---|---|---|---|
 | explosion `ms` | -0.0003 [-0.0011, +0.0004] | -0.001 [-0.024, +0.020] (0.054; K) | -0.040 [-0.103, +0.017] (0.117) | **-0.0166 [-0.0234, -0.0100]** (0.018) | -0.000000 | **+3.31 [+2.36, +4.30]** | **meets** |
 | dust `ms` | -0.0000 [-0.0004, +0.0004] | +0.009 [+0.000, +0.018] (0.025; strict) | **-0.076 [-0.120, -0.034]** (0.119) | **-0.0029 [-0.0048, -0.0011]** (0.0057) | **-0.0000002** | **+1.03 [+0.38, +1.74]** | **meets** |
 
-Means over the 30 settings (current → `ms`; the floor, a second set of 8 real runs; the mean frame's distance below the
-floor in brackets):
+Means over the 30 settings (current → `ms`; the floor, a second set of 8 real runs; the mean frame's distance below
+the floor in brackets):
 
 | effect | mean-frame PSNR (dB) | spectrum distance | motion ratio | coverage |
 |---|---|---:|---:|---:|
@@ -2943,8 +2945,8 @@ floor in brackets):
   spectrum's interval's worse end (+0.020) is inside the null's margin and a hair past study K's (+0.02); under the
   strict reading nothing is worse.
 - **Dust's mean state** brings its average picture 1.0 dB closer (better at 19 of 30 settings, worst -1.8 dB), moves its
-  motion from 6% too lively to 3% too calm (closer), and its coverage closer. Its detail spectrum distance rises by 0.009
-  (8%), an interval just clear of zero on the worse side, within both its margin (0.025) and study K's (0.02).
+  motion from 6% too lively to 3% too calm (closer), and its coverage closer. Its detail spectrum distance rises by
+  0.009 (8%), an interval just clear of zero on the worse side, within both its margin (0.025) and study K's (0.02).
 - Study M2's setting 2 (counting from 0; controls 0.61, 0.32, 0.72), where both mean states lost with M2's seeds, is a
   gain with these (+4.6 dB the explosion, +1.5 dB dust): that loss was its seeds'.
 - The paired spreads were as the probe said or smaller, except the explosion's motion: SD 0.063 (spectrum; the probe
@@ -2984,6 +2986,106 @@ Distance to the floor (a second set of 8 real runs per setting), before and afte
 | explosion | validation (30) | 6.58 → **3.27** | 0.197 → 0.197 (0.036) | 0.030 → **0.013** (0.005) |
 | dust | test (30) | 5.72 → **4.40** | 0.114 → 0.105 (0.036) | 0.0096 → **0.0051** (0.0033) |
 | dust | validation (30) | 5.93 → **4.90** | 0.111 → 0.120 (0.030) | 0.0078 → **0.0050** (0.0022) |
+
+#### 14.9.6 What was replaced, and its cost
+
+**The new explosion and dust** are study M's and M2's candidate files, byte for byte, copied to the data root's
+`m3/models/explosion.nvfx` (301,443 bytes, SHA-256 `b0ee6f053b4b8359...`) and `m3/models/dust.nvfx` (301,443 bytes,
+`938440a486c21c39...`): v2's explosion and round 5's dust with a mean state (file version 6; 10,240 coefficients at
+fp16, 20.5 KB more than the 280,927 bytes of each old file). The old files are untouched. At the end, after the full
+ctest passed with them in private copies of the folders (`m3/scene`), the shared links were repointed:
+`library/models/explosion.nvfx` and `fx/models/scene/explosion.nvfx` to `m3/models/explosion.nvfx`,
+`library/models/dust.nvfx` and `fx_atmos/models/scene/dust.nvfx` to `m3/models/dust.nvfx`. The scene folders of
+`fx_energy`, `fx_blaze`, `fx_flow` and `fx_water` hold neither effect; study D's v1 models for the fireball
+(`experiments/models/d`) and other studies' private copies are untouched.
+
+**Where the mean state acts.** A start point begun at controls c is moved by mu(c) - mu(its own controls): wherever an
+effect is played at controls other than its start point's, that is through the runtime as the study measured it (an
+instance picks one of the three start points nearest its controls by seed), the effect manager, and a script module that
+gives controls of its own. A module that names a start point and gives no controls plays at that start point's own
+controls and is moved by nothing, to the bit. Every explosion module in the library and the portal is of that kind, so
+the portal's keyframes and every explosion entry's are the same to the bit; dust's modules in the moor and the library
+give controls, so they change:
+- **Frozen hashes updated**: the moor's six keyframes after the first strike (076 to 270;
+  [fx_atmos_frozen.csv](../results/experiments/fx_atmos_frozen.csv), with a `dust_m3` row), dust_impact
+  ([frozen.csv](../results/library/frozen.csv)) and bullet_impact_stone
+  ([frozen_round3.csv](../results/library/frozen_round3.csv)), and the two models' rows in both library files; an
+  `explosion_m3` row in [fx_frozen.csv](../results/experiments/fx_frozen.csv), whose portal keyframes did not change.
+  Every other frozen output is the same to the bit: the fireball's (study D's v1), the portal's, the library's other
+  entries (grenade, rocket_trail, plasma_bolt and vehicle_dust_wake among them: trails lay their material down rather
+  than begin from a start point), the fire whirl's, the prairie's, the lift-off's and the falls'.
+- **Judged by eye** (old and new side by side in the data root's `m3/render/cmp`). The moor: the first strike, at
+  controls (0.9, 0.55, 0.6), throws up a wider and taller bank of dust, the size of a strong strike rather than of
+  stored burst 0; the second, at (0.6, 0.6, 0.5), a slightly smaller one than stored burst 7 gave. The library's dust
+  entries: ground_slam (the strongest controls) taller and wider, out to its shock ring; dust_impact a little lower and
+  flatter; the bullet puffs barely change. The same dust everywhere, its rolling front and settling unchanged, no new
+  artefacts. The explosion through the runtime (`nvfx_reel`, v2 and the new one at controls (0.3, 0.5, 0.5) and (0.85,
+  0.5, 0.6), beside the simulator's): at the weak controls the new ball is larger than v2's, which began from a smaller
+  stored burst, and at that moment a little larger than the simulator's own run too (one run says little: the coverage
+  distance over 30 settings is what improved); at the strong ones the two are nearly the same size; shapes, colours and
+  break-up are the same kind, and there are no new artefacts. The gain is statistical (the average picture over many
+  runs and settings): no single frame shows 3 dB.
+
+**Cost, provisional** (thread CPU time per frame through `nvfx_render`, the median of 9 interleaved repetitions of 88
+frames at controls (0.6, 0.5, 0.6), on the shared machine with other agents' jobs running; `nvfx_ordered cost`,
+[m3_cost.csv](../results/experiments/ordered/m3_cost.csv)). Current model → new, ms per frame, and the median of the
+paired differences:
+
+| effect | 128 px float | 256 px float | 128 px int8 | 256 px int8 |
+|---|---|---|---|---|
+| explosion | 0.77 → 0.77 (-0.01) | 1.75 → 1.83 (+0.14) | 0.54 → 0.56 (-0.01) | 1.35 → 1.50 (+0.09) |
+| dust | 0.84 → 0.89 (+0.01) | 2.06 → 2.20 (+0.13) | 0.61 → 0.72 (+0.06) | 1.56 → 1.67 (+0.15) |
+
+The mean state is applied once per shard (a one-shot has one) without allocating, so at 128 px the difference is the
+session's noise; at 256 px both effects cost 0.1 to 0.15 ms more at both precisions (study M2 measured +0.16 and +0.05
+ms there). Not studied: the moved start changes how much of the frame the burst covers at these controls, and the detail
+layer and the renderer skip empty spans, so this may be the picture's size rather than the model's work.
+
+#### 14.9.7 What it means
+
+- **The mean state works, and the earlier nulls were about power.** Measured three times on validation (+4.3, +3.4 and
+  now +3.3 dB for the explosion's average picture; +1.1 and +1.0 dB for dust's) and once on a test (+2.9 and +1.3 dB on
+  30 held-out settings), it brings both one-shots closer to the real effect: the explosion's distance below the floor in
+  the average picture halves (6.0 to 3.1 dB on the test), dust's falls from 5.7 to 4.4 dB, both cover the frame more
+  like the real ones and move more like them, and tracking from a true state is unchanged. Studies M and M2 did not fail
+  it on its effect: at 10 settings even this rule would have passed with probability 0.59 (the explosion) and 0.45
+  (dust) if the mean state truly changed nothing but the mean frame.
+- **The margins are wide, and they say why.** They are the current one-shots' own seed-to-seed variety: a set of 8
+  explosions from v2 at a setting differs from another set by 12% in motion and 0.018 in coverage distance (RMS), more
+  than two sets of real explosions differ, because each begins from one of 16 stored bursts at another intensity. That
+  is a property of the current models, which the mean state removes, and it is what a viewer sees of them; the margins
+  were fixed from it before the mean state was played. Read against study K's narrower margins as well: on the test both
+  effects are within them on every measure and nothing is worse even under the strict reading (the explosion's detail
+  spectrum and motion are better); on validation the explosion's spectrum interval reached +0.0205, a hair past K's
+  +0.02, so under K's margins it would have stopped there, and dust's spectrum was 0.009 worse, within K's margin but
+  strictly (+0.009 [+0.000, +0.018]), so under study M's strict reading dust would have stopped there.
+- **Where it acts.** Only where an effect is played at controls other than its start point's own: the runtime as an
+  engine calls it (controls set, the start point picked by seed), the effect manager and script modules that give
+  controls. The library's explosion entries choose their start points by look and give no controls, so they play exactly
+  as before; its dust entries and the moor change.
+- **What is left.** The explosion's average picture is still 3.1 dB below the floor, its detail spectrum distance 4.7
+  times the floor's (0.170 against 0.036) and it is 10% calmer than the real one (motion 0.90), as §14.1 found its
+  stepper is from a true state (0.87); dust is 4.4 dB below the floor. The mean state moves only the coarse state: the
+  stored 64-pixel fine fields (the detail of each burst) keep their own burst's size, and moving them with it is the
+  next step; the stepper's calm (an ensemble-mean fine-tune from starts moved to the controls, §14.7) the one after.
+- **How to plan a rule for a change that moves trajectories**: measure the null (the current model against itself with
+  fresh seeds) and the candidate's paired spread on the probe, fix the margins from what the null says matters, and size
+  the settings on the candidate's spread. The probe's spreads held on validation, except the explosion's motion (SD
+  0.171 against 0.121 on the probe), which still sat well within its margin.
+
+Reproduce (data root `$NEURALVFX_DATA`; this study's files under `m3`; every step caches and resumes; the job list is
+`m3/jobs/queue.txt`):
+
+```sh
+O="nvfx_ordered --study m3"
+$O val --effect explosion --split probe3 --current v2/models/explosion.nvfx --null --prefix m3_probe        # the null: m3_margins.csv
+$O val --effect explosion --split probe3 --current v2/models/explosion.nvfx --cand ms=m2/cand/explosion/ms.nvfx --null --prefix m3_probe   # m3_power.csv
+nvfx_ordered settings --n 30                                                                             # the extended settings
+$O val --effect explosion --split val3 --current v2/models/explosion.nvfx --cand ms=m2/cand/explosion/ms.nvfx --prefix m3_val
+$O test --effect explosion --current v2/models/explosion.nvfx --cand ms=m3/models/explosion.nvfx --frozen results/experiments/ordered/m3_frozen.csv   # once
+nvfx_ordered cost --effect explosion --current v2/models/explosion.nvfx --cand ms=m3/models/explosion.nvfx --sizes 128,256 --precision float|int8 --reps 9
+#   dust: the same with fx_atmos/models/d/dust.nvfx and m2/cand/dust/ms.nvfx, m3/models/dust.nvfx
+```
 
 ## 15. Study N: a small 3D demo
 
