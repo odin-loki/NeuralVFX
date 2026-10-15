@@ -3,7 +3,7 @@
 # Files are read from the library's models folder (nvfx_library_desc.models_dir; the gallery's --models). A new trained
 # effect joins the library with one line here and entries that play it, in any catalogue file: no code.
 
-effect fire      = "fire.nvfx"                                        # v2 (study D2): intensity, wind, turbulence
+effect fire      = "fire.nvfx"                                        # study M (v3; REPORT §14): intensity, wind, turbulence
 effect smoke     = "smoke.nvfx", swirl 1.4, swirl_scale 9             # v2
 effect explosion = "explosion.nvfx", swirl 2.2, swirl_scale 9, contrast 1   # v2, coupled (study I): 16 start points
 effect steam     = "steam.nvfx"                                       # intensity, wind, turbulence

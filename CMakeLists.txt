@@ -419,17 +419,18 @@ if(NEURALFX_BUILD_TESTS)
                      --expect ${CMAKE_CURRENT_BINARY_DIR}/fireball_script_profile.csv)
     set_tests_properties(neuralfx.SceneApiFireballBitExact PROPERTIES LABELS "neuralfx;data" SKIP_RETURN_CODE 77 TIMEOUT 1200
                          FIXTURES_REQUIRED fireball_profile)
-    # The portal (docs/EFFECTS.md): the effects added after study D with study D's v2 fire and explosion, all in
+    # The portal (docs/EFFECTS.md): the effects added after study D with study M's fire (docs/REPORT.md §14) and study D's
+    # v2 explosion, all in
     # NEURALFX_MODELS_FX (outside git); its keyframes have the SHA-256 recorded in results/experiments/fx_frozen.csv.
-    set(NEURALFX_MODELS_FX "${_nvfx_data}/fx/models/scene" CACHE PATH "steam.nvfx, magic.nvfx and v2's fire.nvfx and explosion.nvfx")
+    set(NEURALFX_MODELS_FX "${_nvfx_data}/fx/models/scene" CACHE PATH "steam.nvfx, magic.nvfx, study M's fire.nvfx and v2's explosion.nvfx")
     add_test(NAME neuralfx.ScriptedPortalFrozen
              COMMAND nvfx_scene_script --script ${CMAKE_CURRENT_SOURCE_DIR}/examples/scenes/portal.nvfxs --models ${NEURALFX_MODELS_FX}
                      --keyframes ${CMAKE_CURRENT_BINARY_DIR}/portal_script_keyframes --no-video --threads 2 --precision float
                      --verify ${CMAKE_CURRENT_SOURCE_DIR}/results/experiments/fx_frozen.csv)
     set_tests_properties(neuralfx.ScriptedPortalFrozen PROPERTIES LABELS "neuralfx;data" SKIP_RETURN_CODE 77 TIMEOUT 1200)
-    # The moor (docs/EFFECTS_ATMOSPHERE.md): fog, dust and cloud with study D's v2 fire, all in NEURALFX_MODELS_ATMOS
+    # The moor (docs/EFFECTS_ATMOSPHERE.md): fog, dust and cloud with study M's fire, all in NEURALFX_MODELS_ATMOS
     # (outside git); its keyframes have the SHA-256 recorded in results/experiments/fx_atmos_frozen.csv.
-    set(NEURALFX_MODELS_ATMOS "${_nvfx_data}/fx_atmos/models/scene" CACHE PATH "fog.nvfx, dust.nvfx, cloud.nvfx and v2's fire.nvfx")
+    set(NEURALFX_MODELS_ATMOS "${_nvfx_data}/fx_atmos/models/scene" CACHE PATH "fog.nvfx, dust.nvfx, cloud.nvfx and study M's fire.nvfx")
     add_test(NAME neuralfx.ScriptedMoorFrozen
              COMMAND nvfx_scene_script --script ${CMAKE_CURRENT_SOURCE_DIR}/examples/scenes/moor.nvfxs --models ${NEURALFX_MODELS_ATMOS}
                      --keyframes ${CMAKE_CURRENT_BINARY_DIR}/moor_script_keyframes --no-video --threads 2 --precision float
@@ -443,7 +444,7 @@ if(NEURALFX_BUILD_TESTS)
     # procedural ones played with zero allocations; the C example's checks of the API. With the eleven learned effects
     # in NEURALFX_MODELS_LIBRARY (outside git; skipped without them): every entry played with zero allocations, and the
     # keyframes of a handful of entries against their SHA-256 in results/library/frozen.csv.
-    set(NEURALFX_MODELS_LIBRARY "${_nvfx_data}/library/models" CACHE PATH "The library's learned effects: fire, smoke, explosion (v2), steam, magic, fog, dust, cloud, jet, orb, vortex .nvfx")
+    set(NEURALFX_MODELS_LIBRARY "${_nvfx_data}/library/models" CACHE PATH "The library's learned effects: fire (study M), smoke, explosion (v2), steam, magic, fog, dust, cloud, jet, orb, vortex .nvfx")
     add_test(NAME neuralfx.LibraryCatalogueCheck COMMAND nvfx_gallery --library ${CMAKE_CURRENT_SOURCE_DIR}/library --check --threads 2)
     set_tests_properties(neuralfx.LibraryCatalogueCheck PROPERTIES LABELS neuralfx TIMEOUT 600)
     add_test(NAME neuralfx.LibraryHostExample COMMAND nvfx_library_host --self-test ${CMAKE_CURRENT_SOURCE_DIR}/library)
