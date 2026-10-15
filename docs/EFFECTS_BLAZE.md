@@ -441,14 +441,17 @@ and ash begins to fall (`emit ash`). Nothing was added to the compositor or the 
 The video (rendered at the runtime's int8 default) and the full keyframes are under the data root's `fx_blaze/scene`
 (outside git); the keyframes' SHA-256 are in `results/experiments/fx_blaze_frozen.csv` and `ctest -R
 ScriptedPrairieFrozen` checks them (pinned to float, skipped without the effects in `NEURALFX_MODELS_BLAZE`, by default
-`$NEURALVFX_DATA/fx_blaze/models/scene`). They are the same on 1 and 2 threads. It plays without an allocation in its
+`$NEURALVFX_DATA/fx_blaze/models/scene`, whose `mushroom.nvfx` links study O's since it replaced the round's, REPORT
+§16.3; the keyframes from 2.1 s on changed with it). They are the same on 1 and 2 threads. It plays without an allocation in its
 frame loop, at 47 ms per frame on 2 threads and 36 ms on 4 on the busy machine (its eight modules' steps 3 to 8 ms of
 it; provisional).
 
 What works: the three read as a grass fire, burnt ground and a distant mushroom cloud, one flash lights them and one
 shock wave moves them. What does not, yet: the coals are a thin strip at this scale; the wildfire's smoke ends in a
 soft line at its tiles' tops; the mushroom's cap is ragged, and late in its life it looks more like a tree of smoke than
-a mushroom; its last frame is held while it fades.
+a mushroom; its last frame is held while it fades. Since study O (the mushroom replaced, §4.5) its fireball is bigger
+and brighter and its cap wider on a clearer stem from 3.4 to 4.6 s (the keyframes above are the new ones); the tree
+of smoke late on is the same.
 
 ## 7. What it means
 

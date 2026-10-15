@@ -476,7 +476,8 @@ build/nvfx_experiment d-eval --effects waterfall --root $NEURALVFX_DATA/fx_water
     --seed-base 7000000 --figures DIR2                                 # each effect once; rows merged, then d-report
 build/nvfx_experiment d-report $R
 # the models joined to the library's folder
-cd $NEURALVFX_DATA/library/models && ln -s ../../fx_water/models/d/{waterfall,fountain,splash,rainshaft}.nvfx .
+cd $NEURALVFX_DATA/library/models && ln -s ../../fx_water/models/d/{waterfall,fountain,rainshaft}.nvfx .
+ln -s ../../o_fix/models/splash.nvfx .                                # the splash since study O (REPORT §16.3)
 # the library's water entries: sheet and keyframes
 build/nvfx_gallery --library library --models $NEURALVFX_DATA/library/models --only waterfall,fountain,splash,... \
     --sheet water_sheet.png --keyframes water_kf --threads 2 --cell 256x192 --columns 6

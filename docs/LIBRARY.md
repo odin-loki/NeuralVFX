@@ -357,17 +357,18 @@ library's night; a game draws its own water.
 Water in two layers ([EFFECTS_WATER.md](EFFECTS_WATER.md)), `library/water.nvfxl`. In `waterfall`, `fountain`,
 `splash` and `rain_shaft` the ordered body is one of the four water models (the simulator's water presets, trained with
 study D's recipe and tested: the fountain and the rain shaft work as steam did, the waterfall and the splash are weak by
-the test's rule, as they only tie the nearest flipbook's average picture), and the random detail around it is seeded:
-spray thrown off the body's water and pools churned where it lands (both read the field bus), drops, rings and foam.
-The other entries are the seeded layer alone (*drawn*): their motion a seeded simulation, their look drawn, their mist
+the test's rule, as they only tie the nearest flipbook's average picture; the splash was replaced by study O's, whose
+average picture is 0.40 dB closer to a real run's, [REPORT.md](REPORT.md) §16.3), and the random detail around it is
+seeded: spray thrown off the body's water and pools churned where it lands (both read the field bus), drops, rings and
+foam. The other entries are the seeded layer alone (*drawn*): their motion a seeded simulation, their look drawn, their mist
 and spray clouds the fog model fed where the water lands (the steam model for the geyser); `waterfall_drawn` and
 `rain_shaft_drawn` are the drawn versions of the two kept beside the learned ones. *Procedural* in the plays column
 means no model. None of the entries draws rock or ground: a fall whose lip is in its box starts in mid-air, so a game
 puts it against its own cliff. The water models are linked into the models' folder with the others
-(`ln -s ../../fx_water/models/d/{waterfall,fountain,splash,rainshaft}.nvfx .`). The waterfall and the rain shaft play
-with `swirl 0, passes 2` on their `effect` line: since study O ([REPORT.md](REPORT.md) §16) their detail layer runs in
-two passes a frame, which takes off the horizontal bands one pass laid across the falling water
-([EFFECTS_WATER.md](EFFECTS_WATER.md) §7.1).
+(`ln -s ../../fx_water/models/d/{waterfall,fountain,rainshaft}.nvfx ../../o_fix/models/splash.nvfx .`). The waterfall
+and the rain shaft play with `swirl 0, passes 2` on their `effect` line: since study O ([REPORT.md](REPORT.md) §16)
+their detail layer runs in two passes a frame, which takes off the horizontal bands one pass laid across the falling
+water ([EFFECTS_WATER.md](EFFECTS_WATER.md) §7.1).
 
 | effect | what it is | plays | box, anchor | runs | parameters (default) | how it looks |
 |---|---|---|---|---|---|---|
@@ -560,8 +561,10 @@ study D's steam, round 5's fog, cloud and jet, and
 study L's magic, orb and vortex ([REPORT.md](REPORT.md) §12.1, which replaced study D's magic and round 5's orb and
 vortex), and round 7's wildfire, coals and mushroom ([EFFECTS_BLAZE.md](EFFECTS_BLAZE.md)) and launch, puffs and ink
 ([EFFECTS_FLOW.md](EFFECTS_FLOW.md)), and round 8's waterfall, fountain, splash and rainshaft
-([EFFECTS_WATER.md](EFFECTS_WATER.md)). The orb plays at float whatever the stage's precision (`precision float` on its
-`effect` line): study L's orb failed study K's int8 rule on its average picture ([REPORT.md](REPORT.md) §13.9). Links are enough:
+([EFFECTS_WATER.md](EFFECTS_WATER.md)); the mushroom and the splash are study O's (a mean state, and for the mushroom a
+stepper fine-tuned on 30-frame windows; [REPORT.md](REPORT.md) §16.3, which replaced round 7's and round 8's). The
+orb plays at float whatever the stage's precision (`precision float` on its `effect` line): study L's orb failed study
+K's int8 rule on its average picture ([REPORT.md](REPORT.md) §13.9). Links are enough:
 
 ```sh
 mkdir -p $NEURALVFX_DATA/library/models && cd $NEURALVFX_DATA/library/models
@@ -571,9 +574,9 @@ ln -s ../../fx/models/d/steam.nvfx .
 ln -s ../../fx_atmos/models/d/fog.nvfx ../../m3/models/dust.nvfx ../../fx_atmos/models/d/cloud.nvfx .
 ln -s ../../fx_energy/models/d/jet.nvfx .
 ln -s ../../l_swirl/models/v3/magic.nvfx ../../l_swirl/models/v3/orb.nvfx ../../l_swirl/models/v3/vortex.nvfx .
-ln -s ../../fx_blaze/models/d/wildfire.nvfx ../../fx_blaze/models/d/coals.nvfx ../../fx_blaze/models/d/mushroom.nvfx .
+ln -s ../../fx_blaze/models/d/wildfire.nvfx ../../fx_blaze/models/d/coals.nvfx ../../o_fix/models/mushroom.nvfx .
 ln -s ../../fx_flow/models/d/launch.nvfx ../../fx_flow/models/d/puffs.nvfx ../../fx_flow/models/d/ink.nvfx .
-ln -s ../../fx_water/models/d/waterfall.nvfx ../../fx_water/models/d/fountain.nvfx ../../fx_water/models/d/splash.nvfx .
+ln -s ../../fx_water/models/d/waterfall.nvfx ../../fx_water/models/d/fountain.nvfx ../../o_fix/models/splash.nvfx .
 ln -s ../../fx_water/models/d/rainshaft.nvfx .
 ```
 

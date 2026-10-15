@@ -3579,6 +3579,14 @@ here; `library_round7`, `scene_prairie`, `effect_mushroom` and `real_vs_learned_
 
 ![The mushroom before (rows 1 and 3) and after study O (rows 2 and 4), at 1, 2, 3.5 and 5 s](figures/o_mushroom.png)
 
+Where a scene asks a start point for controls of its own, the mean state shows. The prairie plays start 13, a calm
+start, at controls (0.8, 0.6, 0.3): the new file moves it there, so its fireball is bigger and brighter and its cap
+wider on a clearer stem at 3.4 to 4.6 s; late on it spreads into the same tree of smoke (below: the prairie's keyframes
+at 2.6, 3.4, 4.1, 4.6 and 5.8 s cropped to the cloud, before on top, after below; the whole frames in
+[EFFECTS_BLAZE.md](EFFECTS_BLAZE.md) §6).
+
+![The prairie's mushroom before (top) and after study O (bottom)](figures/o_prairie_mushroom.png)
+
 ### 16.4 The rocket thruster's exhaust: a cold field on its tail (a library entry)
 
 **The flaw** ([LIBRARY.md](LIBRARY.md)): `rocket_thruster`'s exhaust (the jet model, recoloured blue) curls up at its
