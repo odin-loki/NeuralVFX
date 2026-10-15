@@ -236,7 +236,8 @@ struct ActC {
 enum WP : int {
   w_x0, w_y0, w_x1, w_y1, w_flow, w_vx, w_vy, w_speed, w_angle, w_spread, w_fan, w_pulse, w_breakup, w_gravity, w_wu, w_wv,
   w_rate, w_radius, w_depth, w_damping, w_drift, w_surface, w_swell, w_wavelength, w_period, w_density, w_sway, w_gust,
-  w_floor, w_mist_amount, w_mist_heat, w_brightness, w_clarity, w_cr, w_cg, w_cb, w_from, w_until, w_if, kWaterParams
+  w_floor, w_mist_amount, w_mist_heat, w_brightness, w_clarity, w_cr, w_cg, w_cb, w_from, w_until, w_if, w_threshold, w_churn,
+  kWaterParams
 };
 
 struct WaterC {
@@ -1115,7 +1116,7 @@ void Compiler::water(const Statement& s, WaterC& w) {
   };
   switch (w.kind) {
     case WaterKind::pool:
-      only(s, {"along", "depth", "cells", "speed", "damping", "drift", "rate", "surface", "swell", "wavelength", "period", "colour", "clarity",
+      only(s, {"along", "depth", "cells", "speed", "damping", "drift", "rate", "surface", "swell", "wavelength", "period", "colour", "clarity", "churn",
                "brightness", "capacity", "seed", "from", "until", "if"}, what);
       need("along");
       break;
@@ -1143,6 +1144,11 @@ void Compiler::water(const Statement& s, WaterC& w) {
     case WaterKind::shaft:
       only(s, {"in", "size", "density", "speed", "wind", "sway", "gust", "capacity", "mist", "mist_amount", "mist_heat", "colour", "clarity",
                "brightness", "seed", "from", "until", "if"}, what);
+      need("in");
+      need("size");
+      break;    case WaterKind::spray:  // drops thrown off a learned water effect's water (the bus's soot)
+      only(s, {"in", "size", "density", "threshold", "speed", "radius", "capacity", "gravity", "wind", "floor", "onto", "mist", "mist_amount",
+               "mist_heat", "colour", "brightness", "seed", "from", "until", "if"}, what);
       need("in");
       need("size");
       break;
@@ -1193,7 +1199,8 @@ void Compiler::water(const Statement& s, WaterC& w) {
            {"period", w_period, kWaterParams},   {"density", w_density, kWaterParams}, {"sway", w_sway, kWaterParams},
            {"gust", w_gust, kWaterParams},       {"floor", w_floor, kWaterParams},   {"mist_amount", w_mist_amount, kWaterParams},
            {"mist_heat", w_mist_heat, kWaterParams}, {"brightness", w_brightness, kWaterParams}, {"clarity", w_clarity, kWaterParams},
-           {"from", w_from, kWaterParams},       {"until", w_until, kWaterParams},   {"if", w_if, kWaterParams}}) {
+           {"from", w_from, kWaterParams},       {"until", w_until, kWaterParams},   {"if", w_if, kWaterParams},
+           {"threshold", w_threshold, kWaterParams}, {"churn", w_churn, kWaterParams}}) {
     take2(key, a, b);
   }
   if (const Prop* col = s.prop("colour")) {
@@ -1356,7 +1363,7 @@ Program Compiler::compile() {
       wc.name = st.name;
       wc.pos = st.pos;
       static constexpr std::pair<std::string_view, WaterKind> kinds[] = {{"pool", WaterKind::pool}, {"sheet", WaterKind::sheet}, {"jet", WaterKind::jet},
-                                                                         {"drips", WaterKind::drips}, {"bubbles", WaterKind::bubbles}, {"shaft", WaterKind::shaft}};
+                                                                         {"drips", WaterKind::drips}, {"bubbles", WaterKind::bubbles}, {"shaft", WaterKind::shaft}, {"spray", WaterKind::spray}};
       for (const auto& [n, kk] : kinds)
         if (n == st.kind) wc.kind = kk;
       prog_.waters.push_back(std::move(wc));
@@ -2146,7 +2153,9 @@ struct Scene::Impl {
       s.swell = ev(w_swell, 0.f);
       s.wavelength = ev(w_wavelength, 120.f);
       s.period = ev(w_period, 3.f);
-      s.density = ev(w_density, 20.f);
+      s.density = ev(w_density, w.kind == WaterKind::spray ? 200.f : 20.f);
+      s.threshold = ev(w_threshold, 0.15f);
+      s.churn = ev(w_churn, 0.f);
       s.sway = ev(w_sway, 0.f);
       s.gust = std::clamp(ev(w_gust, 0.6f), 0.f, 1.f);
       s.floor = ev(w_floor, prog.ground);
@@ -2157,7 +2166,7 @@ struct Scene::Impl {
       const std::array<float, 3> dc = w.kind == WaterKind::shaft ? std::array<float, 3>{0.55f, 0.6f, 0.68f} : std::array<float, 3>{0.62f, 0.8f, 0.95f};
       s.colour = {ev(w_cr, dc[0]), ev(w_cg, dc[1]), ev(w_cb, dc[2])};
     }
-    water->step(t, 1.f / prog.fps, f);
+    water->step(t, 1.f / prog.fps, f, bus.get());
   }
 
   void build(const EffectLoader& load, const Options& o);
@@ -2408,6 +2417,7 @@ void Scene::Impl::build(const EffectLoader& load, const Options& o) {
         case WaterKind::drips: drops += 4 * w.count + 16; break;
         case WaterKind::bubbles: drops += w.count; break;
         case WaterKind::shaft: drops += w.count / 4; break;
+        case WaterKind::spray: drops += 4 * w.count; break;
       }
       layout.push_back(L);
     }

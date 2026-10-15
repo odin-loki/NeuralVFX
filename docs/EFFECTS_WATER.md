@@ -209,7 +209,62 @@ drops, not from the rain streaks that reach them; the storm's rain does not fall
   effects were (a falling sheet and spray as dense, cold gas); before training was done, the simulator's water already
   read as smoke, so it was dropped for this design, and none of it is in the repository.
 
-## 10. Reproduce
+## 10. The learned layer and its test (written before the test)
+
+After the seeded system above, the game asked for water as a learned model like fire: *model what is ordered and
+leave random to random*. The body of water's motion (the falling sheet's shape and sway, the jet's arc, the pool's
+churn, the mist's billowing) is now four presets of the simulator, learned with study D's recipe; the seeded system
+stays as the random layer around it (spray, ripples, foam, glints).
+
+**The presets** (`src/sim/sim.cpp`, a block of its own: `add_water_sources`, `add_water_forces`, `water_decay`,
+`render_water`): `waterfall`, `fountain` (its second control is its aim), `splash` (plays once, 3 s, as dust) and
+`rainshaft`. Water is the solver's soot, heavy and without heat, so it falls (as dust does); spray and mist are its heat,
+light, so they rise and fade (as steam's vapour does). Falling water falls at a terminal speed, a fountain's along its
+arc, a splash's crown is held up for half a second and then the crater's jet rises; water turns into spray as it falls
+and into foam and mist over a pool at the bottom of the frame (a closed bottom border, as fog's and dust's ground). For
+the 32-cell coarse state (the magic lesson: broad structures), water does not roll up as gas does: little vorticity
+confinement and curl noise, and still air keeps little momentum of its own, so sheets and arcs stay whole; the mist
+churns by a force of its own. Drawn as reflected light only: translucent blue-white water, white where spray is in it,
+soft white mist (the rain grey-blue). The earlier effects' clips are unchanged (`Sim.StudyEffectsAreUnchangedByTheNewOnes`
+holds the hashes of all eleven, taken before the water work began); `Sim.Water*`, `Sim.Fountain*`, `Sim.Splash*` and
+`Sim.Rain*` check what each preset is.
+
+**Predictability** (`d-chaos`, `results/experiments/fx_water/d_chaos.csv`): as for the other effects, the noise seed
+decides: from the same start with another seed, a run is 24 dB (waterfall), 22 (fountain), 14 (splash) and 21
+(rainshaft) from itself after half a second and 14 to 17 dB after 2 s; a perturbation of 1e-3 of the velocity stays
+above 56 dB for 8 s. So tracking can only be judged over the first second or two, and endless play by its statistics.
+
+**Training**: study D's recipe unchanged (`rollout::recipe_for`; the splash takes the one-shot branch, as dust: 240 runs
+of 90 frames, 16 start points), in its three saved steps (`d-train --stages12 1`, `d-tune`, `d-finish`), one effect at
+a time, one thread, `nice 10`, each from a frozen copy of the binary (`jobs/EFFECT/nvfx_experiment` under the data root),
+with `--root $NEURALVFX_DATA/fx_water --results results/experiments/fx_water`.
+
+**The test, decided now.** Each model is frozen by its SHA-256 (added to `results/experiments/fx_water_frozen.csv`)
+before its test, and the test runs once. Study D's protocol (`nvfx_experiment d-eval`, then `d-report`), as for the
+energy and atmosphere effects ([EFFECTS_ENERGY.md](EFFECTS_ENERGY.md) §4), with **new seeds no study has used**
+(`--seed-base 7000000`):
+- **Tracking from the true state:** 8 held-out runs per effect (salt 2's settings), seeds 7000000 to 7000007, each
+  started at 100 frames from its true state (the splash: at its first frame), 240 frames (the splash: 89); the neural
+  rollout through the runtime against the simulation on the same 32-cell grid with the same detail layer
+  (`coarse_sim_detail`), the plain coarse simulation and holding the first frame. Active PSNR at 1 and 8 frames and at
+  1, 2 and 8 s; the neural run minus `coarse_sim_detail`, paired over the 8 runs.
+- **Endless runs at settings never seen:** study B's ten held-out settings (`b_test_settings`), 10 s each (the splash:
+  its 3 s): the real runs with seeds 7100000 + k and 7110000 + k, the neural run 7120000 + k, the coarse simulation
+  7130000 + k (training used 600000 to 600239, the held-out tracking runs above). Frame statistics against a real run
+  (detail spectrum, motion ratio, coverage, mean-frame PSNR), compared with the second real run (the floor), the
+  nearest of the 45 training flipbooks of study B's grid (made for these effects as for the others: 64 frames at
+  128 px, seed 1; looped), and the coarse simulation with and without the detail layer.
+- **One minute:** a 60 s neural run (seeds 7140000 + k) at the first two held-out settings, in 10 s windows against the
+  real 10 s run (not the splash, which plays once).
+- **Statistics:** every difference paired, with a 95% bootstrap interval of 10,000 resamples; an interval across zero
+  is a tie; every number reported.
+
+What would count as working, decided now, as before: an effect **works as steam did** if it tracks its runs better
+than `coarse_sim_detail` at 1 s (interval above zero) and, endless, its average picture is closer than the nearest
+flipbook's and its motion error is no worse than the flipbook's. Otherwise it is reported as **weak**, and where a
+learned body is weak the library and the scene keep the seeded version for it, and say so.
+
+## 11. Reproduce
 
 ```bash
 # the tests (no data)

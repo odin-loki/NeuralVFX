@@ -118,6 +118,26 @@ TEST(Water, ItsPartsMoveAndItsMistIsGiven) {
   ASSERT_NE(mist, nullptr);
 }
 
+// The random detail of a learned water effect: spray thrown off where the bus has water (here the tiny effect's soot,
+// which the mist module gets from what lands), and none where it has none.
+TEST(Water, SprayIsThrownOffTheBusesWaterOnly) {
+  const auto sprayed = [](const std::string& text) {
+    sc::Scene scene = scene_of(text, 2);
+    std::vector<std::uint8_t> rgb(static_cast<std::size_t>(scene.width()) * static_cast<std::size_t>(scene.height()) * 3);
+    for (int f = 0; f < scene.frames(); ++f) scene.render(f, rgb);
+    return scene.water()->sprayed();
+  };
+  const std::string base = cm::testing::kWaterScene;
+  std::string none = base, off = base;
+  const std::string spray = "water flecks = spray, in (60, 30), size 80 x 70,";
+  ASSERT_NE(base.find(spray), std::string::npos);
+  none.replace(none.find(spray), spray.size(), "water flecks = spray, in (60, 30), size 80 x 70, if 0,");
+  off.replace(off.find(spray), spray.size(), "water flecks = spray, in (0, 0), size 2 x 2,");
+  EXPECT_GT(sprayed(base), 100) << "spray thrown off the module's soot";
+  EXPECT_EQ(sprayed(none), 0);
+  EXPECT_EQ(sprayed(off), 0) << "nothing where the bus has no water";
+}
+
 // The simulation alone: a pool kicked in its middle.
 TEST(Water, WavesSpreadDieAndKeepThePoolsWater) {
   cm::WaterLayout pool;

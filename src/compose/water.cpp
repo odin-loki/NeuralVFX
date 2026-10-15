@@ -43,6 +43,7 @@ const char* water_kind_name(WaterKind k) {
     case WaterKind::drips: return "drips";
     case WaterKind::bubbles: return "bubbles";
     case WaterKind::shaft: return "shaft";
+    case WaterKind::spray: return "spray";
   }
   return "?";
 }
@@ -94,6 +95,7 @@ Water::Water(std::span<const WaterLayout> layout, int drops, int crowns, int rin
         item0_[zs(i)] = streaks;
         streaks += L.count;
         break;
+      case WaterKind::spray: L.count = std::clamp(L.count, 1, 65536); break;  // its drops are the scene's
     }
   }
   nodes_.assign(zs(nodes), Node{});
@@ -228,13 +230,16 @@ void Water::land(int source, int pool, float x, float y, float mass, float speed
   }
 }
 
-void Water::step(float t, float dt, int frame) {
+void Water::step(float t, float dt, int frame, const FieldBus* bus) {
   time_ = t;
   dt_ = dt;
   for (Bins& b : bins_) b.mass.fill(0.f);
   const int E = elements();
-  for (int i = 0; i < E; ++i)
-    if (layout_[zs(i)].kind == WaterKind::pool) step_pool(i, t, dt, frame);
+  for (int i = 0; i < E; ++i) {
+    if (layout_[zs(i)].kind != WaterKind::pool) continue;
+    if (bus && spec_[zs(i)].on && spec_[zs(i)].churn > 0.f) churn_pool(i, t, dt, frame, *bus);
+    step_pool(i, t, dt, frame);
+  }
   for (int i = 0; i < E; ++i) {
     switch (layout_[zs(i)].kind) {
       case WaterKind::sheet:
@@ -242,12 +247,71 @@ void Water::step(float t, float dt, int frame) {
       case WaterKind::drips: step_drips(i, t, dt, frame); break;
       case WaterKind::bubbles: step_bubbles(i, t, dt, frame); break;
       case WaterKind::shaft: step_shaft(i, t, dt, frame); break;
+      case WaterKind::spray:
+        if (bus) step_spray(i, dt, frame, *bus);
+        break;
       case WaterKind::pool: break;
     }
   }
   step_crowns(t, dt, frame);
   step_drops(dt, frame);
   feed_mist();
+}
+
+// A pool stirred by a learned water effect landing on it: where the bus's water (soot) just above its surface falls,
+// the surface is kicked (a random share of it each frame, so it churns rather than holds a dent) and foam is left; rings
+// where its surface is seen.
+void Water::churn_pool(int i, float t, float dt, int frame, const FieldBus& bus) {
+  const WaterSpec& s = spec_[zs(i)];
+  const WaterLayout& L = layout_[zs(i)];
+  const float len = std::max(1.f, std::hypot(s.x1 - s.x0, s.y1 - s.y0)), dx = len / fl(L.cells);
+  for (int j = 0; j < L.cells; ++j) {
+    const float x = s.x0 + (fl(j) + 0.5f) / fl(L.cells) * (s.x1 - s.x0);
+    const FieldBus::Sample b = bus.at(x, surface_y(i, x) - 4.f);
+    const float fall = std::max(0.f, b.v) / std::max(1e-4f, dt);  // world pixels a second, down
+    const float hit = std::min(4.f, b.soot) * fall;
+    if (!(hit > 1.f)) continue;
+    const auto u = [&](int k) { return rnd(L.seed, frame, j, 9100 + k); };
+    wave(i, x, s.churn * 0.12f * hit * 2.f * u(0), 1.5f * dx);
+    if (u(1) < std::min(0.5f, s.churn * hit * 0.0004f)) add_foam(i, x + (u(2) - 0.5f) * dx, (u(3) - 0.5f) * 80.f, 1.5f + 3.f * u(4), 1.f + 2.f * u(5));
+    if (u(6) < std::min(0.3f, s.churn * hit * 0.0002f)) add_ring(i, x, 6.f + 10.f * u(7), t);
+  }
+}
+
+// Spray: drops thrown off where a learned water effect's water is, with its velocity and a scatter of their own. Each
+// frame `density` tries per 100 x 100 pixels a second at random points of the region; where the bus's soot is above
+// `threshold` a drop is thrown, more surely the more water there is.
+void Water::step_spray(int i, float dt, int frame, const FieldBus& bus) {
+  const WaterSpec& s = spec_[zs(i)];
+  const WaterLayout& L = layout_[zs(i)];
+  const float W = std::max(1.f, s.x1), H = std::max(1.f, s.y1), scatter = s.speed > 0.f ? s.speed : 60.f;
+  Bins& bins = bins_[zs(i)];
+  bins.lo = s.x0 - 0.3f * W;
+  bins.hi = s.x0 + 1.3f * W;
+  bins.y = L.onto >= 0 ? spec_[zs(L.onto)].y0 : s.floor;
+  if (!s.on) return;
+  const int n = std::min(count_of(s.density * W * H / 10000.f * dt, rnd(L.seed, frame, 0, 9201)), L.count);
+  for (int q = 0; q < n; ++q) {
+    const auto u = [&](int k) { return rnd(L.seed, frame, q, 9210 + k); };
+    const float x = s.x0 + u(0) * W, y = s.y0 + u(1) * H;
+    const FieldBus::Sample b = bus.at(x, y);
+    if (!(b.soot > s.threshold) || u(2) > std::min(1.f, b.soot / (2.f * s.threshold))) continue;
+    Drop d;
+    d.x = x;
+    d.y = y;
+    d.vx = b.u / std::max(1e-4f, dt) + (u(3) - 0.5f) * scatter;
+    d.vy = b.v / std::max(1e-4f, dt) + (u(4) - 0.5f) * scatter;
+    d.r = s.radius * (0.4f + 0.8f * u(5));
+    d.life = 3.f;
+    d.g = s.gravity;
+    d.wu = s.wu;
+    d.floor = s.floor;
+    d.pool = L.onto;
+    d.source = i;
+    d.white = 1;
+    spawn_drop(d);
+    ++sprayed_;
+  }
 }
 
 // A damped wave equation on the pool's cells, h_tt = c^2 h_xx - 2 k h_t, its ends reflecting; rain on it; its foam drifts.
@@ -816,6 +880,7 @@ void Water::reserve(WaterPicture& p, int screen_w, int screen_h) const {
         prims += L.count;
         ++shafts;
         break;
+      case WaterKind::spray: break;  // its drops are the scene's
     }
   }
   prims += static_cast<int>(drops_.size() + crown_nodes_.size() + crowns_.size() * kCrownWalls * kCrownNodes);

@@ -8,7 +8,11 @@
 //   - bubbles: rising, wobbling, popping at a pool's surface;
 //   - shafts: a rain shaft seen from afar, streaks in a curtain whose density swells and thins in gusts;
 //   - splashes (an action): a crown (two walls and the faint face between them) and drops thrown up where something hits
-//     the water, a jet from the crater, foam, waves.
+//     the water, a jet from the crater, foam, waves;
+//   - spray: drops thrown off where a learned water effect's water is (the field bus's soot), with its velocity: the
+//     random detail of a learned waterfall or fountain, and a pool's `churn` stirs it where that water lands.
+// The learned water effects (the simulator's waterfall, fountain, splash and rainshaft) move the body of water: what is
+// ordered; this is what is random around it (docs/EFFECTS_WATER.md).
 // What lands gives its mist to a module (a learned steam or fog effect, WaterLayout::mist) through deposit().
 //
 // Determinism: every random number is a hash of the element's seed, the frame and a counter (a particle's index, a
@@ -28,7 +32,7 @@
 
 namespace nfx::compose {
 
-enum class WaterKind : std::uint8_t { pool, sheet, jet, drips, bubbles, shaft };
+enum class WaterKind : std::uint8_t { pool, sheet, jet, drips, bubbles, shaft, spray };
 const char* water_kind_name(WaterKind k);
 
 // One element's settings for a frame (world pixels, y down; seconds). What each kind reads is said beside it.
@@ -53,7 +57,9 @@ struct WaterSpec {
   float drift = 0;            // pool: its current (foam rides it), world pixels a second
   float surface = 0;          // pool: its surface seen from above, this tall (0: edge-on); ripples are drawn on it
   float swell = 0, wavelength = 120, period = 3;  // pool: steady waves of this height, length and period
-  float density = 20;         // shaft: streaks at once per 100 x 100 pixels
+  float density = 20;         // shaft: streaks at once per 100 x 100 pixels; spray: tries a second per 100 x 100 pixels
+  float threshold = 0.15f;    // spray: the bus's soot (a learned water effect's water) above which drops are thrown off
+  float churn = 0;            // pool: how much the water landing on it from the bus (soot falling) stirs it and foams
   float sway = 0;             // shaft: how far its wind swings (world pixels a second)
   float gust = 0.6f;          // shaft: how much its density swells and thins along it and over time (0 to 1)
   float floor = 600;          // where what falls lands when it is not over its pool (world y)
@@ -87,7 +93,8 @@ class Water {
   const WaterSpec& spec(int i) const { return spec_[zs(i)]; }
 
   // One frame (dt seconds, frame number `frame`): emit, move, land, feed the mist. Pools first, then what lands on them.
-  void step(float t, float dt, int frame);
+  // `bus`: the modules' fields this frame (spray and pools' churn read it; none: they do nothing).
+  void step(float t, float dt, int frame, const FieldBus* bus = nullptr);
   // A splash at (x, y) where something hits: a crown of `power` (about 0.2 to 1.5), on pool `onto` (-1: on the ground at
   // y), its mist into `mist` (none: nullptr). Takes the oldest splash's place when they are all in use.
   void splash(float x, float y, float power, int onto, Module* mist, float mist_amount, float mist_heat, std::uint64_t seed, float t, int frame);
@@ -104,6 +111,7 @@ class Water {
   int drops_alive() const;
   float pool_height(int pool, float x) const;
   float mist_given() const { return mist_given_; }  // mist given to modules since the start (soot units)
+  long sprayed() const { return sprayed_; }          // drops thrown off the bus's water since the start (spray)
   struct Counts {
     int nodes = 0, drops = 0, foam = 0, rings = 0, bubbles = 0, drips = 0, streaks = 0, crowns = 0;
   };
@@ -170,6 +178,8 @@ class Water {
   void step_drips(int i, float t, float dt, int frame);
   void step_bubbles(int i, float t, float dt, int frame);
   void step_shaft(int i, float t, float dt, int frame);
+  void step_spray(int i, float dt, int frame, const FieldBus& bus);
+  void churn_pool(int i, float t, float dt, int frame, const FieldBus& bus);
   void step_crowns(float t, float dt, int frame);
   void step_drops(float dt, int frame);
   void feed_mist();
@@ -197,6 +207,7 @@ class Water {
   std::vector<Bins> bins_;                // [elements + crowns]
   float time_ = 0, dt_ = 1.f / 30.f;  // the last step's time and length
   float mist_given_ = 0;
+  long sprayed_ = 0;
 };
 
 }  // namespace nfx::compose

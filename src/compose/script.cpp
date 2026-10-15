@@ -93,6 +93,7 @@ constexpr Key kWater[] = {{"along", VT::range},     {"at", VT::point},        {"
                           {"damping", VT::expr},    {"drift", VT::expr},      {"surface", VT::expr},      {"swell", VT::expr},
                           {"wavelength", VT::expr}, {"period", VT::expr},     {"density", VT::expr},      {"sway", VT::expr},
                           {"gust", VT::expr},       {"floor", VT::expr},      {"onto", VT::name},         {"mist", VT::name},
+                          {"threshold", VT::expr},  {"churn", VT::expr},
                           {"mist_amount", VT::expr}, {"mist_heat", VT::expr}, {"brightness", VT::expr},   {"clarity", VT::expr},
                           {"colour", VT::tuple},    {"capacity", VT::expr},   {"seed", VT::expr},         {"from", VT::time},
                           {"until", VT::time},      {"if", VT::expr}};
@@ -155,7 +156,7 @@ constexpr std::string_view kTop[] = {"scene", "bus", "light", "particles", "fram
 constexpr std::string_view kTopLater[] = {"trail", "water"};
 // Actions added later, which do not reserve their words either (docs/EFFECTS_WATER.md).
 constexpr std::string_view kActionsLater[] = {"splash", "wave"};
-constexpr std::string_view kWaterKinds[] = {"pool", "sheet", "jet", "drips", "bubbles", "shaft"};
+constexpr std::string_view kWaterKinds[] = {"pool", "sheet", "jet", "drips", "bubbles", "shaft", "spray"};
 constexpr std::string_view kFieldKinds[] = {"ceiling", "vortex", "wind", "gust", "ring", "attract", "heat", "cold", "lamp"};
 constexpr std::string_view kEmitKinds[] = {"sparks", "embers", "flakes", "arc", "ring", "glow"};
 constexpr std::string_view kEmitLater[] = {"rain", "snow", "ash", "leaves"};  // procedural weather (docs/COMPOSE.md §4.6)
@@ -800,7 +801,7 @@ Statement parse_statement(Parser& p, std::string_view source) {
     declared("water");
     const Pos at = p.pos();
     s.kind = p.name("what kind of water (pool, sheet, jet, drips, bubbles or shaft)");
-    if (!in(kWaterKinds, s.kind)) p.fail(at, std::format("'{}' is not a kind of water (pool, sheet, jet, drips, bubbles, shaft){}", s.kind, did_you_mean(s.kind, strings(kWaterKinds))));
+    if (!in(kWaterKinds, s.kind)) p.fail(at, std::format("'{}' is not a kind of water (pool, sheet, jet, drips, bubbles, shaft, spray){}", s.kind, did_you_mean(s.kind, strings(kWaterKinds))));
     parse_props(p, s, false);
   } else if (w == "field") {
     declared("field");
