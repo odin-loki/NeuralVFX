@@ -2395,3 +2395,38 @@ float and int8, against the current model in the same session) is measured and r
 **What a replacement changes.** The shared model links (the library's and the scenes' model folders) are repointed at
 the new file only at the end, after the full ctest passes with them in a private copy of the folders; every frozen
 hash that changes (the library's, the scenes') is updated in the same change and noted here and in the effect's doc.
+
+#### 14.8.2 The probe (training settings) and the candidates
+
+Candidate minus current model on the probe (the controls of salt-1 training runs 0 to 9, 4 runs pooled per setting,
+tracking 2 runs per setting; [m2_probe1_compare.csv](../results/experiments/ordered/m2_probe1_compare.csv)), development
+only. "Outside" marks a measure whose interval's worse end is beyond its margin (§14.8.1).
+
+| effect | candidate | tracking at 1 s (dB) | spectrum distance | \|ln motion ratio\| | coverage | mean-frame PSNR (dB) | the rule's reading |
+|---|---|---|---|---|---|---|---|
+| explosion | `ms` | -0.00 [-0.00, +0.00] | -0.038 [-0.061, -0.016] | -0.068 [-0.146, +0.001] | -0.020 [-0.027, -0.014] | **+2.76 [+1.70, +3.95]** | meets (as amended) |
+| dust | `ms` | +0.00 [-0.00, +0.00] | +0.007 [-0.005, +0.019] | -0.072 [-0.153, +0.000] | -0.0035 [-0.0063, -0.0012] | +0.58 [-0.27, +1.40] | the mean frame ties |
+| steam | `s16` | -0.01 [-0.13, +0.11] | -0.006 [-0.016, +0.003] | -0.006 [-0.011, -0.001] | -0.0000 | -0.00 [-0.02, +0.01] | both targets tie |
+| steam | `mt4` | +0.01 [-0.11, +0.10] | +0.009 [+0.001, +0.018] | -0.021 [-0.048, +0.008] | +0.0002 [-0.0009, +0.0016] | +0.16 [-0.33, +0.65] | the mean frame ties; coverage outside |
+| steam | `mt4_s16` | -0.02 [-0.16, +0.12] | -0.002 [-0.011, +0.008] | -0.026 [-0.055, +0.006] | +0.0002 [-0.0009, +0.0016] | +0.15 [-0.32, +0.63] | both targets tie; coverage outside |
+| steam | `mt8` | -0.09 [-0.22, +0.03] | +0.006 [-0.002, +0.014] | -0.048 [-0.081, -0.016] | -0.0001 [-0.0019, +0.0016] | +0.06 [-0.47, +0.68] | the mean frame ties; tracking, coverage outside |
+| steam | `mt8_s16` | -0.10 [-0.29, +0.08] | -0.004 [-0.015, +0.006] | -0.053 [-0.088, -0.018] | -0.0001 [-0.0019, +0.0016] | +0.06 [-0.47, +0.67] | both targets tie; tracking, coverage outside |
+
+The emission distances moved by less than 2 × 10⁻⁵ everywhere (within the amended margins; steam, the explosion and
+dust add almost no light). Means over the settings (current → candidate; the floor, a second set of 4 real runs):
+the explosion's mean-frame PSNR 29.41 → 32.18 dB (floor 34.16), coverage 0.033 → 0.013 (0.009), motion 0.98 → 0.88 of
+the real runs' (0.99); dust's 31.69 → 32.26 dB (35.48), coverage 0.0099 → 0.0063 (0.0040), motion 1.00 → 0.90 (0.98);
+steam's 31.88 → 32.03 dB with `mt4_s16` (37.43), motion 0.85 → 0.89 (`mt4_s16`) and 0.91 (`mt8_s16`) (0.99), spectrum
+0.155 → 0.153 (0.044).
+
+- **The explosion's mean state repeats study M's probe** (+2.8 dB then and now on training settings), and on these
+  settings its spectrum is better too.
+- **Dust's mean state moves the right way** (coverage closer, motion's error smaller, the mean frame +0.6 dB) but its
+  average picture only ties at 4 runs pooled.
+- **Steam behaves as smoke did in study M**, not as fire: the fine-tune makes it livelier (motion's error -0.026 at
+  weight 4, -0.053 at weight 8) but leaves its average picture tied, and the swirl at 16 pixels moves its detail spectrum
+  by less than fire's (-0.006, a tie). Neither weight meets the rule here; weight 4 has fewer measures outside their
+  margins (coverage; weight 8 also tracking), so **W = 4**.
+
+**Candidates for validation** (committed before it): steam `mt4_s16` (SHA-256 `65ac1277...`) and `s16` (`c2c24f39...`);
+the explosion `ms` (`b0ee6f05...`); dust `ms` (`938440a4...`). Jet's follow its probe.
