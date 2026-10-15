@@ -11,7 +11,9 @@
 //   - modules with a start point are started and put to sleep when the stage is made (their warm-up runs then), woken
 //     at the first spawn and started afresh at later ones; when the instance ends, they stop;
 //   - a trail's source follows the instance (moves included) and leaves material only while it is alive; its tiles stay
-//     in the world and fade by themselves after it ends, so a trail is never stopped.
+//     in the world and fade by themselves after it ends, so a trail is never stopped;
+//   - water (docs/EFFECTS_WATER.md) follows the instance too and emits only while it is alive (a pool is drawn only
+//     then); what it has thrown falls and lands by itself.
 // The stage's flash and camera shake are the sums of its instances'.
 #include "library.hpp"
 
@@ -266,7 +268,7 @@ void add_unique(std::vector<std::string>& v, std::string s) {
 // What an entry plays: its learned effects and its procedural elements.
 void inventory(Entry& e) {
   const auto action = [&](const Statement& a) {
-    if (a.keyword == "shock" || a.keyword == "scorch" || a.keyword == "burst") add_unique(e.elements, a.keyword);
+    if (a.keyword == "shock" || a.keyword == "scorch" || a.keyword == "burst" || a.keyword == "splash" || a.keyword == "wave") add_unique(e.elements, a.keyword);
   };
   for (const Statement& st : e.body) {
     if (st.keyword == "module" || st.keyword == "trail") {
@@ -278,6 +280,8 @@ void inventory(Entry& e) {
       }
     } else if (st.keyword == "emit") {
       add_unique(e.elements, st.kind);
+    } else if (st.keyword == "water") {
+      add_unique(e.elements, "water " + st.kind);
     } else if (st.keyword == "field") {
       add_unique(e.elements, st.kind);
     } else if (st.keyword == "light") {
@@ -440,6 +444,7 @@ class Instance {
         into.insert(n);
       };
       if (st.keyword == "module" || st.keyword == "trail") local(modules_, st.name, st.name_pos);
+      else if (st.keyword == "water") local(waters_, st.name, st.name_pos);
       else if (st.keyword == "let") local(values_, st.name, st.name_pos);
       else if (st.keyword == "field") local(fields_, st.name, st.name_pos);
       else if (st.keyword == "look") {
@@ -452,7 +457,7 @@ class Instance {
       }
     }
     for (const Param& pa : e.params) {
-      for (const auto* set : {&modules_, &values_, &fields_, &rules_})
+      for (const auto* set : {&modules_, &values_, &fields_, &rules_, &waters_})
         if (set->contains(pa.name)) fail(pa.pos, std::format("'{}' is a parameter and also declared in the entry: choose another name", pa.name));
       params_.insert(pa.name);
     }
@@ -532,7 +537,7 @@ class Instance {
  private:
   [[noreturn]] void fail(Pos p, const std::string& m) const { throw Error(p, m, e_.file); }
 
-  std::string module(const std::string& n) const { return modules_.contains(n) ? p_ + n : n; }
+  std::string module(const std::string& n) const { return modules_.contains(n) || waters_.contains(n) ? p_ + n : n; }
   std::string look(const std::string& n) const { return looks_.contains(n) ? p_ + n : n; }
 
   // An expression of the entry as the stage computes it.
@@ -572,7 +577,7 @@ class Instance {
   Value value(const Value& v, std::string_view key) const {
     Value o = v;
     for (Expr& e : o.exprs) e = expr(e);
-    if (v.type == Value::Type::names || (v.type == Value::Type::name && key == "over")) {
+    if (v.type == Value::Type::names || (v.type == Value::Type::name && (key == "over" || key == "onto" || key == "mist"))) {
       for (std::string& n : o.names)
         if (n != "particles") n = module(n);
     } else if (v.type == Value::Type::look) {
@@ -634,6 +639,16 @@ class Instance {
         s.props.push_back(prop("seed", vexpr(num(static_cast<float>(1 + seed_offset_)))));
       }
       gated(s, false);
+      out.push_back(std::move(s));
+    } else if (w == "water") {  // it follows the instance, and emits (a pool is drawn) only while the instance is alive
+      s.name = p_ + st.name;
+      props(s);
+      if (Prop* seed = find_prop(s, "seed")) {
+        if (seed_offset_ != 0) seed->value.exprs[0] = bin("+", seed->value.exprs[0], num(static_cast<float>(seed_offset_)));
+      } else {
+        s.props.push_back(prop("seed", vexpr(num(static_cast<float>(1 + seed_offset_)))));
+      }
+      gated(s, true);
       out.push_back(std::move(s));
     } else if (w == "let" || w == "look") {
       s.name = w == "let" ? p_ + st.name : look(st.name);
@@ -702,7 +717,7 @@ class Instance {
   const Entry& e_;
   std::string p_, go_, alive_;
   std::int64_t seed_offset_;
-  std::set<std::string> modules_, values_, params_, fields_, looks_, rules_;
+  std::set<std::string> modules_, values_, params_, fields_, looks_, rules_, waters_;
 };
 
 Expr sum(std::vector<Expr> terms, Expr base) {

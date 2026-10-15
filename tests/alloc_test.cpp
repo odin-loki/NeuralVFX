@@ -11,11 +11,13 @@
 // the third round's procedural elements (hail, aurora, rainbow, meteors, a beam, a shield, glints, bursts of spatter
 // and shards), its layers read every frame; and the effect manager (nvfx_manager.h) ticking a
 // crowd on its threads and on the engine's, with spawns, stops, controls, camera moves, a tight budget, proxies, copies
-// offset in time, pauses and culls; and a 3D volume (nvfx_volume.h, study N) stepped, read and drawn on 1 and 3 threads.
+// offset in time, pauses and culls; water (docs/EFFECTS_WATER.md) of every kind, scripted and on a stage, with the
+// engine layers; and a 3D volume (nvfx_volume.h, study N) stepped, read and drawn on 1 and 3 threads.
 // Exit code 0 = no allocation during rendering.
 #include "compose_scene.hpp"
 #include "nvfx_internal.hpp"
 #include "script.hpp"
+#include "water_scene.hpp"
 
 #include <neuralfx/dcm/ddpm.hpp>
 #include <neuralfx/model.hpp>
@@ -753,6 +755,103 @@ at 0, repeat:
   return failures;
 }
 
+// Water (docs/EFFECTS_WATER.md): a scripted scene with water of every kind (its pool, sheet, jets, drips, bubbles and
+// rain shaft, splashes, a wake, mist into a module), overlapped and not, with the engine layers and without; then the
+// same kinds as library entries on a stage, spawned, moved, set, stopped and spawned again.
+int run_water() {
+  namespace sc = nfx::compose::script;
+  int failures = 0;
+  const sc::Script s = sc::parse(nfx::compose::testing::kWaterScene, "water");
+  for (const bool overlap : {false, true}) {
+    for (const bool layers : {false, true}) {
+      sc::Options o;
+      o.threads = 2;
+      o.overlap = overlap;
+      o.layers = layers;
+      sc::Scene scene(s, [](const std::string&) { return nfx::compose::testing::tiny_effect(3); }, o);
+      std::vector<std::uint8_t> rgb(static_cast<std::size_t>(scene.width()) * static_cast<std::size_t>(scene.height()) * 3);
+      scene.render(0, rgb);  // warm-up outside the count
+      g_allocations = 0;
+      g_counting = true;
+      for (int f = 1; f < scene.frames(); ++f) scene.render(f, rgb);
+      g_counting = false;
+      const long n = g_allocations.load();
+      std::printf("water scene %dx%d%s%s: %ld allocations in %d frames\n", scene.width(), scene.height(), overlap ? ", overlapped" : "",
+                  layers ? ", layers" : "", n, scene.frames() - 1);
+      failures += n == 0 ? 0 : 1;
+    }
+  }
+  std::string bytes;
+  {
+    std::ostringstream os;
+    if (!nfx::rollout::save_model(os, nfx::compose::testing::tiny_effect(3).m)) return failures + 1;
+    bytes = os.str();
+  }
+  nvfx_effect* et = nullptr;
+  if (nvfx_effect_load_memory(bytes.data(), bytes.size(), &et) != NVFX_OK) return failures + 1;
+  const nvfx_library_file file{"water.nvfxl", nfx::compose::testing::kWaterCatalogue};
+  nvfx_library_desc ld;
+  nvfx_library_desc_init(&ld);
+  ld.files = &file;
+  ld.n_files = 1;
+  nvfx_library* lib = nullptr;
+  nvfx_scene_error err;
+  if (nvfx_library_open(&ld, &lib, &err) != NVFX_OK) {
+    std::printf("water library: %s\n", err.message);
+    nvfx_effect_free(et);
+    return failures + 1;
+  }
+  const nvfx_scene_effect fx{"tiny.nvfx", et};
+  const nvfx_stage_room rooms[] = {{"falls", 2, 1}, {"plunge", 2, 0}};
+  for (const int overlap : {0, 1}) {
+    nvfx_stage_desc sd;
+    nvfx_stage_desc_init(&sd);
+    sd.width = 200;
+    sd.height = 120;
+    sd.ground = 110;
+    sd.rooms = rooms;
+    sd.n_rooms = 2;
+    sd.effects = &fx;
+    sd.n_effects = 1;
+    sd.overlap = overlap;
+    sd.layers = 1;
+    nvfx_stage* st = nullptr;
+    if (nvfx_stage_create(lib, &sd, &st, &err) != NVFX_OK) {
+      std::printf("water stage: %s\n", err.message);
+      ++failures;
+      continue;
+    }
+    nvfx_scene* scene = nvfx_stage_scene(st);
+    std::vector<std::uint8_t> rgba(200 * 120 * 4);
+    nvfx_scene_render(scene, rgba.data(), 200 * 4);  // warm-up outside the count
+    g_allocations.store(0);
+    g_counting.store(true);
+    nvfx_fx a = 0, b = 0, c = 0;
+    int spawned = 0;
+    spawned += nvfx_stage_spawn(st, "falls", 100.f, 110.f, 1.f, -1.0, &a) == NVFX_OK;
+    spawned += nvfx_stage_spawn(st, "plunge", 60.f, 110.f, 1.f, -1.0, &b) == NVFX_OK;
+    for (int f = 1; f < 150; ++f) {
+      const float t = static_cast<float>(f) / 30.f;
+      nvfx_stage_move(st, a, 100.f + 20.f * std::sin(t), 110.f);
+      if (f == 40) nvfx_stage_set_param(st, a, "flow", 1.3f);
+      if (f == 60) spawned += nvfx_stage_spawn(st, "plunge", 140.f, 110.f, 1.2f, -1.0, &c) == NVFX_OK;
+      if (f == 90) nvfx_stage_stop(st, a, -1.0);
+      if (f == 100) spawned += nvfx_stage_spawn(st, "falls", 90.f, 110.f, 1.f, -1.0, &a) == NVFX_OK;
+      nvfx_scene_step_frames(scene, 1);
+      nvfx_scene_render(scene, rgba.data(), 200 * 4);
+    }
+    g_counting.store(false);
+    const long n = g_allocations.load();
+    std::printf("water stage%s: %ld allocations in 149 frames (%d spawns, moves, a parameter, a stop; layers on)\n", overlap ? ", overlapped" : "", n,
+                spawned);
+    failures += n == 0 && spawned == 4 ? 0 : 1;
+    nvfx_stage_free(st);
+  }
+  nvfx_library_free(lib);
+  nvfx_effect_free(et);
+  return failures;
+}
+
 // The effect manager: everything is made by nvfx_manager_create and nvfx_manager_add_model; 400 ticks at 60 Hz of a
 // crowd of two looping effects and a one-shot, with every call a game makes between ticks, allocate nothing. Run with
 // its own threads (2), and with the engine running the jobs (here both job slots on the calling thread).
@@ -997,6 +1096,7 @@ int main() {
   failures += run_library();
   failures += run_engine_features();
   failures += run_fx_elements();  // the procedural elements of the library's third round
+  failures += run_water();
   failures += run_rollout_prior(64) + run_rollout_prior(128);  // the prior against drift
   failures += run_rollout(64, true);                             // the simulator's look for the first frames
   failures += run_rollout(64, false, true);                      // study D2's advection gain and softening

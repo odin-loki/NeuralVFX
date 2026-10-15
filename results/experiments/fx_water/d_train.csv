@@ -1,0 +1,5 @@
+effect,runs,frames,sim_minutes,record_s,stepper_loss,stepper_s,renderer_psnr,contrast,swirl,detail_score,starts,start_fine,stored_bytes,total_s
+waterfall,160,240,21.33,804,0.03331,8241,0.00,1,0.8,0.000,8,0,83594,9045
+fountain,160,240,21.33,447,0.06851,5337,0.00,1,0.8,0.000,8,0,83594,5785
+splash,240,90,12.00,163,0.05438,4675,0.00,1,0.8,0.000,16,64,280826,4838
+rainshaft,160,240,21.33,327,0.03249,4662,0.00,1,0.8,0.000,8,0,83594,4989

@@ -119,7 +119,8 @@ neuralfx_defaults(neuralfx_io)
 # and bloom for whole scenes, field effects, and scene scripts (a text format, its parser and runner), over the
 # runtime's internals.
 set(NEURALFX_COMPOSE_SOURCES src/compose/compose.cpp src/compose/fields.cpp src/compose/trail.cpp src/compose/script.cpp src/compose/script_run.cpp
-                             src/compose/fx_particles.cpp src/compose/fx_emit.cpp)
+                             src/compose/fx_particles.cpp src/compose/fx_emit.cpp
+                             src/compose/water.cpp)
 add_library(neuralfx_compose STATIC ${NEURALFX_COMPOSE_SOURCES})
 target_include_directories(neuralfx_compose PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src/compose" "${CMAKE_CURRENT_SOURCE_DIR}/src/runtime")
 target_link_libraries(neuralfx_compose PUBLIC nvfx)
@@ -418,6 +419,11 @@ if(NEURALFX_BUILD_TESTS)
   target_link_libraries(neuralfx_3d_tests PRIVATE neuralfx_train nvfx GTest::gtest_main)
   neuralfx_defaults(neuralfx_3d_tests)
   gtest_discover_tests(neuralfx_3d_tests TEST_PREFIX "neuralfx." DISCOVERY_MODE PRE_TEST PROPERTIES LABELS neuralfx)
+  # Water (docs/EFFECTS_WATER.md): its own test program, so the shared test list stays as it is.
+  add_executable(neuralfx_water_tests tests/test_water.cpp)
+  target_link_libraries(neuralfx_water_tests PRIVATE neuralfx_compose GTest::gtest_main)
+  neuralfx_defaults(neuralfx_water_tests)
+  gtest_discover_tests(neuralfx_water_tests TEST_PREFIX "neuralfx." DISCOVERY_MODE PRE_TEST PROPERTIES LABELS neuralfx)
   # Counts heap allocations around nvfx_render (replaces the global operator new, so it is its own program).
   add_executable(nvfx_alloc_test tests/alloc_test.cpp)
   target_link_libraries(nvfx_alloc_test PRIVATE nvfx neuralfx_compose nvfx_scene_api nvfx_library_api neuralfx_ddpm)  # the trainer's format writer makes a test prior
@@ -492,7 +498,7 @@ if(NEURALFX_BUILD_TESTS)
     set_tests_properties(neuralfx.LibraryCataloguePlays PROPERTIES LABELS "neuralfx;data" SKIP_RETURN_CODE 77 TIMEOUT 1800)
     add_test(NAME neuralfx.LibraryKeyframesFrozen
              COMMAND nvfx_gallery --library ${CMAKE_CURRENT_SOURCE_DIR}/library --models ${NEURALFX_MODELS_LIBRARY}
-                     --only campfire,blue_gas_flame,grenade,steam_vent,portal,lightning_strike,ground_fog,dust_impact,flamethrower,plasma_orb,dust_devil,rocket_trail,vehicle_dust_wake,wall_of_flames,distant_mushroom,rocket_launch,ink_cloud
+                     --only campfire,blue_gas_flame,grenade,steam_vent,portal,lightning_strike,ground_fog,dust_impact,flamethrower,plasma_orb,dust_devil,rocket_trail,vehicle_dust_wake,wall_of_flames,distant_mushroom,rocket_launch,ink_cloud,waterfall_drawn,garden_fountain,boulder_splash,rain_shaft_drawn,fountain,rain_shaft
                      --keyframes ${CMAKE_CURRENT_BINARY_DIR}/library_keyframes --verify ${CMAKE_CURRENT_SOURCE_DIR}/results/library/frozen.csv --threads 2
                      --precision float)
     set_tests_properties(neuralfx.LibraryKeyframesFrozen PROPERTIES LABELS "neuralfx;data" SKIP_RETURN_CODE 77 TIMEOUT 1200)
@@ -510,6 +516,16 @@ if(NEURALFX_BUILD_TESTS)
                      --keyframes ${CMAKE_CURRENT_BINARY_DIR}/library_round3_keyframes --verify ${CMAKE_CURRENT_SOURCE_DIR}/results/library/frozen_round3.csv
                      --threads 2 --precision float)
     set_tests_properties(neuralfx.LibraryRound3KeyframesFrozen PROPERTIES LABELS "neuralfx;data" SKIP_RETURN_CODE 77 TIMEOUT 1200)
+    # The falls (docs/EFFECTS_WATER.md): the learned waterfall and rainshaft with the composer's seeded water and the
+    # library's cloud (NEURALFX_MODELS_LIBRARY, outside git, with the water models linked in; skipped without them); its
+    # keyframes have the SHA-256 recorded in results/experiments/fx_water_frozen.csv.
+    add_test(NAME neuralfx.ScriptedFallsFrozen
+             COMMAND nvfx_scene_script --script ${CMAKE_CURRENT_SOURCE_DIR}/examples/scenes/falls.nvfxs --models ${NEURALFX_MODELS_LIBRARY}
+                     --keyframes ${CMAKE_CURRENT_BINARY_DIR}/falls_script_keyframes --no-video --threads 2 --precision float
+                     --verify ${CMAKE_CURRENT_SOURCE_DIR}/results/experiments/fx_water_frozen.csv)
+    set_tests_properties(neuralfx.ScriptedFallsFrozen PROPERTIES LABELS "neuralfx;data" SKIP_RETURN_CODE 77 TIMEOUT 1200)
+    add_test(NAME neuralfx.SceneScriptChecks.falls COMMAND nvfx_scene_script --script ${CMAKE_CURRENT_SOURCE_DIR}/examples/scenes/falls.nvfxs --check)
+    set_tests_properties(neuralfx.SceneScriptChecks.falls PROPERTIES LABELS neuralfx)
     # The fire whirl (docs/EFFECTS_ENERGY.md): jet, orb and vortex, all in NEURALFX_MODELS_ENERGY (outside git); its
     # keyframes have the SHA-256 recorded in results/experiments/fx_energy_frozen.csv.
     set(NEURALFX_MODELS_ENERGY "${_nvfx_data}/fx_energy/models/scene" CACHE PATH "jet.nvfx, orb.nvfx and vortex.nvfx")
@@ -559,7 +575,7 @@ if(NEURALFX_BUILD_TESTS)
     set_tests_properties(neuralfx.PackFullLibraryVerifies PROPERTIES LABELS "neuralfx;data" FIXTURES_REQUIRED library_pack)
     add_test(NAME neuralfx.PackLibraryKeyframesFrozen
              COMMAND nvfx_gallery --pack ${CMAKE_CURRENT_BINARY_DIR}/library.nvfxp
-                     --only campfire,blue_gas_flame,grenade,steam_vent,portal,lightning_strike,ground_fog,dust_impact,flamethrower,plasma_orb,dust_devil,wall_of_flames,distant_mushroom
+                     --only campfire,blue_gas_flame,grenade,steam_vent,portal,lightning_strike,ground_fog,dust_impact,flamethrower,plasma_orb,dust_devil,wall_of_flames,distant_mushroom,waterfall_drawn,garden_fountain,boulder_splash,rain_shaft_drawn,fountain,rain_shaft
                      --keyframes ${CMAKE_CURRENT_BINARY_DIR}/library_pack_keyframes --verify ${CMAKE_CURRENT_SOURCE_DIR}/results/library/frozen.csv --threads 2
                      --precision float)
     set_tests_properties(neuralfx.PackLibraryKeyframesFrozen PROPERTIES LABELS "neuralfx;data" SKIP_RETURN_CODE 77 TIMEOUT 1200 FIXTURES_REQUIRED library_pack)

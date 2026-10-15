@@ -475,7 +475,8 @@ void step_eval(const Ctx& c) {
       for (int t = 0; t < c.threads; ++t) {
         pool.emplace_back([&] {
           for (int r; (r = next++) < n_runs;) {
-            const sim::Params p = run_params(e, static_cast<std::uint64_t>(r), kTestSalt);
+            sim::Params p = run_params(e, static_cast<std::uint64_t>(r), kTestSalt);
+            if (c.seed_base > 0) p.seed = c.seed_base + static_cast<std::uint64_t>(r);
             sim::Fluid truth(p);
             for (int i = 0; i < warm; ++i) truth.step_frame();
             const sim::State st = truth.state();
@@ -658,15 +659,16 @@ void step_eval(const Ctx& c) {
               return std::make_pair(cl, f.state());
             };
             SetResult& res = results[static_cast<std::size_t>(si)];
-            const auto [ra, sa] = real_run(900000 + static_cast<std::uint64_t>(si));
-            const auto [rb, sb] = real_run(910000 + static_cast<std::uint64_t>(si));
+            const std::uint64_t ss = static_cast<std::uint64_t>(si);
+            const auto [ra, sa] = real_run(c.seed_base > 0 ? c.seed_base + 100000 + ss : 900000 + ss);
+            const auto [rb, sb] = real_run(c.seed_base > 0 ? c.seed_base + 110000 + ss : 910000 + ss);
             (void)sa;
             (void)sb;
             res.real = ra;
             const metrics::ClipStats ref = metrics::stats(ra);
             res.d["real_other_seed"] = metrics::distance(ref, metrics::stats(rb));
             const std::vector<float> ctl{s[0], s[1], s[2]};
-            res.neural = runtime_clip(fx.e, ctl, -1, 920000 + static_cast<std::uint64_t>(si), F);
+            res.neural = runtime_clip(fx.e, ctl, -1, c.seed_base > 0 ? c.seed_base + 120000 + ss : 920000 + ss, F);
             res.d["neural"] = metrics::distance(ref, metrics::stats(res.neural));
             if (grid) {
               res.grid = runtime_clip(grid->e, ctl, -1, 1, F);
@@ -692,7 +694,7 @@ void step_eval(const Ctx& c) {
               p.intensity = s[0];
               p.wind = s[1];
               p.turbulence = s[2];
-              p.seed = 930000 + static_cast<std::uint64_t>(si);
+              p.seed = c.seed_base > 0 ? c.seed_base + 130000 + ss : 930000 + ss;
               p.size = kSize;
               sim::Params q = p;
               q.sim_res = kRes;
@@ -746,7 +748,7 @@ void step_eval(const Ctx& c) {
         const auto& s = settings[static_cast<std::size_t>(si)];
         const std::vector<float> ctl{s[0], s[1], s[2]};
         const metrics::ClipStats ref = metrics::stats(results[static_cast<std::size_t>(si)].real);
-        const Clip longrun = runtime_clip(fx.e, ctl, -1, 940000 + static_cast<std::uint64_t>(si), W * windows);
+        const Clip longrun = runtime_clip(fx.e, ctl, -1, c.seed_base > 0 ? c.seed_base + 140000 + static_cast<std::uint64_t>(si) : 940000 + static_cast<std::uint64_t>(si), W * windows);
         for (int w = 0; w < windows; ++w) {
           const metrics::StatDistance d = metrics::distance(ref, metrics::stats(slice_clip(longrun, w * W, W)));
           long_rows.push_back(std::format("{},{},{},{:.4f},{:.4f},{:.4f},{:.4f},{:.3f}", en, si, w, d.spectrum_l1, d.motion_ratio, d.coverage_l1, d.emission_l1, d.mean_frame_psnr));

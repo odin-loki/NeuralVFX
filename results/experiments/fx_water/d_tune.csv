@@ -1,0 +1,5 @@
+effect,iterations,activity_weight,loss,seconds
+waterfall,800,100,0.03330,1337
+fountain,800,100,0.06660,1386
+splash,800,100,0.05723,1165
+rainshaft,800,100,0.03124,1213
