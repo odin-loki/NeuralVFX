@@ -2458,3 +2458,55 @@ emission 0.00085 (`mt4` 0.00093; the floor 0.00027).
 
 **The jet's candidates for validation**: `mt4_s16` (SHA-256 `e69a087b...`), `mt8` (`5e98f8c0...`) and `s16` (as
 committed).
+
+#### 14.8.3 Validation: no candidate meets the rule
+
+Candidate minus current model on study G's 10 validation settings with the study's fresh seeds, 8 runs pooled per
+setting, tracking 8 runs per setting ([m2_val_compare.csv](../results/experiments/ordered/m2_val_compare.csv),
+[m2_val_choice.csv](../results/experiments/ordered/m2_val_choice.csv)). Bold: better (interval clear of zero); struck:
+strictly worse; "outside": the worse end beyond the measure's margin.
+
+| effect | candidate | tracking at 1 s (dB) | spectrum distance | \|ln motion ratio\| | coverage (margin) | mean-frame PSNR (dB) | rule |
+|---|---|---|---|---|---|---|---|
+| explosion | `ms` | +0.00 [-0.00, +0.00] | -0.003 [-0.049, **+0.044**] outside | -0.053 [-0.122, +0.003] | **-0.016 [-0.029, -0.003]** (0.0031) | **+3.37 [+1.13, +5.53]** | spectrum outside |
+| dust | `ms` | +0.00 [-0.00, +0.00] | -0.008 [-0.025, +0.005] | **-0.124 [-0.189, -0.059]** | -0.0024 [-0.0057, **+0.0009**] outside (0.00075) | **+1.09 [+0.00, +2.27]** | coverage outside |
+| steam | `mt4_s16` | -0.05 [-0.15, +0.06] | -0.003 [-0.016, +0.008] | **-0.038 [-0.069, -0.004]** | +0.0008 [-0.0000, **+0.0016**] outside (0.00073) | -0.07 [-0.48, +0.37] | targets tie; coverage outside |
+| steam | `s16` | +0.04 [-0.02, +0.10] | **-0.016 [-0.031, -0.006]** | **-0.007 [-0.011, -0.003]** | +0.0000 [-0.0000, +0.0000] | +0.01 [-0.01, +0.04] | the mean frame ties |
+| jet | `mt4_s16` | **+0.14 [+0.07, +0.20]** | ~~+0.095 [+0.041, +0.142]~~ | **-0.024 [-0.040, -0.006]** | +0.0000 [-0.0032, **+0.0034**] outside (0.00086) | +0.21 [-0.14, +0.61] | spectrum worse; coverage, emission outside |
+| jet | `mt8` | -0.04 [-0.10, +0.02] | -0.003 [-0.009, +0.002] | **-0.018 [-0.031, -0.002]** | -0.0002 [-0.0031, **+0.0025**] outside (0.00086) | +0.03 [-0.27, +0.41] | the mean frame ties; coverage outside |
+| jet | `s16` | **+0.19 [+0.14, +0.23]** | ~~+0.114 [+0.059, +0.159]~~ | ~~+0.031 [+0.017, +0.047]~~ outside | +0.0000 [-0.0001, +0.0001] | **+0.05 [+0.00, +0.12]** | spectrum, motion worse |
+
+Emission moved by at most 1.3 × 10⁻⁴ (the jet's `mt4_s16`, outside its margin of 10⁻⁴; every other candidate within).
+The amendment's least value decided nothing here: with 10% of the current model's distance alone every emission
+reading would be the same.
+
+Means over the settings (current → candidate; the floor, a second set of 8 real runs; the mean-frame PSNR's distance
+below the floor in brackets):
+
+| effect | model | mean-frame PSNR (dB) | spectrum distance | motion ratio | coverage |
+|---|---|---|---:|---:|---:|
+| explosion | v2 → `ms` (floor) | 28.98 (7.03 below) → **32.35 (3.66 below)** (36.01) | 0.170 → 0.167 (0.036) | 1.02 → 0.90 (0.98) | 0.031 → 0.015 (0.007) |
+| dust | current → `ms` (floor) | 32.66 (6.59 below) → 33.74 (5.51 below) (39.25) | 0.098 → 0.090 (0.029) | 1.06 → 0.96 (0.97) | 0.0075 → 0.0051 (0.0021) |
+| steam | current → `mt4_s16`, `s16` (floor) | 33.17 → 33.10, 33.18 (39.99) | 0.181 → 0.178, 0.164 (0.028) | 0.83 → 0.87, 0.83 (1.00) | 0.0073 → 0.0080, 0.0073 (0.0057) |
+| jet | current → `mt8`, `mt4_s16` (floor) | 29.34 → 29.37, 29.55 (39.84) | 0.149 → 0.145, 0.244 (0.014) | 0.85 → 0.87, 0.88 (1.01) | 0.0086 → 0.0083, 0.0086 (0.0034) |
+
+**No candidate meets the rule; none of the four effects is tested, and their test seeds (8,700,000 to 8,899,999) are
+unspent.**
+- **The explosion's mean state is a null for the second time**, for a reason the margin makes plain: its average picture
+  is 3.4 dB closer to a real run's (its distance below the floor nearly halved, 7.0 to 3.7 dB, as in study M), its
+  coverage error halved and its motion's error smaller, and its detail spectrum distance unchanged on average
+  (-0.003), but the explosion's spectrum distance moves by up to ±0.14 from setting to setting, so the interval
+  (±0.046) is more than twice the margin's width and cannot show that it stays within 0.02. Under study M's strict
+  reading (no measure's interval entirely on the worse side) it would have met the rule.
+- **Dust's mean state** is better on its target by a hair (+1.09 dB [+0.00, +2.27]), its motion is much closer to the
+  real (1.06 to 0.96 of the real runs', the floor's 0.97), and its coverage closer on average (0.0075 to 0.0051), but the
+  coverage interval's worse end (+0.0009) is past its margin (+0.00075, 10% of 0.0075). It too would have met the strict
+  reading. At one setting of the ten (the second) both one-shots' mean state is clearly worse (dust -1.4 dB, the
+  explosion -3.8 dB): the quadratic mean state does not hold everywhere in the control space.
+- **Steam gained nothing from the fine-tune**, as smoke did not in study M: it is livelier (motion 0.83 to 0.87 of the
+  real) but its average picture is unchanged (-0.07 dB [-0.48, +0.37]) and its coverage error grows a little. The swirl
+  at 16 pixels improves its detail spectrum (-0.016) with the average picture tied (+0.01 dB [-0.01, +0.04]): the same
+  null as smoke's `s16` in study M, now without the emission artefact.
+- **The jet's probe gain did not hold**: its fine-tune's average picture was +0.4 dB on training settings and is +0.03
+  dB [-0.27, +0.41] here (weight 8); it is livelier (motion's error -0.018) and tracking ties. With the swirl at 16 pixels
+  its detail is clearly worse, as on the probe.
