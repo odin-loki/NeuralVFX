@@ -37,6 +37,12 @@ C++23, no third-party runtime dependencies, a C API for engines, no Python.
   lightning, optics, designed effects), each simulated as accurately as the PC allows and checked against
   measurements where a real counterpart exists, a full weather system with regimes and transitions, 3D scenes and the
   library rebuilt in 3D.
+- **3D demo (study N):** [docs/STUDY_3D.md](docs/STUDY_3D.md): a 3D fire from our own 3D solver (not a validated fire
+  code), learned as a 16 x 24 x 16 state that drives seeded 64 x 96 x 64 detail, drawn by a physically based volume
+  renderer and played through a volume C API (`nvfx_volume.h`). On its held-out test it follows a real run better than
+  the simulation run on the coarse grid with the same detail (picture from four cameras at 1 s: +2.20 dB [+1.09, +3.12])
+  but looks worse when played on (motion and coverage, mostly where it runs away: when the wind blows towards -x), and
+  holding the first frame still beats it after a second. About 70 ms a step on one busy core (provisional). Videos: [videos/README.md](videos/README.md) §9.
 - **Engine integration:** [docs/ENGINES.md](docs/ENGINES.md) (C API for effects and scenes, threading, Unreal, Unity,
   the Godot 4 plugin, lit sprites for an engine's own lighting: §11).
 - **Putting it in your engine:** [docs/INTEGRATION.md](docs/INTEGRATION.md): which API when, the frame loop and threads,
@@ -145,6 +151,7 @@ From [docs/REPORT.md](docs/REPORT.md), measured on simulated fire, smoke and exp
 | effect packs and the C++ wrapper | `include/neuralfx/nvfx_pack.h`, `src/pack`, `include/neuralfx/nvfx.hpp` | one file an engine ships (`.nvfxp`): the models, the catalogue, a manifest with a SHA-256 per member, the entries' models and optional manager costs, members coded by the context-mixing coder's fast model (the full library: 614 kB against 1.54 MB loose, loaded in 0.12 s); a library, scenes and models from a pack; a header-only C++23 wrapper over the five C APIs (RAII handles, spans, `std::expected`, no exceptions); `nvfx_version()`; [docs/INTEGRATION.md](docs/INTEGRATION.md) |
 | effect manager | `include/neuralfx/nvfx_manager.h`, `src/manager` | many rollout effects within a CPU budget per frame, in libnvfx: sizes and update rates from on-screen size and priority with hysteresis, frames between updates by crossfade, copies sharing a simulation (optionally offset in time), pauses off screen, proxies for the far field when the budget is short, the engine's threads or its own with the same pictures on any number, no allocation per frame; [docs/MANAGER.md](docs/MANAGER.md) |
 | Godot 4 plugin | `engines/godot` | a GDExtension (godot-cpp at a pinned tag): `NeuralVFXScene`, `NeuralVFXStage` (the effect library) and `NeuralVFXEffect` nodes into textures (and the lit-sprite layers as four more), demo projects and a headless test in Godot 4.4.1 (`engines/godot/test.sh`); [docs/ENGINES.md](docs/ENGINES.md) §8 |
+| 3D effects (study N) | `src/sim3d`, `src/render3d`, `src/core/rollout3d.cpp`, `src/train/rollout3d_train.cpp`, `include/neuralfx/nvfx_volume.h`, `nvfx_3d` | a small 3D demo ([docs/STUDY_3D.md](docs/STUDY_3D.md)): our own 3D fire simulator (not a validated fire code), a volume renderer (Planck emission through the CIE 1931 colour matching functions, soot absorption and single scattering, any camera), a 3D rollout model (a 16 x 24 x 16 learned state, 3 x 3 x 3 convolutions with FiLM, a 3D projection, seeded 64 x 96 x 64 detail) and a C API that gives engines its fields as 3D textures or pictures for any camera ([docs/ENGINES.md](docs/ENGINES.md) §12) |
 | context mixing | `src/dcm`, `nvfx_dcm` | the owner's diffusion-context mixing (DCM) from CameraDetector: a PAQ8-style mixer with a frozen, versioned inference copy and a nested mixer search, k-means contexts without LibTorch, and a value-domain mixer (a value and a Laplace scale per prediction) for generating and coding effects; docs/DCM.md (study G) |
 
 ## Build and test
@@ -154,7 +161,7 @@ Ubuntu 24.04: `g++-14`, CMake 3.25+, Ninja, `libgtest-dev`, `zlib1g-dev` (and `f
 ```sh
 cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_COMPILER=g++-14
 cmake --build build
-ctest --test-dir build                     # 409 tests: sim, metrics, codecs, gradients, runtime parity, composition, scene scripts, field effects, trails, engine layers, weather, procedural sky, combat and magic elements, context mixing, denoiser, lossless coder, low-bit, vector-quantised, sparse and multi-level features, video codecs, BC7 and ASTC flipbooks, allocation, C API for effects and scenes, the effect library, the effect manager, effect packs and the C++ wrapper, start points from footage
+ctest --test-dir build                     # 431 tests: sim, metrics, codecs, gradients, runtime parity, composition, scene scripts, field effects, trails, engine layers, weather, procedural sky, combat and magic elements, context mixing, denoiser, lossless coder, low-bit, vector-quantised, sparse and multi-level features, video codecs, BC7 and ASTC flipbooks, allocation, C API for effects and scenes, the effect library, the effect manager, effect packs and the C++ wrapper, start points from footage, 3D volumes (study N's simulator, renderer, model, gradients and C API)
 ```
 
 Options: `NEURALFX_BUILD_VIEWER` (GLFW + OpenGL; fetches Dear ImGui), `NEURALFX_BUILD_SHARED` (libnvfx.so for engines),
@@ -212,14 +219,15 @@ training, evaluation; about three hours), then `d-timing` on an idle machine and
 | `nvfx_g_extras` | study G's extras (stage S8): one renderer for every model (G4a), a shard critic (G5a), a mixer of the stepper and a coarse solver for smoke (G5b); none kept ([docs/DCM.md](docs/DCM.md) §10) |
 | `nvfx_study_h` | study H's measurements: products on LZ78/RePair-compressed data against dense code (`--h1`), the run-aware detail step (`--h2`); scripts in `tools/study_h/` |
 | `nvfx_f2` | studies F2 and F3 (results/compression): `data`, `flipbooks` (our BC3 layout and raw, then BC7 and ASTC), `trim` (the same flipbooks without their empty space), `train` (low-bit, quantisation-aware, rate-aware, vector-quantised and sparse models), `rescore`, `pairs`, `video` (x264, x265, VP9, AV1 through ffmpeg), `report` (equal-quality ratios against each flipbook baseline and codec, memory and disk, with intervals; `--figure`, `--pareto`), `g3c`, `g3c-report`, `timing` |
+| `nvfx_3d` | study N, a small 3D demo: `pilot`, `look`, `record`, `train`, `finish`, `truth`, `track`, `real`, `play`, `compare`, `freeze`, `video`, `timing`, `edge` ([docs/STUDY_3D.md](docs/STUDY_3D.md) §12) |
 | `neuralfx_arch_bench` | Phase 0 architecture microbenchmark |
 
 ## Layout
 
 | path | what |
 |---|---|
-| `include/neuralfx/` | public headers: `nvfx.h` (C API), `nvfx_scene.h` (C API for scenes), `nvfx_library.h` (C API for the effect library), `nvfx_manager.h` (C API for many effects), `clip`, `sim`, `model`, `train`, `rollout`, `rollout_train`, `footage`, `metrics`, `flipbook`, `ingest`, `image_io`, `noise`, `cm` (lossless coder), `video_codec` (video baselines); `dcm/` (context mixing) |
-| `src/core`, `src/sim`, `src/train`, `src/runtime`, `src/manager`, `src/compose`, `src/library`, `src/dcm`, `src/codec`, `src/common`, `src/proto` | libraries (see the table above); `src/codec` runs video codecs through ffmpeg as baselines; `src/proto` holds the Phase 0 prototypes |
+| `include/neuralfx/` | public headers: `nvfx.h` (C API), `nvfx_scene.h` (C API for scenes), `nvfx_library.h` (C API for the effect library), `nvfx_manager.h` (C API for many effects), `nvfx_volume.h` (C API for 3D effects), `sim3d`, `render3d`, `rollout3d` (study N), `clip`, `sim`, `model`, `train`, `rollout`, `rollout_train`, `footage`, `metrics`, `flipbook`, `ingest`, `image_io`, `noise`, `cm` (lossless coder), `video_codec` (video baselines); `dcm/` (context mixing) |
+| `src/core`, `src/sim`, `src/sim3d`, `src/render3d`, `src/train`, `src/runtime`, `src/manager`, `src/compose`, `src/library`, `src/dcm`, `src/codec`, `src/common`, `src/proto` | libraries (see the table above); `src/codec` runs video codecs through ffmpeg as baselines; `src/proto` holds the Phase 0 prototypes |
 | `tools/`, `examples/`, `viewer/`, `bench/` | executables |
 | `library/` | the effect library's catalogue (`.nvfxl` files in the scene-script language; the models are in the data folder) |
 | `engines/godot/` | the Godot 4 GDExtension, its demo project and its headless test |

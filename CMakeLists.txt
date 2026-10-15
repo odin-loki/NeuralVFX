@@ -58,7 +58,8 @@ neuralfx_defaults(neuralfx_proto)
 neuralfx_simd(neuralfx_proto)
 
 # The model description and .nvfx format: shared by the runtime, the trainer and the tools.
-add_library(neuralfx_model STATIC src/core/model.cpp src/core/rollout.cpp src/core/cm.cpp)
+add_library(neuralfx_model STATIC src/core/model.cpp src/core/rollout.cpp src/core/cm.cpp
+                                  src/core/rollout3d.cpp src/render3d/render3d.cpp)  # study N's volume renderer (docs/STUDY_3D.md), baseline ISA
 target_include_directories(neuralfx_model PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include")
 set_target_properties(neuralfx_model PROPERTIES POSITION_INDEPENDENT_CODE ON)
 neuralfx_defaults(neuralfx_model)
@@ -67,6 +68,7 @@ neuralfx_defaults(neuralfx_model)
 set(NVFX_RUNTIME_SOURCES src/runtime/nvfx.cpp src/runtime/rt_base.cpp src/runtime/rt_avx2.cpp src/runtime/rt_avx512.cpp
                          src/runtime/rt_prior.cpp src/runtime/rt_prior_base.cpp src/runtime/rt_prior_avx2.cpp src/runtime/rt_prior_avx512.cpp
                          src/runtime/rt_handoff.cpp
+                         src/runtime/nvfx_volume.cpp src/runtime/rt_volume_avx2.cpp  # 3D volumes (nvfx_volume.h, docs/STUDY_3D.md)
                          src/manager/interp.cpp src/manager/manager.cpp src/manager/nvfx_manager.cpp)  # the effect manager (docs/MANAGER.md)
 find_package(Threads REQUIRED)  # the effect manager's worker threads
 add_library(nvfx STATIC ${NVFX_RUNTIME_SOURCES})
@@ -94,9 +96,16 @@ target_link_libraries(neuralfx_core PUBLIC neuralfx_model PRIVATE ${NEURALFX_ENC
 target_compile_definitions(neuralfx_core PRIVATE ${NEURALFX_ENCODER_DEFS})
 neuralfx_defaults(neuralfx_core)
 
+# Study N (docs/STUDY_3D.md): the 3D simulator, our own solver for a small 3D demo (not a validated fire code). Baseline
+# ISA, no contraction, threads that never change a value.
+add_library(neuralfx_sim3d STATIC src/sim3d/sim3d.cpp)
+target_link_libraries(neuralfx_sim3d PUBLIC neuralfx_model Threads::Threads)
+neuralfx_defaults(neuralfx_sim3d)
+
 # Trainer: hand-written gradients; its hot loops switch on AVX2 + FMA (train() checks the CPU).
-add_library(neuralfx_train STATIC src/train/net.cpp src/train/train.cpp src/train/rollout_train.cpp)
-target_link_libraries(neuralfx_train PUBLIC neuralfx_core)
+add_library(neuralfx_train STATIC src/train/net.cpp src/train/train.cpp src/train/rollout_train.cpp
+                                  src/train/rollout3d_train.cpp)  # study N's 3D rollout model (docs/STUDY_3D.md)
+target_link_libraries(neuralfx_train PUBLIC neuralfx_core neuralfx_sim3d)
 neuralfx_defaults(neuralfx_train)
 neuralfx_simd(neuralfx_train)
 
@@ -236,6 +245,15 @@ if(NEURALFX_BUILD_TOOLS)
   endif()
   set_target_properties(nvfx_c_host PROPERTIES LINKER_LANGUAGE CXX)
   neuralfx_defaults(nvfx_c_host)
+  # 3D volumes from plain C (nvfx_volume.h, study N): play a 3D effect, read its extinction texture, draw it for a camera.
+  add_executable(nvfx_volume_host examples/volume_host.c)
+  if(NEURALFX_BUILD_SHARED)
+    target_link_libraries(nvfx_volume_host PRIVATE nvfx_shared m)
+  else()
+    target_link_libraries(nvfx_volume_host PRIVATE nvfx m)
+  endif()
+  set_target_properties(nvfx_volume_host PROPERTIES LINKER_LANGUAGE CXX)
+  neuralfx_defaults(nvfx_volume_host)
   # The effect library from plain C (nvfx_library.h): list a catalogue, spawn effects on a stage, drive and stop them.
   add_executable(nvfx_library_host examples/library_host.c)
   if(NEURALFX_BUILD_SHARED)
@@ -344,6 +362,11 @@ if(NEURALFX_BUILD_TOOLS)
   add_executable(nvfx_reel tools/nvfx_reel.cpp)
   target_link_libraries(nvfx_reel PRIVATE neuralfx_train nvfx)
   neuralfx_defaults(nvfx_reel)
+  # Study N (docs/STUDY_3D.md): a small 3D demo: the 3D simulator's pilot, training runs, the 3D rollout model's
+  # training, validation and test, videos and timing.
+  add_executable(nvfx_3d tools/nvfx_3d.cpp)
+  target_link_libraries(nvfx_3d PRIVATE neuralfx_train neuralfx_io neuralfx_pack nvfx)  # neuralfx_pack: SHA-256 of the frozen model
+  neuralfx_defaults(nvfx_3d)
 
   add_executable(nvfx_ordered tools/nvfx_ordered.cpp)
   target_link_libraries(nvfx_ordered PRIVATE neuralfx_io neuralfx_train neuralfx_dcm nvfx)
@@ -389,6 +412,12 @@ if(NEURALFX_BUILD_TESTS)
   target_include_directories(neuralfx_manager_tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src")
   neuralfx_defaults(neuralfx_manager_tests)
   gtest_discover_tests(neuralfx_manager_tests TEST_PREFIX "neuralfx." DISCOVERY_MODE PRE_TEST PROPERTIES LABELS neuralfx)
+  # Study N (docs/STUDY_3D.md): the 3D simulator, the volume renderer, the 3D rollout model and its trainer, and the
+  # volume C API: their own test program.
+  add_executable(neuralfx_3d_tests tests/test_3d.cpp)
+  target_link_libraries(neuralfx_3d_tests PRIVATE neuralfx_train nvfx GTest::gtest_main)
+  neuralfx_defaults(neuralfx_3d_tests)
+  gtest_discover_tests(neuralfx_3d_tests TEST_PREFIX "neuralfx." DISCOVERY_MODE PRE_TEST PROPERTIES LABELS neuralfx)
   # Counts heap allocations around nvfx_render (replaces the global operator new, so it is its own program).
   add_executable(nvfx_alloc_test tests/alloc_test.cpp)
   target_link_libraries(nvfx_alloc_test PRIVATE nvfx neuralfx_compose nvfx_scene_api nvfx_library_api neuralfx_ddpm)  # the trainer's format writer makes a test prior
@@ -401,6 +430,8 @@ if(NEURALFX_BUILD_TESTS)
   if(NEURALFX_BUILD_TOOLS)
     add_test(NAME neuralfx.CHostExample COMMAND nvfx_c_host --self-test)
     set_tests_properties(neuralfx.CHostExample PROPERTIES LABELS neuralfx)
+    add_test(NAME neuralfx.VolumeHostExample COMMAND nvfx_volume_host --self-test)
+    set_tests_properties(neuralfx.VolumeHostExample PROPERTIES LABELS neuralfx)
     # The fireball as a script reproduces the hand-written scene's frozen keyframes to the bit (about a minute on 2
     # threads). Needs the study D effects (outside git): skipped when they are not in NEURALFX_MODELS_D. The frozen
     # keyframes here and below are the float path's (--precision float); rollout effects run at int8 by default since

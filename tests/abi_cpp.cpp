@@ -2,6 +2,7 @@
 // the struct sizes of docs/INTEGRATION.md §8 again, the shared library's version against these headers, and the
 // wrapper's success and error paths. With tests/abi_c99.c: nvfx_abi_test (exit status: the number of failed checks).
 #include <neuralfx/nvfx.hpp>
+#include <neuralfx/nvfx_volume.h>
 
 #include <cstdint>
 #include <cstdio>
@@ -33,6 +34,9 @@ static_assert(sizeof(nvfx_manager_stats) == 184);
 static_assert(sizeof(nvfx_pack_desc) == 40);
 static_assert(sizeof(nvfx_pack_info) == 48);
 static_assert(sizeof(nvfx_pack_member) == 48);
+static_assert(sizeof(nvfx_volume_info) == 96);
+static_assert(sizeof(nvfx_volume_camera) == 128);
+static_assert(sizeof(nvfx_volume_look_at) == 52);
 #endif
 static_assert(sizeof(nvfx_status) == 4 && sizeof(nvfx_fx) == 4 && sizeof(nvfx_handle) == 4);
 // The wrapper's handles are a pointer each, move-only; a Picture is the C struct.

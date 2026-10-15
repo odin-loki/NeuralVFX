@@ -31,7 +31,7 @@
 extern "C" {
 #endif
 
-#define NVFX_VERSION 5 /* 2: scenes (nvfx_scene.h); 3: nvfx_version(), effect packs (nvfx_pack.h); 4: engine layers and trails; 5: precision (study K) */
+#define NVFX_VERSION 6 /* 2: scenes (nvfx_scene.h); 3: nvfx_version(), effect packs (nvfx_pack.h); 4: engine layers and trails; 5: precision (study K); 6: 3D volumes (nvfx_volume.h) */
 
 typedef enum nvfx_status {
   NVFX_OK = 0,
@@ -158,6 +158,7 @@ NVFX_API nvfx_status nvfx_bake(nvfx_instance* instance, int frames, uint8_t* rgb
 #define NVFX_FEATURE_MANAGER 0x4u   /* nvfx_manager.h */
 #define NVFX_FEATURE_PACK 0x8u      /* nvfx_pack.h (packs of format NVFX_PACK_FORMAT and older) */
 #define NVFX_FEATURE_SHARED 0x10u   /* this is the shared library (libnvfx.so, nvfx.dll) */
+#define NVFX_FEATURE_VOLUME 0x20u   /* nvfx_volume.h (3D effects, study N) */
 #define NVFX_FEATURE_AVX2 0x100u    /* this CPU runs the AVX2 code (used by default when present) */
 #define NVFX_FEATURE_AVX512 0x200u  /* this CPU runs the AVX-512 code (nvfx_set_isa) */
 #define NVFX_FEATURE_VNNI 0x400u    /* this CPU has AVX-512 VNNI (int8 frame models use it) */
