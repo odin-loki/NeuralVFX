@@ -43,6 +43,10 @@ these by about 0.08 dB in the average picture.
 The library's fire in these videos is v2's: study M replaced it afterwards ([REPORT.md](../docs/REPORT.md) §14) with a
 fire that is closer to real runs on average (+0.39 dB in the mean picture, a detail spectrum 0.023 nearer) but looks the
 same frame by frame, so the videos were not re-rendered.
+Likewise the dust: study M3 ([REPORT.md](../docs/REPORT.md) §14.9) replaced the library's dust and explosion with
+models whose start points follow the requested controls (+1.3 and +2.9 dB closer to real runs in the average picture).
+The explosion entries name their start points and play as before; the dust in these videos (the moor, the dust
+effects, the dust impact) is the earlier model's.
 Every video is H.264 (yuv420p, +faststart, no audio). Click a poster to open its video.
 
 **58 videos, 71.5 MB in all**, each at most 5 MB, with 58 JPEG posters (736 KB in all).
