@@ -66,6 +66,21 @@ neural - coarse_sim_detail, paired over runs: frame 1: -2.19 [-2.82, -1.56]; fra
 
 neural_dynamics_true_renderer - coarse_sim_detail, paired over runs: frame 1: -1.09 [-1.66, -0.59]; frame 8: +1.02 [+0.84, +1.20]; frame 30: +1.50 [+1.05, +2.03]; frame 60: +1.36 [+0.99, +1.71]; frame 240: +0.20 [-0.19, +0.62] (tie);
 
+**puffs**
+
+| method | 1 | 4 | 8 | 16 | 30 | 60 | 120 | 240 |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| neural | 25.47 | 20.38 | 17.64 | 15.61 | 14.42 | 13.62 | 13.35 | 13.42 |
+| neural_dynamics_true_renderer | 29.00 | 21.20 | 17.91 | 15.61 | 14.40 | 13.64 | 13.40 | 13.51 |
+| coarse_sim_detail | 29.72 | 21.31 | 17.76 | 15.37 | 14.79 | 14.59 | 14.44 | 15.49 |
+| coarse_sim | 18.81 | 17.82 | 17.11 | 16.34 | 16.20 | 15.83 | 15.50 | 16.54 |
+| frozen | 22.41 | 13.69 | 11.71 | 11.03 | 10.87 | 10.50 | 10.97 | 11.91 |
+| renderer_on_true_fields | 28.57 | 28.51 | 28.58 | 29.10 | 29.61 | 29.05 | 29.05 | 29.05 |
+
+neural - coarse_sim_detail, paired over runs: frame 1: -4.26 [-7.12, -1.41]; frame 8: -0.12 [-1.38, +1.22] (tie); frame 30: -0.37 [-1.12, +0.45] (tie); frame 60: -0.97 [-1.52, -0.50]; frame 240: -2.07 [-2.76, -1.44];
+
+neural_dynamics_true_renderer - coarse_sim_detail, paired over runs: frame 1: -0.72 [-2.82, +1.62] (tie); frame 8: +0.15 [-1.14, +1.54] (tie); frame 30: -0.39 [-1.20, +0.51] (tie); frame 60: -0.94 [-1.53, -0.44]; frame 240: -1.98 [-2.68, -1.36];
+
 ### Endless runs at held-out settings
 
 The ten held-out settings of study B, a new seed each, 10 s per run (explosions: their 3 s). Distances of each method's frame statistics to a real run of the simulation at that setting; `real_other_seed` is a second real run with another seed, the floor. Lower is better except motion ratio (1 is right) and mean-frame PSNR (higher is closer).
@@ -98,6 +113,20 @@ Spectrum distance, paired over settings: neural - grid_k8 -; neural - flipbook_n
 
 Mean-frame PSNR (dB), paired: neural - flipbook_nearest +0.26 [-1.28, +1.77] (tie); neural - coarse_sim_detail -1.42 [-2.78, +0.14] (tie); neural - real_other_seed -4.44 [-5.67, -3.14]. Motion error |ln(motion ratio)|, paired: neural - flipbook_nearest +0.032 [-0.020, +0.092] (tie); neural - coarse_sim_detail -0.055 [-0.180, +0.085] (tie); neural - real_other_seed +0.139 [+0.057, +0.255]. Coverage distance, paired: neural - flipbook_nearest +0.0210 [-0.0005, +0.0435] (tie); neural - real_other_seed +0.0630 [+0.0400, +0.0854].
 
+**puffs**
+
+| method | spectrum L1 | motion ratio | coverage L1 | emission L1 | mean-frame PSNR |
+|---|---:|---:|---:|---:|---:|
+| real_other_seed | 0.083 | 0.96 | 0.0209 | 0.0000 | 26.33 |
+| neural | 0.193 | 1.30 | 0.0344 | 0.0003 | 23.93 |
+| flipbook_nearest | 0.138 | 1.04 | 0.0240 | 0.0000 | 22.33 |
+| coarse_sim_detail | 0.128 | 0.98 | 0.0235 | 0.0000 | 24.43 |
+| coarse_sim | 1.187 | 0.44 | 0.0292 | 0.0000 | 23.92 |
+
+Spectrum distance, paired over settings: neural - grid_k8 -; neural - flipbook_nearest +0.055 [-0.037, +0.142] (tie); neural - coarse_sim_detail +0.065 [+0.011, +0.118]; neural - real_other_seed +0.110 [+0.061, +0.161].
+
+Mean-frame PSNR (dB), paired: neural - flipbook_nearest +1.60 [+0.60, +2.46]; neural - coarse_sim_detail -0.50 [-1.55, +0.44] (tie); neural - real_other_seed -2.40 [-3.49, -1.02]. Motion error |ln(motion ratio)|, paired: neural - flipbook_nearest +0.046 [-0.100, +0.164] (tie); neural - coarse_sim_detail +0.067 [-0.034, +0.171] (tie); neural - real_other_seed +0.117 [+0.001, +0.236]. Coverage distance, paired: neural - flipbook_nearest +0.0104 [-0.0014, +0.0225] (tie); neural - real_other_seed +0.0135 [+0.0028, +0.0251].
+
 ### One minute of play
 
 Statistics of each 10 s window of a 60 s neural run (shards of 6 s from start points, the default) against a real 10 s run at the same setting (two held-out settings): if the effect drifted, the distances would grow window by window.
@@ -128,3 +157,15 @@ Statistics of each 10 s window of a 60 s neural run (shards of 6 s from start po
 | ink | 1 | 3 | 0.2424 | 1.7549 | 0.0054 | 26.980 |
 | ink | 1 | 4 | 0.1529 | 2.0410 | 0.0106 | 26.995 |
 | ink | 1 | 5 | 0.1407 | 1.8880 | 0.0172 | 28.274 |
+| puffs | 0 | 0 | 0.1202 | 1.3141 | 0.0457 | 21.183 |
+| puffs | 0 | 1 | 0.2177 | 1.1032 | 0.0203 | 25.738 |
+| puffs | 0 | 2 | 0.2305 | 1.1780 | 0.0240 | 25.374 |
+| puffs | 0 | 3 | 0.1223 | 1.3402 | 0.0440 | 21.473 |
+| puffs | 0 | 4 | 0.2215 | 1.1539 | 0.0235 | 24.612 |
+| puffs | 0 | 5 | 0.2509 | 1.1013 | 0.0225 | 24.754 |
+| puffs | 1 | 0 | 0.1655 | 1.3421 | 0.0142 | 25.861 |
+| puffs | 1 | 1 | 0.1260 | 1.4370 | 0.0262 | 26.063 |
+| puffs | 1 | 2 | 0.2021 | 1.1990 | 0.0181 | 27.793 |
+| puffs | 1 | 3 | 0.1063 | 1.7258 | 0.0203 | 23.907 |
+| puffs | 1 | 4 | 0.1394 | 1.5723 | 0.0380 | 23.570 |
+| puffs | 1 | 5 | 0.1233 | 1.5112 | 0.0221 | 28.017 |
