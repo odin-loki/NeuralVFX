@@ -1,17 +1,48 @@
 # Fire effects: wildfire, coals and a mushroom cloud
 
-Status: **in progress** (14 October 2026). Audience: dev, research, artists. Three effects a game would want next to
+Status: **done** (15 October 2026). Audience: dev, research, artists. Three effects a game would want next to
 fire, smoke and the explosion: a **wildfire** (a wide front of flames along the ground, as in a burning field, a wall
 of fire or a grass fire: the whole width burns, where study D's fire makes one flame per tile), **coals** (a bed of
 glowing embers on the ground, as in a dying campfire, a forge or cracked lava ground) and a **mushroom** cloud (a large
 explosion's fireball that rises on a stem and cools into a rolling cap of smoke; it plays once, for 5 s). They come
 from the project's own 2D fluid simulator with new sources, forces and drawing, and are trained and tested exactly as
 the last six were ([EFFECTS_ENERGY.md](EFFECTS_ENERGY.md), [EFFECTS_ATMOSPHERE.md](EFFECTS_ATMOSPHERE.md)): study D's
-recipe and protocol ([REPORT.md](REPORT.md) §6), on held-out settings and seeds.
+recipe and protocol ([REPORT.md](REPORT.md) §6), on held-out settings and seeds. A scene script plays all three
+together (§6), and ten new library entries use them (§6).
 
 ## 1. Bottom line
 
-To come, after the test.
+- **The wildfire works, by the rule set before the test.** From its true state it follows a held-out run 3.0 dB
+  [2.6, 3.4] better than the same simulation on the same 32-cell grid with the same detail layer at 1 s, and is still
+  ahead at 2 s (+4.0) and 8 s (+4.0). Played endlessly at settings and seeds it never saw, its average picture is 4.1 dB
+  [2.6, 5.4] closer to a real run than the nearest training flipbook's, its motion error ties the flipbook's (motion
+  ratio 0.95 against 1.27; a second real run: 1.04) and its detail ties it (spectrum distance 0.16 against 0.12; floor
+  0.04).
+- **The coals work too**, and track better than any looping effect so far: +4.7 dB [4.2, 5.1] over the coarse
+  simulation at 1 s (as much as study D's explosion), +4.3 at 8 s. Endless, their average picture is 1.9 dB [0.6, 3.2]
+  closer than the flipbook's and their motion is better than the flipbook's and ties a second real run (0.94 against
+  0.99), but their detail is twice as far from real as the flipbook's (0.137 against 0.073): the learned bed glows
+  dimmer and more evenly than the real one.
+- **The mushroom is weak**, as magic, the orb and the vortex were. It loses to the coarse simulation from 1 s (-1.1 dB
+  [-1.8, -0.5]; -3.0 [-3.7, -2.5] at 4 s), and the same dynamics drawn by the simulation's renderer lose as much, so
+  the dynamics, not only the renderer, fall behind; its learned renderer also loses 6 dB on the first frame (16 dB on
+  the true fields of the fresh fireball). Endless, its average picture is 2.4 dB [1.5, 3.4] further from real than the
+  flipbook's, its detail three times as far (0.26 against 0.10) and its cover too wide; only its motion ties the
+  flipbook's. The learned cloud loses its stem and its rolled cap and turns ragged; its own renderer adds blue and
+  green fringes. With the explosion's field-shader look (`look cloud`) it still reads as a mushroom cloud in a scene
+  and in the library (fair), but it is the weakest of the three.
+- **Cost (provisional, a busy shared machine):** 82 KB stored for the wildfire and the coals, 274 KB for the mushroom
+  (16 start points with 64-pixel fine fields, as the explosion's); 2.5 MB per instance at 128 px. At the runtime's
+  int8 default on the AVX-512 build, 0.50 (wildfire), 0.72 (coals) and 0.73 ms (mushroom) per 128 px frame, where
+  study D's fire took 0.71 ms and its explosion 0.58 ms in the same rounds (§5).
+- **A scene script** (`examples/scenes/prairie.nvfxs`) plays all three: a grass fire's front, the coals it has left,
+  and a mushroom cloud on the horizon whose shock wave bends the flames. Its keyframes are frozen (`ctest -R
+  ScriptedPrairieFrozen`). **Ten library entries** use the models, among them a new `wall_of_flames` (the wildfire
+  model's continuous front, where the old one was nine separate fire flames): good for the wildfire's three, fair for
+  the coals' and the mushroom's (§6).
+- **What it took:** a preset each, a one-shot length of the effect's own (`sim::one_shot_frames`: the mushroom needs
+  5 s), study D's recipe otherwise unchanged, 2.7 to 3.7 CPU-hours of training each, and no new code in the trainer or
+  the runtime.
 
 ## 2. The effects
 
@@ -125,11 +156,31 @@ branches decide the rest:
   now read it: the detail constants are calibrated over the one-shot's whole length (`finish_model`; the explosion's
   and dust's 89 frames, as before) and study D's steps (`d-chaos`, `d-eval`) track and play it to its end.
 
-Each is trained in study D's three saved steps (`d-train --stages12 1`, `d-tune` for stage 3, `d-finish`), one
-thread, `nice 10`, one effect at a time, from a copy of the tool (`DATA/fx_blaze/jobs/train.sh`, resumable after a
-restart; logs under `DATA/fx_blaze/logs`).
+Each was trained in study D's three saved steps (`d-train --stages12 1`, `d-tune` for stage 3, `d-finish`), one
+thread each, `nice 10`, from a copy of the tool (`DATA/fx_blaze/jobs/train.sh`, resumable after a restart; logs under
+`DATA/fx_blaze/logs`), on a machine shared with two other agents (load 8 to 14 on 4 cores). The wildfire trained alone;
+the coals and the mushroom side by side once two cores were free. No step had to run again.
 
-To come: the training table.
+| effect | runs x frames | simulation | stages 1-2 (loss, s) | stage 3 (loss, s) | renderer (training samples) | contrast, swirl, grow | detail score | start points | stored |
+|---|---|---:|---|---|---:|---|---:|---:|---:|
+| wildfire | 160 x 240 | 21.3 min, recorded in 292 s | 0.0275, 7063 | 0.0277, 1218 | 34.7 dB | 1, 0.5, 1 | 0.41 | 8 (grown) | 82 KB |
+| coals | 160 x 240 | 21.3 min, recorded in 324 s | 0.0553, 8134 | 0.0529, 2363 | 37.8 dB | 0.5, 0, 1 | 0.39 | 8 (grown) | 82 KB |
+| mushroom | 240 x 150 | 20.0 min, recorded in 336 s | 0.0282, 7904 | 0.0484, 2300 | 29.2 dB | 1, 0.5, 1 | 0.45 | 16 (64 px fine) | 274 KB |
+
+In all 2.7 CPU-hours for the wildfire (161 minutes: 123 for stages 1 and 2, 25 for stage 3, 13 for the last step), 3.7
+for the coals (220 minutes) and 3.5 for the mushroom (208 minutes); the coals and the mushroom shared the machine with
+each other as well. The loss columns are not comparable between effects (each is normalised by its own state's scale),
+nor stage 3's with stages 1-2's (it adds the activity term: the mushroom's rose, as dust's did). The calibration chose
+no sub-grid swirl and half the contrast for the coals (new material arrives smoother: their bed's pattern comes from
+the source, not from the flow), and a modest swirl (0.5) for the wildfire and the mushroom. The mushroom's renderer is
+the weakest of any effect so far on its training samples (29.2 dB; the explosion's 34.7): the fresh fireball and the
+cold cap are far apart in what they look like.
+
+Each model was frozen before the test: [fx_blaze_frozen.csv](../results/experiments/fx_blaze_frozen.csv) has their
+SHA-256 (the files are under the data root's `fx_blaze/models/d`). The wildfire was trained by a copy of the tool built
+from the working tree before the coals' and the mushroom's presets were final; its preset is the same to the byte in
+the committed code (full-size clips at two settings were compared, `DATA/fx_blaze/jobs/state/*.preset.sha256`), and so
+are the coals' and the mushroom's.
 
 ## 4. The test
 
@@ -170,19 +221,223 @@ flipbook's and its motion error is no worse than the flipbook's (interval not ab
 to the coarse simulation at tracking at 1 s, or whose detail and motion both lose to the flipbook, is reported as
 **weak**, as magic, the orb and the vortex were.
 
-To come: the results.
+The test ran once, for all three, on 15 October 2026 (`d-eval`, two threads, 11 minutes;
+[D_SUMMARY.md](../results/experiments/fx_blaze/D_SUMMARY.md),
+[d_track.csv](../results/experiments/fx_blaze/d_track.csv), [d_stats.csv](../results/experiments/fx_blaze/d_stats.csv),
+[d_long.csv](../results/experiments/fx_blaze/d_long.csv)). The `neural` rows played at int8 (the runtime's default; the
+AVX-512 build with VNNI).
+
+### 4.1 Tracking from the true state
+
+Active PSNR (dB), mean over 8 held-out runs (the mushroom's last horizon is 4 s, its run ending at 5 s):
+
+| effect | method | 1 frame | 8 frames | 1 s | 2 s | 8 s (mushroom: 4 s) |
+|---|---|---:|---:|---:|---:|---:|
+| wildfire | neural | 29.1 | 24.3 | 22.8 | 22.2 | 19.9 |
+| wildfire | neural dynamics, simulation's renderer | 30.2 | 24.3 | 22.8 | 22.2 | 19.8 |
+| wildfire | coarse simulation + detail | 24.4 | 21.5 | 19.8 | 18.2 | 15.9 |
+| wildfire | coarse simulation | 24.8 | 22.5 | 21.1 | 19.2 | 16.6 |
+| wildfire | holding the first frame | 30.0 | 17.6 | 15.5 | 15.5 | 15.1 |
+| coals | neural | 31.3 | 23.5 | 20.9 | 19.6 | 19.1 |
+| coals | neural dynamics, simulation's renderer | 34.7 | 23.6 | 20.7 | 19.4 | 18.8 |
+| coals | coarse simulation + detail | 30.7 | 18.8 | 16.2 | 14.8 | 14.9 |
+| coals | coarse simulation | 21.8 | 19.8 | 18.9 | 17.7 | 17.4 |
+| coals | holding the first frame | 34.0 | 18.0 | 16.1 | 13.3 | 13.1 |
+| mushroom | neural | 15.5 | 15.2 | 13.7 | 12.5 | 12.0 |
+| mushroom | neural dynamics, simulation's renderer | 17.5 | 15.2 | 13.4 | 12.4 | 12.0 |
+| mushroom | coarse simulation + detail | 21.4 | 14.8 | 14.8 | 15.1 | 15.0 |
+| mushroom | coarse simulation | 19.3 | 16.8 | 16.3 | 16.3 | 16.0 |
+| mushroom | holding the first frame | 11.4 | 5.4 | 5.2 | 6.3 | 8.1 |
+
+Neural minus coarse simulation + detail, paired over runs (95% intervals; bold: the neural rollout is worse):
+
+| effect | 1 frame | 8 frames | 1 s | 2 s | 8 s (mushroom: 4 s) |
+|---|---|---|---|---|---|
+| wildfire | +4.62 [+3.81, +5.38] | +2.77 [+2.10, +3.40] | +2.98 [+2.56, +3.36] | +3.99 [+3.50, +4.56] | +3.95 [+3.47, +4.45] |
+| coals | +0.61 [-0.95, +2.30] (tie) | +4.71 [+4.11, +5.38] | +4.65 [+4.18, +5.06] | +4.80 [+4.15, +5.46] | +4.27 [+3.44, +5.11] |
+| mushroom | **-5.96 [-7.49, -4.37]** | +0.42 [-0.26, +1.05] (tie) | **-1.10 [-1.76, -0.53]** | **-2.55 [-3.27, -1.76]** | **-3.04 [-3.69, -2.45]** |
+| mushroom, neural dynamics with the simulation's renderer | **-3.98 [-5.21, -2.53]** | +0.39 [-0.14, +0.92] (tie) | **-1.41 [-2.07, -0.85]** | **-2.70 [-3.41, -1.92]** | **-3.04 [-3.68, -2.45]** |
+
+(The paired differences at 4 s are from the same bootstrap as `d-report`'s, `metrics::paired_bootstrap` with 10,000
+resamples, on the rows of `d_track.csv`; `d-report` prints 1 and 8 frames, 1, 2 and 8 s.)
+
+- **The wildfire's and the coals' learned dynamics follow a run better than the simulation at the same resolution at
+  every horizon**, the coals by 4 to 5 dB from the eighth frame, more than any looping effect so far (fire, smoke,
+  steam, the jet, fog and cloud: 2.1 to 2.6 dB at 1 s; study D's explosion: 4.7). Both are calm flows
+  that the 32-cell state carries well: the wildfire's front stays where it burns, and the coals' bed stands still while
+  its pattern follows the noise the stepper sees.
+- **Their renderers are sound**: 34.7 dB (wildfire) and 33.0 dB (coals) on the true fields, mean over the first 30
+  frames. The coals' first frame loses a little to their renderer (+0.6, a tie, where the simulation's renderer on the
+  same dynamics leads by 4.1 dB).
+- **The mushroom's are not.** Its learned renderer reaches only 15.7 dB on the true fields of the first frame and 20.8
+  dB over the first second (the explosion's in study D: 21 dB): the white-hot young fireball is rare in its training
+  samples, as the explosion's was. But unlike the explosion's, its dynamics lose too: drawn by the simulation's renderer
+  they tie the coarse simulation at 8 frames and fall behind from 1 s, by 3 dB at 4 s. The plain coarse simulation,
+  without the detail layer, follows the runs best of all from the eighth frame.
+
+### 4.2 Endless runs at settings never seen
+
+Means over the 10 held-out settings (spectrum distance and coverage distance: lower is better; motion ratio: 1 is
+right; mean-frame PSNR: higher is closer):
+
+| effect | method | spectrum | motion | coverage | mean-frame PSNR |
+|---|---|---:|---:|---:|---:|
+| wildfire | real, other seed (floor) | 0.039 | 1.04 | 0.025 | 29.0 |
+| wildfire | **neural rollout (82 KB)** | 0.159 | 0.95 | 0.031 | 26.0 |
+| wildfire | nearest training flipbook | 0.121 | 1.27 | 0.055 | 21.9 |
+| wildfire | coarse simulation + detail | 0.278 | 0.78 | 0.052 | 22.6 |
+| wildfire | coarse simulation | 0.740 | 0.40 | 0.043 | 22.5 |
+| coals | real, other seed (floor) | 0.069 | 0.99 | 0.004 | 31.6 |
+| coals | **neural rollout (82 KB)** | 0.137 | 0.94 | 0.005 | 29.7 |
+| coals | nearest training flipbook | 0.073 | 1.29 | 0.004 | 27.8 |
+| coals | coarse simulation + detail | 0.090 | 0.91 | 0.012 | 27.4 |
+| coals | coarse simulation | 0.456 | 0.72 | 0.008 | 29.9 |
+| mushroom | real, other seed (floor) | 0.089 | 1.01 | 0.017 | 24.9 |
+| mushroom | **neural rollout (274 KB)** | 0.260 | 0.78 | 0.038 | 23.0 |
+| mushroom | nearest training flipbook (150 frames) | 0.098 | 1.10 | 0.020 | 25.4 |
+| mushroom | coarse simulation + detail | 0.122 | 0.96 | 0.013 | 24.5 |
+| mushroom | coarse simulation | 0.875 | 0.68 | 0.019 | 24.4 |
+
+Neural minus each other method, paired over the 10 settings (motion as the error |ln ratio|; bold: the neural rollout
+is better):
+
+| effect | statistic | nearest flipbook | coarse simulation + detail | real, other seed |
+|---|---|---|---|---|
+| wildfire | spectrum distance | +0.038 [-0.016, +0.088] (tie) | **-0.119 [-0.204, -0.043]** | +0.119 [+0.089, +0.152] |
+| wildfire | mean-frame PSNR (dB) | **+4.08 [+2.62, +5.36]** | **+3.43 [+2.07, +4.67]** | -3.00 [-3.91, -2.19] |
+| wildfire | motion error | -0.088 [-0.206, +0.027] (tie) | **-0.100 [-0.181, -0.016]** | +0.107 [+0.047, +0.161] |
+| wildfire | coverage distance | **-0.024 [-0.036, -0.012]** | - | +0.006 [+0.001, +0.012] |
+| coals | spectrum distance | +0.064 [+0.034, +0.095] | +0.047 [+0.022, +0.073] | +0.068 [+0.032, +0.102] |
+| coals | mean-frame PSNR (dB) | **+1.94 [+0.62, +3.15]** | **+2.35 [+1.39, +3.30]** | -1.85 [-2.73, -1.01] |
+| coals | motion error | **-0.126 [-0.230, -0.021]** | -0.041 [-0.103, +0.023] (tie) | +0.020 [-0.025, +0.062] (tie) |
+| coals | coverage distance | +0.001 [-0.000, +0.002] (tie) | - | +0.001 [+0.001, +0.002] |
+| mushroom | spectrum distance | +0.162 [+0.101, +0.244] | +0.138 [+0.056, +0.238] | +0.171 [+0.094, +0.268] |
+| mushroom | mean-frame PSNR (dB) | -2.40 [-3.43, -1.52] | -1.43 [-2.43, -0.52] | -1.87 [-2.96, -0.96] |
+| mushroom | motion error | +0.155 [-0.007, +0.317] (tie) | +0.176 [+0.025, +0.324] | +0.183 [+0.006, +0.367] |
+| mushroom | coverage distance | +0.018 [+0.009, +0.030] | - | +0.020 [+0.005, +0.036] |
+
+- **The wildfire** plays with the right motion (0.95; a flipbook of a neighbouring setting moves 27% too much), an
+  average picture 4 dB closer than the flipbook's and its coverage closer too: a flipbook of another setting puts the
+  front's flames and smoke in the wrong places. Its detail ties the flipbook's and beats the coarse simulation's, but is
+  0.12 from the floor: the detail layer's striped, serrated flame bases (the figure below) are its weak part.
+- **The coals** move as real coals do (motion tied with a second real run), with an average picture closer than the
+  flipbook's and the coarse simulation's. Their detail is the weak part: the learned bed glows more evenly and more
+  dimly than the real one (its hot patches are fewer and duller), which a flipbook of a neighbouring setting, a real
+  bed, does not do (0.073, near the floor of 0.069).
+- **The mushroom** loses on everything but motion, which ties the flipbook's: its learned cloud spreads wider than the
+  real one (coverage twice the floor's distance), its cap does not roll over into the rolled lobes on a stem that the
+  real one makes, and its detail is ragged. Since the flipbooks here cover the mushroom's whole 5 s, they are real
+  mushrooms of a neighbouring setting, which is hard to beat; a library of 64-frame flipbooks would have held the last
+  frame from 2.1 s.
+
+![Wildfire, coals and mushroom at the first held-out setting: for each, the real run (top) and the neural rollout with a new seed (below), across the run](figures/blaze_endless.png)
+
+### 4.3 One minute without a restart
+
+| effect | spectrum distance | motion ratio | mean-frame PSNR |
+|---|---|---|---|
+| wildfire | 0.10-0.22 | 0.68-1.32 | 26.3-29.9 |
+| coals | 0.09-0.13 | 0.89-1.16 | 29.5-31.6 |
+
+Ranges over six 10 s windows at each of the first two held-out settings (the mushroom plays once). Neither drifts: the
+last windows are as good as the first. The wildfire moves too little at the first setting in every window (0.68 to
+0.90) and a little too much at the second (0.98 to 1.32): a fault of the settings, as in its 10 s runs.
+
+### 4.4 By the rule
+
+- **The wildfire works**: it tracks better than the coarse simulation at 1 s (+2.98 [2.56, 3.36]), its average picture
+  is closer than the flipbook's (+4.08 [2.62, 5.36]) and its motion error ties the flipbook's.
+- **The coals work**: +4.65 [4.18, 5.06] at 1 s, an average picture closer than the flipbook's (+1.94 [0.62, 3.15]) and
+  a motion error smaller than the flipbook's. Their detail, worse than the flipbook's, does not decide by the rule, but
+  it is the thing to improve.
+- **The mushroom is weak**: it loses to the coarse simulation at 1 s (-1.10 [-1.76, -0.53]), and endless its average
+  picture and detail lose to the flipbook (its motion ties).
 
 ## 5. Memory and cost
 
-To come: `d-timing` beside study D's fire in the same session (provisional, a shared machine).
+Per frame through `nvfx_render` on one pinned core, with study D's fire and explosion measured in the same session
+(`nvfx_experiment d-timing`, four rounds back to back): the least of the four rounds and, in brackets, the greatest
+([d_timing_rounds.csv](../results/experiments/fx_blaze/d_timing_rounds.csv), the first round in
+[d_timing.csv](../results/experiments/fx_blaze/d_timing.csv)). The instances play at their default precision, int8
+(study K); the ISA is forced per row, so the AVX2 rows are int8 without VNNI and the AVX-512 row is the default build.
+**Provisional:** the machine was shared with other agents' jobs (load average 12 to 14 on 4 cores).
+
+| effect | stored | resident | per instance at 128 px | AVX2, 64 px | AVX2, 128 px | AVX2, 256 px | AVX-512, 128 px (the default) | restart (AVX2, 128 px) |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| wildfire | 82 KB | 163 KB | 2.5 MB | 0.46 ms (0.49) | 0.70 ms (0.74) | 1.64 ms (2.45) | **0.50 ms** (0.54) | 17 ms (1 s warm-up) |
+| coals | 82 KB | 163 KB | 2.5 MB | 0.61 ms (0.64) | 0.97 ms (1.16) | 2.07 ms (2.22) | **0.72 ms** (0.77) | 17 ms (1 s warm-up) |
+| mushroom | 274 KB | 804 KB | 2.5 MB | 0.51 ms (0.55) | 0.97 ms (1.13) | 1.77 ms (1.91) | **0.73 ms** (0.75) | 0.2 ms |
+| fire (study D, same session) | 82 KB | 163 KB | 2.5 MB | 0.47 ms (0.49) | 0.91 ms (1.10) | 2.43 ms (2.70) | 0.71 ms (0.83) | 15 ms |
+| explosion (study D, same session) | 274 KB | 804 KB | 2.5 MB | 0.45 ms (0.51) | 0.79 ms (0.92) | 1.70 ms (2.06) | 0.58 ms (0.68) | 0.2 ms |
+
+The same network as study D's, so the same per-pixel work (1012 multiply-adds per pixel at 128 px) and working memory
+(2.5 MB per instance at 128 px with int8's buffers). The wildfire costs what fire costs or less (much of its frame is
+smoke that the detail layer and the renderer handle as quickly); the coals and the mushroom about 1 to 1.25 times
+fire's at 128 px. Like fire, the wildfire and the coals grow their fine fields at instance start, so a restart costs a
+1 s warm-up (15 to 23 ms); the mushroom stores its start points with fine fields, as the explosion does, and restarts
+in 0.2 ms. For scale, the 32-cell simulation of each with its own renderer costs 2.5 to 3.0 (wildfire), 8.6 to 9.0
+(coals: its bed's pattern evaluates the flicker noise in every cell twice a step) and 2.3 to 2.9 ms (mushroom) in our
+scalar code, against 1.3 to 1.5 ms for fire's. They should be re-timed on a quiet machine with study D's effects in the
+same rounds (`tools/study_k/time.sh` times all rollout effects).
 
 ## 6. The library and a scene
 
-To come.
+**Ten library entries** (`library/blaze.nvfxl`; the models in `library/models.nvfxl`), judged by eye from sheets, a
+30-second play of every loop and each one-shot through its length ([LIBRARY.md](LIBRARY.md) has the notes):
+- the wildfire: `wall_of_flames` (rewritten: five overlapping tiles of the wildfire model, a continuous front, where it
+  was nine separate fire flames that read as tongues side by side), `grass_fire` and `burning_field`, all **good**;
+- the coals: `ember_bed`, `forge`, `lava_cracks` and `burnt_ground`, **fair** (`lava_cracks` weak to fair): at night
+  their dark char is lost against the ground, so they read as glowing patches with small flames rather than a heap;
+- the mushroom: `nuke`, `mushroom_blast` and `distant_mushroom`, **fair**: the flash, the fireball, the stem and the
+  darkening read, but the cap is ragged and its edges hang down like branches. They draw the mushroom with the
+  explosion entries' look `cloud`, since its own renderer gives blue and green fringes.
+
+Two of them have frozen keyframes (`wall_of_flames`, `distant_mushroom`: `ctest -R LibraryKeyframesFrozen`, pinned to
+float). What it took: a wildfire tile's front fills the middle 84% of the tile and the feather that softens the smoke's
+top also fades the tile's sides, so tiles overlap by about half their width; the coals' bed lies in the bottom sixth of
+its tile and the scene's ground hides what is drawn below its line, so coals stand on the ground line and are best a
+little larger than their box; a one-shot's module fades out by `opacity` over its last second, as the explosion's do.
+
+![The ten entries of wildfire, coals and mushroom, each alone at its show moment](figures/library_sheet_blaze.png)
+
+**The scene**: `examples/scenes/prairie.nvfxs` (8 s at 1280 x 720 and 30 fps, about 60 lines). Night on a prairie. A
+grass fire has burnt through the left of the field, which lies as a bed of glowing coals with a few small flames
+(three coals tiles); its front still burns on the right, leaning in a light wind (four wildfire tiles). At 2 s a huge
+blast on the horizon behind the burnt ground: a flash of the scene's light, and the mushroom model wakes (drawn by the
+`cloud` look) and climbs, rolling over and darkening to smoke. At 4 s its shock wave arrives: a shock front, a camera
+shake, the flames lie down before it (their wind control is raised for a second), the coals flare and throw up sparks,
+and ash begins to fall (`emit ash`). Nothing was added to the compositor or the runtime.
+
+![The prairie: keyframes at 0.8, 2.1, 2.6, 3.4, 4.1, 4.6, 5.8 and 7.2 s](figures/prairie_keyframes.png)
+
+The video (rendered at the runtime's int8 default) and the full keyframes are under the data root's `fx_blaze/scene`
+(outside git); the keyframes' SHA-256 are in `results/experiments/fx_blaze_frozen.csv` and `ctest -R
+ScriptedPrairieFrozen` checks them (pinned to float, skipped without the effects in `NEURALFX_MODELS_BLAZE`, by default
+`$NEURALVFX_DATA/fx_blaze/models/scene`). They are the same on 1 and 2 threads. It plays without an allocation in its
+frame loop, at 47 ms per frame on 2 threads and 36 ms on 4 on the busy machine (its eight modules' steps 3 to 8 ms of
+it; provisional).
+
+What works: the three read as a grass fire, burnt ground and a distant mushroom cloud, one flash lights them and one
+shock wave moves them. What does not, yet: the coals are a thin strip at this scale; the wildfire's smoke ends in a
+soft line at its tiles' tops; the mushroom's cap is ragged, and late in its life it looks more like a tree of smoke than
+a mushroom; its last frame is held while it fades.
 
 ## 7. What it means
 
-To come.
+- **Effects shaped for the 32-cell state learn well, and the stiller they are, the better they track.** The wildfire
+  (fire's speeds) and the coals (a still bed driven by the noise the stepper sees) follow held-out runs 3 to 5 dB better
+  than the coarse simulation and play endlessly with the right motion; the coals track better than any looping effect
+  so far.
+- **A long one-shot is the hard case.** The mushroom's look changes completely over its 5 s (a white fireball, an
+  orange cap, grey-brown smoke), and its shape depends on two broad rolls staying attached to a stem. The learned
+  stepper loses the shape within a second or two, and its renderer, which sees the white fireball rarely, loses the
+  first frames. Dust and the explosion, 3 s long, were easier. Untested fixes: the explosion's coupled training of study
+  I or its first-second hand-off ([COMPOSE.md](COMPOSE.md) §10), more start points along the run (not only at its first
+  frame), or a stepper that is told the time since the start more finely than by two decays.
+- **Detail is still the weak part.** The wildfire's detail ties a flipbook's but its flame bases show the detail
+  layer's stripes; the coals' learned bed glows too evenly. Neither is a problem of motion.
+- **The library got a real wall of fire.** One wildfire tile burns along its whole width, so a wall is five overlapping
+  tiles rather than nine flames side by side.
 
 ## 8. Reproduce
 
@@ -198,4 +453,10 @@ build/nvfx_experiment d-finish --effects wildfire $R --threads 1
 #   (the same for coals and mushroom)
 build/nvfx_experiment d-eval   --effects wildfire,coals,mushroom $R --threads 2 --figures DIR   # the test, once
 build/nvfx_experiment d-report $R                                                             # D_SUMMARY.md
+build/nvfx_experiment d-timing --effects fire,explosion,wildfire,coals,mushroom --root ROOT --results DIR
+build/nvfx_scene_script --script examples/scenes/prairie.nvfxs --models DIR3 --out prairie.mp4 --keyframes DIR --sheet sheet.png
+build/nvfx_gallery --library library --models DATA/library/models --only wall_of_flames,nuke --sheet sheet.png
 ```
+
+`ROOT/models/d` for the timing holds study D's `fire.nvfx` and `explosion.nvfx` with the three new models; `DIR3`
+holds `wildfire.nvfx`, `coals.nvfx` and `mushroom.nvfx`.

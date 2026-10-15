@@ -33,14 +33,15 @@ C++23, no third-party runtime dependencies, a C API for engines, no Python.
   textures and colour space, effect packs (one checked file with the models and the catalogue), calibration,
   determinism, memory, the version and ABI; the C++ wrapper `include/neuralfx/nvfx.hpp`.
 - **More effects:** [docs/EFFECTS.md](docs/EFFECTS.md) (steam and magic: presets, training, the test, a scene).
-- **Effect library:** [docs/LIBRARY.md](docs/LIBRARY.md): 79 named effects ready to place (fires, smokes, explosions,
-  steam, magic, ambient, sparks, lights, dust, trails, weather) from the eleven trained models and procedural elements,
+- **Effect library:** [docs/LIBRARY.md](docs/LIBRARY.md): 88 named effects ready to place (fires, smokes, explosions,
+  steam, magic, ambient, sparks, lights, dust, trails, weather) from the fourteen trained models and procedural elements,
   with a C API to spawn and drive them, a gallery, and the Godot node `NeuralVFXStage`. Trails (a rocket's smoke, a
   vehicle's dust wake, a carried torch, a comet) move with the game's object and leave their material in the world
   behind it; rain, snow, ash and leaves are procedural and ride the effects' air.
 - **Energy effects:** [docs/EFFECTS_ENERGY.md](docs/EFFECTS_ENERGY.md) (a flamethrower's jet, a plasma orb and a dust
   devil: presets, training, the test, a fire-whirl scene).
 - **Atmosphere effects:** [docs/EFFECTS_ATMOSPHERE.md](docs/EFFECTS_ATMOSPHERE.md) (fog, dust and cloud: presets, training, the test, a scene).
+- **Fire effects:** [docs/EFFECTS_BLAZE.md](docs/EFFECTS_BLAZE.md) (a wildfire front, a bed of coals and a mushroom cloud: presets, training, the test, a scene).
 - **Data and licences:** [docs/DATA.md](docs/DATA.md).
 - **Footage:** [docs/FOOTAGE.md](docs/FOOTAGE.md): start points estimated from frames (study J), so a rollout effect
   continues what footage shows (`nvfx_estimate`); validated on simulated renders only.

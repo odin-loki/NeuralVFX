@@ -910,6 +910,19 @@ flipbook, average picture closer, detail tied with it), but the vortex sometimes
 Each is 82 KB. The full account, with a scene in which a flamethrower sets a dust devil alight, is in
 [EFFECTS_ENERGY.md](EFFECTS_ENERGY.md).
 
+### 6.13 Fire effects
+
+Three more presets were trained and tested the same way: a **wildfire** (a front of flames whose whole width burns,
+smoke rolling off its top), **coals** (a low bed of glowing coals with short flames) and a **mushroom** cloud (a fireball
+that rises on a stem into a cap and darkens; it plays once, for 5 s, the one-shot recipe at a length of its own). The
+wildfire and the coals work by the rule set before their test: they track a held-out run 3.0 dB [2.6, 3.4] and 4.7 dB
+[4.2, 5.1] better than the coarse simulation with the same detail layer at 1 s, and at unseen settings and seeds their
+average picture is closer than the nearest flipbook's (+4.1 and +1.9 dB) with motion no worse; the coals' detail is
+twice as far from real as the flipbook's. The mushroom is weak: it loses to the coarse simulation from 1 s (-1.1 dB
+[-1.8, -0.5]) and to the flipbook endless, losing its stem and rolled cap. 82 KB (wildfire, coals) and 274 KB
+(mushroom). The full account, with a prairie scene and ten library entries (among them a new wall of fire), is in
+[EFFECTS_BLAZE.md](EFFECTS_BLAZE.md).
+
 ## 7. Runtime cost and budget
 
 Median ms per frame through `nvfx_render`, one pinned AVX2 core (90th percentiles and every configuration in
