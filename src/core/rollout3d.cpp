@@ -586,6 +586,10 @@ void detail_step(const Model& m, State& s, std::uint64_t seed, std::span<const f
       for (int z = 0; z < FZ; ++z) {
         for (int x = 0; x < FX; ++x) {
           const std::size_t i = fi(x, y, z);
+          if (ws.hi[i] <= 0.f) {  // the forward sample's corners are all empty: the result is 0 whatever this is
+            ws.fb[i] = 0.f;
+            continue;
+          }
           const float* u = ws.ufine.data() + i * 3;
           ws.fb[i] = sample_zero(ws.fa.data(), FX, FY, FZ, fl(x) + u[0], fl(y) + u[1], fl(z) + u[2], nullptr, nullptr);
         }
