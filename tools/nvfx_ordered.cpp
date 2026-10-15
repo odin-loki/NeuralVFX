@@ -2522,6 +2522,26 @@ void step_test(const Ctx& c, sim::Effect e, const tools::Args& a) {
   std::ofstream(done) << "done " << models[1].sha << " " << (r.pass() ? "met" : "not met") << "\n";
 }
 
+// Study M3: the validation and test settings at N (`settings --n N`): study B's and study G's ten first, then more drawn the
+// same way; whether G's ten are still the first ten of the validation list (each at least 0.05 from all N test settings).
+void step_settings(const tools::Args& a) {
+  const int n = a.i("n", 10);
+  const auto test = test_settings(n), val = validation_settings(n, n), g = validation_settings();
+  int kept = 0;
+  for (std::size_t i = 0; i < g.size(); ++i) kept += val[i] == g[i] ? 1 : 0;
+  double closest = 1e9;
+  for (const auto& v : val) {
+    for (const auto& t : test) closest = std::min(closest, std::hypot(double(v[0] - t[0]), double(v[1] - t[1]), double(v[2] - t[2])));
+  }
+  std::println("settings at N = {}: study G's ten validation settings are the first ten of the validation list: {} of 10; the closest validation "
+               "setting to a test setting: {:.3f}",
+               n, kept, closest);
+  for (int i = 0; i < n; ++i) {
+    std::println("{:3d}  test ({:.3f}, {:.3f}, {:.3f})  validation ({:.3f}, {:.3f}, {:.3f})", i, test[sz(i)][0], test[sz(i)][1], test[sz(i)][2], val[sz(i)][0],
+                 val[sz(i)][1], val[sz(i)][2]);
+  }
+}
+
 // --- cost: thread CPU time per frame through nvfx_render, models interleaved -------------------------------------------
 
 double thread_ms() {
@@ -2628,8 +2648,9 @@ int main(int argc, char** argv) {
     c.m2 = study == "m2";
     c.m3 = study == "m3";
     const std::string step = a.positional()[0];
-    if (step == "setmean" || step == "set" || step == "info") {
+    if (step == "setmean" || step == "set" || step == "info" || step == "settings") {
       if (step == "set") step_set(a);
+      else if (step == "settings") step_settings(a);
       else if (step == "info") step_info(a);
       else step_setmean(a);
       return 0;
