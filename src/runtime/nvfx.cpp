@@ -789,7 +789,7 @@ nvfx_isa nvfx_get_isa(void) { return resolved_isa(); }
 
 uint32_t nvfx_version(uint32_t* features) {
   if (features) {
-    std::uint32_t f = NVFX_FEATURE_SCENE | NVFX_FEATURE_LIBRARY | NVFX_FEATURE_MANAGER | NVFX_FEATURE_PACK;  // built with every API
+    std::uint32_t f = NVFX_FEATURE_SCENE | NVFX_FEATURE_LIBRARY | NVFX_FEATURE_MANAGER | NVFX_FEATURE_PACK | NVFX_FEATURE_VOLUME;  // built with every API
 #ifdef NVFX_SHARED_BUILD
     f |= NVFX_FEATURE_SHARED;
 #endif

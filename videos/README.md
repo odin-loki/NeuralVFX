@@ -18,6 +18,8 @@ machine, so how long they took says nothing about cost):
 - **Round 7's six** cost 0.50 (wildfire), 0.72 (coals) and 0.73 ms (mushroom), and 0.47 to 0.49 ms (launch, puffs,
   ink) per 128 px frame at int8 on the AVX-512 build (provisional, the shared machine;
   [EFFECTS_BLAZE.md](../docs/EFFECTS_BLAZE.md) §5, [EFFECTS_FLOW.md](../docs/EFFECTS_FLOW.md) §5).
+- **Study N's 3D fire** costs about 70 ms a step and 50 ms a 256 x 256 picture on one busy core (provisional;
+  [STUDY_3D.md](../docs/STUDY_3D.md) §8); a volume needs 31 MB.
 - **The fireball scene** runs at 80 frames per second at 1280 x 720 on 4 threads ([COMPOSE.md](../docs/COMPOSE.md) §7.3).
 - **A crowd of about 165 effects** fits a 4 ms budget per 60 Hz tick on one core once the manager has measured the machine
   ([MANAGER.md](../docs/MANAGER.md) §1 and §7.1).
@@ -38,7 +40,7 @@ fire that is closer to real runs on average (+0.39 dB in the mean picture, a det
 same frame by frame, so the videos were not re-rendered.
 Every video is H.264 (yuv420p, +faststart, no audio). Click a poster to open its video.
 
-**47 videos, 59.0 MB in all**, each at most 5 MB, with 47 JPEG posters (583 KB in all).
+**51 videos, 62.8 MB in all**, each at most 5 MB, with 51 JPEG posters (622 KB in all).
 
 ## 1. Showcase scenes
 
@@ -159,10 +161,28 @@ above).
 |---|---|---|---|---|---|---|
 | <a href="lit_sprites.mp4"><img src="lit_sprites.jpg" width="200" alt="Lit sprites"></a> | **Lit sprites** | `nvfx_lit_host`'s stage (chimney smoke, a campfire, a rocket trail moved across it) read as an engine reads its layers ([ENGINES.md](../docs/ENGINES.md) §11) and lit by the host. Top left: the relit picture, albedo x (a cool ambient + a warm point light circling the scene, by the normals) + emission, over the host's own sky and ground. Top right: the albedo layer over grey. Bottom: the emission layer and the normal layer | Learned: the smoke, the fire, the trail's material; procedural: embers, the rocket's glow. The light, the sky and the ground are the host's | The library's smoke, fire, explosion; int8 | `nvfx_lit_host library MODELS OUT --frames 300 --threads 2 --raw -` piped to ffmpeg (`--raw` is new: every frame's four quadrants as raw RGB); four 640 x 360 quadrants, 1280 x 720, 30 fps, 10 s; labels by ffmpeg drawtext; CRF 24, 0.5 MB | Good: the smoke and the trail brighten as the light passes them; the rocket leaves the stage after about 3.5 s and its trail stays |
 
-## 9. Later
+## 9. A 3D fire (study N)
 
-Round 7's six effects (wildfire, coals, mushroom, launch, puffs, ink) are in the sections above. Still to come:
-**water** and the **3D demo** (study N); their videos come when they merge.
+Study N's small 3D demo ([STUDY_3D.md](../docs/STUDY_3D.md)): a 3D fire learned as a 16 x 24 x 16 state that drives
+seeded 64 x 96 x 64 detail, from our own 3D simulator (not a validated fire code). `nvfx_3d video --kind KIND` plays the
+frozen chosen model (`chosen.nvfx3`, 268 KB, float: there is no int8 path for volumes) through the volume C API
+(`nvfx_volume.h`: 8 s shards crossfaded over 0.5 s) and draws every frame with the study's volume renderer (Planck
+emission through the CIE 1931 colour matching functions, soot absorption and single scattering, one fixed exposure),
+over a floor grid and sky the tool draws; 1280 x 720, 30 fps, CRF 24 (`-preset slow`). Demo seeds 9,900,000 and up,
+which no measured run uses. **The look (colour, glow, smoke shading) is physics-based rendering of the fields, not
+learned; what is learned is how the fields move.**
+
+| | Video | What it shows | Learned / procedural | Models, precision | Rendered | How it looks |
+|---|---|---|---|---|---|---|
+| <a href="3d_fire_orbit.mp4"><img src="3d_fire_orbit.jpg" width="200" alt="The 3D fire, walked around"></a> | **The 3D fire, walked around** | The camera circles the fire once, rising and falling a little; controls 0.7, 0.5, 0.6 (no wind), seed 9,900,001 | Learned: the fire's motion (the coarse state); seeded: the 64 x 96 x 64 detail; rendered: the volume renderer. Procedural: the floor and sky | `chosen.nvfx3` (study N, 268 KB); float | `--kind orbit`, 12 s, 1.2 MB | A small flame under a grey smoke column from every side. The flame's base breaks into bright, blocky spots (the detail layer's 4-cell blocks show), whiter and shorter than the simulation's; the plume leans in still air for a few seconds before the 8 s shard change straightens it |
+| <a href="3d_real_vs_learned.mp4"><img src="3d_real_vs_learned.jpg" width="200" alt="Real against learned in 3D"></a> | **Real against learned, in 3D** | Left: the 3D simulator (64 x 96 x 64). Right: the learned model from the same state (a held-out run after 100 frames: controls 0.65, 0.45, 0.55, seed 9,900,000) with the same noise seed, one continuous rollout. One camera swings a quarter turn around both. **Both are chaotic: they part after a second or two**, as the caption says | Left: simulation. Right: learned (the reference model, not the runtime's shards). Both drawn by the same volume renderer | `chosen.nvfx3`; float | `--kind real-vs-learned`, 10 s, 0.9 MB | They part within two seconds and keep the same smoke column's height and lean; the learned flame is whiter at its base and broken into hot spots where the simulation's is one orange tongue |
+| <a href="3d_wind.mp4"><img src="3d_wind.jpg" width="200" alt="The 3D fire's wind swept live"></a> | **Wind, swept live** | Side (left) and top (right) at once while the wind control sweeps from none (0.5) to full towards -x (0) by 4.8 s, to full towards +x (1) by 9 s and back to none; intensity 0.7, turbulence 0.5, seed 9,900,002 | As the orbit | `chosen.nvfx3`; float | `--kind wind`, 12 s, 0.7 MB | The plume follows the control slowly: it barely turns as the wind drops towards -x (from above, the smoke still trails a little towards +x); after the 8 s shard change (a fresh start near the controls of that moment) it leans hard with the +x wind and straightens as the wind falls back. **A failure shows: from 5 s, after the hard wind towards -x, a second fire grows on the floor at the box's upwind edge and fills a corner with a bright mass by 7.5 s**, until the 8 s shard change clears it. The model runs away when the wind blows towards -x (STUDY_3D.md §11; a second seed and constant winds of 0.05 and 0.25 do the same); kept as rendered |
+| <a href="3d_smoke_orbit.mp4"><img src="3d_smoke_orbit.jpg" width="200" alt="3D smoke, walked around"></a> | **3D smoke, walked around** (a demo only) | The camera circles a learned 3D smoke column once; controls 0.7, 0.5, 0.5, seed 9,900,005. Trained after the study's test on the same recipe, **not validated or tested** | As the orbit | `smoke3d.nvfx3` (study N's smoke, 268 KB; `$NEURALVFX_DATA/n_3d/models`); float | `--kind orbit --model .../smoke3d.nvfx3 --title "LEARNED 3D SMOKE"`, 12 s, 1.2 MB | A thick grey column that billows and rises out of the frame from every side; small orange specks glow at its base, which the simulated smoke (too cool to glow) does not have |
+
+## 10. Later
+
+Round 7's six effects (wildfire, coals, mushroom, launch, puffs, ink) and study N's 3D fire are in the sections above.
+Still to come: **water**; its videos come when it merges.
 
 ## Reproduce
 
@@ -183,6 +203,12 @@ build/nvfx_scene_script --script examples/scenes/prairie.nvfxs --models $NEURALV
 build/nvfx_gallery --library library --models $M --only campfire --video campfire.mp4 --clip 2.4
 build/nvfx_crowd --budget 16 --threads 4 --seconds 20 --video crowd.mp4
 build/nvfx_lit_host library $M OUT --frames 300 --raw - | ffmpeg -f rawvideo -pix_fmt rgb24 -s 1280x720 -r 30 -i - lit.mp4
+# study N's 3D videos (the model: $NEURALVFX_DATA/n_3d/models/chosen.nvfx3 unless --model says otherwise)
+build/nvfx_3d video --kind orbit --out 3d_fire_orbit.mp4 --seconds 12 --controls 0.7,0.5,0.6 --seed 9900001
+build/nvfx_3d video --kind real-vs-learned --out 3d_real_vs_learned.mp4 --seconds 10 --controls 0.65,0.45,0.55 --seed 9900000
+build/nvfx_3d video --kind wind --out 3d_wind.mp4 --seconds 12 --controls 0.7,0.5,0.5 --seed 9900002
+build/nvfx_3d video --kind orbit --model $NEURALVFX_DATA/n_3d/models/smoke3d.nvfx3 --title "LEARNED 3D SMOKE" \
+    --out 3d_smoke_orbit.mp4 --seconds 12 --controls 0.7,0.5,0.5 --seed 9900005
 ```
 
 (`M=$NEURALVFX_DATA/library/models`.) `nvfx_reel`'s header lists every option.

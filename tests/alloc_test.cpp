@@ -11,7 +11,7 @@
 // the third round's procedural elements (hail, aurora, rainbow, meteors, a beam, a shield, glints, bursts of spatter
 // and shards), its layers read every frame; and the effect manager (nvfx_manager.h) ticking a
 // crowd on its threads and on the engine's, with spawns, stops, controls, camera moves, a tight budget, proxies, copies
-// offset in time, pauses and culls.
+// offset in time, pauses and culls; and a 3D volume (nvfx_volume.h, study N) stepped, read and drawn on 1 and 3 threads.
 // Exit code 0 = no allocation during rendering.
 #include "compose_scene.hpp"
 #include "nvfx_internal.hpp"
@@ -23,7 +23,9 @@
 #include <neuralfx/nvfx_library.h>
 #include <neuralfx/nvfx_manager.h>
 #include <neuralfx/nvfx_scene.h>
+#include <neuralfx/nvfx_volume.h>
 #include <neuralfx/rollout.hpp>
+#include <neuralfx/rollout3d.hpp>
 
 #include <algorithm>
 #include <cmath>
@@ -883,6 +885,81 @@ int run_manager(bool external) {
 
 }  // namespace
 
+// Study N (docs/STUDY_3D.md): a 3D volume (nvfx_volume.h) on 1 and 3 threads, in shards with crossfades, stepped, read
+// as float and half textures in every field, drawn for a moving camera, seeded again and stepped back (restarts).
+int run_volume(int threads) {
+  nfx::rollout3d::Hyper h;
+  h.rx = 8;
+  h.ry = 12;
+  h.rz = 8;
+  h.fine = 2;
+  h.hidden = 8;
+  h.memory = 2;
+  h.jacobi = 8;
+  h.warmup = 4;
+  nfx::rollout3d::Model m = nfx::rollout3d::init_model(h, 4);
+  m.effect = "volume";
+  m.scale = {0.08f, 0.15f, 0.08f, 0.4f, 0.06f};
+  m.lo = {-0.6f, -0.6f, -0.6f, 0.f, 0.f};
+  m.hi = {0.6f, 0.9f, 0.6f, 2.f, 0.5f};
+  for (int k = 0; k < 3; ++k) {
+    nfx::rollout3d::StartPoint sp;
+    sp.controls = {0.2f + 0.3f * static_cast<float>(k), 0.5f, 0.5f};
+    sp.seed = 9'000'600 + static_cast<std::uint64_t>(k);
+    sp.time = 3.f;
+    sp.coarse.resize(static_cast<std::size_t>(h.cells()) * nfx::rollout3d::kPhys);
+    for (std::size_t i = 0; i < sp.coarse.size(); ++i) {
+      const float v = 0.5f + 0.5f * std::sin(0.37f * static_cast<float>(i) + static_cast<float>(k));
+      sp.coarse[i] = i % 5 < 3 ? 0.1f * (v - 0.5f) : (i % 5 == 3 ? 1.2f * v : 0.1f * v);
+    }
+    m.starts.push_back(std::move(sp));
+  }
+  std::ostringstream os;
+  if (!nfx::rollout3d::save_model(os, m)) return 1;
+  const std::string bytes = os.str();
+  nvfx_volume_effect* e = nullptr;
+  nvfx_volume* v = nullptr;
+  if (nvfx_volume_effect_load_memory(bytes.data(), bytes.size(), &e) != NVFX_OK) return 1;
+  if (nvfx_volume_create(e, threads, &v) != NVFX_OK) return 1;
+  const float controls[3] = {0.6f, 0.3f, 0.8f};
+  nvfx_volume_set_controls(v, controls, 3);
+  nvfx_volume_set_seed(v, 99);
+  if (nvfx_volume_set_shard(v, 1.5f) != NVFX_OK) return 1;
+  const std::size_t n = static_cast<std::size_t>(h.fx()) * h.fy() * h.fz();
+  std::vector<float> field(3 * n);
+  std::vector<std::uint16_t> half(3 * n);
+  std::vector<std::uint8_t> rgba(64 * 48 * 4);
+  nvfx_volume_camera cam{};
+  const auto frame = [&](double t, int f) {
+    long bad = 0;
+    bad += nvfx_volume_step_to(v, t) != NVFX_OK;
+    for (const nvfx_volume_field fld : {NVFX_VOLUME_TEMPERATURE, NVFX_VOLUME_SOOT, NVFX_VOLUME_EXTINCTION, NVFX_VOLUME_VELOCITY}) {
+      bad += nvfx_volume_read(v, fld, NVFX_VOLUME_FLOAT, field.data(), field.size() * 4) != NVFX_OK;
+      bad += nvfx_volume_read(v, fld, NVFX_VOLUME_HALF, half.data(), half.size() * 2) != NVFX_OK;
+    }
+    const float a = 0.1f * static_cast<float>(f);
+    const nvfx_volume_look_at la{{2.f * std::sin(a), 1.f, 2.f * std::cos(a)}, {0.f, 0.7f, 0.f}, {0.f, 1.f, 0.f}, 45.f, 64.f / 48.f, 0.f, 0.f};
+    bad += nvfx_volume_camera_look_at(&la, &cam) != NVFX_OK;
+    bad += nvfx_volume_render(v, &cam, 64, 48, rgba.data(), 64 * 4) != NVFX_OK;
+    return bad;
+  };
+  long bad = frame(0.0, 0);  // warm-up outside the count
+  g_allocations = 0;
+  g_counting = true;
+  for (int f = 1; f <= 80; ++f) bad += frame(f / 30.0, f);  // across a shard change and its crossfade
+  nvfx_volume_set_seed(v, 7);                                 // a new seed: the timeline starts again
+  bad += frame(0.5, 81);
+  bad += frame(0.2, 82);  // back in time: a restart
+  nvfx_volume_set_variation(v, 2);
+  bad += frame(1.0, 83);
+  g_counting = false;
+  const long a = g_allocations.load();
+  std::printf("volume (3D, study N) on %d thread%s: %ld allocations in 84 frames%s\n", threads, threads == 1 ? "" : "s", a, bad ? " (calls failed)" : "");
+  nvfx_volume_free(v);
+  nvfx_volume_effect_free(e);
+  return a == 0 && bad == 0 ? 0 : 1;
+}
+
 int main() {
   nfx::Hyper g;
   g.arch = nfx::Arch::grid;
@@ -932,6 +1009,7 @@ int main() {
   failures += run_multi(128, false) + run_multi(64, true) + run_multi(128, true);                // multi-level models (study F4), int8
   failures += run_multi(128, false, NVFX_PRECISION_FLOAT) + run_multi(64, true, NVFX_PRECISION_FLOAT);  // and float
   failures += run_manager(false) + run_manager(true);                                                    // the effect manager
+  failures += run_volume(1) + run_volume(3);                                                             // 3D volumes (study N)
   std::printf("%s\n", failures ? "FAILED: nvfx_render allocated" : "ok: no allocation per frame");
   return failures ? 1 : 0;
 }

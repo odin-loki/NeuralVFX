@@ -1,18 +1,34 @@
 # To do: every effect in 3D — a small demo here first, then big on a PC
 
-**Status:** stage 1 is under way; stage 2 is planned, not started.
+**Status:** stage 1 is done (study N, `docs/STUDY_3D.md`); stage 2 is planned, not started.
 
-- **Stage 1, here and now (study N):** a small 3D demo in this container, on branch `study-3d`. It is fire first,
-  smoke if time allows, and contains:
-  - our own 3D solver;
-  - a small 3D rollout model (a 16³ coarse grid);
-  - a physically based volume renderer;
-  - a first volume API;
-  - demo videos of the fire seen from every side.
+- **Stage 1, here and now (study N): done.** A small 3D demo in this container ([docs/STUDY_3D.md](docs/STUDY_3D.md),
+  REPORT §15). What it built:
+  - our own 3D solver (64 x 96 x 64; fire and a smoke preset; not a validated fire code);
+  - a 3D rollout model (a 16 x 24 x 16 learned state, 14,218 weights, driving seeded 64 x 96 x 64 detail);
+  - a physically based volume renderer (Planck's law and CIE 1931 to RGB, soot absorption and single scattering);
+  - the volume C API (`include/neuralfx/nvfx_volume.h`, `NVFX_VERSION` 6);
+  - demo videos (`videos/3d_*.mp4`).
 
-  It is measured as every study here is. Its write-up will be `docs/STUDY_3D.md`. It answers the first questions
-  before money and weeks go into stage 2: does a learned 3D rollout work at all, does it beat simply running a cheap
-  3D simulation, and what does it cost to play?
+  What it found, on held-out settings with fresh seeds, the rule written before validation:
+  - **The learned 3D fire tracks a real run better than the cheap 3D simulation with the same seeded detail.** At
+    1 s it is +1.1 dB in temperature and +2.2 dB in pictures from four cameras.
+  - **Played on, it is better on detail and the mean picture but worse on motion and coverage**, so it does not beat
+    the cheap simulation outright.
+  - **Most of the "worse" is one fault:** with wind blowing in, heat builds up at the box's upwind side and a second
+    fire grows there. The coarse advection's samples are clamped to the grid, so inflow keeps its own heat. The
+    `nvfx_3d edge` check catches it.
+  - **Cost (provisional):** a step takes about 60 to 70 ms on one core, 33 ms on four. The detail layer is 59 ms of
+    that and the network 15. A 256² picture takes about 49 ms on the CPU.
+
+  What stage 2 takes from it:
+  - choose models on endless play as well as tracking;
+  - bring ambient air in at open edges (zero heat, soot and memory) and check with `nvfx_3d edge`;
+  - train on long rollouts at the controls' extremes and with controls that change;
+  - make the detail layer cheap (SIMD, sparse bricks) and draw pictures on the GPU;
+  - use a finer state (32³) or a smoother lock against blocky flames;
+  - start from a validated teacher (FDS);
+  - snapshot every training stage.
 - **Stage 2, on a PC, much later:** everything below. Accurate 3D simulations of every effect, however long they take,
   checked against measured physics. Large 3D models trained on them, as fine as the PC allows. Then 3D scenes, a 3D
   library and a full weather system.
