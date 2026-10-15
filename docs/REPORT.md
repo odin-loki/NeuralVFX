@@ -2382,10 +2382,11 @@ thing on smoke's mean frame (§13.3) and replaced the strict reading by non-infe
 these are study K's margins for the spectrum (a fifth of the models' own distances, 0.1 to 0.15, and half the distance
 between two sets of eight real runs), motion, coverage and emission. Tracking's margin is study K's at 2 s rather than
 its -0.10 dB at 1 s: a retrained stepper changes every frame of a rollout, as chaos does by 2 s, where int8 changed
-them by a few hundredths of a dB; a fifth of a dB at 1 s, where the active PSNR is about 18 dB, is a sixth of the spread of single runs (a
-standard deviation of 1.1 to 1.3 dB over study M's 16 validation runs, [m_val_track.csv](../results/experiments/ordered/m_val_track.csv)). A margin works both ways: a change that matters fails even when the interval crosses zero, so the margins are
-stricter than the strict reading where the measure is noisy and more lenient only where a change is too small to
-matter. Study M's own validation data are not revisited with this rule.
+them by a few hundredths of a dB; a fifth of a dB at 1 s, where the active PSNR is about 18 dB, is a sixth of the
+spread of single runs (a standard deviation of 1.1 to 1.3 dB over study M's 16 validation runs,
+[m_val_track.csv](../results/experiments/ordered/m_val_track.csv)). A margin works both ways: a change that matters
+fails even when the interval crosses zero, so the margins are stricter than the strict reading where the measure is
+noisy and more lenient only where a change is too small to matter. Study M's own validation data are not revisited with this rule.
 
 **One amendment, after the probe and before any validation number.** The coverage and emission margins have a least
 value of 0.0001 (in the units of the curves: the frame's mean alpha, and its mean light added, max(0, rgb - alpha), on
@@ -2394,8 +2395,9 @@ emission distance was about 2 × 10⁻⁵ (the explosion and dust add almost no 
 10⁻⁵) and its mean state moved it by +1 × 10⁻⁶ [-3 × 10⁻⁶, +4 × 10⁻⁶], outside a margin of 10% of it: a relative margin
 on a distance that is almost zero is the size of its noise, which re-creates the null the margins were meant to remove
 (smoke's in study M). The least value matters only where the current model's distance is under 0.001, which in
-study M's validation ([m_val_stats.csv](../results/experiments/ordered/m_val_stats.csv)) is smoke's and the explosion's light alone (fire's coverage and light and every coverage
-distance there are above it, where 10% governs). The rule as first committed is commit `f996878`; nothing else was
+study M's validation ([m_val_stats.csv](../results/experiments/ordered/m_val_stats.csv)) is smoke's and the
+explosion's light alone (fire's coverage and light and every coverage distance there are above it, where 10%
+governs). The rule as first committed is commit `f996878`; nothing else was
 changed.
 
 **Validation (the choice).** Study G's 10 validation settings (DCM §4) with seeds no study has used: real runs
@@ -2466,9 +2468,10 @@ Means: the jet's mean-frame PSNR 27.02 dB (`mt4` 27.41, `mt8` 27.42; the floor 3
 emission 0.00085 (`mt4` 0.00093; the floor 0.00027).
 
 - **The fine-tune works on the jet as on fire**: its average picture 0.4 dB closer at both weights, motion closer to the
-  real (0.93 to 1.00 at weight 4), tracking and detail unchanged.
-- **The swirl at 16 pixels is wrong for the jet.** Its sub-grid swirl is the strongest of any effect (3 pixels a frame,
-  steam's 0.5, fire's 0.5 before study M), chosen by study D's calibration at 6 pixels; moved to 16 pixels, eddies of that
+  real (0.93 to 1.00 at weight 4), tracking and detail unchanged. (On training settings; on validation the average
+  picture tied, §14.8.3.)
+- **The swirl at 16 pixels is wrong for the jet.** Its sub-grid swirl is the strongest of the seven here (3 pixels a frame,
+  as the launch's and three water effects'; steam's 0.5, fire's 0.5), chosen by study D's calibration at 6 pixels; moved to 16 pixels, eddies of that
   strength move whole tongues of the flame: the detail spectrum distance rises from 0.15 to 0.25 and motion moves away
   from the real. Study M's pairing of the two changes came from fire, whose swirl is a sixth of the jet's.
 - So the jet's fine-tune is also validated alone, `mtW`, as magic's is (its target the mean frame; the spectrum held to
