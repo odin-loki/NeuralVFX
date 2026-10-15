@@ -2362,8 +2362,8 @@ thing on smoke's mean frame (§13.3) and replaced the strict reading by non-infe
 these are study K's margins for the spectrum (a fifth of the models' own distances, 0.1 to 0.15, and half the distance
 between two sets of eight real runs), motion, coverage and emission. Tracking's margin is study K's at 2 s rather than
 its -0.10 dB at 1 s: a retrained stepper changes every frame of a rollout, as chaos does by 2 s, where int8 changed
-them by a few hundredths of a dB; a fifth of a dB at 1 s (about 18 dB of active PSNR) is a tenth of what a run's seed
-moves it. A margin works both ways: a change that matters fails even when the interval crosses zero, so the margins are
+them by a few hundredths of a dB; a fifth of a dB at 1 s, where the active PSNR is about 18 dB, is a sixth of the spread of single runs (a
+standard deviation of 1.1 to 1.3 dB over study M's 16 validation runs, [m_val_track.csv](../results/experiments/ordered/m_val_track.csv)). A margin works both ways: a change that matters fails even when the interval crosses zero, so the margins are
 stricter than the strict reading where the measure is noisy and more lenient only where a change is too small to
 matter. Study M's own validation data are not revisited with this rule.
 

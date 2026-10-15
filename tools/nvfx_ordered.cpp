@@ -2229,13 +2229,13 @@ double thread_ms() {
   return static_cast<double>(ts.tv_sec) * 1e3 + static_cast<double>(ts.tv_nsec) * 1e-6;
 }
 // As study L's (nvfx_swirl cost), with the precision chosen: per repetition and size, each model in turn plays 200 frames
-// after the first at controls (0.6, 0.5, 0.6) and the median over frames is kept; reported per size: the median over
+// (one-shots: their 88) after the first at controls (0.6, 0.5, 0.6) and the median over frames is kept; reported per size: the median over
 // repetitions, its range, and the median of each model's paired difference from the first (the current model).
 // --precision float|int8|default (the runtime's: int8 where the CPU has VNNI); --ftz flushes subnormal floats to zero in
 // this thread (FTZ and DAZ), as many engines run.
 void step_cost(sim::Effect e, const tools::Args& a) {
   const auto models = read_entries(a.need("current"), a.str("cand", ""));
-  const int reps = a.i("reps", 7), frames = 200;
+  const int reps = a.i("reps", 7), frames = sim::effect_loops(e) ? 200 : 88;  // a one-shot holds its last frame after 89
   const std::string prec = a.str("precision", "float");
   const nvfx_precision pr = prec == "float" ? NVFX_PRECISION_FLOAT : prec == "int8" ? NVFX_PRECISION_INT8 : NVFX_PRECISION_DEFAULT;
   if (prec != "float" && prec != "int8" && prec != "default") throw std::invalid_argument("--precision float, int8 or default");
