@@ -1,6 +1,7 @@
 # Energy and motion effects: jet, orb and vortex
 
-Status: **done** (14 October 2026). Audience: dev, research, artists. Three effects a game would want next to fire,
+Status: **done** (14 October 2026; the orb and the vortex replaced by study L, 15 October 2026, §9). Audience: dev,
+research, artists. Three effects a game would want next to fire,
 smoke, the explosion, steam and magic: a **jet** (a flamethrower or a rocket thruster: a narrow jet of burning gas from
 a nozzle), an **orb** (a ball of cyan plasma that boils inside a soft boundary and breathes) and a **vortex** (a dust
 devil seen from the side). They come from the project's own 2D fluid simulator with new sources, forces and drawing,
@@ -27,6 +28,8 @@ and were trained and tested exactly as steam and magic were ([EFFECTS.md](EFFECT
 - **But the vortex sometimes loses its column.** A check after the test (§4.4): at 4 of the 10 held-out settings, all
   at low intensity, the learned column dies away for up to 4.8 s in a minute, and comes back at the next shard (6.5% of
   all frames); the simulation's did not, in a minute at the same settings, nor did the jet's and the orb's.
+- **Study L replaced the orb and the vortex** (§9): retrained steppers that track 0.45 dB [0.27, 0.62] and 0.21 dB [0.11,
+  0.29] better at 1 s on fresh held-out runs; the new vortex loses its column in a fifth to a quarter fewer frames.
 - Each is **82 KB** stored (8 start points; fine fields grown at instance start, as fire's), 2.4 MB per instance at
   128 px. Per frame at 128 px they cost 1.0 (jet), 1.3 (orb) and 1.0 ms (vortex) where study D's fire took 1.25 ms in
   the same session, on the shared machine: provisional (§5).
@@ -289,7 +292,7 @@ shards, the next shard brings it back. So the learned stepper sometimes loses th
 of a thin column, which on the 32-cell grid is only two to four cells wide, and then regrows it no faster than the
 simulation grows a column from an empty frame (about 4 s). The simulation does not lose it. Untested ways to fix it:
 start points with fine fields, more training runs at low intensity, a shorter shard for this effect, or a source the
-runtime keeps alive.
+runtime keeps alive. (Study L, §9, found the cause in the stepper: it cannot grow a column from nothing.)
 
 ![Jet, orb and vortex, the simulator's presets: two frames a second apart at three settings (low, middle, high controls)](figures/energy_presets.png)
 
@@ -384,3 +387,33 @@ build/nvfx_scene_script --script examples/scenes/firewhirl.nvfxs --models DIR --
 
 `ROOT/models/d` for the timing holds study D's `fire.nvfx` with the three new effects. `DIR` for the scene holds
 `jet.nvfx`, `orb.nvfx` and `vortex.nvfx`.
+
+## 9. Study L: the orb and the vortex replaced (15 October 2026)
+
+Study L ([REPORT.md](REPORT.md) §12.1) took the orb's and the vortex's tracking apart on training settings, and the
+vortex's lost columns, and replaced both after a test on study B's held-out settings with fresh seeds.
+- **Why they tied the coarse simulation.** Their learned 32-cell steppers: with the true coarse state in place of the
+  stepper the same detail layer tracks 7.3 dB (orb) and 4.9 dB (vortex) better at 1 s; the renderer costs only the first
+  frame (1.3 and 2.8 dB) and the detail layer barely matters. The orb's boiling is decided below the 32-cell scale (the
+  coarse simulation itself tracks 2.6 dB better at 1 s on 48 cells than on 32).
+- **Why the vortex loses its column.** Not its start points nor too few low-intensity runs (55 of its 160 training runs
+  are below 0.4): played from a run's own true state its column still dies at 4 of 8 low-intensity training settings, and
+  from an empty grid it grows none in 20 s, where the simulation grows one in 2 to 4 s. Its stepper asks for negative heat
+  at an empty foot; the floor at zero hides that from every gradient, so it could never learn to regrow a column once the
+  sway blows its thin foot away.
+- **The new orb**: the same network fine-tuned on 30-frame windows (the horizon it is judged on), 1,500 iterations. Test:
+  tracking at 1 s **+0.45 dB [+0.27, +0.62]**, detail spectrum distance -0.010 [-0.016, -0.003], average picture 1.4 dB
+  closer to a real run, motion tied. It still only ties the coarse simulation with its detail layer at 1 s (+0.04 dB).
+- **The new vortex**: fine-tuned with windows that start from an empty grid and with the floor's gradient passed
+  (`StepperOptions::floor_gradient`), 2,400 iterations. Test: tracking at 1 s **+0.21 dB [+0.11, +0.29]**, light closer,
+  everything else tied; the column-loss check of §4.4: 4.8% of frames lost against 6.6% (published seeds), 4.5% against
+  5.6% (fresh seeds), at the same 4 low-intensity settings. It still grows no column from an empty grid (its sink there
+  shrank from -0.10 to -0.02): fewer losses, not none, so the library keeps its intensity at 0.5 or more.
+- Both cost what they did (their steppers have the same shape): at 128 px 0.84 and 0.75 ms beside fire's 0.87 to 0.90 ms
+  in the same session (provisional; REPORT §12.1.6). Files: the data root's `l_swirl/models/v3`.
+- **The fire whirl** was drawn again with both (frozen keyframes updated). Its burning column is still braided: that is
+  the detail layer locking once a frame on a column that rises about a coarse cell a frame (magic's saw-teeth). Locking
+  twice a frame removes the braid, but lowers the vortex's endless motion by 3%, which study L's rule counts as worse, so
+  the new vortex keeps one pass.
+
+![The fire whirl with study L's orb and vortex: keyframes at 0.8, 2.2, 3.4, 4.6, 5.6, 6.8, 8.0 and 9.4 s](figures/firewhirl_keyframes_l.png)

@@ -29,7 +29,10 @@ Plan and decisions: [PLAN.md](PLAN.md).
     run, which no earlier effect's did; fog ties the 45 MB flipbook library on every statistic;
   - **weak:** magic (a fast regular swirl) only ties the coarse simulation and its detail is worse than a flipbook's;
     the plasma orb and the dust devil also only tie it at 1 s, though they play endlessly with the right motion and
-    an average picture closer than a flipbook's; the dust devil sometimes loses its column at low intensity.
+    an average picture closer than a flipbook's; the dust devil sometimes loses its column at low intensity. Study L
+    (§12.1) found why and replaced all three: magic now leads its coarse simulation (+0.6 dB at 1 s) without its
+    saw-teeth, the orb and the dust devil track 0.45 and 0.21 dB better than before, and the dust devil loses its
+    column less often, though the orb still ties the coarse simulation.
   Scene scripts play them together: a portal ([EFFECTS.md](EFFECTS.md)), a stormy moor
   ([EFFECTS_ATMOSPHERE.md](EFFECTS_ATMOSPHERE.md)), a fire whirl ([EFFECTS_ENERGY.md](EFFECTS_ENERGY.md)).
 - **For engines:** an effect library of named, ready-to-place effects built from the trained models and procedural
@@ -1232,6 +1235,17 @@ penalties for the picture. At held-out settings fire's detail spectrum distance 
 better in both moved the mean frame by 0.04 dB, and the explosion barely changed. Motion's error turned out to depend on
 the setting rather than be a uniform shortfall. Nothing was tested; v2 is unchanged.
 
+**Study L: fast and regular swirls** (§12.1). Magic, the orb and the vortex only tied the coarse simulation at 1 s. Taken
+apart on training settings: the 32-cell learned stepper is the largest part for all three (4.6 to 7.3 dB from what the
+true coarse state would give); for a fast rotation its semi-Lagrangian advection smears more than standing still; the
+detail layer's once-a-frame lock makes magic's saw-teeth (and the fire whirl's braid); and the vortex's stepper asks for a
+sink at an empty foot, which its floor at zero hides from every gradient, so a lost column never regrows. A detail layer
+in two passes, MacCormack advection, 30-frame training windows, and training from empty grids with the floor's gradient
+passed gave candidates that met the rule written before validation; tested once on fresh seeds all three replace their
+models: magic +0.94 dB [0.59, 1.32] at 1 s without its teeth, the orb +0.45 [0.27, 0.62], the vortex +0.21 [0.11, 0.29]
+with a fifth to a quarter fewer lost-column frames. The orb still ties its coarse simulation; a finer coarse state is
+what the diagnosis points to next.
+
 **Composed effects.** The fireball (16 coupled modules, particles, light, distortion, bloom) runs at **12.5 ms per frame
 at 1280 x 720 (80 frames per second) and 27.2 ms at 1920 x 1080 on 4 threads** after two optimisation rounds, 10.6 and
 10.3 times faster than first written (measured in one session on a quiet machine), with every frame the same to the
@@ -1240,10 +1254,13 @@ scripts; the scripted fireball reproduces the hand-written one to the bit.
 
 ### 12.1 Study L: fast and regular swirls (magic, the orb, the vortex)
 
-Status: **in progress** (14 October 2026). The diagnosis below was made on training settings only; the design and the
-rule were committed before any validation number (this commit). Code: `tools/nvfx_swirl.cpp` (`nvfx_swirl diag | dstats
-| coarse | advect | column | train | set | val | test | collapse | cost`); every run is logged under the data root's
-`l_swirl`.
+Status: **done** (15 October 2026). The diagnosis was made on training settings only; the design and the rule were
+committed before any validation number (commit 26c8c97), and each effect's chosen candidate was frozen by SHA-256 before
+its one test. **All three models are replaced**: each met the rule on study B's held-out settings with fresh seeds.
+Magic tracks a held-out run 0.94 dB [0.59, 1.32] better at 1 s and its saw-teeth are gone; the orb 0.45 dB [0.27, 0.62],
+with detail closer to the real; the vortex 0.21 dB [0.11, 0.29], and it loses its column in fewer frames (4.5% against
+5.6% with fresh seeds), though not never. Code: `tools/nvfx_swirl.cpp` (`nvfx_swirl diag | dstats | coarse | advect |
+column | train | set | val | test | collapse | cost | look`); every run is logged under the data root's `l_swirl`.
 
 **The question.** Eight rollout effects follow a held-out run 2 to 4.7 dB better than the coarse simulation with the same
 detail layer at 1 s. Three only tie it: magic (a spinning portal, whose fast smooth arms come out saw-toothed), the orb (a
@@ -1294,9 +1311,13 @@ Active PSNR (dB) at 1 s, means over the 8 runs (`nvfx_swirl diag`; the data root
 - **The vortex loses its column through its stepper, not its start points.** At 8 low-intensity training settings (55 of
   the 160 training runs have intensity below 0.4, so they are not rare), played from the run's own true state (a perfect
   start point, its own seed) for 20 s the learned column dies at 4 of the 8 (26% to 98% of frames); played from each
-  stored start point alone, 31 of 64 plays lose it; in shards of 6 s, 5 of 8 settings lose 4% to 13% of their frames. The
-  stepper is trained on windows of 16 frames after at most 48 of its own (2.1 s); a shard is 6 s, and in longer rollouts
-  its heat fades.
+  stored start point alone, 31 of 64 plays lose it; in shards of 6 s, 5 of 8 settings lose 4% to 13% of their frames.
+  **And once lost, it cannot come back:** from an empty grid the learned vortex grows no column in 20 s at any of the 8
+  settings, where the simulation grows one in 2 to 4.3 s. Without its floor at zero, the stepper asks for negative heat
+  at an empty foot (about -0.1 summed over its six cells after three steps, at every intensity); the floor clamps it to
+  zero, which also blocks the gradient there, so no training window can teach it to grow from nothing (and none starts
+  from an empty grid: state 0 of a training run is already one frame in). A thin column whose foot is blown aside by the
+  sway stays dead until the next shard brings a start point.
 
 #### 12.1.2 Design and the rule (committed before validation)
 
@@ -1334,3 +1355,148 @@ over the tracking runs on validation, over the 10 settings in the test), 95% boo
 On validation, among the candidates that meet the rule the one with the largest gain in tracking at 1 s is chosen; an
 effect with none stops there and is not tested (as study D2). The cost is measured beside fire in the same session and
 reported, not part of the rule.
+
+#### 12.1.3 What was tried (training settings)
+
+Each candidate was first played on a probe of training settings (the controls of training runs 0 to 9, their own seeds,
+4 runs pooled per setting; tracking on 2 runs per setting) with the rule's statistics, against the current model:
+
+| effect | candidate | tracking at 1 s (dB) | on the probe |
+|---|---|---:|---|
+| magic | detail contrast 0.5 (an existing constant) | +1.4 (diagnosis runs) | endless motion falls to 0.72 of the real (current 1.12): dropped |
+| magic | detail layer in 2 passes (`passes 2`) / 3 passes | +0.50 / +0.53 | meets the rule; the teeth are gone |
+| magic | stepper fine-tuned on 30-frame windows (`u30`) | -0.16 | worse at 1 s, better average picture (+1.6 dB) |
+| magic | MacCormack stepper (`mc`, fine-tuned 1,600 iterations) | -0.06 | ties alone; with 2 passes +0.51, motion and detail closer |
+| orb | stepper fine-tuned on 30-frame windows, 600 / 1,500 iterations (`u30`, `u30b`) | +0.45 / +0.64 | meet the rule (spectrum, picture better too) |
+| orb | detail layer in 2 passes | -0.27 | detail spectrum much worse (+0.096): a slow ball needs no second lock |
+| vortex | own rollouts as long as a shard (burn-in up to 180 frames) | +0.04 | motion lower; the column is lost as often |
+| vortex | 30-frame windows | +0.17 | motion lower (0.76 of the real against 0.85) |
+| vortex | detail layer in 2 passes | -0.05 | motion lower; the fire whirl's braid is gone |
+| vortex | windows from an empty grid (every run's empty state, 80 short runs of the first 41 frames) | +0.06 | ties; the column still never grows |
+| vortex | the same with the floor gradient (`StepperOptions::floor_gradient`), 800 then 1,600 more iterations (`grow3`) | +0.17 | meets the rule; columns lost less often (from its own true state 1 of 8 settings, against 4) |
+
+Not tried, because the diagnosis does not point there: renderer fine-tuning (34 to 36 dB on the true fields; at 1 s the
+dynamics score the same with either renderer) and start points with fine fields (the vortex loses its column from its own
+true state, and magic's start is gone within a second). A 48-cell grid was not built (§12.1.2).
+
+#### 12.1.4 Validation (the choice)
+
+Candidate minus current model; tracking over the 16 salt-3 runs, the endless statistics over study G's 10 validation
+settings with 8 runs pooled ([l_val_*_compare.csv](../results/experiments/swirl/)). Bold: better; struck: worse.
+
+| effect | candidate | tracking at 1 s (dB) | spectrum | \|ln motion\| | coverage | emission | mean-frame PSNR (dB) | rule |
+|---|---|---|---|---|---|---|---|---|
+| magic | 2 passes | **+0.67 [+0.42, +0.93]** | +0.017 (tie) | -0.036 (tie) | **-0.0003** | ~~+0.00011 [+0.00004, +0.00019]~~ | **+0.59** | fails |
+| magic | 3 passes | **+0.73 [+0.44, +1.03]** | ~~+0.029 [+0.003, +0.054]~~ | +0.015 (tie) | **-0.0002** | ~~+0.00012 [+0.00004, +0.00020]~~ | **+0.69** | fails |
+| magic | MacCormack + 2 passes | **+1.09 [+0.72, +1.46]** | -0.026 (tie) | **-0.085 [-0.157, -0.013]** | **-0.0011** | -0.0001 (tie) | **+1.61** | **chosen** |
+| magic | 30-frame windows + 2 passes | **+0.48 [+0.27, +0.71]** | +0.021 (tie) | -0.009 (tie) | **-0.0015** | **-0.0004** | **+1.83** | meets |
+| orb | `u30` | **+0.30 [+0.18, +0.41]** | **-0.017 [-0.024, -0.011]** | +0.011 (tie) | -0.0003 (tie) | -0.0004 (tie) | **+0.85** | meets |
+| orb | `u30b` | **+0.46 [+0.35, +0.58]** | **-0.018 [-0.026, -0.010]** | +0.002 (tie) | **-0.0007** | **-0.0008** | **+1.75** | **chosen** |
+| vortex | `grow3` | **+0.30 [+0.09, +0.52]** | -0.006 (tie) | +0.037 (tie) | -0.0007 (tie) | -0.0000 (tie) | +0.48 (tie) | **chosen** |
+| vortex | `grow3` + 2 passes | **+0.27 [+0.05, +0.49]** | **-0.028 [-0.045, -0.013]** | ~~+0.049 [+0.004, +0.091]~~ | -0.0007 (tie) | -0.0000 (tie) | +0.50 (tie) | fails |
+
+The vortex's column check on the validation settings (60 s each, fresh seeds 5,350,000 + k; [l_collapse_val_5350000.csv](../results/experiments/swirl/l_collapse_val_5350000.csv)):
+`grow3` loses 2.9% of its frames at 3 of 10 settings, the current vortex 5.1% at 5.
+
+#### 12.1.5 The test (once, on fresh seeds)
+
+Study B's 10 held-out settings; candidate minus current model, paired over the settings ([l_test_*_compare.csv](../results/experiments/swirl/)):
+
+| effect | tracking at 1 s (dB) | spectrum | \|ln motion\| | coverage | emission | mean-frame PSNR (dB) | the rule |
+|---|---|---|---|---|---|---|---|
+| magic | **+0.94 [+0.59, +1.32]** | -0.017 [-0.069, +0.039] | -0.061 [-0.121, +0.004] | **-0.0012 [-0.0015, -0.0008]** | **-0.0002 [-0.0003, -0.0001]** | **+1.54 [+0.91, +2.34]** | **met: replaced** |
+| orb | **+0.45 [+0.27, +0.62]** | **-0.010 [-0.016, -0.003]** | +0.007 [-0.013, +0.027] | **-0.0007 [-0.0012, -0.0002]** | **-0.0008 [-0.0013, -0.0002]** | **+1.39 [+0.59, +2.15]** | **met: replaced** |
+| vortex | **+0.21 [+0.11, +0.29]** | +0.001 [-0.009, +0.012] | -0.008 [-0.038, +0.021] | +0.0020 [-0.0005, +0.0050] | **-0.0001 [-0.0002, -0.0000]** | -0.24 [-0.50, +0.04] | **met: replaced** |
+
+Means over the test's settings (tracking: 4 runs per setting):
+
+| effect | model | tracking 1 frame / 8 frames / 1 s / 2 s / 8 s (dB) | coarse simulation + its detail, 1 s | new or current minus it, 1 s | spectrum | motion ratio | mean-frame PSNR |
+|---|---|---|---:|---|---:|---:|---:|
+| magic | current | 21.02 / 18.16 / 17.39 / 17.42 / 17.26 | 17.43 | -0.05 [-0.67, +0.55] | 0.166 | 1.16 | 29.08 |
+| magic | **new** | 22.81 / 18.58 / 18.33 / 18.35 / 18.32 | 17.73 | **+0.61 [+0.15, +1.03]** | 0.149 | 0.92 | 30.63 |
+| orb | current | 29.30 / 20.64 / 16.22 / 15.10 / 14.90 | 16.63 | -0.41 [-1.09, +0.20] | 0.208 | 0.89 | 31.38 |
+| orb | **new** | 29.41 / 20.85 / 16.67 / 15.79 / 15.71 | 16.63 | +0.04 [-0.52, +0.54] | 0.198 | 0.87 | 32.76 |
+| vortex | current | 30.02 / 24.32 / 20.98 / 19.90 / 17.48 | 19.35 | **+1.63 [+1.36, +1.92]** | 0.179 | 0.85 | 31.18 |
+| vortex | **new** | 30.08 / 24.46 / 21.19 / 20.31 / 18.07 | 19.35 | **+1.84 [+1.54, +2.15]** | 0.180 | 0.85 | 30.94 |
+
+(A second real run, the floor: spectrum 0.012 / 0.021 / 0.038, mean-frame PSNR 42.5 / 38.4 / 37.9 dB for magic, the orb and
+the vortex.) With 40 tracking runs instead of study D's 8, the current vortex already leads its coarse simulation at 1 s.
+
+**The vortex's column-loss check** ([EFFECTS_ENERGY.md](EFFECTS_ENERGY.md) §4.4: 60 s at each held-out setting; the cover
+threshold from d-eval's real run, seed 900,000 + k, as the scratch tool of that check is lost: the current vortex comes out
+at 6.6% instead of the published 6.5%): with the published seeds the new vortex loses 4.8% of its frames (current 6.6%),
+with fresh seeds 5,950,000 + k 4.5% (current 5.6%), at the same 4 of 10 low-intensity settings, the longest stretch 4.4 and
+4.2 s (current 4.8 s) ([l_collapse_950000.csv](../results/experiments/swirl/l_collapse_950000.csv),
+[l_collapse_5950000.csv](../results/experiments/swirl/l_collapse_5950000.csv)). Fewer, not none: the new stepper still
+grows no column from an empty grid.
+
+#### 12.1.6 What was replaced, and its cost
+
+The three new files are written beside the old ones, which are untouched: `l_swirl/models/v3/magic.nvfx` (file version 5:
+MacCormack advection and 2 detail passes, 82 KB), `orb.nvfx` and `vortex.nvfx` (version 2, new stepper weights only; 82
+KB). The portal and fire whirl scenes and the library's entries that use them (portal, dark_portal, magic_orb; wisp,
+ball_lightning, plasma_orb, energy_core; dust_devil, fire_whirl, magic_vortex) were drawn again and judged by eye: the
+portal's arms are smooth with a bright rim where they were saw-toothed, the dark portal a fuller ring, the magic vortex
+one column where it often split in two, the dust devil and fire whirl comparable (the whirl's column curls over a little
+lower), the orb's entries the same. The fire whirl's burning column is still braided: two detail passes remove the braid
+(figures in the data root's `l_swirl/look`) but cost the vortex 3% of its endless motion, which the rule counts as worse.
+Their frozen keyframes are updated (portal, fire whirl, the library's portal, plasma_orb and dust_devil).
+
+Cost, provisional (thread CPU time per frame through `nvfx_render`, median of 7 interleaved repetitions of 200 frames,
+pinned to one core of the shared machine, beside study D's v2 fire in the same session;
+[l_cost.csv](../results/experiments/swirl/l_cost.csv)):
+
+| size | magic, current | magic, new | orb, current / new | vortex, current / new | fire (three rounds) |
+|---|---:|---:|---:|---:|---:|
+| 64 px | 0.53 (0.47) | 0.64 (0.62) | 0.50 / 0.49 (0.48 / 0.48) | 0.49 / 0.48 (0.48 / 0.49) | 0.49 to 0.52 (0.49 to 0.50) |
+| 128 px | 1.01 (0.61) | 0.82 (0.81) | 0.85 / 0.84 (0.72 / 0.72) | 0.75 / 0.75 (0.73 / 0.74) | 0.87 to 0.90 (0.73 to 0.74) |
+| 256 px | 1.14 (1.07) | 1.41 (1.48) | 2.61 / 2.50 (1.61 / 1.59) | 1.72 / 1.69 (1.67 / 1.65) | 2.24 to 2.35 (1.57 to 1.63) |
+
+In brackets: with subnormal floats flushed to zero in the playing thread (FTZ and DAZ, as many engines run). The orb and
+the vortex cost what they did (their steppers have the same shape). The new magic costs about a third more than the old
+one with subnormals flushed (+0.21 ms at 128 px, +0.38 ms at 256 px; its second detail pass) and about as much as fire.
+Without the flush the old magic is slower than the new one at 128 px: **subnormal floats** in the fine fields (the lock's
+repeated scaling of empty fringes) cost the runtime up to 40% of a frame (the old magic at 128 px 1.01 against 0.61 ms,
+the orb at 256 px 2.61 against 1.61, fire at 256 px 2.2 against 1.6). The new magic's two-pass detail flushes values
+below 1e-20 after each pass; doing so for every effect, or setting FTZ and DAZ inside `nvfx_render`, would remove that
+cost but changes frames (by invisible amounts), so it was not done here.
+
+#### 12.1.7 What it means
+
+- **Fast or regular swirls fail in three places, and the stepper is the largest.** The 32-cell learned stepper is 4.6 to
+  7.3 dB from what its own detail layer and renderer could do with the true coarse state, and these flows lose more on 32
+  cells than plumes do (the coarse simulation gains 1.3 to 2.6 dB at 1 s from 48 cells). A fast rotation adds a defect
+  of the architecture: semi-Lagrangian advection of the coarse state smears a ring more than leaving it alone would.
+  The detail layer adds the saw-teeth, by locking once per frame what moves more than a coarse cell per frame. And a
+  stepper with a clamp at zero can learn a sink where there should be a source, which no gradient can undo: the
+  vortex's lost columns.
+- **Small changes fixed parts of each.** Locking twice a frame removes the teeth (magic: +0.5 to +0.7 dB at 1 s alone);
+  MacCormack advection helps only together with it (+1.1 dB on validation, +0.94 in the test). Training the orb on the
+  horizon it is judged on (30-frame windows) gains 0.45 dB and closer detail. Passing the floor's gradient and training
+  from empty grids lets the vortex hold its column better (+0.21 dB; a fifth to a quarter fewer lost frames).
+- **None of the three reaches the eight good effects.** The orb still ties its coarse simulation at 1 s, magic leads it
+  by 0.6 dB (the good effects: 2 to 4.7), and the vortex still grows no column from nothing. What the diagnosis points to
+  next: a finer coarse state for the orb and magic (a 48-cell grid needs non-integer blocks in the lock at 128 px; a
+  64-cell grid would quadruple the stepper's cost), and for the vortex longer training with the floor gradient (its sink
+  at an empty foot shrank from -0.10 to -0.02 but is still a sink) or a source term the network adds to, not one it
+  must learn.
+- **The fire whirl's braid is the same defect as magic's teeth**, and two passes remove it, but the rule, which counts the
+  vortex's endless motion, kept the vortex at one pass. A scene that burns the whirl could load a two-pass copy.
+
+Reproduce (data under `NEURALVFX_DATA`; each step logs to `l_swirl/logs` and resumes from its outputs):
+
+```sh
+B=build/nvfx_swirl
+$B diag   --effect magic --model M --runs 8 --variants "p2:passes=2/c05:contrast=0.5" --figure diag.png   # tracking, taken apart
+$B dstats --effect magic --model M --settings 8 --variants "p2:passes=2"                            # endless statistics, taken apart
+$B coarse --effect orb --model M ; $B advect --effect magic ; $B column --effect vortex --model M
+$B train  --effect magic --model M --out mc.nvfx --advection 1 --iterations 1000 --lr 7e-4 --activity-stage 600 --unroll 30 --seed 24
+$B set    --model mc.nvfx --detail passes=2 --out magic_mc_p2.nvfx
+$B train  --effect orb --model M --out u30.nvfx --activity-stage 600 --unroll 30 --seed 22   # then 900 more from it, --lr-ft 5e-4 --seed 26
+$B train  --effect vortex --model M --out g2.nvfx --empty-start --growth 80 --growth-frames 41 --floor-gradient --activity-stage 800 --seed 28
+#   (then 1600 more from it, --seed 29)
+$B val    --effect E --current M --cand name=F,... --split val
+$B test   --effect E --current M --cand chosen=F --frozen results/experiments/swirl_frozen.csv           # once
+$B collapse --effect vortex --current M --cand chosen=F --seed-base 5950000
+$B cost   --effect E --current M --cand new=F --fire FIRE --size 128 --reps 7 [--ftz]
+```
