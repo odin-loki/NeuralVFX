@@ -206,6 +206,12 @@ runs:
 The registered constants tracked best, so nothing in §5 changed. (Already on the probe the stepper led the coarse
 simulation and was close to holding the first frame.)
 
+**Candidate A had to be made again.** The trainer saved its stage-2 snapshot only at checkpoint iterations (every 20),
+and stage 2 ended at iteration 1,250, which is not one, so A's file was never written (fixed: the hook now also runs at
+the end of every stage). Training is deterministic and resumes to the bit (tested), so iterations 920 to 1,250 were
+run again from the iteration-920 checkpoint with the same options; the losses logged at 920, 930, 940 and 950 equal
+the original run's to every printed digit (`logs/train_regen.log` against `logs/train_base.log` in the data root).
+
 (Validation's results to come.)
 
 ## 7. The test
