@@ -967,10 +967,12 @@ std::map<std::pair<int, int>, TrackRow> read_track(const fs::path& f) {
   return out;
 }
 
-std::string interval(const nfx::metrics::Interval& iv, int digits, bool higher_better) {
+// judged: false for a statistic reported for context only (the motion ratio, whose ideal is 1, not more or less)
+std::string interval(const nfx::metrics::Interval& iv, int digits, bool higher_better, bool judged = true) {
   const bool tie = iv.covers_zero();
   const bool better = higher_better ? iv.lo > 0 : iv.hi < 0;
   const std::string core = std::format("{:+.{}f} [{:+.{}f}, {:+.{}f}]", iv.mean, digits, iv.lo, digits, iv.hi, digits);
+  if (!judged) return core + " (context)";
   return core + (tie ? " (tie)" : better ? " (better)" : " (worse)");
 }
 
@@ -1047,7 +1049,7 @@ int compare(const Args& a) {
                      ea.size(), endless_runs(split)));
     both("| statistic | " + A + " | " + B + (show_floor ? " | floor (other real runs)" : "") + " | difference |");
     both(std::string("|---|---:|---:|") + (show_floor ? "---:|" : "") + "---|");
-    const auto stat = [&](const char* name, auto get, bool higher_better, int digits) {
+    const auto stat = [&](const char* name, auto get, bool higher_better, int digits, bool judged = true) {
       std::vector<double> va, vb;
       double fm = 0;
       for (std::size_t i = 0; i < ea.size(); ++i) {
@@ -1062,12 +1064,12 @@ int compare(const Args& a) {
         mb += vb[i] / static_cast<double>(vb.size());
       }
       const std::string flo = show_floor ? std::format(" | {:.{}f}", fm, digits) : "";
-      both(std::format("| {} | {:.{}f} | {:.{}f}{} | {} |", name, ma, digits, mb, digits, flo, interval(iv, digits, higher_better)));
+      both(std::format("| {} | {:.{}f} | {:.{}f}{} | {} |", name, ma, digits, mb, digits, flo, interval(iv, digits, higher_better, judged)));
       csv << std::format("endless,{},,{:.5f},{:.5f},{:.5f},{:.5f},{:.5f}\n", name, ma, mb, iv.mean, iv.lo, iv.hi);
     };
     stat("3D spectrum distance", [](const Endless& e) { return e.spectrum; }, false, 3);
     stat("|ln motion ratio|", [](const Endless& e) { return e.motion; }, false, 3);
-    stat("motion ratio", [](const Endless& e) { return e.motion_ratio; }, true, 3);
+    stat("motion ratio", [](const Endless& e) { return e.motion_ratio; }, true, 3, false);
     stat("coverage distance", [](const Endless& e) { return e.coverage; }, false, 4);
     stat("emission distance", [](const Endless& e) { return e.emission; }, false, 4);
     stat("mean picture PSNR (dB)", [](const Endless& e) { return e.mean_psnr; }, true, 2);
