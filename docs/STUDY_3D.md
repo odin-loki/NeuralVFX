@@ -101,10 +101,12 @@ Study D's model with one more dimension:
   sampling, stored at 8 bits per value; the fine fields grow from them in a 24-frame warm-up.
 - **Training** (CPU only, hand-written gradients checked against finite differences, `tests/test_3d.cpp`): study D's
   three stages: backpropagation through time over windows of up to 12 frames from true states with noise on the inputs
-  (1,200 iterations, the unroll growing over the first half); windows that start after up to 24 frames of the stepper's
-  own rollout, with a loss on the heat's and soot's profiles along each axis (500 iterations); the same with a loss on
-  how much each channel changes per frame (300 iterations); batch 8, Adam, cosine learning rates. Checkpoints every
-  20 iterations; a resumed run is the same to the bit as one that never stopped (tested).
+  (900 iterations, the unroll growing over the first half); windows that start after up to 24 frames of the stepper's
+  own rollout, with a loss on the heat's and soot's profiles along each axis (350 iterations); the same with a loss on
+  how much each channel changes per frame (250 iterations); batch 8, Adam, cosine learning rates. Checkpoints every
+  20 iterations; a resumed run is the same to the bit as one that never stopped (tested). (The run began on a schedule
+  of 1,200, 500 and 300 iterations and was cut to this one at iteration 140, before anything was evaluated, because
+  the shared machine gave it under one core: the stage-1 unroll ramp and learning rate changed from iteration 140 on.)
 - **Data**: 40 runs of 8 s (240 frames) from an empty grid at random controls in [0, 1]^3, seeds 9,000,000 + i (5.3 minutes of
   simulated fire).
 - **The runtime**: `include/neuralfx/nvfx_volume.h` (§9) runs this reference on buffers made at creation, on its own
@@ -231,7 +233,7 @@ B=build/nvfx_3d
 $B pilot --widths 48,64,80 --seconds 12 --seeds 2 --threads 3       # §2.1 (results/3d/pilot.csv)
 $B pilot --widths 64,48 --seconds 20 --seeds 2 --threads 3          # §2.1's puffing (results/3d/pilot_puff.csv)
 $B record --runs 40 --frames 240 --threads 3                        # the training runs (seeds 9,000,000 + i)
-$B train --name base --iterations 1200 --finetune 500 --activity 300 --batch 8 --unroll 12 --burn 24 --threads 4
+$B train --name base --iterations 900 --finetune 350 --activity 250 --batch 8 --unroll 12 --burn 24 --threads 4
 $B finish --ckpt base_stage2 --out candA && $B finish --ckpt base --out candB
 $B truth --split val && $B real --split val                         # the validation's simulations
 for m in A B; do $B track --split val --method $m --model $NEURALVFX_DATA/n_3d/models/cand$m.nvfx3; done
