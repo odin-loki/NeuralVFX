@@ -1,0 +1,4 @@
+effect,iterations,activity_weight,loss,seconds
+launch,800,100,0.05152,1203
+puffs,800,100,0.50446,2096
+ink,800,100,0.01694,2176

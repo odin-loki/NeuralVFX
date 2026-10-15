@@ -181,10 +181,10 @@ TEST(Sim, LoopSeamIsNoWorseThanAnOrdinaryFrameStep) {
   EXPECT_LE(mean_abs_diff(c.frame(c.frames - 1), c.frame(0)), 1.5 * step + 0.5);
 }
 
-// Adding effects (docs/EFFECTS.md, docs/EFFECTS_ENERGY.md, docs/EFFECTS_ATMOSPHERE.md, docs/EFFECTS_BLAZE.md) must not
-// change the earlier ones: these hashes are of clips made before steam and magic existed (fire, smoke, explosion),
-// before jet, orb, vortex, fog, dust and cloud existed (steam, magic), and before wildfire, coals and mushroom existed
-// (jet, orb, vortex, fog, dust, cloud).
+// Adding effects (docs/EFFECTS.md, docs/EFFECTS_ENERGY.md, docs/EFFECTS_ATMOSPHERE.md, docs/EFFECTS_BLAZE.md,
+// docs/EFFECTS_FLOW.md) must not change the earlier ones: these hashes are of clips made before steam and magic existed
+// (fire, smoke, explosion), before jet, orb, vortex, fog, dust and cloud existed (steam, magic), and before wildfire,
+// coals and mushroom, and launch, puffs and ink, existed (jet, orb, vortex, fog, dust, cloud).
 // FNV-1a of the RGBA bytes; the solver is built at the baseline ISA without contraction.
 TEST(Sim, StudyEffectsAreUnchangedByTheNewOnes) {
   const auto fnv = [](std::span<const std::uint8_t> b) {
@@ -663,8 +663,12 @@ TEST(Sim, BlazeEffectsAreNamedAndOnlyTheMushroomPlaysOnce) {
   EXPECT_EQ(sim::effect_name(sim::Effect::wildfire), "wildfire");
   EXPECT_EQ(sim::effect_name(sim::Effect::coals), "coals");
   EXPECT_EQ(sim::effect_name(sim::Effect::mushroom), "mushroom");
-  // after cloud, in this order
-  EXPECT_TRUE(std::ranges::equal(std::span(sim::kAllEffects).last(4), std::array{sim::Effect::cloud, sim::Effect::wildfire, sim::Effect::coals, sim::Effect::mushroom}));
+  // after cloud, in this order, before launch, puffs and ink
+  const auto at = [](sim::Effect e) { return std::ranges::find(sim::kAllEffects, e) - sim::kAllEffects.begin(); };
+  EXPECT_EQ(at(sim::Effect::wildfire), at(sim::Effect::cloud) + 1);
+  EXPECT_EQ(at(sim::Effect::coals), at(sim::Effect::cloud) + 2);
+  EXPECT_EQ(at(sim::Effect::mushroom), at(sim::Effect::cloud) + 3);
+  EXPECT_LT(at(sim::Effect::mushroom), at(sim::Effect::launch));
   EXPECT_TRUE(sim::effect_loops(sim::Effect::wildfire));
   EXPECT_TRUE(sim::effect_loops(sim::Effect::coals));
   EXPECT_FALSE(sim::effect_loops(sim::Effect::mushroom));
@@ -768,6 +772,163 @@ TEST(Sim, MushroomRisesIntoACapThatSpreadsAndDarkens) {
   EXPECT_GT(blaze_of(big[89]).sy, blaze_of(small_one[89]).sy);
   const auto left = blaze_run(sim::Effect::mushroom, 0.6f, 0.f, 0.5f, 120), right = blaze_run(sim::Effect::mushroom, 0.6f, 1.f, 0.5f, 120);
   EXPECT_GT(blaze_of(right[119]).sx, blaze_of(left[119]).sx + 0.1);
+}
+
+// --- launch, puffs and ink (docs/EFFECTS_FLOW.md) ---------------------------------------------------------------------
+
+TEST(Sim, FlowEffectsHaveTheirOwnControls) {
+  const std::array<std::pair<sim::Effect, std::string_view>, 3> second{
+      {{sim::Effect::launch, "wind"}, {sim::Effect::puffs, "rate"}, {sim::Effect::ink, "current"}}};
+  for (const auto& [e, name] : second) {
+    sim::Effect back{};
+    ASSERT_TRUE(sim::parse_effect(sim::effect_name(e), back));
+    EXPECT_EQ(back, e);
+    EXPECT_TRUE(sim::effect_loops(e));
+    EXPECT_TRUE(std::ranges::contains(sim::kNewEffects, e));
+    EXPECT_FALSE(std::ranges::contains(sim::kEffects, e));
+    const auto names = sim::control_names(e);
+    EXPECT_EQ(names[0], "intensity");
+    EXPECT_EQ(names[1], name);
+    EXPECT_EQ(names[2], "turbulence");
+  }
+  // added after cloud (and after wildfire, coals and mushroom), in this order
+  const auto at = [](sim::Effect e) { return std::ranges::find(sim::kAllEffects, e) - sim::kAllEffects.begin(); };
+  EXPECT_LT(at(sim::Effect::cloud), at(sim::Effect::launch));
+  EXPECT_LT(at(sim::Effect::launch), at(sim::Effect::puffs));
+  EXPECT_LT(at(sim::Effect::puffs), at(sim::Effect::ink));
+}
+
+namespace {
+
+// The material's spread after `frames` frames at 64 cells, and what was drawn.
+struct FlowRun {
+  Spread spread;
+  sim::State state;
+  std::vector<std::uint8_t> rgba;
+};
+FlowRun flow_run(sim::Effect e, float intensity, float second, float turbulence, int frames) {
+  sim::Fluid f(atmos_params(e, intensity, second, turbulence));
+  for (int i = 0; i < frames; ++i) f.step_frame();
+  FlowRun r{spread_of(f.state()), f.state(), std::vector<std::uint8_t>(64 * 64 * 4)};
+  f.render(r.rgba);
+  return r;
+}
+
+// Soot in a band of rows [y0, y1) and columns [x0, x1) of a state (fractions of the frame, y up).
+double soot_in(const sim::State& s, double x0, double x1, double y0, double y1) {
+  double a = 0;
+  for (int y = static_cast<int>(y0 * s.n); y < static_cast<int>(y1 * s.n); ++y) {
+    for (int x = static_cast<int>(x0 * s.n); x < static_cast<int>(x1 * s.n); ++x) a += s.soot[static_cast<std::size_t>(y * s.n + x)];
+  }
+  return a;
+}
+
+}  // namespace
+
+TEST(Sim, LaunchBlastsTheGroundAndBillowsOutBothWays) {
+  const FlowRun r = flow_run(sim::Effect::launch, 0.6f, 0.5f, 0.5f, 150);
+  // the clouds run out along the ground both ways, well beyond the jet (about a fifth of the frame wide)
+  EXPECT_GT(soot_in(r.state, 0.0, 0.3, 0.0, 0.3), 0.15 * r.spread.amount);
+  EXPECT_GT(soot_in(r.state, 0.7, 1.0, 0.0, 0.3), 0.15 * r.spread.amount);
+  EXPECT_GT(r.spread.width(), 0.8);
+  // the heat reaches the ground under the nozzle
+  double ground_heat = 0, heat = 0;
+  for (int y = 0; y < r.state.n; ++y) {
+    for (int x = 0; x < r.state.n; ++x) {
+      const float t = r.state.temp[static_cast<std::size_t>(y * r.state.n + x)];
+      heat += t;
+      if (y < r.state.n / 8 && std::abs(x - r.state.n / 2) < r.state.n / 8) ground_heat += t;
+    }
+  }
+  EXPECT_GT(ground_heat, 0.05 * heat);  // (8% of it in the bottom eighth of the middle quarter of the frame)
+  // bright at the impact: light (colour above coverage) near the ground in the middle, reflected light at the sides
+  long lit = 0, lit_side = 0;
+  for (int py = 0; py < 64; ++py) {
+    for (int px = 0; px < 64; ++px) {
+      const auto* o = &r.rgba[static_cast<std::size_t>(py * 64 + px) * 4];
+      if (o[0] <= o[3] + 8) continue;
+      ++lit;
+      if (std::abs(px - 32) > 20) ++lit_side;
+    }
+  }
+  EXPECT_GT(lit, 60);
+  EXPECT_LT(lit_side, lit / 10);
+  // the clouds rise as they cool: their centre climbs above the ground band
+  EXPECT_GT(r.spread.cy, 0.15);
+  EXPECT_GT(r.spread.top, 0.5);
+  // the wind drifts them
+  const FlowRun left = flow_run(sim::Effect::launch, 0.6f, 0.f, 0.5f, 150), right = flow_run(sim::Effect::launch, 0.6f, 1.f, 0.5f, 150);
+  EXPECT_LT(left.spread.cx, 0.45);
+  EXPECT_GT(right.spread.cx, 0.55);
+}
+
+TEST(Sim, PuffsComeInPulsesThatTheRateControlQuickens) {
+  // puffs past a line a little above the mouth (the soot there rising past a level and falling back)
+  const auto puffs = [](float rate, std::uint64_t seed) {
+    auto p = atmos_params(sim::Effect::puffs, 0.7f, rate, 0.4f);
+    p.seed = seed;
+    sim::Fluid f(p);
+    int n = 0;
+    bool open = false;
+    for (int i = 0; i < 300; ++i) {
+      f.step_frame();
+      const double m = soot_in(f.state(), 0.28, 0.45, 0.14, 0.2) / (0.17 * 0.06 * 64 * 64);
+      if (!open && m > 0.3) {
+        open = true;
+        ++n;
+      }
+      if (open && m < 0.1) open = false;
+    }
+    return n;
+  };
+  int slow = 0, fast = 0;
+  for (const std::uint64_t seed : {1, 2, 3}) {
+    slow += puffs(0.1f, seed);
+    fast += puffs(0.9f, seed);
+  }
+  EXPECT_GE(slow, 2);              // distinct pulses, a few in 10 s at the slow rate
+  EXPECT_GT(fast, slow + slow / 2);  // more at the fast rate
+  const FlowRun r = flow_run(sim::Effect::puffs, 0.7f, 0.5f, 0.4f, 240);
+  EXPECT_GT(r.spread.cx, 46.5 / 128 + 0.05);  // the trail drifts right of the mouth
+  EXPECT_GT(r.spread.top, 0.6);                // and rises
+  long bad = 0, covered = 0;
+  for (std::size_t i = 0; i < r.rgba.size(); i += 4) {
+    for (int k = 0; k < 3; ++k) bad += r.rgba[i + static_cast<std::size_t>(k)] > r.rgba[i + 3] + 1;  // reflected light only
+    covered += r.rgba[i + 3] > 64;
+  }
+  EXPECT_EQ(bad, 0);
+  EXPECT_GT(covered, 200);
+}
+
+TEST(Sim, InkIsSlowDarkDyeThatTheCurrentCarries) {
+  const FlowRun r = flow_run(sim::Effect::ink, 0.7f, 0.5f, 0.5f, 240);
+  EXPECT_TRUE(std::ranges::all_of(r.state.temp, [](float t) { return t == 0.f; }));  // no heat
+  long bad = 0, covered = 0;
+  double rgb = 0, alpha = 0;
+  for (std::size_t i = 0; i < r.rgba.size(); i += 4) {
+    for (int k = 0; k < 3; ++k) bad += r.rgba[i + static_cast<std::size_t>(k)] > r.rgba[i + 3] + 1;  // no light
+    if (r.rgba[i + 3] > 64) {
+      ++covered;
+      rgb += r.rgba[i] + r.rgba[i + 1] + r.rgba[i + 2];
+      alpha += 3.0 * r.rgba[i + 3];
+    }
+  }
+  EXPECT_EQ(bad, 0);
+  EXPECT_GT(covered, 300);
+  EXPECT_LT(rgb, 0.25 * alpha);  // dark
+  // slow: where there is dye, the water moves at a few cells (of a 128-cell frame) a second
+  std::vector<float> speed;
+  for (std::size_t i = 0; i < r.state.soot.size(); ++i) {
+    if (r.state.soot[i] > 0.05f) speed.push_back(2.f * std::hypot(r.state.u[i], r.state.v[i]));
+  }
+  ASSERT_FALSE(speed.empty());
+  std::ranges::sort(speed);
+  EXPECT_LT(speed[speed.size() / 2], 20.f);
+  EXPECT_LT(speed[speed.size() * 99 / 100], 50.f);
+  // the current carries it left or right
+  const FlowRun left = flow_run(sim::Effect::ink, 0.7f, 0.f, 0.5f, 240), right = flow_run(sim::Effect::ink, 0.7f, 1.f, 0.5f, 240);
+  EXPECT_LT(left.spread.cx, 0.4);
+  EXPECT_GT(right.spread.cx, 0.6);
 }
 
 TEST(Sim, ParamsRoundTripThroughClipMetadata) {

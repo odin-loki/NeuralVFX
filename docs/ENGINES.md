@@ -387,8 +387,8 @@ nothing).
 
 ## 9. The effect library
 
-[LIBRARY.md](LIBRARY.md) is a catalogue of 158 named effects (a campfire, a grenade, a steam vent, a portal, a lightning
-strike, ground fog, a dust impact, a flamethrower, a plasma orb, a rocket's trail, rain, ...) built from the fourteen
+[LIBRARY.md](LIBRARY.md) is a catalogue of 168 named effects (a campfire, a grenade, a steam vent, a portal, a lightning
+strike, ground fog, a dust impact, a flamethrower, a plasma orb, a rocket's trail, rain, ...) built from the seventeen
 trained models and the compositor's procedural elements, ready to place without training. Four are **trails**
 (`rocket_trail`, `vehicle_dust_wake`, `carried_torch`, `comet_trail`): the game moves them every frame with
 `nvfx_stage_move`, and their smoke, dust or glow stays in the world behind them ([LIBRARY.md](LIBRARY.md) §9); five are

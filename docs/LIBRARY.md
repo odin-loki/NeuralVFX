@@ -1,11 +1,12 @@
 # The effect library
 
-A catalogue of 158 named, ready-to-use effects that a game lists, places and drives without training anything: a
+A catalogue of 168 named, ready-to-use effects that a game lists, places and drives without training anything: a
 campfire, a grenade, a steam vent, a portal, a lightning strike, ground fog, a dust impact, a flamethrower, a plasma
-orb, a dust devil, a rocket's smoke trail, rain, a wall of fire, a forge, a nuke. Each plays the fourteen trained
+orb, a dust devil, a rocket's smoke trail, rain, a wall of fire, a forge, a nuke, a rocket launch, a locomotive's chimney, an ink cloud. Each plays the seventeen
+trained
 rollout models (fire, smoke, explosion v2, steam and magic; fog, dust and cloud,
 [EFFECTS_ATMOSPHERE.md](EFFECTS_ATMOSPHERE.md); jet, orb and vortex, [EFFECTS_ENERGY.md](EFFECTS_ENERGY.md); wildfire,
-coals and mushroom, [EFFECTS_BLAZE.md](EFFECTS_BLAZE.md)) and the compositor's procedural elements (embers, sparks, shock fronts, scorch marks, flashes, lights, bolts, rings), at
+coals and mushroom, [EFFECTS_BLAZE.md](EFFECTS_BLAZE.md); launch, puffs and ink, [EFFECTS_FLOW.md](EFFECTS_FLOW.md)) and the compositor's procedural elements (embers, sparks, shock fronts, scorch marks, flashes, lights, bolts, rings), at
 a size, with parameters mapped onto the models' controls and looks. The 23 entries of the six newer models were added
 with the recipe of §6, in text; the only code they needed is a third anchor, for the jet's nozzle. The nine newest
 entries needed two features of the compositor: **trails** (`rocket_trail`, `vehicle_dust_wake`, `carried_torch`,
@@ -13,7 +14,9 @@ entries needed two features of the compositor: **trails** (`rocket_trail`, `vehi
 weather** (`rain`, `snow`, `falling_ash`, `falling_leaves`, `cherry_petals`, §2.1). The **third round** (70 entries,
 §10) adds weather and sky, combat, magic and props, half of them from new procedural elements (hail, an aurora, a
 rainbow, meteors, beams, shields, glints, spatter and shards; [COMPOSE.md](COMPOSE.md) §4.10). The ten entries of the three fire models (`library/blaze.nvfxl`, round 7) were added the same
-way, in text; among them `wall_of_flames` was rewritten as one continuous front of the wildfire model.
+way, in text; among them `wall_of_flames` was rewritten as one continuous front of the wildfire model. The ten
+entries of launch, puffs and ink (round 7 too) came after them, in text again, with two new categories, `engines` and
+`underwater`, and no code.
 
 ![The library's contact sheet: the entries of the first five models](figures/library_sheet.png)
 
@@ -23,38 +26,46 @@ way, in text; among them `wall_of_flames` was rewritten as one continuous front 
 
 ![The library's contact sheet: the ten entries of wildfire, coals and mushroom](figures/library_sheet_blaze.png)
 
+![The library's contact sheet: the ten entries of launch, puffs and ink](figures/library_sheet_flow.png)
+
 *Every entry alone on a stage fitted to its box, at the moment its catalogue says shows it well (`nvfx_gallery`).*
 
-| category | entries | of them round 5's models | of them trails and weather | of them the fire models' | learned | procedural only |
-|---|---|---|---|---|---|---|
-| fire | 18 | 4 | 0 | 5 | 18 | 0 |
-| smoke | 7 | 2 | 0 | 0 | 7 | 0 |
-| explosions | 8 | 0 | 0 | 3 | 7 | 1 |
-| steam (and water) | 5 | 0 | 0 | 0 | 5 | 0 |
-| magic | 8 | 3 | 0 | 0 | 6 | 2 |
-| ambient | 7 | 0 | 0 | 2 | 5 | 2 |
-| sparks (and debris) | 8 | 1 | 0 | 0 | 2 | 6 |
-| light | 7 | 2 | 0 | 0 | 3 | 4 |
-| dust | 5 | 5 | 0 | 0 | 5 | 0 |
-| trails | 4 | 0 | 4 | 0 | 4 | 0 |
-| weather | 11 | 6 | 5 | 0 | 6 | 5 |
-| **all** | **88** | **23** | **9** | **10** | **68** | **20** |
+| category | entries | of them round 5's models | of them trails and weather | of them the fire models' | of them launch, puffs and ink's | learned | procedural only |
+|---|---|---|---|---|---|---|---|
+| fire | 18 | 4 | 0 | 5 | 0 | 18 | 0 |
+| smoke | 8 | 2 | 0 | 0 | 1 | 8 | 0 |
+| explosions | 8 | 0 | 0 | 3 | 0 | 7 | 1 |
+| steam (and water) | 5 | 0 | 0 | 0 | 0 | 5 | 0 |
+| magic | 8 | 3 | 0 | 0 | 0 | 6 | 2 |
+| ambient | 7 | 0 | 0 | 2 | 0 | 5 | 2 |
+| sparks (and debris) | 8 | 1 | 0 | 0 | 0 | 2 | 6 |
+| light | 7 | 2 | 0 | 0 | 0 | 3 | 4 |
+| dust | 5 | 5 | 0 | 0 | 0 | 5 | 0 |
+| trails | 4 | 0 | 4 | 0 | 0 | 4 | 0 |
+| weather | 11 | 6 | 5 | 0 | 0 | 6 | 5 |
+| engines | 5 | 0 | 0 | 0 | 5 | 5 | 0 |
+| underwater | 4 | 0 | 0 | 0 | 4 | 4 | 0 |
+| **all** | **98** | **23** | **9** | **10** | **10** | **78** | **20** |
+
+`engines`, `underwater` and one smoke entry (`smoke_signals`) are the ten of launch, puffs and ink, marked *(flow)*.
 
 With the third round's 70 (§10: 20 weather, 23 combat, 14 magic, 13 fire, smoke, steam and light; 34 learned, 36
-procedural only) the catalogue holds **158** entries, 102 of them learned and 56 procedural only.
+procedural only) the catalogue holds **168** entries, 112 of them learned and 56 procedural only.
 
-**What is learned and what is not.** Only fourteen things move by a trained model: fire, smoke, an explosion, steam,
-magic, fog, dust, cloud, a jet, an orb, a vortex, a wildfire front, coals and a mushroom cloud. Everything else in an
-entry is the compositor's: particles (embers, sparks, debris), shock fronts, scorch marks, flashes, camera shakes, and
-the glows this library adds (lightning and electric arcs, rings, discs and motes of light, lamps; rain, snow, ash and
-leaves). Entries that use no model at all say *(procedural)* in their description. A trail's material is learned (it
-plays in the explosion or dust model's tiles), but where it appears is the compositor's: it is put into the model's
-state along the source's path, as a script's `heat` field and `transfer` add material. **A recolour is a look, not new
-dynamics**: blue gas, green witch fire, the violet magic burst, the red dark portal, the coloured smokes and fogs, the
-blue rocket exhaust, the cyan comet's tail and the violet dragon breath and magic vortex move exactly as their model's
-orange fire, grey smoke, explosion, white fog, jet or dust column does; a field-shader look draws them in another colour
-(`hue`, `tint`). Nothing here was trained for the library. Entries marked *(new)* are those of round 5's six models,
-*(trail)* and *(weather)* the nine that followed, *(blaze)* those of the three fire models.
+**What is learned and what is not.** Only seventeen things move by a trained model: fire, smoke, an explosion, steam,
+magic, fog, dust, cloud, a jet, an orb, a vortex, a wildfire front, coals, a mushroom cloud, an engine's blast on the
+ground (launch), smoke in puffs and a plume with almost no buoyancy (ink). Everything else in an entry is the
+compositor's: particles (embers, sparks, debris), shock fronts, scorch marks, flashes, camera shakes, and the glows this
+library adds (lightning and electric arcs, rings, discs and motes of light, lamps; rain, snow, ash and leaves). Entries
+that use no model at all say *(procedural)* in their description. A trail's material is learned (it plays in the
+explosion or dust model's tiles), but where it appears is the compositor's: it is put into the model's state along the
+source's path, as a script's `heat` field and `transfer` add material. **A recolour is a look, not new dynamics**: blue
+gas, green witch fire, the violet magic burst, the red dark portal, the coloured smokes and fogs, the blue rocket
+exhaust, the cyan comet's tail and the violet dragon breath and magic vortex move exactly as their model's orange fire,
+grey smoke, explosion, white fog, jet or dust column does; a field-shader look draws them in another colour (`hue`,
+`tint`). Nothing here was trained for the library. Entries marked *(new)* are those of round 5's six models, *(trail)*
+and *(weather)* the nine that followed, *(blaze)* those of the three fire models, *(flow)* the ten of launch, puffs and
+ink.
 
 ## 1. The catalogue
 
@@ -89,7 +100,7 @@ sizes, smoke placed where the flames are) or replaced: §8 says which.
 | `forge` (blaze) | A forge's hearth: a bed of white-hot coals roaring with small flames, a strong orange light, sparks (the coals model, hottest) | coals; look hotbed, lamp, burst | 240 x 140, base | loop | intensity (1) | Fair: a bright bed with lively flames, a strong light and sparks (the hottest coals drawn brighter by a look); small. |
 | `fire_whirl` (new) | A fire whirl: a spinning column of flame rising from burning ground, swaying (the vortex model, its warm air drawn as flame) | whirlwind; look whirl_fire, embers, lamp | 320 x 480, base | loop | intensity (0.85), sway (0.7) | Fair: a thin swaying column of flame under a wide orange haze, which can show its tile's square edge; its column is braided (the detail layer's once-a-frame lock, REPORT §12.1). |
 
-### Smoke (7)
+### Smoke (8)
 
 | effect | what it is | plays | box, anchor | runs | parameters (default) | how it looks |
 |---|---|---|---|---|---|---|
@@ -100,6 +111,7 @@ sizes, smoke placed where the flames are) or replaced: §8 says which.
 | `poison_gas` (new) | Poison gas: a heavy green gas that pours out low and rolls along the ground (the fog model, recoloured) | fog; look toxic, lamp | 600 x 120, base | loop | intensity (0.8), wind (0.5) | Good: a heavy green gas that stays on the ground (it replaced poison_smoke, whose smoke always rose); its three releases show as humps. |
 | `signal_smoke` | Signal smoke: a plume of red smoke from a flare on the ground | smoke; look signal, glow, lamp | 300 x 480, base | loop | intensity (0.6), wind (0.6) | Good: a red plume over a glowing flare. |
 | `smoke_screen` (new) | A smoke screen: a thick white wall of smoke that lingers where it was laid and boils slowly (the cloud model) | cloud; look screen | 700 x 240, base | loop | intensity (0.9), wind (0.5) | Good: a thick white wall of smoke that lingers and boils. |
+| `smoke_signals` (flow) | Smoke signals: a small fire on the ground sends up distinct puffs of grey smoke (the puffs model over the fire model) | puffs, fire; look smoke, lamp | 300 x 520, base | loop | rate (0.15) | Fair: a small fire under puffs of grey smoke that roll up and drift; the puffs come irregularly (their timing is the model's noise), now and then two close together. |
 
 ### Explosions (8)
 
@@ -303,6 +315,32 @@ the gallery's thumbnail shows each after `show` seconds of travel through its bo
 | `coin_glint` | light | A coin's glint (procedural): now and then a single star of light flashes on a coin or a gem (the anchor) | glints | 60 x 60, centre | loop | every (1.6) | Good: one star of light flashing now and then. |
 | `gold_glitter` | light | Glittering gold (procedural): a heap of treasure twinkling all over with small warm glints | glints, lamp | 300 x 80, base | loop | sparkle (1) | Fair: small warm glints twinkling over a heap; it needs the treasure under it. |
 
+### Engines (5)
+
+The launch model (an engine's exhaust blown down onto the ground, rolling out both ways in billows) and the puffs model
+(smoke in pulses), [EFFECTS_FLOW.md](EFFECTS_FLOW.md). `library/engines.nvfxl`.
+
+| effect | what it is | plays | box, anchor | runs | parameters (default) | how it looks |
+|---|---|---|---|---|---|---|
+| `rocket_launch` (flow) | A rocket launch pad: the engine's exhaust blasts the pad and rolls out both ways in billowing grey-white clouds that rise, bright where it hits | launch; glow, lamp | 760 x 500, base | loop | thrust (0.8), wind (0.55) | Good: a white-hot jet into the pad and soft white billows both ways, lit by the fire. The library draws the launch model with a gentler sub-grid swirl than its calibration chose (swirl 1 against 3, in `models.nvfxl`), which drew the billows as wormy lines; the clouds fill the tile, and at times its square shows at the top corners. |
+| `landing_thruster` (flow) | A landing thruster: a lander's engine firing down at dusty ground, kicking up a low brown cloud both ways (the launch model, recoloured) | launch; look blast_dust, glow, lamp | 360 x 240, base | loop | thrust (0.4) | Fair: a thin flame into a brown cloud thrown both ways; the cloud is large for so small a flame. |
+| `hover_downwash` (flow) | A hovering craft's downwash: a strong draught blown down at the ground, throwing up dust that rolls out both ways (the launch model's flow, drawn without its flame) | launch; look downwash | 420 x 220, base | loop | power (0.5) | Fair: dust blown out both ways that rises in two columns; the draught itself is invisible, so it reads as dust thrown up by something above. |
+| `locomotive_chimney` (flow) | A steam locomotive's chimney: grey-white puffs of steam and smoke that roll up and drift away into a trail; its anchor is the chimney's top (the puffs model) | puffs; look chuff | 300 x 460, base | loop | rate (0.4), intensity (0.65) | Fair: puffs leave the chimney and roll up, but a little above it they merge into a wavy column; the pulses are irregular, not a locomotive's steady beat (the model's noise times them). |
+| `exhaust_stack` (flow) | A truck's exhaust stack: dark diesel smoke in quick puffs as the engine works; its anchor is the top of the stack | puffs; look diesel | 200 x 340, base | loop | rate (0.7), intensity (0.4) | Fair: quick grey puffs merging into a short trail; faint at night. |
+
+### Underwater (4)
+
+The ink model, a plume with almost no buoyancy that curls and spreads slowly and drifts with the current
+([EFFECTS_FLOW.md](EFFECTS_FLOW.md)), recoloured by looks. `library/underwater.nvfxl`. The stage behind them is the
+library's night; a game draws its own water.
+
+| effect | what it is | plays | box, anchor | runs | parameters (default) | how it looks |
+|---|---|---|---|---|---|---|
+| `ink_cloud` (flow) | An ink cloud: a squid's ink spreading from where it was released (the anchor) into soft, slowly curling clouds and tendrils | ink; look squid_ink | 360 x 360, centre | loop | amount (0.7), current (0.5) | Fair: a slowly curling blue-black cloud around its release, lifted a little so that it reads at night (dark ink would vanish against the night); it stays compact rather than spreading far (§8). |
+| `blood_in_water` (flow) | Blood in water: a thin red plume curling away from a wound (the anchor) and drifting with the current | ink; look blood | 340 x 300, centre | loop | amount (0.35), current (0.8) | Fair: a red plume streaming with the current at low turbulence; it bunches into a compact blob now and then, and at higher turbulence it curls into blocky arms. |
+| `silt_cloud` (flow) | Stirred silt: a brown cloud rising off the bottom where something disturbed it, spreading and drifting slowly | ink; look silt | 520 x 300, base | loop | amount (0.8), current (0.6) | Fair: a pale cloud rising off the bottom and drifting; paler than silt in the gallery's night, and its edges boxy at times (the lattice above). |
+| `dye_plume` (flow) | A dye plume: a bright green tracer dye curling slowly out of a nozzle (the anchor) in still water | ink; look dye | 300 x 400, centre | loop | amount (0.5) | Weak to fair: a green blob with short, blocky arms rather than a long curling plume. |
+
 ## 2. The format
 
 A catalogue is written in the scene-script language ([COMPOSE.md](COMPOSE.md) §4), with two more statements. Each
@@ -454,11 +492,12 @@ error, spawns, no room, steal, stop, rooms freed, camera, clear, the same frames
 
 ## 4. The gallery
 
-The models' folder, `$NEURALVFX_DATA/library/models` by default, holds the fourteen learned effects under the names
+The models' folder, `$NEURALVFX_DATA/library/models` by default, holds the seventeen learned effects under the names
 `models.nvfxl` gives them: the v2 fire, smoke and explosion, study D's steam, round 5's fog, dust, cloud and jet, and
 study L's magic, orb and vortex ([REPORT.md](REPORT.md) §12.1, which replaced study D's magic and round 5's orb and
-vortex), and round 7's wildfire, coals and mushroom ([EFFECTS_BLAZE.md](EFFECTS_BLAZE.md)). The orb plays at float whatever the stage's precision (`precision float` on its `effect` line): study L's orb
-failed study K's int8 rule on its average picture ([REPORT.md](REPORT.md) §13.9). Links are enough:
+vortex), and round 7's wildfire, coals and mushroom ([EFFECTS_BLAZE.md](EFFECTS_BLAZE.md)) and launch, puffs and ink
+([EFFECTS_FLOW.md](EFFECTS_FLOW.md)). The orb plays at float whatever the stage's precision (`precision float` on its
+`effect` line): study L's orb failed study K's int8 rule on its average picture ([REPORT.md](REPORT.md) §13.9). Links are enough:
 
 ```sh
 mkdir -p $NEURALVFX_DATA/library/models && cd $NEURALVFX_DATA/library/models
@@ -468,6 +507,7 @@ ln -s ../../fx_atmos/models/d/fog.nvfx ../../fx_atmos/models/d/dust.nvfx ../../f
 ln -s ../../fx_energy/models/d/jet.nvfx .
 ln -s ../../l_swirl/models/v3/magic.nvfx ../../l_swirl/models/v3/orb.nvfx ../../l_swirl/models/v3/vortex.nvfx .
 ln -s ../../fx_blaze/models/d/wildfire.nvfx ../../fx_blaze/models/d/coals.nvfx ../../fx_blaze/models/d/mushroom.nvfx .
+ln -s ../../fx_flow/models/d/launch.nvfx ../../fx_flow/models/d/puffs.nvfx ../../fx_flow/models/d/ink.nvfx .
 ```
 
 `tools/nvfx_gallery.cpp` plays every entry through the C API, each alone on a stage fitted to its box:
@@ -497,7 +537,7 @@ back and forth. In `--shot`, `--spawn NAME@X,Y,SCALE,AT,VX,VY` moves the instanc
   stopped and spawned again, heap allocations counted in the frame loop and in those calls (0 for each), and something
   drawn.
 - `--keyframes` and `--verify`: each entry's `show` frame as PNG, compared by SHA-256 with frozen rows
-  (`library_keyframe,NAME,file,bytes,sha256`; `results/library/frozen.csv` also records the SHA-256 of the fourteen model
+  (`library_keyframe,NAME,file,bytes,sha256`; `results/library/frozen.csv` also records the SHA-256 of the seventeen model
   files they were made with).
 - `--shot`: a stage played as a game would (frame 0 drawn, the spawns, then N frames): the Godot test's reference.
 
@@ -507,7 +547,7 @@ Outputs go under `$NEURALVFX_DATA/library` (the sheet, the video, keyframes); on
 
 **Tests** (`ctest`): `neuralfx.LibraryCatalogueCheck` (no data: the catalogue and every procedural entry);
 `neuralfx.LibraryHostExample` (the C example's self-test); `neuralfx.LibraryCataloguePlays` (every entry, with the
-fourteen models in `NEURALFX_MODELS_LIBRARY`, by default `$NEURALVFX_DATA/library/models`; skipped without them);
+seventeen models in `NEURALFX_MODELS_LIBRARY`, by default `$NEURALVFX_DATA/library/models`; skipped without them);
 `neuralfx.LibraryKeyframesFrozen` (the keyframes of `campfire`, `blue_gas_flame`, `grenade`, `steam_vent`, `portal`,
 `lightning_strike`, `ground_fog`, `dust_impact`, `flamethrower`, `plasma_orb`, `dust_devil`, `wall_of_flames`,
 `distant_mushroom`, and two moving ones, `rocket_trail` and `vehicle_dust_wake`, against `results/library/frozen.csv`,
@@ -623,6 +663,29 @@ orb and the vortex). A new category is just a new name in `category` (`dust` and
   which also darkens it to grey smoke as it cools. Its start points differ more than the explosion's: `start 13` (calm)
   gives the most mushroom-like cap, `start 9` (the strongest) the biggest cloud.
 
+**What adding launch, puffs and ink taught** (ten entries, `engines.nvfxl` and `underwater.nvfxl`, text only):
+- **A model's calibrated detail can look worse than its statistics are.** The launch model's calibration chose the
+  strongest sub-grid swirl (3), the one that brings its endless detail spectrum closest to a real run's; on screen it
+  draws the billows as wormy, boxy lines. The library plays it with `swirl 1, swirl_scale 9` on its `effect` line (as it
+  plays smoke and the explosion with their own), and the billows are soft. A check after the test measured the price:
+  the detail spectrum's distance from real runs goes from 0.12 to 0.33 ([EFFECTS_FLOW.md](EFFECTS_FLOW.md) §4.4).
+- **Read where the source is.** Puffs' mouth is 36% from the left of its tile and 5% up, so a chimney's module stands
+  at (X + 0.137 w, Y + 0.05 w); ink's release is in the middle, 27% up, so (X + 0.012 w, Y + 0.27 w); launch's nozzle
+  is 56% up the middle of its tile (the entries put a glow there).
+- **A plume that reaches the top of its tile shows the tile's edge**: puffs' trail rises out of its tile, so its entries
+  take a feather of 0.3.
+- **Dark looks need a light background.** Ink carries no heat and no light; drawn as dark as ink is, it vanished against
+  the gallery's night, so the gallery's `squid_ink` is lifted to a blue-grey. On a game's lit water a darker look
+  (`soot_albedo` about 0.1) is the ink it should be.
+- **The ink model's shape depends on its turbulence**: at 0.2 or below the dye streams along the current; at the
+  middle it curls into short, blocky arms set along the frame's axes (the curl noise's lattice, which the simulator
+  has too). Blood and the dye plume play at low turbulence.
+- **Ink stays compact.** Its start points come from 5 s into its training runs and every shard starts from one, and the
+  learned stepper holds the dye together more than the simulation does: ink in the library stays a compact cloud.
+  Longer shards (20 s instead of 8) did not spread it further.
+- **Names**: `glow` and `wash` are words of the language; the signal fire's lamp is `warm` and the downwash's module
+  `draught`.
+
 **A new look** (a recolour) is a `look` line before the first entry of a file (shared) or inside an entry (its own).
 It changes colours, not motion; say so in the entry's description.
 
@@ -663,6 +726,12 @@ It changes colours, not motion; say so in the entry's description.
   gallery, `burning_field` 30 ms, on the busy shared machine); the mushroom entries play once for 5 s and hold the model's last frame while they fade; the mushroom model is
   the weakest of the fourteen ([EFFECTS_BLAZE.md](EFFECTS_BLAZE.md) §4: its cap is ragged and it loses its stem), so
   its entries are fair at best.
+- **The launch model blows down only**, at the middle of its tile, onto the tile's own ground (as jets blow right). A
+  rocket that rises leaves the tile's nozzle where it was: the lift-off scene fades the blast's light and keeps its
+  clouds ([EFFECTS_FLOW.md](EFFECTS_FLOW.md) §6).
+- **Puffs are irregular**: the pulses are timed by the model's noise, from about one every two seconds (`rate` 0) to two
+  and a half a second (`rate` 1); a locomotive's steady beat is not in the model.
+- **Ink is slow and stays compact** (above), and its arms can look blocky at middle turbulence.
 - **Weather is drawn unlit** (its own colours, not lit by the scene's lights or lamps: snow by a campfire does not glow)
   and fills a rectangle (the entry's box at its scale); a game that wants rain over the whole screen spawns it with a
   box as large as the screen, or several. Rain thins smoke inside its rectangle only.
@@ -726,6 +795,17 @@ walk-through videos:
   flame larger, and the trail starts at the flame as hot gas that glows and cools into smoke; still only fair.
 - **The dust wake** was a flat even band; noise in how much it leaves breaks it a little earlier.
 - **Ash, snow and petals** were too faint at night: bigger, lighter and denser now; ash still reads as grey snow.
+
+The ten entries of launch, puffs and ink were judged from the sheet, strips of frames over time (the rocket launch
+to 30 s, blood to 20 s, the chimneys over their first 5 s), every loop's frame after 30 s of play (all still alive and in
+place), and the scene that uses all three models (`examples/scenes/liftoff.nvfxs`, 10 s):
+- **The rocket launch** first showed wormy, boxy lines all through its billows (the model's calibrated sub-grid swirl,
+  above); with a gentler swirl they are soft.
+- **The chimneys** showed their tile's flat top edge where the trail left it; a wider feather hides it.
+- **The ink cloud** vanished at night (a dark look on a dark stage); it is lifted to a blue-grey. **Blood** curled into a
+  pinwheel of blocky arms at middle turbulence; at 0.2 and a stronger current it streams as a plume.
+- **The truck's exhaust** was too dark to see; its look is lighter. The landing thruster's and the downwash's dust took
+  a softer look (less relief) after showing fine, hair-like streaks.
 
 ## 9. Trails
 

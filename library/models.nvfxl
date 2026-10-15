@@ -51,3 +51,9 @@ look blaze = shader, heat_scale 0.9, emission 2.6, emission_power 2, soot_densit
 effect wildfire = "wildfire.nvfx"                                     # intensity, wind, turbulence
 effect coals    = "coals.nvfx"                                        # intensity, wind, turbulence
 effect mushroom = "mushroom.nvfx"                                     # plays once (5 s): 16 start points
+
+# Launch, puffs and ink (docs/EFFECTS_FLOW.md): an engine's exhaust blown down onto the ground, smoke in pulses, and a
+# plume with almost no buoyancy (underwater). Puffs and ink carry no light: their entries draw them with looks.
+effect launch    = "launch.nvfx", swirl 1, swirl_scale 9                # intensity (thrust), wind, turbulence
+effect puffs     = "puffs.nvfx"                                       # intensity, rate (pulses a second), turbulence
+effect ink       = "ink.nvfx"                                         # intensity, current, turbulence
