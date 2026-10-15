@@ -5,7 +5,7 @@
 //
 //   nvfx_reel --out F.mp4 --seconds S --panel SPEC [--panel SPEC ...] [--size 256] [--zoom 1.5] [--filter bilinear|nearest]
 //             [--width 1280] [--height 720] [--columns N] [--title TEXT] [--note TEXT ...] [--caption TEXT ...] [--timer]
-//             [--bars | --compact] [--seed 1] [--restart S] [--crf 26] [--bg R,G,B,R,G,B]
+//             [--bars | --compact] [--seed 1] [--seed-base N] [--restart S] [--crf 26] [--bg R,G,B,R,G,B]
 //
 //   SPEC is LABEL|SOURCE[|KEYS[|DETAIL[|BG]]]:
 //     FILE.nvfx                  a learned effect; KEYS "T:C1,C2,C3;T:C1,C2,C3;..." its controls at times T (seconds),
@@ -19,6 +19,8 @@
 //          swirl_scale, swirl_rate, swirl_ramp, contrast, grow), for FILE and learned panels (KEYS may be empty)
 //   BG     "R,G,B,R,G,B": the panel's background gradient, top and bottom colours (default --bg's: a dark night sky,
 //          36,40,50,13,14,17); a dark effect (ink) needs a light one
+//   --seed-base N: real and learned panels take seed N + RUN for the held-out run's noise (its settings stay salt 2's),
+//                as nvfx_experiment d-eval --seed-base does (the earth effects' test, docs/EFFECTS_EARTH.md: 6000000)
 //   --restart S: real and learned panels start again every S seconds from the next run (RUN, RUN + 1, ...), one-shot
 //                effects with the next seed (default: one-shots only, real and learned panels after their length and
 //                0.5 s, effects after their length and 1 s).
@@ -166,13 +168,15 @@ nvfx_effect* load_effect(const rollout::Model& m) {
   return fx;
 }
 
-// Real and learned panels: (re)start at run `run` of the held-out set.
+// Real and learned panels: (re)start at run `run` of the held-out set (its seed seed_base + run when seed_base > 0).
+std::uint64_t g_seed_base = 0;
 void start_run(Panel& p, int run) {
   p.run = run;
   rollout::SimRecipe r;
   r.effect = p.effect;
   r.salt = 2;  // study D's held-out runs
-  const sim::Params prm = rollout::recipe_run(r, static_cast<std::uint64_t>(run));
+  sim::Params prm = rollout::recipe_run(r, static_cast<std::uint64_t>(run));
+  if (g_seed_base > 0) prm.seed = g_seed_base + static_cast<std::uint64_t>(run);
   p.controls = {prm.intensity, prm.wind, prm.turbulence};
   p.names.clear();
   for (const std::string_view name : sim::control_names(p.effect)) p.names.emplace_back(name);
@@ -375,6 +379,7 @@ int main(int argc, char** argv) try {
     else if (k == "--columns") columns = std::stoi(next());
     else if (k == "--crf") crf = std::stoi(next());
     else if (k == "--seed") seed = std::stoull(next());
+    else if (k == "--seed-base") g_seed_base = std::stoull(next());
     else if (k == "--restart") restart = std::stof(next());
     else if (k == "--bg") bg = parse_gradient(next());
     else if (k == "--timer") timer = true;
