@@ -592,8 +592,9 @@ point. Going back in time or far ahead restarts the shard's rollout (a start run
 
 **Threads and memory.** A volume owns its worker threads (`threads` at creation); the fields and the pictures are the
 same to the bit on any number (tested), and nothing is allocated after creation (`nvfx_alloc_test`). A volume needs
-about 40 MB (two shards' fine fields, one shared set of step buffers, the renderer's prepared volume); the effect file is
-about 0.27 MB. The cost per frame is in STUDY_3D.md §8 (provisional): a step is tens of milliseconds, so a volume suits
+31 MB (two shards' fine fields, one shared set of step buffers, the renderer's prepared volume; `nvfx_volume_scratch_bytes`);
+the effect file is 268 KB (14,218 weights at 16 bits, 8 start states at 8 bits). `examples/volume_host.c` is the whole
+loop in plain C. The cost per frame is in STUDY_3D.md §8 (provisional): a step is tens of milliseconds, so a volume suits
 one hero effect updated at 30 Hz, or baking.
 
 **What it is not.** No int8 path, no SIMD beyond an AVX2 convolution, no scenes, library, manager or Godot node for
