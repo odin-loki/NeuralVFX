@@ -26,6 +26,10 @@
 //       velocity); the random part (the RMS of the frames about their mean frame, the spectra of the mean frame and of
 //       the fluctuations, the fluctuations' temporal correlation at 1 to 16 frames).
 //
+//   nvfx_ordered cost --effect E --current F [--cand NAME=F,...] [--sizes 64,128,256] [--reps 7]
+//                     [--precision float|int8|default] [--ftz] [--out CSV]
+//       thread CPU time per frame through nvfx_render, the models interleaved (the cost of §14.6).
+//
 // Options: --root DATA (default $NEURALVFX_DATA or /root/nvfx-data; this study's files are under DATA/m_ordered),
 // --results DIR (results/experiments/ordered), --threads N (1).
 #include "args.hpp"
@@ -47,10 +51,12 @@
 #include <complex>
 #include <functional>
 #include <cstdlib>
+#include <ctime>
 #include <filesystem>
 #include <format>
 #include <fstream>
 #include <map>
+#include <memory>
 #include <mutex>
 #include <numeric>
 #include <print>
@@ -59,6 +65,8 @@
 #include <string>
 #include <thread>
 #include <vector>
+
+#include <xmmintrin.h>
 
 namespace fs = std::filesystem;
 using namespace nfx;
@@ -2058,11 +2066,81 @@ void step_test(const Ctx& c, sim::Effect e, const tools::Args& a) {
   std::ofstream(done) << "done " << models[1].sha << " " << (r.pass() ? "met" : "not met") << "\n";
 }
 
+// --- cost: thread CPU time per frame through nvfx_render, models interleaved -------------------------------------------
+
+double thread_ms() {
+  timespec ts{};
+  clock_gettime(CLOCK_THREAD_CPUTIME_ID, &ts);
+  return static_cast<double>(ts.tv_sec) * 1e3 + static_cast<double>(ts.tv_nsec) * 1e-6;
+}
+// As study L's (nvfx_swirl cost), with the precision chosen: per repetition and size, each model in turn plays 200 frames
+// after the first at controls (0.6, 0.5, 0.6) and the median over frames is kept; reported per size: the median over
+// repetitions, its range, and the median of each model's paired difference from the first (the current model).
+// --precision float|int8|default (the runtime's: int8 where the CPU has VNNI); --ftz flushes subnormal floats to zero in
+// this thread (FTZ and DAZ), as many engines run.
+void step_cost(sim::Effect e, const tools::Args& a) {
+  const auto models = read_entries(a.need("current"), a.str("cand", ""));
+  const int reps = a.i("reps", 7), frames = 200;
+  const std::string prec = a.str("precision", "float");
+  const nvfx_precision pr = prec == "float" ? NVFX_PRECISION_FLOAT : prec == "int8" ? NVFX_PRECISION_INT8 : NVFX_PRECISION_DEFAULT;
+  if (prec != "float" && prec != "int8" && prec != "default") throw std::invalid_argument("--precision float, int8 or default");
+  const bool ftz = a.flag("ftz");
+  if (ftz) _mm_setcsr(_mm_getcsr() | 0x8040);
+  std::vector<int> sizes;
+  for (const auto& t : split_list(a.str("sizes", "64,128,256"), ',')) sizes.push_back(std::stoi(t));
+  std::vector<std::unique_ptr<Runtime>> rts;
+  for (const auto& m : models) rts.push_back(std::make_unique<Runtime>(m.m));
+  std::vector<std::string> rows;
+  for (const int size : sizes) {
+    std::vector<std::vector<double>> med(models.size());
+    std::vector<std::uint8_t> buf(sz(size) * sz(size) * 4);
+    for (int r = 0; r < reps; ++r) {
+      for (std::size_t k = 0; k < models.size(); ++k) {
+        nvfx_instance* in = nullptr;
+        if (nvfx_instance_create(rts[k]->e, size, &in) != NVFX_OK) throw std::runtime_error("instance");
+        if (nvfx_instance_set_precision(in, pr) != NVFX_OK) throw std::runtime_error("precision");
+        const float ctl[3] = {0.6f, 0.5f, 0.6f};
+        nvfx_instance_set_controls(in, ctl, 3);
+        nvfx_instance_set_seed(in, 77 + static_cast<std::uint64_t>(r));
+        nvfx_render(in, 0.0, buf.data(), sz(size) * 4);
+        std::vector<double> ms;
+        for (int f = 1; f <= frames; ++f) {
+          const double t0 = thread_ms();
+          nvfx_render(in, f / 30.0, buf.data(), sz(size) * 4);
+          ms.push_back(thread_ms() - t0);
+        }
+        nvfx_instance_free(in);
+        std::ranges::sort(ms);
+        med[k].push_back(ms[ms.size() / 2]);
+      }
+    }
+    const auto median = [](std::vector<double> v) {
+      std::ranges::sort(v);
+      return v[v.size() / 2];
+    };
+    for (std::size_t k = 0; k < models.size(); ++k) {
+      std::vector<double> d;
+      for (int r = 0; r < reps; ++r) d.push_back(med[k][sz(r)] - med[0][sz(r)]);
+      const auto [lo, hi] = std::ranges::minmax(med[k]);
+      std::println("cost {} {} at {} px, {}{}: {:.3f} ms (range {:.3f} to {:.3f}), minus current {:+.3f} ms (median of {} paired repetitions)", ename(e),
+                   models[k].name, size, prec, ftz ? ", FTZ" : "", median(med[k]), lo, hi, median(d), reps);
+      rows.push_back(std::format("{},{},{},{},{},{:.4f},{:.4f},{:.4f},{:+.4f},{},{}", ename(e), models[k].name, size, prec, ftz ? 1 : 0, median(med[k]), lo, hi,
+                                 median(d), reps, models[k].sha));
+    }
+  }
+  if (a.has("out")) {  // appended: one session's rounds in order
+    const bool fresh = !fs::exists(a.str("out"));
+    std::ofstream o(a.str("out"), std::ios::app);
+    if (fresh) o << "effect,model,size,precision,ftz,median_ms,min_ms,max_ms,minus_current_ms,reps,sha256\n";
+    for (const auto& r : rows) o << r << "\n";
+  }
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
   try {
-    tools::Args a(argc, argv, {"play"});
+    tools::Args a(argc, argv, {"play", "ftz"});
     if (a.positional().empty()) {
       std::println("nvfx_ordered diag --effect E [--model F] [--settings 8] [--reps 4] [--root DIR] [--results DIR] [--threads N]");
       return 2;
@@ -2088,6 +2166,7 @@ int main(int argc, char** argv) {
     else if (step == "sstart") step_sstart(c, e, a);
     else if (step == "fitbias") step_fitbias(c, e, a);
     else if (step == "train") step_train(c, e, a);
+    else if (step == "cost") step_cost(e, a);
     else throw std::invalid_argument("unknown step " + step);
     a.warn_unused();
   } catch (const std::exception& e) {
