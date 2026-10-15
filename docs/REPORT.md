@@ -3230,3 +3230,70 @@ picture. A second pass costs the detail layer's share of a frame again (about 0.
 keyframes (`fx_water_frozen.csv`; the same on 1, 2 and 3 threads) and the library's `rain_shaft` keyframe
 (`frozen.csv`; the same on 2 and 3 threads). Re-rendered: `effect_waterfall`, `effect_rainshaft`, `scene_falls`,
 `real_vs_learned_water`, `library_water`.
+
+### 16.3 The mushroom cloud (and the splash): the plan, committed before any of its numbers
+
+**The flaw.** The mushroom cloud is weak by its rule ([EFFECTS_BLAZE.md](EFFECTS_BLAZE.md) §4): from 1 s it follows a
+held-out run worse than the coarse simulation with the same detail layer, and played endlessly its average picture and
+detail lose to the nearest flipbook's; it loses its stem and its rolled cap, and its cap turns ragged. The splash is weak
+by its rule too ([EFFECTS_WATER.md](EFFECTS_WATER.md) §4: its average picture only ties the flipbook's). Both are
+one-shots that play from 16 stored first states at other intensities, as the explosion and dust did before study M3.
+
+**Candidates**, each a file built from the current model (the mushroom `fx_blaze/models/d/mushroom.nvfx`, SHA-256
+`505bdfe8...`; the splash `fx_water/models/d/splash.nvfx`, `8705966a...`), by what later studies found helps:
+- `ms`: **the mean state** (study M3, §14.9): fitted to the first states of the effect's 240 training runs (salt 1),
+  quadratic in the controls per block of 2 x 2 cells (`nvfx_ordered fitmean`, `setmean`), so a start point begun at other
+  controls is moved to them; for both effects;
+- `u30`: **longer windows** (study L, §12.1): the stepper fine-tuned from its weights by 600 iterations of the activity
+  stage on windows of 30 frames (`train --activity-stage 600 --mean-stage 0 --unroll 30 --lr-ft 7e-4`); the mushroom;
+- `mt4`: **the ensemble-mean fine-tune** (study M, §14.2): 600 iterations of the mean stage at weight 4, burn-in 0 to 90
+  frames, 16 frames with gradient (`train --mean-stage 600 --mean-weight 4`); the mushroom;
+- `ms_u30`, `ms_mt4`: each fine-tune with the mean state; the mushroom.
+
+**The probe (development, training settings only)**, as study M3's (§14.9.1): the controls of salt-1 training runs 0
+to 39 (40 settings); per setting 8 real runs (the reference) and 8 more (the floor), 8 plays per model through the
+runtime as shipped (float, the frozen tests' precision; one-shots their whole length: the mushroom's 149 frames, the
+splash's 89, from the first), tracking 2 runs per setting from the true state. In two steps: the current model and
+**the null** (the current model with fresh seeds) first, which fix the margins (written to
+`results/experiments/fix/o_margins.csv` and committed before any candidate is played on the probe); then the candidates,
+whose paired spread fixes **the number of settings N** for validation and the test: the smallest multiple of 10 at which,
+for each effect and every measure but the target, a candidate leaving it truly unchanged passes its margin with
+probability at least 0.9, by resampling the probe's settings and in the normal form with the SD at the upper end of its
+one-sided 80% interval; at most 60. The candidates sent to validation are those that meet the rule's form on the probe
+(if none of an effect's does, the one with the fewest measures outside their margins); they are named, with their
+SHA-256, before validation.
+
+**The rule (its form fixed now; its numbers from the probe, committed before validation).** Candidate minus current
+model, paired over the settings (tracking: each setting's mean over its 2 runs), 95% bootstrap with 10,000 resamples
+(`metrics::paired_bootstrap`, seed 2026); the measures of studies M, M2 and M3 (8 runs pooled per setting): tracking at
+1 s, the detail spectrum distance, |ln motion ratio|, the coverage and emission distances and the mean-frame PSNR. A
+candidate replaces the current model when
+1. it is **better on at least one of two targets**: the mean-frame PSNR (the ordered picture: where the stem and the cap
+   are, on average) or tracking at 1 s (following a real run), its interval above zero; and
+2. **every measure is within its margin**, the target it does not improve included: tracking at least the margin (dB),
+   the mean frame at least its margin (dB), the spectrum, motion, coverage and emission distances at most theirs.
+
+Each margin is the larger of study K's at the measure's scale (tracking -0.20 dB as studies M2 and M3 used it, the mean
+frame -0.10 dB, spectrum and motion +0.02, coverage and emission 10% of the current model's mean distance on the probe,
+at least 0.0001) and the null's RMS change at a setting; tracking has no null (a tracked run takes its own seed) and keeps
+-0.20 dB. On validation, among an effect's candidates that meet the rule, the one with the largest mean-frame gain is
+chosen (if none gains in the mean frame, the largest tracking gain); an effect with none stops there (a null, reported
+with its numbers). The strict reading (no interval entirely on the worse side of zero) and study K's margins are reported
+beside and do not decide.
+
+**Seeds** (study O's range): the probe real 3,000,000 + 100 s + k (the floor + 50), plays 3,010,000, the null 3,020,000,
+tracking 3,030,000; **validation** study G's 10 validation settings and more drawn the same way
+(`validation_settings(N, N)`), real 3,100,000 (the floor + 50), plays 3,150,000, tracking 3,180,000; **the test** study
+B's 10 held-out settings and more drawn the same way (`test_settings(N)`), real 3,200,000, plays 3,250,000, tracking
+3,280,000 (k = 0 to 7; tracking k = 0, 1).
+
+**The test, once per effect** with a chosen candidate: the file is copied to the data root's `o_fix/models/<effect>.nvfx`
+and frozen by SHA-256 in `results/experiments/fix/o_frozen.csv` before it; `nvfx_ordered --study o test` refuses any
+other file and runs once (a marker under `o_fix`). An effect that meets the rule on the test is replaced: the shared
+links (the library's models and every scene folder holding it) are repointed at the very end, after the full ctest has
+passed with private copies of the folders, and every frozen hash that changes is updated in the same change. Reported
+beside, not deciding: the distance to the floor before and after, the cost, and, for a replaced model, its round's own
+test (tracking against the coarse simulation, endless against the nearest flipbook) run again on fresh seeds.
+
+Code: `nvfx_ordered --study o` (`fitmean`, `setmean`, `train`, `val --split probeo|valo`, `test`); every file under the
+data root's `o_fix`, tables under `results/experiments/fix`.
