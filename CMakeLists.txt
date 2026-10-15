@@ -566,7 +566,7 @@ if(NEURALFX_BUILD_TESTS)
     set(NEURALFX_MODELS_EARTH "${_nvfx_data}/fx_earth/models/scene" CACHE PATH "lava.nvfx, eruption.nvfx and avalanche.nvfx")
     add_test(NAME neuralfx.ScriptedVolcanoFrozen
              COMMAND nvfx_scene_script --script ${CMAKE_CURRENT_SOURCE_DIR}/examples/scenes/volcano.nvfxs --models ${NEURALFX_MODELS_EARTH}
-                     --keyframes ${CMAKE_CURRENT_BINARY_DIR}/volcano_script_keyframes --no-video --threads 2 --precision float
+                     --keyframes ${CMAKE_CURRENT_BINARY_DIR}/volcano_script_keyframes --no-video --threads 2 --precision float --isa avx2
                      --verify ${CMAKE_CURRENT_SOURCE_DIR}/results/experiments/fx_earth_frozen.csv)
     set_tests_properties(neuralfx.ScriptedVolcanoFrozen PROPERTIES LABELS "neuralfx;data" SKIP_RETURN_CODE 77 TIMEOUT 1200)
     add_test(NAME neuralfx.SceneScriptChecks.volcano COMMAND nvfx_scene_script --script ${CMAKE_CURRENT_SOURCE_DIR}/examples/scenes/volcano.nvfxs --check)
