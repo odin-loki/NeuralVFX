@@ -1,0 +1,11 @@
+variant,run,frames_from,frames,step_median_ms,period_median_ms,load_note
+one_tile_one_pass,1,75,225,2.206,44.129,shared machine load about 8 on 4 cores
+three_tiles_one_pass,1,75,225,7.908,48.680,shared machine load about 8 on 4 cores
+three_tiles_two_passes (as shipped),1,75,225,12.385,50.315,shared machine load about 8 on 4 cores
+one_tile_one_pass,2,75,225,2.203,42.629,shared machine load about 8 on 4 cores
+three_tiles_one_pass,2,75,225,7.904,47.892,shared machine load about 8 on 4 cores
+three_tiles_two_passes (as shipped),2,75,225,12.184,45.992,shared machine load about 8 on 4 cores
+one_tile_one_pass (second session),1,75,225,2.204,41.585,shared machine load about 8 on 4 cores
+one_tile_two_passes (second session),1,75,225,3.179,40.219,shared machine load about 8 on 4 cores
+one_tile_one_pass (second session),2,75,225,2.281,41.114,shared machine load about 8 on 4 cores
+one_tile_two_passes (second session),2,75,225,2.518,43.503,shared machine load about 8 on 4 cores

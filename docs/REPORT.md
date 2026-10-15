@@ -3641,11 +3641,32 @@ interleaved, the median of 9 paired repetitions; `o_cost_passes.csv`; measured o
 | launch (swirl 1, scale 9) | 256 | 1.387 → 1.656 | +0.233 | 1.964 → 2.104 | +0.165 |
 
 A second pass skips the empty spans as the first does, so the waterfall's sheet (a narrow band of the frame) costs
-almost nothing more; the launch's billows fill the tile, and the second pass costs it 8 to 18% (the paired differences over the medians). @@COST_MODELS@@
+almost nothing more; the launch's billows fill the tile, and the second pass costs it 8 to 18% (the paired
+differences over the medians).
+
+The replaced mushroom and splash cost what the round's did: the mean state acts once, on the start point, and the
+fine-tuned stepper has the same shape (`o_cost_models.csv`, the same tool, the build after merging main, a load of about
+8): the mushroom 0.640 → 0.684 ms at 128 px int8 (paired +0.063, inside both ranges), 1.580 → 1.513 at 256 (+0.006),
+0.689 → 0.746 and 1.591 → 1.590 at float; the splash 0.730 → 0.700 (-0.044), 1.610 → 1.580 (-0.095), 0.796 → 0.773
+and 1.666 → 1.645 at float. Every difference is within the spread of repetitions on this machine.
 
 **The lift-off's three tiles** (`nvfx_scene_script --no-video --profile`, the scene's 300 frames at 1280 x 720 on 2
-threads, int8, the wall time a frame; before, three tiles with one pass, and three tiles with two, interleaved; the same
-load): @@COST_LIFTOFF@@
+threads, int8, the wall time a frame; three ways of playing the blast in turn, twice, and one tile with two passes in a second
+session; `o_cost_liftoff.csv`; medians over the 225 frames from the ignition at 2.5 s; a load of about 8):
+
+| the blast | step stage (ms a frame) | whole frame (ms) |
+|---|---|---|
+| one tile, one pass (before study O) | 2.21, 2.20 | 44.1, 42.6 |
+| three tiles, one pass | 7.91, 7.90 | 48.7, 47.9 |
+| three tiles, two passes (as shipped) | 12.39, 12.18 | 50.3, 46.0 |
+| one tile, two passes (a second session) | 3.18, 2.52 (one pass: 2.20, 2.28) | 40.2, 43.5 (41.6, 41.1) |
+
+The two outer tiles add about 5.7 ms a frame to the step stage (all seven modules' steps on 2 threads) and about 5 ms
+to the frame; the second pass adds about 4.4 ms more on the three tiles, more than the bare effect's +0.23 ms at 256 px
+would give (three full tiles of billows on the two threads the frame's drawing shares; on one tile, +0.3 to +1.0 ms),
+but the frame as a whole hardly moves (48.3 against 48.2 ms on average over the two runs, within the runs' spread),
+since the step overlaps the drawing of the frame before. The lift-off still runs at about 20 frames a second at
+1280 x 720 on 2 busy threads; a game that cannot spare the step can keep one tile and accept the square.
 
 ### 16.7 What it means
 
