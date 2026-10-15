@@ -54,6 +54,6 @@ effect mushroom = "mushroom.nvfx"                                     # plays on
 
 # Launch, puffs and ink (docs/EFFECTS_FLOW.md): an engine's exhaust blown down onto the ground, smoke in pulses, and a
 # plume with almost no buoyancy (underwater). Puffs and ink carry no light: their entries draw them with looks.
-effect launch    = "launch.nvfx", swirl 1, swirl_scale 9                # intensity (thrust), wind, turbulence
+effect launch    = "launch.nvfx", swirl 1, swirl_scale 9, passes 2      # intensity (thrust), wind, turbulence; study O: 2 detail passes
 effect puffs     = "puffs.nvfx"                                       # intensity, rate (pulses a second), turbulence
 effect ink       = "ink.nvfx"                                         # intensity, current, turbulence

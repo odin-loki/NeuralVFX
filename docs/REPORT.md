@@ -3231,6 +3231,37 @@ keyframes (`fx_water_frozen.csv`; the same on 1, 2 and 3 threads) and the librar
 (`frozen.csv`; the same on 2 and 3 threads). Re-rendered: `effect_waterfall`, `effect_rainshaft`, `scene_falls`,
 `real_vs_learned_water`, `library_water`.
 
+### 16.2 Launch's square block: the tile, not the model
+
+**The flaw.** In `scene_liftoff.mp4` the blast's billows were one square block with straight, soft sides, and in
+`effect_launch.mp4` they fill the tile and run out at its sides; with its calibrated swirl (3) the billows were drawn
+as wormy, boxy lines, which the library had already softened (`swirl 1, swirl_scale 9`).
+
+**The cause: the tile, which is the effect's whole domain** ([EFFECTS_FLOW.md](EFFECTS_FLOW.md) §6.1). Played from
+an empty grid at the controls of 6 training runs, the simulator's own launch covers 0.23 of its frame after 5 s and 0.34
+to 0.35 from 10 s on; the learned launch as shipped 0.26 to 0.34 (`nvfx_fix cover`); from a run's true state it covers
+what the run covers (0.218 against 0.219 over 2 s; `nvfx_fix bands`, whose taking apart also shows the learned dynamics
+drawn by the simulator's renderer, and the true coarse states moving the detail layer, with the same billowy outlines).
+Both fill the square in a few seconds and leave it at the sides: the model is not at fault, and no feather can draw what
+has left the domain. (An index of how much the coverage's edges line up with the frame's axes, sum |g|^2 cos 4 theta
+over sum |g|^2, is lower for the learned launch as played, 0.12, than for the simulator, 0.22: its billows are not
+boxier at the scale of its pixels.)
+
+**The fix: the scene's blast is a domain of three tiles** (`tiles 3 x 1, band 8`), the middle one blowing and the outer
+two carrying its billows on, their own nozzles cleared every frame (`suppress`), started by the ignition's rule as a
+domain cannot wait; and the launch's effect line takes `passes 2` (the scene and the library), which takes off a ladder
+of chevrons that one detail pass laid along the jet's edges (the waterfall's stamp, §16.1; seen through the scene's
+look at 3.5 times magnification, judged by eye: the spectral measure finds no peak in the learned renderer's frames).
+By eye (before and after in EFFECTS_FLOW.md §6.1): the billows spill past the middle tile into curls and arms on both
+sides and the straight sides are gone; late on, after the lift-off, the right-hand cloud is still a tall block.
+**Not fixed:** the library's launch entries are spawned, and spawned entries cannot be tiled domains, so their clouds
+still fill one tile (`rocket_launch`'s square shows at its top corners at times); the bare model's reel shows the tile.
+
+**What changed.** `examples/scenes/liftoff.nvfxs` and `library/models.nvfxl` (the launch line). Frozen hashes: the
+lift-off's keyframes 078 to 282 (`fx_flow_frozen.csv`; frame 030, before the ignition, is unchanged; the same on 1 and 2
+threads) and the library's `rocket_launch` (`frozen.csv`; the same on 2 and 3 threads). Re-rendered: `scene_liftoff`,
+`effect_launch`. The scene's three blast tiles cost two more 256-pixel tiles' steps a frame (§16.6 has the cost).
+
 ### 16.3 The mushroom cloud (and the splash): the plan, committed before any of its numbers
 
 **The flaw.** The mushroom cloud is weak by its rule ([EFFECTS_BLAZE.md](EFFECTS_BLAZE.md) §4): from 1 s it follows a

@@ -235,6 +235,27 @@ std::vector<double> vspec(const Clip& cl, int r0, int r1, int c0, int c1) {
   return P;
 }
 
+// How much the edges of the picture's coverage line up with the frame's axes: over every pixel and frame, the alpha
+// channel's gradient g (central differences), sum |g|^2 cos(4 theta) / sum |g|^2, theta its angle. 0 for edges at every
+// angle alike, 1 if every edge is horizontal or vertical, -1 if every one is diagonal (boxy shapes: towards 1).
+double axis_index(const Clip& cl) {
+  double num = 0, den = 0;
+  const int S = cl.size;
+  for (int f = 0; f < cl.frames; ++f) {
+    const auto px = cl.frame(f);
+    const auto a = [&](int x, int y) { return static_cast<double>(px[(sz(y) * sz(S) + sz(x)) * 4 + 3]) / 255.0; };
+    for (int y = 1; y < S - 1; ++y)
+      for (int x = 1; x < S - 1; ++x) {
+        const double gx = 0.5 * (a(x + 1, y) - a(x - 1, y)), gy = 0.5 * (a(x, y + 1) - a(x, y - 1));
+        const double g2 = gx * gx + gy * gy;
+        if (g2 <= 0) continue;
+        num += (gx * gx * gx * gx - 6.0 * gx * gx * gy * gy + gy * gy * gy * gy) / g2;
+        den += g2;
+      }
+  }
+  return den > 0 ? num / den : 0.0;
+}
+
 // --- a line chart (log10 power against the period) -------------------------------------------------------------------------
 
 using Rgb = std::array<std::uint8_t, 3>;
@@ -339,6 +360,7 @@ void step_bands(const tools::Args& a) {
   const std::size_t NM = methods.size();
   const auto idx = [&](const std::string& n) { return static_cast<std::size_t>(std::ranges::find(methods, n) - methods.begin()); };
   std::vector<std::vector<std::vector<double>>> spec(NM, std::vector<std::vector<double>>(sz(n_runs)));
+  std::vector<std::vector<double>> axis(NM, std::vector<double>(sz(n_runs))), cover(NM, std::vector<double>(sz(n_runs)));
   std::vector<Clip> shown(NM);
   const auto t0 = std::chrono::steady_clock::now();
   parallel(threads, n_runs, [&](int r) {
@@ -410,7 +432,14 @@ void step_bands(const tools::Args& a) {
         render_fields(p, os.fine_t, os.fine_d, clips[idx("oracle_" + v.name)].frame(i));
       }
     }
-    for (std::size_t m = 0; m < NM; ++m) spec[m][sz(r)] = vspec(clips[m], r0, r1, c0, c1);
+    for (std::size_t m = 0; m < NM; ++m) {
+      spec[m][sz(r)] = vspec(clips[m], r0, r1, c0, c1);
+      axis[m][sz(r)] = axis_index(clips[m]);
+      double al = 0;
+      for (int f = 0; f < clips[m].frames; ++f)
+        for (std::size_t q = 3; q < clips[m].frame(f).size(); q += 4) al += clips[m].frame(f)[q] / 255.0;
+      cover[m][sz(r)] = al / (static_cast<double>(clips[m].frames) * kSize * kSize);
+    }
     if (first + r == show) shown = std::move(clips);
     std::println("bands: run {} ({:.2f}, {:.2f}, {:.2f}) done ({:.0f} s)", first + r, ctl[0], ctl[1], ctl[2],
                  std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count());
@@ -427,6 +456,23 @@ void step_bands(const tools::Args& a) {
   for (std::size_t m = 0; m < NM; ++m)
     for (int r = 0; r < n_runs; ++r)
       for (int k = 1; k <= H; ++k) mean[m][sz(k)] += spec[m][sz(r)][sz(k)] / n_runs;
+  {  // the edges' alignment with the frame's axes, per method: mean over runs, and each run
+    std::ofstream ax(out / "axis_index.csv");
+    ax << "method,run,axis_index\n";
+    std::println("\nthe coverage's edges along the frame's axes (axis index: 0 at every angle alike, 1 all horizontal or vertical), mean over runs and per run:");
+    for (std::size_t m = 0; m < NM; ++m) {
+      double mu = 0;
+      std::string line;
+      for (int r = 0; r < n_runs; ++r) {
+        mu += axis[m][sz(r)] / n_runs;
+        line += std::format(" {:+.3f}", axis[m][sz(r)]);
+        ax << std::format("{},{},{:.5f}\n", methods[m], first + r, axis[m][sz(r)]);
+      }
+      double cv = 0;
+      for (int r = 0; r < n_runs; ++r) cv += cover[m][sz(r)] / n_runs;
+      std::println("  {:<22} {:+.3f}:{}   (mean coverage {:.3f})", methods[m], mu, line, cv);
+    }
+  }
   std::ofstream su(out / "bands_summary.csv");
   su << "method,excess_log10_2p5_8px,excess_sd_runs,peak_period,peak_excess_log10\n";
   std::println("\n{} (runs {} to {}; rows {}..{}, columns {}..{}): vertical power over the real frames' (log10), periods 2.5 to 8 px",
@@ -592,6 +638,68 @@ void step_peaks(const tools::Args& a) {
   }
 }
 
+// --- cover: how much of the frame an effect covers over time ----------------------------------------------------------------
+
+// At the controls of training runs (salt 1), the mean alpha of each second: the simulator's run (from an empty grid, its
+// own seed), the runtime as shipped (shards from the stored start points; a seed of study O's) and the runtime as one
+// rollout from the nearest start point (no shards). Development only.
+void step_cover(const tools::Args& a) {
+  sim::Effect e{};
+  if (!sim::parse_effect(a.need("effect"), e)) throw std::invalid_argument("unknown effect");
+  rollout::Model M = load_or_throw(a.need("model"));
+  if (a.has("detail")) set_detail(M, a.str("detail"));
+  const int n_runs = a.i("runs", 6), first = a.i("first", 0), secs = a.i("seconds", 20), threads = a.i("threads", 1);
+  std::vector<std::array<std::vector<double>, 3>> res(sz(n_runs));
+  Runtime fx(M);
+  parallel(threads, n_runs, [&](int r) {
+    const sim::Params p = run_params(e, 1, static_cast<std::uint64_t>(first + r));
+    const std::vector<float> ctl{p.intensity, p.wind, p.turbulence};
+    std::vector<std::uint8_t> px(sz(kSize) * kSize * 4);
+    const auto mean_alpha = [&] {
+      double s = 0;
+      for (std::size_t q = 3; q < px.size(); q += 4) s += px[q] / 255.0;
+      return s / (kSize * kSize);
+    };
+    sim::Fluid f(p);
+    for (int t = 0; t < secs; ++t) {
+      double acc = 0;
+      for (int i = 0; i < 30; ++i) {
+        f.step_frame();
+        f.render(px);
+        acc += mean_alpha() / 30;
+      }
+      res[sz(r)][0].push_back(acc);
+    }
+    for (int mode = 1; mode <= 2; ++mode) {
+      nvfx_instance* in = nullptr;
+      if (nvfx_instance_create(fx.e, kSize, &in) != NVFX_OK) throw std::runtime_error("instance");
+      nvfx_instance_set_precision(in, NVFX_PRECISION_FLOAT);
+      nvfx_instance_set_controls(in, ctl.data(), 3);
+      nvfx_instance_set_seed(in, 3'020'000 + static_cast<std::uint64_t>(r));
+      if (mode == 2) nvfx_instance_set_drift(in, 0.f);
+      for (int t = 0; t < secs; ++t) {
+        double acc = 0;
+        for (int i = 0; i < 30; ++i) {
+          nvfx_render(in, (t * 30 + i) / 30.0, px.data(), sz(kSize) * 4);
+          acc += mean_alpha() / 30;
+        }
+        res[sz(r)][sz(mode)].push_back(acc);
+      }
+      nvfx_instance_free(in);
+    }
+  });
+  const char* names[3] = {"simulator", "shards", "one rollout"};
+  for (int m = 0; m < 3; ++m) {
+    std::string line;
+    for (int t = 0; t < secs; ++t) {
+      double v = 0;
+      for (int r = 0; r < n_runs; ++r) v += res[sz(r)][sz(m)][sz(t)] / n_runs;
+      line += std::format(" {:.3f}", v);
+    }
+    std::println("{:<12} mean alpha by second:{}", names[m], line);
+  }
+}
+
 // --- strip -------------------------------------------------------------------------------------------------------------------
 
 void step_strip(const tools::Args& a) {
@@ -669,6 +777,7 @@ int main(int argc, char** argv) {
     if (step == "bands") step_bands(a);
     else if (step == "strip") step_strip(a);
     else if (step == "peaks") step_peaks(a);
+    else if (step == "cover") step_cover(a);
     else throw std::invalid_argument("unknown step " + step);
     a.warn_unused();
   } catch (const std::exception& ex) {
