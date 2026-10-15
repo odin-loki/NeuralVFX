@@ -50,3 +50,52 @@ same four rounds: `../experiments/round5_effect_timing_quiet.csv` (used in `docs
 `../manager/crowd_timing_runs_quiet.csv` and `crowd_timing_summary_quiet.csv`, and three alternating pairs with and
 without `--calibrate`: `../manager/crowd_calibrate_quiet.csv` (`docs/MANAGER.md` §7.1). The moor and fire-whirl scenes:
 25 to 29 ms per frame on 2 threads and 15 to 17 ms on 4.
+
+## Round 6 (15 October 2026)
+
+No agent ran: load average 1.0 throughout (`round6/run.log`), the runs alone on the machine. This session's machine was
+fast again: the fireball took 12.8 ms per frame at 1280 x 720 on 4 threads at float and 12.2 ms at int8 (medians of
+five alternating runs, `round6/fireball_frames.txt`; 45.7 and 44.0 ms on 1 thread), against 26 ms in round 5.
+
+Two parts, both five interleaved rounds on one pinned core:
+
+1. **Study K's set** (`tools/study_k/time.sh build OUT 5 20`): the eleven effects as study K measured them
+   (`round6/effects.csv`, `effects_summary.md`), where a frame's time goes (`profile_summary.md`), the fireball, and the
+   effect manager's crowd (`crowd_summary.csv`, `crowd_runs.csv`).
+2. **Every model as the library ships it now** (`nvfx_study_k timing --effects every --models DATA/library/models`):
+   all 21, at 64, 128 and 256 px, float and both int8 candidates, AVX2 and AVX-512 (`round6/lib21.csv`,
+   `lib21_summary.md`). This is the first quiet timing of round 7's six, the four water bodies, study M's fire and
+   study M3's explosion and dust.
+
+Per 128 x 128 frame (median over the rounds), at the default on this CPU (int8 on AVX-512 with VNNI) and at float on
+AVX2 (the default on a CPU without VNNI):
+
+| effect | default | float AVX2 | effect | default | float AVX2 | effect | default | float AVX2 |
+|---|---:|---:|---|---:|---:|---|---:|---:|
+| fire (M) | 0.67 | 0.92 | dust (M3) | 0.62 | 0.85 | puffs | 0.54 | 0.74 |
+| smoke | 0.56 | 0.79 | cloud | 0.59 | 0.84 | ink | 0.48 | 0.74 |
+| explosion (M3) | 0.55 | 0.75 | wildfire | 0.53 | 0.73 | waterfall | 0.52 | 0.71 |
+| steam | 0.53 | 0.74 | coals | 0.80 | 1.07 | fountain | 0.55 | 0.77 |
+| magic | 0.66 | 0.80 | mushroom | 0.60 | 0.84 | splash | 0.70 | 0.90 |
+| jet | 0.56 | 0.75 | launch | 0.51 | 0.73 | rain shaft | 0.51 | 0.73 |
+| orb | 0.58 | 0.79 | vortex | 0.54 | 0.76 | fog | 0.56 | 0.64 |
+
+(ms; the orb plays at float in the library and scenes, REPORT.md §13.9: 0.63 ms on AVX-512, 0.79 on AVX2.) An instance
+takes 1.6 MB at 64 px, 2.4 MB at 128 and 5.8 MB at 256 (float; int8 about 85 KB more).
+
+Ratios over the 21 models (mean of each model's ratio, 95% bootstrap):
+
+| | 64 px | 128 px | 256 px |
+|---|---|---|---|
+| int8 (second convolution) / float, both on AVX-512 | 0.845 [0.827, 0.862] | 0.906 [0.896, 0.915] | 0.959 [0.942, 0.980] |
+| int8 / float, both on AVX2 | 0.958 [0.950, 0.967] | 0.979 [0.972, 0.985] | 0.978 [0.969, 0.988] |
+| float on AVX-512 / float on AVX2 | 0.788 [0.778, 0.800] | 0.806 [0.785, 0.838] | 0.800 [0.787, 0.815] |
+
+These agree with study K's provisional figures (REPORT.md §13.6, §13.8): int8 pays with VNNI (about a tenth off a 128 px
+frame), barely without it, and most of the gain over the float default is the AVX-512 build itself. Float on the
+AVX-512 build is 0.80 of float on AVX2 at every size, on a quiet machine too. Float rollouts still default to AVX2; moving
+them would change the float frames (the float convolution and the renderer round differently between builds) and so the
+frozen float keyframes, which would then depend on the CPU running the tests. That is left as a decision.
+
+The effect manager's crowd (165 effects, 4 ms budget, 1 thread): 3.95 ms CPU per frame at float and 2.70 ms at int8
+(medians of five runs), against 44.5 and 31.4 ms for every effect its own unmanaged 64 px instance.

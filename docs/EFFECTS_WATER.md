@@ -42,7 +42,9 @@ a pool churns where that water lands (§7). A scene plays a waterfall under an i
   included, are the same on 1, 2 and 3 threads; `nvfx_alloc_test` plays every kind, scripted and on a stage: 0
   allocations.
 - **Cost.** A learned body costs what a module of its size costs (a 128-pixel tile's step about 0.4 ms a frame on one
-  thread here); the seeded layer's simulation next to nothing (0.003 to 0.06 ms an element), its drawing what it covers
+  thread here; through `nvfx_render`, a whole 128 x 128 frame on a quiet machine takes 0.52 ms for the waterfall, 0.55
+  for the fountain, 0.70 for the splash and 0.51 for the rain shaft at the default, int8 on AVX-512:
+  [results/quiet](../results/quiet/README.md) round 6); the seeded layer's simulation next to nothing (0.003 to 0.06 ms an element), its drawing what it covers
   (1 to 8 ms an element at 1280 x 720, §9). A learned waterfall with its spray and pool drew in 3.1 ms a frame against
   5.8 for the drawn one, in a 640 x 480 scene.
 - **How it looks.** The learned bodies are soft, broad and continuous, as gas models are: a sheet that falls whole and

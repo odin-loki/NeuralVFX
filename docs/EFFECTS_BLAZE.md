@@ -355,6 +355,12 @@ last windows are as good as the first. The wildfire moves too little at the firs
 
 ## 5. Memory and cost
 
+**Quiet re-timing** (15 October 2026, [results/quiet](../results/quiet/README.md) round 6, nothing else running): per 128 x
+128 frame at the default (int8, AVX-512), the wildfire 0.53 ms, the coals 0.80 and the mushroom 0.60; at float on AVX2
+0.73, 1.07 and 0.84. The figures below come from a
+busy session; the machine's speed varies between sessions, so compare figures only within one.
+
+
 Per frame through `nvfx_render` on one pinned core, with study D's fire and explosion measured in the same session
 (`nvfx_experiment d-timing`, four rounds back to back): the least of the four rounds and, in brackets, the greatest
 ([d_timing_rounds.csv](../results/experiments/fx_blaze/d_timing_rounds.csv), the first round in

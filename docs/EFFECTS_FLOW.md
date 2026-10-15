@@ -372,6 +372,12 @@ reads as worms. The library and the scene take the look over the statistic.
 
 ## 5. Memory and cost
 
+**Quiet re-timing** (15 October 2026, [results/quiet](../results/quiet/README.md) round 6, nothing else running): per 128 x
+128 frame at the default (int8, AVX-512), launch 0.51 ms, puffs 0.54 and ink 0.48; at float on AVX2 0.73, 0.74 and
+0.74. The figures below come from a
+busy session; the machine's speed varies between sessions, so compare figures only within one.
+
+
 Per frame through `nvfx_render` on one pinned core, with study D's fire measured in the same session (`nvfx_experiment
 d-timing`, twelve rounds back to back; [d_timing.csv](../results/experiments/fx_flow/d_timing.csv) has the first round,
 [d_timing_rounds.csv](../results/experiments/fx_flow/d_timing_rounds.csv) all of them): the least of the rounds' medians
