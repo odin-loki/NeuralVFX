@@ -3181,3 +3181,52 @@ its own play), snapshot at every stage, and chosen on tracking *and* endless pla
 - Study N's smoke demo also runs away given 30 s (its box's heat to 3,128); retrained with the fix it does not.
 - **Cost** (provisional, now on a quiet machine): a step 70, 37 and 23 ms on 1, 2 and 4 threads; a 256 x 256 picture
   61, 30 and 16 ms. The detail layer is still three quarters of a step.
+
+## 16. Study O: the most visible flaws of the shipped effects, fixed and measured
+
+Status: **in progress** (15 October 2026). Study O takes the flaws that show most in the demos and the library, finds
+each one's cause with evidence, and fixes what it can: a fix in the compositor, a look or a library entry is judged by
+eye from before and after frames, and a fix that changes a model goes through a rule written here before any of its
+validation numbers, validated and tested once. Seeds: study O's range, 3,000,000 to 3,499,999. Code: `tools/nvfx_fix.cpp`
+(`nvfx_fix bands | peaks | strip`); every run is logged under the data root's `o_fix`.
+
+### 16.1 The learned waterfall's horizontal bands: the detail layer, locked once a frame
+
+**The flaw.** The learned waterfall's sheet (and, fainter, the rain shaft's curtains) showed horizontal bands a few
+pixels apart from the lip down, plainly in `videos/effect_waterfall.mp4` and `scene_falls.mp4`, where the library and
+the scene play the water models with `swirl 0`. The docs had put it down to the grown fine fields.
+
+**The cause** ([EFFECTS_WATER.md](EFFECTS_WATER.md) §7.1 has the figures). `nvfx_fix bands` takes the sheet apart on 8
+training runs of the waterfall (salt 1, runs 0 to 7; diagnosis only): the power of the frame's luminance along y in a
+window of the sheet (rows 16 to 80, columns 56 to 72 of the 128-pixel frame), for the simulator's frames and for the
+learned effect with one part at a time swapped:
+- the learned coarse state alone, upsampled and drawn by the simulator's renderer, is smooth: **not the learned body**;
+- the learned dynamics drawn by the simulator's renderer have the bands: **not the learned renderer**;
+- the detail layer driven by the simulator's own coarse states (an oracle stepper) has them: **the detail layer**;
+- the spectrum of each banded version has one narrow peak (up to 3.5 decades above the simulator's at that period, 1.6
+  to 1.9 on average over the runs), and **its period is one frame's fall**: 2.9 pixels at intensities 0.03 to 0.13,
+  3.05 to 3.2 at 0.54 to 0.59, 3.2 to 3.4 at 0.78 to 0.81 (the water falls at 85 + 30 intensity cells a second: 2.9 to
+  3.6 pixels a frame), not the coarse grid's 4 pixels; at 256 pixels it doubles (5.1 to 6.4).
+
+Once a frame the detail layer locks its fine fields to the coarse state: a factor per coarse cell, and the missing
+material added broken up by the flicker noise, neither of which moves with the water. The fall carries each frame's
+stamp one frame's travel down and the next lands beside it: a sum of stamps one travel apart repeats with that period.
+It is study L's saw-tooth (§12.1.1) in a straight fall. Without the breakup noise (`contrast 0`) the peak is lower and
+stays (the factors stamp as well).
+
+**The fix: a library and scene setting, judged by eye.** The detail layer already runs in passes (study L's
+`DetailSpec::passes`); an `effect` line can now set it (`passes N`, a whole number from 1 to 8, as it sets `swirl`), and
+the library and the falls scene play the waterfall and the rain shaft with `swirl 0, passes 2`. Each pass moves the water
+half a frame's travel and the stamps blend: in the as-played runtime (`nvfx_fix peaks`, the largest narrow peak of the
+rows' spectrum above its neighbours, mean over the 8 runs) the waterfall goes from 0.73 decades to 0.07 at 128 pixels,
+the rain shaft from 0.40 to 0.04; the fountain has none (0.04) and keeps one pass. At 256 pixels two passes leave
+half-travel bands (0.48) and three take them off (0.20), so the demo reels, rendered at 256 pixels, use three. No model
+file changes. By eye (the falls at 3.5 s before and after, the library's sheet, the reels): the sheet falls in straight
+streaks with no ladder of bands, the curtains are the same with fainter stripes gone; nothing else changed in the
+picture. A second pass costs the detail layer's share of a frame again (about 0.17 ms at 128 pixels, §13.1).
+
+**What changed.** `src/compose/script.cpp` and `script_run.cpp` (the `passes` key; `Script.AnEffectsPassesSplitItsDetailLayer`),
+`nvfx_reel` (DETAIL `passes`), `library/water.nvfxl` and `examples/scenes/falls.nvfxs`. Frozen hashes: the falls' six
+keyframes (`fx_water_frozen.csv`; the same on 1, 2 and 3 threads) and the library's `rain_shaft` keyframe
+(`frozen.csv`; the same on 2 and 3 threads). Re-rendered: `effect_waterfall`, `effect_rainshaft`, `scene_falls`,
+`real_vs_learned_water`, `library_water`.

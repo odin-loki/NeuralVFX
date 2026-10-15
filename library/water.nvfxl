@@ -5,10 +5,12 @@
 # look is drawn and whose mist goes into a learned module where it lands (deposit(): the fog model for cold spray, the
 # steam model for a geyser's). Entries drawn entirely by the seeded layer say so (*drawn*).
 
-effect waterfall_fx = "waterfall.nvfx", swirl 0    # the learned waterfall; no sub-grid swirl (it marbles the sheet)
-effect fountain_fx  = "fountain.nvfx", swirl 0     # the learned fountain: intensity (height), aim, turbulence
-effect splash_fx    = "splash.nvfx", swirl 0       # the learned splash: plays once (3 s) from one of 16 stored starts
-effect rainshaft_fx = "rainshaft.nvfx", swirl 0    # the learned rain shaft: intensity, wind, turbulence
+# The falling water's detail layer runs in two passes a frame (study O, docs/REPORT.md §16): with one, the pattern it
+# lays down each frame was carried one frame's fall apart and stacked into horizontal bands across the sheet.
+effect waterfall_fx = "waterfall.nvfx", swirl 0, passes 2   # the learned waterfall; no sub-grid swirl (it marbles the sheet)
+effect fountain_fx  = "fountain.nvfx", swirl 0              # the learned fountain: intensity (height), aim, turbulence
+effect splash_fx    = "splash.nvfx", swirl 0                # the learned splash: plays once (3 s) from one of 16 stored starts
+effect rainshaft_fx = "rainshaft.nvfx", swirl 0, passes 2   # the learned rain shaft: intensity, wind, turbulence
 
 look spray  = shader, emission 0, soot_density 0.7, soot_albedo 0.9, sky 1.1, shadow 0.1, scene_light 1.3, relief 0.4,
               tint (0.9, 0.95, 1)                                                       # white spray and mist

@@ -49,9 +49,15 @@ a pool churns where that water lands (§7). A scene plays a waterfall under an i
   5.8 for the drawn one, in a 640 x 480 scene.
 - **How it looks.** The learned bodies are soft, broad and continuous, as gas models are: a sheet that falls whole and
   sways, a foot that churns and billows into mist, a fountain's bell, a rain curtain that thickens and leans; they carry
-  faint horizontal banding (their grown fine fields) and no drops. The seeded layer gives what they lack: drops,
+  no drops. The seeded layer gives what they lack: drops,
   spray, glints, rings and foam. Weak spots are named in §11: small things (drips, a trickle, a wake) read in motion
   rather than in a still, and nothing draws rock, so falls whose lip shows start in mid-air.
+- **The horizontal bands are gone** (study O, [REPORT.md](REPORT.md) §16). The learned waterfall's sheet and the rain
+  shaft's curtains carried bands across them, one frame's fall apart. The detail layer made them: once a frame it
+  lays new material broken up by a noise pattern that stays put and scales the fine fields by a factor per coarse cell,
+  and the fall carries each frame's stamp one frame's travel down, where the next one lands beside it (§7.1). The
+  library and the scene now play both with `passes 2` on their `effect` line: the detail layer moves and locks the
+  water twice a frame, and the bands are gone.
 
 ## 2. Ordered and random: what each layer models, and why
 
@@ -267,7 +273,47 @@ bottom, so a module stood on the ground with `sink 0.055` has its pool at the gr
 that line. A waterfall's lip is at 0.9 of the tile's height: a tile taller than the picture puts the lip above it (the
 scene's waterfall), with a feather small enough not to fade the falling water where it shows. The learned bodies' strong
 sub-grid swirl marbles the waterfall's sheet; the library and the scene play the water models with `swirl 0` (the
-effect statement's detail setting), where its streaks fall straight.
+effect statement's detail setting), where its streaks fall straight, and the waterfall and the rain shaft with `passes 2`
+(§7.1).
+
+### 7.1 The bands across the falling water (study O)
+
+With one detail pass a frame the learned waterfall's sheet and the rain shaft's curtains showed horizontal bands, a few
+pixels apart, from the lip down (the left of the picture below; the scene at 3.5 s). Study O ([REPORT.md](REPORT.md)
+§16) took the picture apart on 8 training runs (`nvfx_fix bands`): the power of the sheet's rows along y, against the
+simulator's own frames, for the learned effect as played and with one part at a time swapped out.
+
+![The falls at 3.5 s: one detail pass a frame (left), two (right)](figures/o_falls_before_after.png)
+
+![The learned waterfall's sheet taken apart (training run 6, intensity 0.54; 128 px, scaled 3x): the simulator; the
+learned effect as played; its learned dynamics drawn by the simulator's renderer; the true coarse states moving the
+detail layer; the learned coarse state alone; no breakup noise; two passes](figures/o_waterfall_bands.png)
+
+![The spectrum of the sheet's rows (mean over 8 training runs)](figures/o_waterfall_spectrum.png)
+
+- **The detail layer makes the bands; the learned body and the renderer do not.** The learned coarse state alone is
+  smooth (no peak). The learned dynamics drawn by the simulator's renderer have the bands, and so does the detail layer
+  driven by the simulator's own coarse states (an oracle stepper): the spectrum of every one of them has the same narrow
+  peak, up to 3.5 decades above the simulator's at that period.
+- **The peak sits at one frame's fall.** At intensities 0.03 to 0.13 the bands are 2.9 pixels apart (of a 128-pixel
+  frame), at 0.54 to 0.59 3.05 to 3.2, at 0.78 to 0.81 3.2 to 3.4: the water's speed (85 + 30 intensity cells a
+  second, 2.9 to 3.6 pixels a frame) less a little near the lip. It is not the coarse grid's 4 pixels.
+- **Why.** Once a frame the detail layer locks the fine fields to the coarse state: it scales them by a factor per
+  coarse cell and adds what is missing as new material broken up by the flicker noise. Neither pattern moves with the
+  water. The fall carries each frame's stamp down by one frame's travel, the next stamp lands beside it, and the sum of
+  stamps one travel apart repeats with that period: bands, as study L found for magic's saw-teeth around a ring
+  ([REPORT.md](REPORT.md) §12.1). Without the breakup noise (`contrast 0`) the peak is lower but stays (the factors
+  stamp too).
+- **The fix: lock twice a frame.** With `passes 2` each pass moves the water half a frame's travel (1.5 to 1.8 pixels)
+  and the stamps blend; the peak is gone at every intensity (`nvfx_fix peaks`: the largest narrow peak of the rows'
+  spectrum 0.73 decades above its neighbours on average with one pass, 0.07 with two). It is a setting of the effect
+  line, judged by eye, like `swirl 0`; the model file is unchanged. **At 256 pixels the travel doubles**: two passes
+  leave half-travel bands (0.48), three take them off (0.20), so a 256-pixel tile wants `passes 3` (the demo videos'
+  reels are 256 pixels and use 3; the library and the scene play 128-pixel tiles with 2). The rain shaft is the same
+  (0.40 with one pass, 0.04 with two); the fountain has no bands (0.04 with one), and the splash's water is thrown, so
+  both keep one pass.
+- **Cost:** a second pass of the detail layer, about 0.17 ms more per 128-pixel tile a frame (the detail layer's share
+  of a frame, [REPORT.md](REPORT.md) §13.1).
 
 **By eye.** The learned waterfall falls whole, sways, and churns and billows into a broad mist at its foot, which the
 drawn one cannot (its mist is the fog model fed from outside, a slow low bank); the drawn one has crisper water: a glassy
@@ -285,7 +331,7 @@ module; the seeded layer's arrays are a few hundred KB (§9).
 
 ## 8. In scripts
 
-A learned body is a module: `effect waterfall_fx = "waterfall.nvfx", swirl 0`, then `module NAME = waterfall_fx, ...`
+A learned body is a module: `effect waterfall_fx = "waterfall.nvfx", swirl 0, passes 2`, then `module NAME = waterfall_fx, ...`
 with its controls (intensity, wind or aim, turbulence) as for any effect. The seeded layer: `water NAME = KIND` declares
 an element (`pool`, `sheet`, `jet`, `drips`, `bubbles`, `shaft`, `spray`); `splash` and `wave` are actions (in rules;
 `wave` also in `every frame`). [COMPOSE.md](COMPOSE.md) §5.5 has the keys of each; the checker rejects a key a kind
@@ -295,7 +341,7 @@ naming a trail), a capacity out of its range, and `splash` under `every frame`, 
 its seed offset, emitting only while it is alive.
 
 ```text
-effect waterfall_fx = "waterfall.nvfx", swirl 0
+effect waterfall_fx = "waterfall.nvfx", swirl 0, passes 2
 module falls  = waterfall_fx, size 128, width 900, at (300, 616), sink 0.055, feather 0.15, start 0, seed 93,
                 controls (0.65, 0.45, 0.5)
 water pool    = pool, along (20, 614) to (640, 614), depth 26, surface 26, cells 192, drift 20, churn 1
@@ -349,7 +395,7 @@ entries (`results/library/frozen.csv`: `waterfall_drawn`, `garden_fountain`, `bo
 Twenty-three entries in `library/water.nvfxl` (category `water`), each judged by eye from contact sheets and keyframes
 at full size; [LIBRARY.md](LIBRARY.md) §1 (Water) has the table, the notes and the sheet:
 - **A learned body with seeded detail**: `waterfall` (fair to good: the sheet falls whole and sways into a churning,
-  misty foot; faint banding; weak by the test), `fountain` (fair: a bell of falling water, soft, with drops falling from
+  misty foot; weak by the test; its bands are gone since study O), `fountain` (fair: a bell of falling water, soft, with drops falling from
   it into a rippling basin), `splash` (fair: two horns of water and the crater's column, seeded drops and rings; weak by
   the test) and `rain_shaft` (good: learned curtains under the cloud model, seeded streaks; a faint green tinge at the
   foot from the learned renderer).
@@ -388,7 +434,7 @@ By eye, in its video (`fx_water/scene/falls.mp4` in the data root): the waterfal
 sheet whole and swaying with spray falling through it, its foot a broad churning mist over a foaming, rippling pool;
 the rain shafts fill in under the clouds, thicken and thin and lean, the flashes light the whole scene and the bolts
 fork; the rain arrives and the puddles ring. Weak points: no cliff or rock is drawn (the falls come out of the night
-sky); the learned sheet and curtains carry faint horizontal banding; the mist hides most of the seeded pool's rings
+sky); the mist hides most of the seeded pool's rings
 under the falls; the puddles' rings come from their own drops, not from the rain streaks that reach them.
 
 ## 13. What it is not
