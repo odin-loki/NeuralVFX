@@ -1,0 +1,87 @@
+
+## D: start points and learned dynamics
+
+### Chaos horizon (the simulation itself)
+
+Active PSNR against a run of the simulation from a stored start point, by frames after it (30 per second), mean over runs. Perturbations are relative to the velocity RMS.
+
+| effect | case | 1 | 4 | 8 | 15 | 30 | 60 | 120 | 240 |
+|---|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| launch | start+1e-3_same_seed | 71.08 | 67.60 | 65.95 | 64.58 | 62.93 | 60.06 | 55.58 | 50.11 |
+| launch | start+1e-1_same_seed | 46.09 | 40.17 | 37.26 | 34.88 | 32.05 | 28.52 | 25.48 | 23.27 |
+| launch | same_start_other_seed | 37.79 | 31.16 | 23.72 | 17.56 | 13.03 | 10.41 | 9.62 | 10.33 |
+| launch | other_start_same_seed | 10.35 | 10.28 | 10.22 | 10.19 | 10.19 | 10.44 | 11.36 | 13.53 |
+| puffs | start+1e-3_same_seed | 72.68 | 68.54 | 67.43 | 65.79 | 65.02 | 63.98 | 62.78 | 62.44 |
+| puffs | start+1e-1_same_seed | 51.35 | 44.90 | 42.14 | 39.74 | 37.65 | 36.41 | 32.96 | 34.13 |
+| puffs | same_start_other_seed | 49.68 | 24.93 | 21.18 | 17.13 | 13.78 | 12.30 | 11.74 | 13.82 |
+| puffs | other_start_same_seed | 9.52 | 9.64 | 9.78 | 10.11 | 10.85 | 13.21 | 16.35 | 21.74 |
+| ink | start+1e-3_same_seed | 83.80 | 76.18 | 75.65 | 73.33 | 74.61 | 74.09 | 74.23 | 79.08 |
+| ink | start+1e-1_same_seed | 60.09 | 54.36 | 52.04 | 50.37 | 49.67 | 50.34 | 52.02 | 57.86 |
+| ink | same_start_other_seed | 31.02 | 27.73 | 24.94 | 21.40 | 17.75 | 15.14 | 14.91 | 15.63 |
+| ink | other_start_same_seed | 14.00 | 13.97 | 13.96 | 14.01 | 14.30 | 14.79 | 16.93 | 22.04 |
+
+### Training
+
+Stepper loss: stages 1-2 (normalised squared error plus profiles) and stage 3 (plus activity). Renderer PSNR on its training samples (true fields). Detail constants as calibrated.
+
+| effect | runs x frames | minutes of simulation | stepper loss 1-2 | stepper s | stage 3 loss | stage 3 s | renderer dB | contrast | swirl | grow | start points | KB stored |
+|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| launch | 160 x 240 | 21.33 | 0.04987 | 6773 | 0.05152 | 1203 | 31.20 | 1 | 3 | 1 | 8 | 145.7 |
+
+Renderer, detail constants and start points from `d-finish` on the trained steppers; stage 3 from `d-tune`.
+
+### Tracking a held-out run from its true start point
+
+Active PSNR against the true run, mean over held-out runs (other seeds and settings), by frames after the start point. `neural`: the rollout effect through the runtime, started from the true state (coarse and fine) with the run's noise seed. `coarse_sim_detail`: the simulation on the same 32-cell grid with the same detail layer, drawn by the simulation's own renderer. `neural_dynamics_true_renderer`: the neural dynamics drawn by that renderer too (separates dynamics from rendering). `renderer_on_true_fields`: the learned renderer on the true fields (frames 1-30, then their mean).
+
+**launch**
+
+| method | 1 | 4 | 8 | 16 | 30 | 60 | 120 | 240 |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| neural | 22.76 | 18.42 | 15.79 | 14.03 | 13.23 | 12.02 | 11.27 | 10.43 |
+| neural_dynamics_true_renderer | 23.86 | 18.69 | 15.87 | 14.03 | 13.20 | 11.98 | 11.25 | 10.30 |
+| coarse_sim_detail | 24.95 | 17.92 | 14.85 | 12.71 | 11.70 | 10.62 | 10.02 | 10.11 |
+| coarse_sim | 16.66 | 16.32 | 15.73 | 14.65 | 13.72 | 12.22 | 11.40 | 11.15 |
+| frozen | 22.72 | 14.87 | 12.39 | 10.44 | 9.03 | 7.86 | 7.42 | 7.97 |
+| renderer_on_true_fields | 28.58 | 28.60 | 28.68 | 28.83 | 28.87 | 28.77 | 28.77 | 28.77 |
+
+neural - coarse_sim_detail, paired over runs: frame 1: -2.19 [-2.82, -1.56]; frame 8: +0.94 [+0.78, +1.12]; frame 30: +1.53 [+1.09, +2.04]; frame 60: +1.40 [+1.03, +1.74]; frame 240: +0.32 [-0.06, +0.75] (tie);
+
+neural_dynamics_true_renderer - coarse_sim_detail, paired over runs: frame 1: -1.09 [-1.66, -0.59]; frame 8: +1.02 [+0.84, +1.20]; frame 30: +1.50 [+1.05, +2.03]; frame 60: +1.36 [+0.99, +1.71]; frame 240: +0.20 [-0.19, +0.62] (tie);
+
+### Endless runs at held-out settings
+
+The ten held-out settings of study B, a new seed each, 10 s per run (explosions: their 3 s). Distances of each method's frame statistics to a real run of the simulation at that setting; `real_other_seed` is a second real run with another seed, the floor. Lower is better except motion ratio (1 is right) and mean-frame PSNR (higher is closer).
+
+**launch**
+
+| method | spectrum L1 | motion ratio | coverage L1 | emission L1 | mean-frame PSNR |
+|---|---:|---:|---:|---:|---:|
+| real_other_seed | 0.039 | 1.04 | 0.0183 | 0.0006 | 20.81 |
+| neural | 0.122 | 1.19 | 0.0813 | 0.0011 | 16.36 |
+| flipbook_nearest | 0.093 | 1.10 | 0.0603 | 0.0010 | 16.10 |
+| coarse_sim_detail | 0.096 | 1.20 | 0.0378 | 0.0008 | 17.78 |
+| coarse_sim | 0.883 | 0.27 | 0.0213 | 0.0008 | 17.98 |
+
+Spectrum distance, paired over settings: neural - grid_k8 -; neural - flipbook_nearest +0.029 [+0.003, +0.056]; neural - coarse_sim_detail +0.026 [+0.004, +0.049]; neural - real_other_seed +0.083 [+0.058, +0.120].
+
+Mean-frame PSNR (dB), paired: neural - flipbook_nearest +0.26 [-1.28, +1.77] (tie); neural - coarse_sim_detail -1.42 [-2.78, +0.14] (tie); neural - real_other_seed -4.44 [-5.67, -3.14]. Motion error |ln(motion ratio)|, paired: neural - flipbook_nearest +0.032 [-0.020, +0.092] (tie); neural - coarse_sim_detail -0.055 [-0.180, +0.085] (tie); neural - real_other_seed +0.139 [+0.057, +0.255]. Coverage distance, paired: neural - flipbook_nearest +0.0210 [-0.0005, +0.0435] (tie); neural - real_other_seed +0.0630 [+0.0400, +0.0854].
+
+### One minute of play
+
+Statistics of each 10 s window of a 60 s neural run (shards of 6 s from start points, the default) against a real 10 s run at the same setting (two held-out settings): if the effect drifted, the distances would grow window by window.
+
+| effect | setting | window | spectrum L1 | motion ratio | coverage L1 | mean-frame PSNR |
+|---|---:|---:|---:|---:|---:|---:|
+| launch | 0 | 0 | 0.0855 | 1.4195 | 0.0531 | 17.093 |
+| launch | 0 | 1 | 0.0867 | 1.4717 | 0.0893 | 17.095 |
+| launch | 0 | 2 | 0.0792 | 1.5067 | 0.0694 | 17.590 |
+| launch | 0 | 3 | 0.0851 | 1.3429 | 0.0414 | 18.391 |
+| launch | 0 | 4 | 0.0755 | 1.3663 | 0.0646 | 18.257 |
+| launch | 0 | 5 | 0.0794 | 1.4384 | 0.0504 | 19.098 |
+| launch | 1 | 0 | 0.0742 | 1.1359 | 0.1178 | 14.966 |
+| launch | 1 | 1 | 0.1055 | 1.1699 | 0.1145 | 16.524 |
+| launch | 1 | 2 | 0.1051 | 1.1749 | 0.0982 | 16.075 |
+| launch | 1 | 3 | 0.0551 | 1.5217 | 0.0505 | 18.186 |
+| launch | 1 | 4 | 0.0942 | 1.2530 | 0.1369 | 15.135 |
+| launch | 1 | 5 | 0.0640 | 1.2115 | 0.1095 | 17.228 |
