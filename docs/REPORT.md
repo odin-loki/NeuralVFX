@@ -2539,6 +2539,39 @@ Means: the orb's mean-frame PSNR 31.02 dB (the floor 36.38), spectrum 0.253 (`s1
 
 **The orb's candidates for validation**: `mt4_s16` (SHA-256 `77ec5707...`) and `s16` (`003de375...`), as committed.
 
+The vortex's and magic's probes (committed with their candidates, after the orb's and before their validation;
+magic's in [m2_probe3_compare.csv](../results/experiments/ordered/m2_probe3_compare.csv)):
+
+| effect | candidate | tracking at 1 s (dB) | spectrum distance | \|ln motion ratio\| | coverage | emission | mean-frame PSNR (dB) | the rule's reading |
+|---|---|---|---|---|---|---|---|---|
+| vortex | `s16` | +0.12 [-0.04, +0.24] | ~~+0.079 [+0.056, +0.106]~~ | +0.009 [-0.002, +0.021] | ~~+0.0001~~ | ~~+0.000002~~ | ~~-0.04 [-0.06, -0.01]~~ | worse |
+| vortex | `mt4` | **+0.23 [+0.09, +0.38]** | ~~+0.009 [+0.002, +0.017]~~ | **-0.061 [-0.099, -0.017]** | ~~+0.0063 [+0.0039, +0.0084]~~ | ~~+0.0003 [+0.0001, +0.0004]~~ | ~~-1.33 [-1.60, -1.03]~~ | worse |
+| vortex | `mt4_s16` | **+0.36 [+0.18, +0.53]** | ~~+0.099 [+0.071, +0.129]~~ | **-0.047 [-0.080, -0.012]** | ~~+0.0065 [+0.0040, +0.0087]~~ | ~~+0.0003 [+0.0001, +0.0005]~~ | ~~-1.36 [-1.64, -1.05]~~ | worse |
+| vortex | `mt8` | **+0.36 [+0.22, +0.51]** | ~~+0.013 [+0.003, +0.024]~~ | -0.033 [-0.065, +0.000] | ~~+0.0091 [+0.0040, +0.0130]~~ | ~~+0.0004 [+0.0002, +0.0006]~~ | ~~-1.81 [-2.36, -1.22]~~ | worse |
+| vortex | `mt8_s16` | **+0.48 [+0.31, +0.66]** | ~~+0.102 [+0.078, +0.127]~~ | -0.016 [-0.047, +0.015] | ~~+0.0094 [+0.0042, +0.0133]~~ | ~~+0.0004 [+0.0002, +0.0006]~~ | ~~-1.84 [-2.39, -1.24]~~ | worse |
+| magic | `mt4` | ~~-0.23 [-0.29, -0.17]~~ | +0.001 [-0.005, +0.006] | ~~+0.007 [+0.002, +0.013]~~ | **-0.0009 [-0.0015, -0.0003]** | **-0.0002 [-0.0003, -0.0002]** | **+0.79 [+0.35, +1.29]** | better; tracking outside |
+| magic | `mt8` | ~~-0.35 [-0.46, -0.25]~~ | **-0.012 [-0.017, -0.007]** | +0.002 [-0.003, +0.007] | -0.0002 [-0.0006, +0.0001] | **-0.0002 [-0.0003, -0.0001]** | **+0.73 [+0.27, +1.26]** | better; tracking outside |
+
+Means: the vortex's mean-frame PSNR 31.28 dB (`mt4` 29.94; the floor 36.07), coverage 0.0183 (`mt4` 0.0246; the floor
+0.0102), motion 0.86 (`mt4` 0.94; the floor 0.98); magic's mean-frame PSNR 30.52 dB (`mt4` 31.31; the floor 39.44),
+tracking at 1 s 18.31 dB (`mt4` 18.08).
+
+- **The fine-tune makes the vortex's average picture clearly worse** (-1.3 dB at weight 4, -1.8 at 8) and its coverage
+  error larger, while it tracks a run from its true state better (+0.2 to +0.5 dB at 1 s) and moves more like the real
+  one. The vortex's v3 was trained with windows that start from an empty grid so it could regrow its column (§12.1);
+  the ensemble-mean stage, whose windows start from true states, may undo some of that, which is where its picture
+  differs. The swirl at 16 pixels hurts its detail (its swirl is 1 pixel a frame, twice steam's).
+- **Magic shows the trade the loss makes**: its average picture is 0.7 to 0.8 dB closer to the real one, its coverage
+  and light closer, but it follows a run from its true state 0.2 to 0.35 dB worse at 1 s. The ensemble-mean loss fits
+  where the effect goes on average from a start, not a single run; magic, whose look after a second is decided by its
+  seed (§6.10), has a predictable mean that the loss reaches and a single run it then follows less closely.
+- Weights by the procedure: the vortex's `mtW_s16` both have two measures outside (coverage, emission), so the larger
+  mean-frame gain (the smaller loss): **W = 4**; magic's `mtW` both have one (tracking), so the larger mean-frame gain:
+  **W = 4**.
+
+**Candidates for validation**: the vortex `mt4_s16` (SHA-256 `269630fa...`) and `s16` (`9fd900d0...`), as committed
+(both clearly worse here); magic `mt4` (`0d35e089...`).
+
 ## 15. Study N: a small 3D demo
 
 Status: **done** (15 October 2026). The full write-up is [STUDY_3D.md](STUDY_3D.md); this is its summary. It is stage 1
