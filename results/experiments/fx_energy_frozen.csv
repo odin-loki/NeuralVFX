@@ -2,11 +2,13 @@ kind,name,file,bytes,sha256,source
 rollout_effect,jet,fx_energy/models/d/jet.nvfx,83719,2b2707401acf8eca154ab5c745e70d5d6ba35a2a92a7fe3a2e9ee35a1a464a2f,study D's recipe (docs/EFFECTS_ENERGY.md): d-train --stages12 1 then d-tune then d-finish
 rollout_effect,orb,fx_energy/models/d/orb.nvfx,83719,9395caad14be5f3e45319a26ecdb867c6037ae15473b17be9766d2df2acdc5e9,study D's recipe (docs/EFFECTS_ENERGY.md): d-train --stages12 1 then d-tune then d-finish
 rollout_effect,vortex,fx_energy/models/d/vortex.nvfx,83719,f5b4be3690fe0107da6747af6917eee8aadf98323bb2edff7331ad3afb3f348f,study D's recipe (docs/EFFECTS_ENERGY.md): d-train --stages12 1 then d-tune then d-finish (stages 1-2 restarted once after a container restart)
-firewhirl_keyframe,frame_024,nvfx_scene_script --keyframes (examples/scenes/firewhirl.nvfxs),1103798,683cad5cffe00c3ed7691fbb91190c174fd4a6209f173c0932d2ed0dbb339ae5,
-firewhirl_keyframe,frame_066,nvfx_scene_script --keyframes (examples/scenes/firewhirl.nvfxs),1108675,1c7567148146ac92fa0837b54bab0dc8f632e6921003dfaecbe2c42e0cd38d01,
-firewhirl_keyframe,frame_102,nvfx_scene_script --keyframes (examples/scenes/firewhirl.nvfxs),1212139,bc5169dcb40e4411477ef7291fb46b095d3be3b2ab53c21ec1928af8afd9bacd,
-firewhirl_keyframe,frame_138,nvfx_scene_script --keyframes (examples/scenes/firewhirl.nvfxs),1238797,a84b115ad31a85cde957b2f8e1b9967bf1e24d1e3ae7c2d7fd511e0d9aec1a7f,
-firewhirl_keyframe,frame_168,nvfx_scene_script --keyframes (examples/scenes/firewhirl.nvfxs),1308906,cb15c00bbbbc099404c010d4c15d9c50646d3a44859be5d45c49364d15a1eaee,
-firewhirl_keyframe,frame_204,nvfx_scene_script --keyframes (examples/scenes/firewhirl.nvfxs),1280200,6bef470075f5011ebdcf5d7c6076e8728447565635bf62acc194900185274d21,
-firewhirl_keyframe,frame_240,nvfx_scene_script --keyframes (examples/scenes/firewhirl.nvfxs),1292709,7020cf02fd96cb7ab18b8178a9b568cc7cd2c46460424a2587d112bf493587a4,
-firewhirl_keyframe,frame_282,nvfx_scene_script --keyframes (examples/scenes/firewhirl.nvfxs),1147665,b933a1e418f827dd25088d28eec803deceb36ad9821ff61829ddf4aafa7852e5,
+rollout_effect,orb_v3,l_swirl/models/v3/orb.nvfx,83719,1d4cab793cafbfec08db4d3206de684c917f2af3abc46d040df6537ad630782d,study L (docs/REPORT.md §12.1): replaces orb after its test; the fire whirl keyframes below are drawn with it
+rollout_effect,vortex_v3,l_swirl/models/v3/vortex.nvfx,83719,1102b8cffdf74b739b0725ed6c10dbe31816ad4c07222fd8cd57dbf7499bf240,study L (docs/REPORT.md §12.1): replaces vortex after its test; the fire whirl keyframes below are drawn with it
+firewhirl_keyframe,frame_024,nvfx_scene_script --keyframes (examples/scenes/firewhirl.nvfxs),1101347,bdf4b80d567336f21a628ba2dfe89aaa4e56011a7ef7653dc0c7f598f9b4b091,
+firewhirl_keyframe,frame_066,nvfx_scene_script --keyframes (examples/scenes/firewhirl.nvfxs),1108381,7c3d4d5a765b700e21ad51fa13671f729d0a21d431b0d6b93cc1fa6618be99f5,
+firewhirl_keyframe,frame_102,nvfx_scene_script --keyframes (examples/scenes/firewhirl.nvfxs),1215398,dca6eef7140151b70cd127c4fd24edc43310dc4a17825e9d9bbbbe3ae0880e14,
+firewhirl_keyframe,frame_138,nvfx_scene_script --keyframes (examples/scenes/firewhirl.nvfxs),1241142,a6c6a37306cd78523f6992637cb2061581f5fe50cb1f090b559a2efb3a5b9979,
+firewhirl_keyframe,frame_168,nvfx_scene_script --keyframes (examples/scenes/firewhirl.nvfxs),1304649,9e504ad0eb7ba43fe9b84426aeb9cd0f0443cb49d02b2b4b7d8dfae07ee52842,
+firewhirl_keyframe,frame_204,nvfx_scene_script --keyframes (examples/scenes/firewhirl.nvfxs),1286054,ac7057bf32ad83233f3e6d8fb32e89ba4cedddd732da4e22e85685b6ab33b0f3,
+firewhirl_keyframe,frame_240,nvfx_scene_script --keyframes (examples/scenes/firewhirl.nvfxs),1297442,32d0dcb0f6187dd2f35d2ddfb3b6fcbb0c27c5fbe01b7166d78b192974125de7,
+firewhirl_keyframe,frame_282,nvfx_scene_script --keyframes (examples/scenes/firewhirl.nvfxs),1155885,3ec2235e04b6d2dadcc5e46838ef21a5764c7234f11fc3617d7788eaea18a7cf,
