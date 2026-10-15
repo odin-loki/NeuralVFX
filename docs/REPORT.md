@@ -3262,6 +3262,28 @@ lift-off's keyframes 078 to 282 (`fx_flow_frozen.csv`; frame 030, before the ign
 threads) and the library's `rocket_launch` (`frozen.csv`; the same on 2 and 3 threads). Re-rendered: `scene_liftoff`,
 `effect_launch`. The scene's three blast tiles cost two more 256-pixel tiles' steps a frame (§16.6 has the cost).
 
+### 16.4 The rocket thruster's exhaust: a cold field on its tail (a library entry)
+
+**The flaw** ([LIBRARY.md](LIBRARY.md)): `rocket_thruster`'s exhaust (the jet model, recoloured blue) curls up at its
+end as a flame does instead of streaming. **The cause:** the jet model is a flamethrower's burning jet: its gas slows
+along its length and its hot end rises on its own heat (the simulator's does too; the model card says "its end curls
+up"). Watching 34 s of the entry also showed a second fault: at times a shard's half-second blend showed two jets, one
+aimed down, because the start point nearest the entry's controls (0.9, 0.4, 0.45) was start point 2, stored at aim 0.04
+(18 degrees down), and a new shard begins from it.
+
+**Tried, by eye** (34 s of each, frames every 4 s and at the shard changes): a lower aim (0.25) lowers the jet but its
+end still hooks up; a `wind` field along the exhaust tears the flame apart and lights a patch of the tile (as COMPOSE.md
+§5 warns, strong pushes break a learned flame); a `ceiling` just above the nozzle flattens the tail a little; **a `cold`
+field over the tail** (strength 0.12 of the heat a frame within 160 pixels of a point 360 pixels along the exhaust)
+takes off the heat that lifts it: the exhaust streams and fades. With aim 0.45 and turbulence 0.5, start point 0
+(stored at aim 0.46) is the nearest (squared distance 0.218 against 0.264 and 0.298 for the next two), and no blend
+shows a second jet. **The fix** is those three changes in the entry: in the frames below (before, top; after, bottom, at
+4, 8.3, 12, 16.3, 20, 24.3, 28 and 32.3 s) the old tail hooks up in most of them and two jets show at 28 s; the new
+exhaust streams to the right and fades in all of them. It is a look and a force, not a model change; its keyframe is
+not among the frozen ones. Re-rendered: `library_fire`.
+
+![rocket_thruster over 34 s: before study O (top), after (bottom)](figures/o_thruster.png)
+
 ### 16.3 The mushroom cloud (and the splash): the plan, committed before any of its numbers
 
 **The flaw.** The mushroom cloud is weak by its rule ([EFFECTS_BLAZE.md](EFFECTS_BLAZE.md) §4): from 1 s it follows a
