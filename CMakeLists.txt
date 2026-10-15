@@ -431,10 +431,10 @@ if(NEURALFX_BUILD_TESTS)
       set_tests_properties(neuralfx.SceneScriptChecks.${scene} PROPERTIES LABELS neuralfx)
     endforeach()
     # The effect library (docs/LIBRARY.md). Without data: every entry of the catalogue parsed and checked, and the
-    # procedural ones played with zero allocations; the C example's checks of the API. With the eleven learned effects
+    # procedural ones played with zero allocations; the C example's checks of the API. With the fourteen learned effects
     # in NEURALFX_MODELS_LIBRARY (outside git; skipped without them): every entry played with zero allocations, and the
     # keyframes of a handful of entries against their SHA-256 in results/library/frozen.csv.
-    set(NEURALFX_MODELS_LIBRARY "${_nvfx_data}/library/models" CACHE PATH "The library's learned effects: fire, smoke, explosion (v2), steam, magic, fog, dust, cloud, jet, orb, vortex .nvfx")
+    set(NEURALFX_MODELS_LIBRARY "${_nvfx_data}/library/models" CACHE PATH "The library's learned effects: fire, smoke, explosion (v2), steam, magic, fog, dust, cloud, jet, orb, vortex, launch, puffs, ink .nvfx")
     add_test(NAME neuralfx.LibraryCatalogueCheck COMMAND nvfx_gallery --library ${CMAKE_CURRENT_SOURCE_DIR}/library --check --threads 2)
     set_tests_properties(neuralfx.LibraryCatalogueCheck PROPERTIES LABELS neuralfx TIMEOUT 600)
     add_test(NAME neuralfx.LibraryHostExample COMMAND nvfx_library_host --self-test ${CMAKE_CURRENT_SOURCE_DIR}/library)
@@ -478,7 +478,7 @@ if(NEURALFX_BUILD_TESTS)
                      --keyframes ${CMAKE_CURRENT_BINARY_DIR}/fireball_int8_keyframes --no-video --threads 2 --precision int8 --isa avx512
                      --verify ${CMAKE_CURRENT_SOURCE_DIR}/results/experiments/k_int8_frozen.csv)
     set_tests_properties(neuralfx.ScriptedFireballInt8Frozen PROPERTIES LABELS "neuralfx;data" SKIP_RETURN_CODE 77 TIMEOUT 1200)
-    # Effect packs (docs/INTEGRATION.md §5), with the library's eleven models (outside git; skipped without them): the
+    # Effect packs (docs/INTEGRATION.md §5), with the library's fourteen models (outside git; skipped without them): the
     # full library packed by the tool, checked as an engine's load checks it, and the gallery's keyframes of the frozen
     # entries played from the pack against their SHA-256 in results/library/frozen.csv (the folder's frames).
     add_test(NAME neuralfx.PackFullLibrary
