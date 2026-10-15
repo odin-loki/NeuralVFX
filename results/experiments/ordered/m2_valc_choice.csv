@@ -1,0 +1,9 @@
+effect,model,targets,better,none_worse,meets_rule,mean_frame_gain_db,spectrum_change,coverage_margin,emission_margin,outside_margin,strict_worse,sha256
+orb,mt4_s16,mean_frame;spectrum_l1,0,0,0,-0.9595,-0.06288,0.000351,0.000349,track_1s;coverage_l1;emission_l1,track_1s;abs_ln_motion_ratio,77ec57077fce62c3cc5b69ae5a1a04b1cacd0ba5c08e7adc774cc25b74e239b4
+orb,s16,mean_frame;spectrum_l1,0,0,0,-0.0078,-0.06642,0.000351,0.000349,abs_ln_motion_ratio,none,003de375be62ae21e1b183477ded0f3ac6e6aff42e520ba4aff816c8841b2b12
+orb,chosen,,,,,,,,,,,none
+magic,mt4,mean_frame,1,0,0,0.9628,0.00371,0.000422,0.000101,track_1s,track_1s;abs_ln_motion_ratio,0d35e08933451cb7c81a3b01a07bd2238c459067a4c098de8a7bc2b2e884a381
+magic,chosen,,,,,,,,,,,none
+vortex,mt4_s16,mean_frame;spectrum_l1,0,0,0,-1.3784,0.08897,0.001777,0.000100,coverage_l1;emission_l1,spectrum_l1;coverage_l1;emission_l1;mean_frame_psnr,269630fa82b42d1c184ea28a2fcce6b99eebb644ad23d4e326f490f2974c6f21
+vortex,s16,mean_frame;spectrum_l1,0,1,0,-0.0211,0.07282,0.001777,0.000100,none,spectrum_l1;coverage_l1;emission_l1;mean_frame_psnr,9fd900d04190666fb64e82b032e8bdc0da41bd8c1c673039b5351aec07362b1a
+vortex,chosen,,,,,,,,,,,none
