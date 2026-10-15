@@ -1,0 +1,2 @@
+kind,name,file,bytes,sha256,source
+rollout_effect,launch,fx_flow/models/d/launch.nvfx,149287,9d8f5fb639cbdb682e8bf764873a53bdc734220ffc78705a3f24827768c5ef81,study D's recipe (docs/EFFECTS_FLOW.md): d-train --stages12 1 then d-tune then d-finish
