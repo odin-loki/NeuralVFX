@@ -1,0 +1,70 @@
+# A grass fire on a prairie at night, and a blast on the horizon, written as a script (docs/COMPOSE.md §4) to show the
+# fire effects (docs/EFFECTS_BLAZE.md) together:
+#
+#   nvfx_scene_script --script examples/scenes/prairie.nvfxs --models DIR --out prairie.mp4
+#
+# DIR holds wildfire.nvfx, coals.nvfx and mushroom.nvfx (docs/EFFECTS_BLAZE.md).
+#
+# Night on a prairie. A grass fire has burnt through the left of the field, which lies as a bed of glowing coals with a
+# few small flames; its front still burns on the right, leaning in a light wind. Far off on the horizon behind the
+# burnt ground, a huge blast: its flash lights the plain, and a mushroom cloud climbs, its cap rolling over and cooling
+# from orange to grey-brown smoke. Its shock wave arrives two seconds later: the flames lie down before it and rise
+# again, the coals flare and throw up sparks, and ash begins to fall.
+
+scene      size 1280 x 720, fps 30, length 8 s, ground 560
+bus        at (-128, -400), size 1536 x 1180, cell 8
+particles  capacity 8000, flow 0.9
+keyframes  0.8, 2.1, 2.6, 3.4, 4.1, 4.6, 5.8, 7.2
+
+effect wildfire = "wildfire.nvfx"
+effect coals    = "coals.nvfx"
+effect mushroom = "mushroom.nvfx"
+
+# The mushroom drawn as the fireball's explosions are: hot gas that glows, soot lit by the scene.
+look cloud = shader, heat_scale 1.6, emission 1.6, emission_power 3, soot_density 3, relief 4, soot_albedo 0.3, sky 0.18,
+             shadow 0.3, scene_light 0.6, tint (1, 0.93, 0.86)
+
+let blast = t - boom                                                   # since the blast (negative before it)
+let flash = if(blast >= 0, exp(-blast / 0.2), 0)
+let wave  = if(t >= hit, smooth((t - hit) / 0.15) * exp(-(t - hit) / 0.9), 0)   # the shock wave passing
+let lean  = 0.6 + 0.35 * wave                                          # the wind, and the blast's wind on top
+
+# The mushroom cloud on the horizon, behind the burnt ground, waiting for the blast; it fades a little at its end.
+module cloud = mushroom, size 128, width 600, at (360, ground + 6), sink 0.02, feather 0.12, look cloud, start 13,
+               seed 91, waiting, controls (0.8, 0.6, 0.3), opacity 1 - 0.6 * smooth((cloud.age - 4.6) / 1.4)
+# The burnt ground: three tiles of the coals model, overlapping.
+module c1 = coals, size 128, width 480, at (120, ground), sink 0.02, feather 0.18, start 0, seed 21,
+            controls (0.55, 0.6, 0.4), intensity 0.55 + 0.45 * wave, wind lean
+module c2 = coals, size 128, width 480, at (340, ground), sink 0.02, feather 0.18, start 0, seed 22,
+            controls (0.45, 0.6, 0.4), intensity 0.45 + 0.45 * wave, wind lean
+module c3 = coals, size 128, width 480, at (560, ground), sink 0.02, feather 0.18, start 0, seed 23,
+            controls (0.6, 0.6, 0.4), intensity 0.6 + 0.4 * wave, wind lean
+# The fire's front on the right: four tiles of the wildfire model, overlapping where their fronts taper.
+module f1 = wildfire, size 128, width 400, at (720, ground), sink 0.04, feather 0.22, start 0, seed 11,
+            controls (0.5, 0.6, 0.5), intensity 0.5 + 0.25 * wave, wind lean
+module f2 = wildfire, size 128, width 400, at (890, ground), sink 0.04, feather 0.22, start 0, seed 12,
+            controls (0.6, 0.6, 0.55), intensity 0.6 + 0.25 * wave, wind lean
+module f3 = wildfire, size 128, width 400, at (1060, ground), sink 0.04, feather 0.22, start 0, seed 13,
+            controls (0.55, 0.6, 0.5), intensity 0.55 + 0.25 * wave, wind lean
+module f4 = wildfire, size 128, width 400, at (1230, ground), sink 0.04, feather 0.22, start 0, seed 14,
+            controls (0.6, 0.6, 0.55), intensity 0.6 + 0.25 * wave, wind lean
+
+light   gain 0.16, flash (1.1 * flash, 1.0 * flash, 0.85 * flash)
+frame   exposure 1.2 * (1 + 0.8 * flash), fade smooth(t / 0.4) * smooth((length - t) / 0.6), haze 1, bloom 1,
+        bloom_threshold 1
+camera  x (rand - 0.5) * 12 * wave, y (rand - 0.5) * 12 * wave
+# The fireball's glow on the plain, fading as it rises and cools.
+field afterglow = lamp, at (360, 440), radius 520, strength 0.9 * exp(-max(0, blast) / 1.5) * smooth(blast / 0.05),
+                  colour (1, 0.6, 0.3)
+
+emit embers, on f1, f2, f3, f4, tries 2, chance 0.5, spread 120
+emit ash, in (0, 0), size 1280 x 640, density 1.2 * smooth((t - hit - 0.3) / 1.5), wind (60, 0), from 4.2
+
+# The blast on the horizon.
+at 2.0 as boom:
+  wake cloud
+# Its shock wave arrives: the flames lie down, the coals flare and throw up sparks.
+at 4.0 as hit:
+  shock at (360, ground - 40), speed 1400, decay 0.5, amp 5, width 30
+  burst at (200, ground - 6), radius 120, embers 60, sparks 20, speed 260
+  burst at (480, ground - 6), radius 120, embers 60, sparks 20, speed 260

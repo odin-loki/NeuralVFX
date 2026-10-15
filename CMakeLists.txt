@@ -460,6 +460,16 @@ if(NEURALFX_BUILD_TESTS)
     set_tests_properties(neuralfx.ScriptedFireWhirlFrozen PROPERTIES LABELS "neuralfx;data" SKIP_RETURN_CODE 77 TIMEOUT 1200)
     add_test(NAME neuralfx.SceneScriptChecks.firewhirl COMMAND nvfx_scene_script --script ${CMAKE_CURRENT_SOURCE_DIR}/examples/scenes/firewhirl.nvfxs --check)
     set_tests_properties(neuralfx.SceneScriptChecks.firewhirl PROPERTIES LABELS neuralfx)
+    # The prairie (docs/EFFECTS_BLAZE.md): wildfire, coals and mushroom, all in NEURALFX_MODELS_BLAZE (outside git); its
+    # keyframes have the SHA-256 recorded in results/experiments/fx_blaze_frozen.csv.
+    set(NEURALFX_MODELS_BLAZE "${_nvfx_data}/fx_blaze/models/scene" CACHE PATH "wildfire.nvfx, coals.nvfx and mushroom.nvfx")
+    add_test(NAME neuralfx.ScriptedPrairieFrozen
+             COMMAND nvfx_scene_script --script ${CMAKE_CURRENT_SOURCE_DIR}/examples/scenes/prairie.nvfxs --models ${NEURALFX_MODELS_BLAZE}
+                     --keyframes ${CMAKE_CURRENT_BINARY_DIR}/prairie_script_keyframes --no-video --threads 2 --precision float
+                     --verify ${CMAKE_CURRENT_SOURCE_DIR}/results/experiments/fx_blaze_frozen.csv)
+    set_tests_properties(neuralfx.ScriptedPrairieFrozen PROPERTIES LABELS "neuralfx;data" SKIP_RETURN_CODE 77 TIMEOUT 1200)
+    add_test(NAME neuralfx.SceneScriptChecks.prairie COMMAND nvfx_scene_script --script ${CMAKE_CURRENT_SOURCE_DIR}/examples/scenes/prairie.nvfxs --check)
+    set_tests_properties(neuralfx.SceneScriptChecks.prairie PROPERTIES LABELS neuralfx)
     # Study K (docs/REPORT.md §13): the fireball's keyframes with its modules at int8 on the AVX-512 build (the build int8
     # takes where the CPU has VNNI; without VNNI it computes the same integer sums, so the same frames), against their
     # SHA-256 in results/experiments/k_int8_frozen.csv. Skipped without AVX-512 or without the study D effects.
