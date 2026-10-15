@@ -80,8 +80,29 @@ Work that runs in this container meanwhile, in 2D and in small 3D, measured as e
   - water and volcanic: a geyser (#88), a pyroclastic flow (#110).
 - **A weather director in 2D**, ahead of the 3D weather system:
   - regimes: clear, overcast, rain, storm, snow, fog and dust storm;
-  - each regime a scene that blends the learned effects with the procedural weather;
-  - moving between regimes deterministically from a seed and a target.
+  - a small weather state drives the layers that exist:
+    - the state: cloud cover, rain and snow rates, mean wind and gustiness, visibility, temperature, lightning rate
+      and dust load;
+    - the layers: rain, snow and hail emitters, the fog and cloud models, the storm entries, the wind every module
+      feels, the sky's light;
+  - moving between regimes deterministically from a seed and a target, in the order real weather keeps:
+    - clouds build before rain;
+    - the gust front arrives before the downpour;
+    - lightning comes with the heaviest rain;
+  - weather noise: gusts and rain cells as seeded random processes with real time scales;
+  - established relations instead of guesses:
+    - fog visibility from Koschmieder (3.912 / extinction);
+    - rain drop sizes from Marshall-Palmer (N0 = 8000 m^-3 mm^-1, slope 4.1 R^-0.21 mm^-1);
+    - drop fall speeds from Atlas and colleagues (9.65 - 10.3 exp(-0.6 D) m/s), so streak lengths follow the rate;
+    - wind from the Beaufort scale's descriptions (what leaves, smoke and dust do at each force);
+  - driven from a script or, in an engine, through the scene inputs that exist (no new C calls);
+  - checked by tests:
+    - determinism;
+    - no jumps in the state;
+    - each regime reaching its targets;
+    - the relations holding;
+    - the scene's random numbers kept.
+  - shown in a 40 s scene that clears, clouds over, rains, storms and clears again.
 - **Small 3D:**
   - a second 3D effect: smoke, validated this time, with bounds calibrated on several teacher runs;
   - 3D fire and smoke coupled.
