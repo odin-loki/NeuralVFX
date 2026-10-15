@@ -37,6 +37,12 @@ C++23, no third-party runtime dependencies, a C API for engines, no Python.
   lightning, optics, designed effects), each simulated as accurately as the PC allows and checked against
   measurements where a real counterpart exists, a full weather system with regimes and transitions, 3D scenes and the
   library rebuilt in 3D.
+- **3D demo (study N):** [docs/STUDY_3D.md](docs/STUDY_3D.md): a 3D fire from our own 3D solver (not a validated fire
+  code), learned as a 16 x 24 x 16 state that drives seeded 64 x 96 x 64 detail, drawn by a physically based volume
+  renderer and played through a volume C API (`nvfx_volume.h`). On its held-out test it follows a real run better than
+  the simulation run on the coarse grid with the same detail (picture from four cameras at 1 s: +2.20 dB [+1.09, +3.12])
+  but looks worse when played on (motion and coverage), holding the first frame still beats it after a second, and it
+  runs away in a strong wind. About 70 ms a step on one busy core (provisional). Videos: [videos/README.md](videos/README.md) §9.
 - **Engine integration:** [docs/ENGINES.md](docs/ENGINES.md) (C API for effects and scenes, threading, Unreal, Unity,
   the Godot 4 plugin, lit sprites for an engine's own lighting: §11).
 - **Putting it in your engine:** [docs/INTEGRATION.md](docs/INTEGRATION.md): which API when, the frame loop and threads,

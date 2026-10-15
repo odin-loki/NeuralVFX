@@ -2295,3 +2295,59 @@ nvfx_ordered val --effect fire --split probe|val --current v2/models/fire.nvfx -
 nvfx_ordered test --effect fire --current v2/models/fire.nvfx --cand mt4_s16=mt4_s16.nvfx --frozen results/experiments/ordered/m_frozen.csv
 nvfx_ordered cost --effect fire --current v2/models/fire.nvfx --cand v3=m_ordered/models/v3/fire.nvfx --reps 15 --precision float [--ftz]
 ```
+
+## 15. Study N: a small 3D demo
+
+Status: **done** (15 October 2026). The full write-up is [STUDY_3D.md](STUDY_3D.md); this is its summary. It is stage 1
+of the 3D plan ([TODO.md](../TODO.md)): a small, honestly measured 3D learned effect on this machine's CPU before the
+PC's big one.
+
+**What was built** (C++23, CPU only, tested): our own 3D fire simulator (`src/sim3d`; a stable-fluids solver with
+combustion expansion, curl noise and vorticity confinement, the same fields on any thread count; tuned by eye, **not a
+validated fire code**, and it puffs at 0.5 to 0.65 Hz where a fire this size puffs near 2.7 Hz); a volume renderer
+(`src/render3d`; Planck emission through the CIE 1931 colour matching functions, soot absorption and single scattering,
+one fixed exposure, any camera); a 3D rollout model (`src/core/rollout3d.cpp`: a 16 x 24 x 16 state of velocity, heat,
+soot and memory moved by 3 x 3 x 3 convolutions with FiLM, a 3D projection and advection, driving seeded 64 x 96 x 64
+detail; 14,218 weights, a 268 KB file with 8 start points) and its trainer (hand-written gradients checked against
+finite differences, resumable to the bit); the volume C API `nvfx_volume.h` in libnvfx (`NVFX_VERSION` 6: fields as 3D
+textures, pictures for any camera, no allocation per frame, the same on any thread count; [ENGINES.md](ENGINES.md) §12);
+and `nvfx_3d`, the study's tool. The grid, 64 x 96 x 64, came from a pilot (STUDY_3D.md §2.1).
+
+**The rule and the test** (written before validation; the test ran once on the frozen file; paired bootstrap, 95%).
+Validation chose candidate A (stages 1 and 2) over B (with stage 3's activity loss) on tracking at 1 s, +0.29 dB
+[+0.01, +0.58], though B plays much more like the simulation; the rule's choice stands. On the test, against the
+simulator run on the coarse grid with the same seeded detail (study D0's baseline), at 6 held-out settings and with
+fresh seeds:
+
+| | learned | coarse simulation + detail | difference |
+|---|---:|---:|---|
+| tracking, temperature at 1 s (dB) | 19.31 | 18.23 | +1.08 [+0.74, +1.39] |
+| tracking, picture from 4 cameras at 1 s (dB) | 16.98 | 14.78 | +2.20 [+1.09, +3.12] |
+| endless, 3D spectrum distance | 0.451 | 0.769 | -0.318 [-0.477, -0.053] (better) |
+| endless, \|ln motion ratio\| | 0.409 | 0.181 | +0.229 [+0.063, +0.402] (worse) |
+| endless, coverage distance | 0.0089 | 0.0040 | +0.0049 [+0.0006, +0.0116] (worse) |
+| endless, emission distance | 0.0101 | 0.0159 | -0.0059 [-0.0128, +0.0037] (tie) |
+| endless, mean picture PSNR (dB) | 27.18 | 23.91 | +3.27 [+0.54, +5.20] (better) |
+
+**The verdict: the learned 3D fire follows real runs better than running the cheap simulation, but looks worse in how
+much it moves and how much it covers**, so it does not beat the cheap simulation outright. Holding the first frame
+beats it after a second (temperature at 1 s by 0.78 dB [0.29, 1.27]), and other real runs (the floor) are far closer to
+the real runs than either method.
+
+**Cost** (provisional, one busy core at a load of 8): a step about 70 ms, three quarters of it the 64 x 96 x 64 detail
+layer and 15 ms the network's coarse step; a picture 50 ms at 256 x 256 and 190 ms at 512 x 512; a volume 31 MB. The
+full simulation's frame is 162 ms; the baseline costs about as much as the learned model. Threads could not be measured
+on the saturated machine.
+
+**A failure the test did not see.** In a strong wind (0.05, below every test setting's) the chosen model runs away: a
+second fire grows at the box's upwind edge and fills the box within a few seconds, until the next shard clears it. The
+most likely cause is the coarse advection, which samples clamped to the grid, so an inflow edge keeps and feeds the heat
+that reaches it (STUDY_3D.md §11). The wind video shows it.
+
+**Videos** ([videos/README.md](../videos/README.md) §9): the fire walked around, real against learned, and the wind
+swept live, runaway included (and smoke walked around, a demo trained but not tested).
+
+**What it means** (STUDY_3D.md §13): the recipe works in 3D as machinery and follows a fire better than the cheap
+simulation; for the PC, choose on how a model plays as well as how it tracks, bring ambient air in at open edges, train
+on long rollouts at the controls' extremes, spend the cost on the detail layer (SIMD, sparse bricks) and the GPU for
+pictures, use a finer state or a smoother lock, and start from a validated teacher.

@@ -594,8 +594,10 @@ point. Going back in time or far ahead restarts the shard's rollout (a start run
 same to the bit on any number (tested), and nothing is allocated after creation (`nvfx_alloc_test`). A volume needs
 31 MB (two shards' fine fields, one shared set of step buffers, the renderer's prepared volume; `nvfx_volume_scratch_bytes`);
 the effect file is 268 KB (14,218 weights at 16 bits, 8 start states at 8 bits). `examples/volume_host.c` is the whole
-loop in plain C. The cost per frame is in STUDY_3D.md §8 (provisional): a step is tens of milliseconds, so a volume suits
-one hero effect updated at 30 Hz, or baking.
+loop in plain C. The cost per frame is in STUDY_3D.md §8 (provisional): about 70 ms a step and 50 ms a 256 x 256 picture on one
+busy core, so a volume suits one hero effect, or baking; an engine draws the textures on its GPU.
 
 **What it is not.** No int8 path, no SIMD beyond an AVX2 convolution, no scenes, library, manager or Godot node for
-volumes yet; one trained effect. Its teacher is our own 3D solver, not a validated fire code.
+volumes yet; one trained effect. Its teacher is our own 3D solver, not a validated fire code. The trained fire runs
+away in a strong wind (a wind control of 0.05: a second fire grows at the box's upwind edge until the next shard;
+STUDY_3D.md §11); the test's settings, where it was measured, have winds of 0.25 to 0.8.

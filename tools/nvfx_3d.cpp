@@ -1073,6 +1073,16 @@ int compare(const Args& a) {
     stat("coverage distance", [](const Endless& e) { return e.coverage; }, false, 4);
     stat("emission distance", [](const Endless& e) { return e.emission; }, false, 4);
     stat("mean picture PSNR (dB)", [](const Endless& e) { return e.mean_psnr; }, true, 2);
+    // each setting's statistics (context for the pooled means above; nothing here is judged)
+    both("\nPer setting (" + A + " / " + B + "):\n");
+    both("| setting (intensity, wind, turbulence) | motion ratio | coverage distance | emission distance | 3D spectrum distance | mean picture PSNR (dB) |");
+    both("|---|---|---|---|---|---|");
+    for (std::size_t i = 0; i < ea.size(); ++i) {
+      const auto& c = sets[i];
+      both(std::format("| {:.2f}, {:.2f}, {:.2f} | {:.2f} / {:.2f} | {:.4f} / {:.4f} | {:.4f} / {:.4f} | {:.3f} / {:.3f} | {:.2f} / {:.2f} |", c[0], c[1], c[2],
+                       ea[i].motion_ratio, eb[i].motion_ratio, ea[i].coverage, eb[i].coverage, ea[i].emission, eb[i].emission, ea[i].spectrum,
+                       eb[i].spectrum, ea[i].mean_psnr, eb[i].mean_psnr));
+    }
   }
   return 0;
 }
@@ -1225,6 +1235,7 @@ int video(const Args& a) {
   const auto cs = nfx::tools::parse_floats(a.str("controls", "0.7,0.5,0.6"));
   std::array<float, 3> c{cs.at(0), cs.at(1), cs.at(2)};
   const std::uint64_t seed = a.u64("seed", 9'900'000);
+  const std::string title = a.str("title", "LEARNED 3D FIRE");  // the orbit's caption
   Canvas cv{W, H, std::vector<std::uint8_t>(zu(W) * zu(H) * 3)};
   Video vid(out, W, H, crf);
   std::vector<std::uint8_t> pic, pic2;
@@ -1241,7 +1252,7 @@ int video(const Args& a) {
       vol.draw(view, W, H, pic);
       glow1 = 0.7f * glow1 + 0.3f * picture_glow(pic);
       composite(cv, 0, 0, W, H, pic, view, glow1);
-      cv.text("LEARNED 3D FIRE", 24, 20, 3, {255, 255, 255});
+      cv.text(title, 24, 20, 3, {255, 255, 255});
       cv.text("A 16X24X16 LEARNED STATE DRIVES 64X96X64 SEEDED DETAIL. PLAYED AND RAY-MARCHED ON THE CPU.", 24, 52, 1, {190, 190, 196});
       cv.text(std::format("INTENSITY {:.2f}  WIND {:.2f}  TURBULENCE {:.2f}", c[0], c[1], c[2]), 24, H - 30, 2, {200, 200, 206});
       vid.put(cv);

@@ -1,7 +1,17 @@
 # Study N: a small 3D demo
 
-Status: **design and rule committed before validation** (15 October 2026). Audience: dev, research, the owner. The
-results, the cost and the videos are added below the rule as they come; nothing above §6 changes after validation.
+Status: **done** (15 October 2026). Audience: dev, research, the owner. The design and the rule (§1 to §5) were
+committed before validation and did not change; the results, the cost and the videos follow them (§6 to §10).
+
+**In short.** A 3D fire from our own 3D solver (not a validated fire code), learned as a 16 x 24 x 16 state that drives
+seeded 64 x 96 x 64 detail, drawn by a physically based volume renderer and played through a volume C API. On the
+held-out test, run once, it **follows a real run better than running the simulation on the coarse grid with the same
+detail** (at 1 s: temperature +1.08 dB [+0.74, +1.39], picture from four cameras +2.20 dB [+1.09, +3.12]) **but looks
+worse when played on**, in how much it moves (|ln motion ratio| +0.229 [+0.063, +0.402]) and how much it covers
+(+0.0049 [+0.0006, +0.0116]); so by the rule it does not beat the cheap simulation outright. Holding the first frame
+still beats it after a second. In a strong wind, below the test's settings, it runs away (§11). A step costs about
+70 ms and a 256 x 256 picture about 50 ms on one busy core (provisional), most of it the detail layer. Smoke was
+trained as a demo only (§10), not validated or tested.
 
 The owner's plan ([TODO.md](../TODO.md)) is to take every effect to 3D on a big PC later: accurate 3D simulations and
 large 3D rollout models. The owner: "we will do a small model here. First we demo and then we go big." This study is
@@ -212,15 +222,118 @@ the end of every stage). Training is deterministic and resumes to the bit (teste
 run again from the iteration-920 checkpoint with the same options; the losses logged at 920, 930, 940 and 950 equal
 the original run's to every printed digit (`logs/train_regen.log` against `logs/train_base.log` in the data root).
 
-(Validation's results to come.)
+**Validation** (`results/3d/compare_val_*.md`, per-run rows in `results/3d/val_track/`): 12 tracking runs, 4 settings
+with 2 real runs and 2 plays each pooled. Means, and differences with 95% intervals:
+
+| measure | A | B | coarse simulation + detail | holding the first frame | A - B | A - coarse |
+|---|---:|---:|---:|---:|---|---|
+| tracking, temperature field, 1 s (dB) | 19.57 | 19.31 | 18.31 | 20.38 | +0.26 [+0.12, +0.39] | +1.26 [+0.33, +2.14] |
+| tracking, soot field, 1 s (dB) | 25.03 | 24.84 | 19.56 | 24.86 | +0.19 [+0.07, +0.31] | +5.47 [+4.71, +6.21] |
+| tracking, picture, 8 frames (dB) | 21.32 | 20.81 | 18.45 | 19.65 | +0.51 [+0.29, +0.76] | +2.87 [+2.43, +3.28] |
+| **tracking, picture, 1 s (dB)** | **17.37** | **17.08** | 14.78 | 18.06 | **+0.29 [+0.01, +0.58]** | +2.60 [+1.02, +4.14] |
+| tracking, picture, 2 s (dB) | 17.20 | 17.51 | 14.67 | 18.00 | -0.31 [-0.84, +0.10] | +2.53 [+1.38, +3.63] |
+| endless: 3D spectrum distance | 0.842 | 0.358 | 0.778 | | +0.484 [-0.009, +0.977] | +0.064 [-0.454, +0.582] |
+| endless: \|ln motion ratio\| (motion ratio) | 0.890 (1.73) | 0.491 (0.83) | 0.233 (1.10) | | +0.399 [+0.058, +0.740] | +0.657 [+0.527, +0.786] |
+| endless: coverage distance | 0.0262 | 0.0054 | 0.0037 | | +0.0208 [-0.0000, +0.0417] | +0.0225 [+0.0011, +0.0440] |
+| endless: emission distance | 0.0270 | 0.0049 | 0.0136 | | +0.0221 [+0.0002, +0.0439] | +0.0133 [-0.0115, +0.0382] |
+| endless: mean picture PSNR (dB) | 22.62 | 27.50 | 23.55 | | -4.87 [-10.09, +0.34] | -0.93 [-6.46, +4.61] |
+
+- **The choice, by the rule: A** (the stepper after stage 2), with the higher picture PSNR at 1 s (17.37 against 17.08
+  dB, more than 0.1 dB apart). Its file was frozen before the test (`results/3d/frozen.csv`: 274,756 bytes, SHA-256
+  ac94e05b189d17a8673044799a18e3494bb6347d438cf76d80115b9e182443e6) and is `models/chosen.nvfx3` in the data root.
+- **The rule chose the candidate that plays worse.** B (stage 3's activity loss) plays much more like the simulation:
+  its spectrum distance is less than half A's, its motion 0.83 of the real runs' where A's is 1.73, and its mean picture
+  4.9 dB closer. A moves too much and spreads too wide when it plays on. The rule looked only at tracking at 1 s, where
+  A leads by 0.29 dB with an interval that just clears zero. Choosing on tracking was a poor rule for a model that will
+  mostly be played endlessly; it stands, and the test runs A.
+- **Against the baseline on validation**, both candidates follow a real run better than the coarse simulation at every
+  horizon, by 1 to 6.6 dB. Played endlessly, A is worse in motion and coverage and ties the rest; B is better in the
+  spectrum, emission and mean picture, worse in motion and coverage (by small amounts: 0.0017 coverage).
+- **Holding the first frame beats both candidates at 1 s and 2 s** on validation (picture 18.06 against 17.37 dB at
+  1 s, a tie for A; temperature at 2 s worse for A by 1.1 dB): over a second the fire changes less than the learned
+  rollout's errors grow. Holding is a reference, not a method (it does not move).
 
 ## 7. The test
 
-(To come.)
+Run once, on the frozen file, after validation (`results/3d/compare_test_*.md`, per-run rows in `results/3d/test_track/`):
+18 tracking runs at the 6 held-out settings, and 3 real runs, 3 plays of each method and 3 other real runs (the floor)
+pooled per setting. Means, and the chosen model minus the coarse simulation with 95% intervals:
 
-## 8. Cost
+| measure | learned (A) | coarse simulation + detail | holding the first frame | floor (other real runs) | learned - coarse |
+|---|---:|---:|---:|---:|---|
+| tracking, temperature field, 8 frames (dB) | 22.57 | 20.58 | 21.01 | | +1.99 [+1.73, +2.27] |
+| **tracking, temperature field, 1 s (dB)** | **19.31** | **18.23** | 20.09 | | **+1.08 [+0.74, +1.39]** |
+| tracking, temperature field, 2 s (dB) | 18.86 | 17.77 | 19.83 | | +1.09 [+0.67, +1.49] |
+| tracking, soot field, 8 frames / 1 s / 2 s (dB) | 27.35 / 24.77 / 24.22 | 24.78 / 19.22 / 17.79 | 25.27 / 24.92 / 24.71 | | +2.57 [+2.26, +2.92] / +5.55 [+4.84, +6.21] / +6.43 [+5.92, +6.92] |
+| tracking, picture, 8 frames (dB) | 21.15 | 17.90 | 19.32 | | +3.25 [+2.69, +3.81] |
+| **tracking, picture, 1 s (dB)** | **16.98** | **14.78** | 17.68 | | **+2.20 [+1.09, +3.12]** |
+| tracking, picture, 2 s (dB) | 17.00 | 14.89 | 18.04 | | +2.11 [+1.25, +2.98] |
+| **endless: 3D spectrum distance** | 0.451 | 0.769 | | 0.034 | -0.318 [-0.477, -0.053] (better) |
+| **endless: \|ln motion ratio\|** | 0.409 | 0.181 | | 0.064 | **+0.229 [+0.063, +0.402] (worse)** |
+| endless: motion ratio (context) | 1.063 | 1.071 | | 1.015 | -0.008 [-0.323, +0.421] |
+| **endless: coverage distance** | 0.0089 | 0.0040 | | 0.0016 | **+0.0049 [+0.0006, +0.0116] (worse)** |
+| **endless: emission distance** | 0.0101 | 0.0159 | | 0.0011 | -0.0059 [-0.0128, +0.0037] (tie) |
+| **endless: mean picture PSNR (dB)** | 27.18 | 23.91 | | 42.52 | +3.27 [+0.54, +5.20] (better) |
 
-(To come.)
+**By the rule:**
+1. **Tracking: it follows a real run better.** At 1 s the temperature field is 1.08 dB [+0.74, +1.39] and the picture
+   from four cameras 2.20 dB [+1.09, +3.12] closer to the simulation's own continuation than the coarse simulation's
+   with the same detail; both intervals are above zero. It is also better at 8 frames and 2 s, and in soot at every
+   horizon.
+2. **Look: it fails.** Two endless statistics are worse: |ln motion ratio| (+0.229 [+0.063, +0.402]) and the coverage
+   distance (+0.0049 [+0.0006, +0.0116]). Two are better (the 3D spectrum distance, -0.318 [-0.477, -0.053], and the
+   mean picture, +3.27 dB [+0.54, +5.20]) and the emission distance ties.
+3. **The verdict: the learned 3D fire follows real runs better than running the cheap simulation, but looks worse in
+   how much it moves (|ln motion ratio|) and in how much of the picture it covers (the coverage distance).** On
+   average over the settings its motion is right (a ratio of 1.06 against the coarse simulation's 1.07), but it is off
+   in both directions from setting to setting (the per-setting rows in `compare_test_learned_vs_coarse.md`), where the
+   coarse simulation is off by less.
+
+Beside the rule (not judged):
+- **Holding the first frame beats the learned model after a second**, as on validation: in temperature at 1 s by
+  0.78 dB [0.29, 1.27] and at 2 s by 0.97 dB [0.20, 1.76], in the picture at 2 s by 1.04 dB [0.15, 2.06] (the picture
+  at 1 s and the soot tie). Only at 8 frames does the learned model lead (+1.56 dB in temperature, +1.83 dB in the
+  picture). At this grid a held-out fire changes so little in a second or two, against how fast the learned rollout's
+  errors grow, that not moving at all scores better. Holding the first frame is not an effect (it does not move);
+  it marks how far the learned rollout is from following a run.
+- **The floor** (other real runs at the same setting against the real runs) is far below both methods on every endless
+  statistic: the 3D spectrum distance 0.034 against 0.451, the mean picture 42.5 dB against 27.2. Neither the learned
+  model nor the coarse simulation plays like the 64 x 96 x 64 simulation.
+- Validation's ordering held: the learned model leads the coarse simulation in tracking by about the same margins
+  (picture at 1 s: +2.60 on validation, +2.20 on the test), and on the test it also wins the spectrum and the mean
+  picture, which tied on validation.
+
+## 8. Cost (provisional)
+
+`nvfx_3d timing` (`results/3d/timing.csv`): the chosen model through the volume C API at controls (0.7, 0.5, 0.6), 5
+starts of 60 frames each, and 4 pictures of each size per start from one camera; then where a step's time goes (the
+reference on one thread); then the simulator itself for scale. Milliseconds per frame, median (minimum):
+
+| what | 1 thread | 2 threads | 4 threads |
+|---|---:|---:|---:|
+| a step (one frame) | 68 (60) | 79 (59) | 67 (33) |
+| a picture, 256 x 256 | 49 (43) | 53 (36) | 55 (34) |
+| a picture, 512 x 512 | 190 (170) | 194 (156) | 187 (141) |
+| a start (the start point and the 24-frame warm-up of the fine fields) | 1,666 | 1,999 | 1,824 |
+
+Where a step's time goes, on one thread (median ms): the noise inputs 2.7, the coarse step (convolutions, projection,
+advection) 14.9, **the detail layer 59.1**, the renderer's preparation of the volume 19.2, and a 256 x 256 picture 43.8.
+For scale, the simulator's frame costs 162 ms at 64 x 96 x 64 and 5.7 ms at the coarse 16 x 24 x 16, both on one
+thread.
+
+- **These numbers are provisional and say little about threads.** They were measured at nice 15 on the shared 4-core
+  machine at a load of 7.5 to 8.1 (four other agents training), where extra threads find no free core: the medians do
+  not fall with threads; the minimums, the frames that found free cores, do (a step 60 to 33 ms, a 512 x 512 picture
+  170 to 141 ms). On an idle machine expect a step and a picture to scale with cores, as every loop splits over cells
+  or rows.
+- **The learned network is the cheap part.** The coarse step is 15 ms of a step's 77; the 64 x 96 x 64 detail layer
+  (advection, the lock, the swirl) is three quarters of it. A step costs about 2.4 times less than the simulator's frame
+  at full resolution, but about the same as the baseline (the coarse simulation's 5.7 ms plus the same detail layer):
+  the learned model wins on quality (§7), not on cost.
+- **The CPU picture is for tools and baking.** At 50 ms for 256 x 256 it is too slow for a game frame; an engine reads
+  the fields as 3D textures (`nvfx_volume_read`) and ray-marches them on its GPU.
+- **Memory**: a volume needs 31 MB (two shards' fine fields, one set of step buffers, the renderer's prepared volume);
+  the effect file is 268 KB.
 
 ## 9. The volume C API
 
@@ -240,7 +353,29 @@ look-at description) into premultiplied RGBA8. How an engine uses it: [ENGINES.m
 
 ## 10. Demo videos
 
-(To come.)
+In `videos/` ([videos/README.md](../videos/README.md) §9), made by `nvfx_3d video` with the chosen model (A) at
+1280 x 720, 30 fps, H.264 (CRF 24, yuv420p, +faststart, no audio), each over a dark floor grid and sky drawn by the tool.
+The learned volume is played and drawn through the volume C API (the runtime's default playback: 8 s shards crossfaded
+over 0.5 s); the real-against-learned video runs the reference model in one continuous rollout beside the simulator.
+Demo seeds are 9,900,000 and up (no measured run uses them). Every frame is the volume renderer's (§3): the fire's
+light, colour and smoke are physics-based pictures of the fields, not learned.
+
+- **`3d_fire_orbit`** (12 s): the camera circles the fire once at controls (0.7, 0.5, 0.6), seed 9,900,001. A small
+  flame under a column of grey smoke, seen from every side. The flame's base often breaks into bright, blocky spots
+  (the 4-cell blocks of the detail layer's lock show through), it is whiter and shorter than the simulation's orange
+  tongue, and the plume leans for a few seconds in still air before the 8 s shard change straightens it.
+- **`3d_real_vs_learned`** (10 s): a held-out run (controls 0.65, 0.45, 0.55, seed 9,900,000) simulated for 100 frames,
+  then the simulation (left) and the learned model from that same state with the same noise seed (right), one camera
+  swinging a quarter turn around both. Captioned that they part after a second or two, which they do: by 2 s they are
+  different fires with the same smoke column's height and lean; the learned flame is whiter at its base and broken into
+  hot spots where the simulation's is one orange tongue.
+- **`3d_wind`** (12 s): the side (left) and the top (right) at once, controls (0.7, *wind*, 0.5), seed 9,900,002,
+  while the wind sweeps from none (0.5) to full towards -x (0) by 4.8 s, to full towards +x (1) by 9 s and back to none.
+  The plume and the smoke follow the wind with a lag of about a second (from the side it leans, from above the smoke
+  trails downwind). **From 5 s, after the wind has blown hard towards -x, a second fire grows on the floor at the box's
+  upwind edge and fills a corner of the box with a bright mass by 7.5 s**, until the shard change at 8 s clears it: the
+  runaway of §11. A second render with the next seed (9,900,003) did the same, and so does a constant wind of 0.05, so
+  the planned render is kept, as it is.
 
 ## 11. Limits
 
@@ -248,7 +383,7 @@ look-at description) into premultiplied RGBA8. How an engine uses it: [ENGINES.m
   puffs at a steady rate, but at 0.5 to 0.65 Hz, several times slower than a real pool fire of this size would. The
   learned model can only be as real as its teacher. The PC plan's validated teachers (FDS) are what would change that.
 - **One effect, one small model.** A fire, with a 16 x 24 x 16 learned state, 16 channels and 14,218 weights, trained
-  for about two thousand iterations on 40 runs (5.3 minutes of simulated fire). The smoke preset exists but was not
+  for 1,500 iterations on 40 runs (5.3 minutes of simulated fire). The smoke preset exists but was not
   trained. No hyperparameter was searched.
 - **Small samples.** The test pairs 18 tracked runs and 6 settings (3 runs pooled per setting); study D2 pooled 8.
   Intervals over 6 settings are wide.
@@ -257,6 +392,18 @@ look-at description) into premultiplied RGBA8. How an engine uses it: [ENGINES.m
   chemiluminescent base (a soot-and-temperature model has none), one exposure for every picture.
 - **The measures see the fields at 64 x 96 x 64 and pictures at 128 x 128 from four fixed cameras**; the 3D spectrum
   covers the lowest 64 cells of the box only.
+- **The chosen model runs away in a strong wind.** At a wind of 0.05 (blowing hard towards -x) a second fire starts on
+  the floor at the box's upwind edge after 2 to 3 s and grows into a bright mass that fills the box by 5 to 6 s, until
+  the 8 s shard change clears it ([figures/n_wind_runaway.png](figures/n_wind_runaway.png): constant controls 0.7, 0.05,
+  0.5, seed 9,900,004, at 2, 3.5, 5 and 6.5 s). The wind video shows it too, on two seeds (§10). The most likely cause
+  is the coarse advection: it samples clamped to the grid, so at an edge where the flow comes in, the edge cell's heat
+  and soot are carried inwards and kept at the edge every frame; whatever the stepper adds there feeds itself, and only
+  the range clamp bounds it. The simulator's edge has no heat to keep; the stepper's, under a strong wind and at zero
+  padding, does. Training windows (at most 24 frames of burn-in and 12 of loss) are too short to see a slow build-up.
+  None of the test's settings has a wind below 0.25, so the test did not meet it; validation's (0.50, 0.15, 0.75) may
+  have, which would explain much of A's poor coverage there (§6).
+- **The rule chose the candidate that plays worse** (§6): stage 3's model moves and spreads more like the simulation
+  when it plays on, but tracked 0.29 dB worse at 1 s.
 - **Cost is provisional**: measured on a shared 4-core machine at a load of 8 to 14, where nice-15 jobs get under a
   core.
 
@@ -283,9 +430,48 @@ $B track --split test --method learned --model .../chosen.nvfx3 ; $B track --spl
 $B play --split test --method learned --model .../chosen.nvfx3 ; $B play --split test --method coarse --model .../chosen.nvfx3
 $B compare --split test --a learned --b coarse                      # once
 $B timing --threads 1,2,4                                           # §8 (results/3d/timing.csv)
-$B video --kind orbit --out 3d_fire_orbit.mp4 --seconds 12          # §10
+$B video --kind orbit --out 3d_fire_orbit.mp4 --seconds 12 --controls 0.7,0.5,0.6 --seed 9900001                  # §10
+$B video --kind real-vs-learned --out 3d_real_vs_learned.mp4 --seconds 10 --controls 0.65,0.45,0.55 --seed 9900000
+$B video --kind wind --out 3d_wind.mp4 --seconds 12 --controls 0.7,0.5,0.5 --seed 9900002
 ```
+
+The per-run tracking rows (`results/3d/val_track/*.csv`, `results/3d/test_track/*.csv`) have no header: the setting,
+the run, then for each horizon (8, 30 and 60 frames) the horizon, the temperature field PSNR, the soot field PSNR, the
+picture PSNR (the mean over the cameras) and each camera's picture PSNR (azimuths 0, 90, 180 and 270 degrees).
 
 ## 13. What it means for the PC plan
 
-(Completed after the test.)
+The plan's stage 1 asked three questions ([TODO.md](../TODO.md)). The answers, from this one small fire:
+
+- **Does a learned 3D rollout work at all?** Yes, as machinery: the 3D solver, the volume renderer, the model, its
+  trainer with checked gradients, a resumable deterministic training run, the runtime and its C API all work end to
+  end on a CPU, and the model follows a held-out fire for 2 s from any of four cameras. As an effect it is a start:
+  small blocky flames, too much motion at some settings, and a runaway in a strong wind.
+- **Does it beat simply running a cheap 3D simulation?** At following a real run, clearly (+1.1 dB in temperature and
+  +2.2 dB in the picture at 1 s, every horizon better); at playing on, not by the rule (worse in motion and coverage,
+  better in the spectrum and the mean picture). And holding the first frame still beats it after a second, so the
+  learned rollout's error growth, not the baseline, is what to beat next.
+- **What does it cost to play?** About 70 ms a step and 50 ms a 256 x 256 picture on one busy core, three quarters of
+  the step in the 64 x 96 x 64 detail layer, not the network; about as much as the cheap simulation with the same detail.
+
+What to do differently on the PC:
+1. **Choose on how it plays, not only on how it tracks.** The rule here chose on tracking at 1 s, and the candidate it
+   chose plays worse than the one it passed over (§6). For effects that are played endlessly the choice should require
+   the endless statistics not to be worse, then rank by tracking.
+2. **Let nothing flow in at an open edge, and train on long rollouts.** The runaway (§11) most likely comes from
+   advection that samples clamped to the grid, so an upwind edge keeps and feeds whatever heat reaches it; open
+   boundaries should bring in ambient air (zero heat, soot and memory). And a slow build-up like it is invisible to
+   windows of 12 frames after at most 24 of burn-in: train with burn-in from the stepper's own long rollouts (hundreds of
+   frames), at the controls' extremes, and with controls that move.
+3. **Spend the cost where it is.** The detail layer is the cost: SIMD and sparse bricks for it first (only blocks with
+   material), and on an engine the picture belongs to the GPU. A bigger network (32 to 64 channels, 32³ to 64³ states)
+   is affordable next to it.
+4. **A finer learned state, or a smoother lock.** The 4-cell blocks show in the flame; emission is so steep in
+   temperature that block averages lose the hottest spots, so learned flames are whiter and shorter. A 32³ state, or a
+   lock that blends between blocks, or a sub-grid temperature variance channel, is the next step.
+5. **A validated teacher.** This solver puffs at 0.5 to 0.65 Hz where a fire this size puffs near 2.7 Hz; the learned
+   model copies its teacher faithfully, so the teacher's physics is the ceiling (FDS, as the plan says).
+6. **Budget for training.** The fire's 40 training runs took 0.65 CPU-hours to simulate and its 1,500 iterations 2.3
+   CPU-hours (2.4 hours of wall time, at under one core of the shared machine). The trainer splits a batch's windows
+   over threads with the same result on any count, so a PC's cores shorten it directly.
+7. **Snapshot every stage**, as the trainer now does: a stage that ended between checkpoints lost its model here (§6).
