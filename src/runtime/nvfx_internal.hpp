@@ -16,9 +16,14 @@ const RolloutEffect* rollout_of(const nvfx_effect* e);
 nvfx_status set_rollout_int8_convs(nvfx_instance* in, Int8Convs convs);
 
 // The precision an nvfx_precision asks of a rollout effect (DEFAULT: default_rollout_precision()), and the ISA a rollout runner
-// at a precision takes: the one forced (nvfx_set_isa), else AVX2; at int8 with no ISA forced, the AVX-512 build where
-// the CPU has VNNI. Scenes and the effect manager create their runners with these, as instances do.
+// at a precision takes: the one forced (nvfx_set_isa); with none forced, the AVX-512 build where the CPU has AVX-512
+// (at int8 only where it also has VNNI), else AVX2, else the baseline (docs/REPORT.md §13.10). Scenes and the effect
+// manager create their runners with these, as instances do.
 Precision rollout_precision(nvfx_precision p);
 nvfx_isa rollout_isa(Precision p);
+
+// The ISA a rollout instance's runners were built for (at its present precision); NVFX_ISA_AUTO for a frame model's
+// instance or null.
+nvfx_isa rollout_instance_isa(const nvfx_instance* in);
 
 }  // namespace nfx::rt

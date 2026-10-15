@@ -102,10 +102,12 @@ NVFX_API nvfx_status nvfx_instance_set_colour(nvfx_instance* instance, float hue
  * multiply-adds) multiplies 7-bit activations (one scale per channel over the grid) by 8-bit weights (one scale per
  * output channel) in integers; every ISA computes the same integer sums, and with no ISA forced the AVX-512 build is
  * used where the CPU has VNNI. The renderer and the detail layer stay float. Its frames are not float's: the effects
- * are chaotic, so int8 and float runs drift apart after a while, as two seeds do. DEFAULT is INT8 for rollout effects:
- * on held-out settings and seeds it tracked real runs and played as float does on all eleven trained effects (study
- * K's rule), and a frame costs about a tenth less than float in the same build at 128 x 128 (VNNI); FLOAT is the
- * reference. A change starts the instance's timeline again.
+ * are chaotic, so int8 and float runs drift apart after a while, as two seeds do. DEFAULT is INT8 for rollout effects
+ * where the CPU has AVX-512 VNNI and no other ISA is forced, FLOAT elsewhere: on held-out settings and seeds int8
+ * tracked real runs and played as float does on all eleven trained effects (study K's rule), and with VNNI a frame
+ * costs about a tenth less than float in the same build at 128 x 128. FLOAT is the reference; with no ISA forced it
+ * takes the AVX-512 build where the CPU has AVX-512 (0.80 of AVX2's time, docs/REPORT.md §13.10), else AVX2; the
+ * builds may differ in the last bits (nvfx_set_isa forces one). A change starts the instance's timeline again.
  * A set-up call: a change allocates the instance's new buffers (at INT8 a frame model's instance holds the first layer
  * at every grid point: 0.2 to 0.4 MB). */
 typedef enum nvfx_precision { NVFX_PRECISION_DEFAULT = 0, NVFX_PRECISION_FLOAT = 1, NVFX_PRECISION_INT8 = 2 } nvfx_precision;
@@ -160,12 +162,14 @@ NVFX_API nvfx_status nvfx_bake(nvfx_instance* instance, int frames, uint8_t* rgb
 #define NVFX_FEATURE_SHARED 0x10u   /* this is the shared library (libnvfx.so, nvfx.dll) */
 #define NVFX_FEATURE_VOLUME 0x20u   /* nvfx_volume.h (3D effects, study N) */
 #define NVFX_FEATURE_AVX2 0x100u    /* this CPU runs the AVX2 code (used by default when present) */
-#define NVFX_FEATURE_AVX512 0x200u  /* this CPU runs the AVX-512 code (nvfx_set_isa) */
-#define NVFX_FEATURE_VNNI 0x400u    /* this CPU has AVX-512 VNNI (int8 frame models use it) */
+#define NVFX_FEATURE_AVX512 0x200u  /* this CPU runs the AVX-512 code (rollout effects use it; nvfx_set_isa) */
+#define NVFX_FEATURE_VNNI 0x400u    /* this CPU has AVX-512 VNNI (int8 frame models and rollout effects use it) */
 NVFX_API uint32_t nvfx_version(uint32_t* features);
 
 /* Testing and benchmarking -------------------------------------------------------------------------------------- */
-NVFX_API nvfx_isa nvfx_get_isa(void);                 /* the ISA instances are created with (see nvfx_instance_set_precision) */
+NVFX_API nvfx_isa nvfx_get_isa(void);                 /* the default ISA: the one forced, else AVX2 when present (frame
+                                                         models; rollout effects take AVX-512 where the CPU has it: see
+                                                         nvfx_instance_set_precision) */
 NVFX_API nvfx_status nvfx_set_isa(nvfx_isa isa);      /* force an ISA for instances created afterwards */
 NVFX_API double nvfx_instance_macs_per_pixel(const nvfx_instance* instance);
 
