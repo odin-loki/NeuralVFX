@@ -1348,6 +1348,11 @@ int video(const Args& a) {
   std::array<float, 3> c{cs.at(0), cs.at(1), cs.at(2)};
   const std::uint64_t seed = a.u64("seed", 9'900'000);
   const std::string title = a.str("title", "LEARNED 3D FIRE");  // the orbit's caption
+  // the volume's shard length in seconds (the runtime's default 8; 0: one continuous rollout), and for --kind wind a
+  // wind held instead of the sweep (study N2's figure of the edges)
+  const float shard = a.f("shard", 8.f);
+  const bool held = a.has("wind-fixed");
+  const float wind_fixed = a.f("wind-fixed", 0.5f);
   Canvas cv{W, H, std::vector<std::uint8_t>(zu(W) * zu(H) * 3)};
   Video vid(out, W, H, crf);
   std::vector<std::uint8_t> pic, pic2;
@@ -1357,6 +1362,7 @@ int video(const Args& a) {
     VolumeHandle vol(model, threads);
     nvfx_volume_set_controls(vol.v, c.data(), 3);
     nvfx_volume_set_seed(vol.v, seed);
+    if (nvfx_volume_set_shard(vol.v, shard) != NVFX_OK) throw std::invalid_argument("bad --shard");
     for (int f = 0; f < frames; ++f) {
       const float t = static_cast<float>(f) / 30.f, az = 2.f * std::numbers::pi_v<float> * t / seconds;
       const View view{{2.1f * std::sin(az), 0.8f + 0.2f * std::sin(0.5f * az), 2.1f * std::cos(az)}, {0.f, 0.62f, 0.f}, {0.f, 1.f, 0.f}, 40.f};
@@ -1373,11 +1379,13 @@ int video(const Args& a) {
   } else if (kind == "wind") {
     VolumeHandle vol(model, threads);
     nvfx_volume_set_seed(vol.v, seed);
+    if (nvfx_volume_set_shard(vol.v, shard) != NVFX_OK) throw std::invalid_argument("bad --shard");
     const int pw = W / 2;
     for (int f = 0; f < frames; ++f) {
       const float t = static_cast<float>(f) / 30.f, u = t / seconds;
-      // wind: still, full towards -x, full towards +x, still again
-      const float w = u < 0.15f ? 0.5f : u < 0.4f ? 0.5f - 0.5f * (u - 0.15f) / 0.25f : u < 0.75f ? (u - 0.4f) / 0.35f : 1.f - 0.5f * (u - 0.75f) / 0.25f;
+      // wind: still, full towards -x, full towards +x, still again (or held)
+      const float w = held ? wind_fixed
+                           : u < 0.15f ? 0.5f : u < 0.4f ? 0.5f - 0.5f * (u - 0.15f) / 0.25f : u < 0.75f ? (u - 0.4f) / 0.35f : 1.f - 0.5f * (u - 0.75f) / 0.25f;
       c[1] = std::clamp(w, 0.f, 1.f);
       nvfx_volume_set_controls(vol.v, c.data(), 3);
       if (nvfx_volume_step_to(vol.v, t) != NVFX_OK) throw std::runtime_error("step failed");
@@ -1392,7 +1400,11 @@ int video(const Args& a) {
       cv.fill(pw - 1, 0, 2, H, {0, 0, 0});
       cv.text("FROM THE SIDE", 24, 20, 2, {255, 255, 255});
       cv.text("FROM ABOVE", pw + 24, 20, 2, {255, 255, 255});
-      cv.text("LEARNED 3D FIRE: THE WIND CONTROL SWEPT LIVE", 24, H - 64, 2, {230, 230, 236});
+      cv.text(held ? a.str("caption", "LEARNED 3D FIRE: THE WIND HELD") : a.str("caption", "LEARNED 3D FIRE: THE WIND CONTROL SWEPT LIVE"), 24, H - 64, 2, {230, 230, 236});
+      if (held) {
+        const std::string ts = std::format("{:.1f} S", t);
+        cv.text(ts, W - 24 - nfx::tools::text_width(ts, 3), 20, 3, {255, 225, 150});
+      }
       const int bx = 24, by = H - 36, bw = W - 220;
       cv.fill(bx, by, bw, 16, {40, 40, 46});
       const int mid = bx + bw / 2, end = bx + static_cast<int>(std::lround(c[1] * static_cast<float>(bw)));
