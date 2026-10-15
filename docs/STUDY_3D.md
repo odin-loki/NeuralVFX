@@ -524,3 +524,139 @@ What to do differently on the PC:
    CPU-hours (2.4 hours of wall time, at under one core of the shared machine). The trainer splits a batch's windows
    over threads with the same result on any count, so a PC's cores shorten it directly.
 7. **Snapshot every stage**, as the trainer now does: a stage that ended between checkpoints lost its model here (§6).
+
+## 14. Study N2: ambient air at the open edges
+
+Status: **in progress**. Study N's demo has one fault that spoils it: the runaway at the box's sides (§11). Study N2
+fixes it in the model's advection, retrains the same small model on data that holds long rollouts, the controls'
+extremes and controls that change, chooses on tracking *and* endless play (study N's first lesson, §13), and tests
+once. §14.1 to §14.5 (the fix, the data, the training, the seeds, the settings and the rule) were written and committed
+before any validation number.
+
+### 14.1 The fault and the fix
+
+**The fault** (§11): the coarse advection traces each cell back along the flow and samples the state there; where the
+trace left the grid it was clamped to the edge cell. At a side where air flows in, a cell then traces back to itself
+and keeps its heat every frame, and whatever the stepper adds there feeds itself.
+
+**The fix** (`src/core/rollout3d.cpp`, `trilinear_ambient`; the trainer's `advect` and `advect_back` in
+`src/train/rollout3d_train.cpp`; the volume runtime runs the reference, so it has it too): beyond the open sides (x and
+z) and the top lies ambient air, one ghost cell deep, with **zero heat, zero soot and zero memory, and still**; a trace
+that leaves the grid there samples between the edge cell and that air. The floor is closed and still clamps.
+
+- **"The wind's velocity where the wind is."** In our simulator the wind drags only material
+  (`sim3d.cpp`, `add_forces`: u moves towards the wind's speed in proportion to min(1, 2 (heat + soot))), so air with
+  nothing in it has no wind of its own. Study N's 40 training runs show it: the mean velocity across a side (x = 0 or
+  x = max) never exceeds 0.019 coarse cells per frame in any frame from 4 s on, where the full wind is 0.375. So the
+  model's ambient air is still.
+- **The edge mode belongs to the model** (`Model::edges`): an `.nvfx3` file of version 2 stores it; a version 1 file
+  (study N's) loads with clamped edges and plays exactly as before (study N's `edge` rows of §11 come out the same to
+  every printed digit), and a model with clamped edges is still saved as version 1.
+- **Tests** (`tests/test_3d.cpp`, 28 in all, 7 new): what flows in at each side and through the top, and that the floor
+  clamps; the trainer's forward pass equals the reference's with air coming in through every side and the top, with
+  either edge mode; **gradients match finite differences** with inflow everywhere, with clamped edges and with controls
+  that change during the window; the runtime equals the reference to the bit with either edge mode; a steady schedule
+  of controls is the fixed run to the bit; training with the new stage resumes to the bit.
+- **A first look, before anything was trained** (study N's chosen model, its §11 seed 9,900,004 and 8 s, the reference
+  played): with the fix alone and no wind, nothing grows (the box's heat 18 to 24, the sides under 0.02, where with
+  clamped edges it reaches 105 and a side 35); at a wind of 0.05 the box's heat reaches 107 instead of 1,848, but the
+  sides along the wind (z = 0, z = max) still collect heat (16 and 4 after 8 s). The stepper was trained with clamped
+  edges, so the fix alone is not enough for study N's model: retrain.
+
+### 14.2 The simulator's own boundaries
+
+They do not have the fault. The simulator's heat and soot have a border of zero (ambient) that their advection samples,
+so a cell at an inflow side takes in empty air, never its own heat. One small leak: the sample position is clamped half
+a cell beyond the edge, so a trace more than half a cell outside (an inflow faster than 30 cells per second at 64
+cells) takes half the edge cell's value instead of nothing; that halves every substep, it never feeds. Its velocity
+border copies the edge cell (outflow), as usual. In study N's 40 runs the upwind side holds no heat at all (the
+x = max side at winds below 0.35 and the x = 0 side above 0.65: at most 0.0003 summed over a side's 384 coarse cells,
+from 4 s on). **The simulator is unchanged**, so study N's training runs are still the teacher's and are used again.
+The edge check (§14.5) runs the simulation beside the model as the reference.
+
+### 14.3 Data and training
+
+- **Data**: study N's 40 runs (8 s each at random controls, seeds 9,000,000 + i) and **24 new runs of 18 s** (540
+  frames; seeds 9,200,000 + i), by i mod 3: 8 with **the wind at an extreme** (0 to 0.15 for even i / 3, 0.85 to 1 for
+  odd), the other controls random; 8 with **controls that change during the run** (segments of 2 to 4 s, each with new
+  targets reached by a smooth 1 s ramp; the wind's target at an extreme six times in ten, else anywhere; intensity and
+  turbulence anywhere); 8 at random controls held, as study N's but longer. 12.5 minutes of simulated fire in all.
+- **The model**: study N's size (16 x 24 x 16, two 3 x 3 x 3 convolutions of 16 channels, 4 memory channels, 14,218
+  weights) with ambient edges, initialised with seed 9,200,777; the detail layer's constants as study N's (contrast 1,
+  swirl 0.5, swirl length 12, grow 1.5); 8 start points at frame 150 by farthest-point sampling over the controls (at
+  that frame) of all 64 runs.
+- **Training**: windows drawn in proportion to the runs' frames; every step takes the controls of its own frame. Stages
+  1 to 3 as study N's (900, 350 and 250 iterations; batch 8; unroll 12; in stages 2 and 3 half the windows after up to
+  24 frames of the stepper's own rollout, with the profile loss; stage 3 with the activity loss). **Stage 4, long
+  rollouts** (new): 250 iterations in which every window starts after 48 to 240 frames of the stepper's own rollout
+  (no gradient through it), from the runs long enough to hold it (the 24 new ones), with stage 3's losses and learning
+  rate (7e-4, cosine). Trainer seed 9,200,000. **A snapshot at the end of every stage.**
+- **A finer state (24 x 36 x 24) is not tried**: 24 does not divide the 64-cell detail grid, so it would need new
+  training runs at another resolution, which this machine's time does not allow.
+
+### 14.4 Seeds and held-out settings
+
+**Seeds** (unused blocks of study N's range): training 9,200,000 + i; validation tracking 9,500,000 + 100 s + k, real
+runs 9,510,000 + 100 s + k, plays 9,520,000 + 100 s + k; test tracking 9,800,000 + 100 s + k, real runs
+9,810,000 + 100 s + k, the floor 9,810,050 + 100 s + k, plays 9,820,000 + 100 s + k (s the setting, k the run); the
+edge check's plays 9,520,900 + j (validation) and 9,820,900 + j (test) and its simulations 9,510,900 + j (j the
+wind's index); demo videos 9,950,000 and up.
+
+**Held-out settings** (intensity, wind, turbulence), new, none a training run's (training controls are random or
+scheduled), with a strong wind towards -x and towards +x in each split:
+- validation: (0.60, 0.08, 0.50), (0.40, 0.92, 0.65), (0.75, 0.30, 0.35), (0.50, 0.50, 0.80), (0.30, 0.65, 0.25);
+- test: (0.70, 0.05, 0.40), (0.55, 0.95, 0.55), (0.45, 0.20, 0.70), (0.80, 0.50, 0.30), (0.35, 0.75, 0.45),
+  (0.65, 0.40, 0.90).
+
+Validation: 3 tracking runs per setting (15), 2 real runs and 2 plays per method pooled per setting. Test: 3 tracking
+runs per setting (18), 3 real runs, 3 plays and 3 other real runs (the floor) per setting.
+
+### 14.5 Measures, the edge check and the rule
+
+**Methods**: the candidates; **study N's chosen model as it shipped** (A, clamped edges; "N"); **the coarse simulation
+with the same detail** (§5, from the new model's start points); for reference only, holding the first frame, study N's
+model with the edge fix alone ("N + fix", validation only) and the floor (test only).
+
+**Measures**, as §5: tracking from the true state (temperature and soot field PSNR, picture PSNR from four cameras; at
+8 frames, 1 s and 2 s); endless statistics (3D spectrum distance, |ln motion ratio|, coverage distance, emission
+distance, mean picture PSNR; 240 frames after the warm-up, as §5). Differences: **candidate minus study N's model** and
+**candidate minus the coarse simulation**; paired bootstrap of the mean difference, 10,000 resamples, seed 2026, 95%
+percentile intervals; tracking paired over runs, endless statistics over settings.
+
+**The edge check** (`nvfx_3d edge`, `nvfx_3d edgecheck`): the model played in one rollout from the start point nearest
+(0.7, w, 0.5), its 24-frame warm-up and then **30 s**, at constant winds **w = 0.05, 0.25, 0.5 (no wind), 0.75 and
+0.95** (the coarse state: the detail layer never feeds back into it); and the simulation itself at the same controls
+(64 x 96 x 64 from an empty grid, block averages, 30 s from 5 s on, as a start point is 5 s into its run). Every
+0.5 s, the coarse heat summed over each side slab (x = 0, x = max, z = 0, z = max) and over the top layer. A side
+**runs away** if (a) its mean over 20 to 30 s is more than twice its mean over 5 to 15 s plus 0.5 (it grows), or (b)
+its largest value over 5 to 30 s is more than twice the simulation's largest on that side plus 1 (it holds far more
+heat than the teacher ever does there). **A model passes if no side runs away at any wind.**
+
+**Candidates**: **C2** (the stepper after stage 2), **C3** (after stage 3), **C4** (after stage 4), with the same start
+points, detail constants and renderer.
+
+**The choice (validation)**, on tracking and endless play:
+1. eligible: the candidates that pass the edge check;
+2. **tracking, non-inferiority**: of those, the ones whose mean picture PSNR at 1 s and mean temperature field PSNR at
+   1 s are each within 0.5 dB of the best eligible candidate's;
+3. **endless play, improvement**: of those, the one with the lowest mean rank over the five endless statistics (each the
+   mean over the five settings; tied values share a rank); a tie goes to the higher picture PSNR at 1 s.
+
+If no candidate passes the edge check, steps 2 and 3 choose among all three and the chosen one fails the test's first
+condition. `nvfx_3d choose` applies the rule. The chosen file is frozen by SHA-256 in `results/3d/n2/frozen.csv` before
+the test; the tool refuses the test's learned runs on any file not listed there.
+
+**The test (it runs once)**, the chosen model on the test's settings and seeds:
+1. **It fixes study N's fault** if it passes the edge check with the test's seeds (9,820,900 + j).
+2. **Against study N's model**: its tracking is *non-inferior* if at 1 s the interval of the temperature field PSNR's
+   difference lies above -0.5 dB and the picture PSNR's above -1 dB; its endless play is *not worse* if no endless
+   statistic's interval lies entirely on the worse side, and *better* if, in addition, at least one lies entirely on
+   the better side.
+3. **It passes** if 1 holds, its tracking is non-inferior and its endless play is not worse: then it becomes the demo
+   model and the videos are made again. "**It plays better than study N's model**" if it passes and its endless play is
+   better. If it does not pass, study N's model and videos stay, and the numbers are reported.
+4. **Against the coarse simulation**, study N's rule unchanged (§5): "beats running the cheap simulation", "follows
+   real runs better but looks worse in ...", or "does not beat running the cheap simulation".
+
+Soot, 8 frames and 2 s, holding the first frame and the floor are reported beside, not judged. **Cost**, as §5:
+provisional.
