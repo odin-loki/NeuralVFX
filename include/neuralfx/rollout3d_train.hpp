@@ -60,7 +60,8 @@ struct TrainOptions {
   int threads = 0;
   std::uint64_t seed = 1;
   int log_every = 25;
-  int checkpoint_every = 50;
+  int checkpoint_every = 50;  // and at the end of every stage
+  int stop_at = 0;            // stop once this many iterations are done (0: run the whole schedule)
   std::function<void(int iteration, int unroll, double loss, double seconds)> progress;
 };
 
@@ -74,8 +75,8 @@ struct TrainState {
 std::expected<void, std::string> save_checkpoint(const std::filesystem::path& path, const Model& m, const TrainState& s);
 std::expected<void, std::string> load_checkpoint(const std::filesystem::path& path, Model& m, TrainState& s);
 
-// Trains m.step_w from s.iteration to the end of the schedule; calls checkpoint(model, state) every
-// checkpoint_every iterations and at the end. m.scale, m.lo and m.hi must be set (set_normalisation).
+// Trains m.step_w from s.iteration to the end of the schedule (or to stop_at); calls checkpoint(model, state) every
+// checkpoint_every iterations, at the end of each stage and where it stops. m.scale, m.lo and m.hi must be set (set_normalisation).
 void train_stepper(Model& m, std::span<const Run> runs, const TrainOptions& o, TrainState& s,
                    const std::function<void(const Model&, const TrainState&)>& checkpoint = {});
 

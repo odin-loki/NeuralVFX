@@ -513,6 +513,7 @@ r3::TrainOptions train_options(const Args& a) {
   o.seed = a.u64("seed", 1);
   o.log_every = a.i("log-every", 10);
   o.checkpoint_every = a.i("checkpoint-every", 20);
+  o.stop_at = a.i("stop-at", 0);
   return o;
 }
 

@@ -839,7 +839,10 @@ void train_stepper(Model& m, std::span<const Run> runs, const TrainOptions& o, T
       s.curve.emplace_back(it, loss);
       if (o.progress) o.progress(it, unroll, loss, std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count());
     }
-    if (checkpoint && ((o.checkpoint_every > 0 && s.iteration % o.checkpoint_every == 0) || s.iteration == total)) checkpoint(m, s);
+    const bool stage_end = s.iteration == o.iterations || s.iteration == o.iterations + o.finetune || s.iteration == total;
+    const bool stop = o.stop_at > 0 && s.iteration >= o.stop_at;
+    if (checkpoint && ((o.checkpoint_every > 0 && s.iteration % o.checkpoint_every == 0) || stage_end || stop)) checkpoint(m, s);
+    if (stop) break;
   }
 }
 
