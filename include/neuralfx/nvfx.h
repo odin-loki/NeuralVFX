@@ -31,7 +31,7 @@
 extern "C" {
 #endif
 
-#define NVFX_VERSION 6 /* 2: scenes (nvfx_scene.h); 3: nvfx_version(), effect packs (nvfx_pack.h); 4: engine layers and trails; 5: precision (study K); 6: 3D volumes (nvfx_volume.h) */
+#define NVFX_VERSION 7 /* 2: scenes (nvfx_scene.h); 3: nvfx_version(), effect packs (nvfx_pack.h); 4: engine layers and trails; 5: precision (study K); 6: 3D volumes (nvfx_volume.h); 7: drawn at half size and upscaled (study P) */
 
 typedef enum nvfx_status {
   NVFX_OK = 0,
@@ -141,6 +141,22 @@ NVFX_API nvfx_status nvfx_instance_set_prior(nvfx_instance* instance, int every_
  * slightly worse in 23 of 24 configurations), and the extra drawing costs 2.8 to 7 times a frame while it shows.
  * Errors: NVFX_ERROR_ARGUMENT (not a rollout effect, negative counts, or an effect the simulator does not make). */
 NVFX_API nvfx_status nvfx_instance_set_handoff(nvfx_instance* instance, int frames, int fade);
+
+/* Rollout effects: drawn at half size and upscaled (study P, docs/STUDY_P.md) --------------------------------------
+ * An instance can draw its effect at half its size and bring the frame to full size: the detail layer and the renderer,
+ * whose work grows with the pixels, then do a quarter of it. NVFX_UPSCALE_BILINEAR is the bilinear 2x (what a GPU's
+ * bilinear sampler gives; needs no file). NVFX_UPSCALE_LEARNED adds a small learned 2x (two small convolutions on the
+ * half-size frame) and seeded micro-detail (fine noise whose amplitude the network gives from the frame), deterministic
+ * from the instance's seed and the time; it needs an upscaler file attached to the effect (nvfx_effect_attach_upscaler,
+ * once, before the effect is shared between threads; one file can serve every effect). The instance's size must be a
+ * multiple of 64 (twice the coarse grid). A set-up call: it allocates the instance's new buffers and starts its timeline
+ * again; nvfx_render then allocates nothing. The instance's colour is applied after the upscale. Pixels the half-size
+ * frame leaves empty stay exactly transparent. Errors: NVFX_ERROR_ARGUMENT (not a rollout effect, an unknown mode,
+ * LEARNED with no upscaler attached), NVFX_ERROR_UNSUPPORTED (a size that is not a multiple of 64). */
+typedef enum nvfx_upscale { NVFX_UPSCALE_OFF = 0, NVFX_UPSCALE_BILINEAR = 1, NVFX_UPSCALE_LEARNED = 2 } nvfx_upscale;
+NVFX_API nvfx_status nvfx_effect_attach_upscaler(nvfx_effect* effect, const char* path);
+NVFX_API nvfx_status nvfx_effect_attach_upscaler_memory(nvfx_effect* effect, const void* data, size_t bytes);
+NVFX_API nvfx_status nvfx_instance_set_upscale(nvfx_instance* instance, nvfx_upscale mode);
 
 /* Render the frame at `time_seconds` (looping effects wrap; one-shot effects hold their last frame) into `rgba`,
  * whose rows are `stride_bytes` apart (>= size * 4). No allocation. */

@@ -1,0 +1,22 @@
+every shipped effect at 8 training settings, 128 px (pixels drawn: any channel above 4 of 255):
+  wildfire mean alpha 0.216, pixels drawn 0.708
+    launch mean alpha 0.312, pixels drawn 0.479
+    vortex mean alpha 0.109, pixels drawn 0.451
+ rainshaft mean alpha 0.092, pixels drawn 0.426
+ waterfall mean alpha 0.167, pixels drawn 0.419
+       jet mean alpha 0.109, pixels drawn 0.389
+  fountain mean alpha 0.104, pixels drawn 0.332
+     puffs mean alpha 0.118, pixels drawn 0.329
+ explosion mean alpha 0.173, pixels drawn 0.254
+     magic mean alpha 0.091, pixels drawn 0.235
+     smoke mean alpha 0.065, pixels drawn 0.215
+  mushroom mean alpha 0.131, pixels drawn 0.202
+     steam mean alpha 0.044, pixels drawn 0.179
+       ink mean alpha 0.062, pixels drawn 0.149
+       orb mean alpha 0.036, pixels drawn 0.129
+     cloud mean alpha 0.042, pixels drawn 0.116
+     coals mean alpha 0.066, pixels drawn 0.109
+       fog mean alpha 0.024, pixels drawn 0.104
+      dust mean alpha 0.043, pixels drawn 0.084
+      fire mean alpha 0.011, pixels drawn 0.076
+    splash mean alpha 0.029, pixels drawn 0.064
