@@ -1,6 +1,7 @@
 # To do: every effect in 3D — a small demo here first, then big on a PC
 
 **Status:** stage 1 is done (study N, `docs/STUDY_3D.md`, and its follow-up N2, §14); stage 2 is planned, not started.
+Work here is paused (15 October 2026): four branches wait to be finished and merged ("Here, until the PC").
 
 - **Stage 1, here and now (study N): done.** A small 3D demo in this container ([docs/STUDY_3D.md](docs/STUDY_3D.md),
   REPORT §15). What it built:
@@ -51,20 +52,42 @@ First we demo, then we go big.
 
 Work that runs in this container meanwhile, in 2D and in small 3D, measured as every study is.
 
-**Under way (15 October 2026):**
-- **Round 9's effects**:
-  - earth: lava, a volcanic eruption and a powder-snow avalanche;
-  - air: a candle flame, smoke rings and heavy gas spilling along the ground;
-  - library entries, a volcano scene and a crypt scene, and demo videos.
-- **Study O**, the most visible flaws:
-  - the learned waterfall's banding;
-  - launch's boxy billows;
-  - the mushroom cloud's lost stem and cap;
-  - the rocket thruster's curling exhaust;
-  - the weak splash.
-- **Study P, cheaper big effects.** Draw an effect that fills much of the screen at half resolution, then bring it to
-  full size with a learned 2x upscale and seeded micro-detail. It is measured against native resolution and a plain
-  bilinear upscale, in quality and milliseconds, on six large effects at 256 and 512 px (seeds 3.6 to 3.9 million).
+**Paused (15 October 2026), each on its own branch, not merged into main.** Each branch's doc opens with a "Status:
+paused" note: what is done, where its data is under `/root/nvfx-data`, and the exact commands to resume. To finish one:
+merge main into it, finish its list, run the full ctest, `nvfx_alloc_test`, `nvfx_gallery --check` and the Godot test,
+then merge it into main.
+- **Round 9, earth** (`effects-earth`, docs/EFFECTS_EARTH.md): lava, a volcanic eruption and a powder-snow avalanche.
+  - Done: the three presets with sim tests (the 21 earlier effects' clips unchanged); the test design committed first.
+  - Lava is trained and tested once. It passes: tracking at 1 s is +1.09 dB [+0.70, +1.43] over the coarse simulation
+    with detail; its endless mean picture is closer than the nearest flipbook's and its motion ties it; its detail is
+    worse than the flipbook's.
+  - Left: the eruption's model (its training was running at the pause), the avalanche's, their tests, timing, library
+    entries, the volcano scene, videos and REPORT §6.16.
+- **Round 9, air** (`effects-air`, docs/EFFECTS_AIR.md): a candle flame, smoke rings and heavy gas along the ground.
+  - Done: the three presets with sim and recipe tests (earlier clips unchanged); the rule committed before training.
+  - The candle's model was in its last training stage at the pause; a follow-on job set to test it once and train the
+    other two may have run on. Check `/root/nvfx-data/fx_air/jobs/state` and the logs before resuming.
+  - Left: the smoke ring's and heavy gas's models, all tests, timing, the library file, the crypt scene, videos and
+    REPORT §6.17.
+- **Study O, the most visible flaws** (`study-fix`, REPORT §16):
+  - Done, by eye, with no model change:
+    - the waterfall's and rain shaft's banding (the detail layer locking once a frame; effects take `passes N`, and
+      the library and the falls scene use 2);
+    - launch's square block (the lift-off scene uses a three-tile domain);
+    - the thruster's curling exhaust (a `cold` field on its tail).
+  - The mushroom and splash fixes: the rule is committed (§16.3.1) and the candidates are frozen. On validation the
+    mushroom gained +1.12 dB [0.79, 1.45] in the mean picture and the splash +0.62 dB [0.40, 0.86].
+  - **The held-out test has not run; its seeds (3,200,000 to 3,299,999) are unspent.** No model has been replaced.
+- **Study P, cheaper big effects** (`study-upscale`, docs/STUDY_P.md):
+  - The idea: draw a large effect at half size, then upscale it 2x with a learned net and seeded micro-detail.
+  - Found: the render size enters only the detail layer and the renderer, so a half-size instance shares the native
+    one's motion bit for bit.
+  - Training tiles show the learned 2x only slightly better than bilinear against native: +0.08 dB shared, up to
+    +0.55 dB per effect.
+  - Built: an opt-in path (`nvfx_effect_attach_upscaler`, `nvfx_instance_set_upscale`, NVFX_VERSION 7, no allocation
+    per frame), costing 0.45 to 0.56 of native at 512 px (busy machine, provisional).
+  - The rule's form is committed; its margins wait on the null probe. **The test has not run; seeds 3.8 to 3.9
+    million are unspent.**
 - **Float on AVX-512 (done).** Float rollouts take the AVX-512 build by default where the CPU has it: 0.80 of AVX2's
   time on a quiet machine (`results/quiet`, round 6). Its float frames turned out bit-identical to AVX2's for all 24
   models with this compiler; the frozen float tests are pinned to AVX2 anyway (REPORT §13.10).
