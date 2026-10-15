@@ -2374,7 +2374,7 @@ emission distance was about 2 × 10⁻⁵ (the explosion and dust add almost no 
 10⁻⁵) and its mean state moved it by +1 × 10⁻⁶ [-3 × 10⁻⁶, +4 × 10⁻⁶], outside a margin of 10% of it: a relative margin
 on a distance that is almost zero is the size of its noise, which re-creates the null the margins were meant to remove
 (smoke's in study M). The least value matters only where the current model's distance is under 0.001, which in
-study M's tables (§14.4) is smoke's and the explosion's light alone (fire's coverage and light and every coverage
+study M's validation ([m_val_stats.csv](../results/experiments/ordered/m_val_stats.csv)) is smoke's and the explosion's light alone (fire's coverage and light and every coverage
 distance there are above it, where 10% governs). The rule as first committed is commit `f996878`; nothing else was
 changed.
 
