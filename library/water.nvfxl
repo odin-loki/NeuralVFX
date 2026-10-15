@@ -8,6 +8,7 @@
 effect waterfall_fx = "waterfall.nvfx", swirl 0    # the learned waterfall; no sub-grid swirl (it marbles the sheet)
 effect fountain_fx  = "fountain.nvfx", swirl 0     # the learned fountain: intensity (height), aim, turbulence
 effect splash_fx    = "splash.nvfx", swirl 0       # the learned splash: plays once (3 s) from one of 16 stored starts
+effect rainshaft_fx = "rainshaft.nvfx", swirl 0    # the learned rain shaft: intensity, wind, turbulence
 
 look spray  = shader, emission 0, soot_density 0.7, soot_albedo 0.9, sky 1.1, shadow 0.1, scene_light 1.3, relief 0.4,
               tint (0.9, 0.95, 1)                                                       # white spray and mist
@@ -212,7 +213,21 @@ water p3 = pool, along (X + 220 * scale, Y - 18 * scale) to (X + 420 * scale, Y 
            surface 12 * scale, cells 64, rate 2.5 * density, seed 734
 
 entry rain_shaft, category water, size 700 x 700, anchor base, loop, show 3,
-      about "A rain shaft: a dark storm cloud trailing a slanted curtain of rain that thickens and thins in gusts (the cloud model and streaks)"
+      about "A rain shaft: a dark storm cloud (the cloud model) trailing a curtain of rain that thickens, thins and leans with the wind (the rainshaft model), its streaks seeded"
+param density = 18, range (5, 50), about "streaks in each 100 x 100 pixels at once"
+param wind = 50, range (-200, 200), about "how it slants"
+module a = cloud, size 128, width 520 * scale, at (X - 140 * scale, Y - 360 * scale), feather 0.1, look storm, start 0,
+           seed 741, controls (0.9, 0.6, 0.5), wind 0.55 + wind / 1000
+module b = cloud, size 128, width 520 * scale, at (X + 140 * scale, Y - 350 * scale), feather 0.1, look storm, start 3,
+           seed 742, controls (0.9, 0.6, 0.5), wind 0.55 + wind / 1000
+module curtain = rainshaft_fx, size 128, width 600 * scale, at (X, Y), sink 0.055, feather 0.2, start 0, seed 745,
+                 controls (0.6, 0.6, 0.5), wind 0.5 + wind / 400
+water streaks = shaft, in (X - 150 * scale, Y - 540 * scale), size 300 * scale x 540 * scale, density density,
+                speed 600 * scale, wind (wind * scale, 0), sway 30 * scale, gust 0.7, clarity 0.85, colour (0.55, 0.6, 0.68),
+                seed 744
+
+entry rain_shaft_drawn, category water, size 700 x 700, anchor base, loop, show 3,
+      about "A rain shaft, drawn: a dark storm cloud trailing a slanted curtain of rain that thickens and thins in gusts (the cloud model; the curtain and its streaks the seeded layer alone)"
 param density = 22, range (5, 50), about "streaks in each 100 x 100 pixels at once"
 param wind = 70, range (-200, 200), about "how it slants"
 module a = cloud, size 128, width 520 * scale, at (X - 140 * scale, Y - 360 * scale), feather 0.1, look storm, start 0,
