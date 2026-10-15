@@ -1723,7 +1723,7 @@ bool Fluid::render_water(std::span<std::uint8_t> out) const {
 // every force is a function of the state where it acts, the position, the controls and the run's two noise fields
 // (curl_potential, source_flicker), which learned dynamics see as inputs; nothing follows a clock of its own. The smoke
 // ring, which plays once, is made at its first step (as the explosion's burst) and also follows the time since its start,
-// but only through the faster of the two decays a learned one-shot sees as inputs (exp(-t / 0.15 s)).
+// but only through the two decays a learned one-shot sees as inputs (exp(-t / 0.15 s), exp(-t / 1 s)), as the mushroom.
 
 namespace {
 
@@ -1742,7 +1742,7 @@ float gas_floor(float X) {
   const float d = std::abs(X - 64.5f);
   return 4.f + 8.f * smoothstep(28.f, 16.f, d) + 8.f * smoothstep(46.f, 60.f, d);
 }
-constexpr float kGasX = 64.5f, kGasY = 26.5f;  // the release, over the mound (a coarse cell's centre)
+constexpr float kGasX = 64.5f, kGasY = 26.5f;  // the release, over the mound (its height a coarse cell's centre)
 
 }  // namespace
 
@@ -1845,9 +1845,9 @@ bool Fluid::add_air_sources(float dt) {
 }
 
 // candle: the draught blows the flame and its plume sideways, in gusts that the curl noise where it blows makes (more
-// flicker the stronger it blows). smokering: nothing beyond tune()'s (its vortices are its own). heavygas: its floor (the
-// air in it is still and what comes down onto it stops, as fog's ground but following the hollows) and a draught along
-// it in the flow's direction.
+// flicker the stronger it blows). smokering: the wind, which moves the clear air (the ring's vortices are its own), and
+// the curl noise that breaks it up as it ages. heavygas: its floor (the air in it is still and what comes down onto it
+// stops, as fog's ground but following the hollows) and a draught along it in the flow's direction.
 void Fluid::add_air_forces(float dt) {
   if (!air_effect(p_.effect)) return;
   const float n = f(n_), s = n / 128.f;
