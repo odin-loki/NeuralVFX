@@ -1,0 +1,12 @@
+kind,name,file,bytes,sha256,source
+rollout_effect,wildfire,fx_blaze/models/d/wildfire.nvfx,83719,ada7ce4af7496237c7cdabcf27efb739bef1b0b5e57c4cdc65dd1f2c6eba2585,study D's recipe (docs/EFFECTS_BLAZE.md): d-train --stages12 1 then d-tune then d-finish
+rollout_effect,coals,fx_blaze/models/d/coals.nvfx,83719,f042745cc2cebfc9c890b4d14ad1594186f7112cf90218177c60e80ea5aecdd2,study D's recipe (docs/EFFECTS_BLAZE.md): d-train --stages12 1 then d-tune then d-finish
+rollout_effect,mushroom,fx_blaze/models/d/mushroom.nvfx,280927,505bdfe80ce38c684617eb7da7ca681c0fc507a155285a19251ea0fd8b25a5f3,study D's recipe (docs/EFFECTS_BLAZE.md): d-train --stages12 1 then d-tune then d-finish (the one-shot branch, 150 frames)
+prairie_keyframe,frame_024,nvfx_scene_script --keyframes (examples/scenes/prairie.nvfxs),1268593,036dd532a241cab143301189663d322b7751c33cd9411380515c95c8b2c850ee,
+prairie_keyframe,frame_063,nvfx_scene_script --keyframes (examples/scenes/prairie.nvfxs),877417,5b5cecf66e02b938dc5265db405e9e1f036b0127529fccdd9323834e4f8cfce8,
+prairie_keyframe,frame_078,nvfx_scene_script --keyframes (examples/scenes/prairie.nvfxs),1134860,4c33f87cbff21c41ab642959194c4877a5aba0c28176329e2bd71085f3c51aff,
+prairie_keyframe,frame_102,nvfx_scene_script --keyframes (examples/scenes/prairie.nvfxs),1242221,b43bab1dea4defa12ac94715099ee34b1fd3779acad5fb25e6e1c8b8bf96abc9,
+prairie_keyframe,frame_123,nvfx_scene_script --keyframes (examples/scenes/prairie.nvfxs),1288514,d584c5722ed72151df46eadfbe41838e7415939ab8735e4029ac6138f765943f,
+prairie_keyframe,frame_138,nvfx_scene_script --keyframes (examples/scenes/prairie.nvfxs),1296937,46f70f039ed3fafbdb44dc6938b3da51da0cbe2c4b9ba4283f561971dab76d70,
+prairie_keyframe,frame_174,nvfx_scene_script --keyframes (examples/scenes/prairie.nvfxs),1324248,489fea74cdc2e2b5f2f104ec03473f3182105424f5986bcec14e148d708367fb,
+prairie_keyframe,frame_216,nvfx_scene_script --keyframes (examples/scenes/prairie.nvfxs),1328275,90f6a1f8bd333fd6b2584088fed561e65a3129578096ca4359cfed9d76261133,

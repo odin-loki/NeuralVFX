@@ -1102,6 +1102,93 @@ double window_loss(const Model& m, const Run& r, int first, int unroll, int burn
   return loss;
 }
 
+double mean_window_loss(const Model& m, const Run& r, int first, int burn, int unroll, int pool, std::uint64_t seed_a, std::uint64_t seed_b,
+                        std::vector<float>* grad, float weight) {
+  const Hyper& h = m.h;
+  const StepLayout L = step_layout(h);
+  const int R = h.res, N = R * R, C = h.channels(), G = R / pool;
+  if (pool < 1 || R % pool != 0) throw std::invalid_argument("rollout: the mean loss's blocks must divide the grid");
+  const std::vector<float> controls = r.controls();
+  std::array<float, kPhys> wch{};
+  for (int k = 0; k < kPhys; ++k) wch[sz(k)] = 1.f / (m.scale[sz(k)] * m.scale[sz(k)]);
+  // the two rollouts: burn-in without gradient, then the window with its caches; pooled states per window frame
+  std::array<std::vector<Cache>, 2> cs;
+  std::array<std::vector<Vec>, 2> conds, pooled;
+  for (int k = 0; k < 2; ++k) {
+    const std::uint64_t seed = k == 0 ? seed_a : seed_b;
+    Vec S, pressure(sz(N), 0.f), noise(sz(N) * kNoise), cond(sz(h.cond()));
+    state_of(m, r, first, S);
+    Cache cb;
+    for (int s = 0; s < burn; ++s) {
+      condition(m, controls, run_time(r, first + s), cond);
+      coarse_noise(m, seed, run_time(r, first + s), noise);
+      forward(m, L, S.data(), noise.data(), cond, pressure, cb);
+      S = cb.next;
+    }
+    cs[sz(k)].resize(sz(unroll));
+    conds[sz(k)].resize(sz(unroll));
+    pooled[sz(k)].resize(sz(unroll));
+    for (int s = 0; s < unroll; ++s) {
+      conds[sz(k)][sz(s)].resize(sz(h.cond()));
+      condition(m, controls, run_time(r, first + burn + s), conds[sz(k)][sz(s)]);
+      coarse_noise(m, seed, run_time(r, first + burn + s), noise);
+      forward(m, L, S.data(), noise.data(), conds[sz(k)][sz(s)], pressure, cs[sz(k)][sz(s)]);
+      S = cs[sz(k)][sz(s)].next;
+      Vec& P = pooled[sz(k)][sz(s)];
+      P.assign(sz(G) * sz(G) * kPhys, 0.f);
+      for (int y = 0; y < R; ++y) {
+        for (int x = 0; x < R; ++x) {
+          for (int c = 0; c < kPhys; ++c) P[(sz(y / pool) * sz(G) + sz(x / pool)) * kPhys + sz(c)] += S[(sz(y) * sz(R) + sz(x)) * sz(C) + sz(c)] / fl(pool * pool);
+        }
+      }
+    }
+  }
+  // the loss and its gradient with respect to each rollout's states
+  const float norm = weight / (fl(unroll) * fl(G * G) * kPhys);
+  double loss = 0;
+  std::array<std::vector<Vec>, 2> gout;
+  for (int k = 0; k < 2; ++k) gout[sz(k)].assign(sz(unroll), Vec(sz(N) * sz(C), 0.f));
+  Vec X(sz(G) * sz(G) * kPhys);
+  for (int s = 0; s < unroll; ++s) {
+    const float* t = r.coarse.data() + sz(first + burn + s + 1) * sz(N) * kPhys;
+    std::fill(X.begin(), X.end(), 0.f);
+    for (int y = 0; y < R; ++y) {
+      for (int x = 0; x < R; ++x) {
+        for (int c = 0; c < kPhys; ++c) X[(sz(y / pool) * sz(G) + sz(x / pool)) * kPhys + sz(c)] += t[(sz(y) * sz(R) + sz(x)) * kPhys + sz(c)] / fl(pool * pool);
+      }
+    }
+    for (std::size_t q = 0; q < X.size(); ++q) {
+      const float w = wch[q % kPhys];
+      const float da = pooled[0][sz(s)][q] - X[q], db = pooled[1][sz(s)][q] - X[q];
+      loss += static_cast<double>(norm * w * da * db);
+    }
+    for (int k = 0; k < 2; ++k) {
+      const Vec& other = pooled[sz(1 - k)][sz(s)];
+      Vec& g = gout[sz(k)][sz(s)];
+      for (int y = 0; y < R; ++y) {
+        for (int x = 0; x < R; ++x) {
+          for (int c = 0; c < kPhys; ++c) {
+            const std::size_t q = (sz(y / pool) * sz(G) + sz(x / pool)) * kPhys + sz(c);
+            g[(sz(y) * sz(R) + sz(x)) * sz(C) + sz(c)] = norm * wch[sz(c)] * (other[q] - X[q]) / fl(pool * pool);
+          }
+        }
+      }
+    }
+  }
+  if (grad) {
+    for (int k = 0; k < 2; ++k) {
+      Vec gS(sz(N) * sz(C), 0.f), gp(sz(N), 0.f), gS_in, gp_in;
+      for (int s = unroll - 1; s >= 0; --s) {
+        for (std::size_t j = 0; j < gS.size(); ++j) gS[j] += gout[sz(k)][sz(s)][j];
+        backward(m, L, cs[sz(k)][sz(s)], conds[sz(k)][sz(s)], gS, gp, gS_in, gp_in, grad->data());
+        gS.swap(gS_in);
+        gp.swap(gp_in);
+      }
+    }
+  }
+  return loss;
+}
+
 bool window_has_coupling(const Run& r, int first, int unroll) {
   for (int i = first + 1; i <= first + unroll; ++i) {
     if (i >= 0 && sz(i) < r.forcing_at.size() && r.forcing_at[sz(i)] >= 0) return true;
@@ -1136,6 +1223,7 @@ int thread_count(int requested) {
 
 StepperResult train_stepper(Model& m, std::span<const Run> runs, const StepperOptions& o) {
   if (runs.empty()) throw std::invalid_argument("rollout: no runs");
+  if (m.h.force != 0.f || !m.bias.empty()) throw std::invalid_argument("rollout: the trainer does not model Hyper::force or Model::bias (study M)");
   const Hyper& h = m.h;
   const std::size_t per = sz(h.res) * sz(h.res) * kPhys;
   for (const Run& r : runs) {
@@ -1167,7 +1255,7 @@ StepperResult train_stepper(Model& m, std::span<const Run> runs, const StepperOp
   Adam adam(L.size);
   StepperResult res;
   const auto t0 = std::chrono::steady_clock::now();
-  const int total = o.iterations + o.finetune + o.activity_stage;
+  const int total = o.iterations + o.finetune + o.activity_stage + o.mean_stage;
   std::vector<double> tail;
   // The mix of plain and coupled runs (o.plain_runs >= 0): a window from the coupled runs with probability
   // o.coupled_share.
@@ -1182,6 +1270,7 @@ StepperResult train_stepper(Model& m, std::span<const Run> runs, const StepperOp
   for (int it = 0; it < total; ++it) {
     const bool fine = it >= o.iterations;
     const bool act = it >= o.iterations + o.finetune;
+    const bool mean = it >= o.iterations + o.finetune + o.activity_stage;  // study M's stage
     const int unroll = fine ? o.max_unroll : std::min(o.max_unroll, 1 + it * o.max_unroll / std::max(1, o.iterations / 2));
     std::vector<Vec> grads(sz(threads), Vec(L.size, 0.f));
     std::vector<double> losses(sz(threads), 0.0);
@@ -1201,6 +1290,15 @@ StepperResult train_stepper(Model& m, std::span<const Run> runs, const StepperOp
               for (int k = 0; k < 16 && !window_has_coupling(r, first + burn, unroll); ++k) first = static_cast<int>(rng() % static_cast<std::uint64_t>(span));
             }
             const bool anchored = o.anchor > 0.f && o.anchor_model && o.plain_runs >= 0 && ri < n_plain;
+            if (mean && (b & 2)) {  // study M: the ensemble-mean loss (half the batch: the windows with b & 2)
+              const int mb = o.mean_burn_min + static_cast<int>(rng() % static_cast<std::uint64_t>(std::max(1, o.mean_burn_max - o.mean_burn_min + 1)));
+              const int mspan = r.frames - unroll - mb - 1;
+              if (mspan <= 0) continue;
+              const int mfirst = static_cast<int>(rng() % static_cast<std::uint64_t>(mspan));
+              const std::uint64_t sa = rng(), sb = rng();
+              losses[sz(t)] += mean_window_loss(m, r, mfirst, mb, unroll, o.mean_pool, sa, sb, &grads[sz(t)], o.mean_weight);
+              continue;
+            }
             losses[sz(t)] += window_loss(m, r, first, unroll, burn, o.sigma, fine ? o.profile : 0.f, rng(), &grads[sz(t)], act ? o.activity : 0.f,
                                          anchored ? o.anchor_model : nullptr, anchored ? o.anchor : 0.f);
           }
@@ -1222,8 +1320,8 @@ StepperResult train_stepper(Model& m, std::span<const Run> runs, const StepperOp
       const float s = static_cast<float>(o.clip / gn);
       for (float& g : grads[0]) g *= s;
     }
-    const int stage_it = act ? it - o.iterations - o.finetune : (fine ? it - o.iterations : it);
-    const int stage_n = act ? o.activity_stage : (fine ? o.finetune : o.iterations);
+    const int stage_it = mean ? it - o.iterations - o.finetune - o.activity_stage : (act ? it - o.iterations - o.finetune : (fine ? it - o.iterations : it));
+    const int stage_n = mean ? o.mean_stage : (act ? o.activity_stage : (fine ? o.finetune : o.iterations));
     const float base = fine ? o.lr_finetune : o.lr;
     const float lr = base * (0.05f + 0.95f * 0.5f * (1.f + std::cos(3.14159265f * static_cast<float>(stage_it) / static_cast<float>(std::max(1, stage_n)))));
     adam.step(m.step_w, grads[0], lr);
@@ -1580,9 +1678,10 @@ SimRecipe recipe_for(sim::Effect e) {
   r.stepper.activity = 100.f;
   if (e == sim::Effect::smoke) r.start_fine = 64;  // smoke lingers: growing its detail would take seconds
   if (e == sim::Effect::fog || e == sim::Effect::cloud) r.start_fine = 64;  // they linger too (docs/EFFECTS_ATMOSPHERE.md)
+  if (e == sim::Effect::launch || e == sim::Effect::puffs || e == sim::Effect::ink) r.start_fine = 64;  // and these (docs/EFFECTS_FLOW.md)
   if (!sim::effect_loops(e)) {  // the explosion, and dust (docs/EFFECTS_ATMOSPHERE.md), which plays once as it does
     r.runs = 240;
-    r.frames = 90;
+    r.frames = sim::one_shot_frames(e);  // 90 (3 s); the mushroom's 150 (docs/EFFECTS_BLAZE.md)
     r.start_frame = 0;
     r.start_fine = 64;  // the burst's shape is the look
     r.starts = 16;
@@ -1590,7 +1689,7 @@ SimRecipe recipe_for(sim::Effect e) {
   }
   // steam and magic (docs/EFFECTS.md) take fire's recipe: their vapour and energy are gone within a second or two, so
   // like fire's flames they grow their fine fields at instance start instead of storing them
-  // and so do jet, orb and vortex (docs/EFFECTS_ENERGY.md)
+  // and so do jet, orb and vortex (docs/EFFECTS_ENERGY.md), and wildfire and coals (docs/EFFECTS_BLAZE.md)
   return r;
 }
 
@@ -1679,7 +1778,8 @@ FinishResult finish_model(Model& m, const SimRecipe& r, std::span<const Run> run
   // detail layer, as deployed (from start points, new seeds), at the controls of four training runs
   std::vector<sim::Params> cal;
   for (std::size_t i = 0; i < std::min<std::size_t>(4, runs.size()); ++i) cal.push_back(runs[i].p);
-  out.detail_score = one_shot ? calibrate_detail(m, cal, 1, 0, std::min(89, r.frames - 1)) : calibrate_detail(m, cal, 150, 60, 180);
+  // a one-shot over its whole length (the explosion's and dust's 89 frames after the first; the mushroom's 149)
+  out.detail_score = one_shot ? calibrate_detail(m, cal, 1, 0, r.frames - 1) : calibrate_detail(m, cal, 150, 60, 180);
   return out;
 }
 

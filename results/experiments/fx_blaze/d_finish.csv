@@ -1,0 +1,4 @@
+effect,renderer_psnr,contrast,swirl,detail_score,starts,stored_bytes,grow
+wildfire,34.65,1,0.5,0.414,8,83594,1
+coals,37.82,0.5,0,0.393,8,83594,1
+mushroom,29.16,1,0.5,0.454,16,280826,1

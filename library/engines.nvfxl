@@ -1,0 +1,63 @@
+# Engines (docs/EFFECTS_FLOW.md): the launch model, an engine's exhaust blown down onto the ground that rolls out both
+# ways in billows, and the puffs model, smoke leaving a chimney or an exhaust in pulses (their timing comes from the
+# model's noise, so they are irregular, faster with `rate`). Puffs carry no light: they are drawn by looks lit by the
+# scene.
+
+look chuff  = shader, emission 0, soot_density 2.4, soot_albedo 0.8, sky 0.9, shadow 0.3, scene_light 1.2, relief 1.6,
+              tint (0.92, 0.92, 0.94)                                  # a locomotive's steam and smoke, grey-white
+look diesel = like chuff, tint (0.55, 0.52, 0.5), soot_albedo 0.5, soot_density 3.2, sky 0.9    # dark exhaust
+look blast_dust = shader, heat_scale 1.4, emission 1.8, emission_power 3, soot_density 1.5, soot_albedo 0.65, sky 0.6,
+                  shadow 0.3, scene_light 1.2, relief 0.8, tint (0.86, 0.74, 0.58)  # an exhaust that blows up dust
+look downwash = shader, emission 0, soot_density 1.4, soot_albedo 0.7, sky 0.6, shadow 0.3, scene_light 1.2, relief 0.8,
+                tint (0.8, 0.72, 0.6)                                  # the launch model's flow with no flame: dust
+
+entry rocket_launch, category engines, size 760 x 500, anchor base, loop, show 4,
+      about "A rocket launch pad: the engine's exhaust blasts the pad and rolls out both ways in billowing grey-white clouds that rise, bright where it hits (the launch model)"
+param thrust = 0.8, range (0.3, 1), about "how hard it blows"
+param wind = 0.55, range (0, 1), about "drift of the clouds: 0.5 still air"
+let w = 760 * scale
+module blast = launch, size 128, width w, at (X, Y), sink 0.02, feather 0.08, start 0, seed 1101,
+               controls (0.8, 0.55, 0.5), intensity thrust, wind wind
+emit glow, at (X, Y - 0.56 * w), radius 10 * scale, colour (1, 0.92, 0.8), brightness 2.5 * (0.9 + 0.1 * noise(25 * t, 1, 0))
+field fire = lamp, at (X, Y - 40 * scale), radius 300 * scale, strength 0.6 * thrust, colour (1, 0.7, 0.4)
+
+entry landing_thruster, category engines, size 360 x 240, anchor base, loop, show 3,
+      about "A landing thruster: a lander's engine firing down at dusty ground, kicking up a low brown cloud both ways (the launch model, recoloured)"
+param thrust = 0.4, range (0.1, 0.8), about "how hard it blows"
+let w = 360 * scale
+module blast = launch, size 128, width w, at (X, Y), sink 0.02, feather 0.1, look blast_dust, start 0, seed 1111,
+               controls (0.4, 0.5, 0.4), intensity thrust
+emit glow, at (X, Y - 0.56 * w), radius 6 * scale, colour (1, 0.85, 0.6), brightness 2
+field fire = lamp, at (X, Y - 20 * scale), radius 140 * scale, strength 0.4 * thrust, colour (1, 0.75, 0.45)
+
+entry hover_downwash, category engines, size 420 x 220, anchor base, loop, show 3,
+      about "A hovering craft's downwash: a strong draught blown down at the ground, throwing up dust that rolls out both ways (the launch model's flow, drawn without its flame)"
+param power = 0.5, range (0.2, 0.9), about "how strong the draught"
+module draught = launch, size 128, width 420 * scale, at (X, Y), sink 0.02, feather 0.1, look downwash, start 0, seed 1121,
+                controls (0.5, 0.5, 0.6), intensity power
+
+entry locomotive_chimney, category engines, size 300 x 460, anchor base, loop, show 4,
+      about "A steam locomotive's chimney: grey-white puffs of steam and smoke that roll up and drift away into a trail; its anchor is the chimney's top (the puffs model)"
+param rate = 0.4, range (0, 1), about "pulses: 0 about one every two seconds, 1 about two and a half a second (irregular)"
+param intensity = 0.65, range (0.3, 1), about "puff size"
+let w = 300 * scale
+module chuff = puffs, size 128, width w, at (X + 0.137 * w, Y + 0.05 * w), feather 0.3, look chuff, start 0, seed 1131,
+               controls (0.65, 0.4, 0.5), intensity intensity, rate rate
+
+entry exhaust_stack, category engines, size 200 x 340, anchor base, loop, show 4,
+      about "A truck's exhaust stack: dark diesel smoke in quick puffs as the engine works; its anchor is the top of the stack"
+param rate = 0.7, range (0, 1), about "pulses: faster as the engine works harder (irregular)"
+param intensity = 0.4, range (0.1, 0.8), about "how much smoke"
+let w = 200 * scale
+module stack = puffs, size 128, width w, at (X + 0.137 * w, Y + 0.05 * w), feather 0.3, look diesel, start 0, seed 1141,
+               controls (0.4, 0.7, 0.5), intensity intensity, rate rate
+
+entry smoke_signals, category smoke, size 300 x 520, anchor base, loop, show 5,
+      about "Smoke signals: a small fire on the ground sends up distinct puffs of grey smoke (the puffs model over the fire model)"
+param rate = 0.15, range (0, 0.5), about "how often a puff goes up"
+let w = 300 * scale
+module puff = puffs, size 128, width w, at (X + 0.137 * w, Y + 0.02 * w), feather 0.3, look smoke, start 0, seed 1151,
+              controls (0.8, 0.15, 0.4), intensity 0.8, rate rate
+module fire = fire, size 64, width 120 * scale, at (X, Y), sink 0.08, feather 0.15, start 0, seed 1152,
+              controls (0.45, 0.5, 0.5)
+field warm = lamp, at (X, Y - 20 * scale), radius 90 * scale, strength 0.4, colour (1, 0.6, 0.3)

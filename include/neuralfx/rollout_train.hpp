@@ -152,6 +152,16 @@ struct StepperOptions {
   // Without it a stepper that asks for less than nothing in an empty cell gets no gradient there and can never learn to
   // grow material from nothing (the vortex's column). Off by default.
   bool floor_gradient = false;
+  // Study M (docs/REPORT.md §14), the ordered part: a fourth stage of `mean_stage` iterations, after the others. Half its
+  // windows are the activity stage's; the other half (mean_window_loss) start from a true state of a run and play two
+  // rollouts with seeds of their own (not the run's) for a burn-in of mean_burn_min .. mean_burn_max frames without
+  // gradient, then max_unroll frames with it; their loss is mean_weight times (a - x)(a' - x), a and a' the two rollouts'
+  // state and x the run's own over the window's frames, averaged over blocks of mean_pool cells. Its expectation is the
+  // squared bias of the model's mean from that start (plus a constant): it corrects where the effect drifts to on average
+  // without asking a rollout to be calmer, as a squared error against one run would. Off by default.
+  int mean_stage = 0;
+  float mean_weight = 1.f;
+  int mean_burn_min = 0, mean_burn_max = 90, mean_pool = 4;
   int checkpoint_every = 0;                    // call checkpoint(iterations done) this often (0: never)
   int stop_after = 0;                          // stop after this many iterations, on the full schedule (0: run it all)
   std::function<void(int done)> checkpoint;
@@ -216,7 +226,7 @@ struct SimRecipe {
   RendererOptions renderer;
   std::function<void(const std::string&)> log;
 };
-SimRecipe recipe_for(sim::Effect e);  // fire, steam, magic, jet, orb, vortex as above; smoke, fog, cloud keep 64-pixel fine fields; one-shot effects (explosion, dust): 240 runs x 90 frames, 16 starts
+SimRecipe recipe_for(sim::Effect e);  // fire, steam, magic, jet, orb, vortex, wildfire, coals as above; smoke, fog, cloud, launch, puffs, ink keep 64-pixel fine fields; one-shot effects (explosion, dust, mushroom): 240 runs of their length (sim::one_shot_frames: 90 frames, the mushroom's 150), 16 starts
 sim::Params recipe_run(const SimRecipe& r, std::uint64_t index);
 std::vector<Run> record_runs(const SimRecipe& r);
 Model recipe_model(const SimRecipe& r);  // hyperparameters, noise and detail settings for the effect, fresh weights
@@ -234,6 +244,12 @@ FinishResult finish_model(Model& m, const SimRecipe& r, std::span<const Run> run
 double window_loss(const Model& m, const Run& run, int first, int unroll, int burn, float sigma, float profile,
                    std::uint64_t noise_seed, std::vector<float>* grad, float activity = 0.f, const Model* anchor = nullptr,
                    float anchor_weight = 0.f);
+// Study M: the ensemble-mean loss of one window (StepperOptions::mean_stage): from the run's true state `first`, two
+// rollouts with noise seeds seed_a and seed_b roll `burn` frames without gradient, then `unroll` frames; the loss is
+// weight times the mean over those frames, the blocks of `pool` cells and the physical channels (each in its scale) of
+// (a - x)(a' - x), x the run's state. Its gradient is added to grad (step_layout size). Plain runs only.
+double mean_window_loss(const Model& m, const Run& run, int first, int burn, int unroll, int pool, std::uint64_t seed_a, std::uint64_t seed_b,
+                        std::vector<float>* grad, float weight = 1.f);
 // Whether the steps of a window (states first + 1 .. first + unroll after `first`) include a coupling of a forced run.
 bool window_has_coupling(const Run& run, int first, int unroll);
 

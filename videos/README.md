@@ -1,11 +1,12 @@
 # Demo videos
 
-NeuralVFX replaces VFX flipbooks with small learned effects. Each of its eleven trained effects (fire, smoke, an
-explosion, steam, magic, fog, dust, cloud, a flamethrower's jet, a plasma orb and a dust devil) is one file of 42 to
-274 KB. It holds a few stored simulation states and a small network that moves the effect forward one frame at a time,
-driven by noise. So an effect plays for as long as it is wanted without repeating, follows artist controls (intensity,
-wind, turbulence) and can be scripted into scenes where effects push, light and feed one another. **Everything here
-ran on the CPU**: no GPU was used to train, play or render any of it.
+NeuralVFX replaces VFX flipbooks with small learned effects. Each of its seventeen trained effects (fire, smoke, an
+explosion, steam, magic, fog, dust, cloud, a flamethrower's jet, a plasma orb and a dust devil; since round 7 also a
+wildfire, coals, a mushroom cloud, an engine's launch blast, smoke puffs and ink) is one file of 42 to 274 KB. It
+holds a few stored simulation states and a small network that moves the effect forward one frame at a time, driven by
+noise. So an effect plays for as long as it is wanted without repeating, follows artist controls (intensity, wind,
+turbulence) and can be scripted into scenes where effects push, light and feed one another. **Everything here ran on
+the CPU**: no GPU was used to train, play or render any of it.
 
 What the docs measure (these videos were not timed: they were rendered at low priority on a busy shared 4-core
 machine, so how long they took says nothing about cost):
@@ -14,6 +15,9 @@ machine, so how long they took says nothing about cost):
   default on such a CPU (0.32 ms at 64 px, 1.37 ms at 256 px; mean over the eleven effects, provisional;
   [REPORT.md](../docs/REPORT.md) §13.6), and 0.8 to 0.9 ms in float on one AVX2 core (§6.7). An instance needs 2.4 MB
   of working memory at 128 px.
+- **Round 7's six** cost 0.50 (wildfire), 0.72 (coals) and 0.73 ms (mushroom), and 0.47 to 0.49 ms (launch, puffs,
+  ink) per 128 px frame at int8 on the AVX-512 build (provisional, the shared machine;
+  [EFFECTS_BLAZE.md](../docs/EFFECTS_BLAZE.md) §5, [EFFECTS_FLOW.md](../docs/EFFECTS_FLOW.md) §5).
 - **The fireball scene** runs at 80 frames per second at 1280 x 720 on 4 threads ([COMPOSE.md](../docs/COMPOSE.md) §7.3).
 - **A crowd of about 165 effects** fits a 4 ms budget per 60 Hz tick on one core once the manager has measured the machine
   ([MANAGER.md](../docs/MANAGER.md) §1 and §7.1).
@@ -29,9 +33,12 @@ violet burst) is such a look, not new dynamics. All learned effects play at the 
 The orb too: these were rendered before study K's rule on study L's orb sent it to float ([REPORT.md](../docs/REPORT.md)
 §13.9), so the fire whirl's lamps and the library's orb entries play at float from now on, a run that differs from
 these by about 0.08 dB in the average picture.
+The library's fire in these videos is v2's: study M replaced it afterwards ([REPORT.md](../docs/REPORT.md) §14) with a
+fire that is closer to real runs on average (+0.39 dB in the mean picture, a detail spectrum 0.023 nearer) but looks the
+same frame by frame, so the videos were not re-rendered.
 Every video is H.264 (yuv420p, +faststart, no audio). Click a poster to open its video.
 
-**37 videos, 49.1 MB in all**, each at most 5 MB, with 37 JPEG posters (437 KB in all).
+**47 videos, 59.0 MB in all**, each at most 5 MB, with 47 JPEG posters (583 KB in all).
 
 ## 1. Showcase scenes
 
@@ -47,13 +54,16 @@ without a heap allocation in its frame loop.
 | <a href="scene_moor.mp4"><img src="scene_moor.jpg" width="200" alt="The moor"></a> | **The moor** | Storm cloud drifting over a foggy moor with a campfire; lightning strikes twice, the dust rolls out through the fog and pushes it aside, the second strike bends the flames ([EFFECTS_ATMOSPHERE.md](../docs/EFFECTS_ATMOSPHERE.md) §6) | Learned: fog (5 modules), cloud (3), dust bursts (all shader looks), the campfire. Procedural: the lightning's flash (no bolt), shock, debris, embers, scorch, light | Fog (146 KB), dust (274 KB), cloud (146 KB), v2 fire (`fx_atmos/models/scene`); int8 | `moor.nvfxs`, 10 s, 2.5 MB | Each reads as what it is; lifted fog stays up as pale plumes; there is a flash but no bolt to see |
 | <a href="scene_firewhirl.mp4"><img src="scene_firewhirl.jpg" width="200" alt="The fire whirl"></a> | **The fire whirl** (study L's orb and vortex) | A dust devil wanders between two plasma lamps; a flamethrower opens up, its flame bends into the whirl, the whirl catches and burns as a column of fire, the lamps flare, then it dies down to dust ([EFFECTS_ENERGY.md](../docs/EFFECTS_ENERGY.md) §6, §9) | Learned: the jet (its own renderer), the lamps (orb, own renderer), the whirl (vortex, a dust look blending to a burning one). Procedural: embers, light | Jet (82 KB), orb and vortex v3 of study L (82 KB each) (`fx_energy/models/scene`); int8 | `firewhirl.nvfxs`, 10 s, 3.4 MB | Reads as a flamethrower, lamps and a dust devil; the burning column is braided (the detail layer locking once a frame); the lamps' light on the dust is faint |
 | <a href="scene_weather.mp4"><img src="scene_weather.jpg" width="200" alt="Weather and trails"></a> | **Weather and trails** | A smoke column, its right half washed by rain; a campfire under snow that melts in its heat; a rocket leaves a smoke trail across the sky; a truck leaves a dust wake ([COMPOSE.md](../docs/COMPOSE.md) §5.3) | Learned: the column (smoke), the campfire (fire), the rocket's trail (explosion model tiles), the dust wake (dust model tiles), all but the fire by shader looks. Procedural: rain, snow, the rocket's glow and glare, embers, the lamp | The library's fire, smoke, explosion, dust (`library/models`); int8 | `weather.nvfxs`, 8 s, 2.4 MB | The trails stay where they were left and fade; the rain's thinning of the column is subtle; rain and snow are unlit |
+| <a href="scene_prairie.mp4"><img src="scene_prairie.jpg" width="200" alt="The prairie"></a> | **The prairie** (round 7) | Night on a prairie: a grass fire's front burns on the right, the ground it burnt glows as coals; at 2 s a blast on the horizon and a mushroom cloud climbs and darkens; at 4 s its shock wave lays the flames down, the coals flare and ash falls ([EFFECTS_BLAZE.md](../docs/EFFECTS_BLAZE.md) §6) | Learned: the front (four wildfire tiles) and the burnt ground (three coals tiles), by their own renderers; the mushroom (drawn by the explosions' look `cloud`). Procedural: the flash and afterglow, the shock front, camera shake, embers, sparks, ash, light | Wildfire (82 KB), coals (82 KB), mushroom (274 KB) (`fx_blaze/models/scene`); int8 | `prairie.nvfxs`, 8 s, 2.4 MB | The three read as a grass fire, burnt ground and a distant mushroom cloud; the coals are a thin strip at this scale; the front's smoke ends in a soft line at its tiles' tops; the cap is ragged, and late on the cloud looks more like a tree of smoke |
+| <a href="scene_liftoff.mp4"><img src="scene_liftoff.jpg" width="200" alt="The lift-off"></a> | **The lift-off** (round 7) | Night at a launch pad: two stacks puff vapour under floodlights; at 2.5 s the engine lights and its exhaust billows out over the pad both ways; sand stirred by the blast hangs and drifts away; at 7.5 s the rocket's flame climbs out of the picture and the clouds go on billowing ([EFFECTS_FLOW.md](../docs/EFFECTS_FLOW.md) §6) | Learned: the blast (launch, played with the library's gentler swirl), the stacks' puffs, the sand (ink, recoloured brown), all by field-shader looks. Procedural: the flash, shock, embers and debris, the rocket's flame (a glow and a lamp), the floodlights | Launch, puffs, ink (146 KB each) (`fx_flow/models/scene`); int8 | `liftoff.nvfxs`, 10 s, 1.9 MB | The blast reads as a launch and lights the vapour and the sand; its billows are one square-ish block (one tile); the puffs are small beside the blast; there is no rocket to see, only its flame |
 | <a href="scene_campfire.mp4"><img src="scene_campfire.jpg" width="200" alt="The campfire"></a> | **The campfire, driven by the game** | A campfire the game drives through inputs and rules ([ENGINES.md](../docs/ENGINES.md) §7): a gust at 2.5 s, the log beside it catches at 4 s, a breeze and the flames lean at 5.5 s, more fuel at 7 s, a second gust at 8 s, doused at 9.3 s, relit at 10.5 s | Learned: the two fires, the smoke sky (shader look). Procedural: the gusts' embers, the scorch, light | Study D's v1 fire and smoke; int8 | `campfire.nvfxs` with `--trigger blow@2.5 --trigger light_log@4 --set breeze=1.5@5.5 --set lean=0.7@5.5 --set fuel=1@7 --trigger blow@8 --trigger douse@9.3 --trigger relight@10.5 --set fuel=0.7@10.5`; the script's 960 x 540, scaled to 1280 x 720 (lanczos); 12 s, 3.2 MB | The events read clearly; the smoke shows as puffs above the flames rather than a column (the script hands the fires' top rows to a sky domain) |
 
 ## 2. Each learned effect alone, at three settings
 
 `nvfx_reel` (this repository's demo tool, `tools/nvfx_reel.cpp`): one model, three control settings side by side,
 each rendered at 256 px through `nvfx_render`, composited over a dark gradient and scaled x1.5 with a bilinear filter
-(to 384 px), 1280 x 576 at 30 fps, 9 s, CRF 26, seed 1. The runtime's default playback: 6 s shards, each a fresh rollout
+(to 384 px), 1280 x 576 at 30 fps, 9 s (the mushroom 12 s), CRF 26, seed 1. Ink, a dark dye with no light of its own,
+is shown over a pale water-coloured gradient instead. The runtime's default playback: 6 s shards, each a fresh rollout
 from one of the three stored start points nearest the controls, crossfaded. One-shots (explosion, dust) start again with
 the next seed when they end. Everything in these clips is learned, drawn by the effect's own renderer; nothing is
 procedural but the labels.
@@ -71,6 +81,12 @@ procedural but the labels.
 | <a href="effect_fog.mp4"><img src="effect_fog.jpg" width="200" alt="Fog"></a> | **Fog** | 0.3, 0.5, 0.3; 0.6, 0.2, 0.5; 0.95, 0.85, 0.9 | `fog.nvfx` (146 KB) | 0.1 MB | Good: low ground fog that rolls with the wind |
 | <a href="effect_dust.mp4"><img src="effect_dust.jpg" width="200" alt="Dust"></a> | **Dust** (one-shot) | 0.3, 0.5, 0.3; 0.6, 0.2, 0.5; 1.0, 0.85, 0.9 | `dust.nvfx` (274 KB) | 0.2 MB | Good: a burst of dust that spreads along the ground and curls |
 | <a href="effect_cloud.mp4"><img src="effect_cloud.jpg" width="200" alt="Cloud"></a> | **Cloud** | 0.3, 0.5, 0.3; 0.6, 0.2, 0.5; 0.95, 0.85, 0.9 | `cloud.nvfx` (146 KB) | 0.1 MB | Fair: a drifting cloud; faint green and magenta fringes at its edges from the learned renderer |
+| <a href="effect_wildfire.mp4"><img src="effect_wildfire.jpg" width="200" alt="Wildfire"></a> | **Wildfire** (round 7) | 0.3, 0.5, 0.3; 0.6, 0.2 (wind left), 0.5; 0.9, 0.8 (wind right), 0.7 | `wildfire.nvfx` (82 KB) | 0.5 MB | Good: a continuous front of flames across the tile, leaning with the wind (it works by the rule, [EFFECTS_BLAZE.md](../docs/EFFECTS_BLAZE.md) §4.4); its dark smoke is faint over the night sky |
+| <a href="effect_coals.mp4"><img src="effect_coals.jpg" width="200" alt="Coals"></a> | **Coals** (round 7) | 0.3, 0.5, 0.3; 0.6, 0.2, 0.5; 0.9, 0.8, 0.7 | `coals.nvfx` (82 KB) | 0.2 MB | Good to fair: a low glowing bed with small flames (it works by the rule); the learned bed glows dimmer and more evenly than the simulator's, and is dim at intensity 0.3 |
+| <a href="effect_mushroom.mp4"><img src="effect_mushroom.jpg" width="200" alt="Mushroom cloud"></a> | **Mushroom** (one-shot, round 7) | 0.1, 0.5, 0.2; 0.5, 0.1, 0.6; 0.85, 0.9, 0.5 | `mushroom.nvfx` (274 KB) | 0.3 MB | Weak by the rule: a fireball rises on a stem into a cap and darkens, but the cap turns ragged and hangs down like branches, and its own renderer adds blue and green fringes (the library draws it with the explosions' look). It plays 5 s, holds 1 s and starts again with the next seed |
+| <a href="effect_launch.mp4"><img src="effect_launch.jpg" width="200" alt="Launch"></a> | **Launch** (round 7) | 0.3, 0.5, 0.3; 0.6, 0.2, 0.5; 0.95, 0.8, 0.7 | `launch.nvfx` (146 KB), played with the library's swirl 1, scale 9 (`nvfx_reel`'s DETAIL field; its calibration chose 3) | 0.8 MB | Short of the bar by the rule ([EFFECTS_FLOW.md](../docs/EFFECTS_FLOW.md) §4): the jet hits the ground and billows out both ways, but the billows fill the tile and run out at its sides (the scene and the library feather its edges), and the settings change it less than the labels suggest |
+| <a href="effect_puffs.mp4"><img src="effect_puffs.jpg" width="200" alt="Puffs"></a> | **Puffs** (round 7) | 0.3, 0.2 (slow), 0.3; 0.6, 0.5, 0.5; 0.9, 0.9 (fast), 0.7 | `puffs.nvfx` (146 KB) | 0.6 MB | Weak by the rule: a column of grey smoke whose pulses are irregular and hard to tell apart (the model has no clock); green and magenta fringes now and then |
+| <a href="effect_ink.mp4"><img src="effect_ink.jpg" width="200" alt="Ink"></a> | **Ink** (round 7) | 0.3, 0.5 (still), 0.3; 0.6, 0.2 (current left), 0.5; 0.9, 0.8 (current right), 0.7 | `ink.nvfx` (146 KB) | 0.2 MB | Short of the bar by the rule: dark dye curls, spreads and drifts with the current, but stays a more compact cloud than the simulator's, and leaves the tile at its sides |
 
 ## 3. Controllability
 
@@ -99,20 +115,25 @@ pixels.**
 |---|---|---|---|---|---|---|
 | <a href="real_vs_learned_fire_smoke.mp4"><img src="real_vs_learned_fire_smoke.jpg" width="200" alt="Real against learned: fire, smoke, steam, explosion"></a> | **Fire, smoke, steam, explosion** | Top: the simulator (`src/sim`, its own renderer). Bottom: the learned effect | Top: simulation. Bottom: learned (own renderer) | The library's fire, smoke, steam, explosion; int8 | 0.5 MB | Nearly the same picture for the first half second, then the same kind of flame, plume and cloud on different paths; the learned explosion's first frames are smoother and greener than the simulator's |
 | <a href="real_vs_learned_energy.mp4"><img src="real_vs_learned_energy.jpg" width="200" alt="Real against learned: magic, jet, orb, vortex"></a> | **Magic, jet, orb, vortex** | As above | As above | The library's magic, jet, orb, vortex (study L's v3 for magic, orb and vortex); int8 | 0.6 MB | The portal, the jet and the dust devil keep the simulator's look throughout; the learned orb is often rounder than the simulator's lobed ball |
+| <a href="real_vs_learned_round7.mp4"><img src="real_vs_learned_round7.jpg" width="200" alt="Real against learned: round 7"></a> | **Round 7: wildfire, coals, mushroom, launch, puffs, ink** | As above, in six columns at x1.55 for 11 s; ink over a pale water-coloured gradient; launch with the library's swirl 1, scale 9; the mushroom (5 s) starts again with the next held-out run every 5.5 s | As above | The library's six round 7 models; int8 | 0.8 MB | Wildfire, coals and ink stay close in look and motion; the learned launch's billows are boxier; the learned puffs make a noisy column where the simulator's pulses are distinct; the learned mushroom loses its clean stem and cap within a second, as its test found |
 | <a href="real_vs_learned_atmosphere.mp4"><img src="real_vs_learned_atmosphere.jpg" width="200" alt="Real against learned: fog, dust, cloud"></a> | **Fog, dust, cloud** | As above | As above | The library's fog, dust, cloud; int8 | 0.2 MB | Close in shape and motion; the learned cloud has faint colour fringes the simulator's grey cloud lacks |
 
 ## 6. The library, by category
 
-The effect library ([LIBRARY.md](../docs/LIBRARY.md)): 149 named, ready-made effects. Each entry was played alone on a
+The effect library ([LIBRARY.md](../docs/LIBRARY.md)): 168 named, ready-made effects, 149 in the twelve category
+walk-throughs and round 7's 20 (19 new, and `wall_of_flames` rewritten on the wildfire model) in a walk-through of their
+own. Each entry was played alone on a
 stage fitted to its box by `nvfx_gallery --library library --models DIR --only NAME --video NAME.mp4 --clip S --threads 2`
 (960 x 540, 30 fps, its name, category and models in the bar on top), one run per entry so each gets its own length:
 loops a few seconds each, one-shots their length and half a second (explosions: and a second), at most 4 to 7 s. The
 clips are joined in the order of the catalogue's files (`library/*.nvfxl`) and encoded once at CRF 26. The library's own judgement of each entry
-(good, fair, weak) is in LIBRARY.md's tables.
+(good, fair, weak) is in LIBRARY.md's tables. Round 7 moved `wall_of_flames` from the fire category's file to its own and
+rewrote it, so the fire walk-through now has 16 entries; the walk-throughs before round 7 played the orb at int8 (see
+above).
 
 | | Video | Entries | Learned / procedural | Models, precision | Rendered | How it looks |
 |---|---|---|---|---|---|---|
-| <a href="library_fire.mp4"><img src="library_fire.jpg" width="200" alt="Library: fire"></a> | **Fire** | 17: campfire, torch, candle, brazier, bonfire, wall of flames, burning ground, blue gas flame, witch fire, burning wreck, flamethrower, gas leak fire, rocket thruster, fire whirl, candle cluster, blue and green torches | All 17 learned; procedural embers, sparks, glows, lights, scorch. Recolours: blue gas, witch fire, the blue and green torches, the thruster's blue | Fire, smoke, jet, vortex; int8 | Loops 2.4 s each; 40.8 s, 1.8 MB | Good: the fires read well; one flame per tile, so wide fires are rows of tongues; the fire whirl's haze shows its tile's square edge (LIBRARY.md: fair) |
+| <a href="library_fire.mp4"><img src="library_fire.jpg" width="200" alt="Library: fire"></a> | **Fire** | 16: campfire, torch, candle, brazier, bonfire, burning ground, blue gas flame, witch fire, burning wreck, flamethrower, gas leak fire, rocket thruster, fire whirl, candle cluster, blue and green torches (the wall of flames, rewritten, is in round 7's walk-through) | All 16 learned; procedural embers, sparks, glows, lights, scorch. Recolours: blue gas, witch fire, the blue and green torches, the thruster's blue | Fire, smoke, jet, vortex; int8 | Loops 2.4 s each; 38.4 s, 1.7 MB | Good: the fires read well; one flame per tile, so wide fires are rows of tongues; the fire whirl's haze shows its tile's square edge (LIBRARY.md: fair) |
 | <a href="library_smoke.mp4"><img src="library_smoke.jpg" width="200" alt="Library: smoke"></a> | **Smoke** | 10: chimney smoke, smoke column, smoke grenade, black oil smoke, poison gas, signal smoke, smoke screen, incense, white and dark chimney smoke | All 10 learned (shader looks). Recolours: poison gas, signal smoke, black oil smoke, the white and dark chimneys | Smoke, fog, cloud, fire; int8 | Loops 2.6 s; the 12 s smoke grenade cut at 4.5 s; 27.9 s, 1.1 MB | Good: plumes that billow and lean; thick smoke shows the shader's marbled texture |
 | <a href="library_explosions.mp4"><img src="library_explosions.jpg" width="200" alt="Library: explosions"></a> | **Explosions** | 5: grenade, large blast, magic burst, teleport flash, airburst | 4 learned, 1 procedural (teleport flash); flash, shock front, debris, embers and scorch are procedural. Recolour: the violet magic burst | Explosion, smoke; int8 | One-shots, their length and 1 s (at most 7 s: the 9 s large blast is cut); 20.4 s, 1.2 MB | Good: fireballs with their flash, shock and debris, rolling into smoke; the clouds show the marbled texture |
 | <a href="library_steam.mp4"><img src="library_steam.jpg" width="200" alt="Library: steam"></a> | **Steam and water** | 7: steam vent, geyser, pipe leak, kettle steam, hot springs, steaming cup, sewer steam | All 7 learned (shader looks) | Steam; int8 | Loops 3 s; 21 s, 1.1 MB | Good: jets and wisps of white vapour at very different sizes |
@@ -124,6 +145,7 @@ clips are joined in the order of the catalogue's files (`library/*.nvfxl`) and e
 | <a href="library_sparks_light.mp4"><img src="library_sparks_light.jpg" width="200" alt="Library: sparks and light"></a> | **Sparks and light** | 20: sparks, welding sparks, grinder sparks, debris shower, electric arc, lightning strike, ember burst, ball lightning, muzzle flash, signal flare, lantern, flashbang, shockwave ring, plasma orb, energy core, beacon, quest marker, pickup sparkle, coin glint, gold glitter | 5 learned (debris shower and signal flare: smoke; ball lightning, plasma orb, energy core: orb), 15 procedural | Smoke, orb; int8 | Loops 2.4 s; one-shots their length and 0.5 s (at least 1.5 s); 48 s, 2.2 MB | Good: crisp sparks, arcs and bolts; the lightning strike lights the whole stage; the muzzle flash lasts 0.12 s by design |
 | <a href="library_combat.mp4"><img src="library_combat.jpg" width="200" alt="Library: combat"></a> | **Combat** | 23: bullet impacts (stone, dirt, metal, wood), blood spray, sparks on metal, muzzle flashes (rifle, shotgun, energy), tracer, laser beam, plasma bolt, frag and incendiary grenades, small and medium explosions, EMP blast, shield bubble, shield hit, force field, red, green and violet smoke grenades | 12 learned, 11 procedural (beams, shields, spatter, shards, flashes). Recolours: the coloured smoke grenades | Explosion, smoke, fire, dust, orb; int8 | Loops 2.2 s; one-shots their length and 0.5 s, at most 4 s (the 12 s smoke grenades and the 8 s incendiary are cut); 59.4 s, 3.5 MB | Good: beams, bolts and shields are crisp; impacts and muzzle flashes are brief by design |
 | <a href="library_ambient.mp4"><img src="library_ambient.jpg" width="200" alt="Library: ambient"></a> | **Ambient** | 5: heat haze, fireflies, drifting embers, smouldering ground, dust motes | 3 learned (heat haze and drifting embers: an invisible fire whose heat drives the haze and the embers; smouldering ground: smoke), 2 procedural | Fire, smoke; int8 | Loops 4 s; 20 s, 0.8 MB | Quiet by design; the heat haze is a distortion seen only in motion |
+| <a href="library_round7.mp4"><img src="library_round7.jpg" width="200" alt="Library: round 7"></a> | **Round 7** | 20: wall of flames (rewritten), grass fire, burning field, ember bed, forge, lava cracks, burnt ground, nuke, mushroom blast, distant mushroom (`library/blaze.nvfxl`); rocket launch, landing thruster, hover downwash, locomotive chimney, exhaust stack, smoke signals (`library/engines.nvfxl`); ink cloud, blood in water, silt cloud, dye plume (`library/underwater.nvfxl`) | All 20 learned; procedural flashes, shock rings, sparks, embers, glows and lights. Recolours: lava cracks (coals), the underwater dyes (ink: blue-black, red, pale silt, green), the thrusters' dust | Wildfire, coals, mushroom, launch (swirl 1, scale 9), puffs, ink, fire; int8 | Loops 2.4 s; one-shots their length and 0.5 s (6 to 6.5 s); 59.8 s, 2.2 MB | The wildfire's three are good; the coals' fair (glowing patches more than a heap; lava cracks weak to fair); the mushroom's fair (the flash, stem and darkening read, the cap is ragged and turns into a tree of smoke); rocket launch good, the other engines fair (irregular puffs); the underwater dyes fair (compact, blocky at times; dye plume weak to fair), shown on the gallery's night stage since the library leaves the water to the game's background |
 
 ## 7. Many effects at once
 
@@ -139,8 +161,8 @@ clips are joined in the order of the catalogue's files (`library/*.nvfxl`) and e
 
 ## 9. Later
 
-The newest effects are still being trained or built: **wildfire, coals, mushroom, launch, puffs, ink and water**.
-Their videos come when they merge.
+Round 7's six effects (wildfire, coals, mushroom, launch, puffs, ink) are in the sections above. Still to come:
+**water** and the **3D demo** (study N); their videos come when they merge.
 
 ## Reproduce
 
@@ -153,6 +175,11 @@ build/nvfx_reel --out fire.mp4 --seconds 9 --size 256 --zoom 1.5 --width 1280 --
     --panel "SMALL|$M/fire.nvfx|0:0.25,0.5,0.3" --panel "MEDIUM|$M/fire.nvfx|0:0.6,0.15,0.5" --panel "LARGE|$M/fire.nvfx|0:0.95,0.75,0.7"
 build/nvfx_reel --out track.mp4 --seconds 10 --zoom 1.7 --compact --timer --columns 1 \
     --panel "FIRE: REAL|real:fire:1" --panel "FIRE: LEARNED|learned:fire:1:$M/fire.nvfx"
+build/nvfx_reel --out launch.mp4 --seconds 9 --size 256 --zoom 1.5 --width 1280 --height 576 --title "LAUNCH" \
+    --panel "LOW|$M/launch.nvfx|0:0.3,0.5,0.3|swirl=1,swirl_scale=9"            # a detail setting, as an effect line sets it
+build/nvfx_reel --out ink.mp4 --seconds 9 --size 256 --zoom 1.5 --width 1280 --height 576 --title "INK" \
+    --bg 150,180,190,80,112,126 --panel "LITTLE|$M/ink.nvfx|0:0.3,0.5,0.3"         # dark dye over a pale gradient
+build/nvfx_scene_script --script examples/scenes/prairie.nvfxs --models $NEURALVFX_DATA/fx_blaze/models/scene --out prairie.mp4
 build/nvfx_gallery --library library --models $M --only campfire --video campfire.mp4 --clip 2.4
 build/nvfx_crowd --budget 16 --threads 4 --seconds 20 --video crowd.mp4
 build/nvfx_lit_host library $M OUT --frames 300 --raw - | ffmpeg -f rawvideo -pix_fmt rgb24 -s 1280x720 -r 30 -i - lit.mp4

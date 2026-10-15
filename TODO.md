@@ -1,330 +1,603 @@
-# To do on a PC: every effect in 3D, learned from accurate 3D simulations
+# To do: every effect in 3D — a small demo here first, then big on a PC
 
-**Status: planned, not started.** Nothing in this file has been run. It is meant for a desktop PC, much later. On that
-PC run time does not matter: a simulation may take days and training may take weeks.
+**Status:** stage 1 is under way; stage 2 is planned, not started.
+
+- **Stage 1, here and now (study N):** a small 3D demo in this container, on branch `study-3d`. It is fire first,
+  smoke if time allows, and contains:
+  - our own 3D solver;
+  - a small 3D rollout model (a 16³ coarse grid);
+  - a physically based volume renderer;
+  - a first volume API;
+  - demo videos of the fire seen from every side.
+
+  It is measured as every study here is. Its write-up will be `docs/STUDY_3D.md`. It answers the first questions
+  before money and weeks go into stage 2: does a learned 3D rollout work at all, does it beat simply running a cheap
+  3D simulation, and what does it cost to play?
+- **Stage 2, on a PC, much later:** everything below. Accurate 3D simulations of every effect, however long they take,
+  checked against measured physics. Large 3D models trained on them, as fine as the PC allows. Then 3D scenes, a 3D
+  library and a full weather system.
+
+First we demo, then we go big.
+
+## Contents
+
+1. [The goal](#the-goal)
+2. [Principles](#principles)
+3. [The catalogue: every effect](#the-catalogue-every-effect)
+4. [Weather systems](#weather-systems)
+5. [The simulators](#the-simulators)
+6. [The models](#the-models)
+7. [The pipeline every effect goes through](#the-pipeline-every-effect-goes-through)
+8. [Runtime and engines](#runtime-and-engines)
+9. [3D scenes and the 3D library](#3d-scenes-and-the-3d-library)
+10. [Measurement](#measurement)
+11. [Order of work](#order-of-work)
+12. [What it costs](#what-it-costs)
+13. [Seeds](#seeds)
+14. [What goes in git](#what-goes-in-git)
 
 ## The goal
 
-Go straight to 3D, for every effect in the repository:
-- simulate each effect in 3D as accurately as the PC can, however long it takes;
-- train a 3D rollout model on those runs, as large and as high resolution as the PC allows;
-- play it in 3D: a volume that moves and responds the same from any camera, for FUSE;
-- then rebuild the scenes and the library on top of the 3D effects.
+Every visual effect a game engine needs, in 3D. Each one plays as today's fire does:
+- from start points, with a learned stepper driven by seeded noise;
+- pseudorandom but deterministic;
+- for as long as it is wanted, in a vast range of settings;
+- the same from any camera, so it can be walked around, flown through or seen from above.
 
-Every effect plays as today's fire does: from start points, with a learned stepper driven by seeded noise. It is
-pseudorandom but deterministic, plays for as long as it is wanted, and covers a vast range of settings, only with a 3D
-state. What is ordered is learned. What is random stays seeded random: spray, sparks, foam, droplets and fine flicker.
+Realism comes from teachers that are as accurate as the PC can run, and that are checked against measurements of the
+real thing. Cost is chosen at the end from measured numbers, so the effects stay CPU-light where it counts.
 
-Today's effects are 2D sprites learned from `src/sim`, a 2D solver whose look was tuned by eye. They play close to that
-teacher (studies D, D2, K and M), so the teacher is the ceiling on realism. 3D teachers that are checked against
-measured physics raise the ceiling. 3D models remove the sprite's limit: the effect can be walked around.
+## Principles
 
-## The effects
+1. **Model what's ordered, leave random to random** (study M).
+   - Learned: what has structure, such as plumes, rolls, fronts, waves, flames and collapses.
+   - Seeded random: what is random at the scale it is seen, such as spray, sparks, foam, droplets, fine flicker,
+     grains, leaves and rain streaks.
+   - Exact physics, where it is cheap and known: wave dispersion, ballistics, settling, optics.
+2. **Accuracy first, checked against the real thing.** Every teacher is an established simulator, or a solver of
+   ours, that has passed checks against measurements before any training. Where nothing real exists (magic), say so.
+3. **One family of models.**
+   - The 3D rollout of stage 1, with channels per group.
+   - A level-set variant for liquids.
+   - A continuum-plus-grains variant for granular flows.
+   - Seeded procedural growth for thin structures (lightning, frost, cracks).
+4. **Deterministic to the bit.** The same seed gives the same frames on any number of threads, so every client of a
+   multiplayer game sees the same fire.
+5. **The engine's GPU draws; the library's CPU steps.** Volumes, level sets and particles go to the engine each frame.
+   A CPU picture exists for tests, videos and engines without volumetrics.
+6. **The house rules for measuring:**
+   - rules are written before the test, and the test runs once;
+   - held-out settings and seeds;
+   - paired bootstrap 95% intervals with 10,000 resamples;
+   - ties reported as ties, and nulls reported with their numbers.
 
-The 21 learned effects, plus the water system (procedural today), grouped by the physics that makes them, since each
-group shares one simulator and one kind of check. The vortex becomes two 3D effects: a fire whirl and a dust devil.
+## The catalogue: every effect
 
-| group | effects | simulator (run outside the repository) |
+Every row has a number (#), which gives it its seeds (see [Seeds](#seeds)).
+- **Tier 1** is the first wave on the PC, **Tier 2** the second, **Tier 3** later or hard.
+- **"By eye against footage"** means no measured quantity exists that a picture could be checked against: those are
+  compared with real footage by study J's statistics, if footage is supplied.
+- **"Consistency only"** means there is no real counterpart.
+
+Today's 2D effects map onto these rows:
+
+| 2D effect | 3D row | 2D effect | 3D row | 2D effect | 3D row |
+|---|---|---|---|---|---|
+| fire | 0, 1 | orb | 148 | launch | 32 |
+| smoke | 16 | vortex | 10, 74 | puffs | 20 |
+| explosion | 23 | fog | 58 | ink | 92 |
+| steam | 61, 112, 117 | dust | 100 | waterfall | 82 |
+| magic | 139 | cloud | 41 | fountain | 83 |
+| jet | 4 | wildfire | 5 | splash | 85 |
+| coals | 11 | mushroom | 28 | rainshaft | 51 |
+
+The water system's sheets, jets, drips, bubbles and pools are rows 82 to 91.
+
+### Fire and combustion
+
+| # | effect | the case and what matters | simulator | checked against | tier |
+|---|---|---|---|---|---|
+| 0 | pool fire (fuel spill, oil fire) | a burning pool, 0.3 to 3 m; heat release rate, soot yield, wind | FDS | burning rate against Babrauskas's correlation; flame height against Heskestad's L = 0.235 Q^(2/5) - 1.02 D; puffing against f = 1.5 / sqrt(D); centreline temperature and velocity against McCaffrey | 1 |
+| 1 | campfire and bonfire | a wood crib or a log pile; size, moisture, wind | FDS (solid pyrolysis) | crib burning rate against Block's experiments; flame height and puffing as #0 | 1 |
+| 2 | torch and candle | small laminar to flickering flames; wick, draughts | PeleLM with a detailed mechanism (a DNS) | flame height and flicker frequency against measured candle flames | 2 |
+| 3 | gas jet fire (burst pipe, leak) | a high-momentum gas jet burning; flow, angle, wind | FDS or PeleLM | flame length against Delichatsios's correlations; lift-off height against Kalghatgi's | 2 |
+| 4 | flamethrower | a burning liquid stream (Lagrangian droplets); flow, aim, wind | FDS | jet flame length as #3; a gas jet flame against the Sandia piloted flame D data (TNF workshop) first | 2 |
+| 5 | grass fire | a front spreading through grass; wind, fuel load, moisture, slope | FDS (vegetation, level set) | rate of spread and front depth against the CSIRO grassland experiments, as Mell and colleagues' simulations were | 1 |
+| 6 | forest crown fire | fire climbing into and running through tree crowns | FDS (vegetation) | spread rate and flame heights against the International Crown Fire Modelling Experiment | 2 |
+| 7 | room fire, flashover and backdraft | a fire in a compartment: hot layer, flashover, an opened door feeding a backdraft | FDS | hot-layer temperature against the McCaffrey-Quintiere-Harkleroad correlation; flows against Steckler's compartment experiments; flashover near a 600 °C upper layer | 2 |
+| 8 | fire out of a window | flames and smoke leaving an opening up a facade | FDS | external flame height and temperature against Law's method (as in the Eurocode) | 2 |
+| 9 | vehicle fire | a burning car: tyres, fuel, glass breaking | FDS | heat release curves against measured car fires | 2 |
+| 10 | fire whirl | a fire in rotating flow; circulation, heat release rate | FDS | flame height against circulation from laboratory fire whirls | 2 |
+| 11 | coals and embers | a bed of glowing charring fuel, low flames, hot air | FDS (char oxidation) | surface temperatures and flicker against infrared measurements of ember beds | 2 |
+| 12 | BLEVE fireball | a ruptured tank's fireball; mass of fuel | PeleLM | diameter and duration against the CCPS correlations (D = 5.8 M^(1/3), D in m, M the fuel's mass in kg) | 2 |
+| 13 | molotov (burning liquid splash) | a breaking bottle spreading burning fuel | Basilisk, then FDS | by eye against footage | 3 |
+| 14 | fireworks | shells, stars, trails, crackles and smoke | our particles, with the LES for the smoke | star trajectories with drag; colours from metal salts' emission (strontium red, barium green, copper blue, sodium yellow) | 2 |
+| 15 | ember showers and spotting | embers lofted from a fire, landing ahead of it | FDS (particles) | lofting and transport against Albini's spotting model | 2 |
+
+### Smoke and hot gas
+
+| # | effect | the case and what matters | simulator | checked against | tier |
+|---|---|---|---|---|---|
+| 16 | smoke column | a fire's plume far above its flames; wind bends it, the sky colours it | FDS | rise and spread against plume theory (Morton, Taylor and Turner); light blocked by soot's mass extinction coefficient, 8.7 m²/g for flaming soot (Mulholland and Croarkin) | 1 |
+| 17 | black and white smoke | sooty tyre smoke; white smoke from wet fuel (water droplets) | FDS | smoke yields and extinction against measurements | 2 |
+| 18 | coloured smoke grenade | a dense dye aerosol, nearly unbuoyant, drifting | FDS (no combustion) | by eye against footage | 2 |
+| 19 | smoke filling a room | a ceiling jet, a descending layer, smoke leaking under doors | FDS | ceiling-jet temperature and velocity against Alpert's correlations | 2 |
+| 20 | chimney and exhaust puffs (a steam train) | pulsed releases rising as thermals | FDS | puff rise and growth against Scorer's thermals | 2 |
+| 21 | cigarette and incense wisps | a laminar plume that turns turbulent | a DNS (PeleLM or MicroHH) | transition height against measured laminar plumes | 3 |
+| 22 | smouldering | smoke without flame: thin, pale, slow | FDS | smoke yield against measurements | 3 |
+
+### Explosions, blasts and impacts
+
+| # | effect | the case and what matters | simulator | checked against | tier |
+|---|---|---|---|---|---|
+| 23 | high-explosive ground burst | blast, fireball, dust skirt, crater | PeleC, then PeleLM; ejecta by DEM | overpressure and impulse against distance by the Kingery-Bulmash charts; crater size against Holsapple's crater scaling | 1 |
+| 24 | air burst | a burst above the ground; the reflected shock forms a Mach stem | PeleC | triple-point height against the reflected-blast charts (UFC 3-340-02) | 2 |
+| 25 | vapour-cloud explosion | a fuel-air cloud deflagrating among obstacles | PeleC | blast strength against the TNO multi-energy and Baker-Strehlow-Tang methods | 2 |
+| 26 | grenade with fragments | a small burst throwing fragments and dirt | PeleC, with fragments as particles | fragment speed by Gurney's equations; fragment sizes by Mott's distribution | 2 |
+| 27 | impact with ejecta (a shell or meteor) | crater, ejecta curtain, dust | PeleC with DEM or MPM ejecta | crater and ejecta against Holsapple's scaling | 2 |
+| 28 | mushroom cloud | a large burst's fireball rising on a stem into a rolling cap, through stratified air | PeleC, then PeleLM | rise against buoyant-thermal theory in stratified air (Morton, Taylor and Turner) | 2 |
+| 29 | condensation (Wilson) cloud | humid air condensing in the blast's negative phase | PeleC with moist thermodynamics | by eye against footage of blasts in humid air | 2 |
+| 30 | underwater explosion | a gas bubble pulsing, a water dome and plume | Basilisk (compressible) | bubble period against the Rayleigh-Willis formula | 3 |
+| 31 | dust explosion | a dust cloud deflagrating (a mill, a mine) | PeleC with particles | rate of pressure rise against dust explosion tests (K_St) | 3 |
+
+### Engines, rockets and guns
+
+| # | effect | the case and what matters | simulator | checked against | tier |
+|---|---|---|---|---|---|
+| 32 | rocket launch | under-expanded exhaust on the pad, a ground cloud billowing both ways, the deluge's steam | PeleC | Mach disk location against x/D = 0.67 sqrt(p0 / pa) (Crist, Sherman and Glass) | 2 |
+| 33 | rocket or missile in flight | an afterburning plume and its smoke trail | PeleC, then the LES | by eye against footage | 2 |
+| 34 | rocket landing | the plume eroding the ground and spraying dust | PeleC with DEM | erosion and spray against plume-surface interaction tests | 3 |
+| 35 | jet afterburner | shock diamonds in a hot exhaust | PeleC | shock-cell spacing against Pack's formula | 2 |
+| 36 | contrails | condensation trails forming, spreading and fading | the atmospheric LES with ice | formation against the Schmidt-Appleman criterion | 2 |
+| 37 | helicopter downwash | a rotor's wash lifting dust (brownout) or water spray | the LES with particles | induced velocity against momentum theory | 2 |
+| 38 | muzzle flash and blast | the flash, the blast and the smoke at a gun's muzzle | PeleC | flash regions against Klingenberg's measurements | 2 |
+| 39 | tyre burnout smoke | dense white smoke from a spinning tyre | FDS | by eye against footage | 3 |
+| 40 | vehicle exhaust | a cold start's steam and soot, diesel smoke | FDS | by eye against footage | 3 |
+
+### Weather: clouds
+
+| # | effect | the case and what matters | simulator | checked against | tier |
+|---|---|---|---|---|---|
+| 41 | fair-weather cumulus | shallow cumulus over a warm sea or land | PALM or MicroHH | cloud fraction, liquid water and cloud base and top against the BOMEX intercomparison (Siebesma and colleagues) | 1 |
+| 42 | towering cumulus | clouds deepening through the afternoon | PALM or MicroHH | the shallow-to-deep transition intercomparison (the LBA case) | 2 |
+| 43 | stratocumulus deck | a broken deck under an inversion | PALM or MicroHH | the DYCOMS-II intercomparisons (RF01, and RF02 for drizzle) | 2 |
+| 44 | stratus and overcast | a grey sky with a moving texture | PALM or MicroHH | as #43 | 1 |
+| 45 | altocumulus and mid-level layers | cloudlets in rows at mid levels | PALM or MicroHH | by eye against footage | 3 |
+| 46 | cirrus and contrail cirrus | thin ice clouds and fall streaks | PALM or MicroHH (ice) | the GCSS cirrus cases | 2 |
+| 47 | cumulonimbus | anvil, overshooting top, mammatus | CM1 | the Weisman-Klemp idealised storm | 2 |
+| 48 | lenticular and cap clouds | standing clouds over mountains | CM1 or PALM with terrain | wavelength against linear mountain-wave theory (the Scorer parameter) | 2 |
+| 49 | pyrocumulus | a fire's plume capped by its own cloud | FDS coupled with the moist LES | plume rise with moisture; by eye against footage | 3 |
+
+### Weather: precipitation
+
+| # | effect | the case and what matters | simulator | checked against | tier |
+|---|---|---|---|---|---|
+| 50 | drizzle | fine drops from low cloud | PALM or MicroHH | as #43 (RF02) | 2 |
+| 51 | rain and rainshafts | light to torrential rain, shafts below a cloud base, the cold outflow | PALM or MicroHH, CM1 for storms | drop sizes against Marshall-Palmer; fall speeds against Gunn and Kinzer; drop shapes against Beard and Chuang; the outflow front against gravity-current theory (Benjamin) | 1 |
+| 52 | virga | rain evaporating before it reaches the ground | PALM or MicroHH | evaporation against the microphysics' own checks | 2 |
+| 53 | snowfall | light to heavy snow, flakes fluttering | PALM or MicroHH, our flake dynamics | flake fall speeds against Locatelli and Hobbs | 1 |
+| 54 | blizzard and blowing snow | falling and blown snow, whiteout | PALM with saltation | blowing-snow flux against field measurements | 2 |
+| 55 | sleet and freezing rain | rain freezing in a cold layer or on contact (glaze) | PALM or MicroHH | the melting-layer profiles | 3 |
+| 56 | hail | hailstones growing in updrafts and falling, bouncing | CM1 with hail microphysics | hail sizes and fall speeds against measurements | 2 |
+| 57 | graupel and diamond dust | soft pellets; glittering ice crystals in clear cold air | PALM or MicroHH | halos (#133) | 3 |
+
+### Weather: fog and haze
+
+| # | effect | the case and what matters | simulator | checked against | tier |
+|---|---|---|---|---|---|
+| 58 | radiation fog | fog forming in a calm cooling night, lifting in the morning | PALM | liquid water and depth against a measured fog case (tower measurements, such as those of Cabauw or Cardington) | 1 |
+| 59 | advection and sea fog | fog rolling in over cold ground or sea | PALM | by eye against footage; visibility against liquid water | 2 |
+| 60 | valley fog and cold pools | fog filling valleys | PALM with terrain | by eye against footage | 2 |
+| 61 | steam fog | fog smoking off warm water into cold air | PALM or MicroHH | saturation by mixing | 2 |
+| 62 | haze and smog | aerosol dimming and colouring the distance | the sky model (#130) | aerosol optical depth against measurements | 1 |
+| 63 | low cloud over hills | cloud sweeping over ridges | PALM with terrain | by eye against footage | 3 |
+
+### Weather: storms
+
+| # | effect | the case and what matters | simulator | checked against | tier |
+|---|---|---|---|---|---|
+| 64 | thunderstorm (single and multicell) | towers, anvils, rain and outflow, lightning | CM1 | the Weisman-Klemp storm with weak shear | 2 |
+| 65 | squall line and shelf cloud | a line of storms with a shelf cloud on its gust front | CM1 | Rotunno, Klemp and Weisman's theory | 2 |
+| 66 | supercell | a rotating storm: wall cloud, rear-flank downdraft, hail | CM1 | the Weisman-Klemp storm with strong shear | 3 |
+| 67 | tornado | a funnel, its debris cloud, multiple vortices | CM1 at very high resolution | Orf and colleagues' simulated tornado; wind profiles against Doppler radar observations; laboratory vortex chambers (swirl ratio) | 3 |
+| 68 | waterspout | a vortex over water with a spray ring | CM1 or PALM | by eye against footage | 3 |
+| 69 | downburst and microburst | a cold downdraft hitting the ground and spreading | CM1 | outflow against Fujita's analyses and the JAWS measurements | 2 |
+| 70 | haboob (dust storm) | a wall of dust lifted by a storm's outflow | CM1 with dust | a gravity-current front; dust lifting by saltation (Bagnold) | 2 |
+| 71 | sandstorm | sand and dust streaming low in strong wind | PALM with saltation | saltation flux against Bagnold's law | 2 |
+| 72 | hurricane | near: rain bands, wind, spray; far: the eyewall and bands | CM1 | the Rotunno-Emanuel idealised hurricane | 3 |
+
+### Weather: wind and what it carries
+
+| # | effect | the case and what matters | simulator | checked against | tier |
+|---|---|---|---|---|---|
+| 73 | gusts and turbulent wind | the wind field near the ground, around buildings and trees | PALM | spectra against the Kaimal and von Kármán spectra | 1 |
+| 74 | dust devils | vortices forming in a hot afternoon, lifting dust | PALM with particles | dust devils in boundary-layer LES (Raasch and Franke); core radius and pressure drop against field measurements | 2 |
+| 75 | drifting snow and spindrift | snow streaming over ground and ridges | PALM with saltation | as #54 | 2 |
+| 76 | sand streamers | sand skimming over dunes | PALM with saltation | Bagnold's law | 3 |
+| 77 | sea spray | spray torn off whitecaps | Basilisk, then the LES | sea-spray generation against measurements | 2 |
+
+Lightning is #122 and aurora #128 (electrical); rainbows, halos and the sky are optics (#130 to #138).
+
+### Water
+
+| # | effect | the case and what matters | simulator | checked against | tier |
+|---|---|---|---|---|---|
+| 78 | open ocean | wind waves and swell, whitecaps, foam | exact spectral waves with seeded phases; Basilisk for breaking | spectra against JONSWAP and Pierson-Moskowitz; whitecap coverage against Monahan's law | 1 |
+| 79 | breaking waves and surf | plunging and spilling breakers on a beach, swash | Basilisk | breaker type against the Iribarren number; breaking against Deike, Melville and Popinet's simulations and experiments | 2 |
+| 80 | ship wakes and bow spray | a hull's Kelvin wake, a speedboat's rooster tail | Basilisk | the Kelvin wake angle (19.47°) | 2 |
+| 81 | rivers, rapids and hydraulic jumps | flow over rocks and weirs, standing waves | Basilisk | jump heights against Bélanger's equation | 2 |
+| 82 | waterfall | a sheet or column breaking up, plunging, spray and mist | Basilisk, the LES for the mist | break-up length against falling-jet measurements | 1 |
+| 83 | fountain | a jet thrown up, breaking into drops, falling into a pool | Basilisk | trajectory with drag; break-up length (Rayleigh-Plateau) | 1 |
+| 84 | hoses and firefighting jets | a jet's reach and break-up; water hitting fire | Basilisk, coupled with FDS | reach against hose-stream measurements | 2 |
+| 85 | splash | an object or a character entering water: cavity, crown, Worthington jet, droplets | Basilisk | the splashing threshold K = Oh Re^1.25 (Mundo, Sommerfeld and Tropea); cavities against Duez and colleagues' sphere-entry experiments | 1 |
+| 86 | rain on water and puddles | crowns, rings, capillary ripples | Basilisk | ring speeds against the capillary-gravity dispersion relation | 1 |
+| 87 | drips, drops and rivulets on glass | dripping taps; drops sliding and merging on a window | Basilisk with contact angles | contact-angle hysteresis; dripping-tap regimes | 2 |
+| 88 | geyser | periodic eruptions of water and steam | Basilisk with phase change, or designed | intervals and heights against geyser records | 3 |
+| 89 | flood and dam-break wave | a wall of water through streets | Basilisk | Ritter's solution and dam-break experiments | 3 |
+| 90 | sloshing and pouring | water in a tank, a glass filling | Basilisk | sloshing frequencies against tank experiments | 3 |
+| 91 | bubbles and bubble plumes | bubbles rising and wobbling; a bubble curtain | Basilisk | terminal velocities and shapes against Clift, Grace and Weber | 1 |
+| 92 | ink, silt and blood in water | a slightly dense plume curling and spreading | Basilisk (single phase) | spreading against plume theory; Rayleigh-Taylor growth against Dimonte and colleagues | 2 |
+| 93 | propeller wash and cavitation | a propeller's wake and vapour bubbles | needs a cavitation model | by eye against footage | 3 |
+
+### Other liquids
+
+| # | effect | the case and what matters | simulator | checked against | tier |
+|---|---|---|---|---|---|
+| 94 | lava flow | glowing flow, cooling crust, folds and breakouts | Basilisk with temperature-dependent viscosity, or our solver | Griffiths and Fink's wax analogue experiments; length against effusion rate (Walker) | 2 |
+| 95 | mud and debris flow | thick flow with boulders | Basilisk (Herschel-Bulkley) or MPM | the USGS debris-flow flume experiments | 2 |
+| 96 | blood spatter and pools | drops in flight, stains, pooling | Basilisk | stain shapes against impact angle (sin θ = width / length) | 2 |
+| 97 | viscous liquids (honey, slime, paint) | coiling, buckling and slow spreading | Basilisk | coiling frequencies against viscous rope-coiling experiments | 3 |
+| 98 | oil slick on water | a spreading film, rainbow sheen | our spreading model | spreading against Fay's regimes; sheen by thin-film interference | 3 |
+| 99 | molten metal pour | a glowing stream, splashes and sparks | Basilisk | by eye against footage | 3 |
+
+### Granular and particle-laden flows
+
+| # | effect | the case and what matters | simulator | checked against | tier |
+|---|---|---|---|---|---|
+| 100 | dust burst | dust thrown up by an impact or a fall, spreading and settling | the LES with particles | settling against measured terminal velocities; the spreading front against particle-laden gravity currents | 1 |
+| 101 | vehicle dust wake | dust behind a vehicle on a dirt road | the LES with particles | by eye against footage | 1 |
+| 102 | footstep and landing dust | small puffs from feet and landings | the LES with particles | by eye against footage | 3 |
+| 103 | sand: falling, piles and slides | sand pouring, piling and sliding | DEM (LIGGGHTS) or MPM | angle of repose; flow against the μ(I) rheology | 2 |
+| 104 | building collapse with dust | rubble falling, a dust cloud rolling out | DEM with the LES | runout against granular column collapse (Lube and colleagues, Lajeunesse and colleagues) | 2 |
+| 105 | snow avalanche | a dense flow under a powder cloud | MPM with the LES | the Vallée de la Sionne measurements | 2 |
+| 106 | landslide and rockfall | slides and falling rock with dust | DEM or MPM | runout against volume (Heim's ratio, Scheidegger) | 2 |
+| 107 | leaves and petals in wind | fluttering, tumbling, swirling in gusts | our coupled light solids | falling regimes against Field and colleagues' falling-disk experiments | 2 |
+| 108 | ash fall | ash settling from a plume | the LES with particles | settling velocities | 2 |
+
+### Volcanic
+
+| # | effect | the case and what matters | simulator | checked against | tier |
+|---|---|---|---|---|---|
+| 109 | eruption column | a Plinian column rising and spreading as an umbrella cloud | a multiphase LES (choose the code when this starts) | height against eruption rate (Mastin and colleagues: H = 2.00 V^0.241, H in km, V the dense-rock eruption rate in m³/s) | 2 |
+| 110 | pyroclastic flow | a hot, ground-hugging cloud of ash and gas | a multiphase LES | the large-scale PELE experiments (Lube and colleagues) | 2 |
+| 111 | lava fountain | molten rock jetting and falling as spatter | ballistics, with Basilisk for the spatter | fountain heights against observations | 2 |
+| 112 | fumaroles and steam vents | steam jetting and drifting | PALM or MicroHH | as steam (#61) | 2 |
+| 113 | volcanic lightning | lightning in an ash plume | the lightning model (#122) in the plume | by eye against footage | 3 |
+| 114 | lahar | a volcanic mudflow | as #95 | as #95 | 3 |
+
+### Ice, snow and cold
+
+| # | effect | the case and what matters | simulator | checked against | tier |
+|---|---|---|---|---|---|
+| 115 | frost on surfaces and windows | frost growing in ferns and feathers | our growth models (Reiter's automaton, Gravner and Griffeath's) | crystal habits against the Nakaya diagram and Libbrecht's experiments | 2 |
+| 116 | snow crystal growth close-up | a single crystal growing | as #115 | as #115 | 3 |
+| 117 | freezing breath and cold steam | breath and kettles condensing in cold air | MicroHH | saturation by mixing | 2 |
+| 118 | dry-ice and liquid-nitrogen fog | cold, heavy fog flowing over edges | PALM or MicroHH | front speed against gravity-current theory (Benjamin) | 1 |
+| 119 | icicles | icicles growing and dripping | our growth model | shapes against Short, Baygents and Goldstein's theory | 3 |
+| 120 | ice cracking and shattering | cracks running, ice breaking | our fracture model | by eye against footage | 3 |
+| 121 | snow accumulation and melt | snow building up and melting on surfaces | our accumulation model | by eye against footage | 3 |
+
+### Electrical and plasma
+
+| # | effect | the case and what matters | simulator | checked against | tier |
+|---|---|---|---|---|---|
+| 122 | lightning | stepped leaders, branching, the return stroke, flicker, afterglow; cloud-to-ground and in-cloud | our dielectric breakdown model (Niemeyer, Pietronero and Wiesmann) | leader steps and branching against high-speed camera records (Rakov and Uman's compilation) | 2 |
+| 123 | electric arcs and shorts | arcs climbing (a Jacob's ladder), shorting sparks | designed on the breakdown model | by eye against footage | 3 |
+| 124 | welding arc and sparks | the arc's glare, spatter, sparks | our particles | spark bursts against carbon content (spark-testing charts) | 2 |
+| 125 | grinder sparks | a fan of sparks, some bursting | our particles | as #124 | 2 |
+| 126 | plasma globe | filaments reaching for a hand | designed | by eye against footage | 3 |
+| 127 | St Elmo's fire | a corona glow on points | designed | by eye against footage | 3 |
+| 128 | aurora | curtains folding and rippling | designed dynamics with physical light | emission lines (557.7 nm green, 630.0 nm red, 427.8 nm blue); by eye against all-sky footage | 2 |
+| 129 | ball lightning | a glowing ball drifting | designed | consistency only | 3 |
+
+### Optics and light (computed from the volumes and the camera, not learned)
+
+| # | effect | the case and what matters | method | checked against | tier |
+|---|---|---|---|---|---|
+| 130 | sky and sun | day, sunset, twilight, night | precomputed atmospheric scattering (Bruneton's method) | sky radiance against the CIE standard skies | 1 |
+| 131 | crepuscular and god rays | light shafts through cloud, smoke and trees | single scattering in the volumes | by eye against footage | 1 |
+| 132 | rainbow and fogbow | primary, secondary and supernumerary bows | Mie and Airy theory from the drop sizes | angles (42° and 51°) and the bows' widths for the drop sizes | 2 |
+| 133 | halos and sun dogs | the 22° halo and sun dogs from ice crystals | ray tracing through hexagonal crystals | angles and colours | 3 |
+| 134 | coronas and glories | coloured rings around the sun or a shadow | Mie theory | ring radii against droplet size | 3 |
+| 135 | heat haze and mirages | shimmer over hot ground and exhausts; inferior and superior mirages | refraction from the temperature field (Gladstone-Dale) | mirage geometry against the temperature profile | 1 |
+| 136 | caustics and underwater light shafts | light focused by a moving water surface | from the water surface (#78 to #91) | by eye against footage | 2 |
+| 137 | cloud shadows | shadows running over the land | from the cloud volumes | consistency only | 1 |
+| 138 | fire and lightning light on the scene | light from emission, flickering with it | from the volumes' emission | consistency only | 1 |
+
+### Designed effects (no real counterpart)
+
+These are real 3D fluids with designed sources and forces, as the 2D presets are. They are checked for consistency
+only, and they say so.
+
+| # | effect | # | effect | # | effect |
+|---|---|---|---|---|---|
+| 139 | portal | 143 | auras and buffs | 147 | healing motes |
+| 140 | spell projectile | 144 | teleport | 148 | plasma orb and energy core |
+| 141 | shield bubble | 145 | summoning circle | 149 | force-push shockwave |
+| 142 | energy beam | 146 | curse smoke | 150 | black hole with lensing |
+
+All are tier 2, except the black hole (tier 3).
+
+### Coupled solids (they move with the fluids; a separate plan)
+
+These need mesh-based learned simulators, a different model family, which gets a plan of its own when the fluids are
+done. All are tier 3.
+
+| # | effect | # | effect |
+|---|---|---|---|
+| 151 | cloth and flags in wind | 154 | objects floating and sinking |
+| 152 | grass and trees in wind | 155 | fracture of glass, wood and stone |
+| 153 | debris lifted by wind and tornadoes | 156 | objects burning, charring and collapsing |
+
+## Weather systems
+
+A weather system is the state of the sky and the air over a whole world, changing over minutes to days. It drives the
+local effects near the camera.
+
+### Two scales
+
+- **Regional**, 10 to 50 km across, minutes to days:
+  - the cloud field, wind, rain and snow fields, fronts, storms, and the day-night cycle;
+  - simulated by CM1, PALM, MicroHH, or WRF in LES mode (for real terrain);
+  - learned as a coarse 3D rollout over a large domain (for example 64 x 64 x 32 cells over 20 km), conditioned on the
+    large-scale forcing (sounding, surface fluxes, wind shear, time of day);
+  - seeded and deterministic, stepped a few times a second and interpolated.
+- **Local**, tens of metres around the camera, every frame:
+  - rain streaks and splashes, snow, gusts, leaves, fog wisps, lightning bolts, drifting snow and spray;
+  - fed by the regional state at the camera: rain rate and drop sizes, wind, temperature, humidity, visibility, cloud
+    base and lightning probability.
+
+### Regimes
+
+Each regime is a set of soundings and forcings whose simulated runs are its training data.
+
+| regime | what you see | the case it is simulated from | checked against |
+|---|---|---|---|
+| clear and calm | blue sky, haze, heat shimmer by day, stars and radiation fog by night | a dry boundary layer through a day | the sky model; fog as #58 |
+| fair weather | cumulus over land or sea | BOMEX; a diurnal land case | BOMEX |
+| trade cumulus with showers | cumulus raining in short showers | RICO | the RICO intercomparison (vanZanten and colleagues) |
+| overcast | stratocumulus or stratus, drizzle | DYCOMS-II | RF01 and RF02 |
+| steady rain | a warm front's nimbostratus | an idealised warm front | rain rates and drop sizes |
+| showers | scattered convective showers | a moist, weakly sheared sounding | rain statistics |
+| thunderstorms | towers, anvils, lightning, outflow | the Weisman-Klemp sounding, weak shear | the Weisman-Klemp storm |
+| squall line | a line of storms, a shelf cloud, a gust front | the RKW case | Rotunno, Klemp and Weisman |
+| supercell and tornado | a rotating storm, hail, a funnel | the Weisman-Klemp sounding, strong shear | the Weisman-Klemp storm; Orf and colleagues |
+| hail storm | hail falling, bouncing, piling | the supercell with hail microphysics | hail sizes |
+| downburst | a sudden cold blast of wind and rain | a microburst case | JAWS |
+| dust storm | a haboob wall, then dusty dimness | an outflow over dry ground | gravity-current speeds |
+| sandstorm | streaming sand, low visibility | strong wind over sand | Bagnold |
+| snowfall | light to heavy snow | a cold moist profile | flake fall speeds |
+| blizzard | heavy and blowing snow, whiteout | cold, windy, snowing | blowing-snow flux |
+| sleet and freezing rain | ice pellets, glaze on everything | a warm nose over a cold layer | the melting-layer profile |
+| fog | radiation, advection or valley fog | as #58 to #60 | as #58 |
+| heat wave | haze, mirages, convective plumes, dust devils | a hot dry boundary layer | dust devils as #74 |
+| hurricane | near: extreme wind, rain bands, spray; far: the eyewall | the Rotunno-Emanuel case | the idealised hurricane |
+| mountain weather | lenticular clouds, cap clouds, föhn, orographic rain | flow over terrain | mountain-wave theory |
+| polar | diamond dust, halos, aurora, blowing snow | a cold, clear, stable layer | halos; aurora lines |
+| monsoon downpour | torrential rain, flooding streets | a very moist sounding | rain rates |
+
+### Transitions, controls and couplings
+
+- **Transitions.** An engine asks for a regime and a time ("a storm in ten minutes", "clearing by dawn"). The regional
+  model's controls move smoothly from one forcing to the next, deterministically from the world's seed. Time of day
+  and season are controls too.
+- **Couplings with the local effects** (several exist in 2D today):
+  - rain wets surfaces, thins smoke and puts out fires;
+  - wind bends flames and smoke, carries embers ahead of a wildfire, builds waves and drives drifting snow;
+  - snow accumulates and melts;
+  - lightning ignites fires;
+  - fog and haze set the visibility;
+  - clouds cast moving shadows;
+  - the air's temperature decides whether breath and steam show.
+- **Light.** The sky model with the clouds' multiple scattering, sun shafts, lightning lighting clouds from inside, and
+  the fire's glow on low cloud and smoke.
+- **Measurement.**
+  - Regional statistics against the simulations: cloud fraction, cloud base and top, rain rate, wind spectra.
+  - The simulations against their intercomparison cases.
+  - Local statistics against measurements: drop sizes and fall speeds, flake fall speeds, gust spectra.
+
+## The simulators
+
+All of them run outside the repository. The repository holds only our case files (small text inputs) and readers for
+their output. Check each licence for using its outputs as training data, and record it in the licence register
+(`docs/DATA.md`).
+
+| simulator | for | notes |
 |---|---|---|
-| A. Fire and smoke | fire, smoke, wildfire, coals, puffs, jet (flamethrower), vortex (fire whirl) | NIST's Fire Dynamics Simulator (FDS): LES, low-Mach, combustion, soot, radiation, vegetation |
-| B. Blasts and rockets | explosion, mushroom cloud, launch (rocket exhaust on the ground) | PeleC (compressible reacting flow with adaptive mesh refinement), handing over to PeleLM (low-Mach) once the shocks have gone |
-| C. Air and water vapour | cloud, fog, steam, rainshaft | an atmospheric LES with moist thermodynamics and microphysics: PALM or MicroHH |
-| D. Particles in air | dust, vortex (dust devil) | the same LES with Lagrangian particles: settling, two-way coupling |
-| E. Liquids | waterfall, fountain, splash, ink, and the water system's pieces (sheets, jets, drips, bubbles, pools) | Basilisk: adaptive octree, volume of fluid, surface tension |
-| F. Designed (no real counterpart) | magic, orb | a real 3D fluid (Basilisk single-phase, or our own solver) with designed sources and forces, as the 2D presets are |
+| FDS (NIST) | fire, smoke, wildfire, compartments | Fortran, public domain; LES, low-Mach, combustion, soot, radiation, vegetation, particles; MPI |
+| PeleC and PeleLM | blasts, rockets, jet flames, small flames (DNS) | C++, open source; compressible and low-Mach reacting flow with adaptive mesh refinement |
+| CM1 | thunderstorms, supercells, tornadoes, squall lines, hurricanes, downbursts | Fortran, freely available; the standard for idealised storms |
+| PALM | boundary layers, clouds, fog, dust devils, saltation, terrain, cities | Fortran, GPL; LES with cloud microphysics and Lagrangian particles |
+| MicroHH | clouds, plumes, DNS of small flows | C++, GPL; LES and DNS with moist thermodynamics |
+| WRF (LES mode) | regional weather over real terrain | Fortran, public domain |
+| Basilisk | splashes, waves, jets, drops, bubbles, liquids | C, GPL; adaptive octree, volume of fluid, surface tension |
+| LIGGGHTS | granular flows (DEM) | C++, GPL |
+| an MPM code (chosen at the time) | snow, mud and sand at large deformation | |
+| our own (C++, in the repository) | stage 1's solver, particles, lightning, frost and icicle growth, ocean spectra, optics | tested here |
 
-The compositor's procedural parts are not learned, and they move to 3D as they are:
-- particles: sparks, embers, debris, flakes, rain, snow, ash, leaves, hail, spatter, shards and streaks;
-- emitters: hail, aurora, rainbow, meteors, beams, shields and glints;
-- force fields.
+## The models
 
-They are covered in "3D scenes and the 3D library" below.
+| family | for | the state (coarse, learned) | seeded random (fine) |
+|---|---|---|---|
+| gas volume | fire, smoke, explosions after their shocks, clouds, fog, steam, dust clouds, designed | velocity, temperature, the group's scalars (soot, vapour, cloud water, rain, ice, dust), memory | fine temperature and scalars, flicker, grains |
+| free surface | waterfalls, fountains, splashes, rivers, surf, lava, mud | velocity, liquid fraction or level set, memory | spray, foam, bubbles, droplets as particles |
+| ocean | open water | exact spectral waves with seeded phases; learned breaking and whitecaps | foam and spray |
+| granular | sand, rubble, avalanches, landslides | density and velocity of the continuum | the visible grains and rocks as particles |
+| regional weather | weather systems | the atmosphere's coarse state, conditioned on forcing | local weather effects |
+| thin structures | lightning, frost, cracks, icicles | none: procedural growth models, seeded | the whole effect |
 
-## Decisions (proposed; settle them before starting)
-
-1. **Accuracy first, checked against measured physics.**
-   - Each group uses an established, validated simulator, run as an external program. Nothing of the simulators
-     enters the repository: only our case files (inputs) and C++ readers for their output.
-   - Every simulation is checked against measurements before any training.
-   - Writing our own solvers is the fallback, for when an established one cannot give what we need.
-2. **One 3D rollout model for every group.**
-   - The state: a coarse 3D grid of velocity (u, v, w), the group's own scalars (below) and memory channels.
-   - The stepper: learned 3 x 3 x 3 convolutions with FiLM on the controls.
-   - Advection: semi-Lagrangian or MacCormack (study L).
-   - A 3D pressure projection.
-   - The forcing: seeded 3D noise.
-   - Fine detail: a seeded 3D detail layer carried by the coarse flow, as study M splits ordered from random.
-   - Grids need not be cubes: fog is flat, a waterfall tall and a wildfire wide.
-3. **The groups' scalars.**
-   - A and F: temperature and soot.
-   - B: temperature, soot and pressure (the blast, while it lasts).
-   - C: temperature, water vapour, cloud water and rain.
-   - D: temperature and dust.
-   - E: the liquid fraction (or a level set), plus foam and spray densities.
-4. **What the runtime gives an engine: both of these.**
-   - **The volume itself**, for the engine's own renderer, which is the natural fit for FUSE (the GPU draws and
-     lights it; the CPU only steps it):
-     - gases as 3D textures: extinction, emission, scattering albedo and optionally velocity;
-     - liquids as a level-set volume (to mesh with marching cubes or to ray-march with refraction), plus a list of
-       spray and foam particles.
-   - **A picture for a camera**, drawn on the CPU, for engines without volumetrics, for tests and for videos.
-5. **Resolution: as high as the PC allows**, chosen per group from a measured pilot and a grid-convergence check, for
-   the simulations and the models alike.
+Every learned family:
+- steps with 3 x 3 x 3 convolutions with FiLM on the controls;
+- advects (semi-Lagrangian or MacCormack) and projects pressure in 3D;
+- is driven by seeded 3D noise;
+- grows from start points;
+- plays forever with shards;
+- trains with hand-written gradients checked against finite differences, the statistics loss (study D2) and long
+  windows (study L).
 
 ## The pipeline every effect goes through
 
-### 0. Measure the PC (once)
+0. **Measure the PC** once: cores, RAM, disk, CPU features. Record them in `results/3d/pc.md`.
+1. **Pilot.**
+   - One case at three resolutions, each twice as fine as the last.
+   - The row's checks must converge, then pass within the measurements' scatter.
+   - Acceptance bands go in `results/3d/<group>/validation.md` before the runs.
+   - Measure the memory per cell and the time per cell-step. The production grid is the largest that fits in 80% of
+     RAM at an acceptable time per run.
+2. **Production runs.**
+   - Settings that matter in a game, with several seeds per setting.
+   - Looping effects: a warm-up, then 30 to 60 s at 30 fps. One-shots: from start to end.
+   - The held-out split goes in `results/3d/<effect>/split.md` before the first production run. Splits are by run.
+3. **Ingest.**
+   - One reader per simulator, into one 3D clip format: FDS slices or Plot3D, AMReX plotfiles, NetCDF (PALM, MicroHH,
+     CM1, WRF), and a Basilisk output routine of ours.
+   - Ingest each chunk as it is written, then delete it.
+   - A 256³ grid of six float32 quantities is 402 MB a frame, so 362 GB for 30 s at 30 fps. Keep the coarse grids, the
+     fine fields and 16-bit storage. Keep full fields for a few runs only.
+4. **Train.**
+   - Start where stage 1 ends. Climb (48³ and 64³ grids, steppers 48 to 64 wide, 8 memory channels, 256³ detail),
+     keeping each step only if it wins on validation.
+   - Keep the stepper at most 64 channels wide, or extend the int8 path, which takes at most 64.
+   - Checkpoints, so it can stop and resume.
+5. **Measure** ([Measurement](#measurement)).
+6. **Ship**, if it wins:
+   - the effect pack;
+   - frozen keyframes, pinned to float;
+   - demo videos;
+   - library entries.
 
-Record the PC's cores, RAM, free disk and CPU features (AVX2, AVX-512, VNNI) in `results/3d/pc.md`. Every size scales
-from these numbers. The library stays C++ on the CPU. The engine's GPU only draws the volumes it is given.
+   Today's 2D effect stays as the light option.
 
-### 1. Pilot: prove the simulation is right before training anything
+## Runtime and engines
 
-- **One case** of the effect, at three resolutions, each twice as fine as the last.
-- **Grid convergence.** The group's checks (in the group's section below) must stop moving between the two finest
-  grids, or the production grid must be finer still.
-- **Acceptance bands are written in `results/3d/<group>/validation.md` before the runs.** Pass if each check falls
-  within the measurements' own scatter. If one fails, fix the simulation before anything else.
-- **Cost.** Measure the memory per cell and the time per cell-step. The production grid is the largest that fits in
-  80% of RAM at an acceptable time per run.
-
-### 2. Production runs
-
-- **Settings that matter in a game**, per effect (in the group's section below), and several seeds per setting.
-- **Each run:**
-  - looping effects: a warm-up, discarded until the statistics are steady, then 30 to 60 s at 30 fps;
-  - one-shots: from ignition to the end.
-- **Held-out split.** Each effect's split goes in `results/3d/<effect>/split.md` before its first production run.
-  - It holds settings never trained on and fresh seeds.
-  - Seed bases are 9,000,000 + 100,000 x the effect's number. The 7,000,000s are water's and the 8,000,000s are
-    study M's.
-  - The numbers:
-
-    | group | effects (number) |
-    |---|---|
-    | A | fire 0, smoke 1, wildfire 2, coals 3, puffs 4, jet 5, fire whirl 6 |
-    | B | explosion 7, mushroom 8, launch 9 |
-    | C | cloud 10, fog 11, steam 12, rainshaft 13 |
-    | D | dust 14, dust devil 15 |
-    | E | splash 16, fountain 17, waterfall 18, ink 19, water system 20 |
-    | F | magic 21, orb 22 |
-  - Splits are by run, never by frame.
-- **Disk.**
-  - A 256³ grid with six float32 quantities is 402 MB a frame, so 362 GB for 30 s at 30 fps.
-  - Ingest each output chunk as it is written, then delete it. Keep the coarse grids, the fine fields the detail layer
-    and the start points need, and 16-bit storage.
-  - Keep full-resolution fields for a few runs only, for pictures and checks.
-- **None of it goes in git.** Runs live under the data root.
-
-### 3. Ingest
-
-There is one reader per simulator, all into one 3D clip format: fields, frame times, the setting and the seed. The
-format has block averages for the coarse grid and fine fields at the detail layer's size.
-
-| simulator | its output |
-|---|---|
-| FDS | 3D slice or Plot3D files |
-| PeleC and PeleLM | AMReX plotfiles |
-| PALM and MicroHH | NetCDF, through libnetcdf's C API |
-| Basilisk | a small output routine of ours in the case file, writing our raw format |
-
-### 4. Train
-
-- Start at a 32³ coarse grid, or the same number of cells in the effect's shape. Use a stepper 24 to 32 wide, 4 memory
-  channels and fine detail at 128³.
-- Then climb, keeping each step only if it wins on validation: a 48³ or 64³ grid, a stepper 48 to 64 wide, 8 memory
-  channels, fine detail at 256³.
-- Keep the stepper at most 64 channels wide, or extend the int8 path, which takes at most 64
-  (`src/runtime/rt_rollout.hpp`).
-- Use the statistics loss (study D2) and long windows (study L).
-- Training runs for days to weeks, with checkpoints, so it can stop and resume.
-
-### 5. Measure
-
-Follow the repository's rules:
-- write the rules down before the test, and run the test once;
-- use held-out settings and seeds;
-- use paired bootstrap 95% intervals with 10,000 resamples;
-- report ties as ties.
-
-What to measure:
-- **Against the simulation, in 3D:**
-  - tracking from the true state, as field errors and as pictures from several cameras, at 8 frames, 1 s and 2 s;
-  - endless statistics, as in studies D2 and K: the 3D detail spectrum, motion, coverage, emission or extinction, and
-    the mean volume.
-- **Against reality.** The model's own runs are measured with the group's physical checks, exactly as the simulation's
-  were. A 3D model allows this, where a sprite does not. If real footage is supplied, also compare pictures from a
-  matching camera with study J's statistics. If there is none, say so.
-- **Against the 2D effect from the front:** today's sprite beside the 3D effect drawn from the same side.
-- **Cost:** milliseconds per frame for the step and for the picture, separately, at each grid size, on 1 and 4
-  threads, AVX2 and AVX-512, float and int8. Also the memory per instance.
-
-### 6. Ship it, if it wins
-
-If it wins, ship:
-- the 3D effect in the effect pack;
-- frozen keyframes, pinned to float;
-- demo videos in `videos/`.
-
-If it does not win, report the result with its numbers, as every other study does.
-
-## The groups
-
-### A. Fire and smoke (FDS) — first
-
-FDS is public domain, validated against decades of fire experiments, and runs on CPUs with MPI. Its resolution is
-measured as D*/dx, the plume's characteristic diameter over the cell size:
-- D* = (Q / (rho_inf c_p T_inf sqrt(g)))^(2/5), where Q is the heat release rate;
-- FDS's own guidance treats D*/dx of 4 to 16 as coarse to moderate;
-- aim for at least 20, and as high as RAM allows.
-
-| effect | the case | settings | checked against |
-|---|---|---|---|
-| fire | a square pool burner of propane or methane, 0.3 to 1 m across | burner size, heat release rate, cross-wind (speed and direction), soot yield (clean to sooty) | mean flame height against Heskestad's L = 0.235 Q^(2/5) - 1.02 D (Q in kW, L and D in m); puffing frequency against f = 1.5 / sqrt(D) Hz; centreline temperature and velocity against McCaffrey's plume correlations |
-| smoke | a smouldering or smoke-pot source, and a fire's plume far above its flames | source strength, heat, wind, soot yield | plume rise and spread against plume theory (Morton, Taylor and Turner); the light it blocks from soot's mass extinction coefficient, about 8.7 m²/g for flaming soot (Mulholland and Croarkin) |
-| wildfire | a grass fire spreading across a strip of vegetation (FDS's vegetation and level-set models) | wind, fuel load, moisture, slope | rate of spread and fire-front depth against the CSIRO grassland fire experiments, as the physics-based grassland fire simulations of Mell and colleagues were checked |
-| coals | a bed of charring fuel: the solid's char oxidation, glowing surface, low flames and hot air above | bed size, air flow (a draught or a bellows), how far it has burned down | surface temperatures and their flicker against infrared measurements of glowing ember beds; heat release against the bed's burning rate |
-| puffs | hot gas from a chimney or an exhaust, released in pulses | pulse rate, strength, wind | puff (thermal) rise and growth against Scorer's thermal experiments and thermal theory |
-| jet | a flamethrower: a burning stream of liquid fuel (Lagrangian droplets) | flow rate, aim, wind | turbulent jet flame length against Delichatsios's correlations; a gas jet flame against the Sandia piloted flame D data (TNF workshop) before the liquid stream |
-| vortex (fire whirl) | a fire in a rotating flow (corner gaps or rotating screens) | circulation, heat release rate | flame height against circulation, from laboratory fire-whirl experiments |
-
-The light: emission from temperature by Planck's law, integrated against a camera's RGB response, and absorption by
-soot in proportion to its volume fraction. The blue base of a clean flame (chemiluminescence) is not in a
-soot-and-temperature model; say so wherever the pictures are shown.
-
-### B. Blasts and rockets (PeleC, then PeleLM)
-
-| effect | the case | settings | checked against |
-|---|---|---|---|
-| explosion | a charge or a fuel-air cloud igniting near the ground | energy, height, fuel (clean to sooty) | blast overpressure and impulse against distance by the Kingery-Bulmash charts (TNT equivalent); fireball size and duration against fireball scaling |
-| mushroom cloud | a large burst's fireball rising through a stratified atmosphere (compressible for the first fraction of a second, then low-Mach) | energy, stratification, wind | stem and cap rise against buoyant-thermal theory in a stratified atmosphere (Morton, Taylor and Turner); the toroidal cap's roll-up |
-| launch | an under-expanded rocket exhaust hitting a pad or the ground and billowing both ways (afterburning; optionally a water deluge's steam) | thrust, nozzle pressure ratio, height above the ground | Mach disk location against x/D = 0.67 sqrt(p0 / pa) (Crist, Sherman and Glass); wall pressure of impinging jets against measurements |
-
-The hand-over from compressible to low-Mach maps the fields at a fixed time, after the shock has left the domain. The
-learned model sees only the low-Mach part. The blast's shock ring, a few frames long, is drawn by the compositor, as
-today's shock fronts are.
-
-### C. Air and water vapour (PALM or MicroHH)
-
-| effect | the case | settings | checked against |
-|---|---|---|---|
-| cloud | shallow cumulus over a warm sea (the BOMEX case), then single clouds at a finer grid | surface heat and moisture fluxes, wind shear | cloud fraction, liquid water and cloud base and top against the BOMEX LES intercomparison (Siebesma and colleagues) |
-| fog | radiation fog forming in a calm, cooling night, and advection fog rolling in | cooling rate, wind, humidity | liquid water and fog depth against a measured radiation-fog case, as published LES fog studies were checked |
-| steam | a warm, moist plume condensing as it rises and evaporating at its edges (a kettle, a vent, a cooling tower, a hot spring) | heat, moisture, air temperature and humidity, wind | plume rise against plume theory; where the visible plume ends against saturation by mixing |
-| rainshaft | rain falling from a cloud base, its evaporation, and the cold outflow it drives | rain rate, air humidity, wind | drop sizes against Marshall-Palmer; fall speeds against Gunn and Kinzer; the outflow's front speed against gravity-current theory (Benjamin) |
-
-The light: scattering by droplets, with a Mie phase function and multiple scattering, which matters for clouds and fog,
-plus absorption.
-
-### D. Particles in air (the same LES, with Lagrangian particles)
-
-| effect | the case | settings | checked against |
-|---|---|---|---|
-| dust | a burst of dust from an impact or a vehicle, spreading along the ground and settling | energy, particle size, wind | settling against measured terminal velocities; the spreading front against particle-laden gravity-current experiments |
-| vortex (dust devil) | dust devils forming in a convective boundary layer, as LES finds them (Raasch and Franke), lifting dust | surface heating, background wind | core radius, tangential velocity profile and pressure drop against field measurements of dust devils |
-
-### E. Liquids (Basilisk)
-
-Basilisk resolves splashes, jets and breaking water with an adaptive octree, volume of fluid and surface tension. It
-has been validated on drop impacts, jets and breaking waves.
-
-| effect | the case | settings | checked against |
-|---|---|---|---|
-| splash | a drop or an object hitting water or a wet surface: crown, jets, droplets | impact speed, size, depth | splashing threshold against Mundo, Sommerfeld and Tropea's K = Oh Re^1.25; crown and Worthington jet heights against drop-impact experiments |
-| fountain | a jet thrown up and breaking into drops, falling into a pool | flow rate, aim, nozzle | trajectory against ballistics with drag; break-up length against jet break-up measurements (Rayleigh-Plateau) |
-| waterfall | a sheet or column falling, breaking up, entraining air and plunging into a pool with spray and mist | flow rate, height, width | break-up length of falling jets; plunge-pool air entrainment and spray against measurements |
-| ink | a slightly dense plume in still or moving water (ink, blood, silt); high Schmidt number | density difference, release rate, current | spreading and entrainment against plume theory; Rayleigh-Taylor mixing growth against measurements (the alpha group, Dimonte and colleagues) |
-| water system | sheets, jets, drips, bubbles and pools (the composer's water kinds today) | as each | as splash and fountain; bubble rise against measured terminal velocities |
-
-**The learned part:** the liquid fraction or a level set on the coarse grid, with velocity.
-
-**The seeded random part:** spray droplets, foam and bubbles as particles, which study M's split suits.
-
-**The light:** surfaces need reflection and refraction, and the engine draws them. For tests and videos, our renderer
-sphere-traces the level set with Fresnel reflection and refraction against an environment map. A learned stepper may
-smear a sharp surface, so measure that first, on the splash.
-
-### F. Designed effects (magic, orb)
-
-There is no real counterpart to measure.
-- The 3D versions are a real fluid with designed sources and forces, as the 2D presets are: magic's swirling portal
-  and the orb's boiling, pulsing ball.
-- They are checked against grid convergence and the design's own intent only, and they say so.
-- They come last. Study L showed fast, regular swirls are hard for a learned stepper, so learn from groups A to E
-  first.
-
-## Order of work
-
-1. **Shared code.** The 3D clip format and FDS reader, the 3D rollout model and trainer, and the volume renderer for
-   emission and absorption. Then the volume API (`include/neuralfx/nvfx_volume.h`), a new C API beside the effect and
-   scene APIs:
-   - create an instance from a 3D effect file, with a seed, controls and a variation;
-   - step it to a time;
-   - read the volume as 3D textures (R8, R16F or R32F), or draw it for a camera given as view and projection matrices
-     into RGBA;
-   - per-ISA SIMD for the 3 x 3 x 3 convolutions and the int8 path;
-   - threads, no allocation per frame, and shards so it plays forever;
-   - the ABI test, `INTEGRATION.md`'s sizes and `NVFX_VERSION` updated;
-   - a Godot demo (a FogVolume or a 3D texture) and an example host.
-
-   The tests:
-   - ingest round trips;
-   - the renderer against Beer-Lambert and blackbody limits;
-   - the 3D stepper's gradients against finite differences;
-   - runtime parity with the trainer's reference on every ISA, float and int8;
-   - the same frames on any number of threads;
-   - no allocation per frame.
-2. **Group A**, fire first. It proves the whole pipeline, with the most validation data behind it.
-3. **Group C**, then **D**. These need the atmospheric LES, its NetCDF reader, and scattering in the renderer.
-4. **Group B.** This needs PeleC and PeleLM, the AMReX reader, and the hand-over.
-5. **Group E.** This needs Basilisk, the level-set state, particles for spray and foam, and the surface renderer.
-6. **Group F.**
-7. **3D scenes and the 3D library** (below), started once groups A and C have shipped effects to compose.
+- **The volume API** (`include/neuralfx/nvfx_volume.h`, started in stage 1):
+  - load, create, seed, controls, step;
+  - fields as 3D textures, level sets and particle lists;
+  - a CPU picture for a camera;
+  - no allocation per frame, per-ISA SIMD, int8, threads and shards.
+- **Sparse volumes.** Only bricks with material in them are stored and stepped. They are uploaded as a brick atlas, as
+  sparse volume formats do.
+- **Level of detail.** Grid size (16³, 32³ or 64³ per instance), step rate (every frame, every other frame), and the 2D
+  sprite for the far distance. The effect manager (budget, sharing, proxies, interpolation) extends to volumes.
+- **For FUSE:**
+  - gases as 3D textures or bricks for its volumetric renderer, lit with the scene;
+  - emission as a light source, flickering with the effect;
+  - liquids as level sets to mesh or ray-march;
+  - particles as instanced sprites or meshes;
+  - weather as a state the game reads (rain rate, wind) and sets (regime, time).
+- **The weather API** (`nvfx_weather.h`):
+  - set the regime, time and season;
+  - read the local state at a point;
+  - get the regional cloud volume and wind field;
+  - deterministic from the world's seed.
+- **The ABI test, `INTEGRATION.md`'s sizes and `NVFX_VERSION`** are updated with every public struct.
 
 ## 3D scenes and the 3D library
 
 - **The scene language in 3D:**
   - positions, sizes and wind as 3D vectors, and a camera;
-  - modules as volumes placed in the world;
-  - the field bus as a 3D grid, with couplings (pushes, transfers, hand-overs, shocks) in 3D;
-  - force fields in 3D.
-- **The procedural parts in 3D:**
-  - particles in 3D: sparks, embers, debris, flakes, rain, snow, ash, leaves, hail, spatter, shards and streaks;
-  - emitters: aurora, rainbow, meteors, beams, shields and glints as 3D shapes;
-  - the water system's strands, drops, crowns, pool waves, foam, rings, bubbles and shafts in 3D.
-- **The library rebuilt in 3D:** today's 149 entries, plus round 7's and the water entries, made again from the 3D
-  effects, each checked from several cameras.
-- **The effect manager for volumes:** budget, level of detail by grid size and step rate, sharing and proxies.
-- **A 3D scene C API** for engines, as `nvfx_scene.h` is for 2D. FUSE gets volumes, particles and lights per frame.
+  - modules as volumes in the world;
+  - the field bus as a 3D grid, with couplings (pushes, transfers, hand-overs, shocks) and force fields in 3D;
+  - inputs and rules as today.
+- **The procedural parts in 3D:** particles (sparks, embers, debris, flakes, rain, snow, ash, leaves, hail, spatter,
+  shards, streaks), emitters (beams, shields, glints, meteors) and the water system's pieces.
+- **The library rebuilt in 3D:** every 2D entry (149 today, more with rounds 7 and 8) made again from the 3D effects,
+  plus new entries for every catalogue row, each checked from several cameras.
+- **A 3D scene C API** for engines, as `nvfx_scene.h` is for 2D.
 
-## What it costs to play (arithmetic from today's 2D numbers; to be measured)
+## Measurement
 
-The 2D stepper works on 32 x 32 cells with 3 x 3 convolutions. Its network stage takes about 0.17 ms per frame on one
-core at float, and 0.10 ms at int8 with VNNI (REPORT.md §13.8).
+For every effect:
+- **Against its simulation, in 3D:**
+  - tracking from the true state (8 frames, 1 s, 2 s), as field errors and as pictures from several cameras;
+  - endless statistics (the 3D detail spectrum, motion, coverage, emission or extinction, the mean volume).
+- **Against reality:** the model's own runs are measured with the row's physical checks, exactly as the simulation's
+  were. If real footage is supplied, also compare it with study J's statistics. If there is none, say so.
+- **Against cheaper ways:**
+  - the simulator run at the model's coarse grid with the same seeded detail (study D0's baseline);
+  - today's 2D sprite from the front.
+- **Cost:**
+  - the step and the picture separately, at each grid size;
+  - 1 and 4 threads; AVX2 and AVX-512; float and int8;
+  - memory per instance.
+- **Demo videos** in `videos/`: each effect walked around, swept through its settings, and beside its simulation.
 
-**A 32³ stepper** has 32 times the cells and 3 times the taps, so about 100 times the work:
-- about 16 ms per frame on one core at float, and 10 at int8;
-- about 3 to 4 ms on four cores.
+## Order of work
 
-That is playable for one hero effect, or for a few with sharing and level of detail.
+0. **Stage 1, here:** study N's fire, and smoke if time allows. It establishes the 3D code, the model, the renderer,
+   the volume API and the videos.
+1. **Wave 1 (PC, tier 1)** proves every model family once:
+   - pool fire (#0), campfire (#1), grass fire (#5), smoke column (#16) and ground-burst explosion (#23);
+   - fair-weather cumulus (#41), overcast (#44), rain (#51), snow (#53), radiation fog (#58) and haze (#62);
+   - wind (#73), ocean (#78), waterfall (#82), fountain (#83), splash (#85), rain on water (#86) and bubbles (#91);
+   - dust burst (#100), vehicle dust wake (#101) and cold fog (#118);
+   - optics #130, #131, #135, #137 and #138;
+   - the first weather regimes: clear, fair weather, overcast, steady rain, snowfall and fog;
+   - the volume API, sparse volumes and the manager for volumes;
+   - the 3D scene language.
+2. **Wave 2 (tier 2):**
+   - the rest of fire, smoke, blasts and engines;
+   - storms (thunderstorm, squall line, downburst, dust storm and sandstorm);
+   - lightning, blizzard, rivers, surf, lava, mud and granular flows;
+   - volcanic effects, frost, aurora and rainbows;
+   - the designed effects;
+   - the library rebuilt in 3D;
+   - the full weather system with transitions.
+3. **Wave 3 (tier 3):** supercells and tornadoes, hurricanes, the hardest liquids, halos and coronas, the remaining
+   designed effects, and coupled solids (their own plan).
 
-**A 64³ stepper** is 8 times that again, about 130 ms on one core: for baking, cutscenes or hero shots, unless int8 and
-threading bring it down.
+## What it costs
 
-**Other costs:**
-- the 3D pressure projection: a few ms;
-- the detail layer: it scales with the fine grid's size;
-- ray-marching a picture on the CPU: about 6 million samples at 256 x 256 px and 96 steps a ray.
+### To play
 
-With the engine's GPU drawing the volumes, the CPU pays only the step. Many distant effects can share instances, or
-fall back to today's 2D sprites, which stay in the library as the light option.
+These are estimates scaled from today's 2D numbers, to be measured.
+
+- **The 2D stepper** works on 32 x 32 cells with 3 x 3 convolutions. Its network stage takes about 0.17 ms a frame on
+  one core at float, and 0.10 ms at int8 with VNNI (REPORT.md §13.8).
+- **A 32³ stepper** has about 100 times that work:
+  - about 16 ms a frame on one core at float, and 10 at int8;
+  - about 3 to 4 ms on four cores.
+- **A 64³ stepper** is 8 times that again.
+- **Sparse bricks** cut this to the cells with material in them. Lower step rates and sharing cut it further.
+- **A CPU picture** is about 6 million samples at 256 x 256 px and 96 steps a ray. With the engine's GPU drawing the
+  volumes, the CPU pays only the step.
+- **Stage 1 measures the first real numbers.**
+
+### To make
+
+Days to weeks of the PC per effect for the simulations, and as much again for training. The pilots measure the real
+numbers.
+
+Storage is the binding limit: ingest as runs are written. The disk needs room for one run's raw output at a time,
+plus every effect's kept grids.
+
+## Seeds
+
+- **Stage 1 (study N):** 9,000,000 to 9,999,999.
+- **Stage 2:** catalogue row # owns 10,000,000 + 100,000 x #, up to 25,699,999 for row 156. The weather regimes take
+  30,000,000 + 100,000 x their row in the regimes table.
+
+Ranges already used elsewhere:
+- 5.3 to 5.9 million: studies G, K and L;
+- 7 million: water;
+- 8 million: study M.
 
 ## What goes in git
 
 These go in:
 - code;
-- the simulators' case files (small text inputs) under `sim3d/<simulator>/<effect>/`, so every run can be repeated;
+- the simulators' case files under `sim3d/<simulator>/<effect>/`, so every run can be repeated;
 - docs, small result tables and figures;
 - the demo videos.
 
-These never go in: the simulators themselves, 3D runs, frames, volumes, renders or model weights.
+These never go in: the simulators themselves, runs, frames, volumes, renders or model weights.

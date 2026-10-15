@@ -1,9 +1,10 @@
 # A lightning strike on a foggy moor, written as a script (docs/COMPOSE.md §4) to show the atmosphere effects
-# (docs/EFFECTS_ATMOSPHERE.md) together, with study D's fire:
+# (docs/EFFECTS_ATMOSPHERE.md) together, with a fire:
 #
 #   nvfx_scene_script --script examples/scenes/moor.nvfxs --models DIR --out moor.mp4
 #
-# DIR holds fog.nvfx, dust.nvfx and cloud.nvfx (docs/EFFECTS_ATMOSPHERE.md) and study D's fire.nvfx (v2).
+# DIR holds fog.nvfx, dust.nvfx and cloud.nvfx (docs/EFFECTS_ATMOSPHERE.md) and study M's fire.nvfx (docs/REPORT.md
+# §14).
 #
 # Night under a bank of storm cloud drifting to the right. Frost-white fog lies along the ground, released in five
 # places, and a campfire burns in it. Lightning flashes in the cloud and strikes the moor: the strike kicks up dust,

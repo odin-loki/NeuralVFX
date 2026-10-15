@@ -102,6 +102,14 @@ struct Hyper {
   // corrected by its round trip and clamped to the range of the forward sample's four corners (as the simulation advects
   // its scalars): far less numerical diffusion where the flow moves a cell or more a frame (a fast swirl).
   int advection = 0;
+  // Study M (docs/REPORT.md §14; file version 6, written only when it or Model::mean is set): the coarse state's random
+  // part. Trained for squared error on noisy inputs, the stepper damps its own fluctuations: played from a start point at
+  // its own controls it moves about 0.8 as much as the simulation. With force > 0 each step adds the simulation's own
+  // stochastic forcing at the coarse level before the projection: the curl of the curl-noise input (the stream function
+  // the stepper already sees, with the run's seed, scale and rate) by central differences over cells, times force,
+  // (1 + 6 turbulence) / 4 (the simulation's curl force grows about so with turbulence) and min(1, 2 (heat + soot)) (where
+  // there is material, as the simulation's), in coarse cells per frame.
+  float force = 0.f;
 
   int channels() const { return kPhys + memory; }
   int inputs() const { return channels() + kNoise + kCoords; }
@@ -120,6 +128,20 @@ struct RenderLayout {
   std::size_t w1, b1, w2, b2, wo, bo, size;
 };
 RenderLayout render_layout(const Hyper& h);
+
+// Study M (docs/REPORT.md §14): the ordered part of the coarse state as a function of the controls. A start point was
+// saved from a run at its own controls; played at others, the learned stepper keeps its look for seconds (the effect's size,
+// lean and amount). With a mean state, a start point begun at controls c is moved by mu(c) - mu(its own controls): its
+// ordered part becomes c's and what made it a sample (its fluctuations about its own mean) stays. mu is a quadratic in
+// the three controls per block of block x block coarse cells (u, v, heat, soot), interpolated bilinearly to the cells:
+// fitted to the time means of the training runs (looping effects) or to their first states (one-shot effects, whose
+// start points are first states). File version 6, written only when it is present.
+inline constexpr int kMeanFeatures = 10;  // 1, I, W, T, I^2, W^2, T^2, IW, IT, WT
+struct MeanState {
+  int block = 0;            // 0: none (start points are begun as they are)
+  std::vector<float> beta;  // [feature][block row][block column][kPhys]
+  bool empty() const { return block == 0; }
+};
 
 struct StartPoint {
   std::vector<float> controls;        // the run's controls
@@ -151,6 +173,12 @@ struct Model {
   // and unrelated to the field; a zero code of a channel whose range starts at zero restores exactly zero.
   int start_bits = 16;
   bool start_dither = false;
+  MeanState mean;  // study M (docs/REPORT.md §14)
+  // Study M: a correction of the stepper's ordered bias, in the mean state's form (a quadratic in the controls per block of
+  // cells, bilinear to the cells): each step adds bias(controls) to the coarse state (u, v, heat, soot) before the
+  // projection, a constant source fitted so that the stepper's own mean at each training run's controls is the run's. It
+  // moves where the effect is on average; its fluctuations stay the stepper's. Version 6, written only when present.
+  MeanState bias;
 
   std::size_t storage_bytes() const;  // as saved: weights fp16, coarse states at start_bits, fine fields 8-bit
 };
@@ -200,8 +228,18 @@ struct State {
 // from zero (activations of the second convolution, which are not negative, as floor(x + 0.5)).
 enum class Int8 { off, second, both };
 
-// Start an effect at `size` pixels from start point `index` (time and coarse state from it; fine fields from it or
-// grown from the coarse state by h.warmup frames with `seed`).
+// Study M: the mean state at controls c (res * res * kPhys, rows from the bottom; zeros without one), and start point
+// `index`'s coarse state begun at controls c: its own, moved by mu(c) - mu(its controls) when the model has a mean state
+// (heat and soot kept within the model's range), into out (res * res * kPhys).
+void mean_state(const Model& m, std::span<const float> controls, std::span<float> out);
+void start_coarse(const Model& m, int index, std::span<const float> controls, std::span<float> out);
+// The same without allocating (the runtime): scratch holds at least mean_scratch(m) floats.
+std::size_t mean_scratch(const Model& m);  // for the mean state and the bias correction alike
+void mean_state(const Model& m, std::span<const float> controls, std::span<float> out, std::span<float> scratch);
+void start_coarse(const Model& m, int index, std::span<const float> controls, std::span<float> out, std::span<float> scratch);
+
+// Start an effect at `size` pixels from start point `index` (time and coarse state from it, moved to the controls by the
+// mean state when there is one; fine fields from it or grown from the coarse state by h.warmup frames with `seed`).
 State start(const Model& m, int index, int size, std::span<const float> controls, std::uint64_t seed, Int8 q = Int8::off);
 // One frame: the stepper on the coarse grid, then the detail layer.
 void step(const Model& m, State& s, std::span<const float> controls, std::uint64_t seed, Int8 q = Int8::off);
@@ -212,6 +250,12 @@ void render(const Model& m, const State& s, std::span<float> rgba);
 // Coarse: in (res*res*channels), pressure in/out, out (res*res*channels), flow (res*res*2).
 void coarse_step(const Model& m, std::span<const float> in, std::span<const float> noise, std::span<const float> cond,
                  std::span<float> pressure, std::span<float> out, std::span<float> flow, Int8 q = Int8::off);
+// Study M (Model::bias): add the bias correction at the step's controls (the condition's first three values) to a
+// [cell][channels] state; scratch holds at least mean_scratch(m) floats (no allocation).
+void add_bias(const Model& m, std::span<const float> cond, std::span<float> state, std::span<float> scratch);
+// Study M (Hyper::force): the coarse stochastic forcing on a [cell][channels] state (velocity in channels 0 and 1) from
+// the step's noise inputs and condition; coarse_step applies it to the updated state before the projection.
+void coarse_force(const Model& m, std::span<const float> noise, std::span<const float> cond, std::span<float> state);
 // Study L's coarse advection (Hyper::advection = 1): MacCormack on a [cell][C] state S (velocity in channels 0 and 1, coarse
 // cells per frame), clamped to the forward sample's corners; out has S's size. The physical range is applied after it.
 void advect_maccormack(std::span<const float> S, int R, int C, std::span<float> out);

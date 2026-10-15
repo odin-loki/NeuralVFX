@@ -770,7 +770,8 @@ void Module::shade(const Light* light) {
 namespace {
 // Models whose learned renderer draws light (their picture is emission); the others draw lit material.
 bool gives_light(std::string_view effect) {
-  return effect == "fire" || effect == "explosion" || effect == "magic" || effect == "jet" || effect == "orb";
+  return effect == "fire" || effect == "explosion" || effect == "magic" || effect == "jet" || effect == "orb" ||
+         effect == "wildfire" || effect == "coals" || effect == "mushroom";  // docs/EFFECTS_BLAZE.md
 }
 }  // namespace
 

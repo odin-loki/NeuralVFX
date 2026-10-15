@@ -1,0 +1,86 @@
+# A night launch, written as a script (docs/COMPOSE.md §4) to show launch, puffs and ink (docs/EFFECTS_FLOW.md)
+# together:
+#
+#   nvfx_scene_script --script examples/scenes/liftoff.nvfxs --models DIR --out liftoff.mp4
+#
+# DIR holds launch.nvfx, puffs.nvfx and ink.nvfx (docs/EFFECTS_FLOW.md).
+#
+# Night at a launch pad. Floodlights; two stacks either side of the pad puff white vapour. The engine lights: a flash,
+# the exhaust hits the pad and rolls out both ways in billows lit by its fire, and the stacks' puffs are blown about by
+# the blast. The blast stirs fine sand off the apron beyond the billows, which hangs in the air and drifts away on the
+# wind (the ink model: a plume with almost no buoyancy). Then the rocket climbs away: its flame rises out of the picture
+# while the billows roll on.
+
+scene      size 1280 x 720, fps 30, length 10 s, ground 620
+bus        at (-128, -360), size 1536 x 1100, cell 8
+particles  capacity 6000, flow 0.9
+keyframes  1.0, 2.6, 3.2, 4.2, 5.4, 6.8, 7.9, 9.4
+
+effect launch = "launch.nvfx", swirl 1, swirl_scale 9   # a gentler sub-grid swirl than its calibration chose (3)
+effect puffs  = "puffs.nvfx"
+effect ink    = "ink.nvfx"
+
+# The stacks' vapour and the stirred sand, lit by the scene (the floodlights, the engine's fire, the night sky).
+look vapour = shader, emission 0, soot_density 2.2, soot_albedo 0.85, sky 0.35, shadow 0.25, scene_light 1.3, relief 1.5,
+              tint (0.94, 0.96, 1)
+look sand   = shader, emission 0, soot_density 1.4, soot_albedo 0.6, sky 0.4, shadow 0.3, scene_light 1.4, relief 1,
+              tint (0.9, 0.74, 0.52)
+# The blast: its exhaust's light over white clouds lit by it; when the rocket has gone, the same clouds without the
+# light (what is left of the exhaust is smoke).
+look exhaust = shader, heat_scale 1.2, emission 2.2, emission_power 2, soot_density 2.4, soot_albedo 0.8, sky 0.6,
+               shadow 0.3, scene_light 1, relief 1.2, tint (1, 0.97, 0.95)
+look spent   = like exhaust, emission 0
+
+let pad    = 700                                                     # the pad's middle (world x)
+let nozzle = ground - 0.56 * 900                                      # the nozzle, 56% up the launch tile
+let lit    = if(t >= ignition, smooth((t - ignition) / 0.8), 0)        # the engine coming up to thrust
+let flash  = if(t >= ignition, exp(-(t - ignition) / 0.15), 0)
+let climb  = if(t >= liftoff, t - liftoff, 0)                         # seconds since the rocket left the pad
+let gone   = smooth(climb / 1.2)                                     # its flame no longer on the pad
+let gusty  = 0.62 + 0.05 * noise(0.4 * t, 4.5, 0)                     # the wind, to the right
+
+# The engine's blast on the pad, waiting for the ignition.
+module blast  = launch, size 256, width 900, at (pad, ground), sink 0.02, feather 0.25, look exhaust to spent by gone,
+                start 0, seed 11, waiting, controls (0.4, 0.5, 0.5), intensity 0.35 + 0.55 * lit * (1 - 0.6 * gone),
+                wind 0.5 + 0.05 * noise(0.4 * t, 4.5, 0), opacity smooth(blast.age / 0.3)
+# Two stacks either side of the pad, puffing vapour (their mouths at the ground; a puffs tile's mouth is 36% from its
+# left edge and 5% up).
+module vent_l = puffs, size 128, width 320, at (pad - 330 + 44, ground + 16), feather 0.3, look vapour, start 0, seed 21,
+                controls (0.6, 0.35, 0.5), intensity 0.6, rate 0.35
+module vent_r = puffs, size 128, width 300, at (pad + 300 + 41, ground + 15), feather 0.3, look vapour, start 3, seed 22,
+                controls (0.55, 0.25, 0.5), intensity 0.55, rate 0.25
+# Fine sand stirred off the apron beyond the billows, hanging and drifting away on the wind (an ink tile's source is a
+# quarter of the way up its middle).
+module sand_l = ink, size 128, width 560, at (pad - 470 + 7, ground - 40 + 151), feather 0.2, look sand, start 0, seed 31,
+                waiting, controls (0.5, 0.7, 0.4), current gusty, opacity smooth(sand_l.age / 1.5)
+module sand_r = ink, size 128, width 600, at (pad + 480 + 7, ground - 40 + 162), feather 0.2, look sand, start 4, seed 32,
+                waiting, controls (0.6, 0.7, 0.4), current gusty, opacity smooth(sand_r.age / 1.5)
+
+# The rocket's flame where the nozzle is, and the floodlights.
+emit glow, at (pad, nozzle - 250 * climb * climb), radius 10 + 8 * lit, colour (1, 0.92, 0.8), brightness 3 * lit, from 2.5
+field rocket  = lamp, at (pad, nozzle - 250 * climb * climb), radius 320, strength 0.6 * lit, colour (1, 0.75, 0.45)
+field flood_l = lamp, at (pad - 420, ground - 260), radius 260, strength 0.5 * (1 - 0.6 * lit), colour (0.7, 0.8, 1)
+field flood_r = lamp, at (pad + 380, ground - 200), radius 240, strength 0.45 * (1 - 0.6 * lit), colour (0.7, 0.8, 1)
+
+light   gain 0.16 * (1 - 0.7 * gone), flash (0.9 * flash, 0.75 * flash, 0.55 * flash)
+frame   exposure 1.2 * (1 + 0.5 * flash), fade smooth(t / 0.4) * smooth((length - t) / 0.6), haze 1, bloom 1, bloom_threshold 1
+camera  x (rand - 0.5) * (2 + 10 * flash) * lit, y (rand - 0.5) * (2 + 10 * flash) * lit
+
+# The engine lights.
+at 2.5 as ignition:
+  wake blast
+  shock at (pad, ground - 20), speed 1100, decay 0.4, amp 4, width 30
+  burst at (pad, ground - 8), radius 30, embers 160, debris 20, speed 520
+# The blast reaches the apron and lifts the sand.
+at 3.3:
+  wake sand_l
+  wake sand_r
+# Lift-off.
+at 7.5 as liftoff:
+  burst at (pad, ground - 8), radius 40, embers 120, debris 0, speed 420
+
+every frame:
+  push vent_l, gain 0.3 * lit    # the blast's air blows the vapour about
+  push vent_r, gain 0.3 * lit
+  push sand_l, gain 0.15 * lit   # and carries the sand
+  push sand_r, gain 0.15 * lit

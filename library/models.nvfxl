@@ -3,7 +3,7 @@
 # Files are read from the library's models folder (nvfx_library_desc.models_dir; the gallery's --models). A new trained
 # effect joins the library with one line here and entries that play it, in any catalogue file: no code.
 
-effect fire      = "fire.nvfx"                                        # v2 (study D2): intensity, wind, turbulence
+effect fire      = "fire.nvfx"                                        # study M (v3; REPORT §14): intensity, wind, turbulence
 effect smoke     = "smoke.nvfx", swirl 1.4, swirl_scale 9             # v2
 effect explosion = "explosion.nvfx", swirl 2.2, swirl_scale 9, contrast 1   # v2, coupled (study I): 16 start points
 effect steam     = "steam.nvfx"                                       # intensity, wind, turbulence
@@ -44,3 +44,16 @@ look devil_dust = shader, emission 0, soot_density 2.6, soot_albedo 0.5, sky 0.3
                   tint (1, 0.78, 0.55)
 look blaze = shader, heat_scale 0.9, emission 2.6, emission_power 2, soot_density 2.6, soot_albedo 0.35, sky 0.2,
              shadow 0.3, scene_light 0.8, relief 1, tint (1, 0.8, 0.6)
+
+# The fire effects (docs/EFFECTS_BLAZE.md): a burning front whose whole width burns, a bed of glowing coals, and a
+# mushroom cloud (plays once, 5 s). All three give light. The mushroom's entries draw it with the explosions' look
+# `cloud` (its own renderer gives colour fringes); the coals' own renderer or a look for a hotter bed.
+effect wildfire = "wildfire.nvfx"                                     # intensity, wind, turbulence
+effect coals    = "coals.nvfx"                                        # intensity, wind, turbulence
+effect mushroom = "mushroom.nvfx"                                     # plays once (5 s): 16 start points
+
+# Launch, puffs and ink (docs/EFFECTS_FLOW.md): an engine's exhaust blown down onto the ground, smoke in pulses, and a
+# plume with almost no buoyancy (underwater). Puffs and ink carry no light: their entries draw them with looks.
+effect launch    = "launch.nvfx", swirl 1, swirl_scale 9                # intensity (thrust), wind, turbulence
+effect puffs     = "puffs.nvfx"                                       # intensity, rate (pulses a second), turbulence
+effect ink       = "ink.nvfx"                                         # intensity, current, turbulence

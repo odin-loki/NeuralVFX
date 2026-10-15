@@ -1,0 +1,10 @@
+effect,name,sha256,how
+fire,s16,77888b99a961f407afe2c939e55f982fad62c7ffb46f2ed755f24abfa40619dc,v2 with swirl_scale 16
+fire,mt4,716cfc7537d1e098f031b3bb191c4f5224049307a71122aef3a7536e8e559d2d,v2's stepper fine-tuned 600 iterations with the ensemble-mean loss at weight 4 (nvfx_ordered train --mean-weight 4 --seed 41)
+fire,mt8,f8244de7e824abf449a786a3e4c693b58da9d56035ceb9dc0e1672c826173ac0,the same at weight 8 (--mean-weight 8 --seed 43)
+fire,mt4_s16,51fce5d5ec7b922c9107b63294237198ffbb6c5cc6a8f9de55470139902ec783,mt4 with swirl_scale 16
+fire,mt8_s16,722c5e9f31fe5d6b374098dcf7eb3d689bb2adb78f58c24c5235642d51b6f932,mt8 with swirl_scale 16
+smoke,s16,989f03df2f35dcc9967e32d2975d11180f381cb564411a6b2ce82fc578c1c78c,v2 with swirl_scale 16
+explosion,ms,b0ee6f053b4b83594fe9cb26d5b496b3ba829fe32d246ab24297796e032a7bc5,v2 with the mean state (nvfx_ordered fitmean; setmean)
+explosion,ms_sw0,b98dc987d181c0b8d76922c1a227a74641cb56fc096393606c4f35182c3cfe2d,ms with swirl 0
+explosion,ms_s16,ce2d91a487bf03ff7fc7a618470fb7fd2e9b0bdca8bc04c2fbde7f5ecce14c43,ms with swirl_scale 16

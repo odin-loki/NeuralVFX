@@ -5,9 +5,9 @@
 //
 //   nvfx_reel --out F.mp4 --seconds S --panel SPEC [--panel SPEC ...] [--size 256] [--zoom 1.5] [--filter bilinear|nearest]
 //             [--width 1280] [--height 720] [--columns N] [--title TEXT] [--note TEXT ...] [--caption TEXT ...] [--timer]
-//             [--bars | --compact] [--seed 1] [--restart S] [--crf 26]
+//             [--bars | --compact] [--seed 1] [--restart S] [--crf 26] [--bg R,G,B,R,G,B]
 //
-//   SPEC is LABEL|SOURCE[|KEYS]:
+//   SPEC is LABEL|SOURCE[|KEYS[|DETAIL[|BG]]]:
 //     FILE.nvfx                  a learned effect; KEYS "T:C1,C2,C3;T:C1,C2,C3;..." its controls at times T (seconds),
 //                                linear in between, held before the first and after the last (one key: constant)
 //     real:EFFECT:RUN            the simulator's held-out run RUN of EFFECT (study D's held-out runs, salt 2: their own
@@ -15,8 +15,13 @@
 //     learned:EFFECT:RUN:FILE    the learned effect FILE started from that run's true state at that frame (its coarse
 //                                state and fine fields as the only start point, the run's noise seed), one continuous
 //                                rollout: frame i of both comes i frames after the same state (study D's tracking, §6.4)
+//   DETAIL "swirl=1,swirl_scale=9": the learned model's detail layer as a scene script's `effect` line sets it (swirl,
+//          swirl_scale, swirl_rate, swirl_ramp, contrast, grow), for FILE and learned panels (KEYS may be empty)
+//   BG     "R,G,B,R,G,B": the panel's background gradient, top and bottom colours (default --bg's: a dark night sky,
+//          36,40,50,13,14,17); a dark effect (ink) needs a light one
 //   --restart S: real and learned panels start again every S seconds from the next run (RUN, RUN + 1, ...), one-shot
-//                effects with the next seed (default: one-shots only, every 3.5 s, or their length and 1 s).
+//                effects with the next seed (default: one-shots only, real and learned panels after their length and
+//                0.5 s, effects after their length and 1 s).
 //
 // Learned effects play at the runtime's default precision (int8 for rollout effects) and drift (6 s shards); real and
 // learned panels are 128 px (the simulator's size), others --size px. Each panel is composited over its background at
@@ -77,11 +82,22 @@ struct Canvas {
   }
 };
 
-// A panel's background: a dark vertical gradient (night sky to ground), so that both glowing and dark material show.
-Rgb background(int y, int h) {
+// A panel's background: a vertical gradient from `top` to `bottom` (by default a dark night sky, so that both glowing
+// and dark material show).
+using Gradient = std::array<float, 6>;
+constexpr Gradient kNight{36, 40, 50, 13, 14, 17};
+Rgb background(int y, int h, const Gradient& g) {
   const float u = static_cast<float>(y) / static_cast<float>(std::max(1, h - 1));
   const auto mix = [u](float a, float b) { return static_cast<std::uint8_t>(std::lround(a + (b - a) * u)); };
-  return {mix(36, 13), mix(40, 14), mix(50, 17)};
+  return {mix(g[0], g[3]), mix(g[1], g[4]), mix(g[2], g[5])};
+}
+
+Gradient parse_gradient(const std::string& text) {
+  Gradient g{};
+  const auto v = split(text, ',');
+  if (v.size() != 6) throw std::invalid_argument("a background is R,G,B,R,G,B (top, bottom): " + text);
+  for (std::size_t i = 0; i < 6; ++i) g[i] = std::stof(v[i]);
+  return g;
 }
 
 struct Key {
@@ -102,6 +118,8 @@ struct Panel {
   bool loops = true;
   float length = 0.f;  // a one-shot effect's seconds
   int cycle = 0;
+  std::vector<std::pair<std::string, float>> detail;  // DETAIL
+  Gradient bg = kNight;                                // BG
   // real and learned
   sim::Effect effect = sim::Effect::fire;
   int run0 = 0, run = -1;
@@ -123,6 +141,29 @@ void load_names(Panel& p) {
     const char* name = nvfx_effect_control_name(p.fx, i);
     p.names.emplace_back(name ? name : std::format("control {}", i));
   }
+}
+
+// A scene script's detail settings on a learned model (script_run.cpp reads the same keys from an `effect` line).
+void set_detail(rollout::Model& m, const std::vector<std::pair<std::string, float>>& detail) {
+  for (const auto& [k, v] : detail) {
+    rollout::DetailSpec& d = m.detail;
+    if (k == "swirl") d.swirl = v;
+    else if (k == "swirl_scale") d.swirl_scale = v;
+    else if (k == "swirl_rate") d.swirl_rate = v;
+    else if (k == "swirl_ramp") d.swirl_ramp = v;
+    else if (k == "contrast") d.contrast = v;
+    else if (k == "grow") d.grow = v;
+    else throw std::invalid_argument("no detail setting " + k);
+  }
+}
+
+nvfx_effect* load_effect(const rollout::Model& m) {
+  std::ostringstream os;
+  if (auto w = rollout::save_model(os, m); !w) throw std::runtime_error(w.error());
+  const std::string bytes = os.str();
+  nvfx_effect* fx = nullptr;
+  if (nvfx_effect_load_memory(bytes.data(), bytes.size(), &fx) != NVFX_OK) throw std::runtime_error("cannot load a changed model");
+  return fx;
 }
 
 // Real and learned panels: (re)start at run `run` of the held-out set.
@@ -156,26 +197,31 @@ void start_run(Panel& p, int run) {
   sp.fine_t = st.temp;
   sp.fine_d = st.soot;
   m.starts = {sp};
-  std::ostringstream os;
-  if (auto w = rollout::save_model(os, m); !w) throw std::runtime_error(w.error());
-  const std::string bytes = os.str();
+  set_detail(m, p.detail);
   if (p.in) nvfx_instance_free(p.in);
   if (p.fx) nvfx_effect_free(p.fx);
   p.in = nullptr;
   p.fx = nullptr;
-  if (nvfx_effect_load_memory(bytes.data(), bytes.size(), &p.fx) != NVFX_OK) throw std::runtime_error("cannot load the started model");
+  p.fx = load_effect(m);
   if (nvfx_instance_create(p.fx, kSimSize, &p.in) != NVFX_OK) throw std::runtime_error("cannot create an instance");
   nvfx_instance_set_controls(p.in, p.controls.data(), static_cast<int>(p.controls.size()));
   nvfx_instance_set_drift(p.in, 0.f);     // one continuous rollout
   nvfx_instance_set_variation(p.in, 0);   // from the true start point, with the run's seed
 }
 
-std::unique_ptr<Panel> make_panel(const std::string& spec, int size, std::uint64_t seed) {
+std::unique_ptr<Panel> make_panel(const std::string& spec, int size, std::uint64_t seed, const Gradient& bg) {
   const auto f = split(spec, '|');
-  if (f.size() < 2) throw std::invalid_argument("--panel LABEL|SOURCE[|KEYS]: " + spec);
+  if (f.size() < 2) throw std::invalid_argument("--panel LABEL|SOURCE[|KEYS[|DETAIL[|BG]]]: " + spec);
   auto pp = std::make_unique<Panel>();
   Panel& p = *pp;
   p.label = f[0];
+  p.bg = f.size() >= 5 && !f[4].empty() ? parse_gradient(f[4]) : bg;
+  if (f.size() >= 4 && !f[3].empty())
+    for (const std::string& kv : split(f[3], ',')) {
+      const auto eq = kv.find('=');
+      if (eq == std::string::npos) throw std::invalid_argument("a detail setting is KEY=VALUE: " + kv);
+      p.detail.emplace_back(kv.substr(0, eq), std::stof(kv.substr(eq + 1)));
+    }
   const auto src = split(f[1], ':');
   if (src[0] == "real" || src[0] == "learned") {
     if (src.size() < 3 || (src[0] == "learned" && src.size() < 4)) throw std::invalid_argument("real:EFFECT:RUN or learned:EFFECT:RUN:FILE: " + f[1]);
@@ -189,7 +235,14 @@ std::unique_ptr<Panel> make_panel(const std::string& spec, int size, std::uint64
   }
   p.kind = "effect";
   p.size = size;
-  if (nvfx_effect_load(f[1].c_str(), &p.fx) != NVFX_OK) throw std::runtime_error("cannot load " + f[1]);
+  if (p.detail.empty()) {
+    if (nvfx_effect_load(f[1].c_str(), &p.fx) != NVFX_OK) throw std::runtime_error("cannot load " + f[1]);
+  } else {
+    auto loaded = rollout::load_model(f[1]);
+    if (!loaded) throw std::runtime_error(loaded.error());
+    set_detail(*loaded, p.detail);
+    p.fx = load_effect(*loaded);
+  }
   if (nvfx_instance_create(p.fx, size, &p.in) != NVFX_OK) throw std::runtime_error(std::format("cannot play {} at {} px", f[1], size));
   nvfx_instance_set_seed(p.in, seed);
   p.seed = seed;
@@ -198,7 +251,7 @@ std::unique_ptr<Panel> make_panel(const std::string& spec, int size, std::uint64
   p.loops = info.loops != 0;
   p.length = info.fps > 0.f ? static_cast<float>(info.frames) / info.fps : 3.f;
   load_names(p);
-  if (f.size() >= 3)
+  if (f.size() >= 3 && !f[2].empty())
     for (const std::string& k : split(f[2], ';')) {
       const auto c = k.find(':');
       if (c == std::string::npos) throw std::invalid_argument("a key is T:C1,C2,C3: " + k);
@@ -245,7 +298,7 @@ void render_panel(Panel& p, int f, float restart) {
     if (nvfx_render(p.in, at, p.rgba.data(), sz(p.size) * 4) != NVFX_OK) throw std::runtime_error("render failed");
     return;
   }
-  const float period = restart > 0.f ? restart : sim::effect_loops(p.effect) ? 0.f : 3.5f;
+  const float period = restart > 0.f ? restart : sim::effect_loops(p.effect) ? 0.f : static_cast<float>(sim::one_shot_frames(p.effect)) / kFps + 0.5f;
   const int per = period > 0.f ? static_cast<int>(std::lround(period * kFps)) : 1 << 30;
   const int run = p.run0 + f / per, i = f % per;  // i: frames since the start point, less one
   if (run != p.run) start_run(p, run);
@@ -262,7 +315,7 @@ void blit(const Panel& p, Canvas& cv, int x0, int y0, int d, bool nearest) {
   const int n = p.size;
   std::vector<float> img(sz(n) * sz(n) * 3);
   for (int y = 0; y < n; ++y) {
-    const Rgb bg = background(y, n);
+    const Rgb bg = background(y, n, p.bg);
     for (int x = 0; x < n; ++x) {
       const std::size_t i = sz(y) * sz(n) + sz(x);
       const float a = static_cast<float>(p.rgba[i * 4 + 3]) / 255.f;
@@ -300,6 +353,7 @@ int main(int argc, char** argv) try {
   float seconds = 10.f, zoom = 1.5f, restart = 0.f;
   int size = 256, width = 1280, height = 720, columns = 0, crf = 26;
   std::uint64_t seed = 1;
+  Gradient bg = kNight;
   bool timer = false, bars = false, compact = false, nearest = false;
   for (int i = 1; i < argc; ++i) {
     const std::string k = argv[i];
@@ -322,14 +376,15 @@ int main(int argc, char** argv) try {
     else if (k == "--crf") crf = std::stoi(next());
     else if (k == "--seed") seed = std::stoull(next());
     else if (k == "--restart") restart = std::stof(next());
+    else if (k == "--bg") bg = parse_gradient(next());
     else if (k == "--timer") timer = true;
     else if (k == "--bars") bars = true;
     else if (k == "--compact") compact = true;
     else throw std::invalid_argument("unknown option " + k);
   }
-  if (out.empty() || specs.empty()) throw std::invalid_argument("nvfx_reel --out F.mp4 --seconds S --panel LABEL|SOURCE[|KEYS] ... (see the source's header)");
+  if (out.empty() || specs.empty()) throw std::invalid_argument("nvfx_reel --out F.mp4 --seconds S --panel LABEL|SOURCE[|KEYS[|DETAIL[|BG]]] ... (see the source's header)");
   std::vector<std::unique_ptr<Panel>> panels;
-  for (const std::string& s : specs) panels.push_back(make_panel(s, size, seed));
+  for (const std::string& s : specs) panels.push_back(make_panel(s, size, seed, bg));
 
   // Layout: a title bar, a grid of panels (label above, controls below), captions at the bottom.
   const int n = static_cast<int>(panels.size()), cols = columns > 0 ? std::min(columns, n) : n, rows = (n + cols - 1) / cols;
@@ -369,10 +424,14 @@ int main(int argc, char** argv) try {
       cv.text(p.label, x, y + 4, 2, {245, 245, 245});
       blit(p, cv, x, y + label_h, d, nearest);
       const int by = y + label_h + d + 8;
-      if (compact) {
+      if (compact) {  // "I0.67 W0.24 T0.56", or "I.67 W.24 T.56" where that does not fit the panel
         std::string line;
-        for (std::size_t c = 0; c < p.controls.size() && c < p.names.size(); ++c)
-          line += std::format("{}{}{:.2f}", c ? " " : "", p.names[c].empty() ? '?' : p.names[c][0], p.controls[c]);
+        const bool tight = d < tools::text_width("I0.00 W0.00 T0.00", 2);
+        for (std::size_t c = 0; c < p.controls.size() && c < p.names.size(); ++c) {
+          std::string v = std::format("{:.2f}", p.controls[c]);
+          if (tight && v.starts_with("0.")) v.erase(0, 1);
+          line += std::format("{}{}{}", c ? " " : "", p.names[c].empty() ? '?' : p.names[c][0], v);
+        }
         cv.text(line, x, by, 2, {175, 175, 182});
       }
       for (std::size_t c = 0; !compact && c < p.controls.size() && c < p.names.size(); ++c) {

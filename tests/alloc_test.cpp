@@ -205,8 +205,9 @@ int run_multi(int size, bool masked, nvfx_precision precision = NVFX_PRECISION_D
 // A rollout effect: the counted frames include a seek backwards (a restart from a start point, with warm-up steps).
 // With `handoff`, an explosion whose first 30 frames are drawn in the simulator's look, crossfading over 10
 // (docs/COMPOSE.md §10). With `d2`, study D2's detail constants (advection gain and softening, docs/REPORT.md §6.9).
-// With `int8`, study K's int8 path (both convolutions with `both`; docs/REPORT.md §13).
-int run_rollout(int size, bool handoff = false, bool d2 = false, bool int8 = false, bool both = false) {
+// With `int8`, study K's int8 path (both convolutions with `both`; docs/REPORT.md §13). With `mean`, study M's mean state:
+// every shard's start is moved to the controls (docs/REPORT.md §14).
+int run_rollout(int size, bool handoff = false, bool d2 = false, bool int8 = false, bool both = false, bool mean = false) {
   nfx::rollout::Hyper h;
   h.res = 16;
   h.hidden = 8;
@@ -231,6 +232,11 @@ int run_rollout(int size, bool handoff = false, bool d2 = false, bool int8 = fal
     sp.seed = static_cast<std::uint64_t>(k);
     sp.coarse.assign(static_cast<std::size_t>(h.res) * h.res * nfx::rollout::kPhys, 0.2f);
     m.starts.push_back(sp);
+  }
+  if (mean) {
+    m.mean.block = 2;
+    m.mean.beta.resize(static_cast<std::size_t>(nfx::rollout::kMeanFeatures) * 8 * 8 * nfx::rollout::kPhys);
+    for (std::size_t i = 0; i < m.mean.beta.size(); ++i) m.mean.beta[i] = 0.05f * static_cast<float>(static_cast<int>(i % 7) - 3);
   }
   std::ostringstream os;
   if (!nfx::rollout::save_model(os, m)) return 1;
@@ -257,7 +263,10 @@ int run_rollout(int size, bool handoff = false, bool d2 = false, bool int8 = fal
   g_counting = false;
   const long n = g_allocations.load();
   std::printf("rollout %dx%d%s: %ld allocations in 202 frames (with a restart)\n", size, size,
-              handoff ? " with the hand-off" : (d2 ? " with study D2's detail constants" : int8 ? (both ? " at int8 (both convolutions)" : " at int8") : ""), n);
+              handoff ? " with the hand-off"
+                      : (d2 ? " with study D2's detail constants"
+                            : (mean ? " with study M's mean state" : int8 ? (both ? " at int8 (both convolutions)" : " at int8") : "")),
+              n);
   nvfx_instance_free(in);
   nvfx_effect_free(e);
   return n == 0 ? 0 : 1;
@@ -992,6 +1001,7 @@ int main() {
   failures += run_rollout(64, true);                             // the simulator's look for the first frames
   failures += run_rollout(64, false, true);                      // study D2's advection gain and softening
   failures += run_rollout(64, false, false, true) + run_rollout(128, false, false, true) + run_rollout(64, false, false, true, true);  // study K
+  failures += run_rollout(64, false, false, false, false, true);  // study M's mean state
   failures += run(g, 128, "grid", 8) + run(g, 128, "grid", 5) + run(g, 64, "grid", 4) + run(c, 64, "conv", 4);  // packed features
   failures += run(g, 128, "grid", 8, 6) + run(c, 64, "conv", 8, 8);  // vector-quantised features
   failures += run_per_plane(g, 128, "grid", false) + run_per_plane(c, 64, "conv", false);  // a width per feature plane

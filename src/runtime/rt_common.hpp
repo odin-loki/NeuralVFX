@@ -71,8 +71,11 @@ class RolloutRunner {
  public:
   virtual ~RolloutRunner() = default;
   // Begin at start point `index` with a noise seed: its coarse state and fine fields (or fine fields upsampled from
-  // the coarse state, to be grown by h.warmup ordinary steps).
-  virtual void begin(int index, std::uint64_t seed) = 0;
+  // the coarse state, to be grown by h.warmup ordinary steps). Study M (docs/REPORT.md §14): with controls and an effect
+  // that has a mean state, the coarse state is moved to the controls (rollout::start_coarse); without controls, or
+  // without a mean state, it is the start point's own.
+  virtual void begin(int index, std::uint64_t seed, std::span<const float> controls) = 0;
+  void begin(int index, std::uint64_t seed) { begin(index, seed, {}); }
   // begin(), then the warm-up steps when the start point has no fine fields.
   virtual void start(int index, std::span<const float> controls, std::uint64_t seed) = 0;
   virtual void step(std::span<const float> controls, std::uint64_t seed) = 0;

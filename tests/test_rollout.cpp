@@ -117,7 +117,51 @@ TEST(Rollout, OneShotEffectsTakeTheExplosionsRecipe) {
     EXPECT_EQ(r.starts, fire.starts);
     EXPECT_TRUE(recipe_model(r).loop);
   }
+  // The mushroom (docs/EFFECTS_BLAZE.md) takes the same branch at its own length (5 s); wildfire and coals take fire's
+  // recipe as it is.
+  const SimRecipe mush = recipe_for(sim::Effect::mushroom);
+  EXPECT_EQ(mush.runs, ex.runs);
+  EXPECT_EQ(mush.frames, 150);
+  EXPECT_EQ(mush.frames, sim::one_shot_frames(sim::Effect::mushroom));
+  EXPECT_EQ(mush.start_frame, 0);
+  EXPECT_EQ(mush.start_fine, ex.start_fine);
+  EXPECT_EQ(mush.starts, ex.starts);
+  EXPECT_EQ(mush.stepper.burn_max, ex.stepper.burn_max);
+  EXPECT_EQ(ex.frames, 90);
+  const Model mm = recipe_model(mush);
+  EXPECT_FALSE(mm.loop);
+  EXPECT_EQ(mm.h.frames, 150);
+  EXPECT_EQ(mm.h.n_age, 2);
+  for (const sim::Effect e : {sim::Effect::wildfire, sim::Effect::coals}) {
+    const SimRecipe r = recipe_for(e), fire = recipe_for(sim::Effect::fire);
+    EXPECT_EQ(r.start_fine, fire.start_fine);
+    EXPECT_EQ(r.runs, fire.runs);
+    EXPECT_EQ(r.frames, fire.frames);
+    EXPECT_EQ(r.starts, fire.starts);
+    EXPECT_TRUE(recipe_model(r).loop);
+  }
 }
+// launch, puffs and ink keep fine fields with their start points as smoke does (docs/EFFECTS_FLOW.md); otherwise they
+// take fire's recipe.
+TEST(Rollout, FlowEffectsKeepFineFieldsAsSmokeDoes) {
+  const SimRecipe fire = recipe_for(sim::Effect::fire), smoke = recipe_for(sim::Effect::smoke);
+  for (const sim::Effect e : {sim::Effect::launch, sim::Effect::puffs, sim::Effect::ink}) {
+    const SimRecipe r = recipe_for(e);
+    EXPECT_EQ(r.start_fine, smoke.start_fine) << sim::effect_name(e);
+    EXPECT_EQ(r.runs, fire.runs);
+    EXPECT_EQ(r.frames, fire.frames);
+    EXPECT_EQ(r.start_frame, fire.start_frame);
+    EXPECT_EQ(r.starts, fire.starts);
+    EXPECT_EQ(r.stepper.activity_stage, fire.stepper.activity_stage);
+    const Model m = recipe_model(r);
+    EXPECT_TRUE(m.loop);
+    EXPECT_EQ(m.h.n_age, 0);
+    EXPECT_EQ(m.noise.flicker_rate, sim::flicker_rate(e));
+  }
+  EXPECT_EQ(recipe_model(recipe_for(sim::Effect::puffs)).control_names[1], "rate");
+  EXPECT_EQ(recipe_model(recipe_for(sim::Effect::ink)).control_names[1], "current");
+}
+
 TEST(Rollout, CoarseFromSimAveragesBlocks) {
   sim::State st;
   st.n = 16;
@@ -622,6 +666,59 @@ void rollout_gradient_check(int unroll, int burn, float profile, float activity 
 
 }  // namespace
 
+TEST(Rollout, StudyMMeanLossGradientsMatchFiniteDifferences) {
+  // mean_window_loss: two rollouts with their own seeds, the product of their pooled differences from the run; its
+  // gradient through both rollouts against finite differences (the same acceptance as the window loss's). Without a
+  // burn-in: the burn-in is not differentiated (as the window loss's), so finite differences would see it.
+  Model m = tiny_model(31);
+  const auto r = tiny_run(m.h, 14);
+  std::vector<float> grad(m.step_w.size(), 0.f);
+  const auto eval = [&](std::vector<float>* g) { return mean_window_loss(m, r, 1, 0, 5, 2, 101, 202, g, 1.f); };
+  const double l0 = eval(&grad);
+  EXPECT_NE(l0, 0.0);
+  int checked = 0, bad = 0, live = 0, kinks = 0;
+  const auto near = [](double a, double b) { return std::abs(a - b) <= 3e-2 * std::max(std::abs(a), std::abs(b)) + 2e-5; };
+  for (std::size_t i = 0; i < m.step_w.size(); i += std::max<std::size_t>(1, m.step_w.size() / 250)) {
+    float& slot = m.step_w[i];
+    const float keep = slot;
+    const double base = eval(nullptr);
+    std::vector<double> n;
+    for (const float eps : {1e-2f, 3e-3f, 1e-3f}) {
+      slot = keep + eps;
+      const double lp = eval(nullptr);
+      slot = keep - eps;
+      const double lm = eval(nullptr);
+      slot = keep;
+      n.push_back((lp - lm) / (2.0 * static_cast<double>(eps)));
+      if (eps < 5e-3f) {
+        n.push_back((lp - base) / static_cast<double>(eps));
+        n.push_back((base - lm) / static_cast<double>(eps));
+      }
+    }
+    const double ana = grad[i];
+    if (std::ranges::any_of(n, [&](double v) { return near(v, ana); })) {
+      ++checked;
+      live += std::abs(n[0]) > 2e-5;
+      continue;
+    }
+    const auto [lo, hi] = std::ranges::minmax(n);
+    if (hi - lo > 0.1 * std::max(std::abs(lo), std::abs(hi)) + 1e-6) {
+      ++kinks;
+      continue;
+    }
+    ++checked;
+    if (++bad <= 6) ADD_FAILURE() << std::format("param {}: analytic {} central {} {} {}", i, ana, n[0], n[1], n[4]);
+  }
+  EXPECT_GT(checked, 100);
+  EXPECT_LE(kinks, (checked + kinks) / 10) << "too many parameters at kinks";
+  EXPECT_GT(live, checked / 2) << "most gradients are zero: the check would be vacuous";
+  // the seeds matter (each rollout is driven by its own noise), the same seeds give the same loss, and a burn-in moves
+  // the window
+  EXPECT_EQ(eval(nullptr), mean_window_loss(m, r, 1, 0, 5, 2, 101, 202, nullptr, 1.f));
+  EXPECT_NE(eval(nullptr), mean_window_loss(m, r, 1, 0, 5, 2, 101, 303, nullptr, 1.f));
+  EXPECT_NE(mean_window_loss(m, r, 1, 3, 5, 2, 101, 202, nullptr, 1.f), mean_window_loss(m, r, 4, 0, 5, 2, 101, 202, nullptr, 1.f));
+}
+
 TEST(Rollout, GradientsMatchFiniteDifferencesOneStep) { rollout_gradient_check(1, 0, 0.f); }
 TEST(Rollout, GradientsMatchFiniteDifferencesThroughTime) { rollout_gradient_check(4, 0, 0.f); }
 // The burn-in frames of a fine-tuning window are a stop-gradient by design (the window starts from wherever the
@@ -982,6 +1079,159 @@ std::vector<std::uint8_t> reference_frame(const Model& m, int start_index, int s
 
 }  // namespace
 
+namespace {
+
+// Study M: a mean state of modest size on a model's grid (blocks of `block` cells), from a seed.
+void add_mean_state(Model& m, int block, std::uint64_t seed) {
+  const int G = m.h.res / block;
+  m.mean.block = block;
+  m.mean.beta.resize(static_cast<std::size_t>(kMeanFeatures) * G * G * kPhys);
+  std::mt19937_64 rng(seed);
+  std::normal_distribution<float> nd(0.f, 0.08f);
+  for (float& b : m.mean.beta) b = nd(rng);
+}
+
+}  // namespace
+
+TEST(Rollout, StudyMMeanStateRoundTripsInVersion6) {
+  // Study M: Model::mean. Without one the file keeps its old layout; with one it is version 6 (with the version 4 and 5
+  // fields), it round-trips at fp16, and a mean state that does not fit the grid is refused.
+  Model m = tiny_model();
+  const auto r = tiny_run(m.h, 4);
+  StartPoint sp;
+  sp.controls = r.controls();
+  sp.seed = 5;
+  sp.time = 1.f;
+  sp.coarse.assign(r.coarse.begin(), r.coarse.begin() + 8 * 8 * kPhys);
+  m.starts.push_back(sp);
+  quantise_like_storage(m);
+  std::stringstream old_ss;
+  ASSERT_TRUE(save_model(old_ss, m));
+  EXPECT_EQ(old_ss.str()[8], 2);
+  Model q = m;
+  add_mean_state(q, 2, 9);
+  q.detail.passes = 2;
+  q.detail.soften = 0.1f;
+  quantise_like_storage(q);
+  std::stringstream ss;
+  ASSERT_TRUE(save_model(ss, q));
+  EXPECT_EQ(ss.str()[8], 6);
+  EXPECT_EQ(ss.str().size(), old_ss.str().size() + 8 + 8 + 8 + 4 + 2 * q.mean.beta.size() + 4 + 4);  // the version 3, 4, 5 and 6 fields
+  auto back = load_model(ss);
+  ASSERT_TRUE(back) << back.error();
+  EXPECT_EQ(back->mean.block, 2);
+  EXPECT_EQ(back->mean.beta, q.mean.beta);
+  EXPECT_EQ(back->detail.passes, 2);
+  EXPECT_EQ(back->detail.soften, q.detail.soften);
+  std::stringstream again;
+  ASSERT_TRUE(save_model(again, *back));
+  EXPECT_EQ(again.str(), ss.str());
+  Model qb = m;  // a bias correction alone
+  qb.bias = q.mean;
+  std::stringstream bss;
+  ASSERT_TRUE(save_model(bss, qb));
+  EXPECT_EQ(bss.str()[8], 6);
+  auto bback = load_model(bss);
+  ASSERT_TRUE(bback) << bback.error();
+  EXPECT_TRUE(bback->mean.empty());
+  EXPECT_EQ(bback->bias.block, 2);
+  EXPECT_EQ(bback->bias.beta, q.mean.beta);
+  Model bad = q;
+  bad.mean.block = 3;  // 8 cells are not whole blocks of 3
+  std::stringstream bs;
+  EXPECT_FALSE(save_model(bs, bad));
+  bad = q;
+  bad.mean.beta.pop_back();
+  std::stringstream bs2;
+  EXPECT_FALSE(save_model(bs2, bad));
+}
+
+TEST(Rollout, StudyMMeanStateMovesStartsToTheControls) {
+  // A start point begun at its own controls is itself, to the bit; at other controls it is moved by mu(to) - mu(from),
+  // heat and soot kept within the range; the mean state is the quadratic in the controls at every block's centre.
+  Model m = runtime_model(16);
+  const std::size_t n = 16 * 16 * kPhys;
+  const std::vector<float> other{0.9f, 0.1f, 0.2f};
+  std::vector<float> out(n);
+  start_coarse(m, 0, other, out);  // no mean state: the start point's own
+  EXPECT_EQ(out, m.starts[0].coarse);
+  add_mean_state(m, 1, 4);
+  for (const int index : {0, 1}) {
+    start_coarse(m, index, m.starts[static_cast<std::size_t>(index)].controls, out);
+    EXPECT_EQ(out, m.starts[static_cast<std::size_t>(index)].coarse);
+  }
+  std::vector<float> to(n), from(n);
+  mean_state(m, other, to);
+  mean_state(m, m.starts[1].controls, from);
+  start_coarse(m, 1, other, out);
+  int moved = 0;
+  for (std::size_t i = 0; i < n; ++i) {
+    const std::size_t c = i % kPhys;
+    EXPECT_EQ(out[i], std::clamp(m.starts[1].coarse[i] + (to[i] - from[i]), m.lo[c], m.hi[c]));
+    moved += out[i] != m.starts[1].coarse[i];
+  }
+  EXPECT_GT(moved, static_cast<int>(n) / 2);
+  // blocks of one cell: the polynomial itself
+  const float i0 = other[0], w0 = other[1], t0 = other[2];
+  const std::array<float, kMeanFeatures> f{1.f, i0, w0, t0, i0 * i0, w0 * w0, t0 * t0, i0 * w0, i0 * t0, w0 * t0};
+  for (const std::size_t k : {std::size_t{0}, std::size_t{37}, n - 1}) {
+    float v = 0.f;
+    for (int p = 0; p < kMeanFeatures; ++p) v += f[static_cast<std::size_t>(p)] * m.mean.beta[static_cast<std::size_t>(p) * n + k];
+    EXPECT_NEAR(to[k], v, 1e-6f);
+  }
+  // rollout::start begins there (and grows fine fields from the moved state)
+  const State s = rollout::start(m, 1, 32, other, 3);
+  for (int i = 0; i < 16 * 16; ++i) {
+    for (int c = 0; c < kPhys; ++c) EXPECT_EQ(s.coarse[static_cast<std::size_t>(i * m.h.channels() + c)], out[static_cast<std::size_t>(i * kPhys + c)]);
+  }
+}
+
+TEST(Rollout, StudyMForceRoundTripsAndStirsWhereThereIsMaterial) {
+  // Hyper::force alone also needs version 6; the forcing adds the curl of the noise's stream function to the velocity
+  // where there is heat or soot and nowhere else, scaled with turbulence.
+  Model m = runtime_model(16);
+  m.h.force = 0.05f;
+  std::stringstream ss;
+  ASSERT_TRUE(save_model(ss, m));
+  EXPECT_EQ(ss.str()[8], 6);
+  auto back = load_model(ss);
+  ASSERT_TRUE(back) << back.error();
+  EXPECT_EQ(back->h.force, 0.05f);
+  EXPECT_TRUE(back->mean.empty());
+  Model bad = m;
+  bad.h.force = -1.f;
+  std::stringstream bs;
+  EXPECT_FALSE(save_model(bs, bad));
+  const int R = 16, C = m.h.channels();
+  std::vector<float> noise(static_cast<std::size_t>(R) * R * kNoise);
+  coarse_noise(m, 7, 1.f, noise);
+  std::vector<float> state(static_cast<std::size_t>(R) * R * static_cast<std::size_t>(C), 0.f);
+  for (int i = 0; i < R * R / 2; ++i) state[static_cast<std::size_t>(i * C + 2)] = 0.6f;  // heat in the lower half only
+  std::vector<float> lo_t(3), hi_t(3);
+  condition(m, std::vector<float>{0.5f, 0.5f, 0.1f}, 1.f, lo_t);
+  condition(m, std::vector<float>{0.5f, 0.5f, 0.9f}, 1.f, hi_t);
+  auto a = state, b = state;
+  coarse_force(m, noise, lo_t, a);
+  coarse_force(m, noise, hi_t, b);
+  double moved = 0, ma = 0, mb = 0;
+  for (int i = 0; i < R * R; ++i) {
+    for (int c = 0; c < 2; ++c) {
+      const float da = a[static_cast<std::size_t>(i * C + c)], db = b[static_cast<std::size_t>(i * C + c)];
+      if (i >= R * R / 2) {
+        EXPECT_EQ(da, 0.f);
+        EXPECT_EQ(db, 0.f);
+      } else {
+        moved += da != 0.f;
+        ma += std::abs(da);
+        mb += std::abs(db);
+      }
+    }
+    EXPECT_EQ(a[static_cast<std::size_t>(i * C + 2)], state[static_cast<std::size_t>(i * C + 2)]);
+  }
+  EXPECT_GT(moved, R * R / 2);
+  EXPECT_NEAR(mb / ma, (1. + 6. * 0.9) / (1. + 6. * 0.1), 1e-3);
+}
+
 TEST(RolloutRuntime, InfoAndControls) {
   const Model m = runtime_model();
   Fx fx(m);
@@ -1116,6 +1366,106 @@ TEST(RolloutRuntime, MatchesTheReferenceWithStudyLsAdvection) {
   Model sl = m;
   sl.h.advection = 0;
   EXPECT_NE(reference_frame(m, 1, 64, 12), reference_frame(sl, 1, 64, 12));
+}
+
+TEST(RolloutRuntime, MatchesTheReferenceWithStudyMsMeanState) {
+  // A mean state (Model::mean): the instance plays a start point at controls other than its own, so the start is moved to
+  // them, as rollout::start moves it, on every ISA; without the mean state the frames differ.
+  Model m = runtime_model();
+  add_mean_state(m, 2, 6);
+  quantise_like_storage(m);
+  const std::vector<float> other{0.85f, 0.25f, 0.4f};
+  Fx fx(m);
+  const auto reference = [&](const Model& mm, int start_index, int size, int frames) {
+    const std::uint64_t seed = mm.starts[static_cast<std::size_t>(start_index)].seed;
+    State s = rollout::start(mm, start_index, size, other, seed);
+    for (int f = 0; f < frames; ++f) rollout::step(mm, s, other, seed);
+    std::vector<float> rgba(static_cast<std::size_t>(size) * size * 4);
+    rollout::render(mm, s, rgba);
+    std::vector<std::uint8_t> out(rgba.size());
+    for (std::size_t i = 0; i < rgba.size(); ++i) out[i] = static_cast<std::uint8_t>(rgba[i] * 255.f + 0.5f);
+    return out;
+  };
+  for (const nvfx_isa isa : {NVFX_ISA_BASELINE, NVFX_ISA_AVX2, NVFX_ISA_AVX512}) {
+    if (nvfx_set_isa(isa) != NVFX_OK) continue;
+    for (const int start_index : {0, 1}) {
+      const int size = 64;
+      nvfx_instance* in = nullptr;
+      ASSERT_EQ(nvfx_instance_create(fx.e, size, &in), NVFX_OK);
+      ASSERT_EQ(nvfx_instance_set_precision(in, NVFX_PRECISION_FLOAT), NVFX_OK);
+      nvfx_instance_set_controls(in, other.data(), 3);
+      ASSERT_EQ(nvfx_instance_set_variation(in, start_index), NVFX_OK);
+      std::vector<std::uint8_t> rt(static_cast<std::size_t>(size) * size * 4);
+      for (const int frames : {0, 4, 12}) {
+        ASSERT_EQ(nvfx_render(in, frames / 30.0, rt.data(), static_cast<std::size_t>(size) * 4), NVFX_OK);
+        const auto ref = reference(m, start_index, size, frames);
+        int worst = 0;
+        std::size_t off = 0;
+        for (std::size_t i = 0; i < ref.size(); ++i) {
+          const int d = std::abs(int(ref[i]) - int(rt[i]));
+          worst = std::max(worst, d);
+          off += d > 1;
+        }
+        EXPECT_LE(worst, 3) << "isa " << isa << " start " << start_index << " frame " << frames;
+        EXPECT_LE(off, ref.size() / 100) << "isa " << isa << " start " << start_index << " frame " << frames;
+      }
+      nvfx_instance_free(in);
+    }
+  }
+  nvfx_set_isa(NVFX_ISA_AUTO);
+  Model plain = m;
+  plain.mean = {};
+  EXPECT_NE(reference(m, 1, 64, 4), reference(plain, 1, 64, 4));
+  EXPECT_NE(reference(m, 0, 64, 4), reference(plain, 0, 64, 4));
+}
+
+TEST(RolloutRuntime, MatchesTheReferenceWithStudyMsForce) {
+  // The coarse stochastic forcing (Hyper::force), a mean state and a bias correction, in the runtime as in the
+  // reference, on every ISA.
+  Model m = runtime_model();
+  m.h.force = 0.2f;
+  add_mean_state(m, 2, 8);
+  {
+    Model b = runtime_model();
+    add_mean_state(b, 4, 12);
+    m.bias = b.mean;
+    for (float& v : m.bias.beta) v *= 0.1f;
+  }
+  quantise_like_storage(m);
+  Fx fx(m);
+  for (const nvfx_isa isa : {NVFX_ISA_BASELINE, NVFX_ISA_AVX2, NVFX_ISA_AVX512}) {
+    if (nvfx_set_isa(isa) != NVFX_OK) continue;
+    for (const int start_index : {0, 1}) {
+      const int size = 64;
+      nvfx_instance* in = nullptr;
+      ASSERT_EQ(nvfx_instance_create(fx.e, size, &in), NVFX_OK);
+      ASSERT_EQ(nvfx_instance_set_precision(in, NVFX_PRECISION_FLOAT), NVFX_OK);
+      nvfx_instance_set_controls(in, m.starts[static_cast<std::size_t>(start_index)].controls.data(), 3);
+      ASSERT_EQ(nvfx_instance_set_variation(in, start_index), NVFX_OK);
+      std::vector<std::uint8_t> rt(static_cast<std::size_t>(size) * size * 4);
+      for (const int frames : {4, 12}) {
+        ASSERT_EQ(nvfx_render(in, frames / 30.0, rt.data(), static_cast<std::size_t>(size) * 4), NVFX_OK);
+        const auto ref = reference_frame(m, start_index, size, frames);
+        int worst = 0;
+        std::size_t off = 0;
+        for (std::size_t i = 0; i < ref.size(); ++i) {
+          const int d = std::abs(int(ref[i]) - int(rt[i]));
+          worst = std::max(worst, d);
+          off += d > 1;
+        }
+        EXPECT_LE(worst, 3) << "isa " << isa << " start " << start_index << " frame " << frames;
+        EXPECT_LE(off, ref.size() / 100) << "isa " << isa << " start " << start_index << " frame " << frames;
+      }
+      nvfx_instance_free(in);
+    }
+  }
+  nvfx_set_isa(NVFX_ISA_AUTO);
+  Model calm = m;
+  calm.h.force = 0.f;
+  EXPECT_NE(reference_frame(m, 1, 64, 12), reference_frame(calm, 1, 64, 12));
+  Model unbiased = m;
+  unbiased.bias = {};
+  EXPECT_NE(reference_frame(m, 1, 64, 12), reference_frame(unbiased, 1, 64, 12));
 }
 
 TEST(RolloutRuntime, ShardsMakeEveryFrameAFunctionOfTime) {
