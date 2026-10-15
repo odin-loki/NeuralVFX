@@ -533,23 +533,27 @@ without `wash`), snow melting where the bus is hot, a wind field carrying leaves
 
 ### 5.5 Water
 
-Water ([EFFECTS_WATER.md](EFFECTS_WATER.md)) is the composer's own, not learned: a seeded simulation of strands, drops,
-crowns, pools, foam, rings, bubbles and streaks, drawn over the background and under the modules (and into the engine
-layers), whose mist goes into a module of a learned effect (fog, steam) through `deposit()` where it lands. Every random
+Water ([EFFECTS_WATER.md](EFFECTS_WATER.md)) has two layers. Its body (a waterfall's sheet, a fountain's arc, a splash,
+a rain shaft) is a learned effect, played as a module like fire; what is random around it is the composer's own, not
+learned: a seeded simulation of strands, drops, crowns, pools, foam, rings, bubbles and streaks, drawn over the
+background and under the modules (and into the engine layers), whose mist goes into a module of a learned effect (fog,
+steam) through `deposit()` where it lands. `spray` and a pool's `churn` tie the two: they read the field bus, where the
+learned body's water is its soot. Every random
 number is a hash of the element's seed, the frame and an index, and it moves on the scene's thread in script order, so
 its frames are the same on any number of threads. Capacities are constants: everything is made when the scene is.
 
 | kind | what it is | keys (defaults) |
 |---|---|---|
-| `pool` | a water surface along a line: a 1D height field (a damped wave equation) stirred by what lands, `wave` and rain, with foam on its current and ripple rings | `along (x0, y0) to (x1, y1)` (required), `depth` (60: the body below the line), `surface` (0: edge-on; else the surface seen from above, this tall, where rings show), `cells` (96; 8 to 4096), `speed` (140: the waves'), `damping` (1.2), `drift` (0: its current), `rate` (0: rain drops a second per 100 pixels), `swell`, `wavelength`, `period` (0, 120, 3: steady waves), `clarity` (0.5), `capacity` (256 foam pieces) |
+| `pool` | a water surface along a line: a 1D height field (a damped wave equation) stirred by what lands, `wave` and rain, with foam on its current and ripple rings | `along (x0, y0) to (x1, y1)` (required), `depth` (60: the body below the line), `surface` (0: edge-on; else the surface seen from above, this tall, where rings show), `cells` (96; 8 to 4096), `speed` (140: the waves'), `damping` (1.2), `drift` (0: its current), `rate` (0: rain drops a second per 100 pixels), `swell`, `wavelength`, `period` (0, 120, 3: steady waves), `churn` (0: how much a learned effect's water falling onto it, the bus's soot just above it, stirs it and leaves foam), `clarity` (0.5), `capacity` (256 foam pieces) |
 | `sheet` | water pouring over a lip: strands across it that fall, tear into tongues and streaks, and break into drops and spray | `along` (the lip, required), `flow` (0.6: 0 to about 1.5), `velocity (u, v)` at the lip (0, 40), `strands` (24; 1 to 256), `capacity` (72 nodes in flight a strand: frames of fall; 8 to 512), `breakup` (1: 2 breaks twice as soon) |
 | `jet` | water thrown from a nozzle: `jets` strands fanned `fan` degrees apart, aimed `angle` degrees from upright, wandering by `spread` and swinging by `pulse` | `at` (required), `speed` (required), `angle` (0), `spread` (3), `fan` (0), `jets` (1; 1 to 64), `pulse` (0), `flow` (0.6), `capacity` (72), `breakup` (1) |
 | `drips` | drops that swell at random points along a line, let go and fall | `along` (required), `rate` (1 a second), `radius` (2), `capacity` (64 forming at once) |
 | `bubbles` | bubbles rising through a region, wobbling and growing, popping at the pool's surface | `in (x, y)`, `size W x H` (required), `rate` (4 a second), `radius` (3: the largest), `speed` (45: their rise), `capacity` (256) |
+| `spray` | drops thrown off a learned water effect's body: tries at random points of a region, a drop where the bus's soot is above `threshold` (more surely the more), with the bus's velocity and a scatter of its own | `in`, `size` (required), `density` (200 tries a second per 100 x 100 pixels), `threshold` (0.15), `speed` (60: the scatter, world pixels a second), `radius` (2), `capacity` (256 tries a frame at most) |
 | `shaft` | a rain shaft seen from afar: streaks in a curtain whose density swells and thins in gusts across it, slanted by a swaying wind, and a veil | `in`, `size` (required), `density` (20 streaks in each 100 x 100 pixels), `speed` (520), `wind (u, v)`, `sway` (0: how far the wind swings), `gust` (0.6), `clarity` (0.4), `colour` (0.55, 0.6, 0.68), `capacity` (2048) |
 
 All kinds take `colour` (what the water reflects: 0.62, 0.8, 0.95), `brightness` (1), `seed` (1), `from`, `until` and
-`if` (it emits only while on; a pool is drawn only while on). What falls (sheets, jets, drips) also takes `gravity`
+`if` (it emits only while on; a pool is drawn only while on). What falls (sheets, jets, drips, spray) also takes `gravity`
 (700), `wind (u, v)` (the drops' and spray's drift), `floor` (where it lands off its pool: the ground), `onto` (the pool
 it lands on, bubbles' pool) and `mist` (the module its landing water feeds), `mist_amount` (1) and `mist_heat` (0.2: the
 warmth deposited with the mist, a fraction of it; a fog takes 0); a shaft takes `mist` too. The settings may change

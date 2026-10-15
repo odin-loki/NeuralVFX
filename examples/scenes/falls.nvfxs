@@ -1,26 +1,27 @@
-# A waterfall at night as a storm comes in, written as a script (docs/COMPOSE.md §4) to show the water
-# (docs/EFFECTS_WATER.md) with the library's learned fog and cloud:
+# A waterfall at night as a storm comes in, written as a script (docs/COMPOSE.md §4) to show water in its two layers
+# (docs/EFFECTS_WATER.md): the ordered body learned, the random detail seeded.
 #
 #   nvfx_scene_script --script examples/scenes/falls.nvfxs --models $NEURALVFX_DATA/library/models --out falls.mp4
 #
-# The water is the composer's deterministic water: a seeded simulation drawn by the frame; the mist and the clouds are
-# the learned fog and cloud effects (library/models.nvfxl's files).
+# The models' folder holds the learned waterfall and rainshaft (the simulator's water presets trained with study D's
+# recipe) and the library's cloud; the spray, the pools, their ripples and foam, the rain and its streaks are the
+# composer's seeded water and weather.
 #
-# A waterfall pours from the cliff above the picture into a pool on the left; where it lands it stirs the pool, throws
-# spray, and its mist (the fog model, fed where the water lands) rolls out over the pool. A bank of storm cloud drifts in
-# from the right trailing rain shafts that thicken and slant in the gusts; lightning flashes in it and strikes twice.
-# Then the rain arrives: it falls over the right of the picture, ringing the puddles there and the pool.
+# A waterfall pours from the cliff above the picture into a pool on the left: the learned waterfall's sheet sways and
+# its foot churns and billows into mist; spray is thrown off its water and the pool is churned where it lands (both read
+# the field bus). A bank of storm cloud drifts in from the right trailing two rain shafts, whose curtains (the learned
+# rainshaft) fill in and lean with the wind under seeded streaks; lightning flashes in it and strikes twice. Then the
+# rain arrives: it falls over the right of the picture, ringing the puddles there and the pool.
 
 scene      size 1280 x 720, fps 30, length 12 s, ground 640
 bus        at (-128, -300), size 1536 x 1040, cell 8
 particles  capacity 12000, flow 0.9
 keyframes  2, 3.5, 5.62, 7, 9.03, 11.5
 
-effect fog   = "fog.nvfx"
+effect waterfall_fx = "waterfall.nvfx", swirl 0
 effect cloud = "cloud.nvfx"
+effect rainshaft_fx = "rainshaft.nvfx", swirl 0
 
-look spray = shader, emission 0, soot_density 0.7, soot_albedo 0.9, sky 1.1, shadow 0.1, scene_light 1.3, relief 0.4,
-             tint (0.9, 0.95, 1)
 look storm = shader, emission 0, soot_density 3, soot_albedo 0.45, sky 0.25, shadow 0.35, scene_light 1.2, relief 2.5,
              tint (0.62, 0.66, 0.78)
 
@@ -31,27 +32,34 @@ let storm  = smooth((t - 1.5) / 3)                          # the rain shafts fi
 let rain   = smooth((t - 6.5) / 1.5)                        # the rain arriving over the picture
 let drift  = 0.36 + 0.05 * noise(0.3 * t, 2.5, 0)           # the wind aloft, to the left
 
-# The waterfall, its pool, and its mist.
-module mist  = fog, size 128, width 560, at (330, ground), sink 0.03, feather 0.1, look spray, start 0, seed 91,
-               controls (0, 0.5, 0.6)
-water pool   = pool, along (40, 612) to (640, 612), depth 28, surface 28, cells 192, drift 20, rate 3 * rain, seed 92
-water falls  = sheet, along (250, -20) to (370, -20), flow 0.85, velocity (25, 40), strands 30, capacity 96, onto pool,
-               mist mist, mist_amount 0.9, mist_heat 0, wind (-30 * rain, 0), seed 93
+# The waterfall: its body the learned waterfall (its sheet, its sway, the churn at its foot and its mist), the random
+# detail around it seeded: spray thrown off its water, the pool it churns, ripples and foam.
+module falls = waterfall_fx, size 128, width 900, at (300, 616), sink 0.055, feather 0.15, start 0, seed 93,
+               controls (0.65, 0.45, 0.5), wind 0.45 - 0.1 * rain
+water pool   = pool, along (20, 614) to (640, 614), depth 26, surface 26, cells 192, drift 20, rate 3 * rain, churn 1,
+               seed 92
+water flecks = spray, in (160, 150), size 280 x 460, threshold 0.3, speed 140, radius 1.6, wind (-30 * rain, 0),
+               onto pool, seed 94
 
-# The storm: three masses of the cloud model drifting in from the right, and the rain shafts under them.
+# The storm: three masses of the cloud model drifting in from the right, and under them two rain shafts: their
+# curtains the learned rainshaft, their streaks seeded.
 module cloud_a = cloud, size 128, width 640, at (820, 480), feather 0.1, look storm, start 0, seed 61,
                  controls (0.8, 0.4, 0.5), wind drift
 module cloud_b = cloud, size 128, width 700, at (1120, 470), feather 0.1, look storm, start 3, seed 62,
                  controls (0.95, 0.4, 0.6), wind drift
 module cloud_c = cloud, size 128, width 640, at (1400, 490), feather 0.1, look storm, start 5, seed 63,
                  controls (0.75, 0.4, 0.4), wind drift
-water shaft_a = shaft, in (760 - 12 * t, 200), size 230 x 440, density 26 * storm, speed 640, wind (-90, 0), sway 40,
-                gust 0.7, colour (0.55, 0.6, 0.68), seed 64
-water shaft_b = shaft, in (1040 - 12 * t, 190), size 260 x 450, density 32 * storm, speed 640, wind (-110, 0), sway 50,
-                gust 0.6, colour (0.55, 0.6, 0.68), seed 65
+module curtain_a = rainshaft_fx, size 128, width 520, at (875 - 12 * t, 640), sink 0.055, feather 0.2, start 0, seed 64,
+                   controls (0.5, 0.3, 0.5), intensity 0.15 + 0.6 * storm, opacity storm
+module curtain_b = rainshaft_fx, size 128, width 560, at (1170 - 12 * t, 640), sink 0.055, feather 0.2, start 4, seed 65,
+                   controls (0.6, 0.25, 0.6), intensity 0.2 + 0.65 * storm, opacity storm
+water streaks_a = shaft, in (790 - 12 * t, 200), size 170 x 440, density 22 * storm, speed 640, wind (-90, 0), sway 40,
+                  gust 0.7, clarity 0.85, colour (0.55, 0.6, 0.68), seed 66
+water streaks_b = shaft, in (1080 - 12 * t, 190), size 190 x 450, density 26 * storm, speed 640, wind (-110, 0), sway 50,
+                  gust 0.6, clarity 0.85, colour (0.55, 0.6, 0.68), seed 67
 
 # The rain over the right of the picture, and the puddles it rings.
-emit rain, in (600, -40), size 760 x 680, density 4 * rain, wind (-80, 0), radius 0.8, seed 66
+emit rain, in (600, -40), size 760 x 680, density 4 * rain, wind (-80, 0), radius 0.8, seed 166
 water puddle_a = pool, along (700, 648) to (850, 648), depth 7, surface 7, cells 48, rate 9 * rain, seed 67
 water puddle_b = pool, along (930, 655) to (1080, 655), depth 9, surface 9, cells 48, rate 9 * rain, seed 68
 water puddle_c = pool, along (1140, 646) to (1260, 646), depth 6, surface 6, cells 40, rate 9 * rain, seed 69

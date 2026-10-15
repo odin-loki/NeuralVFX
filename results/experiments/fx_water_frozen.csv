@@ -1,13 +1,12 @@
 kind,name,file,bytes,sha256,source
-rollout_effect,fog,fx_atmos/models/d/fog.nvfx,149287,bcb5466137e5684c409ae57321e2faf898c273ae40556641be75bfb3a012da49,the library's model (library/models.nvfxl; docs/EFFECTS_ATMOSPHERE.md)
 rollout_effect,cloud,fx_atmos/models/d/cloud.nvfx,149287,b1a886dd038a8e88f4461e5fbd3b0830d9c54e764b0977f9fded225b57e221c8,the library's model (library/models.nvfxl; docs/EFFECTS_ATMOSPHERE.md)
-falls_keyframe,frame_060,nvfx_scene_script --keyframes (examples/scenes/falls.nvfxs),1174737,06259ce2ff1c6d671d912905866a68532102412484f97bc239e83f8d771c6b61,
-falls_keyframe,frame_105,nvfx_scene_script --keyframes (examples/scenes/falls.nvfxs),1262968,e766973b6749f8bb590a4af821a8c89d490242d636db07e97394a32e1e622b8b,
-falls_keyframe,frame_169,nvfx_scene_script --keyframes (examples/scenes/falls.nvfxs),975855,5d4bd02da46d9dd9fd9e7d660701f237e070b4d771703f4170d90e59f7b463f0,
-falls_keyframe,frame_210,nvfx_scene_script --keyframes (examples/scenes/falls.nvfxs),1316509,55a75c6f23376aa36e1f4c3279c78593fac14f0a5766217907272f329fa3f292,
-falls_keyframe,frame_271,nvfx_scene_script --keyframes (examples/scenes/falls.nvfxs),1067986,99aca90176d9a4cfe28dd674277f1c875064c9fc8e698fe74866645cc1709e12,
-falls_keyframe,frame_345,nvfx_scene_script --keyframes (examples/scenes/falls.nvfxs),1382570,ffbf538fc307b49b3537edaffe4b7ed2db6350bb3e990d5c23e020195a3f1e40,
 rollout_effect,waterfall,fx_water/models/d/waterfall.nvfx,83719,ffc894995d47325aa883787188e4defeb001ebb76e848152b72f128b06e70a0c,study D's recipe (docs/EFFECTS_WATER.md): d-train --stages12 1 then d-tune then d-finish; frozen before its test
 rollout_effect,fountain,fx_water/models/d/fountain.nvfx,83719,a4dd81de4d939b763ecf3b87118c40043e4487a57e89dd65b39f394f28782034,study D's recipe (docs/EFFECTS_WATER.md): d-train --stages12 1 then d-tune then d-finish; frozen before its test
 rollout_effect,splash,fx_water/models/d/splash.nvfx,280927,8705966a0b60cc32f618ad89ba762f9e33269e0a73f8a36ede3af838ccb6fdd5,study D's recipe (docs/EFFECTS_WATER.md): d-train --stages12 1 then d-tune then d-finish; frozen before its test
 rollout_effect,rainshaft,fx_water/models/d/rainshaft.nvfx,83719,310b168bc6352dc277be04971c74553df596c2f5535faa917d5153d842eb0b20,study D's recipe (docs/EFFECTS_WATER.md): d-train --stages12 1 then d-tune then d-finish; frozen before its test
+falls_keyframe,frame_060,nvfx_scene_script --keyframes (examples/scenes/falls.nvfxs),1084717,8f8cbb396988785bc46fcc0b30c21ac54f722445c06b03084cffe51ced0f0bfa,
+falls_keyframe,frame_105,nvfx_scene_script --keyframes (examples/scenes/falls.nvfxs),1162600,ee8e913232384ed12e830d85c41bfddb7f6a31c72ba0ac97af6db992756dcb2f,
+falls_keyframe,frame_169,nvfx_scene_script --keyframes (examples/scenes/falls.nvfxs),916976,fc594f38a68f4e7ce9c52ec100ebe41e4cccd2180ed2005cb8347507c9e38ce9,
+falls_keyframe,frame_210,nvfx_scene_script --keyframes (examples/scenes/falls.nvfxs),1197104,3d5b4e45dbae2733f6ac77a409fef19dc1dda91651e575616107d22d0b64670d,
+falls_keyframe,frame_271,nvfx_scene_script --keyframes (examples/scenes/falls.nvfxs),983586,c8bd920ed996e081bf8c6aa00d0288c79fe3b38a16cf529624997fe071c05da8,
+falls_keyframe,frame_345,nvfx_scene_script --keyframes (examples/scenes/falls.nvfxs),1255566,9cbe2703f183566456c3e66e6f52d0d5d656ffb4e3bfc1198c5fceba7ea557c0,

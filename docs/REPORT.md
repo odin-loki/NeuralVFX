@@ -912,13 +912,17 @@ Each is 82 KB. The full account, with a scene in which a flamethrower sets a dus
 
 ### 6.15 Water
 
-Water was not trained. Waterfalls, fountains, splashes, drips, bubbles, rain on puddles and rain shafts are a
-deterministic system in the composer: their motion a seeded simulation (strands that fall and break into drops, splash
-crowns, a damped wave equation per pool, foam, rings, bubbles, streaks; every random number a hash of seed, frame and
-index), their look drawn, and only their mist learned (the fog or steam model, fed where the water lands). The same
-frames on any number of threads, no allocation per frame; its simulation costs next to nothing and its drawing what
-it covers (1 to 8 ms an element a frame at 1280 x 720 on one thread); 19 library entries and a scene of a waterfall
-under an incoming storm. The full account is in [EFFECTS_WATER.md](EFFECTS_WATER.md).
+Water is two layers, as the game asked ("model what is ordered and leave random to random"). The ordered body is
+learned: four new presets of the simulator (a waterfall, a fountain, a splash that plays once, a rain shaft) trained
+with this study's recipe and tested with its protocol on new seeds (7000000 and up). All four track held-out runs
+better than the coarse simulation with the same detail layer at 1 s (+1.8 to +3.7 dB); played endlessly, the fountain
+and the rain shaft work as steam did (average picture 3.3 and 4.6 dB closer than the nearest flipbook's, motion tied),
+while the waterfall and the splash only tie the flipbook's average picture and are weak by the rule set before the
+test. The random detail is a deterministic seeded simulation in the composer (spray, drops, crowns, pools with waves,
+foam, ripples, bubbles, drips, rain streaks; every random number a hash of seed, frame and index), which reads the
+learned body's water through the field bus. The same frames on any number of threads, no allocation per frame; 23
+library entries and a scene of a waterfall under an incoming storm. The full account is in
+[EFFECTS_WATER.md](EFFECTS_WATER.md).
 
 ## 7. Runtime cost and budget
 

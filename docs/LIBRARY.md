@@ -1,17 +1,19 @@
 # The effect library
 
-A catalogue of 98 named, ready-to-use effects that a game lists, places and drives without training anything: a
+A catalogue of 102 named, ready-to-use effects that a game lists, places and drives without training anything: a
 campfire, a grenade, a steam vent, a portal, a lightning strike, ground fog, a dust impact, a flamethrower, a plasma
-orb, a dust devil, a rocket's smoke trail, rain. Each plays the eleven trained rollout models (fire, smoke, explosion
+orb, a dust devil, a rocket's smoke trail, rain. Each plays the fifteen trained rollout models (fire, smoke, explosion
 v2, steam and magic; fog, dust and cloud, [EFFECTS_ATMOSPHERE.md](EFFECTS_ATMOSPHERE.md); jet, orb and vortex,
-[EFFECTS_ENERGY.md](EFFECTS_ENERGY.md)) and the compositor's procedural elements (embers, sparks, shock fronts, scorch marks, flashes, lights, bolts, rings), at
+[EFFECTS_ENERGY.md](EFFECTS_ENERGY.md); waterfall, fountain, splash and rainshaft, [EFFECTS_WATER.md](EFFECTS_WATER.md)) and the compositor's procedural elements (embers, sparks, shock fronts, scorch marks, flashes, lights, bolts, rings), at
 a size, with parameters mapped onto the models' controls and looks. The 23 entries of the six newer models were added
 with the recipe of §6, in text; the only code they needed is a third anchor, for the jet's nozzle. The nine newest
 entries needed two features of the compositor: **trails** (`rocket_trail`, `vehicle_dust_wake`, `carried_torch`,
 `comet_trail`: effects that move and leave their smoke, dust or glow in the world behind them, §9) and **procedural
-weather** (`rain`, `snow`, `falling_ash`, `falling_leaves`, `cherry_petals`, §2.1). The 19 **water** entries
-(waterfalls, fountains, splashes, drips, bubbles, rain on puddles, a rain shaft) are the composer's deterministic water
-([EFFECTS_WATER.md](EFFECTS_WATER.md)): a seeded simulation, drawn, whose mist is the fog or steam model (§1, Water).
+weather** (`rain`, `snow`, `falling_ash`, `falling_leaves`, `cherry_petals`, §2.1). The 23 **water** entries
+(waterfalls, fountains, splashes, drips, bubbles, rain on puddles, rain shafts) are water in two layers
+([EFFECTS_WATER.md](EFFECTS_WATER.md)): the ordered body learned (four new models: waterfall, fountain, splash,
+rainshaft) and the random detail seeded (the composer's deterministic water: spray, pools, ripples, foam, drops),
+or the seeded layer alone (§1, Water).
 
 ![The library's contact sheet: the entries of the first five models](figures/library_sheet.png)
 
@@ -19,7 +21,7 @@ weather** (`rain`, `snow`, `falling_ash`, `falling_leaves`, `cherry_petals`, §2
 
 ![The library's contact sheet: the four trails, moved through their boxes, and the five procedural weathers](figures/library_sheet_engine.png)
 
-![The library's contact sheet: the 19 water entries](figures/library_sheet_water.png)
+![The library's contact sheet: the 23 water entries](figures/library_sheet_water.png)
 
 *Every entry alone on a stage fitted to its box, at the moment its catalogue says shows it well (`nvfx_gallery`).*
 
@@ -36,14 +38,13 @@ weather** (`rain`, `snow`, `falling_ash`, `falling_leaves`, `cherry_petals`, §2
 | dust | 5 | 5 | 0 | 5 | 0 |
 | trails | 4 | 0 | 4 | 4 | 0 |
 | weather | 11 | 6 | 5 | 6 | 5 |
-| water | 19 | 0 | 0 | 9 | 10 |
-| **all** | **98** | **23** | **9** | **68** | **30** |
+| water | 23 | 0 | 0 | 13 | 10 |
+| **all** | **102** | **23** | **9** | **72** | **30** |
 
-**What is learned and what is not.** Only eleven things move by a trained model: fire, smoke, an explosion, steam,
-magic, fog, dust, cloud, a jet, an orb and a vortex. Everything else in an entry is the compositor's: particles (embers,
+**What is learned and what is not.** Only fifteen things move by a trained model: fire, smoke, an explosion, steam,
+magic, fog, dust, cloud, a jet, an orb, a vortex, and the bodies of a waterfall, a fountain, a splash and a rain shaft. Everything else in an entry is the compositor's: particles (embers,
 sparks, debris), shock fronts, scorch marks, flashes, camera shakes, and the glows this library adds (lightning and
-electric arcs, rings, discs and motes of light, lamps; rain, snow, ash and leaves; water, whose mist alone is
-learned). Entries that use no model at all
+electric arcs, rings, discs and motes of light, lamps; rain, snow, ash and leaves; water's random detail). Entries that use no model at all
 say *(procedural)* in their description. A trail's material is learned (it plays in the explosion or dust model's
 tiles), but where it appears is the compositor's: it is put into the model's state along the source's path, as a
 script's `heat` field and `transfer` add material. **A recolour is a look, not new dynamics**: blue gas, green witch
@@ -201,12 +202,19 @@ the gallery's thumbnail shows each after `show` seconds of travel through its bo
 | `falling_leaves` (weather) | Falling leaves (procedural): autumn leaves tumbling and swaying down, blown by the wind | leaves | 960 x 540, base | loop | density (0.35), wind (60), size (1) | Fair: leaves in four autumn colours that tumble (they narrow and widen as they turn) and swing as they fall; small and few at the defaults, and flat shapes, not leaf shapes. |
 | `cherry_petals` (weather) | Cherry petals (procedural): small pink petals drifting and tumbling on a light breeze | leaves | 960 x 540, base | loop | density (0.6), wind (70), size (1) | Fair: small pink petals that tumble and drift; pleasant in motion, specks in a still. |
 
-### Water (19)
+### Water (23)
 
-The composer's deterministic water ([EFFECTS_WATER.md](EFFECTS_WATER.md)), `library/water.nvfxl`: its motion a seeded
-simulation, its look drawn; what is learned is the mist and spray (the fog model fed where the water lands, the steam
-model for the geyser) and the rain shaft's cloud. *Procedural* in a description's place means no model. None of the
-entries draws rock or ground: a fall whose lip is in its box starts in mid-air, so a game puts it against its own cliff.
+Water in two layers ([EFFECTS_WATER.md](EFFECTS_WATER.md)), `library/water.nvfxl`. In `waterfall`, `fountain`,
+`splash` and `rain_shaft` the ordered body is one of the four water models (the simulator's water presets, trained with
+study D's recipe and tested: the fountain and the rain shaft work as steam did, the waterfall and the splash are weak by
+the test's rule, as they only tie the nearest flipbook's average picture), and the random detail around it is seeded:
+spray thrown off the body's water and pools churned where it lands (both read the field bus), drops, rings and foam.
+The other entries are the seeded layer alone (*drawn*): their motion a seeded simulation, their look drawn, their mist
+and spray clouds the fog model fed where the water lands (the steam model for the geyser); `waterfall_drawn` and
+`rain_shaft_drawn` are the drawn versions of the two kept beside the learned ones. *Procedural* in the plays column
+means no model. None of the entries draws rock or ground: a fall whose lip is in its box starts in mid-air, so a game
+puts it against its own cliff. The water models are linked into the models' folder with the others
+(`ln -s ../../fx_water/models/d/{waterfall,fountain,splash,rainshaft}.nvfx .`).
 
 | effect | what it is | plays | box, anchor | runs | parameters (default) | how it looks |
 |---|---|---|---|---|---|---|
@@ -218,14 +226,17 @@ entries draws rock or ground: a fall whose lip is in its box starts in mid-air, 
 | `pipe_outflow` | A pipe's outflow: water gushing out of a culvert in an arc and crashing into the pool below | fog; look spray, water pool, sheet | 520 x 360, base | loop | flow (0.9), speed (160) | Good: a ribbon arcing out and breaking up as it falls, spray and mist where it lands (the pipe is not drawn). |
 | `leaking_pipe` | A leaking pipe: a thin trickle and drops falling from a seam into a puddle that rings where they land | water pool, jet, drips | 260 x 260, base | loop | rate (3) | Weak in a still: a thin trickle of drops and a ringing puddle, small; better in motion and close up. |
 | `cave_drips` | A dripping cave ceiling: drops swelling on the rock and letting go one by one into a still pool, rings spreading | water pool, drips | 520 x 420, base | loop | rate (4) | Weak in a still: the drops are small and few at the gallery's size (rings show at full size); no rock is drawn. |
+| `fountain` | A fountain: a jet rising and falling back in a bell of water into its basin (the fountain model), drops off the bell and the basin's ripples and foam seeded | fountain; water pool (churn), spray | 480 x 480, base | loop | height (0.6), aim (0.5) | Fair: a jet that rises into a bell of falling water, soft and white, with seeded drops falling from it into a rippling basin; it reads as a fountain in motion, a little like a jellyfish in a still. |
 | `garden_fountain` | A garden fountain: a tall central jet and a ring of arcing jets falling back into a basin, rippling it | water pool, jet | 420 x 360, base | loop | height (1) | Good: a central column and six arcs falling back into a rippling basin. |
 | `water_geyser` | A geyser: a gurgling spout that erupts every eight seconds into a towering column of water and steam, then falls back | steam; look geyser, water pool, jet | 420 x 760, base | loop | every (8) | Fair: the eruption reads, with steam at its foot and beads of water at the top, but the column is a bundle of strands, a little like branches. |
 | `broken_hydrant` | A broken hydrant: a column of water blasting up from the street, spraying and swaying, rain of drops and a spreading puddle | fog; look spray, water pool, jet | 520 x 520, base | loop | power (1) | Fair: a swaying column that bursts into drops over a cloud of spray; two or three strands, not a solid column. |
+| `splash` | A splash: the crown of water thrown up where something hits the water and the column from its crater, falling back into the pool (the splash model), its drops, rings, waves and foam seeded | splash; water pool (churn), spray, splash | 480 x 420, base | once, 3 s | power (0.6) | Fair: the learned crown's two walls rise and lean out, then the crater's column; seeded drops, rings and foam around them. The walls read as two horns rather than a cup. |
 | `boulder_splash` | A boulder into a lake: a wide crown of water and spray, a column from the crater, waves rolling out and a cloud of spray | fog; look spray, water pool, splash | 560 x 420, base | once, 4 s | power (1.3) | Good: the crown, its drops, the column from the crater, rings and waves; the fog's spray cloud is slow and lingers, for spray. |
 | `cannonball_splash` | A cannonball splash: a sudden narrow crown and a tall column of water thrown up from the crater | water pool, splash | 400 x 420, base | once, 3 s | power (0.9) | Fair: a crown and a column; small in the gallery. |
 | `dive_splash` | A dive: a small, clean crown and a short column, rings spreading where the diver went in | water pool, splash | 320 x 260, base | once, 2.5 s | power (0.45) | Fair: small and quick by design. |
 | `rain_on_puddles` | Rain on puddles: rain falling (the compositor's rain) on three puddles that ring and fleck where drops land | rain, water pool | 960 x 540, base | loop | density (3) | Fair: the rain and the rings read; the puddles are thin strips (their drops are their own, not the rain's). |
-| `rain_shaft` | A rain shaft: a dark storm cloud trailing a slanted curtain of rain that thickens and thins in gusts (the cloud model and streaks) | cloud; look storm, water shaft | 700 x 700, base | loop | density (22), wind (70) | Good: a dark cloud over a slanted, gusting curtain of streaks with a soft veil. |
+| `rain_shaft` | A rain shaft: a dark storm cloud (the cloud model) trailing a curtain of rain that thickens, thins and leans with the wind (the rainshaft model), its streaks seeded | cloud, rainshaft; look storm, water shaft | 700 x 700, base | loop | density (18), wind (50) | Good: the learned curtains hang from the cloud, thicken and thin and spread at their foot; the seeded streaks fall through them. A faint green tinge at the foot (the learned renderer). |
+| `rain_shaft_drawn` | A rain shaft, drawn: a dark storm cloud trailing a slanted curtain of rain that thickens and thins in gusts (the cloud model; the curtain and its streaks the seeded layer alone) | cloud; look storm, water shaft | 700 x 700, base | loop | density (22), wind (70) | Good: a dark cloud over a slanted, gusting curtain of streaks with a soft veil. |
 | `underwater_bubbles` | Bubbles under water: seen through the side of deep water, bubbles rising, wobbling and growing, popping at the surface | water pool, bubbles | 360 x 420, base | loop | rate (6) | Fair: bubbles rise, wobble and pop; the water reads as a pane at night. |
 | `fish_tank` | A fish tank: an aerator's stream of small bubbles rising in a column, a few stray ones, ripples at the top | water pool, bubbles | 360 x 300, base | loop | none | Fair: the aerator's column reads; the tank is a translucent box (no glass edges, no fish). |
 | `boat_wake` | A wake: something moving along calm water, the surface pushed aside before it and rolling out behind it | water pool, wave | 900 x 160, base | loop | speed (120) | Weak in a still: a bump travelling along the surface with a trail of foam; nothing draws the boat; reads in motion. |
@@ -234,7 +245,8 @@ entries draws rock or ground: a fall whose lip is in its box starts in mid-air, 
 In the gallery (`--precision float`, two threads of the shared machine, other agents' jobs running), the water entries
 took 5 ms (`dive_splash`, 440 x 328) to 55 ms (`tall_waterfall`, 1432 x 1072) a frame with their stage's own picture,
 most of it the stage's size; every entry played with no allocation. The keyframes of `waterfall`, `garden_fountain`,
-`boulder_splash` and `rain_shaft` are frozen (`results/library/frozen.csv`).
+`boulder_splash` and `rain_shaft` (now `waterfall_drawn` and `rain_shaft_drawn`, their keyframes unchanged), and of
+`fountain` and `rain_shaft` with their learned bodies, are frozen (`results/library/frozen.csv`).
 
 ## 2. The format
 
@@ -317,7 +329,7 @@ drawn, and say so in the entries that use them.
 | `burst ... sparks` | short fast bright embers thrown within a cone | `muzzle_flash`, `grinder_sparks`, `lightning_strike`, `flashbang` |
 | `emit rain`, `snow`, `ash`, `leaves` | weather (allocation-free, deterministic, tested by `Weather.*` in `tests/test_engine_features.cpp`): particles that fill a rectangle at a `density` (per 100 x 100 world pixels) and fall through it with a `wind`, riding the bus's flow; rain is drawn as streaks and can `wash` smoke out of the modules it falls on, snow `melt`s over heat, ash has a few `glowing` flakes, leaves (and petals) tumble and swing as they fall ([COMPOSE.md](COMPOSE.md) §4.6 and §5.4) | `rain`, `snow`, `falling_ash`, `falling_leaves`, `cherry_petals` |
 | `trail` | not procedural: tiles of a learned effect laid on a grid in the world, fed along a moving source's path ([COMPOSE.md](COMPOSE.md) §5.3, §9 here) | `rocket_trail`, `vehicle_dust_wake`, `carried_torch`, `comet_trail` |
-| `water`, `splash`, `wave` | the composer's deterministic water ([EFFECTS_WATER.md](EFFECTS_WATER.md), [COMPOSE.md](COMPOSE.md) §5.5): pools, sheets, jets, drips, bubbles and rain shafts, splashes and wakes; a seeded simulation, drawn, its mist deposited into a fog or steam module; tested by `Water.*` (`tests/test_water.cpp`) | the 19 water entries |
+| `water`, `splash`, `wave` | the random layer of water: the composer's deterministic water ([EFFECTS_WATER.md](EFFECTS_WATER.md), [COMPOSE.md](COMPOSE.md) §5.5): pools, sheets, jets, drips, bubbles and rain shafts, splashes and wakes; a seeded simulation, drawn, its mist deposited into a fog or steam module; tested by `Water.*` (`tests/test_water.cpp`) | the 19 water entries |
 
 ## 3. The API
 
