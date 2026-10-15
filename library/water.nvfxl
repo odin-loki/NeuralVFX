@@ -6,6 +6,7 @@
 # steam model for a geyser's). Entries drawn entirely by the seeded layer say so (*drawn*).
 
 effect waterfall_fx = "waterfall.nvfx", swirl 0    # the learned waterfall; no sub-grid swirl (it marbles the sheet)
+effect fountain_fx  = "fountain.nvfx", swirl 0     # the learned fountain: intensity (height), aim, turbulence
 
 look spray  = shader, emission 0, soot_density 0.7, soot_albedo 0.9, sky 1.1, shadow 0.1, scene_light 1.3, relief 0.4,
               tint (0.9, 0.95, 1)                                                       # white spray and mist
@@ -109,6 +110,17 @@ water roof = drips, along (X - 220 * scale, Y - 410 * scale) to (X + 220 * scale
                 radius 4 * scale, gravity 700 * scale, onto pool, seed 662
 
 # --- thrown water ---------------------------------------------------------------------------------------------------
+
+entry fountain, category water, size 480 x 480, anchor base, loop, show 3,
+      about "A fountain: a jet rising and falling back in a bell of water into its basin (the fountain model), drops off the bell and the basin's ripples and foam seeded"
+param height = 0.6, range (0.1, 1), about "how high it rises"
+param aim = 0.5, range (0, 1), about "where it leans: 0.5 upright"
+module fount = fountain_fx, size 128, width 480 * scale, at (X, Y), sink 0.055, feather 0.3, start 0, seed 700,
+               controls (0.6, 0.5, 0.5), intensity height, aim aim
+water basin = pool, along (X - 220 * scale, Y - 4 * scale) to (X + 220 * scale, Y - 4 * scale), depth 16 * scale,
+              surface 16 * scale, cells 96, churn 1, seed 702
+water flecks = spray, in (X - 200 * scale, Y - 390 * scale), size 400 * scale x 380 * scale, threshold 0.3,
+               speed 100 * scale, radius 1.5 * scale, gravity 700 * scale, onto basin, seed 703
 
 entry garden_fountain, category water, size 420 x 360, anchor base, loop, show 3,
       about "A garden fountain: a tall central jet and a ring of arcing jets falling back into a basin, rippling it"
