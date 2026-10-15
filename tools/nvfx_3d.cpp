@@ -134,15 +134,19 @@ std::vector<std::array<float, 3>> settings(const std::string& split) {
   return s;
 }
 std::vector<std::array<float, 3>> settings_all(const std::string& split) {
+  // probe: for choices made before validation (the detail layer's constants), at the controls of training runs 0 to 3
+  // with seeds of its own (9,300,000 + 100 s + k); never used for the rule
+  if (split == "probe") return {train_controls(kTrainBase), train_controls(kTrainBase + 1), train_controls(kTrainBase + 2), train_controls(kTrainBase + 3)};
   if (split == "val") return {{0.35f, 0.30f, 0.40f}, {0.65f, 0.70f, 0.60f}, {0.50f, 0.15f, 0.75f}, {0.80f, 0.55f, 0.25f}};
   if (split == "test") {
     return {{0.30f, 0.60f, 0.55f}, {0.45f, 0.25f, 0.30f}, {0.55f, 0.80f, 0.70f}, {0.70f, 0.40f, 0.85f}, {0.85f, 0.65f, 0.45f}, {0.60f, 0.50f, 0.20f}};
   }
   throw std::invalid_argument("split must be val or test");
 }
-int track_runs(const std::string&) { return std::min(3, g_max_runs); }
+int track_runs(const std::string& split) { return std::min(split == "probe" ? 2 : 3, g_max_runs); }
 int endless_runs(const std::string& split) { return std::min(split == "test" ? 3 : 2, g_max_runs); }
 std::uint64_t base_of(const std::string& split, const std::string& what) {
+  if (split == "probe") return 9'300'000 + (what == "track" ? 0 : what == "real" ? 10'000 : 20'000);
   const bool t = split == "test";
   if (what == "track") return t ? kTestTrack : kValTrack;
   if (what == "real") return t ? kTestReal : kValReal;
@@ -556,6 +560,7 @@ int finish(const Args& a) {
   r3::choose_starts(m, runs, a.i("starts", 8), a.i("frame", 150));
   m.detail.swirl = a.f("swirl", m.detail.swirl);
   m.detail.contrast = a.f("contrast", m.detail.contrast);
+  m.detail.grow = a.f("grow", m.detail.grow);
   const fs::path f = root / "models" / (out + ".nvfx3");
   fs::create_directories(f.parent_path());
   if (auto e = r3::save_model(f, m); !e) throw std::runtime_error(e.error());

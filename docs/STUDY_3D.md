@@ -189,7 +189,24 @@ picture at 256 x 256 and 512 x 512, through the volume C API, on 1 thread and on
 
 ## 6. Validation
 
-(To come.)
+**A check before validation (probe split, not validation data).** A probe of the stage-1 stepper (iteration 920) looked
+dimmer than the simulation (smaller flames): emission is so steep in temperature that block averages lose the hottest
+spots. Whether other detail constants would help was checked on a probe split of its own (the controls of training
+runs 0 to 3, seeds 9,300,000 + 100 s + k, 2 runs each, tracking only; `results/3d/probe_detail.csv`), means over the 8
+runs:
+
+| variant | temperature field, 8 frames / 1 s / 2 s (dB) | picture, 8 frames / 1 s / 2 s (dB) |
+|---|---|---|
+| stage-1 stepper, the registered constants (grow 1.5, contrast 1) | 22.93 / 20.47 / 19.82 | 23.30 / 20.05 / 18.91 |
+| the same with grow 3 | 22.04 / 19.50 / 18.73 | 21.07 / 18.32 / 17.09 |
+| the same with grow 3 and contrast 0.5 | 22.06 / 19.50 / 18.69 | 21.11 / 18.33 / 16.98 |
+| coarse simulation + detail (registered constants) | 20.36 / 18.75 / 17.90 | 17.67 / 16.24 / 15.80 |
+| holding the first frame | 22.24 / 20.61 / 20.49 | 21.53 / 19.43 / 19.47 |
+
+The registered constants tracked best, so nothing in §5 changed. (Already on the probe the stepper led the coarse
+simulation and was close to holding the first frame.)
+
+(Validation's results to come.)
 
 ## 7. The test
 

@@ -1,0 +1,6 @@
+variant,runs,temperature_psnr_8f,temperature_psnr_1s,temperature_psnr_2s,picture_psnr_8f,picture_psnr_1s,picture_psnr_2s
+stage-1 stepper; grow 1.5 contrast 1 (registered),8,22.93,20.47,19.82,23.30,20.05,18.91
+stage-1 stepper; grow 3,8,22.04,19.50,18.73,21.07,18.32,17.09
+stage-1 stepper; grow 3 contrast 0.5,8,22.06,19.50,18.69,21.11,18.33,16.98
+coarse simulation + detail (registered constants),8,20.36,18.75,17.90,17.67,16.24,15.80
+holding the first frame,8,22.24,20.61,20.49,21.53,19.43,19.47
