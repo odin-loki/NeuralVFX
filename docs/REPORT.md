@@ -3530,6 +3530,41 @@ motion 0.98 → 0.96 (1.00), its coverage 0.0025 → 0.0017 (0.0008).
 the mean state is what moves the average picture most. Both chosen files were copied to the data root's
 `o_fix/models/` and frozen in [o_frozen.csv](../results/experiments/fix/o_frozen.csv) before the test.
 
+### 16.3.3 The test (once): both meet the rule and are replaced
+
+Study B's 10 held-out settings and 20 more (`test_settings(30)`), the test's seeds (real 3,200,000 + 100 s + k, the
+floor + 50, plays 3,250,000, tracking 3,280,000), each file frozen before it ran, the tool binary of the probe and
+validation ([o_test_compare.csv](../results/experiments/fix/o_test_compare.csv),
+[o_test_stats.csv](../results/experiments/fix/o_test_stats.csv),
+[o_test_decision.csv](../results/experiments/fix/o_test_decision.csv)). Candidate minus current model, 95% intervals
+(margins in brackets):
+
+| statistic | mushroom: current → `ms_u30` | difference [95% interval] (margin) | splash: current → `ms` | difference [95% interval] (margin) |
+|---|---|---|---|---|
+| mean-frame PSNR (dB) | 27.80 → 28.98 | **+1.18 [+0.91, +1.45]** (better at 29 of 30 settings; worst -0.22) | 33.24 → 33.64 | **+0.40 [+0.21, +0.60]** (better at 21 of 30; worst -0.20) |
+| tracking at 1 s (dB) | 13.57 → 14.43 | **+0.85 [+0.73, +0.97]** (-0.20) | 13.35 → 13.35 | -0.000 [-0.000, +0.000] (-0.20) |
+| detail spectrum distance | 0.187 → 0.174 | **-0.013 [-0.026, -0.000]** (+0.039) | 0.070 → 0.068 | -0.003 [-0.006, +0.000] (+0.020) |
+| \|ln motion ratio\| (motion ratio) | 0.230 (0.81) → 0.204 (0.82) | -0.025 [-0.064, +0.013] (+0.095) | 0.108 (0.96) → 0.085 (0.96) | **-0.024 [-0.037, -0.010]** (+0.072) |
+| coverage distance | 0.0189 → 0.0148 | **-0.0041 [-0.0074, -0.0011]** (+0.0117) | 0.0028 → 0.0021 | **-0.0006 [-0.0010, -0.0003]** (+0.0017) |
+| emission distance | 0.00007 → 0.00008 | +0.000005 [+0.000003, +0.000008] (+0.0001) | 0.00003 → 0.00003 | -0.000001 [-0.000001, +0.000000] (+0.0001) |
+
+**Both meet the rule on the test, and both are replaced.** The mushroom is better on both targets (its average picture
+1.18 dB closer to a real run's, and it follows a run from its true state 0.85 dB better at 1 s), and better on detail
+and coverage too; its motion ties; its emission distance is 5 x 10^-6 larger, an interval entirely on the worse side but
+a twentieth of its margin (the mushroom gives almost no light beyond its colour), so under study M's strict reading it
+would have stopped, and under study K's margins it passes. The splash's average picture is 0.40 dB closer, its motion and
+coverage closer, its detail and tracking tied (tracking from a true state is the same frames: the mean state moves a
+start at its own controls by nothing).
+
+Distance to the floor (a second set of 8 real runs per setting), before and after:
+
+| effect | split | mean-frame PSNR below the floor (dB), current → now | spectrum distance, current → now (the floor's) | coverage distance (the floor's) |
+|---|---|---|---|---|
+| mushroom | test (30) | 6.93 → **5.75** | 0.187 → **0.174** (0.031) | 0.019 → **0.015** (0.004) |
+| mushroom | validation (30) | 6.63 → **5.51** | 0.182 → 0.179 (0.032) | 0.017 → **0.012** (0.005) |
+| splash | test (30) | 6.08 → **5.68** (the floor 39.32) | 0.070 → 0.068 (0.028) | 0.0028 → **0.0021** (0.0008) |
+| splash | validation (30) | 5.93 → **5.31** | 0.073 → **0.070** (0.029) | 0.0025 → **0.0017** (0.0008) |
+
 ### 16.4 The rocket thruster's exhaust: a cold field on its tail (a library entry)
 
 **The flaw** ([LIBRARY.md](LIBRARY.md)): `rocket_thruster`'s exhaust (the jet model, recoloured blue) curls up at its

@@ -52,6 +52,11 @@ a pool churns where that water lands (§7). A scene plays a waterfall under an i
   no drops. The seeded layer gives what they lack: drops,
   spray, glints, rings and foam. Weak spots are named in §11: small things (drips, a trickle, a wake) read in motion
   rather than in a still, and nothing draws rock, so falls whose lip shows start in mid-air.
+- **The splash replaced** (study O, [REPORT.md](REPORT.md) §16.3): the same model with a mean state (each of its 16
+  stored first states moved to the requested controls). On 30 held-out settings its average picture is 0.40 dB [0.21,
+  0.60] closer to a real run's, with closer motion and coverage and tracking from a true state the same, by a rule
+  written before its validation (`o_fix/models/splash.nvfx` under the data root, SHA-256 `806a7a6c...`). It is still
+  weak by this round's rule, which was not run again.
 - **The horizontal bands are gone** (study O, [REPORT.md](REPORT.md) §16). The learned waterfall's sheet and the rain
   shaft's curtains carried bands across them, one frame's fall apart. The detail layer made them: once a frame it
   lays new material broken up by a noise pattern that stays put and scales the fine fields by a factor per coarse cell,

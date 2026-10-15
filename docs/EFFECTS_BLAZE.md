@@ -31,6 +31,11 @@ together (§6), and ten new library entries use them (§6).
   flipbook's. The learned cloud loses its stem and its rolled cap and turns ragged; its own renderer adds blue and
   green fringes. With the explosion's field-shader look (`look cloud`) it still reads as a mushroom cloud in a scene
   and in the library (fair), but it is the weakest of the three.
+- **Study O replaced it** ([REPORT.md](REPORT.md) §16.3, §4.5 below): the same model with a mean state (each stored
+  burst moved to the requested controls) and its stepper fine-tuned on 30-frame windows. On 30 held-out settings it
+  follows a run 0.85 dB [0.73, 0.97] better at 1 s and its average picture is 1.18 dB [0.91, 1.45] closer to a real
+  run's, with closer detail and coverage, by a rule written before its validation. It is still weak by this round's
+  rule (§4.5), and its cap is still ragged.
 - **Cost (provisional, a busy shared machine):** 82 KB stored for the wildfire and the coals, 274 KB for the mushroom
   (16 start points with 64-pixel fine fields, as the explosion's); 2.5 MB per instance at 128 px. At the runtime's
   int8 default on the AVX-512 build, 0.50 (wildfire), 0.72 (coals) and 0.73 ms (mushroom) per 128 px frame, where
@@ -352,6 +357,23 @@ last windows are as good as the first. The wildfire moves too little at the firs
   it is the thing to improve.
 - **The mushroom is weak**: it loses to the coarse simulation at 1 s (-1.10 [-1.76, -0.53]), and endless its average
   picture and detail lose to the flipbook (its motion ties).
+
+### 4.5 Study O: the mushroom replaced
+
+Study O ([REPORT.md](REPORT.md) §16.3) tried what later studies found helps, under a rule planned for power and written
+before its validation: the mean state (study M3: each of the 16 stored first states moved to the requested controls by
+a quadratic fit of the training runs' first states; 77 to 96% of their variation explained), the stepper fine-tuned
+on 30-frame windows (study L), the ensemble-mean fine-tune (study M), and each fine-tune with the mean state. Every one
+met the rule on validation; the chosen one, **the mean state with the 30-frame fine-tune** (`ms_u30`), met it again on
+the test, run once on 30 held-out settings with fresh seeds: its average picture 1.18 dB [0.91, 1.45] closer to a real
+run's (better at 29 of 30 settings), tracking at 1 s 0.85 dB [0.73, 0.97] better, detail spectrum distance -0.013
+[-0.026, -0.000], coverage distance -0.0041 [-0.0074, -0.0011], motion tied. The library's and the prairie's mushroom is
+now that file (`o_fix/models/mushroom.nvfx` under the data root, 301,443 bytes, SHA-256 `4a2f08a0...`; the old one is
+untouched). What is still wrong: its mean frame is still 5.75 dB below a second set of real runs (it was 6.93) and its
+detail six times the floor's; its tracking at 1 s, 14.43 dB on the test, has gained most of the 1.1 dB it lost to the
+coarse simulation with the detail layer in this round's test, but this round's rule was not run again, so it is still
+counted weak. By eye the cap keeps its lobes a little longer and the stem is the same; the cap still turns ragged after
+3 to 4 s (the figure of REPORT §16.3.4).
 
 ## 5. Memory and cost
 
