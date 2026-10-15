@@ -27,9 +27,10 @@ C++23, no third-party runtime dependencies, a C API for engines, no Python.
   matched memory, NVIDIA's claims and the honest limits. The generated tables with intervals are in
   [results/experiments/SUMMARY.md](results/experiments/SUMMARY.md).
 - **Plan and decisions:** [docs/PLAN.md](docs/PLAN.md).
-- **To do on a PC, later:** [TODO.md](TODO.md): 3D effects. An accurate 3D simulation of fire (LES with combustion,
-  soot and radiation, checked against measured flames), a 3D rollout model trained on it, as large and fine as the PC
-  allows, and a volume API that gives an engine 3D textures or pictures from any camera.
+- **To do on a PC, later:** [TODO.md](TODO.md): every effect in 3D. Accurate 3D simulations by group (fire and smoke,
+  blasts and rockets, clouds and vapour, dust, liquids, designed effects), each checked against measured physics; 3D
+  rollout models trained on them, as large and fine as the PC allows; a volume API that gives an engine 3D textures or
+  pictures from any camera; then 3D scenes and the library rebuilt in 3D.
 - **Engine integration:** [docs/ENGINES.md](docs/ENGINES.md) (C API for effects and scenes, threading, Unreal, Unity,
   the Godot 4 plugin, lit sprites for an engine's own lighting: §11).
 - **Putting it in your engine:** [docs/INTEGRATION.md](docs/INTEGRATION.md): which API when, the frame loop and threads,
