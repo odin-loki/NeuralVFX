@@ -199,7 +199,19 @@ picture at 256 x 256 and 512 x 512, through the volume C API, on 1 thread and on
 
 ## 9. The volume C API
 
-(To come; the header is `include/neuralfx/nvfx_volume.h`.)
+`include/neuralfx/nvfx_volume.h`, in libnvfx (static and shared; `NVFX_VERSION` 6, feature bit `NVFX_FEATURE_VOLUME`):
+load a 3D effect (`nvfx_volume_effect_load`, `_load_memory`), create a volume with its own threads, set the seed, the
+controls, the variation (a start point) and the shard length, step to a time, read the fields (temperature, soot,
+extinction, velocity) as float or half 3D textures, and draw it for a camera (view and projection matrices, or a
+look-at description) into premultiplied RGBA8. How an engine uses it: [ENGINES.md](ENGINES.md) §12; struct sizes:
+[INTEGRATION.md](INTEGRATION.md) §8. What is tested (`tests/test_3d.cpp`, `tests/alloc_test.cpp`, `tests/abi_*`):
+- parity with the reference (`src/core/rollout3d.cpp`): equal to the bit at the baseline ISA, within float rounding
+  with the AVX2 convolution;
+- the same fields and pictures on 1 and 3 threads, through a shard change and its crossfade;
+- every frame a function of the time (stepping back in time and forward again gives the same fields);
+- no allocation per frame on 1 and 3 threads, through shard changes, new seeds, variations, restarts, every field and
+  texel format and a moving camera (`nvfx_alloc_test`);
+- the structs' sizes from C99 and C++ without exceptions (`nvfx_abi_test`), the error paths.
 
 ## 10. Demo videos
 
@@ -211,7 +223,29 @@ picture at 256 x 256 and 512 x 512, through the volume C API, on 1 thread and on
 
 ## 12. Reproduce
 
-(To come.)
+Data under `NEURALVFX_DATA/n_3d` (default `/root/nvfx-data/n_3d`); every step resumes from what it has written (the
+job scripts used are in the data root's `jobs/`). Build as the main README says, then:
+
+```sh
+B=build/nvfx_3d
+$B pilot --widths 48,64,80 --seconds 12 --seeds 2 --threads 3       # §2.1 (results/3d/pilot.csv)
+$B pilot --widths 64,48 --seconds 20 --seeds 2 --threads 3          # §2.1's puffing (results/3d/pilot_puff.csv)
+$B record --runs 40 --frames 240 --threads 3                        # the training runs (seeds 9,000,000 + i)
+$B train --name base --iterations 1200 --finetune 500 --activity 300 --batch 8 --unroll 12 --burn 24 --threads 4
+$B finish --ckpt base_stage2 --out candA && $B finish --ckpt base --out candB
+$B truth --split val && $B real --split val                         # the validation's simulations
+for m in A B; do $B track --split val --method $m --model $NEURALVFX_DATA/n_3d/models/cand$m.nvfx3; done
+$B track --split val --method coarse --model .../candA.nvfx3 ; $B track --split val --method hold --model .../candA.nvfx3
+for m in A B; do $B play --split val --method $m --model .../cand$m.nvfx3; done; $B play --split val --method coarse --model .../candA.nvfx3
+$B compare --split val --a A --b coarse                             # results/3d/compare_val_*.md
+$B freeze --model .../chosen.nvfx3                                  # results/3d/frozen.csv, before the test
+$B truth --split test && $B real --split test                       # the test's simulations (and the floor)
+$B track --split test --method learned --model .../chosen.nvfx3 ; $B track --split test --method coarse --model .../chosen.nvfx3
+$B play --split test --method learned --model .../chosen.nvfx3 ; $B play --split test --method coarse --model .../chosen.nvfx3
+$B compare --split test --a learned --b coarse                      # once
+$B timing --threads 1,2,4                                           # §8 (results/3d/timing.csv)
+$B video --kind orbit --out 3d_fire_orbit.mp4 --seconds 12          # §10
+```
 
 ## 13. What it means for the PC plan
 
