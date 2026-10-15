@@ -3223,7 +3223,8 @@ the rain shaft from 0.40 to 0.04; the fountain has none (0.04) and keeps one pas
 half-travel bands (0.48) and three take them off (0.20), so the demo reels, rendered at 256 pixels, use three. No model
 file changes. By eye (the falls at 3.5 s before and after, the library's sheet, the reels): the sheet falls in straight
 streaks with no ladder of bands, the curtains are the same with fainter stripes gone; nothing else changed in the
-picture. A second pass costs the detail layer's share of a frame again (about 0.17 ms at 128 pixels, §13.1).
+picture. A second pass of the detail layer skips the empty spans as the first does: the waterfall costs +0.00 ms a
+frame at 128 pixels and +0.04 to +0.06 ms at 256 (§16.6).
 
 **What changed.** `src/compose/script.cpp` and `script_run.cpp` (the `passes` key; `Script.AnEffectsPassesSplitItsDetailLayer`),
 `nvfx_reel` (DETAIL `passes`), `library/water.nvfxl` and `examples/scenes/falls.nvfxs`. Frozen hashes: the falls' six

@@ -312,8 +312,10 @@ detail layer; the learned coarse state alone; no breakup noise; two passes](figu
   reels are 256 pixels and use 3; the library and the scene play 128-pixel tiles with 2). The rain shaft is the same
   (0.40 with one pass, 0.04 with two); the fountain has no bands (0.04 with one), and the splash's water is thrown, so
   both keep one pass.
-- **Cost:** a second pass of the detail layer, about 0.17 ms more per 128-pixel tile a frame (the detail layer's share
-  of a frame, [REPORT.md](REPORT.md) §13.1).
+- **Cost:** a second pass of the detail layer, which skips empty spans, so it costs what the water covers: measured
+  beside one pass (`nvfx_ordered cost`, 9 interleaved repetitions on the shared machine at a load of 13, so
+  provisional; [o_cost_passes.csv](../results/experiments/fix/o_cost_passes.csv)), the waterfall +0.00 ms a frame at
+  128 px and +0.04 to +0.06 ms at 256 px, int8 or float.
 
 **By eye.** The learned waterfall falls whole, sways, and churns and billows into a broad mist at its foot, which the
 drawn one cannot (its mist is the fog model fed from outside, a slow low bank); the drawn one has crisper water: a glassy
