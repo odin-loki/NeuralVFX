@@ -244,10 +244,11 @@ with 2 real runs and 2 plays each pooled. Means, and differences with 95% interv
   ac94e05b189d17a8673044799a18e3494bb6347d438cf76d80115b9e182443e6) and is `models/chosen.nvfx3` in the data root.
 - **The rule chose the candidate that plays worse.** B (stage 3's activity loss) plays much more like the simulation:
   its spectrum distance is less than half A's, its motion 0.83 of the real runs' where A's is 1.73, and its mean picture
-  4.9 dB closer. A moves too much and spreads too wide when it plays on; the per-setting rows (added to the comparison
-  tables after the test, for the write-up) put all of that at the two lowest winds, where A runs away (§11). The rule looked only at tracking at 1 s, where
-  A leads by 0.29 dB with an interval that just clears zero. Choosing on tracking was a poor rule for a model that will
-  mostly be played endlessly; it stands, and the test runs A.
+  4.9 dB closer. A moves too much and spreads too wide when it plays on; the per-setting rows (added to the
+  comparison tables after the test, for the write-up) put all of that at the two lowest winds, where A runs away
+  (§11), and show A and B alike at the other two. The rule looked only at tracking at 1 s, where A leads by 0.29 dB
+  with an interval that just clears zero. Choosing on tracking was a poor rule for a model that will mostly be played
+  endlessly; it stands, and the test runs A.
 - **Against the baseline on validation**, both candidates follow a real run better than the coarse simulation at every
   horizon, by 1 to 6.6 dB. Played endlessly, A is worse in motion and coverage and ties the rest; B is better in the
   spectrum, emission and mean picture, worse in motion and coverage (by small amounts: 0.0017 coverage).
