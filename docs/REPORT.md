@@ -2510,3 +2510,31 @@ unspent.**
 - **The jet's probe gain did not hold**: its fine-tune's average picture was +0.4 dB on training settings and is +0.03
   dB [-0.27, +0.41] here (weight 8); it is livelier (motion's error -0.018) and tracking ties. With the swirl at 16 pixels
   its detail is clearly worse, as on the probe.
+
+#### 14.8.4 The orb, the vortex and magic: probe and candidates
+
+Study L's steppers were fine-tuned as study M's fire was (600 iterations of the ensemble-mean stage at weights 4 and 8),
+each with its own training's options from study L (§12.1): the orb and magic on 30-frame windows (their training
+horizon), the vortex with the floor's gradient passed (`--floor-gradient`) on study M's 16 frames. Magic's file keeps its
+MacCormack advection and two detail passes. On the probe ([m2_probe2_compare.csv](../results/experiments/ordered/m2_probe2_compare.csv)):
+
+| effect | candidate | tracking at 1 s (dB) | spectrum distance | \|ln motion ratio\| | coverage | emission | mean-frame PSNR (dB) | the rule's reading |
+|---|---|---|---|---|---|---|---|---|
+| orb | `s16` | +0.05 [-0.02, +0.11] | **-0.073 [-0.106, -0.032]** | ~~+0.015 [+0.001, +0.027]~~ | ~~+0.00003~~ | +0.00002 | -0.01 [-0.04, +0.02] | the mean frame ties; motion outside |
+| orb | `mt4` | ~~-0.16 [-0.24, -0.09]~~ | -0.001 [-0.006, +0.004] | -0.007 [-0.014, -0.000] | +0.0003 [-0.0001, +0.0007] | +0.0005 [-0.0001, +0.0010] | -0.50 [-1.23, +0.34] | tracking, coverage, emission outside |
+| orb | `mt4_s16` | ~~-0.13 [-0.22, -0.04]~~ | **-0.070 [-0.104, -0.029]** | +0.006 [-0.002, +0.015] | +0.0004 [-0.0001, +0.0008] | +0.0006 [-0.0001, +0.0011] | -0.51 [-1.27, +0.35] | the mean frame ties; tracking, coverage, emission outside |
+| orb | `mt8` | -0.08 [-0.22, +0.02] | **-0.007 [-0.011, -0.002]** | +0.007 [-0.006, +0.019] | +0.0001 [-0.0003, +0.0004] | +0.0001 [-0.0003, +0.0005] | -0.03 [-0.67, +0.58] | tracking, coverage, emission outside |
+| orb | `mt8_s16` | -0.05 [-0.22, +0.09] | **-0.074 [-0.119, -0.016]** | +0.024 [-0.003, +0.046] | +0.0001 [-0.0003, +0.0005] | +0.0001 [-0.0003, +0.0005] | -0.04 [-0.70, +0.59] | the mean frame ties; four outside |
+
+Means: the orb's mean-frame PSNR 31.02 dB (the floor 36.38), spectrum 0.253 (`s16` 0.180; the floor 0.018), motion 0.93
+(`s16` 0.91; the floor 1.02).
+
+- **The fine-tune does not help the orb**: at weight 4 its average picture is half a dB further from the real one (a
+  tie at 4 runs) and it tracks 0.16 dB worse at 1 s; at weight 8 both tie. The orb's boiling is decided below the 32-cell
+  scale (study L), and its v3 stepper was already fine-tuned on 30-frame windows for the horizon it is judged on.
+- **The swirl at 16 pixels takes a quarter off the orb's detail spectrum distance** (0.253 to 0.180), the largest
+  spectrum gain of any change in studies M and M2, with the average picture tied, but it calms the orb by 2% of motion.
+- The weight for `mtW_s16` by the procedure: neither meets the rule; weight 4 has three measures outside (tracking,
+  coverage, emission), weight 8 four, so **W = 4**.
+
+**The orb's candidates for validation**: `mt4_s16` (SHA-256 `77ec5707...`) and `s16` (`003de375...`), as committed.
