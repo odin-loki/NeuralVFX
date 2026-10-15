@@ -3041,6 +3041,12 @@ session's noise; at 256 px both effects cost 0.1 to 0.15 ms more at both precisi
 ms there). Not studied: the moved start changes how much of the frame the burst covers at these controls, and the detail
 layer and the renderer skip empty spans, so this may be the picture's size rather than the model's work.
 
+**Checks.** The branch (main merged; nothing new on it) builds with `-DNEURALFX_WERROR=ON` and passes all 451 tests of
+`ctest` with the new models in the private folders; after the links were repointed, the 16 tests that read the shared
+folders pass again from them; `nvfx_alloc_test` counts no allocation per frame. Until this branch is merged, a build of
+main with the shared folders will fail four frozen tests (the moor's keyframes, dust_impact's in the library and in its
+pack, bullet_impact_stone's): their new hashes are this branch's.
+
 #### 14.9.7 What it means
 
 - **The mean state works, and the earlier nulls were about power.** Measured three times on validation (+4.3, +3.4 and
