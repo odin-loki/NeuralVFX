@@ -20,24 +20,27 @@ namespace nfx::sim {
 // fire, smoke and explosion are the effects of studies A to I, whose tools loop over kEffects. steam and magic came
 // later (docs/EFFECTS.md): the same solver with other sources, forces and drawing, trained and tested as study D's.
 // jet, orb and vortex (docs/EFFECTS_ENERGY.md) and fog, dust and cloud (docs/EFFECTS_ATMOSPHERE.md) came after them,
-// the same way, then wildfire, coals and mushroom (docs/EFFECTS_BLAZE.md), and launch, puffs and ink
-// (docs/EFFECTS_FLOW.md).
-enum class Effect { fire, smoke, explosion, steam, magic, jet, orb, vortex, fog, dust, cloud, wildfire, coals, mushroom, launch, puffs, ink };
+// the same way, then wildfire, coals and mushroom (docs/EFFECTS_BLAZE.md), launch, puffs and ink
+// (docs/EFFECTS_FLOW.md), and waterfall, fountain, splash and rainshaft (docs/EFFECTS_WATER.md).
+enum class Effect { fire, smoke, explosion, steam, magic, jet, orb, vortex, fog, dust, cloud, wildfire, coals, mushroom, launch, puffs, ink,
+                    waterfall, fountain, splash, rainshaft };
 inline constexpr std::array kEffects{Effect::fire, Effect::smoke, Effect::explosion};  // the studies' effects
 inline constexpr std::array kNewEffects{Effect::steam, Effect::magic, Effect::jet, Effect::orb, Effect::vortex,  // added since
                                         Effect::fog,   Effect::dust,  Effect::cloud,
                                         Effect::wildfire, Effect::coals, Effect::mushroom,
-                                        Effect::launch, Effect::puffs, Effect::ink};
+                                        Effect::launch, Effect::puffs, Effect::ink,
+                                        Effect::waterfall, Effect::fountain, Effect::splash, Effect::rainshaft};
 inline constexpr std::array kAllEffects{Effect::fire, Effect::smoke, Effect::explosion, Effect::steam, Effect::magic,
                                         Effect::jet,  Effect::orb,   Effect::vortex,    Effect::fog,   Effect::dust,
                                         Effect::cloud,
                                         Effect::wildfire, Effect::coals, Effect::mushroom,
-                                        Effect::launch, Effect::puffs, Effect::ink};
+                                        Effect::launch, Effect::puffs, Effect::ink,
+                                        Effect::waterfall, Effect::fountain, Effect::splash, Effect::rainshaft};
 
 std::string_view effect_name(Effect e);
 bool parse_effect(std::string_view text, Effect& out);  // any effect of kAllEffects
-bool effect_loops(Effect e);                            // an explosion, dust and the mushroom play once; the others loop
-// How many frames (at 30 per second) an effect that plays once lasts: 90 (3 s) for the explosion and dust, 150 (5 s) for
+bool effect_loops(Effect e);                            // an explosion, dust, the mushroom and a splash play once; the others loop
+// How many frames (at 30 per second) an effect that plays once lasts: 90 (3 s) for the explosion, dust and a splash, 150 (5 s) for
 // the mushroom, whose cap needs that long to rise, roll over and darken; 0 for an effect that loops.
 int one_shot_frames(Effect e);
 
@@ -45,7 +48,7 @@ int one_shot_frames(Effect e);
 inline constexpr int kControls = 3;
 inline constexpr std::array<std::string_view, kControls> kControlNames{"intensity", "wind", "turbulence"};
 // The names an effect gives its controls: kControlNames, except that magic's second control is its spin (and the
-// jet's its aim, the orb's its pulse, the vortex's its sway, puffs' their rate and ink's its current).
+// jet's its aim, the orb's its pulse, the vortex's its sway, puffs' their rate, ink's its current, the fountain's its aim).
 std::array<std::string_view, kControls> control_names(Effect e);
 // How fast the source flicker changes (its time axis per second: source_flicker, rollout::NoiseSpec::flicker_rate).
 float flicker_rate(Effect e);
@@ -55,7 +58,8 @@ struct Params {
   float intensity = 0.5f;   // source size and strength
   float wind = 0.5f;        // lateral wind: 0 = full left, 0.5 = none, 1 = full right (magic: spin, slow to fast;
                             // jet: aim, low to high; orb: pulse, calm to strong; vortex: sway, still to wandering;
-                            // puffs: rate, slow to fast; ink: current, full left to full right)
+                            // puffs: rate, slow to fast; ink: current, full left to full right;
+                            // fountain: aim, leaning left to right)
   float turbulence = 0.5f;  // vorticity confinement and curl-noise strength
   std::uint64_t seed = 1;   // source noise and turbulence field
   int size = 128;           // output pixels (square)
@@ -148,6 +152,14 @@ class Fluid {
   void add_flow_forces(float dt);
   void flow_decay(float dt);
   bool render_flow(std::span<std::uint8_t> rgba) const;
+  // waterfall, fountain, splash and rainshaft (docs/EFFECTS_WATER.md): water is soot (heavy, no heat); spray and mist
+  // are the solver's heat (light, so they rise). Their sources, how their water falls, the pool or ground it falls onto
+  // and their drawing, kept apart from the other effects' code; each does nothing for the other effects (false: not
+  // handled)
+  bool add_water_sources(float dt);
+  void add_water_forces(float dt);
+  void water_decay(float dt);
+  bool render_water(std::span<std::uint8_t> rgba) const;
   void add_forces(float dt);
   void project();
   void advect_velocity(float dt);

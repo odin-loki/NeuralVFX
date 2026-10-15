@@ -938,6 +938,20 @@ puffs ties the coarse simulation at tracking (which has the same noise-timed sou
 average picture is 1.6 dB [0.6, 2.5] closer than the flipbook's. Each is 146 KB and about 0.5 ms per 128 px frame. The
 full account, with a night launch scene and ten library entries, is in [EFFECTS_FLOW.md](EFFECTS_FLOW.md).
 
+### 6.15 Water
+
+Water is two layers, as the game asked ("model what is ordered and leave random to random"). The ordered body is
+learned: four new presets of the simulator (a waterfall, a fountain, a splash that plays once, a rain shaft) trained
+with this study's recipe and tested with its protocol on new seeds (7000000 and up). All four track held-out runs
+better than the coarse simulation with the same detail layer at 1 s (+1.8 to +3.7 dB); played endlessly, the fountain
+and the rain shaft work as steam did (average picture 3.3 and 4.6 dB closer than the nearest flipbook's, motion tied),
+while the waterfall and the splash only tie the flipbook's average picture and are weak by the rule set before the
+test. The random detail is a deterministic seeded simulation in the composer (spray, drops, crowns, pools with waves,
+foam, ripples, bubbles, drips, rain streaks; every random number a hash of seed, frame and index), which reads the
+learned body's water through the field bus. The same frames on any number of threads, no allocation per frame; 23
+library entries and a scene of a waterfall under an incoming storm. The full account is in
+[EFFECTS_WATER.md](EFFECTS_WATER.md).
+
 ## 7. Runtime cost and budget
 
 Median ms per frame through `nvfx_render`, one pinned AVX2 core (90th percentiles and every configuration in

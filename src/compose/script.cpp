@@ -9,6 +9,7 @@
 //   declaration := 'effect' NAME '=' STRING props | 'look' NAME '=' ('shader' | 'like' NAME) props
 //                | 'let' NAME '=' expr | 'input' NAME '=' expr | 'module' NAME '=' EFFECT props | 'field' NAME '=' KIND props
 //                | 'trail' NAME '=' EFFECT props
+//                | 'water' NAME '=' ('pool' | 'sheet' | 'jet' | 'drips' | 'bubbles' | 'shaft') props   (docs/EFFECTS_WATER.md)
 //   emitter     := 'emit' ('sparks' | 'embers' | 'flakes' | 'arc' | 'ring' | 'glow' | 'rain' | 'snow' | 'ash' | 'leaves'
 //                         | 'hail' | 'aurora' | 'rainbow' | 'meteors' | 'beam' | 'shield' | 'glints') props
 //   catalogue   := 'entry' NAME props | 'param' NAME '=' expr props   (library catalogues only, docs/LIBRARY.md)
@@ -17,7 +18,7 @@
 //   modifier    := 'as' NAME | 'repeat' | 'at' 'most' expr
 //   action      := 'transfer' NAME '->' names props | 'push' NAME props | 'suppress' NAME props
 //                | 'hand_over' NAME '->' NAME props | 'start' NAME props | 'wake' names props | 'stop' names
-//                | ('shock' | 'scorch' | 'burst') props
+//                | ('shock' | 'scorch' | 'burst' | 'splash') props | 'wave' NAME props
 //   props       := {[','] KEY value}          (the keys, and the shape of each value, depend on the statement)
 //   value       := expr | point | '(' expr {',' expr} ')' | expr 'x' expr | NAME | names | point 'to' point | STRING
 //   point       := '(' expr ',' expr ')'
@@ -86,6 +87,22 @@ constexpr Key kField[] = {{"at", VT::point},     {"level", VT::expr},    {"radiu
                           {"velocity", VT::point}, {"direction", VT::point}, {"core", VT::expr},  {"on", VT::names},
                           {"weight", VT::expr},  {"if", VT::expr},       {"from", VT::time},      {"until", VT::time},
                           {"colour", VT::tuple}};
+// Water (docs/EFFECTS_WATER.md): its elements, and the actions that splash and make waves.
+constexpr Key kWater[] = {{"along", VT::range},     {"at", VT::point},        {"in", VT::point},          {"size", VT::dims},
+                          {"flow", VT::expr},       {"velocity", VT::point},  {"speed", VT::expr},        {"angle", VT::expr},
+                          {"spread", VT::expr},     {"fan", VT::expr},        {"jets", VT::expr},         {"strands", VT::expr},
+                          {"pulse", VT::expr},      {"breakup", VT::expr},    {"gravity", VT::expr},      {"wind", VT::point},
+                          {"rate", VT::expr},       {"radius", VT::expr},     {"depth", VT::expr},        {"cells", VT::expr},
+                          {"damping", VT::expr},    {"drift", VT::expr},      {"surface", VT::expr},      {"swell", VT::expr},
+                          {"wavelength", VT::expr}, {"period", VT::expr},     {"density", VT::expr},      {"sway", VT::expr},
+                          {"gust", VT::expr},       {"floor", VT::expr},      {"onto", VT::name},         {"mist", VT::name},
+                          {"threshold", VT::expr},  {"churn", VT::expr},
+                          {"mist_amount", VT::expr}, {"mist_heat", VT::expr}, {"brightness", VT::expr},   {"clarity", VT::expr},
+                          {"colour", VT::tuple},    {"capacity", VT::expr},   {"seed", VT::expr},         {"from", VT::time},
+                          {"until", VT::time},      {"if", VT::expr}};
+constexpr Key kSplash[] = {{"at", VT::point},       {"power", VT::expr},      {"onto", VT::name},         {"mist", VT::name},
+                           {"mist_amount", VT::expr}, {"mist_heat", VT::expr}, {"seed", VT::expr},        {"if", VT::expr}};
+constexpr Key kWave[] = {{"at", VT::point}, {"amount", VT::expr}, {"width", VT::expr}, {"if", VT::expr}};
 constexpr Key kEmit[] = {{"along", VT::range},    {"from", VT::time},   {"until", VT::time},      {"count", VT::expr},  {"tries", VT::expr},
                          {"chance", VT::expr},    {"spread", VT::expr}, {"in", VT::point},        {"size", VT::dims},   {"soot", VT::expr},
                          {"on", VT::names},       {"if", VT::expr},     {"at", VT::point},        {"radius", VT::expr}, {"squash", VT::expr},
@@ -129,7 +146,8 @@ constexpr Schema kSchemas[] = {
     {"trail", kTrail},
     {"emit", kEmit},       {"transfer", kTransfer}, {"push", kPush},      {"suppress", kSuppress},   {"hand_over", kHandOver},
     {"start", kStart},     {"wake", kWake},       {"stop", kStop},        {"shock", kShock},         {"scorch", kScorch},
-    {"burst", kBurst},     {"let", {}},           {"keyframes", {}},      {"every", {}},             {"at", {}},
+    {"burst", kBurst},     {"water", kWater},     {"splash", kSplash},    {"wave", kWave},
+    {"let", {}},           {"keyframes", {}},      {"every", {}},             {"at", {}},
     {"when", {}},          {"input", {}},         {"entry", kEntry},      {"param", kParam}};
 
 std::span<const Key> keys_of(std::string_view keyword) {
@@ -149,7 +167,10 @@ constexpr std::string_view kTop[] = {"scene", "bus", "light", "particles", "fram
                                      "input", "module", "field", "emit", "every", "at", "when", "entry", "param"};
 // Statements and emitters added later, which do not reserve their words (scripts may already use them as names): a line
 // that starts with one is that statement.
-constexpr std::string_view kTopLater[] = {"trail"};
+constexpr std::string_view kTopLater[] = {"trail", "water"};
+// Actions added later, which do not reserve their words either (docs/EFFECTS_WATER.md).
+constexpr std::string_view kActionsLater[] = {"splash", "wave"};
+constexpr std::string_view kWaterKinds[] = {"pool", "sheet", "jet", "drips", "bubbles", "shaft", "spray"};
 constexpr std::string_view kFieldKinds[] = {"ceiling", "vortex", "wind", "gust", "ring", "attract", "heat", "cold", "lamp"};
 constexpr std::string_view kEmitKinds[] = {"sparks", "embers", "flakes", "arc", "ring", "glow"};
 constexpr std::string_view kEmitLater[] = {"rain", "snow", "ash", "leaves"};  // procedural weather (docs/COMPOSE.md §4.6)
@@ -166,7 +187,7 @@ bool in(const std::string_view (&list)[N], std::string_view w) {
   return std::ranges::find(list, w) != std::end(list);
 }
 
-bool is_action(std::string_view w) { return in(kActions, w); }
+bool is_action(std::string_view w) { return in(kActions, w) || in(kActionsLater, w); }
 
 }  // namespace
 
@@ -670,8 +691,10 @@ Statement parse_action(Parser& p) {
   s.keyword = k.text;
   s.pos = k.pos;
   if (k.type != Tok::ident || !is_action(k.text)) {
-    const std::string hint = did_you_mean(k.text, strings(kActions));
-    p.fail(k.pos, hint.empty() ? std::format("expected an action (transfer, push, suppress, hand_over, start, wake, stop, shock, scorch, burst), found '{}'", k.text)
+    std::vector<std::string> actions = strings(kActions);
+    for (const std::string_view l : kActionsLater) actions.emplace_back(l);
+    const std::string hint = did_you_mean(k.text, actions);
+    p.fail(k.pos, hint.empty() ? std::format("expected an action (transfer, push, suppress, hand_over, start, wake, stop, shock, scorch, burst, splash, wave), found '{}'", k.text)
                                : std::format("expected an action, found '{}'{}", k.text, hint));
   }
   const auto names = [&](std::vector<std::string>& out, std::string_view what) {
@@ -688,6 +711,8 @@ Statement parse_action(Parser& p) {
     else s.targets.push_back(p.name("the module that takes over"));
   } else if (s.keyword == "push" || s.keyword == "suppress" || s.keyword == "start") {
     s.subjects.push_back(p.name("a module"));
+  } else if (s.keyword == "wave") {
+    s.subjects.push_back(p.name("a water pool"));
   } else if (s.keyword == "wake" || s.keyword == "stop") {
     names(s.subjects, "a module");
   }
@@ -787,6 +812,12 @@ Statement parse_statement(Parser& p, std::string_view source) {
     declared("trail");
     s.kind = p.name("the trail's effect");
     parse_props(p, s, true);
+  } else if (w == "water") {
+    declared("water");
+    const Pos at = p.pos();
+    s.kind = p.name("what kind of water (pool, sheet, jet, drips, bubbles or shaft)");
+    if (!in(kWaterKinds, s.kind)) p.fail(at, std::format("'{}' is not a kind of water (pool, sheet, jet, drips, bubbles, shaft, spray){}", s.kind, did_you_mean(s.kind, strings(kWaterKinds))));
+    parse_props(p, s, false);
   } else if (w == "field") {
     declared("field");
     const Pos at = p.pos();
@@ -848,7 +879,7 @@ Statement parse_statement(Parser& p, std::string_view source) {
     std::vector<std::string> tops = strings(kTop);
     for (const std::string_view l : kTopLater) tops.emplace_back(l);
     const std::string hint = did_you_mean(w, tops);
-    p.fail(k.pos, hint.empty() ? std::format("unknown statement '{}' (expected scene, bus, light, particles, frame, camera, keyframes, effect, look, let, input, module, trail, field, emit, every, at or when; entry and param in a library catalogue)", w)
+    p.fail(k.pos, hint.empty() ? std::format("unknown statement '{}' (expected scene, bus, light, particles, frame, camera, keyframes, effect, look, let, input, module, trail, water, field, emit, every, at or when; entry and param in a library catalogue)", w)
                                : std::format("unknown statement '{}'{}", w, hint));
   }
   if (!p.done()) p.fail(p.pos(), std::format("unexpected {} at the end of the {} statement", p.found(), w));
@@ -1014,7 +1045,7 @@ std::string statement_text(const Statement& s) {
     o += std::format(" {} = {}", s.name, ex(s.args[0])) + props_text(s);
   } else if (w == "entry") {
     o += " " + s.name + props_text(s);
-  } else if (w == "module" || w == "trail" || w == "field") {
+  } else if (w == "module" || w == "trail" || w == "field" || w == "water") {
     o += std::format(" {} = {}", s.name, s.kind) + props_text(s);
   } else if (w == "emit") {
     o += " " + s.kind + props_text(s);
@@ -1037,7 +1068,7 @@ std::string statement_text(const Statement& s) {
     o += ":";
   } else if (w == "transfer" || w == "hand_over") {
     o += " " + s.subjects[0] + " -> " + join_names(s.targets) + props_text(s);
-  } else if (w == "push" || w == "suppress" || w == "start" || w == "wake" || w == "stop") {
+  } else if (w == "push" || w == "suppress" || w == "start" || w == "wake" || w == "stop" || w == "wave") {
     o += " " + join_names(s.subjects) + props_text(s);
   } else {
     o += props_text(s, false);

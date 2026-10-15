@@ -204,6 +204,7 @@ class Scene {
   std::span<const std::pair<std::string, float>> rules_fired() const;  // every rule: its name (or line) and when it first fired
   const FieldBus& bus() const;
   Particles& particles();
+  const Water* water() const;  // the scene's water (water.hpp; docs/EFFECTS_WATER.md), none without water statements
   const Frame& frame() const;
   int active_modules() const;  // stepped in the last frame
   std::size_t scratch_bytes() const;

@@ -1,5 +1,6 @@
 // Composed effects (compose.hpp, docs/COMPOSE.md).
 #include "compose.hpp"
+#include "water.hpp"
 
 #include <neuralfx/noise.hpp>
 #include <neuralfx/nvfx.h>
@@ -2366,6 +2367,17 @@ void Frame::compose(const Params& P, const LightView* L, std::span<const std::ar
               for (Image4& l : layers_) std::fill(l.row(y) + zs(sp[0]) * 4, l.row(y) + zs(sp[1]) * 4, 0.f);
             sp = {w_, 0};
           }
+          if (bg && water_on_) {  // water (water.hpp): over the background, under the modules
+            const WaterLight wl{L->L4, L->nx, L->ny, L->x0, L->y0, L->cell, L->flash};
+            const bool ly = layers_on_;
+            const std::array<int, 2> ws = water_.draw_row(y, screen_.row(y), ly ? layers_[kColour].row(y) : nullptr, ly ? layers_[kAlbedo].row(y) : nullptr,
+                                                          ly ? layers_[kEmission].row(y) : nullptr, ly ? layers_[kNormal].row(y) : nullptr, w_, wl);
+            if (ly && ws[0] < ws[1]) {
+              std::array<int, 2>& sp = layer_span_[zs(y)];
+              sp[0] = std::min(sp[0], ws[0]);
+              sp[1] = std::max(sp[1], ws[1]);
+            }
+          }
           const float wy = P.cam_y + fl(y) + 0.5f;
           const float clip = smooth01((P.ground_y + 2.f - wy) / 3.f);  // the ground hides what is below it
           if (clip <= 0.f) continue;
@@ -2986,9 +2998,13 @@ void Frame::finish_impl(const Params& P, std::span<std::uint8_t> rgb, Pool& pool
 
 // --- capture and render -----------------------------------------------------------------------------------------------
 
+void Frame::reserve_water(const Water& water) { water.reserve(water_, w_, h_); }
+
 void Frame::capture(const Light& light, std::span<const std::array<float, 4>> scorch, std::span<Module* const> modules, const Particles& parts,
-                    std::span<const Shock> shocks, const FieldBus& bus) {
+                    std::span<const Shock> shocks, const FieldBus& bus, const Water* water) {
   P_ = params();
+  water_on_ = water != nullptr;
+  if (water) water->picture(water_, P_.cam_x, P_.cam_y, w_, h_);
   light_cap_ = light_view(light);
   scorch_.assign(scorch.begin(), scorch.end());
   take_tiles(modules);

@@ -1,11 +1,13 @@
 # Demo videos
 
-NeuralVFX replaces VFX flipbooks with small learned effects. Each of its seventeen trained effects (fire, smoke, an
+NeuralVFX replaces VFX flipbooks with small learned effects. Each of its twenty-one trained effects (fire, smoke, an
 explosion, steam, magic, fog, dust, cloud, a flamethrower's jet, a plasma orb and a dust devil; since round 7 also a
-wildfire, coals, a mushroom cloud, an engine's launch blast, smoke puffs and ink) is one file of 42 to 274 KB. It
-holds a few stored simulation states and a small network that moves the effect forward one frame at a time, driven by
-noise. So an effect plays for as long as it is wanted without repeating, follows artist controls (intensity, wind,
-turbulence) and can be scripted into scenes where effects push, light and feed one another. **Everything here ran on
+wildfire, coals, a mushroom cloud, an engine's launch blast, smoke puffs and ink; and the bodies of four kinds of
+water, a waterfall, a fountain, a splash and a rain shaft) is one file of 42 to 274 KB. It holds a few stored
+simulation states and a small network that moves the effect forward one frame at a time, driven by noise. So an effect
+plays for as long as it is wanted without repeating, follows artist controls (intensity, wind, turbulence) and can be
+scripted into scenes where effects push, light and feed one another. Water adds a second, seeded layer drawn by the
+composer (drops, spray, pools, foam, rings), every random number a hash of a seed. **Everything here ran on
 the CPU**: no GPU was used to train, play or render any of it.
 
 What the docs measure (these videos were not timed: they were rendered at low priority on a busy shared 4-core
@@ -18,6 +20,9 @@ machine, so how long they took says nothing about cost):
 - **Round 7's six** cost 0.50 (wildfire), 0.72 (coals) and 0.73 ms (mushroom), and 0.47 to 0.49 ms (launch, puffs,
   ink) per 128 px frame at int8 on the AVX-512 build (provisional, the shared machine;
   [EFFECTS_BLAZE.md](../docs/EFFECTS_BLAZE.md) §5, [EFFECTS_FLOW.md](../docs/EFFECTS_FLOW.md) §5).
+- **Water** (round 8): a learned body costs what a module costs (a 128-pixel tile's step about 0.4 ms a frame on one
+  thread); the seeded layer's simulation 0.003 to 0.06 ms an element and its drawing 1 to 8 ms an element at
+  1280 x 720 (provisional; [EFFECTS_WATER.md](../docs/EFFECTS_WATER.md) §1, §9).
 - **Study N's 3D fire** costs about 70 ms a step and 50 ms a 256 x 256 picture on one busy core (provisional;
   [STUDY_3D.md](../docs/STUDY_3D.md) §8); a volume needs 31 MB.
 - **The fireball scene** runs at 80 frames per second at 1280 x 720 on 4 threads ([COMPOSE.md](../docs/COMPOSE.md) §7.3).
@@ -40,7 +45,7 @@ fire that is closer to real runs on average (+0.39 dB in the mean picture, a det
 same frame by frame, so the videos were not re-rendered.
 Every video is H.264 (yuv420p, +faststart, no audio). Click a poster to open its video.
 
-**51 videos, 62.8 MB in all**, each at most 5 MB, with 51 JPEG posters (622 KB in all).
+**58 videos, 71.5 MB in all**, each at most 5 MB, with 58 JPEG posters (736 KB in all).
 
 ## 1. Showcase scenes
 
@@ -58,6 +63,7 @@ without a heap allocation in its frame loop.
 | <a href="scene_weather.mp4"><img src="scene_weather.jpg" width="200" alt="Weather and trails"></a> | **Weather and trails** | A smoke column, its right half washed by rain; a campfire under snow that melts in its heat; a rocket leaves a smoke trail across the sky; a truck leaves a dust wake ([COMPOSE.md](../docs/COMPOSE.md) §5.3) | Learned: the column (smoke), the campfire (fire), the rocket's trail (explosion model tiles), the dust wake (dust model tiles), all but the fire by shader looks. Procedural: rain, snow, the rocket's glow and glare, embers, the lamp | The library's fire, smoke, explosion, dust (`library/models`); int8 | `weather.nvfxs`, 8 s, 2.4 MB | The trails stay where they were left and fade; the rain's thinning of the column is subtle; rain and snow are unlit |
 | <a href="scene_prairie.mp4"><img src="scene_prairie.jpg" width="200" alt="The prairie"></a> | **The prairie** (round 7) | Night on a prairie: a grass fire's front burns on the right, the ground it burnt glows as coals; at 2 s a blast on the horizon and a mushroom cloud climbs and darkens; at 4 s its shock wave lays the flames down, the coals flare and ash falls ([EFFECTS_BLAZE.md](../docs/EFFECTS_BLAZE.md) §6) | Learned: the front (four wildfire tiles) and the burnt ground (three coals tiles), by their own renderers; the mushroom (drawn by the explosions' look `cloud`). Procedural: the flash and afterglow, the shock front, camera shake, embers, sparks, ash, light | Wildfire (82 KB), coals (82 KB), mushroom (274 KB) (`fx_blaze/models/scene`); int8 | `prairie.nvfxs`, 8 s, 2.4 MB | The three read as a grass fire, burnt ground and a distant mushroom cloud; the coals are a thin strip at this scale; the front's smoke ends in a soft line at its tiles' tops; the cap is ragged, and late on the cloud looks more like a tree of smoke |
 | <a href="scene_liftoff.mp4"><img src="scene_liftoff.jpg" width="200" alt="The lift-off"></a> | **The lift-off** (round 7) | Night at a launch pad: two stacks puff vapour under floodlights; at 2.5 s the engine lights and its exhaust billows out over the pad both ways; sand stirred by the blast hangs and drifts away; at 7.5 s the rocket's flame climbs out of the picture and the clouds go on billowing ([EFFECTS_FLOW.md](../docs/EFFECTS_FLOW.md) §6) | Learned: the blast (launch, played with the library's gentler swirl), the stacks' puffs, the sand (ink, recoloured brown), all by field-shader looks. Procedural: the flash, shock, embers and debris, the rocket's flame (a glow and a lamp), the floodlights | Launch, puffs, ink (146 KB each) (`fx_flow/models/scene`); int8 | `liftoff.nvfxs`, 10 s, 1.9 MB | The blast reads as a launch and lights the vapour and the sand; its billows are one square-ish block (one tile); the puffs are small beside the blast; there is no rocket to see, only its flame |
+| <a href="scene_falls.mp4"><img src="scene_falls.jpg" width="200" alt="The falls"></a> | **The falls** (water) | A waterfall pours into a pool on the left; a bank of storm cloud drifts in from the right trailing two rain shafts that fill in and lean; lightning flashes and strikes twice; the rain arrives over the right and rings the puddles and the pool ([EFFECTS_WATER.md](../docs/EFFECTS_WATER.md) §12) | Learned: the waterfall's sheet, foot and mist, the two rain shafts' curtains (the learned bodies, `swirl 0`), the storm cloud (shader look). Seeded: the spray thrown off the learned water, the pool's ripples, waves and foam, the rain streaks and the puddles' rings. Procedural: the lightning bolts and flashes, light | Waterfall, rainshaft (82 KB each), cloud (146 KB) (`library/models`); int8 | `falls.nvfxs`, 12 s, CRF 25 (to stay under 5 MB), 4.0 MB | A large, misty fall whose sheet sways with spray through it, a foaming pool, rain shafts that thicken and lean, forked bolts. No cliff or rock is drawn, so the falls come out of the night sky; the sheet and the curtains carry faint horizontal banding; the mist hides most of the pool's rings |
 | <a href="scene_campfire.mp4"><img src="scene_campfire.jpg" width="200" alt="The campfire"></a> | **The campfire, driven by the game** | A campfire the game drives through inputs and rules ([ENGINES.md](../docs/ENGINES.md) §7): a gust at 2.5 s, the log beside it catches at 4 s, a breeze and the flames lean at 5.5 s, more fuel at 7 s, a second gust at 8 s, doused at 9.3 s, relit at 10.5 s | Learned: the two fires, the smoke sky (shader look). Procedural: the gusts' embers, the scorch, light | Study D's v1 fire and smoke; int8 | `campfire.nvfxs` with `--trigger blow@2.5 --trigger light_log@4 --set breeze=1.5@5.5 --set lean=0.7@5.5 --set fuel=1@7 --trigger blow@8 --trigger douse@9.3 --trigger relight@10.5 --set fuel=0.7@10.5`; the script's 960 x 540, scaled to 1280 x 720 (lanczos); 12 s, 3.2 MB | The events read clearly; the smoke shows as puffs above the flames rather than a column (the script hands the fires' top rows to a sky domain) |
 
 ## 2. Each learned effect alone, at three settings
@@ -65,7 +71,10 @@ without a heap allocation in its frame loop.
 `nvfx_reel` (this repository's demo tool, `tools/nvfx_reel.cpp`): one model, three control settings side by side,
 each rendered at 256 px through `nvfx_render`, composited over a dark gradient and scaled x1.5 with a bilinear filter
 (to 384 px), 1280 x 576 at 30 fps, 9 s (the mushroom 12 s), CRF 26, seed 1. Ink, a dark dye with no light of its own,
-is shown over a pale water-coloured gradient instead. The runtime's default playback: 6 s shards, each a fresh rollout
+is shown over a pale water-coloured gradient instead. The four water clips are the learned body alone, played with
+`swirl 0` as the library and the scene play them (`nvfx_reel`'s DETAIL field; the waterfall's, fountain's and rain
+shaft's calibration chose 3, the splash's 0): `nvfx_reel` draws no seeded layer, so their drops, spray and pools are in
+the scene and the library walk-through below. The runtime's default playback: 6 s shards, each a fresh rollout
 from one of the three stored start points nearest the controls, crossfaded. One-shots (explosion, dust) start again with
 the next seed when they end. Everything in these clips is learned, drawn by the effect's own renderer; nothing is
 procedural but the labels.
@@ -89,6 +98,10 @@ procedural but the labels.
 | <a href="effect_launch.mp4"><img src="effect_launch.jpg" width="200" alt="Launch"></a> | **Launch** (round 7) | 0.3, 0.5, 0.3; 0.6, 0.2, 0.5; 0.95, 0.8, 0.7 | `launch.nvfx` (146 KB), played with the library's swirl 1, scale 9 (`nvfx_reel`'s DETAIL field; its calibration chose 3) | 0.8 MB | Short of the bar by the rule ([EFFECTS_FLOW.md](../docs/EFFECTS_FLOW.md) §4): the jet hits the ground and billows out both ways, but the billows fill the tile and run out at its sides (the scene and the library feather its edges), and the settings change it less than the labels suggest |
 | <a href="effect_puffs.mp4"><img src="effect_puffs.jpg" width="200" alt="Puffs"></a> | **Puffs** (round 7) | 0.3, 0.2 (slow), 0.3; 0.6, 0.5, 0.5; 0.9, 0.9 (fast), 0.7 | `puffs.nvfx` (146 KB) | 0.6 MB | Weak by the rule: a column of grey smoke whose pulses are irregular and hard to tell apart (the model has no clock); green and magenta fringes now and then |
 | <a href="effect_ink.mp4"><img src="effect_ink.jpg" width="200" alt="Ink"></a> | **Ink** (round 7) | 0.3, 0.5 (still), 0.3; 0.6, 0.2 (current left), 0.5; 0.9, 0.8 (current right), 0.7 | `ink.nvfx` (146 KB) | 0.2 MB | Short of the bar by the rule: dark dye curls, spreads and drifts with the current, but stays a more compact cloud than the simulator's, and leaves the tile at its sides |
+| <a href="effect_waterfall.mp4"><img src="effect_waterfall.jpg" width="200" alt="Waterfall"></a> | **Waterfall** (water) | 0.3, 0.5, 0.3; 0.6, 0.2 (wind left), 0.5; 0.95, 0.8 (wind right), 0.7 | `waterfall.nvfx` (82 KB), swirl 0 | 0.4 MB | Weak by the rule ([EFFECTS_WATER.md](../docs/EFFECTS_WATER.md) §4: its average picture only ties the flipbook's): a soft sheet that falls whole, sways and spreads into a churning, misty foot; faint horizontal banding across the sheet (its grown fine fields); no drops (the seeded layer draws those); it starts in mid-air at the tile's top |
+| <a href="effect_fountain.mp4"><img src="effect_fountain.jpg" width="200" alt="Fountain"></a> | **Fountain** (water) | 0.3, 0.2 (aimed low), 0.3; 0.6, 0.5, 0.5; 0.95, 0.9 (aimed high), 0.7 | `fountain.nvfx` (82 KB), swirl 0 | 0.3 MB | Works by the rule: a soft arc and bell of falling water whose height and lean follow the controls; a faint green and violet tinge at its foot now and then |
+| <a href="effect_splash.mp4"><img src="effect_splash.jpg" width="200" alt="Splash"></a> | **Splash** (one-shot, water) | 0.2, 0.5, 0.3; 0.5, 0.2, 0.5; 0.85, 0.8, 0.5 | `splash.nvfx` (274 KB), swirl 0 | 0.2 MB | Weak by the rule: a crown's two walls rise and fall back into a low, swirling mist; small in its tile. A 3 s one-shot: each panel plays it, holds 1 s and starts again with the next seed |
+| <a href="effect_rainshaft.mp4"><img src="effect_rainshaft.jpg" width="200" alt="Rain shaft"></a> | **Rain shaft** (water) | 0.3, 0.5, 0.3; 0.6, 0.2, 0.5; 0.95, 0.8, 0.7 | `rainshaft.nvfx` (82 KB), swirl 0 | 0.3 MB | Works by the rule: grey-blue curtains that thicken, thin and lean with the wind and spread at the ground; faint horizontal banding; a faint green tinge at the foot from the learned renderer, as [EFFECTS_WATER.md](../docs/EFFECTS_WATER.md) §11 reports; no streaks (seeded) |
 
 ## 3. Controllability
 
@@ -118,13 +131,14 @@ pixels.**
 | <a href="real_vs_learned_fire_smoke.mp4"><img src="real_vs_learned_fire_smoke.jpg" width="200" alt="Real against learned: fire, smoke, steam, explosion"></a> | **Fire, smoke, steam, explosion** | Top: the simulator (`src/sim`, its own renderer). Bottom: the learned effect | Top: simulation. Bottom: learned (own renderer) | The library's fire, smoke, steam, explosion; int8 | 0.5 MB | Nearly the same picture for the first half second, then the same kind of flame, plume and cloud on different paths; the learned explosion's first frames are smoother and greener than the simulator's |
 | <a href="real_vs_learned_energy.mp4"><img src="real_vs_learned_energy.jpg" width="200" alt="Real against learned: magic, jet, orb, vortex"></a> | **Magic, jet, orb, vortex** | As above | As above | The library's magic, jet, orb, vortex (study L's v3 for magic, orb and vortex); int8 | 0.6 MB | The portal, the jet and the dust devil keep the simulator's look throughout; the learned orb is often rounder than the simulator's lobed ball |
 | <a href="real_vs_learned_round7.mp4"><img src="real_vs_learned_round7.jpg" width="200" alt="Real against learned: round 7"></a> | **Round 7: wildfire, coals, mushroom, launch, puffs, ink** | As above, in six columns at x1.55 for 11 s; ink over a pale water-coloured gradient; launch with the library's swirl 1, scale 9; the mushroom (5 s) starts again with the next held-out run every 5.5 s | As above | The library's six round 7 models; int8 | 0.8 MB | Wildfire, coals and ink stay close in look and motion; the learned launch's billows are boxier; the learned puffs make a noisy column where the simulator's pulses are distinct; the learned mushroom loses its clean stem and cap within a second, as its test found |
+| <a href="real_vs_learned_water.mp4"><img src="real_vs_learned_water.jpg" width="200" alt="Real against learned: water"></a> | **Water: waterfall, fountain, splash, rain shaft** | As above, the learned body only (no seeded spray or pool), all four with `swirl 0` as the library plays them; the splash (3 s) starts again with the next held-out run every 3.5 s | Top: simulation. Bottom: learned body (own renderer) | The library's four water models; int8 | 0.5 MB | Close for the first half second, then the same kinds of sheet, bell and curtain on their own paths; the learned waterfall shows its horizontal banding beside the simulator's smooth sheet; the learned splash's crown falls into a flatter mist |
 | <a href="real_vs_learned_atmosphere.mp4"><img src="real_vs_learned_atmosphere.jpg" width="200" alt="Real against learned: fog, dust, cloud"></a> | **Fog, dust, cloud** | As above | As above | The library's fog, dust, cloud; int8 | 0.2 MB | Close in shape and motion; the learned cloud has faint colour fringes the simulator's grey cloud lacks |
 
 ## 6. The library, by category
 
-The effect library ([LIBRARY.md](../docs/LIBRARY.md)): 168 named, ready-made effects, 149 in the twelve category
-walk-throughs and round 7's 20 (19 new, and `wall_of_flames` rewritten on the wildfire model) in a walk-through of their
-own. Each entry was played alone on a
+The effect library ([LIBRARY.md](../docs/LIBRARY.md)): 191 named, ready-made effects, 149 in the twelve category
+walk-throughs, round 7's 20 (19 new, and `wall_of_flames` rewritten on the wildfire model) and the 23 water entries in
+walk-throughs of their own. Each entry was played alone on a
 stage fitted to its box by `nvfx_gallery --library library --models DIR --only NAME --video NAME.mp4 --clip S --threads 2`
 (960 x 540, 30 fps, its name, category and models in the bar on top), one run per entry so each gets its own length:
 loops a few seconds each, one-shots their length and half a second (explosions: and a second), at most 4 to 7 s. The
@@ -148,6 +162,7 @@ above).
 | <a href="library_combat.mp4"><img src="library_combat.jpg" width="200" alt="Library: combat"></a> | **Combat** | 23: bullet impacts (stone, dirt, metal, wood), blood spray, sparks on metal, muzzle flashes (rifle, shotgun, energy), tracer, laser beam, plasma bolt, frag and incendiary grenades, small and medium explosions, EMP blast, shield bubble, shield hit, force field, red, green and violet smoke grenades | 12 learned, 11 procedural (beams, shields, spatter, shards, flashes). Recolours: the coloured smoke grenades | Explosion, smoke, fire, dust, orb; int8 | Loops 2.2 s; one-shots their length and 0.5 s, at most 4 s (the 12 s smoke grenades and the 8 s incendiary are cut); 59.4 s, 3.5 MB | Good: beams, bolts and shields are crisp; impacts and muzzle flashes are brief by design |
 | <a href="library_ambient.mp4"><img src="library_ambient.jpg" width="200" alt="Library: ambient"></a> | **Ambient** | 5: heat haze, fireflies, drifting embers, smouldering ground, dust motes | 3 learned (heat haze and drifting embers: an invisible fire whose heat drives the haze and the embers; smouldering ground: smoke), 2 procedural | Fire, smoke; int8 | Loops 4 s; 20 s, 0.8 MB | Quiet by design; the heat haze is a distortion seen only in motion |
 | <a href="library_round7.mp4"><img src="library_round7.jpg" width="200" alt="Library: round 7"></a> | **Round 7** | 20: wall of flames (rewritten), grass fire, burning field, ember bed, forge, lava cracks, burnt ground, nuke, mushroom blast, distant mushroom (`library/blaze.nvfxl`); rocket launch, landing thruster, hover downwash, locomotive chimney, exhaust stack, smoke signals (`library/engines.nvfxl`); ink cloud, blood in water, silt cloud, dye plume (`library/underwater.nvfxl`) | All 20 learned; procedural flashes, shock rings, sparks, embers, glows and lights. Recolours: lava cracks (coals), the underwater dyes (ink: blue-black, red, pale silt, green), the thrusters' dust | Wildfire, coals, mushroom, launch (swirl 1, scale 9), puffs, ink, fire; int8 | Loops 2.4 s; one-shots their length and 0.5 s (6 to 6.5 s); 59.8 s, 2.2 MB | The wildfire's three are good; the coals' fair (glowing patches more than a heap; lava cracks weak to fair); the mushroom's fair (the flash, stem and darkening read, the cap is ragged and turns into a tree of smoke); rocket launch good, the other engines fair (irregular puffs); the underwater dyes fair (compact, blocky at times; dye plume weak to fair), shown on the gallery's night stage since the library leaves the water to the game's background |
+| <a href="library_water.mp4"><img src="library_water.jpg" width="200" alt="Library: water"></a> | **Water** | 23: waterfall, waterfall drawn, tall waterfall, wide falls, cascade, pipe outflow, leaking pipe, cave drips, fountain, garden fountain, water geyser, broken hydrant, splash, boulder splash, cannonball splash, dive splash, rain on puddles, rain shaft, rain shaft drawn, underwater bubbles, fish tank, boat wake, shore waves (`library/water.nvfxl`) | **A learned body with seeded detail** (4): waterfall, fountain, splash, rain shaft (under the cloud model). **Seeded water with a learned mist** (7): the drawn falls, cascade and pipe outflow, the hydrant and the boulder splash over the fog model, the geyser over steam, the drawn rain shaft under the cloud model. **Seeded only** (12): drips, the garden fountain's jets, the small splashes, rain on puddles, bubbles, wakes and waves | Waterfall, fountain, splash, rainshaft (swirl 0), fog, steam, cloud; int8 | Loops 2.3 s; one-shots their length and 0.5 s; 58.2 s, 2.8 MB | The learned rain shaft good, the learned waterfall fair to good, fountain and splash fair (LIBRARY.md); the drawn falls, pipe outflow, garden fountain, boulder splash and drawn rain shaft good; the cascade's ledges hang in mid-air, the geyser and hydrant are bundles of strands, puddles are thin strips; drips, the boat wake and the late small splashes are faint in a still and read in motion; no rock is drawn anywhere |
 
 ## 7. Many effects at once
 
@@ -181,8 +196,8 @@ learned; what is learned is how the fields move.**
 
 ## 10. Later
 
-Round 7's six effects (wildfire, coals, mushroom, launch, puffs, ink) and study N's 3D fire are in the sections above.
-Still to come: **water**; its videos come when it merges.
+Every effect that has merged is above: round 7's six, study N's 3D fire and the water. Nothing is still to come here
+but the PC plan ([TODO.md](../TODO.md)): every effect in 3D, trained on large simulations on a PC.
 
 ## Reproduce
 
@@ -200,6 +215,9 @@ build/nvfx_reel --out launch.mp4 --seconds 9 --size 256 --zoom 1.5 --width 1280 
 build/nvfx_reel --out ink.mp4 --seconds 9 --size 256 --zoom 1.5 --width 1280 --height 576 --title "INK" \
     --bg 150,180,190,80,112,126 --panel "LITTLE|$M/ink.nvfx|0:0.3,0.5,0.3"         # dark dye over a pale gradient
 build/nvfx_scene_script --script examples/scenes/prairie.nvfxs --models $NEURALVFX_DATA/fx_blaze/models/scene --out prairie.mp4
+build/nvfx_scene_script --script examples/scenes/falls.nvfxs --models $M --out falls.mp4
+build/nvfx_reel --out waterfall.mp4 --seconds 9 --size 256 --zoom 1.5 --width 1280 --height 576 --title "WATERFALL" \
+    --panel "THIN|$M/waterfall.nvfx|0:0.3,0.5,0.3|swirl=0"                       # the learned body, as the library plays it
 build/nvfx_gallery --library library --models $M --only campfire --video campfire.mp4 --clip 2.4
 build/nvfx_crowd --budget 16 --threads 4 --seconds 20 --video crowd.mp4
 build/nvfx_lit_host library $M OUT --frames 300 --raw - | ffmpeg -f rawvideo -pix_fmt rgb24 -s 1280x720 -r 30 -i - lit.mp4

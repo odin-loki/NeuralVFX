@@ -1,0 +1,271 @@
+# Water (docs/EFFECTS_WATER.md) in two layers. The ordered body of water is learned: the water models (waterfall,
+# fountain, splash, rainshaft: the simulator's presets trained with study D's recipe), played as modules like fire.
+# The random detail around it is the composer's seeded water: spray thrown off the body's water (the field bus's soot),
+# pools whose surface it churns, ripples, foam, drops, crowns, drips, bubbles and streaks; a seeded simulation whose
+# look is drawn and whose mist goes into a learned module where it lands (deposit(): the fog model for cold spray, the
+# steam model for a geyser's). Entries drawn entirely by the seeded layer say so (*drawn*).
+
+effect waterfall_fx = "waterfall.nvfx", swirl 0    # the learned waterfall; no sub-grid swirl (it marbles the sheet)
+effect fountain_fx  = "fountain.nvfx", swirl 0     # the learned fountain: intensity (height), aim, turbulence
+effect splash_fx    = "splash.nvfx", swirl 0       # the learned splash: plays once (3 s) from one of 16 stored starts
+effect rainshaft_fx = "rainshaft.nvfx", swirl 0    # the learned rain shaft: intensity, wind, turbulence
+
+look spray  = shader, emission 0, soot_density 0.7, soot_albedo 0.9, sky 1.1, shadow 0.1, scene_light 1.3, relief 0.4,
+              tint (0.9, 0.95, 1)                                                       # white spray and mist
+look geyser = shader, emission 0, soot_density 1.8, soot_albedo 0.85, sky 1.2, shadow 0.15, scene_light 1.3, relief 0.8,
+              tint (0.94, 0.96, 1)                                                      # its steam
+
+# --- falling water --------------------------------------------------------------------------------------------------
+
+entry waterfall, category water, size 480 x 560, anchor base, loop, show 3,
+      about "A waterfall: a sheet of water pouring over a lip and plunging into a churning pool under its own mist (the waterfall model), spray thrown off it and the pool's ripples and foam seeded"
+param flow = 0.6, range (0.1, 1), about "how much water"
+param wind = 0.5, range (0, 1), about "where its mist drifts: 0.5 still air"
+module falls = waterfall_fx, size 128, width 480 * scale, at (X, Y), sink 0.055, feather 0.3, start 0, seed 600,
+               controls (0.6, 0.5, 0.5), intensity flow, wind wind
+water pool = pool, along (X - 230 * scale, Y - 4 * scale) to (X + 230 * scale, Y - 4 * scale), depth 22 * scale,
+             surface 22 * scale, cells 128, churn 1, seed 602
+water flecks = spray, in (X - 140 * scale, Y - 290 * scale), size 280 * scale x 280 * scale, threshold 0.3,
+               speed 140 * scale, radius 1.6 * scale, gravity 700 * scale, onto pool, seed 603
+
+entry waterfall_drawn, category water, size 400 x 560, anchor base, loop, show 3,
+      about "A waterfall, drawn: a sheet of water pouring over a lip, tearing into streaks and drops as it falls into a pool it stirs, mist rising where it lands (the seeded layer alone, its mist the fog model)"
+param flow = 0.8, range (0.3, 1.4), about "how much water"
+param mist = 1, range (0, 2), about "how much mist"
+module haze = fog, size 128, width 400 * scale, at (X, Y), sink 0.03, feather 0.1, look spray, start 0, seed 601,
+              controls (0, 0.5, 0.5)
+water pool = pool, along (X - 195 * scale, Y - 24 * scale) to (X + 195 * scale, Y - 24 * scale), depth 24 * scale,
+             surface 24 * scale, cells 96, seed 602
+water falls = sheet, along (X - 60 * scale, Y - 530 * scale) to (X + 60 * scale, Y - 530 * scale), flow flow,
+              velocity (0, 40 * scale), gravity 700 * scale, strands 28, capacity 96, onto pool, mist haze, mist_amount mist,
+              mist_heat 0, seed 603
+
+entry tall_waterfall, category water, size 360 x 900, anchor base, loop, show 3,
+      about "A tall waterfall: a narrow ribbon plunging a long way, breaking up into streaks and spray long before the pool"
+param flow = 0.7, range (0.3, 1.4), about "how much water"
+module haze = fog, size 128, width 360 * scale, at (X, Y), sink 0.03, feather 0.1, look spray, start 0, seed 611,
+              controls (0, 0.5, 0.6)
+water pool = pool, along (X - 175 * scale, Y - 20 * scale) to (X + 175 * scale, Y - 20 * scale), depth 20 * scale,
+             surface 20 * scale, cells 96, seed 612
+water falls = sheet, along (X - 28 * scale, Y - 880 * scale) to (X + 28 * scale, Y - 880 * scale), flow flow,
+              velocity (0, 30 * scale), gravity 700 * scale, strands 14, capacity 128, breakup 1.6, onto pool, mist haze,
+              mist_amount 1.3, mist_heat 0, seed 613
+
+entry wide_falls, category water, size 900 x 420, anchor base, loop, show 3,
+      about "Wide falls: a long, low curtain of water over a broad lip into a river, mist along its foot"
+param flow = 0.7, range (0.3, 1.4), about "how much water"
+module haze = fog, size 128, width 900 * scale, at (X, Y), sink 0.03, feather 0.1, look spray, start 0, seed 621,
+              controls (0, 0.5, 0.5)
+water river = pool, along (X - 445 * scale, Y - 26 * scale) to (X + 445 * scale, Y - 26 * scale), depth 26 * scale,
+              surface 26 * scale, cells 192, drift 30 * scale, seed 622
+water falls = sheet, along (X - 360 * scale, Y - 380 * scale) to (X + 360 * scale, Y - 380 * scale), flow flow,
+              velocity (20 * scale, 40 * scale), gravity 700 * scale, strands 96, capacity 80, onto river, mist haze,
+              mist_amount 0.12, mist_heat 0, seed 623
+
+entry cascade, category water, size 520 x 640, anchor base, loop, show 3,
+      about "A cascade: water stepping down a cliff in three falls, each onto a ledge's pool that spills over into the next"
+param flow = 0.7, range (0.3, 1.4), about "how much water"
+module haze = fog, size 128, width 520 * scale, at (X, Y), sink 0.03, feather 0.1, look spray, start 0, seed 631,
+              controls (0, 0.5, 0.5)
+water ledge1 = pool, along (X - 150 * scale, Y - 420 * scale) to (X + 10 * scale, Y - 420 * scale), depth 10 * scale,
+               surface 10 * scale, cells 48, seed 632
+water ledge2 = pool, along (X - 40 * scale, Y - 220 * scale) to (X + 120 * scale, Y - 220 * scale), depth 10 * scale,
+               surface 10 * scale, cells 48, seed 633
+water pool = pool, along (X - 255 * scale, Y - 20 * scale) to (X + 255 * scale, Y - 20 * scale), depth 20 * scale,
+             surface 20 * scale, cells 96, seed 634
+water fall1 = sheet, along (X - 130 * scale, Y - 620 * scale) to (X - 70 * scale, Y - 620 * scale), flow flow,
+              velocity (10 * scale, 30 * scale), gravity 700 * scale, strands 12, capacity 64, onto ledge1, seed 635
+water fall2 = sheet, along (X + 10 * scale, Y - 423 * scale) to (X + 10 * scale, Y - 412 * scale), flow 0.9 * flow,
+              velocity (70 * scale, 0), gravity 700 * scale, strands 10, capacity 64, onto ledge2, seed 636
+water fall3 = sheet, along (X + 120 * scale, Y - 223 * scale) to (X + 120 * scale, Y - 212 * scale), flow 0.9 * flow,
+              velocity (80 * scale, 0), gravity 700 * scale, strands 10, capacity 64, onto pool, mist haze, mist_heat 0,
+              seed 637
+
+entry pipe_outflow, category water, size 520 x 360, anchor base, loop, show 3,
+      about "A pipe's outflow: water gushing out of a culvert in an arc and crashing into the pool below"
+param flow = 0.9, range (0.3, 1.5), about "how much water"
+param speed = 160, range (60, 300), about "how fast it leaves the pipe"
+module haze = fog, size 128, width 520 * scale, at (X, Y), sink 0.03, feather 0.1, look spray, start 0, seed 641,
+              controls (0, 0.5, 0.5)
+water pool = pool, along (X - 255 * scale, Y - 22 * scale) to (X + 255 * scale, Y - 22 * scale), depth 22 * scale,
+             surface 22 * scale, cells 96, seed 642
+water gush = sheet, along (X - 200 * scale, Y - 300 * scale) to (X - 200 * scale, Y - 262 * scale), flow flow,
+             velocity (speed * scale, -10 * scale), gravity 700 * scale, strands 14, capacity 72, onto pool, mist haze,
+             mist_amount 0.8, mist_heat 0, seed 643
+
+entry leaking_pipe, category water, size 260 x 260, anchor base, loop, show 3,
+      about "A leaking pipe: a thin trickle and drops falling from a seam into a puddle that rings where they land"
+param rate = 3, range (0.5, 10), about "drops a second"
+water puddle = pool, along (X - 80 * scale, Y - 6 * scale) to (X + 80 * scale, Y - 6 * scale), depth 6 * scale,
+               surface 6 * scale, cells 64, rate 0, seed 651
+water trickle = jet, at (X - 14 * scale, Y - 236 * scale), speed 40 * scale, angle 100, spread 4, flow 0.5,
+                gravity 700 * scale, capacity 64, breakup 1.5, onto puddle, seed 652
+water leak = drips, along (X - 4 * scale, Y - 238 * scale) to (X + 30 * scale, Y - 238 * scale), rate rate,
+             radius 2.2 * scale, gravity 700 * scale, onto puddle, seed 653
+
+entry cave_drips, category water, size 520 x 420, anchor base, loop, show 3,
+      about "A dripping cave ceiling: drops swelling on the rock and letting go one by one into a still pool, rings spreading"
+param rate = 4, range (0.5, 10), about "drops a second"
+water pool = pool, along (X - 255 * scale, Y - 16 * scale) to (X + 255 * scale, Y - 16 * scale), depth 16 * scale,
+             surface 16 * scale, cells 128, damping 0.6, rate 0, clarity 0.6, seed 661
+water roof = drips, along (X - 220 * scale, Y - 410 * scale) to (X + 220 * scale, Y - 410 * scale), rate rate,
+                radius 4 * scale, gravity 700 * scale, onto pool, seed 662
+
+# --- thrown water ---------------------------------------------------------------------------------------------------
+
+entry fountain, category water, size 480 x 480, anchor base, loop, show 3,
+      about "A fountain: a jet rising and falling back in a bell of water into its basin (the fountain model), drops off the bell and the basin's ripples and foam seeded"
+param height = 0.6, range (0.1, 1), about "how high it rises"
+param aim = 0.5, range (0, 1), about "where it leans: 0.5 upright"
+module fount = fountain_fx, size 128, width 480 * scale, at (X, Y), sink 0.055, feather 0.3, start 0, seed 700,
+               controls (0.6, 0.5, 0.5), intensity height, aim aim
+water basin = pool, along (X - 220 * scale, Y - 4 * scale) to (X + 220 * scale, Y - 4 * scale), depth 16 * scale,
+              surface 16 * scale, cells 96, churn 1, seed 702
+water flecks = spray, in (X - 200 * scale, Y - 390 * scale), size 400 * scale x 380 * scale, threshold 0.3,
+               speed 100 * scale, radius 1.5 * scale, gravity 700 * scale, onto basin, seed 703
+
+entry garden_fountain, category water, size 420 x 360, anchor base, loop, show 3,
+      about "A garden fountain: a tall central jet and a ring of arcing jets falling back into a basin, rippling it"
+param height = 1, range (0.5, 1.4), about "how high"
+water basin = pool, along (X - 190 * scale, Y - 16 * scale) to (X + 190 * scale, Y - 16 * scale), depth 16 * scale,
+              surface 16 * scale, cells 96, rate 0, seed 671
+water centre = jet, at (X, Y - 16 * scale), speed 560 * height * scale, spread 1.5, pulse 0.05, flow 0.7,
+               gravity 700 * scale, capacity 96, onto basin, seed 672
+water arcs = jet, at (X, Y - 18 * scale), jets 6, fan 13, speed 330 * height * scale, spread 2, flow 0.45,
+             gravity 700 * scale, capacity 72, onto basin, seed 673
+
+entry water_geyser, category water, size 420 x 760, anchor base, loop, show 5,
+      about "A geyser: a gurgling spout that erupts every eight seconds into a towering column of water and steam, then falls back"
+param every = 8, range (4, 20), about "seconds between eruptions"
+let k = t - every * floor(t / every)
+let erupt = smooth((k - 3) / 0.5) * (1 - smooth((k - 6.5) / 1.5))
+module cloud = steam, size 128, width 420 * scale, at (X, Y), sink 0.04, feather 0.25, look geyser, start 0, seed 681,
+               controls (0.15, 0.5, 0.6), intensity 0.15 + 0.6 * erupt
+water pool = pool, along (X - 200 * scale, Y - 14 * scale) to (X + 200 * scale, Y - 14 * scale), depth 14 * scale,
+             surface 14 * scale, cells 96, rate 0, seed 682
+water spout = jet, at (X, Y - 14 * scale), jets 9, fan 1.2, speed (120 + 900 * erupt) * scale, spread 4, pulse 0.15,
+              flow 0.5 + 0.7 * erupt, gravity 700 * scale, capacity 160, onto pool, mist cloud, mist_amount 1.5,
+              mist_heat 0.6, seed 683
+
+entry broken_hydrant, category water, size 520 x 520, anchor base, loop, show 3,
+      about "A broken hydrant: a column of water blasting up from the street, spraying and swaying, rain of drops and a spreading puddle"
+param power = 1, range (0.5, 1.4), about "how hard it blows"
+module haze = fog, size 128, width 520 * scale, at (X, Y), sink 0.03, feather 0.1, look spray, start 0, seed 691,
+              controls (0, 0.5, 0.6)
+water puddle = pool, along (X - 250 * scale, Y - 6 * scale) to (X + 250 * scale, Y - 6 * scale), depth 6 * scale,
+               surface 6 * scale, cells 96, rate 0, seed 692
+water column = jet, at (X, Y - 30 * scale), jets 3, fan 5, speed 640 * power * scale, angle 4, spread 5, pulse 0.2,
+               flow 1.1, breakup 1.4, gravity 700 * scale, capacity 120, onto puddle, mist haze, mist_amount 0.6,
+               mist_heat 0, seed 693
+
+# --- impacts --------------------------------------------------------------------------------------------------------
+
+entry splash, category water, size 480 x 420, anchor base, once 3, show 0.5,
+      about "A splash: the crown of water thrown up where something hits the water and the column from its crater, falling back into the pool (the splash model), its drops, rings, waves and foam seeded"
+param power = 0.6, range (0.3, 1), about "how big"
+module crown = splash_fx, size 128, width 480 * scale, at (X, Y), sink 0.055, feather 0.3, start 0, seed 800,
+               controls (0.44, 0.46, 0.58), intensity power, opacity 1 - smooth((t - 2.2) / 0.8)
+water lake = pool, along (X - 235 * scale, Y - 4 * scale) to (X + 235 * scale, Y - 4 * scale), depth 22 * scale,
+             surface 22 * scale, cells 160, churn 1, seed 802
+water flecks = spray, in (X - 200 * scale, Y - 410 * scale), size 400 * scale x 400 * scale, threshold 0.3,
+               speed 160 * scale, radius 1.5 * scale, gravity 700 * scale, onto lake, seed 803
+at 0:
+  splash at (X, Y - 4 * scale), power 0.5 * power, onto lake, seed 804
+
+entry boulder_splash, category water, size 560 x 420, anchor base, once 4, show 0.2,
+      about "A boulder into a lake: a wide crown of water and spray, a column from the crater, waves rolling out and a cloud of spray"
+param power = 1.3, range (0.6, 1.8), about "how big"
+module haze = fog, size 128, width 560 * scale, at (X, Y), sink 0.03, feather 0.1, look spray, start 0, seed 701,
+              controls (0, 0.5, 0.6)
+water lake = pool, along (X - 275 * scale, Y - 24 * scale) to (X + 275 * scale, Y - 24 * scale), depth 24 * scale,
+             surface 24 * scale, cells 160, rate 0, seed 702
+at 0:
+  splash at (X, Y - 18 * scale), power power, onto lake, mist haze, mist_amount 0.6, mist_heat 0, seed 703
+
+entry cannonball_splash, category water, size 400 x 420, anchor base, once 3, show 0.35,
+      about "A cannonball splash: a sudden narrow crown and a tall column of water thrown up from the crater"
+param power = 0.9, range (0.5, 1.5), about "how big"
+water lake = pool, along (X - 195 * scale, Y - 20 * scale) to (X + 195 * scale, Y - 20 * scale), depth 20 * scale,
+             surface 20 * scale, cells 128, rate 0, seed 711
+at 0:
+  splash at (X, Y - 14 * scale), power power, onto lake, seed 712
+
+entry dive_splash, category water, size 320 x 260, anchor base, once 2.5, show 0.15,
+      about "A dive: a small, clean crown and a short column, rings spreading where the diver went in"
+param power = 0.45, range (0.2, 0.8), about "how big"
+water lake = pool, along (X - 155 * scale, Y - 16 * scale) to (X + 155 * scale, Y - 16 * scale), depth 16 * scale,
+             surface 16 * scale, cells 96, rate 0, seed 721
+at 0:
+  splash at (X, Y - 12 * scale), power power, onto lake, seed 722
+
+# --- rain and still water -------------------------------------------------------------------------------------------
+
+entry rain_on_puddles, category water, size 960 x 540, anchor base, loop, show 2,
+      about "Rain on puddles: rain falling (the compositor's rain) on three puddles that ring and fleck where drops land"
+param density = 3, range (0.5, 12), about "drops in each 100 x 100 pixels at once"
+emit rain, in (X - 480 * scale, Y - 540 * scale), size 960 * scale x 540 * scale, density density, wind (40 * scale, 0),
+     radius 0.8 * scale, seed 731
+water p1 = pool, along (X - 400 * scale, Y - 14 * scale) to (X - 160 * scale, Y - 14 * scale), depth 10 * scale,
+           surface 10 * scale, cells 64, rate 2.5 * density, seed 732
+water p2 = pool, along (X - 90 * scale, Y - 8 * scale) to (X + 150 * scale, Y - 8 * scale), depth 8 * scale,
+           surface 8 * scale, cells 64, rate 2.5 * density, seed 733
+water p3 = pool, along (X + 220 * scale, Y - 18 * scale) to (X + 420 * scale, Y - 18 * scale), depth 12 * scale,
+           surface 12 * scale, cells 64, rate 2.5 * density, seed 734
+
+entry rain_shaft, category water, size 700 x 700, anchor base, loop, show 3,
+      about "A rain shaft: a dark storm cloud (the cloud model) trailing a curtain of rain that thickens, thins and leans with the wind (the rainshaft model), its streaks seeded"
+param density = 18, range (5, 50), about "streaks in each 100 x 100 pixels at once"
+param wind = 50, range (-200, 200), about "how it slants"
+module a = cloud, size 128, width 520 * scale, at (X - 140 * scale, Y - 360 * scale), feather 0.1, look storm, start 0,
+           seed 741, controls (0.9, 0.6, 0.5), wind 0.55 + wind / 1000
+module b = cloud, size 128, width 520 * scale, at (X + 140 * scale, Y - 350 * scale), feather 0.1, look storm, start 3,
+           seed 742, controls (0.9, 0.6, 0.5), wind 0.55 + wind / 1000
+module curtain = rainshaft_fx, size 128, width 600 * scale, at (X, Y), sink 0.055, feather 0.2, start 0, seed 745,
+                 controls (0.6, 0.6, 0.5), wind 0.5 + wind / 400
+water streaks = shaft, in (X - 150 * scale, Y - 540 * scale), size 300 * scale x 540 * scale, density density,
+                speed 600 * scale, wind (wind * scale, 0), sway 30 * scale, gust 0.7, clarity 0.85, colour (0.55, 0.6, 0.68),
+                seed 744
+
+entry rain_shaft_drawn, category water, size 700 x 700, anchor base, loop, show 3,
+      about "A rain shaft, drawn: a dark storm cloud trailing a slanted curtain of rain that thickens and thins in gusts (the cloud model; the curtain and its streaks the seeded layer alone)"
+param density = 22, range (5, 50), about "streaks in each 100 x 100 pixels at once"
+param wind = 70, range (-200, 200), about "how it slants"
+module a = cloud, size 128, width 520 * scale, at (X - 140 * scale, Y - 360 * scale), feather 0.1, look storm, start 0,
+           seed 741, controls (0.9, 0.6, 0.5), wind 0.55 + wind / 1000
+module b = cloud, size 128, width 520 * scale, at (X + 140 * scale, Y - 350 * scale), feather 0.1, look storm, start 3,
+           seed 742, controls (0.9, 0.6, 0.5), wind 0.55 + wind / 1000
+water shaft = shaft, in (X - 230 * scale, Y - 560 * scale), size 420 * scale x 560 * scale, density density,
+              speed 600 * scale, wind (wind * scale, 0), sway 30 * scale, gust 0.7, colour (0.55, 0.6, 0.68), seed 743
+
+entry underwater_bubbles, category water, size 360 x 420, anchor base, loop, show 3,
+      about "Bubbles under water: seen through the side of deep water, bubbles rising, wobbling and growing, popping at the surface"
+param rate = 6, range (1, 20), about "bubbles a second"
+water deep = pool, along (X - 175 * scale, Y - 400 * scale) to (X + 175 * scale, Y - 400 * scale), depth 400 * scale,
+             cells 96, rate 0, clarity 0.6, seed 751
+water rising = bubbles, in (X - 150 * scale, Y - 380 * scale), size 300 * scale x 370 * scale, rate rate,
+               radius 4 * scale, speed 60 * scale, onto deep, seed 752
+
+entry fish_tank, category water, size 360 x 300, anchor base, loop, show 3,
+      about "A fish tank: an aerator's stream of small bubbles rising in a column, a few stray ones, ripples at the top"
+water tank = pool, along (X - 170 * scale, Y - 260 * scale) to (X + 170 * scale, Y - 260 * scale), depth 260 * scale,
+             cells 96, rate 0, clarity 0.75, colour (0.55, 0.85, 0.85), seed 761
+water stream = bubbles, in (X + 100 * scale, Y - 250 * scale), size 14 * scale x 240 * scale, rate 14,
+               radius 2.2 * scale, speed 80 * scale, onto tank, seed 762
+water strays = bubbles, in (X - 150 * scale, Y - 240 * scale), size 220 * scale x 230 * scale, rate 1.2,
+               radius 3 * scale, speed 50 * scale, onto tank, seed 763
+
+entry boat_wake, category water, size 900 x 160, anchor base, loop, show 3,
+      about "A wake: something moving along calm water, the surface pushed aside before it and rolling out behind it"
+param speed = 120, range (40, 300), about "how fast it goes (world pixels a second)"
+let boat = X - 420 * scale + (speed * t - 840 * floor(speed * t / 840)) * scale
+water lake = pool, along (X - 445 * scale, Y - 30 * scale) to (X + 445 * scale, Y - 30 * scale), depth 30 * scale,
+             surface 30 * scale, cells 256, speed 90 * scale, damping 0.4, rate 0, seed 771
+every frame:
+  wave lake at (boat, Y - 30 * scale), amount 60 * scale, width 16 * scale
+
+entry shore_waves, category water, size 900 x 200, anchor base, loop, show 3,
+      about "Waves on a lake: a steady swell rolling along the surface, glinting, with foam carried on the current"
+param swell = 4, range (1, 10), about "how high the waves"
+water lake = pool, along (X - 445 * scale, Y - 40 * scale) to (X + 445 * scale, Y - 40 * scale), depth 40 * scale,
+             surface 40 * scale, cells 192, swell swell * scale, wavelength 160 * scale, period 3.2, drift 25 * scale,
+             rate 0.6, seed 781
