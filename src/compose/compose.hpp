@@ -18,6 +18,7 @@
 #pragma once
 
 #include "rt_common.hpp"
+#include "water_picture.hpp"
 
 #include <array>
 #include <atomic>
@@ -610,6 +611,8 @@ class Particles {
 
 // --- the frame ---------------------------------------------------------------------------------------------------------
 
+class Water;  // water.hpp
+
 struct Shock {
   float x = 0, y = 0, t0 = 0, speed = 900.f, decay = 0.35f, amp = 6.f, width = 26.f;
   float radius(float t) const;  // world pixels at scene time t
@@ -655,7 +658,11 @@ class Frame {
   // See above. `modules` in drawing order, as draw() takes them. render() sets *images_read (and wakes the pool's
   // waiting threads) once the modules' images have been drawn.
   void capture(const Light& light, std::span<const std::array<float, 4>> scorch, std::span<Module* const> modules, const Particles& parts,
-               std::span<const Shock> shocks, const FieldBus& bus);
+               std::span<const Shock> shocks, const FieldBus& bus, const Water* water = nullptr);
+  // Water (water.hpp, docs/EFFECTS_WATER.md): capture() takes the picture of the water it is given, and render() draws it
+  // over the background, under the modules (a waterfall's mist over its foot), into the layers as well. reserve_water()
+  // makes room for everything it may draw (a set-up call: allocates). Only render() draws it.
+  void reserve_water(const Water& water);
   void render(std::span<std::uint8_t> rgb, float bloom_threshold, float bloom_strength, Pool& pool, std::atomic<bool>* images_read = nullptr);
   // Room for captures (capture() allocates only when a count grows beyond what it held before).
   void reserve(int modules, int shocks, int scorch, int particles);
@@ -797,6 +804,8 @@ class Frame {
   std::vector<std::array<float, 4>> scorch_;
   std::vector<Shock> shocks_;
   Particles parts_{0};
+  WaterPicture water_;
+  bool water_on_ = false;
   std::array<double, kRenderStages> render_ms_{};
 };
 

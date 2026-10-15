@@ -109,7 +109,8 @@ neuralfx_defaults(neuralfx_io)
 # Composed effects (docs/COMPOSE.md): rollout effects coupled through their fields, with particles, light, distortion
 # and bloom for whole scenes, field effects, and scene scripts (a text format, its parser and runner), over the
 # runtime's internals.
-set(NEURALFX_COMPOSE_SOURCES src/compose/compose.cpp src/compose/fields.cpp src/compose/trail.cpp src/compose/script.cpp src/compose/script_run.cpp)
+set(NEURALFX_COMPOSE_SOURCES src/compose/compose.cpp src/compose/fields.cpp src/compose/trail.cpp src/compose/script.cpp src/compose/script_run.cpp
+                             src/compose/water.cpp)
 add_library(neuralfx_compose STATIC ${NEURALFX_COMPOSE_SOURCES})
 target_include_directories(neuralfx_compose PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src/compose" "${CMAKE_CURRENT_SOURCE_DIR}/src/runtime")
 target_link_libraries(neuralfx_compose PUBLIC nvfx)
@@ -375,6 +376,11 @@ if(NEURALFX_BUILD_TESTS)
   target_include_directories(neuralfx_manager_tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src")
   neuralfx_defaults(neuralfx_manager_tests)
   gtest_discover_tests(neuralfx_manager_tests TEST_PREFIX "neuralfx." DISCOVERY_MODE PRE_TEST PROPERTIES LABELS neuralfx)
+  # Water (docs/EFFECTS_WATER.md): its own test program, so the shared test list stays as it is.
+  add_executable(neuralfx_water_tests tests/test_water.cpp)
+  target_link_libraries(neuralfx_water_tests PRIVATE neuralfx_compose GTest::gtest_main)
+  neuralfx_defaults(neuralfx_water_tests)
+  gtest_discover_tests(neuralfx_water_tests TEST_PREFIX "neuralfx." DISCOVERY_MODE PRE_TEST PROPERTIES LABELS neuralfx)
   # Counts heap allocations around nvfx_render (replaces the global operator new, so it is its own program).
   add_executable(nvfx_alloc_test tests/alloc_test.cpp)
   target_link_libraries(nvfx_alloc_test PRIVATE nvfx neuralfx_compose nvfx_scene_api nvfx_library_api neuralfx_ddpm)  # the trainer's format writer makes a test prior

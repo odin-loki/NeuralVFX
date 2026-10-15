@@ -13,8 +13,10 @@
 //   5. tiles of a domain share their bands; the couplings of `every frame` (transfer, suppress, stop), in order;
 //   6. the field bus is cleared and every active module publishes to it;
 //   7. pushes of `every frame` (they read the bus), then the force fields, in order;
-//   8. light; 9. fields on particles, particles move, rules on landings; 10. shading and the picture.
+//   8. light; 9. fields on particles, particles move, rules on landings; then the water (water.hpp, its settings and a
+//      step); 10. shading and the picture.
 #include "script.hpp"
+#include "water.hpp"
 
 #include <neuralfx/noise.hpp>
 #include <neuralfx/rollout.hpp>
@@ -172,7 +174,7 @@ enum P : int {
   p_amp, p_width, p_radius, p_glow, p_embers, p_debris, p_count, p_tries, p_chance, p_spread, p_level, p_strength,
   p_soft, p_damping, p_swirl, p_steam, p_amount, p_scale, p_rate, p_u, p_v, p_core, p_weight, p_if, p_start,
   p_cr, p_cg, p_cb, p_bright, p_jitter, p_branches, p_squash, p_sparks, p_dx, p_dy, p_cone,
-  p_density, p_wu, p_wv, p_flowk, p_wash, p_melt, p_glowing, kParams
+  p_density, p_wu, p_wv, p_flowk, p_wash, p_melt, p_glowing, p_power, p_mist_amount, p_mist_heat, kParams
 };
 using Params = std::array<Code, kParams>;
 
@@ -227,6 +229,24 @@ struct ActC {
   bool has_in = false, empty = false;
   int in_c = 0, in_r = 0, from = 0;  // start
   std::vector<Module*> buf;           // transfer: the active targets, filled per call
+  int water = -1, mist = -1;          // splash: the pool it lands on, the module its mist feeds; wave: the pool
+};
+
+// Water (water.hpp, docs/EFFECTS_WATER.md): an element's settings, each an expression evaluated every frame.
+enum WP : int {
+  w_x0, w_y0, w_x1, w_y1, w_flow, w_vx, w_vy, w_speed, w_angle, w_spread, w_fan, w_pulse, w_breakup, w_gravity, w_wu, w_wv,
+  w_rate, w_radius, w_depth, w_damping, w_drift, w_surface, w_swell, w_wavelength, w_period, w_density, w_sway, w_gust,
+  w_floor, w_mist_amount, w_mist_heat, w_brightness, w_clarity, w_cr, w_cg, w_cb, w_from, w_until, w_if, kWaterParams
+};
+
+struct WaterC {
+  std::string name;
+  Pos pos;
+  WaterKind kind = WaterKind::pool;
+  std::array<Code, kWaterParams> p;
+  int strands = 24, nodes = 72, cells = 128, count = 256;  // what is fixed: WaterLayout
+  int onto = -1, mist = -1;                                // a pool (a water element), a module
+  std::uint64_t seed = 1;
 };
 
 struct RuleC {
@@ -284,6 +304,8 @@ struct Program {
   std::vector<ModC> modules;
   std::vector<FieldC> fields;
   std::vector<EmitC> emitters;
+  std::vector<WaterC> waters;
+  int splash_capacity = 0;  // splashes that may be under way at once (as shocks: each splash action's copies)
   std::vector<RuleC> rules;
   std::vector<ActC> every;
   std::vector<InputC> inputs;
@@ -428,6 +450,20 @@ class Compiler {
   void trail(const Statement& s, ModC& m);
   void field(const Statement& s);
   void emitter(const Statement& s);
+  void water(const Statement& s, WaterC& w);
+  int water_index(const std::string& name, Pos pos, bool pool) const {
+    std::vector<std::string> all;
+    for (std::size_t i = 0; i < prog_.waters.size(); ++i) {
+      const WaterC& w = prog_.waters[i];
+      if (w.name == name) {
+        if (pool && w.kind != WaterKind::pool) fail(pos, std::format("'{}' is water of kind {}, not a pool", name, water_kind_name(w.kind)));
+        return static_cast<int>(i);
+      }
+      all.push_back(w.name);
+    }
+    if (const auto it = names_.find(name); it != names_.end()) fail(pos, std::format("'{}' is a {}, not water", name, it->second.first));
+    fail(pos, std::format("unknown water '{}'{}", name, did_you_mean(name, all)));
+  }
   void rule(const Statement& s, RuleC& r);
   ActC action(const Statement& a, const Ctx& c, bool every, int limit);
   std::vector<int> modules_of(const std::vector<std::string>& names, Pos pos, bool particles_ok, bool* particles = nullptr) const;
@@ -1070,15 +1106,119 @@ void Compiler::emitter(const Statement& s) {
   prog_.emitters.push_back(std::move(e));
 }
 
+// Water (docs/EFFECTS_WATER.md): what each kind takes and needs; counts and capacities are constants (they size it when
+// the scene is made); `onto` names a pool, `mist` a module.
+void Compiler::water(const Statement& s, WaterC& w) {
+  const std::string what = std::format("water {}", s.kind);
+  const auto need = [&](std::string_view key) {
+    if (!s.prop(key)) fail(s.pos, std::format("{} needs '{}'", what, key));
+  };
+  switch (w.kind) {
+    case WaterKind::pool:
+      only(s, {"along", "depth", "cells", "speed", "damping", "drift", "rate", "surface", "swell", "wavelength", "period", "colour", "clarity",
+               "brightness", "capacity", "seed", "from", "until", "if"}, what);
+      need("along");
+      break;
+    case WaterKind::sheet:
+      only(s, {"along", "flow", "velocity", "strands", "capacity", "breakup", "gravity", "wind", "floor", "onto", "mist", "mist_amount",
+               "mist_heat", "colour", "brightness", "seed", "from", "until", "if"}, what);
+      need("along");
+      break;
+    case WaterKind::jet:
+      only(s, {"at", "speed", "angle", "spread", "fan", "jets", "pulse", "flow", "capacity", "breakup", "gravity", "wind", "floor", "onto",
+               "mist", "mist_amount", "mist_heat", "colour", "brightness", "seed", "from", "until", "if"}, what);
+      need("at");
+      need("speed");
+      break;
+    case WaterKind::drips:
+      only(s, {"along", "rate", "radius", "capacity", "gravity", "wind", "floor", "onto", "mist", "mist_amount", "mist_heat", "colour",
+               "brightness", "seed", "from", "until", "if"}, what);
+      need("along");
+      break;
+    case WaterKind::bubbles:
+      only(s, {"in", "size", "rate", "radius", "speed", "capacity", "onto", "colour", "brightness", "seed", "from", "until", "if"}, what);
+      need("in");
+      need("size");
+      break;
+    case WaterKind::shaft:
+      only(s, {"in", "size", "density", "speed", "wind", "sway", "gust", "capacity", "mist", "mist_amount", "mist_heat", "colour", "clarity",
+               "brightness", "seed", "from", "until", "if"}, what);
+      need("in");
+      need("size");
+      break;
+  }
+  if (const Prop* p = s.prop("strands")) w.strands = integer(p->value.exprs[0], "the strands", 1, 256);
+  if (const Prop* p = s.prop("jets")) w.strands = integer(p->value.exprs[0], "the jets", 1, 64);
+  else if (w.kind == WaterKind::jet) w.strands = 1;
+  if (const Prop* p = s.prop("cells")) w.cells = integer(p->value.exprs[0], "the cells", 8, 4096);
+  const int cap_default = w.kind == WaterKind::sheet || w.kind == WaterKind::jet ? 72 : w.kind == WaterKind::drips ? 64 : w.kind == WaterKind::shaft ? 2048 : 256;
+  const int cap = s.prop("capacity") ? integer(s.prop("capacity")->value.exprs[0], "the capacity", 1, 65536) : cap_default;
+  if (w.kind == WaterKind::sheet || w.kind == WaterKind::jet) {
+    w.nodes = cap;
+    if (w.nodes < 8 || w.nodes > 512) fail(s.prop("capacity")->pos, "a strand holds 8 to 512 nodes (frames in flight)");
+  } else {
+    w.count = cap;
+  }
+  if (const Prop* p = s.prop("seed")) w.seed = static_cast<std::uint64_t>(integer(p->value.exprs[0], "the seed", 0));
+  if (const Prop* p = s.prop("onto")) w.onto = water_index(p->value.names[0], p->value.pos, true);
+  if (const Prop* p = s.prop("mist")) {
+    w.mist = module_index(p->value.names[0], p->value.pos);
+    if (prog_.modules[zs(w.mist)].trail) fail(p->value.pos, std::format("'{}' is a trail: mist goes into a module", p->value.names[0]));
+  }
+  Ctx c;
+  const auto take2 = [&](std::string_view key, WP a, WP b) {
+    const Prop* pr = s.prop(key);
+    if (!pr) return;
+    Ctx cc = c;
+    const std::string k = std::format("'{}'", key);
+    cc.what = k;
+    w.p[a] = code(pr->value.exprs[0], cc);
+    if (b != kWaterParams) w.p[b] = code(pr->value.exprs[1], cc);
+  };
+  if (const Prop* a = s.prop("along")) {
+    Ctx cc;
+    cc.what = "'along'";
+    for (int k = 0; k < 4; ++k) w.p[zs(w_x0 + k)] = code(a->value.exprs[zs(k)], cc);
+  }
+  take2("at", w_x0, w_y0);
+  take2("in", w_x0, w_y0);
+  take2("size", w_x1, w_y1);
+  for (const auto& [key, a, b] : std::initializer_list<std::tuple<std::string_view, WP, WP>>{
+           {"flow", w_flow, kWaterParams},       {"velocity", w_vx, w_vy},           {"speed", w_speed, kWaterParams},
+           {"angle", w_angle, kWaterParams},     {"spread", w_spread, kWaterParams}, {"fan", w_fan, kWaterParams},
+           {"pulse", w_pulse, kWaterParams},     {"breakup", w_breakup, kWaterParams}, {"gravity", w_gravity, kWaterParams},
+           {"wind", w_wu, w_wv},                 {"rate", w_rate, kWaterParams},     {"radius", w_radius, kWaterParams},
+           {"depth", w_depth, kWaterParams},     {"damping", w_damping, kWaterParams}, {"drift", w_drift, kWaterParams},
+           {"surface", w_surface, kWaterParams}, {"swell", w_swell, kWaterParams},   {"wavelength", w_wavelength, kWaterParams},
+           {"period", w_period, kWaterParams},   {"density", w_density, kWaterParams}, {"sway", w_sway, kWaterParams},
+           {"gust", w_gust, kWaterParams},       {"floor", w_floor, kWaterParams},   {"mist_amount", w_mist_amount, kWaterParams},
+           {"mist_heat", w_mist_heat, kWaterParams}, {"brightness", w_brightness, kWaterParams}, {"clarity", w_clarity, kWaterParams},
+           {"from", w_from, kWaterParams},       {"until", w_until, kWaterParams},   {"if", w_if, kWaterParams}}) {
+    take2(key, a, b);
+  }
+  if (const Prop* col = s.prop("colour")) {
+    if (col->value.exprs.size() != 3) fail(col->pos, "a colour has three values (red, green, blue)");
+    Ctx cc;
+    cc.what = "a colour";
+    w.p[w_cr] = code(col->value.exprs[0], cc);
+    w.p[w_cg] = code(col->value.exprs[1], cc);
+    w.p[w_cb] = code(col->value.exprs[2], cc);
+  }
+}
+
 ActC Compiler::action(const Statement& a, const Ctx& c, bool every, int limit) {
   ActC out;
   out.kind = a.keyword;
   out.pos = a.pos;
   const std::string& k = a.keyword;
-  if (every && (k == "hand_over" || k == "start" || k == "wake" || k == "shock" || k == "scorch" || k == "burst")) {
+  if (every && (k == "hand_over" || k == "start" || k == "wake" || k == "shock" || k == "scorch" || k == "burst" || k == "splash")) {
     fail(a.pos, std::format("'{}' happens once: put it in a rule (at ..., when ...), not under 'every frame'", k));
   }
-  for (const std::string& n : a.subjects) out.subjects.push_back(module_index(n, a.pos));
+  if (k == "wave") {  // its subject is a pool
+    out.water = water_index(a.subjects[0], a.pos, true);
+  } else {
+    for (const std::string& n : a.subjects) out.subjects.push_back(module_index(n, a.pos));
+  }
   out.targets = modules_of(a.targets, a.pos, false);
   const int copies = std::min(limit, kMaxShocks);
   if (k == "transfer") {
@@ -1118,17 +1258,26 @@ ActC Compiler::action(const Statement& a, const Ctx& c, bool every, int limit) {
         out.tiles.push_back({integer(p->value.exprs[i], "a tile's column", 0, m.cols - 1), integer(p->value.exprs[i + 1], "a tile's row", 0, m.rows - 1)});
       }
     }
-  } else if (k == "shock" || k == "scorch" || k == "burst") {
+  } else if (k == "shock" || k == "scorch" || k == "burst" || k == "splash" || k == "wave") {
     if (!a.prop("at")) fail(a.pos, std::format("{} needs 'at (x, y)'", k));
     if (k == "shock") prog_.shock_capacity += copies;
     if (k == "scorch") prog_.scorch_capacity += copies;
+    if (k == "splash") {
+      prog_.splash_capacity += copies;
+      if (const Prop* p = a.prop("onto")) out.water = water_index(p->value.names[0], p->value.pos, true);
+      if (const Prop* p = a.prop("mist")) {
+        out.mist = module_index(p->value.names[0], p->value.pos);
+        if (prog_.modules[zs(out.mist)].trail) fail(p->value.pos, std::format("'{}' is a trail: mist goes into a module", p->value.names[0]));
+      }
+    }
   }
   for (const auto& [key, pa, pb] : std::initializer_list<std::tuple<std::string_view, P, P>>{
            {"at", p_x, p_y},         {"fraction", p_fraction, kParams}, {"top", p_top, kParams},     {"heat", p_heat, kParams},
            {"soot", p_soot, kParams}, {"gain", p_gain, kParams},        {"seed", p_seed, kParams},   {"speed", p_speed, kParams},
            {"decay", p_decay, kParams}, {"amp", p_amp, kParams},        {"width", p_width, kParams}, {"radius", p_radius, kParams},
            {"glow", p_glow, kParams}, {"embers", p_embers, kParams},    {"debris", p_debris, kParams}, {"if", p_if, kParams},
-           {"sparks", p_sparks, kParams}, {"direction", p_dx, p_dy},    {"cone", p_cone, kParams}}) {
+           {"sparks", p_sparks, kParams}, {"direction", p_dx, p_dy},    {"cone", p_cone, kParams},  {"power", p_power, kParams},
+           {"mist_amount", p_mist_amount, kParams}, {"mist_heat", p_mist_heat, kParams}, {"amount", p_amount, kParams}}) {
     take(out.p, a, key, pa, pb, c);
   }
   return out;
@@ -1201,6 +1350,16 @@ Program Compiler::compile() {
       prog_.modules.push_back(std::move(m));
     } else if (w == "field") {
       declare(st.name, st.name_pos, "field");
+    } else if (w == "water") {  // (its kind is known now: splashes and waves name pools)
+      declare(st.name, st.name_pos, "water");
+      WaterC wc;
+      wc.name = st.name;
+      wc.pos = st.pos;
+      static constexpr std::pair<std::string_view, WaterKind> kinds[] = {{"pool", WaterKind::pool}, {"sheet", WaterKind::sheet}, {"jet", WaterKind::jet},
+                                                                         {"drips", WaterKind::drips}, {"bubbles", WaterKind::bubbles}, {"shaft", WaterKind::shaft}};
+      for (const auto& [n, kk] : kinds)
+        if (n == st.kind) wc.kind = kk;
+      prog_.waters.push_back(std::move(wc));
     } else if (w == "at" || w == "when") {
       declare(st.name, st.name_pos, "rule");
       rule_slot.push_back(prog_.slots++);
@@ -1262,6 +1421,7 @@ Program Compiler::compile() {
     }
   }
   // 3. settings that may change over time
+  std::size_t water_i = 0;
   for (const Statement& st : s_.statements) {
     Ctx c;
     const auto expr = [&](std::string_view key, Code& out) {
@@ -1311,6 +1471,8 @@ Program Compiler::compile() {
       field(st);
     } else if (st.keyword == "emit") {
       emitter(st);
+    } else if (st.keyword == "water") {
+      water(st, prog_.waters[water_i++]);
     } else if (st.keyword == "at" || st.keyword == "when") {
       RuleC r;
       r.name = st.name.empty() ? std::format("line {}", st.pos.line) : st.name;
@@ -1368,6 +1530,7 @@ struct Scene::Impl {
   std::unique_ptr<FieldBus> bus;
   std::unique_ptr<Light> light;
   std::unique_ptr<Particles> parts;
+  std::unique_ptr<Water> water;  // water statements (water.hpp); none without them
   std::unique_ptr<Frame> frame;
   std::unique_ptr<Pool> pool;
   std::unique_ptr<PictureThread> picture;  // Options::overlap
@@ -1596,6 +1759,16 @@ struct Scene::Impl {
       const int sparks = std::max(0, static_cast<int>(eval_or(a.p[p_sparks], 0.f)));
       const float dx = eval_or(a.p[p_dx], 0.f), dy = eval_or(a.p[p_dy], -1.f), cone = eval_or(a.p[p_cone], 360.f);
       burst(x, y, r, embers, debris, speed, sparks, dx, dy, cone);
+    } else if (k == "splash") {  // water: a crown of drops where something hits (water.hpp)
+      if (!water) return;
+      const float x = eval(a.p[p_x]), y = eval(a.p[p_y]);
+      const float power = eval_or(a.p[p_power], 1.f), amount = eval_or(a.p[p_mist_amount], 1.f), heat = eval_or(a.p[p_mist_heat], 0.2f);
+      const auto seed = static_cast<std::uint64_t>(std::max(0.f, eval_or(a.p[p_seed], 1.f)));
+      Module* mist = a.mist >= 0 ? mods[zs(a.mist)].tiles[0] : nullptr;
+      water->splash(x, y, power, a.water, mist, amount, heat, seed, t, static_cast<int>(std::lround(t * prog.fps)));
+    } else if (k == "wave") {  // water: waves on a pool (every frame along a path: a wake)
+      if (!water) return;
+      water->stir(a.water, eval(a.p[p_x]), eval_or(a.p[p_amount], 200.f), eval_or(a.p[p_width], 20.f), static_cast<int>(std::lround(t * prog.fps)));
     }
   }
 
@@ -1938,6 +2111,55 @@ struct Scene::Impl {
     frame->cam_y = eval_or(prog.cam_y, 0.f);
   }
 
+  // The water's settings for this frame, then its step (water.hpp).
+  void water_step(int f, float t) {
+    if (!water) return;
+    for (std::size_t i = 0; i < prog.waters.size(); ++i) {
+      const WaterC& w = prog.waters[i];
+      WaterSpec& s = water->spec(static_cast<int>(i));
+      const auto& P = w.p;
+      const auto ev = [&](WP k, float d) { return P[zs(k)].present() ? eval(P[zs(k)]) : d; };
+      s.on = !(P[w_from].present() && t < eval(P[w_from])) && !(P[w_until].present() && !(t < eval(P[w_until]))) &&
+             !(P[w_if].present() && eval(P[w_if]) == 0.f);
+      s.x0 = ev(w_x0, 0.f);
+      s.y0 = ev(w_y0, 0.f);
+      s.x1 = ev(w_x1, w.kind == WaterKind::jet ? s.x0 : 100.f);
+      s.y1 = ev(w_y1, w.kind == WaterKind::jet ? s.y0 : 100.f);
+      s.flow = ev(w_flow, 0.6f);
+      s.vx = ev(w_vx, 0.f);
+      s.vy = ev(w_vy, 40.f);
+      s.speed = ev(w_speed, 0.f);
+      s.angle = ev(w_angle, 0.f);
+      s.spread = ev(w_spread, 3.f);
+      s.fan = ev(w_fan, 0.f);
+      s.pulse = ev(w_pulse, 0.f);
+      s.breakup = ev(w_breakup, 1.f);
+      s.gravity = ev(w_gravity, 700.f);
+      s.wu = ev(w_wu, 0.f);
+      s.wv = ev(w_wv, 0.f);
+      s.rate = ev(w_rate, w.kind == WaterKind::pool ? 0.f : w.kind == WaterKind::drips ? 1.f : 4.f);
+      s.radius = ev(w_radius, w.kind == WaterKind::bubbles ? 3.f : 2.f);
+      s.depth = ev(w_depth, 60.f);
+      s.damping = ev(w_damping, 1.2f);
+      s.drift = ev(w_drift, 0.f);
+      s.surface = ev(w_surface, 0.f);
+      s.swell = ev(w_swell, 0.f);
+      s.wavelength = ev(w_wavelength, 120.f);
+      s.period = ev(w_period, 3.f);
+      s.density = ev(w_density, 20.f);
+      s.sway = ev(w_sway, 0.f);
+      s.gust = std::clamp(ev(w_gust, 0.6f), 0.f, 1.f);
+      s.floor = ev(w_floor, prog.ground);
+      s.mist_amount = ev(w_mist_amount, 1.f);
+      s.mist_heat = ev(w_mist_heat, 0.2f);
+      s.brightness = ev(w_brightness, 1.f);
+      s.clarity = ev(w_clarity, w.kind == WaterKind::shaft ? 0.4f : 0.5f);
+      const std::array<float, 3> dc = w.kind == WaterKind::shaft ? std::array<float, 3>{0.55f, 0.6f, 0.68f} : std::array<float, 3>{0.62f, 0.8f, 0.95f};
+      s.colour = {ev(w_cr, dc[0]), ev(w_cg, dc[1]), ev(w_cb, dc[2])};
+    }
+    water->step(t, 1.f / prog.fps, f);
+  }
+
   void build(const EffectLoader& load, const Options& o);
   void render(int f, std::span<std::uint8_t> rgb);
   void advance(int f) {  // the states of the frames up to f, without pictures
@@ -2163,6 +2385,37 @@ void Scene::Impl::build(const EffectLoader& load, const Options& o) {
   if (o.overlap && o.threads > 1) picture = std::make_unique<PictureThread>(*frame, *pool);
   frame->reserve(static_cast<int>(all.size()), std::max(1, prog.shock_capacity), std::max(1, prog.scorch_capacity), prog.capacity);
   frame->ground_y = prog.ground;
+  if (!prog.waters.empty() || prog.splash_capacity > 0) {  // water (water.hpp): its elements, and room for what they throw
+    std::vector<WaterLayout> layout;
+    int drops = 256, rings = 64;
+    for (const WaterC& w : prog.waters) {
+      WaterLayout L;
+      L.kind = w.kind;
+      L.strands = w.strands;
+      L.nodes = w.nodes;
+      L.cells = w.cells;
+      L.count = w.count;
+      L.onto = w.onto;
+      L.mist = w.mist >= 0 ? mods[zs(w.mist)].tiles[0] : nullptr;
+      L.seed = w.seed;
+      switch (w.kind) {
+        case WaterKind::sheet:
+        case WaterKind::jet: drops += 24 * w.strands; break;
+        case WaterKind::pool:
+          drops += 128;
+          rings += 192;
+          break;
+        case WaterKind::drips: drops += 4 * w.count + 16; break;
+        case WaterKind::bubbles: drops += w.count; break;
+        case WaterKind::shaft: drops += w.count / 4; break;
+      }
+      layout.push_back(L);
+    }
+    const int crowns = std::clamp(prog.splash_capacity, 1, 32);
+    drops += 640 * std::min(crowns, std::max(0, prog.splash_capacity));
+    water = std::make_unique<Water>(layout, drops, crowns, rings);
+    frame->reserve_water(*water);
+  }
   if (o.layers) {  // the engine layers: the frame's, and every module's beside its image
     frame->use_layers(true);
     for (Module* m : all) m->use_layers(true);
@@ -2209,14 +2462,14 @@ void Scene::Impl::render(int f, std::span<std::uint8_t> rgb) {
   advance(f);  // frames skipped since the last picture (and frame f itself, unless the last call computed it)
   shade_for(f);
   if (!picture) {
-    frame->capture(*light, scorch, active, *parts, shocks, *bus);
+    frame->capture(*light, scorch, active, *parts, shocks, *bus, water.get());
     frame->render(rgb, bloom_threshold, bloom, *pool);
     picture_ms();
     return;
   }
   // Overlapped: frame f's picture is drawn on the picture thread while the next frame's state is computed (and shaded)
   // here; the next call finds it done.
-  frame->capture(*light, scorch, active, *parts, shocks, *bus);
+  frame->capture(*light, scorch, active, *parts, shocks, *bus, water.get());
   picture->start(rgb, bloom_threshold, bloom);
   state(++computed);
   picture->wait_images();
@@ -2352,6 +2605,7 @@ void Scene::Impl::state(int f) {
       if (!r.cond.present() || eval(r.cond) != 0.f) fire(r, i, t);
     }
   }
+  water_step(f, t);  // the water: its settings and a step (its time is counted with the particles')
   const auto c6 = Clock::now();
   // 10. the picture: shade(), then Frame::capture() and render() (render())
   stage[kScript] = ms(c0, c1);
@@ -2468,6 +2722,7 @@ float Scene::rule_time(std::string_view name) const {
 std::span<const std::pair<std::string, float>> Scene::rules_fired() const { return impl_->first; }
 const FieldBus& Scene::bus() const { return *impl_->bus; }
 Particles& Scene::particles() { return *impl_->parts; }
+const Water* Scene::water() const { return impl_->water.get(); }
 const Frame& Scene::frame() const { return *impl_->frame; }
 int Scene::active_modules() const { return static_cast<int>(impl_->active.size()); }
 std::size_t Scene::scratch_bytes() const {
