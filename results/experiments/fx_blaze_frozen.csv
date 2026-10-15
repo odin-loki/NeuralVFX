@@ -1,2 +1,4 @@
 kind,name,file,bytes,sha256,source
 rollout_effect,wildfire,fx_blaze/models/d/wildfire.nvfx,83719,ada7ce4af7496237c7cdabcf27efb739bef1b0b5e57c4cdc65dd1f2c6eba2585,study D's recipe (docs/EFFECTS_BLAZE.md): d-train --stages12 1 then d-tune then d-finish
+rollout_effect,coals,fx_blaze/models/d/coals.nvfx,83719,f042745cc2cebfc9c890b4d14ad1594186f7112cf90218177c60e80ea5aecdd2,study D's recipe (docs/EFFECTS_BLAZE.md): d-train --stages12 1 then d-tune then d-finish
+rollout_effect,mushroom,fx_blaze/models/d/mushroom.nvfx,280927,505bdfe80ce38c684617eb7da7ca681c0fc507a155285a19251ea0fd8b25a5f3,study D's recipe (docs/EFFECTS_BLAZE.md): d-train --stages12 1 then d-tune then d-finish (the one-shot branch, 150 frames)

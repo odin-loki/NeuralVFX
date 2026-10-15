@@ -1,2 +1,4 @@
 effect,runs,frames,sim_minutes,record_s,stepper_loss,stepper_s,renderer_psnr,contrast,swirl,detail_score,starts,start_fine,stored_bytes,total_s
 wildfire,160,240,21.33,292,0.02745,7063,0.00,1,0.8,0.000,8,0,83594,7356
+coals,160,240,21.33,324,0.05530,8134,0.00,1,0.8,0.000,8,0,83594,8458
+mushroom,240,150,20.00,336,0.02823,7904,0.00,1,0.8,0.000,16,64,280826,8240
