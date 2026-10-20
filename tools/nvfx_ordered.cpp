@@ -46,6 +46,13 @@
 // (m3_margins.csv) and the power at a number of settings by resampling the probe's settings (m3_power.csv); `val --split
 // val3` and `test` (once) use study G's and study B's settings extended to the number of settings the probe fixed, with
 // seeds in 8,300,000 to 8,499,999 and 8,700,000 to 8,899,999.
+//
+// Study O (docs/REPORT.md §16): --study o keeps every file under DATA/o_fix and gives the one-shots it fixes (the mushroom,
+// the splash) study M3's planning on study O's seeds (3,000,000 to 3,499,999): `val --split probeo [--null]` the probe
+// (training settings; the null fixes the margins, o_margins.csv; the candidates' spread the number of settings,
+// o_power.csv), `val --split valo` and `test` (once) at that number of settings. Its rule has two targets, the mean frame
+// and tracking at 1 s: a candidate is better on at least one, and every measure, the other target included, is within
+// its margin. `train --activity-stage N --mean-stage 0 --unroll 30` is study L's fine-tune on longer windows.
 #include "args.hpp"
 
 #include <neuralfx/clip.hpp>
@@ -97,7 +104,8 @@ struct Ctx {
   int threads = 1;
   bool m2 = false;  // study M2 (--study m2): files under DATA/m2, its splits and its rule
   bool m3 = false;  // study M3 (--study m3): files under DATA/m3, its splits and its rule
-  fs::path dir() const { return data / (m3 ? "m3" : m2 ? "m2" : "m_ordered"); }
+  bool o = false;   // study O (--study o): files under DATA/o_fix, its splits and its rule
+  fs::path dir() const { return data / (o ? "o_fix" : m3 ? "m3" : m2 ? "m2" : "m_ordered"); }
 };
 
 template <class F>
@@ -222,7 +230,7 @@ std::vector<Setting> training_settings(sim::Effect e, int n, int first = 0) {
   }
   return v;
 }
-int frames_of(sim::Effect e) { return sim::effect_loops(e) ? 300 : 89; }
+int frames_of(sim::Effect e) { return sim::effect_loops(e) ? 300 : sim::one_shot_frames(e) - 1; }  // 89 but the mushroom's 149
 int warm_of(sim::Effect e) { return sim::effect_loops(e) ? 150 : 1; }
 
 // --- what a clip holds: the statistics of study D2, the random part, the ordered coarse fields -------------------------------
@@ -1431,7 +1439,7 @@ void step_train(const Ctx& c, sim::Effect e, const tools::Args& a) {
   rollout::StepperOptions so = rollout::recipe_for(e).stepper;
   so.iterations = 0;
   so.finetune = 0;
-  so.activity_stage = 0;
+  so.activity_stage = a.i("activity-stage", 0);  // study O: study L's fine-tune on longer windows (with --mean-stage 0 --unroll 30)
   so.mean_stage = a.i("mean-stage", 600);
   so.mean_weight = a.f("mean-weight", 4.f);
   so.mean_burn_min = a.i("mean-burn-min", 0);
@@ -1710,6 +1718,16 @@ std::vector<Setting> validation_settings(int n = 10, int n_test = 10) {
 //          8,800,000, tracking 8,850,000 (study M2's test block, never used).
 constexpr int kM3ProbeSettings = 40;
 constexpr int kM3Settings = 30;  // fixed by the probe (REPORT §14.9.2) before validation
+// Study O (docs/REPORT.md §16; its own range, 3,000,000 to 3,499,999; 8 runs pooled; tracking runs k < 2 per setting, each
+// from an empty grid as the test's):
+//   probeo development only (training settings: the controls of salt-1 training runs 0 to kOProbeSettings - 1): real
+//          3,000,000, plays 3,010,000, the null 3,020,000, tracking 3,030,000.
+//   valo   study G's validation settings extended to kOSettings: real 3,100,000, plays 3,150,000, tracking 3,180,000.
+//   testo  study B's held-out settings extended to kOSettings: real 3,200,000, plays 3,250,000, tracking 3,280,000.
+//   checko a library setting's check, not a decision (training settings, salt-1 runs 0 to 9; 4 runs pooled): real
+//          3,040,000, plays 3,050,000, tracking 3,060,000 (2 runs per setting).
+constexpr int kOProbeSettings = 40;
+constexpr int kOSettings = 30;  // fixed by the probe (REPORT §16.3) before validation
 struct Split {
   std::string name;
   std::vector<Setting> settings;
@@ -1764,6 +1782,28 @@ Split split_of(const std::string& name, sim::Effect e) {
     s.model = 8'310'000;
     s.null = 8'320'000;
     s.track = 8'330'000;
+  } else if (name == "checko") {  // study O's check of a library setting (training settings, development only)
+    s.settings = training_settings(e, 10);
+    s.reps = 4;
+    s.track_reps = 2;
+    s.real = 3'040'000;
+    s.model = 3'050'000;
+    s.track = 3'060'000;
+  } else if (name == "probeo") {
+    s.settings = training_settings(e, kOProbeSettings);
+    s.track_reps = 2;
+    s.real = 3'000'000;
+    s.model = 3'010'000;
+    s.null = 3'020'000;
+    s.track = 3'030'000;
+  } else if (name == "valo" || name == "testo") {
+    if (kOSettings <= 0) throw std::invalid_argument("study O: the probe has not fixed the number of settings (kOSettings)");
+    const bool val = name == "valo";
+    s.settings = val ? validation_settings(kOSettings, kOSettings) : test_settings(kOSettings);
+    s.track_reps = 2;
+    s.real = val ? 3'100'000 : 3'200'000;
+    s.model = val ? 3'150'000 : 3'250'000;
+    s.track = val ? 3'180'000 : 3'280'000;
   } else if (name == "val3" || name == "test3") {
     if (kM3Settings <= 0) throw std::invalid_argument("study M3: the probe has not fixed the number of settings (kM3Settings)");
     const bool val = name == "val3";
@@ -1843,7 +1883,7 @@ void save_stats(const fs::path& p, const metrics::ClipStats& s) {
   }
   fs::rename(tmp, p);
 }
-std::string stats_ext(const Ctx& c) { return c.m2 || c.m3 ? "fst" : "stats"; }
+std::string stats_ext(const Ctx& c) { return c.m2 || c.m3 || c.o ? "fst" : "stats"; }
 metrics::ClipStats real_stats(const Ctx& c, sim::Effect e, const Setting& s, std::uint64_t seed) {
   const fs::path p = c.dir() / "vt" / "real" / std::format("{}_{}.{}", ename(e), seed, stats_ext(c));
   metrics::ClipStats st;
@@ -2216,8 +2256,9 @@ void decide_m2(const Ctx& c, sim::Effect e, const Split& sp, const std::vector<E
 // strict reading (no interval entirely on the worse side of zero) is reported beside and does not decide.
 struct MarginsM3 {
   double track = 0, spectrum = 0, motion = 0, coverage = 0, emission = 0;
+  double mean_frame = 0;  // study O: the mean frame's margin (dB, negative), where it is not the target a candidate improves
   bool set() const { return spectrum > 0; }
-  double of(int k) const { return std::array{track, spectrum, motion, coverage, emission, 0.0}[sz(k)]; }  // kCmpNames' order
+  double of(int k) const { return std::array{track, spectrum, motion, coverage, emission, mean_frame}[sz(k)]; }  // kCmpNames' order
 };
 constexpr double kM3Track = -0.20, kM3Spectrum = 0.02, kM3Motion = 0.02, kM3Share = 0.10, kM3Least = 1e-4;
 // The margins of the rule, per effect: m3_margins.csv from the probe's null (§14.9.2), copied here before validation.
@@ -2337,6 +2378,88 @@ void decide_m3(const Ctx& c, sim::Effect e, const Split& sp, const std::vector<E
   std::println("{} {}: {}", sp.name, en, chosen > 0 ? "chosen " + models[sz(chosen)].name : std::string("none meets the rule"));
 }
 
+// Study O's rule (docs/REPORT.md §16; its numbers fixed by the probe and committed before validation). As study M3's, but
+// with two targets, the mean frame (the ordered picture) and tracking at 1 s (following a real run): a candidate meets it
+// when
+//   1. it is better on at least one target (its interval above zero), and
+//   2. every measure is within its margin (the interval's worse end), the target it does not improve included: tracking
+//      at 1 s at least margin.track (dB), the mean-frame PSNR at least margin.mean_frame (dB), the detail spectrum
+//      distance, |ln motion ratio|, coverage and emission distances at most theirs.
+// Each margin is the larger of study K's (tracking -0.20 dB as M2 and M3 used it, the mean frame -0.10 dB, spectrum and
+// motion +0.02, coverage and emission 10% of the current model's mean distance on the probe, at least 0.0001) and the
+// null's RMS change at a setting (the current model with fresh seeds, 8 runs pooled, over the probe's settings);
+// tracking has no null (a tracked run takes its own seed) and keeps K's. Among the candidates of an effect that meet it on
+// validation the one with the largest mean-frame gain is chosen (if none gains in the mean frame, the largest tracking
+// gain). The strict reading (no interval entirely on the worse side of zero) is reported beside and does not decide.
+constexpr double kOMeanFrame = -0.10;
+// The margins of the rule, per effect: o_margins.csv from the probe's null, copied here before validation.
+MarginsM3 margins_o(sim::Effect e) {
+  const std::string en = ename(e);  // {track, spectrum, motion, coverage, emission, mean frame}
+  if (en == "mushroom") return {-0.20, 0.0386599, 0.0945322, 0.0116669, 0.0001, -1.3497991};
+  if (en == "splash") return {-0.20, 0.0200000, 0.0719209, 0.0017218, 0.0001, -1.2629790};
+  return {};
+}
+// Study K's margins at the same scales (o_margins.csv's k_margin), reported beside as a second reading; they do not decide.
+MarginsM3 margins_k_o(sim::Effect e) {
+  const std::string en = ename(e);
+  if (en == "mushroom") return {-0.20, 0.02, 0.02, 0.0022196, 0.0001, -0.10};
+  if (en == "splash") return {-0.20, 0.02, 0.02, 0.0002844, 0.0001, -0.10};
+  return {};
+}
+RuleM3 apply_rule_o(const Scores& cand, const Scores& cur, const MarginsM3& mg, const MarginsM3& mk = {}) {
+  RuleM3 r;
+  r.mg = mg;
+  for (int k = 0; k < 6; ++k) r.iv[sz(k)] = metrics::paired_bootstrap(cmp_stat(cand, k), cmp_stat(cur, k), 10000, 2026);
+  r.better = r.iv[5].lo > 0 || r.iv[0].lo > 0;
+  r.within[0] = r.iv[0].lo >= mg.track;
+  for (int k = 1; k < 5; ++k) r.within[sz(k)] = r.iv[sz(k)].hi <= mg.of(k);
+  r.within[5] = r.iv[5].lo >= mg.mean_frame;
+  r.none_worse = std::ranges::all_of(r.within, [](bool b) { return b; });
+  r.strict_worse[0] = r.iv[0].hi < 0;
+  for (int k = 1; k < 5; ++k) r.strict_worse[sz(k)] = r.iv[sz(k)].lo > 0;
+  r.strict_worse[5] = r.iv[5].hi < 0;
+  if (mk.set()) {
+    r.within_k[0] = r.iv[0].lo >= mk.track;
+    for (int k = 1; k < 5; ++k) r.within_k[sz(k)] = r.iv[sz(k)].hi <= mk.of(k);
+    r.within_k[5] = r.iv[5].lo >= mk.mean_frame;
+  }
+  return r;
+}
+void print_rule_o(const std::string& split, const std::string& en, const Entry& m, const RuleM3& r) {
+  std::println("{} {} {} (targets: the mean frame, tracking at 1 s): better on a target {}, within every margin {} -> {}", split, en, m.name,
+               r.better ? "yes" : "no", r.none_worse ? "yes" : "no", r.pass() ? "MEETS the rule" : "does not meet it");
+  for (int k = 0; k < 6; ++k) {
+    std::println("    {:<20} {:+.5f} [{:+.5f}, {:+.5f}]  margin {:+.5f}{}{}{}", kCmpNames[sz(k)], r.iv[sz(k)].mean, r.iv[sz(k)].lo, r.iv[sz(k)].hi, r.mg.of(k),
+                 (k == 0 || k == 5) && r.iv[sz(k)].lo > 0 ? "  (better: a target)" : "", r.within[sz(k)] ? "" : "  OUTSIDE its margin",
+                 std::string(r.within_k[sz(k)] ? "" : "  (outside study K's)") + (r.strict_worse[sz(k)] ? "  (strictly worse)" : ""));
+  }
+}
+void decide_o(const Ctx& c, sim::Effect e, const Split& sp, const std::vector<Entry>& models, const std::vector<Scores>& sc, const std::string& prefix) {
+  const std::string en = ename(e);
+  const MarginsM3 mg = margins_o(e);
+  if (!mg.set()) throw std::runtime_error("study O: the margins of " + en + " are not fixed (margins_o)");
+  std::vector<std::string> rows;
+  int chosen = -1;
+  double best = -1e9;
+  bool by_frame = false;
+  for (std::size_t mi = 1; mi < models.size(); ++mi) {
+    const RuleM3 r = apply_rule_o(sc[mi], sc[0], mg, margins_k_o(e));
+    print_rule_o(sp.name, en, models[mi], r);
+    rows.push_back(rule_m3_row(en, models[mi], r));
+    if (!r.pass()) continue;
+    const bool frame = r.iv[5].lo > 0;
+    const double gain = frame ? r.iv[5].mean : r.iv[0].mean;
+    if ((frame && !by_frame) || (frame == by_frame && gain > best)) {
+      best = gain;
+      by_frame = frame;
+      chosen = static_cast<int>(mi);
+    }
+  }
+  rows.push_back(std::format("{},chosen,,,,,,,,,,,,,,,,,,,,{}", en, chosen > 0 ? models[sz(chosen)].name : "none"));  // 22 columns
+  merge_rows(c.results / std::format("{}_choice.csv", prefix), kRuleM3Header, rows, en);
+  std::println("{} {}: {}", sp.name, en, chosen > 0 ? "chosen " + models[sz(chosen)].name : std::string("none meets the rule"));
+}
+
 // The probe's power analysis (§14.9.2). For each candidate (and the null) and measure: the paired differences over the
 // probe's settings (mean, SD, RMS, the SD's upper 80% confidence bound by Wilson and Hilferty's chi-square), the number of
 // settings at which a measure truly unchanged on average with that spread passes its margin with probability 0.9 (normal
@@ -2354,22 +2477,26 @@ double sd_upper80(double sd, int n) {  // the upper end of the SD's one-sided 80
 const std::array kM3PowerN = {10, 20, 30, 40, 50, 60, 70, 80, 100, 120};
 
 void probe_m3(const Ctx& c, sim::Effect e, const Split& sp, const std::vector<Entry>& models, const std::vector<Scores>& sc) {
-  const std::string en = ename(e);
+  const std::string en = ename(e), tag = c.o ? "o" : "m3";
   const int P = static_cast<int>(sp.settings.size());
   int null_i = -1;
   for (std::size_t mi = 1; mi < models.size(); ++mi) {
     if (models[mi].seed_base > 0) null_i = static_cast<int>(mi);
   }
   const Scores& floor = sc.back();
-  MarginsM3 mg = margins_m3(e);
+  MarginsM3 mg = c.o ? margins_o(e) : margins_m3(e);
   if (null_i > 0) {
     const Scores& nl = sc[sz(null_i)];
     mg = margins_from_null(sc[0], nl);
-    const MarginsM3 mk = margins_k(sc[0]);
+    MarginsM3 mk = margins_k(sc[0]);
+    if (c.o) {  // study O: the mean frame has a margin too (it is a target or held to it)
+      mk.mean_frame = kOMeanFrame;
+      mg.mean_frame = std::min(kOMeanFrame, -rms_of(diff_of(nl, sc[0], 5)));
+    }
     std::vector<std::string> rows;
     std::println("\nprobe3 {}: the margins the null gives (each the larger of study K's and the null's RMS change at a setting, {} settings)", en, P);
     std::println("{:<20}{:>12}{:>12}{:>12}{:>12}{:>12}{:>12}{:>12}", "measure", "K's", "null RMS", "null mean", "null SD", "floor", "current", "margin");
-    for (int k = 0; k < 5; ++k) {
+    for (int k = 0; k < (c.o ? 6 : 5); ++k) {
       const auto d = diff_of(nl, sc[0], k);
       const double fl = k == 0 ? 0.0 : mean_of(cmp_stat(floor, k));
       std::println("{:<20}{:>12.6f}{:>12.6f}{:>12.6f}{:>12.6f}{:>12.6f}{:>12.6f}{:>12.6f}", kCmpNames[sz(k)], mk.of(k), rms_of(d), mean_of(d), sd_of(d), fl,
@@ -2377,7 +2504,7 @@ void probe_m3(const Ctx& c, sim::Effect e, const Split& sp, const std::vector<En
       rows.push_back(std::format("{},{},{},{:.7f},{:.7f},{:.7f},{:.7f},{:.7f},{:.7f},{:.7f}", en, kCmpNames[sz(k)], P, mk.of(k), rms_of(d), mean_of(d), sd_of(d), fl,
                                  mean_of(cmp_stat(sc[0], k)), mg.of(k)));
     }
-    merge_rows(c.results / "m3_margins.csv", "effect,measure,settings,k_margin,null_rms,null_mean,null_sd,floor_mean,current_mean,margin", rows, en);
+    merge_rows(c.results / std::format("{}_margins.csv", tag), "effect,measure,settings,k_margin,null_rms,null_mean,null_sd,floor_mean,current_mean,margin", rows, en);
   }
   if (!mg.set()) throw std::runtime_error("probe3: no null (--null) and no margins fixed for " + en);
   std::vector<std::string> rows;
@@ -2390,7 +2517,10 @@ void probe_m3(const Ctx& c, sim::Effect e, const Split& sp, const std::vector<En
       sd[sz(k)] = sd_of(d[sz(k)]);
       sdu[sz(k)] = sd_upper80(sd[sz(k)], P);
     }
-    if (static_cast<int>(mi) != null_i) print_rule_m3("probe3", en, models[mi], apply_rule_m3(sc[mi], sc[0], mg, margins_k_m3(e)));
+    if (static_cast<int>(mi) != null_i) {
+      if (c.o) print_rule_o(sp.name, en, models[mi], apply_rule_o(sc[mi], sc[0], mg));
+      else print_rule_m3("probe3", en, models[mi], apply_rule_m3(sc[mi], sc[0], mg, margins_k_m3(e)));
+    }
     std::println("\nprobe3 {} {} - current: power by resampling the probe's {} settings (pass: unchanged / a loss of the margin's size; the target as measured)", en,
                  models[mi].name, P);
     std::println("{:<20}{:>10}{:>10}{:>10}{:>10}{:>8}{:>8} | pass at N settings: {}", "measure", "mean", "SD", "SD up80", "margin", "N90", "N90up",
@@ -2456,17 +2586,18 @@ void probe_m3(const Ctx& c, sim::Effect e, const Split& sp, const std::vector<En
     }
     std::println("{}\n{}", l1, l2);
   }
-  merge_rows(c.results / "m3_power.csv", "effect,model,measure,probe_settings,n_settings,mean,sd,sd_up80,margin,n90,n90_up80,p_pass,p_pass_if_loss", rows, en);
+  merge_rows(c.results / std::format("{}_power.csv", tag), "effect,model,measure,probe_settings,n_settings,mean,sd,sd_up80,margin,n90,n90_up80,p_pass,p_pass_if_loss", rows, en);
 }
 
 void step_val(const Ctx& c, sim::Effect e, const tools::Args& a) {
   auto models = read_entries(a.need("current"), a.str("cand", ""));
-  const Split sp = split_of(a.str("split", c.m3 ? "probe3" : c.m2 ? "probe2" : "probe"), e);
-  if (sp.name == "test" || sp.name == "test2" || sp.name == "test3") throw std::invalid_argument("val: the test runs once, through `test`");
+  const Split sp = split_of(a.str("split", c.o ? "probeo" : c.m3 ? "probe3" : c.m2 ? "probe2" : "probe"), e);
+  if (sp.name == "test" || sp.name == "test2" || sp.name == "test3" || sp.name == "testo") throw std::invalid_argument("val: the test runs once, through `test`");
+  if (c.o != (sp.name == "probeo" || sp.name == "valo" || sp.name == "checko")) throw std::invalid_argument("val: study O's splits are probeo, valo and checko, with --study o");
   if (c.m2 != (sp.name == "probe2" || sp.name == "val2")) throw std::invalid_argument("val: study M2's splits are probe2 and val2, with --study m2");
   if (c.m3 != (sp.name == "probe3" || sp.name == "val3")) throw std::invalid_argument("val: study M3's splits are probe3 and val3, with --study m3");
   if (a.flag("null")) {  // study M3's null: the current model played with fresh seeds (the probe only)
-    if (sp.name != "probe3") throw std::invalid_argument("val: --null is the probe's (probe3)");
+    if (sp.name != "probe3" && sp.name != "probeo") throw std::invalid_argument("val: --null is the probe's (probe3, probeo)");
     Entry n = models[0];
     n.name = "null";
     n.seed_base = sp.null;
@@ -2482,7 +2613,11 @@ void step_val(const Ctx& c, sim::Effect e, const tools::Args& a) {
   if (sp.name == "val") decide(c, e, sp, models, sc, prefix);
   if (sp.name == "val2") decide_m2(c, e, sp, models, sc, prefix);
   if (sp.name == "val3") decide_m3(c, e, sp, models, sc, prefix);
-  if (sp.name == "probe3") probe_m3(c, e, sp, models, sc);
+  if (sp.name == "probe3" || sp.name == "probeo") probe_m3(c, e, sp, models, sc);
+  if (sp.name == "valo") decide_o(c, e, sp, models, sc, prefix);
+  if (sp.name == "checko") {  // a library setting's check: what it changes, not a decision
+    for (std::size_t mi = 1; mi < models.size(); ++mi) print_rule_o(sp.name, ename(e), models[mi], apply_rule_o(sc[mi], sc[0], margins_k(sc[0])));
+  }
   if (sp.name == "probe2") {  // the rule's reading on training settings, for development only (not a decision)
     for (std::size_t mi = 1; mi < models.size(); ++mi) print_rule_m2(sp.name, ename(e), models[mi], apply_rule_m2(sc[mi], sc[0], targets_spectrum(models[mi], models[0])));
   }
@@ -2504,12 +2639,21 @@ void step_test(const Ctx& c, sim::Effect e, const tools::Args& a) {
     }
     if (!ok) throw std::runtime_error("test: the candidate's SHA-256 is not frozen for " + ename(e) + " in " + a.need("frozen"));
   }
-  const MarginsM3 mg3 = c.m3 ? margins_m3(e) : MarginsM3{};
-  if (c.m3 && !mg3.set()) throw std::runtime_error("test: study M3's margins of " + ename(e) + " are not fixed");
-  const Split sp = split_of(c.m3 ? "test3" : c.m2 ? "test2" : "test", e);  // throws before the marker if the settings are not fixed
+  const MarginsM3 mg3 = c.o ? margins_o(e) : c.m3 ? margins_m3(e) : MarginsM3{};
+  if ((c.m3 || c.o) && !mg3.set()) throw std::runtime_error("test: the margins of " + ename(e) + " are not fixed");
+  const Split sp = split_of(c.o ? "testo" : c.m3 ? "test3" : c.m2 ? "test2" : "test", e);  // throws before the marker if the settings are not fixed
   std::ofstream(done) << "started " << models[1].sha << "\n";
   for (const auto& m : models) std::println("test: {} {} {} sha256 {}", ename(e), m.name, m.path.string(), m.sha);
   const auto sc = evaluate(c, e, sp, models);
+  if (c.o) {  // study O: its rule, once
+    report_split(c, e, sp, models, sc, "o_test");
+    const RuleM3 r = apply_rule_o(sc[1], sc[0], mg3, margins_k_o(e));
+    print_rule_o("testo", ename(e), models[1], r);
+    std::println("testo {} {}: {}", ename(e), models[1].name, r.pass() ? "MEETS the rule: replace" : "does not meet it: keep the current model");
+    merge_rows(c.results / "o_test_decision.csv", kRuleM3Header, {rule_m3_row(ename(e), models[1], r)}, ename(e));
+    std::ofstream(done) << "done " << models[1].sha << " " << (r.pass() ? "met" : "not met") << "\n";
+    return;
+  }
   if (c.m3) {  // study M3: its rule, once
     report_split(c, e, sp, models, sc, "m3_test");
     const RuleM3 r = apply_rule_m3(sc[1], sc[0], mg3, margins_k_m3(e));
@@ -2659,9 +2803,11 @@ int main(int argc, char** argv) {
     c.results = a.str("results", "results/experiments/ordered");
     c.threads = a.i("threads", 1);
     const std::string study = a.str("study", "m");
-    if (study != "m" && study != "m2" && study != "m3") throw std::invalid_argument("--study m, m2 or m3");
+    if (study != "m" && study != "m2" && study != "m3" && study != "o") throw std::invalid_argument("--study m, m2, m3 or o");
     c.m2 = study == "m2";
     c.m3 = study == "m3";
+    c.o = study == "o";
+    if (c.o && !a.has("results")) c.results = "results/experiments/fix";  // study O's tables
     const std::string step = a.positional()[0];
     if (step == "setmean" || step == "set" || step == "info" || step == "settings") {
       if (step == "set") step_set(a);

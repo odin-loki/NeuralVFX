@@ -99,6 +99,13 @@ From [docs/REPORT.md](docs/REPORT.md), measured on simulated fire, smoke and exp
   closer on validation but failed margins narrower than those measures' spread, and the rest tied or traded. Study M3
   retried the mean state with a rule planned for power (margins from the null, 30 settings) and **replaced the explosion
   and dust**: on held-out settings their average pictures came 2.9 and 1.3 dB closer to a real run's, nothing worse.
+- **The most visible flaws (study O, [docs/REPORT.md](docs/REPORT.md) §16):** the learned waterfall's horizontal bands
+  were its detail layer's once-a-frame lock, stamped one frame's fall apart (effects take `passes N`; the falls and the
+  library play the water in 2); the lift-off's square blast was its tile, the effect's whole domain, which the
+  simulator's billows fill too (the scene plays it as three tiles); the rocket thruster's exhaust no longer curls up (a
+  cold field on its tail). The mushroom cloud and the splash, retrained under a rule planned for power and tested once,
+  were **replaced**: on held-out settings their average pictures came 1.18 and 0.40 dB closer to a real run's, and the
+  mushroom follows a run 0.85 dB better at 1 s.
 - **Memory, against production block compression:** for equal quality, a network per effect clip needs **2.4 to
   4.3 times less memory than a BC7 flipbook** at 8 bits, and 7.5 times less [4.2, 8.3] with features trained for 4
   bits. **Against ASTC** (mobile GPUs; 8x8 to 12x12 blocks hold every frame at full size in 121 to 256 KB) the ratios
@@ -170,7 +177,7 @@ Ubuntu 24.04: `g++-14`, CMake 3.25+, Ninja, `libgtest-dev`, `zlib1g-dev` (and `f
 ```sh
 cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_COMPILER=g++-14
 cmake --build build
-ctest --test-dir build                     # 461 tests: sim, metrics, codecs, gradients, runtime parity, composition, scene scripts, field effects, trails, engine layers, weather, procedural sky, combat and magic elements, context mixing, denoiser, lossless coder, low-bit, vector-quantised, sparse and multi-level features, video codecs, BC7 and ASTC flipbooks, allocation, C API for effects and scenes, the effect library, the effect manager, effect packs and the C++ wrapper, start points from footage, 3D volumes (study N's simulator, renderer, model, gradients and C API; study N2's ambient edges, schedules and long stage)
+ctest --test-dir build                     # 462 tests: sim, metrics, codecs, gradients, runtime parity, composition, scene scripts, field effects, trails, engine layers, weather, procedural sky, combat and magic elements, context mixing, denoiser, lossless coder, low-bit, vector-quantised, sparse and multi-level features, video codecs, BC7 and ASTC flipbooks, allocation, C API for effects and scenes, the effect library, the effect manager, effect packs and the C++ wrapper, start points from footage, 3D volumes (study N's simulator, renderer, model, gradients and C API; study N2's ambient edges, schedules and long stage)
 ```
 
 Options: `NEURALFX_BUILD_VIEWER` (GLFW + OpenGL; fetches Dear ImGui), `NEURALFX_BUILD_SHARED` (libnvfx.so for engines),
