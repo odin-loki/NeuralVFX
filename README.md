@@ -170,7 +170,7 @@ Ubuntu 24.04: `g++-14`, CMake 3.25+, Ninja, `libgtest-dev`, `zlib1g-dev` (and `f
 ```sh
 cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_COMPILER=g++-14
 cmake --build build
-ctest --test-dir build                     # 461 tests: sim, metrics, codecs, gradients, runtime parity, composition, scene scripts, field effects, trails, engine layers, weather, procedural sky, combat and magic elements, context mixing, denoiser, lossless coder, low-bit, vector-quantised, sparse and multi-level features, video codecs, BC7 and ASTC flipbooks, allocation, C API for effects and scenes, the effect library, the effect manager, effect packs and the C++ wrapper, start points from footage, 3D volumes (study N's simulator, renderer, model, gradients and C API; study N2's ambient edges, schedules and long stage)
+ctest --test-dir build                     # 472 tests: sim, metrics, codecs, gradients, runtime parity, composition, scene scripts, field effects, trails, engine layers, weather, procedural sky, combat and magic elements, context mixing, denoiser, lossless coder, low-bit, vector-quantised, sparse and multi-level features, video codecs, BC7 and ASTC flipbooks, allocation, C API for effects and scenes, the effect library, the effect manager, effect packs and the C++ wrapper, start points from footage, 3D volumes (study N's simulator, renderer, model, gradients and C API; study N2's ambient edges, schedules and long stage), effects drawn at half size and upscaled (study P)
 ```
 
 Options: `NEURALFX_BUILD_VIEWER` (GLFW + OpenGL; fetches Dear ImGui), `NEURALFX_BUILD_SHARED` (libnvfx.so for engines),
@@ -229,6 +229,7 @@ training, evaluation; about three hours), then `d-timing` on an idle machine and
 | `nvfx_study_h` | study H's measurements: products on LZ78/RePair-compressed data against dense code (`--h1`), the run-aware detail step (`--h2`); scripts in `tools/study_h/` |
 | `nvfx_f2` | studies F2 and F3 (results/compression): `data`, `flipbooks` (our BC3 layout and raw, then BC7 and ASTC), `trim` (the same flipbooks without their empty space), `train` (low-bit, quantisation-aware, rate-aware, vector-quantised and sparse models), `rescore`, `pairs`, `video` (x264, x265, VP9, AV1 through ffmpeg), `report` (equal-quality ratios against each flipbook baseline and codec, memory and disk, with intervals; `--figure`, `--pareto`), `g3c`, `g3c-report`, `timing` |
 | `nvfx_3d` | study N, a small 3D demo: `pilot`, `look`, `record`, `train`, `finish`, `truth`, `track`, `real`, `play`, `compare`, `freeze`, `video`, `timing`, `edge`; study N2 (`--study n2`): `edgecheck`, `reedge`, `choose` ([docs/STUDY_3D.md](docs/STUDY_3D.md) §12, §14.13) |
+| `nvfx_study_p` | study P, large effects drawn at half size and upscaled: `pin`, `info`, `check`, `tiles`, `train`, `calib`, `dev`, `eval` (validation with the null, the test once), `margins`, `choose`, `decide`, `cost`, `video`, and the development steps `anatomy`, `bench`, `tile-eval` ([docs/STUDY_P.md](docs/STUDY_P.md)) |
 | `neuralfx_arch_bench` | Phase 0 architecture microbenchmark |
 
 ## Layout
