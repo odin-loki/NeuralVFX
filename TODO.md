@@ -1,7 +1,8 @@
 # To do: every effect in 3D — a small demo here first, then big on a PC
 
 **Status:** stage 1 is done (study N, `docs/STUDY_3D.md`, and its follow-up N2, §14); stage 2 is planned, not started.
-Work here is paused (15 October 2026): four branches wait to be finished and merged ("Here, until the PC").
+Work here resumed on 20 October 2026: study O is merged; round 9 and study P are being finished on their branches
+("Here, until the PC").
 
 - **Stage 1, here and now (study N): done.** A small 3D demo in this container ([docs/STUDY_3D.md](docs/STUDY_3D.md),
   REPORT §15). What it built:
@@ -52,7 +53,7 @@ First we demo, then we go big.
 
 Work that runs in this container meanwhile, in 2D and in small 3D, measured as every study is.
 
-**Paused (15 October 2026), each on its own branch, not merged into main.** Each branch's doc opens with a "Status:
+**Being finished (paused 15 October, resumed 20 October 2026), each on its own branch until it is merged into main.** Each branch's doc opens with a "Status:
 paused" note: what is done, where its data is under `/root/nvfx-data`, and the exact commands to resume. To finish one:
 merge main into it, finish its list, run the full ctest, `nvfx_alloc_test`, `nvfx_gallery --check` and the Godot test,
 then merge it into main.
@@ -69,15 +70,16 @@ then merge it into main.
     other two may have run on. Check `/root/nvfx-data/fx_air/jobs/state` and the logs before resuming.
   - Left: the smoke ring's and heavy gas's models, all tests, timing, the library file, the crypt scene, videos and
     REPORT §6.17.
-- **Study O, the most visible flaws** (`study-fix`, REPORT §16):
+- **Study O, the most visible flaws** (`study-fix`, REPORT §16): **finished and merged into main** (20 October 2026).
   - Done, by eye, with no model change:
     - the waterfall's and rain shaft's banding (the detail layer locking once a frame; effects take `passes N`, and
       the library and the falls scene use 2);
     - launch's square block (the lift-off scene uses a three-tile domain);
     - the thruster's curling exhaust (a `cold` field on its tail).
-  - The mushroom and splash fixes: the rule is committed (§16.3.1) and the candidates are frozen. On validation the
-    mushroom gained +1.12 dB [0.79, 1.45] in the mean picture and the splash +0.62 dB [0.40, 0.86].
-  - **The held-out test has not run; its seeds (3,200,000 to 3,299,999) are unspent.** No model has been replaced.
+  - The mushroom and the splash, by the rule committed before validation (§16.3.1), tested once on seeds 3,200,000
+    to 3,299,999: both meet it and are **replaced** (the library's links point at `o_fix/models/`). The mushroom's
+    mean picture +1.18 dB [0.91, 1.45], tracking at 1 s +0.85 dB [0.73, 0.97]; the splash's mean picture +0.40 dB
+    [0.21, 0.60]. Still short: the mushroom's cap turns ragged after 3 to 4 s (§16.7).
 - **Study P, cheaper big effects** (`study-upscale`, docs/STUDY_P.md):
   - The idea: draw a large effect at half size, then upscale it 2x with a learned net and seeded micro-detail.
   - Found: the render size enters only the detail layer and the renderer, so a half-size instance shares the native

@@ -16,7 +16,7 @@
 //                                state and fine fields as the only start point, the run's noise seed), one continuous
 //                                rollout: frame i of both comes i frames after the same state (study D's tracking, §6.4)
 //   DETAIL "swirl=1,swirl_scale=9": the learned model's detail layer as a scene script's `effect` line sets it (swirl,
-//          swirl_scale, swirl_rate, swirl_ramp, contrast, grow), for FILE and learned panels (KEYS may be empty)
+//          swirl_scale, swirl_rate, swirl_ramp, contrast, grow, passes), for FILE and learned panels (KEYS may be empty)
 //   BG     "R,G,B,R,G,B": the panel's background gradient, top and bottom colours (default --bg's: a dark night sky,
 //          36,40,50,13,14,17); a dark effect (ink) needs a light one
 //   --seed-base N: real and learned panels take seed N + RUN for the held-out run's noise (its settings stay salt 2's),
@@ -155,6 +155,7 @@ void set_detail(rollout::Model& m, const std::vector<std::pair<std::string, floa
     else if (k == "swirl_ramp") d.swirl_ramp = v;
     else if (k == "contrast") d.contrast = v;
     else if (k == "grow") d.grow = v;
+    else if (k == "passes") d.passes = std::max(1, static_cast<int>(v));
     else throw std::invalid_argument("no detail setting " + k);
   }
 }

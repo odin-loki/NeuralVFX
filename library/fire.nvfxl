@@ -155,8 +155,12 @@ entry rocket_thruster, category fire, size 420 x 200, anchor left, loop, show 2,
       about "A rocket thruster: a fierce blue-white exhaust with a white-hot core at the nozzle (the anchor), the jet recoloured; it blows to the right"
 param intensity = 0.9, range (0.4, 1), about "thrust"
 let w = 420 * scale
+# Study O (docs/REPORT.md §16.4): the exhaust streams instead of curling up as a flame does. The jet's slow, hot tail
+# rose on its own heat, so its heat is taken off where it ends (it fades instead); aim 0.45 and turbulence 0.5 make start
+# point 0 (aimed level) the nearest one, so a new shard no longer begins from a jet aimed down (two jets in its blend).
 module exhaust = jet, size 128, width w, at (X + 0.45 * w, Y + 0.4 * w), feather 0.06, look thrust, start 0, seed 721,
-                 controls (0.9, 0.4, 0.45), intensity intensity, aim 0.4, glow (0.4, 0.6, 1.4)
+                 controls (0.9, 0.45, 0.5), intensity intensity, aim 0.45, glow (0.4, 0.6, 1.4)
+field cool = cold, at (X + 360 * scale, Y - 60 * scale), radius 160 * scale, strength 0.12, on exhaust
 emit glow, at (X + 6 * scale, Y), radius 9 * scale, colour (0.8, 0.9, 1), brightness 2.5 * (0.9 + 0.1 * noise(30 * t, 2, 0))
 field blue = lamp, at (X + 40 * scale, Y), radius 120 * scale, strength 0.5 * intensity, colour (0.5, 0.7, 1)
 

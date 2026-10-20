@@ -16,7 +16,9 @@ bus        at (-128, -360), size 1536 x 1100, cell 8
 particles  capacity 6000, flow 0.9
 keyframes  1.0, 2.6, 3.2, 4.2, 5.4, 6.8, 7.9, 9.4
 
-effect launch = "launch.nvfx", swirl 1, swirl_scale 9   # a gentler sub-grid swirl than its calibration chose (3)
+# A gentler sub-grid swirl than its calibration chose (3), and the detail layer in two passes a frame (study O, REPORT
+# §16.2: one pass laid stripes along the jet's edges).
+effect launch = "launch.nvfx", swirl 1, swirl_scale 9, passes 2
 effect puffs  = "puffs.nvfx"
 effect ink    = "ink.nvfx"
 
@@ -39,9 +41,11 @@ let climb  = if(t >= liftoff, t - liftoff, 0)                         # seconds 
 let gone   = smooth(climb / 1.2)                                     # its flame no longer on the pad
 let gusty  = 0.62 + 0.05 * noise(0.4 * t, 4.5, 0)                     # the wind, to the right
 
-# The engine's blast on the pad, waiting for the ignition.
-module blast  = launch, size 256, width 900, at (pad, ground), sink 0.02, feather 0.25, look exhaust to spent by gone,
-                start 0, seed 11, waiting, controls (0.4, 0.5, 0.5), intensity 0.35 + 0.55 * lit * (1 - 0.6 * gone),
+# The engine's blast on the pad, started at the ignition. Its billows fill a launch tile within seconds and run out at its
+# sides (the simulator's do too), so the blast is a domain of three tiles side by side (study O, REPORT §16.2): the
+# middle one blows, the outer two carry the billows on (their own nozzle is cleared every frame, below).
+module blast  = launch, size 256, width 900, tiles 3 x 1, band 8, at (pad, ground), sink 0.02, feather 0.25,
+                look exhaust to spent by gone, controls (0.4, 0.5, 0.5), intensity 0.35 + 0.55 * lit * (1 - 0.6 * gone),
                 wind 0.5 + 0.05 * noise(0.4 * t, 4.5, 0), opacity smooth(blast.age / 0.3)
 # Two stacks either side of the pad, puffing vapour (their mouths at the ground; a puffs tile's mouth is 36% from its
 # left edge and 5% up).
@@ -68,7 +72,7 @@ camera  x (rand - 0.5) * (2 + 10 * flash) * lit, y (rand - 0.5) * (2 + 10 * flas
 
 # The engine lights.
 at 2.5 as ignition:
-  wake blast
+  start blast, from 0, seed 11
   shock at (pad, ground - 20), speed 1100, decay 0.4, amp 4, width 30
   burst at (pad, ground - 8), radius 30, embers 160, debris 20, speed 520
 # The blast reaches the apron and lifts the sand.
@@ -80,6 +84,7 @@ at 7.5 as liftoff:
   burst at (pad, ground - 8), radius 40, embers 120, debris 0, speed 420
 
 every frame:
+  suppress blast, cells (12, 14) to (20, 22), tiles (0, 0), (2, 0)   # the outer tiles' nozzles (56% up their middle)
   push vent_l, gain 0.3 * lit    # the blast's air blows the vapour about
   push vent_r, gain 0.3 * lit
   push sand_l, gain 0.15 * lit   # and carries the sand
