@@ -3627,8 +3627,11 @@ not among the frozen ones. Re-rendered: `library_fire`.
   `library_round7` (the mushroom entries and `rocket_launch`'s 2 passes) and `real_vs_learned_round7` (the mushroom, and
   launch in 2 passes). `real_vs_learned_water`'s splash starts from a run's true state, where the mean state moves
   nothing, and its stepper is the round's: unchanged.
-- **Checks** (after merging main at 6845415): the full build with warnings as errors; the full ctest, 462 of 462 with private copies of the model folders before the links moved;
-  `nvfx_alloc_test`; `nvfx_gallery --check` over the whole library; the Godot test (`engines/godot/test.sh`).
+- **Checks** (after merging main at 6845415, still main's head on 20 October): the full build with warnings as errors;
+  the full ctest, 462 of 462 with private copies of the model folders before the links moved and 462 of 462 again with
+  the moved links (the pack rebuilt from them), none skipped; `nvfx_alloc_test` (no allocation per frame);
+  `nvfx_gallery --check` over the whole library with its models (191 effects, 191 played, 0 failed); the Godot test
+  (`engines/godot/test.sh`: the fireball and the library stage, 0 failures).
 
 ### 16.6 Cost
 
