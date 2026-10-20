@@ -28,12 +28,28 @@ Stepper loss: stages 1-2 (normalised squared error plus profiles) and stage 3 (p
 |---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
 | lava | 160 x 240 | 21.33 | 0.06704 | 5236 | 0.06308 | 1247 | 34.74 | 0.5 | 0.5 | 1 | 8 | 145.7 |
 | eruption | 160 x 240 | 21.33 | 0.06857 | 6238 | 0.06594 | 1235 | 29.05 | 1 | 3 | 1 | 8 | 145.7 |
+| avalanche | 240 x 150 | 20.00 | 0.01966 | 4685 | 0.02022 | 1112 | 35.46 | 0.5 | 1.5 | 1 | 16 | 274.2 |
 
 Renderer, detail constants and start points from `d-finish` on the trained steppers; stage 3 from `d-tune`.
 
 ### Tracking a held-out run from its true start point
 
 Active PSNR against the true run, mean over held-out runs (other seeds and settings), by frames after the start point. `neural`: the rollout effect through the runtime, started from the true state (coarse and fine) with the run's noise seed. `coarse_sim_detail`: the simulation on the same 32-cell grid with the same detail layer, drawn by the simulation's own renderer. `neural_dynamics_true_renderer`: the neural dynamics drawn by that renderer too (separates dynamics from rendering). `renderer_on_true_fields`: the learned renderer on the true fields (frames 1-30, then their mean).
+
+**avalanche**
+
+| method | 1 | 4 | 8 | 16 | 30 | 60 | 120 | 240 |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| neural | 24.34 | 20.54 | 17.41 | 14.47 | 12.69 | 11.75 | 13.30 | - |
+| neural_dynamics_true_renderer | 25.09 | 21.31 | 17.73 | 14.63 | 12.73 | 11.76 | 13.35 | - |
+| coarse_sim_detail | 22.59 | 18.68 | 17.20 | 15.67 | 14.93 | 14.84 | 16.39 | - |
+| coarse_sim | 20.75 | 18.95 | 18.23 | 17.07 | 16.01 | 15.63 | 17.45 | - |
+| frozen | 16.12 | 10.10 | 8.10 | 6.62 | 5.81 | 5.60 | 7.45 | - |
+| renderer_on_true_fields | 33.47 | 31.08 | 29.56 | 29.19 | 29.37 | 29.72 | 29.72 | 29.72 |
+
+neural - coarse_sim_detail, paired over runs: frame 1: +1.75 [+0.70, +2.70]; frame 8: +0.21 [-1.96, +2.23] (tie); frame 30: -2.23 [-4.42, -0.07]; frame 60: -3.10 [-5.17, -0.96];
+
+neural_dynamics_true_renderer - coarse_sim_detail, paired over runs: frame 1: +2.50 [+1.36, +3.53]; frame 8: +0.53 [-1.66, +2.54] (tie); frame 30: -2.20 [-4.37, -0.04]; frame 60: -3.08 [-5.16, -0.96];
 
 **eruption**
 
@@ -68,6 +84,20 @@ neural_dynamics_true_renderer - coarse_sim_detail, paired over runs: frame 1: +1
 ### Endless runs at held-out settings
 
 The ten held-out settings of study B, a new seed each, 10 s per run (explosions: their 3 s). Distances of each method's frame statistics to a real run of the simulation at that setting; `real_other_seed` is a second real run with another seed, the floor. Lower is better except motion ratio (1 is right) and mean-frame PSNR (higher is closer).
+
+**avalanche**
+
+| method | spectrum L1 | motion ratio | coverage L1 | emission L1 | mean-frame PSNR |
+|---|---:|---:|---:|---:|---:|
+| real_other_seed | 0.124 | 0.99 | 0.0052 | 0.0000 | 30.29 |
+| neural | 0.167 | 0.96 | 0.0228 | 0.0001 | 24.64 |
+| flipbook_nearest | 0.146 | 0.97 | 0.0125 | 0.0000 | 27.55 |
+| coarse_sim_detail | 0.165 | 0.93 | 0.0064 | 0.0000 | 29.73 |
+| coarse_sim | 0.583 | 0.61 | 0.0060 | 0.0000 | 29.98 |
+
+Spectrum distance, paired over settings: neural - grid_k8 -; neural - flipbook_nearest +0.021 [-0.046, +0.084] (tie); neural - coarse_sim_detail +0.002 [-0.056, +0.072] (tie); neural - real_other_seed +0.043 [-0.028, +0.114] (tie).
+
+Mean-frame PSNR (dB), paired: neural - flipbook_nearest -2.90 [-5.71, -0.89]; neural - coarse_sim_detail -5.09 [-7.87, -2.89]; neural - real_other_seed -5.65 [-7.67, -3.68]. Motion error |ln(motion ratio)|, paired: neural - flipbook_nearest +0.155 [-0.320, +0.651] (tie); neural - coarse_sim_detail +0.318 [+0.013, +0.680]; neural - real_other_seed +0.367 [+0.013, +0.760]. Coverage distance, paired: neural - flipbook_nearest +0.0103 [-0.0045, +0.0301] (tie); neural - real_other_seed +0.0176 [+0.0022, +0.0375].
 
 **eruption**
 
