@@ -258,7 +258,6 @@ training, evaluation; about three hours), then `d-timing` on an idle machine and
 - C++23 and the CPU only, for the runtime and the product. No GPU. No Python.
 - No pretrained networks without the owner's approval.
 - No raw video, frames, clips or model weights in git. Data lives under `NEURALVFX_DATA`.
-- No AI model names or email addresses in the repository.
 - Measure honestly: clips and control settings held out from training, 95% intervals in square brackets, ties
   reported as ties.
 - Documentation in plain English with British spelling.
