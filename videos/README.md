@@ -49,7 +49,7 @@ The explosion entries name their start points and play as before; the dust in th
 effects, the dust impact) is the earlier model's.
 Every video is H.264 (yuv420p, +faststart, no audio). Click a poster to open its video.
 
-**58 videos, 71.5 MB in all**, each at most 5 MB, with 58 JPEG posters (736 KB in all).
+**61 videos, 75.5 MB in all**, each at most 5 MB, with 61 JPEG posters (771 KB in all).
 
 ## 1. Showcase scenes
 
@@ -207,6 +207,24 @@ shards hide.
 | <a href="3d_wind.mp4"><img src="3d_wind.jpg" width="200" alt="The 3D fire's wind swept live"></a> | **Wind, swept live** | Side (left) and top (right) at once while the wind control sweeps from none (0.5) to full towards -x (0) by 4.8 s, to full towards +x (1) by 9 s and back to none; intensity 0.7, turbulence 0.5, seed 9,950,002 | As the orbit | C4; float | `--kind wind`, 12 s, 0.6 MB | **One fire throughout: the second fire study N's model grew at the upwind edge is gone.** The plume still follows the control slowly, leaning with the wind a second or two late |
 | <a href="3d_smoke_orbit.mp4"><img src="3d_smoke_orbit.jpg" width="200" alt="3D smoke, walked around"></a> | **3D smoke, walked around** (a demo only) | The camera circles a learned 3D smoke column once; controls 0.7, 0.5, 0.5, seed 9,900,005. Trained after the study's test on the same recipe, **not validated or tested** | As the orbit | `smoke3d.nvfx3` (study N's smoke, 268 KB; `$NEURALVFX_DATA/n_3d/models`); float | `--kind orbit --model .../smoke3d.nvfx3 --title "LEARNED 3D SMOKE"`, 12 s, 1.2 MB | A thick grey column that billows and rises out of the frame from every side; small orange specks glow at its base, which the simulated smoke (too cool to glow) does not have |
 
+## 9b. Drawn at half size and upscaled (study P)
+
+Study P ([STUDY_P.md](../docs/STUDY_P.md)) asked whether a large effect drawn at half size and brought back by a small
+learned 2x with seeded micro-detail looks as good as drawing it at full size. `nvfx_study_p video` plays one seed three
+ways at 512 px, side by side: **N**, an instance created at 512 px; **B**, an instance at 256 px brought to 512 by the
+bilinear 2x (what a GPU's sampler gives); **L**, the same 256 px frames brought to 512 by the study's chosen learned 2x
+(`cand_shared.nvfxup`, the shared net, gain 0.10, 30 noise slices a second). B and L are the very frames an instance with
+`nvfx_instance_set_upscale` draws. Below each panel the outlined 170 px crop, twice as large (nearest neighbour). Over a
+dark gradient, 1584 x 976, 30 fps, CRF 24 (`-preset slow`). Seeds 3,900,301 to 3,900,303, which no measured run uses.
+**The learned 2x did not pass its rule** (STUDY_P.md §6): what the videos show is that B and L look alike, and both
+softer than N in the finest filaments.
+
+| | Video | What it shows | Learned / procedural | Models, precision | Rendered | How it looks |
+|---|---|---|---|---|---|---|
+| <a href="upscale_explosion.mp4"><img src="upscale_explosion.jpg" width="200" alt="An explosion at 512 px: native, half size + bilinear, half size + learned"></a> | **An explosion, three ways** | A strong burst (controls 0.85, 0.5, 0.6, seed 3,900,301), its 89 frames; the crop on its left flank | All three learned (the same model and seed); L adds the learned 2x and its noise | The library's explosion (study M3's); int8 | `--effect explosion --crop 30,90,170`, 3 s, 0.4 MB | The same fireball in all three, the same motion; N's flank is crisper, B and L slightly soft and hard to tell apart |
+| <a href="upscale_mushroom.mp4"><img src="upscale_mushroom.jpg" width="200" alt="A mushroom cloud at 512 px: native, half size + bilinear, half size + learned"></a> | **A mushroom cloud, three ways** | Controls 0.8, 0.5, 0.6, seed 3,900,302, its 149 frames; the crop on the cap | As above | The library's mushroom; int8 | `--effect mushroom --crop 180,230,170`, 5 s, 0.5 MB | The same cap and stem; N's streaks in the stem are sharper; L's edges a little firmer than B's |
+| <a href="upscale_waterfall.mp4"><img src="upscale_waterfall.jpg" width="200" alt="A waterfall at 512 px: native, half size + bilinear, half size + learned"></a> | **A waterfall, three ways** | Controls 0.6, 0.5, 0.6, seed 3,900,303, 10 s; the crop on the falling sheet | As above (the learned body only, no seeded spray or pool) | The library's waterfall; int8 | `--effect waterfall --crop 170,170,170`, 10 s, 3.3 MB | N's thin zig-zag streaks are sharp where B and L blur them; L is no closer to N than B |
+
 ## 10. Later
 
 Every effect that has merged is above: round 7's six, study N's 3D fire and the water. Nothing is still to come here
@@ -240,6 +258,10 @@ build/nvfx_3d video --kind real-vs-learned --model $NEURALVFX_DATA/n2_3d/models/
 build/nvfx_3d video --kind wind --model $NEURALVFX_DATA/n2_3d/models/chosen.nvfx3 --out 3d_wind.mp4 --seconds 12 --controls 0.7,0.5,0.5 --seed 9950002
 build/nvfx_3d video --kind orbit --model $NEURALVFX_DATA/n_3d/models/smoke3d.nvfx3 --title "LEARNED 3D SMOKE" \
     --out 3d_smoke_orbit.mp4 --seconds 12 --controls 0.7,0.5,0.5 --seed 9900005
+# study P (the models frozen in $NEURALVFX_DATA/p_upscale/models, the chosen upscaler in p_upscale/nets)
+build/nvfx_study_p video --effect explosion --net cand_shared --size 512 --controls 0.85,0.5,0.6 --seed 3900301 --crop 30,90,170 --out upscale_explosion.mp4
+build/nvfx_study_p video --effect mushroom --net cand_shared --size 512 --controls 0.8,0.5,0.6 --seed 3900302 --crop 180,230,170 --out upscale_mushroom.mp4
+build/nvfx_study_p video --effect waterfall --net cand_shared --size 512 --controls 0.6,0.5,0.6 --seed 3900303 --crop 170,170,170 --seconds 10 --out upscale_waterfall.mp4
 ```
 
 (`M=$NEURALVFX_DATA/library/models`.) `nvfx_reel`'s header lists every option.
