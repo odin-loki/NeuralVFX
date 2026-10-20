@@ -8,7 +8,8 @@
 # scale the size it was spawned at and alive 1 while it plays (docs/LIBRARY.md). Seeds are this round's (6,300,000 and up).
 
 effect lava_fx      = "lava.nvfx"         # intensity (heat and flow rate), flow (downhill left, level, right), turbulence (bubbling)
-effect eruption_fx  = "eruption.nvfx"     # intensity (eruption rate), wind, turbulence
+effect eruption_fx  = "eruption.nvfx", swirl 1, swirl_scale 9   # intensity (eruption rate), wind, turbulence; a gentler
+#                                                                   swirl than its calibration's 3, whose detail draws worms
 effect avalanche_fx = "avalanche.nvfx"    # plays once (5 s), 16 start points: intensity (size), direction, turbulence
 
 # Molten rock under a dark crust: the lava model's heat drawn as glow only where it is hot (the crust stays dark), its rock
@@ -16,8 +17,8 @@ effect avalanche_fx = "avalanche.nvfx"    # plays once (5 s), 16 start points: i
 look magma    = shader, heat_scale 1.3, emission 2.0, emission_power 1.3, soot_density 3.0, soot_albedo 0.12, sky 0.1,
                 shadow 0.4, scene_light 0.6, relief 3, tint (0.5, 0.44, 0.4)
 # The eruption's ash lit by the scene (lightning, the vent's glow, the moon), glowing where it is hot (at the vent).
-look ash      = shader, heat_scale 1.0, emission 1.8, emission_power 2.5, soot_density 3.2, soot_albedo 0.28, sky 0.22,
-                shadow 0.4, scene_light 1.2, relief 2.5, tint (0.82, 0.76, 0.7)
+look ash      = shader, heat_scale 1.5, emission 1.6, emission_power 4, soot_density 4.5, soot_albedo 0.24, sky 0.25,
+                shadow 0.4, scene_light 1.2, relief 2.5, tint (0.72, 0.69, 0.66)
 # Powder snow lit by the scene: white, soft, blue in its shade.
 look powder   = shader, emission 0, soot_density 2.0, soot_albedo 0.92, sky 1.1, shadow 0.3, scene_light 1.3, relief 2,
                 tint (0.94, 0.97, 1)

@@ -27,12 +27,28 @@ Stepper loss: stages 1-2 (normalised squared error plus profiles) and stage 3 (p
 | effect | runs x frames | minutes of simulation | stepper loss 1-2 | stepper s | stage 3 loss | stage 3 s | renderer dB | contrast | swirl | grow | start points | KB stored |
 |---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
 | lava | 160 x 240 | 21.33 | 0.06704 | 5236 | 0.06308 | 1247 | 34.74 | 0.5 | 0.5 | 1 | 8 | 145.7 |
+| eruption | 160 x 240 | 21.33 | 0.06857 | 6238 | 0.06594 | 1235 | 29.05 | 1 | 3 | 1 | 8 | 145.7 |
 
 Renderer, detail constants and start points from `d-finish` on the trained steppers; stage 3 from `d-tune`.
 
 ### Tracking a held-out run from its true start point
 
 Active PSNR against the true run, mean over held-out runs (other seeds and settings), by frames after the start point. `neural`: the rollout effect through the runtime, started from the true state (coarse and fine) with the run's noise seed. `coarse_sim_detail`: the simulation on the same 32-cell grid with the same detail layer, drawn by the simulation's own renderer. `neural_dynamics_true_renderer`: the neural dynamics drawn by that renderer too (separates dynamics from rendering). `renderer_on_true_fields`: the learned renderer on the true fields (frames 1-30, then their mean).
+
+**eruption**
+
+| method | 1 | 4 | 8 | 16 | 30 | 60 | 120 | 240 |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| neural | 24.20 | 20.57 | 17.53 | 15.86 | 15.28 | 12.95 | 11.66 | 10.68 |
+| neural_dynamics_true_renderer | 26.70 | 21.21 | 17.73 | 15.91 | 15.34 | 13.01 | 11.71 | 10.72 |
+| coarse_sim_detail | 24.12 | 20.62 | 17.27 | 15.45 | 14.78 | 13.17 | 11.55 | 10.81 |
+| coarse_sim | 16.90 | 16.68 | 16.38 | 16.04 | 15.43 | 13.69 | 12.01 | 11.04 |
+| frozen | 27.55 | 17.92 | 14.43 | 11.81 | 10.24 | 9.32 | 8.68 | 8.93 |
+| renderer_on_true_fields | 27.84 | 27.55 | 27.38 | 27.81 | 27.92 | 27.77 | 27.77 | 27.77 |
+
+neural - coarse_sim_detail, paired over runs: frame 1: +0.08 [-1.18, +1.25] (tie); frame 8: +0.26 [-0.08, +0.58] (tie); frame 30: +0.50 [+0.06, +0.96]; frame 60: -0.22 [-0.75, +0.35] (tie); frame 240: -0.13 [-1.20, +0.75] (tie);
+
+neural_dynamics_true_renderer - coarse_sim_detail, paired over runs: frame 1: +2.58 [+1.85, +3.22]; frame 8: +0.46 [+0.09, +0.80]; frame 30: +0.55 [+0.09, +1.03]; frame 60: -0.16 [-0.69, +0.42] (tie); frame 240: -0.09 [-1.17, +0.78] (tie);
 
 **lava**
 
@@ -52,6 +68,20 @@ neural_dynamics_true_renderer - coarse_sim_detail, paired over runs: frame 1: +1
 ### Endless runs at held-out settings
 
 The ten held-out settings of study B, a new seed each, 10 s per run (explosions: their 3 s). Distances of each method's frame statistics to a real run of the simulation at that setting; `real_other_seed` is a second real run with another seed, the floor. Lower is better except motion ratio (1 is right) and mean-frame PSNR (higher is closer).
+
+**eruption**
+
+| method | spectrum L1 | motion ratio | coverage L1 | emission L1 | mean-frame PSNR |
+|---|---:|---:|---:|---:|---:|
+| real_other_seed | 0.078 | 0.99 | 0.0284 | 0.0000 | 21.66 |
+| neural | 0.154 | 1.09 | 0.0436 | 0.0000 | 20.01 |
+| flipbook_nearest | 0.172 | 1.04 | 0.0529 | 0.0000 | 18.70 |
+| coarse_sim_detail | 0.200 | 1.83 | 0.0536 | 0.0000 | 18.90 |
+| coarse_sim | 0.760 | 0.44 | 0.0946 | 0.0000 | 17.64 |
+
+Spectrum distance, paired over settings: neural - grid_k8 -; neural - flipbook_nearest -0.018 [-0.072, +0.034] (tie); neural - coarse_sim_detail -0.046 [-0.108, +0.021] (tie); neural - real_other_seed +0.076 [+0.039, +0.114].
+
+Mean-frame PSNR (dB), paired: neural - flipbook_nearest +1.31 [+0.04, +2.55]; neural - coarse_sim_detail +1.11 [-0.22, +2.57] (tie); neural - real_other_seed -1.65 [-3.41, -0.05]. Motion error |ln(motion ratio)|, paired: neural - flipbook_nearest +0.001 [-0.089, +0.078] (tie); neural - coarse_sim_detail -0.422 [-0.540, -0.294]; neural - real_other_seed +0.043 [-0.003, +0.088] (tie). Coverage distance, paired: neural - flipbook_nearest -0.0093 [-0.0178, -0.0014]; neural - real_other_seed +0.0152 [+0.0009, +0.0305].
 
 **lava**
 
@@ -85,3 +115,15 @@ Statistics of each 10 s window of a 60 s neural run (shards of 6 s from start po
 | lava | 1 | 3 | 0.0974 | 1.0947 | 0.0233 | 23.013 |
 | lava | 1 | 4 | 0.1615 | 1.7630 | 0.0260 | 21.347 |
 | lava | 1 | 5 | 0.1149 | 1.4894 | 0.0230 | 24.008 |
+| eruption | 0 | 0 | 0.1162 | 1.0579 | 0.0426 | 20.825 |
+| eruption | 0 | 1 | 0.1226 | 1.1701 | 0.0391 | 20.538 |
+| eruption | 0 | 2 | 0.1200 | 1.1207 | 0.0370 | 21.659 |
+| eruption | 0 | 3 | 0.1192 | 1.1107 | 0.0461 | 20.742 |
+| eruption | 0 | 4 | 0.1160 | 1.0028 | 0.0443 | 22.571 |
+| eruption | 0 | 5 | 0.1150 | 1.1062 | 0.0568 | 21.857 |
+| eruption | 1 | 0 | 0.1346 | 1.1199 | 0.0223 | 22.731 |
+| eruption | 1 | 1 | 0.1264 | 1.2214 | 0.0400 | 18.864 |
+| eruption | 1 | 2 | 0.1063 | 1.3140 | 0.0540 | 23.373 |
+| eruption | 1 | 3 | 0.1992 | 1.0576 | 0.0367 | 20.898 |
+| eruption | 1 | 4 | 0.1069 | 1.3923 | 0.0396 | 18.355 |
+| eruption | 1 | 5 | 0.1565 | 1.2145 | 0.0495 | 19.023 |
