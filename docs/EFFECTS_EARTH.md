@@ -173,7 +173,28 @@ another intensity stayed the wrong size; the avalanche's slab is released over i
 learns from the controls and the first age input, so its first state, which is its start point, holds about a fifth of
 it, and the mean state would have little to correct. The models are study D's recipe as it is.
 
-(The training table after training.)
+| effect | runs x frames | simulation | stages 1-2 (loss, s) | stage 3 (loss, s) | renderer (training samples) | contrast, swirl, grow | detail score | start points | stored |
+|---|---|---:|---|---|---:|---|---:|---:|---:|
+| lava | 160 x 240 | 21.3 min, recorded in 239 s | 0.0670, 5236 | 0.0631, 1247 | 34.7 dB | 0.5, 0.5, 1 | 0.50 | 8 (64 px fine) | 146 KB |
+| eruption | 160 x 240 | 21.3 min, recorded in 255 s | 0.0686, 6238 | 0.0659, 1235 | 29.1 dB | 1, 3, 1 | 0.50 | 8 (64 px fine) | 146 KB |
+AVALANCHE_TRAIN_ROW
+
+The seconds are wall-clock time on a share of one core of the shared machine (load 5 to 14 on 4 cores). In all 2.2 hours
+for lava (19:39 to 21:52 UTC on 15 October: 91 minutes for stages 1 and 2, 25 for stage 3, 17 for the last step) and 2.5
+for the eruption (108, 25 and 16 minutes)AVALANCHE_TRAIN_TIME. The loss columns are not comparable between effects (each is
+normalised by its own state's scale). The calibration chose half the contrast and a small swirl for lava (its new
+material arrives from its noise-drawn pattern, smoother than turbulence makes it) and the strongest swirl (3) for the
+eruption, as for launch and the jet; on screen that swirl draws the ash as worms, so the library and the scene play the
+eruption with `swirl 1, swirl_scale 9` (as launch's entries do; §6). The eruption's renderer is the weaker of the two on
+its training samples (29.1 dB): the white-hot vent and the dark ash are far apart in what they look like, as the
+mushroom's fireball and cap were (29.2 dB).
+
+Each model was frozen before its test: [fx_earth_frozen.csv](../results/experiments/fx_earth_frozen.csv) has their
+SHA-256 (the files are under the data root's `fx_earth/models/d`, with read-only copies in `fx_earth/models/frozen`). All
+three were trained by one frozen copy of the tool (`DATA/fx_earth/bin`, SHA-256 `7b3e2f02...`, built from commit
+2868289, whose presets are those of the committed code). A restart of the machine on 20 October stopped the queue
+between the eruption's training and its test; nothing had to run again (each step's marker is under
+`DATA/fx_earth/jobs/state`).
 
 ## 4. The test
 
@@ -224,7 +245,121 @@ mushroom, the waterfall and the splash were. An effect that is neither (for exam
 ties, but its average picture only ties the flipbook's) **falls short** of working, as launch and ink did. Detail
 (spectrum distance) and coverage are reported but do not decide.
 
-(The results after the test.)
+The tests ran once each, with this design: lava's on 15 October 2026 (4.5 minutes on one thread), the eruption's and
+the avalanche's on 20 October, each into its own folder under the data root (`DATA/fx_earth/test/<effect>`), its rows
+then merged into [d_track.csv](../results/experiments/fx_earth/d_track.csv),
+[d_stats.csv](../results/experiments/fx_earth/d_stats.csv) and [d_long.csv](../results/experiments/fx_earth/d_long.csv);
+`d-report` wrote [D_SUMMARY.md](../results/experiments/fx_earth/D_SUMMARY.md). The `neural` rows played at int8 (the
+runtime's default; the AVX-512 build with VNNI). One thing differed from the plan: the machine restarted between the
+eruption's training and its test, and the queue was started again; no step or test ran twice.
+
+### 4.1 Tracking from the true state
+
+Active PSNR (dB), mean over 8 held-out runs (the avalanche's last horizon is 4 s, its run ending at 5 s):
+
+| effect | method | 1 frame | 8 frames | 1 s | 2 s | 8 s (avalanche: 4 s) |
+|---|---|---:|---:|---:|---:|---:|
+| lava | neural | 30.2 | 22.0 | 16.1 | 14.5 | 13.9 |
+| lava | neural dynamics, simulation's renderer | 36.3 | 22.3 | 16.0 | 14.5 | 13.8 |
+| lava | coarse simulation + detail | 24.9 | 19.6 | 15.0 | 13.9 | 13.4 |
+| lava | coarse simulation | 17.9 | 17.3 | 16.9 | 16.2 | 16.3 |
+| lava | holding the first frame | 38.5 | 22.2 | 14.3 | 11.8 | 10.7 |
+| eruption | neural | 24.2 | 17.5 | 15.3 | 13.0 | 10.7 |
+| eruption | neural dynamics, simulation's renderer | 26.7 | 17.7 | 15.3 | 13.0 | 10.7 |
+| eruption | coarse simulation + detail | 24.1 | 17.3 | 14.8 | 13.2 | 10.8 |
+| eruption | coarse simulation | 16.9 | 16.4 | 15.4 | 13.7 | 11.0 |
+| eruption | holding the first frame | 27.6 | 14.4 | 10.2 | 9.3 | 8.9 |
+AVALANCHE_TRACK_ROWS
+
+Neural minus coarse simulation + detail, paired over runs (95% intervals; bold: the neural rollout is better):
+
+| effect | 1 frame | 8 frames | 1 s | 2 s | 8 s (avalanche: 4 s) |
+|---|---|---|---|---|---|
+| lava | **+5.28 [+4.22, +6.30]** | **+2.42 [+2.13, +2.77]** | **+1.09 [+0.70, +1.43]** | **+0.63 [+0.18, +1.01]** | +0.49 [-0.26, +1.20] (tie) |
+| lava, neural dynamics with the simulation's renderer | **+11.44 [+10.42, +12.38]** | **+2.75 [+2.47, +3.11]** | **+0.93 [+0.56, +1.24]** | **+0.56 [+0.12, +0.91]** | +0.42 [-0.33, +1.15] (tie) |
+| eruption | +0.08 [-1.18, +1.25] (tie) | +0.26 [-0.08, +0.58] (tie) | **+0.50 [+0.06, +0.96]** | -0.22 [-0.75, +0.35] (tie) | -0.13 [-1.20, +0.75] (tie) |
+| eruption, neural dynamics with the simulation's renderer | **+2.58 [+1.85, +3.22]** | **+0.46 [+0.09, +0.80]** | **+0.55 [+0.09, +1.03]** | -0.16 [-0.69, +0.42] (tie) | -0.09 [-1.17, +0.78] (tie) |
+AVALANCHE_TRACK_DIFF
+
+- **Lava follows a held-out run better than the simulation at the same resolution** from the first frame to 2 s (+2.4 dB
+  at 8 frames, +1.1 at 1 s, +0.6 at 2 s) and ties it at 8 s. Less than the coals (+4.7 at 1 s), its forced cousin: the
+  lava's crust is drawn from the flicker noise's zero lines, a fine network of seams 4 to 8 cells wide that the 32-cell
+  state cannot carry, so both the learned stepper and the coarse simulation lose its pixels within a second; the plain
+  coarse simulation without the detail layer, a soft band in the right place, scores highest of all from 16 frames
+  (16.9 dB at 1 s). Its learned renderer reaches 31.0 dB on the true fields.
+- **The eruption beats it only at 1 s, by half a decibel**, and ties it at every other horizon: its column and umbrella
+  are as turbulent as launch's billows, and two runs of the simulation part within a second or two (§2). Its renderer is
+  the weak part of its first frames (27.8 dB on the true fields): drawn by the simulation's renderer the same dynamics
+  lead by 2.6 dB at the first frame.
+AVALANCHE_TRACK_NOTE
+
+### 4.2 Endless runs at settings never seen
+
+Means over the 10 held-out settings (spectrum distance and coverage distance: lower is better; motion ratio: 1 is
+right; mean-frame PSNR: higher is closer):
+
+| effect | method | spectrum | motion | coverage | mean-frame PSNR |
+|---|---|---:|---:|---:|---:|
+| lava | real, other seed (floor) | 0.048 | 1.00 | 0.006 | 24.6 |
+| lava | **neural rollout (146 KB)** | 0.143 | 1.19 | 0.026 | 21.9 |
+| lava | nearest training flipbook | 0.104 | 1.38 | 0.014 | 20.7 |
+| lava | coarse simulation + detail | 0.234 | 1.46 | 0.013 | 22.2 |
+| lava | coarse simulation | 0.772 | 0.71 | 0.006 | 23.5 |
+| eruption | real, other seed (floor) | 0.078 | 0.99 | 0.028 | 21.7 |
+| eruption | **neural rollout (146 KB)** | 0.154 | 1.09 | 0.044 | 20.0 |
+| eruption | nearest training flipbook | 0.172 | 1.04 | 0.053 | 18.7 |
+| eruption | coarse simulation + detail | 0.200 | 1.83 | 0.054 | 18.9 |
+| eruption | coarse simulation | 0.760 | 0.44 | 0.095 | 17.6 |
+AVALANCHE_ENDLESS_ROWS
+
+Neural minus each other method, paired over the 10 settings (motion as the error \|ln ratio\|; bold: the neural
+rollout is better):
+
+| effect | statistic | nearest flipbook | coarse simulation + detail | real, other seed |
+|---|---|---|---|---|
+| lava | spectrum distance | +0.039 [+0.014, +0.061] | **-0.091 [-0.125, -0.059]** | +0.095 [+0.066, +0.125] |
+| lava | mean-frame PSNR (dB) | **+1.22 [+0.11, +2.45]** | -0.33 [-1.22, +0.38] (tie) | -2.72 [-4.33, -1.22] |
+| lava | motion error | -0.069 [-0.205, +0.060] (tie) | **-0.127 [-0.239, -0.026]** | +0.163 [+0.071, +0.250] |
+| lava | coverage distance | +0.012 [+0.002, +0.020] | - | +0.020 [+0.016, +0.023] |
+| eruption | spectrum distance | -0.018 [-0.072, +0.034] (tie) | -0.046 [-0.108, +0.021] (tie) | +0.076 [+0.039, +0.114] |
+| eruption | mean-frame PSNR (dB) | **+1.31 [+0.04, +2.55]** | +1.11 [-0.22, +2.57] (tie) | -1.65 [-3.41, -0.05] |
+| eruption | motion error | +0.001 [-0.089, +0.078] (tie) | **-0.422 [-0.540, -0.294]** | +0.043 [-0.003, +0.088] (tie) |
+| eruption | coverage distance | **-0.009 [-0.018, -0.001]** | - | +0.015 [+0.001, +0.031] |
+AVALANCHE_ENDLESS_DIFF
+
+- **Lava** plays with its average picture 1.2 dB closer than a neighbouring setting's flipbook and its motion tied with
+  the flipbook's (19% fast; the flipbook 38%); its detail is a little further from real than the flipbook's (+0.039), and
+  its coverage too: the learned band glows more evenly, as a river of orange with darker streaks, where the simulator's
+  is dark crust split by bright seams (the figure below). It beats the coarse simulation with the detail layer on detail
+  and motion, and ties its average picture.
+- **The eruption** plays with its average picture 1.3 dB closer than the flipbook's, its motion tied with the flipbook's
+  and with a second real run's (9% fast), its detail tied with the flipbook's and its coverage closer: a flipbook of a
+  neighbouring setting puts the umbrella at another height and lean. Its learned renderer adds faint pink and green
+  fringes at the ash's edges, as the mushroom's and the cloud's do.
+AVALANCHE_ENDLESS_NOTE
+
+![Lava, eruption and avalanche at the first held-out setting: for each, the real run (top) and the neural rollout with a new seed (below), across the run](figures/earth_endless.png)
+
+### 4.3 One minute without a restart
+
+| effect | spectrum distance | motion ratio | mean-frame PSNR |
+|---|---|---|---|
+| lava | 0.09-0.16 | 1.09-1.76 | 21.3-25.5 |
+| eruption | 0.11-0.20 | 1.00-1.39 | 18.4-23.4 |
+
+Ranges over six 10 s windows at each of the first two held-out settings (the avalanche plays once). Neither drifts: the
+last windows are as good as the first. Lava moves too fast in every window at both settings (1.09 to 1.76), as in its
+10 s runs: the learned crust crawls faster than the simulator's.
+
+### 4.4 By the rule
+
+- **Lava works**: it tracks better than the coarse simulation at 1 s (+1.09 [+0.70, +1.43]), its average picture is
+  closer than the flipbook's (+1.22 [+0.11, +2.45]) and its motion error ties the flipbook's. Its detail, worse than the
+  flipbook's, does not decide by the rule, but it is what is missing: the crust's network of seams.
+- **The eruption works, narrowly**: +0.50 [+0.06, +0.96] at 1 s (the only horizon it leads at), an average picture
+  closer than the flipbook's (+1.31 [+0.04, +2.55]) and its motion error tied with the flipbook's. Both intervals that
+  decide are near zero.
+AVALANCHE_VERDICT
 
 ## 5. Memory and cost
 
