@@ -458,3 +458,9 @@ The six models are the files frozen in [p_models.csv](../results/experiments/ups
 `p_upscale/models`), the candidates `p_upscale/nets/cand_*.nvfxup`; the training tiles and the real runs' cache were
 deleted after use (they are made again by `tiles` and by `eval`). The waterfall plays as its file says, one detail pass
 a frame; study O's `passes 2` is the library's choice in its effect lines, not in the file.
+
+**Checks** (after merging main at eaa7ddf, round 9's air on top of its earth): the full build with warnings as errors;
+the full ctest, 488 of 488 (main's 477 and this study's 11 in `tests/test_upscale.cpp`), none skipped;
+`nvfx_alloc_test`, no allocation per frame, with the half-size instance upscaled by the bilinear 2x, by the learned 2x
+and by the learned 2x at int8; `nvfx_gallery --check --require-models`, 213 effects, 213 played, 0 failed; the Godot
+test (`engines/godot/test.sh`), 0 failures.

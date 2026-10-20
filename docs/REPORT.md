@@ -3824,3 +3824,8 @@ skip the fewest empty blocks.
 - **What could make a learned upscaler worth it**: a target it can reach (the detail layer at full size and only the
   renderer at half size, or a renderer that draws filaments from the coarse flow), and a cheaper kernel for the effects
   that fill their frames.
+
+**Checks** (after merging main at eaa7ddf): the full build with warnings as errors; the full ctest, 488 of 488 (main's
+477 and study P's 11), none skipped; `nvfx_alloc_test` (no allocation per frame, with the bilinear 2x, the learned 2x
+and the learned 2x at int8); `nvfx_gallery --check --require-models` (213 effects, all played, 0 failed); the Godot test
+(0 failures).
