@@ -555,3 +555,8 @@ build/nvfx_gallery --library library --models $NEURALVFX_DATA/library/models --o
 holds `candle.nvfx`, `smokering.nvfx` and `heavygas.nvfx` (`ctest -R ScriptedCryptFrozen` reads it from
 `NEURALFX_MODELS_AIR`). The check after the test (§4.6) is `d-eval --effects candle` on a copy of the frozen model whose
 detail swirl is set to 1 and its scale to 9 (`nvfx_ordered set --values "swirl=1;swirl_scale=9"`).
+
+**Checks** after main (study O's merge, 37b08cd) was merged in, on the shared machine: the full ctest, 470 of 470 (8
+new: four sim tests, a recipe test, `ScriptedCryptFrozen`, `SceneScriptChecks.crypt` and `LibraryAirKeyframesFrozen`);
+`nvfx_alloc_test`, no allocation per frame; `nvfx_gallery --check`, 203 effects, all 203 played with the shared models
+(66 played and 137 parsed and checked without them), 0 failed; and the Godot test, 0 failures.
