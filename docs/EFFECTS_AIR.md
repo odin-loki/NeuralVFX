@@ -558,7 +558,12 @@ holds `candle.nvfx`, `smokering.nvfx` and `heavygas.nvfx` (`ctest -R ScriptedCry
 `NEURALFX_MODELS_AIR`). The check after the test (§4.6) is `d-eval --effects candle` on a copy of the frozen model whose
 detail swirl is set to 1 and its scale to 9 (`nvfx_ordered set --values "swirl=1;swirl_scale=9"`).
 
-**Checks** after main (study O's merge, 37b08cd) was merged in, on the shared machine: the full ctest, 470 of 470 (8
-new: four sim tests, a recipe test, `ScriptedCryptFrozen`, `SceneScriptChecks.crypt` and `LibraryAirKeyframesFrozen`);
-`nvfx_alloc_test`, no allocation per frame; `nvfx_gallery --check`, 203 effects, all 203 played with the shared models
-(66 played and 137 parsed and checked without them), 0 failed; and the Godot test, 0 failures.
+**Checks** after main with round 9's earth (09015b5) was merged in, on the shared machine. The merge changed no clip:
+the full-size clips of all 27 effects at two settings are byte for byte those of each side before it (the 21 earlier
+and the earth's three against main's own build, the air's three against this branch's), the hash test's small clips of
+the six new effects are the ones hashed before it, and the 21 training clips of the air models re-simulate from their
+metadata to the byte (the data root's `fx_air/jobs/state/merged_earth_clips.sha256`). The full ctest, 477 of 477 (main's
+469 and the 8 of this round: four sim tests, a recipe test, `ScriptedCryptFrozen`, `SceneScriptChecks.crypt` and
+`LibraryAirKeyframesFrozen`); `nvfx_alloc_test`, no allocation per frame; `nvfx_gallery --check --require-models`, 213
+effects, all played, 0 failed; and the Godot test, 0 failures. The library's air look `powder` was renamed `gunpowder`,
+as the earth's file declares one of that name.
