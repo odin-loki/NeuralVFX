@@ -3612,7 +3612,9 @@ not among the frozen ones. Re-rendered: `library_fire`.
   bytes larger than before (the mean state's coefficients). The shared links moved last, after the full ctest had passed
   with private copies of the folders: `library/models/mushroom.nvfx`, `library/models/splash.nvfx` and
   `fx_blaze/models/scene/mushroom.nvfx`. The round's files are untouched under `fx_blaze/models/d` and
-  `fx_water/models/d`.
+  `fx_water/models/d`. A branch that has not merged these hashes will find its frozen tests that play the
+  mushroom (`LibraryKeyframesFrozen` and `PackLibraryKeyframesFrozen` at `distant_mushroom`, `ScriptedPrairieFrozen`)
+  failing against the moved links; merging study-fix brings the new hashes.
 - **Frozen hashes** (all at float, pinned to the AVX2 build with `--isa avx2`): the falls' six keyframes and the
   lift-off's 078 to 282 (§16.1, §16.2); in `results/library/frozen.csv` `rain_shaft`, `rocket_launch`,
   `distant_mushroom` and the mushroom's and splash's model rows; the prairie's keyframes 063 to 216
@@ -3680,8 +3682,8 @@ since the step overlaps the drawing of the frame before. The lift-off still runs
 - **A model fix that the test confirms can still look much the same.** The mushroom's average picture is 1.18 dB closer
   to a real run's and it follows a run better, but its stem and rolled cap are still lost after 3 to 4 s, and by eye the
   new file differs mostly where a scene asks a start point for other controls (the mean state). The splash's gain,
-  0.40 dB, is small and was only visible as a gain because the rule's margins and N were sized from the null's spread
-  (study M3's lesson).
+  0.40 dB, is small and invisible by eye; it could be told from a tie because the margins came from the null's spread
+  and N from the candidates' (study M3's lesson).
 - **Not fixed:** the mushroom's ragged cap and its detail (still 5.6 times the floor's spectrum distance on the test);
   the library's launch entries, spawned and so not tiled, still fill one tile; the bare launch reel shows its tile; the
   splash's crown still reads as two horns in the library. What would fix them: tiled domains for spawned entries in the
