@@ -9,8 +9,10 @@
 //       models; a member is coded only when that saves 5% and 256 bytes). Exit 77 with --require-models when a model
 //       is missing.
 //   nvfx_pack list PACK [--manifest]          members, entries and costs (--manifest: the manifest as written)
-//   nvfx_pack verify PACK [--threads N]       every check an engine's load makes: the pack, its catalogue as a
-//                                             library, every model loaded
+//   nvfx_pack verify PACK [--threads N] [--skip-missing]
+//                                             every check an engine's load makes: the pack, its catalogue as a
+//                                             library, every model loaded (--skip-missing: exit 77 when PACK is not
+//                                             there, as for a test whose pack was not built without the models)
 //   nvfx_pack extract PACK DIR                every member into DIR, byte for byte
 //   nvfx_pack measure --library DIR --models DIR [--reps 7] [--threads 3] [--out results/pack]
 //                                             each coder's pack size and loading time against the loose files
@@ -263,6 +265,10 @@ int do_verify(const Args& a) {
   nvfx_pack_desc_init(&d);
   d.path = pos[1].c_str();
   d.threads = a.i("threads", 1);
+  if (a.flag("skip-missing") && !fs::exists(pos[1])) {
+    std::println(stderr, "verify: {} is not there: skipped", pos[1]);
+    return 77;
+  }
   nvfx_pack* pack = nullptr;
   nvfx_scene_error err;
   if (nvfx_pack_open(&d, &pack, &err) != NVFX_OK) {

@@ -609,8 +609,8 @@ if(NEURALFX_BUILD_TESTS)
              COMMAND nvfx_pack pack ${CMAKE_CURRENT_BINARY_DIR}/library.nvfxp --library ${CMAKE_CURRENT_SOURCE_DIR}/library --models ${NEURALFX_MODELS_LIBRARY}
                      --require-models --threads 2)
     set_tests_properties(neuralfx.PackFullLibrary PROPERTIES LABELS "neuralfx;data" SKIP_RETURN_CODE 77 TIMEOUT 600 FIXTURES_SETUP library_pack)
-    add_test(NAME neuralfx.PackFullLibraryVerifies COMMAND nvfx_pack verify ${CMAKE_CURRENT_BINARY_DIR}/library.nvfxp)
-    set_tests_properties(neuralfx.PackFullLibraryVerifies PROPERTIES LABELS "neuralfx;data" FIXTURES_REQUIRED library_pack)
+    add_test(NAME neuralfx.PackFullLibraryVerifies COMMAND nvfx_pack verify ${CMAKE_CURRENT_BINARY_DIR}/library.nvfxp --skip-missing)
+    set_tests_properties(neuralfx.PackFullLibraryVerifies PROPERTIES LABELS "neuralfx;data" SKIP_RETURN_CODE 77 FIXTURES_REQUIRED library_pack)
     add_test(NAME neuralfx.PackLibraryKeyframesFrozen
              COMMAND nvfx_gallery --pack ${CMAKE_CURRENT_BINARY_DIR}/library.nvfxp
                      --only campfire,blue_gas_flame,grenade,steam_vent,portal,lightning_strike,ground_fog,dust_impact,flamethrower,plasma_orb,dust_devil,wall_of_flames,distant_mushroom,waterfall_drawn,garden_fountain,boulder_splash,rain_shaft_drawn,fountain,rain_shaft,lava_flow,volcano_eruption,avalanche
