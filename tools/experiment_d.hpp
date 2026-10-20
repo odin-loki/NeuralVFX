@@ -22,7 +22,8 @@ struct Ctx {
   // (salt 2) and take seeds base + run; the real runs at the held-out settings base + 100000 + setting and
   // base + 110000 + setting, the neural runs base + 120000 + setting, the coarse simulation's base + 130000 + setting,
   // the long runs base + 140000 + setting. The water effects' test (docs/EFFECTS_WATER.md) uses 7000000: seeds no study
-  // had used.
+  // had used. d-chaos too: its runs keep their settings (salt 77) and take seeds base + 150000 + run (the other seed
+  // base + 150999 + run); the earth effects (docs/EFFECTS_EARTH.md) use 6000000.
   std::uint64_t seed_base = 0;
   int iters(int full) const { return quick ? std::max(50, full / 20) : full; }
 };

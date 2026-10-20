@@ -1679,10 +1679,11 @@ SimRecipe recipe_for(sim::Effect e) {
   if (e == sim::Effect::smoke) r.start_fine = 64;  // smoke lingers: growing its detail would take seconds
   if (e == sim::Effect::fog || e == sim::Effect::cloud) r.start_fine = 64;  // they linger too (docs/EFFECTS_ATMOSPHERE.md)
   if (e == sim::Effect::launch || e == sim::Effect::puffs || e == sim::Effect::ink) r.start_fine = 64;  // and these (docs/EFFECTS_FLOW.md)
+  if (e == sim::Effect::lava || e == sim::Effect::eruption) r.start_fine = 64;  // and these (docs/EFFECTS_EARTH.md)
   if (e == sim::Effect::heavygas) r.start_fine = 64;  // heavy gas pools and lingers, as fog does (docs/EFFECTS_AIR.md)
   if (!sim::effect_loops(e)) {  // the explosion, and dust (docs/EFFECTS_ATMOSPHERE.md), which plays once as it does
     r.runs = 240;
-    r.frames = sim::one_shot_frames(e);  // 90 (3 s); the mushroom's 150 (docs/EFFECTS_BLAZE.md); a smoke ring's 120 (docs/EFFECTS_AIR.md)
+    r.frames = sim::one_shot_frames(e);  // 90 (3 s); the mushroom's and the avalanche's 150 (docs/EFFECTS_BLAZE.md, EFFECTS_EARTH.md); a smoke ring's 120 (docs/EFFECTS_AIR.md)
     r.start_frame = 0;
     r.start_fine = 64;  // the burst's shape is the look
     r.starts = 16;

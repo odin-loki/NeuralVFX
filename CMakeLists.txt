@@ -506,7 +506,7 @@ if(NEURALFX_BUILD_TESTS)
     set_tests_properties(neuralfx.LibraryCataloguePlays PROPERTIES LABELS "neuralfx;data" SKIP_RETURN_CODE 77 TIMEOUT 1800)
     add_test(NAME neuralfx.LibraryKeyframesFrozen
              COMMAND nvfx_gallery --library ${CMAKE_CURRENT_SOURCE_DIR}/library --models ${NEURALFX_MODELS_LIBRARY}
-                     --only campfire,blue_gas_flame,grenade,steam_vent,portal,lightning_strike,ground_fog,dust_impact,flamethrower,plasma_orb,dust_devil,rocket_trail,vehicle_dust_wake,wall_of_flames,distant_mushroom,rocket_launch,ink_cloud,waterfall_drawn,garden_fountain,boulder_splash,rain_shaft_drawn,fountain,rain_shaft
+                     --only campfire,blue_gas_flame,grenade,steam_vent,portal,lightning_strike,ground_fog,dust_impact,flamethrower,plasma_orb,dust_devil,rocket_trail,vehicle_dust_wake,wall_of_flames,distant_mushroom,rocket_launch,ink_cloud,waterfall_drawn,garden_fountain,boulder_splash,rain_shaft_drawn,fountain,rain_shaft,lava_flow,volcano_eruption,avalanche
                      --keyframes ${CMAKE_CURRENT_BINARY_DIR}/library_keyframes --verify ${CMAKE_CURRENT_SOURCE_DIR}/results/library/frozen.csv --threads 2
                      --precision float --isa avx2)
     set_tests_properties(neuralfx.LibraryKeyframesFrozen PROPERTIES LABELS "neuralfx;data" SKIP_RETURN_CODE 77 TIMEOUT 1200)
@@ -574,6 +574,16 @@ if(NEURALFX_BUILD_TESTS)
     set_tests_properties(neuralfx.ScriptedLiftoffFrozen PROPERTIES LABELS "neuralfx;data" SKIP_RETURN_CODE 77 TIMEOUT 1200)
     add_test(NAME neuralfx.SceneScriptChecks.liftoff COMMAND nvfx_scene_script --script ${CMAKE_CURRENT_SOURCE_DIR}/examples/scenes/liftoff.nvfxs --check)
     set_tests_properties(neuralfx.SceneScriptChecks.liftoff PROPERTIES LABELS neuralfx)
+    # The volcano (docs/EFFECTS_EARTH.md): lava and the eruption, both in NEURALFX_MODELS_EARTH (outside git); its
+    # keyframes have the SHA-256 recorded in results/experiments/fx_earth_frozen.csv.
+    set(NEURALFX_MODELS_EARTH "${_nvfx_data}/fx_earth/models/scene" CACHE PATH "lava.nvfx, eruption.nvfx and avalanche.nvfx")
+    add_test(NAME neuralfx.ScriptedVolcanoFrozen
+             COMMAND nvfx_scene_script --script ${CMAKE_CURRENT_SOURCE_DIR}/examples/scenes/volcano.nvfxs --models ${NEURALFX_MODELS_EARTH}
+                     --keyframes ${CMAKE_CURRENT_BINARY_DIR}/volcano_script_keyframes --no-video --threads 2 --precision float --isa avx2
+                     --verify ${CMAKE_CURRENT_SOURCE_DIR}/results/experiments/fx_earth_frozen.csv)
+    set_tests_properties(neuralfx.ScriptedVolcanoFrozen PROPERTIES LABELS "neuralfx;data" SKIP_RETURN_CODE 77 TIMEOUT 1200)
+    add_test(NAME neuralfx.SceneScriptChecks.volcano COMMAND nvfx_scene_script --script ${CMAKE_CURRENT_SOURCE_DIR}/examples/scenes/volcano.nvfxs --check)
+    set_tests_properties(neuralfx.SceneScriptChecks.volcano PROPERTIES LABELS neuralfx)
     # The crypt (docs/EFFECTS_AIR.md): candle, smokering and heavygas, all in NEURALFX_MODELS_AIR (outside git); its
     # keyframes have the SHA-256 recorded in results/experiments/fx_air_frozen.csv.
     set(NEURALFX_MODELS_AIR "${_nvfx_data}/fx_air/models/scene" CACHE PATH "candle.nvfx, smokering.nvfx and heavygas.nvfx")
@@ -603,7 +613,7 @@ if(NEURALFX_BUILD_TESTS)
     set_tests_properties(neuralfx.PackFullLibraryVerifies PROPERTIES LABELS "neuralfx;data" FIXTURES_REQUIRED library_pack)
     add_test(NAME neuralfx.PackLibraryKeyframesFrozen
              COMMAND nvfx_gallery --pack ${CMAKE_CURRENT_BINARY_DIR}/library.nvfxp
-                     --only campfire,blue_gas_flame,grenade,steam_vent,portal,lightning_strike,ground_fog,dust_impact,flamethrower,plasma_orb,dust_devil,wall_of_flames,distant_mushroom,waterfall_drawn,garden_fountain,boulder_splash,rain_shaft_drawn,fountain,rain_shaft
+                     --only campfire,blue_gas_flame,grenade,steam_vent,portal,lightning_strike,ground_fog,dust_impact,flamethrower,plasma_orb,dust_devil,wall_of_flames,distant_mushroom,waterfall_drawn,garden_fountain,boulder_splash,rain_shaft_drawn,fountain,rain_shaft,lava_flow,volcano_eruption,avalanche
                      --keyframes ${CMAKE_CURRENT_BINARY_DIR}/library_pack_keyframes --verify ${CMAKE_CURRENT_SOURCE_DIR}/results/library/frozen.csv --threads 2
                      --precision float --isa avx2)
     set_tests_properties(neuralfx.PackLibraryKeyframesFrozen PROPERTIES LABELS "neuralfx;data" SKIP_RETURN_CODE 77 TIMEOUT 1200 FIXTURES_REQUIRED library_pack)

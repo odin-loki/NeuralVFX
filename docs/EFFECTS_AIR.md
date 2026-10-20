@@ -92,7 +92,9 @@ and `--flow`). The smoke ring keeps `wind`. Every earlier effect's clips are unc
 `Sim.StudyEffectsAreUnchangedByTheNewOnes` now also hashes clips of the ten effects of rounds 7 and 8 (wildfire, coals,
 mushroom, launch, puffs, ink, waterfall, fountain, splash, rainshaft) made before these three existed, and full-size
 clips (128 px, 64 frames) of all 21 earlier effects at two settings were compared byte for byte before and after (the
-data root's `fx_air/jobs/state/baseline_clips.sha256`). Tests of the new presets:
+data root's `fx_air/jobs/state/baseline_clips.sha256`). Merged with round 9's earth, which also appended three effects,
+the air effects stand after the avalanche in `sim::Effect`; nothing in the solver, the trainer or the model files
+depends on an effect's number (a model file names its effect), and the merge changed no clip (§8). Tests of the new presets:
 `Sim.AirEffectsHaveTheirOwnControlsAndOnlyTheRingPlaysOnce`, `Sim.CandleIsASmallSteadyTeardropWithAWispThatLeansInADraught`,
 `Sim.SmokeRingRisesAsAVortexPairThatSpreadsAndBreaksUp`, `Sim.HeavyGasSpillsAlongTheFloorAndPoolsInTheHollows`, and in
 the recipe `Rollout.AirEffectsTakeTheirRecipes`.
@@ -475,7 +477,7 @@ length ([LIBRARY.md](LIBRARY.md) has the notes):
 - the smoke ring: `smoke_ring` **good**, `rising_smoke_rings` and `cannon_smoke_ring` **fair**: a ring seen side-on, two
   rolled cores under a hood of smoke, rising, spreading and breaking up; repeated rings are the one-shot started again
   in turn on three modules every 1.8 s, so they overlap as they rise; the cannon's big ring breaks into two columns at
-  the end. Drawn by looks (`incense`, `powder`).
+  the end. Drawn by looks (`incense`, `gunpowder`).
 - heavy gas: `dry_ice_fog`, `toxic_spill`, `swamp_gas` and `stage_fog`, **fair**: a low layer of vapour poured out and
   flowing along the ground with soft rolling fronts; streaky at times, and the two releases of `stage_fog` stay two humps
   more than one layer. The tile's mound and hollows are not drawn: an entry stands the mound's top on the ground, so its

@@ -25,7 +25,7 @@ look candlelight = like flame, heat_scale 0.9, emission 2.6, emission_power 3, s
 # its first frames).
 look incense = shader, emission 0, soot_density 2.4, soot_albedo 0.75, sky 0.7, shadow 0.3, scene_light 1.2, relief 1.4,
                tint (0.86, 0.88, 0.95)
-look powder  = shader, emission 0, soot_density 3, soot_albedo 0.55, sky 0.6, shadow 0.35, scene_light 1.2, relief 1.6,
+look gunpowder = shader, emission 0, soot_density 3, soot_albedo 0.55, sky 0.6, shadow 0.35, scene_light 1.2, relief 1.6,
                tint (0.8, 0.78, 0.75)
 
 entry candle_flame, category fire, size 50 x 150, anchor base, loop, show 2,
@@ -118,7 +118,7 @@ entry cannon_smoke_ring, category smoke, size 320 x 360, anchor base, once 4.5, 
       about "A cannon's smoke ring: a mortar fired upwards throws a flash, sparks and a big ring of powder smoke that rolls up and breaks apart (the smoke ring model at full strength); its anchor is the muzzle"
 param power = 1, range (0.6, 1), about "the charge: the ring's size and speed"
 param wind = 0.5, range (0, 1), about "drift: 0.5 still air"
-module puff = smokering, size 128, width 380 * scale, at (X, Y), sink 0.11, feather 0.15, look powder, start 9, seed 2121,
+module puff = smokering, size 128, width 380 * scale, at (X, Y), sink 0.11, feather 0.15, look gunpowder, start 9, seed 2121,
               controls (1, 0.5, 0.35), intensity power, wind wind, opacity 1 - smooth((t - 3.7) / 0.7)
 let flash = exp(-t / 0.08)
 light flash (1.1 * flash * power, 0.9 * flash * power, 0.6 * flash * power)

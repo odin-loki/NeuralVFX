@@ -162,6 +162,41 @@ TEST(Rollout, FlowEffectsKeepFineFieldsAsSmokeDoes) {
   EXPECT_EQ(recipe_model(recipe_for(sim::Effect::ink)).control_names[1], "current");
 }
 
+// Lava and the eruption linger (a crust that crawls, an umbrella of ash), so they keep fine fields with their start
+// points as smoke does; the avalanche plays once and takes the explosion's branch at its own length
+// (docs/EFFECTS_EARTH.md).
+TEST(Rollout, EarthEffectsKeepFineFieldsAndTheAvalanchePlaysOnce) {
+  const SimRecipe fire = recipe_for(sim::Effect::fire), smoke = recipe_for(sim::Effect::smoke), ex = recipe_for(sim::Effect::explosion);
+  for (const sim::Effect e : {sim::Effect::lava, sim::Effect::eruption}) {
+    const SimRecipe r = recipe_for(e);
+    EXPECT_EQ(r.start_fine, smoke.start_fine) << sim::effect_name(e);
+    EXPECT_EQ(r.runs, fire.runs);
+    EXPECT_EQ(r.frames, fire.frames);
+    EXPECT_EQ(r.start_frame, fire.start_frame);
+    EXPECT_EQ(r.starts, fire.starts);
+    EXPECT_EQ(r.stepper.activity_stage, fire.stepper.activity_stage);
+    const Model m = recipe_model(r);
+    EXPECT_TRUE(m.loop);
+    EXPECT_EQ(m.h.n_age, 0);
+    EXPECT_EQ(m.noise.flicker_rate, sim::flicker_rate(e));
+  }
+  const SimRecipe av = recipe_for(sim::Effect::avalanche);
+  EXPECT_EQ(av.runs, ex.runs);
+  EXPECT_EQ(av.frames, sim::one_shot_frames(sim::Effect::avalanche));
+  EXPECT_EQ(av.frames, 150);
+  EXPECT_EQ(av.start_frame, 0);
+  EXPECT_EQ(av.start_fine, ex.start_fine);
+  EXPECT_EQ(av.starts, ex.starts);
+  EXPECT_EQ(av.stepper.burn_max, ex.stepper.burn_max);
+  const Model m = recipe_model(av);
+  EXPECT_FALSE(m.loop);
+  EXPECT_EQ(m.h.frames, 150);
+  EXPECT_EQ(m.h.n_age, 2);
+  EXPECT_EQ(recipe_model(recipe_for(sim::Effect::lava)).control_names[1], "flow");
+  EXPECT_EQ(m.control_names[1], "direction");
+  EXPECT_EQ(recipe_model(recipe_for(sim::Effect::eruption)).control_names[1], "wind");
+}
+
 // The air effects (docs/EFFECTS_AIR.md): the candle takes fire's recipe as it is, heavy gas keeps fine fields with its
 // start points as fog does, and the smoke ring takes the one-shot branch at its own length (4 s).
 TEST(Rollout, AirEffectsTakeTheirRecipes) {

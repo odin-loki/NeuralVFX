@@ -1243,7 +1243,7 @@ int main(int argc, char** argv) try {
     d.effects = a.str("effects");
     if (a.has("figures")) d.figures = a.str("figures");
     d.stages12 = a.i("stages12", 0) != 0;
-    d.seed_base = static_cast<std::uint64_t>(a.i("seed-base", 0));  // d-eval's test seeds (experiment_d.hpp)
+    d.seed_base = static_cast<std::uint64_t>(a.i("seed-base", 0));  // d-eval's and d-chaos's seeds (experiment_d.hpp)
     if (step == "d-chaos" || step == "d") study_d::step_chaos(d);
     if (step == "d-train" || step == "d") study_d::step_train(d);
     if (step == "d-tune") study_d::step_tune(d);

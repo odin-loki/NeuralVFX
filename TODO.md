@@ -1,8 +1,8 @@
 # To do: every effect in 3D — a small demo here first, then big on a PC
 
 **Status:** stage 1 is done (study N, `docs/STUDY_3D.md`, and its follow-up N2, §14); stage 2 is planned, not started.
-Work here resumed on 20 October 2026: study O is merged; round 9 and study P are being finished on their branches
-("Here, until the PC").
+Work here resumed on 20 October 2026: study O and round 9 (earth and air) are merged; study P is being finished on its
+branch ("Here, until the PC").
 
 - **Stage 1, here and now (study N): done.** A small 3D demo in this container ([docs/STUDY_3D.md](docs/STUDY_3D.md),
   REPORT §15). What it built:
@@ -58,15 +58,17 @@ paused" note: what is done, where its data is under `/root/nvfx-data`, and the e
 merge main into it, finish its list, run the full ctest, `nvfx_alloc_test`, `nvfx_gallery --check` and the Godot test,
 then merge it into main.
 - **Round 9, earth** (`effects-earth`, docs/EFFECTS_EARTH.md): lava, a volcanic eruption and a powder-snow avalanche.
-  - Done: the three presets with sim tests (the 21 earlier effects' clips unchanged); the test design committed first.
-  - Lava is trained and tested once. It passes: tracking at 1 s is +1.09 dB [+0.70, +1.43] over the coarse simulation
-    with detail; its endless mean picture is closer than the nearest flipbook's and its motion ties it; its detail is
-    worse than the flipbook's.
-  - Left: the eruption's model (its training was running at the pause), the avalanche's, their tests, timing, library
-    entries, the volcano scene, videos and REPORT §6.16.
+  - **Finished and merged into main** (20 October 2026): the three presets with sim tests (the
+    21 earlier effects' clips unchanged); the test design committed first; all three trained and tested once.
+  - Lava works (tracking at 1 s +1.09 dB [+0.70, +1.43] over the coarse simulation with detail; endless mean picture
+    closer than the nearest flipbook's, motion tied, detail worse). The eruption works narrowly (+0.50 dB [+0.06,
+    +0.96] at 1 s; mean picture +1.31 dB [+0.04, +2.55]). The avalanche is weak (-2.23 dB [-4.42, -0.07] at 1 s; mean
+    picture 2.90 dB [0.89, 5.71] further from real than the flipbook's).
+  - Also done: timing (provisional), ten library entries, the volcano scene with frozen keyframes, six videos,
+    REPORT §6.16.
 - **Round 9, air** (`effects-air`, docs/EFFECTS_AIR.md): a candle flame, smoke rings and heavy gas along the ground.
-  **Finished on its branch** (20 October 2026), waiting to be merged into main.
-  - Done: the three presets with sim and recipe tests (the 21 earlier effects' clips unchanged); the rule committed
+  - **Finished and merged into main** (20 October 2026): the three presets with sim and recipe tests (the 21 earlier
+    effects' clips unchanged, and the air effects' own clips unchanged by the merge with earth); the rule committed
     before any test; each model frozen by SHA-256 and tested once on seeds from 6,400,000.
   - The candle and the smoke ring work by the rule; heavy gas falls short (its mean picture and motion tie the nearest
     flipbook). Tracking at 1 s over the coarse simulation with detail: candle +2.90 dB [+2.35, +3.41], smoke ring
