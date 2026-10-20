@@ -196,7 +196,9 @@ TEST(Sim, StudyEffectsAreUnchangedByTheNewOnes) {
     }
     return h;
   };
-  const std::array<std::pair<sim::Effect, std::uint64_t>, 11> want{{{sim::Effect::fire, 0xecb25de8e62e7379ULL},
+  // the eleven of rounds 1 to 6, and round 7's six and the water's four (hashed before the earth effects were added,
+  // docs/EFFECTS_EARTH.md)
+  const std::array<std::pair<sim::Effect, std::uint64_t>, 21> want{{{sim::Effect::fire, 0xecb25de8e62e7379ULL},
                                                                      {sim::Effect::smoke, 0xea602bfa2409bf3fULL},
                                                                      {sim::Effect::explosion, 0xbb823d31fd8c4eb4ULL},
                                                                      {sim::Effect::steam, 0xa57b2dc109882ec3ULL},
@@ -206,7 +208,17 @@ TEST(Sim, StudyEffectsAreUnchangedByTheNewOnes) {
                                                                      {sim::Effect::vortex, 0xfa46f5fc13b9cb20ULL},
                                                                      {sim::Effect::fog, 0x36573f12c43055b2ULL},
                                                                      {sim::Effect::dust, 0xa20af83462f66930ULL},
-                                                                     {sim::Effect::cloud, 0x8e6664474fe37d58ULL}}};
+                                                                     {sim::Effect::cloud, 0x8e6664474fe37d58ULL},
+                                                                     {sim::Effect::wildfire, 0xad693da9553819c7ULL},
+                                                                     {sim::Effect::coals, 0x6f038944bdd12910ULL},
+                                                                     {sim::Effect::mushroom, 0x93f24f8ef0b28ae6ULL},
+                                                                     {sim::Effect::launch, 0x8a85441c04182281ULL},
+                                                                     {sim::Effect::puffs, 0xcff7f9fb95e106fdULL},
+                                                                     {sim::Effect::ink, 0x46f9e4a0c8a075b4ULL},
+                                                                     {sim::Effect::waterfall, 0x20ace39e7ed5b5b1ULL},
+                                                                     {sim::Effect::fountain, 0x897564a37a1bf472ULL},
+                                                                     {sim::Effect::splash, 0x4c634291b30f7d58ULL},
+                                                                     {sim::Effect::rainshaft, 0xbc6f9c2a34332725ULL}}};
   for (const auto& [e, h] : want) {
     auto p = small(e);
     p.intensity = 0.8f;
@@ -223,8 +235,8 @@ TEST(Sim, NewEffectsAreNamedAndLoop) {
     sim::Effect back{};
     ASSERT_TRUE(sim::parse_effect(sim::effect_name(e), back));
     EXPECT_EQ(back, e);
-    EXPECT_EQ(sim::effect_loops(e), e != sim::Effect::dust && e != sim::Effect::mushroom &&
-                                       e != sim::Effect::splash);  // they play once, as the explosion
+    EXPECT_EQ(sim::effect_loops(e), e != sim::Effect::dust && e != sim::Effect::mushroom && e != sim::Effect::splash &&
+                                       e != sim::Effect::avalanche);  // they play once, as the explosion
     EXPECT_EQ(sim::simulate(small(e)).rgba, sim::simulate(small(e)).rgba) << sim::effect_name(e);
   }
   EXPECT_EQ(sim::kAllEffects.size(), sim::kEffects.size() + sim::kNewEffects.size());
@@ -1004,10 +1016,10 @@ TEST(Sim, WaterEffectsAreNamedWithTheirControls) {
     EXPECT_FALSE(std::ranges::contains(sim::kEffects, e)) << name;
     EXPECT_EQ(sim::control_names(e)[1], e == sim::Effect::fountain ? "aim" : "wind") << name;
   }
-  // after cloud, in this order
-  // the last four, after round 7's six (wildfire, coals, mushroom, launch, puffs, ink)
-  EXPECT_EQ(sim::kAllEffects[sim::kAllEffects.size() - 4], sim::Effect::waterfall);
-  EXPECT_EQ(sim::kAllEffects.back(), sim::Effect::rainshaft);
+  // after round 7's six (wildfire, coals, mushroom, launch, puffs, ink), in this order
+  const auto at = [](sim::Effect e) { return std::ranges::find(sim::kAllEffects, e) - sim::kAllEffects.begin(); };
+  EXPECT_EQ(at(sim::Effect::waterfall), at(sim::Effect::ink) + 1);
+  EXPECT_EQ(at(sim::Effect::rainshaft), at(sim::Effect::waterfall) + 3);
 }
 
 TEST(Sim, WaterIsReflectedLightBlueWhiteAndTranslucent) {
@@ -1086,6 +1098,254 @@ TEST(Sim, RainFallsFromTheCloudBaseAndTheWindSlantsIt) {
   const auto light = water_spread(water_params(sim::Effect::rainshaft, 0.f, 0.5f, 0.5f), 120);
   const auto heavy = water_spread(water_params(sim::Effect::rainshaft, 1.f, 0.5f, 0.5f), 120);
   EXPECT_GT(heavy.water, 2.0 * light.water);  // intensity: how heavy
+}
+
+// --- lava, eruption and avalanche (docs/EFFECTS_EARTH.md) ------------------------------------------------------------
+
+namespace {
+
+// Where the material (soot: rock, ash, snow) and the heat are, as fractions of the frame (y up), and how it moves.
+struct EarthSpread {
+  double soot = 0, heat = 0, sx = 0, sy = 0, top = 0, u = 0;  // u: the material's mean horizontal speed (cells of a
+                                                               // 128-cell frame per second)
+  double hot_top = 0;          // the highest row where the heat is above half its peak
+  double dark = 0, glowing = 0;  // of the cells with rock in them (soot > 0.5): the share with heat below a fifth of
+                                 // the peak (crust) and above half of it (glow)
+  double above = 0;            // material above 22% of the height (lava's bubbles)
+  double wide_top = 0, wide_low = 0;  // columns with ash above 55% of the height, and between 30 and 45% (eruption)
+  double side_low = 0;         // ash low down (below 10%) more than 15% of the frame from the middle (eruption)
+};
+
+EarthSpread earth_spread(const sim::State& s) {
+  EarthSpread o;
+  float peak_t = 0.f, peak_d = 0.f;
+  for (const float t : s.temp) peak_t = std::max(peak_t, t);
+  for (const float d : s.soot) peak_d = std::max(peak_d, d);
+  const double n = s.n, scale = 128.0 / n;
+  long rock = 0, dark = 0, glowing = 0;
+  std::vector<double> col_top(static_cast<std::size_t>(s.n), 0.0), col_low(static_cast<std::size_t>(s.n), 0.0);
+  for (int y = 0; y < s.n; ++y) {
+    for (int x = 0; x < s.n; ++x) {
+      const std::size_t i = static_cast<std::size_t>(y * s.n + x);
+      const double d = s.soot[i], t = s.temp[i], fy = (y + 0.5) / n, fx = (x + 0.5) / n;
+      o.soot += d;
+      o.heat += t;
+      o.sx += d * fx;
+      o.sy += d * fy;
+      o.u += d * s.u[i] * scale;
+      if (d > 0.1 * peak_d) o.top = std::max(o.top, (y + 1) / n);
+      if (t > 0.5 * peak_t) o.hot_top = std::max(o.hot_top, (y + 1) / n);
+      if (d > 0.5) {
+        ++rock;
+        dark += t < 0.25 * peak_t;
+        glowing += t > 0.5 * peak_t;
+      }
+      if (fy > 0.22) o.above += d;
+      if (fy > 0.55) col_top[static_cast<std::size_t>(x)] = std::max(col_top[static_cast<std::size_t>(x)], d);
+      if (fy > 0.3 && fy < 0.45) col_low[static_cast<std::size_t>(x)] = std::max(col_low[static_cast<std::size_t>(x)], d);
+      if (fy < 0.1 && std::abs(fx - 0.5) > 0.15) o.side_low += d;
+    }
+  }
+  for (int x = 0; x < s.n; ++x) {
+    o.wide_top += col_top[static_cast<std::size_t>(x)] > 0.2;
+    o.wide_low += col_low[static_cast<std::size_t>(x)] > 0.2;
+  }
+  if (o.soot > 0) {
+    o.sx /= o.soot;
+    o.sy /= o.soot;
+    o.u /= o.soot;
+  }
+  if (rock > 0) {
+    o.dark = static_cast<double>(dark) / static_cast<double>(rock);
+    o.glowing = static_cast<double>(glowing) / static_cast<double>(rock);
+  }
+  return o;
+}
+
+// The state after each of `frames` frames, at 64 cells.
+std::vector<sim::State> earth_run(sim::Effect e, float intensity, float second, float turbulence, int frames, std::uint64_t seed = 3) {
+  sim::Fluid f(water_params(e, intensity, second, turbulence, seed));
+  std::vector<sim::State> v;
+  for (int i = 0; i < frames; ++i) {
+    f.step_frame();
+    v.push_back(f.state());
+  }
+  return v;
+}
+
+// Means of a statistic over frames [a, b) of a run.
+template <class F>
+double mean_over(const std::vector<sim::State>& v, int a, int b, F stat) {
+  double m = 0;
+  for (int i = a; i < b; ++i) m += stat(earth_spread(v[static_cast<std::size_t>(i)])) / (b - a);
+  return m;
+}
+
+}  // namespace
+
+TEST(Sim, EarthEffectsAreNamedAndOnlyTheAvalanchePlaysOnce) {
+  const std::array earth{sim::Effect::lava, sim::Effect::eruption, sim::Effect::avalanche};
+  const std::array<std::string_view, 3> second{"flow", "wind", "direction"};
+  for (std::size_t k = 0; k < earth.size(); ++k) {
+    const sim::Effect e = earth[k];
+    sim::Effect back{};
+    ASSERT_TRUE(sim::parse_effect(sim::effect_name(e), back));
+    EXPECT_EQ(back, e);
+    EXPECT_TRUE(std::ranges::contains(sim::kNewEffects, e));
+    EXPECT_FALSE(std::ranges::contains(sim::kEffects, e));
+    const auto names = sim::control_names(e);
+    EXPECT_EQ(names[0], "intensity");
+    EXPECT_EQ(names[1], second[k]);
+    EXPECT_EQ(names[2], "turbulence");
+  }
+  EXPECT_EQ(sim::effect_name(sim::Effect::lava), "lava");
+  EXPECT_EQ(sim::effect_name(sim::Effect::eruption), "eruption");
+  EXPECT_EQ(sim::effect_name(sim::Effect::avalanche), "avalanche");
+  // after the water's four, in this order
+  const auto at = [](sim::Effect e) { return std::ranges::find(sim::kAllEffects, e) - sim::kAllEffects.begin(); };
+  EXPECT_GT(at(sim::Effect::lava), at(sim::Effect::rainshaft));
+  EXPECT_EQ(at(sim::Effect::eruption), at(sim::Effect::lava) + 1);
+  EXPECT_EQ(at(sim::Effect::avalanche), at(sim::Effect::lava) + 2);
+  EXPECT_TRUE(sim::effect_loops(sim::Effect::lava));
+  EXPECT_TRUE(sim::effect_loops(sim::Effect::eruption));
+  EXPECT_FALSE(sim::effect_loops(sim::Effect::avalanche));
+  EXPECT_EQ(sim::one_shot_frames(sim::Effect::avalanche), 150);  // it runs, grows and comes to rest within 5 s
+  EXPECT_EQ(sim::one_shot_frames(sim::Effect::lava), 0);
+  // lava gives light (colour above alpha) over dark rock; the eruption's ash is dark and glows only at the vent; the
+  // avalanche is white snow with no light of its own
+  const auto clip = [](sim::Effect e, int frames) {
+    auto p = water_params(e, 0.7f, 0.7f, 0.5f);
+    p.frames = frames;
+    return sim::simulate(p);
+  };
+  const Clip lava = clip(sim::Effect::lava, 20), eruption = clip(sim::Effect::eruption, 20), snow = clip(sim::Effect::avalanche, 60);
+  long glowing = 0;
+  for (std::size_t i = 0; i < lava.rgba.size(); i += 4) glowing += lava.rgba[i] > lava.rgba[i + 3] + 8;
+  EXPECT_GT(glowing, 100);
+  long ash = 0, dark = 0, lit = 0, low_lit = 0;
+  for (std::size_t i = 0; i < eruption.rgba.size(); i += 4) {
+    const auto py = (i / 4 / 64) % 64;  // rows from the top
+    const auto [r8, g8] = std::pair{eruption.rgba[i], eruption.rgba[i + 1]};
+    if (eruption.rgba[i + 3] > 200 && r8 < g8 + 30) {
+      ++ash;
+      dark += g8 < 0.45 * eruption.rgba[i + 3];
+    }
+    if (r8 > 120 && r8 > g8 + 40) {  // an orange glow
+      ++lit;
+      low_lit += py > 38;  // in the lower 40% of the frame
+    }
+  }
+  ASSERT_GT(ash, 100);
+  EXPECT_GT(static_cast<double>(dark), 0.8 * static_cast<double>(ash));
+  EXPECT_GT(lit, 10);
+  EXPECT_GT(static_cast<double>(low_lit), 0.9 * static_cast<double>(lit));
+  long bad = 0, covered = 0;
+  double r = 0, b = 0, a = 0;
+  for (std::size_t i = 0; i < snow.rgba.size(); i += 4) {
+    for (std::size_t k = 0; k < 3; ++k) bad += snow.rgba[i + k] > snow.rgba[i + 3] + 1;
+    if (snow.rgba[i + 3] > 64) {
+      ++covered;
+      r += snow.rgba[i];
+      b += snow.rgba[i + 2];
+      a += snow.rgba[i + 3];
+    }
+  }
+  EXPECT_EQ(bad, 0);
+  ASSERT_GT(covered, 100);
+  EXPECT_GT(r, 0.6 * a);  // light
+  EXPECT_GE(b, r);        // white with a blue shade
+}
+
+TEST(Sim, LavaFlowsAlongTheGroundAndPoolsUnderACrustThatCracks) {
+  const auto v = earth_run(sim::Effect::lava, 0.6f, 0.5f, 0.5f, 240);
+  for (int i = 150; i < 240; i += 10) {
+    const EarthSpread e = earth_spread(v[static_cast<std::size_t>(i)]);
+    EXPECT_LT(e.sy, 0.15) << i;    // low, along the ground
+    EXPECT_LT(e.top, 0.35) << i;
+    EXPECT_GT(e.dark, 0.3) << i;   // much of it dark crust
+    EXPECT_GT(e.glowing, 0.03) << i;  // that cracks to show the glow
+  }
+  // the crust's pattern crawls: the heat a second apart differs by a good part of itself
+  double diff = 0, sum = 0;
+  for (std::size_t i = 0; i < v[150].temp.size(); ++i) {
+    diff += std::abs(v[150].temp[i] - v[180].temp[i]);
+    sum += v[150].temp[i];
+  }
+  EXPECT_GT(diff / sum, 0.25);
+  // flow: downhill to the left or right, slowly; level, it stays (and pools: the band is deeper)
+  const auto speed = [](const EarthSpread& e) { return e.u; };
+  const auto left = earth_run(sim::Effect::lava, 0.6f, 0.f, 0.5f, 180), right = earth_run(sim::Effect::lava, 0.6f, 1.f, 0.5f, 180);
+  const double ul = mean_over(left, 120, 180, speed), ur = mean_over(right, 120, 180, speed), u0 = mean_over(v, 120, 180, speed);
+  EXPECT_LT(ul, -3.0);
+  EXPECT_GT(ur, 3.0);
+  EXPECT_LT(std::abs(u0), 1.0);
+  EXPECT_LT(ur, 25.0);  // slowly: at or below fire's speeds
+  const auto depth = [](const EarthSpread& e) { return e.sy; };
+  EXPECT_GT(mean_over(v, 120, 180, depth), mean_over(right, 120, 180, depth));
+  // it pools downhill: more rock on the side it flows to
+  const auto x = [](const EarthSpread& e) { return e.sx; };
+  EXPECT_GT(mean_over(right, 120, 180, x), mean_over(left, 120, 180, x) + 0.01);
+  // hotter with intensity; more bubbling with turbulence
+  const auto cool = earth_run(sim::Effect::lava, 0.f, 0.5f, 0.5f, 150), hot = earth_run(sim::Effect::lava, 1.f, 0.5f, 0.5f, 150);
+  const auto heat = [](const EarthSpread& e) { return e.heat; };
+  EXPECT_GT(mean_over(hot, 100, 150, heat), 1.5 * mean_over(cool, 100, 150, heat));
+  const auto calm = earth_run(sim::Effect::lava, 0.6f, 0.5f, 0.f, 240), boiling = earth_run(sim::Effect::lava, 0.6f, 0.5f, 1.f, 240);
+  const auto above = [](const EarthSpread& e) { return e.above; };
+  EXPECT_GT(mean_over(boiling, 120, 240, above), 1.5 * mean_over(calm, 120, 240, above) + 0.1);
+}
+
+TEST(Sim, EruptionRisesIntoAnUmbrellaAndItsHeavyAshFallsBack) {
+  const auto v = earth_run(sim::Effect::eruption, 0.6f, 0.5f, 0.5f, 240);
+  const auto wide_top = [](const EarthSpread& e) { return e.wide_top; };
+  const auto wide_low = [](const EarthSpread& e) { return e.wide_low; };
+  // an umbrella under the stable layer, wider than the column below it and spanning much of the frame
+  EXPECT_GT(mean_over(v, 180, 240, wide_top), 1.4 * mean_over(v, 180, 240, wide_low));
+  EXPECT_GT(mean_over(v, 180, 240, wide_top), 0.4 * 64);
+  EXPECT_GT(mean_over(v, 180, 240, wide_low), 0.0);  // on a column
+  // only the ash near the vent is hot enough to glow
+  const auto hot_top = [](const EarthSpread& e) { return e.hot_top; };
+  EXPECT_LT(mean_over(v, 180, 240, hot_top), 0.4);
+  // the heavy ash collapses down the sides and runs out along the ground, more at a higher rate
+  const auto side = [](const EarthSpread& e) { return e.side_low; };
+  const auto weak = earth_run(sim::Effect::eruption, 0.1f, 0.5f, 0.5f, 240), strong = earth_run(sim::Effect::eruption, 1.f, 0.5f, 0.5f, 240);
+  EXPECT_GT(mean_over(strong, 180, 240, side), 2.0 * mean_over(weak, 180, 240, side) + 1.0);
+  // a higher rate, more ash and a higher column
+  const auto soot = [](const EarthSpread& e) { return e.soot; };
+  const auto top = [](const EarthSpread& e) { return e.top; };
+  EXPECT_GT(mean_over(strong, 180, 240, soot), 1.5 * mean_over(weak, 180, 240, soot));
+  EXPECT_GT(mean_over(strong, 180, 240, top), mean_over(weak, 180, 240, top) + 0.05);
+  // the wind leans it
+  const auto left = earth_run(sim::Effect::eruption, 0.6f, 0.f, 0.5f, 180), right = earth_run(sim::Effect::eruption, 0.6f, 1.f, 0.5f, 180);
+  const auto x = [](const EarthSpread& e) { return e.sx; };
+  EXPECT_GT(mean_over(right, 150, 180, x), mean_over(left, 150, 180, x) + 0.1);
+}
+
+TEST(Sim, AvalancheRunsDownhillGrowsAndSettles) {
+  const auto x = [](const EarthSpread& e) { return e.sx; };
+  const auto soot = [](const EarthSpread& e) { return e.soot; };
+  const auto top = [](const EarthSpread& e) { return e.top; };
+  for (const float d : {0.f, 1.f}) {  // it runs to the left or to the right, and grows as it goes
+    const auto v = earth_run(sim::Effect::avalanche, 0.7f, d, 0.5f, 150);
+    const double sign = d > 0.5f ? 1.0 : -1.0;
+    EXPECT_GT(sign * (mean_over(v, 85, 95, x) - mean_over(v, 5, 15, x)), 0.25) << d;
+    EXPECT_GT(mean_over(v, 70, 80, soot), 2.0 * mean_over(v, 5, 15, soot)) << d;
+    EXPECT_GT(mean_over(v, 85, 95, top), mean_over(v, 5, 15, top) + 0.15) << d;
+    // then it settles: by its end most of its snow has come out of the air
+    double peak = 0;
+    for (const auto& s : v) peak = std::max(peak, earth_spread(s).soot);
+    EXPECT_LT(earth_spread(v.back()).soot, 0.6 * peak) << d;
+    for (const auto& s : v) {
+      for (const float t : s.temp) ASSERT_EQ(t, 0.f);  // no heat
+    }
+  }
+  // on the level it only slumps, near where it broke loose
+  const auto level = earth_run(sim::Effect::avalanche, 0.7f, 0.5f, 0.5f, 150);
+  EXPECT_NEAR(mean_over(level, 140, 150, x), 0.5, 0.15);
+  EXPECT_LT(mean_over(level, 70, 80, soot), 0.5 * mean_over(earth_run(sim::Effect::avalanche, 0.7f, 1.f, 0.5f, 80), 70, 80, soot));
+  // a bigger avalanche with intensity
+  const auto small_one = earth_run(sim::Effect::avalanche, 0.1f, 1.f, 0.5f, 90), big = earth_run(sim::Effect::avalanche, 1.f, 1.f, 0.5f, 90);
+  EXPECT_GT(mean_over(big, 70, 90, soot), 2.0 * mean_over(small_one, 70, 90, soot));
+  EXPECT_GT(mean_over(big, 70, 90, top), mean_over(small_one, 70, 90, top) + 0.1);
 }
 
 TEST(Sim, ParamsRoundTripThroughClipMetadata) {

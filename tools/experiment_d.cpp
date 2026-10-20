@@ -147,6 +147,7 @@ void step_chaos(const Ctx& c) {
     std::vector<std::vector<double>> curves(names.size(), std::vector<double>(static_cast<std::size_t>(N), 0.0));
     for (int k = 0; k < seeds; ++k) {
       sim::Params p = run_params(e, static_cast<std::uint64_t>(k), 77);
+      if (c.seed_base > 0) p.seed = c.seed_base + 150000 + static_cast<std::uint64_t>(k);  // the other seed is this + 999
       sim::Fluid a(p);
       for (int i = 0; i < warm; ++i) a.step_frame();
       const sim::State s0 = a.state();
