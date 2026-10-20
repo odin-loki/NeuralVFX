@@ -1,0 +1,241 @@
+arm,effect,size,comparison,measure,mean,lo,hi,margin,verdict
+L_effect,explosion,256,L-B,apsnr_vsN,0.568982,0.438428,0.696324,,better
+L_effect,explosion,256,L-B,ssim_vsN,0.000198,0.000057,0.000308,,better
+L_effect,explosion,256,L-B,hf_l1_vsN,-0.127451,-0.208774,-0.056172,,better
+L_effect,explosion,256,L-N,track1s,0.115668,0.085931,0.149142,0.200000,within
+L_effect,explosion,256,L-N,spectrum_l1,-0.057158,-0.090533,-0.025218,0.045568,within
+L_effect,explosion,256,L-N,abs_ln_motion_ratio,0.002322,-0.009437,0.012712,0.043185,within
+L_effect,explosion,256,L-N,coverage_l1,-0.000016,-0.000049,0.000014,0.005623,within
+L_effect,explosion,256,L-N,emission_l1,0.000004,0.000003,0.000004,0.000100,within
+L_effect,explosion,256,L-N,mean_frame_psnr,-0.014393,-0.032892,-0.001396,1.389847,within
+L_effect,explosion,256,L-N,hf_l1_real,-0.020231,-0.061991,0.008269,0.073319,within
+L_effect,mushroom,256,L-B,apsnr_vsN,0.334745,0.300213,0.369685,,better
+L_effect,mushroom,256,L-B,ssim_vsN,0.000779,0.000697,0.000858,,better
+L_effect,mushroom,256,L-B,hf_l1_vsN,-0.260996,-0.306824,-0.211864,,better
+L_effect,mushroom,256,L-N,track1s,0.154857,0.122608,0.190009,0.200000,within
+L_effect,mushroom,256,L-N,spectrum_l1,-0.131493,-0.141561,-0.119749,0.051437,within
+L_effect,mushroom,256,L-N,abs_ln_motion_ratio,0.007846,-0.016668,0.028990,0.131208,within
+L_effect,mushroom,256,L-N,coverage_l1,0.000016,-0.000019,0.000064,0.013404,within
+L_effect,mushroom,256,L-N,emission_l1,0.000009,0.000007,0.000011,0.000100,within
+L_effect,mushroom,256,L-N,mean_frame_psnr,0.002800,-0.001951,0.007405,1.453381,within
+L_effect,mushroom,256,L-N,hf_l1_real,-0.165809,-0.192406,-0.140681,0.089370,within
+L_effect,wildfire,256,L-B,apsnr_vsN,0.345152,0.245047,0.447904,,better
+L_effect,wildfire,256,L-B,ssim_vsN,0.000768,0.000595,0.000951,,better
+L_effect,wildfire,256,L-B,hf_l1_vsN,-0.088552,-0.104470,-0.071793,,better
+L_effect,wildfire,256,L-N,track1s,0.197228,0.163024,0.230084,0.200000,within
+L_effect,wildfire,256,L-N,spectrum_l1,-0.131172,-0.156769,-0.107739,0.026281,within
+L_effect,wildfire,256,L-N,abs_ln_motion_ratio,-0.006613,-0.043840,0.029870,0.031407,within
+L_effect,wildfire,256,L-N,coverage_l1,-0.000010,-0.000041,0.000024,0.001916,within
+L_effect,wildfire,256,L-N,emission_l1,0.000003,-0.000014,0.000019,0.000245,within
+L_effect,wildfire,256,L-N,mean_frame_psnr,-0.018988,-0.046607,0.009055,0.664901,within
+L_effect,wildfire,256,L-N,hf_l1_real,-0.118163,-0.158238,-0.084133,0.033329,within
+L_effect,launch,256,L-B,apsnr_vsN,0.066673,0.051045,0.081648,,better
+L_effect,launch,256,L-B,ssim_vsN,0.001292,0.001143,0.001430,,better
+L_effect,launch,256,L-B,hf_l1_vsN,0.037858,0.022861,0.053980,,not better
+L_effect,launch,256,L-N,track1s,0.317798,0.292683,0.346018,0.200000,within
+L_effect,launch,256,L-N,spectrum_l1,-0.267046,-0.350735,-0.171242,0.032832,within
+L_effect,launch,256,L-N,abs_ln_motion_ratio,-0.220834,-0.263503,-0.166834,0.124531,within
+L_effect,launch,256,L-N,coverage_l1,-0.000082,-0.000192,0.000027,0.022702,within
+L_effect,launch,256,L-N,emission_l1,-0.000020,-0.000041,0.000001,0.000194,within
+L_effect,launch,256,L-N,mean_frame_psnr,-0.007883,-0.022539,0.004649,2.065764,within
+L_effect,launch,256,L-N,hf_l1_real,-0.488722,-0.611702,-0.348368,0.051554,within
+L_effect,smoke,256,L-B,apsnr_vsN,0.348375,0.324077,0.372311,,better
+L_effect,smoke,256,L-B,ssim_vsN,-0.001092,-0.001617,-0.000654,,not better
+L_effect,smoke,256,L-B,hf_l1_vsN,-0.027143,-0.066981,0.015551,,not better
+L_effect,smoke,256,L-N,track1s,1.020391,0.959010,1.083101,0.200000,within
+L_effect,smoke,256,L-N,spectrum_l1,-0.469937,-0.505813,-0.433693,0.038307,within
+L_effect,smoke,256,L-N,abs_ln_motion_ratio,-0.225018,-0.282723,-0.143962,0.081812,within
+L_effect,smoke,256,L-N,coverage_l1,0.000003,-0.000061,0.000073,0.004586,within
+L_effect,smoke,256,L-N,emission_l1,-0.000045,-0.000052,-0.000038,0.000100,within
+L_effect,smoke,256,L-N,mean_frame_psnr,0.047856,0.022159,0.073533,1.743398,within
+L_effect,smoke,256,L-N,hf_l1_real,-0.602196,-0.657732,-0.547313,0.048630,within
+L_effect,waterfall,256,L-B,apsnr_vsN,0.056092,0.039240,0.073234,,better
+L_effect,waterfall,256,L-B,ssim_vsN,0.000619,0.000565,0.000668,,better
+L_effect,waterfall,256,L-B,hf_l1_vsN,0.057356,0.052941,0.061752,,not better
+L_effect,waterfall,256,L-N,track1s,0.368529,0.320216,0.415754,0.200000,within
+L_effect,waterfall,256,L-N,spectrum_l1,-0.361514,-0.409788,-0.311011,0.020322,within
+L_effect,waterfall,256,L-N,abs_ln_motion_ratio,0.037752,-0.102629,0.168349,0.046551,past the margin
+L_effect,waterfall,256,L-N,coverage_l1,-0.000020,-0.000133,0.000091,0.007848,within
+L_effect,waterfall,256,L-N,emission_l1,-0.000025,-0.000029,-0.000021,0.000100,within
+L_effect,waterfall,256,L-N,mean_frame_psnr,-0.052483,-0.076055,-0.030518,1.836803,within
+L_effect,waterfall,256,L-N,hf_l1_real,-0.570229,-0.656710,-0.485626,0.024218,within
+L_effect,explosion,512,L-B,apsnr_vsN,0.451424,0.363233,0.539989,,better
+L_effect,explosion,512,L-B,ssim_vsN,0.000068,-0.000032,0.000139,,not better
+L_effect,explosion,512,L-B,hf_l1_vsN,-0.038573,-0.092042,0.002272,,not better
+L_effect,explosion,512,L-N,track1s,0.068832,0.054910,0.082674,0.200000,within
+L_effect,explosion,512,L-N,spectrum_l1,-0.067750,-0.108617,-0.027775,0.062049,within
+L_effect,explosion,512,L-N,abs_ln_motion_ratio,-0.022444,-0.032339,-0.008913,0.050033,within
+L_effect,explosion,512,L-N,coverage_l1,0.000005,-0.000048,0.000050,0.005618,within
+L_effect,explosion,512,L-N,emission_l1,0.000001,0.000001,0.000002,0.000100,within
+L_effect,explosion,512,L-N,mean_frame_psnr,-0.014165,-0.026246,-0.005640,1.387048,within
+L_effect,explosion,512,L-N,hf_l1_real,-0.000735,-0.036952,0.024824,0.088182,within
+L_effect,mushroom,512,L-B,apsnr_vsN,0.183357,0.165922,0.199387,,better
+L_effect,mushroom,512,L-B,ssim_vsN,0.000005,-0.000040,0.000044,,not better
+L_effect,mushroom,512,L-B,hf_l1_vsN,-0.152778,-0.187000,-0.120709,,better
+L_effect,mushroom,512,L-N,track1s,0.044581,0.034830,0.056401,0.200000,within
+L_effect,mushroom,512,L-N,spectrum_l1,-0.151507,-0.171561,-0.133175,0.085532,within
+L_effect,mushroom,512,L-N,abs_ln_motion_ratio,-0.012780,-0.042121,0.018054,0.099287,within
+L_effect,mushroom,512,L-N,coverage_l1,0.000047,-0.000023,0.000113,0.013354,within
+L_effect,mushroom,512,L-N,emission_l1,0.000004,0.000004,0.000005,0.000100,within
+L_effect,mushroom,512,L-N,mean_frame_psnr,-0.007950,-0.011184,-0.004747,1.456838,within
+L_effect,mushroom,512,L-N,hf_l1_real,-0.128861,-0.161813,-0.096960,0.124751,within
+L_effect,wildfire,512,L-B,apsnr_vsN,0.146554,0.109930,0.181457,,better
+L_effect,wildfire,512,L-B,ssim_vsN,0.000147,0.000083,0.000219,,better
+L_effect,wildfire,512,L-B,hf_l1_vsN,-0.040903,-0.053209,-0.028606,,better
+L_effect,wildfire,512,L-N,track1s,0.055544,0.042502,0.069376,0.200000,within
+L_effect,wildfire,512,L-N,spectrum_l1,-0.108274,-0.143134,-0.077797,0.031200,within
+L_effect,wildfire,512,L-N,abs_ln_motion_ratio,-0.076983,-0.090798,-0.065336,0.036966,within
+L_effect,wildfire,512,L-N,coverage_l1,0.000002,-0.000012,0.000016,0.001916,within
+L_effect,wildfire,512,L-N,emission_l1,0.000003,-0.000009,0.000013,0.000246,within
+L_effect,wildfire,512,L-N,mean_frame_psnr,-0.022719,-0.036754,-0.008441,0.661212,within
+L_effect,wildfire,512,L-N,hf_l1_real,-0.082028,-0.131861,-0.039489,0.039149,within
+L_effect,launch,512,L-B,apsnr_vsN,0.033473,0.024216,0.042717,,better
+L_effect,launch,512,L-B,ssim_vsN,-0.000378,-0.000507,-0.000255,,not better
+L_effect,launch,512,L-B,hf_l1_vsN,0.052816,0.037591,0.069153,,not better
+L_effect,launch,512,L-N,track1s,0.115942,0.106363,0.126269,0.200000,within
+L_effect,launch,512,L-N,spectrum_l1,-0.330091,-0.391929,-0.258650,0.047145,within
+L_effect,launch,512,L-N,abs_ln_motion_ratio,-0.162758,-0.171435,-0.154136,0.134223,within
+L_effect,launch,512,L-N,coverage_l1,0.000075,-0.000038,0.000216,0.022639,within
+L_effect,launch,512,L-N,emission_l1,-0.000009,-0.000015,-0.000002,0.000192,within
+L_effect,launch,512,L-N,mean_frame_psnr,-0.012409,-0.020586,-0.004531,2.107206,within
+L_effect,launch,512,L-N,hf_l1_real,-0.480729,-0.594079,-0.354249,0.055750,within
+L_effect,smoke,512,L-B,apsnr_vsN,0.356888,0.334818,0.376706,,better
+L_effect,smoke,512,L-B,ssim_vsN,-0.001837,-0.002144,-0.001540,,not better
+L_effect,smoke,512,L-B,hf_l1_vsN,-0.032848,-0.076451,0.013802,,not better
+L_effect,smoke,512,L-N,track1s,0.624500,0.584074,0.673567,0.200000,within
+L_effect,smoke,512,L-N,spectrum_l1,-0.432833,-0.467348,-0.397210,0.049061,within
+L_effect,smoke,512,L-N,abs_ln_motion_ratio,-0.295831,-0.315875,-0.275411,0.080772,within
+L_effect,smoke,512,L-N,coverage_l1,-0.000008,-0.000070,0.000051,0.004737,within
+L_effect,smoke,512,L-N,emission_l1,-0.000056,-0.000062,-0.000049,0.000100,within
+L_effect,smoke,512,L-N,mean_frame_psnr,-0.053177,-0.086424,-0.019101,1.645052,within
+L_effect,smoke,512,L-N,hf_l1_real,-0.477741,-0.534574,-0.421048,0.054662,within
+L_effect,waterfall,512,L-B,apsnr_vsN,0.032154,0.024497,0.040375,,better
+L_effect,waterfall,512,L-B,ssim_vsN,-0.000067,-0.000103,-0.000033,,not better
+L_effect,waterfall,512,L-B,hf_l1_vsN,0.056915,0.053453,0.060290,,not better
+L_effect,waterfall,512,L-N,track1s,0.132965,0.106067,0.160647,0.200000,within
+L_effect,waterfall,512,L-N,spectrum_l1,-0.369987,-0.404869,-0.336434,0.023314,within
+L_effect,waterfall,512,L-N,abs_ln_motion_ratio,-0.135434,-0.191794,-0.074569,0.048632,within
+L_effect,waterfall,512,L-N,coverage_l1,-0.000004,-0.000050,0.000038,0.007864,within
+L_effect,waterfall,512,L-N,emission_l1,-0.000010,-0.000012,-0.000008,0.000100,within
+L_effect,waterfall,512,L-N,mean_frame_psnr,-0.033423,-0.051414,-0.016201,1.817200,within
+L_effect,waterfall,512,L-N,hf_l1_real,-0.550797,-0.624299,-0.482205,0.025760,within
+L_shared,explosion,256,L-B,apsnr_vsN,0.248362,0.210678,0.279485,,better
+L_shared,explosion,256,L-B,ssim_vsN,0.000264,0.000226,0.000295,,better
+L_shared,explosion,256,L-B,hf_l1_vsN,-0.054176,-0.098245,-0.015510,,better
+L_shared,explosion,256,L-N,track1s,0.198648,0.160550,0.241089,0.200000,within
+L_shared,explosion,256,L-N,spectrum_l1,-0.105881,-0.151773,-0.062444,0.045568,within
+L_shared,explosion,256,L-N,abs_ln_motion_ratio,0.008804,-0.008973,0.023479,0.043185,within
+L_shared,explosion,256,L-N,coverage_l1,-0.000035,-0.000131,0.000066,0.005623,within
+L_shared,explosion,256,L-N,emission_l1,0.000001,0.000000,0.000001,0.000100,within
+L_shared,explosion,256,L-N,mean_frame_psnr,0.012850,-0.004038,0.031120,1.389847,within
+L_shared,explosion,256,L-N,hf_l1_real,-0.103394,-0.164001,-0.058354,0.073319,within
+L_shared,mushroom,256,L-B,apsnr_vsN,0.120466,0.110253,0.130507,,better
+L_shared,mushroom,256,L-B,ssim_vsN,0.000570,0.000518,0.000626,,better
+L_shared,mushroom,256,L-B,hf_l1_vsN,-0.116165,-0.162235,-0.066301,,better
+L_shared,mushroom,256,L-N,track1s,0.223224,0.182068,0.266827,0.200000,within
+L_shared,mushroom,256,L-N,spectrum_l1,-0.182898,-0.218908,-0.142908,0.051437,within
+L_shared,mushroom,256,L-N,abs_ln_motion_ratio,0.030843,-0.020362,0.073649,0.131208,within
+L_shared,mushroom,256,L-N,coverage_l1,-0.000034,-0.000166,0.000112,0.013404,within
+L_shared,mushroom,256,L-N,emission_l1,-0.000001,-0.000003,0.000002,0.000100,within
+L_shared,mushroom,256,L-N,mean_frame_psnr,0.036953,0.023005,0.051619,1.453381,within
+L_shared,mushroom,256,L-N,hf_l1_real,-0.277416,-0.307180,-0.245445,0.089370,within
+L_shared,wildfire,256,L-B,apsnr_vsN,0.054646,0.010635,0.090473,,better
+L_shared,wildfire,256,L-B,ssim_vsN,-0.000063,-0.000340,0.000188,,not better
+L_shared,wildfire,256,L-B,hf_l1_vsN,0.076103,0.044310,0.112695,,not better
+L_shared,wildfire,256,L-N,track1s,0.322892,0.288390,0.362523,0.200000,within
+L_shared,wildfire,256,L-N,spectrum_l1,-0.196640,-0.237871,-0.160634,0.026281,within
+L_shared,wildfire,256,L-N,abs_ln_motion_ratio,0.018072,-0.026769,0.059542,0.031407,past the margin
+L_shared,wildfire,256,L-N,coverage_l1,-0.000002,-0.000047,0.000053,0.001916,within
+L_shared,wildfire,256,L-N,emission_l1,0.000002,-0.000014,0.000017,0.000245,within
+L_shared,wildfire,256,L-N,mean_frame_psnr,0.008754,-0.016260,0.031812,0.664901,within
+L_shared,wildfire,256,L-N,hf_l1_real,-0.231764,-0.281098,-0.192034,0.033329,within
+L_shared,launch,256,L-B,apsnr_vsN,0.025809,0.011154,0.040729,,better
+L_shared,launch,256,L-B,ssim_vsN,0.000800,0.000623,0.000963,,better
+L_shared,launch,256,L-B,hf_l1_vsN,0.070106,0.049751,0.091621,,not better
+L_shared,launch,256,L-N,track1s,0.326013,0.301257,0.351920,0.200000,within
+L_shared,launch,256,L-N,spectrum_l1,-0.258511,-0.350661,-0.153472,0.032832,within
+L_shared,launch,256,L-N,abs_ln_motion_ratio,-0.223421,-0.267426,-0.167459,0.124531,within
+L_shared,launch,256,L-N,coverage_l1,0.000084,-0.000086,0.000251,0.022702,within
+L_shared,launch,256,L-N,emission_l1,-0.000017,-0.000025,-0.000010,0.000194,within
+L_shared,launch,256,L-N,mean_frame_psnr,-0.025264,-0.036310,-0.015465,2.065764,within
+L_shared,launch,256,L-N,hf_l1_real,-0.487837,-0.622275,-0.332922,0.051554,within
+L_shared,smoke,256,L-B,apsnr_vsN,0.087729,0.075269,0.100041,,better
+L_shared,smoke,256,L-B,ssim_vsN,0.001795,0.001571,0.002012,,better
+L_shared,smoke,256,L-B,hf_l1_vsN,-0.002386,-0.026220,0.022741,,not better
+L_shared,smoke,256,L-N,track1s,0.891992,0.831164,0.951136,0.200000,within
+L_shared,smoke,256,L-N,spectrum_l1,-0.478934,-0.523797,-0.433974,0.038307,within
+L_shared,smoke,256,L-N,abs_ln_motion_ratio,-0.222034,-0.280909,-0.140218,0.081812,within
+L_shared,smoke,256,L-N,coverage_l1,0.000042,-0.000011,0.000092,0.004586,within
+L_shared,smoke,256,L-N,emission_l1,-0.000002,-0.000005,0.000001,0.000100,within
+L_shared,smoke,256,L-N,mean_frame_psnr,0.014636,-0.029655,0.056972,1.743398,within
+L_shared,smoke,256,L-N,hf_l1_real,-0.629799,-0.698655,-0.559502,0.048630,within
+L_shared,waterfall,256,L-B,apsnr_vsN,0.003742,-0.006342,0.014755,,not better
+L_shared,waterfall,256,L-B,ssim_vsN,0.000092,-0.000026,0.000199,,not better
+L_shared,waterfall,256,L-B,hf_l1_vsN,0.055518,0.050423,0.061109,,not better
+L_shared,waterfall,256,L-N,track1s,0.388630,0.336144,0.438690,0.200000,within
+L_shared,waterfall,256,L-N,spectrum_l1,-0.362892,-0.416446,-0.305184,0.020322,within
+L_shared,waterfall,256,L-N,abs_ln_motion_ratio,0.032062,-0.106260,0.160463,0.046551,past the margin
+L_shared,waterfall,256,L-N,coverage_l1,0.000059,-0.000156,0.000267,0.007848,within
+L_shared,waterfall,256,L-N,emission_l1,0.000009,0.000006,0.000013,0.000100,within
+L_shared,waterfall,256,L-N,mean_frame_psnr,-0.036941,-0.066743,-0.006186,1.836803,within
+L_shared,waterfall,256,L-N,hf_l1_real,-0.561921,-0.653520,-0.470507,0.024218,within
+L_shared,explosion,512,L-B,apsnr_vsN,0.173473,0.145092,0.199400,,better
+L_shared,explosion,512,L-B,ssim_vsN,0.000083,0.000048,0.000108,,better
+L_shared,explosion,512,L-B,hf_l1_vsN,0.000007,-0.022281,0.017111,,not better
+L_shared,explosion,512,L-N,track1s,0.102642,0.081734,0.123118,0.200000,within
+L_shared,explosion,512,L-N,spectrum_l1,-0.140198,-0.194540,-0.087326,0.062049,within
+L_shared,explosion,512,L-N,abs_ln_motion_ratio,-0.025321,-0.037529,-0.009399,0.050033,within
+L_shared,explosion,512,L-N,coverage_l1,0.000010,-0.000033,0.000047,0.005618,within
+L_shared,explosion,512,L-N,emission_l1,0.000000,-0.000000,0.000001,0.000100,within
+L_shared,explosion,512,L-N,mean_frame_psnr,-0.003423,-0.007256,0.000295,1.387048,within
+L_shared,explosion,512,L-N,hf_l1_real,-0.090558,-0.148137,-0.043795,0.088182,within
+L_shared,mushroom,512,L-B,apsnr_vsN,0.121953,0.104737,0.137617,,better
+L_shared,mushroom,512,L-B,ssim_vsN,0.000146,0.000129,0.000164,,better
+L_shared,mushroom,512,L-B,hf_l1_vsN,-0.029049,-0.063608,0.007919,,not better
+L_shared,mushroom,512,L-N,track1s,0.083141,0.070363,0.097044,0.200000,within
+L_shared,mushroom,512,L-N,spectrum_l1,-0.231846,-0.260659,-0.201299,0.085532,within
+L_shared,mushroom,512,L-N,abs_ln_motion_ratio,-0.017342,-0.061448,0.028465,0.099287,within
+L_shared,mushroom,512,L-N,coverage_l1,0.000019,-0.000004,0.000054,0.013354,within
+L_shared,mushroom,512,L-N,emission_l1,0.000000,-0.000001,0.000002,0.000100,within
+L_shared,mushroom,512,L-N,mean_frame_psnr,0.005697,0.002083,0.008624,1.456838,within
+L_shared,mushroom,512,L-N,hf_l1_real,-0.263443,-0.300200,-0.226975,0.124751,within
+L_shared,wildfire,512,L-B,apsnr_vsN,-0.063933,-0.129527,-0.007698,,not better
+L_shared,wildfire,512,L-B,ssim_vsN,-0.000269,-0.000456,-0.000094,,not better
+L_shared,wildfire,512,L-B,hf_l1_vsN,0.096193,0.064368,0.133425,,not better
+L_shared,wildfire,512,L-N,track1s,0.127793,0.112191,0.147241,0.200000,within
+L_shared,wildfire,512,L-N,spectrum_l1,-0.217372,-0.255038,-0.181536,0.031200,within
+L_shared,wildfire,512,L-N,abs_ln_motion_ratio,-0.095234,-0.111520,-0.081565,0.036966,within
+L_shared,wildfire,512,L-N,coverage_l1,-0.000028,-0.000117,0.000070,0.001916,within
+L_shared,wildfire,512,L-N,emission_l1,0.000001,-0.000006,0.000008,0.000246,within
+L_shared,wildfire,512,L-N,mean_frame_psnr,0.009771,-0.003206,0.023583,0.661212,within
+L_shared,wildfire,512,L-N,hf_l1_real,-0.226961,-0.281501,-0.173155,0.039149,within
+L_shared,launch,512,L-B,apsnr_vsN,0.015090,0.003038,0.026464,,better
+L_shared,launch,512,L-B,ssim_vsN,-0.000255,-0.000432,-0.000088,,not better
+L_shared,launch,512,L-B,hf_l1_vsN,0.073138,0.052257,0.095450,,not better
+L_shared,launch,512,L-N,track1s,0.126384,0.117901,0.136010,0.200000,within
+L_shared,launch,512,L-N,spectrum_l1,-0.339584,-0.406949,-0.261301,0.047145,within
+L_shared,launch,512,L-N,abs_ln_motion_ratio,-0.163706,-0.172456,-0.155042,0.134223,within
+L_shared,launch,512,L-N,coverage_l1,0.000097,-0.000048,0.000269,0.022639,within
+L_shared,launch,512,L-N,emission_l1,-0.000013,-0.000020,-0.000006,0.000192,within
+L_shared,launch,512,L-N,mean_frame_psnr,-0.015379,-0.020212,-0.010824,2.107206,within
+L_shared,launch,512,L-N,hf_l1_real,-0.484852,-0.608841,-0.345721,0.055750,within
+L_shared,smoke,512,L-B,apsnr_vsN,0.087404,0.082379,0.092413,,better
+L_shared,smoke,512,L-B,ssim_vsN,0.000928,0.000832,0.001018,,better
+L_shared,smoke,512,L-B,hf_l1_vsN,-0.005078,-0.030743,0.022899,,not better
+L_shared,smoke,512,L-N,track1s,0.535711,0.489546,0.588702,0.200000,within
+L_shared,smoke,512,L-N,spectrum_l1,-0.449065,-0.492026,-0.404349,0.049061,within
+L_shared,smoke,512,L-N,abs_ln_motion_ratio,-0.306825,-0.327716,-0.285411,0.080772,within
+L_shared,smoke,512,L-N,coverage_l1,0.000027,-0.000006,0.000059,0.004737,within
+L_shared,smoke,512,L-N,emission_l1,-0.000005,-0.000006,-0.000003,0.000100,within
+L_shared,smoke,512,L-N,mean_frame_psnr,-0.028092,-0.055409,-0.000204,1.645052,within
+L_shared,smoke,512,L-N,hf_l1_real,-0.505511,-0.575643,-0.433218,0.054662,within
+L_shared,waterfall,512,L-B,apsnr_vsN,-0.010791,-0.016676,-0.004434,,not better
+L_shared,waterfall,512,L-B,ssim_vsN,-0.000376,-0.000476,-0.000281,,not better
+L_shared,waterfall,512,L-B,hf_l1_vsN,0.053030,0.047311,0.059318,,not better
+L_shared,waterfall,512,L-N,track1s,0.153475,0.126992,0.180724,0.200000,within
+L_shared,waterfall,512,L-N,spectrum_l1,-0.378503,-0.412818,-0.345586,0.023314,within
+L_shared,waterfall,512,L-N,abs_ln_motion_ratio,-0.136233,-0.191143,-0.076712,0.048632,within
+L_shared,waterfall,512,L-N,coverage_l1,0.000035,-0.000169,0.000235,0.007864,within
+L_shared,waterfall,512,L-N,emission_l1,0.000005,0.000004,0.000007,0.000100,within
+L_shared,waterfall,512,L-N,mean_frame_psnr,-0.021271,-0.040427,-0.001264,1.817200,within
+L_shared,waterfall,512,L-N,hf_l1_real,-0.546913,-0.620332,-0.478017,0.025760,within

@@ -264,9 +264,54 @@ At **S = 512**, L (the chosen upscaler) is adopted as an opt-in option when all 
 
 S = 256 is reported the same way and does not decide. Ties are reported as ties; "beats" means an interval clear of zero.
 
-### 4.5 The rule's numbers
+### 4.5 The rule's numbers (committed after the null probe and validation, before the test)
 
-(Committed after the null probe and validation, before the test.)
+**The candidates, after calibration** (§3.3, dev split): the shared net with gain 0.10 and 30 slices a second; the
+per-effect nets with gains 0.40 (explosion), 0.50 (mushroom), 0.30 (wildfire), 0.10 (launch) and 0 (smoke and the
+waterfall, whose residuals gained too little SSIM or PSNR over B to spend on noise), 30 slices a second where the gain is
+not 0.
+
+**The margins** ([p_margins.csv](../results/experiments/upscale/p_margins.csv)): the null (N with fresh seeds minus N,
+4 plays pooled, over the 10 validation settings) gives every margin but tracking's and emission's; they are wide where
+re-seeding moves a measure a lot, as study M3 found. At 512 px (256 px within a few per cent of these, in the CSV):
+
+| effect | spectrum | \|ln motion\| | coverage | emission | mean frame (dB) | high band vs real | tracking (dB) |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| explosion | +0.062 | +0.050 | +0.0056 | +0.0001 | -1.39 | +0.088 | -0.20 |
+| mushroom | +0.086 | +0.099 | +0.0134 | +0.0001 | -1.46 | +0.125 | -0.20 |
+| wildfire | +0.031 | +0.037 | +0.0019 | +0.0002 | -0.66 | +0.039 | -0.20 |
+| launch | +0.047 | +0.134 | +0.0226 | +0.0002 | -2.11 | +0.056 | -0.20 |
+| smoke | +0.049 | +0.081 | +0.0047 | +0.0001 | -1.65 | +0.055 | -0.20 |
+| waterfall | +0.023 | +0.049 | +0.0079 | +0.0001 | -1.82 | +0.026 | -0.20 |
+
+**The choice: the shared upscaler** ([p_choice_val.txt](../results/experiments/upscale/p_choice_val.txt)). At 512 px the
+per-effect nets are better than the shared one on (a)'s PSNR for all six effects (+0.02 to +0.28 dB, every interval
+above zero), but worse on SSIM for the mushroom, launch and smoke (by 0.0001 to 0.0028, intervals entirely below zero)
+and on the high band for the waterfall (+0.004 [+0.000, +0.007]); so only the explosion and the wildfire count, 2 of the
+4 the choice asks for, and by the rule the shared net is chosen. It is frozen in
+[p_frozen.csv](../results/experiments/upscale/p_frozen.csv) (`cand_shared.nvfxup`, SHA-256 `4043e2c7...`, gain 0.10,
+30 slices a second); the test plays it as arm `L_chosen`.
+
+**The number of test settings: 20**, the cap ([p_power.csv](../results/experiments/upscale/p_power.csv)): the largest
+finite need is 1,430 settings (a tiny but consistent difference); and for nine of the rule's (a) measures the shared
+net's validation mean lies on the wrong side, where no number of settings gives power: the explosion's high band, the
+wildfire's PSNR, SSIM and high band, launch's SSIM and high band, and the waterfall's PSNR, SSIM and high band.
+
+**What validation says before the test** ([p_decide_val.txt](../results/experiments/upscale/p_decide_val.txt), the
+rule's form applied to validation, not deciding): at 512 px the shared net beats B on (a) and the high band for **0 of
+the 6** effects (it beats B on PSNR for four, by +0.02 to +0.17 dB, and loses on the wildfire and the waterfall; its
+high band is never better than B's) and is within N's margins on (b) for all 6. So condition 1 is expected to fail. The
+per-effect nets read 1 of 6 and 6 of 6 at 512 px, 3 of 6 and 5 of 6 at 256 px; the shared net reads 2 of 6 and 5 of 6 at
+256 px.
+
+**The test** then runs once as §4.2 and §4.4 say: study B's held-out settings extended to 20 (`test_settings(20)`), 4
+plays per setting, 2 tracking runs, seeds 3,800,000 (real), 3,810,000 (plays) and 3,830,000 (tracking), arms N, B and
+`L_chosen`, in three processes of two effects each (`--tag rule_<effects>`, each refusing a second run).
+
+**The cost condition** is judged on a run of §4.4's protocol with the chosen net, made after this commit
+(`nvfx_study_p cost --net cand_shared`, label `rule`). One run of the same protocol with the per-effect nets was made on
+20 October before this commit, on a quiet machine, to see where the cost stands; its numbers are reported in §6 beside
+the rule's run and do not decide.
 
 ## 5. Reproduce
 

@@ -1,0 +1,25 @@
+per-effect against shared at 256 px (L_effect - L_shared, validation):
+  explosion: apsnr_vsN +0.321 [+0.221, +0.424] ssim_vsN -0.0001 [-0.0002, +0.0000] hf_l1_vsN -0.073 [-0.112, -0.040]
+   mushroom: apsnr_vsN +0.214 [+0.183, +0.246] ssim_vsN +0.0002 [+0.0002, +0.0003] hf_l1_vsN -0.145 [-0.158, -0.132]
+   wildfire: apsnr_vsN +0.291 [+0.190, +0.381] ssim_vsN +0.0008 [+0.0005, +0.0011] hf_l1_vsN -0.165 [-0.203, -0.127]
+     launch: apsnr_vsN +0.041 [+0.036, +0.046] ssim_vsN +0.0005 [+0.0004, +0.0006] hf_l1_vsN -0.032 [-0.040, -0.024]
+      smoke: apsnr_vsN +0.261 [+0.247, +0.276] ssim_vsN -0.0029 [-0.0032, -0.0026] hf_l1_vsN -0.025 [-0.042, -0.006]
+  waterfall: apsnr_vsN +0.052 [+0.042, +0.065] ssim_vsN +0.0005 [+0.0004, +0.0006] hf_l1_vsN +0.002 [-0.002, +0.005]
+per-effect against shared at 512 px (L_effect - L_shared, validation):
+  explosion: apsnr_vsN +0.278 [+0.212, +0.347] ssim_vsN -0.0000 [-0.0001, +0.0000] hf_l1_vsN -0.039 [-0.073, -0.009]
+   mushroom: apsnr_vsN +0.061 [+0.048, +0.074] ssim_vsN -0.0001 [-0.0002, -0.0001] hf_l1_vsN -0.124 [-0.140, -0.108]
+   wildfire: apsnr_vsN +0.210 [+0.167, +0.256] ssim_vsN +0.0004 [+0.0003, +0.0006] hf_l1_vsN -0.137 [-0.174, -0.102]
+     launch: apsnr_vsN +0.018 [+0.016, +0.022] ssim_vsN -0.0001 [-0.0002, -0.0001] hf_l1_vsN -0.020 [-0.028, -0.013]
+      smoke: apsnr_vsN +0.269 [+0.251, +0.285] ssim_vsN -0.0028 [-0.0031, -0.0025] hf_l1_vsN -0.028 [-0.047, -0.007]
+  waterfall: apsnr_vsN +0.043 [+0.035, +0.053] ssim_vsN +0.0003 [+0.0002, +0.0004] hf_l1_vsN +0.004 [+0.000, +0.007]
+at 512 px the per-effect upscalers are better on PSNR (and not worse) for 2 of 6 effects: the choice is L_shared
+settings for the test: 20 (the largest finite need 1430; capped at 20)
+  no number of settings gives power where validation's mean is on the wrong side: explosion L-B hf_l1_vsN (mean +0.0000)
+  no number of settings gives power where validation's mean is on the wrong side: wildfire L-B apsnr_vsN (mean -0.0639)
+  no number of settings gives power where validation's mean is on the wrong side: wildfire L-B ssim_vsN (mean -0.0003)
+  no number of settings gives power where validation's mean is on the wrong side: wildfire L-B hf_l1_vsN (mean +0.0962)
+  no number of settings gives power where validation's mean is on the wrong side: launch L-B ssim_vsN (mean -0.0003)
+  no number of settings gives power where validation's mean is on the wrong side: launch L-B hf_l1_vsN (mean +0.0731)
+  no number of settings gives power where validation's mean is on the wrong side: waterfall L-B apsnr_vsN (mean -0.0108)
+  no number of settings gives power where validation's mean is on the wrong side: waterfall L-B ssim_vsN (mean -0.0004)
+  no number of settings gives power where validation's mean is on the wrong side: waterfall L-B hf_l1_vsN (mean +0.0530)
