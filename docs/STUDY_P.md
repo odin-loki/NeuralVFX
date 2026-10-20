@@ -308,6 +308,13 @@ per-effect nets read 1 of 6 and 6 of 6 at 512 px, 3 of 6 and 5 of 6 at 256 px; t
 plays per setting, 2 tracking runs, seeds 3,800,000 (real), 3,810,000 (plays) and 3,830,000 (tracking), arms N, B and
 `L_chosen`, in three processes of two effects each (`--tag rule_<effects>`, each refusing a second run).
 
+**The mushroom stays the frozen one.** Study O replaced the library's mushroom (main 37b08cd: the shared link now points
+to `o_fix/models/mushroom.nvfx`, SHA-256 `4a2f08a0...`) while this test was running (it had reached the explosion's
+512 px settings; the mushroom's part had not begun). The test plays the mushroom this study froze before any number
+(§3.1, [p_models.csv](../results/experiments/upscale/p_models.csv): `fx_blaze/models/d/mushroom.nvfx`, `505bdfe8...`),
+because its calibration, the null's margins and the choice were all measured on that model; study O's mushroom is not
+measured here. The upscaler itself reads frames, not a model file, and the opt-in path works with either.
+
 **The cost condition** is judged on a run of §4.4's protocol with the chosen net, made after this commit
 (`nvfx_study_p cost --net cand_shared`, label `rule`). One run of the same protocol with the per-effect nets was made on
 20 October before this commit, on a quiet machine, to see where the cost stands; its numbers are reported in §6 beside
