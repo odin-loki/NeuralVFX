@@ -32,6 +32,9 @@ std::string_view effect_name(Effect e) {
     case Effect::fountain: return "fountain";
     case Effect::splash: return "splash";
     case Effect::rainshaft: return "rainshaft";
+    case Effect::lava: return "lava";
+    case Effect::eruption: return "eruption";
+    case Effect::avalanche: return "avalanche";
   }
   std::unreachable();
 }
@@ -44,10 +47,11 @@ bool parse_effect(std::string_view text, Effect& out) {
 }
 
 bool effect_loops(Effect e) { return e != Effect::explosion && e != Effect::dust && e != Effect::mushroom &&
-                                   e != Effect::splash; }
+                                   e != Effect::splash && e != Effect::avalanche; }
 
 int one_shot_frames(Effect e) {
   if (effect_loops(e)) return 0;
+  if (e == Effect::avalanche) return 150;  // docs/EFFECTS_EARTH.md
   return e == Effect::mushroom ? 150 : 90;
 }
 
@@ -59,6 +63,8 @@ std::array<std::string_view, kControls> control_names(Effect e) {
   if (e == Effect::puffs) return {"intensity", "rate", "turbulence"};  // docs/EFFECTS_FLOW.md
   if (e == Effect::ink) return {"intensity", "current", "turbulence"};
   if (e == Effect::fountain) return {"intensity", "aim", "turbulence"};
+  if (e == Effect::lava) return {"intensity", "flow", "turbulence"};  // docs/EFFECTS_EARTH.md
+  if (e == Effect::avalanche) return {"intensity", "direction", "turbulence"};
   return kControlNames;
 }
 
@@ -85,6 +91,9 @@ float flicker_rate(Effect e) {
     case Effect::fountain: return 2.4f;   // a fluttering jet
     case Effect::splash: return 1.4f;     // the crown's shape, as the burst of dust
     case Effect::rainshaft: return 0.7f;  // slow gusts: the shafts thin and thicken
+    case Effect::lava: return 0.6f;       // a slow crawl of the surface (docs/EFFECTS_EARTH.md)
+    case Effect::eruption: return 2.0f;   // a roaring vent
+    case Effect::avalanche: return 1.4f;  // the slab's shape, as the burst of dust
   }
   std::unreachable();
 }
@@ -160,6 +169,13 @@ Tune tune(const Params& p) {
     case Effect::fountain: return {20.f, 30.f, 0.6f, 0.05f, 0.f, 0.f, 0.05f + 0.3f * turb, 2.f + 10.f * turb, 1.6f};
     case Effect::splash: return {10.f, 60.f, 0.6f, 0.05f, 0.f, 0.f, 0.1f + 0.4f * turb, 2.f + 10.f * turb, 1.6f};
     case Effect::rainshaft: return {25.f, 0.f, 0.6f, 0.10f, 0.f, 0.f, 0.1f + 0.5f * turb, 3.f + 12.f * turb, 0.5f};
+    // lava, eruption and avalanche (docs/EFFECTS_EARTH.md); their sources, flows, ground and drawing are in
+    // add_earth_sources, add_earth_forces and earth_decay. lava: heavy rock (soot) whose heat is its glow, barely stirred,
+    // very viscous. eruption: hot ash that rises while it is hot and is heavy once it cools; its wind is its own
+    // (sheared). avalanche: snow (soot, no heat), heavy, lifted by its own speed; its slope is its own force.
+    case Effect::lava: return {0.f, 0.f, 0.3f, 0.05f, 0.f, 0.f, 0.05f + 0.25f * turb, 1.f + 6.f * turb, 2.0f};
+    case Effect::eruption: return {70.f, 12.f, 0.6f, 0.08f, 0.f, 0.f, 0.3f + 1.2f * turb, 4.f + 20.f * turb, 0.4f};
+    case Effect::avalanche: return {0.f, 25.f, 1.f, 0.12f, 0.f, 0.f, 0.4f + 1.2f * turb, 10.f + 40.f * turb, 0.6f};
   }
   std::unreachable();
 }
@@ -169,6 +185,8 @@ bool atmos(Effect e) { return e == Effect::fog || e == Effect::dust || e == Effe
 bool on_ground(Effect e) { return e == Effect::fog || e == Effect::dust; }  // lie on a ground (add_atmos_forces)
 // waterfall, fountain, splash and rainshaft (docs/EFFECTS_WATER.md): they fall onto a pool or the ground
 bool water(Effect e) { return e == Effect::waterfall || e == Effect::fountain || e == Effect::splash || e == Effect::rainshaft; }
+// lava, eruption and avalanche (docs/EFFECTS_EARTH.md): they lie on the ground (project)
+bool earth(Effect e) { return e == Effect::lava || e == Effect::eruption || e == Effect::avalanche; }
 
 // magic: a ring of energy around the middle of the frame, spun by a force that peaks at the ring (radius in cells).
 float magic_radius(const Params& p, float n) { return (0.19f + 0.09f * p.intensity) * n; }
@@ -288,6 +306,7 @@ void Fluid::step(float dt) {
   blaze_decay(dt);   // wildfire and mushroom
   flow_decay(dt);    // launch
   water_decay(dt);   // waterfall, fountain, splash and rainshaft
+  earth_decay(dt);   // avalanche
   time_ += dt;
 }
 
@@ -324,6 +343,7 @@ void Fluid::add_sources(float dt) {
   }
   if (add_blaze_sources(dt)) return;  // wildfire, coals and mushroom
   if (add_flow_sources(dt)) return;  // launch, puffs and ink
+  if (add_earth_sources(dt)) return;  // lava, eruption and avalanche
   const bool fire = p_.effect == Effect::fire;
   const float cx = 0.5f * n, cy = (fire ? 0.10f : 0.09f) * n;
   const float hw = (fire ? 0.10f + 0.08f * I : 0.09f + 0.07f * I) * n, hh = 0.035f * n;
@@ -437,6 +457,7 @@ void Fluid::add_forces(float dt) {
   add_blaze_forces(dt);  // wildfire, coals and mushroom
   add_flow_forces(dt);  // launch, puffs and ink
   add_water_forces(dt);  // waterfall, fountain, splash and rainshaft
+  add_earth_forces(dt);  // lava, eruption and avalanche
 }
 
 void Fluid::project() {
@@ -467,11 +488,12 @@ void Fluid::project() {
   add_energy_divergence();  // jet, orb and vortex
   if (p_.effect == Effect::dust) add_atmos_divergence();
   add_blaze_divergence();  // the mushroom's burst
+  add_earth_divergence();  // the avalanche's cloud (docs/EFFECTS_EARTH.md)
   // Open boundaries: p = 0 on the border, which is never written. Warm-started from the last solve.
   constexpr float w = 1.7f;
   // the mushroom and launch stand on the ground too (docs/EFFECTS_BLAZE.md, docs/EFFECTS_FLOW.md), and water falls onto it
   const bool ground = on_ground(p_.effect) || p_.effect == Effect::mushroom || p_.effect == Effect::launch ||
-                    water(p_.effect);
+                    water(p_.effect) || earth(p_.effect);  // docs/EFFECTS_EARTH.md
   for (int it = 0; it < p_.pressure_iters; ++it) {
     for (const int colour : {0, 1}) {
       for (int y = 1; y <= n; ++y) {
@@ -575,6 +597,7 @@ void Fluid::render(std::span<std::uint8_t> out) const {
     return;
   }
   if (render_blaze(out)) return;  // wildfire, coals and mushroom
+  if (render_earth(out)) return;  // lava, eruption and avalanche
   const float n = f(n_), sc = n / f(S);
   constexpr float lx = -0.45f, ly = 0.89f;  // towards the light: up and to the left
   for (int py = 0; py < S; ++py) {
@@ -1697,6 +1720,316 @@ bool Fluid::render_water(std::span<std::uint8_t> out) const {
   return true;
 }
 
+// --- lava, eruption and avalanche (docs/EFFECTS_EARTH.md) ------------------------------------------------------------
+//
+// Three presets kept apart from the other effects' code: their sources, forces, decay and drawing. As in the other
+// blocks, every force is a function of the state where it acts, the position, the controls and the run's two noise
+// fields (curl_potential, source_flicker), which learned dynamics see as inputs; the avalanche, which plays once, also
+// follows the time since its start, but only through the two decays a learned one-shot sees (exp(-t / 0.15 s) and
+// exp(-t / 1 s)). Nothing follows a clock of its own. All three lie on the ground: the closed bottom border of the
+// pressure solve (project).
+//   lava: molten rock is the solver's soot (heavy, very viscous) and its glow is its heat; the crust is rock that has
+//         cooled. A band of lava along the ground, kept full by what wells up from below, flows along the slope (the
+//         second control, `flow`) or pools where the ground is level; its glow is drawn to a pattern of plates and
+//         seams that the curl noise moves and the flow carries; bubbles of hot lava well up where the curl noise is
+//         high (more with turbulence).
+//   eruption: hot ash (heat and soot) blown up from a vent; it rises while it is hot and spreads into an umbrella under
+//         a stable layer; the ash is heavy, so what has cooled falls back down the column's sides and runs out along
+//         the ground. A sheared wind leans it.
+//   avalanche: snow is soot without heat. A slab breaks loose on the upslope side in its first moments, runs down the
+//         slope (the second control, `direction`: left, level or right), picks up snow from the ground as it goes and
+//         is lifted into a billowing cloud by its own speed; where the slope runs out it slows and settles.
+
+namespace {
+
+// lava: the band's surface (cells): 13 to 20% of the frame high (intensity), deeper where it pools (a level slope, and
+// downhill along a slope), lumpy where the flicker noise is.
+constexpr float kLavaHalfWidth = 0.48f;
+float lava_slope(const Params& p) { return 2.f * p.wind - 1.f; }  // -1: down to the left, 0 level, 1: down to the right
+// Per column of the band (X in cells of a 128-cell frame): its surface (cells of an n-cell grid) and how strongly a
+// bubble wells up there. Both follow the flicker noise along a row at the band's height (a coarse cell's centre, 18.5),
+// smoothed over a coarse cell either side, so its lumps and bubbles are about a coarse cell wide or more.
+struct LavaColumn {
+  float top, bubble;
+};
+LavaColumn lava_column(const Params& p, float n, float X, float time) {
+  constexpr float row = 18.5f;
+  const float fl = 0.25f * source_flicker(p, X - 4.f, row, time) + 0.5f * source_flicker(p, X, row, time) +
+                   0.25f * source_flicker(p, X + 4.f, row, time);
+  const float s = lava_slope(p), along = std::clamp((X - 64.f) / (kLavaHalfWidth * 128.f), -1.f, 1.f);
+  const float top = (0.13f + 0.07f * p.intensity) * n * (1.1f - 0.25f * std::abs(s) + 0.25f * s * along) * (0.9f + 0.3f * fl);
+  const float level = 0.42f - 0.22f * p.turbulence;
+  return {top, smoothstep(level, level + 0.1f, fl)};
+}
+
+// eruption: the vent at the bottom of the middle of the frame, and the height of the stable layer (the umbrella)
+float eruption_ceiling(const Params& p, float n) { return (0.55f + 0.2f * p.intensity) * n; }
+
+// avalanche: the slope (-1: running left, 1: right) and where the slab breaks loose (cells), upslope of the middle
+float avalanche_slope(const Params& p) { return 2.f * p.wind - 1.f; }
+float avalanche_release(const Params& p, float n) { return 0.5f * n - 0.32f * n * avalanche_slope(p); }
+// How fast the slope carries snow at x (cells of a 128-cell frame per second, signed): 25 to 55 (intensity) where the
+// slope is steep (most of the control's range: the speed saturates), running out over 45 to 80% of the way from the
+// release.
+float avalanche_flow(const Params& p, float n, float x) {
+  const float sl = avalanche_slope(p), run = (x - avalanche_release(p, n)) * (sl >= 0.f ? 1.f : -1.f) / n;
+  return (25.f + 30.f * p.intensity) * std::tanh(3.f * sl) * (1.f - smoothstep(0.45f, 0.8f, run));
+}
+
+}  // namespace
+
+bool Fluid::add_earth_sources(float dt) {
+  if (!earth(p_.effect)) return false;
+  const float n = f(n_), s = n / 128.f, I = p_.intensity;
+  const auto flick = [&](int x, int y) { return source_flicker(p_, f(x) / s, f(y) / s, time_); };
+  const auto psi = [&](int x, int y) { return curl_potential(p_, f(x) / s, f(y) / s, time_); };
+  if (p_.effect == Effect::lava) {
+    // The band is kept full of rock (drawn towards a density of 1), and its heat is drawn slowly towards a pattern: hot
+    // seams between dark plates of crust, where the curl noise is near its middle, brighter at intensity; the bottom of
+    // the band stays a little hotter. The draw is slow, so the flow carries the pattern before it fades.
+    const float cx = 0.5f * n, hw = kLavaHalfWidth * n, rate_d = 1.f - std::exp(-3.f * dt), rate_t = 1.f - std::exp(-1.2f * dt);
+    const float hot = 0.8f + 0.6f * I;
+    const int y_hi = std::min(n_, static_cast<int>(0.3f * n) + 1);
+    for (int x = 1; x <= n_; ++x) {
+      const float along = 1.f - smoothstep(0.85f, 1.f, std::abs(f(x) - cx) / hw);
+      if (along <= 0.f) continue;
+      const float top = lava_column(p_, n, f(x) / s, time_).top;
+      for (int y = 1; y <= y_hi; ++y) {
+        const float inside = along * (1.f - smoothstep(0.8f * top, top, f(y)));
+        if (inside <= 0.f) continue;
+        soot_[x, y] += inside * rate_d * (1.f - soot_[x, y]);
+        const float seam = 1.f - smoothstep(0.05f, 0.22f, std::abs(flick(x, y)));
+        const float glow = hot * (0.03f + 0.97f * seam * (0.55f + 0.45f * smoothstep(-0.6f, 0.6f, psi(x, y))));
+        temp_[x, y] += inside * rate_t * (glow - temp_[x, y]);
+      }
+    }
+    return true;
+  }
+  if (p_.effect == Effect::eruption) {
+    // hot ash blown up out of the vent, broken up by the flicker noise: a hot core, and a rim of denser, cooler ash that
+    // the blast throws up but its heat cannot carry (it falls back down the column's sides)
+    const float cx = 0.5f * (n + 1.f), cy = 0.05f * n, hw = (0.06f + 0.03f * I) * n, hh = 0.04f * n;
+    const float speed = (50.f + 25.f * I) * s, heat = 1.5f + 0.5f * I, ash = 2.0f + 1.0f * I;
+    const int y_lo = std::max(1, static_cast<int>(cy - 2.f * hh)), y_hi = std::min(n_, static_cast<int>(cy + 2.f * hh) + 1);
+    const int x_lo = std::max(1, static_cast<int>(cx - 1.5f * hw)), x_hi = std::min(n_, static_cast<int>(cx + 1.5f * hw) + 1);
+    for (int y = y_lo; y <= y_hi; ++y) {
+      for (int x = x_lo; x <= x_hi; ++x) {
+        const float ex = (f(x) - cx) / hw, ey = (f(y) - cy) / hh;
+        const float shape = 1.f - smoothstep(0.6f, 1.f, std::sqrt(ex * ex + ey * ey));
+        if (shape <= 0.f) continue;
+        const float k = shape * (0.45f + 0.55f * smoothstep(-0.3f, 0.5f, flick(x, y))), rim = smoothstep(0.35f, 0.8f, std::abs(ex));
+        temp_[x, y] = std::max(temp_[x, y], heat * k * (1.f - 0.75f * rim));
+        soot_[x, y] = std::max(soot_[x, y], ash * k * (1.f + 0.3f * rim));
+        v_[x, y] = std::max(v_[x, y], speed * k);
+      }
+    }
+    return true;
+  }
+  // avalanche: the slab breaks loose over its first moments (the first age input's decay, 0.15 s), a mound of snow on
+  // the ground upslope of the middle, its edge from the flicker noise; it starts moving down the slope at once
+  const float release = std::exp(-time_ / 0.15f) / 0.15f;
+  if (release < 1e-3f) return true;
+  const float cx = avalanche_release(p_, n), a = (0.10f + 0.06f * I) * n, b = (0.08f + 0.05f * I) * n;
+  const float level = 2.f + 1.f * I, slide = 35.f * s * avalanche_slope(p_);
+  const int y_hi = std::min(n_, static_cast<int>(1.6f * b) + 1);
+  const int x_lo = std::max(1, static_cast<int>(cx - 1.6f * a)), x_hi = std::min(n_, static_cast<int>(cx + 1.6f * a) + 1);
+  for (int y = 1; y <= y_hi; ++y) {
+    for (int x = x_lo; x <= x_hi; ++x) {
+      const float ex = (f(x) - cx) / a, ey = f(y) / b, fl = flick(x, y);
+      const float shape = 1.f - smoothstep(0.5f, 1.f + 0.35f * fl, std::sqrt(ex * ex + ey * ey));
+      if (shape <= 0.f) continue;
+      const float k = dt * release * shape;
+      soot_[x, y] += k * level * (0.75f + 0.25f * smoothstep(-0.5f, 0.5f, fl));
+      u_[x, y] += std::min(1.f, 6.f * k) * (slide - u_[x, y]);
+    }
+  }
+  return true;
+}
+
+void Fluid::add_earth_forces(float dt) {
+  if (!earth(p_.effect)) return;
+  const float n = f(n_), s = n / 128.f, I = p_.intensity;
+  if (p_.effect == Effect::lava) {
+    // The lava flows along the slope: its velocity is drawn (strongly: it is viscous) towards a flow that is still at
+    // the ground and fastest at its surface, 6 to 20 cells per second at the steepest slope (intensity); it does not
+    // move up and down, except where a bubble of hot lava wells up (the curl noise above a level that turbulence
+    // lowers), which lifts the surface into a glowing dome that falls back as the noise moves on.
+    const float slope = lava_slope(p_), U = slope * (6.f + 14.f * I) * s, visc = 1.f - std::exp(-4.f * dt);
+    const float lift = (10.f + 12.f * p_.turbulence) * s, fall = 15.f * s;
+    const int y_hi = std::min(n_, static_cast<int>(0.35f * n) + 1);
+    for (int x = 1; x <= n_; ++x) {
+      const auto [top, welling] = lava_column(p_, n, f(x) / s, time_);
+      const float bubble = welling * (1.f - smoothstep(0.75f, 0.95f, std::abs(f(x) - 0.5f * n) / (kLavaHalfWidth * n)));  // in the band
+      for (int y = 1; y <= y_hi; ++y) {
+        const float D = soot_[x, y];
+        if (D <= 0.01f) continue;
+        const float h = std::clamp(f(y) / top, 0.f, 1.f), m = std::min(1.f, 2.f * D);
+        u_[x, y] += m * visc * (U * h * (2.f - h) - u_[x, y]);
+        const float dome = smoothstep(0.4f * top, 0.8f * top, f(y)) * (1.f - smoothstep(top, 1.25f * top, f(y)));
+        const float above = smoothstep(top, 1.2f * top, f(y));  // lifted rock falls back (it is heavy)
+        v_[x, y] += m * visc * (bubble * lift * dome - fall * above - v_[x, y]);
+        if (bubble > 0.f) temp_[x, y] += dt * 3.f * bubble * dome * std::max(0.f, (0.8f + 0.6f * I) * 1.2f - temp_[x, y]);
+      }
+    }
+    return;
+  }
+  if (p_.effect == Effect::eruption) {
+    // The wind leans the column and shears it: the air drags the ash towards a wind that grows with height. Above the
+    // stable layer hot ash is pushed back down, so the column stops rising and spreads into an umbrella. On the ground
+    // the air is still, so what falls back runs out sideways.
+    const float W = (2.f * p_.wind - 1.f) * 40.f * s, drag = 1.f - std::exp(-1.0f * dt), ceil = eruption_ceiling(p_, n);
+    const float stable = 4.f * tune(p_).buoyancy * s, still = 1.f - std::exp(-3.f * dt), spread = 45.f * s, cx = 0.5f * (n + 1.f);
+    const float collapse = (20.f + 30.f * I) * s;
+    for (int y = 1; y <= n_; ++y) {
+      const float shear = W * f(y) / n, above = smoothstep(ceil, ceil + 0.12f * n, f(y));
+      const float level = smoothstep(ceil - 0.1f * n, ceil, f(y));  // at the stable layer the umbrella runs out sideways
+      const float low = 1.f - smoothstep(0.3f * ceil, 0.6f * ceil, f(y));
+      for (int x = 1; x <= n_; ++x) {
+        const float mat = std::min(1.f, 2.f * (temp_[x, y] + soot_[x, y]));
+        u_[x, y] += drag * (shear - u_[x, y]) * mat;
+        u_[x, y] += dt * spread * level * mat * std::tanh((f(x) - cx) / (0.05f * n));
+        v_[x, y] -= dt * stable * above * temp_[x, y];
+        v_[x, y] *= 1.f - still * above;  // the stable layer damps vertical motion: the ash spreads out sideways
+        // low down, ash that carries too little heat for its weight (the rim, and what has cooled) collapses: it falls
+        // back down the column's sides and runs out along the ground
+        const float T = temp_[x, y], D = soot_[x, y];
+        if (D > 0.05f && low > 0.f) v_[x, y] -= dt * collapse * low * D * (1.f - smoothstep(0.25f, 0.45f, T / D));
+      }
+    }
+    earth_ground();
+    return;
+  }
+  // avalanche: snow on the slope is pulled down it (the slope runs out past 45 to 80% of the way from the release), and
+  // where it moves fast it is held up in the air (turbulent suspension), so the cloud billows up as it runs; the ground
+  // holds what settles.
+  const float pull = 1.f - std::exp(-2.f * dt), carry = 0.85f * tune(p_).soot_weight * s;
+  for (int x = 1; x <= n_; ++x) {
+    const float U = avalanche_flow(p_, n, f(x)) * s;
+    for (int y = 1; y <= n_; ++y) {
+      const float D = soot_[x, y];
+      if (D <= 0.f) continue;
+      u_[x, y] += pull * std::min(1.f, 2.f * D) * (U - u_[x, y]) * smoothstep(0.f, 5.f * s, std::abs(U));
+      v_[x, y] += dt * carry * D * smoothstep(10.f * s, 45.f * s, std::abs(u_[x, y]));
+    }
+  }
+  (void)I;
+  earth_ground();
+}
+
+// avalanche: the running cloud takes in air (entrainment): where it moves fast it swells, so it grows and billows up as
+// it goes; once it slows it stops growing.
+void Fluid::add_earth_divergence() {
+  if (p_.effect != Effect::avalanche) return;
+  const float n = f(n_), rate = (0.9f + 1.2f * p_.intensity) * (0.3f + 0.7f * std::exp(-time_ / 1.f));
+  if (rate < 0.01f) return;
+  const int y_hi = std::min(n_, static_cast<int>(0.5f * n) + 1);
+  for (int x = 1; x <= n_; ++x) {
+    const float run = std::abs(avalanche_flow(p_, n, f(x))) / 55.f;
+    if (run <= 0.f) continue;
+    for (int y = 1; y <= y_hi; ++y) {
+      const float D = soot_[x, y];
+      if (D > 0.02f) div_[x, y] += rate * run * smoothstep(0.05f, 0.5f, D) * (1.f - smoothstep(0.25f * n, 0.5f * n, f(y)));
+    }
+  }
+}
+
+// The ground under the eruption and the avalanche (as fog's and dust's, add_atmos_forces): the air in it is still, and
+// what comes down onto it stops (the closed bottom border does the rest).
+void Fluid::earth_ground() {
+  const float s = f(n_) / 128.f, g = 3.f * s, top = g + 4.f * s;
+  const int y_hi = std::min(n_, static_cast<int>(top) + 1);
+  for (int y = 1; y <= y_hi; ++y) {
+    const float hold = 1.f - smoothstep(g - 2.f * s, g + 2.f * s, f(y)), stop = 1.f - smoothstep(g, top, f(y));
+    for (int x = 1; x <= n_; ++x) {
+      u_[x, y] *= 1.f - hold;
+      v_[x, y] *= 1.f - (v_[x, y] < 0.f ? std::max(hold, stop) : hold);
+    }
+  }
+}
+
+// All three: where material leaves the frame (at its sides and top), the outermost cells take their inner neighbours'
+// values (material flows out evenly). The scalar advection's correction reads a stale border there, which would leave a
+// line of material, or of nothing, along the border. avalanche: the snow picks up more snow from the ground where it runs fast (more while it
+// is young: the second age input's decay, 1 s), and a cloud that has slowed settles out.
+void Fluid::earth_decay(float dt) {
+  if (!earth(p_.effect)) return;
+  for (Field* q : {&temp_, &soot_}) {
+    for (int k = 1; k <= n_; ++k) {
+      (*q)[1, k] = (*q)[2, k];
+      (*q)[n_, k] = (*q)[n_ - 1, k];
+      (*q)[k, n_] = (*q)[k, n_ - 1];
+    }
+  }
+  if (p_.effect != Effect::avalanche) return;
+  const float n = f(n_), s = n / 128.f, I = p_.intensity, young = 0.3f + 0.7f * std::exp(-time_ / 1.f);
+  for (int y = 1; y <= n_; ++y) {
+    const float low = 1.f - smoothstep(0.03f * n, 0.08f * n, f(y)), reach = 1.f - smoothstep(0.15f * n, 0.4f * n, f(y));
+    for (int x = 1; x <= n_; ++x) {
+      const float D = soot_[x, y];
+      if (D <= 0.f) continue;
+      const float speed = std::abs(u_[x, y]) / s;
+      if (reach > 0.f) {
+        const float pick = dt * (1.5f + 1.5f * I) * young * reach * smoothstep(15.f, 60.f, speed) * smoothstep(0.05f, 0.4f, D);
+        soot_[x, y] += pick * std::max(0.f, 1.5f - D);
+      }
+      soot_[x, y] -= dt * (0.45f + 0.45f * low) * (1.f - smoothstep(5.f, 25.f, speed)) * soot_[x, y];  // a slow cloud settles out
+    }
+  }
+}
+
+namespace {
+
+// lava's glow: deep red where it is dull, through red and orange to yellow and white-yellow where it is hottest
+Rgb lava_ramp(float t) {
+  static constexpr std::array<float, 6> at{0.f, 0.15f, 0.4f, 0.7f, 1.0f, 1.4f};
+  static constexpr std::array<Rgb, 6> c{{{0.f, 0.f, 0.f}, {0.32f, 0.02f, 0.f}, {0.85f, 0.16f, 0.02f}, {1.f, 0.48f, 0.06f}, {1.f, 0.78f, 0.28f}, {1.f, 0.95f, 0.7f}}};
+  return ramp(at, c, t);
+}
+
+}  // namespace
+
+// lava: its glow over dark rock, the crust faintly lit from above. eruption: dark grey-brown ash, deeply self-shadowed,
+// glowing red to orange where it is hot (at the vent). avalanche: white snow, its shade grey-blue; no light of its own.
+bool Fluid::render_earth(std::span<std::uint8_t> out) const {
+  if (!earth(p_.effect)) return false;
+  const int S = p_.size;
+  const float n = f(n_), sc = n / f(S);
+  constexpr float lx = -0.45f, ly = 0.89f;  // towards the light: up and to the left
+  for (int py = 0; py < S; ++py) {
+    for (int px = 0; px < S; ++px) {
+      const float gx = (f(px) + 0.5f) * sc + 0.5f;
+      const float gy = n - (f(py) + 0.5f) * sc + 0.5f;
+      const float T = temp_.sample(gx, gy), D = soot_.sample(gx, gy);
+      float tau = 0.f;  // optical depth towards the light
+      for (int k = 1; k <= 12; ++k) tau += soot_.sample(gx + lx * 2.f * f(k) * sc, gy + ly * 2.f * f(k) * sc);
+      Rgb c{};
+      float a = 0.f;
+      if (p_.effect == Effect::lava) {
+        const Rgb e = lava_ramp(T);
+        const float as = 1.f - std::exp(-3.f * D), g = 0.10f * (0.5f + 0.5f * std::exp(-0.15f * tau));
+        c = {e.r + g * as, e.g + 0.92f * g * as, e.b + 0.85f * g * as};
+        a = clamp01(as + 0.3f * std::max(e.r, e.g));
+      } else if (p_.effect == Effect::eruption) {  // only the hottest ash glows (near the vent)
+        const Rgb e = fire_ramp(1.3f * std::max(0.f, T - 0.85f));
+        const float as = 1.f - std::exp(-3.f * D), keep = 1.f - 0.45f * as, light = std::exp(-0.2f * tau);
+        const Rgb g{0.09f + 0.42f * light, 0.085f + 0.39f * light, 0.08f + 0.35f * light};
+        c = {e.r * keep + g.r * as, e.g * keep + g.g * as, e.b * keep + g.b * as};
+        a = clamp01(as + 0.25f * std::max(e.r, e.g));
+      } else {
+        const float as = 1.f - std::exp(-2.2f * D), light = std::exp(-0.25f * tau);
+        c = {(0.50f + 0.49f * light) * as, (0.55f + 0.44f * light) * as, (0.66f + 0.34f * light) * as};
+        a = as;
+      }
+      auto o = out.subspan((static_cast<std::size_t>(py) * S + px) * 4, 4);
+      o[0] = q8(c.r);
+      o[1] = q8(c.g);
+      o[2] = q8(c.b);
+      o[3] = q8(a);
+    }
+  }
+  return true;
+}
+
 void stamp(Clip& clip, const Params& p) {
   clip.effect = effect_name(p.effect);
   clip.source = "sim";
@@ -1730,7 +2063,7 @@ Clip simulate(const Params& p) {
   if (loops) {
     // Long enough for the plume to reach a statistically steady state, so the loop crossfade joins similar frames
     // (fog takes about 5 s to cover the ground; cloud as long to grow from nothing; the water effects' mist as long).
-    const int warmup = p.warmup >= 0 ? p.warmup : (p.effect == Effect::smoke ? 180 : atmos(p.effect) || water(p.effect) ? 150 : flow_warmup(p.effect));
+    const int warmup = p.warmup >= 0 ? p.warmup : (p.effect == Effect::smoke ? 180 : atmos(p.effect) || water(p.effect) || earth(p.effect) ? 150 : flow_warmup(p.effect));
     for (int i = 0; i < warmup; ++i) fluid.step_frame();
   }
   Clip raw;

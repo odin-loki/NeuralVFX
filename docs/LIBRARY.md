@@ -1,13 +1,14 @@
 # The effect library
 
-A catalogue of 191 named, ready-to-use effects that a game lists, places and drives without training anything: a
+A catalogue of 201 named, ready-to-use effects that a game lists, places and drives without training anything: a
 campfire, a grenade, a steam vent, a portal, a lightning strike, ground fog, a dust impact, a flamethrower, a plasma
 orb, a dust devil, a rocket's smoke trail, rain, a wall of fire, a forge, a nuke, a rocket launch, a locomotive's
-chimney, an ink cloud, a waterfall, a fountain, a splash, a rain shaft. Each plays the twenty-one trained rollout models
+chimney, an ink cloud, a waterfall, a fountain, a splash, a rain shaft, a lava flow, a volcano erupting, an avalanche.
+Each plays the twenty-four trained rollout models
 (fire, smoke, explosion v2, steam and magic; fog, dust and cloud, [EFFECTS_ATMOSPHERE.md](EFFECTS_ATMOSPHERE.md); jet,
 orb and vortex, [EFFECTS_ENERGY.md](EFFECTS_ENERGY.md); wildfire, coals and mushroom, [EFFECTS_BLAZE.md](EFFECTS_BLAZE.md);
 launch, puffs and ink, [EFFECTS_FLOW.md](EFFECTS_FLOW.md); waterfall, fountain, splash and rainshaft,
-[EFFECTS_WATER.md](EFFECTS_WATER.md)) and the compositor's procedural elements (embers, sparks, shock fronts, scorch marks, flashes, lights, bolts, rings), at
+[EFFECTS_WATER.md](EFFECTS_WATER.md); lava, eruption and avalanche, [EFFECTS_EARTH.md](EFFECTS_EARTH.md)) and the compositor's procedural elements (embers, sparks, shock fronts, scorch marks, flashes, lights, bolts, rings), at
 a size, with parameters mapped onto the models' controls and looks. The 23 entries of the six newer models were added
 with the recipe of §6, in text; the only code they needed is a third anchor, for the jet's nozzle. The nine newest
 entries needed two features of the compositor: **trails** (`rocket_trail`, `vehicle_dust_wake`, `carried_torch`,
@@ -22,7 +23,9 @@ entries of launch, puffs and ink (round 7 too) came after them, in text again, w
 (waterfalls, fountains, splashes, drips, bubbles, rain on puddles, rain shafts) are water in two layers
 ([EFFECTS_WATER.md](EFFECTS_WATER.md)): the ordered body learned (four new models: waterfall, fountain, splash,
 rainshaft) and the random detail seeded (the composer's deterministic water: spray, pools, ripples, foam, drops),
-or the seeded layer alone (§1, Water).
+or the seeded layer alone (§1, Water). The ten **earth** entries (lava flows and pools, eruptions, avalanches;
+`library/earth.nvfxl`, round 9) came last, in text, with one new category, `earth`; the only code they needed is the
+lava counted among the effects that give light (a module of it lights the scene as fire's do).
 
 ![The library's contact sheet: the entries of the first five models](figures/library_sheet.png)
 
@@ -35,6 +38,8 @@ or the seeded layer alone (§1, Water).
 ![The library's contact sheet: the ten entries of launch, puffs and ink](figures/library_sheet_flow.png)
 
 ![The library's contact sheet: the 23 water entries](figures/library_sheet_water.png)
+
+![The library's contact sheet: the ten earth entries](figures/library_sheet_earth.png)
 
 *Every entry alone on a stage fitted to its box, at the moment its catalogue says shows it well (`nvfx_gallery`).*
 
@@ -54,18 +59,21 @@ or the seeded layer alone (§1, Water).
 | engines | 5 | 0 | 0 | 0 | 5 | 5 | 0 |
 | underwater | 4 | 0 | 0 | 0 | 4 | 4 | 0 |
 | water | 23 | 0 | 0 | 0 | 0 | 13 | 10 |
-| **all** | **121** | **23** | **9** | **10** | **10** | **91** | **30** |
+| earth | 10 | 0 | 0 | 0 | 0 | 10 | 0 |
+| **all** | **131** | **23** | **9** | **10** | **10** | **101** | **30** |
 
 `engines`, `underwater` and one smoke entry (`smoke_signals`) are the ten of launch, puffs and ink, marked *(flow)*; `water` the 23 of
-water (§1, Water), thirteen of them on the four water models and ten on the composer's seeded water alone.
+water (§1, Water), thirteen of them on the four water models and ten on the composer's seeded water alone; `earth` the ten of
+lava, eruption and avalanche (§1, Earth).
 
 With the third round's 70 (§10: 20 weather, 23 combat, 14 magic, 13 fire, smoke, steam and light; 34 learned, 36
-procedural only) the catalogue holds **191** entries, 125 of them learned and 66 procedural only.
+procedural only) the catalogue holds **201** entries, 135 of them learned and 66 procedural only.
 
-**What is learned and what is not.** Only twenty-one things move by a trained model: fire, smoke, an explosion, steam,
+**What is learned and what is not.** Only twenty-four things move by a trained model: fire, smoke, an explosion, steam,
 magic, fog, dust, cloud, a jet, an orb, a vortex, a wildfire front, coals, a mushroom cloud, an engine's blast on the
 ground (launch), smoke in puffs, a plume with almost no buoyancy (ink), and the bodies of a
-waterfall, a fountain, a splash and a rain shaft. Everything else in an entry is the
+waterfall, a fountain, a splash and a rain shaft, and lava, an eruption's ash column and an avalanche's powder cloud.
+Everything else in an entry is the
 compositor's: particles (embers, sparks, debris), shock fronts, scorch marks, flashes, camera shakes, and the glows this
 library adds (lightning and electric arcs, rings, discs and motes of light, lamps; rain, snow, ash and leaves; water's random detail). Entries
 that use no model at all say *(procedural)* in their description. A trail's material is learned (it plays in the
@@ -402,6 +410,40 @@ most of it the stage's size; every entry played with no allocation. The keyframe
 `boulder_splash` and `rain_shaft` (now `waterfall_drawn` and `rain_shaft_drawn`, their keyframes unchanged), and of
 `fountain` and `rain_shaft` with their learned bodies, are frozen (`results/library/frozen.csv`).
 
+### Earth (10, round 9: `library/earth.nvfxl`)
+
+The three earth models ([EFFECTS_EARTH.md](EFFECTS_EARTH.md)): lava (a band of molten rock along the bottom of its tile
+that flows along the slope of its `flow` control or pools on the level; it works by its test's rule), the eruption (an
+ash column from a vent at the bottom of the middle of its tile, spreading into an umbrella; it works, narrowly) and the
+avalanche (a powder-snow cloud that runs in the direction of its `direction` control, swells and settles; it plays
+once, 5 s; weak by its test's rule: it loses to the coarse simulation with detail from 1 s, and grows less than the
+simulator's cloud). The file declares its models itself (`effect lava_fx = "lava.nvfx"` and so on), as
+the water's does, and its looks: `magma` (the lava's heat drawn as glow, its crust kept dark), `ash` (the eruption's
+ash lit by the scene, glowing only where it is hottest), `powder` (snow), `rockdust` and `pyro` (the avalanche
+recoloured as a rockslide's dust and a pyroclastic flow). The eruption plays with `swirl 1, swirl_scale 9` on its
+`effect` line, as launch does: its calibrated swirl (3) draws the ash as worms. The models are linked into the models'
+folder with the others (`ln -s ../../fx_earth/models/d/{lava,eruption,avalanche}.nvfx .`). Seeds are the round's
+(6,300,000 and up).
+
+| effect | what it is | plays | box, anchor | runs | parameters (default) | how it looks |
+|---|---|---|---|---|---|---|
+| `lava_flow` | A lava flow: a river of molten rock creeping along the ground under a dark crust that cracks to show the glow, bubbling now and then (the lava model, three tiles) | lava; look magma, lamp, burst | 900 x 160, base | loop | heat (0.6), flow (0.85) | Fair: a low glowing river with darker streaks of crust, thicker downhill, spitting embers now and then; the learned crust is streaks, not the simulator's network of plates and seams, and from afar the band is a thin strip. |
+| `lava_pool` | A lava lake: a still pool of molten rock, its crust drifting and cracking, bubbles of glowing lava swelling up and bursting in spatter (the lava model, level and boiling) | lava; look magma, lamp, burst | 520 x 170, base | loop | heat (0.5), boil (0.5) | Fair: a bright boiling mass whose domes rise and fall; at high `boil` the domes are blocky and read more as flames than as bubbles. |
+| `lava_crack_glow` | Cooling lava ground: a field of dark crust whose cracks still glow, crawling slowly, now and then a bubble (the lava model, cool and calm) | lava; look magma, lamp | 760 x 130, base | loop | heat (0.2) | Weak to fair: a low strip of glowing streaks; no crack network (the learned crust, above), so it reads as embers along the ground more than as cracked rock. |
+| `volcano_eruption` | A volcanic eruption: a column of dark ash blasting up from a glowing vent into an umbrella cloud, its heavy ash collapsing down the sides, lava bombs thrown out, lightning flickering in the plume, ash falling (the eruption model) | eruption; look ash, arc, lamps, ash, burst | 900 x 900, base | loop | power (0.8), wind (0.55) | Good to fair: a column into an umbrella over a glowing, incandescent jet, bombs and flashes of lightning in the plume; the vent's lamp lights the ash brown, and the shader's relief shows a marbled texture; heavy (one 256-pixel tile: 62 ms a frame with its stage on two threads). |
+| `distant_volcano` | A volcano erupting far off: a dark plume rising from a glowing summit into a flat-topped cloud, faint lightning flickering in it (the eruption model, small) | eruption; look ash, arc, lamp | 420 x 360, base | loop | power (0.6), wind (0.65) | Fair: a T-shaped plume on the horizon; lit brown by its vent at this size it looks nearer than it is. |
+| `ash_column` | An ash column: a steady plume of grey-brown ash leaning downwind from a vent, ash falling out of it (the eruption model, low) | eruption; look ash, ash | 600 x 700, base | loop | power (0.35), wind (0.75) | Good: a dark plume leaning downwind into a ragged umbrella; the falling ash is fine and dark, seen only up close. |
+| `avalanche` | A powder avalanche: a slab of snow breaks loose and runs down the slope as a white cloud that swells and billows up as it goes, then settles, snow blowing ahead of it, the ground shaking (the avalanche model) | avalanche; look powder, snow, camera | 900 x 520, base | once 5.5 s | size (0.8), direction (1) | Fair: a bright cloud that runs, swells into a billowing head and settles; its leading side is cut hard where the cloud piles against its tile's edge, the renderer draws dark marbled lines inside it, and it grows less than the simulator's (the test's weak verdict). |
+| `snow_slide` | A snow slide: a small slab of snow slipping down a slope in a puff of powder that settles (the avalanche model, small) | avalanche; look powder | 480 x 260, base | once 5.5 s | size (0.3), direction (0.9) | Fair: a small puff that slides and settles; at 128 pixels its edge is hard. |
+| `rock_slide_dust` | A rockslide's dust: rocks tumbling down a slope in a rolling cloud of brown dust that swells and settles (the avalanche model, recoloured brown) | avalanche; look rockdust, burst, camera | 760 x 420, base | once 5.5 s | size (0.6), direction (1) | Fair: a grey-brown dust cloud, streaky inside, debris thrown ahead; it reads as dust, not as rocks falling (no rocks are drawn). |
+| `pyroclastic_flow` | A pyroclastic flow: a glowing avalanche of hot ash rolling down a volcano's flank, swelling as it goes, its base lit red (the avalanche model, recoloured dark ash) | avalanche; look pyro, lamp, ash | 900 x 520, base | once 5.5 s | size (0.9), direction (1) | Fair: a broad brown billowing cloud, the most convincing of the four in a still; the red light at its base is faint and the marbled lines show. |
+
+In the gallery (`--precision float --isa avx2`, two threads of the shared machine) the lava and eruption entries took
+12 ms (`lava_pool`, `distant_volcano`) to 62 ms (`volcano_eruption`) a frame with their stage's own picture
+when the machine's load was 7 to 10; at load 5 the avalanche entries took 4.5 ms (`snow_slide`) to 13 ms
+(`avalanche`), when `lava_pool` took 7 and `volcano_eruption` 38; every entry played with no allocation. The keyframes of `lava_flow`, `volcano_eruption`
+and `avalanche` are frozen (`results/library/frozen.csv`, with the three models' rows).
+
 ## 2. The format
 
 A catalogue is written in the scene-script language ([COMPOSE.md](COMPOSE.md) §4), with two more statements. Each
@@ -554,7 +596,7 @@ error, spawns, no room, steal, stop, rooms freed, camera, clear, the same frames
 
 ## 4. The gallery
 
-The models' folder, `$NEURALVFX_DATA/library/models` by default, holds the twenty-one learned effects under the names
+The models' folder, `$NEURALVFX_DATA/library/models` by default, holds the twenty-four learned effects under the names
 `models.nvfxl` gives them: study M's fire ([REPORT.md](REPORT.md) §14, which replaced v2's), the v2 smoke, study
 M3's explosion and dust (v2's and round 5's with a mean state, [REPORT.md](REPORT.md) §14.9, which replaced them),
 study D's steam, round 5's fog, cloud and jet, and
@@ -562,7 +604,8 @@ study L's magic, orb and vortex ([REPORT.md](REPORT.md) §12.1, which replaced s
 vortex), and round 7's wildfire, coals and mushroom ([EFFECTS_BLAZE.md](EFFECTS_BLAZE.md)) and launch, puffs and ink
 ([EFFECTS_FLOW.md](EFFECTS_FLOW.md)), and round 8's waterfall, fountain, splash and rainshaft
 ([EFFECTS_WATER.md](EFFECTS_WATER.md)); the mushroom and the splash are study O's (a mean state, and for the mushroom a
-stepper fine-tuned on 30-frame windows; [REPORT.md](REPORT.md) §16.3, which replaced round 7's and round 8's). The
+stepper fine-tuned on 30-frame windows; [REPORT.md](REPORT.md) §16.3, which replaced round 7's and round 8's), and
+round 9's lava, eruption and avalanche ([EFFECTS_EARTH.md](EFFECTS_EARTH.md)). The
 orb plays at float whatever the stage's precision (`precision float` on its `effect` line): study L's orb failed study
 K's int8 rule on its average picture ([REPORT.md](REPORT.md) §13.9). Links are enough:
 
@@ -578,6 +621,7 @@ ln -s ../../fx_blaze/models/d/wildfire.nvfx ../../fx_blaze/models/d/coals.nvfx .
 ln -s ../../fx_flow/models/d/launch.nvfx ../../fx_flow/models/d/puffs.nvfx ../../fx_flow/models/d/ink.nvfx .
 ln -s ../../fx_water/models/d/waterfall.nvfx ../../fx_water/models/d/fountain.nvfx ../../o_fix/models/splash.nvfx .
 ln -s ../../fx_water/models/d/rainshaft.nvfx .
+ln -s ../../fx_earth/models/d/lava.nvfx ../../fx_earth/models/d/eruption.nvfx ../../fx_earth/models/d/avalanche.nvfx .
 ```
 
 **Study M3's explosion and dust** ([REPORT.md](REPORT.md) §14.9) carry a mean state: a module that gives controls of
@@ -616,7 +660,7 @@ back and forth. In `--shot`, `--spawn NAME@X,Y,SCALE,AT,VX,VY` moves the instanc
   stopped and spawned again, heap allocations counted in the frame loop and in those calls (0 for each), and something
   drawn.
 - `--keyframes` and `--verify`: each entry's `show` frame as PNG, compared by SHA-256 with frozen rows
-  (`library_keyframe,NAME,file,bytes,sha256`; `results/library/frozen.csv` also records the SHA-256 of the twenty-one model
+  (`library_keyframe,NAME,file,bytes,sha256`; `results/library/frozen.csv` also records the SHA-256 of the twenty-four model
   files they were made with).
 - `--shot`: a stage played as a game would (frame 0 drawn, the spawns, then N frames): the Godot test's reference.
 
@@ -626,10 +670,11 @@ Outputs go under `$NEURALVFX_DATA/library` (the sheet, the video, keyframes); on
 
 **Tests** (`ctest`): `neuralfx.LibraryCatalogueCheck` (no data: the catalogue and every procedural entry);
 `neuralfx.LibraryHostExample` (the C example's self-test); `neuralfx.LibraryCataloguePlays` (every entry, with the
-twenty-one models in `NEURALFX_MODELS_LIBRARY`, by default `$NEURALVFX_DATA/library/models`; skipped without them);
+twenty-four models in `NEURALFX_MODELS_LIBRARY`, by default `$NEURALVFX_DATA/library/models`; skipped without them);
 `neuralfx.LibraryKeyframesFrozen` (the keyframes of `campfire`, `blue_gas_flame`, `grenade`, `steam_vent`, `portal`,
 `lightning_strike`, `ground_fog`, `dust_impact`, `flamethrower`, `plasma_orb`, `dust_devil`, `wall_of_flames`,
-`distant_mushroom`, and two moving ones, `rocket_trail` and `vehicle_dust_wake`, against `results/library/frozen.csv`,
+`distant_mushroom`, the water's and the earth's (`lava_flow`, `volcano_eruption`, `avalanche`), and two moving ones,
+`rocket_trail` and `vehicle_dust_wake`, against `results/library/frozen.csv`,
 on 2 threads; skipped without the models); the `Library.*`, `Glows.*`, `Lamps.*`, `Trails.*`, `Layers.*` and `Weather.*` unit
 tests; the library stage and the engine features' stage in `nvfx_alloc_test`; `neuralfx.LitHostExample` (lit sprites,
 [ENGINES.md](ENGINES.md) §11). The third round's entries have their own frozen keyframes and tests (§10.4).
