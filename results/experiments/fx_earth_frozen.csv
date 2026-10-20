@@ -1,2 +1,3 @@
 kind,name,file,bytes,sha256,source
 rollout_effect,lava,fx_earth/models/d/lava.nvfx,149287,b291382b358f5bef7205502a24f26d00a5a0ff6baecb1d328948a968ebe1084d,study D's recipe (docs/EFFECTS_EARTH.md): d-train --stages12 1 then d-tune then d-finish; frozen before its test
+rollout_effect,eruption,fx_earth/models/d/eruption.nvfx,149287,4a96c0ba5d510200b7b886e3c90b1fc62b77d22fee2180d01ce103d95838ae57,study D's recipe (docs/EFFECTS_EARTH.md): d-train --stages12 1 then d-tune then d-finish; frozen before its test
