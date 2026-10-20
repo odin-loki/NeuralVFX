@@ -3336,7 +3336,8 @@ still fill one tile (`rocket_launch`'s square shows at its top corners at times)
 **What changed.** `examples/scenes/liftoff.nvfxs` and `library/models.nvfxl` (the launch line). Frozen hashes: the
 lift-off's keyframes 078 to 282 (`fx_flow_frozen.csv`; frame 030, before the ignition, is unchanged; the same on 1 and 2
 threads) and the library's `rocket_launch` (`frozen.csv`; the same on 2 and 3 threads). Re-rendered: `scene_liftoff`,
-`effect_launch`. The scene's three blast tiles cost two more 256-pixel tiles' steps a frame (§16.6 has the cost).
+`effect_launch`, and with the mushroom `library_round7` and `real_vs_learned_round7` (§16.5). The scene's three blast
+tiles cost two more 256-pixel tiles' steps a frame (§16.6 has the cost).
 
 ### 16.3 The mushroom cloud (and the splash): the plan, committed before any of its numbers
 
@@ -3624,7 +3625,7 @@ not among the frozen ones. Re-rendered: `library_fire`.
   `library_round7` (the mushroom entries and `rocket_launch`'s 2 passes) and `real_vs_learned_round7` (the mushroom, and
   launch in 2 passes). `real_vs_learned_water`'s splash starts from a run's true state, where the mean state moves
   nothing, and its stepper is the round's: unchanged.
-- **Checks** (after merging main at 6845415): the full build with warnings as errors; the full ctest, @@CTEST@@;
+- **Checks** (after merging main at 6845415): the full build with warnings as errors; the full ctest, 462 of 462 with private copies of the model folders before the links moved;
   `nvfx_alloc_test`; `nvfx_gallery --check` over the whole library; the Godot test (`engines/godot/test.sh`).
 
 ### 16.6 Cost
