@@ -398,6 +398,35 @@ most of it the stage's size; every entry played with no allocation. The keyframe
 `boulder_splash` and `rain_shaft` (now `waterfall_drawn` and `rain_shaft_drawn`, their keyframes unchanged), and of
 `fountain` and `rain_shaft` with their learned bodies, are frozen (`results/library/frozen.csv`).
 
+### Earth (10, round 9: `library/earth.nvfxl`)
+
+The three earth models ([EFFECTS_EARTH.md](EFFECTS_EARTH.md)): lava (a band of molten rock along the bottom of its tile
+that flows along the slope of its `flow` control or pools on the level; it works by its test's rule), the eruption (an
+ash column from a vent at the bottom of the middle of its tile, spreading into an umbrella; it works, narrowly) and the
+avalanche (a powder-snow cloud that runs in the direction of its `direction` control, swells and settles; it plays
+once, 5 s; AVALANCHE_LIB_VERDICT). The file declares its models itself (`effect lava_fx = "lava.nvfx"` and so on), as
+the water's does, and its looks: `magma` (the lava's heat drawn as glow, its crust kept dark), `ash` (the eruption's
+ash lit by the scene, glowing only where it is hottest), `powder` (snow), `rockdust` and `pyro` (the avalanche
+recoloured as a rockslide's dust and a pyroclastic flow). The eruption plays with `swirl 1, swirl_scale 9` on its
+`effect` line, as launch does: its calibrated swirl (3) draws the ash as worms. The models are linked into the models'
+folder with the others (`ln -s ../../fx_earth/models/d/{lava,eruption,avalanche}.nvfx .`). Seeds are the round's
+(6,300,000 and up).
+
+| effect | what it is | plays | box, anchor | runs | parameters (default) | how it looks |
+|---|---|---|---|---|---|---|
+| `lava_flow` | A lava flow: a river of molten rock creeping along the ground under a dark crust that cracks to show the glow, bubbling now and then (the lava model, three tiles) | lava; look magma, lamp, burst | 900 x 160, base | loop | heat (0.6), flow (0.85) | Fair: a low glowing river with darker streaks of crust, thicker downhill, spitting embers now and then; the learned crust is streaks, not the simulator's network of plates and seams, and from afar the band is a thin strip. |
+| `lava_pool` | A lava lake: a still pool of molten rock, its crust drifting and cracking, bubbles of glowing lava swelling up and bursting in spatter (the lava model, level and boiling) | lava; look magma, lamp, burst | 520 x 170, base | loop | heat (0.5), boil (0.5) | Fair: a bright boiling mass whose domes rise and fall; at high `boil` the domes are blocky and read more as flames than as bubbles. |
+| `lava_crack_glow` | Cooling lava ground: a field of dark crust whose cracks still glow, crawling slowly, now and then a bubble (the lava model, cool and calm) | lava; look magma, lamp | 760 x 130, base | loop | heat (0.2) | Weak to fair: a low strip of glowing streaks; no crack network (the learned crust, above), so it reads as embers along the ground more than as cracked rock. |
+| `volcano_eruption` | A volcanic eruption: a column of dark ash blasting up from a glowing vent into an umbrella cloud, its heavy ash collapsing down the sides, lava bombs thrown out, lightning flickering in the plume, ash falling (the eruption model) | eruption; look ash, arc, lamps, ash, burst | 900 x 900, base | loop | power (0.8), wind (0.55) | Good to fair: a column into an umbrella over a glowing, incandescent jet, bombs and flashes of lightning in the plume; the vent's lamp lights the ash brown, and the shader's relief shows a marbled texture; heavy (one 256-pixel tile: 62 ms a frame with its stage on two threads). |
+| `distant_volcano` | A volcano erupting far off: a dark plume rising from a glowing summit into a flat-topped cloud, faint lightning flickering in it (the eruption model, small) | eruption; look ash, arc, lamp | 420 x 360, base | loop | power (0.6), wind (0.65) | Fair: a T-shaped plume on the horizon; lit brown by its vent at this size it looks nearer than it is. |
+| `ash_column` | An ash column: a steady plume of grey-brown ash leaning downwind from a vent, ash falling out of it (the eruption model, low) | eruption; look ash, ash | 600 x 700, base | loop | power (0.35), wind (0.75) | Good: a dark plume leaning downwind into a ragged umbrella; the falling ash is fine and dark, seen only up close. |
+AVALANCHE_LIB_ROWS
+
+In the gallery (`--precision float --isa avx2`, two threads of the shared machine) the lava and eruption entries took
+12 ms (`lava_pool`, `distant_volcano`) to 62 ms (`volcano_eruption`) a frame with their stage's own picture
+AVALANCHE_LIB_COST; every entry played with no allocation. The keyframes of `lava_flow`, `volcano_eruption`
+AVALANCHE_LIB_KF are frozen (`results/library/frozen.csv`, with the three models' rows).
+
 ## 2. The format
 
 A catalogue is written in the scene-script language ([COMPOSE.md](COMPOSE.md) §4), with two more statements. Each

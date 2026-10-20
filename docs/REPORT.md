@@ -952,6 +952,22 @@ learned body's water through the field bus. The same frames on any number of thr
 library entries and a scene of a waterfall under an incoming storm. The full account is in
 [EFFECTS_WATER.md](EFFECTS_WATER.md).
 
+### 6.16 Earth effects
+
+Three more presets were trained with this study's recipe and tested with its protocol on seeds of their own
+(6,000,000 and up), at the runtime's default int8: **lava** (a band of molten rock along the ground under a dark crust
+whose seams glow, flowing along the slope of a `flow` control or pooling on the level, bubbling slowly), an
+**eruption** (a column of hot dark ash from a vent that spreads into an umbrella under a stable layer, its cooler rim
+collapsing down its sides) and a powder-snow **avalanche** (a cloud that breaks loose upslope, runs in the direction of a
+`direction` control, swells as it runs and settles; it plays once, 5 s). Lava works by the rule set before its test: it
+tracks a held-out run 1.09 dB [0.70, 1.43] better than the coarse simulation with the same detail layer at 1 s, and
+endless its average picture is 1.22 dB [0.11, 2.45] closer than the nearest flipbook's with its motion tied; its learned
+crust is streaks rather than the simulator's network of seams, so its detail is further from real than the
+flipbook's. The eruption works narrowly: +0.50 dB [0.06, 0.96] at 1 s (it ties at every other horizon) and an average
+picture 1.31 dB [0.04, 2.55] closer, motion tied; started from an empty grid, its stepper grows no column, as study L's
+vortex did not. AVALANCHE_REPORT Each is 146 KB (the avalanche 274 KB) and REPORT_COST. The full account, with a
+volcano scene and ten library entries, is in [EFFECTS_EARTH.md](EFFECTS_EARTH.md).
+
 ## 7. Runtime cost and budget
 
 Median ms per frame through `nvfx_render`, one pinned AVX2 core (90th percentiles and every configuration in
