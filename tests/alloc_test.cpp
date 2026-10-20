@@ -1,19 +1,19 @@
 // nvfx_render must not allocate (docs/PLAN.md §5.4), nor may a frame of a composed scene (docs/COMPOSE.md). This
 // program replaces the global operator new to count heap allocations, builds small grid, conv and rollout effects in
 // memory, and renders 200 frames of each with every feature switched on (controls, seeded drift, colour; grid models at
-// float and int8 precision), a rollout effect as one continuous rollout with the prior against drift, then 99 frames of
-// a small composed scene (its modules with their own step scratch, and sharing one per thread), 44 frames of a scripted
-// one, and the scripted one through the scene C API (nvfx_scene.h) with the game's calls between frames: steps, field
-// reads, inputs, triggers, module moves and controls; then a stage of the effect library (nvfx_library.h): learned and
-// procedural effects (glows, lamps, bursts of sparks, shards) spawned, moved, set, stopped and stolen between frames,
-// overlapped and not; a stage with the engine layers on (read every frame in every format), a trail moved every frame
-// (its tiles switched on, grown, faded and taken again) and procedural weather (rain washing, snow melting); a stage of
-// the third round's procedural elements (hail, aurora, rainbow, meteors, a beam, a shield, glints, bursts of spatter
-// and shards), its layers read every frame; and the effect manager (nvfx_manager.h) ticking a
-// crowd on its threads and on the engine's, with spawns, stops, controls, camera moves, a tight budget, proxies, copies
-// offset in time, pauses and culls; water (docs/EFFECTS_WATER.md) of every kind, scripted and on a stage, with the
-// engine layers; and a 3D volume (nvfx_volume.h, study N) stepped, read and drawn on 1 and 3 threads.
-// Exit code 0 = no allocation during rendering.
+// float and int8 precision), a rollout effect as one continuous rollout with the prior against drift, rollout effects
+// drawn at half size and upscaled (study P: bilinear and learned), then 99 frames of a small composed scene (its
+// modules with their own step scratch, and sharing one per thread), 44 frames of a scripted one, and the scripted one
+// through the scene C API (nvfx_scene.h) with the game's calls between frames: steps, field reads, inputs, triggers,
+// module moves and controls; then a stage of the effect library (nvfx_library.h): learned and procedural effects
+// (glows, lamps, bursts of sparks, shards) spawned, moved, set, stopped and stolen between frames, overlapped and not;
+// a stage with the engine layers on (read every frame in every format), a trail moved every frame (its tiles switched
+// on, grown, faded and taken again) and procedural weather (rain washing, snow melting); a stage of the third round's
+// procedural elements (hail, aurora, rainbow, meteors, a beam, a shield, glints, bursts of spatter and shards), its
+// layers read every frame; and the effect manager (nvfx_manager.h) ticking a crowd on its threads and on the engine's,
+// with spawns, stops, controls, camera moves, a tight budget, proxies, copies offset in time, pauses and culls; water
+// (docs/EFFECTS_WATER.md) of every kind, scripted and on a stage, with the engine layers; and a 3D volume
+// (nvfx_volume.h, study N) stepped, read and drawn on 1 and 3 threads. Exit code 0 = no allocation during rendering.
 #include "compose_scene.hpp"
 #include "nvfx_internal.hpp"
 #include "script.hpp"
@@ -28,6 +28,7 @@
 #include <neuralfx/nvfx_volume.h>
 #include <neuralfx/rollout.hpp>
 #include <neuralfx/rollout3d.hpp>
+#include <neuralfx/upscale.hpp>
 
 #include <algorithm>
 #include <cmath>
@@ -209,7 +210,7 @@ int run_multi(int size, bool masked, nvfx_precision precision = NVFX_PRECISION_D
 // (docs/COMPOSE.md §10). With `d2`, study D2's detail constants (advection gain and softening, docs/REPORT.md §6.9).
 // With `int8`, study K's int8 path (both convolutions with `both`; docs/REPORT.md §13). With `mean`, study M's mean state:
 // every shard's start is moved to the controls (docs/REPORT.md §14).
-int run_rollout(int size, bool handoff = false, bool d2 = false, bool int8 = false, bool both = false, bool mean = false) {
+int run_rollout(int size, bool handoff = false, bool d2 = false, bool int8 = false, bool both = false, bool mean = false, int upscale = 0) {
   nfx::rollout::Hyper h;
   h.res = 16;
   h.hidden = 8;
@@ -254,6 +255,15 @@ int run_rollout(int size, bool handoff = false, bool d2 = false, bool int8 = fal
   nvfx_instance_set_seed(in, 99);
   nvfx_instance_set_colour(in, 0.4f, 1.2f);
   if (handoff && nvfx_instance_set_handoff(in, 30, 10) != NVFX_OK) return 1;
+  if (upscale == 2) {  // study P: a learned 2x with micro-detail (any weights do)
+    nfx::upscale::Net net = nfx::upscale::init_net(8, 8, 1, 5);
+    net.gain = 0.7f;
+    std::ostringstream ns;
+    if (!nfx::upscale::save_net(ns, net)) return 1;
+    const std::string nb = ns.str();
+    if (nvfx_effect_attach_upscaler_memory(e, nb.data(), nb.size()) != NVFX_OK) return 1;
+  }
+  if (upscale > 0 && nvfx_instance_set_upscale(in, upscale == 2 ? NVFX_UPSCALE_LEARNED : NVFX_UPSCALE_BILINEAR) != NVFX_OK) return 1;
   std::vector<std::uint8_t> rgba(static_cast<std::size_t>(size) * size * 4);
   nvfx_render(in, 0.0, rgba.data(), static_cast<std::size_t>(size) * 4);  // warm-up outside the count
   g_allocations = 0;
@@ -269,6 +279,7 @@ int run_rollout(int size, bool handoff = false, bool d2 = false, bool int8 = fal
                       : (d2 ? " with study D2's detail constants"
                             : (mean ? " with study M's mean state" : int8 ? (both ? " at int8 (both convolutions)" : " at int8") : "")),
               n);
+  if (upscale > 0) std::printf("  (the frames above: drawn at half size and upscaled, %s)\n", upscale == 2 ? "learned 2x with micro-detail" : "bilinear 2x");
   nvfx_instance_free(in);
   nvfx_effect_free(e);
   return n == 0 ? 0 : 1;
@@ -1102,6 +1113,8 @@ int main() {
   failures += run_rollout(64, false, true);                      // study D2's advection gain and softening
   failures += run_rollout(64, false, false, true) + run_rollout(128, false, false, true) + run_rollout(64, false, false, true, true);  // study K
   failures += run_rollout(64, false, false, false, false, true);  // study M's mean state
+  failures += run_rollout(128, false, false, false, false, false, 1) + run_rollout(128, false, false, false, false, false, 2) +
+              run_rollout(128, false, false, true, false, false, 2);  // study P: drawn at half size and upscaled
   failures += run(g, 128, "grid", 8) + run(g, 128, "grid", 5) + run(g, 64, "grid", 4) + run(c, 64, "conv", 4);  // packed features
   failures += run(g, 128, "grid", 8, 6) + run(c, 64, "conv", 8, 8);  // vector-quantised features
   failures += run_per_plane(g, 128, "grid", false) + run_per_plane(c, 64, "conv", false);  // a width per feature plane

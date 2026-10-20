@@ -63,6 +63,7 @@ add_library(neuralfx_model STATIC src/core/model.cpp src/core/rollout.cpp src/co
 target_include_directories(neuralfx_model PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include")
 set_target_properties(neuralfx_model PROPERTIES POSITION_INDEPENDENT_CODE ON)
 neuralfx_defaults(neuralfx_model)
+target_sources(neuralfx_model PRIVATE src/core/upscale.cpp)  # study P's upscaler: its format and float reference (docs/STUDY_P.md)
 
 # The runtime (what ships in a game): C API, per-ISA renderers, no allocation per frame.
 set(NVFX_RUNTIME_SOURCES src/runtime/nvfx.cpp src/runtime/rt_base.cpp src/runtime/rt_avx2.cpp src/runtime/rt_avx512.cpp
@@ -70,6 +71,8 @@ set(NVFX_RUNTIME_SOURCES src/runtime/nvfx.cpp src/runtime/rt_base.cpp src/runtim
                          src/runtime/rt_handoff.cpp
                          src/runtime/nvfx_volume.cpp src/runtime/rt_volume_avx2.cpp  # 3D volumes (nvfx_volume.h, docs/STUDY_3D.md)
                          src/manager/interp.cpp src/manager/manager.cpp src/manager/nvfx_manager.cpp)  # the effect manager (docs/MANAGER.md)
+# Study P (docs/STUDY_P.md): rollout effects drawn at half size and upscaled, one build per ISA.
+list(APPEND NVFX_RUNTIME_SOURCES src/runtime/rt_upscale_base.cpp src/runtime/rt_upscale_avx2.cpp src/runtime/rt_upscale_avx512.cpp)
 find_package(Threads REQUIRED)  # the effect manager's worker threads
 add_library(nvfx STATIC ${NVFX_RUNTIME_SOURCES})
 target_link_libraries(nvfx PUBLIC neuralfx_model Threads::Threads)
@@ -372,6 +375,12 @@ if(NEURALFX_BUILD_TOOLS)
   add_executable(nvfx_ordered tools/nvfx_ordered.cpp)
   target_link_libraries(nvfx_ordered PRIVATE neuralfx_io neuralfx_train neuralfx_dcm nvfx)
   neuralfx_defaults(nvfx_ordered)
+  # Study P (docs/STUDY_P.md): large effects drawn at half size and upscaled: training the upscaler, the null probe,
+  # validation, the test, the cost and the videos.
+  add_executable(nvfx_study_p tools/nvfx_study_p.cpp)
+  target_include_directories(nvfx_study_p PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src/runtime")
+  target_link_libraries(nvfx_study_p PRIVATE neuralfx_io neuralfx_train neuralfx_pack nvfx)
+  neuralfx_defaults(nvfx_study_p)
 
   # Study O (docs/REPORT.md §16): the most visible flaws of the shipped effects and demos, taken apart.
   add_executable(nvfx_fix tools/nvfx_fix.cpp)
@@ -429,6 +438,17 @@ if(NEURALFX_BUILD_TESTS)
   target_link_libraries(neuralfx_water_tests PRIVATE neuralfx_compose GTest::gtest_main)
   neuralfx_defaults(neuralfx_water_tests)
   gtest_discover_tests(neuralfx_water_tests TEST_PREFIX "neuralfx." DISCOVERY_MODE PRE_TEST PROPERTIES LABELS neuralfx)
+  # Study P (docs/STUDY_P.md): the upscaler's reference, format, runtime parity, determinism, no allocation and the
+  # frozen frames; its own test program, so the shared test list stays as it is.
+  add_executable(neuralfx_upscale_tests tests/test_upscale.cpp)
+  target_link_libraries(neuralfx_upscale_tests PRIVATE neuralfx_compose GTest::gtest_main)  # the tests' small rollout effect (compose_scene.hpp)
+  target_include_directories(neuralfx_upscale_tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src/runtime")
+  target_compile_definitions(neuralfx_upscale_tests PRIVATE NEURALFX_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
+  neuralfx_defaults(neuralfx_upscale_tests)
+  if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+    target_compile_options(neuralfx_upscale_tests PRIVATE -Wno-mismatched-new-delete)  # it counts allocations
+  endif()
+  gtest_discover_tests(neuralfx_upscale_tests TEST_PREFIX "neuralfx." DISCOVERY_MODE PRE_TEST PROPERTIES LABELS neuralfx)
   # Counts heap allocations around nvfx_render (replaces the global operator new, so it is its own program).
   add_executable(nvfx_alloc_test tests/alloc_test.cpp)
   target_link_libraries(nvfx_alloc_test PRIVATE nvfx neuralfx_compose nvfx_scene_api nvfx_library_api neuralfx_ddpm)  # the trainer's format writer makes a test prior

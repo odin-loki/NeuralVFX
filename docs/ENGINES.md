@@ -164,6 +164,20 @@ is the same; what differs:
   The orb is the exception: study L's orb failed study K's rule at int8 (REPORT.md §13.9), so the library and the
   scenes play it at float (`precision float` on its `effect` statement); set `NVFX_PRECISION_FLOAT` for orb instances
   and for the orb's `nvfx_manager_model_desc`.
+- **Drawn at half size and upscaled (study P, [STUDY_P.md](STUDY_P.md); experimental, did not pass its rule).** For an
+  effect drawn large: `nvfx_instance_set_upscale(inst, NVFX_UPSCALE_BILINEAR)` plays the instance at half its size (any
+  size that is a multiple of 64) and brings each frame back with the bilinear 2x; `NVFX_UPSCALE_LEARNED`, after
+  `nvfx_effect_attach_upscaler(effect, "file.nvfxup")`, uses a small learned 2x with seeded micro-detail instead
+  (deterministic from the instance's seed and the time). Either is a set-up call (new buffers, a new timeline); frames
+  allocate nothing; the colour is applied after the upscale; empty pixels stay exactly transparent. NVFX_VERSION 7.
+  **What pays is drawing at half size**: the half-size instance costs 0.29 to 0.34 of a native one at 512 px (0.34 to
+  0.43 at 256 px), and against the simulator's frames it is within the null's margins of native or closer (it loses the
+  native's finest filaments, which the detail layer draws at 512 px and the simulator does not have). So the cheap way
+  is the engine's own: create the instance at half size and let the GPU's bilinear sampler draw it large. The learned 2x
+  did not pass its rule: it costs 0.45 to 0.59 of native at 512 px (more than 0.55 for two of six effects; busy machine,
+  provisional), and against native on the same seed it was not better than the bilinear 2x on PSNR, SSIM and the high
+  band together for any of the six effects at 512 px on the held-out test (STUDY_P.md §6); its micro-detail, isotropic
+  noise, does not draw the native's filaments.
 - `nvfx_bake` renders consecutive frames from a fresh start and crossfades a few extra frames into the first ones, so
   the flipbook loops.
 

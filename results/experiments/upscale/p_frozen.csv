@@ -1,0 +1,2 @@
+arm,file,gain,rate,sha256
+L_chosen,p_upscale/nets/cand_shared.nvfxup,0.10,30,4043e2c76b4f4a597ebcee08ae5a8625e37d26649ae26df8638e79ececaea636

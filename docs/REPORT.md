@@ -3729,3 +3729,103 @@ since the step overlaps the drawing of the frame before. The lift-off still runs
   splash's crown still reads as two horns in the library. What would fix them: tiled domains for spawned entries in the
   compositor; for the mushroom, a stepper that sees the cap's whole life (longer windows than 30 frames, or more coarse
   cells over the cap).
+
+## 17. Study P: large effects drawn at half size and upscaled
+
+**Status: finished** (20 October 2026; paused once and resumed). The full write-up, with every table and interval, is
+[STUDY_P.md](STUDY_P.md); the results are under `results/experiments/upscale/`. Seeds: study P's range, 3,600,000 to
+3,999,999. Code: `include/neuralfx/upscale.hpp` and `src/core/upscale.cpp` (the upscaler, its float reference and the
+`.nvfxup` file), `src/runtime/rt_upscale*` (the runtime's kernel, once per ISA), `tools/nvfx_study_p.cpp` (the study),
+`tests/test_upscale.cpp` (11 tests). Data under `/root/nvfx-data/p_upscale` (the frozen models, the upscalers `nets/`,
+the logs).
+
+**The question.** A rollout effect drawn large (512 px) spends most of its frame in the per-pixel detail layer and
+renderer. Does drawing it at half size and bringing it back with a small learned 2x upscaler and seeded micro-detail
+(L) look as good as drawing at native size (N), for clearly less time, and better than the bilinear 2x (B)? Six large
+effects: the explosion, the mushroom, the wildfire, launch (in place of the suggested cloud, which fills only 12% of
+its frame), smoke and the waterfall; at 256 and 512 px, 512 deciding.
+
+### 17.1 What the size touches
+
+The fine fields never feed back into the coarse state: the stepper, its noise and the timeline do not depend on the
+size an instance draws at, so a half-size instance moves to the bit as the native one does (`nvfx_study_p check`, all
+six effects). What differs is the detail layer, which at half size draws its own fine detail rather than native's
+averaged (its frames are 25 to 44 dB from N's averaged to half size). So native's finest filaments are not in the
+half-size frame, even blurred, and a 2x of it can only sharpen a little: on held-out training tiles the shipped size
+(8, 8, 1: 128 multiply-adds a full-size pixel) gains +0.07 dB over bilinear, up to +0.55 dB per effect.
+
+### 17.2 The rule (committed before the test; the test ran once)
+
+The design and the rule's form were committed before any validation or test number (`0108862`); the margins from the
+null probe (N against N with fresh seeds on the validation settings), the choice and the number of test settings
+before the test (`1dcf55e`, and `858f301`: the test plays the mushroom this study froze, not study O's replacement,
+which reached main while the test was running). At 512 px, L is adopted as an opt-in option when, each for at least 5
+of the 6 effects: (1) L beats B against N on active PSNR, SSIM and the high band (bins S / 4 + 1 to S / 2), all three
+intervals clear of zero; (2) L is within the null's margins of N against the simulator's frames at S (tracking at 1 s,
+the endless statistics, the high band); (3) L costs at most 0.55 of N a frame (interleaved, the median ratio). Paired
+bootstrap over the settings, 95%, 10,000 resamples. Validation chose the **shared** upscaler (gain 0.10, 30 noise
+slices a second): the per-effect nets were better on PSNR for all six but worse on SSIM or the high band for four.
+
+### 17.3 The test: the learned 2x does not pass
+
+Run once on 20 held-out settings, seeds 3,800,000 to 3,839,999, 4 plays and 2 tracking runs a setting
+(STUDY_P.md §6). At 512 px, L minus B:
+
+| effect | active PSNR vs N (dB) | SSIM vs N | high band vs N (lower is better) |
+|---|---|---|---|
+| explosion | **+0.087 [+0.028, +0.140]** | -0.0001 [-0.0002, +0.0000] (tie) | +0.009 [-0.013, +0.028] (tie) |
+| mushroom | **+0.107 [+0.093, +0.120]** | **+0.0001 [+0.0001, +0.0001]** | -0.001 [-0.040, +0.039] (tie) |
+| wildfire | -0.045 [-0.090, -0.005] (worse) | -0.0003 [-0.0005, -0.0001] (worse) | +0.085 [+0.060, +0.113] (worse) |
+| launch | +0.007 [-0.000, +0.016] (tie) | -0.0004 [-0.0005, -0.0002] (worse) | +0.075 [+0.059, +0.091] (worse) |
+| smoke | **+0.085 [+0.082, +0.088]** | **+0.0010 [+0.0009, +0.0011]** | +0.002 [-0.019, +0.023] (tie) |
+| waterfall | -0.016 [-0.020, -0.011] (worse) | -0.0004 [-0.0005, -0.0003] (worse) | +0.053 [+0.048, +0.059] (worse) |
+
+- **Condition 1: 0 of 6.** The learned 2x is a little closer to N than bilinear on PSNR for three effects and further
+  for two, and its high band is never closer to N's.
+- **Condition 2: 6 of 6.** L is within every margin of N against the simulator's frames, and nearer them than N on
+  tracking at 1 s (+0.08 to +0.53 dB), the detail spectrum and the high band, because like B it carries less of the
+  fine detail N's detail layer draws at 512 px, which the simulator (128 cells drawn at 512) does not have.
+- **Condition 3: 4 of 6** (below). So by its rule **the learned 2x is not adopted.** At 256 px (not deciding):
+  conditions 1, 2 and 3 hold for 1, 4 and 2 of the 6.
+
+### 17.4 Cost (provisional: a busy machine)
+
+Thread CPU time a frame through `nvfx_render`, N, the half-size instance alone (H), B and L interleaved in one process,
+30 rounds of 20 frames, the median of each ratio to N (the runtime's default, int8 on AVX-512 with VNNI):
+
+| | explosion | mushroom | wildfire | launch | smoke | waterfall |
+|---|---:|---:|---:|---:|---:|---:|
+| N at 512 px (ms) | 4.16 | 6.00 | 4.32 | 4.33 | 4.70 | 4.45 |
+| H / N | 0.343 | 0.310 | 0.291 | 0.302 | 0.325 | 0.298 |
+| B / N | 0.426 | 0.361 | 0.369 | 0.367 | 0.395 | 0.369 |
+| **L / N** | 0.571 | **0.453** | 0.593 | **0.536** | **0.550** | **0.530** |
+
+At 256 px H / N is 0.34 to 0.43 (the coarse step, about 0.3 ms, does not shrink) and L / N 0.46 to 0.70. The learned
+part costs 0.55 to 0.97 ms of a busy core at 512 px beyond the bilinear 2x; the effects that fill most of their frame
+skip the fewest empty blocks.
+
+### 17.5 What ships, and what it means
+
+- **An opt-in path, labelled experimental** (`NVFX_VERSION` 7, ENGINES.md §5): `nvfx_effect_attach_upscaler` (a
+  `.nvfxup` file, once per effect) and `nvfx_instance_set_upscale` with `NVFX_UPSCALE_BILINEAR` (no file) or
+  `NVFX_UPSCALE_LEARNED`; no allocation per frame; deterministic from the seed and the time, with seeking; frozen frames
+  pinned to the AVX2 float build. The upscalers' weights stay under the data root.
+- **What pays is drawing at half size itself.** The half-size instance costs about a third of native at 512 px, and with
+  the bilinear 2x (free on a GPU sampler) it is within the null's margins of native against the simulator's frames on
+  every measure for all six effects at 512 px (4 of 6 at 256 px), and closer than native on tracking and the spectrum
+  (on validation and on the test; beside the rule, not deciding). It loses native's finest filaments; whether a game
+  needs them at the size it draws an effect is a judgement by eye (videos/README.md §9b). An engine can create the
+  instance at half size and draw its texture at full size with no new call.
+- **The learned 2x does not earn its cost**: the half-size frame does not hold native's detail for it to recover, and
+  seeded noise adds high-band energy only at a price in PSNR and SSIM.
+- **The simulator's frames at 512 px are no reference for fine detail.** Drawn from 128 cells, they have about a
+  seventeenth to a third of native's high-band power; native's detail at 512 px is the detail layer's own, checked
+  against nothing. A 512-cell teacher (0.18 s a frame here) would settle it, on the PC.
+- **What could make a learned upscaler worth it**: a target it can reach (the detail layer at full size and only the
+  renderer at half size, or a renderer that draws filaments from the coarse flow), and a cheaper kernel for the effects
+  that fill their frames.
+
+**Checks** (after merging main at eaa7ddf): the full build with warnings as errors; the full ctest, 488 of 488 (main's
+477 and study P's 11), none skipped; `nvfx_alloc_test` (no allocation per frame, with the bilinear 2x, the learned 2x
+and the learned 2x at int8); `nvfx_gallery --check --require-models` (213 effects, all played, 0 failed); the Godot test
+(0 failures).

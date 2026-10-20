@@ -7,6 +7,7 @@
 #include "rt_common.hpp"
 #include "rt_handoff.hpp"
 #include "rt_prior.hpp"
+#include "rt_upscale.hpp"
 
 #include <algorithm>
 #include <array>
@@ -32,6 +33,7 @@ struct nvfx_effect {
   Effect e;
   std::unique_ptr<RolloutEffect> roll;
   std::unique_ptr<nfx::rt::PriorNet> prior;  // rollout effects: the optional prior against drift (nvfx_effect_attach_prior)
+  std::unique_ptr<nfx::upscale::Net> upscaler;  // rollout effects: the optional learned 2x (nvfx_effect_attach_upscaler)
 };
 
 struct nvfx_instance {
@@ -68,6 +70,12 @@ struct nvfx_instance {
   // The simulator's look for the first frames (docs/COMPOSE.md §10; rt_handoff.hpp), drawn into `mix`: off at 0, 0.
   int handoff_frames = 0, handoff_fade = 0;
   nfx::rt::SimLook handoff_look = nfx::rt::SimLook::none;
+  // Study P (docs/STUDY_P.md): drawn at half size (`inner`, the runners' size) and upscaled into the frame by `up`
+  // (bilinear, or the effect's learned upscaler), through the half-size frame `half`. Off: inner == size, no `up`.
+  nvfx_upscale upscale = NVFX_UPSCALE_OFF;
+  int inner = 0;
+  std::unique_ptr<nfx::rt::Upscaler> up;
+  std::vector<std::uint8_t> half;
 };
 
 const RolloutEffect* nfx::rt::rollout_of(const nvfx_effect* e) { return e ? e->roll.get() : nullptr; }
@@ -129,20 +137,41 @@ std::unique_ptr<RolloutRunner> make_rollout_runner(const RolloutEffect& e, int s
   }
 }
 
-// A rollout instance's two runners at a precision, sharing one step scratch (a set-up call: allocates).
-// The instance is unchanged if this throws.
-void make_rollout_runners(nvfx_instance& in, nfx::rt::Precision q) {
-  std::array<std::unique_ptr<RolloutRunner>, 2> r{make_rollout_runner(*in.effect->roll, in.size, q, in.convs, in.isa),
-                                                  make_rollout_runner(*in.effect->roll, in.size, q, in.convs, in.isa)};
+// Study P: the upscaler of an instance drawn at half size n, on the ISA of its runners (bilinear without a net).
+std::unique_ptr<nfx::rt::Upscaler> make_upscaler(const nfx::upscale::Net* net, int n, nvfx_isa isa) {
+  switch (isa) {
+    case NVFX_ISA_AVX512: return nfx::rt::isa_avx512::make_upscaler(net, n);
+    case NVFX_ISA_AVX2: return nfx::rt::isa_avx2::make_upscaler(net, n);
+    default: return nfx::rt::isa_base::make_upscaler(net, n);
+  }
+}
+
+// A rollout instance's two runners at a precision, sharing one step scratch, at the size the instance draws at (half its
+// size when it upscales, study P), and its upscaler (a set-up call: allocates). The instance is unchanged if this throws.
+void make_rollout_runners(nvfx_instance& in, nfx::rt::Precision q, nvfx_upscale mode) {
+  const int inner = mode == NVFX_UPSCALE_OFF ? in.size : in.size / 2;
+  std::array<std::unique_ptr<RolloutRunner>, 2> r{make_rollout_runner(*in.effect->roll, inner, q, in.convs, in.isa),
+                                                  make_rollout_runner(*in.effect->roll, inner, q, in.convs, in.isa)};
   auto scratch = std::make_unique<nfx::rt::RolloutScratch>();
   for (auto& x : r) scratch->fit(*x);
   for (auto& x : r) x->use_scratch(scratch.get());  // frees their own
+  std::unique_ptr<nfx::rt::Upscaler> up;
+  std::vector<std::uint8_t> half;
+  if (mode != NVFX_UPSCALE_OFF) {
+    up = make_upscaler(mode == NVFX_UPSCALE_LEARNED ? in.effect->upscaler.get() : nullptr, inner, runner_isa(q, in.isa));
+    half.assign(static_cast<std::size_t>(inner) * static_cast<std::size_t>(inner) * 4, 0);
+  }
   in.a.r = std::move(r[0]);
   in.b.r = std::move(r[1]);
   in.a.shard = in.b.shard = -1;
   in.step_scratch = std::move(scratch);
   in.built_isa = runner_isa(q, in.isa);
+  in.upscale = mode;
+  in.inner = inner;
+  in.up = std::move(up);
+  in.half = std::move(half);
 }
+void make_rollout_runners(nvfx_instance& in, nfx::rt::Precision q) { make_rollout_runners(in, q, in.upscale); }
 
 // A frame model's renderer on the instances' ISA. With int8, a hidden layer to run in integers and no ISA forced, the
 // AVX-512 build is taken where the CPU has VNNI: its integer kernel keeps 8-bit activations (AVX2's has 7) and is as
@@ -283,16 +312,13 @@ void hand_off(nvfx_instance& in, const RolloutRunner& r, std::int64_t f, const F
   if (in.handoff_frames + in.handoff_fade <= 0) return;
   const float w = nfx::rt::handoff_weight(f, in.handoff_frames, in.handoff_fade);
   if (w >= 1.f) return;
-  const std::size_t row = static_cast<std::size_t>(in.size) * 4;
-  nfx::rt::draw_sim_look(in.handoff_look, r.fine_heat(), r.fine_soot(), in.size, in.mix.data(), row, fi.apply_colour ? fi.colour.data() : nullptr);
-  nfx::rt::blend_handoff(rgba, stride, in.mix.data(), row, in.size, w);
+  const std::size_t row = static_cast<std::size_t>(in.inner) * 4;
+  nfx::rt::draw_sim_look(in.handoff_look, r.fine_heat(), r.fine_soot(), in.inner, in.mix.data(), row, fi.apply_colour ? fi.colour.data() : nullptr);
+  nfx::rt::blend_handoff(rgba, stride, in.mix.data(), row, in.inner, w);
 }
 
-// The frame at f (frames since the effect began) into rgba.
-void rollout_frame(nvfx_instance& in, std::int64_t f, const FrameInput& fi, std::uint8_t* rgba, std::size_t stride) {
-  const auto& m = in.effect->roll->m;
-  if (!m.loop && m.h.frames > 0) f = std::min<std::int64_t>(f, m.h.frames - 1);  // one-shot: hold the last frame
-  f = std::max<std::int64_t>(f, 0);
+// The frame at f (frames since the effect began, already clamped) into rgba, at the runners' size.
+void rollout_frame_inner(nvfx_instance& in, std::int64_t f, const FrameInput& fi, std::uint8_t* rgba, std::size_t stride) {
   const std::int64_t L = shard_frames(in);
   if (L == 0) {
     bring(in, in.a, 0, f);
@@ -309,14 +335,32 @@ void rollout_frame(nvfx_instance& in, std::int64_t f, const FrameInput& fi, std:
   hand_off(in, *cur.r, f, fi, rgba, stride);
   if (j < L - kBlend) return;
   // the crossfade: the next shard comes in over the last kBlend frames
-  const std::size_t row = static_cast<std::size_t>(in.size) * 4;
+  const std::size_t row = static_cast<std::size_t>(in.inner) * 4;
   next.r->render(fi, in.mix.data(), row);
   const float w = (static_cast<float>(j - (L - kBlend)) + 0.5f) / static_cast<float>(kBlend);
-  for (int y = 0; y < in.size; ++y) {
+  for (int y = 0; y < in.inner; ++y) {
     std::uint8_t* d = rgba + stride * static_cast<std::size_t>(y);
     const std::uint8_t* s = in.mix.data() + row * static_cast<std::size_t>(y);
     for (std::size_t i = 0; i < row; ++i) d[i] = static_cast<std::uint8_t>(static_cast<float>(d[i]) * (1.f - w) + static_cast<float>(s[i]) * w + 0.5f);
   }
+}
+
+// The frame at f (frames since the effect began) into rgba. Study P: an instance that upscales draws the frame at half
+// size without its colour matrix, and the upscaler brings it to full size with the noise of the frame's time from the
+// instance's seed and applies the colour matrix.
+void rollout_frame(nvfx_instance& in, std::int64_t f, const FrameInput& fi, std::uint8_t* rgba, std::size_t stride) {
+  const auto& m = in.effect->roll->m;
+  if (!m.loop && m.h.frames > 0) f = std::min<std::int64_t>(f, m.h.frames - 1);  // one-shot: hold the last frame
+  f = std::max<std::int64_t>(f, 0);
+  if (!in.up) {
+    rollout_frame_inner(in, f, fi, rgba, stride);
+    return;
+  }
+  FrameInput plain = fi;
+  plain.apply_colour = false;
+  const std::size_t row = static_cast<std::size_t>(in.inner) * 4;
+  rollout_frame_inner(in, f, plain, in.half.data(), row);
+  in.up->run(in.half.data(), row, in.seed, static_cast<double>(f) / static_cast<double>(m.fps), fi, rgba, stride);
 }
 
 // The prior's work buffers for an instance, on the default ISA (the one forced, else AVX2): a prior step gives the same
@@ -543,6 +587,7 @@ nvfx_status nvfx_instance_create(const nvfx_effect* e, int size, nvfx_instance**
       auto in = std::make_unique<nvfx_instance>();
       in->effect = e;
       in->size = size;
+      in->inner = size;
       in->controls.assign(static_cast<std::size_t>(h.n_controls), 0.5f);
       in->isa = static_cast<nvfx_isa>(g_forced_isa.load());
       make_rollout_runners(*in, nfx::rt::rollout_precision(in->precision));
@@ -590,7 +635,7 @@ size_t nvfx_instance_scratch_bytes(const nvfx_instance* in) {
   if (!in) return 0;
   if (in->a.r) {
     return in->a.r->scratch_bytes() + in->b.r->scratch_bytes() + in->step_scratch->bytes() + in->mix.size() + 4 * (in->controls.size() + in->prior_cond.size()) +
-           (in->prior ? in->prior->scratch_bytes() : 0);
+           (in->prior ? in->prior->scratch_bytes() : 0) + (in->up ? in->up->scratch_bytes() : 0) + in->half.size();
   }
   return in->renderer->scratch_bytes() + 4 * (in->controls.size() + in->cond.size() + in->za.size() + in->zb.size());
 }
@@ -687,6 +732,61 @@ nvfx_status nvfx_instance_set_handoff(nvfx_instance* in, int frames, int fade) {
   in->handoff_frames = frames;
   in->handoff_fade = fade;
   in->handoff_look = look;
+  return NVFX_OK;
+}
+
+// --- study P: drawn at half size and upscaled (docs/STUDY_P.md) -----------------------------------------------------------
+
+namespace {
+nvfx_status attach_upscaler(nvfx_effect* e, std::span<const char> bytes) {
+  if (!e->roll || e->upscaler) return NVFX_ERROR_ARGUMENT;  // instances may hold the attached one
+  auto n = nfx::upscale::parse_net(bytes);
+  if (!n) return NVFX_ERROR_FORMAT;
+  e->upscaler = std::make_unique<nfx::upscale::Net>(std::move(*n));
+  e->roll->resident_bytes += e->upscaler->w.size() * 4;
+  return NVFX_OK;
+}
+}  // namespace
+
+nvfx_status nvfx_effect_attach_upscaler(nvfx_effect* e, const char* path) {
+  if (!e || !path) return NVFX_ERROR_ARGUMENT;
+  try {
+    std::ifstream f(path, std::ios::binary);
+    if (!f) return NVFX_ERROR_IO;
+    const std::vector<char> bytes((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
+    if (f.bad()) return NVFX_ERROR_IO;
+    return attach_upscaler(e, bytes);
+  } catch (const std::bad_alloc&) {
+    return NVFX_ERROR_MEMORY;
+  } catch (...) {
+    return NVFX_ERROR_FORMAT;
+  }
+}
+
+nvfx_status nvfx_effect_attach_upscaler_memory(nvfx_effect* e, const void* data, size_t bytes) {
+  if (!e || !data) return NVFX_ERROR_ARGUMENT;
+  try {
+    return attach_upscaler(e, std::span(static_cast<const char*>(data), bytes));
+  } catch (const std::bad_alloc&) {
+    return NVFX_ERROR_MEMORY;
+  } catch (...) {
+    return NVFX_ERROR_FORMAT;
+  }
+}
+
+nvfx_status nvfx_instance_set_upscale(nvfx_instance* in, nvfx_upscale mode) {
+  if (!in || !in->a.r) return NVFX_ERROR_ARGUMENT;
+  if (mode != NVFX_UPSCALE_OFF && mode != NVFX_UPSCALE_BILINEAR && mode != NVFX_UPSCALE_LEARNED) return NVFX_ERROR_ARGUMENT;
+  if (mode == NVFX_UPSCALE_LEARNED && !in->effect->upscaler) return NVFX_ERROR_ARGUMENT;
+  if (mode != NVFX_UPSCALE_OFF && (in->size % (2 * in->effect->roll->m.h.res) != 0 || in->size / 2 > 512)) return NVFX_ERROR_UNSUPPORTED;
+  if (mode == in->upscale) return NVFX_OK;
+  try {  // a set-up call: new runners at the new size, the upscaler's buffers and a new timeline
+    make_rollout_runners(*in, nfx::rt::rollout_precision(in->precision), mode);
+  } catch (const std::bad_alloc&) {
+    return NVFX_ERROR_MEMORY;
+  } catch (...) {
+    return NVFX_ERROR_UNSUPPORTED;
+  }
   return NVFX_OK;
 }
 
