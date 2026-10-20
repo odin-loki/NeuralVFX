@@ -1,3 +1,11 @@
 kind,name,file,bytes,sha256,source
 rollout_effect,lava,fx_earth/models/d/lava.nvfx,149287,b291382b358f5bef7205502a24f26d00a5a0ff6baecb1d328948a968ebe1084d,study D's recipe (docs/EFFECTS_EARTH.md): d-train --stages12 1 then d-tune then d-finish; frozen before its test
 rollout_effect,eruption,fx_earth/models/d/eruption.nvfx,149287,4a96c0ba5d510200b7b886e3c90b1fc62b77d22fee2180d01ce103d95838ae57,study D's recipe (docs/EFFECTS_EARTH.md): d-train --stages12 1 then d-tune then d-finish; frozen before its test
+volcano_keyframe,frame_030,nvfx_scene_script --keyframes (examples/scenes/volcano.nvfxs),1171310,fce67548a9ccc3e061c670bc1f3dfc5738797864c6f08e7647f93a33e90f4ca0,
+volcano_keyframe,frame_078,nvfx_scene_script --keyframes (examples/scenes/volcano.nvfxs),859328,1212a558532d4acae76c28effcb634f120f5c9da36b6baf25fac841cc1c4f142,
+volcano_keyframe,frame_096,nvfx_scene_script --keyframes (examples/scenes/volcano.nvfxs),1117645,ff3fada9578b0d08f33b80590824fef784627beb0f1c39961d569b49d16af59a,
+volcano_keyframe,frame_120,nvfx_scene_script --keyframes (examples/scenes/volcano.nvfxs),1173241,8be155a74b69fd630e47dcdd3b938f3d3a02f149e9a9aafe9f87f72c0f06981d,
+volcano_keyframe,frame_150,nvfx_scene_script --keyframes (examples/scenes/volcano.nvfxs),1177583,c0da76c9e38eb728437c1dcbc68473740f8bd00c106c8714999ec2f4461d04bc,
+volcano_keyframe,frame_186,nvfx_scene_script --keyframes (examples/scenes/volcano.nvfxs),1191330,437b2565b9bae25051924d30302a12a35b06fa86542841b47d72cdbfabd69070,
+volcano_keyframe,frame_219,nvfx_scene_script --keyframes (examples/scenes/volcano.nvfxs),1183615,bd7d029c9c8720cedc0a0d8ccb5ad2f8551f4b49694125da6a11fa4671172fcd,
+volcano_keyframe,frame_252,nvfx_scene_script --keyframes (examples/scenes/volcano.nvfxs),969655,2f4a87e681bda6a66af23a37ac2e258da0e96646eb2671d5eec9c79b7e3dd160,
