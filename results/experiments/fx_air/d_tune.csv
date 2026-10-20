@@ -1,0 +1,4 @@
+effect,iterations,activity_weight,loss,seconds
+candle,800,100,0.03908,1306
+smokering,800,100,0.00643,1086
+heavygas,800,100,0.02083,1184

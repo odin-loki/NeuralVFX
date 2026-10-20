@@ -215,8 +215,9 @@ class Module {
   // fine soot's slopes as the field shader's relief reads them. albedo() says what the pixel reflects, unlit: `rgb` times
   // image()'s alpha, or (`from_rgb`) image()'s colour itself. The field shader's looks give their soot colour and their
   // emission exactly; a learned look's picture is split by its model: light-giving models (fire, explosion, magic, jet,
-  // orb, wildfire, coals, mushroom, lava) give all of it as emission and reflect nothing, the others (smoke, steam, fog,
-  // dust, cloud, vortex, the eruption's ash, the avalanche's snow) reflect all of it (its learned shading kept, as baked light) and give none. image() is the same with
+  // orb, wildfire, coals, mushroom, lava, candle) give all of it as emission and reflect nothing, the others (smoke, steam,
+  // fog, dust, cloud, vortex, the eruption's ash, the avalanche's snow, smokering, heavygas) reflect all of it (its learned
+  // shading kept, as baked light) and give none. image() is the same with
   // layers or without.
   void use_layers(bool on);
   bool layers() const { return layers_; }

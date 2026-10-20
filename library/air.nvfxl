@@ -1,0 +1,159 @@
+# The air effects of docs/EFFECTS_AIR.md: the candle model (a small, calm flame on a wick with a thin wisp of smoke
+# above it; it leans and flickers in a draught), the smoke ring model (one vortex ring puffed from an opening, rising
+# and spreading as it rolls, then breaking up; it plays once, 4 s) and the heavy gas model (a cold, dense vapour poured
+# out near the ground that spills and flows along it with a rolling front, pools in the low places and thins).
+# A candle tile's wick is in its middle, 12.5% up, so its modules stand at the wick with `sink 0.125`; its flame is
+# small in its tile (a tenth of its width), the rest is the wisp's room. A ring's opening is in the middle of its tile,
+# 11% up, so its modules stand at the opening with `sink 0.11`. A heavy gas tile pours over a low mound in its middle
+# (9% up) into hollows on either side (3% up); its floor is not drawn. Rings repeat by starting the one-shot again (a
+# module per ring in the air). In an entry, t is the time since the spawn, (X, Y) the anchor, scale the size it was
+# spawned at and alive 1 while it plays (docs/LIBRARY.md).
+
+# Cold vapours lit by the scene (heavy gas carries no heat): white dry-ice fog, a sickly green gas, a dim grey-green
+# marsh gas.
+look dry_ice = shader, emission 0, soot_density 1.6, soot_albedo 0.85, sky 0.6, shadow 0.2, scene_light 1.3, relief 1.2,
+               tint (0.92, 0.96, 1)
+look poison_gas = shader, emission 0, soot_density 1.8, soot_albedo 0.7, sky 0.5, shadow 0.25, scene_light 1.2, relief 1.2,
+               tint (0.62, 0.95, 0.35)
+look marsh_gas = shader, emission 0, soot_density 1.1, soot_albedo 0.6, sky 0.5, shadow 0.2, scene_light 1.2, relief 0.8,
+               tint (0.72, 0.82, 0.66)
+# The candle's flame and its wisp drawn by the field shader (its own renderer gives the wisp blue-green fringes): an
+# orange-yellow flame, its warm plume barely seen, a grey wisp lit by the scene.
+look candlelight = like flame, heat_scale 0.9, emission 2.6, emission_power 3, soot_density 1.6, soot_albedo 0.35, sky 0.3
+
+# A smoke ring drawn as incense or a cannon's powder smoke, lit by the scene (its own renderer gives colour fringes on
+# its first frames).
+look incense = shader, emission 0, soot_density 2.4, soot_albedo 0.75, sky 0.7, shadow 0.3, scene_light 1.2, relief 1.4,
+               tint (0.86, 0.88, 0.95)
+look gunpowder = shader, emission 0, soot_density 3, soot_albedo 0.55, sky 0.6, shadow 0.35, scene_light 1.2, relief 1.6,
+               tint (0.8, 0.78, 0.75)
+
+entry candle_flame, category fire, size 50 x 150, anchor base, loop, show 2,
+      about "A candle's flame: a small, calm flame on its wick with a thin wisp of smoke above it, leaning and fluttering in a draught (the candle model, drawn by a field-shader look); its anchor is the wick"
+param intensity = 0.4, range (0, 1), about "flame size"
+param draught = 0.5, range (0, 1), about "0.5 still air; less blows it to the left, more to the right"
+param flicker = 0.2, range (0, 1), about "how much it flutters (the model's turbulence)"
+module flame = candle, size 128, width 150 * scale, at (X, Y), sink 0.125, feather 0.2, look candlelight, start 0, seed 2001,
+               controls (0.4, 0.5, 0.2), intensity intensity, draught draught, turbulence flicker
+emit glow, at (X, Y - 6 * scale), radius 7 * scale, colour (1, 0.75, 0.4), brightness 0.35 * (0.6 + 0.4 * intensity)
+field warm = lamp, at (X, Y - 8 * scale), radius 70 * scale, strength 0.5 + 0.3 * intensity, colour (1, 0.68, 0.35)
+
+entry candelabra, category fire, size 220 x 220, anchor base, loop, show 2,
+      about "A candelabra: five candle flames at the tips of its arms (the candle model, each its own start and seed), with their warm light; its anchor is the foot of the middle candle's wick"
+param intensity = 0.35, range (0, 0.8), about "flame size"
+param draught = 0.5, range (0, 1), about "0.5 still air; less to the left, more to the right"
+module c1 = candle, size 64, width 110 * scale, at (X - 84 * scale, Y + 30 * scale), sink 0.125, feather 0.2, look candlelight, start 0, seed 2011,
+            controls (0.35, 0.5, 0.2), intensity intensity, draught draught
+module c2 = candle, size 64, width 110 * scale, at (X - 42 * scale, Y + 14 * scale), sink 0.125, feather 0.2, look candlelight, start 4, seed 2012,
+            controls (0.35, 0.5, 0.2), intensity intensity, draught draught
+module c3 = candle, size 64, width 110 * scale, at (X, Y), sink 0.125, feather 0.2, look candlelight, start 0, seed 2013,
+            controls (0.4, 0.5, 0.2), intensity 1.1 * intensity, draught draught
+module c4 = candle, size 64, width 110 * scale, at (X + 42 * scale, Y + 14 * scale), sink 0.125, feather 0.2, look candlelight, start 5, seed 2014,
+            controls (0.35, 0.5, 0.2), intensity intensity, draught draught
+module c5 = candle, size 64, width 110 * scale, at (X + 84 * scale, Y + 30 * scale), sink 0.125, feather 0.2, look candlelight, start 0, seed 2015,
+            controls (0.35, 0.5, 0.2), intensity intensity, draught draught
+field warm = lamp, at (X, Y - 10 * scale), radius 160 * scale, strength 0.9, colour (1, 0.66, 0.33)
+
+entry storm_lantern, category fire, size 60 x 120, anchor base, loop, show 2,
+      about "A lantern's flame: a small candle flame behind glass, steady, swaying a little when a draught gets in, with a soft halo (the candle model); its anchor is the wick"
+param intensity = 0.3, range (0, 0.7), about "flame size"
+param draught = 0.5, range (0, 1), about "a draught outside: the glass lets in a third of it"
+module flame = candle, size 64, width 110 * scale, at (X, Y), sink 0.125, feather 0.25, look candlelight, start 0, seed 2021,
+               controls (0.3, 0.5, 0.1), intensity intensity, draught 0.5 + 0.33 * (draught - 0.5), turbulence 0.1
+emit glow, at (X, Y - 8 * scale), radius 16 * scale, colour (1, 0.62, 0.3), brightness 0.12
+field warm = lamp, at (X, Y - 8 * scale), radius 110 * scale, strength 0.8, colour (1, 0.65, 0.32)
+
+entry torch_in_draught, category fire, size 140 x 260, anchor base, loop, show 2,
+      about "A torch's head in a draught: a big candle-like flame that leans, flutters and streams its smoke away, with sparks (the candle model at its largest); its anchor is the torch's head"
+param intensity = 1, range (0.5, 1), about "flame size"
+param draught = 0.85, range (0, 1), about "0.5 still air; less to the left, more to the right"
+module flame = candle, size 128, width 260 * scale, at (X, Y), sink 0.125, feather 0.2, look candlelight, start 7, seed 2031,
+               controls (0.9, 0.85, 0.6), intensity intensity, draught draught, turbulence 0.6
+emit embers, on flame, tries 1, chance 0.25, spread 10 * scale
+field warm = lamp, at (X, Y - 30 * scale), radius 140 * scale, strength 0.9, colour (1, 0.6, 0.28)
+
+entry birthday_candles, category fire, size 200 x 90, anchor base, loop, show 2,
+      about "Birthday candles: six tiny flames in a row on a cake, each with its own flicker and a thread of smoke (the candle model at its smallest); its anchor is the middle of the row of wicks"
+param intensity = 0.1, range (0, 0.4), about "flame size"
+param draught = 0.5, range (0, 1), about "someone about to blow: more leans them all to the right"
+module c1 = candle, size 64, width 70 * scale, at (X - 75 * scale, Y), sink 0.125, feather 0.25, look candlelight, start 4, seed 2041,
+            controls (0.1, 0.5, 0.3), intensity intensity, draught draught
+module c2 = candle, size 64, width 70 * scale, at (X - 45 * scale, Y - 3 * scale), sink 0.125, feather 0.25, look candlelight, start 4, seed 2042,
+            controls (0.1, 0.5, 0.3), intensity intensity, draught draught
+module c3 = candle, size 64, width 70 * scale, at (X - 15 * scale, Y + 2 * scale), sink 0.125, feather 0.25, look candlelight, start 4, seed 2043,
+            controls (0.1, 0.5, 0.3), intensity intensity, draught draught
+module c4 = candle, size 64, width 70 * scale, at (X + 15 * scale, Y - 2 * scale), sink 0.125, feather 0.25, look candlelight, start 4, seed 2044,
+            controls (0.1, 0.5, 0.3), intensity intensity, draught draught
+module c5 = candle, size 64, width 70 * scale, at (X + 45 * scale, Y + 1 * scale), sink 0.125, feather 0.25, look candlelight, start 4, seed 2045,
+            controls (0.1, 0.5, 0.3), intensity intensity, draught draught
+module c6 = candle, size 64, width 70 * scale, at (X + 75 * scale, Y - 1 * scale), sink 0.125, feather 0.25, look candlelight, start 4, seed 2046,
+            controls (0.1, 0.5, 0.3), intensity intensity, draught draught
+field warm = lamp, at (X, Y - 10 * scale), radius 140 * scale, strength 0.8, colour (1, 0.7, 0.38)
+
+entry smoke_ring, category smoke, size 200 x 220, anchor base, once 4.2, show 1.6,
+      about "A smoke ring: one ring of smoke puffed from an opening, rising and spreading as it rolls, then breaking up (the smoke ring model, 4 s); its anchor is the opening"
+param strength = 0.5, range (0, 1), about "how hard the puff: a bigger ring that rises faster"
+param wind = 0.5, range (0, 1), about "drift: 0.5 still air"
+module puff = smokering, size 128, width 240 * scale, at (X, Y), sink 0.11, feather 0.15, look incense, start 13, seed 2101,
+              controls (0.5, 0.5, 0.3), intensity strength, wind wind, opacity 1 - smooth((t - 3.4) / 0.6)
+
+entry rising_smoke_rings, category smoke, size 220 x 300, anchor base, loop, show 3,
+      about "Smoke rings, one after another: a smoker's or a censer's rings puffed every 1.8 s, each rising, spreading and breaking up (the smoke ring model, a ring started again for each puff); its anchor is the opening"
+param strength = 0.4, range (0, 0.8), about "how hard each puff"
+param wind = 0.5, range (0, 1), about "drift: 0.5 still air"
+module r1 = smokering, size 128, width 260 * scale, at (X, Y), sink 0.11, feather 0.15, look incense, start 13, seed 2111, waiting,
+            controls (0.4, 0.5, 0.3), intensity strength, wind wind, opacity 1 - smooth((r1.age - 3.4) / 0.6)
+module r2 = smokering, size 128, width 260 * scale, at (X, Y), sink 0.11, feather 0.15, look incense, start 0, seed 2112, waiting,
+            controls (0.4, 0.5, 0.3), intensity strength, wind wind, opacity 1 - smooth((r2.age - 3.4) / 0.6)
+module r3 = smokering, size 128, width 260 * scale, at (X, Y), sink 0.11, feather 0.15, look incense, start 12, seed 2113, waiting,
+            controls (0.4, 0.5, 0.3), intensity strength, wind wind, opacity 1 - smooth((r3.age - 3.4) / 0.6)
+when t - 5.4 * floor(t / 5.4) < 1 / fps, repeat:
+  start r1 from 13, seed 2111 + floor(t / 5.4)
+when t > 1.8 and (t - 1.8) - 5.4 * floor((t - 1.8) / 5.4) < 1 / fps, repeat:
+  start r2 from 0, seed 2112 + floor(t / 5.4)
+when t > 3.6 and (t - 3.6) - 5.4 * floor((t - 3.6) / 5.4) < 1 / fps, repeat:
+  start r3 from 12, seed 2113 + floor(t / 5.4)
+
+entry cannon_smoke_ring, category smoke, size 320 x 360, anchor base, once 4.5, show 1.2,
+      about "A cannon's smoke ring: a mortar fired upwards throws a flash, sparks and a big ring of powder smoke that rolls up and breaks apart (the smoke ring model at full strength); its anchor is the muzzle"
+param power = 1, range (0.6, 1), about "the charge: the ring's size and speed"
+param wind = 0.5, range (0, 1), about "drift: 0.5 still air"
+module puff = smokering, size 128, width 380 * scale, at (X, Y), sink 0.11, feather 0.15, look gunpowder, start 9, seed 2121,
+              controls (1, 0.5, 0.35), intensity power, wind wind, opacity 1 - smooth((t - 3.7) / 0.7)
+let flash = exp(-t / 0.08)
+light flash (1.1 * flash * power, 0.9 * flash * power, 0.6 * flash * power)
+emit glow, at (X, Y - 6 * scale), radius 26 * scale, colour (1, 0.75, 0.4), brightness 3 * flash
+field blast = lamp, at (X, Y - 20 * scale), radius 220 * scale, strength 1.4 * exp(-t / 0.15), colour (1, 0.7, 0.4)
+at 0:
+  burst at (X, Y - 4 * scale), radius 10 * scale, embers 30, sparks 40, speed 520 * scale, direction (0, -1), cone 40
+
+entry dry_ice_fog, category gas, size 600 x 200, anchor base, loop, show 4,
+      about "Dry-ice fog: a cold white vapour poured out over the floor, spilling both ways with rolling fronts and pooling low (the heavy gas model); its anchor is where it pours out, on the floor"
+param intensity = 0.6, range (0, 1), about "how fast it pours out"
+param flow = 0.5, range (0, 1), about "0.5 both ways; less to the left, more to the right"
+module fog = heavygas, size 128, width 640 * scale, at (X, Y), sink 0.09, feather 0.12, look dry_ice, start 0, seed 2201,
+             controls (0.6, 0.5, 0.4), intensity intensity, flow flow
+
+entry toxic_spill, category gas, size 560 x 200, anchor base, loop, show 4,
+      about "A toxic spill: a sickly green gas pouring out of a leak and creeping along the ground to one side, pooling as it goes (the heavy gas model, recoloured); its anchor is the leak"
+param intensity = 0.7, range (0.2, 1), about "how fast it leaks"
+param flow = 0.75, range (0, 1), about "0.5 both ways; less to the left, more to the right"
+module gas = heavygas, size 128, width 600 * scale, at (X, Y), sink 0.09, feather 0.12, look poison_gas, start 0, seed 2211,
+             controls (0.7, 0.75, 0.5), intensity intensity, flow flow
+field sickly = lamp, at (X, Y - 30 * scale), radius 200 * scale, strength 0.25, colour (0.5, 1, 0.3)
+
+entry swamp_gas, category gas, size 640 x 180, anchor base, loop, show 4,
+      about "Swamp gas: a low, dim marsh gas welling up slowly and lying over the ground, with a few will-o'-the-wisps drifting in it (the heavy gas model at a low rate, recoloured)"
+param intensity = 0.25, range (0, 0.6), about "how much gas wells up"
+module gas = heavygas, size 128, width 680 * scale, at (X, Y), sink 0.09, feather 0.15, look marsh_gas, start 0, seed 2221,
+             controls (0.25, 0.5, 0.3), intensity intensity, turbulence 0.3
+emit glow, at (X, Y - 30 * scale), radius 3 * scale, colour (0.6, 1, 0.75), brightness 1.2, count 3, spread 220 * scale, rate 0.25, seed 7
+
+entry stage_fog, category gas, size 900 x 220, anchor base, loop, show 4,
+      about "Stage fog: two fog machines' heavy white fog rolling out across a stage floor to the right in a thick layer with rolling fronts (two tiles of the heavy gas model); its anchor is the middle of the stage's front"
+param intensity = 0.85, range (0.3, 1), about "the machines' output"
+param flow = 0.85, range (0, 1), about "0.5 both ways; less to the left, more to the right"
+module f1 = heavygas, size 128, width 600 * scale, at (X - 150 * scale, Y), sink 0.09, feather 0.12, look dry_ice, start 0, seed 2231,
+            controls (0.85, 0.85, 0.4), intensity intensity, flow flow
+module f2 = heavygas, size 128, width 600 * scale, at (X + 150 * scale, Y), sink 0.09, feather 0.12, look dry_ice, start 0, seed 2232,
+            controls (0.85, 0.85, 0.4), intensity 0.8 * intensity, flow flow

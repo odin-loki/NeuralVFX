@@ -21,31 +21,33 @@ namespace nfx::sim {
 // later (docs/EFFECTS.md): the same solver with other sources, forces and drawing, trained and tested as study D's.
 // jet, orb and vortex (docs/EFFECTS_ENERGY.md) and fog, dust and cloud (docs/EFFECTS_ATMOSPHERE.md) came after them,
 // the same way, then wildfire, coals and mushroom (docs/EFFECTS_BLAZE.md), launch, puffs and ink
-// (docs/EFFECTS_FLOW.md), waterfall, fountain, splash and rainshaft (docs/EFFECTS_WATER.md), and lava, eruption and
-// avalanche (docs/EFFECTS_EARTH.md).
+// (docs/EFFECTS_FLOW.md), waterfall, fountain, splash and rainshaft (docs/EFFECTS_WATER.md), lava, eruption and avalanche
+// (docs/EFFECTS_EARTH.md), and candle, smokering and heavygas (docs/EFFECTS_AIR.md).
 enum class Effect { fire, smoke, explosion, steam, magic, jet, orb, vortex, fog, dust, cloud, wildfire, coals, mushroom, launch, puffs, ink,
-                    waterfall, fountain, splash, rainshaft, lava, eruption, avalanche };
+                    waterfall, fountain, splash, rainshaft, lava, eruption, avalanche, candle, smokering, heavygas };
 inline constexpr std::array kEffects{Effect::fire, Effect::smoke, Effect::explosion};  // the studies' effects
 inline constexpr std::array kNewEffects{Effect::steam, Effect::magic, Effect::jet, Effect::orb, Effect::vortex,  // added since
                                         Effect::fog,   Effect::dust,  Effect::cloud,
                                         Effect::wildfire, Effect::coals, Effect::mushroom,
                                         Effect::launch, Effect::puffs, Effect::ink,
                                         Effect::waterfall, Effect::fountain, Effect::splash, Effect::rainshaft,
-                                        Effect::lava, Effect::eruption, Effect::avalanche};
+                                        Effect::lava, Effect::eruption, Effect::avalanche,
+                                        Effect::candle, Effect::smokering, Effect::heavygas};
 inline constexpr std::array kAllEffects{Effect::fire, Effect::smoke, Effect::explosion, Effect::steam, Effect::magic,
                                         Effect::jet,  Effect::orb,   Effect::vortex,    Effect::fog,   Effect::dust,
                                         Effect::cloud,
                                         Effect::wildfire, Effect::coals, Effect::mushroom,
                                         Effect::launch, Effect::puffs, Effect::ink,
                                         Effect::waterfall, Effect::fountain, Effect::splash, Effect::rainshaft,
-                                        Effect::lava, Effect::eruption, Effect::avalanche};
+                                        Effect::lava, Effect::eruption, Effect::avalanche,
+                                        Effect::candle, Effect::smokering, Effect::heavygas};
 
 std::string_view effect_name(Effect e);
 bool parse_effect(std::string_view text, Effect& out);  // any effect of kAllEffects
-bool effect_loops(Effect e);                            // an explosion, dust, the mushroom, a splash and an avalanche play once; the others loop
+bool effect_loops(Effect e);  // an explosion, dust, the mushroom, a splash, an avalanche and a smoke ring play once; the others loop
 // How many frames (at 30 per second) an effect that plays once lasts: 90 (3 s) for the explosion, dust and a splash, 150 (5 s) for
-// the mushroom, whose cap needs that long to rise, roll over and darken, AVALANCHE_FRAMES for the avalanche
-// (docs/EFFECTS_EARTH.md); 0 for an effect that loops.
+// the mushroom, whose cap needs that long to rise, roll over and darken, and for the avalanche (docs/EFFECTS_EARTH.md), 120 (4 s)
+// for a smoke ring (docs/EFFECTS_AIR.md); 0 for an effect that loops.
 int one_shot_frames(Effect e);
 
 // The learned controls, all normalised to [0, 1].
@@ -53,7 +55,7 @@ inline constexpr int kControls = 3;
 inline constexpr std::array<std::string_view, kControls> kControlNames{"intensity", "wind", "turbulence"};
 // The names an effect gives its controls: kControlNames, except that magic's second control is its spin (and the
 // jet's its aim, the orb's its pulse, the vortex's its sway, puffs' their rate, ink's its current, the fountain's its aim,
-// lava's its flow and the avalanche's its direction).
+// lava's its flow, the avalanche's its direction, the candle's its draught and heavy gas's its flow).
 std::array<std::string_view, kControls> control_names(Effect e);
 // How fast the source flicker changes (its time axis per second: source_flicker, rollout::NoiseSpec::flicker_rate).
 float flicker_rate(Effect e);
@@ -65,7 +67,8 @@ struct Params {
                             // jet: aim, low to high; orb: pulse, calm to strong; vortex: sway, still to wandering;
                             // puffs: rate, slow to fast; ink: current, full left to full right;
                             // fountain: aim, leaning left to right; lava: flow, downhill to the left, level, to the
-                            // right; avalanche: direction, running left, level, running right)
+                            // right; avalanche: direction, running left, level, running right; candle: draught, from
+                            // the right to from the left; heavygas: flow, to the left to to the right)
   float turbulence = 0.5f;  // vorticity confinement and curl-noise strength
   std::uint64_t seed = 1;   // source noise and turbulence field
   int size = 128;           // output pixels (square)
@@ -174,6 +177,12 @@ class Fluid {
   void add_earth_divergence();
   void earth_decay(float dt);
   bool render_earth(std::span<std::uint8_t> rgba) const;
+  // candle, smokering and heavygas (docs/EFFECTS_AIR.md): their sources, forces, decay and drawing, and the floor heavy gas
+  // flows along, kept apart from the other effects' code; each does nothing for the other effects (false: not handled)
+  bool add_air_sources(float dt);
+  void add_air_forces(float dt);
+  void air_decay(float dt);
+  bool render_air(std::span<std::uint8_t> rgba) const;
   void add_forces(float dt);
   void project();
   void advect_velocity(float dt);
