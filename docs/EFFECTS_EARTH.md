@@ -511,3 +511,8 @@ build/nvfx_gallery --library library --models DATA/library/models --only volcano
 `ROOT/models/d` for the timing holds study D's `fire.nvfx` and `explosion.nvfx` with the three new models; `DIR3`
 holds `lava.nvfx` and `eruption.nvfx`. The data root's `fx_earth/jobs` holds the queue that trained and tested them
 (`train.sh`, `test.sh`, which refuses a model whose SHA-256 is not the frozen one, and `chain2.sh`).
+
+**Checks** (after merging main at 37b08cd, study O, still main's head on 20 October): the full build; the full ctest,
+469 of 469, none skipped; `nvfx_alloc_test` (no allocation per frame); `nvfx_gallery --check` over the whole library
+with its models (201 effects, 201 played, 0 failed) and without them (66 played, 135 parsed and checked, 0 failed);
+the Godot test (`engines/godot/test.sh`, 0 failures).
