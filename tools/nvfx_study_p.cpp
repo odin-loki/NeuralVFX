@@ -2087,7 +2087,11 @@ int step_video(const tools::Args& a, const Ctx& c) {
   const upscale::Net net = load_net(c.net(a.need("net")));
   const Loaded fx(c.model(e));
   const std::vector<Arm> arms = arms_list(std::make_shared<upscale::Net>(net));
-  const int gap = 12, title_h = 40, label_h = 30, W = 3 * S + 4 * gap, Hh = title_h + label_h + S + gap;
+  // a second row: a crop of each panel (--crop X,Y,SIDE in the panel's pixels) shown twice as large, nearest-neighbour
+  const auto cropv = ints(a.str("crop", std::format("{},{},{}", S / 2 - S / 6, S / 2 - S / 6, S / 3)));
+  const int cx = cropv.at(0), cy = cropv.at(1), cs = cropv.at(2), zoom = 2, zs = cs * zoom;
+  if (cx < 0 || cy < 0 || cx + cs > S || cy + cs > S || 3 * zs + 4 * 12 > 3 * S + 4 * 12) throw std::invalid_argument("--crop out of the panel");
+  const int gap = 12, title_h = 40, label_h = 30, W = 3 * S + 4 * gap, row2 = title_h + label_h + S + gap + label_h, Hh = row2 + zs + gap;
   std::vector<std::uint8_t> rgb(sz(W) * sz(Hh) * 3);
   const auto fill = [&](int x0, int y0, int w, int h, std::array<std::uint8_t, 3> col) {
     for (int y = std::max(0, y0); y < std::min(Hh, y0 + h); ++y) {
@@ -2127,7 +2131,31 @@ int step_video(const tools::Args& a, const Ctx& c) {
     for (int k = 0; k < 3; ++k) {
       const int x = gap + k * (S + gap);
       text(labels[sz(k)], x, title_h + 6, 2, {230, 230, 235});
-      blit(k == 0 ? n : std::span<const std::uint8_t>(o[sz(k - 1)]), x, title_h + label_h);
+      text(std::format("{} PX CROP, 2X", cs), x + (S - zs) / 2, row2 - label_h + 8, 2, {170, 170, 176});
+      const std::span<const std::uint8_t> fr = k == 0 ? n : std::span<const std::uint8_t>(o[sz(k - 1)]);
+      blit(fr, x, title_h + label_h);
+      // the crop, outlined on the panel and enlarged below it
+      for (int t = 0; t < cs; ++t) {
+        for (const auto& [px, py] : std::array<std::pair<int, int>, 4>{{{cx + t, cy}, {cx + t, cy + cs - 1}, {cx, cy + t}, {cx + cs - 1, cy + t}}}) {
+          std::uint8_t* q = &rgb[(sz(title_h + label_h + py) * sz(W) + sz(x + px)) * 3];
+          q[0] = 255;
+          q[1] = 220;
+          q[2] = 120;
+        }
+      }
+      const int x2 = x + (S - zs) / 2;
+      for (int y = 0; y < zs; ++y) {
+        for (int xx = 0; xx < zs; ++xx) {
+          const std::uint8_t* src = &rgb[(sz(title_h + label_h + cy + y / zoom) * sz(W) + sz(x + cx + xx / zoom)) * 3];
+          std::uint8_t* dst = &rgb[(sz(row2 + y) * sz(W) + sz(x2 + xx)) * 3];
+          if (y / zoom == 0 || y / zoom == cs - 1 || xx / zoom == 0 || xx / zoom == cs - 1) {
+            const std::uint8_t* in = &rgb[(sz(title_h + label_h + cy + std::clamp(y / zoom, 1, cs - 2)) * sz(W) + sz(x + cx + std::clamp(xx / zoom, 1, cs - 2))) * 3];
+            std::memcpy(dst, in, 3);  // not the outline
+          } else {
+            std::memcpy(dst, src, 3);
+          }
+        }
+      }
     }
     if (std::fwrite(rgb.data(), 1, rgb.size(), video) != rgb.size()) throw std::runtime_error("ffmpeg stopped reading");
   });
