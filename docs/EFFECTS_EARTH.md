@@ -1,31 +1,7 @@
 # Earth effects: lava, an eruption and an avalanche
 
-> **Status: paused** (15 October 2026, 22:00 UTC; the week's compute ran out). **Done:** the three presets with their
-> tests and the byte-for-byte check of all 21 earlier effects (§2), `d-chaos` (§2), the test's design, committed before
-> any test (§4); **lava** trained (2.2 h: renderer 34.7 dB, 146 KB), frozen
-> (`results/experiments/fx_earth_frozen.csv`, SHA-256 `b291382b...`) and tested once: it **works** by the rule (tracking
-> at 1 s +1.09 dB [+0.70, +1.43] over `coarse_sim_detail`; endless mean frame +1.22 dB [+0.11, +2.45] over the nearest
-> flipbook, motion error tied, -0.069 [-0.205, +0.060]; spectrum +0.039 [+0.014, +0.061] worse than the flipbook's;
-> `results/experiments/fx_earth/D_SUMMARY.md`). **Not done:** the eruption's and the avalanche's training and tests, the
-> cost (`d-timing`), the library entries (`library/earth.nvfxl` is an unjudged draft), the volcano scene's look and frozen
-> keyframes (`examples/scenes/volcano.nvfxs` parses; `ScriptedVolcanoFrozen` has no rows yet), the videos, REPORT §6.16,
-> README/ENGINES counts, the merge of main and the final checks. **Models** (data root `/root/nvfx-data/fx_earth`):
-> `models/d/lava.nvfx` (frozen; a read-only copy in `models/frozen/`, linked into `library/models`); the eruption's
-> `d-train` started automatically at 21:57 UTC from the queue and was left running (`logs/eruption.d-train.log`;
-> `jobs/train.sh` then runs its `d-tune` and `d-finish`); the queue is paused (`jobs/PAUSED`), so the avalanche will not
-> start. **To resume:**
-> ```sh
-> D=/root/nvfx-data/fx_earth; cat $D/logs/queue.log                     # what ran
-> rm $D/jobs/PAUSED; $D/jobs/train.sh eruption                           # resumes at its first unfinished step
-> # freeze: sha256sum $D/models/d/eruption.nvfx, a row in results/experiments/fx_earth_frozen.csv, commit and push; then
-> $D/jobs/test.sh eruption                                               # the test, once (refuses an unfrozen model)
-> $D/jobs/train.sh avalanche && (freeze as above) && $D/jobs/test.sh avalanche
-> cp $D/test/*/d_{track,stats,long}.csv ...                              # merge each effect's rows into results/experiments/fx_earth
-> build/nvfx_experiment d-report --root $D --results results/experiments/fx_earth
-> ```
-
-Status: **in progress** (15 October 2026). The presets, their training plan and the test's design (§4) are written
-and committed before any test runs; the results follow them. Audience: dev, research, artists. Three effects a game
+Status: **done** (20 October 2026). The presets, their training plan and the test's design (§4) were written and
+committed before any test ran; the results follow them. Audience: dev, research, artists. Three effects a game
 would want next to fire, smoke and dust: **lava** (glowing molten rock that flows slowly along the ground and pools,
 under a dark crust that cracks to show the glow, bubbling slowly), a volcanic **eruption** (a jet of hot dark ash from a
 vent that rises and spreads into an umbrella under a stable layer, while its heavy parts collapse back down its sides)
@@ -37,7 +13,35 @@ sources, forces and drawing, and are trained and tested as the last nine were ([
 
 ## 1. Bottom line
 
-(After the test.)
+- **Lava works, by the rule set before the test.** From its true state it follows a held-out run 1.09 dB [0.70, 1.43]
+  better than the same simulation on the same 32-cell grid with the same detail layer at 1 s (+2.4 at 8 frames, +0.6 at
+  2 s, a tie at 8 s). Played endlessly at settings and seeds it never saw, its average picture is 1.22 dB [0.11, 2.45]
+  closer to a real run than the nearest training flipbook's and its motion error ties the flipbook's (motion ratio 1.19
+  against 1.38; a second real run 1.00). Its detail is further from real than the flipbook's (spectrum distance 0.143
+  against 0.104; floor 0.048): the learned crust is a glowing band with darker streaks, where the simulator draws dark
+  plates split by bright seams.
+- **The eruption works, narrowly**: +0.50 dB [0.06, 0.96] at 1 s, and a tie at every other horizon; endless its average
+  picture is 1.31 dB [0.04, 2.55] closer than the flipbook's, its motion ties the flipbook's and a second real run's
+  (1.09), its detail ties the flipbook's. Its learned renderer is the weak part of its first frames (27.8 dB on the true
+  fields) and adds faint colour fringes. Started from an empty grid, its stepper grows no column (§6), as study L's
+  vortex did not.
+- **The avalanche is weak**, as the mushroom and the splash were. Its first frame is 1.75 dB [0.70, 2.70] better than
+  the coarse simulation's, but from 1 s it falls behind (-2.23 dB [-4.42, -0.07]; -3.1 at 2 and 4 s), and the same
+  dynamics drawn by the simulation's renderer lose as much: the learned cloud does not grow and billow as the
+  simulator's does, and stays low and flat. Endless, its average picture is 2.90 dB [0.89, 5.71] further from real than
+  the flipbook's (the flipbooks here are whole 5 s avalanches of a neighbouring setting); its motion and detail tie the
+  flipbook's.
+- **Cost (provisional, a shared machine):** 146 KB stored for lava and the eruption (64-pixel fine fields with 8 start
+  points), 274 KB for the avalanche (16 start points); 2.4 MB per instance at 128 px. At the runtime's int8 default on
+  the AVX-512 build, 0.49 (lava), 0.48 (eruption) and 0.44 ms (avalanche) per 128 px frame, where study D's fire took
+  0.66 ms and its explosion 0.55 in the same rounds (§5). Restarts take a quarter of a millisecond.
+- **A scene script** (`examples/scenes/volcano.nvfxs`) plays an eruption on the horizon whose rate surges after a
+  blast, a lava river in the foreground, bombs, ash fall and lightning in the plume; its keyframes are frozen
+  (`ctest -R ScriptedVolcanoFrozen`, float on AVX2). **Ten library entries** use the models (`library/earth.nvfxl`, a new
+  category `earth`): the eruption's three good to fair, the avalanche's four fair, the lava's three fair to weak (§6).
+- **What it took:** a preset each, the one-shot length of the avalanche (`sim::one_shot_frames`: 5 s), one line in the
+  recipe (lava and the eruption keep fine fields with their start points, as smoke does), 1.9 to 2.5 hours of one
+  thread each, and no new code in the trainer, the runtime or the compositor.
 
 ## 2. The effects
 
@@ -177,11 +181,12 @@ it, and the mean state would have little to correct. The models are study D's re
 |---|---|---:|---|---|---:|---|---:|---:|---:|
 | lava | 160 x 240 | 21.3 min, recorded in 239 s | 0.0670, 5236 | 0.0631, 1247 | 34.7 dB | 0.5, 0.5, 1 | 0.50 | 8 (64 px fine) | 146 KB |
 | eruption | 160 x 240 | 21.3 min, recorded in 255 s | 0.0686, 6238 | 0.0659, 1235 | 29.1 dB | 1, 3, 1 | 0.50 | 8 (64 px fine) | 146 KB |
-AVALANCHE_TRAIN_ROW
+| avalanche | 240 x 150 | 20.0 min, recorded in 225 s | 0.0197, 4685 | 0.0202, 1112 | 35.5 dB | 0.5, 1.5, 1 | 0.88 | 16 (64 px fine) | 274 KB |
 
 The seconds are wall-clock time on a share of one core of the shared machine (load 5 to 14 on 4 cores). In all 2.2 hours
 for lava (19:39 to 21:52 UTC on 15 October: 91 minutes for stages 1 and 2, 25 for stage 3, 17 for the last step) and 2.5
-for the eruption (108, 25 and 16 minutes)AVALANCHE_TRAIN_TIME. The loss columns are not comparable between effects (each is
+for the eruption (108, 25 and 16 minutes), 1.9 for the avalanche (82, 21 and 11 minutes; 17:44 to 19:38 UTC on 20
+October). The loss columns are not comparable between effects (each is
 normalised by its own state's scale). The calibration chose half the contrast and a small swirl for lava (its new
 material arrives from its noise-drawn pattern, smoother than turbulence makes it) and the strongest swirl (3) for the
 eruption, as for launch and the jet; on screen that swirl draws the ash as worms, so the library and the scene play the
@@ -269,7 +274,11 @@ Active PSNR (dB), mean over 8 held-out runs (the avalanche's last horizon is 4 s
 | eruption | coarse simulation + detail | 24.1 | 17.3 | 14.8 | 13.2 | 10.8 |
 | eruption | coarse simulation | 16.9 | 16.4 | 15.4 | 13.7 | 11.0 |
 | eruption | holding the first frame | 27.6 | 14.4 | 10.2 | 9.3 | 8.9 |
-AVALANCHE_TRACK_ROWS
+| avalanche | neural | 24.3 | 17.4 | 12.7 | 11.8 | 13.3 |
+| avalanche | neural dynamics, simulation's renderer | 25.1 | 17.7 | 12.7 | 11.8 | 13.4 |
+| avalanche | coarse simulation + detail | 22.6 | 17.2 | 14.9 | 14.8 | 16.4 |
+| avalanche | coarse simulation | 20.8 | 18.2 | 16.0 | 15.6 | 17.5 |
+| avalanche | holding the first frame | 16.1 | 8.1 | 5.8 | 5.6 | 7.5 |
 
 Neural minus coarse simulation + detail, paired over runs (95% intervals; bold: the neural rollout is better):
 
@@ -279,7 +288,11 @@ Neural minus coarse simulation + detail, paired over runs (95% intervals; bold: 
 | lava, neural dynamics with the simulation's renderer | **+11.44 [+10.42, +12.38]** | **+2.75 [+2.47, +3.11]** | **+0.93 [+0.56, +1.24]** | **+0.56 [+0.12, +0.91]** | +0.42 [-0.33, +1.15] (tie) |
 | eruption | +0.08 [-1.18, +1.25] (tie) | +0.26 [-0.08, +0.58] (tie) | **+0.50 [+0.06, +0.96]** | -0.22 [-0.75, +0.35] (tie) | -0.13 [-1.20, +0.75] (tie) |
 | eruption, neural dynamics with the simulation's renderer | **+2.58 [+1.85, +3.22]** | **+0.46 [+0.09, +0.80]** | **+0.55 [+0.09, +1.03]** | -0.16 [-0.69, +0.42] (tie) | -0.09 [-1.17, +0.78] (tie) |
-AVALANCHE_TRACK_DIFF
+| avalanche | **+1.75 [+0.70, +2.70]** | +0.21 [-1.96, +2.23] (tie) | -2.23 [-4.42, -0.07] | -3.10 [-5.17, -0.96] | -3.09 [-4.21, -2.03] |
+| avalanche, neural dynamics with the simulation's renderer | **+2.50 [+1.36, +3.53]** | +0.53 [-1.66, +2.54] (tie) | -2.20 [-4.37, -0.04] | -3.08 [-5.16, -0.96] | -3.04 [-4.16, -1.99] |
+
+(The paired differences at 4 s are from the same bootstrap as `d-report`'s, `metrics::paired_bootstrap` with 10,000
+resamples, on the rows of `d_track.csv`; `d-report` prints 1 and 8 frames, 1, 2 and 8 s.)
 
 - **Lava follows a held-out run better than the simulation at the same resolution** from the first frame to 2 s (+2.4 dB
   at 8 frames, +1.1 at 1 s, +0.6 at 2 s) and ties it at 8 s. Less than the coals (+4.7 at 1 s), its forced cousin: the
@@ -291,7 +304,11 @@ AVALANCHE_TRACK_DIFF
   are as turbulent as launch's billows, and two runs of the simulation part within a second or two (§2). Its renderer is
   the weak part of its first frames (27.8 dB on the true fields): drawn by the simulation's renderer the same dynamics
   lead by 2.6 dB at the first frame.
-AVALANCHE_TRACK_NOTE
+- **The avalanche's learned dynamics fall behind from 1 s**, by 2 to 3 dB, and drawn by the simulation's renderer
+  they lose as much, so the dynamics, not the renderer, are the fault (its renderer reaches 29.7 dB on the true fields,
+  33.5 on the first frame). Its first frame is the best of the three against the coarse simulation, which smears the
+  slab at once; then the simulator's cloud swells and billows up (the entrainment of §2) where the learned one runs out
+  low and flat. The plain coarse simulation, a soft cloud in the right place, tracks best of all.
 
 ### 4.2 Endless runs at settings never seen
 
@@ -310,7 +327,11 @@ right; mean-frame PSNR: higher is closer):
 | eruption | nearest training flipbook | 0.172 | 1.04 | 0.053 | 18.7 |
 | eruption | coarse simulation + detail | 0.200 | 1.83 | 0.054 | 18.9 |
 | eruption | coarse simulation | 0.760 | 0.44 | 0.095 | 17.6 |
-AVALANCHE_ENDLESS_ROWS
+| avalanche | real, other seed (floor) | 0.124 | 0.99 | 0.005 | 30.3 |
+| avalanche | **neural rollout (274 KB)** | 0.167 | 0.96 | 0.023 | 24.6 |
+| avalanche | nearest training flipbook (150 frames) | 0.146 | 0.97 | 0.013 | 27.6 |
+| avalanche | coarse simulation + detail | 0.165 | 0.93 | 0.006 | 29.7 |
+| avalanche | coarse simulation | 0.583 | 0.61 | 0.006 | 30.0 |
 
 Neural minus each other method, paired over the 10 settings (motion as the error \|ln ratio\|; bold: the neural
 rollout is better):
@@ -325,7 +346,10 @@ rollout is better):
 | eruption | mean-frame PSNR (dB) | **+1.31 [+0.04, +2.55]** | +1.11 [-0.22, +2.57] (tie) | -1.65 [-3.41, -0.05] |
 | eruption | motion error | +0.001 [-0.089, +0.078] (tie) | **-0.422 [-0.540, -0.294]** | +0.043 [-0.003, +0.088] (tie) |
 | eruption | coverage distance | **-0.009 [-0.018, -0.001]** | - | +0.015 [+0.001, +0.031] |
-AVALANCHE_ENDLESS_DIFF
+| avalanche | spectrum distance | +0.021 [-0.046, +0.084] (tie) | +0.002 [-0.056, +0.072] (tie) | +0.043 [-0.028, +0.114] (tie) |
+| avalanche | mean-frame PSNR (dB) | -2.90 [-5.71, -0.89] | -5.09 [-7.87, -2.89] | -5.65 [-7.67, -3.68] |
+| avalanche | motion error | +0.155 [-0.320, +0.651] (tie) | +0.318 [+0.013, +0.680] | +0.367 [+0.013, +0.760] |
+| avalanche | coverage distance | +0.010 [-0.005, +0.030] (tie) | - | +0.018 [+0.002, +0.038] |
 
 - **Lava** plays with its average picture 1.2 dB closer than a neighbouring setting's flipbook and its motion tied with
   the flipbook's (19% fast; the flipbook 38%); its detail is a little further from real than the flipbook's (+0.039), and
@@ -336,7 +360,12 @@ AVALANCHE_ENDLESS_DIFF
   and with a second real run's (9% fast), its detail tied with the flipbook's and its coverage closer: a flipbook of a
   neighbouring setting puts the umbrella at another height and lean. Its learned renderer adds faint pink and green
   fringes at the ash's edges, as the mushroom's and the cloud's do.
-AVALANCHE_ENDLESS_NOTE
+- **The avalanche** loses on the average picture to everything (2.9 dB to the flipbook, 5.1 to the coarse
+  simulation with the detail layer) and ties on motion and detail. Its coverage is four times the floor's distance: the
+  learned cloud covers other parts of the frame than the real one, lower and flatter, and at the first held-out setting
+  (a small avalanche, the figure below) it hardly grows at all. A flipbook here is a whole real avalanche of a
+  neighbouring setting, played once, which is hard to beat (as for the mushroom); a 64-frame flipbook held on its last
+  frame would have stood still from 2.1 s.
 
 ![Lava, eruption and avalanche at the first held-out setting: for each, the real run (top) and the neural rollout with a new seed (below), across the run](figures/earth_endless.png)
 
@@ -359,19 +388,106 @@ last windows are as good as the first. Lava moves too fast in every window at bo
 - **The eruption works, narrowly**: +0.50 [+0.06, +0.96] at 1 s (the only horizon it leads at), an average picture
   closer than the flipbook's (+1.31 [+0.04, +2.55]) and its motion error tied with the flipbook's. Both intervals that
   decide are near zero.
-AVALANCHE_VERDICT
+- **The avalanche is weak**: it loses to the coarse simulation at tracking at 1 s (-2.23 [-4.42, -0.07]), and endless
+  its average picture loses to the flipbook (-2.90 [-5.71, -0.89]); its motion and detail tie.
 
 ## 5. Memory and cost
 
-(After the test: `nvfx_experiment d-timing`, beside study D's fire in the same session.)
+Per frame through `nvfx_render` on one pinned core, with study D's fire and explosion in the same session
+(`nvfx_experiment d-timing`, four rounds back to back on 20 October): the least of the four rounds' medians and, in
+brackets, the greatest ([d_timing_rounds.csv](../results/experiments/fx_earth/d_timing_rounds.csv), the first round in
+[d_timing.csv](../results/experiments/fx_earth/d_timing.csv)). The instances play at their default precision, int8; the
+ISA is forced per row, so the AVX2 rows are int8 without VNNI and the AVX-512 row is the default build. **Provisional:**
+the machine was shared with other agents' jobs (load 7 to 10 on 4 cores).
+
+| effect | stored | resident | per instance at 128 px | AVX2, 64 px | AVX2, 128 px | AVX2, 256 px | AVX-512, 128 px (the default) | restart (AVX2, 128 px) |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| lava | 146 KB | 419 KB | 2.4 MB | 0.43 ms (0.45) | 0.67 ms (0.92) | 1.62 ms (1.76) | **0.49 ms** (0.90) | 0.25 ms |
+| eruption | 146 KB | 419 KB | 2.4 MB | 0.46 ms (0.47) | 0.67 ms (0.71) | 1.57 ms (1.88) | **0.48 ms** (0.51) | 0.26 ms |
+| avalanche | 274 KB | 804 KB | 2.4 MB | 0.50 ms (0.58) | 0.62 ms (0.75) | 1.18 ms (1.60) | **0.44 ms** (0.52) | 0.22 ms |
+| fire (study D, same session) | 82 KB | 163 KB | 2.4 MB | 0.46 ms (0.65) | 0.88 ms (0.99) | 2.25 ms (2.56) | 0.66 ms (0.72) | 15.5 ms (1 s warm-up) |
+| explosion (study D, same session) | 274 KB | 804 KB | 2.4 MB | 0.45 ms (0.46) | 0.73 ms (0.80) | 1.53 ms (1.69) | 0.55 ms (0.61) | 0.22 ms |
+
+The same network as study D's, so the same per-pixel work (1012 multiply-adds per pixel at 128 px) and working memory.
+All three cost less than fire per 128 px frame, about what the explosion costs: much of their frame is empty or smooth
+(lava is a band along the bottom, the avalanche a cloud on the ground), and the detail layer and the renderer skip empty
+spans. All three store their start points with fine fields, so a restart is a quarter of a millisecond. For scale, the
+32-cell simulation of each with its own renderer costs 2.6 to 3.2 (lava), 3.5 to 4.7 (eruption) and 3.4 to 3.8 ms
+(avalanche) in our scalar code, against 1.2 to 1.6 ms for fire's. They should be re-timed on a quiet machine with every
+rollout effect (`tools/study_k/time.sh`).
 
 ## 6. The library and a scene
 
-(After the test.)
+**Ten library entries** (`library/earth.nvfxl`, a new category `earth`; the file declares the three models itself, as
+the water's does), judged by eye from shots, sheets and a play of every loop and each one-shot through its length
+([LIBRARY.md](LIBRARY.md) has the notes):
+- lava: `lava_flow` and `lava_pool` **fair**, `lava_crack_glow` **weak to fair**. The learned lava, drawn by its own
+  renderer, is an orange river; the entries draw it with a look of their own (`magma`) that keeps the crust dark and
+  the glow where it is hot, which reads more as molten rock. What none of them shows is the simulator's network of
+  plates and seams (§4.2); the pool's domes, at high `boil`, are blocky and read as flames.
+- the eruption: `volcano_eruption` **good to fair** (a column into an umbrella over an incandescent jet, bombs, lightning
+  flickering in the plume, ash falling), `ash_column` **good**, `distant_volcano` **fair** (lit brown by its vent, it
+  looks nearer than it is). They draw it with a look `ash` (dark ash lit by the scene, glowing only where it is
+  hottest) and play it with `swirl 1, swirl_scale 9`: its calibrated swirl (3) draws the ash as worms, as launch's did.
+- the avalanche: `avalanche`, `snow_slide`, `rock_slide_dust` and `pyroclastic_flow` **fair**: a white cloud that runs,
+  swells and fades (looks `powder`, `rockdust` and `pyro` recolour it as snow, a rockslide's dust and hot ash), but a
+  large cloud piles up against its tile's far edge and shows it as a straight side, and the learned cloud grows less
+  than the simulator's. A one-shot's module fades out by `opacity` over its last second, as the explosion's do.
+
+Three have frozen keyframes (`lava_flow`, `volcano_eruption`, `avalanche`: `ctest -R LibraryKeyframesFrozen`, float on
+AVX2, and from the pack, `PackLibraryKeyframesFrozen`).
+
+![The ten entries of lava, the eruption and the avalanche, each alone at its show moment](figures/library_sheet_earth.png)
+
+**The scene**: `examples/scenes/volcano.nvfxs` (9 s at 1280 x 720 and 30 fps, about 70 lines). Night. A volcano on the
+horizon is erupting (one 256-pixel eruption tile, its vent at the summit), and in the foreground a lava river creeps to
+the right (four lava tiles, the `magma` look), lighting the ground. At 2.5 s the volcano blasts: a flash of the scene's
+light, a shock front from the summit, bombs of lava thrown high (debris, embers and sparks), and the eruption's rate
+rises over a second; at 3.3 s the shock reaches the lava, which spits and bubbles harder. From 3.5 s ash falls over
+everything, some of it still glowing, and from 4 s lightning flickers in the plume (a procedural arc, a lamp and a flash
+of the scene's light, at times the noise picks). Nothing was added to the compositor or the runtime.
+
+![The volcano: keyframes at 1.0, 2.6, 3.2, 4.0, 5.0, 6.2, 7.3 and 8.4 s](figures/volcano_keyframes.png)
+
+The video (at the runtime's int8 default) is `videos/scene_volcano.mp4`; the keyframes' SHA-256 are in
+[fx_earth_frozen.csv](../results/experiments/fx_earth_frozen.csv) and `ctest -R ScriptedVolcanoFrozen` checks them
+(float on AVX2, skipped without the effects in `NEURALFX_MODELS_EARTH`, by default `$NEURALVFX_DATA/fx_earth/models/scene`).
+They are the same on 1 and 2 threads. It plays without an allocation in its frame loop, at 20 ms a frame on 2 threads
+(the mean over its 270 frames, the shared machine; provisional).
+
+What was learned in writing it:
+- **The learned eruption grows no column from an empty grid.** Woken empty at the blast (`start 0, empty`), the module
+  stayed empty for 9 s, as study L's vortex grew no column from nothing (its stepper learns a sink at an empty vent,
+  which the floor at zero then blocks; [REPORT.md](REPORT.md) §12.1.1). So the scene's volcano is already erupting from a
+  start point, and the blast raises its rate. An eruption that starts in a game needs the start point, faded in.
+- **One ground line puts the volcano in the river.** The scene's ground is one line, so the distant volcano stands on
+  the same line as the lava; it is smaller, behind the lava's tiles and lit only by its own vent, which is what makes it
+  read as far off.
+- **A hot band lights the ground a lot**: four lava tiles give the bus heat along the whole frame, so the scene's light
+  gain is lower (0.1) than the prairie's (0.16).
+
+What works: the eruption, its blast, the bombs and the lightning read as a volcano at night, and the river reads as
+lava. What does not, yet: the plume is one tile and its marbled texture shows (the shader's relief on the learned
+fine fields); the river is a glowing strip without the crust's seams; the ash fall is fine and dark and shows mostly in
+motion.
 
 ## 7. What it means
 
-(After the test.)
+- **A forced effect shaped for the 32-cell state learns, and its fine pattern is the price.** Lava, a band kept full
+  and driven by the noise the stepper sees, tracks better than the coarse simulation and plays with the right kind of
+  picture, but its crust's seams, a fine network drawn from the noise's zero lines, are below what the state carries:
+  the learned lava is a band of glow with streaks. The coals, whose glow follows the noise's peaks rather than its zero
+  lines, kept their pattern better; a crust whose plates are the noise's broad lows would be the next thing to try.
+- **A turbulent column learns as fire and launch did**: the eruption works narrowly, on the half decibel at 1 s that
+  launch's +1.5 dB came from, its picture and motion right on average; its weak parts are its renderer's first frames
+  and fringes, and a stepper that cannot start from nothing.
+- **A one-shot whose shape comes from growth is the hard case again.** The avalanche's look is made by the
+  simulator's entrainment (the cloud swells where it runs fast), a slow, cumulative process the learned stepper does not
+  reproduce: it lets the cloud run but not swell. The mushroom (whose cap is made by two broad rolls) failed the same
+  way; dust and the explosion, whose bursts are set at the start, did not. Fixes worth trying, none tested here: the
+  explosion's coupled training of study I, start points along the run and not only at its first frame, or a source
+  term the stepper adds to rather than one it must learn (study L's finding for the vortex).
+- **Ten entries in text, again**: a category, three looks and ten entries, with no code; the scene too.
 
 ## 8. Reproduce
 
@@ -387,4 +503,11 @@ build/nvfx_experiment d-finish --effects lava $R
 #   (the same for eruption and avalanche)
 build/nvfx_experiment d-eval   --effects lava --root $NEURALVFX_DATA/fx_earth --results DIR --threads 2 --seed-base 6000000 --figures FIGS   # the test, once per effect
 build/nvfx_experiment d-report --root $NEURALVFX_DATA/fx_earth --results results/experiments/fx_earth   # D_SUMMARY.md
+build/nvfx_experiment d-timing --effects fire,explosion,lava,eruption,avalanche --root ROOT --results DIR
+build/nvfx_scene_script --script examples/scenes/volcano.nvfxs --models DIR3 --out volcano.mp4 --keyframes DIR --sheet sheet.png
+build/nvfx_gallery --library library --models DATA/library/models --only volcano_eruption,avalanche --sheet sheet.png
 ```
+
+`ROOT/models/d` for the timing holds study D's `fire.nvfx` and `explosion.nvfx` with the three new models; `DIR3`
+holds `lava.nvfx` and `eruption.nvfx`. The data root's `fx_earth/jobs` holds the queue that trained and tested them
+(`train.sh`, `test.sh`, which refuses a model whose SHA-256 is not the frozen one, and `chain2.sh`).
