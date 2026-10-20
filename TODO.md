@@ -1,8 +1,8 @@
 # To do: every effect in 3D — a small demo here first, then big on a PC
 
 **Status:** stage 1 is done (study N, `docs/STUDY_3D.md`, and its follow-up N2, §14); stage 2 is planned, not started.
-Work here resumed on 20 October 2026: study O and round 9's earth are merged; round 9's air and study P are being
-finished on their branches ("Here, until the PC").
+Work here resumed on 20 October 2026: study O and round 9's earth are merged; study P is finished on its branch
+(`study-upscale`); round 9's air is being finished on its branch ("Here, until the PC").
 
 - **Stage 1, here and now (study N): done.** A small 3D demo in this container ([docs/STUDY_3D.md](docs/STUDY_3D.md),
   REPORT §15). What it built:
@@ -82,16 +82,20 @@ then merge it into main.
     to 3,299,999: both meet it and are **replaced** (the library's links point at `o_fix/models/`). The mushroom's
     mean picture +1.18 dB [0.91, 1.45], tracking at 1 s +0.85 dB [0.73, 0.97]; the splash's mean picture +0.40 dB
     [0.21, 0.60]. Still short: the mushroom's cap turns ragged after 3 to 4 s (§16.7).
-- **Study P, cheaper big effects** (`study-upscale`, docs/STUDY_P.md):
+- **Study P, cheaper big effects** (`study-upscale`, docs/STUDY_P.md, REPORT §17): **finished on its branch** (20
+  October 2026), not yet merged into main.
   - The idea: draw a large effect at half size, then upscale it 2x with a learned net and seeded micro-detail.
   - Found: the render size enters only the detail layer and the renderer, so a half-size instance shares the native
-    one's motion bit for bit.
-  - Training tiles show the learned 2x only slightly better than bilinear against native: +0.08 dB shared, up to
-    +0.55 dB per effect.
-  - Built: an opt-in path (`nvfx_effect_attach_upscaler`, `nvfx_instance_set_upscale`, NVFX_VERSION 7, no allocation
-    per frame), costing 0.45 to 0.56 of native at 512 px (busy machine, provisional).
-  - The rule's form is committed; its margins wait on the null probe. **The test has not run; seeds 3.8 to 3.9
-    million are unspent.**
+    one's motion bit for bit; its detail layer draws its own fine detail, not native's averaged.
+  - By the rule committed before the test (`1dcf55e`), tested once on seeds 3,800,000 to 3,839,999: the learned 2x
+    **did not pass**. At 512 px it beat bilinear against native on PSNR, SSIM and the high band for none of the six
+    effects (PSNR +0.09 to +0.11 dB for three, worse for two; its high band never closer), was within the null's
+    margins of native against the simulator for all six, and cost at most 0.55 of native for four (0.45 to 0.59).
+  - What pays is the half size itself: 0.29 to 0.34 of native at 512 px, and with the bilinear 2x within native's
+    margins against the simulator on every measure for all six effects (busy machine, provisional).
+  - Shipped as an experimental opt-in (`nvfx_effect_attach_upscaler`, `nvfx_instance_set_upscale` with
+    `NVFX_UPSCALE_BILINEAR` or `NVFX_UPSCALE_LEARNED`, NVFX_VERSION 7, no allocation per frame); three videos.
+  - Left for the PC: a 512-cell teacher to judge native's own fine detail at 512 px (0.18 s a frame here).
 - **Float on AVX-512 (done).** Float rollouts take the AVX-512 build by default where the CPU has it: 0.80 of AVX2's
   time on a quiet machine (`results/quiet`, round 6). Its float frames turned out bit-identical to AVX2's for all 24
   models with this compiler; the frozen float tests are pinned to AVX2 anyway (REPORT §13.10).

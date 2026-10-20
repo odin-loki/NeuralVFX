@@ -107,6 +107,12 @@ From [docs/REPORT.md](docs/REPORT.md), measured on simulated fire, smoke and exp
   cold field on its tail). The mushroom cloud and the splash, retrained under a rule planned for power and tested once,
   were **replaced**: on held-out settings their average pictures came 1.18 and 0.40 dB closer to a real run's, and the
   mushroom follows a run 0.85 dB better at 1 s.
+- **Large effects drawn at half size (study P, [docs/STUDY_P.md](docs/STUDY_P.md), REPORT §17):** a half-size instance
+  moves to the bit as the native one does and costs 0.29 to 0.34 of it at 512 px; with the bilinear 2x it stays within
+  the null's margins of native against the simulator on every measure for all six effects tried. A small learned 2x
+  with seeded micro-detail, tested once by a rule committed first, **did not pass**: it beat bilinear on PSNR, SSIM and
+  the high band together for none of the six, and cost more than 0.55 of native for two. Both ship as an experimental
+  opt-in (`nvfx_instance_set_upscale`, NVFX_VERSION 7).
 - **Memory, against production block compression:** for equal quality, a network per effect clip needs **2.4 to
   4.3 times less memory than a BC7 flipbook** at 8 bits, and 7.5 times less [4.2, 8.3] with features trained for 4
   bits. **Against ASTC** (mobile GPUs; 8x8 to 12x12 blocks hold every frame at full size in 121 to 256 KB) the ratios

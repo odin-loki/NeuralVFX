@@ -7,15 +7,16 @@ test, which ran once (§6).
 
 **In short.** Drawing a large effect at half size and bringing it back with the small learned 2x and seeded
 micro-detail **did not pass its rule**: on 20 held-out settings at 512 px it beat the bilinear 2x against native on
-PSNR, SSIM and the high band together for **none of the six effects** (it was a little closer than bilinear on PSNR for
-three, by +0.09 to +0.11 dB, further for two; its high band never closer to native's), and it cost at most 0.55 of native
-for **four** of them (0.45 to 0.59; five needed; a busy machine). Against the simulator's frames it was within the null's
-margins of native for all six. What pays is drawing at half size itself: the half-size instance costs **0.29 to 0.34 of
-native at 512 px**, and with the bilinear 2x (free on a GPU) it is within the null's margins of native against the
-simulator's frames on every measure for all six effects at 512 px, and closer than native on tracking and the spectrum. What it loses is native's finest
-filaments, which native's detail layer draws at 512 px and which neither a 2x of the half-size frame nor the simulator
-(at its 128 cells) has. **The opt-in path ships, labelled experimental**: `nvfx_instance_set_upscale` with
-`NVFX_UPSCALE_BILINEAR` (no file) or `NVFX_UPSCALE_LEARNED` (an attached `.nvfxup`), NVFX_VERSION 7; ENGINES.md §5.
+PSNR, SSIM and the high band together for **none of the six effects** (it was a little closer than bilinear on PSNR
+for three, by +0.09 to +0.11 dB, further for two; its high band never closer to native's), and it cost at most 0.55 of
+native for **four** of them (0.45 to 0.59; five needed; a busy machine). Against the simulator's frames it was within
+the null's margins of native for all six. What pays is drawing at half size itself: the half-size instance costs
+**0.29 to 0.34 of native at 512 px**, and with the bilinear 2x (free on a GPU) it is within the null's margins of
+native against the simulator's frames on every measure for all six effects at 512 px, and closer than native on
+tracking and the spectrum. What it loses is native's finest filaments, which native's detail layer draws at 512 px and
+which neither a 2x of the half-size frame nor the simulator (at its 128 cells) has. **The opt-in path ships, labelled
+experimental**: `nvfx_instance_set_upscale` with `NVFX_UPSCALE_BILINEAR` (no file) or `NVFX_UPSCALE_LEARNED` (an
+attached `.nvfxup`), NVFX_VERSION 7; ENGINES.md §5.
 
 The fine fields never feed back into the coarse state, so a half-size instance shares the native one's motion to the
 bit (§2): the comparison against native on the same seed is a paired one.
@@ -90,8 +91,8 @@ and frozen by SHA-256 in [p_models.csv](../results/experiments/upscale/p_models.
 **One change from the suggested set: launch instead of cloud.** How much of its frame each shipped effect fills, at 8
 training settings, 128 px ([p_coverage.txt](../results/experiments/upscale/p_coverage.txt), `nvfx_study_p info`):
 wildfire draws 71% of its pixels, launch 48%, waterfall 42%, explosion 25%, smoke 22% and mushroom 20%, but cloud only
-12% (mean alpha 0.04), 16th of 21; launch is second (mean alpha 0.31, the highest). The explosion, the mushroom and smoke
-are kept as suggested: they grow to fill their frames and are the effects a game draws largest.
+12% (mean alpha 0.04), 16th of 21; launch is second (mean alpha 0.31, the highest). The explosion, the mushroom and
+smoke are kept as suggested: they grow to fill their frames and are the effects a game draws largest.
 
 ### 3.2 The upscaler (`include/neuralfx/upscale.hpp`, `src/core/upscale.cpp`)
 
@@ -101,12 +102,12 @@ On the half-size frame (premultiplied RGBA8, n x n), per half-size pixel:
   residuals of the pixel's 2 x 2 full-size pixels (16) and the micro-detail's amplitude per channel (4, through a ReLU);
 - out = bilinear 2x + residual + gain x amplitude x eta, then the instance's colour matrix, clamped, to bytes.
 
-**eta** is seeded noise at the full size: white noise (one hash per pixel from the instance's seed and a time slice) minus
-its 3 x 3 mean, scaled to unit variance, so its energy sits at the finest scales; slices change `rate` times a second and
-are blended by a smoothstep, with the variance kept at 1. It depends on the seed, the pixel and the frame's time only.
-**Pixels where the bilinear 2x is empty in every channel stay exactly transparent**, as a rollout effect's empty pixels
-are. The file (`.nvfxup`, magic NVFXUPS1) holds c1, c2, k2, the gain, the rate, a tag and the weights: 2.2 KB for the
-shipped size.
+**eta** is seeded noise at the full size: white noise (one hash per pixel from the instance's seed and a time slice)
+minus its 3 x 3 mean, scaled to unit variance, so its energy sits at the finest scales; slices change `rate` times a
+second and are blended by a smoothstep, with the variance kept at 1. It depends on the seed, the pixel and the frame's
+time only. **Pixels where the bilinear 2x is empty in every channel stay exactly transparent**, as a rollout effect's
+empty pixels are. The file (`.nvfxup`, magic NVFXUPS1) holds c1, c2, k2, the gain, the rate, a tag and the weights:
+2.2 KB for the shipped size.
 
 **The size, from cost** (training data only). Held-out training tiles, PSNR against N, residual only:
 
@@ -121,8 +122,8 @@ shipped size.
 Every size gains little over the bilinear 2x (§2 says why), and the larger ones cost what the plan cannot pay: with
 8, 8, 1 the runtime's upscaler takes about 0.6 to 0.8 ms of a busy core at 512 px, which with the half-size instance
 (0.30 to 0.35 of N) puts L at about 0.45 to 0.56 of N (a probe, `nvfx_study_p cost`, 8 rounds); the 8, 8, 3 net would
-double the network's part. **The study uses 8, 8, 1.** One net serves both sizes: a net trained on 512 px tiles alone did
-no better on them than one trained on both (`tile-eval`).
+double the network's part. **The study uses 8, 8, 1.** One net serves both sizes: a net trained on 512 px tiles alone
+did no better on them than one trained on both (`tile-eval`).
 
 ### 3.3 Training (`nvfx_study_p tiles`, `train`; training settings and seeds only)
 
@@ -136,12 +137,13 @@ no better on them than one trained on both (`tile-eval`).
   steps of 32 tiles, hand-written gradients (`tile_pass`).
 - **The candidates**: one **shared** net, trained on all six effects' tiles (each effect drawn equally often), and **one
   per effect**, trained on its own tiles, the same size and steps.
-- **The micro-detail's gain and rate** (`nvfx_study_p calib`, the dev split: training runs 16 on, seeds 3,650,000): the
-  gain is the largest of 0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.75 and 1 whose PSNR and SSIM against N each keep at least half of
-  the residual's own gain over B (gain 0), means over the effects and sizes; if the residual gains nothing on either
-  measure, there is no micro-detail. The rate is the one of 4, 8, 15 and 30 slices a second whose motion is closest to
-  N's. A high-band loss that made the residual itself sharpen (restoring N's high-pass energy from 21% to 87% of N's) was
-  tried and dropped: it cost 0.6 dB of PSNR against N on held-out tiles, which the rule's first condition does not allow.
+- **The micro-detail's gain and rate** (`nvfx_study_p calib`, the dev split: training runs 16 on, seeds 3,650,000):
+  the gain is the largest of 0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.75 and 1 whose PSNR and SSIM against N each keep at least
+  half of the residual's own gain over B (gain 0), means over the effects and sizes; if the residual gains nothing on
+  either measure, there is no micro-detail. The rate is the one of 4, 8, 15 and 30 slices a second whose motion is
+  closest to N's. A high-band loss that made the residual itself sharpen (restoring N's high-pass energy from 21% to
+  87% of N's) was tried and dropped: it cost 0.6 dB of PSNR against N on held-out tiles, which the rule's first
+  condition does not allow.
 
 ### 3.4 The runtime (`src/runtime/rt_upscale*.{hpp,cpp}`, `nvfx_effect_attach_upscaler`, `nvfx_instance_set_upscale`)
 
@@ -176,9 +178,9 @@ half-size frames), looping effects 300 frames (10 s), one-shots their run (explo
   over the plays as study D2 pools), mean |log10 P_arm - log10 P_N| over the radial bins above the half-size frame's
   Nyquist frequency (bins S / 4 + 1 to S / 2), where upscaling loses detail.
 
-**(b) Against the simulator's real frames at S**: the teacher, the simulation on its 128-cell grid (the resolution every
-model was trained and measured at), drawn by its own renderer at S px (its dynamics do not depend on the size it draws at,
-§2):
+**(b) Against the simulator's real frames at S**: the teacher, the simulation on its 128-cell grid (the resolution
+every model was trained and measured at), drawn by its own renderer at S px (its dynamics do not depend on the size it
+draws at, §2):
 - tracking at 1 s from the true state (study D's protocol, as study M3's: 2 runs per setting from an empty grid, looping
   effects warmed for 100 frames, one-shots 1; the true state with its 128-cell fine fields as the only start point, one
   continuous rollout with the run's seed), active PSNR at frame 30 against the teacher drawn at S;
@@ -218,9 +220,9 @@ Run k of setting s has seed base + 100 s + k. Settings of the test are at least 
   preferred when it ties.**
 - **The number of test settings**: for the chosen upscaler at 512 px, each effect and each measure of the rule, the
   settings at which the rule's interval would clear its bound with probability 0.9 if the test's mean equalled
-  validation's, ((1.96 + 1.28) SD / distance)^2, with the SD at the upper end of its one-sided 80% interval; the smallest
-  multiple of 10 covering every finite one, at least 10, at most 20 (the time a test takes here). Measures whose
-  validation mean lies on the wrong side have no such number; they are listed.
+  validation's, ((1.96 + 1.28) SD / distance)^2, with the SD at the upper end of its one-sided 80% interval; the
+  smallest multiple of 10 covering every finite one, at least 10, at most 20 (the time a test takes here). Measures
+  whose validation mean lies on the wrong side have no such number; they are listed.
 
 ### 4.4 The rule's form
 
@@ -236,14 +238,15 @@ At **S = 512**, L (the chosen upscaler) is adopted as an opt-in option when all 
    order rotated each round, 30 rounds of 20 frames, each instance on its own timeline; the median over the rounds of
    L / N. Absolute milliseconds are provisional (a shared machine).
 
-S = 256 is reported the same way and does not decide. Ties are reported as ties; "beats" means an interval clear of zero.
+S = 256 is reported the same way and does not decide. Ties are reported as ties; "beats" means an interval clear of
+zero.
 
 ### 4.5 The rule's numbers (committed after the null probe and validation, before the test)
 
 **The candidates, after calibration** (§3.3, dev split): the shared net with gain 0.10 and 30 slices a second; the
 per-effect nets with gains 0.40 (explosion), 0.50 (mushroom), 0.30 (wildfire), 0.10 (launch) and 0 (smoke and the
-waterfall, whose residuals gained too little SSIM or PSNR over B to spend on noise), 30 slices a second where the gain is
-not 0.
+waterfall, whose residuals gained too little SSIM or PSNR over B to spend on noise), 30 slices a second where the gain
+is not 0.
 
 **The margins** ([p_margins.csv](../results/experiments/upscale/p_margins.csv)): the null (N with fresh seeds minus N,
 4 plays pooled, over the 10 validation settings) gives every margin but tracking's and emission's; they are wide where
@@ -301,9 +304,9 @@ teacher's frames by 0.02 to 0.09 in the detail spectrum, 3% to 13% in motion and
 setting (RMS over the settings), so most margins are the null's, 1.0 to 21 times study K's; emission's is study K's
 (0.0001) but for the wildfire and launch (0.0002, the null's), and tracking's is -0.20 dB. The margins are in §4.5.
 
-**N against the teacher's frames.** At 512 px N's spectrum is 0.46 (wildfire) to 1.09 (smoke) from the teacher's, and its
-high band 0.54 to 1.24 (in log10 power: N draws about 3 to 17 times the teacher's high-band power), because the teacher at 512
-px is drawn from 128 cells and N's detail layer draws at 512.
+**N against the teacher's frames.** At 512 px N's spectrum is 0.46 (wildfire) to 1.09 (smoke) from the teacher's, and
+its high band 0.54 to 1.24 (in log10 power: N draws about 3 to 17 times the teacher's high-band power), because the
+teacher at 512 px is drawn from 128 cells and N's detail layer draws at 512.
 
 **The candidates against B and N at 512 px** (validation, the rule's form applied as a reading; full tables in
 [p_decide_val.txt](../results/experiments/upscale/p_decide_val.txt)):
@@ -333,9 +336,9 @@ their margins).
 ## 6. The test (once)
 
 Study B's 10 held-out settings and 10 more drawn the same way (`test_settings(20)`), seeds 3,800,000 (real), 3,810,000
-(plays) and 3,830,000 (tracking), 4 plays and 2 tracking runs per setting, the shared net frozen (`4043e2c7...`), run once
-in three processes of two effects (20 October 2026; markers under `p_upscale`), the mushroom the frozen one (§4.5)
-([p_eval_test.csv](../results/experiments/upscale/p_eval_test.csv),
+(plays) and 3,830,000 (tracking), 4 plays and 2 tracking runs per setting, the shared net frozen (`4043e2c7...`), run
+once in three processes of two effects (20 October 2026; markers under `p_upscale`), the mushroom the frozen one
+(§4.5) ([p_eval_test.csv](../results/experiments/upscale/p_eval_test.csv),
 [p_decide_test.txt](../results/experiments/upscale/p_decide_test.txt),
 [p_decide_test.csv](../results/experiments/upscale/p_decide_test.csv)).
 
@@ -368,23 +371,25 @@ have.
 **So by its rule the learned 2x is not adopted**: condition 1 holds for none of the six effects, condition 3 for four
 (five needed); only condition 2 holds.
 
-**At 256 px** (reported the same way, not deciding): condition 1 holds for 1 of 6 (the mushroom: +0.112 dB, +0.0005 SSIM,
-high band -0.071 [-0.118, -0.023]); PSNR is better for five (+0.02 to +0.19 dB) and a tie for the waterfall, SSIM better
-for three, the high band worse for the wildfire, launch and the waterfall. Condition 2 holds for 4 of 6: the wildfire's
-and the waterfall's |ln motion ratio| intervals reach past their margins (-0.005 [-0.045, +0.038] against 0.031, -0.031
-[-0.133, +0.070] against 0.047). Condition 3: L costs 0.46 to 0.70 of N (§7), at most 0.55 for 2 of 6.
+**At 256 px** (reported the same way, not deciding): condition 1 holds for 1 of 6 (the mushroom: +0.112 dB, +0.0005
+SSIM, high band -0.071 [-0.118, -0.023]); PSNR is better for five (+0.02 to +0.19 dB) and a tie for the waterfall,
+SSIM better for three, the high band worse for the wildfire, launch and the waterfall. Condition 2 holds for 4 of 6:
+the wildfire's and the waterfall's |ln motion ratio| intervals reach past their margins (-0.005 [-0.045, +0.038]
+against 0.031, -0.031 [-0.133, +0.070] against 0.047). Condition 3: L costs 0.46 to 0.70 of N (§7), at most 0.55 for 2
+of 6.
 
-**B against N** (beside the rule): on the test as on validation, B is within N's margins on every (b) measure for all six
-effects at 512 px (for 4 of 6 at 256 px), nearer the teacher than N on tracking (+0.10 to +0.54 dB) and the spectrum.
+**B against N** (beside the rule): on the test as on validation, B is within N's margins on every (b) measure for all
+six effects at 512 px (for 4 of 6 at 256 px), nearer the teacher than N on tracking (+0.10 to +0.54 dB) and the
+spectrum.
 
 ## 7. Cost (provisional: a busy machine)
 
-Thread CPU time per frame through `nvfx_render`, the four instances in turn within one process (their order rotated each
-round), 30 rounds of 20 frames, each on its own timeline at controls (0.6, 0.5, 0.6), the runtime's default (int8 on
-AVX-512 with VNNI); the median over the rounds of each ratio to N, and in brackets the 95% bootstrap interval of the mean
-ratio ([p_cost.csv](../results/experiments/upscale/p_cost.csv), [p_cost_rule.txt](../results/experiments/upscale/p_cost_rule.txt);
-label `rule`, the shared net, run after §4.5 was committed). H is the half-size instance alone: what B costs when the
-engine's GPU does the bilinear 2x.
+Thread CPU time per frame through `nvfx_render`, the four instances in turn within one process (their order rotated
+each round), 30 rounds of 20 frames, each on its own timeline at controls (0.6, 0.5, 0.6), the runtime's default (int8
+on AVX-512 with VNNI); the median over the rounds of each ratio to N, and in brackets the 95% bootstrap interval of
+the mean ratio ([p_cost.csv](../results/experiments/upscale/p_cost.csv),
+[p_cost_rule.txt](../results/experiments/upscale/p_cost_rule.txt); label `rule`, the shared net, run after §4.5 was
+committed). H is the half-size instance alone: what B costs when the engine's GPU does the bilinear 2x.
 
 | effect | N, 512 px | H / N | B / N | **L / N** | N, 256 px | H / N | B / N | L / N |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|
@@ -409,12 +414,13 @@ on a GPU. At 256 px L costs 0.46 to 0.70 of N.
 
 ## 8. What it means
 
-- **For an engine: draw large effects at half size and let the GPU upscale.** The half-size instance costs about a third
-  of native at 512 px (0.29 to 0.34; 0.34 to 0.43 at 256 px, where the fixed coarse step weighs more), and against the
-  simulator it plays as well as native or better on every measure studied. It is softer than native in the finest
-  filaments; whether a game needs those at the size it draws the effect is a judgement by eye (the videos: videos/README.md §9b).
-  Creating the instance at half size and drawing its texture at full size needs no new call; `NVFX_UPSCALE_BILINEAR`
-  does the same on the CPU for engines that want the full-size bytes (0.04 to 0.08 of native more).
+- **For an engine: draw large effects at half size and let the GPU upscale.** The half-size instance costs about a
+  third of native at 512 px (0.29 to 0.34; 0.34 to 0.43 at 256 px, where the fixed coarse step weighs more), and
+  against the simulator it plays as well as native or better on every measure studied. It is softer than native in the
+  finest filaments; whether a game needs those at the size it draws the effect is a judgement by eye (the videos:
+  videos/README.md §9b). Creating the instance at half size and drawing its texture at full size needs no new call;
+  `NVFX_UPSCALE_BILINEAR` does the same on the CPU for engines that want the full-size bytes (0.04 to 0.08 of native
+  more).
 - **The learned 2x does not earn its cost.** Native's finest detail is not in the half-size frame, not even blurred: the
   half-size detail layer draws its own (§2), so a 2x trained for squared error can only sharpen a little (+0.07 dB over
   bilinear for the shared net on training tiles, up to +0.55 dB per effect), and seeded noise adds high-band energy only
@@ -422,13 +428,13 @@ on a GPU. At 256 px L costs 0.46 to 0.70 of N.
   core at 512 px) it did not beat bilinear on all three of (a)'s measures for any effect. The per-effect nets did better
   on PSNR and the high band (validation, §5) but lost SSIM for four effects, so the rule kept the shared one.
 - **The simulator's frames at 512 px are not a reference for fine detail.** Drawn from 128 cells, they have about a
-  seventeenth to a third of native's high-band power; native's detail at 512 px is the detail layer's own, checked against nothing.
-  A 512-cell teacher (0.18 s a frame here) would be needed to say whether native's filaments are right; it is a task for
-  the PC.
+  seventeenth to a third of native's high-band power; native's detail at 512 px is the detail layer's own, checked
+  against nothing. A 512-cell teacher (0.18 s a frame here) would be needed to say whether native's filaments are
+  right; it is a task for the PC.
 - **What would make a learned upscaler worth it**: a target it can reach (a half-size instance whose fine fields are
-  native's averaged, e.g. by running the detail layer at full size and only the renderer at half size, or a renderer that
-  draws filaments from the coarse flow), and a cheaper kernel for effects that fill their frame (the wildfire and launch
-  skip the fewest empty blocks).
+  native's averaged, e.g. by running the detail layer at full size and only the renderer at half size, or a renderer
+  that draws filaments from the coarse flow), and a cheaper kernel for effects that fill their frame (the wildfire and
+  launch skip the fewest empty blocks).
 
 ## 9. Reproduce
 
