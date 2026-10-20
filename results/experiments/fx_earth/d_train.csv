@@ -1,3 +1,4 @@
 effect,runs,frames,sim_minutes,record_s,stepper_loss,stepper_s,renderer_psnr,contrast,swirl,detail_score,starts,start_fine,stored_bytes,total_s
 lava,160,240,21.33,239,0.06704,5236,0.00,1,0.8,0.000,8,64,149162,5481
 eruption,160,240,21.33,255,0.06857,6238,0.00,1,0.8,0.000,8,64,149162,6501
+avalanche,240,150,20.00,225,0.01966,4685,0.00,1,0.8,0.000,16,64,280826,4909

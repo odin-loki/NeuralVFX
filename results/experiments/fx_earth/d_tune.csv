@@ -1,3 +1,4 @@
 effect,iterations,activity_weight,loss,seconds
 lava,800,100,0.06308,1247
 eruption,800,100,0.06594,1235
+avalanche,800,100,0.02022,1112

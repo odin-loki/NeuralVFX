@@ -9,3 +9,4 @@ volcano_keyframe,frame_150,nvfx_scene_script --keyframes (examples/scenes/volcan
 volcano_keyframe,frame_186,nvfx_scene_script --keyframes (examples/scenes/volcano.nvfxs),1191330,437b2565b9bae25051924d30302a12a35b06fa86542841b47d72cdbfabd69070,
 volcano_keyframe,frame_219,nvfx_scene_script --keyframes (examples/scenes/volcano.nvfxs),1183615,bd7d029c9c8720cedc0a0d8ccb5ad2f8551f4b49694125da6a11fa4671172fcd,
 volcano_keyframe,frame_252,nvfx_scene_script --keyframes (examples/scenes/volcano.nvfxs),969655,2f4a87e681bda6a66af23a37ac2e258da0e96646eb2671d5eec9c79b7e3dd160,
+rollout_effect,avalanche,fx_earth/models/d/avalanche.nvfx,280927,77bf9d9d5464e514345a74f2a0498d4947115db04fa286c264ce7567715c194c,study D's recipe (docs/EFFECTS_EARTH.md): d-train --stages12 1 then d-tune then d-finish (the one-shot branch, 150 frames); frozen before its test
