@@ -21,35 +21,39 @@ effect heavygas  = "heavygas.nvfx"
 # The tomb's vapour: pale and cold, lit by the candles and the moonlight; the censer's incense, blue-grey.
 look miasma  = shader, emission 0, soot_density 1.6, soot_albedo 0.8, sky 0.55, shadow 0.2, scene_light 1.3, relief 1.2,
                tint (0.82, 0.95, 0.9)
-look incense = shader, emission 0, soot_density 2.4, soot_albedo 0.75, sky 0.7, shadow 0.3, scene_light 1.2, relief 1.4,
+look incense = shader, emission 0, soot_density 2.2, soot_albedo 0.5, sky 0.45, shadow 0.3, scene_light 1.1, relief 1.4,
                tint (0.86, 0.88, 0.95)
+# The candles' flames and wisps drawn by the field shader, as the library draws them (the model's own renderer gives the
+# wisp blue-green fringes).
+look candlelight = shader, heat_scale 0.9, emission 2.6, emission_power 3, soot_density 1.6, soot_albedo 0.35, sky 0.3,
+                   shadow 0.3, scene_light 0.5, relief 2
 
 let door    = smooth((t - opened) / 0.5) * (1 - smooth((t - 6.2) / 1.2))   # the door open (0 shut, 1 wide open)
 let opened  = 2.5
 let blow    = noise(0.9 * t, 3.1, 0)                                      # the draught's gusts
 let draught = 0.5 + door * (0.3 + 0.08 * blow)                            # it blows from the left, to the right
-let censer  = 1080                                                         # the censer (world x), its mouth 150 up
+let censer  = 1080                                                         # the censer (world x), its mouth 60 up
 
 # A row of five candles on the left, each its own start and seed.
-module c1 = candle, size 64, width 120, at (150, ground - 4), sink 0.125, feather 0.2, start 0, seed 11,
+module c1 = candle, size 64, width 120, at (150, ground - 4), sink 0.125, feather 0.2, look candlelight, start 0, seed 11,
             controls (0.4, 0.5, 0.15), draught draught, turbulence 0.15 + 0.45 * door
-module c2 = candle, size 64, width 130, at (215, ground - 10), sink 0.125, feather 0.2, start 0, seed 12,
+module c2 = candle, size 64, width 130, at (215, ground - 10), sink 0.125, feather 0.2, look candlelight, start 0, seed 12,
             controls (0.5, 0.5, 0.15), draught draught, turbulence 0.15 + 0.45 * door
-module c3 = candle, size 64, width 120, at (280, ground - 2), sink 0.125, feather 0.2, start 4, seed 13,
+module c3 = candle, size 64, width 120, at (280, ground - 2), sink 0.125, feather 0.2, look candlelight, start 4, seed 13,
             controls (0.3, 0.5, 0.15), draught draught, turbulence 0.15 + 0.45 * door
-module c4 = candle, size 64, width 140, at (345, ground - 14), sink 0.125, feather 0.2, start 0, seed 14,
+module c4 = candle, size 64, width 140, at (345, ground - 14), sink 0.125, feather 0.2, look candlelight, start 0, seed 14,
             controls (0.55, 0.5, 0.2), draught draught, turbulence 0.2 + 0.45 * door
-module c5 = candle, size 64, width 120, at (410, ground - 6), sink 0.125, feather 0.2, start 4, seed 15,
+module c5 = candle, size 64, width 120, at (410, ground - 6), sink 0.125, feather 0.2, look candlelight, start 4, seed 15,
             controls (0.35, 0.5, 0.15), draught draught, turbulence 0.15 + 0.45 * door
 # The tomb's vapour, spilling out over its broken lid (the tile's mound) and along the floor.
 module gas = heavygas, size 128, width 640, at (700, ground), sink 0.09, feather 0.12, look miasma, start 0, seed 21,
              controls (0.7, 0.5, 0.4), intensity 0.7, flow 0.5 + 0.4 * door, turbulence 0.35 + 0.2 * door
 # The censer's rings: three modules started in turn, one every 1.6 s.
-module r1 = smokering, size 128, width 300, at (censer, ground - 150), sink 0.11, feather 0.15, look incense, start 3, seed 31,
+module r1 = smokering, size 128, width 260, at (censer, ground - 60), sink 0.11, feather 0.15, look incense, start 3, seed 31,
             waiting, controls (0.5, 0.5, 0.3), wind 0.5 + 0.3 * door, opacity 1 - smooth((r1.age - 3.3) / 0.7)
-module r2 = smokering, size 128, width 300, at (censer, ground - 150), sink 0.11, feather 0.15, look incense, start 5, seed 32,
+module r2 = smokering, size 128, width 260, at (censer, ground - 60), sink 0.11, feather 0.15, look incense, start 5, seed 32,
             waiting, controls (0.5, 0.5, 0.3), wind 0.5 + 0.3 * door, opacity 1 - smooth((r2.age - 3.3) / 0.7)
-module r3 = smokering, size 128, width 300, at (censer, ground - 150), sink 0.11, feather 0.15, look incense, start 7, seed 33,
+module r3 = smokering, size 128, width 260, at (censer, ground - 60), sink 0.11, feather 0.15, look incense, start 7, seed 33,
             waiting, controls (0.5, 0.5, 0.3), wind 0.5 + 0.3 * door, opacity 1 - smooth((r3.age - 3.3) / 0.7)
 
 # The candles' light and their wicks, the censer's coals, the moonlight through the door.
@@ -58,10 +62,10 @@ emit glow, at (215, ground - 12), radius 3, colour (1, 0.8, 0.5), brightness 1.2
 emit glow, at (280, ground - 4), radius 3, colour (1, 0.8, 0.5), brightness 1.2
 emit glow, at (345, ground - 16), radius 3, colour (1, 0.8, 0.5), brightness 1.2
 emit glow, at (410, ground - 8), radius 3, colour (1, 0.8, 0.5), brightness 1.2
-emit glow, at (censer, ground - 148), radius 8, colour (1, 0.45, 0.2), brightness 1.4 * (0.85 + 0.15 * noise(3 * t, 1, 0))
-field candles = lamp, at (280, ground - 40), radius 380, strength 0.9 * (1 - 0.25 * door), colour (1, 0.65, 0.32)
-field coals   = lamp, at (censer, ground - 150), radius 220, strength 0.5, colour (1, 0.5, 0.25)
-field moon    = lamp, at (40, ground - 200), radius 700, strength 0.55 * door, colour (0.6, 0.72, 1)
+emit glow, at (censer, ground - 58), radius 8, colour (1, 0.45, 0.2), brightness 1.4 * (0.85 + 0.15 * noise(3 * t, 1, 0))
+field candles = lamp, at (280, ground - 40), radius 360, strength 0.6 * (1 - 0.25 * door), colour (1, 0.65, 0.32)
+field coals   = lamp, at (censer, ground - 60), radius 200, strength 0.4, colour (1, 0.5, 0.25)
+field moon    = lamp, at (40, ground - 200), radius 700, strength 0.3 * door, colour (0.6, 0.72, 1)
 light   gain 0.12
 frame   exposure 1.25, fade smooth(t / 0.4) * smooth((length - t) / 0.6), haze 1, bloom 1, bloom_threshold 1
 emit leaves, in (-40, 380), size 900 x 230, density 0.03 * door, wind (420, -20), colour (0.32, 0.27, 0.2), from 2.5, until 7
