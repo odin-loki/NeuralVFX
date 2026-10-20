@@ -1,0 +1,3 @@
+effect,model,file,bytes,sha256,note
+mushroom,ms_u30,o_fix/models/mushroom.nvfx,301443,4a2f08a05eed33a85584b670eb009b606ecb1443089429b15beca703a46c97cc,the mushroom with the mean state and its stepper fine-tuned on 30-frame windows; chosen on validation (REPORT §16.3.2) and frozen before its test
+splash,ms,o_fix/models/splash.nvfx,301443,806a7a6cf27d73bb84b602cbe8f11e9b4ca4ce071bad50a4b9224bfb9131e82a,the splash with the mean state; chosen on validation (REPORT §16.3.2) and frozen before its test

@@ -3,10 +3,10 @@ rollout_effect,launch,fx_flow/models/d/launch.nvfx,149287,9d8f5fb639cbdb682e8bf7
 rollout_effect,puffs,fx_flow/models/d/puffs.nvfx,149287,200fa35d01167f3ab56634c1ea26a1a8b50cbefe97058d1406c75585e135b9a5,study D's recipe (docs/EFFECTS_FLOW.md): d-train --stages12 1 then d-tune then d-finish
 rollout_effect,ink,fx_flow/models/d/ink.nvfx,149287,22c06ce159bbfde31118c9ec92155c2cf1371afc235599ceb43acd5c22d1e92d,study D's recipe (docs/EFFECTS_FLOW.md): d-train --stages12 1 then d-tune then d-finish
 liftoff_keyframe,frame_030,nvfx_scene_script --keyframes (examples/scenes/liftoff.nvfxs),960692,05fd6aed9f5abbdfc9cfde4773a3c1815f292a7812538e60f32560efb5a15243,
-liftoff_keyframe,frame_078,nvfx_scene_script --keyframes (examples/scenes/liftoff.nvfxs),834880,31f4034bd37f5ee7cac7ba7401aaf5034ddf9d049c3c0a0f417c45be25c72507,
-liftoff_keyframe,frame_096,nvfx_scene_script --keyframes (examples/scenes/liftoff.nvfxs),1005197,2b27c73880747983c242e173de988cef758b066b5232b04ebf9795b913678920,
-liftoff_keyframe,frame_126,nvfx_scene_script --keyframes (examples/scenes/liftoff.nvfxs),1010293,50b746305df2a735260ee5895ce423fffe6ec7efb83691fd9254800567739b04,
-liftoff_keyframe,frame_162,nvfx_scene_script --keyframes (examples/scenes/liftoff.nvfxs),997270,7e6ff9e0ff02093013ff0267122ea566d12c4dd78f513c782dad9fec6075804b,
-liftoff_keyframe,frame_204,nvfx_scene_script --keyframes (examples/scenes/liftoff.nvfxs),1006855,70437f85bbf1ca58dd49f2909d5bc95fd6126c0dae2bcded82cc733899eca50e,
-liftoff_keyframe,frame_237,nvfx_scene_script --keyframes (examples/scenes/liftoff.nvfxs),1018313,66fe0b3f146e386821bc1eea7cd174fceb8931e56d33e0548d0b333f48ed36b8,
-liftoff_keyframe,frame_282,nvfx_scene_script --keyframes (examples/scenes/liftoff.nvfxs),1094870,d971ef8fb7c7d54d15ebd8cd02557d52fce70ae1b0ea8d9290391aabc8e045b5,
+liftoff_keyframe,frame_078,nvfx_scene_script --keyframes (examples/scenes/liftoff.nvfxs),836884,1cc60dc0fbbf3d925a5b1699b415159b67a0dcae615af6b3fb8f0d491264f931,
+liftoff_keyframe,frame_096,nvfx_scene_script --keyframes (examples/scenes/liftoff.nvfxs),1004843,53d8b30dffb960e2d710c64d0f0d37d0aa4fbd09263482b38b2a3dd0f951afb3,
+liftoff_keyframe,frame_126,nvfx_scene_script --keyframes (examples/scenes/liftoff.nvfxs),1004397,43420479355f49a23a3ef73466ea85edaa5e36cb98e52a4e1ef40b61318b8970,
+liftoff_keyframe,frame_162,nvfx_scene_script --keyframes (examples/scenes/liftoff.nvfxs),981496,1463f7312102c0f9e2d2b546aad1480b1ab9127d84a9365e9bb00713f030dd79,
+liftoff_keyframe,frame_204,nvfx_scene_script --keyframes (examples/scenes/liftoff.nvfxs),999912,11bbe9e70bf2004865d6974af3b3515bab84ea874d9ee892482ff73d8c642036,
+liftoff_keyframe,frame_237,nvfx_scene_script --keyframes (examples/scenes/liftoff.nvfxs),1014871,204046d4470d284556c16764e5863309b04ef7a93129a2c3099ad7ee60ba03d8,
+liftoff_keyframe,frame_282,nvfx_scene_script --keyframes (examples/scenes/liftoff.nvfxs),1108586,baedad22bee715fa0da267ae2b8948916116e0ed749d1509c688f2cee551e514,

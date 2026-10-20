@@ -1,0 +1,9 @@
+effect,model,better,none_worse,meets_rule,mean_frame_gain_db,mean_frame_lo,spectrum_change,spectrum_hi,motion_hi,coverage_hi,emission_hi,track_lo,margin_spectrum,margin_motion,margin_coverage,margin_emission,margin_track,outside_margin,outside_k_margin,strict_worse,sha256
+splash,ms,1,1,1,0.6240,0.3957,-0.00294,-0.00069,-0.00358,-0.000489,0.0000002,-0.0001,0.02000,0.07192,0.001722,0.0001000,-0.20,none,none,none,806a7a6cf27d73bb84b602cbe8f11e9b4ca4ce071bad50a4b9224bfb9131e82a
+splash,chosen,,,,,,,,,,,,,,,,,,,,ms
+mushroom,ms,1,1,1,0.2365,0.0198,0.00896,0.01959,0.09393,-0.002009,-0.0000003,-0.0010,0.03866,0.09453,0.011667,0.0001000,-0.20,none,abs_ln_motion_ratio,abs_ln_motion_ratio,d6e030a2a7c48e4ecedd285672a334b119be147b53d8dcd89086ccd36a715dcc
+mushroom,u30,1,1,1,0.4551,0.1027,-0.01069,-0.00494,-0.03263,0.000424,0.0000103,0.7611,0.03866,0.09453,0.011667,0.0001000,-0.20,none,none,emission_l1,366abc8bf3e376eb319f5d99e25c1bb1aa0bdb7263c3d45986efc3d14af32bdf
+mushroom,mt4,1,1,1,0.6813,0.4275,-0.01056,-0.00625,-0.02296,-0.000218,0.0000066,-0.0059,0.03866,0.09453,0.011667,0.0001000,-0.20,none,none,emission_l1,58e84914e7b9258143c9c748e1d72fef0082819646832b419929a26b58b19106
+mushroom,ms_u30,1,1,1,1.1222,0.7931,-0.00369,0.00942,0.03464,-0.002098,0.0000071,0.7608,0.03866,0.09453,0.011667,0.0001000,-0.20,none,abs_ln_motion_ratio,emission_l1,4a2f08a05eed33a85584b670eb009b606ecb1443089429b15beca703a46c97cc
+mushroom,ms_mt4,1,1,1,1.0707,0.7362,-0.00234,0.00818,0.05422,-0.003002,0.0000048,-0.0064,0.03866,0.09453,0.011667,0.0001000,-0.20,none,abs_ln_motion_ratio,emission_l1,7ff95277d2d451c33e43fdaad5223e2156efbb1773db29d6a900c33462e34e55
+mushroom,chosen,,,,,,,,,,,,,,,,,,,,ms_u30

@@ -1443,7 +1443,11 @@ Program Compiler::compile() {
           e.precision = v == "int8" ? 1 : 0;
           continue;
         }
-        e.detail.push_back({p.key, constant(p.value.exprs[0], std::format("'{}'", p.key))});
+        const float v = constant(p.value.exprs[0], std::format("'{}'", p.key));
+        // study O (docs/REPORT.md §16): the detail layer in passes, a whole number of them (1 to 8)
+        if (p.key == "passes" && !(v >= 1.f && v <= 8.f && v == std::floor(v)))
+          fail(p.value.pos, std::format("an effect's passes are a whole number from 1 to 8, not {}", v));
+        e.detail.push_back({p.key, v});
       }
     } else if (st.keyword == "look") {
       ShaderSpec spec;
@@ -2309,6 +2313,7 @@ void Scene::Impl::build(const EffectLoader& load, const Options& o) {
       else if (key == "swirl_ramp") d.swirl_ramp = v;
       else if (key == "contrast") d.contrast = v;
       else if (key == "grow") d.grow = v;
+      else if (key == "passes") d.passes = static_cast<int>(v);  // study O: the lock every 1 / passes of a frame's flow
     }
     if (e.m.starts.empty()) fail(ec.pos, std::format("effect '{}' has no start points", ec.name));
     effects.push_back(std::make_unique<rt::RolloutEffect>(std::move(e)));

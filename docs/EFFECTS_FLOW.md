@@ -405,8 +405,9 @@ the last six were.
 
 `examples/scenes/liftoff.nvfxs` (10 s at 1280 x 720 and 30 fps, about 85 lines). Night at a launch pad. Two stacks
 either side of the pad puff white vapour (the puffs model, drawn by a field-shader look so that the scene lights it),
-under two floodlights. At 2.5 s the engine lights: a flash, a shock, sparks, and the launch model wakes (900 world
-pixels wide, at 256 pixels): its exhaust hits the pad and rolls out both ways in billows lit by its fire, while the
+under two floodlights. At 2.5 s the engine lights: a flash, a shock, sparks, and the launch model starts (900 world
+pixels wide, at 256 pixels; since study O the middle tile of a domain of three, §6.1): its exhaust hits the pad and
+rolls out both ways in billows lit by its fire, while the
 blast's air blows the stacks' puffs about (a push from the bus). At 3.3 s fine sand lifted off the apron beyond the
 billows (the ink model, a plume with almost no buoyancy, drawn brown by a third look) hangs in the air and drifts away
 on the wind (its `current`). At 7.5 s the rocket lifts off: its flame (a glow and a lamp) climbs out of the picture, the
@@ -427,15 +428,46 @@ shared machine (provisional).
   take its exhaust with it, as the tile's ground would rise too. The scene leaves the blast where it is and lets the
   rocket's flame climb away as a glow, blends the blast's look to one without light, and lowers its thrust: physically
   the pad's clouds do go on billowing for a while after lift-off.
-- **The library's gentler swirl suits a scene too** (`effect launch = "launch.nvfx", swirl 1, swirl_scale 9`), and so
-  does a wide feather (0.25): the billows fill their tile, and its square shows otherwise.
+- **The library's gentler swirl suits a scene too** (`effect launch = "launch.nvfx", swirl 1, swirl_scale 9, passes 2`
+  since study O), and so does a wide feather (0.25). The billows fill their tile, and its square shows otherwise: since
+  study O the scene gives the blast two outer tiles that carry its billows on (§6.1).
 - **Ink in air is a hanging cloud.** There is no water to draw in the compositor (its background is a night sky and
   ground), so the scene uses ink for what it is in any fluid: a plume with almost no buoyancy, here fine sand that hangs
   and drifts. Underwater uses are the library's (`underwater`), on a game's own background.
 
 What works: the blast reads as a launch at this scale, lights the stacks' vapour and the sand, and its clouds outlast the
-rocket. What does not, yet: the billows are one square-ish block (one tile); the puffs are small beside the blast; there
-is no rocket to see, only its flame.
+rocket. What does not, yet: the puffs are small beside the blast; there is no rocket to see, only its flame; late on, the
+right-hand cloud is still a tall block. Until study O the billows were one square block (one tile, §6.1).
+
+### 6.1 The square block and its edges (study O)
+
+The blast's billows read as one square block with straight, soft sides in the scene, and the bare model's reel shows
+them running out at its tile's sides. Study O ([REPORT.md](REPORT.md) §16.2) asked whether that is the tile or the model.
+**It is the tile: the effect's whole domain.** Played from an empty grid at the controls of 6 training runs, the
+simulator's own launch covers 0.03 of its frame after 1 s, 0.23 after 5 s and 0.34 to 0.35 from 10 s on (mean alpha);
+the learned launch as shipped covers 0.26 to 0.34, and from a run's true state the same as the run (0.218 against
+0.219 over its first 2 s): in a few seconds both fill the square and leave it at the sides (`nvfx_fix cover`,
+`nvfx_fix bands` on 6 training runs). The model is not the cause, and no feather can draw what has left the domain.
+
+**The fix, in the scene:** the blast is a domain of three launch tiles side by side sharing bands of 8 cells
+(`tiles 3 x 1, band 8`); the middle one blows and the outer two carry its billows on, their own nozzles cleared every
+frame (`suppress blast, cells (12, 14) to (20, 22), tiles (0, 0), (2, 0)`). A domain cannot wait, so the blast is
+started by the ignition's rule (`start blast, from 0, seed 11`) instead of being woken. By eye (keyframes before and
+after below; the video): the billows now spill past the middle tile on both sides into curls and arms, and the straight
+sides are gone; late on, after the lift-off, the right-hand cloud is still a tall block, and a lit piece of cloud
+drifts free on the left. **The jet's stripes:** along the jet's edges the scene's look drew a ladder of chevrons, the
+same stamp of the detail layer locking once a frame that banded the waterfall ([EFFECTS_WATER.md](EFFECTS_WATER.md)
+§7.1); with `passes 2` on the effect line (now in the scene and the library) they are gone. The measure of study O
+finds no peak in the learned renderer's own frames of the jet (the stripes show through the look's relief at 3.5 times
+magnification), so this one is judged by eye only.
+
+![The lift-off at 4.2 s and 6.8 s: before study O (top), after (bottom)](figures/o_liftoff_before_after.png)
+
+![The jet's left edge at 4.2 s: one detail pass a frame (left), two (right)](figures/o_launch_jet.png)
+
+**Not fixed:** the library's launch entries (`rocket_launch`, `landing_thruster`, `hover_downwash`) are spawned, and
+spawned entries cannot be tiled domains, so their clouds still fill their one tile (they take `passes 2` with the
+library's effect line); the bare model's reel (`videos/effect_launch.mp4`) shows the tile as it is.
 
 ## 7. What it means
 

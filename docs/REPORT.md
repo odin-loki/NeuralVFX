@@ -3245,3 +3245,450 @@ its own play), snapshot at every stage, and chosen on tracking *and* endless pla
 - Study N's smoke demo also runs away given 30 s (its box's heat to 3,128); retrained with the fix it does not.
 - **Cost** (provisional, now on a quiet machine): a step 70, 37 and 23 ms on 1, 2 and 4 threads; a 256 x 256 picture
   61, 30 and 16 ms. The detail layer is still three quarters of a step.
+
+## 16. Study O: the most visible flaws of the shipped effects, fixed and measured
+
+**Status: finished** (15 October 2026; paused once by the owner's usage limit and resumed). Fixed and judged by eye,
+with no model change: the waterfall's and rain shaft's bands (§16.1, `passes 2`), launch's square block in the lift-off
+(§16.2, a three-tile domain and `passes 2`) and the rocket thruster's curling exhaust (§16.4, a cold field). The mushroom
+and the splash (§16.3): the margins, N = 30 and the rule committed before validation, which chose **mushroom `ms_u30`**
+(the mean state and a 30-frame fine-tune) and **splash `ms`** (the mean state); the test, run once on seeds 3,200,000
+to 3,299,999, found **both meet the rule**: the mushroom's mean frame +1.18 dB [+0.91, +1.45] and tracking at 1 s
++0.85 dB [+0.73, +0.97], the splash's mean frame +0.40 dB [+0.21, +0.60], nothing past a margin (§16.3.3). **Both are
+replaced** and the library's and the prairie's links moved to them (§16.5); by eye the mushroom changes little (§16.3.4).
+Cost in §16.6, what it means in §16.7. Data under `/root/nvfx-data/o_fix` (candidates `cand/`, the files now shipped
+`models/`, logs `logs/`). The section was written as the work went.
+
+Study O takes the flaws that show most in the demos and the library, finds
+each one's cause with evidence, and fixes what it can: a fix in the compositor, a look or a library entry is judged by
+eye from before and after frames, and a fix that changes a model goes through a rule written here before any of its
+validation numbers, validated and tested once. Seeds: study O's range, 3,000,000 to 3,499,999. Code: `tools/nvfx_fix.cpp`
+(`nvfx_fix bands | peaks | strip`); every run is logged under the data root's `o_fix`.
+
+### 16.1 The learned waterfall's horizontal bands: the detail layer, locked once a frame
+
+**The flaw.** The learned waterfall's sheet (and, fainter, the rain shaft's curtains) showed horizontal bands a few
+pixels apart from the lip down, plainly in `videos/effect_waterfall.mp4` and `scene_falls.mp4`, where the library and
+the scene play the water models with `swirl 0`. The docs had put it down to the grown fine fields.
+
+**The cause** ([EFFECTS_WATER.md](EFFECTS_WATER.md) §7.1 has the figures). `nvfx_fix bands` takes the sheet apart on 8
+training runs of the waterfall (salt 1, runs 0 to 7; diagnosis only): the power of the frame's luminance along y in a
+window of the sheet (rows 16 to 80, columns 56 to 72 of the 128-pixel frame), for the simulator's frames and for the
+learned effect with one part at a time swapped:
+- the learned coarse state alone, upsampled and drawn by the simulator's renderer, is smooth: **not the learned body**;
+- the learned dynamics drawn by the simulator's renderer have the bands: **not the learned renderer**;
+- the detail layer driven by the simulator's own coarse states (an oracle stepper) has them: **the detail layer**;
+- the spectrum of each banded version has one narrow peak (up to 3.5 decades above the simulator's at that period, 1.6
+  to 1.9 on average over the runs), and **its period is one frame's fall**: 2.9 pixels at intensities 0.03 to 0.13,
+  3.05 to 3.2 at 0.54 to 0.59, 3.2 to 3.4 at 0.78 to 0.81 (the water falls at 85 + 30 intensity cells a second: 2.9 to
+  3.6 pixels a frame), not the coarse grid's 4 pixels; at 256 pixels it doubles (5.1 to 6.4).
+
+Once a frame the detail layer locks its fine fields to the coarse state: a factor per coarse cell, and the missing
+material added broken up by the flicker noise, neither of which moves with the water. The fall carries each frame's
+stamp one frame's travel down and the next lands beside it: a sum of stamps one travel apart repeats with that period.
+It is study L's saw-tooth (§12.1.1) in a straight fall. Without the breakup noise (`contrast 0`) the peak is lower and
+stays (the factors stamp as well).
+
+**The fix: a library and scene setting, judged by eye.** The detail layer already runs in passes (study L's
+`DetailSpec::passes`); an `effect` line can now set it (`passes N`, a whole number from 1 to 8, as it sets `swirl`), and
+the library and the falls scene play the waterfall and the rain shaft with `swirl 0, passes 2`. Each pass moves the water
+half a frame's travel and the stamps blend: in the as-played runtime (`nvfx_fix peaks`, the largest narrow peak of the
+rows' spectrum above its neighbours, mean over the 8 runs) the waterfall goes from 0.73 decades to 0.07 at 128 pixels,
+the rain shaft from 0.40 to 0.04; the fountain has none (0.04) and keeps one pass. At 256 pixels two passes leave
+half-travel bands (0.48) and three take them off (0.20), so the demo reels, rendered at 256 pixels, use three. No model
+file changes. By eye (the falls at 3.5 s before and after, the library's sheet, the reels): the sheet falls in straight
+streaks with no ladder of bands, the curtains are the same with fainter stripes gone; nothing else changed in the
+picture. A second pass of the detail layer skips the empty spans as the first does: the waterfall costs +0.00 ms a
+frame at 128 pixels and +0.04 to +0.06 ms at 256 (§16.6).
+
+**What changed.** `src/compose/script.cpp` and `script_run.cpp` (the `passes` key; `Script.AnEffectsPassesSplitItsDetailLayer`),
+`nvfx_reel` (DETAIL `passes`), `library/water.nvfxl` and `examples/scenes/falls.nvfxs`. Frozen hashes: the falls' six
+keyframes (`fx_water_frozen.csv`; the same on 1, 2 and 3 threads) and the library's `rain_shaft` keyframe
+(`frozen.csv`; the same on 2 and 3 threads). Re-rendered: `effect_waterfall`, `effect_rainshaft`, `scene_falls`,
+`real_vs_learned_water`, `library_water`.
+
+### 16.2 Launch's square block: the tile, not the model
+
+**The flaw.** In `scene_liftoff.mp4` the blast's billows were one square block with straight, soft sides, and in
+`effect_launch.mp4` they fill the tile and run out at its sides; with its calibrated swirl (3) the billows were drawn
+as wormy, boxy lines, which the library had already softened (`swirl 1, swirl_scale 9`).
+
+**The cause: the tile, which is the effect's whole domain** ([EFFECTS_FLOW.md](EFFECTS_FLOW.md) §6.1). Played from
+an empty grid at the controls of 6 training runs, the simulator's own launch covers 0.23 of its frame after 5 s and 0.34
+to 0.35 from 10 s on; the learned launch as shipped 0.26 to 0.34 (`nvfx_fix cover`); from a run's true state it covers
+what the run covers (0.218 against 0.219 over 2 s; `nvfx_fix bands`, whose taking apart also shows the learned dynamics
+drawn by the simulator's renderer, and the true coarse states moving the detail layer, with the same billowy outlines).
+Both fill the square in a few seconds and leave it at the sides: the model is not at fault, and no feather can draw what
+has left the domain. (An index of how much the coverage's edges line up with the frame's axes, sum |g|^2 cos 4 theta
+over sum |g|^2, is lower for the learned launch as played, 0.12, than for the simulator, 0.22: its billows are not
+boxier at the scale of its pixels.)
+
+**The fix: the scene's blast is a domain of three tiles** (`tiles 3 x 1, band 8`), the middle one blowing and the outer
+two carrying its billows on, their own nozzles cleared every frame (`suppress`), started by the ignition's rule as a
+domain cannot wait; and the launch's effect line takes `passes 2` (the scene and the library), which takes off a ladder
+of chevrons that one detail pass laid along the jet's edges (the waterfall's stamp, §16.1; seen through the scene's
+look at 3.5 times magnification, judged by eye: the spectral measure finds no peak in the learned renderer's frames).
+By eye (before and after in EFFECTS_FLOW.md §6.1): the billows spill past the middle tile into curls and arms on both
+sides and the straight sides are gone; late on, after the lift-off, the right-hand cloud is still a tall block.
+**Not fixed:** the library's launch entries are spawned, and spawned entries cannot be tiled domains, so their clouds
+still fill one tile (`rocket_launch`'s square shows at its top corners at times); the bare model's reel shows the tile.
+
+**What changed.** `examples/scenes/liftoff.nvfxs` and `library/models.nvfxl` (the launch line). Frozen hashes: the
+lift-off's keyframes 078 to 282 (`fx_flow_frozen.csv`; frame 030, before the ignition, is unchanged; the same on 1 and 2
+threads) and the library's `rocket_launch` (`frozen.csv`; the same on 2 and 3 threads). Re-rendered: `scene_liftoff`,
+`effect_launch`, and with the mushroom `library_round7` and `real_vs_learned_round7` (§16.5). The scene's three blast
+tiles cost two more 256-pixel tiles' steps a frame (§16.6 has the cost).
+
+### 16.3 The mushroom cloud (and the splash): the plan, committed before any of its numbers
+
+**The flaw.** The mushroom cloud is weak by its rule ([EFFECTS_BLAZE.md](EFFECTS_BLAZE.md) §4): from 1 s it follows a
+held-out run worse than the coarse simulation with the same detail layer, and played endlessly its average picture and
+detail lose to the nearest flipbook's; it loses its stem and its rolled cap, and its cap turns ragged. The splash is weak
+by its rule too ([EFFECTS_WATER.md](EFFECTS_WATER.md) §4: its average picture only ties the flipbook's). Both are
+one-shots that play from 16 stored first states at other intensities, as the explosion and dust did before study M3.
+
+**Candidates**, each a file built from the current model (the mushroom `fx_blaze/models/d/mushroom.nvfx`, SHA-256
+`505bdfe8...`; the splash `fx_water/models/d/splash.nvfx`, `8705966a...`), by what later studies found helps:
+- `ms`: **the mean state** (study M3, §14.9): fitted to the first states of the effect's 240 training runs (salt 1),
+  quadratic in the controls per block of 2 x 2 cells (`nvfx_ordered fitmean`, `setmean`), so a start point begun at other
+  controls is moved to them; for both effects;
+- `u30`: **longer windows** (study L, §12.1): the stepper fine-tuned from its weights by 600 iterations of the activity
+  stage on windows of 30 frames (`train --activity-stage 600 --mean-stage 0 --unroll 30 --lr-ft 7e-4`); the mushroom;
+- `mt4`: **the ensemble-mean fine-tune** (study M, §14.2): 600 iterations of the mean stage at weight 4, burn-in 0 to 90
+  frames, 16 frames with gradient (`train --mean-stage 600 --mean-weight 4`); the mushroom;
+- `ms_u30`, `ms_mt4`: each fine-tune with the mean state; the mushroom.
+
+**The probe (development, training settings only)**, as study M3's (§14.9.1): the controls of salt-1 training runs 0
+to 39 (40 settings); per setting 8 real runs (the reference) and 8 more (the floor), 8 plays per model through the
+runtime as shipped (float, the frozen tests' precision; one-shots their whole length: the mushroom's 149 frames, the
+splash's 89, from the first), tracking 2 runs per setting from the true state. In two steps: the current model and
+**the null** (the current model with fresh seeds) first, which fix the margins (written to
+`results/experiments/fix/o_margins.csv` and committed before any candidate is played on the probe); then the candidates,
+whose paired spread fixes **the number of settings N** for validation and the test: the smallest multiple of 10 at which,
+for each effect and every measure but the target, a candidate leaving it truly unchanged passes its margin with
+probability at least 0.9, by resampling the probe's settings and in the normal form with the SD at the upper end of its
+one-sided 80% interval; at most 60. The candidates sent to validation are those that meet the rule's form on the probe
+(if none of an effect's does, the one with the fewest measures outside their margins); they are named, with their
+SHA-256, before validation.
+
+**The rule (its form fixed now; its numbers from the probe, committed before validation).** Candidate minus current
+model, paired over the settings (tracking: each setting's mean over its 2 runs), 95% bootstrap with 10,000 resamples
+(`metrics::paired_bootstrap`, seed 2026); the measures of studies M, M2 and M3 (8 runs pooled per setting): tracking at
+1 s, the detail spectrum distance, |ln motion ratio|, the coverage and emission distances and the mean-frame PSNR. A
+candidate replaces the current model when
+1. it is **better on at least one of two targets**: the mean-frame PSNR (the ordered picture: where the stem and the cap
+   are, on average) or tracking at 1 s (following a real run), its interval above zero; and
+2. **every measure is within its margin**, the target it does not improve included: tracking at least the margin (dB),
+   the mean frame at least its margin (dB), the spectrum, motion, coverage and emission distances at most theirs.
+
+Each margin is the larger of study K's at the measure's scale (tracking -0.20 dB as studies M2 and M3 used it, the mean
+frame -0.10 dB, spectrum and motion +0.02, coverage and emission 10% of the current model's mean distance on the probe,
+at least 0.0001) and the null's RMS change at a setting; tracking has no null (a tracked run takes its own seed) and keeps
+-0.20 dB. On validation, among an effect's candidates that meet the rule, the one with the largest mean-frame gain is
+chosen (if none gains in the mean frame, the largest tracking gain); an effect with none stops there (a null, reported
+with its numbers). The strict reading (no interval entirely on the worse side of zero) and study K's margins are reported
+beside and do not decide.
+
+**Seeds** (study O's range): the probe real 3,000,000 + 100 s + k (the floor + 50), plays 3,010,000, the null 3,020,000,
+tracking 3,030,000; **validation** study G's 10 validation settings and more drawn the same way
+(`validation_settings(N, N)`), real 3,100,000 (the floor + 50), plays 3,150,000, tracking 3,180,000; **the test** study
+B's 10 held-out settings and more drawn the same way (`test_settings(N)`), real 3,200,000, plays 3,250,000, tracking
+3,280,000 (k = 0 to 7; tracking k = 0, 1).
+
+**The test, once per effect** with a chosen candidate: the file is copied to the data root's `o_fix/models/<effect>.nvfx`
+and frozen by SHA-256 in `results/experiments/fix/o_frozen.csv` before it; `nvfx_ordered --study o test` refuses any
+other file and runs once (a marker under `o_fix`). An effect that meets the rule on the test is replaced: the shared
+links (the library's models and every scene folder holding it) are repointed at the very end, after the full ctest has
+passed with private copies of the folders, and every frozen hash that changes is updated in the same change. Reported
+beside, not deciding: the distance to the floor before and after, the cost, and, for a replaced model, its round's own
+test (tracking against the coarse simulation, endless against the nearest flipbook) run again on fresh seeds.
+
+Code: `nvfx_ordered --study o` (`fitmean`, `setmean`, `train`, `val --split probeo|valo`, `test`); every file under the
+data root's `o_fix`, tables under `results/experiments/fix`.
+
+**The null and the margins (the probe's first step; committed before any candidate is played on the probe).** The
+current models and the same models with fresh seeds on the 40 training settings, 8 runs pooled each
+([o_margins.csv](../results/experiments/fix/o_margins.csv), [o_probe_stats.csv](../results/experiments/fix/o_probe_stats.csv)):
+
+| effect | measure | study K's margin | the null's RMS change at a setting | the floor (two sets of 8 real runs) | the current model | **margin** |
+|---|---|---:|---:|---:|---:|---:|
+| mushroom | tracking at 1 s (dB) | -0.20 | none (the same frames) | - | 13.95 | **-0.20** |
+| mushroom | spectrum distance | 0.02 | 0.039 | 0.027 | 0.184 | **+0.0387** |
+| mushroom | \|ln motion ratio\| | 0.02 | 0.095 | 0.037 | 0.215 | **+0.0945** |
+| mushroom | coverage distance | 0.0022 | 0.0117 | 0.0046 | 0.0222 | **+0.0117** |
+| mushroom | emission distance | 0.0001 | 0.000007 | 0.000009 | 0.000070 | **+0.0001** |
+| mushroom | mean-frame PSNR (dB) | -0.10 | 1.35 | 34.62 | 27.17 | **-1.35** |
+| splash | tracking at 1 s (dB) | -0.20 | none | - | 13.26 | **-0.20** |
+| splash | spectrum distance | 0.02 | 0.015 | 0.028 | 0.071 | **+0.02** |
+| splash | \|ln motion ratio\| | 0.02 | 0.072 | 0.030 | 0.093 | **+0.0719** |
+| splash | coverage distance | 0.00028 | 0.0017 | 0.0009 | 0.0028 | **+0.0017** |
+| splash | emission distance | 0.0001 | 0.000003 | 0.000000 | 0.000028 | **+0.0001** |
+| splash | mean-frame PSNR (dB) | -0.10 | 1.26 | 39.04 | 33.16 | **-1.26** |
+
+As for study M3's one-shots, re-seeding the current models moves their statistics at a setting by more than two sets of
+real runs differ (the mushroom's motion by 9.5% and its mean frame by 1.35 dB at a setting), because each play begins
+from one of 16 stored first states taken at other intensities: the margins are wide, and they are the effects' own
+seed-to-seed variety. The mean frame's margin applies only to a candidate whose better target is tracking.
+
+**The probe's second step: the candidates on the training settings** (development only; candidate minus current
+model over the 40 settings, 8 runs pooled, tracking 2 runs per setting;
+[o_probe_compare.csv](../results/experiments/fix/o_probe_compare.csv),
+[o_power.csv](../results/experiments/fix/o_power.csv)). Bold: better (interval clear of zero); all within their margins:
+
+| effect | candidate | tracking at 1 s (dB) | spectrum distance | \|ln motion ratio\| | coverage | mean-frame PSNR (dB) | the rule's reading |
+|---|---|---|---|---|---|---|---|
+| mushroom | `ms` | -0.000 [-0.001, +0.000] | +0.006 [-0.005, +0.016] | +0.041 [+0.004, +0.077] | **-0.0062 [-0.0097, -0.0028]** | **+0.32 [+0.04, +0.60]** | meets (motion strictly worse, within its margin) |
+| mushroom | `u30` | **+0.84 [+0.72, +0.97]** | **-0.015 [-0.022, -0.009]** | **-0.044 [-0.055, -0.031]** | -0.0002 [-0.0013, +0.0008] | **+0.60 [+0.32, +0.88]** | meets |
+| mushroom | `mt4` | **+0.22 [+0.14, +0.30]** | **-0.014 [-0.019, -0.009]** | **-0.030 [-0.038, -0.022]** | **-0.0018 [-0.0030, -0.0006]** | **+0.91 [+0.67, +1.14]** | meets |
+| mushroom | `ms_u30` | **+0.84 [+0.72, +0.97]** | -0.008 [-0.023, +0.005] | -0.018 [-0.054, +0.018] | **-0.0061 [-0.0094, -0.0029]** | **+1.39 [+1.09, +1.68]** | meets |
+| mushroom | `ms_mt4` | **+0.22 [+0.14, +0.30]** | -0.009 [-0.021, +0.003] | +0.001 [-0.035, +0.036] | **-0.0088 [-0.0120, -0.0056]** | **+1.46 [+1.10, +1.80]** | meets |
+| splash | `ms` | -0.000 [-0.000, +0.000] | **-0.003 [-0.005, -0.001]** | **-0.021 [-0.034, -0.008]** | **-0.0008 [-0.0011, -0.0005]** | **+0.59 [+0.39, +0.80]** | meets |
+
+Emission moved by at most 1 x 10^-5 (within its margin of 10^-4; the fine-tuned steppers' strictly worse, as the
+strict reading counts it). Means (current → candidate; the floor): the mushroom's tracking at 1 s 13.95 dB → 14.79
+(`u30`, `ms_u30`) and 14.16 (`mt4`, `ms_mt4`); its mean-frame PSNR 27.17 → 27.49, 27.77, 28.08, 28.56 and 28.63 dB
+(34.62), its motion ratio 0.82 → 0.78, 0.87, 0.85, 0.82, 0.81 (1.00), its coverage 0.0222 → 0.0160, 0.0220, 0.0204,
+0.0161, 0.0134 (0.0046); the splash's mean frame 33.16 → 33.75 dB (39.04), its motion 0.98 → 0.97 (1.00).
+
+- **Longer windows help the mushroom most at following a run**: +0.84 dB at 1 s from the true state, where its round's
+  test found it 1.1 dB behind the coarse simulation; with the ensemble-mean loss, +0.22 dB. Both bring its detail and
+  motion closer to the real ones and its average picture 0.6 and 0.9 dB closer.
+- **The mean state brings both one-shots' average picture and coverage closer** (the mushroom +0.32 dB, the splash
+  +0.59 dB), as for the explosion and dust; on the mushroom it calms it (motion 0.82 to 0.78 of the real), within the
+  margin. With either fine-tune the two add: +1.39 and +1.46 dB.
+
+**The number of settings.** "Every measure but the target" is read, for each candidate, as the measures that are not
+a target it improves on the probe (the mean state leaves tracking unchanged by construction, so its only target is the
+mean frame; every fine-tuned candidate improves both). The margin measures then need, at a probability of 0.9 that a
+truly unchanged one passes (normal form, SD at the upper end of its 80% interval): `ms` 21 settings (motion), `ms_u30`
+and `ms_mt4` 21 (motion), 18 and 14 (spectrum), `u30` and `mt4` 5 or fewer, the splash's `ms` 5; by resampling the
+probe's settings, at 30 settings every one of them passes with probability 0.99 or more. **N = 30**, the smallest
+multiple of 10 that meets the plan's condition. (Read the other way, with tracking held to its margin as if unchanged
+for `u30` and `ms_u30`, whose tracking spread over settings is 0.40 dB, it would need 54; their tracking gain, 0.84 dB,
+is 11 standard errors above zero at 30 settings, so tracking will be their target.) At 30 settings, by resampling the
+probe, the whole rule passes with probability 0.51 for `ms` (its mean-frame gain is small against its spread: 0.32 dB,
+SD 0.92), 0.99 for `mt4` and `ms_mt4`, 0.80 and 0.76 for `ms_u30` and `u30` read with tracking unchanged, and 1.00 for
+the splash's `ms`.
+
+### 16.3.1 The rule's numbers (committed before validation; the test runs once)
+
+**Candidates** (SHA-256): the mushroom `ms` `d6e030a2a7c48e4ecedd285672a334b119be147b53d8dcd89086ccd36a715dcc`, `u30`
+`366abc8bf3e376eb319f5d99e25c1bb1aa0bdb7263c3d45986efc3d14af32bdf`, `mt4`
+`58e84914e7b9258143c9c748e1d72fef0082819646832b419929a26b58b19106`, `ms_u30`
+`4a2f08a05eed33a85584b670eb009b606ecb1443089429b15beca703a46c97cc`, `ms_mt4`
+`7ff95277d2d451c33e43fdaad5223e2156efbb1773db29d6a900c33462e34e55`, each against the current mushroom (`505bdfe8...`);
+the splash `ms` `806a7a6cf27d73bb84b602cbe8f11e9b4ca4ce071bad50a4b9224bfb9131e82a` against the current splash
+(`8705966a...`). Files under the data root's `o_fix/cand`.
+
+**Margins** (the larger of study K's and the null's RMS change; o_margins.csv): the mushroom tracking at 1 s **-0.20 dB**,
+spectrum **+0.0387**, |ln motion ratio| **+0.0945**, coverage **+0.0117**, emission **+0.0001**, mean frame **-1.35 dB**;
+the splash **-0.20 dB**, **+0.02**, **+0.0719**, **+0.0017**, **+0.0001**, **-1.26 dB**. **N = 30** settings for
+validation (study G's 10 and 20 more, `validation_settings(30, 30)`; G's ten are its first ten, the closest to a test
+setting 0.085 away) and for the test (study B's 10 and 20 more, `test_settings(30)`), with the seeds of §16.3. The rest of
+the rule as written above. Every model plays through the runtime at float on the build's default float ISA (this
+branch's, AVX2), the same tool binary for the probe, validation and the test.
+
+### 16.3.2 Validation (the choice): every candidate meets the rule
+
+Candidate minus current model on study G's 10 validation settings and 20 more, the study's seeds, 8 runs pooled per
+setting, tracking 2 runs per setting ([o_val_compare.csv](../results/experiments/fix/o_val_compare.csv),
+[o_val_stats.csv](../results/experiments/fix/o_val_stats.csv), [o_val_choice.csv](../results/experiments/fix/o_val_choice.csv)).
+Bold: better; "K": past study K's margin (a second reading); "strict": the interval entirely on the worse side:
+
+| effect | candidate | tracking at 1 s (dB) | spectrum distance | \|ln motion ratio\| | coverage | mean-frame PSNR (dB) | rule |
+|---|---|---|---|---|---|---|---|
+| mushroom | `ms` | -0.000 [-0.001, +0.000] | +0.009 [-0.002, +0.020] | +0.054 [+0.012, +0.094] (K; strict) | **-0.0054 [-0.0088, -0.0020]** | **+0.24 [+0.02, +0.46]** | meets |
+| mushroom | `u30` | **+0.89 [+0.76, +1.02]** | **-0.011 [-0.017, -0.005]** | **-0.046 [-0.057, -0.033]** | -0.0005 [-0.0015, +0.0004] | **+0.46 [+0.10, +0.80]** | meets |
+| mushroom | `mt4` | +0.07 [-0.01, +0.14] | **-0.011 [-0.015, -0.006]** | **-0.032 [-0.039, -0.023]** | **-0.0010 [-0.0019, -0.0002]** | **+0.68 [+0.43, +0.95]** | meets |
+| mushroom | **`ms_u30`** | **+0.89 [+0.76, +1.02]** | -0.004 [-0.017, +0.009] | -0.005 [-0.046, +0.035] (K) | **-0.0055 [-0.0091, -0.0021]** | **+1.12 [+0.79, +1.45]** | **chosen** |
+| mushroom | `ms_mt4` | +0.07 [-0.01, +0.14] | -0.002 [-0.014, +0.008] | +0.014 [-0.027, +0.054] (K) | **-0.0063 [-0.0096, -0.0030]** | **+1.07 [+0.74, +1.41]** | meets |
+| splash | **`ms`** | -0.000 [-0.000, +0.000] | **-0.003 [-0.005, -0.001]** | **-0.019 [-0.034, -0.004]** | **-0.0008 [-0.0012, -0.0005]** | **+0.62 [+0.40, +0.86]** | **chosen** |
+
+Emission moved by at most 1 x 10^-5 everywhere (within its margin; the fine-tuned steppers' strictly worse). Means over
+the 30 settings (current → candidate; the floor, a second set of 8 real runs): the mushroom's mean-frame PSNR 28.13 dB
+→ 29.25 (`ms_u30`) (34.76), its tracking at 1 s 13.85 → 14.74 dB, its motion ratio 0.82 → 0.81 (1.00), its coverage
+0.0173 → 0.0118 (0.0046), its spectrum 0.182 → 0.179 (0.032); the splash's mean frame 33.53 → 34.15 dB (39.46), its
+motion 0.98 → 0.96 (1.00), its coverage 0.0025 → 0.0017 (0.0008).
+
+**The choice:** among the mushroom's five, all meeting the rule, the largest mean-frame gain is `ms_u30`'s (+1.12 dB;
+`ms_mt4` +1.07), which also follows a run 0.89 dB better at 1 s; the splash's `ms`. As on the probe, the fine-tune on
+30-frame windows is what follows a run better (`mt4`'s tracking gain of the probe, +0.22 dB, was +0.07 here, a tie), and
+the mean state is what moves the average picture most. Both chosen files were copied to the data root's
+`o_fix/models/` and frozen in [o_frozen.csv](../results/experiments/fix/o_frozen.csv) before the test.
+
+### 16.3.3 The test (once): both meet the rule and are replaced
+
+Study B's 10 held-out settings and 20 more (`test_settings(30)`), the test's seeds (real 3,200,000 + 100 s + k, the
+floor + 50, plays 3,250,000, tracking 3,280,000), each file frozen before it ran, the tool binary of the probe and
+validation ([o_test_compare.csv](../results/experiments/fix/o_test_compare.csv),
+[o_test_stats.csv](../results/experiments/fix/o_test_stats.csv),
+[o_test_decision.csv](../results/experiments/fix/o_test_decision.csv)). Candidate minus current model, 95% intervals
+(margins in brackets):
+
+| statistic | mushroom: current → `ms_u30` | difference [95% interval] (margin) | splash: current → `ms` | difference [95% interval] (margin) |
+|---|---|---|---|---|
+| mean-frame PSNR (dB) | 27.80 → 28.98 | **+1.18 [+0.91, +1.45]** (better at 29 of 30 settings; worst -0.22) | 33.24 → 33.64 | **+0.40 [+0.21, +0.60]** (better at 21 of 30; worst -0.20) |
+| tracking at 1 s (dB) | 13.57 → 14.43 | **+0.85 [+0.73, +0.97]** (-0.20) | 13.35 → 13.35 | -0.000 [-0.000, +0.000] (-0.20) |
+| detail spectrum distance | 0.187 → 0.174 | **-0.013 [-0.026, -0.000]** (+0.039) | 0.070 → 0.068 | -0.003 [-0.006, +0.000] (+0.020) |
+| \|ln motion ratio\| (motion ratio) | 0.230 (0.81) → 0.204 (0.82) | -0.025 [-0.064, +0.013] (+0.095) | 0.108 (0.96) → 0.085 (0.96) | **-0.024 [-0.037, -0.010]** (+0.072) |
+| coverage distance | 0.0189 → 0.0148 | **-0.0041 [-0.0074, -0.0011]** (+0.0117) | 0.0028 → 0.0021 | **-0.0006 [-0.0010, -0.0003]** (+0.0017) |
+| emission distance | 0.00007 → 0.00008 | +0.000005 [+0.000003, +0.000008] (+0.0001) | 0.00003 → 0.00003 | -0.000001 [-0.000001, +0.000000] (+0.0001) |
+
+**Both meet the rule on the test, and both are replaced.** The mushroom is better on both targets (its average picture
+1.18 dB closer to a real run's, and it follows a run from its true state 0.85 dB better at 1 s), and better on detail
+and coverage too; its motion ties; its emission distance is 5 x 10^-6 larger, an interval entirely on the worse side but
+a twentieth of its margin (the mushroom gives almost no light beyond its colour), so under study M's strict reading it
+would have stopped, and under study K's margins it passes. The splash's average picture is 0.40 dB closer, its motion and
+coverage closer, its detail and tracking tied (tracking from a true state is the same frames: the mean state moves a
+start at its own controls by nothing).
+
+Distance to the floor (a second set of 8 real runs per setting), before and after:
+
+| effect | split | mean-frame PSNR below the floor (dB), current → now | spectrum distance, current → now (the floor's) | coverage distance (the floor's) |
+|---|---|---|---|---|
+| mushroom | test (30) | 6.93 → **5.75** | 0.187 → **0.174** (0.031) | 0.019 → **0.015** (0.004) |
+| mushroom | validation (30) | 6.63 → **5.51** | 0.182 → 0.179 (0.032) | 0.017 → **0.012** (0.005) |
+| splash | test (30) | 6.08 → **5.68** (the floor 39.32) | 0.070 → 0.068 (0.028) | 0.0028 → **0.0021** (0.0008) |
+| splash | validation (30) | 5.93 → **5.31** | 0.073 → **0.070** (0.029) | 0.0025 → **0.0017** (0.0008) |
+
+### 16.3.4 How the replaced mushroom looks
+
+The numbers move more than the picture. Below, the mushroom as shipped and as replaced (the model's own renderer, 256
+px, seed 3,100,000, at 1, 2, 3.5 and 5 s; `nvfx_fix strip`): rows 1 and 2 at controls (0.5, 0.1, 0.6), rows 3 and 4 at
+`distant_mushroom`'s (0.9, 0.6, 0.3), the old model above the new each time. By eye the two are hard to tell apart: the
+same fireball at 1 s, the same stem and cap at 2 s, the same ragged cap hanging down in lobes by 3.5 s; at 5 s the new
+cap holds together a little more. What the test measured (an average picture 1.18 dB closer, a run followed better) is
+a matter of where and how much smoke there is over many runs, not of a shape one sees in one. The stem and the rolled
+cap that the simulator keeps are still lost after 3 to 4 s; the mushroom stays weak to the eye, if less weak by the rule.
+The library's and the prairie's mushroom are drawn with the explosions' look (`cloud`), which hides the fringes seen
+here; `library_round7`, `scene_prairie`, `effect_mushroom` and `real_vs_learned_round7` were rendered again with it.
+
+![The mushroom before (rows 1 and 3) and after study O (rows 2 and 4), at 1, 2, 3.5 and 5 s](figures/o_mushroom.png)
+
+Where a scene asks a start point for controls of its own, the mean state shows. The prairie plays start 13, a calm
+start, at controls (0.8, 0.6, 0.3): the new file moves it there, so its fireball is bigger and brighter and its cap
+wider on a clearer stem at 3.4 to 4.6 s; late on it spreads into the same tree of smoke (below: the prairie's keyframes
+at 2.6, 3.4, 4.1, 4.6 and 5.8 s cropped to the cloud, before on top, after below; the whole frames in
+[EFFECTS_BLAZE.md](EFFECTS_BLAZE.md) §6).
+
+![The prairie's mushroom before (top) and after study O (bottom)](figures/o_prairie_mushroom.png)
+
+### 16.4 The rocket thruster's exhaust: a cold field on its tail (a library entry)
+
+**The flaw** ([LIBRARY.md](LIBRARY.md)): `rocket_thruster`'s exhaust (the jet model, recoloured blue) curls up at its
+end as a flame does instead of streaming. **The cause:** the jet model is a flamethrower's burning jet: its gas slows
+along its length and its hot end rises on its own heat (the simulator's does too; the model card says "its end curls
+up"). Watching 34 s of the entry also showed a second fault: at times a shard's half-second blend showed two jets, one
+aimed down, because the start point nearest the entry's controls (0.9, 0.4, 0.45) was start point 2, stored at aim 0.04
+(18 degrees down), and a new shard begins from it.
+
+**Tried, by eye** (34 s of each, frames every 4 s and at the shard changes): a lower aim (0.25) lowers the jet but its
+end still hooks up; a `wind` field along the exhaust tears the flame apart and lights a patch of the tile (as COMPOSE.md
+§5 warns, strong pushes break a learned flame); a `ceiling` just above the nozzle flattens the tail a little; **a `cold`
+field over the tail** (strength 0.12 of the heat a frame within 160 pixels of a point 360 pixels along the exhaust)
+takes off the heat that lifts it: the exhaust streams and fades. With aim 0.45 and turbulence 0.5, start point 0
+(stored at aim 0.46) is the nearest (squared distance 0.218 against 0.264 and 0.298 for the next two), and no blend
+shows a second jet. **The fix** is those three changes in the entry: in the frames below (before, top; after, bottom, at
+4, 8.3, 12, 16.3, 20, 24.3, 28 and 32.3 s) the old tail hooks up in most of them and two jets show at 28 s; the new
+exhaust streams to the right and fades in all of them. It is a look and a force, not a model change; its keyframe is
+not among the frozen ones. Re-rendered: `library_fire`.
+
+![rocket_thruster over 34 s: before study O (top), after (bottom)](figures/o_thruster.png)
+
+### 16.5 What changed
+
+- **Code** (no runtime or API change; `NVFX_VERSION` as main's): an `effect` line takes `passes N` (`src/compose/script.cpp`,
+  `script_run.cpp`; the detail layer in N passes a frame, a whole number from 1 to 8; `Script.AnEffectsPassesSplitItsDetailLayer`),
+  `nvfx_reel`'s DETAIL field takes it too; `tools/nvfx_fix.cpp` (`bands`, `peaks`, `cover`, `strip`: §16.1 and §16.2's
+  evidence and the figures); `nvfx_ordered --study o` (the probe with its null, validation and the test, by §16.3.1's
+  rule).
+- **Catalogue and scenes:** `library/water.nvfxl` (the waterfall and the rain shaft in 2 passes), `library/models.nvfxl`
+  (launch in 2 passes), `library/fire.nvfxl` (`rocket_thruster`: a cold field, aim 0.45, turbulence 0.5),
+  `examples/scenes/falls.nvfxs` (2 passes) and `liftoff.nvfxs` (the blast a domain of three tiles, 2 passes).
+- **Models replaced** (both met the rule on the test, §16.3.3): the **mushroom** is now `o_fix/models/mushroom.nvfx`
+  under the data root (`ms_u30`: the mean state and the stepper fine-tuned on 30-frame windows; 301,443 bytes, SHA-256
+  `4a2f08a05eed33a85584b670eb009b606ecb1443089429b15beca703a46c97cc`) and the **splash** `o_fix/models/splash.nvfx`
+  (`ms`: the mean state; 301,443 bytes, `806a7a6cf27d73bb84b602cbe8f11e9b4ca4ce071bad50a4b9224bfb9131e82a`), each 20,516
+  bytes larger than before (the mean state's coefficients). The shared links moved last, after the full ctest had passed
+  with private copies of the folders: `library/models/mushroom.nvfx`, `library/models/splash.nvfx` and
+  `fx_blaze/models/scene/mushroom.nvfx`. The round's files are untouched under `fx_blaze/models/d` and
+  `fx_water/models/d`. A branch that has not merged these hashes will find its frozen tests that play the
+  mushroom (`LibraryKeyframesFrozen` and `PackLibraryKeyframesFrozen` at `distant_mushroom`, `ScriptedPrairieFrozen`)
+  failing against the moved links; merging study-fix brings the new hashes.
+- **Frozen hashes** (all at float, pinned to the AVX2 build with `--isa avx2`): the falls' six keyframes and the
+  lift-off's 078 to 282 (§16.1, §16.2); in `results/library/frozen.csv` `rain_shaft`, `rocket_launch`,
+  `distant_mushroom` and the mushroom's and splash's model rows; the prairie's keyframes 063 to 216
+  (`fx_blaze_frozen.csv`; 024, before the blast, is unchanged, and the old file still gives the old 063 and 078 on this
+  build, so the change is the model's); rows for the new files (`mushroom_o`, `splash_o`). No other frozen keyframe
+  plays the mushroom or the splash (`boulder_splash` is seeded water over the fog model: unchanged).
+- **Videos re-rendered** (videos/README.md): `effect_waterfall`, `effect_rainshaft`, `scene_falls`,
+  `real_vs_learned_water`, `library_water` (§16.1, and its `splash` again for the new model), `scene_liftoff`,
+  `effect_launch` (§16.2), `library_fire` (§16.4), `effect_mushroom`, `effect_splash`, `scene_prairie`,
+  `library_round7` (the mushroom entries and `rocket_launch`'s 2 passes) and `real_vs_learned_round7` (the mushroom, and
+  launch in 2 passes). `real_vs_learned_water`'s splash starts from a run's true state, where the mean state moves
+  nothing, and its stepper is the round's: unchanged.
+- **Checks** (after merging main at 6845415, still main's head on 20 October): the full build with warnings as errors;
+  the full ctest, 462 of 462 with private copies of the model folders before the links moved and 462 of 462 again with
+  the moved links (the pack rebuilt from them), none skipped; `nvfx_alloc_test` (no allocation per frame);
+  `nvfx_gallery --check` over the whole library with its models (191 effects, 191 played, 0 failed); the Godot test
+  (`engines/godot/test.sh`: the fireball and the library stage, 0 failures).
+
+### 16.6 Cost
+
+The detail layer's second pass (`nvfx_ordered cost`, thread CPU time a frame through `nvfx_render`, the models
+interleaved, the median of 9 paired repetitions; `o_cost_passes.csv`; measured on the shared machine at a load of about
+13 on 4 cores, so provisional):
+
+| effect | size | int8: one pass → two (ms) | difference | float: one pass → two (ms) | difference |
+|---|---|---|---|---|---|
+| waterfall (swirl 0) | 128 | 0.574 → 0.583 | +0.004 | 0.798 → 0.788 | -0.015 |
+| waterfall (swirl 0) | 256 | 1.412 → 1.450 | +0.061 | 1.829 → 1.836 | +0.036 |
+| launch (swirl 1, scale 9) | 128 | 0.539 → 0.649 | +0.099 | 0.785 → 0.871 | +0.090 |
+| launch (swirl 1, scale 9) | 256 | 1.387 → 1.656 | +0.233 | 1.964 → 2.104 | +0.165 |
+
+A second pass skips the empty spans as the first does, so the waterfall's sheet (a narrow band of the frame) costs
+almost nothing more; the launch's billows fill the tile, and the second pass costs it 8 to 18% (the paired
+differences over the medians).
+
+The replaced mushroom and splash cost what the round's did: the mean state acts once, on the start point, and the
+fine-tuned stepper has the same shape (`o_cost_models.csv`, the same tool, the build after merging main, a load of about
+8): the mushroom 0.640 → 0.684 ms at 128 px int8 (paired +0.063, inside both ranges), 1.580 → 1.513 at 256 (+0.006),
+0.689 → 0.746 and 1.591 → 1.590 at float; the splash 0.730 → 0.700 (-0.044), 1.610 → 1.580 (-0.095), 0.796 → 0.773
+and 1.666 → 1.645 at float. Every difference is within the spread of repetitions on this machine.
+
+**The lift-off's three tiles** (`nvfx_scene_script --no-video --profile`, the scene's 300 frames at 1280 x 720 on 2
+threads, int8, the wall time a frame; three ways of playing the blast in turn, twice, and one tile with two passes in a second
+session; `o_cost_liftoff.csv`; medians over the 225 frames from the ignition at 2.5 s; a load of about 8):
+
+| the blast | step stage (ms a frame) | whole frame (ms) |
+|---|---|---|
+| one tile, one pass (before study O) | 2.21, 2.20 | 44.1, 42.6 |
+| three tiles, one pass | 7.91, 7.90 | 48.7, 47.9 |
+| three tiles, two passes (as shipped) | 12.39, 12.18 | 50.3, 46.0 |
+| one tile, two passes (a second session) | 3.18, 2.52 (one pass: 2.20, 2.28) | 40.2, 43.5 (41.6, 41.1) |
+
+The two outer tiles add about 5.7 ms a frame to the step stage (all seven modules' steps on 2 threads) and about 5 ms
+to the frame; the second pass adds about 4.4 ms more on the three tiles, more than the bare effect's +0.23 ms at 256 px
+would give (three full tiles of billows on the two threads the frame's drawing shares; on one tile, +0.3 to +1.0 ms),
+but the frame as a whole hardly moves (48.3 against 48.2 ms on average over the two runs, within the runs' spread),
+since the step overlaps the drawing of the frame before. The lift-off still runs at about 20 frames a second at
+1280 x 720 on 2 busy threads; a game that cannot spare the step can keep one tile and accept the square.
+
+### 16.7 What it means
+
+- **Two of the five flaws were not the models'.** The waterfall's bands were the detail layer's once-a-frame lock seen
+  through a fast, straight fall, and launch's block was its domain, which the simulator's billows fill as well. Both are
+  fixed in how the effects are played, with no model change: `passes` for any effect whose material moves a few pixels
+  a frame (study L met the same stamp as magic's saw-teeth), and a tiled domain where an effect must outgrow its tile.
+- **The thruster's curl is the jet model's physics** (a burning jet's hot end rises); a force in the entry takes it off.
+  A recoloured model keeps the physics it was trained on, and a library entry can steer it with the compositor's fields.
+- **A model fix that the test confirms can still look much the same.** The mushroom's average picture is 1.18 dB closer
+  to a real run's and it follows a run better, but its stem and rolled cap are still lost after 3 to 4 s, and by eye the
+  new file differs mostly where a scene asks a start point for other controls (the mean state). The splash's gain,
+  0.40 dB, is small and invisible by eye; it could be told from a tie because the margins came from the null's spread
+  and N from the candidates' (study M3's lesson).
+- **Not fixed:** the mushroom's ragged cap and its detail (still 5.6 times the floor's spectrum distance on the test);
+  the library's launch entries, spawned and so not tiled, still fill one tile; the bare launch reel shows its tile; the
+  splash's crown still reads as two horns in the library. What would fix them: tiled domains for spawned entries in the
+  compositor; for the mushroom, a stepper that sees the cap's whole life (longer windows than 30 frames, or more coarse
+  cells over the cap).

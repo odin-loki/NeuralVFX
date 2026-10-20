@@ -201,6 +201,46 @@ TEST(Script, AnEffectsPrecisionOverridesTheScenes) {
   }
 }
 
+// `passes N` on an effect runs its detail layer in N passes a frame (study O, docs/REPORT.md §16: the learned waterfall's
+// bands), as a model file with DetailSpec::passes = N plays; it is a whole number from 1 to 8.
+TEST(Script, AnEffectsPassesSplitItsDetailLayer) {
+  const auto played = [](const char* own, int file_passes) {
+    const std::string text = std::format("scene size 160 x 90, fps 30, length 1\neffect tiny = \"tiny\"{}\n"
+                                         "module m = tiny, size 32, width 64, at (80, 74), start 0, seed 5", own);
+    sc::EffectLoader loader = [file_passes](const std::string&) {
+      rt::RolloutEffect e = tiny_effect(3);
+      e.m.detail.passes = file_passes;
+      return e;
+    };
+    sc::Scene s(sc::parse(text, "p"), loader, {1, Isa::base});
+    std::vector<std::uint8_t> px(160 * 90 * 3);
+    std::vector<float> all;
+    for (int f = 0; f < s.frames(); ++f) {
+      s.render(f, px);
+      const auto& img = s.module("m", 0)->image().px;
+      all.insert(all.end(), img.begin(), img.end());
+    }
+    return all;
+  };
+  const auto one = played("", 1), two = played(", passes 2", 1);
+  ASSERT_GT(std::accumulate(one.begin(), one.end(), 0.0), 0.0);  // the module's picture
+  EXPECT_NE(one, two);
+  EXPECT_EQ(two, played("", 2));            // the same frames as a file that says 2
+  EXPECT_EQ(one, played(", passes 1", 2));  // and the line wins over the file
+  const char* own = "effect e = \"e\", swirl 0, passes 2\n";
+  EXPECT_EQ(sc::print(sc::parse(own, "p")), own);
+  for (const char* bad : {"effect e = \"e\", passes 1.5\nmodule m = e, size 32", "effect e = \"e\", passes 0\nmodule m = e, size 32"}) {
+    try {
+      sc::Scene s(sc::parse(bad, "p"), tiny_loader(), {1, Isa::base});
+      ADD_FAILURE() << "no error for: " << bad;
+    } catch (const sc::Error& e) {
+      EXPECT_EQ(e.pos.line, 1);
+      EXPECT_EQ(e.pos.col, 24);
+      EXPECT_NE(e.message.find("a whole number from 1 to 8"), std::string::npos) << e.what();
+    }
+  }
+}
+
 using nfx::compose::testing::kEverything;
 
 TEST(Script, RoundTripThroughThePrinter) {
