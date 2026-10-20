@@ -44,7 +44,7 @@ std::string_view effect_name(Effect e);
 bool parse_effect(std::string_view text, Effect& out);  // any effect of kAllEffects
 bool effect_loops(Effect e);                            // an explosion, dust, the mushroom, a splash and a smoke ring play once; the others loop
 // How many frames (at 30 per second) an effect that plays once lasts: 90 (3 s) for the explosion, dust and a splash, 150 (5 s) for
-// the mushroom, whose cap needs that long to rise, roll over and darken, SMOKERING_FRAMES for a smoke ring (docs/EFFECTS_AIR.md);
+// the mushroom, whose cap needs that long to rise, roll over and darken, 120 (4 s) for a smoke ring (docs/EFFECTS_AIR.md);
 // 0 for an effect that loops.
 int one_shot_frames(Effect e);
 
