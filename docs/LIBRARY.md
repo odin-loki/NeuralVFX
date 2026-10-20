@@ -1,13 +1,14 @@
 # The effect library
 
-A catalogue of 191 named, ready-to-use effects that a game lists, places and drives without training anything: a
+A catalogue of 203 named, ready-to-use effects that a game lists, places and drives without training anything: a
 campfire, a grenade, a steam vent, a portal, a lightning strike, ground fog, a dust impact, a flamethrower, a plasma
 orb, a dust devil, a rocket's smoke trail, rain, a wall of fire, a forge, a nuke, a rocket launch, a locomotive's
-chimney, an ink cloud, a waterfall, a fountain, a splash, a rain shaft. Each plays the twenty-one trained rollout models
+chimney, an ink cloud, a waterfall, a fountain, a splash, a rain shaft, a candelabra, smoke rings, dry-ice fog. Each plays
+the twenty-four trained rollout models
 (fire, smoke, explosion v2, steam and magic; fog, dust and cloud, [EFFECTS_ATMOSPHERE.md](EFFECTS_ATMOSPHERE.md); jet,
 orb and vortex, [EFFECTS_ENERGY.md](EFFECTS_ENERGY.md); wildfire, coals and mushroom, [EFFECTS_BLAZE.md](EFFECTS_BLAZE.md);
 launch, puffs and ink, [EFFECTS_FLOW.md](EFFECTS_FLOW.md); waterfall, fountain, splash and rainshaft,
-[EFFECTS_WATER.md](EFFECTS_WATER.md)) and the compositor's procedural elements (embers, sparks, shock fronts, scorch marks, flashes, lights, bolts, rings), at
+[EFFECTS_WATER.md](EFFECTS_WATER.md); candle, smokering and heavygas, [EFFECTS_AIR.md](EFFECTS_AIR.md)) and the compositor's procedural elements (embers, sparks, shock fronts, scorch marks, flashes, lights, bolts, rings), at
 a size, with parameters mapped onto the models' controls and looks. The 23 entries of the six newer models were added
 with the recipe of §6, in text; the only code they needed is a third anchor, for the jet's nozzle. The nine newest
 entries needed two features of the compositor: **trails** (`rocket_trail`, `vehicle_dust_wake`, `carried_torch`,
@@ -22,7 +23,8 @@ entries of launch, puffs and ink (round 7 too) came after them, in text again, w
 (waterfalls, fountains, splashes, drips, bubbles, rain on puddles, rain shafts) are water in two layers
 ([EFFECTS_WATER.md](EFFECTS_WATER.md)): the ordered body learned (four new models: waterfall, fountain, splash,
 rainshaft) and the random detail seeded (the composer's deterministic water: spray, pools, ripples, foam, drops),
-or the seeded layer alone (§1, Water).
+or the seeded layer alone (§1, Water). The twelve **air** entries (`library/air.nvfxl`, round 9: candles, smoke rings,
+heavy gas; §1, Air) were added in text again, with a new category, `gas`, and no code.
 
 ![The library's contact sheet: the entries of the first five models](figures/library_sheet.png)
 
@@ -35,6 +37,8 @@ or the seeded layer alone (§1, Water).
 ![The library's contact sheet: the ten entries of launch, puffs and ink](figures/library_sheet_flow.png)
 
 ![The library's contact sheet: the 23 water entries](figures/library_sheet_water.png)
+
+![The library's contact sheet: the twelve air entries](figures/library_sheet_air.png)
 
 *Every entry alone on a stage fitted to its box, at the moment its catalogue says shows it well (`nvfx_gallery`).*
 
@@ -60,12 +64,13 @@ or the seeded layer alone (§1, Water).
 water (§1, Water), thirteen of them on the four water models and ten on the composer's seeded water alone.
 
 With the third round's 70 (§10: 20 weather, 23 combat, 14 magic, 13 fire, smoke, steam and light; 34 learned, 36
-procedural only) the catalogue holds **191** entries, 125 of them learned and 66 procedural only.
+procedural only) the catalogue holds **191** entries, 125 of them learned and 66 procedural only; with the twelve air
+entries (§1, Air; all learned), **203**, 137 of them learned.
 
-**What is learned and what is not.** Only twenty-one things move by a trained model: fire, smoke, an explosion, steam,
+**What is learned and what is not.** Only twenty-four things move by a trained model: fire, smoke, an explosion, steam,
 magic, fog, dust, cloud, a jet, an orb, a vortex, a wildfire front, coals, a mushroom cloud, an engine's blast on the
-ground (launch), smoke in puffs, a plume with almost no buoyancy (ink), and the bodies of a
-waterfall, a fountain, a splash and a rain shaft. Everything else in an entry is the
+ground (launch), smoke in puffs, a plume with almost no buoyancy (ink), the bodies of a
+waterfall, a fountain, a splash and a rain shaft, a candle's flame, a smoke ring and heavy gas. Everything else in an entry is the
 compositor's: particles (embers, sparks, debris), shock fronts, scorch marks, flashes, camera shakes, and the glows this
 library adds (lightning and electric arcs, rings, discs and motes of light, lamps; rain, snow, ash and leaves; water's random detail). Entries
 that use no model at all say *(procedural)* in their description. A trail's material is learned (it plays in the
@@ -401,6 +406,39 @@ took 5 ms (`dive_splash`, 440 x 328) to 55 ms (`tall_waterfall`, 1432 x 1072) a 
 most of it the stage's size; every entry played with no allocation. The keyframes of `waterfall`, `garden_fountain`,
 `boulder_splash` and `rain_shaft` (now `waterfall_drawn` and `rain_shaft_drawn`, their keyframes unchanged), and of
 `fountain` and `rain_shaft` with their learned bodies, are frozen (`results/library/frozen.csv`).
+
+### Air (12, round 9: `library/air.nvfxl`)
+
+The candle model (a small, calm flame on a wick with a thin wisp of smoke, leaning and fluttering in a draught), the
+smoke ring model (one ring puffed from an opening, rising and spreading as it rolls, then breaking up; once, 4 s) and the
+heavy gas model (a cold vapour poured out near the ground that flows along it and thins), [EFFECTS_AIR.md](EFFECTS_AIR.md):
+the candle and the ring work by their test's rule, heavy gas falls short of it (its average picture ties the nearest
+flipbook's). The candle plays with a gentler sub-grid swirl than its calibration chose (swirl 1, scale 9, in
+`models.nvfxl`: the calibrated 3 tears its small flame), and all three are drawn by field-shader looks lit by the scene
+(the candle's learned renderer gives its wisp blue-green fringes, the ring's tints its first frames, heavy gas carries no
+heat). Marked *(air)*.
+
+| effect | what it is | plays | box, anchor | runs | parameters (default) | how it looks |
+|---|---|---|---|---|---|---|
+| `candle_flame` (air) | A candle's flame: a small, calm flame on its wick with a thin wisp of smoke above it, leaning and fluttering in a draught; its anchor is the wick | candle; look candlelight, glow, lamp | 50 x 150, base | loop | intensity (0.4), draught (0.5), flicker (0.2) | Fair: a narrow orange flame on its wick with a grey wisp wavering up; the learned flame does not keep the simulator's rounded teardrop, and a faint red glow shows in the wisp just above it. |
+| `candelabra` (air) | Five candle flames at the tips of a candelabra's arms, each its own start and seed, with their warm light | candle; look candlelight, lamp | 220 x 220, base | loop | intensity (0.35), draught (0.5) | Fair: five small flames whose wisps curl at their tops; at 64 px a tile the flames are a few pixels wide and read as candles. |
+| `storm_lantern` (air) | A lantern's flame: a small candle flame behind glass, steady, swaying a little when a draught gets in, with a soft halo | candle; look candlelight, glow, lamp | 60 x 120, base | loop | intensity (0.3), draught (0.5: a third of it gets in) | Fair: a steady small flame in a warm halo; nothing draws the lantern. |
+| `torch_in_draught` (air) | A torch's head in a draught: a big candle-like flame that leans, flutters and streams its smoke away, with sparks | candle; look candlelight, embers, lamp | 140 x 260, base | loop | intensity (1), draught (0.85) | Fair: a big leaning flame and a long, curling trail of smoke; the flame's base is ragged at times. |
+| `birthday_candles` (air) | Six tiny flames in a row on a cake, each with its own flicker and a thread of smoke | candle; look candlelight, lamp | 200 x 90, base | loop | intensity (0.1), draught (0.5) | Fair: six tiny flames, each with a curl of smoke; they read at small sizes. |
+| `smoke_ring` (air) | One ring of smoke puffed from an opening, rising and spreading as it rolls, then breaking up | smokering; look incense | 200 x 220, base | once, 4.2 s | strength (0.5), wind (0.5) | Good: a ring seen side-on (two rolled cores under a hood of smoke) that rises, spreads and breaks up into a haze. |
+| `rising_smoke_rings` (air) | Smoke rings one after another, a smoker's or a censer's, every 1.8 s, each rising, spreading and breaking up | smokering (three modules started in turn); look incense | 220 x 300, base | loop | strength (0.4), wind (0.5) | Fair: rings rising in a stack; 1.8 s apart they overlap as they rise. |
+| `cannon_smoke_ring` (air) | A mortar fired upwards: a flash, sparks and a big ring of powder smoke that rolls up and breaks apart | smokering; look powder, flash, glow, lamp, burst | 320 x 360, base | once, 4.5 s | power (1), wind (0.5) | Fair: the flash and sparks, then a big soft ring that rolls up and splits into two columns; soft and slow for a cannon. |
+| `dry_ice_fog` (air) | A cold white vapour poured out over the floor, spilling both ways with rolling fronts and pooling low | heavygas; look dry_ice | 600 x 200, base | loop | intensity (0.6), flow (0.5) | Fair: a low white layer spilling both ways with soft rolling fronts, streaky at times; the tile's mound and hollows are not drawn (the hollows are under the ground line). |
+| `toxic_spill` (air) | A sickly green gas pouring out of a leak and creeping along the ground to one side | heavygas; look poison_gas, lamp | 560 x 200, base | loop | intensity (0.7), flow (0.75) | Fair: a green layer creeping to the right; as dry_ice_fog. |
+| `swamp_gas` (air) | A low, dim marsh gas welling up and lying over the ground, with a few will-o'-the-wisps drifting in it | heavygas; look marsh_gas, glows | 640 x 180, base | loop | intensity (0.25) | Fair: a dim grey-green layer with three faint wandering lights; at this rate the gas is thin and patchy. |
+| `stage_fog` (air) | Two fog machines' heavy white fog rolling out across a stage floor in a thick layer | heavygas (two tiles); look dry_ice | 900 x 220, base | loop | intensity (0.85), flow (0.85) | Fair: a thick white layer flowing right; the two releases show as two humps more than as one layer. |
+
+In the gallery (`--video`, two threads of the shared machine, load 6 to 10 on its 4 cores), the air entries took 33 to 63
+ms a frame with their stage's own picture (the stages 320 x 240 to 1032 x 776; one run, provisional); every entry played
+with no allocation. The keyframes of
+`candelabra`, `smoke_ring` and `dry_ice_fog` are frozen ([frozen_air.csv](../results/library/frozen_air.csv), float on
+AVX2, `ctest -R LibraryAirKeyframesFrozen`). The air models are linked into the models' folder with the others
+(`ln -s ../../fx_air/models/d/{candle,smokering,heavygas}.nvfx .`).
 
 ## 2. The format
 
@@ -766,6 +804,20 @@ orb and the vortex). A new category is just a new name in `category` (`dust` and
   Longer shards (20 s instead of 8) did not spread it further.
 - **Names**: `glow` and `wash` are words of the language; the signal fire's lamp is `warm` and the downwash's module
   `draught`.
+
+**What adding the candle, smoke ring and heavy gas taught** (`library/air.nvfxl`; again no code):
+- **A small flame wants a gentle detail layer and a look.** The candle's calibrated swirl (3) tears a flame two or three
+  coarse cells wide into shreds; `swirl 1, swirl_scale 9` keeps it a flame, and a field-shader look (`candlelight`,
+  `like flame` with a high emission power, so that the warm plume stays dim) removes the blue-green fringes the learned
+  renderer puts on the wisp.
+- **A one-shot that repeats is several modules started in turn.** `rising_smoke_rings` starts three ring modules, each
+  from a start point of its own, one every 1.8 s (`when t - 5.4 * floor(t / 5.4) < 1 / fps, repeat:` and two more with
+  offsets); a start's seed may be an expression (`seed 2111 + floor(t / 5.4)`), so each puff differs. Study M3's mean
+  state moves each start to the module's controls.
+- **Read where the floor is.** Heavy gas pours over a mound 9% up its tile into hollows 3% up: an entry stands the
+  mound's top on the ground (`sink 0.09`), so the hollows, and what pools in them, are under the ground line.
+- **Names**: `ring` is a word of the language (the ring's module is `puff`); a file's looks come before its first entry,
+  and `toxic` and `marsh` were already other files' looks.
 
 **A new look** (a recolour) is a `look` line before the first entry of a file (shared) or inside an entry (its own).
 It changes colours, not motion; say so in the entry's description.
