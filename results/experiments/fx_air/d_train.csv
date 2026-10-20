@@ -1,2 +1,3 @@
 effect,runs,frames,sim_minutes,record_s,stepper_loss,stepper_s,renderer_psnr,contrast,swirl,detail_score,starts,start_fine,stored_bytes,total_s
 candle,160,240,21.33,342,0.03997,5210,0.00,1,0.8,0.000,8,0,83594,5551
+smokering,240,120,16.00,196,0.00665,6151,0.00,1,0.8,0.000,16,64,280826,6347
