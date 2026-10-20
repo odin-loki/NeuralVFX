@@ -197,6 +197,39 @@ TEST(Rollout, EarthEffectsKeepFineFieldsAndTheAvalanchePlaysOnce) {
   EXPECT_EQ(recipe_model(recipe_for(sim::Effect::eruption)).control_names[1], "wind");
 }
 
+// The air effects (docs/EFFECTS_AIR.md): the candle takes fire's recipe as it is, heavy gas keeps fine fields with its
+// start points as fog does, and the smoke ring takes the one-shot branch at its own length (4 s).
+TEST(Rollout, AirEffectsTakeTheirRecipes) {
+  const SimRecipe fire = recipe_for(sim::Effect::fire), fog = recipe_for(sim::Effect::fog), ex = recipe_for(sim::Effect::explosion);
+  const SimRecipe candle = recipe_for(sim::Effect::candle), gas = recipe_for(sim::Effect::heavygas), ring = recipe_for(sim::Effect::smokering);
+  for (const SimRecipe* r : {&candle, &gas}) {
+    EXPECT_EQ(r->runs, fire.runs);
+    EXPECT_EQ(r->frames, fire.frames);
+    EXPECT_EQ(r->start_frame, fire.start_frame);
+    EXPECT_EQ(r->starts, fire.starts);
+    EXPECT_EQ(r->stepper.activity_stage, fire.stepper.activity_stage);
+    EXPECT_TRUE(recipe_model(*r).loop);
+    EXPECT_EQ(recipe_model(*r).h.n_age, 0);
+  }
+  EXPECT_EQ(candle.start_fine, fire.start_fine);
+  EXPECT_EQ(gas.start_fine, fog.start_fine);
+  EXPECT_EQ(ring.runs, ex.runs);
+  EXPECT_EQ(ring.frames, 120);
+  EXPECT_EQ(ring.frames, sim::one_shot_frames(sim::Effect::smokering));
+  EXPECT_EQ(ring.start_frame, 0);
+  EXPECT_EQ(ring.start_fine, ex.start_fine);
+  EXPECT_EQ(ring.starts, ex.starts);
+  EXPECT_EQ(ring.stepper.burn_max, ex.stepper.burn_max);
+  const Model rm = recipe_model(ring);
+  EXPECT_FALSE(rm.loop);
+  EXPECT_EQ(rm.h.frames, 120);
+  EXPECT_EQ(rm.h.n_age, 2);
+  EXPECT_EQ(recipe_model(candle).control_names[1], "draught");
+  EXPECT_EQ(recipe_model(gas).control_names[1], "flow");
+  EXPECT_EQ(rm.control_names[1], "wind");
+  EXPECT_EQ(recipe_model(candle).noise.flicker_rate, sim::flicker_rate(sim::Effect::candle));
+}
+
 TEST(Rollout, CoarseFromSimAveragesBlocks) {
   sim::State st;
   st.n = 16;

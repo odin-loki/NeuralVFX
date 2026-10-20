@@ -1,8 +1,8 @@
 # To do: every effect in 3D — a small demo here first, then big on a PC
 
 **Status:** stage 1 is done (study N, `docs/STUDY_3D.md`, and its follow-up N2, §14); stage 2 is planned, not started.
-Work here resumed on 20 October 2026: study O and round 9's earth are merged; round 9's air and study P are being
-finished on their branches ("Here, until the PC").
+Work here resumed on 20 October 2026: study O and round 9 (earth and air) are merged; study P is being finished on its
+branch ("Here, until the PC").
 
 - **Stage 1, here and now (study N): done.** A small 3D demo in this container ([docs/STUDY_3D.md](docs/STUDY_3D.md),
   REPORT §15). What it built:
@@ -67,11 +67,15 @@ then merge it into main.
   - Also done: timing (provisional), ten library entries, the volcano scene with frozen keyframes, six videos,
     REPORT §6.16.
 - **Round 9, air** (`effects-air`, docs/EFFECTS_AIR.md): a candle flame, smoke rings and heavy gas along the ground.
-  - Done: the three presets with sim and recipe tests (earlier clips unchanged); the rule committed before training.
-  - The candle's model was in its last training stage at the pause; a follow-on job set to test it once and train the
-    other two may have run on. Check `/root/nvfx-data/fx_air/jobs/state` and the logs before resuming.
-  - Left: the smoke ring's and heavy gas's models, all tests, timing, the library file, the crypt scene, videos and
-    REPORT §6.17.
+  - **Finished and merged into main** (20 October 2026): the three presets with sim and recipe tests (the 21 earlier
+    effects' clips unchanged, and the air effects' own clips unchanged by the merge with earth); the rule committed
+    before any test; each model frozen by SHA-256 and tested once on seeds from 6,400,000.
+  - The candle and the smoke ring work by the rule; heavy gas falls short (its mean picture and motion tie the nearest
+    flipbook). Tracking at 1 s over the coarse simulation with detail: candle +2.90 dB [+2.35, +3.41], smoke ring
+    +7.51 dB [+6.62, +8.44], heavy gas +1.61 dB [+0.92, +2.15].
+  - Also done: timing (provisional), library/air.nvfxl (12 entries), the crypt scene with frozen keyframes, six videos
+    and REPORT §6.17. Still weak: the candle's flame is ragged up close, the ring's fine detail is poor and its first
+    frame is off, and the gas streaks.
 - **Study O, the most visible flaws** (`study-fix`, REPORT §16): **finished and merged into main** (20 October 2026).
   - Done, by eye, with no model change:
     - the waterfall's and rain shaft's banding (the detail layer locking once a frame; effects take `passes N`, and

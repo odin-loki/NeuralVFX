@@ -972,6 +972,23 @@ the nearest flipbook's, motion and detail tied. Each is 146 KB (the avalanche 27
 128 px frame at int8 (provisional, a shared machine; study D's fire 0.66 ms in the same rounds). The full account, with a
 volcano scene and ten library entries, is in [EFFECTS_EARTH.md](EFFECTS_EARTH.md).
 
+### 6.17 Air effects
+
+Three more presets were trained and tested the same way, at the runtime's default int8, with seeds of the round's own
+(6,400,000 and up): a **candle** (a small, calm flame on a wick with a thin wisp of smoke, leaning and fluttering in a
+`draught`), a **smoke ring** (one vortex ring, a counter-rotating pair in 2D, puffed from an opening, rising and spreading
+as it rolls, then breaking up; it plays once, for 4 s, with study M3's mean state, decided before training) and **heavy
+gas** (a cold vapour poured out near the ground that flows along it, in the direction of its `flow`, and thins). The
+candle and the ring work by the rule set before the test: they track a held-out run 2.9 dB [2.4, 3.4] and 7.5 dB [6.6,
+8.4] better than the coarse simulation with the same detail layer at 1 s (the ring's the largest gain of any effect so
+far), and endless their average picture is closer than the nearest flipbook's (+2.5 and +3.7 dB) with motion no worse;
+the ring's average picture and motion tie a second real run's, and it holds its shape (two cores, rising together,
+through its first two seconds), but its detail is the furthest from real of any effect (spectrum distance 0.72). Heavy
+gas tracks better too (+1.6 [0.9, 2.2]) but its average picture only ties the flipbook's, so it falls short without
+being weak. By eye the candle is weaker than its numbers (its learned flame does not keep the rounded teardrop; the
+library plays it with a gentler swirl and a look). 82, 294 and 146 KB; 0.43 to 0.57 ms per 128 px frame. The full
+account, with a crypt scene and twelve library entries, is in [EFFECTS_AIR.md](EFFECTS_AIR.md).
+
 ## 7. Runtime cost and budget
 
 Median ms per frame through `nvfx_render`, one pinned AVX2 core (90th percentiles and every configuration in

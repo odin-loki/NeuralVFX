@@ -510,6 +510,14 @@ if(NEURALFX_BUILD_TESTS)
                      --keyframes ${CMAKE_CURRENT_BINARY_DIR}/library_keyframes --verify ${CMAKE_CURRENT_SOURCE_DIR}/results/library/frozen.csv --threads 2
                      --precision float --isa avx2)
     set_tests_properties(neuralfx.LibraryKeyframesFrozen PROPERTIES LABELS "neuralfx;data" SKIP_RETURN_CODE 77 TIMEOUT 1200)
+    # The air entries (docs/EFFECTS_AIR.md, library/air.nvfxl) against their SHA-256 in results/library/frozen_air.csv,
+    # float pinned as above; skipped without the air models in NEURALFX_MODELS_LIBRARY.
+    add_test(NAME neuralfx.LibraryAirKeyframesFrozen
+             COMMAND nvfx_gallery --library ${CMAKE_CURRENT_SOURCE_DIR}/library --models ${NEURALFX_MODELS_LIBRARY}
+                     --only candelabra,smoke_ring,dry_ice_fog
+                     --keyframes ${CMAKE_CURRENT_BINARY_DIR}/library_air_keyframes --verify ${CMAKE_CURRENT_SOURCE_DIR}/results/library/frozen_air.csv --threads 2
+                     --precision float --isa avx2)
+    set_tests_properties(neuralfx.LibraryAirKeyframesFrozen PROPERTIES LABELS "neuralfx;data" SKIP_RETURN_CODE 77 TIMEOUT 1200)
     # The third round's entries (docs/LIBRARY.md §10) against their SHA-256 in results/library/frozen_round3.csv, float
     # pinned as above: the procedural ones need no data; those that also play learned models are skipped without them.
     # The procedural ones play no learned model, and the compositor gives the same bits on every ISA, so they need no
@@ -576,6 +584,16 @@ if(NEURALFX_BUILD_TESTS)
     set_tests_properties(neuralfx.ScriptedVolcanoFrozen PROPERTIES LABELS "neuralfx;data" SKIP_RETURN_CODE 77 TIMEOUT 1200)
     add_test(NAME neuralfx.SceneScriptChecks.volcano COMMAND nvfx_scene_script --script ${CMAKE_CURRENT_SOURCE_DIR}/examples/scenes/volcano.nvfxs --check)
     set_tests_properties(neuralfx.SceneScriptChecks.volcano PROPERTIES LABELS neuralfx)
+    # The crypt (docs/EFFECTS_AIR.md): candle, smokering and heavygas, all in NEURALFX_MODELS_AIR (outside git); its
+    # keyframes have the SHA-256 recorded in results/experiments/fx_air_frozen.csv.
+    set(NEURALFX_MODELS_AIR "${_nvfx_data}/fx_air/models/scene" CACHE PATH "candle.nvfx, smokering.nvfx and heavygas.nvfx")
+    add_test(NAME neuralfx.ScriptedCryptFrozen
+             COMMAND nvfx_scene_script --script ${CMAKE_CURRENT_SOURCE_DIR}/examples/scenes/crypt.nvfxs --models ${NEURALFX_MODELS_AIR}
+                     --keyframes ${CMAKE_CURRENT_BINARY_DIR}/crypt_script_keyframes --no-video --threads 2 --precision float --isa avx2
+                     --verify ${CMAKE_CURRENT_SOURCE_DIR}/results/experiments/fx_air_frozen.csv)
+    set_tests_properties(neuralfx.ScriptedCryptFrozen PROPERTIES LABELS "neuralfx;data" SKIP_RETURN_CODE 77 TIMEOUT 1200)
+    add_test(NAME neuralfx.SceneScriptChecks.crypt COMMAND nvfx_scene_script --script ${CMAKE_CURRENT_SOURCE_DIR}/examples/scenes/crypt.nvfxs --check)
+    set_tests_properties(neuralfx.SceneScriptChecks.crypt PROPERTIES LABELS neuralfx)
     # Study K (docs/REPORT.md §13): the fireball's keyframes with its modules at int8 on the AVX-512 build (the build int8
     # takes where the CPU has VNNI; without VNNI it computes the same integer sums, so the same frames), against their
     # SHA-256 in results/experiments/k_int8_frozen.csv. Skipped without AVX-512 or without the study D effects.
