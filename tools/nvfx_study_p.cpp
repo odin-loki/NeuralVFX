@@ -1887,6 +1887,34 @@ int step_decide(const tools::Args& a, const Ctx& c) {
       std::println("  {}: beats B on (a) and the high band for {} of 6, within N's margins on (b) for {} of 6", arm, a_pass, b_pass);
     }
   }
+  // Beside the rule, not deciding: B against N on (b), with the same margins (is drawing at half size and letting the GPU's
+  // bilinear sampler upscale as realistic as native?).
+  for (const int S : sizes) {
+    std::println("\nB against N on (b) at {} px ({}; beside the rule, not deciding):", S, split);
+    int within = 0;
+    for (const sim::Effect e : kStudy) {
+      std::vector<int> set;
+      const auto it = t.find(std::format("{},{},B,track1s", ename(e), S));
+      if (it == t.end()) continue;
+      for (const auto& [st, v] : it->second) set.push_back(st);
+      bool ok = true;
+      std::string line = std::format("  {:>9}:", ename(e));
+      for (const Measure& m : kBMeasures) {
+        const auto b = column(t, std::format("{},{},B,{}", ename(e), S, m.name), set);
+        const auto n = column(t, std::format("{},{},N,{}", ename(e), S, m.name), set);
+        if (b.empty() || b.size() != n.size()) continue;
+        const auto iv = metrics::paired_bootstrap(b, n, 10000, 2026);
+        const double mg = margins.at(std::format("{},{},{}", ename(e), S, m.name));
+        const bool w = m.better > 0 ? iv.lo >= -mg : iv.hi <= mg;
+        ok &= w;
+        line += std::format(" {} {}{}", m.name, fmt_iv(iv, 4), w ? "" : " (past)");
+        o << std::format("B,{},{},B-N,{},{:.6f},{:.6f},{:.6f},{:.6f},{}\n", ename(e), S, m.name, iv.mean, iv.lo, iv.hi, mg, w ? "within" : "past the margin");
+      }
+      within += ok;
+      std::println("{}", line);
+    }
+    std::println("  B is within N's margins on (b) for {} of 6 at {} px", within, S);
+  }
   return 0;
 }
 

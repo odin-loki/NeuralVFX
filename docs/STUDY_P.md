@@ -313,6 +313,76 @@ plays per setting, 2 tracking runs, seeds 3,800,000 (real), 3,810,000 (plays) an
 20 October before this commit, on a quiet machine, to see where the cost stands; its numbers are reported in §6 beside
 the rule's run and do not decide.
 
+## 5. Validation: the null, the choice (10 settings, 4 plays, 2 tracking runs)
+
+**The null** ([p_margins.txt](../results/experiments/upscale/p_margins.txt)): re-seeding N moves its distance from the
+teacher's frames by 0.02 to 0.09 in the detail spectrum, 3% to 13% in motion and 0.7 to 2.1 dB in the mean frame at a
+setting (RMS over the settings), so most margins are the null's, 1.0 to 21 times study K's; emission's is study K's
+(0.0001) but for the wildfire and launch (0.0002, the null's), and tracking's is -0.20 dB. The margins are in §4.5.
+
+**N against the teacher's frames.** At 512 px N's spectrum is 0.46 (wildfire) to 1.09 (smoke) from the teacher's, and its
+high band 0.54 to 1.24 (in log10 power: N draws about 3 to 17 times the teacher's high-band power), because the teacher at 512
+px is drawn from 128 cells and N's detail layer draws at 512.
+
+**The candidates against B and N at 512 px** (validation, the rule's form applied as a reading; full tables in
+[p_decide_val.txt](../results/experiments/upscale/p_decide_val.txt)):
+
+| effect | shared: PSNR vs N, L - B | shared: SSIM, L - B | shared: high band vs N, L - B | per effect: PSNR, L - B | per effect: high band, L - B |
+|---|---|---|---|---|---|
+| explosion | **+0.173 [+0.145, +0.199]** | **+0.0001 [+0.0000, +0.0001]** | +0.000 [-0.022, +0.017] | **+0.451 [+0.363, +0.540]** | -0.039 [-0.092, +0.002] |
+| mushroom | **+0.122 [+0.105, +0.138]** | **+0.0001 [+0.0001, +0.0002]** | -0.029 [-0.064, +0.008] | **+0.183 [+0.166, +0.199]** | **-0.153 [-0.187, -0.121]** |
+| wildfire | -0.064 [-0.130, -0.008] | -0.0003 [-0.0005, -0.0001] | +0.096 [+0.064, +0.133] | **+0.147 [+0.110, +0.181]** | **-0.041 [-0.053, -0.029]** |
+| launch | **+0.015 [+0.003, +0.026]** | -0.0003 [-0.0004, -0.0001] | +0.073 [+0.052, +0.095] | **+0.033 [+0.024, +0.043]** | +0.053 [+0.038, +0.069] |
+| smoke | **+0.087 [+0.082, +0.092]** | **+0.0009 [+0.0008, +0.0010]** | -0.005 [-0.031, +0.023] | **+0.357 [+0.335, +0.377]** | -0.033 [-0.076, +0.014] |
+| waterfall | -0.011 [-0.017, -0.004] | -0.0004 [-0.0005, -0.0003] | +0.053 [+0.047, +0.059] | **+0.032 [+0.024, +0.040]** | +0.057 [+0.053, +0.060] |
+
+Bold: better than B (interval clear of zero). Against N on (b) both candidates are within every margin for all six
+effects at 512 px, and closer to the teacher than N on most measures (the shared net: tracking +0.08 to +0.54 dB, the
+spectrum 0.14 to 0.45 nearer), because they carry less of N's fine detail, as B does.
+
+**The choice** (§4.3, [p_choice_val.txt](../results/experiments/upscale/p_choice_val.txt)): the shared net, as §4.5
+says: the per-effect nets are better on PSNR for all six effects but worse on SSIM or the high band for four of them.
+
+**B itself** (beside the rule, not deciding; [p_decide_val.csv](../results/experiments/upscale/p_decide_val.csv), rows
+`B`): drawn at half size and upscaled by the bilinear 2x, every effect is within N's margins on every (b) measure at
+512 px, and nearer the teacher than N on tracking (+0.10 to +0.55 dB), the spectrum (0.16 to 0.46 nearer) and the high
+band (0.11 to 0.51 nearer); at 256 px for 4 of the 6 (the wildfire's and the waterfall's motion intervals reach past
+their margins).
+
+## 6. The test (once)
+
+TEST
+
+## 7. Cost (provisional: a busy machine)
+
+Thread CPU time per frame through `nvfx_render`, the four instances in turn within one process (their order rotated each
+round), 30 rounds of 20 frames, each on its own timeline at controls (0.6, 0.5, 0.6), the runtime's default (int8 on
+AVX-512 with VNNI); the median over the rounds of each ratio to N, and in brackets the 95% bootstrap interval of the mean
+ratio ([p_cost.csv](../results/experiments/upscale/p_cost.csv), [p_cost_rule.txt](../results/experiments/upscale/p_cost_rule.txt);
+label `rule`, the shared net, run after §4.5 was committed). H is the half-size instance alone: what B costs when the
+engine's GPU does the bilinear 2x.
+
+| effect | N, 512 px | H / N | B / N | **L / N** | N, 256 px | H / N | B / N | L / N |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| explosion | 4.16 ms | 0.343 | 0.426 | 0.571 [0.557, 0.614] | 1.24 ms | 0.374 | 0.441 | 0.554 [0.527, 0.633] |
+| mushroom | 6.00 | 0.310 | 0.361 | **0.453** [0.459, 0.543] | 1.76 | 0.337 | 0.391 | 0.455 [0.480, 0.555] |
+| wildfire | 4.32 | 0.291 | 0.369 | 0.593 [0.558, 0.618] | 1.29 | 0.432 | 0.478 | 0.700 [0.663, 0.742] |
+| launch | 4.33 | 0.302 | 0.367 | **0.536** [0.520, 0.560] | 1.32 | 0.420 | 0.484 | 0.640 [0.606, 0.673] |
+| smoke | 4.70 | 0.325 | 0.395 | **0.550** [0.526, 0.599] | 1.56 | 0.396 | 0.432 | 0.537 [0.518, 0.619] |
+| waterfall | 4.45 | 0.298 | 0.369 | **0.530** [0.486, 0.646] | 1.24 | 0.421 | 0.482 | 0.610 [0.590, 0.630] |
+
+**Condition 3 is not met**: at 512 px L costs at most 0.55 of N for 4 of the 6 effects (the mushroom 0.453, launch
+0.536, smoke 0.5498, the waterfall 0.530), not 5; the explosion (0.571) and the wildfire (0.593) cost more. The effects
+that fill the most of their frame skip the fewest empty blocks: the network runs on every half-size pixel that has
+something near it, and the learned part costs 0.55 (the mushroom) to 0.97 ms (the wildfire) of a busy core at 512 px
+beyond the bilinear 2x. The run with the per-effect nets made before §4.5 was
+committed, on a quiet machine ([p_cost_per_effect.txt](../results/experiments/upscale/p_cost_per_effect.txt)), read the
+same: 0.477 to 0.595 at 512 px, 4 of 6 at or under 0.55 (the explosion 0.548, the mushroom, smoke and the waterfall).
+
+**What drawing at half size saves by itself**: the half-size instance costs 0.29 to 0.34 of N at 512 px and 0.34 to
+0.43 at 256 px (the coarse step, about 0.3 ms, does not shrink); the CPU's bilinear 2x adds 0.05 to 0.09 of N, nothing
+on a GPU. At 256 px L costs 0.46 to 0.70 of N.
+
 ## 5. Reproduce
 
 ```sh
