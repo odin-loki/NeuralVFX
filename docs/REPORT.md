@@ -965,7 +965,11 @@ endless its average picture is 1.22 dB [0.11, 2.45] closer than the nearest flip
 crust is streaks rather than the simulator's network of seams, so its detail is further from real than the
 flipbook's. The eruption works narrowly: +0.50 dB [0.06, 0.96] at 1 s (it ties at every other horizon) and an average
 picture 1.31 dB [0.04, 2.55] closer, motion tied; started from an empty grid, its stepper grows no column, as study L's
-vortex did not. AVALANCHE_REPORT Each is 146 KB (the avalanche 274 KB) and REPORT_COST. The full account, with a
+vortex did not. The avalanche is weak, as the mushroom and the splash were: its first frame beats the coarse
+simulation's by 1.75 dB [0.70, 2.70], but from 1 s it falls behind (-2.23 dB [-4.42, -0.07]), its cloud growing and
+billowing less than the simulator's, and endless its average picture is 2.90 dB [0.89, 5.71] further from real than
+the nearest flipbook's, motion and detail tied. Each is 146 KB (the avalanche 274 KB) and costs 0.44 to 0.49 ms per
+128 px frame at int8 (provisional, a shared machine; study D's fire 0.66 ms in the same rounds). The full account, with a
 volcano scene and ten library entries, is in [EFFECTS_EARTH.md](EFFECTS_EARTH.md).
 
 ## 7. Runtime cost and budget

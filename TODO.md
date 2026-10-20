@@ -58,12 +58,14 @@ paused" note: what is done, where its data is under `/root/nvfx-data`, and the e
 merge main into it, finish its list, run the full ctest, `nvfx_alloc_test`, `nvfx_gallery --check` and the Godot test,
 then merge it into main.
 - **Round 9, earth** (`effects-earth`, docs/EFFECTS_EARTH.md): lava, a volcanic eruption and a powder-snow avalanche.
-  - Done: the three presets with sim tests (the 21 earlier effects' clips unchanged); the test design committed first.
-  - Lava is trained and tested once. It passes: tracking at 1 s is +1.09 dB [+0.70, +1.43] over the coarse simulation
-    with detail; its endless mean picture is closer than the nearest flipbook's and its motion ties it; its detail is
-    worse than the flipbook's.
-  - Left: the eruption's model (its training was running at the pause), the avalanche's, their tests, timing, library
-    entries, the volcano scene, videos and REPORT §6.16.
+  - **Finished on its branch** (20 October 2026), waiting to be merged into main: the three presets with sim tests (the
+    21 earlier effects' clips unchanged); the test design committed first; all three trained and tested once.
+  - Lava works (tracking at 1 s +1.09 dB [+0.70, +1.43] over the coarse simulation with detail; endless mean picture
+    closer than the nearest flipbook's, motion tied, detail worse). The eruption works narrowly (+0.50 dB [+0.06,
+    +0.96] at 1 s; mean picture +1.31 dB [+0.04, +2.55]). The avalanche is weak (-2.23 dB [-4.42, -0.07] at 1 s; mean
+    picture 2.90 dB [0.89, 5.71] further from real than the flipbook's).
+  - Also done: timing (provisional), ten library entries, the volcano scene with frozen keyframes, six videos,
+    REPORT §6.16.
 - **Round 9, air** (`effects-air`, docs/EFFECTS_AIR.md): a candle flame, smoke rings and heavy gas along the ground.
   - Done: the three presets with sim and recipe tests (earlier clips unchanged); the rule committed before training.
   - The candle's model was in its last training stage at the pause; a follow-on job set to test it once and train the
