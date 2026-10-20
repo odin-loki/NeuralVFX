@@ -381,6 +381,11 @@ if(NEURALFX_BUILD_TOOLS)
   target_include_directories(nvfx_study_p PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src/runtime")
   target_link_libraries(nvfx_study_p PRIVATE neuralfx_io neuralfx_train neuralfx_pack nvfx)
   neuralfx_defaults(nvfx_study_p)
+
+  # Study O (docs/REPORT.md §16): the most visible flaws of the shipped effects and demos, taken apart.
+  add_executable(nvfx_fix tools/nvfx_fix.cpp)
+  target_link_libraries(nvfx_fix PRIVATE neuralfx_io neuralfx_train nvfx)
+  neuralfx_defaults(nvfx_fix)
 endif()
 
 if(NEURALFX_BUILD_BENCH)

@@ -18,9 +18,11 @@ bus        at (-128, -300), size 1536 x 1040, cell 8
 particles  capacity 12000, flow 0.9
 keyframes  2, 3.5, 5.62, 7, 9.03, 11.5
 
-effect waterfall_fx = "waterfall.nvfx", swirl 0
+# The falling water's detail layer in two passes a frame (study O, docs/REPORT.md §16): with one, its pattern was laid
+# down once per frame's fall and stacked into horizontal bands.
+effect waterfall_fx = "waterfall.nvfx", swirl 0, passes 2
 effect cloud = "cloud.nvfx"
-effect rainshaft_fx = "rainshaft.nvfx", swirl 0
+effect rainshaft_fx = "rainshaft.nvfx", swirl 0, passes 2
 
 look storm = shader, emission 0, soot_density 3, soot_albedo 0.45, sky 0.25, shadow 0.35, scene_light 1.2, relief 2.5,
              tint (0.62, 0.66, 0.78)
