@@ -154,10 +154,10 @@ NVFX_API nvfx_status nvfx_instance_set_handoff(nvfx_instance* instance, int fram
  * half-size frame leaves empty stay exactly transparent.
  * Experimental: LEARNED did not pass its rule (study P): at 512 px it costs 0.45 to 0.59 of drawing at full size (more
  * than the 0.55 allowed for two of six effects; provisional, a busy machine) and against the full-size frames it was
- * not better than BILINEAR on PSNR, SSIM and fine detail together (on validation; the test: docs/STUDY_P.md §6). The
- * half-size instance alone costs 0.29 to 0.34 of a full-size one at 512 px and is as close to the simulator's frames as
- * the full-size one: an engine gets most of the saving by creating the instance at half size and letting its GPU sample
- * it larger.
+ * not better than BILINEAR on PSNR, SSIM and fine detail together (on the held-out test, docs/STUDY_P.md §6). The
+ * half-size instance alone costs 0.29 to 0.34 of a full-size one at 512 px and is within the null's margins of the
+ * full-size one against the simulator's frames: an engine gets most of the saving by creating the instance at half size
+ * and letting its GPU sample it larger.
  * Errors: NVFX_ERROR_ARGUMENT (not a rollout effect, an unknown mode, LEARNED with no upscaler attached),
  * NVFX_ERROR_UNSUPPORTED (a size that is not a multiple of 64). */
 typedef enum nvfx_upscale { NVFX_UPSCALE_OFF = 0, NVFX_UPSCALE_BILINEAR = 1, NVFX_UPSCALE_LEARNED = 2 } nvfx_upscale;

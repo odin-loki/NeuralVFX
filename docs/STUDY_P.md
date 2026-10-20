@@ -1,50 +1,24 @@
 # Study P: large effects drawn at half size and upscaled
 
-Status: **paused** (15 October 2026; §0). Audience: dev, research, the owner. The design and the plan (§1 to §4) are
-committed before any validation or test number; the rule's numbers (§4.5) follow the null probe and validation and are
-committed before the test, which runs once. **The test has not run; its seeds (3,800,000 on) are unspent.**
+Status: **done** (20 October 2026). Audience: dev, research, the owner. The design and the plan (§1 to §4.4, commit
+`0108862`) were committed before any validation or test number; the rule's numbers (§4.5: the margins from the null
+probe, the choice, the number of test settings; commit `1dcf55e`, with the mushroom's note in `858f301`) before the
+test, which ran once (§6).
 
-## 0. Status: paused
+**In short.** Drawing a large effect at half size and bringing it back with the small learned 2x and seeded
+micro-detail **did not pass its rule**: on 20 held-out settings at 512 px it beat the bilinear 2x against native on
+PSNR, SSIM and the high band together for **none of the six effects** (it was a little closer than bilinear on PSNR for
+three, by +0.09 to +0.11 dB, further for two; its high band never closer to native's), and it cost at most 0.55 of native
+for **four** of them (0.45 to 0.59; five needed; a busy machine). Against the simulator's frames it was within the null's
+margins of native for all six. What pays is drawing at half size itself: the half-size instance costs **0.29 to 0.34 of
+native at 512 px**, and with the bilinear 2x (free on a GPU) it is within the null's margins of native against the
+simulator's frames on every measure for all six effects at 512 px, and closer than native on tracking and the spectrum. What it loses is native's finest
+filaments, which native's detail layer draws at 512 px and which neither a 2x of the half-size frame nor the simulator
+(at its 128 cells) has. **The opt-in path ships, labelled experimental**: `nvfx_instance_set_upscale` with
+`NVFX_UPSCALE_BILINEAR` (no file) or `NVFX_UPSCALE_LEARNED` (an attached `.nvfxup`), NVFX_VERSION 7; ENGINES.md §5.
 
-Paused when the owner's weekly usage ran low. Where it stands:
-
-- **Done**: the design (§1 to §3), the runtime path (`nvfx_effect_attach_upscaler`, `nvfx_instance_set_upscale`,
-  NVFX_VERSION 7, `tests/test_upscale.cpp`: 11 tests, frozen AVX2 float frames), the study tool, the six effects frozen
-  (launch for cloud, §3.1), training tiles, the candidates trained (one shared, one per effect, 8, 8, 1).
-- **Found** (§2): the render size enters only the detail layer and the renderer; the fine fields never feed back into
-  the coarse state, so N and the half-size instance share the macro motion to the bit (checked on all six). But the
-  half-size detail layer draws its own fine detail (its picture is 25 to 44 dB from N's averaged), so against N on the
-  same seed a learned 2x gains little over bilinear (+0.07 dB on held-out training tiles for the shared net; +0.06 to
-  +0.55 dB per effect), and micro-detail noise trades PSNR and SSIM for high-band energy. On one dev setting at 512 px
-  the teacher's frames (128 cells drawn at 512) have about a tenth of N's high-band power, so B is closer to them than
-  N. Cost probe (busy machine, 8 rounds): L at 0.45 to 0.56 of N at 512 px, 0.51 to 0.64 at 256 px.
-- **The rule**: its form (§4.4) is committed (commit 0108862); its numbers (§4.5: margins, the choice, the number of
-  test settings) are **not**, because the null probe has not finished.
-- **Still running when paused** (left alone): `jobs/train_calib.sh` (calibrating the candidates' micro-detail gain and
-  rate on the dev split, in place in `nets/`) and `jobs/probe.sh` (the null probe on validation: N, N with fresh seeds,
-  B and the real runs; rows to `results/experiments/upscale/p_eval_val.csv` in the worktree, not committed while being
-  written). Their logs end with `logs/train_calib.done` and `logs/probe.done`.
-- **Data** under `/root/nvfx-data/p_upscale` (about 0.4 GB): `models/` (the six frozen effects), `tiles/` (training
-  tiles, 393 MB, scratch: delete when the study ends), `nets/` (`cand_shared.nvfxup`, `cand_<effect>.nvfxup`, and
-  development nets `dev_*`, `arch_*`, `hf_*`, `s512_*`, `*_881`), `cache/` (the real runs pooled per setting), `logs/`,
-  `jobs/`, `bin/nvfx_study_p_v1` (the binary the probe runs), `scratch/`.
-
-**To resume** (from the worktree, `NEURALVFX_DATA=/root/nvfx-data`, `P="nice -n 10 build/nvfx_study_p"`):
-
-```sh
-cat /root/nvfx-data/p_upscale/logs/calib_cand_*.log /root/nvfx-data/p_upscale/logs/probe.log   # finished? (*.done)
-# if a job died, rerun it: both resume (training and calibration rewrite their nets; eval skips finished settings)
-/root/nvfx-data/p_upscale/jobs/train_calib.sh      # or only its calib lines
-/root/nvfx-data/p_upscale/jobs/probe.sh
-$P margins                                         # the margins from N and the null alone: p_margins.csv
-$P eval --split val --cands shared=cand_shared,effect=cand_{effect} --threads 2   # validation of the candidates
-$P choose                                          # the choice and the number of test settings: p_choice.txt, p_power.csv
-# write §4.5 (margins, choice, settings), commit and push, then once:
-$P eval --split test --settings N --cands chosen=cand_shared   # or cand_{effect}; refuses a second run
-$P decide --split test && $P cost --net cand_shared --rounds 30 --frames 20
-$P video --effect explosion --net cand_shared --out videos/upscale_explosion.mp4 --size 512
-```
-
+The fine fields never feed back into the coarse state, so a half-size instance shares the native one's motion to the
+bit (§2): the comparison against native on the same seed is a paired one.
 
 ## 1. The question
 
@@ -358,7 +332,50 @@ their margins).
 
 ## 6. The test (once)
 
-TEST
+Study B's 10 held-out settings and 10 more drawn the same way (`test_settings(20)`), seeds 3,800,000 (real), 3,810,000
+(plays) and 3,830,000 (tracking), 4 plays and 2 tracking runs per setting, the shared net frozen (`4043e2c7...`), run once
+in three processes of two effects (20 October 2026; markers under `p_upscale`), the mushroom the frozen one (§4.5)
+([p_eval_test.csv](../results/experiments/upscale/p_eval_test.csv),
+[p_decide_test.txt](../results/experiments/upscale/p_decide_test.txt),
+[p_decide_test.csv](../results/experiments/upscale/p_decide_test.csv)).
+
+**Condition 1, L against B on (a) and the high band, at 512 px: 0 of 6** (L minus B, paired over the 20 settings, 95%
+intervals; bold where L is better, interval clear of zero):
+
+| effect | active PSNR vs N (dB) | SSIM vs N | high band vs N (lower is better) | means: B, L PSNR (dB) |
+|---|---|---|---|---|
+| explosion | **+0.087 [+0.028, +0.140]** | -0.0001 [-0.0002, +0.0000] (tie) | +0.009 [-0.013, +0.028] (tie) | 40.49, 40.57 |
+| mushroom | **+0.107 [+0.093, +0.120]** | **+0.0001 [+0.0001, +0.0001]** | -0.001 [-0.040, +0.039] (tie) | 36.55, 36.66 |
+| wildfire | -0.045 [-0.090, -0.005] (worse) | -0.0003 [-0.0005, -0.0001] (worse) | +0.085 [+0.060, +0.113] (worse) | 42.29, 42.24 |
+| launch | +0.007 [-0.000, +0.016] (tie) | -0.0004 [-0.0005, -0.0002] (worse) | +0.075 [+0.059, +0.091] (worse) | 28.89, 28.90 |
+| smoke | **+0.085 [+0.082, +0.088]** | **+0.0010 [+0.0009, +0.0011]** | +0.002 [-0.019, +0.023] (tie) | 25.28, 25.37 |
+| waterfall | -0.016 [-0.020, -0.011] (worse) | -0.0004 [-0.0005, -0.0003] (worse) | +0.053 [+0.048, +0.059] (worse) | 30.52, 30.51 |
+
+The learned 2x is a little closer to N than the bilinear 2x on three effects (+0.09 to +0.11 dB) and further on two, and
+**its high band is never closer to N's than B's**: on the wildfire, launch and the waterfall it has less of N's fine
+energy than B has (its residual, trained for squared error, smooths where the half-size detail is not N's; at gain 0.10
+the micro-detail does not make it up), on the other three it ties.
+
+**Condition 2, L against N on the real frames, at 512 px: 6 of 6** within every margin. L is nearer the teacher's frames
+than N on tracking at 1 s (+0.08 to +0.53 dB, every interval above zero), the detail spectrum (0.11 to 0.46 nearer) and
+the high band (0.08 to 0.58 nearer), and moves more like the teacher (|ln motion ratio| 0.09 to 0.31 smaller for the
+wildfire, launch, smoke and the waterfall); the mean frame is within 0.04 dB of N's. As §5 says, that is because L, like
+B, carries less of the fine detail N's detail layer draws at 512 px, which the teacher (128 cells drawn at 512) does not
+have.
+
+**Condition 3, cost: 4 of 6** (§7).
+
+**So by its rule the learned 2x is not adopted**: condition 1 holds for none of the six effects, condition 3 for four
+(five needed); only condition 2 holds.
+
+**At 256 px** (reported the same way, not deciding): condition 1 holds for 1 of 6 (the mushroom: +0.112 dB, +0.0005 SSIM,
+high band -0.071 [-0.118, -0.023]); PSNR is better for five (+0.02 to +0.19 dB) and a tie for the waterfall, SSIM better
+for three, the high band worse for the wildfire, launch and the waterfall. Condition 2 holds for 4 of 6: the wildfire's
+and the waterfall's |ln motion ratio| intervals reach past their margins (-0.005 [-0.045, +0.038] against 0.031, -0.031
+[-0.133, +0.070] against 0.047). Condition 3: L costs 0.46 to 0.70 of N (§7), at most 0.55 for 2 of 6.
+
+**B against N** (beside the rule): on the test as on validation, B is within N's margins on every (b) measure for all six
+effects at 512 px (for 4 of 6 at 256 px), nearer the teacher than N on tracking (+0.10 to +0.54 dB) and the spectrum.
 
 ## 7. Cost (provisional: a busy machine)
 
@@ -387,10 +404,33 @@ committed, on a quiet machine ([p_cost_per_effect.txt](../results/experiments/up
 same: 0.477 to 0.595 at 512 px, 4 of 6 at or under 0.55 (the explosion 0.548, the mushroom, smoke and the waterfall).
 
 **What drawing at half size saves by itself**: the half-size instance costs 0.29 to 0.34 of N at 512 px and 0.34 to
-0.43 at 256 px (the coarse step, about 0.3 ms, does not shrink); the CPU's bilinear 2x adds 0.05 to 0.09 of N, nothing
+0.43 at 256 px (the coarse step, about 0.3 ms, does not shrink); the CPU's bilinear 2x adds 0.04 to 0.08 of N, nothing
 on a GPU. At 256 px L costs 0.46 to 0.70 of N.
 
-## 5. Reproduce
+## 8. What it means
+
+- **For an engine: draw large effects at half size and let the GPU upscale.** The half-size instance costs about a third
+  of native at 512 px (0.29 to 0.34; 0.34 to 0.43 at 256 px, where the fixed coarse step weighs more), and against the
+  simulator it plays as well as native or better on every measure studied. It is softer than native in the finest
+  filaments; whether a game needs those at the size it draws the effect is a judgement by eye (the videos: videos/README.md §9b).
+  Creating the instance at half size and drawing its texture at full size needs no new call; `NVFX_UPSCALE_BILINEAR`
+  does the same on the CPU for engines that want the full-size bytes (0.04 to 0.08 of native more).
+- **The learned 2x does not earn its cost.** Native's finest detail is not in the half-size frame, not even blurred: the
+  half-size detail layer draws its own (§2), so a 2x trained for squared error can only sharpen a little (+0.07 dB over
+  bilinear for the shared net on training tiles, up to +0.55 dB per effect), and seeded noise adds high-band energy only
+  at the price of PSNR and SSIM. At the cost the plan could pay (128 multiply-adds per pixel, 0.55 to 0.97 ms of a busy
+  core at 512 px) it did not beat bilinear on all three of (a)'s measures for any effect. The per-effect nets did better
+  on PSNR and the high band (validation, §5) but lost SSIM for four effects, so the rule kept the shared one.
+- **The simulator's frames at 512 px are not a reference for fine detail.** Drawn from 128 cells, they have about a
+  seventeenth to a third of native's high-band power; native's detail at 512 px is the detail layer's own, checked against nothing.
+  A 512-cell teacher (0.18 s a frame here) would be needed to say whether native's filaments are right; it is a task for
+  the PC.
+- **What would make a learned upscaler worth it**: a target it can reach (a half-size instance whose fine fields are
+  native's averaged, e.g. by running the detail layer at full size and only the renderer at half size, or a renderer that
+  draws filaments from the coarse flow), and a cheaper kernel for effects that fill their frame (the wildfire and launch
+  skip the fewest empty blocks).
+
+## 9. Reproduce
 
 ```sh
 P="nvfx_study_p"                                  # data root $NEURALVFX_DATA; this study's files under p_upscale
@@ -401,4 +441,14 @@ $P train --effects explosion --out cand_explosion --steps 4000 --amp-from 2000 -
 $P calib --net cand_shared --settings 2 && $P calib --net cand_explosion --effects explosion --settings 3   # and each effect
 $P eval --split val --null --cands shared=cand_shared,effect=cand_{effect}   # the null probe and validation
 $P margins && $P choose                            # the margins, the choice, the number of test settings
+$P eval --split test --settings 20 --cands chosen=cand_shared --effects explosion,mushroom --tag rule_explosion_mushroom   # once
+#   (and wildfire,launch and smoke,waterfall; each writes its own rows and refuses a second run)
+$P decide --split test                             # the rule; B against N beside it
+$P cost --net cand_shared --rounds 30 --frames 20 --label rule
+$P video --effect explosion --net cand_shared --size 512 --controls 0.85,0.5,0.6 --seed 3900301 --crop 30,90,170 --out upscale_explosion.mp4
 ```
+
+The six models are the files frozen in [p_models.csv](../results/experiments/upscale/p_models.csv) (the data root's
+`p_upscale/models`), the candidates `p_upscale/nets/cand_*.nvfxup`; the training tiles and the real runs' cache were
+deleted after use (they are made again by `tiles` and by `eval`). The waterfall plays as its file says, one detail pass
+a frame; study O's `passes 2` is the library's choice in its effect lines, not in the file.
