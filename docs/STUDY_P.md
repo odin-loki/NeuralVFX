@@ -84,9 +84,9 @@ mean of N given the half-size frame is close to the bilinear 2x, and any detail 
 
 ### 3.1 The effects
 
-Six large ones from the 21 shipped models, as the library ships them now, copied to the data root's `p_upscale/models`
-and frozen by SHA-256 in [p_models.csv](../results/experiments/upscale/p_models.csv): **explosion** (study M3's),
-**mushroom**, **wildfire**, **launch**, **smoke** and **waterfall**.
+Six large ones from the 21 models the library shipped when the study began (before study O and round 9), copied to
+the data root's `p_upscale/models` and frozen by SHA-256 in [p_models.csv](../results/experiments/upscale/p_models.csv):
+**explosion** (study M3's), **mushroom**, **wildfire**, **launch**, **smoke** and **waterfall**.
 
 **One change from the suggested set: launch instead of cloud.** How much of its frame each shipped effect fills, at 8
 training settings, 128 px ([p_coverage.txt](../results/experiments/upscale/p_coverage.txt), `nvfx_study_p info`):
