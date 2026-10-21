@@ -9,3 +9,8 @@ smokering,abs_ln_motion_ratio,0.021187
 smokering,coverage_l1,0.000282
 smokering,emission_l1,0.000000
 smokering,mean_frame_psnr,44.117418
+dustexplosion,spectrum_l1,0.020312
+dustexplosion,abs_ln_motion_ratio,0.020333
+dustexplosion,coverage_l1,0.002704
+dustexplosion,emission_l1,0.000235
+dustexplosion,mean_frame_psnr,32.956139

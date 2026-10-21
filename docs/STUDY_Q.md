@@ -32,7 +32,7 @@ took it over from the jobs it left running (the data root's `q_fix/jobs/*.sh`, t
 | crown and window fires' streaks | **done by eye** (§5.1) | detail settings, frozen hashes, videos (78ae21b, 47b2b0f) | - |
 | heavy gas | **done by eye** (§5.1) | `soften 0.1` | its start points not tried (§9) |
 | smoke ring | **stopped at validation** | N = 40 (ca955b9); `rf` meets no rule: its motion's interval past its margin (§4.7) | kept; nothing more |
-| dust explosion's renderer | validation | margins (8572674); N = 10 (§4.6) | `rf` on validation (`val.sh`); then the choice, the freeze, the test |
+| dust explosion's renderer | **the test** | margins (8572674); N = 10 (§4.6); `rf` chosen on validation and frozen (§4.7) | the test, once (`test.sh`) |
 | candle | **nothing changed** (§3.7) | the diagnosis | - |
 | mushroom's cap | **left** (§3.7) | the diagnosis | - |
 
@@ -377,6 +377,17 @@ interval lies past its margin (+0.02). The probe showed the same loss at half th
 the refit renderer draws the ring's smoke with less change from frame to frame than the current one. By the rule the ring
 stops at validation and keeps its model; its first frame stays the renderer's weak part, and its looks (which take the
 fields, not the renderer) keep the by-eye fix of §5.1.
+
+**The dust explosion (10 settings): `rf` meets the rule and is chosen.** It is better on its first target, the first
+frame **+3.46 dB [+3.20, +3.73]** (21.9 → 25.4 dB), and at 1 s (+0.09 [+0.05, +0.12]) and on detail (-0.004 [-0.007,
+-0.001]); its mean frame ties (+0.03 [-0.01, +0.06]); at 2 s it is a little worse (-0.04 [-0.07, -0.01], a fifth of its
+margin), its motion error too (+0.004 [+0.001, +0.006], a ninth of its margin), coverage and emission tie. Every interval
+lies within its margin. By study M's strict reading two intervals lie wholly on the worse side (tracking at 2 s and the
+motion), by study K's margins none is outside: reported, not deciding.
+
+**Frozen** before its test ([q_frozen.csv](../results/experiments/q_fix/q_frozen.csv)): the data root's
+`q_fix/models/dustexplosion.nvfx` (read-only; 301,443 bytes, SHA-256
+`a0f273ea278b3a60f0ea4e96db5177258faf0fcd21ffa020ac2ca65d78bed520`), validated and tested by `nvfx_ordered_q3`.
 
 ## 5. Fixes with no model change
 
