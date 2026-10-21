@@ -34,7 +34,10 @@ avalanche's diagnosis) and one `pipeline.sh` per effect (margins committed, cand
 binary run writes its tables to `q2_fix/res/<effect>/` and `merge.sh` gathers them into
 `results/experiments/q2_fix`; `commit.sh` commits only that folder and pushes. The avalanche's candidates' probe also
 waits for `jobs/go_probe_avalanche`, made by hand after its diagnosis (§3). `freeze.sh` and `test.sh` are run by hand
-after validation. The order (§4.6): build, the candidates and the
+after validation. **Disk** (the coordinator's limit, 21 October): study Q2's new data (`q2_fix` and the worktree's
+build) stays under 1.5 GB and `/` keeps 1 GB free; every data-making step first runs `check_disk` (common.sh), which
+waits while either fails and logs `PAUSED` to `q2_fix/logs/disk.log`; each effect's probe, validation and test caches
+(`q2_fix/vt`) are deleted when its step is done (the tables keep the numbers). The order (§4.6): build, the candidates and the
 null probes; each effect's margins committed and pushed (`jobs/margins_<effect>.committed`) before its candidates are
 played on the probe; the rule's numbers (`q2_rule.csv`) committed and pushed before validation; the chosen file frozen
 (`q2_frozen.csv`) and pushed before its test, which runs once (`q2_fix/test_<effect>.done`).
