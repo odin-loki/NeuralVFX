@@ -3898,3 +3898,8 @@ sky, no wet ground and no trees for the Beaufort forces 5 to 9 (WEATHER.md §7).
 they cost without it; no allocation per frame (`nvfx_alloc_test`: every regime, every layer it drives, scripted and
 through the C API). The day scene's median frame: 76 ms on 2 threads of the same busy machine (provisional; the cloud,
 fog, fire and smoke modules and the picture at 1280 x 720, not the director).
+
+**Checks** (main at c846c80, merged: nothing new on it): the full build with warnings as errors; the full ctest, 518 of
+518 (main's 488, the 28 weather tests, the day scene's frozen keyframes and its script check), none skipped;
+`nvfx_alloc_test` (no allocation per frame, the weather director's scenes included); `nvfx_gallery --check
+--require-models` (214 effects, all played, 0 failed); the Godot test (0 failures).

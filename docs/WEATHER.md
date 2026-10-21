@@ -440,6 +440,9 @@ And in ctest: `neuralfx.ScriptedWeatherDayFrozen` (the scene's eight keyframes a
 `results/experiments/weather_frozen.csv`, float on the AVX2 build as the other frozen tests; skipped, exit 77, without the
 library's models) and `neuralfx.SceneScriptChecks.weather_day`.
 
+Checked before the branch's last push (main at c846c80): the full ctest, 518 of 518, none skipped; `nvfx_alloc_test`;
+`nvfx_gallery --check --require-models` (214 of 214 played); the Godot test (0 failures).
+
 ## 9. Limits
 
 - **It is a director, not a weather model.** Nothing is simulated: no cloud physics, no fronts, no terrain, no diurnal
