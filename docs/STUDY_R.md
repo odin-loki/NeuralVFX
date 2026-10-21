@@ -187,6 +187,20 @@ What it says, plainly:
   laboratory plumes are still on their way to self-similarity (Carazzo et al.). Some of the departure is that; the
   momentum budget is not: it is wrong at every height.
 
+**The turbulence control spans the measured band.** At intensity 0.5 (4 seeds each, the same heights):
+
+| turbulence | top-hat alpha | velocity's exponent | buoyancy's exponent | F's exponent | momentum over buoyancy | W constant (MTT's) |
+|---:|---|---|---|---|---|---|
+| 0 | 0.110 [0.099, 0.120] | -0.53 [-0.64, -0.43] | -1.62 [-1.69, -1.56] | -0.02 [-0.06, +0.02] | 0.85 [0.81, 0.89] | 3.48 (4.77) |
+| 0.5 | 0.149 [0.133, 0.173] | -0.45 [-0.51, -0.37] | -1.51 [-1.62, -1.43] | +0.02 [-0.03, +0.08] | 0.78 [0.74, 0.81] | 2.67 (3.91) |
+| 1 | 0.164 [0.153, 0.175] | -0.37 [-0.42, -0.30] | -1.74 [-1.83, -1.67] | -0.03 [-0.05, -0.02] | 0.72 [0.69, 0.74] | 2.32 (3.66) |
+
+The control's confinement and curl noise set the entrainment: alpha runs from 0.110 (inside the brief's 0.08 to 0.12
+and the compiled band's lower end) to 0.164 (just above the compiled band's 0.16). The stronger the turbulence, the more
+momentum is lost (0.85 to 0.72) and the slower the plume for its flux; at turbulence 1 the buoyancy flux also falls a
+little with height (-0.03, the interval clear of 0: the curl noise's swirl carries some heat out through the box's
+sides). Turbulence 0 is the most MTT-like in its constants and buoyancy law, though its velocity falls fastest.
+
 ### 1.5 Where the box matters
 
 The study's box (64 x 96 x 64) against one two thirds taller (64 x 160 x 64) and one half as wide again (96 x 96 x 96,
@@ -227,6 +241,18 @@ of the box by 40 cells downwind, which flattens the fitted path (0.54). Measured
 of U the coefficient comes to 1.9 and 2.1, nearer Briggs's 1.6. Making the wind a moving ambient (an inflow boundary,
 wind in the air as well as on the smoke) would change the learned models' open edges (study N2's ambient air is still)
 and every 3D effect; it is not done here.
+
+### 1.7 The teacher, in short
+
+`smoke_r` is a plume as Morton, Taylor and Turner describe one in what conserves and how it spreads: its buoyancy flux
+is the same at every height, it widens linearly at a top-hat alpha of 0.11 to 0.16 across its turbulence control (the
+measured band for pure plumes is 0.10 to 0.16), its centreline velocity and buoyancy fall within about 0.1 of MTT's
+exponents, and its velocity scales with the source's flux about as MTT says. It falls short in one clear way: **it is
+about a third too slow for its buoyancy flux**, because the solver loses a fifth of the momentum the buoyancy gives (the
+likeliest cause is numerical dissipation; the less dissipative step tried was unstable). The box is short (2 to 6 source
+diameters of plume), trustworthy to about 85 cells, and its sides narrow the plume by about 5%. **Its wind is not a
+crossflow** (a drag on the smoke through still air), so the wind-bent plume does not follow Briggs's law. This is the
+teacher the learned smoke below copies; it is a much better smoke than study N's, and still our own solver.
 
 ## 2. The learned smoke: design and rule (written and committed before validation)
 
