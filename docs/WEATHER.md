@@ -410,7 +410,9 @@ work as relations should (the hills fade at the visibility the rain leaves). Wha
 - the ground does not get wet, puddle or darken in the rain, and nothing draws trees for the Beaufort forces 5 to 9;
 - the flash lights the scene evenly (the frame's flash): there is no shadow or direction to it;
 - the rainbow is the procedural one, placed by the script, not by the sun's direction; nothing in the scene says where the
-  sun is.
+  sun is;
+- the video (`videos/scene_weather_day.mp4`: 960 x 540, two passes at 900 kbit/s to stay under 5 MB) loses most of the
+  rain's finest streaks, which are thinner than a pixel; the keyframes above show the rain as drawn.
 
 ## 8. Tests
 
