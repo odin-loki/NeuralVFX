@@ -4087,3 +4087,35 @@ errors; the full ctest, 489 of 489 (main's 488 and `VolumeDetail`), none skipped
 frame; the volume on 1 and 3 threads, 0 allocations in 84 frames each); `nvfx_gallery --check --require-models` (213
 effects, 213 played, 0 failed); the Godot test (`engines/godot/test.sh`: the fireball and the library stage, 0 failures
 each, both frames the references' pixels).
+
+## 20. Study R: a validated 3D smoke
+
+**Status: in progress** (21 October 2026; branch `study-smoke3d`). The full write-up is [STUDY_R.md](STUDY_R.md). Seeds:
+29,000,000 to 29,999,999. Code: `Effect::smoke_r` and `Params::span`, `source_x`, `scalars` and `velocity` in
+`src/sim3d/sim3d.cpp`; `render3d::optics_for` (warm smoke, also used by the volume runtime); `tools/plume3d.cpp`
+(`nvfx_3d plume`, `plumefit`, `plumevideo`); study R's seeds, settings, calibrated edge check (`edgecal`), choice and
+`check` in `tools/nvfx_3d.cpp`. Tests: `tests/test_3d.cpp` (5 new) and `neuralfx.Smoke3dShippedModel` (data). No C
+call or public struct changed (`NVFX_VERSION` 7).
+
+**The teacher, checked against plume physics first.** Study N's smoke preset was clearly wrong as a plume: its buoyancy
+flux fell threefold up the box (it cooled its gas, faded its soot and damped every velocity), and without those sinks
+its advection made heat and soot (the flux grew 75%). `smoke_r` removes the sinks and carries heat and soot in flux
+form, which conserves them. Measured against Morton, Taylor and Turner (1956) in still air (5 seeds of 16 s at each of
+three source strengths, heights 24 to 92 cells, intervals by resampling the seeds):
+
+| | intensity 0.2 | 0.5 | 0.8 | MTT / measured |
+|---|---|---|---|---|
+| buoyancy flux's exponent with height | +0.03 [-0.03, +0.10] | +0.02 [-0.03, +0.08] | -0.00 [-0.06, +0.05] | 0 |
+| top-hat alpha | 0.151 [0.139, 0.162] | 0.149 [0.133, 0.173] | 0.141 [0.129, 0.157] | 0.10 to 0.16 (Carazzo et al. 2006) |
+| centreline velocity's exponent | -0.36 [-0.40, -0.32] | -0.45 [-0.51, -0.37] | -0.41 [-0.43, -0.39] | -1/3 |
+| centreline buoyancy's exponent | -1.58 [-1.71, -1.45] | -1.51 [-1.62, -1.42] | -1.67 [-1.74, -1.60] | -5/3 |
+| momentum gained over buoyancy | 0.78 | 0.78 | 0.79 | 1 |
+
+W (z - z0)^(1/3) scales as F^0.41 [0.33, 0.48] across the strengths (MTT 1/3). So the solver's plume conserves its
+buoyancy flux and spreads at the measured rate, its power laws hold to within about 0.1 in the exponents, and its
+velocity is about a third too slow for its flux: it gains only 0.78 of the momentum its buoyancy gives, most likely
+the semi-Lagrangian velocity step's numerical dissipation (a MacCormack velocity step, which would have helped, was
+unstable at this grid). The box's top matters only in its last 10 cells; its sides make the plume about 5% narrower and
+its centreline buoyancy 5 to 18% higher than in a box half as wide again. The wind-bent plume does not follow Briggs's
+two-thirds law (exponents 0.54 and 0.88, coefficients 4.3 and 5.3 against 1.6), because the solver's wind is a drag on
+smoke through still air: the plume moves at under half the wind's speed and leans rather than bends.
