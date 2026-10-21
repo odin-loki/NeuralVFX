@@ -34,7 +34,7 @@ took it over from the jobs it left running (the data root's `q_fix/jobs/*.sh`, t
 | smoke ring | **stopped at validation** | N = 40 (ca955b9); `rf` meets no rule: its motion's interval past its margin (§4.7) | kept; nothing more |
 | dust explosion's renderer | **replaced** (§4.8, §6) | `rf` passed its test: the first frame +2.85 dB [+2.54, +3.16], every measure within its margin; links, models/, frozen rows, two videos | - |
 | candle | **nothing changed** (§3.7) | the diagnosis | - |
-| mushroom's cap | **left** (§3.7); its renderer's first second taken up (§4.1) | the diagnosis; `rf` added to the plan before its probe | `rf` built, the null probe; then its margins, the probe, N, validation |
+| mushroom's cap | **left** (§3.7); its renderer's first second taken up (§4.1) | `rf` added to the plan before its probe; margins (a447d13); N = 60, the cap (§4.6) | `rf` on validation (`val.sh`); then the choice, the freeze, the test |
 
 ## 1. Bottom line
 
@@ -417,6 +417,20 @@ an SD of 0.71 to 0.81 dB between settings: if truly unchanged it would pass its 
 are as measured meets the rule's form with probability 0.99 (`ms`), 0.62 (`u30`), 0.60 (`ms_u30`) and 0.45 (`u60`)
 (q_power.csv), stated here before validation. (The probe's rows for `u60` went into git with the dust explosion's
 replacement, 9d77cbf, before this; nothing of the avalanche's validation had run.)
+
+**The mushroom** (added to the plan before its probe, §4.1). The null moves its spectrum distance at a setting by 0.024
+(RMS), its motion by 5.0%, its coverage distance by 0.0037 and its mean frame by 1.07 dB: margins tracking -0.20 dB at
+each horizon, spectrum **+0.0236**, |ln motion ratio| **+0.0502**, coverage **+0.0037**, emission **+0.0001** (study
+K's), mean frame **-1.07 dB**. `rf` (SHA-256 `c1cd25a276bd3b2a9e0578e631ed85ad9cd9286d5625d30b2c987b2cd9004209`) on the
+probe: the first frame **+2.16 dB [+2.06, +2.27]** (15.85 → 18.01 dB; better, a target), tracking at 1 s +0.06 [+0.03,
++0.10], the spectrum distance -0.042 [-0.070, -0.015] (0.171 → 0.128), the motion error -0.066 [-0.068, -0.063] (the
+motion ratio 0.82 → 0.88) and emission better; the mean frame -0.05 [-0.07, -0.04], tracking at 2 s -0.03 [-0.05, -0.01]
+and coverage +0.0005 [+0.0003, +0.0006] worse, each a twentieth of its margin or less: it meets the rule's form. The
+number of settings: the spectrum distance, which `rf` improves but which is not its target, spreads widely between
+settings (an SD of 0.090: at a few settings the new renderer's detail is much closer to real, at others a little
+further); if truly unchanged it would pass its margin with probability 0.53 at 60 settings by resampling and needs 191
+in the normal form. The cap binds: **N = 60**, at which the rule's form passes with probability 0.53 if every held
+measure is truly unchanged (q_power.csv), stated here before validation.
 
 ### 4.7 Validation (the choice)
 
