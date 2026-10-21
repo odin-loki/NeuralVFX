@@ -126,6 +126,12 @@ and the Godot test; details in its doc and REPORT section):
   frames (its renderer) and a weak current that runs 25% fast; sea spray's detail (tufts, not thin plumes). To try: a
   field-shader look that draws heat as white vapour (steam and fine spray are heat, which a look draws as light).
 
+- **Study R2, the 3D smoke again** (`study-smoke3d-r2`, docs/STUDY_R2.md, REPORT §24; seeds 34.0 to 34.9 million):
+  the teacher's momentum deficit found (vorticity confinement pushing the plume down, and the semi-Lagrangian
+  velocity step's non-conservation) and fixed (`smoke_r2`: dM/dz over B 1.088, from `smoke_r`'s 0.80); the learned
+  smoke retrained with a spread loss and an edge loss under a rule with margins from the teacher's own spread, then
+  tested once. Under way.
+
 **Next:**
 - **Study Q's leftovers** (STUDY_Q.md §9): the avalanche's start points (the mean state with fine fields regrown from
   the moved coarse state), the geyser's tracking with its first frame kept, the haboob's and the ring's first frames
