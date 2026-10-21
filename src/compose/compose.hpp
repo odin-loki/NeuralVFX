@@ -218,8 +218,8 @@ class Module {
   // emission exactly; a learned look's picture is split by its model: light-giving models (fire, explosion, magic, jet,
   // orb, wildfire, coals, mushroom, lava, candle, crownfire, windowfire, dustexplosion) give all of it as emission and
   // reflect nothing, the others (smoke, steam,
-  // fog, dust, cloud, vortex, the eruption's ash, the avalanche's snow, smokering, heavygas) reflect all of it (its learned
-  // shading kept, as baked light) and give none. image() is the same with
+  // fog, dust, cloud, vortex, the eruption's ash, the avalanche's snow, smokering, heavygas, geyser, haboob, seaspray)
+  // reflect all of it (its learned shading kept, as baked light) and give none. image() is the same with
   // layers or without.
   void use_layers(bool on);
   bool layers() const { return layers_; }

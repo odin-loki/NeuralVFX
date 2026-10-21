@@ -1,16 +1,16 @@
 # The effect library
 
-A catalogue of 224 named, ready-to-use effects that a game lists, places and drives without training anything: a
+A catalogue of 234 named, ready-to-use effects that a game lists, places and drives without training anything: a
 campfire, a grenade, a steam vent, a portal, a lightning strike, ground fog, a dust impact, a flamethrower, a plasma
 orb, a dust devil, a rocket's smoke trail, rain, a wall of fire, a forge, a nuke, a rocket launch, a locomotive's
 chimney, an ink cloud, a waterfall, a fountain, a splash, a rain shaft, a lava flow, a volcano erupting, an avalanche,
-a candelabra, smoke rings, dry-ice fog, a forest's crown fire, a window fire, a mill's dust explosion. Each plays the
-thirty trained rollout models
+a candelabra, smoke rings, dry-ice fog, a forest's crown fire, a window fire, a mill's dust explosion, a geyser, a
+haboob, sea spray. Each plays the thirty-three trained rollout models
 (fire, smoke, explosion v2, steam and magic; fog, dust and cloud, [EFFECTS_ATMOSPHERE.md](EFFECTS_ATMOSPHERE.md); jet,
 orb and vortex, [EFFECTS_ENERGY.md](EFFECTS_ENERGY.md); wildfire, coals and mushroom, [EFFECTS_BLAZE.md](EFFECTS_BLAZE.md);
 launch, puffs and ink, [EFFECTS_FLOW.md](EFFECTS_FLOW.md); waterfall, fountain, splash and rainshaft,
 [EFFECTS_WATER.md](EFFECTS_WATER.md); lava, eruption and avalanche, [EFFECTS_EARTH.md](EFFECTS_EARTH.md); candle, smokering and
-heavygas, [EFFECTS_AIR.md](EFFECTS_AIR.md); crownfire, windowfire and dustexplosion, [EFFECTS_FIRE2.md](EFFECTS_FIRE2.md)) and the compositor's procedural elements (embers, sparks, shock fronts, scorch marks, flashes, lights, bolts, rings), at
+heavygas, [EFFECTS_AIR.md](EFFECTS_AIR.md); crownfire, windowfire and dustexplosion, [EFFECTS_FIRE2.md](EFFECTS_FIRE2.md); geyser, haboob and seaspray, [EFFECTS_ELEMENTS.md](EFFECTS_ELEMENTS.md)) and the compositor's procedural elements (embers, sparks, shock fronts, scorch marks, flashes, lights, bolts, rings), at
 a size, with parameters mapped onto the models' controls and looks. The 23 entries of the six newer models were added
 with the recipe of §6, in text; the only code they needed is a third anchor, for the jet's nozzle. The nine newest
 entries needed two features of the compositor: **trails** (`rocket_trail`, `vehicle_dust_wake`, `carried_torch`,
@@ -81,13 +81,15 @@ With the third round's 70 (§10: 20 weather, 23 combat, 14 magic, 13 fire, smoke
 procedural only) the catalogue holds **201** entries, 135 of them learned and 66 procedural only; with the twelve air
 entries (§1, Air; all learned, in the categories fire, smoke and gas, not in the table above), **213**, 147 of them learned;
 with the weather director (§1, Weather; learned, not in the table above either), **214**, 148 of them learned; with
-round 10's ten fire entries (§1, Fire, round 10; all learned, not in the table above), **224**, 158 of them learned.
+round 10's ten fire entries (§1, Fire, round 10; all learned, not in the table above), **224**, 158 of them learned;
+with the ten elements entries (§1, Elements; all learned, in the categories water and weather, not in the table
+above), **234**, 168 of them learned.
 
-**What is learned and what is not.** Only thirty things move by a trained model: fire, smoke, an explosion, steam,
+**What is learned and what is not.** Only thirty-three things move by a trained model: fire, smoke, an explosion, steam,
 magic, fog, dust, cloud, a jet, an orb, a vortex, a wildfire front, coals, a mushroom cloud, an engine's blast on the
 ground (launch), smoke in puffs, a plume with almost no buoyancy (ink), the bodies of a
 waterfall, a fountain, a splash and a rain shaft, lava, an eruption's ash column and an avalanche's powder cloud, and a
-candle's flame, a smoke ring and heavy gas, and a crown fire, a window fire and a dust explosion. Everything else in an entry is the
+candle's flame, a smoke ring and heavy gas, a crown fire, a window fire and a dust explosion, and a geyser's column, a haboob's dust front and sea spray. Everything else in an entry is the
 compositor's: particles (embers, sparks, debris), shock fronts, scorch marks, flashes, camera shakes, and the glows this
 library adds (lightning and electric arcs, rings, discs and motes of light, lamps; rain, snow, ash and leaves; water's random detail). Entries
 that use no model at all say *(procedural)* in their description. A trail's material is learned (it plays in the
@@ -526,6 +528,41 @@ float on AVX2, `ctest -R LibraryFire2KeyframesFrozen`). The three models are lin
 others (`ln -s ../../fx_fire2/models/d/{crownfire,windowfire,dustexplosion}.nvfx .`).
 
 ![The ten round-10 fire entries, each alone at its show moment](figures/library_sheet_fire2.png)
+### Elements (10, round 10: `library/elements.nvfxl`)
+
+The geyser model (a vent that simmers, steams and surges as its conduit's noise rises, then erupts in a white column of
+water and steam that holds, collapses back around the vent and leaves its steam drifting off; irregular, on its own
+time), the haboob model (a storm's cold outflow running right along the ground as a gravity current, a tall rolling head
+of dust with dimmer dust behind; once, 5 s) and the sea spray model (spray torn off breaking wave crests by the wind,
+blown to the right and falling back), [EFFECTS_ELEMENTS.md](EFFECTS_ELEMENTS.md): sea spray works by its test's rule, the
+haboob falls short of it (its average picture ties the nearest flipbook's) and the geyser is weak (it ties the coarse
+simulation at following a run at 1 s). The geyser and sea spray are drawn by their own learned renderers (their steam
+and fine spray are the solver's heat, which a field-shader look draws only as light), the haboobs by scene-lit dust
+looks (`haboob_dust`, `rust_dust`). Every module has `glow (0, 0, 0)`: their heat is steam and spray, not fire, and must
+not light the stage. None of the models draws its ground or sea: the geysers stand in the composer's seeded pools, the
+sea entries over its waves (a `pool` with a swell), and spray drops fly off the big geysers. The haboob entries fade
+out over their last 0.8 s, as the model's 5 s end. Seeds are 2,700,001 and up (a script takes seeds up to 2^24, so not
+the test's 27,000,000 and up); the geysers' seeds were chosen so that the conduit erupts at the show moment.
+
+| effect | what it is | plays | box, anchor | runs | parameters (default) | how it looks |
+|---|---|---|---|---|---|---|
+| `erupting_geyser` | A geyser: a vent that simmers and steams, surges, then erupts in a white column that holds, collapses back around the vent and leaves its steam drifting off; irregular, on its own time | geyser; spray drops onto a seeded pool | 420 x 760, base | loop | height (0.7), wind (0.5) | Fair: a tall white column by the show moment with green and magenta fringes at its crown, the drops falling back into the basin; between eruptions a faint wisp of steam. |
+| `hot_spring_geyser` | A small geyser in a hot spring: mostly steam rising off the pool, spurting a little now and then | geyser (low); seeded pool | 300 x 420, base | loop | height (0.2), wind (0.6) | Fair: a moderate white spurt over the pool and its steam; at times only a wisp. |
+| `geyser_in_wind` | A geyser in a strong wind: its column bent a little and its steam torn away downwind | geyser (windy); spray drops blown downwind | 560 x 640, base | loop | height (0.8), wind (0.9) | Fair: a white column with its drops blown to the right; the column itself hardly leans and the steam's plume is short. |
+| `haboob` | A storm's outflow rolling in along the ground as a towering wall of dust, its head churning, the air behind it dim; it runs to the right | haboob (one 256 px tile); look haboob_dust; blown sand | 1200 x 700, base | once, 6 s | strength (0.7), height (0.8) | Fair: a rolling ochre wall with curling billows and faint marbling, soft at its tile's top edge; it fades out at its end. |
+| `dust_wall_far` | A dust storm far off: a low brown wall rolling across the horizon, its top billowing | haboob; look haboob_dust | 900 x 300, base | once, 6 s | strength (0.5), height (0.5) | Fair: two billows rolling right, softer than the near wall. |
+| `low_sandstorm` | A sandstorm front: sand and dust streaming low along the ground, a short rolling head in front | haboob (height 0); look haboob_dust; blown sand | 800 x 260, base | once, 6 s | strength (0.8) | Fair: a low front with a short head and the sand racing along under it; its head is taller than a sandstorm's. |
+| `red_planet_dust_front` | A dust front on a red planet: a rust-coloured wall rolling over the plain | haboob (one 256 px tile); look rust_dust | 1000 x 600, base | once, 6 s | strength (0.6), height (0.9) | Fair: a tall rust-red wall with a big curling head. |
+| `sea_spray` | Sea spray in a gale: waves breaking, the wind tearing white spray off their crests and blowing it downwind, the drops falling back | seaspray (two tiles); the composer's waves | 900 x 300, base | loop | gale (0.6), waves (0.6) | Fair: white tufts along the sea that stream downwind and fall back in motion; blobbier than the simulator's thin plumes. |
+| `storm_surf` | Storm surf: big seas breaking, spray and spume streaming off every crest | seaspray at its strongest (two tiles); the composer's waves | 1000 x 380, base | loop | gale (1) | Fair: a line of white spray along the whole sea, lumpy. |
+| `whitecaps` | Whitecaps in a fresh wind: a few crests breaking here and there, a little spray blown off them | seaspray (light, two tiles); the composer's waves | 800 x 200, base | loop | gale (0.15) | Weak to fair: faint white flecks on the waves; they read in motion more than in a still. |
+
+In the gallery (`--video`, two threads of the shared machine, load 4 to 7 on its 4 cores), the elements entries took 23
+(`low_sandstorm`) to 51 ms (`storm_surf`) a frame with their stage's own picture (the stages 688 x 512 to 1368 x 1032;
+one run, provisional); every entry played with no allocation. The keyframes of `erupting_geyser`, `haboob` and
+`sea_spray` are frozen ([frozen_elements.csv](../results/library/frozen_elements.csv), float on AVX2, `ctest -R
+LibraryElementsKeyframesFrozen`). The elements models are linked into the models' folder with the others
+(`ln -s ../../fx_elements/models/d/{geyser,haboob,seaspray}.nvfx .`).
 
 ## 2. The format
 
@@ -685,7 +722,7 @@ error, spawns, no room, steal, stop, rooms freed, camera, clear, the same frames
 
 ## 4. The gallery
 
-The models' folder, `$NEURALVFX_DATA/library/models` by default, holds the thirty learned effects under the names
+The models' folder, `$NEURALVFX_DATA/library/models` by default, holds the thirty-three learned effects under the names
 `models.nvfxl` gives them: study M's fire ([REPORT.md](REPORT.md) §14, which replaced v2's), the v2 smoke, study
 M3's explosion and dust (v2's and round 5's with a mean state, [REPORT.md](REPORT.md) §14.9, which replaced them),
 study D's steam, round 5's fog, cloud and jet, and
@@ -695,8 +732,9 @@ vortex), and round 7's wildfire, coals and mushroom ([EFFECTS_BLAZE.md](EFFECTS_
 ([EFFECTS_WATER.md](EFFECTS_WATER.md)); the mushroom and the splash are study O's (a mean state, and for the mushroom a
 stepper fine-tuned on 30-frame windows; [REPORT.md](REPORT.md) §16.3, which replaced round 7's and round 8's), and
 round 9's lava, eruption and avalanche ([EFFECTS_EARTH.md](EFFECTS_EARTH.md)) and candle, smokering and heavygas
-([EFFECTS_AIR.md](EFFECTS_AIR.md)), and round 10's crownfire, windowfire and dustexplosion
-([EFFECTS_FIRE2.md](EFFECTS_FIRE2.md); declared in `library/fire2.nvfxl` itself). The
+([EFFECTS_AIR.md](EFFECTS_AIR.md)), round 10's crownfire, windowfire and dustexplosion
+([EFFECTS_FIRE2.md](EFFECTS_FIRE2.md); declared in `library/fire2.nvfxl` itself), and round 10's geyser, haboob and
+seaspray ([EFFECTS_ELEMENTS.md](EFFECTS_ELEMENTS.md)). The
 orb plays at float whatever the stage's precision (`precision float` on its `effect` line): study L's orb failed study
 K's int8 rule on its average picture ([REPORT.md](REPORT.md) §13.9). Links are enough:
 
@@ -714,6 +752,8 @@ ln -s ../../fx_water/models/d/waterfall.nvfx ../../fx_water/models/d/fountain.nv
 ln -s ../../fx_water/models/d/rainshaft.nvfx .
 ln -s ../../fx_earth/models/d/lava.nvfx ../../fx_earth/models/d/eruption.nvfx ../../fx_earth/models/d/avalanche.nvfx .
 ln -s ../../fx_air/models/d/candle.nvfx ../../fx_air/models/d/smokering.nvfx ../../fx_air/models/d/heavygas.nvfx .
+ln -s ../../fx_fire2/models/d/crownfire.nvfx ../../fx_fire2/models/d/windowfire.nvfx ../../fx_fire2/models/d/dustexplosion.nvfx .
+ln -s ../../fx_elements/models/d/geyser.nvfx ../../fx_elements/models/d/haboob.nvfx ../../fx_elements/models/d/seaspray.nvfx .
 ```
 
 **Study M3's explosion and dust** ([REPORT.md](REPORT.md) §14.9) carry a mean state: a module that gives controls of
@@ -762,7 +802,7 @@ Outputs go under `$NEURALVFX_DATA/library` (the sheet, the video, keyframes); on
 
 **Tests** (`ctest`): `neuralfx.LibraryCatalogueCheck` (no data: the catalogue and every procedural entry);
 `neuralfx.LibraryHostExample` (the C example's self-test); `neuralfx.LibraryCataloguePlays` (every entry, with the
-thirty models in `NEURALFX_MODELS_LIBRARY`, by default `$NEURALVFX_DATA/library/models`; skipped without them);
+thirty-three models in `NEURALFX_MODELS_LIBRARY`, by default `$NEURALVFX_DATA/library/models`; skipped without them);
 `neuralfx.LibraryKeyframesFrozen` (the keyframes of `campfire`, `blue_gas_flame`, `grenade`, `steam_vent`, `portal`,
 `lightning_strike`, `ground_fog`, `dust_impact`, `flamethrower`, `plasma_orb`, `dust_devil`, `wall_of_flames`,
 `distant_mushroom`, the water's and the earth's (`lava_flow`, `volcano_eruption`, `avalanche`), and two moving ones,

@@ -226,7 +226,7 @@ struct SimRecipe {
   RendererOptions renderer;
   std::function<void(const std::string&)> log;
 };
-SimRecipe recipe_for(sim::Effect e);  // fire, steam, magic, jet, orb, vortex, wildfire, coals, candle as above; smoke, fog, cloud, launch, puffs, ink, lava, eruption, heavygas, crownfire, windowfire keep 64-pixel fine fields; one-shot effects (explosion, dust, mushroom, avalanche, smokering, dustexplosion): 240 runs of their length (sim::one_shot_frames: 90 frames, the mushroom's and the avalanche's 150, a smoke ring's and a dust explosion's 120), 16 starts
+SimRecipe recipe_for(sim::Effect e);  // fire, steam, magic, jet, orb, vortex, wildfire, coals, candle as above; smoke, fog, cloud, launch, puffs, ink, lava, eruption, heavygas, crownfire, windowfire, geyser, seaspray keep 64-pixel fine fields; one-shot effects (explosion, dust, mushroom, avalanche, smokering, dustexplosion, haboob): 240 runs of their length (sim::one_shot_frames: 90 frames, the mushroom's, the avalanche's and the haboob's 150, a smoke ring's and a dust explosion's 120), 16 starts
 sim::Params recipe_run(const SimRecipe& r, std::uint64_t index);
 std::vector<Run> record_runs(const SimRecipe& r);
 Model recipe_model(const SimRecipe& r);  // hyperparameters, noise and detail settings for the effect, fresh weights

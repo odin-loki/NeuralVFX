@@ -452,6 +452,19 @@ r3::Model tiny_model(std::uint64_t seed = 3, int hidden = 8, r3::Edges edges = r
   return m;
 }
 
+TEST(Rollout3d, FinerCoarseStateMatchesTheDetailGrid) {
+  // study hres (STUDY_3D_HRES.md): 32 x 48 x 32 coarse with fine 2 still fills 64 x 96 x 64
+  r3::Hyper h;
+  h.rx = 32;
+  h.ry = 48;
+  h.rz = 32;
+  h.fine = 2;
+  EXPECT_EQ(h.fx(), 64);
+  EXPECT_EQ(h.fy(), 96);
+  EXPECT_EQ(h.fz(), 64);
+  EXPECT_EQ(h.cells(), 32 * 48 * 32);
+}
+
 TEST(Rollout3d, SaveLoadRoundTripsAsStorageRounds) {
   // study N's files (clamped edges) are version 1, as they were; ambient edges make version 2
   for (const r3::Edges e : {r3::Edges::clamp, r3::Edges::ambient}) {

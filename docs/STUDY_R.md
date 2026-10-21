@@ -406,6 +406,29 @@ the orbit video re-rendered); if it fails, the best candidate is shipped only as
 
 **Cost** (reported, not judged; provisional on the shared machine), as N2.
 
+## 6. Beside the study
+
+### 6.2 Study R and study hres
+
+The owner's study hres ([STUDY_3D_HRES.md](STUDY_3D_HRES.md), on main since this branch began) and study R change
+different things and share no data, seeds or files:
+- **hres changes the model**: a coarse state of 32 x 48 x 32 (fine 2, a stepper 32 wide, 8 memory channels) driving
+  the same 64 x 96 x 64 detail, trained with study N2's recipe; its fire is trained and shipped
+  (`models/3d/fire_hres.nvfx3`), not yet validated. **Study R changes the teacher**: N2's model unchanged in size
+  (16 x 24 x 16), trained on `smoke_r`, the smoke checked against plume theory first (§1), then validated and tested
+  once under a rule committed before validation.
+- **hres's smoke** (`tools/study_3d/hres_smoke.sh`, `hres_smoke_validate.sh`; STUDY_3D_HRES.md §6) retrains N2's smoke2
+  lineage at the finer grid on `--effect smoke`: **study N's preset, the teacher §1.2 found wrong as a plume** (its
+  buoyancy flux falls threefold up the box, because it cools, fades and damps). Its check is the edge check and a demo
+  video, with no held-out test. So the two smokes overlap in name only: hres's is a finer model of the old teacher, study
+  R's a validated teacher with N2's model.
+- Seeds: hres's smoke uses blocks from 9,610,000 to 9,867,999 (inside study N's range), its data root `hres_3d/smoke`; study R uses
+  29,000,000 to 29,999,999 and `r_smoke3d`. The merged `nvfx_3d` keeps both (`--study hres`, `--study r`; the merge
+  resolved study R's and hres's additions to the same switches side by side and changed nothing of hres's behaviour).
+- **The natural next step joins them**: hres's finer model trained on `smoke_r`. `--study hres --effect smoke_r` runs
+  today, but hres's seed blocks treat only `--effect smoke` as smoke (`hres_smoke()`), so such a run would take the
+  fire's seed blocks; it needs a seed block of its own and its own rule, and it is not done here.
+
 ## 7. Reproduce
 
 Data under `NEURALVFX_DATA/r_smoke3d` (default `/root/nvfx-data/r_smoke3d`); every step resumes from what it has
