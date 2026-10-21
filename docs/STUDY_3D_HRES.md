@@ -1,7 +1,7 @@
 # Study hres: finer coarse 3D fire (high-resolution state, same detail grid)
 
-Status: **protocol committed** (17 October 2026). Audience: dev, research, the owner. Validation and the test have not
-run.
+Status: **fire trained** (1750 iterations, October 2026); exported `.nvfx3` files are in
+`results/3d/hres/fire/models/`. Validation and the held-out test have not run. Audience: dev, research, the owner.
 
 **In short.** Stage 1 (study N) used a **16 x 24 x 16** coarse state with **fine = 4** to drive **64 x 96 x 64** detail.
 Study hres doubles the coarse resolution to **32 x 48 x 32** with **fine = 2**, the same detail volume, a **32-wide**
