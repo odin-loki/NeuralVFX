@@ -43,6 +43,7 @@ cache/
 *.pgm
 *.nfxclip
 *.nvfx
+!models/**/*.nvfx
 results/experiments/quick/
 
 # Godot: the extension and libnvfx copied into the demo project, and the editor's cache
