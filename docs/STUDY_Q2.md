@@ -22,8 +22,9 @@ in the trainer (`Rollout.RendererFineTuneKeepsItsScalesAndStartsFromItsWeights`)
 
 Planned (21 October 2026, 18:00 UTC). The plan and the rule's form (§4) are committed (c6e56e9); no number of the
 study exists yet. Heavy work waits for the quiet machine: another agent re-times everything (the data root's
-`quiet7/QUIET_DONE` marks its end; at the latest 20:40 UTC, three hours after this study began). Until then only
-reading, planning and the code (syntax-checked, not built) at `nice -n 19`. Every job below is already started
+`quiet7/QUIET_DONE` marks its end; the coordinator dropped the three-hour fallback at 19:05 UTC, since round 7's quiet
+timing repeats any block that sees foreign load: no CPU job of any size before the marker). Until then only reading,
+planning, docs and the code (syntax-checked, not built). Every job below is already started
 (`q2_fix/jobs/go.sh`, 18:00 UTC) and waits for the quiet machine itself.
 
 **How to pick it up.** Every job is a script in the data root's `q2_fix/jobs/` that skips what is done (a marker
