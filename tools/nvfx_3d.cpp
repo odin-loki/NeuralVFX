@@ -59,6 +59,7 @@
 
 namespace nfx::rt {
 void volume_conv3_avx2(int rx, int ry, int rz, const float* in, int ci, const float* W, const float* b, int co, float* out, int y0, int y1);
+std::unique_ptr<nfx::rollout3d::DetailKernel> make_volume_detail(const nfx::rollout3d::Model& m, const nfx::rollout3d::Workspace& ws, nvfx_isa isa);
 }  // namespace nfx::rt
 
 namespace fs = std::filesystem;
@@ -127,6 +128,9 @@ constexpr std::array<int, 3> kHorizons{8, 30, 60};
 constexpr int kEndlessWarm = 150, kEndlessFrames = 240;
 constexpr int kPic = 128;  // the four cameras' pictures for the measures
 constexpr float kPeakT = 1.5f, kPeakD = 0.2f;
+// study R's smoke: its source's heat is at most 0.45 and its soot 1.2 (STUDY_R.md §2.6)
+float peak_t() { return g_r ? 0.5f : kPeakT; }
+float peak_d() { return g_r ? 1.2f : kPeakD; }
 
 r3::Hyper study_hyper() {
   r3::Hyper h;
@@ -291,6 +295,14 @@ struct Fields {
 void fast_conv(r3::Workspace& ws) {
   if (nvfx_get_isa() != NVFX_ISA_BASELINE) ws.conv = nfx::rt::volume_conv3_avx2;
 }
+// Study R: the detail layer on vectors as the volume runtime runs it (REPORT.md §19: the reference's fields to the bit,
+// a third of the time), for the tracking runs, the plays and the coarse simulation's detail.
+std::unique_ptr<r3::DetailKernel> fast_detail(const r3::Model& m, r3::Workspace& ws) {
+  if (!g_r || nvfx_get_isa() == NVFX_ISA_BASELINE) return nullptr;
+  auto k = nfx::rt::make_volume_detail(m, ws, nvfx_get_isa());
+  ws.detail = k.get();
+  return k;
+}
 
 // --- measures -----------------------------------------------------------------------------------------------------
 
@@ -414,7 +426,8 @@ class UnitBuilder {
       for (std::size_t i = 0; i < p.size(); i += 4) {
         const double a = p[i + 3] / 255.0;
         cov += a;
-        for (std::size_t c = 0; c < 3; ++c) emi += std::max(0.0, p[i + c] / 255.0 - a) / 3.0;
+        // the light the fire emits beyond its cover; warm smoke emits none, so study R measures the light it adds
+        for (std::size_t c = 0; c < 3; ++c) emi += (g_r ? p[i + c] / 255.0 : std::max(0.0, p[i + c] / 255.0 - a)) / 3.0;
         for (std::size_t c = 0; c < 4; ++c) u.mean_frame[zu(k)][i + c] += static_cast<float>(p[i + c]) / static_cast<float>(u.frames);
       }
       const double px = static_cast<double>(p.size() / 4);
@@ -780,7 +793,9 @@ struct CoarseSim {
       s.coarse[j * zu(C) + 4] = st.soot[j];
       for (int k = 0; k < 3; ++k) s.flow[j * 3 + zu(k)] = s.coarse[j * zu(C) + zu(k)];
     }
-    r3::detail_step(m, s, seed, std::vector<float>(c.begin(), c.end()), ws, &pool);
+    const std::vector<float> cv(c.begin(), c.end());
+    if (ws.detail) ws.detail->step(m, s, seed, cv, ws, &pool);
+    else r3::detail_step(m, s, seed, cv, ws, &pool);
     s.time += 1.f / m.fps;
     s.since_start += 1.f / m.fps;
   }
@@ -911,6 +926,7 @@ int track(const Args& a) {
   if (learned) require_frozen(a, split, model_file);
   r3::Workspace ws(m);
   fast_conv(ws);
+  const auto detail_kernel = fast_detail(m, ws);
   rd::Renderer rend(m.h.fx(), m.h.fy(), m.h.fz(), study_optics());
   const auto sets = settings(split);
   const fs::path out = root / "eval" / split / "track" / (method + ".csv");
@@ -960,7 +976,7 @@ int track(const Args& a) {
         if (learned) test = {st.fine_t, st.fine_d};
         else if (method == "coarse") test = {cs.s.fine_t, cs.s.fine_d};
         else test = t.start;
-        const double ft = field_psnr(t.at[j].t, test.t, kPeakT), fd = field_psnr(t.at[j].d, test.d, kPeakD);
+        const double ft = field_psnr(t.at[j].t, test.t, peak_t()), fd = field_psnr(t.at[j].d, test.d, peak_d());
         pictures(rend, pool, t.at[j], pt);
         pictures(rend, pool, test, pm);
         double pic = 0;
@@ -1043,6 +1059,7 @@ int play(const Args& a) {
   if (learned) require_frozen(a, split, model_file);
   r3::Workspace ws(m);
   fast_conv(ws);
+  const auto detail_kernel = fast_detail(m, ws);
   rd::Renderer rend(m.h.fx(), m.h.fy(), m.h.fz(), study_optics());
   const auto sets = settings(split);
   for (int s = 0; s < static_cast<int>(sets.size()); ++s) {
@@ -1218,11 +1235,12 @@ int compare(const Args& a) {
     stat("\\|ln motion ratio\\|", [](const Endless& e) { return e.motion; }, false, 3);
     stat("motion ratio", [](const Endless& e) { return e.motion_ratio; }, true, 3, false);
     stat("coverage distance", [](const Endless& e) { return e.coverage; }, false, 4);
-    stat("emission distance", [](const Endless& e) { return e.emission; }, false, 4);
+    stat(g_r ? "light distance" : "emission distance", [](const Endless& e) { return e.emission; }, false, 4);
     stat("mean picture PSNR (dB)", [](const Endless& e) { return e.mean_psnr; }, true, 2);
     // each setting's statistics (context for the pooled means above; nothing here is judged)
     both("\nPer setting (" + A + " / " + B + "):\n");
-    both("| setting (intensity, wind, turbulence) | motion ratio | coverage distance | emission distance | 3D spectrum distance | mean picture PSNR (dB) |");
+    both(std::string("| setting (intensity, wind, turbulence) | motion ratio | coverage distance | ") + (g_r ? "light" : "emission") +
+         " distance | 3D spectrum distance | mean picture PSNR (dB) |");
     both("|---|---|---|---|---|---|");
     for (std::size_t i = 0; i < ea.size(); ++i) {
       const auto& c = sets[i];
@@ -1456,6 +1474,7 @@ int video(const Args& a) {
     r3::quantise_like_storage(m);
     r3::Workspace ws(m);
     fast_conv(ws);
+    const auto detail_kernel = fast_detail(m, ws);
     nfx::Pool pool(threads);
     nfx::sim3d::Fluid sim(fine_params(c, seed, threads));
     for (int f = 0; f < kTrackWarm; ++f) sim.step_frame();
