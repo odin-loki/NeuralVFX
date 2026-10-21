@@ -19,3 +19,8 @@ geyser,abs_ln_motion_ratio,0.254340
 geyser,coverage_l1,0.016641
 geyser,emission_l1,0.000000
 geyser,mean_frame_psnr,34.605179
+dustexplosion,spectrum_l1,0.017718
+dustexplosion,abs_ln_motion_ratio,0.029380
+dustexplosion,coverage_l1,0.003478
+dustexplosion,emission_l1,0.000245
+dustexplosion,mean_frame_psnr,32.273097
