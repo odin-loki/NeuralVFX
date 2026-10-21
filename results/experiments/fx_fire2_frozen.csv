@@ -1,5 +1,6 @@
 kind,name,file,bytes,sha256,source
 rollout_effect,dustexplosion,fx_fire2/models/d/dustexplosion.nvfx,301443,65057a10925134b335a5734c073d5080c0838fe4babfcccb99e7b29bdec39480,study D's recipe (docs/EFFECTS_FIRE2.md): d-train --stages12 1 then d-tune then d-finish (the one-shot branch, 120 frames), then study M3's mean state (nvfx_ordered --study m3 fitmean --block 2, setmean)
+rollout_effect,dustexplosion_q,q_fix/models/dustexplosion.nvfx,301443,a0f273ea278b3a60f0ea4e96db5177258faf0fcd21ffa020ac2ca65d78bed520,study Q (docs/STUDY_Q.md §4.8): the dust explosion with its renderer refit (rf); replaces it after its test; the library and the forest-edge town draw it by looks, so their keyframes are unchanged
 rollout_effect,windowfire,fx_fire2/models/d/windowfire.nvfx,149287,12adb609fe231a7f4737245f09cd15c4f1a568b1c46d91f5f4f7453a707d7661,study D's recipe (docs/EFFECTS_FIRE2.md): d-train --stages12 1 then d-tune then d-finish
 rollout_effect,crownfire,fx_fire2/models/d/crownfire.nvfx,149287,1973c9d3adb8a82be34c9fef013a186e87f48abc2684f5e6d1d18cb7e1350302,study D's recipe (docs/EFFECTS_FIRE2.md): d-train --stages12 1 then d-tune then d-finish
 forestedge_keyframe,frame_024,nvfx_scene_script --keyframes (examples/scenes/forestedge.nvfxs; --precision float --isa avx2),1094761,4c0534e47d473b23f5184a8386bb0341d5314fd5e473da28d1d7182c756cdf58,

@@ -32,7 +32,7 @@ took it over from the jobs it left running (the data root's `q_fix/jobs/*.sh`, t
 | crown and window fires' streaks | **done by eye** (§5.1) | detail settings, frozen hashes, videos (78ae21b, 47b2b0f) | - |
 | heavy gas | **done by eye** (§5.1) | `soften 0.1` | its start points not tried (§9) |
 | smoke ring | **stopped at validation** | N = 40 (ca955b9); `rf` meets no rule: its motion's interval past its margin (§4.7) | kept; nothing more |
-| dust explosion's renderer | **passed the test** (§4.8) | `rf`: the first frame +2.85 dB [+2.54, +3.16], all within margins | replacing the shipped file (links, frozen hashes, models/, videos) |
+| dust explosion's renderer | **replaced** (§4.8, §6) | `rf` passed its test: the first frame +2.85 dB [+2.54, +3.16], every measure within its margin; links, models/, frozen rows, two videos | - |
 | candle | **nothing changed** (§3.7) | the diagnosis | - |
 | mushroom's cap | **left** (§3.7) | the diagnosis | - |
 
@@ -446,6 +446,31 @@ side). Distance to the floor (a second set of 8 real runs per setting): the mean
 (the floor 32.15 dB), the spectrum distance 0.120 → 0.119 (the floor's 0.014), the coverage distance 0.0088 → 0.0091
 (0.0036). On validation the same picture: the first frame +3.46 dB, the mean frame a tie.
 
+**Its round's own test again** (reported beside, not deciding; `d-eval` from the round's frozen binary, `--seed-base
+33300000`, the current and the new file on the same seeds;
+[deval_dustexplosion/](../results/experiments/q_fix/deval_dustexplosion)): tracking a held-out run over the coarse
+simulation with detail at 1 s **+8.69 dB [+8.06, +9.29] → +8.81 [+8.19, +9.41]**, at the first frame -0.78 [-4.06,
++1.87] → +2.80 [-0.17, +5.07] (both ties: the coarse simulation starts from the true fine fields, §3.5); endless, the mean
+picture closer than the nearest flipbook's by **+3.79 dB [+3.15, +4.35] → +3.80 [+3.16, +4.36]**, motion and coverage as
+before. It works by the round's rule as before.
+
+**How it looks.** The first frames are where it changes (below: the current file above the new one at three settings,
+its own renderer at 256 px, seed 33,465,011, at 0, 0.1, 0.33, 0.67, 1.5 and 3 s; `nvfx_fix strip`): the unlit cloud and
+the spark, which the current renderer draws blue-green with green and magenta fringes, are grey-beige with thin fringes,
+as the dust is; from about half a second, once the flame has run through the cloud, the two are hard to tell apart (the
+streaks inside the fireball and the faint pall are the same). The library's three dust-explosion entries and the
+forest-edge town draw it with the field shader's looks (`dust_blast`, `coal_blast`), which take the fields and not the
+renderer, so their frames do not change at all (§6).
+
+![The dust explosion before (rows 1, 3, 5) and after study Q (rows 2, 4, 6), at (0.2, 0, 0.3), (0.55, 0.5, 0.5) and (0.95, 1, 0.7), at 0, 0.1, 0.33, 0.67, 1.5 and 3 s](figures/q_dustexplosion_rf.png)
+
+The refits of the haboob and the smoke ring that stopped at validation do the same to their first frames (below: the
+current renderer above the refit, at (0.5, 0.5, 0.5), seed 33,465,001, at 0, 1, 5, 10, 15 and 30 frames): the haboob's
+magenta tint at the lock's foot and the ring's green-cyan blob at the opening go. They were not replaced: the haboob's
+refit draws its dust with more fine structure, the ring's with less motion, each past its margin (§4.7).
+
+![The haboob (rows 1 and 2) and the smoke ring (rows 3 and 4), the current renderer above the refit, at 0, 1, 5, 10, 15 and 30 frames](figures/q_rf_haboob_smokering.png)
+
 ## 5. Fixes with no model change
 
 ### 5.1 The detail settings of four effects, in the library and the scenes, judged by eye
@@ -489,6 +514,31 @@ advection).
 
 ![The library's smoke rings and heavy gases before (top) and after study Q (bottom)](figures/q_air_library.png)
 
-## 6. Reproduce
+## 6. What changed
+
+- **Models replaced** (each met the rule on its test, §4.8):
+  - **the dust explosion** is now the data root's `q_fix/models/dustexplosion.nvfx` (`rf`: the renderer trained again
+    with the first frames among its samples; 301,443 bytes, the size of the old file, SHA-256
+    `a0f273ea278b3a60f0ea4e96db5177258faf0fcd21ffa020ac2ca65d78bed520`; in git `models/2d/dustexplosion.nvfx`, its row in
+    `models/SHA256SUMS`). The shared links moved, their old targets in `q_fix/logs/links_before.txt`:
+    `library/models/dustexplosion.nvfx` (was `../../fx_fire2/models/d/dustexplosion.nvfx`) and
+    `fx_fire2/models/scene/dustexplosion.nvfx` (was `../d/dustexplosion.nvfx`); `models/layout.txt` already maps both to
+    `2d/dustexplosion.nvfx`, and `models/restore.sh` reports 0 different. The round's file is untouched under
+    `fx_fire2/models/d` and `fx_fire2/models/frozen`.
+- **Frozen hashes** (float, pinned to the AVX2 build with `--isa avx2`): the frozen tests that play the dust explosion
+  were run with private copies of the two folders holding the new file before the links moved, and give their frozen
+  keyframes to the bit (the library's `dust_explosion`, the forest-edge town's eight keyframes: both draw it by looks,
+  which do not use the renderer); only the model rows changed: `results/library/frozen_fire2.csv`'s `dustexplosion` and
+  a row for the new file in `results/experiments/fx_fire2_frozen.csv` (`dustexplosion_q`).
+- **Videos re-rendered** (videos/README.md): `effect_dustexplosion` (its own renderer; seed 33,490,011) and
+  `real_vs_learned_fire2` (round 10's held-out seeds; the crown and window fires' columns are the same frames).
+  `library_fire2` and `scene_forestedge` draw it by looks and do not change.
+- **By eye, no model change** (§5.1): the crown fire, the window fire, heavy gas and the smoke ring's detail settings in
+  the library and the scenes; their frozen hashes and videos.
+- **Code**: `nvfx_fix parts` (the taking apart) and `strip --also` (rows of other files); `nvfx_ordered --study q`
+  (`refit`, `starts`, `graft`, `val --split probeq | valq | checkq`, `test`, the rule's numbers from `q_rule.csv`); `soften`
+  as an effect line's key and in `nvfx_reel`'s DETAIL field.
+
+## 7. Reproduce
 
 (Written when the study ends.)
