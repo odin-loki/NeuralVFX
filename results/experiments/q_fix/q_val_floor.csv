@@ -19,3 +19,8 @@ avalanche,abs_ln_motion_ratio,0.078690
 avalanche,coverage_l1,0.001529
 avalanche,emission_l1,0.000000
 avalanche,mean_frame_psnr,40.352348
+mushroom,spectrum_l1,0.030141
+mushroom,abs_ln_motion_ratio,0.047333
+mushroom,coverage_l1,0.004393
+mushroom,emission_l1,0.000009
+mushroom,mean_frame_psnr,34.496018

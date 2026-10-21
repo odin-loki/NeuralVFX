@@ -34,7 +34,7 @@ took it over from the jobs it left running (the data root's `q_fix/jobs/*.sh`, t
 | smoke ring | **stopped at validation** | N = 40 (ca955b9); `rf` meets no rule: its motion's interval past its margin (§4.7) | kept; nothing more |
 | dust explosion's renderer | **replaced** (§4.8, §6) | `rf` passed its test: the first frame +2.85 dB [+2.54, +3.16], every measure within its margin; links, models/, frozen rows, two videos | - |
 | candle | **nothing changed** (§3.7) | the diagnosis | - |
-| mushroom's cap | **left** (§3.7); its renderer's first second taken up (§4.1) | `rf` added to the plan before its probe; margins (a447d13); N = 60, the cap (§4.6) | `rf` on validation (`val.sh`); then the choice, the freeze, the test |
+| mushroom's cap | **left** (§3.7); its renderer's first second taken up (§4.1) | `rf` added before its probe; margins (a447d13); N = 60 (§4.6); `rf` chosen on validation and frozen (§4.7) | the test, once |
 
 ## 1. Bottom line
 
@@ -486,6 +486,18 @@ margin). By the rule (§4.3) `u30` is chosen, better at 1 s, the only candidate 
 
 **Frozen** before its test: the data root's `q_fix/models/avalanche.nvfx` (read-only; 280,927 bytes, the size of the
 old file, SHA-256 `d6161c1d09116e2b00a959011192de85c20378a815623ff5c3249fc49013ec67`), validated and tested by
+`nvfx_ordered_q3`.
+
+**The mushroom (60 settings): `rf` meets the rule and is chosen.** It is better on one of its targets, the first frame
+**+2.07 dB [+1.99, +2.16]** (16.0 → 18.1 dB), and at 1 s (+0.07 [+0.04, +0.10]), on detail (the spectrum distance
+**-0.047 [-0.072, -0.022]**, 0.180 → 0.133), motion (**-0.063 [-0.066, -0.059]**: the motion ratio 0.82 → 0.88) and
+emission; the mean frame is a little worse (-0.05 [-0.07, -0.04], a twentieth of its margin of -1.07 dB), tracking at
+2 s (-0.02 [-0.03, -0.00]) and coverage (+0.0004 [+0.0003, +0.0006], an eighth of its margin) too. Every interval lies
+within its margin; by study M's strict reading three lie wholly on the worse side (reported, not deciding). The mushroom
+is study O's file (REPORT §16.3); its stepper and its mean state are unchanged.
+
+**Frozen** before its test: the data root's `q_fix/models/mushroom.nvfx` (read-only; 301,443 bytes, the size of study
+O's file, SHA-256 `c1cd25a276bd3b2a9e0578e631ed85ad9cd9286d5625d30b2c987b2cd9004209`), validated and tested by
 `nvfx_ordered_q3`.
 
 ### 4.8 The test (once)
