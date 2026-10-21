@@ -180,14 +180,15 @@ is the same; what differs:
   `nvfx_effect_attach_upscaler(effect, "file.nvfxup")`, uses a small learned 2x with seeded micro-detail instead
   (deterministic from the instance's seed and the time). Either is a set-up call (new buffers, a new timeline); frames
   allocate nothing; the colour is applied after the upscale; empty pixels stay exactly transparent. NVFX_VERSION 7.
-  **What pays is drawing at half size**: the half-size instance costs 0.29 to 0.34 of a native one at 512 px (0.34 to
-  0.43 at 256 px), and against the simulator's frames it is within the null's margins of native or closer (it loses the
-  native's finest filaments, which the detail layer draws at 512 px and the simulator does not have). So the cheap way
-  is the engine's own: create the instance at half size and let the GPU's bilinear sampler draw it large. The learned 2x
-  did not pass its rule: it costs 0.45 to 0.59 of native at 512 px (more than 0.55 for two of six effects; busy machine,
-  provisional), and against native on the same seed it was not better than the bilinear 2x on PSNR, SSIM and the high
-  band together for any of the six effects at 512 px on the held-out test (STUDY_P.md §6); its micro-detail, isotropic
-  noise, does not draw the native's filaments.
+  **What pays is drawing at half size**: the half-size instance costs 0.29 to 0.38 of a native one at 512 px (0.36 to
+  0.42 at 256 px; a quiet machine, REPORT.md §13.11), and against the simulator's frames it is within the null's
+  margins of native or closer (it loses the native's finest filaments, which the detail layer draws at 512 px and the
+  simulator does not have). So the cheap way is the engine's own: create the instance at half size and let the GPU's
+  bilinear sampler draw it large. The learned 2x did not pass its rule: it costs 0.51 to 0.62 of native at 512 px on a
+  quiet machine (more than 0.55 for three of six effects; 0.45 to 0.59 and two of six in the rule's run on a busy one),
+  and against native on the same seed it was not better than the bilinear 2x on PSNR, SSIM and the high band together
+  for any of the six effects at 512 px on the held-out test (STUDY_P.md §6); its micro-detail, isotropic noise, does
+  not draw the native's filaments.
 - `nvfx_bake` renders consecutive frames from a fresh start and crossfades a few extra frames into the first ones, so
   the flipbook loops.
 
@@ -658,15 +659,16 @@ repeating. `nvfx_volume_set_shard(vol, 0)` plays one continuous rollout; `nvfx_v
 point. Going back in time or far ahead restarts the shard's rollout (a start runs a 24-frame warm-up).
 
 **Threads and memory.** A volume owns its worker threads (`threads` at creation); the fields and the pictures are the
-same to the bit on any number (tested), and nothing is allocated after creation (`nvfx_alloc_test`). A volume needs
-52 MB (two shards' fine fields, one shared set of step buffers, the detail layer's own buffers of 19 MB, the renderer's
-prepared volume; `nvfx_volume_scratch_bytes`); the effect file is 268 KB (14,218 weights at 16 bits, 8 start states at
-8 bits). `examples/volume_host.c` is the whole loop in plain C. The cost per frame is in STUDY_3D.md §8 (provisional):
-about 70 ms a step and 50 ms a 256 x 256 picture on one busy core. **The detail layer runs on vectors** since 21 October
-2026 (AVX-512 where the CPU has it, else AVX2; nothing to set): the reference's fields to the bit on every ISA, so the
-frames are those of before, and a step costs about a third of what it did (26 against 83 ms on one core of a busy
-machine; the detail layer alone 10 against 64 ms; [REPORT.md](REPORT.md) §19). A volume still suits one hero effect, or
-baking; an engine draws the textures on its GPU.
+same to the bit on any number (tested), and nothing is allocated after creation (`nvfx_alloc_test`). A volume needs 52
+MB (two shards' fine fields, one shared set of step buffers, the detail layer's own buffers of 19 MB, the renderer's
+prepared volume; `nvfx_volume_scratch_bytes`); the effect file is 268 KB (14,218 weights at 16 bits, 8 start states at 8
+bits). `examples/volume_host.c` is the whole loop in plain C. The cost per frame (STUDY_3D.md §14.12, a quiet machine,
+round 7 of the quiet re-timing): a step 21 ms and a 256 x 256 picture 56 ms on one thread, 9 and 14 ms on four, a start
+(its warm-up) 0.55 s and 0.22 s. **The detail layer runs on vectors** since 21 October 2026 (AVX-512 where the CPU has
+it, else AVX2; nothing to set): the reference's fields to the bit on every ISA, so the frames are those of before, and a
+step costs about 0.4 of what it did (25 against 65 ms on one core of a quiet machine; the detail layer alone 10 against
+47 to 50 ms; [REPORT.md](REPORT.md) §19). A volume still suits one hero effect, or baking; an engine draws the textures
+on its GPU.
 
 **What it is not.** No int8 path, no SIMD beyond an AVX2 convolution and the detail layer, no scenes, library, manager or Godot node for
 volumes yet; one trained effect. Its teacher is our own 3D solver, not a validated fire code. The trained fire runs
