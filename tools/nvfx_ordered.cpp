@@ -1521,7 +1521,11 @@ void step_starts(const Ctx& c, sim::Effect e, const tools::Args& a) {
   const auto runs = training_runs(c, e, c.threads);
   rollout::choose_starts(m, runs, count, r.start_frame);
   int same = 0;
-  for (std::size_t i = 0; i < std::min(before.size(), m.starts.size()); ++i) same += before[i].controls == m.starts[i].controls ? 1 : 0;
+  for (std::size_t i = 0; i < std::min(before.size(), m.starts.size()); ++i) {  // the file stores its controls rounded
+    bool eq = before[i].controls.size() == m.starts[i].controls.size();
+    for (std::size_t k = 0; eq && k < before[i].controls.size(); ++k) eq = std::abs(before[i].controls[k] - m.starts[i].controls[k]) < 1e-3f;
+    same += eq ? 1 : 0;
+  }
   rollout::quantise_like_storage(m);
   if (auto w = rollout::save_model(a.need("out"), m); !w) throw std::runtime_error(w.error());
   std::println("starts: {} {} start points (the first {} of {} the current file's controls) -> {} ({:.0f} s)", ename(e), m.starts.size(), same, before.size(),
@@ -1810,11 +1814,25 @@ constexpr int kOSettings = 30;  // fixed by the probe (REPORT §16.3) before val
 // (The floor: the real runs' base + 50. Study Q's other seeds: d-eval's re-run of a replaced model's round test from
 // 33,300,000, diagnosis and figures 33,460,000 to 33,499,999.)
 constexpr int kQProbeSettings = 40;
-// The number of settings for validation and the test, per effect: fixed by the probe (REPORT §21) before validation; 0
-// until then (valq and testq refuse to run).
+// Study Q's rule numbers per effect (the number of settings N for validation and the test, and the margins), fixed by the
+// probe and committed before validation in results/experiments/q_fix/q_rule.csv (one row per effect: effect, N, then the
+// eight margins in kQNames' order), which valq and testq read (--rule FILE, default that path): the same binary validates
+// and tests every effect, and an effect without a row refuses to run.
+std::string g_q_rule = "results/experiments/q_fix/q_rule.csv";
+std::vector<std::string> q_rule_row(sim::Effect e) {
+  std::ifstream in(g_q_rule);
+  std::string line;
+  while (std::getline(in, line)) {
+    std::vector<std::string> v;
+    std::stringstream ss(line);
+    for (std::string x; std::getline(ss, x, ',');) v.push_back(x);
+    if (!v.empty() && v[0] == sim::effect_name(e)) return v;
+  }
+  return {};
+}
 int q_settings(sim::Effect e) {
-  (void)e;
-  return 0;
+  const auto v = q_rule_row(e);
+  return v.size() >= 2 ? std::stoi(v[1]) : 0;
 }
 struct Split {
   std::string name;
@@ -2821,10 +2839,13 @@ std::vector<double> cmp_q(const Scores& s, int k) {
 }
 using MarginsQ = std::array<double, kQM>;
 bool margins_set(const MarginsQ& m) { return m[3] > 0; }
-// The margins of the rule, per effect: q_margins.csv from the probe's null, copied here before validation.
+// The margins of the rule, per effect: q_margins.csv's from the probe's null, in q_rule.csv (q_settings) before validation.
 MarginsQ margins_q(sim::Effect e) {
-  (void)e;
-  return {};
+  const auto v = q_rule_row(e);
+  MarginsQ m{};
+  if (v.size() < 2 + kQM) return m;
+  for (int k = 0; k < kQM; ++k) m[sz(k)] = std::stod(v[sz(2 + k)]);
+  return m;
 }
 MarginsQ margins_k_q(const Scores& cur) {
   return {-0.20, -0.20, -0.20, kM3Spectrum, kM3Motion, std::max(kM3Least, kM3Share * mean_of(cmp_q(cur, 5))), std::max(kM3Least, kM3Share * mean_of(cmp_q(cur, 6))),
@@ -3338,6 +3359,7 @@ int main(int argc, char** argv) {
     c.q = study == "q";
     if (c.o && !a.has("results")) c.results = "results/experiments/fix";  // study O's tables
     if (c.q && !a.has("results")) c.results = "results/experiments/q_fix";  // study Q's tables
+    if (a.has("rule")) g_q_rule = a.str("rule");  // study Q's rule numbers (q_settings)
     const std::string step = a.positional()[0];
     if (step == "setmean" || step == "set" || step == "info" || step == "settings" || step == "graft") {
       if (step == "set") step_set(a);

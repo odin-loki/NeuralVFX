@@ -269,6 +269,13 @@ float, pinned to the AVX2 build with `--isa avx2`), and the videos that show it 
 deciding: the distance to the floor before and after, the cost, and for a replaced model its round's own test (`d-eval`,
 tracking against the coarse simulation with detail, endless against the nearest flipbook) run again with fresh seeds.
 
+**The tool binary.** The rule's numbers are read from a committed table, `results/experiments/q_fix/q_rule.csv` (an
+effect's N and its eight margins; `valq` and `testq` refuse an effect without a row), so that one binary validates and
+tests every effect: `nvfx_ordered` built at the commit that adds the table's reader (the data root's
+`q_fix/bin/nvfx_ordered_q3`, SHA-256 `4ee12407c321c3164b2be97cb589620f38449045e8b7c7cd2eb229baaf400e8e`). The probe ran
+on an earlier build (`nvfx_ordered_q1`, `ff55e409...`) of the same evaluation code (what changed between them: the reader
+of the table, `graft` and a log message of `starts`).
+
 ### 4.5 Seeds
 
 Study Q's range, 33,000,000 to 33,499,999 (library and script seeds stay below 2^25 = 33,554,432); per run seed
@@ -282,6 +289,23 @@ base + 100 s + k (setting s, run k):
 | the test (`testq`) | 33,200,000 | 33,250,000 | - | 33,280,000 |
 | a replaced model's round test again (`d-eval --seed-base 33300000`) | 33,300,000 to 33,450,999 | | | |
 | diagnosis, figures, the trainers' seeds | 33,460,000 to 33,499,999 | | | |
+
+### 4.6 The probe and the rule's numbers (each effect's committed before its validation)
+
+The probe's tables: [q_margins.csv](../results/experiments/q_fix/q_margins.csv) (the null's margins, committed for each
+effect before its candidates were played on the probe), [q_power.csv](../results/experiments/q_fix/q_power.csv) and
+`q_probe_*.csv`; the numbers each effect's validation and test use: [q_rule.csv](../results/experiments/q_fix/q_rule.csv).
+
+**The haboob.** The null (the current model with fresh seeds, 40 training settings) moves its spectrum distance at a
+setting by 0.017 (RMS), its motion by 5.7%, its coverage distance by 0.0036 and its mean frame by 0.85 dB: margins
+tracking -0.20 dB at each horizon, spectrum **+0.02** (study K's), |ln motion ratio| **+0.0566**, coverage **+0.0036**,
+emission **+0.0001**, mean frame **-0.85 dB**. `rf` (SHA-256 `807e51674c37cdb53c82f423e3a78518215c110ab0df2a51720b28656e57e334`)
+on the probe: the first frame **+2.53 dB [+2.44, +2.63]**, the mean frame **+0.11 [+0.07, +0.14]**, tracking at 1 s
++0.15 [+0.12, +0.19] and at 2 s +0.05 [+0.02, +0.08] (better), the spectrum distance +0.010 [+0.007, +0.014] (worse, within
+its margin), motion, coverage and emission no worse: it meets the rule's form. Every measure that is not a target it
+improves passes its margin, if truly unchanged, with probability 1.00 at 10 settings by resampling, and needs at most 5
+in the normal form at the SD's upper 80% bound: **N = 10** (study B's ten held-out settings for the test, study G's ten
+for validation).
 
 ## 5. Fixes with no model change
 
