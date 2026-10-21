@@ -31,7 +31,7 @@
 extern "C" {
 #endif
 
-#define NVFX_VERSION 7 /* 2: scenes (nvfx_scene.h); 3: nvfx_version(), effect packs (nvfx_pack.h); 4: engine layers and trails; 5: precision (study K); 6: 3D volumes (nvfx_volume.h); 7: drawn at half size and upscaled (study P) */
+#define NVFX_VERSION 8 /* 2: scenes (nvfx_scene.h); 3: nvfx_version(), effect packs (nvfx_pack.h); 4: engine layers and trails; 5: precision (study K); 6: 3D volumes (nvfx_volume.h); 7: drawn at half size and upscaled (study P); 8: the effect manager draws large effects at half size (nvfx_manager_desc.half_px) */
 
 typedef enum nvfx_status {
   NVFX_OK = 0,

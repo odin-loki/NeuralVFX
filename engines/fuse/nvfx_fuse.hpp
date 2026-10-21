@@ -51,6 +51,8 @@ struct SpriteModel {
   const char* name = nullptr;  // the pack's model, without folder and extension ("fire")
   int max_sims = 8;            // its simulations at once (each holds pool slots: docs/MANAGER.md §2.8); <= 0: the manager's 16
   int precision = NVFX_PRECISION_DEFAULT;  // the orb plays at NVFX_PRECISION_FLOAT (study K's rule, docs/ENGINES.md §5)
+  float half_px = -1.f;        // drawn at half size where it pays (docs/MANAGER.md §2.10): < 0 the sprites' threshold
+                               // (SpriteConfig::half_px), 0 never for this model, > 0 its own (pixels on screen)
 };
 
 enum class Costs : std::uint8_t {
@@ -65,6 +67,14 @@ struct SpriteConfig {
   int job_slots = 2;                    // FUSE workers that may run the manager's jobs at once
   Costs costs = Costs::pack_or_calibrate;
   float texel_scale = 1.f;              // sprite pixels per screen pixel (below 1: softer and cheaper at every distance)
+  // Drawn at half size where it pays (docs/MANAGER.md §2.10, FUSE.md §5): a sprite at least half_px pixels on screen
+  // (or half_share of the view's height) is drawn at the level below its level. half_px < 0: the manager's default
+  // (nvfx_manager_desc_init); 0 with half_share 0: off. half_upscale NVFX_UPSCALE_OFF (the adapter's default): the
+  // half-size picture is uploaded and FUSE's bilinear sampler draws it on the quad (a quarter of the upload, no CPU for
+  // the 2x); NVFX_UPSCALE_BILINEAR: the manager's bilinear 2x on the CPU first, the picture at its level's size.
+  float half_px = -1.f;
+  float half_share = 0.f;
+  nvfx_upscale half_upscale = NVFX_UPSCALE_OFF;
   float edge_fade = 0.08f;              // soft edges of the sprites' quads (fuse::Quad::edge): plumes that touch their picture's border
 };
 

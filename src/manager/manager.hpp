@@ -13,6 +13,12 @@
 // which updates run now, the jobs); the jobs (one per simulation with work) run on any threads, each with its own step
 // scratch, and touch only their simulation and the instances that view it; end() publishes the pictures. Every
 // decision is a function of the calls made and the cost model, so the pictures do not depend on the threads.
+//
+// Drawn at half size where it pays (docs/MANAGER.md §2.10): a simulation's level is its picture's, chosen as before; a
+// simulation large on screen (nvfx_manager_desc.half_px, half_share) is drawn at the level below (its slot is there), and
+// its picture is the runtime's bilinear 2x of the drawing (rt_upscale.hpp, as nvfx_instance_set_upscale draws it) or the
+// drawing itself (NVFX_UPSCALE_OFF). The planner works on picture levels; the draw level is the picture level minus one
+// when `half` is set, and the cost model counts the drawing's step and pictures and the 2x.
 #pragma once
 
 #include <neuralfx/nvfx.h>
@@ -20,6 +26,7 @@
 
 #include "interp.hpp"
 #include "../runtime/rt_common.hpp"
+#include "../runtime/rt_upscale.hpp"
 
 #include <array>
 #include <atomic>
@@ -35,6 +42,9 @@ inline constexpr std::array<int, kLevels> kSizes{32, 64, 128, 256};
 inline constexpr int kMaxDiv = 4;       // frames per keyframe: 1 to 4 (30 to 7.5 Hz at 30 fps)
 inline constexpr int kMaxControls = 8;
 inline constexpr std::int64_t kBlend = 15;  // shard crossfade frames, as nvfx.cpp
+// The default threshold of drawing at half size, pixels on screen (nvfx_manager_desc.half_px; 0: off). Set by the rule of
+// docs/REPORT.md §22, measured before it was set.
+inline constexpr float kDefaultHalfPx = 0.f;
 
 int level_of_size(int size);  // -1 if not one of kSizes
 
@@ -51,6 +61,7 @@ struct Slot {
   std::array<Track, 2> t;
   std::vector<std::uint8_t> mix, out;         // the shard crossfade's second picture; the composed picture
   std::array<std::vector<std::uint8_t>, 2> key;  // the two latest keyframes
+  std::vector<std::uint8_t> up;  // drawn at half size: the composed picture's bilinear 2x (2 size x 2 size; empty if never)
   bool used = false;
 };
 
@@ -86,6 +97,7 @@ struct Sim {
   Slot* next_slot = nullptr;  // a level change, carried out by this tick's job
   Slot* old_slot = nullptr;   // the slot it left in this tick's job, released by end()
   int div = 1, next_div = 1;
+  bool half = false, next_half = false;  // drawn at half size: the picture level is the slot's (next slot's) plus one
   double last_up = -1e30;
   // keyframes: slot->key[ka] at frame fa, slot->key[ka ^ 1] at frame fb (the state is at fb)
   int ka = 0;
@@ -102,7 +114,8 @@ struct Sim {
   float px = 0.f, importance = 0.f;
   bool paused = false, parked = false, locked = false, all_proxy = true;
   double paused_s = 0.0, idle_s = 0.0;
-  int want_level = 0, want_div = 1, plan_level = -1, plan_div = 1;
+  int want_level = 0, want_div = 1, plan_level = -1, plan_div = 1;  // picture levels
+  bool want_half = false, plan_half = false;
   bool plan_proxy = false;
   int proxy_target = -1;  // the proxy cell the plan sends its viewers to
   std::int64_t max_offset = 0;
@@ -156,6 +169,9 @@ struct Model {
   bool loop = true;
   nvfx_interp interp = NVFX_INTERP_CROSSFADE;  // drawing between keyframes (the manager's, or the model's own)
   rt::Precision precision = rt::Precision::float32;  // its simulations' (study K)
+  int isa = 0;                 // its runners' ISA as an index into Work::up (0 baseline, 1 AVX2, 2 AVX-512)
+  float half_px = -1.f;        // nvfx_manager_model_desc.half_px: < 0 the manager's thresholds, 0 never, > 0 its own
+  bool half_bufs = false;      // its slots below the top level hold a 2x picture (the policy may draw it at half size)
   std::int64_t shard = 0;      // frames per shard (0: one continuous rollout)
   float step_factor = 1.f;     // steps per frame on average (the next shard's warm-up and pre-roll)
   float render_factor = 1.f;   // pictures per keyframe on average (the shard crossfades)
@@ -212,6 +228,8 @@ class Manager {
     std::unique_ptr<rt::RolloutScratch> scratch;
     std::vector<float> uv;
     std::vector<std::uint8_t> px;
+    // the bilinear 2x of a drawing at half size, per ISA (Model::isa) and draw level (made by add_model)
+    std::array<std::array<std::unique_ptr<rt::Upscaler>, kLevels>, 3> up;
     double ms = 0.0;
     char pad[64] = {};
   };
@@ -236,8 +254,11 @@ class Manager {
   // planning
   void view(Inst& in);
   void want(Model& M, Sim& s);
-  float cost(const Model& M, int level, int div) const;
+  float half_threshold(const Model& M) const;  // pixels on screen from which a simulation is drawn at half size (0: never)
+  bool half_fits(const Model& M, int level) const;  // a picture at `level` can be drawn at the level below
+  float cost(const Model& M, int level, int div, bool half = false) const;
   float compose_ms(const Model& M, int size) const;
+  float up_ms(const Model& M, int level, bool half) const;  // the 2x of a picture at `level` (0 unless half and bilinear)
   std::array<float, 3> rate_px() const { return {desc_.rate_px[0], desc_.rate_px[1], desc_.rate_px[2]}; }
   void plan();
   void apply();
@@ -252,6 +273,7 @@ class Manager {
   void draw(Model& M, Sim& s, Slot& L, std::int64_t f, std::uint8_t* out);
   void push_ring(Sim& s, const std::uint8_t* px, int size, std::int64_t frame, const float* d);
   void compose_main(Model& M, Sim& s, Work& w);
+  void compose_drawing(Model& M, Sim& s);
   void compose_view(Model& M, Sim& s, Inst& in, Work& w);
   int ring_view(Model& M, Sim& s, std::int64_t f, std::uint8_t* out, Work& w);
   void interpolate(Model& M, const std::uint8_t* a, const std::uint8_t* b, int size, float wt, const float* uv, std::uint8_t* out) const;
@@ -287,6 +309,7 @@ class Manager {
   float planned_ = 0.f, plan_total_ = 0.f;
   std::size_t memory_ = 0;
   std::array<float, kLevels> fade_ms_{}, motion_ms_{};  // composing one picture: crossfade, motion-compensated
+  std::array<float, kLevels> up_ms_{};  // the bilinear 2x into a picture of that level (from the level below)
   float proxy_cut_ = 0.f;
   int split_model_ = -1, split_cell_ = -1;  // a proxy the plan adds for instances shown from another cell's  // the importance below which new instances start as proxies (the budget is short)
 };

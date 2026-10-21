@@ -670,6 +670,9 @@ std::expected<std::unique_ptr<System>, nvfx::Error> System::create(const fuse::E
     md.max_instances = sc.max_sprites;
     md.budget_ms = sc.budget_ms;
     md.texel_scale = sc.texel_scale;
+    if (sc.half_px >= 0.f) md.half_px = sc.half_px;  // else the manager's default
+    md.half_share = sc.half_share;
+    md.half_upscale = sc.half_upscale;
     auto mgr = nvfx::Manager::create(md);
     if (!mgr) return unexpected(mgr.error());
     for (const SpriteModel& m : sc.models) {
@@ -685,6 +688,7 @@ std::expected<std::unique_ptr<System>, nvfx::Error> System::create(const fuse::E
       auto mm = nvfx::manager_model_desc();
       if (sc.models[i].max_sims > 0) mm.max_sims = sc.models[i].max_sims;
       mm.precision = sc.models[i].precision;
+      mm.half_px = sc.models[i].half_px;
       auto model = s->manager.add_model(s->effects[i], &mm);
       if (!model) return unexpected(load_error(model.error().status, "sprites: " + s->model_names[i] + " is not a rollout effect the manager plays"));
       s->manager_model.push_back(*model);

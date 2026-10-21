@@ -39,12 +39,26 @@ std::unique_ptr<rt::RolloutRunner> make_runner(const rt::RolloutEffect& e, int s
   }
 }
 
+// Drawn at half size (docs/MANAGER.md §2.10): the runtime's bilinear 2x of an n x n drawing (rt_upscale.hpp without a
+// network: what nvfx_instance_set_upscale(NVFX_UPSCALE_BILINEAR) draws), on the ISA of the model's runners, as an
+// instance's upscaler is made (nvfx.cpp), so a simulation's picture is that instance's to the bit.
+int isa_index(nvfx_isa isa) { return isa == NVFX_ISA_AVX512 ? 2 : isa == NVFX_ISA_AVX2 ? 1 : 0; }
+std::unique_ptr<rt::Upscaler> make_bilinear(int isa, int n) {
+  switch (isa) {
+    case 2: return rt::isa_avx512::make_upscaler(nullptr, n);
+    case 1: return rt::isa_avx2::make_upscaler(nullptr, n);
+    default: return rt::isa_base::make_upscaler(nullptr, n);
+  }
+}
+
 // The planner's defaults (docs/MANAGER.md §6): one AVX2 core of the project's machine, milliseconds per simulation step
 // and per keyframe picture at 32, 64, 128 and 256 px, and per composed picture.
 constexpr std::array<float, kLevels> kStepMs{0.33f, 0.36f, 0.48f, 1.05f};
 constexpr std::array<float, kLevels> kRenderMs{0.064f, 0.11f, 0.30f, 1.30f};
 constexpr std::array<float, kLevels> kFadeMs{0.0007f, 0.0023f, 0.009f, 0.031f};
 constexpr std::array<float, kLevels> kMotionMs{0.021f, 0.082f, 0.335f, 1.35f};
+// The bilinear 2x into a picture at 64, 128 and 256 px (from 32, 64 and 128), in the same units (docs/MANAGER.md §2.10).
+constexpr std::array<float, kLevels> kUpMs{0.f, 0.006f, 0.022f, 0.085f};
 constexpr nvfx_interp kDefaultInterp = NVFX_INTERP_CROSSFADE;  // the quality study's choice (docs/MANAGER.md §5.3)
 
 struct ShardPlan {
@@ -121,6 +135,7 @@ Manager::Manager(const nvfx_manager_desc& d) : desc_(d) {
   interp_ = d.interp == NVFX_INTERP_DEFAULT ? kDefaultInterp : d.interp;
   fade_ms_ = kFadeMs;
   motion_ms_ = kMotionMs;
+  up_ms_ = kUpMs;
   insts_.resize(z(d.max_instances));
   free_insts_.reserve(insts_.size());
   for (int i = d.max_instances - 1; i >= 0; --i) free_insts_.push_back(i);
@@ -160,7 +175,7 @@ nvfx_status Manager::add_model(const nvfx_effect* fx, const nvfx_manager_model_d
   if (d.max_sims < 1 || d.max_sims > 4096 || d.history < 0 || d.history > 256 || d.proxy_steps < 1 || d.proxy_steps > 16 || d.proxy_rate_div < 1 ||
       d.proxy_rate_div > kMaxDiv || !(d.shard_seconds > 0.f) || level_of_size(d.proxy_size) < 0 || d.proxy_sims < 0 || d.proxy_sims > 4096 ||
       d.offset_sims < 0 || d.offset_sims > 4096 || d.interp < NVFX_INTERP_DEFAULT || d.interp > NVFX_INTERP_MOTION || d.precision < NVFX_PRECISION_DEFAULT ||
-      d.precision > NVFX_PRECISION_INT8) {
+      d.precision > NVFX_PRECISION_INT8 || !std::isfinite(d.half_px)) {
     return NVFX_ERROR_ARGUMENT;
   }
   const auto& m = re->m;
@@ -208,8 +223,23 @@ nvfx_status Manager::add_model(const nvfx_effect* fx, const nvfx_manager_model_d
   M.proxy_max = static_cast<int>(std::min<std::size_t>(ncell, z(d.proxy_sims)));
   M.step_ms = kStepMs;
   M.render_ms = kRenderMs;
+  // drawn at half size: its own threshold, or the manager's; the 2x pictures and upscalers only where the policy can act
+  M.half_px = d.half_px < 0.f ? -1.f : d.half_px;
+  M.isa = isa_index(rt::rollout_isa(M.precision));
+  const bool half_on = M.half_px > 0.f || (M.half_px < 0.f && (desc_.half_px > 0.f || desc_.half_share > 0.f));
+  M.half_bufs = half_on && desc_.half_upscale == NVFX_UPSCALE_BILINEAR && M.max_level > M.min_level;
   try {
     std::size_t bytes = 0;
+    if (M.half_bufs) {  // per thread: the bilinear 2x of a drawing at each level below the top
+      for (Work& w : work_) {
+        for (int L = M.min_level; L < M.max_level; ++L) {
+          auto& u = w.up[z(M.isa)][z(L)];
+          if (u || M.slots_n[z(L)] == 0) continue;
+          u = make_bilinear(M.isa, kSizes[z(L)]);
+          bytes += u->scratch_bytes();
+        }
+      }
+    }
     for (int L = 0; L < kLevels; ++L) {
       const int size = kSizes[z(L)];
       const std::size_t px = z(size) * z(size) * 4;
@@ -231,6 +261,10 @@ nvfx_status Manager::add_model(const nvfx_effect* fx, const nvfx_manager_model_d
         S->out.assign(px, 0);
         for (auto& k : S->key) k.assign(px, 0);
         bytes += 4 * px + sizeof(Slot);
+        if (M.half_bufs && !S->proxy_pool && L < M.max_level) {  // a drawing at half size for a picture a level up
+          S->up.assign(4 * px, 0);
+          bytes += 4 * px;
+        }
         (S->proxy_pool ? M.proxy_free : M.free[z(L)]).push_back(S.get());
         M.slots.push_back(std::move(S));
       }
@@ -313,8 +347,11 @@ nvfx_status Manager::calibrate(int model, int frames) {
       r->start(0, ctl, 12345);
       std::vector<std::uint8_t> a(z(size) * z(size) * 4), b(a.size()), o(a.size());
       rt::FrameInput fi;
-      std::vector<double> st, rd, cf, mo;
+      std::vector<double> st, rd, cf, mo, ups;
       std::vector<float> uv(z(M.res) * z(M.res) * 2, 0.f);
+      // drawn at half size: the bilinear 2x of this size's drawings into the level above
+      std::unique_ptr<rt::Upscaler> up = M.half_bufs && L < M.max_level ? make_bilinear(M.isa, size) : nullptr;
+      std::vector<std::uint8_t> hi(up ? 4 * a.size() : 0);
       for (int i = 0; i < frames + 4; ++i) {
         const double t0 = now_ms();
         r->step(ctl, 12345);
@@ -327,11 +364,14 @@ nvfx_status Manager::calibrate(int model, int frames) {
         const double t3 = now_ms();
         motion_blend(a.data(), b.data(), size, 0.5f, Motion{uv.data(), M.res, static_cast<float>(size) / static_cast<float>(M.res) * M.advect}, o.data());
         const double t4 = now_ms();
+        if (up) up->run((i % 2) ? a.data() : b.data(), z(size) * 4, 0, 0.0, fi, hi.data(), z(size) * 8);
+        const double t5 = now_ms();
         if (i < 4) continue;  // warm caches
         st.push_back(t1 - t0);
         rd.push_back(t2 - t1);
         cf.push_back(t3 - t2);
         mo.push_back(t4 - t3);
+        ups.push_back(t5 - t4);
       }
       const auto med = [](std::vector<double>& v) {
         std::nth_element(v.begin(), v.begin() + static_cast<std::ptrdiff_t>(v.size() / 2), v.end());
@@ -341,6 +381,7 @@ nvfx_status Manager::calibrate(int model, int frames) {
       M.render_ms[z(L)] = med(rd);
       fade_ms_[z(L)] = med(cf);
       motion_ms_[z(L)] = med(mo);
+      if (up) up_ms_[z(L + 1)] = med(ups);
     }
   } catch (const std::bad_alloc&) {
     return NVFX_ERROR_MEMORY;
@@ -705,6 +746,7 @@ bool Manager::fork(Inst& in) {
       }
       for (std::size_t k = 0; k < 2; ++k) resample(from.key[k].data(), from.size, to->key[k].data(), to->size);
       s.slot = to;
+      s.half = s.next_half = src.half && to->level == src.slot->level;  // the same picture, from the same drawing
       s.started = src.started;
       s.ready = src.ready;
       s.clock = src.clock;
@@ -752,6 +794,7 @@ void Manager::view(Inst& in) {
 }
 
 void Manager::want(Model& M, Sim& s) {
+  s.want_half = false;  // never for proxies and locked simulations
   if (s.proxy_cell >= 0) {
     s.want_level = M.proxy_level;
     s.want_div = M.proxy_div;
@@ -760,7 +803,9 @@ void Manager::want(Model& M, Sim& s) {
   if (s.locked) return;  // set by begin() from the locking viewer
   const float h = std::clamp(desc_.hysteresis, 0.f, 0.9f);
   const float px = s.px * desc_.texel_scale;
-  const int cur = s.slot ? (s.next_slot ? s.next_slot->level : s.slot->level) : -1;
+  // the picture's level now: its drawing's, one up when drawn at half size
+  const bool half_now = s.slot && (s.next_slot ? s.next_half : s.half);
+  const int cur = s.slot ? (s.next_slot ? s.next_slot->level : s.slot->level) + (half_now ? 1 : 0) : -1;
   if (cur < 0) {
     s.want_level = level_for(M, px);
   } else {
@@ -774,6 +819,24 @@ void Manager::want(Model& M, Sim& s) {
     const int faster = div_for(T, s.px / (1.f + h)), slower = div_for(T, s.px / (1.f - h));
     s.want_div = faster < s.div ? faster : slower > s.div ? slower : s.div;
   }
+  // drawn at half size where it pays: at least the threshold on screen (once on, until the size falls below it by the
+  // hysteresis), and only where the picture's level has a level below it to draw at
+  const float H = half_threshold(M);
+  if (H > 0.f && half_fits(M, s.want_level)) s.want_half = half_now ? s.px >= H * (1.f - h) : s.px >= H;
+}
+
+float Manager::half_threshold(const Model& M) const {
+  if (M.half_px >= 0.f) return M.half_px;  // the model's own (0: never)
+  float t = desc_.half_px > 0.f ? desc_.half_px : std::numeric_limits<float>::infinity();
+  if (desc_.half_share > 0.f && camera_) t = std::min(t, desc_.half_share * view_h_);
+  return std::isfinite(t) ? t : 0.f;
+}
+
+bool Manager::half_fits(const Model& M, int level) const { return level > M.min_level && level <= M.max_level && M.slots_n[z(level - 1)] > 0; }
+
+float Manager::up_ms(const Model& M, int level, bool half) const {
+  (void)M;
+  return half && desc_.half_upscale == NVFX_UPSCALE_BILINEAR && level > 0 && level < kLevels ? up_ms_[z(level)] : 0.f;
 }
 
 float Manager::compose_ms(const Model& M, int size) const {
@@ -783,12 +846,15 @@ float Manager::compose_ms(const Model& M, int size) const {
 }
 
 // Mean milliseconds per tick of a simulation at a level: its steps and keyframe pictures per second, and the pictures
-// composed between keyframes, at the game's tick rate.
-float Manager::cost(const Model& M, int level, int div) const {
+// composed between keyframes, at the game's tick rate. Drawn at half size, the steps and pictures are the level below's,
+// and every picture shown (at most the effect's frame rate) is brought up by the 2x.
+float Manager::cost(const Model& M, int level, int div, bool half) const {
   const float hz = static_cast<float>(hz_);
+  const int D = half ? level - 1 : level;
   const float steps = M.fps * M.step_factor / hz, pictures = M.fps / static_cast<float>(div) * M.render_factor / hz;
-  const float between = div > 1 ? std::min(M.fps, hz) / hz * compose_ms(M, kSizes[z(level)]) : 0.f;
-  return steps * M.step_ms[z(level)] + pictures * M.render_ms[z(level)] + between;
+  const float shown = std::min(M.fps, hz) / hz;
+  const float between = div > 1 ? shown * compose_ms(M, kSizes[z(D)]) : 0.f;
+  return steps * M.step_ms[z(D)] + pictures * M.render_ms[z(D)] + between + shown * up_ms(M, level, half);
 }
 
 void Manager::plan() {
@@ -799,24 +865,32 @@ void Manager::plan() {
     for (Sim& s : M.sims) {
       s.plan_proxy = false;
       if (!s.used || s.paused || (s.refs <= 0 && s.proxy_cell < 0)) {
-        s.plan_level = s.slot ? s.slot->level : -1;
+        s.plan_level = s.slot ? s.slot->level + (s.half ? 1 : 0) : -1;
         s.plan_div = s.div;
+        s.plan_half = s.half;
         continue;
       }
       want(M, s);
       if (!s.slot) {
         s.plan_level = s.want_level;
         s.plan_div = s.want_div;
+        s.plan_half = s.want_half;
       } else {
-        const int cur = s.next_slot ? s.next_slot->level : s.slot->level;
+        const bool half_now = s.next_slot ? s.next_half : s.half;
+        const int draw = s.next_slot ? s.next_slot->level : s.slot->level, cur = draw + (half_now ? 1 : 0);
         s.plan_level = std::min(cur, s.want_level);  // down at once; up later, within the budget (below)
         s.plan_div = std::max(s.div, s.want_div);
+        // drawn at half size: on at once (the drawing shrinks) once the picture is at its wanted level, not while it is
+        // still to grow; off at once only when that does not draw it larger, else later, within the budget (below)
+        s.plan_half = s.want_half ? half_now || s.plan_level == s.want_level : half_now && s.plan_level > draw;
       }
       if (s.locked) {
         s.plan_level = s.want_level;
         s.plan_div = s.want_div;
+        s.plan_half = false;
       }
-      s.cost = cost(M, s.plan_level, s.plan_div);
+      if (s.plan_half && !half_fits(M, s.plan_level)) s.plan_half = false;
+      s.cost = cost(M, s.plan_level, s.plan_div, s.plan_half);
       total += s.cost;
       if (s.proxy_cell >= 0 && z(s.proxy_cell) < M.planned.size()) M.planned[z(s.proxy_cell)] = 1;
       order_.push_back(&s);
@@ -837,19 +911,25 @@ void Manager::plan() {
       Model& M = models_[z(s.model)];
       // At the proxies' size or smaller a lower rate saves little (the steps cost the same at every rate): such a
       // simulation goes to a proxy at once if it can (docs/MANAGER.md §6); larger ones lower their rate, then size.
-      const bool small = s.plan_level <= M.proxy_level;
+      const bool small = s.plan_level - (s.plan_half ? 1 : 0) <= M.proxy_level;  // by the size it is drawn at
       while (total > budget) {
         float next = 0.f;
         const bool try_proxy = small && proxy_ok(M, s);
         if (s.plan_div < kMaxDiv && !try_proxy) {
-          next = cost(M, s.plan_level, s.plan_div + 1);
+          next = cost(M, s.plan_level, s.plan_div + 1, s.plan_half);
           ++s.plan_div;
         } else if (s.plan_level > M.min_level && !try_proxy) {
+          // the next level down whose drawing has slots; drawn at half size, its drawing goes down with it while it can
           int L = s.plan_level - 1;
-          while (L > M.min_level && M.slots_n[z(L)] == 0) --L;
-          if (M.slots_n[z(L)] == 0) break;
-          next = cost(M, L, s.plan_div);
+          bool hf = s.plan_half;
+          for (;; --L) {
+            if (hf && !half_fits(M, L)) hf = false;
+            if (L <= M.min_level || M.slots_n[z(hf ? L - 1 : L)] > 0) break;
+          }
+          if (M.slots_n[z(hf ? L - 1 : L)] == 0) break;
+          next = cost(M, L, s.plan_div, hf);
           s.plan_level = L;
+          s.plan_half = hf;
         } else {
           // a proxy, if every viewer allows it and has kept its source long enough
           if (!proxy_ok(M, s)) break;
@@ -886,19 +966,24 @@ void Manager::plan() {
       Model& M = models_[z(s.model)];
       while (true) {
         int L = s.plan_level, d = s.plan_div;
-        if (L < s.want_level) {
+        bool hf = s.plan_half;
+        if (L < s.want_level) {  // size first: drawn at half size on the way up if it is already, else at the top
           ++L;
+          hf = s.want_half && (s.plan_half || L == s.want_level) && half_fits(M, L);
+        } else if (hf && !s.want_half) {  // drawn at its full size again: a size step up
+          hf = false;
         } else if (d > s.want_div) {
           --d;
         } else {
           break;
         }
-        const float next = cost(M, L, d);
+        const float next = cost(M, L, d, hf);
         if (total + next - s.cost > room) break;
         total += next - s.cost;
         s.cost = next;
         s.plan_level = L;
         s.plan_div = d;
+        s.plan_half = hf;
         break;  // one rung per tick and simulation
       }
     }
@@ -1076,12 +1161,15 @@ void Manager::apply() {
           s.next_slot = M.free[z(M.min_level)].back();
           M.free[z(M.min_level)].pop_back();
           s.next_slot->used = true;
+          s.next_half = false;
           s.parked = true;
         }
         continue;
       }
       if (s.refs <= 0 && s.proxy_cell < 0) continue;
-      int L = std::max(s.plan_level, M.min_level);
+      const int P = std::max(s.plan_level, M.min_level);  // the picture's level
+      const bool hf = s.plan_half && half_fits(M, P);
+      const int L = hf ? P - 1 : P;  // the drawing's (the slot's)
       if (!s.slot) {
         for (int q = L; q >= M.min_level && !s.slot; --q) {
           if (!M.free[z(q)].empty()) {
@@ -1091,10 +1179,12 @@ void Manager::apply() {
             for (Track& t : s.slot->t) t.shard = -1;
           }
         }
+        s.half = s.next_half = hf && s.slot;
         s.div = s.plan_div;
         continue;
       }
       const int cur = s.next_slot ? s.next_slot->level : s.slot->level;
+      const bool half_now = s.next_slot ? s.next_half : s.half;
       if (L != cur && !s.next_slot) {
         Slot* to = nullptr;
         if (L > cur) {  // up: the largest free size up to L
@@ -1107,10 +1197,19 @@ void Manager::apply() {
             if (!M.free[z(q)].empty()) to = M.free[z(q)].back(), M.free[z(q)].pop_back();
           }
         }
-        if (to) {
+        if (to) {  // drawn at half size from the transfer on (none free: the drawing and its picture stay as they are)
           to->used = true;
           s.next_slot = to;
+          s.next_half = hf;
         }
+      } else if (L == cur) {  // the same drawing: drawn at half size or not from now (its picture changes size)
+        if (s.next_slot) {
+          s.next_half = hf;
+        } else if (s.half != hf) {
+          s.half = s.next_half = hf;
+          s.shown = -1;  // composed again
+        }
+        if (P > cur + (half_now ? 1 : 0)) s.last_up = now_;  // the picture went up a level
       }
       if (s.plan_div < s.div) s.last_up = now_;
       s.div = s.plan_div;
@@ -1162,7 +1261,8 @@ void Manager::schedule(double dt) {
         const float steps = s.ready ? static_cast<float>(s.div) * M.step_factor : std::min(desc_.catchup_frames, static_cast<float>(M.re->m.h.warmup + s.div));
         c = steps * M.step_ms[z(L)] + M.render_factor * M.render_ms[z(L)] * (s.started ? 1.f : 2.f);
       }
-      const float comp = (moved && s.div > 1 ? compose_ms(M, kSizes[z(L)]) : 0.f) + static_cast<float>(views) * compose_ms(M, desc_.copy_size);
+      const float comp = (moved && s.div > 1 ? compose_ms(M, kSizes[z(L)]) : 0.f) + (moved ? up_ms(M, L + 1, s.half) : 0.f) +
+                         static_cast<float>(views) * compose_ms(M, desc_.copy_size);
       s.cost = c + comp;
       s.compose_cost = comp;
       if (s.due) {
@@ -1284,7 +1384,10 @@ nvfx_status Manager::begin(double dt, int* jobs) {
       attach(in, mi, i, off);
       continue;
     }
-    const float own = in.visible ? cost(M, level_for(M, in.px * desc_.texel_scale), div_for(rate_px(), in.px)) : 0.f;
+    const int own_level = level_for(M, in.px * desc_.texel_scale);
+    const float H = half_threshold(M);
+    const bool own_half = H > 0.f && in.px >= H && half_fits(M, own_level);
+    const float own = in.visible ? cost(M, own_level, div_for(rate_px(), in.px), own_half) : 0.f;
     const bool room = joined + own <= desc_.budget_ms || (proxy_cut_ > 0.f && in.importance > proxy_cut_) || !in.visible;
     int cell = in.allow_proxy && in.lock_level < 0 ? proxy_cell(M, in) : -1;
     if (cell >= 0 && (M.free_sims.empty() || !room)) {
@@ -1472,6 +1575,7 @@ nvfx_status Manager::end() {
       in.pic_time = static_cast<double>(s->show - in.offset) / static_cast<double>(M.fps);
       if (s->refs > 1) flags |= NVFX_PICTURE_SHARED;
       if (s->held || s->paused) flags |= NVFX_PICTURE_HELD;
+      if (s->half) flags |= NVFX_PICTURE_HALF;
       if (!M.loop && M.frames > 0 && s->show - in.offset >= M.frames - 1) in.finished = true;
     }
     if (before != in.pic) flags |= NVFX_PICTURE_NEW;
@@ -1496,6 +1600,7 @@ nvfx_status Manager::end() {
         continue;
       }
       if (s.slot) st.lod[s.slot->level][std::clamp(s.div, 1, kMaxDiv) - 1]++;
+      if (s.slot && s.half) st.half++;
       st.updated += s.updated ? 1 : 0;
       st.steps += s.steps;
       st.renders += s.renders;
@@ -1570,6 +1675,7 @@ void Manager::transfer(Model& M, Sim& s) {
   s.old_slot = &from;
   s.slot = &to;
   s.next_slot = nullptr;
+  s.half = s.next_half;
   s.shown = -1;
 }
 
@@ -1715,9 +1821,21 @@ void Manager::interpolate(Model& M, const std::uint8_t* a, const std::uint8_t* b
   }
 }
 
-// The picture of the simulation's display frame for its viewers without an offset: a keyframe, or between two.
+// The picture of the simulation's display frame for its viewers without an offset: a keyframe, or between two; drawn at
+// half size, brought up by the bilinear 2x (as nvfx_instance_set_upscale(NVFX_UPSCALE_BILINEAR) draws it).
 void Manager::compose_main(Model& M, Sim& s, Work& w) {
-  (void)w;
+  compose_drawing(M, s);
+  Slot& L = *s.slot;
+  if (!s.half || desc_.half_upscale != NVFX_UPSCALE_BILINEAR || L.up.empty()) return;
+  rt::Upscaler* u = w.up[z(M.isa)][z(L.level)].get();
+  if (!u) return;  // never: add_model made it
+  const rt::FrameInput plain;
+  u->run(s.pic, z(L.size) * 4, 0, 0.0, plain, L.up.data(), z(L.size) * 8);
+  s.pic = L.up.data();
+  s.pic_size = 2 * L.size;
+}
+
+void Manager::compose_drawing(Model& M, Sim& s) {
   Slot& L = *s.slot;
   const std::int64_t f = std::clamp(s.show, s.fa, s.fb);
   s.pic_size = L.size;
