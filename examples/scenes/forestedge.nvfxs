@@ -1,0 +1,73 @@
+# A town at the edge of a burning forest at night, written as a script (docs/COMPOSE.md §4) to show round 10's fire
+# effects (docs/EFFECTS_FIRE2.md) together:
+#
+#   nvfx_scene_script --script examples/scenes/forestedge.nvfxs --models DIR --out forestedge.mp4
+#
+# DIR holds crownfire.nvfx, windowfire.nvfx and dustexplosion.nvfx (with study M3's mean state) (docs/EFFECTS_FIRE2.md).
+#
+# Night at the edge of a forest. A crown fire runs through the trees behind the town, its crowns torching and its smoke
+# bent over by the wind; embers drift over the roofs. A house on the left is already burning: flames pour from two of
+# its windows and roll up the wall, black smoke spreading under its eaves. At 2 s a window of the house in the middle
+# catches and the fire in its room grows. At 5 s the mill on the right blows up: flour dust lit inside it flashes
+# through the cloud and a huge brown-orange fireball bursts out with a shock that shakes the town, flattens the window
+# flames for a moment and throws debris and burning embers; then a pall of dust hangs over the wreck, and ash falls.
+
+scene      size 1280 x 720, fps 30, length 10 s, ground 620
+bus        at (-128, -400), size 1536 x 1180, cell 8
+particles  capacity 9000, flow 0.9
+keyframes  0.8, 2.4, 4.0, 5.2, 5.6, 6.2, 7.4, 9.0
+
+effect crownfire     = "crownfire.nvfx"
+effect windowfire    = "windowfire.nvfx"
+effect dustexplosion = "dustexplosion.nvfx"
+
+let blast = t - boom                                                    # since the mill blew up (negative before it)
+let flash = if(blast >= 0, smooth(blast / 0.12) * exp(-blast / 0.4), 0)
+let burn  = if(blast >= 0, smooth(blast / 0.3) * exp(-blast / 1.3), 0)
+let wave  = if(t >= hit, smooth((t - hit) / 0.12) * exp(-(t - hit) / 0.7), 0)   # the shock wave passing the houses
+let gusts = noise(0.7 * t, 2.3, 0)                                      # the fire's wind, gusting
+let blow  = 0.68 + 0.06 * gusts
+let mill  = 1010                                                         # the mill (world x)
+
+# The forest behind the town: three crown fire tiles along the skyline, overlapping, burning before a wind to the right.
+module f1 = crownfire, size 128, width 640, at (120, ground - 70), sink 0.02, feather 0.15, start 0, seed 2631001,
+            controls (0.7, 0.7, 0.5), intensity 0.7, wind blow
+module f2 = crownfire, size 128, width 640, at (500, ground - 80), sink 0.02, feather 0.15, start 3, seed 2631002,
+            controls (0.8, 0.7, 0.55), intensity 0.8, wind blow
+module f3 = crownfire, size 128, width 640, at (880, ground - 70), sink 0.02, feather 0.15, start 5, seed 2631003,
+            controls (0.6, 0.7, 0.5), intensity 0.6, wind blow
+# The burning house on the left: two windows, one above the other.
+module h1 = windowfire, size 128, width 300, at (250, ground - 20), sink 0.094, feather 0.12, start 0, seed 2631011,
+            controls (0.75, 0.55, 0.5), intensity 0.75, wind 0.55 + 0.4 * wave
+module h2 = windowfire, size 128, width 260, at (250, ground - 250), sink 0.094, feather 0.12, start 2, seed 2631012,
+            controls (0.55, 0.55, 0.5), intensity 0.55, wind 0.55 + 0.4 * wave
+# The house in the middle: a window that catches at 2 s, its fire growing.
+module h3 = windowfire, size 128, width 280, at (640, ground - 30), sink 0.094, feather 0.12, start 0, seed 2631021,
+            waiting, controls (0.1, 0.55, 0.4), intensity 0.1 + 0.6 * smooth((t - 2) / 3), wind 0.55 + 0.4 * wave
+# The mill on the right: its dust cloud, lit in its middle at 5 s.
+module dust = dustexplosion, size 128, width 820, at (mill, ground), sink 0.02, feather 0.12, start 0, seed 2631031,
+              waiting, controls (1, 0.5, 0.6), intensity 1, ignition 0.5, turbulence 0.6,
+              opacity 1 - 0.5 * smooth((dust.age - 3.6) / 0.6)
+
+light   gain 0.12, flash (1.0 * flash, 0.75 * flash, 0.45 * flash)
+frame   exposure 1.2 * (1 + 0.5 * flash), fade smooth(t / 0.4) * smooth((length - t) / 0.6), haze 1, bloom 1,
+        bloom_threshold 1
+camera  x (rand - 0.5) * 14 * wave, y (rand - 0.5) * 14 * wave
+
+field forest   = lamp, at (500, ground - 260), radius 900, strength 0.55, colour (1, 0.5, 0.2)
+field house    = lamp, at (250, ground - 120), radius 360, strength 0.5, colour (1, 0.5, 0.2)
+field middle   = lamp, at (640, ground - 60), radius 260, strength 0.5 * smooth((t - 2) / 3), colour (1, 0.5, 0.2)
+field fireball = lamp, at (mill, ground - 200), radius 700, strength 1.6 * burn, colour (1, 0.55, 0.22)
+
+emit embers, on f1, f2, f3, tries 2, chance 0.5, spread 260
+emit embers, on h1, h2, tries 1, chance 0.3, spread 40
+emit ash, in (0, 0), size 1280 x 640, density 0.5 + 1.0 * smooth((t - hit - 0.5) / 1.5), wind (90, 0)
+
+at 2.0:
+  wake h3
+# The mill blows up.
+at 5.0 as boom:
+  wake dust
+at 5.3 as hit:
+  shock at (mill, ground - 80), speed 1300, decay 0.4, amp 6, width 30
+  burst at (mill, ground - 60), radius 160, embers 320, debris 110, speed 700
