@@ -1,15 +1,16 @@
 # The effect library
 
-A catalogue of 214 named, ready-to-use effects that a game lists, places and drives without training anything: a
+A catalogue of 224 named, ready-to-use effects that a game lists, places and drives without training anything: a
 campfire, a grenade, a steam vent, a portal, a lightning strike, ground fog, a dust impact, a flamethrower, a plasma
 orb, a dust devil, a rocket's smoke trail, rain, a wall of fire, a forge, a nuke, a rocket launch, a locomotive's
 chimney, an ink cloud, a waterfall, a fountain, a splash, a rain shaft, a lava flow, a volcano erupting, an avalanche,
-a candelabra, smoke rings, dry-ice fog. Each plays the twenty-seven trained rollout models
+a candelabra, smoke rings, dry-ice fog, a forest's crown fire, a window fire, a mill's dust explosion. Each plays the
+thirty trained rollout models
 (fire, smoke, explosion v2, steam and magic; fog, dust and cloud, [EFFECTS_ATMOSPHERE.md](EFFECTS_ATMOSPHERE.md); jet,
 orb and vortex, [EFFECTS_ENERGY.md](EFFECTS_ENERGY.md); wildfire, coals and mushroom, [EFFECTS_BLAZE.md](EFFECTS_BLAZE.md);
 launch, puffs and ink, [EFFECTS_FLOW.md](EFFECTS_FLOW.md); waterfall, fountain, splash and rainshaft,
 [EFFECTS_WATER.md](EFFECTS_WATER.md); lava, eruption and avalanche, [EFFECTS_EARTH.md](EFFECTS_EARTH.md); candle, smokering and
-heavygas, [EFFECTS_AIR.md](EFFECTS_AIR.md)) and the compositor's procedural elements (embers, sparks, shock fronts, scorch marks, flashes, lights, bolts, rings), at
+heavygas, [EFFECTS_AIR.md](EFFECTS_AIR.md); crownfire, windowfire and dustexplosion, [EFFECTS_FIRE2.md](EFFECTS_FIRE2.md)) and the compositor's procedural elements (embers, sparks, shock fronts, scorch marks, flashes, lights, bolts, rings), at
 a size, with parameters mapped onto the models' controls and looks. The 23 entries of the six newer models were added
 with the recipe of §6, in text; the only code they needed is a third anchor, for the jet's nozzle. The nine newest
 entries needed two features of the compositor: **trails** (`rocket_trail`, `vehicle_dust_wake`, `carried_torch`,
@@ -31,7 +32,9 @@ lava counted among the effects that give light (a module of it lights the scene 
 `gas`; the only code they needed is the candle counted among the effects that give light, as lava is. The last,
 `weather_director` (§1, Weather), plays the weather director ([WEATHER.md](WEATHER.md)): a room's own weather moving
 between regimes in the order real weather keeps, set by its `regime` parameter; the code it needed is the director and
-its statement in entries.
+its statement in entries. The ten **round 10 fire** entries (`library/fire2.nvfxl`: crown fires, window fires, dust
+explosions; §1, Fire, round 10) came after it, in text, in the categories fire, smoke and explosions; the only code they
+needed is the three counted among the effects that give light.
 
 ![The library's contact sheet: the entries of the first five models](figures/library_sheet.png)
 
@@ -77,13 +80,14 @@ lava, eruption and avalanche (§1, Earth).
 With the third round's 70 (§10: 20 weather, 23 combat, 14 magic, 13 fire, smoke, steam and light; 34 learned, 36
 procedural only) the catalogue holds **201** entries, 135 of them learned and 66 procedural only; with the twelve air
 entries (§1, Air; all learned, in the categories fire, smoke and gas, not in the table above), **213**, 147 of them learned;
-with the weather director (§1, Weather; learned, not in the table above either), **214**, 148 of them learned.
+with the weather director (§1, Weather; learned, not in the table above either), **214**, 148 of them learned; with
+round 10's ten fire entries (§1, Fire, round 10; all learned, not in the table above), **224**, 158 of them learned.
 
-**What is learned and what is not.** Only twenty-seven things move by a trained model: fire, smoke, an explosion, steam,
+**What is learned and what is not.** Only thirty things move by a trained model: fire, smoke, an explosion, steam,
 magic, fog, dust, cloud, a jet, an orb, a vortex, a wildfire front, coals, a mushroom cloud, an engine's blast on the
 ground (launch), smoke in puffs, a plume with almost no buoyancy (ink), the bodies of a
 waterfall, a fountain, a splash and a rain shaft, lava, an eruption's ash column and an avalanche's powder cloud, and a
-candle's flame, a smoke ring and heavy gas. Everything else in an entry is the
+candle's flame, a smoke ring and heavy gas, and a crown fire, a window fire and a dust explosion. Everything else in an entry is the
 compositor's: particles (embers, sparks, debris), shock fronts, scorch marks, flashes, camera shakes, and the glows this
 library adds (lightning and electric arcs, rings, discs and motes of light, lamps; rain, snow, ash and leaves; water's random detail). Entries
 that use no model at all say *(procedural)* in their description. A trail's material is learned (it plays in the
@@ -488,6 +492,41 @@ with no allocation. The keyframes of
 AVX2, `ctest -R LibraryAirKeyframesFrozen`). The air models are linked into the models' folder with the others
 (`ln -s ../../fx_air/models/d/{candle,smokering,heavygas}.nvfx .`).
 
+### Fire, round 10 (10, `library/fire2.nvfxl`)
+
+The crown fire model (fire running through a forest's crowns: the crowns torch in their own flames, spot fires catch
+ahead, a tall column of smoke bends over in the wind), the window fire model (a room fire venting from a window seen
+front-on: flames out of the opening's upper part and up the wall, the room's glow below, black smoke spreading under the
+eave at the tile's top) and the dust explosion model (a dust cloud lit at one end or in its middle: the flame runs
+through it into a brown-orange fireball that billows up and burns out, leaving a pall; once, 4 s),
+[EFFECTS_FIRE2.md](EFFECTS_FIRE2.md): all three work by their test's rule. The file declares the three models itself
+(`crown_fx`, `window_fx`, `dust_fx`). The crown fires are drawn by a field-shader look (`forest_fire`: the model's own
+renderer draws the smoke column thin and dark with green fringes), the dust explosions by `dust_blast` and `coal_blast`
+(its own renderer gives the unlit cloud blue-green fringes and draws the pall faint), the window fires by their own
+renderer (the smouldering one by a dimmer look, `smoulder`). Embers are the compositor's (`emit embers` on the crown
+and window modules, a `burst` in the mill). Marked *(fire2)*.
+
+| effect | what it is | plays | box, anchor | runs | parameters (default) | how it looks |
+|---|---|---|---|---|---|---|
+| `crown_fire` (fire2) | Fire running through a forest's crowns, flames standing over the canopy and leaning before the wind, embers thrown ahead and a tall column of smoke bending over; its anchor is the ground under the trees | crownfire; look forest_fire, embers, lamp | 640 x 640, base | loop | intensity (0.6), wind (0.65) | Fair: a row of crowns torching in their own tongues under a column of smoke lit by the fire, embers flying; the flames carry vertical streaks and the column ends softly at the tile's top; nothing draws the trees, so the flames stand over an empty band. |
+| `forest_fire_front` (fire2) | A crown fire running through a wide stand of trees before a strong wind, spot fires catching ahead, a wall of smoke bent over (three tiles) | crownfire; look forest_fire, embers, lamp, ash | 1500 x 760, base | loop | intensity (0.8), wind (0.8) | Fair: a long front of torching crowns whose columns lean downwind and merge into a wall of smoke; streaky, and the three tiles' columns stay three. |
+| `torching_trees` (fire2) | A few crowns burning in still air, each its own tall flame, a column of smoke going straight up | crownfire; look forest_fire, embers, lamp | 420 x 520, base | loop | intensity (0.2) | Fair: a narrow stand of torching crowns under a straight column; the low intensity makes the zone narrower, not the flames much smaller. |
+| `distant_forest_fire` (fire2) | A line of burning crowns far off, under a towering column of smoke drifting in the wind | crownfire; look forest_fire, lamp | 520 x 560, base | loop | intensity (0.7), wind (0.6) | Fair: as `crown_fire` without embers; best small, on a horizon, where the streaks are lost. |
+| `window_fire` (fire2) | A burning room venting from its window: flames pour out of the top of the opening and roll up the wall, black smoke spreading under the eave; its anchor is the middle of the sill | windowfire; embers, lamp | 300 x 380, base | loop | intensity (0.6), wind (0.5) | Fair: bright flames out of the window's upper part and up the wall, a black plume that spreads out under the eave; the room's glow in the lower part is patchy; nothing draws the facade or the window. |
+| `burning_house` (fire2) | Three windows of a house venting flames, two on the ground floor and one above, their smoke spreading under the eaves (three tiles) | windowfire; embers, lamp | 640 x 560, base | loop | intensity (0.7), wind (0.55) | Fair: three window fires, each with its own plume and ceiling jet; the upper window's eave and the lower ones' are where their tiles end, so each plume stops there. |
+| `smoking_window` (fire2) | A fire smouldering in a room: the window glowing dull red, flames licking at its top, thick black smoke pouring up the wall | windowfire; look smoulder, lamp | 260 x 340, base | loop | intensity (0.1) | Fair: a dim, smoky window fire; the model's flame changes little with its intensity, so the look does most of the smouldering. |
+| `dust_explosion` (fire2) | A cloud of dust lit at one end: the flame runs through it into a brown-orange fireball that billows up and burns out, leaving a brown pall | dustexplosion; look dust_blast, lamp, flash | 520 x 460, base | once, 4.2 s | size (0.6), ignition (0.2) | Fair: the flame visibly runs from the lit end through the cloud, the fireball billows up and leaves a tan pall that rises and thins; streaks inside the fireball, and its orange is paler than the model's own renderer's. |
+| `mill_explosion` (fire2) | A mill's flour dust lit in its middle: a huge fireball bursts out with a flash, a shock, debris and burning embers, and a pall hangs over the wreck | dustexplosion; look dust_blast, flash, shake, shock, lamp, burst | 760 x 640, base | once, 4.5 s | power (1) | Fair: a big flash and fireball with debris and sparks, then a broad tan pall; the fireball reads as lit dust more than flame. |
+| `mine_dust_blast` (fire2) | A coal-dust blast in a mine gallery: lit at one end, the flame races along the cloud, then a dark pall fills the gallery | dustexplosion; look coal_blast, lamp | 760 x 360, base | once, 4.2 s | size (0.5) | Fair: the flame runs along the cloud from its left end; the dark dust shows little against the night stage and the fireball dominates. |
+
+In the gallery (`--video`, two threads of the shared machine), the entries took 7 to 127 ms a frame with their stage's
+own picture (the stages 632 x 472 to 1704 x 1280; one run, provisional); every entry played with no allocation. The
+keyframes of `crown_fire`, `window_fire` and `dust_explosion` are frozen ([frozen_fire2.csv](../results/library/frozen_fire2.csv),
+float on AVX2, `ctest -R LibraryFire2KeyframesFrozen`). The three models are linked into the models' folder with the
+others (`ln -s ../../fx_fire2/models/d/{crownfire,windowfire,dustexplosion}.nvfx .`).
+
+![The ten round-10 fire entries, each alone at its show moment](figures/library_sheet_fire2.png)
+
 ## 2. The format
 
 A catalogue is written in the scene-script language ([COMPOSE.md](COMPOSE.md) §4), with two more statements. Each
@@ -646,7 +685,7 @@ error, spawns, no room, steal, stop, rooms freed, camera, clear, the same frames
 
 ## 4. The gallery
 
-The models' folder, `$NEURALVFX_DATA/library/models` by default, holds the twenty-seven learned effects under the names
+The models' folder, `$NEURALVFX_DATA/library/models` by default, holds the thirty learned effects under the names
 `models.nvfxl` gives them: study M's fire ([REPORT.md](REPORT.md) §14, which replaced v2's), the v2 smoke, study
 M3's explosion and dust (v2's and round 5's with a mean state, [REPORT.md](REPORT.md) §14.9, which replaced them),
 study D's steam, round 5's fog, cloud and jet, and
@@ -656,7 +695,8 @@ vortex), and round 7's wildfire, coals and mushroom ([EFFECTS_BLAZE.md](EFFECTS_
 ([EFFECTS_WATER.md](EFFECTS_WATER.md)); the mushroom and the splash are study O's (a mean state, and for the mushroom a
 stepper fine-tuned on 30-frame windows; [REPORT.md](REPORT.md) §16.3, which replaced round 7's and round 8's), and
 round 9's lava, eruption and avalanche ([EFFECTS_EARTH.md](EFFECTS_EARTH.md)) and candle, smokering and heavygas
-([EFFECTS_AIR.md](EFFECTS_AIR.md)). The
+([EFFECTS_AIR.md](EFFECTS_AIR.md)), and round 10's crownfire, windowfire and dustexplosion
+([EFFECTS_FIRE2.md](EFFECTS_FIRE2.md); declared in `library/fire2.nvfxl` itself). The
 orb plays at float whatever the stage's precision (`precision float` on its `effect` line): study L's orb failed study
 K's int8 rule on its average picture ([REPORT.md](REPORT.md) §13.9). Links are enough:
 
@@ -722,7 +762,7 @@ Outputs go under `$NEURALVFX_DATA/library` (the sheet, the video, keyframes); on
 
 **Tests** (`ctest`): `neuralfx.LibraryCatalogueCheck` (no data: the catalogue and every procedural entry);
 `neuralfx.LibraryHostExample` (the C example's self-test); `neuralfx.LibraryCataloguePlays` (every entry, with the
-twenty-seven models in `NEURALFX_MODELS_LIBRARY`, by default `$NEURALVFX_DATA/library/models`; skipped without them);
+thirty models in `NEURALFX_MODELS_LIBRARY`, by default `$NEURALVFX_DATA/library/models`; skipped without them);
 `neuralfx.LibraryKeyframesFrozen` (the keyframes of `campfire`, `blue_gas_flame`, `grenade`, `steam_vent`, `portal`,
 `lightning_strike`, `ground_fog`, `dust_impact`, `flamethrower`, `plasma_orb`, `dust_devil`, `wall_of_flames`,
 `distant_mushroom`, the water's and the earth's (`lava_flow`, `volcano_eruption`, `avalanche`), and two moving ones,
