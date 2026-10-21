@@ -2,6 +2,7 @@
 // training, validation and the test (once), demo videos and timing. Every step writes under --root (default
 // $NEURALVFX_DATA/n_3d, else /root/nvfx-data/n_3d) and resumes from what it has written. `--study n2` selects study
 // N2's seeds, held-out settings, data root (n2_3d) and edges (ambient air at the open sides; STUDY_3D.md §14).
+// `--study hres` (alias `n3`) is the finer coarse grid (32 x 48 x 32, fine 2; docs/STUDY_3D_HRES.md).
 //
 //   nvfx_3d pilot  --widths 48,64,80 --seconds 12 --seeds 2       cost per frame, plume rise and puffing at each grid
 //   nvfx_3d look   --width 64 --frames 150 --out DIR               stills of the simulation from the four cameras
@@ -77,11 +78,13 @@ double cpu_now() {
 }
 double now() { return std::chrono::duration<double>(std::chrono::steady_clock::now().time_since_epoch()).count(); }
 
-bool g_n2 = false;  // --study n2 (STUDY_3D.md §14)
+bool g_n2 = false;    // --study n2 (STUDY_3D.md §14)
+bool g_hres = false;  // --study hres|n3 (docs/STUDY_3D_HRES.md): 32 x 48 x 32 coarse, fine 2
+bool n2_recipe() { return g_n2 || g_hres; }
 
 fs::path data_root(const Args& a) {
   if (a.has("root")) return a.str("root");
-  const char* dir = g_n2 ? "n2_3d" : "n_3d";
+  const char* dir = g_hres ? "hres_3d" : g_n2 ? "n2_3d" : "n_3d";
   if (const char* e = std::getenv("NEURALVFX_DATA")) return fs::path(e) / dir;
   return fs::path("/root/nvfx-data") / dir;
 }
@@ -104,6 +107,34 @@ constexpr std::uint64_t kN2Train = 9'200'000;
 constexpr std::uint64_t kN2ValTrack = 9'500'000, kN2ValReal = 9'510'000, kN2ValPlay = 9'520'000;
 constexpr std::uint64_t kN2TestTrack = 9'800'000, kN2TestReal = 9'810'000, kN2TestPlay = 9'820'000;
 constexpr std::uint64_t kN2Edge = 900;  // the edge check: the plays' (or the real runs') base + 900 + the wind's index
+// study hres (STUDY_3D_HRES.md): 9,600,000 + i training; validation and test blocks inside study N's range
+constexpr std::uint64_t kHresTrain = 9'600'000;
+constexpr std::uint64_t kHresValTrack = 9'650'000, kHresValReal = 9'651'000, kHresValPlay = 9'652'000;
+constexpr std::uint64_t kHresTestTrack = 9'860'000, kHresTestReal = 9'861'000, kHresTestPlay = 9'862'000;
+constexpr std::uint64_t kHresEdge = 900;
+constexpr std::uint64_t kHresFireInit = 9'600'777;
+constexpr std::uint64_t kHresFireTrainer = 9'600'000;
+constexpr std::uint64_t kHresLongTrain = 9'620'000;  // the 540-frame runs (40 short runs use kHresTrain + i)
+// smoke hres (STUDY_3D_HRES.md §6): same recipe as N2's smoke2, finer coarse grid
+constexpr std::uint64_t kHresSmokeTrain = 9'610'000;
+constexpr std::uint64_t kHresSmokeValTrack = 9'655'000, kHresSmokeValReal = 9'656'000, kHresSmokeValPlay = 9'657'000;
+constexpr std::uint64_t kHresSmokeTestTrack = 9'865'000, kHresSmokeTestReal = 9'866'000, kHresSmokeTestPlay = 9'867'000;
+constexpr std::uint64_t kHresSmokeInit = 9'610'100;
+constexpr std::uint64_t kHresSmokeTrainer = 9'610'000;
+constexpr std::uint64_t kHresSmokeLongTrain = 9'621'000;
+
+bool hres_smoke(const Args& a) {
+  nfx::sim3d::Effect e = nfx::sim3d::Effect::fire;
+  if (!nfx::sim3d::parse_effect(a.str("effect", "fire"), e)) throw std::invalid_argument("--effect fire|smoke");
+  return e == nfx::sim3d::Effect::smoke;
+}
+
+std::uint64_t hres_train_base(const Args& a) {
+  if (a.has("seed-base")) return a.u64("seed-base", 0);
+  const bool smoke = hres_smoke(a);
+  if (a.str("runs-dir", "train") == "long") return smoke ? kHresSmokeLongTrain : kHresLongTrain;
+  return smoke ? kHresSmokeTrain : kHresTrain;
+}
 constexpr std::uint64_t kFloor = 50;  // the floor's real runs: the real base + 50 + 100 s + k
 constexpr int kWidth = 64, kHeight = 96;
 constexpr int kTrackWarm = 100;  // frames simulated from an empty grid before a tracked state
@@ -114,12 +145,21 @@ constexpr float kPeakT = 1.5f, kPeakD = 0.2f;
 
 r3::Hyper study_hyper() {
   r3::Hyper h;
-  h.rx = kWidth / 4;
-  h.ry = kHeight / 4;
-  h.rz = kWidth / 4;
-  h.fine = 4;
-  h.hidden = 16;
-  h.memory = 4;
+  if (g_hres) {
+    h.rx = kWidth / 2;
+    h.ry = kHeight / 2;
+    h.rz = kWidth / 2;
+    h.fine = 2;
+    h.hidden = 32;
+    h.memory = 8;
+  } else {
+    h.rx = kWidth / 4;
+    h.ry = kHeight / 4;
+    h.rz = kWidth / 4;
+    h.fine = 4;
+    h.hidden = 16;
+    h.memory = 4;
+  }
   h.jacobi = 40;
   h.n_controls = 3;
   h.warmup = 24;
@@ -202,6 +242,13 @@ std::vector<std::array<float, 3>> settings_all(const std::string& split) {
   // probe: for choices made before validation (the detail layer's constants), at the controls of training runs 0 to 3
   // with seeds of its own (9,300,000 + 100 s + k); never used for the rule
   if (split == "probe") return {train_controls(kTrainBase), train_controls(kTrainBase + 1), train_controls(kTrainBase + 2), train_controls(kTrainBase + 3)};
+  if (g_hres) {  // study hres (STUDY_3D_HRES.md §2): committed before validation
+    if (split == "val") return {{0.62f, 0.12f, 0.48f}, {0.38f, 0.88f, 0.62f}, {0.72f, 0.28f, 0.38f}, {0.48f, 0.52f, 0.78f}, {0.28f, 0.68f, 0.22f}};
+    if (split == "test") {
+      return {{0.68f, 0.07f, 0.42f}, {0.52f, 0.93f, 0.52f}, {0.42f, 0.22f, 0.68f}, {0.78f, 0.48f, 0.32f}, {0.33f, 0.72f, 0.42f}, {0.63f, 0.38f, 0.88f}};
+    }
+    throw std::invalid_argument("split must be val or test");
+  }
   if (g_n2) {  // study N2 (§14): new settings, a strong wind towards -x and towards +x in each split
     if (split == "val") return {{0.60f, 0.08f, 0.50f}, {0.40f, 0.92f, 0.65f}, {0.75f, 0.30f, 0.35f}, {0.50f, 0.50f, 0.80f}, {0.30f, 0.65f, 0.25f}};
     if (split == "test") {
@@ -217,9 +264,14 @@ std::vector<std::array<float, 3>> settings_all(const std::string& split) {
 }
 int track_runs(const std::string& split) { return std::min(split == "probe" ? 2 : 3, g_max_runs); }
 int endless_runs(const std::string& split) { return std::min(split == "test" ? 3 : 2, g_max_runs); }
-std::uint64_t base_of(const std::string& split, const std::string& what) {
+std::uint64_t base_of(const std::string& split, const std::string& what, bool smoke = false) {
   if (split == "probe") return 9'300'000 + (what == "track" ? 0 : what == "real" ? 10'000 : 20'000);
   const bool t = split == "test";
+  if (g_hres) {
+    if (what == "track") return t ? (smoke ? kHresSmokeTestTrack : kHresTestTrack) : (smoke ? kHresSmokeValTrack : kHresValTrack);
+    if (what == "real") return t ? (smoke ? kHresSmokeTestReal : kHresTestReal) : (smoke ? kHresSmokeValReal : kHresValReal);
+    return t ? (smoke ? kHresSmokeTestPlay : kHresTestPlay) : (smoke ? kHresSmokeValPlay : kHresValPlay);
+  }
   if (g_n2) {
     if (what == "track") return t ? kN2TestTrack : kN2ValTrack;
     if (what == "real") return t ? kN2TestReal : kN2ValReal;
@@ -546,8 +598,8 @@ std::vector<r3::Run> load_runs(const fs::path& dir) {
 int record(const Args& a) {
   const fs::path root = data_root(a), dir = root / "runs" / a.str("runs-dir", "train");
   fs::create_directories(dir);
-  const int runs = a.i("runs", 40), frames = a.i("frames", g_n2 ? 540 : 240), threads = a.i("threads", 3);
-  const std::uint64_t base = a.u64("seed-base", g_n2 ? kN2Train : kTrainBase);  // fire 9,000,000; smoke 9,100,000; N2 9,200,000
+  const int runs = a.i("runs", 40), frames = a.i("frames", n2_recipe() ? 540 : 240), threads = a.i("threads", 3);
+  const std::uint64_t base = g_hres ? hres_train_base(a) : a.u64("seed-base", g_n2 ? kN2Train : kTrainBase);
   nfx::sim3d::Effect effect = nfx::sim3d::Effect::fire;
   if (!nfx::sim3d::parse_effect(a.str("effect", "fire"), effect)) throw std::invalid_argument("--effect fire|smoke");
   const r3::Hyper h = study_hyper();
@@ -555,15 +607,15 @@ int record(const Args& a) {
     const fs::path f = dir / std::format("run_{:04}.n3run", i);
     if (fs::exists(f)) continue;
     const std::uint64_t seed = base + static_cast<std::uint64_t>(i);
-    const std::vector<float> sched = g_n2 && n2_kind(i) == 1 ? n2_schedule(seed, frames, 30.f) : std::vector<float>{};
-    const auto c = g_n2 ? (sched.empty() ? n2_controls(i, seed) : std::array<float, 3>{sched[0], sched[1], sched[2]}) : train_controls(seed);
+    const std::vector<float> sched = n2_recipe() && n2_kind(i) == 1 ? n2_schedule(seed, frames, 30.f) : std::vector<float>{};
+    const auto c = n2_recipe() ? (sched.empty() ? n2_controls(i, seed) : std::array<float, 3>{sched[0], sched[1], sched[2]}) : train_controls(seed);
     const double t0 = now(), c0 = cpu_now();
     auto p = fine_params(c, seed, threads);
     p.effect = effect;
     const r3::Run r = r3::record_run(p, frames, h, sched);
     if (auto e = r3::save_run(f, r); !e) throw std::runtime_error(e.error());
     std::string kind;
-    if (g_n2) {
+    if (n2_recipe()) {
       kind = n2_kind(i) == 0 ? " (wind at an extreme)" : n2_kind(i) == 2 ? " (random, held)" : "";
       if (!sched.empty()) {
         float wlo = 1.f, whi = 0.f;
@@ -591,8 +643,11 @@ std::vector<r3::Run> training_runs(const Args& a, const fs::path& root) {
 }
 
 r3::Model fresh_model(nfx::sim3d::Effect e = nfx::sim3d::Effect::fire) {
-  r3::Model m = r3::init_model(study_hyper(), g_n2 ? 9'200'777 : 9'000'777);
-  m.edges = g_n2 ? r3::Edges::ambient : r3::Edges::clamp;  // study N clamped; N2 brings ambient air in (§14)
+  std::uint64_t init_seed = 9'000'777;
+  if (g_hres) init_seed = e == nfx::sim3d::Effect::smoke ? kHresSmokeInit : kHresFireInit;
+  else if (g_n2) init_seed = 9'200'777;
+  r3::Model m = r3::init_model(study_hyper(), init_seed);
+  m.edges = n2_recipe() ? r3::Edges::ambient : r3::Edges::clamp;  // study N clamped; N2 and hres bring ambient air in
   m.effect = e == nfx::sim3d::Effect::fire ? "fire3d" : "smoke3d";
   m.fps = 30.f;
   m.noise = nfx::sim3d::forcing(e);
@@ -602,10 +657,19 @@ r3::Model fresh_model(nfx::sim3d::Effect e = nfx::sim3d::Effect::fire) {
 
 r3::TrainOptions train_options(const Args& a) {
   r3::TrainOptions o;
-  o.iterations = a.i("iterations", 1500);
-  o.finetune = a.i("finetune", 600);
-  o.activity_stage = a.i("activity", 300);
-  o.long_stage = a.i("long", 0);
+  if (g_hres) {  // study N2 schedule (STUDY_3D_HRES.md §3)
+    o.iterations = a.i("iterations", 900);
+    o.finetune = a.i("finetune", 350);
+    o.activity_stage = a.i("activity", 250);
+    o.long_stage = a.i("long", 250);
+    o.seed = a.u64("seed", hres_smoke(a) ? kHresSmokeTrainer : kHresFireTrainer);
+  } else {
+    o.iterations = a.i("iterations", 1500);
+    o.finetune = a.i("finetune", 600);
+    o.activity_stage = a.i("activity", 300);
+    o.long_stage = a.i("long", 0);
+    o.seed = a.u64("seed", 1);
+  }
   o.burn_long_min = a.i("burn-long-min", 48);
   o.burn_long_max = a.i("burn-long-max", 240);
   o.batch = a.i("batch", 8);
@@ -614,7 +678,6 @@ r3::TrainOptions train_options(const Args& a) {
   o.lr = a.f("lr", 2e-3f);
   o.lr_finetune = a.f("lr-ft", 7e-4f);
   o.threads = a.i("threads", 3);
-  o.seed = a.u64("seed", 1);
   o.log_every = a.i("log-every", 10);
   o.checkpoint_every = a.i("checkpoint-every", 20);
   o.stop_at = a.i("stop-at", 0);
@@ -648,10 +711,10 @@ int train(const Args& a) {
   };
   r3::train_stepper(m, runs, o, s, [&](const r3::Model& mm, const r3::TrainState& ss) {
     if (auto e = r3::save_checkpoint(ck, mm, ss); !e) throw std::runtime_error(e.error());
-    if (!g_n2 && ss.iteration == stage2_end) {  // candidate A of the validation: the stepper after stages 1 and 2
+    if (!n2_recipe() && ss.iteration == stage2_end) {  // candidate A of the validation: the stepper after stages 1 and 2
       if (auto e = r3::save_checkpoint(root / "ckpt" / (name + "_stage2.ckpt"), mm, ss); !e) throw std::runtime_error(e.error());
     }
-    for (int k = 1; g_n2 && k <= 4; ++k) {  // study N2: a snapshot at the end of every stage
+    for (int k = 1; n2_recipe() && k <= 4; ++k) {  // study N2 and hres: a snapshot at the end of every stage
       if (ss.iteration == r3::stage_end(o, k) && (k == 1 || r3::stage_end(o, k) != r3::stage_end(o, k - 1))) {
         if (auto e = r3::save_checkpoint(root / "ckpt" / std::format("{}_stage{}.ckpt", name, k), mm, ss); !e) throw std::runtime_error(e.error());
         log_line(log, std::format("snapshot {}_stage{} at iteration {}", name, k, ss.iteration));
@@ -828,8 +891,11 @@ int truth(const Args& a) {
   const fs::path root = data_root(a);
   const std::string split = a.need("split");
   const int threads = a.i("threads", 3);
+  const bool smoke = hres_smoke(a);
   const r3::Hyper h = study_hyper();
   const auto sets = settings(split);
+  nfx::sim3d::Effect effect = nfx::sim3d::Effect::fire;
+  if (!nfx::sim3d::parse_effect(a.str("effect", "fire"), effect)) throw std::invalid_argument("--effect fire|smoke");
   for (int s = 0; s < static_cast<int>(sets.size()); ++s) {
     for (int k = 0; k < track_runs(split); ++k) {
       const fs::path f = root / "eval" / split / "truth" / std::format("s{}_k{}.bin", s, k);
@@ -837,8 +903,10 @@ int truth(const Args& a) {
       const double t0 = now();
       Truth t;
       t.controls = sets[zu(s)];
-      t.seed = base_of(split, "track") + 100 * static_cast<std::uint64_t>(s) + static_cast<std::uint64_t>(k);
-      nfx::sim3d::Fluid sim(fine_params(t.controls, t.seed, threads));
+      t.seed = base_of(split, "track", smoke) + 100 * static_cast<std::uint64_t>(s) + static_cast<std::uint64_t>(k);
+      auto p = fine_params(t.controls, t.seed, threads);
+      p.effect = effect;
+      nfx::sim3d::Fluid sim(p);
       for (int fr = 0; fr < kTrackWarm; ++fr) sim.step_frame();
       t.time = sim.time();
       t.coarse = coarse_of(h, sim);
@@ -964,10 +1032,13 @@ int real(const Args& a) {
   const fs::path root = data_root(a);
   const std::string split = a.need("split");
   const int threads = a.i("threads", 3);
+  const bool smoke = hres_smoke(a);
   nfx::Pool pool(threads);
   rd::Renderer rend(kWidth, kHeight, kWidth);
   const auto sets = settings(split);
   const bool floor = split == "test" || a.flag("floor");
+  nfx::sim3d::Effect effect = nfx::sim3d::Effect::fire;
+  if (!nfx::sim3d::parse_effect(a.str("effect", "fire"), effect)) throw std::invalid_argument("--effect fire|smoke");
   for (int s = 0; s < static_cast<int>(sets.size()); ++s) {
     for (int which = 0; which < (floor ? 2 : 1); ++which) {
       for (int k = 0; k < endless_runs(split); ++k) {
@@ -975,8 +1046,10 @@ int real(const Args& a) {
         const fs::path f = root / "eval" / split / "endless" / label / std::format("s{}_k{}.unit", s, k);
         if (fs::exists(f)) continue;
         const double t0 = now();
-        const std::uint64_t seed = base_of(split, "real") + (which ? kFloor : 0) + 100 * static_cast<std::uint64_t>(s) + static_cast<std::uint64_t>(k);
-        nfx::sim3d::Fluid sim(fine_params(sets[zu(s)], seed, threads));
+        const std::uint64_t seed = base_of(split, "real", smoke) + (which ? kFloor : 0) + 100 * static_cast<std::uint64_t>(s) + static_cast<std::uint64_t>(k);
+        auto p = fine_params(sets[zu(s)], seed, threads);
+        p.effect = effect;
+        nfx::sim3d::Fluid sim(p);
         for (int fr = 0; fr < kEndlessWarm; ++fr) sim.step_frame();
         UnitBuilder ub(kEndlessFrames);
         const std::size_t n = zu(sim.nx()) * zu(sim.ny()) * zu(sim.nz());
@@ -1015,7 +1088,7 @@ int play(const Args& a) {
       const fs::path f = root / "eval" / split / "endless" / method / std::format("s{}_k{}.unit", s, k);
       if (fs::exists(f)) continue;
       const double t0 = now();
-      const std::uint64_t seed = base_of(split, "play") + 100 * static_cast<std::uint64_t>(s) + static_cast<std::uint64_t>(k);
+      const std::uint64_t seed = base_of(split, "play", hres_smoke(a)) + 100 * static_cast<std::uint64_t>(s) + static_cast<std::uint64_t>(k);
       const auto c = sets[zu(s)];
       const std::vector<float> cv(c.begin(), c.end());
       const int si = nearest_start(m, c);
@@ -1640,7 +1713,10 @@ int edge(const Args& a) {
   const int threads = a.i("threads", 3);
   nfx::Pool pool(threads);
   // seeds: --seed for every wind (study N's default: 9,900,004), else study N2's: the base + 900 + the wind's index
-  const std::uint64_t base = a.u64("seed-base", (sim ? kN2ValReal : kN2ValPlay) + kN2Edge);
+  const std::uint64_t edge_default = g_hres ? (sim ? kHresValReal : kHresValPlay) + kHresEdge
+                                              : g_n2 ? (sim ? kN2ValReal : kN2ValPlay) + kN2Edge
+                                                     : 9'900'004;
+  const std::uint64_t base = a.u64("seed-base", edge_default);
   const std::string label = a.str("label", sim ? "simulation" : model.stem().string());
   std::ofstream csv;
   if (a.has("out")) {
@@ -1663,7 +1739,7 @@ int edge(const Args& a) {
   const r3::Hyper h = study_hyper();
   for (std::size_t wi = 0; wi < winds.size(); ++wi) {
     const std::array<float, 3> c{cs.at(0), winds[wi], cs.at(2)};
-    const std::uint64_t seed = a.has("seed") ? a.u64("seed", 0) : g_n2 ? base + wi : 9'900'004;
+    const std::uint64_t seed = a.has("seed") ? a.u64("seed", 0) : n2_recipe() ? base + wi : 9'900'004;
     const double t0 = now();
     SideHeat last;
     if (sim) {
@@ -2056,7 +2132,9 @@ int main(int argc, char** argv) {
     const std::string cmd = a.positional()[0];
     g_max_settings = a.i("max-settings", g_max_settings);
     g_max_runs = a.i("max-runs", g_max_runs);
-    g_n2 = a.str("study", "n") == "n2";
+    const std::string study = a.str("study", "n");
+    g_hres = study == "hres" || study == "n3";
+    g_n2 = study == "n2";
     int rc = 2;
     if (cmd == "pilot") rc = pilot(a);
     else if (cmd == "look") rc = look(a);

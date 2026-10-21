@@ -127,6 +127,7 @@ then merge it into main.
     - the scene's random numbers kept.
   - shown in a 40 s scene that clears, clouds over, rains, storms and clears again.
 - **Small 3D:**
+  - **finer coarse 3D (study hres):** fire (N2 C4 lineage) and smoke (N2 smoke2 lineage); [docs/STUDY_3D_HRES.md](docs/STUDY_3D_HRES.md), `tools/study_3d/hres_fire.sh` and `hres_smoke.sh`; `nvfx_3d --study hres` (32 x 48 x 32, fine 2);
   - a second 3D effect: smoke, validated this time, with bounds calibrated on several teacher runs;
   - 3D fire and smoke coupled.
 - **For FUSE:** a sample integration in C++, with the effect pack and the volume API side by side.
