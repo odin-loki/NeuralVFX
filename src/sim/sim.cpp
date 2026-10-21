@@ -38,6 +38,9 @@ std::string_view effect_name(Effect e) {
     case Effect::candle: return "candle";
     case Effect::smokering: return "smokering";
     case Effect::heavygas: return "heavygas";
+    case Effect::crownfire: return "crownfire";
+    case Effect::windowfire: return "windowfire";
+    case Effect::dustexplosion: return "dustexplosion";
     case Effect::geyser: return "geyser";
     case Effect::haboob: return "haboob";
     case Effect::seaspray: return "seaspray";
@@ -54,12 +57,13 @@ bool parse_effect(std::string_view text, Effect& out) {
 
 bool effect_loops(Effect e) { return e != Effect::explosion && e != Effect::dust && e != Effect::mushroom &&
                                    e != Effect::splash && e != Effect::avalanche && e != Effect::smokering &&
-                                   e != Effect::haboob; }
+                                   e != Effect::dustexplosion && e != Effect::haboob; }
 
 int one_shot_frames(Effect e) {
   if (effect_loops(e)) return 0;
   if (e == Effect::avalanche) return 150;  // docs/EFFECTS_EARTH.md
   if (e == Effect::smokering) return 120;  // 4 s: a smoke ring's rise, roll and break-up (docs/EFFECTS_AIR.md)
+  if (e == Effect::dustexplosion) return 120;  // 4 s: the burn through the cloud, the fireball, the pall (docs/EFFECTS_FIRE2.md)
   if (e == Effect::haboob) return 150;     // 5 s: a dust front's run across the frame (docs/EFFECTS_ELEMENTS.md)
   return e == Effect::mushroom ? 150 : 90;
 }
@@ -76,6 +80,7 @@ std::array<std::string_view, kControls> control_names(Effect e) {
   if (e == Effect::avalanche) return {"intensity", "direction", "turbulence"};
   if (e == Effect::candle) return {"intensity", "draught", "turbulence"};  // docs/EFFECTS_AIR.md
   if (e == Effect::heavygas) return {"intensity", "flow", "turbulence"};
+  if (e == Effect::dustexplosion) return {"intensity", "ignition", "turbulence"};  // docs/EFFECTS_FIRE2.md
   if (e == Effect::haboob) return {"intensity", "height", "turbulence"};  // docs/EFFECTS_ELEMENTS.md
   if (e == Effect::seaspray) return {"intensity", "gale", "turbulence"};
   return kControlNames;
@@ -110,6 +115,9 @@ float flicker_rate(Effect e) {
     case Effect::candle: return 1.2f;     // a flame that breathes and gutters
     case Effect::smokering: return 1.4f;  // the puff's lumps, as the explosion's
     case Effect::heavygas: return 0.8f;   // a slow, uneven release, as ink's
+    case Effect::crownfire: return 2.2f;      // crowns torching, as the wildfire's front (docs/EFFECTS_FIRE2.md)
+    case Effect::windowfire: return 2.6f;     // flames, as fire's
+    case Effect::dustexplosion: return 1.4f;  // the cloud's lumps, as the burst of dust
     case Effect::geyser: return 0.3f;     // the conduit's state: eruptions seconds apart (docs/EFFECTS_ELEMENTS.md)
     case Effect::haboob: return 0.8f;     // the outflow's gusts
     case Effect::seaspray: return 0.9f;   // crests that break and settle
@@ -202,6 +210,14 @@ Tune tune(const Params& p) {
     case Effect::candle: return {200.f, 0.f, 0.3f, 0.8f, 0.f, 0.f, 0.15f + 0.9f * turb, 2.f + 22.f * turb, 0.3f};
     case Effect::smokering: return {30.f, 0.f, 0.8f, 0.25f, 0.f, 0.f, 0.2f + 1.0f * turb, 4.f + 26.f * turb, 0.35f};
     case Effect::heavygas: return {0.f, 18.f, 1.f, 0.08f, 0.f, 0.f, 0.2f + 1.2f * turb, 3.f + 14.f * turb, 0.2f};
+    // crownfire, windowfire and dustexplosion (docs/EFFECTS_FIRE2.md); their sources, winds, the window fire's ceiling and
+    // the dust explosion's burning are in add_fire2_sources, add_fire2_forces, add_fire2_divergence and fire2_decay.
+    // crownfire: hot flames over the crowns that cool into a tall column of thick smoke; its wind is its own (sheared,
+    // slowed in the canopy). windowfire: flames out of a room that cool into black smoke. dustexplosion: dust (soot)
+    // that burns where it is hot; the burnt cloud rises, cools and its dust settles.
+    case Effect::crownfire: return {110.f, 3.f, 0.3f, 0.08f, 0.f, 0.f, 0.5f + 2.5f * turb, 8.f + 45.f * turb, 0.2f};
+    case Effect::windowfire: return {110.f, 2.f, 0.5f, 0.2f, 0.f, 0.f, 0.4f + 1.6f * turb, 8.f + 40.f * turb, 0.2f};
+    case Effect::dustexplosion: return {35.f, 5.f, 1.3f, 0.08f, 0.f, 0.f, 0.2f + 0.6f * turb, 4.f + 20.f * turb, 0.6f};
     // geyser, haboob and seaspray (docs/EFFECTS_ELEMENTS.md); their sources, winds, grounds and how their water falls
     // are in add_elements_sources, add_elements_forces and elements_decay. geyser: water is soot (it flies as drops do,
     // geyser_drop) and steam is heat (light, it rises and thins). haboob: the outflow's cold air is
@@ -345,6 +361,7 @@ void Fluid::step(float dt) {
   water_decay(dt);   // waterfall, fountain, splash and rainshaft
   earth_decay(dt);   // avalanche
   air_decay(dt);     // candle, smokering and heavygas
+  fire2_decay(dt);   // crownfire, windowfire and dustexplosion
   elements_decay(dt);  // geyser, haboob and seaspray
   time_ += dt;
 }
@@ -384,6 +401,7 @@ void Fluid::add_sources(float dt) {
   if (add_flow_sources(dt)) return;  // launch, puffs and ink
   if (add_earth_sources(dt)) return;  // lava, eruption and avalanche
   if (add_air_sources(dt)) return;   // candle, smokering and heavygas
+  if (add_fire2_sources(dt)) return;  // crownfire, windowfire and dustexplosion
   if (add_elements_sources(dt)) return;  // geyser, haboob and seaspray
   const bool fire = p_.effect == Effect::fire;
   const float cx = 0.5f * n, cy = (fire ? 0.10f : 0.09f) * n;
@@ -500,6 +518,7 @@ void Fluid::add_forces(float dt) {
   add_water_forces(dt);  // waterfall, fountain, splash and rainshaft
   add_earth_forces(dt);  // lava, eruption and avalanche
   add_air_forces(dt);    // candle, smokering and heavygas
+  add_fire2_forces(dt);  // crownfire, windowfire and dustexplosion
   add_elements_forces(dt);  // geyser, haboob and seaspray
 }
 
@@ -532,13 +551,16 @@ void Fluid::project() {
   if (p_.effect == Effect::dust) add_atmos_divergence();
   add_blaze_divergence();  // the mushroom's burst
   add_earth_divergence();  // the avalanche's cloud (docs/EFFECTS_EARTH.md)
+  add_fire2_divergence();  // the dust explosion's burning gas (docs/EFFECTS_FIRE2.md)
   add_elements_divergence();  // the geyser's vent (docs/EFFECTS_ELEMENTS.md)
   // Open boundaries: p = 0 on the border, which is never written. Warm-started from the last solve.
   constexpr float w = 1.7f;
   // the mushroom and launch stand on the ground too (docs/EFFECTS_BLAZE.md, docs/EFFECTS_FLOW.md), and water falls onto it
   const bool ground = on_ground(p_.effect) || p_.effect == Effect::mushroom || p_.effect == Effect::launch ||
                     water(p_.effect) || earth(p_.effect) || p_.effect == Effect::heavygas ||  // docs/EFFECTS_EARTH.md, docs/EFFECTS_AIR.md
+                    p_.effect == Effect::crownfire || p_.effect == Effect::dustexplosion ||   // docs/EFFECTS_FIRE2.md
                     elements(p_.effect);                                                       // docs/EFFECTS_ELEMENTS.md
+  const bool ceiling = p_.effect == Effect::windowfire;  // the eave over the window fire (docs/EFFECTS_FIRE2.md)
   for (int it = 0; it < p_.pressure_iters; ++it) {
     for (const int colour : {0, 1}) {
       for (int y = 1; y <= n; ++y) {
@@ -549,6 +571,9 @@ void Fluid::project() {
       }
       if (ground) {  // fog, dust and the water effects: the bottom border is closed (no flow through the ground)
         for (int x = 1; x <= n; ++x) pressure_[x, 0] = pressure_[x, 1];
+      }
+      if (ceiling) {  // and the top border under a ceiling
+        for (int x = 1; x <= n; ++x) pressure_[x, n + 1] = pressure_[x, n];
       }
     }
   }
@@ -638,6 +663,7 @@ void Fluid::render(std::span<std::uint8_t> out) const {
   if (render_flow(out)) return;    // launch, puffs and ink
   if (render_water(out)) return;   // waterfall, fountain, splash and rainshaft
   if (render_air(out)) return;     // candle, smokering and heavygas
+  if (render_fire2(out)) return;   // crownfire, windowfire and dustexplosion
   if (render_elements(out)) return;  // geyser, haboob and seaspray
   if (atmos(p_.effect)) {
     render_atmos(out);
@@ -2358,6 +2384,340 @@ bool Fluid::render_air(std::span<std::uint8_t> out) const {
   return true;
 }
 
+// --- crownfire, windowfire and dustexplosion (docs/EFFECTS_FIRE2.md) ----------------------------------------------------
+//
+// Three presets kept apart from the other effects' code: their sources, forces, decay and drawing. As in the other blocks,
+// every force is a function of the state where it acts, the position, the controls and the run's two noise fields
+// (curl_potential, source_flicker), which learned dynamics see as inputs; nothing follows a clock of its own. The dust
+// explosion, which plays once, is made at its first step (its cloud and the spark that lights it, as the explosion's
+// burst) and then burns by its own state: where its dust is hot it burns, giving heat and expanding, and the heat spreads
+// into the dust beside it, so the flame runs through the cloud. It also follows the time since its start, but only
+// through the slower of the two decays a learned one-shot sees as inputs (exp(-t / 1 s)): the cloud can burn for its
+// first one to two seconds.
+
+namespace {
+
+bool fire2_effect(Effect e) { return e == Effect::crownfire || e == Effect::windowfire || e == Effect::dustexplosion; }
+
+// crownfire: the canopy (cells of a 128-cell frame): the crowns from 22 cells up to their tops, a tree every 16 cells,
+// whose tops are 40 to 46 cells up (a crown's middle is its highest and densest part); the trunks under them and the
+// ground (the closed bottom border) are not drawn.
+constexpr float kCrownBase = 22.f;
+float crown_shape(float X) { return 0.5f + 0.5f * std::cos(2.f * 3.14159265f * (X - 8.5f) / 16.f); }  // 1 at a crown's middle
+float crown_top(float X) { return 40.f + 6.f * crown_shape(X); }
+// The fire's extent along the canopy: its burning zone, shifted upwind (the head of the fire is its downwind edge), and
+// where the embers it throws ahead light spot fires in the crowns (both sides in still air, a short way; downwind, further
+// the harder the wind blows). d = 2 wind - 1.
+struct CrownZone {
+  float c, hw;
+};
+CrownZone crown_zone(const Params& p) { return {64.5f - 8.f * (2.f * p.wind - 1.f), 30.f + 10.f * p.intensity}; }
+// How strongly the crowns burn at X (cells of a 128-cell frame), before the torching that the flicker noise draws: the
+// zone, its downwind half burning harder in a wind (the head).
+float crown_burn(const Params& p, float X) {
+  const auto [c, hw] = crown_zone(p);
+  const float d = 2.f * p.wind - 1.f, a = (X - c) / hw;
+  return (1.f - smoothstep(0.7f, 1.f, std::abs(a))) * (0.75f + 0.25f * d * std::clamp(a, -1.f, 1.f));
+}
+// Where spot fires can catch (0 to 1 at X): beyond either edge of the zone, out to 4 cells in still air, up to 36 cells
+// downwind in the strongest wind and none upwind.
+float crown_spots(const Params& p, float X) {
+  const auto [c, hw] = crown_zone(p);
+  const float d = 2.f * p.wind - 1.f, side = X >= c ? 1.f : -1.f, edge = c + side * (hw + 2.f);
+  const float reach = 4.f + 32.f * std::max(0.f, side * d) - 4.f * std::max(0.f, -side * d), out = side * (X - edge);
+  if (reach <= 0.5f || out <= -2.f) return 0.f;
+  return smoothstep(-2.f, 1.f, out) * (1.f - smoothstep(0.7f * reach, reach, out));
+}
+
+// windowfire: the window (cells of a 128-cell frame, the facade seen front-on): an opening 36 cells wide and 32 tall, its
+// sill 12 cells up; the burning room's hot gas flows out through its upper part, above the neutral plane, and the
+// fresh air in through the lower part. The eave over it is the top of the frame (a closed border).
+constexpr float kWinX0 = 46.5f, kWinX1 = 82.5f, kWinSill = 12.f, kWinHead = 44.f;
+float window_neutral(const Params& p) { return 30.f - 6.f * p.intensity; }  // a bigger fire pushes it lower
+
+// dustexplosion: the cloud (cells of a 128-cell frame): an oval on the ground in the middle of the frame, and where the
+// spark lights it (the second control: its left end at 0, its middle at 0.5, its right end at 1).
+struct DustCloud {
+  float cx, cy, a, b;
+};
+DustCloud dust_cloud(const Params& p) {
+  const float a = 30.f + 14.f * p.intensity, b = 14.f + 6.f * p.intensity;
+  return {64.5f, 5.f + b, a, b};
+}
+// The burn: where the dust is hotter than its ignition (0.35 to 0.7) it burns at up to 80 times its amount a second,
+// while the cloud can burn (the slow age decay from 0.4 down to 0.12: fully for its first 0.9 s, not at all after 2.1 s)
+// and until its air is used up (the burning stops as the heat nears its cap, 1.25 to 1.6: the cloud has more dust than
+// its air can burn, so most of it is left as the pall).
+float dust_burn_rate(float T, float D, float can, float cap) {
+  if (D <= 0.f || T <= 0.35f) return 0.f;
+  return 80.f * can * D * smoothstep(0.35f, 0.7f, T) * (1.f - smoothstep(cap - 0.4f, cap, T));
+}
+// The heat at which the burning stops (its air used up): 1.25 to 1.6, richer and leaner where the curl noise is (psi).
+float dust_cap(float psi) { return 1.25f + 0.35f * smoothstep(-0.5f, 0.5f, psi); }
+float dust_can_burn(float time) { return smoothstep(0.12f, 0.4f, std::exp(-time / 1.f)); }
+constexpr float kDustHeat = 4.f;  // heat per unit of dust burnt
+
+}  // namespace
+
+bool Fluid::add_fire2_sources(float dt) {
+  if (!fire2_effect(p_.effect)) return false;
+  const float n = f(n_), s = n / 128.f, I = p_.intensity;
+  const auto flicker = [&](int x, int y) { return source_flicker(p_, f(x) / s, f(y) / s, time_); };
+  if (p_.effect == Effect::crownfire) {
+    // The crowns burn through their depth: flames where the flicker noise is high (crowns torching), in stronger and
+    // weaker stretches that move along the canopy with the curl noise; the head burns hardest. Beyond the zone, where the
+    // flicker is high, spot fires catch in the crowns the embers land in, and die down as it falls.
+    const float heat = 1.5f + 0.4f * I, lift = (24.f + 16.f * I) * s, smoke = 1.2f + 0.6f * I;
+    const int y_lo = std::max(1, static_cast<int>(kCrownBase * s)), y_hi = std::min(n_, static_cast<int>(46.f * s) + 1);
+    for (int x = 1; x <= n_; ++x) {
+      const float X = f(x) / s, burn = crown_burn(p_, X), spots = crown_spots(p_, X);
+      if (burn <= 0.f && spots <= 0.f) continue;
+      const float top = crown_top(X), crown = 0.6f + 0.4f * crown_shape(X);
+      for (int y = y_lo; y <= y_hi; ++y) {
+        const float Y = f(y) / s, in = crown * smoothstep(kCrownBase, kCrownBase + 4.f, Y) * (1.f - smoothstep(top - 5.f, top, Y));
+        if (in <= 0.f) continue;
+        const float fl = flicker(x, y);
+        const float k = in * (burn * (0.5f + 0.5f * smoothstep(-0.2f, 0.6f, fl)) * (0.75f + 0.25f * curl_potential(p_, X, Y, time_)) +
+                              0.7f * spots * smoothstep(0.3f, 0.6f, fl));
+        if (k <= 0.f) continue;
+        temp_[x, y] = std::max(temp_[x, y], heat * k);
+        soot_[x, y] += dt * smoke * k;
+        v_[x, y] = std::max(v_[x, y], lift * k);
+      }
+    }
+    return true;
+  }
+  if (p_.effect == Effect::windowfire) {
+    // Above the neutral plane the room's hot, smoky gas pours out (drawn in quickly, so the flames are fed and steady),
+    // rising faster towards the head of the window and broken up by the flicker noise; below it the opening is the
+    // burning room seen through the inflowing air: still, glowing red to orange as the flicker noise draws it. The
+    // gas burns once it is out of the window (fire2_decay).
+    const float neutral = window_neutral(p_) * s, x0 = kWinX0 * s, x1 = kWinX1 * s, sill = kWinSill * s, head = kWinHead * s;
+    const float level = 1.3f + 0.5f * I, lift = (18.f + 14.f * I) * s, smoke = 0.3f + 0.2f * I, glow = 0.75f + 0.25f * I;
+    const float rate = 1.f - std::exp(-10.f * dt), slow = 1.f - std::exp(-4.f * dt);
+    const int xl = std::max(1, static_cast<int>(x0)), xh = std::min(n_, static_cast<int>(x1) + 1);
+    const int yl = std::max(1, static_cast<int>(sill - 3.f * s)), yh = std::min(n_, static_cast<int>(head) + 1);
+    for (int y = yl; y <= yh; ++y) {
+      const float Y = f(y), vert = smoothstep(sill - 0.5f, sill + 1.5f * s, Y) * (1.f - smoothstep(head - 1.5f * s, head + 0.5f, Y));
+      for (int x = xl; x <= xh; ++x) {
+        const float X = f(x), jamb = smoothstep(x0 - 0.5f, x0 + 1.5f * s, X) * (1.f - smoothstep(x1 - 1.5f * s, x1 + 0.5f, X));
+        const float in = vert * jamb;
+        if (Y < sill + 1.5f * s && jamb > 0.f) {  // the wall under the sill: still air, so nothing runs down it
+          u_[x, y] *= 1.f - jamb;
+          v_[x, y] *= 1.f - jamb;
+        }
+        if (in <= 0.f) continue;
+        const float fl = smoothstep(-0.3f, 0.5f, flicker(x, y));
+        if (Y >= neutral) {
+          const float up = std::clamp((Y - neutral) / std::max(1.f, head - neutral), 0.f, 1.f), r = rate * in;
+          const float to = std::max(level * (0.5f + 0.5f * fl) * smoothstep(0.f, 0.4f, up), glow * (0.35f + 0.65f * fl));
+          temp_[x, y] += r * (to - temp_[x, y]);
+          v_[x, y] += r * (lift * (0.4f + 0.6f * up) - v_[x, y]);
+          soot_[x, y] += dt * smoke * in * (0.5f + 0.5f * fl) * smoothstep(0.f, 0.4f, up);
+        } else {
+          const float hold = in * (1.f - smoothstep(neutral - 3.f * s, neutral, Y));
+          temp_[x, y] += slow * in * (glow * (0.35f + 0.65f * fl) - temp_[x, y]);
+          u_[x, y] *= 1.f - std::max(hold, in);
+          v_[x, y] *= 1.f - std::max(hold, in);
+        }
+      }
+    }
+    return true;
+  }
+  // dustexplosion: at its first step, the cloud (lumpy, its edge and its lumps from the flicker noise), still, and the
+  // spark that lights it, low in the cloud at its left end, its middle or its right end (the second control)
+  if (time_ > 0.f) return true;
+  const auto [cx, cy, a, b] = dust_cloud(p_);
+  const float level = 0.7f + 0.5f * I, ix = cx + (2.f * p_.wind - 1.f) * 0.75f * a, iy = cy - 0.25f * b, ir = 4.5f;
+  for (int y = 1; y <= n_; ++y) {
+    for (int x = 1; x <= n_; ++x) {
+      const float X = f(x) / s, Y = f(y) / s, fl = flicker(x, y);
+      const float ex = (X - cx) / a, ey = (Y - cy) / b;
+      const float fall = 1.f - smoothstep(0.55f, 1.f + 0.3f * fl, std::sqrt(ex * ex + ey * ey));
+      if (fall > 0.f) soot_[x, y] = std::max(soot_[x, y], level * fall * (0.7f + 0.3f * smoothstep(-0.5f, 0.5f, fl)));
+      const float r = std::sqrt((X - ix) * (X - ix) + (Y - iy) * (Y - iy));
+      if (r < ir) temp_[x, y] = std::max(temp_[x, y], 1.4f * (1.f - smoothstep(0.4f * ir, ir, r)));
+    }
+  }
+  return true;
+}
+
+// crownfire: the wind, slowed in the canopy and stronger with height above it, drags the flames and the column (it leans
+// and bends the column over). windowfire: the eave (upward flow stops under it, so the smoke spreads out sideways under
+// it as a ceiling jet) and a wind along the facade. dustexplosion: none of its own (its burning expands it, project()).
+void Fluid::add_fire2_forces(float dt) {
+  if (!fire2_effect(p_.effect)) return;
+  const float n = f(n_), s = n / 128.f, d = 2.f * p_.wind - 1.f;
+  if (p_.effect == Effect::crownfire) {
+    const float drag = 1.f - std::exp(-2.f * dt);
+    for (int y = 1; y <= n_; ++y) {
+      const float W = d * (16.f + 50.f * smoothstep(40.f, 110.f, f(y) / s)) * s;
+      for (int x = 1; x <= n_; ++x) {
+        const float mat = std::min(1.f, 2.f * (temp_[x, y] + soot_[x, y]));
+        u_[x, y] += drag * (W - u_[x, y]) * mat;
+      }
+    }
+    return;
+  }
+  if (p_.effect == Effect::windowfire) {
+    const float W = d * 22.f * s, drag = 1.f - std::exp(-1.2f * dt), under = 5.f * s;
+    for (int y = 1; y <= n_; ++y) {
+      const float stop = smoothstep(n - under, n, f(y));
+      for (int x = 1; x <= n_; ++x) {
+        const float mat = std::min(1.f, 2.f * (temp_[x, y] + soot_[x, y]));
+        u_[x, y] += drag * (W * (0.4f + 0.6f * f(y) / n) - u_[x, y]) * mat;
+        if (v_[x, y] > 0.f) v_[x, y] *= 1.f - stop;
+      }
+    }
+    return;
+  }
+  (void)dt;
+  (void)n;
+}
+
+// dustexplosion: the burning gas expands, at a rate set by how fast its dust burns, which pushes the cloud out ahead of
+// the flame and swells the fireball.
+void Fluid::add_fire2_divergence() {
+  if (p_.effect != Effect::dustexplosion) return;
+  const float can = dust_can_burn(time_), s = f(n_) / 128.f;
+  if (can <= 0.f) return;
+  for (int y = 1; y <= n_; ++y) {
+    for (int x = 1; x <= n_; ++x) {
+      const float cap = dust_cap(curl_potential(p_, f(x) / s, f(y) / s, time_));
+      div_[x, y] += 2.5f * dust_burn_rate(temp_[x, y], soot_[x, y], can, cap);
+    }
+  }
+}
+
+// crownfire and windowfire: the flames' gas burns out (its heat above 0.4 falls at up to 1.7 and 1.6 a second, on top of
+// tune()'s slow cooling of the warm column) and leaves smoke as it burns. dustexplosion: its dust burns where it is hot (the burn
+// above), and the heat spreads into the dust beside it (the flame's front runs through the cloud), not into clear air.
+// All three: where material leaves the frame at its sides (and top), the outermost cells take their inner neighbours'
+// values, as the earth effects' (earth_decay).
+void Fluid::fire2_decay(float dt) {
+  if (!fire2_effect(p_.effect)) return;
+  if (p_.effect == Effect::dustexplosion) {
+    const float can = dust_can_burn(time_);
+    if (can > 0.f) {
+      // the heat spreads at 40 cells squared a second (four passes of 10, each stable), only where there is dust
+      const float s = f(n_) / 128.f, k = 10.f * dt * s * s;
+      for (int y = 1; y <= n_; ++y) {  // how fast it spreads: faster and slower where the flicker noise is (the front wrinkles)
+        for (int x = 1; x <= n_; ++x) {
+          tmp_b_[x, y] = soot_[x, y] <= 0.02f ? 0.f : smoothstep(0.02f, 0.2f, soot_[x, y]) *
+                                                         (0.5f + smoothstep(-0.4f, 0.4f, source_flicker(p_, f(x) / s, f(y) / s, time_)));
+        }
+      }
+      for (int pass = 0; pass < 4; ++pass) {
+        for (int y = 1; y <= n_; ++y) {
+          for (int x = 1; x <= n_; ++x) {
+            const auto& T = temp_;
+            if (tmp_b_[x, y] <= 0.f) {
+              tmp_a_[x, y] = T[x, y];
+              continue;
+            }
+            const int xl = std::max(1, x - 1), xr = std::min(n_, x + 1), yd = std::max(1, y - 1), yu = std::min(n_, y + 1);
+            const float l = (4.f * (T[xl, y] + T[xr, y] + T[x, yd] + T[x, yu]) + T[xl, yd] + T[xr, yd] + T[xl, yu] + T[xr, yu] - 20.f * T[x, y]) / 6.f;
+            tmp_a_[x, y] = T[x, y] + k * tmp_b_[x, y] * l;
+          }
+        }
+        for (int y = 1; y <= n_; ++y) {
+          for (int x = 1; x <= n_; ++x) temp_[x, y] = tmp_a_[x, y];
+        }
+      }
+      for (int y = 1; y <= n_; ++y) {
+        for (int x = 1; x <= n_; ++x) {
+          const float T = temp_[x, y], D = soot_[x, y], cap = dust_cap(curl_potential(p_, f(x) / s, f(y) / s, time_));
+          const float burnt = std::min({D, dt * dust_burn_rate(T, D, can, cap), std::max(0.f, cap - T) / kDustHeat});
+          temp_[x, y] = T + kDustHeat * burnt;
+          soot_[x, y] = D - 0.1f * burnt;  // most of what burns leaves ash and smoke
+        }
+      }
+    }
+  } else {
+    const bool crown = p_.effect == Effect::crownfire;
+    const float rate = crown ? 1.7f : 1.6f, smoke = crown ? 0.6f : 0.8f, s = f(n_) / 128.f;
+    const float room = crown ? 0.f : kWinHead * s, x0 = kWinX0 * s, x1 = kWinX1 * s;  // the gas in the window burns once out of it
+    for (int y = 1; y <= n_; ++y) {
+      for (int x = 1; x <= n_; ++x) {
+        const float T = temp_[x, y];
+        if (T <= 0.4f || (f(y) < room && f(x) > x0 - 1.f && f(x) < x1 + 1.f)) continue;
+        const float burnt = T * (1.f - std::exp(-rate * dt * smoothstep(0.4f, 0.7f, T)));
+        temp_[x, y] = T - burnt;
+        soot_[x, y] += smoke * burnt;
+      }
+    }
+  }
+  const bool top = p_.effect != Effect::windowfire;
+  for (Field* q : {&temp_, &soot_}) {
+    for (int k = 1; k <= n_; ++k) {
+      (*q)[1, k] = (*q)[2, k];
+      (*q)[n_, k] = (*q)[n_ - 1, k];
+      if (top) (*q)[k, n_] = (*q)[k, n_ - 1];
+    }
+  }
+}
+
+namespace {
+
+// the flames of the crown fire and the window fire: invisible below a heat of 0.4 (the warm column), then dull red,
+// orange, yellow and a pale yellow core
+Rgb flame_ramp(float t) {
+  static constexpr std::array<float, 6> at{0.4f, 0.48f, 0.62f, 0.85f, 1.1f, 1.45f};
+  static constexpr std::array<Rgb, 6> c{{{0.f, 0.f, 0.f}, {0.45f, 0.06f, 0.f}, {0.92f, 0.30f, 0.03f}, {1.f, 0.58f, 0.10f}, {1.f, 0.82f, 0.35f}, {1.f, 0.95f, 0.72f}}};
+  return ramp(at, c, t);
+}
+// the dust flame: a deep brown-red at its edge, through a brown orange to orange and yellow where it is hottest
+Rgb dust_flame_ramp(float t) {
+  static constexpr std::array<float, 6> at{0.3f, 0.45f, 0.7f, 1.0f, 1.3f, 1.65f};
+  static constexpr std::array<Rgb, 6> c{{{0.f, 0.f, 0.f}, {0.35f, 0.08f, 0.02f}, {0.75f, 0.24f, 0.04f}, {1.f, 0.42f, 0.08f}, {1.f, 0.56f, 0.16f}, {1.f, 0.72f, 0.32f}}};
+  return ramp(at, c, t);
+}
+
+}  // namespace
+
+// Emitted light by heat over smoke or dust shaded towards the light (up and to the left). crownfire: its flames over a
+// thick grey-brown smoke; windowfire: its flames and the room's glow over black smoke; dustexplosion: a brown-orange
+// fireball over tan-brown dust. The trees, the facade and the ground are the scene's to draw.
+bool Fluid::render_fire2(std::span<std::uint8_t> out) const {
+  if (!fire2_effect(p_.effect)) return false;
+  const int S = p_.size;
+  const float n = f(n_), sc = n / f(S);
+  constexpr float lx = -0.45f, ly = 0.89f;
+  for (int py = 0; py < S; ++py) {
+    for (int px = 0; px < S; ++px) {
+      const float gx = (f(px) + 0.5f) * sc + 0.5f;
+      const float gy = n - (f(py) + 0.5f) * sc + 0.5f;
+      const float T = temp_.sample(gx, gy), D = soot_.sample(gx, gy);
+      float tau = 0.f;  // optical depth towards the light
+      for (int k = 1; k <= 12; ++k) tau += soot_.sample(gx + lx * 2.f * f(k) * sc, gy + ly * 2.f * f(k) * sc);
+      const float light = std::exp(-0.45f * tau);
+      Rgb c{};
+      float a = 0.f;
+      if (p_.effect == Effect::dustexplosion) {
+        const Rgb e = dust_flame_ramp(T);
+        const float as = 1.f - std::exp(-3.2f * D), keep = 1.f - 0.6f * as;
+        const float lit = std::exp(-0.25f * tau), g = 0.72f * (0.45f + 0.55f * lit) * (1.f - 0.6f * smoothstep(0.4f, 1.3f, T));  // hot dust is charred dark
+        c = {e.r * keep + 0.86f * g * as, e.g * keep + 0.72f * g * as, e.b * keep + 0.52f * g * as};
+        a = clamp01(as + 0.3f * std::max(e.r, e.g));
+      } else {
+        const bool crown = p_.effect == Effect::crownfire;
+        const Rgb e = flame_ramp(T);
+        const float as = 1.f - std::exp(-(crown ? 2.2f : 2.8f) * D), keep = 1.f - 0.5f * as;
+        const float g = (crown ? 0.55f : 0.13f) * (0.3f + 0.7f * light);
+        const Rgb tint = crown ? Rgb{1.f, 0.94f, 0.86f} : Rgb{1.f, 0.97f, 0.94f};
+        c = {e.r * keep + tint.r * g * as, e.g * keep + tint.g * g * as, e.b * keep + tint.b * g * as};
+        a = clamp01(as + 0.3f * std::max(e.r, e.g));
+      }
+      auto o = out.subspan((static_cast<std::size_t>(py) * S + px) * 4, 4);
+      o[0] = q8(c.r);
+      o[1] = q8(c.g);
+      o[2] = q8(c.b);
+      o[3] = q8(a);
+    }
+  }
+  return true;
+}
+
 // --- geyser, haboob and seaspray (docs/EFFECTS_ELEMENTS.md) -----------------------------------------------------------
 //
 // Three presets kept apart from the other effects' code: their sources, forces, decay and drawing. As in the other
@@ -2786,7 +3146,8 @@ Clip simulate(const Params& p) {
     const int warmup = p.warmup >= 0 ? p.warmup
                        : (p.effect == Effect::smoke                                                    ? 180
                           : atmos(p.effect) || water(p.effect) || earth(p.effect) ||
-                                    p.effect == Effect::heavygas || elements(p.effect) ? 150  // heavy gas pools as fog does
+                                    p.effect == Effect::heavygas || p.effect == Effect::crownfire ||
+                                    p.effect == Effect::windowfire || elements(p.effect) ? 150  // heavy gas pools as fog does; the fires' columns and ceiling layer build up
                                                                  : flow_warmup(p.effect));
     for (int i = 0; i < warmup; ++i) fluid.step_frame();
   }

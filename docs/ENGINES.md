@@ -143,7 +143,8 @@ is the same; what differs:
   run it came from (`info.n_variations` start points).
 - **Controls change the dynamics**, so a change shows within a few frames rather than at once.
 - **Sizes**: any multiple of 32 from 32 to 1024. The coarse step costs the same at every size; the detail layer and the
-  renderer scale with pixels.
+  renderer scale with pixels. (Since 21 October 2026 the detail layer costs about an eighth less, a frame 3 to 4%, with
+  the same frames to the bit; [REPORT.md](REPORT.md) §19.)
 - **One instance per playing copy.** The state belongs to the instance; two copies that should look different need two
   instances (sharing one instance shares the look, as before).
 - **Memory**: the effect holds the weights and the start points (stored and resident sizes in `nvfx_effect_info`);
@@ -440,9 +441,9 @@ nothing).
 
 ## 9. The effect library
 
-[LIBRARY.md](LIBRARY.md) is a catalogue of 224 named effects (a campfire, a grenade, a steam vent, a portal, a lightning
-strike, ground fog, a dust impact, a flamethrower, a plasma orb, a rocket's trail, rain, a lava flow, a candelabra, a
-haboob, ...) built from the thirty
+[LIBRARY.md](LIBRARY.md) is a catalogue of 234 named effects (a campfire, a grenade, a steam vent, a portal, a lightning
+strike, ground fog, a dust impact, a flamethrower, a plasma orb, a rocket's trail, rain, a lava flow, a candelabra, a crown
+fire, a window fire, a haboob, ...) built from the thirty-three
 trained models and the compositor's procedural elements, ready to place without training. Four are **trails**
 (`rocket_trail`, `vehicle_dust_wake`, `carried_torch`, `comet_trail`): the game moves them every frame with
 `nvfx_stage_move`, and their smoke, dust or glow stays in the world behind them ([LIBRARY.md](LIBRARY.md) §9); five are
@@ -651,12 +652,16 @@ point. Going back in time or far ahead restarts the shard's rollout (a start run
 
 **Threads and memory.** A volume owns its worker threads (`threads` at creation); the fields and the pictures are the
 same to the bit on any number (tested), and nothing is allocated after creation (`nvfx_alloc_test`). A volume needs
-31 MB (two shards' fine fields, one shared set of step buffers, the renderer's prepared volume; `nvfx_volume_scratch_bytes`);
-the effect file is 268 KB (14,218 weights at 16 bits, 8 start states at 8 bits). `examples/volume_host.c` is the whole
-loop in plain C. The cost per frame is in STUDY_3D.md §8 (provisional): about 70 ms a step and 50 ms a 256 x 256 picture on one
-busy core, so a volume suits one hero effect, or baking; an engine draws the textures on its GPU.
+52 MB (two shards' fine fields, one shared set of step buffers, the detail layer's own buffers of 19 MB, the renderer's
+prepared volume; `nvfx_volume_scratch_bytes`); the effect file is 268 KB (14,218 weights at 16 bits, 8 start states at
+8 bits). `examples/volume_host.c` is the whole loop in plain C. The cost per frame is in STUDY_3D.md §8 (provisional):
+about 70 ms a step and 50 ms a 256 x 256 picture on one busy core. **The detail layer runs on vectors** since 21 October
+2026 (AVX-512 where the CPU has it, else AVX2; nothing to set): the reference's fields to the bit on every ISA, so the
+frames are those of before, and a step costs about a third of what it did (26 against 83 ms on one core of a busy
+machine; the detail layer alone 10 against 64 ms; [REPORT.md](REPORT.md) §19). A volume still suits one hero effect, or
+baking; an engine draws the textures on its GPU.
 
-**What it is not.** No int8 path, no SIMD beyond an AVX2 convolution, no scenes, library, manager or Godot node for
+**What it is not.** No int8 path, no SIMD beyond an AVX2 convolution and the detail layer, no scenes, library, manager or Godot node for
 volumes yet; one trained effect. Its teacher is our own 3D solver, not a validated fire code. The trained fire runs
 away when the wind blows towards -x (a wind control of 0.3 or below: a second fire grows at the box's upwind edge
 until the next shard; STUDY_3D.md §11); keep the wind control between 0.4 and 0.8, where it was seen to behave, and

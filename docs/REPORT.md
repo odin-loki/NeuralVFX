@@ -989,6 +989,28 @@ being weak. By eye the candle is weaker than its numbers (its learned flame does
 library plays it with a gentler swirl and a look). 82, 294 and 146 KB; 0.43 to 0.57 ms per 128 px frame. The full
 account, with a crypt scene and twelve library entries, is in [EFFECTS_AIR.md](EFFECTS_AIR.md).
 
+### 6.18 Fire effects, round 10
+
+Three more presets were trained and tested the same way, at the runtime's default int8, with seeds of the round's own
+(26,000,000 and up): a forest **crown fire** (the crowns of a stand of trees torching in their own flames, spot fires
+catching ahead of the head, a tall column of smoke bent over by a wind that grows with height; distinct from round 7's
+wildfire, a front on the ground), a **window fire** (a room fire venting from a window seen front-on: flames pour out of
+the opening's upper part above the neutral plane and roll up the wall, the room glows through the lower part, and black
+smoke spreads out under the eave as a ceiling jet) and a **dust explosion** (a dust cloud lit at one end or in its
+middle, the second control `ignition`: a deflagration front, the dust's heat spreading into the dust beside it and
+burning where it is hot, runs through the cloud, the burning gas expands into a brown-orange fireball that billows up and
+burns out, and a pall of dust and ash is left; it plays once, for 4 s, with study M3's mean state, decided before
+training). All three work by the rule set before the test: they track a held-out run 2.60 dB [2.16, 3.04], 3.31 dB [2.91,
+3.73] and 8.44 dB [7.88, 9.04] better than the coarse simulation with the same detail layer at 1 s (the dust
+explosion's the largest gain of any effect so far: the 32-cell simulation cannot resolve the burn's preheat zone and
+burns the cloud out in a flash), and endless their average picture is closer than the nearest flipbook's (+1.76, +1.78
+and +3.15 dB) with motion no worse; the dust explosion's average picture, motion and coverage tie a second real run's,
+and its learned flame runs through the cloud from where it was lit. The two fires' detail is six times further from real
+than the flipbook's (spectrum distances 0.43 and 0.44): their learned flames and smoke carry streaks along the flow. By
+eye all three are fair; the library draws the crown fires' column and the dust explosions with field-shader looks. 146,
+146 and 294 KB; 0.49 to 0.65 ms per 128 px frame. The full account, with a forest-edge town scene and ten library
+entries, is in [EFFECTS_FIRE2.md](EFFECTS_FIRE2.md).
+
 ### 6.19 Elements
 
 Three more presets were trained and tested the same way, at the runtime's default int8, with seeds of the round's own
@@ -3925,3 +3947,165 @@ fog, fire and smoke modules and the picture at 1280 x 720, not the director).
 518 (main's 488, the 28 weather tests, the day scene's frozen keyframes and its script check), none skipped;
 `nvfx_alloc_test` (no allocation per frame, the weather director's scenes included); `nvfx_gallery --check
 --require-models` (214 effects, all played, 0 failed); the Godot test (0 failures).
+
+## 19. The detail layer made cheaper: SIMD, exact skipping, fused passes
+
+**Status: finished** (21 October 2026; branch `detail-fast`). Code: `src/runtime/rt_detail3.hpp` with
+`rt_detail3_avx2.cpp` and `rt_detail3_avx512.cpp` (the volumes' detail layer on vectors), `src/runtime/rt_rollout.hpp`
+(the 2D detail layer), `tools/nvfx_detail_bench.cpp` with `tools/detail_bench/` (the A/B probe, the old build, the whole
+measurement), `tests/test_3d.cpp` (`VolumeDetail.VectorsGiveTheReferenceToTheBit`). Results: `results/detail/`.
+
+**The question** (TODO.md): the detail layer, which carries fine heat and soot by the learned coarse flow and locks them
+to the coarse state, was three quarters of a 3D step (59 ms of 60 to 70 on one core, STUDY_3D.md §8) and much of a 2D
+frame at 256 px and above. Make it clearly cheaper, in 2D and 3D, **without changing a frame on any ISA**: the frozen
+tests pass unchanged and no frozen hash is edited; a speed-up that changes frames could only be an option, measured and
+reported.
+
+**How it was measured.** Old and new in one process (`nvfx_detail_bench`): two probe modules, one built from this
+branch and one from main before it (c846c80, `build_old.sh`), each the runtime's internals with only a small C
+interface exported, play the same models, sizes, ISAs, seeds and controls in lockstep, frame by frame, in alternating
+order; per frame the step's, the picture's and the detail stage's thread CPU time (one thread) or wall time (four), and
+every field and picture of both compared bit for bit. A round is 16 frames (2D) or 6 steps (3D); the ratio of a round
+is new's median over old's; reported is the median over 12 (10) rounds with a 95% bootstrap interval, and per size
+and ISA the geometric mean over the 27 shipped 2D models with a 95% bootstrap interval over models. The container moved
+during the study (at 01:18 UTC, from a Sapphire Rapids host to a Cascade Lake one, both with AVX-512); everything below
+is from the second host, shared with six training jobs (load 15 to 21), so **absolute milliseconds are provisional**
+and slow; the interleaved ratios are what to read.
+
+### 19.1 Where the time was
+
+- **3D: plain scalar C++.** The volume runtime ran the reference's `rollout3d::detail_step`: per fine cell (64 x 96 x
+  64) six trilinear interpolations for the velocity, two MacCormack samples of eight corners with bounds checks for each
+  of two fields, the lock's four interpolations and, where new material arrives, three octaves of 4D value noise; and
+  per frame the swirl's lattice built from 1.2 million hashes and the flicker's from half a million.
+- **Skipping cannot pay in 3D, for this model.** After a few frames 91 to 96% of the fine cells hold heat or soot and
+  every 4 x 4 x 4 brick does (only 25% of the values are below 1e-6; none is subnormal), and new material arrives in 8
+  to 11% of the coarse cells but in every coarse row. So no empty brick stays empty: the gain had to come from vectors.
+- **2D was already on vectors and skipped empty spans** (study H2: blocks of 8 or 16 pixels, the stages run row by row a
+  few rows apart, row extents widened by the flow's reach). What bounds it is fetching each lane's bilinear corners
+  (one 16-byte load per lane and row, transposed in registers): with the fetch removed (wrong values, timing only; 512 px,
+  AVX-512, the first host) the stage costs 0.57 to 0.86 of its time, so no change elsewhere can make it much cheaper. At
+  128 px the per-frame and per-row work (grid rows expanded along x, the lock's factors, the noise lattices) was roughly
+  a tenth to a quarter of it (timed with the cycle counter on the busy machine: noisy).
+
+### 19.2 3D: the volume runtime's detail layer on vectors
+
+`rt_detail3.hpp`, built for AVX2 and for AVX-512, replaces `detail_step` through `Workspace::detail` (the reference is
+unchanged and still the trainer's and the tools'; the baseline ISA keeps it). What differs is bookkeeping only:
+- **separable interpolation:** every coarse, swirl and flicker row is interpolated along x once per frame (the
+  reference's first lerp, the same operands), and a cell blends those rows along z and y (or y and z) as the reference
+  does;
+- **the fields interleaved in a zero-bordered box:** a MacCormack sample needs no bounds checks; each lane fetches the
+  two x-corners of both fields of one (y, z) row with one 16-byte load, four rows a sample, transposed in registers;
+  positions are clamped to [-1, size] and floored as `trilinear_zero()` does (a NaN position reads only zeros, as the
+  reference's);
+- **the hashed lattices cached per seed and time level:** the swirl's value noise as its two time slices (from corners
+  hashed once each instead of 16 times a node), the flicker's levels as they are (a volume's two crossfading shards
+  use two seeds: four slots);
+- **one stencil for both fields,** the forward samples written straight into a second box, the block sums of the lock
+  taken in the reference's order (on vectors, a block per lane, when the fine grid is 4 cells a coarse cell).
+
+**Exact by construction:** the two files are compiled without contraction (`-ffp-contract=off`, CMakeLists.txt), so
+every multiply and add rounds on its own as in the reference (the baseline build has no FMA); `std::min`, `std::max`
+and `std::clamp` are reproduced with their ties and NaNs; a lane computes exactly what the reference computes for its
+cell. `VolumeDetail.VectorsGiveTheReferenceToTheBit` holds it to the reference on every ISA the CPU has (through the
+warm-up and step by step, 1 and 3 threads, swirl and breakup on and off, both edge modes, fine rows of whole vectors,
+part vectors and less than one, a state the reference made, two seeds in turn); compiled with contraction it fails at
+once (checked). Memory: 19 MB more per volume (`nvfx_volume_scratch_bytes` 32.8 to 51.6 MB); no allocation per frame.
+
+The chosen 64 x 96 x 64 model (`n2_3d/models/chosen.nvfx3`, controls 0.7, 0.5, 0.6), old against new
+(`results/detail/volume_3d.md`, `detail_3d.md`); every field of every step the same to the bit (240 volume steps, 240
+detail steps):
+
+| | threads | ISA | old ms | new ms | new / old |
+|---|---:|---|---:|---:|---|
+| the detail layer alone | 1 | AVX2 | 63.4 | 11.0 | **0.176 [0.173, 0.179]** |
+| the detail layer alone | 1 | AVX-512 | 64.0 | 10.0 | **0.155 [0.153, 0.158]** |
+| a volume step (`nvfx_volume_step_to`) | 1 | AVX2 | 86.5 | 26.8 | **0.319 [0.300, 0.326]** |
+| a volume step | 1 | AVX-512 | 83.1 | 25.8 | **0.309 [0.306, 0.324]** |
+| the detail layer alone | 4 | AVX2 | 145.6 | 23.7 | 0.174 [0.132, 0.216] |
+| the detail layer alone | 4 | AVX-512 | 121.7 | 23.1 | 0.181 [0.126, 0.211] |
+| a volume step | 4 | AVX2 | 197.6 | 35.3 | 0.184 [0.133, 0.300] |
+| a volume step | 4 | AVX-512 | 172.4 | 53.3 | 0.303 [0.152, 0.372] |
+
+So the detail layer is **5.7 to 6.5 times faster** on one core and a step **3.1 to 3.2 times**; the coarse step (the
+network, projection and advection, about 15 ms) is now the larger part. The four-thread rows are wall time on a machine
+with four cores and a load of 15 to 21: four threads found no free cores (they took longer than one), so those rows say
+only that the ratio holds; on the Sapphire Rapids host before the move, quieter, one core gave 7.8 against 51.8 ms (AVX-512)
+and 9.5 against 52.7 ms (AVX2).
+
+### 19.3 2D: what was left to gain
+
+What ships (each kept only when it was a gain on both ISAs and every frame of the 27 models stayed the same):
+- **the span scan fused into the copy** of each row into the ring: the copy notes the first and last block with
+  material from the bits it loads, instead of scanning the row again (mostly the sparse effects);
+- **the lock's noise only where new material arrives:** a block whose interpolated new material is +0 everywhere skips
+  the flicker (exact: with keep and ck not negative the breakup is a finite number not below +0, and +0 times it is +0);
+- **grid rows expanded by permutes:** each coarse, swirl and noise row is copied once and each vector of pixels takes its
+  values by two-register permutes from a window planned at set-up (the scalar loop where its cells do not fit);
+- **the row stages out of line** (the copy, the round trip, the lock's factors and rows), which compiles a little better.
+
+`results/detail/frames_2d_*.md`: the 27 shipped models, 12 rounds of 16 frames, float; detail = the detail stage, step =
+the whole step, frame = step and picture; new / old, geometric mean over models [95% bootstrap over models]:
+
+| size | ISA | detail | step | frame | detail ms, old / new | frames compared, differing |
+|---:|---|---|---|---|---|---|
+| 128 | AVX2 | **0.878 [0.869, 0.888]** | 0.951 [0.947, 0.955] | 0.971 [0.967, 0.975] | 0.176 / 0.157 | 5,184, 0 |
+| 128 | AVX-512 | **0.868 [0.859, 0.878]** | 0.954 [0.948, 0.959] | 0.975 [0.970, 0.979] | 0.183 / 0.160 | 5,184, 0 |
+| 256 | AVX2 | **0.878 [0.870, 0.887]** | 0.926 [0.920, 0.931] | 0.962 [0.958, 0.966] | 0.569 / 0.496 | 5,184, 0 |
+| 256 | AVX-512 | **0.874 [0.862, 0.885]** | 0.930 [0.924, 0.936] | 0.965 [0.959, 0.972] | 0.568 / 0.503 | 5,184, 0 |
+| 512 | AVX2 | **0.897 [0.885, 0.908]** | 0.913 [0.906, 0.921] | 0.961 [0.954, 0.969] | 2.290 / 2.035 | 5,184, 0 |
+| 512 | AVX-512 | **0.904 [0.886, 0.922]** | 0.926 [0.913, 0.939] | 0.974 [0.968, 0.980] | 2.329 / 2.131 | 5,184, 0 |
+
+Per model the detail stage takes 0.80 to 0.82 (magic, fog) to 0.98 (the orb at 512 px) of its time; the sparse effects (fog,
+heavy gas, cloud, magic) gain most. So the 2D detail layer is about **an eighth cheaper** (a tenth at 512 px), and a
+whole frame 3 to 4% — clearly faster as a stage, not by a factor: it had been on vectors already.
+
+**Tried and not kept** (each measured old against new, frames compared):
+- **hardware gathers** for the grid rows: about a tie on Sapphire Rapids, but on the Cascade Lake host a frame 7 to
+  21% slower (its picture too, which expands its rows the same way); the 3D kernel's rows likewise went back to scalar;
+- **a fast fetch** for vectors whose corners lie within two columns and two rows of a common shift (unaligned loads,
+  unzips and blends instead of per-lane loads): the detail stage 1.2 to 1.35 times slower with intrinsics on AVX-512,
+  its cases' branches unpredictable (about three quarters of the vectors qualify for most effects, 4% for the rain
+  shaft's fast swirl);
+- **skipping empty blocks inside the spans** by a bitmap of 16-pixel units with material: no gain (the row extents
+  already cover little more than the material: 0.25 of the pixels against 0.20 for fog, 0.43 against 0.29 for the
+  avalanche), a few percent slower;
+- **the lock's factors on vectors** (a coarse cell per lane): 6% slower on AVX2 at 128 px, a tie on AVX-512.
+
+**An option that changes frames, measured and not shipped:** a semi-Lagrangian detail layer (the forward sample alone,
+no round trip; `results/detail/option_semilagrangian_256.csv`, 27 models at 256 px against this branch's exact layer)
+costs 0.758 [0.732, 0.782] (AVX2) and 0.751 [0.727, 0.773] (AVX-512) of the exact layer's detail stage, 0.95 of a frame,
+and changes every frame: the lowest picture PSNR against the exact layer over a round is 27 dB (launch) to 57 dB (the
+sparse cloud, coals and smoke ring), 38 dB on average. It blurs the filaments the MacCormack step keeps; it would need its own test against the simulator before
+it could even be offered.
+
+### 19.4 Bit identity
+
+- **The frozen tests, unchanged:** the full ctest, 489 of 489 (main's 488 and the new `VolumeDetail` test), with every
+  frozen keyframe hash and SHA-256 as it was; no frozen CSV edited.
+- **Old against new, directly**, every frame of every timing run above: 31,104 frames of the 27 models (128, 256 and 512
+  px, AVX2 and AVX-512, float; the fine heat and soot, the coarse state, the flow and the picture) and 3,240 more at
+  int8 (256 px), 16,200 pictures through `nvfx_render` (300 frames each, 128 px, both ISAs, the default precision:
+  shards, crossfades and warm-ups), and 480 volume and detail steps of the 3D model (1 and 4 threads, both ISAs): **none
+  differs** (`results/detail/`).
+- **A trap found on the way:** an exact change to one function can still change frames, because GCC fuses
+  multiply-adds into FMAs by the shape of the code around them (CMakeLists.txt's note). Inlining the larger row
+  expansion changed how the AVX2 build compiled its callers, and their frames, though the expansion itself gave the same
+  values; kept out of line it does not. The bench caught it; nothing ships that it has not compared on both builds.
+
+### 19.5 What it means
+
+- **3D: the detail layer is no longer the cost of a volume.** A step is about a third of what it was; what remains is
+  the coarse step (the learned network on 6,144 cells) and the renderer's preparation and picture. A finer state or a
+  larger volume (TODO stage 2) now scales from 10 ms of detail, not 60.
+- **2D: what is left is fetching the samples' corners.** The layer was already vectorised and sparse; its exact gains
+  were an eighth. A cheaper advection (§19.3's option) or the GPU are the ways to make it much cheaper, both outside
+  "the same frames".
+- **Provisional:** one busy machine (the ratios are paired and interleaved; the absolute times are not a quiet machine's).
+
+**Checks** (origin/main is c846c80, the branch's base, so there was nothing to merge): the full build with warnings as
+errors; the full ctest, 489 of 489 (main's 488 and `VolumeDetail`), none skipped; `nvfx_alloc_test` (no allocation per
+frame; the volume on 1 and 3 threads, 0 allocations in 84 frames each); `nvfx_gallery --check --require-models` (213
+effects, 213 played, 0 failed); the Godot test (`engines/godot/test.sh`: the fireball and the library stage, 0 failures
+each, both frames the references' pixels).

@@ -131,7 +131,7 @@ into (g' = g Δθ/θ, about 0.1 to 0.3 m/s²) and 1 to 2 km deep, so sqrt(g' h) 
 runs at that speed, as haboobs' do. The tile's frame is shown faster than real time; the scene sets the pace.
 
 Every earlier effect's clips are unchanged to the byte: `Sim.StudyEffectsAreUnchangedByTheNewOnes` hashes clips of all
-27 earlier effects, unchanged (and now the three new ones, hashed when their presets were frozen for training), and full-size clips (128 px; 64 frames, the one-shots their own length) of all 27 at two
+27 earlier effects, unchanged (and now round 10's fire three, hashed when the two round 10 branches were merged, and these three, hashed when their presets were frozen for training), and full-size clips (128 px; 64 frames, the one-shots their own length) of all 27 at two
 settings were compared byte for byte before and after (54 SHA-256, identical; the data root's
 `fx_elements/jobs/state/baseline_clips.sha256` and `after_clips.sha256`). Tests of the new presets:
 `Sim.ElementsEffectsHaveTheirOwnControlsAndOnlyTheHaboobPlaysOnce`, `Sim.GeyserEruptsHoldsCollapsesIntoSteamAndIsQuietBetween`,
@@ -590,8 +590,9 @@ runtime.
 
 ![The coast: keyframes at 0.8, 2.0, 3.0, 4.0, 5.0, 6.0, 7.2 and 8.4 s](figures/coast_keyframes.png)
 
-The video (rendered at the runtime's int8 default; [videos/README.md](../videos/README.md) §1) and the full keyframes
-are under the data root's `fx_elements/scene` and `fx_elements/media` (outside git); the keyframes' SHA-256 are in
+The video is [videos/scene_coast.mp4](../videos/scene_coast.mp4) (rendered at the runtime's int8 default;
+[videos/README.md](../videos/README.md) §1); the full keyframes are under the data root's `fx_elements/scene/frozen1`
+(outside git), and their SHA-256 are in
 [fx_elements_frozen.csv](../results/experiments/fx_elements_frozen.csv) and `ctest -R ScriptedCoastFrozen` checks them
 (pinned to float on the AVX2 build, skipped without the effects in `NEURALFX_MODELS_ELEMENTS`, by default
 `$NEURALVFX_DATA/fx_elements/models/scene`). They are the same on 1 and 2 threads. It plays without an allocation in
@@ -655,3 +656,14 @@ SHA-256 is not the frozen one and refuses to test twice), the frozen tool's SHA-
 `state/after_clips.sha256`); the scratch probes this document quotes are in `fx_elements/dev` (outside git): `probe` and
 `froude` (§2), `horizon` (the haboob's 4 s pairs, §4), `beside` (§4.5, §4.6), `ctrl2` and `ctrl3` (§4.7), `seedscan`
 (the library's geyser seeds, §6).
+
+**Checks** after main with round 10's fire (4858d12) was merged in, on the shared machine. The merge put the three
+elements after the dust explosion in `sim::Effect` (each round's block whole in `sim.cpp` and `sim.hpp`; the order of
+the lists, switches and tests made to match) and changed no clip: the full-size clips of all 33 effects at two settings
+are byte for byte those of each side before it (the 27 earlier and the elements' three against this branch's build
+before the merge, the fire three against their own branch's; the data root's `fx_elements/jobs/state/premerge_*.sha256`
+and `merged_fire2_*.sha256`), and the hash test now holds all 33. The models name their effect, not its number, so the
+frozen models and keyframes were untouched. The full ctest, 539 of 539 (main's 531 and the 8 of this round: four sim
+tests, a recipe test, `ScriptedCoastFrozen`, `SceneScriptChecks.coast` and `LibraryElementsKeyframesFrozen`), none
+skipped; `nvfx_alloc_test`, no allocation per frame; `nvfx_gallery --check --require-models`, 234 effects, all played, 0
+failed; and the Godot test, 0 failures.
