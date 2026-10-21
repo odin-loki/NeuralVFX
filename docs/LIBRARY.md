@@ -1,13 +1,16 @@
 # The effect library
 
-A catalogue of 191 named, ready-to-use effects that a game lists, places and drives without training anything: a
+A catalogue of 234 named, ready-to-use effects that a game lists, places and drives without training anything: a
 campfire, a grenade, a steam vent, a portal, a lightning strike, ground fog, a dust impact, a flamethrower, a plasma
 orb, a dust devil, a rocket's smoke trail, rain, a wall of fire, a forge, a nuke, a rocket launch, a locomotive's
-chimney, an ink cloud, a waterfall, a fountain, a splash, a rain shaft. Each plays the twenty-one trained rollout models
+chimney, an ink cloud, a waterfall, a fountain, a splash, a rain shaft, a lava flow, a volcano erupting, an avalanche,
+a candelabra, smoke rings, dry-ice fog, a forest's crown fire, a window fire, a mill's dust explosion, a geyser, a
+haboob, sea spray. Each plays the thirty-three trained rollout models
 (fire, smoke, explosion v2, steam and magic; fog, dust and cloud, [EFFECTS_ATMOSPHERE.md](EFFECTS_ATMOSPHERE.md); jet,
 orb and vortex, [EFFECTS_ENERGY.md](EFFECTS_ENERGY.md); wildfire, coals and mushroom, [EFFECTS_BLAZE.md](EFFECTS_BLAZE.md);
 launch, puffs and ink, [EFFECTS_FLOW.md](EFFECTS_FLOW.md); waterfall, fountain, splash and rainshaft,
-[EFFECTS_WATER.md](EFFECTS_WATER.md)) and the compositor's procedural elements (embers, sparks, shock fronts, scorch marks, flashes, lights, bolts, rings), at
+[EFFECTS_WATER.md](EFFECTS_WATER.md); lava, eruption and avalanche, [EFFECTS_EARTH.md](EFFECTS_EARTH.md); candle, smokering and
+heavygas, [EFFECTS_AIR.md](EFFECTS_AIR.md); crownfire, windowfire and dustexplosion, [EFFECTS_FIRE2.md](EFFECTS_FIRE2.md); geyser, haboob and seaspray, [EFFECTS_ELEMENTS.md](EFFECTS_ELEMENTS.md)) and the compositor's procedural elements (embers, sparks, shock fronts, scorch marks, flashes, lights, bolts, rings), at
 a size, with parameters mapped onto the models' controls and looks. The 23 entries of the six newer models were added
 with the recipe of §6, in text; the only code they needed is a third anchor, for the jet's nozzle. The nine newest
 entries needed two features of the compositor: **trails** (`rocket_trail`, `vehicle_dust_wake`, `carried_torch`,
@@ -22,7 +25,16 @@ entries of launch, puffs and ink (round 7 too) came after them, in text again, w
 (waterfalls, fountains, splashes, drips, bubbles, rain on puddles, rain shafts) are water in two layers
 ([EFFECTS_WATER.md](EFFECTS_WATER.md)): the ordered body learned (four new models: waterfall, fountain, splash,
 rainshaft) and the random detail seeded (the composer's deterministic water: spray, pools, ripples, foam, drops),
-or the seeded layer alone (§1, Water).
+or the seeded layer alone (§1, Water). The ten **earth** entries (lava flows and pools, eruptions, avalanches;
+`library/earth.nvfxl`, round 9) came next, in text, with one new category, `earth`; the only code they needed is the
+lava counted among the effects that give light (a module of it lights the scene as fire's do). The twelve **air** entries
+(`library/air.nvfxl`, round 9 too: candles, smoke rings, heavy gas; §1, Air) came next, in text, with one new category,
+`gas`; the only code they needed is the candle counted among the effects that give light, as lava is. The last,
+`weather_director` (§1, Weather), plays the weather director ([WEATHER.md](WEATHER.md)): a room's own weather moving
+between regimes in the order real weather keeps, set by its `regime` parameter; the code it needed is the director and
+its statement in entries. The ten **round 10 fire** entries (`library/fire2.nvfxl`: crown fires, window fires, dust
+explosions; §1, Fire, round 10) came after it, in text, in the categories fire, smoke and explosions; the only code they
+needed is the three counted among the effects that give light.
 
 ![The library's contact sheet: the entries of the first five models](figures/library_sheet.png)
 
@@ -35,6 +47,10 @@ or the seeded layer alone (§1, Water).
 ![The library's contact sheet: the ten entries of launch, puffs and ink](figures/library_sheet_flow.png)
 
 ![The library's contact sheet: the 23 water entries](figures/library_sheet_water.png)
+
+![The library's contact sheet: the ten earth entries](figures/library_sheet_earth.png)
+
+![The library's contact sheet: the twelve air entries](figures/library_sheet_air.png)
 
 *Every entry alone on a stage fitted to its box, at the moment its catalogue says shows it well (`nvfx_gallery`).*
 
@@ -54,18 +70,26 @@ or the seeded layer alone (§1, Water).
 | engines | 5 | 0 | 0 | 0 | 5 | 5 | 0 |
 | underwater | 4 | 0 | 0 | 0 | 4 | 4 | 0 |
 | water | 23 | 0 | 0 | 0 | 0 | 13 | 10 |
-| **all** | **121** | **23** | **9** | **10** | **10** | **91** | **30** |
+| earth | 10 | 0 | 0 | 0 | 0 | 10 | 0 |
+| **all** | **131** | **23** | **9** | **10** | **10** | **101** | **30** |
 
 `engines`, `underwater` and one smoke entry (`smoke_signals`) are the ten of launch, puffs and ink, marked *(flow)*; `water` the 23 of
-water (§1, Water), thirteen of them on the four water models and ten on the composer's seeded water alone.
+water (§1, Water), thirteen of them on the four water models and ten on the composer's seeded water alone; `earth` the ten of
+lava, eruption and avalanche (§1, Earth).
 
 With the third round's 70 (§10: 20 weather, 23 combat, 14 magic, 13 fire, smoke, steam and light; 34 learned, 36
-procedural only) the catalogue holds **191** entries, 125 of them learned and 66 procedural only.
+procedural only) the catalogue holds **201** entries, 135 of them learned and 66 procedural only; with the twelve air
+entries (§1, Air; all learned, in the categories fire, smoke and gas, not in the table above), **213**, 147 of them learned;
+with the weather director (§1, Weather; learned, not in the table above either), **214**, 148 of them learned; with
+round 10's ten fire entries (§1, Fire, round 10; all learned, not in the table above), **224**, 158 of them learned;
+with the ten elements entries (§1, Elements; all learned, in the categories water and weather, not in the table
+above), **234**, 168 of them learned.
 
-**What is learned and what is not.** Only twenty-one things move by a trained model: fire, smoke, an explosion, steam,
+**What is learned and what is not.** Only thirty-three things move by a trained model: fire, smoke, an explosion, steam,
 magic, fog, dust, cloud, a jet, an orb, a vortex, a wildfire front, coals, a mushroom cloud, an engine's blast on the
-ground (launch), smoke in puffs, a plume with almost no buoyancy (ink), and the bodies of a
-waterfall, a fountain, a splash and a rain shaft. Everything else in an entry is the
+ground (launch), smoke in puffs, a plume with almost no buoyancy (ink), the bodies of a
+waterfall, a fountain, a splash and a rain shaft, lava, an eruption's ash column and an avalanche's powder cloud, and a
+candle's flame, a smoke ring and heavy gas, a crown fire, a window fire and a dust explosion, and a geyser's column, a haboob's dust front and sea spray. Everything else in an entry is the
 compositor's: particles (embers, sparks, debris), shock fronts, scorch marks, flashes, camera shakes, and the glows this
 library adds (lightning and electric arcs, rings, discs and motes of light, lamps; rain, snow, ash and leaves; water's random detail). Entries
 that use no model at all say *(procedural)* in their description. A trail's material is learned (it plays in the
@@ -106,7 +130,7 @@ sizes, smoke placed where the flames are) or replaced: §8 says which.
 | `burning_wreck` | A burning wreck: a strong, ragged fire under a column of dark smoke, embers and a red light | fire, smoke; look sooty, embers, lamp | 340 x 520, base | loop | intensity (0.8), wind (0.6) | Good: dark smoke rising out of a ragged fire; the smoke is thin at 128 pixels. |
 | `flamethrower` (new) | A flamethrower: a roaring jet of burning gas from its nozzle (the anchor), widening, breaking up and curling into smoke; it blows to the right | jet; lamp | 520 x 300, left | loop | intensity (0.8), aim (0) | Good: a roaring jet that widens, breaks up and curls into smoke at its end; it blows to the right only. |
 | `gas_leak_fire` (new) | A burning gas leak: a roaring, flickering jet of flame from a broken pipe (the anchor), angled up; it blows to the right | jet; lamp | 300 x 240, left | loop | intensity (0.55) | Good: a small, flickering jet angled up. |
-| `rocket_thruster` (new) | A rocket thruster: a fierce blue-white exhaust with a white-hot core at the nozzle (the anchor), the jet recoloured; it blows to the right | jet; look thrust, glow, lamp | 420 x 200, left | loop | intensity (0.9) | Fair: a blue exhaust behind a white-hot core, but its tail curls up as a flame does rather than streaming straight. |
+| `rocket_thruster` (new) | A rocket thruster: a fierce blue-white exhaust with a white-hot core at the nozzle (the anchor), the jet recoloured; it blows to the right | jet; look thrust, glow, lamp, cold | 420 x 200, left | loop | intensity (0.9) | Fair to good: a blue exhaust behind a white-hot core that streams to the right and fades. Until study O its tail curled up as a flame does: the jet's slow, hot end rose on its own heat; a `cold` field now takes the heat off where it ends, and its controls make the level start point the nearest, so a new shard no longer begins from a jet aimed down (which showed two jets in a blend). |
 | `ember_bed` (blaze) | A bed of embers: a campfire burnt down to a heap of glowing coals, small flames licking up, a warm light (the coals model) | coals; lamp, burst | 260 x 110, base | loop | intensity (0.55), wind (0.5) | Fair: glowing patches that crawl and pulse with small flames licking up; at night its dark char is lost against the ground, so it reads as glowing patches more than a heap. |
 | `forge` (blaze) | A forge's hearth: a bed of white-hot coals roaring with small flames, a strong orange light, sparks (the coals model, hottest) | coals; look hotbed, lamp, burst | 240 x 140, base | loop | intensity (1) | Fair: a bright bed with lively flames, a strong light and sparks (the hottest coals drawn brighter by a look); small. |
 | `fire_whirl` (new) | A fire whirl: a spinning column of flame rising from burning ground, swaying (the vortex model, its warm air drawn as flame) | whirlwind; look whirl_fire, embers, lamp | 320 x 480, base | loop | intensity (0.85), sway (0.7) | Fair: a thin swaying column of flame under a wide orange haze, which can show its tile's square edge; its column is braided (the detail layer's once-a-frame lock, REPORT §12.1). |
@@ -133,9 +157,9 @@ sizes, smoke placed where the flames are) or replaced: §8 says which.
 | `magic_burst` | A magic burst: the explosion model recoloured violet, a ring of light, a violet flash and glowing motes | explosion; look burst_violet, flash, ring, glow, shock | 360 x 360, centre | once, 2.2 s | power (1) | Good: a violet ball (the explosion, recoloured), a ring and motes. |
 | `teleport_flash` | A teleport flash: a column of light, a flash, an expanding ring on the ground and sparkles (procedural) | arc, glow, ring, lamp, flash | 240 x 360, base | once, 1.2 s | hue_shift (0) | Good: a clean column of light and a ring. |
 | `airburst` | An airburst: an explosion in the air (no scorch), its embers falling as it fades | explosion; look cloud, flash, shake, shock, burst | 380 x 380, centre | once, 3 s | power (1) | Good: a fireball in the air with sparks flying out. |
-| `nuke` (blaze) | A nuclear blast: a blinding flash, a fireball that rises on a stem into a mushroom cloud, a shock front racing out along the ground (the mushroom model) | mushroom; look cloud, flash, shake, ring, lamp, shock, scorch, burst | 760 x 900, base | once, 6 s | power (1) | Fair: the flash, the ring, the white fireball, the stem and the darkening cloud read; the cap is ragged and its edges hang down like branches, so after 3 to 4 s it looks more like a tree of smoke than a smooth cap (the test found the model weak). Heavy (a 256-pixel tile: about 37 ms a frame on one thread with its stage, against 6 ms for `grenade`). |
-| `mushroom_blast` (blaze) | A big blast that leaves a small mushroom cloud: a fireball rising on a stem into a rolling cap of smoke (the mushroom model) | mushroom; look cloud, flash, shake, shock, scorch, burst | 420 x 520, base | once, 5.5 s | power (1) | Fair: a fireball that rises into a small mushroom of smoke on a stem; the same ragged cap. |
-| `distant_mushroom` (blaze) | A distant blast on the horizon: a far-off flash, a mushroom cloud climbing, its rumble arriving two seconds later (the mushroom model) | mushroom; look cloud, flash, shake, lamp | 360 x 420, base | once, 6 s | power (1) | Fair: the far flash, the climbing cloud and the late rumble read; the cap's two lobes are uneven. |
+| `nuke` (blaze) | A nuclear blast: a blinding flash, a fireball that rises on a stem into a mushroom cloud, a shock front racing out along the ground (the mushroom model) | mushroom; look cloud, flash, shake, ring, lamp, shock, scorch, burst | 760 x 900, base | once, 6 s | power (1) | Fair: the flash, the ring, the white fireball, the stem and the darkening cloud read; the cap is ragged and its edges hang down like branches, so after 3 to 4 s it looks more like a tree of smoke than a smooth cap (the test found the model weak; study O's replacement, closer to real runs on average, makes the cap a little broader and rounder at first and leaves the rest as it was). Heavy (a 256-pixel tile: about 37 ms a frame on one thread with its stage, against 6 ms for `grenade`). |
+| `mushroom_blast` (blaze) | A big blast that leaves a small mushroom cloud: a fireball rising on a stem into a rolling cap of smoke (the mushroom model) | mushroom; look cloud, flash, shake, shock, scorch, burst | 420 x 520, base | once, 5.5 s | power (1) | Fair: a fireball that rises into a small mushroom of smoke on a stem; the same ragged cap (the same with study O's model). |
+| `distant_mushroom` (blaze) | A distant blast on the horizon: a far-off flash, a mushroom cloud climbing, its rumble arriving two seconds later (the mushroom model) | mushroom; look cloud, flash, shake, lamp | 360 x 420, base | once, 6 s | power (1) | Fair: the far flash, the climbing cloud and the late rumble read; the cap's two lobes are uneven (the same with study O's model: its start point is close to its controls). |
 
 ### Steam and water (5)
 
@@ -220,7 +244,7 @@ the gallery's thumbnail shows each after `show` seconds of travel through its bo
 | `carried_torch` (trail) | A carried torch: its flame leans away from the way it moves, its hot gas and smoke stream out behind it and stay in the world; its anchor is the torch's head (move it every frame) | fire, explosion; look flame, trail, look torch_smoke, embers, lamp | 700 x 320, centre | loop, moving (180, 0) | intensity (0.65) | Fair: the hot gas glows orange behind the flame and streams back into a wavy grey smoke trail, which reads well. The flame itself is small, thin and ragged, with curling tongues, and leans only a little: the fire model leans with its wind control, and pushed further (to show a fast torch) it became a thin red streak. |
 | `comet_trail` (trail) | A comet or a spell's trail: a ball of cyan plasma that leaves a glowing tail behind it, cooling and fading (the orb and the explosion's tail, recoloured; move it every frame) | orb, explosion; trail, look comet, glow, lamp | 900 x 360, centre | loop, moving (300, 40) | intensity (0.7) | Good: a bright cyan head and a glowing tail that frays and fades behind it (the explosion's hot gas, recoloured); the head is the orb model, small at this size. |
 
-### Weather (11)
+### Weather (12)
 
 | effect | what it is | plays | box, anchor | runs | parameters (default) | how it looks |
 |---|---|---|---|---|---|---|
@@ -235,6 +259,7 @@ the gallery's thumbnail shows each after `show` seconds of travel through its bo
 | `falling_ash` (weather) | Falling ash (procedural): grey flakes drifting down after a fire, a few still glowing, carried by the air | ash | 960 x 540, base | loop | density (2), wind (20), size (1) | Weak to fair: slow grey flakes with a few glowing ones; at night it reads as grey snow, and the glowing flecks are few and small. Better over a burnt, lit scene than in the gallery's dark one. |
 | `falling_leaves` (weather) | Falling leaves (procedural): autumn leaves tumbling and swaying down, blown by the wind | leaves | 960 x 540, base | loop | density (0.35), wind (60), size (1) | Fair: leaves in four autumn colours that tumble (they narrow and widen as they turn) and swing as they fall; small and few at the defaults, and flat shapes, not leaf shapes. |
 | `cherry_petals` (weather) | Cherry petals (procedural): small pink petals drifting and tumbling on a light breeze | leaves | 960 x 540, base | loop | density (0.6), wind (70), size (1) | Fair: small pink petals that tumble and drift; pleasant in motion, specks in a still. |
+| `weather_director` | The weather director: clouds, rain, snow, hail, lightning, fog and dust over the box from one small weather state; set its regime (0 clear, 1 overcast, 2 rain, 3 storm, 4 snow, 5 fog, 6 dust) and it heads there in the order real weather keeps ([WEATHER.md](WEATHER.md)) | cloud, fog; looks fleece, storm, fogbank, grit; the `weather` director, rain and snow by their physics, hail, leaves, arc, lamp, flash | 960 x 540, base | loop | regime (3), change (20) | Fair: its point is the transitions, which a still does not show; at the gallery's night the storm's clouds are dark and faint and its rain thinner than `downpour`'s; a room is a weather of its own (two rooms, two weathers). |
 
 ### Weather and sky (20, round 3: `library/storms.nvfxl`)
 
@@ -333,7 +358,7 @@ The launch model (an engine's exhaust blown down onto the ground, rolling out bo
 
 | effect | what it is | plays | box, anchor | runs | parameters (default) | how it looks |
 |---|---|---|---|---|---|---|
-| `rocket_launch` (flow) | A rocket launch pad: the engine's exhaust blasts the pad and rolls out both ways in billowing grey-white clouds that rise, bright where it hits | launch; glow, lamp | 760 x 500, base | loop | thrust (0.8), wind (0.55) | Good: a white-hot jet into the pad and soft white billows both ways, lit by the fire. The library draws the launch model with a gentler sub-grid swirl than its calibration chose (swirl 1 against 3, in `models.nvfxl`), which drew the billows as wormy lines; the clouds fill the tile, and at times its square shows at the top corners. |
+| `rocket_launch` (flow) | A rocket launch pad: the engine's exhaust blasts the pad and rolls out both ways in billowing grey-white clouds that rise, bright where it hits | launch; glow, lamp | 760 x 500, base | loop | thrust (0.8), wind (0.55) | Good: a white-hot jet into the pad and soft white billows both ways, lit by the fire. The library draws the launch model with a gentler sub-grid swirl than its calibration chose (swirl 1 against 3, in `models.nvfxl`), which drew the billows as wormy lines, and since study O in two detail passes a frame; the clouds fill the tile, and at times its square shows at the top corners: the cloud fills the launch model's whole domain, as the simulator's does, and a spawned entry cannot be a domain of several tiles, which is how the lift-off scene carries its billows on ([EFFECTS_FLOW.md](EFFECTS_FLOW.md) §6.1). |
 | `landing_thruster` (flow) | A landing thruster: a lander's engine firing down at dusty ground, kicking up a low brown cloud both ways (the launch model, recoloured) | launch; look blast_dust, glow, lamp | 360 x 240, base | loop | thrust (0.4) | Fair: a thin flame into a brown cloud thrown both ways; the cloud is large for so small a flame. |
 | `hover_downwash` (flow) | A hovering craft's downwash: a strong draught blown down at the ground, throwing up dust that rolls out both ways (the launch model's flow, drawn without its flame) | launch; look downwash | 420 x 220, base | loop | power (0.5) | Fair: dust blown out both ways that rises in two columns; the draught itself is invisible, so it reads as dust thrown up by something above. |
 | `locomotive_chimney` (flow) | A steam locomotive's chimney: grey-white puffs of steam and smoke that roll up and drift away into a trail; its anchor is the chimney's top (the puffs model) | puffs; look chuff | 300 x 460, base | loop | rate (0.4), intensity (0.65) | Fair: puffs leave the chimney and roll up, but a little above it they merge into a wavy column; the pulses are irregular, not a locomotive's steady beat (the model's noise times them). |
@@ -357,18 +382,22 @@ library's night; a game draws its own water.
 Water in two layers ([EFFECTS_WATER.md](EFFECTS_WATER.md)), `library/water.nvfxl`. In `waterfall`, `fountain`,
 `splash` and `rain_shaft` the ordered body is one of the four water models (the simulator's water presets, trained with
 study D's recipe and tested: the fountain and the rain shaft work as steam did, the waterfall and the splash are weak by
-the test's rule, as they only tie the nearest flipbook's average picture), and the random detail around it is seeded:
-spray thrown off the body's water and pools churned where it lands (both read the field bus), drops, rings and foam.
-The other entries are the seeded layer alone (*drawn*): their motion a seeded simulation, their look drawn, their mist
+the test's rule, as they only tie the nearest flipbook's average picture; the splash was replaced by study O's, whose
+average picture is 0.40 dB closer to a real run's, [REPORT.md](REPORT.md) §16.3), and the random detail around it is
+seeded: spray thrown off the body's water and pools churned where it lands (both read the field bus), drops, rings and
+foam. The other entries are the seeded layer alone (*drawn*): their motion a seeded simulation, their look drawn, their mist
 and spray clouds the fog model fed where the water lands (the steam model for the geyser); `waterfall_drawn` and
 `rain_shaft_drawn` are the drawn versions of the two kept beside the learned ones. *Procedural* in the plays column
 means no model. None of the entries draws rock or ground: a fall whose lip is in its box starts in mid-air, so a game
 puts it against its own cliff. The water models are linked into the models' folder with the others
-(`ln -s ../../fx_water/models/d/{waterfall,fountain,splash,rainshaft}.nvfx .`).
+(`ln -s ../../fx_water/models/d/{waterfall,fountain,rainshaft}.nvfx ../../o_fix/models/splash.nvfx .`). The waterfall
+and the rain shaft play with `swirl 0, passes 2` on their `effect` line: since study O ([REPORT.md](REPORT.md) §16)
+their detail layer runs in two passes a frame, which takes off the horizontal bands one pass laid across the falling
+water ([EFFECTS_WATER.md](EFFECTS_WATER.md) §7.1).
 
 | effect | what it is | plays | box, anchor | runs | parameters (default) | how it looks |
 |---|---|---|---|---|---|---|
-| `waterfall` | A waterfall: a sheet of water pouring over a lip and plunging into a churning pool under its own mist (the waterfall model), spray thrown off it and the pool's ripples and foam seeded | waterfall; water pool (churn), spray | 480 x 560, base | loop | flow (0.6), wind (0.5) | Fair to good: the learned sheet falls whole and sways, its foot churns and billows into mist; the seeded spray falls through it and rings and foams the pool. The sheet carries faint horizontal banding (its grown fine fields), and its lip starts in mid-air. |
+| `waterfall` | A waterfall: a sheet of water pouring over a lip and plunging into a churning pool under its own mist (the waterfall model), spray thrown off it and the pool's ripples and foam seeded | waterfall; water pool (churn), spray | 480 x 560, base | loop | flow (0.6), wind (0.5) | Fair to good: the learned sheet falls whole and sways, its foot churns and billows into mist; the seeded spray falls through it and rings and foams the pool. Its lip starts in mid-air. Until study O the sheet carried horizontal bands (the detail layer locking once a frame); with `passes 2` its streaks fall straight. |
 | `waterfall_drawn` | A waterfall, drawn: a sheet of water pouring over a lip, tearing into streaks and drops as it falls into a pool it stirs, mist rising where it lands (the seeded layer alone, its mist the fog model) | fog; look spray, water pool, sheet | 400 x 560, base | loop | flow (0.8), mist (1) | Good: a glassy sheet that tears into tongues and streaks and whitens as it falls; the pool stirred, with foam and rings; the fog's mist at its foot. |
 | `tall_waterfall` | A tall waterfall: a narrow ribbon plunging a long way, breaking up into streaks and spray long before the pool | fog; look spray, water pool, sheet | 360 x 900, base | loop | flow (0.7) | Fair: reads as a plunge; thin, and mostly broken water, in a still. |
 | `wide_falls` | Wide falls: a long, low curtain of water over a broad lip into a river, mist along its foot | fog; look spray, water pool, sheet | 900 x 420, base | loop | flow (0.7) | Fair: a broad curtain of tongues; its lower half is a rain of streaks, and its mist a flat-topped bank. |
@@ -380,12 +409,12 @@ puts it against its own cliff. The water models are linked into the models' fold
 | `garden_fountain` | A garden fountain: a tall central jet and a ring of arcing jets falling back into a basin, rippling it | water pool, jet | 420 x 360, base | loop | height (1) | Good: a central column and six arcs falling back into a rippling basin. |
 | `water_geyser` | A geyser: a gurgling spout that erupts every eight seconds into a towering column of water and steam, then falls back | steam; look geyser, water pool, jet | 420 x 760, base | loop | every (8) | Fair: the eruption reads, with steam at its foot and beads of water at the top, but the column is a bundle of strands, a little like branches. |
 | `broken_hydrant` | A broken hydrant: a column of water blasting up from the street, spraying and swaying, rain of drops and a spreading puddle | fog; look spray, water pool, jet | 520 x 520, base | loop | power (1) | Fair: a swaying column that bursts into drops over a cloud of spray; two or three strands, not a solid column. |
-| `splash` | A splash: the crown of water thrown up where something hits the water and the column from its crater, falling back into the pool (the splash model), its drops, rings, waves and foam seeded | splash; water pool (churn), spray, splash | 480 x 420, base | once, 3 s | power (0.6) | Fair: the learned crown's two walls rise and lean out, then the crater's column; seeded drops, rings and foam around them. The walls read as two horns rather than a cup. |
+| `splash` | A splash: the crown of water thrown up where something hits the water and the column from its crater, falling back into the pool (the splash model), its drops, rings, waves and foam seeded | splash; water pool (churn), spray, splash | 480 x 420, base | once, 3 s | power (0.6) | Fair: the learned crown's two walls rise and lean out, then the crater's column; seeded drops, rings and foam around them. The walls read as two horns rather than a cup (the same with study O's model, closer to real runs on average). |
 | `boulder_splash` | A boulder into a lake: a wide crown of water and spray, a column from the crater, waves rolling out and a cloud of spray | fog; look spray, water pool, splash | 560 x 420, base | once, 4 s | power (1.3) | Good: the crown, its drops, the column from the crater, rings and waves; the fog's spray cloud is slow and lingers, for spray. |
 | `cannonball_splash` | A cannonball splash: a sudden narrow crown and a tall column of water thrown up from the crater | water pool, splash | 400 x 420, base | once, 3 s | power (0.9) | Fair: a crown and a column; small in the gallery. |
 | `dive_splash` | A dive: a small, clean crown and a short column, rings spreading where the diver went in | water pool, splash | 320 x 260, base | once, 2.5 s | power (0.45) | Fair: small and quick by design. |
 | `rain_on_puddles` | Rain on puddles: rain falling (the compositor's rain) on three puddles that ring and fleck where drops land | rain, water pool | 960 x 540, base | loop | density (3) | Fair: the rain and the rings read; the puddles are thin strips (their drops are their own, not the rain's). |
-| `rain_shaft` | A rain shaft: a dark storm cloud (the cloud model) trailing a curtain of rain that thickens, thins and leans with the wind (the rainshaft model), its streaks seeded | cloud, rainshaft; look storm, water shaft | 700 x 700, base | loop | density (18), wind (50) | Good: the learned curtains hang from the cloud, thicken and thin and spread at their foot; the seeded streaks fall through them. A faint green tinge at the foot (the learned renderer). |
+| `rain_shaft` | A rain shaft: a dark storm cloud (the cloud model) trailing a curtain of rain that thickens, thins and leans with the wind (the rainshaft model), its streaks seeded | cloud, rainshaft; look storm, water shaft | 700 x 700, base | loop | density (18), wind (50) | Good: the learned curtains hang from the cloud, thicken and thin and spread at their foot; the seeded streaks fall through them. A faint green tinge at the foot (the learned renderer); since study O (`passes 2`) without the faint bands across the curtains. |
 | `rain_shaft_drawn` | A rain shaft, drawn: a dark storm cloud trailing a slanted curtain of rain that thickens and thins in gusts (the cloud model; the curtain and its streaks the seeded layer alone) | cloud; look storm, water shaft | 700 x 700, base | loop | density (22), wind (70) | Good: a dark cloud over a slanted, gusting curtain of streaks with a soft veil. |
 | `underwater_bubbles` | Bubbles under water: seen through the side of deep water, bubbles rising, wobbling and growing, popping at the surface | water pool, bubbles | 360 x 420, base | loop | rate (6) | Fair: bubbles rise, wobble and pop; the water reads as a pane at night. |
 | `fish_tank` | A fish tank: an aerator's stream of small bubbles rising in a column, a few stray ones, ripples at the top | water pool, bubbles | 360 x 300, base | loop | none | Fair: the aerator's column reads; the tank is a translucent box (no glass edges, no fish). |
@@ -397,6 +426,143 @@ took 5 ms (`dive_splash`, 440 x 328) to 55 ms (`tall_waterfall`, 1432 x 1072) a 
 most of it the stage's size; every entry played with no allocation. The keyframes of `waterfall`, `garden_fountain`,
 `boulder_splash` and `rain_shaft` (now `waterfall_drawn` and `rain_shaft_drawn`, their keyframes unchanged), and of
 `fountain` and `rain_shaft` with their learned bodies, are frozen (`results/library/frozen.csv`).
+
+### Earth (10, round 9: `library/earth.nvfxl`)
+
+The three earth models ([EFFECTS_EARTH.md](EFFECTS_EARTH.md)): lava (a band of molten rock along the bottom of its tile
+that flows along the slope of its `flow` control or pools on the level; it works by its test's rule), the eruption (an
+ash column from a vent at the bottom of the middle of its tile, spreading into an umbrella; it works, narrowly) and the
+avalanche (a powder-snow cloud that runs in the direction of its `direction` control, swells and settles; it plays
+once, 5 s; weak by its test's rule: it loses to the coarse simulation with detail from 1 s, and grows less than the
+simulator's cloud). The file declares its models itself (`effect lava_fx = "lava.nvfx"` and so on), as
+the water's does, and its looks: `magma` (the lava's heat drawn as glow, its crust kept dark), `ash` (the eruption's
+ash lit by the scene, glowing only where it is hottest), `powder` (snow), `rockdust` and `pyro` (the avalanche
+recoloured as a rockslide's dust and a pyroclastic flow). The eruption plays with `swirl 1, swirl_scale 9` on its
+`effect` line, as launch does: its calibrated swirl (3) draws the ash as worms. The models are linked into the models'
+folder with the others (`ln -s ../../fx_earth/models/d/{lava,eruption,avalanche}.nvfx .`). Seeds are the round's
+(6,300,000 and up).
+
+| effect | what it is | plays | box, anchor | runs | parameters (default) | how it looks |
+|---|---|---|---|---|---|---|
+| `lava_flow` | A lava flow: a river of molten rock creeping along the ground under a dark crust that cracks to show the glow, bubbling now and then (the lava model, three tiles) | lava; look magma, lamp, burst | 900 x 160, base | loop | heat (0.6), flow (0.85) | Fair: a low glowing river with darker streaks of crust, thicker downhill, spitting embers now and then; the learned crust is streaks, not the simulator's network of plates and seams, and from afar the band is a thin strip. |
+| `lava_pool` | A lava lake: a still pool of molten rock, its crust drifting and cracking, bubbles of glowing lava swelling up and bursting in spatter (the lava model, level and boiling) | lava; look magma, lamp, burst | 520 x 170, base | loop | heat (0.5), boil (0.5) | Fair: a bright boiling mass whose domes rise and fall; at high `boil` the domes are blocky and read more as flames than as bubbles. |
+| `lava_crack_glow` | Cooling lava ground: a field of dark crust whose cracks still glow, crawling slowly, now and then a bubble (the lava model, cool and calm) | lava; look magma, lamp | 760 x 130, base | loop | heat (0.2) | Weak to fair: a low strip of glowing streaks; no crack network (the learned crust, above), so it reads as embers along the ground more than as cracked rock. |
+| `volcano_eruption` | A volcanic eruption: a column of dark ash blasting up from a glowing vent into an umbrella cloud, its heavy ash collapsing down the sides, lava bombs thrown out, lightning flickering in the plume, ash falling (the eruption model) | eruption; look ash, arc, lamps, ash, burst | 900 x 900, base | loop | power (0.8), wind (0.55) | Good to fair: a column into an umbrella over a glowing, incandescent jet, bombs and flashes of lightning in the plume; the vent's lamp lights the ash brown, and the shader's relief shows a marbled texture; heavy (one 256-pixel tile: 62 ms a frame with its stage on two threads). |
+| `distant_volcano` | A volcano erupting far off: a dark plume rising from a glowing summit into a flat-topped cloud, faint lightning flickering in it (the eruption model, small) | eruption; look ash, arc, lamp | 420 x 360, base | loop | power (0.6), wind (0.65) | Fair: a T-shaped plume on the horizon; lit brown by its vent at this size it looks nearer than it is. |
+| `ash_column` | An ash column: a steady plume of grey-brown ash leaning downwind from a vent, ash falling out of it (the eruption model, low) | eruption; look ash, ash | 600 x 700, base | loop | power (0.35), wind (0.75) | Good: a dark plume leaning downwind into a ragged umbrella; the falling ash is fine and dark, seen only up close. |
+| `avalanche` | A powder avalanche: a slab of snow breaks loose and runs down the slope as a white cloud that swells and billows up as it goes, then settles, snow blowing ahead of it, the ground shaking (the avalanche model) | avalanche; look powder, snow, camera | 900 x 520, base | once 5.5 s | size (0.8), direction (1) | Fair: a bright cloud that runs, swells into a billowing head and settles; its leading side is cut hard where the cloud piles against its tile's edge, the renderer draws dark marbled lines inside it, and it grows less than the simulator's (the test's weak verdict). |
+| `snow_slide` | A snow slide: a small slab of snow slipping down a slope in a puff of powder that settles (the avalanche model, small) | avalanche; look powder | 480 x 260, base | once 5.5 s | size (0.3), direction (0.9) | Fair: a small puff that slides and settles; at 128 pixels its edge is hard. |
+| `rock_slide_dust` | A rockslide's dust: rocks tumbling down a slope in a rolling cloud of brown dust that swells and settles (the avalanche model, recoloured brown) | avalanche; look rockdust, burst, camera | 760 x 420, base | once 5.5 s | size (0.6), direction (1) | Fair: a grey-brown dust cloud, streaky inside, debris thrown ahead; it reads as dust, not as rocks falling (no rocks are drawn). |
+| `pyroclastic_flow` | A pyroclastic flow: a glowing avalanche of hot ash rolling down a volcano's flank, swelling as it goes, its base lit red (the avalanche model, recoloured dark ash) | avalanche; look pyro, lamp, ash | 900 x 520, base | once 5.5 s | size (0.9), direction (1) | Fair: a broad brown billowing cloud, the most convincing of the four in a still; the red light at its base is faint and the marbled lines show. |
+
+In the gallery (`--precision float --isa avx2`, two threads of the shared machine) the lava and eruption entries took
+12 ms (`lava_pool`, `distant_volcano`) to 62 ms (`volcano_eruption`) a frame with their stage's own picture
+when the machine's load was 7 to 10; at load 5 the avalanche entries took 4.5 ms (`snow_slide`) to 13 ms
+(`avalanche`), when `lava_pool` took 7 and `volcano_eruption` 38; every entry played with no allocation. The keyframes of `lava_flow`, `volcano_eruption`
+and `avalanche` are frozen (`results/library/frozen.csv`, with the three models' rows).
+
+### Air (12, round 9: `library/air.nvfxl`)
+
+The candle model (a small, calm flame on a wick with a thin wisp of smoke, leaning and fluttering in a draught), the
+smoke ring model (one ring puffed from an opening, rising and spreading as it rolls, then breaking up; once, 4 s) and the
+heavy gas model (a cold vapour poured out near the ground that flows along it and thins), [EFFECTS_AIR.md](EFFECTS_AIR.md):
+the candle and the ring work by their test's rule, heavy gas falls short of it (its average picture ties the nearest
+flipbook's). The candle plays with a gentler sub-grid swirl than its calibration chose (swirl 1, scale 9, in
+`models.nvfxl`: the calibrated 3 tears its small flame), and all three are drawn by field-shader looks lit by the scene
+(the candle's learned renderer gives its wisp blue-green fringes, the ring's tints its first frames, heavy gas carries no
+heat). Marked *(air)*.
+
+| effect | what it is | plays | box, anchor | runs | parameters (default) | how it looks |
+|---|---|---|---|---|---|---|
+| `candle_flame` (air) | A candle's flame: a small, calm flame on its wick with a thin wisp of smoke above it, leaning and fluttering in a draught; its anchor is the wick | candle; look candlelight, glow, lamp | 50 x 150, base | loop | intensity (0.4), draught (0.5), flicker (0.2) | Fair: a narrow orange flame on its wick with a grey wisp wavering up; the learned flame does not keep the simulator's rounded teardrop, and a faint red glow shows in the wisp just above it. |
+| `candelabra` (air) | Five candle flames at the tips of a candelabra's arms, each its own start and seed, with their warm light | candle; look candlelight, lamp | 220 x 220, base | loop | intensity (0.35), draught (0.5) | Fair: five small flames whose wisps curl at their tops; at 64 px a tile the flames are a few pixels wide and read as candles. |
+| `storm_lantern` (air) | A lantern's flame: a small candle flame behind glass, steady, swaying a little when a draught gets in, with a soft halo | candle; look candlelight, glow, lamp | 60 x 120, base | loop | intensity (0.3), draught (0.5: a third of it gets in) | Fair: a steady small flame in a warm halo; nothing draws the lantern. |
+| `torch_in_draught` (air) | A torch's head in a draught: a big candle-like flame that leans, flutters and streams its smoke away, with sparks | candle; look candlelight, embers, lamp | 140 x 260, base | loop | intensity (1), draught (0.85) | Fair: a big leaning flame and a long, curling trail of smoke; the flame's base is ragged at times. |
+| `birthday_candles` (air) | Six tiny flames in a row on a cake, each with its own flicker and a thread of smoke | candle; look candlelight, lamp | 200 x 90, base | loop | intensity (0.1), draught (0.5) | Fair: six tiny flames, each with a curl of smoke; they read at small sizes. |
+| `smoke_ring` (air) | One ring of smoke puffed from an opening, rising and spreading as it rolls, then breaking up | smokering; look incense | 200 x 220, base | once, 4.2 s | strength (0.5), wind (0.5) | Good: a ring seen side-on (two rolled cores under a hood of smoke) that rises, spreads and breaks up into a haze. |
+| `rising_smoke_rings` (air) | Smoke rings one after another, a smoker's or a censer's, every 1.8 s, each rising, spreading and breaking up | smokering (three modules started in turn); look incense | 220 x 300, base | loop | strength (0.4), wind (0.5) | Fair: rings rising in a stack; 1.8 s apart they overlap as they rise. |
+| `cannon_smoke_ring` (air) | A mortar fired upwards: a flash, sparks and a big ring of powder smoke that rolls up and breaks apart | smokering; look gunpowder, flash, glow, lamp, burst | 320 x 360, base | once, 4.5 s | power (1), wind (0.5) | Fair: the flash and sparks, then a big soft ring that rolls up and splits into two columns; soft and slow for a cannon. |
+| `dry_ice_fog` (air) | A cold white vapour poured out over the floor, spilling both ways with rolling fronts and pooling low | heavygas; look dry_ice | 600 x 200, base | loop | intensity (0.6), flow (0.5) | Fair: a low white layer spilling both ways with soft rolling fronts, streaky at times; the tile's mound and hollows are not drawn (the hollows are under the ground line). |
+| `toxic_spill` (air) | A sickly green gas pouring out of a leak and creeping along the ground to one side | heavygas; look poison_gas, lamp | 560 x 200, base | loop | intensity (0.7), flow (0.75) | Fair: a green layer creeping to the right; as dry_ice_fog. |
+| `swamp_gas` (air) | A low, dim marsh gas welling up and lying over the ground, with a few will-o'-the-wisps drifting in it | heavygas; look marsh_gas, glows | 640 x 180, base | loop | intensity (0.25) | Fair: a dim grey-green layer with three faint wandering lights; at this rate the gas is thin and patchy. |
+| `stage_fog` (air) | Two fog machines' heavy white fog rolling out across a stage floor in a thick layer | heavygas (two tiles); look dry_ice | 900 x 220, base | loop | intensity (0.85), flow (0.85) | Fair: a thick white layer flowing right; the two releases show as two humps more than as one layer. |
+
+In the gallery (`--video`, two threads of the shared machine, load 6 to 10 on its 4 cores), the air entries took 33 to 63
+ms a frame with their stage's own picture (the stages 320 x 240 to 1032 x 776; one run, provisional); every entry played
+with no allocation. The keyframes of
+`candelabra`, `smoke_ring` and `dry_ice_fog` are frozen ([frozen_air.csv](../results/library/frozen_air.csv), float on
+AVX2, `ctest -R LibraryAirKeyframesFrozen`). The air models are linked into the models' folder with the others
+(`ln -s ../../fx_air/models/d/{candle,smokering,heavygas}.nvfx .`).
+
+### Fire, round 10 (10, `library/fire2.nvfxl`)
+
+The crown fire model (fire running through a forest's crowns: the crowns torch in their own flames, spot fires catch
+ahead, a tall column of smoke bends over in the wind), the window fire model (a room fire venting from a window seen
+front-on: flames out of the opening's upper part and up the wall, the room's glow below, black smoke spreading under the
+eave at the tile's top) and the dust explosion model (a dust cloud lit at one end or in its middle: the flame runs
+through it into a brown-orange fireball that billows up and burns out, leaving a pall; once, 4 s),
+[EFFECTS_FIRE2.md](EFFECTS_FIRE2.md): all three work by their test's rule. The file declares the three models itself
+(`crown_fx`, `window_fx`, `dust_fx`). The crown fires are drawn by a field-shader look (`forest_fire`: the model's own
+renderer draws the smoke column thin and dark with green fringes), the dust explosions by `dust_blast` and `coal_blast`
+(its own renderer gives the unlit cloud blue-green fringes and draws the pall faint), the window fires by their own
+renderer (the smouldering one by a dimmer look, `smoulder`). Embers are the compositor's (`emit embers` on the crown
+and window modules, a `burst` in the mill). Marked *(fire2)*.
+
+| effect | what it is | plays | box, anchor | runs | parameters (default) | how it looks |
+|---|---|---|---|---|---|---|
+| `crown_fire` (fire2) | Fire running through a forest's crowns, flames standing over the canopy and leaning before the wind, embers thrown ahead and a tall column of smoke bending over; its anchor is the ground under the trees | crownfire; look forest_fire, embers, lamp | 640 x 640, base | loop | intensity (0.6), wind (0.65) | Fair: a row of crowns torching in their own tongues under a column of smoke lit by the fire, embers flying; the flames carry vertical streaks and the column ends softly at the tile's top; nothing draws the trees, so the flames stand over an empty band. |
+| `forest_fire_front` (fire2) | A crown fire running through a wide stand of trees before a strong wind, spot fires catching ahead, a wall of smoke bent over (three tiles) | crownfire; look forest_fire, embers, lamp, ash | 1500 x 760, base | loop | intensity (0.8), wind (0.8) | Fair: a long front of torching crowns whose columns lean downwind and merge into a wall of smoke; streaky, and the three tiles' columns stay three. |
+| `torching_trees` (fire2) | A few crowns burning in still air, each its own tall flame, a column of smoke going straight up | crownfire; look forest_fire, embers, lamp | 420 x 520, base | loop | intensity (0.2) | Fair: a narrow stand of torching crowns under a straight column; the low intensity makes the zone narrower, not the flames much smaller. |
+| `distant_forest_fire` (fire2) | A line of burning crowns far off, under a towering column of smoke drifting in the wind | crownfire; look forest_fire, lamp | 520 x 560, base | loop | intensity (0.7), wind (0.6) | Fair: as `crown_fire` without embers; best small, on a horizon, where the streaks are lost. |
+| `window_fire` (fire2) | A burning room venting from its window: flames pour out of the top of the opening and roll up the wall, black smoke spreading under the eave; its anchor is the middle of the sill | windowfire; embers, lamp | 300 x 380, base | loop | intensity (0.6), wind (0.5) | Fair: bright flames out of the window's upper part and up the wall, a black plume that spreads out under the eave; the room's glow in the lower part is patchy; nothing draws the facade or the window. |
+| `burning_house` (fire2) | Three windows of a house venting flames, two on the ground floor and one above, their smoke spreading under the eaves (three tiles) | windowfire; embers, lamp | 640 x 560, base | loop | intensity (0.7), wind (0.55) | Fair: three window fires, each with its own plume and ceiling jet; the upper window's eave and the lower ones' are where their tiles end, so each plume stops there. |
+| `smoking_window` (fire2) | A fire smouldering in a room: the window glowing dull red, flames licking at its top, thick black smoke pouring up the wall | windowfire; look smoulder, lamp | 260 x 340, base | loop | intensity (0.1) | Fair: a dim, smoky window fire; the model's flame changes little with its intensity, so the look does most of the smouldering. |
+| `dust_explosion` (fire2) | A cloud of dust lit at one end: the flame runs through it into a brown-orange fireball that billows up and burns out, leaving a brown pall | dustexplosion; look dust_blast, lamp, flash | 520 x 460, base | once, 4.2 s | size (0.6), ignition (0.2) | Fair: the flame visibly runs from the lit end through the cloud, the fireball billows up and leaves a tan pall that rises and thins; streaks inside the fireball, and its orange is paler than the model's own renderer's. |
+| `mill_explosion` (fire2) | A mill's flour dust lit in its middle: a huge fireball bursts out with a flash, a shock, debris and burning embers, and a pall hangs over the wreck | dustexplosion; look dust_blast, flash, shake, shock, lamp, burst | 760 x 640, base | once, 4.5 s | power (1) | Fair: a big flash and fireball with debris and sparks, then a broad tan pall; the fireball reads as lit dust more than flame. |
+| `mine_dust_blast` (fire2) | A coal-dust blast in a mine gallery: lit at one end, the flame races along the cloud, then a dark pall fills the gallery | dustexplosion; look coal_blast, lamp | 760 x 360, base | once, 4.2 s | size (0.5) | Fair: the flame runs along the cloud from its left end; the dark dust shows little against the night stage and the fireball dominates. |
+
+In the gallery (`--video`, two threads of the shared machine), the entries took 7 to 127 ms a frame with their stage's
+own picture (the stages 632 x 472 to 1704 x 1280; one run, provisional); every entry played with no allocation. The
+keyframes of `crown_fire`, `window_fire` and `dust_explosion` are frozen ([frozen_fire2.csv](../results/library/frozen_fire2.csv),
+float on AVX2, `ctest -R LibraryFire2KeyframesFrozen`). The three models are linked into the models' folder with the
+others (`ln -s ../../fx_fire2/models/d/{crownfire,windowfire,dustexplosion}.nvfx .`).
+
+![The ten round-10 fire entries, each alone at its show moment](figures/library_sheet_fire2.png)
+### Elements (10, round 10: `library/elements.nvfxl`)
+
+The geyser model (a vent that simmers, steams and surges as its conduit's noise rises, then erupts in a white column of
+water and steam that holds, collapses back around the vent and leaves its steam drifting off; irregular, on its own
+time), the haboob model (a storm's cold outflow running right along the ground as a gravity current, a tall rolling head
+of dust with dimmer dust behind; once, 5 s) and the sea spray model (spray torn off breaking wave crests by the wind,
+blown to the right and falling back), [EFFECTS_ELEMENTS.md](EFFECTS_ELEMENTS.md): sea spray works by its test's rule, the
+haboob falls short of it (its average picture ties the nearest flipbook's) and the geyser is weak (it ties the coarse
+simulation at following a run at 1 s). The geyser and sea spray are drawn by their own learned renderers (their steam
+and fine spray are the solver's heat, which a field-shader look draws only as light), the haboobs by scene-lit dust
+looks (`haboob_dust`, `rust_dust`). Every module has `glow (0, 0, 0)`: their heat is steam and spray, not fire, and must
+not light the stage. None of the models draws its ground or sea: the geysers stand in the composer's seeded pools, the
+sea entries over its waves (a `pool` with a swell), and spray drops fly off the big geysers. The haboob entries fade
+out over their last 0.8 s, as the model's 5 s end. Seeds are 2,700,001 and up (a script takes seeds up to 2^24, so not
+the test's 27,000,000 and up); the geysers' seeds were chosen so that the conduit erupts at the show moment.
+
+| effect | what it is | plays | box, anchor | runs | parameters (default) | how it looks |
+|---|---|---|---|---|---|---|
+| `erupting_geyser` | A geyser: a vent that simmers and steams, surges, then erupts in a white column that holds, collapses back around the vent and leaves its steam drifting off; irregular, on its own time | geyser; spray drops onto a seeded pool | 420 x 760, base | loop | height (0.7), wind (0.5) | Fair: a tall white column by the show moment with green and magenta fringes at its crown, the drops falling back into the basin; between eruptions a faint wisp of steam. |
+| `hot_spring_geyser` | A small geyser in a hot spring: mostly steam rising off the pool, spurting a little now and then | geyser (low); seeded pool | 300 x 420, base | loop | height (0.2), wind (0.6) | Fair: a moderate white spurt over the pool and its steam; at times only a wisp. |
+| `geyser_in_wind` | A geyser in a strong wind: its column bent a little and its steam torn away downwind | geyser (windy); spray drops blown downwind | 560 x 640, base | loop | height (0.8), wind (0.9) | Fair: a white column with its drops blown to the right; the column itself hardly leans and the steam's plume is short. |
+| `haboob` | A storm's outflow rolling in along the ground as a towering wall of dust, its head churning, the air behind it dim; it runs to the right | haboob (one 256 px tile); look haboob_dust; blown sand | 1200 x 700, base | once, 6 s | strength (0.7), height (0.8) | Fair: a rolling ochre wall with curling billows and faint marbling, soft at its tile's top edge; it fades out at its end. |
+| `dust_wall_far` | A dust storm far off: a low brown wall rolling across the horizon, its top billowing | haboob; look haboob_dust | 900 x 300, base | once, 6 s | strength (0.5), height (0.5) | Fair: two billows rolling right, softer than the near wall. |
+| `low_sandstorm` | A sandstorm front: sand and dust streaming low along the ground, a short rolling head in front | haboob (height 0); look haboob_dust; blown sand | 800 x 260, base | once, 6 s | strength (0.8) | Fair: a low front with a short head and the sand racing along under it; its head is taller than a sandstorm's. |
+| `red_planet_dust_front` | A dust front on a red planet: a rust-coloured wall rolling over the plain | haboob (one 256 px tile); look rust_dust | 1000 x 600, base | once, 6 s | strength (0.6), height (0.9) | Fair: a tall rust-red wall with a big curling head. |
+| `sea_spray` | Sea spray in a gale: waves breaking, the wind tearing white spray off their crests and blowing it downwind, the drops falling back | seaspray (two tiles); the composer's waves | 900 x 300, base | loop | gale (0.6), waves (0.6) | Fair: white tufts along the sea that stream downwind and fall back in motion; blobbier than the simulator's thin plumes. |
+| `storm_surf` | Storm surf: big seas breaking, spray and spume streaming off every crest | seaspray at its strongest (two tiles); the composer's waves | 1000 x 380, base | loop | gale (1) | Fair: a line of white spray along the whole sea, lumpy. |
+| `whitecaps` | Whitecaps in a fresh wind: a few crests breaking here and there, a little spray blown off them | seaspray (light, two tiles); the composer's waves | 800 x 200, base | loop | gale (0.15) | Weak to fair: faint white flecks on the waves; they read in motion more than in a still. |
+
+In the gallery (`--video`, two threads of the shared machine, load 4 to 7 on its 4 cores), the elements entries took 23
+(`low_sandstorm`) to 51 ms (`storm_surf`) a frame with their stage's own picture (the stages 688 x 512 to 1368 x 1032;
+one run, provisional); every entry played with no allocation. The keyframes of `erupting_geyser`, `haboob` and
+`sea_spray` are frozen ([frozen_elements.csv](../results/library/frozen_elements.csv), float on AVX2, `ctest -R
+LibraryElementsKeyframesFrozen`). The elements models are linked into the models' folder with the others
+(`ln -s ../../fx_elements/models/d/{geyser,haboob,seaspray}.nvfx .`).
 
 ## 2. The format
 
@@ -426,7 +592,8 @@ a number in [0, 1) that differs from spawn to spawn, and `alive` 1 while it play
 parameter is a value by its name. An entry may declare modules (single ones: tiles stay where they are declared),
 fields, emitters, trails (`trail NAME = EFFECT ...`, [COMPOSE.md](COMPOSE.md) §5.3: material left in the world
 along a moving source's path), `let`s, its own looks, rules (`at T:` and `when ...:`, which fire once per spawn, or every time
-with `repeat`), `every frame:` couplings, a flash (`light flash (r, g, b)`) and a camera shake (`camera x ..., y ...`).
+with `repeat`), `every frame:` couplings, a flash (`light flash (r, g, b)`), a camera shake (`camera x ..., y ...`) and a
+weather director (`weather NAME, regime PARAM`, [WEATHER.md](WEATHER.md); no schedule: its times would be the stage's).
 The stage owns the picture, the clock, the bus, the particles and the camera's place; an entry cannot set them, read
 another instance, or wait for a shock front by number (fronts are counted over the whole stage). The parser and checker
 give every error as `file.nvfxl:line:column: message`.
@@ -459,7 +626,11 @@ is rewritten so that:
 - a trail's pool of tiles is made with the stage; it leaves material only while its instance is `alive`, so a stop
   leaves what is there to fade where it is, and a new spawn starts a new path (a jump: nothing is drawn between where
   the last one ended and where this one starts);
-- flashes and camera shakes of all instances add up.
+- flashes and camera shakes of all instances add up;
+- a weather director is the room's: it runs from the stage's start, heading where its `regime` (a parameter) says, so the
+  weather is there when the instance spawns and goes on after it ends (what it drives is gated as the rest is); the game
+  reads it as `sN_NAME.member` with `nvfx_scene_get_input` (`sN_` the instance's prefix: N its place among the stage's
+  instances in the order of the rooms).
 
 `nvfx_gallery --library library --print NAME` prints an entry alone as the stage plays it.
 
@@ -480,6 +651,7 @@ drawn, and say so in the entries that use them.
 | `emit rain`, `snow`, `ash`, `leaves` | weather (allocation-free, deterministic, tested by `Weather.*` in `tests/test_engine_features.cpp`): particles that fill a rectangle at a `density` (per 100 x 100 world pixels) and fall through it with a `wind`, riding the bus's flow; rain is drawn as streaks and can `wash` smoke out of the modules it falls on, snow `melt`s over heat, ash has a few `glowing` flakes, leaves (and petals) tumble and swing as they fall ([COMPOSE.md](COMPOSE.md) §4.6 and §5.4) | `rain`, `snow`, `falling_ash`, `falling_leaves`, `cherry_petals` |
 | `trail` | not procedural: tiles of a learned effect laid on a grid in the world, fed along a moving source's path ([COMPOSE.md](COMPOSE.md) §5.3, §9 here) | `rocket_trail`, `vehicle_dust_wake`, `carried_torch`, `comet_trail` |
 | the third round's (§10) | hail, an aurora, a rainbow, meteors, beams, shields, glints, and a burst's spatter (coloured drops that stain) and shards ([COMPOSE.md](COMPOSE.md) §4.10; tested by `FxElements.*`, `tests/test_fx_elements.cpp`) | the 70 entries of §10 |
+| `weather` (the director) | a small weather state moving between regimes in the order real weather keeps, with seeded gusts and rain cells, from relations in the literature; its members (`sky.rain`, `sky.cloud`, ...) drive the other elements and the models' controls, and `emit rain` and `emit snow` take its physics (`rate` in mm/h, `scale`, `depth`, `shutter`), `emit hail` a `speed` ([WEATHER.md](WEATHER.md); tested by `Weather*.*`, `tests/test_weather_director.cpp`) | `weather_director` |
 | `water`, `splash`, `wave` | the random layer of water: the composer's deterministic water ([EFFECTS_WATER.md](EFFECTS_WATER.md), [COMPOSE.md](COMPOSE.md) §5.5): pools, sheets, jets, drips, bubbles and rain shafts, splashes and wakes; a seeded simulation, drawn, its mist deposited into a fog or steam module; tested by `Water.*` (`tests/test_water.cpp`) | the 19 water entries |
 
 ## 3. The API
@@ -550,15 +722,21 @@ error, spawns, no room, steal, stop, rooms freed, camera, clear, the same frames
 
 ## 4. The gallery
 
-The models' folder, `$NEURALVFX_DATA/library/models` by default, holds the twenty-one learned effects under the names
+The models' folder, `$NEURALVFX_DATA/library/models` by default, holds the thirty-three learned effects under the names
 `models.nvfxl` gives them: study M's fire ([REPORT.md](REPORT.md) §14, which replaced v2's), the v2 smoke, study
 M3's explosion and dust (v2's and round 5's with a mean state, [REPORT.md](REPORT.md) §14.9, which replaced them),
 study D's steam, round 5's fog, cloud and jet, and
 study L's magic, orb and vortex ([REPORT.md](REPORT.md) §12.1, which replaced study D's magic and round 5's orb and
 vortex), and round 7's wildfire, coals and mushroom ([EFFECTS_BLAZE.md](EFFECTS_BLAZE.md)) and launch, puffs and ink
 ([EFFECTS_FLOW.md](EFFECTS_FLOW.md)), and round 8's waterfall, fountain, splash and rainshaft
-([EFFECTS_WATER.md](EFFECTS_WATER.md)). The orb plays at float whatever the stage's precision (`precision float` on its
-`effect` line): study L's orb failed study K's int8 rule on its average picture ([REPORT.md](REPORT.md) §13.9). Links are enough:
+([EFFECTS_WATER.md](EFFECTS_WATER.md)); the mushroom and the splash are study O's (a mean state, and for the mushroom a
+stepper fine-tuned on 30-frame windows; [REPORT.md](REPORT.md) §16.3, which replaced round 7's and round 8's), and
+round 9's lava, eruption and avalanche ([EFFECTS_EARTH.md](EFFECTS_EARTH.md)) and candle, smokering and heavygas
+([EFFECTS_AIR.md](EFFECTS_AIR.md)), round 10's crownfire, windowfire and dustexplosion
+([EFFECTS_FIRE2.md](EFFECTS_FIRE2.md); declared in `library/fire2.nvfxl` itself), and round 10's geyser, haboob and
+seaspray ([EFFECTS_ELEMENTS.md](EFFECTS_ELEMENTS.md)). The
+orb plays at float whatever the stage's precision (`precision float` on its `effect` line): study L's orb failed study
+K's int8 rule on its average picture ([REPORT.md](REPORT.md) §13.9). Links are enough:
 
 ```sh
 mkdir -p $NEURALVFX_DATA/library/models && cd $NEURALVFX_DATA/library/models
@@ -568,10 +746,14 @@ ln -s ../../fx/models/d/steam.nvfx .
 ln -s ../../fx_atmos/models/d/fog.nvfx ../../m3/models/dust.nvfx ../../fx_atmos/models/d/cloud.nvfx .
 ln -s ../../fx_energy/models/d/jet.nvfx .
 ln -s ../../l_swirl/models/v3/magic.nvfx ../../l_swirl/models/v3/orb.nvfx ../../l_swirl/models/v3/vortex.nvfx .
-ln -s ../../fx_blaze/models/d/wildfire.nvfx ../../fx_blaze/models/d/coals.nvfx ../../fx_blaze/models/d/mushroom.nvfx .
+ln -s ../../fx_blaze/models/d/wildfire.nvfx ../../fx_blaze/models/d/coals.nvfx ../../o_fix/models/mushroom.nvfx .
 ln -s ../../fx_flow/models/d/launch.nvfx ../../fx_flow/models/d/puffs.nvfx ../../fx_flow/models/d/ink.nvfx .
-ln -s ../../fx_water/models/d/waterfall.nvfx ../../fx_water/models/d/fountain.nvfx ../../fx_water/models/d/splash.nvfx .
+ln -s ../../fx_water/models/d/waterfall.nvfx ../../fx_water/models/d/fountain.nvfx ../../o_fix/models/splash.nvfx .
 ln -s ../../fx_water/models/d/rainshaft.nvfx .
+ln -s ../../fx_earth/models/d/lava.nvfx ../../fx_earth/models/d/eruption.nvfx ../../fx_earth/models/d/avalanche.nvfx .
+ln -s ../../fx_air/models/d/candle.nvfx ../../fx_air/models/d/smokering.nvfx ../../fx_air/models/d/heavygas.nvfx .
+ln -s ../../fx_fire2/models/d/crownfire.nvfx ../../fx_fire2/models/d/windowfire.nvfx ../../fx_fire2/models/d/dustexplosion.nvfx .
+ln -s ../../fx_elements/models/d/geyser.nvfx ../../fx_elements/models/d/haboob.nvfx ../../fx_elements/models/d/seaspray.nvfx .
 ```
 
 **Study M3's explosion and dust** ([REPORT.md](REPORT.md) §14.9) carry a mean state: a module that gives controls of
@@ -610,8 +792,8 @@ back and forth. In `--shot`, `--spawn NAME@X,Y,SCALE,AT,VX,VY` moves the instanc
   stopped and spawned again, heap allocations counted in the frame loop and in those calls (0 for each), and something
   drawn.
 - `--keyframes` and `--verify`: each entry's `show` frame as PNG, compared by SHA-256 with frozen rows
-  (`library_keyframe,NAME,file,bytes,sha256`; `results/library/frozen.csv` also records the SHA-256 of the twenty-one model
-  files they were made with).
+  (`library_keyframe,NAME,file,bytes,sha256`; `results/library/frozen.csv` also records the SHA-256 of the twenty-four model
+  files they were made with, `frozen_air.csv` the air models').
 - `--shot`: a stage played as a game would (frame 0 drawn, the spawns, then N frames): the Godot test's reference.
 
 Outputs go under `$NEURALVFX_DATA/library` (the sheet, the video, keyframes); only the sheets in `docs/figures`
@@ -620,10 +802,11 @@ Outputs go under `$NEURALVFX_DATA/library` (the sheet, the video, keyframes); on
 
 **Tests** (`ctest`): `neuralfx.LibraryCatalogueCheck` (no data: the catalogue and every procedural entry);
 `neuralfx.LibraryHostExample` (the C example's self-test); `neuralfx.LibraryCataloguePlays` (every entry, with the
-twenty-one models in `NEURALFX_MODELS_LIBRARY`, by default `$NEURALVFX_DATA/library/models`; skipped without them);
+thirty-three models in `NEURALFX_MODELS_LIBRARY`, by default `$NEURALVFX_DATA/library/models`; skipped without them);
 `neuralfx.LibraryKeyframesFrozen` (the keyframes of `campfire`, `blue_gas_flame`, `grenade`, `steam_vent`, `portal`,
 `lightning_strike`, `ground_fog`, `dust_impact`, `flamethrower`, `plasma_orb`, `dust_devil`, `wall_of_flames`,
-`distant_mushroom`, and two moving ones, `rocket_trail` and `vehicle_dust_wake`, against `results/library/frozen.csv`,
+`distant_mushroom`, the water's and the earth's (`lava_flow`, `volcano_eruption`, `avalanche`), and two moving ones,
+`rocket_trail` and `vehicle_dust_wake`, against `results/library/frozen.csv`,
 on 2 threads; skipped without the models); the `Library.*`, `Glows.*`, `Lamps.*`, `Trails.*`, `Layers.*` and `Weather.*` unit
 tests; the library stage and the engine features' stage in `nvfx_alloc_test`; `neuralfx.LitHostExample` (lit sprites,
 [ENGINES.md](ENGINES.md) §11). The third round's entries have their own frozen keyframes and tests (§10.4).
@@ -742,6 +925,8 @@ orb and the vortex). A new category is just a new name in `category` (`dust` and
   draws the billows as wormy, boxy lines. The library plays it with `swirl 1, swirl_scale 9` on its `effect` line (as it
   plays smoke and the explosion with their own), and the billows are soft. A check after the test measured the price:
   the detail spectrum's distance from real runs goes from 0.12 to 0.33 ([EFFECTS_FLOW.md](EFFECTS_FLOW.md) §4.4).
+  Since study O the line also says `passes 2` (the detail layer twice a frame), which takes the stripes off the jet's
+  edges that one pass laid down ([EFFECTS_FLOW.md](EFFECTS_FLOW.md) §6.1).
 - **Read where the source is.** Puffs' mouth is 36% from the left of its tile and 5% up, so a chimney's module stands
   at (X + 0.137 w, Y + 0.05 w); ink's release is in the middle, 27% up, so (X + 0.012 w, Y + 0.27 w); launch's nozzle
   is 56% up the middle of its tile (the entries put a glow there).
@@ -758,6 +943,20 @@ orb and the vortex). A new category is just a new name in `category` (`dust` and
   Longer shards (20 s instead of 8) did not spread it further.
 - **Names**: `glow` and `wash` are words of the language; the signal fire's lamp is `warm` and the downwash's module
   `draught`.
+
+**What adding the candle, smoke ring and heavy gas taught** (`library/air.nvfxl`; again no code):
+- **A small flame wants a gentle detail layer and a look.** The candle's calibrated swirl (3) tears a flame two or three
+  coarse cells wide into shreds; `swirl 1, swirl_scale 9` keeps it a flame, and a field-shader look (`candlelight`,
+  `like flame` with a high emission power, so that the warm plume stays dim) removes the blue-green fringes the learned
+  renderer puts on the wisp.
+- **A one-shot that repeats is several modules started in turn.** `rising_smoke_rings` starts three ring modules, each
+  from a start point of its own, one every 1.8 s (`when t - 5.4 * floor(t / 5.4) < 1 / fps, repeat:` and two more with
+  offsets); a start's seed may be an expression (`seed 2111 + floor(t / 5.4)`), so each puff differs. Study M3's mean
+  state moves each start to the module's controls.
+- **Read where the floor is.** Heavy gas pours over a mound 9% up its tile into hollows 3% up: an entry stands the
+  mound's top on the ground (`sink 0.09`), so the hollows, and what pools in them, are under the ground line.
+- **Names**: `ring` is a word of the language (the ring's module is `puff`); a file's looks come before its first entry,
+  and `toxic` and `marsh` were already other files' looks.
 
 **A new look** (a recolour) is a `look` line before the first entry of a file (shared) or inside an entry (its own).
 It changes colours, not motion; say so in the entry's description.
@@ -842,7 +1041,9 @@ walk-through video:
   middle of its tile); **the dust storm** became three large tiles low down, from three small floating puffs.
 - **The white cloud** is drawn by a look: the cloud model's own renderer gave pink and green fringes.
 - **The rocket thruster** lost its exhaust after half a minute: its later shards started from a jet aimed down (see
-  §6); a higher turbulence fixed it.
+  §6); a higher turbulence fixed it. Its tail still curled up like a flame, and at times a shard's blend showed two
+  jets; since study O ([REPORT.md](REPORT.md) §16.4) a `cold` field takes the heat off the tail, which then fades
+  instead of rising, and aim 0.45 with turbulence 0.5 make start point 0 (aimed level) the nearest.
 - **The fire whirl** glowed as a large orange square (the warm air at the top of its tile drawn as flame); a dimmer
   look keeps the column and a softer haze.
 

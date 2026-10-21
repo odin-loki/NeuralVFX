@@ -1,10 +1,15 @@
 // The volume C API (include/neuralfx/nvfx_volume.h; study N, docs/STUDY_3D.md): 3D rollout effects for engines. A volume
 // runs the reference code of src/core/rollout3d.cpp on buffers made at creation, on its own threads (every loop writes per
-// cell or per slab, so the thread count never changes a value), with the AVX2 convolution where the CPU has it; its
-// pictures come from src/render3d. Shards as the 2D runtime's: each a fresh rollout from a start point, crossfaded in.
+// cell or per slab, so the thread count never changes a value), with the AVX2 convolution where the CPU has it and the
+// detail layer on vectors (rt_detail3.hpp: the reference's fields to the bit, on AVX-512 where the CPU has it, else
+// AVX2); its pictures come from src/render3d. Shards as the 2D runtime's: each a fresh rollout from a start point,
+// crossfaded in.
 #include <neuralfx/nvfx_volume.h>
 #include <neuralfx/render3d.hpp>
 #include <neuralfx/rollout3d.hpp>
+
+#include "nvfx_internal.hpp"
+#include "rt_volume.hpp"
 
 #include <algorithm>
 #include <bit>
@@ -16,10 +21,6 @@
 #include <spanstream>
 #include <stdfloat>
 #include <string>
-
-namespace nfx::rt {
-void volume_conv3_avx2(int rx, int ry, int rz, const float* in, int ci, const float* W, const float* b, int co, float* out, int y0, int y1);
-}  // namespace nfx::rt
 
 namespace r3 = nfx::rollout3d;
 
@@ -38,6 +39,7 @@ struct nvfx_volume {
   const nvfx_volume_effect* e;
   nfx::Pool pool;
   r3::Workspace ws;
+  std::unique_ptr<r3::DetailKernel> detail;  // ws.detail: the detail layer on vectors (none at the baseline ISA)
   Runner run[2];
   std::vector<float> out_t, out_d, out_flow;  // a crossfaded frame
   const float* cur_t = nullptr;
@@ -51,6 +53,14 @@ struct nvfx_volume {
   long frame = -1;  // the frame the fields show (-1: none yet)
   bool prepared = false;
 };
+
+std::unique_ptr<r3::DetailKernel> nfx::rt::make_volume_detail(const r3::Model& m, const r3::Workspace& ws, nvfx_isa isa) {
+  switch (isa) {
+    case NVFX_ISA_AVX512: return d3_avx512::make_detail3(m, ws);
+    case NVFX_ISA_AVX2: return d3_avx2::make_detail3(m, ws);
+    default: return nullptr;
+  }
+}
 
 namespace {
 
@@ -197,6 +207,8 @@ nvfx_status nvfx_volume_create(const nvfx_volume_effect* effect, int threads, nv
     auto v = std::make_unique<nvfx_volume>(effect, threads);
     const r3::Model& m = effect->m;
     if (nvfx_get_isa() != NVFX_ISA_BASELINE) v->ws.conv = nfx::rt::volume_conv3_avx2;
+    v->detail = nfx::rt::make_volume_detail(m, v->ws, nfx::rt::rollout_isa(nfx::rt::Precision::float32));
+    v->ws.detail = v->detail.get();
     for (auto& r : v->run) r.s = r3::make_state(m);
     v->out_t.assign(m.h.fine_cells(), 0.f);
     v->out_d.assign(m.h.fine_cells(), 0.f);
@@ -221,6 +233,7 @@ std::size_t nvfx_volume_scratch_bytes(const nvfx_volume* v) {
   std::size_t n = v->renderer.bytes() + vb(v->out_t) + vb(v->out_d) + vb(v->out_flow);
   const r3::Workspace& w = v->ws;
   for (const auto* x : {&w.X, &w.y1, &w.y2, &w.d, &w.mid, &w.div, &w.tmp, &w.noise, &w.cond, &w.next, &w.ufine, &w.fa, &w.fb, &w.lo, &w.hi, &w.rr, &w.aa}) n += vb(*x);
+  if (v->detail) n += v->detail->bytes();
   for (const auto& r : v->run) {
     for (const auto* x : {&r.s.coarse, &r.s.pressure, &r.s.flow, &r.s.fine_t, &r.s.fine_d}) n += vb(*x);
   }

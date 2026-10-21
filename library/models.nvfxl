@@ -50,10 +50,18 @@ look blaze = shader, heat_scale 0.9, emission 2.6, emission_power 2, soot_densit
 # `cloud` (its own renderer gives colour fringes); the coals' own renderer or a look for a hotter bed.
 effect wildfire = "wildfire.nvfx"                                     # intensity, wind, turbulence
 effect coals    = "coals.nvfx"                                        # intensity, wind, turbulence
+# Since study O (docs/REPORT.md §16.3) the mushroom file has a mean state and a stepper fine-tuned on 30-frame
+# windows (a module that gives controls begins its start point moved to them); it met the study's rule on its test.
 effect mushroom = "mushroom.nvfx"                                     # plays once (5 s): 16 start points
 
 # Launch, puffs and ink (docs/EFFECTS_FLOW.md): an engine's exhaust blown down onto the ground, smoke in pulses, and a
 # plume with almost no buoyancy (underwater). Puffs and ink carry no light: their entries draw them with looks.
-effect launch    = "launch.nvfx", swirl 1, swirl_scale 9                # intensity (thrust), wind, turbulence
+effect launch    = "launch.nvfx", swirl 1, swirl_scale 9, passes 2      # intensity (thrust), wind, turbulence; study O: 2 detail passes
 effect puffs     = "puffs.nvfx"                                       # intensity, rate (pulses a second), turbulence
 effect ink       = "ink.nvfx"                                         # intensity, current, turbulence
+
+# The air effects (docs/EFFECTS_AIR.md): a candle (with the gentler sub-grid swirl the library plays it with, as launch), a
+# smoke ring (plays once, 4 s: 16 start points and study M3's mean state) and heavy gas. The ring and the gas carry no light.
+effect candle    = "candle.nvfx", swirl 1, swirl_scale 9                # intensity, draught, turbulence (its calibration chose swirl 3)
+effect smokering = "smokering.nvfx"                                     # plays once (4 s): 16 start points, a mean state; intensity, wind, turbulence
+effect heavygas  = "heavygas.nvfx"                                      # intensity (release rate), flow (0 left, 1 right), turbulence

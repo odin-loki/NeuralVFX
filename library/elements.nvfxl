@@ -1,0 +1,120 @@
+# The elements of docs/EFFECTS_ELEMENTS.md: the geyser model (a vent in a low mound at the bottom of the middle of its
+# tile, 6% up: it simmers, steams and surges as its conduit's noise rises, then erupts in a white column of water and
+# steam that holds, collapses back around the vent and leaves its steam drifting on the wind; irregular, as geysers
+# are, on its own time), the haboob model (a storm's cold outflow let go at the left side of its tile, running right
+# along the ground, 2% up, as a gravity current with a tall rolling head of dust and dimmer dust behind it; it plays
+# once, 5 s) and the sea spray model (wave crests breaking along the sea's surface, 9% up its tile, the wind tearing
+# spray off them to the right, the drops falling back into the sea and a fine spray drifting on). None of them draws its
+# ground or sea: the game's does (or, here, the composer's seeded water). A haboob runs to the right and sea spray
+# blows to the right; a game mirrors the module for the left. In an entry, t is the time since the spawn, (X, Y) the
+# anchor, scale the size it was spawned at and alive 1 while it plays (docs/LIBRARY.md). Seeds are this round's
+# (2,700,001 and up: a script takes seeds up to 2^24, so not the test's 27,000,000 and up).
+
+effect geyser_fx   = "geyser.nvfx"     # intensity (the column's height), wind (0 from the right, 0.5 still, 1 from the left), turbulence
+effect haboob_fx   = "haboob.nvfx"     # plays once (5 s), 16 start points with a mean state: intensity (density: speed), height, turbulence
+effect seaspray_fx = "seaspray.nvfx"   # intensity (the sea's size), gale (a near gale to a storm, blowing right), turbulence
+
+# A haboob's dust: ochre, dense, deeply shaded by itself; and the red dust of another world.
+look haboob_dust  = shader, emission 0, soot_density 2.4, soot_albedo 0.62, sky 0.55, shadow 0.4, scene_light 1.3, relief 0.5,
+                    tint (0.98, 0.72, 0.46)
+look rust_dust    = shader, emission 0, soot_density 2.4, soot_albedo 0.55, sky 0.5, shadow 0.4, scene_light 1.3, relief 0.5,
+                    tint (1, 0.55, 0.36)
+# The geyser and sea spray are drawn by their own learned renderers: their steam and fine spray are the solver's heat,
+# which a field-shader look draws only as light (the renderers add faint green and magenta fringes to the geyser's crown).
+
+# --- geyser ---------------------------------------------------------------------------------------------------------
+
+entry erupting_geyser, category water, size 420 x 760, anchor base, loop, show 4,
+      about "A geyser: a vent that simmers and steams, surges, then erupts in a white column of water and steam that holds, collapses back around the vent and leaves its steam drifting off; irregular, on its own time (the geyser model)"
+param height = 0.7, range (0.2, 1), about "the column's height"
+param wind = 0.5, range (0, 1), about "0.5 still air; less blows from the right, more from the left"
+module vent = geyser_fx, size 128, width 760 * scale, at (X, Y), sink 0.0625, feather 0.15, start 0, seed 2700053, glow (0, 0, 0),
+              controls (0.7, 0.5, 0.4), intensity height, wind wind
+water basin = pool, along (X - 160 * scale, Y - 4 * scale) to (X + 160 * scale, Y - 4 * scale), depth 6 * scale,
+              surface 8 * scale, cells 96, churn 1.5, rate 0, seed 2700002
+water drops = spray, in (X - 200 * scale, Y - 700 * scale), size 400 * scale x 700 * scale, threshold 0.25, speed 40 * scale,
+              radius 1.6 * scale, gravity 400 * scale, onto basin, seed 2700003
+
+entry hot_spring_geyser, category water, size 300 x 420, anchor base, loop, show 3,
+      about "A small geyser in a hot spring: mostly steam rising off the pool, spurting a little now and then (the geyser model, low)"
+param height = 0.2, range (0, 0.45), about "how high it spurts"
+param wind = 0.6, range (0, 1), about "0.5 still air"
+module vent = geyser_fx, size 128, width 420 * scale, at (X, Y), sink 0.0625, feather 0.2, start 3, seed 2700200, glow (0, 0, 0),
+              controls (0.2, 0.6, 0.5), intensity height, wind wind
+water spring = pool, along (X - 140 * scale, Y - 3 * scale) to (X + 140 * scale, Y - 3 * scale), depth 5 * scale,
+               surface 10 * scale, cells 80, churn 1, rate 0, seed 2700012
+
+entry geyser_in_wind, category water, size 560 x 640, anchor base, loop, show 4,
+      about "A geyser in a strong wind: its column bent a little and its steam torn away downwind in a long plume (the geyser model, windy)"
+param height = 0.8, range (0.3, 1), about "the column's height"
+param wind = 0.9, range (0.5, 1), about "how hard the wind blows from the left (0.5 still)"
+module vent = geyser_fx, size 128, width 640 * scale, at (X - 60 * scale, Y), sink 0.0625, feather 0.15, start 5, seed 2700057, glow (0, 0, 0),
+              controls (0.8, 0.9, 0.6), intensity height, wind wind
+water drops = spray, in (X - 300 * scale, Y - 600 * scale), size 600 * scale x 600 * scale, threshold 0.25, speed 40 * scale,
+              radius 1.6 * scale, gravity 400 * scale, wind (600 * (wind - 0.5) * scale, 0), seed 2700022
+
+# --- haboob ---------------------------------------------------------------------------------------------------------
+
+entry haboob, category weather, size 1200 x 700, anchor base, once 6, show 3.5,
+      about "A haboob: a storm's outflow rolling in along the ground as a towering wall of dust, its head churning, the air behind it dim with dust; it runs to the right (the haboob model, one 256-pixel tile)"
+param strength = 0.7, range (0.2, 1), about "the outflow's density: a stronger storm runs faster"
+param height = 0.8, range (0.2, 1), about "how tall the wall"
+module wall = haboob_fx, size 256, width 1200 * scale, at (X, Y), sink 0.023, feather 0.2, look haboob_dust, start 0,
+              seed 2700031, glow (0, 0, 0), controls (0.7, 0.8, 0.5), intensity strength, height height, opacity 1 - smooth((t - 5.2) / 0.8)
+emit ash, in (X - 600 * scale, Y - 500 * scale), size 1200 * scale x 500 * scale, density 0.6 * smooth((t - 1) / 2),
+     wind (300 * scale, -10 * scale), colour (0.55, 0.42, 0.28), glowing 0, seed 2700032
+
+entry dust_wall_far, category weather, size 900 x 300, anchor base, once 6, show 3.5,
+      about "A dust storm far off: a low brown wall rolling across the horizon, its top billowing (the haboob model, distant)"
+param strength = 0.5, range (0.2, 1), about "how fast it comes"
+param height = 0.5, range (0, 1), about "how tall"
+module wall = haboob_fx, size 128, width 900 * scale, at (X, Y), sink 0.023, feather 0.2, look haboob_dust, start 3,
+              seed 2700041, glow (0, 0, 0), controls (0.5, 0.5, 0.5), intensity strength, height height, opacity 0.85 * (1 - smooth((t - 5.2) / 0.8))
+
+entry low_sandstorm, category weather, size 800 x 260, anchor base, once 6, show 3,
+      about "A sandstorm front: sand and dust streaming low along the ground in a strong wind, a short rolling head in front (the haboob model, low)"
+param strength = 0.8, range (0.3, 1), about "how hard it blows"
+module front = haboob_fx, size 128, width 800 * scale, at (X, Y), sink 0.023, feather 0.2, look haboob_dust, start 5,
+               seed 2700051, glow (0, 0, 0), controls (0.8, 0, 0.6), intensity strength, height 0, opacity 1 - smooth((t - 5.2) / 0.8)
+emit ash, in (X - 400 * scale, Y - 120 * scale), size 800 * scale x 120 * scale, density 1.2 * smooth((t - 0.5) / 1.5),
+     wind (420 * strength * scale, 0), colour (0.66, 0.52, 0.34), glowing 0, radius 0.9 * scale, seed 2700052
+
+entry red_planet_dust_front, category weather, size 1000 x 600, anchor base, once 6, show 3.5,
+      about "A dust front on a red planet: a rust-coloured wall of dust rolling over the plain (the haboob model, recoloured)"
+param strength = 0.6, range (0.2, 1), about "how fast"
+param height = 0.9, range (0.2, 1), about "how tall"
+module wall = haboob_fx, size 256, width 1000 * scale, at (X, Y), sink 0.023, feather 0.2, look rust_dust, start 7,
+              seed 2700061, glow (0, 0, 0), controls (0.6, 0.9, 0.5), intensity strength, height height, opacity 1 - smooth((t - 5.2) / 0.8)
+
+# --- sea spray ------------------------------------------------------------------------------------------------------
+
+entry sea_spray, category water, size 900 x 300, anchor base, loop, show 3,
+      about "Sea spray in a gale: waves breaking along the sea, the wind tearing white spray off their crests and blowing it downwind, the drops falling back and a fine haze drifting on (the sea spray model, two tiles, over the composer's waves)"
+param gale = 0.6, range (0, 1), about "the wind: a near gale to a storm, blowing to the right"
+param waves = 0.6, range (0.2, 1), about "the sea's size"
+module a = seaspray_fx, size 128, width 480 * scale, at (X - 210 * scale, Y), sink 0.094, feather 0.15, start 0,
+           seed 2700071, glow (0, 0, 0), controls (0.6, 0.6, 0.5), intensity waves, gale gale
+module b = seaspray_fx, size 128, width 480 * scale, at (X + 210 * scale, Y), sink 0.094, feather 0.15, start 4,
+           seed 2700072, glow (0, 0, 0), controls (0.6, 0.6, 0.5), intensity waves, gale gale
+water ocean = pool, along (X - 450 * scale, Y) to (X + 450 * scale, Y), depth 40 * scale, surface 30 * scale, cells 192,
+            swell (3 + 5 * waves) * scale, wavelength 150 * scale, period 3, drift 30 * scale, rate 0, churn 1, seed 2700073
+
+entry storm_surf, category water, size 1000 x 380, anchor base, loop, show 3,
+      about "Storm surf: big seas breaking in a storm, spray and spume streaming off every crest (the sea spray model at its strongest, two tiles, over the composer's waves)"
+param gale = 1, range (0.5, 1), about "the wind"
+module a = seaspray_fx, size 128, width 560 * scale, at (X - 230 * scale, Y), sink 0.094, feather 0.15, start 7,
+           seed 2700081, glow (0, 0, 0), controls (1, 1, 0.7), intensity 1, gale gale, turbulence 0.7
+module b = seaspray_fx, size 128, width 560 * scale, at (X + 230 * scale, Y), sink 0.094, feather 0.15, start 2,
+           seed 2700082, glow (0, 0, 0), controls (1, 1, 0.7), intensity 1, gale gale, turbulence 0.7
+water ocean = pool, along (X - 500 * scale, Y) to (X + 500 * scale, Y), depth 50 * scale, surface 36 * scale, cells 224,
+            swell 9 * scale, wavelength 180 * scale, period 3.4, drift 45 * scale, rate 0, churn 1.5, seed 2700083
+
+entry whitecaps, category water, size 800 x 200, anchor base, loop, show 3,
+      about "Whitecaps in a fresh wind: a few crests breaking here and there, a little spray blown off them (the sea spray model, light)"
+param gale = 0.15, range (0, 0.5), about "the wind"
+module a = seaspray_fx, size 128, width 420 * scale, at (X - 190 * scale, Y), sink 0.094, feather 0.18, start 1,
+           seed 2700091, glow (0, 0, 0), controls (0.4, 0.15, 0.4), intensity 0.4, gale gale
+module b = seaspray_fx, size 128, width 420 * scale, at (X + 190 * scale, Y), sink 0.094, feather 0.18, start 6,
+           seed 2700092, glow (0, 0, 0), controls (0.4, 0.15, 0.4), intensity 0.4, gale gale
+water ocean = pool, along (X - 400 * scale, Y) to (X + 400 * scale, Y), depth 30 * scale, surface 24 * scale, cells 160,
+            swell 3 * scale, wavelength 120 * scale, period 2.8, drift 20 * scale, rate 0, churn 0.5, seed 2700093

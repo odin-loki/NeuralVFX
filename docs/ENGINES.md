@@ -2,8 +2,8 @@
 
 Status: **current**. Audience: dev. The API is `include/neuralfx/nvfx.h` (C, no dependencies) for single effects and
 `include/neuralfx/nvfx_scene.h` for composed scenes played from scripts (§7), which can also give their effects alone
-as lit sprites for the engine to light (§11); the reference host is `examples/c_host.c`, and a Godot 4 plugin is in
-`engines/godot` (§8). **To put it in your own engine**, start with [INTEGRATION.md](INTEGRATION.md): which API when,
+as lit sprites for the engine to light (§11); the reference host is `examples/c_host.c`, a Godot 4 plugin is in
+`engines/godot` (§8), and a sample integration for FUSE, the owner's engine, is in `engines/fuse` ([FUSE.md](FUSE.md)). **To put it in your own engine**, start with [INTEGRATION.md](INTEGRATION.md): which API when,
 the frame loop, textures, effect packs (`nvfx_pack.h`: one checked file with the models and the catalogue),
 calibration, and the C++ wrapper `include/neuralfx/nvfx.hpp`.
 
@@ -60,7 +60,8 @@ Looping effects wrap time; one-shot effects (explosions) hold their last frame a
 ## 4. Engines
 
 Nothing here is engine-specific; these notes say where the calls go. The Godot plugin is in this repository and
-tested headless (§8); the Unreal and Unity notes are not built or tested.
+tested headless (§8), as is the FUSE sample integration on a stand-in FUSE ([FUSE.md](FUSE.md)); the Unreal and Unity notes
+are not built or tested.
 
 ### Unreal Engine
 
@@ -86,6 +87,14 @@ tested headless (§8); the Unreal and Unity notes are not built or tested.
   each into an `ImageTexture`.
 - Draw an effect's texture with premultiplied-alpha blending (`CanvasItemMaterial.blend_mode = BLEND_MODE_PREMULT_ALPHA`,
   or a spatial material's `blend_mode = premul_alpha`). A scene's picture is opaque.
+
+### FUSE
+
+- The sample integration in `engines/fuse` ([FUSE.md](FUSE.md)): a small interface FUSE implements (frame clock, job
+  system, view, texture uploads, render hooks) and a C++23 adapter that plays one pack's models as sprites through the
+  effect manager on FUSE's jobs, a scene script and a library stage on cards in the world, and the 3D fire volume, with
+  a headless demo on a stand-in FUSE whose test checks no allocation per frame and the same frames on any number of
+  workers.
 
 ### Custom engines
 
@@ -134,7 +143,8 @@ is the same; what differs:
   run it came from (`info.n_variations` start points).
 - **Controls change the dynamics**, so a change shows within a few frames rather than at once.
 - **Sizes**: any multiple of 32 from 32 to 1024. The coarse step costs the same at every size; the detail layer and the
-  renderer scale with pixels.
+  renderer scale with pixels. (Since 21 October 2026 the detail layer costs about an eighth less, a frame 3 to 4%, with
+  the same frames to the bit; [REPORT.md](REPORT.md) §19.)
 - **One instance per playing copy.** The state belongs to the instance; two copies that should look different need two
   instances (sharing one instance shares the look, as before).
 - **Memory**: the effect holds the weights and the start points (stored and resident sizes in `nvfx_effect_info`);
@@ -164,6 +174,20 @@ is the same; what differs:
   The orb is the exception: study L's orb failed study K's rule at int8 (REPORT.md §13.9), so the library and the
   scenes play it at float (`precision float` on its `effect` statement); set `NVFX_PRECISION_FLOAT` for orb instances
   and for the orb's `nvfx_manager_model_desc`.
+- **Drawn at half size and upscaled (study P, [STUDY_P.md](STUDY_P.md); experimental, did not pass its rule).** For an
+  effect drawn large: `nvfx_instance_set_upscale(inst, NVFX_UPSCALE_BILINEAR)` plays the instance at half its size (any
+  size that is a multiple of 64) and brings each frame back with the bilinear 2x; `NVFX_UPSCALE_LEARNED`, after
+  `nvfx_effect_attach_upscaler(effect, "file.nvfxup")`, uses a small learned 2x with seeded micro-detail instead
+  (deterministic from the instance's seed and the time). Either is a set-up call (new buffers, a new timeline); frames
+  allocate nothing; the colour is applied after the upscale; empty pixels stay exactly transparent. NVFX_VERSION 7.
+  **What pays is drawing at half size**: the half-size instance costs 0.29 to 0.34 of a native one at 512 px (0.34 to
+  0.43 at 256 px), and against the simulator's frames it is within the null's margins of native or closer (it loses the
+  native's finest filaments, which the detail layer draws at 512 px and the simulator does not have). So the cheap way
+  is the engine's own: create the instance at half size and let the GPU's bilinear sampler draw it large. The learned 2x
+  did not pass its rule: it costs 0.45 to 0.59 of native at 512 px (more than 0.55 for two of six effects; busy machine,
+  provisional), and against native on the same seed it was not better than the bilinear 2x on PSNR, SSIM and the high
+  band together for any of the six effects at 512 px on the held-out test (STUDY_P.md §6); its micro-detail, isotropic
+  noise, does not draw the native's filaments.
 - `nvfx_bake` renders consecutive frames from a fresh start and crossfades a few extra frames into the first ones, so
   the flipbook loops.
 
@@ -256,6 +280,25 @@ burning?". They read the bus of the last frame computed and cost a few bilinear 
 
 `examples/scenes/campfire.nvfxs` is a small scene driven this way (three inputs, four rules only the game fires); the
 viewer's scene mode shows a script's inputs as sliders and its named rules as buttons ([VIEWER.md](VIEWER.md)).
+
+**Weather** ([WEATHER.md](WEATHER.md)): a script's weather director heads for the regime an input says, so the game
+moves the weather with the calls above and reads it back by name, with no call of its own:
+
+```c
+/* the script: input weather = 0, input change = 30, weather sky, seed 28500010, regime weather, over change,
+   and `when sky.since == 0 as thunder, repeat:` for the flashes */
+nvfx_scene_set_input(scene, "weather", 3);              /* 0 clear ... 3 storm ... 6 dust: heads there over 30 s */
+float rain, wind, vis;
+nvfx_scene_get_input(scene, "sky.rain", &rain);         /* mm/h: a weather's members, read by NAME.member */
+nvfx_scene_get_input(scene, "sky.wind", &wind);         /* m/s at 10 m, gusts included */
+nvfx_scene_get_input(scene, "sky.visibility", &vis);    /* m: the game's own fog, AI sight, audio */
+int flashes;
+nvfx_scene_rule_state(scene, "thunder", &flashes, NULL); /* one more each flash: play the thunder */
+```
+
+`nvfx_scene_get_input` reads `NAME.member` when no input has that name (cloud, rain, snow, hail, wind, mean, gust,
+visibility, temp, lightning, dust, fog, extinction, u, beaufort, lean, leaves, lift, light, flash, strike, bolt, since,
+regime, progress: WEATHER.md §1). The director steps first in each frame, so what is read is the frame's.
 
 **Errors.** Script errors (`NVFX_ERROR_SCRIPT`) carry the line and the column, in `nvfx_scene_error` and in the
 message (`"name:line:column: message"`, with a suggestion for a misspelt word). The script is checked before any
@@ -398,13 +441,18 @@ nothing).
 
 ## 9. The effect library
 
-[LIBRARY.md](LIBRARY.md) is a catalogue of 191 named effects (a campfire, a grenade, a steam vent, a portal, a lightning
-strike, ground fog, a dust impact, a flamethrower, a plasma orb, a rocket's trail, rain, ...) built from the twenty-one
+[LIBRARY.md](LIBRARY.md) is a catalogue of 234 named effects (a campfire, a grenade, a steam vent, a portal, a lightning
+strike, ground fog, a dust impact, a flamethrower, a plasma orb, a rocket's trail, rain, a lava flow, a candelabra, a crown
+fire, a window fire, a haboob, ...) built from the thirty-three
 trained models and the compositor's procedural elements, ready to place without training. Four are **trails**
 (`rocket_trail`, `vehicle_dust_wake`, `carried_torch`, `comet_trail`): the game moves them every frame with
 `nvfx_stage_move`, and their smoke, dust or glow stays in the world behind them ([LIBRARY.md](LIBRARY.md) §9); five are
 **procedural weather** (`rain`, `snow`, `falling_ash`, `falling_leaves`, `cherry_petals`) that rides the effects' air,
-melts over fires (snow) and thins smoke (rain). `include/neuralfx/nvfx_library.h`, in `libnvfx`, lists them and plays them on a **stage**: a scene (§7) with
+melts over fires (snow) and thins smoke (rain); and `weather_director` plays the weather director
+([WEATHER.md](WEATHER.md)): set its `regime` parameter (0 clear ... 6 dust) with `nvfx_stage_set_param` and the weather
+heads there in the order real weather keeps; read it with `nvfx_scene_get_input(scene, "s0_sky.rain")` (an instance's
+names start `sN_`, N its place among all the stage's instances in the order of the rooms: give the weather a room of one,
+first, and it is `s0_`). `include/neuralfx/nvfx_library.h`, in `libnvfx`, lists them and plays them on a **stage**: a scene (§7) with
 room for a number of instances of chosen effects, which the game spawns at a position, scale and time, drives through
 named parameters, moves and stops while it plays, without allocating per frame. A stage is an ordinary `nvfx_scene`
 for stepping, drawing and reading fields, so the threading, overlap and exactness of §7 hold for it
@@ -604,12 +652,16 @@ point. Going back in time or far ahead restarts the shard's rollout (a start run
 
 **Threads and memory.** A volume owns its worker threads (`threads` at creation); the fields and the pictures are the
 same to the bit on any number (tested), and nothing is allocated after creation (`nvfx_alloc_test`). A volume needs
-31 MB (two shards' fine fields, one shared set of step buffers, the renderer's prepared volume; `nvfx_volume_scratch_bytes`);
-the effect file is 268 KB (14,218 weights at 16 bits, 8 start states at 8 bits). `examples/volume_host.c` is the whole
-loop in plain C. The cost per frame is in STUDY_3D.md §8 (provisional): about 70 ms a step and 50 ms a 256 x 256 picture on one
-busy core, so a volume suits one hero effect, or baking; an engine draws the textures on its GPU.
+52 MB (two shards' fine fields, one shared set of step buffers, the detail layer's own buffers of 19 MB, the renderer's
+prepared volume; `nvfx_volume_scratch_bytes`); the effect file is 268 KB (14,218 weights at 16 bits, 8 start states at
+8 bits). `examples/volume_host.c` is the whole loop in plain C. The cost per frame is in STUDY_3D.md §8 (provisional):
+about 70 ms a step and 50 ms a 256 x 256 picture on one busy core. **The detail layer runs on vectors** since 21 October
+2026 (AVX-512 where the CPU has it, else AVX2; nothing to set): the reference's fields to the bit on every ISA, so the
+frames are those of before, and a step costs about a third of what it did (26 against 83 ms on one core of a busy
+machine; the detail layer alone 10 against 64 ms; [REPORT.md](REPORT.md) §19). A volume still suits one hero effect, or
+baking; an engine draws the textures on its GPU.
 
-**What it is not.** No int8 path, no SIMD beyond an AVX2 convolution, no scenes, library, manager or Godot node for
+**What it is not.** No int8 path, no SIMD beyond an AVX2 convolution and the detail layer, no scenes, library, manager or Godot node for
 volumes yet; one trained effect. Its teacher is our own 3D solver, not a validated fire code. The trained fire runs
 away when the wind blows towards -x (a wind control of 0.3 or below: a second fire grows at the box's upwind edge
 until the next shard; STUDY_3D.md §11); keep the wind control between 0.4 and 0.8, where it was seen to behave, and

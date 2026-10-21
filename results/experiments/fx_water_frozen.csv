@@ -3,10 +3,11 @@ rollout_effect,cloud,fx_atmos/models/d/cloud.nvfx,149287,b1a886dd038a8e88f4461e5
 rollout_effect,waterfall,fx_water/models/d/waterfall.nvfx,83719,ffc894995d47325aa883787188e4defeb001ebb76e848152b72f128b06e70a0c,study D's recipe (docs/EFFECTS_WATER.md): d-train --stages12 1 then d-tune then d-finish; frozen before its test
 rollout_effect,fountain,fx_water/models/d/fountain.nvfx,83719,a4dd81de4d939b763ecf3b87118c40043e4487a57e89dd65b39f394f28782034,study D's recipe (docs/EFFECTS_WATER.md): d-train --stages12 1 then d-tune then d-finish; frozen before its test
 rollout_effect,splash,fx_water/models/d/splash.nvfx,280927,8705966a0b60cc32f618ad89ba762f9e33269e0a73f8a36ede3af838ccb6fdd5,study D's recipe (docs/EFFECTS_WATER.md): d-train --stages12 1 then d-tune then d-finish; frozen before its test
+rollout_effect,splash_o,o_fix/models/splash.nvfx,301443,806a7a6cf27d73bb84b602cbe8f11e9b4ca4ce071bad50a4b9224bfb9131e82a,study O (docs/REPORT.md §16.3): the splash with the mean state (ms); replaces it after its test; no keyframe below plays it
 rollout_effect,rainshaft,fx_water/models/d/rainshaft.nvfx,83719,310b168bc6352dc277be04971c74553df596c2f5535faa917d5153d842eb0b20,study D's recipe (docs/EFFECTS_WATER.md): d-train --stages12 1 then d-tune then d-finish; frozen before its test
-falls_keyframe,frame_060,nvfx_scene_script --keyframes (examples/scenes/falls.nvfxs),1084717,8f8cbb396988785bc46fcc0b30c21ac54f722445c06b03084cffe51ced0f0bfa,
-falls_keyframe,frame_105,nvfx_scene_script --keyframes (examples/scenes/falls.nvfxs),1162600,ee8e913232384ed12e830d85c41bfddb7f6a31c72ba0ac97af6db992756dcb2f,
-falls_keyframe,frame_169,nvfx_scene_script --keyframes (examples/scenes/falls.nvfxs),916976,fc594f38a68f4e7ce9c52ec100ebe41e4cccd2180ed2005cb8347507c9e38ce9,
-falls_keyframe,frame_210,nvfx_scene_script --keyframes (examples/scenes/falls.nvfxs),1197104,3d5b4e45dbae2733f6ac77a409fef19dc1dda91651e575616107d22d0b64670d,
-falls_keyframe,frame_271,nvfx_scene_script --keyframes (examples/scenes/falls.nvfxs),983586,c8bd920ed996e081bf8c6aa00d0288c79fe3b38a16cf529624997fe071c05da8,
-falls_keyframe,frame_345,nvfx_scene_script --keyframes (examples/scenes/falls.nvfxs),1255566,9cbe2703f183566456c3e66e6f52d0d5d656ffb4e3bfc1198c5fceba7ea557c0,
+falls_keyframe,frame_060,nvfx_scene_script --keyframes (examples/scenes/falls.nvfxs),1086232,eee6bfdb035d2ec8bfda85810cf901c8982e0e80d594ceb15171663d64c67a2f,
+falls_keyframe,frame_105,nvfx_scene_script --keyframes (examples/scenes/falls.nvfxs),1163494,2aac5b21ac63eb69ec79ec21e60381170c7ad03078276aaf3661f5b2de5af95b,
+falls_keyframe,frame_169,nvfx_scene_script --keyframes (examples/scenes/falls.nvfxs),920137,37baced641183d60eb943b07b8c73caba6f4fd6234c6de4fd11d2775f90c21ac,
+falls_keyframe,frame_210,nvfx_scene_script --keyframes (examples/scenes/falls.nvfxs),1200085,03f1f6434a54b559af9184a43474d69a4da5c66d4854bbbe3e30a6dd17c5766a,
+falls_keyframe,frame_271,nvfx_scene_script --keyframes (examples/scenes/falls.nvfxs),986836,980b10384574ea84dbd678663ba2d78dd4d3b23d04931fb3e2c49778bf7d2ec4,
+falls_keyframe,frame_345,nvfx_scene_script --keyframes (examples/scenes/falls.nvfxs),1256717,500b406d2ef5c79f3f7d03daa5d58eb657dd56b9ab4f77e63ef72c21e2edf28e,

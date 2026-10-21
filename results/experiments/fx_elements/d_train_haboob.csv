@@ -1,0 +1,2 @@
+effect,runs,frames,sim_minutes,record_s,stepper_loss,stepper_s,renderer_psnr,contrast,swirl,detail_score,starts,start_fine,stored_bytes,total_s
+haboob,240,150,20.00,542,0.02115,10862,0.00,1,0.8,0.000,16,64,280826,11404

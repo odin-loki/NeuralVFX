@@ -196,7 +196,12 @@ TEST(Sim, StudyEffectsAreUnchangedByTheNewOnes) {
     }
     return h;
   };
-  const std::array<std::pair<sim::Effect, std::uint64_t>, 11> want{{{sim::Effect::fire, 0xecb25de8e62e7379ULL},
+  // the eleven of rounds 1 to 6, and round 7's six and the water's four (hashed before the earth effects were added,
+  // docs/EFFECTS_EARTH.md); the earth's three and the air's three (docs/EFFECTS_AIR.md), each hashed on its own branch
+  // before the two were merged; round 10's fire three (docs/EFFECTS_FIRE2.md), hashed when round 10's two branches were
+  // merged (their full-size clips at two settings then the same to the byte as on their own branch); the elements' three
+  // (docs/EFFECTS_ELEMENTS.md), hashed when they were frozen for training
+  const std::array<std::pair<sim::Effect, std::uint64_t>, 33> want{{{sim::Effect::fire, 0xecb25de8e62e7379ULL},
                                                                      {sim::Effect::smoke, 0xea602bfa2409bf3fULL},
                                                                      {sim::Effect::explosion, 0xbb823d31fd8c4eb4ULL},
                                                                      {sim::Effect::steam, 0xa57b2dc109882ec3ULL},
@@ -206,7 +211,29 @@ TEST(Sim, StudyEffectsAreUnchangedByTheNewOnes) {
                                                                      {sim::Effect::vortex, 0xfa46f5fc13b9cb20ULL},
                                                                      {sim::Effect::fog, 0x36573f12c43055b2ULL},
                                                                      {sim::Effect::dust, 0xa20af83462f66930ULL},
-                                                                     {sim::Effect::cloud, 0x8e6664474fe37d58ULL}}};
+                                                                     {sim::Effect::cloud, 0x8e6664474fe37d58ULL},
+                                                                     {sim::Effect::wildfire, 0xad693da9553819c7ULL},
+                                                                     {sim::Effect::coals, 0x6f038944bdd12910ULL},
+                                                                     {sim::Effect::mushroom, 0x93f24f8ef0b28ae6ULL},
+                                                                     {sim::Effect::launch, 0x8a85441c04182281ULL},
+                                                                     {sim::Effect::puffs, 0xcff7f9fb95e106fdULL},
+                                                                     {sim::Effect::ink, 0x46f9e4a0c8a075b4ULL},
+                                                                     {sim::Effect::waterfall, 0x20ace39e7ed5b5b1ULL},
+                                                                     {sim::Effect::fountain, 0x897564a37a1bf472ULL},
+                                                                     {sim::Effect::splash, 0x4c634291b30f7d58ULL},
+                                                                     {sim::Effect::rainshaft, 0xbc6f9c2a34332725ULL},
+                                                                     {sim::Effect::lava, 0xda1ec09e7760ba23ULL},
+                                                                     {sim::Effect::eruption, 0x89fc8b4b3c97b50cULL},
+                                                                     {sim::Effect::avalanche, 0xf96254ac3880822fULL},
+                                                                     {sim::Effect::candle, 0xd3a4c4a39b7ebaebULL},
+                                                                     {sim::Effect::smokering, 0x49f140ddbe3ed42dULL},
+                                                                     {sim::Effect::heavygas, 0xe6c6e7108b078388ULL},
+                                                                     {sim::Effect::crownfire, 0x51f90f3d8df5215bULL},
+                                                                     {sim::Effect::windowfire, 0xcd277c23602b7cd5ULL},
+                                                                     {sim::Effect::dustexplosion, 0x36dc803d54654b51ULL},
+                                                                     {sim::Effect::geyser, 0xc8fc3cda1895799fULL},
+                                                                     {sim::Effect::haboob, 0x4e72b71ef7c58d0aULL},
+                                                                     {sim::Effect::seaspray, 0x1860a76e95ded34aULL}}};
   for (const auto& [e, h] : want) {
     auto p = small(e);
     p.intensity = 0.8f;
@@ -223,8 +250,9 @@ TEST(Sim, NewEffectsAreNamedAndLoop) {
     sim::Effect back{};
     ASSERT_TRUE(sim::parse_effect(sim::effect_name(e), back));
     EXPECT_EQ(back, e);
-    EXPECT_EQ(sim::effect_loops(e), e != sim::Effect::dust && e != sim::Effect::mushroom &&
-                                       e != sim::Effect::splash);  // they play once, as the explosion
+    EXPECT_EQ(sim::effect_loops(e), e != sim::Effect::dust && e != sim::Effect::mushroom && e != sim::Effect::splash &&
+                                       e != sim::Effect::avalanche && e != sim::Effect::smokering &&
+                                       e != sim::Effect::dustexplosion && e != sim::Effect::haboob);  // they play once, as the explosion
     EXPECT_EQ(sim::simulate(small(e)).rgba, sim::simulate(small(e)).rgba) << sim::effect_name(e);
   }
   EXPECT_EQ(sim::kAllEffects.size(), sim::kEffects.size() + sim::kNewEffects.size());
@@ -1004,10 +1032,10 @@ TEST(Sim, WaterEffectsAreNamedWithTheirControls) {
     EXPECT_FALSE(std::ranges::contains(sim::kEffects, e)) << name;
     EXPECT_EQ(sim::control_names(e)[1], e == sim::Effect::fountain ? "aim" : "wind") << name;
   }
-  // after cloud, in this order
-  // the last four, after round 7's six (wildfire, coals, mushroom, launch, puffs, ink)
-  EXPECT_EQ(sim::kAllEffects[sim::kAllEffects.size() - 4], sim::Effect::waterfall);
-  EXPECT_EQ(sim::kAllEffects.back(), sim::Effect::rainshaft);
+  // after round 7's six (wildfire, coals, mushroom, launch, puffs, ink), in this order
+  const auto at = [](sim::Effect e) { return std::ranges::find(sim::kAllEffects, e) - sim::kAllEffects.begin(); };
+  EXPECT_EQ(at(sim::Effect::waterfall), at(sim::Effect::ink) + 1);
+  EXPECT_EQ(at(sim::Effect::rainshaft), at(sim::Effect::waterfall) + 3);
 }
 
 TEST(Sim, WaterIsReflectedLightBlueWhiteAndTranslucent) {
@@ -1086,6 +1114,962 @@ TEST(Sim, RainFallsFromTheCloudBaseAndTheWindSlantsIt) {
   const auto light = water_spread(water_params(sim::Effect::rainshaft, 0.f, 0.5f, 0.5f), 120);
   const auto heavy = water_spread(water_params(sim::Effect::rainshaft, 1.f, 0.5f, 0.5f), 120);
   EXPECT_GT(heavy.water, 2.0 * light.water);  // intensity: how heavy
+}
+
+// --- lava, eruption and avalanche (docs/EFFECTS_EARTH.md) ------------------------------------------------------------
+
+namespace {
+
+// Where the material (soot: rock, ash, snow) and the heat are, as fractions of the frame (y up), and how it moves.
+struct EarthSpread {
+  double soot = 0, heat = 0, sx = 0, sy = 0, top = 0, u = 0;  // u: the material's mean horizontal speed (cells of a
+                                                               // 128-cell frame per second)
+  double hot_top = 0;          // the highest row where the heat is above half its peak
+  double dark = 0, glowing = 0;  // of the cells with rock in them (soot > 0.5): the share with heat below a fifth of
+                                 // the peak (crust) and above half of it (glow)
+  double above = 0;            // material above 22% of the height (lava's bubbles)
+  double wide_top = 0, wide_low = 0;  // columns with ash above 55% of the height, and between 30 and 45% (eruption)
+  double side_low = 0;         // ash low down (below 10%) more than 15% of the frame from the middle (eruption)
+};
+
+EarthSpread earth_spread(const sim::State& s) {
+  EarthSpread o;
+  float peak_t = 0.f, peak_d = 0.f;
+  for (const float t : s.temp) peak_t = std::max(peak_t, t);
+  for (const float d : s.soot) peak_d = std::max(peak_d, d);
+  const double n = s.n, scale = 128.0 / n;
+  long rock = 0, dark = 0, glowing = 0;
+  std::vector<double> col_top(static_cast<std::size_t>(s.n), 0.0), col_low(static_cast<std::size_t>(s.n), 0.0);
+  for (int y = 0; y < s.n; ++y) {
+    for (int x = 0; x < s.n; ++x) {
+      const std::size_t i = static_cast<std::size_t>(y * s.n + x);
+      const double d = s.soot[i], t = s.temp[i], fy = (y + 0.5) / n, fx = (x + 0.5) / n;
+      o.soot += d;
+      o.heat += t;
+      o.sx += d * fx;
+      o.sy += d * fy;
+      o.u += d * s.u[i] * scale;
+      if (d > 0.1 * peak_d) o.top = std::max(o.top, (y + 1) / n);
+      if (t > 0.5 * peak_t) o.hot_top = std::max(o.hot_top, (y + 1) / n);
+      if (d > 0.5) {
+        ++rock;
+        dark += t < 0.25 * peak_t;
+        glowing += t > 0.5 * peak_t;
+      }
+      if (fy > 0.22) o.above += d;
+      if (fy > 0.55) col_top[static_cast<std::size_t>(x)] = std::max(col_top[static_cast<std::size_t>(x)], d);
+      if (fy > 0.3 && fy < 0.45) col_low[static_cast<std::size_t>(x)] = std::max(col_low[static_cast<std::size_t>(x)], d);
+      if (fy < 0.1 && std::abs(fx - 0.5) > 0.15) o.side_low += d;
+    }
+  }
+  for (int x = 0; x < s.n; ++x) {
+    o.wide_top += col_top[static_cast<std::size_t>(x)] > 0.2;
+    o.wide_low += col_low[static_cast<std::size_t>(x)] > 0.2;
+  }
+  if (o.soot > 0) {
+    o.sx /= o.soot;
+    o.sy /= o.soot;
+    o.u /= o.soot;
+  }
+  if (rock > 0) {
+    o.dark = static_cast<double>(dark) / static_cast<double>(rock);
+    o.glowing = static_cast<double>(glowing) / static_cast<double>(rock);
+  }
+  return o;
+}
+
+// The state after each of `frames` frames, at 64 cells.
+std::vector<sim::State> earth_run(sim::Effect e, float intensity, float second, float turbulence, int frames, std::uint64_t seed = 3) {
+  sim::Fluid f(water_params(e, intensity, second, turbulence, seed));
+  std::vector<sim::State> v;
+  for (int i = 0; i < frames; ++i) {
+    f.step_frame();
+    v.push_back(f.state());
+  }
+  return v;
+}
+
+// Means of a statistic over frames [a, b) of a run.
+template <class F>
+double mean_over(const std::vector<sim::State>& v, int a, int b, F stat) {
+  double m = 0;
+  for (int i = a; i < b; ++i) m += stat(earth_spread(v[static_cast<std::size_t>(i)])) / (b - a);
+  return m;
+}
+
+}  // namespace
+
+TEST(Sim, EarthEffectsAreNamedAndOnlyTheAvalanchePlaysOnce) {
+  const std::array earth{sim::Effect::lava, sim::Effect::eruption, sim::Effect::avalanche};
+  const std::array<std::string_view, 3> second{"flow", "wind", "direction"};
+  for (std::size_t k = 0; k < earth.size(); ++k) {
+    const sim::Effect e = earth[k];
+    sim::Effect back{};
+    ASSERT_TRUE(sim::parse_effect(sim::effect_name(e), back));
+    EXPECT_EQ(back, e);
+    EXPECT_TRUE(std::ranges::contains(sim::kNewEffects, e));
+    EXPECT_FALSE(std::ranges::contains(sim::kEffects, e));
+    const auto names = sim::control_names(e);
+    EXPECT_EQ(names[0], "intensity");
+    EXPECT_EQ(names[1], second[k]);
+    EXPECT_EQ(names[2], "turbulence");
+  }
+  EXPECT_EQ(sim::effect_name(sim::Effect::lava), "lava");
+  EXPECT_EQ(sim::effect_name(sim::Effect::eruption), "eruption");
+  EXPECT_EQ(sim::effect_name(sim::Effect::avalanche), "avalanche");
+  // after the water's four, in this order
+  const auto at = [](sim::Effect e) { return std::ranges::find(sim::kAllEffects, e) - sim::kAllEffects.begin(); };
+  EXPECT_GT(at(sim::Effect::lava), at(sim::Effect::rainshaft));
+  EXPECT_EQ(at(sim::Effect::eruption), at(sim::Effect::lava) + 1);
+  EXPECT_EQ(at(sim::Effect::avalanche), at(sim::Effect::lava) + 2);
+  EXPECT_TRUE(sim::effect_loops(sim::Effect::lava));
+  EXPECT_TRUE(sim::effect_loops(sim::Effect::eruption));
+  EXPECT_FALSE(sim::effect_loops(sim::Effect::avalanche));
+  EXPECT_EQ(sim::one_shot_frames(sim::Effect::avalanche), 150);  // it runs, grows and comes to rest within 5 s
+  EXPECT_EQ(sim::one_shot_frames(sim::Effect::lava), 0);
+  // lava gives light (colour above alpha) over dark rock; the eruption's ash is dark and glows only at the vent; the
+  // avalanche is white snow with no light of its own
+  const auto clip = [](sim::Effect e, int frames) {
+    auto p = water_params(e, 0.7f, 0.7f, 0.5f);
+    p.frames = frames;
+    return sim::simulate(p);
+  };
+  const Clip lava = clip(sim::Effect::lava, 20), eruption = clip(sim::Effect::eruption, 20), snow = clip(sim::Effect::avalanche, 60);
+  long glowing = 0;
+  for (std::size_t i = 0; i < lava.rgba.size(); i += 4) glowing += lava.rgba[i] > lava.rgba[i + 3] + 8;
+  EXPECT_GT(glowing, 100);
+  long ash = 0, dark = 0, lit = 0, low_lit = 0;
+  for (std::size_t i = 0; i < eruption.rgba.size(); i += 4) {
+    const auto py = (i / 4 / 64) % 64;  // rows from the top
+    const auto [r8, g8] = std::pair{eruption.rgba[i], eruption.rgba[i + 1]};
+    if (eruption.rgba[i + 3] > 200 && r8 < g8 + 30) {
+      ++ash;
+      dark += g8 < 0.45 * eruption.rgba[i + 3];
+    }
+    if (r8 > 120 && r8 > g8 + 40) {  // an orange glow
+      ++lit;
+      low_lit += py > 38;  // in the lower 40% of the frame
+    }
+  }
+  ASSERT_GT(ash, 100);
+  EXPECT_GT(static_cast<double>(dark), 0.8 * static_cast<double>(ash));
+  EXPECT_GT(lit, 10);
+  EXPECT_GT(static_cast<double>(low_lit), 0.9 * static_cast<double>(lit));
+  long bad = 0, covered = 0;
+  double r = 0, b = 0, a = 0;
+  for (std::size_t i = 0; i < snow.rgba.size(); i += 4) {
+    for (std::size_t k = 0; k < 3; ++k) bad += snow.rgba[i + k] > snow.rgba[i + 3] + 1;
+    if (snow.rgba[i + 3] > 64) {
+      ++covered;
+      r += snow.rgba[i];
+      b += snow.rgba[i + 2];
+      a += snow.rgba[i + 3];
+    }
+  }
+  EXPECT_EQ(bad, 0);
+  ASSERT_GT(covered, 100);
+  EXPECT_GT(r, 0.6 * a);  // light
+  EXPECT_GE(b, r);        // white with a blue shade
+}
+
+TEST(Sim, LavaFlowsAlongTheGroundAndPoolsUnderACrustThatCracks) {
+  const auto v = earth_run(sim::Effect::lava, 0.6f, 0.5f, 0.5f, 240);
+  for (int i = 150; i < 240; i += 10) {
+    const EarthSpread e = earth_spread(v[static_cast<std::size_t>(i)]);
+    EXPECT_LT(e.sy, 0.15) << i;    // low, along the ground
+    EXPECT_LT(e.top, 0.35) << i;
+    EXPECT_GT(e.dark, 0.3) << i;   // much of it dark crust
+    EXPECT_GT(e.glowing, 0.03) << i;  // that cracks to show the glow
+  }
+  // the crust's pattern crawls: the heat a second apart differs by a good part of itself
+  double diff = 0, sum = 0;
+  for (std::size_t i = 0; i < v[150].temp.size(); ++i) {
+    diff += std::abs(v[150].temp[i] - v[180].temp[i]);
+    sum += v[150].temp[i];
+  }
+  EXPECT_GT(diff / sum, 0.25);
+  // flow: downhill to the left or right, slowly; level, it stays (and pools: the band is deeper)
+  const auto speed = [](const EarthSpread& e) { return e.u; };
+  const auto left = earth_run(sim::Effect::lava, 0.6f, 0.f, 0.5f, 180), right = earth_run(sim::Effect::lava, 0.6f, 1.f, 0.5f, 180);
+  const double ul = mean_over(left, 120, 180, speed), ur = mean_over(right, 120, 180, speed), u0 = mean_over(v, 120, 180, speed);
+  EXPECT_LT(ul, -3.0);
+  EXPECT_GT(ur, 3.0);
+  EXPECT_LT(std::abs(u0), 1.0);
+  EXPECT_LT(ur, 25.0);  // slowly: at or below fire's speeds
+  const auto depth = [](const EarthSpread& e) { return e.sy; };
+  EXPECT_GT(mean_over(v, 120, 180, depth), mean_over(right, 120, 180, depth));
+  // it pools downhill: more rock on the side it flows to
+  const auto x = [](const EarthSpread& e) { return e.sx; };
+  EXPECT_GT(mean_over(right, 120, 180, x), mean_over(left, 120, 180, x) + 0.01);
+  // hotter with intensity; more bubbling with turbulence
+  const auto cool = earth_run(sim::Effect::lava, 0.f, 0.5f, 0.5f, 150), hot = earth_run(sim::Effect::lava, 1.f, 0.5f, 0.5f, 150);
+  const auto heat = [](const EarthSpread& e) { return e.heat; };
+  EXPECT_GT(mean_over(hot, 100, 150, heat), 1.5 * mean_over(cool, 100, 150, heat));
+  const auto calm = earth_run(sim::Effect::lava, 0.6f, 0.5f, 0.f, 240), boiling = earth_run(sim::Effect::lava, 0.6f, 0.5f, 1.f, 240);
+  const auto above = [](const EarthSpread& e) { return e.above; };
+  EXPECT_GT(mean_over(boiling, 120, 240, above), 1.5 * mean_over(calm, 120, 240, above) + 0.1);
+}
+
+TEST(Sim, EruptionRisesIntoAnUmbrellaAndItsHeavyAshFallsBack) {
+  const auto v = earth_run(sim::Effect::eruption, 0.6f, 0.5f, 0.5f, 240);
+  const auto wide_top = [](const EarthSpread& e) { return e.wide_top; };
+  const auto wide_low = [](const EarthSpread& e) { return e.wide_low; };
+  // an umbrella under the stable layer, wider than the column below it and spanning much of the frame
+  EXPECT_GT(mean_over(v, 180, 240, wide_top), 1.4 * mean_over(v, 180, 240, wide_low));
+  EXPECT_GT(mean_over(v, 180, 240, wide_top), 0.4 * 64);
+  EXPECT_GT(mean_over(v, 180, 240, wide_low), 0.0);  // on a column
+  // only the ash near the vent is hot enough to glow
+  const auto hot_top = [](const EarthSpread& e) { return e.hot_top; };
+  EXPECT_LT(mean_over(v, 180, 240, hot_top), 0.4);
+  // the heavy ash collapses down the sides and runs out along the ground, more at a higher rate
+  const auto side = [](const EarthSpread& e) { return e.side_low; };
+  const auto weak = earth_run(sim::Effect::eruption, 0.1f, 0.5f, 0.5f, 240), strong = earth_run(sim::Effect::eruption, 1.f, 0.5f, 0.5f, 240);
+  EXPECT_GT(mean_over(strong, 180, 240, side), 2.0 * mean_over(weak, 180, 240, side) + 1.0);
+  // a higher rate, more ash and a higher column
+  const auto soot = [](const EarthSpread& e) { return e.soot; };
+  const auto top = [](const EarthSpread& e) { return e.top; };
+  EXPECT_GT(mean_over(strong, 180, 240, soot), 1.5 * mean_over(weak, 180, 240, soot));
+  EXPECT_GT(mean_over(strong, 180, 240, top), mean_over(weak, 180, 240, top) + 0.05);
+  // the wind leans it
+  const auto left = earth_run(sim::Effect::eruption, 0.6f, 0.f, 0.5f, 180), right = earth_run(sim::Effect::eruption, 0.6f, 1.f, 0.5f, 180);
+  const auto x = [](const EarthSpread& e) { return e.sx; };
+  EXPECT_GT(mean_over(right, 150, 180, x), mean_over(left, 150, 180, x) + 0.1);
+}
+
+TEST(Sim, AvalancheRunsDownhillGrowsAndSettles) {
+  const auto x = [](const EarthSpread& e) { return e.sx; };
+  const auto soot = [](const EarthSpread& e) { return e.soot; };
+  const auto top = [](const EarthSpread& e) { return e.top; };
+  for (const float d : {0.f, 1.f}) {  // it runs to the left or to the right, and grows as it goes
+    const auto v = earth_run(sim::Effect::avalanche, 0.7f, d, 0.5f, 150);
+    const double sign = d > 0.5f ? 1.0 : -1.0;
+    EXPECT_GT(sign * (mean_over(v, 85, 95, x) - mean_over(v, 5, 15, x)), 0.25) << d;
+    EXPECT_GT(mean_over(v, 70, 80, soot), 2.0 * mean_over(v, 5, 15, soot)) << d;
+    EXPECT_GT(mean_over(v, 85, 95, top), mean_over(v, 5, 15, top) + 0.15) << d;
+    // then it settles: by its end most of its snow has come out of the air
+    double peak = 0;
+    for (const auto& s : v) peak = std::max(peak, earth_spread(s).soot);
+    EXPECT_LT(earth_spread(v.back()).soot, 0.6 * peak) << d;
+    for (const auto& s : v) {
+      for (const float t : s.temp) ASSERT_EQ(t, 0.f);  // no heat
+    }
+  }
+  // on the level it only slumps, near where it broke loose
+  const auto level = earth_run(sim::Effect::avalanche, 0.7f, 0.5f, 0.5f, 150);
+  EXPECT_NEAR(mean_over(level, 140, 150, x), 0.5, 0.15);
+  EXPECT_LT(mean_over(level, 70, 80, soot), 0.5 * mean_over(earth_run(sim::Effect::avalanche, 0.7f, 1.f, 0.5f, 80), 70, 80, soot));
+  // a bigger avalanche with intensity
+  const auto small_one = earth_run(sim::Effect::avalanche, 0.1f, 1.f, 0.5f, 90), big = earth_run(sim::Effect::avalanche, 1.f, 1.f, 0.5f, 90);
+  EXPECT_GT(mean_over(big, 70, 90, soot), 2.0 * mean_over(small_one, 70, 90, soot));
+  EXPECT_GT(mean_over(big, 70, 90, top), mean_over(small_one, 70, 90, top) + 0.1);
+}
+
+// --- candle, smokering and heavygas (docs/EFFECTS_AIR.md) ------------------------------------------------------------
+
+TEST(Sim, AirEffectsHaveTheirOwnControlsAndOnlyTheRingPlaysOnce) {
+  const std::array<std::pair<sim::Effect, std::string_view>, 3> second{
+      {{sim::Effect::candle, "draught"}, {sim::Effect::smokering, "wind"}, {sim::Effect::heavygas, "flow"}}};
+  for (const auto& [e, name] : second) {
+    sim::Effect back{};
+    ASSERT_TRUE(sim::parse_effect(sim::effect_name(e), back));
+    EXPECT_EQ(back, e);
+    EXPECT_TRUE(std::ranges::contains(sim::kNewEffects, e));
+    EXPECT_FALSE(std::ranges::contains(sim::kEffects, e));
+    const auto names = sim::control_names(e);
+    EXPECT_EQ(names[0], "intensity");
+    EXPECT_EQ(names[1], name);
+    EXPECT_EQ(names[2], "turbulence");
+    EXPECT_EQ(sim::effect_loops(e), e != sim::Effect::smokering);
+  }
+  EXPECT_EQ(sim::effect_name(sim::Effect::smokering), "smokering");
+  EXPECT_EQ(sim::effect_name(sim::Effect::heavygas), "heavygas");
+  EXPECT_EQ(sim::one_shot_frames(sim::Effect::smokering), 120);  // 4 s
+  EXPECT_EQ(sim::one_shot_frames(sim::Effect::candle), 0);
+  // after the earth effects (docs/EFFECTS_EARTH.md), in this order
+  const auto at = [](sim::Effect e) { return std::ranges::find(sim::kAllEffects, e) - sim::kAllEffects.begin(); };
+  EXPECT_EQ(at(sim::Effect::candle), at(sim::Effect::avalanche) + 1);
+  EXPECT_EQ(at(sim::Effect::smokering), at(sim::Effect::candle) + 1);
+  EXPECT_EQ(at(sim::Effect::heavygas), at(sim::Effect::candle) + 2);
+}
+
+namespace {
+
+// The state after each of `frames` frames, at 64 cells.
+std::vector<sim::State> air_run(sim::Effect e, float intensity, float second, float turbulence, int frames, std::uint64_t seed = 1) {
+  auto p = atmos_params(e, intensity, second, turbulence);
+  p.seed = seed;
+  sim::Fluid f(p);
+  std::vector<sim::State> v;
+  for (int i = 0; i < frames; ++i) {
+    f.step_frame();
+    v.push_back(f.state());
+  }
+  return v;
+}
+
+// Heat in the flame (above the visible threshold of the candle's light), its centroid and extent, as fractions of the
+// frame (y up).
+struct Flame {
+  double heat = 0, x = 0, y = 0, left = 1, right = 0, top = 0, bottom = 1;
+};
+Flame flame_of(const sim::State& s) {
+  Flame o;
+  const double n = s.n;
+  for (int y = 0; y < s.n; ++y) {
+    for (int x = 0; x < s.n; ++x) {
+      const double t = s.temp[static_cast<std::size_t>(y * s.n + x)];
+      if (t < 0.4) continue;
+      o.heat += t;
+      o.x += t * (x + 0.5) / n;
+      o.y += t * (y + 0.5) / n;
+      o.left = std::min(o.left, x / n);
+      o.right = std::max(o.right, (x + 1) / n);
+      o.bottom = std::min(o.bottom, y / n);
+      o.top = std::max(o.top, (y + 1) / n);
+    }
+  }
+  if (o.heat > 0) {
+    o.x /= o.heat;
+    o.y /= o.heat;
+  }
+  return o;
+}
+
+}  // namespace
+
+TEST(Sim, CandleIsASmallSteadyTeardropWithAWispThatLeansInADraught) {
+  const auto v = air_run(sim::Effect::candle, 0.5f, 0.5f, 0.1f, 150);
+  for (int i = 90; i < 150; i += 10) {
+    const Flame fl = flame_of(v[static_cast<std::size_t>(i)]);
+    EXPECT_GT(fl.heat, 1.0) << i;
+    EXPECT_LT(fl.right - fl.left, 0.16) << i;  // small and narrow, on its wick in the middle of the frame
+    EXPECT_GT(fl.top - fl.bottom, 1.8 * (fl.right - fl.left)) << i;  // taller than it is wide
+    EXPECT_LT(fl.top, 0.5) << i;
+    EXPECT_NEAR(fl.x, 0.5, 0.03) << i;
+    const Spread sm = spread_of(v[static_cast<std::size_t>(i)]);
+    EXPECT_GT(sm.cy, fl.y + 0.1) << i;  // its smoke rises above it
+    EXPECT_GT(sm.top, 0.8) << i;
+  }
+  // steady in still air: the flame's heat changes little from frame to frame
+  const auto change = [](const sim::State& a, const sim::State& b) {
+    double d = 0, sum = 0;
+    for (std::size_t i = 0; i < a.temp.size(); ++i) {
+      if (a.temp[i] < 0.4f && b.temp[i] < 0.4f) continue;
+      d += std::abs(a.temp[i] - b.temp[i]);
+      sum += a.temp[i];
+    }
+    return d / sum;
+  };
+  double calm = 0, gusty = 0;
+  const auto t = air_run(sim::Effect::candle, 0.5f, 0.5f, 1.f, 150), d = air_run(sim::Effect::candle, 0.5f, 0.9f, 0.1f, 150);
+  for (int i = 100; i < 140; ++i) {
+    calm += change(v[static_cast<std::size_t>(i)], v[static_cast<std::size_t>(i + 1)]) / 40;
+    gusty += change(t[static_cast<std::size_t>(i)], t[static_cast<std::size_t>(i + 1)]) / 40;
+  }
+  EXPECT_LT(calm, 0.1);
+  EXPECT_GT(gusty, 1.5 * calm);  // turbulence makes it flicker
+  // the draught leans it and its smoke to the side it blows to
+  const auto left = air_run(sim::Effect::candle, 0.5f, 0.1f, 0.1f, 120), right = air_run(sim::Effect::candle, 0.5f, 0.9f, 0.1f, 120);
+  EXPECT_LT(flame_of(left[119]).x, 0.5 - 0.02);
+  EXPECT_GT(flame_of(right[119]).x, 0.5 + 0.02);
+  EXPECT_GT(spread_of(right[119]).cx, spread_of(left[119]).cx + 0.15);
+  EXPECT_GT(flame_of(d[149]).x, 0.5 + 0.02);
+  // a bigger flame with intensity; it gives light (colour above coverage)
+  const auto small_one = air_run(sim::Effect::candle, 0.f, 0.5f, 0.1f, 90), big = air_run(sim::Effect::candle, 1.f, 0.5f, 0.1f, 90);
+  EXPECT_GT(flame_of(big[89]).top - flame_of(big[89]).bottom, 1.4 * (flame_of(small_one[89]).top - flame_of(small_one[89]).bottom));
+  EXPECT_GT(flame_of(big[89]).heat, 2.0 * flame_of(small_one[89]).heat);
+  auto p = atmos_params(sim::Effect::candle, 0.6f, 0.5f, 0.3f);
+  p.frames = 12;
+  const Clip c = sim::simulate(p);
+  long glowing = 0;
+  for (std::size_t i = 0; i < c.rgba.size(); i += 4) glowing += c.rgba[i] > c.rgba[i + 3] + 8;
+  EXPECT_GT(glowing, 100);
+}
+
+namespace {
+
+// Circulation (cells squared per second, y up) of the left and the right half of a state.
+std::pair<double, double> halves_circulation(const sim::State& s) {
+  double l = 0, r = 0;
+  for (int y = 1; y < s.n - 1; ++y) {
+    for (int x = 1; x < s.n - 1; ++x) {
+      const auto at = [&](int xx, int yy) { return static_cast<std::size_t>(yy * s.n + xx); };
+      const double w = 0.5 * ((s.v[at(x + 1, y)] - s.v[at(x - 1, y)]) - (s.u[at(x, y + 1)] - s.u[at(x, y - 1)]));
+      (x < s.n / 2 ? l : r) += w;
+    }
+  }
+  return {l, r};
+}
+
+}  // namespace
+
+TEST(Sim, SmokeRingRisesAsAVortexPairThatSpreadsAndBreaksUp) {
+  const auto v = air_run(sim::Effect::smokering, 0.5f, 0.5f, 0.3f, sim::one_shot_frames(sim::Effect::smokering));
+  // a pair of vortices turning in opposite senses, the left one anticlockwise: the air between them rises
+  const auto [l, r] = halves_circulation(v[0]);
+  EXPECT_GT(l, 0.0);
+  EXPECT_LT(r, 0.0);
+  EXPECT_NEAR(l, -r, 0.2 * l);
+  const Spread first = spread_of(v[0]), mid = spread_of(v[59]), last = spread_of(v[119]);
+  EXPECT_LT(first.cy, 0.3);  // puffed near the bottom
+  EXPECT_GT(mid.cy, first.cy + 0.15);  // it rises
+  EXPECT_GT(last.cy, mid.cy);
+  EXPECT_GT(last.width(), first.width() + 0.1);  // and spreads
+  EXPECT_NEAR(mid.cx, 0.5, 0.05);
+  // slowly: it rises more slowly at the end than at the start
+  EXPECT_LT(last.cy - spread_of(v[89]).cy, spread_of(v[29]).cy - first.cy);
+  // its two cores hold together for a second or two: soot in both halves, little between them below the top
+  const auto halves = [](const sim::State& s) {
+    double a = 0, b = 0;
+    for (int y = 0; y < s.n; ++y) {
+      for (int x = 0; x < s.n; ++x) (x < s.n / 2 ? a : b) += s.soot[static_cast<std::size_t>(y * s.n + x)];
+    }
+    return std::pair{a, b};
+  };
+  const auto [ha, hb] = halves(v[45]);
+  EXPECT_NEAR(ha, hb, 0.25 * (ha + hb));
+  // then breaks up: with turbulence its smoke is scattered further about its middle at the end
+  const auto rough = air_run(sim::Effect::smokering, 0.5f, 0.5f, 1.f, 120);
+  const auto scatter = [](const sim::State& s) {
+    const Spread o = spread_of(s);
+    double r2 = 0;
+    for (int y = 0; y < s.n; ++y) {
+      for (int x = 0; x < s.n; ++x) {
+        const double dx = (x + 0.5) / s.n - o.cx, dy = (y + 0.5) / s.n - o.cy;
+        r2 += s.soot[static_cast<std::size_t>(y * s.n + x)] * (dx * dx + dy * dy);
+      }
+    }
+    return std::sqrt(r2 / o.amount);
+  };
+  EXPECT_GT(scatter(rough[119]), 1.1 * scatter(v[119]));
+  // it is smoke: reflected light only
+  auto p = atmos_params(sim::Effect::smokering, 0.6f, 0.5f, 0.3f);
+  p.frames = 30;
+  const Clip c = sim::simulate(p);
+  EXPECT_FALSE(c.loop);
+  long bad = 0, covered = 0;
+  for (std::size_t i = 0; i < c.rgba.size(); i += 4) {
+    for (int k = 0; k < 3; ++k) bad += c.rgba[i + static_cast<std::size_t>(k)] > c.rgba[i + 3] + 1;
+    covered += c.rgba[i + 3] > 64;
+  }
+  EXPECT_EQ(bad, 0);
+  EXPECT_GT(covered, 200);
+  // a stronger puff, a bigger ring that rises faster; the wind drifts it
+  const auto weak = air_run(sim::Effect::smokering, 0.f, 0.5f, 0.3f, 60), strong = air_run(sim::Effect::smokering, 1.f, 0.5f, 0.3f, 60);
+  EXPECT_GT(spread_of(strong[59]).cy, spread_of(weak[59]).cy + 0.05);
+  EXPECT_GT(spread_of(strong[59]).amount, 1.5 * spread_of(weak[59]).amount);
+  const auto left = air_run(sim::Effect::smokering, 0.5f, 0.f, 0.3f, 90), right = air_run(sim::Effect::smokering, 0.5f, 1.f, 0.3f, 90);
+  EXPECT_GT(spread_of(right[89]).cx, spread_of(left[89]).cx + 0.15);
+}
+
+TEST(Sim, HeavyGasSpillsAlongTheFloorAndPoolsInTheHollows) {
+  const auto v = air_run(sim::Effect::heavygas, 0.6f, 0.5f, 0.3f, 240);
+  EXPECT_TRUE(std::ranges::all_of(v[239].temp, [](float t) { return t == 0.f; }));  // no heat: its weight moves it
+  const Spread early = spread_of(v[59]), late = spread_of(v[239]);
+  EXPECT_LT(late.cy, 0.2);                       // a layer on the floor, under its release (a fifth of the frame up)
+  EXPECT_LT(late.top, 0.45);
+  EXPECT_GT(late.width(), 0.75);                 // that has spread over the floor
+  EXPECT_GT(late.width(), early.width() + 0.3);  // from its release (about a sixth of the frame wide)
+  // the gas runs out as a current with a front: the edge of the layer moves along the floor
+  const Spread s90 = spread_of(v[89]), s120 = spread_of(v[119]);
+  EXPECT_GT(s120.right, s90.right + 0.04);
+  EXPECT_LT(s120.left, s90.left - 0.04);
+  // it pools in the hollows: in the bottom rows there is more gas over the hollows than over the mound
+  const auto low = [](const sim::State& s, double x0, double x1) {
+    double a = 0;
+    int cells = 0;
+    for (int y = 0; y < s.n * 12 / 100; ++y) {
+      for (int x = static_cast<int>(x0 * s.n); x < static_cast<int>(x1 * s.n); ++x) {
+        a += s.soot[static_cast<std::size_t>(y * s.n + x)];
+        ++cells;
+      }
+    }
+    return a / cells;
+  };
+  double hollows = 0, mound = 0;
+  for (int i = 180; i < 240; i += 10) {
+    hollows += low(v[static_cast<std::size_t>(i)], 0.1, 0.25) + low(v[static_cast<std::size_t>(i)], 0.75, 0.9);
+    mound += 2 * low(v[static_cast<std::size_t>(i)], 0.42, 0.58);
+  }
+  EXPECT_GT(hollows, 1.5 * mound);
+  // the flow control sends it left or right; more intensity, more gas
+  const auto left = air_run(sim::Effect::heavygas, 0.6f, 0.f, 0.3f, 150), right = air_run(sim::Effect::heavygas, 0.6f, 1.f, 0.3f, 150);
+  EXPECT_LT(spread_of(left[149]).cx, 0.45);
+  EXPECT_GT(spread_of(right[149]).cx, 0.55);
+  const auto thin = air_run(sim::Effect::heavygas, 0.f, 0.5f, 0.3f, 150), thick = air_run(sim::Effect::heavygas, 1.f, 0.5f, 0.3f, 150);
+  EXPECT_GT(spread_of(thick[149]).amount, 1.5 * spread_of(thin[149]).amount);
+  // a pale vapour: reflected light only
+  auto p = atmos_params(sim::Effect::heavygas, 0.6f, 0.5f, 0.3f);
+  p.frames = 12;
+  const Clip c = sim::simulate(p);
+  long bad = 0, covered = 0;
+  double rgb = 0, alpha = 0;
+  for (std::size_t i = 0; i < c.rgba.size(); i += 4) {
+    for (int k = 0; k < 3; ++k) bad += c.rgba[i + static_cast<std::size_t>(k)] > c.rgba[i + 3] + 1;
+    if (c.rgba[i + 3] > 64) {
+      ++covered;
+      rgb += c.rgba[i] + c.rgba[i + 1] + c.rgba[i + 2];
+      alpha += 3.0 * c.rgba[i + 3];
+    }
+  }
+  EXPECT_EQ(bad, 0);
+  EXPECT_GT(covered, 200);
+  EXPECT_GT(rgb, 0.6 * alpha);  // pale
+}
+
+TEST(Sim, Fire2EffectsHaveTheirOwnControlsAndOnlyTheDustExplosionPlaysOnce) {
+  const std::array<std::pair<sim::Effect, std::string_view>, 3> second{
+      {{sim::Effect::crownfire, "wind"}, {sim::Effect::windowfire, "wind"}, {sim::Effect::dustexplosion, "ignition"}}};
+  for (const auto& [e, name] : second) {
+    sim::Effect back{};
+    ASSERT_TRUE(sim::parse_effect(sim::effect_name(e), back));
+    EXPECT_EQ(back, e);
+    EXPECT_TRUE(std::ranges::contains(sim::kNewEffects, e));
+    EXPECT_FALSE(std::ranges::contains(sim::kEffects, e));
+    const auto names = sim::control_names(e);
+    EXPECT_EQ(names[0], "intensity");
+    EXPECT_EQ(names[1], name);
+    EXPECT_EQ(names[2], "turbulence");
+    EXPECT_EQ(sim::effect_loops(e), e != sim::Effect::dustexplosion);
+  }
+  EXPECT_EQ(sim::effect_name(sim::Effect::crownfire), "crownfire");
+  EXPECT_EQ(sim::effect_name(sim::Effect::windowfire), "windowfire");
+  EXPECT_EQ(sim::effect_name(sim::Effect::dustexplosion), "dustexplosion");
+  EXPECT_EQ(sim::one_shot_frames(sim::Effect::dustexplosion), 120);  // 4 s
+  EXPECT_EQ(sim::one_shot_frames(sim::Effect::crownfire), 0);
+  // after the air effects (docs/EFFECTS_AIR.md), in this order
+  const auto at = [](sim::Effect e) { return std::ranges::find(sim::kAllEffects, e) - sim::kAllEffects.begin(); };
+  EXPECT_GT(at(sim::Effect::crownfire), at(sim::Effect::heavygas));
+  EXPECT_EQ(at(sim::Effect::windowfire), at(sim::Effect::crownfire) + 1);
+  EXPECT_EQ(at(sim::Effect::dustexplosion), at(sim::Effect::crownfire) + 2);
+}
+
+namespace {
+
+// Heat above `threshold` (visible flames: the crown and window fires draw no light below 0.4), its centroid and extent,
+// as fractions of the frame (y up); the threshold 0.3 for the dust explosion's fireball.
+Flame heat_of(const sim::State& s, double threshold) {
+  Flame o;
+  const double n = s.n;
+  for (int y = 0; y < s.n; ++y) {
+    for (int x = 0; x < s.n; ++x) {
+      const double t = s.temp[static_cast<std::size_t>(y * s.n + x)];
+      if (t < threshold) continue;
+      o.heat += t;
+      o.x += t * (x + 0.5) / n;
+      o.y += t * (y + 0.5) / n;
+      o.left = std::min(o.left, x / n);
+      o.right = std::max(o.right, (x + 1) / n);
+      o.bottom = std::min(o.bottom, y / n);
+      o.top = std::max(o.top, (y + 1) / n);
+    }
+  }
+  if (o.heat > 0) {
+    o.x /= o.heat;
+    o.y /= o.heat;
+  }
+  return o;
+}
+
+// Light it gives: pixels whose colour is above their cover.
+long glowing_pixels(const Clip& c) {
+  long n = 0;
+  for (std::size_t i = 0; i < c.rgba.size(); i += 4) n += c.rgba[i] > c.rgba[i + 3] + 8;
+  return n;
+}
+
+}  // namespace
+
+TEST(Sim, CrownFireBurnsInTheCanopyWithSpotFiresAheadAndATallColumn) {
+  const auto v = air_run(sim::Effect::crownfire, 0.5f, 0.5f, 0.5f, 240);
+  for (int i = 150; i < 240; i += 15) {
+    const Flame fl = heat_of(v[static_cast<std::size_t>(i)], 0.4);
+    EXPECT_GT(fl.heat, 5.0) << i;
+    EXPECT_GT(fl.bottom, 0.14) << i;  // in the crowns, off the ground (the wildfire's front is on it)
+    EXPECT_GT(fl.right - fl.left, 0.4) << i;  // across the canopy
+    EXPECT_LT(fl.y, 0.5) << i;
+    EXPECT_NEAR(fl.x, 0.5, 0.08) << i;
+    const Spread sm = spread_of(v[static_cast<std::size_t>(i)]);
+    EXPECT_GT(sm.top, 0.95) << i;  // a column of smoke to the top of the frame
+    EXPECT_GT(sm.cy, 0.5) << i;
+  }
+  // the wildfire burns on the ground: its flames start lower
+  const auto wild = air_run(sim::Effect::wildfire, 0.5f, 0.5f, 0.5f, 120);
+  EXPECT_LT(heat_of(wild[119], 0.4).bottom, 0.1);
+  // the wind leans the flames and bends the column over; spot fires catch ahead of the head, downwind
+  const auto left = air_run(sim::Effect::crownfire, 0.5f, 0.1f, 0.5f, 180), right = air_run(sim::Effect::crownfire, 0.5f, 0.9f, 0.5f, 180);
+  EXPECT_GT(spread_of(right[179]).cx, spread_of(left[179]).cx + 0.15);
+  int ahead = 0, ahead_still = 0;
+  for (int i = 90; i < 180; ++i) {
+    const sim::State& s = right[static_cast<std::size_t>(i)];
+    const sim::State& c = v[static_cast<std::size_t>(i)];
+    for (int y = 0; y < s.n; ++y) {
+      for (int x = s.n * 76 / 100; x < s.n; ++x) {  // beyond the head of the fire at this wind (its zone ends at 0.73)
+        ahead += s.temp[static_cast<std::size_t>(y * s.n + x)] > 0.4f;
+        ahead_still += c.temp[static_cast<std::size_t>(y * s.n + x)] > 0.4f;
+      }
+    }
+  }
+  EXPECT_GT(ahead, 20);
+  EXPECT_LT(ahead_still, ahead / 4);
+  // more intensity, a fiercer fire; it gives light
+  const auto low = air_run(sim::Effect::crownfire, 0.f, 0.5f, 0.5f, 150), high = air_run(sim::Effect::crownfire, 1.f, 0.5f, 0.5f, 150);
+  EXPECT_GT(heat_of(high[149], 0.4).heat, 1.3 * heat_of(low[149], 0.4).heat);
+  EXPECT_GT(heat_of(high[149], 0.4).right - heat_of(high[149], 0.4).left, heat_of(low[149], 0.4).right - heat_of(low[149], 0.4).left);
+  auto p = atmos_params(sim::Effect::crownfire, 0.6f, 0.5f, 0.5f);
+  p.frames = 12;
+  EXPECT_GT(glowing_pixels(sim::simulate(p)), 100);
+}
+
+TEST(Sim, WindowFirePoursOutOfItsWindowUpTheWallAndSpreadsUnderTheEave) {
+  const auto v = air_run(sim::Effect::windowfire, 0.5f, 0.5f, 0.5f, 240);
+  const auto side_soot = [](const sim::State& s, double y0, double y1) {  // away from the column, a third out on either side
+    double a = 0;
+    for (int y = static_cast<int>(y0 * s.n); y < static_cast<int>(y1 * s.n); ++y) {
+      for (int x = 0; x < s.n; ++x) {
+        if (std::abs((x + 0.5) / s.n - 0.5) > 0.2) a += s.soot[static_cast<std::size_t>(y * s.n + x)];
+      }
+    }
+    return a;
+  };
+  double top = 0, mid = 0, wide = 0;
+  for (int i = 150; i < 240; i += 15) {
+    const sim::State& s = v[static_cast<std::size_t>(i)];
+    const Flame fl = heat_of(s, 0.4);
+    EXPECT_GT(fl.top, 0.5) << i;      // flames out of the window (its head 0.34 up) and up the wall above it
+    EXPECT_GT(fl.bottom, 0.07) << i;  // nothing below the sill (0.09 up)
+    EXPECT_NEAR(fl.x, 0.5, 0.1) << i;
+    EXPECT_LT(fl.right - fl.left, 0.5) << i;
+    top += side_soot(s, 0.85, 1.0);
+    mid += side_soot(s, 0.5, 0.65);
+    for (int x = 0; x < s.n; ++x) wide += (s.soot[static_cast<std::size_t>((s.n - 3) * s.n + x)] > 0.05f) / (6.0 * s.n);
+  }
+  // the smoke gathers under the eave and spreads out sideways under it (a ceiling jet), more than it spreads lower down
+  EXPECT_GT(top, 2.0 * mid);
+  EXPECT_GT(wide, 0.5);
+  // under the eave the air does not rise through it
+  double up = 0;
+  for (int x = 0; x < v[239].n; ++x) up = std::max(up, static_cast<double>(v[239].v[static_cast<std::size_t>((v[239].n - 1) * v[239].n + x)]));
+  EXPECT_LT(up, 0.05 * 64);  // a few cells a second at most: the column below rises at 30 or more
+  // the lower part of the window (the room seen through the inflowing air) glows and is still
+  {
+    const sim::State& s = v[239];
+    double heat = 0, speed = 0;
+    int cells = 0;
+    for (int y = s.n * 12 / 128 + 1; y < s.n * 22 / 128; ++y) {
+      for (int x = s.n * 50 / 128; x < s.n * 78 / 128; ++x) {
+        const auto k = static_cast<std::size_t>(y * s.n + x);
+        heat += s.temp[k];
+        speed = std::max(speed, std::hypot(static_cast<double>(s.u[k]), static_cast<double>(s.v[k])));
+        ++cells;
+      }
+    }
+    EXPECT_GT(heat / cells, 0.3);
+    EXPECT_LT(speed, 0.15 * 64);  // a few cells a second at most (the hold leaves what one step's forces add)
+  }
+  // a wind along the facade leans it; a bigger fire, more flame and smoke
+  const auto left = air_run(sim::Effect::windowfire, 0.5f, 0.1f, 0.5f, 180), right = air_run(sim::Effect::windowfire, 0.5f, 0.9f, 0.5f, 180);
+  EXPECT_GT(spread_of(right[179]).cx, spread_of(left[179]).cx + 0.1);
+  const auto low = air_run(sim::Effect::windowfire, 0.f, 0.5f, 0.5f, 150), high = air_run(sim::Effect::windowfire, 1.f, 0.5f, 0.5f, 150);
+  EXPECT_GT(heat_of(high[149], 0.4).heat, 1.3 * heat_of(low[149], 0.4).heat);
+  EXPECT_GT(spread_of(high[149]).amount, 1.3 * spread_of(low[149]).amount);
+  auto p = atmos_params(sim::Effect::windowfire, 0.6f, 0.5f, 0.5f);
+  p.frames = 12;
+  EXPECT_GT(glowing_pixels(sim::simulate(p)), 100);
+}
+
+TEST(Sim, DustExplosionBurnsThroughItsCloudFromWhereItIsLitIntoAFireballAndAPall) {
+  const int F = sim::one_shot_frames(sim::Effect::dustexplosion);
+  const auto v = air_run(sim::Effect::dustexplosion, 0.5f, 0.f, 0.5f, F);
+  // at its first frame: a cloud of dust on the ground, lit at its left end
+  const Spread cloud = spread_of(v[0]);
+  EXPECT_LT(cloud.cy, 0.25);
+  EXPECT_GT(cloud.width(), 0.45);
+  const Flame spark = heat_of(v[0], 0.3);
+  EXPECT_LT(spark.x, 0.3);
+  EXPECT_LT(spark.right - spark.left, 0.15);
+  // the flame runs through the cloud to its other end, the fireball grows and rises
+  EXPECT_GT(heat_of(v[15], 0.3).x, spark.x + 0.1);
+  EXPECT_GT(heat_of(v[30], 0.3).right, cloud.right - 0.05);
+  EXPECT_GT(heat_of(v[45], 0.3).heat, 10.0 * spark.heat);
+  EXPECT_GT(heat_of(v[60], 0.3).y, heat_of(v[15], 0.3).y + 0.1);
+  // lit at its right end it runs the other way; lit in its middle it burns through sooner
+  const auto r = air_run(sim::Effect::dustexplosion, 0.5f, 1.f, 0.5f, 30), m = air_run(sim::Effect::dustexplosion, 0.5f, 0.5f, 0.5f, 30);
+  EXPECT_GT(heat_of(r[0], 0.3).x, 0.7);
+  EXPECT_LT(heat_of(r[15], 0.3).x, heat_of(r[0], 0.3).x - 0.1);
+  EXPECT_GT(heat_of(m[15], 0.3).heat, 1.2 * heat_of(v[15], 0.3).heat);
+  // the burning gas expands: the cloud swells
+  EXPECT_GT(spread_of(v[45]).width(), cloud.width() + 0.1);
+  // and burns out by the end, leaving a pall of dust and ash, risen and spread
+  EXPECT_LT(heat_of(v[static_cast<std::size_t>(F - 1)], 0.3).heat, 0.05 * heat_of(v[45], 0.3).heat);
+  const Spread pall = spread_of(v[static_cast<std::size_t>(F - 1)]);
+  EXPECT_GT(pall.amount, 0.5 * cloud.amount);
+  EXPECT_GT(pall.cy, cloud.cy + 0.15);
+  EXPECT_GT(pall.width(), cloud.width());
+  // a bigger, denser cloud with intensity
+  const auto weak = air_run(sim::Effect::dustexplosion, 0.f, 0.5f, 0.5f, 1), strong = air_run(sim::Effect::dustexplosion, 1.f, 0.5f, 0.5f, 1);
+  EXPECT_GT(spread_of(strong[0]).amount, 2.0 * spread_of(weak[0]).amount);
+  EXPECT_GT(spread_of(strong[0]).width(), spread_of(weak[0]).width() + 0.1);
+  // it plays once; its fireball gives light
+  auto p = atmos_params(sim::Effect::dustexplosion, 0.6f, 0.5f, 0.5f);
+  p.frames = 40;
+  const Clip c = sim::simulate(p);
+  EXPECT_FALSE(c.loop);
+  EXPECT_GT(glowing_pixels(c), 1000);
+}
+
+// --- geyser, haboob and seaspray (docs/EFFECTS_ELEMENTS.md) ---------------------------------------------------------
+
+TEST(Sim, ElementsEffectsHaveTheirOwnControlsAndOnlyTheHaboobPlaysOnce) {
+  const std::array<std::pair<sim::Effect, std::string_view>, 3> second{
+      {{sim::Effect::geyser, "wind"}, {sim::Effect::haboob, "height"}, {sim::Effect::seaspray, "gale"}}};
+  for (const auto& [e, name] : second) {
+    sim::Effect back{};
+    ASSERT_TRUE(sim::parse_effect(sim::effect_name(e), back));
+    EXPECT_EQ(back, e);
+    EXPECT_TRUE(std::ranges::contains(sim::kNewEffects, e));
+    EXPECT_FALSE(std::ranges::contains(sim::kEffects, e));
+    const auto names = sim::control_names(e);
+    EXPECT_EQ(names[0], "intensity");
+    EXPECT_EQ(names[1], name);
+    EXPECT_EQ(names[2], "turbulence");
+    EXPECT_EQ(sim::effect_loops(e), e != sim::Effect::haboob);
+  }
+  EXPECT_EQ(sim::effect_name(sim::Effect::geyser), "geyser");
+  EXPECT_EQ(sim::effect_name(sim::Effect::haboob), "haboob");
+  EXPECT_EQ(sim::effect_name(sim::Effect::seaspray), "seaspray");
+  EXPECT_EQ(sim::one_shot_frames(sim::Effect::haboob), 150);  // 5 s
+  EXPECT_EQ(sim::one_shot_frames(sim::Effect::geyser), 0);
+  // appended after round 10's fire effects (docs/EFFECTS_FIRE2.md), in this order
+  const auto at = [](sim::Effect e) { return std::ranges::find(sim::kAllEffects, e) - sim::kAllEffects.begin(); };
+  EXPECT_EQ(at(sim::Effect::geyser), at(sim::Effect::dustexplosion) + 1);
+  EXPECT_EQ(at(sim::Effect::haboob), at(sim::Effect::geyser) + 1);
+  EXPECT_EQ(at(sim::Effect::seaspray), at(sim::Effect::geyser) + 2);
+}
+
+namespace {
+
+// Water (soot) and steam (heat) of a state: their amounts, and the highest row (as a fraction of the frame) where there
+// is more than `level` of each.
+struct Column {
+  double water = 0, steam = 0, water_top = 0, steam_top = 0, steam_x = 0;
+};
+Column column_of(const sim::State& s, float level = 0.1f) {
+  Column o;
+  for (int y = 0; y < s.n; ++y) {
+    for (int x = 0; x < s.n; ++x) {
+      const auto i = static_cast<std::size_t>(y * s.n + x);
+      o.water += s.soot[i];
+      o.steam += s.temp[i];
+      o.steam_x += s.temp[i] * (x + 0.5) / s.n;
+      if (s.soot[i] > level) o.water_top = std::max(o.water_top, (y + 1.0) / s.n);
+      if (s.temp[i] > level) o.steam_top = std::max(o.steam_top, (y + 1.0) / s.n);
+    }
+  }
+  if (o.steam > 0) o.steam_x /= o.steam;
+  return o;
+}
+
+// The geyser's conduit, as the simulator reads it (docs/EFFECTS_ELEMENTS.md §2): it erupts once the flicker noise at
+// the coarse cell left of the vent rises above 0.18.
+float conduit(const sim::Params& p, float t) { return sim::source_flicker(p, 62.5f, 6.5f, t); }
+
+}  // namespace
+
+TEST(Sim, GeyserEruptsHoldsCollapsesIntoSteamAndIsQuietBetween) {
+  auto p = atmos_params(sim::Effect::geyser, 0.7f, 0.5f, 0.4f);
+  p.seed = 1;
+  sim::Fluid f(p);
+  int quiet = 0, erupting = 0, quiet_dry = 0, high = 0, frames = 0, after = 0, after_steam = 0;
+  double peak = 0;
+  bool was_erupting = false;
+  int since = 1000;
+  for (int i = 0; i < 1800; ++i) {  // a minute
+    f.step_frame();
+    const float t = static_cast<float>(i + 1) / 30.f, q = conduit(p, t);
+    const Column c = column_of(f.state());
+    ++frames;
+    if (q < -0.1f) {  // the conduit low: the vent only simmers
+      ++quiet;
+      quiet_dry += c.water < 1.0;
+    }
+    if (q > 0.30f) {  // well into an eruption: a column of water
+      ++erupting;
+      high += c.water_top > 0.4;
+      peak = std::max(peak, c.water_top);
+    }
+    since = q > 0.18f ? 0 : since + 1;
+    if (was_erupting && q < 0.18f) since = 0;
+    was_erupting = q > 0.18f;
+    if (since >= 45 && since < 60 && q < 0.0f) {  // 1.5 to 2 s after an eruption ended: its steam is still up
+      ++after;
+      after_steam += c.steam > 10.0 && c.steam_top > 0.3;
+    }
+  }
+  EXPECT_GT(quiet, frames / 5);  // quiet for a fifth of the time or more
+  EXPECT_GT(erupting, 60);       // and erupting for seconds
+  EXPECT_GT(quiet_dry, 0.9 * quiet);  // no water while it is quiet
+  EXPECT_GT(high, 0.6 * erupting);    // the column rises over 40% of the frame while it erupts
+  EXPECT_GT(peak, 0.5);
+  EXPECT_GT(after, 0);
+  EXPECT_GT(after_steam, 0.7 * after);  // the steam lingers after the water has fallen
+  // intensity: a taller column; wind: the steam drifts with it
+  const auto top = [](float intensity, float wind) {
+    auto q = atmos_params(sim::Effect::geyser, intensity, wind, 0.4f);
+    q.seed = 1;
+    sim::Fluid g(q);
+    double best = 0, sx = 0;
+    int k = 0;
+    for (int i = 0; i < 600; ++i) {
+      g.step_frame();
+      const Column c = column_of(g.state());
+      best = std::max(best, c.water_top);
+      if (i >= 300 && c.steam > 1.0) {
+        sx += c.steam_x;
+        ++k;
+      }
+    }
+    return std::pair{best, k > 0 ? sx / k : 0.5};
+  };
+  const auto low = top(0.f, 0.5f), tall = top(1.f, 0.5f), left = top(0.7f, 0.f), right = top(0.7f, 1.f);
+  EXPECT_GT(tall.first, low.first + 0.1);
+  EXPECT_LT(left.second, 0.45);
+  EXPECT_GT(right.second, 0.55);
+}
+
+namespace {
+
+// The haboob's front (the rightmost column holding more than `amount` of the outflow's cold air, as a fraction of the
+// frame), the height of its head (the highest row with dust within a fifth of the frame behind the front) and the
+// lifted dust (heat).
+struct Front {
+  double x = 0, head = 0, dust = 0, cy = 0, cold = 0;
+};
+Front front_of(const sim::State& s) {
+  Front o;
+  const double n = s.n;
+  int fx = -1;
+  for (int x = s.n - 1; x >= 0 && fx < 0; --x) {
+    double c = 0;
+    for (int y = 0; y < s.n; ++y) c += s.soot[static_cast<std::size_t>(y * s.n + x)];
+    if (c > 3.0 * n / 128.0) fx = x;
+  }
+  o.x = (fx + 1) / n;
+  for (int y = 0; y < s.n; ++y) {
+    for (int x = 0; x < s.n; ++x) {
+      const auto i = static_cast<std::size_t>(y * s.n + x);
+      o.dust += s.temp[i];
+      o.cold += s.soot[i];
+      o.cy += s.soot[i] * (y + 0.5) / n;
+      if (x <= fx && x >= fx - s.n / 5 && s.soot[i] + s.temp[i] > 0.2) o.head = std::max(o.head, (y + 1) / n);
+    }
+  }
+  if (o.cold > 0) o.cy /= o.cold;
+  return o;
+}
+
+}  // namespace
+
+TEST(Sim, HaboobRunsAlongTheGroundAsAGravityCurrentAtItsSpeedAndLiftsDust) {
+  // the front runs right along the ground at about the gravity-current speed of its outflow, U = Fr sqrt(g' h) with
+  // g' = 20 cells/s^2 times its density and h its depth (docs/EFFECTS_ELEMENTS.md §2): at intensity 0.5 and height 0.5
+  // a density of 0.9 and a depth of 47 cells of a 128-cell frame, sqrt(g' h) = 29 cells per second
+  const auto run = [](float intensity, float height, std::uint64_t seed) {
+    auto p = atmos_params(sim::Effect::haboob, intensity, height, 0.5f);
+    p.seed = seed;
+    sim::Fluid f(p);
+    std::vector<Front> v;
+    for (int i = 0; i < 150; ++i) {
+      f.step_frame();
+      v.push_back(front_of(f.state()));
+    }
+    return v;
+  };
+  double fr = 0;
+  for (const std::uint64_t seed : {1, 2, 3, 4}) {
+    const auto v = run(0.5f, 0.5f, seed);
+    for (int i = 15; i < 150; i += 15) EXPECT_GE(v[static_cast<std::size_t>(i)].x, v[static_cast<std::size_t>(i - 15)].x - 0.02) << i;
+    EXPECT_GT(v[119].x, 0.65) << seed;  // across most of the frame in 4 s
+    EXPECT_LT(v[59].cy, 0.3) << seed;   // a current along the ground
+    EXPECT_GT(v[59].head, 0.15) << seed;  // with a head
+    EXPECT_GT(v[119].dust, 1.3 * v[0].dust) << seed;  // it lifts dust as it runs
+    // the front's speed from 1.5 to 3 s, in cells of a 128-cell frame per second, over sqrt(g' h)
+    const double U = std::max(0.0, v[89].x - v[44].x) * 128.0 / 1.5;
+    fr += U / std::sqrt(20.0 * 0.9 * 47.0) / 4.0;
+  }
+  EXPECT_GT(fr, 0.6);  // gravity currents: Fr from 1/sqrt(2) (half the depth, Benjamin 1968) to 1.19 (deep, Huppert
+  EXPECT_LT(fr, 1.5);  // and Simpson 1980) and sqrt(2) (deep and ideal, Benjamin)
+  // a denser outflow runs faster; a deeper one stands taller
+  const auto weak = run(0.f, 0.5f, 1), strong = run(1.f, 0.5f, 1), low = run(0.5f, 0.f, 1), tall = run(0.5f, 1.f, 1);
+  EXPECT_GT(strong[89].x, weak[89].x + 0.05);
+  EXPECT_GT(tall[29].head, low[29].head + 0.1);
+  // ochre dust: reflected light only
+  auto p = atmos_params(sim::Effect::haboob, 0.6f, 0.5f, 0.5f);
+  p.frames = 45;
+  const Clip c = sim::simulate(p);
+  long bad = 0, covered = 0;
+  double r = 0, b = 0;
+  for (std::size_t i = 0; i < c.rgba.size(); i += 4) {
+    for (int k = 0; k < 3; ++k) bad += c.rgba[i + static_cast<std::size_t>(k)] > c.rgba[i + 3] + 1;
+    if (c.rgba[i + 3] > 64) {
+      ++covered;
+      r += c.rgba[i];
+      b += c.rgba[i + 2];
+    }
+  }
+  EXPECT_EQ(bad, 0);
+  EXPECT_GT(covered, 200);
+  EXPECT_GT(r, 1.5 * b);  // brown
+}
+
+TEST(Sim, SeaSprayIsTornOffTheCrestsDriftsDownwindAndFallsBack) {
+  const auto spray = [](float intensity, float gale) {
+    const auto v = air_run(sim::Effect::seaspray, intensity, gale, 0.5f, 240);
+    double drops = 0, mist = 0, du = 0, dmass = 0, mist_y = 0, drop_y = 0;
+    for (int i = 120; i < 240; ++i) {
+      const sim::State& s = v[static_cast<std::size_t>(i)];
+      for (int y = 0; y < s.n; ++y) {
+        for (int x = 0; x < s.n; ++x) {
+          const auto k = static_cast<std::size_t>(y * s.n + x);
+          drops += s.soot[k];
+          mist += s.temp[k];
+          du += s.soot[k] * s.u[k];
+          drop_y += s.soot[k] * (y + 0.5) / s.n;
+          mist_y += s.temp[k] * (y + 0.5) / s.n;
+        }
+      }
+      // nothing below the sea's surface (it fell back into the sea)
+      for (int y = 0; y < s.n * 7 / 100; ++y) {
+        for (int x = 0; x < s.n; ++x) EXPECT_EQ(s.soot[static_cast<std::size_t>(y * s.n + x)], 0.f);
+      }
+    }
+    dmass = std::max(drops, 1e-9);
+    return std::array<double, 5>{drops, mist, du / dmass, drop_y / dmass, mist_y / std::max(mist, 1e-9)};
+  };
+  const auto calm = spray(0.5f, 0.f), gale = spray(0.5f, 1.f), big = spray(1.f, 0.5f), small = spray(0.f, 0.5f);
+  EXPECT_GT(gale[0], 3.0 * calm[0]);  // whitecaps grow as the wind speed to the power 3.41: far more spray in a gale
+  EXPECT_GT(gale[1], 3.0 * calm[1]);
+  EXPECT_GT(big[0], 1.3 * small[0]);  // and on a bigger sea
+  EXPECT_GT(gale[2], 0.0);            // the drops are carried downwind
+  EXPECT_LT(gale[3], 0.35);           // low over the sea
+  EXPECT_GT(gale[4], gale[3]);        // the fine spray drifts higher than the drops
+  // white spray: reflected light only
+  auto p = atmos_params(sim::Effect::seaspray, 0.7f, 0.8f, 0.5f);
+  p.frames = 12;
+  const Clip c = sim::simulate(p);
+  long bad = 0, covered = 0;
+  double rgb = 0, alpha = 0;
+  for (std::size_t i = 0; i < c.rgba.size(); i += 4) {
+    for (int k = 0; k < 3; ++k) bad += c.rgba[i + static_cast<std::size_t>(k)] > c.rgba[i + 3] + 1;
+    if (c.rgba[i + 3] > 64) {
+      ++covered;
+      rgb += c.rgba[i] + c.rgba[i + 1] + c.rgba[i + 2];
+      alpha += 3.0 * c.rgba[i + 3];
+    }
+  }
+  EXPECT_EQ(bad, 0);
+  EXPECT_GT(covered, 30);
+  EXPECT_GT(rgb, 0.7 * alpha);  // pale
 }
 
 TEST(Sim, ParamsRoundTripThroughClipMetadata) {

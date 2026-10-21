@@ -1,0 +1,85 @@
+the null (N with fresh seeds minus N, pooled plays, over the validation settings) and the margins:
+explosion 256 track1s              K 0.2000 null rms 0.0000 (mean +0.0000) N 19.6790 -> margin 0.2000
+explosion 256 spectrum_l1          K 0.0200 null rms 0.0456 (mean +0.0004) N 0.3332 -> margin 0.0456
+explosion 256 abs_ln_motion_ratio  K 0.0200 null rms 0.0432 (mean +0.0275) N 0.0348 -> margin 0.0432
+explosion 256 coverage_l1          K 0.0013 null rms 0.0056 (mean +0.0024) N 0.0132 -> margin 0.0056
+explosion 256 emission_l1          K 0.0001 null rms 0.0000 (mean +0.0000) N 0.0000 -> margin 0.0001
+explosion 256 mean_frame_psnr      K 0.1000 null rms 1.3898 (mean -0.4761) N 31.2381 -> margin 1.3898
+explosion 256 hf_l1_real           K 0.0200 null rms 0.0733 (mean +0.0047) N 0.4335 -> margin 0.0733
+explosion 512 track1s              K 0.2000 null rms 0.0000 (mean +0.0000) N 19.5023 -> margin 0.2000
+explosion 512 spectrum_l1          K 0.0200 null rms 0.0620 (mean +0.0052) N 0.4905 -> margin 0.0620
+explosion 512 abs_ln_motion_ratio  K 0.0200 null rms 0.0500 (mean +0.0055) N 0.0736 -> margin 0.0500
+explosion 512 coverage_l1          K 0.0013 null rms 0.0056 (mean +0.0023) N 0.0132 -> margin 0.0056
+explosion 512 emission_l1          K 0.0001 null rms 0.0000 (mean +0.0000) N 0.0000 -> margin 0.0001
+explosion 512 mean_frame_psnr      K 0.1000 null rms 1.3870 (mean -0.4755) N 31.1537 -> margin 1.3870
+explosion 512 hf_l1_real           K 0.0200 null rms 0.0882 (mean +0.0142) N 0.5899 -> margin 0.0882
+ mushroom 256 track1s              K 0.2000 null rms 0.0000 (mean +0.0000) N 13.8585 -> margin 0.2000
+ mushroom 256 spectrum_l1          K 0.0200 null rms 0.0514 (mean +0.0138) N 0.3855 -> margin 0.0514
+ mushroom 256 abs_ln_motion_ratio  K 0.0200 null rms 0.1312 (mean -0.0102) N 0.1391 -> margin 0.1312
+ mushroom 256 coverage_l1          K 0.0019 null rms 0.0134 (mean +0.0019) N 0.0193 -> margin 0.0134
+ mushroom 256 emission_l1          K 0.0001 null rms 0.0000 (mean +0.0000) N 0.0001 -> margin 0.0001
+ mushroom 256 mean_frame_psnr      K 0.1000 null rms 1.4534 (mean -0.4173) N 27.4170 -> margin 1.4534
+ mushroom 256 hf_l1_real           K 0.0200 null rms 0.0894 (mean +0.0276) N 0.5479 -> margin 0.0894
+ mushroom 512 track1s              K 0.2000 null rms 0.0000 (mean +0.0000) N 14.0243 -> margin 0.2000
+ mushroom 512 spectrum_l1          K 0.0200 null rms 0.0855 (mean +0.0324) N 0.5279 -> margin 0.0855
+ mushroom 512 abs_ln_motion_ratio  K 0.0200 null rms 0.0993 (mean +0.0476) N 0.1527 -> margin 0.0993
+ mushroom 512 coverage_l1          K 0.0019 null rms 0.0134 (mean +0.0018) N 0.0193 -> margin 0.0134
+ mushroom 512 emission_l1          K 0.0001 null rms 0.0000 (mean +0.0000) N 0.0001 -> margin 0.0001
+ mushroom 512 mean_frame_psnr      K 0.1000 null rms 1.4568 (mean -0.4389) N 27.4641 -> margin 1.4568
+ mushroom 512 hf_l1_real           K 0.0200 null rms 0.1248 (mean +0.0527) N 0.7000 -> margin 0.1248
+ wildfire 256 track1s              K 0.2000 null rms 0.0000 (mean +0.0000) N 23.9354 -> margin 0.2000
+ wildfire 256 spectrum_l1          K 0.0200 null rms 0.0263 (mean -0.0035) N 0.3542 -> margin 0.0263
+ wildfire 256 abs_ln_motion_ratio  K 0.0200 null rms 0.0314 (mean +0.0026) N 0.0528 -> margin 0.0314
+ wildfire 256 coverage_l1          K 0.0016 null rms 0.0019 (mean +0.0000) N 0.0162 -> margin 0.0019
+ wildfire 256 emission_l1          K 0.0001 null rms 0.0002 (mean -0.0001) N 0.0010 -> margin 0.0002
+ wildfire 256 mean_frame_psnr      K 0.1000 null rms 0.6649 (mean +0.1361) N 30.6205 -> margin 0.6649
+ wildfire 256 hf_l1_real           K 0.0200 null rms 0.0333 (mean +0.0042) N 0.4078 -> margin 0.0333
+ wildfire 512 track1s              K 0.2000 null rms 0.0000 (mean +0.0000) N 23.8580 -> margin 0.2000
+ wildfire 512 spectrum_l1          K 0.0200 null rms 0.0312 (mean -0.0017) N 0.4602 -> margin 0.0312
+ wildfire 512 abs_ln_motion_ratio  K 0.0200 null rms 0.0370 (mean +0.0041) N 0.1548 -> margin 0.0370
+ wildfire 512 coverage_l1          K 0.0016 null rms 0.0019 (mean +0.0000) N 0.0162 -> margin 0.0019
+ wildfire 512 emission_l1          K 0.0001 null rms 0.0002 (mean -0.0001) N 0.0010 -> margin 0.0002
+ wildfire 512 mean_frame_psnr      K 0.1000 null rms 0.6612 (mean +0.1236) N 30.5718 -> margin 0.6612
+ wildfire 512 hf_l1_real           K 0.0200 null rms 0.0391 (mean +0.0048) N 0.5356 -> margin 0.0391
+   launch 256 track1s              K 0.2000 null rms 0.0000 (mean +0.0000) N 13.5024 -> margin 0.2000
+   launch 256 spectrum_l1          K 0.0200 null rms 0.0328 (mean +0.0036) N 0.4617 -> margin 0.0328
+   launch 256 abs_ln_motion_ratio  K 0.0200 null rms 0.1245 (mean +0.0328) N 0.3595 -> margin 0.1245
+   launch 256 coverage_l1          K 0.0048 null rms 0.0227 (mean +0.0008) N 0.0477 -> margin 0.0227
+   launch 256 emission_l1          K 0.0001 null rms 0.0002 (mean -0.0000) N 0.0008 -> margin 0.0002
+   launch 256 mean_frame_psnr      K 0.1000 null rms 2.0658 (mean -0.2212) N 20.9508 -> margin 2.0658
+   launch 256 hf_l1_real           K 0.0200 null rms 0.0516 (mean +0.0051) N 0.7685 -> margin 0.0516
+   launch 512 track1s              K 0.2000 null rms 0.0000 (mean +0.0000) N 13.5509 -> margin 0.2000
+   launch 512 spectrum_l1          K 0.0200 null rms 0.0471 (mean +0.0061) N 0.7021 -> margin 0.0471
+   launch 512 abs_ln_motion_ratio  K 0.0200 null rms 0.1342 (mean +0.0340) N 0.4746 -> margin 0.1342
+   launch 512 coverage_l1          K 0.0048 null rms 0.0226 (mean +0.0008) N 0.0477 -> margin 0.0226
+   launch 512 emission_l1          K 0.0001 null rms 0.0002 (mean -0.0000) N 0.0008 -> margin 0.0002
+   launch 512 mean_frame_psnr      K 0.1000 null rms 2.1072 (mean -0.2483) N 21.0667 -> margin 2.1072
+   launch 512 hf_l1_real           K 0.0200 null rms 0.0558 (mean +0.0067) N 0.9910 -> margin 0.0558
+    smoke 256 track1s              K 0.2000 null rms 0.0000 (mean +0.0000) N 17.0125 -> margin 0.2000
+    smoke 256 spectrum_l1          K 0.0200 null rms 0.0383 (mean +0.0117) N 0.7910 -> margin 0.0383
+    smoke 256 abs_ln_motion_ratio  K 0.0200 null rms 0.0818 (mean +0.0357) N 0.2851 -> margin 0.0818
+    smoke 256 coverage_l1          K 0.0013 null rms 0.0046 (mean +0.0001) N 0.0130 -> margin 0.0046
+    smoke 256 emission_l1          K 0.0001 null rms 0.0000 (mean -0.0000) N 0.0001 -> margin 0.0001
+    smoke 256 mean_frame_psnr      K 0.1000 null rms 1.7434 (mean -0.9456) N 33.4059 -> margin 1.7434
+    smoke 256 hf_l1_real           K 0.0200 null rms 0.0486 (mean +0.0106) N 1.1065 -> margin 0.0486
+    smoke 512 track1s              K 0.2000 null rms 0.0000 (mean +0.0000) N 16.6876 -> margin 0.2000
+    smoke 512 spectrum_l1          K 0.0200 null rms 0.0491 (mean +0.0144) N 1.0934 -> margin 0.0491
+    smoke 512 abs_ln_motion_ratio  K 0.0200 null rms 0.0808 (mean +0.0375) N 0.5992 -> margin 0.0808
+    smoke 512 coverage_l1          K 0.0013 null rms 0.0047 (mean +0.0000) N 0.0129 -> margin 0.0047
+    smoke 512 emission_l1          K 0.0001 null rms 0.0000 (mean -0.0000) N 0.0001 -> margin 0.0001
+    smoke 512 mean_frame_psnr      K 0.1000 null rms 1.6451 (mean -0.9668) N 33.2123 -> margin 1.6451
+    smoke 512 hf_l1_real           K 0.0200 null rms 0.0547 (mean +0.0111) N 1.2421 -> margin 0.0547
+waterfall 256 track1s              K 0.2000 null rms 0.0000 (mean +0.0000) N 18.3972 -> margin 0.2000
+waterfall 256 spectrum_l1          K 0.0200 null rms 0.0203 (mean +0.0009) N 0.6321 -> margin 0.0203
+waterfall 256 abs_ln_motion_ratio  K 0.0200 null rms 0.0466 (mean +0.0045) N 0.1453 -> margin 0.0466
+waterfall 256 coverage_l1          K 0.0016 null rms 0.0078 (mean +0.0008) N 0.0159 -> margin 0.0078
+waterfall 256 emission_l1          K 0.0001 null rms 0.0000 (mean +0.0000) N 0.0001 -> margin 0.0001
+waterfall 256 mean_frame_psnr      K 0.1000 null rms 1.8368 (mean -0.4596) N 26.2934 -> margin 1.8368
+waterfall 256 hf_l1_real           K 0.0200 null rms 0.0242 (mean +0.0000) N 0.9325 -> margin 0.0242
+waterfall 512 track1s              K 0.2000 null rms 0.0000 (mean +0.0000) N 18.3868 -> margin 0.2000
+waterfall 512 spectrum_l1          K 0.0200 null rms 0.0233 (mean +0.0013) N 0.8630 -> margin 0.0233
+waterfall 512 abs_ln_motion_ratio  K 0.0200 null rms 0.0486 (mean -0.0105) N 0.2451 -> margin 0.0486
+waterfall 512 coverage_l1          K 0.0016 null rms 0.0079 (mean +0.0008) N 0.0159 -> margin 0.0079
+waterfall 512 emission_l1          K 0.0001 null rms 0.0000 (mean +0.0000) N 0.0001 -> margin 0.0001
+waterfall 512 mean_frame_psnr      K 0.1000 null rms 1.8172 (mean -0.4567) N 26.2290 -> margin 1.8172
+waterfall 512 hf_l1_real           K 0.0200 null rms 0.0258 (mean +0.0012) N 1.1122 -> margin 0.0258

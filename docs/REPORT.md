@@ -952,6 +952,87 @@ learned body's water through the field bus. The same frames on any number of thr
 library entries and a scene of a waterfall under an incoming storm. The full account is in
 [EFFECTS_WATER.md](EFFECTS_WATER.md).
 
+### 6.16 Earth effects
+
+Three more presets were trained with this study's recipe and tested with its protocol on seeds of their own
+(6,000,000 and up), at the runtime's default int8: **lava** (a band of molten rock along the ground under a dark crust
+whose seams glow, flowing along the slope of a `flow` control or pooling on the level, bubbling slowly), an
+**eruption** (a column of hot dark ash from a vent that spreads into an umbrella under a stable layer, its cooler rim
+collapsing down its sides) and a powder-snow **avalanche** (a cloud that breaks loose upslope, runs in the direction of a
+`direction` control, swells as it runs and settles; it plays once, 5 s). Lava works by the rule set before its test: it
+tracks a held-out run 1.09 dB [0.70, 1.43] better than the coarse simulation with the same detail layer at 1 s, and
+endless its average picture is 1.22 dB [0.11, 2.45] closer than the nearest flipbook's with its motion tied; its learned
+crust is streaks rather than the simulator's network of seams, so its detail is further from real than the
+flipbook's. The eruption works narrowly: +0.50 dB [0.06, 0.96] at 1 s (it ties at every other horizon) and an average
+picture 1.31 dB [0.04, 2.55] closer, motion tied; started from an empty grid, its stepper grows no column, as study L's
+vortex did not. The avalanche is weak, as the mushroom and the splash were: its first frame beats the coarse
+simulation's by 1.75 dB [0.70, 2.70], but from 1 s it falls behind (-2.23 dB [-4.42, -0.07]), its cloud growing and
+billowing less than the simulator's, and endless its average picture is 2.90 dB [0.89, 5.71] further from real than
+the nearest flipbook's, motion and detail tied. Each is 146 KB (the avalanche 274 KB) and costs 0.44 to 0.49 ms per
+128 px frame at int8 (provisional, a shared machine; study D's fire 0.66 ms in the same rounds). The full account, with a
+volcano scene and ten library entries, is in [EFFECTS_EARTH.md](EFFECTS_EARTH.md).
+
+### 6.17 Air effects
+
+Three more presets were trained and tested the same way, at the runtime's default int8, with seeds of the round's own
+(6,400,000 and up): a **candle** (a small, calm flame on a wick with a thin wisp of smoke, leaning and fluttering in a
+`draught`), a **smoke ring** (one vortex ring, a counter-rotating pair in 2D, puffed from an opening, rising and spreading
+as it rolls, then breaking up; it plays once, for 4 s, with study M3's mean state, decided before training) and **heavy
+gas** (a cold vapour poured out near the ground that flows along it, in the direction of its `flow`, and thins). The
+candle and the ring work by the rule set before the test: they track a held-out run 2.9 dB [2.4, 3.4] and 7.5 dB [6.6,
+8.4] better than the coarse simulation with the same detail layer at 1 s (the ring's the largest gain of any effect so
+far), and endless their average picture is closer than the nearest flipbook's (+2.5 and +3.7 dB) with motion no worse;
+the ring's average picture and motion tie a second real run's, and it holds its shape (two cores, rising together,
+through its first two seconds), but its detail is the furthest from real of any effect (spectrum distance 0.72). Heavy
+gas tracks better too (+1.6 [0.9, 2.2]) but its average picture only ties the flipbook's, so it falls short without
+being weak. By eye the candle is weaker than its numbers (its learned flame does not keep the rounded teardrop; the
+library plays it with a gentler swirl and a look). 82, 294 and 146 KB; 0.43 to 0.57 ms per 128 px frame. The full
+account, with a crypt scene and twelve library entries, is in [EFFECTS_AIR.md](EFFECTS_AIR.md).
+
+### 6.18 Fire effects, round 10
+
+Three more presets were trained and tested the same way, at the runtime's default int8, with seeds of the round's own
+(26,000,000 and up): a forest **crown fire** (the crowns of a stand of trees torching in their own flames, spot fires
+catching ahead of the head, a tall column of smoke bent over by a wind that grows with height; distinct from round 7's
+wildfire, a front on the ground), a **window fire** (a room fire venting from a window seen front-on: flames pour out of
+the opening's upper part above the neutral plane and roll up the wall, the room glows through the lower part, and black
+smoke spreads out under the eave as a ceiling jet) and a **dust explosion** (a dust cloud lit at one end or in its
+middle, the second control `ignition`: a deflagration front, the dust's heat spreading into the dust beside it and
+burning where it is hot, runs through the cloud, the burning gas expands into a brown-orange fireball that billows up and
+burns out, and a pall of dust and ash is left; it plays once, for 4 s, with study M3's mean state, decided before
+training). All three work by the rule set before the test: they track a held-out run 2.60 dB [2.16, 3.04], 3.31 dB [2.91,
+3.73] and 8.44 dB [7.88, 9.04] better than the coarse simulation with the same detail layer at 1 s (the dust
+explosion's the largest gain of any effect so far: the 32-cell simulation cannot resolve the burn's preheat zone and
+burns the cloud out in a flash), and endless their average picture is closer than the nearest flipbook's (+1.76, +1.78
+and +3.15 dB) with motion no worse; the dust explosion's average picture, motion and coverage tie a second real run's,
+and its learned flame runs through the cloud from where it was lit. The two fires' detail is six times further from real
+than the flipbook's (spectrum distances 0.43 and 0.44): their learned flames and smoke carry streaks along the flow. By
+eye all three are fair; the library draws the crown fires' column and the dust explosions with field-shader looks. 146,
+146 and 294 KB; 0.49 to 0.65 ms per 128 px frame. The full account, with a forest-edge town scene and ten library
+entries, is in [EFFECTS_FIRE2.md](EFFECTS_FIRE2.md).
+
+### 6.19 Elements
+
+Three more presets were trained and tested the same way, at the runtime's default int8, with seeds of the round's own
+(27,000,000 and up): a **geyser** (a vent that simmers, steams and surges, then erupts in a white column of water and
+steam that holds, collapses and steams; its conduit's state is a slow noise the stepper sees, so it keeps its own
+irregular time), a **haboob** (a storm's cold outflow let go from a lock and running along the ground as a gravity
+current, a tall rolling head of dust; it plays once, for 5 s, with study M3's mean state, decided before training) and
+**sea spray** (spray torn off breaking wave crests by the wind, the crests' share following Monahan and
+O'Muircheartaigh's whitecap cover). The simulator's haboob runs as gravity-current theory says: its front at a steady
+0.86 to 0.90 of sqrt(g' h) of its feed, and Fr = 1.15 ± 0.23 on its head (Huppert and Simpson's laboratory 1.19,
+Benjamin's ideal √2). Sea spray works by the rule set before the test: it tracks a held-out run 1.9 dB [1.0, 2.8]
+better than the coarse simulation with the same detail layer at 1 s (+2.9 at 8 s), and endless its average picture is
+5.9 dB [4.8, 7.1] closer than the nearest flipbook's and ties a second real run's, its motion no worse; its detail is
+far from real (spectrum distance 0.36, the flipbook's 0.10). The haboob tracks better from 1 s (+1.1 [0.3, 1.9]) but
+its average picture only ties the flipbook's (its whole 150 frames at a neighbouring setting), so it falls short; its
+learned front runs at the simulator's speed at one held-out setting and 25% fast at the other, and its renderer loses
+its first frames. The geyser is weak: it ties the coarse simulation at 1 s (+1.1 [-0.3, +2.6]) and loses at 2 s; at a
+middle setting it erupts when its conduit says (a column in 95% of those frames), at a low one never, and within a shard
+its column follows its start point more than its intensity. 146, 294 and 146 KB; 0.42 to 1.03 ms per 128 px frame. The
+full account, with a coast scene under the weather director and ten library entries, is in
+[EFFECTS_ELEMENTS.md](EFFECTS_ELEMENTS.md).
+
 ## 7. Runtime cost and budget
 
 Median ms per frame through `nvfx_render`, one pinned AVX2 core (90th percentiles and every configuration in
@@ -3245,3 +3326,786 @@ its own play), snapshot at every stage, and chosen on tracking *and* endless pla
 - Study N's smoke demo also runs away given 30 s (its box's heat to 3,128); retrained with the fix it does not.
 - **Cost** (provisional, now on a quiet machine): a step 70, 37 and 23 ms on 1, 2 and 4 threads; a 256 x 256 picture
   61, 30 and 16 ms. The detail layer is still three quarters of a step.
+
+## 16. Study O: the most visible flaws of the shipped effects, fixed and measured
+
+**Status: finished** (15 October 2026; paused once by the owner's usage limit and resumed). Fixed and judged by eye,
+with no model change: the waterfall's and rain shaft's bands (§16.1, `passes 2`), launch's square block in the lift-off
+(§16.2, a three-tile domain and `passes 2`) and the rocket thruster's curling exhaust (§16.4, a cold field). The mushroom
+and the splash (§16.3): the margins, N = 30 and the rule committed before validation, which chose **mushroom `ms_u30`**
+(the mean state and a 30-frame fine-tune) and **splash `ms`** (the mean state); the test, run once on seeds 3,200,000
+to 3,299,999, found **both meet the rule**: the mushroom's mean frame +1.18 dB [+0.91, +1.45] and tracking at 1 s
++0.85 dB [+0.73, +0.97], the splash's mean frame +0.40 dB [+0.21, +0.60], nothing past a margin (§16.3.3). **Both are
+replaced** and the library's and the prairie's links moved to them (§16.5); by eye the mushroom changes little (§16.3.4).
+Cost in §16.6, what it means in §16.7. Data under `/root/nvfx-data/o_fix` (candidates `cand/`, the files now shipped
+`models/`, logs `logs/`). The section was written as the work went.
+
+Study O takes the flaws that show most in the demos and the library, finds
+each one's cause with evidence, and fixes what it can: a fix in the compositor, a look or a library entry is judged by
+eye from before and after frames, and a fix that changes a model goes through a rule written here before any of its
+validation numbers, validated and tested once. Seeds: study O's range, 3,000,000 to 3,499,999. Code: `tools/nvfx_fix.cpp`
+(`nvfx_fix bands | peaks | strip`); every run is logged under the data root's `o_fix`.
+
+### 16.1 The learned waterfall's horizontal bands: the detail layer, locked once a frame
+
+**The flaw.** The learned waterfall's sheet (and, fainter, the rain shaft's curtains) showed horizontal bands a few
+pixels apart from the lip down, plainly in `videos/effect_waterfall.mp4` and `scene_falls.mp4`, where the library and
+the scene play the water models with `swirl 0`. The docs had put it down to the grown fine fields.
+
+**The cause** ([EFFECTS_WATER.md](EFFECTS_WATER.md) §7.1 has the figures). `nvfx_fix bands` takes the sheet apart on 8
+training runs of the waterfall (salt 1, runs 0 to 7; diagnosis only): the power of the frame's luminance along y in a
+window of the sheet (rows 16 to 80, columns 56 to 72 of the 128-pixel frame), for the simulator's frames and for the
+learned effect with one part at a time swapped:
+- the learned coarse state alone, upsampled and drawn by the simulator's renderer, is smooth: **not the learned body**;
+- the learned dynamics drawn by the simulator's renderer have the bands: **not the learned renderer**;
+- the detail layer driven by the simulator's own coarse states (an oracle stepper) has them: **the detail layer**;
+- the spectrum of each banded version has one narrow peak (up to 3.5 decades above the simulator's at that period, 1.6
+  to 1.9 on average over the runs), and **its period is one frame's fall**: 2.9 pixels at intensities 0.03 to 0.13,
+  3.05 to 3.2 at 0.54 to 0.59, 3.2 to 3.4 at 0.78 to 0.81 (the water falls at 85 + 30 intensity cells a second: 2.9 to
+  3.6 pixels a frame), not the coarse grid's 4 pixels; at 256 pixels it doubles (5.1 to 6.4).
+
+Once a frame the detail layer locks its fine fields to the coarse state: a factor per coarse cell, and the missing
+material added broken up by the flicker noise, neither of which moves with the water. The fall carries each frame's
+stamp one frame's travel down and the next lands beside it: a sum of stamps one travel apart repeats with that period.
+It is study L's saw-tooth (§12.1.1) in a straight fall. Without the breakup noise (`contrast 0`) the peak is lower and
+stays (the factors stamp as well).
+
+**The fix: a library and scene setting, judged by eye.** The detail layer already runs in passes (study L's
+`DetailSpec::passes`); an `effect` line can now set it (`passes N`, a whole number from 1 to 8, as it sets `swirl`), and
+the library and the falls scene play the waterfall and the rain shaft with `swirl 0, passes 2`. Each pass moves the water
+half a frame's travel and the stamps blend: in the as-played runtime (`nvfx_fix peaks`, the largest narrow peak of the
+rows' spectrum above its neighbours, mean over the 8 runs) the waterfall goes from 0.73 decades to 0.07 at 128 pixels,
+the rain shaft from 0.40 to 0.04; the fountain has none (0.04) and keeps one pass. At 256 pixels two passes leave
+half-travel bands (0.48) and three take them off (0.20), so the demo reels, rendered at 256 pixels, use three. No model
+file changes. By eye (the falls at 3.5 s before and after, the library's sheet, the reels): the sheet falls in straight
+streaks with no ladder of bands, the curtains are the same with fainter stripes gone; nothing else changed in the
+picture. A second pass of the detail layer skips the empty spans as the first does: the waterfall costs +0.00 ms a
+frame at 128 pixels and +0.04 to +0.06 ms at 256 (§16.6).
+
+**What changed.** `src/compose/script.cpp` and `script_run.cpp` (the `passes` key; `Script.AnEffectsPassesSplitItsDetailLayer`),
+`nvfx_reel` (DETAIL `passes`), `library/water.nvfxl` and `examples/scenes/falls.nvfxs`. Frozen hashes: the falls' six
+keyframes (`fx_water_frozen.csv`; the same on 1, 2 and 3 threads) and the library's `rain_shaft` keyframe
+(`frozen.csv`; the same on 2 and 3 threads). Re-rendered: `effect_waterfall`, `effect_rainshaft`, `scene_falls`,
+`real_vs_learned_water`, `library_water`.
+
+### 16.2 Launch's square block: the tile, not the model
+
+**The flaw.** In `scene_liftoff.mp4` the blast's billows were one square block with straight, soft sides, and in
+`effect_launch.mp4` they fill the tile and run out at its sides; with its calibrated swirl (3) the billows were drawn
+as wormy, boxy lines, which the library had already softened (`swirl 1, swirl_scale 9`).
+
+**The cause: the tile, which is the effect's whole domain** ([EFFECTS_FLOW.md](EFFECTS_FLOW.md) §6.1). Played from
+an empty grid at the controls of 6 training runs, the simulator's own launch covers 0.23 of its frame after 5 s and 0.34
+to 0.35 from 10 s on; the learned launch as shipped 0.26 to 0.34 (`nvfx_fix cover`); from a run's true state it covers
+what the run covers (0.218 against 0.219 over 2 s; `nvfx_fix bands`, whose taking apart also shows the learned dynamics
+drawn by the simulator's renderer, and the true coarse states moving the detail layer, with the same billowy outlines).
+Both fill the square in a few seconds and leave it at the sides: the model is not at fault, and no feather can draw what
+has left the domain. (An index of how much the coverage's edges line up with the frame's axes, sum |g|^2 cos 4 theta
+over sum |g|^2, is lower for the learned launch as played, 0.12, than for the simulator, 0.22: its billows are not
+boxier at the scale of its pixels.)
+
+**The fix: the scene's blast is a domain of three tiles** (`tiles 3 x 1, band 8`), the middle one blowing and the outer
+two carrying its billows on, their own nozzles cleared every frame (`suppress`), started by the ignition's rule as a
+domain cannot wait; and the launch's effect line takes `passes 2` (the scene and the library), which takes off a ladder
+of chevrons that one detail pass laid along the jet's edges (the waterfall's stamp, §16.1; seen through the scene's
+look at 3.5 times magnification, judged by eye: the spectral measure finds no peak in the learned renderer's frames).
+By eye (before and after in EFFECTS_FLOW.md §6.1): the billows spill past the middle tile into curls and arms on both
+sides and the straight sides are gone; late on, after the lift-off, the right-hand cloud is still a tall block.
+**Not fixed:** the library's launch entries are spawned, and spawned entries cannot be tiled domains, so their clouds
+still fill one tile (`rocket_launch`'s square shows at its top corners at times); the bare model's reel shows the tile.
+
+**What changed.** `examples/scenes/liftoff.nvfxs` and `library/models.nvfxl` (the launch line). Frozen hashes: the
+lift-off's keyframes 078 to 282 (`fx_flow_frozen.csv`; frame 030, before the ignition, is unchanged; the same on 1 and 2
+threads) and the library's `rocket_launch` (`frozen.csv`; the same on 2 and 3 threads). Re-rendered: `scene_liftoff`,
+`effect_launch`, and with the mushroom `library_round7` and `real_vs_learned_round7` (§16.5). The scene's three blast
+tiles cost two more 256-pixel tiles' steps a frame (§16.6 has the cost).
+
+### 16.3 The mushroom cloud (and the splash): the plan, committed before any of its numbers
+
+**The flaw.** The mushroom cloud is weak by its rule ([EFFECTS_BLAZE.md](EFFECTS_BLAZE.md) §4): from 1 s it follows a
+held-out run worse than the coarse simulation with the same detail layer, and played endlessly its average picture and
+detail lose to the nearest flipbook's; it loses its stem and its rolled cap, and its cap turns ragged. The splash is weak
+by its rule too ([EFFECTS_WATER.md](EFFECTS_WATER.md) §4: its average picture only ties the flipbook's). Both are
+one-shots that play from 16 stored first states at other intensities, as the explosion and dust did before study M3.
+
+**Candidates**, each a file built from the current model (the mushroom `fx_blaze/models/d/mushroom.nvfx`, SHA-256
+`505bdfe8...`; the splash `fx_water/models/d/splash.nvfx`, `8705966a...`), by what later studies found helps:
+- `ms`: **the mean state** (study M3, §14.9): fitted to the first states of the effect's 240 training runs (salt 1),
+  quadratic in the controls per block of 2 x 2 cells (`nvfx_ordered fitmean`, `setmean`), so a start point begun at other
+  controls is moved to them; for both effects;
+- `u30`: **longer windows** (study L, §12.1): the stepper fine-tuned from its weights by 600 iterations of the activity
+  stage on windows of 30 frames (`train --activity-stage 600 --mean-stage 0 --unroll 30 --lr-ft 7e-4`); the mushroom;
+- `mt4`: **the ensemble-mean fine-tune** (study M, §14.2): 600 iterations of the mean stage at weight 4, burn-in 0 to 90
+  frames, 16 frames with gradient (`train --mean-stage 600 --mean-weight 4`); the mushroom;
+- `ms_u30`, `ms_mt4`: each fine-tune with the mean state; the mushroom.
+
+**The probe (development, training settings only)**, as study M3's (§14.9.1): the controls of salt-1 training runs 0
+to 39 (40 settings); per setting 8 real runs (the reference) and 8 more (the floor), 8 plays per model through the
+runtime as shipped (float, the frozen tests' precision; one-shots their whole length: the mushroom's 149 frames, the
+splash's 89, from the first), tracking 2 runs per setting from the true state. In two steps: the current model and
+**the null** (the current model with fresh seeds) first, which fix the margins (written to
+`results/experiments/fix/o_margins.csv` and committed before any candidate is played on the probe); then the candidates,
+whose paired spread fixes **the number of settings N** for validation and the test: the smallest multiple of 10 at which,
+for each effect and every measure but the target, a candidate leaving it truly unchanged passes its margin with
+probability at least 0.9, by resampling the probe's settings and in the normal form with the SD at the upper end of its
+one-sided 80% interval; at most 60. The candidates sent to validation are those that meet the rule's form on the probe
+(if none of an effect's does, the one with the fewest measures outside their margins); they are named, with their
+SHA-256, before validation.
+
+**The rule (its form fixed now; its numbers from the probe, committed before validation).** Candidate minus current
+model, paired over the settings (tracking: each setting's mean over its 2 runs), 95% bootstrap with 10,000 resamples
+(`metrics::paired_bootstrap`, seed 2026); the measures of studies M, M2 and M3 (8 runs pooled per setting): tracking at
+1 s, the detail spectrum distance, |ln motion ratio|, the coverage and emission distances and the mean-frame PSNR. A
+candidate replaces the current model when
+1. it is **better on at least one of two targets**: the mean-frame PSNR (the ordered picture: where the stem and the cap
+   are, on average) or tracking at 1 s (following a real run), its interval above zero; and
+2. **every measure is within its margin**, the target it does not improve included: tracking at least the margin (dB),
+   the mean frame at least its margin (dB), the spectrum, motion, coverage and emission distances at most theirs.
+
+Each margin is the larger of study K's at the measure's scale (tracking -0.20 dB as studies M2 and M3 used it, the mean
+frame -0.10 dB, spectrum and motion +0.02, coverage and emission 10% of the current model's mean distance on the probe,
+at least 0.0001) and the null's RMS change at a setting; tracking has no null (a tracked run takes its own seed) and keeps
+-0.20 dB. On validation, among an effect's candidates that meet the rule, the one with the largest mean-frame gain is
+chosen (if none gains in the mean frame, the largest tracking gain); an effect with none stops there (a null, reported
+with its numbers). The strict reading (no interval entirely on the worse side of zero) and study K's margins are reported
+beside and do not decide.
+
+**Seeds** (study O's range): the probe real 3,000,000 + 100 s + k (the floor + 50), plays 3,010,000, the null 3,020,000,
+tracking 3,030,000; **validation** study G's 10 validation settings and more drawn the same way
+(`validation_settings(N, N)`), real 3,100,000 (the floor + 50), plays 3,150,000, tracking 3,180,000; **the test** study
+B's 10 held-out settings and more drawn the same way (`test_settings(N)`), real 3,200,000, plays 3,250,000, tracking
+3,280,000 (k = 0 to 7; tracking k = 0, 1).
+
+**The test, once per effect** with a chosen candidate: the file is copied to the data root's `o_fix/models/<effect>.nvfx`
+and frozen by SHA-256 in `results/experiments/fix/o_frozen.csv` before it; `nvfx_ordered --study o test` refuses any
+other file and runs once (a marker under `o_fix`). An effect that meets the rule on the test is replaced: the shared
+links (the library's models and every scene folder holding it) are repointed at the very end, after the full ctest has
+passed with private copies of the folders, and every frozen hash that changes is updated in the same change. Reported
+beside, not deciding: the distance to the floor before and after, the cost, and, for a replaced model, its round's own
+test (tracking against the coarse simulation, endless against the nearest flipbook) run again on fresh seeds.
+
+Code: `nvfx_ordered --study o` (`fitmean`, `setmean`, `train`, `val --split probeo|valo`, `test`); every file under the
+data root's `o_fix`, tables under `results/experiments/fix`.
+
+**The null and the margins (the probe's first step; committed before any candidate is played on the probe).** The
+current models and the same models with fresh seeds on the 40 training settings, 8 runs pooled each
+([o_margins.csv](../results/experiments/fix/o_margins.csv), [o_probe_stats.csv](../results/experiments/fix/o_probe_stats.csv)):
+
+| effect | measure | study K's margin | the null's RMS change at a setting | the floor (two sets of 8 real runs) | the current model | **margin** |
+|---|---|---:|---:|---:|---:|---:|
+| mushroom | tracking at 1 s (dB) | -0.20 | none (the same frames) | - | 13.95 | **-0.20** |
+| mushroom | spectrum distance | 0.02 | 0.039 | 0.027 | 0.184 | **+0.0387** |
+| mushroom | \|ln motion ratio\| | 0.02 | 0.095 | 0.037 | 0.215 | **+0.0945** |
+| mushroom | coverage distance | 0.0022 | 0.0117 | 0.0046 | 0.0222 | **+0.0117** |
+| mushroom | emission distance | 0.0001 | 0.000007 | 0.000009 | 0.000070 | **+0.0001** |
+| mushroom | mean-frame PSNR (dB) | -0.10 | 1.35 | 34.62 | 27.17 | **-1.35** |
+| splash | tracking at 1 s (dB) | -0.20 | none | - | 13.26 | **-0.20** |
+| splash | spectrum distance | 0.02 | 0.015 | 0.028 | 0.071 | **+0.02** |
+| splash | \|ln motion ratio\| | 0.02 | 0.072 | 0.030 | 0.093 | **+0.0719** |
+| splash | coverage distance | 0.00028 | 0.0017 | 0.0009 | 0.0028 | **+0.0017** |
+| splash | emission distance | 0.0001 | 0.000003 | 0.000000 | 0.000028 | **+0.0001** |
+| splash | mean-frame PSNR (dB) | -0.10 | 1.26 | 39.04 | 33.16 | **-1.26** |
+
+As for study M3's one-shots, re-seeding the current models moves their statistics at a setting by more than two sets of
+real runs differ (the mushroom's motion by 9.5% and its mean frame by 1.35 dB at a setting), because each play begins
+from one of 16 stored first states taken at other intensities: the margins are wide, and they are the effects' own
+seed-to-seed variety. The mean frame's margin applies only to a candidate whose better target is tracking.
+
+**The probe's second step: the candidates on the training settings** (development only; candidate minus current
+model over the 40 settings, 8 runs pooled, tracking 2 runs per setting;
+[o_probe_compare.csv](../results/experiments/fix/o_probe_compare.csv),
+[o_power.csv](../results/experiments/fix/o_power.csv)). Bold: better (interval clear of zero); all within their margins:
+
+| effect | candidate | tracking at 1 s (dB) | spectrum distance | \|ln motion ratio\| | coverage | mean-frame PSNR (dB) | the rule's reading |
+|---|---|---|---|---|---|---|---|
+| mushroom | `ms` | -0.000 [-0.001, +0.000] | +0.006 [-0.005, +0.016] | +0.041 [+0.004, +0.077] | **-0.0062 [-0.0097, -0.0028]** | **+0.32 [+0.04, +0.60]** | meets (motion strictly worse, within its margin) |
+| mushroom | `u30` | **+0.84 [+0.72, +0.97]** | **-0.015 [-0.022, -0.009]** | **-0.044 [-0.055, -0.031]** | -0.0002 [-0.0013, +0.0008] | **+0.60 [+0.32, +0.88]** | meets |
+| mushroom | `mt4` | **+0.22 [+0.14, +0.30]** | **-0.014 [-0.019, -0.009]** | **-0.030 [-0.038, -0.022]** | **-0.0018 [-0.0030, -0.0006]** | **+0.91 [+0.67, +1.14]** | meets |
+| mushroom | `ms_u30` | **+0.84 [+0.72, +0.97]** | -0.008 [-0.023, +0.005] | -0.018 [-0.054, +0.018] | **-0.0061 [-0.0094, -0.0029]** | **+1.39 [+1.09, +1.68]** | meets |
+| mushroom | `ms_mt4` | **+0.22 [+0.14, +0.30]** | -0.009 [-0.021, +0.003] | +0.001 [-0.035, +0.036] | **-0.0088 [-0.0120, -0.0056]** | **+1.46 [+1.10, +1.80]** | meets |
+| splash | `ms` | -0.000 [-0.000, +0.000] | **-0.003 [-0.005, -0.001]** | **-0.021 [-0.034, -0.008]** | **-0.0008 [-0.0011, -0.0005]** | **+0.59 [+0.39, +0.80]** | meets |
+
+Emission moved by at most 1 x 10^-5 (within its margin of 10^-4; the fine-tuned steppers' strictly worse, as the
+strict reading counts it). Means (current → candidate; the floor): the mushroom's tracking at 1 s 13.95 dB → 14.79
+(`u30`, `ms_u30`) and 14.16 (`mt4`, `ms_mt4`); its mean-frame PSNR 27.17 → 27.49, 27.77, 28.08, 28.56 and 28.63 dB
+(34.62), its motion ratio 0.82 → 0.78, 0.87, 0.85, 0.82, 0.81 (1.00), its coverage 0.0222 → 0.0160, 0.0220, 0.0204,
+0.0161, 0.0134 (0.0046); the splash's mean frame 33.16 → 33.75 dB (39.04), its motion 0.98 → 0.97 (1.00).
+
+- **Longer windows help the mushroom most at following a run**: +0.84 dB at 1 s from the true state, where its round's
+  test found it 1.1 dB behind the coarse simulation; with the ensemble-mean loss, +0.22 dB. Both bring its detail and
+  motion closer to the real ones and its average picture 0.6 and 0.9 dB closer.
+- **The mean state brings both one-shots' average picture and coverage closer** (the mushroom +0.32 dB, the splash
+  +0.59 dB), as for the explosion and dust; on the mushroom it calms it (motion 0.82 to 0.78 of the real), within the
+  margin. With either fine-tune the two add: +1.39 and +1.46 dB.
+
+**The number of settings.** "Every measure but the target" is read, for each candidate, as the measures that are not
+a target it improves on the probe (the mean state leaves tracking unchanged by construction, so its only target is the
+mean frame; every fine-tuned candidate improves both). The margin measures then need, at a probability of 0.9 that a
+truly unchanged one passes (normal form, SD at the upper end of its 80% interval): `ms` 21 settings (motion), `ms_u30`
+and `ms_mt4` 21 (motion), 18 and 14 (spectrum), `u30` and `mt4` 5 or fewer, the splash's `ms` 5; by resampling the
+probe's settings, at 30 settings every one of them passes with probability 0.99 or more. **N = 30**, the smallest
+multiple of 10 that meets the plan's condition. (Read the other way, with tracking held to its margin as if unchanged
+for `u30` and `ms_u30`, whose tracking spread over settings is 0.40 dB, it would need 54; their tracking gain, 0.84 dB,
+is 11 standard errors above zero at 30 settings, so tracking will be their target.) At 30 settings, by resampling the
+probe, the whole rule passes with probability 0.51 for `ms` (its mean-frame gain is small against its spread: 0.32 dB,
+SD 0.92), 0.99 for `mt4` and `ms_mt4`, 0.80 and 0.76 for `ms_u30` and `u30` read with tracking unchanged, and 1.00 for
+the splash's `ms`.
+
+### 16.3.1 The rule's numbers (committed before validation; the test runs once)
+
+**Candidates** (SHA-256): the mushroom `ms` `d6e030a2a7c48e4ecedd285672a334b119be147b53d8dcd89086ccd36a715dcc`, `u30`
+`366abc8bf3e376eb319f5d99e25c1bb1aa0bdb7263c3d45986efc3d14af32bdf`, `mt4`
+`58e84914e7b9258143c9c748e1d72fef0082819646832b419929a26b58b19106`, `ms_u30`
+`4a2f08a05eed33a85584b670eb009b606ecb1443089429b15beca703a46c97cc`, `ms_mt4`
+`7ff95277d2d451c33e43fdaad5223e2156efbb1773db29d6a900c33462e34e55`, each against the current mushroom (`505bdfe8...`);
+the splash `ms` `806a7a6cf27d73bb84b602cbe8f11e9b4ca4ce071bad50a4b9224bfb9131e82a` against the current splash
+(`8705966a...`). Files under the data root's `o_fix/cand`.
+
+**Margins** (the larger of study K's and the null's RMS change; o_margins.csv): the mushroom tracking at 1 s **-0.20 dB**,
+spectrum **+0.0387**, |ln motion ratio| **+0.0945**, coverage **+0.0117**, emission **+0.0001**, mean frame **-1.35 dB**;
+the splash **-0.20 dB**, **+0.02**, **+0.0719**, **+0.0017**, **+0.0001**, **-1.26 dB**. **N = 30** settings for
+validation (study G's 10 and 20 more, `validation_settings(30, 30)`; G's ten are its first ten, the closest to a test
+setting 0.085 away) and for the test (study B's 10 and 20 more, `test_settings(30)`), with the seeds of §16.3. The rest of
+the rule as written above. Every model plays through the runtime at float on the build's default float ISA (this
+branch's, AVX2), the same tool binary for the probe, validation and the test.
+
+### 16.3.2 Validation (the choice): every candidate meets the rule
+
+Candidate minus current model on study G's 10 validation settings and 20 more, the study's seeds, 8 runs pooled per
+setting, tracking 2 runs per setting ([o_val_compare.csv](../results/experiments/fix/o_val_compare.csv),
+[o_val_stats.csv](../results/experiments/fix/o_val_stats.csv), [o_val_choice.csv](../results/experiments/fix/o_val_choice.csv)).
+Bold: better; "K": past study K's margin (a second reading); "strict": the interval entirely on the worse side:
+
+| effect | candidate | tracking at 1 s (dB) | spectrum distance | \|ln motion ratio\| | coverage | mean-frame PSNR (dB) | rule |
+|---|---|---|---|---|---|---|---|
+| mushroom | `ms` | -0.000 [-0.001, +0.000] | +0.009 [-0.002, +0.020] | +0.054 [+0.012, +0.094] (K; strict) | **-0.0054 [-0.0088, -0.0020]** | **+0.24 [+0.02, +0.46]** | meets |
+| mushroom | `u30` | **+0.89 [+0.76, +1.02]** | **-0.011 [-0.017, -0.005]** | **-0.046 [-0.057, -0.033]** | -0.0005 [-0.0015, +0.0004] | **+0.46 [+0.10, +0.80]** | meets |
+| mushroom | `mt4` | +0.07 [-0.01, +0.14] | **-0.011 [-0.015, -0.006]** | **-0.032 [-0.039, -0.023]** | **-0.0010 [-0.0019, -0.0002]** | **+0.68 [+0.43, +0.95]** | meets |
+| mushroom | **`ms_u30`** | **+0.89 [+0.76, +1.02]** | -0.004 [-0.017, +0.009] | -0.005 [-0.046, +0.035] (K) | **-0.0055 [-0.0091, -0.0021]** | **+1.12 [+0.79, +1.45]** | **chosen** |
+| mushroom | `ms_mt4` | +0.07 [-0.01, +0.14] | -0.002 [-0.014, +0.008] | +0.014 [-0.027, +0.054] (K) | **-0.0063 [-0.0096, -0.0030]** | **+1.07 [+0.74, +1.41]** | meets |
+| splash | **`ms`** | -0.000 [-0.000, +0.000] | **-0.003 [-0.005, -0.001]** | **-0.019 [-0.034, -0.004]** | **-0.0008 [-0.0012, -0.0005]** | **+0.62 [+0.40, +0.86]** | **chosen** |
+
+Emission moved by at most 1 x 10^-5 everywhere (within its margin; the fine-tuned steppers' strictly worse). Means over
+the 30 settings (current → candidate; the floor, a second set of 8 real runs): the mushroom's mean-frame PSNR 28.13 dB
+→ 29.25 (`ms_u30`) (34.76), its tracking at 1 s 13.85 → 14.74 dB, its motion ratio 0.82 → 0.81 (1.00), its coverage
+0.0173 → 0.0118 (0.0046), its spectrum 0.182 → 0.179 (0.032); the splash's mean frame 33.53 → 34.15 dB (39.46), its
+motion 0.98 → 0.96 (1.00), its coverage 0.0025 → 0.0017 (0.0008).
+
+**The choice:** among the mushroom's five, all meeting the rule, the largest mean-frame gain is `ms_u30`'s (+1.12 dB;
+`ms_mt4` +1.07), which also follows a run 0.89 dB better at 1 s; the splash's `ms`. As on the probe, the fine-tune on
+30-frame windows is what follows a run better (`mt4`'s tracking gain of the probe, +0.22 dB, was +0.07 here, a tie), and
+the mean state is what moves the average picture most. Both chosen files were copied to the data root's
+`o_fix/models/` and frozen in [o_frozen.csv](../results/experiments/fix/o_frozen.csv) before the test.
+
+### 16.3.3 The test (once): both meet the rule and are replaced
+
+Study B's 10 held-out settings and 20 more (`test_settings(30)`), the test's seeds (real 3,200,000 + 100 s + k, the
+floor + 50, plays 3,250,000, tracking 3,280,000), each file frozen before it ran, the tool binary of the probe and
+validation ([o_test_compare.csv](../results/experiments/fix/o_test_compare.csv),
+[o_test_stats.csv](../results/experiments/fix/o_test_stats.csv),
+[o_test_decision.csv](../results/experiments/fix/o_test_decision.csv)). Candidate minus current model, 95% intervals
+(margins in brackets):
+
+| statistic | mushroom: current → `ms_u30` | difference [95% interval] (margin) | splash: current → `ms` | difference [95% interval] (margin) |
+|---|---|---|---|---|
+| mean-frame PSNR (dB) | 27.80 → 28.98 | **+1.18 [+0.91, +1.45]** (better at 29 of 30 settings; worst -0.22) | 33.24 → 33.64 | **+0.40 [+0.21, +0.60]** (better at 21 of 30; worst -0.20) |
+| tracking at 1 s (dB) | 13.57 → 14.43 | **+0.85 [+0.73, +0.97]** (-0.20) | 13.35 → 13.35 | -0.000 [-0.000, +0.000] (-0.20) |
+| detail spectrum distance | 0.187 → 0.174 | **-0.013 [-0.026, -0.000]** (+0.039) | 0.070 → 0.068 | -0.003 [-0.006, +0.000] (+0.020) |
+| \|ln motion ratio\| (motion ratio) | 0.230 (0.81) → 0.204 (0.82) | -0.025 [-0.064, +0.013] (+0.095) | 0.108 (0.96) → 0.085 (0.96) | **-0.024 [-0.037, -0.010]** (+0.072) |
+| coverage distance | 0.0189 → 0.0148 | **-0.0041 [-0.0074, -0.0011]** (+0.0117) | 0.0028 → 0.0021 | **-0.0006 [-0.0010, -0.0003]** (+0.0017) |
+| emission distance | 0.00007 → 0.00008 | +0.000005 [+0.000003, +0.000008] (+0.0001) | 0.00003 → 0.00003 | -0.000001 [-0.000001, +0.000000] (+0.0001) |
+
+**Both meet the rule on the test, and both are replaced.** The mushroom is better on both targets (its average picture
+1.18 dB closer to a real run's, and it follows a run from its true state 0.85 dB better at 1 s), and better on detail
+and coverage too; its motion ties; its emission distance is 5 x 10^-6 larger, an interval entirely on the worse side but
+a twentieth of its margin (the mushroom gives almost no light beyond its colour), so under study M's strict reading it
+would have stopped, and under study K's margins it passes. The splash's average picture is 0.40 dB closer, its motion and
+coverage closer, its detail and tracking tied (tracking from a true state is the same frames: the mean state moves a
+start at its own controls by nothing).
+
+Distance to the floor (a second set of 8 real runs per setting), before and after:
+
+| effect | split | mean-frame PSNR below the floor (dB), current → now | spectrum distance, current → now (the floor's) | coverage distance (the floor's) |
+|---|---|---|---|---|
+| mushroom | test (30) | 6.93 → **5.75** | 0.187 → **0.174** (0.031) | 0.019 → **0.015** (0.004) |
+| mushroom | validation (30) | 6.63 → **5.51** | 0.182 → 0.179 (0.032) | 0.017 → **0.012** (0.005) |
+| splash | test (30) | 6.08 → **5.68** (the floor 39.32) | 0.070 → 0.068 (0.028) | 0.0028 → **0.0021** (0.0008) |
+| splash | validation (30) | 5.93 → **5.31** | 0.073 → **0.070** (0.029) | 0.0025 → **0.0017** (0.0008) |
+
+### 16.3.4 How the replaced mushroom looks
+
+The numbers move more than the picture. Below, the mushroom as shipped and as replaced (the model's own renderer, 256
+px, seed 3,100,000, at 1, 2, 3.5 and 5 s; `nvfx_fix strip`): rows 1 and 2 at controls (0.5, 0.1, 0.6), rows 3 and 4 at
+`distant_mushroom`'s (0.9, 0.6, 0.3), the old model above the new each time. By eye the two are hard to tell apart: the
+same fireball at 1 s, the same stem and cap at 2 s, the same ragged cap hanging down in lobes by 3.5 s; at 5 s the new
+cap holds together a little more. What the test measured (an average picture 1.18 dB closer, a run followed better) is
+a matter of where and how much smoke there is over many runs, not of a shape one sees in one. The stem and the rolled
+cap that the simulator keeps are still lost after 3 to 4 s; the mushroom stays weak to the eye, if less weak by the rule.
+The library's and the prairie's mushroom are drawn with the explosions' look (`cloud`), which hides the fringes seen
+here; `library_round7`, `scene_prairie`, `effect_mushroom` and `real_vs_learned_round7` were rendered again with it.
+
+![The mushroom before (rows 1 and 3) and after study O (rows 2 and 4), at 1, 2, 3.5 and 5 s](figures/o_mushroom.png)
+
+Where a scene asks a start point for controls of its own, the mean state shows. The prairie plays start 13, a calm
+start, at controls (0.8, 0.6, 0.3): the new file moves it there, so its fireball is bigger and brighter and its cap
+wider on a clearer stem at 3.4 to 4.6 s; late on it spreads into the same tree of smoke (below: the prairie's keyframes
+at 2.6, 3.4, 4.1, 4.6 and 5.8 s cropped to the cloud, before on top, after below; the whole frames in
+[EFFECTS_BLAZE.md](EFFECTS_BLAZE.md) §6).
+
+![The prairie's mushroom before (top) and after study O (bottom)](figures/o_prairie_mushroom.png)
+
+### 16.4 The rocket thruster's exhaust: a cold field on its tail (a library entry)
+
+**The flaw** ([LIBRARY.md](LIBRARY.md)): `rocket_thruster`'s exhaust (the jet model, recoloured blue) curls up at its
+end as a flame does instead of streaming. **The cause:** the jet model is a flamethrower's burning jet: its gas slows
+along its length and its hot end rises on its own heat (the simulator's does too; the model card says "its end curls
+up"). Watching 34 s of the entry also showed a second fault: at times a shard's half-second blend showed two jets, one
+aimed down, because the start point nearest the entry's controls (0.9, 0.4, 0.45) was start point 2, stored at aim 0.04
+(18 degrees down), and a new shard begins from it.
+
+**Tried, by eye** (34 s of each, frames every 4 s and at the shard changes): a lower aim (0.25) lowers the jet but its
+end still hooks up; a `wind` field along the exhaust tears the flame apart and lights a patch of the tile (as COMPOSE.md
+§5 warns, strong pushes break a learned flame); a `ceiling` just above the nozzle flattens the tail a little; **a `cold`
+field over the tail** (strength 0.12 of the heat a frame within 160 pixels of a point 360 pixels along the exhaust)
+takes off the heat that lifts it: the exhaust streams and fades. With aim 0.45 and turbulence 0.5, start point 0
+(stored at aim 0.46) is the nearest (squared distance 0.218 against 0.264 and 0.298 for the next two), and no blend
+shows a second jet. **The fix** is those three changes in the entry: in the frames below (before, top; after, bottom, at
+4, 8.3, 12, 16.3, 20, 24.3, 28 and 32.3 s) the old tail hooks up in most of them and two jets show at 28 s; the new
+exhaust streams to the right and fades in all of them. It is a look and a force, not a model change; its keyframe is
+not among the frozen ones. Re-rendered: `library_fire`.
+
+![rocket_thruster over 34 s: before study O (top), after (bottom)](figures/o_thruster.png)
+
+### 16.5 What changed
+
+- **Code** (no runtime or API change; `NVFX_VERSION` as main's): an `effect` line takes `passes N` (`src/compose/script.cpp`,
+  `script_run.cpp`; the detail layer in N passes a frame, a whole number from 1 to 8; `Script.AnEffectsPassesSplitItsDetailLayer`),
+  `nvfx_reel`'s DETAIL field takes it too; `tools/nvfx_fix.cpp` (`bands`, `peaks`, `cover`, `strip`: §16.1 and §16.2's
+  evidence and the figures); `nvfx_ordered --study o` (the probe with its null, validation and the test, by §16.3.1's
+  rule).
+- **Catalogue and scenes:** `library/water.nvfxl` (the waterfall and the rain shaft in 2 passes), `library/models.nvfxl`
+  (launch in 2 passes), `library/fire.nvfxl` (`rocket_thruster`: a cold field, aim 0.45, turbulence 0.5),
+  `examples/scenes/falls.nvfxs` (2 passes) and `liftoff.nvfxs` (the blast a domain of three tiles, 2 passes).
+- **Models replaced** (both met the rule on the test, §16.3.3): the **mushroom** is now `o_fix/models/mushroom.nvfx`
+  under the data root (`ms_u30`: the mean state and the stepper fine-tuned on 30-frame windows; 301,443 bytes, SHA-256
+  `4a2f08a05eed33a85584b670eb009b606ecb1443089429b15beca703a46c97cc`) and the **splash** `o_fix/models/splash.nvfx`
+  (`ms`: the mean state; 301,443 bytes, `806a7a6cf27d73bb84b602cbe8f11e9b4ca4ce071bad50a4b9224bfb9131e82a`), each 20,516
+  bytes larger than before (the mean state's coefficients). The shared links moved last, after the full ctest had passed
+  with private copies of the folders: `library/models/mushroom.nvfx`, `library/models/splash.nvfx` and
+  `fx_blaze/models/scene/mushroom.nvfx`. The round's files are untouched under `fx_blaze/models/d` and
+  `fx_water/models/d`. A branch that has not merged these hashes will find its frozen tests that play the
+  mushroom (`LibraryKeyframesFrozen` and `PackLibraryKeyframesFrozen` at `distant_mushroom`, `ScriptedPrairieFrozen`)
+  failing against the moved links; merging study-fix brings the new hashes.
+- **Frozen hashes** (all at float, pinned to the AVX2 build with `--isa avx2`): the falls' six keyframes and the
+  lift-off's 078 to 282 (§16.1, §16.2); in `results/library/frozen.csv` `rain_shaft`, `rocket_launch`,
+  `distant_mushroom` and the mushroom's and splash's model rows; the prairie's keyframes 063 to 216
+  (`fx_blaze_frozen.csv`; 024, before the blast, is unchanged, and the old file still gives the old 063 and 078 on this
+  build, so the change is the model's); rows for the new files (`mushroom_o`, `splash_o`). No other frozen keyframe
+  plays the mushroom or the splash (`boulder_splash` is seeded water over the fog model: unchanged).
+- **Videos re-rendered** (videos/README.md): `effect_waterfall`, `effect_rainshaft`, `scene_falls`,
+  `real_vs_learned_water`, `library_water` (§16.1, and its `splash` again for the new model), `scene_liftoff`,
+  `effect_launch` (§16.2), `library_fire` (§16.4), `effect_mushroom`, `effect_splash`, `scene_prairie`,
+  `library_round7` (the mushroom entries and `rocket_launch`'s 2 passes) and `real_vs_learned_round7` (the mushroom, and
+  launch in 2 passes). `real_vs_learned_water`'s splash starts from a run's true state, where the mean state moves
+  nothing, and its stepper is the round's: unchanged.
+- **Checks** (after merging main at 6845415, still main's head on 20 October): the full build with warnings as errors;
+  the full ctest, 462 of 462 with private copies of the model folders before the links moved and 462 of 462 again with
+  the moved links (the pack rebuilt from them), none skipped; `nvfx_alloc_test` (no allocation per frame);
+  `nvfx_gallery --check` over the whole library with its models (191 effects, 191 played, 0 failed); the Godot test
+  (`engines/godot/test.sh`: the fireball and the library stage, 0 failures).
+
+### 16.6 Cost
+
+The detail layer's second pass (`nvfx_ordered cost`, thread CPU time a frame through `nvfx_render`, the models
+interleaved, the median of 9 paired repetitions; `o_cost_passes.csv`; measured on the shared machine at a load of about
+13 on 4 cores, so provisional):
+
+| effect | size | int8: one pass → two (ms) | difference | float: one pass → two (ms) | difference |
+|---|---|---|---|---|---|
+| waterfall (swirl 0) | 128 | 0.574 → 0.583 | +0.004 | 0.798 → 0.788 | -0.015 |
+| waterfall (swirl 0) | 256 | 1.412 → 1.450 | +0.061 | 1.829 → 1.836 | +0.036 |
+| launch (swirl 1, scale 9) | 128 | 0.539 → 0.649 | +0.099 | 0.785 → 0.871 | +0.090 |
+| launch (swirl 1, scale 9) | 256 | 1.387 → 1.656 | +0.233 | 1.964 → 2.104 | +0.165 |
+
+A second pass skips the empty spans as the first does, so the waterfall's sheet (a narrow band of the frame) costs
+almost nothing more; the launch's billows fill the tile, and the second pass costs it 8 to 18% (the paired
+differences over the medians).
+
+The replaced mushroom and splash cost what the round's did: the mean state acts once, on the start point, and the
+fine-tuned stepper has the same shape (`o_cost_models.csv`, the same tool, the build after merging main, a load of about
+8): the mushroom 0.640 → 0.684 ms at 128 px int8 (paired +0.063, inside both ranges), 1.580 → 1.513 at 256 (+0.006),
+0.689 → 0.746 and 1.591 → 1.590 at float; the splash 0.730 → 0.700 (-0.044), 1.610 → 1.580 (-0.095), 0.796 → 0.773
+and 1.666 → 1.645 at float. Every difference is within the spread of repetitions on this machine.
+
+**The lift-off's three tiles** (`nvfx_scene_script --no-video --profile`, the scene's 300 frames at 1280 x 720 on 2
+threads, int8, the wall time a frame; three ways of playing the blast in turn, twice, and one tile with two passes in a second
+session; `o_cost_liftoff.csv`; medians over the 225 frames from the ignition at 2.5 s; a load of about 8):
+
+| the blast | step stage (ms a frame) | whole frame (ms) |
+|---|---|---|
+| one tile, one pass (before study O) | 2.21, 2.20 | 44.1, 42.6 |
+| three tiles, one pass | 7.91, 7.90 | 48.7, 47.9 |
+| three tiles, two passes (as shipped) | 12.39, 12.18 | 50.3, 46.0 |
+| one tile, two passes (a second session) | 3.18, 2.52 (one pass: 2.20, 2.28) | 40.2, 43.5 (41.6, 41.1) |
+
+The two outer tiles add about 5.7 ms a frame to the step stage (all seven modules' steps on 2 threads) and about 5 ms
+to the frame; the second pass adds about 4.4 ms more on the three tiles, more than the bare effect's +0.23 ms at 256 px
+would give (three full tiles of billows on the two threads the frame's drawing shares; on one tile, +0.3 to +1.0 ms),
+but the frame as a whole hardly moves (48.3 against 48.2 ms on average over the two runs, within the runs' spread),
+since the step overlaps the drawing of the frame before. The lift-off still runs at about 20 frames a second at
+1280 x 720 on 2 busy threads; a game that cannot spare the step can keep one tile and accept the square.
+
+### 16.7 What it means
+
+- **Two of the five flaws were not the models'.** The waterfall's bands were the detail layer's once-a-frame lock seen
+  through a fast, straight fall, and launch's block was its domain, which the simulator's billows fill as well. Both are
+  fixed in how the effects are played, with no model change: `passes` for any effect whose material moves a few pixels
+  a frame (study L met the same stamp as magic's saw-teeth), and a tiled domain where an effect must outgrow its tile.
+- **The thruster's curl is the jet model's physics** (a burning jet's hot end rises); a force in the entry takes it off.
+  A recoloured model keeps the physics it was trained on, and a library entry can steer it with the compositor's fields.
+- **A model fix that the test confirms can still look much the same.** The mushroom's average picture is 1.18 dB closer
+  to a real run's and it follows a run better, but its stem and rolled cap are still lost after 3 to 4 s, and by eye the
+  new file differs mostly where a scene asks a start point for other controls (the mean state). The splash's gain,
+  0.40 dB, is small and invisible by eye; it could be told from a tie because the margins came from the null's spread
+  and N from the candidates' (study M3's lesson).
+- **Not fixed:** the mushroom's ragged cap and its detail (still 5.6 times the floor's spectrum distance on the test);
+  the library's launch entries, spawned and so not tiled, still fill one tile; the bare launch reel shows its tile; the
+  splash's crown still reads as two horns in the library. What would fix them: tiled domains for spawned entries in the
+  compositor; for the mushroom, a stepper that sees the cap's whole life (longer windows than 30 frames, or more coarse
+  cells over the cap).
+
+## 17. Study P: large effects drawn at half size and upscaled
+
+**Status: finished** (20 October 2026; paused once and resumed). The full write-up, with every table and interval, is
+[STUDY_P.md](STUDY_P.md); the results are under `results/experiments/upscale/`. Seeds: study P's range, 3,600,000 to
+3,999,999. Code: `include/neuralfx/upscale.hpp` and `src/core/upscale.cpp` (the upscaler, its float reference and the
+`.nvfxup` file), `src/runtime/rt_upscale*` (the runtime's kernel, once per ISA), `tools/nvfx_study_p.cpp` (the study),
+`tests/test_upscale.cpp` (11 tests). Data under `/root/nvfx-data/p_upscale` (the frozen models, the upscalers `nets/`,
+the logs).
+
+**The question.** A rollout effect drawn large (512 px) spends most of its frame in the per-pixel detail layer and
+renderer. Does drawing it at half size and bringing it back with a small learned 2x upscaler and seeded micro-detail
+(L) look as good as drawing at native size (N), for clearly less time, and better than the bilinear 2x (B)? Six large
+effects: the explosion, the mushroom, the wildfire, launch (in place of the suggested cloud, which fills only 12% of
+its frame), smoke and the waterfall; at 256 and 512 px, 512 deciding.
+
+### 17.1 What the size touches
+
+The fine fields never feed back into the coarse state: the stepper, its noise and the timeline do not depend on the
+size an instance draws at, so a half-size instance moves to the bit as the native one does (`nvfx_study_p check`, all
+six effects). What differs is the detail layer, which at half size draws its own fine detail rather than native's
+averaged (its frames are 25 to 44 dB from N's averaged to half size). So native's finest filaments are not in the
+half-size frame, even blurred, and a 2x of it can only sharpen a little: on held-out training tiles the shipped size
+(8, 8, 1: 128 multiply-adds a full-size pixel) gains +0.07 dB over bilinear, up to +0.55 dB per effect.
+
+### 17.2 The rule (committed before the test; the test ran once)
+
+The design and the rule's form were committed before any validation or test number (`0108862`); the margins from the
+null probe (N against N with fresh seeds on the validation settings), the choice and the number of test settings
+before the test (`1dcf55e`, and `858f301`: the test plays the mushroom this study froze, not study O's replacement,
+which reached main while the test was running). At 512 px, L is adopted as an opt-in option when, each for at least 5
+of the 6 effects: (1) L beats B against N on active PSNR, SSIM and the high band (bins S / 4 + 1 to S / 2), all three
+intervals clear of zero; (2) L is within the null's margins of N against the simulator's frames at S (tracking at 1 s,
+the endless statistics, the high band); (3) L costs at most 0.55 of N a frame (interleaved, the median ratio). Paired
+bootstrap over the settings, 95%, 10,000 resamples. Validation chose the **shared** upscaler (gain 0.10, 30 noise
+slices a second): the per-effect nets were better on PSNR for all six but worse on SSIM or the high band for four.
+
+### 17.3 The test: the learned 2x does not pass
+
+Run once on 20 held-out settings, seeds 3,800,000 to 3,839,999, 4 plays and 2 tracking runs a setting
+(STUDY_P.md §6). At 512 px, L minus B:
+
+| effect | active PSNR vs N (dB) | SSIM vs N | high band vs N (lower is better) |
+|---|---|---|---|
+| explosion | **+0.087 [+0.028, +0.140]** | -0.0001 [-0.0002, +0.0000] (tie) | +0.009 [-0.013, +0.028] (tie) |
+| mushroom | **+0.107 [+0.093, +0.120]** | **+0.0001 [+0.0001, +0.0001]** | -0.001 [-0.040, +0.039] (tie) |
+| wildfire | -0.045 [-0.090, -0.005] (worse) | -0.0003 [-0.0005, -0.0001] (worse) | +0.085 [+0.060, +0.113] (worse) |
+| launch | +0.007 [-0.000, +0.016] (tie) | -0.0004 [-0.0005, -0.0002] (worse) | +0.075 [+0.059, +0.091] (worse) |
+| smoke | **+0.085 [+0.082, +0.088]** | **+0.0010 [+0.0009, +0.0011]** | +0.002 [-0.019, +0.023] (tie) |
+| waterfall | -0.016 [-0.020, -0.011] (worse) | -0.0004 [-0.0005, -0.0003] (worse) | +0.053 [+0.048, +0.059] (worse) |
+
+- **Condition 1: 0 of 6.** The learned 2x is a little closer to N than bilinear on PSNR for three effects and further
+  for two, and its high band is never closer to N's.
+- **Condition 2: 6 of 6.** L is within every margin of N against the simulator's frames, and nearer them than N on
+  tracking at 1 s (+0.08 to +0.53 dB), the detail spectrum and the high band, because like B it carries less of the
+  fine detail N's detail layer draws at 512 px, which the simulator (128 cells drawn at 512) does not have.
+- **Condition 3: 4 of 6** (below). So by its rule **the learned 2x is not adopted.** At 256 px (not deciding):
+  conditions 1, 2 and 3 hold for 1, 4 and 2 of the 6.
+
+### 17.4 Cost (provisional: a busy machine)
+
+Thread CPU time a frame through `nvfx_render`, N, the half-size instance alone (H), B and L interleaved in one process,
+30 rounds of 20 frames, the median of each ratio to N (the runtime's default, int8 on AVX-512 with VNNI):
+
+| | explosion | mushroom | wildfire | launch | smoke | waterfall |
+|---|---:|---:|---:|---:|---:|---:|
+| N at 512 px (ms) | 4.16 | 6.00 | 4.32 | 4.33 | 4.70 | 4.45 |
+| H / N | 0.343 | 0.310 | 0.291 | 0.302 | 0.325 | 0.298 |
+| B / N | 0.426 | 0.361 | 0.369 | 0.367 | 0.395 | 0.369 |
+| **L / N** | 0.571 | **0.453** | 0.593 | **0.536** | **0.550** | **0.530** |
+
+At 256 px H / N is 0.34 to 0.43 (the coarse step, about 0.3 ms, does not shrink) and L / N 0.46 to 0.70. The learned
+part costs 0.55 to 0.97 ms of a busy core at 512 px beyond the bilinear 2x; the effects that fill most of their frame
+skip the fewest empty blocks.
+
+### 17.5 What ships, and what it means
+
+- **An opt-in path, labelled experimental** (`NVFX_VERSION` 7, ENGINES.md §5): `nvfx_effect_attach_upscaler` (a
+  `.nvfxup` file, once per effect) and `nvfx_instance_set_upscale` with `NVFX_UPSCALE_BILINEAR` (no file) or
+  `NVFX_UPSCALE_LEARNED`; no allocation per frame; deterministic from the seed and the time, with seeking; frozen frames
+  pinned to the AVX2 float build. The upscalers' weights stay under the data root.
+- **What pays is drawing at half size itself.** The half-size instance costs about a third of native at 512 px, and with
+  the bilinear 2x (free on a GPU sampler) it is within the null's margins of native against the simulator's frames on
+  every measure for all six effects at 512 px (4 of 6 at 256 px), and closer than native on tracking and the spectrum
+  (on validation and on the test; beside the rule, not deciding). It loses native's finest filaments; whether a game
+  needs them at the size it draws an effect is a judgement by eye (videos/README.md §9b). An engine can create the
+  instance at half size and draw its texture at full size with no new call.
+- **The learned 2x does not earn its cost**: the half-size frame does not hold native's detail for it to recover, and
+  seeded noise adds high-band energy only at a price in PSNR and SSIM.
+- **The simulator's frames at 512 px are no reference for fine detail.** Drawn from 128 cells, they have about a
+  seventeenth to a third of native's high-band power; native's detail at 512 px is the detail layer's own, checked
+  against nothing. A 512-cell teacher (0.18 s a frame here) would settle it, on the PC.
+- **What could make a learned upscaler worth it**: a target it can reach (the detail layer at full size and only the
+  renderer at half size, or a renderer that draws filaments from the coarse flow), and a cheaper kernel for the effects
+  that fill their frames.
+
+**Checks** (after merging main at eaa7ddf): the full build with warnings as errors; the full ctest, 488 of 488 (main's
+477 and study P's 11), none skipped; `nvfx_alloc_test` (no allocation per frame, with the bilinear 2x, the learned 2x
+and the learned 2x at int8); `nvfx_gallery --check --require-models` (213 effects, all played, 0 failed); the Godot test
+(0 failures).
+
+## 18. The weather director in 2D
+
+**Status: done** (21 October 2026). The full write-up, with every relation, its citation and what is a choice, is
+[WEATHER.md](WEATHER.md). Seeds: 28,500,000 to 28,599,999. Code: `src/compose/weather.hpp` and `weather.cpp` (the
+director), the `weather` statement and the physical keys of `emit rain`, `emit snow` and `emit hail` in the scene
+language, the day's sky (`frame daylight, overcast, visibility`) in `src/compose/compose.cpp`, a library entry
+(`weather_director`). Tests: `tests/test_weather_director.cpp` (28), `nvfx_alloc_test`, the day scene's frozen keyframes
+(`neuralfx.ScriptedWeatherDayFrozen`). No model was trained, and no C call was added.
+
+**What it is.** The TODO's step ahead of the 3D weather system: a small weather state (cloud, rain, snow, hail, the wind
+and its gustiness, visibility, temperature, lightning, dust, fog) that moves between seven regimes (clear, overcast,
+rain, storm, snow, fog, dust storm), each a target varied by the seed, and drives the layers that already exist. It is a
+director, not a weather model: nothing is simulated. What it adds is order and the physics of the local effects:
+- **Transitions in the order real weather keeps**: each quantity moves in a window of the transition of its own, so
+  clouds build before rain, the gust front (wind, gusts, the drop in temperature) arrives before the downpour, lightning
+  and hail come with the heaviest rain, and it clears in reverse. Measured on the noise-free state: clear to storm, the
+  wind is at 90 % of its rise while the rain is under a fifth of its own; storm to clear, lightning, rain, wind and cloud
+  each make half their change in that order.
+- **Weather noise**: Ornstein-Uhlenbeck processes stepped exactly and smoothed over 1 to 5 s. The gusts at the Kaimal
+  integral time scale of the 10 m wind (L_u / U, L_u = 56.7 m: IEC 61400-1): over 3000 s of storm their spread over the
+  mean is 0.356 for a gustiness of 0.355 and their autocorrelation at the time scale 0.453 (the process's 0.451). The rain
+  cells log-normal over 90 to 400 s (spread of ln R 0.475 for 0.5). Lightning a Poisson process at the moment's rate, which
+  follows the cells' rain squared: 1432 flashes for 1444.5 expected, falling in rain 1.66 times the storm's mean; each a
+  flash of 1 to 5 return strokes.
+- **Relations instead of guesses**: Koschmieder's visibility (3.912 / extinction); Marshall-Palmer drop sizes, and the
+  rain's extinction from them (twice the drops' cross-section: 0.365 R^0.63 km^-1, a kilometre at 40 mm/h); Atlas,
+  Srivastava and Sekhon's fall speeds, within 1.4 % of Gunn and Kinzer's measurements from 1 to 5 mm; Locatelli and
+  Hobbs's snowflakes, whose number carries the rate's mass flux; the Beaufort scale and what the wind does on land at each
+  force (smoke rising vertically at 0, leaves in motion at 3, dust raised at 4, the full lean at a gale); Kasten and
+  Czeplak's daylight under cloud; the CIE overcast sky.
+
+**What does not hold, as it is.**
+- **Marshall-Palmer drops falling at Atlas's speeds carry 5 to 18 % more rain than the rate that named them** (18 % at 1
+  mm/h, 9 % at 50, 5 % at 100): what each was fitted to differs, and the director draws the distribution the rate names
+  rather than one rescaled to close the loop.
+- **Snow's visibility rests on assumptions** (the flakes' sizes, an area ratio of 0.3), set so that 1 mm/h is the US
+  weather service's moderate snow (825 m); real snow varies by a factor of 3 to 10 at a rate.
+- **The transitions' windows, the regimes' targets, the rain cells' times and the rain-to-snow ramp are choices**
+  (WEATHER.md §3.10): the order is the observed one, the rest is not measured here.
+- **A flash count is the seed's**: the day scene's storm, with the first twenty seeds, flashes 0 to 16 times (4 to 5 most
+  often); the scene plays the second seed tried (six flashes).
+
+**The layers.** Rain and snow take the physics (`emit rain, rate R, scale S, depth D, shutter T`): each drop sized by
+Marshall-Palmer and falling at its Atlas speed, its streak the distance it falls in the shutter, the count the
+distribution's number in the slab drawn; measured in a scene at 2, 20 and 60 mm/h, the count within 8 %, the mean fall
+speed within 3 % and every streak within 1 %. Hail takes a speed (12.8 m/s for a 10 mm stone by its drag). The cloud and
+fog models take their opacity, look and lean from the state; the storm's bolt, its lamp and the flash follow the
+lightning; a learned module's `wind` control leans with the Beaufort force; the day's sky (three new `frame` keys, off by
+default so every earlier scene is the same to the bit) lights the sky, the hills and the ground by Kasten and Czeplak,
+greys into the CIE overcast sky and veils the hills by Koschmieder (measured in the picture: the hills' contrast within
+0.03 of exp(-3.912 x / V)).
+
+**Control without new C calls.** In a script, `weather sky, seed S, regime clear:` and a schedule of lines (`storm at 17,
+over 4`), its members (`sky.rain`, ...) values anywhere. In an engine, the script hands an input to `regime`; the game sets
+it with `nvfx_scene_set_input`, reads the state with `nvfx_scene_get_input(scene, "sky.rain")` (which now reads a weather's
+members by name) and counts flashes with a rule (`nvfx_scene_rule_state`). On a library stage, `weather_director`'s
+`regime` parameter (`nvfx_stage_set_param`).
+
+**The day scene** (`examples/scenes/weather_day.nvfxs`, 40 s at 1280 x 720, `videos/scene_weather_day.mp4`): clear,
+clouding over, rain, the gust front and a thunderstorm (six flashes, hail), clearing in reverse and a rainbow. By eye the
+order reads; the weak points are the rain's look at the near scale (long, bright, slanted: what near drops in a strong
+wind do, but heavier-looking than the rate), the cloud masses being puffs in a band rather than a deck, a flat dark storm
+sky, no wet ground and no trees for the Beaufort forces 5 to 9 (WEATHER.md §7).
+
+**Cost.** A director step is about 1 microsecond (one core of the shared machine at a load of 17); the layers cost what
+they cost without it; no allocation per frame (`nvfx_alloc_test`: every regime, every layer it drives, scripted and
+through the C API). The day scene's median frame: 76 ms on 2 threads of the same busy machine (provisional; the cloud,
+fog, fire and smoke modules and the picture at 1280 x 720, not the director).
+
+**Checks** (main at c846c80, merged: nothing new on it): the full build with warnings as errors; the full ctest, 518 of
+518 (main's 488, the 28 weather tests, the day scene's frozen keyframes and its script check), none skipped;
+`nvfx_alloc_test` (no allocation per frame, the weather director's scenes included); `nvfx_gallery --check
+--require-models` (214 effects, all played, 0 failed); the Godot test (0 failures).
+
+## 19. The detail layer made cheaper: SIMD, exact skipping, fused passes
+
+**Status: finished** (21 October 2026; branch `detail-fast`). Code: `src/runtime/rt_detail3.hpp` with
+`rt_detail3_avx2.cpp` and `rt_detail3_avx512.cpp` (the volumes' detail layer on vectors), `src/runtime/rt_rollout.hpp`
+(the 2D detail layer), `tools/nvfx_detail_bench.cpp` with `tools/detail_bench/` (the A/B probe, the old build, the whole
+measurement), `tests/test_3d.cpp` (`VolumeDetail.VectorsGiveTheReferenceToTheBit`). Results: `results/detail/`.
+
+**The question** (TODO.md): the detail layer, which carries fine heat and soot by the learned coarse flow and locks them
+to the coarse state, was three quarters of a 3D step (59 ms of 60 to 70 on one core, STUDY_3D.md §8) and much of a 2D
+frame at 256 px and above. Make it clearly cheaper, in 2D and 3D, **without changing a frame on any ISA**: the frozen
+tests pass unchanged and no frozen hash is edited; a speed-up that changes frames could only be an option, measured and
+reported.
+
+**How it was measured.** Old and new in one process (`nvfx_detail_bench`): two probe modules, one built from this
+branch and one from main before it (c846c80, `build_old.sh`), each the runtime's internals with only a small C
+interface exported, play the same models, sizes, ISAs, seeds and controls in lockstep, frame by frame, in alternating
+order; per frame the step's, the picture's and the detail stage's thread CPU time (one thread) or wall time (four), and
+every field and picture of both compared bit for bit. A round is 16 frames (2D) or 6 steps (3D); the ratio of a round
+is new's median over old's; reported is the median over 12 (10) rounds with a 95% bootstrap interval, and per size
+and ISA the geometric mean over the 27 shipped 2D models with a 95% bootstrap interval over models. The container moved
+during the study (at 01:18 UTC, from a Sapphire Rapids host to a Cascade Lake one, both with AVX-512); everything below
+is from the second host, shared with six training jobs (load 15 to 21), so **absolute milliseconds are provisional**
+and slow; the interleaved ratios are what to read.
+
+### 19.1 Where the time was
+
+- **3D: plain scalar C++.** The volume runtime ran the reference's `rollout3d::detail_step`: per fine cell (64 x 96 x
+  64) six trilinear interpolations for the velocity, two MacCormack samples of eight corners with bounds checks for each
+  of two fields, the lock's four interpolations and, where new material arrives, three octaves of 4D value noise; and
+  per frame the swirl's lattice built from 1.2 million hashes and the flicker's from half a million.
+- **Skipping cannot pay in 3D, for this model.** After a few frames 91 to 96% of the fine cells hold heat or soot and
+  every 4 x 4 x 4 brick does (only 25% of the values are below 1e-6; none is subnormal), and new material arrives in 8
+  to 11% of the coarse cells but in every coarse row. So no empty brick stays empty: the gain had to come from vectors.
+- **2D was already on vectors and skipped empty spans** (study H2: blocks of 8 or 16 pixels, the stages run row by row a
+  few rows apart, row extents widened by the flow's reach). What bounds it is fetching each lane's bilinear corners
+  (one 16-byte load per lane and row, transposed in registers): with the fetch removed (wrong values, timing only; 512 px,
+  AVX-512, the first host) the stage costs 0.57 to 0.86 of its time, so no change elsewhere can make it much cheaper. At
+  128 px the per-frame and per-row work (grid rows expanded along x, the lock's factors, the noise lattices) was roughly
+  a tenth to a quarter of it (timed with the cycle counter on the busy machine: noisy).
+
+### 19.2 3D: the volume runtime's detail layer on vectors
+
+`rt_detail3.hpp`, built for AVX2 and for AVX-512, replaces `detail_step` through `Workspace::detail` (the reference is
+unchanged and still the trainer's and the tools'; the baseline ISA keeps it). What differs is bookkeeping only:
+- **separable interpolation:** every coarse, swirl and flicker row is interpolated along x once per frame (the
+  reference's first lerp, the same operands), and a cell blends those rows along z and y (or y and z) as the reference
+  does;
+- **the fields interleaved in a zero-bordered box:** a MacCormack sample needs no bounds checks; each lane fetches the
+  two x-corners of both fields of one (y, z) row with one 16-byte load, four rows a sample, transposed in registers;
+  positions are clamped to [-1, size] and floored as `trilinear_zero()` does (a NaN position reads only zeros, as the
+  reference's);
+- **the hashed lattices cached per seed and time level:** the swirl's value noise as its two time slices (from corners
+  hashed once each instead of 16 times a node), the flicker's levels as they are (a volume's two crossfading shards
+  use two seeds: four slots);
+- **one stencil for both fields,** the forward samples written straight into a second box, the block sums of the lock
+  taken in the reference's order (on vectors, a block per lane, when the fine grid is 4 cells a coarse cell).
+
+**Exact by construction:** the two files are compiled without contraction (`-ffp-contract=off`, CMakeLists.txt), so
+every multiply and add rounds on its own as in the reference (the baseline build has no FMA); `std::min`, `std::max`
+and `std::clamp` are reproduced with their ties and NaNs; a lane computes exactly what the reference computes for its
+cell. `VolumeDetail.VectorsGiveTheReferenceToTheBit` holds it to the reference on every ISA the CPU has (through the
+warm-up and step by step, 1 and 3 threads, swirl and breakup on and off, both edge modes, fine rows of whole vectors,
+part vectors and less than one, a state the reference made, two seeds in turn); compiled with contraction it fails at
+once (checked). Memory: 19 MB more per volume (`nvfx_volume_scratch_bytes` 32.8 to 51.6 MB); no allocation per frame.
+
+The chosen 64 x 96 x 64 model (`n2_3d/models/chosen.nvfx3`, controls 0.7, 0.5, 0.6), old against new
+(`results/detail/volume_3d.md`, `detail_3d.md`); every field of every step the same to the bit (240 volume steps, 240
+detail steps):
+
+| | threads | ISA | old ms | new ms | new / old |
+|---|---:|---|---:|---:|---|
+| the detail layer alone | 1 | AVX2 | 63.4 | 11.0 | **0.176 [0.173, 0.179]** |
+| the detail layer alone | 1 | AVX-512 | 64.0 | 10.0 | **0.155 [0.153, 0.158]** |
+| a volume step (`nvfx_volume_step_to`) | 1 | AVX2 | 86.5 | 26.8 | **0.319 [0.300, 0.326]** |
+| a volume step | 1 | AVX-512 | 83.1 | 25.8 | **0.309 [0.306, 0.324]** |
+| the detail layer alone | 4 | AVX2 | 145.6 | 23.7 | 0.174 [0.132, 0.216] |
+| the detail layer alone | 4 | AVX-512 | 121.7 | 23.1 | 0.181 [0.126, 0.211] |
+| a volume step | 4 | AVX2 | 197.6 | 35.3 | 0.184 [0.133, 0.300] |
+| a volume step | 4 | AVX-512 | 172.4 | 53.3 | 0.303 [0.152, 0.372] |
+
+So the detail layer is **5.7 to 6.5 times faster** on one core and a step **3.1 to 3.2 times**; the coarse step (the
+network, projection and advection, about 15 ms) is now the larger part. The four-thread rows are wall time on a machine
+with four cores and a load of 15 to 21: four threads found no free cores (they took longer than one), so those rows say
+only that the ratio holds; on the Sapphire Rapids host before the move, quieter, one core gave 7.8 against 51.8 ms (AVX-512)
+and 9.5 against 52.7 ms (AVX2).
+
+### 19.3 2D: what was left to gain
+
+What ships (each kept only when it was a gain on both ISAs and every frame of the 27 models stayed the same):
+- **the span scan fused into the copy** of each row into the ring: the copy notes the first and last block with
+  material from the bits it loads, instead of scanning the row again (mostly the sparse effects);
+- **the lock's noise only where new material arrives:** a block whose interpolated new material is +0 everywhere skips
+  the flicker (exact: with keep and ck not negative the breakup is a finite number not below +0, and +0 times it is +0);
+- **grid rows expanded by permutes:** each coarse, swirl and noise row is copied once and each vector of pixels takes its
+  values by two-register permutes from a window planned at set-up (the scalar loop where its cells do not fit);
+- **the row stages out of line** (the copy, the round trip, the lock's factors and rows), which compiles a little better.
+
+`results/detail/frames_2d_*.md`: the 27 shipped models, 12 rounds of 16 frames, float; detail = the detail stage, step =
+the whole step, frame = step and picture; new / old, geometric mean over models [95% bootstrap over models]:
+
+| size | ISA | detail | step | frame | detail ms, old / new | frames compared, differing |
+|---:|---|---|---|---|---|---|
+| 128 | AVX2 | **0.878 [0.869, 0.888]** | 0.951 [0.947, 0.955] | 0.971 [0.967, 0.975] | 0.176 / 0.157 | 5,184, 0 |
+| 128 | AVX-512 | **0.868 [0.859, 0.878]** | 0.954 [0.948, 0.959] | 0.975 [0.970, 0.979] | 0.183 / 0.160 | 5,184, 0 |
+| 256 | AVX2 | **0.878 [0.870, 0.887]** | 0.926 [0.920, 0.931] | 0.962 [0.958, 0.966] | 0.569 / 0.496 | 5,184, 0 |
+| 256 | AVX-512 | **0.874 [0.862, 0.885]** | 0.930 [0.924, 0.936] | 0.965 [0.959, 0.972] | 0.568 / 0.503 | 5,184, 0 |
+| 512 | AVX2 | **0.897 [0.885, 0.908]** | 0.913 [0.906, 0.921] | 0.961 [0.954, 0.969] | 2.290 / 2.035 | 5,184, 0 |
+| 512 | AVX-512 | **0.904 [0.886, 0.922]** | 0.926 [0.913, 0.939] | 0.974 [0.968, 0.980] | 2.329 / 2.131 | 5,184, 0 |
+
+Per model the detail stage takes 0.80 to 0.82 (magic, fog) to 0.98 (the orb at 512 px) of its time; the sparse effects (fog,
+heavy gas, cloud, magic) gain most. So the 2D detail layer is about **an eighth cheaper** (a tenth at 512 px), and a
+whole frame 3 to 4% — clearly faster as a stage, not by a factor: it had been on vectors already.
+
+**Tried and not kept** (each measured old against new, frames compared):
+- **hardware gathers** for the grid rows: about a tie on Sapphire Rapids, but on the Cascade Lake host a frame 7 to
+  21% slower (its picture too, which expands its rows the same way); the 3D kernel's rows likewise went back to scalar;
+- **a fast fetch** for vectors whose corners lie within two columns and two rows of a common shift (unaligned loads,
+  unzips and blends instead of per-lane loads): the detail stage 1.2 to 1.35 times slower with intrinsics on AVX-512,
+  its cases' branches unpredictable (about three quarters of the vectors qualify for most effects, 4% for the rain
+  shaft's fast swirl);
+- **skipping empty blocks inside the spans** by a bitmap of 16-pixel units with material: no gain (the row extents
+  already cover little more than the material: 0.25 of the pixels against 0.20 for fog, 0.43 against 0.29 for the
+  avalanche), a few percent slower;
+- **the lock's factors on vectors** (a coarse cell per lane): 6% slower on AVX2 at 128 px, a tie on AVX-512.
+
+**An option that changes frames, measured and not shipped:** a semi-Lagrangian detail layer (the forward sample alone,
+no round trip; `results/detail/option_semilagrangian_256.csv`, 27 models at 256 px against this branch's exact layer)
+costs 0.758 [0.732, 0.782] (AVX2) and 0.751 [0.727, 0.773] (AVX-512) of the exact layer's detail stage, 0.95 of a frame,
+and changes every frame: the lowest picture PSNR against the exact layer over a round is 27 dB (launch) to 57 dB (the
+sparse cloud, coals and smoke ring), 38 dB on average. It blurs the filaments the MacCormack step keeps; it would need its own test against the simulator before
+it could even be offered.
+
+### 19.4 Bit identity
+
+- **The frozen tests, unchanged:** the full ctest, 489 of 489 (main's 488 and the new `VolumeDetail` test), with every
+  frozen keyframe hash and SHA-256 as it was; no frozen CSV edited.
+- **Old against new, directly**, every frame of every timing run above: 31,104 frames of the 27 models (128, 256 and 512
+  px, AVX2 and AVX-512, float; the fine heat and soot, the coarse state, the flow and the picture) and 3,240 more at
+  int8 (256 px), 16,200 pictures through `nvfx_render` (300 frames each, 128 px, both ISAs, the default precision:
+  shards, crossfades and warm-ups), and 480 volume and detail steps of the 3D model (1 and 4 threads, both ISAs): **none
+  differs** (`results/detail/`).
+- **A trap found on the way:** an exact change to one function can still change frames, because GCC fuses
+  multiply-adds into FMAs by the shape of the code around them (CMakeLists.txt's note). Inlining the larger row
+  expansion changed how the AVX2 build compiled its callers, and their frames, though the expansion itself gave the same
+  values; kept out of line it does not. The bench caught it; nothing ships that it has not compared on both builds.
+
+### 19.5 What it means
+
+- **3D: the detail layer is no longer the cost of a volume.** A step is about a third of what it was; what remains is
+  the coarse step (the learned network on 6,144 cells) and the renderer's preparation and picture. A finer state or a
+  larger volume (TODO stage 2) now scales from 10 ms of detail, not 60.
+- **2D: what is left is fetching the samples' corners.** The layer was already vectorised and sparse; its exact gains
+  were an eighth. A cheaper advection (§19.3's option) or the GPU are the ways to make it much cheaper, both outside
+  "the same frames".
+- **Provisional:** one busy machine (the ratios are paired and interleaved; the absolute times are not a quiet machine's).
+
+**Checks** (origin/main is c846c80, the branch's base, so there was nothing to merge): the full build with warnings as
+errors; the full ctest, 489 of 489 (main's 488 and `VolumeDetail`), none skipped; `nvfx_alloc_test` (no allocation per
+frame; the volume on 1 and 3 threads, 0 allocations in 84 frames each); `nvfx_gallery --check --require-models` (213
+effects, 213 played, 0 failed); the Godot test (`engines/godot/test.sh`: the fireball and the library stage, 0 failures
+each, both frames the references' pixels).

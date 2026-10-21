@@ -164,6 +164,11 @@ class Effect : public detail::Handle<nvfx_effect, nvfx_effect_free> {
   // The prior against drift (rollout effects): before sharing the effect and creating instances.
   Result<> attach_prior(zstring path) { return detail::check(nvfx_effect_attach_prior(p_, path.c_str())); }
   Result<> attach_prior_memory(std::span<const std::uint8_t> data) { return detail::check(nvfx_effect_attach_prior_memory(p_, data.data(), data.size())); }
+  // The learned 2x upscaler (rollout effects, study P): before sharing the effect between threads.
+  Result<> attach_upscaler(zstring path) { return detail::check(nvfx_effect_attach_upscaler(p_, path.c_str())); }
+  Result<> attach_upscaler_memory(std::span<const std::uint8_t> data) {
+    return detail::check(nvfx_effect_attach_upscaler_memory(p_, data.data(), data.size()));
+  }
 };
 
 class Instance : public detail::Handle<nvfx_instance, nvfx_instance_free> {
@@ -188,6 +193,7 @@ class Instance : public detail::Handle<nvfx_instance, nvfx_instance_free> {
   Result<> set_precision(nvfx_precision precision) { return detail::check(nvfx_instance_set_precision(p_, precision)); }
   Result<> set_prior(int every_frames, int t, float beta) { return detail::check(nvfx_instance_set_prior(p_, every_frames, t, beta)); }
   Result<> set_handoff(int frames, int fade) { return detail::check(nvfx_instance_set_handoff(p_, frames, fade)); }
+  Result<> set_upscale(nvfx_upscale mode) { return detail::check(nvfx_instance_set_upscale(p_, mode)); }
   // The frame at `seconds` into `rgba` (size x size premultiplied RGBA8, rows `stride` bytes apart; 0: size * 4).
   Result<> render(double seconds, std::span<std::uint8_t> rgba, std::size_t stride = 0) {
     if (rgba.size() < detail::picture_bytes(size_, size_, stride) || stride == 0) return detail::fail(NVFX_ERROR_ARGUMENT);

@@ -7,10 +7,12 @@
 //       for the effect manager (--costs: rows model,size,step_ms,render_ms; --calibrate: measured on this machine).
 //       Without --library: every *.nvfx in --models. --coder: store, full, light or fast (the context-mixing coder's
 //       models; a member is coded only when that saves 5% and 256 bytes). Exit 77 with --require-models when a model
-//       is missing.
+//       or a file to --add is missing.
 //   nvfx_pack list PACK [--manifest]          members, entries and costs (--manifest: the manifest as written)
-//   nvfx_pack verify PACK [--threads N]       every check an engine's load makes: the pack, its catalogue as a
-//                                             library, every model loaded
+//   nvfx_pack verify PACK [--threads N] [--skip-missing]
+//                                             every check an engine's load makes: the pack, its catalogue as a
+//                                             library, every model loaded (--skip-missing: exit 77 when PACK is not
+//                                             there, as for a test whose pack was not built without the models)
 //   nvfx_pack extract PACK DIR                every member into DIR, byte for byte
 //   nvfx_pack measure --library DIR --models DIR [--reps 7] [--threads 3] [--out results/pack]
 //                                             each coder's pack size and loading time against the loose files
@@ -127,7 +129,10 @@ Contents collect(const Args& a) {
     c.members.push_back(std::move(in));
   }
   for (pk::Input& in : catalogue) c.members.push_back(std::move(in));
-  for (const std::string& f : list_arg(a, "add")) c.members.push_back({fs::path(f).filename().string(), pk::kind_of_file(f), read_bytes(f)});
+  for (const std::string& f : list_arg(a, "add")) {
+    if (!fs::exists(f)) throw Missing(std::format("{} is not there (--add)", f));  // a 3D model, say, outside git
+    c.members.push_back({fs::path(f).filename().string(), pk::kind_of_file(f), read_bytes(f)});
+  }
   for (const std::string& f : list_arg(a, "licence")) c.members.push_back({fs::path(f).filename().string(), pk::Kind::licence, read_bytes(f)});
   for (const pk::Input& in : c.members) c.loose_bytes += in.data.size();
   return c;
@@ -263,6 +268,10 @@ int do_verify(const Args& a) {
   nvfx_pack_desc_init(&d);
   d.path = pos[1].c_str();
   d.threads = a.i("threads", 1);
+  if (a.flag("skip-missing") && !fs::exists(pos[1])) {
+    std::println(stderr, "verify: {} is not there: skipped", pos[1]);
+    return 77;
+  }
   nvfx_pack* pack = nullptr;
   nvfx_scene_error err;
   if (nvfx_pack_open(&d, &pack, &err) != NVFX_OK) {

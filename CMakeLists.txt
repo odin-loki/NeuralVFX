@@ -27,6 +27,7 @@ option(NEURALFX_BUILD_VIEWER "Build the Dear ImGui viewer (needs GLFW and OpenGL
 option(NEURALFX_WERROR "Treat warnings in neuralfx targets as errors (CI)" OFF)
 option(NEURALFX_FETCH_ENCODERS "Fetch open-source BC7 and ASTC encoders (pinned commits) for the flipbook baselines; study code only, never the runtime" ON)
 option(NEURALFX_BUILD_GODOT "Build the Godot 4 GDExtension (engines/godot; fetches godot-cpp, needs Python 3)" OFF)
+option(NEURALFX_BUILD_FUSE "Build the sample integration for FUSE (engines/fuse: the adapter, the headless demo and its test)" ON)
 
 function(neuralfx_defaults target)
   if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
@@ -63,13 +64,20 @@ add_library(neuralfx_model STATIC src/core/model.cpp src/core/rollout.cpp src/co
 target_include_directories(neuralfx_model PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include")
 set_target_properties(neuralfx_model PROPERTIES POSITION_INDEPENDENT_CODE ON)
 neuralfx_defaults(neuralfx_model)
+target_sources(neuralfx_model PRIVATE src/core/upscale.cpp)  # study P's upscaler: its format and float reference (docs/STUDY_P.md)
 
 # The runtime (what ships in a game): C API, per-ISA renderers, no allocation per frame.
 set(NVFX_RUNTIME_SOURCES src/runtime/nvfx.cpp src/runtime/rt_base.cpp src/runtime/rt_avx2.cpp src/runtime/rt_avx512.cpp
                          src/runtime/rt_prior.cpp src/runtime/rt_prior_base.cpp src/runtime/rt_prior_avx2.cpp src/runtime/rt_prior_avx512.cpp
                          src/runtime/rt_handoff.cpp
                          src/runtime/nvfx_volume.cpp src/runtime/rt_volume_avx2.cpp  # 3D volumes (nvfx_volume.h, docs/STUDY_3D.md)
+                         src/runtime/rt_detail3_avx2.cpp src/runtime/rt_detail3_avx512.cpp  # their detail layer on vectors
                          src/manager/interp.cpp src/manager/manager.cpp src/manager/nvfx_manager.cpp)  # the effect manager (docs/MANAGER.md)
+# Study P (docs/STUDY_P.md): rollout effects drawn at half size and upscaled, one build per ISA.
+list(APPEND NVFX_RUNTIME_SOURCES src/runtime/rt_upscale_base.cpp src/runtime/rt_upscale_avx2.cpp src/runtime/rt_upscale_avx512.cpp)
+# The volumes' detail layer on vectors reproduces the reference's floats to the bit (rt_detail3.hpp): no contraction there,
+# whatever the runtime's flags (a source's options come after its target's).
+set_source_files_properties(src/runtime/rt_detail3_avx2.cpp src/runtime/rt_detail3_avx512.cpp PROPERTIES COMPILE_OPTIONS "-ffp-contract=off")
 find_package(Threads REQUIRED)  # the effect manager's worker threads
 add_library(nvfx STATIC ${NVFX_RUNTIME_SOURCES})
 target_link_libraries(nvfx PUBLIC neuralfx_model Threads::Threads)
@@ -120,7 +128,7 @@ neuralfx_defaults(neuralfx_io)
 # runtime's internals.
 set(NEURALFX_COMPOSE_SOURCES src/compose/compose.cpp src/compose/fields.cpp src/compose/trail.cpp src/compose/script.cpp src/compose/script_run.cpp
                              src/compose/fx_particles.cpp src/compose/fx_emit.cpp
-                             src/compose/water.cpp)
+                             src/compose/water.cpp src/compose/weather.cpp)
 add_library(neuralfx_compose STATIC ${NEURALFX_COMPOSE_SOURCES})
 target_include_directories(neuralfx_compose PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src/compose" "${CMAKE_CURRENT_SOURCE_DIR}/src/runtime")
 target_link_libraries(neuralfx_compose PUBLIC nvfx)
@@ -372,6 +380,30 @@ if(NEURALFX_BUILD_TOOLS)
   add_executable(nvfx_ordered tools/nvfx_ordered.cpp)
   target_link_libraries(nvfx_ordered PRIVATE neuralfx_io neuralfx_train neuralfx_dcm nvfx)
   neuralfx_defaults(nvfx_ordered)
+  # Study P (docs/STUDY_P.md): large effects drawn at half size and upscaled: training the upscaler, the null probe,
+  # validation, the test, the cost and the videos.
+  add_executable(nvfx_study_p tools/nvfx_study_p.cpp)
+  target_include_directories(nvfx_study_p PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src/runtime")
+  target_link_libraries(nvfx_study_p PRIVATE neuralfx_io neuralfx_train neuralfx_pack nvfx)
+  neuralfx_defaults(nvfx_study_p)
+
+  # The detail layer's A/B bench (docs/REPORT.md §19, results/detail/): two builds' probes in one process, frame by frame.
+  # The probe is a module of this build's runtime internals with only its probe_* functions exported; the old build's
+  # comes from tools/detail_bench/build_old.sh.
+  add_library(nvfx_detail_probe MODULE tools/detail_bench/probe.cpp)
+  target_include_directories(nvfx_detail_probe PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src/runtime")
+  target_link_libraries(nvfx_detail_probe PRIVATE nvfx)
+  set_target_properties(nvfx_detail_probe PROPERTIES PREFIX "" CXX_VISIBILITY_PRESET hidden VISIBILITY_INLINES_HIDDEN ON)
+  target_link_options(nvfx_detail_probe PRIVATE -Wl,--exclude-libs,ALL -Wl,-Bsymbolic)
+  neuralfx_defaults(nvfx_detail_probe)
+  add_executable(nvfx_detail_bench tools/nvfx_detail_bench.cpp)
+  target_link_libraries(nvfx_detail_bench PRIVATE ${CMAKE_DL_LIBS})
+  neuralfx_defaults(nvfx_detail_bench)
+
+  # Study O (docs/REPORT.md §16): the most visible flaws of the shipped effects and demos, taken apart.
+  add_executable(nvfx_fix tools/nvfx_fix.cpp)
+  target_link_libraries(nvfx_fix PRIVATE neuralfx_io neuralfx_train nvfx)
+  neuralfx_defaults(nvfx_fix)
 endif()
 
 if(NEURALFX_BUILD_BENCH)
@@ -386,6 +418,10 @@ endif()
 
 if(NEURALFX_BUILD_GODOT)
   add_subdirectory(engines/godot)
+endif()
+
+if(NEURALFX_BUILD_FUSE)
+  add_subdirectory(engines/fuse)
 endif()
 
 if(NEURALFX_BUILD_TESTS)
@@ -417,6 +453,7 @@ if(NEURALFX_BUILD_TESTS)
   # volume C API: their own test program.
   add_executable(neuralfx_3d_tests tests/test_3d.cpp)
   target_link_libraries(neuralfx_3d_tests PRIVATE neuralfx_train nvfx GTest::gtest_main)
+  target_include_directories(neuralfx_3d_tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src/runtime")  # the detail layer's kernels
   neuralfx_defaults(neuralfx_3d_tests)
   gtest_discover_tests(neuralfx_3d_tests TEST_PREFIX "neuralfx." DISCOVERY_MODE PRE_TEST PROPERTIES LABELS neuralfx)
   # Water (docs/EFFECTS_WATER.md): its own test program, so the shared test list stays as it is.
@@ -424,6 +461,27 @@ if(NEURALFX_BUILD_TESTS)
   target_link_libraries(neuralfx_water_tests PRIVATE neuralfx_compose GTest::gtest_main)
   neuralfx_defaults(neuralfx_water_tests)
   gtest_discover_tests(neuralfx_water_tests TEST_PREFIX "neuralfx." DISCOVERY_MODE PRE_TEST PROPERTIES LABELS neuralfx)
+  # The weather director (docs/WEATHER.md): the relations, the noise, determinism, no jumps, the regimes' targets, the
+  # order of transitions, the script and the scene API, the physical rain, snow and hail, the day, the scene's random
+  # numbers and no allocation per frame; its own test program (it counts allocations: it replaces operator new).
+  add_executable(neuralfx_weather_tests tests/test_weather_director.cpp)
+  target_link_libraries(neuralfx_weather_tests PRIVATE neuralfx_compose nvfx_scene_api nvfx_library_api GTest::gtest_main)
+  neuralfx_defaults(neuralfx_weather_tests)
+  if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+    target_compile_options(neuralfx_weather_tests PRIVATE -Wno-mismatched-new-delete)  # it counts allocations
+  endif()
+  gtest_discover_tests(neuralfx_weather_tests TEST_PREFIX "neuralfx." DISCOVERY_MODE PRE_TEST PROPERTIES LABELS neuralfx)
+  # Study P (docs/STUDY_P.md): the upscaler's reference, format, runtime parity, determinism, no allocation and the
+  # frozen frames; its own test program, so the shared test list stays as it is.
+  add_executable(neuralfx_upscale_tests tests/test_upscale.cpp)
+  target_link_libraries(neuralfx_upscale_tests PRIVATE neuralfx_compose GTest::gtest_main)  # the tests' small rollout effect (compose_scene.hpp)
+  target_include_directories(neuralfx_upscale_tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src/runtime")
+  target_compile_definitions(neuralfx_upscale_tests PRIVATE NEURALFX_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
+  neuralfx_defaults(neuralfx_upscale_tests)
+  if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+    target_compile_options(neuralfx_upscale_tests PRIVATE -Wno-mismatched-new-delete)  # it counts allocations
+  endif()
+  gtest_discover_tests(neuralfx_upscale_tests TEST_PREFIX "neuralfx." DISCOVERY_MODE PRE_TEST PROPERTIES LABELS neuralfx)
   # Counts heap allocations around nvfx_render (replaces the global operator new, so it is its own program).
   add_executable(nvfx_alloc_test tests/alloc_test.cpp)
   target_link_libraries(nvfx_alloc_test PRIVATE nvfx neuralfx_compose nvfx_scene_api nvfx_library_api neuralfx_ddpm)  # the trainer's format writer makes a test prior
@@ -501,10 +559,26 @@ if(NEURALFX_BUILD_TESTS)
     set_tests_properties(neuralfx.LibraryCataloguePlays PROPERTIES LABELS "neuralfx;data" SKIP_RETURN_CODE 77 TIMEOUT 1800)
     add_test(NAME neuralfx.LibraryKeyframesFrozen
              COMMAND nvfx_gallery --library ${CMAKE_CURRENT_SOURCE_DIR}/library --models ${NEURALFX_MODELS_LIBRARY}
-                     --only campfire,blue_gas_flame,grenade,steam_vent,portal,lightning_strike,ground_fog,dust_impact,flamethrower,plasma_orb,dust_devil,rocket_trail,vehicle_dust_wake,wall_of_flames,distant_mushroom,rocket_launch,ink_cloud,waterfall_drawn,garden_fountain,boulder_splash,rain_shaft_drawn,fountain,rain_shaft
+                     --only campfire,blue_gas_flame,grenade,steam_vent,portal,lightning_strike,ground_fog,dust_impact,flamethrower,plasma_orb,dust_devil,rocket_trail,vehicle_dust_wake,wall_of_flames,distant_mushroom,rocket_launch,ink_cloud,waterfall_drawn,garden_fountain,boulder_splash,rain_shaft_drawn,fountain,rain_shaft,lava_flow,volcano_eruption,avalanche
                      --keyframes ${CMAKE_CURRENT_BINARY_DIR}/library_keyframes --verify ${CMAKE_CURRENT_SOURCE_DIR}/results/library/frozen.csv --threads 2
                      --precision float --isa avx2)
     set_tests_properties(neuralfx.LibraryKeyframesFrozen PROPERTIES LABELS "neuralfx;data" SKIP_RETURN_CODE 77 TIMEOUT 1200)
+    # The air entries (docs/EFFECTS_AIR.md, library/air.nvfxl) against their SHA-256 in results/library/frozen_air.csv,
+    # float pinned as above; skipped without the air models in NEURALFX_MODELS_LIBRARY.
+    add_test(NAME neuralfx.LibraryAirKeyframesFrozen
+             COMMAND nvfx_gallery --library ${CMAKE_CURRENT_SOURCE_DIR}/library --models ${NEURALFX_MODELS_LIBRARY}
+                     --only candelabra,smoke_ring,dry_ice_fog
+                     --keyframes ${CMAKE_CURRENT_BINARY_DIR}/library_air_keyframes --verify ${CMAKE_CURRENT_SOURCE_DIR}/results/library/frozen_air.csv --threads 2
+                     --precision float --isa avx2)
+    set_tests_properties(neuralfx.LibraryAirKeyframesFrozen PROPERTIES LABELS "neuralfx;data" SKIP_RETURN_CODE 77 TIMEOUT 1200)
+    # Round 10's fire entries (docs/EFFECTS_FIRE2.md, library/fire2.nvfxl) against their SHA-256 in
+    # results/library/frozen_fire2.csv, float pinned as above; skipped without those models in NEURALFX_MODELS_LIBRARY.
+    add_test(NAME neuralfx.LibraryFire2KeyframesFrozen
+             COMMAND nvfx_gallery --library ${CMAKE_CURRENT_SOURCE_DIR}/library --models ${NEURALFX_MODELS_LIBRARY}
+                     --only crown_fire,window_fire,dust_explosion
+                     --keyframes ${CMAKE_CURRENT_BINARY_DIR}/library_fire2_keyframes --verify ${CMAKE_CURRENT_SOURCE_DIR}/results/library/frozen_fire2.csv --threads 2
+                     --precision float --isa avx2)
+    set_tests_properties(neuralfx.LibraryFire2KeyframesFrozen PROPERTIES LABELS "neuralfx;data" SKIP_RETURN_CODE 77 TIMEOUT 1200)
     # The third round's entries (docs/LIBRARY.md §10) against their SHA-256 in results/library/frozen_round3.csv, float
     # pinned as above: the procedural ones need no data; those that also play learned models are skipped without them.
     # The procedural ones play no learned model, and the compositor gives the same bits on every ISA, so they need no
@@ -561,6 +635,63 @@ if(NEURALFX_BUILD_TESTS)
     set_tests_properties(neuralfx.ScriptedLiftoffFrozen PROPERTIES LABELS "neuralfx;data" SKIP_RETURN_CODE 77 TIMEOUT 1200)
     add_test(NAME neuralfx.SceneScriptChecks.liftoff COMMAND nvfx_scene_script --script ${CMAKE_CURRENT_SOURCE_DIR}/examples/scenes/liftoff.nvfxs --check)
     set_tests_properties(neuralfx.SceneScriptChecks.liftoff PROPERTIES LABELS neuralfx)
+    # The volcano (docs/EFFECTS_EARTH.md): lava and the eruption, both in NEURALFX_MODELS_EARTH (outside git); its
+    # keyframes have the SHA-256 recorded in results/experiments/fx_earth_frozen.csv.
+    set(NEURALFX_MODELS_EARTH "${_nvfx_data}/fx_earth/models/scene" CACHE PATH "lava.nvfx, eruption.nvfx and avalanche.nvfx")
+    add_test(NAME neuralfx.ScriptedVolcanoFrozen
+             COMMAND nvfx_scene_script --script ${CMAKE_CURRENT_SOURCE_DIR}/examples/scenes/volcano.nvfxs --models ${NEURALFX_MODELS_EARTH}
+                     --keyframes ${CMAKE_CURRENT_BINARY_DIR}/volcano_script_keyframes --no-video --threads 2 --precision float --isa avx2
+                     --verify ${CMAKE_CURRENT_SOURCE_DIR}/results/experiments/fx_earth_frozen.csv)
+    set_tests_properties(neuralfx.ScriptedVolcanoFrozen PROPERTIES LABELS "neuralfx;data" SKIP_RETURN_CODE 77 TIMEOUT 1200)
+    add_test(NAME neuralfx.SceneScriptChecks.volcano COMMAND nvfx_scene_script --script ${CMAKE_CURRENT_SOURCE_DIR}/examples/scenes/volcano.nvfxs --check)
+    set_tests_properties(neuralfx.SceneScriptChecks.volcano PROPERTIES LABELS neuralfx)
+    # The crypt (docs/EFFECTS_AIR.md): candle, smokering and heavygas, all in NEURALFX_MODELS_AIR (outside git); its
+    # keyframes have the SHA-256 recorded in results/experiments/fx_air_frozen.csv.
+    set(NEURALFX_MODELS_AIR "${_nvfx_data}/fx_air/models/scene" CACHE PATH "candle.nvfx, smokering.nvfx and heavygas.nvfx")
+    add_test(NAME neuralfx.ScriptedCryptFrozen
+             COMMAND nvfx_scene_script --script ${CMAKE_CURRENT_SOURCE_DIR}/examples/scenes/crypt.nvfxs --models ${NEURALFX_MODELS_AIR}
+                     --keyframes ${CMAKE_CURRENT_BINARY_DIR}/crypt_script_keyframes --no-video --threads 2 --precision float --isa avx2
+                     --verify ${CMAKE_CURRENT_SOURCE_DIR}/results/experiments/fx_air_frozen.csv)
+    set_tests_properties(neuralfx.ScriptedCryptFrozen PROPERTIES LABELS "neuralfx;data" SKIP_RETURN_CODE 77 TIMEOUT 1200)
+    add_test(NAME neuralfx.SceneScriptChecks.crypt COMMAND nvfx_scene_script --script ${CMAKE_CURRENT_SOURCE_DIR}/examples/scenes/crypt.nvfxs --check)
+    set_tests_properties(neuralfx.SceneScriptChecks.crypt PROPERTIES LABELS neuralfx)
+    # The forest-edge town (docs/EFFECTS_FIRE2.md): crownfire, windowfire and dustexplosion, all in NEURALFX_MODELS_FIRE2
+    # (outside git); its keyframes have the SHA-256 recorded in results/experiments/fx_fire2_frozen.csv.
+    set(NEURALFX_MODELS_FIRE2 "${_nvfx_data}/fx_fire2/models/scene" CACHE PATH "crownfire.nvfx, windowfire.nvfx and dustexplosion.nvfx")
+    add_test(NAME neuralfx.ScriptedForestEdgeFrozen
+             COMMAND nvfx_scene_script --script ${CMAKE_CURRENT_SOURCE_DIR}/examples/scenes/forestedge.nvfxs --models ${NEURALFX_MODELS_FIRE2}
+                     --keyframes ${CMAKE_CURRENT_BINARY_DIR}/forestedge_script_keyframes --no-video --threads 2 --precision float --isa avx2
+                     --verify ${CMAKE_CURRENT_SOURCE_DIR}/results/experiments/fx_fire2_frozen.csv)
+    set_tests_properties(neuralfx.ScriptedForestEdgeFrozen PROPERTIES LABELS "neuralfx;data" SKIP_RETURN_CODE 77 TIMEOUT 1200)
+    add_test(NAME neuralfx.SceneScriptChecks.forestedge COMMAND nvfx_scene_script --script ${CMAKE_CURRENT_SOURCE_DIR}/examples/scenes/forestedge.nvfxs --check)
+    set_tests_properties(neuralfx.SceneScriptChecks.forestedge PROPERTIES LABELS neuralfx)
+    # The coast (docs/EFFECTS_ELEMENTS.md): geyser, haboob and seaspray, all in NEURALFX_MODELS_ELEMENTS (outside git),
+    # under the weather director; its keyframes have the SHA-256 recorded in results/experiments/fx_elements_frozen.csv.
+    set(NEURALFX_MODELS_ELEMENTS "${_nvfx_data}/fx_elements/models/scene" CACHE PATH "geyser.nvfx, haboob.nvfx and seaspray.nvfx")
+    add_test(NAME neuralfx.ScriptedCoastFrozen
+             COMMAND nvfx_scene_script --script ${CMAKE_CURRENT_SOURCE_DIR}/examples/scenes/coast.nvfxs --models ${NEURALFX_MODELS_ELEMENTS}
+                     --keyframes ${CMAKE_CURRENT_BINARY_DIR}/coast_script_keyframes --no-video --threads 2 --precision float --isa avx2
+                     --verify ${CMAKE_CURRENT_SOURCE_DIR}/results/experiments/fx_elements_frozen.csv)
+    set_tests_properties(neuralfx.ScriptedCoastFrozen PROPERTIES LABELS "neuralfx;data" SKIP_RETURN_CODE 77 TIMEOUT 1200)
+    add_test(NAME neuralfx.SceneScriptChecks.coast COMMAND nvfx_scene_script --script ${CMAKE_CURRENT_SOURCE_DIR}/examples/scenes/coast.nvfxs --check)
+    set_tests_properties(neuralfx.SceneScriptChecks.coast PROPERTIES LABELS neuralfx)
+    # The elements entries (library/elements.nvfxl) against their SHA-256 in results/library/frozen_elements.csv, float
+    # pinned to AVX2 as the other frozen keyframes; skipped without the three models in NEURALFX_MODELS_LIBRARY.
+    add_test(NAME neuralfx.LibraryElementsKeyframesFrozen
+             COMMAND nvfx_gallery --library ${CMAKE_CURRENT_SOURCE_DIR}/library --models ${NEURALFX_MODELS_LIBRARY}
+                     --only erupting_geyser,haboob,sea_spray
+                     --keyframes ${CMAKE_CURRENT_BINARY_DIR}/library_elements_keyframes --verify ${CMAKE_CURRENT_SOURCE_DIR}/results/library/frozen_elements.csv --threads 2
+                     --precision float --isa avx2)
+    set_tests_properties(neuralfx.LibraryElementsKeyframesFrozen PROPERTIES LABELS "neuralfx;data" SKIP_RETURN_CODE 77 TIMEOUT 1200)
+    # A day's weather (docs/WEATHER.md): the weather director over the library's cloud, fog, fire and smoke, all in
+    # NEURALFX_MODELS_LIBRARY (outside git); its keyframes have the SHA-256 recorded in results/experiments/weather_frozen.csv.
+    add_test(NAME neuralfx.ScriptedWeatherDayFrozen
+             COMMAND nvfx_scene_script --script ${CMAKE_CURRENT_SOURCE_DIR}/examples/scenes/weather_day.nvfxs --models ${NEURALFX_MODELS_LIBRARY}
+                     --keyframes ${CMAKE_CURRENT_BINARY_DIR}/weather_day_keyframes --no-video --threads 2 --precision float --isa avx2
+                     --verify ${CMAKE_CURRENT_SOURCE_DIR}/results/experiments/weather_frozen.csv)
+    set_tests_properties(neuralfx.ScriptedWeatherDayFrozen PROPERTIES LABELS "neuralfx;data" SKIP_RETURN_CODE 77 TIMEOUT 1800)
+    add_test(NAME neuralfx.SceneScriptChecks.weather_day COMMAND nvfx_scene_script --script ${CMAKE_CURRENT_SOURCE_DIR}/examples/scenes/weather_day.nvfxs --check)
+    set_tests_properties(neuralfx.SceneScriptChecks.weather_day PROPERTIES LABELS neuralfx)
     # Study K (docs/REPORT.md §13): the fireball's keyframes with its modules at int8 on the AVX-512 build (the build int8
     # takes where the CPU has VNNI; without VNNI it computes the same integer sums, so the same frames), against their
     # SHA-256 in results/experiments/k_int8_frozen.csv. Skipped without AVX-512 or without the study D effects.
@@ -576,11 +707,11 @@ if(NEURALFX_BUILD_TESTS)
              COMMAND nvfx_pack pack ${CMAKE_CURRENT_BINARY_DIR}/library.nvfxp --library ${CMAKE_CURRENT_SOURCE_DIR}/library --models ${NEURALFX_MODELS_LIBRARY}
                      --require-models --threads 2)
     set_tests_properties(neuralfx.PackFullLibrary PROPERTIES LABELS "neuralfx;data" SKIP_RETURN_CODE 77 TIMEOUT 600 FIXTURES_SETUP library_pack)
-    add_test(NAME neuralfx.PackFullLibraryVerifies COMMAND nvfx_pack verify ${CMAKE_CURRENT_BINARY_DIR}/library.nvfxp)
-    set_tests_properties(neuralfx.PackFullLibraryVerifies PROPERTIES LABELS "neuralfx;data" FIXTURES_REQUIRED library_pack)
+    add_test(NAME neuralfx.PackFullLibraryVerifies COMMAND nvfx_pack verify ${CMAKE_CURRENT_BINARY_DIR}/library.nvfxp --skip-missing)
+    set_tests_properties(neuralfx.PackFullLibraryVerifies PROPERTIES LABELS "neuralfx;data" SKIP_RETURN_CODE 77 FIXTURES_REQUIRED library_pack)
     add_test(NAME neuralfx.PackLibraryKeyframesFrozen
              COMMAND nvfx_gallery --pack ${CMAKE_CURRENT_BINARY_DIR}/library.nvfxp
-                     --only campfire,blue_gas_flame,grenade,steam_vent,portal,lightning_strike,ground_fog,dust_impact,flamethrower,plasma_orb,dust_devil,wall_of_flames,distant_mushroom,waterfall_drawn,garden_fountain,boulder_splash,rain_shaft_drawn,fountain,rain_shaft
+                     --only campfire,blue_gas_flame,grenade,steam_vent,portal,lightning_strike,ground_fog,dust_impact,flamethrower,plasma_orb,dust_devil,wall_of_flames,distant_mushroom,waterfall_drawn,garden_fountain,boulder_splash,rain_shaft_drawn,fountain,rain_shaft,lava_flow,volcano_eruption,avalanche
                      --keyframes ${CMAKE_CURRENT_BINARY_DIR}/library_pack_keyframes --verify ${CMAKE_CURRENT_SOURCE_DIR}/results/library/frozen.csv --threads 2
                      --precision float --isa avx2)
     set_tests_properties(neuralfx.PackLibraryKeyframesFrozen PROPERTIES LABELS "neuralfx;data" SKIP_RETURN_CODE 77 TIMEOUT 1200 FIXTURES_REQUIRED library_pack)

@@ -3,7 +3,8 @@
 // number of threads), the 3D rollout model (its format, its reference on any number of threads), the trainer (its
 // forward pass is the reference's; its gradients match finite differences through time, with the profile and activity
 // losses), and the volume C API (parity with the reference: exact at the baseline ISA, within float rounding with AVX2;
-// the same fields and pictures on any number of threads; shards; texel formats; errors). Study N2 (§14): ambient air at
+// the same fields and pictures on any number of threads; shards; texel formats; errors; its detail layer on vectors gives
+// the reference's fields to the bit on every ISA). Study N2 (§14): ambient air at
 // the open sides and top of the coarse advection (what flows in, the reference against the trainer, gradients through
 // it with inflow at every side and the top, study N's clamped files unchanged), controls that change during a run (the
 // simulator's, the runs' format, gradients with them) and the long training stage (resumes to the bit).
@@ -15,7 +16,10 @@
 
 #include <gtest/gtest.h>
 
+#include "rt_volume.hpp"
+
 #include <algorithm>
+#include <array>
 #include <bit>
 #include <cmath>
 #include <cstring>
@@ -278,12 +282,13 @@ std::vector<float> smooth_state(const r3::Hyper& h, float phase, std::uint64_t s
   return c;
 }
 
-r3::Model tiny_model(std::uint64_t seed = 3, int hidden = 8, r3::Edges edges = r3::Edges::ambient) {
+// dims: the coarse grid (x, y, z) and the fine cells per coarse cell
+r3::Model tiny_model(std::uint64_t seed = 3, int hidden = 8, r3::Edges edges = r3::Edges::ambient, std::array<int, 4> dims = {4, 6, 5, 2}) {
   r3::Hyper h;
-  h.rx = 4;
-  h.ry = 6;
-  h.rz = 5;
-  h.fine = 2;
+  h.rx = dims[0];
+  h.ry = dims[1];
+  h.rz = dims[2];
+  h.fine = dims[3];
   h.hidden = hidden;
   h.memory = 2;
   h.jacobi = 6;
@@ -897,6 +902,73 @@ TEST(VolumeApi, StepsAreAFunctionOfTime) {
   uint32_t features = 0;
   nvfx_version(&features);
   EXPECT_TRUE(features & NVFX_FEATURE_VOLUME);
+}
+
+// The volume runtime's detail layer on vectors (src/runtime/rt_detail3.hpp) gives rollout3d::detail_step's fields to the
+// bit, on every vector ISA the CPU has: through the warm-up and step by step, on 1 and 3 threads, with the swirl and the
+// breakup on or off, with either edge mode, on fine rows of whole vectors, of vectors and a remainder, and shorter than
+// a vector; from a state the reference made; and for two runs of different seeds stepped in turn through one kernel and
+// workspace (as a volume's crossfading shards: its noise caches are per seed).
+TEST(VolumeDetail, VectorsGiveTheReferenceToTheBit) {
+  struct Case {
+    std::array<int, 4> dims;
+    float swirl, contrast;
+    r3::Edges edges;
+  };
+  const Case cases[] = {{{4, 6, 5, 2}, 0.5f, 1.f, r3::Edges::ambient}, {{4, 6, 5, 4}, 0.5f, 1.f, r3::Edges::ambient},
+                        {{5, 6, 4, 4}, 1.5f, 0.5f, r3::Edges::clamp},  {{4, 6, 5, 4}, 0.f, 1.f, r3::Edges::ambient},
+                        {{4, 5, 4, 4}, 0.5f, 0.f, r3::Edges::ambient}};
+  const std::vector<float> c{0.6f, 0.4f, 0.7f};
+  const auto bits = [](const r3::State& s) {
+    std::vector<std::uint32_t> v;
+    for (const auto* f : {&s.fine_t, &s.fine_d, &s.coarse}) {
+      for (const float x : *f) v.push_back(std::bit_cast<std::uint32_t>(x));
+    }
+    return v;
+  };
+  int isas = 0;
+  for (const nvfx_isa isa : {NVFX_ISA_AVX2, NVFX_ISA_AVX512}) {
+    if (nvfx_set_isa(isa) != NVFX_OK) continue;  // not on this CPU
+    nvfx_set_isa(NVFX_ISA_AUTO);
+    ++isas;
+    for (const Case& k : cases) {
+      r3::Model m = tiny_model(3, 8, k.edges, k.dims);
+      m.detail.swirl = k.swirl;
+      m.detail.contrast = k.contrast;
+      for (const int threads : {1, 3}) {
+        nfx::Pool pool(threads);
+        nfx::Pool* p = threads > 1 ? &pool : nullptr;
+        r3::Workspace wa(m), wb(m);
+        const auto kernel = nfx::rt::make_volume_detail(m, wb, isa);
+        ASSERT_TRUE(kernel);
+        wb.detail = kernel.get();
+        r3::State a = r3::make_state(m), b = r3::make_state(m);
+        r3::start(m, 1, c, 42, a, wa, p);
+        r3::start(m, 1, c, 42, b, wb, p);
+        ASSERT_EQ(bits(a), bits(b)) << "after the warm-up, isa " << isa << " dims " << k.dims[0] << k.dims[3] << " threads " << threads;
+        for (int f = 0; f < 8; ++f) {
+          r3::step(m, a, c, 42, wa, p);
+          r3::step(m, b, c, 42, wb, p);
+          ASSERT_EQ(bits(a), bits(b)) << "frame " << f << ", isa " << isa << " dims " << k.dims[0] << k.dims[3] << " threads " << threads;
+        }
+        // from the reference's state, and two seeds in turn
+        r3::State a2 = r3::make_state(m), b2 = r3::make_state(m);
+        r3::start(m, 0, c, 43, a2, wa, p);
+        b = a;
+        b2 = a2;
+        for (int f = 0; f < 4; ++f) {
+          r3::step(m, a, c, 42, wa, p);
+          r3::step(m, a2, c, 43, wa, p);
+          r3::step(m, b, c, 42, wb, p);
+          r3::step(m, b2, c, 43, wb, p);
+          ASSERT_EQ(bits(a), bits(b)) << "seed 42, frame " << f;
+          ASSERT_EQ(bits(a2), bits(b2)) << "seed 43, frame " << f;
+        }
+        EXPECT_NE(bits(a), bits(a2));
+      }
+    }
+  }
+  if (isas == 0) GTEST_SKIP() << "no AVX2";
 }
 
 }  // namespace

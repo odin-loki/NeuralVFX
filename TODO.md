@@ -1,7 +1,9 @@
 # To do: every effect in 3D — a small demo here first, then big on a PC
 
 **Status:** stage 1 is done (study N, `docs/STUDY_3D.md`, and its follow-up N2, §14); stage 2 is planned, not started.
-Work here is paused (15 October 2026): four branches wait to be finished and merged ("Here, until the PC").
+Since 15 October 2026, here: round 9, studies O and P, float on AVX-512, the faster detail layer, the 2D weather
+director, the FUSE sample and round 10's fire and elements are done and merged; study R (a validated 3D smoke) is
+under way ("Here, until the PC").
 
 - **Stage 1, here and now (study N): done.** A small 3D demo in this container ([docs/STUDY_3D.md](docs/STUDY_3D.md),
   REPORT §15). What it built:
@@ -52,85 +54,73 @@ First we demo, then we go big.
 
 Work that runs in this container meanwhile, in 2D and in small 3D, measured as every study is.
 
-**Paused (15 October 2026), each on its own branch, not merged into main.** Each branch's doc opens with a "Status:
-paused" note: what is done, where its data is under `/root/nvfx-data`, and the exact commands to resume. To finish one:
-merge main into it, finish its list, run the full ctest, `nvfx_alloc_test`, `nvfx_gallery --check` and the Godot test,
-then merge it into main.
-- **Round 9, earth** (`effects-earth`, docs/EFFECTS_EARTH.md): lava, a volcanic eruption and a powder-snow avalanche.
-  - Done: the three presets with sim tests (the 21 earlier effects' clips unchanged); the test design committed first.
-  - Lava is trained and tested once. It passes: tracking at 1 s is +1.09 dB [+0.70, +1.43] over the coarse simulation
-    with detail; its endless mean picture is closer than the nearest flipbook's and its motion ties it; its detail is
-    worse than the flipbook's.
-  - Left: the eruption's model (its training was running at the pause), the avalanche's, their tests, timing, library
-    entries, the volcano scene, videos and REPORT §6.16.
-- **Round 9, air** (`effects-air`, docs/EFFECTS_AIR.md): a candle flame, smoke rings and heavy gas along the ground.
-  - Done: the three presets with sim and recipe tests (earlier clips unchanged); the rule committed before training.
-  - The candle's model was in its last training stage at the pause; a follow-on job set to test it once and train the
-    other two may have run on. Check `/root/nvfx-data/fx_air/jobs/state` and the logs before resuming.
-  - Left: the smoke ring's and heavy gas's models, all tests, timing, the library file, the crypt scene, videos and
-    REPORT §6.17.
-- **Study O, the most visible flaws** (`study-fix`, REPORT §16):
-  - Done, by eye, with no model change:
-    - the waterfall's and rain shaft's banding (the detail layer locking once a frame; effects take `passes N`, and
-      the library and the falls scene use 2);
-    - launch's square block (the lift-off scene uses a three-tile domain);
-    - the thruster's curling exhaust (a `cold` field on its tail).
-  - The mushroom and splash fixes: the rule is committed (§16.3.1) and the candidates are frozen. On validation the
-    mushroom gained +1.12 dB [0.79, 1.45] in the mean picture and the splash +0.62 dB [0.40, 0.86].
-  - **The held-out test has not run; its seeds (3,200,000 to 3,299,999) are unspent.** No model has been replaced.
-- **Study P, cheaper big effects** (`study-upscale`, docs/STUDY_P.md):
-  - The idea: draw a large effect at half size, then upscale it 2x with a learned net and seeded micro-detail.
-  - Found: the render size enters only the detail layer and the renderer, so a half-size instance shares the native
-    one's motion bit for bit.
-  - Training tiles show the learned 2x only slightly better than bilinear against native: +0.08 dB shared, up to
-    +0.55 dB per effect.
-  - Built: an opt-in path (`nvfx_effect_attach_upscaler`, `nvfx_instance_set_upscale`, NVFX_VERSION 7, no allocation
-    per frame), costing 0.45 to 0.56 of native at 512 px (busy machine, provisional).
-  - The rule's form is committed; its margins wait on the null probe. **The test has not run; seeds 3.8 to 3.9
-    million are unspent.**
-- **Float on AVX-512 (done).** Float rollouts take the AVX-512 build by default where the CPU has it: 0.80 of AVX2's
-  time on a quiet machine (`results/quiet`, round 6). Its float frames turned out bit-identical to AVX2's for all 24
-  models with this compiler; the frozen float tests are pinned to AVX2 anyway (REPORT §13.10).
+**Done since 15 October 2026** (each merged into main after the full ctest, `nvfx_alloc_test`, `nvfx_gallery --check`
+and the Godot test; details in its doc and REPORT section):
+- **Round 9, earth** (docs/EFFECTS_EARTH.md, REPORT §6.16): lava, a volcanic eruption and a powder-snow avalanche, each
+  tested once. Lava works (tracking at 1 s +1.09 dB [+0.70, +1.43] over the coarse simulation with detail); the
+  eruption works narrowly (+0.50 dB [+0.06, +0.96]); the avalanche is weak (-2.23 dB [-4.42, -0.07]). Ten library
+  entries, the volcano scene, six videos.
+- **Round 9, air** (docs/EFFECTS_AIR.md, REPORT §6.17): a candle flame, smoke rings and heavy gas, each tested once. The
+  candle (+2.90 dB [+2.35, +3.41]) and the smoke ring (+7.51 dB [+6.62, +8.44]) work; heavy gas falls short (its mean
+  picture ties the nearest flipbook's). Twelve library entries, the crypt scene, six videos.
+- **Study O, the most visible flaws** (REPORT §16): the waterfall's and rain shaft's banding, launch's square block and
+  the thruster's curling exhaust fixed by eye; the mushroom (+1.18 dB [0.91, 1.45] in the mean picture) and the splash
+  (+0.40 dB [0.21, 0.60]) replaced by a held-out test.
+- **Study P, cheaper big effects** (docs/STUDY_P.md, REPORT §17): the learned 2x upscale did not pass its rule (it beat
+  bilinear on none of six effects); drawing at half size with a bilinear 2x costs 0.36 to 0.43 of native and stays
+  within native's margins against the simulator for all six (busy machine). Shipped as an opt-in, the learned mode
+  marked experimental (NVFX_VERSION 7).
+- **Float on AVX-512** (REPORT §13.10): float rollouts take the AVX-512 build where the CPU has it, 0.80 of AVX2's time;
+  frames bit-identical to AVX2's with this compiler.
+- **The detail layer's cost** (REPORT §19, `results/detail/`): the same frames to the bit on every ISA; in 3D the detail
+  layer takes 0.16 to 0.18 of its time and a step 0.31 to 0.32; in 2D the detail stage 0.87 to 0.90 and a frame 0.96 to
+  0.98 (busy machine). A semi-Lagrangian option (0.75) changes every frame and was not shipped.
+- **The 2D weather director** (docs/WEATHER.md, REPORT §18): seven regimes, ordered transitions, seeded gusts, rain cells
+  and lightning, rain and snow by Marshall-Palmer, Atlas and Koschmieder, a 40 s day scene and its video; engines drive
+  it through the scene inputs. Weak: no sun or wet ground, clouds as puffs rather than a deck, one place in 2D.
+- **For FUSE** (docs/FUSE.md, `engines/fuse`): the interface FUSE implements, an adapter (pack, effect manager on FUSE's
+  jobs, a scripted scene, library entries, the 3D fire), a headless demo with its test and a video.
+- **CI:** the g++ job's one failure since the packs came in (the pack verify test without the models) fixed.
+
+**Under way:**
+- **Round 10, fire** (`effects-fire2`, docs/EFFECTS_FIRE2.md, REPORT §6.18; seeds 26.0 to 26.9 million): a forest crown
+  fire (#6), fire venting from a window (#8) and a dust explosion (#31). **Finished and merged into main** (21 October
+  2026): each tested once, all three work by the rule (tracking at 1 s over the coarse
+  simulation with detail: crown fire +2.60 dB [+2.16, +3.04], window fire +3.31 dB [+2.91, +3.73], dust explosion
+  +8.44 dB [+7.88, +9.04]; endless, the mean picture closer than the nearest flipbook's, motion no worse). Ten library
+  entries, the forest-edge town scene, six videos. Still weak: the two fires' detail streaks (spectrum six times the
+  flipbook's); the dust explosion's renderer fringes its unlit cloud and draws its pall faint, and its start follows the
+  ignition control only roughly.
+- **Round 10, elements** (`effects-elements`, docs/EFFECTS_ELEMENTS.md, REPORT §6.19; seeds 27.0 to 27.9 million): a
+  geyser (#88), a haboob dust wall (#70, #71) and sea spray off breaking waves (#77). **Finished and merged into main**
+  (21 October 2026): each tested once. Sea spray works (tracking at 1 s over the coarse simulation with detail +1.92 dB
+  [+1.01, +2.83]; endless mean picture +5.88 dB [+4.77, +7.11] closer than the nearest flipbook's, motion tied); the
+  haboob falls short (+1.06 dB [+0.25, +1.87] at 1 s, its mean picture tied with the flipbook's; the simulator's front
+  runs at Fr = 1.15 on its head, Huppert and Simpson's 1.19); the geyser is weak (+1.10 dB [-0.33, +2.57] at 1 s, a
+  tie). Ten library entries, the coast scene under the weather director, six videos. Still weak: the geyser never
+  erupts at low intensity and within a shard follows its start point more than its intensity; the haboob's first
+  frames (its renderer) and a weak current that runs 25% fast; sea spray's detail (tufts, not thin plumes). To try: a
+  field-shader look that draws heat as white vapour (steam and fine spray are heat, which a look draws as light).
 
 **Next:**
-- **The detail layer's cost.** It is three quarters of a 3D step and much of a 2D frame at 256 px. Try SIMD and
-  skipping empty rows and bricks.
-- **More 2D effects**, from the catalogue rows the 2D solver can carry:
-  - fire and smoke: a forest crown fire (#6), fire out of a window (#8), coloured smoke grenades (#18);
-  - blasts and engines: a dust explosion (#31), contrails (#36), helicopter downwash (#37);
-  - weather: blizzard and drifting snow (#54, #75), steam fog (#61), a haboob or sandstorm wall (#70, #71), sea spray
-    (#77);
-  - water and volcanic: a geyser (#88), a pyroclastic flow (#110).
-- **A weather director in 2D**, ahead of the 3D weather system:
-  - regimes: clear, overcast, rain, storm, snow, fog and dust storm;
-  - a small weather state drives the layers that exist:
-    - the state: cloud cover, rain and snow rates, mean wind and gustiness, visibility, temperature, lightning rate
-      and dust load;
-    - the layers: rain, snow and hail emitters, the fog and cloud models, the storm entries, the wind every module
-      feels, the sky's light;
-  - moving between regimes deterministically from a seed and a target, in the order real weather keeps:
-    - clouds build before rain;
-    - the gust front arrives before the downpour;
-    - lightning comes with the heaviest rain;
-  - weather noise: gusts and rain cells as seeded random processes with real time scales;
-  - established relations instead of guesses:
-    - fog visibility from Koschmieder (3.912 / extinction);
-    - rain drop sizes from Marshall-Palmer (N0 = 8000 m^-3 mm^-1, slope 4.1 R^-0.21 mm^-1);
-    - drop fall speeds from Atlas and colleagues (9.65 - 10.3 exp(-0.6 D) m/s), so streak lengths follow the rate;
-    - wind from the Beaufort scale's descriptions (what leaves, smoke and dust do at each force);
-  - driven from a script or, in an engine, through the scene inputs that exist (no new C calls);
-  - checked by tests:
-    - determinism;
-    - no jumps in the state;
-    - each regime reaching its targets;
-    - the relations holding;
-    - the scene's random numbers kept.
-  - shown in a 40 s scene that clears, clouds over, rains, storms and clears again.
+- **Study Q, round 9's weak spots**, as study O did for earlier ones: the avalanche's cloud (it billows less than the
+  simulator's), heavy gas's streaking fronts and tied mean picture, the candle's ragged flame up close, the smoke
+  ring's fine detail and first frame, the mushroom's cap after 3 to 4 s.
+- **Half size where it pays.** Study P found that drawing a large effect at half size with a bilinear 2x holds up
+  against the simulator at about 0.4 of the cost. Let the effect manager choose it by an effect's size on screen,
+  and measure it in the library's scenes.
+- **More 2D effects**, from the catalogue rows the 2D solver can carry: coloured smoke grenades (#18), contrails (#36),
+  helicopter downwash (#37), blizzard and drifting snow (#54, #75), steam fog (#61), a learned pyroclastic flow (#110;
+  the library's entry today is built from existing models).
+- **The weather director, next:** a cloud deck rather than puffs, the sun and its shafts, wet ground and puddles, a storm
+  that moves across the scene, trees bending by the Beaufort force.
 - **Small 3D:**
   - **finer coarse 3D (study hres):** fire (N2 C4 lineage) and smoke (N2 smoke2 lineage); [docs/STUDY_3D_HRES.md](docs/STUDY_3D_HRES.md), `tools/study_3d/hres_fire.sh` and `hres_smoke.sh`; `nvfx_3d --study hres` (32 x 48 x 32, fine 2);
   - a second 3D effect: smoke, validated this time, with bounds calibrated on several teacher runs;
-  - 3D fire and smoke coupled.
-- **For FUSE:** a sample integration in C++, with the effect pack and the volume API side by side.
+  - 3D fire and smoke coupled;
+  - a job hook in the volume API, so an engine's job system can run a volume's step (FUSE.md §9).
+- **Quiet re-timing, round 7:** the new effects, the faster detail layer, half size and the FUSE demo on a quiet
+  machine, as `results/quiet` did before (today's costs come from a machine at a load of 6 to 21).
 
 ## Contents
 
@@ -506,7 +496,8 @@ Each regime is a set of soundings and forcings whose simulated runs are its trai
 
 - **Transitions.** An engine asks for a regime and a time ("a storm in ten minutes", "clearing by dawn"). The regional
   model's controls move smoothly from one forcing to the next, deterministically from the world's seed. Time of day
-  and season are controls too.
+  and season are controls too. The 2D weather director ([docs/WEATHER.md](docs/WEATHER.md)) does this today for one
+  place, with targets chosen rather than simulated; the regional model would supply them.
 - **Couplings with the local effects** (several exist in 2D today):
   - rain wets surfaces, thins smoke and puts out fires;
   - wind bends flames and smoke, carries embers ahead of a wildfire, builds waves and drives drifting snow;
@@ -714,7 +705,11 @@ Ranges already used elsewhere:
 - 5.3 to 5.9 million: studies G, K and L;
 - 3.0 to 3.5 million: study O; 3.6 to 3.9 million: study P;
 - 6.0 to 6.8 million: round 9's effects (earth 6.0 to 6.4, air 6.4 to 6.8); 6.9 million: an earlier smoke test;
+- 26 million: round 10's fire effects (the test 26,000,000 to 26,150,999; the library's and the scene's module seeds,
+  which a script takes only up to 2^24, are 2,630,001 and up);
 - 7 million: water;
+- 27 million: round 10's elements (27,000,000 to 27,999,999; the library's and the scene's module seeds 2,700,001 to
+  2,710,031, as a script takes seeds up to 2^24);
 - 8 million: studies M, M2 and M3.
 
 ## What goes in git

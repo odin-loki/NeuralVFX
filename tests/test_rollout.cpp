@@ -162,6 +162,140 @@ TEST(Rollout, FlowEffectsKeepFineFieldsAsSmokeDoes) {
   EXPECT_EQ(recipe_model(recipe_for(sim::Effect::ink)).control_names[1], "current");
 }
 
+// Lava and the eruption linger (a crust that crawls, an umbrella of ash), so they keep fine fields with their start
+// points as smoke does; the avalanche plays once and takes the explosion's branch at its own length
+// (docs/EFFECTS_EARTH.md).
+TEST(Rollout, EarthEffectsKeepFineFieldsAndTheAvalanchePlaysOnce) {
+  const SimRecipe fire = recipe_for(sim::Effect::fire), smoke = recipe_for(sim::Effect::smoke), ex = recipe_for(sim::Effect::explosion);
+  for (const sim::Effect e : {sim::Effect::lava, sim::Effect::eruption}) {
+    const SimRecipe r = recipe_for(e);
+    EXPECT_EQ(r.start_fine, smoke.start_fine) << sim::effect_name(e);
+    EXPECT_EQ(r.runs, fire.runs);
+    EXPECT_EQ(r.frames, fire.frames);
+    EXPECT_EQ(r.start_frame, fire.start_frame);
+    EXPECT_EQ(r.starts, fire.starts);
+    EXPECT_EQ(r.stepper.activity_stage, fire.stepper.activity_stage);
+    const Model m = recipe_model(r);
+    EXPECT_TRUE(m.loop);
+    EXPECT_EQ(m.h.n_age, 0);
+    EXPECT_EQ(m.noise.flicker_rate, sim::flicker_rate(e));
+  }
+  const SimRecipe av = recipe_for(sim::Effect::avalanche);
+  EXPECT_EQ(av.runs, ex.runs);
+  EXPECT_EQ(av.frames, sim::one_shot_frames(sim::Effect::avalanche));
+  EXPECT_EQ(av.frames, 150);
+  EXPECT_EQ(av.start_frame, 0);
+  EXPECT_EQ(av.start_fine, ex.start_fine);
+  EXPECT_EQ(av.starts, ex.starts);
+  EXPECT_EQ(av.stepper.burn_max, ex.stepper.burn_max);
+  const Model m = recipe_model(av);
+  EXPECT_FALSE(m.loop);
+  EXPECT_EQ(m.h.frames, 150);
+  EXPECT_EQ(m.h.n_age, 2);
+  EXPECT_EQ(recipe_model(recipe_for(sim::Effect::lava)).control_names[1], "flow");
+  EXPECT_EQ(m.control_names[1], "direction");
+  EXPECT_EQ(recipe_model(recipe_for(sim::Effect::eruption)).control_names[1], "wind");
+}
+
+// The air effects (docs/EFFECTS_AIR.md): the candle takes fire's recipe as it is, heavy gas keeps fine fields with its
+// start points as fog does, and the smoke ring takes the one-shot branch at its own length (4 s).
+TEST(Rollout, AirEffectsTakeTheirRecipes) {
+  const SimRecipe fire = recipe_for(sim::Effect::fire), fog = recipe_for(sim::Effect::fog), ex = recipe_for(sim::Effect::explosion);
+  const SimRecipe candle = recipe_for(sim::Effect::candle), gas = recipe_for(sim::Effect::heavygas), ring = recipe_for(sim::Effect::smokering);
+  for (const SimRecipe* r : {&candle, &gas}) {
+    EXPECT_EQ(r->runs, fire.runs);
+    EXPECT_EQ(r->frames, fire.frames);
+    EXPECT_EQ(r->start_frame, fire.start_frame);
+    EXPECT_EQ(r->starts, fire.starts);
+    EXPECT_EQ(r->stepper.activity_stage, fire.stepper.activity_stage);
+    EXPECT_TRUE(recipe_model(*r).loop);
+    EXPECT_EQ(recipe_model(*r).h.n_age, 0);
+  }
+  EXPECT_EQ(candle.start_fine, fire.start_fine);
+  EXPECT_EQ(gas.start_fine, fog.start_fine);
+  EXPECT_EQ(ring.runs, ex.runs);
+  EXPECT_EQ(ring.frames, 120);
+  EXPECT_EQ(ring.frames, sim::one_shot_frames(sim::Effect::smokering));
+  EXPECT_EQ(ring.start_frame, 0);
+  EXPECT_EQ(ring.start_fine, ex.start_fine);
+  EXPECT_EQ(ring.starts, ex.starts);
+  EXPECT_EQ(ring.stepper.burn_max, ex.stepper.burn_max);
+  const Model rm = recipe_model(ring);
+  EXPECT_FALSE(rm.loop);
+  EXPECT_EQ(rm.h.frames, 120);
+  EXPECT_EQ(rm.h.n_age, 2);
+  EXPECT_EQ(recipe_model(candle).control_names[1], "draught");
+  EXPECT_EQ(recipe_model(gas).control_names[1], "flow");
+  EXPECT_EQ(rm.control_names[1], "wind");
+  EXPECT_EQ(recipe_model(candle).noise.flicker_rate, sim::flicker_rate(sim::Effect::candle));
+}
+
+// The fire effects of round 10 (docs/EFFECTS_FIRE2.md): the crown fire and the window fire keep fine fields with their
+// start points (their smoke lingers, as smoke's does), and the dust explosion takes the one-shot branch at its own length
+// (4 s).
+TEST(Rollout, Fire2EffectsTakeTheirRecipes) {
+  const SimRecipe fire = recipe_for(sim::Effect::fire), smoke = recipe_for(sim::Effect::smoke), ex = recipe_for(sim::Effect::explosion);
+  const SimRecipe crown = recipe_for(sim::Effect::crownfire), window = recipe_for(sim::Effect::windowfire);
+  const SimRecipe burst = recipe_for(sim::Effect::dustexplosion);
+  for (const SimRecipe* r : {&crown, &window}) {
+    EXPECT_EQ(r->runs, fire.runs);
+    EXPECT_EQ(r->frames, fire.frames);
+    EXPECT_EQ(r->start_frame, fire.start_frame);
+    EXPECT_EQ(r->starts, fire.starts);
+    EXPECT_EQ(r->start_fine, smoke.start_fine);
+    EXPECT_EQ(r->stepper.activity_stage, fire.stepper.activity_stage);
+    EXPECT_TRUE(recipe_model(*r).loop);
+    EXPECT_EQ(recipe_model(*r).h.n_age, 0);
+    EXPECT_EQ(recipe_model(*r).control_names[1], "wind");
+  }
+  EXPECT_EQ(burst.runs, ex.runs);
+  EXPECT_EQ(burst.frames, 120);
+  EXPECT_EQ(burst.frames, sim::one_shot_frames(sim::Effect::dustexplosion));
+  EXPECT_EQ(burst.start_frame, 0);
+  EXPECT_EQ(burst.start_fine, ex.start_fine);
+  EXPECT_EQ(burst.starts, ex.starts);
+  EXPECT_EQ(burst.stepper.burn_max, ex.stepper.burn_max);
+  const Model bm = recipe_model(burst);
+  EXPECT_FALSE(bm.loop);
+  EXPECT_EQ(bm.h.frames, 120);
+  EXPECT_EQ(bm.h.n_age, 2);
+  EXPECT_EQ(bm.control_names[1], "ignition");
+  EXPECT_EQ(recipe_model(crown).noise.flicker_rate, sim::flicker_rate(sim::Effect::crownfire));
+  EXPECT_EQ(bm.noise.flicker_rate, sim::flicker_rate(sim::Effect::dustexplosion));
+}
+
+// The elements (docs/EFFECTS_ELEMENTS.md): the geyser and sea spray keep fine fields with their start points, as smoke
+// does; the haboob takes the one-shot branch at its own length (5 s).
+TEST(Rollout, ElementsEffectsTakeTheirRecipes) {
+  const SimRecipe fire = recipe_for(sim::Effect::fire), smoke = recipe_for(sim::Effect::smoke), ex = recipe_for(sim::Effect::explosion);
+  const SimRecipe geyser = recipe_for(sim::Effect::geyser), spray = recipe_for(sim::Effect::seaspray), haboob = recipe_for(sim::Effect::haboob);
+  for (const SimRecipe* r : {&geyser, &spray}) {
+    EXPECT_EQ(r->runs, fire.runs);
+    EXPECT_EQ(r->frames, fire.frames);
+    EXPECT_EQ(r->start_frame, fire.start_frame);
+    EXPECT_EQ(r->starts, fire.starts);
+    EXPECT_EQ(r->start_fine, smoke.start_fine);
+    EXPECT_EQ(r->stepper.activity_stage, fire.stepper.activity_stage);
+    EXPECT_TRUE(recipe_model(*r).loop);
+    EXPECT_EQ(recipe_model(*r).h.n_age, 0);
+  }
+  EXPECT_EQ(haboob.runs, ex.runs);
+  EXPECT_EQ(haboob.frames, 150);
+  EXPECT_EQ(haboob.frames, sim::one_shot_frames(sim::Effect::haboob));
+  EXPECT_EQ(haboob.start_frame, 0);
+  EXPECT_EQ(haboob.start_fine, ex.start_fine);
+  EXPECT_EQ(haboob.starts, ex.starts);
+  EXPECT_EQ(haboob.stepper.burn_max, ex.stepper.burn_max);
+  const Model hm = recipe_model(haboob);
+  EXPECT_FALSE(hm.loop);
+  EXPECT_EQ(hm.h.frames, 150);
+  EXPECT_EQ(hm.h.n_age, 2);
+  EXPECT_EQ(recipe_model(geyser).control_names[1], "wind");
+  EXPECT_EQ(hm.control_names[1], "height");
+  EXPECT_EQ(recipe_model(spray).control_names[1], "gale");
+  EXPECT_EQ(recipe_model(geyser).noise.flicker_rate, sim::flicker_rate(sim::Effect::geyser));
+}
+
 TEST(Rollout, CoarseFromSimAveragesBlocks) {
   sim::State st;
   st.n = 16;

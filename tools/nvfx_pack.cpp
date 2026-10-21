@@ -662,7 +662,7 @@ int h3(const tools::Args& a) {
 
 int main(int argc, char** argv) try {
   const tools::Args a(argc, argv, {"help", "unpack", "study", "tables", "h3", "light", "fast", "lz", "seekable", "flipbooks-only", "manifest", "all-models",
-                                   "require-models", "calibrate"});
+                                   "require-models", "calibrate", "skip-missing"});
   const auto& pos = a.positional();
   if (!pos.empty() && tools::is_pack_mode(pos[0])) return tools::pack_mode(a);
   if (a.flag("help") || (pos.empty() && !a.has("report") && !a.flag("study") && !a.flag("tables"))) {
@@ -670,7 +670,7 @@ int main(int argc, char** argv) try {
                  "--study [--data DIR] [--scores CSV] [--out DIR] [--threads N] [--flipbooks-only] | --tables [--scores CSV] [--out DIR] | "
                  "--h3 [--reps N] [--segment N] [--out DIR] [--csv NAME] FILES_OR_DIRS | "
                  "pack OUT.nvfxp --library DIR [--models DIR] [--add FILES] [--licence FILES] [--costs CSV | --calibrate] [--coder fast] | list PACK [--manifest] | "
-                 "verify PACK | extract PACK DIR | measure --library DIR --models DIR [--reps 7] [--threads 3] [--out results/pack]");
+                 "verify PACK [--skip-missing] | extract PACK DIR | measure --library DIR --models DIR [--reps 7] [--threads 3] [--out results/pack]");
     return 0;
   }
   if (a.flag("h3")) {
