@@ -7,18 +7,24 @@ under a rule committed before validation (§2 onwards).
 
 ## 0. Where the study stands (a handoff, kept current)
 
-As of 21 October 2026, 10:00 UTC:
-- **Done:** the teacher fixed and measured (§1; the turbulence rows still running); the learned smoke's rule committed
-  (§2, commit f269659) and its edge bounds calibrated and committed before validation (3c91ff2); the 48 training runs;
-  the validation's and most of the test's teacher simulations; the plume video (`videos/3d_plume_theory.mp4`).
+As of 21 October 2026, 11:25 UTC:
+- **Done:** the teacher fixed and measured (§1, every row); the learned smoke's rule committed (§2, commit f269659) and
+  its edge bounds calibrated and committed before validation (3c91ff2); the 48 training runs; the validation's and the
+  test's teacher simulations (the last of the test's floor runs finishing); the plume video
+  (`videos/3d_plume_theory.mp4`); the buoyancy budget's code (cb525ae: `plume` records what leaves through the sides and
+  what the box stores, `plumefit --budget`).
 - **Running** (detached, resumable; scripts in `$NEURALVFX_DATA/r_smoke3d/jobs/`, logs in `.../logs/`): `train.sh`
-  (stage 1 of 4; it writes `models/C2..C4.nvfx3` at the end), `val_staged.sh` (each candidate's edge check, tracking
-  and plays as its snapshot appears, the coarse simulation and holding with C2), `sims.sh` (the test's real runs and
-  floor), `plume.sh` (turbulence 0 and 1).
+  (stage 2 of 4 at 11:25; it writes `models/C4.nvfx3` at the end, about 14:30 to 15:30), `val_staged.sh` (each
+  candidate's finish, edge check, tracking and plays as its snapshot appears; the coarse simulation and holding with
+  C2), `plume_budget.sh` (§1.4's open check: v_t100b and v_i50b, the same seeds as v_t100 and four of v_i50's; then
+  `nvfx_3d plumefit --study r --configs v_t100b,v_i50b --budget v_t100b,v_i50b --fit-lo 24 --fit-hi 92 --out
+  $D/scratch/side` and the result into §1.4).
 - **Next, in order:** when `job_val.log` says VAL_DONE: `jobs/val_report.sh` (results/3d/r: edge check, comparisons,
   the choice); `cp models/<chosen>.nvfx3 models/chosen.nvfx3`; `nvfx_3d freeze --model .../chosen.nvfx3 --frozen
   results/3d/r/frozen.csv`; commit and push; then `jobs/test.sh` (once) and `jobs/test_report.sh`; then the orbit and
-  coupled videos (§5), docs (§3 to §6, REPORT §20, TODO), merge origin/main, the full checks, push.
+  coupled videos (§5), docs (§3 to §6, REPORT §20, TODO), merge origin/main (373829d at 11:15: 11 conflict hunks in
+  `tools/nvfx_3d.cpp`, where study hres extends the same switches as study R; keep both), the models/ entry if it
+  ships, the full checks, push.
 
 ## 1. The teacher against plume physics
 
