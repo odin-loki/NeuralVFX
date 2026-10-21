@@ -22,9 +22,11 @@ namespace nfx::sim {
 // jet, orb and vortex (docs/EFFECTS_ENERGY.md) and fog, dust and cloud (docs/EFFECTS_ATMOSPHERE.md) came after them,
 // the same way, then wildfire, coals and mushroom (docs/EFFECTS_BLAZE.md), launch, puffs and ink
 // (docs/EFFECTS_FLOW.md), waterfall, fountain, splash and rainshaft (docs/EFFECTS_WATER.md), lava, eruption and avalanche
-// (docs/EFFECTS_EARTH.md), and candle, smokering and heavygas (docs/EFFECTS_AIR.md).
+// (docs/EFFECTS_EARTH.md), candle, smokering and heavygas (docs/EFFECTS_AIR.md), and crownfire, windowfire and
+// dustexplosion (docs/EFFECTS_FIRE2.md).
 enum class Effect { fire, smoke, explosion, steam, magic, jet, orb, vortex, fog, dust, cloud, wildfire, coals, mushroom, launch, puffs, ink,
-                    waterfall, fountain, splash, rainshaft, lava, eruption, avalanche, candle, smokering, heavygas };
+                    waterfall, fountain, splash, rainshaft, lava, eruption, avalanche, candle, smokering, heavygas,
+                    crownfire, windowfire, dustexplosion };
 inline constexpr std::array kEffects{Effect::fire, Effect::smoke, Effect::explosion};  // the studies' effects
 inline constexpr std::array kNewEffects{Effect::steam, Effect::magic, Effect::jet, Effect::orb, Effect::vortex,  // added since
                                         Effect::fog,   Effect::dust,  Effect::cloud,
@@ -32,7 +34,8 @@ inline constexpr std::array kNewEffects{Effect::steam, Effect::magic, Effect::je
                                         Effect::launch, Effect::puffs, Effect::ink,
                                         Effect::waterfall, Effect::fountain, Effect::splash, Effect::rainshaft,
                                         Effect::lava, Effect::eruption, Effect::avalanche,
-                                        Effect::candle, Effect::smokering, Effect::heavygas};
+                                        Effect::candle, Effect::smokering, Effect::heavygas,
+                                        Effect::crownfire, Effect::windowfire, Effect::dustexplosion};
 inline constexpr std::array kAllEffects{Effect::fire, Effect::smoke, Effect::explosion, Effect::steam, Effect::magic,
                                         Effect::jet,  Effect::orb,   Effect::vortex,    Effect::fog,   Effect::dust,
                                         Effect::cloud,
@@ -40,14 +43,15 @@ inline constexpr std::array kAllEffects{Effect::fire, Effect::smoke, Effect::exp
                                         Effect::launch, Effect::puffs, Effect::ink,
                                         Effect::waterfall, Effect::fountain, Effect::splash, Effect::rainshaft,
                                         Effect::lava, Effect::eruption, Effect::avalanche,
-                                        Effect::candle, Effect::smokering, Effect::heavygas};
+                                        Effect::candle, Effect::smokering, Effect::heavygas,
+                                        Effect::crownfire, Effect::windowfire, Effect::dustexplosion};
 
 std::string_view effect_name(Effect e);
 bool parse_effect(std::string_view text, Effect& out);  // any effect of kAllEffects
-bool effect_loops(Effect e);  // an explosion, dust, the mushroom, a splash, an avalanche and a smoke ring play once; the others loop
+bool effect_loops(Effect e);  // an explosion, dust, the mushroom, a splash, an avalanche, a smoke ring and a dust explosion play once; the others loop
 // How many frames (at 30 per second) an effect that plays once lasts: 90 (3 s) for the explosion, dust and a splash, 150 (5 s) for
 // the mushroom, whose cap needs that long to rise, roll over and darken, and for the avalanche (docs/EFFECTS_EARTH.md), 120 (4 s)
-// for a smoke ring (docs/EFFECTS_AIR.md); 0 for an effect that loops.
+// for a smoke ring (docs/EFFECTS_AIR.md) and a dust explosion (docs/EFFECTS_FIRE2.md); 0 for an effect that loops.
 int one_shot_frames(Effect e);
 
 // The learned controls, all normalised to [0, 1].
@@ -55,7 +59,8 @@ inline constexpr int kControls = 3;
 inline constexpr std::array<std::string_view, kControls> kControlNames{"intensity", "wind", "turbulence"};
 // The names an effect gives its controls: kControlNames, except that magic's second control is its spin (and the
 // jet's its aim, the orb's its pulse, the vortex's its sway, puffs' their rate, ink's its current, the fountain's its aim,
-// lava's its flow, the avalanche's its direction, the candle's its draught and heavy gas's its flow).
+// lava's its flow, the avalanche's its direction, the candle's its draught and heavy gas's its flow, a dust explosion's
+// where it is ignited).
 std::array<std::string_view, kControls> control_names(Effect e);
 // How fast the source flicker changes (its time axis per second: source_flicker, rollout::NoiseSpec::flicker_rate).
 float flicker_rate(Effect e);
@@ -68,7 +73,8 @@ struct Params {
                             // puffs: rate, slow to fast; ink: current, full left to full right;
                             // fountain: aim, leaning left to right; lava: flow, downhill to the left, level, to the
                             // right; avalanche: direction, running left, level, running right; candle: draught, from
-                            // the right to from the left; heavygas: flow, to the left to to the right)
+                            // the right to from the left; heavygas: flow, to the left to to the right; dustexplosion:
+                            // ignition, at the cloud's left end, its middle or its right end)
   float turbulence = 0.5f;  // vorticity confinement and curl-noise strength
   std::uint64_t seed = 1;   // source noise and turbulence field
   int size = 128;           // output pixels (square)
@@ -183,6 +189,14 @@ class Fluid {
   void add_air_forces(float dt);
   void air_decay(float dt);
   bool render_air(std::span<std::uint8_t> rgba) const;
+  // crownfire, windowfire and dustexplosion (docs/EFFECTS_FIRE2.md): their sources, forces, the window fire's ceiling,
+  // the dust explosion's burning and expansion, decay and drawing, kept apart from the other effects' code; each does
+  // nothing for the other effects (false: not handled)
+  bool add_fire2_sources(float dt);
+  void add_fire2_forces(float dt);
+  void add_fire2_divergence();
+  void fire2_decay(float dt);
+  bool render_fire2(std::span<std::uint8_t> rgba) const;
   void add_forces(float dt);
   void project();
   void advect_velocity(float dt);

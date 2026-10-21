@@ -2,7 +2,8 @@
 
 **Status:** stage 1 is done (study N, `docs/STUDY_3D.md`, and its follow-up N2, §14); stage 2 is planned, not started.
 Since 15 October 2026, here: round 9, studies O and P, float on AVX-512, the faster detail layer, the 2D weather
-director and the FUSE sample are done and merged; round 10's effects are under way ("Here, until the PC").
+director, the FUSE sample and round 10's fire are done and merged; round 10's elements and study R (a validated 3D
+smoke) are under way ("Here, until the PC").
 
 - **Stage 1, here and now (study N): done.** A small 3D demo in this container ([docs/STUDY_3D.md](docs/STUDY_3D.md),
   REPORT §15). What it built:
@@ -82,8 +83,14 @@ and the Godot test; details in its doc and REPORT section):
 - **CI:** the g++ job's one failure since the packs came in (the pack verify test without the models) fixed.
 
 **Under way:**
-- **Round 10, fire** (`effects-fire2`, seeds 26.0 to 26.9 million): a forest crown fire (#6), fire venting from a window
-  (#8) and a dust explosion (#31), with a library file, a scene and videos.
+- **Round 10, fire** (`effects-fire2`, docs/EFFECTS_FIRE2.md, REPORT §6.18; seeds 26.0 to 26.9 million): a forest crown
+  fire (#6), fire venting from a window (#8) and a dust explosion (#31). **Finished and merged into main** (21 October
+  2026): each tested once, all three work by the rule (tracking at 1 s over the coarse
+  simulation with detail: crown fire +2.60 dB [+2.16, +3.04], window fire +3.31 dB [+2.91, +3.73], dust explosion
+  +8.44 dB [+7.88, +9.04]; endless, the mean picture closer than the nearest flipbook's, motion no worse). Ten library
+  entries, the forest-edge town scene, six videos. Still weak: the two fires' detail streaks (spectrum six times the
+  flipbook's); the dust explosion's renderer fringes its unlit cloud and draws its pall faint, and its start follows the
+  ignition control only roughly.
 - **Round 10, elements** (`effects-elements`, seeds 27.0 to 27.9 million): a geyser (#88), a haboob dust wall (#70,
   #71) and sea spray off breaking waves (#77), with a library file, a scene and videos.
 
@@ -689,6 +696,8 @@ Ranges already used elsewhere:
 - 5.3 to 5.9 million: studies G, K and L;
 - 3.0 to 3.5 million: study O; 3.6 to 3.9 million: study P;
 - 6.0 to 6.8 million: round 9's effects (earth 6.0 to 6.4, air 6.4 to 6.8); 6.9 million: an earlier smoke test;
+- 26 million: round 10's fire effects (the test 26,000,000 to 26,150,999; the library's and the scene's module seeds,
+  which a script takes only up to 2^24, are 2,630,001 and up);
 - 7 million: water;
 - 8 million: studies M, M2 and M3.
 

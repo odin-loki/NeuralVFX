@@ -230,6 +230,40 @@ TEST(Rollout, AirEffectsTakeTheirRecipes) {
   EXPECT_EQ(recipe_model(candle).noise.flicker_rate, sim::flicker_rate(sim::Effect::candle));
 }
 
+// The fire effects of round 10 (docs/EFFECTS_FIRE2.md): the crown fire and the window fire keep fine fields with their
+// start points (their smoke lingers, as smoke's does), and the dust explosion takes the one-shot branch at its own length
+// (4 s).
+TEST(Rollout, Fire2EffectsTakeTheirRecipes) {
+  const SimRecipe fire = recipe_for(sim::Effect::fire), smoke = recipe_for(sim::Effect::smoke), ex = recipe_for(sim::Effect::explosion);
+  const SimRecipe crown = recipe_for(sim::Effect::crownfire), window = recipe_for(sim::Effect::windowfire);
+  const SimRecipe burst = recipe_for(sim::Effect::dustexplosion);
+  for (const SimRecipe* r : {&crown, &window}) {
+    EXPECT_EQ(r->runs, fire.runs);
+    EXPECT_EQ(r->frames, fire.frames);
+    EXPECT_EQ(r->start_frame, fire.start_frame);
+    EXPECT_EQ(r->starts, fire.starts);
+    EXPECT_EQ(r->start_fine, smoke.start_fine);
+    EXPECT_EQ(r->stepper.activity_stage, fire.stepper.activity_stage);
+    EXPECT_TRUE(recipe_model(*r).loop);
+    EXPECT_EQ(recipe_model(*r).h.n_age, 0);
+    EXPECT_EQ(recipe_model(*r).control_names[1], "wind");
+  }
+  EXPECT_EQ(burst.runs, ex.runs);
+  EXPECT_EQ(burst.frames, 120);
+  EXPECT_EQ(burst.frames, sim::one_shot_frames(sim::Effect::dustexplosion));
+  EXPECT_EQ(burst.start_frame, 0);
+  EXPECT_EQ(burst.start_fine, ex.start_fine);
+  EXPECT_EQ(burst.starts, ex.starts);
+  EXPECT_EQ(burst.stepper.burn_max, ex.stepper.burn_max);
+  const Model bm = recipe_model(burst);
+  EXPECT_FALSE(bm.loop);
+  EXPECT_EQ(bm.h.frames, 120);
+  EXPECT_EQ(bm.h.n_age, 2);
+  EXPECT_EQ(bm.control_names[1], "ignition");
+  EXPECT_EQ(recipe_model(crown).noise.flicker_rate, sim::flicker_rate(sim::Effect::crownfire));
+  EXPECT_EQ(bm.noise.flicker_rate, sim::flicker_rate(sim::Effect::dustexplosion));
+}
+
 TEST(Rollout, CoarseFromSimAveragesBlocks) {
   sim::State st;
   st.n = 16;
