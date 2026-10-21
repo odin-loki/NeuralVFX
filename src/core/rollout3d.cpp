@@ -688,7 +688,11 @@ void step(const Model& m, State& s, std::span<const float> controls, std::uint64
   coarse_noise(m, seed, s.time, ws, ws.noise, pool);
   coarse_step(m, s.coarse, ws.noise, ws.cond, s.pressure, ws.next, s.flow, ws, pool);
   s.coarse.swap(ws.next);
-  detail_step(m, s, seed, controls, ws, pool);
+  if (ws.detail) {
+    ws.detail->step(m, s, seed, controls, ws, pool);
+  } else {
+    detail_step(m, s, seed, controls, ws, pool);
+  }
   s.time += 1.f / m.fps;
   s.since_start += 1.f / m.fps;
 }

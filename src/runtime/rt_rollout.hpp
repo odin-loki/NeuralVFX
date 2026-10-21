@@ -108,6 +108,23 @@ inline void st_pairs(float* p, V a, V b) {
   }
 }
 
+// Some lane of a or b is not +0 (its bits are not all zero: -0 and NaN count).
+template <class V>
+inline bool any_bits(V a, V b) {
+  if constexpr (kOne<V>) {
+    return (std::bit_cast<std::uint32_t>(a) | std::bit_cast<std::uint32_t>(b)) != 0;
+  } else {
+    const vi m = reinterpret_cast<vi>(a) | reinterpret_cast<vi>(b);
+#if NFX_VW == 16
+    return _mm512_test_epi32_mask(reinterpret_cast<__m512i>(m), reinterpret_cast<__m512i>(m)) != 0;
+#elif NFX_VW == 8
+    return !_mm256_testz_si256(reinterpret_cast<__m256i>(m), reinterpret_cast<__m256i>(m));
+#else
+    return _mm_movemask_epi8(_mm_cmpeq_epi32(reinterpret_cast<__m128i>(m), _mm_setzero_si128())) != 0xffff;
+#endif
+  }
+}
+
 inline v4 load4(const float* p) { return *reinterpret_cast<const v4u*>(p); }
 
 // Lanes 4 g to 4 g + 3 hold the four floats at p + o[j + 4 g].
@@ -373,15 +390,80 @@ class RowPair {
     }
     return {rows_[static_cast<std::size_t>(s0)].data(), rows_[static_cast<std::size_t>(s1)].data()};
   }
-  std::size_t bytes() const { return 4 * (rows_[0].size() + rows_[1].size()); }
+  std::size_t bytes() const { return 4 * (rows_[0].size() + rows_[1].size() + pad_.size()) + plan_.size() * sizeof(Plan); }
+
+  // Set-up (allocates): rows of grids n cells wide read through axis `ax` take whole vectors of pixels from a copy of the
+  // grid row by permutes (no gathers: they were slow on one CPU) wherever a vector's cells fit a window of two vectors;
+  // the values and the lerp are those of the scalar loop.
+  void plan(const Axis& ax, int n) {
+#if NFX_VW >= 8
+    const int nq = Q > 0 ? Q : static_cast<int>(q_);
+    planned_ = &ax;
+    pad_.assign(static_cast<std::size_t>(n * nq + 2 * kW), 0.f);
+    plan_.assign(w_ / kW, Plan{});
+    for (std::size_t b = 0; b < plan_.size(); ++b) {
+      Plan& p = plan_[b];
+      const int x = static_cast<int>(b) * kW, base = ax.i[static_cast<std::size_t>(x)];
+      p.base = base * nq;
+      p.ok = (ax.i[static_cast<std::size_t>(x + kW - 1)] - base + 1) * nq <= 2 * kW - 1;
+      for (int k = 0; k < kW; ++k) p.lo[static_cast<std::size_t>(k)] = (ax.i[static_cast<std::size_t>(x + k)] - base) * nq;
+    }
+#else
+    (void)ax;
+    (void)n;
+#endif
+  }
 
  private:
+  struct Plan {
+    int base = 0;  // the window's first float in the row: the first pixel's cell
+    bool ok = false;
+    std::array<std::int32_t, kW> lo{};  // each lane's first value in the window (its second is nq further)
+  };
+#if NFX_VW == 16
+  static vf perm2(vf a, vf b, vi i) { return reinterpret_cast<vf>(_mm512_permutex2var_ps(reinterpret_cast<__m512>(a), reinterpret_cast<__m512i>(i), reinterpret_cast<__m512>(b))); }
+#elif NFX_VW == 8
+  static vf perm2(vf a, vf b, vi i) {  // vpermps reads an index's low three bits
+    const vf lo = reinterpret_cast<vf>(_mm256_permutevar8x32_ps(reinterpret_cast<__m256>(a), reinterpret_cast<__m256i>(i)));
+    const vf hi = reinterpret_cast<vf>(_mm256_permutevar8x32_ps(reinterpret_cast<__m256>(b), reinterpret_cast<__m256i>(i)));
+    return i >= 8 ? hi : lo;
+  }
+#endif
   int slot(int j) const { return key_[0] == j ? 0 : key_[1] == j ? 1 : -1; }
-  void expand(const float* grid, int n, const Axis& ax, int j, int s) {
+  // Not inlined: inlined, the larger body changed how GCC compiled the AVX2 build's callers (their multiply-adds fused
+  // differently, so their frames changed); out of line, every build's frames are as before.
+  [[gnu::noinline]] void expand(const float* grid, int n, const Axis& ax, int j, int s) {
     const std::size_t nq = Q > 0 ? static_cast<std::size_t>(Q) : q_;
     const float* g = grid + static_cast<std::size_t>(j) * static_cast<std::size_t>(n) * nq;
     float* out = rows_[static_cast<std::size_t>(s)].data();
-    for (std::size_t x = 0; x < w_; ++x) {
+    std::size_t x = 0;
+#if NFX_VW >= 8
+    if (&ax == planned_) {
+      std::copy_n(g, static_cast<std::size_t>(n) * nq, pad_.data());  // the row, with room after it for whole windows
+      for (std::size_t b = 0; b < plan_.size(); ++b, x += kW) {
+        const Plan& p = plan_[b];
+        if (!p.ok) {
+          for (std::size_t k = x; k < x + kW; ++k) {
+            const float* a = g + static_cast<std::size_t>(ax.i[k]) * nq;
+            const float w = ax.w[k];
+            for (std::size_t q = 0; q < nq; ++q) out[q * stride_ + k] = a[q] + w * (a[q + nq] - a[q]);
+          }
+          continue;
+        }
+        const vf w = load(ax.w.data() + x);
+        vi lo;
+        std::memcpy(&lo, p.lo.data(), sizeof lo);
+        const vi hi = lo + static_cast<std::int32_t>(nq);
+        for (std::size_t q = 0; q < nq; ++q) {
+          const float* src = pad_.data() + static_cast<std::size_t>(p.base) + q;
+          const vf v0 = load(src), v1 = load(src + kW);
+          const vf a = perm2(v0, v1, lo), c = perm2(v0, v1, hi);
+          store(out + q * stride_ + x, a + w * (c - a));
+        }
+      }
+    }
+#endif
+    for (; x < w_; ++x) {
       const float* a = g + static_cast<std::size_t>(ax.i[x]) * nq;
       const float w = ax.w[x];
       for (std::size_t q = 0; q < nq; ++q) out[q * stride_ + x] = a[q] + w * (a[q + nq] - a[q]);
@@ -391,6 +473,9 @@ class RowPair {
   std::size_t w_ = 0, q_ = 0, stride_ = 0;
   std::array<AlignedFloats, 2> rows_;
   std::array<int, 2> key_{-1, -1};
+  const Axis* planned_ = nullptr;  // plan()'s axis (expand() falls back to the scalar loop for any other)
+  AlignedFloats pad_;
+  std::vector<Plan> plan_;
 };
 
 class Rollout final : public RolloutRunner {
@@ -574,6 +659,10 @@ class Rollout final : public RolloutRunner {
         x *= 2.f;
       }
     }
+    flow_rows_.plan(ax_, R_);
+    fac_rows_.plan(ax_, R_);
+    swirl_rows_.plan(sx_, sw_n_);
+    for (std::size_t o = 0; o < oct.size(); ++o) noise_rows_[o].plan(nax_[o], oct[o].n);
   }
 
   using RolloutRunner::begin;
@@ -1614,44 +1703,38 @@ class Rollout final : public RolloutRunner {
   }
 
   // Row y of the fields, interleaved, into the ring of zero-bordered rows.
-  void copy_row(int y) {
+  [[gnu::noinline]] void copy_row(int y) {
     const std::size_t S = z(S_);
     float* o = ring_row(td_, y + 1) + 2;
     const float* a = ft_.data() + z(y) * S;
     const float* b = fd_.data() + z(y) * S;
-    each_block(S_, [&]<class V>(int x) { st_pairs<V>(o + 2 * x, ld<V>(a + x), ld<V>(b + x)); });
-    zero_ends(td_, y + 1);
-    mirror(td_, y + 1);
-    if (spans_) {  // the first and last pixel of the row that is not +0 in either field (bit patterns: -0 and NaN count)
-      // Blocks of 8 pixels are tested at once (an "or" of their bits, which vectorises), then the pixel in the block.
-      const auto bits = [&](int x) { return std::bit_cast<std::uint32_t>(a[x]) | std::bit_cast<std::uint32_t>(b[x]); };
-      const auto any8 = [&](int x0) {
-        std::uint32_t m = 0;
-        for (int x = x0; x < std::min(S_, x0 + 8); ++x) m |= bits(x);
-        return m != 0;
-      };
-      int first = S_, last = -1;
-      for (int x0 = 0; x0 < S_ && first == S_; x0 += 8) {
-        if (!any8(x0)) continue;
-        for (int x = x0;; ++x) {
-          if (bits(x)) {
-            first = x;
-            break;
-          }
+    if (!spans_) {
+      each_block(S_, [&]<class V>(int x) { st_pairs<V>(o + 2 * x, ld<V>(a + x), ld<V>(b + x)); });
+    } else {
+      // The first and last pixel of the row that is not +0 in either field (bit patterns: -0 and NaN count): the copy
+      // notes the first and last block with such a pixel (an "or" of the bits it loads), then the pixel in the block.
+      int fb = -1, lb = -1;
+      each_block(S_, [&]<class V>(int x) {
+        const V va = ld<V>(a + x), vb = ld<V>(b + x);
+        st_pairs<V>(o + 2 * x, va, vb);
+        if (any_bits<V>(va, vb)) {
+          if (fb < 0) fb = x;
+          lb = x;
         }
-      }
-      for (int x0 = (S_ - 1) / 8 * 8; x0 >= 0 && last < 0 && first < S_; x0 -= 8) {
-        if (!any8(x0)) continue;
-        for (int x = std::min(S_, x0 + 8) - 1;; --x) {
-          if (bits(x)) {
-            last = x;
-            break;
-          }
+      });
+      const auto bits = [&](int x) { return std::bit_cast<std::uint32_t>(a[x]) | std::bit_cast<std::uint32_t>(b[x]); };
+      int first = S_, last = -1;
+      if (fb >= 0) {
+        for (first = fb; !bits(first); ++first) {
+        }
+        for (last = lb < S_ / kW * kW ? lb + kW - 1 : lb; !bits(last); --last) {
         }
       }
       ext_[z(y) * 2] = first;
       ext_[z(y) * 2 + 1] = last;
     }
+    zero_ends(td_, y + 1);
+    mirror(td_, y + 1);
   }
 
   // The pixels of row y whose forward samples can see material (copied rows within the samples' vertical reach,
@@ -1740,7 +1823,7 @@ class Rollout final : public RolloutRunner {
   }
 
   // Row y of the round trip and the correction, and its column sums.
-  void back_row(int y) {
+  [[gnu::noinline]] void back_row(int y) {
     const std::size_t i = z(y) * z(S_);
     const int Pw = S_ + 3;
     const float edge = static_cast<float>(S_), yf = static_cast<float>(y);
@@ -1792,7 +1875,7 @@ class Rollout final : public RolloutRunner {
   // Row c of coarse cells is complete: its block sums (from the column sums, which start again) and the lock's factors
   // (as the reference): where the fine field holds more than the coarse cell, scale it down; where it holds less, scale
   // it up to `grow` and add the rest as new material.
-  void lock_factors(int c) {
+  [[gnu::noinline]] void lock_factors(int c) {
     const rollout::DetailSpec& dt = m_.detail;
     const int kk = S_ / R_;
     const float inv = 1.f / static_cast<float>(kk * kk);
@@ -1827,7 +1910,7 @@ class Rollout final : public RolloutRunner {
 
   // Row y of the lock, heat and soot together: the factors interpolated from the coarse cells, new material broken up by
   // the flicker noise (tongues, not a smear). The noise is evaluated only on rows that receive new material.
-  void lock_row(int y) {
+  [[gnu::noinline]] void lock_row(int y) {
     const rollout::DetailSpec& dt = m_.detail;
     const std::size_t S = z(S_);
     const int c = ax_.i[z(y)];
@@ -1853,6 +1936,9 @@ class Rollout final : public RolloutRunner {
     // the contrast curve's argument (phi - edge0) / (edge1 - edge0) as one multiply-add of the octaves' weighted sum
     const float span = 1.f / (dt.edge1 - dt.edge0), scale = span / fine_flicker_.norm(), shift = -dt.edge0 * span;
     const float keep = 1.f - dt.contrast, ck = dt.contrast * dt.kappa;
+    // With keep and ck not negative the breakup g is a finite number not below +0, so g times +0 is +0: a block whose new
+    // material is +0 everywhere needs no noise.
+    const bool zero_keeps = keep >= 0.f && ck >= 0.f;
     float* qt = ft_.data() + z(y) * S;
     float* qd = fd_.data() + z(y) * S;
     // Where the fields are +0 after the round trip and no new material is interpolated, the lock gives +0 * scale + 0:
@@ -1875,7 +1961,7 @@ class Rollout final : public RolloutRunner {
       rt = rt + wy * (ld<V>(rt1 + x) - rt);
       ad = ad + wy * (ld<V>(ad1 + x) - ad);
       rd = rd + wy * (ld<V>(rd1 + x) - rd);
-      if (noisy) {
+      if (noisy && (!zero_keeps || any_bits<V>(at, ad))) {
         V sum{};
         for (std::size_t o = 0; o < no; ++o) {
           const V a = ld<V>(n0[o] + x);
