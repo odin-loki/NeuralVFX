@@ -152,6 +152,7 @@ struct System::Impl {
   std::vector<SpriteSlot> sprites;
   std::vector<fuse::Texture> sprite_tex;
   int job_slots = 0;
+  float edge_fade = 0.f;
   nvfx_status manager_status[16] = {};
 
   // --- cards (0: the scene, 1: the stage)
@@ -189,7 +190,7 @@ struct System::Impl {
     fuse::Quad quad{};
     Image picture_img, field_img[2];
     fuse::Texture tex = 0, field_tex[2] = {0, 0};
-    double ms = 0.0;
+    double ms = 0.0, step_ms = 0.0, picture_ms = 0.0, fields_ms = 0.0;
     nvfx_status status = NVFX_OK;
   } volume;
 
@@ -282,6 +283,8 @@ struct System::Impl {
     const auto t0 = Clock::now();
     VolumeState& v = volume;
     v.status = nvfx_volume_step_to(vol, v.t);
+    const auto t1 = Clock::now();
+    v.step_ms = ms_between(t0, t1);
     if (v.status == NVFX_OK && v.draw) {
       v.status = nvfx_volume_render(vol, &v.cam, v.pw, v.ph, v.picture_img.bytes.data(), static_cast<std::size_t>(v.pw) * 4);
       if (v.status == NVFX_OK) {
@@ -291,6 +294,8 @@ struct System::Impl {
         ++v.picture_img.version;
       }
     }
+    const auto t2 = Clock::now();
+    v.picture_ms = v.draw ? ms_between(t1, t2) : 0.0;
     if (v.status == NVFX_OK && v.fields) {
       const nvfx_volume_field which[2] = {NVFX_VOLUME_TEMPERATURE, NVFX_VOLUME_EXTINCTION};
       for (int i = 0; i < 2 && v.status == NVFX_OK; ++i) {
@@ -299,7 +304,9 @@ struct System::Impl {
         if (v.status == NVFX_OK) ++f.version;
       }
     }
-    v.ms = ms_between(t0, Clock::now());
+    const auto t3 = Clock::now();
+    v.fields_ms = v.fields ? ms_between(t2, t3) : 0.0;
+    v.ms = ms_between(t0, t3);
   }
 
   static void run_card(CardState& c) noexcept {
@@ -506,6 +513,7 @@ struct System::Impl {
       q.u1 = q.v1 = (static_cast<float>(own.pic_size) - 0.5f) / T;
       q.depth = view.world_to_screen(q.centre).depth;
       q.opacity = 1.f;
+      q.edge = edge_fade;
       ++drawn;
     }
     // the cards and the volume
@@ -531,9 +539,16 @@ struct System::Impl {
     // stats
     stats.sprites = live;
     stats.sprites_drawn = drawn;
-    if (manager) nvfx_manager_get_stats(manager.get(), &stats.manager);
+    if (manager) {
+      nvfx_manager_get_stats(manager.get(), &stats.manager);
+      stats.memory.manager = stats.manager.memory_bytes;  // reported from its first tick on
+      stats.memory_bytes = stats.memory.models + stats.memory.manager + stats.memory.scenes + stats.memory.volume + stats.memory.packets;
+    }
     stats.copied_bytes = copied;
     stats.volume_ms = v.ms;
+    stats.volume_step_ms = v.due ? v.step_ms : 0.0;
+    stats.volume_picture_ms = v.due ? v.picture_ms : 0.0;
+    stats.volume_fields_ms = v.due ? v.fields_ms : 0.0;
     stats.scene_ms = cards[0].ms;
     stats.stage_ms = cards[1].ms;
     stats.uploaded_bytes = uploaded_bytes.load(std::memory_order_relaxed);
@@ -678,6 +693,7 @@ std::expected<std::unique_ptr<System>, nvfx::Error> System::create(const fuse::E
         if (auto r = s->manager.calibrate(*model); !r) return unexpected(r.error());
     }
     s->job_slots = sc.job_slots;
+    s->edge_fade = std::clamp(sc.edge_fade, 0.f, 1.f);
     s->sprites.resize(static_cast<std::size_t>(sc.max_sprites));
     for (int i = 0; i < sc.max_sprites; ++i) {
       const fuse::Texture t = engine.gpu->create_texture({kSpriteTexture, kSpriteTexture, 1, fuse::TextureFormat::Rgba8Srgb, "nvfx sprite"});
@@ -778,23 +794,23 @@ std::expected<std::unique_ptr<System>, nvfx::Error> System::create(const fuse::E
   s->uploaded.assign(n_sprites + 5, 0);
 
   // what this level holds
-  std::size_t mem = 0;
-  if (s->manager) mem += s->manager.get_stats().value_or(nvfx_manager_stats{}).memory_bytes;
+  Stats::Memory& mb = s->stats.memory;
+  if (s->manager) mb.manager = s->manager.get_stats().value_or(nvfx_manager_stats{}).memory_bytes;
+  for (const nvfx::Effect& e : s->effects) mb.models += e.get_info().value_or(nvfx_effect_info{}).resident_bytes;
   for (const Impl::CardState& c : s->cards)
     if (c.on) {
       nvfx_scene_info info{};
       nvfx_scene_get_info(c.s, &info);
-      mem += info.scratch_bytes + c.staging.bytes.size();
+      mb.scenes += info.scratch_bytes + c.staging.bytes.size();
     }
-  for (const nvfx::Effect& e : s->effects) mem += e.get_info().value_or(nvfx_effect_info{}).resident_bytes;
-  if (s->vol) mem += nvfx_volume_scratch_bytes(s->vol) + s->volume.info.resident_bytes + s->volume.picture_img.bytes.size() + 2 * s->volume.field_img[0].bytes.size();
+  if (s->vol) mb.volume = nvfx_volume_scratch_bytes(s->vol) + s->volume.info.resident_bytes + s->volume.picture_img.bytes.size() + 2 * s->volume.field_img[0].bytes.size();
   std::size_t tex = n_sprites * kSpriteTexture * kSpriteTexture * 4 + s->volume.picture_img.bytes.size() + 2 * s->volume.field_img[0].bytes.size();
   for (const Impl::CardState& c : s->cards) tex += c.staging.bytes.size();
   for (const Impl::Packet& p : s->packets) {
-    for (const Image& img : p.sprite_px) mem += img.bytes.size();
-    mem += p.card_px[0].bytes.size() + p.card_px[1].bytes.size() + p.volume_px.bytes.size() + p.field_px[0].bytes.size() + p.field_px[1].bytes.size();
+    for (const Image& img : p.sprite_px) mb.packets += img.bytes.size();
+    mb.packets += p.card_px[0].bytes.size() + p.card_px[1].bytes.size() + p.volume_px.bytes.size() + p.field_px[0].bytes.size() + p.field_px[1].bytes.size();
   }
-  s->stats.memory_bytes = mem;
+  s->stats.memory_bytes = mb.models + mb.manager + mb.scenes + mb.volume + mb.packets;
   s->stats.texture_bytes = tex;
 
   // 8. the render hook; the pack is freed here (the library, the scene and the effects keep what they need)
@@ -963,7 +979,11 @@ void System::place_volume(Vec3 position, float scale) noexcept {
 }
 
 void System::update(const fuse::FrameTime& time, const fuse::View& view) noexcept { impl_->update(time, view); }
-const Stats& System::stats() const noexcept { return impl_->stats; }
+const Stats& System::stats() const noexcept {
+  impl_->stats.uploaded_bytes = impl_->uploaded_bytes.load(std::memory_order_relaxed);  // the render thread's counters, now
+  impl_->stats.frames_drawn = impl_->frames_drawn.load(std::memory_order_relaxed);
+  return impl_->stats;
+}
 const FrameError& System::last_error() const noexcept { return impl_->error; }
 
 }  // namespace nvfx_fuse

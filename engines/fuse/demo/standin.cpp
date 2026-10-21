@@ -327,6 +327,12 @@ void SoftRenderer::rasterise(const fuse::Quad& q, const Mat4& vp) noexcept {
       const double s = A / C, tt = B / C;
       if (s < -1.0 || s > 1.0 || tt < -1.0 || tt > 1.0) continue;
       if (!(M[6] * s + M[7] * tt + M[8] > 0.05)) continue;  // behind the camera
+      float opx = op;
+      if (q.edge > 0.f) {  // soft edges
+        const auto ramp = [&](double d) { const float r = std::clamp(static_cast<float>(d) / q.edge, 0.f, 1.f); return r * r * (3.f - 2.f * r); };
+        opx *= ramp(1.0 - std::abs(s)) * ramp(1.0 - std::abs(tt));
+        if (!(opx > 0.f)) continue;
+      }
       const float u = q.u0 + static_cast<float>((s + 1.0) * 0.5) * (q.u1 - q.u0), v = q.v0 + static_cast<float>((1.0 - tt) * 0.5) * (q.v1 - q.v0);
       const float fu = u * static_cast<float>(tw) - 0.5f, fv = v * static_cast<float>(th) - 0.5f;
       const int x0 = static_cast<int>(std::floor(fu)), y0 = static_cast<int>(std::floor(fv));
@@ -336,10 +342,10 @@ void SoftRenderer::rasterise(const fuse::Quad& q, const Mat4& vp) noexcept {
       if ((t00[0] | t00[1] | t00[2] | t00[3] | t10[0] | t10[1] | t10[2] | t10[3] | t01[0] | t01[1] | t01[2] | t01[3] | t11[0] | t11[1] | t11[2] | t11[3]) == 0) continue;
       const float w00 = (1.f - ax) * (1.f - ay), w10 = ax * (1.f - ay), w01 = (1.f - ax) * ay, w11 = ax * ay;
       float* o = &fb_[(static_cast<std::size_t>(y) * static_cast<std::size_t>(w_) + static_cast<std::size_t>(x)) * 3];
-      const float a = (w00 * t00[3] + w10 * t10[3] + w01 * t01[3] + w11 * t11[3]) * (op / 255.f);
+      const float a = (w00 * t00[3] + w10 * t10[3] + w01 * t01[3] + w11 * t11[3]) * (opx / 255.f);
       for (std::size_t c = 0; c < 3; ++c) {
         const float src = w00 * decode_[t00[c]] + w10 * decode_[t10[c]] + w01 * decode_[t01[c]] + w11 * decode_[t11[c]];
-        o[c] = src * op + o[c] * (1.f - a);  // premultiplied: ONE, ONE_MINUS_SRC_ALPHA
+        o[c] = src * opx + o[c] * (1.f - a);  // premultiplied: ONE, ONE_MINUS_SRC_ALPHA
       }
     }
   }

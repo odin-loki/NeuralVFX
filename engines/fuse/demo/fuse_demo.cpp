@@ -110,8 +110,8 @@ void frame_done(void* ctx, std::uint64_t frame, const std::uint8_t* rgb, int w, 
 
 // --- the world --------------------------------------------------------------------------------------------------------
 
-const nvfx_fuse::Card kSceneCard{{-2.7f, 0.f, -2.9f}, {0.944f, 0.f, 0.330f}, {0.f, 1.f, 0.f}, 0.0056f};   // the campfire script, 960 x 540
-const nvfx_fuse::Card kStageCard{{3.1f, 0.f, -3.1f}, {0.944f, 0.f, -0.330f}, {0.f, 1.f, 0.f}, 0.0078f};    // the stage, 640 x 360
+const nvfx_fuse::Card kSceneCard{{-3.3f, 0.f, -3.0f}, {0.940f, 0.f, 0.342f}, {0.f, 1.f, 0.f}, 0.0085f};   // the campfire script, 960 x 540
+const nvfx_fuse::Card kStageCard{{3.4f, 0.f, -3.3f}, {0.940f, 0.f, -0.342f}, {0.f, 1.f, 0.f}, 0.0090f};    // the stage, 640 x 360
 constexpr float kStageGround = 0.87f * 360.f;
 
 // A point of a card from its scene's world pixels (x across, y down to its ground line at `ground`).
@@ -128,8 +128,11 @@ struct Result {
   float max_heat = 0.f;
   int max_sprites_drawn = 0, explosions_left = 0;
   double update_ms = 0, update_ms_max = 0, volume_ms = 0, volume_ms_max = 0, scene_ms = 0, stage_ms = 0, jobs_ms = 0, planned_ms = 0, wall_s = 0;
+  double volume_step_ms = 0, volume_picture_ms = 0, volume_fields_ms = 0;
   int volume_frames = 0, scene_frames = 0, stage_frames = 0;
   std::size_t memory = 0, textures = 0;
+  nvfx_fuse::Stats::Memory mem{};
+  double load_ms = 0;
   nvfx_manager_stats manager{};
   int status = 0;  // 0 ran, 1 failed to load, 77 no pack
 };
@@ -176,10 +179,11 @@ Result play(const Options& o, int workers, bool capture) {
   cfg.stage.rooms = rooms;
   cfg.stage.card = kStageCard;
   cfg.volume.member = "fire3d.nvfx3";
-  cfg.volume.position = {0.35f, 0.f, -0.2f};
-  cfg.volume.scale = 2.0f;
+  cfg.volume.position = {0.2f, 0.f, -0.9f};
+  cfg.volume.scale = 2.4f;
   cfg.volume.seed = 9950001;
   cfg.volume.fields = true;
+  cfg.volume.picture_scale = 0.4f;
 
   g_allocations.store(0);
   g_counting.store(true);
@@ -194,9 +198,7 @@ Result play(const Options& o, int workers, bool capture) {
     return res;
   }
   nvfx_fuse::System& fx = **sys;
-  std::printf("loaded in %.0f ms on %d worker%s + the game thread: %.1f MB in NeuralVFX, %.1f MB of textures\n",
-              std::chrono::duration<double, std::milli>(Clock::now() - t_load).count(), workers, workers == 1 ? "" : "s",
-              static_cast<double>(fx.stats().memory_bytes) / 1048576.0, static_cast<double>(fx.stats().texture_bytes) / 1048576.0);
+  res.load_ms = std::chrono::duration<double, std::milli>(Clock::now() - t_load).count();
   const int fire = fx.model("fire"), smoke = fx.model("smoke"), explosion = fx.model("explosion"), magic = fx.model("magic");
 
   // the game's state
@@ -221,24 +223,24 @@ Result play(const Options& o, int workers, bool capture) {
 
     // --- the game: spawns, despawns, inputs, rules (between updates)
     if (f == 0) {
-      const float zs[3] = {2.6f, 0.8f, -1.0f};
+      const float zs[3] = {3.0f, 1.2f, -0.6f};
       for (int i = 0; i < 6; ++i) {  // six torches, one simulation shown 0.37 s apart
         const bool left = i < 3;
         nvfx_fuse::SpriteDesc d;
         d.model = fire;
-        d.position = {left ? -1.9f - 0.3f * static_cast<float>(i) : 2.5f + 0.3f * static_cast<float>(i - 3), 0.f, zs[i % 3]};
+        d.position = {left ? -1.6f - 0.3f * static_cast<float>(i) : 2.2f + 0.3f * static_cast<float>(i - 3), 0.f, zs[i % 3]};
         d.size = 1.1f;
         d.controls = {0.8f, 0.5f, 0.45f};
         d.seed = 7;
         d.time_offset = 0.37f * static_cast<float>(i);
         torches[i] = fx.spawn(d);
       }
-      const Vec3 at_col[2] = {{-1.0f, 0.f, -3.6f}, {1.7f, 0.f, -3.9f}};
+      const Vec3 at_col[2] = {{-0.9f, 0.f, -4.6f}, {1.5f, 0.f, -4.9f}};
       for (int i = 0; i < 2; ++i) {  // two smoke columns, each its own run
         nvfx_fuse::SpriteDesc d;
         d.model = smoke;
         d.position = at_col[i];
-        d.size = 3.0f;
+        d.size = 3.6f;
         d.controls = {0.4f, 0.5f, 0.5f};
         d.seed = 31 + static_cast<std::uint64_t>(i);
         columns[i] = fx.spawn(d);
@@ -258,9 +260,9 @@ Result play(const Options& o, int workers, bool capture) {
     if (at(2.0)) {
       nvfx_fuse::SpriteDesc d;
       d.model = explosion;
-      d.position = {-1.5f, 0.f, 1.2f};
-      d.size = 2.0f;
-      d.controls = {0.8f, 0.5f, 0.6f};
+      d.position = {1.7f, 0.f, 1.6f};
+      d.size = 2.2f;
+      d.controls = {0.6f, 0.5f, 0.5f};
       d.seed = 101;
       d.allow_proxy = false;
       d.priority = 2.f;
@@ -278,9 +280,9 @@ Result play(const Options& o, int workers, bool capture) {
     if (at(4.2)) {
       nvfx_fuse::SpriteDesc d;
       d.model = magic;
-      d.position = {-0.6f, 1.7f, 0.4f};
+      d.position = {-0.9f, 1.6f, 0.6f};
       d.anchor_base = false;
-      d.size = 1.5f;
+      d.size = 1.4f;
       d.controls = {0.7f, 0.6f, 0.5f};
       d.seed = 55;
       portal = fx.spawn(d);
@@ -306,9 +308,9 @@ Result play(const Options& o, int workers, bool capture) {
     if (at(6.3)) {
       nvfx_fuse::SpriteDesc d;
       d.model = explosion;
-      d.position = {2.1f, 0.f, 1.5f};
-      d.size = 1.8f;
-      d.controls = {0.7f, 0.5f, 0.5f};
+      d.position = {-1.3f, 0.f, 2.2f};
+      d.size = 2.0f;
+      d.controls = {0.55f, 0.5f, 0.5f};
       d.seed = 202;
       d.allow_proxy = false;
       d.priority = 2.f;
@@ -336,7 +338,7 @@ Result play(const Options& o, int workers, bool capture) {
 
     // --- the camera: a slow dolly in
     const float k = smooth(t / 10.f);
-    camera.look_at({-0.7f + 1.5f * k, 1.6f + 0.35f * k, 7.4f - 1.9f * k}, {0.1f + 0.35f * k, 1.35f, -1.2f});
+    camera.look_at({-0.5f + 1.2f * k, 1.7f + 0.3f * k, 7.8f - 2.0f * k}, {0.f + 0.3f * k, 1.5f, -1.5f});
 
     // --- the frame
     fx.update(ft, camera);
@@ -348,6 +350,9 @@ Result play(const Options& o, int workers, bool capture) {
     if (st.volume_ms > 0) {
       res.volume_ms += st.volume_ms;
       res.volume_ms_max = std::max(res.volume_ms_max, st.volume_ms);
+      res.volume_step_ms += st.volume_step_ms;
+      res.volume_picture_ms += st.volume_picture_ms;
+      res.volume_fields_ms += st.volume_fields_ms;
       ++res.volume_frames;
     }
     if (st.scene_ms > 0) {
@@ -377,6 +382,7 @@ Result play(const Options& o, int workers, bool capture) {
   res.uploaded = st.uploaded_bytes;
   res.frames_drawn = st.frames_drawn;
   res.memory = st.memory_bytes;
+  res.mem = st.memory;
   res.textures = gpu.texture_bytes();
   res.manager = st.manager;
   for (const auto& b : blasts) res.explosions_left += fx.alive(b) ? 1 : 0;
@@ -396,10 +402,15 @@ void report(const Result& r, int workers, int frames) {
   std::printf("  update (game thread, wall): mean %.1f ms, worst %.1f ms; volume job %.1f ms mean (%d frames, worst %.1f); scene %.1f ms (%d); stage %.1f ms (%d)\n",
               mean(r.update_ms, frames), r.update_ms_max, mean(r.volume_ms, r.volume_frames), r.volume_frames, r.volume_ms_max, mean(r.scene_ms, r.scene_frames),
               r.scene_frames, mean(r.stage_ms, r.stage_frames), r.stage_frames);
+  std::printf("  the volume's job: step %.1f ms, picture %.1f ms, fields read %.1f ms (means)\n", mean(r.volume_step_ms, r.volume_frames),
+              mean(r.volume_picture_ms, r.volume_frames), mean(r.volume_fields_ms, r.volume_frames));
   std::printf("  manager: %.2f ms of jobs per tick against %.2f planned (budget %.0f ms); last tick %d sims, %d proxied, %.1f MB\n", mean(r.jobs_ms, frames),
               mean(r.planned_ms, frames), r.manager.budget_ms, r.manager.sims, r.manager.proxied, static_cast<double>(r.manager.memory_bytes) / 1048576.0);
   std::printf("  uploaded %.1f MB in all (%.2f MB a frame); heat on the campfire up to %.2f; up to %d sprites drawn\n", static_cast<double>(r.uploaded) / 1048576.0,
               static_cast<double>(r.uploaded) / 1048576.0 / std::max(1, frames), r.max_heat, r.max_sprites_drawn);
+  const auto mb = [](std::size_t b) { return static_cast<double>(b) / 1048576.0; };
+  std::printf("  loaded in %.0f ms; %.1f MB on the CPU (models %.1f, manager %.1f, scene and stage %.1f, volume %.1f, packets %.1f), textures %.1f MB\n", r.load_ms,
+              mb(r.memory), mb(r.mem.models), mb(r.mem.manager), mb(r.mem.scenes), mb(r.mem.volume), mb(r.mem.packets), mb(r.textures));
   if (r.errors) std::printf("  last error: %s\n", r.last_error.c_str());
 }
 

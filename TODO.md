@@ -141,7 +141,10 @@ then merge it into main.
 - **Small 3D:**
   - a second 3D effect: smoke, validated this time, with bounds calibrated on several teacher runs;
   - 3D fire and smoke coupled.
-- **For FUSE:** a sample integration in C++, with the effect pack and the volume API side by side.
+- **For FUSE (done, 21 October 2026, `engine-fuse`):** a sample integration in C++, with the effect pack and the volume
+  API side by side ([docs/FUSE.md](docs/FUSE.md), `engines/fuse`): the interface FUSE implements, an adapter that plays
+  one pack's sprites through the effect manager on FUSE's jobs, a scripted scene, library entries and the 3D fire, a
+  headless demo with its test (no allocation per frame, the same frames on any number of workers) and a video.
 
 ## Contents
 

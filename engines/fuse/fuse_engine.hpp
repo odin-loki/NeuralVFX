@@ -118,6 +118,8 @@ struct Quad {
   Vec3 centre, axis_u, axis_v;
   float depth = 0.f;    // view depth of the centre, for sorting (the adapter fills it from View::world_to_screen)
   float opacity = 1.f;  // multiplies the premultiplied texel (fades)
+  float edge = 0.f;     // soft edges: the texel also fades to nothing over this fraction of the half-width and of the
+                        // half-height at each edge (smoothstep), hiding where a plume touches its picture's border; 0: none
 };
 
 class DrawSink {

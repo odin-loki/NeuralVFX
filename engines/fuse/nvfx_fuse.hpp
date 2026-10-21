@@ -65,6 +65,7 @@ struct SpriteConfig {
   int job_slots = 2;                    // FUSE workers that may run the manager's jobs at once
   Costs costs = Costs::pack_or_calibrate;
   float texel_scale = 1.f;              // sprite pixels per screen pixel (below 1: softer and cheaper at every distance)
+  float edge_fade = 0.08f;              // soft edges of the sprites' quads (fuse::Quad::edge): plumes that touch their picture's border
 };
 
 // Where a 2D scene stands in the world: a card whose picture is the scene's world pixels.
@@ -157,11 +158,19 @@ struct Stats {
   nvfx_manager_stats manager{};           // the last tick (planned_ms, jobs_ms, sims, proxied, ...)
   double update_ms = 0;                   // the last update(), wall clock, on the game thread (jobs included)
   double volume_ms = 0, scene_ms = 0, stage_ms = 0;  // their jobs in the last update (0 when nothing was due)
+  double volume_step_ms = 0, volume_picture_ms = 0, volume_fields_ms = 0;  // the volume's job: its step, picture and reads
   std::size_t copied_bytes = 0;           // pixels copied into the frame's packet by the last update
-  std::uint64_t uploaded_bytes = 0;       // texels given to GpuUpload::update by the render hook, in all
+  std::uint64_t uploaded_bytes = 0;       // texels given to GpuUpload::update by the render hook, in all (read when stats() is called)
   std::uint64_t frames_drawn = 0;         // render hooks run
   std::uint64_t errors = 0;               // frame errors in all (last_error() has the last)
-  std::size_t memory_bytes = 0;           // what NeuralVFX holds for this level (manager, scenes, volume, packets)
+  std::size_t memory_bytes = 0;           // what this level holds on the CPU, all of it allocated by create():
+  struct Memory {
+    std::size_t models = 0;               // the sprites' models (nvfx_effect_info.resident_bytes)
+    std::size_t manager = 0;              // the manager's pools and threads' scratch (nvfx_manager_stats.memory_bytes, from the first update)
+    std::size_t scenes = 0;               // the scene and the stage (nvfx_scene_info.scratch_bytes and their pictures)
+    std::size_t volume = 0;               // the volume (nvfx_volume_scratch_bytes, its model, its picture and fields)
+    std::size_t packets = 0;              // the frames_in_flight packets for the render thread
+  } memory;
   std::size_t texture_bytes = 0;          // what the textures made at load hold on FUSE's side
 };
 

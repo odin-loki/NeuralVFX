@@ -2,8 +2,8 @@
 
 Status: **current**. Audience: dev. The API is `include/neuralfx/nvfx.h` (C, no dependencies) for single effects and
 `include/neuralfx/nvfx_scene.h` for composed scenes played from scripts (§7), which can also give their effects alone
-as lit sprites for the engine to light (§11); the reference host is `examples/c_host.c`, and a Godot 4 plugin is in
-`engines/godot` (§8). **To put it in your own engine**, start with [INTEGRATION.md](INTEGRATION.md): which API when,
+as lit sprites for the engine to light (§11); the reference host is `examples/c_host.c`, a Godot 4 plugin is in
+`engines/godot` (§8), and a sample integration for FUSE, the owner's engine, is in `engines/fuse` ([FUSE.md](FUSE.md)). **To put it in your own engine**, start with [INTEGRATION.md](INTEGRATION.md): which API when,
 the frame loop, textures, effect packs (`nvfx_pack.h`: one checked file with the models and the catalogue),
 calibration, and the C++ wrapper `include/neuralfx/nvfx.hpp`.
 
@@ -60,7 +60,8 @@ Looping effects wrap time; one-shot effects (explosions) hold their last frame a
 ## 4. Engines
 
 Nothing here is engine-specific; these notes say where the calls go. The Godot plugin is in this repository and
-tested headless (§8); the Unreal and Unity notes are not built or tested.
+tested headless (§8), as is the FUSE sample integration on a stand-in FUSE ([FUSE.md](FUSE.md)); the Unreal and Unity notes
+are not built or tested.
 
 ### Unreal Engine
 
@@ -86,6 +87,14 @@ tested headless (§8); the Unreal and Unity notes are not built or tested.
   each into an `ImageTexture`.
 - Draw an effect's texture with premultiplied-alpha blending (`CanvasItemMaterial.blend_mode = BLEND_MODE_PREMULT_ALPHA`,
   or a spatial material's `blend_mode = premul_alpha`). A scene's picture is opaque.
+
+### FUSE
+
+- The sample integration in `engines/fuse` ([FUSE.md](FUSE.md)): a small interface FUSE implements (frame clock, job
+  system, view, texture uploads, render hooks) and a C++23 adapter that plays one pack's models as sprites through the
+  effect manager on FUSE's jobs, a scene script and a library stage on cards in the world, and the 3D fire volume, with
+  a headless demo on a stand-in FUSE whose test checks no allocation per frame and the same frames on any number of
+  workers.
 
 ### Custom engines
 
