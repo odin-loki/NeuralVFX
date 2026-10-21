@@ -38,6 +38,9 @@ std::string_view effect_name(Effect e) {
     case Effect::candle: return "candle";
     case Effect::smokering: return "smokering";
     case Effect::heavygas: return "heavygas";
+    case Effect::geyser: return "geyser";
+    case Effect::haboob: return "haboob";
+    case Effect::seaspray: return "seaspray";
   }
   std::unreachable();
 }
@@ -50,12 +53,14 @@ bool parse_effect(std::string_view text, Effect& out) {
 }
 
 bool effect_loops(Effect e) { return e != Effect::explosion && e != Effect::dust && e != Effect::mushroom &&
-                                   e != Effect::splash && e != Effect::avalanche && e != Effect::smokering; }
+                                   e != Effect::splash && e != Effect::avalanche && e != Effect::smokering &&
+                                   e != Effect::haboob; }
 
 int one_shot_frames(Effect e) {
   if (effect_loops(e)) return 0;
   if (e == Effect::avalanche) return 150;  // docs/EFFECTS_EARTH.md
   if (e == Effect::smokering) return 120;  // 4 s: a smoke ring's rise, roll and break-up (docs/EFFECTS_AIR.md)
+  if (e == Effect::haboob) return 150;     // 5 s: a dust front's run across the frame (docs/EFFECTS_ELEMENTS.md)
   return e == Effect::mushroom ? 150 : 90;
 }
 
@@ -71,6 +76,8 @@ std::array<std::string_view, kControls> control_names(Effect e) {
   if (e == Effect::avalanche) return {"intensity", "direction", "turbulence"};
   if (e == Effect::candle) return {"intensity", "draught", "turbulence"};  // docs/EFFECTS_AIR.md
   if (e == Effect::heavygas) return {"intensity", "flow", "turbulence"};
+  if (e == Effect::haboob) return {"intensity", "height", "turbulence"};  // docs/EFFECTS_ELEMENTS.md
+  if (e == Effect::seaspray) return {"intensity", "gale", "turbulence"};
   return kControlNames;
 }
 
@@ -103,6 +110,9 @@ float flicker_rate(Effect e) {
     case Effect::candle: return 1.2f;     // a flame that breathes and gutters
     case Effect::smokering: return 1.4f;  // the puff's lumps, as the explosion's
     case Effect::heavygas: return 0.8f;   // a slow, uneven release, as ink's
+    case Effect::geyser: return 0.3f;     // the conduit's state: eruptions seconds apart (docs/EFFECTS_ELEMENTS.md)
+    case Effect::haboob: return 0.8f;     // the outflow's gusts
+    case Effect::seaspray: return 0.9f;   // crests that break and settle
   }
   std::unreachable();
 }
@@ -192,6 +202,15 @@ Tune tune(const Params& p) {
     case Effect::candle: return {200.f, 0.f, 0.3f, 0.8f, 0.f, 0.f, 0.15f + 0.9f * turb, 2.f + 22.f * turb, 0.3f};
     case Effect::smokering: return {30.f, 0.f, 0.8f, 0.25f, 0.f, 0.f, 0.2f + 1.0f * turb, 4.f + 26.f * turb, 0.35f};
     case Effect::heavygas: return {0.f, 18.f, 1.f, 0.08f, 0.f, 0.f, 0.2f + 1.2f * turb, 3.f + 14.f * turb, 0.2f};
+    // geyser, haboob and seaspray (docs/EFFECTS_ELEMENTS.md); their sources, winds, grounds and how their water falls
+    // are in add_elements_sources, add_elements_forces and elements_decay. geyser: water is soot (it flies as drops do,
+    // geyser_drop) and steam is heat (light, it rises and thins). haboob: the outflow's cold air is
+    // soot, heavy, so it runs along the ground as a gravity current; the dust its gust front lifts is heat, without
+    // buoyancy (the cold air's weight carries it), settling out slowly. seaspray: drops are soot (they fall at their own
+    // speed, in add_elements_forces), the fine spray is heat that the wind carries and that evaporates.
+    case Effect::geyser: return {90.f, 0.f, 0.55f, 0.f, 0.f, 0.f, 0.2f + 1.0f * turb, 4.f + 22.f * turb, 0.6f};
+    case Effect::haboob: return {0.f, 20.f, 0.25f, 0.f, 0.f, 0.f, 0.3f + 1.0f * turb, 8.f + 32.f * turb, 0.f};
+    case Effect::seaspray: return {6.f, 0.f, 0.45f, 0.f, 0.f, 0.f, 0.1f + 0.5f * turb, 8.f + 30.f * turb, 0.f};
   }
   std::unreachable();
 }
@@ -203,6 +222,8 @@ bool on_ground(Effect e) { return e == Effect::fog || e == Effect::dust; }  // l
 bool water(Effect e) { return e == Effect::waterfall || e == Effect::fountain || e == Effect::splash || e == Effect::rainshaft; }
 // lava, eruption and avalanche (docs/EFFECTS_EARTH.md): they lie on the ground (project)
 bool earth(Effect e) { return e == Effect::lava || e == Effect::eruption || e == Effect::avalanche; }
+// geyser, haboob and seaspray (docs/EFFECTS_ELEMENTS.md): they stand on the ground or the sea (project)
+bool elements(Effect e) { return e == Effect::geyser || e == Effect::haboob || e == Effect::seaspray; }
 
 // magic: a ring of energy around the middle of the frame, spun by a force that peaks at the ring (radius in cells).
 float magic_radius(const Params& p, float n) { return (0.19f + 0.09f * p.intensity) * n; }
@@ -324,6 +345,7 @@ void Fluid::step(float dt) {
   water_decay(dt);   // waterfall, fountain, splash and rainshaft
   earth_decay(dt);   // avalanche
   air_decay(dt);     // candle, smokering and heavygas
+  elements_decay(dt);  // geyser, haboob and seaspray
   time_ += dt;
 }
 
@@ -362,6 +384,7 @@ void Fluid::add_sources(float dt) {
   if (add_flow_sources(dt)) return;  // launch, puffs and ink
   if (add_earth_sources(dt)) return;  // lava, eruption and avalanche
   if (add_air_sources(dt)) return;   // candle, smokering and heavygas
+  if (add_elements_sources(dt)) return;  // geyser, haboob and seaspray
   const bool fire = p_.effect == Effect::fire;
   const float cx = 0.5f * n, cy = (fire ? 0.10f : 0.09f) * n;
   const float hw = (fire ? 0.10f + 0.08f * I : 0.09f + 0.07f * I) * n, hh = 0.035f * n;
@@ -477,6 +500,7 @@ void Fluid::add_forces(float dt) {
   add_water_forces(dt);  // waterfall, fountain, splash and rainshaft
   add_earth_forces(dt);  // lava, eruption and avalanche
   add_air_forces(dt);    // candle, smokering and heavygas
+  add_elements_forces(dt);  // geyser, haboob and seaspray
 }
 
 void Fluid::project() {
@@ -508,11 +532,13 @@ void Fluid::project() {
   if (p_.effect == Effect::dust) add_atmos_divergence();
   add_blaze_divergence();  // the mushroom's burst
   add_earth_divergence();  // the avalanche's cloud (docs/EFFECTS_EARTH.md)
+  add_elements_divergence();  // the geyser's vent (docs/EFFECTS_ELEMENTS.md)
   // Open boundaries: p = 0 on the border, which is never written. Warm-started from the last solve.
   constexpr float w = 1.7f;
   // the mushroom and launch stand on the ground too (docs/EFFECTS_BLAZE.md, docs/EFFECTS_FLOW.md), and water falls onto it
   const bool ground = on_ground(p_.effect) || p_.effect == Effect::mushroom || p_.effect == Effect::launch ||
-                    water(p_.effect) || earth(p_.effect) || p_.effect == Effect::heavygas;  // docs/EFFECTS_EARTH.md, docs/EFFECTS_AIR.md
+                    water(p_.effect) || earth(p_.effect) || p_.effect == Effect::heavygas ||  // docs/EFFECTS_EARTH.md, docs/EFFECTS_AIR.md
+                    elements(p_.effect);                                                       // docs/EFFECTS_ELEMENTS.md
   for (int it = 0; it < p_.pressure_iters; ++it) {
     for (const int colour : {0, 1}) {
       for (int y = 1; y <= n; ++y) {
@@ -612,6 +638,7 @@ void Fluid::render(std::span<std::uint8_t> out) const {
   if (render_flow(out)) return;    // launch, puffs and ink
   if (render_water(out)) return;   // waterfall, fountain, splash and rainshaft
   if (render_air(out)) return;     // candle, smokering and heavygas
+  if (render_elements(out)) return;  // geyser, haboob and seaspray
   if (atmos(p_.effect)) {
     render_atmos(out);
     return;
@@ -2331,6 +2358,398 @@ bool Fluid::render_air(std::span<std::uint8_t> out) const {
   return true;
 }
 
+// --- geyser, haboob and seaspray (docs/EFFECTS_ELEMENTS.md) -----------------------------------------------------------
+//
+// Three presets kept apart from the other effects' code: their sources, forces, decay and drawing. As in the other
+// blocks, every force is a function of the state where it acts, the position, the controls and the run's two noise
+// fields (curl_potential, source_flicker), which learned dynamics see as inputs; nothing follows a clock of its own. The
+// geyser and sea spray loop; the haboob plays once, is made at its first step (as the explosion's burst) and otherwise
+// does not follow the time since its start. All three stand on the ground (or the sea): the closed bottom border of the
+// pressure solve (project).
+//   geyser: water is the solver's soot (heavy, so it falls back) and steam is its heat (light, so it rises and thins).
+//         The conduit's state is the flicker noise at the vent (a coarse cell's centre, where a learned stepper sees
+//         exactly that value; it changes over seconds): while it is low the vent only simmers, as it rises the vent
+//         steams and surges, above a level the geyser erupts (a jet of water and steam), holds while it stays there and
+//         collapses as it falls, and the steam it threw up drifts off on the wind.
+//   haboob: the outflow's cold air is soot (heavy, faintly dusty): a gravity current. It plays once: a storm's cold
+//         pool is let go at the left side of the frame at its first step and fed from behind after it, and its front
+//         runs across the frame along the ground. Where it runs over the ground faster than a threshold it lifts dust
+//         (saltation, Bagnold 1941), which is the solver's heat without buoyancy: the gust behind the front lifts it
+//         into the head's billows, a tall dark wall, and behind the head it settles out into a dim haze.
+//   seaspray: wave crests break along the sea's surface near the bottom of the frame where the flicker noise there is
+//         high, more of them the stronger the gale (whitecap cover grows as the wind speed to the power 3.41, Monahan
+//         and O'Muircheartaigh 1980); the wind tears spray off them: drops (soot) that the wind carries and that fall
+//         back into the sea at their own speed, and a fine spray (heat) that drifts on and evaporates.
+
+namespace {
+
+bool elements_effect(Effect e) { return elements(e); }
+
+// geyser (cells of a 128-cell frame; the frame is about 25 m across, so the water's gravity, 9.8 m/s^2, is 50 cells/s^2)
+constexpr float kGeyserGround = 8.f;                  // the top of the sinter mound around the vent
+constexpr float kVentX = 64.5f;                       // the vent's middle
+constexpr float kConduitX = 62.5f, kConduitY = 6.5f;  // where the conduit's state is read (a coarse cell's centre)
+constexpr float kGeyserGravity = 50.f;
+// how far the conduit's state has risen towards an eruption: the vent steams from 0, erupts from 1
+float geyser_charge(const Params& p, float time) {
+  return (source_flicker(p, kConduitX, kConduitY, time) + 0.14f) / 0.32f;
+}
+// The vent now: how strongly it erupts and steams (0 to 1), and the speed it throws water up at (cells per second; s =
+// cells per cell of a 128-cell frame): the speed that throws a drop to the column's height, 50 to 90 cells (10 to 18 m,
+// intensity) in a full eruption, a sixth of it at its start and end, when it surges.
+struct Geyser {
+  float erupt, steam, speed;
+};
+Geyser geyser_state(const Params& p, float time, float s) {
+  const float q = geyser_charge(p, time), erupt = smoothstep(1.f, 1.35f, q);
+  const float H = (50.f + 40.f * p.intensity) * s * (0.15f + 0.85f * erupt);
+  return {erupt, std::max(0.1f, smoothstep(0.f, 1.f, q)), erupt > 0.f ? std::sqrt(2.f * kGeyserGravity * s * H) : 0.f};
+}
+// How the geyser's water drops move at a point (cells per second; X, Y in cells): in the column's core, a cone of about
+// 7 degrees from the vent, below the height the eruption throws water to, they rise at the speed a drop thrown from the
+// vent has there, sqrt(V^2 - 2 g z), fanning out, and wider as they slow near the top (drops thrown off the axis
+// turn sooner, so its crown is rounded); outside it, and above it, they fall at their terminal speed (about 8 m/s),
+// moving out from the column (more with turbulence) and, high up, with the wind.
+struct Drop {
+  float u, v;
+};
+Drop geyser_drop(const Params& p, const Geyser& gy, float x, float y, float s) {
+  const float G = kGeyserGravity * s, z = std::max(0.f, y - kGeyserGround * s), dx = x - kVentX * s;
+  const float top = gy.speed * gy.speed / (2.f * G), w = (5.f + 2.f * p.intensity) * s + 0.12f * z;
+  const float r = std::min(1.f, std::abs(dx) / w), crown = top * (1.f - 0.45f * r * r);  // drops thrown off the axis fall sooner
+  const float core = top > s ? (1.f - smoothstep(0.7f * w, 1.1f * w, std::abs(dx))) * (1.f - smoothstep(0.75f * crown, crown, z)) : 0.f;
+  const float rise = std::sqrt(std::max(0.f, gy.speed * gy.speed - 2.f * G * z));
+  const float out = (8.f + 14.f * p.turbulence) * s * std::clamp(dx / (w + 8.f * s), -1.f, 1.f);
+  const float drift = (2.f * p.wind - 1.f) * 12.f * s * smoothstep(0.f, 60.f * s, z);
+  const float head = (0.12f * rise + 18.f * s * (1.f - rise / std::max(gy.speed, s))) * std::clamp(dx / w, -1.f, 1.f);  // they spread as they slow
+  return {core * head + (1.f - core) * (out + drift), core * rise - (1.f - core) * 40.f * s};
+}
+
+// haboob: the ground (cells), and the outflow: its depth (30 to 64 cells, height) and dust density (0.6 to 1.2,
+// intensity) where it is let go, and the speed sqrt(g' h) of such an outflow, with g' its density times the dust's weight
+// (tune(): 20 cells/s^2 per unit); a gravity current's front runs at Fr sqrt(g' h) (Benjamin 1968), and
+// docs/EFFECTS_ELEMENTS.md §2 measures the Froude number Fr the simulator's current runs at
+constexpr float kHaboobGround = 3.f;
+struct Outflow {
+  float depth, density, speed;
+};
+Outflow haboob_outflow(const Params& p) {
+  const float h = 30.f + 34.f * p.wind, d = 0.6f + 0.6f * p.intensity;
+  return {h, d, std::sqrt(20.f * d * h)};
+}
+
+// seaspray: the sea's surface (cells); the wind (cells per second) at a height z above it, a logarithmic profile with
+// a roughness of 1.5 cells, reaching 30 to 90 cells per second at the top of the frame (gale)
+constexpr float kSea = 12.f;
+float sea_wind(const Params& p, float z) {
+  const float top = 30.f + 60.f * p.wind;
+  return top * std::log1p(std::max(0.f, z) / 1.5f) / std::log1p(116.f / 1.5f);
+}
+// the share of the surface where crests break: Monahan and O'Muircheartaigh's whitecap cover, 3.84e-6 U^3.41, for a
+// wind U (m/s, 10 m up) of 12 to 25 m/s (a near gale to a storm, the gale control), times 1.2 to 2.4 (intensity: bigger
+// seas break more), from 2% to 54% of the surface
+float sea_breaking(const Params& p) {
+  const float U = 12.f + 13.f * p.wind;
+  return std::min(0.6f, (1.2f + 1.2f * p.intensity) * 3.84e-6f * std::pow(U, 3.41f));
+}
+
+}  // namespace
+
+bool Fluid::add_elements_sources(float dt) {
+  if (!elements_effect(p_.effect)) return false;
+  const float n = f(n_), s = n / 128.f, I = p_.intensity;
+  const auto flicker = [&](int x, int y) { return source_flicker(p_, f(x) / s, f(y) / s, time_); };
+  const auto box = [&](float x0, float x1, float y0, float y1, auto&& fn) {
+    const int xl = std::max(1, static_cast<int>(x0)), xh = std::min(n_, static_cast<int>(x1) + 1);
+    const int yl = std::max(1, static_cast<int>(y0)), yh = std::min(n_, static_cast<int>(y1) + 1);
+    for (int y = yl; y <= yh; ++y) {
+      for (int x = xl; x <= xh; ++x) fn(x, y);
+    }
+  };
+  if (p_.effect == Effect::geyser) {
+    // The vent: steam simmers out of it always; as the conduit's charge rises it steams harder and surges, and from a
+    // charge of 1 it erupts: water and steam are blown up at the speed that throws water to the column's height,
+    // (50 to 90 cells, intensity: 10 to 18 m) times the eruption's strength, broken into surges by the flicker noise.
+    const Geyser gy = geyser_state(p_, time_, s);
+    const float erupt = gy.erupt, steam = gy.steam, V = gy.speed;
+    const float cx = kVentX * s, g = kGeyserGround * s, hw = (4.f + 2.f * I) * s, hh = 3.f * s;
+    box(cx - hw, cx + hw, g - hh, g + hh, [&](int x, int y) {
+      const float shape = (1.f - smoothstep(0.6f, 1.f, std::abs(f(x) - cx) / hw)) * (1.f - smoothstep(0.5f, 1.f, std::abs(f(y) - g) / hh));
+      if (shape <= 0.f) return;
+      const float k = shape * (0.3f + 0.7f * smoothstep(-0.4f, 0.4f, flicker(x, y)));
+      if (erupt > 0.f) {
+        soot_[x, y] = std::max(soot_[x, y], (1.1f + 0.3f * I) * erupt * k);
+        v_[x, y] = std::max(v_[x, y], V * k);
+        u_[x, y] *= 1.f - shape;
+      }
+      temp_[x, y] = std::max(temp_[x, y], (0.45f + 0.25f * I) * steam * k);
+      v_[x, y] = std::max(v_[x, y], (8.f + 20.f * steam) * s * k);
+    });
+    return true;
+  }
+  if (p_.effect == Effect::haboob) {
+    // At its first step the storm's cold pool stands at the left side of the frame (26 cells wide, the outflow's
+    // depth), lumpy with the flicker noise, and is let go; after it the downdraft goes on feeding it at the left edge:
+    // dusty air drawn towards the outflow's density over its depth, moving forward as the current's body does (a
+    // constant-flux current).
+    const Outflow o = haboob_outflow(p_);
+    const float h = o.depth * s, g = kHaboobGround * s, feed = 1.f - std::exp(-4.f * dt), forward = 0.8f * o.speed * s;
+    if (time_ <= 0.f) {
+      box(1.f, 30.f * s, g, g + 1.2f * h, [&](int x, int y) {
+        const float fl = flicker(x, y);
+        const float shape = (1.f - smoothstep(0.75f * h, (1.05f + 0.15f * fl) * h, f(y) - g)) * (1.f - smoothstep(22.f * s, 30.f * s, f(x)));
+        if (shape <= 0.f) return;
+        soot_[x, y] = std::max(soot_[x, y], o.density * shape * (0.75f + 0.25f * smoothstep(-0.4f, 0.4f, fl)));
+        temp_[x, y] = std::max(temp_[x, y], 0.5f * soot_[x, y]);  // the storm's own dust
+      });
+    }
+    box(1.f, 10.f * s, 1.f, g + 1.1f * h, [&](int x, int y) {
+      const float shape = (1.f - smoothstep(0.7f * h, 1.1f * h, f(y) - g)) * (1.f - smoothstep(5.f * s, 10.f * s, f(x)));
+      if (shape <= 0.f) return;
+      const float k = feed * shape;
+      soot_[x, y] += k * (o.density * (0.75f + 0.25f * smoothstep(-0.4f, 0.4f, flicker(x, y))) - soot_[x, y]);
+      temp_[x, y] += k * (0.3f * soot_[x, y] - temp_[x, y]);
+      u_[x, y] += k * (forward - u_[x, y]);
+    });
+    return true;
+  }
+  // seaspray: where a crest breaks (the flicker along the surface above a level the breaking share sets) it rises into
+  // a hump of white water, 4 to 10 cells high (intensity: the sea's size) where it breaks hardest, and the wind tears
+  // spray off its top: drops thrown up at 25 to 55 cells per second and forward at the wind's speed there, and a fine
+  // spray, more the stronger the gale.
+  const float y0 = kSea * s, up = (25.f + 30.f * I) * s, tear = 0.5f + 0.5f * p_.wind;
+  const float level = 0.36f - 0.45f * sea_breaking(p_);  // the flicker's level above which a crest breaks
+  const float hmax = (4.f + 6.f * I) * s;
+  box(1.f, n, y0 - 2.f * s, y0 + 1.6f * hmax, [&](int x, int y) {
+    const float crest = smoothstep(level, level + 0.2f, source_flicker(p_, f(x) / s, kSea, time_));
+    if (crest <= 0.f) return;
+    const float hc = hmax * crest, z = f(y) - y0;
+    if (z > 1.6f * hc) return;
+    const float fl = smoothstep(-0.3f, 0.5f, flicker(x, y));
+    if (z <= hc && z >= hc - 3.f * s) soot_[x, y] = std::max(soot_[x, y], (0.5f + 0.3f * I) * crest * (0.5f + 0.5f * fl));  // the white cap
+    const float lip = (1.f - smoothstep(0.f, 0.6f * hc + s, std::abs(z - hc))) * crest;  // the crest's top, where it is torn
+    if (lip <= 0.f) return;
+    const float k = lip * tear * fl;
+    soot_[x, y] = std::max(soot_[x, y], 0.9f * k);
+    temp_[x, y] = std::max(temp_[x, y], (0.6f + 0.5f * p_.wind) * k);
+    u_[x, y] += lip * (sea_wind(p_, (hc + 6.f * s) / s) * s - u_[x, y]);
+    v_[x, y] += lip * (up * crest - v_[x, y]);
+  });
+  return true;
+}
+
+// geyser: its water drags the air in the column with it a little; the wind carries the steam, more higher up; the
+// ground around the vent is still. haboob: the rough ground holds back the air at it (so the front's nose is raised
+// above the ground, as a gravity current's is). seaspray: the wind over the sea, everywhere (a logarithmic profile); the
+// sea's surface stops what falls onto it.
+void Fluid::add_elements_forces(float dt) {
+  if (!elements_effect(p_.effect)) return;
+  const float n = f(n_), s = n / 128.f;
+  // as fog's: the air in the ground is still and what comes down onto it stops, but for an opening (the geyser's vent)
+  const auto ground = [&](float g, float open_x, float open_hw) {
+    const float top = g + 4.f * s;
+    const int y_hi = std::min(n_, static_cast<int>(top) + 1);
+    for (int y = 1; y <= y_hi; ++y) {
+      const float hold = 1.f - smoothstep(g - 2.f * s, g + 2.f * s, f(y)), stop = 1.f - smoothstep(g, top, f(y));
+      for (int x = 1; x <= n_; ++x) {
+        const float shut = smoothstep(0.6f * open_hw, open_hw, std::abs(f(x) - open_x));
+        u_[x, y] *= 1.f - hold * shut;
+        v_[x, y] *= 1.f - shut * (v_[x, y] < 0.f ? std::max(hold, stop) : hold);
+      }
+    }
+  };
+  if (p_.effect == Effect::geyser) {
+    // The water moves as drops do, through the air (geyser_drop, elements_decay), and drags the air in the column up a
+    // little; the steam is carried by the wind, more higher up; bare air keeps little momentum of its own.
+    const Geyser gy = geyser_state(p_, time_, s);
+    const float wind = (2.f * p_.wind - 1.f) * 40.f * s, drag = 1.f - std::exp(-1.5f * dt), g = kGeyserGround * s;
+    const float pull = 1.f - std::exp(-2.f * dt), calm = 1.f - std::exp(-2.f * dt);
+    for (int y = 1; y <= n_; ++y) {
+      const float shear = smoothstep(g, g + 60.f * s, f(y));  // the wind is weaker near the ground
+      for (int x = 1; x <= n_; ++x) {
+        const float T = temp_[x, y], D = soot_[x, y];
+        if (D > 0.f) {
+          const Drop d = geyser_drop(p_, gy, f(x), f(y), s);
+          const float w = pull * std::min(1.f, 2.f * D);
+          u_[x, y] += w * (0.3f * d.u - u_[x, y]);
+          v_[x, y] += w * (0.3f * d.v - v_[x, y]);
+        }
+        const float m = std::min(1.f, 3.f * T) * (1.f - std::min(1.f, 0.7f * D));
+        if (m > 0.f) u_[x, y] += drag * m * (0.3f + 0.7f * shear) * (wind - u_[x, y]);
+        const float bare = calm * (1.f - std::min(1.f, 4.f * (D + T)));
+        u_[x, y] *= 1.f - bare;
+        v_[x, y] *= 1.f - bare;
+      }
+    }
+    ground(g, kVentX * s, (8.f + 2.f * p_.intensity) * s);
+    return;
+  }
+  if (p_.effect == Effect::haboob) {  // the rough ground: the air within 2 cells of it is held back (no slip)
+    const float g = kHaboobGround * s, rough = 1.f - std::exp(-3.f * dt);
+    for (int y = 1; y <= std::min(n_, static_cast<int>(g + 2.f * s) + 1); ++y) {
+      const float near = 1.f - smoothstep(g, g + 2.f * s, f(y));
+      for (int x = 1; x <= n_; ++x) u_[x, y] -= rough * near * u_[x, y];
+    }
+    ground(g, -1000.f, 1.f);  // no opening
+    return;
+  }
+  // seaspray: all the air moves with the wind (drawn towards the profile at its height); the drops fall at their own
+  // speed relative to it (elements_decay), so the wind needs to carry only the air
+  const float drag = 1.f - std::exp(-1.2f * dt), y0 = kSea * s;
+  for (int y = 1; y <= n_; ++y) {
+    const float w = sea_wind(p_, (f(y) - y0) / s) * s;
+    for (int x = 1; x <= n_; ++x) u_[x, y] += drag * (w - u_[x, y]);
+  }
+  ground(y0, -1000.f, 1.f);  // no opening
+}
+
+// geyser: the vent discharges water and steam, so the pressure solve targets an outflow there (as the explosion's hot
+// gas expands): the volume that leaves the vent at the jet's speed, from the conduit under the ground.
+void Fluid::add_elements_divergence() {
+  if (p_.effect != Effect::geyser) return;
+  const float n = f(n_), s = n / 128.f, I = p_.intensity;
+  const Geyser gy = geyser_state(p_, time_, s);
+  const float V = gy.speed, slow = (8.f + 20.f * gy.steam) * s;
+  const float cx = kVentX * s, g = kGeyserGround * s, hw = (4.f + 2.f * I) * s, depth = 4.f * s;
+  const float rate = std::max(V, slow) / depth;  // per second: the jet's speed over the depth it comes from
+  const int xl = std::max(1, static_cast<int>(cx - hw)), xh = std::min(n_, static_cast<int>(cx + hw) + 1);
+  const int yl = std::max(1, static_cast<int>(g - depth)), yh = std::min(n_, static_cast<int>(g) + 1);
+  for (int y = yl; y <= yh; ++y) {
+    for (int x = xl; x <= xh; ++x) {
+      const float shape = (1.f - smoothstep(0.6f, 1.f, std::abs(f(x) - cx) / hw)) * (1.f - smoothstep(0.5f, 1.f, std::abs(f(y) - (g - 0.5f * depth)) / (0.5f * depth)));
+      div_[x, y] += rate * shape;
+    }
+  }
+}
+
+// All three: where material leaves the frame the outermost cells take their inner neighbours' values (it flows out
+// evenly, as the earth effects'), and where clear air comes in (the sea spray's upwind side) they are clear. geyser:
+// its water moves as drops (geyser_drop); water that comes down onto the ground runs off, and steams (it is hot); hot
+// water steams a little as it flies. haboob: the current lifts dust where it runs over the ground faster than a
+// threshold (Bagnold's flux, as the cube of the wind over the ground). seaspray: the drops fall at their own speed through the air (as rain does,
+// about 2 m/s: 20 cells per second for the frame's 12 m), and what falls back into the sea is gone; the fine spray
+// evaporates (tune()'s cooling).
+void Fluid::elements_decay(float dt) {
+  if (!elements_effect(p_.effect)) return;
+  const float n = f(n_), s = n / 128.f;
+  for (Field* q : {&temp_, &soot_}) {
+    for (int k = 1; k <= n_; ++k) {
+      (*q)[1, k] = (*q)[2, k];
+      (*q)[n_, k] = (*q)[n_ - 1, k];
+      (*q)[k, n_] = (*q)[k, n_ - 1];
+    }
+  }
+  if (p_.effect == Effect::geyser) {
+    // the drops move through the air: the water is carried on by its drop velocity less the air's (which the solver's
+    // advection has already moved it by)
+    const Geyser gy = geyser_state(p_, time_, s);
+    for (int y = 1; y <= n_; ++y) {
+      for (int x = 1; x <= n_; ++x) {
+        const Drop d = geyser_drop(p_, gy, f(x), f(y), s);
+        tmp_a_[x, y] = soot_.sample(f(x) - dt * (d.u - u_[x, y]), f(y) - dt * (d.v - v_[x, y]));
+      }
+    }
+    for (int y = 1; y <= n_; ++y) {
+      for (int x = 1; x <= n_; ++x) soot_[x, y] = tmp_a_[x, y];
+    }
+    const float g = kGeyserGround * s, turn = 1.f - std::exp(-12.f * dt), fly = 0.25f * dt;
+    for (int y = 1; y <= n_; ++y) {
+      const float land = 1.f - smoothstep(g + s, g + 5.f * s, f(y)), under = f(y) < g - 3.f * s ? 1.f : 0.f;
+      for (int x = 1; x <= n_; ++x) {
+        const float D = soot_[x, y];
+        if (D <= 0.f) continue;
+        if (under > 0.f) {
+          soot_[x, y] = 0.f;
+          continue;
+        }
+        const float away = smoothstep(7.f * s, 11.f * s, std::abs(f(x) - kVentX * s));  // not the vent itself
+        if (land > 0.f && away > 0.f) {
+          const float c = turn * land * away * D;
+          soot_[x, y] -= c;
+          temp_[x, y] += 0.5f * c;
+        }
+        temp_[x, y] += fly * D;  // hot water flashes to steam as it flies
+      }
+    }
+    return;
+  }
+  if (p_.effect == Effect::haboob) {
+    // where the air runs over the ground faster than half the outflow's speed it lifts dust (in the lowest 6 cells),
+    // at a rate that grows as the cube of the wind there (Bagnold's flux), up to twice the outflow's density
+    const Outflow o = haboob_outflow(p_);
+    const float U = o.speed * s, g = kHaboobGround * s, pick = 6.f * dt;
+    for (int y = 1; y <= n_ && f(y) < g + 6.f * s; ++y) {
+      const float low = 1.f - smoothstep(g + 2.f * s, g + 6.f * s, f(y));
+      for (int x = 1; x <= n_; ++x) {
+        const float r = std::abs(u_[x, y]) / U;
+        if (r <= 0.5f) continue;
+        temp_[x, y] += pick * low * (r * r * r - 0.125f) * std::max(0.f, 2.f * o.density - temp_[x, y]);
+      }
+    }
+    return;
+  }
+  // seaspray
+  for (int k = 1; k <= n_; ++k) temp_[1, k] = soot_[1, k] = 0.f;  // clear air comes in upwind
+  const float c = std::min(0.9f, 20.f * s * dt), y0 = kSea * s;
+  for (int x = 1; x <= n_; ++x) {
+    for (int y = 1; y <= n_; ++y) {
+      const float above = y < n_ ? soot_[x, y + 1] : soot_[x, y];
+      soot_[x, y] += c * (above - soot_[x, y]);  // upwind: the drops come down from the cell above
+    }
+    for (int y = 1; y <= n_ && f(y) < y0 - 2.f * s; ++y) temp_[x, y] = soot_[x, y] = 0.f;
+  }
+}
+
+namespace {
+
+struct Shade {
+  Rgb lit, dark;
+};
+Rgb shade(const Shade& c, float light) {
+  return {c.dark.r + (c.lit.r - c.dark.r) * light, c.dark.g + (c.lit.g - c.dark.g) * light, c.dark.b + (c.lit.b - c.dark.b) * light};
+}
+
+}  // namespace
+
+// Reflected light only, lit from above and to the left and shaded by what lies towards the light. geyser: its water
+// white and frothy, blue-grey in its own shade, its steam soft and pale. haboob: ochre dust, deeply self-shadowed, the
+// thin dust behind it dim. seaspray: white drops and foam, grey-blue in their shade, the fine spray a pale haze. The
+// ground and the sea are the scene's to draw.
+bool Fluid::render_elements(std::span<std::uint8_t> out) const {
+  if (!elements_effect(p_.effect)) return false;
+  const int S = p_.size;
+  const float n = f(n_), sc = n / f(S);
+  constexpr float lx = -0.45f, ly = 0.89f;  // towards the light: up and to the left
+  const bool dust = p_.effect == Effect::haboob;
+  const Shade water = p_.effect == Effect::geyser ? Shade{{0.98f, 0.99f, 1.00f}, {0.66f, 0.73f, 0.80f}}
+                      : dust                      ? Shade{{0.80f, 0.58f, 0.38f}, {0.20f, 0.14f, 0.10f}}
+                                                  : Shade{{0.96f, 0.98f, 1.00f}, {0.48f, 0.57f, 0.66f}};
+  const Shade vapour = p_.effect == Effect::geyser ? Shade{{0.95f, 0.96f, 0.97f}, {0.58f, 0.61f, 0.66f}} : Shade{{0.86f, 0.90f, 0.94f}, {0.62f, 0.67f, 0.73f}};
+  const float density = dust ? 2.4f : p_.effect == Effect::geyser ? 2.0f : 2.6f, shading = dust ? 0.35f : 0.05f;
+  for (int py = 0; py < S; ++py) {
+    for (int px = 0; px < S; ++px) {
+      const float gx = (f(px) + 0.5f) * sc + 0.5f;
+      const float gy = n - (f(py) + 0.5f) * sc + 0.5f;
+      const float T = temp_.sample(gx, gy), D = soot_.sample(gx, gy);
+      float tau = 0.f;  // optical depth towards the light
+      for (int k = 1; k <= 12; ++k) {
+        const float qx = gx + lx * 2.f * f(k) * sc, qy = gy + ly * 2.f * f(k) * sc;
+        tau += dust ? temp_.sample(qx, qy) + 0.2f * soot_.sample(qx, qy) : soot_.sample(qx, qy) + 0.3f * temp_.sample(qx, qy);
+      }
+      const float light = std::exp(-shading * tau);
+      const float aw = dust ? 1.f - std::exp(-density * T - 1.2f * D) : 1.f - std::exp(-density * D);
+      const float av = dust ? 0.f : 0.85f * (1.f - std::exp(-1.8f * T)) * (1.f - aw);
+      const Rgb cw = shade(water, light), cv = shade(vapour, 0.6f + 0.4f * light);
+      auto o = out.subspan((static_cast<std::size_t>(py) * S + px) * 4, 4);
+      o[0] = q8(cw.r * aw + cv.r * av);
+      o[1] = q8(cw.g * aw + cv.g * av);
+      o[2] = q8(cw.b * aw + cv.b * av);
+      o[3] = q8(aw + av);
+    }
+  }
+  return true;
+}
+
 void stamp(Clip& clip, const Params& p) {
   clip.effect = effect_name(p.effect);
   clip.source = "sim";
@@ -2367,7 +2786,7 @@ Clip simulate(const Params& p) {
     const int warmup = p.warmup >= 0 ? p.warmup
                        : (p.effect == Effect::smoke                                                    ? 180
                           : atmos(p.effect) || water(p.effect) || earth(p.effect) ||
-                                    p.effect == Effect::heavygas ? 150  // heavy gas pools as fog does
+                                    p.effect == Effect::heavygas || elements(p.effect) ? 150  // heavy gas pools as fog does
                                                                  : flow_warmup(p.effect));
     for (int i = 0; i < warmup; ++i) fluid.step_frame();
   }

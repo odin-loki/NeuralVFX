@@ -243,7 +243,8 @@ TEST(Sim, NewEffectsAreNamedAndLoop) {
     ASSERT_TRUE(sim::parse_effect(sim::effect_name(e), back));
     EXPECT_EQ(back, e);
     EXPECT_EQ(sim::effect_loops(e), e != sim::Effect::dust && e != sim::Effect::mushroom && e != sim::Effect::splash &&
-                                       e != sim::Effect::avalanche && e != sim::Effect::smokering);  // they play once, as the explosion
+                                       e != sim::Effect::avalanche && e != sim::Effect::smokering &&
+                                       e != sim::Effect::haboob);  // they play once, as the explosion
     EXPECT_EQ(sim::simulate(small(e)).rgba, sim::simulate(small(e)).rgba) << sim::effect_name(e);
   }
   EXPECT_EQ(sim::kAllEffects.size(), sim::kEffects.size() + sim::kNewEffects.size());
@@ -1606,6 +1607,260 @@ TEST(Sim, HeavyGasSpillsAlongTheFloorAndPoolsInTheHollows) {
   EXPECT_EQ(bad, 0);
   EXPECT_GT(covered, 200);
   EXPECT_GT(rgb, 0.6 * alpha);  // pale
+}
+
+// --- geyser, haboob and seaspray (docs/EFFECTS_ELEMENTS.md) ---------------------------------------------------------
+
+TEST(Sim, ElementsEffectsHaveTheirOwnControlsAndOnlyTheHaboobPlaysOnce) {
+  const std::array<std::pair<sim::Effect, std::string_view>, 3> second{
+      {{sim::Effect::geyser, "wind"}, {sim::Effect::haboob, "height"}, {sim::Effect::seaspray, "gale"}}};
+  for (const auto& [e, name] : second) {
+    sim::Effect back{};
+    ASSERT_TRUE(sim::parse_effect(sim::effect_name(e), back));
+    EXPECT_EQ(back, e);
+    EXPECT_TRUE(std::ranges::contains(sim::kNewEffects, e));
+    EXPECT_FALSE(std::ranges::contains(sim::kEffects, e));
+    const auto names = sim::control_names(e);
+    EXPECT_EQ(names[0], "intensity");
+    EXPECT_EQ(names[1], name);
+    EXPECT_EQ(names[2], "turbulence");
+    EXPECT_EQ(sim::effect_loops(e), e != sim::Effect::haboob);
+  }
+  EXPECT_EQ(sim::effect_name(sim::Effect::geyser), "geyser");
+  EXPECT_EQ(sim::effect_name(sim::Effect::haboob), "haboob");
+  EXPECT_EQ(sim::effect_name(sim::Effect::seaspray), "seaspray");
+  EXPECT_EQ(sim::one_shot_frames(sim::Effect::haboob), 150);  // 5 s
+  EXPECT_EQ(sim::one_shot_frames(sim::Effect::geyser), 0);
+  // appended after the air effects (docs/EFFECTS_AIR.md), in this order
+  const auto at = [](sim::Effect e) { return std::ranges::find(sim::kAllEffects, e) - sim::kAllEffects.begin(); };
+  EXPECT_GT(at(sim::Effect::geyser), at(sim::Effect::heavygas));
+  EXPECT_EQ(at(sim::Effect::haboob), at(sim::Effect::geyser) + 1);
+  EXPECT_EQ(at(sim::Effect::seaspray), at(sim::Effect::geyser) + 2);
+}
+
+namespace {
+
+// Water (soot) and steam (heat) of a state: their amounts, and the highest row (as a fraction of the frame) where there
+// is more than `level` of each.
+struct Column {
+  double water = 0, steam = 0, water_top = 0, steam_top = 0, steam_x = 0;
+};
+Column column_of(const sim::State& s, float level = 0.1f) {
+  Column o;
+  for (int y = 0; y < s.n; ++y) {
+    for (int x = 0; x < s.n; ++x) {
+      const auto i = static_cast<std::size_t>(y * s.n + x);
+      o.water += s.soot[i];
+      o.steam += s.temp[i];
+      o.steam_x += s.temp[i] * (x + 0.5) / s.n;
+      if (s.soot[i] > level) o.water_top = std::max(o.water_top, (y + 1.0) / s.n);
+      if (s.temp[i] > level) o.steam_top = std::max(o.steam_top, (y + 1.0) / s.n);
+    }
+  }
+  if (o.steam > 0) o.steam_x /= o.steam;
+  return o;
+}
+
+// The geyser's conduit, as the simulator reads it (docs/EFFECTS_ELEMENTS.md §2): it erupts once the flicker noise at
+// the coarse cell left of the vent rises above 0.18.
+float conduit(const sim::Params& p, float t) { return sim::source_flicker(p, 62.5f, 6.5f, t); }
+
+}  // namespace
+
+TEST(Sim, GeyserEruptsHoldsCollapsesIntoSteamAndIsQuietBetween) {
+  auto p = atmos_params(sim::Effect::geyser, 0.7f, 0.5f, 0.4f);
+  p.seed = 1;
+  sim::Fluid f(p);
+  int quiet = 0, erupting = 0, quiet_dry = 0, high = 0, frames = 0, after = 0, after_steam = 0;
+  double peak = 0;
+  bool was_erupting = false;
+  int since = 1000;
+  for (int i = 0; i < 1800; ++i) {  // a minute
+    f.step_frame();
+    const float t = static_cast<float>(i + 1) / 30.f, q = conduit(p, t);
+    const Column c = column_of(f.state());
+    ++frames;
+    if (q < -0.1f) {  // the conduit low: the vent only simmers
+      ++quiet;
+      quiet_dry += c.water < 1.0;
+    }
+    if (q > 0.30f) {  // well into an eruption: a column of water
+      ++erupting;
+      high += c.water_top > 0.4;
+      peak = std::max(peak, c.water_top);
+    }
+    since = q > 0.18f ? 0 : since + 1;
+    if (was_erupting && q < 0.18f) since = 0;
+    was_erupting = q > 0.18f;
+    if (since >= 45 && since < 60 && q < 0.0f) {  // 1.5 to 2 s after an eruption ended: its steam is still up
+      ++after;
+      after_steam += c.steam > 10.0 && c.steam_top > 0.3;
+    }
+  }
+  EXPECT_GT(quiet, frames / 5);  // quiet for a fifth of the time or more
+  EXPECT_GT(erupting, 60);       // and erupting for seconds
+  EXPECT_GT(quiet_dry, 0.9 * quiet);  // no water while it is quiet
+  EXPECT_GT(high, 0.6 * erupting);    // the column rises over 40% of the frame while it erupts
+  EXPECT_GT(peak, 0.5);
+  EXPECT_GT(after, 0);
+  EXPECT_GT(after_steam, 0.7 * after);  // the steam lingers after the water has fallen
+  // intensity: a taller column; wind: the steam drifts with it
+  const auto top = [](float intensity, float wind) {
+    auto q = atmos_params(sim::Effect::geyser, intensity, wind, 0.4f);
+    q.seed = 1;
+    sim::Fluid g(q);
+    double best = 0, sx = 0;
+    int k = 0;
+    for (int i = 0; i < 600; ++i) {
+      g.step_frame();
+      const Column c = column_of(g.state());
+      best = std::max(best, c.water_top);
+      if (i >= 300 && c.steam > 1.0) {
+        sx += c.steam_x;
+        ++k;
+      }
+    }
+    return std::pair{best, k > 0 ? sx / k : 0.5};
+  };
+  const auto low = top(0.f, 0.5f), tall = top(1.f, 0.5f), left = top(0.7f, 0.f), right = top(0.7f, 1.f);
+  EXPECT_GT(tall.first, low.first + 0.1);
+  EXPECT_LT(left.second, 0.45);
+  EXPECT_GT(right.second, 0.55);
+}
+
+namespace {
+
+// The haboob's front (the rightmost column holding more than `amount` of the outflow's cold air, as a fraction of the
+// frame), the height of its head (the highest row with dust within a fifth of the frame behind the front) and the
+// lifted dust (heat).
+struct Front {
+  double x = 0, head = 0, dust = 0, cy = 0, cold = 0;
+};
+Front front_of(const sim::State& s) {
+  Front o;
+  const double n = s.n;
+  int fx = -1;
+  for (int x = s.n - 1; x >= 0 && fx < 0; --x) {
+    double c = 0;
+    for (int y = 0; y < s.n; ++y) c += s.soot[static_cast<std::size_t>(y * s.n + x)];
+    if (c > 3.0 * n / 128.0) fx = x;
+  }
+  o.x = (fx + 1) / n;
+  for (int y = 0; y < s.n; ++y) {
+    for (int x = 0; x < s.n; ++x) {
+      const auto i = static_cast<std::size_t>(y * s.n + x);
+      o.dust += s.temp[i];
+      o.cold += s.soot[i];
+      o.cy += s.soot[i] * (y + 0.5) / n;
+      if (x <= fx && x >= fx - s.n / 5 && s.soot[i] + s.temp[i] > 0.2) o.head = std::max(o.head, (y + 1) / n);
+    }
+  }
+  if (o.cold > 0) o.cy /= o.cold;
+  return o;
+}
+
+}  // namespace
+
+TEST(Sim, HaboobRunsAlongTheGroundAsAGravityCurrentAtItsSpeedAndLiftsDust) {
+  // the front runs right along the ground at about the gravity-current speed of its outflow, U = Fr sqrt(g' h) with
+  // g' = 20 cells/s^2 times its density and h its depth (docs/EFFECTS_ELEMENTS.md §2): at intensity 0.5 and height 0.5
+  // a density of 0.9 and a depth of 47 cells of a 128-cell frame, sqrt(g' h) = 29 cells per second
+  const auto run = [](float intensity, float height, std::uint64_t seed) {
+    auto p = atmos_params(sim::Effect::haboob, intensity, height, 0.5f);
+    p.seed = seed;
+    sim::Fluid f(p);
+    std::vector<Front> v;
+    for (int i = 0; i < 150; ++i) {
+      f.step_frame();
+      v.push_back(front_of(f.state()));
+    }
+    return v;
+  };
+  double fr = 0;
+  for (const std::uint64_t seed : {1, 2, 3, 4}) {
+    const auto v = run(0.5f, 0.5f, seed);
+    for (int i = 15; i < 150; i += 15) EXPECT_GE(v[static_cast<std::size_t>(i)].x, v[static_cast<std::size_t>(i - 15)].x - 0.02) << i;
+    EXPECT_GT(v[119].x, 0.65) << seed;  // across most of the frame in 4 s
+    EXPECT_LT(v[59].cy, 0.3) << seed;   // a current along the ground
+    EXPECT_GT(v[59].head, 0.15) << seed;  // with a head
+    EXPECT_GT(v[119].dust, 1.3 * v[0].dust) << seed;  // it lifts dust as it runs
+    // the front's speed from 1.5 to 3 s, in cells of a 128-cell frame per second, over sqrt(g' h)
+    const double U = std::max(0.0, v[89].x - v[44].x) * 128.0 / 1.5;
+    fr += U / std::sqrt(20.0 * 0.9 * 47.0) / 4.0;
+  }
+  EXPECT_GT(fr, 0.6);  // gravity currents: Fr from 1/sqrt(2) (half the depth, Benjamin 1968) to 1.19 (deep, Huppert
+  EXPECT_LT(fr, 1.5);  // and Simpson 1980) and sqrt(2) (deep and ideal, Benjamin)
+  // a denser outflow runs faster; a deeper one stands taller
+  const auto weak = run(0.f, 0.5f, 1), strong = run(1.f, 0.5f, 1), low = run(0.5f, 0.f, 1), tall = run(0.5f, 1.f, 1);
+  EXPECT_GT(strong[89].x, weak[89].x + 0.05);
+  EXPECT_GT(tall[29].head, low[29].head + 0.1);
+  // ochre dust: reflected light only
+  auto p = atmos_params(sim::Effect::haboob, 0.6f, 0.5f, 0.5f);
+  p.frames = 45;
+  const Clip c = sim::simulate(p);
+  long bad = 0, covered = 0;
+  double r = 0, b = 0;
+  for (std::size_t i = 0; i < c.rgba.size(); i += 4) {
+    for (int k = 0; k < 3; ++k) bad += c.rgba[i + static_cast<std::size_t>(k)] > c.rgba[i + 3] + 1;
+    if (c.rgba[i + 3] > 64) {
+      ++covered;
+      r += c.rgba[i];
+      b += c.rgba[i + 2];
+    }
+  }
+  EXPECT_EQ(bad, 0);
+  EXPECT_GT(covered, 200);
+  EXPECT_GT(r, 1.5 * b);  // brown
+}
+
+TEST(Sim, SeaSprayIsTornOffTheCrestsDriftsDownwindAndFallsBack) {
+  const auto spray = [](float intensity, float gale) {
+    const auto v = air_run(sim::Effect::seaspray, intensity, gale, 0.5f, 240);
+    double drops = 0, mist = 0, du = 0, dmass = 0, mist_y = 0, drop_y = 0;
+    for (int i = 120; i < 240; ++i) {
+      const sim::State& s = v[static_cast<std::size_t>(i)];
+      for (int y = 0; y < s.n; ++y) {
+        for (int x = 0; x < s.n; ++x) {
+          const auto k = static_cast<std::size_t>(y * s.n + x);
+          drops += s.soot[k];
+          mist += s.temp[k];
+          du += s.soot[k] * s.u[k];
+          drop_y += s.soot[k] * (y + 0.5) / s.n;
+          mist_y += s.temp[k] * (y + 0.5) / s.n;
+        }
+      }
+      // nothing below the sea's surface (it fell back into the sea)
+      for (int y = 0; y < s.n * 7 / 100; ++y) {
+        for (int x = 0; x < s.n; ++x) EXPECT_EQ(s.soot[static_cast<std::size_t>(y * s.n + x)], 0.f);
+      }
+    }
+    dmass = std::max(drops, 1e-9);
+    return std::array<double, 5>{drops, mist, du / dmass, drop_y / dmass, mist_y / std::max(mist, 1e-9)};
+  };
+  const auto calm = spray(0.5f, 0.f), gale = spray(0.5f, 1.f), big = spray(1.f, 0.5f), small = spray(0.f, 0.5f);
+  EXPECT_GT(gale[0], 3.0 * calm[0]);  // whitecaps grow as the wind speed to the power 3.41: far more spray in a gale
+  EXPECT_GT(gale[1], 3.0 * calm[1]);
+  EXPECT_GT(big[0], 1.3 * small[0]);  // and on a bigger sea
+  EXPECT_GT(gale[2], 0.0);            // the drops are carried downwind
+  EXPECT_LT(gale[3], 0.35);           // low over the sea
+  EXPECT_GT(gale[4], gale[3]);        // the fine spray drifts higher than the drops
+  // white spray: reflected light only
+  auto p = atmos_params(sim::Effect::seaspray, 0.7f, 0.8f, 0.5f);
+  p.frames = 12;
+  const Clip c = sim::simulate(p);
+  long bad = 0, covered = 0;
+  double rgb = 0, alpha = 0;
+  for (std::size_t i = 0; i < c.rgba.size(); i += 4) {
+    for (int k = 0; k < 3; ++k) bad += c.rgba[i + static_cast<std::size_t>(k)] > c.rgba[i + 3] + 1;
+    if (c.rgba[i + 3] > 64) {
+      ++covered;
+      rgb += c.rgba[i] + c.rgba[i + 1] + c.rgba[i + 2];
+      alpha += 3.0 * c.rgba[i + 3];
+    }
+  }
+  EXPECT_EQ(bad, 0);
+  EXPECT_GT(covered, 30);
+  EXPECT_GT(rgb, 0.7 * alpha);  // pale
 }
 
 TEST(Sim, ParamsRoundTripThroughClipMetadata) {
