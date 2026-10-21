@@ -216,10 +216,10 @@ level below its level (REPORT.md §22 measures it and sets the default):
   its slot at the level below, and its cost is that level's steps and pictures, plus with BILINEAR the 2x of every picture
   shown (`nvfx_manager_calibrate` measures the 2x too). Drawing at half size is a downward change (it happens at once,
   through a level transfer, §2.1); drawing at full size again is an upward one (it waits until the plan is under 85% of
-  the budget and `min_dwell` has passed, §2.4). A
-  simulation whose picture is still to grow takes its larger level first and is drawn at half size once there, so a
-  growing effect makes one transfer, not two. Under a short budget a simulation drawn at half size goes down with its
-  drawing: a 256 px picture drawn at 128, then a 128 px one drawn at 64.
+  the budget and `min_dwell` has passed, §2.4). A simulation that is still to grow when it passes the threshold goes up
+  a picture level with its drawing where it was (its picture grows, its drawing does not: no transfer). Under a short
+  budget a simulation drawn at half size goes down with its drawing (a 256 px picture drawn at 128, then a 128 px one
+  drawn at 64), and back up the same way when there is room (`Manager.HalfSizeUnderAShortBudget`).
 - **The pools.** A simulation drawn at half size takes a slot of the level below (§2.8: by default an effect has one
   256 px slot and four of 128), so large effects drawn at half size use the 128 px pool, and the 256 px slot goes to an
   effect between 128 and `half_px` pixels on screen. With BILINEAR every slot below the top level holds a 2x

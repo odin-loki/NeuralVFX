@@ -454,6 +454,72 @@ TEST(Manager, HalfSizeLocksModelsShareAndCost) {
   }
 }
 
+// Under a short budget a simulation drawn at half size goes down with its drawing (a 128 px picture drawn at 64, then a
+// 64 px one drawn at 32), within the budget; with room again it comes back; drawing at full size again waits for room.
+TEST(Manager, HalfSizeUnderAShortBudget) {
+  const Effect e(tiny_effect(true));
+  nvfx_manager_desc d = small_desc();
+  d.half_px = 100.f;
+  d.half_upscale = NVFX_UPSCALE_BILINEAR;
+  d.proxies = 0;
+  d.min_dwell = 0.1f;
+  d.budget_ms = 0.45f;
+  Mgr g(d);
+  int model = -1;
+  const auto md = small_model();
+  ASSERT_EQ(nvfx_manager_add_model(g.m, e.fx, &md, &model), NVFX_OK);
+  for (const auto& [size, step] : {std::pair{32, 0.05f}, std::pair{64, 0.2f}, std::pair{128, 0.8f}}) ASSERT_EQ(nvfx_manager_set_cost(g.m, model, size, step, step), NVFX_OK);
+  std::vector<nvfx_handle> hs;
+  for (int i = 0; i < 4; ++i) hs.push_back(spawn(g.m, model, static_cast<std::uint64_t>(40 + i), 120.f));
+  nvfx_manager_set_priority(g.m, hs[0], 10.f);
+  const auto run = [&](int ticks) {
+    nvfx_manager_stats st{};
+    for (int t = 0; t < ticks; ++t) {
+      EXPECT_EQ(nvfx_manager_tick(g.m, 1.0 / 60.0), NVFX_OK);
+      nvfx_manager_get_stats(g.m, &st);
+    }
+    return st;
+  };
+  const auto pic = [&](nvfx_handle h) {
+    nvfx_manager_picture p;
+    EXPECT_EQ(nvfx_manager_get_picture(g.m, h, &p), NVFX_OK);
+    return p;
+  };
+  nvfx_manager_stats st = run(90);
+  EXPECT_LE(st.plan_ms, 0.45 * 1.01);
+  EXPECT_EQ(st.half, 4);  // every one is still drawn at half size
+  const nvfx_manager_picture top = pic(hs[0]);
+  EXPECT_EQ(top.lod_size, 64);  // the important one keeps its 128 px picture drawn at 64
+  EXPECT_EQ(top.size, 128);
+  int lowered = 0;
+  for (const nvfx_handle h : hs) {
+    const nvfx_manager_picture p = pic(h);
+    EXPECT_NE(p.flags & NVFX_PICTURE_HALF, 0);
+    EXPECT_EQ(p.size, 2 * p.lod_size);
+    lowered += p.lod_size == 32 ? 1 : 0;
+  }
+  EXPECT_GT(lowered, 0);  // some went down to a 64 px picture drawn at 32
+  // room again: back up, drawn at half size
+  ASSERT_EQ(nvfx_manager_set_budget(g.m, 1000.f), NVFX_OK);
+  st = run(240);
+  EXPECT_EQ(st.half, 4);
+  for (const nvfx_handle h : hs) EXPECT_EQ(pic(h).lod_size, 64);
+  // smaller on screen, with a short budget again: drawing them at full size would not fit, so they wait at half size
+  ASSERT_EQ(nvfx_manager_set_budget(g.m, 0.2f), NVFX_OK);
+  for (const nvfx_handle h : hs) nvfx_manager_set_screen_size(g.m, h, 80.f, 1);
+  st = run(60);
+  for (const nvfx_handle h : hs) EXPECT_LE(pic(h).lod_size, 64);
+  EXPECT_LT(st.lod[2][0] + st.lod[2][1] + st.lod[2][2] + st.lod[2][3], 4);
+  // and with room they are drawn at full size, one rung a tick
+  ASSERT_EQ(nvfx_manager_set_budget(g.m, 1000.f), NVFX_OK);
+  st = run(240);
+  EXPECT_EQ(st.half, 0);
+  for (const nvfx_handle h : hs) {
+    EXPECT_EQ(pic(h).lod_size, 128);
+    EXPECT_EQ(pic(h).flags & NVFX_PICTURE_HALF, 0);
+  }
+}
+
 TEST(Manager, FixedLevelIsNvfxRenderLooping) { expect_like_render(true, 64); }
 TEST(Manager, FixedLevelIsNvfxRenderOneShot) { expect_like_render(false, 32); }
 TEST(Manager, FixedLevelIsNvfxRender128) { expect_like_render(true, 128); }

@@ -155,7 +155,7 @@ NVFX_API nvfx_status nvfx_manager_set_position(nvfx_manager* manager, nvfx_handl
 NVFX_API nvfx_status nvfx_manager_set_screen_size(nvfx_manager* manager, nvfx_handle instance, float pixels, int visible);
 NVFX_API nvfx_status nvfx_manager_set_priority(nvfx_manager* manager, nvfx_handle instance, float priority);
 /* Pins the instance's simulation at a size (32 to 256) and an update every rate_div frames (1 to 4: 30 to 7.5 Hz),
- * whatever the budget (0, 0: free again). */
+ * whatever the budget (0, 0: free again). A locked simulation is drawn at that size, never at half size (half_px). */
 NVFX_API nvfx_status nvfx_manager_set_lod_lock(nvfx_manager* manager, nvfx_handle instance, int size, int rate_div);
 
 /* Ticks ---------------------------------------------------------------------------------------------------------- */

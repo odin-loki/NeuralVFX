@@ -967,9 +967,9 @@ void Manager::plan() {
       while (true) {
         int L = s.plan_level, d = s.plan_div;
         bool hf = s.plan_half;
-        if (L < s.want_level) {  // size first: drawn at half size on the way up if it is already, else at the top
-          ++L;
-          hf = s.want_half && (s.plan_half || L == s.want_level) && half_fits(M, L);
+        if (L < s.want_level) {  // size first; wanted at half size, the picture goes up a level and its drawing stays
+          ++L;                   // where it was (no transfer), or goes up with it if it was drawn at half size already
+          hf = s.want_half && half_fits(M, L);
         } else if (hf && !s.want_half) {  // drawn at its full size again: a size step up
           hf = false;
         } else if (d > s.want_div) {
