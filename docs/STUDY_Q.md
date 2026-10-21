@@ -34,7 +34,7 @@ took it over from the jobs it left running (the data root's `q_fix/jobs/*.sh`, t
 | smoke ring | **stopped at validation** | N = 40 (ca955b9); `rf` meets no rule: its motion's interval past its margin (§4.7) | kept; nothing more |
 | dust explosion's renderer | **replaced** (§4.8, §6) | `rf` passed its test: the first frame +2.85 dB [+2.54, +3.16], every measure within its margin; links, models/, frozen rows, two videos | - |
 | candle | **nothing changed** (§3.7) | the diagnosis | - |
-| mushroom's cap | **left** (§3.7) | the diagnosis | - |
+| mushroom's cap | **left** (§3.7); its renderer's first second taken up (§4.1) | the diagnosis; `rf` added to the plan before its probe | `rf` built, the null probe; then its margins, the probe, N, validation |
 
 ## 1. Bottom line
 
@@ -237,6 +237,16 @@ Each is a file built from the shipped model by one change, with the tools named;
 The diagnosis (§3) may add or drop a candidate before the probe's second step; any change is written here, with its
 reason, before validation. The fine-tunes run on 2 threads with seeds 33,470,001 and up (the trainer's own; the training
 runs are the recipe's, salt 1); the renderer refits on 1 thread (the result depends on the thread count).
+
+**Added on 21 October at 12:00 UTC, before any of its probe** (by the agent that took the study over, §0): the
+**mushroom** (study O's file, `o_fix/models/mushroom.nvfx`, SHA-256 `4a2f08a05eed33a85584b670eb009b606ecb1443089429b15beca703a46c97cc`)
+gets `rf`, as the haboob's (the renderer trained again with 100 samples from its runs' first 15 frames; the same targets:
+the first frame and the mean frame). Why: the taking apart found its renderer the weakest of any effect in a one-shot's
+first second (§3.7: 15.0 dB on the true fields at the first frame, 24.2 at the thirtieth), the cause §3.5 found for the
+others, and the dust explosion's refit has since passed its test (§4.8). It does not touch the cap's raggedness, which is
+the stepper's (§3.7) and stays left (§9). Its probe (the null first, its margins committed before `rf` is played), its
+rule's numbers, validation and test follow §4.2 to §4.4 unchanged, with the binary of validation (`nvfx_ordered_q3`, the
+same evaluation code as the probe's `q1`, §4.4) for every step.
 
 ### 4.2 The probe (development, training settings only)
 
