@@ -34,7 +34,7 @@ took it over from the jobs it left running (the data root's `q_fix/jobs/*.sh`, t
 | smoke ring | **stopped at validation** | N = 40 (ca955b9); `rf` meets no rule: its motion's interval past its margin (§4.7) | kept; nothing more |
 | dust explosion's renderer | **replaced** (§4.8, §6) | `rf` passed its test: the first frame +2.85 dB [+2.54, +3.16], every measure within its margin; links, models/, frozen rows, two videos | - |
 | candle | **nothing changed** (§3.7) | the diagnosis | - |
-| mushroom's cap | **left** (§3.7); its renderer's first second taken up (§4.1) | `rf` added before its probe; margins (a447d13); N = 60 (§4.6); `rf` chosen on validation and frozen (§4.7) | the test, once |
+| mushroom's cap | the cap **left** (§3.7); its renderer's first second **replaced** (§4.1, §4.8, §6) | `rf` passed its test: the first frame +2.04 dB [+1.97, +2.12], every measure within its margin; links, models/, frozen rows, two videos | the cap (§9) |
 
 ## 1. Bottom line
 
@@ -605,6 +605,44 @@ refit draws its dust with more fine structure, the ring's with less motion, each
 
 ![The haboob (rows 1 and 2) and the smoke ring (rows 3 and 4), the current renderer above the refit, at 0, 1, 5, 10, 15 and 30 frames](figures/q_rf_haboob_smokering.png)
 
+**The mushroom, `rf` (60 settings): it meets the rule, and is replaced.**
+
+| measure | current → `rf` | difference [95% interval] | margin | reading |
+|---|---|---|---|---|
+| tracking, the first frame (dB) | 15.98 → 18.02 | **+2.04 [+1.97, +2.12]** | -0.20 | better (a target; at 60 of 60 settings, the least +1.38) |
+| tracking at 1 s (dB) | 14.44 → 14.51 | **+0.07 [+0.04, +0.10]** | -0.20 | better |
+| tracking at 2 s (dB) | 13.89 → 13.85 | -0.04 [-0.06, -0.02] | -0.20 | worse, within its margin (a fifth of it) |
+| detail spectrum distance | 0.166 → 0.130 | **-0.036 [-0.059, -0.013]** | +0.024 | better |
+| \|ln motion ratio\| (motion ratio) | 0.192 (0.83) → 0.129 (0.88) | **-0.062 [-0.066, -0.058]** | +0.050 | better |
+| coverage distance | 0.0150 → 0.0154 | +0.0004 [+0.0003, +0.0005] | +0.0037 | worse, within its margin (an eighth) |
+| emission distance | 0.00008 → 0.00005 | **-0.00003 [-0.00003, -0.00002]** | +0.0001 | better |
+| mean-frame PSNR (dB) | 28.80 → 28.75 | -0.05 [-0.07, -0.03] | -1.07 | worse, within its margin (a twentieth; a target) |
+
+The refit renderer draws the mushroom's first frame 2.04 dB closer to the simulator's, at every one of the 60 settings,
+and its detail and motion closer to real through the whole run (the spectrum distance 0.166 → 0.130, the motion ratio
+0.83 → 0.88 of the real); its average picture is 0.05 dB further, its cover a little larger, tracking at 2 s 0.04 dB
+lower, each well within its margin (three intervals wholly on the worse side by study M's strict reading). Distance to
+the floor: the mean frame 5.64 → 5.69 dB below it (the floor 34.44 dB), the spectrum distance 0.166 → **0.130** (the
+floor's 0.033), the coverage distance 0.0150 → 0.0154 (0.0056).
+
+**Its round's own test again** (beside, not deciding; `d-eval --seed-base 33300000`, the current and the new file on the
+same seeds, from this branch's build, since round 7's frozen binary cannot read study O's file with its mean state;
+[deval_mushroom/](../results/experiments/q_fix/deval_mushroom)): tracking against the coarse simulation with detail at
+the first frame **-6.64 dB [-7.54, -5.89] → -4.53 [-5.52, -3.79]** (the coarse simulation starts from the true fields,
+§3.5), at frame 8 +0.21 [-0.47, +0.97] (a tie) → **+1.67 [+0.81, +2.52]**, at 1 s -0.12 [-1.37, +1.19] → -0.12
+[-1.35, +1.19] (ties); endless, the mean picture against the nearest flipbook's -0.76 [-1.93, +0.33] → -0.81 [-1.97,
++0.28] (ties), the motion error against the flipbook's +0.114 [+0.006, +0.249] (worse) → +0.061 [-0.049, +0.192] (a
+tie).
+
+**How it looks.** Below, study O's file above the new one at the reel's three settings (its own renderer, 256 px, seed
+33,465,031, at 0, 0.1, 0.33, 0.67, 1 and 2 s): the young fireball, which the current renderer draws a saturated
+yellow-orange with a hot orange base and, at the large setting, green tints at its edge, is paler, cream at its heart
+under an orange rim, without the green; from about 1 s, as the cap forms, the two are alike. The cap's raggedness after 3
+to 4 s is the stepper's and is unchanged (§3.7, §9). The library's three mushroom entries and the prairie draw it with
+the explosions' look (`cloud`), which takes the fields, so their frames do not change (§6).
+
+![The mushroom before (rows 1, 3, 5) and after study Q (rows 2, 4, 6), at (0.1, 0.5, 0.2), (0.5, 0.1, 0.6) and (0.85, 0.9, 0.5), at 0, 0.1, 0.33, 0.67, 1 and 2 s](figures/q_mushroom_rf.png)
+
 ## 5. Fixes with no model change
 
 ### 5.1 The detail settings of four effects, in the library and the scenes, judged by eye
@@ -666,6 +704,12 @@ advection).
     `/root/nvfx-data/fx_earth/models/d/avalanche.nvfx`; the volcano scene's folder, whose script does not play it);
     `models/layout.txt` maps both to `2d/avalanche.nvfx`. The round's file is untouched under `fx_earth/models/d` and
     `fx_earth/models/frozen`.
+  - **the mushroom** is now `q_fix/models/mushroom.nvfx` (`rf`: study O's file with its renderer trained again with
+    the first frames among its samples; its stepper and mean state study O's; 301,443 bytes, SHA-256
+    `c1cd25a276bd3b2a9e0578e631ed85ad9cd9286d5625d30b2c987b2cd9004209`; in git `models/2d/mushroom.nvfx`). The links moved
+    (old targets logged): `library/models/mushroom.nvfx` and `fx_blaze/models/scene/mushroom.nvfx` (both were study O's
+    `o_fix/models/mushroom.nvfx`); `models/layout.txt` maps both to `2d/mushroom.nvfx`. Study O's file and round 7's are
+    untouched.
 - **Frozen hashes** (float, pinned to the AVX2 build with `--isa avx2`): the frozen tests that play the dust explosion
   were run with private copies of the two folders holding the new file before the links moved, and give their frozen
   keyframes to the bit (the library's `dust_explosion`, the forest-edge town's eight keyframes: both draw it by looks,
@@ -673,12 +717,16 @@ advection).
   a row for the new file in `results/experiments/fx_fire2_frozen.csv` (`dustexplosion_q`). The avalanche: the library's
   `avalanche` keyframe changes (the old file still gives the old hash on this build, so the change is the model's;
   `results/library/frozen.csv`, its keyframe and model rows; `LibraryKeyframesFrozen` and `PackLibraryKeyframesFrozen`
-  pass with it), and a row for the new file in `fx_earth_frozen.csv` (`avalanche_q`); no scene plays it.
+  pass with it), and a row for the new file in `fx_earth_frozen.csv` (`avalanche_q`); no scene plays it. The mushroom:
+  the library's `distant_mushroom` and the prairie's eight keyframes give their frozen hashes with the new file (looks);
+  only `frozen.csv`'s model row changed, and a row for the new file in `fx_blaze_frozen.csv` (`mushroom_q`).
 - **Videos re-rendered** (videos/README.md): `effect_dustexplosion` (its own renderer; seed 33,490,011) and
   `real_vs_learned_fire2` (round 10's held-out seeds; the crown and window fires' columns are the same frames).
   `library_fire2` and `scene_forestedge` draw it by looks and do not change. The avalanche: `effect_avalanche` (seed
   33,490,021), `real_vs_learned_earth` (round 9's held-out seeds; the lava and eruption columns the same frames) and
-  `library_earth` (its four avalanche entries; the others played again).
+  `library_earth` (its four avalanche entries; the others played again). The mushroom: `effect_mushroom` (seed 1, as
+  study O's) and `real_vs_learned_round7` (round 7's held-out runs; the other five columns the same frames);
+  `library_round7` and `scene_prairie` draw it by looks and do not change.
 - **By eye, no model change** (§5.1): the crown fire, the window fire, heavy gas and the smoke ring's detail settings in
   the library and the scenes; their frozen hashes and videos.
 - **Code**: `nvfx_fix parts` (the taking apart) and `strip --also` (rows of other files); `nvfx_ordered --study q`
