@@ -1532,7 +1532,9 @@ nvfx_status Manager::tick(double dt) {
 }
 
 void Manager::worker(int index) {
-  std::uint32_t seen = epoch_.load();
+  // From epoch 0, the value before any tick (the threads start in the constructor): reading epoch_ here instead would miss
+  // the first tick when this thread starts after it, and tick() would wait for it for ever (seen under a heavy load).
+  std::uint32_t seen = 0;
   for (;;) {
     epoch_.wait(seen);
     const std::uint32_t e = epoch_.load();
