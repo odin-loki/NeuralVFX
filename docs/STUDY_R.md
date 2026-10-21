@@ -66,6 +66,16 @@ its total to 2e-6; `Sim3d.FluxFormKeepsTheSootItCarries`). The fire and study N'
 unchanged to the bit (their recorded runs compared byte for byte). With the fix one seed's buoyancy flux stayed within
 about 7% of its mean at every height, with no trend. Everything below is about `smoke_r`.
 
+**A second question, written down before its answer** (21 October, 07:50 UTC, before the test below finished and
+before any training): the first five seeds of `smoke_r` gained only about 0.80 of the vertical momentum their buoyancy
+should give (dM/dz against the plane's integral of g', heights 24 to 72) and their flux-balance parameter stayed at 2 to
+3 (a pure plume has 1), which points at numerical dissipation in the semi-Lagrangian velocity step. `Params::velocity`
+adds the clamped MacCormack correction to that step. **The criterion**: on the same two seeds (29,010,000 and 29,010,001),
+if MacCormack velocity brings the momentum ratio within 0.90 to 1.10 *and* moves Gamma at both ends of the fitted range
+closer to 1, `smoke_r` adopts it and every `smoke_r` run (training, the edge bounds' teacher runs, the plume
+measurements) is made again; otherwise `smoke_r` keeps the semi-Lagrangian step and the deficit is reported as a limit.
+The answer is in §1.4.
+
 ### 1.3 The measurement
 
 `nvfx_3d plume` (`tools/plume3d.cpp`): `smoke_r` in still air (wind 0.5) from an empty box, 6 s of spin-up, then 16 s
