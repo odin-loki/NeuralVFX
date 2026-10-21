@@ -27,7 +27,7 @@ took it over from the jobs it left running (the data root's `q_fix/jobs/*.sh`, t
 | weak spot | stage | committed | running / next |
 |---|---|---|---|
 | avalanche | **replaced** (§4.8, §6) | `u30` passed its test: tracking at 1 s +0.34 dB [+0.18, +0.50], the mean frame +0.16 [+0.04, +0.28], every measure within its margin; links, models/, frozen hashes, three videos | its start points (the mean state did not meet the rule, §9) |
-| geyser | validation | margins (36514f3); N = 60, the cap (§4.6) | `u30`, `s24`, `s24_u30` on validation (`val.sh`, 2 threads); then the choice, the freeze, the test |
+| geyser | **stopped at validation** | margins (36514f3); N = 60 (§4.6); none meets the rule: `u30` better on both targets but its first frame past its margin (§4.7) | kept; what is left in §9 |
 | haboob's first frame | **stopped at validation** | `rf` meets no rule: its spectrum's interval past its margin (ce134c7) | kept; nothing more |
 | crown and window fires' streaks | **done by eye** (§5.1) | detail settings, frozen hashes, videos (78ae21b, 47b2b0f) | - |
 | heavy gas | **done by eye** (§5.1) | `soften 0.1` | its start points not tried (§9) |
@@ -487,6 +487,22 @@ margin). By the rule (§4.3) `u30` is chosen, better at 1 s, the only candidate 
 **Frozen** before its test: the data root's `q_fix/models/avalanche.nvfx` (read-only; 280,927 bytes, the size of the
 old file, SHA-256 `d6161c1d09116e2b00a959011192de85c20378a815623ff5c3249fc49013ec67`), validated and tested by
 `nvfx_ordered_q3`.
+
+**The geyser (60 settings): none meets the rule.**
+
+| candidate | tracking: first frame | at 1 s (target) | at 2 s | spectrum | \|ln motion\| | coverage | mean frame (target) | reading |
+|---|---|---|---|---|---|---|---|---|
+| `u30` | **-0.19 [-0.28, -0.11]** (margin -0.20) | **+0.41 [+0.27, +0.58]** | +0.39 [+0.15, +0.66] | +0.007 [+0.001, +0.013] | +0.013 [-0.001, +0.026] | +0.0000 | **+0.20 [+0.08, +0.32]** | the first frame past its margin: no |
+| `s24` | 0 | 0 | 0 | +0.044 [-0.012, +0.100] | +0.066 [-0.012, +0.144] | +0.0014 [-0.0010, +0.0038] | -0.08 [-0.96, +0.84] | better on no target: no |
+| `s24_u30` | -0.19 [-0.28, -0.11] | +0.41 [+0.27, +0.58] | +0.39 | +0.049 [-0.009, +0.108] | +0.061 [-0.016, +0.138] | +0.0014 | +0.03 [-0.85, +0.94] | the first frame past its margin: no |
+
+The 30-frame fine-tune is better on both its targets: it follows a run 0.41 dB better at 1 s and 0.39 at 2 s, and its
+average picture is 0.20 dB closer to a real run's. But it loses 0.19 dB at the first frame, and that interval's worse end
+(-0.28) lies past its margin (-0.20); on the probe the same loss was half the size (-0.09 [-0.13, -0.05]). More start
+points (`s24`) bring the endless picture no closer (a tie, with the widest interval of any candidate here: another
+eruption, another picture) and move the motion and detail further, within their wide margins. By the rule the geyser
+stops at validation and keeps its model. What it needed, a fine-tune that keeps the first frames (its first frame is a
+fresh state the long windows' loss weighs little), is left (§9).
 
 **The mushroom (60 settings): `rf` meets the rule and is chosen.** It is better on one of its targets, the first frame
 **+2.07 dB [+1.99, +2.16]** (16.0 → 18.1 dB), and at 1 s (+0.07 [+0.04, +0.10]), on detail (the spectrum distance

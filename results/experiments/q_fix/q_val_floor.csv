@@ -24,3 +24,8 @@ mushroom,abs_ln_motion_ratio,0.047333
 mushroom,coverage_l1,0.004393
 mushroom,emission_l1,0.000009
 mushroom,mean_frame_psnr,34.496018
+geyser,spectrum_l1,0.266426
+geyser,abs_ln_motion_ratio,0.280748
+geyser,coverage_l1,0.013466
+geyser,emission_l1,0.000000
+geyser,mean_frame_psnr,35.146415
