@@ -555,3 +555,12 @@ build/nvfx_gallery --library library --models $NEURALVFX_DATA/library/models --o
 holds `crownfire.nvfx`, `windowfire.nvfx` and `dustexplosion.nvfx` (`ctest -R ScriptedForestEdgeFrozen` reads it from
 `NEURALFX_MODELS_FIRE2`); the library's models folder links the three (`ln -s ../../fx_fire2/models/d/{crownfire,
 windowfire,dustexplosion}.nvfx .`).
+
+**Checks** after main (c30a47e: the weather director, the FUSE sample, the detail layer made cheaper) was merged in, on
+the shared machine. The merge changed no clip: full-size clips of all 27 earlier effects at two settings are byte for
+byte those of main's own build before this round (`fx_fire2/jobs/state/merged_clips.sha256` against
+`baseline_clips.sha256`), and the three new effects' are those their models were trained from (`*.preset.sha256`). The
+build with `-DNEURALFX_WERROR=ON`; the full ctest, 531 of 531 (main's 523 and the 8 of this round: four sim tests, a
+recipe test, `LibraryFire2KeyframesFrozen`, `ScriptedForestEdgeFrozen` and `SceneScriptChecks.forestedge`; the data
+tests skip with exit 77 without the models); `nvfx_alloc_test`, no allocation per frame; `nvfx_gallery --check
+--require-models` with every model, 224 effects, all played, 0 failed; and the Godot test, 0 failures.
