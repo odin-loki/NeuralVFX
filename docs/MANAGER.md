@@ -458,6 +458,12 @@ The defaults that follow:
   keyframes (offsets spread over 1.7 s between the copies).
 - **Budget** 4 ms per tick, one thread; **burst** 1.5; **fade** 8 frames; **pause** off screen, **park** after 1 s,
   **cull** after 30 s.
+- **Half size off** (`half_px` 0, `half_share` 0; §2.10). The rule committed before it was measured (REPORT.md §22.2)
+  asked, for each of seven effects, that drawing at half size cost at most 0.5 of drawing at full size at 256 px and stay
+  within the null's margins of it against the simulator. Six cost 0.31 to 0.42 of full size, but magic 0.54 (its
+  full-size frame is cheap, so the coarse step weighs more; REPORT.md §22.4, provisional), so it is not on by default.
+  Set `half_px` (256 is the threshold measured) to have it: with no budget it took a close-up scene's tick from 17.1 to
+  15.2 ms (§7.2), and with a budget the planner runs more simulations of their own instead.
 
 ## 7. The crowd benchmark (provisional)
 
@@ -546,6 +552,41 @@ three rounds, least and greatest in brackets:
   hardware with `nvfx_manager_set_cost`; the defaults are one core of the project's machine on a fast day.
 - **On several threads the wall time now spreads**: 6.5 ms per tick on 2 threads for 13.1 ms of CPU and 7.3 ms on 4
   for 26.7 ms, where the shared machine's other jobs had held two cores.
+
+### 7.2 Half size off and on: the crowd and a close-up scene (provisional)
+
+`tools/manager/time_halfsize.sh build OUT 10 20` (REPORT.md §22.3, committed before the runs): the crowd as above, and
+`nvfx_crowd --scene close`, the same effects large on screen (32 fires, smoke columns and steam vents 2 to 40 m ahead, a
+camera walking at 0.6 m/s, an explosion every 1.5 s; seed 35,095,001; four 256 px slots per effect, as an engine that
+plays large effects would size that pool). Three arms: **off** (`half_px` 0), **on** (`half_px` 256, `half_upscale` OFF:
+the engine's sampler does the 2x) and **cpu2x** (`half_px` 256, BILINEAR), back to back in each of ten rounds, their
+order rotated; the default costs, so the plans are the same in every round. **Provisional**: run after the round-7 quiet
+session while other agents' jobs ran (load average 6 to 20). Medians over the rounds, each arm against off round by
+round, with 95% bootstrap intervals ([ab_summary.txt](../results/manager/halfsize/ab_summary.txt), every run in
+`ab_runs.csv`):
+
+| configuration | drawn at half size (on) | CPU per tick, off | on / off | cpu2x / off | simulations, off → on | proxied, off → on |
+|---|---:|---:|---|---|---|---|
+| crowd, 4 ms, 1 thread | 1.0 | 2.92 ms | 0.971 [0.939, 1.149] | 1.056 [0.994, 1.147] | 22.2 → 22.7 | 147.9 → 148.2 |
+| crowd, 8 ms, 2 threads | 1.2 | 5.94 | 1.033 [0.993, 1.062] | 1.005 [0.988, 1.032] | 38.4 → 37.6 | 133.1 → 132.4 |
+| crowd, 16 ms, 4 threads | 1.5 | 11.28 | 1.016 [0.983, 1.052] | 1.003 [0.982, 1.027] | 62.7 → 63.3 | 107.4 → 106.9 |
+| crowd, no budget, 4 threads | 1.3 | 15.88 | **0.978 [0.951, 0.994]** | 0.975 [0.950, 1.002] | 70.2 → 70.2 | 69.3 → 69.3 |
+| close, 4 ms, 1 thread | 3.6 | 2.65 | 1.094 [1.068, 1.202] | 1.072 [1.002, 1.143] | 10.4 → 11.3 | 29.3 → 27.8 |
+| close, 8 ms, 2 threads | 4.3 | 5.38 | 1.045 [1.024, 1.061] | 1.077 [1.061, 1.138] | 13.2 → 17.4 | 25.6 → 22.0 |
+| close, no budget, 4 threads | 5.2 | 17.09 | **0.886 [0.869, 0.901]** | **0.893 [0.868, 0.913]** | 34.2 → 34.2 | 0 → 0 |
+
+(The ratios are of the mean CPU per tick of a run; the CPU here is below the 4 and 8 ms budgets because the default
+costs are float's on AVX2 and the runs play int8 on AVX-512, §7.1.)
+
+- **With no budget the saving shows directly**: in the close scene, where about five simulations at a time are drawn at
+  half size, a tick costs 0.886 of off, 2.0 ms less (cpu2x, with the manager's 2x, 0.893); in the crowd, about one,
+  0.978. The planner's own estimate moves the same way (23.7 → 19.9 ms in the close scene).
+- **With a budget the planner spends what it saves.** In the close scene at 8 ms, 17.4 simulations run their own runs
+  instead of 13.2 and 22.0 instances are shown from proxies instead of 25.6, for 4.5% more CPU (within the budget, as
+  the plan says); at 4 ms, 11.3 instead of 10.4. In the crowd few effects are 256 px on screen (each effect also has
+  only one 256 px slot by default), so its plans hardly change and the CPU ties within the noise.
+- **The 2x on the CPU** (cpu2x) costs a little more than letting the engine's sampler do it, as expected; it is there
+  for engines that want every picture at its level's size.
 
 ## 8. Limits
 
