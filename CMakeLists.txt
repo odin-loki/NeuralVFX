@@ -71,9 +71,13 @@ set(NVFX_RUNTIME_SOURCES src/runtime/nvfx.cpp src/runtime/rt_base.cpp src/runtim
                          src/runtime/rt_prior.cpp src/runtime/rt_prior_base.cpp src/runtime/rt_prior_avx2.cpp src/runtime/rt_prior_avx512.cpp
                          src/runtime/rt_handoff.cpp
                          src/runtime/nvfx_volume.cpp src/runtime/rt_volume_avx2.cpp  # 3D volumes (nvfx_volume.h, docs/STUDY_3D.md)
+                         src/runtime/rt_detail3_avx2.cpp src/runtime/rt_detail3_avx512.cpp  # their detail layer on vectors
                          src/manager/interp.cpp src/manager/manager.cpp src/manager/nvfx_manager.cpp)  # the effect manager (docs/MANAGER.md)
 # Study P (docs/STUDY_P.md): rollout effects drawn at half size and upscaled, one build per ISA.
 list(APPEND NVFX_RUNTIME_SOURCES src/runtime/rt_upscale_base.cpp src/runtime/rt_upscale_avx2.cpp src/runtime/rt_upscale_avx512.cpp)
+# The volumes' detail layer on vectors reproduces the reference's floats to the bit (rt_detail3.hpp): no contraction there,
+# whatever the runtime's flags (a source's options come after its target's).
+set_source_files_properties(src/runtime/rt_detail3_avx2.cpp src/runtime/rt_detail3_avx512.cpp PROPERTIES COMPILE_OPTIONS "-ffp-contract=off")
 find_package(Threads REQUIRED)  # the effect manager's worker threads
 add_library(nvfx STATIC ${NVFX_RUNTIME_SOURCES})
 target_link_libraries(nvfx PUBLIC neuralfx_model Threads::Threads)
@@ -383,6 +387,19 @@ if(NEURALFX_BUILD_TOOLS)
   target_link_libraries(nvfx_study_p PRIVATE neuralfx_io neuralfx_train neuralfx_pack nvfx)
   neuralfx_defaults(nvfx_study_p)
 
+  # The detail layer's A/B bench (docs/REPORT.md §19, results/detail/): two builds' probes in one process, frame by frame.
+  # The probe is a module of this build's runtime internals with only its probe_* functions exported; the old build's
+  # comes from tools/detail_bench/build_old.sh.
+  add_library(nvfx_detail_probe MODULE tools/detail_bench/probe.cpp)
+  target_include_directories(nvfx_detail_probe PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src/runtime")
+  target_link_libraries(nvfx_detail_probe PRIVATE nvfx)
+  set_target_properties(nvfx_detail_probe PROPERTIES PREFIX "" CXX_VISIBILITY_PRESET hidden VISIBILITY_INLINES_HIDDEN ON)
+  target_link_options(nvfx_detail_probe PRIVATE -Wl,--exclude-libs,ALL -Wl,-Bsymbolic)
+  neuralfx_defaults(nvfx_detail_probe)
+  add_executable(nvfx_detail_bench tools/nvfx_detail_bench.cpp)
+  target_link_libraries(nvfx_detail_bench PRIVATE ${CMAKE_DL_LIBS})
+  neuralfx_defaults(nvfx_detail_bench)
+
   # Study O (docs/REPORT.md §16): the most visible flaws of the shipped effects and demos, taken apart.
   add_executable(nvfx_fix tools/nvfx_fix.cpp)
   target_link_libraries(nvfx_fix PRIVATE neuralfx_io neuralfx_train nvfx)
@@ -436,6 +453,7 @@ if(NEURALFX_BUILD_TESTS)
   # volume C API: their own test program.
   add_executable(neuralfx_3d_tests tests/test_3d.cpp)
   target_link_libraries(neuralfx_3d_tests PRIVATE neuralfx_train nvfx GTest::gtest_main)
+  target_include_directories(neuralfx_3d_tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src/runtime")  # the detail layer's kernels
   neuralfx_defaults(neuralfx_3d_tests)
   gtest_discover_tests(neuralfx_3d_tests TEST_PREFIX "neuralfx." DISCOVERY_MODE PRE_TEST PROPERTIES LABELS neuralfx)
   # Water (docs/EFFECTS_WATER.md): its own test program, so the shared test list stays as it is.
