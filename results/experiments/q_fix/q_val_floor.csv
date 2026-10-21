@@ -1,0 +1,6 @@
+effect,statistic,floor_mean
+haboob,spectrum_l1,0.023996
+haboob,abs_ln_motion_ratio,0.074558
+haboob,coverage_l1,0.002495
+haboob,emission_l1,0.000000
+haboob,mean_frame_psnr,37.297365
