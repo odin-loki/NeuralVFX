@@ -27,7 +27,7 @@ took it over from the jobs it left running (the data root's `q_fix/jobs/*.sh`, t
 | weak spot | stage | committed | running / next |
 |---|---|---|---|
 | avalanche | probe | margins (78ae21b); `ms`, `u30`, `ms_u30` on the probe (6336822) | `u60` training (600 iterations, 60-frame windows), then on the probe (`probe_av2.sh`); then N, validation |
-| geyser | probe | margins (36514f3) | `u30`, `s24`, `s24_u30` on the probe (`probe_ge.sh`); then N, validation |
+| geyser | validation | margins (36514f3); N = 60, the cap (§4.6) | `u30`, `s24`, `s24_u30` on validation (`val.sh`, 2 threads); then the choice, the freeze, the test |
 | haboob's first frame | **stopped at validation** | `rf` meets no rule: its spectrum's interval past its margin (ce134c7) | kept; nothing more |
 | crown and window fires' streaks | **done by eye** (§5.1) | detail settings, frozen hashes, videos (78ae21b, 47b2b0f) | - |
 | heavy gas | **done by eye** (§5.1) | `soften 0.1` | its start points not tried (§9) |
@@ -353,6 +353,35 @@ its motion error +0.003 [+0.002, +0.005] and coverage distance +0.0002 [+0.0001,
 margin), emission a tie: it meets the rule's form. Every measure that is not a target it improves passes its margin, if
 truly unchanged, with probability 1.00 at 10 settings by resampling and needs 1 setting in the normal form at the SD's
 upper 80% bound: **N = 10** (study G's ten validation settings, study B's ten held-out ones).
+
+**The geyser.** An erupting geyser is chaotic (another seed, another eruption), and the null shows it: it moves the
+spectrum distance at a setting by 0.125 (RMS), the motion by 22%, the coverage distance by 0.0070 and the mean frame by
+3.11 dB. Margins: tracking -0.20 dB at each horizon, spectrum **+0.125**, |ln motion ratio| **+0.217**, coverage
+**+0.0070**, emission **+0.0001** (study K's), mean frame **-3.11 dB**. On the probe:
+- `u30` (SHA-256 `262f3c8fd46e56efbb606aabcaa9156ea84e8305800fc5d5180cf8d1a375aa05`): tracking at 1 s **+0.28 dB [+0.13, +0.42]** (better: a target), at 2 s +0.21
+  [-0.06, +0.47], the first frame -0.09 [-0.13, -0.05], the spectrum distance +0.011 [+0.004, +0.019] and coverage +0.0003
+  [+0.0000, +0.0005] (worse, each well within its margin), motion, emission and the mean frame ties (+0.04 [-0.07,
+  +0.16]): it meets the rule's form.
+- `s24` (`3cef97755ca4b0b3451179423a3fa7201ae0cac4d32b3c2d96020022ebbf3cd6`): the same frames from a true state (start points play no part there); in endless play no better on any measure:
+  the mean frame +0.14 [-0.82, +1.10], the spectrum distance +0.043 [-0.022, +0.111], its motion error +0.064 [-0.016,
+  +0.147] (the motion ratio 1.05 → 0.91), emission a little closer: better on no target.
+- `s24_u30` (`bbeed0d23c88af8d3c25eb415304b6a522ab7bbb666f9b7684f2184ad3571ffa`): `u30`'s tracking and `s24`'s endless play, its spectrum's interval reaching past its margin (+0.056 [-0.013,
+  +0.127]).
+
+The number of settings: tracking at 2 s, which `u30` improves but which is not its target, spreads widely (an SD of 0.87
+dB between settings): if truly unchanged it would pass its margin of -0.20 dB with probability 0.48 at 60 settings by
+resampling and needs 246 in the normal form; `s24`'s spectrum needs 39. The cap binds: **N = 60**, at which a candidate
+whose held measures are truly unchanged and whose improved targets are as measured meets the rule's form with
+probability 0.47 (`u30`), 0.99 (`s24`) and 0.46 (`s24_u30`) (q_power.csv), stated here before validation.
+
+**A correction to §4.1, before validation.** `starts` reports (the data root's `q_fix/logs/starts_geyser.log`) that none
+of `s24`'s first 8 start points has the current file's controls, where §4.1 said its first 8 are the current ones. The
+recipe's rule is the same (farthest-point order over the salt-1 training runs' controls from the run nearest the middle)
+and the round recorded the same 160 runs, so the cause was not traced; `s24` is therefore 24 start points chosen afresh
+by that rule, not the current 8 and 16 more. It is the candidate §4.1 names in every other respect and is validated as
+it is.
+
+**The avalanche.** (After `u60` has been played on the probe.)
 
 ### 4.7 Validation (the choice)
 
