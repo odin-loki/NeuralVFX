@@ -989,6 +989,28 @@ being weak. By eye the candle is weaker than its numbers (its learned flame does
 library plays it with a gentler swirl and a look). 82, 294 and 146 KB; 0.43 to 0.57 ms per 128 px frame. The full
 account, with a crypt scene and twelve library entries, is in [EFFECTS_AIR.md](EFFECTS_AIR.md).
 
+### 6.18 Fire effects, round 10
+
+Three more presets were trained and tested the same way, at the runtime's default int8, with seeds of the round's own
+(26,000,000 and up): a forest **crown fire** (the crowns of a stand of trees torching in their own flames, spot fires
+catching ahead of the head, a tall column of smoke bent over by a wind that grows with height; distinct from round 7's
+wildfire, a front on the ground), a **window fire** (a room fire venting from a window seen front-on: flames pour out of
+the opening's upper part above the neutral plane and roll up the wall, the room glows through the lower part, and black
+smoke spreads out under the eave as a ceiling jet) and a **dust explosion** (a dust cloud lit at one end or in its
+middle, the second control `ignition`: a deflagration front, the dust's heat spreading into the dust beside it and
+burning where it is hot, runs through the cloud, the burning gas expands into a brown-orange fireball that billows up and
+burns out, and a pall of dust and ash is left; it plays once, for 4 s, with study M3's mean state, decided before
+training). All three work by the rule set before the test: they track a held-out run 2.60 dB [2.16, 3.04], 3.31 dB [2.91,
+3.73] and 8.44 dB [7.88, 9.04] better than the coarse simulation with the same detail layer at 1 s (the dust
+explosion's the largest gain of any effect so far: the 32-cell simulation cannot resolve the burn's preheat zone and
+burns the cloud out in a flash), and endless their average picture is closer than the nearest flipbook's (+1.76, +1.78
+and +3.15 dB) with motion no worse; the dust explosion's average picture, motion and coverage tie a second real run's,
+and its learned flame runs through the cloud from where it was lit. The two fires' detail is six times further from real
+than the flipbook's (spectrum distances 0.43 and 0.44): their learned flames and smoke carry streaks along the flow. By
+eye all three are fair; the library draws the crown fires' column and the dust explosions with field-shader looks. 146,
+146 and 294 KB; 0.49 to 0.65 ms per 128 px frame. The full account, with a forest-edge town scene and ten library
+entries, is in [EFFECTS_FIRE2.md](EFFECTS_FIRE2.md).
+
 ## 7. Runtime cost and budget
 
 Median ms per frame through `nvfx_render`, one pinned AVX2 core (90th percentiles and every configuration in

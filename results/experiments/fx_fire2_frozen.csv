@@ -1,0 +1,12 @@
+kind,name,file,bytes,sha256,source
+rollout_effect,dustexplosion,fx_fire2/models/d/dustexplosion.nvfx,301443,65057a10925134b335a5734c073d5080c0838fe4babfcccb99e7b29bdec39480,study D's recipe (docs/EFFECTS_FIRE2.md): d-train --stages12 1 then d-tune then d-finish (the one-shot branch, 120 frames), then study M3's mean state (nvfx_ordered --study m3 fitmean --block 2, setmean)
+rollout_effect,windowfire,fx_fire2/models/d/windowfire.nvfx,149287,12adb609fe231a7f4737245f09cd15c4f1a568b1c46d91f5f4f7453a707d7661,study D's recipe (docs/EFFECTS_FIRE2.md): d-train --stages12 1 then d-tune then d-finish
+rollout_effect,crownfire,fx_fire2/models/d/crownfire.nvfx,149287,1973c9d3adb8a82be34c9fef013a186e87f48abc2684f5e6d1d18cb7e1350302,study D's recipe (docs/EFFECTS_FIRE2.md): d-train --stages12 1 then d-tune then d-finish
+forestedge_keyframe,frame_024,nvfx_scene_script --keyframes (examples/scenes/forestedge.nvfxs; --precision float --isa avx2),1129339,b5734951a1cca3f266bb84134f60ae0a165d37a3984244b3fb9965f2a79e0279,
+forestedge_keyframe,frame_072,nvfx_scene_script --keyframes (examples/scenes/forestedge.nvfxs; --precision float --isa avx2),1161874,f5da729a5c812ab592605a3282c7c87e810d7843faf33747eb1d0c4e34fca66d,
+forestedge_keyframe,frame_120,nvfx_scene_script --keyframes (examples/scenes/forestedge.nvfxs; --precision float --isa avx2),1161050,c830f7f67f4b632df8f747f781de85a4411be59c49468b5f3188063d7f1f085a,
+forestedge_keyframe,frame_156,nvfx_scene_script --keyframes (examples/scenes/forestedge.nvfxs; --precision float --isa avx2),954606,75105412fea252ca57da9e6b3dc872565f0c64a0f73cde12b7a3116011b5e240,
+forestedge_keyframe,frame_168,nvfx_scene_script --keyframes (examples/scenes/forestedge.nvfxs; --precision float --isa avx2),1058609,f87574c8f950a2de743b6cd15098291e2e1c08f9d3db518d7470e3e4c164ceec,
+forestedge_keyframe,frame_186,nvfx_scene_script --keyframes (examples/scenes/forestedge.nvfxs; --precision float --isa avx2),1066006,b111c067d6b490c01e53a1195b6253f0c3825a66bf62b5bb05d62971e84d2d20,
+forestedge_keyframe,frame_222,nvfx_scene_script --keyframes (examples/scenes/forestedge.nvfxs; --precision float --isa avx2),1110569,7c55b0942a1c95c141605a87337fc4b04657751bfdeff31817ade1e17b61902c,
+forestedge_keyframe,frame_270,nvfx_scene_script --keyframes (examples/scenes/forestedge.nvfxs; --precision float --isa avx2),1147577,2c88093075a36f77189179c9389334036061ff95e5fb076076cc72627bcfaf8a,
