@@ -62,7 +62,7 @@ that play them were rendered again with the new files (`effect_mushroom`, `effec
 `library_round7`, `real_vs_learned_round7`, `library_water`).
 Every video is H.264 (yuv420p, +faststart, no audio). Click a poster to open its video.
 
-**87 videos, 101.2 MB (96.5 MiB) in all**, each at most 5 MB, with 87 JPEG posters (1.1 MB in all).
+**93 videos, 110.1 MB (105.0 MiB) in all**, each at most 5 MB, with 93 JPEG posters (1.3 MB in all).
 
 ## 1. Showcase scenes
 
@@ -275,10 +275,29 @@ softer than N in the finest filaments.
 | <a href="upscale_mushroom.mp4"><img src="upscale_mushroom.jpg" width="200" alt="A mushroom cloud at 512 px: native, half size + bilinear, half size + learned"></a> | **A mushroom cloud, three ways** | Controls 0.8, 0.5, 0.6, seed 3,900,302, its 149 frames; the crop on the cap | As above | The mushroom as this study froze it (`fx_blaze/models/d`, before study O replaced the library's); int8 | `--effect mushroom --crop 180,230,170`, 5 s, 0.5 MB | The same cap and stem; N's streaks in the stem are sharper; L's edges a little firmer than B's |
 | <a href="upscale_waterfall.mp4"><img src="upscale_waterfall.jpg" width="200" alt="A waterfall at 512 px: native, half size + bilinear, half size + learned"></a> | **A waterfall, three ways** | Controls 0.6, 0.5, 0.6, seed 3,900,303, 10 s; the crop on the falling sheet | As above (the learned body only, no seeded spray or pool) | The library's waterfall file, one detail pass a frame (the library now plays it with `passes 2`, study O); int8 | `--effect waterfall --crop 170,170,170`, 10 s, 3.3 MB | N's thin zig-zag streaks are sharp where B and L blur them; L is no closer to N than B |
 
+## 9c. A 3D smoke on a validated teacher (study R)
+
+Study R ([STUDY_R.md](../docs/STUDY_R.md), REPORT §20) checked the 3D solver's smoke against plume theory first, fixed
+it (`smoke_r`: no cooling, fading or damping; heat and soot carried in flux form) and measured it against Morton,
+Taylor and Turner (1956); then it trained N2's small model on it and tested it once under a rule written before
+validation. **By that rule the learned smoke fails**: on validation its edge check missed by 7% on one side (1.08
+against a bound of 1.01 at a wind of 0.5), and on the test, though it follows real runs better than the coarse
+simulation with the same detail (+1.59 dB in pictures at 1 s), it looks worse played on (coverage, the light it adds,
+the mean picture -2.52 dB). **These videos show it as a demo only**, beside study N's smoke above, which stays (by
+N2's precedent a model that fails its rule does not replace a demo; that is the owner's call). Demo seeds 29,900,000
+and up; same renderer and encoding as §9, warm smoke's optics (it does not glow).
+
+| | Video | What it shows | Learned / procedural | Models, precision | Rendered | How it looks |
+|---|---|---|---|---|---|---|
+| <a href="3d_plume_theory.mp4"><img src="3d_plume_theory.jpg" width="200" alt="The teacher against plume theory"></a> | **The teacher against plume theory** | Left: `smoke_r` simulated live in still air (64 x 96 x 64, controls 0.5, 0.5, 0.5, seed 29,900,100) with Morton, Taylor and Turner's top-hat edges, b = 1.2 alpha (z - z0), dashed over it at the fitted alpha and origin. Right: the centreline velocity, the plume's width and the centreline buoyancy against height at three source strengths (pooled time averages, 5 seeds each) against the theory's power laws and the measured band of alpha (Carazzo et al. 2006), and this run's own running average converging onto them | No learned model: the simulation (study R's teacher) and its measurements | the 3D solver (`smoke_r`); the fits of `results/3d/r/plume_fit.md` | `nvfx_3d plumevideo`, 16 s, 0.6 MB | The column widens between the dashed edges; the width follows the theory's line inside the measured band, the velocity and buoyancy fall about as the theory's slopes, the velocity a little faster |
+| <a href="3d_smoke_r_orbit.mp4"><img src="3d_smoke_r_orbit.jpg" width="200" alt="Study R's 3D smoke, walked around"></a> | **Study R's 3D smoke, walked around** (a demo: it failed its test) | The camera circles the learned smoke column once; controls 0.7, 0.5, 0.5, seed 29,900,001 | Learned: the smoke's motion (the 16 x 24 x 16 state); seeded: the 64 x 96 x 64 detail; rendered: the volume renderer. Procedural: the floor and sky | study R's C4 (`models/3d/smoke.nvfx3`; `$NEURALVFX_DATA/r_smoke3d/models/chosen.nvfx3`, frozen before its test); float | `--kind orbit`, 12 s, 1.4 MB | A broad, billowing grey column rising out of the frame, wider and more diffuse than the simulation's, with faint wisps standing near the box's sides |
+| <a href="3d_smoke_r_real_vs_learned.mp4"><img src="3d_smoke_r_real_vs_learned.jpg" width="200" alt="Real against learned, 3D smoke"></a> | **Real against learned, 3D smoke** | Left: the 3D solver's `smoke_r` (64 x 96 x 64). Right: the learned smoke from the same state (a held-out run after 100 frames: controls 0.65, 0.45, 0.55, seed 29,900,002) with the same noise seed, one continuous rollout. **Both are chaotic: they part after a second or two** | Left: simulation. Right: learned (C4). Both drawn by the same volume renderer | C4; float | `--kind real-vs-learned`, 10 s, 1.0 MB | They part within two seconds. The simulation keeps a narrow column of rounded puffs; the learned smoke spreads into a broad cone that by 9 s fills much of its box, with streaky wisps at the sides: the test's worse coverage, light and mean picture, seen |
+| <a href="3d_fire_smoke_coupled.mp4"><img src="3d_fire_smoke_coupled.jpg" width="200" alt="3D fire and smoke, coupled"></a> | **3D fire and smoke, coupled** (a demo, not measured) | Two learned volumes stacked: N2's 3D fire in the lower box, study R's smoke in the box above it. The fire's soot leaving the top of its box (smoothed over a second, against its running mean) sets the smoke's intensity; the fire's intensity sweeps from 0.6 to 0.95 and back; the camera swings a little; seed 29,900,003 (the smoke 29,900,004) | Learned: both volumes' motion. Procedural: the coupling (a flux read off the fire through the volume API), the floor and sky. Drawn as one 64 x 192 x 64 volume with the fire's optics, so the flame lights its smoke | `models/3d/fire.nvfx3` (N2's C4) and C4 of study R; float | `--kind coupled`, 12 s, 0.7 MB | A small flame under a thin column of its own soot that feeds a broader smoke column above; the seam between the two boxes shows as a flat base under the upper smoke |
+
 ## 10. Later
 
-Every effect that has merged is above: round 7's six, study N's 3D fire, the water, round 9's earth and air, and round
-10's fire and elements. Nothing is still to come here
+Every effect that has merged is above: round 7's six, study N's 3D fire, the water, round 9's earth and air, round
+10's fire and elements, and study R's 3D smoke (a demo). Nothing is still to come here
 but the PC plan ([TODO.md](../TODO.md)): every effect in 3D, trained on large simulations on a PC.
 
 ## Reproduce
@@ -340,6 +359,12 @@ build/nvfx_3d video --kind real-vs-learned --model $NEURALVFX_DATA/n2_3d/models/
 build/nvfx_3d video --kind wind --model $NEURALVFX_DATA/n2_3d/models/chosen.nvfx3 --out 3d_wind.mp4 --seconds 12 --controls 0.7,0.5,0.5 --seed 9950002
 build/nvfx_3d video --kind orbit --model $NEURALVFX_DATA/n_3d/models/smoke3d.nvfx3 --title "LEARNED 3D SMOKE" \
     --out 3d_smoke_orbit.mp4 --seconds 12 --controls 0.7,0.5,0.5 --seed 9900005
+# study R (models/3d/smoke.nvfx3 is $NEURALVFX_DATA/r_smoke3d/models/chosen.nvfx3; models/3d/fire.nvfx3 is N2's C4)
+build/nvfx_3d plumevideo --study r --configs v_i50,v_i20,v_i80 --fit-lo 24 --fit-hi 92 --seconds 16 --seed 29900100 --average-from 4 --out 3d_plume_theory.mp4
+build/nvfx_3d video --study r --kind orbit --model models/3d/smoke.nvfx3 --title "LEARNED 3D SMOKE (STUDY R, A DEMO)" \
+    --out 3d_smoke_r_orbit.mp4 --seconds 12 --controls 0.7,0.5,0.5 --seed 29900001
+build/nvfx_3d video --study r --kind real-vs-learned --model models/3d/smoke.nvfx3 --out 3d_smoke_r_real_vs_learned.mp4 --seconds 10 --controls 0.65,0.45,0.55 --seed 29900002
+build/nvfx_3d video --study r --kind coupled --model models/3d/fire.nvfx3 --smoke models/3d/smoke.nvfx3 --out 3d_fire_smoke_coupled.mp4 --seconds 12 --controls 0.6,0.5,0.5 --seed 29900003
 # study hres 3D fire (models/3d/fire_hres.nvfx3 or $NEURALVFX_DATA/hres_3d/fire/models/hres_fire.nvfx3)
 build/nvfx_3d video --kind orbit --model models/3d/fire_hres.nvfx3 --out hres_fire_orbit_1080p.mp4 \
     --width 1920 --height 1080 --crf 18 --seconds 12 --threads 2 --controls 0.75,0.5,0.55 --seed 9960001 --title "HRES 3D FIRE"
