@@ -115,6 +115,7 @@ and the Godot test; details in its doc and REPORT section):
 - **The weather director, next:** a cloud deck rather than puffs, the sun and its shafts, wet ground and puddles, a storm
   that moves across the scene, trees bending by the Beaufort force.
 - **Small 3D:**
+  - **finer coarse 3D (study hres):** fire (N2 C4 lineage) and smoke (N2 smoke2 lineage); [docs/STUDY_3D_HRES.md](docs/STUDY_3D_HRES.md), `tools/study_3d/hres_fire.sh` and `hres_smoke.sh`; `nvfx_3d --study hres` (32 x 48 x 32, fine 2);
   - a second 3D effect: smoke, validated this time, with bounds calibrated on several teacher runs;
   - 3D fire and smoke coupled;
   - a job hook in the volume API, so an engine's job system can run a volume's step (FUSE.md §9).
