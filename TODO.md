@@ -3,8 +3,9 @@
 **Status:** stage 1 is done (study N, `docs/STUDY_3D.md`, and its follow-up N2, §14); stage 2 is planned, not started.
 Since 15 October 2026, here: round 9, studies O and P, float on AVX-512, the faster detail layer, the 2D weather
 director, the FUSE sample, round 10's fire and elements and study Q (the weak spots of rounds 9 and 10) are done and
-merged, and so is study R (a validated 3D smoke): its teacher is a plume by MTT's measures, its learned
-smoke failed its test and ships as a labelled demo ("Here, until the PC").
+merged, and so is study R (a validated 3D smoke): its teacher is a plume by MTT's measures, its learned smoke failed its
+test and ships as a labelled demo ("Here, until the PC"). Round 7 of the quiet re-timing measured all of their costs on
+a quiet machine (REPORT §13.11).
 
 - **Stage 1, here and now (study N): done.** A small 3D demo in this container ([docs/STUDY_3D.md](docs/STUDY_3D.md),
   REPORT §15). What it built:
@@ -22,8 +23,10 @@ smoke failed its test and ships as a labelled demo ("Here, until the PC").
   - **Most of the "worse" is one fault:** with wind blowing in, heat builds up at the box's upwind side and a second
     fire grows there. The coarse advection's samples are clamped to the grid, so inflow keeps its own heat. The
     `nvfx_3d edge` check catches it.
-  - **Cost (provisional):** a step takes about 60 to 70 ms on one core, 33 ms on four. The detail layer is 59 ms of
-    that and the network 15. A 256² picture takes about 49 ms on the CPU.
+  - **Cost (provisional, a busy machine):** a step takes about 60 to 70 ms on one core, 33 ms on four. The detail layer
+    is 59 ms of that and the network 15. A 256² picture takes about 49 ms on the CPU. (Study N2's model on a quiet
+    machine, with the detail layer on vectors since: 21 ms a step on one core, 9 on four; a 256² picture 56 ms;
+    STUDY_3D.md §14.12.)
 
   What study N2 found (STUDY_3D.md §14):
   - **The fault is fixed.** With ambient air at the open edges and a training stage of long rollouts, the same small
@@ -46,8 +49,9 @@ smoke failed its test and ships as a labelled demo ("Here, until the PC").
   - start from a validated teacher (FDS);
   - snapshot every training stage.
 - **Stage 2, on a PC, much later:** everything below. Accurate 3D simulations of every effect, however long they take,
-  checked against measured physics. Large 3D models trained on them, as fine as the PC allows. Then 3D scenes, a 3D
-  library and a full weather system.
+  checked against measured physics. How the PC's GPU trains it, and which simulators teach it (Houdini, with validated
+  research codes as referees), is planned in [docs/PLAN_PC_GPU.md](docs/PLAN_PC_GPU.md). Large 3D models trained on
+  them, as fine as the PC allows. Then 3D scenes, a 3D library and a full weather system.
 
 First we demo, then we go big.
 
@@ -69,13 +73,14 @@ and the Godot test; details in its doc and REPORT section):
   (+0.40 dB [0.21, 0.60]) replaced by a held-out test.
 - **Study P, cheaper big effects** (docs/STUDY_P.md, REPORT §17): the learned 2x upscale did not pass its rule (it beat
   bilinear on none of six effects); drawing at half size with a bilinear 2x costs 0.36 to 0.43 of native and stays
-  within native's margins against the simulator for all six (busy machine). Shipped as an opt-in, the learned mode
-  marked experimental (NVFX_VERSION 7).
+  within native's margins against the simulator for all six (busy machine; 0.36 to 0.42 on a quiet one, round 7).
+  Shipped as an opt-in, the learned mode marked experimental (NVFX_VERSION 7).
 - **Float on AVX-512** (REPORT §13.10): float rollouts take the AVX-512 build where the CPU has it, 0.80 of AVX2's time;
   frames bit-identical to AVX2's with this compiler.
-- **The detail layer's cost** (REPORT §19, `results/detail/`): the same frames to the bit on every ISA; in 3D the detail
-  layer takes 0.16 to 0.18 of its time and a step 0.31 to 0.32; in 2D the detail stage 0.87 to 0.90 and a frame 0.96 to
-  0.98 (busy machine). A semi-Lagrangian option (0.75) changes every frame and was not shipped.
+- **The detail layer's cost** (REPORT §19, `results/detail/`): the same frames to the bit on every ISA; in 3D the
+  detail layer takes 0.16 to 0.18 of its time and a step 0.31 to 0.32; in 2D the detail stage 0.87 to 0.90 and a frame
+  0.96 to 0.98 (busy machine; on a quiet one, round 7: in 3D 0.20 to 0.22 and 0.38 to 0.40, in 2D the same). A
+  semi-Lagrangian option (0.75) changes every frame and was not shipped.
 - **The 2D weather director** (docs/WEATHER.md, REPORT §18): seven regimes, ordered transitions, seeded gusts, rain cells
   and lightning, rain and snow by Marshall-Palmer, Atlas and Koschmieder, a 40 s day scene and its video; engines drive
   it through the scene inputs. Weak: no sun or wet ground, clouds as puffs rather than a deck, one place in 2D.
@@ -125,6 +130,15 @@ and the Godot test; details in its doc and REPORT section):
   erupts at low intensity and within a shard follows its start point more than its intensity; the haboob's first
   frames (its renderer) and a weak current that runs 25% fast; sea spray's detail (tufts, not thin plumes). To try: a
   field-shader look that draws heat as white vapour (steam and fine spray are heat, which a look draws as light).
+- **Quiet re-timing, round 7** (`quiet-round7`, results/quiet/README.md "Round 7", REPORT §13.11): every cost since
+  round 9 re-timed in one session with nothing else running (59 blocks, each started at a load of at most 0.5, three run
+  again for other agents' load), and the documents' provisional figures replaced
+  (`results/quiet/round7/compare_provisional.csv`). The 33 shipped 2D models: 0.63 ms per 128 px frame on average at the
+  int8 default, int8 0.906 of float on the AVX-512 build (round 6's 0.906); multi-threaded figures far lower than on the
+  busy machine (the scenes 30 to 78%, the FUSE demo's jobs 54 to 90%), single-core ones up to 40% higher than the least
+  busy rounds the documents quoted (within 15% of the busy medians for 55 of 60); the 3D detail layer 4.5 to 4.9 times
+  faster, not 5.7 to 6.5; study P's learned 2x under 0.55 of native for 3 of 6 effects, not 4. This host's AVX-512 build
+  ran 7 to 11% slower than round 6's and its speed drifted by about ±7%: absolute milliseconds belong to their session.
 
 **Next:**
 - **Study Q's leftovers** (STUDY_Q.md §9): the avalanche's start points (the mean state with fine fields regrown from
@@ -148,8 +162,6 @@ and the Godot test; details in its doc and REPORT section):
   - 3D fire and smoke coupled: a demo through the volume API (study R, `nvfx_3d video --kind coupled`); a coupled
     simulation (the boxes exchanging heat and momentum) is not done;
   - a job hook in the volume API, so an engine's job system can run a volume's step (FUSE.md §9).
-- **Quiet re-timing, round 7:** the new effects, the faster detail layer, half size and the FUSE demo on a quiet
-  machine, as `results/quiet` did before (today's costs come from a machine at a load of 6 to 21).
 
 ## Contents
 

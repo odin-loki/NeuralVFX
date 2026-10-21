@@ -40,10 +40,11 @@ settings and seeds of this round's own (27,000,000 to 27,999,999).
   (the simulator's: 97%) and in 8% where it is quiet (0%); at the second, low setting (intensity 0.10) it never erupts,
   where the simulator does a third of the minute (§4.6). Within a 6 s shard its column follows the start point it plays
   more than its intensity (§4.7).
-- **Cost (provisional, a shared machine):** 146 KB stored for the geyser and sea spray, 294 KB for the haboob (16 start
-  points with 64-pixel fine fields and its mean state); 2.4 to 2.5 MB per instance at 128 px. At the runtime's int8
-  default on the AVX-512 build, 1.03 (geyser), 0.67 (haboob) and 0.42 ms (sea spray) per 128 px frame, where study D's
-  fire took 0.68 ms and its explosion 0.52 in the same rounds (§5).
+- **Cost (re-timed on a quiet machine, round 7 of the quiet re-timing):** 146 KB stored for the geyser and sea spray,
+  294 KB for the haboob (16 start points with 64-pixel fine fields and its mean state); 2.4 to 2.5 MB per instance at
+  128 px. At the runtime's int8 default on the AVX-512 build, 1.19 (geyser), 0.78 (haboob) and 0.56 ms (sea spray) per
+  128 px frame, where study D's fire took 0.78 ms and its explosion 0.65 in the same rounds (§5; the busy machine's
+  least rounds gave 1.03, 0.67 and 0.42, its medians 1.28, 0.83 and 0.66).
 - **A scene script** (`examples/scenes/coast.nvfxs`, 9 s) plays all three on a desert coast under the weather director:
   a geyser field across a bay erupts as a haboob rolls in behind it and the day turns from clear to a dust storm, the
   rising wind tearing the geysers' steam away and the spray off the breaking sea. Its keyframes are frozen (`ctest -R
@@ -526,30 +527,39 @@ gets it at the next shard, not at once.
 
 ## 5. Memory and cost
 
-Per frame through `nvfx_render` on one pinned core, with study D's fire and explosion measured in the same session
-(`nvfx_experiment d-timing`, twelve rounds back to back, 21 October 2026; [d_timing.csv](../results/experiments/fx_elements/d_timing.csv)
-has the first round, [d_timing_rounds.csv](../results/experiments/fx_elements/d_timing_rounds.csv) all of them): the
-least of the rounds' medians and, in brackets, the median of the rounds. All at the runtime's default precision, int8
-(the AVX2 rows force the AVX2 build, whose int8 kernels the runtime takes on a CPU without VNNI; the AVX-512 row is what
-this machine plays by default). **Provisional**: the machine was shared with other agents' jobs, though its load was
-low during the rounds (about 1 to 2 on 4 cores); a first set of rounds that overlapped this round's own gallery renders
-was discarded and run again.
+Per frame through `nvfx_render` on one pinned core, with study D's fire and explosion in the same session, **re-timed on
+a quiet machine**: round 7 of the quiet re-timing (21 October 2026,
+[results/quiet/README.md](../results/quiet/README.md)), nine rounds of `nvfx_experiment d-timing` with nothing else
+running; the median of the rounds' medians and its 95% interval
+([d_timing_summary.csv](../results/quiet/round7/d_timing_summary.csv), every round in
+[d_timing_rounds.csv](../results/quiet/round7/d_timing_rounds.csv)). The instances play at their default precision. With
+the AVX2 build forced that is float (the default is int8 only on the AVX-512 build where the CPU has VNNI, REPORT.md
+§13.8), so the AVX2 columns are float on AVX2, what a CPU without AVX-512 plays, not int8 without VNNI as this section
+said before; the AVX-512 column is int8, this machine's default. Where the busy machine's median of its twelve rounds
+(21 October, other agents' jobs, load about 1 to 2;
+[d_timing_rounds.csv](../results/experiments/fx_elements/d_timing_rounds.csv)) differs by more than 15%, it follows as
+"was".
 
 | effect | stored | resident | per instance at 128 px | 64 px, AVX2 | 128 px, AVX2 | 256 px, AVX2 | 128 px, AVX-512 (the default) | restart (AVX2, 128 px) |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|
-| geyser | 146 KB | 419 KB | 2.4 MB | 0.55 ms (0.74) | 1.17 ms (1.37) | 2.12 ms (2.49) | **1.03 ms** (1.28) | 0.3 ms |
-| haboob | 294 KB | 804 KB | 2.5 MB | 0.61 ms (0.67) | 0.77 ms (0.97) | 1.37 ms (1.55) | **0.67 ms** (0.83) | 0.3 ms |
-| seaspray | 146 KB | 419 KB | 2.4 MB | 0.44 ms (0.58) | 0.61 ms (0.73) | 1.15 ms (1.44) | **0.42 ms** (0.66) | 0.3 ms |
-| fire (study D's, same session) | 82 KB | 163 KB | 2.4 MB | 0.48 ms (0.62) | 0.94 ms (1.19) | 2.34 ms (2.75) | 0.68 ms (0.85) | 18 ms (1 s warm-up) |
-| explosion (study D's, same session) | 274 KB | 804 KB | 2.4 MB | 0.38 ms (0.47) | 0.68 ms (0.80) | 1.32 ms (1.58) | 0.52 ms (0.67) | 0.2 ms |
+| geyser | 146 KB | 419 KB | 2.4 MB | 0.76 ms [0.68, 0.90] | 1.35 ms [1.23, 1.70] | 2.35 ms [2.25, 2.63] | **1.19 ms** [1.13, 1.21] | 0.31 ms |
+| haboob | 294 KB | 804 KB | 2.5 MB | 0.64 ms [0.56, 0.69] | 0.91 ms [0.78, 0.92] | 1.35 ms [1.33, 1.53] | **0.78 ms** [0.73, 0.85] | 0.25 ms (was 0.3) |
+| seaspray | 146 KB | 419 KB | 2.4 MB | 0.48 ms [0.47, 0.53] (was 0.58) | 0.68 ms [0.66, 0.70] | 1.36 ms [1.29, 1.44] | **0.56 ms** [0.53, 0.66] (was 0.66) | 0.25 ms (was 0.3) |
+| fire (study D's, same session) | 82 KB | 163 KB | 2.4 MB | 0.53 ms [0.48, 0.60] | 0.98 ms [0.87, 1.11] (was 1.19) | 2.39 ms [2.11, 2.53] | 0.78 ms [0.74, 0.81] | 14 ms (1 s warm-up; was 18) |
+| explosion (study D's, same session) | 274 KB | 804 KB | 2.4 MB | 0.46 ms [0.44, 0.47] | 0.75 ms [0.73, 0.91] | 1.64 ms [1.44, 1.81] | 0.65 ms [0.62, 0.83] | 0.24 ms (was 0.2) |
 
 The same network as study D's, so the same per-pixel work (1012 multiply-adds per pixel at 128 px); what differs is how
 much of the frame the detail layer and the renderer work on. The haboob and sea spray cost less than fire; the geyser
-costs more (1.03 ms against 0.68 at the default): why was not studied, though its steam spreads thin over much of its
-frame. All three store their fine fields with their start points and restart in a third of a millisecond. The haboob's
-mean state is applied once, when it starts. For scale, the 32-cell simulation of each with its own renderer costs 2.7
-(geyser: 2.9 in the median round), 7.5 (haboob: 9.3) and 4.8 ms
-(sea spray: 5.9) in our scalar code, against 1.0 ms (1.2) for fire's.
+costs more (1.19 ms against 0.78 at the default): why was not studied, though its steam spreads thin over much of its
+frame. All three store their fine fields with their start points and restart in about a quarter of a millisecond. The
+haboob's mean state is applied once, when it starts. For scale, the 32-cell simulation of each with its own renderer
+costs 2.8 (geyser), 9.2 (haboob) and 5.5 ms (sea spray) in our scalar code, against 1.2 ms for fire's (the busy
+machine's least and median rounds: 2.7 and 2.9, 7.5 and 9.3, 4.8 and 5.9, 1.0 and 1.2).
+
+Against the busy medians the quiet ones are within 15% except sea spray's (17 and 15% lower) and study D's fire at 128
+px on AVX2 (18% lower); the busy rounds here ran at a load of only 1 to 2, so their medians were near a quiet machine's
+already. The busy least rounds at the default (1.03, 0.67 and 0.42 ms) were between 0.07 ms below and 0.05 ms above
+round 7's least (0.99, 0.62, 0.49).
 
 ## 6. The library and a scene
 
@@ -594,12 +604,13 @@ runtime.
 
 The video is [videos/scene_coast.mp4](../videos/scene_coast.mp4) (rendered at the runtime's int8 default;
 [videos/README.md](../videos/README.md) §1); the full keyframes are under the data root's `fx_elements/scene/frozen1`
-(outside git), and their SHA-256 are in
-[fx_elements_frozen.csv](../results/experiments/fx_elements_frozen.csv) and `ctest -R ScriptedCoastFrozen` checks them
-(pinned to float on the AVX2 build, skipped without the effects in `NEURALFX_MODELS_ELEMENTS`, by default
-`$NEURALVFX_DATA/fx_elements/models/scene`). They are the same on 1 and 2 threads. It plays without an allocation in
-its frame loop, at a median 51 ms per frame on 2 threads at int8 on the shared machine (the modules' steps 4.9 ms of it;
-drawing the 1280 x 720 frame, its big dust tile and the sea, and the bloom the rest; provisional).
+(outside git), and their SHA-256 are in [fx_elements_frozen.csv](../results/experiments/fx_elements_frozen.csv) and
+`ctest -R ScriptedCoastFrozen` checks them (pinned to float on the AVX2 build, skipped without the effects in
+`NEURALFX_MODELS_ELEMENTS`, by default `$NEURALVFX_DATA/fx_elements/models/scene`). They are the same on 1 and 2
+threads. It plays without an allocation in its frame loop, at a median 17.3 ms per frame on 2 threads at int8 (float
+17.7) on a quiet machine (round 7 of the quiet re-timing, six rounds: the median of the runs' medians [16.1, 17.9]; the
+modules' steps 3.1 ms of it; drawing the 1280 x 720 frame, its big dust tile and the sea, and the bloom the rest;
+[scenes_summary.csv](../results/quiet/round7/scenes_summary.csv)). On the shared machine it took 51 ms (the steps 4.9).
 
 What works: the three read as a geyser field, a dust wall and a breaking sea under one storm, and one wind moves all
 three. What does not, yet: the haboob is greyer than ochre in the daylight and its marbled streaks show at this size;

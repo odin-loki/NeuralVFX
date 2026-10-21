@@ -254,7 +254,8 @@ runs made with the same setting.
 
 ## 6. What it costs
 
-Measured numbers from the docs (one thread unless said; the shared 4-core machine; the sources say how provisional):
+Measured numbers from the docs (one thread unless said; the rows that name round 7 were re-timed on a quiet machine, the
+others come from the shared 4-core machine and their sources say how provisional):
 
 | part | cost | source |
 |---|---|---|
@@ -265,12 +266,12 @@ Measured numbers from the docs (one thread unless said; the shared 4-core machin
 | the manager's floor | every simulation steps 30 times a second (0.32 ms a step): 15 to 18 simulations per core within 4 ms at 60 Hz; beyond that it shares | MANAGER.md §1, §8 |
 | a crowd | 165 effects in 4 ms per 60 Hz frame on one core, calibrated (3.8 to 4.3 ms measured); 6.7 ms uncalibrated on a machine 1.8 times slower than the defaults assume | MANAGER.md §7.1 |
 | planning a tick | 0.03 to 0.08 ms on the game thread | MANAGER.md §1 |
-| one learned effect alone | 0.54 ms per 128 px frame at int8 with AVX-512 VNNI (0.32 at 64 px, 1.37 at 256) | REPORT.md §13.6 |
+| one learned effect alone | 0.63 ms per 128 px frame at int8 with AVX-512 VNNI, the mean over the 33 shipped models (0.46 to 1.12; 0.37 at 64 px, 1.51 at 256); round 7 | REPORT.md §13.11 |
 | a stage | about 2.5 ms to draw at 320 x 240 (30 ms at 1120 x 840), plus 3 ms per 128 px fire flame, 1 ms per 64 px one, 15 ms per 256 px smoke or steam tile | LIBRARY.md §7 |
 | a later spawn of a learned entry | its warm-up in that frame: 16 to 20 ms for a 128 px fire or steam module | LIBRARY.md §7 |
 | the engine layers | 3.5 to 6 ms more per picture at 960 x 540; reading all four about 7 ms (the adapter reads one, the colour, as RGBA8) | ENGINES.md §11 |
-| a scene | the fireball at 1280 x 720: 12.5 ms per frame on 4 threads, 23.7 on 2 | ENGINES.md §7 |
-| the volume | a step 68 ms (60 at best; 33 at best on 4 threads), a 256 x 256 picture 49 ms, a start (its warm-up) 1.7 s | STUDY_3D.md §8 |
+| a scene | the fireball at 1280 x 720: 12.5 ms per frame on 4 threads, 23.7 on 2; round 7: 15.0 on 4 threads (12.0 at best), 31 at 1920 x 1080; the round scenes 10 to 19 ms on 2 threads | ENGINES.md §7, REPORT.md §13.11 |
+| the volume | study N2's fire, which the demo plays: a step 21 ms (9 on 4 threads), a 256 x 256 picture 56 ms (14), a start (its warm-up) 0.55 s (0.22); a quiet machine, round 7 of the quiet re-timing | STUDY_3D.md §14.12 |
 | uploads | a sprite at most 256 KB, at most 30 times a second; a card w x h x 4 per new picture; the volume's fields 2 x 0.75 MB per volume frame | INTEGRATION.md §4, this adapter |
 
 What that means for a 60 Hz FUSE frame:
@@ -282,12 +283,15 @@ What that means for a 60 Hz FUSE frame:
 - **A scene costs what its script plays**: the campfire script's sky is four 256 px smoke tiles, about 60 ms a picture
   on one thread by the same numbers, so as written it is a showcase, not a budget scene. A scene for a game is written
   small, or given threads of its own (`threads` in the C API; the adapter uses 1).
-- **The volume is not real time on the CPU**: a step and a picture are about 120 ms every 30 fps frame on one thread
-  (STUDY_3D.md §8). It suits one hero effect on a machine with cores to spare, a cut scene, or baking; FUSE's GPU should
-  ray-march its fields (`fields = true`) rather than show the CPU picture, which only saves the picture's 50 ms.
+- **The volume is not real time on the CPU**: a step and a picture are about 77 ms every 30 fps frame on one thread and
+  23 ms on four (STUDY_3D.md §14.12, a quiet machine; 120 ms on one busy thread before the detail layer ran on
+  vectors). It suits one hero effect on a machine with cores to spare, a cut scene, or baking; FUSE's GPU should
+  ray-march its fields (`fields = true`) rather than show the CPU picture, which saves the picture's 56 ms (14 on four
+  threads).
 
-The demo itself ran at about 4 frames a second on the shared machine (load average 6 to 17 while four other agents
-built and trained), most of it the volume's job: its own timings (§8) say how the parts compare, not what they cost.
+The demo itself ran at about 4 frames a second on the shared machine (load average 6 to 17 while four other agents built
+and trained) and at 14 on three workers (11 on the game thread alone) on a quiet one (round 7 of the quiet re-timing,
+§8), most of it the volume's job.
 
 ## 7. Errors
 
@@ -358,28 +362,35 @@ handle): no heap allocation in any frame, failed calls included; the same frames
 failed calls kept as frame errors (`spawn: no sprite model 0: invalid argument`).
 
 **What the test found** (21 October 2026: one run of the same `--check` by hand, then `ctest -R Fuse`, which passed
-every check). The times are wall clock on the shared 4-core machine at a load average of 6 to 17 (four other agents
-building and training), so they say how the parts compare, not what they cost (§6 has the measured costs):
+every check), **re-timed on a quiet machine**: round 7 of the quiet re-timing
+([results/quiet/README.md](../results/quiet/README.md); three runs of `nvfx_fuse_demo --check --workers 3`, nothing else
+running; the median of the runs and their range, [fuse_runs.csv](../results/quiet/round7/fuse_runs.csv)). The first
+run's times were wall clock on the shared 4-core machine at a load average of 6 to 17 (four other agents building and
+training) and are kept in the last column (every time there differs from round 7's by more than 15%). §6 has the costs
+of the parts:
 
-| | 3 workers and the game thread | the game thread alone |
-|---|---:|---:|
-| frames, and the time they took | 600 in 168 s | 600 in 138 s |
-| heap allocations in the frames, every thread | **0** | **0** |
-| frames that differ between the two runs | **0 of 600** | |
-| frame errors | 0 | 0 |
-| `update`, mean and worst (the worst is the volume's shard change at 7.5 s) | 276 and 2,981 ms | 228 and 2,874 ms |
-| the volume's job per volume frame: step, picture, fields | 272, 105 and 111 ms | 190, 85 and 86 ms |
-| the scene's job per picture (the campfire script) | 122 ms | 37 ms |
-| the stage's job per picture | 50 ms | 14 ms |
-| the manager's jobs per tick, against its plan (budget 5 ms) | 7.0 against 4.1 ms | 4.8 against 4.1 ms |
-| uploads | 1.87 MB a frame | the same |
-| `create` | 3.1 s | 2.9 s |
+| | 3 workers and the game thread | the game thread alone | the busy machine: 3 workers / alone |
+|---|---:|---:|---:|
+| frames, and the time they took | 600 in 41.8 s (39.7 to 42.3) | 600 in 55.3 s (51.7 to 55.3) | 168 s / 138 s |
+| heap allocations in the frames, every thread | **0** | **0** | 0 / 0 |
+| frames that differ between the two plays of a run | **0 of 600** | | 0 of 600 |
+| frame errors | 0 | 0 | 0 / 0 |
+| `update`, mean and worst (the worst is the volume's shard change at 7.5 s) | 69.1 and 621 ms (65.5 to 69.6; 616 to 639) | 91.9 and 647 ms (85.9 to 91.9; 642 to 763) | 276 and 2,981 / 228 and 2,874 ms |
+| the volume's job per volume frame: step, picture, fields | 26.9, 38.7 and 50.7 ms | 26.5, 38.9 and 51.4 ms | 272, 105 and 111 / 190, 85 and 86 ms |
+| the scene's job per picture (the campfire script) | 32.7 ms | 30.0 ms | 122 / 37 ms |
+| the stage's job per picture | 14.8 ms | 11.7 ms | 50 / 14 ms |
+| the manager's jobs per tick, against its plan (budget 5 ms) | 4.07 against 4.07 ms | 3.54 against 4.07 ms | 7.0 / 4.8 against 4.1 ms |
+| uploads | 1.88 MB a frame | the same | 1.87 MB a frame |
+| `create` | 1.1 s (1.06 to 1.31) | 1.0 s (1.01 to 1.24) | 3.1 s / 2.9 s |
 
-A later run that reports when its worst update came confirmed it: at 7.50 s, where the volume's next shard starts (§9).
+Every run's worst update came at 7.50 s, where the volume's next shard starts (§9). The volume's step is a tenth of the
+busy run's: the detail layer runs on vectors since (REPORT.md §19), besides the quiet.
 
-On three workers each job took longer than on the game thread alone: the machine had no free core, so more threads
-only competed. The manager's jobs took more than it planned because its default costs are one AVX2 core on a fast day
-(MANAGER.md §7.1): a game calibrates at load, or ships costs measured on its target in the pack.
+On the busy machine each job took longer on three workers than on the game thread alone: it had no free core, so more
+threads only competed. On the quiet one the three workers play the 600 frames in three quarters of the time the game
+thread alone takes (14 frames a second against 11), though a job itself is no faster on them (the scene's and the
+stage's a little slower). The manager's jobs were at or under its plan on both; its default costs are one AVX2 core on a
+fast day (MANAGER.md §7.1): a game calibrates at load, or ships costs measured on its target in the pack.
 
 **Checks** (21 October 2026, the branch on main at c846c80): the full build with warnings as errors; the full ctest,
 492 of 492 (main's 488 and the four here), none skipped; `nvfx_alloc_test`; `nvfx_gallery --check --require-models`

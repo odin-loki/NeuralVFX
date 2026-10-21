@@ -8,10 +8,14 @@ Every frame of both is compared bit for bit (2D: the fine heat and soot, the coa
 3D: the temperature and soot fields). Everything here came from one run of `tools/detail_bench/run_all.sh OLD.so
 NEW.so` (resumable; a CSV that exists is skipped).
 
-**The machine** (21 October 2026, after the container moved at 01:18 UTC): an Intel Xeon at 2.80 GHz, 4 cores,
-AVX-512 with VNNI (Cascade Lake class), shared with five other agents' jobs, six of them training (load 18 to 21). So
-absolute milliseconds are provisional and slow (each process got about a fifth of a core's share); the ratios are
-interleaved and paired and are what to read. Times are the thread's CPU time (the 3D runs on 4 threads: wall time).
+**The machine** (21 October 2026, after the container moved at 01:18 UTC): an Intel Xeon at 2.80 GHz, 4 cores, AVX-512
+with VNNI (Cascade Lake class), shared with five other agents' jobs, six of them training (load 18 to 21). So absolute
+milliseconds are provisional and slow (each process got about a fifth of a core's share); the ratios are interleaved and
+paired and are what to read. **Re-timed on a quiet machine** in round 7 of the quiet re-timing
+(`../quiet/round7/detail_*`, `../quiet/README.md`): the same runs over the 33 shipped models, no frame differing; the 2D
+ratios held to within 0.015, the 3D ones did not (the layer 0.20 to 0.22 of the old instead of 0.155 to 0.176, a step
+0.38 to 0.40 instead of 0.31 to 0.32; REPORT.md §19.2). Times are the thread's CPU time (the 3D runs on 4 threads: wall
+time).
 
 | file | what |
 |---|---|
