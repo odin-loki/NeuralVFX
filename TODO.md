@@ -22,8 +22,10 @@ smoke failed its test and ships as a labelled demo ("Here, until the PC").
   - **Most of the "worse" is one fault:** with wind blowing in, heat builds up at the box's upwind side and a second
     fire grows there. The coarse advection's samples are clamped to the grid, so inflow keeps its own heat. The
     `nvfx_3d edge` check catches it.
-  - **Cost (provisional):** a step takes about 60 to 70 ms on one core, 33 ms on four. The detail layer is 59 ms of
-    that and the network 15. A 256² picture takes about 49 ms on the CPU.
+  - **Cost (provisional, a busy machine):** a step takes about 60 to 70 ms on one core, 33 ms on four. The detail layer
+    is 59 ms of that and the network 15. A 256² picture takes about 49 ms on the CPU. (Study N2's model on a quiet
+    machine, with the detail layer on vectors since: 21 ms a step on one core, 9 on four; a 256² picture 56 ms;
+    STUDY_3D.md §14.12.)
 
   What study N2 found (STUDY_3D.md §14):
   - **The fault is fixed.** With ambient air at the open edges and a training stage of long rollouts, the same small

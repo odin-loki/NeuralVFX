@@ -380,9 +380,10 @@ layers rather than driving the other weather entries.
   regime with every layer the director drives (overlapped and not, with the engine layers and without) and a scene
   driven by an input through the C API, reading the weather back every frame: 0 allocations.
 - **Cost**: a step is about 1 microsecond (one core of the shared machine at a load of 17, the best of seven runs of
-  300,000 steps). The layers cost what they cost without it: the day scene's median frame is 76 ms on 2 threads of the
-  same busy machine (provisional), nearly all of it the cloud, fog, fire and smoke modules and the picture at
-  1280 x 720.
+  300,000 steps). The layers cost what they cost without it: the day scene's median frame is 16.4 ms on 2 threads at the
+  runtime's default (float 17.3; the modules' steps 3.6 ms of it) on a quiet machine (round 7 of the quiet re-timing,
+  six rounds, [15.9, 16.9]; [scenes_summary.csv](../results/quiet/round7/scenes_summary.csv)), nearly all of it the
+  cloud, fog, fire and smoke modules and the picture at 1280 x 720. On the busy machine it took 76 ms.
 
 ## 7. The day scene
 

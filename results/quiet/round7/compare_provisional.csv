@@ -1,0 +1,80 @@
+doc,section,figure,unit,provisional,provisional_note,round7,round7_ci,change_pct
+EFFECTS_EARTH.md,§5,lava default (int8 AVX-512) 128 px,ms,0.49,least of 4 busy rounds,0.54,0.45-0.70,+10
+EFFECTS_EARTH.md,§5,eruption default 128 px,ms,0.48,least of 4 busy rounds,0.53,0.53-0.68,+10
+EFFECTS_EARTH.md,§5,avalanche default 128 px,ms,0.44,least of 4 busy rounds (the round's file),0.61,0.48-0.71,+39
+EFFECTS_EARTH.md,§5,study D fire default 128 px,ms,0.66,least of 4 busy rounds,0.78,0.74-0.81,+18
+EFFECTS_EARTH.md,§5,study D explosion default 128 px,ms,0.55,least of 4 busy rounds,0.65,0.62-0.83,+18
+EFFECTS_EARTH.md,§6,volcano scene 2 threads mean frame,ms,20,busy,14.1,13.4-15.0,-30
+EFFECTS_AIR.md,§5,candle default 128 px,ms,0.50,median of 12 busy rounds,0.57,0.54-0.70,+14
+EFFECTS_AIR.md,§5,smokering default 128 px,ms,0.60,median of 12 busy rounds,0.71,0.66-0.73,+18
+EFFECTS_AIR.md,§5,heavygas default 128 px,ms,0.44,median of 12 busy rounds,0.49,0.40-0.50,+11
+EFFECTS_AIR.md,§6,crypt scene 2 threads float frame,ms,19,busy,10.2,9.8-11.5,-46
+EFFECTS_AIR.md,§6,crypt scene 2 threads int8 frame,ms,28,busy,10.2,9.2-11.0,-64
+EFFECTS_FIRE2.md,§5,crownfire default 128 px,ms,0.59,median of 12 busy rounds,0.66,0.60-0.78,+12
+EFFECTS_FIRE2.md,§5,windowfire default 128 px,ms,0.59,median of 12 busy rounds,0.65,0.51-0.71,+10
+EFFECTS_FIRE2.md,§5,dustexplosion default 128 px,ms,0.81,median of 12 busy rounds (the round's file),0.87,0.80-1.09,+7
+EFFECTS_FIRE2.md,§6,forest edge scene 2 threads int8 frame,ms,,none before,19.0,17.8-20.7,
+EFFECTS_ELEMENTS.md,§5,geyser default 128 px,ms,1.28,median of 12 busy rounds,1.19,1.13-1.21,-7
+EFFECTS_ELEMENTS.md,§5,haboob default 128 px,ms,0.83,median of 12 busy rounds,0.78,0.73-0.85,-6
+EFFECTS_ELEMENTS.md,§5,seaspray default 128 px,ms,0.66,median of 12 busy rounds,0.56,0.53-0.66,-15
+EFFECTS_ELEMENTS.md,§6,coast scene 2 threads int8 median frame,ms,51,busy,17.3,16.1-17.9,-66
+STUDY_P.md,§7,L/N at 512 px (explosion),ratio,0.571,the rule's busy run,0.597,0.544-0.629,+5
+STUDY_P.md,§7,L/N at 512 px (mushroom),ratio,0.453,the rule's busy run,0.505,0.455-0.597,+11
+STUDY_P.md,§7,L/N at 512 px (wildfire),ratio,0.593,the rule's busy run,0.619,0.560-0.641,+4
+STUDY_P.md,§7,L/N at 512 px (launch),ratio,0.536,the rule's busy run,0.532,0.514-0.562,-1
+STUDY_P.md,§7,L/N at 512 px (smoke),ratio,0.550,the rule's busy run,0.619,0.515-0.661,+13
+STUDY_P.md,§7,L/N at 512 px (waterfall),ratio,0.530,the rule's busy run,0.540,0.501-0.546,+2
+STUDY_P.md,§7,H/N at 512 px (range over the six),ratio,0.29-0.34,the rule's busy run,0.29-0.38,,
+STUDY_P.md,§7,N at 512 px (range over the six),ms,4.16-6.00,the rule's busy run,4.43-6.43,,+6 to +18
+REPORT.md,§19.2,3D detail layer alone new/old 1 thread,ratio,0.155-0.176,busy (load 15-21),0.204-0.223,,+27 to +32
+REPORT.md,§19.2,3D volume step new/old 1 thread,ratio,0.309-0.319,busy,0.375-0.396,,+21 to +24
+REPORT.md,§19.2,3D volume step new 1 thread,ms,25.8-26.8,busy,24.6-25.6,,-5
+REPORT.md,§19.2,3D volume step new/old 4 threads,ratio,0.184-0.303,busy (no free cores),0.451-0.460,,
+REPORT.md,§19.3,2D detail stage new/old (6 size-ISA pairs),ratio,0.868-0.904,busy (27 models),0.864-0.905,,within 0.015
+REPORT.md,§19.3,2D detail stage old/new ms at 512 px AVX2,ms,2.290/2.035,busy (27 models),1.816/1.607,,-21
+STUDY_3D.md,§14.12,N2 C4 step 1 thread,ms,70,busy-quiet (load 1.0-1.7; scalar detail layer),21.0,18.8-22.2,-70
+STUDY_3D.md,§14.12,N2 C4 step 4 threads,ms,23,busy-quiet (scalar detail layer),9.0,8.5-9.3,-61
+STUDY_3D.md,§14.12,N2 C4 picture 256x256 1 thread,ms,61,busy-quiet,55.9,51.0-57.4,-8
+STUDY_3D.md,§14.12,N2 C4 picture 256x256 4 threads,ms,16,busy-quiet,14.1,13.5-14.7,-12
+STUDY_3D.md,§14.12,N2 C4 start 1 thread,ms,1866,busy-quiet (scalar detail layer),546,517-584,-71
+STUDY_R.md,§4,smoke step 1 thread,ms,26.6,quiet moment of the shared machine (load 1.4-1.6),21.4,20.0-24.8,-20
+STUDY_R.md,§4,smoke step 4 threads,ms,9.0,quiet moment,9.2,8.7-9.9,+2
+STUDY_R.md,§4,smoke picture 256x256 1 thread,ms,93,quiet moment,85.7,79.8-94.6,-8
+STUDY_R.md,§4,smoke picture 256x256 4 threads,ms,22,quiet moment,22.7,21.7-23.9,+3
+STUDY_3D_HRES.md,§8,hres fire step 1 thread,ms,,none before,239,233-244,
+STUDY_3D_HRES.md,§8,hres fire step 4 threads,ms,,none before,64,63-68,
+STUDY_3D_HRES.md,§8,hres fire picture 256x256 1 thread,ms,,none before,49,44-53,
+REPORT.md,§13.10,fireball 720p 4 threads float (AVX-512 build),ms,15.1-43.5,busy pairs (load 7-10),15.0,13.3-16.1,
+REPORT.md,§13.10,fireball 720p 4 threads after/before (AVX-512/AVX2 float),ratio,,busy pairs followed the load,0.948,0.920-1.027,
+EFFECTS_AIR.md,§5,study D fire default 128 px,ms,0.67,median of 12 busy rounds,0.78,0.74-0.81,+16
+EFFECTS_ELEMENTS.md,§5,seaspray AVX2 (float) 64 px,ms,0.58,median of 12 busy rounds,0.48,0.47-0.53,-17
+EFFECTS_ELEMENTS.md,§5,study D fire AVX2 (float) 128 px,ms,1.19,median of 12 busy rounds,0.98,0.87-1.11,-18
+EFFECTS_ELEMENTS.md,§5,haboob coarse simulation 128 px,ms,7.5,least of 12 busy rounds,9.24,8.61-9.78,+23
+EFFECTS_ELEMENTS.md,§5,seaspray coarse simulation 128 px,ms,4.8,least of 12 busy rounds,5.47,5.41-5.99,+14
+EFFECTS_EARTH.md,§5,lava coarse simulation 128 px,ms,2.6-3.2,range of 4 busy rounds,2.34,2.23-2.61,
+EFFECTS_EARTH.md,§5,eruption coarse simulation 128 px,ms,3.5-4.7,range of 4 busy rounds,3.14,2.94-3.55,
+EFFECTS_EARTH.md,§5,avalanche coarse simulation 128 px,ms,3.4-3.8,range of 4 busy rounds,3.10,2.94-3.76,
+EFFECTS_ELEMENTS.md,§6,coast scene steps on 2 threads,ms,4.9,busy,3.1,,-36
+EFFECTS_AIR.md,§6,crypt scene steps on 2 threads (float / int8),ms,4.8 / 2.6,busy,3.4 / 2.7,,-28 / +5
+WEATHER.md,§6,weather day scene 2 threads median frame,ms,76,busy (load 17),16.4,15.9-16.9,-78
+REPORT.md,§18,weather day scene 2 threads median frame,ms,76,busy,16.4,15.9-16.9,-78
+REPORT.md,§16.6,lift-off scene (three tiles two passes) 2 threads int8 frame,ms,46.0-50.3,two busy runs (load 8),19.8,17.8-20.4 (range of 3),-59
+REPORT.md,§16.6,lift-off scene step stage,ms,12.2-12.4,two busy runs,4.8,4.5-4.9 (range of 3),-61
+REPORT.md,§16.6,launch second pass at 256 px int8 (difference),ms,+0.233,busy (load 13),+0.152,,
+REPORT.md,§16.6,waterfall second pass at 256 px int8 (difference),ms,+0.061,busy,-0.015,,
+FUSE.md,§8,demo 600 frames on 3 workers,s,168,busy (load 6-17),41.8,39.7-42.3 (range of 3),-75
+FUSE.md,§8,demo 600 frames on the game thread alone,s,138,busy,55.3,51.7-55.3 (range of 3),-60
+FUSE.md,§8,the volume's job: step (3 workers),ms,272,busy (scalar detail layer),26.9,25.0-27.1 (range of 3),-90
+FUSE.md,§8,the volume's job: picture (3 workers),ms,105,busy,38.7,36.6-38.9 (range of 3),-63
+FUSE.md,§8,the volume's job: fields (3 workers),ms,111,busy,50.7,48.5-50.9 (range of 3),-54
+FUSE.md,§8,the scene's job per picture (3 workers),ms,122,busy,32.7,30.4-32.9 (range of 3),-73
+FUSE.md,§8,the stage's job per picture (3 workers),ms,50,busy,14.8,13.5-15.2 (range of 3),-70
+FUSE.md,§8,update mean (3 workers),ms,276,busy,69.1,65.5-69.6 (range of 3),-75
+FUSE.md,§8,create (3 workers),s,3.1,busy,1.1,1.06-1.31 (range of 3),-65
+FUSE.md,§6,the volume step 1 thread,ms,68,STUDY_3D §8 study N busy (scalar detail layer),21.0,18.8-22.2 (N2's model),-69
+REPORT.md,§13.11,the 33 models default 128 px mean,ms,0.54,REPORT §13.6 eleven effects busy (load 4-12),0.63,,+17
+REPORT.md,§13.11,int8/float AVX-512 128 px (mean ratio),ratio,0.903,REPORT §13.6 busy (11 effects),0.906,0.897-0.914,0
+REPORT.md,§13.11,float AVX-512/float AVX2 128 px (mean ratio),ratio,0.806,round 6 quiet (21 effects),0.886,0.875-0.896,+10
+REPORT.md,§13.11,fireball 720p 4 threads float,ms,12.8,round 6 quiet (float then on AVX2),15.0,13.3-16.1,+17
+REPORT.md,§13.11,fireball 720p 4 threads int8,ms,12.2,round 6 quiet,14.8,13.4-15.7,+22
+REPORT.md,§1,fireball 720p 4 threads frames per second,fps,80,quiet round 2,67,62-75,-16

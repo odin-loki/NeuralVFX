@@ -7,12 +7,12 @@ committed before validation and did not change; the results, the cost and the vi
 seeded 64 x 96 x 64 detail, drawn by a physically based volume renderer and played through a volume C API. On the
 held-out test, run once, it **follows a real run better than running the simulation on the coarse grid with the same
 detail** (at 1 s: temperature +1.08 dB [+0.74, +1.39], picture from four cameras +2.20 dB [+1.09, +3.12]) **but looks
-worse when played on**, in how much it moves (|ln motion ratio| +0.229 [+0.063, +0.402]) and how much it covers
-(+0.0049 [+0.0006, +0.0116]); so by the rule it does not beat the cheap simulation outright. Holding the first frame
-still beats it after a second. When the wind blows towards -x (0.3 or below) it runs away (§11), which is most of
-what it does worse. A step costs about
-70 ms and a 256 x 256 picture about 50 ms on one busy core (provisional), most of it the detail layer. Smoke was
-trained as a demo only (§10), not validated or tested.
+worse when played on**, in how much it moves (|ln motion ratio| +0.229 [+0.063, +0.402]) and how much it covers (+0.0049
+[+0.0006, +0.0116]); so by the rule it does not beat the cheap simulation outright. Holding the first frame still beats
+it after a second. When the wind blows towards -x (0.3 or below) it runs away (§11), which is most of what it does
+worse. A step costs about 70 ms and a 256 x 256 picture about 50 ms on one busy core (provisional), most of it the
+detail layer (study N2's model, which the demos play, re-timed on a quiet machine with the detail layer on vectors: 21
+ms and 56 ms, §14.12). Smoke was trained as a demo only (§10), not validated or tested.
 
 **Study N2** (§14) fixed the runaway: the model's advection now brings in ambient air at the open sides and top, and the
 same small model retrained with it and with long rollouts has no runaway over 30 s at any wind, and on a new held-out
@@ -316,8 +316,10 @@ Beside the rule (not judged):
 
 ## 8. Cost (provisional)
 
-(Since 21 October 2026 the volume runtime's detail layer runs on vectors, with the same fields to the bit: about a sixth of
-the time below, and a step about a third; REPORT.md §19.)
+(Since 21 October 2026 the volume runtime's detail layer runs on vectors, with the same fields to the bit: about a fifth
+of the time below on a quiet machine, and a step about 0.4; REPORT.md §19. Study N's model below was not re-timed;
+study N2's, the one the demos play, was, on a quiet machine with the vector layer: a step 21 ms on one thread and 9 on
+four, a 256 x 256 picture 56 and 14 ms, §14.12.)
 
 `nvfx_3d timing` (`results/3d/timing.csv`): the chosen model through the volume C API at controls (0.7, 0.5, 0.6), 5
 starts of 60 frames each, and 4 pictures of each size per start from one camera; then where a step's time goes (the
@@ -864,23 +866,29 @@ in the study changed.
   live wind change slowly, its flame base is blocky, and the teacher is still our own solver. Study N's smoke model
   also runs away given 30 s.
 
-### 14.12 Cost (provisional)
+### 14.12 Cost
 
-`nvfx_3d timing` on C4 (`results/3d/n2/timing.csv`), the same procedure as §8, at nice 15 on the shared machine, **this
-time quiet** (load 1.0 to 1.7, so threads found free cores). Milliseconds per frame, median (minimum):
+**Re-timed on a quiet machine** (round 7 of the quiet re-timing, 21 October 2026,
+[results/quiet/README.md](../results/quiet/README.md); nothing else running): `nvfx_3d timing` on C4 as below, six
+rounds, each with study hres's fire and study R's smoke in turn, on 1 and 4 threads; the median of the rounds' medians
+and its 95% interval from order statistics ([volume_summary.csv](../results/quiet/round7/volume_summary.csv)). The
+volume API's step has used the vectorised detail layer since 21 October (REPORT.md §19), which is most of the change
+from the first measurement (in brackets where it differs by more than 15%: `results/3d/n2/timing.csv`, at nice 15 on the
+shared machine at a load of 1.0 to 1.7, the scalar detail layer). Milliseconds per frame:
 
-| what | 1 thread | 2 threads | 4 threads |
-|---|---:|---:|---:|
-| a step (one frame) | 70 (64) | 37 (34) | 23 (20) |
-| a picture, 256 x 256 | 61 (52) | 30 (27) | 16 (14) |
-| a picture, 512 x 512 | 219 (202) | 110 (104) | 59 (55) |
-| a start (the start point and the 24-frame warm-up) | 1,866 | 953 | 602 |
+| what | 1 thread | 4 threads |
+|---|---:|---:|
+| a step (one frame) | **21.0** [18.8, 22.2] (was 70) | **9.0** [8.5, 9.3] (was 23) |
+| a picture, 256 x 256 | 55.9 [51.0, 57.4] | 14.1 [13.5, 14.7] |
+| a picture, 512 x 512 | 200 [190, 215] | 51.6 [49.6, 53.7] |
+| a start (the start point and the 24-frame warm-up) | 546 [517, 584] (was 1,866) | 224 [215, 241] (was 602) |
 
-On one thread a step splits into the noise inputs 2.5 ms, the coarse step 12.0, **the detail layer 54.5**, the
-renderer's preparation 15.8, and a 256 x 256 picture 47.7; the simulator's frame is 165 ms at 64 x 96 x 64 and 5.6 ms
-at 16 x 24 x 16. The ambient edges cost nothing measurable (the coarse step 12 ms, study N's 15 on a busier machine).
-**Threads scale** where study N could not show it: a step and a picture are 3 to 4 times faster on four threads than
-on one. Training cost is in §14.6.
+(Two threads were not re-timed; the first measurement gave a step 37 ms, pictures 30 and 110 ms and a start 953 ms.) On
+one thread a step's stages with the reference detail layer (`rollout3d::detail_step`, which the volume API no longer
+runs) are: the noise inputs 2.2 ms, the coarse step 10.5, the reference detail layer 50.2 (the vector one: about 10,
+REPORT.md §19.2), the renderer's preparation 14.9, and a 256 x 256 picture 43.1; the simulator's frame is 154 ms at 64
+x 96 x 64 and 5.6 ms at 16 x 24 x 16. **Threads scale**: a step is 2.3 times faster on four threads than on one and a
+picture 4 times (where the step scales less was not taken apart). Training cost is in §14.6.
 
 ### 14.13 Reproduce
 

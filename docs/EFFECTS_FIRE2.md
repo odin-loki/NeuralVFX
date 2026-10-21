@@ -36,11 +36,11 @@ sources, forces and drawing, and are trained and tested as the earlier rounds' w
   at its right end, the learned flame's light moves across the cloud as the real one's does, reaching its far end 0.2 s
   sooner (0.50 s against 0.70 s). Lit near its middle, it starts a little right of the real spark: its start points and
   the mean state carry the spark's place only roughly (the fit explains 41% of the first states' heat).
-- **Cost (provisional, a shared machine, load 1.5 to 5 on 4 cores during the rounds):** 146 KB stored for the crown and
-  window fires (64-pixel fine fields with 8 start points), 294 KB for the dust explosion (16 start points and the mean
-  state); 2.4 to 2.5 MB per instance at 128 px. At the runtime's int8 default on the AVX-512 build, 0.49 (crown fire),
-  0.53 (window fire) and 0.65 ms (dust explosion) per 128 px frame, where study D's fire took 0.71 ms and its
-  explosion 0.57 in the same rounds (§5).
+- **Cost (re-timed on a quiet machine, round 7 of the quiet re-timing):** 146 KB stored for the crown and window fires
+  (64-pixel fine fields with 8 start points), 294 KB for the dust explosion (16 start points and the mean state); 2.4 to
+  2.5 MB per instance at 128 px. At the runtime's int8 default on the AVX-512 build, 0.66 (crown fire), 0.65 (window
+  fire) and 0.87 ms (dust explosion) per 128 px frame, where study D's fire took 0.78 ms and its explosion 0.65 in the
+  same rounds (§5; the busy machine's least rounds gave 0.49, 0.53 and 0.65, its medians 0.59, 0.59 and 0.81).
 - **A scene script** (`examples/scenes/forestedge.nvfxs`, 10 s) plays all three in a town at the edge of a burning
   forest: a crown fire along the skyline, a burning house's windows and one that catches, and the mill's dust explosion
   at 5 s with its shock, debris, embers and ash. Its keyframes are frozen (`ctest -R ScriptedForestEdgeFrozen`, float on
@@ -443,28 +443,43 @@ the real one and tinted.
 
 ## 5. Memory and cost
 
-Per frame through `nvfx_render` on one pinned core, with study D's fire and explosion measured in the same session
-(`nvfx_experiment d-timing`, twelve rounds back to back, 21 October 2026; [d_timing.csv](../results/experiments/fx_fire2/d_timing.csv)
-has the first round, [d_timing_rounds.csv](../results/experiments/fx_fire2/d_timing_rounds.csv) all of them): the least of
-the rounds' medians and, in brackets, the median of the rounds. All at the runtime's default precision, int8 (the AVX2
-rows force the AVX2 build, whose int8 kernels the runtime takes on a CPU without VNNI; the AVX-512 row is what this
-machine plays by default). **Provisional**: the machine was shared with four other agents' jobs (load 1.5 to 5 on 4
-cores during the rounds, `nice 10`).
+Per frame through `nvfx_render` on one pinned core, with study D's fire and explosion in the same session, **re-timed on
+a quiet machine**: round 7 of the quiet re-timing (21 October 2026,
+[results/quiet/README.md](../results/quiet/README.md)), nine rounds of `nvfx_experiment d-timing` with nothing else
+running, on the files as shipped (the dust explosion is study Q's, its renderer trained again, the same network); the
+median of the rounds' medians and its 95% interval
+([d_timing_summary.csv](../results/quiet/round7/d_timing_summary.csv), every round in
+[d_timing_rounds.csv](../results/quiet/round7/d_timing_rounds.csv)). The instances play at their default precision. With
+the AVX2 build forced that is float (the default is int8 only on the AVX-512 build where the CPU has VNNI, REPORT.md
+§13.8), so the AVX2 columns are float on AVX2, what a CPU without AVX-512 plays, not int8 without VNNI as this section
+said before; the AVX-512 column is int8, this machine's default. Where the busy machine's median of its twelve rounds
+(21 October, four other agents' jobs, load 1.5 to 5, `nice 10`;
+[d_timing_rounds.csv](../results/experiments/fx_fire2/d_timing_rounds.csv)) differs by more than 15%, it follows as
+"was".
 
 | effect | stored | resident | per instance at 128 px | 64 px, AVX2 | 128 px, AVX2 | 256 px, AVX2 | 128 px, AVX-512 (the default) | restart (AVX2, 128 px) |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|
-| crownfire | 146 KB | 419 KB | 2.4 MB | 0.45 ms (0.47) | 0.73 ms (0.75) | 1.56 ms (1.76) | **0.49 ms** (0.59) | 0.35 ms |
-| windowfire | 146 KB | 419 KB | 2.4 MB | 0.41 ms (0.48) | 0.62 ms (0.72) | 1.69 ms (1.86) | **0.53 ms** (0.59) | 0.31 ms |
-| dustexplosion | 294 KB | 804 KB | 2.5 MB | 0.46 ms (0.52) | 0.84 ms (0.98) | 1.90 ms (2.30) | **0.65 ms** (0.81) | 0.28 ms |
-| fire (study D's, same session) | 82 KB | 163 KB | 2.4 MB | 0.42 ms (0.53) | 0.89 ms (1.06) | 2.12 ms (2.61) | 0.71 ms (0.84) | 22 ms (1 s warm-up) |
-| explosion (study D's, same session) | 274 KB | 804 KB | 2.4 MB | 0.44 ms (0.47) | 0.72 ms (0.84) | 1.52 ms (1.79) | 0.57 ms (0.73) | 0.26 ms |
+| crownfire | 146 KB | 419 KB | 2.4 MB | 0.46 ms [0.45, 0.50] | 0.73 ms [0.71, 0.97] | 1.67 ms [1.61, 1.74] | **0.66 ms** [0.60, 0.78] | 0.36 ms |
+| windowfire | 146 KB | 419 KB | 2.4 MB | 0.49 ms [0.47, 0.65] | 0.75 ms [0.70, 0.82] | 1.76 ms [1.66, 1.97] | **0.65 ms** [0.51, 0.71] | 0.37 ms (was 0.31) |
+| dustexplosion | 294 KB | 804 KB | 2.5 MB | 0.54 ms [0.51, 0.62] | 1.01 ms [0.96, 1.21] | 2.26 ms [2.09, 2.51] | **0.87 ms** [0.80, 1.09] | 0.29 ms |
+| fire (study D's, same session) | 82 KB | 163 KB | 2.4 MB | 0.53 ms [0.48, 0.60] | 0.98 ms [0.87, 1.11] | 2.39 ms [2.11, 2.53] | 0.78 ms [0.74, 0.81] | 14 ms (1 s warm-up; was 22) |
+| explosion (study D's, same session) | 274 KB | 804 KB | 2.4 MB | 0.46 ms [0.44, 0.47] | 0.75 ms [0.73, 0.91] | 1.64 ms [1.44, 1.81] | 0.65 ms [0.62, 0.83] | 0.24 ms |
 
 The same network as study D's, so the same per-pixel work (1012 multiply-adds per pixel at 128 px). The two fires cost
 less than fire at 128 and 256 px; the dust explosion about as much as fire (its fireball and pall cover much of its
 frame). All three store their fine fields with their start points and restart in a third of a millisecond. The dust
 explosion's mean state is applied once, when it starts. For scale, the 32-cell simulation of each with its own renderer
-costs 2.0 to 2.3 (crown fire), 2.1 to 3.0 (window fire) and 2.1 to 2.5 ms (dust explosion: four passes of its heat's
-spread a step) in our scalar code, against 1.1 to 1.2 ms for fire's.
+costs 2.1 (crown fire), 2.2 (window fire) and 2.2 ms (dust explosion: four passes of its heat's spread a step) in our
+scalar code, against 1.2 ms for fire's (the busy machine's: 2.0 to 2.3, 2.1 to 3.0, 2.1 to 2.5 and 1.1 to 1.2).
+
+Against the busy medians the frame times are within 15% everywhere (a few percent either way: these rounds had run at a
+load of 1.5 to 5, mostly niced jobs); against the busy least rounds, which this section quoted (0.49, 0.53 and 0.65 ms
+at the default), round 7's medians are 23 to 35% higher and its least rounds (0.56, 0.46, 0.76) between 13% below and
+17% above. On this session's host the AVX-512 build ran about a tenth slower than on round 6's, the AVX2 build as fast
+(results/quiet/README.md), and a single configuration switched between a fast and a slow state about 1.35 times apart.
+The dust explosion's file changed since the busy table (study Q); the round's file and study Q's, played in turn in the
+same rounds (`nvfx_ordered cost`, nine repetitions), cost the same within 0.04 ms at 128 and 256 px
+([o_cost_models.csv](../results/quiet/round7/o_cost_models.csv)).
 
 ## 6. The library and a scene
 
@@ -507,10 +522,13 @@ wreck and ash falls. Nothing was added to the compositor or the runtime.
 ![The forest-edge town: keyframes at 0.8, 2.4, 4.0, 5.2, 5.6, 6.2, 7.4 and 9.0 s](figures/forestedge_keyframes.png)
 
 The video (rendered at the runtime's int8 default) and the full keyframes are under the data root's `fx_fire2/scene`
-(outside git); the keyframes' SHA-256 are in [fx_fire2_frozen.csv](../results/experiments/fx_fire2_frozen.csv) and `ctest -R
-ScriptedForestEdgeFrozen` checks them (pinned to float on the AVX2 build, skipped without the effects in
+(outside git); the keyframes' SHA-256 are in [fx_fire2_frozen.csv](../results/experiments/fx_fire2_frozen.csv) and
+`ctest -R ScriptedForestEdgeFrozen` checks them (pinned to float on the AVX2 build, skipped without the effects in
 `NEURALFX_MODELS_FIRE2`, by default `$NEURALVFX_DATA/fx_fire2/models/scene`). They are the same on 1 and 2 threads. It
-plays without an allocation in its frame loop.
+plays without an allocation in its frame loop, at a median 19.0 ms per frame on 2 threads at int8 (float 19.3; the mean
+over its 300 frames 19.7) on a quiet machine (round 7 of the quiet re-timing, six rounds: the median of the runs'
+medians [17.8, 20.7]; the modules' steps 2.4 ms of it;
+[scenes_summary.csv](../results/quiet/round7/scenes_summary.csv)).
 
 What works: the three read as a forest's crown fire, a house's window fires and a mill's dust explosion in one night,
 and the blast moves the fires near it. What does not, yet: nothing draws the trees, the houses or the mill (only their

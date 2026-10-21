@@ -42,8 +42,11 @@ C++23, no third-party runtime dependencies, a C API for engines, no Python.
   renderer and played through a volume C API (`nvfx_volume.h`). On its held-out test it follows a real run better than
   the simulation run on the coarse grid with the same detail (picture from four cameras at 1 s: +2.20 dB [+1.09, +3.12])
   but looks worse when played on (motion and coverage, mostly where it runs away: when the wind blows towards -x), and
-  holding the first frame still beats it after a second. About 70 ms a step on one busy core (provisional). Videos: [videos/README.md](videos/README.md) §9.
-  Study N2 (STUDY_3D.md §14) fixed the runaway (ambient air at the model's open edges, long rollouts in training): no runaway over 30 s, better than study N's model on a new test, but by its rule it did not pass, so study N's model and videos remain the demo.
+  holding the first frame still beats it after a second. About 70 ms a step on one busy core then; study N2's model,
+  which the demos play, takes 21 ms a step on one core and 9 on four on a quiet machine since the detail layer runs on
+  vectors (STUDY_3D.md §14.12). Videos: [videos/README.md](videos/README.md) §9. Study N2 (STUDY_3D.md §14) fixed the
+  runaway (ambient air at the model's open edges, long rollouts in training): no runaway over 30 s, better than study
+  N's model on a new test, but by its rule it did not pass, so study N's model and videos remain the demo.
 - **3D smoke on a validated teacher (study R):** [docs/STUDY_R.md](docs/STUDY_R.md): the 3D solver's smoke fixed and
   measured against Morton, Taylor and Turner's plume theory (its buoyancy flux conserved, top-hat entrainment 0.14 to
   0.15 against the measured 0.10 to 0.16, a third too slow for its flux), then learned with N2's recipe and tested once:
@@ -104,8 +107,8 @@ From [docs/REPORT.md](docs/REPORT.md), measured on simulated fire, smoke and exp
 - **Rollout effects in 8-bit integers (study K, [docs/REPORT.md](docs/REPORT.md) §13):** the stepper's second
   convolution runs in 8-bit integers by default since its rule passed: on held-out settings and seeds it followed real
   runs and played as float does on all eleven effects, and with AVX-512 VNNI a frame costs about a tenth less than float
-  on the same build (18% less at 64 px; 0.54 against 0.75 ms at 128 px against the float default on AVX2, most of
-  that the AVX-512 build's; provisional). Without VNNI it barely pays (1 to 5%).
+  on the same build (15% less at 64 px; over the 33 shipped models on a quiet machine 0.63 against 0.79 ms at 128 px
+  against float on AVX2, part of that the AVX-512 build's; REPORT.md §13.11). Without VNNI it barely pays (2 to 4%).
 - **More effects** ([docs/EFFECTS.md](docs/EFFECTS.md)): steam and a magic portal, new presets of the simulator
   trained with study D's recipe (82 KB each). Steam plays as well as fire and smoke: at unseen settings and seeds its
   motion is right and its average picture ties a second real run, 4.3 dB closer than the nearest flipbook. Magic was
@@ -129,11 +132,11 @@ From [docs/REPORT.md](docs/REPORT.md), measured on simulated fire, smoke and exp
   were **replaced**: on held-out settings their average pictures came 1.18 and 0.40 dB closer to a real run's, and the
   mushroom follows a run 0.85 dB better at 1 s.
 - **Large effects drawn at half size (study P, [docs/STUDY_P.md](docs/STUDY_P.md), REPORT §17):** a half-size instance
-  moves to the bit as the native one does and costs 0.29 to 0.34 of it at 512 px; with the bilinear 2x it stays within
-  the null's margins of native against the simulator on every measure for all six effects tried. A small learned 2x
-  with seeded micro-detail, tested once by a rule committed first, **did not pass**: it beat bilinear on PSNR, SSIM and
-  the high band together for none of the six, and cost more than 0.55 of native for two. Both ship as an experimental
-  opt-in (`nvfx_instance_set_upscale`, NVFX_VERSION 7).
+  moves to the bit as the native one does and costs 0.29 to 0.38 of it at 512 px; with the bilinear 2x it stays within
+  the null's margins of native against the simulator on every measure for all six effects tried. A small learned 2x with
+  seeded micro-detail, tested once by a rule committed first, **did not pass**: it beat bilinear on PSNR, SSIM and the
+  high band together for none of the six, and cost more than 0.55 of native for two. Both ship as an experimental opt-in
+  (`nvfx_instance_set_upscale`, NVFX_VERSION 7).
 - **Memory, against production block compression:** for equal quality, a network per effect clip needs **2.4 to
   4.3 times less memory than a BC7 flipbook** at 8 bits, and 7.5 times less [4.2, 8.3] with features trained for 4
   bits. **Against ASTC** (mobile GPUs; 8x8 to 12x12 blocks hold every frame at full size in 121 to 256 KB) the ratios
