@@ -1614,7 +1614,7 @@ int video(const Args& a) {
     }
     nvfx_volume_set_seed(fire.v, seed);
     nvfx_volume_set_seed(smoke.v, seed + 1);
-    const std::size_t n1 = zu(nx) * zu(ny1) * zu(nz), n2 = zu(nx) * zu(ny2) * zu(nz), layer = zu(nx) * zu(nz);
+    const std::size_t n1 = zu(nx) * zu(ny1) * zu(nz), n2 = zu(nx) * zu(ny2) * zu(nz);
     std::vector<float> T1(n1), D1(n1), V1(3 * n1), T2(n2), D2(n2), T(n1 + n2), D(n1 + n2);
     rd::Renderer rend(nx, ny1 + ny2, nz, rd::optics_for("fire3d"));
     nfx::Pool pool(threads);
@@ -1632,15 +1632,32 @@ int video(const Args& a) {
       nvfx_volume_read(fire.v, NVFX_VOLUME_SOOT, NVFX_VOLUME_FLOAT, D1.data(), n1 * 4);
       nvfx_volume_read(fire.v, NVFX_VOLUME_VELOCITY, NVFX_VOLUME_FLOAT, V1.data(), 3 * n1 * 4);
       nvfx_volume_read(smoke.v, NVFX_VOLUME_SOOT, NVFX_VOLUME_FLOAT, D2.data(), n2 * 4);
+      // the volume API's textures run z slowest ((z * ny + y) * nx + x, nvfx_volume.h), the renderer's fields y slowest
+      // ((y * nz + z) * nx + x, render3d.hpp): the soot's flux is summed over the fire's top four layers in the API's
+      // order, and each field is turned into the renderer's order before the two boxes are stacked in y
       double flux = 0;
-      for (std::size_t i = n1 - 4 * layer; i < n1; ++i) flux += static_cast<double>(D1[i]) * std::max(0.f, V1[3 * i + 1]);
+      for (int z = 0; z < nz; ++z) {
+        for (int y = ny1 - 4; y < ny1; ++y) {
+          for (int x = 0; x < nx; ++x) {
+            const std::size_t i = (zu(z) * zu(ny1) + zu(y)) * zu(nx) + zu(x);
+            flux += static_cast<double>(D1[i]) * std::max(0.f, V1[3 * i + 1]);
+          }
+        }
+      }
       flux_s = f == 0 ? flux : flux_s + (flux - flux_s) / 30.0;  // smoothed over about a second
       flux_ref += (flux - flux_ref) / static_cast<double>(f + 1);  // the running mean since the start
       if (t >= 1.f) smoke_i = static_cast<float>(std::clamp(a.f("smoke-intensity", 0.6f) * flux_s / std::max(1e-9, flux_ref), 0.05, 1.0));
-      std::copy(T1.begin(), T1.end(), T.begin());
-      std::copy(D1.begin(), D1.end(), D.begin());
+      const auto rows = [&](const std::vector<float>& src, int ny, float* dst) {
+        for (int z = 0; z < nz; ++z) {
+          for (int y = 0; y < ny; ++y) {
+            for (int x = 0; x < nx; ++x) dst[(zu(y) * zu(nz) + zu(z)) * zu(nx) + zu(x)] = src[(zu(z) * zu(ny) + zu(y)) * zu(nx) + zu(x)];
+          }
+        }
+      };
+      rows(T1, ny1, T.data());
+      rows(D1, ny1, D.data());
       std::fill(T.begin() + static_cast<std::ptrdiff_t>(n1), T.end(), 0.f);
-      std::copy(D2.begin(), D2.end(), D.begin() + static_cast<std::ptrdiff_t>(n1));
+      rows(D2, ny2, D.data() + n1);
       rend.prepare(T, D, &pool);
       const float az = 0.35f * std::numbers::pi_v<float> * std::sin(2.f * std::numbers::pi_v<float> * u);
       const View view{{4.9f * std::sin(az), 1.35f, 4.9f * std::cos(az)}, {0.f, 1.42f, 0.f}, {0.f, 1.f, 0.f}, 40.f};
