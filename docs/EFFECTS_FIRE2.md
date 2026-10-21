@@ -41,7 +41,72 @@ Three seconds (the explosion's length) would cut off the pall as it forms; five 
 a fading haze, and the mushroom showed that a long one-shot, whose look changes over its length, is the hard case for
 the learned stepper.
 
-(The rest of this section, the figures and the speeds, are written when the presets are final.)
+Lengths are in cells of a 128-cell frame and times in seconds; d = 2 wind - 1 and ψ is the curl noise's stream function
+where the force acts.
+
+| | crownfire | windowfire | dustexplosion |
+|---|---|---|---|
+| what it is | a forest canopy across the lower part of the frame (crowns from 22 cells up to their tops, 40 to 46 cells up, a tree every 16 cells; the trunks and the ground are the scene's to draw); a burning zone 60 to 80 cells wide (intensity), 8 d cells upwind of the middle, whose crowns torch in flames that stand 20 to 40 cells over the canopy and lean downwind; spot fires in the crowns beyond it; a tall column of grey-brown smoke to the top of the frame that bends over downwind | the facade seen front-on: a window 36 cells wide and 32 tall, its sill 12 cells up, its head 44; the room's hot gas pours out through the opening above the neutral plane (24 to 30 cells up, lower for a bigger fire) and its flames roll up the wall over the head; below it the room glows through the inflowing air; black smoke runs up to the eave (the top of the frame) and spreads out both ways under it as a ceiling jet | an oval cloud of dust on the ground in the middle of the frame, 60 to 88 cells wide and 28 to 40 tall (intensity), lit low in the cloud at its left end, its middle or its right end (ignition): the flame runs through it, the burning gas expands into a brown-orange fireball that billows up and burns out by 2.5 s, and a brown pall of dust and ash is left that rises a little, spreads and thins |
+| source | in the crowns, through their depth: heat (1.5 to 1.9) k and an upward flow of (24 to 40) k cells per second, with k the crown's shape (1 in its middle, 0.6 between crowns) times the zone (its downwind half burning up to a quarter harder in a wind: the head) times the torching (0.5 + 0.5 smoothstep(-0.2, 0.6) of the flicker noise, rate 2.2) times (0.75 + 0.25 ψ); smoke at (1.2 to 1.8) k a second. Spot fires: 0.7 smoothstep(0.3, 0.6) of the flicker in a band beyond the zone's edges, out to 4 cells in still air, to 36 cells downwind in the strongest wind and none upwind | above the neutral plane the heat is drawn (10 per second) towards (1.3 to 1.8)(0.5 + 0.5 f) (f the flicker noise's smoothstep, rate 2.6), rising from nothing over the plane's first 40% of the way to the head, the flow upwards towards (18 to 32)(0.4 + 0.6 of that way) cells per second, and smoke at (0.3 to 0.5) a second; below the plane (and wherever the outflow is weaker) the room's glow, heat drawn (4 per second) towards (0.75 to 1)(0.35 + 0.65 f), in still air; the wall's air under the sill is still | at its first step: dust (0.7 to 1.2)(0.7 + 0.3 of its lumps) inside an edge the flicker noise makes ragged (rate 1.4), at rest, and a spark of heat 1.4, 4.5 cells across, at 0.75 of the half-width from the middle towards the lit end |
+| forces | buoyancy 110, smoke weight 3; **the wind** drags material (2 per second) towards d (16 + 50 smoothstep(40, 110, y)) cells per second: slowed in the canopy, 66 d at the top of the frame, so the column bends over; a closed ground; damping 0.2; confinement 0.5 to 3.0, curl noise 8 to 53 (turbulence) | buoyancy 110, smoke weight 2; **the eave**: upward flow stops within 5 cells of the top of the frame, over a closed top border, so the smoke spreads out under it; a wind along the facade drags material (1.2 per second) towards 22 d (0.4 + 0.6 y / 128); damping 0.2; confinement 0.4 to 2.0, curl noise 8 to 48 | buoyancy 35, dust weight 5; **the burning gas expands**: a divergence of 2.5 times its burn rate in the pressure solve, which pushes the cloud out ahead of the flame and swells the fireball; a closed ground; damping 0.6; confinement 0.2 to 0.8, curl noise 4 to 24 |
+| decay | above a heat of 0.4 the flames burn out at up to 1.7 per second and leave 0.6 of the heat they lose as smoke; the warm column cools at 0.3 per second, the smoke at 0.08 | once out of the window, the gas above a heat of 0.4 burns out at up to 1.6 per second and leaves 0.8 of it as black smoke; the warm smoke cools at 0.5 per second, the smoke at 0.2 | **the burn**: the heat spreads at 40 cells squared a second (0.5 to 1.5 times that with the flicker noise, so the front wrinkles), only where there is dust; where the dust is hotter than its ignition (0.35 to 0.7) it burns at up to 80 times its amount a second, up to a cap of 1.25 to 1.6 (richer where ψ is higher: its air used up) and while the cloud can burn (exp(-t / 1 s) from 0.4 down to 0.12); a unit burnt gives 4 of heat and leaves 0.9 of itself as ash; the gas cools at 1.3 per second, the dust at 0.08 |
+| drawing | emitted light from a ramp that starts at 0.4 (dull red, orange, yellow, a pale yellow core), so the warm column is not seen, over grey-brown smoke lit from above and to the left | the same ramp, which also draws the room's glow, over black smoke shaded towards the light | emitted light from a brown-orange ramp that starts at 0.3, over tan-brown dust lit from above and to the left, darker where it is hot (charred) |
+
+All three keep the study's control names but for the dust explosion's second, `ignition` (`sim::control_names`, so the
+model files, the runtime and scene scripts call it that; `nvfx_sim` takes `--ignition`). The window fire's room is not
+drawn either: its glow is what the flames inside show through the opening, and the facade, the window's frame and the
+eave are the scene's. Every earlier effect's clips are unchanged to the byte: `Sim.StudyEffectsAreUnchangedByTheNewOnes`
+hashes small clips of all 27 earlier effects, and full-size clips (128 px; the loops 64 frames, the one-shots their
+length) of all 27 at two settings were compared byte for byte before and after (the data root's
+`fx_fire2/jobs/state/baseline_clips.sha256` and `now_clips.sha256`). Tests of the new presets:
+`Sim.Fire2EffectsHaveTheirOwnControlsAndOnlyTheDustExplosionPlaysOnce`,
+`Sim.CrownFireBurnsInTheCanopyWithSpotFiresAheadAndATallColumn`,
+`Sim.WindowFirePoursOutOfItsWindowUpTheWallAndSpreadsUnderTheEave`,
+`Sim.DustExplosionBurnsThroughItsCloudFromWhereItIsLitIntoAFireballAndAPall`, and in the recipe
+`Rollout.Fire2EffectsTakeTheirRecipes`.
+
+**How they were designed.** Each was looked at with contact sheets at several settings (from an empty grid and in the
+steady state) and a scratch probe that printed the amount, centroid and extent of the heat and the smoke over time, a
+column's profile and the speed where there is material. What changed on the way:
+- **Crown fire.** The first fire, a zone of crowns 16 to 38 cells up burning out fast, gave small flames in the middle
+  and a faint column; burning out more slowly and a stronger lift gave one tall flame in the middle, which read as a
+  bonfire. What reads as a crown fire is the crowns themselves: the canopy raised off the ground, a crown every 16
+  cells (four coarse cells, so the coarse state can carry it), each crown torching in its own flame, a zone wider than
+  half the frame, and a warm column that cools slowly (so it keeps rising) under flames that burn out above a heat of
+  0.4 and draw no light below it (at first the column glowed dull red). A wind that only dragged the flames moved the
+  smoke too little and an upwind shift of the zone undid it; a stronger wind that grows with height bends the column
+  over.
+- **Window fire.** The first outflow poured soot with its flames and they read as murky; its smoke kept thickening for
+  seconds (the layer under the eave never settled) and a bright line marked the neutral plane, where the outflow's
+  heat began with no smoke over it. Less smoke in the outflow and more from the flames as they burn out, smoke that thins
+  faster, an outflow whose heat rises from nothing at the plane and a room glow wherever the outflow is weaker, and no
+  burning inside the opening (gas burning there in slow air left a dark band of soot) give a window that glows, flames
+  that pour from its top and black smoke that settles into a layer under the eave.
+- **Dust explosion.** The first burn ran through the cloud at 35 cells a second and stopped before it reached the far
+  end; it also overshot its heat in one step (the burn faster than the step) and left a uniform pale fireball. Four
+  passes of the spread a step, a burn capped at what the step can give, a cap that varies with the curl noise (so the
+  fireball's heat is uneven), dust that chars dark as it burns, less buoyancy (a strong rise drew the fireball out into
+  fingers) and more dust left as ash give a flame that crosses the cloud in about a second from an end and half that
+  from the middle, a brown-orange fireball and a pall. A square front (the five-point spread) became round with a
+  nine-point one, and wrinkled with the flicker noise.
+
+![Crown fire, window fire and dust explosion, the simulator's presets: two frames at each of three settings (all controls 0.2, 0.5 and 0.9); the crown and window fires 1 s apart in the steady state (5 and 6 s), the dust explosion at 0.5 and 1.5 s](figures/fire2_presets.png)
+
+How fast they move, at two settings (all controls 0.5 and all 1; cells of a 128-cell frame per second where there is
+material, median and 99th percentile; the looping effects over frames 150 to 240, the dust explosion over its 120 frames;
+a coarse cell is 4 cells, a frame 1/30 s; the same probe for fire and smoke):
+
+| effect | median | 99th percentile | in coarse cells a frame (99th) |
+|---|---:|---:|---:|
+| fire | 52 to 71 | 96 to 124 | 0.80 to 1.03 |
+| smoke | 37 to 41 | 92 to 108 | 0.76 to 0.90 |
+| crownfire | 31 to 42 | 99 to 114 | 0.82 to 0.95 |
+| windowfire | 21 to 24 | 67 to 85 | 0.56 to 0.71 |
+| dustexplosion | 14 | 34 to 38 | 0.28 to 0.32 |
+
+The crown fire moves at fire's pace (its flames and column), the window fire more slowly (its outflow, then the layer
+under the eave). The dust explosion's gas is slow; what moves fast in it is its flame, which crosses the cloud by burning
+at about 50 to 60 cells a second (lit at an end: 0.4 to 0.5 coarse cells a frame) rather than by flowing.
 
 ## 3. Training
 
