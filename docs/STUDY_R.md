@@ -198,8 +198,7 @@ What it says, plainly:
 The control's confinement and curl noise set the entrainment: alpha runs from 0.110 (inside the brief's 0.08 to 0.12
 and the compiled band's lower end) to 0.164 (just above the compiled band's 0.16). The stronger the turbulence, the more
 momentum is lost (0.85 to 0.72) and the slower the plume for its flux; at turbulence 1 the buoyancy flux also falls a
-little with height (-0.03, the interval clear of 0: the curl noise's swirl carries some heat out through the box's
-sides). Turbulence 0 is the most MTT-like in its constants and buoyancy law, though its velocity falls fastest.
+little with height (-0.03, the interval clear of 0; perhaps heat swirled out through the box's sides, not checked). Turbulence 0 is the most MTT-like in its constants and buoyancy law, though its velocity falls fastest.
 
 ### 1.5 Where the box matters
 
