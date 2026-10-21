@@ -133,6 +133,7 @@ struct Result {
   std::string last_error;
   float max_heat = 0.f;
   int max_sprites_drawn = 0, explosions_left = 0;
+  double worst_time = 0;
   double update_ms = 0, update_ms_max = 0, volume_ms = 0, volume_ms_max = 0, scene_ms = 0, stage_ms = 0, jobs_ms = 0, planned_ms = 0, wall_s = 0;
   double volume_step_ms = 0, volume_picture_ms = 0, volume_fields_ms = 0;
   int volume_frames = 0, scene_frames = 0, stage_frames = 0;
@@ -352,7 +353,10 @@ Result play(const Options& o, int workers, bool capture) {
     res.max_heat = std::max(res.max_heat, fx.heat_at(campfire));
     res.max_sprites_drawn = std::max(res.max_sprites_drawn, st.sprites_drawn);
     res.update_ms += st.update_ms;
-    res.update_ms_max = std::max(res.update_ms_max, st.update_ms);
+    if (st.update_ms > res.update_ms_max) {
+      res.update_ms_max = st.update_ms;
+      res.worst_time = ft.time;
+    }
     if (st.volume_ms > 0) {
       res.volume_ms += st.volume_ms;
       res.volume_ms_max = std::max(res.volume_ms_max, st.volume_ms);
@@ -543,8 +547,8 @@ void report(const Result& r, int workers, int frames) {
   const auto mean = [](double s, int n) { return n > 0 ? s / n : 0.0; };
   std::printf("%d frames on %d worker%s + the game thread in %.1f s: %ld heap allocations in the frames (%ld at load), %llu frame errors\n", frames, workers,
               workers == 1 ? "" : "s", r.wall_s, r.allocations, r.load_allocations, static_cast<unsigned long long>(r.errors));
-  std::printf("  update (game thread, wall): mean %.1f ms, worst %.1f ms; volume job %.1f ms mean (%d frames, worst %.1f); scene %.1f ms (%d); stage %.1f ms (%d)\n",
-              mean(r.update_ms, frames), r.update_ms_max, mean(r.volume_ms, r.volume_frames), r.volume_frames, r.volume_ms_max, mean(r.scene_ms, r.scene_frames),
+  std::printf("  update (game thread, wall): mean %.1f ms, worst %.1f ms (at %.2f s); volume job %.1f ms mean (%d frames, worst %.1f); scene %.1f ms (%d); stage %.1f ms (%d)\n",
+              mean(r.update_ms, frames), r.update_ms_max, r.worst_time, mean(r.volume_ms, r.volume_frames), r.volume_frames, r.volume_ms_max, mean(r.scene_ms, r.scene_frames),
               r.scene_frames, mean(r.stage_ms, r.stage_frames), r.stage_frames);
   std::printf("  the volume's job: step %.1f ms, picture %.1f ms, fields read %.1f ms (means)\n", mean(r.volume_step_ms, r.volume_frames),
               mean(r.volume_picture_ms, r.volume_frames), mean(r.volume_fields_ms, r.volume_frames));

@@ -257,10 +257,11 @@ What that means for a 60 Hz FUSE frame:
 
 - **Sprites are the real-time path.** At 4 ms on one worker the manager plays about 15 to 18 simulations and shows
   far more through sharing and proxies; this is what replaces flipbooks at scale.
-- **A stage with a few small entries fits** (a few ms per 30 Hz picture on one job), **a scene costs what its script
-  plays**: the campfire script's sky is four 256 px smoke tiles, about 60 ms a picture on one thread by LIBRARY.md §7's
-  numbers, so as written it is a showcase, not a budget scene. A scene for a game is written small, or given threads
-  of its own (`threads` in the C API; the adapter uses 1).
+- **A stage with a few small entries fits on one worker**: a 640 x 360 stage with a 128 px fire and a steam module is
+  about 15 ms a picture on one thread by LIBRARY.md §7's numbers, half that per 60 Hz frame.
+- **A scene costs what its script plays**: the campfire script's sky is four 256 px smoke tiles, about 60 ms a picture
+  on one thread by the same numbers, so as written it is a showcase, not a budget scene. A scene for a game is written
+  small, or given threads of its own (`threads` in the C API; the adapter uses 1).
 - **The volume is not real time on the CPU**: a step and a picture are about 120 ms every 30 fps frame on one thread
   (STUDY_3D.md §8). It suits one hero effect on a machine with cores to spare, a cut scene, or baking; FUSE's GPU should
   ray-march its fields (`fields = true`) rather than show the CPU picture, which only saves the picture's 50 ms.
@@ -336,9 +337,9 @@ a frame, calls that must fail (an unknown entry, a sprite in a level without spr
 handle): no heap allocation in any frame, failed calls included; the same frames to the bit; every frame drawn; the
 failed calls kept as frame errors (`spawn: no sprite model 0: invalid argument`).
 
-**What the test found** (21 October 2026, `ctest -R FuseDemo`: all checks passed). The times are wall clock on the
-shared 4-core machine at a load average of 6 to 17 (four other agents building and training), so they say how the
-parts compare, not what they cost (§6 has the measured costs):
+**What the test found** (21 October 2026: one run of the same `--check` by hand, then `ctest -R Fuse`, which passed
+every check). The times are wall clock on the shared 4-core machine at a load average of 6 to 17 (four other agents
+building and training), so they say how the parts compare, not what they cost (§6 has the measured costs):
 
 | | 3 workers and the game thread | the game thread alone |
 |---|---:|---:|
