@@ -1,60 +1,68 @@
-# A desert coast at night, written as a script (docs/COMPOSE.md §4) to show the elements (docs/EFFECTS_ELEMENTS.md)
-# together:
+# A desert coast as a haboob comes in, written as a script (docs/COMPOSE.md §4) to show the elements
+# (docs/EFFECTS_ELEMENTS.md) together, under the weather director (docs/WEATHER.md):
 #
 #   nvfx_scene_script --script examples/scenes/coast.nvfxs --models DIR --out coast.mp4
 #
 # DIR holds geyser.nvfx, haboob.nvfx (with study M3's mean state) and seaspray.nvfx (docs/EFFECTS_ELEMENTS.md).
 #
-# A geyser field on a desert shore under the moon: three geysers steam and erupt, each on its own time; on the right the
-# sea breaks in a fresh wind, a little spray blown off its crests. From 1 s a haboob rolls in behind the geysers from the
-# left, a wall of dust lit by the moon; as its gust front reaches the shore the wind rises, the geysers' steam is torn
-# away to the right, the sea breaks harder and spray streams off every crest, and blown sand races along the ground.
+# A hot afternoon on a desert coast: across a bay, a field of three geysers steams and erupts on the far shore, each on
+# its own time, and in the foreground the sea breaks in a light wind. From 0.8 s a haboob rolls in behind the geysers from the left, a towering wall of dust.
+# The weather turns from clear to a dust storm as it comes (the director's order: the wind first, then the dust it
+# raises, the visibility falling as Koschmieder says): the geysers' steam is torn away to the right, the sea breaks harder
+# and spray streams off its crests as the gale rises, blown sand races along the ground, and the light dims and yellows.
 
-scene      size 1280 x 720, fps 30, length 10 s, ground 560
+scene      size 1280 x 720, fps 30, length 9 s, ground 560
 bus        at (-128, -340), size 1536 x 1100, cell 8
 particles  capacity 6000, flow 0.9
-keyframes  0.8, 2.0, 3.2, 4.2, 5.2, 6.3, 7.5, 9.0
+keyframes  0.8, 2.0, 3.0, 4.0, 5.0, 6.0, 7.2, 8.4
 
 effect geyser   = "geyser.nvfx"
 effect haboob   = "haboob.nvfx"
 effect seaspray = "seaspray.nvfx"
 
-# The geysers' water and steam, and the sea's spray, white under the moon; the haboob's dust, ochre and self-shadowed.
-look steam_white = shader, emission 0, soot_density 1.7, soot_albedo 0.88, sky 1.1, shadow 0.2, scene_light 1.3, relief 0.9,
-                   tint (0.95, 0.97, 1)
-look dust_wall   = shader, emission 0, soot_density 2.6, soot_albedo 0.5, sky 0.45, shadow 0.45, scene_light 1.2, relief 1.5,
-                   tint (0.86, 0.66, 0.44)
-look spume       = shader, emission 0, soot_density 1.4, soot_albedo 0.9, sky 1.1, shadow 0.15, scene_light 1.3, relief 0.6,
-                   tint (0.92, 0.96, 1)
+# The haboob's dust, ochre and shaded by itself, lit by the day.
+look dust_wall = shader, emission 0, soot_density 2.6, soot_albedo 0.7, sky 0.3, shadow 0.45, scene_light 1.5, relief 0.2,
+                 tint (1, 0.64, 0.34)
 
-let squall = smooth((t - 4.2) / 1.2)                         # the haboob's gust reaching the geysers and the shore
-let blow  = noise(0.8 * t, 2.1, 0)
+weather sky, seed 27100000, regime clear:
+  dust at 1.2, over 5
 
-# The haboob, behind the geyser field: one 256-pixel tile across the whole scene, let go at 1 s.
-module wall = haboob, size 256, width 1500, at (500, ground - 40), sink 0.023, feather 0.1, look dust_wall, start 0,
-              seed 2710001, glow (0, 0, 0), waiting, controls (0.75, 0.85, 0.5), opacity 0.9
-# Three geysers, nearer and farther, each its own start and seed (so each erupts on its own time); the gust blows their
-# steam to the right.
-module g1 = geyser, size 128, width 520, at (300, ground + 6), sink 0.0625, feather 0.15, look steam_white, start 0,
-            seed 2710011, glow (0, 0, 0), controls (0.8, 0.5, 0.4), wind 0.5 + 0.42 * squall + 0.05 * blow * squall
-module g2 = geyser, size 128, width 360, at (560, ground - 18), sink 0.0625, feather 0.15, look steam_white, start 3,
-            seed 2710012, glow (0, 0, 0), controls (0.6, 0.5, 0.4), wind 0.5 + 0.42 * squall + 0.05 * blow * squall
-module g3 = geyser, size 128, width 260, at (110, ground - 28), sink 0.0625, feather 0.18, look steam_white, start 6,
-            seed 2710013, glow (0, 0, 0), controls (0.45, 0.5, 0.5), wind 0.5 + 0.42 * squall
-# The sea on the right: two spray tiles over the composer's waves; the gale rises with the gust.
-module s1 = seaspray, size 128, width 420, at (860, ground + 40), sink 0.094, feather 0.15, look spume, start 0,
-            seed 2710021, glow (0, 0, 0), controls (0.6, 0.2, 0.5), gale 0.2 + 0.75 * squall, turbulence 0.5 + 0.2 * squall
-module s2 = seaspray, size 128, width 420, at (1170, ground + 40), sink 0.094, feather 0.15, look spume, start 5,
-            seed 2710022, glow (0, 0, 0), controls (0.6, 0.2, 0.5), gale 0.2 + 0.75 * squall, turbulence 0.5 + 0.2 * squall
-water sea = pool, along (700, ground + 40) to (1420, ground + 40), depth 140, surface 34, cells 256,
-            swell 5 + 4 * squall, wavelength 170, period 3.2, drift 30 + 40 * squall, rate 0, churn 1.2, seed 2710023
+# The sea spray's gale: its control is the wind (10 m up) from 12 to 25 m/s (docs/EFFECTS_ELEMENTS.md §2), here the
+# director's wind now, gusts and all.
+let gale = clamp((sky.wind - 12) / 13, 0, 1)
 
-field moon = lamp, at (900, 80), radius 1400, strength 0.32, colour (0.62, 0.72, 1)
+# The haboob, behind the geyser field: one 256-pixel tile across most of the scene, let go at 0.8 s.
+let sea = 576                                                # the sea's surface: the bay, up to the far shore
+module wall = haboob, size 256, width 1050, at (430, ground + 10), sink 0.023, feather 0.2, look dust_wall, start 0,
+              seed 2710001, glow (0, 0, 0), waiting, controls (0.8, 0.2, 0.5)
+# Three geysers, nearer and farther, each its own start and seed (so each erupts on its own time); the wind every module
+# feels (the director's lean) blows their steam to the right.
+module g1 = geyser, size 128, width 520, at (300, ground + 2), sink 0.0625, feather 0.15, start 0, seed 2700053,
+            glow (0, 0, 0), controls (0.8, 0.5, 0.4), wind sky.lean
+module g2 = geyser, size 128, width 360, at (575, ground - 16), sink 0.0625, feather 0.15, start 3, seed 2700112,
+            glow (0, 0, 0), controls (0.65, 0.5, 0.4), wind sky.lean
+module g3 = geyser, size 128, width 260, at (110, ground - 26), sink 0.0625, feather 0.18, start 6, seed 2700023,
+            glow (0, 0, 0), controls (0.55, 0.5, 0.5), wind sky.lean
+# The sea across the foreground: three spray tiles over the composer's waves, its gale the director's wind.
+module s1 = seaspray, size 128, width 480, at (200, sea), sink 0.094, feather 0.15, start 0, seed 2710021,
+            glow (0, 0, 0), controls (0.9, 0, 0.5), gale gale, turbulence 0.5 + 0.2 * gale
+module s2 = seaspray, size 128, width 480, at (640, sea), sink 0.094, feather 0.15, start 5, seed 2710022,
+            glow (0, 0, 0), controls (0.9, 0, 0.5), gale gale, turbulence 0.5 + 0.2 * gale
+module s3 = seaspray, size 128, width 480, at (1080, sea), sink 0.094, feather 0.15, start 2, seed 2710025,
+            glow (0, 0, 0), controls (0.9, 0, 0.5), gale gale, turbulence 0.5 + 0.2 * gale
+water ocean = pool, along (-80, sea) to (1360, sea), depth 140, surface 40, cells 320,
+            swell 4 + 6 * gale, wavelength 170, period 3.2, drift 20 + 50 * gale, rate 0, churn 1.2, seed 2710023
+water drops = spray, in (100, ground - 460), size 600 x 460, threshold 0.25, speed 40, radius 1.6, gravity 400,
+              wind (40 * sky.u, 0), seed 2710024
+
+# The day's light under the dust (the director's daylight; the dust dims it further, and the haze is kept to 2.5 km so the
+# wall stays the dust that shows: choices).
+frame   daylight sky.light * (1 - 0.35 * sky.dust), visibility max(sky.visibility, 2500), exposure 1.05 / sqrt(sky.light * (1 - 0.35 * sky.dust)),
+        fade smooth(t / 0.4) * smooth((length - t) / 0.6), haze 0, bloom 0.6, bloom_threshold 1
 light   gain 0.08
-frame   exposure 1.3 * (1 - 0.25 * squall), fade smooth(t / 0.4) * smooth((length - t) / 0.6), haze 1, bloom 1, bloom_threshold 1
-# Blown sand racing along the ground behind the gust front.
-emit ash, in (-40, ground - 140), size 1360 x 150, density 1.5 * squall, wind (520, -10), colour (0.6, 0.47, 0.32), glowing 0,
-     radius 0.9, seed 2710031
+# Blown sand racing along the ground as the dust storm comes (the director's dust raised).
+emit ash, in (-40, ground - 160), size 1360 x 170, density 2.5 * sky.lift, wind (40 * sky.u, -10), colour (0.66, 0.52, 0.34),
+     glowing 0, radius 0.9, seed 2710031
 
-at 1.0:
+at 0.8:
   wake wall

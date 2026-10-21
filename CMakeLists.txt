@@ -629,6 +629,24 @@ if(NEURALFX_BUILD_TESTS)
     set_tests_properties(neuralfx.ScriptedCryptFrozen PROPERTIES LABELS "neuralfx;data" SKIP_RETURN_CODE 77 TIMEOUT 1200)
     add_test(NAME neuralfx.SceneScriptChecks.crypt COMMAND nvfx_scene_script --script ${CMAKE_CURRENT_SOURCE_DIR}/examples/scenes/crypt.nvfxs --check)
     set_tests_properties(neuralfx.SceneScriptChecks.crypt PROPERTIES LABELS neuralfx)
+    # The coast (docs/EFFECTS_ELEMENTS.md): geyser, haboob and seaspray, all in NEURALFX_MODELS_ELEMENTS (outside git),
+    # under the weather director; its keyframes have the SHA-256 recorded in results/experiments/fx_elements_frozen.csv.
+    set(NEURALFX_MODELS_ELEMENTS "${_nvfx_data}/fx_elements/models/scene" CACHE PATH "geyser.nvfx, haboob.nvfx and seaspray.nvfx")
+    add_test(NAME neuralfx.ScriptedCoastFrozen
+             COMMAND nvfx_scene_script --script ${CMAKE_CURRENT_SOURCE_DIR}/examples/scenes/coast.nvfxs --models ${NEURALFX_MODELS_ELEMENTS}
+                     --keyframes ${CMAKE_CURRENT_BINARY_DIR}/coast_script_keyframes --no-video --threads 2 --precision float --isa avx2
+                     --verify ${CMAKE_CURRENT_SOURCE_DIR}/results/experiments/fx_elements_frozen.csv)
+    set_tests_properties(neuralfx.ScriptedCoastFrozen PROPERTIES LABELS "neuralfx;data" SKIP_RETURN_CODE 77 TIMEOUT 1200)
+    add_test(NAME neuralfx.SceneScriptChecks.coast COMMAND nvfx_scene_script --script ${CMAKE_CURRENT_SOURCE_DIR}/examples/scenes/coast.nvfxs --check)
+    set_tests_properties(neuralfx.SceneScriptChecks.coast PROPERTIES LABELS neuralfx)
+    # The elements entries (library/elements.nvfxl) against their SHA-256 in results/library/frozen_elements.csv, float
+    # pinned to AVX2 as the other frozen keyframes; skipped without the three models in NEURALFX_MODELS_LIBRARY.
+    add_test(NAME neuralfx.LibraryElementsKeyframesFrozen
+             COMMAND nvfx_gallery --library ${CMAKE_CURRENT_SOURCE_DIR}/library --models ${NEURALFX_MODELS_LIBRARY}
+                     --only erupting_geyser,haboob,sea_spray
+                     --keyframes ${CMAKE_CURRENT_BINARY_DIR}/library_elements_keyframes --verify ${CMAKE_CURRENT_SOURCE_DIR}/results/library/frozen_elements.csv --threads 2
+                     --precision float --isa avx2)
+    set_tests_properties(neuralfx.LibraryElementsKeyframesFrozen PROPERTIES LABELS "neuralfx;data" SKIP_RETURN_CODE 77 TIMEOUT 1200)
     # A day's weather (docs/WEATHER.md): the weather director over the library's cloud, fog, fire and smoke, all in
     # NEURALFX_MODELS_LIBRARY (outside git); its keyframes have the SHA-256 recorded in results/experiments/weather_frozen.csv.
     add_test(NAME neuralfx.ScriptedWeatherDayFrozen
