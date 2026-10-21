@@ -1,4 +1,9 @@
 effect,statistic,floor_mean
+geyser,spectrum_l1,0.237447
+geyser,abs_ln_motion_ratio,0.222226
+geyser,coverage_l1,0.014762
+geyser,emission_l1,0.000000
+geyser,mean_frame_psnr,35.415016
 haboob,spectrum_l1,0.021188
 haboob,abs_ln_motion_ratio,0.069302
 haboob,coverage_l1,0.003329
