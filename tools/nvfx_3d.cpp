@@ -1520,7 +1520,7 @@ int video(const Args& a) {
     // Study R's coupled demo (docs/STUDY_R.md §6; not measured): the learned fire (--model) and the learned smoke
     // (--smoke) stacked in one picture, the smoke's box on top of the fire's. The fire's soot leaving the top of its box
     // (the soot times the upward velocity over its top four fine layers, smoothed over a second) drives the smoke's
-    // intensity, relative to the first second's; the fire's intensity sweeps from --controls' to 0.95 and back. Drawn as
+    // intensity, relative to its running mean; the fire's intensity sweeps from --controls' to 0.95 and back. Drawn as
     // one 64 x 192 x 64 volume with the fire's optics (the smoke's heat set to zero: warm smoke does not glow), so the
     // fire lights its smoke.
     VolumeHandle fire(model, threads), smoke(a.need("smoke"), threads);
@@ -1554,9 +1554,9 @@ int video(const Args& a) {
       nvfx_volume_read(smoke.v, NVFX_VOLUME_SOOT, NVFX_VOLUME_FLOAT, D2.data(), n2 * 4);
       double flux = 0;
       for (std::size_t i = n1 - 4 * layer; i < n1; ++i) flux += static_cast<double>(D1[i]) * std::max(0.f, V1[3 * i + 1]);
-      flux_s = f == 0 ? flux : flux_s + (flux - flux_s) / 30.0;
-      if (t < 1.f) flux_ref += flux / 30.0;
-      else smoke_i = static_cast<float>(std::clamp(a.f("smoke-intensity", 0.6f) * flux_s / std::max(1e-9, flux_ref), 0.05, 1.0));
+      flux_s = f == 0 ? flux : flux_s + (flux - flux_s) / 30.0;  // smoothed over about a second
+      flux_ref += (flux - flux_ref) / static_cast<double>(f + 1);  // the running mean since the start
+      if (t >= 1.f) smoke_i = static_cast<float>(std::clamp(a.f("smoke-intensity", 0.6f) * flux_s / std::max(1e-9, flux_ref), 0.05, 1.0));
       std::copy(T1.begin(), T1.end(), T.begin());
       std::copy(D1.begin(), D1.end(), D.begin());
       std::fill(T.begin() + static_cast<std::ptrdiff_t>(n1), T.end(), 0.f);

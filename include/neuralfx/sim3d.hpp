@@ -3,8 +3,12 @@
 // are the PC plan's job (TODO.md). What was checked is listed in docs/STUDY_3D.md §2 (the plume rises; it puffs at a
 // steady rate).
 //
+// Study R (docs/STUDY_R.md) added a validated smoke, Effect::smoke_r: no cooling, fading or damping, its heat and soot
+// carried in flux form (conservative), checked against Morton, Taylor and Turner's plume theory; and larger boxes
+// (Params::span) for that check. The fire and study N's smoke are unchanged.
+//
 // Solver: collocated grid with a one-cell border; semi-Lagrangian advection (trilinear) for the velocity and a clamped
-// MacCormack correction for the scalars; buoyancy from temperature against soot weight; vorticity confinement; a seeded
+// MacCormack correction for the scalars (or flux form, Params::scalars); buoyancy from temperature against soot weight; vorticity confinement; a seeded
 // 3D curl-noise force (noise4.hpp, shared with the learned model); combustion expansion (a divergence source where the
 // gas is hot); pressure projection by red-black Gauss-Seidel with over-relaxation, warm-started. Boundaries: a closed
 // floor (no flow through it, slip along it; Neumann pressure), open top and sides (p = 0, outflow).

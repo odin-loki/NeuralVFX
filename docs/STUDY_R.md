@@ -95,10 +95,12 @@ pooled and fitted again (seed 2026). With 4 or 5 runs per configuration these un
 
 **The heights fitted** (fixed before the final runs, from the two exploratory seeds): from **24 cells** above the floor
 (below about 20 cells the plume is still contracting and accelerating off its broad, lazy source: b_w falls from the
-source's width to 3.6 cells by 8 cells up and regains it only by about 20) up to **the lowest height above which the
-study's box disagrees with a larger one** by more than 5% in W or b_w (pooled): a box as wide again on each side
-(96 x 96 x 96 at the same cells per unit, span 192) and a box two thirds taller (64 x 160 x 64), each at intensity 0.5
-with 4 seeds; rounded down to a multiple of 4 cells. Local exponents at every height are shown as well (the figure).
+source's width to 3.6 cells by 8 cells up and regains it only by about 20) up to **the highest height to which the
+study's box agrees with larger ones**: the largest H such that at every height up to H the 95% intervals of the ratios
+of W and of b_w (the study's box over the larger box, pooled, the runs resampled) reach into [0.95, 1.05], for both
+larger boxes: one half as wide again (96 x 96 x 96 at the same cells per unit, span 192: 16 cells more on each side)
+and one two thirds taller (64 x 160 x 64), each at intensity 0.5 with 4 seeds; H rounded down to a multiple of 4
+cells. The local exponents at every height are shown as well (the figure).
 
 **Configurations** (seeds 29,010,000 + 100 c + k): intensity 0.5, 0.2 and 0.8 at turbulence 0.5 (5 seeds each);
 turbulence 0 and 1 at intensity 0.5 (4 seeds each; the control's range); the tall and the wide box (4 seeds each); and
