@@ -47,6 +47,10 @@ struct Profile {
   std::vector<double> slice_v, slice_d, slice_t;           // nx * ny: the plane through the axis (z = cz)
   std::vector<double> depth_d, depth_t, depth_u;           // nx * ny: summed over depth (z)
   std::vector<double> div, div_abs;                        // ny: sums over the plane of soot x and heat x the projected flow's divergence (central differences, 1/s)
+  // ny, the buoyancy budget (§1.4; files from before it have none): the buoyancy g' carried out through the four side
+  // faces of each row, the sum over the row's edge cells of max(0, outward velocity) g' (cells^4 / s^3 per row, time
+  // mean); and each plane's sum of g' at the first and at the last averaged frame (what the box stores)
+  std::vector<double> side, b_first, b_last;
 };
 
 template <class T>
@@ -75,7 +79,7 @@ constexpr std::uint32_t kMagic = 0x52504C4Du;  // "MLPR"
 template <class Fn>
 void each_vec(Profile& p, Fn&& fn) {
   for (auto* v : {&p.cnt, &p.r, &p.v, &p.g, &p.d, &p.t, &p.vg, &p.vv, &p.vd, &p.F, &p.Fd, &p.Q, &p.M, &p.heat, &p.soot, &p.xd, &p.zd, &p.ud, &p.slice_v,
-                  &p.slice_d, &p.slice_t, &p.depth_d, &p.depth_t, &p.depth_u, &p.div, &p.div_abs})
+                  &p.slice_d, &p.slice_t, &p.depth_d, &p.depth_t, &p.depth_u, &p.div, &p.div_abs, &p.side, &p.b_first, &p.b_last})
     fn(*v);
 }
 
@@ -104,8 +108,10 @@ Profile load(const fs::path& f) {
   for (auto* x : {&p.nx, &p.ny, &p.nz, &p.frames, &p.nb, &p.effect}) get(i, *x);
   for (auto* x : {&p.s, &p.cx, &p.cz, &p.kT, &p.kD, &p.intensity, &p.wind, &p.turbulence, &p.span, &p.source_x, &p.spin, &p.seconds, &p.wind_speed}) get(i, *x);
   get(i, p.seed);
+  bool optional = false;  // the divergence's sums and the budget's came later: older files end before them
   each_vec(p, [&](std::vector<double>& v) {
-    if (&v == &p.div && i.peek() == std::char_traits<char>::eof()) i.clear(std::ios::eofbit);  // files before the divergence's sums
+    if (&v == &p.div) optional = true;
+    if (optional && !i.eof() && i.peek() == std::char_traits<char>::eof()) i.clear(std::ios::eofbit);
     if (i.eof()) return;
     getv(i, v);
   });
@@ -179,7 +185,8 @@ int measure(const Args& a, const fs::path& root) {
     const int nb = pr.nb;
     const std::size_t pb = zu(ny) * zu(nb), pl = zu(nx) * zu(ny);
     for (auto* v : {&pr.cnt, &pr.r, &pr.v, &pr.g, &pr.d, &pr.t, &pr.vg, &pr.vv, &pr.vd}) v->assign(pb, 0.0);
-    for (auto* v : {&pr.F, &pr.Fd, &pr.Q, &pr.M, &pr.heat, &pr.soot, &pr.xd, &pr.zd, &pr.ud, &pr.div, &pr.div_abs}) v->assign(zu(ny), 0.0);
+    for (auto* v : {&pr.F, &pr.Fd, &pr.Q, &pr.M, &pr.heat, &pr.soot, &pr.xd, &pr.zd, &pr.ud, &pr.div, &pr.div_abs, &pr.side, &pr.b_first, &pr.b_last})
+      v->assign(zu(ny), 0.0);
     for (auto* v : {&pr.slice_v, &pr.slice_d, &pr.slice_t, &pr.depth_d, &pr.depth_t, &pr.depth_u}) v->assign(pl, 0.0);
     // each cell's radial bin (-1 beyond the inscribed circle), and the two rows through the axis with their weights
     std::vector<int> bin(zu(nx) * zu(nz));
@@ -207,13 +214,18 @@ int measure(const Args& a, const fs::path& root) {
       sim.fields(T, D);
       sim.velocity(U);
       for (int y = 0; y < ny; ++y) {
-        double F = 0, Fd = 0, Q = 0, M = 0, H = 0, S = 0, X = 0, Z = 0, UD = 0;
+        double F = 0, Fd = 0, Q = 0, M = 0, H = 0, S = 0, X = 0, Z = 0, UD = 0, SIDE = 0, B = 0;
         for (int z = 0; z < nz; ++z) {
           const double wz = z == z0 ? w0 : z == z1 ? w1 : 0.0;
           for (int x = 0; x < nx; ++x) {
             const std::size_t i = (zu(y) * zu(nz) + zu(z)) * zu(nx) + zu(x);
             const double v = U[3 * i + 1], u = U[3 * i], t = T[i], dd = D[i];
             const double g = static_cast<double>(pr.kT) * t - static_cast<double>(pr.kD) * dd;
+            B += g;
+            if (x == 0) SIDE += std::max(0.0, -u) * g;  // out through the side faces (an edge cell may have two)
+            if (x == nx - 1) SIDE += std::max(0.0, u) * g;
+            if (z == 0) SIDE += std::max(0.0, -static_cast<double>(U[3 * i + 2])) * g;
+            if (z == nz - 1) SIDE += std::max(0.0, static_cast<double>(U[3 * i + 2])) * g;
             F += v * g;
             Fd += v * dd;
             Q += v;
@@ -260,11 +272,14 @@ int measure(const Args& a, const fs::path& root) {
         pr.xd[zu(y)] += X;
         pr.zd[zu(y)] += Z;
         pr.ud[zu(y)] += UD;
+        pr.side[zu(y)] += SIDE;
+        if (fr == 0) pr.b_first[zu(y)] = B;
+        if (fr == frames - 1) pr.b_last[zu(y)] = B;
       }
     }
     const double inv = 1.0 / frames;
     for (auto* v : {&pr.v, &pr.g, &pr.d, &pr.t, &pr.vg, &pr.vv, &pr.vd, &pr.F, &pr.Fd, &pr.Q, &pr.M, &pr.heat, &pr.soot, &pr.xd, &pr.zd, &pr.ud, &pr.slice_v,
-                    &pr.slice_d, &pr.slice_t, &pr.depth_d, &pr.depth_t, &pr.depth_u, &pr.div, &pr.div_abs}) {
+                    &pr.slice_d, &pr.slice_t, &pr.depth_d, &pr.depth_t, &pr.depth_u, &pr.div, &pr.div_abs, &pr.side}) {
       for (double& x : *v) x *= inv;
     }
     pr.frames = frames;
@@ -638,7 +653,7 @@ std::vector<int> all_of(std::size_t n) {
 
 }  // namespace
 
-// nvfx_3d plumefit --configs A,B,C [--strengths A,B,C] [--box REF:CMP,...] [--bent W1,W2 --still S] --fit-lo Z --fit-hi Z
+// nvfx_3d plumefit --configs A,B,C [--strengths A,B,C] [--box REF:CMP,...] [--bent W1,W2 --still S] [--budget A,B] --fit-lo Z --fit-hi Z
 //                  --out DIR [--resamples 10000]
 int fit(const Args& a, const fs::path& root) {
   const auto labels = split(a.need("configs"), ',');
@@ -755,6 +770,62 @@ int fit(const Args& a, const fs::path& root) {
       both(std::format("\nThe boxes agree (both ratios' intervals reach into [0.95, 1.05] at every height from {:.0f}) up to z = {:.1f} cells; rounded down "
                        "to a multiple of 4: {:.0f}.",
                        lo, agree_to, std::isfinite(agree_to) ? 4.0 * std::floor(agree_to / 4.0) : kNaN));
+    }
+  }
+  // the buoyancy budget between the range's ends (§1.4): what the planes' flux loses from lo to hi against what leaves
+  // through the box's sides in between and what the box stores there over the averaging (runs with the budget's sums)
+  if (a.has("budget")) {
+    both(std::format("\nThe buoyancy budget from {:.0f} to {:.0f} cells (each as a fraction of F at {:.0f}; 95% intervals by resampling the runs): the "
+                     "planes' flux lost, what leaves through the four sides in between, what the box stores there, and the rest (made or lost "
+                     "by the numerics):\n",
+                     lo, hi, lo));
+    both("| config | runs | F at lo | F at hi | lost, (F(lo) - F(hi)) / F(lo) | out through the sides | stored | the rest |");
+    both("|---|---:|---:|---:|---|---|---|---|");
+    struct Budget {
+      double Flo = kNaN, Fhi = kNaN, lost = kNaN, side = kNaN, stored = kNaN, rest = kNaN;
+    };
+    for (const auto& l : split(a.str("budget"), ',')) {
+      const Config& c = cfg.at(l);
+      const Profile& p0 = c.runs[0];
+      for (const Profile& p : c.runs) {
+        if (p.side.size() != zu(p.ny)) throw std::runtime_error(l + ": a run without the budget's sums");
+      }
+      int ylo = -1, yhi = -1;
+      for (int y = 0; y < p0.ny; ++y) {
+        if (y + 0.5 >= lo && ylo < 0) ylo = y;
+        if (y + 0.5 <= hi) yhi = y;
+      }
+      if (ylo < 0 || yhi <= ylo) throw std::runtime_error("--budget: the range has no rows");
+      const auto budget = [&](const std::vector<int>& pick) {
+        const double w = 1.0 / static_cast<double>(pick.size());
+        Budget b{0, 0, 0, 0, 0, 0};
+        for (const int k : pick) {
+          const Profile& p = c.runs[zu(k)];
+          const double span = (p.frames - 1) * static_cast<double>(p.seconds) / p.frames;  // first to last averaged frame
+          b.Flo += w * p.F[zu(ylo)];
+          b.Fhi += w * p.F[zu(yhi)];
+          for (int y = ylo; y <= yhi; ++y) {
+            const double h = y == ylo || y == yhi ? 0.5 : 1.0;  // the planes through the end rows' centres
+            b.side += w * h * p.side[zu(y)];
+            b.stored += w * h * (p.b_last[zu(y)] - p.b_first[zu(y)]) / span;
+          }
+        }
+        b.lost = (b.Flo - b.Fhi) / b.Flo;
+        b.side /= b.Flo;
+        b.stored /= b.Flo;
+        b.rest = b.lost - b.side - b.stored;
+        return b;
+      };
+      const Budget b0 = budget(all_of(c.runs.size()));
+      std::vector<Budget> bs;
+      for (int r = 0; r < resamples; ++r) bs.push_back(budget(resample(c.runs.size())));
+      const auto iv = [&](double Budget::* m) {
+        std::vector<double> v;
+        for (const Budget& b : bs) v.push_back(b.*m);
+        return fmt(interval(b0.*m, v), 3);
+      };
+      both(std::format("| {} | {} | {:.0f} | {:.0f} | {} | {} | {} | {} |", l, c.runs.size(), b0.Flo, b0.Fhi, iv(&Budget::lost), iv(&Budget::side),
+                       iv(&Budget::stored), iv(&Budget::rest)));
     }
   }
   // the wind-bent plume against Briggs's two-thirds law: z - zs = 1.6 (F / pi)^(1/3) x^(2/3) / U
