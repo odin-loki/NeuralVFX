@@ -26,7 +26,7 @@ took it over from the jobs it left running (the data root's `q_fix/jobs/*.sh`, t
 
 | weak spot | stage | committed | running / next |
 |---|---|---|---|
-| avalanche | **the test** | margins (78ae21b); N = 60, the cap (§4.6); `u30` chosen on validation and frozen (§4.7) | the test, once (`test.sh`, 2 threads) |
+| avalanche | **passed the test** (§4.8) | `u30`: tracking at 1 s +0.34 dB [+0.18, +0.50], the mean frame +0.16 [+0.04, +0.28], every measure within its margin | replacing the shipped file (links, frozen hashes, models/, videos) |
 | geyser | validation | margins (36514f3); N = 60, the cap (§4.6) | `u30`, `s24`, `s24_u30` on validation (`val.sh`, 2 threads); then the choice, the freeze, the test |
 | haboob's first frame | **stopped at validation** | `rf` meets no rule: its spectrum's interval past its margin (ce134c7) | kept; nothing more |
 | crown and window fires' streaks | **done by eye** (§5.1) | detail settings, frozen hashes, videos (78ae21b, 47b2b0f) | - |
@@ -516,7 +516,28 @@ side). Distance to the floor (a second set of 8 real runs per setting): the mean
 (the floor 32.15 dB), the spectrum distance 0.120 → 0.119 (the floor's 0.014), the coverage distance 0.0088 → 0.0091
 (0.0036). On validation the same picture: the first frame +3.46 dB, the mean frame a tie.
 
-**Its round's own test again** (reported beside, not deciding; `d-eval` from the round's frozen binary, `--seed-base
+**The avalanche, `u30` (60 settings): it meets the rule, and is replaced.**
+
+| measure | current → `u30` | difference [95% interval] | margin | reading |
+|---|---|---|---|---|
+| tracking, the first frame (dB) | 24.52 → 24.53 | +0.01 [-0.04, +0.06] | -0.20 | tie |
+| tracking at 1 s (dB) | 12.88 → 13.22 | **+0.34 [+0.18, +0.50]** | -0.20 | better (a target; at 42 of 60 settings, the worst -0.80) |
+| tracking at 2 s (dB) | 11.55 → 12.17 | **+0.62 [+0.41, +0.84]** | -0.20 | better |
+| detail spectrum distance | 0.122 → 0.116 | **-0.006 [-0.009, -0.003]** | +0.024 | better |
+| \|ln motion ratio\| (motion ratio) | 0.315 (1.13) → 0.324 (1.18) | +0.009 [-0.003, +0.020] | +0.163 | tie |
+| coverage distance | 0.0136 → 0.0133 | -0.0003 [-0.0009, +0.0003] | +0.0075 | tie |
+| emission distance | 0.00009 → 0.00010 | +0.0000004 [+0.0000003, +0.0000005] | +0.0001 | worse, a two-hundredth of its margin |
+| mean-frame PSNR (dB) | 29.00 → 29.15 | **+0.16 [+0.04, +0.28]** | -1.98 | better (a target; at 37 of 60 settings, the worst -0.59) |
+
+The 30-frame fine-tune follows a held-out run from its true state 0.34 dB better at 1 s and 0.62 at 2 s, its average
+picture is 0.16 dB closer to a real run's and its detail a little closer; its motion and coverage tie; its emission
+distance is larger by 4 x 10^-7 (the avalanche gives no light; wholly on the worse side by study M's strict reading, a
+two-hundredth of its margin). Distance to the floor: the mean frame 11.97 → **11.82 dB** below it (the floor 40.97 dB),
+the spectrum distance 0.122 → **0.116** (the floor's 0.033), the coverage distance 0.0136 → 0.0133 (0.0015): most of the
+avalanche's distance from real stays, which is its start points' (§3.1: the mean state, which moves them, drew the detail
+further from real and did not meet the rule).
+
+**The dust explosion's round test again** (reported beside, not deciding; `d-eval` from the round's frozen binary, `--seed-base
 33300000`, the current and the new file on the same seeds;
 [deval_dustexplosion/](../results/experiments/q_fix/deval_dustexplosion)): tracking a held-out run over the coarse
 simulation with detail at 1 s **+8.69 dB [+8.06, +9.29] → +8.81 [+8.19, +9.41]**, at the first frame -0.78 [-4.06,

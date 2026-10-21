@@ -4,3 +4,8 @@ dustexplosion,abs_ln_motion_ratio,0.032141
 dustexplosion,coverage_l1,0.003598
 dustexplosion,emission_l1,0.000185
 dustexplosion,mean_frame_psnr,32.146801
+avalanche,spectrum_l1,0.032833
+avalanche,abs_ln_motion_ratio,0.069987
+avalanche,coverage_l1,0.001540
+avalanche,emission_l1,0.000000
+avalanche,mean_frame_psnr,40.970031
