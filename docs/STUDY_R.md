@@ -74,7 +74,13 @@ adds the clamped MacCormack correction to that step. **The criterion**: on the s
 if MacCormack velocity brings the momentum ratio within 0.90 to 1.10 *and* moves Gamma at both ends of the fitted range
 closer to 1, `smoke_r` adopts it and every `smoke_r` run (training, the edge bounds' teacher runs, the plume
 measurements) is made again; otherwise `smoke_r` keeps the semi-Lagrangian step and the deficit is reported as a limit.
-The answer is in §1.4.
+**The answer: `smoke_r` keeps the semi-Lagrangian velocity step.** MacCormack velocity did raise the momentum early
+on (a 32 x 48 x 32 box after 3 s: the momentum flux 30 to 60% higher at every height, the buoyancy flux unchanged),
+but at 64 x 96 x 64 it is unstable: on seed 29,010,000 the momentum flux after 9 s was 10 to 20 times what it was after
+4 to 6 s near the floor (460,000 against 30,000 to 38,000 cells^4 / s^2 at 4 cells up), and the full 22 s run never
+finished (its velocities grew until the flux form's sweeps needed ever more substeps; they are now capped at 32). An
+unstable step is no fix, so the criterion was not met; the momentum deficit stays and is reported as a limit (§1.4).
+Decided at 08:25 UTC, before training began and before any training result.
 
 ### 1.3 The measurement
 

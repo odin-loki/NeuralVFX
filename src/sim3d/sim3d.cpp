@@ -477,7 +477,8 @@ void Fluid::advect_scalar_flux(Grid& q, float dt) {
       slab_max[zu(y)] = m;
     });
     const float cmax = *std::max_element(slab_max.begin(), slab_max.end()) * dt;
-    const int sub = std::max(1, static_cast<int>(std::ceil(cmax / 0.95f)));
+    // (at most 32 substeps: a flow that fast has already failed, and the sweep must not stall on it)
+    const int sub = std::clamp(static_cast<int>(std::ceil(cmax / 0.95f)), 1, 32);
     const float h = dt / fl(sub);
     for (int s = 0; s < sub; ++s) {
       // the flux through the face between cell a (coordinate ia along the axis, 0..n) and the next
