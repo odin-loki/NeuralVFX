@@ -16,12 +16,13 @@ std::string_view effect_name(Effect e) {
     case Effect::fire: return "fire";
     case Effect::smoke: return "smoke";
     case Effect::smoke_r: return "smoke_r";
+    case Effect::smoke_r2: return "smoke_r2";
   }
   std::unreachable();
 }
 
 bool parse_effect(std::string_view text, Effect& out) {
-  for (const Effect e : {Effect::fire, Effect::smoke, Effect::smoke_r}) {
+  for (const Effect e : {Effect::fire, Effect::smoke, Effect::smoke_r, Effect::smoke_r2}) {
     if (effect_name(e) == text) {
       out = e;
       return true;
@@ -61,6 +62,8 @@ Tune tune(const Params& p) {
     // does not cool or fade in seconds, and a free plume has no drag on it: so no cooling, no soot decay and no velocity
     // damping, which conserves the plume's buoyancy flux as Morton, Taylor and Turner's theory requires.
     case Effect::smoke_r: return {420.f, 0.6f, 0.f, 0.f, 70.f, 2.0f, 0.8f + 4.f * turb, 6.f + 40.f * turb, 0.f, 0.f};
+    // study R2's (docs/STUDY_R2.md §1): study R's constants; what differs is how its velocity is carried (velocity_mode)
+    case Effect::smoke_r2: return {420.f, 0.6f, 0.f, 0.f, 70.f, 2.0f, 0.8f + 4.f * turb, 6.f + 40.f * turb, 0.f, 0.f};
   }
   std::unreachable();
 }
@@ -103,6 +106,7 @@ Fluid::Fluid(const Params& p) : p_(p), nx_(p.width), ny_(p.height), nz_(p.width)
   for (Grid* g : {&u_, &v_, &w_, &temp_, &soot_, &pressure_, &div_, &ta_, &tb_, &tc_, &wx_, &wy_, &wz_, &wn_}) g->init(nx_, ny_, nz_);
   curl_.resize(forcing_, p.span, p.span * fl(ny_) / fl(nx_), p.span);
   pool_ = std::make_unique<Pool>(std::max(1, p.threads));
+  audit_rows_.assign(zu(ny_) + 2, {});
 }
 
 Fluid::~Fluid() = default;
@@ -194,6 +198,33 @@ std::array<float, 2> Fluid::buoyancy_coefficients() const {
   return {t.buoyancy * s_, t.soot_weight * s_};
 }
 
+void Fluid::pressure(std::span<float> out) const {
+  const std::size_t n = zu(nx_) * zu(ny_) * zu(nz_);
+  if (out.size() < n) throw std::invalid_argument("sim3d: pressure buffer too small");
+  const float per_dt = p_.fps * fl(p_.substeps);  // 1 / dt
+  for (int y = 1; y <= ny_; ++y) {
+    for (int z = 1; z <= nz_; ++z) {
+      for (int x = 1; x <= nx_; ++x) out[(zu(y - 1) * zu(nz_) + zu(z - 1)) * zu(nx_) + zu(x - 1)] = pressure_.at(x, y, z) * per_dt;
+    }
+  }
+}
+
+int Fluid::velocity_mode() const {
+  if (p_.velocity >= 0) return p_.velocity;
+  return p_.effect == Effect::smoke_r2 ? 2 : 0;
+}
+
+double Fluid::slab_sum(const Grid& g) const {
+  double s = 0;
+  const int y0 = std::max(1, audit_->y_lo + 1), y1 = std::min(ny_, audit_->y_hi + 1);
+  for (int y = y0; y <= y1; ++y) {
+    for (int z = 1; z <= nz_; ++z) {
+      for (int x = 1; x <= nx_; ++x) s += g.at(x, y, z);
+    }
+  }
+  return s;
+}
+
 void Fluid::velocity_border() {
   // Sides and top: outflow (the neighbour's value). Floor: closed, slip along it (u, w copied, v reflected).
   for (int y = 0; y <= ny_ + 1; ++y) {
@@ -231,11 +262,25 @@ void Fluid::step_frame() {
 }
 
 void Fluid::step(float dt) {
+  // (the audit only reads: each operator's change of the slab's vertical momentum)
+  const bool aud = audit_ != nullptr && audit_->y_hi >= audit_->y_lo;
+  double before = aud ? slab_sum(v_) : 0.0;
+  const auto account = [&](double MomentumAudit::* term) {
+    if (!aud) return;
+    const double after = slab_sum(v_);
+    audit_->*term += after - before;
+    before = after;
+  };
   add_sources(dt);
+  account(&MomentumAudit::sources);
   add_forces(dt);
+  if (aud) before = slab_sum(v_);  // add_forces accounts for its own terms
   advect_velocity(dt);
+  account(&MomentumAudit::advection);
   project();
-  const bool flux = p_.scalars == 1 || (p_.scalars < 0 && p_.effect == Effect::smoke_r);
+  account(&MomentumAudit::projection);
+  if (aud) audit_->seconds += dt;
+  const bool flux = p_.scalars == 1 || (p_.scalars < 0 && plume_smoke(p_.effect));
   if (flux) {
     advect_scalar_flux(temp_, dt);
     advect_scalar_flux(soot_, dt);
@@ -312,11 +357,17 @@ void Fluid::add_forces(float dt) {
   });
   // forces: buoyancy, confinement, curl noise where there is material, wind drag, damping (written to ta, tb, tc, then
   // swapped in, so every cell reads the old velocity)
+  const bool aud = audit_ != nullptr && audit_->y_hi >= audit_->y_lo;
+  const int ay0 = aud ? audit_->y_lo + 1 : 1, ay1 = aud ? audit_->y_hi + 1 : 0;  // the audit's slab, padded rows
   slabs([&](int y) {
+    const bool row = aud && y >= ay0 && y <= ay1;
+    std::array<double, 4> acc{};
     for (int z = 1; z <= nz_; ++z) {
       for (int x = 1; x <= nx_; ++x) {
         const float T = temp_.at(x, y, z), D = soot_.at(x, y, z);
         float fx = 0.f, fy = t.buoyancy * s * T - t.soot_weight * s * D, fz = 0.f;
+        const float fy_buoy = fy;
+        float fy_conf = 0.f, fy_curl = 0.f;
         if (x > 1 && x < nx_ && y > 1 && y < ny_ && z > 1 && z < nz_) {
           const float gx = 0.5f * (wn_.at(x + 1, y, z) - wn_.at(x - 1, y, z));
           const float gy = 0.5f * (wn_.at(x, y + 1, z) - wn_.at(x, y - 1, z));
@@ -325,14 +376,16 @@ void Fluid::add_forces(float dt) {
           const float Nx = gx / len, Ny = gy / len, Nz = gz / len;
           const float ox = wx_.at(x, y, z), oy = wy_.at(x, y, z), oz = wz_.at(x, y, z);
           fx += conf * (Ny * oz - Nz * oy);
-          fy += conf * (Nz * ox - Nx * oz);
+          fy_conf = conf * (Nz * ox - Nx * oz);
+          fy += fy_conf;
           fz += conf * (Nx * oy - Ny * ox);
         }
         const float mat = std::min(1.f, 2.f * (T + D));
         if (mat > 0.01f) {
           const auto c = curl_.sample((fl(x) - 0.5f) / s, (fl(y) - 0.5f) / s, (fl(z) - 0.5f) / s);
           fx += mat * amp * c[0];
-          fy += mat * amp * c[1];
+          fy_curl = mat * amp * c[1];
+          fy += fy_curl;
           fz += mat * amp * c[2];
         }
         float u = (u_.at(x, y, z) + dt * fx) * damp;
@@ -342,9 +395,25 @@ void Fluid::add_forces(float dt) {
         ta_.at(x, y, z) = u;
         tb_.at(x, y, z) = v;
         tc_.at(x, y, z) = w;
+        if (row) {
+          acc[0] += static_cast<double>(dt) * fy_buoy;
+          acc[1] += static_cast<double>(dt) * fy_conf;
+          acc[2] += static_cast<double>(dt) * fy_curl;
+          const float undamped = v_.at(x, y, z) + dt * fy;  // (the same arithmetic as v's, before the damping)
+          acc[3] += static_cast<double>(v) - static_cast<double>(undamped);
+        }
       }
     }
+    if (aud) audit_rows_[zu(y)] = acc;
   });
+  if (aud) {
+    for (int y = ay0; y <= std::min(ay1, ny_); ++y) {
+      audit_->buoyancy += audit_rows_[zu(y)][0];
+      audit_->confinement += audit_rows_[zu(y)][1];
+      audit_->curl += audit_rows_[zu(y)][2];
+      audit_->damping += audit_rows_[zu(y)][3];
+    }
+  }
   std::swap(u_.v, ta_.v);
   std::swap(v_.v, tb_.v);
   std::swap(w_.v, tc_.v);
@@ -396,8 +465,13 @@ void Fluid::project() {
 }
 
 void Fluid::advect_velocity(float dt) {
-  if (p_.velocity == 1) {
+  const int mode = velocity_mode();
+  if (mode == 1) {
     advect_velocity_maccormack(dt);
+    return;
+  }
+  if (mode == 2) {
+    advect_velocity_flux(dt);
     return;
   }
   slabs([&](int y) {
@@ -460,11 +534,48 @@ void Fluid::advect_scalar_flux(Grid& q, float dt) {
   // side, so what leaves one cell enters the next exactly. The border stays zero: inflow at an open side brings
   // nothing, outflow carries the edge cell's value out; the floor's face has no velocity (v is reflected there).
   // Faces next to the border fall back to first order (there is no cell beyond it).
+  flux_sweeps<true>(q, u_, v_, w_, dt, false, false);
+}
+
+void Fluid::component_border(Grid& g, bool reflect_floor) {
+  // as velocity_border() for one component: outflow at the sides and the top, the floor reflecting v
+  for (int y = 0; y <= ny_ + 1; ++y) {
+    const int yc = std::clamp(y, 1, ny_);
+    for (int z = 0; z <= nz_ + 1; ++z) {
+      const int zc = std::clamp(z, 1, nz_);
+      for (int x = 0; x <= nx_ + 1; ++x) {
+        if (x != 0 && z != 0 && y != 0 && x != nx_ + 1 && y != ny_ + 1 && z != nz_ + 1) {
+          x = nx_;
+          continue;
+        }
+        const int xc = std::clamp(x, 1, nx_);
+        g.at(x, y, z) = reflect_floor && y == 0 ? -g.at(xc, 1, zc) : g.at(xc, yc, zc);
+      }
+    }
+  }
+}
+
+void Fluid::advect_velocity_flux(float dt) {
+  // Study R2 (docs/STUDY_R2.md §1): each component in the scalars' flux form, carried by the velocity as it is after
+  // the forces (copied: the carrier stays fixed while the components move). The border is the velocity's own
+  // (outflow: what flows in at an open side carries the edge cell's velocity; the floor reflects v, so no momentum
+  // crosses it), refreshed after every substep. Nothing is clamped: a component may change sign.
+  wx_.v = u_.v;
+  wy_.v = v_.v;
+  wz_.v = w_.v;
+  flux_sweeps<false>(u_, wx_, wy_, wz_, dt, false, false);
+  flux_sweeps<false>(v_, wx_, wy_, wz_, dt, true, audit_ != nullptr && audit_->y_hi >= audit_->y_lo);
+  flux_sweeps<false>(w_, wx_, wy_, wz_, dt, false, false);
+  velocity_border();
+}
+
+template <bool Positive>
+void Fluid::flux_sweeps(Grid& q, const Grid& cu, const Grid& cv, const Grid& cw, float dt, bool reflect_floor, bool audit_faces) {
   const auto mc = [](float r) { return std::max(0.f, std::min({2.f * r, 0.5f * (1.f + r), 2.f})); };
   const bool forward = (steps_ & 1) == 0;
   for (int k = 0; k < 3; ++k) {
     const int axis = forward ? k : 2 - k;  // 0 x, 1 y, 2 z
-    const Grid& c = axis == 0 ? u_ : axis == 1 ? v_ : w_;
+    const Grid& c = axis == 0 ? cu : axis == 1 ? cv : cw;
     const std::size_t st = axis == 0 ? 1 : axis == 1 ? q.stride_y : q.stride_z;
     const int n = axis == 0 ? nx_ : axis == 1 ? ny_ : nz_;
     // the largest Courant number of the sweep (a maximum: the same on any number of threads)
@@ -505,15 +616,40 @@ void Fluid::advect_scalar_flux(Grid& q, float dt) {
             const std::size_t i = zu(y) * q.stride_y + zu(z) * q.stride_z + zu(x);
             const int ic = axis == 0 ? x : axis == 1 ? y : z;
             const float out = face(i, ic), in = face(i - st, ic - 1);
-            ta_.v[i] = std::max(0.f, q.v[i] - h * (out - in));
+            if constexpr (Positive) ta_.v[i] = std::max(0.f, q.v[i] - h * (out - in));
+            else ta_.v[i] = q.v[i] - h * (out - in);
           }
         }
       });
+      if (audit_faces) {  // the audit (study R2): this substep's fluxes through the slab's ends, or in through the sides
+        const int y0 = std::max(1, audit_->y_lo + 1), y1 = std::min(ny_, audit_->y_hi + 1);
+        const auto at = [&](int x, int y, int z) { return zu(y) * q.stride_y + zu(z) * q.stride_z + zu(x); };
+        double fb = 0, ft = 0, fs = 0;
+        if (axis == 1) {
+          for (int z = 1; z <= nz_; ++z) {
+            for (int x = 1; x <= nx_; ++x) {
+              fb += face(at(x, y0 - 1, z), y0 - 1);
+              ft += face(at(x, y1, z), y1);
+            }
+          }
+        } else {
+          const int m = axis == 0 ? nz_ : nx_;
+          for (int y = y0; y <= y1; ++y) {
+            for (int j = 1; j <= m; ++j) {
+              fs += axis == 0 ? face(at(0, y, j), 0) - face(at(nx_, y, j), nx_) : face(at(j, y, 0), 0) - face(at(j, y, nz_), nz_);
+            }
+          }
+        }
+        audit_->flux_bottom += static_cast<double>(h) * fb;
+        audit_->flux_top += static_cast<double>(h) * ft;
+        audit_->flux_sides += static_cast<double>(h) * fs;
+      }
       slabs([&](int y) {
         for (int z = 1; z <= nz_; ++z) {
           for (int x = 1; x <= nx_; ++x) q.at(x, y, z) = ta_.at(x, y, z);
         }
       });
+      if constexpr (!Positive) component_border(q, reflect_floor);
     }
   }
 }

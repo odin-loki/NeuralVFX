@@ -67,6 +67,13 @@ struct TrainOptions {
   float sigma = 0.03f;       // input noise, in channel scales
   float profile = 1.f;       // weight of the profile loss in stages 2 and 3
   float activity = 100.f;    // weight of the activity loss in stage 3
+  // Study R2 (docs/STUDY_R2.md §2): two more losses in stages 2 to 4, off at 0 (every earlier study's training is
+  // unchanged). spread: the plume's width at each height, the model's against the truth's (heat and soot; each row's
+  // mass-weighted spread about its own centroid, so a narrow plume that meanders is not punished for being elsewhere,
+  // and a broad haze is); edge: heat and soot at the box's four open sides beyond the truth's (not the top, which the
+  // plume leaves by).
+  float spread = 0.f;
+  float edge = 0.f;
   float lr = 2e-3f, lr_finetune = 7e-4f;
   float clip = 1.f;
   int threads = 0;
@@ -94,10 +101,19 @@ std::expected<void, std::string> load_checkpoint(const std::filesystem::path& pa
 void train_stepper(Model& m, std::span<const Run> runs, const TrainOptions& o, TrainState& s,
                    const std::function<void(const Model&, const TrainState&)>& checkpoint = {});
 
+// Study R2's losses for a window (TrainOptions::spread and ::edge).
+struct ExtraLosses {
+  float spread = 0.f, edge = 0.f;
+};
+
 // The loss of one window (windows start at state `first`, after `burn` frames of the stepper's own rollout without a
 // gradient) and its gradient, added to grad (step_layout size). Exposed for the tests.
 double window_loss(const Model& m, const Run& run, int first, int unroll, int burn, float sigma, float profile, std::uint64_t noise_seed,
-                   std::vector<float>* grad, float activity = 0.f);
+                   std::vector<float>* grad, float activity = 0.f, const ExtraLosses& extra = {});
+
+// Study R2: the mass-weighted horizontal spread of channel `ch` about each row's own centroid, per row of the coarse
+// grid (cells^2; 0 where the row holds nothing), of a state laid out [cell][channels].
+std::vector<double> row_spread(const Hyper& h, std::span<const float> state, int channels, int ch);
 
 // The stage (1 to 4) an iteration belongs to, and the iteration that ends stage k (1 to 4).
 int train_stage(const TrainOptions& o, int iteration);

@@ -7,6 +7,11 @@
 // carried in flux form (conservative), checked against Morton, Taylor and Turner's plume theory; and larger boxes
 // (Params::span) for that check. The fire and study N's smoke are unchanged.
 //
+// Study R2 (docs/STUDY_R2.md) found where smoke_r's plume loses a fifth of the momentum its buoyancy gives (a budget of
+// the vertical momentum per operator, MomentumAudit) and added Effect::smoke_r2: smoke_r with its velocity carried in
+// flux form too (Params::velocity 2), which conserves momentum as the scalars' flux form conserves heat and soot. The
+// fire, study N's smoke and smoke_r are unchanged to the bit.
+//
 // Solver: collocated grid with a one-cell border; semi-Lagrangian advection (trilinear) for the velocity and a clamped
 // MacCormack correction for the scalars (or flux form, Params::scalars); buoyancy from temperature against soot weight; vorticity confinement; a seeded
 // 3D curl-noise force (noise4.hpp, shared with the learned model); combustion expansion (a divergence source where the
@@ -30,8 +35,11 @@ namespace nfx::sim3d {
 
 // fire; smoke: study N's demo preset (warm gas that cools and soot that fades, every velocity damped; kept as it was
 // so study N's smoke runs can be repeated); smoke_r: study R's smoke, the same source and controls without those sinks,
-// checked against plume theory (docs/STUDY_R.md §1).
-enum class Effect { fire, smoke, smoke_r };
+// checked against plume theory (docs/STUDY_R.md §1); smoke_r2: study R2's, smoke_r with its velocity in flux form
+// (docs/STUDY_R2.md §1).
+enum class Effect { fire, smoke, smoke_r, smoke_r2 };
+// The smoke presets of studies R and R2 (no sinks; heat and soot in flux form by default).
+inline bool plume_smoke(Effect e) { return e == Effect::smoke_r || e == Effect::smoke_r2; }
 std::string_view effect_name(Effect e);
 bool parse_effect(std::string_view text, Effect& out);
 
@@ -60,14 +68,32 @@ struct Params {
   // neighbour, so the solver neither makes nor loses heat or soot; a second-order upwind scheme with the monotonised
   // central limiter, one sweep per axis in alternating order, substeps where a sweep's Courant number would pass 0.95).
   int scalars = -1;
-  // How the velocity is carried: -1 the effect's own (semi-Lagrangian for every effect), 0 semi-Lagrangian, 1 with the
-  // clamped MacCormack correction (less numerical dissipation; study R's measurement of the momentum budget).
+  // How the velocity is carried: -1 the effect's own (smoke_r2: flux form; semi-Lagrangian for every other effect), 0
+  // semi-Lagrangian, 1 with the clamped MacCormack correction (less numerical dissipation; study R's measurement of the
+  // momentum budget), 2 flux form (study R2: each component carried as the scalars' flux form carries heat, by the
+  // velocity after the forces, frozen for the step; what leaves a cell enters its neighbour, so momentum is conserved).
   int velocity = -1;
   std::array<float, 3> controls() const { return {intensity, wind, turbulence}; }
 };
 
 // The noise constants of an effect (the flicker's rate differs, as in 2D).
 Forcing3 forcing(Effect e);
+
+// Study R2 (docs/STUDY_R2.md §1): the budget of the vertical momentum in a slab of rows, per operator. Each field is the
+// sum over the steps of what that operator added to the sum of v over the slab's cells (cells / s, summed over cells:
+// divide by `seconds` for a rate in cells^4 / s^2, the units of a plane's momentum flux per cell of height). The
+// buoyancy, the confinement and the curl noise are the forces' own terms (dt times each force, before any damping);
+// `damping` is what the velocity damping took. The solver fills it when Fluid::set_audit has given it one; nothing the
+// solver computes changes. The projection's term is the pressure's: it telescopes to the planes at the slab's ends.
+struct MomentumAudit {
+  int y_lo = 0, y_hi = -1;  // the slab: cell rows y_lo..y_hi (0-based, as State's), inclusive
+  double sources = 0, buoyancy = 0, confinement = 0, curl = 0, damping = 0, advection = 0, projection = 0;
+  double seconds = 0;  // the time the sums cover
+  // the vertical momentum carried in through the slab's bottom face and out through its top by the advection, as the
+  // scheme computes it where it is in flux form (velocity 2: the faces' fluxes; otherwise left at 0), and through the
+  // box's four sides between the slab's rows (same units as the sums above)
+  double flux_bottom = 0, flux_top = 0, flux_sides = 0;
+};
 
 // The solver's fields without their border: nx * ny * nz values each, indexed (y * nz + z) * nx + x.
 struct State {
@@ -102,6 +128,11 @@ class Fluid {
   // The vertical force per unit of heat and of soot (cells per second squared): the buoyancy is
   // heat_coeff * temperature - soot_coeff * soot (study R's plume measurement: the buoyancy flux).
   std::array<float, 2> buoyancy_coefficients() const;
+  // Study R2: fill `a` (not owned; nullptr stops) with the vertical momentum budget of its slab from the next step on.
+  void set_audit(MomentumAudit* a) { audit_ = a; }
+  // The projection's pressure without its border (nx * ny * nz, indexed as the fields), in cells^2 / s^2: the solver's
+  // pressure (velocity times cells) over the step's dt, so its gradient is an acceleration.
+  void pressure(std::span<float> out) const;
 
  private:
   struct Grid {
@@ -120,7 +151,16 @@ class Fluid {
   void advect_velocity(float dt);
   void advect_scalar(Grid& q, float dt);
   void advect_scalar_flux(Grid& q, float dt);  // the flux form (Params::scalars)
-  void advect_velocity_maccormack(float dt);  // Params::velocity
+  void advect_velocity_maccormack(float dt);  // Params::velocity 1
+  void advect_velocity_flux(float dt);        // Params::velocity 2
+  // The flux form's sweeps of q carried by the velocity cu, cv, cw (one per axis, alternating order; substeps by the
+  // Courant number). Positive: q kept at or above 0 (the scalars); a velocity component instead refreshes its border
+  // (outflow, the floor reflecting v when reflect_floor) after every substep. faces: where the audit's face fluxes go.
+  template <bool Positive>
+  void flux_sweeps(Grid& q, const Grid& cu, const Grid& cv, const Grid& cw, float dt, bool reflect_floor, bool audit_faces);
+  void component_border(Grid& g, bool reflect_floor);
+  double slab_sum(const Grid& g) const;  // the audit's slab: the sum of g over its cells (fixed order)
+  int velocity_mode() const;
   void velocity_border();
   template <class F>
   void slabs(F&& fn);  // fn(y) for y = 1..ny on the pool
@@ -135,6 +175,8 @@ class Fluid {
   CurlField3 curl_;
   Grid u_, v_, w_, temp_, soot_, pressure_, div_, ta_, tb_, tc_, wx_, wy_, wz_, wn_;
   std::unique_ptr<Pool> pool_;
+  MomentumAudit* audit_ = nullptr;
+  std::vector<std::array<double, 4>> audit_rows_;  // per padded row: the forces' terms (buoyancy, confinement, curl, damping)
 };
 
 }  // namespace nfx::sim3d
