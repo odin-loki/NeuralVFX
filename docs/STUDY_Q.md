@@ -26,7 +26,7 @@ took it over from the jobs it left running (the data root's `q_fix/jobs/*.sh`, t
 
 | weak spot | stage | committed | running / next |
 |---|---|---|---|
-| avalanche | **passed the test** (§4.8) | `u30`: tracking at 1 s +0.34 dB [+0.18, +0.50], the mean frame +0.16 [+0.04, +0.28], every measure within its margin | replacing the shipped file (links, frozen hashes, models/, videos) |
+| avalanche | **replaced** (§4.8, §6) | `u30` passed its test: tracking at 1 s +0.34 dB [+0.18, +0.50], the mean frame +0.16 [+0.04, +0.28], every measure within its margin; links, models/, frozen hashes, three videos | its start points (the mean state did not meet the rule, §9) |
 | geyser | validation | margins (36514f3); N = 60, the cap (§4.6) | `u30`, `s24`, `s24_u30` on validation (`val.sh`, 2 threads); then the choice, the freeze, the test |
 | haboob's first frame | **stopped at validation** | `rf` meets no rule: its spectrum's interval past its margin (ce134c7) | kept; nothing more |
 | crown and window fires' streaks | **done by eye** (§5.1) | detail settings, frozen hashes, videos (78ae21b, 47b2b0f) | - |
@@ -549,6 +549,21 @@ the spectrum distance 0.122 → **0.116** (the floor's 0.033), the coverage dist
 avalanche's distance from real stays, which is its start points' (§3.1: the mean state, which moves them, drew the detail
 further from real and did not meet the rule).
 
+**Its round's own test again** (beside, not deciding; round 9's frozen `d-eval` binary, `--seed-base 33300000`, the
+current and the new file on the same seeds; [deval_avalanche/](../results/experiments/q_fix/deval_avalanche)): tracking a
+held-out run against the coarse simulation with detail at 1 s **-3.52 dB [-5.92, -1.10] → -2.47 [-5.12, -0.00]** (still
+behind it, by a dB less), at 2 s -4.20 [-6.41, -2.05] → -3.00 [-5.45, -0.66]; endless, the mean picture against the
+nearest flipbook's -3.37 [-6.82, -0.70] → -3.54 [-6.85, -0.99] (behind it as before; that test plays fewer settings and
+other seeds, and its interval is ten times study Q's). By the round's own rule the avalanche stays weak.
+
+**How it looks.** Below, the current file above the new one at the reel's three settings (its own renderer, 256 px, seed
+33,465,021, at 0.5, 1, 2, 3 and 4 s): from the same start point the two clouds are hard to tell apart; the new one is a
+little fuller at 3 to 4 s. As with study O's mushroom, the numbers move more than the picture: what the test measured is
+where the cloud is over many runs from a true state, not a shape one sees in one run. The cloud as shipped stays smaller
+than the simulator's, which is its start points' (§3.1).
+
+![The avalanche before (rows 1, 3, 5) and after study Q (rows 2, 4, 6), at (0.3, 0.85, 0.3), (0.7, 0.1, 0.5) and (1, 0.95, 0.7), at 0.5, 1, 2, 3 and 4 s](figures/q_avalanche_u30.png)
+
 **The dust explosion's round test again** (reported beside, not deciding; `d-eval` from the round's frozen binary, `--seed-base
 33300000`, the current and the new file on the same seeds;
 [deval_dustexplosion/](../results/experiments/q_fix/deval_dustexplosion)): tracking a held-out run over the coarse
@@ -628,14 +643,26 @@ advection).
     `fx_fire2/models/scene/dustexplosion.nvfx` (was `../d/dustexplosion.nvfx`); `models/layout.txt` already maps both to
     `2d/dustexplosion.nvfx`, and `models/restore.sh` reports 0 different. The round's file is untouched under
     `fx_fire2/models/d` and `fx_fire2/models/frozen`.
+  - **the avalanche** is now `q_fix/models/avalanche.nvfx` (`u30`: the stepper fine-tuned on 30-frame windows; 280,927
+    bytes, the size of the old file, SHA-256 `d6161c1d09116e2b00a959011192de85c20378a815623ff5c3249fc49013ec67`; in git
+    `models/2d/avalanche.nvfx`). The links moved (old targets logged): `library/models/avalanche.nvfx` (was
+    `../../fx_earth/models/d/avalanche.nvfx`) and `fx_earth/models/scene/avalanche.nvfx` (was
+    `/root/nvfx-data/fx_earth/models/d/avalanche.nvfx`; the volcano scene's folder, whose script does not play it);
+    `models/layout.txt` maps both to `2d/avalanche.nvfx`. The round's file is untouched under `fx_earth/models/d` and
+    `fx_earth/models/frozen`.
 - **Frozen hashes** (float, pinned to the AVX2 build with `--isa avx2`): the frozen tests that play the dust explosion
   were run with private copies of the two folders holding the new file before the links moved, and give their frozen
   keyframes to the bit (the library's `dust_explosion`, the forest-edge town's eight keyframes: both draw it by looks,
   which do not use the renderer); only the model rows changed: `results/library/frozen_fire2.csv`'s `dustexplosion` and
-  a row for the new file in `results/experiments/fx_fire2_frozen.csv` (`dustexplosion_q`).
+  a row for the new file in `results/experiments/fx_fire2_frozen.csv` (`dustexplosion_q`). The avalanche: the library's
+  `avalanche` keyframe changes (the old file still gives the old hash on this build, so the change is the model's;
+  `results/library/frozen.csv`, its keyframe and model rows; `LibraryKeyframesFrozen` and `PackLibraryKeyframesFrozen`
+  pass with it), and a row for the new file in `fx_earth_frozen.csv` (`avalanche_q`); no scene plays it.
 - **Videos re-rendered** (videos/README.md): `effect_dustexplosion` (its own renderer; seed 33,490,011) and
   `real_vs_learned_fire2` (round 10's held-out seeds; the crown and window fires' columns are the same frames).
-  `library_fire2` and `scene_forestedge` draw it by looks and do not change.
+  `library_fire2` and `scene_forestedge` draw it by looks and do not change. The avalanche: `effect_avalanche` (seed
+  33,490,021), `real_vs_learned_earth` (round 9's held-out seeds; the lava and eruption columns the same frames) and
+  `library_earth` (its four avalanche entries; the others played again).
 - **By eye, no model change** (§5.1): the crown fire, the window fire, heavy gas and the smoke ring's detail settings in
   the library and the scenes; their frozen hashes and videos.
 - **Code**: `nvfx_fix parts` (the taking apart) and `strip --also` (rows of other files); `nvfx_ordered --study q`
