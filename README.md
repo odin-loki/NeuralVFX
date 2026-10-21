@@ -49,6 +49,11 @@ C++23, no third-party runtime dependencies, a C API for engines, no Python.
 - **Putting it in your engine:** [docs/INTEGRATION.md](docs/INTEGRATION.md): which API when, the frame loop and threads,
   textures and colour space, effect packs (one checked file with the models and the catalogue), calibration,
   determinism, memory, the version and ABI; the C++ wrapper `include/neuralfx/nvfx.hpp`.
+- **For FUSE (the owner's engine):** [docs/FUSE.md](docs/FUSE.md): a sample integration in C++23 (`engines/fuse`): the
+  small interface FUSE implements (frame clock, job system, view, texture uploads, render hooks), an adapter that plays one
+  effect pack's models as sprites through the effect manager on FUSE's jobs, a scene script driven by its inputs, library
+  entries on a stage and the 3D fire volume, with no allocation per frame; a headless demo and its test (the same frames
+  on any number of workers). Video: [videos/fuse_demo.mp4](videos/fuse_demo.mp4).
 - **More effects:** [docs/EFFECTS.md](docs/EFFECTS.md) (steam and magic: presets, training, the test, a scene).
 - **Effect library:** [docs/LIBRARY.md](docs/LIBRARY.md): 213 named effects ready to place (fires, smokes, explosions,
   steam, magic, ambient, sparks, lights, dust, trails, weather, combat, engines, underwater, water, earth, gas) from the
@@ -175,6 +180,7 @@ From [docs/REPORT.md](docs/REPORT.md), measured on simulated fire, smoke and exp
 | effect packs and the C++ wrapper | `include/neuralfx/nvfx_pack.h`, `src/pack`, `include/neuralfx/nvfx.hpp` | one file an engine ships (`.nvfxp`): the models, the catalogue, a manifest with a SHA-256 per member, the entries' models and optional manager costs, members coded by the context-mixing coder's fast model (the full library: 614 kB against 1.54 MB loose, loaded in 0.12 s); a library, scenes and models from a pack; a header-only C++23 wrapper over the five C APIs (RAII handles, spans, `std::expected`, no exceptions); `nvfx_version()`; [docs/INTEGRATION.md](docs/INTEGRATION.md) |
 | effect manager | `include/neuralfx/nvfx_manager.h`, `src/manager` | many rollout effects within a CPU budget per frame, in libnvfx: sizes and update rates from on-screen size and priority with hysteresis, frames between updates by crossfade, copies sharing a simulation (optionally offset in time), pauses off screen, proxies for the far field when the budget is short, the engine's threads or its own with the same pictures on any number, no allocation per frame; [docs/MANAGER.md](docs/MANAGER.md) |
 | Godot 4 plugin | `engines/godot` | a GDExtension (godot-cpp at a pinned tag): `NeuralVFXScene`, `NeuralVFXStage` (the effect library) and `NeuralVFXEffect` nodes into textures (and the lit-sprite layers as four more), demo projects and a headless test in Godot 4.4.1 (`engines/godot/test.sh`); [docs/ENGINES.md](docs/ENGINES.md) §8 |
+| FUSE sample integration | `engines/fuse` | the interface FUSE implements (`fuse_engine.hpp`: frame clock, job system, view, texture upload, render hooks) and a C++23 adapter over it (`nvfx_fuse.hpp`): one pack checked against the headers, sprites through the effect manager on FUSE's jobs within a CPU budget, a scene script and a library stage on cards in the world, the 3D fire volume (a camera-facing picture and 3D textures), packets to the render thread, no allocation per frame; a headless demo on a stand-in FUSE and its test; [docs/FUSE.md](docs/FUSE.md) |
 | 3D effects (study N) | `src/sim3d`, `src/render3d`, `src/core/rollout3d.cpp`, `src/train/rollout3d_train.cpp`, `include/neuralfx/nvfx_volume.h`, `nvfx_3d` | a small 3D demo ([docs/STUDY_3D.md](docs/STUDY_3D.md)): our own 3D fire simulator (not a validated fire code), a volume renderer (Planck emission through the CIE 1931 colour matching functions, soot absorption and single scattering, any camera), a 3D rollout model (a 16 x 24 x 16 learned state, 3 x 3 x 3 convolutions with FiLM, a 3D projection, seeded 64 x 96 x 64 detail) and a C API that gives engines its fields as 3D textures or pictures for any camera ([docs/ENGINES.md](docs/ENGINES.md) §12) |
 | context mixing | `src/dcm`, `nvfx_dcm` | the owner's diffusion-context mixing (DCM) from CameraDetector: a PAQ8-style mixer with a frozen, versioned inference copy and a nested mixer search, k-means contexts without LibTorch, and a value-domain mixer (a value and a Laplace scale per prediction) for generating and coding effects; docs/DCM.md (study G) |
 
@@ -185,12 +191,13 @@ Ubuntu 24.04: `g++-14`, CMake 3.25+, Ninja, `libgtest-dev`, `zlib1g-dev` (and `f
 ```sh
 cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_COMPILER=g++-14
 cmake --build build
-ctest --test-dir build                     # 488 tests: sim, metrics, codecs, gradients, runtime parity, composition, scene scripts, field effects, trails, engine layers, weather, procedural sky, combat and magic elements, context mixing, denoiser, lossless coder, low-bit, vector-quantised, sparse and multi-level features, video codecs, BC7 and ASTC flipbooks, allocation, C API for effects and scenes, the effect library, the effect manager, effect packs and the C++ wrapper, start points from footage, 3D volumes (study N's simulator, renderer, model, gradients and C API; study N2's ambient edges, schedules and long stage), effects drawn at half size and upscaled (study P)
+ctest --test-dir build                     # 492 tests: sim, metrics, codecs, gradients, runtime parity, composition, scene scripts, field effects, trails, engine layers, weather, procedural sky, combat and magic elements, context mixing, denoiser, lossless coder, low-bit, vector-quantised, sparse and multi-level features, video codecs, BC7 and ASTC flipbooks, allocation, C API for effects and scenes, the effect library, the effect manager, effect packs and the C++ wrapper, start points from footage, 3D volumes (study N's simulator, renderer, model, gradients and C API; study N2's ambient edges, schedules and long stage), effects drawn at half size and upscaled (study P), the FUSE sample integration (its self-test, and the headless demo with the models)
 ```
 
 Options: `NEURALFX_BUILD_VIEWER` (GLFW + OpenGL; fetches Dear ImGui), `NEURALFX_BUILD_SHARED` (libnvfx.so for engines),
 `NEURALFX_BUILD_GODOT` (the Godot 4 GDExtension; fetches godot-cpp, needs Python 3 to generate its bindings; see
-`engines/godot/test.sh`), `NEURALFX_FETCH_ENCODERS` (on by default: fetches BC7 and ASTC encoders for the flipbook
+`engines/godot/test.sh`), `NEURALFX_BUILD_FUSE` (on by default: the FUSE sample integration, `engines/fuse`),
+`NEURALFX_FETCH_ENCODERS` (on by default: fetches BC7 and ASTC encoders for the flipbook
 baselines; study code only, [docs/DATA.md](docs/DATA.md) §5), `NEURALFX_BUILD_TOOLS`, `NEURALFX_BUILD_TESTS`,
 `NEURALFX_BUILD_BENCH`, `NEURALFX_WERROR` (CI).
 
@@ -238,6 +245,7 @@ training, evaluation; about three hours), then `d-timing` on an idle machine and
 | `nvfx_dcm` | context mixing: `selftest` runs a small synthetic mixer search under both objectives (ROC-AUC and Laplace bits); `version FILE` prints the SHA-256 version of a serialised mixer; DCM-fine (G1): `record`, `experts`, `search-fine` (with `--pilot`), `train-fine`, `eval-fine`, `bench-experts`, `fine-summary`; the coarse-state denoiser (G2): `ddpm-train`, `ddpm-sample`, `ddpm-time`, `contexts` |
 | `nvfx_prior` | the runtime's prior against drift (docs/DCM.md G2.13): `parity` (study G's test run through the reference and the runtime, bit by bit), `pass` (one denoiser pass per ISA), `time` (frame cost with and without the prior, and of shards: mean, p99, worst) |
 | `nvfx_pack_host` | an engine's start and frame loop in C++ with the wrapper: a pack, the library on a stage, the manager, a PNG sheet ([docs/INTEGRATION.md](docs/INTEGRATION.md)) |
+| `nvfx_fuse_demo` | the FUSE sample integration, headless: a 10 s sequence of pack sprites, a scripted scene, library entries and the 3D fire on a stand-in FUSE (thread pool, render thread, software framebuffer), PNG keyframes and a video; `--check` plays it twice and checks no allocation per frame and the same frames on any number of workers ([docs/FUSE.md](docs/FUSE.md) §8) |
 | `nvfx_pack` | effect packs: `pack`, `list`, `verify`, `extract`, `measure` ([docs/INTEGRATION.md](docs/INTEGRATION.md) §5); and pack a `.nvfx` into a `.nvfz` and back (`--unpack`), bit-exact; `--h3` for format 2 (light or fast literal models, LZ tokens, seekable segments: 4 to 38 times faster decoding for 2 to 23% more disk); `--report DIR` for sizes and ratios; `--study` for the measurement in results/compression (`--flipbooks-only` adds the flipbooks `cm.csv` lacks) |
 | `nvfx_g3` | study G's G3: a codec for authored effect runs from the learned dynamics (closed-loop coarse corrections, an integer context-mixing coder) and a frame model plus a coded residual, against video codecs (through ffmpeg) and flipbooks; `probe`, `ladder`, `baselines`, `g3b`, `summary`, `timing` ([docs/DCM.md](docs/DCM.md) §8) |
 | `nvfx_g_extras` | study G's extras (stage S8): one renderer for every model (G4a), a shard critic (G5a), a mixer of the stepper and a coarse solver for smoke (G5b); none kept ([docs/DCM.md](docs/DCM.md) §10) |
@@ -256,6 +264,7 @@ training, evaluation; about three hours), then `d-timing` on an idle machine and
 | `tools/`, `examples/`, `viewer/`, `bench/` | executables |
 | `library/` | the effect library's catalogue (`.nvfxl` files in the scene-script language; the models are in the data folder) |
 | `engines/godot/` | the Godot 4 GDExtension, its demo project and its headless test |
+| `engines/fuse/` | the sample integration for FUSE: the engine interface, the adapter, the headless demo and its stand-in FUSE |
 | `tests/` | GoogleTest suites, the allocation test, the C host self-test (the viewer's tests are in `viewer/`) |
 | `docs/` | plan, report, composed effects, footage, engines, data, viewer, figures |
 | `results/` | small text results (CSVs and generated summaries); no images, clips or weights |

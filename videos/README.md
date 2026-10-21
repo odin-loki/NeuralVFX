@@ -56,7 +56,7 @@ that play them were rendered again with the new files (`effect_mushroom`, `effec
 `library_round7`, `real_vs_learned_round7`, `library_water`).
 Every video is H.264 (yuv420p, +faststart, no audio). Click a poster to open its video.
 
-**73 videos, 82.0 MB in all**, each at most 5 MB, with 73 JPEG posters (957 KB in all).
+**74 videos, 83.2 MB in all**, each at most 5 MB, with 74 JPEG posters (968 KB in all).
 
 ## 1. Showcase scenes
 
@@ -201,6 +201,12 @@ above).
 |---|---|---|---|---|---|---|
 | <a href="lit_sprites.mp4"><img src="lit_sprites.jpg" width="200" alt="Lit sprites"></a> | **Lit sprites** | `nvfx_lit_host`'s stage (chimney smoke, a campfire, a rocket trail moved across it) read as an engine reads its layers ([ENGINES.md](../docs/ENGINES.md) §11) and lit by the host. Top left: the relit picture, albedo x (a cool ambient + a warm point light circling the scene, by the normals) + emission, over the host's own sky and ground. Top right: the albedo layer over grey. Bottom: the emission layer and the normal layer | Learned: the smoke, the fire, the trail's material; procedural: embers, the rocket's glow. The light, the sky and the ground are the host's | The library's smoke, fire, explosion; int8 | `nvfx_lit_host library MODELS OUT --frames 300 --threads 2 --raw -` piped to ffmpeg (`--raw` is new: every frame's four quadrants as raw RGB); four 640 x 360 quadrants, 1280 x 720, 30 fps, 10 s; labels by ffmpeg drawtext; CRF 24, 0.5 MB | Good: the smoke and the trail brighten as the light passes them; the rocket leaves the stage after about 3.5 s and its trail stays |
 
+## 8b. In an engine: FUSE
+
+| | Video | What it shows | Learned / procedural | Models, precision | Rendered | How it looks |
+|---|---|---|---|---|---|---|
+| <a href="fuse_demo.mp4"><img src="fuse_demo.jpg" width="200" alt="NeuralVFX in a stand-in FUSE"></a> | **NeuralVFX in FUSE** (a sample integration) | `nvfx_fuse_demo`'s 10 s sequence ([FUSE.md](../docs/FUSE.md) §8), everything from one effect pack through the adapter FUSE would use: six torches sharing one simulation offset in time, two smoke columns, two explosions despawned when they finish and a magic portal as sprites through the effect manager (5 ms budget on FUSE's jobs); the campfire script on a card at the left, driven by its rules and inputs (a gust, the log catching, the game's wind, doused and relit); library entries on a stage at the right (a brazier, a steam vent, an electric arc, a magic burst, a lightning strike); the learned 3D fire in the middle. The HUD names each event and shows the manager's plan | Learned: every sprite, the scene's fires and smoke, the stage's brazier, steam and burst, the 3D fire's motion. Procedural: the scene's and the stage's embers, sparks, arc and lightning; the 3D fire's look is its volume renderer. The sky, the ground grid and the HUD are the stand-in's | The library's fire, smoke, explosion, magic, steam; study N2's 3D fire (C4); int8 (the volume float) | `nvfx_fuse_demo --pack fuse_demo.nvfxp --video fuse_demo.mp4`: 60 Hz, every other frame drawn by the stand-in's software renderer (premultiplied, sRGB textures) at 1280 x 720, 30 fps, 10 s; CRF 24 (`-preset slow`), 1.3 MB | Fair: an engine's view, not a beauty render: flat sprites and cards over a dark grid, the cards' effects small in their scenes; soft sprite edges hide the smoke's and the explosions' domain tops; the explosions are soft orange balls; the 3D fire is small in its box, as in §9 |
+
 ## 9. A 3D fire (study N)
 
 Study N's small 3D demo ([STUDY_3D.md](../docs/STUDY_3D.md)): a 3D fire learned as a 16 x 24 x 16 state that drives
@@ -279,6 +285,9 @@ build/nvfx_reel --out earth.mp4 --seconds 11 --zoom 1.7 --compact --timer --colu
 build/nvfx_gallery --library library --models $M --only campfire --video campfire.mp4 --clip 2.4
 build/nvfx_crowd --budget 16 --threads 4 --seconds 20 --video crowd.mp4
 build/nvfx_lit_host library $M OUT --frames 300 --raw - | ffmpeg -f rawvideo -pix_fmt rgb24 -s 1280x720 -r 30 -i - lit.mp4
+# the FUSE sample integration (docs/FUSE.md §8): the pack the test makes, then the demo with its own ffmpeg pipe
+build/nvfx_pack pack fuse_demo.nvfxp --library library --models $M --add examples/scenes/campfire.nvfxs,fire3d.nvfx3 --threads 2
+build/engines/fuse/nvfx_fuse_demo --pack fuse_demo.nvfxp --video fuse_demo.mp4 --out OUT       # fire3d.nvfx3: study N2's chosen.nvfx3
 # study N's 3D videos (the model: $NEURALVFX_DATA/n_3d/models/chosen.nvfx3 unless --model says otherwise)
 build/nvfx_3d video --kind orbit --model $NEURALVFX_DATA/n2_3d/models/chosen.nvfx3 --out 3d_fire_orbit.mp4 --seconds 12 --controls 0.7,0.5,0.6 --seed 9950001
 build/nvfx_3d video --kind real-vs-learned --model $NEURALVFX_DATA/n2_3d/models/chosen.nvfx3 --out 3d_real_vs_learned.mp4 --seconds 10 --controls 0.65,0.45,0.55 --seed 9950000

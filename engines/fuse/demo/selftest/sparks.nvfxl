@@ -1,0 +1,32 @@
+# The FUSE self-test's catalogue (engines/fuse/CMakeLists.txt, docs/FUSE.md §8): procedural entries only, so that a pack
+# of it needs no learned model and the adapter runs where there are none (CI). Copied from library/sparks.nvfxl.
+
+entry sparks, category sparks, size 200 x 220, anchor base, loop, show 1,
+      about "A fountain of sparks thrown up from a point, falling back (a fuse, a broken cable; procedural)"
+param count = 8, range (2, 30), about "sparks a frame"
+emit sparks, along (X, Y) to (X, Y), count count
+field hot = lamp, at (X, Y - 10 * scale), radius 40 * scale, strength 0.25 * (0.7 + 0.3 * noise(9 * t, 3, 0)),
+      colour (1, 0.7, 0.35)
+
+entry electric_arc, category sparks, size 260 x 120, anchor base, loop, show 1,
+      about "An electric arc jumping between two points 200 world pixels apart, flickering, with sparks (procedural)"
+param intensity = 1, range (0.3, 1.5), about "brightness"
+let flick = 0.6 + 0.4 * noise(17 * t, 11, 0)
+emit arc, along (X - 100 * scale, Y - 40 * scale) to (X + 100 * scale, Y - 40 * scale), rate 14, seed 6,
+     width 1.6 * scale, jitter 0.22, branches 2, colour (0.6, 0.75, 1), brightness 2.6 * intensity
+emit sparks, along (X + 100 * scale, Y - 40 * scale) to (X + 100 * scale, Y - 40 * scale), count 3
+field blue = lamp, at (X, Y - 40 * scale), radius 100 * scale, strength 0.45 * intensity * flick, colour (0.5, 0.7, 1)
+
+entry lightning_strike, category sparks, size 360 x 700, anchor base, once 1.2, show 0.1,
+      about "A lightning strike: a branching bolt from the sky to its anchor, struck three times, a flash and a scorch (procedural)"
+param power = 1, range (0.5, 1.5), about "brightness and flash"
+let strike = if(t < 0.12, 1, if(t < 0.2, 0, if(t < 0.32, 0.8, if(t < 0.4, 0, if(t < 0.52, 0.6, 0)))))
+emit arc, along (X + 90 * scale, Y - 680 * scale) to (X, Y), rate 4, seed 8, width 2.2 * scale, jitter 0.12, branches 4,
+     colour (0.75, 0.82, 1), brightness 3.2 * power * strike
+light flash (0.5 * power * strike, 0.55 * power * strike, 0.7 * power * strike)
+field glare = lamp, at (X, Y - 200 * scale), radius 220 * scale, strength 1.4 * power * strike, colour (0.7, 0.8, 1)
+at 0:
+  scorch at (X, Y + 3 * scale), radius 60 * scale, glow 0.8 * exp(-t / 0.8)
+  shock at (X, Y - 10 * scale), speed 900 * scale, decay 0.2, amp 3, width 16 * scale
+  burst at (X, Y - 6 * scale), radius 10 * scale, embers 60, sparks 40, speed 400 * scale
+

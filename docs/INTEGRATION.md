@@ -4,7 +4,8 @@ Status: **current**. Audience: engine programmers. What to call, in what order, 
 The code is the C++ wrapper `include/neuralfx/nvfx.hpp` (header-only, C++23) over the C API; every call has a C
 twin of the same name (`stage.spawn(...)` is `nvfx_stage_spawn(stage, ...)`). The whole flow runs in
 `examples/pack_host.cpp` (`nvfx_pack_host PACK --out sheet.png`). Background: [ENGINES.md](ENGINES.md) (the C API,
-Unreal, Unity, Godot), [LIBRARY.md](LIBRARY.md) (the 70 effects), [MANAGER.md](MANAGER.md) (the budget).
+Unreal, Unity, Godot), [LIBRARY.md](LIBRARY.md) (the 70 effects), [MANAGER.md](MANAGER.md) (the budget); a whole
+integration written this way, for the owner's engine FUSE and run headless on a stand-in: [FUSE.md](FUSE.md).
 
 ## 1. Which API
 
