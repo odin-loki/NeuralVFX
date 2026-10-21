@@ -3,7 +3,7 @@
 #   nvfx_scene_script --script examples/scenes/weather_day.nvfxs --models $NEURALVFX_DATA/library/models --out weather_day.mp4
 #
 # 40 s at 1280 x 720. A clear day with a campfire burning and a few fair-weather clouds; clouds build until the sky is
-# overcast; the gust front comes in (leaves and dust blow, the smoke and the flames lean) and the rain starts; a
+# overcast; the rain starts; the gust front comes in (the leaves blow, the smoke and the flames lean hard) and a
 # thunderstorm: a downpour, lightning, hail in the heaviest cells, the hills lost in the rain; then it clears in reverse
 # (the lightning stops, the rain eases, the wind drops, the clouds break) and a rainbow shows as the sun comes out.
 # Every layer is one the scene language had: the director only says how much of each there is (sky.rain, sky.cloud,
@@ -14,7 +14,7 @@
 scene      size 1280 x 720, fps 30, length 40 s, ground 600
 bus        at (-160, -360), size 1600 x 1080, cell 8
 particles  capacity 24000, flow 0.9
-keyframes  2, 9, 14.5, 17, 21, 25.5, 30.5, 34.5
+keyframes  2, 8, 14, 19.5, 23.1, 27.8, 32.5, 35.5
 
 effect cloud = "cloud.nvfx"
 effect fog   = "fog.nvfx"
@@ -24,40 +24,43 @@ effect smoke = "smoke.nvfx", swirl 1.4, swirl_scale 9
 look fleece = shader, emission 0, soot_density 3, soot_albedo 0.9, sky 1, shadow 0.4, scene_light 1, relief 2.5, tint (0.95, 0.96, 1)
 look storm  = shader, emission 0, soot_density 3, soot_albedo 0.45, sky 0.25, shadow 0.35, scene_light 1.2, relief 2.5, tint (0.62, 0.66, 0.78)
 look spray  = shader, emission 0, soot_density 0.7, soot_albedo 0.8, sky 0.6, shadow 0.1, scene_light 1.2, relief 0.3, tint (0.8, 0.84, 0.9)
-look smoke  = shader, heat_scale 2.5, emission 0, emission_power 3, soot_density 3, soot_albedo 0.55, sky 0.9, shadow 0.3,
+look smoke  = shader, heat_scale 2.5, emission 0, emission_power 3, soot_density 3, soot_albedo 0.42, sky 0.9, shadow 0.3,
               scene_light 0.9, relief 1.2, tint (0.85, 0.86, 0.9)
 
-# The weather: clear, then overcast, rain, a storm and clear again (seeds: 28,500,000 to 28,599,999; even, as seeds pass
-# through a float above 16,777,216).
-weather sky, seed 28500000, regime clear:
-  overcast at 4, over 8
-  rain at 12, over 5
-  storm at 17.5, over 5
-  clear at 28, over 9
+# The weather: clear, then overcast, rain, a storm and clear again. Seeds 28,500,000 to 28,599,999 (even: seeds pass
+# through a float, which above 16,777,216 holds only even whole numbers). This seed's storm flashes six times; the first
+# twenty seeds give 0 to 16 flashes in it, 4 to 5 most often (docs/WEATHER.md §6).
+weather sky, seed 28500002, regime clear:
+  overcast at 3, over 7
+  rain at 11, over 5
+  storm at 17, over 4
+  clear at 30, over 8
 
 let close = 600                        # world pixels a metre where the rain falls, near the camera
-let mid   = 60                         # and where the leaves and the dust blow, further off
+let mid   = 60                         # and where the leaves blow, further off
 let eye   = 0.72 * sky.u               # the wind at 2 m (a log profile over grass, z0 = 3 cm), m/s
 let dark  = smooth(sky.rain / 25)      # how stormy the sky looks
+let grey  = clamp(dark + 1.3 * (1 - sky.light), 0, 1)   # the clouds grey as the daylight under them falls
 let bx    = 640 + 520 * sky.bolt       # where the last flash struck
 
 # The sky's light: Kasten and Czeplak's daylight under the cloud, darkened further in the storm (a choice, docs/WEATHER.md
-# §5), the CIE overcast sky with the cloud, and Koschmieder's haze at the visibility the rain leaves.
-frame  daylight sky.light * (1 - 0.55 * dark), overcast sky.cloud, visibility sky.visibility, exposure 1.05, bloom 0.7,
+# §5), the CIE overcast sky with the cloud, and Koschmieder's haze at the visibility the rain leaves. The camera's
+# exposure follows the daylight halfway (in stops), as a camera or an eye adapts.
+frame  daylight sky.light * (1 - 0.55 * dark), overcast sky.cloud, visibility sky.visibility, exposure 1.05 / sqrt(sky.light), bloom 0.7,
        fade smooth(t / 0.5) * smooth((length - t) / 0.6)
-light  gain 0.14, flash (0.45 * sky.flash, 0.5 * sky.flash, 0.65 * sky.flash)
+light  gain 0.14, flash (0.16 * sky.flash, 0.18 * sky.flash, 0.24 * sky.flash)
 
 # Clouds: five masses of the cloud model; each shows once the cover passes its share of the sky, so the cover is what
 # covers. White in fair weather, dark and heavy as the rain grows; drifting with the wind.
-module cloud_a = cloud, size 128, width 900, at (160, 600), feather 0.12, look fleece to storm by dark, start 0, seed 28500010,
+module cloud_a = cloud, size 128, width 900, at (160, 600), feather 0.12, look fleece to storm by grey, start 0, seed 28500010,
                  controls (0.8, 0.6, 0.5), wind sky.lean, opacity smooth((sky.cloud - 0.02) / 0.25)
-module cloud_b = cloud, size 128, width 1000, at (1100, 640), feather 0.12, look fleece to storm by dark, start 3, seed 28500012,
+module cloud_b = cloud, size 128, width 1000, at (1100, 640), feather 0.12, look fleece to storm by grey, start 3, seed 28500012,
                  controls (0.95, 0.6, 0.6), wind sky.lean, opacity smooth((sky.cloud - 0.2) / 0.25)
-module cloud_c = cloud, size 128, width 900, at (640, 560), feather 0.12, look fleece to storm by dark, start 5, seed 28500014,
+module cloud_c = cloud, size 128, width 900, at (640, 560), feather 0.12, look fleece to storm by grey, start 5, seed 28500014,
                  controls (0.85, 0.6, 0.5), wind sky.lean, opacity smooth((sky.cloud - 0.38) / 0.25)
-module cloud_d = cloud, size 128, width 820, at (300, 760), feather 0.12, look fleece to storm by dark, start 2, seed 28500016,
+module cloud_d = cloud, size 128, width 820, at (300, 760), feather 0.12, look fleece to storm by grey, start 2, seed 28500016,
                  controls (0.8, 0.6, 0.4), wind sky.lean, opacity smooth((sky.cloud - 0.55) / 0.25)
-module cloud_e = cloud, size 128, width 860, at (940, 790), feather 0.12, look fleece to storm by dark, start 6, seed 28500018,
+module cloud_e = cloud, size 128, width 860, at (940, 790), feather 0.12, look fleece to storm by grey, start 6, seed 28500018,
                  controls (0.9, 0.6, 0.5), wind sky.lean, opacity smooth((sky.cloud - 0.7) / 0.25)
 field inside = lamp, at (bx, 160), radius 420, strength 3 * sky.flash, colour (0.75, 0.8, 1)    # lightning lights them
 
@@ -82,13 +85,11 @@ module mist_c = fog, size 128, width 420, at (1060, ground), sink 0.03, feather 
 # Rain, by the director's physics: Marshall-Palmer drops falling at Atlas's speeds, as many as the rate holds, streaks
 # as long as they fall in half a frame, slanted by the wind; it washes the smoke out. Hail in the heaviest cells (12.8 m/s:
 # a 10 mm stone, drawn at 150 world pixels a metre).
-emit rain, in (-160, -40), size 1600 x 640, rate sky.rain, scale close, depth 0.2, radius 0.8, brightness 0.8, wind (eye * close, 0),
+emit rain, in (-160, -40), size 1600 x 640, rate sky.rain, scale close, depth 0.15, radius 0.8, brightness 0.65, wind (eye * close, 0),
      wash 0.02 * sky.rain, seed 28500040
 emit hail, in (-160, -40), size 1600 x 640, density 1.6 * sky.hail, speed 12.8 * 150, wind (eye * 150, 0), radius 1.6, seed 28500042
-# The gust front: leaves in motion from force 3, dust raised from force 4 until the rain lays it.
+# The gust front: leaves in motion from force 3 (Beaufort: "leaves and small twigs in constant motion").
 emit leaves, in (-200, 200), size 1680 x 400, density 0.3 * sky.leaves, radius 3.2, wind (eye * mid, 20), seed 28500044
-emit ash, in (-200, 470), size 1680 x 130, density 5 * sky.lift * (1 - smooth(sky.rain / 1.5)), wind (eye * mid, -15),
-     radius 1.3, colour (0.62, 0.55, 0.44), glowing 0, flow 0.3, seed 28500046
 
 # Lightning: a bolt where the flash struck, the same channel for each of its strokes.
 emit arc, along (bx, 120) to (bx - 40 + 80 * noise(sky.strike, 1.5, 0.5), ground), rate 0.001, seed 28500100 + 2 * sky.strike,
@@ -96,4 +97,4 @@ emit arc, along (bx, 120) to (bx - 40 + 80 * noise(sky.strike, 1.5, 0.5), ground
 
 # The rainbow, opposite the sun as the storm moves off: while the last of the rain falls far away and the sun is out.
 emit rainbow, at (420, ground + 10), radius 520, width 50, count 2,
-     brightness 0.3 * if(sky.regime == 0, smooth((sky.progress - 0.45) / 0.15) * (1 - smooth((sky.progress - 0.85) / 0.15)), 0)
+     brightness 0.22 * if(sky.regime == 0, smooth((sky.progress - 0.45) / 0.15) * (1 - smooth((sky.progress - 0.85) / 0.15)), 0)

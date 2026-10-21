@@ -5,9 +5,11 @@
 // day's sky; the scene's random numbers kept; the same frames on any number of threads; and no allocation per frame
 // (this program replaces operator new to count them, as test_upscale.cpp does).
 #include "compose_scene.hpp"
+#include "library.hpp"
 #include "script.hpp"
 #include "weather.hpp"
 
+#include <neuralfx/nvfx_library.h>
 #include <neuralfx/nvfx_scene.h>
 #include <neuralfx/rollout.hpp>
 
@@ -784,6 +786,94 @@ TEST(WeatherScript, TheSameFramesOnAnyNumberOfThreads) {
   }
   EXPECT_EQ(runs[0], runs[1]);
   EXPECT_EQ(runs[0], runs[2]);
+}
+
+// --- the library ----------------------------------------------------------------------------------------------------------
+
+constexpr const char* kWeatherCatalogue = R"(
+effect tiny = "tiny.nvfx"
+entry squall, category weather, size 200 x 120, anchor base, loop, show 1, about "a director in an entry"
+param regime = 0, range (0, 6), about "where it heads"
+param change = 2, range (1, 60), about "how long it takes"
+weather sky, seed 28500260, regime regime, over change
+module cloud = tiny, size 32, width 64 * scale, at (X, Y - 40), start 1, seed 28500262, wind sky.lean, opacity sky.cloud
+emit rain, in (X - 100, Y - 120), size 200 x 120, rate sky.rain, scale 300 * scale, seed 28500264
+)";
+
+TEST(WeatherLibrary, AnEntryCarriesItsOwnWeather) {
+  namespace lib = nfx::library;
+  const std::vector<std::pair<std::string, std::string>> files = {{"w.nvfxl", kWeatherCatalogue}};
+  const lib::Catalogue c = lib::parse(files);
+  lib::StageSpec spec;
+  spec.width = 240;
+  spec.height = 160;
+  spec.ground = 150.f;
+  spec.rooms.push_back({c.index("squall"), 2});
+  const lib::Stage stage = lib::build_stage(c, spec);
+  ASSERT_EQ(stage.slots.size(), 2u);
+  const std::string text = stage.text();
+  const std::string a = stage.slots[0].prefix + "sky", b = stage.slots[1].prefix + "sky";
+  EXPECT_NE(text.find("weather " + a + ", seed 28500260, regime " + stage.slots[0].params[0] + ", over " + stage.slots[0].params[1]), std::string::npos) << text;
+  EXPECT_NE(text.find(a + ".rain"), std::string::npos) << "its members renamed with its room";
+  sc::Scene scene(stage.script, [](const std::string&) { return cm::testing::tiny_effect(3); }, {});
+  std::vector<std::uint8_t> rgb(240 * 160 * 3);
+  scene.render(0, rgb);
+  scene.set_input(scene.input_index(stage.slots[0].params[0]), 3.f);  // the game asks the first room for a storm
+  for (int f = 1; f < 150; ++f) scene.render(f, rgb);
+  float rain_a = -1.f, rain_b = -1.f;
+  ASSERT_TRUE(scene.weather_value(a + ".rain", rain_a));
+  ASSERT_TRUE(scene.weather_value(b + ".rain", rain_b));
+  EXPECT_GT(rain_a, 10.f) << "the first room's weather turned to a storm";
+  EXPECT_EQ(rain_b, 0.f) << "the second room's stays clear";
+  // through the C API: a parameter the game sets
+  std::string bytes;
+  {
+    std::ostringstream os;
+    ASSERT_TRUE(nfx::rollout::save_model(os, cm::testing::tiny_effect(3).m));
+    bytes = os.str();
+  }
+  nvfx_effect* et = nullptr;
+  ASSERT_EQ(nvfx_effect_load_memory(bytes.data(), bytes.size(), &et), NVFX_OK);
+  const nvfx_library_file file{"w.nvfxl", kWeatherCatalogue};
+  nvfx_library_desc ld;
+  nvfx_library_desc_init(&ld);
+  ld.files = &file;
+  ld.n_files = 1;
+  nvfx_library* l = nullptr;
+  nvfx_scene_error err;
+  ASSERT_EQ(nvfx_library_open(&ld, &l, &err), NVFX_OK) << err.message;
+  const nvfx_stage_room rooms[] = {{"squall", 1, 0}};
+  const nvfx_scene_effect fx{"tiny.nvfx", et};
+  nvfx_stage_desc sd;
+  nvfx_stage_desc_init(&sd);
+  sd.rooms = rooms;
+  sd.n_rooms = 1;
+  sd.effects = &fx;
+  sd.n_effects = 1;
+  sd.width = 240;
+  sd.height = 160;
+  nvfx_stage* st = nullptr;
+  ASSERT_EQ(nvfx_stage_create(l, &sd, &st, &err), NVFX_OK) << err.message;
+  nvfx_fx h = 0;
+  ASSERT_EQ(nvfx_stage_spawn(st, "squall", 120.f, 150.f, 1.f, -1.0, &h), NVFX_OK);
+  ASSERT_EQ(nvfx_stage_set_param(st, h, "regime", 3.f), NVFX_OK);
+  nvfx_scene* sc_ = nvfx_stage_scene(st);
+  ASSERT_EQ(nvfx_scene_step(sc_, 5.0, nullptr), NVFX_OK);
+  float rain = 0.f;
+  ASSERT_EQ(nvfx_scene_get_input(sc_, (stage.slots[0].prefix + "sky.rain").c_str(), &rain), NVFX_OK) << "the room's weather, read by its name";
+  EXPECT_GT(rain, 10.f);
+  nvfx_stage_free(st);
+  nvfx_library_free(l);
+  nvfx_effect_free(et);
+  // an entry's weather has no schedule
+  const std::string bad = "effect tiny = \"tiny.nvfx\"\nentry s, category weather, size 64 x 64, anchor base, loop, about \"x\"\nweather sky, regime clear:\n  storm at 2\n";
+  const std::vector<std::pair<std::string, std::string>> bad_files = {{"b.nvfxl", bad}};
+  try {
+    (void)lib::parse(bad_files);
+    ADD_FAILURE() << "a schedule in an entry";
+  } catch (const sc::Error& e) {
+    EXPECT_NE(std::string(e.what()).find("an entry's weather has no schedule"), std::string::npos) << e.what();
+  }
 }
 
 // --- the day ------------------------------------------------------------------------------------------------------------

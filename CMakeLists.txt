@@ -442,7 +442,7 @@ if(NEURALFX_BUILD_TESTS)
   # order of transitions, the script and the scene API, the physical rain, snow and hail, the day, the scene's random
   # numbers and no allocation per frame; its own test program (it counts allocations: it replaces operator new).
   add_executable(neuralfx_weather_tests tests/test_weather_director.cpp)
-  target_link_libraries(neuralfx_weather_tests PRIVATE neuralfx_compose nvfx_scene_api GTest::gtest_main)
+  target_link_libraries(neuralfx_weather_tests PRIVATE neuralfx_compose nvfx_scene_api nvfx_library_api GTest::gtest_main)
   neuralfx_defaults(neuralfx_weather_tests)
   if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
     target_compile_options(neuralfx_weather_tests PRIVATE -Wno-mismatched-new-delete)  # it counts allocations
