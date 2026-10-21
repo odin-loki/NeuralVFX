@@ -1,0 +1,2 @@
+kind,name,file,bytes,sha256,source
+rollout_effect,dustexplosion,fx_fire2/models/d/dustexplosion.nvfx,301443,65057a10925134b335a5734c073d5080c0838fe4babfcccb99e7b29bdec39480,study D's recipe (docs/EFFECTS_FIRE2.md): d-train --stages12 1 then d-tune then d-finish (the one-shot branch, 120 frames), then study M3's mean state (nvfx_ordered --study m3 fitmean --block 2, setmean)

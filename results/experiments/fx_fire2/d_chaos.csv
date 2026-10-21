@@ -1,0 +1,5 @@
+effect,case,f1,f2,f4,f8,f15,f30,f60,f90,f120,f180,f240
+dustexplosion,start+1e-3_same_seed,78.34,76.27,63.66,40.83,32.37,29.52,29.12,30.10,28.23,,
+dustexplosion,start+1e-1_same_seed,57.62,52.38,40.28,32.93,28.77,27.23,24.54,25.48,23.65,,
+dustexplosion,same_start_other_seed,31.96,28.36,25.05,20.82,18.65,15.49,11.09,12.22,12.20,,
+dustexplosion,other_start_same_seed,18.39,18.21,17.81,16.72,14.78,13.43,12.59,14.32,13.95,,
