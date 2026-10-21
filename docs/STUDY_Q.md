@@ -18,6 +18,24 @@ Seeds: study Q's range, 33,000,000 to 33,499,999 (§4.5). Code: `tools/nvfx_fix.
 `tools/nvfx_ordered.cpp` (`--study q`: `refit`, `starts`, `train`, `fitmean`, `setmean`, `val --split probeq | valq |
 checkq`, `test`). Every file is under the data root's `q_fix` (outside git); tables under `results/experiments/q_fix`.
 
+## 0. Where the study stands (handoff)
+
+Kept current as the study goes (last: 21 October 2026, 11:30 UTC). One agent began the study and was stopped; a second
+took it over from the jobs it left running (the data root's `q_fix/jobs/*.sh`, their markers `jobs/*.done` and logs
+`q_fix/logs/`), killing none. Each line: what is committed, what runs, what comes next.
+
+| weak spot | stage | committed | running / next |
+|---|---|---|---|
+| avalanche | probe | margins (78ae21b); `ms`, `u30`, `ms_u30` on the probe (6336822) | `u60` training (600 iterations, 60-frame windows), then on the probe (`probe_av2.sh`); then N, validation |
+| geyser | probe | margins (36514f3) | `u30`, `s24`, `s24_u30` on the probe (`probe_ge.sh`); then N, validation |
+| haboob's first frame | **stopped at validation** | `rf` meets no rule: its spectrum's interval past its margin (ce134c7) | kept; nothing more |
+| crown and window fires' streaks | **done by eye** (§5.1) | detail settings, frozen hashes, videos (78ae21b, 47b2b0f) | - |
+| heavy gas | **done by eye** (§5.1) | `soften 0.1` | its start points not tried (§9) |
+| smoke ring | validation | N = 40 (ca955b9) | `rf` on validation (`val.sh`); then the choice, the freeze, the test |
+| dust explosion's renderer | probe | margins (8572674) | `rf` on the probe (`probe_rf.sh`); then N, validation |
+| candle | **nothing changed** (§3.7) | the diagnosis | - |
+| mushroom's cap | **left** (§3.7) | the diagnosis | - |
+
 ## 1. Bottom line
 
 (Written when the study ends.)
