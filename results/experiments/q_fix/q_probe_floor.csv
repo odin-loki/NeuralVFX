@@ -14,3 +14,8 @@ smokering,abs_ln_motion_ratio,0.017263
 smokering,coverage_l1,0.000288
 smokering,emission_l1,0.000000
 smokering,mean_frame_psnr,43.966840
+geyser,spectrum_l1,0.271527
+geyser,abs_ln_motion_ratio,0.254340
+geyser,coverage_l1,0.016641
+geyser,emission_l1,0.000000
+geyser,mean_frame_psnr,34.605179
