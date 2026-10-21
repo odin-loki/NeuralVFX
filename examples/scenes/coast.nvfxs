@@ -32,20 +32,20 @@ let blow  = noise(0.8 * t, 2.1, 0)
 
 # The haboob, behind the geyser field: one 256-pixel tile across the whole scene, let go at 1 s.
 module wall = haboob, size 256, width 1500, at (500, ground - 40), sink 0.023, feather 0.1, look dust_wall, start 0,
-              seed 2710001, waiting, controls (0.75, 0.85, 0.5), opacity 0.9
+              seed 2710001, glow (0, 0, 0), waiting, controls (0.75, 0.85, 0.5), opacity 0.9
 # Three geysers, nearer and farther, each its own start and seed (so each erupts on its own time); the gust blows their
 # steam to the right.
 module g1 = geyser, size 128, width 520, at (300, ground + 6), sink 0.0625, feather 0.15, look steam_white, start 0,
-            seed 2710011, controls (0.8, 0.5, 0.4), wind 0.5 + 0.42 * squall + 0.05 * blow * squall
+            seed 2710011, glow (0, 0, 0), controls (0.8, 0.5, 0.4), wind 0.5 + 0.42 * squall + 0.05 * blow * squall
 module g2 = geyser, size 128, width 360, at (560, ground - 18), sink 0.0625, feather 0.15, look steam_white, start 3,
-            seed 2710012, controls (0.6, 0.5, 0.4), wind 0.5 + 0.42 * squall + 0.05 * blow * squall
+            seed 2710012, glow (0, 0, 0), controls (0.6, 0.5, 0.4), wind 0.5 + 0.42 * squall + 0.05 * blow * squall
 module g3 = geyser, size 128, width 260, at (110, ground - 28), sink 0.0625, feather 0.18, look steam_white, start 6,
-            seed 2710013, controls (0.45, 0.5, 0.5), wind 0.5 + 0.42 * squall
+            seed 2710013, glow (0, 0, 0), controls (0.45, 0.5, 0.5), wind 0.5 + 0.42 * squall
 # The sea on the right: two spray tiles over the composer's waves; the gale rises with the gust.
 module s1 = seaspray, size 128, width 420, at (860, ground + 40), sink 0.094, feather 0.15, look spume, start 0,
-            seed 2710021, controls (0.6, 0.2, 0.5), gale 0.2 + 0.75 * squall, turbulence 0.5 + 0.2 * squall
+            seed 2710021, glow (0, 0, 0), controls (0.6, 0.2, 0.5), gale 0.2 + 0.75 * squall, turbulence 0.5 + 0.2 * squall
 module s2 = seaspray, size 128, width 420, at (1170, ground + 40), sink 0.094, feather 0.15, look spume, start 5,
-            seed 2710022, controls (0.6, 0.2, 0.5), gale 0.2 + 0.75 * squall, turbulence 0.5 + 0.2 * squall
+            seed 2710022, glow (0, 0, 0), controls (0.6, 0.2, 0.5), gale 0.2 + 0.75 * squall, turbulence 0.5 + 0.2 * squall
 water sea = pool, along (700, ground + 40) to (1420, ground + 40), depth 140, surface 34, cells 256,
             swell 5 + 4 * squall, wavelength 170, period 3.2, drift 30 + 40 * squall, rate 0, churn 1.2, seed 2710023
 
