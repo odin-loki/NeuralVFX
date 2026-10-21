@@ -62,8 +62,8 @@ for sorting and `edge`, a soft-edge width (§3.5). FUSE draws every quad the sam
 Add `engines/fuse/nvfx_fuse.cpp` to FUSE (or link the `nvfx_fuse` static library this repository builds), with
 `engines/fuse` and `include/` on the include path, C++23 (`std::expected`, `std::span`), and link libnvfx: the shared
 library (`libnvfx.so`, `nvfx.dll`; the adapter checks its version against the headers) or the static ones
-(`nvfx_pack_api` pulls in the rest). The headers compile with `-fno-exceptions -fno-rtti`; errors are returned, never
-thrown.
+(`nvfx_pack_api` pulls in the rest). The adapter compiles with `-fno-exceptions -fno-rtti` (as the wrapper does);
+errors are returned, never thrown.
 
 ### 3.2 Make the level's pack
 
@@ -102,6 +102,7 @@ cfg.volume.fields = true;                 // also its temperature and extinction
 
 auto fx = nvfx_fuse::System::create({&jobs, &render_hooks, &gpu}, cfg);
 if (!fx) log_error("NeuralVFX: %s", fx.error().message.c_str());   // the level plays on without its effects
+nvfx_fuse::System& vfx = **fx;
 ```
 
 `create` does every allocation and every slow thing, in this order, and stops at the first failure with a message
@@ -128,17 +129,18 @@ if (!fx) log_error("NeuralVFX: %s", fx.error().message.c_str());   // the level 
 
 ```cpp
 // gameplay first: spawns, despawns, moves, inputs, rules (never during update)
-nvfx_fuse::Sprite torch = fx->spawn({.model = fx->model("fire"), .position = {1.f, 0.f, 2.f}, .size = 1.1f,
+nvfx_fuse::Sprite torch = vfx.spawn({.model = vfx.model("fire"), .position = {1.f, 0.f, 2.f}, .size = 1.1f,
                                      .controls = {0.8f, 0.5f, 0.45f}, .seed = 7, .time_offset = 0.37f});
-fx->despawn(old_torch);
-fx->trigger("blow");                                   // a rule of the scene script, `when 0 as blow`
-fx->set_input("lean", 0.5f + 0.3f * wind);             // an input of the script
-fx->spawn_entry("magic_burst", world_point, 0.8f);     // a library entry on the stage's card
-fx->set_volume_controls({0.7f, 0.5f + 0.25f * wind, 0.6f});
+vfx.despawn(old_torch);
+vfx.trigger("blow");                                   // a rule of the scene script, `when 0 as blow`
+vfx.set_input("lean", 0.5f + 0.3f * wind);             // an input of the script
+vfx.spawn_entry("magic_burst", world_point, 0.8f);     // a library entry on the stage's card
+const float volume_controls[3] = {0.7f, 0.5f + 0.25f * wind, 0.6f};
+vfx.set_volume_controls(volume_controls);
 
-fx->update(clock.now(), camera);                       // everything steps on FUSE's jobs; returns when done
+vfx.update(clock.now(), camera);                       // everything steps on FUSE's jobs; returns when done
 
-if (fx->heat_at(player.position) > 0.1f) player.burn();   // the scene's and the stage's field buses
+if (vfx.heat_at(player.position) > 0.1f) player.burn();   // the scene's and the stage's field buses
 ```
 
 `update` does, in order: waits only if the render thread is `frames_in_flight - 1` frames behind; plans the volume
@@ -187,7 +189,7 @@ render thread │ draw N-1: hook (uploads, quads) ...                           
   first.
 - **Packets.** `frames_in_flight` (default 2) packets carry frames from the game thread to the render thread: frame N's
   quads, and the newest pixels of every texture with a version per texture. A packet is filled only after the render
-  thread has drawn the one K frames before it; pixels are copied into it only when its copy is older than the newest
+  thread has drawn the one `frames_in_flight` frames before it; pixels are copied into it only when its copy is older than the newest
   (a new sprite picture is copied into each packet once), and uploaded only when the texture's copy is older. So a
   frame the render thread skips loses nothing, and the manager's pictures (valid until its next tick) are never read
   while it ticks. A hook for a frame `update` never published draws nothing.
