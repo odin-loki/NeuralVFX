@@ -244,6 +244,32 @@ inline void each_vector(int width, F&& f) {
   for (; x < width; ++x) f.template operator()<float>(x);
 }
 
+// row[idx[j]] for the lanes j of a vector (idx: kW integers).
+inline vf gather(const float* row, vi idx) {
+#if NFX_VW == 16
+  return reinterpret_cast<vf>(_mm512_i32gather_ps(reinterpret_cast<__m512i>(idx), row, 4));
+#else
+  return reinterpret_cast<vf>(_mm256_i32gather_ps(row, reinterpret_cast<__m256i>(idx), 4));
+#endif
+}
+
+// out[x] = p[0] + w[x] (p[s] - p[0]) with p = row + idx[x] s, for x in [0, n): a grid row's lerp at the fine cells' x
+// (idx, w: an axis table; s: the grid's stride along x), the first lerp of the reference's trilinear interpolations.
+inline void expand_row(const float* row, const std::int32_t* idx, const float* w, int s, float* out, int n) {
+  int x = 0;
+  for (; x + kW <= n; x += kW) {
+    vi i;
+    std::memcpy(&i, idx + x, sizeof i);
+    i *= s;
+    const vf a = gather(row, i), b = gather(row + s, i);
+    st<vf>(out + x, a + ld<vf>(w + x) * (b - a));
+  }
+  for (; x < n; ++x) {
+    const float* p = row + static_cast<std::ptrdiff_t>(idx[x]) * s;
+    out[x] = p[0] + w[x] * (p[s] - p[0]);
+  }
+}
+
 // The eight corners of a trilinear sample of both fields of a zero-bordered box (heat and soot interleaved; x rows
 // 2 floats per cell, z rows `rz` floats apart, y planes `ry`), for lanes whose lower corner is at float offset off[j]:
 // t[c] and d[c] are the corners in trilinear_zero()'s order (c = x + 2 z + 4 y).
@@ -472,12 +498,7 @@ class Detail3 final : public r3::DetailKernel {
       for (int k = 0; k < nz; ++k) {
         float* o = swirl_rows_.data() + (zu(j) * zu(nz) + zu(k)) * 3 * zu(FX_);
         const float* row = curl_.data() + idx(0, j, k) * 3;
-        for (int c = 0; c < 3; ++c) {
-          for (int x = 0; x < FX_; ++x) {
-            const float* p = row + zu(ax.i[zu(x)]) * 3 + zu(c);
-            o[zu(c) * zu(FX_) + zu(x)] = p[0] + ax.f[zu(x)] * (p[3] - p[0]);
-          }
-        }
+        for (int c = 0; c < 3; ++c) expand_row(row + c, ax.i.data(), ax.f.data(), 3, o + zu(c) * zu(FX_), FX_);
       }
     });
   }
@@ -570,10 +591,7 @@ class Detail3 final : public r3::DetailKernel {
       for (int z = 0; z < nz; ++z) {
         const float* row = v + (zu(y) * zu(nz) + zu(z)) * zu(nx);
         float* o2 = flick_rows_.data() + q.rows_at + ((zu(l) * zu(q.ax[1].n) + zu(y)) * zu(nz) + zu(z)) * zu(FX_);
-        for (int x = 0; x < FX_; ++x) {
-          const float* p = row + ax.i[zu(x)];
-          o2[x] = p[0] + ax.t[zu(x)] * (p[1] - p[0]);
-        }
+        expand_row(row, ax.i, ax.t, 1, o2, FX_);
       }
     });
   }
@@ -593,10 +611,7 @@ class Detail3 final : public r3::DetailKernel {
           const float* f = pl < channels ? a : b;
           const int c = pl % channels;
           const float* row = f + (zu(j) * zu(h.rz) + zu(k)) * zu(h.rx) * zu(channels) + zu(c);
-          for (int x = 0; x < FX_; ++x) {
-            const float* p = row + zu(ax.i[zu(x)]) * zu(channels);
-            o[zu(pl) * zu(FX_) + zu(x)] = p[0] + ax.f[zu(x)] * (p[channels] - p[0]);
-          }
+          expand_row(row, ax.i.data(), ax.f.data(), channels, o + zu(pl) * zu(FX_), FX_);
         }
       }
     });
@@ -702,8 +717,10 @@ class Detail3 final : public r3::DetailKernel {
     const r3::Hyper& h = m.h;
     const int k = h.fine;
     const std::size_t RZ = zu(PX_) * 2, RY = zu(PZ_) * RZ;
-    float* bs = cells_.data() + zu(cy) * zu(h.rz) * zu(h.rx) * 2;
-    std::fill_n(bs, zu(h.rz) * zu(h.rx) * 2, 0.f);
+    const std::size_t plane = zu(h.rz) * zu(h.rx);
+    float* bs = cells_.data() + zu(cy) * plane * 2;  // the slab's block sums: heat [z][x], then soot
+    std::fill_n(bs, plane * 2, 0.f);
+    const bool lanes = k == 4 && FX_ % (4 * kW) == 0;  // block sums on vectors, a block per lane
     for (int y = cy * k; y < (cy + 1) * k; ++y) {
       const float yf = fl(y);
       for (int z = 0; z < FZ_; ++z) {
@@ -733,10 +750,29 @@ class Detail3 final : public r3::DetailKernel {
           st<V>(qt + x, smax<V>(V{}, sclamp<V>(at + 0.5f * (ld<V>(qt + x) - bt), lot, hit)));
           st<V>(qd + x, smax<V>(V{}, sclamp<V>(ad + 0.5f * (ld<V>(qd + x) - bd), lod, hid)));
         });
-        float* b = bs + zu(z / k) * zu(h.rx) * 2;
-        for (int x = 0; x < FX_; ++x) {
-          b[zu(x / k) * 2] += qt[x];
-          b[zu(x / k) * 2 + 1] += qd[x];
+        // each block's sum adds its cells in the reference's order: y, z, then x
+        float* b = bs + zu(z / k) * zu(h.rx);
+        if (lanes) {
+          for (int x = 0; x < FX_; x += 4 * kW) {
+            for (int ch = 0; ch < 2; ++ch) {
+              const float* q = (ch ? qd : qt) + x;
+              const vf q0 = ld<vf>(q), q1 = ld<vf>(q + kW), q2 = ld<vf>(q + 2 * kW), q3 = ld<vf>(q + 3 * kW);
+              const vf e0 = unzip_<0>(q0, q1, std::make_index_sequence<kW>{}), o0 = unzip_<1>(q0, q1, std::make_index_sequence<kW>{});
+              const vf e1 = unzip_<0>(q2, q3, std::make_index_sequence<kW>{}), o1 = unzip_<1>(q2, q3, std::make_index_sequence<kW>{});
+              float* acc = b + zu(ch) * plane + zu(x / 4);
+              vf a = ld<vf>(acc);
+              a += unzip_<0>(e0, e1, std::make_index_sequence<kW>{});  // cells 4 j
+              a += unzip_<0>(o0, o1, std::make_index_sequence<kW>{});  // 4 j + 1
+              a += unzip_<1>(e0, e1, std::make_index_sequence<kW>{});  // 4 j + 2
+              a += unzip_<1>(o0, o1, std::make_index_sequence<kW>{});  // 4 j + 3
+              st<vf>(acc, a);
+            }
+          }
+        } else {
+          for (int x = 0; x < FX_; ++x) {
+            b[zu(x / k)] += qt[x];
+            b[plane + zu(x / k)] += qd[x];
+          }
         }
       }
     }
@@ -746,7 +782,7 @@ class Detail3 final : public r3::DetailKernel {
       for (int cx = 0; cx < h.rx; ++cx) {
         const std::size_t c = (zu(cy) * zu(h.rz) + zu(cz)) * zu(h.rx) + zu(cx);
         for (int ch = 0; ch < 2; ++ch) {
-          const float bb = bs[(zu(cz) * zu(h.rx) + zu(cx)) * 2 + zu(ch)] * inv, target = s.coarse[c * zu(C) + 3 + zu(ch)];
+          const float bb = bs[zu(ch) * plane + zu(cz) * zu(h.rx) + zu(cx)] * inv, target = s.coarse[c * zu(C) + 3 + zu(ch)];
           constexpr float eps = 1e-4f;
           const float r = (target + eps) / (bb + eps);
           const float rv = r <= 1.f ? r : std::min(r, m.detail.grow);
