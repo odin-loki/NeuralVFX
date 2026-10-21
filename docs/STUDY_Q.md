@@ -26,7 +26,7 @@ took it over from the jobs it left running (the data root's `q_fix/jobs/*.sh`, t
 
 | weak spot | stage | committed | running / next |
 |---|---|---|---|
-| avalanche | validation | margins (78ae21b); the four candidates on the probe; N = 60, the cap (§4.6) | `ms`, `u30`, `ms_u30`, `u60` on validation (`val.sh`, 2 threads); then the choice, the freeze, the test |
+| avalanche | **the test** | margins (78ae21b); N = 60, the cap (§4.6); `u30` chosen on validation and frozen (§4.7) | the test, once (`test.sh`, 2 threads) |
 | geyser | validation | margins (36514f3); N = 60, the cap (§4.6) | `u30`, `s24`, `s24_u30` on validation (`val.sh`, 2 threads); then the choice, the freeze, the test |
 | haboob's first frame | **stopped at validation** | `rf` meets no rule: its spectrum's interval past its margin (ce134c7) | kept; nothing more |
 | crown and window fires' streaks | **done by eye** (§5.1) | detail settings, frozen hashes, videos (78ae21b, 47b2b0f) | - |
@@ -466,6 +466,27 @@ motion), by study K's margins none is outside: reported, not deciding.
 **Frozen** before its test ([q_frozen.csv](../results/experiments/q_fix/q_frozen.csv)): the data root's
 `q_fix/models/dustexplosion.nvfx` (read-only; 301,443 bytes, SHA-256
 `a0f273ea278b3a60f0ea4e96db5177258faf0fcd21ffa020ac2ca65d78bed520`), validated and tested by `nvfx_ordered_q3`.
+
+**The avalanche (60 settings): `u30` meets the rule and is chosen; it is the only one that does.**
+
+| candidate | tracking: first frame | at 1 s (target) | at 2 s | spectrum | \|ln motion\| | coverage | mean frame (target) | reading |
+|---|---|---|---|---|---|---|---|---|
+| `ms` | +0.00 | -0.00 [-0.00, +0.00] | -0.00 | **+0.024 [+0.005, +0.040]** (margin +0.024) | -0.098 [-0.163, -0.035] | -0.0036 | **+0.84 [+0.24, +1.48]** | the spectrum past its margin: no |
+| `u30` | +0.01 [-0.05, +0.07] | **+0.46 [+0.31, +0.63]** | +0.69 [+0.51, +0.88] | -0.002 [-0.006, +0.002] | -0.006 [-0.020, +0.008] | -0.0005 [-0.0010, -0.0001] | +0.12 [-0.01, +0.26] | **meets it** |
+| `ms_u30` | +0.01 | +0.46 [+0.31, +0.62] | +0.69 | **+0.022 [+0.004, +0.039]** | -0.037 [-0.108, +0.032] | -0.0037 | **+0.93 [+0.28, +1.66]** | the spectrum past its margin: no |
+| `u60` | **-0.35 [-0.50, -0.21]** (margin -0.20) | +0.45 [+0.24, +0.65] | +1.00 [+0.80, +1.19] | -0.004 [-0.007, -0.000] | -0.001 [-0.024, +0.022] | -0.0010 | +0.24 [+0.03, +0.46] | the first frame past its margin: no |
+
+The mean state brings the avalanche's average picture closer (+0.8 to +0.9 dB: a start point at other controls moved to
+the ones asked for) and its motion and coverage too, but draws its detail further from real (the spectrum distance
+0.135 → 0.159), and that interval reaches past its margin, as on the probe. The 60-frame fine-tune follows a run best at
+2 s and improves the mean frame, but loses 0.35 dB at the first frame, as on the probe. `u30` follows a run from its true
+state 0.46 dB better at 1 s and 0.69 at 2 s, and changes nothing else past a tie but a coverage a little closer and an
+emission distance larger by 4 x 10^-7 (wholly on the worse side by study M's strict reading, a two-hundredth of its
+margin). By the rule (§4.3) `u30` is chosen, better at 1 s, the only candidate that meets it.
+
+**Frozen** before its test: the data root's `q_fix/models/avalanche.nvfx` (read-only; 280,927 bytes, the size of the
+old file, SHA-256 `d6161c1d09116e2b00a959011192de85c20378a815623ff5c3249fc49013ec67`), validated and tested by
+`nvfx_ordered_q3`.
 
 ### 4.8 The test (once)
 
