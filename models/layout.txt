@@ -68,6 +68,7 @@ library/models/windowfire.nvfx 2d/windowfire.nvfx
 n2_3d/models/chosen.nvfx3 3d/fire.nvfx3
 n2_3d/models/smoke2.nvfx3 3d/smoke_demo.nvfx3
 n_3d/models/chosen.nvfx3 3d/fire_study_n.nvfx3
+r_smoke3d/models/chosen.nvfx3 3d/smoke.nvfx3
 hres_3d/fire/models/hres_fire.nvfx3 3d/fire_hres.nvfx3
 p_upscale/nets/cand_shared.nvfxup upscale/shared.nvfxup
 v2/models/explosion.nvfx 2d/v2/explosion.nvfx
