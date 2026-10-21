@@ -332,6 +332,12 @@ build/nvfx_scene_script --script examples/scenes/coast.nvfxs --models $NEURALVFX
 ffmpeg -i coast_crf19.mp4 -c:v libx264 -preset slow -crf 24 -pix_fmt yuv420p -movflags +faststart -an scene_coast.mp4
 build/nvfx_gallery --library library --models $M --only erupting_geyser --video erupting_geyser.mp4 --clip 5 --threads 2   # each entry; joined
 # (the data root's fx_elements/jobs/videos.sh makes all six)
+# study Q (docs/STUDY_Q.md): the library's detail settings in a reel's DETAIL field (soften: the fine fields' softening), seeds 33490001 up
+build/nvfx_reel --out effect_crownfire.mp4 --seconds 9 --size 256 --zoom 1.5 --width 1280 --height 576 --title "CROWN FIRE" --seed 33490001 \
+    --bg 120,132,150,64,70,84 --panel "SMALL, STILL AIR|$M/crownfire.nvfx|0:0.2,0.5,0.3|grow=1,contrast=1" ...      # and the two others of the table
+build/nvfx_reel --out effect_windowfire.mp4 ... --panel "SMALL ROOM FIRE|$M/windowfire.nvfx|0:0.2,0.5,0.3|swirl=1,swirl_scale=9,soften=0.2,contrast=0.75" ...
+build/nvfx_reel --out effect_heavygas.mp4 ... --panel "LITTLE, BOTH WAYS|$M/heavygas.nvfx|0:0.2,0.5,0.3|soften=0.1" ...
+# (the data root's q_fix/jobs/videos_a.sh makes those and the two scenes and the two library walks)
 # study N's 3D videos (the model: $NEURALVFX_DATA/n_3d/models/chosen.nvfx3 unless --model says otherwise)
 build/nvfx_3d video --kind orbit --model $NEURALVFX_DATA/n2_3d/models/chosen.nvfx3 --out 3d_fire_orbit.mp4 --seconds 12 --controls 0.7,0.5,0.6 --seed 9950001
 build/nvfx_3d video --kind real-vs-learned --model $NEURALVFX_DATA/n2_3d/models/chosen.nvfx3 --out 3d_real_vs_learned.mp4 --seconds 10 --controls 0.65,0.45,0.55 --seed 9950000

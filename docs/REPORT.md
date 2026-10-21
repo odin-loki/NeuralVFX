@@ -4121,3 +4121,32 @@ find the part that makes it; a fix in how an effect is played is judged by eye, 
 it; a fix that changes a model goes through a rule committed before validation, its margins sized by a null probe on
 training settings (study M3's lesson, §14.9), validated, frozen by SHA-256 and tested once on held-out settings with
 fresh seeds, and it replaces a shipped model only if it passes.
+
+**What the taking apart found** (`nvfx_fix parts`, training runs, STUDY_Q.md §3): one part at a time swapped (the
+runtime as shipped; the learned stepper from a run's true state, drawn by the learned renderer and by the simulator's; the
+true coarse states moving the detail layer; the learned renderer on the true fields), measured over the whole frame:
+- **The avalanche's weakness is its stepper and its start points.** From the true state the learned cloud has 86% and
+  65% of the real cover at 1 and 4 s and sits lower (it runs but does not swell and rise); as shipped, from stored first
+  states at other controls, 67%, 44% and 20% at 1, 2 and 4 s. The detail layer driven by the true coarse states keeps the
+  cloud's size and height; the renderer is good (58 dB in the mean frame on the true fields).
+- **The crown fire's and the window fire's streaks are their detail layers'**, even with a perfect stepper: the crown
+  fire's lock grows the fine structure a rising column carries (its calibration's `grow 2`; with `grow 1` the oracle is
+  0.050 from real, the floor's distance, against 0.510), the window fire's small regular swirl draws curls (without it
+  0.17 against 0.46). Both have three times the real power at periods of 2.5 to 8 pixels.
+- **The first frames of the one-shots are their renderers'**: the recipe takes the renderer's samples at frames 10 to
+  length - 10, so a one-shot's fresh state is never among them; on the true fields the haboob's renderer is 27.9 dB at the
+  first frame (29.4 at the thirtieth), the ring's 26.0 (35.4), the dust explosion's 22.4 (27.6), the mushroom's 15.0
+  (24.2). The haboob's -11.7 dB at the first frame against the coarse simulation is mostly that the coarse simulation's
+  first frame is the true fields drawn by the simulator's own renderer (39 dB).
+- **Heavy gas's tied mean picture and the geyser's endless numbers are their start points'**: from the true state each is
+  close to real (heavy gas spectrum 0.09, mean frame 29.8 dB; the geyser 0.22, 35.5 dB), as shipped far off (0.31, 19.5;
+  0.67, 25.4). The smoke ring's detail is its detail layer's (the oracle 0.67; softened 0.04) and its renderer's (0.45 to
+  0.60 on the true fields).
+
+**Fixed by eye, with no model change** (STUDY_Q.md §5.1; `soften`, study D2's softening of the fine fields, is now a key
+of an effect line): the crown fire `grow 1, contrast 1` (spectrum distance as shipped on training runs 0.479 → 0.100,
+motion 0.80 → 0.69 of the real), the window fire `swirl 1, swirl_scale 9, soften 0.2, contrast 0.75` (0.506 → 0.174,
+0.92 → 0.79), heavy gas `soften 0.1` (0.308 → 0.263), the smoke ring `soften 0.4` for its looks (its fields 0.782 → 0.151),
+in the library and the forest-edge town and the crypt. By eye the crown fire's comb of vertical streaks becomes tongues of
+flame, the window fire's curls go, the gas's thin bright lines soften into billows; both fires move less. Frozen hashes and
+videos updated (§21's list below).
