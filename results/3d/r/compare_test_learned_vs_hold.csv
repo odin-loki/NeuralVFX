@@ -1,0 +1,10 @@
+part,measure,horizon,mean_a,mean_b,diff,lo,hi
+track,field: temperature,8,21.3066,18.7454,2.5612,2.2293,2.8656
+track,field: temperature,30,20.0212,17.7800,2.2412,1.9062,2.5754
+track,field: temperature,60,20.6187,18.3292,2.2896,1.9156,2.6523
+track,field: soot,8,20.8303,18.2494,2.5809,2.2448,2.8889
+track,field: soot,30,19.5596,17.2865,2.2731,1.9326,2.6143
+track,field: soot,60,20.1641,17.8463,2.3178,1.9306,2.6909
+track,picture (4 cameras),8,22.7415,14.5639,8.1776,7.8553,8.4943
+track,picture (4 cameras),30,17.8715,10.4563,7.4152,7.0759,7.7399
+track,picture (4 cameras),60,16.3931,10.7494,5.6437,5.2953,6.0148
