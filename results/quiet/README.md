@@ -293,3 +293,7 @@ study D's fire's defaults 16 to 18% higher, sea spray's two and one of study D's
 in study P rose 6 to 18%. **Ratios**: the 2D detail layer's gain and int8's held; study P's learned 2x and the 3D detail
 layer's gain moved against their claims (3 effects under 0.55 instead of 4; a factor of 4.5 to 4.9 instead of 5.7 to
 6.5); the AVX-512 build's lead over AVX2 is smaller on this host than on round 6's (0.87 to 0.95 against 0.79 to 0.81).
+
+**Checks** (after the session, on the loaded machine; origin/main is fc3d5f6, the branch's base): the full build with
+warnings as errors; the full ctest, 547 of 547, none skipped; `nvfx_alloc_test`; `nvfx_gallery --check
+--require-models` (234 of 234 played); the Godot test (0 failures in both parts).

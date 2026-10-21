@@ -135,8 +135,8 @@ From [docs/REPORT.md](docs/REPORT.md), measured on simulated fire, smoke and exp
   moves to the bit as the native one does and costs 0.29 to 0.38 of it at 512 px; with the bilinear 2x it stays within
   the null's margins of native against the simulator on every measure for all six effects tried. A small learned 2x with
   seeded micro-detail, tested once by a rule committed first, **did not pass**: it beat bilinear on PSNR, SSIM and the
-  high band together for none of the six, and cost more than 0.55 of native for two. Both ship as an experimental opt-in
-  (`nvfx_instance_set_upscale`, NVFX_VERSION 7).
+  high band together for none of the six, and cost more than 0.55 of native for two (three on a quiet machine, REPORT.md
+  §17.4). Both ship as an experimental opt-in (`nvfx_instance_set_upscale`, NVFX_VERSION 7).
 - **Memory, against production block compression:** for equal quality, a network per effect clip needs **2.4 to
   4.3 times less memory than a BC7 flipbook** at 8 bits, and 7.5 times less [4.2, 8.3] with features trained for 4
   bits. **Against ASTC** (mobile GPUs; 8x8 to 12x12 blocks hold every frame at full size in 121 to 256 KB) the ratios

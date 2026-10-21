@@ -105,7 +105,7 @@ Plan and decisions: [PLAN.md](PLAN.md).
   code here, but LZ tokens and lighter models make the coder decode 4 to 38 times faster. Training with couplings
   improves the explosion inside scenes. Tuning the detail layer on the endless statistics (D2) gains detail without
   calming the effects but met none of its rules, so v2 is unchanged. The composed fireball runs at 80 frames per second
-  at 720p on 4 threads (67 in the median of round 7's, §13.11, on a host whose speed drifted: 80 at its best).
+  at 720p on 4 threads (67 in the median of round 7's, §13.11, on a host whose speed drifted: 84 at its best).
 - **Rollout effects in 8 bits (study K, §13):** the stepper's second convolution now runs in 8-bit integers by default.
   On held-out settings and seeds it tracked real runs and played as float does on all eleven effects (every difference a
   tie or far inside its margin; the lowest tracking interval reaches -0.07 dB). With AVX-512 VNNI a 128 x 128 frame
@@ -2098,7 +2098,7 @@ AVX2 build ran as fast and its AVX-512 build 7 to 11% slower; its speed drifted 
 single configuration often landed in a fast or a slow state about 1.35 times apart, which this guest cannot see the
 cause of (no foreign load, steal under 1.5%). The fireball at 1280 x 720 on 4 threads took 15.0 ms float and 14.8 int8
 (medians of ten rounds; round 6: 12.8 and 12.2), though its first two rounds and its last four, at 20:53 and 21:17, ran
-at round 6's speed (12.4 to 13.4 and 12.6 to 12.7 ms).
+at round 6's speed (12.4 to 13.9 ms, and medians of 12.6 to 12.7).
 
 - **The 33 shipped 2D models** (18 rounds, one pinned core): 0.63 ms per 128 px frame on average at the default (int8 on
   the AVX-512 build; 0.46 for heavy gas to 1.12 for the geyser), 0.69 at float on AVX-512, 0.79 at float on AVX2. int8's
@@ -2126,6 +2126,11 @@ at round 6's speed (12.4 to 13.4 and 12.6 to 12.7 ms).
   compositor's frame), and float on the AVX-512 build is 0.95 of AVX2 (intervals reaching 1.03); 1920 x 1080 takes 31
   ms.
 
+**Checks** (origin/main is fc3d5f6, the branch's base, so there was nothing to merge; this round adds scripts, results
+and text, no code): the full build with warnings as errors; the full ctest, 547 of 547, none skipped; `nvfx_alloc_test`
+(no allocation per frame; the volume on 1 and 3 threads, 0 allocations in 84 frames each); `nvfx_gallery --check
+--require-models` (234 effects, 234 played, 0 failed); the Godot test (`engines/godot/test.sh`: the fireball and the
+library stage, 0 failures each).
 ## 14. Study M: model what's ordered, leave random to random
 
 Status: **done.** The diagnosis (§14.1) and what was built and tried (§14.2) were done on training settings only; the

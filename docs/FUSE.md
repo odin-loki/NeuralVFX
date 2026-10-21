@@ -250,7 +250,7 @@ others come from the shared 4-core machine and their sources say how provisional
 | a stage | about 2.5 ms to draw at 320 x 240 (30 ms at 1120 x 840), plus 3 ms per 128 px fire flame, 1 ms per 64 px one, 15 ms per 256 px smoke or steam tile | LIBRARY.md §7 |
 | a later spawn of a learned entry | its warm-up in that frame: 16 to 20 ms for a 128 px fire or steam module | LIBRARY.md §7 |
 | the engine layers | 3.5 to 6 ms more per picture at 960 x 540; reading all four about 7 ms (the adapter reads one, the colour, as RGBA8) | ENGINES.md §11 |
-| a scene | the fireball at 1280 x 720: 12.5 ms per frame on 4 threads, 23.7 on 2; round 7: 15.0 on 4 threads (12.4 at best), 31 at 1920 x 1080; the round scenes 10 to 19 ms on 2 threads | ENGINES.md §7, REPORT.md §13.11 |
+| a scene | the fireball at 1280 x 720: 12.5 ms per frame on 4 threads, 23.7 on 2; round 7: 15.0 on 4 threads (12.0 at best), 31 at 1920 x 1080; the round scenes 10 to 19 ms on 2 threads | ENGINES.md §7, REPORT.md §13.11 |
 | the volume | study N2's fire, which the demo plays: a step 21 ms (9 on 4 threads), a 256 x 256 picture 56 ms (14), a start (its warm-up) 0.55 s (0.22); a quiet machine, round 7 of the quiet re-timing | STUDY_3D.md §14.12 |
 | uploads | a sprite at most 256 KB, at most 30 times a second; a card w x h x 4 per new picture; the volume's fields 2 x 0.75 MB per volume frame | INTEGRATION.md §4, this adapter |
 
