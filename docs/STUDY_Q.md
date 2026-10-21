@@ -576,4 +576,31 @@ advection).
 
 ## 7. Reproduce
 
-(Written when the study ends.)
+The data root's `q_fix/jobs/*.sh` ran every step (resumable, a marker `jobs/*.done` for each); in short, with
+`B=q_fix/bin/nvfx_ordered_q3` (`q1` for the first probes; the same evaluation code), `D` the data root, `R` this folder's
+`results/experiments/q_fix`, each `nice -n 10`:
+
+```
+# the taking apart (diagnosis, training runs; tables in q_fix/diag/EFFECT)
+q_fix/bin/nvfx_fix parts --effect avalanche --model $D/fx_earth/models/d/avalanche.nvfx --runs 6 --threads 1 --out diag/avalanche
+q_fix/bin/nvfx_fix parts --effect crownfire --model ... --variants "g1:grow=1/..." --runs 4 --threads 1 --out diag/crownfire_v
+# the candidates (§4.1)
+$B --study q --threads 1 refit --effect haboob --model $D/fx_elements/models/d/haboob.nvfx --early 15 --out cand/haboob/rf.nvfx
+$B --study q --root $D --threads 2 fitmean --effect avalanche --block 2;  $B setmean --model ... --meanstate meanstate/avalanche_b2.txt --out cand/avalanche/ms.nvfx
+$B --study q --root $D --threads 2 train --effect avalanche --model ... --out cand/avalanche/u30.nvfx --activity-stage 600 --mean-stage 0 --unroll 30 --lr-ft 7e-4 --seed 33470001
+$B --study q --root $D --threads 2 starts --effect geyser --model ... --count 24 --out cand/geyser/s24.nvfx
+$B graft --model cand/geyser/u30.nvfx --starts-from cand/geyser/s24.nvfx --out cand/geyser/s24_u30.nvfx
+# the probe: the null first (its margins committed), then the candidates (q_power.csv)
+$B --study q --threads 1 --results $R val --effect E --split probeq --current FILE --null --prefix q_probe
+$B --study q --threads 1 --results $R val --effect E --split probeq --current FILE --cand NAME=F,... --null --prefix q_probe
+# validation and the test, by the committed rule (q_rule.csv); the chosen file frozen first (jobs/freeze.sh)
+$B --study q --threads 2 --results $R --rule $R/q_rule.csv val --effect E --split valq --current FILE --cand NAME=F,... --prefix q_val
+$B --study q --threads 1 --results $R --rule $R/q_rule.csv test --effect E --current FILE --cand NAME=$D/q_fix/models/E.nvfx --frozen $R/q_frozen.csv
+# figures
+q_fix/bin/nvfx_fix_q3 strip --model CURRENT --also rf=NEW --controls 0.5,0.5,0.5 --size 256 --times 0,0.033,0.167,0.333,0.5,1 --seed 33465001 --out F.png
+```
+
+The results depend on nothing but the seeds and the files (the validation ran on 2 threads, the probe on 1: every run and
+every play is its own job, so the thread count changes no number: two of the avalanche's probe settings computed again
+from nothing on 2 threads give its tracking and statistics to the last digit; the renderer refits ran on 1 thread, which
+does matter there).
