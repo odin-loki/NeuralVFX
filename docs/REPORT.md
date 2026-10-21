@@ -4188,7 +4188,13 @@ smoke video stays. Study hres's smoke (on main) is a finer model of study N's pr
 the natural next step joins the two (STUDY_R.md §6.2): hres's finer state trained on `smoke_r`, and a loss on the
 plume's spread.
 
-**Checks** (on the merge with origin/main 6c87b29): being run.
+**Checks** (on the merge with origin/main 6c87b29, the last main; 373829d was merged earlier, with study hres's
+changes to `tools/nvfx_3d.cpp` kept beside study R's): the full build with warnings as errors; the full ctest, 547 of
+547 (main's 541, study R's five 3D tests and `Smoke3dShippedModel`, which ran: the frozen file, through the volume API,
+10 s at three winds within the calibrated bounds), none skipped; `nvfx_alloc_test` (no allocation per frame; the volume
+on 1 and 3 threads, 0 allocations in 84 frames each); `nvfx_gallery --check --require-models` (234 effects, 234
+played, 0 failed); the Godot test (`engines/godot/test.sh`: the fireball and the library stage, 0 failures each);
+`models/restore.sh` against the data root (0 placed, 76 already there, 0 different).
 
 ## 21. Study Q: the weak spots of rounds 9 and 10, fixed and measured
 

@@ -10,7 +10,7 @@ under a rule committed before validation (§2 onwards).
 
 ## 0. Where the study stands (a handoff, kept current)
 
-As of 21 October 2026, 15:00 UTC: **finished**; nothing is running.
+As of 21 October 2026, 14:45 UTC: **finished**; nothing is running.
 - The teacher fixed and measured against plume theory (§1, with the buoyancy budget that closed §1.4's open check); the
   rule committed before validation (§2, f269659) and its edge bounds (3c91ff2); training (§3.1); validation and the
   choice of C4 by the rule (§3, aae5dd6), frozen before the test; **the test, run once** (§4): **fails** (the edge
