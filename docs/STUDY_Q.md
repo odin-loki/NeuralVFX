@@ -26,7 +26,7 @@ took it over from the jobs it left running (the data root's `q_fix/jobs/*.sh`, t
 
 | weak spot | stage | committed | running / next |
 |---|---|---|---|
-| avalanche | probe | margins (78ae21b); `ms`, `u30`, `ms_u30` on the probe (6336822) | `u60` training (600 iterations, 60-frame windows), then on the probe (`probe_av2.sh`); then N, validation |
+| avalanche | validation | margins (78ae21b); the four candidates on the probe; N = 60, the cap (§4.6) | `ms`, `u30`, `ms_u30`, `u60` on validation (`val.sh`, 2 threads); then the choice, the freeze, the test |
 | geyser | validation | margins (36514f3); N = 60, the cap (§4.6) | `u30`, `s24`, `s24_u30` on validation (`val.sh`, 2 threads); then the choice, the freeze, the test |
 | haboob's first frame | **stopped at validation** | `rf` meets no rule: its spectrum's interval past its margin (ce134c7) | kept; nothing more |
 | crown and window fires' streaks | **done by eye** (§5.1) | detail settings, frozen hashes, videos (78ae21b, 47b2b0f) | - |
@@ -381,7 +381,32 @@ and the round recorded the same 160 runs, so the cause was not traced; `s24` is 
 by that rule, not the current 8 and 16 more. It is the candidate §4.1 names in every other respect and is validated as
 it is.
 
-**The avalanche.** (After `u60` has been played on the probe.)
+**The avalanche.** The null moves its spectrum distance at a setting by 0.024 (RMS), its motion by 16% (|ln motion
+ratio| 0.163), its coverage distance by 0.0075 and its mean frame by 1.98 dB: margins tracking -0.20 dB at each horizon,
+spectrum **+0.0237**, |ln motion ratio| **+0.163**, coverage **+0.0075**, emission **+0.0001** (study K's), mean frame
+**-1.98 dB**. On the probe (the four candidates, `u60` played after its training ended; q_power.csv):
+- `ms` (SHA-256 `be39b93f68d8e1051d45bc58828f0203fb9072fe9bd82f46fa29ccda82bafd4a`): the same frames from a true state
+  (the mean state moves a start at its own controls by nothing); in endless play its motion error -0.131 [-0.213, -0.057]
+  and coverage distance -0.0033 [-0.0065, -0.0004] better, the mean frame +0.58 [-0.01, +1.16] (a tie), the spectrum
+  distance worse, +0.0235 [+0.0108, +0.0366], its interval's end past its margin (+0.0237): better on no target.
+- `u30` (`d6161c1d09116e2b00a959011192de85c20378a815623ff5c3249fc49013ec67`): tracking at 1 s **+0.29 dB [+0.12, +0.47]**
+  (a target) and at 2 s +0.65 [+0.44, +0.87], the spectrum distance -0.006 [-0.011, -0.002], the mean frame +0.11 [-0.04,
+  +0.27] (a tie): it meets the rule's form.
+- `ms_u30` (`bcc04822fdcdfd9eaf53694a2594bca5d55fcc2ca5ab930e961a8995ffc985b4`): `u30`'s tracking, the mean frame **+0.80
+  [+0.16, +1.44]** (a target), motion and coverage better as `ms`'s, the spectrum distance +0.016 [+0.003, +0.029], its
+  interval's end past its margin.
+- `u60` (`9ca9d84f7c5f3c0bd18f5126bfade5c8e0eaffb15fce4eac48d13dc537901c2d`): tracking at 1 s **+0.38 [+0.12, +0.65]**,
+  at 2 s +1.06 [+0.82, +1.31] and the mean frame **+0.27 [+0.02, +0.53]** (both targets better), the spectrum distance
+  -0.007 [-0.012, -0.003]; but the first frame -0.35 [-0.49, -0.22], past its margin (-0.20): the long windows trade the
+  first frames for the later ones.
+
+The number of settings: tracking at 2 s, which every fine-tune improves but which is no candidate's target, spreads with
+an SD of 0.71 to 0.81 dB between settings: if truly unchanged it would pass its margin with probability 0.48 to 0.62 at
+60 settings by resampling and needs 162 to 215 in the normal form; `u60`'s first frame needs 62 there, `ms`'s spectrum
+41. The cap binds: **N = 60**, at which a candidate whose held measures are truly unchanged and whose improved targets
+are as measured meets the rule's form with probability 0.99 (`ms`), 0.62 (`u30`), 0.60 (`ms_u30`) and 0.45 (`u60`)
+(q_power.csv), stated here before validation. (The probe's rows for `u60` went into git with the dust explosion's
+replacement, 9d77cbf, before this; nothing of the avalanche's validation had run.)
 
 ### 4.7 Validation (the choice)
 
