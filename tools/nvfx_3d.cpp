@@ -90,6 +90,7 @@ fs::path data_root(const Args& a) {
   if (a.has("root")) return a.str("root");
   const char* dir = g_r ? "r_smoke3d" : g_hres ? "hres_3d" : g_n2 ? "n2_3d" : "n_3d";
   if (const char* e = std::getenv("NEURALVFX_DATA")) return fs::path(e) / dir;
+  if (const char* h = std::getenv("HOME")) return fs::path(h) / "nvfx-data" / dir;  // as CMake's default
   return fs::path("/root/nvfx-data") / dir;
 }
 
@@ -2200,7 +2201,8 @@ std::map<std::string, EdgeVerdict> edge_verdicts_r(const fs::path& csv, const fs
 int check(const Args& a) {
   const fs::path root = data_root(a);
   const fs::path model = a.has("model") ? fs::path(a.str("model")) : root / "models" / "chosen.nvfx3";
-  if (!fs::exists(model)) {
+  std::error_code ec;  // a data root that cannot be read (as /root on a CI runner) counts as no model
+  if (!fs::exists(model, ec)) {
     std::println("skipped: no model at {}", model.string());
     return 77;
   }
