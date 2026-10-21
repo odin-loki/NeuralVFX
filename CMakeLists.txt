@@ -553,6 +553,14 @@ if(NEURALFX_BUILD_TESTS)
                      --keyframes ${CMAKE_CURRENT_BINARY_DIR}/library_air_keyframes --verify ${CMAKE_CURRENT_SOURCE_DIR}/results/library/frozen_air.csv --threads 2
                      --precision float --isa avx2)
     set_tests_properties(neuralfx.LibraryAirKeyframesFrozen PROPERTIES LABELS "neuralfx;data" SKIP_RETURN_CODE 77 TIMEOUT 1200)
+    # Round 10's fire entries (docs/EFFECTS_FIRE2.md, library/fire2.nvfxl) against their SHA-256 in
+    # results/library/frozen_fire2.csv, float pinned as above; skipped without those models in NEURALFX_MODELS_LIBRARY.
+    add_test(NAME neuralfx.LibraryFire2KeyframesFrozen
+             COMMAND nvfx_gallery --library ${CMAKE_CURRENT_SOURCE_DIR}/library --models ${NEURALFX_MODELS_LIBRARY}
+                     --only crown_fire,window_fire,dust_explosion
+                     --keyframes ${CMAKE_CURRENT_BINARY_DIR}/library_fire2_keyframes --verify ${CMAKE_CURRENT_SOURCE_DIR}/results/library/frozen_fire2.csv --threads 2
+                     --precision float --isa avx2)
+    set_tests_properties(neuralfx.LibraryFire2KeyframesFrozen PROPERTIES LABELS "neuralfx;data" SKIP_RETURN_CODE 77 TIMEOUT 1200)
     # The third round's entries (docs/LIBRARY.md §10) against their SHA-256 in results/library/frozen_round3.csv, float
     # pinned as above: the procedural ones need no data; those that also play learned models are skipped without them.
     # The procedural ones play no learned model, and the compositor gives the same bits on every ISA, so they need no

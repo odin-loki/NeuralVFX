@@ -16,6 +16,21 @@ effect window_fx = "windowfire.nvfx"       # intensity (the room fire's size), w
 effect dust_fx   = "dustexplosion.nvfx"    # plays once (4 s), 16 start points and a mean state: intensity (the cloud's
 #                                            size), ignition (0 its left end, 0.5 its middle, 1 its right end), turbulence
 
+# A dust explosion drawn by the field shader (its own renderer gives the unlit cloud blue-green fringes and draws its pall
+# faint): the fireball's heat as a brown-orange glow, the dust tan and lit by the scene, so the pall it leaves reads.
+look dust_blast = shader, heat_scale 3.2, emission 1.4, emission_power 2, soot_density 3.2, soot_albedo 0.55, sky 0.4,
+                  shadow 0.35, scene_light 1.0, relief 1, tint (0.86, 0.7, 0.5)
+# The same, the dust dark (coal dust).
+look coal_blast = like dust_blast, soot_albedo 0.25, tint (0.55, 0.5, 0.46)
+
+# A crown fire drawn by the field shader: its flames' heat as light, its smoke column grey-brown and lit by the scene
+# (its own renderer draws the column thin and dark, with green fringes); the warm column under heat 0.4 gives no light.
+look forest_fire = shader, heat_scale 1.6, emission 2.4, emission_power 3, soot_density 2.6, soot_albedo 0.3, sky 0.3,
+                   shadow 0.35, scene_light 1.0, relief 1.5, tint (0.8, 0.74, 0.68)
+# A window fire's smouldering room: less light, the smoke as black.
+look smoulder = shader, heat_scale 1.6, emission 1.4, emission_power 3, soot_density 3.4, soot_albedo 0.08, sky 0.2,
+                shadow 0.3, scene_light 0.8, relief 1.5, tint (0.6, 0.58, 0.56)
+
 # --- crown fire ---------------------------------------------------------------------------------------------------------
 
 entry crown_fire, category fire, size 640 x 640, anchor base, loop, show 3,
@@ -23,7 +38,7 @@ entry crown_fire, category fire, size 640 x 640, anchor base, loop, show 3,
 param intensity = 0.6, range (0.2, 1), about "how fierce it burns"
 param wind = 0.65, range (0, 1), about "0.5 still air; less to the left, more to the right"
 module crown = crown_fx, size 128, width 640 * scale, at (X, Y), sink 0.02, feather 0.15, start 0, seed 2630001,
-               controls (0.6, 0.65, 0.5), intensity intensity, wind wind
+               controls (0.6, 0.65, 0.5), intensity intensity, wind wind, look forest_fire
 emit embers, on crown, tries 2, chance 0.5, spread 260 * scale
 field warmth = lamp, at (X, Y - 220 * scale), radius 520 * scale, strength 0.4 + 0.4 * intensity, colour (1, 0.5, 0.2)
 
@@ -32,11 +47,11 @@ entry forest_fire_front, category fire, size 1500 x 760, anchor base, loop, show
 param intensity = 0.8, range (0.4, 1), about "how fierce it burns"
 param wind = 0.8, range (0.5, 1), about "how hard the wind blows (to the right)"
 module a = crown_fx, size 128, width 760 * scale, at (X - 420 * scale, Y), sink 0.02, feather 0.18, start 0, seed 2630011,
-           controls (0.8, 0.8, 0.5), intensity 0.95 * intensity, wind wind
+           controls (0.8, 0.8, 0.5), intensity 0.95 * intensity, wind wind, look forest_fire
 module b = crown_fx, size 128, width 760 * scale, at (X, Y), sink 0.02, feather 0.18, start 3, seed 2630012,
-           controls (0.8, 0.8, 0.55), intensity intensity, wind wind
+           controls (0.8, 0.8, 0.55), intensity intensity, wind wind, look forest_fire
 module c = crown_fx, size 128, width 760 * scale, at (X + 420 * scale, Y), sink 0.02, feather 0.18, start 5, seed 2630013,
-           controls (0.8, 0.8, 0.5), intensity 0.9 * intensity, wind wind
+           controls (0.8, 0.8, 0.5), intensity 0.9 * intensity, wind wind, look forest_fire
 emit embers, on a, b, c, tries 2, chance 0.5, spread 300 * scale
 field warmth = lamp, at (X, Y - 240 * scale), radius 900 * scale, strength 0.5 + 0.4 * intensity, colour (1, 0.5, 0.2)
 emit ash, in (X - 750 * scale, Y - 760 * scale), size 1500 * scale x 760 * scale, density 0.6 * intensity, wind (160 * scale, 10 * scale)
@@ -45,7 +60,7 @@ entry torching_trees, category fire, size 420 x 520, anchor base, loop, show 3,
       about "Torching trees: a few crowns burning in still air, each its own tall flame, a column of smoke going straight up (the crown fire model, low)"
 param intensity = 0.2, range (0, 0.5), about "how fierce they burn"
 module crown = crown_fx, size 128, width 480 * scale, at (X, Y), sink 0.02, feather 0.15, start 0, seed 2630021,
-               controls (0.2, 0.5, 0.4), intensity intensity, wind 0.5, turbulence 0.4
+               controls (0.2, 0.5, 0.4), intensity intensity, wind 0.5, turbulence 0.4, look forest_fire
 emit embers, on crown, tries 1, chance 0.35, spread 140 * scale
 field warmth = lamp, at (X, Y - 140 * scale), radius 320 * scale, strength 0.45, colour (1, 0.52, 0.22)
 
@@ -54,7 +69,7 @@ entry distant_forest_fire, category fire, size 520 x 560, anchor base, loop, sho
 param intensity = 0.7, range (0.3, 1), about "how fierce it burns"
 param wind = 0.6, range (0, 1), about "0.5 still air; less to the left, more to the right"
 module crown = crown_fx, size 128, width 560 * scale, at (X, Y), sink 0.02, feather 0.12, start 4, seed 2630031,
-               controls (0.7, 0.6, 0.5), intensity intensity, wind wind
+               controls (0.7, 0.6, 0.5), intensity intensity, wind wind, look forest_fire
 field warmth = lamp, at (X, Y - 80 * scale), radius 300 * scale, strength 0.3, colour (1, 0.5, 0.2)
 
 # --- window fire --------------------------------------------------------------------------------------------------------
@@ -85,7 +100,7 @@ entry smoking_window, category smoke, size 260 x 340, anchor base, loop, show 3,
       about "A smoking window: a fire smouldering in a room, the window glowing dull red, flames licking at its top and thick black smoke pouring up the wall (the window fire model, low)"
 param intensity = 0.1, range (0, 0.4), about "how big the fire in the room"
 module window = window_fx, size 128, width 340 * scale, at (X, Y), sink 0.094, feather 0.12, start 0, seed 2630061,
-                controls (0.1, 0.5, 0.3), intensity intensity, wind 0.5, turbulence 0.3
+                controls (0.1, 0.5, 0.3), intensity intensity, wind 0.5, turbulence 0.3, look smoulder
 field warmth = lamp, at (X, Y - 30 * scale), radius 160 * scale, strength 0.35, colour (1, 0.45, 0.18)
 
 # --- dust explosion -----------------------------------------------------------------------------------------------------
@@ -95,7 +110,7 @@ entry dust_explosion, category explosions, size 520 x 460, anchor base, once 4.2
 param size = 0.6, range (0.2, 1), about "how big the dust cloud"
 param ignition = 0.2, range (0, 1), about "where it is lit: 0 the cloud's left end, 0.5 its middle, 1 its right end"
 module blast = dust_fx, size 128, width 520 * scale, at (X, Y), sink 0.02, feather 0.12, start 0, seed 2630071,
-               controls (0.6, 0.2, 0.5), intensity size, ignition ignition, opacity 1 - smooth((t - 3.6) / 0.6)
+               controls (0.6, 0.2, 0.5), intensity size, ignition ignition, look dust_blast, opacity 1 - smooth((t - 3.6) / 0.6)
 let burn = smooth(t / 0.3) * exp(-t / 1.2)
 field fireball = lamp, at (X, Y - 120 * scale), radius 420 * scale, strength 1.2 * burn, colour (1, 0.55, 0.2)
 light flash (0.35 * burn, 0.25 * burn, 0.12 * burn)
@@ -104,7 +119,7 @@ entry mill_explosion, category explosions, size 760 x 640, anchor base, once 4.5
       about "A mill's dust explosion: flour dust lit in its middle flashes through the cloud, a huge fireball bursts out with a shock, debris and burning embers, and a pall of dust hangs over the wreck (the dust explosion model at its largest)"
 param power = 1, range (0.6, 1), about "how big the cloud and the blast"
 module blast = dust_fx, size 128, width 760 * scale, at (X, Y), sink 0.02, feather 0.12, start 0, seed 2630081,
-               controls (1, 0.5, 0.6), intensity power, ignition 0.5, turbulence 0.6, opacity 1 - smooth((t - 3.8) / 0.7)
+               controls (1, 0.5, 0.6), intensity power, ignition 0.5, turbulence 0.6, look dust_blast, opacity 1 - smooth((t - 3.8) / 0.7)
 let burn  = smooth(t / 0.25) * exp(-t / 1.3)
 let flash = smooth(t / 0.15) * exp(-t / 0.45)
 light flash (0.9 * flash * power, 0.65 * flash * power, 0.35 * flash * power)
@@ -118,6 +133,6 @@ entry mine_dust_blast, category explosions, size 760 x 360, anchor base, once 4.
       about "A coal-dust blast in a mine gallery: lit at one end, the flame races along the dust cloud from left to right, then a dark pall fills the gallery (the dust explosion model lit at its end, its dust drawn dark)"
 param size = 0.5, range (0.2, 0.8), about "how big the dust cloud"
 module blast = dust_fx, size 128, width 760 * scale, at (X, Y), sink 0.02, feather 0.12, start 0, seed 2630091,
-               controls (0.5, 0, 0.5), intensity size, ignition 0, opacity 1 - smooth((t - 3.6) / 0.6)
+               controls (0.5, 0, 0.5), intensity size, ignition 0, look coal_blast, opacity 1 - smooth((t - 3.6) / 0.6)
 let burn = smooth(t / 0.3) * exp(-t / 1.2)
 field fireball = lamp, at (X, Y - 80 * scale), radius 420 * scale, strength 1.0 * burn, colour (1, 0.55, 0.2)
