@@ -123,6 +123,96 @@ turbulence 0 and 1 at intensity 0.5 (4 seeds each; the control's range); the tal
 the wind-bent plume (§1.6). 1 world unit is taken as a metre for the optics only (warm smoke at 293 K + 98 K per unit
 of heat, the buoyancy read as g dT / T); MTT's laws need no units.
 
+### 1.4 Results: the plume in still air
+
+All fits over **24 to 92 cells** above the floor: by §1.3's rule, both larger boxes agree with the study's box within
+5% (the intervals of the ratios of W and b_w) up to the top of the box (95.5 cells, rounded down to 92; §1.5). Full
+tables: `results/3d/r/plume_fit.md` (and `plume_profiles.csv`, every pooled profile); 10,000 resamples of the runs.
+
+| | intensity 0.2 | intensity 0.5 | intensity 0.8 | MTT, or the measured band |
+|---|---|---|---|---|
+| runs (seeds) | 5 | 5 | 5 | |
+| buoyancy flux F (cells^4/s^3) | 28,700 [26,500, 30,900] | 48,200 [42,500, 52,500] | 76,200 [74,200, 78,100] | |
+| **F's exponent with height** | **+0.03 [-0.03, +0.10]** | **+0.02 [-0.03, +0.08]** | **-0.00 [-0.06, +0.05]** | **0 (conserved)** |
+| spreading rate beta = db_w/dz | 0.128 [0.118, 0.138] | 0.126 [0.113, 0.147] | 0.120 [0.109, 0.133] | (6/5) alpha |
+| **alpha, top-hat** | **0.151 [0.139, 0.162]** | **0.149 [0.133, 0.173]** | **0.141 [0.129, 0.157]** | **0.10 to 0.16** (Carazzo et al.; the brief: 0.08 to 0.12) |
+| alpha, Gaussian | 0.107 [0.099, 0.115] | 0.105 [0.094, 0.122] | 0.100 [0.091, 0.111] | 0.071 to 0.113 |
+| virtual origin z0 (cells; the burner's top is at 4.7) | -7.3 [-10.0, -5.0] | -10.6 [-16.5, -3.7] | -17.6 [-21.5, -13.8] | |
+| **centreline velocity's exponent** | **-0.36 [-0.40, -0.32]** | **-0.45 [-0.51, -0.37]** | **-0.41 [-0.43, -0.39]** | **-1/3** |
+| **centreline buoyancy's exponent** (the soot's is the same) | **-1.58 [-1.71, -1.45]** | **-1.51 [-1.62, -1.42]** | **-1.67 [-1.74, -1.60]** | **-5/3** |
+| z0 from W^-3 / from G^-3/5 (cells) | -4.7 / -8.4 | +4.6 / -15.6 | -3.6 / -16.1 | both = z0 |
+| lambda = b_g / b_w | 1.02 | 0.98 | 1.01 | 1 in MTT's form; 1.1 to 1.2 measured |
+| W (z - z0)^(1/3) / F^(1/3), against MTT's at the fitted alpha | 2.56 (MTT 3.88) | 2.67 (3.91) | 2.75 (4.05) | |
+| G (z - z0)^(5/3) / F^(2/3), against MTT's | 8.4 (10.0) | 8.8 (10.2) | 9.2 (10.9) | |
+| flux-balance Gamma, lowest / highest heights | 3.0 / 3.7 | 2.5 / 3.7 | 2.8 / 3.5 | 1 for a pure plume |
+| momentum budget dM/dz over the plane's buoyancy | 0.78 [0.74, 0.83] | 0.78 [0.74, 0.81] | 0.79 [0.74, 0.84] | 1 |
+
+**Across the source strengths**, the slope of ln (W (z - z0)^(1/3)) against ln F is **0.41 [0.33, 0.48]**: MTT's 1/3
+lies just inside the interval.
+
+What it says, plainly:
+- **The buoyancy flux is conserved** up the plume at every source strength (the exponent within 0.03 of 0, every
+  interval covering 0). This is the property study N's preset broke by a factor of three, and what makes the rest of
+  the comparison meaningful.
+- **The plume spreads linearly at the measured rate for pure plumes**: top-hat alpha 0.14 to 0.15, inside Carazzo et
+  al.'s band of 0.10 to 0.16 and above the 0.08 to 0.12 the brief quoted. The spreading slows a little with source
+  strength (0.151 to 0.141), within the intervals.
+- **The power laws hold roughly, not exactly.** The centreline velocity falls as (z - z0)^-0.36 to -0.45 (MTT: -1/3; the
+  interval excludes it at intensities 0.5 and 0.8), the centreline buoyancy and the soot as -1.51 to -1.67 (MTT: -5/3;
+  the interval excludes it at 0.5 only). The three ways of finding the virtual origin disagree by 10 to 20 cells (from
+  the width about -7 to -18; from W^-3 about 0; from G^-3/5 about -8 to -16), which a self-similar plume would not do;
+  and with the origin fitted freely the velocity's exponent and origin trade off over a range this short (at intensity
+  0.5, -0.38 with an interval from -2.8 to -0.2, `plume_fit.md`).
+- **The velocity is too slow for its buoyancy flux, by about a third.** At the fitted alpha MTT's centreline velocity
+  constant is 3.9 to 4.1; ours is 2.6 to 2.75. The flux-balance parameter stays at 2.5 to 3.7 instead of approaching 1 (a
+  "lazy" plume, short of momentum), and **the plume gains only 0.78 to 0.79 of the vertical momentum its buoyancy should
+  give it**. The likeliest cause is the semi-Lagrangian velocity step's numerical dissipation. MacCormack velocity, which
+  would have reduced it, was unstable (§1.2). This is the solver's main departure from MTT, and it is not fixed.
+- **The box is short for a plume.** The fits span (z - z0) from about 30 to 110 cells, 2 to 6 burner diameters, where
+  laboratory plumes are still on their way to self-similarity (Carazzo et al.). Some of the departure is that; the
+  momentum budget is not: it is wrong at every height.
+
+### 1.5 Where the box matters
+
+The study's box (64 x 96 x 64) against one two thirds taller (64 x 160 x 64) and one half as wide again (96 x 96 x 96,
+the same cells per unit), intensity 0.5, 4 seeds each (`results/3d/r/plume_box_*.csv`); ratios of the pooled profiles,
+the study's box over the larger:
+- **The top does not matter below about 86 cells.** W agrees within 6% and b_w within 4% up to 82 cells (point
+  estimates; the intervals are about +-15%, from the seeds' spread of F), then the study's plume slows and narrows by 4 to
+  7% in its last 10 cells. In the taller box the exponents move towards MTT's (velocity -0.36 [-0.41, -0.32], buoyancy -1.54), alpha
+  0.148.
+- **The sides matter a little at every height.** In the wider box the study's plume is 4 to 6% narrower from 14 cells
+  up (b_w ratio 0.95 to 0.97, its interval clear of 1 at 26 to 35 cells), its centreline 2 to 8% faster and its
+  centreline buoyancy 5 to 18% higher (the intervals reaching 1): a 32-cell half-width constrains the air the plume
+  draws in. In the wider box the buoyancy's exponent is -1.74 [-1.82, -1.67], within 0.01 of MTT's -5/3, and alpha
+  0.144 [0.137, 0.153].
+- By the rule fixed before (§1.3: the intervals of W and b_w within reach of 5%), the box agrees to the top, so the fits
+  above span 24 to 92 cells. The point estimates say more precisely: **trust the profiles to about 85 cells, and expect
+  the width and the centreline buoyancy to be off by about 5 and 10 to 15% for the sides.**
+
+### 1.6 The wind-bent plume
+
+`smoke_r` at winds 0.75 and 1.0 (towards +x), intensity 0.5, in the wider box with the burner a quarter of the way
+across (72 cells of room downwind), 3 seeds of 12 s each; the plume's path is the height of the soot's centroid in
+each column (summed over depth), fitted from 8 to 56 cells downwind against **Briggs's two-thirds law**, z = 1.6 (F /
+pi)^(1/3) x^(2/3) / U, with F from the still plume (48,200) and U the preset's wind speed:
+
+| wind | U (cells/s) | the plume's mean horizontal speed | exponent (Briggs: 2/3) | coefficient (Briggs: 1.6) |
+|---:|---:|---:|---|---|
+| 0.75 | 17.5 | 7.8 | 0.54 [0.52, 0.57] | 4.3 [4.0, 4.4] |
+| 1.0 | 35.0 | 13.7 | 0.88 [0.84, 0.95] | 5.3 [4.9, 5.6] |
+
+**The two-thirds law does not hold, and for a reason in the solver's model of wind, not in its numerics.** In our solver
+the wind is a drag on smoke towards the wind's speed (`add_forces`: u relaxes to U at a rate of 2 per second times
+min(1, 2 (heat + soot))); the air itself is still. Briggs's plume is carried by moving air and entrains air that already
+moves with U, so it is bent over within a few source diameters. Ours moves at well under half the nominal wind (7.8 and
+13.7 against 17.5 and 35 cells per second: diluted smoke feels less drag, and the air it entrains has no wind in it),
+so it leans rather than bends: at full wind its path is nearly straight (exponent 0.88), and at 0.75 it reaches the top
+of the box by 40 cells downwind, which flattens the fitted path (0.54). Measured against the plume's own speed instead
+of U the coefficient comes to 1.9 and 2.1, nearer Briggs's 1.6. Making the wind a moving ambient (an inflow boundary,
+wind in the air as well as on the smoke) would change the learned models' open edges (study N2's ambient air is still)
+and every 3D effect; it is not done here.
+
 ## 2. The learned smoke: design and rule (written and committed before validation)
 
 Everything in this section was fixed, and committed, before any validation number existed; the edge check's bounds
