@@ -189,8 +189,13 @@ frame 10 dB, the cover five times). Candidates: `u30` (following a run), `s24` (
   the mean frame. Its ragged, torn flame was the calibrated swirl (3), which the library already overrides
   (EFFECTS_AIR.md §4.6); its fringes are its learned renderer's on the learned fields, which the library's look
   (`candlelight`) does not use. Nothing more was changed (§9).
-- **The mushroom** (study O's model) was not taken apart again: study O's diagnosis stands (REPORT §16.7: a stepper that
-  sees the cap's whole life is what is missing) and is left (§9).
+- **The mushroom** (study O's model, 4 runs): its cap's raggedness is not a detail setting (softening, `grow 1` and contrast
+  0 each move the spectrum as shipped from 0.199 to 0.199, 0.356 and 0.321) nor its cover (from the true state 0.086,
+  0.120 and 0.174 of the frame at 1, 2 and 4 s against the real 0.091, 0.118 and 0.163); study O's diagnosis stands (REPORT
+  §16.7: a stepper that sees the cap's whole life) and the cap is left (§9). Found on the way: its renderer on the true
+  fields is 15.0 dB at the first frame, 19.6 at the tenth and 24.2 at the thirtieth (42.4 dB in the mean frame), the
+  weakest first second of any effect taken apart here: the fresh fireball, outside the renderer's samples (§3.5). The
+  library draws the mushroom with a look, so this shows only in its own renderer's frames.
 
 ## 4. The model changes: the plan and the rule (committed before any of their numbers)
 
@@ -227,7 +232,9 @@ played on the probe); then the candidates, whose paired spread fixes **the numbe
 validation and test: the smallest multiple of 10 at which, for every candidate of the effect and every measure that is not
 a target it improves on the probe, a candidate leaving that measure truly unchanged passes its margin with probability at
 least 0.9, by resampling the probe's settings and in the normal form with the SD at the upper end of its one-sided 80%
-interval; at most 60 (if the cap binds, the power at 60 is stated before validation).
+interval; at most 60 (if the cap binds, the power at 60 is stated before validation). Every candidate of §4.1 goes to
+validation (the plan names no selection on the probe, so none is made there; written after the first probe, before any
+validation).
 
 ### 4.3 The rule (its form fixed now; its numbers from the probe, committed before validation)
 
@@ -306,6 +313,31 @@ its margin), motion, coverage and emission no worse: it meets the rule's form. E
 improves passes its margin, if truly unchanged, with probability 1.00 at 10 settings by resampling, and needs at most 5
 in the normal form at the SD's upper 80% bound: **N = 10** (study B's ten held-out settings for the test, study G's ten
 for validation).
+
+**The smoke ring.** The null moves its spectrum distance at a setting by 0.039 (RMS), its motion by 1.9%, its coverage
+distance by 0.00036 and its mean frame by 1.70 dB: margins tracking -0.20 dB, spectrum **+0.0387**, |ln motion ratio|
+**+0.02** (study K's), coverage **+0.00036**, emission **+0.0001**, mean frame **-1.70 dB**. `rf` (SHA-256
+`98f87eaca58c41c5a191f302c529b804813f5512d8b0db4b25b2bfd603555486`) on the probe: the first frame **+3.56 dB [+3.41,
++3.71]**, the spectrum distance **-0.073 [-0.077, -0.070]** (0.717 → 0.643; better), coverage and emission closer, the mean
+frame +0.06 [-0.00, +0.12] (a tie), tracking at 1 s a tie and at 2 s -0.12 [-0.17, -0.07] (worse, within its margin), its
+motion error +0.011 [+0.001, +0.021] (worse, its interval's end just past the margin of +0.02): on the probe it does not
+quite meet the rule's form. The number of settings at which every measure that is not an improved target passes if truly
+unchanged: by resampling 0.95 at 30 settings for tracking at 1 s and the motion; in the normal form at the SD's upper 80%
+bound the motion needs 35: **N = 40**.
+
+### 4.7 Validation (the choice)
+
+Candidate minus current model on study G's validation settings extended to the effect's N, the study's seeds, 8 runs
+pooled per setting, tracking 2 runs per setting ([q_val_compareq.csv](../results/experiments/q_fix/q_val_compareq.csv),
+[q_val_choice.csv](../results/experiments/q_fix/q_val_choice.csv)):
+
+**The haboob (10 settings): none meets the rule.** `rf` is better on both its targets, the first frame **+2.55 dB
+[+2.37, +2.70]** (28.8 → 31.3 dB) and the mean frame **+0.15 [+0.13, +0.17]**, and at 1 and 2 s (+0.21, +0.07), its
+coverage and emission closer; but its detail spectrum distance is worse, +0.013 [+0.006, +0.022] (0.093 → 0.106), and that
+interval's worse end lies past its margin (+0.02). The refit renderer draws the haboob's dust with a little more fine
+structure than the current one (on the probe +0.010 [+0.007, +0.014], within the margin at 40 settings); with 10 settings
+the interval is wider. N was sized for measures a candidate leaves unchanged; a real loss of half the margin's size needs
+more. By the rule the haboob stops at validation and keeps its model; its first frame stays the renderer's weak part.
 
 ## 5. Fixes with no model change
 
