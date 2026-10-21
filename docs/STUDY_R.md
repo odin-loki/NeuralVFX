@@ -204,7 +204,25 @@ What it says, plainly:
 The control's confinement and curl noise set the entrainment: alpha runs from 0.110 (inside the brief's 0.08 to 0.12
 and the compiled band's lower end) to 0.164 (just above the compiled band's 0.16). The stronger the turbulence, the more
 momentum is lost (0.85 to 0.72) and the slower the plume for its flux; at turbulence 1 the buoyancy flux also falls a
-little with height (-0.03, the interval clear of 0; perhaps heat swirled out through the box's sides, not checked). Turbulence 0 is the most MTT-like in its constants and buoyancy law, though its velocity falls fastest.
+little with height (-0.03, the interval clear of 0; the budget below finds why). Turbulence 0 is the most MTT-like in
+its constants and buoyancy law, though its velocity falls fastest.
+
+**The buoyancy budget: where the flux goes** (§1.4's open check, measured after the fits above). The same seeds run
+again with two more sums (`v_t100b`, the four of turbulence 1; `v_i50b`, four of turbulence 0.5's five; the planes'
+fluxes repeat the first runs' to the byte): the buoyancy carried out through the box's four sides in each row, and each
+plane's buoyancy at the first and the last averaged frame (what the box stores over the 16 s). Between the planes at 24
+and 92 cells, as fractions of the flux at 24 (`results/3d/r/plume_budget.md`, 10,000 resamples of the runs):
+
+| turbulence | the planes' flux lost, 24 to 92 | out through the sides | stored in the box | the rest (the numerics) |
+|---:|---|---|---|---|
+| 0.5 | -0.023 [-0.085, +0.020] | 0.005 [0.000, 0.013] | -0.026 [-0.086, +0.011] | -0.003 [-0.004, -0.000] |
+| 1 | 0.034 [0.014, 0.053] | 0.003 [0.001, 0.004] | 0.034 [0.015, 0.053] | -0.003 [-0.003, -0.003] |
+
+**Heat does not leave through the sides** (at most half a percent of the flux) and **the solver neither makes nor
+loses buoyancy above the source** to 0.3%. At turbulence 1 the flux's fall with height is **the box still filling**:
+the warm smoke it spreads sideways is still accumulating between 24 and 92 cells after 6 s of spin-up, in every run (the
+interval clear of 0), and that is the 3.4% the planes lose; at turbulence 0.5 the stored amount ties with zero, and so
+does the flux's change. A longer spin-up would remove it; the plume's laws above are unaffected beyond that 3%.
 
 ### 1.5 Where the box matters
 
