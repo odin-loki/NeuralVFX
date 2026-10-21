@@ -49,8 +49,9 @@ a quiet machine (REPORT §13.11).
   - start from a validated teacher (FDS);
   - snapshot every training stage.
 - **Stage 2, on a PC, much later:** everything below. Accurate 3D simulations of every effect, however long they take,
-  checked against measured physics. Large 3D models trained on them, as fine as the PC allows. Then 3D scenes, a 3D
-  library and a full weather system.
+  checked against measured physics. How the PC's GPU trains it, and which simulators teach it (Houdini, with validated
+  research codes as referees), is planned in [docs/PLAN_PC_GPU.md](docs/PLAN_PC_GPU.md). Large 3D models trained on
+  them, as fine as the PC allows. Then 3D scenes, a 3D library and a full weather system.
 
 First we demo, then we go big.
 
