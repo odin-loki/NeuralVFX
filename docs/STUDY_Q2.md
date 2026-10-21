@@ -214,7 +214,12 @@ Study Q2's range, 33,500,000 to 33,999,999; per run seed base + 100 s + k (setti
 
 ### 4.6 The probe and the rule's numbers (each effect's committed before its validation)
 
-(Filled in as the probe runs.)
+**The binary.** `nvfx_ordered` built (Release, g++ 14) after the quiet machine's marker (21:19 UTC) from adb9404, whose
+tool and trainer code are c6e56e9's (the commits between change only this document): the data root's
+`q2_fix/bin/nvfx_ordered_q2`, SHA-256 `420131ac5e3455943401bda68199660191558cacbc8deb568a48bbe551dd265a`, for the
+candidates, the probe, validation and the test; `nvfx_fix_q2` (`be2d773a...`) for the diagnosis and the figures.
+
+(The rest is filled in as the probe runs.)
 
 ### 4.7 Validation (the choice)
 
