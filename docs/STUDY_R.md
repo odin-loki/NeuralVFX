@@ -227,6 +227,15 @@ Per wind and side:
 **A model passes the edge check if no side runs away (holds too much or grows) at any wind.** This is also the 30 s
 no-runaway check at every wind.
 
+**The bounds, as calibrated and committed before validation** (`results/3d/r/edge_calibration.md`, `edge_bounds.csv`;
+the teacher's rows `edge_teacher.csv`; 20 teacher runs, 21 October 07:20 to 09:32 UTC). The teacher passed its own
+check at every wind and side but one: at a wind of 0.95 one of the four runs sent heat to the z = max side (2.07 at its
+peak, growing from 0.002 to 0.52) where the other three held at most 0.09. Left out, that run would have failed a bound
+made from the other three (2 x 0.09 + 1 = 1.19) and its growth would have tripped C = 0.5, so the rule raised B there to
+2.82 and C to 0.78: that side's bound is 2 x 2.07 + 2.82 = 6.95. This is study N2's lesson in action: one teacher run per
+wind would have set a bound the teacher itself breaks. Every other bound is A = 2 times the four runs' largest plus 1:
+from 1.00 (a side the smoke never reaches) to 9.35 (the downwind side at a wind of 0.05).
+
 The only fixed margins in this rule are these bounds; every other decision below is made by 95% intervals or by ranks,
 so there is nothing else to calibrate.
 

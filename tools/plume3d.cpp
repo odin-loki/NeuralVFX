@@ -286,6 +286,7 @@ namespace {
 struct Pooled {
   int ny = 0, nb = 0, nx = 0;
   std::vector<double> cnt, r, v, g, d, F, Fd, depth_d, depth_u;
+  std::vector<double> M, B;  // per height: the plane's momentum flux (w^2) and buoyancy (g'), time means
 };
 Pooled pool_of(const std::vector<Profile>& runs, const std::vector<int>& pick) {
   Pooled o;
@@ -296,7 +297,7 @@ Pooled pool_of(const std::vector<Profile>& runs, const std::vector<int>& pick) {
   o.cnt = p0.cnt;
   o.r = p0.r;
   for (auto* v : {&o.v, &o.g, &o.d}) v->assign(p0.v.size(), 0.0);
-  for (auto* v : {&o.F, &o.Fd}) v->assign(p0.F.size(), 0.0);
+  for (auto* v : {&o.F, &o.Fd, &o.M, &o.B}) v->assign(p0.F.size(), 0.0);
   for (auto* v : {&o.depth_d, &o.depth_u}) v->assign(p0.depth_d.size(), 0.0);
   const double w = 1.0 / static_cast<double>(pick.size());
   for (const int k : pick) {
@@ -309,6 +310,8 @@ Pooled pool_of(const std::vector<Profile>& runs, const std::vector<int>& pick) {
     for (std::size_t i = 0; i < p.F.size(); ++i) {
       o.F[i] += w * p.F[i];
       o.Fd[i] += w * p.Fd[i];
+      o.M[i] += w * p.M[i];
+      o.B[i] += w * (static_cast<double>(p.kT) * p.heat[i] - static_cast<double>(p.kD) * p.soot[i]);
     }
     for (std::size_t i = 0; i < p.depth_d.size(); ++i) {
       o.depth_d[i] += w * p.depth_d[i];
@@ -350,7 +353,7 @@ Gauss gauss_core(const double* sum, const double* cnt, const double* rsum, int n
 }
 
 struct Lines {
-  std::vector<double> z, wc, bw, gc, bg, dc, bd, F, Fd;
+  std::vector<double> z, wc, bw, gc, bg, dc, bd, F, Fd, M, B;
 };
 Lines lines_of(const Pooled& p) {
   Lines L;
@@ -368,6 +371,8 @@ Lines lines_of(const Pooled& p) {
     L.bd.push_back(d.b);
     L.F.push_back(p.F[zu(y)]);
     L.Fd.push_back(p.Fd[zu(y)]);
+    L.M.push_back(p.M.empty() ? kNaN : p.M[zu(y)]);
+    L.B.push_back(p.B.empty() ? kNaN : p.B[zu(y)]);
   }
   return L;
 }
@@ -416,6 +421,9 @@ struct Fit {
   // w_T = W / 2 (1 for a pure plume, above for a lazy one, below for a forced one): the means of the range's lowest and
   // highest four heights
   double gamma_lo = kNaN, gamma_hi = kNaN;
+  // the momentum budget: dM/dz (central differences of the plane's w^2) over the plane's buoyancy, the mean over the
+  // range (1 if buoyancy alone changes the momentum flux, as in MTT's plume)
+  double momentum = kNaN;
 };
 
 // The exponent p and origin z0 of f = A (z - z0)^p fitted together (z0 on a grid below the range: the least squares
@@ -515,6 +523,16 @@ Fit fit_range(const Lines& L, double lo, double hi) {
   }
   f.Cw_mtt = mtt_cw(f.alpha_g);
   f.Cg_mtt = mtt_cg(f.alpha_g);
+  {
+    double sm = 0;
+    int nm = 0;
+    for (std::size_t i = 1; i + 1 < L.z.size(); ++i) {
+      if (L.z[i] < lo || L.z[i] > hi || !(L.B[i] > 0)) continue;
+      sm += 0.5 * (L.M[i + 1] - L.M[i - 1]) / L.B[i];
+      ++nm;
+    }
+    if (nm > 0) f.momentum = sm / nm;
+  }
   std::vector<double> gam;
   for (std::size_t i = 0; i < z.size(); ++i) {
     const double bt = std::numbers::sqrt2 * bw[i], wt = 0.5 * wc[i];
@@ -648,8 +666,8 @@ int fit(const Args& a, const fs::path& root) {
                    lo, hi, resamples));
   both("| config | runs | controls | F (cells^4/s^3) | F spread | beta (b_w / z) | alpha_G | alpha_T | z0 (cells) | p_w (MTT -1/3) | p_g (MTT -5/3) | "
        "p_soot (-5/3) | p_F (0) | z0 from w^-3 | z0 from g^-3/5 | p_w, z0 free | lambda = b_g / b_w | C_w (MTT at alpha_G) | C_g (MTT at alpha_G) | "
-       "Gamma, lowest / highest heights (pure plume 1) |");
-  both("|---|---:|---|---:|---:|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|");
+       "Gamma, lowest / highest heights (pure plume 1) | dM/dz over buoyancy (1) |");
+  both("|---|---:|---|---:|---:|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|");
   std::ofstream csv(out / a.str("csv", "plume_profiles.csv"));
   csv << "config,z,wc,bw,gc,bg,dc,bd,F,Fd\n";
   std::map<std::string, std::vector<Fit>> boots;
@@ -677,7 +695,7 @@ int fit(const Args& a, const fs::path& root) {
                      fmt(iv(&Fit::beta), 3), fmt(iv(&Fit::alpha_g), 3), fmt(iv(&Fit::alpha_t), 3), fmt(iv(&Fit::z0), 1), fmt(iv(&Fit::pw), 3),
                      fmt(iv(&Fit::pg), 3), fmt(iv(&Fit::pd), 3), fmt(iv(&Fit::pF), 3), fmt(iv(&Fit::z0w), 1), fmt(iv(&Fit::z0g), 1), fmt(iv(&Fit::pw_free), 3),
                      fmt(iv(&Fit::lambda), 2), fmt(iv(&Fit::Cw), 2), f.Cw_mtt, fmt(iv(&Fit::Cg), 2), f.Cg_mtt) +
-         std::format(" {} / {} |", fmt(iv(&Fit::gamma_lo), 2), fmt(iv(&Fit::gamma_hi), 2)));
+         std::format(" {} / {} | {} |", fmt(iv(&Fit::gamma_lo), 2), fmt(iv(&Fit::gamma_hi), 2), fmt(iv(&Fit::momentum), 2)));
   }
   // the source strengths: W (z - z0)^(1/3) against F across configs (MTT: slope 1/3)
   if (a.has("strengths")) {
