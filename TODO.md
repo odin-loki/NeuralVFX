@@ -76,6 +76,18 @@ then merge it into main.
   - Also done: timing (provisional), library/air.nvfxl (12 entries), the crypt scene with frozen keyframes, six videos
     and REPORT §6.17. Still weak: the candle's flame is ragged up close, the ring's fine detail is poor and its first
     frame is off, and the gas streaks.
+- **Round 10, fire** (`effects-fire2`, docs/EFFECTS_FIRE2.md): a forest crown fire (#6), fire venting from a window
+  (#8) and a dust explosion (#31), in 2D. **Finished on its branch** (21 October 2026), waiting to be merged into main.
+  - Done: the three presets with sim and recipe tests (the 27 earlier effects' clips unchanged); the rule committed
+    before any training; each model frozen by SHA-256 and tested once on seeds from 26,000,000 (the dust explosion with
+    study M3's mean state, decided before training).
+  - All three work by the rule. Tracking at 1 s over the coarse simulation with detail: crown fire +2.60 dB [+2.16,
+    +3.04], window fire +3.31 dB [+2.91, +3.73], dust explosion +8.44 dB [+7.88, +9.04]; endless, the mean picture
+    closer than the nearest flipbook's (+1.76, +1.78, +3.15 dB) with motion no worse.
+  - Also done: timing (provisional), library/fire2.nvfxl (10 entries), the forest-edge town scene with frozen keyframes,
+    six videos and REPORT §6.18. Still weak: the two fires' detail streaks (spectrum six times the flipbook's); the dust
+    explosion's renderer fringes its unlit cloud and draws its pall faint, and a cloud lit between the stored start
+    points' sparks starts near one of them (the mean state follows the ignition control only roughly).
 - **Study O, the most visible flaws** (`study-fix`, REPORT §16): **finished and merged into main** (20 October 2026).
   - Done, by eye, with no model change:
     - the waterfall's and rain shaft's banding (the detail layer locking once a frame; effects take `passes N`, and
@@ -108,8 +120,8 @@ then merge it into main.
 - **The detail layer's cost.** It is three quarters of a 3D step and much of a 2D frame at 256 px. Try SIMD and
   skipping empty rows and bricks.
 - **More 2D effects**, from the catalogue rows the 2D solver can carry:
-  - fire and smoke: a forest crown fire (#6), fire out of a window (#8), coloured smoke grenades (#18);
-  - blasts and engines: a dust explosion (#31), contrails (#36), helicopter downwash (#37);
+  - fire and smoke: coloured smoke grenades (#18) (a forest crown fire, #6, and fire out of a window, #8: round 10);
+  - blasts and engines: contrails (#36), helicopter downwash (#37) (a dust explosion, #31: round 10);
   - weather: blizzard and drifting snow (#54, #75), steam fog (#61), a haboob or sandstorm wall (#70, #71), sea spray
     (#77);
   - water and volcanic: a geyser (#88), a pyroclastic flow (#110).
@@ -737,6 +749,8 @@ Ranges already used elsewhere:
 - 5.3 to 5.9 million: studies G, K and L;
 - 3.0 to 3.5 million: study O; 3.6 to 3.9 million: study P;
 - 6.0 to 6.8 million: round 9's effects (earth 6.0 to 6.4, air 6.4 to 6.8); 6.9 million: an earlier smoke test;
+- 26 million: round 10's fire effects (the test 26,000,000 to 26,150,999; the library's and the scene's module seeds,
+  which a script takes only up to 2^24, are 2,630,001 and up);
 - 7 million: water;
 - 8 million: studies M, M2 and M3.
 
