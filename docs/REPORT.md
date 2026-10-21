@@ -4132,7 +4132,7 @@ fresh seeds, and it replaces a shipped model only if it passes.
 
 ### 21.1 What the taking apart found
 
-`nvfx_fix parts`, on training runs (STUDY_Q.md §3): one part at a time swapped (the
+With `nvfx_fix parts` on training runs (STUDY_Q.md §3), one part at a time swapped (the
 runtime as shipped; the learned stepper from a run's true state, drawn by the learned renderer and by the simulator's; the
 true coarse states moving the detail layer; the learned renderer on the true fields), measured over the whole frame:
 - **The avalanche's weakness is its stepper and its start points.** From the true state the learned cloud has 86% and
@@ -4255,4 +4255,12 @@ could fix (STUDY_Q.md §9).
 
 ### 21.7 Checks
 
-(After merging main, before the final push.)
+After merging main at 458aaab (still main's head at the end): the full build with warnings as errors
+(`-DNEURALFX_WERROR=ON`); the full ctest, **541 of 541**, none skipped, with the moved links (the frozen tests that play
+each replaced file had passed before: with private copies of the model folders holding the new files for the dust
+explosion and the mushroom, and `LibraryKeyframesFrozen` and the pack's after the avalanche's links moved);
+`nvfx_alloc_test` (no allocation per frame; the volume on 1 and 3 threads, 0 allocations in 84 frames each);
+`nvfx_gallery --check --require-models` over the whole library with its models (234 effects, 234 played, 0 failed); the
+Godot test (`engines/godot/test.sh`: the fireball and the library stage, 0 failures each); `models/restore.sh` against
+the data root (0 placed, 75 already there, 0 different). README's test count is 541 (main's 539, main's new 3D test and
+`Script.AnEffectsSoftenSmoothsItsDetailLayer`).

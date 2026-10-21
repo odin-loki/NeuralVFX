@@ -21,7 +21,7 @@ checkq`, `test`). Every file is under the data root's `q_fix` (outside git); tab
 
 ## 0. Where the study stands (handoff)
 
-Final (21 October 2026, 14:00 UTC). One agent began the study and was stopped at 11:10 UTC; a second took it over from
+Final (21 October 2026, 14:10 UTC). One agent began the study and was stopped at 11:10 UTC; a second took it over from
 the jobs it left running (the data root's `q_fix/jobs/*.sh`, their markers `jobs/*.done`, logs `q_fix/logs/`), killed
 none and finished it: at the handoff the avalanche's `u60` was training, the smoke ring's validation, the dust
 explosion's and the geyser's null probes were running and their candidates' probes waiting; the haboob had stopped at
@@ -795,7 +795,15 @@ does matter there).
 
 ## 8. Checks
 
-(After merging main, before the final push; written below when they have run.)
+After merging main at 458aaab (still main's head at the end): the full build with warnings as errors
+(`-DNEURALFX_WERROR=ON`); the full ctest, **541 of 541**, none skipped, with the moved links (the frozen tests that play
+each replaced file had passed before: with private copies of the model folders holding the new files for the dust
+explosion and the mushroom, and `LibraryKeyframesFrozen` and the pack's after the avalanche's links moved);
+`nvfx_alloc_test` (no allocation per frame; the volume on 1 and 3 threads, 0 allocations in 84 frames each);
+`nvfx_gallery --check --require-models` over the whole library with its models (234 effects, 234 played, 0 failed); the
+Godot test (`engines/godot/test.sh`: the fireball and the library stage, 0 failures each); `models/restore.sh` against
+the data root (0 placed, 75 already there, 0 different). README's test count is 541 (main's 539, main's new 3D test and
+`Script.AnEffectsSoftenSmoothsItsDetailLayer`).
 
 ## 9. What is left
 
