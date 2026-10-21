@@ -7,7 +7,9 @@
 // the reference's fields to the bit on every ISA). Study N2 (§14): ambient air at
 // the open sides and top of the coarse advection (what flows in, the reference against the trainer, gradients through
 // it with inflow at every side and the top, study N's clamped files unchanged), controls that change during a run (the
-// simulator's, the runs' format, gradients with them) and the long training stage (resumes to the bit).
+// simulator's, the runs' format, gradients with them) and the long training stage (resumes to the bit). Study R
+// (docs/STUDY_R.md): the validated smoke's solver (the flux form keeps what it carries; the buoyancy flux is the same up
+// the plume; the same fields on any number of threads), warm smoke's optics, runs that keep their effect.
 #include <neuralfx/nvfx_volume.h>
 #include <neuralfx/render3d.hpp>
 #include <neuralfx/rollout3d.hpp>
@@ -113,6 +115,144 @@ TEST(Sim3d, StateRoundTrips) {
   b.step_frame();
   EXPECT_EQ(a.state().temp, b.state().temp);
   EXPECT_EQ(a.state().v, b.state().v);
+}
+
+// --- study R (docs/STUDY_R.md): the validated smoke ---------------------------------------------------------------
+
+nfx::sim3d::Params small_smoke(int threads, int scalars = -1) {
+  nfx::sim3d::Params p;
+  p.effect = nfx::sim3d::Effect::smoke_r;
+  p.width = 32;
+  p.height = 48;
+  p.intensity = 0.5f;
+  p.wind = 0.5f;
+  p.turbulence = 0.5f;
+  p.seed = 29'099'100;
+  p.threads = threads;
+  p.scalars = scalars;
+  return p;
+}
+
+TEST(Sim3d, SmokeRSameFieldsOnAnyNumberOfThreads) {
+  nfx::sim3d::Params p1 = small_smoke(1), p3 = small_smoke(3);
+  p1.width = p3.width = 16;
+  p1.height = p3.height = 24;
+  nfx::sim3d::Fluid a(p1), b(p3);
+  for (int f = 0; f < 6; ++f) {
+    a.step_frame();
+    b.step_frame();
+  }
+  EXPECT_EQ(a.state().temp, b.state().temp);
+  EXPECT_EQ(a.state().soot, b.state().soot);
+  EXPECT_EQ(a.state().v, b.state().v);
+  // and a state restored into another solver goes on the same way (the flux form's sweep order follows the frame)
+  nfx::sim3d::Fluid c(p1);
+  c.set_state(a.state());
+  a.step_frame();
+  c.step_frame();
+  EXPECT_EQ(a.state().temp, c.state().temp);
+  EXPECT_EQ(a.state().soot, c.state().soot);
+}
+
+// The flux form neither makes nor loses soot: with the burner far below and nothing reaching the box's sides or top in
+// a few frames, a blob of soot carried by a swirling, rising flow keeps its total to float rounding (the MacCormack form
+// changes it by about 1e-4 here).
+TEST(Sim3d, FluxFormKeepsTheSootItCarries) {
+  const auto total_after = [](int scalars) {
+    nfx::sim3d::Params p = small_smoke(2, scalars);
+    nfx::sim3d::Fluid f(p);
+    nfx::sim3d::State s = f.state();
+    double before = 0;
+    for (int y = 0; y < s.ny; ++y) {
+      for (int z = 0; z < s.nz; ++z) {
+        for (int x = 0; x < s.nx; ++x) {
+          const std::size_t i = (zu(y) * zu(s.nz) + zu(z)) * zu(s.nx) + zu(x);
+          const float dx = fl(x) - 15.5f, dy = fl(y) - 30.f, dz = fl(z) - 15.5f;
+          s.soot[i] = std::exp(-(dx * dx + dy * dy + dz * dz) / 18.f);
+          s.u[i] = 6.f * dz / 8.f;  // a swirl about the vertical axis and a slow rise
+          s.w[i] = -6.f * dx / 8.f;
+          s.v[i] = 3.f;
+          if (y >= 14) before += s.soot[i];
+        }
+      }
+    }
+    f.set_state(s);
+    for (int k = 0; k < 3; ++k) f.step_frame();
+    const auto t = f.state();
+    double after = 0;
+    for (int y = 14; y < t.ny; ++y) {
+      for (int i = 0; i < t.nx * t.nz; ++i) after += t.soot[zu(y * t.nx * t.nz + i)];
+    }
+    return after / before;
+  };
+  const double flux = total_after(1), mac = total_after(0);
+  EXPECT_NEAR(flux, 1.0, 2e-6) << "the flux form keeps the soot (MacCormack: " << mac << ")";
+}
+
+// Study R's physics in small: in still air the smoke's buoyancy flux through a horizontal plane is the same at every
+// height of the plume (Morton, Taylor and Turner), to within 10% from 12 to 40 of the box's 48 cells.
+TEST(Sim3d, SmokeRKeepsItsBuoyancyFluxUpThePlume) {
+  nfx::sim3d::Fluid f(small_smoke(3));
+  const int nx = f.nx(), ny = f.ny(), nz = f.nz();
+  const std::size_t n = zu(nx) * zu(ny) * zu(nz);
+  std::vector<float> T(n), D(n), U(3 * n);
+  std::vector<double> F(zu(ny), 0.0);
+  const auto k = f.buoyancy_coefficients();
+  for (int fr = 0; fr < 300; ++fr) {
+    f.step_frame();
+    if (fr < 120) continue;
+    f.fields(T, D);
+    f.velocity(U);
+    for (std::size_t i = 0; i < n; ++i) F[i / (zu(nx) * zu(nz))] += U[3 * i + 1] * (k[0] * T[i] - k[1] * D[i]);
+  }
+  double lo = 1e300, hi = 0;
+  for (int y = 12; y <= 40; ++y) {
+    lo = std::min(lo, F[zu(y)]);
+    hi = std::max(hi, F[zu(y)]);
+  }
+  EXPECT_GT(lo, 0.0);
+  EXPECT_LT(hi / lo, 1.10) << "the buoyancy flux should not change with height: " << lo << " to " << hi;
+}
+
+TEST(Render3d, WarmSmokeDoesNotGlow) {
+  const int n = 12;
+  rd::Renderer warm(n, n, n, rd::optics_for("smoke3d")), cold(n, n, n, rd::optics_for("smoke3d"));
+  std::vector<float> T(zu(n * n * n), 0.6f), T0(T.size(), 0.f), D(T.size(), 0.f);
+  for (std::size_t i = 0; i < D.size(); ++i) D[i] = i % 7 == 0 ? 0.4f : 0.05f;
+  warm.prepare(T, D);
+  cold.prepare(T0, D);
+  const auto cam = rd::look_at({0.f, 0.5f, 2.f}, {0.f, 0.5f, 0.f}, {0.f, 1.f, 0.f}, 40.f, 1.f);
+  std::vector<std::uint8_t> a(32 * 32 * 4), b(a.size());
+  warm.render(cam, 32, 32, a.data(), 32 * 4);
+  cold.render(cam, 32, 32, b.data(), 32 * 4);
+  EXPECT_EQ(a, b) << "warm smoke's temperature adds no light";
+  EXPECT_GT(*std::max_element(a.begin(), a.end()), 10) << "but the soot scatters the key light";
+  // the fire's optics are unchanged for every other effect name
+  const rd::Optics f = rd::optics_for("fire3d"), d{};
+  EXPECT_EQ(f.kelvin0, d.kelvin0);
+  EXPECT_EQ(f.kelvin_per_unit, d.kelvin_per_unit);
+  EXPECT_EQ(f.flame_extinction, d.flame_extinction);
+}
+
+TEST(Rollout3d, RunsKeepTheirEffect) {
+  nfx::sim3d::Params p = small_smoke(1);
+  p.width = 16;
+  p.height = 24;
+  r3::Hyper h;
+  h.rx = 4;
+  h.ry = 6;
+  h.rz = 4;
+  const r3::Run r = r3::record_run(p, 3, h);
+  const auto f = std::filesystem::temp_directory_path() / "nvfx_test_smoke_r.n3run";
+  ASSERT_TRUE(r3::save_run(f, r));
+  const auto back = r3::load_run(f);
+  ASSERT_TRUE(back);
+  EXPECT_EQ(back->p.effect, nfx::sim3d::Effect::smoke_r);
+  EXPECT_EQ(back->coarse, r.coarse);
+  std::filesystem::remove(f);
+  nfx::sim3d::Effect e{};
+  EXPECT_TRUE(nfx::sim3d::parse_effect("smoke_r", e));
+  EXPECT_EQ(e, nfx::sim3d::Effect::smoke_r);
 }
 
 TEST(Noise4, CurlFieldIsNearlyDivergenceFree) {

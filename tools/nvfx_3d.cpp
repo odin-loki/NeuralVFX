@@ -23,6 +23,7 @@
 //   nvfx_3d choose --split val --cands C2,C3,C4 --edge F.csv        study N2's choice among candidates (§14)
 #include "args.hpp"
 #include "label_font.hpp"
+#include "plume3d.hpp"
 
 #include <neuralfx/image_io.hpp>
 #include <neuralfx/metrics.hpp>
@@ -78,12 +79,22 @@ double cpu_now() {
 double now() { return std::chrono::duration<double>(std::chrono::steady_clock::now().time_since_epoch()).count(); }
 
 bool g_n2 = false;  // --study n2 (STUDY_3D.md §14)
+bool g_r = false;   // --study r (docs/STUDY_R.md): the validated smoke
+nfx::sim3d::Effect g_effect = nfx::sim3d::Effect::fire;  // the simulated effect (--effect; study R: the validated smoke)
 
 fs::path data_root(const Args& a) {
   if (a.has("root")) return a.str("root");
-  const char* dir = g_n2 ? "n2_3d" : "n_3d";
+  const char* dir = g_r ? "r_smoke3d" : g_n2 ? "n2_3d" : "n_3d";
   if (const char* e = std::getenv("NEURALVFX_DATA")) return fs::path(e) / dir;
   return fs::path("/root/nvfx-data") / dir;
+}
+
+std::vector<std::string> split_csv(const std::string& line) {
+  std::vector<std::string> t;
+  std::istringstream ss(line);
+  std::string x;
+  while (std::getline(ss, x, ',')) t.push_back(x);
+  return t;
 }
 
 void log_line(const fs::path& file, const std::string& line) {
@@ -105,6 +116,11 @@ constexpr std::uint64_t kN2ValTrack = 9'500'000, kN2ValReal = 9'510'000, kN2ValP
 constexpr std::uint64_t kN2TestTrack = 9'800'000, kN2TestReal = 9'810'000, kN2TestPlay = 9'820'000;
 constexpr std::uint64_t kN2Edge = 900;  // the edge check: the plays' (or the real runs') base + 900 + the wind's index
 constexpr std::uint64_t kFloor = 50;  // the floor's real runs: the real base + 50 + 100 s + k
+// study R (docs/STUDY_R.md): its own range, 29,000,000 to 29,999,999
+constexpr std::uint64_t kRShort = 29'100'000, kRLong = 29'200'000;  // training runs: 8 s at random controls; 18 s of N2's kinds
+constexpr std::uint64_t kRCal = 29'300'000;  // the edge bounds' teacher runs: + 100 j + k (j the wind, k the run)
+constexpr std::uint64_t kRValTrack = 29'400'000, kRValReal = 29'410'000, kRValPlay = 29'420'000, kRValEdge = 29'430'000;
+constexpr std::uint64_t kRTestTrack = 29'700'000, kRTestReal = 29'710'000, kRTestPlay = 29'720'000, kRTestEdge = 29'730'000;
 constexpr int kWidth = 64, kHeight = 96;
 constexpr int kTrackWarm = 100;  // frames simulated from an empty grid before a tracked state
 constexpr std::array<int, 3> kHorizons{8, 30, 60};
@@ -202,6 +218,13 @@ std::vector<std::array<float, 3>> settings_all(const std::string& split) {
   // probe: for choices made before validation (the detail layer's constants), at the controls of training runs 0 to 3
   // with seeds of its own (9,300,000 + 100 s + k); never used for the rule
   if (split == "probe") return {train_controls(kTrainBase), train_controls(kTrainBase + 1), train_controls(kTrainBase + 2), train_controls(kTrainBase + 3)};
+  if (g_r) {  // study R (docs/STUDY_R.md §2): new settings, a strong wind towards -x and towards +x in each split
+    if (split == "val") return {{0.55f, 0.10f, 0.45f}, {0.35f, 0.85f, 0.60f}, {0.70f, 0.35f, 0.75f}, {0.45f, 0.55f, 0.30f}, {0.80f, 0.70f, 0.55f}};
+    if (split == "test") {
+      return {{0.60f, 0.06f, 0.65f}, {0.40f, 0.94f, 0.40f}, {0.75f, 0.25f, 0.30f}, {0.30f, 0.45f, 0.80f}, {0.50f, 0.70f, 0.15f}, {0.85f, 0.60f, 0.50f}};
+    }
+    throw std::invalid_argument("split must be val or test");
+  }
   if (g_n2) {  // study N2 (§14): new settings, a strong wind towards -x and towards +x in each split
     if (split == "val") return {{0.60f, 0.08f, 0.50f}, {0.40f, 0.92f, 0.65f}, {0.75f, 0.30f, 0.35f}, {0.50f, 0.50f, 0.80f}, {0.30f, 0.65f, 0.25f}};
     if (split == "test") {
@@ -220,6 +243,12 @@ int endless_runs(const std::string& split) { return std::min(split == "test" ? 3
 std::uint64_t base_of(const std::string& split, const std::string& what) {
   if (split == "probe") return 9'300'000 + (what == "track" ? 0 : what == "real" ? 10'000 : 20'000);
   const bool t = split == "test";
+  if (g_r) {
+    if (what == "track") return t ? kRTestTrack : kRValTrack;
+    if (what == "real") return t ? kRTestReal : kRValReal;
+    if (what == "edge") return t ? kRTestEdge : kRValEdge;
+    return t ? kRTestPlay : kRValPlay;
+  }
   if (g_n2) {
     if (what == "track") return t ? kN2TestTrack : kN2ValTrack;
     if (what == "real") return t ? kN2TestReal : kN2ValReal;
@@ -239,8 +268,12 @@ nfx::sim3d::Params fine_params(const std::array<float, 3>& c, std::uint64_t seed
   p.turbulence = c[2];
   p.seed = seed;
   p.threads = threads;
+  p.effect = g_effect;
   return p;
 }
+
+// The renderer's optics for the study's effect: fire's, or warm smoke's (which does not glow; render3d.hpp).
+rd::Optics study_optics() { return rd::optics_for(g_effect == nfx::sim3d::Effect::fire ? "fire3d" : "smoke3d"); }
 
 // The four cameras of the study: around the effect at 0, 90, 180 and 270 degrees, a little above the flame's middle.
 rd::Camera study_camera(int k, float aspect, float height_world) {
@@ -546,24 +579,26 @@ std::vector<r3::Run> load_runs(const fs::path& dir) {
 int record(const Args& a) {
   const fs::path root = data_root(a), dir = root / "runs" / a.str("runs-dir", "train");
   fs::create_directories(dir);
-  const int runs = a.i("runs", 40), frames = a.i("frames", g_n2 ? 540 : 240), threads = a.i("threads", 3);
-  const std::uint64_t base = a.u64("seed-base", g_n2 ? kN2Train : kTrainBase);  // fire 9,000,000; smoke 9,100,000; N2 9,200,000
-  nfx::sim3d::Effect effect = nfx::sim3d::Effect::fire;
-  if (!nfx::sim3d::parse_effect(a.str("effect", "fire"), effect)) throw std::invalid_argument("--effect fire|smoke");
+  // study R: runs-dir "short" (8 s at random controls held, seeds 29,100,000 + i) or "long" (18 s of study N2's kinds,
+  // seeds 29,200,000 + i)
+  const bool kinds = g_n2 || (g_r && a.str("runs-dir", "train") == "long");
+  const int runs = a.i("runs", 40), frames = a.i("frames", kinds ? 540 : 240), threads = a.i("threads", 3);
+  const std::uint64_t base = a.u64("seed-base", g_r ? (kinds ? kRLong : kRShort) : g_n2 ? kN2Train : kTrainBase);  // fire 9,000,000; smoke 9,100,000; N2 9,200,000
+  const nfx::sim3d::Effect effect = g_effect;
   const r3::Hyper h = study_hyper();
   for (int i = a.i("from", 0); i < runs; ++i) {  // --from: a second job records the later runs
     const fs::path f = dir / std::format("run_{:04}.n3run", i);
     if (fs::exists(f)) continue;
     const std::uint64_t seed = base + static_cast<std::uint64_t>(i);
-    const std::vector<float> sched = g_n2 && n2_kind(i) == 1 ? n2_schedule(seed, frames, 30.f) : std::vector<float>{};
-    const auto c = g_n2 ? (sched.empty() ? n2_controls(i, seed) : std::array<float, 3>{sched[0], sched[1], sched[2]}) : train_controls(seed);
+    const std::vector<float> sched = kinds && n2_kind(i) == 1 ? n2_schedule(seed, frames, 30.f) : std::vector<float>{};
+    const auto c = kinds ? (sched.empty() ? n2_controls(i, seed) : std::array<float, 3>{sched[0], sched[1], sched[2]}) : train_controls(seed);
     const double t0 = now(), c0 = cpu_now();
     auto p = fine_params(c, seed, threads);
     p.effect = effect;
     const r3::Run r = r3::record_run(p, frames, h, sched);
     if (auto e = r3::save_run(f, r); !e) throw std::runtime_error(e.error());
     std::string kind;
-    if (g_n2) {
+    if (kinds) {
       kind = n2_kind(i) == 0 ? " (wind at an extreme)" : n2_kind(i) == 2 ? " (random, held)" : "";
       if (!sched.empty()) {
         float wlo = 1.f, whi = 0.f;
@@ -591,8 +626,8 @@ std::vector<r3::Run> training_runs(const Args& a, const fs::path& root) {
 }
 
 r3::Model fresh_model(nfx::sim3d::Effect e = nfx::sim3d::Effect::fire) {
-  r3::Model m = r3::init_model(study_hyper(), g_n2 ? 9'200'777 : 9'000'777);
-  m.edges = g_n2 ? r3::Edges::ambient : r3::Edges::clamp;  // study N clamped; N2 brings ambient air in (§14)
+  r3::Model m = r3::init_model(study_hyper(), g_r ? 29'100'777 : g_n2 ? 9'200'777 : 9'000'777);
+  m.edges = g_n2 || g_r ? r3::Edges::ambient : r3::Edges::clamp;  // study N clamped; N2 and R bring ambient air in (§14)
   m.effect = e == nfx::sim3d::Effect::fire ? "fire3d" : "smoke3d";
   m.fps = 30.f;
   m.noise = nfx::sim3d::forcing(e);
@@ -648,10 +683,10 @@ int train(const Args& a) {
   };
   r3::train_stepper(m, runs, o, s, [&](const r3::Model& mm, const r3::TrainState& ss) {
     if (auto e = r3::save_checkpoint(ck, mm, ss); !e) throw std::runtime_error(e.error());
-    if (!g_n2 && ss.iteration == stage2_end) {  // candidate A of the validation: the stepper after stages 1 and 2
+    if (!g_n2 && !g_r && ss.iteration == stage2_end) {  // candidate A of the validation: the stepper after stages 1 and 2
       if (auto e = r3::save_checkpoint(root / "ckpt" / (name + "_stage2.ckpt"), mm, ss); !e) throw std::runtime_error(e.error());
     }
-    for (int k = 1; g_n2 && k <= 4; ++k) {  // study N2: a snapshot at the end of every stage
+    for (int k = 1; (g_n2 || g_r) && k <= 4; ++k) {  // studies N2 and R: a snapshot at the end of every stage
       if (ss.iteration == r3::stage_end(o, k) && (k == 1 || r3::stage_end(o, k) != r3::stage_end(o, k - 1))) {
         if (auto e = r3::save_checkpoint(root / "ckpt" / std::format("{}_stage{}.ckpt", name, k), mm, ss); !e) throw std::runtime_error(e.error());
         log_line(log, std::format("snapshot {}_stage{} at iteration {}", name, k, ss.iteration));
@@ -876,7 +911,7 @@ int track(const Args& a) {
   if (learned) require_frozen(a, split, model_file);
   r3::Workspace ws(m);
   fast_conv(ws);
-  rd::Renderer rend(m.h.fx(), m.h.fy(), m.h.fz());
+  rd::Renderer rend(m.h.fx(), m.h.fy(), m.h.fz(), study_optics());
   const auto sets = settings(split);
   const fs::path out = root / "eval" / split / "track" / (method + ".csv");
   fs::create_directories(out.parent_path());
@@ -965,7 +1000,7 @@ int real(const Args& a) {
   const std::string split = a.need("split");
   const int threads = a.i("threads", 3);
   nfx::Pool pool(threads);
-  rd::Renderer rend(kWidth, kHeight, kWidth);
+  rd::Renderer rend(kWidth, kHeight, kWidth, study_optics());
   const auto sets = settings(split);
   const bool floor = split == "test" || a.flag("floor");
   for (int s = 0; s < static_cast<int>(sets.size()); ++s) {
@@ -1008,7 +1043,7 @@ int play(const Args& a) {
   if (learned) require_frozen(a, split, model_file);
   r3::Workspace ws(m);
   fast_conv(ws);
-  rd::Renderer rend(m.h.fx(), m.h.fy(), m.h.fz());
+  rd::Renderer rend(m.h.fx(), m.h.fy(), m.h.fz(), study_optics());
   const auto sets = settings(split);
   for (int s = 0; s < static_cast<int>(sets.size()); ++s) {
     for (int k = 0; k < endless_runs(split); ++k) {
@@ -1428,7 +1463,7 @@ int video(const Args& a) {
     const std::vector<float> cv3(c.begin(), c.end());
     r3::start_from(m, coarse_of(m.h, sim), sim.time(), cv3, seed, st, ws, &pool, false);
     sim.fields(st.fine_t, st.fine_d);
-    rd::Renderer rs(kWidth, kHeight, kWidth), rl(m.h.fx(), m.h.fy(), m.h.fz());
+    rd::Renderer rs(kWidth, kHeight, kWidth, study_optics()), rl(m.h.fx(), m.h.fy(), m.h.fz(), study_optics());
     const int pw = W / 2;
     std::vector<float> T(m.h.fine_cells()), D(m.h.fine_cells());
     for (int f = 0; f < frames; ++f) {
@@ -1543,7 +1578,7 @@ int timing(const Args& a) {
     r3::State st = r3::make_state(m);
     const std::vector<float> c{0.7f, 0.5f, 0.6f};
     r3::start(m, 0, c, 9'990'200, st, ws, nullptr);
-    rd::Renderer rend(m.h.fx(), m.h.fy(), m.h.fz());
+    rd::Renderer rend(m.h.fx(), m.h.fy(), m.h.fz(), study_optics());
     std::vector<double> tn, tc, td, tp, tr;
     std::vector<std::uint8_t> pic(256 * 256 * 4);
     for (int f = 0; f < frames; ++f) {
@@ -1639,65 +1674,96 @@ int edge(const Args& a) {
   const int frames = static_cast<int>(std::lround(seconds * 30.f));
   const int threads = a.i("threads", 3);
   nfx::Pool pool(threads);
-  // seeds: --seed for every wind (study N's default: 9,900,004), else study N2's: the base + 900 + the wind's index
-  const std::uint64_t base = a.u64("seed-base", (sim ? kN2ValReal : kN2ValPlay) + kN2Edge);
-  const std::string label = a.str("label", sim ? "simulation" : model.stem().string());
+  // seeds: --seed for every wind (study N's default: 9,900,004), else study N2's: the base + 900 + the wind's index;
+  // study R: the plays' base + the wind's index, and the teacher's runs (--sim --runs K) 29,300,000 + 100 j + k
+  const std::uint64_t base = a.u64("seed-base", g_r ? (sim ? kRCal : kRValEdge) : (sim ? kN2ValReal : kN2ValPlay) + kN2Edge);
+  const int runs = sim ? a.i("runs", 1) : 1;
+  const std::string label0 = a.str("label", sim ? "simulation" : model.stem().string());
+  // study R's rows are written a run at a time (a run cut short leaves none) and a run already written is skipped
+  const bool whole = g_r && a.has("out");
+  std::set<std::string> done;
   std::ofstream csv;
   if (a.has("out")) {
     const fs::path out = a.str("out");
     fs::create_directories(out.parent_path());
     const bool fresh = !fs::exists(out);
+    if (!fresh && whole) {
+      std::ifstream i(out);
+      std::string line;
+      while (std::getline(i, line)) {
+        const auto t = split_csv(line);
+        if (t.size() >= 3 && t[0] != "label" && std::abs(std::stod(t[2]) - seconds) < 1e-3) done.insert(t[0] + "," + t[1]);
+      }
+    }
     csv.open(out, std::ios::app);
     if (fresh) csv << "label,wind,seconds,x0,xmax,z0,zmax,top,all,hottest\n";
   }
   if (!a.has("out")) std::println("frame,heat x=0,heat x=max,heat z=0,heat z=max,heat in all,hottest side cell");
+  std::string pending;
+  std::string label = label0;
   const auto emit = [&](float w, int f, const SideHeat& s) {
     if (csv.is_open()) {
-      csv << std::format("{},{:.2f},{:.2f},{:.4f},{:.4f},{:.4f},{:.4f},{:.4f},{:.3f},{:.4f}\n", label, w, f / 30.0, s.side[0], s.side[1], s.side[2], s.side[3],
-                         s.side[4], s.all, s.hot);
-      csv.flush();
+      const std::string row = std::format("{},{:.2f},{:.2f},{:.4f},{:.4f},{:.4f},{:.4f},{:.4f},{:.3f},{:.4f}\n", label, w, f / 30.0, s.side[0], s.side[1], s.side[2],
+                                          s.side[3], s.side[4], s.all, s.hot);
+      if (whole) {
+        pending += row;
+      } else {
+        csv << row;
+        csv.flush();
+      }
     } else {  // study N's columns (no top)
       std::println("{},{:.3f},{:.3f},{:.3f},{:.3f},{:.3f},{:.4f}", f, s.side[0], s.side[1], s.side[2], s.side[3], s.all, s.hot);
     }
   };
   const r3::Hyper h = study_hyper();
   for (std::size_t wi = 0; wi < winds.size(); ++wi) {
-    const std::array<float, 3> c{cs.at(0), winds[wi], cs.at(2)};
-    const std::uint64_t seed = a.has("seed") ? a.u64("seed", 0) : g_n2 ? base + wi : 9'900'004;
-    const double t0 = now();
-    SideHeat last;
-    if (sim) {
-      auto fp = fine_params(c, seed, threads);
-      if (!nfx::sim3d::parse_effect(a.str("effect", "fire"), fp.effect)) throw std::invalid_argument("--effect fire|smoke");
-      nfx::sim3d::Fluid f(fp);
-      for (int fr = 0; fr < kEndlessWarm; ++fr) f.step_frame();
-      for (int fr = 0; fr <= frames; ++fr) {
-        if (fr > 0) f.step_frame();
-        if (fr % 15 != 0) continue;
-        const auto cf = coarse_of(h, f);
-        last = side_heat(h, cf.data(), r3::kPhys, 3);
-        emit(c[1], fr, last);
+    for (int k = 0; k < runs; ++k) {
+      const std::array<float, 3> c{cs.at(0), winds[wi], cs.at(2)};
+      label = g_r && sim ? std::format("{}#{}", label0, k) : label0;
+      if (done.count(std::format("{},{:.2f}", label, c[1]))) continue;
+      const std::uint64_t seed = a.has("seed") ? a.u64("seed", 0)
+                                 : g_r          ? (sim ? base + 100 * wi + static_cast<std::uint64_t>(k) : base + wi)
+                                 : g_n2         ? base + wi
+                                                : 9'900'004;
+      const double t0 = now();
+      SideHeat last;
+      if (sim) {
+        const auto fp = fine_params(c, seed, threads);  // the effect: --effect (study R: the validated smoke)
+        nfx::sim3d::Fluid f(fp);
+        for (int fr = 0; fr < kEndlessWarm; ++fr) f.step_frame();
+        for (int fr = 0; fr <= frames; ++fr) {
+          if (fr > 0) f.step_frame();
+          if (fr % 15 != 0) continue;
+          const auto cf = coarse_of(h, f);
+          last = side_heat(h, cf.data(), r3::kPhys, 3);
+          emit(c[1], fr, last);
+        }
+      } else {
+        r3::Model m = load_study_model(model);
+        r3::quantise_like_storage(m);
+        if (a.has("edges")) m.edges = a.str("edges") == "clamp" ? r3::Edges::clamp : r3::Edges::ambient;
+        r3::Workspace ws(m);
+        fast_conv(ws);
+        const std::vector<float> cv(c.begin(), c.end());
+        r3::State st = r3::make_state(m);
+        const r3::StartPoint& sp = m.starts[zu(nearest_start(m, c))];
+        r3::start_from(m, sp.coarse, sp.time, cv, seed, st, ws, &pool, false);
+        for (int fr = 0; fr < m.h.warmup; ++fr) coarse_only_step(m, st, cv, seed, ws, pool);  // as r3::start's warm-up
+        for (int fr = 0; fr <= frames; ++fr) {
+          if (fr > 0) coarse_only_step(m, st, cv, seed, ws, pool);
+          if (fr % 15 != 0) continue;
+          last = side_heat(m.h, st.coarse.data(), m.h.channels(), 3);
+          emit(c[1], fr, last);
+        }
       }
-    } else {
-      r3::Model m = load_study_model(model);
-      r3::quantise_like_storage(m);
-      if (a.has("edges")) m.edges = a.str("edges") == "clamp" ? r3::Edges::clamp : r3::Edges::ambient;
-      r3::Workspace ws(m);
-      fast_conv(ws);
-      const std::vector<float> cv(c.begin(), c.end());
-      r3::State st = r3::make_state(m);
-      const r3::StartPoint& sp = m.starts[zu(nearest_start(m, c))];
-      r3::start_from(m, sp.coarse, sp.time, cv, seed, st, ws, &pool, false);
-      for (int fr = 0; fr < m.h.warmup; ++fr) coarse_only_step(m, st, cv, seed, ws, pool);  // as r3::start's warm-up
-      for (int fr = 0; fr <= frames; ++fr) {
-        if (fr > 0) coarse_only_step(m, st, cv, seed, ws, pool);
-        if (fr % 15 != 0) continue;
-        last = side_heat(m.h, st.coarse.data(), m.h.channels(), 3);
-        emit(c[1], fr, last);
+      if (whole) {
+        csv << pending;
+        csv.flush();
+        pending.clear();
       }
+      std::println(stderr, "{} wind {:.2f} seed {}: at {:.0f} s the sides hold {:.3f} {:.3f} {:.3f} {:.3f}, the top {:.3f}, the box {:.2f} ({:.0f} s)", label, c[1],
+                   seed, seconds, last.side[0], last.side[1], last.side[2], last.side[3], last.side[4], last.all, now() - t0);
     }
-    std::println(stderr, "{} wind {:.2f} seed {}: at {:.0f} s the sides hold {:.3f} {:.3f} {:.3f} {:.3f}, the top {:.3f}, the box {:.2f} ({:.0f} s)", label, c[1], seed,
-                 seconds, last.side[0], last.side[1], last.side[2], last.side[3], last.side[4], last.all, now() - t0);
   }
   return 0;
 }
@@ -1767,9 +1833,13 @@ std::map<std::string, EdgeVerdict> edge_verdicts(const fs::path& file) {
   return out;
 }
 
+std::map<std::string, EdgeVerdict> edge_verdicts_r(const fs::path& csv, const fs::path& bounds);
+
 int edgecheck(const Args& a) {
-  const auto v = edge_verdicts(a.need("csv"));
-  std::println("Side heat, mean over 5 to 15 s / mean over 20 to 30 s (largest over 5 to 30 s; the simulation's largest):\n");
+  const bool calibrated = a.has("bounds");  // study R: the calibrated bounds
+  const auto v = calibrated ? edge_verdicts_r(a.need("csv"), a.str("bounds")) : edge_verdicts(a.need("csv"));
+  std::println("{}", calibrated ? "Side heat, mean over 5 to 15 s / mean over 20 to 30 s (largest over 5 to 30 s; the calibrated bound on the largest):\n"
+                                : "Side heat, mean over 5 to 15 s / mean over 20 to 30 s (largest over 5 to 30 s; the simulation's largest):\n");
   std::println("| model | wind | x = 0 | x = max | z = 0 | z = max | top | verdict |");
   std::println("|---|---:|---|---|---|---|---|---|");
   for (const auto& [label, e] : v) {
@@ -1778,6 +1848,170 @@ int edgecheck(const Args& a) {
   std::println("");
   for (const auto& [label, e] : v) std::println("{}: {}", label, e.pass ? "passes the edge check" : "FAILS the edge check");
   return 0;
+}
+
+// --- study R's edge check, its bounds calibrated on the teacher's own spread (docs/STUDY_R.md §2.5) ----------------
+
+struct EdgeRow {
+  std::string label;
+  float wind = 0;
+  double t = 0;
+  std::array<double, 5> s{};
+};
+std::vector<EdgeRow> edge_rows(const fs::path& file) {
+  std::vector<EdgeRow> rows;
+  std::ifstream i(file);
+  if (!i) throw std::runtime_error("cannot open " + file.string());
+  std::string line;
+  while (std::getline(i, line)) {
+    const auto t = split_csv(line);
+    if (t.size() < 10 || t[0] == "label") continue;
+    rows.push_back({t[0], std::stof(t[1]), std::stod(t[2]), {std::stod(t[3]), std::stod(t[4]), std::stod(t[5]), std::stod(t[6]), std::stod(t[7])}});
+  }
+  return rows;
+}
+// A run's side k at one wind: its mean over 5 to 15 s, its mean over 20 to 30 s and its largest over 5 to 30 s.
+struct SideStats {
+  double m1 = std::numeric_limits<double>::quiet_NaN(), m2 = m1, mx = m1;
+};
+SideStats side_stats(const std::vector<EdgeRow>& rows, const std::string& label, float w, int k) {
+  double s1 = 0, s2 = 0, mx = 0;
+  int n1 = 0, n2 = 0, n = 0;
+  for (const EdgeRow& r : rows) {
+    if (r.label != label || std::abs(r.wind - w) > 1e-3f) continue;
+    const double v = r.s[zu(k)];
+    if (r.t >= 5 - 1e-6 && r.t <= 15 + 1e-6) {
+      s1 += v;
+      ++n1;
+    }
+    if (r.t >= 20 - 1e-6 && r.t <= 30 + 1e-6) {
+      s2 += v;
+      ++n2;
+    }
+    if (r.t >= 5 - 1e-6 && r.t <= 30 + 1e-6) {
+      mx = std::max(mx, v);
+      ++n;
+    }
+  }
+  SideStats st;
+  if (n1 && n2 && n) st = {s1 / n1, s2 / n2, mx};
+  return st;
+}
+constexpr std::array<const char*, 5> kSideNames{"x = 0", "x = max", "z = 0", "z = max", "top"};
+
+// The teacher's runs (labels simulation#k): per wind and side, a run "holds too much" if its largest exceeds
+// A x the largest of the teacher's runs + B, and "grows" if its late mean exceeds 2 x its early mean + C. Calibration:
+// every teacher run must pass when checked against a bound made from the other runs (leave one out); where one does
+// not, B (or C) is raised to 1.5 times the smallest value that clears every teacher run. The bounds file it writes is
+// what `edgecheck --bounds` applies to models.
+int edgecal(const Args& a) {
+  const auto rows = edge_rows(a.need("csv"));
+  const double A = a.f("a", 2.f), B0 = a.f("b", 1.f), C0 = a.f("c", 0.5f);
+  std::set<std::string> labels;
+  std::set<float> winds;
+  for (const EdgeRow& r : rows) {
+    if (r.label.starts_with("simulation#")) {
+      labels.insert(r.label);
+      winds.insert(r.wind);
+    }
+  }
+  if (labels.size() < 2) throw std::runtime_error("edgecal: needs at least two teacher runs (simulation#k)");
+  const fs::path out = a.need("out");
+  fs::create_directories(out.parent_path());
+  std::ofstream o(out);
+  o << "wind,side,teacher_max,holds_bound,grows_c,runs,max_lo,max_hi\n";
+  std::println("The teacher's {} runs per wind (largest side heat over 5 to 30 s: each run's; leave-one-out with A = {}, B = {}, C = {}):\n", labels.size(), A, B0,
+               C0);
+  std::println("| wind | side | each run's largest | each run's late / early mean | bound (A max + B) | grows if late > 2 early + C | leave-one-out |");
+  std::println("|---:|---|---|---|---:|---:|---|");
+  int raised = 0;
+  for (const float w : winds) {
+    for (int k = 0; k < 5; ++k) {
+      std::vector<SideStats> st;
+      for (const auto& l : labels) {
+        st.push_back(side_stats(rows, l, w, k));
+        if (std::isnan(st.back().mx)) throw std::runtime_error(std::format("edgecal: {} has no rows at wind {:.2f}", l, w));
+      }
+      double tmax = 0, tmin = 1e300;
+      for (const auto& x : st) {
+        tmax = std::max(tmax, x.mx);
+        tmin = std::min(tmin, x.mx);
+      }
+      // leave one out: the smallest B and C that clear every teacher run
+      double need_b = 0, need_c = 0;
+      for (std::size_t i = 0; i < st.size(); ++i) {
+        double others = 0;
+        for (std::size_t j = 0; j < st.size(); ++j) {
+          if (j != i) others = std::max(others, st[j].mx);
+        }
+        need_b = std::max(need_b, st[i].mx - A * others);
+        need_c = std::max(need_c, st[i].m2 - 2 * st[i].m1);
+      }
+      double B = B0, C = C0;
+      std::string loo = "every run passes";
+      if (need_b >= B0) {
+        B = 1.5 * need_b;
+        loo = std::format("B raised to {:.3f}", B);
+        ++raised;
+      }
+      if (need_c >= C0) {
+        C = 1.5 * need_c;
+        loo += std::format("; C raised to {:.3f}", C);
+        ++raised;
+      }
+      std::string maxes, means;
+      for (const auto& x : st) {
+        maxes += std::format("{}{:.3f}", maxes.empty() ? "" : ", ", x.mx);
+        means += std::format("{}{:.3f} / {:.3f}", means.empty() ? "" : ", ", x.m2, x.m1);
+      }
+      std::println("| {:.2f} | {} | {} | {} | {:.3f} | {:.3f} | {} |", w, kSideNames[zu(k)], maxes, means, A * tmax + B, C, loo);
+      o << std::format("{:.2f},{},{:.5f},{:.5f},{:.5f},{},{:.5f},{:.5f}\n", w, k, tmax, A * tmax + B, C, st.size(), tmin, tmax);
+    }
+  }
+  std::println("\n{} bound(s) raised by the leave-one-out calibration; bounds written to {}", raised, out.string());
+  return 0;
+}
+
+struct Bound {
+  double holds = 0, c = 0;
+};
+std::map<std::pair<int, int>, Bound> read_bounds(const fs::path& f) {  // (wind x 100, side) -> bound
+  std::map<std::pair<int, int>, Bound> b;
+  std::ifstream i(f);
+  if (!i) throw std::runtime_error("cannot open " + f.string());
+  std::string line;
+  while (std::getline(i, line)) {
+    const auto t = split_csv(line);
+    if (t.size() < 5 || t[0] == "wind") continue;
+    b[{static_cast<int>(std::lround(std::stod(t[0]) * 100)), std::stoi(t[1])}] = {std::stod(t[3]), std::stod(t[4])};
+  }
+  return b;
+}
+
+// Study R's verdicts: each model (every label not a teacher run's) at each wind, side by side, against the bounds.
+std::map<std::string, EdgeVerdict> edge_verdicts_r(const fs::path& csv, const fs::path& bounds) {
+  const auto rows = edge_rows(csv);
+  const auto bd = read_bounds(bounds);
+  std::map<std::string, EdgeVerdict> out;
+  std::set<std::pair<std::string, float>> seen;
+  for (const EdgeRow& r : rows) {
+    if (r.label.starts_with("simulation") || !seen.insert({r.label, r.wind}).second) continue;
+    EdgeVerdict& v = out[r.label];
+    std::string cells = std::format("| {} | {:.2f} |", r.label, r.wind), worst;
+    for (int k = 0; k < 5; ++k) {
+      const SideStats st = side_stats(rows, r.label, r.wind, k);
+      const auto it = bd.find({static_cast<int>(std::lround(r.wind * 100)), k});
+      if (std::isnan(st.mx) || it == bd.end()) throw std::runtime_error(std::format("edge check: missing rows or bounds for {} at wind {:.2f}", r.label, r.wind));
+      const bool grows = st.m2 > 2 * st.m1 + it->second.c, holds = st.mx > it->second.holds;
+      if (grows || holds) {
+        v.pass = false;
+        worst += std::format("{}{} {}", worst.empty() ? "" : "; ", kSideNames[zu(k)], grows && holds ? "grows and holds too much" : grows ? "grows" : "holds too much");
+      }
+      cells += std::format(" {:.2f} / {:.2f} ({:.2f}; bound {:.2f}) |", st.m1, st.m2, st.mx, it->second.holds);
+    }
+    v.rows.push_back(cells + " " + (worst.empty() ? "no runaway" : "**runs away**: " + worst) + " |");
+  }
+  return out;
 }
 
 // A copy of a model file with other edges (study N2's reference "study N's model with the edge fix alone").
@@ -1805,7 +2039,7 @@ int choose(const Args& a) {
     std::string x;
     while (std::getline(ss, x, ',')) cands.push_back(x);
   }
-  const auto ev = edge_verdicts(a.need("edge"));
+  const auto ev = g_r ? edge_verdicts_r(a.need("edge"), a.need("bounds")) : edge_verdicts(a.need("edge"));
   const auto sets = settings(split);
   struct Score {
     double pic = 0, temp = 0;
@@ -1858,6 +2092,32 @@ int choose(const Args& a) {
   if (pool.empty()) {
     std::println("\nNo candidate passes the edge check: the rule chooses among all of them, and the chosen one fails the edge check.");
     pool = cands;
+  }
+  if (g_r) {  // study R (docs/STUDY_R.md §2.6): the lowest mean rank over seven measures, tracking's two and the five endless
+    for (const auto& c : pool) {
+      double rank = 0;
+      for (int k = 0; k < 7; ++k) {
+        const auto val = [&](const std::string& x) { return k == 0 ? sc[x].pic : k == 1 ? sc[x].temp : sc[x].endless[zu(k - 2)]; };
+        const bool higher = k <= 1 || k == 6;
+        double r = 1;
+        int ties = 0;
+        for (const auto& d : pool) {
+          if (d == c) continue;
+          const double x = val(c), y = val(d);
+          if (higher ? y > x : y < x) r += 1;
+          else if (x == y) ++ties;
+        }
+        rank += (r + 0.5 * ties) / 7.0;
+      }
+      sc[c].rank = rank;
+    }
+    std::string chosen;
+    for (const auto& c : pool) {
+      std::println("{}: mean rank over the seven measures {:.3f}", c, sc[c].rank);
+      if (chosen.empty() || sc[c].rank < sc[chosen].rank - 1e-12 || (std::abs(sc[c].rank - sc[chosen].rank) <= 1e-12 && sc[c].pic > sc[chosen].pic)) chosen = c;
+    }
+    std::println("\nchosen: {}", chosen);
+    return 0;
   }
   double best_pic = -1e9, best_temp = -1e9;
   for (const auto& c : pool) {
@@ -2015,12 +2275,11 @@ int look(const Args& a) {
   const std::array<float, 3> c{a.f("intensity", 0.6f), a.f("wind", 0.5f), a.f("turbulence", 0.5f)};
   const int width = a.i("width", 64);
   auto p = fine_params(c, a.u64("seed", 9'000'950), a.i("threads", 2), width, width * 3 / 2);
-  if (a.str("effect", "fire") == "smoke") p.effect = nfx::sim3d::Effect::smoke;
   const int frames = a.i("frames", 150), every = a.i("every", 30), px = a.i("size", 192);
   const fs::path out = a.has("out") ? fs::path(a.str("out")) : data_root(a) / "look";
   fs::create_directories(out);
   nfx::sim3d::Fluid f(p);
-  rd::Renderer r(f.nx(), f.ny(), f.nz());
+  rd::Renderer r(f.nx(), f.ny(), f.nz(), study_optics());
   nfx::Pool pool(p.threads);
   const std::size_t n = zu(f.nx()) * zu(f.ny()) * zu(f.nz());
   std::vector<float> T(n), D(n);
@@ -2057,6 +2316,8 @@ int main(int argc, char** argv) {
     g_max_settings = a.i("max-settings", g_max_settings);
     g_max_runs = a.i("max-runs", g_max_runs);
     g_n2 = a.str("study", "n") == "n2";
+    g_r = a.str("study", "n") == "r";
+    if (!nfx::sim3d::parse_effect(a.str("effect", g_r ? "smoke_r" : "fire"), g_effect)) throw std::invalid_argument("--effect fire|smoke|smoke_r");
     int rc = 2;
     if (cmd == "pilot") rc = pilot(a);
     else if (cmd == "look") rc = look(a);
@@ -2075,6 +2336,10 @@ int main(int argc, char** argv) {
     else if (cmd == "edgecheck") rc = edgecheck(a);
     else if (cmd == "reedge") rc = reedge(a);
     else if (cmd == "choose") rc = choose(a);
+    else if (cmd == "edgecal") rc = edgecal(a);
+    else if (cmd == "plume") rc = nfx::tools::plume3d::measure(a, data_root(a));
+    else if (cmd == "plumefit") rc = nfx::tools::plume3d::fit(a, data_root(a));
+    else if (cmd == "plumevideo") rc = nfx::tools::plume3d::video(a, data_root(a));
     else std::println(stderr, "unknown command {}", cmd);
     a.warn_unused();
     return rc;

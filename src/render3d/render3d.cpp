@@ -135,6 +135,17 @@ std::array<float, 16> view_matrix(std::array<float, 3> eye, std::array<float, 3>
 
 }  // namespace
 
+Optics optics_for(std::string_view effect) {
+  Optics o;
+  if (effect.starts_with("smoke")) {  // warm smoke (render3d.hpp)
+    o.kelvin0 = 293.f;
+    o.kelvin_per_unit = 98.f;
+    o.flame_extinction = 0.f;
+    o.fire_light = 0.f;
+  }
+  return o;
+}
+
 std::array<float, 3> blackbody_rgb(float kelvin) {
   const auto c = xyz_to_srgb(blackbody_xyz(kelvin));
   const double ref = blackbody_xyz(1800.0)[1];

@@ -14,12 +14,13 @@ std::string_view effect_name(Effect e) {
   switch (e) {
     case Effect::fire: return "fire";
     case Effect::smoke: return "smoke";
+    case Effect::smoke_r: return "smoke_r";
   }
   std::unreachable();
 }
 
 bool parse_effect(std::string_view text, Effect& out) {
-  for (const Effect e : {Effect::fire, Effect::smoke}) {
+  for (const Effect e : {Effect::fire, Effect::smoke, Effect::smoke_r}) {
     if (effect_name(e) == text) {
       out = e;
       return true;
@@ -55,6 +56,10 @@ Tune tune(const Params& p) {
     case Effect::fire: return {260.f, 8.f, 0.9f, 0.6f, 90.f, 2.5f, 1.2f + 6.f * turb, 10.f + 60.f * turb, 0.15f, 1.5f + 1.5f * I};
     // smoke: warm, not hot (it does not glow), so more buoyancy per unit of heat; a stronger push at the source
     case Effect::smoke: return {420.f, 0.6f, 0.30f, 0.30f, 70.f, 2.0f, 0.8f + 4.f * turb, 6.f + 40.f * turb, 0.10f, 0.f};
+    // study R's smoke (docs/STUDY_R.md §1): study N's without its sinks. Warm smoke a few tens of kelvin above the air
+    // does not cool or fade in seconds, and a free plume has no drag on it: so no cooling, no soot decay and no velocity
+    // damping, which conserves the plume's buoyancy flux as Morton, Taylor and Turner's theory requires.
+    case Effect::smoke_r: return {420.f, 0.6f, 0.f, 0.f, 70.f, 2.0f, 0.8f + 4.f * turb, 6.f + 40.f * turb, 0.f, 0.f};
   }
   std::unreachable();
 }
@@ -90,11 +95,12 @@ void Fluid::slabs(F&& fn) {
   pool_->run(ny_, [&](int i) { fn(i + 1); });
 }
 
-Fluid::Fluid(const Params& p) : p_(p), nx_(p.width), ny_(p.height), nz_(p.width), s_(fl(p.width) / 128.f), forcing_(forcing(p.effect)) {
+Fluid::Fluid(const Params& p) : p_(p), nx_(p.width), ny_(p.height), nz_(p.width), s_(fl(p.width) / p.span), forcing_(forcing(p.effect)) {
   if (p.width < 8 || p.width > 512 || p.height < 8 || p.height > 768) throw std::invalid_argument("sim3d: size out of range");
+  if (!(p.span >= 16.f && p.span <= 4096.f) || !(p.source_x >= 0.f && p.source_x <= 1.f)) throw std::invalid_argument("sim3d: bad span or source position");
   if (p.substeps < 1 || !(p.fps > 0.f) || p.pressure_iters < 0) throw std::invalid_argument("sim3d: bad substeps, fps or iterations");
   for (Grid* g : {&u_, &v_, &w_, &temp_, &soot_, &pressure_, &div_, &ta_, &tb_, &tc_, &wx_, &wy_, &wz_, &wn_}) g->init(nx_, ny_, nz_);
-  curl_.resize(forcing_, 128.f, 128.f * fl(ny_) / fl(nx_), 128.f);
+  curl_.resize(forcing_, p.span, p.span * fl(ny_) / fl(nx_), p.span);
   pool_ = std::make_unique<Pool>(std::max(1, p.threads));
 }
 
@@ -182,6 +188,11 @@ void Fluid::velocity(std::span<float> uvw) const {
   }
 }
 
+std::array<float, 2> Fluid::buoyancy_coefficients() const {
+  const Tune t = tune(p_);
+  return {t.buoyancy * s_, t.soot_weight * s_};
+}
+
 void Fluid::velocity_border() {
   // Sides and top: outflow (the neighbour's value). Floor: closed, slip along it (u, w copied, v reflected).
   for (int y = 0; y <= ny_ + 1; ++y) {
@@ -211,7 +222,10 @@ void Fluid::set_controls(float intensity, float wind, float turbulence) {
 
 void Fluid::step_frame() {
   const float dt = 1.f / (p_.fps * fl(p_.substeps));
-  for (int s = 0; s < p_.substeps; ++s) step(dt);
+  for (int s = 0; s < p_.substeps; ++s) {
+    steps_ = frame_ * p_.substeps + s;  // the flux form's sweep order follows it (a restored state goes on the same way)
+    step(dt);
+  }
   ++frame_;
 }
 
@@ -220,8 +234,14 @@ void Fluid::step(float dt) {
   add_forces(dt);
   advect_velocity(dt);
   project();
-  advect_scalar(temp_, dt);
-  advect_scalar(soot_, dt);
+  const bool flux = p_.scalars == 1 || (p_.scalars < 0 && p_.effect == Effect::smoke_r);
+  if (flux) {
+    advect_scalar_flux(temp_, dt);
+    advect_scalar_flux(soot_, dt);
+  } else {
+    advect_scalar(temp_, dt);
+    advect_scalar(soot_, dt);
+  }
   const Tune t = tune(p_);
   const float cool = std::exp(-t.cooling * dt), decay = std::exp(-t.soot_decay * dt);
   slabs([&](int y) {
@@ -238,8 +258,8 @@ void Fluid::step(float dt) {
 void Fluid::add_sources(float dt) {
   const float s = s_, I = p_.intensity;
   const bool fire = p_.effect == Effect::fire;
-  // a round burner on the floor, in 128-unit coordinates (cell x has its centre at (x - 0.5) / s)
-  const float cx = 64.f, cz = 64.f, cy = fire ? 6.f : 5.f;
+  // a round burner on the floor, in world units (128 across by default; cell x has its centre at (x - 0.5) / s)
+  const float cx = p_.span * p_.source_x, cz = p_.span * 0.5f, cy = fire ? 6.f : 5.f;
   const float r = fire ? (0.10f + 0.08f * I) * 128.f : (0.09f + 0.07f * I) * 128.f, hh = 0.035f * 128.f;
   const int x_lo = std::max(1, static_cast<int>((cx - 1.2f * r) * s)), x_hi = std::min(nx_, static_cast<int>((cx + 1.2f * r) * s) + 2);
   const int z_lo = std::max(1, static_cast<int>((cz - 1.2f * r) * s)), z_hi = std::min(nz_, static_cast<int>((cz + 1.2f * r) * s) + 2);
@@ -426,6 +446,70 @@ void Fluid::advect_scalar(Grid& q, float dt) {
       for (int x = 1; x <= nx_; ++x) q.at(x, y, z) = tc_.at(x, y, z);
     }
   });
+}
+
+void Fluid::advect_scalar_flux(Grid& q, float dt) {
+  // Flux form: one sweep per axis (x, y, z on even steps, z, y, x on odd ones), each q_i -= dt (F_i+1/2 - F_i-1/2) with
+  // the face's velocity the mean of its two cells' and the face's value upwind, second order with the monotonised
+  // central limiter (Sweby's form, so the Courant number enters). A face's flux is computed the same way from either
+  // side, so what leaves one cell enters the next exactly. The border stays zero: inflow at an open side brings
+  // nothing, outflow carries the edge cell's value out; the floor's face has no velocity (v is reflected there).
+  // Faces next to the border fall back to first order (there is no cell beyond it).
+  const auto mc = [](float r) { return std::max(0.f, std::min({2.f * r, 0.5f * (1.f + r), 2.f})); };
+  const bool forward = (steps_ & 1) == 0;
+  for (int k = 0; k < 3; ++k) {
+    const int axis = forward ? k : 2 - k;  // 0 x, 1 y, 2 z
+    const Grid& c = axis == 0 ? u_ : axis == 1 ? v_ : w_;
+    const std::size_t st = axis == 0 ? 1 : axis == 1 ? q.stride_y : q.stride_z;
+    const int n = axis == 0 ? nx_ : axis == 1 ? ny_ : nz_;
+    // the largest Courant number of the sweep (a maximum: the same on any number of threads)
+    std::vector<float> slab_max(zu(ny_) + 1, 0.f);
+    slabs([&](int y) {
+      float m = 0.f;
+      for (int z = 1; z <= nz_; ++z) {
+        for (int x = 1; x <= nx_; ++x) m = std::max(m, std::abs(c.at(x, y, z)));
+      }
+      slab_max[zu(y)] = m;
+    });
+    const float cmax = *std::max_element(slab_max.begin(), slab_max.end()) * dt;
+    const int sub = std::max(1, static_cast<int>(std::ceil(cmax / 0.95f)));
+    const float h = dt / fl(sub);
+    for (int s = 0; s < sub; ++s) {
+      // the flux through the face between cell a (coordinate ia along the axis, 0..n) and the next
+      const auto face = [&](std::size_t a, int ia) {
+        const float* qq = q.v.data();
+        const float uf = 0.5f * (c.v[a] + c.v[a + st]), nu = std::abs(uf) * h;
+        float qf;
+        if (uf >= 0.f) {
+          const float d = qq[a + st] - qq[a];
+          float phi = 0.f;
+          if (ia >= 1 && d != 0.f) phi = mc((qq[a] - qq[a - st]) / d);
+          qf = qq[a] + 0.5f * (1.f - nu) * phi * d;
+        } else {
+          const float d = qq[a] - qq[a + st];
+          float phi = 0.f;
+          if (ia <= n - 1 && d != 0.f) phi = mc((qq[a + st] - qq[a + 2 * st]) / d);
+          qf = qq[a + st] + 0.5f * (1.f - nu) * phi * d;
+        }
+        return uf * qf;
+      };
+      slabs([&](int y) {
+        for (int z = 1; z <= nz_; ++z) {
+          for (int x = 1; x <= nx_; ++x) {
+            const std::size_t i = zu(y) * q.stride_y + zu(z) * q.stride_z + zu(x);
+            const int ic = axis == 0 ? x : axis == 1 ? y : z;
+            const float out = face(i, ic), in = face(i - st, ic - 1);
+            ta_.v[i] = std::max(0.f, q.v[i] - h * (out - in));
+          }
+        }
+      });
+      slabs([&](int y) {
+        for (int z = 1; z <= nz_; ++z) {
+          for (int x = 1; x <= nx_; ++x) q.at(x, y, z) = ta_.at(x, y, z);
+        }
+      });
+    }
+  }
 }
 
 }  // namespace nfx::sim3d

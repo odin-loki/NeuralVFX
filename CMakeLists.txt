@@ -373,7 +373,7 @@ if(NEURALFX_BUILD_TOOLS)
   neuralfx_defaults(nvfx_reel)
   # Study N (docs/STUDY_3D.md): a small 3D demo: the 3D simulator's pilot, training runs, the 3D rollout model's
   # training, validation and test, videos and timing.
-  add_executable(nvfx_3d tools/nvfx_3d.cpp)
+  add_executable(nvfx_3d tools/nvfx_3d.cpp tools/plume3d.cpp)
   target_link_libraries(nvfx_3d PRIVATE neuralfx_train neuralfx_io neuralfx_pack nvfx)  # neuralfx_pack: SHA-256 of the frozen model
   neuralfx_defaults(nvfx_3d)
 

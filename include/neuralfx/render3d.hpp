@@ -28,6 +28,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <span>
+#include <string_view>
 #include <vector>
 
 namespace nfx::render3d {
@@ -48,6 +49,12 @@ struct Optics {
   float exposure = 1.f;           // then 1 - exp(-exposure L), then the sRGB curve
   float step = 0.6f;              // ray-march step, in cells
 };
+
+// The optics for an effect, by its name: fire's (the defaults above) for every effect but smoke ("smoke3d", or any name
+// starting with "smoke"), whose gas is warm, not hot: its temperature maps to kelvin0 293 K plus 98 K per unit (the smoke
+// preset's buoyancy, 210 cells per second squared per unit at 64 cells across, read as g dT / T in a box a metre wide),
+// so it never glows, and it has no hot soot (study R, docs/STUDY_R.md §1.5). Everything else as the defaults.
+Optics optics_for(std::string_view effect);
 
 // The blackbody colour table: linear sRGB radiance of a blackbody at `kelvin`, normalised so that the luminance at the
 // optics' reference temperature is 1 (negative components, outside sRGB's gamut, are clamped to 0).
