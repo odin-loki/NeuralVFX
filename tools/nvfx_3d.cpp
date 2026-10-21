@@ -751,7 +751,7 @@ r3::TrainOptions train_options(const Args& a) {
     o.seed = a.u64("seed", 1);
   }
   o.burn_long_min = a.i("burn-long-min", 48);
-  o.burn_long_max = a.i("burn-long-max", g_r2 ? 480 : 240);  // study R2: burn-ins up to 16 s (STUDY_R2.md §2.4)
+  o.burn_long_max = a.i("burn-long-max", g_r2 ? 360 : 240);  // study R2: burn-ins up to 12 s (STUDY_R2.md §2.4)
   o.spread = a.f("spread", g_r2 ? 2.f : 0.f);                 // study R2's losses (STUDY_R2.md §2.4)
   o.edge = a.f("edge", g_r2 ? 10.f : 0.f);
   o.batch = a.i("batch", 8);
@@ -1129,7 +1129,7 @@ int real(const Args& a) {
   nfx::Pool pool(threads);
   rd::Renderer rend(kWidth, kHeight, kWidth, study_optics());
   const auto sets = settings(split);
-  const bool floor = split == "test" || a.flag("floor");
+  const bool floor = (split == "test" && !a.flag("no-floor")) || a.flag("floor");  // study R2 runs no floor (STUDY_R2.md §2.5)
   const nfx::sim3d::Effect effect = g_effect;  // --effect (default fire; study R: smoke_r)
   for (int s = 0; s < static_cast<int>(sets.size()); ++s) {
     if (skip_setting(s)) continue;
@@ -2993,7 +2993,7 @@ int look(const Args& a) {
 
 int main(int argc, char** argv) {
   try {
-    const Args a(argc, argv, {"floor", "sim"});
+    const Args a(argc, argv, {"floor", "no-floor", "sim"});
     if (a.positional().empty()) {
       std::println(stderr, "usage: nvfx_3d pilot|look|record|train|finish|truth|track|real|play|compare|freeze|video|timing [options] (see tools/nvfx_3d.cpp)");
       return 2;

@@ -168,7 +168,14 @@ bytes). The new code paths run only for `smoke_r2` or when asked for (`Params::v
 
 ### 1.6 The plume against Morton, Taylor and Turner, again
 
-(To come: study R §1.3's measurement and fits on `smoke_r2`, seeds 34,010,000 + 100 c + k.)
+Study R §1.3's measurement and fits, unchanged, on `smoke_r2` with seeds of its own (34,010,000 + 100 c + k): intensity
+0.5, 0.2 and 0.8 at turbulence 0.5 (4 seeds each), turbulence 0 and 1 at intensity 0.5 (3 seeds each; study R had 5
+and 4, cut for the machine's load as §2.4 says); 6 s of spin-up
+and 16 s averaged; the fits over **24 to 92 cells**, study R's range, fixed before these runs: its box study (the same
+box and source, a box two thirds taller and one half as wide again) found the top mattering only in the last 10 cells
+and the sides narrowing the plume by about 5%, and the solver's change does not touch either, so the larger boxes are
+not run again. The wind-bent plume is not run again either (study R §1.6: its departure from Briggs's law is the wind's
+model, a drag on the smoke, which this study does not change). (Results: to come.)
 
 ## 2. The learned smoke: design and rule (written and committed before validation)
 
@@ -201,9 +208,12 @@ farthest-point sampling over the controls of all 48 runs; effect `smoke3d`, warm
 ### 2.4 Training, and the two losses aimed at study R's failures
 
 Study N2's four stages, as study R ran them, with three changes:
-- **Longer edge-aware rollouts**: stage 4's windows start after **48 to 480 frames** (16 s) of the stepper's own rollout
+- **Longer edge-aware rollouts**: stage 4's windows start after **48 to 360 frames** (12 s) of the stepper's own rollout
   (study R: 48 to 240), from the 18 s runs. Study R's C4 failed its edge check by a slow build-up at one side over 30 s
-  (0.46 over 5 to 15 s, 0.83 over 20 to 30 s); windows after up to 16 s of its own rollout let the stepper see more of it.
+  (0.46 over 5 to 15 s, 0.83 over 20 to 30 s); windows after up to 12 s of its own rollout let the stepper see more of it.
+  (16 s was planned; cut to 12 s before training began, with the plume measurement's seeds (§1.6) and the test's floor
+  (§2.5), because the shared machine ran at a load of 15 to 20 from 23:00 UTC and the plan's 19 CPU-hours would not have
+  fitted.)
 - **The edge loss** (`TrainOptions::edge`, weight 10, stages 2 to 4): the heat and soot in the coarse cells of the four
   open sides beyond the truth's, squared, in channel scales, over the sides' cells (a hinge: only an excess counts; the
   top is left out, since the plume leaves by it). The mean squared error already counts these cells, at the weight of
@@ -262,14 +272,16 @@ towards +x in each split:
   (0.30, 0.35, 0.85), (0.85, 0.65, 0.60).
 
 Validation: 3 tracking runs per setting (18), 2 real runs and 2 plays of each method pooled per setting. Test: 3
-tracking runs per setting (24), 3 real runs, 3 plays of each method and 3 other real runs (the floor) per setting. The
-test has two settings more than study R's, so that its intervals are narrower.
+tracking runs per setting (24), 3 real runs and 3 plays of each method pooled per setting. The test has two settings more
+than study R's, so that its intervals are narrower; it runs **no floor** (other real runs, which studies N, N2 and R
+reported beside their verdicts and never judged), to save its cost on the busy machine: the margins (§2.7) play the
+floor's part, the teacher against itself.
 
 ### 2.6 Methods and measures
 
 As study R (STUDY_R.md §2.6), unchanged: the candidates (the chosen one on the test: "learned"); **the coarse simulation
 with the same detail** (`smoke_r2` itself on 16 x 24 x 16, its lengths and forces scaled, driving the same seeded detail
-layer); for reference only, holding the first frame (tracking) and other real runs (the floor, test only). Tracking from
+layer); for reference only, holding the first frame (tracking). Tracking from
 the true state at 8 frames, 1 s and 2 s (the heat field PSNR, peak 0.5; the soot field PSNR, peak 1.2; the picture PSNR
 from four cameras); the five endless statistics (the 3D spectrum distance, |ln motion ratio|, the coverage distance,
 the light distance, the mean picture PSNR). Differences: method minus the coarse simulation, paired bootstrap of the mean
@@ -323,7 +335,7 @@ same detail:
 
 **The verdict**: "**passes: the learned 3D smoke beats running the cheap simulation**" if 1, 2 (better) and 3 hold;
 otherwise "**fails**", naming each condition that does not hold, with every number. Study R's strict reading of the
-look, soot, 8 frames and 2 s, holding the first frame and the floor are reported beside it, not judged. **If it passes,
+look, soot, 8 frames and 2 s and holding the first frame are reported beside it, not judged. **If it passes,
 it ships as `models/3d/smoke.nvfx3`**, replacing study R's demo (`models/layout.txt`, `SHA256SUMS`, the data root's
 `r2_smoke3d/models/chosen.nvfx3`, `neuralfx.Smoke3dShippedModel` checking it); if it fails, study R's demo stays and the
 numbers are reported.
@@ -336,4 +348,36 @@ numbers are reported.
 
 ## 7. Reproduce
 
-(To come.)
+Data under `NEURALVFX_DATA/r2_smoke3d` (default `/root/nvfx-data/r2_smoke3d`); every step resumes from what it has
+written; the job scripts used are in its `jobs/` (each takes the tool as `B=...`). Build as the main README says, then:
+
+```sh
+B=build/nvfx_3d; R=results/3d/r2; D=$NEURALVFX_DATA/r2_smoke3d; W="--winds 0.05,0.25,0.5,0.75,0.95 --seconds 30"
+# §1.2: the momentum audit (exploration seeds), smoke_r, the flux form alone and smoke_r2; the stability (jobs/diag2.sh)
+P="$B plume --study r2 --spin 6 --seconds 16"
+$P --label d_r_i50 --effect smoke_r --seeds 2 --seed-base 34000000; $P --label d_flux_i50 --effect smoke_r2 --confinement 0 --seeds 2 --seed-base 34000000
+$P --label d_r2b_i50 --effect smoke_r2 --seeds 2 --seed-base 34000000
+$B plumefit --study r2 --configs d_r_i50,d_flux_i50,d_r2b_i50 --momentum d_r_i50,d_flux_i50,d_r2b_i50 --fit-lo 24 --fit-hi 92 --out $R --md diag_fit.md --csv /dev/null
+$B stability --study r2 --seconds 45 --intensity 0.2 --wind 0.5 --turbulence 0 --seed 34000903   # and the other three extremes
+# §1.5: the old effects byte for byte against main's tool (jobs/bitcheck.sh)
+# §1.6: the plume against MTT (seeds 34,010,000 + 100 c + k; jobs/teacher_lanes.sh), then the fits
+$P --label v_i50 --seeds 4 --seed-base 34010000; $P --label v_i20 --intensity 0.2 --seeds 4 --seed-base 34010100
+$P --label v_i80 --intensity 0.8 --seeds 4 --seed-base 34010200; $P --label v_t00 --turbulence 0 --seeds 3 --seed-base 34010300
+$P --label v_t100 --turbulence 1 --seeds 3 --seed-base 34010400
+$B plumefit --study r2 --configs v_i20,v_i50,v_i80,v_t00,v_t100 --strengths v_i20,v_i50,v_i80 --momentum v_i20,v_i50,v_i80,v_t00,v_t100 \
+   --budget v_i50,v_t100 --fit-lo 24 --fit-hi 92 --out $R
+# §2: the training runs (jobs/records.sh), the rule's numbers (jobs/teacher_lanes.sh, jobs/rule_numbers.sh), training
+$B record --study r2 --runs-dir short --runs 24; $B record --study r2 --runs-dir long --runs 24
+for j in 0 1 2 3 4; do $B edge --study r2 --sim --runs 4 --winds <wind j> --seconds 30 --seed-base $((34300000 + 100 * j)) --out $D/results/edge_teacher_w$j.csv; done
+$B edgecal --study r2 --csv $R/edge_teacher.csv --out $R/edge_bounds.csv          # the five files concatenated
+$B real --study r2 --split cal; $B nullcal --study r2 --out $R/margins.csv
+RUNS="--runs-dir long --also $D/runs/short"
+$B train --study r2 --name r2 $RUNS --iterations 900 --finetune 350 --activity 250 --long 250 --batch 8 --unroll 12 --burn 24 \
+   --burn-long-min 48 --burn-long-max 360 --spread 2 --edge 10 --seed 34200000 --threads 3        # snapshots ckpt/r2_stage1..4.ckpt
+for k in 2 3 4; do $B finish --study r2 --ckpt r2_stage$k --out C$k $RUNS; done
+# §3: validation and the choice (jobs/val.sh), then the freeze
+$B choose --study r2 --split val --cands C2,C3,C4 --edge $R/edge_val.csv --bounds $R/edge_bounds.csv --margins $R/margins.csv
+cp $D/models/<chosen>.nvfx3 $D/models/chosen.nvfx3; $B freeze --model $D/models/chosen.nvfx3 --frozen $R/frozen.csv
+# §4: the test, once (jobs/test.sh), and the verdict
+$B verdict --study r2 --split test --margins $R/margins.csv --bounds $R/edge_bounds.csv --edge-val $R/edge_val.csv --val-label <chosen> --edge-test $R/edge_test.csv
+```
