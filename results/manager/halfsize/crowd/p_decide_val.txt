@@ -1,0 +1,11 @@
+
+B against N on (b) at 256 px (val; beside the rule, not deciding):
+  explosion: track1s +0.2714 [+0.2330, +0.3088] spectrum_l1 -0.1054 [-0.1815, -0.0425] abs_ln_motion_ratio -0.0116 [-0.0314, +0.0093] coverage_l1 +0.0000 [-0.0000, +0.0001] emission_l1 -0.0000 [-0.0000, -0.0000] mean_frame_psnr -0.0019 [-0.0121, +0.0087] hf_l1_real -0.1162 [-0.2191, -0.0139]
+      against N: apsnr_vsN 37.0477 [36.5676, 37.5200] ssim_vsN 0.9938 [0.9929, 0.9946] hf_l1_vsN 0.2584 [0.1230, 0.4078] hf_log_ratio_vsN -0.2567 [-0.4072, -0.1208] abs_ln_motion_vsN 0.0350 [0.0286, 0.0429]
+      smoke: track1s +0.9801 [+0.8615, +1.1011] spectrum_l1 -0.4911 [-0.5579, -0.4220] abs_ln_motion_ratio -0.1550 [-0.2321, -0.0734] coverage_l1 -0.0002 [-0.0005, +0.0000] emission_l1 -0.0000 [-0.0000, -0.0000] mean_frame_psnr -0.0064 [-0.0885, +0.0788] hf_l1_real -0.6533 [-0.7514, -0.5527]
+      against N: apsnr_vsN 24.7659 [24.4020, 25.1540] ssim_vsN 0.9308 [0.9231, 0.9389] hf_l1_vsN 0.6545 [0.5545, 0.7522] hf_log_ratio_vsN -0.6545 [-0.7522, -0.5545] abs_ln_motion_vsN 0.3500 [0.3265, 0.3752]
+       fire: track1s +0.9260 [+0.8110, +1.0599] spectrum_l1 -0.2742 [-0.3522, -0.1821] abs_ln_motion_ratio -0.0107 [-0.1226, +0.1057] coverage_l1 -0.0000 [-0.0000, +0.0000] emission_l1 -0.0000 [-0.0001, +0.0000] mean_frame_psnr +0.0258 [-0.0184, +0.0691] hf_l1_real -0.2880 [-0.4075, -0.1532]
+      against N: apsnr_vsN 27.3649 [26.7340, 28.0030] ssim_vsN 0.9885 [0.9865, 0.9906] hf_l1_vsN 1.3281 [1.2834, 1.3790] hf_log_ratio_vsN -1.3281 [-1.3791, -1.2834] abs_ln_motion_vsN 0.1936 [0.1833, 0.2049]
+      steam: track1s +0.6445 [+0.5408, +0.7553] spectrum_l1 -0.6506 [-0.7252, -0.5825] abs_ln_motion_ratio +0.0072 [-0.1493, +0.1668] (past) coverage_l1 -0.0000 [-0.0002, +0.0001] emission_l1 -0.0000 [-0.0000, -0.0000] mean_frame_psnr -0.0101 [-0.0958, +0.0691] hf_l1_real -0.9486 [-1.0919, -0.8240]
+      against N: apsnr_vsN 24.0267 [23.7210, 24.3335] ssim_vsN 0.9363 [0.9252, 0.9464] hf_l1_vsN 0.9522 [0.8293, 1.0932] hf_log_ratio_vsN -0.9522 [-1.0933, -0.8293] abs_ln_motion_vsN 0.3654 [0.3375, 0.3948]
+  B is within N's margins on (b) for 3 of 4 at 256 px

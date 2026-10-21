@@ -1,0 +1,22 @@
+the null (N with fresh seeds minus N, pooled plays, over the validation settings) and the margins:
+explosion 256 track1s              K 0.2000 null rms 0.0000 (mean +0.0000) N 19.7440 -> margin 0.2000
+explosion 256 spectrum_l1          K 0.0200 null rms 0.0336 (mean -0.0053) N 0.3125 -> margin 0.0336
+explosion 256 abs_ln_motion_ratio  K 0.0200 null rms 0.0876 (mean -0.0267) N 0.0982 -> margin 0.0876
+explosion 256 coverage_l1          K 0.0015 null rms 0.0075 (mean +0.0022) N 0.0147 -> margin 0.0075
+explosion 256 emission_l1          K 0.0001 null rms 0.0000 (mean +0.0000) N 0.0000 -> margin 0.0001
+explosion 256 mean_frame_psnr      K 0.1000 null rms 0.9787 (mean -0.3975) N 31.3504 -> margin 0.9787
+explosion 256 hf_l1_real           K 0.0200 null rms 0.0575 (mean -0.0037) N 0.3964 -> margin 0.0575
+     fire 256 track1s              K 0.2000 null rms 0.0000 (mean +0.0000) N 17.5080 -> margin 0.2000
+     fire 256 spectrum_l1          K 0.0200 null rms 0.0649 (mean +0.0103) N 0.5701 -> margin 0.0649
+     fire 256 abs_ln_motion_ratio  K 0.0200 null rms 0.1124 (mean -0.0445) N 0.1872 -> margin 0.1124
+     fire 256 coverage_l1          K 0.0002 null rms 0.0004 (mean +0.0000) N 0.0022 -> margin 0.0004
+     fire 256 emission_l1          K 0.0002 null rms 0.0003 (mean +0.0001) N 0.0018 -> margin 0.0003
+     fire 256 mean_frame_psnr      K 0.1000 null rms 2.8869 (mean +2.0135) N 37.8294 -> margin 2.8869
+     fire 256 hf_l1_real           K 0.0200 null rms 0.0984 (mean +0.0166) N 0.7805 -> margin 0.0984
+    magic 256 track1s              K 0.2000 null rms 0.0000 (mean +0.0000) N 18.6822 -> margin 0.2000
+    magic 256 spectrum_l1          K 0.0200 null rms 0.0214 (mean -0.0057) N 0.5425 -> margin 0.0214
+    magic 256 abs_ln_motion_ratio  K 0.0200 null rms 0.0274 (mean -0.0066) N 0.2162 -> margin 0.0274
+    magic 256 coverage_l1          K 0.0005 null rms 0.0018 (mean -0.0006) N 0.0051 -> margin 0.0018
+    magic 256 emission_l1          K 0.0001 null rms 0.0004 (mean -0.0002) N 0.0009 -> margin 0.0004
+    magic 256 mean_frame_psnr      K 0.1000 null rms 1.8721 (mean +0.6737) N 30.3643 -> margin 1.8721
+    magic 256 hf_l1_real           K 0.0200 null rms 0.0253 (mean -0.0058) N 0.7282 -> margin 0.0253
