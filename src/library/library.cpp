@@ -13,7 +13,10 @@
 //   - a trail's source follows the instance (moves included) and leaves material only while it is alive; its tiles stay
 //     in the world and fade by themselves after it ends, so a trail is never stopped;
 //   - water (docs/EFFECTS_WATER.md) follows the instance too and emits only while it is alive (a pool is drawn only
-//     then); what it has thrown falls and lands by itself.
+//     then); what it has thrown falls and lands by itself;
+//   - a weather director (docs/WEATHER.md) is the room's: it runs from the stage's start, heading for what its `regime`
+//     says (a parameter: the game sets it), so the weather is there when the instance spawns and goes on after it ends
+//     (what it drives is gated as the rest is); an entry's weather has no schedule (its times would be the stage's).
 // The stage's flash and camera shake are the sums of its instances'.
 #include "library.hpp"
 
@@ -445,6 +448,7 @@ class Instance {
       };
       if (st.keyword == "module" || st.keyword == "trail") local(modules_, st.name, st.name_pos);
       else if (st.keyword == "water") local(waters_, st.name, st.name_pos);
+      else if (st.keyword == "weather") local(weathers_, st.name, st.name_pos);
       else if (st.keyword == "let") local(values_, st.name, st.name_pos);
       else if (st.keyword == "field") local(fields_, st.name, st.name_pos);
       else if (st.keyword == "look") {
@@ -457,7 +461,7 @@ class Instance {
       }
     }
     for (const Param& pa : e.params) {
-      for (const auto* set : {&modules_, &values_, &fields_, &rules_, &waters_})
+      for (const auto* set : {&modules_, &values_, &fields_, &rules_, &waters_, &weathers_})
         if (set->contains(pa.name)) fail(pa.pos, std::format("'{}' is a parameter and also declared in the entry: choose another name", pa.name));
       params_.insert(pa.name);
     }
@@ -537,7 +541,7 @@ class Instance {
  private:
   [[noreturn]] void fail(Pos p, const std::string& m) const { throw Error(p, m, e_.file); }
 
-  std::string module(const std::string& n) const { return modules_.contains(n) || waters_.contains(n) ? p_ + n : n; }
+  std::string module(const std::string& n) const { return modules_.contains(n) || waters_.contains(n) || weathers_.contains(n) ? p_ + n : n; }
   std::string look(const std::string& n) const { return looks_.contains(n) ? p_ + n : n; }
 
   // An expression of the entry as the stage computes it.
@@ -650,6 +654,12 @@ class Instance {
       }
       gated(s, true);
       out.push_back(std::move(s));
+    } else if (w == "weather") {  // the room's weather: from the stage's start, where its regime (a parameter) says
+      if (st.kind == "schedule") fail(st.pos, "an entry's weather has no schedule (its times would be the stage's): drive it with a parameter, 'regime regime'");
+      s.name = p_ + st.name;
+      props(s);
+      if (Prop* seed = find_prop(s, "seed"); seed && seed_offset_ != 0) seed->value.exprs[0] = bin("+", seed->value.exprs[0], num(static_cast<float>(seed_offset_)));
+      out.push_back(std::move(s));
     } else if (w == "let" || w == "look") {
       s.name = w == "let" ? p_ + st.name : look(st.name);
       if (w == "look" && s.kind != "shader") s.kind = look(s.kind);
@@ -717,7 +727,7 @@ class Instance {
   const Entry& e_;
   std::string p_, go_, alive_;
   std::int64_t seed_offset_;
-  std::set<std::string> modules_, values_, params_, fields_, looks_, rules_, waters_;
+  std::set<std::string> modules_, values_, params_, fields_, looks_, rules_, waters_, weathers_;
 };
 
 Expr sum(std::vector<Expr> terms, Expr base) {

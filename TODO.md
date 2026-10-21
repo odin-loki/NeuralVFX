@@ -1,8 +1,8 @@
 # To do: every effect in 3D — a small demo here first, then big on a PC
 
 **Status:** stage 1 is done (study N, `docs/STUDY_3D.md`, and its follow-up N2, §14); stage 2 is planned, not started.
-Work here resumed on 20 October 2026: study O, round 9 (earth and air) and study P are finished and merged ("Here,
-until the PC").
+Work here resumed on 20 October 2026: study O, round 9 (earth and air), study P, the FUSE sample and the 2D weather
+director are finished and merged; round 10's effects and the faster detail layer are under way ("Here, until the PC").
 
 - **Stage 1, here and now (study N): done.** A small 3D demo in this container ([docs/STUDY_3D.md](docs/STUDY_3D.md),
   REPORT §15). What it built:
@@ -113,7 +113,15 @@ then merge it into main.
   - weather: blizzard and drifting snow (#54, #75), steam fog (#61), a haboob or sandstorm wall (#70, #71), sea spray
     (#77);
   - water and volcanic: a geyser (#88), a pyroclastic flow (#110).
-- **A weather director in 2D**, ahead of the 3D weather system:
+- **A weather director in 2D: done** (21 October 2026, branch `weather-director`; [docs/WEATHER.md](docs/WEATHER.md),
+  REPORT §18), ahead of the 3D weather system. Built as designed below: the state, seven regimes varied by the seed,
+  ordered transitions, OU gusts at the Kaimal time scale and log-normal rain cells, Poisson lightning with return
+  strokes; the relations (and the rain's extinction from Marshall-Palmer, Locatelli-Hobbs snow, Kasten-Czeplak daylight,
+  the CIE overcast sky); a `weather` statement with a schedule, rain and snow by their physics, a day sky, a library entry,
+  the state read by engines through `nvfx_scene_get_input` (no new C call); 28 tests and a 40 s scene with frozen
+  keyframes and a video. Found: Marshall-Palmer and Atlas together carry 5 to 18 % more rain than the rate; snow's
+  visibility rests on an assumed area ratio; the windows and targets are choices. Left: no sun or wet ground, the
+  clouds are puffs rather than a deck, the storm moves nowhere (one place, 2D). The design, as it was:
   - regimes: clear, overcast, rain, storm, snow, fog and dust storm;
   - a small weather state drives the layers that exist:
     - the state: cloud cover, rain and snow rates, mean wind and gustiness, visibility, temperature, lightning rate
@@ -520,7 +528,8 @@ Each regime is a set of soundings and forcings whose simulated runs are its trai
 
 - **Transitions.** An engine asks for a regime and a time ("a storm in ten minutes", "clearing by dawn"). The regional
   model's controls move smoothly from one forcing to the next, deterministically from the world's seed. Time of day
-  and season are controls too.
+  and season are controls too. The 2D weather director ([docs/WEATHER.md](docs/WEATHER.md)) does this today for one
+  place, with targets chosen rather than simulated; the regional model would supply them.
 - **Couplings with the local effects** (several exist in 2D today):
   - rain wets surfaces, thins smoke and puts out fires;
   - wind bends flames and smoke, carries embers ahead of a wildfire, builds waves and drives drifting snow;

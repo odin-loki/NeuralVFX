@@ -195,7 +195,9 @@ NVFX_API nvfx_status nvfx_scene_camera(const nvfx_scene* scene, float* x, float*
 
 /* Run-time settings -------------------------------------------------------------------------------------------------
  * Names are those of the script. Each acts from the next frame computed (see nvfx_scene_render). */
-/* Inputs: values the script reads like `t` (declared with `input NAME = value`). */
+/* Inputs: values the script reads like `t` (declared with `input NAME = value`). nvfx_scene_get_input also reads a
+ * weather director's state by "NAME.member" when no input has that name (`weather sky, ...`: "sky.rain" in mm/h,
+ * "sky.visibility" in m, ...; docs/WEATHER.md §1), as of the last frame computed; it cannot be set. */
 NVFX_API nvfx_status nvfx_scene_set_input(nvfx_scene* scene, const char* name, float value);
 NVFX_API nvfx_status nvfx_scene_get_input(const nvfx_scene* scene, const char* name, float* value);
 NVFX_API const char* nvfx_scene_input_name(const nvfx_scene* scene, int i); /* i < n_inputs, else NULL */

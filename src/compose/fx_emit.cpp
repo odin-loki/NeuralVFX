@@ -21,7 +21,7 @@ constexpr float kPi = 3.14159265f, kTau = 6.2831853f;
 
 constexpr std::string_view kNames[] = {"hail", "aurora", "rainbow", "meteors", "beam", "shield", "glints"};
 
-constexpr std::string_view kHail[] = {"in", "size", "density", "wind", "radius", "colour", "brightness", "flow", "seed"};
+constexpr std::string_view kHail[] = {"in", "size", "density", "wind", "radius", "colour", "brightness", "flow", "seed", "speed"};
 constexpr std::string_view kAurora[] = {"in", "size", "colour", "top", "brightness", "rate", "jitter", "seed"};
 constexpr std::string_view kRainbow[] = {"at", "radius", "width", "brightness", "squash", "count"};
 constexpr std::string_view kMeteors[] = {"in", "size", "rate", "speed", "direction", "length", "width", "colour", "brightness", "seed"};
@@ -75,14 +75,14 @@ int count_of(float per, Rng& rnd, int most) {
 // --- sky ---------------------------------------------------------------------------------------------------------------
 
 // Hail, as the weather of §4.6: the rectangle filled at once when it starts, then fed from its top edge and from upwind
-// of it; pellets fall at 560 world pixels a second and bounce once or twice on its bottom edge (or the ground).
+// of it; pellets fall at `speed` (560) world pixels a second and bounce once or twice on its bottom edge (or the ground).
 void hail(const Emit& e, Particles& P, float t, float fps, bool fresh, std::uint32_t salt) {
   Rng rnd{hash_cell(frame_of(t, fps), 83 + static_cast<std::int32_t>(salt), 4, seed_of(e))};
   const float x0 = e.get(v_x, 0.f), y0 = e.get(v_y, 0.f), W = std::max(1.f, e.get(v_w, 100.f)), H = std::max(1.f, e.get(v_h, 100.f));
   const float density = std::max(0.f, e.get(v_density, 1.2f)), wu = e.get(v_wu, 0.f), wv = e.get(v_wv, 0.f), size = std::max(0.3f, e.get(v_radius, 1.3f));
   const float flow = e.get(v_flow, 0.1f);
   const Rgb col = scaled(colour(e, {0.86f, 0.9f, 0.95f}), e.get(v_bright, 1.f));
-  const float vy = std::max(5.f, 560.f + wv), shift = wu * H / vy, xa = x0 - std::max(0.f, shift), span = W + std::abs(shift);
+  const float vy = std::max(5.f, e.get(v_speed, 560.f) + wv), shift = wu * H / vy, xa = x0 - std::max(0.f, shift), span = W + std::abs(shift);
   const float live = density * span * H / 10000.f;
   const int n = count_of(fresh ? live : live * vy / H / fps, rnd, 4096);
   const float floor = y0 + H;
