@@ -1,7 +1,8 @@
 # Elements: a geyser, a haboob and sea spray
 
-Status: **the presets, the training plan and the test's design and rule (§4) are written and committed before any model
-is trained** (21 October 2026); the results will follow them here. Audience: dev, research, artists.
+Status: **done** (21 October 2026). Audience: dev, research, artists. The presets, the training plan (§3) and the test's
+design and rule (§4) were written and committed before any model was trained; each model was frozen by its SHA-256
+before its one test.
 
 Three effects of the elements, after the earth and air rounds ([EFFECTS_EARTH.md](EFFECTS_EARTH.md),
 [EFFECTS_AIR.md](EFFECTS_AIR.md)), from the catalogue in [TODO.md](../TODO.md): a **geyser** (#88: a periodic eruption
@@ -15,7 +16,41 @@ settings and seeds of this round's own (27,000,000 to 27,999,999).
 
 ## 1. Bottom line
 
-To be written from the tests (§4), once each has run.
+- **Sea spray works, by the rule set before the test.** From its true state it follows a held-out run 1.9 dB [1.0, 2.8]
+  better than the same simulation on the same 32-cell grid with the same detail layer at 1 s, and keeps its lead to 8 s
+  (+2.3 at 2 s, +2.9 [1.9, 3.8] at 8 s). Played endlessly at settings and seeds it never saw, its average picture is
+  5.9 dB [4.8, 7.1] closer to a real run's than the nearest training flipbook's and **ties a second real run** (+0.6
+  [-1.3, +2.0]); its motion error ties the flipbook's. Its weak part is its detail: spectrum distance 0.36 against the
+  flipbook's 0.10. By eye: white tufts of spray where crests break, streaming downwind and falling back, blobbier than the
+  simulator's thin plumes. It answers its intensity as the simulator does (§4.7).
+- **The haboob falls short of the bar without being weak.** It tracks better than the coarse simulation from 1 s (+1.1
+  dB [0.3, 1.9]; +2.3 at 2 and at 4 s), but its first frames are lost to its renderer (-11.7 dB at the first frame;
+  the same dynamics drawn by the simulation's renderer tie there), and played endlessly its average picture only **ties**
+  the nearest flipbook's (-0.9 dB [-2.1, +0.2]), where the rule asks for it to be closer; its motion error ties too. The
+  flipbook here is the whole 150-frame one-shot at a neighbouring setting, as close to a real run as a second real run
+  is. **It runs at the simulator's speed** at the test's first held-out setting (24.0 against 25.3 cells/s) and 25% too
+  fast at the second (20.0 against 16.0) (§4.5); the simulator's own current runs as gravity-current theory says (§2:
+  Fr = 1.15 ± 0.23 on its head, Huppert and Simpson's laboratory 1.19).
+- **The geyser is weak**: it ties the coarse simulation at following a run at 1 s (+1.1 dB [-0.3, +2.6]) and loses to it
+  at 2 s (-2.2 [-3.8, -0.5]). Its average picture is 5.3 dB [2.1, 8.4] closer than the flipbook's (a 64-frame flipbook
+  holds less than one of its cycles) and ties a second real run. **Does it erupt when its conduit says?** At the test's
+  first held-out setting yes: over a minute, a column in 95% of the frames where its conduit is past the eruption level
+  (the simulator's: 97%) and in 8% where it is quiet (0%); at the second, low setting (intensity 0.10) it never erupts,
+  where the simulator does a third of the minute (§4.6). Within a 6 s shard its column follows the start point it plays
+  more than its intensity (§4.7).
+- **Cost (provisional, a shared machine):** 146 KB stored for the geyser and sea spray, 294 KB for the haboob (16 start
+  points with 64-pixel fine fields and its mean state); 2.4 to 2.5 MB per instance at 128 px. At the runtime's int8
+  default on the AVX-512 build, 1.03 (geyser), 0.67 (haboob) and 0.42 ms (sea spray) per 128 px frame, where study D's
+  fire took 0.68 ms and its explosion 0.52 in the same rounds (§5).
+- **A scene script** (`examples/scenes/coast.nvfxs`, 9 s) plays all three on a desert coast under the weather director:
+  a geyser field across a bay erupts as a haboob rolls in behind it and the day turns from clear to a dust storm, the
+  rising wind tearing the geysers' steam away and the spray off the breaking sea. Its keyframes are frozen (`ctest -R
+  ScriptedCoastFrozen`, float on AVX2). **Ten library entries** (`library/elements.nvfxl`) use the models, three of them
+  with frozen keyframes: the geysers, haboobs and sea fair, the whitecaps weak to fair (§6).
+- **What it took:** a preset each, one line in the recipe (the geyser and sea spray keep fine fields with their start
+  points), study M3's mean state for the one-shot, 4.2 to 4.4 hours of one thread each side by side on the shared machine
+  (and two container restarts, which cost a step each and changed nothing), and no new code in the trainer, the runtime
+  or the compositor.
 
 ## 2. The effects
 
@@ -96,7 +131,7 @@ into (g' = g Δθ/θ, about 0.1 to 0.3 m/s²) and 1 to 2 km deep, so sqrt(g' h) 
 runs at that speed, as haboobs' do. The tile's frame is shown faster than real time; the scene sets the pace.
 
 Every earlier effect's clips are unchanged to the byte: `Sim.StudyEffectsAreUnchangedByTheNewOnes` hashes clips of all
-27 earlier effects, unchanged, and full-size clips (128 px; 64 frames, the one-shots their own length) of all 27 at two
+27 earlier effects, unchanged (and now the three new ones, hashed when their presets were frozen for training), and full-size clips (128 px; 64 frames, the one-shots their own length) of all 27 at two
 settings were compared byte for byte before and after (54 SHA-256, identical; the data root's
 `fx_elements/jobs/state/baseline_clips.sha256` and `after_clips.sha256`). Tests of the new presets:
 `Sim.ElementsEffectsHaveTheirOwnControlsAndOnlyTheHaboobPlaysOnce`, `Sim.GeyserEruptsHoldsCollapsesIntoSteamAndIsQuietBetween`,
@@ -162,6 +197,66 @@ one with the mean state. Nothing else from the later studies is used, for the re
 ensemble-mean fine-tune changed nothing measurable on steam and the jet, and study O's two detail passes are for the
 falling water's bands, which these do not have.
 
+**How it ran.** The three trained side by side, one thread each, `nice 10`, from the same frozen copy of the tool (built
+at commit 9744781, `fx_elements/bin`, its SHA-256 in `fx_elements/jobs/binaries.sha256`), by a resumable queue
+(`fx_elements/jobs/pipeline.sh`: train, the haboob's mean state, `d-chaos`, freeze, the test), on a machine shared with
+four other agents (load 5 to 14 on 4 cores). The container restarted twice on 21 October: at about 01:18 UTC, half an
+hour into the three `d-train` runs, and at about 05:17, 42 minutes into the geyser's and sea spray's `d-tune` and five
+minutes into the haboob's `d-finish`. Each time the queue started again from its markers (`fx_elements/jobs/state`); a
+step that was cut off ran again whole, from the same tool and the same saved model before it, and its numbers are the
+ones below (the tool and its inputs are deterministic, so a step run again gives the same result: the geyser's first
+1,000 stepper iterations printed the same losses to the digit in both runs). No step after a completed one was redone.
+
+| effect | runs x frames | simulation (recorded in) | stages 1-2 (loss, s) | stage 3 (loss, s) | renderer (training samples) | contrast, swirl, grow | detail score | start points | stored |
+|---|---|---|---|---|---:|---|---:|---:|---:|
+| geyser | 160 x 240 | 21.3 min (679 s) | 0.1142, 11043 | 0.1108, 2135 | 34.3 dB | 0.5, 0, 1 | 4.81 | 8 (64 px fine) | 146 KB |
+| haboob | 240 x 150 | 20.0 min (542 s) | 0.0212, 10862 | 0.0219, 2135 | 31.6 dB | 0.5, 0, 1.5 | 0.44 | 16 (64 px fine) | 274 KB, 294 KB with the mean state |
+| seaspray | 160 x 240 | 21.3 min (554 s) | 0.1075, 11016 | 0.1264, 2237 | 42.1 dB | 0.5, 0, 1 | 0.85 | 8 (64 px fine) | 146 KB |
+
+In all 4.3 hours for the geyser (257 minutes: 196 for stages 1 and 2, 44 for stage 3, 17 for the last step), 4.4 for the
+haboob (266 minutes, 6 of them its mean state) and 4.2 for sea spray (253 minutes), side by side, from 00:49 to 06:26
+UTC with the restarts' losses. The loss columns are not comparable between effects (each is normalised by its own
+state's scale); the geyser's and sea spray's are five times the haboob's, as fire's are larger than smoke's: sudden
+eruptions and breaking crests are hard to predict a frame ahead. The calibration chose no sub-grid swirl and half the
+contrast for all three, and for the haboob a stronger growth of the detail (1.5). The geyser's detail score (the
+calibration's distance of its detailed rollouts from the true runs' statistics) is ten times the others': its true runs
+erupt at times of their own, so two of them differ by much more than the detail does (two real runs' motion ratio is
+6.5 in §4.2). **The haboob's mean state**: the quadratic fit of its training runs' first coarse states explains,
+cross-validated, 88% of the variation over the control space in their heat and soot (the lock's size and density), and
+10% and 1% in their velocity (a lock let go from rest has almost none); `setmean` added 20.5 KB.
+
+Each model was frozen before its test: [fx_elements_frozen.csv](../results/experiments/fx_elements_frozen.csv) has
+their SHA-256 (the files are under the data root's `fx_elements/models/d`, read-only copies under
+`fx_elements/models/frozen`).
+
+**How chaotic they are** (`nvfx_experiment d-chaos`, as [REPORT.md](REPORT.md) §6.1: active PSNR against the
+undisturbed run, mean over 4 runs; [d_chaos.csv](../results/experiments/fx_elements/d_chaos.csv); seeds 27,150,000 and
+up):
+
+| effect | case | 1 frame | 0.5 s | 1 s | 2 s | 4 s | 8 s |
+|---|---|---:|---:|---:|---:|---:|---:|
+| geyser | start nudged by 1e-3, same seed | 85.6 | 81.5 | 80.4 | 77.6 | 75.2 | 71.8 |
+| geyser | start nudged by 1e-1, same seed | 63.1 | 55.6 | 53.3 | 49.1 | 50.7 | 50.6 |
+| geyser | same start, other seed | 42.7 | 20.3 | 16.3 | 14.6 | 17.4 | 10.0 |
+| geyser | other start, same seed | 10.6 | 12.9 | 14.7 | 17.6 | 24.7 | 33.1 |
+| haboob | start nudged by 1e-3, same seed | 99.0 | 86.4 | 82.4 | 79.4 | 75.2 (its frame 120) | - |
+| haboob | start nudged by 1e-1, same seed | 75.2 | 65.1 | 61.7 | 58.5 | 58.1 | - |
+| haboob | same start, other seed | 54.4 | 28.9 | 21.0 | 15.1 | 15.1 | - |
+| haboob | other start, same seed | 24.9 | 27.6 | 29.2 | 28.9 | 26.2 | - |
+| seaspray | start nudged by 1e-3, same seed | 71.3 | 67.1 | 66.8 | 66.3 | 70.2 | 80.6 |
+| seaspray | start nudged by 1e-1, same seed | 49.4 | 42.1 | 42.7 | 47.0 | 53.8 | 57.0 |
+| seaspray | same start, other seed | 19.8 | 13.8 | 10.4 | 11.4 | 12.9 | 12.0 |
+| seaspray | other start, same seed | 11.7 | 16.7 | 20.9 | 27.5 | 41.5 | 52.6 |
+
+- **The noise decides the geyser.** Another seed takes over within a second (16 dB) and, its eruptions coming at other
+  times, is 10 dB away after 8 s; runs from other start points with the same seed draw together (33 dB at 8 s), since
+  the seed's conduit sends them into the same eruptions.
+- **The haboob is set by its lock**: a small error stays small through its 5 s, another seed takes over its head's curls
+  within two seconds (15 dB), and runs from other start points (other locks) stay 25 to 29 dB apart throughout.
+- **Sea spray is driven by its noise more than fire is**: another seed leaves 10 dB after a second (fire: 13, heavy gas:
+  16), and runs from other start points with the same seed become nearly the same run (53 dB at
+  8 s): where and when crests break is the seed's flicker, and a crest's spray falls out within a second or two.
+
 ## 4. The test
 
 **Written before any model was trained, and committed with the presets.** Each model is frozen by its SHA-256
@@ -221,6 +316,314 @@ Detail (spectrum distance) and coverage are reported but do not decide.
   two held-out settings, the share of frames with a water column (alpha above a half over a fifth of the frame's height
   above the vent) while the conduit's charge is above 1.35, and while it is below 0, in the real run and the learned one.
 
+**How it ran.** The design held. Each test ran once, with the frozen tool, into a folder of its own under the data root
+(`fx_elements/test/EFFECT`), right after its model was frozen, all on 21 October: the haboob from 05:54 (3.6 minutes,
+one thread), sea spray from 06:20 (4.0 minutes) and the geyser from 06:22 (4.0 minutes); the queue refuses to test a
+model whose SHA-256 is not the frozen one, or to test twice. Their rows were merged into
+[d_track.csv](../results/experiments/fx_elements/d_track.csv), [d_stats.csv](../results/experiments/fx_elements/d_stats.csv)
+and [d_long.csv](../results/experiments/fx_elements/d_long.csv), and `d-report` wrote
+[D_SUMMARY.md](../results/experiments/fx_elements/D_SUMMARY.md). `d-report` pairs the tracking runs at 1 and 8 frames and
+at 1, 2 and 8 s; the haboob's 4 s, which the design names, was paired the same way (`metrics::paired_bootstrap`, 10,000
+resamples, over the same rows of `d_track.csv`) by a scratch tool. The `neural` rows played at int8 (the runtime's
+default; the AVX-512 build with VNNI).
+
+### 4.1 Tracking from the true state
+
+Active PSNR (dB), mean over 8 held-out runs (the haboob's last horizon is 4 s, its frame 120):
+
+| effect | method | 1 frame | 8 frames | 1 s | 2 s | 8 s (haboob: 4 s) |
+|---|---|---:|---:|---:|---:|---:|
+| geyser | neural | 31.7 | 23.7 | 18.8 | 16.7 | 16.1 |
+| geyser | neural dynamics, simulation's renderer | 34.8 | 23.9 | 19.0 | 16.9 | 16.2 |
+| geyser | coarse simulation + detail | 31.4 | 21.7 | 17.7 | 18.9 | 18.8 |
+| geyser | coarse simulation | 24.4 | 21.4 | 18.4 | 19.5 | 19.6 |
+| geyser | holding the first frame | 41.6 | 25.0 | 18.3 | 16.0 | 11.0 |
+| haboob | neural | 27.5 | 24.4 | 18.5 | 16.7 | 15.1 |
+| haboob | neural dynamics, simulation's renderer | 38.0 | 25.5 | 18.4 | 16.7 | 15.0 |
+| haboob | coarse simulation + detail | 39.2 | 27.1 | 17.4 | 14.3 | 12.9 |
+| haboob | coarse simulation | 24.4 | 25.4 | 21.2 | 16.9 | 14.6 |
+| haboob | holding the first frame | 43.1 | 26.5 | 14.2 | 10.9 | 9.4 |
+| seaspray | neural | 30.1 | 20.6 | 17.2 | 17.1 | 17.5 |
+| seaspray | neural dynamics, simulation's renderer | 30.5 | 20.5 | 17.1 | 17.1 | 17.5 |
+| seaspray | coarse simulation + detail | 23.9 | 19.3 | 15.2 | 14.8 | 14.6 |
+| seaspray | coarse simulation | 20.4 | 18.8 | 16.1 | 15.7 | 15.2 |
+| seaspray | holding the first frame | 28.6 | 14.8 | 10.5 | 10.2 | 10.4 |
+
+Neural minus coarse simulation + detail, paired over runs (95% intervals; bold: the neural rollout is better):
+
+| effect | 1 frame | 8 frames | 1 s | 2 s | 8 s (haboob: 4 s) |
+|---|---|---|---|---|---|
+| geyser | +0.34 [-2.74, +3.13] (tie) | **+1.99 [+0.40, +3.80]** | +1.10 [-0.33, +2.57] (tie) | -2.17 [-3.80, -0.46] | -2.65 [-5.24, +0.03] (tie) |
+| geyser, neural dynamics with the simulation's renderer | **+3.38 [+1.56, +5.42]** | **+2.21 [+0.47, +4.19]** | +1.22 [-0.20, +2.66] (tie) | -2.01 [-3.64, -0.33] | -2.55 [-5.24, +0.30] (tie) |
+| haboob | -11.73 [-13.41, -9.62] | -2.75 [-3.76, -1.89] | **+1.06 [+0.25, +1.87]** | **+2.32 [+1.34, +3.23]** | **+2.28 [+1.60, +2.96]** |
+| haboob, neural dynamics with the simulation's renderer | -1.23 [-2.89, +0.84] (tie) | -1.66 [-2.58, -0.88] | **+0.94 [+0.00, +1.90]** | **+2.30 [+1.33, +3.24]** | **+2.18 [+1.49, +2.89]** |
+| seaspray | **+6.26 [+4.13, +8.63]** | +1.23 [-0.21, +2.55] (tie) | **+1.92 [+1.01, +2.83]** | **+2.30 [+0.42, +4.17]** | **+2.88 [+1.85, +3.78]** |
+| seaspray, neural dynamics with the simulation's renderer | **+6.65 [+4.56, +8.95]** | +1.16 [-0.27, +2.49] (tie) | **+1.87 [+0.94, +2.83]** | **+2.29 [+0.39, +4.18]** | **+2.93 [+1.92, +3.80]** |
+
+- **Sea spray follows a run better than the simulation on the same grid from its first frame to 8 s**, and its lead
+  grows (+1.9 at 1 s, +2.9 at 8 s): crests break where the run's noise says, so a stepper that has learned where they
+  break stays with the run long after the details of the spray have parted. The 32-cell simulation loses the thin crests
+  and their spray at once (23.9 dB at the first frame against the learned 30.1). Its renderer is close to the truth on
+  the true fields (40.5 dB), so its dynamics and its picture lead alike.
+- **The haboob follows better from 1 s** (+1.1, then +2.3 at 2 and 4 s: the coarse simulation's current falls behind as
+  its head's billows are lost on 32 cells), **but its first frames are lost to its renderer**: drawn by the simulation's
+  renderer the same dynamics tie at the first frame (-1.2) where the learned picture loses 11.7 dB. Its renderer reaches
+  only 27.9 dB on the true fields of the first frame (29.1 over its first second, 31.6 on its training samples): the
+  fresh lock, a dense box of dust, is a small share of its training samples, as the explosion's fresh fireball and the
+  smoke ring's fresh puff were, and it shows a magenta speck at the lock's nose. Both lose at 8 frames, when the lock is
+  collapsing.
+- **The geyser leads at 8 frames, ties at 1 s and loses at 2 s.** Its eruptions start and stop with the run's conduit
+  (the same noise), but once a run's column and steam have decorrelated, the coarse simulation's smoother picture of the
+  same eruption scores higher: holding the first frame is as good as the learned run at 1 s (18.3 against 18.8 dB).
+  Its renderer is not the trouble (36 dB on the true fields).
+
+### 4.2 Endless runs at settings never seen
+
+Means over the 10 held-out settings (spectrum distance and coverage distance: lower is better; motion ratio: 1 is
+right; mean-frame PSNR: higher is closer):
+
+| effect | method | spectrum | motion | coverage | mean-frame PSNR |
+|---|---|---:|---:|---:|---:|
+| geyser | real, other seed (floor) | 0.921 | 6.50 | 0.0395 | 26.2 |
+| geyser | **neural rollout (146 KB)** | 0.587 | 4.54 | 0.0382 | 25.3 |
+| geyser | nearest training flipbook (64 frames) | 0.608 | 16.23 | 0.0444 | 20.0 |
+| geyser | coarse simulation + detail | 1.032 | 2.24 | 0.0389 | 23.3 |
+| geyser | coarse simulation | 1.330 | 2.19 | 0.0398 | 23.1 |
+| haboob | real, other seed (floor) | 0.059 | 1.11 | 0.0155 | 25.9 |
+| haboob | **neural rollout (294 KB)** | 0.124 | 0.97 | 0.0139 | 25.8 |
+| haboob | nearest training flipbook (its 150 frames) | 0.096 | 0.86 | 0.0156 | 26.8 |
+| haboob | coarse simulation + detail | 0.162 | 0.79 | 0.0251 | 24.6 |
+| haboob | coarse simulation | 0.600 | 0.41 | 0.0162 | 26.2 |
+| seaspray | real, other seed (floor) | 0.077 | 1.13 | 0.0121 | 29.9 |
+| seaspray | **neural rollout (146 KB)** | 0.357 | 0.85 | 0.0124 | 30.5 |
+| seaspray | nearest training flipbook (64 frames) | 0.099 | 1.16 | 0.0136 | 24.6 |
+| seaspray | coarse simulation + detail | 0.135 | 0.57 | 0.0103 | 28.3 |
+| seaspray | coarse simulation | 1.048 | 0.51 | 0.0107 | 28.5 |
+
+Neural minus each other method, paired over the 10 settings (motion as the error |ln ratio|; bold: the neural rollout
+is better):
+
+| effect | statistic | nearest flipbook | coarse simulation + detail | real, other seed |
+|---|---|---|---|---|
+| geyser | spectrum distance | -0.021 [-0.271, +0.235] (tie) | -0.445 [-1.055, +0.060] (tie) | -0.334 [-0.722, +0.047] (tie) |
+| geyser | mean-frame PSNR (dB) | **+5.27 [+2.12, +8.42]** | +2.03 [-0.79, +4.66] (tie) | -0.87 [-3.90, +2.12] (tie) |
+| geyser | motion error | -0.310 [-0.747, +0.130] (tie) | -0.938 [-2.483, +0.206] (tie) | -0.384 [-1.134, +0.330] (tie) |
+| geyser | coverage distance | -0.0063 [-0.0160, +0.0031] (tie) | - | -0.0013 [-0.0126, +0.0079] (tie) |
+| haboob | spectrum distance | +0.028 [-0.005, +0.056] (tie) | -0.038 [-0.078, +0.009] (tie) | +0.065 [+0.047, +0.083] |
+| haboob | mean-frame PSNR (dB) | -0.93 [-2.13, +0.19] (tie) | **+1.23 [+0.47, +2.00]** | -0.08 [-1.34, +0.87] (tie) |
+| haboob | motion error | -0.039 [-0.159, +0.068] (tie) | -0.087 [-0.182, +0.021] (tie) | -0.046 [-0.140, +0.048] (tie) |
+| haboob | coverage distance | -0.0018 [-0.0071, +0.0030] (tie) | - | -0.0016 [-0.0083, +0.0033] (tie) |
+| seaspray | spectrum distance | +0.257 [+0.204, +0.309] | +0.222 [+0.159, +0.265] | +0.280 [+0.238, +0.325] |
+| seaspray | mean-frame PSNR (dB) | **+5.88 [+4.77, +7.11]** | **+2.22 [+1.25, +3.09]** | +0.60 [-1.30, +1.96] (tie) |
+| seaspray | motion error | +0.040 [-0.074, +0.163] (tie) | **-0.298 [-0.519, -0.105]** | +0.050 [-0.068, +0.168] (tie) |
+| seaspray | coverage distance | -0.0011 [-0.0049, +0.0021] (tie) | - | +0.0003 [-0.0023, +0.0031] (tie) |
+
+- **Sea spray** is, in its average picture, its motion and its cover, as close to a real run as a second real run is
+  (all ties), and closer than the flipbook in its average picture by 5.9 dB: a flipbook loops its own crests in its own
+  places, where a run at another seed breaks crests elsewhere. Its detail is the furthest from real of the three (0.36,
+  the flipbook's 0.10): by eye (the figure below) the learned spray is soft tufts where the simulator's is thin, curling
+  plumes.
+- **The haboob** ties the flipbook and a second real run on everything but detail; the flipbook, its whole 150 frames at
+  a neighbouring setting, is itself as close to a real run as a second real run is (26.8 against 25.9 dB), so there is
+  little room to be closer. It is 1.2 dB [0.5, 2.0] closer than the coarse simulation with detail. By eye the learned
+  lock breaks into vertical streaks as it collapses and its head's curls are blockier than the simulator's.
+- **The geyser's numbers are dominated by when it erupts.** Two real runs at one setting differ by a factor of 6.5 in
+  motion (one erupts in the 10 s window and the other not), so the motion errors are all ties with wide intervals, and
+  the flipbook (2.1 s of one eruption or one quiet spell, looped) is the furthest from real in its average picture. The
+  learned run's average picture ties a second real run's.
+
+![Geyser, haboob and sea spray at the first held-out setting: for each, the real run (top) and the neural rollout with a new seed (below), across the run (the haboob over its 5 s)](figures/elements_endless.png)
+
+### 4.3 One minute without a restart
+
+| effect | spectrum distance | motion ratio | mean-frame PSNR |
+|---|---|---|---|
+| geyser | 0.14-1.35 | 0.12-1.31 | 23.9-32.1 |
+| seaspray | 0.14-0.32 | 0.65-2.05 | 26.5-31.0 |
+
+Ranges over six 10 s windows at each of the first two held-out settings (the haboob plays once). Neither drifts: the
+last windows are as good as the first. Sea spray moves too little at the first setting (0.65 to 0.82) and too much at
+the second (1.23 to 2.05) in every window. At the second setting (intensity 0.10) the learned geyser is nearly still in
+three windows of six (motion 0.12 to 0.19): it does not erupt there (§4.6).
+
+### 4.4 By the rule
+
+- **Sea spray works**: it tracks better than the coarse simulation at 1 s (+1.92 [1.01, 2.83]), its average picture is
+  closer than the flipbook's (+5.88 [4.77, 7.11]) and its motion error ties the flipbook's.
+- **The haboob falls short**: it tracks better than the coarse simulation at 1 s (+1.06 [0.25, 1.87]) and its motion
+  error ties the flipbook's, but its average picture only ties the flipbook's (-0.93 [-2.13, +0.19]), where the rule asks
+  for an interval above zero; nor does it lose anything the rule names as weak.
+- **The geyser is weak**: it ties the coarse simulation at 1 s (+1.10 [-0.33, +2.57]), which the rule names as weak,
+  though its average picture is closer than the flipbook's (+5.27 [2.12, 8.42]) and its motion error ties it.
+
+### 4.5 Does the learned haboob run at the simulator's speed?
+
+Answered beside the rule, as decided (§4), on the test's own runs at its first two held-out settings: the real run
+(seed 27,100,000 + setting) and the neural run (27,120,000 + setting), both from the first frame. The design named the
+front from the coarse soot; the runtime's API gives the learned run's picture and not its coarse fields, so the front was
+taken from the pictures of both, the same way: the rightmost column whose alpha sums to more than 6 pixels' worth (a
+scratch measurement, `fx_elements/dev/beside.cpp`). The front's position (cells of the 128-cell frame):
+
+| | 0.5 s | 1 s | 1.5 s | 2 s | 2.5 s | 3 s | 3.5 s | 4 s | 4.5 s | speed, 1.5 to 3 s |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| setting 0 (0.31, 0.88, 0.74), real | 29 | 37 | 44 | 53 | 66 | 82 | 98 | 114 | 127 | 25.3 cells/s |
+| setting 0, neural | 28 | 32 | 39 | 48 | 64 | 74 | 82 | 92 | 104 | 24.0 cells/s |
+| setting 1 (0.10, 0.44, 0.38), real | 28 | 31 | 37 | 44 | 52 | 60 | 70 | 81 | 100 | 16.0 cells/s |
+| setting 1, neural | 27 | 30 | 37 | 46 | 56 | 68 | 81 | 99 | 116 | 20.0 cells/s |
+
+(Both start at 27, the lock's edge.) **At the first setting it does** (5% slower from 1.5 to 3 s), though it slows after
+3 s and is 23 cells behind at 4.5 s. **At the second it runs 25% too fast** (20.0 against 16.0) and is 16 cells ahead at
+4.5 s: its weak, shallow current runs at the speed of a stronger one (the mean state moves the lock to the controls, §3; why
+the stepper then runs it fast was not studied). Both learned fronts run as a gravity current does, at a steady speed after the lock's
+collapse; the simulator's own speeds against the theory are in §2.
+
+### 4.6 Does the learned geyser erupt when its conduit says?
+
+Answered beside the rule, as decided (§4), at the test's first two held-out settings with the one-minute runs' seeds
+(27,140,000 + setting). `d-eval`'s one-minute run plays in shards, each starting again from a start point with that
+point's own time, so its conduit's time jumps every 6 s; the learned run here is one continuous rollout of a minute
+instead (`nvfx_instance_set_drift(0)`, the runtime's first start point for that seed), whose conduit's time is its start
+point's plus the frames, against the simulator's minute with the same seed. A frame has a column when alpha is above a
+half over a fifth of the frame's height above the vent (a scratch measurement, `fx_elements/dev/beside.cpp`; its first
+run used 0.8 for the alpha by mistake, and was run again with the planned half, which alone is reported):
+
+| | column, share of the minute | while the conduit is past 1.35 | while it is below 0 |
+|---|---:|---:|---:|
+| setting 0 (0.31, 0.88, 0.74), real | 0.29 | 0.97 (of 392 frames) | 0.00 (of 460) |
+| setting 0, neural | 0.36 | 0.95 (of 392) | 0.08 (of 460) |
+| setting 1 (0.10, 0.44, 0.38), real | 0.35 | 0.96 (of 450) | 0.00 (of 256) |
+| setting 1, neural | 0.01 | 0.00 (of 450) | 0.00 (of 256) |
+
+**At the first setting it does**: a column in 95% of the frames where the conduit erupts and in 8% where it is quiet
+(columns lingering after an eruption). The real-against-learned video shows it too: from the same state and noise the
+learned geyser erupts when the simulator's does ([videos/README.md](../videos/README.md) §5). **At the second, low
+setting it never erupts** in the minute, where the simulator does in a third of it: at intensity 0.10 the learned
+conduit's surges stay steam.
+
+### 4.7 After the test: does it answer its intensity?
+
+Not part of the test's design; asked because the geyser's demo video showed two panels at different intensities playing
+the same column. Scratch measurements (`fx_elements/dev/ctrl2.cpp`, `ctrl3.cpp`) with seeds 27,210,000 to 27,210,007 and
+27,200,001; wind or gale 0.5, turbulence 0.5. Over 8 seeds and 10 s, the mean cover (alpha) and the mean height of the
+highest pixel with alpha above a half (share of the frame), the simulator after its 150-frame warm-up and the learned
+effect as the runtime plays it (6 s shards from the start points nearest the controls):
+
+| intensity | geyser, real: cover, top | geyser, learned | seaspray, real | seaspray, learned |
+|---|---|---|---|---|
+| 0.1 | 0.018, 0.13 | 0.010, 0.11 | 0.015, 0.14 | 0.014, 0.13 |
+| 0.5 | 0.029, 0.17 | 0.045, 0.24 | 0.026, 0.18 | 0.024, 0.19 |
+| 0.9 | 0.043, 0.23 | 0.060, 0.30 | 0.043, 0.24 | 0.040, 0.23 |
+
+And from one start point with one seed (seed 27,200,001, for which the runtime's first shard plays start point 0 at
+both settings), the mean cover over that 6 s shard at intensity 0.1 and 0.9: the geyser 0.0148 and 0.0175 (+18%), sea
+spray 0.0119 and 0.0293 (x2.5). **Sea spray answers its intensity as the simulator does**, within a shard and on
+average. **The geyser's answer comes mostly from which start point a shard plays** (its eight start points were stored
+at other controls): from a given start its column follows that start and the noise, hardly its intensity, and on
+average it grows too much with intensity (cover 0.045 at 0.5, the simulator's 0.029). A game that sets a geyser's height
+gets it at the next shard, not at once.
+
+## 5. Memory and cost
+
+Per frame through `nvfx_render` on one pinned core, with study D's fire and explosion measured in the same session
+(`nvfx_experiment d-timing`, twelve rounds back to back, 21 October 2026; [d_timing.csv](../results/experiments/fx_elements/d_timing.csv)
+has the first round, [d_timing_rounds.csv](../results/experiments/fx_elements/d_timing_rounds.csv) all of them): the
+least of the rounds' medians and, in brackets, the median of the rounds. All at the runtime's default precision, int8
+(the AVX2 rows force the AVX2 build, whose int8 kernels the runtime takes on a CPU without VNNI; the AVX-512 row is what
+this machine plays by default). **Provisional**: the machine was shared with other agents' jobs, though its load was
+low during the rounds (about 1 to 2 on 4 cores); a first set of rounds that overlapped this round's own gallery renders
+was discarded and run again.
+
+| effect | stored | resident | per instance at 128 px | 64 px, AVX2 | 128 px, AVX2 | 256 px, AVX2 | 128 px, AVX-512 (the default) | restart (AVX2, 128 px) |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| geyser | 146 KB | 419 KB | 2.4 MB | 0.55 ms (0.74) | 1.17 ms (1.37) | 2.12 ms (2.49) | **1.03 ms** (1.28) | 0.3 ms |
+| haboob | 294 KB | 804 KB | 2.5 MB | 0.61 ms (0.67) | 0.77 ms (0.97) | 1.37 ms (1.55) | **0.67 ms** (0.83) | 0.3 ms |
+| seaspray | 146 KB | 419 KB | 2.4 MB | 0.44 ms (0.58) | 0.61 ms (0.73) | 1.15 ms (1.44) | **0.42 ms** (0.66) | 0.3 ms |
+| fire (study D's, same session) | 82 KB | 163 KB | 2.4 MB | 0.48 ms (0.62) | 0.94 ms (1.19) | 2.34 ms (2.75) | 0.68 ms (0.85) | 18 ms (1 s warm-up) |
+| explosion (study D's, same session) | 274 KB | 804 KB | 2.4 MB | 0.38 ms (0.47) | 0.68 ms (0.80) | 1.32 ms (1.58) | 0.52 ms (0.67) | 0.2 ms |
+
+The same network as study D's, so the same per-pixel work (1012 multiply-adds per pixel at 128 px); what differs is how
+much of the frame the detail layer and the renderer work on. The haboob and sea spray cost less than fire; the geyser
+costs more (1.03 ms against 0.68 at the default): why was not studied, though its steam spreads thin over much of its
+frame. All three store their fine fields with their start points and restart in a third of a millisecond. The haboob's
+mean state is applied once, when it starts. For scale, the 32-cell simulation of each with its own renderer costs 2.7
+(geyser: 2.9 in the median round), 7.5 (haboob: 9.3) and 4.8 ms
+(sea spray: 5.9) in our scalar code, against 1.0 ms (1.2) for fire's.
+
+## 6. The library and a scene
+
+**Ten library entries** (`library/elements.nvfxl`), judged by eye from sheets, close shots and a walk-through of each
+entry through its clip ([LIBRARY.md](LIBRARY.md) has the notes):
+- the geyser: `erupting_geyser`, `hot_spring_geyser` and `geyser_in_wind`, **fair**: by the show moment a white column
+  of water stands over the vent, with green and magenta fringes at its crown from the learned renderer, its drops (the
+  composer's seeded spray) falling back into a seeded basin; between eruptions a faint wisp of steam. The hot spring's is
+  a moderate spurt over its pool; the windy geyser's drops blow downwind, its column hardly leans. Their seeds were chosen
+  (by a scratch scan of the conduit's noise) so that the conduit erupts at the catalogue's show moment.
+- the haboob: `haboob`, `dust_wall_far`, `low_sandstorm` and `red_planet_dust_front`, **fair**: a rolling ochre (or rust)
+  wall running right along the ground with curling billows and faint marbling, its tile's top edge softened (`feather
+  0.2`); each fades out over its last 0.8 s, as the model's 5 s end. Drawn by scene-lit dust looks (`haboob_dust`,
+  `rust_dust`).
+- sea spray: `sea_spray` and `storm_surf` **fair**, `whitecaps` **weak to fair**: white tufts of spray along the
+  composer's waves that stream downwind and fall back in motion; the storm's a lumpy line of white; the whitecaps faint
+  flecks that read in motion more than in a still.
+
+The geyser and sea spray are drawn by their own learned renderers, not field-shader looks: their steam and fine spray
+are the solver's heat, which a look draws only as light (and a heat that is light lights the stage: every module here
+has `glow (0, 0, 0)`). Three of them have frozen keyframes (`erupting_geyser`, `haboob`, `sea_spray`: `ctest -R
+LibraryElementsKeyframesFrozen`, [frozen_elements.csv](../results/library/frozen_elements.csv), float on AVX2); they are
+the same on one and two threads. What it took: a script takes seeds up to 2^24, so the library's and the scene's
+module seeds are 2,700,001 and up, not this round's 27,000,000 and up (the test's seeds are its own, §4); a parameter
+first named `sea` shared its name with another declaration of its entry, which the language refuses, so it is `waves`. Nothing was added to the compositor, the runtime or the
+library's code.
+
+![The ten elements entries, each alone at its show moment](figures/library_sheet_elements.png)
+
+**The scene**: `examples/scenes/coast.nvfxs` (9 s at 1280 x 720 and 30 fps, about 70 lines). A hot afternoon on a desert
+coast, under the weather director ([WEATHER.md](WEATHER.md); seed 27,100,000, from clear to dust from 1.2 s over 5 s).
+Across a bay three geysers stand on the far shore, each with its own start point and seed, so each erupts on its own
+time; the sea breaks in the foreground (three sea spray tiles over the composer's waves, a seeded pool whose swell
+grows with the wind). From 0.8 s a haboob rolls in from the left behind the geysers (one 256-pixel tile 1050 world pixels
+wide, drawn by the look `dust_wall`). The director's wind drives everything: it leans the geysers' steam to the right,
+its strength (12 to 25 m/s) is the spray's `gale`, so the sea breaks harder and streams more spray as the storm comes,
+and its raised dust is blown sand racing along the ground; the light dims and yellows with the dust, and the haze is
+kept to at most 2.5 km so that the wall stays the dust that shows (choices). Nothing was added to the compositor or the
+runtime.
+
+![The coast: keyframes at 0.8, 2.0, 3.0, 4.0, 5.0, 6.0, 7.2 and 8.4 s](figures/coast_keyframes.png)
+
+The video (rendered at the runtime's int8 default; [videos/README.md](../videos/README.md) §1) and the full keyframes
+are under the data root's `fx_elements/scene` and `fx_elements/media` (outside git); the keyframes' SHA-256 are in
+[fx_elements_frozen.csv](../results/experiments/fx_elements_frozen.csv) and `ctest -R ScriptedCoastFrozen` checks them
+(pinned to float on the AVX2 build, skipped without the effects in `NEURALFX_MODELS_ELEMENTS`, by default
+`$NEURALVFX_DATA/fx_elements/models/scene`). They are the same on 1 and 2 threads. It plays without an allocation in
+its frame loop, at a median 51 ms per frame on 2 threads at int8 on the shared machine (the modules' steps 4.9 ms of it;
+drawing the 1280 x 720 frame, its big dust tile and the sea, and the bloom the rest; provisional).
+
+What works: the three read as a geyser field, a dust wall and a breaking sea under one storm, and one wind moves all
+three. What does not, yet: the haboob is greyer than ochre in the daylight and its marbled streaks show at this size;
+the geysers are soft white pillars with faint fringes; the spray is small at this scale; the daylight ground is a thin
+strip of green (the composer's daylight ground is grass); late on, the dust's haze whitens the whole frame.
+
+## 7. What it means
+
+- **An effect whose look is where the noise puts it learns well.** Sea spray's crests break where the run's flicker
+  says, and the learned stepper follows that: it leads the coarse simulation more at 8 s than at 1 s and plays endlessly
+  as close to a real run as a second real run. What it does not keep is the spray's fine shape (its detail is the
+  furthest from real of the three).
+- **A gravity current is learnable, its speed included**, within 5% at one held-out setting; a weak current ran 25% fast.
+  Its first frames are its renderer's trouble, as every one-shot's fresh state has been (the explosion, the ring): a fresh
+  state is a small share of the renderer's training samples. And a one-shot of one kind of motion is hard to beat with a
+  flipbook baseline that is the whole one-shot: the flipbook was as close as a second real run.
+- **A clock in the noise is learnable only in part.** The geyser's conduit is a slow noise the stepper sees, and at a
+  middle setting the learned geyser erupts when it says, but at a low one it never does, and within a shard its column
+  follows its start point more than its intensity. Stored start points at more settings, or study M3's mean state for a
+  looping effect, are the things to try; an eruption on a game's cue would be the one-shot started again (as the rings
+  are).
+- **The design rules held** (broad structures, speeds under a coarse cell a frame, every force a function of what the
+  stepper sees), and so did the theory: the simulator's haboob runs at Fr ≈ 1.15, Huppert and Simpson's laboratory value.
+- **Heat that is not fire needs a look of its own.** A field-shader look draws the solver's heat as light, so steam and
+  fine spray, which are heat here, cannot be drawn by a look lit by the scene; the geyser and sea spray use their learned
+  renderers, with the geyser's green and magenta fringes. A look that draws heat as white vapour is the thing to add.
+
 ## 8. Reproduce
 
 ```sh
@@ -240,12 +643,15 @@ build/nvfx_experiment d-chaos --effects E --root $D --results $D/chaos/E --threa
 build/nvfx_experiment d-eval  --effects E --root $D --results $D/test/E --figures FIGS --threads 1 --seed-base 27000000
 $D/jobs/merge_rows.sh                                                                     # the rows into results/
 build/nvfx_experiment d-report --root $D --results results/experiments/fx_elements      # D_SUMMARY.md
-$D/jobs/timing.sh 4                                                                       # d-timing, four rounds
+$D/jobs/timing.sh 12                                                                      # d-timing, twelve rounds
 build/nvfx_scene_script --script examples/scenes/coast.nvfxs --models $D/models/scene --out coast.mp4 --keyframes DIR
 build/nvfx_gallery --library library --models $NEURALVFX_DATA/library/models --only erupting_geyser,haboob,sea_spray --sheet sheet.png
+$D/jobs/videos.sh                                                                         # the six videos (videos/README.md)
 ```
 
 The data root's `fx_elements/jobs` holds the queue (`train.sh`, `pipeline.sh`, which refuses to test a model whose
 SHA-256 is not the frozen one and refuses to test twice), the frozen tool's SHA-256 and commit (`binaries.sha256`,
 `binaries.commit`), and the clips' hashes before and after the presets (`state/baseline_clips.sha256`,
-`state/after_clips.sha256`); the scratch probes this document quotes are in `fx_elements/dev` (outside git).
+`state/after_clips.sha256`); the scratch probes this document quotes are in `fx_elements/dev` (outside git): `probe` and
+`froude` (§2), `horizon` (the haboob's 4 s pairs, §4), `beside` (§4.5, §4.6), `ctrl2` and `ctrl3` (§4.7), `seedscan`
+(the library's geyser seeds, §6).

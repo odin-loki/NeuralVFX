@@ -76,6 +76,21 @@ then merge it into main.
   - Also done: timing (provisional), library/air.nvfxl (12 entries), the crypt scene with frozen keyframes, six videos
     and REPORT §6.17. Still weak: the candle's flame is ragged up close, the ring's fine detail is poor and its first
     frame is off, and the gas streaks.
+- **Round 10, elements** (`effects-elements`, docs/EFFECTS_ELEMENTS.md): a geyser (#88), a haboob or sandstorm wall
+  (#70, #71) and sea spray (#77).
+  - **Finished on its branch** (21 October 2026): the three presets with sim and recipe tests (the 27 earlier effects'
+    clips unchanged); the haboob's front checked against gravity-current theory (Fr = 1.15 ± 0.23 on its head; Huppert
+    and Simpson 1.19); the rule committed before any training; each model frozen by SHA-256 and tested once on seeds
+    from 27,000,000.
+  - Sea spray works (tracking at 1 s +1.92 dB [+1.01, +2.83] over the coarse simulation with detail; endless mean
+    picture +5.88 dB [+4.77, +7.11] closer than the nearest flipbook's, motion tied). The haboob falls short (+1.06 dB
+    [+0.25, +1.87] at 1 s; mean picture tied with the flipbook's). The geyser is weak (+1.10 dB [-0.33, +2.57] at 1 s,
+    a tie; mean picture +5.27 dB closer than the flipbook's).
+  - Also done: timing (provisional), library/elements.nvfxl (10 entries), the coast scene with frozen keyframes, six
+    videos and REPORT §6.19. Still weak: the geyser never erupts at low intensity and within a shard follows its start
+    point more than its intensity; the haboob's first frames (its renderer) and a weak current that runs 25% fast; sea
+    spray's detail (tufts, not thin plumes). To try: a field-shader look that draws heat as white vapour (steam and fine
+    spray are heat, which a look draws as light), and more start points or study M3's mean state for the geyser.
 - **Study O, the most visible flaws** (`study-fix`, REPORT §16): **finished and merged into main** (20 October 2026).
   - Done, by eye, with no model change:
     - the waterfall's and rain shaft's banding (the detail layer locking once a frame; effects take `passes N`, and
@@ -110,9 +125,9 @@ then merge it into main.
 - **More 2D effects**, from the catalogue rows the 2D solver can carry:
   - fire and smoke: a forest crown fire (#6), fire out of a window (#8), coloured smoke grenades (#18);
   - blasts and engines: a dust explosion (#31), contrails (#36), helicopter downwash (#37);
-  - weather: blizzard and drifting snow (#54, #75), steam fog (#61), a haboob or sandstorm wall (#70, #71), sea spray
-    (#77);
-  - water and volcanic: a geyser (#88), a pyroclastic flow (#110).
+  - weather: blizzard and drifting snow (#54, #75), steam fog (#61); a haboob or sandstorm wall (#70, #71) and sea
+    spray (#77): done in round 10 (elements);
+  - water and volcanic: a geyser (#88): done in round 10 (elements); a pyroclastic flow (#110).
 - **A weather director in 2D: done** (21 October 2026, branch `weather-director`; [docs/WEATHER.md](docs/WEATHER.md),
   REPORT §18), ahead of the 3D weather system. Built as designed below: the state, seven regimes varied by the seed,
   ordered transitions, OU gusts at the Kaimal time scale and log-normal rain cells, Poisson lightning with return
@@ -738,6 +753,8 @@ Ranges already used elsewhere:
 - 3.0 to 3.5 million: study O; 3.6 to 3.9 million: study P;
 - 6.0 to 6.8 million: round 9's effects (earth 6.0 to 6.4, air 6.4 to 6.8); 6.9 million: an earlier smoke test;
 - 7 million: water;
+- 27 million: round 10's elements (27,000,000 to 27,999,999; the library's and the scene's module seeds 2,700,001 to
+  2,710,031, as a script takes seeds up to 2^24);
 - 8 million: studies M, M2 and M3.
 
 ## What goes in git

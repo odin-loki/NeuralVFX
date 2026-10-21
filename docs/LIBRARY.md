@@ -490,6 +490,42 @@ with no allocation. The keyframes of
 AVX2, `ctest -R LibraryAirKeyframesFrozen`). The air models are linked into the models' folder with the others
 (`ln -s ../../fx_air/models/d/{candle,smokering,heavygas}.nvfx .`).
 
+### Elements (10, round 10: `library/elements.nvfxl`)
+
+The geyser model (a vent that simmers, steams and surges as its conduit's noise rises, then erupts in a white column of
+water and steam that holds, collapses back around the vent and leaves its steam drifting off; irregular, on its own
+time), the haboob model (a storm's cold outflow running right along the ground as a gravity current, a tall rolling head
+of dust with dimmer dust behind; once, 5 s) and the sea spray model (spray torn off breaking wave crests by the wind,
+blown to the right and falling back), [EFFECTS_ELEMENTS.md](EFFECTS_ELEMENTS.md): sea spray works by its test's rule, the
+haboob falls short of it (its average picture ties the nearest flipbook's) and the geyser is weak (it ties the coarse
+simulation at following a run at 1 s). The geyser and sea spray are drawn by their own learned renderers (their steam
+and fine spray are the solver's heat, which a field-shader look draws only as light), the haboobs by scene-lit dust
+looks (`haboob_dust`, `rust_dust`). Every module has `glow (0, 0, 0)`: their heat is steam and spray, not fire, and must
+not light the stage. None of the models draws its ground or sea: the geysers stand in the composer's seeded pools, the
+sea entries over its waves (a `pool` with a swell), and spray drops fly off the big geysers. The haboob entries fade
+out over their last 0.8 s, as the model's 5 s end. Seeds are 2,700,001 and up (a script takes seeds up to 2^24, so not
+the test's 27,000,000 and up); the geysers' seeds were chosen so that the conduit erupts at the show moment.
+
+| effect | what it is | plays | box, anchor | runs | parameters (default) | how it looks |
+|---|---|---|---|---|---|---|
+| `erupting_geyser` | A geyser: a vent that simmers and steams, surges, then erupts in a white column that holds, collapses back around the vent and leaves its steam drifting off; irregular, on its own time | geyser; spray drops onto a seeded pool | 420 x 760, base | loop | height (0.7), wind (0.5) | Fair: a tall white column by the show moment with green and magenta fringes at its crown, the drops falling back into the basin; between eruptions a faint wisp of steam. |
+| `hot_spring_geyser` | A small geyser in a hot spring: mostly steam rising off the pool, spurting a little now and then | geyser (low); seeded pool | 300 x 420, base | loop | height (0.2), wind (0.6) | Fair: a moderate white spurt over the pool and its steam; at times only a wisp. |
+| `geyser_in_wind` | A geyser in a strong wind: its column bent a little and its steam torn away downwind | geyser (windy); spray drops blown downwind | 560 x 640, base | loop | height (0.8), wind (0.9) | Fair: a white column with its drops blown to the right; the column itself hardly leans and the steam's plume is short. |
+| `haboob` | A storm's outflow rolling in along the ground as a towering wall of dust, its head churning, the air behind it dim; it runs to the right | haboob (one 256 px tile); look haboob_dust; blown sand | 1200 x 700, base | once, 6 s | strength (0.7), height (0.8) | Fair: a rolling ochre wall with curling billows and faint marbling, soft at its tile's top edge; it fades out at its end. |
+| `dust_wall_far` | A dust storm far off: a low brown wall rolling across the horizon, its top billowing | haboob; look haboob_dust | 900 x 300, base | once, 6 s | strength (0.5), height (0.5) | Fair: two billows rolling right, softer than the near wall. |
+| `low_sandstorm` | A sandstorm front: sand and dust streaming low along the ground, a short rolling head in front | haboob (height 0); look haboob_dust; blown sand | 800 x 260, base | once, 6 s | strength (0.8) | Fair: a low front with a short head and the sand racing along under it; its head is taller than a sandstorm's. |
+| `red_planet_dust_front` | A dust front on a red planet: a rust-coloured wall rolling over the plain | haboob (one 256 px tile); look rust_dust | 1000 x 600, base | once, 6 s | strength (0.6), height (0.9) | Fair: a tall rust-red wall with a big curling head. |
+| `sea_spray` | Sea spray in a gale: waves breaking, the wind tearing white spray off their crests and blowing it downwind, the drops falling back | seaspray (two tiles); the composer's waves | 900 x 300, base | loop | gale (0.6), waves (0.6) | Fair: white tufts along the sea that stream downwind and fall back in motion; blobbier than the simulator's thin plumes. |
+| `storm_surf` | Storm surf: big seas breaking, spray and spume streaming off every crest | seaspray at its strongest (two tiles); the composer's waves | 1000 x 380, base | loop | gale (1) | Fair: a line of white spray along the whole sea, lumpy. |
+| `whitecaps` | Whitecaps in a fresh wind: a few crests breaking here and there, a little spray blown off them | seaspray (light, two tiles); the composer's waves | 800 x 200, base | loop | gale (0.15) | Weak to fair: faint white flecks on the waves; they read in motion more than in a still. |
+
+In the gallery (`--video`, two threads of the shared machine, load 4 to 7 on its 4 cores), the elements entries took 23
+(`low_sandstorm`) to 51 ms (`storm_surf`) a frame with their stage's own picture (the stages 688 x 512 to 1368 x 1032;
+one run, provisional); every entry played with no allocation. The keyframes of `erupting_geyser`, `haboob` and
+`sea_spray` are frozen ([frozen_elements.csv](../results/library/frozen_elements.csv), float on AVX2, `ctest -R
+LibraryElementsKeyframesFrozen`). The elements models are linked into the models' folder with the others
+(`ln -s ../../fx_elements/models/d/{geyser,haboob,seaspray}.nvfx .`).
+
 ## 2. The format
 
 A catalogue is written in the scene-script language ([COMPOSE.md](COMPOSE.md) §4), with two more statements. Each
@@ -658,7 +694,7 @@ vortex), and round 7's wildfire, coals and mushroom ([EFFECTS_BLAZE.md](EFFECTS_
 ([EFFECTS_WATER.md](EFFECTS_WATER.md)); the mushroom and the splash are study O's (a mean state, and for the mushroom a
 stepper fine-tuned on 30-frame windows; [REPORT.md](REPORT.md) §16.3, which replaced round 7's and round 8's), and
 round 9's lava, eruption and avalanche ([EFFECTS_EARTH.md](EFFECTS_EARTH.md)) and candle, smokering and heavygas
-([EFFECTS_AIR.md](EFFECTS_AIR.md)). The
+([EFFECTS_AIR.md](EFFECTS_AIR.md)), and round 10's geyser, haboob and seaspray ([EFFECTS_ELEMENTS.md](EFFECTS_ELEMENTS.md)). The
 orb plays at float whatever the stage's precision (`precision float` on its `effect` line): study L's orb failed study
 K's int8 rule on its average picture ([REPORT.md](REPORT.md) §13.9). Links are enough:
 
@@ -676,6 +712,7 @@ ln -s ../../fx_water/models/d/waterfall.nvfx ../../fx_water/models/d/fountain.nv
 ln -s ../../fx_water/models/d/rainshaft.nvfx .
 ln -s ../../fx_earth/models/d/lava.nvfx ../../fx_earth/models/d/eruption.nvfx ../../fx_earth/models/d/avalanche.nvfx .
 ln -s ../../fx_air/models/d/candle.nvfx ../../fx_air/models/d/smokering.nvfx ../../fx_air/models/d/heavygas.nvfx .
+ln -s ../../fx_elements/models/d/geyser.nvfx ../../fx_elements/models/d/haboob.nvfx ../../fx_elements/models/d/seaspray.nvfx .
 ```
 
 **Study M3's explosion and dust** ([REPORT.md](REPORT.md) §14.9) carry a mean state: a module that gives controls of
