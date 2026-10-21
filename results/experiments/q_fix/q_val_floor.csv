@@ -4,3 +4,8 @@ haboob,abs_ln_motion_ratio,0.074558
 haboob,coverage_l1,0.002495
 haboob,emission_l1,0.000000
 haboob,mean_frame_psnr,37.297365
+smokering,spectrum_l1,0.021849
+smokering,abs_ln_motion_ratio,0.021187
+smokering,coverage_l1,0.000282
+smokering,emission_l1,0.000000
+smokering,mean_frame_psnr,44.117418

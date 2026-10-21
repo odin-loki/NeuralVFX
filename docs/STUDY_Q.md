@@ -31,7 +31,7 @@ took it over from the jobs it left running (the data root's `q_fix/jobs/*.sh`, t
 | haboob's first frame | **stopped at validation** | `rf` meets no rule: its spectrum's interval past its margin (ce134c7) | kept; nothing more |
 | crown and window fires' streaks | **done by eye** (§5.1) | detail settings, frozen hashes, videos (78ae21b, 47b2b0f) | - |
 | heavy gas | **done by eye** (§5.1) | `soften 0.1` | its start points not tried (§9) |
-| smoke ring | validation | N = 40 (ca955b9) | `rf` on validation (`val.sh`); then the choice, the freeze, the test |
+| smoke ring | **stopped at validation** | N = 40 (ca955b9); `rf` meets no rule: its motion's interval past its margin (§4.7) | kept; nothing more |
 | dust explosion's renderer | probe | margins (8572674) | `rf` on the probe (`probe_rf.sh`); then N, validation |
 | candle | **nothing changed** (§3.7) | the diagnosis | - |
 | mushroom's cap | **left** (§3.7) | the diagnosis | - |
@@ -356,6 +356,16 @@ interval's worse end lies past its margin (+0.02). The refit renderer draws the 
 structure than the current one (on the probe +0.010 [+0.007, +0.014], within the margin at 40 settings); with 10 settings
 the interval is wider. N was sized for measures a candidate leaves unchanged; a real loss of half the margin's size needs
 more. By the rule the haboob stops at validation and keeps its model; its first frame stays the renderer's weak part.
+
+**The smoke ring (40 settings): none meets the rule.** `rf` is better on one of its targets, the first frame **+3.52 dB
+[+3.36, +3.69]** (25.4 → 28.9 dB), and on detail, coverage and emission (the spectrum distance **-0.075 [-0.079,
+-0.072]**, 0.699 → 0.624); its mean frame ties (+0.05 [-0.01, +0.12]), tracking at 1 s ties (-0.05 [-0.11, +0.02]) and
+at 2 s is a little worse (-0.11 [-0.17, -0.05], within its margin of -0.20); but its motion error is worse, **+0.023
+[+0.015, +0.030]** (|ln motion ratio| 0.039 → 0.062: the motion ratio 0.978 → 0.944 of the real runs'), and the whole
+interval lies past its margin (+0.02). The probe showed the same loss at half the size (+0.011 [+0.001, +0.021], §4.6):
+the refit renderer draws the ring's smoke with less change from frame to frame than the current one. By the rule the ring
+stops at validation and keeps its model; its first frame stays the renderer's weak part, and its looks (which take the
+fields, not the renderer) keep the by-eye fix of §5.1.
 
 ## 5. Fixes with no model change
 
