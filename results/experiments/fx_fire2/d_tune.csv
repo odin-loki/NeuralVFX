@@ -1,2 +1,4 @@
 effect,iterations,activity_weight,loss,seconds
+crownfire,800,100,0.04670,2164
+windowfire,800,100,0.03275,2166
 dustexplosion,800,100,0.08177,2139
