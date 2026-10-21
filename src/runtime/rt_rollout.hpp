@@ -108,6 +108,34 @@ inline void st_pairs(float* p, V a, V b) {
   }
 }
 
+#if NFX_VW >= 8
+// row[idx[j]] for the lanes j of a vector.
+inline vf gather(const float* row, vi idx) {
+#if NFX_VW == 16
+  return reinterpret_cast<vf>(_mm512_i32gather_ps(reinterpret_cast<__m512i>(idx), row, 4));
+#else
+  return reinterpret_cast<vf>(_mm256_i32gather_ps(row, reinterpret_cast<__m256i>(idx), 4));
+#endif
+}
+#endif
+
+// Some lane of a or b is not +0 (its bits are not all zero: -0 and NaN count).
+template <class V>
+inline bool any_bits(V a, V b) {
+  if constexpr (kOne<V>) {
+    return (std::bit_cast<std::uint32_t>(a) | std::bit_cast<std::uint32_t>(b)) != 0;
+  } else {
+    const vi m = reinterpret_cast<vi>(a) | reinterpret_cast<vi>(b);
+#if NFX_VW == 16
+    return _mm512_test_epi32_mask(reinterpret_cast<__m512i>(m), reinterpret_cast<__m512i>(m)) != 0;
+#elif NFX_VW == 8
+    return !_mm256_testz_si256(reinterpret_cast<__m256i>(m), reinterpret_cast<__m256i>(m));
+#else
+    return _mm_movemask_epi8(_mm_cmpeq_epi32(reinterpret_cast<__m128i>(m), _mm_setzero_si128())) != 0xffff;
+#endif
+  }
+}
+
 inline v4 load4(const float* p) { return *reinterpret_cast<const v4u*>(p); }
 
 // Lanes 4 g to 4 g + 3 hold the four floats at p + o[j + 4 g].
@@ -381,7 +409,21 @@ class RowPair {
     const std::size_t nq = Q > 0 ? static_cast<std::size_t>(Q) : q_;
     const float* g = grid + static_cast<std::size_t>(j) * static_cast<std::size_t>(n) * nq;
     float* out = rows_[static_cast<std::size_t>(s)].data();
-    for (std::size_t x = 0; x < w_; ++x) {
+    std::size_t x = 0;
+#if NFX_VW >= 8
+    // whole vectors of pixels: the grid's values gathered, the same lerp per lane
+    for (; x + kW <= w_; x += kW) {
+      vi base;
+      std::memcpy(&base, ax.i.data() + x, sizeof base);
+      base *= static_cast<std::int32_t>(nq);
+      const vf w = load(ax.w.data() + x);
+      for (std::size_t q = 0; q < nq; ++q) {
+        const vf a = gather(g + q, base), b = gather(g + q + nq, base);
+        store(out + q * stride_ + x, a + w * (b - a));
+      }
+    }
+#endif
+    for (; x < w_; ++x) {
       const float* a = g + static_cast<std::size_t>(ax.i[x]) * nq;
       const float w = ax.w[x];
       for (std::size_t q = 0; q < nq; ++q) out[q * stride_ + x] = a[q] + w * (a[q + nq] - a[q]);
@@ -1619,39 +1661,33 @@ class Rollout final : public RolloutRunner {
     float* o = ring_row(td_, y + 1) + 2;
     const float* a = ft_.data() + z(y) * S;
     const float* b = fd_.data() + z(y) * S;
-    each_block(S_, [&]<class V>(int x) { st_pairs<V>(o + 2 * x, ld<V>(a + x), ld<V>(b + x)); });
-    zero_ends(td_, y + 1);
-    mirror(td_, y + 1);
-    if (spans_) {  // the first and last pixel of the row that is not +0 in either field (bit patterns: -0 and NaN count)
-      // Blocks of 8 pixels are tested at once (an "or" of their bits, which vectorises), then the pixel in the block.
-      const auto bits = [&](int x) { return std::bit_cast<std::uint32_t>(a[x]) | std::bit_cast<std::uint32_t>(b[x]); };
-      const auto any8 = [&](int x0) {
-        std::uint32_t m = 0;
-        for (int x = x0; x < std::min(S_, x0 + 8); ++x) m |= bits(x);
-        return m != 0;
-      };
-      int first = S_, last = -1;
-      for (int x0 = 0; x0 < S_ && first == S_; x0 += 8) {
-        if (!any8(x0)) continue;
-        for (int x = x0;; ++x) {
-          if (bits(x)) {
-            first = x;
-            break;
-          }
+    if (!spans_) {
+      each_block(S_, [&]<class V>(int x) { st_pairs<V>(o + 2 * x, ld<V>(a + x), ld<V>(b + x)); });
+    } else {
+      // The first and last pixel of the row that is not +0 in either field (bit patterns: -0 and NaN count): the copy
+      // notes the first and last block with such a pixel (an "or" of the bits it loads), then the pixel in the block.
+      int fb = -1, lb = -1;
+      each_block(S_, [&]<class V>(int x) {
+        const V va = ld<V>(a + x), vb = ld<V>(b + x);
+        st_pairs<V>(o + 2 * x, va, vb);
+        if (any_bits<V>(va, vb)) {
+          if (fb < 0) fb = x;
+          lb = x;
         }
-      }
-      for (int x0 = (S_ - 1) / 8 * 8; x0 >= 0 && last < 0 && first < S_; x0 -= 8) {
-        if (!any8(x0)) continue;
-        for (int x = std::min(S_, x0 + 8) - 1;; --x) {
-          if (bits(x)) {
-            last = x;
-            break;
-          }
+      });
+      const auto bits = [&](int x) { return std::bit_cast<std::uint32_t>(a[x]) | std::bit_cast<std::uint32_t>(b[x]); };
+      int first = S_, last = -1;
+      if (fb >= 0) {
+        for (first = fb; !bits(first); ++first) {
+        }
+        for (last = lb < S_ / kW * kW ? lb + kW - 1 : lb; !bits(last); --last) {
         }
       }
       ext_[z(y) * 2] = first;
       ext_[z(y) * 2 + 1] = last;
     }
+    zero_ends(td_, y + 1);
+    mirror(td_, y + 1);
   }
 
   // The pixels of row y whose forward samples can see material (copied rows within the samples' vertical reach,
