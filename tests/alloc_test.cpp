@@ -12,7 +12,8 @@
 // procedural elements (hail, aurora, rainbow, meteors, a beam, a shield, glints, bursts of spatter and shards), its
 // layers read every frame; and the effect manager (nvfx_manager.h) ticking a crowd on its threads and on the engine's,
 // with spawns, stops, controls, camera moves, a tight budget, proxies, copies offset in time, pauses and culls; water
-// (docs/EFFECTS_WATER.md) of every kind, scripted and on a stage, with the engine layers; and a 3D volume
+// (docs/EFFECTS_WATER.md) of every kind, scripted and on a stage, with the engine layers; the weather director
+// (docs/WEATHER.md) through every regime with every layer it drives, scripted and driven by an input; and a 3D volume
 // (nvfx_volume.h, study N) stepped, read and drawn on 1 and 3 threads. Exit code 0 = no allocation during rendering.
 #include "compose_scene.hpp"
 #include "nvfx_internal.hpp"
@@ -766,6 +767,115 @@ at 0, repeat:
   return failures;
 }
 
+// The weather director (docs/WEATHER.md): a scripted scene with a schedule that runs through every regime and every
+// layer the director drives (physical rain, snow and hail, leaves, the bolt, the lamp, the flash, a module's controls and
+// opacity, a wind field, the day's sky), overlapped and not, with the engine layers and without; then a scene driven by
+// an input as a game drives it through the C API, reading the weather back every frame.
+int run_weather() {
+  namespace sc = nfx::compose::script;
+  int failures = 0;
+  const char* script = R"(
+scene size 200 x 120, fps 30, length 16 s, ground 115
+particles capacity 20000
+effect tiny = "tiny"
+weather sky, seed 28500300, regime clear:
+  overcast at 0.5, over 1
+  rain at 1.5, over 1
+  storm at 2.5, over 1
+  snow at 10, over 1
+  fog at 11.5, over 1
+  dust at 13, over 1
+  clear at 14.5, over 1
+module m = tiny, size 32, width 64, at (100, 110), start 1, seed 28500302, wind sky.lean, opacity sky.cloud
+emit rain, in (0, 0), size 200 x 110, rate sky.rain, scale 300, wind (sky.u * 30, 0), wash 0.01 * sky.rain, seed 28500304
+emit snow, in (0, 0), size 200 x 110, rate sky.snow, scale 300, wind (sky.u * 30, 0), seed 28500306
+emit hail, in (0, 0), size 200 x 110, density 2 * sky.hail, speed 600, seed 28500308
+emit leaves, in (0, 0), size 200 x 110, density 0.5 * sky.leaves, wind (sky.u * 10, 10), seed 28500310
+emit arc, along (100 + 80 * sky.bolt, 0) to (100, 110), rate 0.001, seed 28500312 + 2 * sky.strike, brightness 3 * sky.flash
+field inside = lamp, at (100 + 80 * sky.bolt, 20), radius 60, strength 2 * sky.flash
+field breeze = wind, velocity (0.02 * sky.u, 0), on m, particles
+light flash (sky.flash, sky.flash, sky.flash)
+frame daylight sky.light, overcast sky.cloud, visibility sky.visibility
+)";
+  const sc::Script s = sc::parse(script, "weather");
+  for (const bool overlap : {false, true}) {
+    for (const bool layers : {false, true}) {
+      sc::Options o;
+      o.threads = 2;
+      o.overlap = overlap;
+      o.layers = layers;
+      sc::Scene scene(s, [](const std::string&) { return nfx::compose::testing::tiny_effect(3); }, o);
+      std::vector<std::uint8_t> rgb(static_cast<std::size_t>(scene.width()) * static_cast<std::size_t>(scene.height()) * 3);
+      scene.render(0, rgb);  // warm-up outside the count
+      g_allocations = 0;
+      g_counting = true;
+      float most_rain = 0.f, v = 0.f;
+      for (int f = 1; f < scene.frames(); ++f) {
+        scene.render(f, rgb);
+        if (scene.weather_value("sky.rain", v)) most_rain = std::max(most_rain, v);
+      }
+      g_counting = false;
+      const long n = g_allocations.load();
+      std::printf("weather scene %dx%d%s%s: %ld allocations in %d frames (every regime; most rain %.1f mm/h, %g flashes)\n", scene.width(), scene.height(),
+                  overlap ? ", overlapped" : "", layers ? ", layers" : "", n, scene.frames() - 1, static_cast<double>(most_rain),
+                  static_cast<double>(scene.director(0).value(nfx::compose::wx::m_strike)));
+      failures += n == 0 && most_rain > 10.f && scene.director(0).value(nfx::compose::wx::m_strike) > 0.f ? 0 : 1;
+    }
+  }
+  std::string bytes;
+  {
+    std::ostringstream os;
+    if (!nfx::rollout::save_model(os, nfx::compose::testing::tiny_effect(3).m)) return failures + 1;
+    bytes = os.str();
+  }
+  nvfx_effect* et = nullptr;
+  if (nvfx_effect_load_memory(bytes.data(), bytes.size(), &et) != NVFX_OK) return failures + 1;
+  const nvfx_scene_effect list[] = {{"tiny", et}};
+  const std::string game = "scene size 160 x 90, fps 30, length 20 s, ground 85\neffect tiny = \"tiny\"\ninput regime = 0\ninput change = 2\n"
+                           "weather sky, seed 28500320, regime regime, over change\n"
+                           "module m = tiny, size 32, width 64, at (80, 80), start 1, seed 28500322, wind sky.lean\n"
+                           "emit rain, in (0, 0), size 160 x 80, rate sky.rain, scale 300, seed 28500324\n"
+                           "when sky.since == 0 as thunder, repeat:\n";
+  nvfx_scene_desc d;
+  nvfx_scene_desc_init(&d);
+  d.script = game.c_str();
+  d.effects = list;
+  d.n_effects = 1;
+  d.threads = 2;
+  nvfx_scene* sc_ = nullptr;
+  nvfx_scene_error err;
+  if (nvfx_scene_create(&d, &sc_, &err) != NVFX_OK) {
+    std::printf("weather scene API: %s\n", err.message);
+    nvfx_effect_free(et);
+    return failures + 1;
+  }
+  nvfx_scene_info info{};
+  nvfx_scene_get_info(sc_, &info);
+  std::vector<std::uint8_t> rgba(static_cast<std::size_t>(info.width) * static_cast<std::size_t>(info.height) * 4);
+  nvfx_scene_render(sc_, rgba.data(), static_cast<std::size_t>(info.width) * 4);  // warm-up outside the count
+  g_allocations = 0;
+  g_counting = true;
+  float rain = 0.f;
+  for (int f = 1; f < info.frames; ++f) {
+    if (f % 90 == 0) nvfx_scene_set_input(sc_, "regime", static_cast<float>((f / 90) % 7));
+    nvfx_scene_step(sc_, 1.0 / 30.0, nullptr);
+    float v = 0.f;
+    nvfx_scene_get_input(sc_, "sky.rain", &v);
+    rain = std::max(rain, v);
+    int thunder = 0;
+    nvfx_scene_rule_state(sc_, "thunder", &thunder, nullptr);
+    nvfx_scene_render(sc_, rgba.data(), static_cast<std::size_t>(info.width) * 4);
+  }
+  g_counting = false;
+  const long n = g_allocations.load();
+  std::printf("weather scene API %dx%d: %ld allocations in %d frames, the regime set by an input every 3 s (most rain %.1f mm/h)\n", info.width, info.height, n,
+              info.frames - 1, static_cast<double>(rain));
+  failures += n == 0 && rain > 1.f ? 0 : 1;
+  nvfx_scene_free(sc_);
+  nvfx_effect_free(et);
+  return failures;
+}
+
 // Water (docs/EFFECTS_WATER.md): a scripted scene with water of every kind (its pool, sheet, jets, drips, bubbles and
 // rain shaft, splashes, a wake, mist into a module), overlapped and not, with the engine layers and without; then the
 // same kinds as library entries on a stage, spawned, moved, set, stopped and spawned again.
@@ -1108,6 +1218,7 @@ int main() {
   failures += run_engine_features();
   failures += run_fx_elements();  // the procedural elements of the library's third round
   failures += run_water();
+  failures += run_weather();  // the weather director
   failures += run_rollout_prior(64) + run_rollout_prior(128);  // the prior against drift
   failures += run_rollout(64, true);                             // the simulator's look for the first frames
   failures += run_rollout(64, false, true);                      // study D2's advection gain and softening

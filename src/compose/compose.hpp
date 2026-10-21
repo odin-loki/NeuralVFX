@@ -26,6 +26,7 @@
 #include <cstdint>
 #include <functional>
 #include <type_traits>
+#include <limits>
 #include <memory>
 #include <mutex>
 #include <span>
@@ -561,6 +562,7 @@ class Particles {
   int alive() const { return n_; }
   int capacity() const { return static_cast<int>(x_.size()); }
   Kind kind(int i) const { return kind_[zs(i)]; }  // of a live particle, in the order each() visits them
+  float streak(int i) const;  // a live rain particle's streak (world pixels: its last step times its steps); 0 for others
   // One particle; returns false when full.
   bool spawn(Kind k, float x, float y, float vx, float vy, float temp, float size, float life);
   // A glow from (x0, y0) to (x1, y1): `radius` world pixels either side of the line, `brightness` times `colour` at its
@@ -571,7 +573,8 @@ class Particles {
   // A weather particle (procedural): rain, snow, ash or a leaf (or a petal) at (x, y), drifting at (du, dv) world pixels a
   // second (its fall and the wind), carried by `flow` of the bus's flow, fluttering at `freq` radians a second from
   // `phase`, of `size` (world pixels) and `colour`, drawn with coverage `alpha`. `aux`: snow melts where the bus's heat
-  // is above it (0: never); ash glows at that temperature, cooling. It lives `life` seconds or until it reaches the
+  // is above it (0: never); ash glows at that temperature, cooling; rain's streak is its last `aux` steps long (0: one and
+  // a half; the weather director's physics give its shutter, docs/WEATHER.md §4.1). It lives `life` seconds or until it reaches the
   // ground. Its random numbers are the caller's: the generator rng is not used.
   bool spawn_weather(Kind k, float x, float y, float du, float dv, float size, float life, float phase, float freq, std::array<float, 3> colour,
                      float alpha, float flow, float aux);
@@ -632,8 +635,8 @@ class Particles {
   void weather_pixels(std::size_t q, float cam_x, float cam_y, int W, int H, F&& f) const;
   int n_ = 0;
   // cool_ is a glow's caps (1: start, 2: end); temp_ its brightness; size_ its radius; r_, g_, b_ its colour.
-  // Weather: temp_ its flutter's phase, cool_ its frequency, (wu_, wv_) its drift, aux_ its melting heat or glow, wa_ its
-  // coverage, wf_ how much it follows the bus's flow.
+  // Weather: temp_ its flutter's phase, cool_ its frequency, (wu_, wv_) its drift, aux_ its melting heat, its glow or (rain)
+  // its streak in steps, wa_ its coverage, wf_ how much it follows the bus's flow.
   std::vector<float> x_, y_, px_, py_, vx_, vy_, temp_, size_, life_, age_, cool_, r_, g_, b_, wu_, wv_, aux_, wa_, wf_;
   std::vector<Kind> kind_;
   std::vector<Landing> landed_;
@@ -675,6 +678,11 @@ class Frame {
   float haze = 1.f;            // heat haze strength
   float fade = 1.f;            // overall fade (0: black)
   float time = 0;
+  // The day (docs/WEATHER.md §4.6; all off by default: the night sky of every scene before it, to the bit). `daylight`: the
+  // sun's and the sky's light (1: a clear day), lighting the sky, the hills and the ground; `overcast`: 0 a clear blue sky
+  // to 1 the CIE overcast sky; `visibility` (world: metres): Koschmieder's haze over the hills (2 km away), the ground and
+  // the sky.
+  float daylight = 0.f, overcast = 0.f, visibility = std::numeric_limits<float>::infinity();
 
   void background(const Light& light, std::span<const std::array<float, 4>> scorch, Pool& pool);  // scorch: x, y, radius, glow
   // Draw modules (each group once, by ownership weights; single modules as they are) over the screen.
@@ -727,9 +735,9 @@ class Frame {
 
  private:
   struct Params {  // the settings above, as a stage reads them
-    float cam_x, cam_y, ground_y, exposure, haze, fade, time;
+    float cam_x, cam_y, ground_y, exposure, haze, fade, time, daylight, overcast, visibility;
   };
-  Params params() const { return {cam_x, cam_y, ground_y, exposure, haze, fade, time}; }
+  Params params() const { return {cam_x, cam_y, ground_y, exposure, haze, fade, time, daylight, overcast, visibility}; }
   struct LightView {  // the light field with a fourth channel (0), a cell to a vector, and where it lies
     const float* L4 = nullptr;
     int nx = 0, ny = 0;

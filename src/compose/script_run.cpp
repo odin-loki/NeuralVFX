@@ -17,6 +17,7 @@
 //      step); 10. shading and the picture.
 #include "script.hpp"
 #include "water.hpp"
+#include "weather.hpp"
 
 #include "fx.hpp"
 
@@ -176,7 +177,8 @@ enum P : int {
   p_amp, p_width, p_radius, p_glow, p_embers, p_debris, p_count, p_tries, p_chance, p_spread, p_level, p_strength,
   p_soft, p_damping, p_swirl, p_steam, p_amount, p_scale, p_rate, p_u, p_v, p_core, p_weight, p_if, p_start,
   p_cr, p_cg, p_cb, p_bright, p_jitter, p_branches, p_squash, p_sparks, p_dx, p_dy, p_cone,
-  p_density, p_wu, p_wv, p_flowk, p_wash, p_melt, p_glowing, p_spatter, p_shards, p_grain, p_stain, p_floor, p_power, p_mist_amount, p_mist_heat, kParams
+  p_density, p_wu, p_wv, p_flowk, p_wash, p_melt, p_glowing, p_spatter, p_shards, p_grain, p_stain, p_floor, p_power, p_mist_amount, p_mist_heat,
+  p_shutter, p_depth, kParams
 };
 using Params = std::array<Code, kParams>;
 
@@ -297,13 +299,31 @@ struct InputC {  // `input NAME = value`: a value the game sets while the scene 
   float value = 0.f;  // the script's starting value
 };
 
+// The weather director (weather.hpp, docs/WEATHER.md): `weather NAME, seed S, regime R, over D, direction X [: schedule]`.
+// Its members (NAME.rain, ...) are slots from `slot` on, written each frame before the rules.
+struct WeatherC {
+  std::string name;
+  Pos pos;
+  std::uint64_t seed = 1;
+  float direction = 1.f;
+  Code regime;      // where to head (a number: 0 clear ... 6 dust; regime names are values in it), each frame; none: clear
+  Code over;        // how long a change takes, evaluated when it starts (default 60 s)
+  struct Line {     // a line of the schedule: from `at` on, head for `regime` over `over` (NaN: the statement's)
+    int regime = 0;
+    float at = 0.f, over = 0.f;
+  };
+  std::vector<Line> schedule;
+  int start = 0;    // the regime it starts in, with a schedule
+  int slot = 0;
+};
+
 struct Program {
   int width = 1280, height = 720;
   float fps = 30.f, length = 10.f, ground = 600.f;
   float bus_x = 0, bus_y = 0, bus_w = 0, bus_h = 0, bus_cell = 8.f;
   bool has_bus = false;
   int capacity = 4096;
-  Code flow, light_gain, exposure, fade, haze, bloom, bloom_threshold, cam_x, cam_y;
+  Code flow, light_gain, exposure, fade, haze, bloom, bloom_threshold, cam_x, cam_y, daylight, overcast, visibility;
   std::array<Code, 3> flash;
   std::vector<float> keyframes;
   std::vector<EffectC> effects;
@@ -317,6 +337,7 @@ struct Program {
   std::vector<RuleC> rules;
   std::vector<ActC> every;
   std::vector<InputC> inputs;
+  std::vector<WeatherC> weathers;
   int slots = s_first;
   int shock_capacity = 0, scorch_capacity = 0;
 };
@@ -327,6 +348,7 @@ struct Ctx {
   bool landing = false;    // inside a `when ... lands` rule: x and temp are the landing's
   bool constant = false;   // must not change over time
   bool scene = false;      // the scene's own settings: ground, length and fps are not known yet
+  bool regimes = false;    // a weather's `regime`: the regimes' names are values (clear 0 ... dust 6)
   std::string_view what;   // for messages
 };
 
@@ -472,6 +494,12 @@ class Compiler {
     if (const auto it = names_.find(name); it != names_.end()) fail(pos, std::format("'{}' is a {}, not water", name, it->second.first));
     fail(pos, std::format("unknown water '{}'{}", name, did_you_mean(name, all)));
   }
+  const WeatherC* weather_of(const std::string& name) const {
+    for (const WeatherC& w : prog_.weathers)
+      if (w.name == name) return &w;
+    return nullptr;
+  }
+  void weather(const Statement& s, WeatherC& w);
   void rule(const Statement& s, RuleC& r);
   ActC action(const Statement& a, const Ctx& c, bool every, int limit);
   std::vector<int> modules_of(const std::vector<std::string>& names, Pos pos, bool particles_ok, bool* particles = nullptr) const;
@@ -497,6 +525,7 @@ void Compiler::emit(const Expr& e, const Ctx& c, Code& code, std::vector<std::st
     case Expr::Kind::number: op(Op::num, 0, e.number); return;
     case Expr::Kind::name: {
       const std::string& n = e.name;
+      if (wx::Regime r{}; c.regimes && wx::regime_of(n, r)) return op(Op::num, 0, static_cast<float>(static_cast<int>(r)));
       if (n == "t") {
         if (c.scene) fail(e.pos, std::format("{} cannot depend on time", c.what));
         return slot(s_t, true);
@@ -532,12 +561,31 @@ void Compiler::emit(const Expr& e, const Ctx& c, Code& code, std::vector<std::st
       }
       if (const auto it = names_.find(n); it != names_.end()) {
         if (it->second.first == "module") fail(e.pos, std::format("a module is not a value: use {}.x, {}.y, {}.started, {}.age or {}.active", n, n, n, n, n));
+        if (it->second.first == "weather") fail(e.pos, std::format("a weather is not a value: use {}.rain, {}.cloud, {}.wind, {}.visibility, ...", n, n, n, n));
         fail(e.pos, std::format("'{}' is a {}, not a value", n, it->second.first));
       }
       if (is_reserved(n)) fail(e.pos, std::format("'{}' is not a value here", n));
+      if (c.regimes) {  // a weather's regime: most likely a misspelt regime
+        std::vector<std::string> all = value_names();
+        for (const std::string_view r : wx::regime_names()) all.emplace_back(r);
+        fail(e.pos, std::format("unknown name '{}': a regime is clear, overcast, rain, storm, snow, fog or dust{}", n, did_you_mean(n, all)));
+      }
       fail(e.pos, std::format("unknown name '{}'{}", n, did_you_mean(n, value_names())));
     }
     case Expr::Kind::member: {
+      if (const WeatherC* w = weather_of(e.name)) {  // the weather director's state (weather.hpp)
+        if (c.scene) fail(e.pos, "the scene's settings cannot depend on the weather");
+        const int k = wx::member_of(e.member);
+        if (k < 0) {
+          std::vector<std::string> all;
+          for (const std::string_view m : wx::member_names()) all.emplace_back(m);
+          const std::string hint = did_you_mean(e.member, all);
+          fail(e.pos, hint.empty() ? std::format("a weather has no '{}' (it has cloud, rain, snow, hail, wind, mean, gust, visibility, temp, lightning, dust, fog, "
+                                                 "extinction, u, beaufort, lean, leaves, lift, light, flash, strike, bolt, since, regime and progress)", e.member)
+                                   : std::format("a weather has no '{}'{}", e.member, hint));
+        }
+        return slot(w->slot + k, true);
+      }
       if (c.scene) fail(e.pos, "the scene's settings cannot depend on modules");
       const ModC& m = module_of(e.name, e.pos);
       if (e.member == "x") return slot(m.slot + m_x, true);
@@ -821,7 +869,7 @@ void Compiler::module(const Statement& s, ModC& m) {
     m.start = integer(p->value.exprs[0], "the start point", 0);
     m.has_start = true;
   }
-  if (const Prop* p = s.prop("seed")) m.seed = static_cast<std::uint64_t>(integer(p->value.exprs[0], "the seed", 0, 1 << 24));
+  if (const Prop* p = s.prop("seed")) m.seed = static_cast<std::uint64_t>(integer(p->value.exprs[0], "the seed", 0, 1 << 25));
   if (const Prop* p = s.prop("empty")) {
     if (!m.has_start) fail(p->pos, "'empty' needs 'start N': the module starts with nothing in it, at that start point's age");
     m.empty = true;
@@ -928,7 +976,7 @@ void Compiler::trail(const Statement& s, ModC& m) {
     c.what = "the opacity";
     m.opacity = code(p->value.exprs[0], c);
   }
-  if (const Prop* p = s.prop("seed")) m.seed = static_cast<std::uint64_t>(integer(p->value.exprs[0], "the seed", 0, 1 << 24));
+  if (const Prop* p = s.prop("seed")) m.seed = static_cast<std::uint64_t>(integer(p->value.exprs[0], "the seed", 0, 1 << 25));
   Ctx c;
   const auto expr = [&](const char* key, Code& out) {
     if (const Prop* p = s.prop(key)) {
@@ -1089,10 +1137,16 @@ void Compiler::emitter(const Statement& s) {
     e.p[p_x1] = code(a->value.exprs[2], c);
     e.p[p_y1] = code(a->value.exprs[3], c);
   } else if (s.kind == "rain" || s.kind == "snow" || s.kind == "ash" || s.kind == "leaves") {  // procedural weather
-    if (s.kind == "rain") only(s, {"in", "size", "density", "wind", "radius", "colour", "brightness", "flow", "wash", "seed", "from", "until", "if"}, what);
-    else if (s.kind == "snow") only(s, {"in", "size", "density", "wind", "radius", "colour", "brightness", "flow", "melt", "seed", "from", "until", "if"}, what);
-    else if (s.kind == "ash") only(s, {"in", "size", "density", "wind", "radius", "colour", "brightness", "flow", "glowing", "seed", "from", "until", "if"}, what);
-    else only(s, {"in", "size", "density", "wind", "radius", "colour", "brightness", "flow", "seed", "from", "until", "if"}, what);
+    // rain and snow also take the director's physics (docs/WEATHER.md §4.1): `rate` (mm/h) sizes, speeds and counts them
+    if (s.kind == "rain") {
+      only(s, {"in", "size", "density", "wind", "radius", "colour", "brightness", "flow", "wash", "seed", "from", "until", "if", "rate", "scale", "shutter", "depth"}, what);
+    } else if (s.kind == "snow") {
+      only(s, {"in", "size", "density", "wind", "radius", "colour", "brightness", "flow", "melt", "seed", "from", "until", "if", "rate", "scale", "depth"}, what);
+    } else if (s.kind == "ash") {
+      only(s, {"in", "size", "density", "wind", "radius", "colour", "brightness", "flow", "glowing", "seed", "from", "until", "if"}, what);
+    } else {
+      only(s, {"in", "size", "density", "wind", "radius", "colour", "brightness", "flow", "seed", "from", "until", "if"}, what);
+    }
     need("in");
     need("size");
     Ctx c;
@@ -1102,6 +1156,9 @@ void Compiler::emitter(const Statement& s) {
     take(e.p, s, "wash", p_wash, kParams, c);
     take(e.p, s, "melt", p_melt, kParams, c);
     take(e.p, s, "glowing", p_glowing, kParams, c);
+    take(e.p, s, "scale", p_scale, kParams, c);
+    take(e.p, s, "shutter", p_shutter, kParams, c);
+    take(e.p, s, "depth", p_depth, kParams, c);
   } else if (s.kind == "ring") {  // procedural: a glowing ring (an ellipse when squashed: a shock ring on the ground)
     only(s, {"at", "radius", "squash", "colour", "width", "brightness", "from", "until", "if"}, what);
     need("at");
@@ -1335,6 +1392,62 @@ ActC Compiler::action(const Statement& a, const Ctx& c, bool every, int limit) {
   return out;
 }
 
+// The weather director (weather.hpp, docs/WEATHER.md). Its seed and direction are constants. `regime` is where it heads:
+// an expression (the game may drive it through an input), whose regime names are values (clear 0 ... dust 6); with a
+// schedule, it is where the weather starts, a constant, and the schedule's lines say where it heads from when.
+void Compiler::weather(const Statement& s, WeatherC& w) {
+  if (const Prop* p = s.prop("seed")) w.seed = static_cast<std::uint64_t>(integer(p->value.exprs[0], "a weather's seed", 0, 1 << 25));
+  if (const Prop* p = s.prop("direction")) {
+    const float d = constant(p->value.exprs[0], "a weather's direction");
+    if (d != 1.f && d != -1.f) fail(p->value.pos, "a weather's direction is 1 (the wind blows to the right, +x) or -1 (to the left)");
+    w.direction = d;
+  }
+  const bool scheduled = s.kind == "schedule";
+  const auto regime_number = [&](float v, Pos at) {
+    if (!(v == std::floor(v)) || v < 0.f || v >= static_cast<float>(wx::kRegimes)) {
+      fail(at, std::format("a regime is clear, overcast, rain, storm, snow, fog or dust (or its number, 0 to 6), not {}", v));
+    }
+    return static_cast<int>(v);
+  };
+  if (const Prop* p = s.prop("regime")) {
+    Ctx c;
+    c.regimes = true;
+    c.constant = scheduled;
+    c.what = scheduled ? "the regime a scheduled weather starts in" : "'regime'";
+    w.regime = code(p->value.exprs[0], c);
+    if (scheduled || !w.regime.varying) {
+      float slots[s_first] = {0.f, prog_.length, prog_.fps, prog_.ground, 0.f, 0.f};
+      Env env;
+      env.slots = slots;
+      w.start = regime_number(run(w.regime, env), p->value.pos);
+    }
+  }
+  if (const Prop* p = s.prop("over")) {
+    Ctx c;
+    c.what = "'over'";
+    w.over = code(p->value.exprs[0], c);
+  }
+  float last = -kNever;
+  for (const Statement& line : s.body) {
+    WeatherC::Line l;
+    wx::Regime r{};
+    wx::regime_of(line.kind, r);  // (the parser checked the name)
+    l.regime = static_cast<int>(r);
+    const Prop* at = line.prop("at");
+    if (!at) fail(line.pos, std::format("say when the weather heads for {}: '{} at T' (seconds)", line.kind, line.kind));
+    l.at = constant(at->value.exprs[0], "a schedule's time");
+    if (!(l.at >= 0.f)) fail(at->value.pos, "a schedule's times are from 0 on");
+    if (l.at < last) fail(at->value.pos, std::format("a schedule's lines come in the order of their times ({} is before the line above's {})", l.at, last));
+    last = l.at;
+    l.over = std::numeric_limits<float>::quiet_NaN();
+    if (const Prop* o = line.prop("over")) {
+      l.over = constant(o->value.exprs[0], "a schedule's 'over'");
+      if (!(l.over >= 0.f)) fail(o->value.pos, "'over' is a time of at least 0 seconds");
+    }
+    w.schedule.push_back(l);
+  }
+}
+
 void Compiler::rule(const Statement& s, RuleC& r) {
   r.pos = s.pos;
   r.kind = s.kind;
@@ -1402,6 +1515,14 @@ Program Compiler::compile() {
       prog_.modules.push_back(std::move(m));
     } else if (w == "field") {
       declare(st.name, st.name_pos, "field");
+    } else if (w == "weather") {  // (known before any expression is compiled: its members)
+      declare(st.name, st.name_pos, "weather");
+      WeatherC wc;
+      wc.name = st.name;
+      wc.pos = st.pos;
+      wc.slot = prog_.slots;
+      prog_.slots += wx::kMembers;
+      prog_.weathers.push_back(std::move(wc));
     } else if (w == "water") {  // (its kind is known now: splashes and waves name pools)
       declare(st.name, st.name_pos, "water");
       WaterC wc;
@@ -1485,7 +1606,9 @@ Program Compiler::compile() {
     }
   }
   // 3. settings that may change over time
-  std::size_t water_i = 0;
+  std::size_t water_i = 0, weather_i = 0;
+  for (const Statement& st : s_.statements)
+    if (st.keyword == "weather") weather(st, prog_.weathers[weather_i++]);
   for (const Statement& st : s_.statements) {
     Ctx c;
     const auto expr = [&](std::string_view key, Code& out) {
@@ -1522,6 +1645,9 @@ Program Compiler::compile() {
       expr("haze", prog_.haze);
       expr("bloom", prog_.bloom);
       expr("bloom_threshold", prog_.bloom_threshold);
+      expr("daylight", prog_.daylight);  // the day (docs/WEATHER.md §4.6)
+      expr("overcast", prog_.overcast);
+      expr("visibility", prog_.visibility);
     } else if (st.keyword == "camera") {
       expr("x", prog_.cam_x);
       expr("y", prog_.cam_y);
@@ -1600,6 +1726,7 @@ struct Scene::Impl {
   std::unique_ptr<PictureThread> picture;  // Options::overlap
   std::unique_ptr<StepScratch> step_scratch;  // Options::shared_scratch
   std::vector<std::unique_ptr<Trail>> trails;  // trail statements, in order
+  std::vector<wx::Director> directors;    // weather statements, in order (weather.hpp)
   std::vector<char> emit_on;                   // per emitter: it emitted in the last frame (weather fills its region when it starts)
   std::vector<Deposit> deposits;               // what each trail's source leaves this frame
   std::vector<Shock> shocks;
@@ -2043,7 +2170,9 @@ struct Scene::Impl {
     emit_on[ei] = 1;
     const float live = density * span * H / 10000.f;  // at once in the region
     const float count = fresh ? live : live * vy / H / prog.fps;
-    const int n = std::min(8192, static_cast<int>(count) + (rnd() < count - std::floor(count) ? 1 : 0));
+    const bool physical = e.p[p_rate].present() && (d.kind == Kind::rain || d.kind == Kind::snow);
+    const int n = physical ? 0 : std::min(8192, static_cast<int>(count) + (rnd() < count - std::floor(count) ? 1 : 0));
+    if (physical) physical_weather(e, d.kind, fresh, x0, y0, W, H, wu, wv, col, d.alpha, flowk, melt, rnd);
     static constexpr std::array<std::array<float, 3>, 4> autumn{{{0.78f, 0.33f, 0.08f}, {0.86f, 0.56f, 0.1f}, {0.55f, 0.17f, 0.06f}, {0.62f, 0.47f, 0.13f}}};
     for (int i = 0; i < n; ++i) {
       const float x = xa + rnd() * span;
@@ -2067,6 +2196,49 @@ struct Scene::Impl {
         if (m->at.x > xa + span || m->at.x + span_m < xa || m->at.y > y0 + H || m->at.y + span_m < y0) continue;
         compose::wash(*m, xa, y0, xa + span, y0 + H, ks, kh);
       }
+    }
+  }
+
+  // Rain or snow by the weather director's physics (weather.hpp, docs/WEATHER.md §4.1), at `rate` mm/h: drops sized by
+  // Marshall and Palmer (0.5 to 6 mm) and falling at Atlas, Srivastava and Sekhon's speeds, or flakes by Locatelli and
+  // Hobbs; as many as the distribution holds in a slab `depth` metres deep (0.5) seen at `scale` world pixels a metre (600)
+  // unless `density` says; each drop as wide as it is there (times `radius`, 1) and its streak the length it falls in the
+  // `shutter` (half a frame: a 180-degree shutter). The region is filled from the distribution itself; what feeds it from
+  // the top is weighted by fall speed (the faster drops cross it sooner), so the drops in it keep the distribution.
+  template <class R>
+  void physical_weather(const EmitC& e, Kind kind, bool fresh, float x0, float y0, float W, float H, float wu, float wv, std::array<float, 3> col, float alpha,
+                        float flowk, float melt, R& rnd) {
+    Particles& P = *parts;
+    const bool rain = kind == Kind::rain;
+    const float rate = eval(e.p[p_rate]);
+    if (!(rate > 0.f)) return;
+    const float scale = std::max(1.f, eval_or(e.p[p_scale], 600.f)), depth = std::max(0.f, eval_or(e.p[p_depth], 0.5f));
+    const float shutter = std::max(1e-4f, eval_or(e.p[p_shutter], 0.5f / prog.fps)), mult = std::max(0.f, eval_or(e.p[p_radius], 1.f));
+    const float k100 = 100.f / scale;
+    const float number = rain ? wx::mp_number(rate) : wx::snow_number(rate);  // a cubic metre
+    const float density = e.p[p_density].present() ? std::max(0.f, eval(e.p[p_density])) : number * depth * k100 * k100;
+    const float vmean = std::max(5.f, (rain ? wx::mp_mean_speed(rate) : wx::flake_mean_speed()) * scale + wv);
+    const float vmax = (rain ? wx::drop_speed(wx::kDropMax) : wx::flake_speed(wx::kFlakeMax)) * scale;
+    const float shift = wu * H / vmean, xa = x0 - std::max(0.f, shift), span = W + std::abs(shift);
+    const float live = density * span * H / 10000.f;
+    const float count = fresh ? live : live * vmean / H / prog.fps;
+    const int n = std::min(8192, static_cast<int>(count) + (rnd() < count - std::floor(count) ? 1 : 0));
+    const auto size_of = [&](float u) { return rain ? wx::mp_sample(rate, u) : wx::flake_sample(u); };
+    const auto speed_of = [&](float D) { return (rain ? wx::drop_speed(D) : wx::flake_speed(D)) * scale; };
+    for (int i = 0; i < n; ++i) {
+      float D = size_of(rnd());
+      if (!fresh)  // fed from the top: a size kept with the chance of its speed over the fastest's
+        for (int k = 0; k < 16 && rnd() * vmax > speed_of(D); ++k) D = size_of(rnd());
+      const float fall = std::max(5.f, speed_of(D) + wv);
+      const float x = xa + rnd() * span;
+      const float y = fresh ? y0 + rnd() * H : y0 - rnd() * fall / prog.fps;
+      const float phase = 6.2831853f * rnd(), freq = rain ? 0.f : 2.f * (0.7f + 0.6f * rnd());
+      const float across = D * scale / 1000.f;  // its diameter there, world pixels
+      std::array<float, 3> c = col;
+      const float tone = 0.85f + 0.3f * rnd();
+      for (float& v : c) v *= tone;
+      const float life = (y0 + H - y) / fall * 1.25f + 0.5f;
+      P.spawn_weather(kind, x, y, wu, fall, mult * (rain ? across : 0.5f * across), life, phase, freq, c, alpha, flowk, rain ? shutter * prog.fps : melt);
     }
   }
 
@@ -2197,6 +2369,9 @@ struct Scene::Impl {
     frame->fade = eval_or(prog.fade, 1.f);
     frame->haze = eval_or(prog.haze, 1.f);
     frame->time = t;
+    frame->daylight = eval_or(prog.daylight, 0.f);
+    frame->overcast = eval_or(prog.overcast, 0.f);
+    frame->visibility = std::max(1.f, eval_or(prog.visibility, kNever));  // metres (at least one)
     bloom = eval_or(prog.bloom, 1.f);
     bloom_threshold = eval_or(prog.bloom_threshold, 1.f);
     light_gain = eval_or(prog.light_gain, 0.14f);
@@ -2204,6 +2379,30 @@ struct Scene::Impl {
     flow = eval_or(prog.flow, 0.9f);
     frame->cam_x = eval_or(prog.cam_x, 0.f);
     frame->cam_y = eval_or(prog.cam_y, 0.f);
+  }
+
+  // A weather director at frame f (weather.hpp, docs/WEATHER.md): where it heads (its schedule's line whose time has
+  // come, or its `regime`), a request when that changes, a step of a frame (frame 0: it starts, in its regime at t = 0),
+  // then its members into their slots. Its random numbers are its own (a hash of its seed and the step).
+  void weather_step(std::size_t wi, int f, float t) {
+    const WeatherC& wc = prog.weathers[wi];
+    wx::Director& d = directors[wi];
+    int to = wc.start;
+    float over = std::numeric_limits<float>::quiet_NaN();
+    if (!wc.schedule.empty()) {
+      for (const WeatherC::Line& l : wc.schedule) {
+        if (!(t >= l.at)) break;
+        to = l.regime;
+        over = l.over;
+      }
+    } else if (wc.regime.varying) {
+      const float v = eval(wc.regime);
+      to = std::isfinite(v) ? static_cast<int>(std::lround(std::clamp(v, 0.f, static_cast<float>(wx::kRegimes - 1)))) : static_cast<int>(d.regime());
+    }
+    if (f == 0) d = wx::Director(wc.seed, static_cast<wx::Regime>(wc.schedule.empty() ? to : wc.start), wc.direction);
+    if (static_cast<int>(d.regime()) != to) d.request(static_cast<wx::Regime>(to), std::isnan(over) ? eval_or(wc.over, 60.f) : over);
+    if (f > 0) d.step(1.f / prog.fps);
+    for (int k = 0; k < wx::kMembers; ++k) slots[zs(wc.slot + k)] = d.value(k);
   }
 
   // The water's settings for this frame, then its step (water.hpp).
@@ -2556,6 +2755,7 @@ void Scene::Impl::build(const EffectLoader& load, const Options& o) {
   fired.assign(prog.rules.size(), 0);
   pending.assign(prog.rules.size(), 0);
   emit_on.assign(prog.emitters.size(), 0);
+  directors.assign(prog.weathers.size(), wx::Director{});
   for (const RuleC& r : prog.rules) first.push_back({r.name, kNever});
 }
 
@@ -2608,6 +2808,8 @@ void Scene::Impl::state(int f) {
     std::erase_if(shocks, [t](const Shock& s) { return t - s.t0 > 40.f * s.decay; });
     next_shock = 0;
   }
+  // 0. the weather: where each director heads now, its step, and its members for everything after (weather.hpp)
+  for (std::size_t wi = 0; wi < prog.weathers.size(); ++wi) weather_step(wi, f, t);
   // 1. rules on time, shocks and fields (and rules the game triggered)
   for (std::size_t i = 0; i < prog.rules.size(); ++i) {
     RuleC& r = prog.rules[i];
@@ -2748,6 +2950,21 @@ int Scene::input_index(std::string_view name) const {
 }
 float Scene::input(int i) const { return impl_->slots[zs(impl_->prog.inputs.at(zs(i)).slot)]; }
 void Scene::set_input(int i, float v) { impl_->slots[zs(impl_->prog.inputs.at(zs(i)).slot)] = v; }
+
+bool Scene::weather_value(std::string_view name, float& out) const {
+  const std::size_t dot = name.find('.');
+  if (dot == std::string_view::npos) return false;
+  const int k = wx::member_of(name.substr(dot + 1));
+  if (k < 0) return false;
+  for (const WeatherC& w : impl_->prog.weathers) {
+    if (w.name != name.substr(0, dot)) continue;
+    out = impl_->slots[zs(w.slot + k)];
+    return true;
+  }
+  return false;
+}
+int Scene::weathers() const { return static_cast<int>(impl_->prog.weathers.size()); }
+const wx::Director& Scene::director(int i) const { return impl_->directors.at(zs(i)); }
 
 bool Scene::trigger(std::string_view rule) {
   for (std::size_t i = 0; i < impl_->prog.rules.size(); ++i) {

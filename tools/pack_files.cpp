@@ -7,7 +7,7 @@
 //       for the effect manager (--costs: rows model,size,step_ms,render_ms; --calibrate: measured on this machine).
 //       Without --library: every *.nvfx in --models. --coder: store, full, light or fast (the context-mixing coder's
 //       models; a member is coded only when that saves 5% and 256 bytes). Exit 77 with --require-models when a model
-//       is missing.
+//       or a file to --add is missing.
 //   nvfx_pack list PACK [--manifest]          members, entries and costs (--manifest: the manifest as written)
 //   nvfx_pack verify PACK [--threads N] [--skip-missing]
 //                                             every check an engine's load makes: the pack, its catalogue as a
@@ -129,7 +129,10 @@ Contents collect(const Args& a) {
     c.members.push_back(std::move(in));
   }
   for (pk::Input& in : catalogue) c.members.push_back(std::move(in));
-  for (const std::string& f : list_arg(a, "add")) c.members.push_back({fs::path(f).filename().string(), pk::kind_of_file(f), read_bytes(f)});
+  for (const std::string& f : list_arg(a, "add")) {
+    if (!fs::exists(f)) throw Missing(std::format("{} is not there (--add)", f));  // a 3D model, say, outside git
+    c.members.push_back({fs::path(f).filename().string(), pk::kind_of_file(f), read_bytes(f)});
+  }
   for (const std::string& f : list_arg(a, "licence")) c.members.push_back({fs::path(f).filename().string(), pk::Kind::licence, read_bytes(f)});
   for (const pk::Input& in : c.members) c.loose_bytes += in.data.size();
   return c;

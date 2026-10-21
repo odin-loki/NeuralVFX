@@ -1465,6 +1465,12 @@ bool Particles::spawn_weather(Kind k, float x, float y, float du, float dv, floa
   return true;
 }
 
+float Particles::streak(int i) const {
+  const std::size_t q = zs(i);
+  if (kind_[q] != Kind::rain) return 0.f;
+  return (aux_[q] > 0.f ? aux_[q] : 1.5f) * std::hypot(x_[q] - px_[q], y_[q] - py_[q]);
+}
+
 void Particles::kill(int i) {
   const int last = --n_;
   if (i == last) return;
@@ -1627,8 +1633,10 @@ void Particles::weather_pixels(std::size_t q, float cam_x, float cam_y, int W, i
       f((zs(yy) * zs(W) + zs(xx)) * 4, std::min(1.f, w[c] * cover));
     }
   };
-  if (k == Kind::rain) {  // a streak along its last step and a half (motion blur), `size` pixels wide
-    const float sx = x + 1.5f * (px_[q] - cam_x - x), sy = y + 1.5f * (py_[q] - cam_y - y);
+  if (k == Kind::rain) {  // a streak along its last step and a half (motion blur), `size` pixels wide; or, from the weather
+                          // director's physics, along the steps its shutter is open (aux_, docs/WEATHER.md §4.1)
+    const float steps = aux_[q] > 0.f ? aux_[q] : 1.5f;
+    const float sx = x + steps * (px_[q] - cam_x - x), sy = y + steps * (py_[q] - cam_y - y);
     const float len = std::hypot(x - sx, y - sy);
     const int n = std::clamp(static_cast<int>(std::ceil(len / 0.75f)), 1, 256);
     const float step = len / fl(n);
@@ -2031,6 +2039,33 @@ void Frame::light_columns(const Params& P, const LightView& L, Pool& pool) {
   });
 }
 
+namespace {
+constexpr float kKoschmiederLn = 3.912f;  // ln(1 / 0.02): docs/WEATHER.md §3.1
+
+// The day's sky at height u (0: the horizon, 1: 900 world pixels above it) (docs/WEATHER.md §4.6): a clear sky's blue,
+// deeper overhead, greying with `overcast` into the CIE standard overcast sky (Moon and Spencer 1942: the luminance
+// (1 + 2 sin(elevation)) / 3 of the zenith's), veiled by the airlight of the haze along a path of 2 km at the horizon
+// to 600 m overhead (Koschmieder: what is seen through a path x is exp(-3.912 x / V) of itself), all times the daylight.
+struct DaySky {
+  px4 dome, air;      // the sky, and the haze's own light (what veils the hills and the ground), times the daylight
+  float hills, clear;  // how much of the hills (2 km away) is seen through the haze; how clear the sky is (1: no haze)
+};
+DaySky day_sky(float daylight, float overcast, float visibility, float u) {
+  const float ov = std::clamp(overcast, 0.f, 1.f), d = std::max(0.f, daylight);
+  const px4 zenith{0.07f, 0.17f, 0.48f, 0.f}, horizon{0.42f, 0.52f, 0.66f, 0.f}, grey{0.62f, 0.64f, 0.68f, 0.f};
+  const px4 clear = horizon + std::pow(u, 0.7f) * (zenith - horizon);
+  const px4 cie = (1.f + 2.f * u) / 3.f * grey;
+  const px4 air = horizon + ov * (0.7f * grey - horizon);
+  const float h = 1.f - std::exp(-kKoschmiederLn * 2000.f * (1.f - 0.7f * u) / visibility);
+  DaySky s;
+  s.dome = d * ((1.f - h) * (clear + ov * (cie - clear)) + h * air);
+  s.air = d * air;
+  s.hills = std::exp(-kKoschmiederLn * 2000.f / visibility);
+  s.clear = 1.f - h;
+  return s;
+}
+}  // namespace
+
 void Frame::background_row(int y, const Params& P, const LightView& L, std::span<const std::array<float, 4>> scorch, StarCache& cache) {
   const px4 flash4{L.flash[0], L.flash[1], L.flash[2], 0.f};
   const auto star_run = [&](int x0, int x1, std::uint32_t star_y, px4 sky, float u, float wy_, float* row_, const auto& light_at_x_, float now_) {
@@ -2055,6 +2090,39 @@ void Frame::background_row(int y, const Params& P, const LightView& L, std::span
   const float* lx0 = light_x_.data() + zs(ly.i0) * zs(w_) * 4;
   const float* lx1 = light_x_.data() + zs(ly.i1) * zs(w_) * 4;
   const auto light_at_x = [&](int x) { return ly.w0 * load4(lx0 + zs(x) * 4) + ly.w1 * load4(lx1 + zs(x) * 4) + flash4; };
+  const bool day = P.daylight > 0.f || P.overcast > 0.f || P.visibility < std::numeric_limits<float>::infinity();
+  if (wy < ground && day) {  // the day's sky and hills (docs/WEATHER.md §4.6)
+    const float u = std::clamp((ground - wy) / 900.f, 0.f, 1.f);
+    const DaySky S = day_sky(P.daylight, P.overcast, P.visibility, u);
+    const float night = 1.f - std::min(1.f, P.daylight);
+    const px4 sky{(0.010f + 0.020f * (1.f - u)) * night + S.dome[0], (0.013f + 0.024f * (1.f - u)) * night + S.dome[1],
+                  (0.030f + 0.035f * (1.f - u)) * night + S.dome[2], 1.f};
+    const float stars = night * (1.f - P.overcast) * S.clear;  // the stars a clear enough night shows
+    const std::uint32_t star_y = hy(ifloor(wy / 3.f));
+    for (int x = 0; x < w_; ++x) {
+      const Column& k = cols_[zs(x)];
+      float* p = row + zs(x) * 4;
+      if (wy >= k.hill) {  // the hills, 2 km away: lit by the day and veiled by the haze in front of them
+        const px4 h = load4(k.hill_colour.data()) + P.daylight * px4{0.030f, 0.045f, 0.034f, 0.f};
+        px4 v = h * S.hills + (1.f - S.hills) * S.air;
+        v[3] = 1.f;
+        store4(p, v);
+        continue;
+      }
+      px4 v = sky + 0.08f * light_at_x(x);
+      if (stars > 0.f) {
+        const float hs = unit(k.star ^ star_y ^ hz(7));
+        if (hs > 0.9965f) {
+          const float tw = 0.6f + 0.4f * std::sin(now * (2.f + 6.f * unit(k.star ^ star_y ^ hz(9))) + 20.f * hs);
+          const float st = stars * (hs - 0.9965f) / 0.0035f * 0.35f * tw * u;
+          v += px4{st, st, 1.1f * st, 0.f};
+        }
+      }
+      v[3] = 1.f;
+      store4(p, v);
+    }
+    return;
+  }
   if (wy < ground) {
     // the hills, and above them the sky: dark blue, lighter at the horizon, a few stars fixed in the world, and a
     // little glow where the light is
@@ -2097,14 +2165,31 @@ void Frame::background_row(int y, const Params& P, const LightView& L, std::span
   const std::uint32_t tex_y = hy(ifloor(wy / 2.f)) ^ hz(3);
   const px4 earth{0.012f, 0.011f, 0.010f, 0.f}, tint{0.9f, 0.75f, 0.6f, 0.f};
   float tex = 0.f;
-  for (int x = 0; x < w_; ++x) {
-    const Column& k = cols_[zs(x)];
-    if (x == 0 || k.tex != cols_[zs(x - 1)].tex) tex = 0.75f + 0.5f * unit(k.tex ^ tex_y) * tex_amp;  // per run of columns
-    const float lit = shade * tex;
-    const px4 l = light_at_x(x);
-    px4 v = (earth + 0.35f * l / (1.f + 0.6f * l)) * lit * tint;
-    v[3] = 1.f;
-    store4(row + zs(x) * 4, v);
+  if (day) {  // the ground by day: grass lit by the daylight, veiled by the haze between it and the viewer
+    const DaySky S = day_sky(P.daylight, P.overcast, P.visibility, 0.f);
+    const float dist = 25.f / (depth + 0.05f);  // metres: 500 at the horizon, 24 at the bottom of the picture
+    const float seen = std::exp(-kKoschmiederLn * dist / P.visibility);
+    const px4 grass = P.daylight * px4{0.045f, 0.06f, 0.028f, 0.f};
+    for (int x = 0; x < w_; ++x) {
+      const Column& k = cols_[zs(x)];
+      if (x == 0 || k.tex != cols_[zs(x - 1)].tex) tex = 0.75f + 0.5f * unit(k.tex ^ tex_y) * tex_amp;  // per run of columns
+      const float lit = shade * tex;
+      const px4 l = light_at_x(x);
+      px4 v = ((earth + 0.35f * l / (1.f + 0.6f * l)) * tint + grass) * lit;
+      v = v * seen + (1.f - seen) * S.air;
+      v[3] = 1.f;
+      store4(row + zs(x) * 4, v);
+    }
+  } else {
+    for (int x = 0; x < w_; ++x) {
+      const Column& k = cols_[zs(x)];
+      if (x == 0 || k.tex != cols_[zs(x - 1)].tex) tex = 0.75f + 0.5f * unit(k.tex ^ tex_y) * tex_amp;  // per run of columns
+      const float lit = shade * tex;
+      const px4 l = light_at_x(x);
+      px4 v = (earth + 0.35f * l / (1.f + 0.6f * l)) * lit * tint;
+      v[3] = 1.f;
+      store4(row + zs(x) * 4, v);
+    }
   }
   for (const auto& s : scorch) {  // scorch marks (x, y, radius, glow), over the columns each covers in this row
     const float dy = (wy - s[1]) / (0.28f * s[2]);

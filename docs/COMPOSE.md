@@ -9,7 +9,9 @@ engines (14 October 2026): **trails** (§5.3: a moving source leaves material in
 procedural **weather** (§4.6 and §5.4: rain, snow, ash, leaves) and the **engine layers** (lit sprites, drawn beside
 the picture for an engine to light; [ENGINES.md](ENGINES.md) §11). Added for the effect library's third round: the
 **procedural elements of §4.10** (hail, aurora, rainbow, meteors, beams, shields, glints, and a burst's spatter and
-shards).
+shards). Added for the **weather director** (21 October 2026, [WEATHER.md](WEATHER.md)): the `weather` statement, whose
+state (`sky.rain`, ...) drives the other statements, rain and snow by their physics (§4.6), and the day's sky (`frame
+daylight, overcast, visibility`).
 
 ## 1. The idea
 
@@ -73,7 +75,8 @@ every kind of statement and counts 0 allocations; the tool counts them too). Sce
 fireball of §6 (`fireball.nvfxs`, which reproduces the hand-written C++ scene to the bit, §4.8), a wall of fire in a
 gale (`firewall.nvfxs`, §5.2), written only as a script, a campfire the game drives with inputs and rules only the
 game fires (`campfire.nvfxs`), and a magic portal with steam vents (`portal.nvfxs`), which shows the effects added
-later with study D's ([EFFECTS.md](EFFECTS.md)); and trails and weather (`weather.nvfxs`, §5.4). The viewer edits scripts live ([VIEWER.md](VIEWER.md)): a scene
+later with study D's ([EFFECTS.md](EFFECTS.md)); trails and weather (`weather.nvfxs`, §5.4); and a day's weather from
+the weather director (`weather_day.nvfxs`, [WEATHER.md](WEATHER.md)). The viewer edits scripts live ([VIEWER.md](VIEWER.md)): a scene
 rebuilt as you type, errors at their line and column, the last good scene playing on.
 
 ```sh
@@ -156,9 +159,10 @@ points, hand-overs between tiles of the same size).
 | `emit KIND` | particles every frame (§4.6; hail, aurora, rainbow, meteors, beams, shields and glints: §4.10) | |
 | `light` | light from the bus's heat | `gain` (0.14), `flash (r, g, b)` (0) |
 | `particles` | the particle pool | `capacity` (4096), `flow` (0.9: how much particles follow the bus's flow) |
-| `frame` | the picture | `exposure` (1), `fade` (1), `haze` (1: heat haze), `bloom` (1: strength), `bloom_threshold` (1) |
+| `frame` | the picture | `exposure` (1), `fade` (1), `haze` (1: heat haze), `bloom` (1: strength), `bloom_threshold` (1); the day ([WEATHER.md](WEATHER.md) §4.6): `daylight` (0: the night sky of every scene before), `overcast` (0 to 1: the CIE overcast sky), `visibility` (infinity: metres, Koschmieder's haze over the hills, the ground and the sky) |
 | `camera` | the screen's top-left corner in the world | `x`, `y` (0) |
 | `keyframes T, T, ...` | frames the tool writes as PNG (`--keyframes`) and to the sheet | |
+| `weather NAME` | the weather director ([WEATHER.md](WEATHER.md)): a small weather state moving between regimes in the order real weather keeps; its members are values (`NAME.rain`, ...); lines under it (`storm at 19, over 4`) are its schedule | `seed` (1), `regime` (clear: where it heads, an expression whose regime names are values; with a schedule, where it starts), `over` (60 s), `direction` (1) |
 | `entry`, `param` | an effect of the library's catalogue and its parameters ([LIBRARY.md](LIBRARY.md)); a scene rejects them | |
 | `at T:` / `when ...:` | a rule (§4.5) | |
 | `every frame:` | couplings applied every frame (§4.5) | |
@@ -208,6 +212,7 @@ Arithmetic in single-precision float, one operation at a time, as C++ computes i
 | an `input` | its value, as the game last set it (never a constant: it cannot size, tile or place tiles) |
 | a rule's name | when it last fired (infinity before: so `smooth((t - boom) / 1)` is 0 until `boom`) |
 | `M.x`, `M.y`, `M.started`, `M.age`, `M.active` | a module (§4.3); a trail's `T.vx`, `T.vy` too |
+| `W.rain`, `W.cloud`, `W.wind`, `W.visibility`, ... | a weather's state ([WEATHER.md](WEATHER.md) §1: cloud, rain, snow, hail, wind, mean, gust, visibility, temp, lightning, dust, fog, extinction, u, beaufort, lean, leaves, lift, light, flash, strike, bolt, since, regime, progress) |
 | `x`, `temp` | in a rule `when ember lands`: where the ember landed and how hot it was |
 | `rand` | a random number in [0, 1), from the particles' generator (deterministic: the same script gives the same frames) |
 | `smooth(v)` | 0 below 0, 1 above 1, smooth in between (`3v² - 2v³`) |
@@ -268,8 +273,8 @@ with or without them:
 | `emit arc` (procedural) | a lightning bolt or an electric arc between two points: midpoint displacement down to pieces of about 10 pixels, a core and a faint halo, flickering, with forks; a new shape every frame, or `rate` times a second | `along (x0, y0) to (x1, y1)`, `colour` (0.55, 0.7, 1), `width` (1.5), `brightness` (2.5), `jitter` (0.2 of its length), `branches` (2), `rate` (0: every frame), `seed` (1) |
 | `emit ring` (procedural) | a glowing ring, an ellipse when squashed (a shock ring seen on the ground), with a faint halo | `at`, `radius`, `squash` (1), `colour` (1, 0.75, 0.45), `width` (3), `brightness` (1.5) |
 | `emit glow` (procedural) | a soft disc of light, or `count` of them wandering within `spread` of the point, each flickering (fireflies, motes) | `at`, `radius`, `colour` (1, 0.7, 0.4), `brightness` (1.5), `count` (1), `spread` (0), `rate` (0.5), `seed` (1) |
-| `emit rain` (procedural) | rain falling through the rectangle `in`, `size` (850 px/s, a streak along its last step and a half), slanted by `wind`; with `wash`, it washes the soot of every module it falls on out (§5.4) | `in (x, y)`, `size W x H` (both required), `density` (3: drops in each 100 x 100 pixels at once), `wind (u, v)` (world pixels a second), `radius` (0.8: the streak's width), `colour` (0.55, 0.6, 0.7), `brightness` (1), `flow` (0.15: how much it follows the bus's flow), `wash` (0: soot washed out a second), `seed` |
-| `emit snow` (procedural) | flakes falling at 55 px/s and fluttering, carried by the bus's flow; they melt where the bus's heat is above `melt` | as rain, and `density` (1.5), `radius` (1.6), `colour` (0.85, 0.87, 0.92), `flow` (1), `melt` (0.15; 0: never) |
+| `emit rain` (procedural) | rain falling through the rectangle `in`, `size` (850 px/s, a streak along its last step and a half), slanted by `wind`; with `wash`, it washes the soot of every module it falls on out (§5.4). With `rate` (mm/h), the weather director's physics ([WEATHER.md](WEATHER.md) §4.1): Marshall-Palmer drops falling at Atlas's speeds, as many as the rate holds in a slab `depth` metres deep seen at `scale` world pixels a metre, each streak as long as its drop falls in the `shutter`, its width the drop's (times `radius`, 1) | `in (x, y)`, `size W x H` (both required), `density` (3: drops in each 100 x 100 pixels at once), `wind (u, v)` (world pixels a second), `radius` (0.8: the streak's width), `colour` (0.55, 0.6, 0.7), `brightness` (1), `flow` (0.15: how much it follows the bus's flow), `wash` (0: soot washed out a second), `seed`; `rate`, `scale` (600), `depth` (0.5), `shutter` (half a frame) |
+| `emit snow` (procedural) | flakes falling at 55 px/s and fluttering, carried by the bus's flow; they melt where the bus's heat is above `melt`. With `rate` (mm/h of melted water), Locatelli and Hobbs's flakes, as many as carry the rate ([WEATHER.md](WEATHER.md) §4.1) | as rain, and `density` (1.5), `radius` (1.6), `colour` (0.85, 0.87, 0.92), `flow` (1), `melt` (0.15; 0: never); `rate`, `scale`, `depth` (no `shutter`) |
 | `emit ash` (procedural) | grey flakes falling at 32 px/s, fluttering, a share of them glowing and cooling | as rain, and `density` (1), `radius` (1.1), `colour` (0.3, 0.28, 0.27), `flow` (1), `glowing` (0.08: the share that glows) |
 | `emit leaves` (procedural) | leaves (or, with a `colour`, petals) tumbling and swaying down at 45 px/s, in autumn colours | as rain, and `density` (0.15), `radius` (2.6), `flow` (0.8) |
 
@@ -283,6 +288,7 @@ shield, glints) are in §4.10.
 ### 4.7 The order of a frame
 
 Every frame runs in this order (`src/compose/script_run.cpp`):
+0. the weather directors, in script order: where each heads now, a step, its members ([WEATHER.md](WEATHER.md));
 1. rules on time, shocks and fields (and rules the game triggered), in script order; their actions run at once;
 2. emitters, in script order (rain washes the modules under it here, before they step);
 3. settings that change over time: modules (controls, opacity, look, place), scorch marks, frame, light, camera; then
@@ -343,14 +349,16 @@ Getting every float the same forced a few things, all visible in the script:
   half a minute, and some fire seeds die out. `shards` hides this by starting fresh rollouts and blending them in; the
   blend is visible as a slow cross-fade of the shapes, and each new shard's warm-up costs a few milliseconds.
 - The parser stops at the first error; `--print` drops comments (it is for round trips and checks, not for editing).
-- Seeds are whole numbers up to 16 777 216 (they pass through a float).
+- Seeds are whole numbers up to 33 554 432 (they pass through a float: above 16 777 216 only even ones; a whole number a
+  float cannot hold is an error, as `28500001` is).
 - Live editing is the viewer's scene mode ([VIEWER.md](VIEWER.md)): an edit is checked once typing pauses and rebuilt off
   the frame. It shows one error at a time, as the parser stops at the first; `--check` remains the quick loop on the
   command line.
 - The game drives a scene through inputs, rule triggers and module moves and controls (the C API, [ENGINES.md](ENGINES.md)
   §7); it cannot add modules, couplings or fields while the scene plays: those are the script's.
 - Weather particles are drawn unlit, in their own colours: the scene's light (fires, lamps) does not light snow or rain.
-  Rain makes no splashes and leaves nothing on the ground; nothing settles (snow does not lie).
+  Rain makes no splashes and leaves nothing on the ground; nothing settles (snow does not lie). The day's sky
+  ([WEATHER.md](WEATHER.md) §4.6) has no sun, so nothing casts a shadow or has a lit side.
 
 ### 4.10 Procedural elements for the sky, combat and magic
 
@@ -367,7 +375,7 @@ the water system.
 
 | emitter | what it makes | keys (defaults) |
 |---|---|---|
-| `emit hail` | hail, as the weather of §4.6 (the rectangle filled at once, then fed from its top edge and from upwind): pellets falling at 560 world pixels a second, bouncing once or twice on the rectangle's bottom edge (or the ground), lying a moment | `in`, `size` (required), `density` (1.2), `wind` (0, 0), `radius` (1.3), `colour`, `brightness` (1: times the colour), `flow` (0.1), `seed` |
+| `emit hail` | hail, as the weather of §4.6 (the rectangle filled at once, then fed from its top edge and from upwind): pellets falling at `speed` world pixels a second, bouncing once or twice on the rectangle's bottom edge (or the ground), lying a moment | `in`, `size` (required), `density` (1.2), `wind` (0, 0), `radius` (1.3), `colour`, `brightness` (1: times the colour), `flow` (0.1), `seed`, `speed` (560) |
 | `emit aurora` | curtains of rays over the rectangle `in`, `size`: their lower edge wanders across its lower part, their folds drift (`jitter`), their brightness shimmers along them, at `rate` times the natural pace; bright in `colour` at the lower edge, fading upwards into `top` | `in`, `size` (required), `colour` (green), `top` (violet), `brightness` (0.5), `rate` (1), `jitter` (1), `seed` |
 | `emit rainbow` | seven bands of an arc about `at` (red outside at `radius`, `width` across all seven), fading into the ground at its feet; `count 2` adds the fainter second bow, its colours reversed | `at`, `radius` (required), `width` (a tenth of the radius), `brightness` (0.35), `squash` (1), `count` (1) |
 | `emit meteors` | shooting stars: `rate` a second, each starting in the rectangle `in`, `size` in a time slot of its own and crossing along `direction` at about `speed` for under a second, its tail `length` long and its head `width` | `in`, `size` (required), `rate` (0.5), `speed` (650), `direction` (1, 0.45), `length` (140), `width` (1.6), `colour` (white), `brightness` (2.5), `seed` |
@@ -593,6 +601,12 @@ truck; the rain reads as streaks and the snow as flakes, the rain's washing of t
 only after a few seconds and is subtle in a still; snow and rain are drawn unlit, so near the campfire they do not glow.
 Tested by `Weather.*`: the region filled and fed, the random numbers kept, rain washing a module's soot (and nothing
 without `wash`), snow melting where the bus is hot, a wind field carrying leaves.
+
+**The weather director** ([WEATHER.md](WEATHER.md)) says how much of each there is: a `weather` statement's state
+(`sky.rain`, `sky.cloud`, `sky.wind`, `sky.visibility`, `sky.flash`, ...) moves between regimes in the order real weather
+keeps, and the scene wires it to these emitters (`emit rain, rate sky.rain, ...`, which then take their physics), to
+the cloud and fog models, the lightning, the wind and the day's sky. `examples/scenes/weather_day.nvfxs` (40 s: clear,
+clouding over, rain, a thunderstorm, clearing) is the reference wiring.
 
 ### 5.5 Water
 
