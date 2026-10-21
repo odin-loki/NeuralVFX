@@ -7,24 +7,22 @@ under a rule committed before validation (§2 onwards).
 
 ## 0. Where the study stands (a handoff, kept current)
 
-As of 21 October 2026, 11:25 UTC:
-- **Done:** the teacher fixed and measured (§1, every row); the learned smoke's rule committed (§2, commit f269659) and
-  its edge bounds calibrated and committed before validation (3c91ff2); the 48 training runs; the validation's and the
-  test's teacher simulations (the last of the test's floor runs finishing); the plume video
-  (`videos/3d_plume_theory.mp4`); the buoyancy budget's code (cb525ae: `plume` records what leaves through the sides and
-  what the box stores, `plumefit --budget`).
+As of 21 October 2026, 12:10 UTC:
+- **Done:** the teacher fixed and measured (§1, every row, and §1.4's buoyancy budget, which closed the one open check);
+  the learned smoke's rule committed (§2, commit f269659) and its edge bounds calibrated and committed before
+  validation (3c91ff2); the 48 training runs; the validation's and the test's teacher simulations; the plume video
+  (`videos/3d_plume_theory.mp4`); **origin/main merged** (5da3529, 373829d: study hres, models/ in git; done while
+  training ran, so the long build and checks overlap the wait; the test runs on the frozen `bin/nvfx_3d_val`, built
+  from 3c91ff2, so the merge cannot touch it).
 - **Running** (detached, resumable; scripts in `$NEURALVFX_DATA/r_smoke3d/jobs/`, logs in `.../logs/`): `train.sh`
-  (stage 2 of 4 at 11:25; it writes `models/C4.nvfx3` at the end, about 14:30 to 15:30), `val_staged.sh` (each
-  candidate's finish, edge check, tracking and plays as its snapshot appears; the coarse simulation and holding with
-  C2), `plume_budget.sh` (§1.4's open check: v_t100b and v_i50b, the same seeds as v_t100 and four of v_i50's; then
-  `nvfx_3d plumefit --study r --configs v_t100b,v_i50b --budget v_t100b,v_i50b --fit-lo 24 --fit-hi 92 --out
-  $D/scratch/side` and the result into §1.4).
+  (stage 3 of 4 at 12:10; it writes `models/C4.nvfx3` at the end, about 15:00 to 15:30), `val_staged.sh` (C2 done
+  but its plays; then the coarse simulation and holding, C3 when `ckpt/r_stage3.ckpt` appears, C4 at the end).
 - **Next, in order:** when `job_val.log` says VAL_DONE: `jobs/val_report.sh` (results/3d/r: edge check, comparisons,
   the choice); `cp models/<chosen>.nvfx3 models/chosen.nvfx3`; `nvfx_3d freeze --model .../chosen.nvfx3 --frozen
-  results/3d/r/frozen.csv`; commit and push; then `jobs/test.sh` (once) and `jobs/test_report.sh`; then the orbit and
-  coupled videos (§5), docs (§3 to §6, REPORT §20, TODO), merge origin/main (373829d at 11:15: 11 conflict hunks in
-  `tools/nvfx_3d.cpp`, where study hres extends the same switches as study R; keep both), the models/ entry if it
-  ships, the full checks, push.
+  results/3d/r/frozen.csv`; commit and push; then `jobs/test.sh` (once) and `jobs/test_report.sh`; then the orbit,
+  real-against-learned and coupled videos (§5; demo seeds 29,900,001 and up), docs (§3 to §6, REPORT §20, TODO), the
+  models/ entry if it ships (models/3d/smoke.nvfx3, layout.txt, SHA256SUMS), merge origin/main again if it moved, the
+  full checks, push.
 
 ## 1. The teacher against plume physics
 
@@ -465,6 +463,9 @@ $B plume --study r --spin 6 --seconds 12 --label v_w100 --wind 1.0 --seeds 3 --s
 $B plumefit --study r --configs v_i20,v_i50,v_i80,v_t00,v_t100,v_tall,v_wide,v_w75,v_w100 --strengths v_i20,v_i50,v_i80 \
    --box v_i50:v_tall,v_i50:v_wide --bent v_w75,v_w100 --still v_i50 --bent-lo 8 --bent-hi 56 --fit-lo 24 --fit-hi 92 --out $R
 $B plumevideo --study r --configs v_i50,v_i20,v_i80 --fit-lo 24 --fit-hi 92 --seconds 16 --seed 29900100 --average-from 4 --out 3d_plume_theory.mp4
+# §1.4's buoyancy budget: the same seeds again with the sides' and the store's sums
+$P --label v_t100b --turbulence 1 --seeds 4 --seed-base 29010400; $P --label v_i50b --seeds 4 --seed-base 29010000
+$B plumefit --study r --configs v_i50b,v_t100b --budget v_i50b,v_t100b --fit-lo 24 --fit-hi 92 --out $R --md plume_budget.md --csv /dev/null
 # §2: the training runs, the edge bounds, training and the candidates
 $B record --study r --runs-dir short --runs 24; $B record --study r --runs-dir long --runs 24
 $B edge --study r --sim --runs 4 $W --out $D/results/edge_teacher.csv; $B edgecal --study r --csv $D/results/edge_teacher.csv --out $R/edge_bounds.csv

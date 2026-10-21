@@ -4137,7 +4137,9 @@ W (z - z0)^(1/3) scales as F^0.41 [0.33, 0.48] across the strengths (MTT 1/3). S
 buoyancy flux and spreads at the measured rate, its power laws hold to within about 0.1 in the exponents, and its
 velocity is about a third too slow for its flux: it gains only 0.78 of the momentum its buoyancy gives, most likely
 the semi-Lagrangian velocity step's numerical dissipation (a MacCormack velocity step, which would have helped, was
-unstable at this grid). The box's top matters only in its last 10 cells; its sides make the plume about 5% narrower and
+unstable at this grid). A budget between 24 and 92 cells closes: under 0.5% of the flux leaves through the box's sides,
+the numerics add 0.3%, and the 3% fall at the strongest turbulence is the box still filling. The box's top matters only
+in its last 10 cells; its sides make the plume about 5% narrower and
 its centreline buoyancy 5 to 18% higher than in a box half as wide again. The wind-bent plume does not follow Briggs's
 two-thirds law (exponents 0.54 and 0.88, coefficients 4.3 and 5.3 against 1.6), because the solver's wind is a drag on
 smoke through still air: the plume moves at under half the wind's speed and leans rather than bends.
