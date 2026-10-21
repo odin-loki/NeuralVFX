@@ -390,15 +390,80 @@ class RowPair {
     }
     return {rows_[static_cast<std::size_t>(s0)].data(), rows_[static_cast<std::size_t>(s1)].data()};
   }
-  std::size_t bytes() const { return 4 * (rows_[0].size() + rows_[1].size()); }
+  std::size_t bytes() const { return 4 * (rows_[0].size() + rows_[1].size() + pad_.size()) + plan_.size() * sizeof(Plan); }
+
+  // Set-up (allocates): rows of grids n cells wide read through axis `ax` take whole vectors of pixels from a copy of the
+  // grid row by permutes (no gathers: they were slow on one CPU) wherever a vector's cells fit a window of two vectors;
+  // the values and the lerp are those of the scalar loop.
+  void plan(const Axis& ax, int n) {
+#if NFX_VW >= 8
+    const int nq = Q > 0 ? Q : static_cast<int>(q_);
+    planned_ = &ax;
+    pad_.assign(static_cast<std::size_t>(n * nq + 2 * kW), 0.f);
+    plan_.assign(w_ / kW, Plan{});
+    for (std::size_t b = 0; b < plan_.size(); ++b) {
+      Plan& p = plan_[b];
+      const int x = static_cast<int>(b) * kW, base = ax.i[static_cast<std::size_t>(x)];
+      p.base = base * nq;
+      p.ok = (ax.i[static_cast<std::size_t>(x + kW - 1)] - base + 1) * nq <= 2 * kW - 1;
+      for (int k = 0; k < kW; ++k) p.lo[static_cast<std::size_t>(k)] = (ax.i[static_cast<std::size_t>(x + k)] - base) * nq;
+    }
+#else
+    (void)ax;
+    (void)n;
+#endif
+  }
 
  private:
+  struct Plan {
+    int base = 0;  // the window's first float in the row: the first pixel's cell
+    bool ok = false;
+    std::array<std::int32_t, kW> lo{};  // each lane's first value in the window (its second is nq further)
+  };
+#if NFX_VW == 16
+  static vf perm2(vf a, vf b, vi i) { return reinterpret_cast<vf>(_mm512_permutex2var_ps(reinterpret_cast<__m512>(a), reinterpret_cast<__m512i>(i), reinterpret_cast<__m512>(b))); }
+#elif NFX_VW == 8
+  static vf perm2(vf a, vf b, vi i) {  // vpermps reads an index's low three bits
+    const vf lo = reinterpret_cast<vf>(_mm256_permutevar8x32_ps(reinterpret_cast<__m256>(a), reinterpret_cast<__m256i>(i)));
+    const vf hi = reinterpret_cast<vf>(_mm256_permutevar8x32_ps(reinterpret_cast<__m256>(b), reinterpret_cast<__m256i>(i)));
+    return i >= 8 ? hi : lo;
+  }
+#endif
   int slot(int j) const { return key_[0] == j ? 0 : key_[1] == j ? 1 : -1; }
-  void expand(const float* grid, int n, const Axis& ax, int j, int s) {
+  // Not inlined: inlined, the larger body changed how GCC compiled the AVX2 build's callers (their multiply-adds fused
+  // differently, so their frames changed); out of line, every build's frames are as before.
+  [[gnu::noinline]] void expand(const float* grid, int n, const Axis& ax, int j, int s) {
     const std::size_t nq = Q > 0 ? static_cast<std::size_t>(Q) : q_;
     const float* g = grid + static_cast<std::size_t>(j) * static_cast<std::size_t>(n) * nq;
     float* out = rows_[static_cast<std::size_t>(s)].data();
-    for (std::size_t x = 0; x < w_; ++x) {
+    std::size_t x = 0;
+#if NFX_VW >= 8
+    if (&ax == planned_) {
+      std::copy_n(g, static_cast<std::size_t>(n) * nq, pad_.data());  // the row, with room after it for whole windows
+      for (std::size_t b = 0; b < plan_.size(); ++b, x += kW) {
+        const Plan& p = plan_[b];
+        if (!p.ok) {
+          for (std::size_t k = x; k < x + kW; ++k) {
+            const float* a = g + static_cast<std::size_t>(ax.i[k]) * nq;
+            const float w = ax.w[k];
+            for (std::size_t q = 0; q < nq; ++q) out[q * stride_ + k] = a[q] + w * (a[q + nq] - a[q]);
+          }
+          continue;
+        }
+        const vf w = load(ax.w.data() + x);
+        vi lo;
+        std::memcpy(&lo, p.lo.data(), sizeof lo);
+        const vi hi = lo + static_cast<std::int32_t>(nq);
+        for (std::size_t q = 0; q < nq; ++q) {
+          const float* src = pad_.data() + static_cast<std::size_t>(p.base) + q;
+          const vf v0 = load(src), v1 = load(src + kW);
+          const vf a = perm2(v0, v1, lo), c = perm2(v0, v1, hi);
+          store(out + q * stride_ + x, a + w * (c - a));
+        }
+      }
+    }
+#endif
+    for (; x < w_; ++x) {
       const float* a = g + static_cast<std::size_t>(ax.i[x]) * nq;
       const float w = ax.w[x];
       for (std::size_t q = 0; q < nq; ++q) out[q * stride_ + x] = a[q] + w * (a[q + nq] - a[q]);
@@ -408,6 +473,9 @@ class RowPair {
   std::size_t w_ = 0, q_ = 0, stride_ = 0;
   std::array<AlignedFloats, 2> rows_;
   std::array<int, 2> key_{-1, -1};
+  const Axis* planned_ = nullptr;  // plan()'s axis (expand() falls back to the scalar loop for any other)
+  AlignedFloats pad_;
+  std::vector<Plan> plan_;
 };
 
 class Rollout final : public RolloutRunner {
@@ -591,6 +659,10 @@ class Rollout final : public RolloutRunner {
         x *= 2.f;
       }
     }
+    flow_rows_.plan(ax_, R_);
+    fac_rows_.plan(ax_, R_);
+    swirl_rows_.plan(sx_, sw_n_);
+    for (std::size_t o = 0; o < oct.size(); ++o) noise_rows_[o].plan(nax_[o], oct[o].n);
   }
 
   using RolloutRunner::begin;

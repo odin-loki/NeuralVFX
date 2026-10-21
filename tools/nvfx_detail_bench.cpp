@@ -33,6 +33,7 @@
 #include <filesystem>
 #include <format>
 #include <fstream>
+#include <limits>
 #include <map>
 #include <print>
 #include <random>
@@ -205,7 +206,7 @@ void run_2d(const nfx::tools::Args& a) {
   const fs::path out = a.str("out", "results/detail/frames_2d.csv");
   if (out.has_parent_path()) fs::create_directories(out.parent_path());
   std::ofstream csv(out);
-  csv << "model,size,isa,precision,round,frames,old_step_ms,new_step_ms,old_frame_ms,new_frame_ms,old_detail_ms,new_detail_ms,differing_frames\n";
+  csv << "model,size,isa,precision,round,frames,old_step_ms,new_step_ms,old_frame_ms,new_frame_ms,old_detail_ms,new_detail_ms,differing_frames,min_psnr_db\n";
   long total_frames = 0, total_bad = 0;
   for (const auto& path : models) {
     void* eo = po.effect(path.c_str());
@@ -235,6 +236,7 @@ void run_2d(const nfx::tools::Args& a) {
         for (int r = 0; r < rounds; ++r) {
           std::vector<double> st[2], fr[2], de[2];
           int bad = 0;
+          double worst = std::numeric_limits<double>::infinity();  // the round's lowest picture PSNR, old against new
           for (int f = 0; f < frames; ++f) {
             if (played >= length) {
               begin();
@@ -264,13 +266,21 @@ void run_2d(const nfx::tools::Args& a) {
               const float* y = pn.field(rn, w, &n1);
               ok = ok && n0 == n1 && same(x, y, n0);
             }
-            ok = ok && std::memcmp(po.render(ro), pn.render(rn), static_cast<std::size_t>(size) * static_cast<std::size_t>(size) * 4) == 0;
+            const std::size_t bytes = static_cast<std::size_t>(size) * static_cast<std::size_t>(size) * 4;
+            const std::uint8_t* pa = po.render(ro);
+            const std::uint8_t* pb = pn.render(rn);
+            if (std::memcmp(pa, pb, bytes) != 0) {
+              ok = false;
+              double se = 0;
+              for (std::size_t q = 0; q < bytes; ++q) se += (static_cast<double>(pa[q]) - pb[q]) * (static_cast<double>(pa[q]) - pb[q]);
+              worst = std::min(worst, 10.0 * std::log10(255.0 * 255.0 / (se / static_cast<double>(bytes))));
+            }
             bad += !ok;
           }
           bad_frames += bad;
           ratios.push_back(median(fr[1]) / median(fr[0]));
-          csv << std::format("{},{},{},{},{},{},{:.5f},{:.5f},{:.5f},{:.5f},{:.5f},{:.5f},{}\n", path.stem().string(), size, is, int8 ? "int8" : "float", r, frames,
-                             median(st[0]), median(st[1]), median(fr[0]), median(fr[1]), median(de[0]), median(de[1]), bad);
+          csv << std::format("{},{},{},{},{},{},{:.5f},{:.5f},{:.5f},{:.5f},{:.5f},{:.5f},{},{:.2f}\n", path.stem().string(), size, is, int8 ? "int8" : "float", r,
+                             frames, median(st[0]), median(st[1]), median(fr[0]), median(fr[1]), median(de[0]), median(de[1]), bad, worst);
         }
         csv.flush();
         total_frames += static_cast<long>(rounds) * frames;
