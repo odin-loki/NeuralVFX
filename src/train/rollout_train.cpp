@@ -1682,9 +1682,12 @@ SimRecipe recipe_for(sim::Effect e) {
   if (e == sim::Effect::lava || e == sim::Effect::eruption) r.start_fine = 64;  // and these (docs/EFFECTS_EARTH.md)
   if (e == sim::Effect::heavygas) r.start_fine = 64;  // heavy gas pools and lingers, as fog does (docs/EFFECTS_AIR.md)
   if (e == sim::Effect::crownfire || e == sim::Effect::windowfire) r.start_fine = 64;  // their smoke lingers (docs/EFFECTS_FIRE2.md)
+  // the geyser's steam drifts for seconds after an eruption and sea spray's fine spray across the frame, as smoke lingers
+  // (docs/EFFECTS_ELEMENTS.md); the haboob plays once, so it takes the branch below
+  if (e == sim::Effect::geyser || e == sim::Effect::seaspray) r.start_fine = 64;
   if (!sim::effect_loops(e)) {  // the explosion, and dust (docs/EFFECTS_ATMOSPHERE.md), which plays once as it does
     r.runs = 240;
-    r.frames = sim::one_shot_frames(e);  // 90 (3 s); the mushroom's and the avalanche's 150 (docs/EFFECTS_BLAZE.md, EFFECTS_EARTH.md); a smoke ring's and a dust explosion's 120 (docs/EFFECTS_AIR.md, EFFECTS_FIRE2.md)
+    r.frames = sim::one_shot_frames(e);  // 90 (3 s); the mushroom's, the avalanche's and the haboob's 150 (docs/EFFECTS_BLAZE.md, EFFECTS_EARTH.md, EFFECTS_ELEMENTS.md); a smoke ring's and a dust explosion's 120 (docs/EFFECTS_AIR.md, EFFECTS_FIRE2.md)
     r.start_frame = 0;
     r.start_fine = 64;  // the burst's shape is the look
     r.starts = 16;

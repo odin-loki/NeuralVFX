@@ -264,6 +264,38 @@ TEST(Rollout, Fire2EffectsTakeTheirRecipes) {
   EXPECT_EQ(bm.noise.flicker_rate, sim::flicker_rate(sim::Effect::dustexplosion));
 }
 
+// The elements (docs/EFFECTS_ELEMENTS.md): the geyser and sea spray keep fine fields with their start points, as smoke
+// does; the haboob takes the one-shot branch at its own length (5 s).
+TEST(Rollout, ElementsEffectsTakeTheirRecipes) {
+  const SimRecipe fire = recipe_for(sim::Effect::fire), smoke = recipe_for(sim::Effect::smoke), ex = recipe_for(sim::Effect::explosion);
+  const SimRecipe geyser = recipe_for(sim::Effect::geyser), spray = recipe_for(sim::Effect::seaspray), haboob = recipe_for(sim::Effect::haboob);
+  for (const SimRecipe* r : {&geyser, &spray}) {
+    EXPECT_EQ(r->runs, fire.runs);
+    EXPECT_EQ(r->frames, fire.frames);
+    EXPECT_EQ(r->start_frame, fire.start_frame);
+    EXPECT_EQ(r->starts, fire.starts);
+    EXPECT_EQ(r->start_fine, smoke.start_fine);
+    EXPECT_EQ(r->stepper.activity_stage, fire.stepper.activity_stage);
+    EXPECT_TRUE(recipe_model(*r).loop);
+    EXPECT_EQ(recipe_model(*r).h.n_age, 0);
+  }
+  EXPECT_EQ(haboob.runs, ex.runs);
+  EXPECT_EQ(haboob.frames, 150);
+  EXPECT_EQ(haboob.frames, sim::one_shot_frames(sim::Effect::haboob));
+  EXPECT_EQ(haboob.start_frame, 0);
+  EXPECT_EQ(haboob.start_fine, ex.start_fine);
+  EXPECT_EQ(haboob.starts, ex.starts);
+  EXPECT_EQ(haboob.stepper.burn_max, ex.stepper.burn_max);
+  const Model hm = recipe_model(haboob);
+  EXPECT_FALSE(hm.loop);
+  EXPECT_EQ(hm.h.frames, 150);
+  EXPECT_EQ(hm.h.n_age, 2);
+  EXPECT_EQ(recipe_model(geyser).control_names[1], "wind");
+  EXPECT_EQ(hm.control_names[1], "height");
+  EXPECT_EQ(recipe_model(spray).control_names[1], "gale");
+  EXPECT_EQ(recipe_model(geyser).noise.flicker_rate, sim::flicker_rate(sim::Effect::geyser));
+}
+
 TEST(Rollout, CoarseFromSimAveragesBlocks) {
   sim::State st;
   st.n = 16;

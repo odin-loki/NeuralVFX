@@ -1011,6 +1011,28 @@ eye all three are fair; the library draws the crown fires' column and the dust e
 146 and 294 KB; 0.49 to 0.65 ms per 128 px frame. The full account, with a forest-edge town scene and ten library
 entries, is in [EFFECTS_FIRE2.md](EFFECTS_FIRE2.md).
 
+### 6.19 Elements
+
+Three more presets were trained and tested the same way, at the runtime's default int8, with seeds of the round's own
+(27,000,000 and up): a **geyser** (a vent that simmers, steams and surges, then erupts in a white column of water and
+steam that holds, collapses and steams; its conduit's state is a slow noise the stepper sees, so it keeps its own
+irregular time), a **haboob** (a storm's cold outflow let go from a lock and running along the ground as a gravity
+current, a tall rolling head of dust; it plays once, for 5 s, with study M3's mean state, decided before training) and
+**sea spray** (spray torn off breaking wave crests by the wind, the crests' share following Monahan and
+O'Muircheartaigh's whitecap cover). The simulator's haboob runs as gravity-current theory says: its front at a steady
+0.86 to 0.90 of sqrt(g' h) of its feed, and Fr = 1.15 ± 0.23 on its head (Huppert and Simpson's laboratory 1.19,
+Benjamin's ideal √2). Sea spray works by the rule set before the test: it tracks a held-out run 1.9 dB [1.0, 2.8]
+better than the coarse simulation with the same detail layer at 1 s (+2.9 at 8 s), and endless its average picture is
+5.9 dB [4.8, 7.1] closer than the nearest flipbook's and ties a second real run's, its motion no worse; its detail is
+far from real (spectrum distance 0.36, the flipbook's 0.10). The haboob tracks better from 1 s (+1.1 [0.3, 1.9]) but
+its average picture only ties the flipbook's (its whole 150 frames at a neighbouring setting), so it falls short; its
+learned front runs at the simulator's speed at one held-out setting and 25% fast at the other, and its renderer loses
+its first frames. The geyser is weak: it ties the coarse simulation at 1 s (+1.1 [-0.3, +2.6]) and loses at 2 s; at a
+middle setting it erupts when its conduit says (a column in 95% of those frames), at a low one never, and within a shard
+its column follows its start point more than its intensity. 146, 294 and 146 KB; 0.42 to 1.03 ms per 128 px frame. The
+full account, with a coast scene under the weather director and ten library entries, is in
+[EFFECTS_ELEMENTS.md](EFFECTS_ELEMENTS.md).
+
 ## 7. Runtime cost and budget
 
 Median ms per frame through `nvfx_render`, one pinned AVX2 core (90th percentiles and every configuration in

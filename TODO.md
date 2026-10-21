@@ -2,8 +2,8 @@
 
 **Status:** stage 1 is done (study N, `docs/STUDY_3D.md`, and its follow-up N2, §14); stage 2 is planned, not started.
 Since 15 October 2026, here: round 9, studies O and P, float on AVX-512, the faster detail layer, the 2D weather
-director, the FUSE sample and round 10's fire are done and merged; round 10's elements and study R (a validated 3D
-smoke) are under way ("Here, until the PC").
+director, the FUSE sample and round 10's fire and elements are done and merged; study R (a validated 3D smoke) is
+under way ("Here, until the PC").
 
 - **Stage 1, here and now (study N): done.** A small 3D demo in this container ([docs/STUDY_3D.md](docs/STUDY_3D.md),
   REPORT §15). What it built:
@@ -91,8 +91,16 @@ and the Godot test; details in its doc and REPORT section):
   entries, the forest-edge town scene, six videos. Still weak: the two fires' detail streaks (spectrum six times the
   flipbook's); the dust explosion's renderer fringes its unlit cloud and draws its pall faint, and its start follows the
   ignition control only roughly.
-- **Round 10, elements** (`effects-elements`, seeds 27.0 to 27.9 million): a geyser (#88), a haboob dust wall (#70,
-  #71) and sea spray off breaking waves (#77), with a library file, a scene and videos.
+- **Round 10, elements** (`effects-elements`, docs/EFFECTS_ELEMENTS.md, REPORT §6.19; seeds 27.0 to 27.9 million): a
+  geyser (#88), a haboob dust wall (#70, #71) and sea spray off breaking waves (#77). **Finished and merged into main**
+  (21 October 2026): each tested once. Sea spray works (tracking at 1 s over the coarse simulation with detail +1.92 dB
+  [+1.01, +2.83]; endless mean picture +5.88 dB [+4.77, +7.11] closer than the nearest flipbook's, motion tied); the
+  haboob falls short (+1.06 dB [+0.25, +1.87] at 1 s, its mean picture tied with the flipbook's; the simulator's front
+  runs at Fr = 1.15 on its head, Huppert and Simpson's 1.19); the geyser is weak (+1.10 dB [-0.33, +2.57] at 1 s, a
+  tie). Ten library entries, the coast scene under the weather director, six videos. Still weak: the geyser never
+  erupts at low intensity and within a shard follows its start point more than its intensity; the haboob's first
+  frames (its renderer) and a weak current that runs 25% fast; sea spray's detail (tufts, not thin plumes). To try: a
+  field-shader look that draws heat as white vapour (steam and fine spray are heat, which a look draws as light).
 
 **Next:**
 - **Study Q, round 9's weak spots**, as study O did for earlier ones: the avalanche's cloud (it billows less than the
@@ -699,6 +707,8 @@ Ranges already used elsewhere:
 - 26 million: round 10's fire effects (the test 26,000,000 to 26,150,999; the library's and the scene's module seeds,
   which a script takes only up to 2^24, are 2,630,001 and up);
 - 7 million: water;
+- 27 million: round 10's elements (27,000,000 to 27,999,999; the library's and the scene's module seeds 2,700,001 to
+  2,710,031, as a script takes seeds up to 2^24);
 - 8 million: studies M, M2 and M3.
 
 ## What goes in git

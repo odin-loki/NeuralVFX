@@ -1,0 +1,2 @@
+effect,runs,frames,sim_minutes,record_s,stepper_loss,stepper_s,renderer_psnr,contrast,swirl,detail_score,starts,start_fine,stored_bytes,total_s
+geyser,160,240,21.33,679,0.11420,11043,0.00,1,0.8,0.000,8,64,149162,11737
