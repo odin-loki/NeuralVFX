@@ -123,7 +123,7 @@ neuralfx_defaults(neuralfx_io)
 # runtime's internals.
 set(NEURALFX_COMPOSE_SOURCES src/compose/compose.cpp src/compose/fields.cpp src/compose/trail.cpp src/compose/script.cpp src/compose/script_run.cpp
                              src/compose/fx_particles.cpp src/compose/fx_emit.cpp
-                             src/compose/water.cpp)
+                             src/compose/water.cpp src/compose/weather.cpp)
 add_library(neuralfx_compose STATIC ${NEURALFX_COMPOSE_SOURCES})
 target_include_directories(neuralfx_compose PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src/compose" "${CMAKE_CURRENT_SOURCE_DIR}/src/runtime")
 target_link_libraries(neuralfx_compose PUBLIC nvfx)

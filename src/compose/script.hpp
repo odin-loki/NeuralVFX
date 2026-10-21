@@ -10,6 +10,7 @@
 #pragma once
 
 #include "compose.hpp"
+#include "weather.hpp"
 
 #include <array>
 #include <cstdint>
@@ -165,6 +166,11 @@ class Scene {
   int input_index(std::string_view name) const;  // -1: none
   float input(int i) const;
   void set_input(int i, float v);
+  // A weather director's member in the last frame computed ("sky.rain": `weather sky, ...`; docs/WEATHER.md), as the
+  // script reads it. False: no such weather or member. nvfx_scene_get_input reads them by the same names.
+  bool weather_value(std::string_view name, float& out) const;
+  int weathers() const;                              // weather statements
+  const wx::Director& director(int i) const;    // the i-th, for tests and tools
   // Fire a named rule (`as NAME`, or "line N") at the start of the next frame computed, as if its condition held there,
   // if it has firings left (once, `at most N`, or `repeat`). False when there is no such rule or it is a landing rule.
   bool trigger(std::string_view rule);

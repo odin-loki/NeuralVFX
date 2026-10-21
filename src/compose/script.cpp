@@ -10,10 +10,12 @@
 //                | 'let' NAME '=' expr | 'input' NAME '=' expr | 'module' NAME '=' EFFECT props | 'field' NAME '=' KIND props
 //                | 'trail' NAME '=' EFFECT props
 //                | 'water' NAME '=' ('pool' | 'sheet' | 'jet' | 'drips' | 'bubbles' | 'shaft') props   (docs/EFFECTS_WATER.md)
+//                | 'weather' NAME props [':' schedule]   (the weather director: docs/WEATHER.md)
 //   emitter     := 'emit' ('sparks' | 'embers' | 'flakes' | 'arc' | 'ring' | 'glow' | 'rain' | 'snow' | 'ash' | 'leaves'
 //                         | 'hail' | 'aurora' | 'rainbow' | 'meteors' | 'beam' | 'shield' | 'glints') props
 //   catalogue   := 'entry' NAME props | 'param' NAME '=' expr props   (library catalogues only, docs/LIBRARY.md)
 //   rule        := ('at' expr ['s'] | 'when' condition) {modifier} ':' [action {';' action}]
+//   schedule    := line {';' line}, or indented lines under the weather;  line := REGIME props  (at T, over D)
 //   condition   := 'shock' expr 'reaches' (point | NAME) | ('ember' | 'debris') 'lands' ['where' expr] | expr
 //   modifier    := 'as' NAME | 'repeat' | 'at' 'most' expr
 //   action      := 'transfer' NAME '->' names props | 'push' NAME props | 'suppress' NAME props
@@ -30,6 +32,7 @@
 #include "script.hpp"
 
 #include "fx.hpp"
+#include "weather.hpp"
 
 #include <algorithm>
 #include <charconv>
@@ -62,7 +65,8 @@ constexpr Key kScene[] = {{"size", VT::dims}, {"fps", VT::expr}, {"length", VT::
 constexpr Key kBus[] = {{"at", VT::point}, {"size", VT::dims}, {"cell", VT::expr}};
 constexpr Key kLight[] = {{"gain", VT::expr}, {"flash", VT::tuple}};
 constexpr Key kParticles[] = {{"capacity", VT::expr}, {"flow", VT::expr}};
-constexpr Key kFrame[] = {{"exposure", VT::expr}, {"fade", VT::expr}, {"haze", VT::expr}, {"bloom", VT::expr}, {"bloom_threshold", VT::expr}};
+constexpr Key kFrame[] = {{"exposure", VT::expr}, {"fade", VT::expr},     {"haze", VT::expr},     {"bloom", VT::expr},
+                          {"bloom_threshold", VT::expr}, {"daylight", VT::expr}, {"overcast", VT::expr}, {"visibility", VT::expr}};
 constexpr Key kCamera[] = {{"x", VT::expr}, {"y", VT::expr}};
 constexpr Key kEffect[] = {{"swirl", VT::expr}, {"swirl_scale", VT::expr}, {"swirl_rate", VT::expr}, {"swirl_ramp", VT::expr},
                            {"contrast", VT::expr}, {"grow", VT::expr}, {"passes", VT::expr}, {"precision", VT::name}};
@@ -111,6 +115,12 @@ constexpr Key kEmit[] = {{"along", VT::range},    {"from", VT::time},   {"until"
                          {"wash", VT::expr},      {"melt", VT::expr},   {"glowing", VT::expr}};
 // The emitters of the procedural elements added for the library (fx.hpp, docs/COMPOSE.md §4.10) take these keys too. They
 // are their own, not `emit`'s: they reserve no word (a module may still be named `top` or `flare`).
+// Rain and snow take the keys of the weather director's physics too (docs/WEATHER.md §4): their own, so they reserve no
+// word (a module may still be named `depth` or `shutter`).
+constexpr Key kEmitPhysical[] = {{"in", VT::point},       {"size", VT::dims},      {"density", VT::expr},   {"wind", VT::point},    {"radius", VT::expr},
+                                 {"colour", VT::tuple},   {"brightness", VT::expr}, {"flow", VT::expr},      {"wash", VT::expr},     {"melt", VT::expr},
+                                 {"seed", VT::expr},      {"from", VT::time},      {"until", VT::time},     {"if", VT::expr},       {"rate", VT::expr},
+                                 {"scale", VT::expr},     {"shutter", VT::expr},   {"depth", VT::expr}};
 constexpr Key kEmitFx[] = {{"along", VT::range},    {"from", VT::time},     {"until", VT::time},      {"count", VT::expr},   {"in", VT::point},
                            {"size", VT::dims},      {"if", VT::expr},       {"at", VT::point},        {"radius", VT::expr},  {"squash", VT::expr},
                            {"colour", VT::tuple},   {"width", VT::expr},    {"brightness", VT::expr}, {"jitter", VT::expr},  {"rate", VT::expr},
@@ -135,6 +145,9 @@ constexpr Key kBurst[] = {{"at", VT::point},  {"radius", VT::expr},    {"embers"
 constexpr Key kEntry[] = {{"category", VT::name}, {"size", VT::dims}, {"anchor", VT::name}, {"loop", VT::flag},
                           {"once", VT::time},     {"show", VT::time}, {"about", VT::text},  {"moving", VT::point}};
 constexpr Key kParam[] = {{"range", VT::tuple}, {"about", VT::text}};
+// The weather director (weather.hpp, docs/WEATHER.md): its settings, and the lines of its schedule (`storm at 19, over 4`).
+constexpr Key kWeather[] = {{"seed", VT::expr}, {"regime", VT::expr}, {"over", VT::time}, {"direction", VT::expr}};
+constexpr Key kSchedule[] = {{"at", VT::time}, {"over", VT::time}};
 
 struct Schema {
   std::string_view keyword;
@@ -148,7 +161,8 @@ constexpr Schema kSchemas[] = {
     {"start", kStart},     {"wake", kWake},       {"stop", kStop},        {"shock", kShock},         {"scorch", kScorch},
     {"burst", kBurst},     {"water", kWater},     {"splash", kSplash},    {"wave", kWave},
     {"let", {}},           {"keyframes", {}},      {"every", {}},             {"at", {}},
-    {"when", {}},          {"input", {}},         {"entry", kEntry},      {"param", kParam}};
+    {"when", {}},          {"input", {}},         {"entry", kEntry},      {"param", kParam},
+    {"weather", kWeather}, {"regime", kSchedule}};
 
 std::span<const Key> keys_of(std::string_view keyword) {
   for (const Schema& s : kSchemas)
@@ -167,7 +181,7 @@ constexpr std::string_view kTop[] = {"scene", "bus", "light", "particles", "fram
                                      "input", "module", "field", "emit", "every", "at", "when", "entry", "param"};
 // Statements and emitters added later, which do not reserve their words (scripts may already use them as names): a line
 // that starts with one is that statement.
-constexpr std::string_view kTopLater[] = {"trail", "water"};
+constexpr std::string_view kTopLater[] = {"trail", "water", "weather"};
 // Actions added later, which do not reserve their words either (docs/EFFECTS_WATER.md).
 constexpr std::string_view kActionsLater[] = {"splash", "wave"};
 constexpr std::string_view kWaterKinds[] = {"pool", "sheet", "jet", "drips", "bubbles", "shaft", "spray"};
@@ -657,7 +671,10 @@ Value parse_value(Parser& p, VT type, std::span<const Key> keys) {
 // whose other keys name its effect's controls (checked when the effect is loaded).
 void parse_props(Parser& p, Statement& s, bool controls_allowed) {
   compose::fx::Emitter fx_kind{};
-  const std::span<const Key> keys = s.keyword == "emit" && compose::fx::emitter_of(s.kind, fx_kind) ? std::span<const Key>(kEmitFx) : keys_of(s.keyword);
+  const bool physical = s.keyword == "emit" && (s.kind == "rain" || s.kind == "snow");
+  const std::span<const Key> keys = s.keyword == "emit" && compose::fx::emitter_of(s.kind, fx_kind) ? std::span<const Key>(kEmitFx)
+                                    : physical                                                     ? std::span<const Key>(kEmitPhysical)
+                                                                                                   : keys_of(s.keyword);
   while (!p.done()) {
     if (p.punct(",")) {
       p.next();
@@ -751,6 +768,32 @@ void parse_body_inline(Parser& p, Statement& s) {
   }
 }
 
+// A line of a weather's schedule: a regime and when to head for it (`storm at 19, over 4`). Its keyword is "regime",
+// its kind the regime's name.
+Statement parse_schedule_line(Parser& p) {
+  Statement s;
+  const Tok& k = p.next();
+  s.keyword = "regime";
+  s.pos = k.pos;
+  wx::Regime r{};
+  if (k.type != Tok::ident || !wx::regime_of(k.text, r)) {
+    std::vector<std::string> names;
+    for (const std::string_view n : wx::regime_names()) names.emplace_back(n);
+    p.fail(k.pos, std::format("'{}' is not a regime (clear, overcast, rain, storm, snow, fog, dust){}", k.text, did_you_mean(k.text, names)));
+  }
+  s.kind = k.text;
+  parse_props(p, s, false);
+  return s;
+}
+
+void parse_schedule_inline(Parser& p, Statement& s) {
+  while (!p.done()) {
+    s.body.push_back(parse_schedule_line(p));
+    if (p.done()) break;
+    p.expect(";", "between two lines of a schedule on one line");
+  }
+}
+
 Statement parse_statement(Parser& p, std::string_view source) {
   Statement s;
   const Tok& k = p.next();
@@ -818,6 +861,16 @@ Statement parse_statement(Parser& p, std::string_view source) {
     s.kind = p.name("what kind of water (pool, sheet, jet, drips, bubbles or shaft)");
     if (!in(kWaterKinds, s.kind)) p.fail(at, std::format("'{}' is not a kind of water (pool, sheet, jet, drips, bubbles, shaft, spray){}", s.kind, did_you_mean(s.kind, strings(kWaterKinds))));
     parse_props(p, s, false);
+  } else if (w == "weather") {  // the weather director: weather NAME, props [: its schedule]
+    s.name_pos = p.pos();
+    s.name = p.name("the weather's name");
+    if (p.punct("=")) p.fail(p.pos(), "a weather takes no '=': write 'weather NAME, seed S, regime R' (docs/WEATHER.md)");
+    parse_props(p, s, false);
+    if (p.punct(":")) {
+      p.next();
+      s.kind = "schedule";
+      parse_schedule_inline(p, s);
+    }
   } else if (w == "field") {
     declared("field");
     const Pos at = p.pos();
@@ -879,7 +932,7 @@ Statement parse_statement(Parser& p, std::string_view source) {
     std::vector<std::string> tops = strings(kTop);
     for (const std::string_view l : kTopLater) tops.emplace_back(l);
     const std::string hint = did_you_mean(w, tops);
-    p.fail(k.pos, hint.empty() ? std::format("unknown statement '{}' (expected scene, bus, light, particles, frame, camera, keyframes, effect, look, let, input, module, trail, water, field, emit, every, at or when; entry and param in a library catalogue)", w)
+    p.fail(k.pos, hint.empty() ? std::format("unknown statement '{}' (expected scene, bus, light, particles, frame, camera, keyframes, effect, look, let, input, module, trail, water, weather, field, emit, every, at or when; entry and param in a library catalogue)", w)
                                : std::format("unknown statement '{}'{}", w, hint));
   }
   if (!p.done()) p.fail(p.pos(), std::format("unexpected {} at the end of the {} statement", p.found(), w));
@@ -887,7 +940,9 @@ Statement parse_statement(Parser& p, std::string_view source) {
   return s;
 }
 
-bool is_block(const Statement& s) { return s.keyword == "every" || s.keyword == "at" || s.keyword == "when"; }
+bool is_block(const Statement& s) {
+  return s.keyword == "every" || s.keyword == "at" || s.keyword == "when" || (s.keyword == "weather" && s.kind == "schedule");
+}
 
 }  // namespace
 
@@ -898,7 +953,11 @@ Script parse(std::string_view text, std::string_view source) {
   for (const LogicalLine& l : lex(text, source)) {
     Parser p(l.toks, source);
     if (l.indented) {
-      if (!block) p.fail(l.toks.front().pos, "this line is indented, but no rule or 'every frame:' above it is waiting for actions");
+      if (!block) p.fail(l.toks.front().pos, "this line is indented, but no rule, 'every frame:' or weather schedule above it is waiting for it");
+      if (block->keyword == "weather") {  // a line of the weather's schedule
+        parse_schedule_inline(p, *block);
+        continue;
+      }
       block->body.push_back(parse_action(p));
       while (!p.done()) {
         p.expect(";", "between two actions on one line");
@@ -910,6 +969,7 @@ Script parse(std::string_view text, std::string_view source) {
     block = is_block(out.statements.back()) ? &out.statements.back() : nullptr;
   }
   for (const Statement& s : out.statements) {  // a named rule may have none: it records when its condition held (its name)
+    if (s.keyword == "weather" && s.kind == "schedule" && s.body.empty()) throw Error(s.pos, "this weather's schedule has no lines (indent them under it: storm at 19, over 4)", source);
     if (is_block(s) && s.body.empty() && (s.keyword == "every" || s.name.empty())) {
       throw Error(s.pos, std::format("this {} has no actions (indent them under it)", s.keyword == "every" ? "'every frame:'" : "rule"), source);
     }
@@ -1049,6 +1109,10 @@ std::string statement_text(const Statement& s) {
     o += std::format(" {} = {}", s.name, s.kind) + props_text(s);
   } else if (w == "emit") {
     o += " " + s.kind + props_text(s);
+  } else if (w == "weather") {
+    o += " " + s.name + props_text(s) + (s.kind == "schedule" ? ":" : "");
+  } else if (w == "regime") {  // a line of a weather's schedule
+    o = s.kind + props_text(s, false);
   } else if (w == "every") {
     o += " frame:";
   } else if (w == "at" || w == "when") {
