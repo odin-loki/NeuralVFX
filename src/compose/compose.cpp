@@ -774,7 +774,8 @@ bool gives_light(std::string_view effect) {
   return effect == "fire" || effect == "explosion" || effect == "magic" || effect == "jet" || effect == "orb" ||
          effect == "wildfire" || effect == "coals" || effect == "mushroom" ||  // docs/EFFECTS_BLAZE.md
          effect == "lava" ||                                                   // docs/EFFECTS_EARTH.md
-         effect == "candle";                                                   // docs/EFFECTS_AIR.md
+         effect == "candle" ||                                                 // docs/EFFECTS_AIR.md
+         effect == "crownfire" || effect == "windowfire" || effect == "dustexplosion";  // docs/EFFECTS_FIRE2.md
 }
 }  // namespace
 
