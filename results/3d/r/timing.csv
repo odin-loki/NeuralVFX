@@ -1,0 +1,20 @@
+what,threads,ms_median,ms_min,ms_max,n,load
+start (warm-up of 24 frames),1,683.38,560.36,787.52,5,1.4
+step,1,26.63,19.06,39.21,300,1.4
+picture 256x256,1,93.49,70.80,124.21,20,1.4
+picture 512x512,1,343.91,285.65,410.09,20,1.4
+start (warm-up of 24 frames),2,386.82,343.03,447.51,5,1.4
+step,2,15.13,11.92,24.63,300,1.4
+picture 256x256,2,46.72,40.12,61.49,20,1.4
+picture 512x512,2,169.69,151.59,185.56,20,1.4
+start (warm-up of 24 frames),4,221.97,209.45,243.05,5,1.6
+step,4,8.95,7.21,19.26,300,1.6
+picture 256x256,4,21.59,19.44,38.53,20,1.6
+picture 512x512,4,81.71,74.04,90.06,20,1.6
+stage: noise inputs (curl lattice, flicker),1,2.20,1.67,6.21,60,1.5
+stage: coarse step (convolutions, projection, advection),1,10.37,7.72,21.64,60,1.5
+stage: detail layer (64x96x64),1,52.75,40.98,84.93,60,1.5
+stage: renderer preparation,1,14.73,11.59,23.40,60,1.5
+stage: one 256x256 picture,1,69.96,54.90,96.62,60,1.5
+simulation 64x96x64,1,151.34,113.25,189.86,20,1.4
+simulation 16x24x16,1,5.14,4.02,9.42,60,1.4

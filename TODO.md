@@ -3,7 +3,8 @@
 **Status:** stage 1 is done (study N, `docs/STUDY_3D.md`, and its follow-up N2, §14); stage 2 is planned, not started.
 Since 15 October 2026, here: round 9, studies O and P, float on AVX-512, the faster detail layer, the 2D weather
 director, the FUSE sample, round 10's fire and elements and study Q (the weak spots of rounds 9 and 10) are done and
-merged; study R (a validated 3D smoke) is under way ("Here, until the PC").
+merged, and so is study R (a validated 3D smoke): its teacher is a plume by MTT's measures, its learned
+smoke failed its test and ships as a labelled demo ("Here, until the PC").
 
 - **Stage 1, here and now (study N): done.** A small 3D demo in this container ([docs/STUDY_3D.md](docs/STUDY_3D.md),
   REPORT §15). What it built:
@@ -93,6 +94,18 @@ and the Godot test; details in its doc and REPORT section):
   (each better on a target, past a margin elsewhere). Still weak: the avalanche (its start points), the geyser, the
   haboob's and the ring's first frames, heavy gas's mean picture, the mushroom's cap.
 
+- **Study R, a validated 3D smoke** (finished on its branch `study-smoke3d`, 21 October 2026, with the checks;
+  docs/STUDY_R.md, REPORT §20; seeds 29.0 to 29.9 million): **the teacher first.** Study N's smoke preset lost two
+  thirds of its buoyancy flux up the box; `smoke_r` (no cooling, fading or damping; heat and soot in flux form)
+  conserves it, spreads at a top-hat alpha of 0.14 to 0.15 (the measured band for pure plumes 0.10 to 0.16), and its
+  centreline laws are within about 0.1 of Morton, Taylor and Turner's exponents; it is a third too slow for its flux
+  (0.78 of the momentum its buoyancy gives), and its wind is a drag, so the bent plume is not Briggs's. **The learned
+  smoke** (N2's recipe; edge bounds calibrated on four teacher runs per wind, committed before validation) **fails its
+  test**: it tracks real runs better than the coarse simulation with detail (+1.59 dB [+1.02, +2.20] in pictures at
+  1 s), but missed one edge bound by 7% on validation and played on spreads too wide (coverage, light and the mean
+  picture worse: -2.52 dB [-3.79, -1.29]). Shipped as a labelled demo (`models/3d/smoke.nvfx3`), with the plume
+  video and the fire and smoke coupled through the volume API.
+
 **Under way:**
 - **Round 10, fire** (`effects-fire2`, docs/EFFECTS_FIRE2.md, REPORT §6.18; seeds 26.0 to 26.9 million): a forest crown
   fire (#6), fire venting from a window (#8) and a dust explosion (#31). **Finished and merged into main** (21 October
@@ -128,8 +141,12 @@ and the Godot test; details in its doc and REPORT section):
   that moves across the scene, trees bending by the Beaufort force.
 - **Small 3D:**
   - **finer coarse 3D (study hres):** fire (N2 C4 lineage) and smoke (N2 smoke2 lineage); [docs/STUDY_3D_HRES.md](docs/STUDY_3D_HRES.md), `tools/study_3d/hres_fire.sh` and `hres_smoke.sh`; `nvfx_3d --study hres` (32 x 48 x 32, fine 2);
-  - a second 3D effect: smoke, validated this time, with bounds calibrated on several teacher runs;
-  - 3D fire and smoke coupled;
+  - a second 3D effect, smoke: **the teacher done** (study R: `smoke_r`, measured against plume theory); the learned
+    smoke failed its test by spreading too wide (STUDY_R.md §6.3). Next: a loss on the plume's spread, more teacher
+    time, hres's finer state trained on `smoke_r` (its own seed block and rule), and the solver's momentum deficit
+    (0.78; a stable less dissipative velocity step);
+  - 3D fire and smoke coupled: a demo through the volume API (study R, `nvfx_3d video --kind coupled`); a coupled
+    simulation (the boxes exchanging heat and momentum) is not done;
   - a job hook in the volume API, so an engine's job system can run a volume's step (FUSE.md §9).
 - **Quiet re-timing, round 7:** the new effects, the faster detail layer, half size and the FUSE demo on a quiet
   machine, as `results/quiet` did before (today's costs come from a machine at a load of 6 to 21).

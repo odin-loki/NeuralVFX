@@ -640,6 +640,13 @@ nvfx_volume_camera_look_at(&la, &cam);            /* or fill cam.view and cam.pr
 nvfx_volume_render(vol, &cam, 640, 360, rgba, 640 * 4);
 ```
 
+**Smoke** (study R, [STUDY_R.md](STUDY_R.md)): a second volume effect, `smoke3d`, plays through the same calls. Its
+temperature is warm smoke's excess over the air (0 to about 0.45, about 98 K per unit), so it does not glow: the
+library's renderer draws effects named `smoke...` with warm smoke's optics (`render3d::optics_for`: no emission, no
+flame soot; the soot's absorption and scattering as the fire's), and its extinction texture is the soot's alone. An
+engine lights it as any fog volume. Nothing in the API changed for it. The shipped file, `models/3d/smoke.nvfx3`, is a
+labelled demo: it failed its test (STUDY_R.md §4).
+
 **Space.** The volume fills `[-ex/2, ex/2] x [0, ey] x [-ez/2, ez/2]` of its own units (`info.extent`: 1 x 1.5 x 1),
 its floor at y = 0; place it by folding its transform into the view matrix. Cameras are column-major OpenGL-style
 matrices, so an engine passes its own (after converting its conventions), from any side.

@@ -30,7 +30,7 @@ struct nvfx_volume_effect {
 
 struct nvfx_volume {
   explicit nvfx_volume(const nvfx_volume_effect* effect, int threads)
-      : e(effect), pool(threads), ws(effect->m), renderer(effect->m.h.fx(), effect->m.h.fy(), effect->m.h.fz()) {}
+      : e(effect), pool(threads), ws(effect->m), renderer(effect->m.h.fx(), effect->m.h.fy(), effect->m.h.fz(), nfx::render3d::optics_for(effect->m.effect)) {}
   struct Runner {
     r3::State s;
     int shard = -1;  // -1: nothing started

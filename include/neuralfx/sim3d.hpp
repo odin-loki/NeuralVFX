@@ -3,8 +3,12 @@
 // are the PC plan's job (TODO.md). What was checked is listed in docs/STUDY_3D.md §2 (the plume rises; it puffs at a
 // steady rate).
 //
+// Study R (docs/STUDY_R.md) added a validated smoke, Effect::smoke_r: no cooling, fading or damping, its heat and soot
+// carried in flux form (conservative), checked against Morton, Taylor and Turner's plume theory; and larger boxes
+// (Params::span) for that check. The fire and study N's smoke are unchanged.
+//
 // Solver: collocated grid with a one-cell border; semi-Lagrangian advection (trilinear) for the velocity and a clamped
-// MacCormack correction for the scalars; buoyancy from temperature against soot weight; vorticity confinement; a seeded
+// MacCormack correction for the scalars (or flux form, Params::scalars); buoyancy from temperature against soot weight; vorticity confinement; a seeded
 // 3D curl-noise force (noise4.hpp, shared with the learned model); combustion expansion (a divergence source where the
 // gas is hot); pressure projection by red-black Gauss-Seidel with over-relaxation, warm-started. Boundaries: a closed
 // floor (no flow through it, slip along it; Neumann pressure), open top and sides (p = 0, outflow).
@@ -24,7 +28,10 @@
 
 namespace nfx::sim3d {
 
-enum class Effect { fire, smoke };
+// fire; smoke: study N's demo preset (warm gas that cools and soot that fades, every velocity damped; kept as it was
+// so study N's smoke runs can be repeated); smoke_r: study R's smoke, the same source and controls without those sinks,
+// checked against plume theory (docs/STUDY_R.md §1).
+enum class Effect { fire, smoke, smoke_r };
 std::string_view effect_name(Effect e);
 bool parse_effect(std::string_view text, Effect& out);
 
@@ -43,6 +50,19 @@ struct Params {
   int substeps = 2;         // solver steps per frame
   int pressure_iters = 30;  // red-black Gauss-Seidel sweeps per projection (warm-started; one projection per step)
   int threads = 1;          // the same fields on any number
+  // The box's width in world units (x and z; lengths and speeds are set for 128 units across, so a wider span at the
+  // same cells per unit is a larger box around the same source) and the burner's position across x as a fraction of
+  // the span. Study R's plume measurement (docs/STUDY_R.md) uses larger boxes; the defaults are every earlier study's.
+  float span = 128.f;
+  float source_x = 0.5f;
+  // How heat and soot are carried: -1 the effect's own (fire and smoke: semi-Lagrangian with the clamped MacCormack
+  // correction; smoke_r: in flux form), 0 MacCormack, 1 flux form (conservative: what leaves a cell enters its
+  // neighbour, so the solver neither makes nor loses heat or soot; a second-order upwind scheme with the monotonised
+  // central limiter, one sweep per axis in alternating order, substeps where a sweep's Courant number would pass 0.95).
+  int scalars = -1;
+  // How the velocity is carried: -1 the effect's own (semi-Lagrangian for every effect), 0 semi-Lagrangian, 1 with the
+  // clamped MacCormack correction (less numerical dissipation; study R's measurement of the momentum budget).
+  int velocity = -1;
   std::array<float, 3> controls() const { return {intensity, wind, turbulence}; }
 };
 
@@ -79,6 +99,9 @@ class Fluid {
   // Temperature and soot (nx * ny * nz each), and the velocity [cell][3] in cells per second.
   void fields(std::span<float> temp, std::span<float> soot) const;
   void velocity(std::span<float> uvw) const;
+  // The vertical force per unit of heat and of soot (cells per second squared): the buoyancy is
+  // heat_coeff * temperature - soot_coeff * soot (study R's plume measurement: the buoyancy flux).
+  std::array<float, 2> buoyancy_coefficients() const;
 
  private:
   struct Grid {
@@ -96,6 +119,8 @@ class Fluid {
   void project();
   void advect_velocity(float dt);
   void advect_scalar(Grid& q, float dt);
+  void advect_scalar_flux(Grid& q, float dt);  // the flux form (Params::scalars)
+  void advect_velocity_maccormack(float dt);  // Params::velocity
   void velocity_border();
   template <class F>
   void slabs(F&& fn);  // fn(y) for y = 1..ny on the pool
@@ -105,6 +130,7 @@ class Fluid {
   float s_;  // cells per unit of a 128-unit width
   int frame_ = 0;
   float time_ = 0.f;
+  int steps_ = 0;  // the solver step under way, frame * substeps + substep (the flux form's sweep order alternates with it)
   Forcing3 forcing_;
   CurlField3 curl_;
   Grid u_, v_, w_, temp_, soot_, pressure_, div_, ta_, tb_, tc_, wx_, wy_, wz_, wn_;

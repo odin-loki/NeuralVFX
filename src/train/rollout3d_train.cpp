@@ -555,7 +555,7 @@ std::expected<void, std::string> save_run(const std::filesystem::path& path, con
     std::ofstream o(tmp, std::ios::binary);
     if (!o) return std::unexpected("cannot write " + tmp.string());
     o.write(r.schedule.empty() ? kRunMagic : kRunMagic2, 8);
-    bin::put(o, static_cast<std::int32_t>(r.p.effect == sim3d::Effect::smoke ? 1 : 0));
+    bin::put(o, static_cast<std::int32_t>(r.p.effect));  // 0 fire, 1 smoke, 2 smoke_r
     for (const float v : {r.p.intensity, r.p.wind, r.p.turbulence, r.p.fps}) bin::put(o, v);
     bin::put(o, r.p.seed);
     for (const int v : {r.p.width, r.p.height, r.p.substeps, r.p.pressure_iters, r.frames}) bin::put(o, static_cast<std::int32_t>(v));
@@ -581,7 +581,8 @@ std::expected<Run, std::string> load_run(const std::filesystem::path& path) {
   Run r;
   auto e = bin::get<std::int32_t>(i);
   if (!e) return std::unexpected(e.error());
-  r.p.effect = *e == 1 ? sim3d::Effect::smoke : sim3d::Effect::fire;
+  if (*e < 0 || *e > 2) return std::unexpected("unknown effect in a 3D run: " + path.string());
+  r.p.effect = static_cast<sim3d::Effect>(*e);
   for (float* v : {&r.p.intensity, &r.p.wind, &r.p.turbulence, &r.p.fps}) {
     auto x = bin::get<float>(i);
     if (!x) return std::unexpected(x.error());

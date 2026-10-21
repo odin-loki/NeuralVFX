@@ -49,7 +49,8 @@ typedef struct nvfx_volume_info {
 } nvfx_volume_info;
 
 typedef enum nvfx_volume_field {
-  NVFX_VOLUME_TEMPERATURE = 0, /* the model's temperature (0 cold; about 1 to 1.5 in the flame) */
+  NVFX_VOLUME_TEMPERATURE = 0, /* the model's temperature (0 cold; about 1 to 1.5 in the flame; warm smoke, "smoke3d":
+                                  0 to about 0.45, its excess over the air, about 98 K per unit) */
   NVFX_VOLUME_SOOT = 1,        /* soot density */
   NVFX_VOLUME_EXTINCTION = 2,  /* extinction per world unit, as this library's renderer has it */
   NVFX_VOLUME_VELOCITY = 3     /* three components per texel (x, y, z), world units per second */
