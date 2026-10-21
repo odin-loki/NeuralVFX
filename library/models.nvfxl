@@ -62,6 +62,9 @@ effect ink       = "ink.nvfx"                                         # intensit
 
 # The air effects (docs/EFFECTS_AIR.md): a candle (with the gentler sub-grid swirl the library plays it with, as launch), a
 # smoke ring (plays once, 4 s: 16 start points and study M3's mean state) and heavy gas. The ring and the gas carry no light.
+# Study Q (docs/STUDY_Q.md §5.1): the ring's and the gas's fine fields softened, as their looks draw them (the ring's
+# real smoke is smooth, and the detail layer gave it three times its fine power; the gas's fronts came out as thin bright
+# lines).
 effect candle    = "candle.nvfx", swirl 1, swirl_scale 9                # intensity, draught, turbulence (its calibration chose swirl 3)
-effect smokering = "smokering.nvfx"                                     # plays once (4 s): 16 start points, a mean state; intensity, wind, turbulence
-effect heavygas  = "heavygas.nvfx"                                      # intensity (release rate), flow (0 left, 1 right), turbulence
+effect smokering = "smokering.nvfx", soften 0.4                         # plays once (4 s): 16 start points, a mean state; intensity, wind, turbulence
+effect heavygas  = "heavygas.nvfx", soften 0.1                          # intensity (release rate), flow (0 left, 1 right), turbulence

@@ -2,11 +2,11 @@ kind,name,file,bytes,sha256,source
 rollout_effect,candle,fx_air/models/d/candle.nvfx,83719,3f3c6bdbfcb954305b8f16a86839e8f5a8f49a7aa120c13c73632d514a0564ad,study D's recipe (docs/EFFECTS_AIR.md): d-train --stages12 1 then d-tune then d-finish
 rollout_effect,smokering,fx_air/models/d/smokering.nvfx,301443,4a2188b2b72f3895869c4438124513cb4a9d9e661cb045e03a53d085f4aec95a,study D's recipe (docs/EFFECTS_AIR.md): d-train --stages12 1 then d-tune then d-finish (the one-shot branch, 120 frames), then study M3's mean state (nvfx_ordered --study m3 fitmean --block 2, setmean)
 rollout_effect,heavygas,fx_air/models/d/heavygas.nvfx,149287,8d436f906cc2fe939aff4830d1368144680c8c2ad4c268dcb59d0b7a9d089e16,study D's recipe (docs/EFFECTS_AIR.md): d-train --stages12 1 then d-tune then d-finish
-crypt_keyframe,frame_024,nvfx_scene_script --keyframes (examples/scenes/crypt.nvfxs; --precision float --isa avx2),1060812,a49f304d02125823df47fafdeaf6d357cc6d0ded1ef5963ec75648d810ce7657,
-crypt_keyframe,frame_066,nvfx_scene_script --keyframes (examples/scenes/crypt.nvfxs; --precision float --isa avx2),1060813,a443bf746e8aea950a0e30b65b84655d621909409fcd4af65bd9954790d77f3b,
-crypt_keyframe,frame_090,nvfx_scene_script --keyframes (examples/scenes/crypt.nvfxs; --precision float --isa avx2),1049825,61cd7956fe00e98bbb5411d407bcc00ef89805bf09c675541b787a61bf6fb2b2,
-crypt_keyframe,frame_114,nvfx_scene_script --keyframes (examples/scenes/crypt.nvfxs; --precision float --isa avx2),1049620,7d02b1c838b6802229eeca074126a9c0c28c16673a4aa3c38ce301c5a1530d10,
-crypt_keyframe,frame_144,nvfx_scene_script --keyframes (examples/scenes/crypt.nvfxs; --precision float --isa avx2),1043845,90ff60a5ac17b1906d6b220968f271e9e40497c0d0fcf7cb35b6b4ae5a5f0c78,
-crypt_keyframe,frame_174,nvfx_scene_script --keyframes (examples/scenes/crypt.nvfxs; --precision float --isa avx2),1046667,9bd62d9e71212bda51b7feea26e45d4debe86165dc221399dd7230de41d9b38d,
-crypt_keyframe,frame_210,nvfx_scene_script --keyframes (examples/scenes/crypt.nvfxs; --precision float --isa avx2),1057776,49da38da859f3cfa2784f063bef887f9199079916f2485910e9007dbbe671348,
-crypt_keyframe,frame_252,nvfx_scene_script --keyframes (examples/scenes/crypt.nvfxs; --precision float --isa avx2),1061582,9ff35d63673e5c6304fbd2c7d32d0ba5197386712043c219e3014470bb7e5072,
+crypt_keyframe,frame_024,nvfx_scene_script --keyframes (examples/scenes/crypt.nvfxs; --precision float --isa avx2),1059813,6b065c3fd1085f75b156b17f0e9c089cb794b177c98301893115169ee4bb9352,
+crypt_keyframe,frame_066,nvfx_scene_script --keyframes (examples/scenes/crypt.nvfxs; --precision float --isa avx2),1059157,d2652649ad58d2224ff6fe3f807a443634e87d806b103d93fdb00820d374f153,
+crypt_keyframe,frame_090,nvfx_scene_script --keyframes (examples/scenes/crypt.nvfxs; --precision float --isa avx2),1047353,1d28e3755b707012ab354f4e69cbd6ef1600539fded5c2cf7907756b6308fc40,
+crypt_keyframe,frame_114,nvfx_scene_script --keyframes (examples/scenes/crypt.nvfxs; --precision float --isa avx2),1047660,d661733f14defcc830d9cef008f32e1de577d4a1dba841f4141096158501f11d,
+crypt_keyframe,frame_144,nvfx_scene_script --keyframes (examples/scenes/crypt.nvfxs; --precision float --isa avx2),1041341,5da62729c12d29abe05906aee8c3efce794171659e65437e11b9e3a7e9f90420,
+crypt_keyframe,frame_174,nvfx_scene_script --keyframes (examples/scenes/crypt.nvfxs; --precision float --isa avx2),1043383,1710b26f3c46ae1a556c1b9a6f6ce57ddf8fb111a0b187ca8317db64fe74d45b,
+crypt_keyframe,frame_210,nvfx_scene_script --keyframes (examples/scenes/crypt.nvfxs; --precision float --isa avx2),1055007,d9b0dfbc110bc4f58ef7bb73d0b38a1791479338d71c9588bf4e628038820b6f,
+crypt_keyframe,frame_252,nvfx_scene_script --keyframes (examples/scenes/crypt.nvfxs; --precision float --isa avx2),1058258,25c785964d8f7d9a7badcecd47717c5e0425f8278672a5a47a62c2fe259e4cbf,

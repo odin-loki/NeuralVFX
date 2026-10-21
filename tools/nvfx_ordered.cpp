@@ -3076,7 +3076,11 @@ void probe_q(const Ctx& c, sim::Effect e, const Split& sp, const std::vector<Ent
 
 void step_val(const Ctx& c, sim::Effect e, const tools::Args& a) {
   auto models = read_entries(a.need("current"), a.str("cand", ""));
-  const Split sp = split_of(a.str("split", c.q ? "probeq" : c.o ? "probeo" : c.m3 ? "probe3" : c.m2 ? "probe2" : "probe"), e);
+  Split sp = split_of(a.str("split", c.q ? "probeq" : c.o ? "probeo" : c.m3 ? "probe3" : c.m2 ? "probe2" : "probe"), e);
+  if (a.has("max-settings")) {  // a dry run of the probe's code on its first settings (study Q; never on validation)
+    if (sp.name != "probeq") throw std::invalid_argument("val: --max-settings is for a dry run of probeq");
+    sp.settings.resize(std::min(sp.settings.size(), sz(a.i("max-settings", 3))));
+  }
   if (c.q != (sp.name == "probeq" || sp.name == "valq" || sp.name == "checkq")) throw std::invalid_argument("val: study Q's splits are probeq, valq and checkq, with --study q");
   if (sp.name == "test" || sp.name == "test2" || sp.name == "test3" || sp.name == "testo" || sp.name == "testq") throw std::invalid_argument("val: the test runs once, through `test`");
   if (c.o != (sp.name == "probeo" || sp.name == "valo" || sp.name == "checko")) throw std::invalid_argument("val: study O's splits are probeo, valo and checko, with --study o");

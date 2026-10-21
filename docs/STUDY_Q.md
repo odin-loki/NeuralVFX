@@ -40,11 +40,157 @@ From the rounds' documents, worst first:
 
 ## 3. Diagnosis
 
-(Each weak spot taken apart with `nvfx_fix parts`: on training runs (salt 1, diagnosis only) the real frames against the
-learned effect with one part at a time swapped: as shipped; from the run's true state (the learned stepper and detail
-layer and renderer); the same states drawn by the simulator's renderer; the learned coarse state alone; the run's true
-coarse states moving the detail layer (a perfect stepper); the learned renderer on the run's true fields; and, per frame
-from a run's first, the learned renderer on the true fields.)
+Each weak spot was taken apart with `nvfx_fix parts` (as study O's `bands` took the waterfall apart, but over the whole
+frame), on training runs (salt 1, runs 0 to 3 unless said; diagnosis only, at float), the real frames against the
+learned effect with one part at a time swapped:
+
+| method | what it is |
+|---|---|
+| `shipped` | the runtime as an engine plays it: shards from the stored start points nearest the controls, a seed of its own (study Q's 33,460,000 + 100 r); a one-shot from its start, a looping effect from 2 s |
+| `true` | the reference rollout from the run's true state (coarse and fine fields, the run's seed): the learned stepper, detail layer and renderer |
+| `true_sim` | the same states drawn by the simulator's renderer (the learned renderer taken out) |
+| `coarse_up` | the learned coarse state alone, upsampled, the simulator's renderer |
+| `oracle` | the run's true coarse state of every frame moving the detail layer (a perfect stepper), the simulator's renderer |
+| `oracle_up` | the true coarse state alone, upsampled |
+| `rend_true` | the learned renderer on the run's true fields (the renderer alone) |
+
+Measured over a looping effect's 90 frames from frame 100 or a one-shot's whole length: study D's frame statistics against
+the real frames (detail spectrum distance, motion ratio, coverage distance, mean-frame PSNR), the luminance's 2D power in
+bands of period as log10 over the real frames' (64 to 16, 16 to 8, 8 to 2.5 and 2.5 to 2 pixels of a 128-pixel frame),
+how much of the fine band (8 to 2.5 px) lies along x rather than y (log10 Px/Py: above the real frames' means more
+vertical structure), active PSNR at 1, 8 and 30 frames, and for a one-shot the cover's size and height over time and the
+renderer on the true fields frame by frame from the first. Tables: the data root's `q_fix/diag/<effect>/parts_*.csv`.
+
+### 3.1 The avalanche: the stepper grows the cloud too little, and its start points make it smaller still
+
+Six training runs, the whole 148 frames:
+
+| method | spectrum | motion | cover dist. | mean frame (dB) | tracking at 1 s (dB) | cover at 1 s / 2 s / 4 s | its height (share of the frame) at 1 / 2 / 4 s |
+|---|---:|---:|---:|---:|---:|---|---|
+| real | | | | | | 0.021 / 0.027 / 0.020 | 0.052 / 0.075 / 0.098 |
+| shipped | 0.198 | 1.02 | 0.0134 | 28.8 | 8.0 | 0.014 / 0.012 / 0.004 | 0.051 / 0.076 / 0.057 |
+| true | 0.134 | 0.97 | 0.0045 | 34.6 | 13.1 | 0.018 / 0.023 / 0.013 | 0.051 / 0.066 / 0.081 |
+| true_sim | 0.128 | 0.99 | 0.0045 | 34.7 | 13.1 | 0.018 / 0.023 / 0.013 | 0.051 / 0.066 / 0.082 |
+| coarse_up | 0.338 | 0.78 | 0.0037 | 35.3 | 15.2 | 0.021 / 0.025 / 0.014 | 0.052 / 0.067 / 0.073 |
+| oracle | 0.128 | 1.19 | 0.0004 | 40.1 | 16.6 | 0.020 / 0.027 / 0.019 | 0.054 / 0.077 / 0.099 |
+| oracle_up | 0.312 | 0.87 | 0.0017 | 40.2 | 18.1 | 0.023 / 0.029 / 0.020 | 0.055 / 0.077 / 0.099 |
+| rend_true | 0.016 | 0.99 | 0.0002 | 57.9 | 31.2 | 0.021 / 0.027 / 0.019 | 0.052 / 0.076 / 0.098 |
+
+- **Not the renderer** (on the true fields 57.9 dB in the mean frame, 30 to 36 dB a frame, its first frame the best) and
+  **not the detail layer**: driven by the true coarse states it keeps the cloud's size and height and follows the run
+  (16.6 dB at 1 s).
+- **The stepper**: from the true state the learned cloud has 86%, 85% and 65% of the real cover at 1, 2 and 4 s and sits
+  lower (its centre at 0.066 of the frame at 2 s against 0.075, 0.081 against 0.098 at 4 s): it runs, but does not swell
+  and rise as the simulator's entrainment makes it; drawn by the simulator's renderer the same. Its training windows (16
+  frames, after a burn-in of up to 32) see little of a growth that lasts two to three seconds. Candidates: `u30`, `u60`.
+- **And its start points**: as shipped, from one of its 16 stored first states (taken at other controls) with a seed of
+  its own, the cloud has 67%, 44% and 20% of the real cover at 1, 2 and 4 s; its average picture is 5.8 dB further from
+  the real one's than from the true state. A stored first state at another intensity and direction releases another slab
+  in another place. Candidate: `ms` (the mean state, which moves a start point to the controls asked for: the fit explains,
+  cross-validated, 72% and 74% of the first states' velocity and 56% of their snow over the control space).
+
+### 3.2 The crown fire and the window fire: the detail layer's lock, not the model
+
+| effect | method | spectrum | motion | fine band 8-2.5 px | finest 2.5-2 px | Px/Py (real) |
+|---|---|---:|---:|---:|---:|---:|
+| crown fire | shipped (grow 2, contrast 0.5, swirl 0) | 0.479 | 0.80 | +0.41 | +0.60 | +0.40 (+0.26) |
+| | true_sim | 0.496 | 0.91 | +0.45 | +0.70 | +0.30 |
+| | oracle | 0.510 | 1.26 | +0.50 | +0.68 | +0.34 |
+| | **oracle, grow 1** | **0.050** | 0.99 | +0.07 | -0.05 | +0.26 |
+| | rend_true | 0.096 | 0.98 | -0.12 | -0.09 | +0.29 |
+| window fire | shipped (grow 1, contrast 0.5, swirl 1.5 at 6 px) | 0.506 | 0.92 | +0.43 | +0.84 | +0.10 (-0.11) |
+| | true_sim | 0.481 | 0.90 | +0.43 | +0.78 | -0.00 |
+| | oracle | 0.460 | 1.10 | +0.40 | +0.75 | +0.08 |
+| | **oracle, swirl 0** | **0.169** | 1.02 | +0.27 | +0.11 | +0.10 |
+| | rend_true | 0.021 | 1.01 | -0.03 | -0.00 | -0.06 |
+
+- **The detail layer draws the streaks**: with a perfect stepper (the true coarse states) and the simulator's renderer
+  it is as far from real as the learned effect (0.51 and 0.46), with three times the real power at periods of 2.5 to 8
+  pixels and five to seven times at 2 to 2.5; the learned renderer on the true fields is close to real (0.10, 0.02).
+- **The crown fire's is its lock's growth** (`grow 2`, the calibration's choice): where a rising column carries material
+  into a coarse cell, the lock scales the fine pattern already there up by as much as twice instead of adding new
+  material broken up by the noise, so every streak the column carries up is kept and strengthened. With `grow 1` the same
+  oracle is 0.050 from real, the floor's distance (two real runs: 0.05), and its streaks lie as the real ones do (Px/Py
+  +0.26).
+- **The window fire's is its sub-grid swirl** (1.5 pixels a frame at a 6-pixel scale): small regular eddies stirred into
+  the flame and its smoke draw fine curls and lines; without it the oracle is 0.17.
+- Played as shipped the learned coarse state adds less than the oracle's error, so the settings that matter are the
+  detail layer's (§5.1).
+
+### 3.3 Heavy gas: its start points, then its thin bright lines
+
+| method | spectrum | motion | cover dist. | mean frame (dB) | 64-16 px | 8-2.5 px | 2.5-2 px |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| shipped | 0.308 | 1.47 | 0.0236 | 19.5 | +0.23 | +0.26 | +0.53 |
+| true_sim | 0.091 | 1.13 | 0.0020 | 29.8 | +0.00 | +0.00 | -0.05 |
+| oracle | 0.140 | 1.20 | 0.0020 | 33.3 | -0.03 | -0.01 | -0.20 |
+| rend_true | 0.024 | 1.01 | 0.0002 | 52.5 | -0.00 | +0.02 | +0.05 |
+
+From the true state the learned gas is close to real in detail, motion and cover (0.09, 1.13, 0.002); as shipped, from
+one of its 8 stored start points at other controls, it is a different layer (the coarse band +0.23, the cover ten times
+as far, the average picture 10 dB further): the tied mean picture is its start points'. The thin bright lines along its
+fronts that read as streaks are the fine band's excess as shipped; `soften 0.1` takes most of it (§5.1). A model fix for
+the start points (more of them, as the geyser's `s24`) was not made in this study (§9).
+
+### 3.4 The smoke ring: the detail layer adds the fine structure, and the renderer adds its own
+
+The ring's real smoke is smooth (it spreads). The detail layer driven by the true coarse states adds three times the real
+fine power (the oracle 0.67 from real); softening the fine fields takes it off (`soften 0.4`: the oracle 0.04, the learned
+stepper drawn by the simulator's renderer 0.15). But the learned renderer on the true fields is itself 0.45 to 0.60 from
+real (ten times the real power at 2 to 2.5 pixels), so the bare model stays far from real whatever the detail layer
+does (as shipped with `soften 0.4`: 0.47). The library and the crypt draw the ring by looks, which take the fields, not
+the learned renderer: there `soften 0.4` is the fix (§5.1). Its first frame (below) is the renderer's too.
+
+### 3.5 The first frames of the haboob, the smoke ring and the dust explosion: the renderer's samples
+
+The learned renderer on the true fields, frame by frame from the run's first (training runs 100 to 103, which are not
+among the renderer's samples):
+
+| effect | 1st | 2nd | 5th | 10th | 15th | 30th | the renderer's samples (frames) |
+|---|---:|---:|---:|---:|---:|---:|---|
+| haboob | 27.9 | 28.2 | 28.9 | 29.6 | 29.8 | 29.4 | 10 to 139 |
+| smoke ring | 26.0 | 25.7 | 27.2 | 31.4 | 32.9 | 35.4 | 10 to 109 |
+| dust explosion | 22.4 | 22.6 | 23.2 | 24.5 | 25.9 | 27.6 | 10 to 109 |
+| avalanche (for comparison) | 36.5 | 32.7 | 31.3 | 30.0 | 30.0 | 31.1 | 10 to 139 |
+
+The recipe takes the renderer's training samples at frames 10 to length - 10 of each run (`finish_model`), so a one-shot's
+fresh state (the haboob's lock, the ring's two dense cores, the dust explosion's unlit cloud and spark) is never among
+them; the renderers are 2 to 9 dB weaker there than later in the run. By eye the current haboob's renderer draws a magenta
+speck at the lock's nose, the ring's a green-cyan blob at the opening, the dust explosion's green and magenta fringes round
+the unlit cloud. The refit `rf` (§4.1) on the same runs: the haboob 30.4, 30.9, 31.9, 32.5, 32.1 and 30.9 dB; the ring
+32.0, 32.2, 33.4, 34.5, 34.9, 35.9; the dust explosion 28.3, 28.4, 28.4, 28.7, 28.9, 27.9.
+
+The haboob's -11.7 dB at the first frame (EFFECTS_ELEMENTS.md §4.1) is mostly a different thing: the coarse simulation with
+the detail layer starts from the true fine fields and draws them with the simulator's own renderer, so its first frame is
+nearly the true one (39 dB), where any learned renderer of the haboob is about 30 dB on the true fields. A refit closes
+part of the renderer's own gap; it cannot close that one.
+
+### 3.6 The geyser: its start points and its eruptions
+
+| method | spectrum | motion | cover dist. | mean frame (dB) | tracking at 1 s (dB) |
+|---|---:|---:|---:|---:|---:|
+| shipped | 0.667 | 1.62 | 0.0216 | 25.4 | 18.6 |
+| true | 0.215 | 0.90 | 0.0041 | 35.5 | 22.3 |
+| true_sim | 0.227 | 0.90 | 0.0040 | 35.7 | 22.5 |
+| oracle | 0.166 | 0.99 | 0.0001 | 43.4 | 32.4 |
+| rend_true | 0.031 | 1.02 | 0.0002 | 55.1 | 45.0 |
+
+Not the renderer (45 dB on the true fields). From the true state the learned stepper follows the run less well than the
+true coarse states would (22.3 against 32.4 dB at 1 s): its column and steam part from the run's within a second; as
+shipped, from its 8 start points at other controls and other moments of the conduit's cycle, it is far further (the mean
+frame 10 dB, the cover five times). Candidates: `u30` (following a run), `s24` (start points nearer the controls).
+
+### 3.7 The dust explosion's detail, the candle and the mushroom
+
+- **The dust explosion's detail is not at fault** by these measures (as shipped 0.128, the oracle 0.068; `grow 1` makes it
+  worse, 0.42): its weak part is its renderer (§3.5).
+- **The candle** as the library plays it (`swirl 1, swirl_scale 9`): 0.245 as shipped, 0.199 with the oracle, and every
+  detail setting tried (softening, contrast 0, swirl 0) is further from real; its renderer on the true fields is 46 dB in
+  the mean frame. Its ragged, torn flame was the calibrated swirl (3), which the library already overrides
+  (EFFECTS_AIR.md §4.6); its fringes are its learned renderer's on the learned fields, which the library's look
+  (`candlelight`) does not use. Nothing more was changed (§9).
+- **The mushroom** (study O's model) was not taken apart again: study O's diagnosis stands (REPORT §16.7: a stepper that
+  sees the cap's whole life is what is missing) and is left (§9).
 
 ## 4. The model changes: the plan and the rule (committed before any of their numbers)
 
@@ -139,7 +285,46 @@ base + 100 s + k (setting s, run k):
 
 ## 5. Fixes with no model change
 
-(Written as the work goes.)
+### 5.1 The detail settings of four effects, in the library and the scenes, judged by eye
+
+The detail layer's settings are set by an effect's line in the library and in a scene, as study O set `passes` and the
+round set the candle's swirl; the model files are unchanged. `soften` (study D2's softening of the fine fields, which the
+runtime has had since study D2) is now a key of an effect line too (`src/compose/script.cpp`, `script_run.cpp`, 0 to 1;
+`Script.AnEffectsSoftenSmoothsItsDetailLayer`), and of `nvfx_reel`'s DETAIL field. Tried on the same training runs as §3
+(the methods `shipped` and `oracle` with each setting), then judged by eye from strips at 256 px and the library's entries
+before and after:
+
+| effect | setting chosen | spectrum distance as shipped (4 runs): before → after | motion ratio: before → after | the fine band 8-2.5 px: before → after | others tried |
+|---|---|---|---|---|---|
+| crown fire | `grow 1, contrast 1` | 0.479 → **0.100** | 0.80 → 0.69 | +0.41 → +0.06 | `grow 1` (0.296, motion 0.54: too calm), `grow 1, swirl 1, swirl_scale 9, contrast 1` (0.150, 0.76: swirl worms in the column), `grow 1.5` (0.255), softening (0.168, motion 0.56), contrast 0 (0.469), `passes 2` (0.771: worse) |
+| window fire | `swirl 1, swirl_scale 9, soften 0.2, contrast 0.75` | 0.506 → **0.174** | 0.92 → 0.79 | +0.43 → +0.24 | swirl 0 (0.408), `swirl 1, swirl_scale 9` (0.364), `soften 0.2` (0.278), the same with contrast 1 (0.255, motion 0.95), contrast 0 (0.485), `passes 2` (0.555) |
+| heavy gas | `soften 0.1` | 0.308 → **0.263** | 1.47 → 1.27 | +0.26 → +0.02 | `soften 0.2` (0.391: too smooth), contrast 0.5 (0.293), `swirl 1, swirl_scale 9` (0.165 but motion 2.6), `passes 2` (0.391) |
+| smoke ring | `soften 0.4` (for its looks) | 0.689 → 0.471 (its learned renderer); the fields drawn by the simulator's renderer 0.782 → **0.151** | 0.88 → 0.87 | +0.29 → +0.06 | `soften 0.1`, `0.2` (0.557, 0.510), contrast 0 (0.682), `swirl 1, swirl_scale 9` (0.845) |
+
+- **The crown fire's streaks are gone by eye** (the strip: before, the flames' base is a comb of vertical streaks; after,
+  separate tongues of flame), at a price in motion: the detail layer's fine structure now changes less from frame to frame
+  (0.69 of the real against 0.80; the round's endless test had 0.93).
+- **The window fire's** flame loses its curls and lines and reads as a rounded flame pouring out; it too moves less (0.79
+  against 0.92).
+- **Heavy gas's** thin bright lines along its fronts are softened into billows; its layer, which is its start points'
+  (§3.3), is unchanged.
+- **The ring's** looks draw its fields, which are now nearly as smooth as the real smoke; its own renderer adds fine
+  structure of its own (§3.4), so a bare model drawn by it changes less.
+- Nothing else in the picture changes; the dust explosion and the candle keep their settings (§3.7).
+
+Applied in `library/fire2.nvfxl` (the crown and window fires), `library/models.nvfxl` (the ring and the gas, which the air
+entries share), `examples/scenes/forestedge.nvfxs` and `crypt.nvfxs`. Frozen hashes updated (float, pinned to the AVX2
+build with `--isa avx2`): the library's `crown_fire`, `window_fire` (`results/library/frozen_fire2.csv`), `smoke_ring` and
+`dry_ice_fog` (`frozen_air.csv`); the forest-edge town's and the crypt's eight keyframes each (`fx_fire2_frozen.csv`,
+`fx_air_frozen.csv`). The entries that did not change were played again and give their frozen hashes (`dust_explosion`,
+`candelabra`). The cost: a softening pass over the fine fields where the effect has material (study D2's, before the
+advection).
+
+![The crown fire before (row 1) and with grow 1, contrast 1 (row 2), grow 1, swirl 1 at scale 9, contrast 1 (row 3), grow 1, swirl 0.5 at scale 9, contrast 1 (row 4), its own renderer at 256 px, at 2, 4 and 6 s](figures/q_crownfire_detail.png)
+
+![The library's crown fire, torching trees and window fire before (top) and after study Q (bottom)](figures/q_fire2_library.png)
+
+![The library's smoke rings and heavy gases before (top) and after study Q (bottom)](figures/q_air_library.png)
 
 ## 6. Reproduce
 

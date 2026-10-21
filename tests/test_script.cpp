@@ -241,6 +241,43 @@ TEST(Script, AnEffectsPassesSplitItsDetailLayer) {
   }
 }
 
+// Study Q (docs/REPORT.md §21): an effect line's `soften` sets the detail layer's softening (study D2's), as a file that
+// says it would, and the line wins over the file.
+TEST(Script, AnEffectsSoftenSmoothsItsDetailLayer) {
+  const auto played = [](const char* own, float file_soften) {
+    const std::string text = std::format("scene size 160 x 90, fps 30, length 1\neffect tiny = \"tiny\"{}\n"
+                                         "module m = tiny, size 32, width 64, at (80, 74), start 0, seed 5", own);
+    sc::EffectLoader loader = [file_soften](const std::string&) {
+      rt::RolloutEffect e = tiny_effect(3);
+      e.m.detail.soften = file_soften;
+      return e;
+    };
+    sc::Scene s(sc::parse(text, "p"), loader, {1, Isa::base});
+    std::vector<std::uint8_t> px(160 * 90 * 3);
+    std::vector<float> all;
+    for (int f = 0; f < s.frames(); ++f) {
+      s.render(f, px);
+      const auto& img = s.module("m", 0)->image().px;
+      all.insert(all.end(), img.begin(), img.end());
+    }
+    return all;
+  };
+  const auto plain = played("", 0.f), soft = played(", soften 0.3", 0.f);
+  ASSERT_GT(std::accumulate(plain.begin(), plain.end(), 0.0), 0.0);  // the module's picture
+  EXPECT_NE(plain, soft);
+  EXPECT_EQ(soft, played("", 0.3f));              // the same frames as a file that says 0.3
+  EXPECT_EQ(plain, played(", soften 0", 0.3f));   // and the line wins over the file
+  const char* own = "effect e = \"e\", swirl 0, soften 0.2\n";
+  EXPECT_EQ(sc::print(sc::parse(own, "p")), own);
+  try {
+    sc::Scene s(sc::parse("effect e = \"e\", soften 1.5\nmodule m = e, size 32", "p"), tiny_loader(), {1, Isa::base});
+    ADD_FAILURE() << "no error for soften 1.5";
+  } catch (const sc::Error& e) {
+    EXPECT_EQ(e.pos.line, 1);
+    EXPECT_NE(e.message.find("from 0 to 1"), std::string::npos) << e.what();
+  }
+}
+
 using nfx::compose::testing::kEverything;
 
 TEST(Script, RoundTripThroughThePrinter) {

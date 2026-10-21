@@ -156,6 +156,7 @@ void set_detail(rollout::Model& m, const std::vector<std::pair<std::string, floa
     else if (k == "contrast") d.contrast = v;
     else if (k == "grow") d.grow = v;
     else if (k == "passes") d.passes = std::max(1, static_cast<int>(v));
+    else if (k == "soften") d.soften = v;  // study Q: the fine fields' diffusion (study D2's), as a script's effect line sets it
     else throw std::invalid_argument("no detail setting " + k);
   }
 }

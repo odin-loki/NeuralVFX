@@ -23,7 +23,7 @@
 //       periods of 2.5 to 8 pixels, and the period of its largest excess), DIR/bands_frames.png (run 0, a window of the
 //       frames, every method) and DIR/bands_spectrum.png (the spectra, run means).
 //
-//   nvfx_fix strip --model F --controls a,b,c [--detail ...] [--variants ...] [--size 256] [--times 2,4,6] [--seed S]
+//   nvfx_fix strip --model F --controls a,b,c [--detail ...] [--variants ...] [--also NAME=F2,...] [--size 256] [--times 2,4,6] [--seed S]
 //                  [--crop x,y,w,h] [--scale 1] [--bg 36,40,50,13,14,17] [--precision float|int8] --out F.png
 //       Frames of the runtime as an engine plays it, one row per variant (the first: the model with --detail), one column
 //       per time; optionally a crop of each frame, scaled up (nearest). For the before and after figures.
@@ -844,6 +844,7 @@ void step_parts(const tools::Args& a) {
     std::vector<BandPower> bp;
     std::vector<std::array<double, 3>> track;  // active PSNR against the real frames at 1, 8 and 30 frames
     std::vector<double> first;                 // rend_first: per step from the run's first
+    std::vector<std::array<double, 6>> shape;  // the cover's size and height at 1, 2 and 4 s (one-shots; or the clip's end)
   };
   std::vector<RunRes> res(sz(n_runs));
   const auto t0 = std::chrono::steady_clock::now();
@@ -935,6 +936,22 @@ void step_parts(const tools::Args& a) {
       int h = 0;
       for (const int fi : {0, 7, 29}) tr[sz(h++)] = fi < K ? active_psnr(clips[0].frame(fi), clips[m].frame(fi)) : 0.0;
       rr.track.push_back(tr);
+      std::array<double, 6> sh{};
+      h = 0;
+      for (const int fi : {29, 59, 119}) {
+        const int f = std::min(fi, K - 1);
+        double al = 0, ay = 0;
+        const auto px = clips[m].frame(f);
+        for (int y = 0; y < kSize; ++y)
+          for (int x = 0; x < kSize; ++x) {
+            const double v = px[(sz(y) * kSize + sz(x)) * 4 + 3] / 255.0;
+            al += v;
+            ay += v * (1.0 - (y + 0.5) / kSize);  // rows run top to bottom: the height above the frame's bottom
+          }
+        sh[sz(h++)] = al / (kSize * kSize);
+        sh[sz(h++)] = al > 0 ? ay / al : 0.0;
+      }
+      rr.shape.push_back(sh);
     }
     std::println("parts: run {} ({:.2f}, {:.2f}, {:.2f}) done ({:.0f} s)", first + r, ctl[0], ctl[1], ctl[2],
                  std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count());
@@ -973,6 +990,18 @@ void step_parts(const tools::Args& a) {
     std::println("{:<22}{:>9.4f}{:>8.3f}{:>9.5f}{:>8.2f} |{:>+8.3f}{:>+8.3f}{:>+8.3f}{:>+8.3f} |{:>+8.3f} |{:>7.2f}{:>7.2f}{:>7.2f}", methods[m], sp, mo, cv, ps, ex[0],
                  ex[1], ex[2], ex[3], ax, tr[0], tr[1], tr[2]);
   }
+  {  // the cover's size (mean alpha) and its alpha-weighted height above the frame's bottom (share of the frame)
+    std::ofstream sh(out / "parts_shape.csv");
+    sh << "method,cover_1s,height_1s,cover_2s,height_2s,cover_4s,height_4s\n";
+    std::println("\nthe cover (mean alpha) and its height above the bottom (share of the frame), mean over runs, at 1, 2 and 4 s of the clip (or its end):");
+    for (std::size_t m = 0; m < NM; ++m) {
+      std::array<double, 6> v{};
+      for (int r = 0; r < n_runs; ++r)
+        for (int k = 0; k < 6; ++k) v[sz(k)] += res[sz(r)].shape[m][sz(k)] / n_runs;
+      sh << std::format("{},{:.4f},{:.4f},{:.4f},{:.4f},{:.4f},{:.4f}\n", methods[m], v[0], v[1], v[2], v[3], v[4], v[5]);
+      std::println("  {:<22} 1 s {:.3f} at {:.3f}   2 s {:.3f} at {:.3f}   4 s {:.3f} at {:.3f}", methods[m], v[0], v[1], v[2], v[3], v[4], v[5]);
+    }
+  }
   if (NF > 0) {
     std::ofstream rf(out / "rend_first.csv");
     rf << "step,mean_active_psnr";
@@ -996,7 +1025,14 @@ void step_parts(const tools::Args& a) {
 void step_strip(const tools::Args& a) {
   rollout::Model M = load_or_throw(a.need("model"));
   if (a.has("detail")) set_detail(M, a.str("detail"));
-  const auto vars = variants_of(M, "played", a.str("variants", ""));
+  auto vars = variants_of(M, "played", a.str("variants", ""));
+  for (const auto& item : split_list(a.str("also", ""), ',')) {  // study Q: rows of other model files (NAME=FILE), with --detail
+    const auto eq = item.find('=');
+    if (eq == std::string::npos) throw std::invalid_argument("--also: NAME=FILE");
+    rollout::Model x = load_or_throw(item.substr(eq + 1));
+    if (a.has("detail")) set_detail(x, a.str("detail"));
+    vars.push_back({item.substr(0, eq), std::move(x)});
+  }
   std::vector<float> ctl;
   for (const auto& s : split_list(a.need("controls"), ',')) ctl.push_back(std::stof(s));
   std::vector<double> times;

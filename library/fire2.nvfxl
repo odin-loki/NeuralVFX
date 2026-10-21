@@ -11,8 +11,13 @@
 # anchor, scale the size it was spawned at and alive 1 while it plays (docs/LIBRARY.md). The round's seeds are 26,000,000
 # and up, more than the language's 2^24; its entries take 2,630,001 and up, which no other work uses.
 
-effect crown_fx  = "crownfire.nvfx"        # intensity (how fierce), wind (0.5 still, 0 left, 1 right), turbulence
-effect window_fx = "windowfire.nvfx"       # intensity (the room fire's size), wind (along the facade), turbulence
+# Study Q (docs/STUDY_Q.md §5.1): the detail layers that drew the two fires' streaks, changed by eye. The crown fire's
+# lock grew the fine structure a rising column carries into a cell (its calibration's grow 2), which kept every streak;
+# its new material now arrives broken up instead (grow 1, contrast 1). The window fire's small regular swirl drew curls
+# and lines in its flame and smoke; a broader, gentler one with its fine fields softened (swirl 1, swirl_scale 9, soften
+# 0.2, contrast 0.75).
+effect crown_fx  = "crownfire.nvfx", grow 1, contrast 1                                    # intensity (how fierce), wind (0.5 still, 0 left, 1 right), turbulence
+effect window_fx = "windowfire.nvfx", swirl 1, swirl_scale 9, soften 0.2, contrast 0.75     # intensity (the room fire's size), wind (along the facade), turbulence
 effect dust_fx   = "dustexplosion.nvfx"    # plays once (4 s), 16 start points and a mean state: intensity (the cloud's
 #                                            size), ignition (0 its left end, 0.5 its middle, 1 its right end), turbulence
 
