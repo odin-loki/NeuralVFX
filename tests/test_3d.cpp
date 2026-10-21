@@ -307,6 +307,11 @@ TEST(Sim3d, TheMomentumAuditOnlyReadsAndAddsUp) {
     if (nfx::sim3d::plume_smoke(effect)) {
       EXPECT_EQ(au.damping, 0.0);
     }
+    if (effect == nfx::sim3d::Effect::smoke_r2) {  // momentum-neutral confinement: no net push on any plane
+      EXPECT_NEAR(au.confinement, 0.0, 1e-5 * scale);
+    } else {
+      EXPECT_NE(au.confinement, 0.0);
+    }
   }
 }
 
@@ -337,6 +342,49 @@ TEST(Sim3d, FluxFormVelocityConservesMomentum) {
   const double faces = au.flux_bottom - au.flux_top + au.flux_sides;
   ASSERT_GT(std::abs(au.flux_top) + std::abs(au.flux_bottom), 1.0) << "momentum crosses the slab's ends";
   EXPECT_NEAR(au.advection, faces, 2e-5 * (std::abs(au.flux_top) + std::abs(au.flux_bottom))) << "the advection is its faces' fluxes";
+}
+
+// Study R2's physics in small: in still air the momentum flux of smoke_r2's plume grows with height by what its
+// buoyancy gives (dM/dz over the planes' buoyancy, rows 12 to 36 of 48, time means over 6 s after 4 s), where smoke_r's
+// (semi-Lagrangian velocity, confinement pushing down on the plume) falls a third short.
+double momentum_ratio(nfx::sim3d::Effect effect) {
+  nfx::sim3d::Params p = small_smoke(3);
+  p.effect = effect;
+  p.seed = 34'099'300;
+  nfx::sim3d::Fluid f(p);
+  const int nx = f.nx(), ny = f.ny(), nz = f.nz();
+  const std::size_t n = zu(nx) * zu(ny) * zu(nz);
+  std::vector<float> T(n), D(n), U(3 * n);
+  std::vector<double> M(zu(ny), 0.0), B(zu(ny), 0.0);
+  const auto k = f.buoyancy_coefficients();
+  for (int fr = 0; fr < 300; ++fr) {
+    f.step_frame();
+    if (fr < 120) continue;
+    f.fields(T, D);
+    f.velocity(U);
+    for (std::size_t i = 0; i < n; ++i) {
+      const std::size_t y = i / (zu(nx) * zu(nz));
+      M[y] += static_cast<double>(U[3 * i + 1]) * U[3 * i + 1];
+      B[y] += k[0] * T[i] - k[1] * D[i];
+    }
+  }
+  double r = 0;
+  int c = 0;
+  for (int y = 12; y <= 36; ++y) {
+    r += 0.5 * (M[zu(y) + 1] - M[zu(y) - 1]) / B[zu(y)];
+    ++c;
+  }
+  return r / c;
+}
+
+TEST(Sim3d, SmokeR2GainsTheMomentumItsBuoyancyGives) {
+  const double r = momentum_ratio(nfx::sim3d::Effect::smoke_r), r2 = momentum_ratio(nfx::sim3d::Effect::smoke_r2);
+  std::printf("momentum gained over buoyancy: smoke_r %.3f, smoke_r2 %.3f\n", r, r2);
+  // (one seed for 6 s on a 32-cell box, still filling: loose bounds, a guard against the deficit coming back)
+  EXPECT_LT(r, 0.75);
+  EXPECT_GT(r2, 0.85);
+  EXPECT_LT(r2, 1.15);
+  EXPECT_GT(r2 - r, 0.25);
 }
 
 TEST(Render3d, WarmSmokeDoesNotGlow) {

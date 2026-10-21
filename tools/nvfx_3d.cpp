@@ -259,8 +259,10 @@ std::vector<float> n2_schedule(std::uint64_t seed, int frames, float fps) {
   return out;
 }
 
-// Smoke tests only (--max-settings, --max-runs): fewer settings and runs than the protocol's.
-int g_max_settings = 1 << 20, g_max_runs = 1 << 20;
+// Smoke tests only (--max-settings, --max-runs): fewer settings and runs than the protocol's. --setting S: only setting S
+// (study R2's parallel jobs: one process per setting, so no two write the same file).
+int g_max_settings = 1 << 20, g_max_runs = 1 << 20, g_only_setting = -1;
+bool skip_setting(int s) { return g_only_setting >= 0 && s != g_only_setting; }
 
 std::vector<std::array<float, 3>> settings_all(const std::string& split);
 std::vector<std::array<float, 3>> settings(const std::string& split) {
@@ -985,6 +987,7 @@ int truth(const Args& a) {
   const auto sets = settings(split);
   const nfx::sim3d::Effect effect = g_effect;  // --effect (default fire; study R: smoke_r)
   for (int s = 0; s < static_cast<int>(sets.size()); ++s) {
+    if (skip_setting(s)) continue;
     for (int k = 0; k < track_runs(split); ++k) {
       const fs::path f = root / "eval" / split / "truth" / std::format("s{}_k{}.bin", s, k);
       if (fs::exists(f)) continue;
@@ -1051,6 +1054,7 @@ int track(const Args& a) {
   }
   std::array<std::vector<std::uint8_t>, 4> pt, pm;
   for (int s = 0; s < static_cast<int>(sets.size()); ++s) {
+    if (skip_setting(s)) continue;
     for (int k = 0; k < track_runs(split); ++k) {
       if (have.count(std::format("{},{}", s, k))) continue;
       Truth t;
@@ -1128,6 +1132,7 @@ int real(const Args& a) {
   const bool floor = split == "test" || a.flag("floor");
   const nfx::sim3d::Effect effect = g_effect;  // --effect (default fire; study R: smoke_r)
   for (int s = 0; s < static_cast<int>(sets.size()); ++s) {
+    if (skip_setting(s)) continue;
     for (int which = 0; which < (floor ? 2 : 1); ++which) {
       for (int k = 0; k < endless_runs(split); ++k) {
         const std::string label = which == 0 ? "real" : "floor";
@@ -1173,6 +1178,7 @@ int play(const Args& a) {
   rd::Renderer rend(m.h.fx(), m.h.fy(), m.h.fz(), study_optics());
   const auto sets = settings(split);
   for (int s = 0; s < static_cast<int>(sets.size()); ++s) {
+    if (skip_setting(s)) continue;
     for (int k = 0; k < endless_runs(split); ++k) {
       const fs::path f = root / "eval" / split / "endless" / method / std::format("s{}_k{}.unit", s, k);
       if (fs::exists(f)) continue;
@@ -2457,6 +2463,7 @@ int stability(const Args& a) {
   const std::array<float, 3> c{a.f("intensity", 0.5f), a.f("wind", 0.5f), a.f("turbulence", 0.5f)};
   auto p = fine_params(c, a.u64("seed", 34'000'900), a.i("threads", 1));
   p.velocity = a.i("velocity", p.velocity);
+  p.confinement = a.i("confinement", p.confinement);
   const int frames = static_cast<int>(std::lround(a.f("seconds", 30.f) * p.fps));
   nfx::sim3d::Fluid f(p);
   const std::size_t n = zu(f.nx()) * zu(f.ny()) * zu(f.nz());
@@ -2485,6 +2492,89 @@ int stability(const Args& a) {
   log_line(log, std::format("{} {:.2f} {:.2f} {:.2f} seed {}: {} (largest speed {:.1f} cells/s)", nfx::sim3d::effect_name(p.effect), c[0], c[1], c[2], p.seed,
                             finite ? "finite throughout" : "NOT FINITE", worst));
   return finite ? 0 : 1;
+}
+
+
+// Study R2 (docs/STUDY_R2.md §2.4, the losses' design): how wide a model's coarse plume grows against the truth's in a
+// free rollout from a true state, and the coarse simulation's for comparison. For each run of --runs (a directory; the
+// runs whose controls are held), from state --from, the model (coarse only) or the coarse simulation plays on with the
+// run's controls and noise; at each horizon, per channel, the truth's mass-weighted mean over the rows of the model's
+// spread over the truth's (rows holding at least 1e-3 of the fullest row), and the model's mass over the truth's.
+int widthprobe(const Args& a) {
+  const fs::path model_file = a.need("model");
+  r3::Model m = load_study_model(model_file);
+  r3::quantise_like_storage(m);
+  const bool coarse = a.str("method", "model") == "coarse";
+  const int threads = a.i("threads", 1), s0 = a.i("from", 60);
+  nfx::Pool pool(threads);
+  r3::Workspace ws(m);
+  fast_conv(ws);
+  std::vector<int> hz;
+  for (const float h : nfx::tools::parse_floats(a.str("horizons", "12,30,90,180,300,450"))) hz.push_back(static_cast<int>(h));
+  const auto runs = load_runs(a.need("runs"));
+  const int C = m.h.channels(), N = m.h.cells();
+  std::vector<std::array<double, 4>> acc(hz.size());  // width ratio heat, soot; mass ratio heat, soot
+  std::vector<int> cnt(hz.size(), 0);
+  for (const r3::Run& r : runs) {
+    if (!r.schedule.empty() || r.frames <= s0 + hz.back() + 1) continue;
+    const std::vector<float> cv = r.controls();
+    const std::array<float, 3> c{cv[0], cv[1], cv[2]};
+    std::vector<float> phys(zu(N) * r3::kPhys), truth(phys.size());
+    r.state(s0, phys.size(), phys);
+    r3::State st = r3::make_state(m);
+    CoarseSim cs;
+    if (coarse) cs.load(m, phys, r.time(s0), c, r.p.seed, threads);
+    else r3::start_from(m, phys, r.time(s0), cv, r.p.seed, st, ws, &pool, false);
+    std::vector<float> now(zu(N) * zu(C), 0.f);
+    int done = 0;
+    for (std::size_t j = 0; j < hz.size(); ++j) {
+      while (done < hz[j]) {
+        if (coarse) cs.f->step_frame();
+        else coarse_only_step(m, st, cv, r.p.seed, ws, pool);
+        ++done;
+      }
+      if (coarse) {
+        const auto fs3 = cs.f->state();
+        for (int i = 0; i < N; ++i) {
+          now[zu(i) * zu(C) + 3] = fs3.temp[zu(i)];
+          now[zu(i) * zu(C) + 4] = fs3.soot[zu(i)];
+        }
+      } else {
+        now = st.coarse;
+      }
+      r.state(s0 + hz[j], truth.size(), truth);
+      for (int k = 3; k < r3::kPhys; ++k) {
+        const auto wm = r3::row_spread(m.h, now, C, k), wt = r3::row_spread(m.h, truth, r3::kPhys, k);
+        std::vector<double> mm(zu(m.h.ry), 0.0), mt(zu(m.h.ry), 0.0);
+        for (int i = 0; i < N; ++i) {
+          const int y = i / (m.h.rx * m.h.rz);
+          mm[zu(y)] += std::max(0.f, now[zu(i) * zu(C) + zu(k)]);
+          mt[zu(y)] += std::max(0.f, truth[zu(i) * r3::kPhys + zu(k)]);
+        }
+        const double tmax = *std::ranges::max_element(mt);
+        double ws_ = 0, wr = 0, smm = 0, smt = 0;
+        for (int y = 0; y < m.h.ry; ++y) {
+          smm += mm[zu(y)];
+          smt += mt[zu(y)];
+          if (!(mt[zu(y)] > 1e-3 * tmax) || !(wt[zu(y)] > 0)) continue;
+          ws_ += mt[zu(y)];
+          wr += mt[zu(y)] * wm[zu(y)] / wt[zu(y)];
+        }
+        acc[j][zu(k - 3)] += ws_ > 0 ? wr / ws_ : 0;
+        acc[j][zu(k - 1)] += smt > 0 ? smm / smt : 0;
+      }
+      ++cnt[j];
+    }
+  }
+  std::println("{} ({}), from state {} of the runs in {} with their controls held:\n", coarse ? "the coarse simulation" : model_file.filename().string(),
+               coarse ? "smoke at 16 x 24 x 16" : "coarse state only", s0, a.str("runs"));
+  std::println("| horizon (frames) | runs | spread over the truth's: heat | soot | mass over the truth's: heat | soot |");
+  std::println("|---:|---:|---:|---:|---:|---:|");
+  for (std::size_t j = 0; j < hz.size(); ++j) {
+    const double n = std::max(1, cnt[j]);
+    std::println("| {} | {} | {:.3f} | {:.3f} | {:.3f} | {:.3f} |", hz[j], cnt[j], acc[j][0] / n, acc[j][1] / n, acc[j][2] / n, acc[j][3] / n);
+  }
+  return 0;
 }
 
 // --- study R2's rule (docs/STUDY_R2.md §2) ---------------------------------------------------------------------------
@@ -2903,6 +2993,7 @@ int main(int argc, char** argv) {
     const std::string cmd = a.positional()[0];
     g_max_settings = a.i("max-settings", g_max_settings);
     g_max_runs = a.i("max-runs", g_max_runs);
+    g_only_setting = a.i("setting", -1);
     const std::string study = a.str("study", "n");
     g_hres = study == "hres" || study == "n3";
     g_n2 = study == "n2";
@@ -2931,6 +3022,7 @@ int main(int argc, char** argv) {
     else if (cmd == "check") rc = check(a);
     else if (cmd == "nullcal") rc = nullcal(a);
     else if (cmd == "stability") rc = stability(a);
+    else if (cmd == "widthprobe") rc = widthprobe(a);
     else if (cmd == "verdict") rc = verdict(a);
     else if (cmd == "plume") rc = nfx::tools::plume3d::measure(a, data_root(a));
     else if (cmd == "plumefit") rc = nfx::tools::plume3d::fit(a, data_root(a));

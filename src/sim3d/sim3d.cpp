@@ -104,6 +104,28 @@ Fluid::Fluid(const Params& p) : p_(p), nx_(p.width), ny_(p.height), nz_(p.width)
   if (!(p.span >= 16.f && p.span <= 4096.f) || !(p.source_x >= 0.f && p.source_x <= 1.f)) throw std::invalid_argument("sim3d: bad span or source position");
   if (p.substeps < 1 || !(p.fps > 0.f) || p.pressure_iters < 0) throw std::invalid_argument("sim3d: bad substeps, fps or iterations");
   for (Grid* g : {&u_, &v_, &w_, &temp_, &soot_, &pressure_, &div_, &ta_, &tb_, &tc_, &wx_, &wy_, &wz_, &wn_}) g->init(nx_, ny_, nz_);
+  if (confinement_mode() == 1) {
+    for (Grid* g : {&fcx_, &fcy_, &fcz_, &fct_}) g->init(nx_, ny_, nz_);
+    // the Gaussian's weights along x and z (sigma in cells), each source cell's normalised over the cells of its row
+    const float sig = p.confinement_sigma * s_;
+    if (!(sig > 0.f)) throw std::invalid_argument("sim3d: bad confinement_sigma");
+    gr_ = std::max(1, static_cast<int>(std::ceil(3.f * sig)));
+    const auto table = [&](int n, std::vector<float>& w) {
+      const int taps = 2 * gr_ + 1;
+      w.assign(zu(n + 2) * zu(taps), 0.f);
+      for (int i = 1; i <= n; ++i) {
+        double z = 0;
+        for (int d = -gr_; d <= gr_; ++d) {
+          if (i + d >= 1 && i + d <= n) z += std::exp(-0.5 * static_cast<double>(d * d) / (static_cast<double>(sig) * sig));
+        }
+        for (int d = -gr_; d <= gr_; ++d) {
+          if (i + d >= 1 && i + d <= n) w[zu(i) * zu(taps) + zu(d + gr_)] = static_cast<float>(std::exp(-0.5 * static_cast<double>(d * d) / (static_cast<double>(sig) * sig)) / z);
+        }
+      }
+    };
+    table(nx_, gx_);
+    table(nz_, gz_);
+  }
   curl_.resize(forcing_, p.span, p.span * fl(ny_) / fl(nx_), p.span);
   pool_ = std::make_unique<Pool>(std::max(1, p.threads));
   audit_rows_.assign(zu(ny_) + 2, {});
@@ -206,6 +228,69 @@ void Fluid::pressure(std::span<float> out) const {
     for (int z = 1; z <= nz_; ++z) {
       for (int x = 1; x <= nx_; ++x) out[(zu(y - 1) * zu(nz_) + zu(z - 1)) * zu(nx_) + zu(x - 1)] = pressure_.at(x, y, z) * per_dt;
     }
+  }
+}
+
+int Fluid::confinement_mode() const {
+  if (p_.confinement >= 0) return p_.confinement;
+  return p_.effect == Effect::smoke_r2 ? 1 : 0;
+}
+
+void Fluid::neutral_confinement(float conf) {
+  // the plain force at every inner cell (as add_forces computes it), 0 elsewhere
+  slabs([&](int y) {
+    for (int z = 0; z <= nz_ + 1; ++z) {
+      for (int x = 0; x <= nx_ + 1; ++x) {
+        float fx = 0.f, fy = 0.f, fz = 0.f;
+        if (x > 1 && x < nx_ && y > 1 && y < ny_ && z > 1 && z < nz_) {
+          const float gx = 0.5f * (wn_.at(x + 1, y, z) - wn_.at(x - 1, y, z));
+          const float gy = 0.5f * (wn_.at(x, y + 1, z) - wn_.at(x, y - 1, z));
+          const float gz = 0.5f * (wn_.at(x, y, z + 1) - wn_.at(x, y, z - 1));
+          const float len = std::sqrt(gx * gx + gy * gy + gz * gz) + 1e-5f;
+          const float Nx = gx / len, Ny = gy / len, Nz = gz / len;
+          const float ox = wx_.at(x, y, z), oy = wy_.at(x, y, z), oz = wz_.at(x, y, z);
+          fx = conf * (Ny * oz - Nz * oy);
+          fy = conf * (Nz * ox - Nx * oz);
+          fz = conf * (Nx * oy - Ny * ox);
+        }
+        fcx_.at(x, y, z) = fx;
+        fcy_.at(x, y, z) = fy;
+        fcz_.at(x, y, z) = fz;
+      }
+    }
+  });
+  // less its horizontal spread: each cell's force spread over its plane by the Gaussian (weights summing to one), so the
+  // plane's sum of the result is zero; x then z, plane by plane (each plane is one task: the same on any thread count)
+  const int taps = 2 * gr_ + 1;
+  for (Grid* f : {&fcx_, &fcy_, &fcz_}) {
+    slabs([&](int y) {
+      for (int z = 1; z <= nz_; ++z) {
+        for (int x = 1; x <= nx_; ++x) fct_.at(x, y, z) = 0.f;
+      }
+      for (int z = 1; z <= nz_; ++z) {  // along x into fct_
+        for (int x = 1; x <= nx_; ++x) {
+          const float v = f->at(x, y, z);
+          if (v == 0.f) continue;
+          const float* w = gx_.data() + zu(x) * zu(taps);
+          for (int d = -gr_; d <= gr_; ++d) {
+            if (x + d >= 1 && x + d <= nx_) fct_.at(x + d, y, z) += v * w[d + gr_];
+          }
+        }
+      }
+      std::vector<float> col(zu(nz_) + 2);
+      for (int x = 1; x <= nx_; ++x) {  // along z, subtracted from the force
+        for (int z = 1; z <= nz_; ++z) col[zu(z)] = 0.f;
+        for (int z = 1; z <= nz_; ++z) {
+          const float v = fct_.at(x, y, z);
+          if (v == 0.f) continue;
+          const float* w = gz_.data() + zu(z) * zu(taps);
+          for (int d = -gr_; d <= gr_; ++d) {
+            if (z + d >= 1 && z + d <= nz_) col[zu(z + d)] += v * w[d + gr_];
+          }
+        }
+        for (int z = 1; z <= nz_; ++z) f->at(x, y, z) -= col[zu(z)];
+      }
+    });
   }
 }
 
@@ -341,6 +426,7 @@ void Fluid::add_forces(float dt) {
   const float wdrag = 1.f - std::exp(-t.wind_drag * dt), damp = std::exp(-t.vel_damp * dt);
   const float conf = t.confinement * s, amp = t.curl_force * s;
   curl_.build(forcing_, p_.seed, time_, pool_.get());
+  const int cmode = confinement_mode();
   // vorticity (central differences) and its magnitude
   slabs([&](int y) {
     for (int z = 1; z <= nz_; ++z) {
@@ -359,6 +445,7 @@ void Fluid::add_forces(float dt) {
   // swapped in, so every cell reads the old velocity)
   const bool aud = audit_ != nullptr && audit_->y_hi >= audit_->y_lo;
   const int ay0 = aud ? audit_->y_lo + 1 : 1, ay1 = aud ? audit_->y_hi + 1 : 0;  // the audit's slab, padded rows
+  if (cmode == 1) neutral_confinement(conf);
   slabs([&](int y) {
     const bool row = aud && y >= ay0 && y <= ay1;
     std::array<double, 4> acc{};
@@ -368,7 +455,12 @@ void Fluid::add_forces(float dt) {
         float fx = 0.f, fy = t.buoyancy * s * T - t.soot_weight * s * D, fz = 0.f;
         const float fy_buoy = fy;
         float fy_conf = 0.f, fy_curl = 0.f;
-        if (x > 1 && x < nx_ && y > 1 && y < ny_ && z > 1 && z < nz_) {
+        if (cmode == 1) {  // momentum-neutral (Params::confinement)
+          fx += fcx_.at(x, y, z);
+          fy_conf = fcy_.at(x, y, z);
+          fy += fy_conf;
+          fz += fcz_.at(x, y, z);
+        } else if (cmode == 0 && x > 1 && x < nx_ && y > 1 && y < ny_ && z > 1 && z < nz_) {
           const float gx = 0.5f * (wn_.at(x + 1, y, z) - wn_.at(x - 1, y, z));
           const float gy = 0.5f * (wn_.at(x, y + 1, z) - wn_.at(x, y - 1, z));
           const float gz = 0.5f * (wn_.at(x, y, z + 1) - wn_.at(x, y, z - 1));

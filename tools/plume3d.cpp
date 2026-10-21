@@ -154,6 +154,7 @@ int measure(const Args& a, const fs::path& root) {
   p.substeps = a.i("substeps", p.substeps);
   p.scalars = a.i("scalars", p.scalars);
   p.velocity = a.i("velocity", p.velocity);
+  p.confinement = a.i("confinement", p.confinement);
   const int seeds = a.i("seeds", 6), from = a.i("from", 0);
   const std::uint64_t base = std::stoull(a.need("seed-base"));
   const float spin = a.f("spin", 6.f), seconds = a.f("seconds", 20.f);
@@ -297,7 +298,8 @@ int measure(const Args& a, const fs::path& root) {
     }
     pr.audit = {static_cast<double>(audit.y_lo), static_cast<double>(audit.y_hi), audit.sources, audit.buoyancy, audit.confinement, audit.curl, audit.damping,
                 audit.advection, audit.projection, audit.seconds, audit.flux_bottom, audit.flux_top, audit.flux_sides,
-                static_cast<double>(p.velocity >= 0 ? p.velocity : p.effect == sim3d::Effect::smoke_r2 ? 2 : 0)};  // [13]: how the velocity was carried
+                static_cast<double>(p.velocity >= 0 ? p.velocity : p.effect == sim3d::Effect::smoke_r2 ? 2 : 0),  // [13]: how the velocity was carried
+                static_cast<double>(p.confinement >= 0 ? p.confinement : p.effect == sim3d::Effect::smoke_r2 ? 1 : 0)};  // [14]: the confinement
     pr.frames = frames;
     save(f, pr);
     const std::string line = std::format("plume {} seed {} ({}x{}x{}, span {:.0f}, controls {:.2f} {:.2f} {:.2f}): {} frames after {} of spin-up, {:.0f} s", label,
@@ -665,7 +667,10 @@ std::vector<Profile> load_config(const fs::path& dir) {
 std::string velocity_name(const Profile& p) {
   if (p.audit.size() < 14) return "-";
   const int v = static_cast<int>(p.audit[13]);
-  return v == 2 ? "flux form" : v == 1 ? "MacCormack" : "semi-Lagrangian";
+  const std::string vel = v == 2 ? "flux form" : v == 1 ? "MacCormack" : "semi-Lagrangian";
+  if (p.audit.size() < 15) return vel;
+  const int c = static_cast<int>(p.audit[14]);
+  return vel + (c == 1 ? "; confinement momentum-neutral" : c == 2 ? "; no confinement" : "; confinement as N's");
 }
 
 std::vector<int> all_of(std::size_t n) {
@@ -1117,6 +1122,7 @@ int video(const Args& a, const fs::path& root) {
   const Profile& p0 = cfg[0].runs[0];
   sim3d::Params p;
   if (!sim3d::parse_effect(a.str("effect", "smoke_r"), p.effect)) throw std::invalid_argument("--effect");
+  const std::string title = a.str("title", "SIMULATED SMOKE, STILL AIR");
   p.intensity = p0.intensity;
   p.wind = p0.wind;
   p.turbulence = p0.turbulence;
@@ -1198,7 +1204,7 @@ int video(const Args& a, const fs::path& root) {
         cv.line(a1[0], a1[1], a2[0], a2[1], {200, 200, 206}, 1.5);
       }
     }
-    cv.text("SIMULATED SMOKE, STILL AIR", 20, 18, 2, {255, 255, 255});
+    cv.text(title, 20, 18, 2, {255, 255, 255});
     cv.text(std::format("OUR 3D SOLVER, {}X{}X{}, CONTROLS {:.2f} {:.2f} {:.2f}", nx, ny, nz, p.intensity, p.wind, p.turbulence), 20, 42, 1, {190, 190, 196});
     cv.text("DASHED: MTT TOP-HAT EDGE B = 1.2 ALPHA (Z - Z0), FITTED", 20, H - 40, 1, {255, 225, 150});
     cv.text(std::format("{:.1f} S", t), lw - 90, 18, 2, {255, 225, 150});

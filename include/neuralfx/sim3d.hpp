@@ -73,6 +73,13 @@ struct Params {
   // momentum budget), 2 flux form (study R2: each component carried as the scalars' flux form carries heat, by the
   // velocity after the forces, frozen for the step; what leaves a cell enters its neighbour, so momentum is conserved).
   int velocity = -1;
+  // How vorticity confinement pushes: -1 the effect's own (smoke_r2: momentum-neutral; every other effect: as study N
+  // wrote it), 0 as study N wrote it (epsilon N x omega), 1 momentum-neutral (study R2: the same force less its
+  // horizontal Gaussian average of width confinement_sigma world units, each cell's force spread over its plane with
+  // weights that sum to one, so that it sharpens the vortices it sees and adds no net momentum to any plane: in a plume
+  // the plain force pushes down on the whole, docs/STUDY_R2.md §1.2), 2 off (for the diagnosis).
+  int confinement = -1;
+  float confinement_sigma = 8.f;
   std::array<float, 3> controls() const { return {intensity, wind, turbulence}; }
 };
 
@@ -161,6 +168,8 @@ class Fluid {
   void component_border(Grid& g, bool reflect_floor);
   double slab_sum(const Grid& g) const;  // the audit's slab: the sum of g over its cells (fixed order)
   int velocity_mode() const;
+  int confinement_mode() const;
+  void neutral_confinement(float conf);  // Params::confinement 1: the force into fcx_, fcy_, fcz_
   void velocity_border();
   template <class F>
   void slabs(F&& fn);  // fn(y) for y = 1..ny on the pool
@@ -174,6 +183,9 @@ class Fluid {
   Forcing3 forcing_;
   CurlField3 curl_;
   Grid u_, v_, w_, temp_, soot_, pressure_, div_, ta_, tb_, tc_, wx_, wy_, wz_, wn_;
+  Grid fcx_, fcy_, fcz_, fct_;     // the momentum-neutral confinement's force and its scratch (Params::confinement 1)
+  std::vector<float> gx_, gz_;     // its spreading weights along x and z: [cell][tap], normalised per source cell
+  int gr_ = 0;                     // their radius in cells
   std::unique_ptr<Pool> pool_;
   MomentumAudit* audit_ = nullptr;
   std::vector<std::array<double, 4>> audit_rows_;  // per padded row: the forces' terms (buoyancy, confinement, curl, damping)
