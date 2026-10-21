@@ -1,2 +1,4 @@
 effect,iterations,activity_weight,loss,seconds
+geyser,800,100,0.11076,2135
 haboob,800,100,0.02193,2135
+seaspray,800,100,0.12636,2237
