@@ -31,6 +31,11 @@ sources, forces and drawing, and are trained and tested as the last nine were ([
   simulator's does, and stays low and flat. Endless, its average picture is 2.90 dB [0.89, 5.71] further from real than
   the flipbook's (the flipbooks here are whole 5 s avalanches of a neighbouring setting); its motion and detail tie the
   flipbook's.
+- **Study Q replaced it** ([REPORT.md](REPORT.md) §21, [STUDY_Q.md](STUDY_Q.md) §4.8): its stepper fine-tuned on 30-frame
+  windows. On 60 held-out settings it follows a run 0.34 dB [0.18, 0.50] better at 1 s from its true state and its
+  average picture is 0.16 dB [0.04, 0.28] closer to a real run's, by a rule written before its validation; run again,
+  this round's test still finds it behind the coarse simulation at 1 s (-2.47 dB [-5.12, -0.00]) and the flipbook's
+  average picture: it is still weak, and what keeps it so is its start points (STUDY_Q.md §3.1).
 - **Cost (provisional, a shared machine):** 146 KB stored for lava and the eruption (64-pixel fine fields with 8 start
   points), 274 KB for the avalanche (16 start points); 2.4 MB per instance at 128 px. At the runtime's int8 default on
   the AVX-512 build, 0.49 (lava), 0.48 (eruption) and 0.44 ms (avalanche) per 128 px frame, where study D's fire took

@@ -23,17 +23,34 @@
 //       periods of 2.5 to 8 pixels, and the period of its largest excess), DIR/bands_frames.png (run 0, a window of the
 //       frames, every method) and DIR/bands_spectrum.png (the spectra, run means).
 //
-//   nvfx_fix strip --model F --controls a,b,c [--detail ...] [--variants ...] [--size 256] [--times 2,4,6] [--seed S]
+//   nvfx_fix strip --model F --controls a,b,c [--detail ...] [--variants ...] [--also NAME=F2,...] [--size 256] [--times 2,4,6] [--seed S]
 //                  [--crop x,y,w,h] [--scale 1] [--bg 36,40,50,13,14,17] [--precision float|int8] --out F.png
 //       Frames of the runtime as an engine plays it, one row per variant (the first: the model with --detail), one column
 //       per time; optionally a crop of each frame, scaled up (nearest). For the before and after figures.
 //
 // Seeds: study O's range, 3,000,000 to 3,499,999 (plays of `bands`: 3,000,000 + 100 r + k).
+//
+// Study Q (docs/REPORT.md §21) adds:
+//
+//   nvfx_fix parts --effect E --model F [--detail ...] [--variants ...] [--runs 4] [--first 0] [--frames K] [--out DIR]
+//                  [--threads 1] [--seed-base 33460000]
+//       The bands' taking apart (the same methods: real, shipped_V, true_V, true_sim_V, coarse_up, oracle_V, oracle_up) and
+//       rend_true (the learned renderer on the run's true fields, coarse and fine), on training runs (salt 1; diagnosis
+//       only), measured over the whole frame: study D's frame statistics against the real frames (detail spectrum distance,
+//       motion ratio, coverage distance, mean-frame PSNR), the 2D power of the luminance in four bands of period (64 to 16,
+//       16 to 8, 8 to 2.5 and 2.5 to 2 pixels of a 128-pixel frame) as log10 over the real frames', and how much of the
+//       fine band's power (periods 2.5 to 8 px) lies along x (|kx| > |ky|: vertical streaks) rather than along y (|ky| >
+//       |kx|: horizontal streaks), as log10(Px / Py), for the method and the real frames. Looping effects from frame 100 of
+//       the run (90 frames); one-shots from their first frame to their last. Also, per frame from the run's first step
+//       (rend_first): the learned renderer on the true fields against the simulator's frame (active PSNR), which shows
+//       whether a one-shot's first frames are its renderer's weak part. Writes DIR/parts_summary.csv, DIR/parts_runs.csv
+//       and DIR/rend_first.csv. Shipped plays take seeds --seed-base + 100 r + k (study Q's diagnosis block).
 #include "args.hpp"
 #include "label_font.hpp"
 
 #include <neuralfx/clip.hpp>
 #include <neuralfx/image_io.hpp>
+#include <neuralfx/metrics.hpp>
 #include <neuralfx/nvfx.h>
 #include <neuralfx/rollout.hpp>
 #include <neuralfx/rollout_train.hpp>
@@ -43,6 +60,7 @@
 #include <array>
 #include <atomic>
 #include <chrono>
+#include <complex>
 #include <cmath>
 #include <filesystem>
 #include <format>
@@ -700,12 +718,321 @@ void step_cover(const tools::Args& a) {
   }
 }
 
+// --- parts: the bands' taking apart over the whole frame (study Q) -------------------------------------------------------------
+
+void fft_inplace(std::span<std::complex<double>> a) {  // radix 2, in place (as metrics.cpp)
+  const std::size_t n = a.size();
+  for (std::size_t i = 1, j = 0; i < n; ++i) {
+    std::size_t bit = n >> 1;
+    for (; j & bit; bit >>= 1) j ^= bit;
+    j ^= bit;
+    if (i < j) std::swap(a[i], a[j]);
+  }
+  for (std::size_t len = 2; len <= n; len <<= 1) {
+    const double ang = -2.0 * std::numbers::pi / static_cast<double>(len);
+    const std::complex<double> wl(std::cos(ang), std::sin(ang));
+    for (std::size_t i = 0; i < n; i += len) {
+      std::complex<double> w(1.0, 0.0);
+      for (std::size_t j = 0; j < len / 2; ++j) {
+        const auto u = a[i + j], v = a[i + j + len / 2] * w;
+        a[i + j] = u + v;
+        a[i + j + len / 2] = u - v;
+        w *= wl;
+      }
+    }
+  }
+}
+
+// The luminance's 2D power (no window, the frame's mean taken off, as metrics::stats but summed in bands), summed over the
+// clip's frames: per band of radius r (cycles per frame) [2, 8), [8, 16), [16, 51.2), [51.2, 64]: periods 64 to 16, 16 to 8,
+// 8 to 2.5 and 2.5 to 2 px of a 128-pixel frame; and the fine band [16, 51.2) split by direction: |kx| > |ky| (variation
+// along x: vertical structures) and |ky| > |kx|.
+struct BandPower {
+  std::array<double, 4> band{};
+  double fine_x = 0, fine_y = 0;
+};
+BandPower band_power(const Clip& cl) {
+  const int n = cl.size;
+  BandPower bp;
+  std::vector<std::complex<double>> plane(sz(n) * sz(n)), line(sz(n));
+  for (int f = 0; f < cl.frames; ++f) {
+    const auto fr = cl.frame(f);
+    double mean = 0;
+    for (std::size_t i = 0; i < plane.size(); ++i) {
+      plane[i] = 0.2126 * fr[i * 4] + 0.7152 * fr[i * 4 + 1] + 0.0722 * fr[i * 4 + 2];
+      mean += plane[i].real();
+    }
+    mean /= static_cast<double>(plane.size());
+    for (auto& v : plane) v -= mean;
+    for (int y = 0; y < n; ++y) fft_inplace(std::span(plane.data() + sz(y) * sz(n), sz(n)));
+    for (int x = 0; x < n; ++x) {
+      for (int y = 0; y < n; ++y) line[sz(y)] = plane[sz(y) * sz(n) + sz(x)];
+      fft_inplace(line);
+      for (int y = 0; y < n; ++y) plane[sz(y) * sz(n) + sz(x)] = line[sz(y)];
+    }
+    const double s = static_cast<double>(n) / kSize;  // radii in cycles per frame, scaled to a 128-pixel frame's periods
+    for (int y = 0; y < n; ++y) {
+      for (int x = 0; x < n; ++x) {
+        const int ky = y <= n / 2 ? y : y - n, kx = x <= n / 2 ? x : x - n;
+        const double r = std::sqrt(static_cast<double>(kx * kx + ky * ky)) / s, p = std::norm(plane[sz(y) * sz(n) + sz(x)]);
+        const int b = r < 2 ? -1 : r < 8 ? 0 : r < 16 ? 1 : r < 51.2 ? 2 : r <= 64 ? 3 : -1;
+        if (b < 0) continue;
+        bp.band[sz(b)] += p;
+        if (b == 2) (std::abs(kx) > std::abs(ky) ? bp.fine_x : std::abs(ky) > std::abs(kx) ? bp.fine_y : bp.fine_x) += std::abs(kx) == std::abs(ky) ? 0.0 : p;
+      }
+    }
+  }
+  return bp;
+}
+
+double active_psnr(std::span<const std::uint8_t> r, std::span<const std::uint8_t> t) {  // study D's active PSNR of one frame
+  double sum = 0, n = 0;
+  for (std::size_t i = 0; i < r.size(); i += 4) {
+    if (std::max({r[i], r[i + 1], r[i + 2], r[i + 3]}) <= 4 && std::max({t[i], t[i + 1], t[i + 2], t[i + 3]}) <= 4) continue;
+    n += 4;
+    for (std::size_t c = 0; c < 4; ++c) {
+      const double d = (static_cast<double>(r[i + c]) - static_cast<double>(t[i + c])) / 255.0;
+      sum += d * d;
+    }
+  }
+  return n > 0 ? -10.0 * std::log10(std::max(1e-12, sum / n)) : 99.0;
+}
+
+// The learned renderer on a simulator state's true fields (fine heat and soot, the coarse state from them), as the
+// renderer was trained (rollout_train's sample_state): memory channels zero.
+void render_true(const rollout::Model& m, const sim::State& st, float fps, std::span<std::uint8_t> out) {
+  rollout::State s;
+  s.res = m.h.res;
+  s.size = st.n;
+  const int C = m.h.channels(), N = m.h.res * m.h.res;
+  std::vector<float> c(sz(N) * rollout::kPhys);
+  rollout::coarse_from_sim(st, m.h.res, fps, c);
+  s.coarse.assign(sz(N) * sz(C), 0.f);
+  for (int i = 0; i < N; ++i)
+    for (int k = 0; k < rollout::kPhys; ++k) s.coarse[sz(i) * sz(C) + sz(k)] = c[sz(i) * rollout::kPhys + sz(k)];
+  s.fine_t = st.temp;
+  s.fine_d = st.soot;
+  std::vector<float> rgba(sz(st.n) * sz(st.n) * 4);
+  rollout::render(m, s, rgba);
+  to_bytes(rgba, out);
+}
+
+void step_parts(const tools::Args& a) {
+  sim::Effect e{};
+  if (!sim::parse_effect(a.need("effect"), e)) throw std::invalid_argument("unknown effect");
+  rollout::Model M = load_or_throw(a.need("model"));
+  if (a.has("detail")) set_detail(M, a.str("detail"));
+  const auto vars = variants_of(M, "played", a.str("variants", ""));
+  const bool once = !sim::effect_loops(e);
+  const int warm = once ? 1 : 100, n_runs = a.i("runs", 4), first = a.i("first", 0), threads = a.i("threads", 1);
+  const int K = a.i("frames", once ? sim::one_shot_frames(e) - 2 : 90), NF = a.i("first-frames", once ? 30 : 0);
+  const std::uint64_t seed_base = a.u64("seed-base", 33'460'000);
+  const fs::path out = a.str("out", "parts");
+  fs::create_directories(out);
+  std::vector<std::string> methods = {"real"};
+  for (const auto& v : vars) methods.push_back("shipped_" + v.name);
+  for (const auto& v : vars) methods.push_back("true_" + v.name);
+  for (const auto& v : vars) methods.push_back("true_sim_" + v.name);
+  methods.push_back("coarse_up");
+  for (const auto& v : vars) methods.push_back("oracle_" + v.name);
+  methods.push_back("oracle_up");
+  methods.push_back("rend_true");
+  const std::size_t NM = methods.size();
+  const auto idx = [&](const std::string& n) { return static_cast<std::size_t>(std::ranges::find(methods, n) - methods.begin()); };
+  struct RunRes {
+    std::vector<metrics::StatDistance> d;
+    std::vector<BandPower> bp;
+    std::vector<std::array<double, 3>> track;  // active PSNR against the real frames at 1, 8 and 30 frames
+    std::vector<double> first;                 // rend_first: per step from the run's first
+    std::vector<std::array<double, 6>> shape;  // the cover's size and height at 1, 2 and 4 s (one-shots; or the clip's end)
+  };
+  std::vector<RunRes> res(sz(n_runs));
+  const auto t0 = std::chrono::steady_clock::now();
+  parallel(threads, n_runs, [&](int r) {
+    const sim::Params p = run_params(e, 1, static_cast<std::uint64_t>(first + r));
+    const std::vector<float> ctl{p.intensity, p.wind, p.turbulence};
+    RunRes& rr = res[sz(r)];
+    if (NF > 0) {  // the learned renderer on the true fields of the run's first steps
+      sim::Fluid f(p);
+      std::vector<std::uint8_t> a1(sz(kSize) * kSize * 4), b1(a1.size());
+      for (int i = 0; i < NF; ++i) {
+        f.step_frame();
+        f.render(a1);
+        render_true(vars.front().m, f.state(), p.fps, b1);
+        rr.first.push_back(active_psnr(a1, b1));
+      }
+    }
+    sim::Fluid truth(p);
+    for (int i = 0; i < warm; ++i) truth.step_frame();
+    const sim::State st = truth.state();
+    std::vector<Clip> clips(NM);
+    for (auto& c : clips) {
+      c.allocate(kSize, K);
+      c.fps = 30.f;
+    }
+    std::vector<std::vector<float>> true_coarse(sz(K));
+    for (int i = 0; i < K; ++i) {
+      truth.step_frame();
+      truth.render(clips[idx("real")].frame(i));
+      render_true(vars.front().m, truth.state(), p.fps, clips[idx("rend_true")].frame(i));
+      true_coarse[sz(i)].resize(sz(kRes) * kRes * rollout::kPhys);
+      rollout::coarse_from_sim(truth.state(), kRes, p.fps, true_coarse[sz(i)]);
+      render_fields(p, upsample(true_coarse[sz(i)], rollout::kPhys, 2), upsample(true_coarse[sz(i)], rollout::kPhys, 3), clips[idx("oracle_up")].frame(i));
+    }
+    rollout::StartPoint sp;
+    sp.controls = ctl;
+    sp.seed = p.seed;
+    sp.time = st.time;
+    sp.coarse.resize(sz(kRes) * kRes * rollout::kPhys);
+    rollout::coarse_from_sim(st, kRes, p.fps, sp.coarse);
+    sp.fine_t = st.temp;
+    sp.fine_d = st.soot;
+    std::vector<float> rgba(sz(kSize) * kSize * 4);
+    for (const auto& v : vars) {
+      {  // as shipped: a one-shot from its start (its frames 1..K), a looping effect from 2 s on
+        Runtime fx(v.m);
+        clips[idx("shipped_" + v.name)] = runtime_clip(fx.e, ctl, seed_base + 100 * static_cast<std::uint64_t>(first + r), once ? warm : 60, K, kSize, NVFX_PRECISION_FLOAT);
+      }
+      rollout::Model mt = v.m;
+      mt.h.start_fine = kSize;
+      mt.starts = {sp};
+      rollout::State rs = rollout::start(mt, 0, kSize, ctl, sp.seed);
+      const bool played = &v == &vars.front();
+      for (int i = 0; i < K; ++i) {
+        rollout::step(mt, rs, ctl, sp.seed);
+        rollout::render(mt, rs, rgba);
+        to_bytes(rgba, clips[idx("true_" + v.name)].frame(i));
+        render_fields(p, rs.fine_t, rs.fine_d, clips[idx("true_sim_" + v.name)].frame(i));
+        if (played) render_fields(p, upsample(rs.coarse, mt.h.channels(), 2), upsample(rs.coarse, mt.h.channels(), 3), clips[idx("coarse_up")].frame(i));
+      }
+      rollout::State os;  // the oracle stepper: the true coarse state of every frame moving this detail layer
+      os.res = kRes;
+      os.size = kSize;
+      os.time = st.time;
+      os.since_start = 0.f;
+      const int C = v.m.h.channels();
+      os.coarse.assign(sz(kRes) * kRes * sz(C), 0.f);
+      os.flow.assign(sz(kRes) * kRes * 2, 0.f);
+      os.pressure.assign(sz(kRes) * kRes, 0.f);
+      os.fine_t = st.temp;
+      os.fine_d = st.soot;
+      for (int i = 0; i < K; ++i) {
+        for (int j = 0; j < kRes * kRes; ++j) {
+          for (int q = 0; q < rollout::kPhys; ++q) os.coarse[sz(j) * sz(C) + sz(q)] = true_coarse[sz(i)][sz(j) * rollout::kPhys + sz(q)];
+          os.flow[sz(j) * 2] = true_coarse[sz(i)][sz(j) * rollout::kPhys];
+          os.flow[sz(j) * 2 + 1] = true_coarse[sz(i)][sz(j) * rollout::kPhys + 1];
+        }
+        rollout::detail_step(v.m, os, p.seed, ctl);
+        os.time += 1.f / v.m.fps;
+        os.since_start += 1.f / v.m.fps;
+        render_fields(p, os.fine_t, os.fine_d, clips[idx("oracle_" + v.name)].frame(i));
+      }
+    }
+    const metrics::ClipStats real = metrics::stats(clips[0]);
+    for (std::size_t m = 0; m < NM; ++m) {
+      rr.d.push_back(metrics::distance(real, metrics::stats(clips[m])));
+      rr.bp.push_back(band_power(clips[m]));
+      std::array<double, 3> tr{};
+      int h = 0;
+      for (const int fi : {0, 7, 29}) tr[sz(h++)] = fi < K ? active_psnr(clips[0].frame(fi), clips[m].frame(fi)) : 0.0;
+      rr.track.push_back(tr);
+      std::array<double, 6> sh{};
+      h = 0;
+      for (const int fi : {29, 59, 119}) {
+        const int f = std::min(fi, K - 1);
+        double al = 0, ay = 0;
+        const auto px = clips[m].frame(f);
+        for (int y = 0; y < kSize; ++y)
+          for (int x = 0; x < kSize; ++x) {
+            const double v = px[(sz(y) * kSize + sz(x)) * 4 + 3] / 255.0;
+            al += v;
+            ay += v * (1.0 - (y + 0.5) / kSize);  // rows run top to bottom: the height above the frame's bottom
+          }
+        sh[sz(h++)] = al / (kSize * kSize);
+        sh[sz(h++)] = al > 0 ? ay / al : 0.0;
+      }
+      rr.shape.push_back(sh);
+    }
+    std::println("parts: run {} ({:.2f}, {:.2f}, {:.2f}) done ({:.0f} s)", first + r, ctl[0], ctl[1], ctl[2],
+                 std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count());
+    std::fflush(stdout);
+  });
+  std::ofstream rs(out / "parts_runs.csv");
+  rs << "method,run,spectrum_l1,motion_ratio,coverage_l1,mean_frame_psnr,band_64_16,band_16_8,band_8_2p5,band_2p5_2,fine_x,fine_y,track_f1,track_f8,track_f30\n";
+  std::ofstream su(out / "parts_summary.csv");
+  su << "method,spectrum_l1,motion_ratio,coverage_l1,mean_frame_psnr,excess_64_16,excess_16_8,excess_8_2p5,excess_2p5_2,fine_x_over_y,track_f1,track_f8,track_f30\n";
+  std::println("\n{} (runs {} to {}, {} frames): against the real frames; band powers as log10 over the real frames'; the fine band's log10(Px / Py)",
+               sim::effect_name(e), first, first + n_runs - 1, K);
+  std::println("{:<22}{:>9}{:>8}{:>9}{:>8} |{:>8}{:>8}{:>8}{:>8} |{:>8} |{:>7}{:>7}{:>7}", "method", "spectrum", "motion", "cover", "PSNR", "64-16", "16-8", "8-2.5",
+               "2.5-2", "Px/Py", "f1", "f8", "f30");
+  const auto lg = [](double x) { return std::log10(std::max(1e-12, x)); };
+  for (std::size_t m = 0; m < NM; ++m) {
+    double sp = 0, mo = 0, cv = 0, ps = 0, ax = 0;
+    std::array<double, 4> ex{};
+    std::array<double, 3> tr{};
+    for (int r = 0; r < n_runs; ++r) {
+      const RunRes& rr = res[sz(r)];
+      const auto& d = rr.d[m];
+      const auto& b = rr.bp[m];
+      sp += d.spectrum_l1 / n_runs;
+      mo += d.motion_ratio / n_runs;
+      cv += d.coverage_l1 / n_runs;
+      ps += d.mean_frame_psnr / n_runs;
+      for (int k = 0; k < 4; ++k) ex[sz(k)] += (lg(b.band[sz(k)]) - lg(rr.bp[0].band[sz(k)])) / n_runs;
+      ax += (lg(b.fine_x) - lg(b.fine_y)) / n_runs;
+      for (int k = 0; k < 3; ++k) tr[sz(k)] += rr.track[m][sz(k)] / n_runs;
+      rs << std::format("{},{},{:.5f},{:.4f},{:.6f},{:.3f},{:.4g},{:.4g},{:.4g},{:.4g},{:.4g},{:.4g},{:.3f},{:.3f},{:.3f}\n", methods[m], first + r, d.spectrum_l1,
+                        d.motion_ratio, d.coverage_l1, d.mean_frame_psnr, b.band[0], b.band[1], b.band[2], b.band[3], b.fine_x, b.fine_y, rr.track[m][0], rr.track[m][1],
+                        rr.track[m][2]);
+    }
+    su << std::format("{},{:.5f},{:.4f},{:.6f},{:.3f},{:.3f},{:.3f},{:.3f},{:.3f},{:.3f},{:.3f},{:.3f},{:.3f}\n", methods[m], sp, mo, cv, ps, ex[0], ex[1], ex[2], ex[3], ax,
+                      tr[0], tr[1], tr[2]);
+    std::println("{:<22}{:>9.4f}{:>8.3f}{:>9.5f}{:>8.2f} |{:>+8.3f}{:>+8.3f}{:>+8.3f}{:>+8.3f} |{:>+8.3f} |{:>7.2f}{:>7.2f}{:>7.2f}", methods[m], sp, mo, cv, ps, ex[0],
+                 ex[1], ex[2], ex[3], ax, tr[0], tr[1], tr[2]);
+  }
+  {  // the cover's size (mean alpha) and its alpha-weighted height above the frame's bottom (share of the frame)
+    std::ofstream sh(out / "parts_shape.csv");
+    sh << "method,cover_1s,height_1s,cover_2s,height_2s,cover_4s,height_4s\n";
+    std::println("\nthe cover (mean alpha) and its height above the bottom (share of the frame), mean over runs, at 1, 2 and 4 s of the clip (or its end):");
+    for (std::size_t m = 0; m < NM; ++m) {
+      std::array<double, 6> v{};
+      for (int r = 0; r < n_runs; ++r)
+        for (int k = 0; k < 6; ++k) v[sz(k)] += res[sz(r)].shape[m][sz(k)] / n_runs;
+      sh << std::format("{},{:.4f},{:.4f},{:.4f},{:.4f},{:.4f},{:.4f}\n", methods[m], v[0], v[1], v[2], v[3], v[4], v[5]);
+      std::println("  {:<22} 1 s {:.3f} at {:.3f}   2 s {:.3f} at {:.3f}   4 s {:.3f} at {:.3f}", methods[m], v[0], v[1], v[2], v[3], v[4], v[5]);
+    }
+  }
+  if (NF > 0) {
+    std::ofstream rf(out / "rend_first.csv");
+    rf << "step,mean_active_psnr";
+    for (int r = 0; r < n_runs; ++r) rf << std::format(",run_{}", first + r);
+    rf << "\n";
+    std::string line;
+    for (int i = 0; i < NF; ++i) {
+      double mu = 0;
+      for (int r = 0; r < n_runs; ++r) mu += res[sz(r)].first[sz(i)] / n_runs;
+      rf << std::format("{},{:.3f}", i + 1, mu);
+      for (int r = 0; r < n_runs; ++r) rf << std::format(",{:.3f}", res[sz(r)].first[sz(i)]);
+      rf << "\n";
+      if (i < 12 || i % 5 == 4) line += std::format(" {}:{:.1f}", i + 1, mu);
+    }
+    std::println("\nrend_first: the learned renderer on the true fields, active PSNR by step from the run's first (mean over runs):{}", line);
+  }
+}
+
 // --- strip -------------------------------------------------------------------------------------------------------------------
 
 void step_strip(const tools::Args& a) {
   rollout::Model M = load_or_throw(a.need("model"));
   if (a.has("detail")) set_detail(M, a.str("detail"));
-  const auto vars = variants_of(M, "played", a.str("variants", ""));
+  auto vars = variants_of(M, "played", a.str("variants", ""));
+  for (const auto& item : split_list(a.str("also", ""), ',')) {  // study Q: rows of other model files (NAME=FILE), with --detail
+    const auto eq = item.find('=');
+    if (eq == std::string::npos) throw std::invalid_argument("--also: NAME=FILE");
+    rollout::Model x = load_or_throw(item.substr(eq + 1));
+    if (a.has("detail")) set_detail(x, a.str("detail"));
+    vars.push_back({item.substr(0, eq), std::move(x)});
+  }
   std::vector<float> ctl;
   for (const auto& s : split_list(a.need("controls"), ',')) ctl.push_back(std::stof(s));
   std::vector<double> times;
@@ -770,7 +1097,7 @@ int main(int argc, char** argv) {
   try {
     tools::Args a(argc, argv, {});
     if (a.positional().empty()) {
-      std::println(stderr, "usage: nvfx_fix bands|peaks|strip ... (see the header of tools/nvfx_fix.cpp)");
+      std::println(stderr, "usage: nvfx_fix bands|peaks|cover|parts|strip ... (see the header of tools/nvfx_fix.cpp)");
       return 2;
     }
     const std::string step = a.positional()[0];
@@ -778,6 +1105,7 @@ int main(int argc, char** argv) {
     else if (step == "strip") step_strip(a);
     else if (step == "peaks") step_peaks(a);
     else if (step == "cover") step_cover(a);
+    else if (step == "parts") step_parts(a);
     else throw std::invalid_argument("unknown step " + step);
     a.warn_unused();
   } catch (const std::exception& ex) {

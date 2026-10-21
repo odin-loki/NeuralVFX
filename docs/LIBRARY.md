@@ -736,7 +736,9 @@ round 9's lava, eruption and avalanche ([EFFECTS_EARTH.md](EFFECTS_EARTH.md)) an
 ([EFFECTS_FIRE2.md](EFFECTS_FIRE2.md); declared in `library/fire2.nvfxl` itself), and round 10's geyser, haboob and
 seaspray ([EFFECTS_ELEMENTS.md](EFFECTS_ELEMENTS.md)). The
 orb plays at float whatever the stage's precision (`precision float` on its `effect` line): study L's orb failed study
-K's int8 rule on its average picture ([REPORT.md](REPORT.md) §13.9). Links are enough:
+K's int8 rule on its average picture ([REPORT.md](REPORT.md) §13.9). The avalanche, the dust explosion and the mushroom are
+study Q's since it replaced them ([REPORT.md](REPORT.md) §21; `models/restore.sh` in this repository places every file).
+Links are enough:
 
 ```sh
 mkdir -p $NEURALVFX_DATA/library/models && cd $NEURALVFX_DATA/library/models
@@ -746,13 +748,13 @@ ln -s ../../fx/models/d/steam.nvfx .
 ln -s ../../fx_atmos/models/d/fog.nvfx ../../m3/models/dust.nvfx ../../fx_atmos/models/d/cloud.nvfx .
 ln -s ../../fx_energy/models/d/jet.nvfx .
 ln -s ../../l_swirl/models/v3/magic.nvfx ../../l_swirl/models/v3/orb.nvfx ../../l_swirl/models/v3/vortex.nvfx .
-ln -s ../../fx_blaze/models/d/wildfire.nvfx ../../fx_blaze/models/d/coals.nvfx ../../o_fix/models/mushroom.nvfx .
+ln -s ../../fx_blaze/models/d/wildfire.nvfx ../../fx_blaze/models/d/coals.nvfx ../../q_fix/models/mushroom.nvfx .
 ln -s ../../fx_flow/models/d/launch.nvfx ../../fx_flow/models/d/puffs.nvfx ../../fx_flow/models/d/ink.nvfx .
 ln -s ../../fx_water/models/d/waterfall.nvfx ../../fx_water/models/d/fountain.nvfx ../../o_fix/models/splash.nvfx .
 ln -s ../../fx_water/models/d/rainshaft.nvfx .
-ln -s ../../fx_earth/models/d/lava.nvfx ../../fx_earth/models/d/eruption.nvfx ../../fx_earth/models/d/avalanche.nvfx .
+ln -s ../../fx_earth/models/d/lava.nvfx ../../fx_earth/models/d/eruption.nvfx ../../q_fix/models/avalanche.nvfx .
 ln -s ../../fx_air/models/d/candle.nvfx ../../fx_air/models/d/smokering.nvfx ../../fx_air/models/d/heavygas.nvfx .
-ln -s ../../fx_fire2/models/d/crownfire.nvfx ../../fx_fire2/models/d/windowfire.nvfx ../../fx_fire2/models/d/dustexplosion.nvfx .
+ln -s ../../fx_fire2/models/d/crownfire.nvfx ../../fx_fire2/models/d/windowfire.nvfx ../../q_fix/models/dustexplosion.nvfx .
 ln -s ../../fx_elements/models/d/geyser.nvfx ../../fx_elements/models/d/haboob.nvfx ../../fx_elements/models/d/seaspray.nvfx .
 ```
 

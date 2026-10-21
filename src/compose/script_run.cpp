@@ -1568,6 +1568,8 @@ Program Compiler::compile() {
         // study O (docs/REPORT.md §16): the detail layer in passes, a whole number of them (1 to 8)
         if (p.key == "passes" && !(v >= 1.f && v <= 8.f && v == std::floor(v)))
           fail(p.value.pos, std::format("an effect's passes are a whole number from 1 to 8, not {}", v));
+        // study Q (docs/REPORT.md §21): the fine fields' softening (study D2's DetailSpec::soften), a share from 0 to 1
+        if (p.key == "soften" && !(v >= 0.f && v <= 1.f)) fail(p.value.pos, std::format("an effect's soften is from 0 to 1, not {}", v));
         e.detail.push_back({p.key, v});
       }
     } else if (st.keyword == "look") {
@@ -2513,6 +2515,7 @@ void Scene::Impl::build(const EffectLoader& load, const Options& o) {
       else if (key == "contrast") d.contrast = v;
       else if (key == "grow") d.grow = v;
       else if (key == "passes") d.passes = static_cast<int>(v);  // study O: the lock every 1 / passes of a frame's flow
+      else if (key == "soften") d.soften = v;  // study Q: the fine fields move this share of the way to their neighbours' mean each frame
     }
     if (e.m.starts.empty()) fail(ec.pos, std::format("effect '{}' has no start points", ec.name));
     effects.push_back(std::make_unique<rt::RolloutEffect>(std::move(e)));

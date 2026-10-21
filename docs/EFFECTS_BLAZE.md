@@ -36,6 +36,9 @@ together (§6), and ten new library entries use them (§6).
   follows a run 0.85 dB [0.73, 0.97] better at 1 s and its average picture is 1.18 dB [0.91, 1.45] closer to a real
   run's, with closer detail and coverage, by a rule written before its validation. It is still weak by this round's
   rule (§4.5), and its cap is still ragged.
+- **Study Q refit its renderer** ([REPORT.md](REPORT.md) §21, [STUDY_Q.md](STUDY_Q.md) §4.8) with the first frames among
+  its samples: on 60 held-out settings its first frame is 2.04 dB [1.97, 2.12] closer, its detail and motion closer, the
+  young fireball paler and without green tints; the cap is unchanged.
 - **Cost (provisional, a busy shared machine):** 82 KB stored for the wildfire and the coals, 274 KB for the mushroom
   (16 start points with 64-pixel fine fields, as the explosion's); 2.5 MB per instance at 128 px. At the runtime's
   int8 default on the AVX-512 build, 0.50 (wildfire), 0.72 (coals) and 0.73 ms (mushroom) per 128 px frame, where
