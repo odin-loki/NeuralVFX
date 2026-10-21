@@ -1,15 +1,15 @@
 # The effect library
 
-A catalogue of 213 named, ready-to-use effects that a game lists, places and drives without training anything: a
+A catalogue of 223 named, ready-to-use effects that a game lists, places and drives without training anything: a
 campfire, a grenade, a steam vent, a portal, a lightning strike, ground fog, a dust impact, a flamethrower, a plasma
 orb, a dust devil, a rocket's smoke trail, rain, a wall of fire, a forge, a nuke, a rocket launch, a locomotive's
 chimney, an ink cloud, a waterfall, a fountain, a splash, a rain shaft, a lava flow, a volcano erupting, an avalanche,
-a candelabra, smoke rings, dry-ice fog. Each plays the twenty-seven trained rollout models
+a candelabra, smoke rings, dry-ice fog, a geyser, a haboob, sea spray. Each plays the thirty trained rollout models
 (fire, smoke, explosion v2, steam and magic; fog, dust and cloud, [EFFECTS_ATMOSPHERE.md](EFFECTS_ATMOSPHERE.md); jet,
 orb and vortex, [EFFECTS_ENERGY.md](EFFECTS_ENERGY.md); wildfire, coals and mushroom, [EFFECTS_BLAZE.md](EFFECTS_BLAZE.md);
 launch, puffs and ink, [EFFECTS_FLOW.md](EFFECTS_FLOW.md); waterfall, fountain, splash and rainshaft,
 [EFFECTS_WATER.md](EFFECTS_WATER.md); lava, eruption and avalanche, [EFFECTS_EARTH.md](EFFECTS_EARTH.md); candle, smokering and
-heavygas, [EFFECTS_AIR.md](EFFECTS_AIR.md)) and the compositor's procedural elements (embers, sparks, shock fronts, scorch marks, flashes, lights, bolts, rings), at
+heavygas, [EFFECTS_AIR.md](EFFECTS_AIR.md); geyser, haboob and seaspray, [EFFECTS_ELEMENTS.md](EFFECTS_ELEMENTS.md)) and the compositor's procedural elements (embers, sparks, shock fronts, scorch marks, flashes, lights, bolts, rings), at
 a size, with parameters mapped onto the models' controls and looks. The 23 entries of the six newer models were added
 with the recipe of §6, in text; the only code they needed is a third anchor, for the jet's nozzle. The nine newest
 entries needed two features of the compositor: **trails** (`rocket_trail`, `vehicle_dust_wake`, `carried_torch`,
@@ -73,13 +73,15 @@ lava, eruption and avalanche (§1, Earth).
 
 With the third round's 70 (§10: 20 weather, 23 combat, 14 magic, 13 fire, smoke, steam and light; 34 learned, 36
 procedural only) the catalogue holds **201** entries, 135 of them learned and 66 procedural only; with the twelve air
-entries (§1, Air; all learned, in the categories fire, smoke and gas, not in the table above), **213**, 147 of them learned.
+entries (§1, Air; all learned, in the categories fire, smoke and gas, not in the table above), **213**, 147 of them learned;
+with the ten elements entries (§1, Elements; all learned, in the categories water and weather, not in the table above),
+**223**, 157 of them learned.
 
-**What is learned and what is not.** Only twenty-seven things move by a trained model: fire, smoke, an explosion, steam,
+**What is learned and what is not.** Only thirty things move by a trained model: fire, smoke, an explosion, steam,
 magic, fog, dust, cloud, a jet, an orb, a vortex, a wildfire front, coals, a mushroom cloud, an engine's blast on the
 ground (launch), smoke in puffs, a plume with almost no buoyancy (ink), the bodies of a
 waterfall, a fountain, a splash and a rain shaft, lava, an eruption's ash column and an avalanche's powder cloud, and a
-candle's flame, a smoke ring and heavy gas. Everything else in an entry is the
+candle's flame, a smoke ring and heavy gas, and a geyser's column, a haboob's dust front and sea spray. Everything else in an entry is the
 compositor's: particles (embers, sparks, debris), shock fronts, scorch marks, flashes, camera shakes, and the glows this
 library adds (lightning and electric arcs, rings, discs and motes of light, lamps; rain, snow, ash and leaves; water's random detail). Entries
 that use no model at all say *(procedural)* in their description. A trail's material is learned (it plays in the
@@ -635,7 +637,7 @@ error, spawns, no room, steal, stop, rooms freed, camera, clear, the same frames
 
 ## 4. The gallery
 
-The models' folder, `$NEURALVFX_DATA/library/models` by default, holds the twenty-seven learned effects under the names
+The models' folder, `$NEURALVFX_DATA/library/models` by default, holds the thirty learned effects under the names
 `models.nvfxl` gives them: study M's fire ([REPORT.md](REPORT.md) §14, which replaced v2's), the v2 smoke, study
 M3's explosion and dust (v2's and round 5's with a mean state, [REPORT.md](REPORT.md) §14.9, which replaced them),
 study D's steam, round 5's fog, cloud and jet, and
@@ -711,7 +713,7 @@ Outputs go under `$NEURALVFX_DATA/library` (the sheet, the video, keyframes); on
 
 **Tests** (`ctest`): `neuralfx.LibraryCatalogueCheck` (no data: the catalogue and every procedural entry);
 `neuralfx.LibraryHostExample` (the C example's self-test); `neuralfx.LibraryCataloguePlays` (every entry, with the
-twenty-seven models in `NEURALFX_MODELS_LIBRARY`, by default `$NEURALVFX_DATA/library/models`; skipped without them);
+thirty models in `NEURALFX_MODELS_LIBRARY`, by default `$NEURALVFX_DATA/library/models`; skipped without them);
 `neuralfx.LibraryKeyframesFrozen` (the keyframes of `campfire`, `blue_gas_flame`, `grenade`, `steam_vent`, `portal`,
 `lightning_strike`, `ground_fog`, `dust_impact`, `flamethrower`, `plasma_orb`, `dust_devil`, `wall_of_flames`,
 `distant_mushroom`, the water's and the earth's (`lava_flow`, `volcano_eruption`, `avalanche`), and two moving ones,
