@@ -1528,6 +1528,18 @@ void step_starts(const Ctx& c, sim::Effect e, const tools::Args& a) {
                a.need("out"), seconds_since(t0));
 }
 
+// graft: --model's file with the start points of --starts-from (both of the same effect and grid): the start points do not
+// depend on the stepper (choose_starts takes them from the training runs), so this is `starts` run on --model without
+// simulating its runs again.
+void step_graft(const tools::Args& a) {
+  rollout::Model m = load_or_throw(a.need("model"));
+  const rollout::Model s = load_or_throw(a.need("starts-from"));
+  if (m.effect != s.effect || m.h.res != s.h.res || m.h.start_fine != s.h.start_fine) throw std::invalid_argument("graft: not the same effect and grid");
+  m.starts = s.starts;
+  if (auto w = rollout::save_model(a.need("out"), m); !w) throw std::runtime_error(w.error());
+  std::println("graft: {} with the {} start points of {} -> {}", a.need("model"), m.starts.size(), a.need("starts-from"), a.need("out"));
+}
+
 // --- sstart: start points moved to the controls by the mean state (training settings) ------------------------------------------
 
 // The diagnosis's neural_one_lr (one continuous reference rollout from one of the three nearest start points, the same index
@@ -3327,8 +3339,9 @@ int main(int argc, char** argv) {
     if (c.o && !a.has("results")) c.results = "results/experiments/fix";  // study O's tables
     if (c.q && !a.has("results")) c.results = "results/experiments/q_fix";  // study Q's tables
     const std::string step = a.positional()[0];
-    if (step == "setmean" || step == "set" || step == "info" || step == "settings") {
+    if (step == "setmean" || step == "set" || step == "info" || step == "settings" || step == "graft") {
       if (step == "set") step_set(a);
+      else if (step == "graft") step_graft(a);
       else if (step == "settings") step_settings(a);
       else if (step == "info") step_info(a);
       else step_setmean(a);

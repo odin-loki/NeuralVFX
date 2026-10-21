@@ -16,7 +16,7 @@
 //                                state and fine fields as the only start point, the run's noise seed), one continuous
 //                                rollout: frame i of both comes i frames after the same state (study D's tracking, §6.4)
 //   DETAIL "swirl=1,swirl_scale=9": the learned model's detail layer as a scene script's `effect` line sets it (swirl,
-//          swirl_scale, swirl_rate, swirl_ramp, contrast, grow, passes), for FILE and learned panels (KEYS may be empty)
+//          swirl_scale, swirl_rate, swirl_ramp, contrast, grow, passes, soften), for FILE and learned panels (KEYS may be empty)
 //   BG     "R,G,B,R,G,B": the panel's background gradient, top and bottom colours (default --bg's: a dark night sky,
 //          36,40,50,13,14,17); a dark effect (ink) needs a light one
 //   --seed-base N: real and learned panels take seed N + RUN for the held-out run's noise (its settings stay salt 2's),

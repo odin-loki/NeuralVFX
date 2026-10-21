@@ -4109,3 +4109,15 @@ errors; the full ctest, 489 of 489 (main's 488 and `VolumeDetail`), none skipped
 frame; the volume on 1 and 3 threads, 0 allocations in 84 frames each); `nvfx_gallery --check --require-models` (213
 effects, 213 played, 0 failed); the Godot test (`engines/godot/test.sh`: the fireball and the library stage, 0 failures
 each, both frames the references' pixels).
+
+## 21. Study Q: the weak spots of rounds 9 and 10, fixed and measured
+
+**Status: under way** (21 October 2026). The full account is [STUDY_Q.md](STUDY_Q.md); this section is its summary.
+Seeds: study Q's range, 33,000,000 to 33,499,999. Data under the data root's `q_fix` (candidates `cand/`, the files
+shipped `models/`, logs `logs/`); tables under `results/experiments/q_fix`.
+
+Study Q does for the weak spots of rounds 9 and 10 what study O (§16) did for earlier ones: each is taken apart first, to
+find the part that makes it; a fix in how an effect is played is judged by eye, with a check on training settings beside
+it; a fix that changes a model goes through a rule committed before validation, its margins sized by a null probe on
+training settings (study M3's lesson, §14.9), validated, frozen by SHA-256 and tested once on held-out settings with
+fresh seeds, and it replaces a shipped model only if it passes.
