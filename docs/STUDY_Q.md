@@ -32,7 +32,7 @@ took it over from the jobs it left running (the data root's `q_fix/jobs/*.sh`, t
 | crown and window fires' streaks | **done by eye** (§5.1) | detail settings, frozen hashes, videos (78ae21b, 47b2b0f) | - |
 | heavy gas | **done by eye** (§5.1) | `soften 0.1` | its start points not tried (§9) |
 | smoke ring | **stopped at validation** | N = 40 (ca955b9); `rf` meets no rule: its motion's interval past its margin (§4.7) | kept; nothing more |
-| dust explosion's renderer | **the test** | margins (8572674); N = 10 (§4.6); `rf` chosen on validation and frozen (§4.7) | the test, once (`test.sh`) |
+| dust explosion's renderer | **passed the test** (§4.8) | `rf`: the first frame +2.85 dB [+2.54, +3.16], all within margins | replacing the shipped file (links, frozen hashes, models/, videos) |
 | candle | **nothing changed** (§3.7) | the diagnosis | - |
 | mushroom's cap | **left** (§3.7) | the diagnosis | - |
 
@@ -417,6 +417,34 @@ motion), by study K's margins none is outside: reported, not deciding.
 **Frozen** before its test ([q_frozen.csv](../results/experiments/q_fix/q_frozen.csv)): the data root's
 `q_fix/models/dustexplosion.nvfx` (read-only; 301,443 bytes, SHA-256
 `a0f273ea278b3a60f0ea4e96db5177258faf0fcd21ffa020ac2ca65d78bed520`), validated and tested by `nvfx_ordered_q3`.
+
+### 4.8 The test (once)
+
+Study B's held-out settings extended to the effect's N (`test_settings(N)`), the test's seeds (real 33,200,000 + 100 s +
+k, the floor + 50, plays 33,250,000, tracking 33,280,000), the file frozen before it ran, the binary of validation, once
+(the marker `q_fix/test_<effect>.done`; [q_test_compareq.csv](../results/experiments/q_fix/q_test_compareq.csv),
+[q_test_decision.csv](../results/experiments/q_fix/q_test_decision.csv), `q_test_*.csv`). Candidate minus current model,
+95% paired bootstrap intervals with 10,000 resamples (margins in brackets):
+
+**The dust explosion, `rf` (10 settings): it meets the rule, and is replaced.**
+
+| measure | current → `rf` | difference [95% interval] | margin | reading |
+|---|---|---|---|---|
+| tracking, the first frame (dB) | 21.75 → 24.60 | **+2.85 [+2.54, +3.16]** | -0.20 | better (a target; at 10 of 10 settings, the least +2.06) |
+| tracking at 1 s (dB) | 15.30 → 15.40 | **+0.11 [+0.08, +0.14]** | -0.20 | better |
+| tracking at 2 s (dB) | 13.81 → 13.79 | -0.02 [-0.05, +0.01] | -0.20 | tie |
+| detail spectrum distance | 0.120 → 0.119 | -0.001 [-0.005, +0.002] | +0.020 | tie |
+| \|ln motion ratio\| (motion ratio) | 0.129 (0.881) → 0.132 (0.878) | +0.004 [+0.001, +0.006] | +0.034 | worse, within its margin (a ninth of it) |
+| coverage distance | 0.0088 → 0.0091 | +0.0002 [-0.0001, +0.0005] | +0.0025 | tie |
+| emission distance | 0.00106 → 0.00106 | -0.000002 [-0.000017, +0.000014] | +0.00018 | tie |
+| mean-frame PSNR (dB) | 29.64 → 29.64 | +0.005 [-0.023, +0.033] | -1.13 | tie (a target) |
+
+The refit renderer draws the dust explosion's first frame 2.85 dB closer to the simulator's on the true fields, and the
+first second a little closer too (+0.11 dB at 1 s); its average picture, detail, coverage and light are the same, and its
+motion error is larger by 0.004 (a ninth of its margin; by study M's strict reading the one interval wholly on the worse
+side). Distance to the floor (a second set of 8 real runs per setting): the mean frame 2.51 dB below it before and after
+(the floor 32.15 dB), the spectrum distance 0.120 → 0.119 (the floor's 0.014), the coverage distance 0.0088 → 0.0091
+(0.0036). On validation the same picture: the first frame +3.46 dB, the mean frame a tie.
 
 ## 5. Fixes with no model change
 

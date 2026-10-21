@@ -1,0 +1,6 @@
+effect,statistic,floor_mean
+dustexplosion,spectrum_l1,0.014369
+dustexplosion,abs_ln_motion_ratio,0.032141
+dustexplosion,coverage_l1,0.003598
+dustexplosion,emission_l1,0.000185
+dustexplosion,mean_frame_psnr,32.146801
