@@ -17,8 +17,8 @@ bus        at (-128, -400), size 1536 x 1180, cell 8
 particles  capacity 9000, flow 0.9
 keyframes  0.8, 2.4, 4.0, 5.2, 5.6, 6.2, 7.4, 9.0
 
-effect crownfire     = "crownfire.nvfx"
-effect windowfire    = "windowfire.nvfx"
+effect crownfire     = "crownfire.nvfx", grow 1, contrast 1                                  # study Q: the library's detail settings
+effect windowfire    = "windowfire.nvfx", swirl 1, swirl_scale 9, soften 0.2, contrast 0.75   # (docs/STUDY_Q.md §5.1), no streaks
 effect dustexplosion = "dustexplosion.nvfx"
 
 # The crown fire drawn as the library draws it: its flames as light, its smoke column grey-brown and lit by the fires

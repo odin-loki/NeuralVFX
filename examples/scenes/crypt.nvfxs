@@ -15,8 +15,8 @@ particles  capacity 4000, flow 0.9
 keyframes  0.8, 2.2, 3.0, 3.8, 4.8, 5.8, 7.0, 8.4
 
 effect candle    = "candle.nvfx", swirl 1, swirl_scale 9   # a gentler sub-grid swirl than its calibration chose (3)
-effect smokering = "smokering.nvfx"
-effect heavygas  = "heavygas.nvfx"
+effect smokering = "smokering.nvfx", soften 0.4                # study Q: the library's settings (docs/STUDY_Q.md §5.1):
+effect heavygas  = "heavygas.nvfx", soften 0.1                 # the fine fields softened
 
 # The tomb's vapour: pale and cold, lit by the candles and the moonlight; the censer's incense, blue-grey.
 look miasma  = shader, emission 0, soot_density 1.1, soot_albedo 0.55, sky 0.35, shadow 0.25, scene_light 1.2, relief 1.2,
