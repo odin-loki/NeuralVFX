@@ -27,6 +27,7 @@ option(NEURALFX_BUILD_VIEWER "Build the Dear ImGui viewer (needs GLFW and OpenGL
 option(NEURALFX_WERROR "Treat warnings in neuralfx targets as errors (CI)" OFF)
 option(NEURALFX_FETCH_ENCODERS "Fetch open-source BC7 and ASTC encoders (pinned commits) for the flipbook baselines; study code only, never the runtime" ON)
 option(NEURALFX_BUILD_GODOT "Build the Godot 4 GDExtension (engines/godot; fetches godot-cpp, needs Python 3)" OFF)
+option(NEURALFX_BUILD_FUSE "Build the sample integration for FUSE (engines/fuse: the adapter, the headless demo and its test)" ON)
 
 function(neuralfx_defaults target)
   if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
@@ -400,6 +401,10 @@ endif()
 
 if(NEURALFX_BUILD_GODOT)
   add_subdirectory(engines/godot)
+endif()
+
+if(NEURALFX_BUILD_FUSE)
+  add_subdirectory(engines/fuse)
 endif()
 
 if(NEURALFX_BUILD_TESTS)
