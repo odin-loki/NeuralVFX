@@ -1137,7 +1137,7 @@ void Compiler::emitter(const Statement& s) {
     e.p[p_x1] = code(a->value.exprs[2], c);
     e.p[p_y1] = code(a->value.exprs[3], c);
   } else if (s.kind == "rain" || s.kind == "snow" || s.kind == "ash" || s.kind == "leaves") {  // procedural weather
-    // rain and snow also take the director's physics (docs/WEATHER.md §4): `rate` (mm/h) sizes, speeds and counts them
+    // rain and snow also take the director's physics (docs/WEATHER.md §4.1): `rate` (mm/h) sizes, speeds and counts them
     if (s.kind == "rain") {
       only(s, {"in", "size", "density", "wind", "radius", "colour", "brightness", "flow", "wash", "seed", "from", "until", "if", "rate", "scale", "shutter", "depth"}, what);
     } else if (s.kind == "snow") {
@@ -1645,7 +1645,7 @@ Program Compiler::compile() {
       expr("haze", prog_.haze);
       expr("bloom", prog_.bloom);
       expr("bloom_threshold", prog_.bloom_threshold);
-      expr("daylight", prog_.daylight);  // the day (docs/WEATHER.md §5)
+      expr("daylight", prog_.daylight);  // the day (docs/WEATHER.md §4.6)
       expr("overcast", prog_.overcast);
       expr("visibility", prog_.visibility);
     } else if (st.keyword == "camera") {
@@ -2199,7 +2199,7 @@ struct Scene::Impl {
     }
   }
 
-  // Rain or snow by the weather director's physics (weather.hpp, docs/WEATHER.md §4), at `rate` mm/h: drops sized by
+  // Rain or snow by the weather director's physics (weather.hpp, docs/WEATHER.md §4.1), at `rate` mm/h: drops sized by
   // Marshall and Palmer (0.5 to 6 mm) and falling at Atlas, Srivastava and Sekhon's speeds, or flakes by Locatelli and
   // Hobbs; as many as the distribution holds in a slab `depth` metres deep (0.5) seen at `scale` world pixels a metre (600)
   // unless `density` says; each drop as wide as it is there (times `radius`, 1) and its streak the length it falls in the
@@ -2371,7 +2371,7 @@ struct Scene::Impl {
     frame->time = t;
     frame->daylight = eval_or(prog.daylight, 0.f);
     frame->overcast = eval_or(prog.overcast, 0.f);
-    frame->visibility = eval_or(prog.visibility, kNever);
+    frame->visibility = std::max(1.f, eval_or(prog.visibility, kNever));  // metres (at least one)
     bloom = eval_or(prog.bloom, 1.f);
     bloom_threshold = eval_or(prog.bloom_threshold, 1.f);
     light_gain = eval_or(prog.light_gain, 0.14f);
@@ -2397,7 +2397,7 @@ struct Scene::Impl {
       }
     } else if (wc.regime.varying) {
       const float v = eval(wc.regime);
-      to = std::isfinite(v) ? std::clamp(static_cast<int>(std::lround(v)), 0, wx::kRegimes - 1) : static_cast<int>(d.regime());
+      to = std::isfinite(v) ? static_cast<int>(std::lround(std::clamp(v, 0.f, static_cast<float>(wx::kRegimes - 1)))) : static_cast<int>(d.regime());
     }
     if (f == 0) d = wx::Director(wc.seed, static_cast<wx::Regime>(wc.schedule.empty() ? to : wc.start), wc.direction);
     if (static_cast<int>(d.regime()) != to) d.request(static_cast<wx::Regime>(to), std::isnan(over) ? eval_or(wc.over, 60.f) : over);

@@ -44,7 +44,7 @@ let grey  = clamp(dark + 1.3 * (1 - sky.light), 0, 1)   # the clouds grey as the
 let bx    = 640 + 520 * sky.bolt       # where the last flash struck
 
 # The sky's light: Kasten and Czeplak's daylight under the cloud, darkened further in the storm (a choice, docs/WEATHER.md
-# §5), the CIE overcast sky with the cloud, and Koschmieder's haze at the visibility the rain leaves. The camera's
+# §4.6), the CIE overcast sky with the cloud, and Koschmieder's haze at the visibility the rain leaves. The camera's
 # exposure follows the daylight halfway (in stops), as a camera or an eye adapts.
 frame  daylight sky.light * (1 - 0.55 * dark), overcast sky.cloud, visibility sky.visibility, exposure 1.05 / sqrt(sky.light), bloom 0.7,
        fade smooth(t / 0.5) * smooth((length - t) / 0.6)

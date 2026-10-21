@@ -573,7 +573,7 @@ class Particles {
   // second (its fall and the wind), carried by `flow` of the bus's flow, fluttering at `freq` radians a second from
   // `phase`, of `size` (world pixels) and `colour`, drawn with coverage `alpha`. `aux`: snow melts where the bus's heat
   // is above it (0: never); ash glows at that temperature, cooling; rain's streak is its last `aux` steps long (0: one and
-  // a half; the weather director's physics give its shutter, docs/WEATHER.md §4). It lives `life` seconds or until it reaches the
+  // a half; the weather director's physics give its shutter, docs/WEATHER.md §4.1). It lives `life` seconds or until it reaches the
   // ground. Its random numbers are the caller's: the generator rng is not used.
   bool spawn_weather(Kind k, float x, float y, float du, float dv, float size, float life, float phase, float freq, std::array<float, 3> colour,
                      float alpha, float flow, float aux);
@@ -677,7 +677,7 @@ class Frame {
   float haze = 1.f;            // heat haze strength
   float fade = 1.f;            // overall fade (0: black)
   float time = 0;
-  // The day (docs/WEATHER.md §5; all off by default: the night sky of every scene before it, to the bit). `daylight`: the
+  // The day (docs/WEATHER.md §4.6; all off by default: the night sky of every scene before it, to the bit). `daylight`: the
   // sun's and the sky's light (1: a clear day), lighting the sky, the hills and the ground; `overcast`: 0 a clear blue sky
   // to 1 the CIE overcast sky; `visibility` (world: metres): Koschmieder's haze over the hills (2 km away), the ground and
   // the sky.

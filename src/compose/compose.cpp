@@ -1633,7 +1633,7 @@ void Particles::weather_pixels(std::size_t q, float cam_x, float cam_y, int W, i
     }
   };
   if (k == Kind::rain) {  // a streak along its last step and a half (motion blur), `size` pixels wide; or, from the weather
-                          // director's physics, along the steps its shutter is open (aux_, docs/WEATHER.md §4)
+                          // director's physics, along the steps its shutter is open (aux_, docs/WEATHER.md §4.1)
     const float steps = aux_[q] > 0.f ? aux_[q] : 1.5f;
     const float sx = x + steps * (px_[q] - cam_x - x), sy = y + steps * (py_[q] - cam_y - y);
     const float len = std::hypot(x - sx, y - sy);
@@ -2041,7 +2041,7 @@ void Frame::light_columns(const Params& P, const LightView& L, Pool& pool) {
 namespace {
 constexpr float kKoschmiederLn = 3.912f;  // ln(1 / 0.02): docs/WEATHER.md §3.1
 
-// The day's sky at height u (0: the horizon, 1: 900 world pixels above it) (docs/WEATHER.md §5): a clear sky's blue,
+// The day's sky at height u (0: the horizon, 1: 900 world pixels above it) (docs/WEATHER.md §4.6): a clear sky's blue,
 // deeper overhead, greying with `overcast` into the CIE standard overcast sky (Moon and Spencer 1942: the luminance
 // (1 + 2 sin(elevation)) / 3 of the zenith's), veiled by the airlight of the haze along a path of 2 km at the horizon
 // to 600 m overhead (Koschmieder: what is seen through a path x is exp(-3.912 x / V) of itself), all times the daylight.
@@ -2090,7 +2090,7 @@ void Frame::background_row(int y, const Params& P, const LightView& L, std::span
   const float* lx1 = light_x_.data() + zs(ly.i1) * zs(w_) * 4;
   const auto light_at_x = [&](int x) { return ly.w0 * load4(lx0 + zs(x) * 4) + ly.w1 * load4(lx1 + zs(x) * 4) + flash4; };
   const bool day = P.daylight > 0.f || P.overcast > 0.f || P.visibility < std::numeric_limits<float>::infinity();
-  if (wy < ground && day) {  // the day's sky and hills (docs/WEATHER.md §5)
+  if (wy < ground && day) {  // the day's sky and hills (docs/WEATHER.md §4.6)
     const float u = std::clamp((ground - wy) / 900.f, 0.f, 1.f);
     const DaySky S = day_sky(P.daylight, P.overcast, P.visibility, u);
     const float night = 1.f - std::min(1.f, P.daylight);

@@ -115,7 +115,7 @@ constexpr Key kEmit[] = {{"along", VT::range},    {"from", VT::time},   {"until"
                          {"wash", VT::expr},      {"melt", VT::expr},   {"glowing", VT::expr}};
 // The emitters of the procedural elements added for the library (fx.hpp, docs/COMPOSE.md §4.10) take these keys too. They
 // are their own, not `emit`'s: they reserve no word (a module may still be named `top` or `flare`).
-// Rain and snow take the keys of the weather director's physics too (docs/WEATHER.md §4): their own, so they reserve no
+// Rain and snow take the keys of the weather director's physics too (docs/WEATHER.md §4.1): their own, so they reserve no
 // word (a module may still be named `depth` or `shutter`).
 constexpr Key kEmitPhysical[] = {{"in", VT::point},       {"size", VT::dims},      {"density", VT::expr},   {"wind", VT::point},    {"radius", VT::expr},
                                  {"colour", VT::tuple},   {"brightness", VT::expr}, {"flow", VT::expr},      {"wash", VT::expr},     {"melt", VT::expr},
