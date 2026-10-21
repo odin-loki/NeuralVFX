@@ -79,7 +79,7 @@ struct Card {
 struct SceneConfig {
   const char* script = nullptr;                // a script member of the pack ("campfire.nvfxs"); nullptr: no scene
   std::span<const nvfx_scene_input> inputs;    // starting values of its inputs
-  int width = 0, height = 0;                   // its texture (the scene is drawn at its script's size and resampled); 0: half
+  int width = 0, height = 0;                   // its texture (the scene is drawn at its script's size and resampled); 0: that size
   int precision = 0;                           // its learned effects' nvfx_precision (0: the runtime's)
   Card card;
 };

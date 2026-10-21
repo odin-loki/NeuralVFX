@@ -38,7 +38,7 @@ if(NEURALFX_BUILD_TESTS AND NEURALFX_BUILD_TOOLS)
                    --add ${PROJECT_SOURCE_DIR}/examples/scenes/campfire.nvfxs,${CMAKE_CURRENT_BINARY_DIR}/pack_files/fire3d.nvfx3 --require-models --threads 2)
   set_tests_properties(neuralfx.FuseDemoPack PROPERTIES LABELS "neuralfx;data" SKIP_RETURN_CODE 77 TIMEOUT 600 FIXTURES_SETUP fuse_pack)
   add_test(NAME neuralfx.FuseDemoHeadless COMMAND nvfx_fuse_demo --pack ${_fuse_pack} --check --workers 3)
-  set_tests_properties(neuralfx.FuseDemoHeadless PROPERTIES LABELS "neuralfx;data" SKIP_RETURN_CODE 77 TIMEOUT 1800 FIXTURES_REQUIRED fuse_pack)
+  set_tests_properties(neuralfx.FuseDemoHeadless PROPERTIES LABELS "neuralfx;data" SKIP_RETURN_CODE 77 TIMEOUT 3600 FIXTURES_REQUIRED fuse_pack)  # 5 to 25 minutes on the shared machine
   # Without any learned model (CI): a pack of demo/selftest's procedural entries, and the adapter's self-test on it (its
   # load errors, and a stage played on the stand-in: no allocation per frame, the same frames on 2 workers and on 0).
   set(_fuse_selftest_pack "${CMAKE_CURRENT_BINARY_DIR}/fuse_selftest.nvfxp")
