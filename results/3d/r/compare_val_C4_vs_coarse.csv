@@ -1,0 +1,16 @@
+part,measure,horizon,mean_a,mean_b,diff,lo,hi
+track,field: temperature,8,20.8072,19.3487,1.4585,1.0979,1.7981
+track,field: temperature,30,19.2991,17.5409,1.7582,1.3975,2.0840
+track,field: temperature,60,20.4172,17.6065,2.8107,2.1545,3.5059
+track,field: soot,8,20.3201,18.8427,1.4775,1.1188,1.8191
+track,field: soot,30,18.8171,17.0331,1.7840,1.4239,2.1105
+track,field: soot,60,19.9321,17.1115,2.8206,2.1628,3.5209
+track,picture (4 cameras),8,22.6275,21.2280,1.3995,0.8945,1.9136
+track,picture (4 cameras),30,17.8288,16.2883,1.5405,0.9595,2.1546
+track,picture (4 cameras),60,16.1495,14.6611,1.4885,0.9980,1.9858
+endless,3D spectrum distance,,0.51183,0.70996,-0.19813,-0.27826,-0.12324
+endless,\|ln motion ratio\|,,0.53124,0.60477,-0.07353,-0.31090,0.11868
+endless,motion ratio,,0.59706,0.56407,0.03299,-0.06698,0.14691
+endless,coverage distance,,0.01671,0.01297,0.00374,0.00022,0.00725
+endless,light distance,,0.03036,0.01211,0.01826,0.00904,0.02748
+endless,mean picture PSNR (dB),,22.80053,23.56742,-0.76689,-3.46934,1.93557

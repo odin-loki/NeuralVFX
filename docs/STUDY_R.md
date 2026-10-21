@@ -7,22 +7,19 @@ under a rule committed before validation (§2 onwards).
 
 ## 0. Where the study stands (a handoff, kept current)
 
-As of 21 October 2026, 12:10 UTC:
+As of 21 October 2026, 14:10 UTC:
 - **Done:** the teacher fixed and measured (§1, every row, and §1.4's buoyancy budget, which closed the one open check);
   the learned smoke's rule committed (§2, commit f269659) and its edge bounds calibrated and committed before
-  validation (3c91ff2); the 48 training runs; the validation's and the test's teacher simulations; the plume video
-  (`videos/3d_plume_theory.mp4`); **origin/main merged** (5da3529, 373829d: study hres, models/ in git; done while
-  training ran, so the long build and checks overlap the wait; the test runs on the frozen `bin/nvfx_3d_val`, built
-  from 3c91ff2, so the merge cannot touch it).
-- **Running** (detached, resumable; scripts in `$NEURALVFX_DATA/r_smoke3d/jobs/`, logs in `.../logs/`): `train.sh`
-  (stage 3 of 4 at 12:10; it writes `models/C4.nvfx3` at the end, about 15:00 to 15:30), `val_staged.sh` (C2 done
-  but its plays; then the coarse simulation and holding, C3 when `ckpt/r_stage3.ckpt` appears, C4 at the end).
-- **Next, in order:** when `job_val.log` says VAL_DONE: `jobs/val_report.sh` (results/3d/r: edge check, comparisons,
-  the choice); `cp models/<chosen>.nvfx3 models/chosen.nvfx3`; `nvfx_3d freeze --model .../chosen.nvfx3 --frozen
-  results/3d/r/frozen.csv`; commit and push; then `jobs/test.sh` (once) and `jobs/test_report.sh`; then the orbit,
-  real-against-learned and coupled videos (§5; demo seeds 29,900,001 and up), docs (§3 to §6, REPORT §20, TODO), the
-  models/ entry if it ships (models/3d/smoke.nvfx3, layout.txt, SHA256SUMS), merge origin/main again if it moved, the
-  full checks, push.
+  validation (3c91ff2); the 48 training runs; training (1,750 iterations, done 13:59); **validation** (VAL_DONE 14:05,
+  `jobs/val_report.sh`: `results/3d/r/edgecheck_val.md`, `compare_val_*.md`, `choice_val.md`): **no candidate passes
+  the edge check, so the rule chose among all three: C4** (mean rank 1.43; C2 and C3 2.29), which by the rule already
+  fails the test's first condition; **C4 frozen** as `models/chosen.nvfx3` in the data root
+  (`results/3d/r/frozen.csv`, SHA-256 7a53e3e2...19988, 274,760 bytes); origin/main merged (5da3529, 373829d; the full
+  checks green on the merge before the model existed); the coupled demo's stacking fixed (5ea67c5).
+- **Next, in order:** `jobs/test.sh` **once** (log `logs/job_test.log`; it waits for nothing now), then
+  `jobs/test_report.sh`; then the orbit, real-against-learned and coupled videos (§5; demo seeds 29,900,001 and up),
+  docs (§3 to §6, REPORT §20, TODO), the models/ entry (models/3d/smoke.nvfx3 as a labelled demo, layout.txt,
+  SHA256SUMS), merge origin/main again if it moved, the full checks, push.
 
 ## 1. The teacher against plume physics
 
