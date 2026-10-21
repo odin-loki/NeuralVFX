@@ -9,7 +9,8 @@ Godot plugin, lit sprites, volumes), [MANAGER.md](MANAGER.md) (the budget), [LIB
 NeuralVFX is meant to replace FUSE's flipbooks: a flipbook on a particle becomes a learned effect playing on the CPU,
 uploaded as a texture when it changes. There is no FUSE source in this repository, so the adapter is written against
 a small interface that FUSE would implement over its own systems (§2); everything else is NeuralVFX's public C API
-through its C++ wrapper. **No call was added to the C API** for this: `NVFX_VERSION` stays 7.
+through its C++ wrapper. **No call was added to the C API** for this (`NVFX_VERSION` 7 then; it is 8 since the effect
+manager draws large sprites at half size, which the adapter exposes, §5).
 
 ![The demo at 7 s: torches, a portal, smoke columns and an explosion as sprites; the campfire script on a card at the
 left; library entries on a stage at the right; the 3D fire in the middle](../videos/fuse_demo.jpg)
@@ -108,8 +109,8 @@ nvfx_fuse::System& vfx = **fx;
 `create` does every allocation and every slow thing, in this order, and stops at the first failure with a message
 (`fx.error()`: the status, the text, and the line and column for a script or catalogue):
 
-1. **The library and the headers.** `nvfx_version` must equal the header's `NVFX_VERSION` ("libnvfx is version 6,
-   the headers 7"), and the build must have the features the level uses: `NVFX_FEATURE_PACK`, and `_MANAGER`,
+1. **The library and the headers.** `nvfx_version` must equal the header's `NVFX_VERSION` ("libnvfx is version 7,
+   the headers 8"), and the build must have the features the level uses: `NVFX_FEATURE_PACK`, and `_MANAGER`,
    `_SCENE`, `_LIBRARY` or `_VOLUME` for what is configured.
 2. **The pack**, read once: its header, length, manifest checksum, every member's two SHA-256 and the entries' needs
    (`effects.nvfxp: truncated: 300000 of its 613865 bytes`). It is freed at the end of `create`: the library, the scene
@@ -212,6 +213,7 @@ and libnvfx's own) over all 600 frames: 0.
 | sprites' CPU | `SpriteConfig::budget_ms` | the manager's planned CPU per frame summed over workers (MANAGER.md §2.4); it lowers sizes and rates, shares and proxies to fit |
 | sprites at once | `max_sprites` | the manager's instances and the sprite textures |
 | simulations per model | `SpriteModel::max_sims` | the manager's pools for that model, the most it plays with runs of their own |
+| large sprites at half size | `SpriteConfig::half_px`, `half_share`, `half_upscale`; `SpriteModel::half_px` | sprites at least that large on screen are drawn at the level below theirs (MANAGER.md §2.10; below) |
 | library entries | `StageConfig::rooms` | instances of each entry at once (`steal`: a spawn when all play replaces the oldest) |
 | a scene | its script | what it plays; the texture is `SceneConfig::width` x `height` |
 | the volume | `picture_scale`, `max_picture` | its picture's pixels (it is drawn at a fraction of its size on screen and sampled up) |
@@ -231,6 +233,24 @@ and libnvfx's own) over all 600 frames: 0.
 The manager's pools dominate: at its defaults (`max_sims` 16) a looping model takes about 29 MB and a one-shot 21 MB
 (MANAGER.md §2.8); size `max_sims` to what the budget can run (15 to 18 simulations per core at 4 ms, MANAGER.md §4).
 Packets cost `frames_in_flight` x (`max_sprites` x 256 KB + the cards' and the volume's pixels).
+
+**Large sprites at half size** (MANAGER.md §2.10, REPORT.md §22). The manager draws a sprite that is large on screen at
+the level below its level: a 256 px picture at 128. How FUSE turns it on or off, at load:
+
+```cpp
+cfg.sprites.half_px = -1.f;                          // the default: the manager's threshold (MANAGER.md §6)
+cfg.sprites.half_px = 0.f;                           // off (with half_share 0)
+cfg.sprites.half_px = 192.f;                         // or its own threshold, in pixels on FUSE's view
+cfg.sprites.half_share = 0.25f;                      // or a quarter of the view's height (either suffices)
+const nvfx_fuse::SpriteModel models[] = {{"fire", 8}, {"magic", 2, 0, 0.f}};   // per model: 0 never, > 0 its own
+```
+
+`SpriteConfig::half_upscale` is `NVFX_UPSCALE_OFF` by default: the picture uploaded is the half-size drawing, and the
+quad's bilinear sampling (FUSE's, in linear light after the sRGB decode) is the 2x; the render hook already uploads only
+a picture's `size` x `size` and sets the quad's UVs to it, so nothing else changes, the upload is a quarter and the 2x
+costs no CPU. `NVFX_UPSCALE_BILINEAR` has the manager do the 2x on FUSE's jobs instead (the picture at its level's size).
+The manager never uses the learned 2x. Turning it on or off changes the plans, so a replay or a lockstep test compares
+runs made with the same setting.
 
 ## 6. What it costs
 

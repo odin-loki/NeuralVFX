@@ -190,6 +190,46 @@ Two additions to `src/runtime`, neither changing any existing output (every bit-
 `transfer_from` and the lean runners. The manager's shard timeline is a copy of `nvfx.cpp`'s (`pick_start`,
 `plan_shard`, `bring`), advanced to keyframes; its tests hold it to `nvfx_render` to the bit.
 
+### 2.10 Drawn at half size where it pays
+
+Study P (docs/STUDY_P.md, REPORT.md §17) found that drawing a large effect at half size and bringing it back with the
+bilinear 2x costs about 0.4 of drawing it at full size, and holds up against the simulator's frames; a 256 px picture
+costs about three times a 128 px one here (§6). So the manager can draw a simulation that is large on screen at the
+level below its level (REPORT.md §22 measures it and sets the default):
+
+- **When.** A simulation whose instances are at least `half_px` pixels on screen (`nvfx_manager_desc`), or at least
+  `half_share` of the viewport's height once `nvfx_manager_set_camera` has given one (either suffices), is drawn at the
+  level below the level its size asks for: a 256 px picture at 128, a 128 px picture at 64. Once on it stays on until
+  its size falls below the threshold by `hysteresis` (15%), so a size wobbling around the threshold never switches. A
+  model can take its own threshold or opt out: `nvfx_manager_model_desc.half_px` (below 0, the default: the manager's;
+  0: never for this effect; above 0: its own, in pixels). Never for proxies (they are small) or for a simulation locked
+  to a level (`nvfx_manager_set_lod_lock` pins what is drawn). Both thresholds 0: off.
+- **Who does the 2x** (`half_upscale`). `NVFX_UPSCALE_OFF` (the default): the engine's bilinear sampler, which already
+  stretches every picture to its sprite. The picture is the half-size drawing, `size` equals `lod_size` and
+  `NVFX_PICTURE_HALF` is set: no CPU for the 2x and a quarter of the upload. `NVFX_UPSCALE_BILINEAR`: the manager, in the
+  simulation's job, with the runtime's bilinear 2x (study P's), so the picture has its level's size (`size` is twice
+  `lod_size`): to the bit what an instance of that size draws with `nvfx_instance_set_upscale(NVFX_UPSCALE_BILINEAR)`
+  (`Manager.HalfSizeIsNvfxRenderWithTheBilinear2x`, and on the trained effects at 256 px). `NVFX_UPSCALE_LEARNED` is
+  refused (`NVFX_ERROR_ARGUMENT`): the learned 2x did not pass its rule (REPORT.md §17.3) and stays an experimental
+  option of `nvfx_instance_set_upscale`, which the manager never picks.
+- **How it plans.** Levels are still the pictures' levels (§2.2), chosen as before; a simulation drawn at half size has
+  its slot at the level below, and its cost is that level's steps and pictures, plus with BILINEAR the 2x of every picture
+  shown (`nvfx_manager_calibrate` measures the 2x too). Drawing at half size is a downward change (it happens at once,
+  through a level transfer, §2.1); drawing at full size again is an upward one (it waits until the plan is under 85% of
+  the budget and `min_dwell` has passed, §2.4). A
+  simulation whose picture is still to grow takes its larger level first and is drawn at half size once there, so a
+  growing effect makes one transfer, not two. Under a short budget a simulation drawn at half size goes down with its
+  drawing: a 256 px picture drawn at 128, then a 128 px one drawn at 64.
+- **The pools.** A simulation drawn at half size takes a slot of the level below (§2.8: by default an effect has one
+  256 px slot and four of 128), so large effects drawn at half size use the 128 px pool, and the 256 px slot goes to an
+  effect between 128 and `half_px` pixels on screen. With BILINEAR every slot below the top level holds a 2x
+  picture (four times its own picture: 1.75 MB per effect at the default pools) and every thread an upscaler per size
+  (0.4 MB); with OFF nothing is added. `nvfx_manager_stats.half` counts the simulations drawn at half size; `lod` counts
+  simulations by the size they are drawn at.
+- **Exact where it can be.** Every decision depends on the sizes given and the cost model, never on measured time: the
+  same pictures on any number of threads and whoever runs the jobs (`Manager.SamePicturesOnAnyNumberOfThreadsAtHalfSize`,
+  with the 2x and without); a tick allocates nothing (`nvfx_alloc_test`, with the 2x and without).
+
 ## 3. The API
 
 ```c
@@ -197,6 +237,7 @@ nvfx_manager_desc d;
 nvfx_manager_desc_init(&d);              /* budget 4 ms, 1 thread, crossfade, sizes 32-256 px, 30 Hz */
 d.threads = 2;
 d.budget_ms = 6.f;                       /* CPU ms per tick, summed over threads */
+d.half_px = 256.f;                       /* effects at least 256 px on screen drawn at half size (§2.10; 0: never) */
 nvfx_manager* m;
 nvfx_manager_create(&d, &m);
 
@@ -224,12 +265,12 @@ if (pic.rgba && (pic.flags & NVFX_PICTURE_NEW)) upload(pic.rgba, pic.size, pic.s
 
 | what | calls |
 |---|---|
-| create | `nvfx_manager_desc_init`, `nvfx_manager_create`, `nvfx_manager_free` |
-| effects | `nvfx_manager_model_desc_init`, `nvfx_manager_add_model` (rollout effects; the effect outlives the manager), `nvfx_manager_set_cost`, `nvfx_manager_get_cost`, `nvfx_manager_calibrate` |
+| create | `nvfx_manager_desc_init`, `nvfx_manager_create`, `nvfx_manager_free`; drawn at half size: `half_px`, `half_share`, `half_upscale` (§2.10) |
+| effects | `nvfx_manager_model_desc_init` (`half_px`: an effect's own threshold for half size, or 0: never), `nvfx_manager_add_model` (rollout effects; the effect outlives the manager), `nvfx_manager_set_cost`, `nvfx_manager_get_cost`, `nvfx_manager_calibrate` |
 | the view | `nvfx_manager_set_camera` (position, forward, up, vertical field of view, viewport in pixels), `nvfx_manager_set_budget` |
 | instances | `nvfx_spawn_desc_init`, `nvfx_manager_spawn` (model, controls, seed, share, time offset, proxies allowed, priority, position and world size or on-screen size), `nvfx_manager_stop`, `nvfx_manager_set_controls` (in place for a simulation of its own; a shared one forks with a copy of the state, no restart), `nvfx_manager_set_position`, `nvfx_manager_set_screen_size`, `nvfx_manager_set_priority`, `nvfx_manager_set_lod_lock` |
 | ticks | `nvfx_manager_tick(dt)`; or `nvfx_manager_tick_begin(dt, &jobs)`, `nvfx_manager_run_jobs(slot)` from the engine's threads, `nvfx_manager_tick_end` |
-| results | `nvfx_manager_get_picture` (pixels, size, stride, the simulation's size and rate, flags: shared, proxy, interpolated, held, fading, finished, new; the effect time; visible; on-screen size), `nvfx_manager_get_stats` (wall and job milliseconds, the planner's, the planning on the calling thread; instances, visible, simulations, paused, proxies, proxied, sharing; updated, skipped, interpolated, held; steps and pictures; simulations per size and rate; memory) |
+| results | `nvfx_manager_get_picture` (pixels, size, stride, the simulation's size and rate, flags: shared, proxy, interpolated, held, fading, finished, new, half; the effect time; visible; on-screen size), `nvfx_manager_get_stats` (wall and job milliseconds, the planner's, the planning on the calling thread; instances, visible, simulations, paused, proxies, proxied, sharing; updated, skipped, interpolated, held; steps and pictures; simulations per size and rate, by the size drawn at; drawn at half size; memory) |
 
 Rules: one thread calls the manager at a time (its own workers aside); spawn, stop and the setters go between ticks; a
 picture stays valid until the next tick; handles of stopped instances are never reused (16-bit generations).
@@ -248,6 +289,14 @@ picture stays valid until the next tick; handles of stopped instances are never 
   stretched to the sprite: pictures are 32 to 256 px whatever the sprite's size.
 - **Sizes.** `world_size` is the sprite's extent in world units; with `set_screen_size` the engine gives the on-screen
   size itself (and visibility) instead. `texel_scale` below 1 trades sharpness for CPU at every distance.
+- **Half size** (§2.10). Large effects are drawn at the level below theirs from `half_px` pixels on screen (the default
+  is in §6): set `half_px` (and `half_share`, a fraction of the viewport's height, for a threshold that scales with the
+  resolution) before `nvfx_manager_create`; `half_px = 0` and `half_share = 0` turn it off; per effect,
+  `nvfx_manager_model_desc.half_px = 0` keeps an effect at full size and a positive value gives it its own threshold; a
+  hero effect locked with `nvfx_manager_set_lod_lock` is never drawn at half size. With the default `half_upscale`
+  (`NVFX_UPSCALE_OFF`) a picture with `NVFX_PICTURE_HALF` is simply smaller: draw it on its sprite with bilinear filtering,
+  as every picture (that is the 2x). An engine that wants every picture at its level's size sets
+  `NVFX_UPSCALE_BILINEAR`, and the manager does the 2x on its jobs.
 - **Budget.** The cost model's defaults are one AVX2 core of the project's machine; call `nvfx_manager_calibrate` once
   per effect at load (tens of milliseconds) to plan with this machine's speed, at the price of plans that depend on
   the machine (and its load at that moment). `nvfx_manager_get_stats` reports what the jobs took (`jobs_ms`) against

@@ -187,7 +187,8 @@ is the same; what differs:
   did not pass its rule: it costs 0.45 to 0.59 of native at 512 px (more than 0.55 for two of six effects; busy machine,
   provisional), and against native on the same seed it was not better than the bilinear 2x on PSNR, SSIM and the high
   band together for any of the six effects at 512 px on the held-out test (STUDY_P.md §6); its micro-detail, isotropic
-  noise, does not draw the native's filaments.
+  noise, does not draw the native's filaments. The effect manager does the same for an engine's large sprites by their
+  size on screen (§10, MANAGER.md §2.10), with the bilinear 2x only (it never picks the learned one).
 - `nvfx_bake` renders consecutive frames from a fresh start and crossfades a few extra frames into the first ones, so
   the flipbook loops.
 
@@ -475,6 +476,32 @@ run at `nvfx_manager_model_desc.precision` (the instances' default: int8 where t
 are float's on AVX2, so at int8, or at float on the AVX-512 build, a crowd uses less than its budget unless
 `nvfx_manager_calibrate` measures the machine
 (the 4 ms crowd of MANAGER.md §7 took 2.8 instead of 4.1 ms per tick with the same plan, provisional).
+
+**Large effects at half size** (NVFX_VERSION 8; MANAGER.md §2.10, REPORT.md §22). The manager draws a simulation whose
+instances are large on screen at the level below its level, as study P found pays (§5): from `nvfx_manager_desc.half_px`
+pixels on screen, or `half_share` of the viewport's height (either suffices), with 15% hysteresis. How an engine turns it
+on or off:
+
+```c
+nvfx_manager_desc d;
+nvfx_manager_desc_init(&d);              /* half_px: the measured default (MANAGER.md §6) */
+d.half_px = 0.f; d.half_share = 0.f;     /* off */
+d.half_px = 192.f;                       /* or: from 192 px on screen */
+d.half_share = 0.25f;                    /* or also: from a quarter of the viewport's height (needs set_camera) */
+d.half_upscale = NVFX_UPSCALE_OFF;       /* the default: the picture is the half-size drawing, the GPU's sampler is the 2x */
+d.half_upscale = NVFX_UPSCALE_BILINEAR;  /* or: the manager's bilinear 2x on its jobs, the picture at its level's size */
+nvfx_manager_model_desc md;
+nvfx_manager_model_desc_init(&md);
+md.half_px = 0.f;                        /* this effect never at half size; > 0: its own threshold; -1: the manager's */
+```
+
+With the default `NVFX_UPSCALE_OFF` nothing changes in how pictures are drawn: a picture with `NVFX_PICTURE_HALF` is the
+half-size drawing (`size` equals `lod_size`), uploaded as any picture and drawn on its sprite with bilinear filtering,
+which is the 2x, for no CPU and a quarter of the upload. `NVFX_UPSCALE_LEARNED` is refused: the learned 2x stays an
+experimental `nvfx_instance_set_upscale` option. A sprite locked with `nvfx_manager_set_lod_lock` is never drawn at half
+size, nor are proxies. The C++ wrapper takes the same fields (`nvfx::manager_desc()`, `nvfx::Picture::half()`); the
+library's stages and scenes draw each learned module at the size its catalogue entry or script names (`size N`), so
+they have no size to switch.
 
 ## 11. Lit sprites: the effects alone, for the engine to light
 

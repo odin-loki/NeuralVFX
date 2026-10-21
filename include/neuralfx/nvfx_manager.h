@@ -5,7 +5,8 @@
  * simulations update, at what level of detail (picture size 32, 64, 128 or 256 px; updates at 30, 15, 10 or 7.5 Hz)
  * and on which thread; the frames between updates are drawn by temporal interpolation. Copies with the same effect,
  * controls and seed share one simulation (optionally offset in time); offscreen simulations pause and resume warm;
- * under a tight budget unimportant looping instances are shown from shared proxy simulations.
+ * under a tight budget unimportant looping instances are shown from shared proxy simulations; simulations large on screen
+ * can be drawn at the level below theirs and brought up by the bilinear 2x (half_px, docs/MANAGER.md §2.10).
  *
  * Determinism: every decision depends only on the calls made (sizes, priorities, the tick's dt) and the cost model
  * (nvfx_manager_set_cost), never on measured time, and a simulation's frames do not depend on which thread computes
