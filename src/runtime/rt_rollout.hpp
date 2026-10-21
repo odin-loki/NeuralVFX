@@ -1703,7 +1703,7 @@ class Rollout final : public RolloutRunner {
   }
 
   // Row y of the fields, interleaved, into the ring of zero-bordered rows.
-  void copy_row(int y) {
+  [[gnu::noinline]] void copy_row(int y) {
     const std::size_t S = z(S_);
     float* o = ring_row(td_, y + 1) + 2;
     const float* a = ft_.data() + z(y) * S;
@@ -1823,7 +1823,7 @@ class Rollout final : public RolloutRunner {
   }
 
   // Row y of the round trip and the correction, and its column sums.
-  void back_row(int y) {
+  [[gnu::noinline]] void back_row(int y) {
     const std::size_t i = z(y) * z(S_);
     const int Pw = S_ + 3;
     const float edge = static_cast<float>(S_), yf = static_cast<float>(y);
@@ -1875,7 +1875,7 @@ class Rollout final : public RolloutRunner {
   // Row c of coarse cells is complete: its block sums (from the column sums, which start again) and the lock's factors
   // (as the reference): where the fine field holds more than the coarse cell, scale it down; where it holds less, scale
   // it up to `grow` and add the rest as new material.
-  void lock_factors(int c) {
+  [[gnu::noinline]] void lock_factors(int c) {
     const rollout::DetailSpec& dt = m_.detail;
     const int kk = S_ / R_;
     const float inv = 1.f / static_cast<float>(kk * kk);
@@ -1910,7 +1910,7 @@ class Rollout final : public RolloutRunner {
 
   // Row y of the lock, heat and soot together: the factors interpolated from the coarse cells, new material broken up by
   // the flicker noise (tongues, not a smear). The noise is evaluated only on rows that receive new material.
-  void lock_row(int y) {
+  [[gnu::noinline]] void lock_row(int y) {
     const rollout::DetailSpec& dt = m_.detail;
     const std::size_t S = z(S_);
     const int c = ax_.i[z(y)];
