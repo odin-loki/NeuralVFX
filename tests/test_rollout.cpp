@@ -1070,6 +1070,48 @@ TEST(Rollout, BurnInStartsFromTheStepperRollout) {
   EXPECT_DOUBLE_EQ(window_loss(m, r, 1, 2, 3, 0.f, 0.f, 5, &g), a);
 }
 
+TEST(Rollout, RendererFineTuneKeepsItsScalesAndStartsFromItsWeights) {
+  // Study Q2: train_renderer with keep_scale continues from the renderer's weights with its input scales; without it the
+  // scales are set from the samples.
+  Model m = tiny_model();
+  m.render_scale = {2.f, 3.f};
+  std::mt19937_64 rng(11);
+  std::uniform_real_distribution<float> u(0.f, 1.f);
+  std::vector<RenderSample> samples(2);
+  for (RenderSample& s : samples) {
+    s.size = 16;
+    s.fine_t.resize(16 * 16);
+    s.fine_d.resize(16 * 16);
+    for (float& v : s.fine_t) v = 0.5f * u(rng);
+    for (float& v : s.fine_d) v = 0.4f * u(rng);
+    s.coarse.resize(static_cast<std::size_t>(m.h.res) * m.h.res * kPhys);
+    for (float& v : s.coarse) v = u(rng);
+    s.rgba.resize(16 * 16 * 4);
+    for (auto& v : s.rgba) v = static_cast<std::uint8_t>(255.f * u(rng));
+  }
+  const std::vector<float> w0 = m.render_w;
+  RendererOptions o;
+  o.threads = 1;
+  o.iterations = 0;
+  o.keep_scale = true;
+  Model a = m;
+  train_renderer(a, samples, o);
+  EXPECT_EQ(a.render_scale[0], 2.f);
+  EXPECT_EQ(a.render_scale[1], 3.f);
+  EXPECT_EQ(a.render_w, w0);
+  o.keep_scale = false;
+  Model b = m;
+  train_renderer(b, samples, o);
+  EXPECT_LT(b.render_scale[0], 0.51f);  // the samples' 99.5th percentile
+  EXPECT_LT(b.render_scale[1], 0.41f);
+  o.keep_scale = true;
+  o.iterations = 5;
+  Model c = m;
+  train_renderer(c, samples, o);
+  EXPECT_EQ(c.render_scale[0], 2.f);
+  EXPECT_NE(c.render_w, w0);
+}
+
 TEST(Rollout, ReferenceRolloutStaysFiniteAndRenders) {
   Model m = tiny_model();
   const auto r = tiny_run(m.h, 4);

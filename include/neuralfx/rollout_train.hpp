@@ -195,9 +195,13 @@ struct RendererOptions {
   float lr = 3e-3f;
   int threads = 0;
   std::uint64_t seed = 2;
+  // Study Q2 (docs/STUDY_Q2.md): continue training a renderer from its weights and keep its input scales (m.render_scale),
+  // so the weights it starts from mean what they meant. Off: the scales are set from the samples (a fresh renderer).
+  bool keep_scale = false;
   std::function<void(int iteration, double loss)> progress;
 };
-// Sets m.render_scale and trains m.render_w. Returns PSNR on the samples' sampled pixels.
+// Sets m.render_scale (unless keep_scale) and trains m.render_w from its current values. Returns PSNR on the samples'
+// sampled pixels.
 double train_renderer(Model& m, std::span<const RenderSample> samples, const RendererOptions& o);
 
 // Grid search over the contrast, swirl and growth constants, as the effect is used: from the start point nearest each
