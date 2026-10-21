@@ -4454,3 +4454,26 @@ round by round, the ratio and the difference of the CPU per tick, medians with 9
 planner spends what drawing at half size saves on other simulations (fewer proxies, higher rates), so there the CPU per
 tick stays near the budget and the plan's composition says what changed; with no budget the CPU per tick shows the
 saving directly. On the quiet machine (after the round-7 re-timing finishes), else labelled provisional.
+
+### 22.4 The rule's cost run (committed before any validation or test number)
+
+`nvfx_study_p cost --net none --sizes 256` ([cost_rule.txt](../results/manager/halfsize/cost_rule.txt), the rows in
+`crowd/cost.csv` and `library/cost.csv`), the first run after the round-7 quiet session finished (21:19 UTC), while
+another agent's niced jobs ran (load average 4 to 7): **provisional**, though N, H and B are interleaved in one process on
+a pinned core. H / N, the median over the 30 rounds (the mean and its 95% bootstrap interval in brackets):
+
+| effect | N at 256 px | **H / N** (OFF) | B / N (BILINEAR) |
+|---|---:|---:|---:|
+| fire (v2, the crowd's) | 1.91 ms | **0.313** (0.341 [0.320, 0.365]) | 0.361 |
+| smoke | 1.49 | **0.419** (0.468 [0.437, 0.501]) | 0.467 |
+| steam | 1.75 | **0.332** (0.347 [0.324, 0.370]) | 0.391 |
+| explosion (v2) | 1.33 | **0.403** (0.407 [0.392, 0.423]) | 0.453 |
+| fire (the library's, study M) | 2.12 | **0.337** (0.356 [0.329, 0.386]) | 0.363 |
+| explosion (the library's, study M3) | 1.46 | **0.385** (0.395 [0.374, 0.416]) | 0.444 |
+| magic (the library's, study L) | 1.25 | **0.543** (0.551 [0.537, 0.566]) | 0.609 |
+
+**The cost condition holds for six of the seven effects and fails for magic** (0.543 against the 0.5 allowed): magic's
+full-size frame is cheap (a sparse swirl), so the coarse step, which does not shrink with the picture, is a larger part
+of it. The rule asks for all seven, so **by the rule the policy does not ship on by default**: `half_px` stays 0, and the
+policy is available to set (per model too). This run decides; any later run on a quieter machine is reported beside it
+and does not. The quality test (§22.2) still runs once, as committed, to report what half size does to each effect.

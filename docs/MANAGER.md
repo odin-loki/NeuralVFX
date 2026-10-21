@@ -570,6 +570,11 @@ three rounds, least and greatest in brackets:
 - **Memory** is the pools': a simulation slot holds two runners (the shard on screen and the next), though the second
   is used only during the half second of a shard change (and a warm-up); sharing it between simulations would save
   about a third, not done.
+- **Half size** (§2.10) is measured at one level: 256 px pictures drawn at 128 (REPORT.md §22). With a lower threshold
+  (below about 147 px) or a smaller `max_size` it also draws 128 px pictures at 64, which was not measured. A simulation
+  drawn at half size loses the finest filaments its detail layer draws at full size (study P); the simulator's frames
+  have none of them, so they are checked against nothing. Switching it on or off is a level transfer: the detail layer
+  starts from a resampled field (above).
 - **Not done:** colour (hue, brightness) per instance, the prior against drift, frame models (grid and conv effects;
   `nvfx_manager_add_model` refuses them), GPU-side interpolation (the API returns composed pictures only).
 
@@ -584,4 +589,10 @@ build/nvfx_lod test --threads 3                     # §5.4, once
 build/nvfx_lod sheet --effect fire --size 64 --div 4                 # $NEURALVFX_DATA/scale/figures
 tools/manager/time_crowd.sh build /tmp/crowd 3 20   # §7: every configuration, 3 interleaved rounds, pinned cores
 build/nvfx_crowd --budget 4 --video $NEURALVFX_DATA/scale/crowd/crowd_b4.mp4 --sheet $NEURALVFX_DATA/scale/crowd
+tools/manager/time_halfsize.sh build /tmp/halfsize 10 20   # §7.2: half size off and on, the crowd and the close scene
 ```
+
+Half size's quality and cost (REPORT.md §22; the jobs `$NEURALVFX_DATA/halfsize/jobs`): `nvfx_study_p eval --split val
+--null --sizes 256 --dir $NEURALVFX_DATA/halfsize/crowd --seed-base 35000000 --effects fire,smoke,steam,explosion
+--results results/manager/halfsize/crowd`, then `margins` and `decide`, then `eval --split test --settings 20` (once),
+and `cost --net none --sizes 256`; the same with `--dir .../halfsize/library --effects fire,explosion,magic`.
