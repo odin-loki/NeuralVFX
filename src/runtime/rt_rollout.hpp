@@ -108,17 +108,6 @@ inline void st_pairs(float* p, V a, V b) {
   }
 }
 
-#if NFX_VW >= 8
-// row[idx[j]] for the lanes j of a vector.
-inline vf gather(const float* row, vi idx) {
-#if NFX_VW == 16
-  return reinterpret_cast<vf>(_mm512_i32gather_ps(reinterpret_cast<__m512i>(idx), row, 4));
-#else
-  return reinterpret_cast<vf>(_mm256_i32gather_ps(row, reinterpret_cast<__m256i>(idx), 4));
-#endif
-}
-#endif
-
 // Some lane of a or b is not +0 (its bits are not all zero: -0 and NaN count).
 template <class V>
 inline bool any_bits(V a, V b) {
@@ -409,21 +398,7 @@ class RowPair {
     const std::size_t nq = Q > 0 ? static_cast<std::size_t>(Q) : q_;
     const float* g = grid + static_cast<std::size_t>(j) * static_cast<std::size_t>(n) * nq;
     float* out = rows_[static_cast<std::size_t>(s)].data();
-    std::size_t x = 0;
-#if NFX_VW >= 8
-    // whole vectors of pixels: the grid's values gathered, the same lerp per lane
-    for (; x + kW <= w_; x += kW) {
-      vi base;
-      std::memcpy(&base, ax.i.data() + x, sizeof base);
-      base *= static_cast<std::int32_t>(nq);
-      const vf w = load(ax.w.data() + x);
-      for (std::size_t q = 0; q < nq; ++q) {
-        const vf a = gather(g + q, base), b = gather(g + q + nq, base);
-        store(out + q * stride_ + x, a + w * (b - a));
-      }
-    }
-#endif
-    for (; x < w_; ++x) {
+    for (std::size_t x = 0; x < w_; ++x) {
       const float* a = g + static_cast<std::size_t>(ax.i[x]) * nq;
       const float w = ax.w[x];
       for (std::size_t q = 0; q < nq; ++q) out[q * stride_ + x] = a[q] + w * (a[q + nq] - a[q]);
@@ -1889,6 +1864,9 @@ class Rollout final : public RolloutRunner {
     // the contrast curve's argument (phi - edge0) / (edge1 - edge0) as one multiply-add of the octaves' weighted sum
     const float span = 1.f / (dt.edge1 - dt.edge0), scale = span / fine_flicker_.norm(), shift = -dt.edge0 * span;
     const float keep = 1.f - dt.contrast, ck = dt.contrast * dt.kappa;
+    // With keep and ck not negative the breakup g is a finite number not below +0, so g times +0 is +0: a block whose new
+    // material is +0 everywhere needs no noise.
+    const bool zero_keeps = keep >= 0.f && ck >= 0.f;
     float* qt = ft_.data() + z(y) * S;
     float* qd = fd_.data() + z(y) * S;
     // Where the fields are +0 after the round trip and no new material is interpolated, the lock gives +0 * scale + 0:
@@ -1911,7 +1889,7 @@ class Rollout final : public RolloutRunner {
       rt = rt + wy * (ld<V>(rt1 + x) - rt);
       ad = ad + wy * (ld<V>(ad1 + x) - ad);
       rd = rd + wy * (ld<V>(rd1 + x) - rd);
-      if (noisy) {
+      if (noisy && (!zero_keeps || any_bits<V>(at, ad))) {
         V sum{};
         for (std::size_t o = 0; o < no; ++o) {
           const V a = ld<V>(n0[o] + x);

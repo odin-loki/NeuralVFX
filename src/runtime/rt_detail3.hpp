@@ -244,27 +244,11 @@ inline void each_vector(int width, F&& f) {
   for (; x < width; ++x) f.template operator()<float>(x);
 }
 
-// row[idx[j]] for the lanes j of a vector (idx: kW integers).
-inline vf gather(const float* row, vi idx) {
-#if NFX_VW == 16
-  return reinterpret_cast<vf>(_mm512_i32gather_ps(reinterpret_cast<__m512i>(idx), row, 4));
-#else
-  return reinterpret_cast<vf>(_mm256_i32gather_ps(row, reinterpret_cast<__m256i>(idx), 4));
-#endif
-}
-
 // out[x] = p[0] + w[x] (p[s] - p[0]) with p = row + idx[x] s, for x in [0, n): a grid row's lerp at the fine cells' x
 // (idx, w: an axis table; s: the grid's stride along x), the first lerp of the reference's trilinear interpolations.
+// Scalar: hardware gathers were no faster on one CPU (Sapphire Rapids) and slower on another (Cascade Lake).
 inline void expand_row(const float* row, const std::int32_t* idx, const float* w, int s, float* out, int n) {
-  int x = 0;
-  for (; x + kW <= n; x += kW) {
-    vi i;
-    std::memcpy(&i, idx + x, sizeof i);
-    i *= s;
-    const vf a = gather(row, i), b = gather(row + s, i);
-    st<vf>(out + x, a + ld<vf>(w + x) * (b - a));
-  }
-  for (; x < n; ++x) {
+  for (int x = 0; x < n; ++x) {
     const float* p = row + static_cast<std::ptrdiff_t>(idx[x]) * s;
     out[x] = p[0] + w[x] * (p[s] - p[0]);
   }
