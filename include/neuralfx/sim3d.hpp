@@ -161,10 +161,12 @@ class Fluid {
   void advect_velocity_maccormack(float dt);  // Params::velocity 1
   void advect_velocity_flux(float dt);        // Params::velocity 2
   // The flux form's sweeps of q carried by the velocity cu, cv, cw (one per axis, alternating order; substeps by the
-  // Courant number). Positive: q kept at or above 0 (the scalars); a velocity component instead refreshes its border
-  // (outflow, the floor reflecting v when reflect_floor) after every substep. faces: where the audit's face fluxes go.
+  // Courant number). Positive: q kept at or above 0 (the scalars); a velocity component (comp 0, 1, 2; -1 a scalar)
+  // instead refreshes its border (outflow, the floor reflecting v when reflect_floor) after every substep, and air
+  // coming in through an open side or the top brings none of the components along the face. audit_faces: the audit's
+  // face fluxes.
   template <bool Positive>
-  void flux_sweeps(Grid& q, const Grid& cu, const Grid& cv, const Grid& cw, float dt, bool reflect_floor, bool audit_faces);
+  void flux_sweeps(Grid& q, const Grid& cu, const Grid& cv, const Grid& cw, float dt, bool reflect_floor, bool audit_faces, int comp);
   void component_border(Grid& g, bool reflect_floor);
   double slab_sum(const Grid& g) const;  // the audit's slab: the sum of g over its cells (fixed order)
   int velocity_mode() const;

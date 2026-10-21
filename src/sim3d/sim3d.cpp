@@ -623,7 +623,7 @@ void Fluid::advect_scalar_flux(Grid& q, float dt) {
   // side, so what leaves one cell enters the next exactly. The border stays zero: inflow at an open side brings
   // nothing, outflow carries the edge cell's value out; the floor's face has no velocity (v is reflected there).
   // Faces next to the border fall back to first order (there is no cell beyond it).
-  flux_sweeps<true>(q, u_, v_, w_, dt, false, false);
+  flux_sweeps<true>(q, u_, v_, w_, dt, false, false, -1);
 }
 
 void Fluid::component_border(Grid& g, bool reflect_floor) {
@@ -647,19 +647,20 @@ void Fluid::component_border(Grid& g, bool reflect_floor) {
 void Fluid::advect_velocity_flux(float dt) {
   // Study R2 (docs/STUDY_R2.md §1): each component in the scalars' flux form, carried by the velocity as it is after
   // the forces (copied: the carrier stays fixed while the components move). The border is the velocity's own
-  // (outflow: what flows in at an open side carries the edge cell's velocity; the floor reflects v, so no momentum
-  // crosses it), refreshed after every substep. Nothing is clamped: a component may change sign.
+  // (outflow; the floor reflects v, so no momentum crosses it), refreshed after every substep, except that air coming
+  // in through an open side or the top brings no velocity along the face (the ambient air is still: a downflow at a
+  // side does not feed itself through the border). Nothing is clamped: a component may change sign.
   wx_.v = u_.v;
   wy_.v = v_.v;
   wz_.v = w_.v;
-  flux_sweeps<false>(u_, wx_, wy_, wz_, dt, false, false);
-  flux_sweeps<false>(v_, wx_, wy_, wz_, dt, true, audit_ != nullptr && audit_->y_hi >= audit_->y_lo);
-  flux_sweeps<false>(w_, wx_, wy_, wz_, dt, false, false);
+  flux_sweeps<false>(u_, wx_, wy_, wz_, dt, false, false, 0);
+  flux_sweeps<false>(v_, wx_, wy_, wz_, dt, true, audit_ != nullptr && audit_->y_hi >= audit_->y_lo, 1);
+  flux_sweeps<false>(w_, wx_, wy_, wz_, dt, false, false, 2);
   velocity_border();
 }
 
 template <bool Positive>
-void Fluid::flux_sweeps(Grid& q, const Grid& cu, const Grid& cv, const Grid& cw, float dt, bool reflect_floor, bool audit_faces) {
+void Fluid::flux_sweeps(Grid& q, const Grid& cu, const Grid& cv, const Grid& cw, float dt, bool reflect_floor, bool audit_faces, int comp) {
   const auto mc = [](float r) { return std::max(0.f, std::min({2.f * r, 0.5f * (1.f + r), 2.f})); };
   const bool forward = (steps_ & 1) == 0;
   for (int k = 0; k < 3; ++k) {
@@ -697,6 +698,9 @@ void Fluid::flux_sweeps(Grid& q, const Grid& cu, const Grid& cv, const Grid& cw,
           if (ia <= n - 1 && d != 0.f) phi = mc((qq[a + st] - qq[a + 2 * st]) / d);
           qf = qq[a + st] + 0.5f * (1.f - nu) * phi * d;
         }
+        // a velocity component across a face where air comes in from outside, through an open side or the top: the
+        // ambient air brings none of it (the components along the face; the one through it is the inflow itself)
+        if (comp >= 0 && comp != axis && ((uf > 0.f && ia == 0 && axis != 1) || (uf < 0.f && ia == n))) qf = 0.f;
         return uf * qf;
       };
       slabs([&](int y) {

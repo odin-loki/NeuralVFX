@@ -868,10 +868,11 @@ int fit(const Args& a, const fs::path& root) {
                      "fluxes where the velocity is in flux form:\n",
                      lo, hi));
     both("| config | runs | velocity | dM/dz over B | d(M + P)/dz over B | advection | projection (pressure) | confinement | curl noise | damping | "
-         "sum (stored) | advection over the planes' net flux | advection over its face fluxes |");
-    both("|---|---:|---|---|---|---|---|---|---|---|---|---|---|");
+         "sum (stored) | advection over the planes' net flux | advection over its face fluxes | turbulent share of M |");
+    both("|---|---:|---|---|---|---|---|---|---|---|---|---|---|---|");
     struct Mom {
       double ratio = kNaN, ratio_p = kNaN, adv = kNaN, proj = kNaN, conf = kNaN, curl = kNaN, damp = kNaN, sum = kNaN, adv_planes = kNaN, adv_faces = kNaN;
+      double turb = kNaN;  // 1 - (the mean flow's w^2) / (the time mean of w^2), inside the inscribed circle over the fit's heights
     };
     for (const auto& l : split(a.str("momentum"), ',')) {
       const Config& c = cfg.at(l);
@@ -920,6 +921,21 @@ int fit(const Args& a, const fs::path& root) {
         }
         const double faces = au[10] - au[11] + au[12];
         if (std::abs(faces) > 0) m.adv_faces = au[7] / faces;
+        double mean2 = 0, all2 = 0;  // the radial bins' (sum of the time-mean w)^2 / cells, and their sum of the time mean of w^2
+        for (int y = 0; y < ny; ++y) {
+          if (y + 0.5 < lo || y + 0.5 > hi) continue;
+          for (int j = 0; j < p0.nb; ++j) {
+            const std::size_t q = zu(y) * zu(p0.nb) + zu(j);
+            double v = 0, vv = 0;
+            for (const int k : pick) {
+              v += w * c.runs[zu(k)].v[q];
+              vv += w * c.runs[zu(k)].vv[q];
+            }
+            if (p0.cnt[q] > 0) mean2 += v * v / p0.cnt[q];
+            all2 += vv;
+          }
+        }
+        if (all2 > 0) m.turb = 1.0 - mean2 / all2;
         return m;
       };
       const Mom m0 = mom(all_of(c.runs.size()));
@@ -930,9 +946,9 @@ int fit(const Args& a, const fs::path& root) {
         for (const Mom& m : ms) v.push_back(m.*f);
         return fmt(interval(m0.*f, v), 3);
       };
-      both(std::format("| {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} |", l, c.runs.size(), velocity_name(c.runs[0]), iv(&Mom::ratio),
+      both(std::format("| {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} |", l, c.runs.size(), velocity_name(c.runs[0]), iv(&Mom::ratio),
                        iv(&Mom::ratio_p), iv(&Mom::adv), iv(&Mom::proj), iv(&Mom::conf), iv(&Mom::curl), iv(&Mom::damp), iv(&Mom::sum), iv(&Mom::adv_planes),
-                       std::isfinite(m0.adv_faces) ? iv(&Mom::adv_faces) : std::string("-")));
+                       std::isfinite(m0.adv_faces) ? iv(&Mom::adv_faces) : std::string("-"), iv(&Mom::turb)));
     }
   }
   // the wind-bent plume against Briggs's two-thirds law: z - zs = 1.6 (F / pi)^(1/3) x^(2/3) / U

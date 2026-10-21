@@ -2476,17 +2476,25 @@ int stability(const Args& a) {
     if (fr % 30 != 0) continue;
     f.fields(T, D);
     f.velocity(U);
-    double vmax = 0, ke = 0, heat = 0;
+    double vmax = 0, ke = 0, heat = 0, mv = 0, side_v = 0, side_n = 0;
     for (std::size_t i = 0; i < n; ++i) {
       const double sp = std::sqrt(double(U[3 * i]) * U[3 * i] + double(U[3 * i + 1]) * U[3 * i + 1] + double(U[3 * i + 2]) * U[3 * i + 2]);
       vmax = std::max(vmax, sp);
       ke += 0.5 * sp * sp / static_cast<double>(n);
       heat += T[i];
+      mv += U[3 * i + 1] / static_cast<double>(n);
+      const int x = static_cast<int>(i % zu(f.nx())), z = static_cast<int>((i / zu(f.nx())) % zu(f.nz()));
+      if (x == 0 || z == 0 || x == f.nx() - 1 || z == f.nz() - 1) {
+        side_v += U[3 * i + 1];
+        side_n += 1;
+      }
       finite = finite && std::isfinite(sp) && std::isfinite(T[i]);
     }
     worst = std::max(worst, vmax);
-    log_line(log, std::format("{} {:.2f} {:.2f} {:.2f} seed {} velocity {}: {} s, largest speed {:.1f} cells/s, KE per cell {:.2f}, heat {:.1f}, {:.3f} CPU s per frame",
-                              nfx::sim3d::effect_name(p.effect), c[0], c[1], c[2], p.seed, p.velocity, fr / 30, vmax, ke, heat, (cpu_now() - c0) / 30.0));
+    log_line(log, std::format("{} {:.2f} {:.2f} {:.2f} seed {} velocity {}: {} s, largest speed {:.1f} cells/s, KE per cell {:.2f}, heat {:.1f}, {:.3f} CPU s per frame; "
+                              "mean v {:.2f}, at the sides {:.2f} cells/s",
+                              nfx::sim3d::effect_name(p.effect), c[0], c[1], c[2], p.seed, p.velocity, fr / 30, vmax, ke, heat, (cpu_now() - c0) / 30.0, mv,
+                              side_n > 0 ? side_v / side_n : 0.0));
     c0 = cpu_now();
   }
   log_line(log, std::format("{} {:.2f} {:.2f} {:.2f} seed {}: {} (largest speed {:.1f} cells/s)", nfx::sim3d::effect_name(p.effect), c[0], c[1], c[2], p.seed,
