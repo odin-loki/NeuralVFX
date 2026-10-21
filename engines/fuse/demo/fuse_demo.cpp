@@ -2,6 +2,7 @@
 //
 //   nvfx_fuse_demo --pack fuse_demo.nvfxp [--out DIR] [--video FILE.mp4] [--seconds 10] [--workers 3] [--calibrate]
 //   nvfx_fuse_demo --pack fuse_demo.nvfxp --check [--seconds 10] [--workers 3]
+//   nvfx_fuse_demo --self-test PACK      PACK: a pack of demo/selftest (procedural entries only: runs without models)
 //
 // Plays a 10 s sequence at 60 Hz through the adapter (engines/fuse/nvfx_fuse.hpp): the pack's learned models as sprites
 // through the effect manager (torches sharing one simulation offset in time, smoke columns whose wind the game sets,
@@ -16,6 +17,11 @@
 // (a hash of each), no frame error, and that the parts did their work (heat on the campfire's card, sprites drawn, the
 // volume's picture and fields uploaded, the one-shots despawned). Exit 0 when every check passed, 1 when one failed, 77
 // when the pack is not there (a build without the models: tests skip).
+//
+// --self-test needs no learned model: the adapter's load errors (a missing pack, a damaged one, an unknown model,
+// script, member or entry, bad settings; each leaving no texture or hook behind), then a stage of the pack's procedural
+// entries played for 2 s twice (on two workers and on the game thread alone) with spawns, stops, a failed spawn and
+// calls on parts the level does not have: no allocation in any frame, the same frames, the frame error kept.
 #include "nvfx_fuse.hpp"
 #include "standin.hpp"
 
@@ -395,6 +401,144 @@ Result play(const Options& o, int workers, bool capture) {
   return res;
 }
 
+// --- the self-test: no learned model needed ----------------------------------------------------------------------------
+
+struct StageRun {
+  std::vector<std::uint64_t> hashes;
+  long allocations = 0;
+  std::uint64_t errors = 0, frames_drawn = 0, uploaded = 0;
+  std::string last_error;
+  bool calls_ok = true;  // every call returned what it should
+  int status = 0;
+};
+
+// The pack's procedural entries on a stage, 2 s at 60 Hz, with spawns, stops and calls that must fail.
+StageRun play_stage(const std::string& pack, int workers) {
+  constexpr int kFrames = 120, kW = 320, kH = 180;
+  StageRun r;
+  r.hashes.assign(kFrames, 0);
+  Capture cap;
+  cap.hashes = &r.hashes;
+  standin::ThreadPool pool(workers);
+  standin::SoftRenderer gpu(kW, kH, &frame_done, &cap);
+  standin::FixedClock clock(kHz);
+  standin::LookAtCamera camera(kW, kH, 0.9f);
+  camera.look_at({0.f, 1.1f, 3.6f}, {0.f, 0.9f, 0.f});
+  const nvfx_stage_room rooms[] = {{"sparks", 2, 0}, {"electric_arc", 1, 0}, {"lightning_strike", 1, 1}};
+  nvfx_fuse::Config cfg;
+  cfg.pack_path = pack.c_str();
+  cfg.stage.rooms = rooms;
+  cfg.stage.width = 320;
+  cfg.stage.height = 180;
+  cfg.stage.card = {{0.f, 0.f, 0.f}, {1.f, 0.f, 0.f}, {0.f, 1.f, 0.f}, 0.01f};
+  auto sys = nvfx_fuse::System::create({&pool, &gpu, &gpu}, cfg);
+  if (!sys) {
+    std::fprintf(stderr, "nvfx_fuse_demo: %s\n", sys.error().message.c_str());
+    r.status = 1;
+    return r;
+  }
+  nvfx_fuse::System& fx = **sys;
+  nvfx_fuse::StageFx sparks;
+  const float no_controls[3] = {0.5f, 0.5f, 0.5f};
+  g_allocations.store(0);
+  g_counting.store(true);
+  for (int f = 0; f < kFrames; ++f) {
+    const fuse::FrameTime ft = clock.now();
+    if (f == 0) sparks = fx.spawn_entry("sparks", {-0.8f, 0.f, 0.f});
+    if (f == 10) r.calls_ok &= static_cast<bool>(fx.spawn_entry("electric_arc", {0.6f, 0.f, 0.f}));
+    if (f == 30 || f == 70) r.calls_ok &= static_cast<bool>(fx.spawn_entry("lightning_strike", {0.2f, 0.f, 0.f}, 0.4f));
+    if (f == 40) {  // calls that fail, in a frame, without allocating
+      r.calls_ok &= !fx.spawn_entry("no_such_entry", {0.f, 0.f, 0.f});  // a frame error, kept
+      r.calls_ok &= !fx.spawn(nvfx_fuse::SpriteDesc{});                   // this level has no sprites: an error too
+      r.calls_ok &= !fx.trigger("blow") && !fx.set_input("fuel", 1.f);    // nor a scene: false
+      r.calls_ok &= !fx.set_volume_controls(no_controls);                 // nor a volume
+      r.calls_ok &= !fx.despawn(nvfx_fuse::Sprite{12345}) && fx.model("fire") == -1;
+    }
+    if (f == 90) r.calls_ok &= fx.stop_entry(sparks);
+    fx.update(ft, camera);
+    gpu.submit(ft.frame, camera, "SELF-TEST");
+    clock.advance();
+  }
+  gpu.finish();
+  g_counting.store(false);
+  r.allocations = g_allocations.load();
+  const nvfx_fuse::Stats& st = fx.stats();
+  r.errors = st.errors;
+  r.frames_drawn = st.frames_drawn;
+  r.uploaded = st.uploaded_bytes;
+  r.last_error = fx.last_error().what;
+  return r;
+}
+
+int self_test(const std::string& pack) {
+  if (!std::filesystem::exists(pack)) {
+    std::printf("nvfx_fuse_demo --self-test: no pack (%s): skipped\n", pack.c_str());
+    return 77;
+  }
+  int failures = 0;
+  const auto expect = [&](bool ok, const char* what) {
+    std::printf("  %s: %s\n", ok ? "ok    " : "FAILED", what);
+    failures += ok ? 0 : 1;
+  };
+  std::printf("load errors:\n");
+  {
+    std::vector<std::uint64_t> none;
+    Capture cap;
+    cap.hashes = &none;
+    standin::ThreadPool pool(1);
+    standin::SoftRenderer gpu(64, 36, &frame_done, &cap);
+    const fuse::Engine engine{&pool, &gpu, &gpu};
+    const auto refused = [&](const nvfx_fuse::Config& c, const fuse::Engine& e, nvfx_status want, const char* what) {
+      const auto s = nvfx_fuse::System::create(e, c);
+      expect(!s && s.error().status == want && gpu.live_textures() == 0 && gpu.hooks() == 0, what);
+      if (!s) std::printf("          (%s)\n", s.error().message.c_str());
+    };
+    const nvfx_stage_room rooms[] = {{"sparks", 1, 0}};
+    nvfx_fuse::Config base;
+    base.pack_path = pack.c_str();
+    base.stage.rooms = rooms;
+    nvfx_fuse::Config c = base;
+    c.pack_path = "/nonexistent/level.nvfxp";
+    refused(c, engine, NVFX_ERROR_IO, "a missing pack is refused");
+    static const std::uint8_t junk[96] = {'N', 'V', 'F', 'X', 'P', 'A', 'C', 'K'};
+    c = base;
+    c.pack_path = nullptr;
+    c.pack_bytes = junk;
+    refused(c, engine, NVFX_ERROR_FORMAT, "a damaged pack is refused");
+    c = base;
+    c.frames_in_flight = 1;
+    refused(c, engine, NVFX_ERROR_ARGUMENT, "frames_in_flight below 2 is refused");
+    refused(base, fuse::Engine{nullptr, &gpu, &gpu}, NVFX_ERROR_ARGUMENT, "an engine without a job system is refused");
+    const nvfx_fuse::SpriteModel models[] = {{"fire", 4, 0}};
+    c = base;
+    c.sprites.models = models;
+    refused(c, engine, NVFX_ERROR_IO, "a model the pack does not hold is refused");
+    c = base;
+    c.scene.script = "no_such_script.nvfxs";
+    refused(c, engine, NVFX_ERROR_IO, "a script the pack does not hold is refused");
+    c = base;
+    c.volume.member = "fire3d.nvfx3";
+    refused(c, engine, NVFX_ERROR_IO, "a volume the pack does not hold is refused (after the stage was made: nothing left behind)");
+    const nvfx_stage_room unknown[] = {{"no_such_entry", 1, 0}};
+    c = base;
+    c.stage.rooms = unknown;
+    refused(c, engine, NVFX_ERROR_ARGUMENT, "a room for an entry the catalogue lacks is refused");
+  }
+  std::printf("a stage of procedural entries, 120 frames on 2 workers and on the game thread alone:\n");
+  const StageRun a = play_stage(pack, 2), b = play_stage(pack, 0);
+  expect(a.status == 0 && b.status == 0, "the level loads and plays");
+  expect(a.allocations == 0 && b.allocations == 0, "no heap allocation in any frame, on any thread (failed calls included)");
+  expect(a.hashes == b.hashes, "the same frames to the bit on 2 workers and on the game thread alone");
+  expect(a.hashes.front() != a.hashes.back(), "the frames change");
+  expect(a.frames_drawn == 120 && b.frames_drawn == 120, "the render hook drew every frame");
+  expect(a.uploaded > 0, "the stage's texture uploaded");
+  expect(a.calls_ok && b.calls_ok, "spawns, a stop, and calls on parts the level lacks return what they should");
+  expect(a.errors == 2 && a.last_error.starts_with("spawn: no sprite model"), "the failed calls are kept as frame errors");
+  std::printf("  (%llu errors, the last: %s)\n", static_cast<unsigned long long>(a.errors), a.last_error.c_str());
+  std::printf("%s\n", failures ? "FAILED" : "all checks passed");
+  return failures ? 1 : 0;
+}
+
 void report(const Result& r, int workers, int frames) {
   const auto mean = [](double s, int n) { return n > 0 ? s / n : 0.0; };
   std::printf("%d frames on %d worker%s + the game thread in %.1f s: %ld heap allocations in the frames (%ld at load), %llu frame errors\n", frames, workers,
@@ -427,9 +571,10 @@ int main(int argc, char** argv) {
     else if (a == "--seconds") o.seconds = std::atof(next().c_str());
     else if (a == "--workers") o.workers = std::atoi(next().c_str());
     else if (a == "--check") o.check = true;
+    else if (a == "--self-test") return self_test(next());
     else if (a == "--calibrate") o.calibrate = true;
     else {
-      std::fprintf(stderr, "nvfx_fuse_demo --pack PACK [--out DIR] [--video FILE.mp4] [--seconds 10] [--workers 3] [--calibrate] [--check]\n");
+      std::fprintf(stderr, "nvfx_fuse_demo --pack PACK [--out DIR] [--video FILE.mp4] [--seconds 10] [--workers 3] [--calibrate] [--check] | --self-test PACK\n");
       return 2;
     }
   }

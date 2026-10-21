@@ -283,7 +283,7 @@ built and trained), most of it the volume's job: its own timings (§8) say how t
 
 ```sh
 cmake --build build --target nvfx_fuse_demo nvfx_pack
-ctest --test-dir build -R FuseDemo                 # packs the level, then runs the demo's --check (skips without the models)
+ctest --test-dir build -R Fuse                     # the self-test (no models needed), and the demo's --check (skips without them)
 build/engines/fuse/nvfx_fuse_demo --pack build/engines/fuse/fuse_demo.nvfxp --out OUT --video fuse_demo.mp4
 ```
 
@@ -325,6 +325,16 @@ twice, on three workers and then on the game thread alone, and checks: no heap a
 (the counter replaces `operator new`, and must have seen libnvfx's allocations at load); **the same 600 frames to the
 bit** on both (a hash of each frame drawn); no frame error; the render hook drew every frame; sprites were drawn; the
 explosions were despawned; heat on the campfire's card; textures uploaded. Without the pack it exits 77.
+
+**The self-test, without models** (`neuralfx.FuseSelfTestPack`, then `neuralfx.FuseSelfTest`; it runs in CI, in about
+2 s): a pack of `demo/selftest/sparks.nvfxl` (three procedural entries copied from the library: no learned model), and
+`nvfx_fuse_demo --self-test` on it. First the load errors, each refused with its status and leaving no texture or hook
+behind: a missing pack, a damaged one, `frames_in_flight` below 2, an engine without a job system, and a model, a
+script, a volume member or a room's entry the pack does not hold (the last two after the stage was made). Then a stage of
+the three entries played for 2 s on two workers and on the game thread alone, with spawns, a stop and, in the middle of
+a frame, calls that must fail (an unknown entry, a sprite in a level without sprites, a rule without a scene, a stale
+handle): no heap allocation in any frame, failed calls included; the same frames to the bit; every frame drawn; the
+failed calls kept as frame errors (`spawn: no sprite model 0: invalid argument`).
 
 **What the test found** (21 October 2026, `ctest -R FuseDemo`: all checks passed). The times are wall clock on the
 shared 4-core machine at a load average of 6 to 17 (four other agents building and training), so they say how the

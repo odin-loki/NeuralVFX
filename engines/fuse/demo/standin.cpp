@@ -184,6 +184,19 @@ void SoftRenderer::remove(Hook fn, void* context) noexcept {
     if (h.first == fn && h.second == context) h = {nullptr, nullptr};
 }
 
+int SoftRenderer::live_textures() const noexcept {
+  int n = 0;
+  for (const Texture& t : textures_) n += t.live ? 1 : 0;
+  return n;
+}
+
+int SoftRenderer::hooks() noexcept {
+  std::lock_guard lk(hooks_mu_);
+  int n = 0;
+  for (const auto& h : hooks_) n += h.first ? 1 : 0;
+  return n;
+}
+
 void SoftRenderer::Sink::draw(const fuse::Quad& q) noexcept {
   if (r->n_quads_ < static_cast<int>(r->quads_.size())) r->quads_[static_cast<std::size_t>(r->n_quads_++)] = q;
 }

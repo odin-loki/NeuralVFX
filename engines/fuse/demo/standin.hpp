@@ -99,6 +99,8 @@ class SoftRenderer final : public fuse::GpuUpload, public fuse::RenderHooks {
   void submit(std::uint64_t frame, const LookAtCamera& camera, const char* caption);
   void finish();
   std::size_t texture_bytes() const noexcept { return texture_bytes_; }
+  int live_textures() const noexcept;  // textures created and not destroyed
+  int hooks() noexcept;                // hooks registered
   std::uint64_t quads_drawn() const noexcept { return quads_drawn_.load(std::memory_order_relaxed); }
 
  private:
