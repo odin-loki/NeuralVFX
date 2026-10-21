@@ -154,7 +154,7 @@ module dust_a = cloud, size 128, width 560 * scale, at (X - 220 * scale, Y + 250
                 controls (0.95, 0.85, 0.6), wind sky.lean, opacity 1 - exp(-1.5 * sky.dust)
 module dust_b = cloud, size 128, width 560 * scale, at (X + 220 * scale, Y + 250 * scale), feather 0.1, look grit, start 7, seed 28500414,
                 controls (0.95, 0.85, 0.6), wind sky.lean, opacity 1 - exp(-1.5 * sky.dust)
-emit rain, in (X - 480 * scale, Y - 540 * scale), size 960 * scale x 540 * scale, rate sky.rain, scale 600 * scale, depth 0.15, radius 0.8,
+emit rain, in (X - 480 * scale, Y - 540 * scale), size 960 * scale x 540 * scale, rate sky.rain, scale 600 * scale, depth 0.3, radius 0.8,
      brightness 0.65, wind (0.72 * sky.u * 600 * scale, 0), wash 0.02 * sky.rain, seed 28500416
 emit snow, in (X - 480 * scale, Y - 540 * scale), size 960 * scale x 540 * scale, rate sky.snow, scale 300 * scale, depth 0.3,
      wind (0.72 * sky.u * 300 * scale, 0), seed 28500418

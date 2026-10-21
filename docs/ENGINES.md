@@ -271,6 +271,25 @@ burning?". They read the bus of the last frame computed and cost a few bilinear 
 `examples/scenes/campfire.nvfxs` is a small scene driven this way (three inputs, four rules only the game fires); the
 viewer's scene mode shows a script's inputs as sliders and its named rules as buttons ([VIEWER.md](VIEWER.md)).
 
+**Weather** ([WEATHER.md](WEATHER.md)): a script's weather director heads for the regime an input says, so the game
+moves the weather with the calls above and reads it back by name, with no call of its own:
+
+```c
+/* the script: input weather = 0, input change = 30, weather sky, seed 28500010, regime weather, over change,
+   and `when sky.since == 0 as thunder, repeat:` for the flashes */
+nvfx_scene_set_input(scene, "weather", 3);              /* 0 clear ... 3 storm ... 6 dust: heads there over 30 s */
+float rain, wind, vis;
+nvfx_scene_get_input(scene, "sky.rain", &rain);         /* mm/h: a weather's members, read by NAME.member */
+nvfx_scene_get_input(scene, "sky.wind", &wind);         /* m/s at 10 m, gusts included */
+nvfx_scene_get_input(scene, "sky.visibility", &vis);    /* m: the game's own fog, AI sight, audio */
+int flashes;
+nvfx_scene_rule_state(scene, "thunder", &flashes, NULL); /* one more each flash: play the thunder */
+```
+
+`nvfx_scene_get_input` reads `NAME.member` when no input has that name (cloud, rain, snow, hail, wind, mean, gust,
+visibility, temp, lightning, dust, fog, extinction, u, beaufort, lean, leaves, lift, light, flash, strike, bolt, since,
+regime, progress: WEATHER.md §1). The director steps first in each frame, so what is read is the frame's.
+
 **Errors.** Script errors (`NVFX_ERROR_SCRIPT`) carry the line and the column, in `nvfx_scene_error` and in the
 message (`"name:line:column: message"`, with a suggestion for a misspelt word). The script is checked before any
 effect is loaded; an effect that cannot be read (`NVFX_ERROR_IO`) or is not a rollout effect (`NVFX_ERROR_FORMAT`)
@@ -412,14 +431,18 @@ nothing).
 
 ## 9. The effect library
 
-[LIBRARY.md](LIBRARY.md) is a catalogue of 213 named effects (a campfire, a grenade, a steam vent, a portal, a lightning
+[LIBRARY.md](LIBRARY.md) is a catalogue of 214 named effects (a campfire, a grenade, a steam vent, a portal, a lightning
 strike, ground fog, a dust impact, a flamethrower, a plasma orb, a rocket's trail, rain, a lava flow, a candelabra, ...) built
 from the twenty-seven
 trained models and the compositor's procedural elements, ready to place without training. Four are **trails**
 (`rocket_trail`, `vehicle_dust_wake`, `carried_torch`, `comet_trail`): the game moves them every frame with
 `nvfx_stage_move`, and their smoke, dust or glow stays in the world behind them ([LIBRARY.md](LIBRARY.md) §9); five are
 **procedural weather** (`rain`, `snow`, `falling_ash`, `falling_leaves`, `cherry_petals`) that rides the effects' air,
-melts over fires (snow) and thins smoke (rain). `include/neuralfx/nvfx_library.h`, in `libnvfx`, lists them and plays them on a **stage**: a scene (§7) with
+melts over fires (snow) and thins smoke (rain); and `weather_director` plays the weather director
+([WEATHER.md](WEATHER.md)): set its `regime` parameter (0 clear ... 6 dust) with `nvfx_stage_set_param` and the weather
+heads there in the order real weather keeps; read it with `nvfx_scene_get_input(scene, "s0_sky.rain")` (an instance's
+names start `sN_`, N its place among all the stage's instances in the order of the rooms: give the weather a room of one,
+first, and it is `s0_`). `include/neuralfx/nvfx_library.h`, in `libnvfx`, lists them and plays them on a **stage**: a scene (§7) with
 room for a number of instances of chosen effects, which the game spawns at a position, scale and time, drives through
 named parameters, moves and stops while it plays, without allocating per frame. A stage is an ordinary `nvfx_scene`
 for stepping, drawing and reading fields, so the threading, overlap and exactness of §7 hold for it
