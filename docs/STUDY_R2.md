@@ -101,8 +101,12 @@ time steps); every such try is reported. The final measurement (§1.6) uses seed
 
 ### 1.5 The other effects, unchanged
 
-(To come: fire, study N's smoke and `smoke_r` recorded with the main branch's tool and with this branch's, compared byte
-for byte.)
+`jobs/bitcheck.sh`: the fire, study N's smoke and study R's `smoke_r` (one run each), and study N2's two kinds of fire
+run (controls held and controls that change), 2 s each at 64 x 96 x 64 from an empty grid, recorded by main's tool
+(fc3d5f6, built clean from that commit) and by this branch's (3cdee7c, with the audit, the flux-form velocity and the
+momentum-neutral confinement compiled in): **all five run files identical, byte for byte** (3,686,464 and 3,687,192
+bytes). The new code paths run only for `smoke_r2` or when asked for (`Params::velocity` 2, `Params::confinement` 1 or
+2, an audit given).
 
 ### 1.6 The plume against Morton, Taylor and Turner, again
 
@@ -153,6 +157,24 @@ Study N2's four stages, as study R ran them, with three changes:
   (coverage, light and the mean picture worse); a squared error against one chaotic run, after a long burn-in, rewards
   the smooth average of its possible futures, which is wider than any one of them. The spread loss is a statistic of
   each frame, so it rewards the narrow instantaneous plume instead (the idea of studies D2 and M3's statistics in 2D).
+
+**How wide study R's learned plume grows** (a probe on study R's own training runs, before any R2 training; `nvfx_3d
+widthprobe`, the 16 of its 18 s runs whose controls are held, from 2 s on, the coarse state alone): each row's spread
+about its centroid over the truth's, weighted by the truth's mass in the row, and the coarse state's mass over the
+truth's:
+
+| frames played on | 12 | 30 (1 s) | 90 | 180 | 300 | 450 (15 s) |
+|---|---:|---:|---:|---:|---:|---:|
+| study R's C4: spread over the truth's (soot) | 1.74 | 2.47 | 3.08 | 3.06 | 3.78 | 5.10 |
+| study R's C4: mass over the truth's (soot) | 0.79 | 0.69 | 0.73 | 1.17 | 1.50 | 1.70 |
+| the coarse simulation: spread over the truth's | 1.04 | 1.01 | 1.07 | 1.26 | 1.15 | 1.10 |
+| the coarse simulation: mass over the truth's | 0.96 | 0.94 | 0.84 | 0.77 | 0.77 | 0.74 |
+
+So the over-spreading is in the learned coarse state, and it grows the longer the model plays: half again as wide
+within 12 frames, two and a half times within a second, five times after 15 s, while a haze builds up (the mass 1.7
+times the truth's). The coarse simulation, the teacher's own equations, keeps the plume's width. This is what the
+spread loss is for, and its weight follows from it: at R's error (a relative spread error near 1 at 1 s) it is about 2
+per window, twice the rest of the loss; as the width comes right it fades.
 
 Otherwise as study R: stage 1, 900 iterations of windows from true states (the unroll growing to 12); stage 2, 350
 iterations with half the windows after up to 24 frames of the stepper's own rollout and the profile loss; stage 3, 250

@@ -110,16 +110,18 @@ Fluid::Fluid(const Params& p) : p_(p), nx_(p.width), ny_(p.height), nz_(p.width)
     const float sig = p.confinement_sigma * s_;
     if (!(sig > 0.f)) throw std::invalid_argument("sim3d: bad confinement_sigma");
     gr_ = std::max(1, static_cast<int>(std::ceil(3.f * sig)));
+    // [tap d][target t]: the weight source t - d gives target t (0 where the source is outside), each source's weights
+    // normalised over the targets it reaches
     const auto table = [&](int n, std::vector<float>& w) {
       const int taps = 2 * gr_ + 1;
-      w.assign(zu(n + 2) * zu(taps), 0.f);
-      for (int i = 1; i <= n; ++i) {
+      w.assign(zu(taps) * zu(n + 2), 0.f);
+      for (int i = 1; i <= n; ++i) {  // source i
         double z = 0;
         for (int d = -gr_; d <= gr_; ++d) {
           if (i + d >= 1 && i + d <= n) z += std::exp(-0.5 * static_cast<double>(d * d) / (static_cast<double>(sig) * sig));
         }
         for (int d = -gr_; d <= gr_; ++d) {
-          if (i + d >= 1 && i + d <= n) w[zu(i) * zu(taps) + zu(d + gr_)] = static_cast<float>(std::exp(-0.5 * static_cast<double>(d * d) / (static_cast<double>(sig) * sig)) / z);
+          if (i + d >= 1 && i + d <= n) w[zu(d + gr_) * zu(n + 2) + zu(i + d)] = static_cast<float>(std::exp(-0.5 * static_cast<double>(d * d) / (static_cast<double>(sig) * sig)) / z);
         }
       }
     };
@@ -259,36 +261,31 @@ void Fluid::neutral_confinement(float conf) {
       }
     }
   });
-  // less its horizontal spread: each cell's force spread over its plane by the Gaussian (weights summing to one), so the
-  // plane's sum of the result is zero; x then z, plane by plane (each plane is one task: the same on any thread count)
-  const int taps = 2 * gr_ + 1;
+  // less its horizontal spread: each cell's force spread over its plane by the Gaussian (weights summing to one over
+  // the cells a source reaches, so the plane's sum of the result is zero), x then z, plane by plane (each plane one
+  // task: the same on any thread count). Written as gathers with the weights indexed by target (gx_, gz_: [tap][cell],
+  // a source's weight for the target it reaches), the inner loops along x.
   for (Grid* f : {&fcx_, &fcy_, &fcz_}) {
     slabs([&](int y) {
-      for (int z = 1; z <= nz_; ++z) {
-        for (int x = 1; x <= nx_; ++x) fct_.at(x, y, z) = 0.f;
-      }
       for (int z = 1; z <= nz_; ++z) {  // along x into fct_
-        for (int x = 1; x <= nx_; ++x) {
-          const float v = f->at(x, y, z);
-          if (v == 0.f) continue;
-          const float* w = gx_.data() + zu(x) * zu(taps);
-          for (int d = -gr_; d <= gr_; ++d) {
-            if (x + d >= 1 && x + d <= nx_) fct_.at(x + d, y, z) += v * w[d + gr_];
-          }
+        float* o = &fct_.at(0, y, z);
+        const float* in = &f->at(0, y, z);
+        for (int x = 1; x <= nx_; ++x) o[x] = 0.f;
+        for (int d = -gr_; d <= gr_; ++d) {
+          const float* w = gx_.data() + zu(d + gr_) * zu(nx_ + 2);
+          const int x0 = std::max(1, 1 + d), x1 = std::min(nx_, nx_ + d);  // targets whose source x - d is inside
+          for (int x = x0; x <= x1; ++x) o[x] += in[x - d] * w[x];
         }
       }
-      std::vector<float> col(zu(nz_) + 2);
-      for (int x = 1; x <= nx_; ++x) {  // along z, subtracted from the force
-        for (int z = 1; z <= nz_; ++z) col[zu(z)] = 0.f;
-        for (int z = 1; z <= nz_; ++z) {
-          const float v = fct_.at(x, y, z);
-          if (v == 0.f) continue;
-          const float* w = gz_.data() + zu(z) * zu(taps);
-          for (int d = -gr_; d <= gr_; ++d) {
-            if (z + d >= 1 && z + d <= nz_) col[zu(z + d)] += v * w[d + gr_];
-          }
+      for (int z = 1; z <= nz_; ++z) {  // along z, subtracted from the force
+        float* o = &f->at(0, y, z);
+        for (int d = -gr_; d <= gr_; ++d) {
+          const int zs = z - d;  // the source row
+          if (zs < 1 || zs > nz_) continue;
+          const float w = gz_[zu(d + gr_) * zu(nz_ + 2) + zu(z)];
+          const float* in = &fct_.at(0, y, zs);
+          for (int x = 1; x <= nx_; ++x) o[x] -= in[x] * w;
         }
-        for (int z = 1; z <= nz_; ++z) f->at(x, y, z) -= col[zu(z)];
       }
     });
   }

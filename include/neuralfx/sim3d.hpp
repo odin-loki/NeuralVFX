@@ -184,7 +184,7 @@ class Fluid {
   CurlField3 curl_;
   Grid u_, v_, w_, temp_, soot_, pressure_, div_, ta_, tb_, tc_, wx_, wy_, wz_, wn_;
   Grid fcx_, fcy_, fcz_, fct_;     // the momentum-neutral confinement's force and its scratch (Params::confinement 1)
-  std::vector<float> gx_, gz_;     // its spreading weights along x and z: [cell][tap], normalised per source cell
+  std::vector<float> gx_, gz_;     // its spreading weights along x and z: [tap][target cell], normalised per source cell
   int gr_ = 0;                     // their radius in cells
   std::unique_ptr<Pool> pool_;
   MomentumAudit* audit_ = nullptr;
