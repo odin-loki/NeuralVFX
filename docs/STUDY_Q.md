@@ -32,7 +32,7 @@ took it over from the jobs it left running (the data root's `q_fix/jobs/*.sh`, t
 | crown and window fires' streaks | **done by eye** (§5.1) | detail settings, frozen hashes, videos (78ae21b, 47b2b0f) | - |
 | heavy gas | **done by eye** (§5.1) | `soften 0.1` | its start points not tried (§9) |
 | smoke ring | **stopped at validation** | N = 40 (ca955b9); `rf` meets no rule: its motion's interval past its margin (§4.7) | kept; nothing more |
-| dust explosion's renderer | probe | margins (8572674) | `rf` on the probe (`probe_rf.sh`); then N, validation |
+| dust explosion's renderer | validation | margins (8572674); N = 10 (§4.6) | `rf` on validation (`val.sh`); then the choice, the freeze, the test |
 | candle | **nothing changed** (§3.7) | the diagnosis | - |
 | mushroom's cap | **left** (§3.7) | the diagnosis | - |
 
@@ -342,6 +342,17 @@ motion error +0.011 [+0.001, +0.021] (worse, its interval's end just past the ma
 quite meet the rule's form. The number of settings at which every measure that is not an improved target passes if truly
 unchanged: by resampling 0.95 at 30 settings for tracking at 1 s and the motion; in the normal form at the SD's upper 80%
 bound the motion needs 35: **N = 40**.
+
+**The dust explosion.** The null moves its spectrum distance at a setting by 0.013 (RMS), its motion by 3.4%, its coverage
+distance by 0.0025, its emission distance by 0.00018 and its mean frame by 1.13 dB: margins tracking -0.20 dB, spectrum
+**+0.02** (study K's), |ln motion ratio| **+0.0343**, coverage **+0.0025**, emission **+0.000177**, mean frame **-1.13
+dB**. `rf` (SHA-256 `a0f273ea278b3a60f0ea4e96db5177258faf0fcd21ffa020ac2ca65d78bed520`) on the probe: the first frame
+**+3.27 dB [+3.09, +3.46]** (21.96 → 25.23 dB), the mean frame **+0.018 [+0.002, +0.034]** (both targets better),
+tracking at 1 s +0.11 [+0.09, +0.13] (better) and at 2 s a tie, the spectrum distance -0.004 [-0.006, -0.003] (better),
+its motion error +0.003 [+0.002, +0.005] and coverage distance +0.0002 [+0.0001, +0.0003] (worse, each a tenth of its
+margin), emission a tie: it meets the rule's form. Every measure that is not a target it improves passes its margin, if
+truly unchanged, with probability 1.00 at 10 settings by resampling and needs 1 setting in the normal form at the SD's
+upper 80% bound: **N = 10** (study G's ten validation settings, study B's ten held-out ones).
 
 ### 4.7 Validation (the choice)
 
