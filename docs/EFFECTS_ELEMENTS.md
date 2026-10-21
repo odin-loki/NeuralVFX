@@ -220,3 +220,32 @@ Detail (spectrum distance) and coverage are reported but do not decide.
 - *Does the learned geyser erupt when its conduit says, and stay quiet between?* Over the one-minute runs at the first
   two held-out settings, the share of frames with a water column (alpha above a half over a fifth of the frame's height
   above the vent) while the conduit's charge is above 1.35, and while it is below 0, in the real run and the learned one.
+
+## 8. Reproduce
+
+```sh
+build/nvfx_sim --effect geyser --intensity 0.7 --wind 0.6 --frames 240 --bg black --sheet geyser.png   # the presets alone
+build/nvfx_sim --effect haboob --intensity 0.6 --height 0.8 --frames 150 --sheet haboob.png
+build/nvfx_sim --effect seaspray --intensity 0.6 --gale 0.8 --frames 120 --bg black --sheet spray.png
+D=$NEURALVFX_DATA/fx_elements
+nohup setsid $D/jobs/pipeline.sh geyser &   # (and haboob, seaspray) study D's three steps, the haboob's mean state,
+                                            # d-chaos, freeze, the test once (--seed-base 27000000); resumable
+#   by hand, per effect E:
+build/nvfx_experiment d-train --stages12 1 --effects E --root $D --results $D/rows/E --threads 1
+build/nvfx_experiment d-tune   --effects E --root $D --results $D/rows/E --threads 1
+build/nvfx_experiment d-finish --effects E --root $D --results $D/rows/E --threads 1
+build/nvfx_ordered fitmean --effect haboob --study m3 --root $D --block 2                # the haboob's mean state
+build/nvfx_ordered setmean --model haboob.finish.nvfx --meanstate $D/m3/meanstate/haboob_b2.txt --out haboob.nvfx
+build/nvfx_experiment d-chaos --effects E --root $D --results $D/chaos/E --threads 1 --seed-base 27000000
+build/nvfx_experiment d-eval  --effects E --root $D --results $D/test/E --figures FIGS --threads 1 --seed-base 27000000
+$D/jobs/merge_rows.sh                                                                     # the rows into results/
+build/nvfx_experiment d-report --root $D --results results/experiments/fx_elements      # D_SUMMARY.md
+$D/jobs/timing.sh 4                                                                       # d-timing, four rounds
+build/nvfx_scene_script --script examples/scenes/coast.nvfxs --models $D/models/scene --out coast.mp4 --keyframes DIR
+build/nvfx_gallery --library library --models $NEURALVFX_DATA/library/models --only erupting_geyser,haboob,sea_spray --sheet sheet.png
+```
+
+The data root's `fx_elements/jobs` holds the queue (`train.sh`, `pipeline.sh`, which refuses to test a model whose
+SHA-256 is not the frozen one and refuses to test twice), the frozen tool's SHA-256 and commit (`binaries.sha256`,
+`binaries.commit`), and the clips' hashes before and after the presets (`state/baseline_clips.sha256`,
+`state/after_clips.sha256`); the scratch probes this document quotes are in `fx_elements/dev` (outside git).

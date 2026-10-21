@@ -198,8 +198,8 @@ TEST(Sim, StudyEffectsAreUnchangedByTheNewOnes) {
   };
   // the eleven of rounds 1 to 6, and round 7's six and the water's four (hashed before the earth effects were added,
   // docs/EFFECTS_EARTH.md); the earth's three and the air's three (docs/EFFECTS_AIR.md), each hashed on its own branch
-  // before the two were merged
-  const std::array<std::pair<sim::Effect, std::uint64_t>, 27> want{{{sim::Effect::fire, 0xecb25de8e62e7379ULL},
+  // before the two were merged; the elements' three (docs/EFFECTS_ELEMENTS.md), hashed when they were frozen for training
+  const std::array<std::pair<sim::Effect, std::uint64_t>, 30> want{{{sim::Effect::fire, 0xecb25de8e62e7379ULL},
                                                                      {sim::Effect::smoke, 0xea602bfa2409bf3fULL},
                                                                      {sim::Effect::explosion, 0xbb823d31fd8c4eb4ULL},
                                                                      {sim::Effect::steam, 0xa57b2dc109882ec3ULL},
@@ -225,7 +225,10 @@ TEST(Sim, StudyEffectsAreUnchangedByTheNewOnes) {
                                                                      {sim::Effect::avalanche, 0xf96254ac3880822fULL},
                                                                      {sim::Effect::candle, 0xd3a4c4a39b7ebaebULL},
                                                                      {sim::Effect::smokering, 0x49f140ddbe3ed42dULL},
-                                                                     {sim::Effect::heavygas, 0xe6c6e7108b078388ULL}}};
+                                                                     {sim::Effect::heavygas, 0xe6c6e7108b078388ULL},
+                                                                     {sim::Effect::geyser, 0xc8fc3cda1895799fULL},
+                                                                     {sim::Effect::haboob, 0x4e72b71ef7c58d0aULL},
+                                                                     {sim::Effect::seaspray, 0x1860a76e95ded34aULL}}};
   for (const auto& [e, h] : want) {
     auto p = small(e);
     p.intensity = 0.8f;
