@@ -60,6 +60,9 @@ struct Params {
   // neighbour, so the solver neither makes nor loses heat or soot; a second-order upwind scheme with the monotonised
   // central limiter, one sweep per axis in alternating order, substeps where a sweep's Courant number would pass 0.95).
   int scalars = -1;
+  // How the velocity is carried: -1 the effect's own (semi-Lagrangian for every effect), 0 semi-Lagrangian, 1 with the
+  // clamped MacCormack correction (less numerical dissipation; study R's measurement of the momentum budget).
+  int velocity = -1;
   std::array<float, 3> controls() const { return {intensity, wind, turbulence}; }
 };
 
@@ -117,6 +120,7 @@ class Fluid {
   void advect_velocity(float dt);
   void advect_scalar(Grid& q, float dt);
   void advect_scalar_flux(Grid& q, float dt);  // the flux form (Params::scalars)
+  void advect_velocity_maccormack(float dt);  // Params::velocity
   void velocity_border();
   template <class F>
   void slabs(F&& fn);  // fn(y) for y = 1..ny on the pool

@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <cmath>
 #include <stdexcept>
+#include <tuple>
 #include <utility>
 
 namespace nfx::sim3d {
@@ -395,6 +396,10 @@ void Fluid::project() {
 }
 
 void Fluid::advect_velocity(float dt) {
+  if (p_.velocity == 1) {
+    advect_velocity_maccormack(dt);
+    return;
+  }
   slabs([&](int y) {
     for (int z = 1; z <= nz_; ++z) {
       for (int x = 1; x <= nx_; ++x) {
@@ -510,6 +515,73 @@ void Fluid::advect_scalar_flux(Grid& q, float dt) {
       });
     }
   }
+}
+
+void Fluid::advect_velocity_maccormack(float dt) {
+  // Semi-Lagrangian forward (ta, tb, tc), backward from the forward fields (wx, wy, wz: free after add_forces), half the
+  // round trip's error added back, clamped to the corners of the forward sample: less numerical dissipation than the
+  // forward step alone (Params::velocity).
+  slabs([&](int y) {
+    for (int z = 1; z <= nz_; ++z) {
+      for (int x = 1; x <= nx_; ++x) {
+        const float bx = fl(x) - dt * u_.at(x, y, z), by = fl(y) - dt * v_.at(x, y, z), bz = fl(z) - dt * w_.at(x, y, z);
+        ta_.at(x, y, z) = u_.sample(bx, by, bz);
+        tb_.at(x, y, z) = v_.sample(bx, by, bz);
+        tc_.at(x, y, z) = w_.sample(bx, by, bz);
+      }
+    }
+  });
+  // the forward fields' border as the velocity's (outflow; the floor reflects v)
+  for (Grid* g : {&ta_, &tb_, &tc_}) {
+    const bool reflect = g == &tb_;
+    for (int y = 0; y <= ny_ + 1; ++y) {
+      const int yc = std::clamp(y, 1, ny_);
+      for (int z = 0; z <= nz_ + 1; ++z) {
+        const int zc = std::clamp(z, 1, nz_);
+        for (int x = 0; x <= nx_ + 1; ++x) {
+          if (x != 0 && z != 0 && y != 0 && x != nx_ + 1 && y != ny_ + 1 && z != nz_ + 1) {
+            x = nx_;
+            continue;
+          }
+          const int xc = std::clamp(x, 1, nx_);
+          g->at(x, y, z) = reflect && y == 0 ? -g->at(xc, 1, zc) : g->at(xc, yc, zc);
+        }
+      }
+    }
+  }
+  slabs([&](int y) {
+    for (int z = 1; z <= nz_; ++z) {
+      for (int x = 1; x <= nx_; ++x) {
+        const float fx = fl(x) + dt * u_.at(x, y, z), fy = fl(y) + dt * v_.at(x, y, z), fz = fl(z) + dt * w_.at(x, y, z);
+        wx_.at(x, y, z) = ta_.sample(fx, fy, fz);
+        wy_.at(x, y, z) = tb_.sample(fx, fy, fz);
+        wz_.at(x, y, z) = tc_.sample(fx, fy, fz);
+      }
+    }
+  });
+  slabs([&](int y) {
+    for (int z = 1; z <= nz_; ++z) {
+      for (int x = 1; x <= nx_; ++x) {
+        const float bx = std::clamp(fl(x) - dt * u_.at(x, y, z), 0.5f, fl(nx_) + 0.5f);
+        const float by = std::clamp(fl(y) - dt * v_.at(x, y, z), 0.5f, fl(ny_) + 0.5f);
+        const float bz = std::clamp(fl(z) - dt * w_.at(x, y, z), 0.5f, fl(nz_) + 0.5f);
+        const int x0 = static_cast<int>(bx), y0 = static_cast<int>(by), z0 = static_cast<int>(bz);
+        for (auto [q, fwd, back] : {std::tuple{&u_, &ta_, &wx_}, std::tuple{&v_, &tb_, &wy_}, std::tuple{&w_, &tc_, &wz_}}) {
+          float lo = q->at(x0, y0, z0), hi = lo;
+          for (int c = 1; c < 8; ++c) {
+            const float a = q->at(x0 + (c & 1), y0 + ((c >> 2) & 1), z0 + ((c >> 1) & 1));
+            lo = std::min(lo, a);
+            hi = std::max(hi, a);
+          }
+          back->at(x, y, z) = std::clamp(fwd->at(x, y, z) + 0.5f * (q->at(x, y, z) - back->at(x, y, z)), lo, hi);
+        }
+      }
+    }
+  });
+  std::swap(u_.v, wx_.v);
+  std::swap(v_.v, wy_.v);
+  std::swap(w_.v, wz_.v);
+  velocity_border();
 }
 
 }  // namespace nfx::sim3d

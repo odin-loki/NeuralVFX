@@ -142,6 +142,7 @@ int measure(const Args& a, const fs::path& root) {
   p.pressure_iters = a.i("pressure-iters", p.pressure_iters);
   p.substeps = a.i("substeps", p.substeps);
   p.scalars = a.i("scalars", p.scalars);
+  p.velocity = a.i("velocity", p.velocity);
   const int seeds = a.i("seeds", 6), from = a.i("from", 0);
   const std::uint64_t base = std::stoull(a.need("seed-base"));
   const float spin = a.f("spin", 6.f), seconds = a.f("seconds", 20.f);
@@ -411,6 +412,10 @@ struct Fit {
   double F = kNaN, Fspread = kNaN;                                 // mean buoyancy flux over the range; (max - min) / mean
   double Cw = kNaN, Cg = kNaN, lambda = kNaN, Aw = kNaN;           // W (z - z0)^(1/3) / F^(1/3), G (z - z0)^(5/3) / F^(2/3), b_g / b_w; Aw = W (z - z0)^(1/3)
   double Cw_mtt = kNaN, Cg_mtt = kNaN;                             // MTT's at the fitted alpha
+  // the flux-balance parameter (Morton 1959), top-hat: 5 F / (8 pi alpha_T b_T w_T^3) with b_T = sqrt(2) b_w and
+  // w_T = W / 2 (1 for a pure plume, above for a lazy one, below for a forced one): the means of the range's lowest and
+  // highest four heights
+  double gamma_lo = kNaN, gamma_hi = kNaN;
 };
 
 // The exponent p and origin z0 of f = A (z - z0)^p fitted together (z0 on a grid below the range: the least squares
@@ -510,6 +515,20 @@ Fit fit_range(const Lines& L, double lo, double hi) {
   }
   f.Cw_mtt = mtt_cw(f.alpha_g);
   f.Cg_mtt = mtt_cg(f.alpha_g);
+  std::vector<double> gam;
+  for (std::size_t i = 0; i < z.size(); ++i) {
+    const double bt = std::numbers::sqrt2 * bw[i], wt = 0.5 * wc[i];
+    gam.push_back(5.0 * F[i] / (8.0 * std::numbers::pi * f.alpha_t * bt * wt * wt * wt));
+  }
+  if (gam.size() >= 8) {
+    double a0 = 0, a1 = 0;
+    for (int k = 0; k < 4; ++k) {
+      a0 += gam[zu(k)] / 4;
+      a1 += gam[gam.size() - 1 - zu(k)] / 4;
+    }
+    f.gamma_lo = a0;
+    f.gamma_hi = a1;
+  }
   return f;
 }
 
@@ -628,8 +647,9 @@ int fit(const Args& a, const fs::path& root) {
                    "widths are 1/e radii of the core (STUDY_R.md §1.3); alpha_G = beta / 1.2, alpha_T = sqrt(2) alpha_G.\n",
                    lo, hi, resamples));
   both("| config | runs | controls | F (cells^4/s^3) | F spread | beta (b_w / z) | alpha_G | alpha_T | z0 (cells) | p_w (MTT -1/3) | p_g (MTT -5/3) | "
-       "p_soot (-5/3) | p_F (0) | z0 from w^-3 | z0 from g^-3/5 | p_w, z0 free | lambda = b_g / b_w | C_w (MTT at alpha_G) | C_g (MTT at alpha_G) |");
-  both("|---|---:|---|---:|---:|---|---|---|---|---|---|---|---|---|---|---|---|---|---|");
+       "p_soot (-5/3) | p_F (0) | z0 from w^-3 | z0 from g^-3/5 | p_w, z0 free | lambda = b_g / b_w | C_w (MTT at alpha_G) | C_g (MTT at alpha_G) | "
+       "Gamma, lowest / highest heights (pure plume 1) |");
+  both("|---|---:|---|---:|---:|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|");
   std::ofstream csv(out / a.str("csv", "plume_profiles.csv"));
   csv << "config,z,wc,bw,gc,bg,dc,bd,F,Fd\n";
   std::map<std::string, std::vector<Fit>> boots;
@@ -656,7 +676,8 @@ int fit(const Args& a, const fs::path& root) {
                      c.runs.size(), p0.intensity, p0.wind, p0.turbulence, p0.nx, p0.ny, p0.nz, p0.span, fmt(iv(&Fit::F), 0), fmt(iv(&Fit::Fspread), 2),
                      fmt(iv(&Fit::beta), 3), fmt(iv(&Fit::alpha_g), 3), fmt(iv(&Fit::alpha_t), 3), fmt(iv(&Fit::z0), 1), fmt(iv(&Fit::pw), 3),
                      fmt(iv(&Fit::pg), 3), fmt(iv(&Fit::pd), 3), fmt(iv(&Fit::pF), 3), fmt(iv(&Fit::z0w), 1), fmt(iv(&Fit::z0g), 1), fmt(iv(&Fit::pw_free), 3),
-                     fmt(iv(&Fit::lambda), 2), fmt(iv(&Fit::Cw), 2), f.Cw_mtt, fmt(iv(&Fit::Cg), 2), f.Cg_mtt));
+                     fmt(iv(&Fit::lambda), 2), fmt(iv(&Fit::Cw), 2), f.Cw_mtt, fmt(iv(&Fit::Cg), 2), f.Cg_mtt) +
+         std::format(" {} / {} |", fmt(iv(&Fit::gamma_lo), 2), fmt(iv(&Fit::gamma_hi), 2)));
   }
   // the source strengths: W (z - z0)^(1/3) against F across configs (MTT: slope 1/3)
   if (a.has("strengths")) {
@@ -695,6 +716,8 @@ int fit(const Args& a, const fs::path& root) {
       std::ofstream bcsv(out / std::format("plume_box_{}_{}.csv", ab[0], ab[1]));
       bcsv << "z,w_ratio,w_lo,w_hi,b_ratio,b_lo,b_hi,g_ratio,g_lo,g_hi,F_ratio,F_lo,F_hi\n";
       const std::size_t n = std::min(LA.z.size(), LB.z.size());
+      double agree_to = kNaN;  // STUDY_R.md §1.3: the highest height to which both ratios' intervals reach into [0.95, 1.05]
+      bool agreeing = true;
       for (std::size_t i = 0; i < n; ++i) {
         const auto ratio = [&](std::vector<double> Lines::* m) {
           std::vector<double> v;
@@ -702,10 +725,18 @@ int fit(const Args& a, const fs::path& root) {
           return interval((LA.*m)[i] / (LB.*m)[i], v);
         };
         const Iv w = ratio(&Lines::wc), b = ratio(&Lines::bw), g = ratio(&Lines::gc), F = ratio(&Lines::F);
+        if (LA.z[i] >= lo && agreeing) {
+          const auto reaches = [](const Iv& v) { return v.hi >= 0.95 && v.lo <= 1.05; };
+          if (reaches(w) && reaches(b)) agree_to = LA.z[i];
+          else agreeing = false;
+        }
         bcsv << std::format("{:.1f},{:.4f},{:.4f},{:.4f},{:.4f},{:.4f},{:.4f},{:.4f},{:.4f},{:.4f},{:.4f},{:.4f},{:.4f}\n", LA.z[i], w.est, w.lo, w.hi, b.est, b.lo,
                             b.hi, g.est, g.lo, g.hi, F.est, F.lo, F.hi);
         if (i % 4 == 2) both(std::format("| {:.1f} | {} | {} | {} | {} |", LA.z[i], fmt(w, 3), fmt(b, 3), fmt(g, 3), fmt(F, 3)));
       }
+      both(std::format("\nThe boxes agree (both ratios' intervals reach into [0.95, 1.05] at every height from {:.0f}) up to z = {:.1f} cells; rounded down "
+                       "to a multiple of 4: {:.0f}.",
+                       lo, agree_to, std::isfinite(agree_to) ? 4.0 * std::floor(agree_to / 4.0) : kNaN));
     }
   }
   // the wind-bent plume against Briggs's two-thirds law: z - zs = 1.6 (F / pi)^(1/3) x^(2/3) / U
