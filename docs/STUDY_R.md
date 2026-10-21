@@ -5,6 +5,21 @@ Status: **in progress**. Audience: dev, research, the owner. A second 3D effect 
 established plume physics first (§1), and the learned smoke is then trained with study N2's recipe and tested once
 under a rule committed before validation (§2 onwards).
 
+## 0. Where the study stands (a handoff, kept current)
+
+As of 21 October 2026, 10:00 UTC:
+- **Done:** the teacher fixed and measured (§1; the turbulence rows still running); the learned smoke's rule committed
+  (§2, commit f269659) and its edge bounds calibrated and committed before validation (3c91ff2); the 48 training runs;
+  the validation's and most of the test's teacher simulations; the plume video (`videos/3d_plume_theory.mp4`).
+- **Running** (detached, resumable; scripts in `$NEURALVFX_DATA/r_smoke3d/jobs/`, logs in `.../logs/`): `train.sh`
+  (stage 1 of 4; it writes `models/C2..C4.nvfx3` at the end), `val_staged.sh` (each candidate's edge check, tracking
+  and plays as its snapshot appears, the coarse simulation and holding with C2), `sims.sh` (the test's real runs and
+  floor), `plume.sh` (turbulence 0 and 1).
+- **Next, in order:** when `job_val.log` says VAL_DONE: `jobs/val_report.sh` (results/3d/r: edge check, comparisons,
+  the choice); `cp models/<chosen>.nvfx3 models/chosen.nvfx3`; `nvfx_3d freeze --model .../chosen.nvfx3 --frozen
+  results/3d/r/frozen.csv`; commit and push; then `jobs/test.sh` (once) and `jobs/test_report.sh`; then the orbit and
+  coupled videos (§5), docs (§3 to §6, REPORT §20, TODO), merge origin/main, the full checks, push.
+
 ## 1. The teacher against plume physics
 
 ### 1.1 The theory and the measurements it is checked against
