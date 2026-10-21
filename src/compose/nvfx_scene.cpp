@@ -651,7 +651,7 @@ nvfx_status nvfx_scene_set_input(nvfx_scene* s, const char* name, float value) {
 nvfx_status nvfx_scene_get_input(const nvfx_scene* s, const char* name, float* value) {
   if (!s || !s->scene || !name || !value) return NVFX_ERROR_ARGUMENT;
   const int i = s->scene->input_index(name);
-  if (i < 0) return NVFX_ERROR_ARGUMENT;
+  if (i < 0) return s->scene->weather_value(name, *value) ? NVFX_OK : NVFX_ERROR_ARGUMENT;  // "sky.rain": a weather's member
   *value = s->scene->input(i);
   return NVFX_OK;
 }

@@ -1,6 +1,6 @@
 # The effect library
 
-A catalogue of 223 named, ready-to-use effects that a game lists, places and drives without training anything: a
+A catalogue of 224 named, ready-to-use effects that a game lists, places and drives without training anything: a
 campfire, a grenade, a steam vent, a portal, a lightning strike, ground fog, a dust impact, a flamethrower, a plasma
 orb, a dust devil, a rocket's smoke trail, rain, a wall of fire, a forge, a nuke, a rocket launch, a locomotive's
 chimney, an ink cloud, a waterfall, a fountain, a splash, a rain shaft, a lava flow, a volcano erupting, an avalanche,
@@ -27,8 +27,11 @@ rainshaft) and the random detail seeded (the composer's deterministic water: spr
 or the seeded layer alone (§1, Water). The ten **earth** entries (lava flows and pools, eruptions, avalanches;
 `library/earth.nvfxl`, round 9) came next, in text, with one new category, `earth`; the only code they needed is the
 lava counted among the effects that give light (a module of it lights the scene as fire's do). The twelve **air** entries
-(`library/air.nvfxl`, round 9 too: candles, smoke rings, heavy gas; §1, Air) came last, in text, with one new category,
-`gas`; the only code they needed is the candle counted among the effects that give light, as lava is.
+(`library/air.nvfxl`, round 9 too: candles, smoke rings, heavy gas; §1, Air) came next, in text, with one new category,
+`gas`; the only code they needed is the candle counted among the effects that give light, as lava is. The last,
+`weather_director` (§1, Weather), plays the weather director ([WEATHER.md](WEATHER.md)): a room's own weather moving
+between regimes in the order real weather keeps, set by its `regime` parameter; the code it needed is the director and
+its statement in entries.
 
 ![The library's contact sheet: the entries of the first five models](figures/library_sheet.png)
 
@@ -74,8 +77,9 @@ lava, eruption and avalanche (§1, Earth).
 With the third round's 70 (§10: 20 weather, 23 combat, 14 magic, 13 fire, smoke, steam and light; 34 learned, 36
 procedural only) the catalogue holds **201** entries, 135 of them learned and 66 procedural only; with the twelve air
 entries (§1, Air; all learned, in the categories fire, smoke and gas, not in the table above), **213**, 147 of them learned;
-with the ten elements entries (§1, Elements; all learned, in the categories water and weather, not in the table above),
-**223**, 157 of them learned.
+with the weather director (§1, Weather; learned, not in the table above either), **214**, 148 of them learned;
+with the ten elements entries (§1, Elements; all learned, in the categories water and weather, not in the table
+above), **224**, 158 of them learned.
 
 **What is learned and what is not.** Only thirty things move by a trained model: fire, smoke, an explosion, steam,
 magic, fog, dust, cloud, a jet, an orb, a vortex, a wildfire front, coals, a mushroom cloud, an engine's blast on the
@@ -236,7 +240,7 @@ the gallery's thumbnail shows each after `show` seconds of travel through its bo
 | `carried_torch` (trail) | A carried torch: its flame leans away from the way it moves, its hot gas and smoke stream out behind it and stay in the world; its anchor is the torch's head (move it every frame) | fire, explosion; look flame, trail, look torch_smoke, embers, lamp | 700 x 320, centre | loop, moving (180, 0) | intensity (0.65) | Fair: the hot gas glows orange behind the flame and streams back into a wavy grey smoke trail, which reads well. The flame itself is small, thin and ragged, with curling tongues, and leans only a little: the fire model leans with its wind control, and pushed further (to show a fast torch) it became a thin red streak. |
 | `comet_trail` (trail) | A comet or a spell's trail: a ball of cyan plasma that leaves a glowing tail behind it, cooling and fading (the orb and the explosion's tail, recoloured; move it every frame) | orb, explosion; trail, look comet, glow, lamp | 900 x 360, centre | loop, moving (300, 40) | intensity (0.7) | Good: a bright cyan head and a glowing tail that frays and fades behind it (the explosion's hot gas, recoloured); the head is the orb model, small at this size. |
 
-### Weather (11)
+### Weather (12)
 
 | effect | what it is | plays | box, anchor | runs | parameters (default) | how it looks |
 |---|---|---|---|---|---|---|
@@ -251,6 +255,7 @@ the gallery's thumbnail shows each after `show` seconds of travel through its bo
 | `falling_ash` (weather) | Falling ash (procedural): grey flakes drifting down after a fire, a few still glowing, carried by the air | ash | 960 x 540, base | loop | density (2), wind (20), size (1) | Weak to fair: slow grey flakes with a few glowing ones; at night it reads as grey snow, and the glowing flecks are few and small. Better over a burnt, lit scene than in the gallery's dark one. |
 | `falling_leaves` (weather) | Falling leaves (procedural): autumn leaves tumbling and swaying down, blown by the wind | leaves | 960 x 540, base | loop | density (0.35), wind (60), size (1) | Fair: leaves in four autumn colours that tumble (they narrow and widen as they turn) and swing as they fall; small and few at the defaults, and flat shapes, not leaf shapes. |
 | `cherry_petals` (weather) | Cherry petals (procedural): small pink petals drifting and tumbling on a light breeze | leaves | 960 x 540, base | loop | density (0.6), wind (70), size (1) | Fair: small pink petals that tumble and drift; pleasant in motion, specks in a still. |
+| `weather_director` | The weather director: clouds, rain, snow, hail, lightning, fog and dust over the box from one small weather state; set its regime (0 clear, 1 overcast, 2 rain, 3 storm, 4 snow, 5 fog, 6 dust) and it heads there in the order real weather keeps ([WEATHER.md](WEATHER.md)) | cloud, fog; looks fleece, storm, fogbank, grit; the `weather` director, rain and snow by their physics, hail, leaves, arc, lamp, flash | 960 x 540, base | loop | regime (3), change (20) | Fair: its point is the transitions, which a still does not show; at the gallery's night the storm's clouds are dark and faint and its rain thinner than `downpour`'s; a room is a weather of its own (two rooms, two weathers). |
 
 ### Weather and sky (20, round 3: `library/storms.nvfxl`)
 
@@ -513,7 +518,8 @@ a number in [0, 1) that differs from spawn to spawn, and `alive` 1 while it play
 parameter is a value by its name. An entry may declare modules (single ones: tiles stay where they are declared),
 fields, emitters, trails (`trail NAME = EFFECT ...`, [COMPOSE.md](COMPOSE.md) §5.3: material left in the world
 along a moving source's path), `let`s, its own looks, rules (`at T:` and `when ...:`, which fire once per spawn, or every time
-with `repeat`), `every frame:` couplings, a flash (`light flash (r, g, b)`) and a camera shake (`camera x ..., y ...`).
+with `repeat`), `every frame:` couplings, a flash (`light flash (r, g, b)`), a camera shake (`camera x ..., y ...`) and a
+weather director (`weather NAME, regime PARAM`, [WEATHER.md](WEATHER.md); no schedule: its times would be the stage's).
 The stage owns the picture, the clock, the bus, the particles and the camera's place; an entry cannot set them, read
 another instance, or wait for a shock front by number (fronts are counted over the whole stage). The parser and checker
 give every error as `file.nvfxl:line:column: message`.
@@ -546,7 +552,11 @@ is rewritten so that:
 - a trail's pool of tiles is made with the stage; it leaves material only while its instance is `alive`, so a stop
   leaves what is there to fade where it is, and a new spawn starts a new path (a jump: nothing is drawn between where
   the last one ended and where this one starts);
-- flashes and camera shakes of all instances add up.
+- flashes and camera shakes of all instances add up;
+- a weather director is the room's: it runs from the stage's start, heading where its `regime` (a parameter) says, so the
+  weather is there when the instance spawns and goes on after it ends (what it drives is gated as the rest is); the game
+  reads it as `sN_NAME.member` with `nvfx_scene_get_input` (`sN_` the instance's prefix: N its place among the stage's
+  instances in the order of the rooms).
 
 `nvfx_gallery --library library --print NAME` prints an entry alone as the stage plays it.
 
@@ -567,6 +577,7 @@ drawn, and say so in the entries that use them.
 | `emit rain`, `snow`, `ash`, `leaves` | weather (allocation-free, deterministic, tested by `Weather.*` in `tests/test_engine_features.cpp`): particles that fill a rectangle at a `density` (per 100 x 100 world pixels) and fall through it with a `wind`, riding the bus's flow; rain is drawn as streaks and can `wash` smoke out of the modules it falls on, snow `melt`s over heat, ash has a few `glowing` flakes, leaves (and petals) tumble and swing as they fall ([COMPOSE.md](COMPOSE.md) §4.6 and §5.4) | `rain`, `snow`, `falling_ash`, `falling_leaves`, `cherry_petals` |
 | `trail` | not procedural: tiles of a learned effect laid on a grid in the world, fed along a moving source's path ([COMPOSE.md](COMPOSE.md) §5.3, §9 here) | `rocket_trail`, `vehicle_dust_wake`, `carried_torch`, `comet_trail` |
 | the third round's (§10) | hail, an aurora, a rainbow, meteors, beams, shields, glints, and a burst's spatter (coloured drops that stain) and shards ([COMPOSE.md](COMPOSE.md) §4.10; tested by `FxElements.*`, `tests/test_fx_elements.cpp`) | the 70 entries of §10 |
+| `weather` (the director) | a small weather state moving between regimes in the order real weather keeps, with seeded gusts and rain cells, from relations in the literature; its members (`sky.rain`, `sky.cloud`, ...) drive the other elements and the models' controls, and `emit rain` and `emit snow` take its physics (`rate` in mm/h, `scale`, `depth`, `shutter`), `emit hail` a `speed` ([WEATHER.md](WEATHER.md); tested by `Weather*.*`, `tests/test_weather_director.cpp`) | `weather_director` |
 | `water`, `splash`, `wave` | the random layer of water: the composer's deterministic water ([EFFECTS_WATER.md](EFFECTS_WATER.md), [COMPOSE.md](COMPOSE.md) §5.5): pools, sheets, jets, drips, bubbles and rain shafts, splashes and wakes; a seeded simulation, drawn, its mist deposited into a fog or steam module; tested by `Water.*` (`tests/test_water.cpp`) | the 19 water entries |
 
 ## 3. The API

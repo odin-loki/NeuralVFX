@@ -3829,3 +3829,77 @@ skip the fewest empty blocks.
 477 and study P's 11), none skipped; `nvfx_alloc_test` (no allocation per frame, with the bilinear 2x, the learned 2x
 and the learned 2x at int8); `nvfx_gallery --check --require-models` (213 effects, all played, 0 failed); the Godot test
 (0 failures).
+
+## 18. The weather director in 2D
+
+**Status: done** (21 October 2026). The full write-up, with every relation, its citation and what is a choice, is
+[WEATHER.md](WEATHER.md). Seeds: 28,500,000 to 28,599,999. Code: `src/compose/weather.hpp` and `weather.cpp` (the
+director), the `weather` statement and the physical keys of `emit rain`, `emit snow` and `emit hail` in the scene
+language, the day's sky (`frame daylight, overcast, visibility`) in `src/compose/compose.cpp`, a library entry
+(`weather_director`). Tests: `tests/test_weather_director.cpp` (28), `nvfx_alloc_test`, the day scene's frozen keyframes
+(`neuralfx.ScriptedWeatherDayFrozen`). No model was trained, and no C call was added.
+
+**What it is.** The TODO's step ahead of the 3D weather system: a small weather state (cloud, rain, snow, hail, the wind
+and its gustiness, visibility, temperature, lightning, dust, fog) that moves between seven regimes (clear, overcast,
+rain, storm, snow, fog, dust storm), each a target varied by the seed, and drives the layers that already exist. It is a
+director, not a weather model: nothing is simulated. What it adds is order and the physics of the local effects:
+- **Transitions in the order real weather keeps**: each quantity moves in a window of the transition of its own, so
+  clouds build before rain, the gust front (wind, gusts, the drop in temperature) arrives before the downpour, lightning
+  and hail come with the heaviest rain, and it clears in reverse. Measured on the noise-free state: clear to storm, the
+  wind is at 90 % of its rise while the rain is under a fifth of its own; storm to clear, lightning, rain, wind and cloud
+  each make half their change in that order.
+- **Weather noise**: Ornstein-Uhlenbeck processes stepped exactly and smoothed over 1 to 5 s. The gusts at the Kaimal
+  integral time scale of the 10 m wind (L_u / U, L_u = 56.7 m: IEC 61400-1): over 3000 s of storm their spread over the
+  mean is 0.356 for a gustiness of 0.355 and their autocorrelation at the time scale 0.453 (the process's 0.451). The rain
+  cells log-normal over 90 to 400 s (spread of ln R 0.475 for 0.5). Lightning a Poisson process at the moment's rate, which
+  follows the cells' rain squared: 1432 flashes for 1444.5 expected, falling in rain 1.66 times the storm's mean; each a
+  flash of 1 to 5 return strokes.
+- **Relations instead of guesses**: Koschmieder's visibility (3.912 / extinction); Marshall-Palmer drop sizes, and the
+  rain's extinction from them (twice the drops' cross-section: 0.365 R^0.63 km^-1, a kilometre at 40 mm/h); Atlas,
+  Srivastava and Sekhon's fall speeds, within 1.4 % of Gunn and Kinzer's measurements from 1 to 5 mm; Locatelli and
+  Hobbs's snowflakes, whose number carries the rate's mass flux; the Beaufort scale and what the wind does on land at each
+  force (smoke rising vertically at 0, leaves in motion at 3, dust raised at 4, the full lean at a gale); Kasten and
+  Czeplak's daylight under cloud; the CIE overcast sky.
+
+**What does not hold, as it is.**
+- **Marshall-Palmer drops falling at Atlas's speeds carry 5 to 18 % more rain than the rate that named them** (18 % at 1
+  mm/h, 9 % at 50, 5 % at 100): what each was fitted to differs, and the director draws the distribution the rate names
+  rather than one rescaled to close the loop.
+- **Snow's visibility rests on assumptions** (the flakes' sizes, an area ratio of 0.3), set so that 1 mm/h is the US
+  weather service's moderate snow (825 m); real snow varies by a factor of 3 to 10 at a rate.
+- **The transitions' windows, the regimes' targets, the rain cells' times and the rain-to-snow ramp are choices**
+  (WEATHER.md §3.10): the order is the observed one, the rest is not measured here.
+- **A flash count is the seed's**: the day scene's storm, with the first twenty seeds, flashes 0 to 16 times (4 to 5 most
+  often); the scene plays the second seed tried (six flashes).
+
+**The layers.** Rain and snow take the physics (`emit rain, rate R, scale S, depth D, shutter T`): each drop sized by
+Marshall-Palmer and falling at its Atlas speed, its streak the distance it falls in the shutter, the count the
+distribution's number in the slab drawn; measured in a scene at 2, 20 and 60 mm/h, the count within 8 %, the mean fall
+speed within 3 % and every streak within 1 %. Hail takes a speed (12.8 m/s for a 10 mm stone by its drag). The cloud and
+fog models take their opacity, look and lean from the state; the storm's bolt, its lamp and the flash follow the
+lightning; a learned module's `wind` control leans with the Beaufort force; the day's sky (three new `frame` keys, off by
+default so every earlier scene is the same to the bit) lights the sky, the hills and the ground by Kasten and Czeplak,
+greys into the CIE overcast sky and veils the hills by Koschmieder (measured in the picture: the hills' contrast within
+0.03 of exp(-3.912 x / V)).
+
+**Control without new C calls.** In a script, `weather sky, seed S, regime clear:` and a schedule of lines (`storm at 17,
+over 4`), its members (`sky.rain`, ...) values anywhere. In an engine, the script hands an input to `regime`; the game sets
+it with `nvfx_scene_set_input`, reads the state with `nvfx_scene_get_input(scene, "sky.rain")` (which now reads a weather's
+members by name) and counts flashes with a rule (`nvfx_scene_rule_state`). On a library stage, `weather_director`'s
+`regime` parameter (`nvfx_stage_set_param`).
+
+**The day scene** (`examples/scenes/weather_day.nvfxs`, 40 s at 1280 x 720, `videos/scene_weather_day.mp4`): clear,
+clouding over, rain, the gust front and a thunderstorm (six flashes, hail), clearing in reverse and a rainbow. By eye the
+order reads; the weak points are the rain's look at the near scale (long, bright, slanted: what near drops in a strong
+wind do, but heavier-looking than the rate), the cloud masses being puffs in a band rather than a deck, a flat dark storm
+sky, no wet ground and no trees for the Beaufort forces 5 to 9 (WEATHER.md §7).
+
+**Cost.** A director step is about 1 microsecond (one core of the shared machine at a load of 17); the layers cost what
+they cost without it; no allocation per frame (`nvfx_alloc_test`: every regime, every layer it drives, scripted and
+through the C API). The day scene's median frame: 76 ms on 2 threads of the same busy machine (provisional; the cloud,
+fog, fire and smoke modules and the picture at 1280 x 720, not the director).
+
+**Checks** (main at c846c80, merged: nothing new on it): the full build with warnings as errors; the full ctest, 518 of
+518 (main's 488, the 28 weather tests, the day scene's frozen keyframes and its script check), none skipped;
+`nvfx_alloc_test` (no allocation per frame, the weather director's scenes included); `nvfx_gallery --check
+--require-models` (214 effects, all played, 0 failed); the Godot test (0 failures).
