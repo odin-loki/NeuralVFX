@@ -355,9 +355,15 @@ building and training), so they say how the parts compare, not what they cost (�
 | uploads | 1.87 MB a frame | the same |
 | `create` | 3.1 s | 2.9 s |
 
+A later run that reports when its worst update came confirmed it: at 7.50 s, where the volume's next shard starts (§9).
+
 On three workers each job took longer than on the game thread alone: the machine had no free core, so more threads
 only competed. The manager's jobs took more than it planned because its default costs are one AVX2 core on a fast day
 (MANAGER.md §7.1): a game calibrates at load, or ships costs measured on its target in the pack.
+
+**Checks** (21 October 2026, the branch on main at c846c80): the full build with warnings as errors; the full ctest,
+492 of 492 (main's 488 and the four here), none skipped; `nvfx_alloc_test`; `nvfx_gallery --check --require-models`
+(213 of 213 played); the Godot test (`engines/godot/test.sh`, 0 failures in both parts).
 
 ## 9. Honest limits
 
