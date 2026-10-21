@@ -1464,6 +1464,12 @@ bool Particles::spawn_weather(Kind k, float x, float y, float du, float dv, floa
   return true;
 }
 
+float Particles::streak(int i) const {
+  const std::size_t q = zs(i);
+  if (kind_[q] != Kind::rain) return 0.f;
+  return (aux_[q] > 0.f ? aux_[q] : 1.5f) * std::hypot(x_[q] - px_[q], y_[q] - py_[q]);
+}
+
 void Particles::kill(int i) {
   const int last = --n_;
   if (i == last) return;

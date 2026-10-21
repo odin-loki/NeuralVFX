@@ -338,6 +338,13 @@ std::vector<LogicalLine> lex(std::string_view src, std::string_view source) {
         Tok t{Tok::number, std::string(line.substr(i, j - i)), 0.f, pos};
         const auto r = std::from_chars(t.text.data(), t.text.data() + t.text.size(), t.num);  // correctly rounded, as a C++ float literal
         if (r.ec != std::errc{} || r.ptr != t.text.data() + t.text.size()) throw Error(pos, std::format("'{}' is not a number", t.text), source);
+        if (t.text.find_first_not_of("0123456789") == std::string::npos) {  // a whole number a float cannot hold (an odd seed above 2^24)
+          double exact = 0.0;
+          std::from_chars(t.text.data(), t.text.data() + t.text.size(), exact);
+          if (static_cast<double>(t.num) != exact) {
+            throw Error(pos, std::format("{} cannot be held exactly (numbers pass through a float: above 16777216 only even ones, it would be {})", t.text, t.num), source);
+          }
+        }
         toks.push_back(std::move(t));
         i = j;
         if (i + 1 < line.size() && line[i] == 'x' && std::isdigit(static_cast<unsigned char>(line[i + 1]))) {  // 3x2: 3 x 2

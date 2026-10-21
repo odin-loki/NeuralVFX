@@ -869,7 +869,7 @@ void Compiler::module(const Statement& s, ModC& m) {
     m.start = integer(p->value.exprs[0], "the start point", 0);
     m.has_start = true;
   }
-  if (const Prop* p = s.prop("seed")) m.seed = static_cast<std::uint64_t>(integer(p->value.exprs[0], "the seed", 0, 1 << 24));
+  if (const Prop* p = s.prop("seed")) m.seed = static_cast<std::uint64_t>(integer(p->value.exprs[0], "the seed", 0, 1 << 25));
   if (const Prop* p = s.prop("empty")) {
     if (!m.has_start) fail(p->pos, "'empty' needs 'start N': the module starts with nothing in it, at that start point's age");
     m.empty = true;
@@ -976,7 +976,7 @@ void Compiler::trail(const Statement& s, ModC& m) {
     c.what = "the opacity";
     m.opacity = code(p->value.exprs[0], c);
   }
-  if (const Prop* p = s.prop("seed")) m.seed = static_cast<std::uint64_t>(integer(p->value.exprs[0], "the seed", 0, 1 << 24));
+  if (const Prop* p = s.prop("seed")) m.seed = static_cast<std::uint64_t>(integer(p->value.exprs[0], "the seed", 0, 1 << 25));
   Ctx c;
   const auto expr = [&](const char* key, Code& out) {
     if (const Prop* p = s.prop(key)) {

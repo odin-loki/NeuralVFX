@@ -561,6 +561,7 @@ class Particles {
   int alive() const { return n_; }
   int capacity() const { return static_cast<int>(x_.size()); }
   Kind kind(int i) const { return kind_[zs(i)]; }  // of a live particle, in the order each() visits them
+  float streak(int i) const;  // a live rain particle's streak (world pixels: its last step times its steps); 0 for others
   // One particle; returns false when full.
   bool spawn(Kind k, float x, float y, float vx, float vy, float temp, float size, float life);
   // A glow from (x0, y0) to (x1, y1): `radius` world pixels either side of the line, `brightness` times `colour` at its

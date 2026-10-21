@@ -438,6 +438,16 @@ if(NEURALFX_BUILD_TESTS)
   target_link_libraries(neuralfx_water_tests PRIVATE neuralfx_compose GTest::gtest_main)
   neuralfx_defaults(neuralfx_water_tests)
   gtest_discover_tests(neuralfx_water_tests TEST_PREFIX "neuralfx." DISCOVERY_MODE PRE_TEST PROPERTIES LABELS neuralfx)
+  # The weather director (docs/WEATHER.md): the relations, the noise, determinism, no jumps, the regimes' targets, the
+  # order of transitions, the script and the scene API, the physical rain, snow and hail, the day, the scene's random
+  # numbers and no allocation per frame; its own test program (it counts allocations: it replaces operator new).
+  add_executable(neuralfx_weather_tests tests/test_weather_director.cpp)
+  target_link_libraries(neuralfx_weather_tests PRIVATE neuralfx_compose nvfx_scene_api GTest::gtest_main)
+  neuralfx_defaults(neuralfx_weather_tests)
+  if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+    target_compile_options(neuralfx_weather_tests PRIVATE -Wno-mismatched-new-delete)  # it counts allocations
+  endif()
+  gtest_discover_tests(neuralfx_weather_tests TEST_PREFIX "neuralfx." DISCOVERY_MODE PRE_TEST PROPERTIES LABELS neuralfx)
   # Study P (docs/STUDY_P.md): the upscaler's reference, format, runtime parity, determinism, no allocation and the
   # frozen frames; its own test program, so the shared test list stays as it is.
   add_executable(neuralfx_upscale_tests tests/test_upscale.cpp)
@@ -614,6 +624,15 @@ if(NEURALFX_BUILD_TESTS)
     set_tests_properties(neuralfx.ScriptedCryptFrozen PROPERTIES LABELS "neuralfx;data" SKIP_RETURN_CODE 77 TIMEOUT 1200)
     add_test(NAME neuralfx.SceneScriptChecks.crypt COMMAND nvfx_scene_script --script ${CMAKE_CURRENT_SOURCE_DIR}/examples/scenes/crypt.nvfxs --check)
     set_tests_properties(neuralfx.SceneScriptChecks.crypt PROPERTIES LABELS neuralfx)
+    # A day's weather (docs/WEATHER.md): the weather director over the library's cloud, fog, fire and smoke, all in
+    # NEURALFX_MODELS_LIBRARY (outside git); its keyframes have the SHA-256 recorded in results/experiments/weather_frozen.csv.
+    add_test(NAME neuralfx.ScriptedWeatherDayFrozen
+             COMMAND nvfx_scene_script --script ${CMAKE_CURRENT_SOURCE_DIR}/examples/scenes/weather_day.nvfxs --models ${NEURALFX_MODELS_LIBRARY}
+                     --keyframes ${CMAKE_CURRENT_BINARY_DIR}/weather_day_keyframes --no-video --threads 2 --precision float --isa avx2
+                     --verify ${CMAKE_CURRENT_SOURCE_DIR}/results/experiments/weather_frozen.csv)
+    set_tests_properties(neuralfx.ScriptedWeatherDayFrozen PROPERTIES LABELS "neuralfx;data" SKIP_RETURN_CODE 77 TIMEOUT 1800)
+    add_test(NAME neuralfx.SceneScriptChecks.weather_day COMMAND nvfx_scene_script --script ${CMAKE_CURRENT_SOURCE_DIR}/examples/scenes/weather_day.nvfxs --check)
+    set_tests_properties(neuralfx.SceneScriptChecks.weather_day PROPERTIES LABELS neuralfx)
     # Study K (docs/REPORT.md §13): the fireball's keyframes with its modules at int8 on the AVX-512 build (the build int8
     # takes where the CPU has VNNI; without VNNI it computes the same integer sums, so the same frames), against their
     # SHA-256 in results/experiments/k_int8_frozen.csv. Skipped without AVX-512 or without the study D effects.

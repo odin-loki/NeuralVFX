@@ -176,6 +176,7 @@ class Director {
   // The state without its noise (the transition's blend of the targets), for tests: cloud, precip, hail, mean, gust,
   // temp, lightning, fog, dust.
   const Target& base() const { return base_; }
+  const Target& heading() const { return to_; }  // the target it heads for: its regime's, as this request varied it
 
  private:
   float normal(std::uint32_t channel) const;   // N(0, 1) for this step
@@ -188,11 +189,18 @@ class Director {
   float dir_;
   Regime to_regime_;
   Target from_{}, to_{}, base_{};
-  float p_ = 1.f, over_ = 1.f, t0_ = 0.f, time_ = 0.f;
+  float p_ = 1.f, over_ = 1.f, t0_ = 0.f, time_ = 0.f, dt_ = 0.f;
   std::int64_t steps_ = 0;
   int requests_ = 0;
-  // the noise: gusts (an OU and its 1-second smoothing), rain cells, cloud, temperature, fog
-  float xg_ = 0, yg_ = 0, xr_ = 0, xc_ = 0, xt_ = 0, xf_ = 0;
+  // The noise: gusts, rain cells, cloud, temperature and fog, each an OU process x and its smoothing y (a second or a
+  // few: gusts are measured as 3-second means), so the state is smooth from frame to frame.
+  struct Noise {
+    float x = 0, y = 0;
+  };
+  std::array<Noise, 5> noise_{};
+  float noise_time(int i) const;  // its OU's time scale now, s
+  float dust_ = 0;                // the dust load, following what the gusts raise over a few seconds
+  float noise(int i) const;       // its smoothed value, at unit variance
   // lightning: the last flash (its start, its strokes' times and peaks)
   int strikes_ = 0, strokes_ = 0;
   float flash_t0_ = 0.f;

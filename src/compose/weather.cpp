@@ -32,7 +32,7 @@ constexpr Target kTargets[] = {
     {0.10f, 0.f, 0.f, 3.f, 0.20f, 22.f, 0.f, 0.f, 0.f, 300.f, 0.f},            // clear: a few clouds, a light breeze (force 2)
     {0.95f, 0.f, 0.f, 5.f, 0.18f, 17.f, 0.f, 0.f, 0.f, 300.f, 0.f},            // overcast: a gentle breeze (force 3)
     {1.00f, 6.f, 0.f, 7.f, 0.22f, 13.f, 0.f, 0.f, 0.f, 300.f, 0.35f},          // rain: moderate (2.5 to 7.6 mm/h)
-    {1.00f, 40.f, 0.6f, 14.f, 0.35f, 16.f, 20.f, 0.f, 0.f, 90.f, 0.5f},        // storm: heavy rain, a near gale in gusts, lightning
+    {1.00f, 40.f, 0.6f, 11.f, 0.40f, 16.f, 20.f, 0.f, 0.f, 90.f, 0.5f},        // storm: heavy rain, force 6 gusting to 8, lightning
     {1.00f, 1.5f, 0.f, 4.f, 0.20f, -4.f, 0.f, 0.f, 0.f, 400.f, 0.3f},          // snow: moderate
     {1.00f, 0.f, 0.f, 1.f, 0.10f, 8.f, 0.f, 3.912f / 0.15f - kClearAir, 0.f, 300.f, 0.f},  // fog: 150 m, light air
     {0.30f, 0.f, 0.f, 15.f, 0.30f, 34.f, 0.f, 0.f, 0.6f, 300.f, 0.f},          // dust storm: about 330 m
@@ -182,10 +182,27 @@ float snow_share(float T) { return std::clamp((2.f - T) / 2.f, 0.f, 1.f); }
 
 namespace {
 // Channels of the step's random numbers.
-enum : std::uint32_t { c_gust, c_gust2, c_rain, c_cloud, c_temp, c_fog, c_flash, c_strokes, c_count, c_gap, c_peak, c_bolt };
-constexpr float kSmooth = 1.f;    // the gusts' smoothing, s (gusts are measured as 3-second means)
+enum : std::uint32_t { c_flash, c_strokes, c_count, c_gap, c_peak, c_bolt, c_noise = 20 };  // a noise: c_noise + 2 i, + 1
+enum : int { n_gust, n_rain, n_cloud, n_temp, n_fog };
+constexpr float kSmooth[] = {1.f, 3.f, 5.f, 5.f, 3.f};  // the noises' smoothing, s (gusts: as 3-second means)
 constexpr float kStroke = 0.045f;  // a stroke's light decays over this, s
+constexpr float kDustTime = 5.f;   // raised dust follows the gusts over this, s (a choice: it mixes, it settles)
 }  // namespace
+
+float Director::noise_time(int i) const {
+  switch (i) {
+    case n_gust: return gust_time(base_.mean);
+    case n_rain: return base_.cell_time;
+    case n_cloud: return 90.f;
+    case n_temp: return 120.f;
+    default: return 40.f;
+  }
+}
+// An OU process of unit variance smoothed over s seconds has the variance tau / (tau + s): brought back to 1.
+float Director::noise(int i) const {
+  const float tau = noise_time(i);
+  return noise_[static_cast<std::size_t>(i)].y / std::sqrt(tau / (tau + kSmooth[i]));
+}
 
 float Director::uniform(std::uint32_t ch) const {
   const std::uint32_t h = hash_cell(static_cast<std::int32_t>(steps_ & 0x7fffffff), static_cast<std::int32_t>(ch), 41, seed_);
@@ -217,14 +234,13 @@ Target Director::variant(Regime r, int k) const {
 
 Director::Director(std::uint64_t seed, Regime start, float direction) : seed_(seed), dir_(direction < 0.f ? -1.f : 1.f), to_regime_(start) {
   to_ = from_ = base_ = variant(start, 0);
-  // the noise at its steady spread (the smoothed gust correlated with the gust as it is in its steady state)
-  xg_ = normal(c_gust);
-  const float tg = gust_time(base_.mean), c = tg / (tg + kSmooth);
-  yg_ = c * xg_ + std::sqrt(c - c * c) * normal(c_gust2);
-  xr_ = normal(c_rain);
-  xc_ = normal(c_cloud);
-  xt_ = normal(c_temp);
-  xf_ = normal(c_fog);
+  // the noise at its steady spread (each smoothing correlated with its process as it is in their steady state)
+  for (int i = 0; i < static_cast<int>(noise_.size()); ++i) {
+    Noise& n = noise_[static_cast<std::size_t>(i)];
+    const float tau = noise_time(i), c = tau / (tau + kSmooth[i]);
+    n.x = normal(c_noise + 2 * static_cast<std::uint32_t>(i));
+    n.y = c * n.x + std::sqrt(c - c * c) * normal(c_noise + 2 * static_cast<std::uint32_t>(i) + 1);
+  }
   derive();
 }
 
@@ -260,23 +276,21 @@ void Director::blend() {
 void Director::step(float dt) {
   if (!(dt > 0.f)) return;
   ++steps_;
+  dt_ = dt;
   time_ += dt;
   if (p_ < 1.f) {
     p_ = std::min(1.f, (time_ - t0_) / over_);
-    blend();
+    if (p_ < 1.f) blend();
+    else base_ = to_;  // there, to the bit
   }
-  // the noise, each an Ornstein-Uhlenbeck process stepped exactly: x' = a x + sqrt(1 - a^2) n, a = exp(-dt / tau)
-  const auto ou = [&](float& x, float tau, std::uint32_t ch) {
-    const float a = std::exp(-dt / tau);
-    x = a * x + std::sqrt(std::max(0.f, 1.f - a * a)) * normal(ch);
-  };
-  ou(xg_, gust_time(base_.mean), c_gust);
-  const float b = std::exp(-dt / kSmooth);
-  yg_ = b * yg_ + (1.f - b) * xg_;
-  ou(xr_, base_.cell_time, c_rain);
-  ou(xc_, 90.f, c_cloud);
-  ou(xt_, 120.f, c_temp);
-  ou(xf_, 40.f, c_fog);
+  // the noise: each an Ornstein-Uhlenbeck process stepped exactly (x' = a x + sqrt(1 - a^2) n, a = exp(-dt / tau)), then
+  // its smoothing (y' = b y + (1 - b) x, b = exp(-dt / s))
+  for (int i = 0; i < static_cast<int>(noise_.size()); ++i) {
+    Noise& n = noise_[static_cast<std::size_t>(i)];
+    const float a = std::exp(-dt / noise_time(i)), b = std::exp(-dt / kSmooth[i]);
+    n.x = a * n.x + std::sqrt(std::max(0.f, 1.f - a * a)) * normal(c_noise + 2 * static_cast<std::uint32_t>(i));
+    n.y = b * n.y + (1.f - b) * n.x;
+  }
   derive();
   // lightning: a Poisson process at the rate of the moment; a new flash takes over from the last
   const float rate = v_[m_lightning] / 60.f;
@@ -312,13 +326,12 @@ void Director::step(float dt) {
 
 void Director::derive() {
   const Target& B = base_;
-  const float tg = gust_time(B.mean), norm = std::sqrt(tg / (tg + kSmooth));  // the smoothed gust's spread
-  const float g = yg_ / norm;
+  const float g = noise(n_gust);
   const float wind = std::max(0.f, B.mean * (1.f + B.gust * g));
-  const float s = B.cell_spread, r = std::exp(s * xr_ - 0.5f * s * s);
-  const float temp = B.temp + 0.3f * xt_;
+  const float s = B.cell_spread, r = std::exp(s * noise(n_rain) - 0.5f * s * s);
+  const float temp = B.temp + 0.3f * noise(n_temp);
   const float precip = B.precip * r, fs = snow_share(temp);
-  const float cloud = std::clamp(B.cloud + 0.6f * B.cloud * (1.f - B.cloud) * xc_, 0.f, 1.f);
+  const float cloud = std::clamp(B.cloud + 0.6f * B.cloud * (1.f - B.cloud) * noise(n_cloud), 0.f, 1.f);
   const float gust_up = std::max(0.f, 1.f + B.gust * g);
   v_[m_cloud] = cloud;
   v_[m_rain] = precip * (1.f - fs);
@@ -329,8 +342,11 @@ void Director::derive() {
   v_[m_gust] = B.gust;
   v_[m_temp] = temp;
   v_[m_lightning] = B.lightning * r * r * std::exp(-s * s);  // with the heaviest rain (its mean kept: E[r^2] = exp(s^2))
-  v_[m_dust] = B.dust * std::min(3.f, gust_up * gust_up * gust_up / (1.f + 3.f * B.gust * B.gust));  // lifted as u*^3 (Bagnold)
-  v_[m_fog] = B.fog * std::exp(0.2f * xf_ - 0.02f);
+  // dust: raised as the wind's cube (as sand's flux goes as u*^3, Bagnold 1941), mixed over a few seconds
+  const float raised = B.dust * std::min(3.f, gust_up * gust_up * gust_up / (1.f + 3.f * B.gust * B.gust));
+  dust_ = steps_ == 0 ? raised : dust_ + (raised - dust_) * (1.f - std::exp(-dt_ / kDustTime));
+  v_[m_dust] = dust_;
+  v_[m_fog] = B.fog * std::exp(0.2f * noise(n_fog) - 0.02f);
   v_[m_extinction] = kClearAir + v_[m_fog] + rain_extinction(v_[m_rain]) + snow_extinction(v_[m_snow]) + v_[m_dust] * (kKoschmieder / 0.2f);
   v_[m_visibility] = visibility_m(v_[m_extinction]);
   v_[m_u] = dir_ * wind;
