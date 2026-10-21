@@ -20,13 +20,21 @@ in the trainer (`Rollout.RendererFineTuneKeepsItsScalesAndStartsFromItsWeights`)
 
 ## 0. Where the study stands (handoff)
 
-Planned (21 October 2026, 18:30 UTC). The plan and the rule's form (§4) are committed; no number of the study exists
-yet. Heavy work waits for the quiet machine: another agent re-times everything (the data root's `quiet7/QUIET_DONE`
-marks its end; at the latest 20:40 UTC, three hours after this study began). Until then only reading, planning and the
-code (syntax-checked, not built) at `nice -n 19`.
+Planned (21 October 2026, 18:00 UTC). The plan and the rule's form (§4) are committed (c6e56e9); no number of the
+study exists yet. Heavy work waits for the quiet machine: another agent re-times everything (the data root's
+`quiet7/QUIET_DONE` marks its end; at the latest 20:40 UTC, three hours after this study began). Until then only
+reading, planning and the code (syntax-checked, not built) at `nice -n 19`. Every job below is already started
+(`q2_fix/jobs/go.sh`, 18:00 UTC) and waits for the quiet machine itself.
 
 **How to pick it up.** Every job is a script in the data root's `q2_fix/jobs/` that skips what is done (a marker
-`jobs/<step>.done`, or the file it makes); its log is in `q2_fix/logs/`. The order (§4.6): build, the candidates and the
+`jobs/<step>.done`, or the file it makes); its log is in `q2_fix/logs/`. `go.sh` starts them all: `build.sh` (the two
+tools, copied to `q2_fix/bin` with the commit), `lane_train.sh A|B` (the fine-tunes), `lane_null.sh` (the geyser's and
+heavy gas's nulls), `lane_small.sh` (the renderer fine-tunes, the start-point candidates, the other nulls, the
+avalanche's diagnosis) and one `pipeline.sh` per effect (margins committed, candidates' probe, `rule.sh`, `val.sh`). Each
+binary run writes its tables to `q2_fix/res/<effect>/` and `merge.sh` gathers them into
+`results/experiments/q2_fix`; `commit.sh` commits only that folder and pushes. The avalanche's candidates' probe also
+waits for `jobs/go_probe_avalanche`, made by hand after its diagnosis (§3). `freeze.sh` and `test.sh` are run by hand
+after validation. The order (§4.6): build, the candidates and the
 null probes; each effect's margins committed and pushed (`jobs/margins_<effect>.committed`) before its candidates are
 played on the probe; the rule's numbers (`q2_rule.csv`) committed and pushed before validation; the chosen file frozen
 (`q2_frozen.csv`) and pushed before its test, which runs once (`q2_fix/test_<effect>.done`).
