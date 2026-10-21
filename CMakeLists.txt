@@ -386,6 +386,19 @@ if(NEURALFX_BUILD_TOOLS)
   target_link_libraries(nvfx_study_p PRIVATE neuralfx_io neuralfx_train neuralfx_pack nvfx)
   neuralfx_defaults(nvfx_study_p)
 
+  # The detail layer's A/B bench (docs/REPORT.md §19, results/detail/): two builds' probes in one process, frame by frame.
+  # The probe is a module of this build's runtime internals with only its probe_* functions exported; the old build's
+  # comes from tools/detail_bench/build_old.sh.
+  add_library(nvfx_detail_probe MODULE tools/detail_bench/probe.cpp)
+  target_include_directories(nvfx_detail_probe PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src/runtime")
+  target_link_libraries(nvfx_detail_probe PRIVATE nvfx)
+  set_target_properties(nvfx_detail_probe PROPERTIES PREFIX "" CXX_VISIBILITY_PRESET hidden VISIBILITY_INLINES_HIDDEN ON)
+  target_link_options(nvfx_detail_probe PRIVATE -Wl,--exclude-libs,ALL -Wl,-Bsymbolic)
+  neuralfx_defaults(nvfx_detail_probe)
+  add_executable(nvfx_detail_bench tools/nvfx_detail_bench.cpp)
+  target_link_libraries(nvfx_detail_bench PRIVATE ${CMAKE_DL_LIBS})
+  neuralfx_defaults(nvfx_detail_bench)
+
   # Study O (docs/REPORT.md §16): the most visible flaws of the shipped effects and demos, taken apart.
   add_executable(nvfx_fix tools/nvfx_fix.cpp)
   target_link_libraries(nvfx_fix PRIVATE neuralfx_io neuralfx_train nvfx)
