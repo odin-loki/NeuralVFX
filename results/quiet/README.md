@@ -130,14 +130,14 @@ their median over the rounds taken per model, and averaged over the models with 
 vCPUs under KVM, AVX-512 with VNNI (and AMX). On the 21 models round 6 timed, its AVX2 build ran as fast as round 6's
 (0.94 to 1.01 of round 6's medians) and its **AVX-512 build 7 to 11% slower** (1.07 to 1.11), so the AVX-512 build's
 lead over AVX2 is smaller here (below). Its speed also drifted during the session, by about ±7% between rounds of the
-same work (slowest around 19:00, fastest after 21:00, for both builds alike), and a single configuration often landed in
-a fast or a slow state about 1.35 times apart (5 to 29% of the configurations of a round were more than 15% above their
-median), with no foreign load and under 1.5% steal: the host's other tenants, which this guest cannot see. So intervals
-are wider than round 6's, the 2D models were given 18 rounds, and ratios within rounds are steadier than absolute
-milliseconds. The anchor, the fireball at 1280 x 720 on 4 threads (study D's models, run as round 6 ran it): 15.0 ms
-float, 14.8 int8 (medians of ten rounds, [13.3, 16.1] and [13.4, 15.7]); its first two rounds (18:21) and the session's
-last four runs (20:53 and 21:17: 12.6 to 12.7 ms) matched round 6's 12.8 and 12.2 ms, the middle of the session ran 14
-to 16.5.
+same work (slowest from about 18:30 to 19:15, fastest after 21:00, for both builds alike), and a single configuration
+often landed in a fast or a slow state about 1.35 times apart (5 to 29% of the configurations of a round were more than
+15% above their median), with no foreign load and under 1.5% steal: the host's other tenants, which this guest cannot
+see. So intervals are wider than round 6's, the 2D models were given 18 rounds, and ratios within rounds are steadier
+than absolute milliseconds. The anchor, the fireball at 1280 x 720 on 4 threads (study D's models, run as round 6 ran
+it): 15.0 ms float, 14.8 int8 (medians of ten rounds, [13.3, 16.1] and [13.4, 15.7]); its first two rounds (18:21) and
+the session's last four runs (20:53 and 21:17: 12.6 to 12.7 ms) matched round 6's 12.8 and 12.2 ms, the middle of the
+session ran 14 to 16.5.
 
 | file | what | used in |
 |---|---|---|
@@ -237,11 +237,10 @@ geometric mean over the 33 models [95% bootstrap]: the detail stage 0.889 [0.880
 px (AVX2, AVX-512), 0.893 and 0.889 at 256, 0.899 and 0.905 at 512; a whole frame 0.964 to 0.973. The busy run's ratios
 (27 models) were within 0.015 of these. 3D (N2's model, 1 thread): the detail layer alone 0.223 [0.204, 0.227] (AVX2)
 and 0.204 [0.199, 0.207] (AVX-512), 10.0 to 10.4 ms against 47 to 50; a volume step 0.396 and 0.375, 24.6 to 25.6 ms
-against 65 to
-66. The busy run said 0.155 to 0.176 and 0.309 to 0.319: it had slowed the old scalar layer by a third and the new one
-    by a few percent, so the gain is a factor of 4.5 to 4.9 for the layer and 2.5 to 2.7 for a step, not 5.7 to 6.5 and
-    3.1 to 3.2. On 4 threads (no free core on the busy machine): a step 9.7 to 11.3 ms against 20.6 to 25.2 (0.45 to
-    0.46).
+against 65 or 66 ms. The busy run said 0.155 to 0.176 and 0.309 to 0.319: it had slowed the old scalar layer by a third
+and the new one by a few percent, so the gain is a factor of 4.5 to 4.9 for the layer and 2.5 to 2.7 for a step, not 5.7
+to 6.5 and 3.1 to 3.2. On 4 threads (no free core on the busy machine): a step 9.7 to 11.3 ms against 20.6 to 25.2 (0.45
+to 0.46).
 
 **3. Study P's half size against native** (STUDY_P.md §7; the runtime's default, int8; 30 rounds): native at 512 px
 took 4.43 to 6.43 ms (the busy run: 4.16 to 6.00), the half-size instance 0.29 to 0.38 of it (0.29 to 0.34), half size

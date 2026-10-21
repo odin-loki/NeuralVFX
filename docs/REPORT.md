@@ -2097,7 +2097,8 @@ figures; `compare_provisional.csv` lists every one replaced with its old value.
 AVX2 build ran as fast and its AVX-512 build 7 to 11% slower; its speed drifted by about ±7% between rounds, and a
 single configuration often landed in a fast or a slow state about 1.35 times apart, which this guest cannot see the
 cause of (no foreign load, steal under 1.5%). The fireball at 1280 x 720 on 4 threads took 15.0 ms float and 14.8 int8
-(medians of ten rounds; round 6: 12.8 and 12.2), its first and last runs 12.4 to 13.4.
+(medians of ten rounds; round 6: 12.8 and 12.2), though its first two rounds and its last four, at 20:53 and 21:17, ran
+at round 6's speed (12.4 to 13.4 and 12.6 to 12.7 ms).
 
 - **The 33 shipped 2D models** (18 rounds, one pinned core): 0.63 ms per 128 px frame on average at the default (int8 on
   the AVX-512 build; 0.46 for heavy gas to 1.12 for the geyser), 0.69 at float on AVX-512, 0.79 at float on AVX2. int8's
@@ -2117,10 +2118,10 @@ cause of (no foreign load, steal under 1.5%). The fireball at 1280 x 720 on 4 th
 - **The 3D steps**: N2's fire 21.0 ms a step on one thread and 9.0 on four (70 and 23 before the detail layer ran on
   vectors), a 256 x 256 picture 56 and 14 ms; study R's smoke 21.4 and 9.2 ms (26.6 and 9.0); study hres's fire 239 and
   64 ms, its 32 x 48 x 32 coarse step alone 192 ms (STUDY_3D.md §14.12, STUDY_R.md §4, STUDY_3D_HRES.md §8).
-- **Scenes and the FUSE demo**, all down by half or more, since on the busy machine their second threads found no free
-  core: on 2 threads the volcano 13.7 ms a frame (20), the crypt 10.2 (19 at float, 28 at int8), the forest edge 19.0,
-  the coast 17.3 (51), the weather day 16.4 (76), the lift-off 19.8 (46 to 50); the FUSE demo 600 frames in 42 s on
-  three workers (168) and 55 s on the game thread alone (138), the volume's step a tenth of before.
+- **Scenes and the FUSE demo**, all far lower (by 30 to 78% for the scenes), as multi-threaded work on the busy machine
+  waited for cores: on 2 threads the volcano 14.1 ms a frame on average (20), the crypt 10.2 (19 at float, 28 at int8),
+  the forest edge 19.0, the coast 17.3 (51), the weather day 16.4 (76), the lift-off 19.8 (46 to 50); the FUSE demo 600
+  frames in 42 s on three workers (168) and 55 s on the game thread alone (138), the volume's step a tenth of before.
 - **The fireball** (§13.10): int8 ties float on 4 threads (0.997 [0.949, 1.044] at 720p, 1.010 at 1080p: the
   compositor's frame), and float on the AVX-512 build is 0.95 of AVX2 (intervals reaching 1.03); 1920 x 1080 takes 31
   ms.

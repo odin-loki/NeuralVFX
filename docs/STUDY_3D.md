@@ -887,8 +887,9 @@ shared machine at a load of 1.0 to 1.7, the scalar detail layer). Milliseconds p
 one thread a step's stages with the reference detail layer (`rollout3d::detail_step`, which the volume API no longer
 runs) are: the noise inputs 2.2 ms, the coarse step 10.5, the reference detail layer 50.2 (the vector one: about 10,
 REPORT.md §19.2), the renderer's preparation 14.9, and a 256 x 256 picture 43.1; the simulator's frame is 154 ms at 64
-x 96 x 64 and 5.6 ms at 16 x 24 x 16. **Threads scale**: a step is 2.3 times faster on four threads than on one and a
-picture 4 times (where the step scales less was not taken apart). Training cost is in §14.6.
+x 96 x 64 and 5.6 ms at 16 x 24 x 16. The ambient edges cost nothing measurable (the coarse step 10.5 ms, 12 in the
+first measurement, study N's 15 on a busier machine). **Threads scale**: a step is 2.3 times faster on four threads than
+on one and a picture 4 times (where the step scales less was not taken apart). Training cost is in §14.6.
 
 ### 14.13 Reproduce
 

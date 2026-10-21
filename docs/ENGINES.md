@@ -667,7 +667,7 @@ round 7 of the quiet re-timing): a step 21 ms and a 256 x 256 picture 56 ms on o
 (its warm-up) 0.55 s and 0.22 s. **The detail layer runs on vectors** since 21 October 2026 (AVX-512 where the CPU has
 it, else AVX2; nothing to set): the reference's fields to the bit on every ISA, so the frames are those of before, and a
 step costs about 0.4 of what it did (25 against 65 ms on one core of a quiet machine; the detail layer alone 10 against
-48 to 50 ms; [REPORT.md](REPORT.md) §19). A volume still suits one hero effect, or baking; an engine draws the textures
+47 to 50 ms; [REPORT.md](REPORT.md) §19). A volume still suits one hero effect, or baking; an engine draws the textures
 on its GPU.
 
 **What it is not.** No int8 path, no SIMD beyond an AVX2 convolution and the detail layer, no scenes, library, manager or Godot node for
