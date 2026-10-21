@@ -4,7 +4,7 @@ Protocol: [docs/STUDY_3D_HRES.md](../../docs/STUDY_3D_HRES.md). Drivers: `tools/
 
 | Effect | N2 baseline (16³ coarse) | hres target (32³ coarse) | Data root |
 |---|---|---|---|
-| Fire | `n2_3d/models/chosen.nvfx3` (C4) | `hres_3d/fire/models/hres_fire.nvfx3` | `$NEURALVFX_DATA/hres_3d/fire` |
+| Fire | `n2_3d/models/chosen.nvfx3` (C4) | `hres_3d/fire/models/hres_fire.nvfx3` (also [models/3d/fire_hres.nvfx3](../../../models/3d/fire_hres.nvfx3) in git) | `$NEURALVFX_DATA/hres_3d/fire` |
 | Smoke | `n2_3d/models/smoke2.nvfx3` | `hres_3d/smoke/models/smoke_hres.nvfx3` | `$NEURALVFX_DATA/hres_3d/smoke` |
 
 **Fire weights (in git):** `fire/models/` — `C1.nvfx3` … `C4.nvfx3` (stage snapshots) and `hres_fire.nvfx3` (final

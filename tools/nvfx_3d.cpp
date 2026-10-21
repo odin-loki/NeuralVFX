@@ -750,6 +750,12 @@ r3::Model load_study_model(const fs::path& f) {
   return std::move(*m);
 }
 
+std::string volume_grid_caption(const fs::path& f) {
+  const r3::Model m = load_study_model(f);
+  return std::format("A {}X{}X{} LEARNED STATE DRIVES {}X{}X{} SEEDED DETAIL. PLAYED AND RAY-MARCHED ON THE CPU.", m.h.rx, m.h.ry, m.h.rz, m.h.fx(), m.h.fy(),
+                       m.h.fz());
+}
+
 std::string sha_of(const fs::path& f) {
   std::ifstream i(f, std::ios::binary);
   const std::vector<std::uint8_t> b((std::istreambuf_iterator<char>(i)), std::istreambuf_iterator<char>());
@@ -1421,6 +1427,7 @@ int video(const Args& a) {
   std::array<float, 3> c{cs.at(0), cs.at(1), cs.at(2)};
   const std::uint64_t seed = a.u64("seed", 9'900'000);
   const std::string title = a.str("title", "LEARNED 3D FIRE");  // the orbit's caption
+  const std::string grid_line = a.has("subtitle") ? a.str("subtitle") : volume_grid_caption(model);
   // the volume's shard length in seconds (the runtime's default 8; 0: one continuous rollout), and for --kind wind a
   // wind held instead of the sweep (study N2's figure of the edges)
   const float shard = a.f("shard", 8.f);
@@ -1444,7 +1451,7 @@ int video(const Args& a) {
       glow1 = 0.7f * glow1 + 0.3f * picture_glow(pic);
       composite(cv, 0, 0, W, H, pic, view, glow1);
       cv.text(title, 24, 20, 3, {255, 255, 255});
-      cv.text("A 16X24X16 LEARNED STATE DRIVES 64X96X64 SEEDED DETAIL. PLAYED AND RAY-MARCHED ON THE CPU.", 24, 52, 1, {190, 190, 196});
+      cv.text(grid_line, 24, 52, 1, {190, 190, 196});
       cv.text(std::format("INTENSITY {:.2f}  WIND {:.2f}  TURBULENCE {:.2f}", c[0], c[1], c[2]), 24, H - 30, 2, {200, 200, 206});
       vid.put(cv);
       if (f % 60 == 0) std::println("  frame {} ({:.0f} s)", f, now() - t0);
@@ -1527,7 +1534,7 @@ int video(const Args& a) {
       cv.text("SIMULATION", 24, 20, 3, {255, 255, 255});
       cv.text("64X96X64 CELLS", 24, 52, 2, {190, 190, 196});
       cv.text("LEARNED", pw + 24, 20, 3, {255, 255, 255});
-      cv.text("16X24X16 LEARNED STATE, SEEDED DETAIL", pw + 24, 52, 2, {190, 190, 196});
+      cv.text(grid_line, pw + 24, 52, 1, {190, 190, 196});
       cv.text("SAME START STATE, SAME NOISE SEED. BOTH ARE CHAOTIC: THEY PART AFTER A SECOND OR TWO.", 24, H - 52, 2, {230, 230, 236});
       cv.text(std::format("HELD-OUT RUN, SEED {}; INTENSITY {:.2f} WIND {:.2f} TURBULENCE {:.2f}", seed, c[0], c[1], c[2]), 24, H - 26, 1, {170, 170, 176});
       const std::string ts = std::format("{:.1f} S", t);
