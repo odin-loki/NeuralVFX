@@ -9,12 +9,15 @@ committed before validation and tested once (§2 onwards).
 
 ## 0. Where the study stands (a handoff, kept current)
 
-As of 21 October 2026, 18:20 UTC: the code is written and unit-tested (commit 962c538: the momentum audit, the velocity
-in flux form and `smoke_r2`, the trainer's spread and edge losses, the rule's margins and verdict); the teacher's
-diagnosis (§1.2) waits for the quiet machine (another agent's timing round), as the brief asked.
+As of 21 October 2026, 22:50 UTC: **the teacher is fixed and chosen** (§1.2 to §1.4: `smoke_r2`, the momentum budget
+closed, 1.088 [1.080, 1.095], from `smoke_r`'s 0.80; the old effects byte for byte, §1.5); **the 48 training runs are
+recording** (`jobs/records.sh`, four at a time).
 - Data root `$NEURALVFX_DATA/r2_smoke3d` (default `/root/nvfx-data/r2_smoke3d`): job scripts in `jobs/`, logs in
-  `logs/`, scratch in `scratch/`. Every job resumes from what it has written.
-- Next: §1.2's runs (`jobs/diag.sh`, started by `jobs/wait_quiet.sh` when `quiet7/QUIET_DONE` appears or at 20:40 UTC).
+  `logs/`, binaries in `bin/` (by commit), scratch in `scratch/`. Every job resumes from what it has written; each checks
+  the disk first (`jobs/disk.sh`: R2 stays under 2.5 GB).
+- Next: training (`jobs/train.sh`) once the runs exist; beside it the edge bounds' teacher runs (`jobs/edgecal.sh`), the
+  margins' (`jobs/nullreal.sh`) and the final plume measurement (`jobs/teacher_mtt.sh`); then the rule's numbers
+  committed (§2.10), validation (`jobs/val.sh`), the choice and the freeze, the test once (`jobs/test.sh`).
 
 ## 1. The teacher's momentum
 
@@ -69,9 +72,32 @@ world units, 4 cells at 64 across; each cell's force spread over its plane with 
 still sharpens the vortices it sees and adds no net momentum to any plane (tested: its term in the audit is zero to
 rounding). The criterion of §1.3 is unchanged and applies to the revised `smoke_r2` at 64 x 96 x 64.
 
-**At full resolution**: two runs each of `smoke_r`, of the velocity in flux form alone (`smoke_r2` with `--confinement
-0`) and of `smoke_r2` (exploration seeds 34,000,000 and 34,000,001, intensity 0.5, wind 0.5, turbulence 0.5, 6 s of
-spin-up and 16 s averaged, as study R's). (Results: to come.)
+**At full resolution** (`jobs/diag.sh`, 20:40 to 21:30 UTC; `results/3d/r2/diag_fit.md`): two runs each of `smoke_r`,
+of the velocity in flux form alone (`smoke_r2 --confinement 0`) and of `smoke_r2` (exploration seeds 34,000,000 and
+34,000,001, intensity 0.5, wind 0.5, turbulence 0.5, 6 s of spin-up and 16 s averaged, as study R's), the slab from 24
+to 92 cells; 95% intervals by resampling the two runs (narrow: two runs understate the spread):
+
+| solver | dM/dz over B | d(M + P)/dz over B | advection over the planes' flux | projection | confinement | curl noise | stored | turbulent share of M |
+|---|---|---|---|---:|---:|---:|---:|---:|
+| `smoke_r` | **0.80** [0.78, 0.82] | 0.76 | 1.12 | +0.04 | **-0.18** | -0.01 | -0.05 | 0.39 |
+| flux form alone | 1.03 [1.00, 1.06] | 0.91 | 1.02 | +0.12 | **-0.17** | -0.01 | -0.13 | 0.42 |
+| **`smoke_r2`** | 1.12 [1.10, 1.14] | **1.035** [1.027, 1.043] | 1.01 [0.97, 1.04] | +0.08 | **0.00** | -0.01 | -0.05 | 0.35 |
+
+- `smoke_r` repeats study R's deficit on fresh seeds (0.80 against R's 0.78 [0.74, 0.81]). At this resolution the
+  confinement takes 0.18 of what the buoyancy gives and the semi-Lagrangian step's non-conservation about 0.1 (its
+  change of the slab's momentum is 1.12 times the planes' net flux).
+- The flux form alone comes out near 1 by a balance of errors: the confinement still pushes down by 0.17, and the
+  pressure (+0.12) and the slab's loss of stored momentum over the averaging (0.13) make it up.
+- **`smoke_r2`** has no net push from its confinement, its advection carries what its faces carry (1.000 to rounding by
+  the faces' own fluxes, 1.01 by the cell-centred estimate of the planes' w^2), and its momentum flux including the
+  pressure grows by what the buoyancy gives: **d(M + P)/dz over B = 1.035**. Without the pressure, 1.12: the pressure
+  adds 0.08 (it falls with height, as a plume drawing in air at its sides requires) and the slab gave up 0.05 of stored
+  momentum while it was averaged.
+- About a third of M is the turbulent part (w'^2; 0.35 to 0.42): the solver's plume is much more turbulent than a
+  laboratory plume's 10 to 20%, so its mean centreline velocity sits lower for the same momentum flux (§1.6).
+- Its buoyancy flux stays within +3.3% and -1.7% of its mean from 24 to 92 cells (`smoke_r` +3.3 / -2.3%).
+- **Its flux-balance parameter now falls with height**, from 2.68 at 24 to 28 cells to 1.84 at 88 to 92, as a lazy
+  plume's must on its way to a pure plume (Gamma = 1); `smoke_r`'s rose (3.26 to 3.52), a plume losing momentum.
 
 ### 1.3 The fix, and the criterion written before its answer
 
@@ -95,9 +121,41 @@ over 30 s, at four extreme settings (intensity 1, turbulence 1, no wind; intensi
 intensity 0.2 with no turbulence). If it fails, the audit says which operator to look at next (the projection, or finer
 time steps); every such try is reported. The final measurement (§1.6) uses seeds of its own, 34,010,000 + 100 c + k.
 
-### 1.4 Stability
+### 1.4 Stability, a third revision, and the decision
 
-(To come.)
+`nvfx_3d stability` (`jobs/diag.sh`): `smoke_r2` from an empty grid for 30 s at the four extreme settings of §1.3, once a
+second the largest speed and the box's kinetic energy per cell (`logs/job_diag.log` in the data root). All four stayed
+finite and no largest speed grew (the largest over 1 to 10 s against 21 to 30 s: 150 and 132, 129 and 111, 136 and 150,
+164 and 125 cells per second). **But at intensity 0.2 with no turbulence the box's kinetic energy rose without
+levelling**: about 11 per cell from 5 to 20 s, 29 at 30 s, 52 at 45 s, where `smoke_r`'s stayed at 6 to 10. The mean
+vertical velocity in the side cells had turned downward (-0.5 to -1.6 cells per second): a recirculation, up in the
+plume and down at the sides, growing. Its cause is the border: the velocity's flux form took what flows in at an open
+side from the edge cell (outflow's zero gradient), so a downflow at the side came back in with the air the plume draws
+in and fed itself; the semi-Lagrangian step's dissipation had hidden this. The physical far field is still air: **the
+entrained air brings no velocity along the face it comes through** (the component through the face is the inflow
+itself). With that (`smoke_r2` from cb31ccb on), the same run's kinetic energy stays at 10 to 19 per cell to 45 s and
+the side cells' mean vertical velocity at 0.0 to 0.07. The budget and the stability were then run again on this
+version (`jobs/diag2.sh`, 22:20 to 22:48 UTC; `results/3d/r2/diag_fit.md`, row `d_r2b_i50`), the same two exploration
+seeds:
+
+| `smoke_r2` (cb31ccb) | dM/dz over B | d(M + P)/dz over B | advection over the planes' flux | projection | confinement | stored | turbulent share of M |
+|---|---|---|---|---:|---:|---:|---:|
+| 2 runs | **1.088** [1.080, 1.095] | **1.005** [1.002, 1.007] | 1.002 [1.001, 1.002] | +0.07 | 0.000 | -0.01 | 0.35 |
+
+Its buoyancy flux stays within +3.1% and -1.6% of its mean from 24 to 92 cells; top-hat alpha 0.157 [0.150, 0.163];
+the flux-balance parameter falls from 2.77 to 1.96 up the fitted range. The four stability runs stay finite with no
+largest speed growing (over 1 to 10 s against after 20 s: 150 and 172, 142 and 115, 158 and 150, 164 and 143 cells per
+second) and the kinetic energy bounded (45 and 46, 28 and 26, 27 and 27, and at intensity 0.2 with no turbulence 11
+and at most 22, levelling at 10 to 19 to 45 s).
+
+**By the criterion of §1.3, `smoke_r2` (as of cb31ccb) is study R2's teacher**: (a) its momentum budget closes where
+`smoke_r`'s does not (dM/dz over B = 1.088, within 0.90 to 1.10; with the pressure 1.005; the advection within 0.2% of
+the momentum flux its planes carry); (b) its buoyancy flux is conserved (within 3.1% of its mean); (c) it is stable.
+Decided at 22:49 UTC, before any training run or the final measurement. (The version before the still inflow, 3cdee7c,
+met (a) only by the criterion's second branch, 1.12 and 1.035, and grew the recirculation above; it was not used.)
+The three changes from `smoke_r`, each found by the audit or the stability check and each tested: the velocity in flux
+form, the confinement momentum-neutral, still ambient inflow for the velocity. Its cost: about 0.4 CPU-seconds a frame
+at 64 x 96 x 64 on one thread on this machine, against `smoke_r`'s 0.32.
 
 ### 1.5 The other effects, unchanged
 
