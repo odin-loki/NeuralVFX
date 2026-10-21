@@ -2461,7 +2461,7 @@ int choose(const Args& a) {
 // once a second the largest speed, the box's kinetic energy per cell, its heat and the seconds of CPU per frame.
 int stability(const Args& a) {
   const std::array<float, 3> c{a.f("intensity", 0.5f), a.f("wind", 0.5f), a.f("turbulence", 0.5f)};
-  auto p = fine_params(c, a.u64("seed", 34'000'900), a.i("threads", 1));
+  auto p = fine_params(c, a.u64("seed", 34'000'900), a.i("threads", 1), a.i("width", kWidth), a.i("height", kHeight));
   p.velocity = a.i("velocity", p.velocity);
   p.confinement = a.i("confinement", p.confinement);
   const int frames = static_cast<int>(std::lround(a.f("seconds", 30.f) * p.fps));
