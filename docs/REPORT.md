@@ -3986,6 +3986,8 @@ it could even be offered.
   "the same frames".
 - **Provisional:** one busy machine (the ratios are paired and interleaved; the absolute times are not a quiet machine's).
 
-**Checks** (after merging main): the full build with warnings as errors; the full ctest, 489 of 489; `nvfx_alloc_test`
-(no allocation per frame, the volume on 1 and 3 threads included); `nvfx_gallery --check --require-models`; the Godot
-test.
+**Checks** (origin/main is c846c80, the branch's base, so there was nothing to merge): the full build with warnings as
+errors; the full ctest, 489 of 489 (main's 488 and `VolumeDetail`), none skipped; `nvfx_alloc_test` (no allocation per
+frame; the volume on 1 and 3 threads, 0 allocations in 84 frames each); `nvfx_gallery --check --require-models` (213
+effects, 213 played, 0 failed); the Godot test (`engines/godot/test.sh`: the fireball and the library stage, 0 failures
+each, both frames the references' pixels).
