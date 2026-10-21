@@ -1,25 +1,24 @@
 # Study R: a validated 3D smoke
 
-Status: **in progress**. Audience: dev, research, the owner. A second 3D effect after study N's fire
+Status: **finished** (21 October 2026): the teacher is a plume by Morton, Taylor and Turner's measures (§1) but a third
+too slow for its buoyancy; **the learned smoke fails its test** (it tracks real runs better than the coarse
+simulation, +1.59 dB in pictures at 1 s, but missed an edge bound by 7% on validation and looks worse played on) and
+ships as a labelled demo (§4, §5). Audience: dev, research, the owner. A second 3D effect after study N's fire
 ([STUDY_3D.md](STUDY_3D.md)), done properly this time: the teacher (our 3D solver's smoke) is checked against
 established plume physics first (§1), and the learned smoke is then trained with study N2's recipe and tested once
 under a rule committed before validation (§2 onwards).
 
 ## 0. Where the study stands (a handoff, kept current)
 
-As of 21 October 2026, 14:10 UTC:
-- **Done:** the teacher fixed and measured (§1, every row, and §1.4's buoyancy budget, which closed the one open check);
-  the learned smoke's rule committed (§2, commit f269659) and its edge bounds calibrated and committed before
-  validation (3c91ff2); the 48 training runs; training (1,750 iterations, done 13:59); **validation** (VAL_DONE 14:05,
-  `jobs/val_report.sh`: `results/3d/r/edgecheck_val.md`, `compare_val_*.md`, `choice_val.md`): **no candidate passes
-  the edge check, so the rule chose among all three: C4** (mean rank 1.43; C2 and C3 2.29), which by the rule already
-  fails the test's first condition; **C4 frozen** as `models/chosen.nvfx3` in the data root
-  (`results/3d/r/frozen.csv`, SHA-256 7a53e3e2...19988, 274,760 bytes); origin/main merged (5da3529, 373829d; the full
-  checks green on the merge before the model existed); the coupled demo's stacking fixed (5ea67c5).
-- **Next, in order:** `jobs/test.sh` **once** (log `logs/job_test.log`; it waits for nothing now), then
-  `jobs/test_report.sh`; then the orbit, real-against-learned and coupled videos (§5; demo seeds 29,900,001 and up),
-  docs (§3 to §6, REPORT §20, TODO), the models/ entry (models/3d/smoke.nvfx3 as a labelled demo, layout.txt,
-  SHA256SUMS), merge origin/main again if it moved, the full checks, push.
+As of 21 October 2026, 15:00 UTC: **finished**; nothing is running.
+- The teacher fixed and measured against plume theory (§1, with the buoyancy budget that closed §1.4's open check); the
+  rule committed before validation (§2, f269659) and its edge bounds (3c91ff2); training (§3.1); validation and the
+  choice of C4 by the rule (§3, aae5dd6), frozen before the test; **the test, run once** (§4): **fails** (the edge
+  check on validation; worse in coverage, light and the mean picture), tracking better; C4 ships as a labelled demo
+  (`models/3d/smoke.nvfx3`, §5) with four demo videos (videos/README.md §9c); REPORT §20, TODO; origin/main merged
+  (6c87b29) and the full checks run on the merge (REPORT §20's last paragraph).
+- Data root `$NEURALVFX_DATA/r_smoke3d`: the runs, evaluations, candidates and logs stay there; the job scripts used
+  are in its `jobs/`. Nothing in this study is left to run; the next steps are §6.3's.
 
 ## 1. The teacher against plume physics
 
@@ -496,7 +495,105 @@ chose among all three: **C4** (mean rank 1.43; C2 and C3 2.29 each). Its file wa
 condition**; the test ran once all the same, and everything it measured is reported (§4). (The choice table's
 "temperature" column is the heat field and its "emission" column the light distance: the tool's labels from study N2.)
 
+## 4. The test (run once)
+
+Run once, 14:05 to 14:20 UTC on 21 October, on the frozen C4 (`jobs/test.sh`; `results/3d/r/compare_test_*.md`,
+`edgecheck_test.md`, per-run rows in `test_track/`): 18 tracking runs at the 6 held-out settings; 3 real runs, 3 plays
+of each method and 3 other real runs (the floor) pooled per setting; the edge check with the test's seeds. Differences
+are C4 minus the coarse simulation with the same detail, paired bootstrap of the mean, 10,000 resamples, 95%
+intervals.
+
+| measure | C4 | coarse simulation | holding | floor | C4 - coarse simulation |
+|---|---:|---:|---:|---:|---|
+| tracking, heat field, 8 frames (dB) | 21.31 | 19.80 | 18.75 | | +1.51 [+1.29, +1.74] |
+| **tracking, heat field, 1 s (dB)** | **20.02** | 18.17 | 17.78 | | **+1.85 [+1.45, +2.27]** |
+| tracking, heat field, 2 s (dB) | 20.62 | 17.74 | 18.33 | | +2.88 [+2.38, +3.39] |
+| tracking, soot field, 1 s (dB) | 19.56 | 17.67 | 17.29 | | +1.89 [+1.47, +2.32] |
+| tracking, picture, 8 frames (dB) | 22.74 | 21.13 | 14.56 | | +1.62 [+1.16, +2.10] |
+| **tracking, picture, 1 s (dB)** | **17.87** | 16.28 | 10.46 | | **+1.59 [+1.02, +2.20]** |
+| tracking, picture, 2 s (dB) | 16.39 | 14.78 | 10.75 | | +1.62 [+1.08, +2.19] |
+| **endless: 3D spectrum distance** | 0.504 | 0.686 | | 0.038 | -0.182 [-0.230, -0.140] (better) |
+| **endless: \|ln motion ratio\|** | 0.552 | 0.602 | | 0.065 | -0.051 [-0.182, +0.084] (tie) |
+| endless: motion ratio (context) | 0.582 | 0.549 | | 1.017 | +0.033 [-0.043, +0.107] |
+| **endless: coverage distance** | 0.0201 | 0.0152 | | 0.0058 | **+0.0049 [+0.0002, +0.0095] (worse)** |
+| **endless: light distance** | 0.0363 | 0.0131 | | 0.0039 | **+0.0232 [+0.0126, +0.0326] (worse)** |
+| **endless: mean picture PSNR (dB)** | 21.70 | 24.22 | | 34.07 | **-2.52 [-3.79, -1.29] (worse)** |
+
+**By the rule** (§2.9):
+1. **No runaway: fails.** No candidate passed the edge check on validation, so the rule had already declared this
+   condition failed (C4: the x = 0 side at a wind of 0.5, 1.08 against a bound of 1.01). With the test's seeds C4
+   *passes* the check (`edgecheck_test.md`: every side within its bound at every wind, nothing grows; that same side
+   reaches 1.00 against 1.01, its downwind sides at most 4.56 against 9.35, its top at most 1.49). That does not change
+   the verdict; it is reported beside it, and it shows how close to C4's own seed-to-seed spread the bound sits.
+2. **Tracking: it follows a real run better.** At 1 s both differences are entirely above zero: the heat field
+   +1.85 dB [+1.45, +2.27] and the picture +1.59 dB [+1.02, +2.20]; so are the soot and the 8-frame and 2 s horizons.
+3. **Look: it does not play as realistically.** Three endless statistics are worse: the coverage distance
+   (+0.0049 [+0.0002, +0.0095]), the light distance (+0.0232 [+0.0126, +0.0326]) and the mean picture
+   (-2.52 dB [-3.79, -1.29]); the 3D spectrum is better (-0.182 [-0.230, -0.140]) and the motion ties.
+
+**The verdict: fails.** The learned 3D smoke follows real runs better than running the cheap simulation (+1.59 dB in
+pictures and +1.85 dB in the heat field at 1 s), but by the rule it runs away (validation's edge check, one side, 7%
+over its bound; it passes with the test's seeds), and it looks worse played on in coverage, in the light it adds and
+in the mean picture. By §2.9 it is shipped only as a labelled demo (§5).
+
+Beside the rule:
+- **The look's shortfall is everywhere, not one setting**: C4's mean picture is below the coarse simulation's at all six
+  test settings (by 0.6 to 4.9 dB), its light distance is larger at five (nearly equal at the sixth, 0.0191 against 0.0186),
+  its coverage distance larger at four. The learned smoke spreads into a broad, diffuse cone and fills more of the
+  box than the real plume ([videos/README.md](../videos/README.md) §9c, real against learned); the coarse simulation
+  runs the teacher's own equations, so it gets the plume's bulk, its spread, right, and loses only in detail (its 3D
+  spectrum distance is the worse). Validation said the same in coverage and light, the mean picture tied there.
+- **Both are calmer than the real smoke** (motion ratio 0.58 for C4, 0.55 for the coarse simulation, 1.02 for other
+  real runs): the seeded detail layer they share moves less than the simulation's own detail.
+- **Holding the first frame is far behind** in pictures (C4 +7.42 dB [+7.08, +7.74] at 1 s) and in the heat field
+  (+2.24 [+1.91, +2.58]): a rising smoke column does not stand still the way a flame's base does. Other real runs (the
+  floor) are still far closer to the real runs than any method (spectrum 0.038, mean picture 34.1 dB).
+
+**Cost** (`nvfx_3d timing`, `results/3d/r/timing.csv`, nice 15, a quiet moment of the shared machine: load 1.4 to
+1.6; provisional). Milliseconds per frame, median:
+
+| what | 1 thread | 2 threads | 4 threads |
+|---|---:|---:|---:|
+| a step through the volume API | 26.6 | 15.1 | 9.0 |
+| a picture, 256 x 256 | 93 | 47 | 22 |
+| a picture, 512 x 512 | 344 | 170 | 82 |
+| a start (the start point and the 24-frame warm-up) | 683 | 387 | 222 |
+
+The volume API's step uses the vectorised detail layer (REPORT §19); on one thread the stages with the reference detail
+layer are: the noise inputs 2.2 ms, the coarse step 10.4, the detail layer 52.8 (which the vector kernel replaces),
+the renderer's preparation 14.7, a 256 x 256 picture 70. The simulation's own frame is 151 ms at 64 x 96 x 64 and 5.1
+ms at 16 x 24 x 16. A smoke picture costs more than the fire's (N2: 61 ms at 256 x 256 on one thread), most likely
+because the soot fills more of the box, so more of each ray is marched (not measured).
+
+## 5. What ships
+
+- **`models/3d/smoke.nvfx3`**: C4, the frozen file (SHA-256 7a53e3e2...19988), **as a labelled demo**: it failed its
+  rule (§4). `models/layout.txt` puts it at `r_smoke3d/models/chosen.nvfx3` in the data root, where
+  `neuralfx.Smoke3dShippedModel` (`nvfx_3d check`) finds it: the file is the one frozen for the test, it plays through
+  the volume C API, its heat is finite and not negative, it is visible, and over 10 s at three winds its sides stay
+  within the calibrated bounds (skipped, exit 77, without the file).
+- `models/3d/smoke_demo.nvfx3` **stays N2's smoke2** (study N's smoke preset, never tested): study hres's smoke
+  scripts copy it from `n2_3d/models/smoke2.nvfx3` as their baseline, and study R compared no earlier smoke (§2.6: a
+  different teacher).
+- **Videos** ([videos/README.md](../videos/README.md) §9c), each labelled a demo: the teacher against plume theory
+  (`3d_plume_theory.mp4`), the learned smoke walked around (`3d_smoke_r_orbit.mp4`), real against learned
+  (`3d_smoke_r_real_vs_learned.mp4`) and the fire and smoke coupled (`3d_fire_smoke_coupled.mp4`). Study N's smoke
+  video stays: as in N2, a model that fails its rule does not replace the demo, which is the owner's call.
+- **In the solver**: `Effect::smoke_r` (the validated teacher) and the flux-form scalars, the plume measurement and its
+  fits; neither the library nor the FUSE demo plays the smoke.
+
 ## 6. Beside the study
+
+### 6.1 Fire and smoke coupled (a demo, not measured)
+
+`nvfx_3d video --kind coupled` stacks two learned volumes: N2's 3D fire in the lower box and study R's smoke in the box
+above it, drawn as one 64 x 192 x 64 volume with the fire's optics, so the flame lights its smoke. The fire's soot
+leaving the top of its box (the soot times the upward velocity over its top four layers, smoothed over a second,
+against its running mean) sets the smoke's intensity, so the smoke above follows how much the fire sends up. Making
+it found a fault in the demo's own code, fixed before the video: the volume API's textures run z slowest, the
+renderer's fields y slowest, and the two boxes were stacked in z and drawn scrambled into stripes (and the flux was
+read off the wrong cells). It is a demo of coupling through the public API, not a coupled simulation: the boxes do not
+exchange heat or momentum, and the seam between them shows as a flat base under the upper smoke.
 
 ### 6.2 Study R and study hres
 
@@ -518,6 +615,26 @@ different things and share no data, seeds or files:
 - **The natural next step joins them**: hres's finer model trained on `smoke_r`. `--study hres --effect smoke_r` runs
   today, but hres's seed blocks treat only `--effect smoke` as smoke (`hres_smoke()`), so such a run would take the
   fire's seed blocks; it needs a seed block of its own and its own rule, and it is not done here.
+
+### 6.3 What it means
+
+- **The teacher is now a plume.** Study N's smoke lost two thirds of its buoyancy flux on the way up; `smoke_r`
+  conserves it, spreads at the measured entrainment rate for pure plumes and follows MTT's power laws to about 0.1 in
+  the exponents, with one clear fault: it is about a third too slow for its flux (it gains 0.78 of the momentum its
+  buoyancy gives), and its wind is a drag on the smoke rather than moving air.
+- **N2's recipe tracks this teacher well and plays it badly.** As for the fire, the learned smoke follows a real run
+  better than the coarse simulation with the same detail, by about 1.6 dB in pictures and 1.9 dB in the heat field at 1
+  s. Played on, it spreads too wide and fills the box: smoke is seen by its soot everywhere it goes, where a flame is
+  seen by its emission at the source, so a plume's spread is what the pictures measure, and the coarse simulation,
+  which runs the teacher's own equations, gets that right.
+- **The edge check failed by a hair, at the tightest kind of bound.** At no wind the teacher puts no heat on the x = 0
+  side, so the bound there is the fixed margin alone (B = 1); C4 holds about 1 (1.08 on validation's seed, 1.00 on the
+  test's). The calibration on four teacher runs did what N2's lesson asked for wherever the teacher reaches a side; for
+  a side it never reaches, the check asks the model for no more than one unit there over 30 s. The rule stands as
+  written.
+- **Next**: train against the spread (the profile and activity losses see means and motion, not the plume's width), more
+  teacher time (9.6 minutes here, N2 had 12.5), and hres's finer state on this teacher (§6.2). A moving ambient wind in
+  the solver would make the bent plume Briggs's, at the cost of changing every 3D effect's open edges.
 
 ## 7. Reproduce
 
@@ -560,5 +677,9 @@ cp $D/models/<chosen>.nvfx3 $D/models/chosen.nvfx3; $B freeze --model $D/models/
 $B truth --study r --split test; $B real --study r --split test
 $B edge --study r --model $D/models/chosen.nvfx3 --label learned --seed-base 29730000 $W --out $D/results/edge_test.csv
 $B track --study r --split test --method learned --model $D/models/chosen.nvfx3 --frozen $R/frozen.csv   # and play; coarse; hold
-$B compare --study r --split test --a learned --b coarse --results $R
+$B compare --study r --split test --a learned --b coarse --results $R; $B compare --study r --split test --a learned --b hold --results $R
+$B compare --study r --split test --a hold --b coarse --results $R; $B edgecheck --study r --csv $R/edge_test.csv --bounds $R/edge_bounds.csv
+# the cost (§4), the shipped file (§5), the videos (videos/README.md §9c)
+$B timing --study r --model $D/models/chosen.nvfx3 --threads 1,2,4 --out $R/timing.csv
+cp $D/models/chosen.nvfx3 models/3d/smoke.nvfx3; (cd models && find 2d 3d prior upscale -type f | sort | xargs sha256sum > SHA256SUMS)
 ```

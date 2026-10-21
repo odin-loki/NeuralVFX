@@ -4112,12 +4112,18 @@ each, both frames the references' pixels).
 
 ## 20. Study R: a validated 3D smoke
 
-**Status: in progress** (21 October 2026; branch `study-smoke3d`). The full write-up is [STUDY_R.md](STUDY_R.md). Seeds:
+**Status: finished** (21 October 2026; branch `study-smoke3d`). The full write-up is [STUDY_R.md](STUDY_R.md). Seeds:
 29,000,000 to 29,999,999. Code: `Effect::smoke_r` and `Params::span`, `source_x`, `scalars` and `velocity` in
 `src/sim3d/sim3d.cpp`; `render3d::optics_for` (warm smoke, also used by the volume runtime); `tools/plume3d.cpp`
-(`nvfx_3d plume`, `plumefit`, `plumevideo`); study R's seeds, settings, calibrated edge check (`edgecal`), choice and
-`check` in `tools/nvfx_3d.cpp`. Tests: `tests/test_3d.cpp` (5 new) and `neuralfx.Smoke3dShippedModel` (data). No C
-call or public struct changed (`NVFX_VERSION` 7).
+(`nvfx_3d plume`, `plumefit` with the buoyancy budget, `plumevideo`); study R's seeds, settings, calibrated edge check
+(`edgecal`), choice, `check` and the coupled demo in `tools/nvfx_3d.cpp`. Tests: `tests/test_3d.cpp` (5 new) and
+`neuralfx.Smoke3dShippedModel` (data). No C call or public struct changed (`NVFX_VERSION` 7).
+
+**In short.** The solver's smoke is now a plume by Morton, Taylor and Turner's measures, but about a third too slow for
+its buoyancy. Study N2's recipe trained on it gives a learned smoke that **fails its test**: it follows a real run
+better than the coarse simulation with the same detail (+1.59 dB [+1.02, +2.20] in pictures and +1.85 dB [+1.45,
++2.27] in the heat field at 1 s), but on validation it missed one edge bound by 7%, and played on it looks worse in
+coverage, in the light it adds and in the mean picture (-2.52 dB [-3.79, -1.29]). It ships as a labelled demo.
 
 **The teacher, checked against plume physics first.** Study N's smoke preset was clearly wrong as a plume: its buoyancy
 flux fell threefold up the box (it cooled its gas, faded its soot and damped every velocity), and without those sinks
@@ -4143,6 +4149,46 @@ in its last 10 cells; its sides make the plume about 5% narrower and
 its centreline buoyancy 5 to 18% higher than in a box half as wide again. The wind-bent plume does not follow Briggs's
 two-thirds law (exponents 0.54 and 0.88, coefficients 4.3 and 5.3 against 1.6), because the solver's wind is a drag on
 smoke through still air: the plume moves at under half the wind's speed and leans rather than bends.
+
+**The learned smoke.** Study N2's model unchanged (a 16 x 24 x 16 state, 14,218 weights, ambient air at the open
+edges, seeded 64 x 96 x 64 detail), its four training stages (the last of long rollouts), on 48 runs of `smoke_r` (9.6
+minutes); 4.3 CPU-hours of training. The rule, the held-out settings and seeds, and **edge bounds calibrated on four
+teacher runs per wind** (N2's lesson: one run per wind set a bound its teacher breaks; here the leave-one-out check
+raised one bound) were committed before validation. On validation **no candidate passed the edge check**: C3 runs
+away at a wind of 0.25; C2 and C4 put too much heat on one side the teacher never reaches (C4 1.08 against a bound of
+1.01 at no wind). The rule then chose among all three by the mean rank of seven measures: **C4**, frozen by its
+SHA-256 before the test, which by the rule already fails the test's first condition.
+
+The test, run once (18 tracking runs at 6 held-out settings; 3 real runs and 3 plays of each method per setting; C4
+minus the coarse simulation with the same seeded detail, paired bootstrap, 10,000 resamples):
+
+| measure | C4 | coarse simulation | C4 - coarse simulation |
+|---|---:|---:|---|
+| tracking, heat field, 1 s (dB) | 20.02 | 18.17 | +1.85 [+1.45, +2.27] (better) |
+| tracking, picture, 1 s (dB) | 17.87 | 16.28 | +1.59 [+1.02, +2.20] (better) |
+| endless: 3D spectrum distance | 0.504 | 0.686 | -0.182 [-0.230, -0.140] (better) |
+| endless: \|ln motion ratio\| | 0.552 | 0.602 | -0.051 [-0.182, +0.084] (tie) |
+| endless: coverage distance | 0.0201 | 0.0152 | +0.0049 [+0.0002, +0.0095] (worse) |
+| endless: light distance | 0.0363 | 0.0131 | +0.0232 [+0.0126, +0.0326] (worse) |
+| endless: mean picture PSNR (dB) | 21.70 | 24.22 | -2.52 [-3.79, -1.29] (worse) |
+
+**The verdict, by the rule: fails.** It follows real runs better than running the cheap simulation, but it runs away by
+validation's edge check (with the test's seeds it passes, that side at 1.00 against 1.01: the bound sits at C4's own
+seed-to-seed spread) and looks worse in coverage, light and the mean picture (the mean picture at every test setting): the learned smoke
+spreads into a broad cone and fills the box where the real plume stays narrow, and the coarse simulation, the teacher's
+own equations, gets the spread right. It beats holding the first frame by 7.4 dB in pictures at 1 s. A step costs
+26.6 ms on one thread and 9.0 on four through the volume API (the vectorised detail layer of §19); a 256 x 256 picture
+93 ms (provisional, `results/3d/r/timing.csv`).
+
+**What ships**: `models/3d/smoke.nvfx3` (C4) as a labelled demo, checked by `neuralfx.Smoke3dShippedModel`; four demo
+videos ([videos/README.md](../videos/README.md) §9c: the teacher against plume theory, the smoke walked around, real
+against learned, and the learned fire and smoke coupled through the volume API, whose stacking bug, z-slowest textures
+stacked as if y-slowest, was fixed first). `smoke_demo.nvfx3` stays N2's smoke (study hres's baseline) and study N's
+smoke video stays. Study hres's smoke (on main) is a finer model of study N's preset, the teacher found wrong here;
+the natural next step joins the two (STUDY_R.md §6.2): hres's finer state trained on `smoke_r`, and a loss on the
+plume's spread.
+
+**Checks** (on the merge with origin/main 6c87b29): being run.
 
 ## 21. Study Q: the weak spots of rounds 9 and 10, fixed and measured
 

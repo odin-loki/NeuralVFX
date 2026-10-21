@@ -44,6 +44,12 @@ C++23, no third-party runtime dependencies, a C API for engines, no Python.
   but looks worse when played on (motion and coverage, mostly where it runs away: when the wind blows towards -x), and
   holding the first frame still beats it after a second. About 70 ms a step on one busy core (provisional). Videos: [videos/README.md](videos/README.md) §9.
   Study N2 (STUDY_3D.md §14) fixed the runaway (ambient air at the model's open edges, long rollouts in training): no runaway over 30 s, better than study N's model on a new test, but by its rule it did not pass, so study N's model and videos remain the demo.
+- **3D smoke on a validated teacher (study R):** [docs/STUDY_R.md](docs/STUDY_R.md): the 3D solver's smoke fixed and
+  measured against Morton, Taylor and Turner's plume theory (its buoyancy flux conserved, top-hat entrainment 0.14 to
+  0.15 against the measured 0.10 to 0.16, a third too slow for its flux), then learned with N2's recipe and tested once:
+  it follows real runs better than the coarse simulation (+1.59 dB in pictures at 1 s) but fails its rule (an edge
+  bound missed by 7% on validation; it spreads too wide played on), so it ships as a labelled demo
+  (`models/3d/smoke.nvfx3`; videos: [videos/README.md](videos/README.md) §9c, with the fire and smoke coupled).
 - **Engine integration:** [docs/ENGINES.md](docs/ENGINES.md) (C API for effects and scenes, threading, Unreal, Unity,
   the Godot 4 plugin, lit sprites for an engine's own lighting: §11).
 - **Putting it in your engine:** [docs/INTEGRATION.md](docs/INTEGRATION.md): which API when, the frame loop and threads,
@@ -261,7 +267,7 @@ training, evaluation; about three hours), then `d-timing` on an idle machine and
 | `nvfx_g_extras` | study G's extras (stage S8): one renderer for every model (G4a), a shard critic (G5a), a mixer of the stepper and a coarse solver for smoke (G5b); none kept ([docs/DCM.md](docs/DCM.md) §10) |
 | `nvfx_study_h` | study H's measurements: products on LZ78/RePair-compressed data against dense code (`--h1`), the run-aware detail step (`--h2`); scripts in `tools/study_h/` |
 | `nvfx_f2` | studies F2 and F3 (results/compression): `data`, `flipbooks` (our BC3 layout and raw, then BC7 and ASTC), `trim` (the same flipbooks without their empty space), `train` (low-bit, quantisation-aware, rate-aware, vector-quantised and sparse models), `rescore`, `pairs`, `video` (x264, x265, VP9, AV1 through ffmpeg), `report` (equal-quality ratios against each flipbook baseline and codec, memory and disk, with intervals; `--figure`, `--pareto`), `g3c`, `g3c-report`, `timing` |
-| `nvfx_3d` | study N, a small 3D demo: `pilot`, `look`, `record`, `train`, `finish`, `truth`, `track`, `real`, `play`, `compare`, `freeze`, `video`, `timing`, `edge`; study N2 (`--study n2`): `edgecheck`, `reedge`, `choose` ([docs/STUDY_3D.md](docs/STUDY_3D.md) §12, §14.13); study hres (`--study hres`): finer **32 x 48 x 32** coarse state, same 64 x 96 x 64 detail ([docs/STUDY_3D_HRES.md](docs/STUDY_3D_HRES.md)) |
+| `nvfx_3d` | study N, a small 3D demo: `pilot`, `look`, `record`, `train`, `finish`, `truth`, `track`, `real`, `play`, `compare`, `freeze`, `video`, `timing`, `edge`; study N2 (`--study n2`): `edgecheck`, `reedge`, `choose` ([docs/STUDY_3D.md](docs/STUDY_3D.md) §12, §14.13); study hres (`--study hres`): finer **32 x 48 x 32** coarse state, same 64 x 96 x 64 detail ([docs/STUDY_3D_HRES.md](docs/STUDY_3D_HRES.md)); study R (`--study r`): `plume`, `plumefit`, `plumevideo` (the smoke against plume theory), `edgecal`, `check`, `video --kind coupled` ([docs/STUDY_R.md](docs/STUDY_R.md) §7) |
 | `nvfx_study_p` | study P, large effects drawn at half size and upscaled: `pin`, `info`, `check`, `tiles`, `train`, `calib`, `dev`, `eval` (validation with the null, the test once), `margins`, `choose`, `decide`, `cost`, `video`, and the development steps `anatomy`, `bench`, `tile-eval` ([docs/STUDY_P.md](docs/STUDY_P.md)) |
 | `neuralfx_arch_bench` | Phase 0 architecture microbenchmark |
 
