@@ -105,7 +105,8 @@ struct Ctx {
   bool m2 = false;  // study M2 (--study m2): files under DATA/m2, its splits and its rule
   bool m3 = false;  // study M3 (--study m3): files under DATA/m3, its splits and its rule
   bool o = false;   // study O (--study o): files under DATA/o_fix, its splits and its rule
-  fs::path dir() const { return data / (o ? "o_fix" : m3 ? "m3" : m2 ? "m2" : "m_ordered"); }
+  bool q = false;   // study Q (--study q): files under DATA/q_fix, its splits and its rule (docs/REPORT.md §21)
+  fs::path dir() const { return data / (q ? "q_fix" : o ? "o_fix" : m3 ? "m3" : m2 ? "m2" : "m_ordered"); }
 };
 
 template <class F>
@@ -1084,6 +1085,7 @@ std::vector<rollout::Run> training_runs(const Ctx& c, sim::Effect e, int threads
       if (in) return;
     }
     run = rollout::record_run(run.p, r.frames, kRes);
+    if (c.q) return;  // study Q keeps them in memory only (a one-shot's 240 runs are 0.6 GB on disk; the disk is shared)
     fs::create_directories(p.parent_path());
     const fs::path tmp = p.string() + ".tmp";
     {
@@ -1469,6 +1471,63 @@ void step_train(const Ctx& c, sim::Effect e, const tools::Args& a) {
   std::println("train: {} -> {}: loss {:.5f} in {:.0f} s", ename(e), out.string(), r.final_loss, r.seconds);
 }
 
+// --- study Q's candidates that are not a fine-tune of the stepper -------------------------------------------------------------
+
+// refit: the renderer trained again as the recipe trains it (rollout::finish_model: its fresh weights, init_model's with
+// seed 1, the recipe's options), on the recipe's samples (two frames from each of the first render_runs salt-1 runs, at
+// frames 10 to length - 10) and, with --early N, one more from each of those runs at one of its first N frames (run i:
+// frame i mod N), which the recipe's samples never include. Everything else in the file is unchanged.
+void step_refit(const Ctx& c, sim::Effect e, const tools::Args& a) {
+  rollout::Model m = load_or_throw(a.need("model"));
+  if (m.effect != ename(e)) throw std::invalid_argument("refit: the model is " + m.effect);
+  const rollout::SimRecipe r = rollout::recipe_for(e);
+  const int early = a.i("early", 15), n = r.render_runs;
+  const auto t0 = std::chrono::steady_clock::now();
+  std::vector<std::vector<rollout::RenderSample>> per(sz(n));
+  parallel(c.threads, n, [&](int i) {
+    sim::Fluid f(run_params(e, 1, static_cast<std::uint64_t>(i)));
+    const int span = std::max(1, r.frames - 20);
+    const int fa = 10 + (i * 37) % span, fb = 10 + (i * 71 + 13) % span, fe = early > 0 ? i % early : -1;
+    for (int k = 0; k <= std::max({fa, fb, fe}); ++k) {
+      f.step_frame();
+      if (k == fa || k == fb) per[sz(i)].push_back(rollout::render_sample(f, m.h.res));
+      if (k == fe) per[sz(i)].push_back(rollout::render_sample(f, m.h.res));
+    }
+  });
+  std::vector<rollout::RenderSample> samples;
+  for (auto& v : per) {
+    for (auto& s : v) samples.push_back(std::move(s));
+  }
+  std::println("refit: {} {} renderer samples ({} of them from the first {} frames) ({:.0f} s)", ename(e), samples.size(), early > 0 ? n : 0, early, seconds_since(t0));
+  m.render_w = rollout::init_model(m.h, 1).render_w;
+  rollout::RendererOptions ro = r.renderer;
+  ro.threads = a.i("render-threads", 1);  // the batch's frames are split over the threads, so the result depends on it: one, fixed
+  const double psnr = rollout::train_renderer(m, samples, ro);
+  rollout::quantise_like_storage(m);
+  if (auto w = rollout::save_model(a.need("out"), m); !w) throw std::runtime_error(w.error());
+  std::println("refit: {} -> {}: renderer PSNR on its samples' pixels {:.2f} dB ({:.0f} s)", ename(e), a.need("out"), psnr, seconds_since(t0));
+}
+
+// starts: the start points taken again from the training runs (salt 1) as the recipe takes them (rollout::choose_starts:
+// farthest-point order in control space from the run nearest the middle, at the recipe's frame, with fine fields at the
+// model's size), --count of them. The first ones are the current file's (the order is the same), so it adds start points.
+void step_starts(const Ctx& c, sim::Effect e, const tools::Args& a) {
+  rollout::Model m = load_or_throw(a.need("model"));
+  if (m.effect != ename(e)) throw std::invalid_argument("starts: the model is " + m.effect);
+  const rollout::SimRecipe r = rollout::recipe_for(e);
+  const int count = a.i("count", 24);
+  const auto t0 = std::chrono::steady_clock::now();
+  const auto before = m.starts;
+  const auto runs = training_runs(c, e, c.threads);
+  rollout::choose_starts(m, runs, count, r.start_frame);
+  int same = 0;
+  for (std::size_t i = 0; i < std::min(before.size(), m.starts.size()); ++i) same += before[i].controls == m.starts[i].controls ? 1 : 0;
+  rollout::quantise_like_storage(m);
+  if (auto w = rollout::save_model(a.need("out"), m); !w) throw std::runtime_error(w.error());
+  std::println("starts: {} {} start points (the first {} of {} the current file's controls) -> {} ({:.0f} s)", ename(e), m.starts.size(), same, before.size(),
+               a.need("out"), seconds_since(t0));
+}
+
 // --- sstart: start points moved to the controls by the mean state (training settings) ------------------------------------------
 
 // The diagnosis's neural_one_lr (one continuous reference rollout from one of the three nearest start points, the same index
@@ -1728,6 +1787,23 @@ constexpr int kM3Settings = 30;  // fixed by the probe (REPORT §14.9.2) before 
 //          3,040,000, plays 3,050,000, tracking 3,060,000 (2 runs per setting).
 constexpr int kOProbeSettings = 40;
 constexpr int kOSettings = 30;  // fixed by the probe (REPORT §16.3) before validation
+// Study Q (docs/REPORT.md §21; its own range, 33,000,000 to 33,499,999; 8 runs pooled; tracking runs k < 2 per setting, each
+// from an empty grid as the test's):
+//   probeq development only (training settings: the controls of salt-1 training runs 0 to kQProbeSettings - 1): real
+//          33,000,000, plays 33,010,000, the null 33,020,000, tracking 33,030,000.
+//   checkq a library setting's check, not a decision (training settings, salt-1 runs 0 to 9; 4 runs pooled): real
+//          33,040,000, plays 33,050,000, tracking 33,060,000 (2 runs per setting).
+//   valq   study G's validation settings extended to q_settings(e): real 33,100,000, plays 33,150,000, tracking 33,180,000.
+//   testq  study B's held-out settings extended to q_settings(e): real 33,200,000, plays 33,250,000, tracking 33,280,000.
+// (The floor: the real runs' base + 50. Study Q's other seeds: d-eval's re-run of a replaced model's round test from
+// 33,300,000, diagnosis and figures 33,460,000 to 33,499,999.)
+constexpr int kQProbeSettings = 40;
+// The number of settings for validation and the test, per effect: fixed by the probe (REPORT §21) before validation; 0
+// until then (valq and testq refuse to run).
+int q_settings(sim::Effect e) {
+  (void)e;
+  return 0;
+}
 struct Split {
   std::string name;
   std::vector<Setting> settings;
@@ -1804,6 +1880,29 @@ Split split_of(const std::string& name, sim::Effect e) {
     s.real = val ? 3'100'000 : 3'200'000;
     s.model = val ? 3'150'000 : 3'250'000;
     s.track = val ? 3'180'000 : 3'280'000;
+  } else if (name == "probeq") {
+    s.settings = training_settings(e, kQProbeSettings);
+    s.track_reps = 2;
+    s.real = 33'000'000;
+    s.model = 33'010'000;
+    s.null = 33'020'000;
+    s.track = 33'030'000;
+  } else if (name == "checkq") {  // study Q's check of a library setting (training settings, development only)
+    s.settings = training_settings(e, 10);
+    s.reps = 4;
+    s.track_reps = 2;
+    s.real = 33'040'000;
+    s.model = 33'050'000;
+    s.track = 33'060'000;
+  } else if (name == "valq" || name == "testq") {
+    const int nq = q_settings(e);
+    if (nq <= 0) throw std::invalid_argument("study Q: the probe has not fixed the number of settings for " + std::string(sim::effect_name(e)) + " (q_settings)");
+    const bool val = name == "valq";
+    s.settings = val ? validation_settings(nq, nq) : test_settings(nq);
+    s.track_reps = 2;
+    s.real = val ? 33'100'000 : 33'200'000;
+    s.model = val ? 33'150'000 : 33'250'000;
+    s.track = val ? 33'180'000 : 33'280'000;
   } else if (name == "val3" || name == "test3") {
     if (kM3Settings <= 0) throw std::invalid_argument("study M3: the probe has not fixed the number of settings (kM3Settings)");
     const bool val = name == "val3";
@@ -1883,7 +1982,7 @@ void save_stats(const fs::path& p, const metrics::ClipStats& s) {
   }
   fs::rename(tmp, p);
 }
-std::string stats_ext(const Ctx& c) { return c.m2 || c.m3 || c.o ? "fst" : "stats"; }
+std::string stats_ext(const Ctx& c) { return c.m2 || c.m3 || c.o || c.q ? "fst" : "stats"; }
 metrics::ClipStats real_stats(const Ctx& c, sim::Effect e, const Setting& s, std::uint64_t seed) {
   const fs::path p = c.dir() / "vt" / "real" / std::format("{}_{}.{}", ename(e), seed, stats_ext(c));
   metrics::ClipStats st;
@@ -1909,6 +2008,67 @@ metrics::ClipStats play_stats(const Ctx& c, sim::Effect e, const Entry& m, nvfx_
   st = metrics::stats(runtime_clip(fx, ctl, -1, seed, frames_of(e)));
   save_stats(p, st);
   return st;
+}
+
+// Study Q caches a setting's runs pooled (and its first run alone), not each run: a one-shot's probe of four models is
+// otherwise 0.6 GB of mean frames on a shared disk. The same statistics: the pooled one is pool() of the same runs.
+struct Pooled {
+  metrics::ClipStats pooled, first;
+};
+bool load_pooled(const fs::path& p, Pooled& s) {
+  std::ifstream i(p, std::ios::binary);
+  return i && get_stats_f(i, s.pooled) && get_stats_f(i, s.first);
+}
+void save_pooled(const fs::path& p, const Pooled& s) {
+  fs::create_directories(p.parent_path());
+  const fs::path tmp = p.string() + ".tmp";
+  {
+    std::ofstream o(tmp, std::ios::binary);
+    put_stats_f(o, s.pooled);
+    put_stats_f(o, s.first);
+  }
+  fs::rename(tmp, p);
+}
+// `reps` real runs at a setting, seeds base + 100 si + k (k < reps), pooled; cached under DATA/q_fix/vt/realp.
+Pooled real_pooled(const Ctx& c, sim::Effect e, const Setting& s, std::uint64_t base, int si, int reps) {
+  const fs::path p = c.dir() / "vt" / "realp" / std::format("{}_{}_{}_{}.pst", ename(e), base, si, reps);
+  Pooled out;
+  if (load_pooled(p, out)) return out;
+  std::vector<metrics::ClipStats> v;
+  for (int k = 0; k < reps; ++k) {
+    const std::uint64_t seed = base + 100 * static_cast<std::uint64_t>(si) + static_cast<std::uint64_t>(k);
+    sim::Fluid f(setting_params(e, s, seed));
+    for (int i = 0; i < warm_of(e); ++i) f.step_frame();
+    Clip cl;
+    cl.allocate(kSize, frames_of(e));
+    cl.fps = 30.f;
+    for (int i = 0; i < cl.frames; ++i) {
+      f.step_frame();
+      f.render(cl.frame(i));
+    }
+    v.push_back(metrics::stats(cl));
+  }
+  out.pooled = pool(v);
+  out.first = v.front();
+  save_pooled(p, out);
+  return out;
+}
+// A model's `reps` plays at a setting (the runtime as shipped, seeds base + 100 si + k), pooled; cached under
+// DATA/q_fix/vt/playp/<the first 16 of the file's SHA-256>.
+Pooled play_pooled(const Ctx& c, sim::Effect e, const std::string& sha, nvfx_effect* fx, const Setting& s, std::uint64_t base, int si, int reps) {
+  const fs::path p = c.dir() / "vt" / "playp" / sha.substr(0, 16) / std::format("{}_{}_{}_{}.pst", ename(e), base, si, reps);
+  Pooled out;
+  if (load_pooled(p, out)) return out;
+  const std::vector<float> ctl(s.begin(), s.end());
+  std::vector<metrics::ClipStats> v;
+  for (int k = 0; k < reps; ++k) {
+    const std::uint64_t seed = base + 100 * static_cast<std::uint64_t>(si) + static_cast<std::uint64_t>(k);
+    v.push_back(metrics::stats(runtime_clip(fx, ctl, -1, seed, frames_of(e))));
+  }
+  out.pooled = pool(v);
+  out.first = v.front();
+  save_pooled(p, out);
+  return out;
 }
 
 double apsnr(std::span<const std::uint8_t> r, std::span<const std::uint8_t> t) {  // study D's active PSNR of one frame
@@ -2006,6 +2166,31 @@ std::vector<Scores> evaluate(const Ctx& c, sim::Effect e, const Split& sp, const
     if (models[mi].seed_base > 0) out[mi].track = out[0].track;
   }
   const auto seed = [&](std::uint64_t base, int si, int k) { return base + 100 * static_cast<std::uint64_t>(si) + static_cast<std::uint64_t>(k); };
+  if (c.q) {  // study Q: the same statistics, cached per setting pooled
+    std::vector<metrics::ClipStats> ref(sz(n)), other(sz(n)), ref1(sz(n));
+    parallel(c.threads, n * 2, [&](int j) {
+      const int si = j / 2, o = j % 2;
+      const Pooled pr = real_pooled(c, e, sp.settings[sz(si)], sp.real + (o ? 50 : 0), si, sp.reps);
+      (o ? other : ref)[sz(si)] = pr.pooled;
+      if (!o) ref1[sz(si)] = pr.first;
+    });
+    std::println("{}: {} real runs ready ({:.0f} s)", sp.name, ename(e), seconds_since(t0));
+    std::fflush(stdout);
+    for (std::size_t mi = 0; mi < models.size(); ++mi) {
+      Runtime rt(models[mi].m);
+      parallel(c.threads, n, [&](int si) {
+        const Pooled pl = play_pooled(c, e, models[mi].sha, rt.e, sp.settings[sz(si)], models[mi].seed_base > 0 ? models[mi].seed_base : sp.model, si, sp.reps);
+        out[mi].d[sz(si)] = metrics::distance(ref[sz(si)], pl.pooled);
+        out[mi].d1[sz(si)] = metrics::distance(ref1[sz(si)], pl.first);
+      });
+      std::println("{}: {} {} played ({:.0f} s)", sp.name, ename(e), models[mi].name, seconds_since(t0));
+      std::fflush(stdout);
+    }
+    Scores floor;
+    for (int si = 0; si < n; ++si) floor.d.push_back(metrics::distance(ref[sz(si)], other[sz(si)]));
+    out.push_back(floor);
+    return out;
+  }
   parallel(c.threads, n * sp.reps * 2, [&](int j) {
     const int si = j % n, k = (j / n) % sp.reps, o = j / (n * sp.reps);
     (void)real_stats(c, e, sp.settings[sz(si)], seed(sp.real + (o ? 50 : 0), si, k));
@@ -2589,15 +2774,316 @@ void probe_m3(const Ctx& c, sim::Effect e, const Split& sp, const std::vector<En
   merge_rows(c.results / std::format("{}_power.csv", tag), "effect,model,measure,probe_settings,n_settings,mean,sd,sd_up80,margin,n90,n90_up80,p_pass,p_pass_if_loss", rows, en);
 }
 
+// --- study Q (docs/REPORT.md §21): the weak spots of rounds 9 and 10 ---------------------------------------------------------
+//
+// Its rule (the form fixed before any of its numbers; the numbers from the probe, committed before validation). Eight
+// measures: tracking from the true state at the first frame, at 1 s and at 2 s (2 runs per setting, averaged per setting),
+// and the endless statistics of the runtime as shipped (8 runs pooled per setting): the detail spectrum distance, |ln
+// motion ratio|, the coverage and emission distances and the mean-frame PSNR. Candidate minus current model, paired over
+// the settings, 95% bootstrap with 10,000 resamples (metrics::paired_bootstrap, seed 2026). Each candidate has targets,
+// declared with it before validation (targets_q): the weak spot it is made to fix. A candidate replaces the current model
+// when
+//   1. it is better on at least one of its targets (the interval above zero), and
+//   2. every measure is within its margin (the interval's worse end), its targets included: each tracking horizon at
+//      least its margin (dB), the mean-frame PSNR at least its margin (dB), the spectrum, motion, coverage and emission
+//      distances at most theirs.
+// Each margin is the larger of study K's at the measure's scale (tracking -0.20 dB, the mean frame -0.10 dB, spectrum and
+// motion +0.02, coverage and emission 10% of the current model's mean distance on the probe, at least 0.0001) and the
+// null's RMS change at a setting (the current model with fresh seeds, over the probe's settings); tracking has no null (a
+// tracked run takes its own seed: the same frames) and keeps K's. On validation, among an effect's candidates that meet
+// it, the chosen one has the largest mean-frame gain among those better on the mean frame; if none is, the largest gain
+// at tracking at 1 s; then at the first frame. The strict reading (no interval entirely on the worse side of zero) and
+// study K's margins are reported beside and do not decide.
+constexpr int kQM = 8;
+const std::array<std::string, kQM> kQNames = {"track_f1", "track_1s", "track_2s", "spectrum_l1", "abs_ln_motion_ratio", "coverage_l1", "emission_l1", "mean_frame_psnr"};
+constexpr std::array<bool, kQM> kQHigher = {true, true, true, false, false, false, false, true};  // higher is better
+std::vector<double> cmp_q(const Scores& s, int k) {
+  std::vector<double> v;
+  if (k < 3) {
+    const int h = k == 0 ? 0 : k == 1 ? kTrack1s : 3;
+    for (const auto& t : s.track) v.push_back(t[sz(h)]);
+  } else {
+    for (const auto& d : s.d) v.push_back(stat_value(d, k - 3));
+  }
+  return v;
+}
+using MarginsQ = std::array<double, kQM>;
+bool margins_set(const MarginsQ& m) { return m[3] > 0; }
+// The margins of the rule, per effect: q_margins.csv from the probe's null, copied here before validation.
+MarginsQ margins_q(sim::Effect e) {
+  (void)e;
+  return {};
+}
+MarginsQ margins_k_q(const Scores& cur) {
+  return {-0.20, -0.20, -0.20, kM3Spectrum, kM3Motion, std::max(kM3Least, kM3Share * mean_of(cmp_q(cur, 5))), std::max(kM3Least, kM3Share * mean_of(cmp_q(cur, 6))),
+          kOMeanFrame};
+}
+std::vector<double> diff_q(const Scores& a, const Scores& b, int k) {
+  auto x = cmp_q(a, k);
+  const auto y = cmp_q(b, k);
+  for (std::size_t i = 0; i < x.size(); ++i) x[i] -= y[i];
+  return x;
+}
+MarginsQ margins_from_null_q(const Scores& cur, const Scores& null) {
+  MarginsQ m = margins_k_q(cur);
+  for (int k = 3; k < 7; ++k) m[sz(k)] = std::max(m[sz(k)], rms_of(diff_q(null, cur, k)));
+  m[7] = std::min(m[7], -rms_of(diff_q(null, cur, 7)));
+  return m;
+}
+// The targets of each candidate, declared before validation: a renderer refit ("rf...") is made for the first frames (and
+// the average picture they are part of); every other candidate (a fine-tune of the stepper, the mean state, more start
+// points) for following a run at 1 s and the average picture.
+std::array<bool, kQM> targets_q(sim::Effect e, const std::string& name) {
+  (void)e;
+  std::array<bool, kQM> t{};
+  if (name.starts_with("rf")) {
+    t[0] = t[7] = true;
+  } else {
+    t[1] = t[7] = true;
+  }
+  return t;
+}
+struct RuleQ {
+  std::array<metrics::Interval, kQM> iv{};
+  MarginsQ mg{};
+  std::array<bool, kQM> target{}, better{}, within{}, within_k{}, strict_worse{};
+  bool pass() const {
+    bool b = false, w = true;
+    for (int k = 0; k < kQM; ++k) {
+      b = b || (target[sz(k)] && better[sz(k)]);
+      w = w && within[sz(k)];
+    }
+    return b && w;
+  }
+};
+RuleQ apply_rule_q(const Scores& cand, const Scores& cur, const MarginsQ& mg, const std::array<bool, kQM>& targets, const MarginsQ& mk) {
+  RuleQ r;
+  r.mg = mg;
+  r.target = targets;
+  for (int k = 0; k < kQM; ++k) {
+    const auto iv = metrics::paired_bootstrap(cmp_q(cand, k), cmp_q(cur, k), 10000, 2026);
+    r.iv[sz(k)] = iv;
+    const bool hi = kQHigher[sz(k)];
+    r.better[sz(k)] = hi ? iv.lo > 0 : iv.hi < 0;
+    r.within[sz(k)] = hi ? iv.lo >= mg[sz(k)] : iv.hi <= mg[sz(k)];
+    r.within_k[sz(k)] = hi ? iv.lo >= mk[sz(k)] : iv.hi <= mk[sz(k)];
+    r.strict_worse[sz(k)] = hi ? iv.hi < 0 : iv.lo > 0;
+  }
+  return r;
+}
+const std::string kRuleQHeader =
+    "effect,model,targets,better_on_target,within_margins,meets_rule,"
+    "track_f1,track_f1_lo,track_f1_hi,track_1s,track_1s_lo,track_1s_hi,track_2s,track_2s_lo,track_2s_hi,spectrum,spectrum_lo,spectrum_hi,motion,motion_lo,"
+    "motion_hi,coverage,coverage_lo,coverage_hi,emission,emission_lo,emission_hi,mean_frame,mean_frame_lo,mean_frame_hi,"
+    "margin_track_f1,margin_track_1s,margin_track_2s,margin_spectrum,margin_motion,margin_coverage,margin_emission,margin_mean_frame,outside_margin,outside_k_margin,"
+    "strict_worse,sha256";
+std::string rule_q_row(const std::string& en, const Entry& m, const RuleQ& r) {
+  std::string tg, out, outk, strict, ivs, mgs;
+  bool b = false, w = true;
+  for (int k = 0; k < kQM; ++k) {
+    if (r.target[sz(k)]) tg += (tg.empty() ? "" : ";") + kQNames[sz(k)];
+    if (!r.within[sz(k)]) out += (out.empty() ? "" : ";") + kQNames[sz(k)];
+    if (!r.within_k[sz(k)]) outk += (outk.empty() ? "" : ";") + kQNames[sz(k)];
+    if (r.strict_worse[sz(k)]) strict += (strict.empty() ? "" : ";") + kQNames[sz(k)];
+    b = b || (r.target[sz(k)] && r.better[sz(k)]);
+    w = w && r.within[sz(k)];
+    ivs += std::format(",{:.6f},{:.6f},{:.6f}", r.iv[sz(k)].mean, r.iv[sz(k)].lo, r.iv[sz(k)].hi);
+    mgs += std::format(",{:.7f}", r.mg[sz(k)]);
+  }
+  return std::format("{},{},{},{},{},{}{}{},{},{},{},{}", en, m.name, tg, b ? 1 : 0, w ? 1 : 0, r.pass() ? 1 : 0, ivs, mgs, out.empty() ? "none" : out,
+                     outk.empty() ? "none" : outk, strict.empty() ? "none" : strict, m.sha);
+}
+void print_rule_q(const std::string& split, const std::string& en, const Entry& m, const RuleQ& r) {
+  std::string tg;
+  for (int k = 0; k < kQM; ++k) {
+    if (r.target[sz(k)]) tg += (tg.empty() ? "" : ", ") + kQNames[sz(k)];
+  }
+  bool b = false, w = true;
+  for (int k = 0; k < kQM; ++k) {
+    b = b || (r.target[sz(k)] && r.better[sz(k)]);
+    w = w && r.within[sz(k)];
+  }
+  std::println("{} {} {} (targets: {}): better on a target {}, within every margin {} -> {}", split, en, m.name, tg, b ? "yes" : "no", w ? "yes" : "no",
+               r.pass() ? "MEETS the rule" : "does not meet it");
+  for (int k = 0; k < kQM; ++k) {
+    std::println("    {:<20} {:+.5f} [{:+.5f}, {:+.5f}]  margin {:+.5f}{}{}{}{}", kQNames[sz(k)], r.iv[sz(k)].mean, r.iv[sz(k)].lo, r.iv[sz(k)].hi, r.mg[sz(k)],
+                 r.better[sz(k)] ? (r.target[sz(k)] ? "  (better: a target)" : "  (better)") : "", r.within[sz(k)] ? "" : "  OUTSIDE its margin",
+                 r.within_k[sz(k)] ? "" : "  (outside study K's)", r.strict_worse[sz(k)] ? "  (strictly worse)" : "");
+  }
+}
+void decide_q(const Ctx& c, sim::Effect e, const Split& sp, const std::vector<Entry>& models, const std::vector<Scores>& sc, const std::string& prefix) {
+  const std::string en = ename(e);
+  const MarginsQ mg = margins_q(e);
+  if (!margins_set(mg)) throw std::runtime_error("study Q: the margins of " + en + " are not fixed (margins_q)");
+  const MarginsQ mk = margins_k_q(sc[0]);
+  std::vector<std::string> rows;
+  int chosen = -1, rank = 99;
+  double best = -1e9;
+  for (std::size_t mi = 1; mi < models.size(); ++mi) {
+    const RuleQ r = apply_rule_q(sc[mi], sc[0], mg, targets_q(e, models[mi].name), mk);
+    print_rule_q(sp.name, en, models[mi], r);
+    rows.push_back(rule_q_row(en, models[mi], r));
+    if (!r.pass()) continue;
+    // its rank: better on the mean frame (0), else at tracking at 1 s (1), else at the first frame (2)
+    const int rk = r.target[7] && r.better[7] ? 0 : r.target[1] && r.better[1] ? 1 : 2;
+    const double gain = r.iv[sz(rk == 0 ? 7 : rk == 1 ? 1 : 0)].mean;
+    if (rk < rank || (rk == rank && gain > best)) {
+      rank = rk;
+      best = gain;
+      chosen = static_cast<int>(mi);
+    }
+  }
+  rows.push_back(std::format("{},chosen,,,,,{}", en, chosen > 0 ? models[sz(chosen)].name : "none"));
+  merge_rows(c.results / std::format("{}_choice.csv", prefix), kRuleQHeader, rows, en);
+  std::println("{} {}: {}", sp.name, en, chosen > 0 ? "chosen " + models[sz(chosen)].name : std::string("none meets the rule"));
+}
+void report_q(const Ctx& c, sim::Effect e, const Split& sp, const std::vector<Entry>& models, const std::vector<Scores>& sc, const std::string& prefix) {
+  (void)sp;
+  const std::string en = ename(e);
+  std::vector<std::string> rows;
+  for (std::size_t mi = 1; mi < models.size(); ++mi) {
+    for (int k = 0; k < kQM; ++k) {
+      const auto a = cmp_q(sc[mi], k), b = cmp_q(sc[0], k);
+      const auto iv = metrics::paired_bootstrap(a, b, 10000, 2026);
+      rows.push_back(std::format("{},{},{},{:.6f},{:.6f},{:.6f},{:.6f},{:.6f},{}", en, models[mi].name, kQNames[sz(k)], iv.mean, iv.lo, iv.hi, mean_of(a), mean_of(b),
+                                 models[mi].sha));
+    }
+  }
+  merge_rows(c.results / std::format("{}_compareq.csv", prefix), "effect,model,statistic,mean_difference,lo,hi,candidate_mean,current_mean,sha256", rows, en);
+  std::vector<std::string> fl;
+  const Scores& floor = sc.back();
+  for (int k = 3; k < kQM; ++k) fl.push_back(std::format("{},{},{:.6f}", en, kQNames[sz(k)], mean_of(cmp_q(floor, k))));
+  merge_rows(c.results / std::format("{}_floor.csv", prefix), "effect,statistic,floor_mean", fl, en);
+}
+
+// The probe (training settings): the null's margins (q_margins.csv), and each candidate's power at N settings by resampling
+// the probe's settings as study M3's probe (probe_m3), here over the eight measures and each candidate's own targets: a
+// measure that is not a target it improves on the probe must pass its margin if truly unchanged (centred on zero), a
+// target it improves is taken as measured. Writes q_power.csv.
+void probe_q(const Ctx& c, sim::Effect e, const Split& sp, const std::vector<Entry>& models, const std::vector<Scores>& sc) {
+  const std::string en = ename(e);
+  const int P = static_cast<int>(sp.settings.size());
+  int null_i = -1;
+  for (std::size_t mi = 1; mi < models.size(); ++mi) {
+    if (models[mi].seed_base > 0) null_i = static_cast<int>(mi);
+  }
+  const Scores& floor = sc.back();
+  MarginsQ mg = margins_q(e);
+  const MarginsQ mk = margins_k_q(sc[0]);
+  if (null_i > 0) {
+    const Scores& nl = sc[sz(null_i)];
+    mg = margins_from_null_q(sc[0], nl);
+    std::vector<std::string> rows;
+    std::println("\nprobeq {}: the margins the null gives (each the larger of study K's and the null's RMS change at a setting, {} settings)", en, P);
+    std::println("{:<20}{:>12}{:>12}{:>12}{:>12}{:>12}{:>12}{:>12}", "measure", "K's", "null RMS", "null mean", "null SD", "floor", "current", "margin");
+    for (int k = 0; k < kQM; ++k) {
+      const auto d = diff_q(nl, sc[0], k);
+      const double fl = k < 3 ? 0.0 : mean_of(cmp_q(floor, k));
+      std::println("{:<20}{:>12.6f}{:>12.6f}{:>12.6f}{:>12.6f}{:>12.6f}{:>12.6f}{:>12.6f}", kQNames[sz(k)], mk[sz(k)], rms_of(d), mean_of(d), sd_of(d), fl,
+                   mean_of(cmp_q(sc[0], k)), mg[sz(k)]);
+      rows.push_back(std::format("{},{},{},{:.7f},{:.7f},{:.7f},{:.7f},{:.7f},{:.7f},{:.7f}", en, kQNames[sz(k)], P, mk[sz(k)], rms_of(d), mean_of(d), sd_of(d), fl,
+                                 mean_of(cmp_q(sc[0], k)), mg[sz(k)]));
+    }
+    merge_rows(c.results / "q_margins.csv", "effect,measure,settings,k_margin,null_rms,null_mean,null_sd,floor_mean,current_mean,margin", rows, en);
+  }
+  if (!margins_set(mg)) throw std::runtime_error("probeq: no null (--null) and no margins fixed for " + en);
+  std::vector<std::string> rows;
+  for (std::size_t mi = 1; mi < models.size(); ++mi) {
+    if (static_cast<int>(mi) == null_i) continue;
+    const auto tg = targets_q(e, models[mi].name);
+    const RuleQ rq = apply_rule_q(sc[mi], sc[0], mg, tg, mk);
+    print_rule_q(sp.name, en, models[mi], rq);
+    std::array<std::vector<double>, kQM> d;
+    std::array<double, kQM> mean{}, sd{}, sdu{};
+    std::array<bool, kQM> as_measured{};  // a target it improves on the probe
+    for (int k = 0; k < kQM; ++k) {
+      d[sz(k)] = diff_q(sc[mi], sc[0], k);
+      mean[sz(k)] = mean_of(d[sz(k)]);
+      sd[sz(k)] = sd_of(d[sz(k)]);
+      sdu[sz(k)] = sd_upper80(sd[sz(k)], P);
+      as_measured[sz(k)] = tg[sz(k)] && rq.better[sz(k)];
+    }
+    std::println("\nprobeq {} {} - current: power by resampling the probe's {} settings (pass: unchanged / a loss of the margin's size; an improved target as measured)",
+                 en, models[mi].name, P);
+    std::println("{:<20}{:>10}{:>10}{:>10}{:>10}{:>8}{:>8} | pass at N settings: {}", "measure", "mean", "SD", "SD up80", "margin", "N90", "N90up", [] {
+      std::string s;
+      for (const int N : kM3PowerN) s += std::format("{:>6}", N);
+      return s;
+    }());
+    std::array<std::array<double, kM3PowerN.size()>, kQM> pu{}, pl{};
+    std::array<double, kM3PowerN.size()> prule{}, pothers{};
+    std::mt19937_64 rng(2026 + mi);
+    std::uniform_int_distribution<int> pick(0, P - 1);
+    const bool any_target = std::ranges::any_of(as_measured, [](bool b) { return b; });
+    for (std::size_t ni = 0; ni < kM3PowerN.size(); ++ni) {
+      const int N = kM3PowerN[ni];
+      constexpr int R = 4000;
+      std::vector<int> idx(sz(N));
+      for (int r = 0; r < R; ++r) {
+        for (int& i : idx) i = pick(rng);
+        bool others = true, target = false;
+        for (int k = 0; k < kQM; ++k) {
+          double s1 = 0, s2 = 0;
+          for (const int i : idx) {
+            const double x = d[sz(k)][sz(i)] - mean[sz(k)];
+            s1 += x;
+            s2 += x * x;
+          }
+          const double m = s1 / N, h = 1.959963984540054 * std::sqrt(std::max(0.0, s2 / N - m * m) / N);
+          const bool hi = kQHigher[sz(k)];
+          if (as_measured[sz(k)]) {  // an improved target, as measured: clears zero, and stays within its margin
+            const double mm = m + mean[sz(k)];
+            const bool t = hi ? mm - h > 0 : mm + h < 0;
+            target = target || t;
+            pu[sz(k)][ni] += t ? 1.0 / R : 0.0;
+            continue;
+          }
+          const double mgk = mg[sz(k)];
+          const bool u = hi ? m - h >= mgk : m + h <= mgk;  // unchanged: centred on zero
+          const bool l = hi ? m - h >= 0 : m + h <= 0;      // a loss of the margin's size: centred on the margin
+          pu[sz(k)][ni] += u ? 1.0 / R : 0.0;
+          pl[sz(k)][ni] += l ? 1.0 / R : 0.0;
+          others = others && u;
+        }
+        pothers[ni] += others ? 1.0 / R : 0.0;
+        prule[ni] += others && (target || !any_target) ? 1.0 / R : 0.0;
+      }
+    }
+    for (int k = 0; k < kQM; ++k) {
+      const double scale = as_measured[sz(k)] ? std::abs(mean[sz(k)]) : std::abs(mg[sz(k)]);
+      const double n90 = scale > 0 ? std::pow(kZPower * sd[sz(k)] / scale, 2) : 1e9, n90u = scale > 0 ? std::pow(kZPower * sdu[sz(k)] / scale, 2) : 1e9;
+      std::string line = std::format("{:<20}{:>+10.5f}{:>10.5f}{:>10.5f}{:>10.5f}{:>8.0f}{:>8.0f} |{}", kQNames[sz(k)], mean[sz(k)], sd[sz(k)], sdu[sz(k)], mg[sz(k)],
+                                     std::ceil(n90), std::ceil(n90u), as_measured[sz(k)] ? " (target)          " : "                   ");
+      for (std::size_t ni = 0; ni < kM3PowerN.size(); ++ni) {
+        line += std::format("{:>6.2f}", pu[sz(k)][ni]);
+        rows.push_back(std::format("{},{},{},{},{},{},{:.7f},{:.7f},{:.7f},{:.7f},{:.1f},{:.1f},{:.4f},{}", en, models[mi].name, kQNames[sz(k)],
+                                   as_measured[sz(k)] ? "target" : "held", P, kM3PowerN[ni], mean[sz(k)], sd[sz(k)], sdu[sz(k)], mg[sz(k)], n90, n90u, pu[sz(k)][ni],
+                                   as_measured[sz(k)] ? std::string("") : std::format("{:.4f}", pl[sz(k)][ni])));
+      }
+      std::println("{}", line);
+    }
+    std::string l1 = std::format("{:<85}", "every other measure unchanged"), l2 = std::format("{:<85}", "the rule (others unchanged, improved targets as measured)");
+    for (std::size_t ni = 0; ni < kM3PowerN.size(); ++ni) {
+      l1 += std::format("{:>6.2f}", pothers[ni]);
+      l2 += std::format("{:>6.2f}", prule[ni]);
+      rows.push_back(std::format("{},{},others_unchanged,,{},{},,,,,,,{:.4f},", en, models[mi].name, P, kM3PowerN[ni], pothers[ni]));
+      rows.push_back(std::format("{},{},rule,,{},{},,,,,,,{:.4f},", en, models[mi].name, P, kM3PowerN[ni], prule[ni]));
+    }
+    std::println("{}\n{}", l1, l2);
+  }
+  merge_rows(c.results / "q_power.csv", "effect,model,measure,role,probe_settings,n_settings,mean,sd,sd_up80,margin,n90,n90_up80,p_pass,p_pass_if_loss", rows, en);
+}
+
 void step_val(const Ctx& c, sim::Effect e, const tools::Args& a) {
   auto models = read_entries(a.need("current"), a.str("cand", ""));
-  const Split sp = split_of(a.str("split", c.o ? "probeo" : c.m3 ? "probe3" : c.m2 ? "probe2" : "probe"), e);
-  if (sp.name == "test" || sp.name == "test2" || sp.name == "test3" || sp.name == "testo") throw std::invalid_argument("val: the test runs once, through `test`");
+  const Split sp = split_of(a.str("split", c.q ? "probeq" : c.o ? "probeo" : c.m3 ? "probe3" : c.m2 ? "probe2" : "probe"), e);
+  if (c.q != (sp.name == "probeq" || sp.name == "valq" || sp.name == "checkq")) throw std::invalid_argument("val: study Q's splits are probeq, valq and checkq, with --study q");
+  if (sp.name == "test" || sp.name == "test2" || sp.name == "test3" || sp.name == "testo" || sp.name == "testq") throw std::invalid_argument("val: the test runs once, through `test`");
   if (c.o != (sp.name == "probeo" || sp.name == "valo" || sp.name == "checko")) throw std::invalid_argument("val: study O's splits are probeo, valo and checko, with --study o");
   if (c.m2 != (sp.name == "probe2" || sp.name == "val2")) throw std::invalid_argument("val: study M2's splits are probe2 and val2, with --study m2");
   if (c.m3 != (sp.name == "probe3" || sp.name == "val3")) throw std::invalid_argument("val: study M3's splits are probe3 and val3, with --study m3");
   if (a.flag("null")) {  // study M3's null: the current model played with fresh seeds (the probe only)
-    if (sp.name != "probe3" && sp.name != "probeo") throw std::invalid_argument("val: --null is the probe's (probe3, probeo)");
+    if (sp.name != "probe3" && sp.name != "probeo" && sp.name != "probeq") throw std::invalid_argument("val: --null is the probe's (probe3, probeo, probeq)");
     Entry n = models[0];
     n.name = "null";
     n.seed_base = sp.null;
@@ -2610,6 +3096,16 @@ void step_val(const Ctx& c, sim::Effect e, const tools::Args& a) {
   const auto sc = evaluate(c, e, sp, models);
   const std::string prefix = a.str("prefix", std::format("m_{}", sp.name));
   report_split(c, e, sp, models, sc, prefix);
+  if (c.q) {
+    report_q(c, e, sp, models, sc, prefix);
+    if (sp.name == "probeq") probe_q(c, e, sp, models, sc);
+    if (sp.name == "valq") decide_q(c, e, sp, models, sc, prefix);
+    if (sp.name == "checkq") {  // a library setting's check: what it changes, not a decision (study K's margins)
+      for (std::size_t mi = 1; mi < models.size(); ++mi)
+        print_rule_q(sp.name, ename(e), models[mi], apply_rule_q(sc[mi], sc[0], margins_k_q(sc[0]), targets_q(e, models[mi].name), margins_k_q(sc[0])));
+    }
+    return;
+  }
   if (sp.name == "val") decide(c, e, sp, models, sc, prefix);
   if (sp.name == "val2") decide_m2(c, e, sp, models, sc, prefix);
   if (sp.name == "val3") decide_m3(c, e, sp, models, sc, prefix);
@@ -2638,6 +3134,22 @@ void step_test(const Ctx& c, sim::Effect e, const tools::Args& a) {
       if (line.find(models[1].sha) != std::string::npos && line.rfind(ename(e) + ",", 0) == 0) ok = true;
     }
     if (!ok) throw std::runtime_error("test: the candidate's SHA-256 is not frozen for " + ename(e) + " in " + a.need("frozen"));
+  }
+  if (c.q) {  // study Q: its rule, once
+    const MarginsQ mq = margins_q(e);
+    if (!margins_set(mq)) throw std::runtime_error("test: the margins of " + ename(e) + " are not fixed (margins_q)");
+    const Split sq = split_of("testq", e);  // throws before the marker if the settings are not fixed
+    std::ofstream(done) << "started " << models[1].sha << "\n";
+    for (const auto& m : models) std::println("test: {} {} {} sha256 {}", ename(e), m.name, m.path.string(), m.sha);
+    const auto sc = evaluate(c, e, sq, models);
+    report_split(c, e, sq, models, sc, "q_test");
+    report_q(c, e, sq, models, sc, "q_test");
+    const RuleQ r = apply_rule_q(sc[1], sc[0], mq, targets_q(e, models[1].name), margins_k_q(sc[0]));
+    print_rule_q("testq", ename(e), models[1], r);
+    std::println("testq {} {}: {}", ename(e), models[1].name, r.pass() ? "MEETS the rule: replace" : "does not meet it: keep the current model");
+    merge_rows(c.results / "q_test_decision.csv", kRuleQHeader, {rule_q_row(ename(e), models[1], r)}, ename(e));
+    std::ofstream(done) << "done " << models[1].sha << " " << (r.pass() ? "met" : "not met") << "\n";
+    return;
   }
   const MarginsM3 mg3 = c.o ? margins_o(e) : c.m3 ? margins_m3(e) : MarginsM3{};
   if ((c.m3 || c.o) && !mg3.set()) throw std::runtime_error("test: the margins of " + ename(e) + " are not fixed");
@@ -2803,11 +3315,13 @@ int main(int argc, char** argv) {
     c.results = a.str("results", "results/experiments/ordered");
     c.threads = a.i("threads", 1);
     const std::string study = a.str("study", "m");
-    if (study != "m" && study != "m2" && study != "m3" && study != "o") throw std::invalid_argument("--study m, m2, m3 or o");
+    if (study != "m" && study != "m2" && study != "m3" && study != "o" && study != "q") throw std::invalid_argument("--study m, m2, m3, o or q");
     c.m2 = study == "m2";
     c.m3 = study == "m3";
     c.o = study == "o";
+    c.q = study == "q";
     if (c.o && !a.has("results")) c.results = "results/experiments/fix";  // study O's tables
+    if (c.q && !a.has("results")) c.results = "results/experiments/q_fix";  // study Q's tables
     const std::string step = a.positional()[0];
     if (step == "setmean" || step == "set" || step == "info" || step == "settings") {
       if (step == "set") step_set(a);
@@ -2826,6 +3340,8 @@ int main(int argc, char** argv) {
     else if (step == "sstart") step_sstart(c, e, a);
     else if (step == "fitbias") step_fitbias(c, e, a);
     else if (step == "train") step_train(c, e, a);
+    else if (step == "refit") step_refit(c, e, a);
+    else if (step == "starts") step_starts(c, e, a);
     else if (step == "cost") step_cost(e, a);
     else throw std::invalid_argument("unknown step " + step);
     a.warn_unused();
