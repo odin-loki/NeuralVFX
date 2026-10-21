@@ -2450,6 +2450,43 @@ int choose(const Args& a) {
 }
 
 
+
+// Study R2 (docs/STUDY_R2.md §1.2): is the solver stable at a setting? The simulation from an empty grid for --seconds,
+// once a second the largest speed, the box's kinetic energy per cell, its heat and the seconds of CPU per frame.
+int stability(const Args& a) {
+  const std::array<float, 3> c{a.f("intensity", 0.5f), a.f("wind", 0.5f), a.f("turbulence", 0.5f)};
+  auto p = fine_params(c, a.u64("seed", 34'000'900), a.i("threads", 1));
+  p.velocity = a.i("velocity", p.velocity);
+  const int frames = static_cast<int>(std::lround(a.f("seconds", 30.f) * p.fps));
+  nfx::sim3d::Fluid f(p);
+  const std::size_t n = zu(f.nx()) * zu(f.ny()) * zu(f.nz());
+  std::vector<float> T(n), D(n), U(3 * n);
+  const fs::path log = data_root(a) / "logs" / "stability.log";
+  double c0 = cpu_now(), worst = 0;
+  bool finite = true;
+  for (int fr = 1; fr <= frames; ++fr) {
+    f.step_frame();
+    if (fr % 30 != 0) continue;
+    f.fields(T, D);
+    f.velocity(U);
+    double vmax = 0, ke = 0, heat = 0;
+    for (std::size_t i = 0; i < n; ++i) {
+      const double sp = std::sqrt(double(U[3 * i]) * U[3 * i] + double(U[3 * i + 1]) * U[3 * i + 1] + double(U[3 * i + 2]) * U[3 * i + 2]);
+      vmax = std::max(vmax, sp);
+      ke += 0.5 * sp * sp / static_cast<double>(n);
+      heat += T[i];
+      finite = finite && std::isfinite(sp) && std::isfinite(T[i]);
+    }
+    worst = std::max(worst, vmax);
+    log_line(log, std::format("{} {:.2f} {:.2f} {:.2f} seed {} velocity {}: {} s, largest speed {:.1f} cells/s, KE per cell {:.2f}, heat {:.1f}, {:.3f} CPU s per frame",
+                              nfx::sim3d::effect_name(p.effect), c[0], c[1], c[2], p.seed, p.velocity, fr / 30, vmax, ke, heat, (cpu_now() - c0) / 30.0));
+    c0 = cpu_now();
+  }
+  log_line(log, std::format("{} {:.2f} {:.2f} {:.2f} seed {}: {} (largest speed {:.1f} cells/s)", nfx::sim3d::effect_name(p.effect), c[0], c[1], c[2], p.seed,
+                            finite ? "finite throughout" : "NOT FINITE", worst));
+  return finite ? 0 : 1;
+}
+
 // --- study R2's rule (docs/STUDY_R2.md §2) ---------------------------------------------------------------------------
 
 constexpr std::array<const char*, 5> kStatNames{"3D spectrum distance", "\\|ln motion ratio\\|", "coverage distance", "light distance", "mean picture PSNR (dB)"};
@@ -2893,6 +2930,7 @@ int main(int argc, char** argv) {
     else if (cmd == "edgecal") rc = edgecal(a);
     else if (cmd == "check") rc = check(a);
     else if (cmd == "nullcal") rc = nullcal(a);
+    else if (cmd == "stability") rc = stability(a);
     else if (cmd == "verdict") rc = verdict(a);
     else if (cmd == "plume") rc = nfx::tools::plume3d::measure(a, data_root(a));
     else if (cmd == "plumefit") rc = nfx::tools::plume3d::fit(a, data_root(a));
