@@ -29,6 +29,9 @@ sources, forces and drawing, and are trained and tested as the earlier rounds' w
   flipbook's (0.43 and 0.44 against 0.08 and 0.07): their learned flames and smoke carry streaks the simulator's do not.
   The dust explosion's (0.13 against 0.09) is the closest of the three, but its learned renderer gives its unlit cloud
   blue-green fringes and draws its pall faint and thin.
+  Study Q replaced its renderer ([REPORT.md](REPORT.md) §21, [STUDY_Q.md](STUDY_Q.md) §4.8): trained again with the
+  first frames among its samples, its first frame is 2.85 dB [2.54, 3.16] closer on 10 held-out settings and the unlit
+  cloud grey-beige where it was blue-green; the pall and the rest are as before.
 - **The dust explosion's flame runs through its cloud from where it was lit** (the question beside the rule, §4.5): lit
   at its right end, the learned flame's light moves across the cloud as the real one's does, reaching its far end 0.2 s
   sooner (0.50 s against 0.70 s). Lit near its middle, it starts a little right of the real spark: its start points and

@@ -4112,9 +4112,17 @@ each, both frames the references' pixels).
 
 ## 21. Study Q: the weak spots of rounds 9 and 10, fixed and measured
 
-**Status: under way** (21 October 2026). The full account is [STUDY_Q.md](STUDY_Q.md); this section is its summary.
-Seeds: study Q's range, 33,000,000 to 33,499,999. Data under the data root's `q_fix` (candidates `cand/`, the files
-shipped `models/`, logs `logs/`); tables under `results/experiments/q_fix`.
+**Status: finished** (21 October 2026; begun by one agent, which was stopped, and finished by a second from the jobs it
+left running, STUDY_Q.md §0). **Three shipped models are replaced**, each by its one test on held-out settings with
+fresh seeds: the **avalanche** (its stepper fine-tuned on 30-frame windows: tracking at 1 s +0.34 dB [+0.18, +0.50],
+the mean frame +0.16 dB [+0.04, +0.28]), the **dust explosion** and the **mushroom** (their renderers trained again with
+the first frames among their samples: the first frame +2.85 dB [+2.54, +3.16] and +2.04 dB [+1.97, +2.12]). **Three
+stopped at validation and keep their files** (the haboob's and the smoke ring's refits, the geyser's fine-tune: each
+better on a target and past a margin elsewhere). The crown and window fires' streaks, heavy gas's bright lines and the
+smoke ring's detail are **fixed by eye** with detail settings, no model change. The full account is
+[STUDY_Q.md](STUDY_Q.md); this section is its summary. Seeds: study Q's range, 33,000,000 to 33,499,999. Data under the
+data root's `q_fix` (candidates `cand/`, the files shipped `models/`, logs `logs/`, jobs `jobs/`); tables under
+`results/experiments/q_fix`.
 
 Study Q does for the weak spots of rounds 9 and 10 what study O (§16) did for earlier ones: each is taken apart first, to
 find the part that makes it; a fix in how an effect is played is judged by eye, with a check on training settings beside
@@ -4122,7 +4130,9 @@ it; a fix that changes a model goes through a rule committed before validation, 
 training settings (study M3's lesson, §14.9), validated, frozen by SHA-256 and tested once on held-out settings with
 fresh seeds, and it replaces a shipped model only if it passes.
 
-**What the taking apart found** (`nvfx_fix parts`, training runs, STUDY_Q.md §3): one part at a time swapped (the
+### 21.1 What the taking apart found
+
+`nvfx_fix parts`, on training runs (STUDY_Q.md §3): one part at a time swapped (the
 runtime as shipped; the learned stepper from a run's true state, drawn by the learned renderer and by the simulator's; the
 true coarse states moving the detail layer; the learned renderer on the true fields), measured over the whole frame:
 - **The avalanche's weakness is its stepper and its start points.** From the true state the learned cloud has 86% and
@@ -4143,10 +4153,106 @@ true coarse states moving the detail layer; the learned renderer on the true fie
   0.67, 25.4). The smoke ring's detail is its detail layer's (the oracle 0.67; softened 0.04) and its renderer's (0.45 to
   0.60 on the true fields).
 
-**Fixed by eye, with no model change** (STUDY_Q.md §5.1; `soften`, study D2's softening of the fine fields, is now a key
-of an effect line): the crown fire `grow 1, contrast 1` (spectrum distance as shipped on training runs 0.479 → 0.100,
-motion 0.80 → 0.69 of the real), the window fire `swirl 1, swirl_scale 9, soften 0.2, contrast 0.75` (0.506 → 0.174,
-0.92 → 0.79), heavy gas `soften 0.1` (0.308 → 0.263), the smoke ring `soften 0.4` for its looks (its fields 0.782 → 0.151),
-in the library and the forest-edge town and the crypt. By eye the crown fire's comb of vertical streaks becomes tongues of
-flame, the window fire's curls go, the gas's thin bright lines soften into billows; both fires move less. Frozen hashes and
-videos updated (§21's list below).
+### 21.2 Fixed by eye, with no model change
+
+In the library and the forest-edge town and the crypt (STUDY_Q.md §5.1; `soften`, study D2's softening of the fine
+fields, is now a key of an effect line): the crown fire `grow 1, contrast 1` (spectrum distance as shipped on training
+runs 0.479 → 0.100, motion 0.80 → 0.69 of the real), the window fire `swirl 1, swirl_scale 9, soften 0.2, contrast 0.75`
+(0.506 → 0.174, 0.92 → 0.79), heavy gas `soften 0.1` (0.308 → 0.263), the smoke ring `soften 0.4` for its looks (its
+fields 0.782 → 0.151). By eye the crown fire's comb of vertical streaks becomes tongues of flame, the window fire's curls
+go, the gas's thin bright lines soften into billows; both fires move less. Frozen hashes and videos updated (§21.5).
+
+### 21.3 The model changes: candidates, the probe and the rule's numbers
+
+Each candidate is the shipped file with one change (STUDY_Q.md §4.1): `rf`, the renderer trained again as the recipe
+trains it with 100 more samples from the runs' first 15 frames (targets: the first frame and the mean frame); `u30` and
+`u60`, the stepper fine-tuned on 30- and 60-frame windows; `ms`, study M3's mean state; `s24`, 24 start points instead
+of 8 (targets of these: tracking at 1 s and the mean frame). The mushroom's `rf` was added to the plan after the
+taking apart and before any of its probe. **The rule** (§4.3, its form committed before any number): a candidate
+replaces the current model when it is better on at least one of its targets and every one of eight measures (tracking
+at the first frame, 1 s and 2 s; the detail spectrum, |ln motion ratio|, coverage and emission distances and the
+mean-frame PSNR) is within its margin, paired over the settings, 95% bootstrap intervals with 10,000 resamples. Each
+margin is the larger of study K's and the null's RMS change at a setting (the current model with fresh seeds on 40
+training settings); N, the number of settings, the smallest multiple of 10 at which a candidate leaving a measure
+unchanged passes its margin with probability 0.9, at most 60. Each effect's numbers were committed before its
+validation ([q_margins.csv](../results/experiments/q_fix/q_margins.csv), [q_rule.csv](../results/experiments/q_fix/q_rule.csv)):
+
+| effect | candidates | margins: spectrum, \|ln motion\|, coverage, mean frame (dB); tracking -0.20 dB | N |
+|---|---|---|---:|
+| avalanche | `ms`, `u30`, `ms_u30`, `u60` | +0.024, +0.163, +0.0075, -1.98 | 60 (the cap) |
+| geyser | `u30`, `s24`, `s24_u30` | +0.125, +0.217, +0.0070, -3.11 (an erupting geyser is chaotic) | 60 (the cap) |
+| haboob | `rf` | +0.020, +0.057, +0.0036, -0.85 | 10 |
+| smoke ring | `rf` | +0.039, +0.020, +0.00036, -1.70 | 40 |
+| dust explosion | `rf` | +0.020, +0.034, +0.0025, -1.13 | 10 |
+| mushroom | `rf` | +0.024, +0.050, +0.0037, -1.07 | 60 (the cap) |
+
+Where the cap binds, the probability that the rule's form passes at 60 settings was stated before validation (the
+avalanche's `u30` 0.62, the geyser's 0.47, the mushroom's `rf` 0.53: tracking at 2 s and the mushroom's spectrum spread
+widely between settings).
+
+### 21.4 Validation and the test
+
+Validation on study G's settings extended to N, the test once on study B's held-out settings extended to N, with study
+Q's seeds; each chosen file frozen by SHA-256 ([q_frozen.csv](../results/experiments/q_fix/q_frozen.csv)) before its
+test (STUDY_Q.md §4.7, §4.8; [q_val_choice.csv](../results/experiments/q_fix/q_val_choice.csv),
+[q_test_decision.csv](../results/experiments/q_fix/q_test_decision.csv)). Candidate minus current model:
+
+| effect | on validation | the test (once) | decision |
+|---|---|---|---|
+| avalanche | `u30` meets the rule (tracking at 1 s +0.46 [+0.31, +0.63]); `ms` and `ms_u30` (the mean frame +0.84, +0.93) past the spectrum's margin; `u60` past the first frame's (-0.35) | tracking at 1 s **+0.34 [+0.18, +0.50]**, at 2 s +0.62 [+0.41, +0.84], the mean frame **+0.16 [+0.04, +0.28]**, detail -0.006 [-0.009, -0.003], motion and coverage ties | **replaced** |
+| dust explosion | `rf` meets it (the first frame +3.46 [+3.20, +3.73]) | the first frame **+2.85 [+2.54, +3.16]**, at 1 s +0.11 [+0.08, +0.14], the mean frame a tie (+0.005 [-0.023, +0.033]), the motion error +0.004 [+0.001, +0.006] (margin +0.034) | **replaced** |
+| mushroom | `rf` meets it (the first frame +2.07 [+1.99, +2.16]) | the first frame **+2.04 [+1.97, +2.12]**, detail -0.036 [-0.059, -0.013], motion -0.062 [-0.066, -0.058], the mean frame -0.05 [-0.07, -0.03] (margin -1.07) | **replaced** |
+| geyser | none: `u30` better on both targets (1 s +0.41 [+0.27, +0.58], the mean frame +0.20 [+0.08, +0.32]) but the first frame -0.19 [-0.28, -0.11] (margin -0.20); `s24` better on nothing | not run | kept |
+| haboob | none: `rf` the first frame +2.55 [+2.37, +2.70], the mean frame +0.15, but the spectrum +0.013 [+0.006, +0.022] (margin +0.02) | not run | kept |
+| smoke ring | none: `rf` the first frame +3.52 [+3.36, +3.69], detail -0.075, but its motion error +0.023 [+0.015, +0.030] (margin +0.02) | not run | kept |
+
+Beside, not deciding, each replaced model's round test run again with fresh seeds (`d-eval --seed-base 33300000`, the
+old and the new file on the same seeds): the avalanche still trails the coarse simulation with detail at 1 s (-3.52 dB
+[-5.92, -1.10] → -2.47 [-5.12, -0.00]) and the flipbook's mean picture (-3.37 → -3.54): weak by its round's rule as
+before; the dust explosion's first frame against the coarse simulation -0.78 → +2.80 (ties), 1 s +8.69 → +8.81; the
+mushroom's first frame -6.64 [-7.54, -5.89] → -4.53 [-5.52, -3.79], frame 8 a tie → +1.67 [+0.81, +2.52].
+
+**How they look** (STUDY_Q.md §4.8, its figures): the dust explosion's unlit cloud and spark, blue-green with green and
+magenta fringes before, are grey-beige with thin fringes; the mushroom's young fireball is paler and loses its green
+tints; from about half a second to a second both look as before. The avalanche from the same start point is hard to tell
+from the old one: as with study O's mushroom, the numbers move more than the picture. The library and the scenes draw
+the dust explosion and the mushroom with field-shader looks, which do not use the renderer, so their frames do not change;
+the avalanche's do.
+
+### 21.5 What changed
+
+- **Models replaced**: `q_fix/models/avalanche.nvfx` (`u30`, SHA-256 `d6161c1d...`), `q_fix/models/dustexplosion.nvfx`
+  (`rf`, `a0f273ea...`) and `q_fix/models/mushroom.nvfx` (`rf` on study O's file, `c1cd25a2...`), each the size of the
+  file it replaces; in git `models/2d/avalanche.nvfx`, `dustexplosion.nvfx` and `mushroom.nvfx` with their rows in
+  `models/SHA256SUMS` (`models/layout.txt` already maps the library's and the scene folders' paths to them;
+  `models/restore.sh` reports 0 different). The shared links moved, their old targets in `q_fix/logs/links_before.txt`:
+  `library/models/` and `fx_earth/models/scene/` (the avalanche), `fx_fire2/models/scene/` (the dust explosion),
+  `fx_blaze/models/scene/` (the mushroom). The rounds' and study O's files are untouched.
+- **Frozen hashes** (float, pinned to the AVX2 build with `--isa avx2`): the library's `avalanche` keyframe and model row
+  (`results/library/frozen.csv`; the old file still gives the old hash on this build); the model rows of the dust
+  explosion (`frozen_fire2.csv`) and the mushroom (`frozen.csv`), whose keyframes (the library's `dust_explosion` and
+  `distant_mushroom`, the forest-edge town's and the prairie's) give their frozen hashes with the new files; rows for the
+  new files in `fx_earth_frozen.csv`, `fx_fire2_frozen.csv` and `fx_blaze_frozen.csv`. Before them (§21.2) the crown and
+  window fires', the smoke ring's and dry ice fog's library keyframes and the town's and the crypt's eight each.
+- **Videos re-rendered** (videos/README.md): `effect_avalanche`, `real_vs_learned_earth`, `library_earth`;
+  `effect_dustexplosion`, `real_vs_learned_fire2`; `effect_mushroom`, `real_vs_learned_round7`; and for the by-eye
+  fixes `effect_crownfire`, `effect_windowfire`, `effect_heavygas`, `library_fire2`, `library_air`, `scene_forestedge`,
+  `scene_crypt`.
+- **Code** (no runtime or API change): `soften` as an effect line's key (`src/compose/script.cpp`, `script_run.cpp`;
+  `Script.AnEffectsSoftenSmoothsItsDetailLayer`) and in `nvfx_reel`'s DETAIL field; `nvfx_fix parts` (the taking apart)
+  and `strip --also`; `nvfx_ordered --study q` (`refit`, `starts`, `graft`, `val --split probeq | valq | checkq`,
+  `test`, the rule's numbers from `q_rule.csv`).
+- **Round documents**: a line each in EFFECTS_EARTH.md, EFFECTS_FIRE2.md, EFFECTS_BLAZE.md, EFFECTS_ELEMENTS.md and
+  EFFECTS_AIR.md.
+
+### 21.6 What is left
+
+The avalanche's start points (the mean state brings its average picture closer but its detail further: the moved coarse
+state likely no longer matches the stored fine fields); the geyser's tracking with its first frame kept; the haboob's and
+the smoke ring's first frames by a refit that keeps their detail and motion (fine-tuning the current renderer rather
+than training it again); heavy gas's start points; the mushroom's cap (its stepper); the candle had nothing a setting
+could fix (STUDY_Q.md §9).
+
+### 21.7 Checks
+
+(After merging main, before the final push.)

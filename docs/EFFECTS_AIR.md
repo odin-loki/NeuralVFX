@@ -2,7 +2,10 @@
 
 Status: **done** (20 October 2026; paused from 15 to 20 October). Audience: dev, research, artists. The design of the
 test and the rule (§4) were written and committed before any model was trained, and so was the one method of a later
-study that this round uses (§3); each model was frozen by its SHA-256 before its one test.
+study that this round uses (§3); each model was frozen by its SHA-256 before its one test. Since then study Q
+([REPORT.md](REPORT.md) §21) softened the smoke ring's and heavy gas's detail where the library and the crypt play them
+(`soften 0.4`, `0.1`); the ring's renderer trained again with its first frames did not meet its rule, and all three
+keep this round's files.
 
 Three effects of the air, after the water round ([EFFECTS_WATER.md](EFFECTS_WATER.md)): a **candle** (a small, calm,
 teardrop flame on a wick, mostly steady, flickering and leaning in a draught, with a thin wisp of smoke; it must read

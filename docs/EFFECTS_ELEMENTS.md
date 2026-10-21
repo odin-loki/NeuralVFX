@@ -2,7 +2,9 @@
 
 Status: **done** (21 October 2026). Audience: dev, research, artists. The presets, the training plan (§3) and the test's
 design and rule (§4) were written and committed before any model was trained; each model was frozen by its SHA-256
-before its one test.
+before its one test. Since then study Q ([REPORT.md](REPORT.md) §21) tried the haboob's renderer trained again with its
+first frames and the geyser's stepper fine-tuned on 30-frame windows and with 24 start points; none met its rule, and
+both keep this round's files.
 
 Three effects of the elements, after the earth and air rounds ([EFFECTS_EARTH.md](EFFECTS_EARTH.md),
 [EFFECTS_AIR.md](EFFECTS_AIR.md)), from the catalogue in [TODO.md](../TODO.md): a **geyser** (#88: a periodic eruption

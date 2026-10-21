@@ -1,9 +1,10 @@
 # Study Q: the weak spots of rounds 9 and 10, fixed and measured
 
-Status: **under way** (21 October 2026). Audience: dev, research, artists. The plan of the model changes and the form of
-their rule (§4) were written and committed before any of the study's numbers; the rule's numbers (the margins and the
-number of settings) come from a probe on training settings and are committed before validation; each chosen file is
-frozen by its SHA-256 before its one test. [REPORT.md](REPORT.md) §21 has the summary.
+Status: **finished** (21 October 2026; begun by one agent, which was stopped, and finished by a second from the jobs it
+left running, §0). Audience: dev, research, artists. The plan of the model changes and the form of their rule (§4) were
+written and committed before any of the study's numbers; the rule's numbers (the margins and the number of settings)
+come from a probe on training settings and are committed before validation; each chosen file is frozen by its SHA-256
+before its one test. [REPORT.md](REPORT.md) §21 has the summary.
 
 Study Q does for the weak spots of rounds 9 and 10 ([EFFECTS_EARTH.md](EFFECTS_EARTH.md),
 [EFFECTS_AIR.md](EFFECTS_AIR.md), [EFFECTS_FIRE2.md](EFFECTS_FIRE2.md), [EFFECTS_ELEMENTS.md](EFFECTS_ELEMENTS.md)) what
@@ -20,25 +21,52 @@ checkq`, `test`). Every file is under the data root's `q_fix` (outside git); tab
 
 ## 0. Where the study stands (handoff)
 
-Kept current as the study goes (last: 21 October 2026, 11:30 UTC). One agent began the study and was stopped; a second
-took it over from the jobs it left running (the data root's `q_fix/jobs/*.sh`, their markers `jobs/*.done` and logs
-`q_fix/logs/`), killing none. Each line: what is committed, what runs, what comes next.
+Final (21 October 2026, 14:00 UTC). One agent began the study and was stopped at 11:10 UTC; a second took it over from
+the jobs it left running (the data root's `q_fix/jobs/*.sh`, their markers `jobs/*.done`, logs `q_fix/logs/`), killed
+none and finished it: at the handoff the avalanche's `u60` was training, the smoke ring's validation, the dust
+explosion's and the geyser's null probes were running and their candidates' probes waiting; the haboob had stopped at
+validation. Every step is committed in the order the rule asks (the commits' times show each rule's numbers before its
+validation, each freeze before its test).
 
-| weak spot | stage | committed | running / next |
+| weak spot | where it ended | what was done (committed) | left (§9) |
 |---|---|---|---|
-| avalanche | **replaced** (§4.8, §6) | `u30` passed its test: tracking at 1 s +0.34 dB [+0.18, +0.50], the mean frame +0.16 [+0.04, +0.28], every measure within its margin; links, models/, frozen hashes, three videos | its start points (the mean state did not meet the rule, §9) |
-| geyser | **stopped at validation** | margins (36514f3); N = 60 (§4.6); none meets the rule: `u30` better on both targets but its first frame past its margin (§4.7) | kept; what is left in §9 |
-| haboob's first frame | **stopped at validation** | `rf` meets no rule: its spectrum's interval past its margin (ce134c7) | kept; nothing more |
-| crown and window fires' streaks | **done by eye** (§5.1) | detail settings, frozen hashes, videos (78ae21b, 47b2b0f) | - |
-| heavy gas | **done by eye** (§5.1) | `soften 0.1` | its start points not tried (§9) |
-| smoke ring | **stopped at validation** | N = 40 (ca955b9); `rf` meets no rule: its motion's interval past its margin (§4.7) | kept; nothing more |
+| avalanche | **replaced** (§4.8, §6) | `u30` passed its test: tracking at 1 s +0.34 dB [+0.18, +0.50], the mean frame +0.16 [+0.04, +0.28], every measure within its margin; links, models/, frozen hashes, three videos | its start points |
+| geyser | **stopped at validation** (§4.7) | none meets the rule: `u30` better on both targets but its first frame past its margin | its tracking with the first frame kept |
+| haboob's first frame | **stopped at validation** (§4.7) | `rf`: the first frame +2.55 dB but its detail past its margin | a refit that keeps the detail |
+| crown and window fires' streaks | **fixed by eye** (§5.1) | detail settings in the library and the town; frozen hashes, videos | - |
+| heavy gas | **fixed by eye** (§5.1) | `soften 0.1` (its thin bright lines) | its start points (its tied mean picture) |
+| candle | **nothing to change** (§3.7) | the diagnosis | - |
+| smoke ring | **fixed by eye** (§5.1); its refit **stopped at validation** (§4.7) | `soften 0.4` for its looks; `rf`: the first frame +3.52 dB but its motion past its margin | a refit that keeps the motion |
+| mushroom's cap | the cap **left** (§3.7); its renderer **replaced** (§4.1, §4.8, §6) | `rf` (added before its probe) passed its test: the first frame +2.04 dB [+1.97, +2.12], every measure within its margin; links, models/, frozen rows, two videos | the cap (its stepper) |
 | dust explosion's renderer | **replaced** (§4.8, §6) | `rf` passed its test: the first frame +2.85 dB [+2.54, +3.16], every measure within its margin; links, models/, frozen rows, two videos | - |
-| candle | **nothing changed** (§3.7) | the diagnosis | - |
-| mushroom's cap | the cap **left** (§3.7); its renderer's first second **replaced** (§4.1, §4.8, §6) | `rf` passed its test: the first frame +2.04 dB [+1.97, +2.12], every measure within its margin; links, models/, frozen rows, two videos | the cap (§9) |
 
 ## 1. Bottom line
 
-(Written when the study ends.)
+- **Three shipped models are replaced**, each by its one test on held-out settings with fresh seeds, under a rule whose
+  numbers were committed before its validation (§4.8):
+  - **the avalanche** (`u30`: its stepper fine-tuned on 30-frame windows) follows a held-out run from its true state
+    0.34 dB [0.18, 0.50] better at 1 s and 0.62 [0.41, 0.84] at 2 s, and its average picture is 0.16 dB [0.04, 0.28]
+    closer to a real run's (60 settings). By eye it is much as before, and by its round's own test it is still weak:
+    from its start points the cloud stays smaller than the simulator's;
+  - **the dust explosion** (`rf`: its renderer trained again with the first frames among its samples): its first frame
+    is 2.85 dB [2.54, 3.16] closer, the unlit cloud grey-beige where it had blue-green fringes (10 settings);
+  - **the mushroom** (`rf` on study O's file): its first frame 2.04 dB [1.97, 2.12] closer, its detail and motion
+    closer through the run (60 settings); the cap's raggedness, its stepper's, is unchanged.
+- **Three stopped at validation and keep their files**, each better on a target and past a margin elsewhere: the
+  haboob's refit (the first frame +2.55 dB, its dust's detail further, +0.013 [+0.006, +0.022] against a margin of
+  +0.02), the smoke ring's (the first frame +3.52 dB, its motion further, +0.023 [+0.015, +0.030] against +0.02) and the
+  geyser's 30-frame fine-tune (+0.41 dB at 1 s and +0.20 in the mean frame, but -0.19 [-0.28, -0.11] at the first frame
+  against -0.20). More start points (`s24`) helped the geyser on nothing; the mean state brought the avalanche's
+  average picture closer (+0.84 dB) but its detail further, past its margin.
+- **Fixed by eye, with no model change** (§5.1): the crown fire's and the window fire's vertical streaks (their detail
+  settings; on training runs the spectrum distance 0.48 → 0.10 and 0.51 → 0.17, at a price in motion), heavy gas's thin
+  bright lines (`soften 0.1`) and the smoke ring's detail where its looks draw it (`soften 0.4`).
+- **What makes each weak spot** (§3): the avalanche's stepper and start points; the fires' detail layer (the crown
+  fire's lock, the window fire's swirl), not their models; the one-shots' first frames, their renderers' (the recipe
+  never shows a renderer a fresh state); heavy gas's and the geyser's endless numbers, their start points'.
+- **Left** (§9): the avalanche's and heavy gas's start points, the geyser's tracking with its first frame kept, the
+  haboob's and the ring's first frames without the losses their refits brought, the mushroom's cap; the candle had
+  nothing a setting could fix.
 
 ## 2. The weak spots
 
@@ -759,7 +787,40 @@ $B --study q --threads 1 --results $R --rule $R/q_rule.csv test --effect E --cur
 q_fix/bin/nvfx_fix_q3 strip --model CURRENT --also rf=NEW --controls 0.5,0.5,0.5 --size 256 --times 0,0.033,0.167,0.333,0.5,1 --seed 33465001 --out F.png
 ```
 
-The results depend on nothing but the seeds and the files (the validation ran on 2 threads, the probe on 1: every run and
+The results depend on nothing but the seeds and the files (the geyser's and the avalanche's validation and the avalanche's
+and the mushroom's tests ran on 2 threads, the rest on 1: every run and
 every play is its own job, so the thread count changes no number: two of the avalanche's probe settings computed again
 from nothing on 2 threads give its tracking and statistics to the last digit; the renderer refits ran on 1 thread, which
 does matter there).
+
+## 8. Checks
+
+(After merging main, before the final push; written below when they have run.)
+
+## 9. What is left
+
+- **The avalanche's start points.** As shipped, from 16 stored first states at other controls, its cloud is smaller than
+  the simulator's (§3.1), and that is most of its distance from real (11.8 dB below the floor in the mean frame after
+  study Q). The mean state moves a start point to the controls asked and brought the average picture 0.84 dB [0.24,
+  1.48] closer on validation, but drew the detail further from real (the spectrum distance +0.024 [+0.005, +0.040]
+  against a margin of +0.024); a likely cause, not checked: the moved coarse state no longer matches the fine fields
+  stored with it. To try: the mean state with the fine fields regrown from the moved coarse state (as fire grows its own
+  at instance start), on a probe of its own.
+- **The geyser's tracking with its first frame kept.** `u30` follows a run better at 1 and 2 s and its average picture
+  is closer, but it loses 0.19 dB at the first frame, past the margin. To try: a fine-tune that keeps the first frames
+  (fewer iterations, or windows that start at the first frame), with a new probe and validation (its test settings are
+  unused). More start points did nothing (§4.7); within a shard it still follows its start point more than its
+  intensity.
+- **The haboob's and the smoke ring's first frames.** Their refits fix them (+2.55 and +3.52 dB) but, trained from fresh
+  weights, change the rest of the run's look: the haboob's detail and the ring's motion past their margins. To try:
+  fine-tuning the current renderer on its samples and the early ones rather than training it again.
+- **Heavy gas's start points** (its tied mean picture, §3.3): not tried. The geyser's `s24` suggests more start points
+  alone are not enough; start points nearer the asked controls, or a mean state for a looping effect, would be the
+  candidates.
+- **The mushroom's cap** after 3 to 4 s: its stepper's, as study O found (REPORT §16.7): a stepper that sees the cap's
+  whole life (windows of the effect's 150 frames, as `u60` began for the avalanche, which traded the first frame for it).
+- **The candle**: its ragged flame was the calibrated swirl, which the library already overrides; its fringes are its
+  own renderer's, which the library's look does not use (§3.7). Nothing more to do in the library; a refit for its bare
+  renderer was not tried.
+- **The haboob's -11.7 dB at the first frame against the coarse simulation** is mostly that the coarse simulation starts
+  from the true fields drawn by the simulator's own renderer (§3.5): no learned renderer closes it.

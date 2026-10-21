@@ -2,8 +2,8 @@
 
 **Status:** stage 1 is done (study N, `docs/STUDY_3D.md`, and its follow-up N2, §14); stage 2 is planned, not started.
 Since 15 October 2026, here: round 9, studies O and P, float on AVX-512, the faster detail layer, the 2D weather
-director, the FUSE sample and round 10's fire and elements are done and merged; study R (a validated 3D smoke) is
-under way ("Here, until the PC").
+director, the FUSE sample and round 10's fire and elements are done and merged; study Q (the weak spots of rounds 9
+and 10) is finished on its branch; study R (a validated 3D smoke) is under way ("Here, until the PC").
 
 - **Stage 1, here and now (study N): done.** A small 3D demo in this container ([docs/STUDY_3D.md](docs/STUDY_3D.md),
   REPORT §15). What it built:
@@ -81,6 +81,17 @@ and the Godot test; details in its doc and REPORT section):
 - **For FUSE** (docs/FUSE.md, `engines/fuse`): the interface FUSE implements, an adapter (pack, effect manager on FUSE's
   jobs, a scripted scene, library entries, the 3D fire), a headless demo with its test and a video.
 - **CI:** the g++ job's one failure since the packs came in (the pack verify test without the models) fixed.
+- **Study Q, the weak spots of rounds 9 and 10** (finished on its branch `study-q`, 21 October 2026, with the checks;
+  docs/STUDY_Q.md, REPORT §21; seeds 33.0 to 33.5 million):
+  each weak spot taken apart first (which part makes it), then fixed by eye or by a model change under a rule committed
+  before validation, its margins from a null probe, tested once on held-out settings. **Replaced** after their tests:
+  the avalanche (its stepper fine-tuned on 30-frame windows: tracking at 1 s +0.34 dB [0.18, 0.50], the mean picture
+  +0.16 dB [0.04, 0.28]), the dust explosion and the mushroom (their renderers trained again with the first frames among
+  their samples: the first frame +2.85 dB [2.54, 3.16] and +2.04 dB [1.97, 2.12]). **Fixed by eye**: the crown and
+  window fires' streaks, heavy gas's bright lines and the smoke ring's detail (detail settings in the library and the
+  scenes). **Stopped at validation**, files kept: the haboob's and the smoke ring's refits and the geyser's fine-tune
+  (each better on a target, past a margin elsewhere). Still weak: the avalanche (its start points), the geyser, the
+  haboob's and the ring's first frames, heavy gas's mean picture, the mushroom's cap.
 
 **Under way:**
 - **Round 10, fire** (`effects-fire2`, docs/EFFECTS_FIRE2.md, REPORT §6.18; seeds 26.0 to 26.9 million): a forest crown
@@ -103,9 +114,10 @@ and the Godot test; details in its doc and REPORT section):
   field-shader look that draws heat as white vapour (steam and fine spray are heat, which a look draws as light).
 
 **Next:**
-- **Study Q, round 9's weak spots**, as study O did for earlier ones: the avalanche's cloud (it billows less than the
-  simulator's), heavy gas's streaking fronts and tied mean picture, the candle's ragged flame up close, the smoke
-  ring's fine detail and first frame, the mushroom's cap after 3 to 4 s.
+- **Study Q's leftovers** (STUDY_Q.md §9): the avalanche's start points (the mean state with fine fields regrown from
+  the moved coarse state), the geyser's tracking with its first frame kept, the haboob's and the ring's first frames
+  by fine-tuning their renderers rather than training them again, heavy gas's start points, the mushroom's cap (a
+  stepper that sees its whole life).
 - **Half size where it pays.** Study P found that drawing a large effect at half size with a bilinear 2x holds up
   against the simulator at about 0.4 of the cost. Let the effect manager choose it by an effect's size on screen,
   and measure it in the library's scenes.
