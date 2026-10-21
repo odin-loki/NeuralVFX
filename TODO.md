@@ -105,8 +105,15 @@ then merge it into main.
   models with this compiler; the frozen float tests are pinned to AVX2 anyway (REPORT §13.10).
 
 **Next:**
-- **The detail layer's cost.** It is three quarters of a 3D step and much of a 2D frame at 256 px. Try SIMD and
-  skipping empty rows and bricks.
+- **The detail layer's cost (done, 21 October 2026; `detail-fast`, REPORT §19, `results/detail/`).** The same frames
+  to the bit on every ISA (the frozen tests unchanged; 31,104 2D frames, 16,200 pictures through the C API and 480 3D
+  steps compared old against new, none differs):
+  - 3D: the volume runtime's detail layer on vectors (AVX2, AVX-512): alone 0.155 to 0.176 of its time on one core (10
+    against 64 ms), a step 0.31 to 0.32 (26 against 83 ms; busy machine, provisional); 19 MB more per volume. Skipping
+    bricks cannot pay for this model: 91 to 96% of the fine cells and every brick hold material.
+  - 2D (already on vectors with skipping, study H2): the detail stage 0.87 to 0.88 of its time at 128 and 256 px, 0.90
+    at 512 (a frame 0.96 to 0.97); what is left is fetching the samples' corners. A semi-Lagrangian option would cost
+    0.75 of the exact layer but changes every frame (27 to 57 dB): not shipped.
 - **More 2D effects**, from the catalogue rows the 2D solver can carry:
   - fire and smoke: a forest crown fire (#6), fire out of a window (#8), coloured smoke grenades (#18);
   - blasts and engines: a dust explosion (#31), contrails (#36), helicopter downwash (#37);

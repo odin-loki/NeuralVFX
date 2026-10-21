@@ -316,6 +316,9 @@ Beside the rule (not judged):
 
 ## 8. Cost (provisional)
 
+(Since 21 October 2026 the volume runtime's detail layer runs on vectors, with the same fields to the bit: about a sixth of
+the time below, and a step about a third; REPORT.md §19.)
+
 `nvfx_3d timing` (`results/3d/timing.csv`): the chosen model through the volume C API at controls (0.7, 0.5, 0.6), 5
 starts of 60 frames each, and 4 pictures of each size per start from one camera; then where a step's time goes (the
 reference on one thread); then the simulator itself for scale. Milliseconds per frame, median (minimum):

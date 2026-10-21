@@ -12,7 +12,8 @@ namespace nfx::rt {
 void volume_conv3_avx2(int rx, int ry, int rz, const float* in, int ci, const float* W, const float* b, int co, float* out, int y0, int y1);
 
 // The detail layer on vectors (rt_detail3.hpp): rollout3d::detail_step's values to the bit, for a model and a workspace
-// of it. Allocates its buffers (about 20 MB for a 64 x 96 x 64 volume); its step() allocates nothing.
+// of it, which must outlive it (it keeps the workspace's axis tables) and be the one its step() is given. Allocates its
+// buffers (about 19 MB for a 64 x 96 x 64 volume); its step() allocates nothing.
 namespace d3_avx2 {
 std::unique_ptr<rollout3d::DetailKernel> make_detail3(const rollout3d::Model& m, const rollout3d::Workspace& ws);
 }  // namespace d3_avx2
