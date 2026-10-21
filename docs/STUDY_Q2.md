@@ -219,6 +219,45 @@ tool and trainer code are c6e56e9's (the commits between change only this docume
 `q2_fix/bin/nvfx_ordered_q2`, SHA-256 `420131ac5e3455943401bda68199660191558cacbc8deb568a48bbe551dd265a`, for the
 candidates, the probe, validation and the test; `nvfx_fix_q2` (`be2d773a...`) for the diagnosis and the figures.
 
+The probe's tables: [q2_margins.csv](../results/experiments/q2_fix/q2_margins.csv) (each effect's null, committed before
+its candidates were played on the probe), [q2_power.csv](../results/experiments/q2_fix/q2_power.csv) and
+`q2_probe_*.csv`; the numbers each effect's validation and test use: [q2_rule.csv](../results/experiments/q2_fix/q2_rule.csv)
+(written by `jobs/rule.sh` from the two tables by §4.2's rule, which gives study Q's N for all six of its effects from
+study Q's tables).
+
+**The haboob** (the null 22:50 UTC, 7a02408; the rule 23:13, 693834e). The null (the current model with fresh seeds, 40
+training settings) moves its spectrum distance at a setting by 0.021 (RMS), its motion by 6.4%, its coverage distance by
+0.0024 and its mean frame by 0.51 dB: margins tracking -0.20 dB at each horizon, spectrum **+0.0213**, |ln motion ratio|
+**+0.0644**, coverage **+0.0024**, emission **+0.0001** (study K's), mean frame **-0.51 dB**. On the probe (candidate minus
+current, 95% intervals):
+- `rft` (the renderer trained on at lr 1e-3; its PSNR on its samples' pixels 34.8 dB, study Q's fresh `rf` 30.9): the first
+  frame **+3.03 dB [+2.96, +3.10]** (28.08 → 31.12 dB; a target), at 1 s +0.04 [+0.01, +0.06], the spectrum distance
+  +0.003 [+0.002, +0.004] (0.101 → 0.104; `rf`'s was +0.010 on study Q's probe), its motion error +0.005 [+0.001, +0.010],
+  at 2 s -0.02 [-0.03, -0.00] and the mean frame -0.04 [-0.05, -0.03] (each worse, each a tenth of its margin or less),
+  coverage and emission closer: it meets the rule's form.
+- `rfs` (lr 3e-4; 34.3 dB on its samples): the first frame **+2.30 [+2.25, +2.36]**, at 1 s +0.07 [+0.06, +0.09], the
+  spectrum +0.006 [+0.005, +0.007], its motion error +0.004 [+0.000, +0.007], the mean frame a tie: it meets the rule's
+  form.
+
+Every measure that is not a target it improves passes its margin, if truly unchanged, with probability 1.00 at 10
+settings by resampling and needs at most 2 in the normal form at the SD's upper 80% bound: **N = 10**.
+
+**The geyser** (the null 23:05 UTC, 7d3d795; the rule 23:35, 781184b). An erupting geyser is chaotic, and the null shows
+it again: it moves the spectrum distance at a setting by 0.174 (RMS), the motion by 26%, the coverage distance by 0.0076
+and the mean frame by 3.05 dB. Margins: tracking -0.20 dB at each horizon, spectrum **+0.174**, |ln motion ratio|
+**+0.255**, coverage **+0.0076**, emission **+0.0001** (study K's), mean frame **-3.05 dB**. On the probe:
+- `u30a` (lr 7e-4 with the anchor): tracking at 1 s **+0.28 dB [+0.13, +0.44]** (a target; 20.74 → 21.02 dB), at 2 s +0.22
+  [-0.02, +0.44], **the first frame a tie, +0.04 [-0.01, +0.09]** (study Q's `u30` on its probe: -0.09 [-0.13, -0.05]),
+  every endless measure a tie (the mean frame +0.00 [-0.09, +0.09]): it meets the rule's form.
+- `u30al` (lr 2.5e-4 with the anchor): the first frame +0.06 [+0.03, +0.09] (better, not a target), at 1 s a tie (+0.02
+  [-0.13, +0.18]), the mean frame -0.07 [-0.17, +0.03] (a tie): better on no target.
+
+The number of settings: tracking at 2 s, which `u30a` improves but which is not its target, spreads widely (an SD of 0.76
+dB between settings): if truly unchanged it would pass its margin with probability 0.55 at 60 settings by resampling and
+needs 187 in the normal form (`u30al`'s: 0.71, 134; its tracking at 1 s 0.92, 77). The cap binds: **N = 60**, at which
+the rule's form passes with probability 0.55 (`u30a`) and 0.66 (`u30al`) if every held measure is truly unchanged and the
+improved targets are as measured (q2_power.csv), stated here before any of the geyser's validation numbers.
+
 (The rest is filled in as the probe runs.)
 
 ### 4.7 Validation (the choice)
