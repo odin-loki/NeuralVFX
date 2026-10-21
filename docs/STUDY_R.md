@@ -419,6 +419,83 @@ the orbit video re-rendered); if it fails, the best candidate is shipped only as
 
 **Cost** (reported, not judged; provisional on the shared machine), as N2.
 
+## 3. Training and validation
+
+### 3.1 Training and the candidates
+
+As planned (§2.4), in one run without a restart: 1,750 iterations in 5.5 hours of wall time and **4.3 CPU-hours** on
+three threads of a machine shared with study Q (load 4 to 18): stage 1 1.06 CPU-hours, stage 2 0.62, stage 3 0.48,
+**stage 4 (the long rollouts) 2.14**, half the total (as in N2). Every stage was snapshot (`ckpt/r_stage1..4.ckpt` in
+the data root); the candidates `models/C2.nvfx3`, `C3.nvfx3`, `C4.nvfx3` are 274,760 bytes each (`.nvfx3` version 2,
+ambient edges, effect `smoke3d`, 8 start points).
+
+### 3.2 The edge check (validation's seeds)
+
+`results/3d/r/edge_val.csv`, `edgecheck_val.md`: each candidate played in one rollout for 30 s at five winds; per side,
+the largest coarse heat over 5 to 30 s against its bound (§2.7), and the late mean against twice the early mean plus C.
+
+| candidate | the check | where it fails |
+|---|---|---|
+| C2 | fails | wind 0.5, x = 0: holds 1.52 against a bound of 1.01 (it does not grow) |
+| C3 | fails | **wind 0.25: runs away** on three sides (x = 0 15.37 against 7.15, z = max 5.85 against 1.85, the top 7.12 against 4.69, each growing) |
+| **C4** | **fails, on one count** | wind 0.5, x = 0: **holds 1.08 against a bound of 1.01** (its mean 0.46 over 5 to 15 s, 0.83 over 20 to 30 s: it rises, but not past 2 x early + C) |
+
+C4 holds every other side at every wind within its bound, most with room: its largest downwind side 4.64 (bound 8.14,
+wind 0.95), its upwind sides 0.49 to 0.74 where the bounds are 1.00 to 1.04, its top 1.24 to 1.58 (bounds 1.50 to 5.56). The
+one failure is a side the teacher never reaches: with no wind (0.5) the four teacher runs put at most 0.005 of heat on
+x = 0, so the bound there is A x 0.005 + B = 1.01, and C4's smoke leans onto that side a little in its 30 s (peak 1.08).
+The bound was calibrated on the teacher's spread and committed before validation; it stands as written.
+
+### 3.3 The rest of validation
+
+`compare_val_*.md`: 15 tracking runs at the 5 settings; 2 real runs and 2 plays of each method pooled per setting.
+Means:
+
+| | C2 | C3 | **C4** | coarse simulation | holding the first frame |
+|---|---:|---:|---:|---:|---:|
+| tracking, picture, 1 s (dB) | 17.65 | 17.63 | **17.83** | 16.29 | 10.31 |
+| tracking, heat field, 1 s (dB) | 18.22 | 18.13 | **19.30** | 17.54 | 17.23 |
+| endless: 3D spectrum distance | 0.511 | 0.535 | 0.512 | 0.710 | |
+| endless: \|ln motion ratio\| (motion ratio) | 0.674 (0.53) | 0.565 (0.60) | **0.531** (0.60) | 0.605 (0.56) | |
+| endless: coverage distance | 0.0291 | 0.0240 | **0.0167** | 0.0130 | |
+| endless: light distance | 0.0247 | **0.0214** | 0.0304 | 0.0121 | |
+| endless: mean picture PSNR (dB) | 22.03 | 22.66 | **22.80** | 23.57 | |
+
+C4 against the coarse simulation, differences with 95% intervals (paired bootstrap, 10,000 resamples):
+
+| measure | 8 frames | 1 s | 2 s |
+|---|---|---|---|
+| tracking, heat field (dB) | +1.46 [+1.10, +1.80] | +1.76 [+1.40, +2.08] | +2.81 [+2.15, +3.51] |
+| tracking, picture (dB) | +1.40 [+0.89, +1.91] | +1.54 [+0.96, +2.15] | +1.49 [+1.00, +1.99] |
+
+| endless statistic | C4 - coarse simulation |
+|---|---|
+| 3D spectrum distance | -0.198 [-0.278, -0.123] (better) |
+| \|ln motion ratio\| | -0.074 [-0.311, +0.119] (tie) |
+| coverage distance | +0.0037 [+0.0002, +0.0072] (worse) |
+| light distance | +0.0183 [+0.0090, +0.0275] (worse) |
+| mean picture PSNR (dB) | -0.77 [-3.47, +1.94] (tie) |
+
+- **Every candidate follows a real run better than the coarse simulation**, at every horizon, and C4 most (the heat
+  field +1.76 dB at 1 s, C2 and C3 +0.6 to +0.7). Holding the first frame is far behind in pictures (a rising smoke
+  column moves its sharp edges by several cells in 8 frames).
+- **Played on, every candidate is worse than the coarse simulation in the light the smoke adds** (C4 +0.018, the
+  worst of the three), C2 and C4 in coverage, and C2 and C3 in the mean picture (C4 ties): the learned smoke covers and darkens the cameras' pictures differently
+  from the real runs, where the coarse simulation, which is the teacher's own equations on a coarse grid, gets the
+  plume's bulk right. The 3D spectrum is better for every candidate (the seeded detail on a moving learned state).
+  Every model is calmer than the real smoke (motion ratios 0.53 to 0.60; the coarse simulation 0.56).
+- **Stage 4 made C4 again** (as in N2): against C3, the same model before the long rollouts, it tracks 1.2 dB better
+  in the heat field at 1 s, and its coverage and motion are better; its light is worse.
+
+### 3.4 The choice, by the rule
+
+`choice_val.md`: **no candidate passes the edge check**, so (§2.8, step 3) the lowest mean rank over the seven measures
+chose among all three: **C4** (mean rank 1.43; C2 and C3 2.29 each). Its file was frozen before the test
+(`results/3d/r/frozen.csv`: `chosen.nvfx3`, 274,760 bytes, SHA-256
+7a53e3e23a6cdbb667e2c96044a00ad74b83b255e89108c7b4af70bf3ac19988). **By the rule it already fails the test's first
+condition**; the test ran once all the same, and everything it measured is reported (§4). (The choice table's
+"temperature" column is the heat field and its "emission" column the light distance: the tool's labels from study N2.)
+
 ## 6. Beside the study
 
 ### 6.2 Study R and study hres
