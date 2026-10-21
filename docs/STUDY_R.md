@@ -399,3 +399,44 @@ floor are reported beside it, not judged. If it passes it ships as the 3D smoke 
 the orbit video re-rendered); if it fails, the best candidate is shipped only as a labelled demo.
 
 **Cost** (reported, not judged; provisional on the shared machine), as N2.
+
+## 7. Reproduce
+
+Data under `NEURALVFX_DATA/r_smoke3d` (default `/root/nvfx-data/r_smoke3d`); every step resumes from what it has
+written (the job scripts used are in the data root's `jobs/`). Build as the main README says, then:
+
+```sh
+B=build/nvfx_3d; R=results/3d/r; D=$NEURALVFX_DATA/r_smoke3d; W="--winds 0.05,0.25,0.5,0.75,0.95 --seconds 30"
+# §1: the plume (seeds 29,010,000 + 100 c + k), then the fits
+P="$B plume --study r --spin 6 --seconds 16"
+$P --label v_i50 --intensity 0.5 --seeds 5 --seed-base 29010000; $P --label v_i20 --intensity 0.2 --seeds 5 --seed-base 29010100
+$P --label v_i80 --intensity 0.8 --seeds 5 --seed-base 29010200; $P --label v_t00 --turbulence 0 --seeds 4 --seed-base 29010300
+$P --label v_t100 --turbulence 1 --seeds 4 --seed-base 29010400; $P --label v_tall --seeds 4 --seed-base 29010500 --height 160
+$P --label v_wide --seeds 4 --seed-base 29010600 --width 96 --span 192
+$B plume --study r --spin 6 --seconds 12 --label v_w75 --wind 0.75 --seeds 3 --seed-base 29010700 --width 96 --span 192 --source-x 0.25 --wind-speed 17.5
+$B plume --study r --spin 6 --seconds 12 --label v_w100 --wind 1.0 --seeds 3 --seed-base 29010800 --width 96 --span 192 --source-x 0.25 --wind-speed 35
+$B plumefit --study r --configs v_i20,v_i50,v_i80,v_t00,v_t100,v_tall,v_wide,v_w75,v_w100 --strengths v_i20,v_i50,v_i80 \
+   --box v_i50:v_tall,v_i50:v_wide --bent v_w75,v_w100 --still v_i50 --bent-lo 8 --bent-hi 56 --fit-lo 24 --fit-hi 92 --out $R
+$B plumevideo --study r --configs v_i50,v_i20,v_i80 --fit-lo 24 --fit-hi 92 --seconds 16 --seed 29900100 --average-from 4 --out 3d_plume_theory.mp4
+# §2: the training runs, the edge bounds, training and the candidates
+$B record --study r --runs-dir short --runs 24; $B record --study r --runs-dir long --runs 24
+$B edge --study r --sim --runs 4 $W --out $D/results/edge_teacher.csv; $B edgecal --study r --csv $D/results/edge_teacher.csv --out $R/edge_bounds.csv
+RUNS="--runs-dir long --also $D/runs/short"
+$B train --study r --name r $RUNS --iterations 900 --finetune 350 --activity 250 --long 250 --batch 8 --unroll 12 --burn 24 \
+   --burn-long-min 48 --burn-long-max 240 --seed 29200000 --threads 3                # snapshots ckpt/r_stage1..4.ckpt
+for k in 2 3 4; do $B finish --study r --ckpt r_stage$k --out C$k $RUNS; done
+# §3: validation (jobs/val_staged.sh, jobs/val_report.sh)
+$B truth --study r --split val; $B real --study r --split val
+for m in C2 C3 C4; do $B edge --study r --model $D/models/$m.nvfx3 --label $m $W --out $D/results/edge_val.csv
+  $B track --study r --split val --method $m --model $D/models/$m.nvfx3; $B play --study r --split val --method $m --model $D/models/$m.nvfx3; done
+$B track --study r --split val --method coarse --model $D/models/C2.nvfx3; $B play --study r --split val --method coarse --model $D/models/C2.nvfx3
+$B track --study r --split val --method hold --model $D/models/C2.nvfx3
+$B edgecheck --study r --csv $R/edge_val.csv --bounds $R/edge_bounds.csv
+$B choose --study r --split val --cands C2,C3,C4 --edge $R/edge_val.csv --bounds $R/edge_bounds.csv
+cp $D/models/<chosen>.nvfx3 $D/models/chosen.nvfx3; $B freeze --model $D/models/chosen.nvfx3 --frozen $R/frozen.csv
+# §4: the test, once (jobs/test.sh, jobs/test_report.sh)
+$B truth --study r --split test; $B real --study r --split test
+$B edge --study r --model $D/models/chosen.nvfx3 --label learned --seed-base 29730000 $W --out $D/results/edge_test.csv
+$B track --study r --split test --method learned --model $D/models/chosen.nvfx3 --frozen $R/frozen.csv   # and play; coarse; hold
+$B compare --study r --split test --a learned --b coarse --results $R
+```
