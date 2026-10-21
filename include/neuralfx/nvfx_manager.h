@@ -63,18 +63,19 @@ typedef struct nvfx_manager_desc {
   /* Drawn at half size where it pays (docs/MANAGER.md §2.10, docs/REPORT.md §22). A simulation whose instances are at
      least half_px pixels on screen, or half_share of the viewport's height (with nvfx_manager_set_camera), is drawn at the
      level below its level (its detail layer and renderer do a quarter of the work: a 256 px picture is drawn at 128),
-     and its picture brought back to the level's size by half_upscale. Once on, it stays on until the size falls below
-     the threshold by `hysteresis`; turning it off is an upward change (it waits for the budget and min_dwell).
-     Simulations locked to a level (nvfx_manager_set_lod_lock) and proxies are never drawn at half size; a model can
-     take its own threshold (nvfx_manager_model_desc.half_px). Both 0: never. Defaults: docs/MANAGER.md §2.10. */
+     and the bilinear 2x brings it back (half_upscale). Once on, it stays on until the size falls below the threshold by
+     `hysteresis`; turning it off is an upward change (it waits for the budget and min_dwell). Simulations locked to a
+     level (nvfx_manager_set_lod_lock) and proxies are never drawn at half size; a model can take its own threshold
+     (nvfx_manager_model_desc.half_px). Both 0: never. Defaults: docs/MANAGER.md §2.10. */
   float half_px;
   float half_share;
-  nvfx_upscale half_upscale; /* NVFX_UPSCALE_BILINEAR (default): the bilinear 2x (study P's, the runtime's) in the
-                                simulation's job, so the picture has its level's size; NVFX_UPSCALE_OFF: none, the picture
-                                is the half-size drawing (size is half the level's) and the engine's bilinear sampler draws
-                                it larger, as it stretches every picture to its sprite (no CPU for the 2x, a quarter of
-                                the upload); NVFX_UPSCALE_LEARNED is refused (NVFX_ERROR_ARGUMENT): experimental, it did not
-                                pass its rule (docs/STUDY_P.md) and the manager never chooses it */
+  nvfx_upscale half_upscale; /* who does the bilinear 2x. NVFX_UPSCALE_OFF (default): the engine's sampler: the picture is
+                                the half-size drawing (size is half the level's, NVFX_PICTURE_HALF set), which the engine
+                                draws larger as it stretches every picture to its sprite (no CPU for the 2x, a quarter of
+                                the upload). NVFX_UPSCALE_BILINEAR: the manager, in the simulation's job (study P's 2x, the
+                                runtime's: what nvfx_instance_set_upscale draws), so the picture has its level's size.
+                                NVFX_UPSCALE_LEARNED is refused (NVFX_ERROR_ARGUMENT): experimental, it did not pass its
+                                rule (docs/STUDY_P.md), and the manager never chooses it */
 } nvfx_manager_desc;
 
 NVFX_API void nvfx_manager_desc_init(nvfx_manager_desc* desc);
@@ -175,7 +176,7 @@ enum {
   NVFX_PICTURE_FINISHED = 32,    /* a one-shot effect has reached its last frame */
   NVFX_PICTURE_NEW = 64,         /* the pixels changed in this tick */
   NVFX_PICTURE_HALF = 128        /* the simulation is drawn at half size (nvfx_manager_desc.half_px): lod_size is the
-                                    drawing's size, and size twice it (NVFX_UPSCALE_BILINEAR) or the same (OFF) */
+                                    drawing's size, and size the same (NVFX_UPSCALE_OFF) or twice it (BILINEAR) */
 };
 
 typedef struct nvfx_manager_picture {

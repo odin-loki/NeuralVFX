@@ -51,7 +51,7 @@ void nvfx_manager_desc_init(nvfx_manager_desc* d) {
   d->seed = 1;
   d->half_px = nfx::mgr::kDefaultHalfPx;  // docs/MANAGER.md §2.10, docs/REPORT.md §22
   d->half_share = 0.f;
-  d->half_upscale = NVFX_UPSCALE_BILINEAR;
+  d->half_upscale = NVFX_UPSCALE_OFF;  // the engine's sampler draws the half-size picture larger (docs/MANAGER.md §2.10)
 }
 
 nvfx_status nvfx_manager_create(const nvfx_manager_desc* desc, nvfx_manager** out) {

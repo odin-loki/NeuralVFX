@@ -4350,3 +4350,107 @@ explosion and the mushroom, and `LibraryKeyframesFrozen` and the pack's after th
 Godot test (`engines/godot/test.sh`: the fireball and the library stage, 0 failures each); `models/restore.sh` against
 the data root (0 placed, 75 already there, 0 different). README's test count is 541 (main's 539, main's new 3D test and
 `Script.AnEffectsSoftenSmoothsItsDetailLayer`).
+
+## 22. Half size where it pays: the effect manager draws large effects at half size
+
+**Status: in progress** (21 October 2026; branch `manager-halfsize`). This section's design and rule (§22.1 to §22.3)
+were committed before any validation, test or timing number; the rule's numbers (the margins) are committed before the
+test, which runs once. Seeds: this work's block, 35,000,000 to 35,099,999. Data under the data root's `halfsize` (the
+frozen models `crowd/models` and `library/models`, the cache, the markers, the logs); tables under
+`results/manager/halfsize`.
+
+### 22.1 The question and the policy
+
+Study P (§17) found that drawing a large effect at half size and bringing it back with the bilinear 2x costs 0.36 to
+0.43 of drawing it at full size at 512 px (0.39 to 0.48 at 256 px), and is within the null's margins of the full-size
+drawing against the simulator's frames for all six of its effects at 512 px (four of six at 256 px). The effect manager
+(docs/MANAGER.md) already picks each simulation's picture size (32, 64, 128 or 256 px: the smallest that holds its size
+on screen) and update rate from its size on screen and the budget; a 256 px picture costs about three times a 128 px one
+in its cost model (2.35 against 0.78 ms per frame on one AVX2 core, MANAGER.md §6). **The policy**: a simulation whose
+instances are at least `half_px` pixels on screen (or `half_share` of the viewport's height) is drawn at the level below
+its level, and the bilinear 2x brings the picture back.
+
+- **The API** (NVFX_VERSION 8, NVFX_MANAGER_VERSION 2): `nvfx_manager_desc.half_px`, `half_share` and `half_upscale`;
+  `nvfx_manager_model_desc.half_px` (below 0, the default: the manager's thresholds; 0: never for this effect; above 0:
+  its own); the picture flag `NVFX_PICTURE_HALF` (then `lod_size` is the drawing's size); `nvfx_manager_stats.half`.
+  `half_upscale` says who does the 2x: `NVFX_UPSCALE_OFF` (the default), the engine's bilinear sampler, which already
+  stretches every picture to its sprite: the picture is the half-size drawing; `NVFX_UPSCALE_BILINEAR`, the manager, with
+  the runtime's bilinear 2x (study P's; what `nvfx_instance_set_upscale(NVFX_UPSCALE_BILINEAR)` draws, to the bit), so the
+  picture has its level's size. `NVFX_UPSCALE_LEARNED` is refused: it did not pass its rule (§17.3) and stays an
+  experimental instance option that the manager never picks.
+- **How it plans.** The planner works on picture levels as before; a simulation drawn at half size has its slot (its
+  runners) at the level below, and the cost model counts that level's steps and pictures and, with BILINEAR, the 2x of
+  every picture shown. Drawing at half size is a downward change (at once); drawing at full size again is an upward one
+  (it waits for room in the budget and `min_dwell`). Hysteresis: once on, a simulation stays on until its size falls
+  below the threshold by `hysteresis` (15%). A simulation locked to a level and the proxies are never drawn at half size.
+  Everything depends on the sizes given and the cost model, never on measured time: the same pictures on any number of
+  threads; nothing is allocated per frame (the 2x pictures and the threads' upscalers are made by
+  `nvfx_manager_add_model`).
+- **What the candidate default switches.** With `half_px` 256 and the manager's largest size (256), only 256 px pictures
+  of effects at least 256 px on screen are drawn at 128: study P's comparison at S = 256 exactly (the full-size drawing
+  at S against the half-size one brought up by the bilinear 2x and shown at S). With the default pools an effect has one
+  256 px slot (MANAGER.md §2.8), so in a crowd few simulations are at 256 px at once.
+- **The library's stages and scenes** do not pick picture sizes: each learned module is drawn at the tile size its
+  catalogue entry or script names (`size N`, COMPOSE.md §4.3), whatever its size on screen, so they have nothing to switch;
+  a script that wants a module at half size writes it at half size. **The C++ wrapper** takes the C structs (the new
+  fields are there) and gains `nvfx::Picture::half()`. **The FUSE adapter** exposes `SpriteConfig::half_px`,
+  `half_share` and `half_upscale` and `SpriteModel::half_px`.
+
+### 22.2 The rule (committed before validation; the test runs once)
+
+**The effects**: the four the manager's crowd benchmark plays, as it plays them (`v2/models` fire, smoke and explosion,
+`fx/models/d` steam), and the library's fire (study M's), explosion (study M3's) and magic (study L's), which the FUSE
+demo's sprites play with smoke: seven models, copied under the data root's `halfsize` and frozen by SHA-256
+([models.csv](../results/manager/halfsize/models.csv)).
+
+**The arms**, at S = 256 px through the runtime as it ships (its default precision and ISA), with study P's tool
+(`nvfx_study_p` with `--dir`, `--seed-base`, arms N and B only): **N**, an instance at 256 px; **B**, the instance at
+128 px brought up by the runtime's bilinear 2x (the manager's picture with BILINEAR, and what an engine's bilinear
+sampler shows with OFF); **H**, the 128 px instance alone (the cost of OFF).
+
+**The measures** are study P's (§17.2, STUDY_P.md §4.1): (a) against N on the same seed (active PSNR, SSIM, the high
+band, the motion against N's), reported, not deciding; (b) against the simulator's frames at 256 px (its 128 cells drawn
+at 256 px): tracking at 1 s, the detail spectrum, |ln motion ratio|, coverage, emission, the mean frame and the high band
+against the real runs.
+
+**Splits and seeds** (run k of setting s takes base + 100 s + k):
+
+| split | settings | seeds |
+|---|---|---|
+| validation (the null probe and the margins) | study G's 10 validation settings | real 35,000,000, plays 35,010,000, null 35,020,000, tracking 35,030,000 |
+| **test, once** | study B's held-out settings extended to 20 (`test_settings(20)`) | real 35,040,000, plays 35,050,000, tracking 35,060,000 |
+| cost | controls 0.6, 0.5, 0.6 | 35,090,000 |
+| benchmarks and videos | | 35,095,000 on |
+
+**The margins** (study P's form): per effect and (b) measure, the larger of study K's margin and the null's RMS change
+at a setting (N with fresh seeds against N, 4 plays pooled, over the 10 validation settings); tracking keeps −0.20 dB.
+Computed by `nvfx_study_p margins` from N and the null alone and committed before the test.
+
+**The rule.** The policy ships **on by default** (`half_px` 256, `half_upscale` OFF) if both hold:
+
+1. **Quality**: for every one of the seven effects, B minus N against the simulator's frames at 256 px is within the
+   effect's margin on every (b) measure: paired over the 20 test settings, 95% bootstrap, 10,000 resamples (seed 2026),
+   the interval's worse end within the margin.
+2. **Cost**: for every one of the seven effects, H costs at most 0.5 of N a frame at 256 px: thread CPU time per frame
+   through `nvfx_render`, N, H and B interleaved in one process with their order rotated each round, 30 rounds of 20
+   frames (`nvfx_study_p cost --net none`), the median over the rounds of H / N, on the quiet machine.
+
+Otherwise `half_px` defaults to 0 (off), what failed is reported, and the policy stays available to set. Reported beside
+the rule, not deciding: (a) against N; validation's readings; B / N; the benchmarks (§22.3).
+
+### 22.3 The benchmarks (committed before any run)
+
+The manager's crowd benchmark (MANAGER.md §7: 160 instances of fire, smoke, steam and explosions in a fly-through, seed
+1, default pools and costs) and a close-up variant of it where effects are large on screen (`nvfx_crowd --scene close`:
+32 fires, smoke columns and steam vents 2 to 40 m ahead, a camera walking at 0.6 m/s, an explosion every 1.5 s; seed
+35,095,001; four 256 px slots per effect, as an engine that plays large effects would size that pool). Configurations: the
+crowd at 4 ms on one thread, 8 ms on two, 16 ms on four and no budget on four; the close scene at 4 ms on one thread, 8 ms
+on two and no budget on four. Arms: **off** (`half_px` 0), **on** (`half_px` 256, OFF) and **cpu2x** (`half_px` 256,
+BILINEAR). Ten rounds; in each, every configuration's three arms run back to back in an order rotated from round to round
+(`tools/manager/time_halfsize.sh build OUT 10 20`). Reported: per configuration and arm the median over the rounds of the
+CPU per tick (the mean of a run's ticks, its median and its 99th percentile), of the plan, of the simulations, proxied
+instances and simulations drawn at half size, each with a 95% bootstrap interval of the median; and each arm against off
+round by round, the ratio and the difference of the CPU per tick, medians with 95% bootstrap intervals. With a budget the
+planner spends what drawing at half size saves on other simulations (fewer proxies, higher rates), so there the CPU per
+tick stays near the budget and the plan's composition says what changed; with no budget the CPU per tick shows the
+saving directly. On the quiet machine (after the round-7 re-timing finishes), else labelled provisional.

@@ -69,7 +69,7 @@ struct SpriteConfig {
   float texel_scale = 1.f;              // sprite pixels per screen pixel (below 1: softer and cheaper at every distance)
   // Drawn at half size where it pays (docs/MANAGER.md §2.10, FUSE.md §5): a sprite at least half_px pixels on screen
   // (or half_share of the view's height) is drawn at the level below its level. half_px < 0: the manager's default
-  // (nvfx_manager_desc_init); 0 with half_share 0: off. half_upscale NVFX_UPSCALE_OFF (the adapter's default): the
+  // (nvfx_manager_desc_init); 0 with half_share 0: off. half_upscale NVFX_UPSCALE_OFF (the default): the
   // half-size picture is uploaded and FUSE's bilinear sampler draws it on the quad (a quarter of the upload, no CPU for
   // the 2x); NVFX_UPSCALE_BILINEAR: the manager's bilinear 2x on the CPU first, the picture at its level's size.
   float half_px = -1.f;

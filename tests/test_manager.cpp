@@ -291,6 +291,7 @@ TEST(Manager, HalfSizeTrainedEffectsAreNvfxRender) {
     nvfx_manager_desc d = small_desc();
     d.max_size = 256;
     d.half_px = 256.f;
+    d.half_upscale = NVFX_UPSCALE_BILINEAR;
     Mgr g(d);
     int model = -1;
     nvfx_manager_model_desc md;
@@ -334,6 +335,7 @@ TEST(Manager, HalfSizeFollowsTheScreenWithHysteresis) {
   const Effect e(tiny_effect(true));
   nvfx_manager_desc d = small_desc();
   d.half_px = 100.f;
+  d.half_upscale = NVFX_UPSCALE_BILINEAR;  // the picture keeps its level's size
   d.min_dwell = 0.2f;
   Mgr g(d);
   int model = -1;
@@ -432,6 +434,7 @@ TEST(Manager, HalfSizeLocksModelsShareAndCost) {
   for (const bool on : {false, true}) {
     nvfx_manager_desc dc = small_desc();
     dc.half_px = on ? 100.f : 0.f;
+    dc.half_upscale = NVFX_UPSCALE_BILINEAR;  // the 2x counted too
     Mgr gc(dc);
     int mc = -1;
     ASSERT_EQ(nvfx_manager_add_model(gc.m, e.fx, nullptr, &mc), NVFX_OK);

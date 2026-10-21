@@ -1,0 +1,8 @@
+set,effect,source,file,bytes,sha256
+crowd,fire,v2/models/fire.nvfx,halfsize/crowd/models/fire.nvfx,42895,b0f7ad32cf34be2a83b7c9959f5c1f0d701d984282483badfaaed54e6661c827
+crowd,smoke,v2/models/smoke.nvfx,halfsize/crowd/models/smoke.nvfx,149287,dfa2b546a5e035b87166d48dbb535d1e6540c8fcf7d483f9df73043ac26d4b52
+crowd,steam,fx/models/d/steam.nvfx,halfsize/crowd/models/steam.nvfx,83719,2d4b624845051eb46e8b2ed630a928327f4b95f13e11ded7797da68ee217775e
+crowd,explosion,v2/models/explosion.nvfx,halfsize/crowd/models/explosion.nvfx,280927,b8e7aa4283567b8f3949ab16b1a181622c8b0d9d49af3708b47c8169557f722b
+library,fire,m_ordered/models/v3/fire.nvfx,halfsize/library/models/fire.nvfx,42895,51fce5d5ec7b922c9107b63294237198ffbb6c5cc6a8f9de55470139902ec783
+library,explosion,m3/models/explosion.nvfx,halfsize/library/models/explosion.nvfx,301443,b0ee6f053b4b83594fe9cb26d5b496b3ba829fe32d246ab24297796e032a7bc5
+library,magic,l_swirl/models/v3/magic.nvfx,halfsize/library/models/magic.nvfx,83743,f1d9d57e75935d0a671483a130a821e529b53ab4e2390b501031aff490d2a5ee
