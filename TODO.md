@@ -49,9 +49,10 @@ a quiet machine (REPORT §13.11).
   - start from a validated teacher (FDS);
   - snapshot every training stage.
 - **Stage 2, on a PC, much later:** everything below. Accurate 3D simulations of every effect, however long they take,
-  checked against measured physics. How the PC's GPU simulates and trains it, each effect in 4 to 8 hours, and which
-  simulators teach it (Houdini, with validated research codes as referees), is planned in
-  [docs/PLAN_PC_GPU.md](docs/PLAN_PC_GPU.md). Large 3D models trained on them, as fine as the PC allows. Then 3D scenes, a 3D library and a full weather system.
+  checked against measured physics. How the PC's GPU simulates, trains and plays the high-resolution effects (a
+  64 x 96 x 64 state, 256 x 384 x 256 detail), each made in 5 to 9 hours, and which simulators teach them (our GPU
+  solvers and Houdini, checked against measurements), is planned in [docs/PLAN_PC_GPU.md](docs/PLAN_PC_GPU.md).
+  Large 3D models trained on them, as fine as the PC allows. Then 3D scenes, a 3D library and a full weather system.
 
 First we demo, then we go big.
 
