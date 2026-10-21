@@ -40,6 +40,71 @@ thermal: **Briggs's two-thirds law**, z = 1.6 F_B^(1/3) x^(2/3) / U (Briggs 1969
 Briggs 1975, "Plume rise predictions", in *Lectures on Air Pollution and Environmental Impact Analyses*, AMS, 59-111),
 with Briggs's flux F_B = F / pi and x the distance downwind.
 
+### 1.2 Study N's preset, and what was wrong with it
+
+Study N's smoke (`Effect::smoke`, kept unchanged so its runs can be repeated) has the fire's solver with smoke's
+constants: warm gas (0.30 + 0.15 intensity at the source) with strong buoyancy and no combustion. First measurements
+(two seeds, 12 s each, `plume/x_n_i50` in the data root) showed it **clearly wrong as a plume**: its buoyancy flux
+through a horizontal plane fell by a factor of three from the source to the top of the box (39,000 to 12,400 cells^4 /
+s^3), because the preset cools its gas (heat times exp(-0.3 t)), fades its soot (the same rate) and damps every velocity
+(exp(-0.1 t)). None of these belongs in a plume of warm smoke a few tens of kelvin above the air: over the seconds it
+takes to cross a metre-sized box, such smoke neither cools nor fades, and nothing drags on a free plume.
+
+**Removing the three sinks was not enough.** The same preset without them (two seeds) had a buoyancy flux that *grew*
+by 75% from the source to the top: the solver made heat and soot. Two checks found where. (1) The projection is
+converged: 150 Gauss-Seidel sweeps instead of 30 changed the fluxes in the third digit. (2) The residual divergence of the
+collocated projection (sum of soot x divergence over each plane) accounts for about a tenth of the gain. The rest is the
+scalars' advection: semi-Lagrangian with the clamped MacCormack correction, which is not conservative, gained about 5%
+of the soot per second inside the plume.
+
+**The fix, `Effect::smoke_r`** (`src/sim3d/sim3d.cpp`): study N's source, controls and forces with **no cooling, no
+soot decay and no velocity damping**, and **heat and soot carried in flux form** (`Params::scalars`, default per effect):
+a second-order upwind scheme with the monotonised central limiter, one sweep per axis in alternating order, the face
+velocity the mean of its two cells', substeps wherever a sweep's Courant number would pass 0.95. What leaves a cell
+enters its neighbour, so the solver neither makes nor loses heat or soot (tested: a blob carried by a swirling flow keeps
+its total to 2e-6; `Sim3d.FluxFormKeepsTheSootItCarries`). The fire and study N's smoke keep MacCormack and are
+unchanged to the bit (their recorded runs compared byte for byte). With the fix one seed's buoyancy flux stayed within
+about 7% of its mean at every height, with no trend. Everything below is about `smoke_r`.
+
+### 1.3 The measurement
+
+`nvfx_3d plume` (`tools/plume3d.cpp`): `smoke_r` in still air (wind 0.5) from an empty box, 6 s of spin-up, then 16 s
+averaged every frame (480 frames), one run per seed. Per run: time means in radial bins one cell wide about the
+burner's axis at every height (vertical velocity w, buoyancy g' = 210 heat - 0.3 soot in cells per second squared at 64
+cells across, soot, and the products w g', w^2, w soot, so the turbulent fluxes are included); the buoyancy flux
+through every horizontal plane, F(z) = the plane's sum of the time mean of w g'; a slice through the axis; the soot
+summed over depth (for the bent plume). Per configuration the runs' time means are pooled, and at each height a
+Gaussian is fitted to the core of each radial profile (ln f against r^2 by least squares, out to where f first falls
+below e^-2 of the axis's): the centreline W, G and soot concentration and their 1/e radii b_w, b_g, b_c.
+
+**The fits** (`nvfx_3d plumefit`), over a fixed range of heights:
+- the velocity width, b_w = beta (z - z0) by least squares: the spreading rate beta, **alpha_G = beta / 1.2**, alpha_T
+  = sqrt(2) alpha_G and **the virtual origin z0** (where the linear width extrapolates to zero);
+- with that z0, the exponents of W, G, the soot and F against (z - z0) by least squares in logs (MTT: -1/3, -5/3, -5/3,
+  0);
+- the origin checked two other ways: W^-3 and G^-3/5 are linear in z for an MTT plume, and their zeros give z0 again;
+  and an exponent fitted together with its own origin (a grid search), to show how far the two trade off over a short
+  range;
+- the constants W (z - z0)^(1/3) / F^(1/3) and G (z - z0)^(5/3) / F^(2/3) against MTT's for Gaussian profiles at the
+  fitted alpha_G, and lambda = b_g / b_w (MTT's simple form assumes 1; laboratory plumes have about 1.1 to 1.2);
+- **the source strengths**: the slope of ln (W (z - z0)^(1/3)) against ln F across intensities 0.2, 0.5 and 0.8
+  (MTT: 1/3).
+
+**Intervals**: 95% percentile intervals from 10,000 resamples of the runs (seeds) with replacement, each resample
+pooled and fitted again (seed 2026). With 4 or 5 runs per configuration these understate the uncertainty somewhat.
+
+**The heights fitted** (fixed before the final runs, from the two exploratory seeds): from **24 cells** above the floor
+(below about 20 cells the plume is still contracting and accelerating off its broad, lazy source: b_w falls from the
+source's width to 3.6 cells by 8 cells up and regains it only by about 20) up to **the lowest height above which the
+study's box disagrees with a larger one** by more than 5% in W or b_w (pooled): a box as wide again on each side
+(96 x 96 x 96 at the same cells per unit, span 192) and a box two thirds taller (64 x 160 x 64), each at intensity 0.5
+with 4 seeds; rounded down to a multiple of 4 cells. Local exponents at every height are shown as well (the figure).
+
+**Configurations** (seeds 29,010,000 + 100 c + k): intensity 0.5, 0.2 and 0.8 at turbulence 0.5 (5 seeds each);
+turbulence 0 and 1 at intensity 0.5 (4 seeds each; the control's range); the tall and the wide box (4 seeds each); and
+the wind-bent plume (§1.6). 1 world unit is taken as a metre for the optics only (warm smoke at 293 K + 98 K per unit
+of heat, the buoyancy read as g dT / T); MTT's laws need no units.
+
 ## 2. The learned smoke: design and rule (written and committed before validation)
 
 Everything in this section was fixed, and committed, before any validation number existed; the edge check's bounds

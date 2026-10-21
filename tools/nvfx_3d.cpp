@@ -1516,8 +1516,66 @@ int video(const Args& a) {
       vid.put(cv);
       if (f % 60 == 0) std::println("  frame {} ({:.0f} s)", f, now() - t0);
     }
+  } else if (kind == "coupled") {
+    // Study R's coupled demo (docs/STUDY_R.md §6; not measured): the learned fire (--model) and the learned smoke
+    // (--smoke) stacked in one picture, the smoke's box on top of the fire's. The fire's soot leaving the top of its box
+    // (the soot times the upward velocity over its top four fine layers, smoothed over a second) drives the smoke's
+    // intensity, relative to the first second's; the fire's intensity sweeps from --controls' to 0.95 and back. Drawn as
+    // one 64 x 192 x 64 volume with the fire's optics (the smoke's heat set to zero: warm smoke does not glow), so the
+    // fire lights its smoke.
+    VolumeHandle fire(model, threads), smoke(a.need("smoke"), threads);
+    nvfx_volume_info fi{}, si{};
+    nvfx_volume_effect_get_info(fire.e, &fi);
+    nvfx_volume_effect_get_info(smoke.e, &si);
+    if (fi.size[0] != si.size[0] || fi.size[2] != si.size[2]) throw std::invalid_argument("coupled: the two volumes need the same width and depth");
+    const int nx = fi.size[0], ny1 = fi.size[1], ny2 = si.size[1], nz = fi.size[2];
+    for (VolumeHandle* v : {&fire, &smoke}) {
+      if (nvfx_volume_set_shard(v->v, shard) != NVFX_OK) throw std::invalid_argument("bad --shard");
+    }
+    nvfx_volume_set_seed(fire.v, seed);
+    nvfx_volume_set_seed(smoke.v, seed + 1);
+    const std::size_t n1 = zu(nx) * zu(ny1) * zu(nz), n2 = zu(nx) * zu(ny2) * zu(nz), layer = zu(nx) * zu(nz);
+    std::vector<float> T1(n1), D1(n1), V1(3 * n1), T2(n2), D2(n2), T(n1 + n2), D(n1 + n2);
+    rd::Renderer rend(nx, ny1 + ny2, nz, rd::optics_for("fire3d"));
+    nfx::Pool pool(threads);
+    double flux_s = 0, flux_ref = 0;
+    float smoke_i = a.f("smoke-intensity", 0.6f);
+    for (int f = 0; f < frames; ++f) {
+      const float t = static_cast<float>(f) / 30.f, u = t / seconds;
+      std::array<float, 3> cf = c;
+      cf[0] = c[0] + (0.95f - c[0]) * std::sin(std::numbers::pi_v<float> * std::clamp((u - 0.2f) / 0.6f, 0.f, 1.f));
+      nvfx_volume_set_controls(fire.v, cf.data(), 3);
+      const std::array<float, 3> csm{smoke_i, c[1], c[2]};
+      nvfx_volume_set_controls(smoke.v, csm.data(), 3);
+      if (nvfx_volume_step_to(fire.v, t) != NVFX_OK || nvfx_volume_step_to(smoke.v, t) != NVFX_OK) throw std::runtime_error("step failed");
+      nvfx_volume_read(fire.v, NVFX_VOLUME_TEMPERATURE, NVFX_VOLUME_FLOAT, T1.data(), n1 * 4);
+      nvfx_volume_read(fire.v, NVFX_VOLUME_SOOT, NVFX_VOLUME_FLOAT, D1.data(), n1 * 4);
+      nvfx_volume_read(fire.v, NVFX_VOLUME_VELOCITY, NVFX_VOLUME_FLOAT, V1.data(), 3 * n1 * 4);
+      nvfx_volume_read(smoke.v, NVFX_VOLUME_SOOT, NVFX_VOLUME_FLOAT, D2.data(), n2 * 4);
+      double flux = 0;
+      for (std::size_t i = n1 - 4 * layer; i < n1; ++i) flux += static_cast<double>(D1[i]) * std::max(0.f, V1[3 * i + 1]);
+      flux_s = f == 0 ? flux : flux_s + (flux - flux_s) / 30.0;
+      if (t < 1.f) flux_ref += flux / 30.0;
+      else smoke_i = static_cast<float>(std::clamp(a.f("smoke-intensity", 0.6f) * flux_s / std::max(1e-9, flux_ref), 0.05, 1.0));
+      std::copy(T1.begin(), T1.end(), T.begin());
+      std::copy(D1.begin(), D1.end(), D.begin());
+      std::fill(T.begin() + static_cast<std::ptrdiff_t>(n1), T.end(), 0.f);
+      std::copy(D2.begin(), D2.end(), D.begin() + static_cast<std::ptrdiff_t>(n1));
+      rend.prepare(T, D, &pool);
+      const float az = 0.35f * std::numbers::pi_v<float> * std::sin(2.f * std::numbers::pi_v<float> * u);
+      const View view{{4.9f * std::sin(az), 1.35f, 4.9f * std::cos(az)}, {0.f, 1.42f, 0.f}, {0.f, 1.f, 0.f}, 40.f};
+      pic.resize(zu(W) * zu(H) * 4);
+      rend.render(view.camera(fl(W) / fl(H)), W, H, pic.data(), zu(W) * 4, &pool);
+      glow1 = 0.7f * glow1 + 0.3f * picture_glow(pic);
+      composite(cv, 0, 0, W, H, pic, view, glow1);
+      cv.text("LEARNED 3D FIRE AND SMOKE, COUPLED (A DEMO)", 24, 20, 3, {255, 255, 255});
+      cv.text("TWO LEARNED VOLUMES STACKED: THE FIRE'S SOOT LEAVING ITS BOX DRIVES THE SMOKE ABOVE IT. NOT MEASURED.", 24, 52, 1, {190, 190, 196});
+      cv.text(std::format("FIRE INTENSITY {:.2f}  SMOKE INTENSITY {:.2f}  WIND {:.2f}", cf[0], smoke_i, c[1]), 24, H - 30, 2, {200, 200, 206});
+      vid.put(cv);
+      if (f % 60 == 0) std::println("  frame {} ({:.0f} s)", f, now() - t0);
+    }
   } else {
-    throw std::invalid_argument("--kind orbit | wind | real-vs-learned");
+    throw std::invalid_argument("--kind orbit | wind | real-vs-learned | coupled");
   }
   vid.close();
   std::println("wrote {} ({:.0f} s)", out, now() - t0);
@@ -1967,7 +2025,7 @@ int edgecal(const Args& a) {
         need_c = std::max(need_c, st[i].m2 - 2 * st[i].m1);
       }
       double B = B0, C = C0;
-      std::string loo = "every run passes";
+      std::string loo;
       if (need_b >= B0) {
         B = 1.5 * need_b;
         loo = std::format("B raised to {:.3f}", B);
@@ -1975,9 +2033,10 @@ int edgecal(const Args& a) {
       }
       if (need_c >= C0) {
         C = 1.5 * need_c;
-        loo += std::format("; C raised to {:.3f}", C);
+        loo += std::format("{}C raised to {:.3f}", loo.empty() ? "" : "; ", C);
         ++raised;
       }
+      if (loo.empty()) loo = "every run passes";
       std::string maxes, means;
       for (const auto& x : st) {
         maxes += std::format("{}{:.3f}", maxes.empty() ? "" : ", ", x.mx);
@@ -2031,6 +2090,82 @@ std::map<std::string, EdgeVerdict> edge_verdicts_r(const fs::path& csv, const fs
     v.rows.push_back(cells + " " + (worst.empty() ? "no runaway" : "**runs away**: " + worst) + " |");
   }
   return out;
+}
+
+// Study R's shipped smoke, checked (ctest, data-dependent: exit 77 when the model is not in the data root): the file is
+// the one frozen for the test (results/3d/r/frozen.csv), it loads through the volume C API as warm smoke, plays and
+// draws with finite fields and a visible picture, and played 10 s in one rollout at winds 0.05, 0.5 and 0.95 no side
+// of its coarse state holds more than the calibrated edge bound (results/3d/r/edge_bounds.csv).
+int check(const Args& a) {
+  const fs::path root = data_root(a);
+  const fs::path model = a.has("model") ? fs::path(a.str("model")) : root / "models" / "chosen.nvfx3";
+  if (!fs::exists(model)) {
+    std::println("skipped: no model at {}", model.string());
+    return 77;
+  }
+  int failures = 0;
+  const auto expect = [&](bool ok, const std::string& what) {
+    std::println("{} {}", ok ? "ok  " : "FAIL", what);
+    if (!ok) ++failures;
+  };
+  if (a.has("frozen") && fs::exists(a.str("frozen"))) {
+    std::ifstream i(a.str("frozen"));
+    const std::string sha = sha_of(model);
+    std::string line;
+    bool found = false;
+    while (std::getline(i, line)) found = found || line.find(sha) != std::string::npos;
+    expect(found, "the model is the one frozen for the test (" + sha.substr(0, 16) + "...)");
+  }
+  {
+    VolumeHandle vol(model, 2);
+    nvfx_volume_info info{};
+    nvfx_volume_effect_get_info(vol.e, &info);
+    expect(std::string(info.name) == "smoke3d", std::format("the effect is smoke3d ({})", info.name));
+    const std::array<float, 3> c{0.6f, 0.5f, 0.5f};
+    nvfx_volume_set_controls(vol.v, c.data(), 3);
+    nvfx_volume_set_seed(vol.v, 29'099'500);
+    expect(nvfx_volume_step_to(vol.v, 1.0) == NVFX_OK, "it plays a second through the volume API");
+    std::vector<float> t(zu(info.size[0]) * zu(info.size[1]) * zu(info.size[2]));
+    expect(nvfx_volume_read(vol.v, NVFX_VOLUME_TEMPERATURE, NVFX_VOLUME_FLOAT, t.data(), t.size() * 4) == NVFX_OK, "its heat reads back");
+    expect(std::ranges::all_of(t, [](float x) { return std::isfinite(x) && x >= 0.f; }), "its heat is finite and not negative");
+    std::vector<std::uint8_t> pic;
+    vol.draw(View{{0.f, 0.75f, 2.3f}, {0.f, 0.62f, 0.f}, {0.f, 1.f, 0.f}, 42.f}, 96, 96, pic);
+    double alpha = 0;
+    for (std::size_t i = 0; i < pic.size(); i += 4) alpha += pic[i + 3] / 255.0;
+    expect(alpha / (96 * 96) > 0.01, std::format("it is visible (mean alpha {:.3f})", alpha / (96 * 96)));
+  }
+  if (a.has("bounds") && fs::exists(a.str("bounds"))) {
+    const auto bd = read_bounds(a.str("bounds"));
+    r3::Model m = load_study_model(model);
+    r3::quantise_like_storage(m);
+    r3::Workspace ws(m);
+    fast_conv(ws);
+    nfx::Pool pool(2);
+    for (const float w : {0.05f, 0.5f, 0.95f}) {
+      const std::array<float, 3> c{0.7f, w, 0.5f};
+      const std::vector<float> cv(c.begin(), c.end());
+      r3::State st = r3::make_state(m);
+      const r3::StartPoint& sp = m.starts[zu(nearest_start(m, c))];
+      r3::start_from(m, sp.coarse, sp.time, cv, 29'099'600, st, ws, &pool, false);
+      std::array<double, 5> mx{};
+      bool finite = true;
+      for (int fr = 0; fr < m.h.warmup + 300; ++fr) {
+        coarse_only_step(m, st, cv, 29'099'600, ws, pool);
+        if (fr < m.h.warmup) continue;
+        const SideHeat sh = side_heat(m.h, st.coarse.data(), m.h.channels(), 3);
+        for (int k = 0; k < 5; ++k) mx[zu(k)] = std::max(mx[zu(k)], sh.side[zu(k)]);
+        finite = finite && std::isfinite(sh.all);
+      }
+      expect(finite, std::format("wind {:.2f}: the coarse state stays finite for 10 s", w));
+      for (int k = 0; k < 5; ++k) {
+        const auto it = bd.find({static_cast<int>(std::lround(w * 100)), k});
+        if (it == bd.end()) continue;
+        expect(mx[zu(k)] <= it->second.holds, std::format("wind {:.2f}, {}: largest side heat {:.3f} within the bound {:.3f}", w, kSideNames[zu(k)], mx[zu(k)], it->second.holds));
+      }
+    }
+  }
+  std::println("{}", failures ? std::format("{} check(s) failed", failures) : "all checks passed");
+  return failures ? 1 : 0;
 }
 
 // A copy of a model file with other edges (study N2's reference "study N's model with the edge fix alone").
@@ -2356,6 +2491,7 @@ int main(int argc, char** argv) {
     else if (cmd == "reedge") rc = reedge(a);
     else if (cmd == "choose") rc = choose(a);
     else if (cmd == "edgecal") rc = edgecal(a);
+    else if (cmd == "check") rc = check(a);
     else if (cmd == "plume") rc = nfx::tools::plume3d::measure(a, data_root(a));
     else if (cmd == "plumefit") rc = nfx::tools::plume3d::fit(a, data_root(a));
     else if (cmd == "plumevideo") rc = nfx::tools::plume3d::video(a, data_root(a));

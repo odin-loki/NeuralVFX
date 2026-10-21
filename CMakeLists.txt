@@ -496,6 +496,13 @@ if(NEURALFX_BUILD_TESTS)
     set_tests_properties(neuralfx.CHostExample PROPERTIES LABELS neuralfx)
     add_test(NAME neuralfx.VolumeHostExample COMMAND nvfx_volume_host --self-test)
     set_tests_properties(neuralfx.VolumeHostExample PROPERTIES LABELS neuralfx)
+    # Study R's 3D smoke (docs/STUDY_R.md): the model frozen for its test, through the volume C API, and 10 s at three
+    # winds within the edge bounds calibrated on the teacher. Needs the model (outside git): skipped when it is not in
+    # the data root (NEURALVFX_DATA/r_smoke3d/models/chosen.nvfx3).
+    add_test(NAME neuralfx.Smoke3dShippedModel
+             COMMAND nvfx_3d check --study r --frozen ${CMAKE_CURRENT_SOURCE_DIR}/results/3d/r/frozen.csv
+                     --bounds ${CMAKE_CURRENT_SOURCE_DIR}/results/3d/r/edge_bounds.csv)
+    set_tests_properties(neuralfx.Smoke3dShippedModel PROPERTIES LABELS "neuralfx;data" SKIP_RETURN_CODE 77 TIMEOUT 600)
     # The fireball as a script reproduces the hand-written scene's frozen keyframes to the bit (about a minute on 2
     # threads). Needs the study D effects (outside git): skipped when they are not in NEURALFX_MODELS_D. The frozen
     # keyframes here and below are the float path's on the AVX2 build (--precision float --isa avx2; skipped on a CPU

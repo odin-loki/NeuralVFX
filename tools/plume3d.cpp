@@ -817,7 +817,7 @@ struct Panel {
     c.line(x0, y0 + h, x0 + w, y0 + h, ax, 1);
     c.line(x0, y0, x0, y0 + h, ax, 1);
     c.text(xl, x0 + w - nfx::tools::text_width(xl, 1), y0 + h + 16, 1, ax);
-    c.text(yl, x0 + 4, y0 + 4, 1, {210, 210, 216});
+    c.text(yl, x0, y0 - 14, 1, {210, 210, 216});
   }
   // y = f(x) as a curve over the panel's x range
   template <class F>
@@ -983,14 +983,14 @@ int video(const Args& a, const fs::path& root) {
     // right: three panels against the theory
     cv.fill(lw, 0, W - lw, H, {12, 13, 17});
     cv.fill(lw - 1, 0, 2, H, {0, 0, 0});
-    const int px0 = lw + 70, pw = W - lw - 100, ph = 168;
+    const int px0 = lw + 70, pw = W - lw - 100, ph = 160;
     const Fit& F0 = fits[0];
     double zmax = 0;
     for (const auto& L : lines) zmax = std::max(zmax, L.z.back() - F0.z0);
     const double zmin = std::max(4.0, lo - F0.z0 - 20);
-    const Panel pw_(px0, 40, pw, ph, zmin, zmax * 1.05, 8, 80, true, true);
-    const Panel pb(px0, 40 + ph + 46, pw, ph, 0, static_cast<double>(ny), 0, 24, false, false);
-    const Panel pg(px0, 40 + 2 * (ph + 46), pw, ph, zmin, zmax * 1.05, 1, 100, true, true);
+    const Panel pw_(px0, 44, pw, ph, zmin, zmax * 1.05, 8, 80, true, true);
+    const Panel pb(px0, 44 + ph + 58, pw, ph, 0, static_cast<double>(ny), 0, 24, false, false);
+    const Panel pg(px0, 44 + 2 * (ph + 58), pw, ph, zmin, zmax * 1.05, 1, 100, true, true);
     pw_.frame(cv, "Z - Z0 (CELLS)", "CENTRELINE VELOCITY W (CELLS/S)", {10, 20, 50, 100, 200}, {10, 20, 50});
     pb.frame(cv, "Z (CELLS ABOVE THE FLOOR)", "TOP-HAT RADIUS SQRT(2) B_W (CELLS)", {0, 20, 40, 60, 80}, {0, 5, 10, 15, 20});
     pg.frame(cv, "Z - Z0 (CELLS)", "CENTRELINE BUOYANCY G' (CELLS/S^2)", {10, 20, 50, 100, 200}, {1, 10, 100});
@@ -1019,12 +1019,12 @@ int video(const Args& a, const fs::path& root) {
         if (pb.inside(L.z[i], bt)) cv.dot(pb.px(L.z[i]), pb.py(bt), in ? 2.4 : 1.4, colr, in ? 1.f : 0.45f);
       }
       (void)Fc;
-      cv.text(std::format("INTENSITY {:.2f}", cfg[c].runs[0].intensity), px0 + pw - 110, 48 + 12 * static_cast<int>(c), 1, colr);
+      cv.text(std::format("INTENSITY {:.2f}", cfg[c].runs[0].intensity), px0 + pw - 100, pw_.y0 + 22 + 12 * static_cast<int>(c), 1, colr);
     }
     // the literature's band of top-hat entrainment for pure plumes (0.10 to 0.16) about the fitted origin, and the fit
     for (const double al : {0.10, 0.16}) pb.curve(cv, [&](double z) { return 1.2 * al * (z - F0.z0); }, {120, 120, 130}, 1.2, 4);
     pb.curve(cv, [&](double z) { return 1.2 * F0.alpha_t * (z - F0.z0); }, {255, 225, 150}, 1.6);
-    cv.text("GREY: ALPHA_T 0.10 AND 0.16 (CARAZZO ET AL. 2006)", px0 + 6, 40 + ph + 46 + 18, 1, {150, 150, 158});
+    cv.text("GREY: ALPHA_T 0.10 AND 0.16 (CARAZZO ET AL. 2006)", px0 + 6, pb.y0 + 18, 1, {150, 150, 158});
     for (const double zc : {lo, hi}) cv.line(pb.px(zc), pb.y0, pb.px(zc), pb.y0 + pb.h, {90, 90, 100}, 1, 3);
     // the live run's running average (one seed): white
     if (averaged > 0) {
@@ -1057,16 +1057,18 @@ int video(const Args& a, const fs::path& root) {
           gy = L.gc[i];
         }
       }
-      cv.text(std::format("WHITE: THIS RUN'S TIME AVERAGE, {:.1f} S", averaged / 30.0), px0 + 6, 40 + ph - 12, 1, {255, 255, 255});
+      cv.text(std::format("WHITE: THIS RUN'S TIME AVERAGE, {:.1f} S", averaged / 30.0), px0 + 6, pw_.y0 + ph - 12, 1, {255, 255, 255});
     } else {
-      cv.text(std::format("WHITE: THIS RUN'S TIME AVERAGE (FROM {:.0f} S)", avg_from), px0 + 6, 40 + ph - 12, 1, {200, 200, 200});
+      cv.text(std::format("WHITE: THIS RUN'S TIME AVERAGE (FROM {:.0f} S)", avg_from), px0 + 6, pw_.y0 + ph - 12, 1, {200, 200, 200});
     }
-    cv.text(std::format("MTT: W ~ Z^-1/3. FITTED {:.2f} [{:.2f}, {:.2f}]", i_pw.est, i_pw.lo, i_pw.hi), px0 + 6, 52, 1, {255, 225, 150});
-    cv.text(std::format("ALPHA_T {:.3f} [{:.3f}, {:.3f}], Z0 {:.0f} CELLS", i_at.est, i_at.lo, i_at.hi, F0.z0), px0 + 6, 40 + ph + 46 + 6, 1, {255, 225, 150});
-    cv.text(std::format("MTT: G' ~ Z^-5/3. FITTED {:.2f} [{:.2f}, {:.2f}]; FLUX F ~ Z^{:.2f}", i_pg.est, i_pg.lo, i_pg.hi, i_pF.est), px0 + 6, 40 + 2 * (ph + 46) + 12, 1,
+    cv.text(std::format("MTT: EXPONENT -0.33. FITTED {:.2f} [{:.2f}, {:.2f}]", i_pw.est, i_pw.lo, i_pw.hi), px0 + 6, pw_.y0 + 6, 1, {255, 225, 150});
+    cv.text(std::format("MTT: B = 1.2 ALPHA (Z - Z0). FITTED ALPHA_T {:.3f} [{:.3f}, {:.3f}], Z0 {:.0f}", i_at.est, i_at.lo, i_at.hi, F0.z0), px0 + 6, pb.y0 + 6, 1,
             {255, 225, 150});
-    cv.text(std::format("POOLED TIME AVERAGES OF {} SEEDS EACH; BOLD: THE FIT'S HEIGHTS {:.0f} TO {:.0f} CELLS", cfg[0].runs.size(), lo, hi), lw + 20, H - 22, 1,
+    cv.text(std::format("MTT: EXPONENT -1.67. FITTED {:.2f} [{:.2f}, {:.2f}]", i_pg.est, i_pg.lo, i_pg.hi), px0 + 6, pg.y0 + 6, 1, {255, 225, 150});
+    cv.text(std::format("BUOYANCY FLUX F: EXPONENT {:.2f} [{:.2f}, {:.2f}] (MTT 0)", i_pF.est, i_pF.lo, i_pF.hi), px0 + 6, pg.y0 + 18, 1, {255, 225, 150});
+    cv.text(std::format("DOTS: POOLED TIME AVERAGES, {} SEEDS EACH; BOLD: THE FIT'S HEIGHTS, {:.0f} TO {:.0f} CELLS", cfg[0].runs.size(), lo, hi), lw + 20, H - 22, 1,
             {170, 170, 176});
+    cv.text("DASHED: MTT'S POWER LAW THROUGH THE BOLD DOTS (SLOPE FIXED)", lw + 20, H - 10, 1, {170, 170, 176});
     if (std::fwrite(cv.rgb.data(), 1, cv.rgb.size(), pipe) != cv.rgb.size()) throw std::runtime_error("ffmpeg stopped reading");
     if (f % 60 == 0) std::println("  frame {} ({:.0f} s)", f, now() - t0);
   }
