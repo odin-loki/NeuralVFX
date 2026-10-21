@@ -127,6 +127,19 @@ void quantise_like_storage(Model& m);
 using Conv3Fn = void (*)(int rx, int ry, int rz, const float* in, int ci, const float* W, const float* b, int co, float* out, int y0, int y1);
 void conv3_reference(int rx, int ry, int rz, const float* in, int ci, const float* W, const float* b, int co, float* out, int y0, int y1);
 
+struct Workspace;
+struct State;
+
+// A detail layer the runtime may pass in place of detail_step (step() and start() call it when Workspace::detail is
+// set): the reference's values to the bit, faster (src/runtime/rt_detail3.hpp, on vectors per ISA). Sized for one model
+// when made; step() allocates nothing.
+class DetailKernel {
+ public:
+  virtual ~DetailKernel() = default;
+  virtual void step(const Model& m, State& s, std::uint64_t seed, std::span<const float> controls, Workspace& ws, Pool* pool) = 0;
+  virtual std::size_t bytes() const = 0;  // its own buffers
+};
+
 // Scratch for one runner: every buffer a step needs, sized once (no allocation per frame).
 struct Workspace {
   explicit Workspace(const Model& m);
@@ -142,6 +155,7 @@ struct Workspace {
   };
   std::array<Axis, 3> coarse_axis, swirl_axis;
   Conv3Fn conv = conv3_reference;
+  DetailKernel* detail = nullptr;      // the runtime's own detail layer (not owned), or the reference's detail_step
 };
 
 // A running effect.
@@ -167,7 +181,7 @@ void detail_step(const Model& m, State& s, std::uint64_t seed, std::span<const f
 void start(const Model& m, int index, std::span<const float> controls, std::uint64_t seed, State& s, Workspace& ws, Pool* pool = nullptr);
 void start_from(const Model& m, std::span<const float> coarse_phys, float time, std::span<const float> controls, std::uint64_t seed, State& s,
                 Workspace& ws, Pool* pool = nullptr, bool grow = true);
-// One frame: the stepper, then the detail layer.
+// One frame: the stepper, then the detail layer (Workspace::detail's, if set, else detail_step).
 void step(const Model& m, State& s, std::span<const float> controls, std::uint64_t seed, Workspace& ws, Pool* pool = nullptr);
 
 // Block averages of fine fields (fx * fy * fz) to the coarse grid, and the fine fields' trilinear up-sampling.

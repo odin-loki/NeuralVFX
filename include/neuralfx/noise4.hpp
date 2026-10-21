@@ -153,6 +153,11 @@ class CurlField3 {
     }
     return out;
   }
+  // The lattice's nodes along x, y and z (node (i, j, k) at 128-unit coordinates ((i, j, k) - 1) curl_length / 2), for a
+  // caller that builds and samples the same lattice itself (the volume runtime's detail layer, src/runtime/rt_detail3.hpp).
+  int nx() const { return nx_; }
+  int ny() const { return ny_; }
+  int nz() const { return nz_; }
 
  private:
   std::size_t idx(int i, int j, int k) const { return (static_cast<std::size_t>(j) * static_cast<std::size_t>(nz_) + static_cast<std::size_t>(k)) * static_cast<std::size_t>(nx_) + static_cast<std::size_t>(i); }
@@ -240,6 +245,19 @@ class FlickerLattice {
       amp *= 0.5f;
     }
     return sum / norm;
+  }
+  // The lattices' layout, for a caller that builds and interpolates them itself as build() and at() do (the volume
+  // runtime's detail layer, src/runtime/rt_detail3.hpp): per octave and axis, the lattice cell of each grid cell (from
+  // the lattice's first, lo) and its smooth5 weight, and the lattice's size n.
+  struct AxisView {
+    const std::int32_t* i = nullptr;
+    const float* t = nullptr;
+    int lo = 0, n = 0;
+  };
+  int octaves() const { return octaves_; }
+  AxisView axis(int octave, int a) const {
+    const auto& ax = oct_[static_cast<std::size_t>(octave)].axis[static_cast<std::size_t>(a)];
+    return {ax.i.data(), ax.t.data(), ax.lo, ax.n};
   }
 
  private:
