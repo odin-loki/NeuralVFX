@@ -1,0 +1,2 @@
+kind,name,file,bytes,sha256,source
+rollout_effect,haboob,fx_elements/models/d/haboob.nvfx,301443,b7aa8a4f1c739fb0f3ddd9b46b3885b9f3e59b7fafcebeae6277a5e2940329a7,study D's recipe (docs/EFFECTS_ELEMENTS.md): d-train --stages12 1 then d-tune then d-finish (the one-shot branch, 150 frames), then study M3's mean state (nvfx_ordered --study m3 fitmean --block 2, setmean); frozen before its test
