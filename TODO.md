@@ -166,6 +166,14 @@ and the Godot test; details in its doc and REPORT section):
   faster, not 5.7 to 6.5; study P's learned 2x under 0.55 of native for 3 of 6 effects, not 4. This host's AVX-512 build
   ran 7 to 11% slower than round 6's and its speed drifted by about ±7%: absolute milliseconds belong to their session.
 
+- **Study R2, the 3D smoke again** (`study-smoke3d-r2`, docs/STUDY_R2.md, REPORT §24; seeds 34.0 to 34.9 million):
+  the teacher's momentum deficit found (vorticity confinement pushing the plume down, and the semi-Lagrangian
+  velocity step's non-conservation) and fixed (`smoke_r2`: dM/dz over B 1.088, from `smoke_r`'s 0.80); the learned
+  smoke retrained with a spread loss and an edge loss under a rule with margins from the teacher's own spread, then
+  tested once. Under way, resumable: training in stage 4 and the rule's teacher runs left running; resume with
+  `/root/nvfx-data/r2_smoke3d/jobs/resume.sh` (STUDY_R2.md §0: the hand steps left). Next after it: a coupled 3D fire
+  and smoke tested as R2 is (not started).
+
 **Next:**
 - **Study Q2's last three** (STUDY_Q2.md §0, resumable: the data root's `q2_fix/jobs/resume.sh`, then `after_val.sh`):
   the geyser's, heavy gas's and the mushroom's validations, freezes and tests; the mushroom's cap still ragged by eye.

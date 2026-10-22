@@ -555,7 +555,7 @@ std::expected<void, std::string> save_run(const std::filesystem::path& path, con
     std::ofstream o(tmp, std::ios::binary);
     if (!o) return std::unexpected("cannot write " + tmp.string());
     o.write(r.schedule.empty() ? kRunMagic : kRunMagic2, 8);
-    bin::put(o, static_cast<std::int32_t>(r.p.effect));  // 0 fire, 1 smoke, 2 smoke_r
+    bin::put(o, static_cast<std::int32_t>(r.p.effect));  // 0 fire, 1 smoke, 2 smoke_r, 3 smoke_r2
     for (const float v : {r.p.intensity, r.p.wind, r.p.turbulence, r.p.fps}) bin::put(o, v);
     bin::put(o, r.p.seed);
     for (const int v : {r.p.width, r.p.height, r.p.substeps, r.p.pressure_iters, r.frames}) bin::put(o, static_cast<std::int32_t>(v));
@@ -581,7 +581,7 @@ std::expected<Run, std::string> load_run(const std::filesystem::path& path) {
   Run r;
   auto e = bin::get<std::int32_t>(i);
   if (!e) return std::unexpected(e.error());
-  if (*e < 0 || *e > 2) return std::unexpected("unknown effect in a 3D run: " + path.string());
+  if (*e < 0 || *e > 3) return std::unexpected("unknown effect in a 3D run: " + path.string());
   r.p.effect = static_cast<sim3d::Effect>(*e);
   for (float* v : {&r.p.intensity, &r.p.wind, &r.p.turbulence, &r.p.fps}) {
     auto x = bin::get<float>(i);
@@ -635,8 +635,27 @@ void set_normalisation(Model& m, std::span<const Run> runs) {
 
 // --- the stepper -----------------------------------------------------------------------------------------------------
 
+std::vector<double> row_spread(const Hyper& h, std::span<const float> state, int channels, int ch) {
+  std::vector<double> out(zu(h.ry), 0.0);
+  const Grid g{h.rx, h.ry, h.rz};
+  for (int y = 0; y < g.ry; ++y) {
+    double m = 0, sx = 0, sz = 0, sxx = 0;
+    for (int z = 0; z < g.rz; ++z) {
+      for (int x = 0; x < g.rx; ++x) {
+        const double q = std::max(0.f, state[g.at(x, y, z) * zu(channels) + zu(ch)]);
+        m += q;
+        sx += q * x;
+        sz += q * z;
+        sxx += q * (static_cast<double>(x) * x + static_cast<double>(z) * z);
+      }
+    }
+    if (m > 0) out[zu(y)] = sxx / m - (sx / m) * (sx / m) - (sz / m) * (sz / m);
+  }
+  return out;
+}
+
 double window_loss(const Model& m, const Run& r, int first, int unroll, int burn, float sigma, float profile, std::uint64_t noise_seed,
-                   std::vector<float>* grad, float activity) {
+                   std::vector<float>* grad, float activity, const ExtraLosses& extra) {
   const Hyper& h = m.h;
   const StepLayout L = step_layout(h);
   const Grid g{h.rx, h.ry, h.rz};
@@ -744,6 +763,74 @@ double window_loss(const Model& m, const Run& r, int first, int unroll, int burn
           const float gj = wgt * 2.f * e * 2.f * dmod * is2 / fl(N);
           gs[zu(j) * zu(C) + zu(k)] += gj;
           gprev[zu(s - 1)][zu(j) * zu(C) + zu(k)] -= gj;
+        }
+      }
+    }
+    if (extra.spread > 0.f) {  // study R2: each row's spread about its own centroid, heat and soot, against the truth's
+      const float sw = extra.spread / (2.f * fl(unroll));
+      for (int k = 3; k < kPhys; ++k) {
+        std::vector<double> mt(zu(g.ry), 0.0), wt(zu(g.ry), 0.0);
+        double tmax = 0, ttot = 0;
+        for (int y = 0; y < g.ry; ++y) {  // the truth's mass and spread per row
+          double mm = 0, sx = 0, sz = 0, sxx = 0;
+          for (int z = 0; z < g.rz; ++z) {
+            for (int x = 0; x < g.rx; ++x) {
+              const double q = std::max(0.f, t[g.at(x, y, z) * kPhys + zu(k)]);
+              mm += q;
+              sx += q * x;
+              sz += q * z;
+              sxx += q * (static_cast<double>(x) * x + static_cast<double>(z) * z);
+            }
+          }
+          mt[zu(y)] = mm;
+          if (mm > 0) wt[zu(y)] = sxx / mm - (sx / mm) * (sx / mm) - (sz / mm) * (sz / mm);
+          tmax = std::max(tmax, mm);
+          ttot += mm;
+        }
+        if (!(ttot > 0)) continue;
+        for (int y = 0; y < g.ry; ++y) {
+          if (!(mt[zu(y)] > 1e-3 * tmax)) continue;
+          double mm = 0, sx = 0, sz = 0, sxx = 0;
+          for (int z = 0; z < g.rz; ++z) {
+            for (int x = 0; x < g.rx; ++x) {
+              const double q = std::max(0.f, S[g.at(x, y, z) * zu(C) + zu(k)]);
+              mm += q;
+              sx += q * x;
+              sz += q * z;
+              sxx += q * (static_cast<double>(x) * x + static_cast<double>(z) * z);
+            }
+          }
+          if (!(mm > 1e-6 * tmax)) continue;
+          const double cx = sx / mm, cz = sz / mm, wm = sxx / mm - cx * cx - cz * cz;
+          const double om = mt[zu(y)] / ttot, den = wt[zu(y)] + 1.0, rel = (wm - wt[zu(y)]) / den;
+          loss += static_cast<double>(sw) * om * rel * rel;
+          const double dw = static_cast<double>(sw) * om * 2.0 * rel / den;  // d loss / d spread
+          for (int z = 0; z < g.rz; ++z) {
+            for (int x = 0; x < g.rx; ++x) {
+              const std::size_t j = g.at(x, y, z);
+              if (!(S[j * zu(C) + zu(k)] > 0.f)) continue;  // max(0, q): no gradient below zero
+              const double d2 = (x - cx) * (x - cx) + (z - cz) * (z - cz);
+              gs[j * zu(C) + zu(k)] += static_cast<float>(dw * (d2 - wm) / mm);
+            }
+          }
+        }
+      }
+    }
+    if (extra.edge > 0.f) {  // study R2: heat and soot at the open sides beyond the truth's (the plume leaves by the top)
+      const int ne = g.rx * g.ry * g.rz - (g.rx - 2) * g.ry * (g.rz - 2);
+      const float ew = extra.edge / (fl(ne) * 2.f * fl(unroll));
+      for (int y = 0; y < g.ry; ++y) {
+        for (int z = 0; z < g.rz; ++z) {
+          for (int x = 0; x < g.rx; ++x) {
+            if (!(x == 0 || z == 0 || x == g.rx - 1 || z == g.rz - 1)) continue;
+            const std::size_t j = g.at(x, y, z);
+            for (int k = 3; k < kPhys; ++k) {
+              const float e = S[j * zu(C) + zu(k)] - t[j * kPhys + zu(k)];
+              if (!(e > 0.f)) continue;
+              loss += static_cast<double>(ew * wch[zu(k)] * e * e);
+              gs[j * zu(C) + zu(k)] += 2.f * ew * wch[zu(k)] * e;
+            }
+          }
         }
       }
     }
@@ -889,7 +976,8 @@ void train_stepper(Model& m, std::span<const Run> runs, const TrainOptions& o, T
       const int span = r.frames - unroll - burn - 1;
       const int first = static_cast<int>(rng() % static_cast<std::uint64_t>(std::max(1, span)));
       std::ranges::fill(grads[zu(b)], 0.f);
-      losses[zu(b)] = window_loss(m, r, first, unroll, burn, o.sigma, fine ? o.profile : 0.f, rng(), &grads[zu(b)], act ? o.activity : 0.f);
+      const ExtraLosses extra{fine ? o.spread : 0.f, fine ? o.edge : 0.f};
+      losses[zu(b)] = window_loss(m, r, first, unroll, burn, o.sigma, fine ? o.profile : 0.f, rng(), &grads[zu(b)], act ? o.activity : 0.f, extra);
     });
     Vec& gsum = grads[0];
     double loss = losses[0];

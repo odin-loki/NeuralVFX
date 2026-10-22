@@ -214,6 +214,179 @@ TEST(Sim3d, SmokeRKeepsItsBuoyancyFluxUpThePlume) {
   EXPECT_LT(hi / lo, 1.10) << "the buoyancy flux should not change with height: " << lo << " to " << hi;
 }
 
+// --- study R2 (docs/STUDY_R2.md): the momentum audit and the velocity in flux form -------------------------------
+
+nfx::sim3d::Params small_smoke_r2(int threads) {
+  nfx::sim3d::Params p = small_smoke(threads);
+  p.effect = nfx::sim3d::Effect::smoke_r2;
+  p.seed = 34'099'100;
+  return p;
+}
+
+// Sums of a state's v over rows y0..y1.
+double rows_v(const nfx::sim3d::State& s, int y0, int y1) {
+  double t = 0;
+  for (int y = y0; y <= y1; ++y) {
+    for (int i = 0; i < s.nx * s.nz; ++i) t += s.v[zu(y * s.nx * s.nz + i)];
+  }
+  return t;
+}
+
+TEST(Sim3d, SmokeR2SameFieldsOnAnyNumberOfThreads) {
+  nfx::sim3d::Params p1 = small_smoke_r2(1), p3 = small_smoke_r2(3);
+  p1.width = p3.width = 16;
+  p1.height = p3.height = 24;
+  nfx::sim3d::Fluid a(p1), b(p3);
+  for (int f = 0; f < 6; ++f) {
+    a.step_frame();
+    b.step_frame();
+  }
+  EXPECT_EQ(a.state().u, b.state().u);
+  EXPECT_EQ(a.state().v, b.state().v);
+  EXPECT_EQ(a.state().w, b.state().w);
+  EXPECT_EQ(a.state().soot, b.state().soot);
+  nfx::sim3d::Fluid c(p1);  // a restored state goes on the same way
+  c.set_state(a.state());
+  a.step_frame();
+  c.step_frame();
+  EXPECT_EQ(a.state().v, c.state().v);
+  EXPECT_EQ(a.state().temp, c.state().temp);
+  // and it is not smoke_r: the velocity is carried another way
+  nfx::sim3d::Params pr = p1;
+  pr.effect = nfx::sim3d::Effect::smoke_r;
+  nfx::sim3d::Fluid r(pr);
+  nfx::sim3d::Fluid r2(p1);
+  for (int f = 0; f < 3; ++f) {
+    r.step_frame();
+    r2.step_frame();
+  }
+  EXPECT_NE(r.state().v, r2.state().v);
+  nfx::sim3d::Effect e{};
+  EXPECT_TRUE(nfx::sim3d::parse_effect("smoke_r2", e));
+  EXPECT_EQ(e, nfx::sim3d::Effect::smoke_r2);
+  EXPECT_EQ(nfx::sim3d::effect_name(e), "smoke_r2");
+}
+
+// The audit only reads: every effect's fields are the same with it as without it, and its terms add up to the slab's
+// change of vertical momentum.
+TEST(Sim3d, TheMomentumAuditOnlyReadsAndAddsUp) {
+  for (const auto effect : {nfx::sim3d::Effect::fire, nfx::sim3d::Effect::smoke, nfx::sim3d::Effect::smoke_r, nfx::sim3d::Effect::smoke_r2}) {
+    nfx::sim3d::Params p = small_smoke(2);
+    p.effect = effect;
+    p.width = 16;
+    p.height = 24;
+    nfx::sim3d::Fluid plain(p), audited(p);
+    for (int f = 0; f < 20; ++f) {
+      plain.step_frame();
+      audited.step_frame();
+    }
+    nfx::sim3d::MomentumAudit au;
+    au.y_lo = 1;
+    au.y_hi = 14;
+    const double before = rows_v(audited.state(), au.y_lo, au.y_hi);
+    audited.set_audit(&au);
+    for (int f = 0; f < 6; ++f) {
+      plain.step_frame();
+      audited.step_frame();
+    }
+    audited.set_audit(nullptr);
+    const auto a = plain.state(), b = audited.state();
+    EXPECT_EQ(a.u, b.u);
+    EXPECT_EQ(a.v, b.v);
+    EXPECT_EQ(a.temp, b.temp);
+    EXPECT_EQ(a.soot, b.soot);
+    const double change = rows_v(b, au.y_lo, au.y_hi) - before;
+    const double terms = au.sources + au.buoyancy + au.confinement + au.curl + au.damping + au.advection + au.projection;
+    const double scale = std::abs(au.buoyancy) + std::abs(au.advection) + std::abs(au.projection) + 1e-6;
+    EXPECT_NEAR(terms, change, 1e-4 * scale) << nfx::sim3d::effect_name(effect);
+    EXPECT_NEAR(au.seconds, 6.0 / 30.0, 1e-5);
+    EXPECT_GT(au.buoyancy, 0.0) << "warm gas in the slab is pushed up: " << nfx::sim3d::effect_name(effect);
+    if (effect == nfx::sim3d::Effect::smoke) {
+      EXPECT_NE(au.damping, 0.0) << "study N's smoke damps its velocity";
+    }
+    if (nfx::sim3d::plume_smoke(effect)) {
+      EXPECT_EQ(au.damping, 0.0);
+    }
+    if (effect == nfx::sim3d::Effect::smoke_r2) {  // momentum-neutral confinement: no net push on any plane
+      EXPECT_NEAR(au.confinement, 0.0, 1e-5 * scale);
+    } else {
+      EXPECT_NE(au.confinement, 0.0);
+    }
+  }
+}
+
+// The flux form conserves momentum: the advection's change of the slab's vertical momentum is what its faces carried in
+// and out (to float rounding), where the semi-Lagrangian step's is not tied to any face.
+TEST(Sim3d, FluxFormVelocityConservesMomentum) {
+  nfx::sim3d::Params p = small_smoke_r2(2);
+  nfx::sim3d::Fluid f(p);
+  nfx::sim3d::State s = f.state();
+  for (int y = 0; y < s.ny; ++y) {
+    for (int z = 0; z < s.nz; ++z) {
+      for (int x = 0; x < s.nx; ++x) {
+        const std::size_t i = (zu(y) * zu(s.nz) + zu(z)) * zu(s.nx) + zu(x);
+        const float dx = fl(x) - 15.5f, dy = fl(y) - 26.f, dz = fl(z) - 15.5f;
+        const float g = std::exp(-(dx * dx + dy * dy + dz * dz) / 30.f);
+        s.v[i] = 40.f * g;  // a rising, swirling jet in the middle of the box
+        s.u[i] = 8.f * dz / 6.f * g;
+        s.w[i] = -8.f * dx / 6.f * g;
+      }
+    }
+  }
+  f.set_state(s);
+  nfx::sim3d::MomentumAudit au;
+  au.y_lo = 14;
+  au.y_hi = 30;
+  f.set_audit(&au);
+  for (int k = 0; k < 3; ++k) f.step_frame();
+  const double faces = au.flux_bottom - au.flux_top + au.flux_sides;
+  ASSERT_GT(std::abs(au.flux_top) + std::abs(au.flux_bottom), 1.0) << "momentum crosses the slab's ends";
+  EXPECT_NEAR(au.advection, faces, 2e-5 * (std::abs(au.flux_top) + std::abs(au.flux_bottom))) << "the advection is its faces' fluxes";
+}
+
+// Study R2's physics in small: in still air the momentum flux of smoke_r2's plume grows with height by what its
+// buoyancy gives (dM/dz over the planes' buoyancy, rows 12 to 36 of 48, time means over 6 s after 4 s), where smoke_r's
+// (semi-Lagrangian velocity, confinement pushing down on the plume) falls a third short.
+double momentum_ratio(nfx::sim3d::Effect effect) {
+  nfx::sim3d::Params p = small_smoke(3);
+  p.effect = effect;
+  p.seed = 34'099'300;
+  nfx::sim3d::Fluid f(p);
+  const int nx = f.nx(), ny = f.ny(), nz = f.nz();
+  const std::size_t n = zu(nx) * zu(ny) * zu(nz);
+  std::vector<float> T(n), D(n), U(3 * n);
+  std::vector<double> M(zu(ny), 0.0), B(zu(ny), 0.0);
+  const auto k = f.buoyancy_coefficients();
+  for (int fr = 0; fr < 300; ++fr) {
+    f.step_frame();
+    if (fr < 120) continue;
+    f.fields(T, D);
+    f.velocity(U);
+    for (std::size_t i = 0; i < n; ++i) {
+      const std::size_t y = i / (zu(nx) * zu(nz));
+      M[y] += static_cast<double>(U[3 * i + 1]) * U[3 * i + 1];
+      B[y] += k[0] * T[i] - k[1] * D[i];
+    }
+  }
+  double r = 0;
+  int c = 0;
+  for (int y = 12; y <= 36; ++y) {
+    r += 0.5 * (M[zu(y) + 1] - M[zu(y) - 1]) / B[zu(y)];
+    ++c;
+  }
+  return r / c;
+}
+
+TEST(Sim3d, SmokeR2GainsTheMomentumItsBuoyancyGives) {
+  const double r = momentum_ratio(nfx::sim3d::Effect::smoke_r), r2 = momentum_ratio(nfx::sim3d::Effect::smoke_r2);
+  std::printf("momentum gained over buoyancy: smoke_r %.3f, smoke_r2 %.3f\n", r, r2);
+  // (one seed for 6 s on a 32-cell box, still filling: loose bounds, a guard against the deficit coming back)
+  EXPECT_LT(r, 0.75);
+  EXPECT_GT(r2, 0.85);
+  EXPECT_LT(r2, 1.15);
+  EXPECT_GT(r2 - r, 0.25);
+}
+
 TEST(Render3d, WarmSmokeDoesNotGlow) {
   const int n = 12;
   rd::Renderer warm(n, n, n, rd::optics_for("smoke3d")), cold(n, n, n, rd::optics_for("smoke3d"));
@@ -670,14 +843,19 @@ TEST(Rollout3d, TrainerForwardMatchesTheReference) {
   forward_matches(r3::Edges::clamp, 0.02f);
 }
 
-void gradient_check(int unroll, float profile, float activity, r3::Edges edges = r3::Edges::ambient, float vbase = 0.25f, bool changing = false) {
+void gradient_check(int unroll, float profile, float activity, r3::Edges edges = r3::Edges::ambient, float vbase = 0.25f, bool changing = false,
+                    r3::ExtraLosses extra = {}) {
   const r3::Model m0 = tiny_model(11 + static_cast<std::uint64_t>(unroll), 4, edges);
   r3::Model m = m0;
   const auto r = tiny_run(m.h, 10, vbase, changing);
   std::vector<float> grad(m.step_w.size(), 0.f);
-  const double l0 = r3::window_loss(m, r, 1, unroll, 0, 0.f, profile, 5, &grad, activity);
+  const double l0 = r3::window_loss(m, r, 1, unroll, 0, 0.f, profile, 5, &grad, activity, extra);
   ASSERT_GT(l0, 0.0);
-  const auto eval = [&] { return r3::window_loss(m, r, 1, unroll, 0, 0.f, profile, 5, nullptr, activity); };
+  if (extra.spread > 0.f || extra.edge > 0.f) {  // the extra losses are there, and they are not all of it
+    const double plain = r3::window_loss(m, r, 1, unroll, 0, 0.f, profile, 5, nullptr, activity);
+    EXPECT_GT(l0, plain * (1.0 + 1e-4)) << "the extra losses add to the loss";
+  }
+  const auto eval = [&] { return r3::window_loss(m, r, 1, unroll, 0, 0.f, profile, 5, nullptr, activity, extra); };
   // as study D's check (tests/test_rollout.cpp): central and one-sided differences at several steps; a parameter passes
   // when one of them matches within 3%; scattered estimates mark a kink (ReLU, clamp, trilinear) and are skipped
   const auto diffs = [&](float& slot) {
@@ -728,6 +906,30 @@ TEST(Rollout3d, GradientsMatchFiniteDifferencesWithProfilesAndActivity) { gradie
 TEST(Rollout3d, GradientsMatchFiniteDifferencesWithInflowEverywhere) { gradient_check(3, 1.f, 50.f, r3::Edges::ambient, 0.02f); }
 TEST(Rollout3d, GradientsMatchFiniteDifferencesWithClampedEdges) { gradient_check(3, 1.f, 50.f, r3::Edges::clamp, 0.02f); }
 TEST(Rollout3d, GradientsMatchFiniteDifferencesWithChangingControls) { gradient_check(3, 1.f, 50.f, r3::Edges::ambient, 0.02f, true); }
+// study R2's losses: the plume's spread at each height and the heat and soot at the open sides and top
+TEST(Rollout3d, GradientsMatchFiniteDifferencesWithTheSpreadLoss) { gradient_check(3, 1.f, 0.f, r3::Edges::ambient, 0.25f, false, {4.f, 0.f}); }
+TEST(Rollout3d, GradientsMatchFiniteDifferencesWithTheEdgeLoss) { gradient_check(3, 0.f, 0.f, r3::Edges::ambient, 0.02f, false, {0.f, 20.f}); }
+TEST(Rollout3d, GradientsMatchFiniteDifferencesWithEveryLoss) { gradient_check(3, 1.f, 50.f, r3::Edges::ambient, 0.02f, true, {4.f, 20.f}); }
+
+// The spread of a row: two equal lumps two cells apart in x spread 1 cell^2 about their centroid, wherever the pair sits.
+TEST(Rollout3d, RowSpreadIsAboutTheRowsOwnCentroid) {
+  r3::Hyper h;
+  h.rx = 6;
+  h.ry = 3;
+  h.rz = 5;
+  const int C = 5;
+  std::vector<float> st(zu(h.cells()) * C, 0.f);
+  const auto at = [&](int x, int y, int z) { return ((zu(y) * zu(h.rz) + zu(z)) * zu(h.rx) + zu(x)) * C + 4; };
+  st[at(1, 0, 2)] = 0.5f;
+  st[at(3, 0, 2)] = 0.5f;
+  st[at(2, 1, 0)] = 0.2f;
+  st[at(4, 1, 4)] = 0.2f;  // two lumps 2 apart in x and 4 in z: spread (1 + 4) = 5
+  const auto w = r3::row_spread(h, st, C, 4);
+  ASSERT_EQ(w.size(), 3u);
+  EXPECT_NEAR(w[0], 1.0, 1e-9);
+  EXPECT_NEAR(w[1], 5.0, 1e-6);
+  EXPECT_EQ(w[2], 0.0);
+}
 
 TEST(Rollout3d, RunsAndCheckpointsRoundTrip) {
   const r3::Model m = tiny_model();

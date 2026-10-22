@@ -4694,3 +4694,32 @@ test. Resume with the data root's `q2_fix/jobs/resume.sh`, then `after_val.sh <e
 
 
 Checks (after merging main at bf3fff8): the build with warnings as errors; the full ctest, 555 of 555; `nvfx_alloc_test`; the gallery check, 234 of 234; the Godot test, 0 failures; `restore.sh` 0 different.
+
+## 24. Study R2: the 3D smoke again, on a teacher with its momentum fixed
+
+**Status: under way** (21 October 2026; branch `study-smoke3d-r2`). The full write-up is [STUDY_R2.md](STUDY_R2.md).
+Seeds: 34,000,000 to 34,999,999. Code: `sim3d::MomentumAudit`, `Params::velocity` 2, `Params::confinement` and
+`Effect::smoke_r2` in `src/sim3d/sim3d.cpp`; `TrainOptions::spread` and `::edge` in `src/train/rollout3d_train.cpp`;
+`nvfx_3d --study r2` (`plumefit --momentum`, `stability`, `widthprobe`, `nullcal`, the R2 choice and `verdict`).
+
+**The teacher's momentum deficit, found and fixed.** Study R's `smoke_r` gained 0.78 of the vertical momentum its
+buoyancy gives. A budget of a slab's vertical momentum per operator (each operator's change, summed as the solver runs;
+it only reads) found two causes, and the larger was not the one study R suspected: **vorticity confinement pushes the
+plume down** (its force uses a unit normal, so the whole outer annulus of the shear layer, larger than the inner disc,
+pulls down at full strength: 0.18 of the buoyancy at 64 cells, 0.30 at 32), and the semi-Lagrangian velocity step is not
+conservative (its change of the slab's momentum is 1.12 times what the planes' momentum flux carries). `smoke_r2`
+carries the velocity in flux form (as the scalars), makes the confinement momentum-neutral (the force less its
+horizontal Gaussian spread, so no plane gets a net push) and takes still ambient air at the open sides and top (without
+it a recirculation fed itself through the border and the box's kinetic energy grew fivefold in 45 s). On two
+exploration seeds at 64 x 96 x 64: dM/dz over B **1.088 [1.080, 1.095]** (`smoke_r` 0.80 [0.78, 0.82]), 1.005 with the
+pressure's part, the advection within 0.2% of its planes' flux, the buoyancy flux within 3% of its mean, top-hat alpha
+0.157, the flux-balance parameter falling up the plume (2.77 to 1.96) where `smoke_r`'s rose, and stable at four extreme
+settings for 30 s. The fire, study N's smoke and `smoke_r` record the same runs byte for byte as main's tool.
+
+**Under way**: the training runs, the learned smoke trained with N2's recipe plus a spread loss (each row's spread
+about its centroid, model against truth: study R's learned plume was 2.5 times too wide after 1 s and 5 times after
+15 s, the coarse simulation 1.0 to 1.25) and an edge loss, a rule whose margins come from the teacher against itself,
+validation and the test once. **The session ended with training in stage 4 (iteration 1520 of 1750) and the rule's
+last teacher runs going, unattended**; nothing shipped changed. Resume with `/root/nvfx-data/r2_smoke3d/jobs/resume.sh`
+(STUDY_R2.md §0 lists what has run and the hand steps left: commit the rule's numbers before validation, the choice and
+freeze, the test once).

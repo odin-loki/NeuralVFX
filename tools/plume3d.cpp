@@ -51,6 +51,11 @@ struct Profile {
   // faces of each row, the sum over the row's edge cells of max(0, outward velocity) g' (cells^4 / s^3 per row, time
   // mean); and each plane's sum of g' at the first and at the last averaged frame (what the box stores)
   std::vector<double> side, b_first, b_last;
+  // study R2 (docs/STUDY_R2.md §1; files from before it have none): ny, each plane's sum of the projection's pressure
+  // (cells^2 / s^2, time mean: the pressure's part of the momentum budget); and the vertical momentum budget of the fit's
+  // slab per operator over the averaged frames (sim3d::MomentumAudit: y_lo, y_hi, sources, buoyancy, confinement, curl,
+  // damping, advection, projection, seconds, flux_bottom, flux_top, flux_sides)
+  std::vector<double> P, audit;
 };
 
 template <class T>
@@ -79,7 +84,7 @@ constexpr std::uint32_t kMagic = 0x52504C4Du;  // "MLPR"
 template <class Fn>
 void each_vec(Profile& p, Fn&& fn) {
   for (auto* v : {&p.cnt, &p.r, &p.v, &p.g, &p.d, &p.t, &p.vg, &p.vv, &p.vd, &p.F, &p.Fd, &p.Q, &p.M, &p.heat, &p.soot, &p.xd, &p.zd, &p.ud, &p.slice_v,
-                  &p.slice_d, &p.slice_t, &p.depth_d, &p.depth_t, &p.depth_u, &p.div, &p.div_abs, &p.side, &p.b_first, &p.b_last})
+                  &p.slice_d, &p.slice_t, &p.depth_d, &p.depth_t, &p.depth_u, &p.div, &p.div_abs, &p.side, &p.b_first, &p.b_last, &p.P, &p.audit})
     fn(*v);
 }
 
@@ -136,7 +141,7 @@ std::vector<std::string> split(const std::string& s, char c) {
 int measure(const Args& a, const fs::path& root) {
   const std::string label = a.need("label");
   sim3d::Params p;
-  if (!sim3d::parse_effect(a.str("effect", "smoke_r"), p.effect)) throw std::invalid_argument("--effect fire|smoke|smoke_r");
+  if (!sim3d::parse_effect(a.str("effect", a.str("study", "r") == "r2" ? "smoke_r2" : "smoke_r"), p.effect)) throw std::invalid_argument("--effect fire|smoke|smoke_r|smoke_r2");
   p.intensity = a.f("intensity", 0.5f);
   p.wind = a.f("wind", 0.5f);
   p.turbulence = a.f("turbulence", 0.5f);
@@ -149,6 +154,7 @@ int measure(const Args& a, const fs::path& root) {
   p.substeps = a.i("substeps", p.substeps);
   p.scalars = a.i("scalars", p.scalars);
   p.velocity = a.i("velocity", p.velocity);
+  p.confinement = a.i("confinement", p.confinement);
   const int seeds = a.i("seeds", 6), from = a.i("from", 0);
   const std::uint64_t base = std::stoull(a.need("seed-base"));
   const float spin = a.f("spin", 6.f), seconds = a.f("seconds", 20.f);
@@ -185,8 +191,12 @@ int measure(const Args& a, const fs::path& root) {
     const int nb = pr.nb;
     const std::size_t pb = zu(ny) * zu(nb), pl = zu(nx) * zu(ny);
     for (auto* v : {&pr.cnt, &pr.r, &pr.v, &pr.g, &pr.d, &pr.t, &pr.vg, &pr.vv, &pr.vd}) v->assign(pb, 0.0);
-    for (auto* v : {&pr.F, &pr.Fd, &pr.Q, &pr.M, &pr.heat, &pr.soot, &pr.xd, &pr.zd, &pr.ud, &pr.div, &pr.div_abs, &pr.side, &pr.b_first, &pr.b_last})
+    for (auto* v : {&pr.F, &pr.Fd, &pr.Q, &pr.M, &pr.heat, &pr.soot, &pr.xd, &pr.zd, &pr.ud, &pr.div, &pr.div_abs, &pr.side, &pr.b_first, &pr.b_last, &pr.P})
       v->assign(zu(ny), 0.0);
+    // the momentum budget's slab (study R2): the rows whose centres lie in [audit-lo, audit-hi] cells above the floor
+    sim3d::MomentumAudit audit;
+    audit.y_lo = static_cast<int>(std::ceil(a.f("audit-lo", 24.f) - 0.5f));
+    audit.y_hi = std::min(ny - 1, static_cast<int>(std::floor(a.f("audit-hi", 92.f) - 0.5f)));
     for (auto* v : {&pr.slice_v, &pr.slice_d, &pr.slice_t, &pr.depth_d, &pr.depth_t, &pr.depth_u}) v->assign(pl, 0.0);
     // each cell's radial bin (-1 beyond the inscribed circle), and the two rows through the axis with their weights
     std::vector<int> bin(zu(nx) * zu(nz));
@@ -208,11 +218,14 @@ int measure(const Args& a, const fs::path& root) {
     const int spin_frames = static_cast<int>(std::lround(spin * p.fps)), frames = static_cast<int>(std::lround(seconds * p.fps));
     for (int fr = 0; fr < spin_frames; ++fr) sim.step_frame();
     const std::size_t n = zu(nx) * zu(ny) * zu(nz);
-    std::vector<float> T(n), D(n), U(3 * n);
+    std::vector<float> T(n), D(n), U(3 * n), Pr(n);
+    sim.set_audit(&audit);
     for (int fr = 0; fr < frames; ++fr) {
       sim.step_frame();
       sim.fields(T, D);
       sim.velocity(U);
+      sim.pressure(Pr);
+      for (std::size_t i = 0; i < n; ++i) pr.P[i / (zu(nx) * zu(nz))] += Pr[i];
       for (int y = 0; y < ny; ++y) {
         double F = 0, Fd = 0, Q = 0, M = 0, H = 0, S = 0, X = 0, Z = 0, UD = 0, SIDE = 0, B = 0;
         for (int z = 0; z < nz; ++z) {
@@ -277,11 +290,16 @@ int measure(const Args& a, const fs::path& root) {
         if (fr == frames - 1) pr.b_last[zu(y)] = B;
       }
     }
+    sim.set_audit(nullptr);
     const double inv = 1.0 / frames;
     for (auto* v : {&pr.v, &pr.g, &pr.d, &pr.t, &pr.vg, &pr.vv, &pr.vd, &pr.F, &pr.Fd, &pr.Q, &pr.M, &pr.heat, &pr.soot, &pr.xd, &pr.zd, &pr.ud, &pr.slice_v,
-                    &pr.slice_d, &pr.slice_t, &pr.depth_d, &pr.depth_t, &pr.depth_u, &pr.div, &pr.div_abs, &pr.side}) {
+                    &pr.slice_d, &pr.slice_t, &pr.depth_d, &pr.depth_t, &pr.depth_u, &pr.div, &pr.div_abs, &pr.side, &pr.P}) {
       for (double& x : *v) x *= inv;
     }
+    pr.audit = {static_cast<double>(audit.y_lo), static_cast<double>(audit.y_hi), audit.sources, audit.buoyancy, audit.confinement, audit.curl, audit.damping,
+                audit.advection, audit.projection, audit.seconds, audit.flux_bottom, audit.flux_top, audit.flux_sides,
+                static_cast<double>(p.velocity >= 0 ? p.velocity : p.effect == sim3d::Effect::smoke_r2 ? 2 : 0),  // [13]: how the velocity was carried
+                static_cast<double>(p.confinement >= 0 ? p.confinement : p.effect == sim3d::Effect::smoke_r2 ? 1 : 0)};  // [14]: the confinement
     pr.frames = frames;
     save(f, pr);
     const std::string line = std::format("plume {} seed {} ({}x{}x{}, span {:.0f}, controls {:.2f} {:.2f} {:.2f}): {} frames after {} of spin-up, {:.0f} s", label,
@@ -645,6 +663,16 @@ std::vector<Profile> load_config(const fs::path& dir) {
   return out;
 }
 
+// How a run's velocity was carried (study R2's audit records it; Params::velocity).
+std::string velocity_name(const Profile& p) {
+  if (p.audit.size() < 14) return "-";
+  const int v = static_cast<int>(p.audit[13]);
+  const std::string vel = v == 2 ? "flux form" : v == 1 ? "MacCormack" : "semi-Lagrangian";
+  if (p.audit.size() < 15) return vel;
+  const int c = static_cast<int>(p.audit[14]);
+  return vel + (c == 1 ? "; confinement momentum-neutral" : c == 2 ? "; no confinement" : "; confinement as N's");
+}
+
 std::vector<int> all_of(std::size_t n) {
   std::vector<int> v(n);
   for (std::size_t i = 0; i < n; ++i) v[i] = static_cast<int>(i);
@@ -826,6 +854,101 @@ int fit(const Args& a, const fs::path& root) {
       };
       both(std::format("| {} | {} | {:.0f} | {:.0f} | {} | {} | {} | {} |", l, c.runs.size(), b0.Flo, b0.Fhi, iv(&Budget::lost), iv(&Budget::side),
                        iv(&Budget::stored), iv(&Budget::rest)));
+    }
+  }
+  // Study R2 (docs/STUDY_R2.md §1): the vertical momentum budget of the slab between the fit's heights, per operator
+  // (runs with the audit), each as a fraction of what the buoyancy gives the slab; and the momentum flux's growth with
+  // height against the planes' buoyancy, without and with the pressure's part
+  if (a.has("momentum")) {
+    both(std::format("\nThe vertical momentum budget from {:.0f} to {:.0f} cells (study R2): what each operator adds to the slab's vertical "
+                     "momentum, as a fraction of what the buoyancy adds (rates over the averaged frames, pooled over the runs; 95% intervals by "
+                     "resampling the runs). Steady, they sum to what the slab stores (about 0). dM/dz over B is study R's ratio (M the plane's "
+                     "sum of w^2, B its buoyancy); with P, the plane's sum of the pressure, added to M; the advection against the momentum "
+                     "flux the planes carry in and out of the slab (1 if the advection conserves momentum); and the flux form's own face "
+                     "fluxes where the velocity is in flux form:\n",
+                     lo, hi));
+    both("| config | runs | velocity | dM/dz over B | d(M + P)/dz over B | advection | projection (pressure) | confinement | curl noise | damping | "
+         "sum (stored) | advection over the planes' net flux | advection over its face fluxes | turbulent share of M |");
+    both("|---|---:|---|---|---|---|---|---|---|---|---|---|---|---|");
+    struct Mom {
+      double ratio = kNaN, ratio_p = kNaN, adv = kNaN, proj = kNaN, conf = kNaN, curl = kNaN, damp = kNaN, sum = kNaN, adv_planes = kNaN, adv_faces = kNaN;
+      double turb = kNaN;  // 1 - (the mean flow's w^2) / (the time mean of w^2), inside the inscribed circle over the fit's heights
+    };
+    for (const auto& l : split(a.str("momentum"), ',')) {
+      const Config& c = cfg.at(l);
+      for (const Profile& p : c.runs) {
+        if (p.audit.size() < 13 || p.P.size() != zu(p.ny)) throw std::runtime_error(l + ": a run without the momentum audit");
+      }
+      const auto mom = [&](const std::vector<int>& pick) {
+        const double w = 1.0 / static_cast<double>(pick.size());
+        const Profile& p0 = c.runs[zu(pick[0])];
+        const int ny = p0.ny;
+        std::vector<double> M(zu(ny), 0.0), P(zu(ny), 0.0), B(zu(ny), 0.0);
+        std::array<double, 13> au{};
+        for (const int k : pick) {
+          const Profile& p = c.runs[zu(k)];
+          for (int y = 0; y < ny; ++y) {
+            M[zu(y)] += w * p.M[zu(y)];
+            P[zu(y)] += w * p.P[zu(y)];
+            B[zu(y)] += w * (static_cast<double>(p.kT) * p.heat[zu(y)] - static_cast<double>(p.kD) * p.soot[zu(y)]);
+          }
+          for (std::size_t j = 2; j < 13; ++j) au[j] += w * p.audit[j] / p.audit[9];  // rates (per second); [9] is the time
+        }
+        Mom m;
+        double sm = 0, smp = 0;
+        int nm = 0;
+        for (int y = 1; y + 1 < ny; ++y) {
+          if (y + 0.5 < lo || y + 0.5 > hi || !(B[zu(y)] > 0)) continue;
+          sm += 0.5 * (M[zu(y) + 1] - M[zu(y) - 1]) / B[zu(y)];
+          smp += 0.5 * (M[zu(y) + 1] + P[zu(y) + 1] - M[zu(y) - 1] - P[zu(y) - 1]) / B[zu(y)];
+          ++nm;
+        }
+        if (nm) {
+          m.ratio = sm / nm;
+          m.ratio_p = smp / nm;
+        }
+        const double b = au[3];
+        m.adv = au[7] / b;
+        m.proj = au[8] / b;
+        m.conf = au[4] / b;
+        m.curl = au[5] / b;
+        m.damp = au[6] / b;
+        m.sum = (au[2] + au[3] + au[4] + au[5] + au[6] + au[7] + au[8]) / b;
+        const int ylo = static_cast<int>(p0.audit[0]), yhi = static_cast<int>(p0.audit[1]);
+        if (ylo >= 1 && yhi + 1 < ny) {
+          const double flux_in = 0.5 * (M[zu(ylo) - 1] + M[zu(ylo)]), flux_out = 0.5 * (M[zu(yhi)] + M[zu(yhi) + 1]);
+          m.adv_planes = au[7] / (flux_in - flux_out);
+        }
+        const double faces = au[10] - au[11] + au[12];
+        if (std::abs(faces) > 0) m.adv_faces = au[7] / faces;
+        double mean2 = 0, all2 = 0;  // the radial bins' (sum of the time-mean w)^2 / cells, and their sum of the time mean of w^2
+        for (int y = 0; y < ny; ++y) {
+          if (y + 0.5 < lo || y + 0.5 > hi) continue;
+          for (int j = 0; j < p0.nb; ++j) {
+            const std::size_t q = zu(y) * zu(p0.nb) + zu(j);
+            double v = 0, vv = 0;
+            for (const int k : pick) {
+              v += w * c.runs[zu(k)].v[q];
+              vv += w * c.runs[zu(k)].vv[q];
+            }
+            if (p0.cnt[q] > 0) mean2 += v * v / p0.cnt[q];
+            all2 += vv;
+          }
+        }
+        if (all2 > 0) m.turb = 1.0 - mean2 / all2;
+        return m;
+      };
+      const Mom m0 = mom(all_of(c.runs.size()));
+      std::vector<Mom> ms;
+      for (int r = 0; r < resamples; ++r) ms.push_back(mom(resample(c.runs.size())));
+      const auto iv = [&](double Mom::* f) {
+        std::vector<double> v;
+        for (const Mom& m : ms) v.push_back(m.*f);
+        return fmt(interval(m0.*f, v), 3);
+      };
+      both(std::format("| {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} |", l, c.runs.size(), velocity_name(c.runs[0]), iv(&Mom::ratio),
+                       iv(&Mom::ratio_p), iv(&Mom::adv), iv(&Mom::proj), iv(&Mom::conf), iv(&Mom::curl), iv(&Mom::damp), iv(&Mom::sum), iv(&Mom::adv_planes),
+                       std::isfinite(m0.adv_faces) ? iv(&Mom::adv_faces) : std::string("-"), iv(&Mom::turb)));
     }
   }
   // the wind-bent plume against Briggs's two-thirds law: z - zs = 1.6 (F / pi)^(1/3) x^(2/3) / U
@@ -1015,6 +1138,7 @@ int video(const Args& a, const fs::path& root) {
   const Profile& p0 = cfg[0].runs[0];
   sim3d::Params p;
   if (!sim3d::parse_effect(a.str("effect", "smoke_r"), p.effect)) throw std::invalid_argument("--effect");
+  const std::string title = a.str("title", "SIMULATED SMOKE, STILL AIR");
   p.intensity = p0.intensity;
   p.wind = p0.wind;
   p.turbulence = p0.turbulence;
@@ -1096,7 +1220,7 @@ int video(const Args& a, const fs::path& root) {
         cv.line(a1[0], a1[1], a2[0], a2[1], {200, 200, 206}, 1.5);
       }
     }
-    cv.text("SIMULATED SMOKE, STILL AIR", 20, 18, 2, {255, 255, 255});
+    cv.text(title, 20, 18, 2, {255, 255, 255});
     cv.text(std::format("OUR 3D SOLVER, {}X{}X{}, CONTROLS {:.2f} {:.2f} {:.2f}", nx, ny, nz, p.intensity, p.wind, p.turbulence), 20, 42, 1, {190, 190, 196});
     cv.text("DASHED: MTT TOP-HAT EDGE B = 1.2 ALPHA (Z - Z0), FITTED", 20, H - 40, 1, {255, 225, 150});
     cv.text(std::format("{:.1f} S", t), lw - 90, 18, 2, {255, 225, 150});

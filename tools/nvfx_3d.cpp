@@ -82,13 +82,14 @@ double now() { return std::chrono::duration<double>(std::chrono::steady_clock::n
 
 bool g_n2 = false;    // --study n2 (STUDY_3D.md §14)
 bool g_hres = false;  // --study hres|n3 (docs/STUDY_3D_HRES.md): 32 x 48 x 32 coarse, fine 2
-bool g_r = false;     // --study r (docs/STUDY_R.md): the validated smoke
+bool g_r = false;     // --study r (docs/STUDY_R.md): the validated smoke; also set for study R2, which shares its machinery
+bool g_r2 = false;    // --study r2 (docs/STUDY_R2.md): the smoke's teacher with its momentum fixed, retrained, a rule with margins
 bool n2_recipe() { return g_n2 || g_hres; }
 nfx::sim3d::Effect g_effect = nfx::sim3d::Effect::fire;  // the simulated effect (--effect; study R: the validated smoke)
 
 fs::path data_root(const Args& a) {
   if (a.has("root")) return a.str("root");
-  const char* dir = g_r ? "r_smoke3d" : g_hres ? "hres_3d" : g_n2 ? "n2_3d" : "n_3d";
+  const char* dir = g_r2 ? "r2_smoke3d" : g_r ? "r_smoke3d" : g_hres ? "hres_3d" : g_n2 ? "n2_3d" : "n_3d";
   if (const char* e = std::getenv("NEURALVFX_DATA")) return fs::path(e) / dir;
   if (const char* h = std::getenv("HOME")) return fs::path(h) / "nvfx-data" / dir;  // as CMake's default
   return fs::path("/root/nvfx-data") / dir;
@@ -154,6 +155,14 @@ constexpr std::uint64_t kRShort = 29'100'000, kRLong = 29'200'000;  // training 
 constexpr std::uint64_t kRCal = 29'300'000;  // the edge bounds' teacher runs: + 100 j + k (j the wind, k the run)
 constexpr std::uint64_t kRValTrack = 29'400'000, kRValReal = 29'410'000, kRValPlay = 29'420'000, kRValEdge = 29'430'000;
 constexpr std::uint64_t kRTestTrack = 29'700'000, kRTestReal = 29'710'000, kRTestPlay = 29'720'000, kRTestEdge = 29'730'000;
+// study R2 (docs/STUDY_R2.md): its own range, 34,000,000 to 34,999,999 (the plume measurement 34,000,000 to 34,099,999,
+// unit tests 34,099,000 to 34,099,999); the same layout as study R's, and a calibration split for the rule's margins
+constexpr std::uint64_t kR2Short = 34'100'000, kR2Long = 34'200'000;
+constexpr std::uint64_t kR2Cal = 34'300'000;      // the edge bounds' teacher runs: + 100 j + k
+constexpr std::uint64_t kR2Null = 34'500'000;     // the margins' teacher runs: + 100 s + k (k = 0..8, three sets of three)
+constexpr std::uint64_t kR2ValTrack = 34'400'000, kR2ValReal = 34'410'000, kR2ValPlay = 34'420'000, kR2ValEdge = 34'430'000;
+constexpr std::uint64_t kR2TestTrack = 34'700'000, kR2TestReal = 34'710'000, kR2TestPlay = 34'720'000, kR2TestEdge = 34'730'000;
+constexpr int kNullSets = 3;  // the margins' teacher runs per calibration setting: three sets of endless_runs("test")
 constexpr int kWidth = 64, kHeight = 96;
 constexpr int kTrackWarm = 100;  // frames simulated from an empty grid before a tracked state
 constexpr std::array<int, 3> kHorizons{8, 30, 60};
@@ -250,8 +259,10 @@ std::vector<float> n2_schedule(std::uint64_t seed, int frames, float fps) {
   return out;
 }
 
-// Smoke tests only (--max-settings, --max-runs): fewer settings and runs than the protocol's.
-int g_max_settings = 1 << 20, g_max_runs = 1 << 20;
+// Smoke tests only (--max-settings, --max-runs): fewer settings and runs than the protocol's. --setting S: only setting S
+// (study R2's parallel jobs: one process per setting, so no two write the same file).
+int g_max_settings = 1 << 20, g_max_runs = 1 << 20, g_only_setting = -1;
+bool skip_setting(int s) { return g_only_setting >= 0 && s != g_only_setting; }
 
 std::vector<std::array<float, 3>> settings_all(const std::string& split);
 std::vector<std::array<float, 3>> settings(const std::string& split) {
@@ -263,6 +274,16 @@ std::vector<std::array<float, 3>> settings_all(const std::string& split) {
   // probe: for choices made before validation (the detail layer's constants), at the controls of training runs 0 to 3
   // with seeds of its own (9,300,000 + 100 s + k); never used for the rule
   if (split == "probe") return {train_controls(kTrainBase), train_controls(kTrainBase + 1), train_controls(kTrainBase + 2), train_controls(kTrainBase + 3)};
+  if (g_r2) {  // study R2 (docs/STUDY_R2.md §2): new settings, a strong wind towards -x and towards +x in each split
+    if (split == "val") return {{0.50f, 0.08f, 0.55f}, {0.40f, 0.90f, 0.35f}, {0.65f, 0.30f, 0.70f}, {0.30f, 0.60f, 0.45f}, {0.75f, 0.45f, 0.25f}, {0.55f, 0.75f, 0.85f}};
+    if (split == "test") {
+      return {{0.45f, 0.04f, 0.40f}, {0.60f, 0.96f, 0.60f}, {0.35f, 0.20f, 0.25f}, {0.70f, 0.55f, 0.80f},
+              {0.80f, 0.80f, 0.35f}, {0.25f, 0.40f, 0.65f}, {0.55f, 0.65f, 0.10f}, {0.90f, 0.30f, 0.50f}};
+    }
+    // the rule's margins: the teacher's own spread at settings of their own (§2.7)
+    if (split == "cal") return {{0.50f, 0.15f, 0.50f}, {0.40f, 0.85f, 0.70f}, {0.70f, 0.50f, 0.30f}, {0.30f, 0.35f, 0.85f}, {0.85f, 0.65f, 0.60f}};
+    throw std::invalid_argument("split must be val, test or cal");
+  }
   if (g_r) {  // study R (docs/STUDY_R.md §2): new settings, a strong wind towards -x and towards +x in each split
     if (split == "val") return {{0.55f, 0.10f, 0.45f}, {0.35f, 0.85f, 0.60f}, {0.70f, 0.35f, 0.75f}, {0.45f, 0.55f, 0.30f}, {0.80f, 0.70f, 0.55f}};
     if (split == "test") {
@@ -291,10 +312,17 @@ std::vector<std::array<float, 3>> settings_all(const std::string& split) {
   throw std::invalid_argument("split must be val or test");
 }
 int track_runs(const std::string& split) { return std::min(split == "probe" ? 2 : 3, g_max_runs); }
-int endless_runs(const std::string& split) { return std::min(split == "test" ? 3 : 2, g_max_runs); }
+int endless_runs(const std::string& split) { return std::min(split == "cal" ? kNullSets * 3 : split == "test" ? 3 : 2, g_max_runs); }
 std::uint64_t base_of(const std::string& split, const std::string& what, bool smoke = false) {
   if (split == "probe") return 9'300'000 + (what == "track" ? 0 : what == "real" ? 10'000 : 20'000);
   const bool t = split == "test";
+  if (g_r2) {
+    if (split == "cal") return kR2Null;
+    if (what == "track") return t ? kR2TestTrack : kR2ValTrack;
+    if (what == "real") return t ? kR2TestReal : kR2ValReal;
+    if (what == "edge") return t ? kR2TestEdge : kR2ValEdge;
+    return t ? kR2TestPlay : kR2ValPlay;
+  }
   if (g_r) {
     if (what == "track") return t ? kRTestTrack : kRValTrack;
     if (what == "real") return t ? kRTestReal : kRValReal;
@@ -650,7 +678,7 @@ int record(const Args& a) {
   const bool kinds = n2_recipe() || (g_r && a.str("runs-dir", "train") == "long");
   const int runs = a.i("runs", 40), frames = a.i("frames", kinds ? 540 : 240), threads = a.i("threads", 3);
   const std::uint64_t base = g_hres ? hres_train_base(a)
-                                    : a.u64("seed-base", g_r ? (kinds ? kRLong : kRShort) : g_n2 ? kN2Train : kTrainBase);  // fire 9,000,000; smoke 9,100,000; N2 9,200,000
+                                    : a.u64("seed-base", g_r2 ? (kinds ? kR2Long : kR2Short) : g_r ? (kinds ? kRLong : kRShort) : g_n2 ? kN2Train : kTrainBase);  // fire 9,000,000; smoke 9,100,000; N2 9,200,000
   const nfx::sim3d::Effect effect = g_effect;  // --effect (default fire; study R: smoke_r)
   const r3::Hyper h = study_hyper();
   for (int i = a.i("from", 0); i < runs; ++i) {  // --from: a second job records the later runs
@@ -694,7 +722,8 @@ std::vector<r3::Run> training_runs(const Args& a, const fs::path& root) {
 
 r3::Model fresh_model(nfx::sim3d::Effect e = nfx::sim3d::Effect::fire) {
   std::uint64_t init_seed = 9'000'777;
-  if (g_r) init_seed = 29'100'777;
+  if (g_r2) init_seed = 34'100'777;
+  else if (g_r) init_seed = 29'100'777;
   else if (g_hres) init_seed = e == nfx::sim3d::Effect::smoke ? kHresSmokeInit : kHresFireInit;
   else if (g_n2) init_seed = 9'200'777;
   r3::Model m = r3::init_model(study_hyper(), init_seed);
@@ -722,7 +751,9 @@ r3::TrainOptions train_options(const Args& a) {
     o.seed = a.u64("seed", 1);
   }
   o.burn_long_min = a.i("burn-long-min", 48);
-  o.burn_long_max = a.i("burn-long-max", 240);
+  o.burn_long_max = a.i("burn-long-max", g_r2 ? 360 : 240);  // study R2: burn-ins up to 12 s (STUDY_R2.md §2.4)
+  o.spread = a.f("spread", g_r2 ? 2.f : 0.f);                 // study R2's losses (STUDY_R2.md §2.4)
+  o.edge = a.f("edge", g_r2 ? 10.f : 0.f);
   o.batch = a.i("batch", 8);
   o.max_unroll = a.i("unroll", 12);
   o.burn_max = a.i("burn", 24);
@@ -753,6 +784,7 @@ int train(const Args& a) {
                               m.scale[4]));
   }
   r3::TrainOptions o = train_options(a);
+  if (o.spread > 0.f || o.edge > 0.f) log_line(log, std::format("study R2's losses in stages 2 to 4: spread {}, edge {}", o.spread, o.edge));
   const int stage2_end = o.iterations + o.finetune;
   const double c0 = cpu_now();
   log_line(log, std::format("schedule: {} + {} + {} + {} iterations (stage 4 burn {} to {}), batch {}, unroll {}, threads {}", o.iterations, o.finetune,
@@ -955,6 +987,7 @@ int truth(const Args& a) {
   const auto sets = settings(split);
   const nfx::sim3d::Effect effect = g_effect;  // --effect (default fire; study R: smoke_r)
   for (int s = 0; s < static_cast<int>(sets.size()); ++s) {
+    if (skip_setting(s)) continue;
     for (int k = 0; k < track_runs(split); ++k) {
       const fs::path f = root / "eval" / split / "truth" / std::format("s{}_k{}.bin", s, k);
       if (fs::exists(f)) continue;
@@ -1021,6 +1054,7 @@ int track(const Args& a) {
   }
   std::array<std::vector<std::uint8_t>, 4> pt, pm;
   for (int s = 0; s < static_cast<int>(sets.size()); ++s) {
+    if (skip_setting(s)) continue;
     for (int k = 0; k < track_runs(split); ++k) {
       if (have.count(std::format("{},{}", s, k))) continue;
       Truth t;
@@ -1095,9 +1129,10 @@ int real(const Args& a) {
   nfx::Pool pool(threads);
   rd::Renderer rend(kWidth, kHeight, kWidth, study_optics());
   const auto sets = settings(split);
-  const bool floor = split == "test" || a.flag("floor");
+  const bool floor = (split == "test" && !a.flag("no-floor")) || a.flag("floor");  // study R2 runs no floor (STUDY_R2.md §2.5)
   const nfx::sim3d::Effect effect = g_effect;  // --effect (default fire; study R: smoke_r)
   for (int s = 0; s < static_cast<int>(sets.size()); ++s) {
+    if (skip_setting(s)) continue;
     for (int which = 0; which < (floor ? 2 : 1); ++which) {
       for (int k = 0; k < endless_runs(split); ++k) {
         const std::string label = which == 0 ? "real" : "floor";
@@ -1143,6 +1178,7 @@ int play(const Args& a) {
   rd::Renderer rend(m.h.fx(), m.h.fy(), m.h.fz(), study_optics());
   const auto sets = settings(split);
   for (int s = 0; s < static_cast<int>(sets.size()); ++s) {
+    if (skip_setting(s)) continue;
     for (int k = 0; k < endless_runs(split); ++k) {
       const fs::path f = root / "eval" / split / "endless" / method / std::format("s{}_k{}.unit", s, k);
       if (fs::exists(f)) continue;
@@ -1851,7 +1887,8 @@ int edge(const Args& a) {
   nfx::Pool pool(threads);
   // seeds: --seed for every wind (study N's default: 9,900,004), else study N2's and hres's: the base + 900 + the wind's
   // index; study R: the plays' base + the wind's index, and the teacher's runs (--sim --runs K) 29,300,000 + 100 j + k
-  const std::uint64_t edge_default = g_r      ? (sim ? kRCal : kRValEdge)
+  const std::uint64_t edge_default = g_r2     ? (sim ? kR2Cal : kR2ValEdge)
+                                     : g_r      ? (sim ? kRCal : kRValEdge)
                                      : g_hres ? (sim ? kHresValReal : kHresValPlay) + kHresEdge
                                      : g_n2   ? (sim ? kN2ValReal : kN2ValPlay) + kN2Edge
                                               : 9'900'004;
@@ -2226,7 +2263,7 @@ int check(const Args& a) {
     expect(std::string(info.name) == "smoke3d", std::format("the effect is smoke3d ({})", info.name));
     const std::array<float, 3> c{0.6f, 0.5f, 0.5f};
     nvfx_volume_set_controls(vol.v, c.data(), 3);
-    nvfx_volume_set_seed(vol.v, 29'099'500);
+    nvfx_volume_set_seed(vol.v, g_r2 ? 34'099'500 : 29'099'500);  // unit tests' seeds (study R's, study R2's)
     expect(nvfx_volume_step_to(vol.v, 1.0) == NVFX_OK, "it plays a second through the volume API");
     std::vector<float> t(zu(info.size[0]) * zu(info.size[1]) * zu(info.size[2]));
     expect(nvfx_volume_read(vol.v, NVFX_VOLUME_TEMPERATURE, NVFX_VOLUME_FLOAT, t.data(), t.size() * 4) == NVFX_OK, "its heat reads back");
@@ -2249,11 +2286,12 @@ int check(const Args& a) {
       const std::vector<float> cv(c.begin(), c.end());
       r3::State st = r3::make_state(m);
       const r3::StartPoint& sp = m.starts[zu(nearest_start(m, c))];
-      r3::start_from(m, sp.coarse, sp.time, cv, 29'099'600, st, ws, &pool, false);
+      const std::uint64_t seed = g_r2 ? 34'099'600 : 29'099'600;
+      r3::start_from(m, sp.coarse, sp.time, cv, seed, st, ws, &pool, false);
       std::array<double, 5> mx{};
       bool finite = true;
       for (int fr = 0; fr < m.h.warmup + 300; ++fr) {
-        coarse_only_step(m, st, cv, 29'099'600, ws, pool);
+        coarse_only_step(m, st, cv, seed, ws, pool);
         if (fr < m.h.warmup) continue;
         const SideHeat sh = side_heat(m.h, st.coarse.data(), m.h.channels(), 3);
         for (int k = 0; k < 5; ++k) mx[zu(k)] = std::max(mx[zu(k)], sh.side[zu(k)]);
@@ -2283,6 +2321,14 @@ int reedge(const Args& a) {
   return 0;
 }
 
+struct ChoiceScore {
+  double pic = 0, temp = 0;
+  std::array<double, 5> endless{};  // spectrum, |ln motion|, coverage, emission (lower better), mean picture (higher)
+  bool edge = false;
+  double rank = 0;
+};
+int choose_r2(const Args& a, const std::vector<std::string>& cands, std::map<std::string, ChoiceScore>& sc, const std::vector<std::string>& eligible);
+
 // Study N2's choice among candidates on validation (STUDY_3D.md §14): (1) only candidates that pass the edge check;
 // (2) tracking, non-inferiority: the mean picture PSNR at 1 s and the mean temperature field PSNR at 1 s each within
 // 0.5 dB of the best eligible candidate's; (3) endless play, improvement: of those, the lowest mean rank over the five
@@ -2298,12 +2344,7 @@ int choose(const Args& a) {
   }
   const auto ev = g_r ? edge_verdicts_r(a.need("edge"), a.need("bounds")) : edge_verdicts(a.need("edge"));
   const auto sets = settings(split);
-  struct Score {
-    double pic = 0, temp = 0;
-    std::array<double, 5> endless{};  // spectrum, |ln motion|, coverage, emission (lower better), mean picture (higher)
-    bool edge = false;
-    double rank = 0;
-  };
+  using Score = ChoiceScore;
   std::map<std::string, Score> sc;
   for (const auto& c : cands) {
     Score s;
@@ -2350,6 +2391,7 @@ int choose(const Args& a) {
     std::println("\nNo candidate passes the edge check: the rule chooses among all of them, and the chosen one fails the edge check.");
     pool = cands;
   }
+  if (g_r2) return choose_r2(a, cands, sc, pool);
   if (g_r) {  // study R (docs/STUDY_R.md §2.6): the lowest mean rank over seven measures, tracking's two and the five endless
     for (const auto& c : pool) {
       double rank = 0;
@@ -2411,6 +2453,393 @@ int choose(const Args& a) {
   }
   std::println("\nchosen: {}", chosen);
   return 0;
+}
+
+
+
+// Study R2 (docs/STUDY_R2.md §1.2): is the solver stable at a setting? The simulation from an empty grid for --seconds,
+// once a second the largest speed, the box's kinetic energy per cell, its heat and the seconds of CPU per frame.
+int stability(const Args& a) {
+  const std::array<float, 3> c{a.f("intensity", 0.5f), a.f("wind", 0.5f), a.f("turbulence", 0.5f)};
+  auto p = fine_params(c, a.u64("seed", 34'000'900), a.i("threads", 1), a.i("width", kWidth), a.i("height", kHeight));
+  p.velocity = a.i("velocity", p.velocity);
+  p.confinement = a.i("confinement", p.confinement);
+  const int frames = static_cast<int>(std::lround(a.f("seconds", 30.f) * p.fps));
+  nfx::sim3d::Fluid f(p);
+  const std::size_t n = zu(f.nx()) * zu(f.ny()) * zu(f.nz());
+  std::vector<float> T(n), D(n), U(3 * n);
+  const fs::path log = data_root(a) / "logs" / "stability.log";
+  double c0 = cpu_now(), worst = 0;
+  bool finite = true;
+  for (int fr = 1; fr <= frames; ++fr) {
+    f.step_frame();
+    if (fr % 30 != 0) continue;
+    f.fields(T, D);
+    f.velocity(U);
+    double vmax = 0, ke = 0, heat = 0, mv = 0, side_v = 0, side_n = 0;
+    for (std::size_t i = 0; i < n; ++i) {
+      const double sp = std::sqrt(double(U[3 * i]) * U[3 * i] + double(U[3 * i + 1]) * U[3 * i + 1] + double(U[3 * i + 2]) * U[3 * i + 2]);
+      vmax = std::max(vmax, sp);
+      ke += 0.5 * sp * sp / static_cast<double>(n);
+      heat += T[i];
+      mv += U[3 * i + 1] / static_cast<double>(n);
+      const int x = static_cast<int>(i % zu(f.nx())), z = static_cast<int>((i / zu(f.nx())) % zu(f.nz()));
+      if (x == 0 || z == 0 || x == f.nx() - 1 || z == f.nz() - 1) {
+        side_v += U[3 * i + 1];
+        side_n += 1;
+      }
+      finite = finite && std::isfinite(sp) && std::isfinite(T[i]);
+    }
+    worst = std::max(worst, vmax);
+    log_line(log, std::format("{} {:.2f} {:.2f} {:.2f} seed {} velocity {}: {} s, largest speed {:.1f} cells/s, KE per cell {:.2f}, heat {:.1f}, {:.3f} CPU s per frame; "
+                              "mean v {:.2f}, at the sides {:.2f} cells/s",
+                              nfx::sim3d::effect_name(p.effect), c[0], c[1], c[2], p.seed, p.velocity, fr / 30, vmax, ke, heat, (cpu_now() - c0) / 30.0, mv,
+                              side_n > 0 ? side_v / side_n : 0.0));
+    c0 = cpu_now();
+  }
+  log_line(log, std::format("{} {:.2f} {:.2f} {:.2f} seed {}: {} (largest speed {:.1f} cells/s)", nfx::sim3d::effect_name(p.effect), c[0], c[1], c[2], p.seed,
+                            finite ? "finite throughout" : "NOT FINITE", worst));
+  return finite ? 0 : 1;
+}
+
+
+// Study R2 (docs/STUDY_R2.md §2.4, the losses' design): how wide a model's coarse plume grows against the truth's in a
+// free rollout from a true state, and the coarse simulation's for comparison. For each run of --runs (a directory; the
+// runs whose controls are held), from state --from, the model (coarse only) or the coarse simulation plays on with the
+// run's controls and noise; at each horizon, per channel, the truth's mass-weighted mean over the rows of the model's
+// spread over the truth's (rows holding at least 1e-3 of the fullest row), and the model's mass over the truth's.
+int widthprobe(const Args& a) {
+  const fs::path model_file = a.need("model");
+  r3::Model m = load_study_model(model_file);
+  r3::quantise_like_storage(m);
+  const bool coarse = a.str("method", "model") == "coarse";
+  const int threads = a.i("threads", 1), s0 = a.i("from", 60);
+  nfx::Pool pool(threads);
+  r3::Workspace ws(m);
+  fast_conv(ws);
+  std::vector<int> hz;
+  for (const float h : nfx::tools::parse_floats(a.str("horizons", "12,30,90,180,300,450"))) hz.push_back(static_cast<int>(h));
+  const auto runs = load_runs(a.need("runs"));
+  const int C = m.h.channels(), N = m.h.cells();
+  std::vector<std::array<double, 4>> acc(hz.size());  // width ratio heat, soot; mass ratio heat, soot
+  std::vector<int> cnt(hz.size(), 0);
+  for (const r3::Run& r : runs) {
+    if (!r.schedule.empty() || r.frames <= s0 + hz.back() + 1) continue;
+    const std::vector<float> cv = r.controls();
+    const std::array<float, 3> c{cv[0], cv[1], cv[2]};
+    std::vector<float> phys(zu(N) * r3::kPhys), truth(phys.size());
+    r.state(s0, phys.size(), phys);
+    r3::State st = r3::make_state(m);
+    CoarseSim cs;
+    if (coarse) cs.load(m, phys, r.time(s0), c, r.p.seed, threads);
+    else r3::start_from(m, phys, r.time(s0), cv, r.p.seed, st, ws, &pool, false);
+    std::vector<float> now(zu(N) * zu(C), 0.f);
+    int done = 0;
+    for (std::size_t j = 0; j < hz.size(); ++j) {
+      while (done < hz[j]) {
+        if (coarse) cs.f->step_frame();
+        else coarse_only_step(m, st, cv, r.p.seed, ws, pool);
+        ++done;
+      }
+      if (coarse) {
+        const auto fs3 = cs.f->state();
+        for (int i = 0; i < N; ++i) {
+          now[zu(i) * zu(C) + 3] = fs3.temp[zu(i)];
+          now[zu(i) * zu(C) + 4] = fs3.soot[zu(i)];
+        }
+      } else {
+        now = st.coarse;
+      }
+      r.state(s0 + hz[j], truth.size(), truth);
+      for (int k = 3; k < r3::kPhys; ++k) {
+        const auto wm = r3::row_spread(m.h, now, C, k), wt = r3::row_spread(m.h, truth, r3::kPhys, k);
+        std::vector<double> mm(zu(m.h.ry), 0.0), mt(zu(m.h.ry), 0.0);
+        for (int i = 0; i < N; ++i) {
+          const int y = i / (m.h.rx * m.h.rz);
+          mm[zu(y)] += std::max(0.f, now[zu(i) * zu(C) + zu(k)]);
+          mt[zu(y)] += std::max(0.f, truth[zu(i) * r3::kPhys + zu(k)]);
+        }
+        const double tmax = *std::ranges::max_element(mt);
+        double ws_ = 0, wr = 0, smm = 0, smt = 0;
+        for (int y = 0; y < m.h.ry; ++y) {
+          smm += mm[zu(y)];
+          smt += mt[zu(y)];
+          if (!(mt[zu(y)] > 1e-3 * tmax) || !(wt[zu(y)] > 0)) continue;
+          ws_ += mt[zu(y)];
+          wr += mt[zu(y)] * wm[zu(y)] / wt[zu(y)];
+        }
+        acc[j][zu(k - 3)] += ws_ > 0 ? wr / ws_ : 0;
+        acc[j][zu(k - 1)] += smt > 0 ? smm / smt : 0;
+      }
+      ++cnt[j];
+    }
+  }
+  std::println("{} ({}), from state {} of the runs in {} with their controls held:\n", coarse ? "the coarse simulation" : model_file.filename().string(),
+               coarse ? "smoke at 16 x 24 x 16" : "coarse state only", s0, a.str("runs"));
+  std::println("| horizon (frames) | runs | spread over the truth's: heat | soot | mass over the truth's: heat | soot |");
+  std::println("|---:|---:|---:|---:|---:|---:|");
+  for (std::size_t j = 0; j < hz.size(); ++j) {
+    const double n = std::max(1, cnt[j]);
+    std::println("| {} | {} | {:.3f} | {:.3f} | {:.3f} | {:.3f} |", hz[j], cnt[j], acc[j][0] / n, acc[j][1] / n, acc[j][2] / n, acc[j][3] / n);
+  }
+  return 0;
+}
+
+// --- study R2's rule (docs/STUDY_R2.md §2) ---------------------------------------------------------------------------
+
+constexpr std::array<const char*, 5> kStatNames{"3D spectrum distance", "\\|ln motion ratio\\|", "coverage distance", "light distance", "mean picture PSNR (dB)"};
+std::array<double, 5> stats_of(const Endless& e) { return {e.spectrum, e.motion, e.coverage, e.emission, e.mean_psnr}; }
+bool stat_higher_better(int k) { return k == 4; }
+
+// The units of `who` at setting s, runs k0 .. k0 + n - 1, pooled (nullopt if any is missing).
+std::optional<Unit> pooled_runs(const fs::path& root, const std::string& split, const std::string& who, int s, int k0, int n) {
+  std::vector<Unit> us;
+  for (int k = k0; k < k0 + n; ++k) {
+    Unit u;
+    if (!load_unit(root / "eval" / split / "endless" / who / std::format("s{}_k{}.unit", s, k), u)) return std::nullopt;
+    us.push_back(std::move(u));
+  }
+  return pool_units(us);
+}
+
+// The rule's margins (STUDY_R2.md §2.7): at each calibration setting, three sets of the test's number of teacher runs
+// (`real --split cal`: seeds 34,500,000 + 100 s + k, k = 0..8); with each set in turn as the reference, the other two are
+// two "methods" exactly as good as the teacher, and their difference in each endless statistic is what chance alone
+// moves a paired difference by at one setting. The margin is the RMS of those differences over the settings and the
+// three rotations. Written from the teacher's runs alone, before any model is validated.
+int nullcal(const Args& a) {
+  const fs::path root = data_root(a);
+  const auto sets = settings("cal");
+  const int per = endless_runs("test");
+  std::array<std::vector<double>, 5> diffs;
+  const fs::path out = a.str("out", "results/3d/r2/margins.csv");
+  fs::create_directories(out.parent_path());
+  std::ofstream md(fs::path(out).replace_extension(".md"));
+  const auto both = [&](const std::string& t) {
+    std::println("{}", t);
+    md << t << "\n";
+  };
+  both(std::format("# Study R2's margins: the teacher against itself\n\nAt each of {} calibration settings, {} sets of {} teacher runs (smoke_r2 at "
+                   "64 x 96 x 64, 150 frames of warm-up, then 240, every frame from the four cameras); each set in turn the reference and the "
+                   "other two compared with it. Per statistic: the difference between the two sets' distances to the reference (lower "
+                   "better but for the mean picture's PSNR), each rotation's.\n",
+                   sets.size(), kNullSets, per));
+  both("| setting (intensity, wind, turbulence) | reference set | 3D spectrum | \\|ln motion\\| | coverage | light | mean picture (dB) |");
+  both("|---|---:|---|---|---|---|---|");
+  for (int si = 0; si < static_cast<int>(sets.size()); ++si) {
+    std::array<Unit, kNullSets> P;
+    for (int k = 0; k < kNullSets; ++k) {
+      auto u = pooled_runs(root, "cal", "real", si, k * per, per);
+      if (!u) throw std::runtime_error(std::format("nullcal: setting {} lacks teacher runs (nvfx_3d real --study r2 --split cal)", si));
+      P[zu(k)] = std::move(*u);
+    }
+    for (int ref = 0; ref < kNullSets; ++ref) {
+      const int b = ref == 0 ? 1 : 0, c = ref == 2 ? 1 : 2;
+      const auto eb = stats_of(distance(P[zu(ref)], P[zu(b)])), ec = stats_of(distance(P[zu(ref)], P[zu(c)]));
+      std::string row = std::format("| {:.2f}, {:.2f}, {:.2f} | {} |", sets[zu(si)][0], sets[zu(si)][1], sets[zu(si)][2], ref);
+      for (int k = 0; k < 5; ++k) {
+        diffs[zu(k)].push_back(eb[zu(k)] - ec[zu(k)]);
+        row += std::format(" {:.4f} / {:.4f} |", eb[zu(k)], ec[zu(k)]);
+      }
+      both(row);
+    }
+  }
+  std::ofstream o(out);
+  o << "statistic,margin,n,mean_abs,max_abs\n";
+  both("\n| statistic | margin (RMS of the null differences) | mean \\|difference\\| | largest \\|difference\\| | n |");
+  both("|---|---:|---:|---:|---:|");
+  for (int k = 0; k < 5; ++k) {
+    double s2 = 0, sa = 0, mx = 0;
+    for (const double d : diffs[zu(k)]) {
+      s2 += d * d;
+      sa += std::abs(d);
+      mx = std::max(mx, std::abs(d));
+    }
+    const double n = static_cast<double>(diffs[zu(k)].size());
+    const double rms = std::sqrt(s2 / n);
+    o << std::format("{},{:.6f},{},{:.6f},{:.6f}\n", k, rms, diffs[zu(k)].size(), sa / n, mx);
+    both(std::format("| {} | {:.4f} | {:.4f} | {:.4f} | {} |", kStatNames[zu(k)], rms, sa / n, mx, diffs[zu(k)].size()));
+  }
+  return 0;
+}
+
+std::array<double, 5> read_margins(const fs::path& f) {
+  std::array<double, 5> m{};
+  std::array<bool, 5> have{};
+  std::ifstream i(f);
+  if (!i) throw std::runtime_error("cannot open " + f.string());
+  std::string line;
+  while (std::getline(i, line)) {
+    const auto t = split_csv(line);
+    if (t.size() < 2 || t[0] == "statistic") continue;
+    const int k = std::stoi(t[0]);
+    if (k < 0 || k > 4) continue;
+    m[zu(k)] = std::stod(t[1]);
+    have[zu(k)] = true;
+  }
+  if (!std::ranges::all_of(have, [](bool b) { return b; })) throw std::runtime_error(f.string() + ": not every statistic has a margin");
+  return m;
+}
+
+// One method against another on a split's endless statistics: per statistic the paired interval (over the settings) of
+// A minus B, and whether it is worse beyond its margin, or worse at all (study R's strict reading).
+struct LookRow {
+  nfx::metrics::Interval iv;
+  double mean_a = 0, mean_b = 0;
+  bool beyond = false, strict_worse = false;
+};
+std::array<LookRow, 5> look_of(const fs::path& root, const std::string& split, const std::string& A, const std::string& B, const std::array<double, 5>& margins) {
+  const auto sets = settings(split);
+  std::array<std::vector<double>, 5> va, vb;
+  for (int si = 0; si < static_cast<int>(sets.size()); ++si) {
+    const int n = endless_runs(split);
+    const auto re = pooled_runs(root, split, "real", si, 0, n), ua = pooled_runs(root, split, A, si, 0, n), ub = pooled_runs(root, split, B, si, 0, n);
+    if (!re || !ua || !ub) throw std::runtime_error(std::format("look: missing endless runs at setting {} ({} or {} or the real runs)", si, A, B));
+    const auto ea = stats_of(distance(*re, *ua)), eb = stats_of(distance(*re, *ub));
+    for (int k = 0; k < 5; ++k) {
+      va[zu(k)].push_back(ea[zu(k)]);
+      vb[zu(k)].push_back(eb[zu(k)]);
+    }
+  }
+  std::array<LookRow, 5> out;
+  for (int k = 0; k < 5; ++k) {
+    LookRow& r = out[zu(k)];
+    r.iv = nfx::metrics::paired_bootstrap(va[zu(k)], vb[zu(k)], 10000, 2026);
+    for (std::size_t i = 0; i < va[zu(k)].size(); ++i) {
+      r.mean_a += va[zu(k)][i] / static_cast<double>(va[zu(k)].size());
+      r.mean_b += vb[zu(k)][i] / static_cast<double>(vb[zu(k)].size());
+    }
+    r.beyond = stat_higher_better(k) ? r.iv.lo < -margins[zu(k)] : r.iv.hi > margins[zu(k)];
+    r.strict_worse = stat_higher_better(k) ? r.iv.hi < 0 : r.iv.lo > 0;
+  }
+  return out;
+}
+
+// Study R2's choice on validation (STUDY_R2.md §2.8): (1) eligible, the candidates that pass the edge check; (2) of
+// those, the ones whose look is within the margins against the coarse simulation (no endless statistic worse beyond
+// its margin); (3) of those, the highest tracking picture PSNR at 1 s, a tie within 0.1 dB going to the higher heat
+// field PSNR at 1 s. If none passes (2): the fewest statistics beyond their margins, then (3). If none passes (1):
+// (2) and (3) among all, and the chosen one fails the test's first condition.
+int choose_r2(const Args& a, const std::vector<std::string>& cands, std::map<std::string, ChoiceScore>& sc, const std::vector<std::string>& eligible) {
+  const fs::path root = data_root(a);
+  const std::string split = a.str("split", "val"), base = a.str("baseline", "coarse");
+  const auto margins = read_margins(a.need("margins"));
+  std::map<std::string, int> beyond;
+  std::println("\nAgainst {} ({}; paired over the settings, 95% intervals; the margin on the worse side):\n", base, split);
+  std::println("| candidate | 3D spectrum | \\|ln motion\\| | coverage | light | mean picture (dB) | statistics beyond their margins |");
+  std::println("|---|---|---|---|---|---|---:|");
+  for (const auto& c : cands) {
+    const auto look = look_of(root, split, c, base, margins);
+    int nb = 0;
+    std::string row = "| " + c + " |";
+    for (int k = 0; k < 5; ++k) {
+      const auto& r = look[zu(k)];
+      nb += r.beyond;
+      row += std::format(" {:+.4f} [{:+.4f}, {:+.4f}]{} |", r.iv.mean, r.iv.lo, r.iv.hi, r.beyond ? " (beyond)" : "");
+    }
+    beyond[c] = nb;
+    std::println("{} {} |", row, nb);
+  }
+  std::println("\nmargins: {:.4f}, {:.4f}, {:.4f}, {:.4f}, {:.2f} dB", margins[0], margins[1], margins[2], margins[3], margins[4]);
+  int fewest = 1 << 20;
+  for (const auto& c : eligible) fewest = std::min(fewest, beyond[c]);
+  std::vector<std::string> kept;
+  for (const auto& c : eligible) {
+    if (beyond[c] == fewest) kept.push_back(c);
+  }
+  const bool none_pass = !std::ranges::any_of(cands, [&](const std::string& c) { return sc[c].edge; });
+  std::string kept_list;
+  for (const auto& c : kept) kept_list += (kept_list.empty() ? "" : ", ") + c;
+  std::println("\nEligible ({}): {} of them; {}: {}", none_pass ? "no candidate passes the edge check, so all of them" : "those that pass the edge check", eligible.size(),
+               fewest == 0 ? "the look within every margin" : std::format("none within every margin, the fewest statistics beyond ({})", fewest), kept_list);
+  std::string chosen;
+  for (const auto& c : kept) {
+    if (chosen.empty()) {
+      chosen = c;
+      continue;
+    }
+    const double d = sc[c].pic - sc[chosen].pic;
+    if (d > 0.1 || (std::abs(d) <= 0.1 && sc[c].temp > sc[chosen].temp)) chosen = c;
+  }
+  std::println("\nchosen: {} (picture at 1 s {:.2f} dB, heat field {:.2f} dB; edge check {}; {} statistic(s) beyond their margins)", chosen, sc[chosen].pic, sc[chosen].temp,
+               sc[chosen].edge ? "passed" : "FAILED", beyond[chosen]);
+  return 0;
+}
+
+// Study R2's verdict on the test (STUDY_R2.md §2.9): (1) no runaway, on validation's seeds (the chosen candidate's
+// rows) and the test's; (2) tracking better: at 1 s the heat field's and the picture's intervals entirely above zero;
+// (3) the look within the margins: no endless statistic worse beyond its margin. Study R's strict reading (no interval
+// entirely on the worse side) is reported beside it and does not decide.
+int verdict(const Args& a) {
+  const fs::path root = data_root(a);
+  const std::string split = a.str("split", "test"), A = a.str("a", "learned"), B = a.str("b", "coarse");
+  const auto margins = read_margins(a.need("margins"));
+  const fs::path out = a.str("out", "results/3d/r2/verdict_" + split + ".md");
+  fs::create_directories(out.parent_path());
+  std::ofstream md(out);
+  const auto both = [&](const std::string& t) {
+    std::println("{}", t);
+    md << t << "\n";
+  };
+  both(std::format("# Study R2's verdict ({}: {} against {})\n", split, A, B));
+  // (1) the edge check
+  const auto bounds = a.need("bounds");
+  bool edge_ok = true;
+  std::string edge_text;
+  for (const auto& [file, label] : {std::pair{a.str("edge-val", ""), a.str("val-label", "")}, std::pair{a.str("edge-test", ""), A}}) {
+    if (file.empty() || label.empty()) continue;
+    const auto ev = edge_verdicts_r(file, bounds);
+    const auto it = ev.find(label);
+    if (it == ev.end()) throw std::runtime_error("verdict: no edge rows for " + label + " in " + file);
+    edge_ok = edge_ok && it->second.pass;
+    edge_text += std::format("{}{} on {}: {}", edge_text.empty() ? "" : "; ", label, fs::path(file).filename().string(), it->second.pass ? "passes" : "FAILS");
+  }
+  both(std::format("1. **No runaway: {}** ({}).", edge_ok ? "holds" : "fails", edge_text));
+  // (2) tracking at 1 s
+  const auto ta = read_track(root / "eval" / split / "track" / (A + ".csv")), tb = read_track(root / "eval" / split / "track" / (B + ".csv"));
+  std::array<nfx::metrics::Interval, 2> tr{};
+  for (int q : {0, 2}) {
+    std::vector<double> va, vb;
+    for (const auto& [key, r] : ta) {
+      const auto it = tb.find(key);
+      if (it == tb.end()) continue;
+      va.push_back(r.v[1][zu(q)]);
+      vb.push_back(it->second.v[1][zu(q)]);
+    }
+    if (va.empty()) throw std::runtime_error("verdict: no paired tracking rows");
+    tr[q == 0 ? 0 : 1] = nfx::metrics::paired_bootstrap(va, vb, 10000, 2026);
+  }
+  const bool better = tr[0].lo > 0 && tr[1].lo > 0, worse = tr[0].hi < 0 && tr[1].hi < 0;
+  both(std::format("2. **Tracking: {}** (at 1 s, the heat field {:+.2f} dB [{:+.2f}, {:+.2f}], the picture {:+.2f} dB [{:+.2f}, {:+.2f}]).",
+                   better ? "follows a real run better" : worse ? "follows worse" : "a tie (or mixed)", tr[0].mean, tr[0].lo, tr[0].hi, tr[1].mean, tr[1].lo, tr[1].hi));
+  // (3) the look
+  const auto look = look_of(root, split, A, B, margins);
+  bool look_ok = true, strict_ok = true;
+  std::string worse_list, strict_list;
+  both("3. **Look**, each endless statistic's paired interval against its margin:\n");
+  both(std::format("| statistic | {} | {} | {} - {} | margin | within it |", A, B, A, B));
+  both("|---|---:|---:|---|---:|---|");
+  for (int k = 0; k < 5; ++k) {
+    const auto& r = look[zu(k)];
+    look_ok = look_ok && !r.beyond;
+    strict_ok = strict_ok && !r.strict_worse;
+    if (r.beyond) worse_list += std::format("{}{}", worse_list.empty() ? "" : ", ", kStatNames[zu(k)]);
+    if (r.strict_worse) strict_list += std::format("{}{}", strict_list.empty() ? "" : ", ", kStatNames[zu(k)]);
+    both(std::format("| {} | {:.4f} | {:.4f} | {:+.4f} [{:+.4f}, {:+.4f}] | {}{:.4f} | {} |", kStatNames[zu(k)], r.mean_a, r.mean_b, r.iv.mean, r.iv.lo, r.iv.hi,
+                     stat_higher_better(k) ? "-" : "+", margins[zu(k)], r.beyond ? "**no: worse beyond the margin**" : r.strict_worse ? "yes (worse, within the margin)" : "yes"));
+  }
+  both(std::format("\n   The look {}.", look_ok ? "is within every margin" : "is worse beyond the margin in " + worse_list));
+  const bool pass = edge_ok && better && look_ok;
+  both(std::format("\n**The verdict: {}**", pass ? "passes: the learned 3D smoke beats running the cheap simulation" : "fails"));
+  if (!pass) {
+    std::string why;
+    if (!edge_ok) why += "it runs away by the edge check; ";
+    if (!better) why += better ? "" : worse ? "it follows real runs worse; " : "it ties at tracking; ";
+    if (!look_ok) why += "it looks worse beyond the margin in " + worse_list + "; ";
+    both("(" + why.substr(0, why.size() - 2) + ")");
+  }
+  both(std::format("\nStudy R's strict reading (beside the rule, not judged): {}.", strict_ok ? "no statistic worse at all" : "worse in " + strict_list));
+  return pass ? 0 : 3;
 }
 
 // --- pilot and look ------------------------------------------------------------------------------------------------
@@ -2564,7 +2993,7 @@ int look(const Args& a) {
 
 int main(int argc, char** argv) {
   try {
-    const Args a(argc, argv, {"floor", "sim"});
+    const Args a(argc, argv, {"floor", "no-floor", "sim"});
     if (a.positional().empty()) {
       std::println(stderr, "usage: nvfx_3d pilot|look|record|train|finish|truth|track|real|play|compare|freeze|video|timing [options] (see tools/nvfx_3d.cpp)");
       return 2;
@@ -2572,11 +3001,13 @@ int main(int argc, char** argv) {
     const std::string cmd = a.positional()[0];
     g_max_settings = a.i("max-settings", g_max_settings);
     g_max_runs = a.i("max-runs", g_max_runs);
+    g_only_setting = a.i("setting", -1);
     const std::string study = a.str("study", "n");
     g_hres = study == "hres" || study == "n3";
     g_n2 = study == "n2";
-    g_r = study == "r";
-    if (!nfx::sim3d::parse_effect(a.str("effect", g_r ? "smoke_r" : "fire"), g_effect)) throw std::invalid_argument("--effect fire|smoke|smoke_r");
+    g_r2 = study == "r2";
+    g_r = study == "r" || g_r2;
+    if (!nfx::sim3d::parse_effect(a.str("effect", g_r2 ? "smoke_r2" : g_r ? "smoke_r" : "fire"), g_effect)) throw std::invalid_argument("--effect fire|smoke|smoke_r|smoke_r2");
     int rc = 2;
     if (cmd == "pilot") rc = pilot(a);
     else if (cmd == "look") rc = look(a);
@@ -2597,6 +3028,10 @@ int main(int argc, char** argv) {
     else if (cmd == "choose") rc = choose(a);
     else if (cmd == "edgecal") rc = edgecal(a);
     else if (cmd == "check") rc = check(a);
+    else if (cmd == "nullcal") rc = nullcal(a);
+    else if (cmd == "stability") rc = stability(a);
+    else if (cmd == "widthprobe") rc = widthprobe(a);
+    else if (cmd == "verdict") rc = verdict(a);
     else if (cmd == "plume") rc = nfx::tools::plume3d::measure(a, data_root(a));
     else if (cmd == "plumefit") rc = nfx::tools::plume3d::fit(a, data_root(a));
     else if (cmd == "plumevideo") rc = nfx::tools::plume3d::video(a, data_root(a));
