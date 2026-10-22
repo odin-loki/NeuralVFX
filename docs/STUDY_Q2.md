@@ -48,7 +48,7 @@ played on the probe; the rule's numbers (`q2_rule.csv`) committed and pushed bef
 | 1 | geyser (`fx_elements/models/d/geyser.nvfx`) | `u30a`, `u30al` | planned |
 | 2 | haboob (`fx_elements/models/d/haboob.nvfx`) | `rft`, `rfs` | planned |
 | 3 | smoke ring (`fx_air/models/d/smokering.nvfx`) | `rft`, `rfs` | planned |
-| 4 | avalanche (`q_fix/models/avalanche.nvfx`) | `msg`, `s48` | planned |
+| 4 | avalanche (`q_fix/models/avalanche.nvfx`) | `s48` (`msg` dropped by its diagnosis before its probe, §3) | planned |
 | 4 | heavy gas (`fx_air/models/d/heavygas.nvfx`) | `ms`, `msg`, `s24` | planned |
 | 5 | mushroom (`q_fix/models/mushroom.nvfx`) | `u60a`, `u90a` | planned |
 
@@ -110,6 +110,30 @@ of the diagnosis block, §4.5) on the avalanche's current file, its mean state o
 grown fine fields keep the detail that the mean state lost. And after the mushroom's fine-tunes: the cover and its
 height from the true state at 1, 2 and 4 s, and strips at 3, 4 and 5 s (the cap). The diagnosis may add or drop a
 candidate before the probe's second step; any change is written here, with its reason, before validation.
+
+**The avalanche's diagnosis** (22 October, 01:00 UTC; `nvfx_fix parts`, salt-1 training runs 0 to 5, the whole 148
+frames, the runtime as shipped with seeds 33,541,000 + 100 r; the data root's `q2_fix/diag/avalanche_*`). The methods
+from a true state are the same frames for all four files (start points play no part there); as shipped:
+
+| file | spectrum | motion | cover dist. | mean frame (dB) | cover at 1 / 2 / 4 s | its height at 1 / 2 / 4 s |
+|---|---:|---:|---:|---:|---|---|
+| real | | | | | 0.021 / 0.027 / 0.020 | 0.052 / 0.075 / 0.098 |
+| current (study Q's `u30`) | 0.151 | 1.14 | 0.0119 | 29.56 | 0.015 / 0.016 / 0.010 | 0.047 / 0.060 / 0.073 |
+| `ms` (its mean state; study Q's `ms_u30` bit for bit, SHA-256 `bcc04822...`) | 0.144 | 1.11 | 0.0045 | 30.21 | 0.021 / 0.025 / 0.018 | 0.050 / 0.061 / 0.070 |
+| `msg` (`ms`, fine fields grown) | 0.148 | 1.12 | 0.0045 | 30.20 | 0.021 / 0.025 / 0.018 | 0.050 / 0.061 / 0.070 |
+| `s48` (48 start points) | 0.144 | 1.29 | 0.0063 | 30.02 | 0.018 / 0.021 / 0.021 | 0.052 / 0.063 / 0.083 |
+
+- **The case for `msg` does not hold.** `msg` was to keep the detail that the mean state lost by dropping the stored fine
+  fields that no longer match the moved coarse state. On these runs the mean state's start points bring the cover and
+  the average picture much closer, and the grown fine fields change nothing of that, but they bring the detail no closer
+  than the stored ones: the spectrum distance is 0.148 against `ms`'s 0.144 (on six runs neither shows the loss study Q
+  measured over 60 settings, +0.022). The mismatch between the moved coarse state and its fine fields is therefore not
+  what draws the mean state's detail away, and `msg` would be study Q's rejected `ms_u30` with its fine fields
+  smoothed. **`msg` is dropped before its probe.** It is not played on the probe or validated.
+- **The case for `s48` holds.** Start points nearer the controls give a cloud closer to real in size and height (at 4 s
+  0.021 and 0.083 against the real 0.020 and 0.098, the current 0.010 and 0.073), the average picture 0.46 dB closer and
+  the detail as close as `ms`'s, with its own fine fields; its motion is further from real (1.29 against 1.14), which
+  the rule's margin judges. **The avalanche goes on with `s48` alone.**
 
 ## 4. The model changes: the plan and the rule (committed before any of their numbers)
 
