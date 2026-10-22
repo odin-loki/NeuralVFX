@@ -413,6 +413,25 @@ margin; study Q's fresh refit had +0.023 [+0.015, +0.030] on its validation). By
 lies wholly on the worse side (the motion). Distance to the floor: the mean frame 3.27 → 3.22 dB below it (the floor
 44.72 dB), the spectrum distance 0.705 → **0.681** (the floor's 0.017), the coverage distance 0.0014 → 0.0013 (0.0003).
 
+**The avalanche, `s48` (30 settings): it meets the rule, and is replaced.**
+
+| measure | current → `s48` | difference [95% interval] | margin | reading |
+|---|---|---|---|---|
+| tracking, the first frame, at 1 s and at 2 s (dB) | 24.43, 13.41, 11.88 (the same) | 0 [0, 0] | -0.20 | the same frames (start points play no part) |
+| detail spectrum distance | 0.111 → 0.112 | +0.002 [-0.010, +0.013] | +0.035 | tie |
+| \|ln motion ratio\| (motion ratio) | 0.307 (1.06) → 0.331 (1.13) | +0.024 [-0.070, +0.117] | +0.209 | tie (its worse end past study K's +0.02) |
+| coverage distance | 0.0138 → 0.0121 | -0.0017 [-0.0064, +0.0026] | +0.0118 | tie |
+| emission distance | 0.00010 → 0.00010 | +0.000000 [-0.000010, +0.000010] | +0.0001 | tie |
+| mean-frame PSNR (dB) | 29.25 → 30.66 | **+1.41 [+0.36, +2.50]** | -2.20 | better (a target) |
+
+With 48 start points the avalanche plays, from a start nearer the controls asked for, a cloud whose average picture is
+1.4 dB closer to a real run's on held-out settings (2.8 dB on validation), with every other measure a tie. Its motion
+and coverage, better on validation, tie here, with intervals as wide as the null's spread (by study K's margins the
+motion's would not pass; reported, not deciding). Distance to the floor: the mean frame 11.85 → **10.44 dB** below it
+(the floor 41.10 dB), the spectrum distance 0.111 → 0.112 (the floor's 0.027), the coverage distance 0.0138 → 0.0121
+(0.0013): the avalanche is still far from real, but a start point is now much less of that distance. The file is 2.9
+times the size (805,951 bytes against 280,927: 32 more start points with their fine fields); a frame costs the same.
+
 ## 5. What changed
 
 (Written when the study ends.)
