@@ -9,3 +9,8 @@ smokering,abs_ln_motion_ratio,0.021747
 smokering,coverage_l1,0.000344
 smokering,emission_l1,0.000000
 smokering,mean_frame_psnr,44.811580
+avalanche,spectrum_l1,0.044789
+avalanche,abs_ln_motion_ratio,0.067543
+avalanche,coverage_l1,0.001312
+avalanche,emission_l1,0.000000
+avalanche,mean_frame_psnr,40.439675
