@@ -309,7 +309,43 @@ distance -0.024 [-0.039, -0.011] (0.129 → 0.105) and the motion error -0.093 [
 probability at least 0.99 at 30 settings by resampling and needs at most 24 in the normal form (the motion; at 20 it
 would need more): **N = 30**, at which the rule's form passes with probability 0.95.
 
-(The rest is filled in as the probe runs.)
+**Heavy gas** (the null 00:50 UTC; the rule 02:20). The null moves its spectrum distance at a setting by 0.020 (RMS),
+its motion by 3.9%, its coverage distance by 0.0021 and its mean frame by 1.03 dB: margins tracking -0.20 dB, spectrum
+**+0.0200**, |ln motion ratio| **+0.0389**, coverage **+0.0021**, emission **+0.0001** (study K's), mean frame **-1.03
+dB**. Tracking from a true state is the same frames for all three (start points play no part there). In endless play on
+the probe:
+- `ms`: the mean frame **+1.66 dB [+1.26, +2.07]** (25.07 → 26.73 dB; a target) and coverage closer, but its motion
+  error **+0.074 [+0.040, +0.108]** (the motion ratio 1.13 → 1.29), past its margin: on the probe it does not meet the
+  rule's form.
+- `msg`: the mean frame **+1.87 [+1.49, +2.26]** (→ 26.94 dB), the spectrum distance -0.022 [-0.032, -0.012] (0.094 →
+  0.072), its motion error -0.024 [-0.042, -0.004] and coverage -0.0039 better, emission +0.00003 (worse, a third of its
+  margin): it meets the rule's form. The mean state's start moved to the controls, with fine fields grown from it, is
+  closer on every endless measure; with the stored fine fields (`ms`) the layer moves too much.
+- `s24`: the mean frame **+0.73 [+0.20, +1.24]**, the spectrum +0.013 [-0.004, +0.032], its end past its margin: on the
+  probe it does not meet the rule's form.
+
+The number of settings: `ms`'s motion (an SD of 0.11 between settings) and `s24`'s spectrum, motion and coverage, if
+truly unchanged, would pass their margins with probability 0.78, 0.73, 0.86 and 0.86 at 60 settings by resampling and
+need 105, 115, 89 and 87 in the normal form. The cap binds: **N = 60**, at which the rule's form passes with probability
+0.78 (`ms`), 0.99 (`msg`) and 0.65 (`s24`) if every held measure is truly unchanged and the improved targets are as
+measured (q2_power.csv), stated here before any of heavy gas's validation numbers.
+
+**The mushroom** (the null 01:47 UTC; the rule 02:20). The null moves its spectrum distance at a setting by 0.013 (RMS),
+its motion by 3.9%, its coverage distance by 0.0060 and its mean frame by 1.23 dB: margins tracking -0.20 dB, spectrum
+**+0.02** (study K's), |ln motion ratio| **+0.0394**, coverage **+0.0060**, emission **+0.0001**, mean frame **-1.23
+dB**. On the probe:
+- `u60a`: tracking at 1 s **+0.70 dB [+0.60, +0.79]** (14.78 → 15.48 dB) and the mean frame **+1.79 [+1.28, +2.30]**
+  (28.62 → 30.41 dB; both targets better), at 2 s +0.81 [+0.68, +0.94], the first frame a tie (-0.01 [-0.02, +0.01];
+  the anchor held it), the spectrum -0.006 and coverage -0.0043 better, its motion error +0.017 [+0.011, +0.023] (the
+  motion ratio 0.87 → 0.86; worse, within its margin): it meets the rule's form.
+- `u90a`: tracking at 1 s **+0.85 [+0.73, +0.96]**, the mean frame **+1.82 [+1.25, +2.39]**, at 2 s +0.94, the first
+  frame +0.05 [+0.04, +0.06] (better), the spectrum -0.007 and coverage -0.0046 better, its motion error +0.022 [+0.015,
+  +0.028] (worse, within its margin): it meets the rule's form.
+
+The number of settings: tracking at 2 s, which both improve but which is not their target, if truly unchanged would pass
+its margin with probability 0.95 and 0.93 at 60 settings by resampling and needs 59 and 70 in the normal form. The cap
+binds: **N = 60**, at which the rule's form passes with probability 0.95 (`u60a`) and 0.92 (`u90a`), stated here before
+any of the mushroom's validation numbers.
 
 ### 4.7 Validation (the choice)
 
