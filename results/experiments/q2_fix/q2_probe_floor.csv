@@ -19,3 +19,8 @@ heavygas,abs_ln_motion_ratio,0.052765
 heavygas,coverage_l1,0.003906
 heavygas,emission_l1,0.000000
 heavygas,mean_frame_psnr,35.801859
+mushroom,spectrum_l1,0.028987
+mushroom,abs_ln_motion_ratio,0.037373
+mushroom,coverage_l1,0.004173
+mushroom,emission_l1,0.000010
+mushroom,mean_frame_psnr,34.400529
