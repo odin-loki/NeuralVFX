@@ -23,9 +23,9 @@ what is not done and leaves running jobs alone).
   resumed from its checkpoints and reproduced its logged losses exactly (iterations 1500 and 1510: 9.439541, 1.363902).
   It now checkpoints every 10 iterations.
 - **Left, in order** (`resume.sh` runs each stage when the one before is done, the hand steps marked): (1) the rule's
-  numbers, `jobs/rule_numbers.sh` (run by `resume.sh` once the teacher's runs are whole: `results/3d/r2/edge_bounds.csv`,
-  `margins.csv`); by hand, §2.10 written, committed and pushed **before validation**, then `touch
-  markers/rule_committed`; (2) validation, `jobs/val.sh` (by `resume.sh`); by hand, `nvfx_3d choose --study r2`
+  numbers: **done and committed before validation** (§2.10; `markers/rule_committed` made after the push, so
+  `resume.sh` starts validation once training has written the candidates; rerun `resume.sh` after training ends);
+  (2) validation, `jobs/val.sh` (by `resume.sh`); by hand, `nvfx_3d choose --study r2`
   (results/3d/r2/choice_val.md), `cp models/<chosen>.nvfx3 models/chosen.nvfx3`, `echo <chosen> > models/chosen.txt`,
   `nvfx_3d freeze --model ... --frozen results/3d/r2/frozen.csv`, committed and pushed; (3) the test once,
   `jobs/test.sh` (by `resume.sh`), its verdict in `results/3d/r2/verdict_test.md`; ship only if it passes (§2.9);
@@ -360,7 +360,13 @@ numbers are reported.
 
 ### 2.10 The numbers the rule uses
 
-(To come, from the teacher's runs, before validation: the margins and the edge bounds.)
+From the teacher's runs alone (22 October, 03:30 to 04:40 UTC), committed before any validation run:
+- **The margins** (`results/3d/r2/margins.csv`, `margins.md`; 5 calibration settings x 3 rotations): 3D spectrum
+  distance **0.0415**, |ln motion ratio| **0.0293**, coverage distance **0.0037**, light distance **0.0026**, mean
+  picture PSNR **1.67 dB**.
+- **The edge bounds** (`results/3d/r2/edge_bounds.csv`, `edge_calibration.md`; four teacher runs per wind,
+  `edge_teacher.csv`): A x the largest teacher run + B with A = 2, B = 1, C = 0.5; the leave-one-out check raised no
+  bound (every teacher run passes against the other three).
 
 ## 7. Reproduce
 
