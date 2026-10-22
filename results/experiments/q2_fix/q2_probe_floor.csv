@@ -14,6 +14,11 @@ smokering,abs_ln_motion_ratio,0.021744
 smokering,coverage_l1,0.000347
 smokering,emission_l1,0.000000
 smokering,mean_frame_psnr,44.079525
+avalanche,spectrum_l1,0.033432
+avalanche,abs_ln_motion_ratio,0.066641
+avalanche,coverage_l1,0.001350
+avalanche,emission_l1,0.000000
+avalanche,mean_frame_psnr,40.189968
 heavygas,spectrum_l1,0.031380
 heavygas,abs_ln_motion_ratio,0.052765
 heavygas,coverage_l1,0.003906
