@@ -9,17 +9,22 @@ committed before validation and tested once (§2 onwards).
 
 ## 0. Where the study stands (a handoff, kept current)
 
-As of 22 October 2026, 00:20 UTC: **the teacher is fixed and chosen** (§1.2 to §1.4: `smoke_r2`, the momentum budget
+As of 22 October 2026, 03:00 UTC: **the teacher is fixed and chosen** (§1.2 to §1.4: `smoke_r2`, the momentum budget
 closed, 1.088 [1.080, 1.095], from `smoke_r`'s 0.80; the old effects byte for byte, §1.5); **the 48 training runs are
-recorded** (22:49 to 00:17, `runs/` in the data root, 1.1 GB); **training is running** (`jobs/train.sh`, three threads,
-the log `logs/train_r2.log`), and beside it, two at a time, the teacher's runs for the rule's numbers and the plume
-measurement (`jobs/teacher_lanes.sh`: the edge bounds' 20 runs, the margins' 45, then §1.6's 18). The machine is shared
-at a load of 15 to 20, so each runs at about a third of a core.
+recorded** (22:49 to 00:17, `runs/` in the data root, 1.1 GB); **the edge bounds' 20 teacher runs are done**;
+training and the margins' teacher runs are under way.
+- **The container restarted at about 02:49 UTC** and killed every job. What was written survived and nothing partial is
+  used: every output is written whole (a run's rows at once, units and profiles through a temporary file renamed), so
+  what is on disk is complete. Training was at iteration 1510 of 1750 (stage 4) and resumed from its checkpoint at
+  1500 (the stage-3 snapshot); the margins' runs had 30 of 45 (settings 0 and 1 whole, 2 to 4 in part) and resumed
+  from there; the plume measurement had 1 of 18 seeds.
+- Training: `jobs/train.sh` (three threads, the log `logs/train_r2.log`; resumes from `ckpt/r2.ckpt`, written every 20
+  iterations). The teacher's runs: `jobs/runq.sh jobs/teacher_tasks.txt N` (each task once across runners; a task
+  already done is skipped run by run): the margins' last 15 runs, then the plume measurement (§1.6).
 - Data root `$NEURALVFX_DATA/r2_smoke3d` (default `/root/nvfx-data/r2_smoke3d`): job scripts in `jobs/`, logs in
   `logs/`, binaries in `bin/` (by commit: training and the teacher's runs on cb31ccb, the test on a5637ed, the same solver
-  and trainer), scratch in `scratch/`. Every job resumes from what it has written (training from its checkpoint, every
-  20 iterations); each checks the disk first (`jobs/disk.sh`: R2 stays under 2.5 GB).
-- Next: when the teacher's runs are done, `jobs/rule_numbers.sh` (the edge bounds and the margins), §2.10 written and
+  and trainer), scratch in `scratch/`. Each job checks the disk first (`jobs/disk.sh`: R2 stays under 2.5 GB).
+- Next: when the margins' runs are done, `jobs/rule_numbers.sh` (the edge bounds and the margins), §2.10 written and
   committed with them, pushed; when training is done, the candidates C2 to C4 (`train.sh` makes them), validation
   (`jobs/val.sh`), the choice and the freeze, the test once (`jobs/test.sh`).
 
