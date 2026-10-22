@@ -1,0 +1,28 @@
+edge --sim --runs 4 --winds 0.05 --seconds 30 --seed-base 34300000 --out /root/nvfx-data/r2_smoke3d/results/edge_teacher_w0.csv
+edge --sim --runs 4 --winds 0.25 --seconds 30 --seed-base 34300100 --out /root/nvfx-data/r2_smoke3d/results/edge_teacher_w1.csv
+edge --sim --runs 4 --winds 0.5 --seconds 30 --seed-base 34300200 --out /root/nvfx-data/r2_smoke3d/results/edge_teacher_w2.csv
+edge --sim --runs 4 --winds 0.75 --seconds 30 --seed-base 34300300 --out /root/nvfx-data/r2_smoke3d/results/edge_teacher_w3.csv
+edge --sim --runs 4 --winds 0.95 --seconds 30 --seed-base 34300400 --out /root/nvfx-data/r2_smoke3d/results/edge_teacher_w4.csv
+real --split cal --setting 0
+real --split cal --setting 1
+real --split cal --setting 2
+real --split cal --setting 3
+real --split cal --setting 4
+plume --effect smoke_r2 --spin 6 --seconds 16 --label v_i50 --intensity 0.5 --from 0 --seeds 1 --seed-base 34010000
+plume --effect smoke_r2 --spin 6 --seconds 16 --label v_i50 --intensity 0.5 --from 1 --seeds 2 --seed-base 34010000
+plume --effect smoke_r2 --spin 6 --seconds 16 --label v_i50 --intensity 0.5 --from 2 --seeds 3 --seed-base 34010000
+plume --effect smoke_r2 --spin 6 --seconds 16 --label v_i50 --intensity 0.5 --from 3 --seeds 4 --seed-base 34010000
+plume --effect smoke_r2 --spin 6 --seconds 16 --label v_i20 --intensity 0.2 --from 0 --seeds 1 --seed-base 34010100
+plume --effect smoke_r2 --spin 6 --seconds 16 --label v_i20 --intensity 0.2 --from 1 --seeds 2 --seed-base 34010100
+plume --effect smoke_r2 --spin 6 --seconds 16 --label v_i20 --intensity 0.2 --from 2 --seeds 3 --seed-base 34010100
+plume --effect smoke_r2 --spin 6 --seconds 16 --label v_i20 --intensity 0.2 --from 3 --seeds 4 --seed-base 34010100
+plume --effect smoke_r2 --spin 6 --seconds 16 --label v_i80 --intensity 0.8 --from 0 --seeds 1 --seed-base 34010200
+plume --effect smoke_r2 --spin 6 --seconds 16 --label v_i80 --intensity 0.8 --from 1 --seeds 2 --seed-base 34010200
+plume --effect smoke_r2 --spin 6 --seconds 16 --label v_i80 --intensity 0.8 --from 2 --seeds 3 --seed-base 34010200
+plume --effect smoke_r2 --spin 6 --seconds 16 --label v_i80 --intensity 0.8 --from 3 --seeds 4 --seed-base 34010200
+plume --effect smoke_r2 --spin 6 --seconds 16 --label v_t00 --turbulence 0 --from 0 --seeds 1 --seed-base 34010300
+plume --effect smoke_r2 --spin 6 --seconds 16 --label v_t00 --turbulence 0 --from 1 --seeds 2 --seed-base 34010300
+plume --effect smoke_r2 --spin 6 --seconds 16 --label v_t00 --turbulence 0 --from 2 --seeds 3 --seed-base 34010300
+plume --effect smoke_r2 --spin 6 --seconds 16 --label v_t100 --turbulence 1 --from 0 --seeds 1 --seed-base 34010400
+plume --effect smoke_r2 --spin 6 --seconds 16 --label v_t100 --turbulence 1 --from 1 --seeds 2 --seed-base 34010400
+plume --effect smoke_r2 --spin 6 --seconds 16 --label v_t100 --turbulence 1 --from 2 --seeds 3 --seed-base 34010400

@@ -1,6 +1,6 @@
 # Study R2: the 3D smoke again, on a teacher with its momentum fixed
 
-Status: **under way** (21 October 2026). Audience: dev, research, the owner. A second try at study R's learned 3D smoke
+Status: **under way, resumable** (22 October 2026; §0 says how to resume). Audience: dev, research, the owner. A second try at study R's learned 3D smoke
 ([STUDY_R.md](STUDY_R.md)): first the teacher's momentum deficit (study R §1.4: the plume gains only 0.78 of the
 momentum its buoyancy gives), found and fixed and the plume measured against Morton, Taylor and Turner again (§1); then
 the learned smoke retrained on the fixed teacher with study N2's recipe and two losses aimed at study R's two failures
@@ -9,24 +9,31 @@ committed before validation and tested once (§2 onwards).
 
 ## 0. Where the study stands (a handoff, kept current)
 
-As of 22 October 2026, 03:00 UTC: **the teacher is fixed and chosen** (§1.2 to §1.4: `smoke_r2`, the momentum budget
-closed, 1.088 [1.080, 1.095], from `smoke_r`'s 0.80; the old effects byte for byte, §1.5); **the 48 training runs are
-recorded** (22:49 to 00:17, `runs/` in the data root, 1.1 GB); **the edge bounds' 20 teacher runs are done**;
-training and the margins' teacher runs are under way.
-- **The container restarted at about 02:49 UTC** and killed every job. What was written survived and nothing partial is
-  used: every output is written whole (a run's rows at once, units and profiles through a temporary file renamed), so
-  what is on disk is complete. Training was at iteration 1510 of 1750 (stage 4) and resumed from its checkpoint at
-  1500 (the stage-3 snapshot); the margins' runs had 30 of 45 (settings 0 and 1 whole, 2 to 4 in part) and resumed
-  from there; the plume measurement had 1 of 18 seeds.
-- Training: `jobs/train.sh` (three threads, the log `logs/train_r2.log`; resumes from `ckpt/r2.ckpt`, written every 20
-  iterations). The teacher's runs: `jobs/runq.sh jobs/teacher_tasks.txt N` (each task once across runners; a task
-  already done is skipped run by run): the margins' last 15 runs, then the plume measurement (§1.6).
+As of 22 October 2026, 03:25 UTC: **under way, resumable; the session ended here** (the owner's usage), with the jobs
+left running unattended. **Resume after any restart with `/root/nvfx-data/r2_smoke3d/jobs/resume.sh`** (it restarts only
+what is not done and leaves running jobs alone).
+- **Done**: the teacher fixed and chosen (§1.2 to §1.4: `smoke_r2`, dM/dz over B 1.088 [1.080, 1.095], from `smoke_r`'s
+  0.80); the old effects byte for byte (§1.5); the 48 training runs (`runs/`, 1.1 GB); the edge bounds' 20 teacher runs
+  (`results/edge_teacher_w*.csv`).
+- **Running**: training (stage 4, from its checkpoint at iteration 1520 of 1750; `logs/train_r2.log`; it then writes C2
+  to C4 and `markers/candidates_done`); the margins' last 9 of 45 teacher runs and the plume measurement's 17 of 18
+  (`jobs/runq.sh jobs/teacher_tasks.txt`).
+- **Two container restarts** (about 02:49 and 03:10 UTC) killed every job; every output is written whole (a run's rows
+  at once, units, profiles and checkpoints through a temporary file renamed), so nothing partial is used; training
+  resumed from its checkpoints and reproduced its logged losses exactly (iterations 1500 and 1510: 9.439541, 1.363902).
+  It now checkpoints every 10 iterations.
+- **Left, in order** (`resume.sh` runs each stage when the one before is done, the hand steps marked): (1) the rule's
+  numbers, `jobs/rule_numbers.sh` (run by `resume.sh` once the teacher's runs are whole: `results/3d/r2/edge_bounds.csv`,
+  `margins.csv`); by hand, §2.10 written, committed and pushed **before validation**, then `touch
+  markers/rule_committed`; (2) validation, `jobs/val.sh` (by `resume.sh`); by hand, `nvfx_3d choose --study r2`
+  (results/3d/r2/choice_val.md), `cp models/<chosen>.nvfx3 models/chosen.nvfx3`, `echo <chosen> > models/chosen.txt`,
+  `nvfx_3d freeze --model ... --frozen results/3d/r2/frozen.csv`, committed and pushed; (3) the test once,
+  `jobs/test.sh` (by `resume.sh`), its verdict in `results/3d/r2/verdict_test.md`; ship only if it passes (§2.9);
+  (4) §1.6's fits (`plumefit`, §7), the videos and the write-up.
 - Data root `$NEURALVFX_DATA/r2_smoke3d` (default `/root/nvfx-data/r2_smoke3d`): job scripts in `jobs/`, logs in
-  `logs/`, binaries in `bin/` (by commit: training and the teacher's runs on cb31ccb, the test on a5637ed, the same solver
-  and trainer), scratch in `scratch/`. Each job checks the disk first (`jobs/disk.sh`: R2 stays under 2.5 GB).
-- Next: when the margins' runs are done, `jobs/rule_numbers.sh` (the edge bounds and the margins), §2.10 written and
-  committed with them, pushed; when training is done, the candidates C2 to C4 (`train.sh` makes them), validation
-  (`jobs/val.sh`), the choice and the freeze, the test once (`jobs/test.sh`).
+  `logs/`, binaries in `bin/` (training and the teacher's runs on cb31ccb, validation and the test on a5637ed: the same
+  solver and trainer), markers in `markers/`. Each job checks the disk first (`jobs/disk.sh`: R2 stays under 2.5 GB).
+- **Nothing shipped changed**: `models/` and every frozen hash are main's; study R's demo stays `models/3d/smoke.nvfx3`.
 
 ## 1. The teacher's momentum
 

@@ -130,7 +130,9 @@ and the Godot test; details in its doc and REPORT section):
   the teacher's momentum deficit found (vorticity confinement pushing the plume down, and the semi-Lagrangian
   velocity step's non-conservation) and fixed (`smoke_r2`: dM/dz over B 1.088, from `smoke_r`'s 0.80); the learned
   smoke retrained with a spread loss and an edge loss under a rule with margins from the teacher's own spread, then
-  tested once. Under way.
+  tested once. Under way, resumable: training in stage 4 and the rule's teacher runs left running; resume with
+  `/root/nvfx-data/r2_smoke3d/jobs/resume.sh` (STUDY_R2.md §0: the hand steps left). Next after it: a coupled 3D fire
+  and smoke tested as R2 is (not started).
 
 **Next:**
 - **Study Q's leftovers** (STUDY_Q.md §9): the avalanche's start points (the mean state with fine fields regrown from

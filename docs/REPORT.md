@@ -4375,4 +4375,7 @@ settings for 30 s. The fire, study N's smoke and `smoke_r` record the same runs 
 **Under way**: the training runs, the learned smoke trained with N2's recipe plus a spread loss (each row's spread
 about its centroid, model against truth: study R's learned plume was 2.5 times too wide after 1 s and 5 times after
 15 s, the coarse simulation 1.0 to 1.25) and an edge loss, a rule whose margins come from the teacher against itself,
-validation and the test once. STUDY_R2.md §0 says what has run and how to resume.
+validation and the test once. **The session ended with training in stage 4 (iteration 1520 of 1750) and the rule's
+last teacher runs going, unattended**; nothing shipped changed. Resume with `/root/nvfx-data/r2_smoke3d/jobs/resume.sh`
+(STUDY_R2.md §0 lists what has run and the hand steps left: commit the rule's numbers before validation, the choice and
+freeze, the test once).
