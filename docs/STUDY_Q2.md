@@ -324,6 +324,24 @@ mean frame; each a tenth of its margin or less), `rfs` one (the spectrum): repor
 `q2_fix/models/haboob.nvfx` (read-only; 301,443 bytes, the size of the old file, SHA-256
 `4f933a2fe7a226cc9aee138722bdf2b358dbf6330952392860b46135efdc0f23`), validated and tested by `nvfx_ordered_q2`.
 
+**The smoke ring (20 settings): both meet the rule; `rft` is chosen.**
+
+| candidate | tracking: first frame (target) | at 1 s | at 2 s | spectrum | \|ln motion\| | coverage | mean frame (target) | reading |
+|---|---|---|---|---|---|---|---|---|
+| `rft` | **+2.94 [+2.72, +3.18]** | +0.10 [-0.01, +0.21] | -0.00 [-0.06, +0.06] | **-0.022 [-0.025, -0.018]** | +0.013 [+0.007, +0.018] (margin +0.021) | -0.0001 | +0.05 [-0.01, +0.12] | **meets it; chosen** |
+| `rfs` | **+2.14 [+1.91, +2.39]** | -0.02 [-0.11, +0.08] | +0.01 [-0.04, +0.06] | **-0.025 [-0.026, -0.023]** | +0.011 [+0.006, +0.015] | -0.0001 | +0.01 [-0.04, +0.07] | meets it |
+
+Both draw the ring's first frame much closer (25.38 → 28.32 and 27.52 dB) and its detail closer through the run (the
+spectrum distance 0.704 → 0.682 and 0.679). Their motion error grows by +0.013 and +0.011 (the motion ratio 0.962 →
+0.945 and 0.947 of the real runs'), each interval's worse end within its margin of +0.021, where study Q's fresh refit
+had grown it by +0.023 [+0.015, +0.030] on study Q's validation and stopped: the renderer trained on from its own
+weights still draws the smoke with a little less change from frame to frame, by half as much. Neither is better on the
+mean frame (ties), so the rule takes the larger first-frame gain: `rft`. By study M's strict reading one interval each
+lies wholly on the worse side (the motion): reported, not deciding.
+
+**Frozen** before its test (cab84db): the data root's `q2_fix/models/smokering.nvfx` (read-only; 301,443 bytes, SHA-256
+`a36e5e385f249dff9df8aae6d8c7c61b0a0a3b573c6f49531df76caf5d18598d`), validated and tested by `nvfx_ordered_q2`.
+
 ### 4.8 The test (once)
 
 Study B's held-out settings extended to the effect's N (`test_settings(N)`), the test's seeds (real 33,700,000 + 100 s +
