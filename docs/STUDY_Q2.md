@@ -20,12 +20,25 @@ in the trainer (`Rollout.RendererFineTuneKeepsItsScalesAndStartsFromItsWeights`)
 
 ## 0. Where the study stands (handoff)
 
-Planned (21 October 2026, 18:00 UTC). The plan and the rule's form (§4) are committed (c6e56e9); no number of the
-study exists yet. Heavy work waits for the quiet machine: another agent re-times everything (the data root's
-`quiet7/QUIET_DONE` marks its end; the coordinator dropped the three-hour fallback at 19:05 UTC, since round 7's quiet
-timing repeats any block that sees foreign load: no CPU job of any size before the marker). Until then only reading,
-planning, docs and the code (syntax-checked, not built). Every job below is already started
-(`q2_fix/jobs/go.sh`, 18:00 UTC) and waits for the quiet machine itself.
+Under way (22 October 2026, 03:00 UTC). The plan and the rule's form (§4) were committed before any number (c6e56e9,
+21 October 18:00 UTC); heavy work waited for the quiet machine's marker (`quiet7/QUIET_DONE`, 21:18 UTC; the
+coordinator dropped the three-hour fallback at 19:05 so that round 7's quiet timing saw no foreign load). Every effect's
+margins were committed and pushed before its candidates' probe, and every rule's numbers before its validation (§4.6);
+each chosen file was frozen before its one test. **Three models are replaced** (§4.8, §5): the haboob and the smoke ring
+(`rft`: the renderer trained on from its own weights) and the avalanche (`s48`: 48 start points), with their links,
+`models/2d`, the frozen rows and their tests, figures and videos. **The geyser, heavy gas and the mushroom are at
+validation**; then each chosen candidate is frozen, tested once and, if it passes, replaced.
+
+**The restart (22 October, about 02:49 UTC).** The container restarted and killed every background job; the files on
+disk and the branch (f6617d1) survived. At that moment the geyser's, heavy gas's and the mushroom's validations were
+running (the geyser's real runs done and part of its plays; heavy gas's and the mushroom's real runs in part). Their
+statistics are cached per setting in files written whole and then renamed (`q2_fix/vt`), keyed by the seeds and the
+file's SHA-256, so a step that runs again recomputes what is missing and gives the same numbers; but a file written in
+the last moments before a restart may not have reached the disk whole, so every cache file written after 02:39 UTC (63
+files; the list in `q2_fix/scratch/deleted_after_restart.txt`) was deleted, and every one kept has the exact size of its
+kind. The three validations were then started again from their beginning (`pipeline.sh`, 02:52 UTC; their tracking
+runs, which are not cached, from scratch). Nothing else was running: the avalanche's test had finished (met) and its
+replacement was committed (3b2ef19) before the restart.
 
 **How to pick it up.** Every job is a script in the data root's `q2_fix/jobs/` that skips what is done (a marker
 `jobs/<step>.done`, or the file it makes); its log is in `q2_fix/logs/`. `go.sh` starts them all: `build.sh` (the two
@@ -45,12 +58,20 @@ played on the probe; the rule's numbers (`q2_rule.csv`) committed and pushed bef
 
 | leftover | effect (shipped file) | candidates (§4.1) | where it is |
 |---|---|---|---|
-| 1 | geyser (`fx_elements/models/d/geyser.nvfx`) | `u30a`, `u30al` | planned |
-| 2 | haboob (`fx_elements/models/d/haboob.nvfx`) | `rft`, `rfs` | planned |
-| 3 | smoke ring (`fx_air/models/d/smokering.nvfx`) | `rft`, `rfs` | planned |
-| 4 | avalanche (`q_fix/models/avalanche.nvfx`) | `s48` (`msg` dropped by its diagnosis before its probe, §3) | planned |
-| 4 | heavy gas (`fx_air/models/d/heavygas.nvfx`) | `ms`, `msg`, `s24` | planned |
-| 5 | mushroom (`q_fix/models/mushroom.nvfx`) | `u60a`, `u90a` | planned |
+| 1 | geyser (`fx_elements/models/d/geyser.nvfx`) | `u30a`, `u30al` | validation (60 settings), started again after the restart |
+| 2 | haboob (`fx_elements/models/d/haboob.nvfx`) | `rft`, `rfs` | **replaced** by `rft` (the first frame +3.04 dB [+2.86, +3.21] on its test) |
+| 3 | smoke ring (`fx_air/models/d/smokering.nvfx`) | `rft`, `rfs` | **replaced** by `rft` (the first frame +2.94 dB [+2.72, +3.16]) |
+| 4 | avalanche (`q_fix/models/avalanche.nvfx`) | `s48` (`msg` dropped by its diagnosis before its probe, §3) | **replaced** by `s48` (the mean frame +1.41 dB [+0.36, +2.50]) |
+| 4 | heavy gas (`fx_air/models/d/heavygas.nvfx`) | `ms`, `msg`, `s24` | validation (60 settings), started again after the restart |
+| 5 | mushroom (`q_fix/models/mushroom.nvfx`) | `u60a`, `u90a` | validation (60 settings), started again after the restart |
+
+**To resume** (`Q` the data root's `q2_fix`): when `$Q/jobs/val_<effect>.done` appears, read the choice
+(`results/experiments/q2_fix/q2_val_choice.csv`), `$Q/jobs/freeze.sh <effect> <name>`, then `$Q/jobs/test.sh 2 <effect>
+<name>` (once); if `$Q/test_<effect>.done` says "met": `$Q/jobs/links.sh <effect> <dir>` (the old targets logged in
+`$Q/logs/links_before.txt`), the file into `models/2d` and `models/SHA256SUMS` regenerated, `models/restore.sh` (0
+different), the frozen rows (`$Q/jobs/update_frozen.sh`, a `<effect>_q2` row in the round's `fx_*_frozen.csv`) and their
+ctests, the videos (`$Q/jobs/videos_*.sh`, `install_videos.sh`) and their rows in videos/README.md. Then the write-up
+(§1, §5, §7, §8; REPORT §23; TODO), the full checks after merging main, and the push.
 
 ## 1. Bottom line
 
