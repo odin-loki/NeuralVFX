@@ -371,6 +371,26 @@ the worse side (the spectrum). Distance to the floor (a second set of 8 real run
 6.61 dB below it (the floor 36.25 dB), the spectrum distance 0.112 → 0.116 (the floor's 0.029), the coverage distance
 0.0089 → 0.0084 (0.0041).
 
+**The smoke ring, `rft` (20 settings): it meets the rule, and is replaced.**
+
+| measure | current → `rft` | difference [95% interval] | margin | reading |
+|---|---|---|---|---|
+| tracking, the first frame (dB) | 25.20 → 28.14 | **+2.94 [+2.72, +3.16]** | -0.20 | better (a target) |
+| tracking at 1 s (dB) | 29.79 → 29.91 | **+0.11 [+0.01, +0.23]** | -0.20 | better |
+| tracking at 2 s (dB) | 27.29 → 27.25 | -0.05 [-0.12, +0.04] | -0.20 | tie |
+| detail spectrum distance | 0.705 → 0.681 | **-0.024 [-0.030, -0.018]** | +0.044 | better |
+| \|ln motion ratio\| (motion ratio) | 0.034 (0.990) → 0.042 (0.971) | +0.009 [+0.002, +0.015] | +0.021 | worse, within its margin |
+| coverage distance | 0.00142 → 0.00130 | **-0.00011 [-0.00018, -0.00005]** | +0.00029 | better |
+| emission distance | 0.00012 → 0.00009 | **-0.00004 [-0.00005, -0.00003]** | +0.0001 | better |
+| mean-frame PSNR (dB) | 41.45 → 41.50 | +0.05 [-0.02, +0.12] | -2.10 | tie (a target) |
+
+The renderer trained on from its own weights draws the ring's first frame 2.9 dB closer, follows a run a little better
+at 1 s, and draws its detail, cover and light closer to real through the run; its smoke changes a little less from frame
+to frame (the motion ratio 0.990 → 0.971 of the real runs'; the interval's worse end, +0.015, three quarters of its
+margin; study Q's fresh refit had +0.023 [+0.015, +0.030] on its validation). By study M's strict reading one interval
+lies wholly on the worse side (the motion). Distance to the floor: the mean frame 3.27 → 3.22 dB below it (the floor
+44.72 dB), the spectrum distance 0.705 → **0.681** (the floor's 0.017), the coverage distance 0.0014 → 0.0013 (0.0003).
+
 ## 5. What changed
 
 (Written when the study ends.)
