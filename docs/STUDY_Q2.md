@@ -298,6 +298,17 @@ Every measure that is not a target it improves passes its margin, if truly uncha
 probability 0.83): **N = 20**, at
 which the rule's form passes with probability 0.98 (`rft`) and 1.00 (`rfs`).
 
+**The avalanche** (the null 01:47 UTC; the rule 01:51; `s48` alone, §3). The null (the current file, study Q's `u30`,
+with fresh seeds) moves its spectrum distance at a setting by 0.035 (RMS), its motion by 21%, its coverage distance by
+0.012 and its mean frame by 2.20 dB: margins tracking -0.20 dB, spectrum **+0.0346**, |ln motion ratio| **+0.209**,
+coverage **+0.0118**, emission **+0.0001** (study K's), mean frame **-2.20 dB**. `s48` (805,951 bytes: 48 start points
+with their 64-pixel fine fields, against 16) on the probe: the same frames from a true state (tracking the same at every
+horizon); in endless play the mean frame **+2.23 dB [+1.18, +3.23]** (28.52 → 30.76 dB; a target), the spectrum
+distance -0.024 [-0.039, -0.011] (0.129 → 0.105) and the motion error -0.093 [-0.180, -0.009] (the motion ratio 1.27 →
+1.15) better, coverage a tie: it meets the rule's form. Every held measure passes its margin, if truly unchanged, with
+probability at least 0.99 at 30 settings by resampling and needs at most 24 in the normal form (the motion; at 20 it
+would need more): **N = 30**, at which the rule's form passes with probability 0.95.
+
 (The rest is filled in as the probe runs.)
 
 ### 4.7 Validation (the choice)
@@ -341,6 +352,17 @@ lies wholly on the worse side (the motion): reported, not deciding.
 
 **Frozen** before its test (cab84db): the data root's `q2_fix/models/smokering.nvfx` (read-only; 301,443 bytes, SHA-256
 `a36e5e385f249dff9df8aae6d8c7c61b0a0a3b573c6f49531df76caf5d18598d`), validated and tested by `nvfx_ordered_q2`.
+
+**The avalanche (30 settings): `s48` meets the rule and is chosen.** Tracking from a true state is the same frames (start
+points play no part there); in endless play its average picture is **+2.77 dB [+1.86, +3.70]** closer to a real run's
+(29.67 → 32.45 dB; a target), its detail **-0.019 [-0.039, -0.002]** (0.133 → 0.113), its motion error **-0.143
+[-0.234, -0.051]** and its coverage distance **-0.0041 [-0.0066, -0.0016]** (0.0093 → 0.0053) closer, emission a tie
+(+0.00001 [-0.00000, +0.00001]). Nothing is worse by any reading. Start points nearer the controls asked for, each with
+its own fine fields, give the cloud the size and place a run at those controls has, which the mean state did by moving
+a start (study Q: +0.84 dB) and the 48 starts do better, without the mean state's cost in detail.
+
+**Frozen** before its test (48cae3c): the data root's `q2_fix/models/avalanche.nvfx` (read-only; 805,951 bytes, SHA-256
+`e457d083dae15fef6b720110655500e7f37d7681307c697a5e05a351e26eaa0b`), validated and tested by `nvfx_ordered_q2`.
 
 ### 4.8 The test (once)
 
