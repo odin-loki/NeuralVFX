@@ -15,6 +15,7 @@
 #include <cmath>
 #include <cstdlib>
 #include <cstring>
+#include <functional>
 #include <map>
 #include <sstream>
 #include <string>
@@ -220,6 +221,305 @@ TEST(Manager, TrainedEffectsAreNvfxRender) {
   if (checked == 0) GTEST_SKIP() << "no trained effects under " << root;
 }
 
+// Drawn at half size (docs/MANAGER.md §2.10): a simulation at least half_px on screen is drawn at the level below its
+// level, and its picture is the runtime's bilinear 2x of the drawing: to the bit what an instance of the level's size
+// draws with nvfx_instance_set_upscale(NVFX_UPSCALE_BILINEAR), through shard changes, crossfades and warm-ups. With
+// NVFX_UPSCALE_OFF the picture is the drawing itself: an instance of half the size.
+void expect_half_like_render(bool loop, nvfx_upscale mode, nvfx_precision precision = NVFX_PRECISION_DEFAULT) {
+  const Effect e(tiny_effect(loop));
+  nvfx_manager_desc d = small_desc();
+  d.half_px = 100.f;
+  d.half_upscale = mode;
+  Mgr g(d);
+  int model = -1;
+  auto md = small_model(2.5f);
+  md.precision = precision;
+  ASSERT_EQ(nvfx_manager_add_model(g.m, e.fx, &md, &model), NVFX_OK);
+  const std::array<float, 3> c{0.45f, 0.55f, 0.6f};
+  const nvfx_handle h = spawn(g.m, model, 77, 120.f, c);  // a 128 px picture, above half_px on screen: drawn at 64
+  const int size = mode == NVFX_UPSCALE_OFF ? 64 : 128;
+  nvfx_instance* in = nullptr;
+  ASSERT_EQ(nvfx_instance_create(e.fx, size, &in), NVFX_OK);
+  ASSERT_EQ(nvfx_instance_set_precision(in, precision), NVFX_OK);
+  if (mode == NVFX_UPSCALE_BILINEAR) {
+    ASSERT_EQ(nvfx_instance_set_upscale(in, NVFX_UPSCALE_BILINEAR), NVFX_OK);
+  }
+  nvfx_instance_set_controls(in, c.data(), 3);
+  nvfx_instance_set_seed(in, 77);
+  nvfx_instance_set_drift(in, 2.5f);
+  Bytes ref(static_cast<std::size_t>(size) * static_cast<std::size_t>(size) * 4);
+  int frame = 0;
+  for (int t = 0; t < 200; ++t) {
+    ASSERT_EQ(nvfx_manager_tick(g.m, 1.0 / 30.0), NVFX_OK);
+    nvfx_manager_picture p;
+    ASSERT_EQ(nvfx_manager_get_picture(g.m, h, &p), NVFX_OK);
+    if (!p.rgba) continue;  // warming up
+    ASSERT_EQ(p.size, size);
+    ASSERT_EQ(p.lod_size, 64);
+    ASSERT_NE(p.flags & NVFX_PICTURE_HALF, 0);
+    nvfx_render(in, frame / 30.0, ref.data(), static_cast<std::size_t>(size) * 4);
+    ASSERT_EQ(std::memcmp(ref.data(), p.rgba, ref.size()), 0) << "frame " << frame;
+    ++frame;
+  }
+  EXPECT_GT(frame, 150);
+  nvfx_manager_stats st;
+  nvfx_manager_get_stats(g.m, &st);
+  EXPECT_EQ(st.half, 1);
+  EXPECT_EQ(st.lod[1][0], 1);  // counted by the size it is drawn at
+  nvfx_instance_free(in);
+}
+
+TEST(Manager, HalfSizeIsNvfxRenderWithTheBilinear2x) {
+  expect_half_like_render(true, NVFX_UPSCALE_BILINEAR);
+  expect_half_like_render(false, NVFX_UPSCALE_BILINEAR);
+  expect_half_like_render(true, NVFX_UPSCALE_BILINEAR, NVFX_PRECISION_INT8);
+}
+TEST(Manager, HalfSizeWithoutTheUpscaleIsTheDrawing) {
+  expect_half_like_render(true, NVFX_UPSCALE_OFF);
+  expect_half_like_render(false, NVFX_UPSCALE_OFF);
+}
+
+// The same on the project's trained effects (outside git; skipped without them): a 256 px picture drawn at 128 and
+// brought up by the bilinear 2x is an instance at 256 px with NVFX_UPSCALE_BILINEAR, frame for frame.
+TEST(Manager, HalfSizeTrainedEffectsAreNvfxRender) {
+  const char* env = std::getenv("NEURALVFX_DATA");
+  const std::string root = env ? env : "/root/nvfx-data";
+  int checked = 0;
+  for (const std::string file : {"v2/models/fire.nvfx", "v2/models/explosion.nvfx", "fx/models/d/steam.nvfx"}) {
+    nvfx_effect* fx = nullptr;
+    if (nvfx_effect_load((root + "/" + file).c_str(), &fx) != NVFX_OK) continue;
+    nvfx_manager_desc d = small_desc();
+    d.max_size = 256;
+    d.half_px = 256.f;
+    d.half_upscale = NVFX_UPSCALE_BILINEAR;
+    Mgr g(d);
+    int model = -1;
+    nvfx_manager_model_desc md;
+    nvfx_manager_model_desc_init(&md);
+    md.max_sims = 2;
+    md.shard_seconds = 2.5f;
+    ASSERT_EQ(nvfx_manager_add_model(g.m, fx, &md, &model), NVFX_OK);
+    const std::array<float, 3> c{0.62f, 0.31f, 0.55f};
+    const nvfx_handle h = spawn(g.m, model, 4242, 300.f, c);
+    nvfx_instance* in = nullptr;
+    ASSERT_EQ(nvfx_instance_create(fx, 256, &in), NVFX_OK);
+    ASSERT_EQ(nvfx_instance_set_upscale(in, NVFX_UPSCALE_BILINEAR), NVFX_OK);
+    nvfx_instance_set_controls(in, c.data(), 3);
+    nvfx_instance_set_seed(in, 4242);
+    nvfx_instance_set_drift(in, 2.5f);
+    Bytes ref(256 * 256 * 4);
+    int frame = 0;
+    for (int t = 0; t < 100; ++t) {
+      ASSERT_EQ(nvfx_manager_tick(g.m, 1.0 / 30.0), NVFX_OK);
+      nvfx_manager_picture p;
+      ASSERT_EQ(nvfx_manager_get_picture(g.m, h, &p), NVFX_OK);
+      if (!p.rgba) continue;
+      ASSERT_EQ(p.size, 256);
+      ASSERT_EQ(p.lod_size, 128);
+      nvfx_render(in, frame / 30.0, ref.data(), 256 * 4);
+      ASSERT_EQ(std::memcmp(ref.data(), p.rgba, ref.size()), 0) << file << " frame " << frame;
+      ++frame;
+    }
+    EXPECT_GT(frame, 70);
+    nvfx_instance_free(in);
+    nvfx_effect_free(fx);
+    ++checked;
+  }
+  if (checked == 0) GTEST_SKIP() << "no trained effects under " << root;
+}
+
+// The threshold follows the size on screen with hysteresis: a size wobbling just around it does not switch, a size
+// well below it draws at full size again (after min_dwell, the budget allowing), and above it at half size at once. The
+// picture keeps its level's size throughout (the bilinear 2x).
+TEST(Manager, HalfSizeFollowsTheScreenWithHysteresis) {
+  const Effect e(tiny_effect(true));
+  nvfx_manager_desc d = small_desc();
+  d.half_px = 100.f;
+  d.half_upscale = NVFX_UPSCALE_BILINEAR;  // the picture keeps its level's size
+  d.min_dwell = 0.2f;
+  Mgr g(d);
+  int model = -1;
+  const auto md = small_model();
+  ASSERT_EQ(nvfx_manager_add_model(g.m, e.fx, &md, &model), NVFX_OK);
+  const nvfx_handle h = spawn(g.m, model, 5, 120.f);
+  int last = -1;  // drawn at half size in the last picture (across the runs)
+  const auto run = [&](int ticks, auto px_of) {
+    int switches = 0;
+    nvfx_manager_picture p{};
+    for (int t = 0; t < ticks; ++t) {
+      nvfx_manager_set_screen_size(g.m, h, px_of(t), 1);
+      EXPECT_EQ(nvfx_manager_tick(g.m, 1.0 / 60.0), NVFX_OK);
+      nvfx_manager_get_picture(g.m, h, &p);
+      if (!p.rgba) continue;
+      EXPECT_EQ(p.size, 128);
+      const int half = (p.flags & NVFX_PICTURE_HALF) ? 1 : 0;
+      if (last >= 0 && half != last) ++switches;
+      last = half;
+    }
+    return std::pair{switches, p};
+  };
+  auto [sw0, p0] = run(60, [](int) { return 120.f; });
+  EXPECT_NE(p0.flags & NVFX_PICTURE_HALF, 0);
+  EXPECT_EQ(p0.lod_size, 64);
+  // around the threshold, within the hysteresis below it (85 to 100 keeps it on): no switch
+  auto [sw1, p1] = run(240, [](int t) { return 100.f * (1.f + 0.1f * std::sin(0.7f * static_cast<float>(t))); });
+  EXPECT_EQ(sw1, 0);
+  EXPECT_NE(p1.flags & NVFX_PICTURE_HALF, 0);
+  // well below: its full size again (the picture's level stays 128 px)
+  auto [sw2, p2] = run(120, [](int) { return 80.f; });
+  EXPECT_EQ(sw2, 1);
+  EXPECT_EQ(p2.flags & NVFX_PICTURE_HALF, 0);
+  EXPECT_EQ(p2.lod_size, 128);
+  // above it again: at once
+  auto [sw3, p3] = run(4, [](int) { return 130.f; });
+  EXPECT_EQ(sw3, 1);
+  EXPECT_NE(p3.flags & NVFX_PICTURE_HALF, 0);
+  EXPECT_EQ(p3.lod_size, 64);
+}
+
+// Never for a simulation locked to a level, nor for a model that opts out (half_px 0); a model's own threshold; a share
+// of the viewport's height, once there is a camera; the plan counts a drawing at half size at the level below's cost.
+TEST(Manager, HalfSizeLocksModelsShareAndCost) {
+  const Effect e(tiny_effect(true));
+  nvfx_manager_desc d = small_desc();
+  d.half_px = 100.f;
+  Mgr g(d);
+  int follows = -1, never = -1, own = -1;
+  auto md = small_model();
+  ASSERT_EQ(nvfx_manager_add_model(g.m, e.fx, &md, &follows), NVFX_OK);
+  md.half_px = 0.f;
+  ASSERT_EQ(nvfx_manager_add_model(g.m, e.fx, &md, &never), NVFX_OK);
+  md.half_px = 60.f;
+  ASSERT_EQ(nvfx_manager_add_model(g.m, e.fx, &md, &own), NVFX_OK);
+  const nvfx_handle a = spawn(g.m, follows, 1, 120.f), locked = spawn(g.m, follows, 2, 120.f), b = spawn(g.m, never, 3, 120.f), c = spawn(g.m, own, 4, 70.f),
+                    small = spawn(g.m, follows, 6, 70.f);
+  ASSERT_EQ(nvfx_manager_set_lod_lock(g.m, locked, 128, 1), NVFX_OK);
+  for (int t = 0; t < 30; ++t) ASSERT_EQ(nvfx_manager_tick(g.m, 1.0 / 60.0), NVFX_OK);
+  const auto half = [&](nvfx_handle h) {
+    nvfx_manager_picture p;
+    EXPECT_EQ(nvfx_manager_get_picture(g.m, h, &p), NVFX_OK);
+    EXPECT_NE(p.rgba, nullptr);
+    return std::pair{(p.flags & NVFX_PICTURE_HALF) != 0, p.lod_size};
+  };
+  EXPECT_EQ(half(a), std::pair(true, 64));
+  EXPECT_EQ(half(locked), std::pair(false, 128));
+  EXPECT_EQ(half(b), std::pair(false, 128));
+  EXPECT_EQ(half(c), std::pair(true, 64));       // its own threshold, 60
+  EXPECT_EQ(half(small), std::pair(false, 128));  // 70 < the manager's 100
+  nvfx_manager_stats st;
+  nvfx_manager_get_stats(g.m, &st);
+  EXPECT_EQ(st.half, 2);
+  // a share of the viewport's height: 0.2 of 360 px is 72, so the 70 px one is not, until the viewport is 400 px high
+  nvfx_manager_desc ds = small_desc();
+  ds.half_px = 0.f;
+  ds.half_share = 0.2f;
+  Mgr gs(ds);
+  int ms = -1;
+  ASSERT_EQ(nvfx_manager_add_model(gs.m, e.fx, nullptr, &ms), NVFX_OK);
+  const nvfx_handle q = spawn(gs.m, ms, 7, 75.f), r = spawn(gs.m, ms, 8, 70.f);
+  const auto half_s = [&](nvfx_handle h) {
+    nvfx_manager_picture p;
+    nvfx_manager_get_picture(gs.m, h, &p);
+    return (p.flags & NVFX_PICTURE_HALF) != 0;
+  };
+  for (int t = 0; t < 20; ++t) ASSERT_EQ(nvfx_manager_tick(gs.m, 1.0 / 60.0), NVFX_OK);
+  EXPECT_FALSE(half_s(q));  // no camera: no viewport to take a share of
+  const float pos[3] = {0.f, 0.f, 0.f}, fwd[3] = {0.f, 0.f, 1.f}, up[3] = {0.f, 1.f, 0.f};
+  ASSERT_EQ(nvfx_manager_set_camera(gs.m, pos, fwd, up, 1.f, 640.f, 360.f), NVFX_OK);
+  for (int t = 0; t < 20; ++t) ASSERT_EQ(nvfx_manager_tick(gs.m, 1.0 / 60.0), NVFX_OK);
+  EXPECT_TRUE(half_s(q));
+  EXPECT_FALSE(half_s(r));
+  // the plan: four 128 px pictures drawn at 64 cost what four drawings at 64 do, and the 2x
+  double off_plan = 0.0;
+  for (const bool on : {false, true}) {
+    nvfx_manager_desc dc = small_desc();
+    dc.half_px = on ? 100.f : 0.f;
+    dc.half_upscale = NVFX_UPSCALE_BILINEAR;  // the 2x counted too
+    Mgr gc(dc);
+    int mc = -1;
+    ASSERT_EQ(nvfx_manager_add_model(gc.m, e.fx, nullptr, &mc), NVFX_OK);
+    ASSERT_EQ(nvfx_manager_set_cost(gc.m, mc, 64, 0.1f, 0.1f), NVFX_OK);
+    ASSERT_EQ(nvfx_manager_set_cost(gc.m, mc, 128, 0.4f, 0.4f), NVFX_OK);
+    for (int i = 0; i < 4; ++i) spawn(gc.m, mc, static_cast<std::uint64_t>(20 + i), 120.f);
+    for (int t = 0; t < 10; ++t) ASSERT_EQ(nvfx_manager_tick(gc.m, 1.0 / 60.0), NVFX_OK);
+    nvfx_manager_get_stats(gc.m, &st);
+    if (!on) {
+      off_plan = st.plan_ms;
+      EXPECT_EQ(st.half, 0);
+    } else {
+      EXPECT_EQ(st.half, 4);
+      EXPECT_LT(st.plan_ms, 0.3 * off_plan);
+      EXPECT_GT(st.plan_ms, 0.25 * off_plan);
+    }
+  }
+}
+
+// Under a short budget a simulation drawn at half size goes down with its drawing (a 128 px picture drawn at 64, then a
+// 64 px one drawn at 32), within the budget; with room again it comes back; drawing at full size again waits for room.
+TEST(Manager, HalfSizeUnderAShortBudget) {
+  const Effect e(tiny_effect(true));
+  nvfx_manager_desc d = small_desc();
+  d.half_px = 100.f;
+  d.half_upscale = NVFX_UPSCALE_BILINEAR;
+  d.proxies = 0;
+  d.min_dwell = 0.1f;
+  d.budget_ms = 0.45f;
+  Mgr g(d);
+  int model = -1;
+  const auto md = small_model();
+  ASSERT_EQ(nvfx_manager_add_model(g.m, e.fx, &md, &model), NVFX_OK);
+  for (const auto& [size, step] : {std::pair{32, 0.05f}, std::pair{64, 0.2f}, std::pair{128, 0.8f}}) ASSERT_EQ(nvfx_manager_set_cost(g.m, model, size, step, step), NVFX_OK);
+  std::vector<nvfx_handle> hs;
+  for (int i = 0; i < 4; ++i) hs.push_back(spawn(g.m, model, static_cast<std::uint64_t>(40 + i), 120.f));
+  nvfx_manager_set_priority(g.m, hs[0], 10.f);
+  const auto run = [&](int ticks) {
+    nvfx_manager_stats st{};
+    for (int t = 0; t < ticks; ++t) {
+      EXPECT_EQ(nvfx_manager_tick(g.m, 1.0 / 60.0), NVFX_OK);
+      nvfx_manager_get_stats(g.m, &st);
+    }
+    return st;
+  };
+  const auto pic = [&](nvfx_handle h) {
+    nvfx_manager_picture p;
+    EXPECT_EQ(nvfx_manager_get_picture(g.m, h, &p), NVFX_OK);
+    return p;
+  };
+  nvfx_manager_stats st = run(90);
+  EXPECT_LE(st.plan_ms, 0.45 * 1.01);
+  EXPECT_EQ(st.half, 4);  // every one is still drawn at half size
+  const nvfx_manager_picture top = pic(hs[0]);
+  EXPECT_EQ(top.lod_size, 64);  // the important one keeps its 128 px picture drawn at 64
+  EXPECT_EQ(top.size, 128);
+  int lowered = 0;
+  for (const nvfx_handle h : hs) {
+    const nvfx_manager_picture p = pic(h);
+    EXPECT_NE(p.flags & NVFX_PICTURE_HALF, 0);
+    EXPECT_EQ(p.size, 2 * p.lod_size);
+    lowered += p.lod_size == 32 ? 1 : 0;
+  }
+  EXPECT_GT(lowered, 0);  // some went down to a 64 px picture drawn at 32
+  // room again: back up, drawn at half size
+  ASSERT_EQ(nvfx_manager_set_budget(g.m, 1000.f), NVFX_OK);
+  st = run(240);
+  EXPECT_EQ(st.half, 4);
+  for (const nvfx_handle h : hs) EXPECT_EQ(pic(h).lod_size, 64);
+  // smaller on screen, with a short budget again: drawing them at full size would not fit, so they wait at half size
+  ASSERT_EQ(nvfx_manager_set_budget(g.m, 0.2f), NVFX_OK);
+  for (const nvfx_handle h : hs) nvfx_manager_set_screen_size(g.m, h, 80.f, 1);
+  st = run(60);
+  for (const nvfx_handle h : hs) EXPECT_LE(pic(h).lod_size, 64);
+  EXPECT_LT(st.lod[2][0] + st.lod[2][1] + st.lod[2][2] + st.lod[2][3], 4);
+  // and with room they are drawn at full size, one rung a tick
+  ASSERT_EQ(nvfx_manager_set_budget(g.m, 1000.f), NVFX_OK);
+  st = run(240);
+  EXPECT_EQ(st.half, 0);
+  for (const nvfx_handle h : hs) {
+    EXPECT_EQ(pic(h).lod_size, 128);
+    EXPECT_EQ(pic(h).flags & NVFX_PICTURE_HALF, 0);
+  }
+}
+
 TEST(Manager, FixedLevelIsNvfxRenderLooping) { expect_like_render(true, 64); }
 TEST(Manager, FixedLevelIsNvfxRenderOneShot) { expect_like_render(false, 32); }
 TEST(Manager, FixedLevelIsNvfxRender128) { expect_like_render(true, 128); }
@@ -232,12 +532,14 @@ TEST(Manager, FixedLevelIsNvfxRenderAtInt8) {
 // pauses, spawns and stops, controls changed on shared and own simulations) gives the same pictures on 1 and 3 threads
 // and with the engine running the jobs on two threads of its own.
 struct Seen {
-  int proxied = 0, skipped = 0, paused = 0, interpolated = 0, shared = 0, levels = 0;
+  int proxied = 0, skipped = 0, paused = 0, interpolated = 0, shared = 0, levels = 0, half = 0;
 };
 
-std::vector<std::uint64_t> busy_scene(int threads, bool external, Seen* seen = nullptr) {
+std::vector<std::uint64_t> busy_scene(int threads, bool external, Seen* seen = nullptr, float half_px = 0.f, nvfx_upscale half_upscale = NVFX_UPSCALE_BILINEAR) {
   const Effect loopfx(tiny_effect(true)), shotfx(tiny_effect(false, 5));
   nvfx_manager_desc d = small_desc(external ? 0 : threads);
+  d.half_px = half_px;
+  d.half_upscale = half_upscale;
   d.job_slots = 2;
   d.budget_ms = 1.2f;
   d.proxy_dwell = 0.3f;
@@ -302,6 +604,7 @@ std::vector<std::uint64_t> busy_scene(int threads, bool external, Seen* seen = n
         for (const int n : row) levels += n > 0 ? 1 : 0;
       }
       seen->levels = std::max(seen->levels, levels);
+      seen->half = std::max(seen->half, st.half);
     }
   }
   return out;
@@ -318,6 +621,21 @@ TEST(Manager, SamePicturesOnAnyNumberOfThreads) {
   EXPECT_GE(seen.levels, 3);
   EXPECT_EQ(one, busy_scene(3, false));
   EXPECT_EQ(one, busy_scene(0, true));
+}
+
+// The same with large simulations drawn at half size (with the bilinear 2x and without it): what is drawn at half size
+// depends only on the sizes given, so the pictures are the same on any number of threads.
+TEST(Manager, SamePicturesOnAnyNumberOfThreadsAtHalfSize) {
+  for (const nvfx_upscale mode : {NVFX_UPSCALE_BILINEAR, NVFX_UPSCALE_OFF}) {
+    Seen seen;
+    const auto one = busy_scene(1, false, &seen, 70.f, mode);
+    EXPECT_GT(seen.half, 0);
+    EXPECT_GT(seen.proxied, 0);
+    EXPECT_GT(seen.skipped, 0);
+    EXPECT_EQ(one, busy_scene(3, false, nullptr, 70.f, mode));
+    EXPECT_EQ(one, busy_scene(0, true, nullptr, 70.f, mode));
+    EXPECT_NE(one, busy_scene(1, false));  // and it does draw something else than the policy off
+  }
 }
 
 // RolloutRunner::transfer_from: the coarse state continues exactly at another size.
@@ -621,6 +939,25 @@ TEST(Manager, ApiErrors) {
   EXPECT_EQ(nvfx_manager_create(&d, &m), NVFX_ERROR_ARGUMENT);
   EXPECT_EQ(nvfx_manager_create(nullptr, &m), NVFX_OK);  // defaults
   nvfx_manager_free(m);
+  for (const auto& bad : std::vector<std::function<void(nvfx_manager_desc&)>>{
+           [](nvfx_manager_desc& x) { x.half_upscale = NVFX_UPSCALE_LEARNED; },  // experimental: never the manager's
+           [](nvfx_manager_desc& x) { x.half_upscale = static_cast<nvfx_upscale>(3); },
+           [](nvfx_manager_desc& x) { x.half_px = -1.f; },
+           [](nvfx_manager_desc& x) { x.half_px = std::nanf(""); },
+           [](nvfx_manager_desc& x) { x.half_share = -0.5f; }}) {
+    nvfx_manager_desc x = small_desc();
+    bad(x);
+    EXPECT_EQ(nvfx_manager_create(&x, &m), NVFX_ERROR_ARGUMENT);
+  }
+  {
+    Mgr ok(small_desc());
+    nvfx_manager_model_desc md;
+    nvfx_manager_model_desc_init(&md);
+    EXPECT_EQ(md.half_px, -1.f);  // the manager's thresholds
+    md.half_px = std::nanf("");
+    int mi = -1;
+    EXPECT_EQ(nvfx_manager_add_model(ok.m, e.fx, &md, &mi), NVFX_ERROR_ARGUMENT);
+  }
   Mgr g(small_desc());
   int model = -1;
   EXPECT_EQ(nvfx_manager_add_model(g.m, nullptr, nullptr, &model), NVFX_ERROR_ARGUMENT);

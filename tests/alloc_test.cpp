@@ -975,8 +975,9 @@ int run_water() {
 
 // The effect manager: everything is made by nvfx_manager_create and nvfx_manager_add_model; 400 ticks at 60 Hz of a
 // crowd of two looping effects and a one-shot, with every call a game makes between ticks, allocate nothing. Run with
-// its own threads (2), and with the engine running the jobs (here both job slots on the calling thread).
-int run_manager(bool external) {
+// its own threads (2), and with the engine running the jobs (here both job slots on the calling thread). With half_px,
+// the large ones are drawn at half size (docs/MANAGER.md §2.10), with the bilinear 2x or without it.
+int run_manager(bool external, float half_px = 0.f, nvfx_upscale half_upscale = NVFX_UPSCALE_BILINEAR) {
   std::string loop_bytes, shot_bytes;
   for (const bool loop : {true, false}) {
     nfx::rollout::Hyper h;
@@ -1023,6 +1024,8 @@ int run_manager(bool external) {
   d.park_after = 0.3f;
   d.cull_after = 2.f;
   d.interp = NVFX_INTERP_MOTION;
+  d.half_px = half_px;
+  d.half_upscale = half_upscale;
   nvfx_manager* g = nullptr;
   if (nvfx_manager_create(&d, &g) != NVFX_OK) return 1;
   nvfx_manager_model_desc md;
@@ -1085,22 +1088,25 @@ int run_manager(bool external) {
   tick(0);  // the first tick outside the count
   g_allocations = 0;
   g_counting = true;
-  int proxied = 0, skipped = 0, paused = 0, interpolated = 0;
+  int proxied = 0, skipped = 0, paused = 0, interpolated = 0, half = 0;
   for (int t = 1; t < 400; ++t) {
     const nvfx_manager_stats st = tick(t);
     proxied = std::max(proxied, st.proxied);
     skipped += st.skipped;
     paused = std::max(paused, st.sims_paused);
     interpolated += st.interpolated;
+    half = std::max(half, st.half);
   }
   g_counting = false;
   const long a = g_allocations.load();
-  std::printf("effect manager, %s: %ld allocations in 399 ticks (most proxied %d, skipped updates %d, most paused %d, interpolated pictures %d)\n",
-              external ? "jobs on the engine's thread" : "2 threads", a, proxied, skipped, paused, interpolated);
+  std::printf("effect manager, %s%s: %ld allocations in 399 ticks (most proxied %d, skipped updates %d, most paused %d, interpolated pictures %d, "
+              "most drawn at half size %d)\n",
+              external ? "jobs on the engine's thread" : "2 threads", half_px <= 0.f ? "" : half_upscale == NVFX_UPSCALE_OFF ? ", half size without the 2x" : ", half size", a,
+              proxied, skipped, paused, interpolated, half);
   nvfx_manager_free(g);
   nvfx_effect_free(fl);
   nvfx_effect_free(fs);
-  return a == 0 && proxied > 0 && interpolated > 0 ? 0 : 1;
+  return a == 0 && proxied > 0 && interpolated > 0 && (half_px <= 0.f || half > 0) ? 0 : 1;
 }
 
 }  // namespace
@@ -1233,6 +1239,7 @@ int main() {
   failures += run_multi(128, false) + run_multi(64, true) + run_multi(128, true);                // multi-level models (study F4), int8
   failures += run_multi(128, false, NVFX_PRECISION_FLOAT) + run_multi(64, true, NVFX_PRECISION_FLOAT);  // and float
   failures += run_manager(false) + run_manager(true);                                                    // the effect manager
+  failures += run_manager(false, 40.f) + run_manager(true, 40.f) + run_manager(false, 40.f, NVFX_UPSCALE_OFF);  // drawn at half size
   failures += run_volume(1) + run_volume(3);                                                             // 3D volumes (study N)
   std::printf("%s\n", failures ? "FAILED: nvfx_render allocated" : "ok: no allocation per frame");
   return failures ? 1 : 0;

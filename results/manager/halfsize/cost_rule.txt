@@ -1,0 +1,20 @@
+# nvfx_study_p cost --net none, label rule (256 px) and ratios (64, 128 px); the first run after QUIET_DONE (21:19 UTC), another agent's niced jobs running (load 4 to 7): provisional
+ 21:19:03 up  3:42,  0 user,  load average: 4.15, 1.64, 1.18
+## crowd set
+     fire 256: N 1.911 ms, H/N 0.341 (median 0.313) [0.320, 0.365], B/N 0.378 (median 0.361) [0.360, 0.398]
+    smoke 256: N 1.487 ms, H/N 0.468 (median 0.419) [0.437, 0.501], B/N 0.514 (median 0.467) [0.481, 0.550]
+    steam 256: N 1.751 ms, H/N 0.347 (median 0.332) [0.324, 0.370], B/N 0.392 (median 0.391) [0.370, 0.413]
+explosion 256: N 1.325 ms, H/N 0.407 (median 0.403) [0.392, 0.423], B/N 0.467 (median 0.453) [0.445, 0.491]
+## library set
+     fire 256: N 2.122 ms, H/N 0.356 (median 0.337) [0.329, 0.386], B/N 0.385 (median 0.363) [0.360, 0.411]
+explosion 256: N 1.455 ms, H/N 0.395 (median 0.385) [0.374, 0.416], B/N 0.451 (median 0.444) [0.426, 0.477]
+    magic 256: N 1.245 ms, H/N 0.551 (median 0.543) [0.537, 0.566], B/N 0.611 (median 0.609) [0.596, 0.627]
+## the 2x's share at 64 and 128 px (crowd set)
+     fire 64: N 0.432 ms, H/N 0.839 (median 0.833) [0.805, 0.875], B/N 0.890 (median 0.849) [0.833, 0.964]
+     fire 128: N 0.723 ms, H/N 0.574 (median 0.581) [0.543, 0.604], B/N 0.581 (median 0.571) [0.554, 0.609]
+    smoke 64: N 0.371 ms, H/N 0.791 (median 0.791) [0.764, 0.817], B/N 0.792 (median 0.811) [0.764, 0.820]
+    smoke 128: N 0.582 ms, H/N 0.590 (median 0.574) [0.546, 0.652], B/N 0.635 (median 0.619) [0.580, 0.709]
+    steam 64: N 0.406 ms, H/N 0.797 (median 0.813) [0.775, 0.817], B/N 0.852 (median 0.836) [0.833, 0.875]
+    steam 128: N 0.624 ms, H/N 0.582 (median 0.611) [0.556, 0.608], B/N 0.612 (median 0.624) [0.582, 0.642]
+explosion 64: N 0.343 ms, H/N 0.829 (median 0.833) [0.808, 0.850], B/N 0.844 (median 0.866) [0.820, 0.866]
+explosion 128: N 0.613 ms, H/N 0.576 (median 0.552) [0.552, 0.602], B/N 0.596 (median 0.572) [0.571, 0.621]

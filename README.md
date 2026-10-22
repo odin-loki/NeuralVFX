@@ -136,7 +136,11 @@ From [docs/REPORT.md](docs/REPORT.md), measured on simulated fire, smoke and exp
   the null's margins of native against the simulator on every measure for all six effects tried. A small learned 2x with
   seeded micro-detail, tested once by a rule committed first, **did not pass**: it beat bilinear on PSNR, SSIM and the
   high band together for none of the six, and cost more than 0.55 of native for two (three on a quiet machine, REPORT.md
-  §17.4). Both ship as an experimental opt-in (`nvfx_instance_set_upscale`, NVFX_VERSION 7).
+  §17.4). Both ship as an experimental opt-in (`nvfx_instance_set_upscale`, NVFX_VERSION 7). **The effect manager**
+  draws large sprites at half size by their size on screen (`nvfx_manager_desc.half_px`, NVFX_VERSION 8, REPORT §22):
+  on 20 held-out settings it stays within the null's margins of full size against the simulator for all seven effects
+  measured at 256 px, but magic saves too little (0.54 of full size against the 0.5 its rule asked), so it is off by
+  default.
 - **Memory, against production block compression:** for equal quality, a network per effect clip needs **2.4 to
   4.3 times less memory than a BC7 flipbook** at 8 bits, and 7.5 times less [4.2, 8.3] with features trained for 4
   bits. **Against ASTC** (mobile GPUs; 8x8 to 12x12 blocks hold every frame at full size in 121 to 256 KB) the ratios
@@ -210,7 +214,7 @@ Ubuntu 24.04: `g++-14`, CMake 3.25+, Ninja, `libgtest-dev`, `zlib1g-dev` (and `f
 ```sh
 cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_COMPILER=g++-14
 cmake --build build
-ctest --test-dir build                     # 547 tests: sim, metrics, codecs, gradients, runtime parity, composition, scene scripts, field effects, trails, engine layers, weather, the weather director, procedural sky, combat and magic elements, context mixing, denoiser, lossless coder, low-bit, vector-quantised, sparse and multi-level features, video codecs, BC7 and ASTC flipbooks, allocation, C API for effects and scenes, the effect library, the effect manager, effect packs and the C++ wrapper, start points from footage, 3D volumes (study N's simulator, renderer, model, gradients and C API; study N2's ambient edges, schedules and long stage), effects drawn at half size and upscaled (study P), the FUSE sample integration (its self-test, and the headless demo with the models), the vectorised 3D detail layer against its reference, study R's smoke (heat and soot carried in flux form, the plume's buoyancy flux kept up the box, warm smoke's optics, and the shipped smoke through the volume API)
+ctest --test-dir build                     # 554 tests: sim, metrics, codecs, gradients, runtime parity, composition, scene scripts, field effects, trails, engine layers, weather, the weather director, procedural sky, combat and magic elements, context mixing, denoiser, lossless coder, low-bit, vector-quantised, sparse and multi-level features, video codecs, BC7 and ASTC flipbooks, allocation, C API for effects and scenes, the effect library, the effect manager (and its large effects drawn at half size), effect packs and the C++ wrapper, start points from footage, 3D volumes (study N's simulator, renderer, model, gradients and C API; study N2's ambient edges, schedules and long stage), effects drawn at half size and upscaled (study P), the FUSE sample integration (its self-test, and the headless demo with the models), the vectorised 3D detail layer against its reference, study R's smoke (heat and soot carried in flux form, the plume's buoyancy flux kept up the box, warm smoke's optics, and the shipped smoke through the volume API)
 ```
 
 Options: `NEURALFX_BUILD_VIEWER` (GLFW + OpenGL; fetches Dear ImGui), `NEURALFX_BUILD_SHARED` (libnvfx.so for engines),

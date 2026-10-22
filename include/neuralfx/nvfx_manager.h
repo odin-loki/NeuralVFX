@@ -5,7 +5,8 @@
  * simulations update, at what level of detail (picture size 32, 64, 128 or 256 px; updates at 30, 15, 10 or 7.5 Hz)
  * and on which thread; the frames between updates are drawn by temporal interpolation. Copies with the same effect,
  * controls and seed share one simulation (optionally offset in time); offscreen simulations pause and resume warm;
- * under a tight budget unimportant looping instances are shown from shared proxy simulations.
+ * under a tight budget unimportant looping instances are shown from shared proxy simulations; simulations large on screen
+ * can be drawn at the level below theirs and brought up by the bilinear 2x (half_px, docs/MANAGER.md §2.10).
  *
  * Determinism: every decision depends only on the calls made (sizes, priorities, the tick's dt) and the cost model
  * (nvfx_manager_set_cost), never on measured time, and a simulation's frames do not depend on which thread computes
@@ -24,7 +25,7 @@
 extern "C" {
 #endif
 
-#define NVFX_MANAGER_VERSION 1
+#define NVFX_MANAGER_VERSION 2 /* 2: drawn at half size where it pays (half_px, half_share, half_upscale; NVFX_VERSION 8) */
 
 typedef struct nvfx_manager nvfx_manager;
 typedef uint32_t nvfx_handle; /* an instance; 0 is never a valid handle, and a stopped instance's handle is not reused */
@@ -60,6 +61,22 @@ typedef struct nvfx_manager_desc {
   int proxies;          /* 1 (default): unimportant looping instances may be shown from shared proxy simulations */
   float proxy_dwell;    /* seconds an instance stays a proxy (or its own) before switching back (default 2) */
   uint64_t seed;        /* phases of the simulations' updates and proxies' time offsets (default 1) */
+  /* Drawn at half size where it pays (docs/MANAGER.md §2.10, docs/REPORT.md §22). A simulation whose instances are at
+     least half_px pixels on screen, or half_share of the viewport's height (with nvfx_manager_set_camera), is drawn at the
+     level below its level (its detail layer and renderer do a quarter of the work: a 256 px picture is drawn at 128),
+     and the bilinear 2x brings it back (half_upscale). Once on, it stays on until the size falls below the threshold by
+     `hysteresis`; turning it off is an upward change (it waits for the budget and min_dwell). Simulations locked to a
+     level (nvfx_manager_set_lod_lock) and proxies are never drawn at half size; a model can take its own threshold
+     (nvfx_manager_model_desc.half_px). Both 0: never. Defaults: docs/MANAGER.md §2.10. */
+  float half_px;
+  float half_share;
+  nvfx_upscale half_upscale; /* who does the bilinear 2x. NVFX_UPSCALE_OFF (default): the engine's sampler: the picture is
+                                the half-size drawing (size is half the level's, NVFX_PICTURE_HALF set), which the engine
+                                draws larger as it stretches every picture to its sprite (no CPU for the 2x, a quarter of
+                                the upload). NVFX_UPSCALE_BILINEAR: the manager, in the simulation's job (study P's 2x, the
+                                runtime's: what nvfx_instance_set_upscale draws), so the picture has its level's size.
+                                NVFX_UPSCALE_LEARNED is refused (NVFX_ERROR_ARGUMENT): experimental, it did not pass its
+                                rule (docs/STUDY_P.md), and the manager never chooses it */
 } nvfx_manager_desc;
 
 NVFX_API void nvfx_manager_desc_init(nvfx_manager_desc* desc);
@@ -87,6 +104,9 @@ typedef struct nvfx_manager_model_desc {
   int precision;      /* its simulations' nvfx_precision, as nvfx_instance_set_precision's (default 0: the runtime's;
                          NVFX_PRECISION_INT8: the stepper's convolutions in 8-bit integers, docs/REPORT.md §13). The
                          planner's default costs are float's: nvfx_manager_calibrate measures the model as it runs */
+  float half_px;      /* drawn at half size where it pays (nvfx_manager_desc.half_px): below 0 (default -1), the
+                         manager's thresholds; 0, never for this effect; above 0, this effect's own threshold in pixels on
+                         screen (the manager's half_share is then not used for it) */
 } nvfx_manager_model_desc;
 
 NVFX_API void nvfx_manager_model_desc_init(nvfx_manager_model_desc* desc);
@@ -135,7 +155,7 @@ NVFX_API nvfx_status nvfx_manager_set_position(nvfx_manager* manager, nvfx_handl
 NVFX_API nvfx_status nvfx_manager_set_screen_size(nvfx_manager* manager, nvfx_handle instance, float pixels, int visible);
 NVFX_API nvfx_status nvfx_manager_set_priority(nvfx_manager* manager, nvfx_handle instance, float priority);
 /* Pins the instance's simulation at a size (32 to 256) and an update every rate_div frames (1 to 4: 30 to 7.5 Hz),
- * whatever the budget (0, 0: free again). */
+ * whatever the budget (0, 0: free again). A locked simulation is drawn at that size, never at half size (half_px). */
 NVFX_API nvfx_status nvfx_manager_set_lod_lock(nvfx_manager* manager, nvfx_handle instance, int size, int rate_div);
 
 /* Ticks ---------------------------------------------------------------------------------------------------------- */
@@ -155,14 +175,16 @@ enum {
   NVFX_PICTURE_HELD = 8,         /* an update was due and waited (budget), or the instance is paused */
   NVFX_PICTURE_FADING = 16,      /* crossfading from a previous source */
   NVFX_PICTURE_FINISHED = 32,    /* a one-shot effect has reached its last frame */
-  NVFX_PICTURE_NEW = 64          /* the pixels changed in this tick */
+  NVFX_PICTURE_NEW = 64,         /* the pixels changed in this tick */
+  NVFX_PICTURE_HALF = 128        /* the simulation is drawn at half size (nvfx_manager_desc.half_px): lod_size is the
+                                    drawing's size, and size the same (NVFX_UPSCALE_OFF) or twice it (BILINEAR) */
 };
 
 typedef struct nvfx_manager_picture {
   const uint8_t* rgba; /* NULL until the instance's first picture, or while it is culled */
   int size;            /* side in pixels */
   size_t stride;       /* bytes per row */
-  int lod_size;        /* the simulation's picture size */
+  int lod_size;        /* the simulation's picture size (drawn at half size: the drawing's, NVFX_PICTURE_HALF) */
   float lod_rate_hz;   /* the simulation's updates per second (0 while paused) */
   int flags;           /* NVFX_PICTURE_* */
   double effect_time;  /* seconds of the effect shown */
@@ -188,9 +210,10 @@ typedef struct nvfx_manager_stats {
   int shared_viewers;      /* instances showing a simulation another instance also shows */
   int proxied;             /* instances shown from proxies */
   int steps, renders;      /* simulation steps and keyframe pictures in the tick */
-  int lod[4][4];           /* simulations per [size 32, 64, 128, 256][rate 30, 15, 10, 7.5 Hz] */
+  int lod[4][4];           /* simulations per [size 32, 64, 128, 256][rate 30, 15, 10, 7.5 Hz], by the size drawn at */
   size_t memory_bytes;     /* what the manager allocated (simulations, buffers, threads' scratch) */
   int threads;
+  int half;                /* simulations drawn at half size (not paused) */
 } nvfx_manager_stats;
 
 NVFX_API nvfx_status nvfx_manager_get_stats(const nvfx_manager* manager, nvfx_manager_stats* out);
