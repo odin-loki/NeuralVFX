@@ -1,6 +1,7 @@
 # Study Q2: study Q's leftovers, fixed and measured
 
-Status: **planned** (21 October 2026). Audience: dev, research, artists. The plan of the model changes and the form of
+Status: **under way, resumable** (22 October 2026: three models replaced; the geyser, heavy gas and the mushroom at
+validation). Audience: dev, research, artists. The plan of the model changes and the form of
 their rule (§4) are written and committed before any of the study's numbers; the rule's numbers (the margins and the
 number of settings) come from a null probe on training settings and are committed before validation; each chosen file
 is frozen by its SHA-256 before its one test. [REPORT.md](REPORT.md) §23 will have the summary.
@@ -72,8 +73,13 @@ played on the probe; the rule's numbers (`q2_rule.csv`) committed and pushed bef
 | 4 | heavy gas (`fx_air/models/d/heavygas.nvfx`) | `ms`, `msg`, `s24` | validation (60 settings), started again after the restart |
 | 5 | mushroom (`q_fix/models/mushroom.nvfx`) | `u60a`, `u90a` | validation (60 settings), started again after the restart |
 
-**To resume** (`Q` the data root's `q2_fix`): after a restart, `$Q/jobs/resume.sh`. It runs each validation, then
-(`after_val.sh`) freezes the chosen candidate and runs its test once. If `$Q/test_<effect>.done` says "met": `$Q/jobs/links.sh <effect> <dir>` (the old targets logged in
+**Stopped here by the owner's usage limit (22 October, 03:20 UTC).** The three validations run on unattended
+(`pipeline.sh`; they end at validation and commit their tables). No freeze or test is started without the agent:
+`after_val.sh` is no longer started by `resume.sh`.
+
+**To resume** (`Q` the data root's `q2_fix`): after a restart, `$Q/jobs/resume.sh` (it restarts the validations). When
+`$Q/jobs/val_<effect>.done` appears: `$Q/jobs/after_val.sh <effect> 2` (the rule's choice frozen, then its one test). If
+`$Q/test_<effect>.done` says "met": `$Q/jobs/links.sh <effect> <dir>` (the old targets logged in
 `$Q/logs/links_before.txt`), the file into `models/2d` and `models/SHA256SUMS` regenerated, `models/restore.sh` (0
 different), the frozen rows (`$Q/jobs/update_frozen.sh`, a `<effect>_q2` row in the round's `fx_*_frozen.csv`) and their
 ctests, the videos (`$Q/jobs/videos_*.sh`, `install_videos.sh`) and their rows in videos/README.md. Then the write-up
@@ -81,7 +87,21 @@ ctests, the videos (`$Q/jobs/videos_*.sh`, `install_videos.sh`) and their rows i
 
 ## 1. Bottom line
 
-(Written when the study ends.)
+- **Three shipped models are replaced**, each by its one test on held-out settings with fresh seeds, under study Q's
+  rule with its numbers from a null probe, committed before validation (§4.8):
+  - **the haboob's first frame** (leftover 2): its renderer trained on from its own weights (`rft`) draws the lock's
+    first frame **3.04 dB [2.86, 3.21]** closer and keeps the dust's detail within its margin (+0.004 [+0.002, +0.006]
+    against +0.021; study Q's fresh refit moved it +0.013 and stopped); the rest ties;
+  - **the smoke ring's first frame** (leftover 3): the same (`rft`), **+2.94 dB [2.72, 3.16]**, and +0.11 [+0.01, +0.23]
+    at 1 s; its motion error +0.009 [+0.002, +0.015], within its margin of +0.021 (study Q's +0.023 stopped);
+  - **the avalanche's start points** (leftover 4): 48 start points instead of 16 (`s48`) bring its average picture
+    **1.41 dB [0.36, 2.50]** closer to a real run's; every other measure ties. The mean state with grown fine fields
+    (`msg`) was dropped by its diagnosis before its probe (§3).
+- **Under way, resumable** (§0): the geyser's anchored fine-tunes (leftover 1; on the probe `u30a` kept the first frame
+  tied, +0.04, with +0.28 dB at 1 s), heavy gas's start points (leftover 4; on the probe `msg`, the mean state with
+  grown fine fields, +1.87 dB in the mean frame and closer on every endless measure) and the mushroom's longer-window
+  fine-tunes (leftover 5; on the probe `u90a` +0.85 dB at 1 s, +1.82 in the mean frame): their validations run on,
+  their freezes and tests wait for the agent. Probe numbers decide nothing.
 
 ## 2. The leftovers, and what each needs
 
@@ -583,8 +603,11 @@ and makes the rest; the renderer fine-tunes ran on 1 thread, which does matter t
 
 ## 7. Checks
 
-(Written when the study ends.)
+After merging main at bf3fff8: see REPORT §23.
 
 ## 8. What is left
 
-(Written when the study ends.)
+The geyser's, heavy gas's and the mushroom's validations, freezes and tests (§0, resumable); by eye the mushroom's cap
+is still ragged after 3 to 4 s with either longer-window fine-tune (the diagnosis's strips, `q2_fix/fig/mush_cap.png`);
+the haboob's -11.7 dB against the coarse simulation at the first frame remains the coarse simulation's own advantage
+(STUDY_Q.md §3.5).

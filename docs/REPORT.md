@@ -4669,3 +4669,26 @@ skipped (main's 547 and the manager's seven new tests: `HalfSizeIsNvfxRenderWith
 test's new sizes); `nvfx_alloc_test` (no allocation per frame, the manager with half size on, with the 2x and without, on
 its threads and the engine's); `nvfx_gallery --check --require-models` (234 effects, 234 played, 0 failed); the Godot
 test (`engines/godot/test.sh`: the fireball and the library stage, 0 failures each). README's test count is 554.
+
+## 23. Study Q2: study Q's leftovers
+
+**Status: under way, resumable** (22 October 2026; stopped by the owner's usage limit). The full account is
+[STUDY_Q2.md](STUDY_Q2.md). Study Q's method unchanged (§21: the plan and the rule's form committed before any number;
+margins from a null probe on training settings and N from the candidates' spread, each effect's committed before its
+validation; the chosen file frozen by SHA-256 before its one test on held-out settings with fresh seeds, 33.5 to 34.0
+million; 95% paired bootstrap intervals with 10,000 resamples).
+
+| leftover | candidate | the test (candidate minus current) | decision |
+|---|---|---|---|
+| the haboob's first frame | `rft`: its renderer trained on from its own weights | the first frame **+3.04 dB [+2.86, +3.21]**, the spectrum +0.004 [+0.002, +0.006] (margin +0.021), the rest ties | **replaced** |
+| the smoke ring's first frame | `rft` | the first frame **+2.94 [+2.72, +3.16]**, 1 s +0.11 [+0.01, +0.23], the motion +0.009 [+0.002, +0.015] (margin +0.021) | **replaced** |
+| the avalanche's start points | `s48`: 48 start points | the mean frame **+1.41 [+0.36, +2.50]**, the rest ties | **replaced** |
+| the geyser's tracking with its first frame kept | `u30a`, `u30al` (with round 2's anchor) | validation running | under way |
+| heavy gas's start points | `ms`, `msg`, `s24` | validation running | under way |
+| the mushroom's cap | `u60a`, `u90a` (60- and 90-frame windows, the anchor) | validation running | under way |
+
+The three replaced files are in `models/2d` (SHA256SUMS; `restore.sh` 0 different), the shared links moved, the frozen
+model rows updated (their keyframes unchanged: looks, or start points kept), five videos re-rendered. Code:
+`nvfx_ordered --study q2`, `train --anchor`, `refit --finetune`, `growfine`, `RendererOptions::keep_scale` and its
+test. Resume with the data root's `q2_fix/jobs/resume.sh`, then `after_val.sh <effect>` after each validation.
+

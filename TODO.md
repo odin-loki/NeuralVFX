@@ -134,6 +134,10 @@ and the Godot test; details in its doc and REPORT section):
   in the manager's worker start that could hang a tick on several threads (main's code).
 
 **Under way:**
+- **Study Q2, study Q's leftovers** (branch `study-q2`, docs/STUDY_Q2.md, REPORT §23; seeds 33.5 to 34.0 million):
+  three models replaced by their one test: the haboob's and the smoke ring's renderers trained on from their own
+  weights (the first frame +3.04 dB [2.86, 3.21] and +2.94 dB [2.72, 3.16]) and the avalanche's 48 start points (the
+  mean picture +1.41 dB [0.36, 2.50]); the geyser, heavy gas and the mushroom at validation (resumable).
 - **Round 10, fire** (`effects-fire2`, docs/EFFECTS_FIRE2.md, REPORT §6.18; seeds 26.0 to 26.9 million): a forest crown
   fire (#6), fire venting from a window (#8) and a dust explosion (#31). **Finished and merged into main** (21 October
   2026): each tested once, all three work by the rule (tracking at 1 s over the coarse
@@ -163,10 +167,8 @@ and the Godot test; details in its doc and REPORT section):
   ran 7 to 11% slower than round 6's and its speed drifted by about ±7%: absolute milliseconds belong to their session.
 
 **Next:**
-- **Study Q's leftovers** (STUDY_Q.md §9): the avalanche's start points (the mean state with fine fields regrown from
-  the moved coarse state), the geyser's tracking with its first frame kept, the haboob's and the ring's first frames
-  by fine-tuning their renderers rather than training them again, heavy gas's start points, the mushroom's cap (a
-  stepper that sees its whole life).
+- **Study Q2's last three** (STUDY_Q2.md §0, resumable: the data root's `q2_fix/jobs/resume.sh`, then `after_val.sh`):
+  the geyser's, heavy gas's and the mushroom's validations, freezes and tests; the mushroom's cap still ragged by eye.
 - **Half size, next** (REPORT §22.9): re-time its cost and the manager's A/B on a quiet machine (the jobs under the data
   root's `halfsize/jobs`; the rule's verdict stands on its own run); a default per effect (on for the effects that passed
   both conditions, off for magic) needs its own rule; measure 128 px pictures drawn at 64 and more of the library's
