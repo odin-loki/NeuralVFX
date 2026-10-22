@@ -104,13 +104,14 @@ Plan and decisions: [PLAN.md](PLAN.md).
   fire play one continuous run; its fine-detail mixer fails twice. Computing on compressed data is slower than dense
   code here, but LZ tokens and lighter models make the coder decode 4 to 38 times faster. Training with couplings
   improves the explosion inside scenes. Tuning the detail layer on the endless statistics (D2) gains detail without
-  calming the effects but met none of its rules, so v2 is unchanged. The composed fireball runs at 80 frames per
-  second at 720p on 4 threads.
-- **Rollout effects in 8 bits (study K, §13):** the stepper's second convolution now runs in 8-bit integers by
-  default. On held-out settings and seeds it tracked real runs and played as float does on all eleven effects (every
-  difference a tie or far inside its margin; the lowest tracking interval reaches -0.07 dB). With AVX-512 VNNI a
-  128 x 128 frame costs 0.90 [0.89, 0.92] of float's on the same build and 0.72 of the float default on AVX2 (most of
-  that the AVX-512 build's); without VNNI it barely pays. Provisional timings, from a shared machine.
+  calming the effects but met none of its rules, so v2 is unchanged. The composed fireball runs at 80 frames per second
+  at 720p on 4 threads (67 in the median of round 7's, §13.11, on a host whose speed drifted: 84 at its best).
+- **Rollout effects in 8 bits (study K, §13):** the stepper's second convolution now runs in 8-bit integers by default.
+  On held-out settings and seeds it tracked real runs and played as float does on all eleven effects (every difference a
+  tie or far inside its margin; the lowest tracking interval reaches -0.07 dB). With AVX-512 VNNI a 128 x 128 frame
+  costs 0.906 [0.897, 0.914] of float's on the same build over the 33 shipped models on a quiet machine (round 7,
+  §13.11; 0.90 in the study's own busy timing) and 0.80 of float on AVX2 (0.72 on round 6's host, where the AVX-512
+  build's lead was larger); without VNNI it barely pays.
 - **Not done:** owner footage (none supplied), rate-optimised block encoding for disk, engine plugins other than
   Godot's (§9, §10; the Godot 4 plugin and a C API for scenes: [ENGINES.md](ENGINES.md) §7, §8). The path from footage
   to rollout effects is built and measured on simulated renders (study J, [FOOTAGE.md](FOOTAGE.md)): start points
@@ -954,40 +955,42 @@ library entries and a scene of a waterfall under an incoming storm. The full acc
 
 ### 6.16 Earth effects
 
-Three more presets were trained with this study's recipe and tested with its protocol on seeds of their own
-(6,000,000 and up), at the runtime's default int8: **lava** (a band of molten rock along the ground under a dark crust
-whose seams glow, flowing along the slope of a `flow` control or pooling on the level, bubbling slowly), an
-**eruption** (a column of hot dark ash from a vent that spreads into an umbrella under a stable layer, its cooler rim
-collapsing down its sides) and a powder-snow **avalanche** (a cloud that breaks loose upslope, runs in the direction of a
-`direction` control, swells as it runs and settles; it plays once, 5 s). Lava works by the rule set before its test: it
-tracks a held-out run 1.09 dB [0.70, 1.43] better than the coarse simulation with the same detail layer at 1 s, and
-endless its average picture is 1.22 dB [0.11, 2.45] closer than the nearest flipbook's with its motion tied; its learned
-crust is streaks rather than the simulator's network of seams, so its detail is further from real than the
-flipbook's. The eruption works narrowly: +0.50 dB [0.06, 0.96] at 1 s (it ties at every other horizon) and an average
-picture 1.31 dB [0.04, 2.55] closer, motion tied; started from an empty grid, its stepper grows no column, as study L's
-vortex did not. The avalanche is weak, as the mushroom and the splash were: its first frame beats the coarse
-simulation's by 1.75 dB [0.70, 2.70], but from 1 s it falls behind (-2.23 dB [-4.42, -0.07]), its cloud growing and
-billowing less than the simulator's, and endless its average picture is 2.90 dB [0.89, 5.71] further from real than
-the nearest flipbook's, motion and detail tied. Each is 146 KB (the avalanche 274 KB) and costs 0.44 to 0.49 ms per
-128 px frame at int8 (provisional, a shared machine; study D's fire 0.66 ms in the same rounds). The full account, with a
-volcano scene and ten library entries, is in [EFFECTS_EARTH.md](EFFECTS_EARTH.md).
+Three more presets were trained with this study's recipe and tested with its protocol on seeds of their own (6,000,000
+and up), at the runtime's default int8: **lava** (a band of molten rock along the ground under a dark crust whose seams
+glow, flowing along the slope of a `flow` control or pooling on the level, bubbling slowly), an **eruption** (a column
+of hot dark ash from a vent that spreads into an umbrella under a stable layer, its cooler rim collapsing down its
+sides) and a powder-snow **avalanche** (a cloud that breaks loose upslope, runs in the direction of a `direction`
+control, swells as it runs and settles; it plays once, 5 s). Lava works by the rule set before its test: it tracks a
+held-out run 1.09 dB [0.70, 1.43] better than the coarse simulation with the same detail layer at 1 s, and endless its
+average picture is 1.22 dB [0.11, 2.45] closer than the nearest flipbook's with its motion tied; its learned crust is
+streaks rather than the simulator's network of seams, so its detail is further from real than the flipbook's. The
+eruption works narrowly: +0.50 dB [0.06, 0.96] at 1 s (it ties at every other horizon) and an average picture 1.31 dB
+[0.04, 2.55] closer, motion tied; started from an empty grid, its stepper grows no column, as study L's vortex did not.
+The avalanche is weak, as the mushroom and the splash were: its first frame beats the coarse simulation's by 1.75 dB
+[0.70, 2.70], but from 1 s it falls behind (-2.23 dB [-4.42, -0.07]), its cloud growing and billowing less than the
+simulator's, and endless its average picture is 2.90 dB [0.89, 5.71] further from real than the nearest flipbook's,
+motion and detail tied. Each is 146 KB (the avalanche 274 KB) and costs 0.53 to 0.61 ms per 128 px frame at int8 (a
+quiet machine, round 7 of the quiet re-timing, §13.11; study D's fire 0.78 ms in the same rounds; the busy machine's
+least rounds gave 0.44 to 0.49 and 0.66). The full account, with a volcano scene and ten library entries, is in
+[EFFECTS_EARTH.md](EFFECTS_EARTH.md).
 
 ### 6.17 Air effects
 
 Three more presets were trained and tested the same way, at the runtime's default int8, with seeds of the round's own
 (6,400,000 and up): a **candle** (a small, calm flame on a wick with a thin wisp of smoke, leaning and fluttering in a
-`draught`), a **smoke ring** (one vortex ring, a counter-rotating pair in 2D, puffed from an opening, rising and spreading
-as it rolls, then breaking up; it plays once, for 4 s, with study M3's mean state, decided before training) and **heavy
-gas** (a cold vapour poured out near the ground that flows along it, in the direction of its `flow`, and thins). The
-candle and the ring work by the rule set before the test: they track a held-out run 2.9 dB [2.4, 3.4] and 7.5 dB [6.6,
-8.4] better than the coarse simulation with the same detail layer at 1 s (the ring's the largest gain of any effect so
-far), and endless their average picture is closer than the nearest flipbook's (+2.5 and +3.7 dB) with motion no worse;
-the ring's average picture and motion tie a second real run's, and it holds its shape (two cores, rising together,
-through its first two seconds), but its detail is the furthest from real of any effect (spectrum distance 0.72). Heavy
-gas tracks better too (+1.6 [0.9, 2.2]) but its average picture only ties the flipbook's, so it falls short without
-being weak. By eye the candle is weaker than its numbers (its learned flame does not keep the rounded teardrop; the
-library plays it with a gentler swirl and a look). 82, 294 and 146 KB; 0.43 to 0.57 ms per 128 px frame. The full
-account, with a crypt scene and twelve library entries, is in [EFFECTS_AIR.md](EFFECTS_AIR.md).
+`draught`), a **smoke ring** (one vortex ring, a counter-rotating pair in 2D, puffed from an opening, rising and
+spreading as it rolls, then breaking up; it plays once, for 4 s, with study M3's mean state, decided before training)
+and **heavy gas** (a cold vapour poured out near the ground that flows along it, in the direction of its `flow`, and
+thins). The candle and the ring work by the rule set before the test: they track a held-out run 2.9 dB [2.4, 3.4] and
+7.5 dB [6.6, 8.4] better than the coarse simulation with the same detail layer at 1 s (the ring's the largest gain of
+any effect so far), and endless their average picture is closer than the nearest flipbook's (+2.5 and +3.7 dB) with
+motion no worse; the ring's average picture and motion tie a second real run's, and it holds its shape (two cores,
+rising together, through its first two seconds), but its detail is the furthest from real of any effect (spectrum
+distance 0.72). Heavy gas tracks better too (+1.6 [0.9, 2.2]) but its average picture only ties the flipbook's, so it
+falls short without being weak. By eye the candle is weaker than its numbers (its learned flame does not keep the
+rounded teardrop; the library plays it with a gentler swirl and a look). 82, 294 and 146 KB; 0.49 to 0.71 ms per 128 px
+frame at int8 (a quiet machine, round 7, §13.11; 0.43 to 0.57 on the busy one). The full account, with a crypt scene
+and twelve library entries, is in [EFFECTS_AIR.md](EFFECTS_AIR.md).
 
 ### 6.18 Fire effects, round 10
 
@@ -998,18 +1001,19 @@ wildfire, a front on the ground), a **window fire** (a room fire venting from a 
 the opening's upper part above the neutral plane and roll up the wall, the room glows through the lower part, and black
 smoke spreads out under the eave as a ceiling jet) and a **dust explosion** (a dust cloud lit at one end or in its
 middle, the second control `ignition`: a deflagration front, the dust's heat spreading into the dust beside it and
-burning where it is hot, runs through the cloud, the burning gas expands into a brown-orange fireball that billows up and
-burns out, and a pall of dust and ash is left; it plays once, for 4 s, with study M3's mean state, decided before
-training). All three work by the rule set before the test: they track a held-out run 2.60 dB [2.16, 3.04], 3.31 dB [2.91,
-3.73] and 8.44 dB [7.88, 9.04] better than the coarse simulation with the same detail layer at 1 s (the dust
+burning where it is hot, runs through the cloud, the burning gas expands into a brown-orange fireball that billows up
+and burns out, and a pall of dust and ash is left; it plays once, for 4 s, with study M3's mean state, decided before
+training). All three work by the rule set before the test: they track a held-out run 2.60 dB [2.16, 3.04], 3.31 dB
+[2.91, 3.73] and 8.44 dB [7.88, 9.04] better than the coarse simulation with the same detail layer at 1 s (the dust
 explosion's the largest gain of any effect so far: the 32-cell simulation cannot resolve the burn's preheat zone and
 burns the cloud out in a flash), and endless their average picture is closer than the nearest flipbook's (+1.76, +1.78
 and +3.15 dB) with motion no worse; the dust explosion's average picture, motion and coverage tie a second real run's,
 and its learned flame runs through the cloud from where it was lit. The two fires' detail is six times further from real
 than the flipbook's (spectrum distances 0.43 and 0.44): their learned flames and smoke carry streaks along the flow. By
 eye all three are fair; the library draws the crown fires' column and the dust explosions with field-shader looks. 146,
-146 and 294 KB; 0.49 to 0.65 ms per 128 px frame. The full account, with a forest-edge town scene and ten library
-entries, is in [EFFECTS_FIRE2.md](EFFECTS_FIRE2.md).
+146 and 294 KB; 0.65 to 0.87 ms per 128 px frame at int8 (a quiet machine, round 7, §13.11; 0.49 to 0.65 on the busy
+one). The full account, with a forest-edge town scene and ten library entries, is in
+[EFFECTS_FIRE2.md](EFFECTS_FIRE2.md).
 
 ### 6.19 Elements
 
@@ -1024,14 +1028,14 @@ O'Muircheartaigh's whitecap cover). The simulator's haboob runs as gravity-curre
 Benjamin's ideal √2). Sea spray works by the rule set before the test: it tracks a held-out run 1.9 dB [1.0, 2.8]
 better than the coarse simulation with the same detail layer at 1 s (+2.9 at 8 s), and endless its average picture is
 5.9 dB [4.8, 7.1] closer than the nearest flipbook's and ties a second real run's, its motion no worse; its detail is
-far from real (spectrum distance 0.36, the flipbook's 0.10). The haboob tracks better from 1 s (+1.1 [0.3, 1.9]) but
-its average picture only ties the flipbook's (its whole 150 frames at a neighbouring setting), so it falls short; its
+far from real (spectrum distance 0.36, the flipbook's 0.10). The haboob tracks better from 1 s (+1.1 [0.3, 1.9]) but its
+average picture only ties the flipbook's (its whole 150 frames at a neighbouring setting), so it falls short; its
 learned front runs at the simulator's speed at one held-out setting and 25% fast at the other, and its renderer loses
 its first frames. The geyser is weak: it ties the coarse simulation at 1 s (+1.1 [-0.3, +2.6]) and loses at 2 s; at a
 middle setting it erupts when its conduit says (a column in 95% of those frames), at a low one never, and within a shard
-its column follows its start point more than its intensity. 146, 294 and 146 KB; 0.42 to 1.03 ms per 128 px frame. The
-full account, with a coast scene under the weather director and ten library entries, is in
-[EFFECTS_ELEMENTS.md](EFFECTS_ELEMENTS.md).
+its column follows its start point more than its intensity. 146, 294 and 146 KB; 0.56 to 1.19 ms per 128 px frame at
+int8 (a quiet machine, round 7, §13.11; 0.42 to 1.03 on the busy one). The full account, with a coast scene under the
+weather director and ten library entries, is in [EFFECTS_ELEMENTS.md](EFFECTS_ELEMENTS.md).
 
 ## 7. Runtime cost and budget
 
@@ -2060,22 +2064,73 @@ the parity tests' tolerances, and to the frames of its build forced, to the bit.
 `SceneApi.FloatScenesTakeTheRuntimesFloatBuild` checks that a float scene through the API plays the script runner's
 frames on that build.
 
-**The fireball** (study D's v1 models composed as COMPOSE.md §7; 1280 x 720, 4 threads, float; `nvfx_fireball
---no-video --no-checksums --profile`, medians over the frames from 36 on). The build before the change and the build
-after it ran alternately, three pairs (`tools/opt2/time_fireball.sh`). **Provisional**: the machine was busy (load
-average 7 to 10; the fireball's threads waited for a core 24 to 75% of the time).
+**The fireball** (study D's v1 models composed as COMPOSE.md §7; 4 threads, float; `nvfx_fireball --no-video
+--profile`, medians over the frames from 36 on). The busy machine's three pairs of the build before the change and the
+build after it (`tools/opt2/time_fireball.sh`, load 7 to 10) followed the other agents' load, not the build (frames of
+16.6 to 46.7 ms). **Re-timed on a quiet machine** (round 7 of the quiet re-timing, §13.11): the AVX2 build forced
+(`--isa avx2`, the frames of before, to the bit) and the default build in turn, ten rounds at 1280 x 720 and at 1920 x
+1080; the median of the runs and its 95% interval, and the ratio of each round's pair:
 
-| pair | frame, before (AVX2) | frame, after (AVX-512) | the models' steps, CPU, before | after |
-|---|---:|---:|---:|---:|
-| 1 | 28.3 ms | 43.5 ms | 14.3 ms | 15.7 ms |
-| 2 | 46.7 ms | 41.1 ms | 11.4 ms | 9.6 ms |
-| 3 | 16.6 ms | 15.1 ms | 10.6 ms | 9.2 ms |
+| | 1280 x 720 | 1920 x 1080 |
+|---|---:|---:|
+| frame, float on AVX2 (before) | 15.7 ms [13.9, 16.8] | 32.8 ms [30.5, 33.6] |
+| frame, float on AVX-512 (after) | 15.0 ms [13.3, 16.1] | 31.1 ms [28.3, 32.1] |
+| after / before, frame | 0.948 [0.920, 1.027] | 0.942 [0.918, 1.015] |
+| after / before, the models' steps (CPU) | 0.961 [0.920, 0.972] | 0.954 [0.917, 1.023] |
 
-The frame times follow the other agents' load, not the build: they vary by a factor of 2 to 3 within each build. In
-the least loaded pair (waiting 24 to 32%) the models' steps took 0.87 of their CPU time and the frame 0.91 of its time.
-The quiet machine's 0.80 is the models' alone; the compositor's share of the frame (drawing, distortion, bloom) does
-not change. `tools/study_k/time.sh` on a quiet machine would settle the fireball's figure.
+So the fireball gains about 5% from the move (the frame's intervals reach 1.03: not clear of a tie), its models' steps 4
+to 5%: less than the bare effects' 0.80 that the move was made on (round 6), since this session's host gave the AVX-512
+build a smaller lead on single effects too (0.87 to 0.93 of AVX2 against round 6's 0.79 to 0.81, §13.11), and the
+compositor's share of the frame (drawing, distortion, bloom) does not change.
 
+
+### 13.11 Round 7 of the quiet re-timing (21 October 2026)
+
+Every cost measured since round 9 had been taken on the shared machine at a load of 6 to 21 and marked provisional.
+Round 7 re-timed them in one session with nothing else running (18:21 to 21:18 UTC; 59 blocks of the existing tools,
+each started only at a load of at most 0.5, with the CPU used by anything else measured during it and three blocks run
+again for it; `tools/quiet/round7.sh`, `results/quiet/README.md` "Round 7", `results/quiet/round7/`). Medians over the
+rounds come with 95% intervals from order statistics; ratios are paired within rounds. The documents now quote its
+figures; `compare_provisional.csv` lists every one replaced with its old value.
+
+**The host was another one** (Xeon family 6, model 207, 2.1 GHz, 4 vCPUs): against round 6 on the same 21 models its
+AVX2 build ran as fast and its AVX-512 build 7 to 11% slower; its speed drifted by about ±7% between rounds, and a
+single configuration often landed in a fast or a slow state about 1.35 times apart, which this guest cannot see the
+cause of (no foreign load, steal under 1.5%). The fireball at 1280 x 720 on 4 threads took 15.0 ms float and 14.8 int8
+(medians of ten rounds; round 6: 12.8 and 12.2), though its first two rounds and its last four, at 20:53 and 21:17, ran
+at round 6's speed (12.4 to 13.9 ms, and medians of 12.6 to 12.7).
+
+- **The 33 shipped 2D models** (18 rounds, one pinned core): 0.63 ms per 128 px frame on average at the default (int8 on
+  the AVX-512 build; 0.46 for heavy gas to 1.12 for the geyser), 0.69 at float on AVX-512, 0.79 at float on AVX2. int8's
+  own gain is round 6's to within 0.01: 0.853 [0.846, 0.860] of float at 64 px, **0.906 [0.897, 0.914] at 128**, 0.955
+  at 256, and 1.003 [0.985, 1.023] at 512 px (12 models), where the float renderer and detail layer are the frame. The
+  AVX-512 build's float lead over AVX2 is smaller on this host: 0.871, 0.886, 0.914 and 0.948 at 64 to 512 px (round 6:
+  0.79 to 0.81). So the default (int8 on AVX-512) is 0.80 [0.79, 0.82] of float on AVX2 at 128 px, not 0.72.
+- **The round documents' tables** (EFFECTS_EARTH, _AIR, _FIRE2, _ELEMENTS §5, `nvfx_experiment d-timing`, 9 rounds):
+  against the busy medians the quiet ones are within 15% for 55 of 60 figures; against the least rounds the documents
+  quoted, the defaults are 10 to 39% higher. Their AVX2 rows are float (an ISA forced makes the default precision float,
+  §13.8), not int8 without VNNI as they said.
+- **The detail layer** (§19): in 2D the old-against-new ratios held to within 0.015 over the 33 models; in 3D the layer
+  is 4.5 to 4.9 times faster and a step 2.5 to 2.7 times, not 5.7 to 6.5 and 3.1 to 3.2 (the busy machine had slowed the
+  old scalar layer by a third); no frame differs.
+- **Study P** (§17.4): the learned 2x costs 0.505 to 0.619 of native at 512 px, 3 of 6 effects under the rule's 0.55
+  instead of 4; the half-size instance 0.29 to 0.38 of native. The verdict stands.
+- **The 3D steps**: N2's fire 21.0 ms a step on one thread and 9.0 on four (70 and 23 before the detail layer ran on
+  vectors), a 256 x 256 picture 56 and 14 ms; study R's smoke 21.4 and 9.2 ms (26.6 and 9.0); study hres's fire 239 and
+  64 ms, its 32 x 48 x 32 coarse step alone 192 ms (STUDY_3D.md §14.12, STUDY_R.md §4, STUDY_3D_HRES.md §8).
+- **Scenes and the FUSE demo**, all far lower (by 30 to 78% for the scenes), as multi-threaded work on the busy machine
+  waited for cores: on 2 threads the volcano 14.1 ms a frame on average (20), the crypt 10.2 (19 at float, 28 at int8),
+  the forest edge 19.0, the coast 17.3 (51), the weather day 16.4 (76), the lift-off 19.8 (46 to 50); the FUSE demo 600
+  frames in 42 s on three workers (168) and 55 s on the game thread alone (138), the volume's step a tenth of before.
+- **The fireball** (§13.10): int8 ties float on 4 threads (0.997 [0.949, 1.044] at 720p, 1.010 at 1080p: the
+  compositor's frame), and float on the AVX-512 build is 0.95 of AVX2 (intervals reaching 1.03); 1920 x 1080 takes 31
+  ms.
+
+**Checks** (origin/main is fc3d5f6, the branch's base, so there was nothing to merge; this round adds scripts, results
+and text, no code): the full build with warnings as errors; the full ctest, 547 of 547, none skipped; `nvfx_alloc_test`
+(no allocation per frame; the volume on 1 and 3 threads, 0 allocations in 84 frames each); `nvfx_gallery --check
+--require-models` (234 effects, 234 played, 0 failed); the Godot test (`engines/godot/test.sh`: the fireball and the
+library stage, 0 failures each).
 ## 14. Study M: model what's ordered, leave random to random
 
 Status: **done.** The diagnosis (§14.1) and what was built and tried (§14.2) were done on training settings only; the
@@ -3324,8 +3379,10 @@ its own play), snapshot at every stage, and chosen on tracking *and* endless pla
   renders are in the data root if the owner chooses to adopt it. The lesson: calibrate such bounds on the teacher's own
   run-to-run spread before writing them into a rule.
 - Study N's smoke demo also runs away given 30 s (its box's heat to 3,128); retrained with the fix it does not.
-- **Cost** (provisional, now on a quiet machine): a step 70, 37 and 23 ms on 1, 2 and 4 threads; a 256 x 256 picture
-  61, 30 and 16 ms. The detail layer is still three quarters of a step.
+- **Cost** (a quiet moment of the shared machine, the scalar detail layer): a step 70, 37 and 23 ms on 1, 2 and 4
+  threads; a 256 x 256 picture 61, 30 and 16 ms; the detail layer three quarters of a step. Re-timed on a quiet machine
+  with the detail layer on vectors (§19; round 7 of the quiet re-timing, §13.11): a step 21.0 ms on one thread and 9.0
+  on four, a 256 x 256 picture 56 and 14 ms, a start 0.55 and 0.22 s (STUDY_3D.md §14.12).
 
 ## 16. Study O: the most visible flaws of the shipped effects, fixed and measured
 
@@ -3717,25 +3774,30 @@ not among the frozen ones. Re-rendered: `library_fire`.
 ### 16.6 Cost
 
 The detail layer's second pass (`nvfx_ordered cost`, thread CPU time a frame through `nvfx_render`, the models
-interleaved, the median of 9 paired repetitions; `o_cost_passes.csv`; measured on the shared machine at a load of about
-13 on 4 cores, so provisional):
+interleaved, the median of 9 paired repetitions), measured first on the shared machine at a load of about 13 on 4 cores
+(`o_cost_passes.csv`) and **re-timed on a quiet machine** (round 7 of the quiet re-timing, §13.11, pinned to one core;
+[results/quiet/round7/o_cost_passes.csv](../results/quiet/round7/o_cost_passes.csv)). Round 7's figures, the busy run's
+difference after them:
 
-| effect | size | int8: one pass → two (ms) | difference | float: one pass → two (ms) | difference |
+| effect | size | int8: one pass → two (ms) | difference (busy) | float: one pass → two (ms) | difference (busy) |
 |---|---|---|---|---|---|
-| waterfall (swirl 0) | 128 | 0.574 → 0.583 | +0.004 | 0.798 → 0.788 | -0.015 |
-| waterfall (swirl 0) | 256 | 1.412 → 1.450 | +0.061 | 1.829 → 1.836 | +0.036 |
-| launch (swirl 1, scale 9) | 128 | 0.539 → 0.649 | +0.099 | 0.785 → 0.871 | +0.090 |
-| launch (swirl 1, scale 9) | 256 | 1.387 → 1.656 | +0.233 | 1.964 → 2.104 | +0.165 |
+| waterfall (swirl 0) | 128 | 0.654 → 0.641 | -0.013 (+0.004) | 0.633 → 0.669 | +0.023 (-0.015) |
+| waterfall (swirl 0) | 256 | 1.627 → 1.533 | -0.015 (+0.061) | 1.566 → 1.777 | +0.233 (+0.036) |
+| launch (swirl 1, scale 9) | 128 | 0.675 → 0.685 | +0.027 (+0.099) | 0.625 → 0.714 | +0.089 (+0.090) |
+| launch (swirl 1, scale 9) | 256 | 1.507 → 1.686 | +0.152 (+0.233) | 1.526 → 1.758 | +0.240 (+0.165) |
 
 A second pass skips the empty spans as the first does, so the waterfall's sheet (a narrow band of the frame) costs
-almost nothing more; the launch's billows fill the tile, and the second pass costs it 8 to 18% (the paired
-differences over the medians).
+almost nothing more (the float row at 256 px excepted, +0.23 ms, inside the repetitions' range of 1.34 to 2.06 ms on
+this host); the launch's billows fill the tile, and the second pass costs it 4 to 16% (the busy run: 8 to 18%).
 
 The replaced mushroom and splash cost what the round's did: the mean state acts once, on the start point, and the
-fine-tuned stepper has the same shape (`o_cost_models.csv`, the same tool, the build after merging main, a load of about
-8): the mushroom 0.640 → 0.684 ms at 128 px int8 (paired +0.063, inside both ranges), 1.580 → 1.513 at 256 (+0.006),
-0.689 → 0.746 and 1.591 → 1.590 at float; the splash 0.730 → 0.700 (-0.044), 1.610 → 1.580 (-0.095), 0.796 → 0.773
-and 1.666 → 1.645 at float. Every difference is within the spread of repetitions on this machine.
+fine-tuned stepper has the same shape. Round 7 (the same tool, quiet,
+[o_cost_models.csv](../results/quiet/round7/o_cost_models.csv)), the round's file → study O's, paired: the mushroom
+0.714 → 0.732 ms at 128 px int8 (+0.007), 1.654 → 1.621 at 256 (+0.141), 0.734 → 0.822 and 1.658 → 1.626 at
+float (+0.038, -0.087); study Q's mushroom, which ships now, +0.012, -0.087, +0.072 and -0.067; the splash 0.847 →
+0.804 (-0.038), 1.637 → 1.626 (-0.105), 0.856 → 0.867 and 1.773 → 1.716 at float (-0.065, -0.063). Every
+difference is within the spread of the repetitions, which on this host was wide (1.11 to 2.37 ms for the round's
+mushroom at 256 px int8); the busy run (`o_cost_models.csv`, a load of about 8) read the same.
 
 **The lift-off's three tiles** (`nvfx_scene_script --no-video --profile`, the scene's 300 frames at 1280 x 720 on 2
 threads, int8, the wall time a frame; three ways of playing the blast in turn, twice, and one tile with two passes in a second
@@ -3747,13 +3809,16 @@ session; `o_cost_liftoff.csv`; medians over the 225 frames from the ignition at 
 | three tiles, one pass | 7.91, 7.90 | 48.7, 47.9 |
 | three tiles, two passes (as shipped) | 12.39, 12.18 | 50.3, 46.0 |
 | one tile, two passes (a second session) | 3.18, 2.52 (one pass: 2.20, 2.28) | 40.2, 43.5 (41.6, 41.1) |
+| **three tiles, two passes (as shipped), round 7 on a quiet machine** | **4.84** (4.50 to 4.93; float 5.41) | **19.8** (17.8 to 20.4; float 20.7) |
 
-The two outer tiles add about 5.7 ms a frame to the step stage (all seven modules' steps on 2 threads) and about 5 ms
-to the frame; the second pass adds about 4.4 ms more on the three tiles, more than the bare effect's +0.23 ms at 256 px
+The two outer tiles add about 5.7 ms a frame to the step stage (all seven modules' steps on 2 threads) and about 5 ms to
+the frame; the second pass adds about 4.4 ms more on the three tiles, more than the bare effect's +0.23 ms at 256 px
 would give (three full tiles of billows on the two threads the frame's drawing shares; on one tile, +0.3 to +1.0 ms),
 but the frame as a whole hardly moves (48.3 against 48.2 ms on average over the two runs, within the runs' spread),
-since the step overlaps the drawing of the frame before. The lift-off still runs at about 20 frames a second at
-1280 x 720 on 2 busy threads; a game that cannot spare the step can keep one tile and accept the square.
+since the step overlaps the drawing of the frame before. Those were the busy machine's figures; on the quiet one the
+shipped lift-off takes 19.8 ms a frame, the step stage 4.8 of it (three runs at each precision in turn,
+`results/quiet/round7/liftoff_runs.csv`; the other three ways were not re-timed), so it runs at about 50 frames a second
+at 1280 x 720 on 2 threads (20 on the busy machine).
 
 ### 16.7 What it means
 
@@ -3832,21 +3897,23 @@ Run once on 20 held-out settings, seeds 3,800,000 to 3,839,999, 4 plays and 2 tr
 - **Condition 3: 4 of 6** (below). So by its rule **the learned 2x is not adopted.** At 256 px (not deciding):
   conditions 1, 2 and 3 hold for 1, 4 and 2 of the 6.
 
-### 17.4 Cost (provisional: a busy machine)
+### 17.4 Cost (the rule's run on a busy machine; re-timed on a quiet one)
 
 Thread CPU time a frame through `nvfx_render`, N, the half-size instance alone (H), B and L interleaved in one process,
-30 rounds of 20 frames, the median of each ratio to N (the runtime's default, int8 on AVX-512 with VNNI):
+30 rounds of 20 frames, the median of each ratio to N (the runtime's default, int8 on AVX-512 with VNNI). The rule's run
+(busy, it decided condition 3) and round 7 of the quiet re-timing (§13.11; STUDY_P.md §7 has both in full):
 
 | | explosion | mushroom | wildfire | launch | smoke | waterfall |
 |---|---:|---:|---:|---:|---:|---:|
-| N at 512 px (ms) | 4.16 | 6.00 | 4.32 | 4.33 | 4.70 | 4.45 |
-| H / N | 0.343 | 0.310 | 0.291 | 0.302 | 0.325 | 0.298 |
-| B / N | 0.426 | 0.361 | 0.369 | 0.367 | 0.395 | 0.369 |
-| **L / N** | 0.571 | **0.453** | 0.593 | **0.536** | **0.550** | **0.530** |
+| N at 512 px (ms): rule / round 7 | 4.16 / 4.43 | 6.00 / 6.43 | 4.32 / 4.76 | 4.33 / 5.11 | 4.70 / 5.35 | 4.45 / 4.72 |
+| H / N: rule / round 7 | 0.343 / 0.334 | 0.310 / 0.331 | 0.291 / 0.312 | 0.302 / 0.290 | 0.325 / 0.377 | 0.298 / 0.290 |
+| B / N: rule / round 7 | 0.426 / 0.417 | 0.361 / 0.396 | 0.369 / 0.382 | 0.367 / 0.362 | 0.395 / 0.457 | 0.369 / 0.354 |
+| **L / N**: rule / round 7 | 0.571 / 0.597 | **0.453** / **0.505** | 0.593 / 0.619 | **0.536** / **0.532** | **0.550** / 0.619 | **0.530** / **0.540** |
 
-At 256 px H / N is 0.34 to 0.43 (the coarse step, about 0.3 ms, does not shrink) and L / N 0.46 to 0.70. The learned
-part costs 0.55 to 0.97 ms of a busy core at 512 px beyond the bilinear 2x; the effects that fill most of their frame
-skip the fewest empty blocks.
+At 256 px H / N is 0.36 to 0.42 on the quiet machine (the rule's run: 0.34 to 0.43; the coarse step, about 0.3 ms, does
+not shrink) and L / N 0.52 to 0.68 (0.46 to 0.70). The learned part costs 0.70 to 1.13 ms of a quiet core at 512 px
+beyond the bilinear 2x (0.55 to 0.97 ms of a busy one); the effects that fill most of their frame skip the fewest empty
+blocks. On the quiet machine 3 of the 6 meet condition 3 instead of 4, so the verdict does not change.
 
 ### 17.5 What ships, and what it means
 
@@ -3940,8 +4007,9 @@ sky, no wet ground and no trees for the Beaufort forces 5 to 9 (WEATHER.md §7).
 
 **Cost.** A director step is about 1 microsecond (one core of the shared machine at a load of 17); the layers cost what
 they cost without it; no allocation per frame (`nvfx_alloc_test`: every regime, every layer it drives, scripted and
-through the C API). The day scene's median frame: 76 ms on 2 threads of the same busy machine (provisional; the cloud,
-fog, fire and smoke modules and the picture at 1280 x 720, not the director).
+through the C API). The day scene's median frame: 16.4 ms on 2 threads at the default on a quiet machine (round 7 of the
+quiet re-timing, §13.11; float 17.3; 76 ms on the busy machine; the cloud, fog, fire and smoke modules and the picture
+at 1280 x 720, not the director).
 
 **Checks** (main at c846c80, merged: nothing new on it): the full build with warnings as errors; the full ctest, 518 of
 518 (main's 488, the 28 weather tests, the day scene's frozen keyframes and its script check), none skipped;
@@ -3961,16 +4029,19 @@ frame at 256 px and above. Make it clearly cheaper, in 2D and 3D, **without chan
 tests pass unchanged and no frozen hash is edited; a speed-up that changes frames could only be an option, measured and
 reported.
 
-**How it was measured.** Old and new in one process (`nvfx_detail_bench`): two probe modules, one built from this
-branch and one from main before it (c846c80, `build_old.sh`), each the runtime's internals with only a small C
-interface exported, play the same models, sizes, ISAs, seeds and controls in lockstep, frame by frame, in alternating
-order; per frame the step's, the picture's and the detail stage's thread CPU time (one thread) or wall time (four), and
-every field and picture of both compared bit for bit. A round is 16 frames (2D) or 6 steps (3D); the ratio of a round
-is new's median over old's; reported is the median over 12 (10) rounds with a 95% bootstrap interval, and per size
-and ISA the geometric mean over the 27 shipped 2D models with a 95% bootstrap interval over models. The container moved
-during the study (at 01:18 UTC, from a Sapphire Rapids host to a Cascade Lake one, both with AVX-512); everything below
-is from the second host, shared with six training jobs (load 15 to 21), so **absolute milliseconds are provisional**
-and slow; the interleaved ratios are what to read.
+**How it was measured.** Old and new in one process (`nvfx_detail_bench`): two probe modules, one built from this branch
+and one from main before it (c846c80, `build_old.sh`), each the runtime's internals with only a small C interface
+exported, play the same models, sizes, ISAs, seeds and controls in lockstep, frame by frame, in alternating order; per
+frame the step's, the picture's and the detail stage's thread CPU time (one thread) or wall time (four), and every field
+and picture of both compared bit for bit. A round is 16 frames (2D) or 6 steps (3D); the ratio of a round is new's
+median over old's; reported is the median over 12 (10) rounds with a 95% bootstrap interval, and per size and ISA the
+geometric mean over the 27 shipped 2D models with a 95% bootstrap interval over models. The container moved during the
+study (at 01:18 UTC, from a Sapphire Rapids host to a Cascade Lake one, both with AVX-512); everything below is from the
+second host, shared with six training jobs (load 15 to 21). **Re-timed on a quiet machine** (round 7 of the quiet
+re-timing, §13.11; the same bench and counts, the old probe built again from c846c80, now over the 33 shipped 2D
+models; `results/quiet/round7/detail_*`): the tables below give round 7's figures, with the busy run's beside them where
+they differ by more than 15%. In 2D the ratios held to within about 1%; in 3D the busy machine had slowed the old scalar
+layer more than the new one, so the gain is smaller than it measured (§19.2).
 
 ### 19.1 Where the time was
 
@@ -4013,26 +4084,30 @@ warm-up and step by step, 1 and 3 threads, swirl and breakup on and off, both ed
 part vectors and less than one, a state the reference made, two seeds in turn); compiled with contraction it fails at
 once (checked). Memory: 19 MB more per volume (`nvfx_volume_scratch_bytes` 32.8 to 51.6 MB); no allocation per frame.
 
-The chosen 64 x 96 x 64 model (`n2_3d/models/chosen.nvfx3`, controls 0.7, 0.5, 0.6), old against new
-(`results/detail/volume_3d.md`, `detail_3d.md`); every field of every step the same to the bit (240 volume steps, 240
-detail steps):
+The chosen 64 x 96 x 64 model (`n2_3d/models/chosen.nvfx3`, controls 0.7, 0.5, 0.6), old against new; every field of
+every step the same to the bit. Round 7 on the quiet machine (`results/quiet/round7/detail_volume_3d.md`,
+`detail_detail_3d.md`; 240 volume steps and 240 detail steps compared, none differs), and the busy run's ratio where it
+differs from round 7's by more than 15% (`results/detail/volume_3d.md`, `detail_3d.md`: 240 and 240):
 
-| | threads | ISA | old ms | new ms | new / old |
-|---|---:|---|---:|---:|---|
-| the detail layer alone | 1 | AVX2 | 63.4 | 11.0 | **0.176 [0.173, 0.179]** |
-| the detail layer alone | 1 | AVX-512 | 64.0 | 10.0 | **0.155 [0.153, 0.158]** |
-| a volume step (`nvfx_volume_step_to`) | 1 | AVX2 | 86.5 | 26.8 | **0.319 [0.300, 0.326]** |
-| a volume step | 1 | AVX-512 | 83.1 | 25.8 | **0.309 [0.306, 0.324]** |
-| the detail layer alone | 4 | AVX2 | 145.6 | 23.7 | 0.174 [0.132, 0.216] |
-| the detail layer alone | 4 | AVX-512 | 121.7 | 23.1 | 0.181 [0.126, 0.211] |
-| a volume step | 4 | AVX2 | 197.6 | 35.3 | 0.184 [0.133, 0.300] |
-| a volume step | 4 | AVX-512 | 172.4 | 53.3 | 0.303 [0.152, 0.372] |
+| | threads | ISA | old ms | new ms | new / old | the busy run |
+|---|---:|---|---:|---:|---|---|
+| the detail layer alone | 1 | AVX2 | 47.3 | 10.4 | **0.223 [0.204, 0.227]** | 0.176 (63.4 / 11.0 ms) |
+| the detail layer alone | 1 | AVX-512 | 49.8 | 10.0 | **0.204 [0.199, 0.207]** | 0.155 (64.0 / 10.0 ms) |
+| a volume step (`nvfx_volume_step_to`) | 1 | AVX2 | 64.6 | 25.6 | **0.396 [0.389, 0.402]** | 0.319 (86.5 / 26.8 ms) |
+| a volume step | 1 | AVX-512 | 65.6 | 24.6 | **0.375 [0.365, 0.384]** | 0.309 (83.1 / 25.8 ms) |
+| the detail layer alone | 4 | AVX2 | 16.9 | 4.1 | 0.242 [0.239, 0.251] | 0.174 (145.6 / 23.7 ms) |
+| the detail layer alone | 4 | AVX-512 | 16.3 | 3.7 | 0.224 [0.218, 0.229] | 0.181 (121.7 / 23.1 ms) |
+| a volume step | 4 | AVX2 | 20.6 | 9.7 | 0.460 [0.448, 0.474] | 0.184 (197.6 / 35.3 ms) |
+| a volume step | 4 | AVX-512 | 25.2 | 11.3 | 0.451 [0.431, 0.464] | 0.303 (172.4 / 53.3 ms) |
 
-So the detail layer is **5.7 to 6.5 times faster** on one core and a step **3.1 to 3.2 times**; the coarse step (the
-network, projection and advection, about 15 ms) is now the larger part. The four-thread rows are wall time on a machine
-with four cores and a load of 15 to 21: four threads found no free cores (they took longer than one), so those rows say
-only that the ratio holds; on the Sapphire Rapids host before the move, quieter, one core gave 7.8 against 51.8 ms (AVX-512)
-and 9.5 against 52.7 ms (AVX2).
+So the detail layer is **4.5 to 4.9 times faster** on one core and a step **2.5 to 2.7 times** (the busy run said 5.7 to
+6.5 and 3.1 to 3.2: the other jobs had slowed the old scalar layer by a third and the new one by a few percent; why was
+not studied); the coarse step (the network, projection and advection, about 15 ms) is now the larger part. On four
+threads, which on the busy machine found no free cores (those rows took longer than one thread), a step takes 9.7 to
+11.3 ms against 20.6 to 25.2 (0.45 to 0.46) and the detail layer alone 3.7 to 4.1 ms against 16.3 to 16.9 (0.22 to
+0.24): the new layer splits over threads as the old did, and the parts that do not (the coarse step's) weigh more. On
+the Sapphire Rapids host before the move, quieter, one core gave 7.8 against 51.8 ms (AVX-512) and 9.5 against 52.7 ms
+(AVX2) for the layer alone.
 
 ### 19.3 2D: what was left to gain
 
@@ -4045,21 +4120,25 @@ What ships (each kept only when it was a gain on both ISAs and every frame of th
   values by two-register permutes from a window planned at set-up (the scalar loop where its cells do not fit);
 - **the row stages out of line** (the copy, the round trip, the lock's factors and rows), which compiles a little better.
 
-`results/detail/frames_2d_*.md`: the 27 shipped models, 12 rounds of 16 frames, float; detail = the detail stage, step =
-the whole step, frame = step and picture; new / old, geometric mean over models [95% bootstrap over models]:
+Round 7 on the quiet machine (`results/quiet/round7/detail_frames_2d_*.md`): the 33 shipped models (the 27 of this study
+and the six of rounds 10 and 11), 12 rounds of 16 frames, float; detail = the detail stage, step = the whole step, frame
+= step and picture; new / old, geometric mean over models [95% bootstrap over models]; the detail stage's milliseconds,
+the median over models, with the busy run's (27 models, `results/detail/frames_2d_*.md`) where they differ by more than
+15%:
 
 | size | ISA | detail | step | frame | detail ms, old / new | frames compared, differing |
 |---:|---|---|---|---|---|---|
-| 128 | AVX2 | **0.878 [0.869, 0.888]** | 0.951 [0.947, 0.955] | 0.971 [0.967, 0.975] | 0.176 / 0.157 | 5,184, 0 |
-| 128 | AVX-512 | **0.868 [0.859, 0.878]** | 0.954 [0.948, 0.959] | 0.975 [0.970, 0.979] | 0.183 / 0.160 | 5,184, 0 |
-| 256 | AVX2 | **0.878 [0.870, 0.887]** | 0.926 [0.920, 0.931] | 0.962 [0.958, 0.966] | 0.569 / 0.496 | 5,184, 0 |
-| 256 | AVX-512 | **0.874 [0.862, 0.885]** | 0.930 [0.924, 0.936] | 0.965 [0.959, 0.972] | 0.568 / 0.503 | 5,184, 0 |
-| 512 | AVX2 | **0.897 [0.885, 0.908]** | 0.913 [0.906, 0.921] | 0.961 [0.954, 0.969] | 2.290 / 2.035 | 5,184, 0 |
-| 512 | AVX-512 | **0.904 [0.886, 0.922]** | 0.926 [0.913, 0.939] | 0.974 [0.968, 0.980] | 2.329 / 2.131 | 5,184, 0 |
+| 128 | AVX2 | **0.889 [0.880, 0.898]** | 0.960 [0.957, 0.963] | 0.973 [0.969, 0.977] | 0.170 / 0.154 | 6,336, 0 |
+| 128 | AVX-512 | **0.864 [0.852, 0.877]** | 0.944 [0.940, 0.949] | 0.970 [0.966, 0.974] | 0.168 / 0.150 | 6,336, 0 |
+| 256 | AVX2 | **0.893 [0.883, 0.902]** | 0.936 [0.930, 0.941] | 0.964 [0.959, 0.969] | 0.498 / 0.449 | 6,336, 0 |
+| 256 | AVX-512 | **0.889 [0.877, 0.902]** | 0.927 [0.920, 0.934] | 0.966 [0.960, 0.972] | 0.506 / 0.453 | 6,336, 0 |
+| 512 | AVX2 | **0.899 [0.889, 0.909]** | 0.918 [0.912, 0.925] | 0.968 [0.963, 0.973] | 1.816 / 1.607 (busy: 2.290 / 2.035) | 6,336, 0 |
+| 512 | AVX-512 | **0.905 [0.895, 0.916]** | 0.919 [0.912, 0.928] | 0.969 [0.964, 0.974] | 1.928 / 1.798 (busy: 2.329 / 2.131) | 6,336, 0 |
 
-Per model the detail stage takes 0.80 to 0.82 (magic, fog) to 0.98 (the orb at 512 px) of its time; the sparse effects (fog,
-heavy gas, cloud, magic) gain most. So the 2D detail layer is about **an eighth cheaper** (a tenth at 512 px), and a
-whole frame 3 to 4% — clearly faster as a stage, not by a factor: it had been on vectors already.
+The busy run's ratios (27 models) were within 0.015 of these: detail 0.868 to 0.904, step 0.913 to 0.954, frame 0.961 to
+0.975. Per model the detail stage takes 0.78 (magic at 256 px) to 0.98 (lava at 512 px) of its time; the sparse effects
+(magic, sea spray, heavy gas, fog, the candle) gain most. So the 2D detail layer is about **an eighth cheaper** (a tenth
+at 512 px), and a whole frame 3 to 4% — clearly faster as a stage, not by a factor: it had been on vectors already.
 
 **Tried and not kept** (each measured old against new, frames compared):
 - **hardware gathers** for the grid rows: about a tie on Sapphire Rapids, but on the Cascade Lake host a frame 7 to
@@ -4088,7 +4167,8 @@ it could even be offered.
   px, AVX2 and AVX-512, float; the fine heat and soot, the coarse state, the flow and the picture) and 3,240 more at
   int8 (256 px), 16,200 pictures through `nvfx_render` (300 frames each, 128 px, both ISAs, the default precision:
   shards, crossfades and warm-ups), and 480 volume and detail steps of the 3D model (1 and 4 threads, both ISAs): **none
-  differs** (`results/detail/`).
+  differs** (`results/detail/`). Round 7 compared 38,016 more frames of the 33 models and 480 more volume and detail
+  steps on the quiet machine: none differs either.
 - **A trap found on the way:** an exact change to one function can still change frames, because GCC fuses
   multiply-adds into FMAs by the shape of the code around them (CMakeLists.txt's note). Inlining the larger row
   expansion changed how the AVX2 build compiled its callers, and their frames, though the expansion itself gave the same
@@ -4096,13 +4176,14 @@ it could even be offered.
 
 ### 19.5 What it means
 
-- **3D: the detail layer is no longer the cost of a volume.** A step is about a third of what it was; what remains is
-  the coarse step (the learned network on 6,144 cells) and the renderer's preparation and picture. A finer state or a
-  larger volume (TODO stage 2) now scales from 10 ms of detail, not 60.
+- **3D: the detail layer is no longer the cost of a volume.** A step is about 0.4 of what it was on one core (a third by
+  the busy run), 0.45 on four; what remains is the coarse step (the learned network on 6,144 cells) and the renderer's
+  preparation and picture. A finer state or a larger volume (TODO stage 2) now scales from 10 ms of detail, not 50.
 - **2D: what is left is fetching the samples' corners.** The layer was already vectorised and sparse; its exact gains
   were an eighth. A cheaper advection (§19.3's option) or the GPU are the ways to make it much cheaper, both outside
   "the same frames".
-- **Provisional:** one busy machine (the ratios are paired and interleaved; the absolute times are not a quiet machine's).
+- **Re-timed on a quiet machine** (round 7, §13.11): the 2D ratios held; the 3D gain is a factor of 4.5 to 4.9 for the
+  layer and 2.5 to 2.7 for a step, less than the busy run's 5.7 to 6.5 and 3.1 to 3.2.
 
 **Checks** (origin/main is c846c80, the branch's base, so there was nothing to merge): the full build with warnings as
 errors; the full ctest, 489 of 489 (main's 488 and `VolumeDetail`), none skipped; `nvfx_alloc_test` (no allocation per
@@ -4174,11 +4255,12 @@ minus the coarse simulation with the same seeded detail, paired bootstrap, 10,00
 
 **The verdict, by the rule: fails.** It follows real runs better than running the cheap simulation, but it runs away by
 validation's edge check (with the test's seeds it passes, that side at 1.00 against 1.01: the bound sits at C4's own
-seed-to-seed spread) and looks worse in coverage, light and the mean picture (the mean picture at every test setting): the learned smoke
-spreads into a broad cone and fills the box where the real plume stays narrow, and the coarse simulation, the teacher's
-own equations, gets the spread right. It beats holding the first frame by 7.4 dB in pictures at 1 s. A step costs
-26.6 ms on one thread and 9.0 on four through the volume API (the vectorised detail layer of §19); a 256 x 256 picture
-93 ms (provisional, `results/3d/r/timing.csv`).
+seed-to-seed spread) and looks worse in coverage, light and the mean picture (the mean picture at every test setting):
+the learned smoke spreads into a broad cone and fills the box where the real plume stays narrow, and the coarse
+simulation, the teacher's own equations, gets the spread right. It beats holding the first frame by 7.4 dB in pictures
+at 1 s. A step costs 21.4 ms on one thread and 9.2 on four through the volume API (the vectorised detail layer of §19);
+a 256 x 256 picture 86 ms on one thread and 23 on four (a quiet machine, round 7 of the quiet re-timing, §13.11; the
+first measurement, `results/3d/r/timing.csv`, gave a step 26.6 ms on one thread).
 
 **What ships**: `models/3d/smoke.nvfx3` (C4) as a labelled demo, checked by `neuralfx.Smoke3dShippedModel`; four demo
 videos ([videos/README.md](../videos/README.md) §9c: the teacher against plume theory, the smoke walked around, real
@@ -4350,6 +4432,243 @@ explosion and the mushroom, and `LibraryKeyframesFrozen` and the pack's after th
 Godot test (`engines/godot/test.sh`: the fireball and the library stage, 0 failures each); `models/restore.sh` against
 the data root (0 placed, 75 already there, 0 different). README's test count is 541 (main's 539, main's new 3D test and
 `Script.AnEffectsSoftenSmoothsItsDetailLayer`).
+
+## 22. Half size where it pays: the effect manager draws large effects at half size
+
+**Status: finished** (22 October 2026; branch `manager-halfsize`). **In short:** the effect manager can draw a large
+effect at the level below its level and let the bilinear 2x bring it back (`half_px`, NVFX_VERSION 8; the engine's
+sampler does the 2x by default, the manager's own on request; the learned 2x never). On the held-out test it stays within
+the null's margins of drawing at full size against the simulator on every measure for all seven effects measured, and
+is closer to the simulator than full size on tracking at 1 s (+0.22 to +0.89 dB); it costs 0.31 to 0.42 of full size
+for six of them but 0.54 for magic, above the 0.5 the rule allowed, so **by its rule it does not ship on by default**:
+`half_px` is 0, and an engine sets it (per model too). With no budget it took a close-up scene's tick from 17.1 to 15.2
+ms; with a budget the planner spends the saving on more simulations of their own (provisional timings: other agents'
+load). This section's design and rule (§22.1 to §22.3)
+were committed before any validation, test or timing number (cdc6933); the rule's numbers (the margins) before the
+test (b925b7a), which ran once. Seeds: this work's block, 35,000,000 to 35,099,999. Data under the data root's `halfsize` (the
+frozen models `crowd/models` and `library/models`, the cache, the markers, the logs); tables under
+`results/manager/halfsize`.
+
+### 22.1 The question and the policy
+
+Study P (§17) found that drawing a large effect at half size and bringing it back with the bilinear 2x costs 0.36 to
+0.43 of drawing it at full size at 512 px (0.39 to 0.48 at 256 px), and is within the null's margins of the full-size
+drawing against the simulator's frames for all six of its effects at 512 px (four of six at 256 px). The effect manager
+(docs/MANAGER.md) already picks each simulation's picture size (32, 64, 128 or 256 px: the smallest that holds its size
+on screen) and update rate from its size on screen and the budget; a 256 px picture costs about three times a 128 px one
+in its cost model (2.35 against 0.78 ms per frame on one AVX2 core, MANAGER.md §6). **The policy**: a simulation whose
+instances are at least `half_px` pixels on screen (or `half_share` of the viewport's height) is drawn at the level below
+its level, and the bilinear 2x brings the picture back.
+
+- **The API** (NVFX_VERSION 8, NVFX_MANAGER_VERSION 2): `nvfx_manager_desc.half_px`, `half_share` and `half_upscale`;
+  `nvfx_manager_model_desc.half_px` (below 0, the default: the manager's thresholds; 0: never for this effect; above 0:
+  its own); the picture flag `NVFX_PICTURE_HALF` (then `lod_size` is the drawing's size); `nvfx_manager_stats.half`.
+  `half_upscale` says who does the 2x: `NVFX_UPSCALE_OFF` (the default), the engine's bilinear sampler, which already
+  stretches every picture to its sprite: the picture is the half-size drawing; `NVFX_UPSCALE_BILINEAR`, the manager, with
+  the runtime's bilinear 2x (study P's; what `nvfx_instance_set_upscale(NVFX_UPSCALE_BILINEAR)` draws, to the bit), so the
+  picture has its level's size. `NVFX_UPSCALE_LEARNED` is refused: it did not pass its rule (§17.3) and stays an
+  experimental instance option that the manager never picks.
+- **How it plans.** The planner works on picture levels as before; a simulation drawn at half size has its slot (its
+  runners) at the level below, and the cost model counts that level's steps and pictures and, with BILINEAR, the 2x of
+  every picture shown. Drawing at half size is a downward change (at once); drawing at full size again is an upward one
+  (it waits for room in the budget and `min_dwell`). Hysteresis: once on, a simulation stays on until its size falls
+  below the threshold by `hysteresis` (15%). A simulation locked to a level and the proxies are never drawn at half size.
+  Everything depends on the sizes given and the cost model, never on measured time: the same pictures on any number of
+  threads; nothing is allocated per frame (the 2x pictures and the threads' upscalers are made by
+  `nvfx_manager_add_model`).
+- **What the candidate default switches.** With `half_px` 256 and the manager's largest size (256), only 256 px pictures
+  of effects at least 256 px on screen are drawn at 128: study P's comparison at S = 256 exactly (the full-size drawing
+  at S against the half-size one brought up by the bilinear 2x and shown at S). With the default pools an effect has one
+  256 px slot (MANAGER.md §2.8), so in a crowd few simulations are at 256 px at once.
+- **The library's stages and scenes** do not pick picture sizes: each learned module is drawn at the tile size its
+  catalogue entry or script names (`size N`, COMPOSE.md §4.3), whatever its size on screen, so they have nothing to switch;
+  a script that wants a module at half size writes it at half size. **The C++ wrapper** takes the C structs (the new
+  fields are there) and gains `nvfx::Picture::half()`. **The FUSE adapter** exposes `SpriteConfig::half_px`,
+  `half_share` and `half_upscale` and `SpriteModel::half_px`.
+
+### 22.2 The rule (committed before validation; the test runs once)
+
+**The effects**: the four the manager's crowd benchmark plays, as it plays them (`v2/models` fire, smoke and explosion,
+`fx/models/d` steam), and the library's fire (study M's), explosion (study M3's) and magic (study L's), which the FUSE
+demo's sprites play with smoke: seven models, copied under the data root's `halfsize` and frozen by SHA-256
+([models.csv](../results/manager/halfsize/models.csv)).
+
+**The arms**, at S = 256 px through the runtime as it ships (its default precision and ISA), with study P's tool
+(`nvfx_study_p` with `--dir`, `--seed-base`, arms N and B only): **N**, an instance at 256 px; **B**, the instance at
+128 px brought up by the runtime's bilinear 2x (the manager's picture with BILINEAR, and what an engine's bilinear
+sampler shows with OFF); **H**, the 128 px instance alone (the cost of OFF).
+
+**The measures** are study P's (§17.2, STUDY_P.md §4.1): (a) against N on the same seed (active PSNR, SSIM, the high
+band, the motion against N's), reported, not deciding; (b) against the simulator's frames at 256 px (its 128 cells drawn
+at 256 px): tracking at 1 s, the detail spectrum, |ln motion ratio|, coverage, emission, the mean frame and the high band
+against the real runs.
+
+**Splits and seeds** (run k of setting s takes base + 100 s + k):
+
+| split | settings | seeds |
+|---|---|---|
+| validation (the null probe and the margins) | study G's 10 validation settings | real 35,000,000, plays 35,010,000, null 35,020,000, tracking 35,030,000 |
+| **test, once** | study B's held-out settings extended to 20 (`test_settings(20)`) | real 35,040,000, plays 35,050,000, tracking 35,060,000 |
+| cost | controls 0.6, 0.5, 0.6 | 35,090,000 |
+| benchmarks and videos | | 35,095,000 on |
+
+**The margins** (study P's form): per effect and (b) measure, the larger of study K's margin and the null's RMS change
+at a setting (N with fresh seeds against N, 4 plays pooled, over the 10 validation settings); tracking keeps −0.20 dB.
+Computed by `nvfx_study_p margins` from N and the null alone and committed before the test.
+
+**The rule.** The policy ships **on by default** (`half_px` 256, `half_upscale` OFF) if both hold:
+
+1. **Quality**: for every one of the seven effects, B minus N against the simulator's frames at 256 px is within the
+   effect's margin on every (b) measure: paired over the 20 test settings, 95% bootstrap, 10,000 resamples (seed 2026),
+   the interval's worse end within the margin.
+2. **Cost**: for every one of the seven effects, H costs at most 0.5 of N a frame at 256 px: thread CPU time per frame
+   through `nvfx_render`, N, H and B interleaved in one process with their order rotated each round, 30 rounds of 20
+   frames (`nvfx_study_p cost --net none`), the median over the rounds of H / N, on the quiet machine.
+
+Otherwise `half_px` defaults to 0 (off), what failed is reported, and the policy stays available to set. Reported beside
+the rule, not deciding: (a) against N; validation's readings; B / N; the benchmarks (§22.3).
+
+### 22.3 The benchmarks (committed before any run)
+
+The manager's crowd benchmark (MANAGER.md §7: 160 instances of fire, smoke, steam and explosions in a fly-through, seed
+1, default pools and costs) and a close-up variant of it where effects are large on screen (`nvfx_crowd --scene close`:
+32 fires, smoke columns and steam vents 2 to 40 m ahead, a camera walking at 0.6 m/s, an explosion every 1.5 s; seed
+35,095,001; four 256 px slots per effect, as an engine that plays large effects would size that pool). Configurations: the
+crowd at 4 ms on one thread, 8 ms on two, 16 ms on four and no budget on four; the close scene at 4 ms on one thread, 8 ms
+on two and no budget on four. Arms: **off** (`half_px` 0), **on** (`half_px` 256, OFF) and **cpu2x** (`half_px` 256,
+BILINEAR). Ten rounds; in each, every configuration's three arms run back to back in an order rotated from round to round
+(`tools/manager/time_halfsize.sh build OUT 10 20`). Reported: per configuration and arm the median over the rounds of the
+CPU per tick (the mean of a run's ticks, its median and its 99th percentile), of the plan, of the simulations, proxied
+instances and simulations drawn at half size, each with a 95% bootstrap interval of the median; and each arm against off
+round by round, the ratio and the difference of the CPU per tick, medians with 95% bootstrap intervals. With a budget the
+planner spends what drawing at half size saves on other simulations (fewer proxies, higher rates), so there the CPU per
+tick stays near the budget and the plan's composition says what changed; with no budget the CPU per tick shows the
+saving directly. On the quiet machine (after the round-7 re-timing finishes), else labelled provisional.
+
+### 22.4 The rule's cost run (committed before any validation or test number)
+
+`nvfx_study_p cost --net none --sizes 256` ([cost_rule.txt](../results/manager/halfsize/cost_rule.txt), the rows in
+`crowd/cost.csv` and `library/cost.csv`), the first run after the round-7 quiet session finished (21:19 UTC), while
+another agent's niced jobs ran (load average 4 to 7): **provisional**, though N, H and B are interleaved in one process on
+a pinned core. H / N, the median over the 30 rounds (the mean and its 95% bootstrap interval in brackets):
+
+| effect | N at 256 px | **H / N** (OFF) | B / N (BILINEAR) |
+|---|---:|---:|---:|
+| fire (v2, the crowd's) | 1.91 ms | **0.313** (0.341 [0.320, 0.365]) | 0.361 |
+| smoke | 1.49 | **0.419** (0.468 [0.437, 0.501]) | 0.467 |
+| steam | 1.75 | **0.332** (0.347 [0.324, 0.370]) | 0.391 |
+| explosion (v2) | 1.33 | **0.403** (0.407 [0.392, 0.423]) | 0.453 |
+| fire (the library's, study M) | 2.12 | **0.337** (0.356 [0.329, 0.386]) | 0.363 |
+| explosion (the library's, study M3) | 1.46 | **0.385** (0.395 [0.374, 0.416]) | 0.444 |
+| magic (the library's, study L) | 1.25 | **0.543** (0.551 [0.537, 0.566]) | 0.609 |
+
+**The cost condition holds for six of the seven effects and fails for magic** (0.543 against the 0.5 allowed): magic's
+full-size frame is cheap (a sparse swirl), so the coarse step, which does not shrink with the picture, is a larger part
+of it. The rule asks for all seven, so **by the rule the policy does not ship on by default**: `half_px` stays 0, and the
+policy is available to set (per model too). This run decides; any later run on a quieter machine is reported beside it
+and does not. The quality test (§22.2) still runs once, as committed, to report what half size does to each effect.
+
+A quiet cross-check, beside the rule: round 7 of the quiet re-timing (§13.11) timed every library model alone at 128 and
+256 px (int8, AVX-512, separate runs rather than interleaved); the ratio 128 / 256 px is 0.400 for the library's fire,
+0.418 for smoke, 0.318 for steam, 0.387 for the explosion and **0.528 for magic**: magic's ratio is above 0.5 on a quiet
+machine too.
+
+### 22.5 Validation (the null probe; 10 settings)
+
+`nvfx_study_p eval --split val --null` on study G's ten validation settings, 4 plays, 4 null plays and 4 real runs a
+setting, 2 tracking runs ([crowd](../results/manager/halfsize/crowd/p_eval_val.csv),
+[library](../results/manager/halfsize/library/p_eval_val.csv)). **The margins**
+([crowd](../results/manager/halfsize/crowd/p_margins.csv), [library](../results/manager/halfsize/library/p_margins.csv);
+committed in b925b7a before the test): re-seeding N moves its distance from the simulator's frames by 0.02 to 0.13 in
+the detail spectrum, 3 to 18% in motion and 1 to 3.6 dB in the mean frame at a setting, so most margins are the null's;
+tracking keeps −0.20 dB and emission study K's 0.0001 (the fire's 0.0003, the null's). The reading of B against N
+(not deciding): within every margin for 6 of 7; steam's |ln motion ratio| interval, +0.007 [−0.149, +0.167], reached
+past its 0.145.
+
+### 22.6 The test (once; 20 held-out settings)
+
+Study B's held-out settings extended to 20, seeds 35,040,000 (real), 35,050,000 (plays) and 35,060,000 (tracking), 4
+plays and 2 tracking runs a setting, run once (markers `test_ran_rule_crowd`, `test_ran_rule_library` under the data
+root's `halfsize`; [crowd](../results/manager/halfsize/crowd/p_decide_test.txt),
+[library](../results/manager/halfsize/library/p_decide_test.txt), the rows in `p_eval_test.csv` and `p_decide_test.csv`).
+
+**The quality condition holds for all seven effects**: B minus N against the simulator's frames at 256 px, paired over
+the 20 settings, 95% intervals (better is higher for tracking and the mean frame, lower for the others; the margins in the
+files above; every interval's worse end is inside its margin):
+
+| effect | tracking at 1 s (dB) | detail spectrum | \|ln motion ratio\| | mean frame (dB) | high band vs real |
+|---|---|---|---|---|---|
+| fire (v2) | **+0.853 [+0.766, +0.939]** | **−0.351 [−0.402, −0.301]** | −0.028 [−0.100, +0.045] | **+0.047 [+0.021, +0.076]** | **−0.422 [−0.500, −0.343]** |
+| smoke | **+0.855 [+0.792, +0.919]** | **−0.480 [−0.524, −0.436]** | **−0.167 [−0.219, −0.114]** | −0.013 [−0.057, +0.030] | **−0.637 [−0.707, −0.571]** |
+| steam | **+0.768 [+0.688, +0.861]** | **−0.578 [−0.667, −0.469]** | −0.058 [−0.165, +0.057] | −0.002 [−0.058, +0.053] | **−0.862 [−1.003, −0.704]** |
+| explosion (v2) | **+0.223 [+0.187, +0.260]** | **−0.072 [−0.131, −0.021]** | +0.006 [−0.008, +0.019] | +0.002 [−0.009, +0.013] | **−0.089 [−0.170, −0.012]** |
+| fire (study M) | **+0.886 [+0.800, +0.973]** | **−0.331 [−0.379, −0.284]** | −0.047 [−0.120, +0.028] | **+0.041 [+0.009, +0.081]** | **−0.373 [−0.445, −0.304]** |
+| explosion (study M3) | **+0.223 [+0.187, +0.260]** | **−0.074 [−0.113, −0.041]** | +0.012 [−0.001, +0.025] | +0.006 [−0.007, +0.017] | **−0.094 [−0.141, −0.053]** |
+| magic | **+0.461 [+0.422, +0.502]** | **−0.184 [−0.298, −0.072]** | **−0.130 [−0.187, −0.074]** | −0.018 [−0.038, −0.000] (worse, within its 1.87 dB) | **−0.225 [−0.393, −0.058]** |
+
+Bold: B is closer to the simulator than N (the interval clear of zero on the better side). Coverage and emission are
+within 0.0003 of N's for every effect (their margins 0.0001 to 0.027). So drawn at half size, every effect is within the
+null's margins of full size against the simulator's frames on every measure, and closer than full size on tracking at 1 s,
+the detail spectrum and the high band (the fires also on the mean frame; magic's mean frame is 0.02 dB further, inside
+its 1.87 dB margin): at 256 px the simulator's frames are its 128 cells drawn at 256 px, and full size draws its detail
+layer's own filaments above them, which half size, like the simulator, does not have (study P's finding at 256 and
+512 px, §17).
+
+**What it loses against full size on the same seed** (beside the rule; means over the 20 settings, 95% bootstrap
+intervals): the active PSNR of B against N is 37.0 to 37.1 dB for the two explosions, 31.4 dB for magic, 26.5 to 26.7 dB
+for the two fires, 24.5 dB for smoke and 24.0 dB for steam; SSIM 0.993, 0.965, 0.986, 0.925 and 0.931. Its high band
+has 10^−0.17 to 10^−1.34 of N's power (the explosions keep two thirds of it, the fires a twentieth), and the |ln| of
+its motion statistic's ratio to N's is 0.03 (the explosions) to 0.35 (smoke and steam): the fine filaments the detail
+layer draws at 256 px, which move, are what half size leaves out. Whether a game needs them on an effect that large is
+a judgement by eye.
+
+### 22.7 The choice
+
+By the rule (§22.2): the quality condition holds for 7 of 7 effects; the cost condition for 6 of 7 (magic, 0.543, §22.4).
+Both are needed, so **the policy ships off by default**: `nvfx_manager_desc_init` sets `half_px` 0 and `half_share` 0,
+and nothing an engine does today changes (the planner's decisions, the pictures and the memory are main's with it off:
+the 2x pictures and upscalers are made only when a threshold is set, and every manager test that ran before passes
+unchanged). An engine that wants it sets `half_px` (256 is the threshold measured), or `half_share`, and can leave magic,
+or any effect, at full size with `nvfx_manager_model_desc.half_px = 0` (ENGINES.md §10, FUSE.md §5).
+
+### 22.8 The benchmarks (provisional)
+
+MANAGER.md §7.2 has the table ([ab_summary.txt](../results/manager/halfsize/ab_summary.txt)): ten interleaved rounds of
+the crowd and the close-up scene, off, on (OFF: the engine's sampler does the 2x) and cpu2x (BILINEAR), run after the
+quiet session while other agents' jobs ran (load average 6 to 20). With no budget, on against off: the close scene's CPU
+per tick **0.886 [0.869, 0.901]** (17.1 to 15.2 ms, about five simulations drawn at half size), the crowd's
+**0.978 [0.951, 0.994]** (about one). With a budget the planner spends the saving: the close scene at 8 ms runs 17.4
+simulations of their own instead of 13.2 and shows 22.0 instances from proxies instead of 25.6, for 1.045 [1.024, 1.061]
+of the CPU (within the budget); the crowd's plans hardly change (each effect has one 256 px slot by default, and few of
+its effects are 256 px on screen) and its CPU per tick ties within the noise. One run in 210 (the crowd at 16 ms on four
+threads) hung at its first tick: a race in the manager's worker start (main's code, not this work's), fixed here
+(831bdb5: a worker starts from epoch 0); the run was killed and run again.
+
+### 22.9 What it means, and what is left
+
+- **For an engine:** large effects at half size are as realistic as at full size against the simulator, cost a third to
+  a half, and lose the finest filaments; the manager does it from a threshold on screen, with no CPU for the 2x (the
+  engine's sampler) and no change to how pictures are drawn. It is off by default because one effect of seven, magic,
+  saved less than the rule asked (0.54 of full size: its cheap full-size frame leaves the fixed coarse step a larger
+  share).
+- **Not measured:** 128 px pictures drawn at 64 (a threshold below about 147 px or a smaller `max_size` switches them);
+  the 26 other library models (study P measured six more at 256 px: four within its margins, the wildfire's and the
+  waterfall's motion intervals past them); the timings on a quiet machine (every timing here is provisional).
+- **Left (TODO.md, Next):** re-time the rule's cost and the benchmarks on a quiet machine (`jobs/timing.sh`; the rule's
+  verdict stands on its own run); a per-effect default (on for the effects measured that passed both conditions, off for
+  magic) would need its own rule; the 256 px pool (one slot per effect by default) limits what the policy can switch in a
+  crowd.
+
+### 22.10 Checks
+
+After merging origin/main at 4fdc2f7 (round 7's quiet re-timing; docs and tools only): the full build with warnings as
+errors (`-DNEURALFX_WERROR=ON`, a fresh build directory: no warning); the full ctest, **554 of 554**, none failed or
+skipped (main's 547 and the manager's seven new tests: `HalfSizeIsNvfxRenderWithTheBilinear2x`,
+`HalfSizeWithoutTheUpscaleIsTheDrawing`, `HalfSizeTrainedEffectsAreNvfxRender`, `HalfSizeFollowsTheScreenWithHysteresis`,
+`HalfSizeLocksModelsShareAndCost`, `HalfSizeUnderAShortBudget`, `SamePicturesOnAnyNumberOfThreadsAtHalfSize`; the ABI
+test's new sizes); `nvfx_alloc_test` (no allocation per frame, the manager with half size on, with the 2x and without, on
+its threads and the engine's); `nvfx_gallery --check --require-models` (234 effects, 234 played, 0 failed); the Godot
+test (`engines/godot/test.sh`: the fireball and the library stage, 0 failures each). README's test count is 554.
 
 ## 24. Study R2: the 3D smoke again, on a teacher with its momentum fixed
 

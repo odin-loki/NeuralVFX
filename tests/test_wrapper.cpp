@@ -526,6 +526,7 @@ TEST(Wrapper, TheManagerIsTheCApi) {
   d.max_instances = 16;
   d.max_size = 64;
   d.budget_ms = 1000.f;
+  d.half_px = 50.f;  // the 60 px one is drawn at half size (docs/MANAGER.md §2.10)
   d.threads = 0;  // the "engine" runs the jobs, in both
   d.job_slots = 2;
   auto m = nvfx::Manager::create(d);
@@ -609,7 +610,7 @@ TEST(Wrapper, TheManagerIsTheCApi) {
       nvfx_manager_tick_end(mgr);
     }
   };
-  int pictures = 0;
+  int pictures = 0, halves = 0;
   for (int t = 0; t < 20; ++t) {
     if (t == 5) {
       const float c2c[3] = {0.8f, 0.2f, 0.5f};
@@ -629,6 +630,8 @@ TEST(Wrapper, TheManagerIsTheCApi) {
       EXPECT_EQ(pic->flags, cp.flags) << "tick " << t;
       EXPECT_EQ(pic->is_new(), (cp.flags & NVFX_PICTURE_NEW) != 0);
       EXPECT_EQ(pic->finished(), false);
+      EXPECT_EQ(pic->half(), (cp.flags & NVFX_PICTURE_HALF) != 0);
+      halves += pic->half() ? 1 : 0;
       ASSERT_EQ(pic->rgba != nullptr, cp.rgba != nullptr);
       if (cp.rgba) {
         ++pictures;
@@ -641,6 +644,7 @@ TEST(Wrapper, TheManagerIsTheCApi) {
     }
   }
   EXPECT_GT(pictures, 20) << "the instances have pictures";
+  EXPECT_GT(halves, 0) << "one is drawn at half size";
   const auto st = m->get_stats();
   nvfx_manager_stats cst;
   nvfx_manager_get_stats(c, &cst);

@@ -31,7 +31,7 @@
 extern "C" {
 #endif
 
-#define NVFX_VERSION 7 /* 2: scenes (nvfx_scene.h); 3: nvfx_version(), effect packs (nvfx_pack.h); 4: engine layers and trails; 5: precision (study K); 6: 3D volumes (nvfx_volume.h); 7: drawn at half size and upscaled (study P) */
+#define NVFX_VERSION 8 /* 2: scenes (nvfx_scene.h); 3: nvfx_version(), effect packs (nvfx_pack.h); 4: engine layers and trails; 5: precision (study K); 6: 3D volumes (nvfx_volume.h); 7: drawn at half size and upscaled (study P); 8: the effect manager draws large effects at half size (nvfx_manager_desc.half_px) */
 
 typedef enum nvfx_status {
   NVFX_OK = 0,
@@ -157,7 +157,8 @@ NVFX_API nvfx_status nvfx_instance_set_handoff(nvfx_instance* instance, int fram
  * not better than BILINEAR on PSNR, SSIM and fine detail together (on the held-out test, docs/STUDY_P.md §6). The
  * half-size instance alone costs 0.29 to 0.34 of a full-size one at 512 px and is within the null's margins of the
  * full-size one against the simulator's frames: an engine gets most of the saving by creating the instance at half size
- * and letting its GPU sample it larger.
+ * and letting its GPU sample it larger. The effect manager does that for large effects by their size on screen
+ * (nvfx_manager_desc.half_px, NVFX_VERSION 8), with the bilinear 2x only: it never picks LEARNED.
  * Errors: NVFX_ERROR_ARGUMENT (not a rollout effect, an unknown mode, LEARNED with no upscaler attached),
  * NVFX_ERROR_UNSUPPORTED (a size that is not a multiple of 64). */
 typedef enum nvfx_upscale { NVFX_UPSCALE_OFF = 0, NVFX_UPSCALE_BILINEAR = 1, NVFX_UPSCALE_LEARNED = 2 } nvfx_upscale;

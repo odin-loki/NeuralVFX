@@ -53,6 +53,12 @@
 //
 // Options: --root DATA (default $NEURALVFX_DATA or /root/nvfx-data; this study's files are under DATA/p_upscale),
 // --results DIR (results/experiments/upscale), --threads N (2).
+//
+// Another study measures with this tool: the effect manager's half size where it pays (docs/REPORT.md §22, arms N and B
+// only): --dir DIR (its models, cache and markers instead of DATA/p_upscale), --seed-base N (validation's real runs,
+// plays, null and tracking from N, N + 10,000, + 20,000, + 30,000; the test's from N + 40,000, + 50,000, + 60,000),
+// eval with no --cands, margins and decide over the effects its rows hold, and cost --net none (N, H and B; --seed,
+// --controls).
 #include "args.hpp"
 #include "label_font.hpp"
 
@@ -182,7 +188,9 @@ int effect_index(sim::Effect e) {
 struct Ctx {
   fs::path data, results;
   int threads = 2;
-  fs::path dir() const { return data / "p_upscale"; }
+  fs::path study;            // --dir: this study's files (default DATA/p_upscale)
+  std::uint64_t seed_base = 0;  // --seed-base: the val and test seeds from this block (default study P's)
+  fs::path dir() const { return study.empty() ? data / "p_upscale" : study; }
   fs::path model(sim::Effect e) const { return dir() / "models" / std::format("{}.nvfx", ename(e)); }
   fs::path net(const std::string& name) const {
     if (name.find('/') != std::string::npos || name.ends_with(".nvfxup")) return fs::path(name);
@@ -252,7 +260,10 @@ struct Split {
   std::vector<Setting> settings;
   std::uint64_t real = 0, play = 0, null = 0, track = 0;
 };
-Split split_of(const std::string& name, sim::Effect e, int n) {
+// With a seed block `base` (--seed-base; another study measuring with this tool, e.g. docs/REPORT.md §22): validation's
+// real runs, plays, null and tracking from base, base + 10,000, + 20,000 and + 30,000; the test's from base + 40,000,
+// + 50,000 and + 60,000.
+Split split_of(const std::string& name, sim::Effect e, int n, std::uint64_t base = 0) {
   Split s;
   s.name = name;
   if (name == "train") {
@@ -276,6 +287,16 @@ Split split_of(const std::string& name, sim::Effect e, int n) {
     s.track = 3'830'000;
   } else {
     throw std::invalid_argument("--split train, dev, val or test");
+  }
+  if (base > 0 && s.name == "val") {
+    s.real = base;
+    s.play = base + 10'000;
+    s.null = base + 20'000;
+    s.track = base + 30'000;
+  } else if (base > 0 && s.name == "test") {
+    s.real = base + 40'000;
+    s.play = base + 50'000;
+    s.track = base + 60'000;
   }
   return s;
 }
@@ -1515,7 +1536,7 @@ int step_eval(const tools::Args& a, const Ctx& c) {
   }
   const auto t0 = std::chrono::steady_clock::now();
   for (const sim::Effect e : effects_of(a.str("effects", "all"))) {
-    const Split sp = split_of(split, e, nset);
+    const Split sp = split_of(split, e, nset, c.seed_base);
     auto m = rollout::load_model(c.model(e));
     if (!m) throw std::runtime_error(m.error());
     const rollout::Model M = std::move(*m);
@@ -1763,6 +1784,19 @@ Table table_of(const std::vector<Row>& rows) {
   for (const Row& r : rows) t[std::format("{},{},{},{}", r.effect, r.size, r.arm, r.measure)][r.setting] = r.value;
   return t;
 }
+// The effects rows hold: study P's six in their order, then any other (another study measuring with this tool, e.g.
+// docs/REPORT.md §22) in the order of its first row.
+std::vector<sim::Effect> effects_in(const std::vector<Row>& rows) {
+  std::vector<sim::Effect> v;
+  for (const sim::Effect e : kStudy) {
+    if (std::ranges::any_of(rows, [&](const Row& r) { return r.effect == ename(e); })) v.push_back(e);
+  }
+  for (const Row& r : rows) {
+    sim::Effect e{};
+    if (sim::parse_effect(r.effect, e) && std::ranges::find(v, e) == v.end()) v.push_back(e);
+  }
+  return v;
+}
 std::vector<double> column(const Table& t, const std::string& key, const std::vector<int>& settings) {
   std::vector<double> v;
   const auto it = t.find(key);
@@ -1777,12 +1811,13 @@ std::vector<double> column(const Table& t, const std::string& key, const std::ve
 
 int step_margins(const tools::Args& a, const Ctx& c) {
   const fs::path in = a.has("in") ? fs::path(a.str("in")) : c.results / "p_eval_val.csv";
-  const Table t = table_of(read_rows(in));
+  const std::vector<Row> rows = read_rows(in);
+  const Table t = table_of(rows);
   const auto sizes = ints(a.str("sizes", "256,512"));
   std::ofstream o(c.results / "p_margins.csv");
   o << "effect,size,measure,k_margin,null_rms,null_mean,n_value,margin,settings\n";
   std::println("the null (N with fresh seeds minus N, pooled plays, over the validation settings) and the margins:");
-  for (const sim::Effect e : kStudy) {
+  for (const sim::Effect e : effects_in(rows)) {
     for (const int S : sizes) {
       for (const Measure& m : kBMeasures) {
         std::vector<int> set;
@@ -1834,7 +1869,9 @@ std::string fmt_iv(const metrics::Interval& iv, int prec) {
 int step_decide(const tools::Args& a, const Ctx& c) {
   const std::string split = a.need("split");
   const fs::path in = c.results / std::format("p_eval_{}.csv", split);
-  const Table t = table_of(read_rows(in));
+  const std::vector<Row> rows = read_rows(in);
+  const Table t = table_of(rows);
+  const std::vector<sim::Effect> effects = effects_in(rows);
   const auto margins = read_margins(c.results / "p_margins.csv");
   const auto sizes = ints(a.str("sizes", "256,512"));
   std::set<std::string> larms;
@@ -1848,7 +1885,7 @@ int step_decide(const tools::Args& a, const Ctx& c) {
     for (const int S : sizes) {
       int a_pass = 0, b_pass = 0, both = 0;
       std::println("\n{} at {} px ({}):", arm, S, split);
-      for (const sim::Effect e : kStudy) {
+      for (const sim::Effect e : effects) {
         std::vector<int> set;
         const auto it = t.find(std::format("{},{},{},apsnr_vsN", ename(e), S, arm));
         if (it == t.end()) continue;
@@ -1884,7 +1921,8 @@ int step_decide(const tools::Args& a, const Ctx& c) {
         both += a_ok && b_ok;
         std::println("{}\n      (a) and the high band beat B: {}; (b) within the margins of N: {}", line, a_ok ? "yes" : "NO", b_ok ? "yes" : "NO");
       }
-      std::println("  {}: beats B on (a) and the high band for {} of 6, within N's margins on (b) for {} of 6", arm, a_pass, b_pass);
+      std::println("  {}: beats B on (a) and the high band for {} of {}, within N's margins on (b) for {} of {}", arm, a_pass, effects.size(), b_pass,
+                   effects.size());
     }
   }
   // Beside the rule, not deciding: B against N on (b), with the same margins (is drawing at half size and letting the GPU's
@@ -1892,7 +1930,7 @@ int step_decide(const tools::Args& a, const Ctx& c) {
   for (const int S : sizes) {
     std::println("\nB against N on (b) at {} px ({}; beside the rule, not deciding):", S, split);
     int within = 0;
-    for (const sim::Effect e : kStudy) {
+    for (const sim::Effect e : effects) {
       std::vector<int> set;
       const auto it = t.find(std::format("{},{},B,track1s", ename(e), S));
       if (it == t.end()) continue;
@@ -1912,8 +1950,19 @@ int step_decide(const tools::Args& a, const Ctx& c) {
       }
       within += ok;
       std::println("{}", line);
+      // and what B is against N on the same seeds: (a) and the high band, the motion against N's (means over the
+      // settings, 95% bootstrap intervals)
+      std::string vs = "      against N:";
+      for (const char* m : {"apsnr_vsN", "ssim_vsN", "hf_l1_vsN", "hf_log_ratio_vsN", "abs_ln_motion_vsN"}) {
+        const auto b = column(t, std::format("{},{},B,{}", ename(e), S, m), set);
+        if (b.empty()) continue;
+        const auto iv = metrics::bootstrap_mean(b, 10000, 2026);
+        vs += std::format(" {} {:.4f} [{:.4f}, {:.4f}]", m, iv.mean, iv.lo, iv.hi);
+        o << std::format("B,{},{},B_vs_N,{},{:.6f},{:.6f},{:.6f},,\n", ename(e), S, m, iv.mean, iv.lo, iv.hi);
+      }
+      std::println("{}", vs);
     }
-    std::println("  B is within N's margins on (b) for {} of 6 at {} px", within, S);
+    std::println("  B is within N's margins on (b) for {} of {} at {} px", within, effects.size(), S);
   }
   return 0;
 }
@@ -2017,6 +2066,12 @@ int step_cost(const tools::Args& a, const Ctx& c) {
   const int rounds = a.i("rounds", 30), frames = a.i("frames", 20);
   pin(a.i("core", -1));
   const std::string net_file = a.need("net");
+  // --net none: N, H and B alone (another study measuring with this tool, docs/REPORT.md §22); --seed, --controls
+  const bool learned = net_file != "none";
+  const int arms = learned ? 4 : 3;
+  const std::uint64_t seed = a.u64("seed", 3'900'200);
+  const auto cv = words(a.str("controls", "0.6,0.5,0.6"));
+  if (cv.size() != 3) throw std::invalid_argument("--controls a,b,c");
   const fs::path out = a.has("out") ? fs::path(a.str("out")) : c.results / "p_cost.csv";
   const bool fresh = !fs::exists(out);
   std::ofstream o(out, std::ios::app);
@@ -2027,27 +2082,27 @@ int step_cost(const tools::Args& a, const Ctx& c) {
     std::string file = net_file;
     for (std::size_t p; (p = file.find("{effect}")) != std::string::npos;) file.replace(p, 8, ename(e));
     const Loaded fx(c.model(e));
-    if (nvfx_effect_attach_upscaler(fx.e, c.net(file).string().c_str()) != NVFX_OK) throw std::runtime_error("cannot attach " + c.net(file).string());
+    if (learned && nvfx_effect_attach_upscaler(fx.e, c.net(file).string().c_str()) != NVFX_OK) throw std::runtime_error("cannot attach " + c.net(file).string());
     for (const int S : sizes) {
-      const Setting ctl{0.6f, 0.5f, 0.6f};
+      const Setting ctl{std::stof(cv[0]), std::stof(cv[1]), std::stof(cv[2])};
       std::array<std::unique_ptr<Instance>, 4> in;
-      in[0] = std::make_unique<Instance>(fx.e, S, ctl, 3'900'200);
-      in[1] = std::make_unique<Instance>(fx.e, S / 2, ctl, 3'900'200);
-      in[2] = std::make_unique<Instance>(fx.e, S, ctl, 3'900'200);
-      in[3] = std::make_unique<Instance>(fx.e, S, ctl, 3'900'200);
-      if (nvfx_instance_set_upscale(in[2]->p, NVFX_UPSCALE_BILINEAR) != NVFX_OK || nvfx_instance_set_upscale(in[3]->p, NVFX_UPSCALE_LEARNED) != NVFX_OK) {
+      in[0] = std::make_unique<Instance>(fx.e, S, ctl, seed);
+      in[1] = std::make_unique<Instance>(fx.e, S / 2, ctl, seed);
+      in[2] = std::make_unique<Instance>(fx.e, S, ctl, seed);
+      if (learned) in[3] = std::make_unique<Instance>(fx.e, S, ctl, seed);
+      if (nvfx_instance_set_upscale(in[2]->p, NVFX_UPSCALE_BILINEAR) != NVFX_OK || (learned && nvfx_instance_set_upscale(in[3]->p, NVFX_UPSCALE_LEARNED) != NVFX_OK)) {
         throw std::runtime_error("set_upscale");
       }
       std::vector<std::uint8_t> buf(sz(S) * sz(S) * 4);
       std::array<int, 4> at{};
       const int F = frames_of(e);  // loop the timeline over 10 s, or a one-shot's run (its restart is part of its cost)
-      for (int k = 0; k < 4; ++k) {  // warm up: a shard rolled ahead
+      for (int k = 0; k < arms; ++k) {  // warm up: a shard rolled ahead
         for (int f = 0; f < 20; ++f) in[sz(k)]->frame(at[sz(k)]++, buf);
       }
       std::array<std::vector<double>, 4> ms;
       for (int r = 0; r < rounds; ++r) {
-        for (int j = 0; j < 4; ++j) {
-          const int k = (j + r) % 4;
+        for (int j = 0; j < arms; ++j) {
+          const int k = (j + r) % arms;
           Instance& I = *in[sz(k)];
           const double t0 = thread_ms();
           for (int f = 0; f < frames; ++f) {
@@ -2066,7 +2121,7 @@ int step_cost(const tools::Args& a, const Ctx& c) {
         const auto iv = metrics::bootstrap_mean(q, 10000, 2026);
         return std::format("{:.3f} (median {:.3f}) [{:.3f}, {:.3f}]", iv.mean, median(q), iv.lo, iv.hi);
       };
-      std::println("{:>9} {}: N {:.3f} ms, H/N {}, B/N {}, L/N {}", ename(e), S, median(ms[0]), ratio(1), ratio(2), ratio(3));
+      std::println("{:>9} {}: N {:.3f} ms, H/N {}, B/N {}{}", ename(e), S, median(ms[0]), ratio(1), ratio(2), learned ? ", L/N " + ratio(3) : std::string());
       std::fflush(stdout);
     }
   }
@@ -2204,6 +2259,9 @@ int main(int argc, char** argv) try {
   c.data = a.str("root", data_root().string());
   c.results = a.str("results", "results/experiments/upscale");
   c.threads = a.i("threads", 2);
+  // another study measuring with this tool (docs/REPORT.md §22): its own files and seed block
+  if (a.has("dir")) c.study = a.str("dir");
+  c.seed_base = a.u64("seed-base", 0);
   const std::string cmd = a.positional()[0];
   int rc = 0;
   if (cmd == "pin") rc = step_pin(c);

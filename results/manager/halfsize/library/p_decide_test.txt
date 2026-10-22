@@ -1,0 +1,9 @@
+
+B against N on (b) at 256 px (test; beside the rule, not deciding):
+  explosion: track1s +0.2226 [+0.1866, +0.2598] spectrum_l1 -0.0740 [-0.1128, -0.0410] abs_ln_motion_ratio +0.0125 [-0.0007, +0.0248] coverage_l1 -0.0000 [-0.0001, +0.0000] emission_l1 -0.0000 [-0.0000, -0.0000] mean_frame_psnr +0.0061 [-0.0070, +0.0169] hf_l1_real -0.0940 [-0.1405, -0.0531]
+      against N: apsnr_vsN 37.1462 [36.6990, 37.5857] ssim_vsN 0.9932 [0.9925, 0.9938] hf_l1_vsN 0.1766 [0.0972, 0.2661] hf_log_ratio_vsN -0.1735 [-0.2640, -0.0927] abs_ln_motion_vsN 0.0323 [0.0274, 0.0374]
+       fire: track1s +0.8859 [+0.8002, +0.9730] spectrum_l1 -0.3309 [-0.3786, -0.2844] abs_ln_motion_ratio -0.0471 [-0.1202, +0.0278] coverage_l1 +0.0000 [-0.0000, +0.0000] emission_l1 -0.0000 [-0.0000, +0.0000] mean_frame_psnr +0.0409 [+0.0087, +0.0811] hf_l1_real -0.3729 [-0.4447, -0.3038]
+      against N: apsnr_vsN 26.5330 [26.1148, 26.9523] ssim_vsN 0.9857 [0.9839, 0.9875] hf_l1_vsN 1.3336 [1.3023, 1.3651] hf_log_ratio_vsN -1.3336 [-1.3651, -1.3024] abs_ln_motion_vsN 0.2078 [0.1984, 0.2174]
+      magic: track1s +0.4606 [+0.4219, +0.5015] spectrum_l1 -0.1840 [-0.2979, -0.0717] abs_ln_motion_ratio -0.1304 [-0.1866, -0.0740] coverage_l1 +0.0000 [-0.0000, +0.0001] emission_l1 +0.0000 [-0.0000, +0.0000] mean_frame_psnr -0.0181 [-0.0383, -0.0003] hf_l1_real -0.2253 [-0.3925, -0.0579]
+      against N: apsnr_vsN 31.3631 [31.1439, 31.5680] ssim_vsN 0.9651 [0.9616, 0.9685] hf_l1_vsN 1.0155 [0.9501, 1.0813] hf_log_ratio_vsN -1.0155 [-1.0813, -0.9501] abs_ln_motion_vsN 0.2818 [0.2615, 0.3030]
+  B is within N's margins on (b) for 3 of 3 at 256 px

@@ -549,21 +549,27 @@ Beside the rule:
   (+2.24 [+1.91, +2.58]): a rising smoke column does not stand still the way a flame's base does. Other real runs (the
   floor) are still far closer to the real runs than any method (spectrum 0.038, mean picture 34.1 dB).
 
-**Cost** (`nvfx_3d timing`, `results/3d/r/timing.csv`, nice 15, a quiet moment of the shared machine: load 1.4 to
-1.6; provisional). Milliseconds per frame, median:
+**Cost**, re-timed on a quiet machine (round 7 of the quiet re-timing, 21 October 2026,
+[results/quiet/README.md](../results/quiet/README.md): `nvfx_3d timing`, six rounds with N2's fire and study hres's in
+turn, nothing else running; the median of the rounds' medians and its 95% interval,
+[volume_summary.csv](../results/quiet/round7/volume_summary.csv)); in brackets the first measurement where it differs by
+more than 15% (`results/3d/r/timing.csv`, nice 15, a quiet moment of the shared machine, load 1.4 to 1.6). Milliseconds
+per frame:
 
-| what | 1 thread | 2 threads | 4 threads |
-|---|---:|---:|---:|
-| a step through the volume API | 26.6 | 15.1 | 9.0 |
-| a picture, 256 x 256 | 93 | 47 | 22 |
-| a picture, 512 x 512 | 344 | 170 | 82 |
-| a start (the start point and the 24-frame warm-up) | 683 | 387 | 222 |
+| what | 1 thread | 4 threads |
+|---|---:|---:|
+| a step through the volume API | **21.4** [20.0, 24.8] (was 26.6) | **9.2** [8.7, 9.9] |
+| a picture, 256 x 256 | 85.7 [79.8, 94.6] | 22.7 [21.7, 23.9] |
+| a picture, 512 x 512 | 317 [300, 338] | 83.4 [78.7, 87.4] |
+| a start (the start point and the 24-frame warm-up) | 554 [465, 615] (was 683) | 226 [211, 230] |
 
-The volume API's step uses the vectorised detail layer (REPORT §19); on one thread the stages with the reference detail
-layer are: the noise inputs 2.2 ms, the coarse step 10.4, the detail layer 52.8 (which the vector kernel replaces),
-the renderer's preparation 14.7, a 256 x 256 picture 70. The simulation's own frame is 151 ms at 64 x 96 x 64 and 5.1
-ms at 16 x 24 x 16. A smoke picture costs more than the fire's (N2: 61 ms at 256 x 256 on one thread), most likely
-because the soot fills more of the box, so more of each ray is marched (not measured).
+(Two threads were not re-timed; the first measurement gave 15.1, 47, 170 and 387 ms.) The volume API's step uses the
+vectorised detail layer (REPORT §19); on one thread the stages with the reference detail layer are: the noise inputs
+2.2 ms, the coarse step 9.9, the detail layer 51.3 (which the vector kernel replaces), the renderer's preparation 14.4,
+a 256 x 256 picture 69.2. The simulation's own frame is 139 ms at 64 x 96 x 64 and 5.8 ms at 16 x 24 x 16. A smoke
+picture costs more than the fire's (N2's: 56 ms at 256 x 256 on one thread in the same rounds), most likely because the
+soot fills more of the box, so more of each ray is marched (not measured).
+
 
 ## 5. What ships
 
