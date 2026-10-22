@@ -1,3 +1,4 @@
 effect,n_settings,margin_track_f1,margin_track_1s,margin_track_2s,margin_spectrum_l1,margin_abs_ln_motion_ratio,margin_coverage_l1,margin_emission_l1,margin_mean_frame_psnr
 haboob,10,-0.2000000,-0.2000000,-0.2000000,0.0213239,0.0644485,0.0024032,0.0001000,-0.5111021
 geyser,60,-0.2000000,-0.2000000,-0.2000000,0.1737442,0.2550044,0.0076178,0.0001000,-3.0493350
+smokering,20,-0.2000000,-0.2000000,-0.2000000,0.0437458,0.0207605,0.0002876,0.0001000,-2.0982561
