@@ -262,11 +262,56 @@ improved targets are as measured (q2_power.csv), stated here before any of the g
 
 ### 4.7 Validation (the choice)
 
-(Filled in after validation.)
+Candidate minus current model on study G's validation settings extended to the effect's N, study Q2's seeds, 8 runs
+pooled per setting, tracking 2 runs per setting ([q2_val_compareq.csv](../results/experiments/q2_fix/q2_val_compareq.csv),
+[q2_val_choice.csv](../results/experiments/q2_fix/q2_val_choice.csv)):
+
+**The haboob (10 settings): both meet the rule; `rft` is chosen.**
+
+| candidate | tracking: first frame (target) | at 1 s | at 2 s | spectrum | \|ln motion\| | coverage | mean frame (target) | reading |
+|---|---|---|---|---|---|---|---|---|
+| `rft` | **+3.02 [+2.82, +3.25]** | +0.01 [-0.03, +0.06] | -0.03 [-0.06, -0.01] | +0.004 [+0.002, +0.007] (margin +0.021) | +0.004 [-0.005, +0.013] | -0.0007 [-0.0011, -0.0003] | -0.04 [-0.06, -0.01] (margin -0.51) | **meets it; chosen** |
+| `rfs` | **+2.30 [+2.17, +2.45]** | +0.06 [+0.02, +0.08] | -0.02 [-0.04, +0.00] | +0.007 [+0.005, +0.010] | +0.003 [-0.004, +0.009] | -0.0005 [-0.0008, -0.0003] | -0.00 [-0.03, +0.02] | meets it |
+
+Both draw the first frame much closer (28.65 → 31.67 and 30.95 dB) and keep the dust's detail within its margin: the
+spectrum distance moves by +0.004 and +0.007 (0.095 → 0.099 and 0.102), where study Q's fresh refit had moved it by
++0.013 [+0.006, +0.022] on study Q's validation. Neither is better on the mean frame (`rft` -0.04, a twenty-fifth of its
+margin; `rfs` a tie), and their targets do not include tracking at 1 s, so the rule takes the larger first-frame gain:
+`rft`. By study M's strict reading `rft` has three intervals wholly on the worse side (tracking at 2 s, the spectrum, the
+mean frame; each a tenth of its margin or less), `rfs` one (the spectrum): reported, not deciding.
+
+**Frozen** before its test ([q2_frozen.csv](../results/experiments/q2_fix/q2_frozen.csv), 5d3aa2f): the data root's
+`q2_fix/models/haboob.nvfx` (read-only; 301,443 bytes, the size of the old file, SHA-256
+`4f933a2fe7a226cc9aee138722bdf2b358dbf6330952392860b46135efdc0f23`), validated and tested by `nvfx_ordered_q2`.
 
 ### 4.8 The test (once)
 
-(Filled in after the tests.)
+Study B's held-out settings extended to the effect's N (`test_settings(N)`), the test's seeds (real 33,700,000 + 100 s +
+k, the floor + 50, plays 33,750,000, tracking 33,780,000), the file frozen before it ran, the binary of validation, once
+(the marker `q2_fix/test_<effect>.done`; [q2_test_compareq.csv](../results/experiments/q2_fix/q2_test_compareq.csv),
+[q2_test_decision.csv](../results/experiments/q2_fix/q2_test_decision.csv), `q2_test_*.csv`). Candidate minus current
+model, 95% paired bootstrap intervals with 10,000 resamples:
+
+**The haboob, `rft` (10 settings): it meets the rule, and is replaced.**
+
+| measure | current → `rft` | difference [95% interval] | margin | reading |
+|---|---|---|---|---|
+| tracking, the first frame (dB) | 28.43 → 31.47 | **+3.04 [+2.86, +3.21]** | -0.20 | better (a target) |
+| tracking at 1 s (dB) | 18.80 → 18.79 | -0.01 [-0.04, +0.03] | -0.20 | tie |
+| tracking at 2 s (dB) | 16.48 → 16.46 | -0.01 [-0.05, +0.02] | -0.20 | tie |
+| detail spectrum distance | 0.112 → 0.116 | +0.004 [+0.002, +0.006] | +0.021 | worse, within its margin (a sixth of it) |
+| \|ln motion ratio\| (motion ratio) | 0.189 (0.916) → 0.192 (0.913) | +0.003 [-0.004, +0.010] | +0.064 | tie |
+| coverage distance | 0.0089 → 0.0084 | **-0.0005 [-0.0010, -0.0001]** | +0.0024 | better |
+| emission distance | 0.00006 → 0.00006 | -0.000000 [-0.000000, +0.000000] | +0.0001 | tie |
+| mean-frame PSNR (dB) | 29.67 → 29.64 | -0.03 [-0.08, +0.01] | -0.51 | tie (a target) |
+
+The renderer trained on from its own weights draws the haboob's first frame 3.0 dB closer to the simulator's on the true
+fields (study Q's fresh refit: +2.55 on its validation), and leaves the rest of the run as it was: tracking at 1 and 2 s,
+motion, light and the average picture tie, the cover is a little closer, and the dust's detail moves by +0.004 (a sixth
+of its margin; study Q's refit moved it by +0.013 and stopped). By study M's strict reading one interval lies wholly on
+the worse side (the spectrum). Distance to the floor (a second set of 8 real runs per setting): the mean frame 6.58 →
+6.61 dB below it (the floor 36.25 dB), the spectrum distance 0.112 → 0.116 (the floor's 0.029), the coverage distance
+0.0089 → 0.0084 (0.0041).
 
 ## 5. What changed
 
