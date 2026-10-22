@@ -40,6 +40,13 @@ kind. The three validations were then started again from their beginning (`pipel
 runs, which are not cached, from scratch). Nothing else was running: the avalanche's test had finished (met) and its
 replacement was committed (3b2ef19) before the restart.
 
+**The second restart (22 October, about 03:10 UTC)** killed the three validations again (and an early full ctest). The
+same cleaning is now one command, **`q2_fix/jobs/resume.sh`**, which either of us runs after a restart: it deletes the
+caches written in the ten minutes before the machine's boot (56 files this time; `q2_fix/logs/resume_deleted.txt`),
+any half-written candidate and a stale git lock, sets aside a test cut off before its result (none so far), and starts
+every lane, pipeline and `after_val.sh` (the freeze and the one test after a validation, by the rule's choice) that is
+not done; each skips what is done. It was run at 03:13 UTC.
+
 **How to pick it up.** Every job is a script in the data root's `q2_fix/jobs/` that skips what is done (a marker
 `jobs/<step>.done`, or the file it makes); its log is in `q2_fix/logs/`. `go.sh` starts them all: `build.sh` (the two
 tools, copied to `q2_fix/bin` with the commit), `lane_train.sh A|B` (the fine-tunes), `lane_null.sh` (the geyser's and
@@ -65,9 +72,8 @@ played on the probe; the rule's numbers (`q2_rule.csv`) committed and pushed bef
 | 4 | heavy gas (`fx_air/models/d/heavygas.nvfx`) | `ms`, `msg`, `s24` | validation (60 settings), started again after the restart |
 | 5 | mushroom (`q_fix/models/mushroom.nvfx`) | `u60a`, `u90a` | validation (60 settings), started again after the restart |
 
-**To resume** (`Q` the data root's `q2_fix`): when `$Q/jobs/val_<effect>.done` appears, read the choice
-(`results/experiments/q2_fix/q2_val_choice.csv`), `$Q/jobs/freeze.sh <effect> <name>`, then `$Q/jobs/test.sh 2 <effect>
-<name>` (once); if `$Q/test_<effect>.done` says "met": `$Q/jobs/links.sh <effect> <dir>` (the old targets logged in
+**To resume** (`Q` the data root's `q2_fix`): after a restart, `$Q/jobs/resume.sh`. It runs each validation, then
+(`after_val.sh`) freezes the chosen candidate and runs its test once. If `$Q/test_<effect>.done` says "met": `$Q/jobs/links.sh <effect> <dir>` (the old targets logged in
 `$Q/logs/links_before.txt`), the file into `models/2d` and `models/SHA256SUMS` regenerated, `models/restore.sh` (0
 different), the frozen rows (`$Q/jobs/update_frozen.sh`, a `<effect>_q2` row in the round's `fx_*_frozen.csv`) and their
 ctests, the videos (`$Q/jobs/videos_*.sh`, `install_videos.sh`) and their rows in videos/README.md. Then the write-up
