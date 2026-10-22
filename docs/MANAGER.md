@@ -1,6 +1,7 @@
 # The effect manager: many rollout effects within a CPU budget
 
-Status: **current** (14 October 2026; the benchmark in §7 was provisional, §7.1 re-times it on a quiet machine). Audience: dev. The C API is `include/neuralfx/nvfx_manager.h` (in libnvfx);
+Status: **current** (14 October 2026; the benchmark in §7 was provisional, §7.1 re-times it on a quiet machine; half size
+where it pays, §2.10 and §7.2, added 22 October 2026). Audience: dev. The C API is `include/neuralfx/nvfx_manager.h` (in libnvfx);
 the code is `src/manager/`; the tools are `nvfx_crowd` (§7) and `nvfx_lod` (§5).
 
 One rollout effect playing on its own costs about 0.75 to 1.1 ms per 128 x 128 frame on one core and 2.4 MB of working
@@ -41,6 +42,9 @@ is off screen, and, when the budget is short, shows unimportant effects from a f
   nothing; planning costs 0.03 to 0.08 ms of the calling thread.
 - **New in the runtime**: a runner can take another's state at another size (the coarse state exactly), and lean
   runners keep only state (186 KB less each): a simulation slot is 0.5 MB at 32 px against 1.3 MB for an `nvfx_instance`.
+- **Large effects at half size** (§2.10, NVFX_VERSION 8): from `half_px` on screen a simulation is drawn at the level
+  below its level and the bilinear 2x (the engine's sampler, or the manager's) brings it back; as realistic as full size
+  against the simulator for the seven effects tested, at 0.31 to 0.54 of the cost, and off by default by its rule (§6).
 
 ## 2. Design
 
@@ -463,7 +467,9 @@ The defaults that follow:
   within the null's margins of it against the simulator. Six cost 0.31 to 0.42 of full size, but magic 0.54 (its
   full-size frame is cheap, so the coarse step weighs more; REPORT.md §22.4, provisional), so it is not on by default.
   Set `half_px` (256 is the threshold measured) to have it: with no budget it took a close-up scene's tick from 17.1 to
-  15.2 ms (§7.2), and with a budget the planner runs more simulations of their own instead.
+  15.2 ms (§7.2), and with a budget the planner runs more simulations of their own instead. On the held-out test it
+  stayed within the null's margins of full size against the simulator for all seven effects, closer on tracking at 1 s
+  (+0.22 to +0.89 dB), and lost the finest filaments against full size (REPORT.md §22.6).
 
 ## 7. The crowd benchmark (provisional)
 

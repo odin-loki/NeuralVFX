@@ -42,8 +42,9 @@ inline constexpr std::array<int, kLevels> kSizes{32, 64, 128, 256};
 inline constexpr int kMaxDiv = 4;       // frames per keyframe: 1 to 4 (30 to 7.5 Hz at 30 fps)
 inline constexpr int kMaxControls = 8;
 inline constexpr std::int64_t kBlend = 15;  // shard crossfade frames, as nvfx.cpp
-// The default threshold of drawing at half size, pixels on screen (nvfx_manager_desc.half_px; 0: off). Set by the rule of
-// docs/REPORT.md §22, measured before it was set.
+// The default threshold of drawing at half size, pixels on screen (nvfx_manager_desc.half_px; 0: off). Off by the rule of
+// docs/REPORT.md §22 (committed before it was measured): within the margins for all seven effects, but magic cost 0.54
+// of full size, above the 0.5 allowed. 256 is the threshold measured.
 inline constexpr float kDefaultHalfPx = 0.f;
 
 int level_of_size(int size);  // -1 if not one of kSizes

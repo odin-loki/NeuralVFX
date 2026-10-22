@@ -5,7 +5,8 @@ Since 15 October 2026, here: round 9, studies O and P, float on AVX-512, the fas
 director, the FUSE sample, round 10's fire and elements and study Q (the weak spots of rounds 9 and 10) are done and
 merged, and so is study R (a validated 3D smoke): its teacher is a plume by MTT's measures, its learned smoke failed its
 test and ships as a labelled demo ("Here, until the PC"). Round 7 of the quiet re-timing measured all of their costs on
-a quiet machine (REPORT §13.11).
+a quiet machine (REPORT §13.11). The effect manager can draw large effects at half size (REPORT §22): off by default
+by its rule (magic saved too little), available to set.
 
 - **Stage 1, here and now (study N): done.** A small 3D demo in this container ([docs/STUDY_3D.md](docs/STUDY_3D.md),
   REPORT §15). What it built:
@@ -111,6 +112,24 @@ and the Godot test; details in its doc and REPORT section):
   picture worse: -2.52 dB [-3.79, -1.29]). Shipped as a labelled demo (`models/3d/smoke.nvfx3`), with the plume
   video and the fire and smoke coupled through the volume API.
 
+- **Half size where it pays: done** (branch `manager-halfsize`, 22 October 2026, with the checks; REPORT §22,
+  MANAGER.md §2.10 and §7.2; seeds 35.0 to 35.1 million). The effect manager draws a simulation that is at least
+  `half_px` pixels (or `half_share` of the view's height) on screen at the level below its level, and the bilinear 2x
+  brings it back: the engine's sampler by default (the picture is the half-size drawing: no CPU, a quarter of the
+  upload), the manager's own with `NVFX_UPSCALE_BILINEAR` (to the bit what `nvfx_instance_set_upscale` draws); never the
+  learned 2x. Hysteresis, never for locks or proxies, per model (`nvfx_manager_model_desc.half_px`: 0 never, > 0 its
+  own), no allocation per frame, the same pictures on any number of threads; NVFX_VERSION 8; exposed in the C++ wrapper
+  and the FUSE adapter (the library's stages and scenes draw at the sizes their scripts name, so they have nothing to
+  switch). **By its rule, committed first, it is off by default:** on 20 held-out settings at 256 px it stays within the
+  null's margins of full size against the simulator on every measure for all seven effects measured (the crowd's fire,
+  smoke, steam and explosion, the library's fire, explosion and magic), closer than full size on tracking at 1 s
+  (+0.22 to +0.89 dB) and the detail spectrum, and costs 0.31 to 0.42 of full size for six of them, but **0.54 for
+  magic** (the rule allowed 0.5; the quiet session's separate runs give 0.53 too). Against full size on the same seed it
+  loses the finest filaments (24 to 37 dB active PSNR). With no budget a close-up scene's tick went from 17.1 to 15.2
+  ms (0.886 [0.869, 0.901]); with a budget the planner runs more simulations of their own (13.2 to 17.4 at 8 ms) and
+  fewer proxies; the crowd hardly changes (provisional timings: other agents' load ran throughout). Also fixed: a race
+  in the manager's worker start that could hang a tick on several threads (main's code).
+
 **Under way:**
 - **Round 10, fire** (`effects-fire2`, docs/EFFECTS_FIRE2.md, REPORT §6.18; seeds 26.0 to 26.9 million): a forest crown
   fire (#6), fire venting from a window (#8) and a dust explosion (#31). **Finished and merged into main** (21 October
@@ -145,9 +164,10 @@ and the Godot test; details in its doc and REPORT section):
   the moved coarse state), the geyser's tracking with its first frame kept, the haboob's and the ring's first frames
   by fine-tuning their renderers rather than training them again, heavy gas's start points, the mushroom's cap (a
   stepper that sees its whole life).
-- **Half size where it pays.** Study P found that drawing a large effect at half size with a bilinear 2x holds up
-  against the simulator at about 0.4 of the cost. Let the effect manager choose it by an effect's size on screen,
-  and measure it in the library's scenes.
+- **Half size, next** (REPORT §22.9): re-time its cost and the manager's A/B on a quiet machine (the jobs under the data
+  root's `halfsize/jobs`; the rule's verdict stands on its own run); a default per effect (on for the effects that passed
+  both conditions, off for magic) needs its own rule; measure 128 px pictures drawn at 64 and more of the library's
+  models at 256 px; the 256 px pool (one slot per effect by default) limits what it switches in a crowd.
 - **More 2D effects**, from the catalogue rows the 2D solver can carry: coloured smoke grenades (#18), contrails (#36),
   helicopter downwash (#37), blizzard and drifting snow (#54, #75), steam fog (#61), a learned pyroclastic flow (#110;
   the library's entry today is built from existing models).
