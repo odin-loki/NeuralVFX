@@ -1,0 +1,46 @@
+model,what,threads,rounds,ms_median,ci_lo,ci_hi,coverage,ms_min_median
+fire,start (warm-up of 24 frames),1,6,546.17,517.08,583.85,0.969,484.84
+fire,step,1,6,20.96,18.81,22.18,0.969,15.86
+fire,picture 256x256,1,6,55.94,50.95,57.44,0.969,43.16
+fire,picture 512x512,1,6,200.28,190.16,214.92,0.969,158.72
+fire,start (warm-up of 24 frames),4,6,223.55,215.14,241.38,0.969,200.78
+fire,step,4,6,9.02,8.50,9.34,0.969,7.30
+fire,picture 256x256,4,6,14.07,13.50,14.71,0.969,12.30
+fire,picture 512x512,4,6,51.55,49.59,53.67,0.969,46.19
+fire,stage: noise inputs (curl lattice; flicker),1,6,2.17,2.15,2.70,0.969,1.76
+fire,stage: coarse step (convolutions; projection; advection),1,6,10.50,9.83,12.50,0.969,8.29
+fire,stage: detail layer (64x96x64),1,6,50.15,48.70,54.14,0.969,39.91
+fire,stage: renderer preparation,1,6,14.93,14.42,16.91,0.969,12.55
+fire,stage: one 256x256 picture,1,6,43.13,41.23,45.62,0.969,35.17
+fire,simulation 64x96x64,1,6,153.81,144.99,165.68,0.969,131.39
+fire,simulation 16x24x16,1,6,5.62,5.49,6.41,0.969,4.83
+hres,start (warm-up of 24 frames),1,6,5901.45,5637.97,6197.11,0.969,5683.64
+hres,step,1,6,238.84,233.22,244.38,0.969,176.66
+hres,picture 256x256,1,6,48.73,44.42,52.58,0.969,36.46
+hres,picture 512x512,1,6,176.44,165.87,190.15,0.969,150.40
+hres,start (warm-up of 24 frames),4,6,1564.51,1513.75,1635.79,0.969,1493.47
+hres,step,4,6,63.77,62.60,68.23,0.969,53.44
+hres,picture 256x256,4,6,12.66,11.49,13.25,0.969,10.50
+hres,picture 512x512,4,6,46.39,43.99,48.90,0.969,40.62
+hres,stage: noise inputs (curl lattice; flicker),1,6,11.48,11.18,11.69,0.969,9.02
+hres,stage: coarse step (convolutions; projection; advection),1,6,192.06,175.87,193.89,0.969,150.31
+hres,stage: detail layer (64x96x64),1,6,46.00,45.10,47.32,0.969,36.98
+hres,stage: renderer preparation,1,6,14.62,14.30,14.96,0.969,11.82
+hres,stage: one 256x256 picture,1,6,36.19,34.26,36.76,0.969,27.95
+hres,simulation 64x96x64,1,6,152.11,143.92,183.15,0.969,132.29
+hres,simulation 16x24x16,1,6,5.40,5.06,6.46,0.969,4.53
+smoke,start (warm-up of 24 frames),1,6,553.68,465.42,614.89,0.969,486.85
+smoke,step,1,6,21.37,19.96,24.81,0.969,15.91
+smoke,picture 256x256,1,6,85.73,79.77,94.55,0.969,69.57
+smoke,picture 512x512,1,6,317.35,300.39,338.45,0.969,271.55
+smoke,start (warm-up of 24 frames),4,6,226.19,211.20,230.38,0.969,207.28
+smoke,step,4,6,9.18,8.66,9.91,0.969,7.42
+smoke,picture 256x256,4,6,22.67,21.73,23.88,0.969,18.18
+smoke,picture 512x512,4,6,83.40,78.74,87.44,0.969,71.21
+smoke,stage: noise inputs (curl lattice; flicker),1,6,2.16,2.15,2.19,0.969,1.71
+smoke,stage: coarse step (convolutions; projection; advection),1,6,9.97,9.84,10.51,0.969,7.88
+smoke,stage: detail layer (64x96x64),1,6,51.34,50.60,53.86,0.969,42.45
+smoke,stage: renderer preparation,1,6,14.41,14.26,15.20,0.969,11.87
+smoke,stage: one 256x256 picture,1,6,69.16,67.80,71.76,0.969,56.77
+smoke,simulation 64x96x64,1,6,138.59,127.68,145.09,0.969,110.71
+smoke,simulation 16x24x16,1,6,5.78,5.07,6.95,0.969,4.95

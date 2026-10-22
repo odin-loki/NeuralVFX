@@ -473,6 +473,8 @@ struct Picture : nvfx_manager_picture {
   }
   bool is_new() const noexcept { return (flags & NVFX_PICTURE_NEW) != 0; }
   bool finished() const noexcept { return (flags & NVFX_PICTURE_FINISHED) != 0; }
+  // drawn at half size (nvfx_manager_desc.half_px, docs/MANAGER.md §2.10): lod_size is the drawing's size
+  bool half() const noexcept { return (flags & NVFX_PICTURE_HALF) != 0; }
 };
 
 class Manager : public detail::Handle<nvfx_manager, nvfx_manager_free> {

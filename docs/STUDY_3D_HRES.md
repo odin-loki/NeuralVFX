@@ -125,3 +125,27 @@ tools/study_3d/hres_fire.sh build/nvfx_3d
 ```
 
 Smoke: `tools/study_3d/hres_smoke.sh build/nvfx_3d`.
+
+## 8. Cost (a quiet machine)
+
+`models/3d/fire_hres.nvfx3` through the volume C API (`nvfx_3d --study hres timing`, controls 0.7, 0.5, 0.6: 5 starts of
+60 frames, 4 pictures of each size per start), re-timed with study N2's fire and study R's smoke in turn, six rounds,
+nothing else running (round 7 of the quiet re-timing, 21 October 2026,
+[results/quiet/README.md](../results/quiet/README.md),
+[volume_summary.csv](../results/quiet/round7/volume_summary.csv)); the median of the rounds' medians and its 95%
+interval, milliseconds per frame:
+
+| what | 1 thread | 4 threads | study N2's C4, the same rounds (1 / 4 threads) |
+|---|---:|---:|---:|
+| a step (one frame) | **239** [233, 244] | **64** [63, 68] | 21.0 / 9.0 |
+| a picture, 256 x 256 | 49 [44, 53] | 12.7 [11.5, 13.3] | 56 / 14 |
+| a picture, 512 x 512 | 176 [166, 190] | 46 [44, 49] | 200 / 52 |
+| a start (the start point and the 24-frame warm-up) | 5,901 [5,638, 6,197] | 1,565 [1,514, 1,636] | 546 / 224 |
+
+On one thread a step's stages (with the reference detail layer, which the volume API replaces by its vector one, about
+10 ms): the noise inputs 11.4 ms, **the coarse step 192** (N2's: 10.5), the detail layer 46.0, the renderer's
+preparation 14.6, a 256 x 256 picture 36.2. So the finer coarse state makes a step about **11 times** N2's on one thread
+and 7 times on four, most of it (192 of 239 ms) the 32 x 48 x 32 stepper: its coarse step costs 18 times N2's (eight
+times the cells, twice the width; §3 expected about eight times); the detail layer and the pictures cost what N2's do,
+since the detail grid is the same. A step at 64 ms on four threads is not real time; like N2's model it suits a hero
+effect, a cut scene or baking.

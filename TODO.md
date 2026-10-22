@@ -3,8 +3,10 @@
 **Status:** stage 1 is done (study N, `docs/STUDY_3D.md`, and its follow-up N2, §14); stage 2 is planned, not started.
 Since 15 October 2026, here: round 9, studies O and P, float on AVX-512, the faster detail layer, the 2D weather
 director, the FUSE sample, round 10's fire and elements and study Q (the weak spots of rounds 9 and 10) are done and
-merged, and so is study R (a validated 3D smoke): its teacher is a plume by MTT's measures, its learned
-smoke failed its test and ships as a labelled demo ("Here, until the PC").
+merged, and so is study R (a validated 3D smoke): its teacher is a plume by MTT's measures, its learned smoke failed its
+test and ships as a labelled demo ("Here, until the PC"). Round 7 of the quiet re-timing measured all of their costs on
+a quiet machine (REPORT §13.11). The effect manager can draw large effects at half size (REPORT §22): off by default
+by its rule (magic saved too little), available to set.
 
 - **Stage 1, here and now (study N): done.** A small 3D demo in this container ([docs/STUDY_3D.md](docs/STUDY_3D.md),
   REPORT §15). What it built:
@@ -22,8 +24,10 @@ smoke failed its test and ships as a labelled demo ("Here, until the PC").
   - **Most of the "worse" is one fault:** with wind blowing in, heat builds up at the box's upwind side and a second
     fire grows there. The coarse advection's samples are clamped to the grid, so inflow keeps its own heat. The
     `nvfx_3d edge` check catches it.
-  - **Cost (provisional):** a step takes about 60 to 70 ms on one core, 33 ms on four. The detail layer is 59 ms of
-    that and the network 15. A 256² picture takes about 49 ms on the CPU.
+  - **Cost (provisional, a busy machine):** a step takes about 60 to 70 ms on one core, 33 ms on four. The detail layer
+    is 59 ms of that and the network 15. A 256² picture takes about 49 ms on the CPU. (Study N2's model on a quiet
+    machine, with the detail layer on vectors since: 21 ms a step on one core, 9 on four; a 256² picture 56 ms;
+    STUDY_3D.md §14.12.)
 
   What study N2 found (STUDY_3D.md §14):
   - **The fault is fixed.** With ambient air at the open edges and a training stage of long rollouts, the same small
@@ -46,8 +50,12 @@ smoke failed its test and ships as a labelled demo ("Here, until the PC").
   - start from a validated teacher (FDS);
   - snapshot every training stage.
 - **Stage 2, on a PC, much later:** everything below. Accurate 3D simulations of every effect, however long they take,
-  checked against measured physics. Large 3D models trained on them, as fine as the PC allows. Then 3D scenes, a 3D
-  library and a full weather system.
+  checked against measured physics. How the PC's GPU simulates, trains and plays the high-resolution effects (a
+  64 x 96 x 64 state, 256 x 384 x 256 detail), each made in 5 to 9 hours, and which simulators teach them (our GPU
+  solvers and Houdini, checked against measurements), is planned in [docs/PLAN_PC_GPU.md](docs/PLAN_PC_GPU.md), and
+  its accelerated version (each effect a small seeded generator: a code fitted against a shared network, pruned and
+  compressed to the noise floor; its first bets testable in 2D here) in [docs/GENERATOR.md](docs/GENERATOR.md).
+  Large 3D models trained on them, as fine as the PC allows. Then 3D scenes, a 3D library and a full weather system.
 
 First we demo, then we go big.
 
@@ -69,13 +77,14 @@ and the Godot test; details in its doc and REPORT section):
   (+0.40 dB [0.21, 0.60]) replaced by a held-out test.
 - **Study P, cheaper big effects** (docs/STUDY_P.md, REPORT §17): the learned 2x upscale did not pass its rule (it beat
   bilinear on none of six effects); drawing at half size with a bilinear 2x costs 0.36 to 0.43 of native and stays
-  within native's margins against the simulator for all six (busy machine). Shipped as an opt-in, the learned mode
-  marked experimental (NVFX_VERSION 7).
+  within native's margins against the simulator for all six (busy machine; 0.36 to 0.42 on a quiet one, round 7).
+  Shipped as an opt-in, the learned mode marked experimental (NVFX_VERSION 7).
 - **Float on AVX-512** (REPORT §13.10): float rollouts take the AVX-512 build where the CPU has it, 0.80 of AVX2's time;
   frames bit-identical to AVX2's with this compiler.
-- **The detail layer's cost** (REPORT §19, `results/detail/`): the same frames to the bit on every ISA; in 3D the detail
-  layer takes 0.16 to 0.18 of its time and a step 0.31 to 0.32; in 2D the detail stage 0.87 to 0.90 and a frame 0.96 to
-  0.98 (busy machine). A semi-Lagrangian option (0.75) changes every frame and was not shipped.
+- **The detail layer's cost** (REPORT §19, `results/detail/`): the same frames to the bit on every ISA; in 3D the
+  detail layer takes 0.16 to 0.18 of its time and a step 0.31 to 0.32; in 2D the detail stage 0.87 to 0.90 and a frame
+  0.96 to 0.98 (busy machine; on a quiet one, round 7: in 3D 0.20 to 0.22 and 0.38 to 0.40, in 2D the same). A
+  semi-Lagrangian option (0.75) changes every frame and was not shipped.
 - **The 2D weather director** (docs/WEATHER.md, REPORT §18): seven regimes, ordered transitions, seeded gusts, rain cells
   and lightning, rain and snow by Marshall-Palmer, Atlas and Koschmieder, a 40 s day scene and its video; engines drive
   it through the scene inputs. Weak: no sun or wet ground, clouds as puffs rather than a deck, one place in 2D.
@@ -106,6 +115,24 @@ and the Godot test; details in its doc and REPORT section):
   picture worse: -2.52 dB [-3.79, -1.29]). Shipped as a labelled demo (`models/3d/smoke.nvfx3`), with the plume
   video and the fire and smoke coupled through the volume API.
 
+- **Half size where it pays: done** (branch `manager-halfsize`, 22 October 2026, with the checks; REPORT §22,
+  MANAGER.md §2.10 and §7.2; seeds 35.0 to 35.1 million). The effect manager draws a simulation that is at least
+  `half_px` pixels (or `half_share` of the view's height) on screen at the level below its level, and the bilinear 2x
+  brings it back: the engine's sampler by default (the picture is the half-size drawing: no CPU, a quarter of the
+  upload), the manager's own with `NVFX_UPSCALE_BILINEAR` (to the bit what `nvfx_instance_set_upscale` draws); never the
+  learned 2x. Hysteresis, never for locks or proxies, per model (`nvfx_manager_model_desc.half_px`: 0 never, > 0 its
+  own), no allocation per frame, the same pictures on any number of threads; NVFX_VERSION 8; exposed in the C++ wrapper
+  and the FUSE adapter (the library's stages and scenes draw at the sizes their scripts name, so they have nothing to
+  switch). **By its rule, committed first, it is off by default:** on 20 held-out settings at 256 px it stays within the
+  null's margins of full size against the simulator on every measure for all seven effects measured (the crowd's fire,
+  smoke, steam and explosion, the library's fire, explosion and magic), closer than full size on tracking at 1 s
+  (+0.22 to +0.89 dB) and the detail spectrum, and costs 0.31 to 0.42 of full size for six of them, but **0.54 for
+  magic** (the rule allowed 0.5; the quiet session's separate runs give 0.53 too). Against full size on the same seed it
+  loses the finest filaments (24 to 37 dB active PSNR). With no budget a close-up scene's tick went from 17.1 to 15.2
+  ms (0.886 [0.869, 0.901]); with a budget the planner runs more simulations of their own (13.2 to 17.4 at 8 ms) and
+  fewer proxies; the crowd hardly changes (provisional timings: other agents' load ran throughout). Also fixed: a race
+  in the manager's worker start that could hang a tick on several threads (main's code).
+
 **Under way:**
 - **Round 10, fire** (`effects-fire2`, docs/EFFECTS_FIRE2.md, REPORT §6.18; seeds 26.0 to 26.9 million): a forest crown
   fire (#6), fire venting from a window (#8) and a dust explosion (#31). **Finished and merged into main** (21 October
@@ -125,15 +152,25 @@ and the Godot test; details in its doc and REPORT section):
   erupts at low intensity and within a shard follows its start point more than its intensity; the haboob's first
   frames (its renderer) and a weak current that runs 25% fast; sea spray's detail (tufts, not thin plumes). To try: a
   field-shader look that draws heat as white vapour (steam and fine spray are heat, which a look draws as light).
+- **Quiet re-timing, round 7** (`quiet-round7`, results/quiet/README.md "Round 7", REPORT §13.11): every cost since
+  round 9 re-timed in one session with nothing else running (59 blocks, each started at a load of at most 0.5, three run
+  again for other agents' load), and the documents' provisional figures replaced
+  (`results/quiet/round7/compare_provisional.csv`). The 33 shipped 2D models: 0.63 ms per 128 px frame on average at the
+  int8 default, int8 0.906 of float on the AVX-512 build (round 6's 0.906); multi-threaded figures far lower than on the
+  busy machine (the scenes 30 to 78%, the FUSE demo's jobs 54 to 90%), single-core ones up to 40% higher than the least
+  busy rounds the documents quoted (within 15% of the busy medians for 55 of 60); the 3D detail layer 4.5 to 4.9 times
+  faster, not 5.7 to 6.5; study P's learned 2x under 0.55 of native for 3 of 6 effects, not 4. This host's AVX-512 build
+  ran 7 to 11% slower than round 6's and its speed drifted by about ±7%: absolute milliseconds belong to their session.
 
 **Next:**
 - **Study Q's leftovers** (STUDY_Q.md §9): the avalanche's start points (the mean state with fine fields regrown from
   the moved coarse state), the geyser's tracking with its first frame kept, the haboob's and the ring's first frames
   by fine-tuning their renderers rather than training them again, heavy gas's start points, the mushroom's cap (a
   stepper that sees its whole life).
-- **Half size where it pays.** Study P found that drawing a large effect at half size with a bilinear 2x holds up
-  against the simulator at about 0.4 of the cost. Let the effect manager choose it by an effect's size on screen,
-  and measure it in the library's scenes.
+- **Half size, next** (REPORT §22.9): re-time its cost and the manager's A/B on a quiet machine (the jobs under the data
+  root's `halfsize/jobs`; the rule's verdict stands on its own run); a default per effect (on for the effects that passed
+  both conditions, off for magic) needs its own rule; measure 128 px pictures drawn at 64 and more of the library's
+  models at 256 px; the 256 px pool (one slot per effect by default) limits what it switches in a crowd.
 - **More 2D effects**, from the catalogue rows the 2D solver can carry: coloured smoke grenades (#18), contrails (#36),
   helicopter downwash (#37), blizzard and drifting snow (#54, #75), steam fog (#61), a learned pyroclastic flow (#110;
   the library's entry today is built from existing models).
@@ -148,8 +185,6 @@ and the Godot test; details in its doc and REPORT section):
   - 3D fire and smoke coupled: a demo through the volume API (study R, `nvfx_3d video --kind coupled`); a coupled
     simulation (the boxes exchanging heat and momentum) is not done;
   - a job hook in the volume API, so an engine's job system can run a volume's step (FUSE.md §9).
-- **Quiet re-timing, round 7:** the new effects, the faster detail layer, half size and the FUSE demo on a quiet
-  machine, as `results/quiet` did before (today's costs come from a machine at a load of 6 to 21).
 
 ## Contents
 

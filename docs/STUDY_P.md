@@ -5,18 +5,18 @@ Status: **done** (20 October 2026). Audience: dev, research, the owner. The desi
 probe, the choice, the number of test settings; commit `1dcf55e`, with the mushroom's note in `858f301`) before the
 test, which ran once (§6).
 
-**In short.** Drawing a large effect at half size and bringing it back with the small learned 2x and seeded
-micro-detail **did not pass its rule**: on 20 held-out settings at 512 px it beat the bilinear 2x against native on
-PSNR, SSIM and the high band together for **none of the six effects** (it was a little closer than bilinear on PSNR
-for three, by +0.09 to +0.11 dB, further for two; its high band never closer to native's), and it cost at most 0.55 of
-native for **four** of them (0.45 to 0.59; five needed; a busy machine). Against the simulator's frames it was within
-the null's margins of native for all six. What pays is drawing at half size itself: the half-size instance costs
-**0.29 to 0.34 of native at 512 px**, and with the bilinear 2x (free on a GPU) it is within the null's margins of
-native against the simulator's frames on every measure for all six effects at 512 px, and closer than native on
-tracking and the spectrum. What it loses is native's finest filaments, which native's detail layer draws at 512 px and
-which neither a 2x of the half-size frame nor the simulator (at its 128 cells) has. **The opt-in path ships, labelled
-experimental**: `nvfx_instance_set_upscale` with `NVFX_UPSCALE_BILINEAR` (no file) or `NVFX_UPSCALE_LEARNED` (an
-attached `.nvfxup`), NVFX_VERSION 7; ENGINES.md §5.
+**In short.** Drawing a large effect at half size and bringing it back with the small learned 2x and seeded micro-detail
+**did not pass its rule**: on 20 held-out settings at 512 px it beat the bilinear 2x against native on PSNR, SSIM and
+the high band together for **none of the six effects** (it was a little closer than bilinear on PSNR for three, by +0.09
+to +0.11 dB, further for two; its high band never closer to native's), and it cost at most 0.55 of native for **four**
+of them (0.45 to 0.59; five needed; a busy machine; on a quiet machine three, 0.51 to 0.62, §7). Against the
+simulator's frames it was within the null's margins of native for all six. What pays is drawing at half size itself: the
+half-size instance costs **0.29 to 0.38 of native at 512 px** (a quiet machine, round 7; 0.29 to 0.34 in the rule's
+run), and with the bilinear 2x (free on a GPU) it is within the null's margins of native against the simulator's frames
+on every measure for all six effects at 512 px, and closer than native on tracking and the spectrum. What it loses is
+native's finest filaments, which native's detail layer draws at 512 px and which neither a 2x of the half-size frame nor
+the simulator (at its 128 cells) has. **The opt-in path ships, labelled experimental**: `nvfx_instance_set_upscale` with
+`NVFX_UPSCALE_BILINEAR` (no file) or `NVFX_UPSCALE_LEARNED` (an attached `.nvfxup`), NVFX_VERSION 7; ENGINES.md §5.
 
 The fine fields never feed back into the coarse state, so a half-size instance shares the native one's motion to the
 bit (§2): the comparison against native on the same seed is a paired one.
@@ -382,49 +382,65 @@ of 6.
 six effects at 512 px (for 4 of 6 at 256 px), nearer the teacher than N on tracking (+0.10 to +0.54 dB) and the
 spectrum.
 
-## 7. Cost (provisional: a busy machine)
+## 7. Cost (the rule's run on a busy machine; re-timed on a quiet one)
 
-Thread CPU time per frame through `nvfx_render`, the four instances in turn within one process (their order rotated
-each round), 30 rounds of 20 frames, each on its own timeline at controls (0.6, 0.5, 0.6), the runtime's default (int8
-on AVX-512 with VNNI); the median over the rounds of each ratio to N, and in brackets the 95% bootstrap interval of
-the mean ratio ([p_cost.csv](../results/experiments/upscale/p_cost.csv),
-[p_cost_rule.txt](../results/experiments/upscale/p_cost_rule.txt); label `rule`, the shared net, run after §4.5 was
-committed). H is the half-size instance alone: what B costs when the engine's GPU does the bilinear 2x.
+Thread CPU time per frame through `nvfx_render`, the four instances in turn within one process (their order rotated each
+round), 30 rounds of 20 frames, each on its own timeline at controls (0.6, 0.5, 0.6), the runtime's default (int8 on
+AVX-512 with VNNI); the median over the rounds of each ratio to N. H is the half-size instance alone: what B costs when
+the engine's GPU does the bilinear 2x. Two runs of the same command (`nvfx_study_p cost --net cand_shared --rounds 30
+--frames 20`):
 
-| effect | N, 512 px | H / N | B / N | **L / N** | N, 256 px | H / N | B / N | L / N |
-|---|---:|---:|---:|---:|---:|---:|---:|---:|
-| explosion | 4.16 ms | 0.343 | 0.426 | 0.571 [0.557, 0.614] | 1.24 ms | 0.374 | 0.441 | 0.554 [0.527, 0.633] |
-| mushroom | 6.00 | 0.310 | 0.361 | **0.453** [0.459, 0.543] | 1.76 | 0.337 | 0.391 | 0.455 [0.480, 0.555] |
-| wildfire | 4.32 | 0.291 | 0.369 | 0.593 [0.558, 0.618] | 1.29 | 0.432 | 0.478 | 0.700 [0.663, 0.742] |
-| launch | 4.33 | 0.302 | 0.367 | **0.536** [0.520, 0.560] | 1.32 | 0.420 | 0.484 | 0.640 [0.606, 0.673] |
-| smoke | 4.70 | 0.325 | 0.395 | **0.550** [0.526, 0.599] | 1.56 | 0.396 | 0.432 | 0.537 [0.518, 0.619] |
-| waterfall | 4.45 | 0.298 | 0.369 | **0.530** [0.486, 0.646] | 1.24 | 0.421 | 0.482 | 0.610 [0.590, 0.630] |
+- **the rule's run** (label `rule`, the shared net, run after §4.5 was committed, on the busy shared machine; in
+  brackets the 95% bootstrap interval of the mean ratio; [p_cost.csv](../results/experiments/upscale/p_cost.csv),
+  [p_cost_rule.txt](../results/experiments/upscale/p_cost_rule.txt)), which decided condition 3;
+- **round 7 of the quiet re-timing** (21 October 2026, nothing else running, pinned to one core; in brackets the 95%
+  interval of the median ratio from order statistics over the 30 rounds;
+  [results/quiet/round7/p_cost_summary.csv](../results/quiet/round7/p_cost_summary.csv),
+  [results/quiet/README.md](../results/quiet/README.md)). It decides nothing: the test had run.
 
-**Condition 3 is not met**: at 512 px L costs at most 0.55 of N for 4 of the 6 effects (the mushroom 0.453, launch
-0.536, smoke 0.5498, the waterfall 0.530), not 5; the explosion (0.571) and the wildfire (0.593) cost more. The effects
-that fill the most of their frame skip the fewest empty blocks: the network runs on every half-size pixel that has
-something near it, and the learned part costs 0.55 (the mushroom) to 0.97 ms (the wildfire) of a busy core at 512 px
-beyond the bilinear 2x. The run with the per-effect nets made before §4.5 was
-committed, on a quiet machine ([p_cost_per_effect.txt](../results/experiments/upscale/p_cost_per_effect.txt)), read the
-same: 0.477 to 0.595 at 512 px, 4 of 6 at or under 0.55 (the explosion 0.548, the mushroom, smoke and the waterfall).
+| effect | N, 512 px: rule / round 7 | H / N | B / N | **L / N, the rule's run** | **L / N, round 7** | N, 256 px: rule / round 7 | H / N | B / N | L / N: rule / round 7 |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| explosion | 4.16 / 4.43 ms | 0.334 | 0.417 | 0.571 [0.557, 0.614] | 0.597 [0.544, 0.629] | 1.24 / 1.49 ms (+20%) | 0.392 | 0.449 | 0.554 / 0.599 |
+| mushroom | 6.00 / 6.43 | 0.331 | 0.396 | **0.453** [0.459, 0.543] | **0.505** [0.455, 0.597] | 1.76 / 2.01 | 0.364 | 0.391 | 0.455 / 0.525 |
+| wildfire | 4.32 / 4.76 | 0.312 | 0.382 | 0.593 [0.558, 0.618] | 0.619 [0.560, 0.641] | 1.29 / 1.44 | 0.411 | 0.471 | 0.700 / 0.677 |
+| launch | 4.33 / 5.11 (+18%) | 0.290 | 0.362 | **0.536** [0.520, 0.560] | **0.532** [0.514, 0.562] | 1.32 / 1.39 | 0.406 | 0.473 | 0.640 / 0.645 |
+| smoke | 4.70 / 5.35 | 0.377 | 0.457 | **0.550** [0.526, 0.599] | 0.619 [0.515, 0.661] | 1.56 / 1.74 | 0.384 | 0.426 | 0.537 / 0.542 |
+| waterfall | 4.45 / 4.72 | 0.290 | 0.354 | **0.530** [0.486, 0.646] | **0.540** [0.501, 0.546] | 1.24 / 1.47 (+18%) | 0.423 | 0.471 | 0.610 / 0.638 |
 
-**What drawing at half size saves by itself**: the half-size instance costs 0.29 to 0.34 of N at 512 px and 0.34 to
-0.43 at 256 px (the coarse step, about 0.3 ms, does not shrink); the CPU's bilinear 2x adds 0.04 to 0.08 of N, nothing
-on a GPU. At 256 px L costs 0.46 to 0.70 of N.
+H / N and B / N are round 7's medians (the rule's run: H / N 0.291 to 0.343 at 512 px and 0.337 to 0.432 at 256 px, B /
+N 0.361 to 0.426 and 0.391 to 0.484; only smoke's at 512 px differ from round 7's by more than 15%: H / N 0.325 and B /
+N 0.395 then, 0.377 and 0.457 now).
+
+**Condition 3 is not met**: in the rule's run L costs at most 0.55 of N at 512 px for 4 of the 6 effects (the mushroom
+0.453, launch 0.536, smoke 0.5498, the waterfall 0.530), not 5; the explosion (0.571) and the wildfire (0.593) cost
+more. On the quiet machine it is 3 of 6 (smoke's 0.619 is above the bound too, its interval across it), so the verdict
+stands either way. The effects that fill the most of their frame skip the fewest empty blocks: the network runs on every
+half-size pixel that has something near it, and the learned part costs 0.55 (the mushroom) to 0.97 ms (the wildfire) of
+a core at 512 px beyond the bilinear 2x (round 7: 0.70 to 1.13 ms). The run with the per-effect nets made before §4.5
+was committed, on a quiet machine ([p_cost_per_effect.txt](../results/experiments/upscale/p_cost_per_effect.txt)), read
+the same: 0.477 to 0.595 at 512 px, 4 of 6 at or under 0.55 (the explosion 0.548, the mushroom, smoke and the
+waterfall).
+
+**What drawing at half size saves by itself**: the half-size instance costs 0.29 to 0.38 of N at 512 px and 0.36 to 0.42
+at 256 px on the quiet machine (the rule's run: 0.29 to 0.34 and 0.34 to 0.43; the coarse step, about 0.3 ms, does not
+shrink); the CPU's bilinear 2x adds 0.03 to 0.08 of N, nothing on a GPU. At 256 px L costs 0.52 to 0.68 of N (the rule's
+run: 0.46 to 0.70). Native itself took 4.4 to 6.4 ms at 512 px on the quiet machine, 6 to 18% more than on the busy one:
+on round 7's host the AVX-512 build, which int8 takes, ran about a tenth slower than on round 6's (the AVX2 build as
+fast; results/quiet/README.md), which the ratios do not see.
 
 ## 8. What it means
 
-- **For an engine: draw large effects at half size and let the GPU upscale.** The half-size instance costs about a
-  third of native at 512 px (0.29 to 0.34; 0.34 to 0.43 at 256 px, where the fixed coarse step weighs more), and
-  against the simulator it plays as well as native or better on every measure studied. It is softer than native in the
-  finest filaments; whether a game needs those at the size it draws the effect is a judgement by eye (the videos:
-  videos/README.md §9b). Creating the instance at half size and drawing its texture at full size needs no new call;
-  `NVFX_UPSCALE_BILINEAR` does the same on the CPU for engines that want the full-size bytes (0.04 to 0.08 of native
-  more).
+- **For an engine: draw large effects at half size and let the GPU upscale.** The half-size instance costs about a third
+  of native at 512 px (0.29 to 0.38 on a quiet machine; 0.36 to 0.42 at 256 px, where the fixed coarse step weighs more;
+  §7), and against the simulator it plays as well as native or better on every measure studied. It is softer than
+  native in the finest filaments; whether a game needs those at the size it draws the effect is a judgement by eye (the
+  videos: videos/README.md §9b). Creating the instance at half size and drawing its texture at full size needs no new
+  call; `NVFX_UPSCALE_BILINEAR` does the same on the CPU for engines that want the full-size bytes (0.03 to 0.08 of
+  native more).
 - **The learned 2x does not earn its cost.** Native's finest detail is not in the half-size frame, not even blurred: the
   half-size detail layer draws its own (§2), so a 2x trained for squared error can only sharpen a little (+0.07 dB over
   bilinear for the shared net on training tiles, up to +0.55 dB per effect), and seeded noise adds high-band energy only
-  at the price of PSNR and SSIM. At the cost the plan could pay (128 multiply-adds per pixel, 0.55 to 0.97 ms of a busy
+  at the price of PSNR and SSIM. At the cost the plan could pay (128 multiply-adds per pixel, 0.70 to 1.13 ms of a quiet
   core at 512 px) it did not beat bilinear on all three of (a)'s measures for any effect. The per-effect nets did better
   on PSNR and the high band (validation, §5) but lost SSIM for four effects, so the rule kept the shared one.
 - **The simulator's frames at 512 px are not a reference for fine detail.** Drawn from 128 cells, they have about a

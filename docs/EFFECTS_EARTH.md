@@ -36,10 +36,11 @@ sources, forces and drawing, and are trained and tested as the last nine were ([
   average picture is 0.16 dB [0.04, 0.28] closer to a real run's, by a rule written before its validation; run again,
   this round's test still finds it behind the coarse simulation at 1 s (-2.47 dB [-5.12, -0.00]) and the flipbook's
   average picture: it is still weak, and what keeps it so is its start points (STUDY_Q.md §3.1).
-- **Cost (provisional, a shared machine):** 146 KB stored for lava and the eruption (64-pixel fine fields with 8 start
-  points), 274 KB for the avalanche (16 start points); 2.4 MB per instance at 128 px. At the runtime's int8 default on
-  the AVX-512 build, 0.49 (lava), 0.48 (eruption) and 0.44 ms (avalanche) per 128 px frame, where study D's fire took
-  0.66 ms and its explosion 0.55 in the same rounds (§5). Restarts take a quarter of a millisecond.
+- **Cost (re-timed on a quiet machine, round 7 of the quiet re-timing):** 146 KB stored for lava and the eruption
+  (64-pixel fine fields with 8 start points), 274 KB for the avalanche (16 start points); 2.4 MB per instance at 128 px.
+  At the runtime's int8 default on the AVX-512 build, 0.54 (lava), 0.53 (eruption) and 0.61 ms (avalanche) per 128 px
+  frame, where study D's fire took 0.78 ms and its explosion 0.65 in the same rounds (§5; the busy machine's least
+  rounds gave 0.49, 0.48 and 0.44, and 0.66 and 0.55). Restarts take a quarter of a millisecond.
 - **A scene script** (`examples/scenes/volcano.nvfxs`) plays an eruption on the horizon whose rate surges after a
   blast, a lava river in the foreground, bombs, ash fall and lightning in the plume; its keyframes are frozen
   (`ctest -R ScriptedVolcanoFrozen`, float on AVX2). **Ten library entries** use the models (`library/earth.nvfxl`, a new
@@ -398,28 +399,42 @@ last windows are as good as the first. Lava moves too fast in every window at bo
 
 ## 5. Memory and cost
 
-Per frame through `nvfx_render` on one pinned core, with study D's fire and explosion in the same session
-(`nvfx_experiment d-timing`, four rounds back to back on 20 October): the least of the four rounds' medians and, in
-brackets, the greatest ([d_timing_rounds.csv](../results/experiments/fx_earth/d_timing_rounds.csv), the first round in
-[d_timing.csv](../results/experiments/fx_earth/d_timing.csv)). The instances play at their default precision, int8; the
-ISA is forced per row, so the AVX2 rows are int8 without VNNI and the AVX-512 row is the default build. **Provisional:**
-the machine was shared with other agents' jobs (load 7 to 10 on 4 cores).
+Per frame through `nvfx_render` on one pinned core, with study D's fire and explosion in the same session, **re-timed on
+a quiet machine**: round 7 of the quiet re-timing (21 October 2026,
+[results/quiet/README.md](../results/quiet/README.md)), nine rounds of `nvfx_experiment d-timing` with nothing else
+running, on the files as shipped (the avalanche is study Q's, the round's stepper fine-tuned, the same network); the
+median of the rounds' medians and its 95% interval
+([d_timing_summary.csv](../results/quiet/round7/d_timing_summary.csv), every round in
+[d_timing_rounds.csv](../results/quiet/round7/d_timing_rounds.csv)). The instances play at their default precision. With
+the AVX2 build forced that is float (the default is int8 only on the AVX-512 build where the CPU has VNNI, REPORT.md
+§13.8), so the AVX2 columns are float on AVX2, what a CPU without AVX-512 plays, not int8 without VNNI as this section
+said before; the AVX-512 column is int8, this machine's default. Where the busy machine's figure (20 October, load 7 to
+10: the least of four rounds' medians, [d_timing_rounds.csv](../results/experiments/fx_earth/d_timing_rounds.csv))
+differs by more than 15%, it follows as "was".
 
 | effect | stored | resident | per instance at 128 px | AVX2, 64 px | AVX2, 128 px | AVX2, 256 px | AVX-512, 128 px (the default) | restart (AVX2, 128 px) |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|
-| lava | 146 KB | 419 KB | 2.4 MB | 0.43 ms (0.45) | 0.67 ms (0.92) | 1.62 ms (1.76) | **0.49 ms** (0.90) | 0.25 ms |
-| eruption | 146 KB | 419 KB | 2.4 MB | 0.46 ms (0.47) | 0.67 ms (0.71) | 1.57 ms (1.88) | **0.48 ms** (0.51) | 0.26 ms |
-| avalanche | 274 KB | 804 KB | 2.4 MB | 0.50 ms (0.58) | 0.62 ms (0.75) | 1.18 ms (1.60) | **0.44 ms** (0.52) | 0.22 ms |
-| fire (study D, same session) | 82 KB | 163 KB | 2.4 MB | 0.46 ms (0.65) | 0.88 ms (0.99) | 2.25 ms (2.56) | 0.66 ms (0.72) | 15.5 ms (1 s warm-up) |
-| explosion (study D, same session) | 274 KB | 804 KB | 2.4 MB | 0.45 ms (0.46) | 0.73 ms (0.80) | 1.53 ms (1.69) | 0.55 ms (0.61) | 0.22 ms |
+| lava | 146 KB | 419 KB | 2.4 MB | 0.45 ms [0.43, 0.49] | 0.69 ms [0.68, 0.72] | 1.63 ms [1.54, 1.76] | **0.54 ms** [0.45, 0.70] | 0.26 ms |
+| eruption | 146 KB | 419 KB | 2.4 MB | 0.49 ms [0.46, 0.56] | 0.74 ms [0.67, 1.01] | 1.80 ms [1.58, 2.21] | **0.53 ms** [0.53, 0.68] | 0.31 ms (was 0.26) |
+| avalanche | 274 KB | 804 KB | 2.4 MB | 0.51 ms [0.48, 0.56] | 0.63 ms [0.57, 0.67] | 1.25 ms [1.22, 1.27] | **0.61 ms** [0.48, 0.71] (was 0.44) | 0.21 ms |
+| fire (study D, same session) | 82 KB | 163 KB | 2.4 MB | 0.53 ms [0.48, 0.60] (was 0.46) | 0.98 ms [0.87, 1.11] | 2.39 ms [2.11, 2.53] | 0.78 ms [0.74, 0.81] (was 0.66) | 14 ms (1 s warm-up) |
+| explosion (study D, same session) | 274 KB | 804 KB | 2.4 MB | 0.46 ms [0.44, 0.47] | 0.75 ms [0.73, 0.91] | 1.64 ms [1.44, 1.81] | 0.65 ms [0.62, 0.83] (was 0.55) | 0.24 ms |
 
 The same network as study D's, so the same per-pixel work (1012 multiply-adds per pixel at 128 px) and working memory.
 All three cost less than fire per 128 px frame, about what the explosion costs: much of their frame is empty or smooth
 (lava is a band along the bottom, the avalanche a cloud on the ground), and the detail layer and the renderer skip empty
 spans. All three store their start points with fine fields, so a restart is a quarter of a millisecond. For scale, the
-32-cell simulation of each with its own renderer costs 2.6 to 3.2 (lava), 3.5 to 4.7 (eruption) and 3.4 to 3.8 ms
-(avalanche) in our scalar code, against 1.2 to 1.6 ms for fire's. They should be re-timed on a quiet machine with every
-rollout effect (`tools/study_k/time.sh`).
+32-cell simulation of each with its own renderer costs 2.3 (lava), 3.1 (eruption) and 3.1 ms (avalanche) in our scalar
+code, against 1.2 ms for fire's (the busy machine's ranges: 2.6 to 3.2, 3.5 to 4.7, 3.4 to 3.8 and 1.2 to 1.6).
+
+What changed against the busy figures: the default column rose by 10% (lava, the eruption) to 18% (study D's fire and
+explosion) and 39% (the avalanche). Part is the statistic: the busy table gave each effect its least round, and round
+7's least rounds are 0.44, 0.43 and 0.40 ms for the three, below the busy ones (0.73 and 0.61 for study D's fire and
+explosion, above them). Part is the host: on this session's the AVX-512 build ran about a tenth slower than on round
+6's, the AVX2 build as fast (results/quiet/README.md), and a single configuration switched between a fast and a slow
+state about 1.35 times apart, which is why the intervals are wide. The avalanche's larger rise is not its new file: the
+round's file and study Q's, played in turn in the same rounds (`nvfx_ordered cost`, nine repetitions), differ by +0.015
+ms at 128 px and +0.05 ms at 256 px at int8 ([o_cost_models.csv](../results/quiet/round7/o_cost_models.csv)).
 
 ## 6. The library and a scene
 
@@ -456,9 +471,11 @@ of the scene's light, at times the noise picks). Nothing was added to the compos
 
 The video (at the runtime's int8 default) is `videos/scene_volcano.mp4`; the keyframes' SHA-256 are in
 [fx_earth_frozen.csv](../results/experiments/fx_earth_frozen.csv) and `ctest -R ScriptedVolcanoFrozen` checks them
-(float on AVX2, skipped without the effects in `NEURALFX_MODELS_EARTH`, by default `$NEURALVFX_DATA/fx_earth/models/scene`).
-They are the same on 1 and 2 threads. It plays without an allocation in its frame loop, at 20 ms a frame on 2 threads
-(the mean over its 270 frames, the shared machine; provisional).
+(float on AVX2, skipped without the effects in `NEURALFX_MODELS_EARTH`, by default
+`$NEURALVFX_DATA/fx_earth/models/scene`). They are the same on 1 and 2 threads. It plays without an allocation in its
+frame loop, at 14.1 ms a frame on 2 threads at the runtime's default (the mean over its 270 frames; median 13.7 ms,
+float 13.8) on a quiet machine: round 7 of the quiet re-timing, six rounds, the median of the runs [13.4, 15.0]
+([scenes_summary.csv](../results/quiet/round7/scenes_summary.csv)); on the shared machine it took 20 ms.
 
 What was learned in writing it:
 - **The learned eruption grows no column from an empty grid.** Woken empty at the blast (`start 0, empty`), the module

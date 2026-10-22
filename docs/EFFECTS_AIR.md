@@ -41,10 +41,11 @@ sources, forces and drawing, and are trained and tested as the earlier rounds' w
   too (as launch and ink in round 7). Its detail is closer to real than the flipbook's (spectrum distance 0.129 against
   0.198). By eye its layer is streakier than the simulator's: its rolling fronts come out as horizontal streaks and thin
   curls, and its release thins and swells more (§4.2).
-- **Cost (provisional, a shared machine, load 5 to 6 on 4 cores):** 82 KB stored for the candle, 294 KB for the ring (16
-  start points with 64-pixel fine fields and the mean state), 146 KB for heavy gas; 2.4 to 2.5 MB per instance at 128
-  px. At the runtime's int8 default on the AVX-512 build, 0.48 (candle), 0.57 (ring) and 0.43 ms (heavy gas) per 128 px
-  frame, where study D's fire took 0.65 ms and its explosion 0.54 in the same rounds (§5).
+- **Cost (re-timed on a quiet machine, round 7 of the quiet re-timing):** 82 KB stored for the candle, 294 KB for the
+  ring (16 start points with 64-pixel fine fields and the mean state), 146 KB for heavy gas; 2.4 to 2.5 MB per instance
+  at 128 px. At the runtime's int8 default on the AVX-512 build, 0.57 (candle), 0.71 (ring) and 0.49 ms (heavy gas) per
+  128 px frame, where study D's fire took 0.78 ms and its explosion 0.65 in the same rounds (§5; the busy machine's
+  least rounds gave 0.48, 0.57 and 0.43, its medians 0.50, 0.60 and 0.44).
 - **A scene script** (`examples/scenes/crypt.nvfxs`, 9 s) plays all three in a ruined crypt at night: candles flicker
   and lean when the door is thrown open, a tomb's cold vapour spills across the floor and is driven along it by the
   draught, and a censer puffs rings that rise and break up. Its keyframes are frozen (`ctest -R ScriptedCryptFrozen`,
@@ -444,29 +445,39 @@ gives the wisp blue-green fringes; that look was not measured.
 
 ## 5. Memory and cost
 
-Per frame through `nvfx_render` on one pinned core, with study D's fire and explosion measured in the same session
-(`nvfx_experiment d-timing`, twelve rounds back to back, 20 October 2026; [d_timing.csv](../results/experiments/fx_air/d_timing.csv)
-has the first round, [d_timing_rounds.csv](../results/experiments/fx_air/d_timing_rounds.csv) all of them): the least of
-the rounds' medians and, in brackets, the median of the rounds. All at the runtime's default precision, int8 (the AVX2
-rows force the AVX2 build, whose int8 kernels the runtime takes on a CPU without VNNI; the AVX-512 row is what this
-machine plays by default). **Provisional**: the machine was shared with three other agents' jobs (load 5 to 6 on 4 cores
-during the rounds).
+Per frame through `nvfx_render` on one pinned core, with study D's fire and explosion in the same session, **re-timed on
+a quiet machine**: round 7 of the quiet re-timing (21 October 2026,
+[results/quiet/README.md](../results/quiet/README.md)), nine rounds of `nvfx_experiment d-timing` with nothing else
+running; the median of the rounds' medians and its 95% interval
+([d_timing_summary.csv](../results/quiet/round7/d_timing_summary.csv), every round in
+[d_timing_rounds.csv](../results/quiet/round7/d_timing_rounds.csv)). The instances play at their default precision. With
+the AVX2 build forced that is float (the default is int8 only on the AVX-512 build where the CPU has VNNI, REPORT.md
+§13.8), so the AVX2 columns are float on AVX2, what a CPU without AVX-512 plays, not int8 without VNNI as this section
+said before; the AVX-512 column is int8, this machine's default. Where the busy machine's median of its twelve rounds
+(20 October, three other agents' jobs, load 5 to 6;
+[d_timing_rounds.csv](../results/experiments/fx_air/d_timing_rounds.csv)) differs by more than 15%, it follows as "was".
 
 | effect | stored | resident | per instance at 128 px | 64 px, AVX2 | 128 px, AVX2 | 256 px, AVX2 | 128 px, AVX-512 (the default) | restart (AVX2, 128 px) |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|
-| candle | 82 KB | 163 KB | 2.4 MB | 0.44 ms (0.46) | 0.70 ms (0.73) | 1.60 ms (1.66) | **0.48 ms** (0.50) | 15 ms (1 s warm-up) |
-| smokering | 294 KB | 804 KB | 2.5 MB | 0.59 ms (0.63) | 0.76 ms (0.79) | 1.02 ms (1.11) | **0.57 ms** (0.60) | 0.4 ms |
-| heavygas | 146 KB | 419 KB | 2.4 MB | 0.43 ms (0.44) | 0.63 ms (0.65) | 1.19 ms (1.24) | **0.43 ms** (0.44) | 0.4 ms |
-| fire (study D's, same session) | 82 KB | 163 KB | 2.4 MB | 0.45 ms (0.47) | 0.89 ms (0.91) | 2.29 ms (2.38) | 0.65 ms (0.67) | 15 ms (1 s warm-up) |
-| explosion (study D's, same session) | 274 KB | 804 KB | 2.4 MB | 0.43 ms (0.44) | 0.73 ms (0.75) | 1.44 ms (1.58) | 0.54 ms (0.58) | 0.3 ms |
+| candle | 82 KB | 163 KB | 2.4 MB | 0.45 ms [0.43, 0.57] | 0.76 ms [0.71, 1.08] | 1.67 ms [1.62, 1.82] | **0.57 ms** [0.54, 0.70] | 14 ms (1 s warm-up) |
+| smokering | 294 KB | 804 KB | 2.5 MB | 0.63 ms [0.60, 0.64] | 0.79 ms [0.77, 0.81] | 1.09 ms [1.01, 1.13] | **0.71 ms** [0.66, 0.73] (was 0.60) | 0.27 ms (was 0.4) |
+| heavygas | 146 KB | 419 KB | 2.4 MB | 0.48 ms [0.45, 0.57] | 0.65 ms [0.61, 0.79] | 1.29 ms [1.18, 1.60] | **0.49 ms** [0.40, 0.50] | 0.26 ms (was 0.4) |
+| fire (study D's, same session) | 82 KB | 163 KB | 2.4 MB | 0.53 ms [0.48, 0.60] | 0.98 ms [0.87, 1.11] | 2.39 ms [2.11, 2.53] | 0.78 ms [0.74, 0.81] (was 0.67) | 14 ms (1 s warm-up) |
+| explosion (study D's, same session) | 274 KB | 804 KB | 2.4 MB | 0.46 ms [0.44, 0.47] | 0.75 ms [0.73, 0.91] | 1.64 ms [1.44, 1.81] | 0.65 ms [0.62, 0.83] | 0.24 ms (was 0.3) |
 
 The same network as study D's, so the same per-pixel work (1012 multiply-adds per pixel at 128 px). All three cost less
 than fire at 128 and 256 px: much of their frames is empty or smooth, which the detail layer and the renderer pass
-quickly. The candle grows its fine fields at instance start, as fire does (a restart costs a 1 s warm-up, 15 ms); the
-ring and heavy gas store theirs with their start points and restart in under half a millisecond. The ring's mean state
-is applied once, when it starts. For scale, the 32-cell simulation of each with its own renderer costs 3.2 to 3.3
-(candle), 4.1 to 4.2 (ring: its smoke's spreading is a pass of its own) and 2.6 to 2.7 ms (heavy gas) in our scalar
-code, against 1.2 ms for fire's.
+quickly. The candle grows its fine fields at instance start, as fire does (a restart costs a 1 s warm-up, 14 ms); the
+ring and heavy gas store theirs with their start points and restart in about a quarter of a millisecond. The ring's mean
+state is applied once, when it starts. For scale, the 32-cell simulation of each with its own renderer costs 3.0
+(candle), 4.2 (ring: its smoke's spreading is a pass of its own) and 2.4 ms (heavy gas) in our scalar code, against 1.2
+ms for fire's (the busy machine's: 3.2 to 3.3, 4.1 to 4.2, 2.6 to 2.7 and 1.2).
+
+Against the busy medians the quiet ones are within 15% except the ring's and study D's fire's default (+18% and +16%);
+most are a few percent higher: on this session's host the AVX-512 build ran about a tenth slower than on round 6's (the
+AVX2 build as fast; results/quiet/README.md), and a single configuration switched between a fast and a slow state about
+1.35 times apart, which is why some intervals are wide. The busy machine's least rounds (0.48, 0.57 and 0.43 ms at the
+default) were close to round 7's least (0.52, 0.66, 0.39: within 16%).
 
 ## 6. The library and a scene
 
@@ -510,8 +521,10 @@ The video (rendered at the runtime's int8 default) and the full keyframes are un
 (outside git); the keyframes' SHA-256 are in [fx_air_frozen.csv](../results/experiments/fx_air_frozen.csv) and `ctest -R
 ScriptedCryptFrozen` checks them (pinned to float on the AVX2 build, skipped without the effects in
 `NEURALFX_MODELS_AIR`, by default `$NEURALVFX_DATA/fx_air/models/scene`). They are the same on 1 and 2 threads. It plays
-without an allocation in its frame loop, at 19 ms per frame on 2 threads at float and 28 ms at int8 on the busy machine
-(the modules' steps 4.8 and 2.6 ms of it; the rest varied with the other agents' jobs; provisional).
+without an allocation in its frame loop, at 10.2 ms per frame on 2 threads at int8 and at float alike on a quiet machine
+(round 7 of the quiet re-timing, six rounds: the median of the runs' median frames, [9.2, 11.0] and [9.8, 11.5]; the
+modules' steps 2.7 and 3.4 ms of it; [scenes_summary.csv](../results/quiet/round7/scenes_summary.csv)). The busy
+machine's 19 ms at float and 28 ms at int8 (steps 4.8 and 2.6 ms) varied with the other agents' jobs.
 
 What works: the three read as candles, a crypt's cold vapour and a censer's rings, and one draught moves all three. What
 does not, yet: nothing draws the candles, the tomb or the censer (only their flames, vapour, coals and smoke); the candles

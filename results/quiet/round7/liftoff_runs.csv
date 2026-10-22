@@ -1,0 +1,7 @@
+precision,round,frames,step_median_ms,period_median_ms,allocations
+default,1,225,4.841,19.813,0
+default,2,225,4.935,20.358,0
+default,3,225,4.497,17.763,0
+float,1,225,4.953,17.558,0
+float,2,225,5.411,20.718,0
+float,3,225,5.458,20.856,0
