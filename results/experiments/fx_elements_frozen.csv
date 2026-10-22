@@ -10,3 +10,4 @@ coast_keyframe,frame_150,nvfx_scene_script --keyframes (examples/scenes/coast.nv
 coast_keyframe,frame_180,nvfx_scene_script --keyframes (examples/scenes/coast.nvfxs; --precision float --isa avx2),761988,4383b1088b6cc69eba0cfc158937d7cbe86e173df326c1a86d8d37c10c82c92e,
 coast_keyframe,frame_216,nvfx_scene_script --keyframes (examples/scenes/coast.nvfxs; --precision float --isa avx2),753489,bfe574be0444309c3addb32ed5ffc302c83f18d1e29158b5cee2a432bcb36abd,
 coast_keyframe,frame_252,nvfx_scene_script --keyframes (examples/scenes/coast.nvfxs; --precision float --isa avx2),722850,7a56215c2d8e40460e0e3b4eebde5882d7c59ee9c9e7bc9dca0f8f7eac40637d,
+rollout_effect,haboob_q2,q2_fix/models/haboob.nvfx,301443,4f933a2fe7a226cc9aee138722bdf2b358dbf6330952392860b46135efdc0f23,study Q2 (docs/STUDY_Q2.md §4.8): the haboob with its renderer trained on from its own weights (rft); replaces it after its test; the library and the coast draw it by looks
