@@ -258,6 +258,22 @@ needs 187 in the normal form (`u30al`'s: 0.71, 134; its tracking at 1 s 0.92, 77
 the rule's form passes with probability 0.55 (`u30a`) and 0.66 (`u30al`) if every held measure is truly unchanged and the
 improved targets are as measured (q2_power.csv), stated here before any of the geyser's validation numbers.
 
+**The smoke ring** (the null 00:36 UTC, f878700; the rule 00:48, its row in q2_rule.csv). The null moves its spectrum
+distance at a setting by 0.044 (RMS), its motion by 2.1%, its coverage distance by 0.00029 and its mean frame by 2.10
+dB: margins tracking -0.20 dB, spectrum **+0.0437**, |ln motion ratio| **+0.0208**, coverage **+0.00029**, emission
+**+0.0001** (study K's), mean frame **-2.10 dB**. On the probe:
+- `rft` (41.1 dB on its samples' pixels; study Q's fresh `rf` 39.8): the first frame **+2.98 dB [+2.82, +3.15]** (25.08 →
+  28.06 dB) and the mean frame **+0.05 [+0.01, +0.08]** (both targets better), at 1 s +0.13 [+0.05, +0.20], the spectrum
+  distance -0.025 [-0.029, -0.021] (0.716 → 0.691), coverage and emission closer, at 2 s a tie, and **its motion error a
+  tie, +0.003 [-0.004, +0.009]** (study Q's `rf` on its probe: +0.011 [+0.001, +0.021]): it meets the rule's form.
+- `rfs` (39.9 dB): the first frame **+2.19 [+2.02, +2.36]**, the spectrum -0.026, coverage and emission closer, the rest
+  ties (the motion +0.001 [-0.004, +0.006]): it meets the rule's form.
+
+Every measure that is not a target it improves passes its margin, if truly unchanged, with probability at least 0.98 at
+20 settings by resampling and needs at most 19 in the normal form (at 10, `rft`'s tracking at 1 s would pass with
+probability 0.83): **N = 20**, at
+which the rule's form passes with probability 0.98 (`rft`) and 1.00 (`rfs`).
+
 (The rest is filled in as the probe runs.)
 
 ### 4.7 Validation (the choice)
