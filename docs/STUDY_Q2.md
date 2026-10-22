@@ -282,7 +282,7 @@ needs 187 in the normal form (`u30al`'s: 0.71, 134; its tracking at 1 s 0.92, 77
 the rule's form passes with probability 0.55 (`u30a`) and 0.66 (`u30al`) if every held measure is truly unchanged and the
 improved targets are as measured (q2_power.csv), stated here before any of the geyser's validation numbers.
 
-**The smoke ring** (the null 00:36 UTC, f878700; the rule 00:48, its row in q2_rule.csv). The null moves its spectrum
+**The smoke ring** (the null 00:35 UTC, f878700; the rule 00:47, b5c9bfb). The null moves its spectrum
 distance at a setting by 0.044 (RMS), its motion by 2.1%, its coverage distance by 0.00029 and its mean frame by 2.10
 dB: margins tracking -0.20 dB, spectrum **+0.0437**, |ln motion ratio| **+0.0208**, coverage **+0.00029**, emission
 **+0.0001** (study K's), mean frame **-2.10 dB**. On the probe:
@@ -298,7 +298,7 @@ Every measure that is not a target it improves passes its margin, if truly uncha
 probability 0.83): **N = 20**, at
 which the rule's form passes with probability 0.98 (`rft`) and 1.00 (`rfs`).
 
-**The avalanche** (the null 01:47 UTC; the rule 01:51; `s48` alone, §3). The null (the current file, study Q's `u30`,
+**The avalanche** (the null 01:46 UTC, a7d28f8; the rule 01:49, e246297; `s48` alone, §3). The null (the current file, study Q's `u30`,
 with fresh seeds) moves its spectrum distance at a setting by 0.035 (RMS), its motion by 21%, its coverage distance by
 0.012 and its mean frame by 2.20 dB: margins tracking -0.20 dB, spectrum **+0.0346**, |ln motion ratio| **+0.209**,
 coverage **+0.0118**, emission **+0.0001** (study K's), mean frame **-2.20 dB**. `s48` (805,951 bytes: 48 start points
@@ -309,7 +309,7 @@ distance -0.024 [-0.039, -0.011] (0.129 → 0.105) and the motion error -0.093 [
 probability at least 0.99 at 30 settings by resampling and needs at most 24 in the normal form (the motion; at 20 it
 would need more): **N = 30**, at which the rule's form passes with probability 0.95.
 
-**Heavy gas** (the null 00:50 UTC; the rule 02:20). The null moves its spectrum distance at a setting by 0.020 (RMS),
+**Heavy gas** (the null 00:50 UTC, 6dfcddb; the rule 02:28, 58c2ebb). The null moves its spectrum distance at a setting by 0.020 (RMS),
 its motion by 3.9%, its coverage distance by 0.0021 and its mean frame by 1.03 dB: margins tracking -0.20 dB, spectrum
 **+0.0200**, |ln motion ratio| **+0.0389**, coverage **+0.0021**, emission **+0.0001** (study K's), mean frame **-1.03
 dB**. Tracking from a true state is the same frames for all three (start points play no part there). In endless play on
@@ -330,7 +330,7 @@ need 105, 115, 89 and 87 in the normal form. The cap binds: **N = 60**, at which
 0.78 (`ms`), 0.99 (`msg`) and 0.65 (`s24`) if every held measure is truly unchanged and the improved targets are as
 measured (q2_power.csv), stated here before any of heavy gas's validation numbers.
 
-**The mushroom** (the null 01:47 UTC; the rule 02:20). The null moves its spectrum distance at a setting by 0.013 (RMS),
+**The mushroom** (the null 01:45 UTC, 13048e5; the rule 02:07, f53d9d1). The null moves its spectrum distance at a setting by 0.013 (RMS),
 its motion by 3.9%, its coverage distance by 0.0060 and its mean frame by 1.23 dB: margins tracking -0.20 dB, spectrum
 **+0.02** (study K's), |ln motion ratio| **+0.0394**, coverage **+0.0060**, emission **+0.0001**, mean frame **-1.23
 dB**. On the probe:
