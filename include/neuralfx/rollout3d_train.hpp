@@ -1,5 +1,7 @@
-// Training study N's 3D rollout effect (rollout3d.hpp) from 3D simulation runs (sim3d.hpp), on the CPU, with hand-written
-// gradients checked against finite differences (tests/test_3d.cpp). Study D's recipe with one more dimension:
+// Training study N's 3D rollout effect (rollout3d.hpp) from 3D simulation runs (sim3d.hpp), with hand-written gradients
+// checked against finite differences (tests/test_3d.cpp). Default device is CPU; optional CUDA backend
+// (TrainOptions::device, Y-slab sharded conv3, CMake NEURALFX_CUDA) for hres-scale grids. Study D's recipe with one more
+// dimension:
 //   1. record_run: simulate a run and keep its coarse state every frame (block averages of velocity, heat and soot);
 //   2. train_stepper: backpropagation through time over windows from true states, with noise on the inputs; then
 //      windows that start after the stepper's own rollout, with a loss on where the heat and soot are (their profiles
@@ -54,7 +56,11 @@ std::expected<Run, std::string> load_run(const std::filesystem::path& path);
 // Channel scales (RMS over the runs) and the range the state is kept in (1.5 x the largest magnitude seen).
 void set_normalisation(Model& m, std::span<const Run> runs);
 
+enum class TrainDevice { cpu, cuda };
+
 struct TrainOptions {
+  TrainDevice device = TrainDevice::cpu;
+  int shards = 4;            // CUDA: Y-slab streams for conv3 (1: one stream, no slab overlap)
   int iterations = 1500;     // stage 1: windows from true states, the unroll growing to max_unroll over its first half
   int finetune = 600;        // stage 2: half the windows start after up to burn_max frames of the stepper's own rollout
   int activity_stage = 300;  // stage 3: as stage 2, plus matching how much the state changes per frame

@@ -7,14 +7,17 @@ B=${1:-build/nvfx_3d}
 ROOT=${2:-${NEURALVFX_DATA:-$HOME/nvfx-data}/hres_3d/fire}
 TREC=${3:-3}
 TTRAIN=${4:-2}
+TRAIN_DEVICE=${TRAIN_DEVICE:-cpu}
+TRAIN_SHARDS=${TRAIN_SHARDS:-4}
 H="--study hres --root $ROOT --effect fire"
+TD="--device $TRAIN_DEVICE --shards $TRAIN_SHARDS"
 W="--winds 0.05,0.25,0.5,0.75,0.95 --seconds 30"
 N2=${NEURALVFX_DATA:-$HOME/nvfx-data}/n2_3d/models
 
 echo "hres fire: data $ROOT"
 $B record $H --runs 40 --frames 240 --threads $TREC
 $B record $H --runs-dir long --runs 24 --frames 540 --threads $TREC
-$B train $H --name hres --runs-dir train --also "$ROOT/runs/long" --threads $TTRAIN
+$B train $H --name hres --runs-dir train --also "$ROOT/runs/long" --threads $TTRAIN $TD
 for k in 1 2 3 4; do
   if [ -f "$ROOT/ckpt/hres_stage$k.ckpt" ]; then $B finish $H --ckpt hres_stage$k --out C$k --runs-dir train --also "$ROOT/runs/long"; fi
 done

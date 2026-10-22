@@ -88,10 +88,14 @@ mkdir -p $R
 $B --study hres record --root $R --runs 40 --frames 240 --threads 3
 $B --study hres record --root $R --runs-dir long --from 0 --runs 24 --frames 540 --threads 3
 
-# Train (resumable)
+# Train (resumable). CPU default. Optional GPU trainer (Y-slab sharded conv3, lower host RAM):
+#   cmake -S . -B build-cuda -G Ninja -DCMAKE_CXX_COMPILER=g++-14 -DNEURALFX_CUDA=ON -DCMAKE_CUDA_ARCHITECTURES=86
+#   ninja -C build-cuda nvfx_3d
+#   export B=build-cuda/nvfx_3d TRAIN_DEVICE=cuda TRAIN_SHARDS=4
 $B --study hres train --root $R --name hres --runs-dir train --also $R/runs/long \
   --iterations 900 --finetune 350 --activity 250 --long 250 --batch 8 --unroll 12 --burn 24 \
   --seed 9600000 --threads 3
+# With GPU: append --device cuda --shards 4 (or set TRAIN_DEVICE / TRAIN_SHARDS in hres_fire.sh / hres_machine_run.sh).
 
 $B --study hres finish --root $R --ckpt hres --out hres_fire --runs-dir train --also $R/runs/long
 
@@ -124,28 +128,16 @@ tools/study_3d/hres_fire.sh build/nvfx_3d
 # then validation commands printed at the end; mirror study N2 §14.13 with --study hres --root $NEURALVFX_DATA/hres_3d/fire
 ```
 
-Smoke: `tools/study_3d/hres_smoke.sh build/nvfx_3d`.
+Smoke: `tools/study_3d/hres_smoke.sh build/nvfx_3d`. After training completes, `finish` + demo validation:
+`bash tools/study_3d/hres_smoke_after_train.sh` (or `bash tools/study_3d/start_smoke_watcher.sh` while CPU train runs).
 
-## 8. Cost (a quiet machine)
+Quick CUDA sanity check (after `build-cuda`): `bash tools/study_3d/cuda_train_check.sh`.
 
-`models/3d/fire_hres.nvfx3` through the volume C API (`nvfx_3d --study hres timing`, controls 0.7, 0.5, 0.6: 5 starts of
-60 frames, 4 pictures of each size per start), re-timed with study N2's fire and study R's smoke in turn, six rounds,
-nothing else running (round 7 of the quiet re-timing, 21 October 2026,
-[results/quiet/README.md](../results/quiet/README.md),
-[volume_summary.csv](../results/quiet/round7/volume_summary.csv)); the median of the rounds' medians and its 95%
-interval, milliseconds per frame:
+Status: `bash tools/study_3d/hres_status.sh` (or `monitor_hres.sh` every 60 s). Fire validation (long): `bash tools/study_3d/start_fire_validate.sh`
+(uses `nvfx_bin_link`; safe with a space in the repo path). After validate, publish into `models/3d/`: `bash tools/study_3d/start_fire_publish_watcher.sh`.
+While smoke CUDA train runs: `bash tools/study_3d/pause_fire_validate.sh` (removes partial edge CSVs; resume skips finished steps).
+The smoke watcher auto-starts fire validate after smoke reaches iteration 1750 if validate is not done yet.
 
-| what | 1 thread | 4 threads | study N2's C4, the same rounds (1 / 4 threads) |
-|---|---:|---:|---:|
-| a step (one frame) | **239** [233, 244] | **64** [63, 68] | 21.0 / 9.0 |
-| a picture, 256 x 256 | 49 [44, 53] | 12.7 [11.5, 13.3] | 56 / 14 |
-| a picture, 512 x 512 | 176 [166, 190] | 46 [44, 49] | 200 / 52 |
-| a start (the start point and the 24-frame warm-up) | 5,901 [5,638, 6,197] | 1,565 [1,514, 1,636] | 546 / 224 |
-
-On one thread a step's stages (with the reference detail layer, which the volume API replaces by its vector one, about
-10 ms): the noise inputs 11.4 ms, **the coarse step 192** (N2's: 10.5), the detail layer 46.0, the renderer's
-preparation 14.6, a 256 x 256 picture 36.2. So the finer coarse state makes a step about **11 times** N2's on one thread
-and 7 times on four, most of it (192 of 239 ms) the 32 x 48 x 32 stepper: its coarse step costs 18 times N2's (eight
-times the cells, twice the width; §3 expected about eight times); the detail layer and the pictures cost what N2's do,
-since the detail grid is the same. A step at 64 ms on four threads is not real time; like N2's model it suits a hero
-effect, a cut scene or baking.
+**Resume smoke on GPU** (stops CPU train, resumes `ckpt/smoke.ckpt`): `bash tools/study_3d/hres_smoke_resume_cuda.sh`
+(`TRAIN_SHARDS`, `BUILD_DIR=build-cuda`). Or fresh: `TRAIN_DEVICE=cuda bash tools/study_3d/hres_smoke.sh`. `nvfx_bin_link.sh` avoids
+WSL path issues when the repo lives under `Neural VFX`.

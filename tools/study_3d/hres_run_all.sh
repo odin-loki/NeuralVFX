@@ -1,9 +1,11 @@
-#!/bin/sh
+#!/usr/bin/env bash
 # Run study hres end-to-end: fire (record, train, finish, validate) then smoke. One train job at a time.
-# Usage: hres_run_all.sh [BUILD_DIR] [NEURALVFX_DATA]
-set -e
+# Usage: hres_run_all.sh [NVFX_3D_BINARY] [NEURALVFX_DATA]
+set -euo pipefail
 REPO=$(cd "$(dirname "$0")/../.." && pwd)
-B=${1:-$REPO/build/nvfx_3d}
+if [ -n "${1:-}" ] && [ -x "$1" ]; then B=$1; else
+  B=$(BUILD="${BUILD:-$REPO/build/nvfx_3d}" bash "$REPO/tools/study_3d/nvfx_bin_link.sh")
+fi
 export NEURALVFX_DATA=${2:-$HOME/nvfx-data}
 LOG=$NEURALVFX_DATA/hres_run_all.log
 exec > >(tee -a "$LOG") 2>&1

@@ -3,6 +3,7 @@
 // against finite differences.
 #include <neuralfx/binio.hpp>
 #include <neuralfx/rollout3d_train.hpp>
+#include <neuralfx/rollout3d_train_cuda.hpp>
 
 #include <algorithm>
 #include <bit>
@@ -923,6 +924,11 @@ int stage_end(const TrainOptions& o, int stage) {
 
 void train_stepper(Model& m, std::span<const Run> runs, const TrainOptions& o, TrainState& s,
                    const std::function<void(const Model&, const TrainState&)>& checkpoint) {
+  if (o.device == TrainDevice::cuda) {
+    if (!cuda_train_available()) throw std::runtime_error("rollout3d: --device cuda but no CUDA device is available");
+    cuda_train_stepper(m, runs, o, s, checkpoint);
+    return;
+  }
   if (runs.empty()) throw std::invalid_argument("rollout3d: no runs");
   const StepLayout L = step_layout(m.h);
   if (m.step_w.size() != L.size) throw std::invalid_argument("rollout3d: weights do not match the hyperparameters");

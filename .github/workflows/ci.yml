@@ -1,6 +1,7 @@
 # Build and test on Ubuntu 24.04 with warnings as errors.
 #   build   the libraries, tools and tests (ffmpeg installed so the video-ingest test runs; the BC7 and ASTC encoders of
 #           the flipbook baselines fetched at pinned commits), plus a benchmark smoke run
+#   cuda    compile the optional 3D CUDA trainer (NEURALFX_CUDA); Rollout3d.Cuda* tests skip when no GPU is present
 #   viewer  the Dear ImGui viewer (fetched at a pinned tag) and its tests: the scene mode's reload logic (no display) and
 #           headless screenshots under Xvfb of both modes (the scene mode on untrained stand-ins: CI has no models);
 #           configured without the encoders (the build that does without them)
@@ -45,6 +46,29 @@ jobs:
           build/nvfx_sim --effect fire --size 64 --frames 8 --out build/smoke.nfxclip
           build/nvfx_train --clips build/smoke.nfxclip --out build/smoke.nvfx --grid 16 --hidden 16 --iters 50 --pixels 512 --quiet
           build/nvfx_c_host build/smoke.nvfx 64 1
+
+  cuda:
+    name: CUDA 3D trainer (compile)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install system packages
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends g++-14 cmake ninja-build libgtest-dev zlib1g-dev ffmpeg nvidia-cuda-toolkit
+
+      - name: Configure
+        run: >-
+          cmake -S . -B build-cuda -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_COMPILER=g++-14 -DCMAKE_C_COMPILER=gcc-14
+          -DNEURALFX_WERROR=ON -DNEURALFX_CUDA=ON -DCMAKE_CUDA_ARCHITECTURES=70
+
+      - name: Build
+        run: cmake --build build-cuda --target neuralfx_3d_tests nvfx_3d
+
+      - name: Test (GPU tests skip when no device)
+        run: ctest --test-dir build-cuda -R 'Rollout3d.Cuda' --output-on-failure
 
   viewer:
     name: Viewer (Xvfb)

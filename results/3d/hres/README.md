@@ -1,6 +1,11 @@
 # Study hres results (finer coarse 3D rollouts)
 
-Protocol: [docs/STUDY_3D_HRES.md](../../docs/STUDY_3D_HRES.md). Drivers: `tools/study_3d/hres_fire.sh`, `hres_smoke.sh`.
+Protocol: [docs/STUDY_3D_HRES.md](../../docs/STUDY_3D_HRES.md). Drivers: `tools/study_3d/hres_fire.sh`, `hres_smoke.sh`,
+`hres_machine_run.sh`. Optional GPU training: `build-cuda/nvfx_3d` with `TRAIN_DEVICE=cuda` (see §5 in the study doc);
+sanity check: `bash tools/study_3d/cuda_train_check.sh`. Status: `bash tools/study_3d/hres_status.sh`.
+While smoke train runs: `bash tools/study_3d/start_smoke_watcher.sh` (finish + validate + publish at 1750).
+Fire validate (hours): `bash tools/study_3d/start_fire_validate.sh`; publish watcher: `start_fire_publish_watcher.sh`.
+During smoke CUDA train, `pause_fire_validate.sh` avoids contention; the smoke watcher restarts fire validate at iteration 1750.
 
 | Effect | N2 baseline (16³ coarse) | hres target (32³ coarse) | Data root |
 |---|---|---|---|

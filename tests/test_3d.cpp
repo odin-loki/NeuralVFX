@@ -14,6 +14,7 @@
 #include <neuralfx/render3d.hpp>
 #include <neuralfx/rollout3d.hpp>
 #include <neuralfx/rollout3d_train.hpp>
+#include <neuralfx/rollout3d_train_cuda.hpp>
 #include <neuralfx/sim3d.hpp>
 
 #include <gtest/gtest.h>
@@ -1312,5 +1313,74 @@ TEST(VolumeDetail, VectorsGiveTheReferenceToTheBit) {
   }
   if (isas == 0) GTEST_SKIP() << "no AVX2";
 }
+
+#ifdef NEURALFX_HAVE_CUDA
+#include <cuda_runtime.h>
+
+TEST(Rollout3d, CudaDeviceSmoke) {
+  if (!r3::cuda_train_available()) GTEST_SKIP() << "no CUDA device";
+  float* d = nullptr;
+  ASSERT_EQ(cudaMalloc(&d, sizeof(float)), cudaSuccess);
+  float h = 3.f, out = 0.f;
+  ASSERT_EQ(cudaMemcpy(d, &h, sizeof(float), cudaMemcpyHostToDevice), cudaSuccess);
+  ASSERT_EQ(cudaMemcpy(&out, d, sizeof(float), cudaMemcpyDeviceToHost), cudaSuccess);
+  EXPECT_EQ(out, 3.f);
+  cudaFree(d);
+}
+
+TEST(Rollout3d, CudaWindowLossMatchesCpu) {
+  if (!r3::cuda_train_available()) GTEST_SKIP() << "no CUDA device";
+  const r3::Model m = tiny_model(3, 8, r3::Edges::ambient);
+  const auto r = tiny_run(m.h, 6, 0.25f);
+  std::vector<float> grad_cpu(m.step_w.size()), grad_cuda(m.step_w.size());
+  const double loss_cpu = r3::window_loss(m, r, 2, 1, 0, 0.f, 0.f, 1, nullptr);
+  const double loss_cuda = r3::window_loss_cuda(m, r, 2, 1, 0, 0.f, 0.f, 1, nullptr, 0.f, 1);
+  EXPECT_NEAR(loss_cpu, loss_cuda, 1e-3 * loss_cpu + 1e-6);
+  const double loss_cpu2 = r3::window_loss(m, r, 2, 1, 0, 0.f, 0.f, 1, &grad_cpu);
+  const double loss_cuda2 = r3::window_loss_cuda(m, r, 2, 1, 0, 0.f, 0.f, 1, &grad_cuda, 0.f, 1);
+  EXPECT_NEAR(loss_cpu2, loss_cuda2, 1e-3 * loss_cpu2 + 1e-6);
+  for (std::size_t j = 0; j < grad_cpu.size(); ++j) {
+    const float ref = grad_cpu[j];
+    EXPECT_NEAR(grad_cuda[j], ref, 2e-2f * std::max(1.f, std::abs(ref)) + 5e-4f) << "weight " << j;
+  }
+  std::vector<float> grad_cpu_u2(m.step_w.size()), grad_cuda_u2(m.step_w.size());
+  const double loss_cpu_u2 = r3::window_loss(m, r, 1, 2, 0, 0.f, 0.f, 5, &grad_cpu_u2);
+  const double loss_cuda_u2 = r3::window_loss_cuda(m, r, 1, 2, 0, 0.f, 0.f, 5, &grad_cuda_u2, 0.f, 1);
+  EXPECT_NEAR(loss_cpu_u2, loss_cuda_u2, 2e-3 * loss_cpu_u2 + 1e-6);
+  for (std::size_t j = 0; j < grad_cpu_u2.size(); ++j) {
+    const float ref = grad_cpu_u2[j];
+    EXPECT_NEAR(grad_cuda_u2[j], ref, 3e-2f * std::max(1.f, std::abs(ref)) + 5e-4f) << "unroll2 weight " << j;
+  }
+}
+
+TEST(Rollout3d, CudaTrainingMatchesCpu) {
+  if (!r3::cuda_train_available()) GTEST_SKIP() << "no CUDA device";
+  r3::Model cpu_m = tiny_model(5, 8);
+  const std::vector<r3::Run> runs{tiny_run(cpu_m.h, 14), tiny_run(cpu_m.h, 14)};
+  r3::set_normalisation(cpu_m, runs);
+  r3::Model cuda_m = cpu_m;
+  r3::TrainOptions o;
+  o.iterations = 3;
+  o.finetune = 99;
+  o.activity_stage = 99;
+  o.long_stage = 0;
+  o.batch = 2;
+  o.max_unroll = 2;
+  o.burn_max = 0;
+  o.sigma = 0.f;
+  o.threads = 1;
+  o.seed = 4242;
+  r3::TrainState sc, sg;
+  r3::train_stepper(cpu_m, runs, o, sc);
+  o.device = r3::TrainDevice::cuda;
+  o.shards = 2;
+  r3::train_stepper(cuda_m, runs, o, sg);
+  EXPECT_EQ(sc.iteration, sg.iteration);
+  for (std::size_t j = 0; j < cpu_m.step_w.size(); ++j) {
+    const float ref = cpu_m.step_w[j];
+    EXPECT_NEAR(cuda_m.step_w[j], ref, 3e-2f * std::max(1.f, std::abs(ref)) + 1e-4f) << "weight " << j;
+  }
+}
+#endif
 
 }  // namespace

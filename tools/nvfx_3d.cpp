@@ -107,8 +107,11 @@ void log_line(const fs::path& file, const std::string& line) {
   fs::create_directories(file.parent_path());
   std::ofstream o(file, std::ios::app);
   o << line << "\n";
-  std::println("{}", line);
-  std::fflush(stdout);
+  o.flush();
+  if (!std::getenv("NVFX_TRAIN_QUIET_STDOUT")) {
+    std::println("{}", line);
+    std::fflush(stdout);
+  }
 }
 
 // --- the study's constants (docs/STUDY_3D.md §5) -------------------------------------------------------------------
@@ -760,6 +763,8 @@ r3::TrainOptions train_options(const Args& a) {
   o.lr = a.f("lr", 2e-3f);
   o.lr_finetune = a.f("lr-ft", 7e-4f);
   o.threads = a.i("threads", 3);
+  o.shards = std::max(1, a.i("shards", 4));
+  if (a.str("device", "cpu") == "cuda") o.device = r3::TrainDevice::cuda;
   o.log_every = a.i("log-every", 10);
   o.checkpoint_every = a.i("checkpoint-every", 20);
   o.stop_at = a.i("stop-at", 0);
@@ -787,8 +792,9 @@ int train(const Args& a) {
   if (o.spread > 0.f || o.edge > 0.f) log_line(log, std::format("study R2's losses in stages 2 to 4: spread {}, edge {}", o.spread, o.edge));
   const int stage2_end = o.iterations + o.finetune;
   const double c0 = cpu_now();
-  log_line(log, std::format("schedule: {} + {} + {} + {} iterations (stage 4 burn {} to {}), batch {}, unroll {}, threads {}", o.iterations, o.finetune,
-                            o.activity_stage, o.long_stage, o.burn_long_min, o.burn_long_max, o.batch, o.max_unroll, o.threads));
+  log_line(log, std::format("schedule: {} + {} + {} + {} iterations (stage 4 burn {} to {}), batch {}, unroll {}, threads {}, device {} shards {}", o.iterations,
+                            o.finetune, o.activity_stage, o.long_stage, o.burn_long_min, o.burn_long_max, o.batch, o.max_unroll, o.threads,
+                            o.device == r3::TrainDevice::cuda ? "cuda" : "cpu", o.shards));
   o.progress = [&](int it, int unroll, double loss, double seconds) {
     log_line(log, std::format("it {} unroll {} loss {:.6f} ({:.0f} s, {:.0f} CPU s)", it, unroll, loss, seconds, cpu_now() - c0));
   };
