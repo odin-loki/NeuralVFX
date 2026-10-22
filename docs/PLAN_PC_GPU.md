@@ -2,7 +2,9 @@
 
 **Status:** a plan, written 21 October 2026, revised the same day: the high-resolution 3D effects, each in hours.
 Nothing in it has started. It refines stage 2 of [TODO.md](../TODO.md) (the catalogue, the measuring rules and the
-seeds stay as they are there).
+seeds stay as they are there). Its accelerated version, every effect as a small seeded generator (a code of a few
+hundred numbers fitted against a shared family network, coarser and fewer teachers, pruning and compression to the
+noise floor), is [GENERATOR.md](GENERATOR.md): if its bets hold, an effect takes about 1 to 2 hours.
 
 **What "high resolution" means here.** TODO's stage 2 sizes:
 - a **64 x 96 x 64 learned state** (64³ for effects that aren't tall): twice study hres's 32 x 48 x 32 in each

@@ -52,7 +52,9 @@ by its rule (magic saved too little), available to set.
 - **Stage 2, on a PC, much later:** everything below. Accurate 3D simulations of every effect, however long they take,
   checked against measured physics. How the PC's GPU simulates, trains and plays the high-resolution effects (a
   64 x 96 x 64 state, 256 x 384 x 256 detail), each made in 5 to 9 hours, and which simulators teach them (our GPU
-  solvers and Houdini, checked against measurements), is planned in [docs/PLAN_PC_GPU.md](docs/PLAN_PC_GPU.md).
+  solvers and Houdini, checked against measurements), is planned in [docs/PLAN_PC_GPU.md](docs/PLAN_PC_GPU.md), and
+  its accelerated version (each effect a small seeded generator: a code fitted against a shared network, pruned and
+  compressed to the noise floor; its first bets testable in 2D here) in [docs/GENERATOR.md](docs/GENERATOR.md).
   Large 3D models trained on them, as fine as the PC allows. Then 3D scenes, a 3D library and a full weather system.
 
 First we demo, then we go big.
