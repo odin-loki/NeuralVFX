@@ -10,3 +10,4 @@ crypt_keyframe,frame_144,nvfx_scene_script --keyframes (examples/scenes/crypt.nv
 crypt_keyframe,frame_174,nvfx_scene_script --keyframes (examples/scenes/crypt.nvfxs; --precision float --isa avx2),1043383,1710b26f3c46ae1a556c1b9a6f6ce57ddf8fb111a0b187ca8317db64fe74d45b,
 crypt_keyframe,frame_210,nvfx_scene_script --keyframes (examples/scenes/crypt.nvfxs; --precision float --isa avx2),1055007,d9b0dfbc110bc4f58ef7bb73d0b38a1791479338d71c9588bf4e628038820b6f,
 crypt_keyframe,frame_252,nvfx_scene_script --keyframes (examples/scenes/crypt.nvfxs; --precision float --isa avx2),1058258,25c785964d8f7d9a7badcecd47717c5e0425f8278672a5a47a62c2fe259e4cbf,
+rollout_effect,smokering_q2,q2_fix/models/smokering.nvfx,301443,a36e5e385f249dff9df8aae6d8c7c61b0a0a3b573c6f49531df76caf5d18598d,study Q2 (docs/STUDY_Q2.md §4.8): the smoke ring with its renderer trained on from its own weights (rft); replaces it after its test; the library and the crypt draw it by looks

@@ -10,7 +10,7 @@
 effect lava_fx      = "lava.nvfx"         # intensity (heat and flow rate), flow (downhill left, level, right), turbulence (bubbling)
 effect eruption_fx  = "eruption.nvfx", swirl 1, swirl_scale 9   # intensity (eruption rate), wind, turbulence; a gentler
 #                                                                   swirl than its calibration's 3, whose detail draws worms
-effect avalanche_fx = "avalanche.nvfx"    # plays once (5 s), 16 start points: intensity (size), direction, turbulence
+effect avalanche_fx = "avalanche.nvfx"    # plays once (5 s), 48 start points (study Q2; the first 16 as before): intensity (size), direction, turbulence
 
 # Molten rock under a dark crust: the lava model's heat drawn as glow only where it is hot (the crust stays dark), its rock
 # dark and faintly lit by the scene.

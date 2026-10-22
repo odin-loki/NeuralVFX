@@ -1375,8 +1375,9 @@ State sample_state(const Model& m, const RenderSample& s) {
 
 double train_renderer(Model& m, std::span<const RenderSample> samples, const RendererOptions& o) {
   if (samples.empty()) throw std::invalid_argument("rollout: no render samples");
-  // Input normalisation: the 99.5th percentile of fine heat and soot over the samples' active pixels.
-  {
+  // Input normalisation: the 99.5th percentile of fine heat and soot over the samples' active pixels (kept as it is when
+  // the renderer is fine-tuned from its weights).
+  if (!o.keep_scale) {
     std::vector<float> t, d;
     for (const RenderSample& s : samples) {
       for (std::size_t i = 0; i < s.fine_t.size(); i += 7) {

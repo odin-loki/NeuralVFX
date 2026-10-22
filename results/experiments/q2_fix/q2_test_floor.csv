@@ -1,0 +1,16 @@
+effect,statistic,floor_mean
+haboob,spectrum_l1,0.028567
+haboob,abs_ln_motion_ratio,0.100931
+haboob,coverage_l1,0.004110
+haboob,emission_l1,0.000000
+haboob,mean_frame_psnr,36.254509
+smokering,spectrum_l1,0.016563
+smokering,abs_ln_motion_ratio,0.017305
+smokering,coverage_l1,0.000283
+smokering,emission_l1,0.000000
+smokering,mean_frame_psnr,44.723394
+avalanche,spectrum_l1,0.026807
+avalanche,abs_ln_motion_ratio,0.046235
+avalanche,coverage_l1,0.001324
+avalanche,emission_l1,0.000000
+avalanche,mean_frame_psnr,41.095301

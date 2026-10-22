@@ -53,6 +53,19 @@
 // o_power.csv), `val --split valo` and `test` (once) at that number of settings. Its rule has two targets, the mean frame
 // and tracking at 1 s: a candidate is better on at least one, and every measure, the other target included, is within
 // its margin. `train --activity-stage N --mean-stage 0 --unroll 30` is study L's fine-tune on longer windows.
+//
+// Study Q (docs/REPORT.md §21): --study q keeps every file under DATA/q_fix, its seeds 33,000,000 to 33,499,999, its rule
+// (eight measures, each candidate's targets, margins from the null) with its numbers per effect from a committed table
+// (results/experiments/q_fix/q_rule.csv): `val --split probeq [--null]`, `val --split valq`, `test` (once).
+//
+// Study Q2 (docs/STUDY_Q2.md): --study q2 is study Q's method on its leftovers, every file under DATA/q2_fix, its own seeds
+// (33,500,000 to 33,999,999) and tables (results/experiments/q2_fix: q2_margins.csv, q2_power.csv, q2_rule.csv,
+// q2_frozen.csv, q2_val_*.csv, q2_test_*.csv): `val --split probeq2 [--null]`, `val --split valq2`, `test` (once,
+// testq2). Its candidates add three ways of making a file: `train --anchor W` (the fine-tune with round 2's anchor: each
+// window from a true state also pays W times the first step's squared distance from the current model's first step),
+// `refit --finetune` (the renderer trained on from its own weights and input scales, --iterations, --lr) and `growfine`
+// (the start points' stored fine fields dropped, so the runtime grows them from the start's coarse state, moved by the
+// mean state where there is one, over --warmup frames: 0 for a one-shot).
 #include "args.hpp"
 
 #include <neuralfx/clip.hpp>
@@ -106,7 +119,9 @@ struct Ctx {
   bool m3 = false;  // study M3 (--study m3): files under DATA/m3, its splits and its rule
   bool o = false;   // study O (--study o): files under DATA/o_fix, its splits and its rule
   bool q = false;   // study Q (--study q): files under DATA/q_fix, its splits and its rule (docs/REPORT.md §21)
-  fs::path dir() const { return data / (q ? "q_fix" : o ? "o_fix" : m3 ? "m3" : m2 ? "m2" : "m_ordered"); }
+  bool q2 = false;  // study Q2 (--study q2, with q): study Q's rule on its own seeds, files under DATA/q2_fix (docs/STUDY_Q2.md)
+  fs::path dir() const { return data / (q2 ? "q2_fix" : q ? "q_fix" : o ? "o_fix" : m3 ? "m3" : m2 ? "m2" : "m_ordered"); }
+  std::string qp() const { return q2 ? "q2" : "q"; }  // study Q's or Q2's table prefix (q_margins.csv, q2_margins.csv, ...)
 };
 
 template <class F>
@@ -1453,6 +1468,17 @@ void step_train(const Ctx& c, sim::Effect e, const tools::Args& a) {
   so.seed = a.u64("seed", 41);
   so.keep_normalisation = true;
   so.floor_gradient = a.flag("floor-gradient");  // study L's vortex was trained with it (REPORT §12.1)
+  // Study Q2: round 2's anchor (docs/COMPOSE.md §10): a window from a true state (no burn-in) also pays --anchor times the
+  // first step's squared distance from the current model's first step on the same input, so the fine-tune keeps the
+  // first step as the current model makes it. Every run is plain (no coupled runs), so every such window is anchored.
+  const rollout::Model anchor_model = m;
+  if (a.has("anchor")) {
+    so.anchor = a.f("anchor", 0.f);
+    so.anchor_model = &anchor_model;
+    so.plain_runs = static_cast<int>(runs.size());
+    so.coupled_share = 0.f;
+  }
+  so.stop_after = a.i("stop-after", 0);
   so.threads = c.threads;
   so.log_every = 25;
   so.progress = [&](int it, int unroll, double loss) {
@@ -1465,6 +1491,8 @@ void step_train(const Ctx& c, sim::Effect e, const tools::Args& a) {
     rollout::quantise_like_storage(ck);
     if (auto w = rollout::save_model(out.string() + std::format(".it{}", done), ck); !w) throw std::runtime_error(w.error());
   };
+  std::println("train: {} activity stage {}, mean stage {}, unroll {}, lr {}, seed {}, anchor {}{}", ename(e), so.activity_stage, so.mean_stage, so.max_unroll,
+               so.lr_finetune, so.seed, so.anchor, so.stop_after > 0 ? std::format(", stopped after {}", so.stop_after) : std::string());
   const rollout::StepperResult r = rollout::train_stepper(m, runs, so);
   rollout::quantise_like_storage(m);
   if (auto w = rollout::save_model(out, m); !w) throw std::runtime_error(w.error());
@@ -1499,8 +1527,19 @@ void step_refit(const Ctx& c, sim::Effect e, const tools::Args& a) {
     for (auto& s : v) samples.push_back(std::move(s));
   }
   std::println("refit: {} {} renderer samples ({} of them from the first {} frames) ({:.0f} s)", ename(e), samples.size(), early > 0 ? n : 0, early, seconds_since(t0));
-  m.render_w = rollout::init_model(m.h, 1).render_w;
   rollout::RendererOptions ro = r.renderer;
+  // Study Q2: --finetune trains the current renderer on from its own weights and input scales (rollout::RendererOptions::
+  // keep_scale) instead of fresh ones, --iterations of it at --lr (the cosine schedule from there), on the same samples.
+  const bool finetune = a.flag("finetune");
+  if (finetune) {
+    ro.keep_scale = true;
+  } else {
+    m.render_w = rollout::init_model(m.h, 1).render_w;
+  }
+  ro.iterations = a.i("iterations", ro.iterations);
+  ro.lr = a.f("lr", ro.lr);
+  std::println("refit: {} {}: {} iterations at lr {}", ename(e), finetune ? "the current renderer trained on from its weights and scales" : "fresh weights",
+               ro.iterations, ro.lr);
   ro.threads = a.i("render-threads", 1);  // the batch's frames are split over the threads, so the result depends on it: one, fixed
   const double psnr = rollout::train_renderer(m, samples, ro);
   rollout::quantise_like_storage(m);
@@ -1542,6 +1581,28 @@ void step_graft(const tools::Args& a) {
   m.starts = s.starts;
   if (auto w = rollout::save_model(a.need("out"), m); !w) throw std::runtime_error(w.error());
   std::println("graft: {} with the {} start points of {} -> {}", a.need("model"), m.starts.size(), a.need("starts-from"), a.need("out"));
+}
+
+// growfine (study Q2): --model's file with its start points' stored fine fields dropped, so the runtime grows them at
+// instance start from the start's coarse state (moved to the controls by the mean state where the file has one), as a
+// fire's are: the coarse state upsampled, then --warmup frames of the stepper and the detail layer (h.warmup; a one-shot
+// takes 0, since every warm-up frame is a frame of its life). Nothing else in the file changes.
+void step_growfine(const tools::Args& a) {
+  rollout::Model m = load_or_throw(a.need("model"));
+  const int warmup = a.i("warmup", m.loop ? 30 : 0);
+  if (warmup < 0 || (!m.loop && warmup > 0)) throw std::invalid_argument("growfine: --warmup 0 or more, and 0 for a one-shot");
+  int dropped = 0;
+  for (auto& s : m.starts) {
+    dropped += s.fine_t.empty() ? 0 : 1;
+    s.fine_t.clear();
+    s.fine_d.clear();
+  }
+  m.h.start_fine = 0;
+  m.h.warmup = warmup;
+  rollout::quantise_like_storage(m);
+  if (auto w = rollout::save_model(a.need("out"), m); !w) throw std::runtime_error(w.error());
+  std::println("growfine: {}: the fine fields of {} of {} start points dropped, grown at instance start over {} frames ({}) -> {} ({} bytes stored)", a.need("model"),
+               dropped, m.starts.size(), warmup, m.mean.empty() ? "no mean state" : "from the start moved by the mean state", a.need("out"), m.storage_bytes());
 }
 
 // --- sstart: start points moved to the controls by the mean state (training settings) ------------------------------------------
@@ -1813,6 +1874,15 @@ constexpr int kOSettings = 30;  // fixed by the probe (REPORT §16.3) before val
 //   testq  study B's held-out settings extended to q_settings(e): real 33,200,000, plays 33,250,000, tracking 33,280,000.
 // (The floor: the real runs' base + 50. Study Q's other seeds: d-eval's re-run of a replaced model's round test from
 // 33,300,000, diagnosis and figures 33,460,000 to 33,499,999.)
+// Study Q2 (docs/STUDY_Q2.md §4.5; its own range, 33,500,000 to 33,999,999; the same pooling and tracking):
+//   probeq2 development only (training settings, salt-1 runs 0 to kQProbeSettings - 1): real 33,500,000, plays
+//           33,510,000, the null 33,520,000, tracking 33,530,000.
+//   checkq2 a library setting's check, not a decision: real 33,560,000, plays 33,570,000, tracking 33,580,000.
+//   valq2   study G's validation settings extended to the effect's N (q2_rule.csv): real 33,600,000, plays 33,650,000,
+//           tracking 33,680,000.
+//   testq2  study B's held-out settings extended to N: real 33,700,000, plays 33,750,000, tracking 33,780,000.
+// (Library, scene and figure seeds, the trainers' and the diagnosis's: 33,540,000 to 33,554,431, below 2^25; a replaced
+// model's round test again: d-eval --seed-base 33800000.)
 constexpr int kQProbeSettings = 40;
 // Study Q's rule numbers per effect (the number of settings N for validation and the test, and the margins), fixed by the
 // probe and committed before validation in results/experiments/q_fix/q_rule.csv (one row per effect: effect, N, then the
@@ -1933,6 +2003,29 @@ Split split_of(const std::string& name, sim::Effect e) {
     s.real = val ? 33'100'000 : 33'200'000;
     s.model = val ? 33'150'000 : 33'250'000;
     s.track = val ? 33'180'000 : 33'280'000;
+  } else if (name == "probeq2") {  // study Q2 (its own range, 33,500,000 to 33,999,999; docs/STUDY_Q2.md §4.5)
+    s.settings = training_settings(e, kQProbeSettings);
+    s.track_reps = 2;
+    s.real = 33'500'000;
+    s.model = 33'510'000;
+    s.null = 33'520'000;
+    s.track = 33'530'000;
+  } else if (name == "checkq2") {  // study Q2's check of a library setting (training settings, development only)
+    s.settings = training_settings(e, 10);
+    s.reps = 4;
+    s.track_reps = 2;
+    s.real = 33'560'000;
+    s.model = 33'570'000;
+    s.track = 33'580'000;
+  } else if (name == "valq2" || name == "testq2") {
+    const int nq = q_settings(e);
+    if (nq <= 0) throw std::invalid_argument("study Q2: the probe has not fixed the number of settings for " + std::string(sim::effect_name(e)) + " (q2_rule.csv)");
+    const bool val = name == "valq2";
+    s.settings = val ? validation_settings(nq, nq) : test_settings(nq);
+    s.track_reps = 2;
+    s.real = val ? 33'600'000 : 33'700'000;
+    s.model = val ? 33'650'000 : 33'750'000;
+    s.track = val ? 33'680'000 : 33'780'000;
   } else if (name == "val3" || name == "test3") {
     if (kM3Settings <= 0) throw std::invalid_argument("study M3: the probe has not fixed the number of settings (kM3Settings)");
     const bool val = name == "val3";
@@ -3007,7 +3100,7 @@ void probe_q(const Ctx& c, sim::Effect e, const Split& sp, const std::vector<Ent
     const Scores& nl = sc[sz(null_i)];
     mg = margins_from_null_q(sc[0], nl);
     std::vector<std::string> rows;
-    std::println("\nprobeq {}: the margins the null gives (each the larger of study K's and the null's RMS change at a setting, {} settings)", en, P);
+    std::println("\n{} {}: the margins the null gives (each the larger of study K's and the null's RMS change at a setting, {} settings)", sp.name, en, P);
     std::println("{:<20}{:>12}{:>12}{:>12}{:>12}{:>12}{:>12}{:>12}", "measure", "K's", "null RMS", "null mean", "null SD", "floor", "current", "margin");
     for (int k = 0; k < kQM; ++k) {
       const auto d = diff_q(nl, sc[0], k);
@@ -3017,9 +3110,10 @@ void probe_q(const Ctx& c, sim::Effect e, const Split& sp, const std::vector<Ent
       rows.push_back(std::format("{},{},{},{:.7f},{:.7f},{:.7f},{:.7f},{:.7f},{:.7f},{:.7f}", en, kQNames[sz(k)], P, mk[sz(k)], rms_of(d), mean_of(d), sd_of(d), fl,
                                  mean_of(cmp_q(sc[0], k)), mg[sz(k)]));
     }
-    merge_rows(c.results / "q_margins.csv", "effect,measure,settings,k_margin,null_rms,null_mean,null_sd,floor_mean,current_mean,margin", rows, en);
+    merge_rows(c.results / std::format("{}_margins.csv", c.qp()), "effect,measure,settings,k_margin,null_rms,null_mean,null_sd,floor_mean,current_mean,margin", rows,
+               en);
   }
-  if (!margins_set(mg)) throw std::runtime_error("probeq: no null (--null) and no margins fixed for " + en);
+  if (!margins_set(mg)) throw std::runtime_error(sp.name + ": no null (--null) and no margins fixed for " + en);
   std::vector<std::string> rows;
   for (std::size_t mi = 1; mi < models.size(); ++mi) {
     if (static_cast<int>(mi) == null_i) continue;
@@ -3036,8 +3130,8 @@ void probe_q(const Ctx& c, sim::Effect e, const Split& sp, const std::vector<Ent
       sdu[sz(k)] = sd_upper80(sd[sz(k)], P);
       as_measured[sz(k)] = tg[sz(k)] && rq.better[sz(k)];
     }
-    std::println("\nprobeq {} {} - current: power by resampling the probe's {} settings (pass: unchanged / a loss of the margin's size; an improved target as measured)",
-                 en, models[mi].name, P);
+    std::println("\n{} {} {} - current: power by resampling the probe's {} settings (pass: unchanged / a loss of the margin's size; an improved target as measured)",
+                 sp.name, en, models[mi].name, P);
     std::println("{:<20}{:>10}{:>10}{:>10}{:>10}{:>8}{:>8} | pass at N settings: {}", "measure", "mean", "SD", "SD up80", "margin", "N90", "N90up", [] {
       std::string s;
       for (const int N : kM3PowerN) s += std::format("{:>6}", N);
@@ -3104,23 +3198,28 @@ void probe_q(const Ctx& c, sim::Effect e, const Split& sp, const std::vector<Ent
     }
     std::println("{}\n{}", l1, l2);
   }
-  merge_rows(c.results / "q_power.csv", "effect,model,measure,role,probe_settings,n_settings,mean,sd,sd_up80,margin,n90,n90_up80,p_pass,p_pass_if_loss", rows, en);
+  merge_rows(c.results / std::format("{}_power.csv", c.qp()), "effect,model,measure,role,probe_settings,n_settings,mean,sd,sd_up80,margin,n90,n90_up80,p_pass,p_pass_if_loss",
+             rows, en);
 }
 
 void step_val(const Ctx& c, sim::Effect e, const tools::Args& a) {
   auto models = read_entries(a.need("current"), a.str("cand", ""));
-  Split sp = split_of(a.str("split", c.q ? "probeq" : c.o ? "probeo" : c.m3 ? "probe3" : c.m2 ? "probe2" : "probe"), e);
+  Split sp = split_of(a.str("split", c.q2 ? "probeq2" : c.q ? "probeq" : c.o ? "probeo" : c.m3 ? "probe3" : c.m2 ? "probe2" : "probe"), e);
+  // study Q's and Q2's splits by their role (Q2's carry its seeds; the rule and the reports are study Q's)
+  const std::string probe_q_name = c.q2 ? "probeq2" : "probeq", val_q_name = c.q2 ? "valq2" : "valq", check_q_name = c.q2 ? "checkq2" : "checkq";
   if (a.has("max-settings")) {  // a dry run of the probe's code on its first settings (study Q; never on validation)
-    if (sp.name != "probeq") throw std::invalid_argument("val: --max-settings is for a dry run of probeq");
+    if (sp.name != probe_q_name) throw std::invalid_argument("val: --max-settings is for a dry run of " + probe_q_name);
     sp.settings.resize(std::min(sp.settings.size(), sz(a.i("max-settings", 3))));
   }
-  if (c.q != (sp.name == "probeq" || sp.name == "valq" || sp.name == "checkq")) throw std::invalid_argument("val: study Q's splits are probeq, valq and checkq, with --study q");
-  if (sp.name == "test" || sp.name == "test2" || sp.name == "test3" || sp.name == "testo" || sp.name == "testq") throw std::invalid_argument("val: the test runs once, through `test`");
+  if (c.q != (sp.name == probe_q_name || sp.name == val_q_name || sp.name == check_q_name))
+    throw std::invalid_argument(c.q2 ? "val: study Q2's splits are probeq2, valq2 and checkq2, with --study q2" : "val: study Q's splits are probeq, valq and checkq, with --study q");
+  if (sp.name == "test" || sp.name == "test2" || sp.name == "test3" || sp.name == "testo" || sp.name == "testq" || sp.name == "testq2")
+    throw std::invalid_argument("val: the test runs once, through `test`");
   if (c.o != (sp.name == "probeo" || sp.name == "valo" || sp.name == "checko")) throw std::invalid_argument("val: study O's splits are probeo, valo and checko, with --study o");
   if (c.m2 != (sp.name == "probe2" || sp.name == "val2")) throw std::invalid_argument("val: study M2's splits are probe2 and val2, with --study m2");
   if (c.m3 != (sp.name == "probe3" || sp.name == "val3")) throw std::invalid_argument("val: study M3's splits are probe3 and val3, with --study m3");
   if (a.flag("null")) {  // study M3's null: the current model played with fresh seeds (the probe only)
-    if (sp.name != "probe3" && sp.name != "probeo" && sp.name != "probeq") throw std::invalid_argument("val: --null is the probe's (probe3, probeo, probeq)");
+    if (sp.name != "probe3" && sp.name != "probeo" && sp.name != "probeq" && sp.name != "probeq2") throw std::invalid_argument("val: --null is the probe's (probe3, probeo, probeq, probeq2)");
     Entry n = models[0];
     n.name = "null";
     n.seed_base = sp.null;
@@ -3135,9 +3234,9 @@ void step_val(const Ctx& c, sim::Effect e, const tools::Args& a) {
   report_split(c, e, sp, models, sc, prefix);
   if (c.q) {
     report_q(c, e, sp, models, sc, prefix);
-    if (sp.name == "probeq") probe_q(c, e, sp, models, sc);
-    if (sp.name == "valq") decide_q(c, e, sp, models, sc, prefix);
-    if (sp.name == "checkq") {  // a library setting's check: what it changes, not a decision (study K's margins)
+    if (sp.name == probe_q_name) probe_q(c, e, sp, models, sc);
+    if (sp.name == val_q_name) decide_q(c, e, sp, models, sc, prefix);
+    if (sp.name == check_q_name) {  // a library setting's check: what it changes, not a decision (study K's margins)
       for (std::size_t mi = 1; mi < models.size(); ++mi)
         print_rule_q(sp.name, ename(e), models[mi], apply_rule_q(sc[mi], sc[0], margins_k_q(sc[0]), targets_q(e, models[mi].name), margins_k_q(sc[0])));
     }
@@ -3175,16 +3274,17 @@ void step_test(const Ctx& c, sim::Effect e, const tools::Args& a) {
   if (c.q) {  // study Q: its rule, once
     const MarginsQ mq = margins_q(e);
     if (!margins_set(mq)) throw std::runtime_error("test: the margins of " + ename(e) + " are not fixed (margins_q)");
-    const Split sq = split_of("testq", e);  // throws before the marker if the settings are not fixed
+    const Split sq = split_of(c.q2 ? "testq2" : "testq", e);  // throws before the marker if the settings are not fixed
     std::ofstream(done) << "started " << models[1].sha << "\n";
     for (const auto& m : models) std::println("test: {} {} {} sha256 {}", ename(e), m.name, m.path.string(), m.sha);
     const auto sc = evaluate(c, e, sq, models);
-    report_split(c, e, sq, models, sc, "q_test");
-    report_q(c, e, sq, models, sc, "q_test");
+    const std::string tp = c.qp() + "_test";
+    report_split(c, e, sq, models, sc, tp);
+    report_q(c, e, sq, models, sc, tp);
     const RuleQ r = apply_rule_q(sc[1], sc[0], mq, targets_q(e, models[1].name), margins_k_q(sc[0]));
-    print_rule_q("testq", ename(e), models[1], r);
-    std::println("testq {} {}: {}", ename(e), models[1].name, r.pass() ? "MEETS the rule: replace" : "does not meet it: keep the current model");
-    merge_rows(c.results / "q_test_decision.csv", kRuleQHeader, {rule_q_row(ename(e), models[1], r)}, ename(e));
+    print_rule_q(sq.name, ename(e), models[1], r);
+    std::println("{} {} {}: {}", sq.name, ename(e), models[1].name, r.pass() ? "MEETS the rule: replace" : "does not meet it: keep the current model");
+    merge_rows(c.results / std::format("{}_decision.csv", tp), kRuleQHeader, {rule_q_row(ename(e), models[1], r)}, ename(e));
     std::ofstream(done) << "done " << models[1].sha << " " << (r.pass() ? "met" : "not met") << "\n";
     return;
   }
@@ -3341,7 +3441,7 @@ void step_info(const tools::Args& a) {
 
 int main(int argc, char** argv) {
   try {
-    tools::Args a(argc, argv, {"play", "ftz", "floor-gradient", "null"});
+    tools::Args a(argc, argv, {"play", "ftz", "floor-gradient", "null", "finetune"});
     if (a.positional().empty()) {
       std::println("nvfx_ordered diag --effect E [--model F] [--settings 8] [--reps 4] [--root DIR] [--results DIR] [--threads N]");
       return 2;
@@ -3352,18 +3452,21 @@ int main(int argc, char** argv) {
     c.results = a.str("results", "results/experiments/ordered");
     c.threads = a.i("threads", 1);
     const std::string study = a.str("study", "m");
-    if (study != "m" && study != "m2" && study != "m3" && study != "o" && study != "q") throw std::invalid_argument("--study m, m2, m3, o or q");
+    if (study != "m" && study != "m2" && study != "m3" && study != "o" && study != "q" && study != "q2") throw std::invalid_argument("--study m, m2, m3, o, q or q2");
     c.m2 = study == "m2";
     c.m3 = study == "m3";
     c.o = study == "o";
-    c.q = study == "q";
+    c.q = study == "q" || study == "q2";  // study Q2 is study Q's method on its own seeds and tables
+    c.q2 = study == "q2";
     if (c.o && !a.has("results")) c.results = "results/experiments/fix";  // study O's tables
-    if (c.q && !a.has("results")) c.results = "results/experiments/q_fix";  // study Q's tables
-    if (a.has("rule")) g_q_rule = a.str("rule");  // study Q's rule numbers (q_settings)
+    if (c.q && !a.has("results")) c.results = c.q2 ? "results/experiments/q2_fix" : "results/experiments/q_fix";  // study Q's (Q2's) tables
+    if (c.q2) g_q_rule = "results/experiments/q2_fix/q2_rule.csv";
+    if (a.has("rule")) g_q_rule = a.str("rule");  // study Q's (Q2's) rule numbers (q_settings)
     const std::string step = a.positional()[0];
-    if (step == "setmean" || step == "set" || step == "info" || step == "settings" || step == "graft") {
+    if (step == "setmean" || step == "set" || step == "info" || step == "settings" || step == "graft" || step == "growfine") {
       if (step == "set") step_set(a);
       else if (step == "graft") step_graft(a);
+      else if (step == "growfine") step_growfine(a);
       else if (step == "settings") step_settings(a);
       else if (step == "info") step_info(a);
       else step_setmean(a);
