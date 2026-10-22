@@ -603,7 +603,7 @@ and makes the rest; the renderer fine-tunes ran on 1 thread, which does matter t
 
 ## 7. Checks
 
-After merging main at bf3fff8: see REPORT §23.
+After merging main at bf3fff8: the build with warnings as errors; the full ctest, **555 of 555**; `nvfx_alloc_test` (no allocation per frame); `nvfx_gallery --check --require-models` (234 effects, 234 played, 0 failed); the Godot test (0 failures); `models/restore.sh` 0 different.
 
 ## 8. What is left
 

@@ -4692,3 +4692,5 @@ model rows updated (their keyframes unchanged: looks, or start points kept), fiv
 `nvfx_ordered --study q2`, `train --anchor`, `refit --finetune`, `growfine`, `RendererOptions::keep_scale` and its
 test. Resume with the data root's `q2_fix/jobs/resume.sh`, then `after_val.sh <effect>` after each validation.
 
+
+Checks (after merging main at bf3fff8): the build with warnings as errors; the full ctest, 555 of 555; `nvfx_alloc_test`; the gallery check, 234 of 234; the Godot test, 0 failures; `restore.sh` 0 different.
