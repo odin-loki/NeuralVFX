@@ -497,7 +497,59 @@ times the size (805,951 bytes against 280,927: 32 more start points with their f
 
 ## 5. What changed
 
-(Written when the study ends.)
+- **Models replaced** (each met the rule on its test, §4.8); each file is the size of the one it replaces but the
+  avalanche's, and a frame costs the same (only the renderer's weights or the start points change):
+  - **the haboob** is now the data root's `q2_fix/models/haboob.nvfx` (`rft`: round 10's file with its renderer trained
+    on from its own weights and input scales, 1000 iterations at lr 1e-3, on the recipe's samples and 100 from the
+    runs' first 15 frames; 301,443 bytes, SHA-256 `4f933a2fe7a226cc9aee138722bdf2b358dbf6330952392860b46135efdc0f23`;
+    in git `models/2d/haboob.nvfx`);
+  - **the smoke ring** is now `q2_fix/models/smokering.nvfx` (`rft`, the same on round 9's file; 301,443 bytes,
+    `a36e5e385f249dff9df8aae6d8c7c61b0a0a3b573c6f49531df76caf5d18598d`; `models/2d/smokering.nvfx`);
+  - **the avalanche** is now `q2_fix/models/avalanche.nvfx` (`s48`: study Q's file with 48 start points chosen as the
+    recipe chooses them, its first 16 the old ones; 805,951 bytes, `e457d083dae15fef6b720110655500e7f37d7681307c697a5e05a351e26eaa0b`;
+    `models/2d/avalanche.nvfx`).
+
+  The shared links moved, their old targets in the data root's `q2_fix/logs/links_before.txt`: `library/models/` and
+  the scene folders `fx_elements/models/scene/` (the haboob), `fx_air/models/scene/` (the ring) and
+  `fx_earth/models/scene/` (the avalanche); `models/layout.txt` already maps them to `2d/<name>.nvfx`,
+  `models/SHA256SUMS` is regenerated and `models/restore.sh` reports 0 different. The rounds' and study Q's files are
+  untouched.
+- **Frozen hashes** (float, pinned to the AVX2 build with `--isa avx2`): only the model rows changed. The library's
+  `haboob`, `smoke_ring` and `avalanche` keyframes and the coast's and the crypt's give their frozen hashes with the new
+  files: the haboob and the ring are drawn there by looks, which take the fields and not the renderer, and the library's
+  avalanche entries pin start points 7 and 11, which `s48` keeps. Changed: the `library_model` rows of
+  `results/library/frozen_elements.csv` (haboob), `frozen_air.csv` (smokering) and `frozen.csv` (avalanche), and a row
+  for each new file in `results/experiments/fx_elements_frozen.csv` (`haboob_q2`), `fx_air_frozen.csv` (`smokering_q2`)
+  and `fx_earth_frozen.csv` (`avalanche_q2`). `LibraryElementsKeyframesFrozen`, `ScriptedCoastFrozen`,
+  `LibraryAirKeyframesFrozen`, `ScriptedCryptFrozen`, `LibraryKeyframesFrozen`, `ScriptedVolcanoFrozen`,
+  `PackFullLibrary` and `PackLibraryKeyframesFrozen` pass with them.
+- **Videos re-rendered** (videos/README.md): `effect_haboob` (seed 33,550,011) and `real_vs_learned_elements` (round
+  10's held-out runs; the geyser's and sea spray's columns the same frames), `effect_smokering` (33,550,012) and
+  `real_vs_learned_air` (round 9's held-out runs; the command remakes the committed video to the byte from the old
+  file), `effect_avalanche` (33,550,021). `real_vs_learned_earth` is the same frames to the byte with the new avalanche
+  (a learned panel starts from the held-out run's true state, not a start point), and `library_earth` too (its entries
+  pin start points the file keeps); the haboob's and the ring's library walks and scenes draw them by looks.
+- **Figures**: `docs/figures/q2_haboob_rft.png`, `q2_smokering_rft.png`, `q2_avalanche_s48.png` (below in §4.8's
+  terms: the current file above the new one at three settings, its own renderer at 256 px).
+- **Code** (no runtime or API change): `nvfx_ordered --study q2` (study Q's rule on its own seeds and tables), `train
+  --anchor`, `refit --finetune --iterations --lr`, `growfine`; `rollout::RendererOptions::keep_scale` (a renderer
+  trained on from its weights keeps its input scales) and its test,
+  `Rollout.RendererFineTuneKeepsItsScalesAndStartsFromItsWeights`. `library/earth.nvfxl`'s comment on the avalanche's
+  start points.
+
+![The haboob before (rows 1, 3, 5) and after study Q2 (rows 2, 4, 6), at (0.3, 0.3, 0.3), (0.5, 0.5, 0.5) and (0.95, 0.9, 0.7), at 0, 1, 5, 10, 15 and 30 frames](figures/q2_haboob_rft.png)
+
+![The smoke ring before (rows 1, 3, 5) and after study Q2 (rows 2, 4, 6), at (0.2, 0.5, 0.2), (0.55, 0.7, 0.4) and (0.95, 0.45, 0.8), at 0, 1, 5, 10, 15 and 30 frames](figures/q2_smokering_rft.png)
+
+![The avalanche before (rows 1, 3, 5) and after study Q2 (rows 2, 4, 6), at (0.3, 0.85, 0.3), (0.7, 0.1, 0.5) and (1, 0.95, 0.7), at 0.5, 1, 2, 3 and 4 s](figures/q2_avalanche_s48.png)
+
+**How they look.** The haboob's lock (its first frames), which the current renderer draws with a magenta speck at its
+nose, a violet tint at its foot and a dark diagonal across it, is a plain ochre wall; from about half a second the two
+are alike. The ring's opening, a green-cyan blob between its two cores with green and magenta fringes in its first
+frames, is a faint grey stem; later the ring is as before. The avalanche, played from the same seed, starts from
+another stored first state, nearer the controls asked for: at the small setting the old file's cloud thins away by 3 s
+where the new one's swells and rises; at the large setting the new cloud is smaller than the old one's from this seed;
+what the test measured is over many seeds (its average picture 1.4 dB closer), not one.
 
 ## 6. Reproduce
 
@@ -512,13 +564,22 @@ $B setmean --model $D/q_fix/models/avalanche.nvfx --meanstate $D/q_fix/meanstate
 $B growfine --model cand/avalanche/ms.nvfx --warmup 0 --out cand/avalanche/msg.nvfx
 $B --study q2 --root $D --threads 2 starts --effect avalanche --model $D/q_fix/models/avalanche.nvfx --count 48 --out cand/avalanche/s48.nvfx
 $B --study q2 --root $D --threads 2 fitmean --effect heavygas --block 2
+$B --study q2 --root $D --threads 2 train --effect mushroom --model $D/q_fix/models/mushroom.nvfx --out cand/mushroom/u90a.nvfx --activity-stage 600 --mean-stage 0 --unroll 90 --lr-ft 7e-4 --anchor 100 --seed 33540004
+# the diagnosis beside (§3)
+q2_fix/bin/nvfx_fix_q2 parts --effect avalanche --model FILE --runs 6 --threads 1 --seed-base 33541000 --out diag/avalanche_NAME
 # the probe: the null first (its margins committed), then the candidates (q2_power.csv)
 $B --study q2 --threads 1 --results $R val --effect E --split probeq2 --current FILE --null --prefix q2_probe
 $B --study q2 --threads 1 --results $R val --effect E --split probeq2 --current FILE --cand NAME=F,... --null --prefix q2_probe
 # validation and the test, by the committed rule (q2_rule.csv); the chosen file frozen first
 $B --study q2 --threads 2 --results $R --rule $R/q2_rule.csv val --effect E --split valq2 --current FILE --cand NAME=F,... --prefix q2_val
 $B --study q2 --threads 2 --results $R --rule $R/q2_rule.csv test --effect E --current FILE --cand NAME=$D/q2_fix/models/E.nvfx --frozen $R/q2_frozen.csv
+# figures
+q2_fix/bin/nvfx_fix_q2 strip --model CURRENT --also rft=NEW --controls 0.5,0.5,0.5 --size 256 --times 0,0.033,0.167,0.333,0.5,1 --seed 33545001 --out F.png
 ```
+
+The results depend on nothing but the seeds and the files: every run and every play is its own job, so the thread
+count and the order change no number, and a step that ran again after a restart (§0) reads the settings it had cached
+and makes the rest; the renderer fine-tunes ran on 1 thread, which does matter there.
 
 ## 7. Checks
 
