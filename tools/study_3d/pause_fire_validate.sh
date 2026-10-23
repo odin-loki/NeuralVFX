@@ -18,7 +18,7 @@ for m in C2 C3 C4; do
   fi
 done
 pkill -f 'nvfx_3d.*hres_3d/fire' 2>/dev/null || true
-pkill -f 'hres_fire_validate.sh' 2>/dev/null || true
+pkill -f 'hres_fire_validate(\.sh|\.snapshot\.sh)' 2>/dev/null || true
 pkill -f 'run_fire_validate.sh' 2>/dev/null || true
 sleep 1
 LOG=${NEURALVFX_DATA:-$HOME/nvfx-data}/hres_3d/fire/logs/validate.log

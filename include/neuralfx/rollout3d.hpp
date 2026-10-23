@@ -186,5 +186,7 @@ void step(const Model& m, State& s, std::span<const float> controls, std::uint64
 
 // Block averages of fine fields (fx * fy * fz) to the coarse grid, and the fine fields' trilinear up-sampling.
 void block_average(const Hyper& h, std::span<const float> fine, std::span<float> coarse, int channel, int channels);
+// Block-average a coarse phys grid (kPhys per cell) from src's (rx,ry,rz) to dst's; identical grids copy.
+std::vector<float> coarse_downsample(const Hyper& src, std::span<const float> phys, const Hyper& dst);
 
 }  // namespace nfx::rollout3d

@@ -27,4 +27,5 @@ echo "=== resume smoke CUDA $(date -Iseconds) nvfx=$B ===" | tee -a "$LOG"
 export NVFX_TRAIN_QUIET_STDOUT=1
 nohup "$B" train $H --name smoke $ALSO --threads 1 --device cuda --shards "${TRAIN_SHARDS:-4}" >>"$LOG" 2>&1 &
 echo "started CUDA smoke train pid=$! (log $LOG)"
+export BUILD="$BUILD_DIR/nvfx_3d"
 bash "$REPO/tools/study_3d/start_smoke_watcher.sh" 2>/dev/null || true

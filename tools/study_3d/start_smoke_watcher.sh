@@ -3,6 +3,12 @@ set -euo pipefail
 REPO=$(cd "$(dirname "$0")/../.." && pwd)
 ROOT=${NEURALVFX_DATA:-$HOME/nvfx-data}/hres_3d/smoke
 mkdir -p "$ROOT/logs"
+LOCK="$ROOT/logs/after_train.lock"
+exec 9>"$LOCK"
+if ! flock -n 9; then
+  echo "smoke watcher lock held ($LOCK)"
+  exit 0
+fi
 if [ -f "$ROOT/logs/after_train.pid" ] && kill -0 "$(cat "$ROOT/logs/after_train.pid")" 2>/dev/null; then
   echo "watcher already running pid=$(cat "$ROOT/logs/after_train.pid")"
   exit 0

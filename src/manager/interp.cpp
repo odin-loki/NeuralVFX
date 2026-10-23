@@ -1,6 +1,8 @@
 // Interpolation and resampling of premultiplied RGBA8 pictures for the effect manager (interp.hpp).
 #include "interp.hpp"
 
+#include "../runtime/nvfx_internal.hpp"
+
 #include <algorithm>
 #include <array>
 #include <atomic>
@@ -146,7 +148,7 @@ void force_portable_kernels(bool on) { g_portable.store(on); }
 bool using_avx2_kernels() {
 #if defined(NFX_MGR_X86)
   static const bool has = cpu_avx2();
-  return has && !g_portable.load();
+  return has && !g_portable.load() && nfx::rt::current_profile().isa != NVFX_ISA_BASELINE;
 #else
   return false;
 #endif

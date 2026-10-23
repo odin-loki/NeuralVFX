@@ -1,9 +1,10 @@
 # Study hres: finer coarse 3D fire (high-resolution state, same detail grid)
 
-Status: **fire trained** (1750 iterations, October 2026). Shipped weights: `models/3d/fire_hres.nvfx3` (restore to
-`$NEURALVFX_DATA/hres_3d/fire/models/hres_fire.nvfx3` via `models/restore.sh`). Stage snapshots `C1`–`C4` remain in
-`results/3d/hres/fire/models/`. Demo videos: [videos/README.md](../videos/README.md) §9. Validation and the held-out
-test have not run. Audience: dev, research, the owner.
+Status: **fire and smoke trained** (1750 iterations, October 2026). Shipped: `models/3d/fire_hres.nvfx3` (**C2** chosen
+on validation; `results/3d/hres/fire/frozen.csv`) and `models/3d/smoke_hres.nvfx3` (demo; fails edge check, see
+`results/3d/hres/smoke/edgecheck.md`). Restore via `models/restore.sh` under `$NEURALVFX_DATA/hres_3d/`. Stage snapshots
+`C1`–`C4` remain in `results/3d/hres/fire/models/`. Demo videos: [videos/README.md](../videos/README.md) §9. Audience:
+dev, research, the owner.
 
 **In short.** Stage 1 (study N) used a **16 x 24 x 16** coarse state with **fine = 4** to drive **64 x 96 x 64** detail.
 Study hres doubles the coarse resolution to **32 x 48 x 32** with **fine = 2**, the same detail volume, a **32-wide**
@@ -137,6 +138,10 @@ Status: `bash tools/study_3d/hres_status.sh` (or `monitor_hres.sh` every 60 s). 
 (uses `nvfx_bin_link`; safe with a space in the repo path). After validate, publish into `models/3d/`: `bash tools/study_3d/start_fire_publish_watcher.sh`.
 While smoke CUDA train runs: `bash tools/study_3d/pause_fire_validate.sh` (removes partial edge CSVs; resume skips finished steps).
 The smoke watcher auto-starts fire validate after smoke reaches iteration 1750 if validate is not done yet.
+
+**Calibrated edge bounds** (several simulation runs per wind, study R-style; optional after a single-run edgecheck):
+`bash tools/study_3d/hres_fire_edge_bounds.sh`, then `bash tools/study_3d/hres_fire_recheck_edges.sh` to rebuild `choose_val.md` without
+rerunning val track/play. Or `USE_EDGE_BOUNDS=1` on a fresh `hres_fire_validate.sh` run once `edge_teacher.csv` and `edge_bounds.csv` exist.
 
 **Resume smoke on GPU** (stops CPU train, resumes `ckpt/smoke.ckpt`): `bash tools/study_3d/hres_smoke_resume_cuda.sh`
 (`TRAIN_SHARDS`, `BUILD_DIR=build-cuda`). Or fresh: `TRAIN_DEVICE=cuda bash tools/study_3d/hres_smoke.sh`. `nvfx_bin_link.sh` avoids

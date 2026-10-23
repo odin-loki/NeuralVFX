@@ -139,6 +139,16 @@ inline Version version() noexcept {
 inline nvfx_isa get_isa() noexcept { return nvfx_get_isa(); }
 inline Result<> set_isa(nvfx_isa isa) { return detail::check(nvfx_set_isa(isa)); }
 
+inline Result<nvfx_profile> init_profile(nvfx_profile_preset preset = NVFX_PROFILE_DEFAULT) {
+  nvfx_profile p{};
+  return detail::value_or_fail(nvfx_profile_init(&p, preset), p);
+}
+inline Result<> set_profile(const nvfx_profile& profile) { return detail::check(nvfx_set_profile(&profile)); }
+inline Result<nvfx_profile> get_profile() {
+  nvfx_profile p{};
+  return detail::value_or_fail(nvfx_get_profile(&p), p);
+}
+
 class Pack;
 
 // --- effects and instances (nvfx.h) ----------------------------------------------------------------------------------

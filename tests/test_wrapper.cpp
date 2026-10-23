@@ -130,7 +130,7 @@ TEST(Wrapper, VersionAndTheCpu) {
   EXPECT_EQ(v.features, f);
   EXPECT_EQ(nvfx_version(nullptr), static_cast<std::uint32_t>(NVFX_VERSION));
   EXPECT_TRUE(v.matches_headers());
-  EXPECT_TRUE(v.has(NVFX_FEATURE_SCENE | NVFX_FEATURE_LIBRARY | NVFX_FEATURE_MANAGER | NVFX_FEATURE_PACK));
+  EXPECT_TRUE(v.has(NVFX_FEATURE_SCENE | NVFX_FEATURE_LIBRARY | NVFX_FEATURE_MANAGER | NVFX_FEATURE_PACK | NVFX_FEATURE_PROFILE));
   EXPECT_FALSE(v.has(NVFX_FEATURE_SHARED)) << "this program links the static libraries";
   EXPECT_EQ(v.has(NVFX_FEATURE_AVX2), nvfx_get_isa() == NVFX_ISA_AVX2);
   EXPECT_EQ(nvfx::get_isa(), nvfx_get_isa());
@@ -143,6 +143,41 @@ TEST(Wrapper, VersionAndTheCpu) {
   }
   EXPECT_TRUE(nvfx::set_isa(NVFX_ISA_AUTO));
   EXPECT_STREQ(nvfx::status_string(NVFX_ERROR_IO), nvfx_status_string(NVFX_ERROR_IO));
+}
+
+TEST(Wrapper, ProfileRoundTrip) {
+  nvfx_profile p{};
+  EXPECT_EQ(nvfx_profile_init(&p, NVFX_PROFILE_DEFAULT), NVFX_OK);
+  EXPECT_EQ(p.isa, NVFX_ISA_AUTO);
+  EXPECT_EQ(nvfx_profile_init(nullptr, NVFX_PROFILE_DEFAULT), NVFX_ERROR_ARGUMENT);
+  EXPECT_EQ(nvfx_profile_init(&p, static_cast<nvfx_profile_preset>(99)), NVFX_ERROR_ARGUMENT);
+  EXPECT_EQ(nvfx_profile_init(&p, NVFX_PROFILE_LOCKSTEP_AVX2), NVFX_OK);
+  if (nvfx_set_profile(&p) == NVFX_OK) {
+    nvfx_profile q{};
+    EXPECT_EQ(nvfx_get_profile(&q), NVFX_OK);
+    EXPECT_EQ(q.isa, NVFX_ISA_AVX2);
+    EXPECT_EQ(nvfx_get_isa(), NVFX_ISA_AVX2);
+  }
+  nvfx_profile d{};
+  nvfx_profile_init(&d, NVFX_PROFILE_DEFAULT);
+  nvfx_set_profile(&d);
+  auto wp = nvfx::init_profile(NVFX_PROFILE_LOCKSTEP_AVX2);
+  ASSERT_TRUE(wp);
+  EXPECT_EQ(wp->isa, NVFX_ISA_AVX2);
+  same(nvfx::init_profile(static_cast<nvfx_profile_preset>(99)), NVFX_ERROR_ARGUMENT, "init_profile");
+  if (nvfx_set_profile(&*wp) == NVFX_OK) {
+    EXPECT_TRUE(nvfx::set_profile(*wp));
+    auto got = nvfx::get_profile();
+    ASSERT_TRUE(got);
+    EXPECT_EQ(got->isa, NVFX_ISA_AVX2);
+  } else {
+    same(nvfx::set_profile(*wp), NVFX_ERROR_UNSUPPORTED, "set_profile");
+  }
+  auto portable = nvfx::init_profile(NVFX_PROFILE_LOCKSTEP_PORTABLE);
+  ASSERT_TRUE(portable);
+  EXPECT_EQ(portable->isa, NVFX_ISA_BASELINE);
+  EXPECT_TRUE(nvfx::set_profile(*portable));
+  EXPECT_TRUE(nvfx::set_profile(*nvfx::init_profile()));
 }
 
 TEST(Wrapper, EffectsAndInstancesAreTheCApis) {

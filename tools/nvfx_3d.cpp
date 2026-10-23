@@ -129,6 +129,7 @@ constexpr std::uint64_t kHresTrain = 9'600'000;
 constexpr std::uint64_t kHresValTrack = 9'650'000, kHresValReal = 9'651'000, kHresValPlay = 9'652'000;
 constexpr std::uint64_t kHresTestTrack = 9'860'000, kHresTestReal = 9'861'000, kHresTestPlay = 9'862'000;
 constexpr std::uint64_t kHresEdge = 900;
+constexpr std::uint64_t kHresCal = 9'653'000;  // hres edge teacher runs: + 100 * wind_index + run
 constexpr std::uint64_t kHresFireInit = 9'600'777;
 constexpr std::uint64_t kHresFireTrainer = 9'600'000;
 constexpr std::uint64_t kHresLongTrain = 9'620'000;  // the 540-frame runs (40 short runs use kHresTrain + i)
@@ -1067,18 +1068,21 @@ int track(const Args& a) {
       if (!load_truth(root / "eval" / split / "truth" / std::format("s{}_k{}.bin", s, k), t)) throw std::runtime_error("missing truth: nvfx_3d truth first");
       const double t0 = now();
       const std::vector<float> cv(t.controls.begin(), t.controls.end());
+      const r3::Hyper truth_h = study_hyper();
+      std::vector<float> coarse0 = t.coarse;
+      if (coarse0.size() != zu(m.h.cells()) * r3::kPhys) coarse0 = r3::coarse_downsample(truth_h, t.coarse, m.h);
       r3::State st = r3::make_state(m);
       CoarseSim cs;
       if (learned) {
-        r3::start_from(m, t.coarse, t.time, cv, t.seed, st, ws, &pool, false);
+        r3::start_from(m, coarse0, t.time, cv, t.seed, st, ws, &pool, false);
         st.fine_t = t.start.t;
         st.fine_d = t.start.d;
       } else if (method == "coarse") {
         cs.s = r3::make_state(m);
-        r3::start_from(m, t.coarse, t.time, cv, t.seed, cs.s, ws, &pool, false);
+        r3::start_from(m, coarse0, t.time, cv, t.seed, cs.s, ws, &pool, false);
         cs.s.fine_t = t.start.t;
         cs.s.fine_d = t.start.d;
-        cs.load(m, t.coarse, t.time, t.controls, t.seed, threads);
+        cs.load(m, coarse0, t.time, t.controls, t.seed, threads);
       }
       std::string row = std::format("{},{}", s, k);
       int done = 0;
@@ -1893,16 +1897,17 @@ int edge(const Args& a) {
   nfx::Pool pool(threads);
   // seeds: --seed for every wind (study N's default: 9,900,004), else study N2's and hres's: the base + 900 + the wind's
   // index; study R: the plays' base + the wind's index, and the teacher's runs (--sim --runs K) 29,300,000 + 100 j + k
+  const int runs = sim ? a.i("runs", 1) : 1;
+  const bool multi = sim && runs > 1 && (g_r || g_hres);
   const std::uint64_t edge_default = g_r2     ? (sim ? kR2Cal : kR2ValEdge)
                                      : g_r      ? (sim ? kRCal : kRValEdge)
-                                     : g_hres ? (sim ? kHresValReal : kHresValPlay) + kHresEdge
-                                     : g_n2   ? (sim ? kN2ValReal : kN2ValPlay) + kN2Edge
-                                              : 9'900'004;
+                                     : g_hres   ? (sim ? (multi ? kHresCal : kHresValReal + kHresEdge) : kHresValPlay + kHresEdge)
+                                     : g_n2     ? (sim ? kN2ValReal : kN2ValPlay) + kN2Edge
+                                                : 9'900'004;
   const std::uint64_t base = a.u64("seed-base", edge_default);
-  const int runs = sim ? a.i("runs", 1) : 1;
   const std::string label0 = a.str("label", sim ? "simulation" : model.stem().string());
   // study R's rows are written a run at a time (a run cut short leaves none) and a run already written is skipped
-  const bool whole = g_r && a.has("out");
+  const bool whole = (g_r || multi) && a.has("out");
   std::set<std::string> done;
   std::ofstream csv;
   if (a.has("out")) {
@@ -1941,10 +1946,11 @@ int edge(const Args& a) {
   for (std::size_t wi = 0; wi < winds.size(); ++wi) {
     for (int k = 0; k < runs; ++k) {
       const std::array<float, 3> c{cs.at(0), winds[wi], cs.at(2)};
-      label = g_r && sim ? std::format("{}#{}", label0, k) : label0;
+      label = sim && (g_r || multi) ? std::format("{}#{}", label0, k) : label0;
       if (done.count(std::format("{},{:.2f}", label, c[1]))) continue;
       const std::uint64_t seed = a.has("seed") ? a.u64("seed", 0)
                                  : g_r          ? (sim ? base + 100 * wi + static_cast<std::uint64_t>(k) : base + wi)
+                                 : multi        ? base + 100 * wi + static_cast<std::uint64_t>(k)
                                  : n2_recipe()  ? base + wi
                                                 : 9'900'004;
       const double t0 = now();
@@ -2348,7 +2354,7 @@ int choose(const Args& a) {
     std::string x;
     while (std::getline(ss, x, ',')) cands.push_back(x);
   }
-  const auto ev = g_r ? edge_verdicts_r(a.need("edge"), a.need("bounds")) : edge_verdicts(a.need("edge"));
+  const auto ev = (g_r || a.has("bounds")) ? edge_verdicts_r(a.need("edge"), a.need("bounds")) : edge_verdicts(a.need("edge"));
   const auto sets = settings(split);
   using Score = ChoiceScore;
   std::map<std::string, Score> sc;

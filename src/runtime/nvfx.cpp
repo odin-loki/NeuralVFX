@@ -13,6 +13,7 @@
 #include <array>
 #include <atomic>
 #include <cmath>
+#include <cstdint>
 #include <cstring>
 #include <fstream>
 #include <iterator>
@@ -82,7 +83,11 @@ const RolloutEffect* nfx::rt::rollout_of(const nvfx_effect* e) { return e ? e->r
 
 namespace {
 
-std::atomic<int> g_forced_isa{NVFX_ISA_AUTO};
+std::atomic<std::uint64_t> g_profile{0};
+
+std::uint64_t pack_profile(const nfx::rt::Profile& p) { return (static_cast<std::uint64_t>(p.flags) << 32) | static_cast<std::uint32_t>(p.isa); }
+
+constexpr std::uint32_t kProfileFlags = 0;
 
 bool cpu_has(nvfx_isa isa) {
 #if defined(__GNUC__) && defined(__x86_64__)
@@ -102,14 +107,15 @@ bool cpu_has_vnni() {
 #endif
 }
 
-nvfx_isa resolved_isa() {
-  const auto forced = static_cast<nvfx_isa>(g_forced_isa.load());
+nvfx_isa frame_isa(nvfx_isa forced) {
   if (forced != NVFX_ISA_AUTO) return forced;
   // AVX2 by default: AVX-512 measured as a tie on the benchmark machine (docs/PLAN.md §8) and lowers clocks on some CPUs.
   // This is frame models' ISA and nvfx_get_isa()'s; rollout runners take AVX-512 where the CPU has it (runner_isa).
   if (cpu_has(NVFX_ISA_AVX2)) return NVFX_ISA_AVX2;
   return NVFX_ISA_BASELINE;
 }
+
+nvfx_isa resolved_isa() { return frame_isa(nfx::rt::current_profile().isa); }
 
 // The precision a frame model's instance runs at: DEFAULT is int8 for the grid and multi families (docs/REPORT.md §7).
 nfx::rt::Precision frame_precision(const nfx::Model& m, nvfx_precision p) {
@@ -178,7 +184,7 @@ void make_rollout_runners(nvfx_instance& in, nfx::rt::Precision q) { make_rollou
 // fast or faster (docs/REPORT.md §7). Everything else stays on AVX2 (docs/PLAN.md §8).
 std::unique_ptr<Renderer> make_frame_renderer(const nfx::rt::Effect& e, int size, nvfx_precision p, nvfx_isa forced) {
   const nfx::rt::Precision q = frame_precision(e.m, p);
-  nvfx_isa isa = forced != NVFX_ISA_AUTO ? forced : cpu_has(NVFX_ISA_AVX2) ? NVFX_ISA_AVX2 : NVFX_ISA_BASELINE;
+  nvfx_isa isa = frame_isa(forced);
   const bool hidden = e.m.layers.size() > 2;
   if (q == nfx::rt::Precision::int8 && hidden && forced == NVFX_ISA_AUTO && cpu_has(NVFX_ISA_AVX512) && cpu_has_vnni()) isa = NVFX_ISA_AVX512;
   switch (isa) {
@@ -467,13 +473,22 @@ nfx::rt::Precision nfx::rt::rollout_precision(nvfx_precision p) {
   return default_rollout_precision();
 }
 
+nfx::rt::Profile nfx::rt::current_profile() {
+  const std::uint64_t w = g_profile.load();
+  return {static_cast<nvfx_isa>(static_cast<std::uint32_t>(w)), static_cast<std::uint32_t>(w >> 32)};
+}
+
 nfx::rt::Precision nfx::rt::default_rollout_precision() {
-  const auto forced = static_cast<nvfx_isa>(g_forced_isa.load());
+  const nvfx_isa forced = current_profile().isa;
   const bool vnni = (forced == NVFX_ISA_AUTO || forced == NVFX_ISA_AVX512) && cpu_has(NVFX_ISA_AVX512) && cpu_has_vnni();
   return vnni ? Precision::int8 : Precision::float32;
 }
 
-nvfx_isa nfx::rt::rollout_isa(Precision p) { return runner_isa(p, static_cast<nvfx_isa>(g_forced_isa.load())); }
+nvfx_isa nfx::rt::rollout_isa(Precision p) { return runner_isa(p, current_profile().isa); }
+
+nvfx_isa nfx::rt::rollout_isa(Precision p, nvfx_isa forced) { return runner_isa(p, forced); }
+
+nvfx_isa nfx::rt::resolve_frame_isa(nvfx_isa forced) { return frame_isa(forced); }
 
 nvfx_isa nfx::rt::rollout_instance_isa(const nvfx_instance* in) { return in && in->a.r ? in->built_isa : NVFX_ISA_AUTO; }
 
@@ -589,7 +604,7 @@ nvfx_status nvfx_instance_create(const nvfx_effect* e, int size, nvfx_instance**
       in->size = size;
       in->inner = size;
       in->controls.assign(static_cast<std::size_t>(h.n_controls), 0.5f);
-      in->isa = static_cast<nvfx_isa>(g_forced_isa.load());
+      in->isa = nfx::rt::current_profile().isa;
       make_rollout_runners(*in, nfx::rt::rollout_precision(in->precision));
       in->mix.assign(static_cast<std::size_t>(size) * size * 4, 0);
       in->drift_seconds = e->roll->m.loop ? 6.f : 0.f;
@@ -618,7 +633,7 @@ nvfx_status nvfx_instance_create(const nvfx_effect* e, int size, nvfx_instance**
     in->za.assign(static_cast<std::size_t>(h.n_latent), 0.f);
     in->zb.assign(static_cast<std::size_t>(h.n_latent), 0.f);
     in->drift_seconds = h.loop ? 4.f * static_cast<float>(h.frames) / std::max(1.f, e->e.m.fps) : 0.f;
-    in->isa = static_cast<nvfx_isa>(g_forced_isa.load());
+    in->isa = nfx::rt::current_profile().isa;
     in->renderer = make_frame_renderer(e->e, size, in->precision, in->isa);
     *out = in.release();
     return NVFX_OK;
@@ -897,7 +912,7 @@ nvfx_isa nvfx_get_isa(void) { return resolved_isa(); }
 
 uint32_t nvfx_version(uint32_t* features) {
   if (features) {
-    std::uint32_t f = NVFX_FEATURE_SCENE | NVFX_FEATURE_LIBRARY | NVFX_FEATURE_MANAGER | NVFX_FEATURE_PACK | NVFX_FEATURE_VOLUME;  // built with every API
+    std::uint32_t f = NVFX_FEATURE_SCENE | NVFX_FEATURE_LIBRARY | NVFX_FEATURE_MANAGER | NVFX_FEATURE_PACK | NVFX_FEATURE_VOLUME | NVFX_FEATURE_PROFILE;
 #ifdef NVFX_SHARED_BUILD
     f |= NVFX_FEATURE_SHARED;
 #endif
@@ -911,7 +926,42 @@ uint32_t nvfx_version(uint32_t* features) {
 
 nvfx_status nvfx_set_isa(nvfx_isa isa) {
   if (isa != NVFX_ISA_AUTO && !cpu_has(isa)) return NVFX_ERROR_UNSUPPORTED;
-  g_forced_isa.store(isa);
+  std::uint64_t w = g_profile.load();
+  while (!g_profile.compare_exchange_weak(w, pack_profile({isa, static_cast<std::uint32_t>(w >> 32)}))) {
+  }
+  return NVFX_OK;
+}
+
+nvfx_status nvfx_profile_init(nvfx_profile* profile, nvfx_profile_preset preset) {
+  if (!profile) return NVFX_ERROR_ARGUMENT;
+  switch (preset) {
+    case NVFX_PROFILE_DEFAULT:
+      *profile = nvfx_profile{NVFX_ISA_AUTO, 0, 0};
+      return NVFX_OK;
+    case NVFX_PROFILE_LOCKSTEP_AVX2:
+      *profile = nvfx_profile{NVFX_ISA_AVX2, 0, 0};
+      return NVFX_OK;
+    case NVFX_PROFILE_LOCKSTEP_PORTABLE:
+      *profile = nvfx_profile{NVFX_ISA_BASELINE, 0, 0};
+      return NVFX_OK;
+    default:
+      *profile = nvfx_profile{NVFX_ISA_AUTO, 0, 0};
+      return NVFX_ERROR_ARGUMENT;
+  }
+}
+
+nvfx_status nvfx_set_profile(const nvfx_profile* profile) {
+  if (!profile || profile->reserved != 0 || (profile->flags & ~kProfileFlags) != 0) return NVFX_ERROR_ARGUMENT;
+  if (static_cast<std::uint32_t>(profile->isa) > static_cast<std::uint32_t>(NVFX_ISA_AVX512)) return NVFX_ERROR_ARGUMENT;
+  if (profile->isa != NVFX_ISA_AUTO && !cpu_has(profile->isa)) return NVFX_ERROR_UNSUPPORTED;
+  g_profile.store(pack_profile({profile->isa, profile->flags}));
+  return NVFX_OK;
+}
+
+nvfx_status nvfx_get_profile(nvfx_profile* profile) {
+  if (!profile) return NVFX_ERROR_ARGUMENT;
+  const nfx::rt::Profile p = nfx::rt::current_profile();
+  *profile = nvfx_profile{p.isa, p.flags, 0};
   return NVFX_OK;
 }
 

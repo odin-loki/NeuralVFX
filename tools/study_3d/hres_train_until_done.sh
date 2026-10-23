@@ -34,27 +34,36 @@ if ! [ -f "$SMOKE/logs/after_train.pid" ] || ! kill -0 "$(cat "$SMOKE/logs/after
 fi
 
 while ! grep -q 'done at iteration 1750' "$SMOKE/logs/train_smoke.log" 2>/dev/null; do
+  if ! pgrep -f 'nvfx_3d train.*hres_3d/smoke' >/dev/null 2>&1; then
+    log "error: smoke train process exited before 1750 — check $SMOKE/logs/train_smoke.log"
+    exit 1
+  fi
   last=$(grep '^it ' "$SMOKE/logs/train_smoke.log" 2>/dev/null | awk '!seen[$0]++' | tail -1 || echo '?')
   log "smoke training… $last"
   sleep "$POLL"
 done
 log "smoke train at 1750"
 
-while [ ! -f "$SMOKE/models/smoke_hres.nvfx3" ]; do
-  log "waiting for smoke finish (watcher)…"
+while ! [ -f "$SMOKE/logs/after_train.done" ]; do
+  if [ -f "$SMOKE/models/smoke_hres.nvfx3" ]; then
+    log "waiting for smoke watcher (finish/validate/publish)…"
+  else
+    log "waiting for smoke finish (watcher)…"
+  fi
   sleep "$POLL"
 done
-log "smoke_hres.nvfx3 ready"
+log "smoke pipeline complete (after_train.log)"
 
-if ! grep -q 'done: chosen' "$FIRE/logs/validate.log" 2>/dev/null; then
-  if pgrep -f 'hres_fire_validate.sh' >/dev/null 2>&1; then
+DONE_SH="$REPO/tools/study_3d/hres_validate_done.sh"
+if ! bash "$DONE_SH" "$FIRE/logs/validate.log" 2>/dev/null; then
+  if pgrep -f 'hres_fire_validate(\.sh|\.snapshot\.sh)|run_fire_validate\.sh' >/dev/null 2>&1; then
     log "fire validate already running"
   else
     log "starting fire validate"
     bash "$REPO/tools/study_3d/start_fire_validate.sh"
   fi
   bash "$REPO/tools/study_3d/start_fire_publish_watcher.sh"
-  while ! grep -q 'done: chosen' "$FIRE/logs/validate.log" 2>/dev/null; do
+  while ! bash "$DONE_SH" "$FIRE/logs/validate.log" 2>/dev/null; do
     log "fire validate in progress…"
     sleep "$POLL"
   done

@@ -469,7 +469,8 @@ if(NEURALFX_BUILD_TESTS)
   # Study N (docs/STUDY_3D.md): the 3D simulator, the volume renderer, the 3D rollout model and its trainer, and the
   # volume C API: their own test program.
   add_executable(neuralfx_3d_tests tests/test_3d.cpp)
-  target_link_libraries(neuralfx_3d_tests PRIVATE neuralfx_train nvfx GTest::gtest_main)
+  target_link_libraries(neuralfx_3d_tests PRIVATE neuralfx_train nvfx neuralfx_dcm GTest::gtest_main)
+  target_compile_definitions(neuralfx_3d_tests PRIVATE NEURALFX_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
   target_include_directories(neuralfx_3d_tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src/runtime")  # the detail layer's kernels
   neuralfx_defaults(neuralfx_3d_tests)
   gtest_discover_tests(neuralfx_3d_tests TEST_PREFIX "neuralfx." DISCOVERY_MODE PRE_TEST PROPERTIES LABELS neuralfx)

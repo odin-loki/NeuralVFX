@@ -10,6 +10,7 @@
 // simulator's, the runs' format, gradients with them) and the long training stage (resumes to the bit). Study R
 // (docs/STUDY_R.md): the validated smoke's solver (the flux form keeps what it carries; the buoyancy flux is the same up
 // the plume; the same fields on any number of threads), warm smoke's optics, runs that keep their effect.
+#include <neuralfx/dcm/mixer.hpp>
 #include <neuralfx/nvfx_volume.h>
 #include <neuralfx/render3d.hpp>
 #include <neuralfx/rollout3d.hpp>
@@ -27,6 +28,7 @@
 #include <cmath>
 #include <cstring>
 #include <filesystem>
+#include <fstream>
 #include <format>
 #include <random>
 #include <sstream>
@@ -639,6 +641,26 @@ TEST(Rollout3d, FinerCoarseStateMatchesTheDetailGrid) {
   EXPECT_EQ(h.cells(), 32 * 48 * 32);
 }
 
+TEST(Rollout3d, CoarseDownsampleMatchesBlockAverageOfPhys) {
+  r3::Hyper fine;
+  fine.rx = 32;
+  fine.ry = 48;
+  fine.rz = 32;
+  fine.fine = 2;
+  r3::Hyper coarse;
+  coarse.rx = 16;
+  coarse.ry = 24;
+  coarse.rz = 16;
+  coarse.fine = 4;
+  const std::size_t n = zu(fine.cells()) * r3::kPhys;
+  std::vector<float> src(n);
+  for (std::size_t i = 0; i < n; ++i) src[i] = static_cast<float>(i % 97) * 0.01f;
+  const std::vector<float> dst = r3::coarse_downsample(fine, src, coarse);
+  EXPECT_EQ(dst.size(), zu(coarse.cells()) * r3::kPhys);
+  const std::vector<float> again = r3::coarse_downsample(coarse, dst, coarse);
+  for (std::size_t i = 0; i < dst.size(); ++i) EXPECT_FLOAT_EQ(dst[i], again[i]);
+}
+
 TEST(Rollout3d, SaveLoadRoundTripsAsStorageRounds) {
   // study N's files (clamped edges) are version 1, as they were; ambient edges make version 2
   for (const r3::Edges e : {r3::Edges::clamp, r3::Edges::ambient}) {
@@ -1245,6 +1267,33 @@ TEST(VolumeApi, StepsAreAFunctionOfTime) {
   uint32_t features = 0;
   nvfx_version(&features);
   EXPECT_TRUE(features & NVFX_FEATURE_VOLUME);
+}
+
+TEST(VolumeApi, HresFireIsTheFrozenModel) {
+  const std::filesystem::path src = NEURALFX_SOURCE_DIR;
+  const std::filesystem::path frozen_csv = src / "results/3d/hres/fire/frozen.csv";
+  const std::filesystem::path model = src / "models/3d/fire_hres.nvfx3";
+  if (!std::filesystem::exists(frozen_csv)) GTEST_SKIP() << "no results/3d/hres/fire/frozen.csv";
+  ASSERT_TRUE(std::filesystem::exists(model)) << model;
+  std::string frozen_sha;
+  {
+    std::ifstream in(frozen_csv);
+    for (std::string line; std::getline(in, line);) {
+      std::vector<std::string> cols;
+      std::stringstream ls(line);
+      for (std::string c; std::getline(ls, c, ',');) cols.push_back(c);
+      if (cols.size() >= 2 && cols[0] == "chosen.nvfx3") frozen_sha = cols[1];
+    }
+  }
+  if (frozen_sha.empty()) GTEST_SKIP() << "frozen.csv has no chosen.nvfx3 row";
+  std::ifstream mf(model, std::ios::binary);
+  ASSERT_TRUE(mf.good()) << model;
+  std::ostringstream bytes;
+  bytes << mf.rdbuf();
+  EXPECT_EQ(nfx::dcm::sha256_hex(bytes.str()), frozen_sha);
+  nvfx_volume_effect* e = nullptr;
+  ASSERT_EQ(nvfx_volume_effect_load(model.string().c_str(), &e), NVFX_OK);
+  nvfx_volume_effect_free(e);
 }
 
 // The volume runtime's detail layer on vectors (src/runtime/rt_detail3.hpp) gives rollout3d::detail_step's fields to the

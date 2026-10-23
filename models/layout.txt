@@ -69,9 +69,10 @@ n2_3d/models/chosen.nvfx3 3d/fire.nvfx3
 n2_3d/models/smoke2.nvfx3 3d/smoke_demo.nvfx3
 n_3d/models/chosen.nvfx3 3d/fire_study_n.nvfx3
 r_smoke3d/models/chosen.nvfx3 3d/smoke.nvfx3
-hres_3d/fire/models/hres_fire.nvfx3 3d/fire_hres.nvfx3
 p_upscale/nets/cand_shared.nvfxup upscale/shared.nvfxup
 v2/models/explosion.nvfx 2d/v2/explosion.nvfx
 v2/models/fire.ddpm prior/fire.ddpm
 v2/models/fire.nvfx 2d/v2/fire.nvfx
 v2/models/smoke.nvfx 2d/smoke.nvfx
+hres_3d/fire/models/chosen.nvfx3 3d/fire_hres.nvfx3
+hres_3d/smoke/models/smoke_hres.nvfx3 3d/smoke_hres.nvfx3

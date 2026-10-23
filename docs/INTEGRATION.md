@@ -217,7 +217,10 @@ measuring. Check the result in play: `get_stats()->jobs_ms` against `planned_ms`
   lockstep). With no ISA forced, rollout effects take the AVX-512 code where the CPU has AVX-512 (float since 15
   October 2026; int8 only with VNNI) and AVX2 elsewhere, so at one precision a machine with AVX-512 and one without may
   play different frames (the shipped models measured the same to the bit, [REPORT.md](REPORT.md) §13.10, but the code
-  does not promise it); `nvfx_set_isa(NVFX_ISA_AVX2)` on both makes sure ([ENGINES.md](ENGINES.md) §4). The
+  does not promise it); `nvfx_set_isa(NVFX_ISA_AVX2)` on both makes sure ([ENGINES.md](ENGINES.md) §4). Since version
+  9, `nvfx_profile_init` / `nvfx_set_profile` (C++ `nvfx::init_profile` / `nvfx::set_profile`) apply one profile before
+  any instance, scene, stage, manager or volume is created (`NVFX_PROFILE_LOCKSTEP_AVX2` or `NVFX_PROFILE_LOCKSTEP_PORTABLE`
+  for baseline ISA everywhere). The
   manager's plan depends only on the calls and its cost model: calibration makes it depend on the machine (and its load
   at that moment); fixed costs (`set_cost`, a pack's costs) keep the plans the same everywhere, for replays or lockstep.
   Packs change nothing: the members are the files.
@@ -233,10 +236,10 @@ measuring. Check the result in play: `get_stats()->jobs_ms` against `planned_ms`
 
 ## 8. Version and ABI
 
-`nvfx_version(&features)` returns the library's `NVFX_VERSION` (6: 3D volumes, `nvfx_volume.h`, study N; 5: precision in the scene, stage and manager descs, study K; 4: engine layers and trails; 3: packs and `nvfx_version`), which changes whenever
+`nvfx_version(&features)` returns the library's `NVFX_VERSION` (9: `nvfx_profile` / `nvfx_set_profile`; 8: manager `half_px`; 7: half-size upscale; 6: 3D volumes, `nvfx_volume.h`, study N; 5: precision in the scene, stage and manager descs, study K; 4: engine layers and trails; 3: packs and `nvfx_version`), which changes whenever
 a call or a public struct changes: an engine that loads `libnvfx.so` / `nvfx.dll` checks it against the header's
 (`nvfx::version().matches_headers()`). `features` says what the build holds (`NVFX_FEATURE_SCENE`, `_LIBRARY`,
-`_MANAGER`, `_PACK`, `_VOLUME`, `_SHARED`) and what this CPU runs (`_AVX2`, `_AVX512`, `_VNNI`). The headers compile as C99 and
+`_MANAGER`, `_PACK`, `_VOLUME`, `_PROFILE`, `_SHARED`) and what this CPU runs (`_AVX2`, `_AVX512`, `_VNNI`). The headers compile as C99 and
 as C++ (with `-fno-exceptions -fno-rtti` for the wrapper). On 64-bit platforms (x86-64 Linux and Windows alike: no
 `long` in any struct) the structs a binding declares have these sizes in bytes, checked at compile time by
 `nvfx_abi_test` (`ctest -R Abi`):

@@ -52,6 +52,7 @@ struct nvfx_volume {
   int shard_frames = 240, fade = 15;
   long frame = -1;  // the frame the fields show (-1: none yet)
   bool prepared = false;
+  nfx::rt::Profile profile;
 };
 
 std::unique_ptr<r3::DetailKernel> nfx::rt::make_volume_detail(const r3::Model& m, const r3::Workspace& ws, nvfx_isa isa) {
@@ -206,8 +207,9 @@ nvfx_status nvfx_volume_create(const nvfx_volume_effect* effect, int threads, nv
   try {
     auto v = std::make_unique<nvfx_volume>(effect, threads);
     const r3::Model& m = effect->m;
-    if (nvfx_get_isa() != NVFX_ISA_BASELINE) v->ws.conv = nfx::rt::volume_conv3_avx2;
-    v->detail = nfx::rt::make_volume_detail(m, v->ws, nfx::rt::rollout_isa(nfx::rt::Precision::float32));
+    v->profile = nfx::rt::current_profile();
+    if (nfx::rt::resolve_frame_isa(v->profile.isa) != NVFX_ISA_BASELINE) v->ws.conv = nfx::rt::volume_conv3_avx2;
+    v->detail = nfx::rt::make_volume_detail(m, v->ws, nfx::rt::rollout_isa(nfx::rt::Precision::float32, v->profile.isa));
     v->ws.detail = v->detail.get();
     for (auto& r : v->run) r.s = r3::make_state(m);
     v->out_t.assign(m.h.fine_cells(), 0.f);

@@ -925,6 +925,19 @@ TEST(Manager, InterpolationKernels) {
   int worst = 0;
   for (std::size_t i = 0; i < o.size(); ++i) worst = std::max(worst, std::abs(o[i] - q[i]));
   EXPECT_LE(worst, 1);
+  nvfx_profile saved{};
+  nvfx_get_profile(&saved);
+  nvfx_profile portable{};
+  ASSERT_EQ(nvfx_profile_init(&portable, NVFX_PROFILE_LOCKSTEP_PORTABLE), NVFX_OK);
+  ASSERT_EQ(nvfx_set_profile(&portable), NVFX_OK);
+  EXPECT_FALSE(nfx::mgr::using_avx2_kernels());
+  Bytes via_profile(o.size());
+  nfx::mgr::motion_blend(a.data(), b.data(), S, 0.3f, wavy, via_profile.data());
+  nvfx_set_profile(&saved);
+  nfx::mgr::force_portable_kernels(true);
+  nfx::mgr::motion_blend(a.data(), b.data(), S, 0.3f, wavy, q.data());
+  nfx::mgr::force_portable_kernels(false);
+  EXPECT_EQ(via_profile, q);
   // resampling: a box average down, then a copy
   Bytes small(32 * 32 * 4);
   nfx::mgr::resample(a.data(), S, small.data(), 32);

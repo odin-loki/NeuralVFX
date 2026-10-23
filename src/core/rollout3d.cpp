@@ -732,6 +732,38 @@ void start(const Model& m, int index, std::span<const float> controls, std::uint
   start_from(m, sp.coarse, sp.time, controls, seed, s, ws, pool, true);
 }
 
+std::vector<float> coarse_downsample(const Hyper& src, std::span<const float> phys, const Hyper& dst) {
+  const std::size_t src_n = zu(src.cells()) * kPhys;
+  const std::size_t dst_n = zu(dst.cells()) * kPhys;
+  if (phys.size() != src_n) throw std::invalid_argument("rollout3d: coarse_downsample phys size");
+  if (src.rx == dst.rx && src.ry == dst.ry && src.rz == dst.rz) return std::vector<float>(phys.begin(), phys.end());
+  if (src.rx % dst.rx != 0 || src.ry % dst.ry != 0 || src.rz % dst.rz != 0) throw std::invalid_argument("rollout3d: coarse_downsample grid ratio");
+  const int fx = src.rx / dst.rx, fy = src.ry / dst.ry, fz = src.rz / dst.rz;
+  std::vector<float> out(dst_n);
+  const float inv = 1.f / static_cast<float>(fx * fy * fz);
+  for (int cy = 0; cy < dst.ry; ++cy) {
+    for (int cz = 0; cz < dst.rz; ++cz) {
+      for (int cx = 0; cx < dst.rx; ++cx) {
+        const std::size_t di = (zu(cy) * zu(dst.rz) + zu(cz)) * zu(dst.rx) + zu(cx);
+        for (int c = 0; c < kPhys; ++c) {
+          float b = 0.f;
+          for (int dy = 0; dy < fy; ++dy) {
+            for (int dz = 0; dz < fz; ++dz) {
+              for (int dx = 0; dx < fx; ++dx) {
+                const int sx = cx * fx + dx, sy = cy * fy + dy, sz = cz * fz + dz;
+                const std::size_t si = (zu(sy) * zu(src.rz) + zu(sz)) * zu(src.rx) + zu(sx);
+                b += phys[si * kPhys + zu(c)];
+              }
+            }
+          }
+          out[di * kPhys + zu(c)] = b * inv;
+        }
+      }
+    }
+  }
+  return out;
+}
+
 void block_average(const Hyper& h, std::span<const float> fine, std::span<float> coarse, int channel, int channels) {
   const int k = h.fine, FX = h.fx(), FZ = h.fz();
   const float inv = 1.f / static_cast<float>(k * k * k);

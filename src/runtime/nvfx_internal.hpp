@@ -5,7 +5,16 @@
 
 #include "rt_common.hpp"
 
+#include <cstdint>
+
 namespace nfx::rt {
+
+// Process-wide runtime profile (library-internal). Stored as one atomic word: isa in the low 32 bits, flags in the high 32.
+struct Profile {
+  nvfx_isa isa = NVFX_ISA_AUTO;
+  std::uint32_t flags = 0;
+};
+Profile current_profile();
 
 // The rollout effect an nvfx_effect holds (nullptr: a frame effect, or null).
 const RolloutEffect* rollout_of(const nvfx_effect* e);
@@ -21,6 +30,8 @@ nvfx_status set_rollout_int8_convs(nvfx_instance* in, Int8Convs convs);
 // manager create their runners with these, as instances do.
 Precision rollout_precision(nvfx_precision p);
 nvfx_isa rollout_isa(Precision p);
+nvfx_isa resolve_frame_isa(nvfx_isa forced);
+nvfx_isa rollout_isa(Precision p, nvfx_isa forced);
 
 // The ISA a rollout instance's runners were built for (at its present precision); NVFX_ISA_AUTO for a frame model's
 // instance or null.

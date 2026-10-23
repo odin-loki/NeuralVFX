@@ -31,7 +31,7 @@
 extern "C" {
 #endif
 
-#define NVFX_VERSION 8 /* 2: scenes (nvfx_scene.h); 3: nvfx_version(), effect packs (nvfx_pack.h); 4: engine layers and trails; 5: precision (study K); 6: 3D volumes (nvfx_volume.h); 7: drawn at half size and upscaled (study P); 8: the effect manager draws large effects at half size (nvfx_manager_desc.half_px) */
+#define NVFX_VERSION 9 /* 2: scenes (nvfx_scene.h); 3: nvfx_version(), effect packs (nvfx_pack.h); 4: engine layers and trails; 5: precision (study K); 6: 3D volumes (nvfx_volume.h); 7: drawn at half size and upscaled (study P); 8: the effect manager draws large effects at half size (nvfx_manager_desc.half_px); 9: nvfx_profile / nvfx_set_profile */
 
 typedef enum nvfx_status {
   NVFX_OK = 0,
@@ -185,6 +185,7 @@ NVFX_API nvfx_status nvfx_bake(nvfx_instance* instance, int frames, uint8_t* rgb
 #define NVFX_FEATURE_PACK 0x8u      /* nvfx_pack.h (packs of format NVFX_PACK_FORMAT and older) */
 #define NVFX_FEATURE_SHARED 0x10u   /* this is the shared library (libnvfx.so, nvfx.dll) */
 #define NVFX_FEATURE_VOLUME 0x20u   /* nvfx_volume.h (3D effects, study N) */
+#define NVFX_FEATURE_PROFILE 0x40u  /* nvfx_profile, nvfx_set_profile, nvfx_get_profile */
 #define NVFX_FEATURE_AVX2 0x100u    /* this CPU runs the AVX2 code (used by default when present) */
 #define NVFX_FEATURE_AVX512 0x200u  /* this CPU runs the AVX-512 code (rollout effects use it; nvfx_set_isa) */
 #define NVFX_FEATURE_VNNI 0x400u    /* this CPU has AVX-512 VNNI (int8 frame models and rollout effects use it) */
@@ -194,8 +195,23 @@ NVFX_API uint32_t nvfx_version(uint32_t* features);
 NVFX_API nvfx_isa nvfx_get_isa(void);                 /* the default ISA: the one forced, else AVX2 when present (frame
                                                          models; rollout effects take AVX-512 where the CPU has it: see
                                                          nvfx_instance_set_precision) */
-NVFX_API nvfx_status nvfx_set_isa(nvfx_isa isa);      /* force an ISA for instances created afterwards */
+NVFX_API nvfx_status nvfx_set_isa(nvfx_isa isa);      /* force an ISA for instances and volumes created afterwards; keeps profile flags */
 NVFX_API double nvfx_instance_macs_per_pixel(const nvfx_instance* instance);
+
+typedef enum nvfx_profile_preset {
+  NVFX_PROFILE_DEFAULT = 0,
+  NVFX_PROFILE_LOCKSTEP_AVX2 = 1,
+  NVFX_PROFILE_LOCKSTEP_PORTABLE = 2 /* baseline ISA everywhere (SSE2); manager motion uses the portable kernel */
+} nvfx_profile_preset;
+
+typedef struct nvfx_profile {
+  nvfx_isa isa;
+  uint32_t flags;    /* reserved: 0 */
+  uint32_t reserved; /* 0 */
+} nvfx_profile;
+NVFX_API nvfx_status nvfx_profile_init(nvfx_profile* profile, nvfx_profile_preset preset);
+NVFX_API nvfx_status nvfx_set_profile(const nvfx_profile* profile);
+NVFX_API nvfx_status nvfx_get_profile(nvfx_profile* profile);
 
 #ifdef __cplusplus
 }

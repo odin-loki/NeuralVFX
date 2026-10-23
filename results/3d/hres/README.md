@@ -9,8 +9,8 @@ During smoke CUDA train, `pause_fire_validate.sh` avoids contention; the smoke w
 
 | Effect | N2 baseline (16³ coarse) | hres target (32³ coarse) | Data root |
 |---|---|---|---|
-| Fire | `n2_3d/models/chosen.nvfx3` (C4) | `hres_3d/fire/models/hres_fire.nvfx3` (also [models/3d/fire_hres.nvfx3](../../../models/3d/fire_hres.nvfx3) in git) | `$NEURALVFX_DATA/hres_3d/fire` |
-| Smoke | `n2_3d/models/smoke2.nvfx3` | `hres_3d/smoke/models/smoke_hres.nvfx3` | `$NEURALVFX_DATA/hres_3d/smoke` |
+| Fire | `n2_3d/models/chosen.nvfx3` (C4) | **C2** chosen on val → [models/3d/fire_hres.nvfx3](../../../models/3d/fire_hres.nvfx3) (`frozen.csv`: `chosen.nvfx3`) | `$NEURALVFX_DATA/hres_3d/fire` |
+| Smoke | `n2_3d/models/smoke2.nvfx3` | [models/3d/smoke_hres.nvfx3](../../../models/3d/smoke_hres.nvfx3) (edge check: see `smoke/edgecheck.md`) | `$NEURALVFX_DATA/hres_3d/smoke` |
 
 **Fire weights (in git):** `fire/models/` — `C1.nvfx3` … `C4.nvfx3` (stage snapshots) and `hres_fire.nvfx3` (final
 `finish` from `ckpt/hres.ckpt`). Copy to `$NEURALVFX_DATA/hres_3d/fire/models/` for `nvfx_3d` drivers, or pass

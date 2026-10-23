@@ -106,7 +106,12 @@ where the CPU has AVX-512 (at int8 only with VNNI; at float since 15 October 202
 quiet machine, REPORT.md §13.10), else AVX2, else SSE2. `nvfx_set_isa` forces one ISA for every instance, scene, stage
 and manager created afterwards. The ISAs' floats may differ in the last bits (SSE2's do; AVX2's and AVX-512's measured
 the same to the bit on every shipped rollout model, REPORT.md §13.10, but the code does not promise it), so forcing one
-gives the same frames on every CPU that has it (lockstep, tests).
+gives the same frames on every CPU that has it (lockstep, tests). For a lockstep game profile (NVFX_VERSION 9), call
+`nvfx_profile_init(&p, NVFX_PROFILE_LOCKSTEP_AVX2)` then `nvfx_set_profile(&p)` **before** creating any instance, scene,
+stage, manager or volume; use fixed manager costs (`nvfx_manager_set_cost` or a pack's costs), not `calibrate()`, and
+set explicit precision where needed (`NVFX_PRECISION_FLOAT` for rollout effects). On CPUs without AVX2, or when you
+need the slowest portable rollout and manager motion path on every machine, use `NVFX_PROFILE_LOCKSTEP_PORTABLE`
+(baseline ISA; C++ `nvfx::init_profile` / `nvfx::set_profile`).
 
 ## 5. Rollout effects
 

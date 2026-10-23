@@ -46,6 +46,8 @@ NVFX_ABI_CHECK(status, sizeof(nvfx_status) == 4);
 NVFX_ABI_CHECK(fx, sizeof(nvfx_fx) == 4);
 NVFX_ABI_CHECK(handle, sizeof(nvfx_handle) == 4);
 NVFX_ABI_CHECK(volume_field, sizeof(nvfx_volume_field) == 4);
+NVFX_ABI_CHECK(profile, sizeof(nvfx_profile) == 12);
+NVFX_ABI_CHECK(profile_preset, sizeof(nvfx_profile_preset) == 4);
 
 int nvfx_abi_c99(void);
 
@@ -54,7 +56,7 @@ int nvfx_abi_c99(void) {
   int failures = 0;
   uint32_t features = 0;
   const uint32_t version = nvfx_version(&features);
-  const uint32_t apis = NVFX_FEATURE_SCENE | NVFX_FEATURE_LIBRARY | NVFX_FEATURE_MANAGER | NVFX_FEATURE_PACK | NVFX_FEATURE_VOLUME;
+  const uint32_t apis = NVFX_FEATURE_SCENE | NVFX_FEATURE_LIBRARY | NVFX_FEATURE_MANAGER | NVFX_FEATURE_PACK | NVFX_FEATURE_VOLUME | NVFX_FEATURE_PROFILE;
   if (version != NVFX_VERSION) {
     fprintf(stderr, "abi: the library is version %u, the headers %d\n", (unsigned)version, NVFX_VERSION);
     ++failures;

@@ -5,7 +5,7 @@
 # Default binary: ~/.cache/neuralvfx/nvfx_3d via nvfx_bin_link.sh.
 # Lighter than hres_fire_validate.sh: 30 s edge sim + learned vs smoke2, edgecheck; no held-out test.
 # Optional: set TRUTH=1 to also run val truth/real, track/play, and compare smoke_hres vs smoke2.
-# Resumes from files already written (edge CSVs append; delete them to rerun edge).
+# Resumes from files already written (delete edge CSVs to rerun edge).
 set -euo pipefail
 
 REPO=$(cd "$(dirname "$0")/../.." && pwd)
@@ -19,7 +19,10 @@ ROOT=${2:-${NEURALVFX_DATA:-$HOME/nvfx-data}/hres_3d/smoke}
 DATA=${NEURALVFX_DATA:-$HOME/nvfx-data}
 R=results/3d/hres/smoke
 H="--study hres --root $ROOT --effect smoke"
-W="--winds 0.05,0.25,0.5,0.75,0.95 --seconds 30 --effect smoke"
+W="--winds 0.05,0.25,0.5,0.75,0.95 --seconds 30"
+# Hres smoke edge seeds (docs/STUDY_3D_HRES.md §2): sim 9,656,900; models 9,657,900.
+SEED_SIM=9656900
+SEED_MODEL=9657900
 N2_SRC=$DATA/n2_3d/models/smoke2.nvfx3
 LEARNED=${LEARNED:-smoke_hres}
 
@@ -42,19 +45,19 @@ combine_edge() {
 
 echo "hres smoke validate: data $ROOT, results $R"
 
-"$B" edge $H --sim $W --out "$R/edge_sim.csv"
-"$B" edge $H --model "$ROOT/models/smoke2.nvfx3" --label smoke2 $W --out "$R/edge_smoke2.csv"
-"$B" edge $H --model "$ROOT/models/$LEARNED.nvfx3" --label "$LEARNED" $W --out "$R/edge_learned.csv"
+rm -f "$R/edge_sim.csv" "$R/edge_smoke2.csv" "$R/edge_learned.csv" "$R/edge.csv"
+"$B" edge $H --sim $W --seed-base "$SEED_SIM" --out "$R/edge_sim.csv"
+"$B" edge $H --model "$ROOT/models/smoke2.nvfx3" --label smoke2 $W --seed-base "$SEED_MODEL" --out "$R/edge_smoke2.csv"
+"$B" edge $H --model "$ROOT/models/$LEARNED.nvfx3" --label "$LEARNED" $W --seed-base "$SEED_MODEL" --out "$R/edge_learned.csv"
 combine_edge "$R/edge.csv" "$R/edge_sim.csv" "$R/edge_smoke2.csv" "$R/edge_learned.csv"
 "$B" edgecheck --csv "$R/edge.csv" | tee "$R/edgecheck.md"
 
 if [ -n "${TRUTH:-}" ]; then
   "$B" truth $H --split val
   "$B" real $H --split val
-  for m in smoke2 "$LEARNED"; do
-    "$B" track $H --split val --method "$m" --model "$ROOT/models/$m.nvfx3"
-    "$B" play $H --split val --method "$m" --model "$ROOT/models/$m.nvfx3"
-  done
+  "$B" track $H --split val --method "$LEARNED" --model "$ROOT/models/$LEARNED.nvfx3"
+  "$B" play $H --split val --method "$LEARNED" --model "$ROOT/models/$LEARNED.nvfx3"
+  "$B" play $H --split val --method smoke2 --model "$ROOT/models/smoke2.nvfx3"
   "$B" compare $H --split val --a "$LEARNED" --b smoke2 --results "$R"
 fi
 
