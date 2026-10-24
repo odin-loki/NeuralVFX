@@ -7,10 +7,12 @@ interface FUSE implements (`fuse_engine.hpp`), the adapter that plays NeuralVFX 
 Godot plugin, lit sprites, volumes), [MANAGER.md](MANAGER.md) (the budget), [LIBRARY.md](LIBRARY.md) (the catalogue).
 
 NeuralVFX is meant to replace FUSE's flipbooks: a flipbook on a particle becomes a learned effect playing on the CPU,
-uploaded as a texture when it changes. There is no FUSE source in this repository, so the adapter is written against
-a small interface that FUSE would implement over its own systems (§2); everything else is NeuralVFX's public C API
+uploaded as a texture when it changes. **FUSE source** lives in the owner's **`Desktop/FUSE`** git repo; this tree
+holds the adapter (`engines/fuse/`) against `fuse_engine.hpp`, which FUSE implements over its own systems (§2).
+Everything else is NeuralVFX's public C API
 through its C++ wrapper. **No call was added to the C API** for this (`NVFX_VERSION` 7 then; it is 8 since the effect
-manager draws large sprites at half size, which the adapter exposes, §5).
+manager draws large sprites at half size, which the adapter exposes, §5; 10 since the volume API has a job hook, §9,
+which the adapter does not use yet).
 
 ![The demo at 7 s: torches, a portal, smoke columns and an explosion as sprites; the campfire script on a card at the
 left; library entries on a stage at the right; the 3D fire in the middle](../videos/fuse_demo.jpg)
@@ -185,9 +187,10 @@ render thread │ draw N-1: hook (uploads, quads) ...                           
   thread and touches only the packets and `GpuUpload`.
 - **Jobs.** The manager's jobs use FUSE's workers directly (`threads = 0`, `job_slots` at once: MANAGER.md §4). A scene,
   a stage and a volume each run as one job: the scene and the stage on one thread (`threads = 1`, overlap off), the
-  volume on `VolumeConfig::threads` threads (1: only the job's; above 1 it starts threads of its own inside that job,
-  because the volume API takes no job system). With the defaults one update runs up to 3 + `job_slots` jobs, longest
-  first.
+  volume on `VolumeConfig::threads` threads (1: only the job's; above 1 it starts threads of its own inside that job).
+  The volume API can run on an engine's job system instead (`nvfx_volume_create_with_jobs`, NVFX_VERSION 10), but the
+  adapter does not use it yet: the volume's loops would call `JobSystem::run` from inside the volume's own job, which §2
+  forbids (§9). With the defaults one update runs up to 3 + `job_slots` jobs, longest first.
 - **Packets.** `frames_in_flight` (default 2) packets carry frames from the game thread to the render thread: frame N's
   quads, and the newest pixels of every texture with a version per texture. A packet is filled only after the render
   thread has drawn the one `frames_in_flight` frames before it; pixels are copied into it only when its copy is older than the newest
@@ -238,12 +241,18 @@ Packets cost `frames_in_flight` x (`max_sprites` x 256 KB + the cards' and the v
 the level below its level: a 256 px picture at 128. How FUSE turns it on or off, at load:
 
 ```cpp
-cfg.sprites.half_px = -1.f;                          // the default: the manager's threshold (MANAGER.md §6)
+cfg.sprites.half_px = -1.f;                          // the default: the manager's per-effect default (MANAGER.md §6)
 cfg.sprites.half_px = 0.f;                           // off (with half_share 0)
 cfg.sprites.half_px = 192.f;                         // or its own threshold, in pixels on FUSE's view
 cfg.sprites.half_share = 0.25f;                      // or a quarter of the view's height (either suffices)
 const nvfx_fuse::SpriteModel models[] = {{"fire", 8}, {"magic", 2, 0, 0.f}};   // per model: 0 never, > 0 its own
 ```
+
+`SpriteConfig::half_px` below 0 passes the manager's default through (NVFX_MANAGER_VERSION 3, REPORT.md §22.11): by
+the model's name, fire, smoke, steam and explosions at least 256 px on FUSE's view are drawn at 128, magic and every
+effect not measured at full size; so the demo's fire, smoke and explosions take it and its magic does not. 0 is off for
+every sprite model, a positive value one threshold for all of them; `SpriteModel::half_px` still comes first (0 opts a
+model out, a positive value opts it in at its own threshold).
 
 `SpriteConfig::half_upscale` is `NVFX_UPSCALE_OFF` by default: the picture uploaded is the half-size drawing, and the
 quad's bilinear sampling (FUSE's, in linear light after the sRGB decode) is the 2x; the render hook already uploads only
@@ -398,13 +407,26 @@ fast day (MANAGER.md §7.1): a game calibrates at load, or ships costs measured 
 
 ## 9. Honest limits
 
-- **FUSE is a guess.** There is no FUSE source here: the interface is what an engine of FUSE's shape needs, written
-  down; FUSE's real job system, render thread and texture uploads will differ in detail (for example, creating textures
+- **FUSE lives on the Desktop.** Implement `fuse_engine.hpp` in `Desktop/FUSE`; keep the adapter here in sync. The
+  stand-in demo approximates job system, render thread and texture uploads (for example, creating textures
   on the render thread only). The stand-in is a test harness, not a renderer.
 - **The volume is slow on the CPU** (§6), and a shard change starts the next shard's rollout in one frame: every 8 s a
-  step costs a start, about 1.7 s on one thread (STUDY_3D.md §8; the demo's worst frame is that one). The volume API has
-  no job hook, so its parallelism is threads of its own; it cannot spread a start over frames. Play one continuous
-  rollout (`shard_seconds = 0`) to avoid it where the model holds (study N2's fire held 30 s, STUDY_3D.md §14), or bake.
+  step costs a start, about 1.7 s on one thread (STUDY_3D.md §8; the demo's worst frame is that one). The volume API
+  has a job hook since 24 October 2026 (`nvfx_volume_create_with_jobs(fx, run, context, &vol)`, NVFX_VERSION 10,
+  ENGINES.md §12): every parallel loop of a step, a read or a picture becomes one fork-join `run(context, jobs, job,
+  job_context)` on the engine, the same frames to the bit (`VolumeApi.SameFieldsAndPicturesOnAnEnginesJobSystem`,
+  `nvfx_alloc_test`: no allocation on that path). **This adapter does not use it yet**: it steps the volume inside one
+  FUSE job, from which `JobSystem::run` may not be called (§2: game thread only; the stand-in's `ThreadPool::run` is not
+  re-entrant, a nested call from a worker would corrupt the run in progress). The adapter makes four volume calls in
+  all: `nvfx_volume_step_to` at load (the warm-up, frame 0) and, in its job, `nvfx_volume_step_to`,
+  `nvfx_volume_render` and `nvfx_volume_read`; every parallel loop of those (a start's warm-up steps, a step, a
+  crossfade, a picture's prepare and rows, a field's slices) goes through the volume's one pool, which the hook
+  replaces whole, so the library side needs nothing more. Wiring it means either stepping the volume on the game thread
+  before `JobSystem::run` (its loops then fan out over FUSE's workers, but the cards and the manager wait for it) or a
+  `JobSystem` that allows a nested `run` from a worker: the creation call changes (`nvfx_volume_create_with_jobs` in
+  place of `nvfx_volume_create`, `VolumeConfig::threads` then unused) and the volume leaves the job list; the hook also
+  does not spread a start over frames (a step is still one call). Play one continuous rollout (`shard_seconds = 0`) to
+  avoid the start where the model holds (study N2's fire held 30 s, STUDY_3D.md §14), or bake.
 - **The volume's quad is an impostor**: its CPU picture is drawn for the camera at the frame its volume frame changed
   (30 Hz) and placed in the world facing that camera, so between pictures a moving camera sees it slightly off, and FUSE's
   geometry does not cut it (no depth inside the box). When the camera is inside or beside the box (a corner behind the

@@ -304,8 +304,10 @@ nvfx_scene_rule_state(scene, "thunder", &flashes, NULL); /* one more each flash:
 ```
 
 `nvfx_scene_get_input` reads `NAME.member` when no input has that name (cloud, rain, snow, hail, wind, mean, gust,
-visibility, temp, lightning, dust, fog, extinction, u, beaufort, lean, leaves, lift, light, flash, strike, bolt, since,
-regime, progress: WEATHER.md §1). The director steps first in each frame, so what is read is the frame's.
+visibility, temp, lightning, dust, fog, extinction, u, beaufort, lean, leaves, lift, trees, light, flash, strike, bolt, since,
+regime, progress, humidity, dewpoint, base, water, wet, puddle, evaporation, carried, front, hour, elevation, sunx, sun,
+shaft, deck, foot: WEATHER.md §1; an `input` the script hands to the director's `hour` places the sun, §3.14). The director steps first
+in each frame, so what is read is the frame's.
 
 **Errors.** Script errors (`NVFX_ERROR_SCRIPT`) carry the line and the column, in `nvfx_scene_error` and in the
 message (`"name:line:column: message"`, with a suggestion for a misspelt word). The script is checked before any
@@ -490,9 +492,9 @@ on or off:
 
 ```c
 nvfx_manager_desc d;
-nvfx_manager_desc_init(&d);              /* half_px: the measured default (MANAGER.md §6) */
-d.half_px = 0.f; d.half_share = 0.f;     /* off */
-d.half_px = 192.f;                       /* or: from 192 px on screen */
+nvfx_manager_desc_init(&d);              /* half_px -1: the measured default per effect (MANAGER.md §6) */
+d.half_px = 0.f; d.half_share = 0.f;     /* off, for every effect */
+d.half_px = 192.f;                       /* or: from 192 px on screen, for every effect */
 d.half_share = 0.25f;                    /* or also: from a quarter of the viewport's height (needs set_camera) */
 d.half_upscale = NVFX_UPSCALE_OFF;       /* the default: the picture is the half-size drawing, the GPU's sampler is the 2x */
 d.half_upscale = NVFX_UPSCALE_BILINEAR;  /* or: the manager's bilinear 2x on its jobs, the picture at its level's size */
@@ -500,6 +502,16 @@ nvfx_manager_model_desc md;
 nvfx_manager_model_desc_init(&md);
 md.half_px = 0.f;                        /* this effect never at half size; > 0: its own threshold; -1: the manager's */
 ```
+
+**The default is per effect** (NVFX_MANAGER_VERSION 3; REPORT.md §22.11): with `half_px` below 0, what
+`nvfx_manager_desc_init` sets, the manager reads each model's name (`nvfx_effect_info.name`) and draws **fire, smoke,
+steam and explosions** at half size from **256 px** on screen (the threshold measured; a 256 px picture drawn at 128),
+**magic** and every effect not measured never: those four passed both of the rule's conditions (cost at most 0.5 of
+full size at 256 px, within the null's margins against the simulator on the held-out test), magic cost 0.54. So an
+engine that sets nothing gets 128 px pictures with `NVFX_PICTURE_HALF` for its large fires, smoke, steam and
+explosions, and everything else as before; `half_px` 0 is off for every effect, a positive value one threshold for
+every effect, and a model's own `nvfx_manager_model_desc.half_px` comes first (0 keeps a fire at full size, a positive
+value opts magic in).
 
 With the default `NVFX_UPSCALE_OFF` nothing changes in how pictures are drawn: a picture with `NVFX_PICTURE_HALF` is the
 half-size drawing (`size` equals `lod_size`), uploaded as any picture and drawn on its sprite with bilinear filtering,
@@ -680,6 +692,96 @@ flame soot; the soot's absorption and scattering as the fire's), and its extinct
 engine lights it as any fog volume. Nothing in the API changed for it. The shipped file, `models/3d/smoke.nvfx3`, is a
 labelled demo: it failed its test (STUDY_R.md §4).
 
+### 12.1 Two volumes coupled through the API: the fire's soot drives the smoke (a demo)
+
+`nvfx_3d video --kind coupled` ([STUDY_R.md](STUDY_R.md) §6.1; videos/README.md §9c) is the pattern for an engine that
+wants a fire with a smoke column above it from the two volumes: it stacks the smoke's box on the fire's and lets what
+the fire sends up set how thick the smoke is. Nothing in the API is specific to it; it is ordinary calls in a
+particular order, and the arithmetic between them is in `include/neuralfx/coupled3d.hpp` (C++23, header only, no
+dependencies; a C host writes the same three loops). The rule, as the header has it:
+
+- **The flux** (`top_soot_flux(soot, velocity, nx, ny, nz, layers)`): over the top `layers` rows of the fire's box
+  (y from `ny - layers` to `ny - 1`; the tool uses 4 of 96), the sum of `soot * max(0, v_y)`, read from the API's
+  `NVFX_VOLUME_SOOT` and `NVFX_VOLUME_VELOCITY` textures as floats (texel (x, y, z) at `(z * ny + y) * nx + x`;
+  velocity three per texel, world units per second, y up). Gas that sinks counts for nothing; the order of the sum is
+  fixed, so the number is the same on every machine and thread count.
+- **The drive** (`FluxDrive::update(flux, base, fps, time, settle = 1)`): the flux smoothed over about a second
+  (`smoothed += (flux - smoothed) / fps`) against its running mean since the start; the smoke's intensity is
+  `clamp(base * smoothed / mean, 0.05, 1)`, and `base` for the first `settle` seconds. A fire sending up more soot than
+  its average thickens the smoke about a second later; less thins it. `base` is the smoke's intensity when the fire is
+  at its average (the tool's `--smoke-intensity`, 0.6).
+- **The layout** (`rows_to_renderer(src, nx, ny, nz, dst)`): the API's textures run z slowest; this library's CPU
+  renderer wants `(y * nz + z) * nx + x`. Stacking two boxes in y is writing the lower at `dst` and the upper at
+  `dst + nx * ny_lower * nz`. An engine that draws the two as 3D textures on its GPU does not need this: it uploads the
+  fire's and the smoke's textures as they are and places the smoke's box `extent[1]` above the fire's.
+
+```c
+nvfx_volume_effect *fire_fx, *smoke_fx;  nvfx_volume *fire, *smoke;
+nvfx_volume_effect_load("fire.nvfx3", &fire_fx);  nvfx_volume_effect_load("smoke.nvfx3", &smoke_fx);
+nvfx_volume_info fi, si;
+nvfx_volume_effect_get_info(fire_fx, &fi);  nvfx_volume_effect_get_info(smoke_fx, &si);
+/* the two need the same width and depth to stack (fi.size[0] == si.size[0], fi.size[2] == si.size[2]); heights may differ */
+nvfx_volume_create(fire_fx, 4, &fire);  nvfx_volume_create(smoke_fx, 4, &smoke);
+nvfx_volume_set_seed(fire, seed);  nvfx_volume_set_seed(smoke, seed + 1);
+const int nx = fi.size[0], ny = fi.size[1], nz = fi.size[2], layers = 4;
+float *soot = malloc(nx * ny * nz * 4), *vel = malloc(3 * nx * ny * nz * 4);   /* once */
+double smoothed = 0, mean = 0;  long frames = 0;  float base = 0.6f, smoke_i = base;
+
+/* every frame, at 30 fps: the intensity from frame f's fire is the smoke's for frame f + 1 */
+float cf[3] = {fire_i, wind, turb}, cs[3] = {smoke_i, wind, turb};
+nvfx_volume_set_controls(fire, cf, 3);  nvfx_volume_set_controls(smoke, cs, 3);
+nvfx_volume_step_to(fire, t);  nvfx_volume_step_to(smoke, t);
+nvfx_volume_read(fire, NVFX_VOLUME_SOOT, NVFX_VOLUME_FLOAT, soot, nx * ny * nz * 4);
+nvfx_volume_read(fire, NVFX_VOLUME_VELOCITY, NVFX_VOLUME_FLOAT, vel, 3 * nx * ny * nz * 4);
+double flux = 0;                                              /* coupled3d::top_soot_flux */
+for (int z = 0; z < nz; ++z) for (int y = ny - layers; y < ny; ++y) for (int x = 0; x < nx; ++x) {
+  size_t i = ((size_t)z * ny + y) * nx + x;
+  flux += soot[i] * fmaxf(0.f, vel[3 * i + 1]);
+}
+smoothed = frames == 0 ? flux : smoothed + (flux - smoothed) / 30.0;   /* coupled3d::FluxDrive::update */
+mean += (flux - mean) / (double)(frames + 1);  ++frames;
+smoke_i = t >= 1.0 ? (float)fmin(1.0, fmax(0.05, base * smoothed / fmax(1e-9, mean))) : base;
+/* then: read both volumes' extinction (or soot) as 3D textures for the GPU, the smoke's box placed fi.extent[1] above the fire's */
+```
+
+What crosses between the two volumes is that one number per frame. No heat, soot or momentum does: the smoke's model
+makes its column from the burner at the base of its own box, so the seam shows as a flat base under the smoke, and
+the fire's own soot column stops at its top. It is a demo of coupling through the public API, not measured. Both
+volumes are deterministic, so the pair is: the committed video re-rendered to the byte on 24 October 2026
+(STUDY_R.md §6.1); `Coupled3d.*` in `neuralfx_3d_tests` tests the three functions, and `neuralfx.Coupled3dVideoSmoke`
+runs the shipped fire and smoke through this loop for 15 frames on every test run where ffmpeg is installed.
+
+**The same coupling inside the simulation: `sim3d::Stack` and its seams.** The solver (`include/neuralfx/sim3d.hpp`,
+the teacher; not in the C API) couples two boxes properly, for comparison and as the teacher a stacked model would
+train on. `Stack(lower, upper)` takes two `Params` of the same width, depth, fps and substeps; the upper's
+`Params::source` is off (no burner of its own) and its effect may differ (`smoke_r` above `fire` in the tool). A
+`Seam` is one row of a box's fields over its (x, z) plane (`nx * nz` values, `z * nx + x`; `u`, `v`, `w` in cells per
+second, `temp`, `soot`). `Fluid::set_top_seam` / `set_floor_seam` make that row the box's border row at that end, in
+place of its open-top outflow or its closed, slipping floor, so its advection carries the neighbour's heat, soot and
+velocity in across the seam and its projection sees the neighbour's velocity through it; `seam_row(y, out)` copies a
+box's own row out for the other. At the start of every solver step the stack copies the lower's top row into the
+upper's floor seam and the upper's bottom row into the lower's top seam, both from the state **before** the step, so
+the exchange is two-way (a downflow in the upper box comes back down) and the order of the two steps does not matter.
+The pressure solve stays each box's own (p = 0 beyond a top seam as beyond an open top, Neumann beyond a floor seam):
+a coupling of the carried quantities, not one solve over both boxes. A box with no seams is the single box to the bit;
+`Stack::fields(temp, soot)` gives both boxes as one volume, the lower's rows first, in the renderer's order; the totals
+of heat and soot are one tall box's to 1% and the share above the seam to 0.01 (STUDY_R.md §6.1). Tests:
+`Sim3d.CoupledStack*`. `nvfx_3d video --kind coupled-sim` draws it (`--upper` the upper box's effect, `--warm` frames
+before the first picture); it has no flat base at the seam, because the fields cross it.
+
+```sh
+# the two learned volumes, the committed demo (both files in git): 12 s at 1280 x 720, about 90 s on 3 threads
+build/nvfx_3d video --kind coupled --model models/3d/fire.nvfx3 --smoke models/3d/smoke.nvfx3 --out coupled.mp4 --seconds 12 --controls 0.6,0.5,0.5 --seed 29900003
+# a 2 s check at 640 x 360 on 4 threads (7 s)
+build/nvfx_3d video --kind coupled --model models/3d/fire.nvfx3 --smoke models/3d/smoke.nvfx3 --out /tmp/coupled.mp4 --seconds 2 --width 640 --height 360 --threads 4
+# one continuous rollout per box, a heavier smoke base
+build/nvfx_3d video --kind coupled --model models/3d/fire.nvfx3 --smoke models/3d/smoke.nvfx3 --out /tmp/coupled.mp4 --shard 0 --smoke-intensity 0.8
+# the solver's Stack instead (no model): smoke_r, or study R2's smoke_r2, above the fire, 60 frames warmed first
+build/nvfx_3d video --kind coupled-sim --out /tmp/coupled_sim.mp4 --seconds 12 --warm 60 --controls 0.6,0.5,0.5 --seed 29900003
+build/nvfx_3d video --kind coupled-sim --upper smoke_r2 --out /tmp/coupled_sim_r2.mp4 --seconds 12 --warm 60 --threads 4
+ctest --test-dir build -R 'Coupled3d|CoupledStack|Coupled3dVideoSmoke'      # the rule, the seams, the shipped pair end to end
+```
+
 **Space.** The volume fills `[-ex/2, ex/2] x [0, ey] x [-ez/2, ez/2]` of its own units (`info.extent`: 1 x 1.5 x 1),
 its floor at y = 0; place it by folding its transform into the view matrix. Cameras are column-major OpenGL-style
 matrices, so an engine passes its own (after converting its conventions), from any side.
@@ -690,8 +792,14 @@ by the seed and the shard) with noise of its own, rolled ahead and crossfaded in
 repeating. `nvfx_volume_set_shard(vol, 0)` plays one continuous rollout; `nvfx_volume_set_variation` fixes the start
 point. Going back in time or far ahead restarts the shard's rollout (a start runs a 24-frame warm-up).
 
-**Threads and memory.** A volume owns its worker threads (`threads` at creation); the fields and the pictures are the
-same to the bit on any number (tested), and nothing is allocated after creation (`nvfx_alloc_test`). A volume needs 52
+**Threads and memory.** A volume owns its worker threads (`threads` at creation), or runs on the engine's job system
+instead (`nvfx_volume_create_with_jobs(fx, run, context, &vol)`, NVFX_VERSION 10): the engine's `run(context, jobs,
+job, job_context)` must call `job(job_context, j)` for every j in [0, jobs) on its workers and return when all have (a
+fork-join; FUSE.md §2's `JobSystem::run` is one). The volume asks it several times per step, read or picture (one per
+parallel loop: a step's slabs, a field's slices, a picture's rows), on the thread that made the call, and never from
+inside one of its own jobs; a `NULL` `run` is the caller alone. The fields and the pictures are the
+same to the bit on any number of threads and on an engine's jobs (tested), and nothing is allocated after creation
+(`nvfx_alloc_test`, on both paths). A volume needs 52
 MB (two shards' fine fields, one shared set of step buffers, the detail layer's own buffers of 19 MB, the renderer's
 prepared volume; `nvfx_volume_scratch_bytes`); the effect file is 268 KB (14,218 weights at 16 bits, 8 start states at 8
 bits). `examples/volume_host.c` is the whole loop in plain C. The cost per frame (STUDY_3D.md §14.12, a quiet machine,

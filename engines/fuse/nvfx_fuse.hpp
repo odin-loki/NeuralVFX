@@ -108,8 +108,9 @@ struct VolumeConfig {
   std::array<float, 3> controls = {0.7f, 0.5f, 0.6f};  // intensity, wind (0.5 none; keep it in 0.4 to 0.8), turbulence
   std::uint64_t seed = 1;
   float shard_seconds = 8.f;              // 0: one continuous rollout
-  int threads = 1;                        // the volume's own threads, the FUSE job's included (the volume API takes no
-                                          // job system: above 1 it runs threads of its own inside that job)
+  int threads = 1;                        // the volume's own threads, the FUSE job's included (above 1 it runs threads of
+                                          // its own inside that job; nvfx_volume_create_with_jobs is not used: the volume
+                                          // steps inside a FUSE job, from which JobSystem::run may not be called, FUSE.md §9)
   bool picture = true;                    // drawn on the CPU for FUSE's camera, shown as a quad facing the camera
   bool fields = false;                    // its temperature and extinction as 3D textures (half floats) for FUSE's ray marcher
   float picture_scale = 0.5f;             // picture pixels per screen pixel

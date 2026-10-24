@@ -5,6 +5,9 @@
 // have finished. Each index must write its own outputs and read only what no other index of the same call writes; then
 // the result is the same on any number of threads, whatever order the indices run in. The workers are created by the
 // constructor (or resize()) and wait on a condition variable between calls: run() never allocates.
+//
+// Or, with set_runner(), the pool has no workers and hands every run() to an engine's fork-join job system (the volume
+// C API's job hook, nvfx_volume_create_with_jobs): the same indices, the same contract, on the engine's threads.
 #pragma once
 
 #include <algorithm>
@@ -40,14 +43,34 @@ class Pool {
     for (int t = 1; t < threads; ++t) workers_.emplace_back([this] { work(); });
   }
 
+  // An engine's job system: run(context, n, call, call_ctx) calls call(call_ctx, i) for every i in [0, n), on any
+  // threads, in any order, any number at once, and returns when all have returned.
+  using Runner = void (*)(void* context, int n, void (*call)(void* call_ctx, int i), void* call_ctx);
+
+  // Set-up only: stops the workers; every run() of two indices or more goes through `runner` (nullptr: the caller alone).
+  void set_runner(Runner runner, void* context) {
+    stop();
+    {
+      std::lock_guard lock(mutex_);
+      stopping_ = false;
+    }
+    runner_ = runner;
+    runner_ctx_ = context;
+  }
+  bool has_runner() const { return runner_ != nullptr; }
+
   template <class F>
   void run(int n, F&& fn) {
     if (n <= 0) return;
+    using Fn = std::remove_reference_t<F>;
+    if (runner_ && n > 1) {
+      runner_(runner_ctx_, n, [](void* c, int i) { (*static_cast<Fn*>(c))(i); }, const_cast<void*>(static_cast<const void*>(&fn)));
+      return;
+    }
     if (workers_.empty() || n == 1) {
       for (int i = 0; i < n; ++i) fn(i);
       return;
     }
-    using Fn = std::remove_reference_t<F>;
     {
       std::lock_guard lock(mutex_);
       call_ = [](void* c, int i) { (*static_cast<Fn*>(c))(i); };
@@ -95,6 +118,8 @@ class Pool {
   std::mutex mutex_;
   std::condition_variable wake_, done_;
   std::vector<std::jthread> workers_;
+  Runner runner_ = nullptr;
+  void* runner_ctx_ = nullptr;
   void (*call_)(void*, int) = nullptr;
   void* ctx_ = nullptr;
   int n_ = 0;

@@ -16,7 +16,9 @@
 #include <cstdlib>
 #include <cstring>
 #include <functional>
+#include <limits>
 #include <map>
+#include <memory>
 #include <sstream>
 #include <string>
 #include <thread>
@@ -26,8 +28,9 @@ namespace {
 
 using Bytes = std::vector<std::uint8_t>;
 
-// A small rollout effect: 16 x 16 coarse cells; start points with fine fields and without (grown by a warm-up).
-std::string tiny_effect(bool loop, std::uint64_t seed = 3) {
+// A small rollout effect: 16 x 16 coarse cells; start points with fine fields and without (grown by a warm-up). Named
+// "tinyloop" or "tinyshot" unless a name is given (the manager's per-effect defaults go by it, docs/REPORT.md §22.11).
+std::string tiny_effect(bool loop, std::uint64_t seed = 3, const char* name = nullptr) {
   namespace ro = nfx::rollout;
   ro::Hyper h;
   h.res = 16;
@@ -42,7 +45,7 @@ std::string tiny_effect(bool loop, std::uint64_t seed = 3) {
     h.frames = 40;
   }
   ro::Model m = ro::init_model(h, seed);
-  m.effect = loop ? "tinyloop" : "tinyshot";
+  m.effect = name ? name : loop ? "tinyloop" : "tinyshot";
   m.loop = loop;
   m.control_names = {"intensity", "wind", "turbulence"};
   m.scale = {0.2f, 0.2f, 0.4f, 0.3f};
@@ -451,6 +454,97 @@ TEST(Manager, HalfSizeLocksModelsShareAndCost) {
       EXPECT_LT(st.plan_ms, 0.3 * off_plan);
       EXPECT_GT(st.plan_ms, 0.25 * off_plan);
     }
+  }
+}
+
+// The defaults per effect (docs/REPORT.md §22.11): with the manager's half_px below 0 (nvfx_manager_desc_init's), an
+// effect's measured default goes by its name: fire, smoke, steam and explosion are drawn at half size from 256 px on
+// screen (a 256 px picture drawn at 128), magic and an effect not measured never. A model's own half_px still opts out
+// (0) or in (its own threshold) under the default; the manager's half_px 0 turns it off for every effect, and above 0 is
+// that threshold for every effect, the names aside.
+TEST(Manager, HalfSizePerEffectDefaults) {
+  const char* names[] = {"fire", "smoke", "steam", "explosion", "magic", nullptr};  // nullptr: "tinyloop", not measured
+  std::vector<std::unique_ptr<Effect>> effects;
+  for (const char* n : names) effects.push_back(std::make_unique<Effect>(tiny_effect(true, 3, n)));
+  const auto desc = [](float half_px) {  // the manager's defaults (max_size 256), but one thread and no budget
+    nvfx_manager_desc d;
+    nvfx_manager_desc_init(&d);
+    d.half_px = half_px;
+    d.threads = 1;
+    d.budget_ms = 1000.f;
+    return d;
+  };
+  const auto lean = [](float half_px = -1.f) {  // two slots a size, no proxies
+    nvfx_manager_model_desc md;
+    nvfx_manager_model_desc_init(&md);
+    md.max_sims = 2;
+    for (int& s : md.slots) s = 2;
+    md.proxy_sims = 0;
+    md.half_px = half_px;
+    return md;
+  };
+  const auto half = [](nvfx_manager* m, nvfx_handle h) {
+    nvfx_manager_picture p;
+    EXPECT_EQ(nvfx_manager_get_picture(m, h, &p), NVFX_OK);
+    EXPECT_NE(p.rgba, nullptr);
+    return std::pair{(p.flags & NVFX_PICTURE_HALF) != 0, p.lod_size};
+  };
+  // the default: by name
+  {
+    nvfx_manager_desc d;
+    nvfx_manager_desc_init(&d);
+    ASSERT_LT(d.half_px, 0.f);  // nvfx_manager_desc_init's own
+    ASSERT_EQ(d.max_size, 256);
+    d = desc(d.half_px);
+    Mgr g(d);
+    std::vector<nvfx_handle> hs;
+    for (std::size_t i = 0; i < effects.size(); ++i) {
+      int model = -1;
+      const auto md = lean();
+      ASSERT_EQ(nvfx_manager_add_model(g.m, effects[i]->fx, &md, &model), NVFX_OK);
+      hs.push_back(spawn(g.m, model, 1, 300.f));  // a 256 px picture, above the measured threshold
+      if (i == 0) hs.push_back(spawn(g.m, model, 2, 200.f));  // a fire below it: full size
+    }
+    for (int t = 0; t < 30; ++t) ASSERT_EQ(nvfx_manager_tick(g.m, 1.0 / 60.0), NVFX_OK);
+    EXPECT_EQ(half(g.m, hs[0]), std::pair(true, 128));   // fire
+    EXPECT_EQ(half(g.m, hs[1]), std::pair(false, 256));  // fire at 200 px: below 256
+    EXPECT_EQ(half(g.m, hs[2]), std::pair(true, 128));   // smoke
+    EXPECT_EQ(half(g.m, hs[3]), std::pair(true, 128));   // steam
+    EXPECT_EQ(half(g.m, hs[4]), std::pair(true, 128));   // explosion
+    EXPECT_EQ(half(g.m, hs[5]), std::pair(false, 256));  // magic: off by the rule
+    EXPECT_EQ(half(g.m, hs[6]), std::pair(false, 256));  // not measured: off
+    nvfx_manager_stats st;
+    nvfx_manager_get_stats(g.m, &st);
+    EXPECT_EQ(st.half, 4);
+  }
+  // a model's own half_px under the default: fire opted out, magic opted in with its own threshold
+  {
+    Mgr g(desc(-1.f));
+    int fire = -1, magic = -1;
+    auto md = lean(0.f);
+    ASSERT_EQ(nvfx_manager_add_model(g.m, effects[0]->fx, &md, &fire), NVFX_OK);
+    md = lean(60.f);
+    ASSERT_EQ(nvfx_manager_add_model(g.m, effects[4]->fx, &md, &magic), NVFX_OK);
+    const nvfx_handle a = spawn(g.m, fire, 1, 300.f), b = spawn(g.m, magic, 2, 300.f);
+    for (int t = 0; t < 30; ++t) ASSERT_EQ(nvfx_manager_tick(g.m, 1.0 / 60.0), NVFX_OK);
+    EXPECT_EQ(half(g.m, a), std::pair(false, 256));
+    EXPECT_EQ(half(g.m, b), std::pair(true, 128));
+  }
+  // the manager's half_px 0: off for every name; above 0: that threshold for every name
+  for (const float px : {0.f, 100.f}) {
+    Mgr g(desc(px));
+    std::vector<nvfx_handle> hs;
+    for (const int i : {0, 4, 5}) {  // fire, magic, not measured
+      int model = -1;
+      const auto md = lean();
+      ASSERT_EQ(nvfx_manager_add_model(g.m, effects[static_cast<std::size_t>(i)]->fx, &md, &model), NVFX_OK);
+      hs.push_back(spawn(g.m, model, 1, 300.f));
+    }
+    for (int t = 0; t < 30; ++t) ASSERT_EQ(nvfx_manager_tick(g.m, 1.0 / 60.0), NVFX_OK);
+    for (const nvfx_handle h : hs) EXPECT_EQ(half(g.m, h), px > 0.f ? std::pair(true, 128) : std::pair(false, 256)) << px;
+    nvfx_manager_stats st;
+    nvfx_manager_get_stats(g.m, &st);
+    EXPECT_EQ(st.half, px > 0.f ? 3 : 0);
   }
 }
 
@@ -955,12 +1049,24 @@ TEST(Manager, ApiErrors) {
   for (const auto& bad : std::vector<std::function<void(nvfx_manager_desc&)>>{
            [](nvfx_manager_desc& x) { x.half_upscale = NVFX_UPSCALE_LEARNED; },  // experimental: never the manager's
            [](nvfx_manager_desc& x) { x.half_upscale = static_cast<nvfx_upscale>(3); },
-           [](nvfx_manager_desc& x) { x.half_px = -1.f; },
            [](nvfx_manager_desc& x) { x.half_px = std::nanf(""); },
+           [](nvfx_manager_desc& x) { x.half_px = -std::numeric_limits<float>::infinity(); },
            [](nvfx_manager_desc& x) { x.half_share = -0.5f; }}) {
     nvfx_manager_desc x = small_desc();
     bad(x);
     EXPECT_EQ(nvfx_manager_create(&x, &m), NVFX_ERROR_ARGUMENT);
+  }
+  {
+    nvfx_manager_desc x;
+    nvfx_manager_desc_init(&x);
+    EXPECT_LT(x.half_px, 0.f);  // the default: each effect's measured default (REPORT.md §22.11)
+    x = small_desc();
+    x.half_px = -1.f;  // the same, given
+    EXPECT_EQ(nvfx_manager_create(&x, &m), NVFX_OK);
+    nvfx_manager_free(m);
+    x.half_px = -7.f;  // any value below 0
+    EXPECT_EQ(nvfx_manager_create(&x, &m), NVFX_OK);
+    nvfx_manager_free(m);
   }
   {
     Mgr ok(small_desc());

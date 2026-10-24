@@ -308,9 +308,11 @@ double Fluid::slab_sum(const Grid& g) const {
 }
 
 void Fluid::velocity_border() {
-  // Sides and top: outflow (the neighbour's value). Floor: closed, slip along it (u, w copied, v reflected).
+  // Sides and top: outflow (the neighbour's value). Floor: closed, slip along it (u, w copied, v reflected). A seam's
+  // row (Stack) takes the neighbour box's velocity instead.
   for (int y = 0; y <= ny_ + 1; ++y) {
     const int yc = std::clamp(y, 1, ny_);
+    const Seam* seam = y == 0 ? floor_ : y == ny_ + 1 ? top_ : nullptr;
     for (int z = 0; z <= nz_ + 1; ++z) {
       const int zc = std::clamp(z, 1, nz_);
       for (int x = 0; x <= nx_ + 1; ++x) {
@@ -320,9 +322,86 @@ void Fluid::velocity_border() {
           continue;
         }
         const int xc = std::clamp(x, 1, nx_);
+        if (seam) {
+          const std::size_t i = zu(zc - 1) * zu(nx_) + zu(xc - 1);
+          u_.at(x, y, z) = seam->u[i];
+          w_.at(x, y, z) = seam->w[i];
+          v_.at(x, y, z) = seam->v[i];
+          continue;
+        }
         u_.at(x, y, z) = u_.at(xc, yc, zc);
         w_.at(x, y, z) = w_.at(xc, yc, zc);
         v_.at(x, y, z) = y == 0 ? -v_.at(xc, 1, zc) : v_.at(xc, yc, zc);
+      }
+    }
+  }
+}
+
+void Fluid::set_floor_seam(const Seam* s) {
+  floor_ = s;
+  if (s) {
+    check_seam(*s);
+    return;
+  }
+  for (Grid* g : {&temp_, &soot_}) {  // the scalars' border row is zero again (nothing comes in through a closed floor)
+    for (int z = 0; z <= nz_ + 1; ++z) {
+      for (int x = 0; x <= nx_ + 1; ++x) g->at(x, 0, z) = 0.f;
+    }
+  }
+  velocity_border();
+}
+
+void Fluid::set_top_seam(const Seam* s) {
+  top_ = s;
+  if (s) {
+    check_seam(*s);
+    return;
+  }
+  for (Grid* g : {&temp_, &soot_}) {  // (an open top brings nothing in)
+    for (int z = 0; z <= nz_ + 1; ++z) {
+      for (int x = 0; x <= nx_ + 1; ++x) g->at(x, ny_ + 1, z) = 0.f;
+    }
+  }
+  velocity_border();
+}
+
+void Fluid::check_seam(const Seam& s) const {
+  const std::size_t n = zu(nx_) * zu(nz_);
+  if (s.u.size() != n || s.v.size() != n || s.w.size() != n || s.temp.size() != n || s.soot.size() != n) {
+    throw std::invalid_argument("sim3d: a seam of the wrong size");
+  }
+}
+
+void Fluid::seam_row(int y, Seam& out) const {
+  if (y < 0 || y >= ny_) throw std::invalid_argument("sim3d: seam row out of range");
+  const std::size_t n = zu(nx_) * zu(nz_);
+  for (std::vector<float>* f : {&out.u, &out.v, &out.w, &out.temp, &out.soot}) f->resize(n);
+  for (int z = 1; z <= nz_; ++z) {
+    for (int x = 1; x <= nx_; ++x) {
+      const std::size_t i = zu(z - 1) * zu(nx_) + zu(x - 1);
+      out.u[i] = u_.at(x, y + 1, z);
+      out.v[i] = v_.at(x, y + 1, z);
+      out.w[i] = w_.at(x, y + 1, z);
+      out.temp[i] = temp_.at(x, y + 1, z);
+      out.soot[i] = soot_.at(x, y + 1, z);
+    }
+  }
+}
+
+void Fluid::scalar_seams() {
+  // The scalars' border rows at the seams, the neighbour's heat and soot (the advection reads them: the semi-Lagrangian
+  // trace reaches half a cell into the row, the flux form's face takes the row's value when the flow comes in). The
+  // rest of the border stays zero, never written. The corners of the row take the nearest cell's value, as the
+  // velocity's border does.
+  for (const auto& [seam, y] : {std::pair{floor_, 0}, std::pair{top_, ny_ + 1}}) {
+    if (!seam) continue;
+    check_seam(*seam);
+    for (int z = 0; z <= nz_ + 1; ++z) {
+      const int zc = std::clamp(z, 1, nz_);
+      for (int x = 0; x <= nx_ + 1; ++x) {
+        const std::size_t i = zu(zc - 1) * zu(nx_) + zu(std::clamp(x, 1, nx_) - 1);
+        temp_.at(x, y, z) = seam->temp[i];
+        soot_.at(x, y, z) = seam->soot[i];
       }
     }
   }
@@ -353,6 +432,10 @@ void Fluid::step(float dt) {
     audit_->*term += after - before;
     before = after;
   };
+  if (floor_ || top_) {  // stacked (Stack): the neighbours' rows into the borders before anything reads them
+    scalar_seams();
+    velocity_border();
+  }
   add_sources(dt);
   account(&MomentumAudit::sources);
   add_forces(dt);
@@ -384,6 +467,7 @@ void Fluid::step(float dt) {
 }
 
 void Fluid::add_sources(float dt) {
+  if (!p_.source) return;  // a box without a burner (Stack's upper box)
   const float s = s_, I = p_.intensity;
   const bool fire = p_.effect == Effect::fire;
   // a round burner on the floor, in world units (128 across by default; cell x has its centre at (x - 0.5) / s)
@@ -587,6 +671,16 @@ void Fluid::advect_scalar(Grid& q, float dt) {
       for (int x = 1; x <= nx_; ++x) ta_.at(x, y, z) = q.sample(fl(x) - dt * u_.at(x, y, z), fl(y) - dt * v_.at(x, y, z), fl(z) - dt * w_.at(x, y, z));
     }
   });
+  // At a seam (Stack) the backward trace from the edge row reaches the forward field's border row, which is scratch:
+  // it takes the neighbour's value there (q's border row, the seam's), as the forward step of a row beyond the seam
+  // would give it to first order. Without it the round trip's error at the seam is the scratch's, and the correction
+  // makes material there (the fire's soot grew by a quarter in a second across a seam). Elsewhere nothing changes.
+  for (const auto& [seam, y] : {std::pair{floor_, 0}, std::pair{top_, ny_ + 1}}) {
+    if (!seam) continue;
+    for (int z = 0; z <= nz_ + 1; ++z) {
+      for (int x = 0; x <= nx_ + 1; ++x) ta_.at(x, y, z) = q.at(x, y, z);
+    }
+  }
   slabs([&](int y) {
     for (int z = 1; z <= nz_; ++z) {
       for (int x = 1; x <= nx_; ++x) tb_.at(x, y, z) = ta_.sample(fl(x) + dt * u_.at(x, y, z), fl(y) + dt * v_.at(x, y, z), fl(z) + dt * w_.at(x, y, z));
@@ -626,10 +720,13 @@ void Fluid::advect_scalar_flux(Grid& q, float dt) {
   flux_sweeps<true>(q, u_, v_, w_, dt, false, false, -1);
 }
 
-void Fluid::component_border(Grid& g, bool reflect_floor) {
-  // as velocity_border() for one component: outflow at the sides and the top, the floor reflecting v
+void Fluid::component_border(Grid& g, bool reflect_floor, int comp) {
+  // as velocity_border() for one component: outflow at the sides and the top, the floor reflecting v; a seam's row
+  // (Stack) takes the neighbour's component
   for (int y = 0; y <= ny_ + 1; ++y) {
     const int yc = std::clamp(y, 1, ny_);
+    const Seam* seam = y == 0 ? floor_ : y == ny_ + 1 ? top_ : nullptr;
+    const std::vector<float>* row = seam ? (comp == 0 ? &seam->u : comp == 1 ? &seam->v : &seam->w) : nullptr;
     for (int z = 0; z <= nz_ + 1; ++z) {
       const int zc = std::clamp(z, 1, nz_);
       for (int x = 0; x <= nx_ + 1; ++x) {
@@ -638,6 +735,10 @@ void Fluid::component_border(Grid& g, bool reflect_floor) {
           continue;
         }
         const int xc = std::clamp(x, 1, nx_);
+        if (row) {
+          g.at(x, y, z) = (*row)[zu(zc - 1) * zu(nx_) + zu(xc - 1)];
+          continue;
+        }
         g.at(x, y, z) = reflect_floor && y == 0 ? -g.at(xc, 1, zc) : g.at(xc, yc, zc);
       }
     }
@@ -683,6 +784,9 @@ void Fluid::flux_sweeps(Grid& q, const Grid& cu, const Grid& cv, const Grid& cw,
     const float h = dt / fl(sub);
     for (int s = 0; s < sub; ++s) {
       // the flux through the face between cell a (coordinate ia along the axis, 0..n) and the next
+      // (a seam's face, Stack: first order from both sides, since the box beyond it computes the same face from the one
+      // row it has of this box, so what leaves one box is what enters the other)
+      const bool seam_lo = axis == 1 && floor_ != nullptr, seam_hi = axis == 1 && top_ != nullptr;
       const auto face = [&](std::size_t a, int ia) {
         const float* qq = q.v.data();
         const float uf = 0.5f * (c.v[a] + c.v[a + st]), nu = std::abs(uf) * h;
@@ -690,17 +794,18 @@ void Fluid::flux_sweeps(Grid& q, const Grid& cu, const Grid& cv, const Grid& cw,
         if (uf >= 0.f) {
           const float d = qq[a + st] - qq[a];
           float phi = 0.f;
-          if (ia >= 1 && d != 0.f) phi = mc((qq[a] - qq[a - st]) / d);
+          if (ia >= 1 && d != 0.f && !(seam_hi && ia == n)) phi = mc((qq[a] - qq[a - st]) / d);
           qf = qq[a] + 0.5f * (1.f - nu) * phi * d;
         } else {
           const float d = qq[a] - qq[a + st];
           float phi = 0.f;
-          if (ia <= n - 1 && d != 0.f) phi = mc((qq[a + st] - qq[a + 2 * st]) / d);
+          if (ia <= n - 1 && d != 0.f && !(seam_lo && ia == 0)) phi = mc((qq[a + st] - qq[a + 2 * st]) / d);
           qf = qq[a + st] + 0.5f * (1.f - nu) * phi * d;
         }
         // a velocity component across a face where air comes in from outside, through an open side or the top: the
-        // ambient air brings none of it (the components along the face; the one through it is the inflow itself)
-        if (comp >= 0 && comp != axis && ((uf > 0.f && ia == 0 && axis != 1) || (uf < 0.f && ia == n))) qf = 0.f;
+        // ambient air brings none of it (the components along the face; the one through it is the inflow itself). At a
+        // seam (Stack) what comes in is the neighbour's air, and it brings its components (the border row holds them).
+        if (comp >= 0 && comp != axis && ((uf > 0.f && ia == 0 && axis != 1) || (uf < 0.f && ia == n && !(axis == 1 && top_)))) qf = 0.f;
         return uf * qf;
       };
       slabs([&](int y) {
@@ -742,7 +847,7 @@ void Fluid::flux_sweeps(Grid& q, const Grid& cu, const Grid& cv, const Grid& cw,
           for (int x = 1; x <= nx_; ++x) q.at(x, y, z) = ta_.at(x, y, z);
         }
       });
-      if constexpr (!Positive) component_border(q, reflect_floor);
+      if constexpr (!Positive) component_border(q, reflect_floor, comp);
     }
   }
 }
@@ -761,24 +866,10 @@ void Fluid::advect_velocity_maccormack(float dt) {
       }
     }
   });
-  // the forward fields' border as the velocity's (outflow; the floor reflects v)
-  for (Grid* g : {&ta_, &tb_, &tc_}) {
-    const bool reflect = g == &tb_;
-    for (int y = 0; y <= ny_ + 1; ++y) {
-      const int yc = std::clamp(y, 1, ny_);
-      for (int z = 0; z <= nz_ + 1; ++z) {
-        const int zc = std::clamp(z, 1, nz_);
-        for (int x = 0; x <= nx_ + 1; ++x) {
-          if (x != 0 && z != 0 && y != 0 && x != nx_ + 1 && y != ny_ + 1 && z != nz_ + 1) {
-            x = nx_;
-            continue;
-          }
-          const int xc = std::clamp(x, 1, nx_);
-          g->at(x, y, z) = reflect && y == 0 ? -g->at(xc, 1, zc) : g->at(xc, yc, zc);
-        }
-      }
-    }
-  }
+  // the forward fields' border as the velocity's (outflow; the floor reflects v; a seam's row the neighbour's)
+  component_border(ta_, false, 0);
+  component_border(tb_, true, 1);
+  component_border(tc_, false, 2);
   slabs([&](int y) {
     for (int z = 1; z <= nz_; ++z) {
       for (int x = 1; x <= nx_; ++x) {
@@ -812,6 +903,56 @@ void Fluid::advect_velocity_maccormack(float dt) {
   std::swap(v_.v, wy_.v);
   std::swap(w_.v, wz_.v);
   velocity_border();
+}
+
+// --- two boxes stacked --------------------------------------------------------------------------------------------
+
+namespace {
+
+// The seams from the boxes' state as it is: the lower box's top row (the upper's floor border) and the upper's bottom
+// row (the lower's top border), both before either box steps.
+void exchange_seams(const Fluid& lo, const Fluid& hi, Seam& lo_top, Seam& hi_floor) {
+  lo.seam_row(lo.ny() - 1, lo_top);
+  hi.seam_row(0, hi_floor);
+}
+
+}  // namespace
+
+Stack::Stack(const Params& lower, const Params& upper) : lo_(lower), hi_(upper) {
+  // (nx and nz are both Params::width; a Fluid has checked each box's own values)
+  if (lo_.nx() != hi_.nx() || lo_.nz() != hi_.nz() || lower.fps != upper.fps || lower.substeps != upper.substeps) {
+    throw std::invalid_argument("sim3d: stacked boxes need the same width, fps and substeps");
+  }
+  exchange_seams(lo_, hi_, lo_top_, hi_floor_);
+  hi_.set_floor_seam(&lo_top_);
+  lo_.set_top_seam(&hi_floor_);
+}
+
+void Stack::step_frame() {
+  // as Fluid::step_frame for both: before every solver step the seams are taken from both boxes' state as it is (a
+  // state set from outside included), then both step, so the order of the two steps does not matter
+  const float dt = 1.f / (lo_.p_.fps * fl(lo_.p_.substeps));
+  for (int s = 0; s < lo_.p_.substeps; ++s) {
+    exchange_seams(lo_, hi_, lo_top_, hi_floor_);
+    for (Fluid* f : {&lo_, &hi_}) {
+      f->steps_ = f->frame_ * f->p_.substeps + s;
+      f->step(dt);
+    }
+  }
+  ++lo_.frame_;
+  ++hi_.frame_;
+}
+
+void Stack::set_controls(float intensity, float wind, float turbulence) {
+  lo_.set_controls(intensity, wind, turbulence);
+  hi_.set_controls(intensity, wind, turbulence);
+}
+
+void Stack::fields(std::span<float> temp, std::span<float> soot) const {
+  const std::size_t n_lo = zu(lo_.nx()) * zu(lo_.ny()) * zu(lo_.nz()), n_hi = zu(hi_.nx()) * zu(hi_.ny()) * zu(hi_.nz());
+  if (temp.size() < n_lo + n_hi || soot.size() < n_lo + n_hi) throw std::invalid_argument("sim3d: field buffers too small");
+  lo_.fields(temp.first(n_lo), soot.first(n_lo));
+  hi_.fields(temp.subspan(n_lo, n_hi), soot.subspan(n_lo, n_hi));
 }
 
 }  // namespace nfx::sim3d

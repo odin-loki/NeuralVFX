@@ -32,6 +32,7 @@
 #include <atomic>
 #include <cstdint>
 #include <memory>
+#include <string_view>
 #include <thread>
 #include <vector>
 
@@ -42,10 +43,13 @@ inline constexpr std::array<int, kLevels> kSizes{32, 64, 128, 256};
 inline constexpr int kMaxDiv = 4;       // frames per keyframe: 1 to 4 (30 to 7.5 Hz at 30 fps)
 inline constexpr int kMaxControls = 8;
 inline constexpr std::int64_t kBlend = 15;  // shard crossfade frames, as nvfx.cpp
-// The default threshold of drawing at half size, pixels on screen (nvfx_manager_desc.half_px; 0: off). Off by the rule of
-// docs/REPORT.md §22 (committed before it was measured): within the margins for all seven effects, but magic cost 0.54
-// of full size, above the 0.5 allowed. 256 is the threshold measured.
-inline constexpr float kDefaultHalfPx = 0.f;
+// Drawing at half size (nvfx_manager_desc.half_px): below 0, the default, each effect's measured default by its name
+// (docs/REPORT.md §22.11): on from kHalfOnPx on screen (the threshold measured) for the effects that passed both of the
+// rule's conditions (fire, smoke, steam, explosion), off for magic (it cost 0.54 of full size, above the 0.5 allowed) and
+// for every effect not measured; 0, off for every effect; above 0, that threshold for every effect.
+inline constexpr float kDefaultHalfPx = -1.f;
+inline constexpr float kHalfOnPx = 256.f;
+bool half_default_on(std::string_view effect);
 
 int level_of_size(int size);  // -1 if not one of kSizes
 
@@ -172,6 +176,7 @@ struct Model {
   rt::Precision precision = rt::Precision::float32;  // its simulations' (study K)
   int isa = 0;                 // its runners' ISA as an index into Work::up (0 baseline, 1 AVX2, 2 AVX-512)
   float half_px = -1.f;        // nvfx_manager_model_desc.half_px: < 0 the manager's thresholds, 0 never, > 0 its own
+  bool half_default = false;   // its name's measured default is on (half_default_on; the manager's half_px below 0)
   bool half_bufs = false;      // its slots below the top level hold a 2x picture (the policy may draw it at half size)
   std::int64_t shard = 0;      // frames per shard (0: one continuous rollout)
   float step_factor = 1.f;     // steps per frame on average (the next shard's warm-up and pre-roll)

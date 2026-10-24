@@ -467,8 +467,8 @@ if(NEURALFX_BUILD_TESTS)
   neuralfx_defaults(neuralfx_manager_tests)
   gtest_discover_tests(neuralfx_manager_tests TEST_PREFIX "neuralfx." DISCOVERY_MODE PRE_TEST PROPERTIES LABELS neuralfx)
   # Study N (docs/STUDY_3D.md): the 3D simulator, the volume renderer, the 3D rollout model and its trainer, and the
-  # volume C API: their own test program.
-  add_executable(neuralfx_3d_tests tests/test_3d.cpp)
+  # volume C API: their own test program. Study R §6.1's coupled demo rule (coupled3d.hpp) is tested beside them.
+  add_executable(neuralfx_3d_tests tests/test_3d.cpp tests/test_coupled3d.cpp)
   target_link_libraries(neuralfx_3d_tests PRIVATE neuralfx_train nvfx neuralfx_dcm GTest::gtest_main)
   target_compile_definitions(neuralfx_3d_tests PRIVATE NEURALFX_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
   target_include_directories(neuralfx_3d_tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src/runtime")  # the detail layer's kernels
@@ -514,6 +514,25 @@ if(NEURALFX_BUILD_TESTS)
     set_tests_properties(neuralfx.CHostExample PROPERTIES LABELS neuralfx)
     add_test(NAME neuralfx.VolumeHostExample COMMAND nvfx_volume_host --self-test)
     set_tests_properties(neuralfx.VolumeHostExample PROPERTIES LABELS neuralfx)
+    # The 3D study tool starts and names its commands (it has no --help: with no command it prints its usage line and
+    # exits 2, so the test passes on the line, not the exit code).
+    add_test(NAME neuralfx.Volume3dToolUsage COMMAND nvfx_3d)
+    set_tests_properties(neuralfx.Volume3dToolUsage PROPERTIES LABELS neuralfx PASS_REGULAR_EXPRESSION "usage: nvfx_3d ")
+    # Study R §6.1's coupled demo end to end (docs/STUDY_R.md; videos/README.md §9c): the shipped fire and smoke
+    # (models/3d, in git) stacked through the volume C API and drawn for 15 frames at 320 x 180 into the build tree.
+    # Checks the two volumes load, step, read back and stack (the layout fault §6.1 found would throw or scramble here);
+    # it does not check the picture. The tool pipes its frames to ffmpeg, so the test is added only where ffmpeg is on
+    # the path at configure time.
+    find_program(NEURALFX_FFMPEG ffmpeg DOC "ffmpeg, which the demo video tools pipe their frames to")
+    if(NEURALFX_FFMPEG)
+      add_test(NAME neuralfx.Coupled3dVideoSmoke
+               COMMAND nvfx_3d video --study r --kind coupled --model ${CMAKE_CURRENT_SOURCE_DIR}/models/3d/fire.nvfx3
+                       --smoke ${CMAKE_CURRENT_SOURCE_DIR}/models/3d/smoke.nvfx3 --out ${CMAKE_CURRENT_BINARY_DIR}/coupled3d_smoke.mp4
+                       --seconds 0.5 --width 320 --height 180 --threads 2 --controls 0.6,0.5,0.5 --seed 29900003)
+      set_tests_properties(neuralfx.Coupled3dVideoSmoke PROPERTIES LABELS neuralfx TIMEOUT 300)
+    else()
+      message(STATUS "ffmpeg not found: neuralfx.Coupled3dVideoSmoke not added")
+    endif()
     # Study R's 3D smoke (docs/STUDY_R.md): the model frozen for its test, through the volume C API, and 10 s at three
     # winds within the edge bounds calibrated on the teacher. Needs the model (outside git): skipped when it is not in
     # the data root (NEURALVFX_DATA/r_smoke3d/models/chosen.nvfx3).
@@ -584,7 +603,7 @@ if(NEURALFX_BUILD_TESTS)
     set_tests_properties(neuralfx.LibraryCataloguePlays PROPERTIES LABELS "neuralfx;data" SKIP_RETURN_CODE 77 TIMEOUT 1800)
     add_test(NAME neuralfx.LibraryKeyframesFrozen
              COMMAND nvfx_gallery --library ${CMAKE_CURRENT_SOURCE_DIR}/library --models ${NEURALFX_MODELS_LIBRARY}
-                     --only campfire,blue_gas_flame,grenade,steam_vent,portal,lightning_strike,ground_fog,dust_impact,flamethrower,plasma_orb,dust_devil,rocket_trail,vehicle_dust_wake,wall_of_flames,distant_mushroom,rocket_launch,ink_cloud,waterfall_drawn,garden_fountain,boulder_splash,rain_shaft_drawn,fountain,rain_shaft,lava_flow,volcano_eruption,avalanche
+                     --only campfire,blue_gas_flame,grenade,steam_vent,steam_fog,portal,lightning_strike,ground_fog,dust_impact,flamethrower,plasma_orb,dust_devil,rocket_trail,vehicle_dust_wake,wall_of_flames,distant_mushroom,rocket_launch,ink_cloud,waterfall_drawn,garden_fountain,boulder_splash,rain_shaft_drawn,fountain,rain_shaft,lava_flow,volcano_eruption,avalanche,coloured_smoke_grenade
                      --keyframes ${CMAKE_CURRENT_BINARY_DIR}/library_keyframes --verify ${CMAKE_CURRENT_SOURCE_DIR}/results/library/frozen.csv --threads 2
                      --precision float --isa avx2)
     set_tests_properties(neuralfx.LibraryKeyframesFrozen PROPERTIES LABELS "neuralfx;data" SKIP_RETURN_CODE 77 TIMEOUT 1200)
@@ -607,10 +626,13 @@ if(NEURALFX_BUILD_TESTS)
     # The third round's entries (docs/LIBRARY.md §10) against their SHA-256 in results/library/frozen_round3.csv, float
     # pinned as above: the procedural ones need no data; those that also play learned models are skipped without them.
     # The procedural ones play no learned model, and the compositor gives the same bits on every ISA, so they need no
-    # --isa (and run on a CPU without AVX2 too).
+    # --isa (and run on a CPU without AVX2 too). Its one failure in a full -j 4 run (Oct 2026) was not a race: the test
+    # has its own keyframe directory, plays the entries one after another and gives the same twelve hashes under load;
+    # the CSV had been checked out with CRLF and the --verify reader compared "hash\r" with "hash" (every row
+    # DIFFERENT with identical digests). The readers now strip the \r, so no RESOURCE_LOCK is needed.
     add_test(NAME neuralfx.LibraryProceduralKeyframesFrozen
              COMMAND nvfx_gallery --library ${CMAKE_CURRENT_SOURCE_DIR}/library
-                     --only hailstorm,aurora,rainbow,meteor_shower,blood_spray,laser_beam,shield_hit,emp_blast,level_up,holy_beam,bullet_impact_metal,pickup_sparkle
+                     --only hailstorm,aurora,rainbow,meteor_shower,blood_spray,laser_beam,shield_hit,emp_blast,level_up,holy_beam,bullet_impact_metal,pickup_sparkle,drifting_snow
                      --keyframes ${CMAKE_CURRENT_BINARY_DIR}/library_procedural_keyframes --verify ${CMAKE_CURRENT_SOURCE_DIR}/results/library/frozen_round3.csv
                      --threads 2 --precision float)
     set_tests_properties(neuralfx.LibraryProceduralKeyframesFrozen PROPERTIES LABELS neuralfx TIMEOUT 1200)

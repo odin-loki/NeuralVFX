@@ -1,7 +1,8 @@
 # The effect manager: many rollout effects within a CPU budget
 
 Status: **current** (14 October 2026; the benchmark in §7 was provisional, §7.1 re-times it on a quiet machine; half size
-where it pays, §2.10 and §7.2, added 22 October 2026). Audience: dev. The C API is `include/neuralfx/nvfx_manager.h` (in libnvfx);
+where it pays, §2.10 and §7.2, added 22 October 2026; its default per effect, NVFX_MANAGER_VERSION 3, 24 October 2026).
+Audience: dev. The C API is `include/neuralfx/nvfx_manager.h` (in libnvfx);
 the code is `src/manager/`; the tools are `nvfx_crowd` (§7) and `nvfx_lod` (§5).
 
 One rollout effect playing on its own costs about 0.75 to 1.1 ms per 128 x 128 frame on one core and 2.4 MB of working
@@ -44,7 +45,9 @@ is off screen, and, when the budget is short, shows unimportant effects from a f
   runners keep only state (186 KB less each): a simulation slot is 0.5 MB at 32 px against 1.3 MB for an `nvfx_instance`.
 - **Large effects at half size** (§2.10, NVFX_VERSION 8): from `half_px` on screen a simulation is drawn at the level
   below its level and the bilinear 2x (the engine's sampler, or the manager's) brings it back; as realistic as full size
-  against the simulator for the seven effects tested, at 0.31 to 0.54 of the cost, and off by default by its rule (§6).
+  against the simulator for the seven effects tested, at 0.31 to 0.54 of the cost. The default is per effect
+  (NVFX_MANAGER_VERSION 3, REPORT.md §22.11): on from 256 px on screen for fire, smoke, steam and explosions, which
+  passed both of the rule's conditions, off for magic (0.54 of full size) and for every effect not measured (§6).
 
 ## 2. Design
 
@@ -208,6 +211,15 @@ level below its level (REPORT.md §22 measures it and sets the default):
   model can take its own threshold or opt out: `nvfx_manager_model_desc.half_px` (below 0, the default: the manager's;
   0: never for this effect; above 0: its own, in pixels). Never for proxies (they are small) or for a simulation locked
   to a level (`nvfx_manager_set_lod_lock` pins what is drawn). Both thresholds 0: off.
+- **The default per effect** (`half_px` below 0, what `nvfx_manager_desc_init` sets since NVFX_MANAGER_VERSION 3;
+  REPORT.md §22.11). The manager looks each model up by its name (`nvfx_effect_info.name`): **fire, smoke, steam and
+  explosion** are drawn at half size from **256 px** on screen (the threshold measured: with `max_size` 256, a 256 px
+  picture drawn at 128), **magic** and every name not measured never. The rule is §22.2's two conditions, read per
+  effect from the runs already made: the four passed both (cost 0.31 to 0.42 of full size, within every margin on the
+  test), magic failed the cost condition (0.54), and an effect not measured is not presumed to pass. `half_px` 0 is off
+  for every effect, above 0 that threshold for every effect, the names aside; a model's own `half_px` still comes first
+  (0 keeps a fire at full size, a positive value opts magic in). `time_crowd.sh` keeps §7's baseline at full size
+  (`--half-px 0`).
 - **Who does the 2x** (`half_upscale`). `NVFX_UPSCALE_OFF` (the default): the engine's bilinear sampler, which already
   stretches every picture to its sprite. The picture is the half-size drawing, `size` equals `lod_size` and
   `NVFX_PICTURE_HALF` is set: no CPU for the 2x and a quarter of the upload. `NVFX_UPSCALE_BILINEAR`: the manager, in the
@@ -241,7 +253,8 @@ nvfx_manager_desc d;
 nvfx_manager_desc_init(&d);              /* budget 4 ms, 1 thread, crossfade, sizes 32-256 px, 30 Hz */
 d.threads = 2;
 d.budget_ms = 6.f;                       /* CPU ms per tick, summed over threads */
-d.half_px = 256.f;                       /* effects at least 256 px on screen drawn at half size (§2.10; 0: never) */
+d.half_px = 256.f;                       /* every effect at least 256 px on screen drawn at half size (§2.10; 0: never;
+                                            the default, below 0: fire, smoke, steam and explosions from 256 px, §6) */
 nvfx_manager* m;
 nvfx_manager_create(&d, &m);
 
@@ -269,7 +282,7 @@ if (pic.rgba && (pic.flags & NVFX_PICTURE_NEW)) upload(pic.rgba, pic.size, pic.s
 
 | what | calls |
 |---|---|
-| create | `nvfx_manager_desc_init`, `nvfx_manager_create`, `nvfx_manager_free`; drawn at half size: `half_px`, `half_share`, `half_upscale` (§2.10) |
+| create | `nvfx_manager_desc_init`, `nvfx_manager_create`, `nvfx_manager_free`; drawn at half size: `half_px` (below 0, the default: per effect by name; 0: never; above 0: a threshold for every effect), `half_share`, `half_upscale` (§2.10) |
 | effects | `nvfx_manager_model_desc_init` (`half_px`: an effect's own threshold for half size, or 0: never), `nvfx_manager_add_model` (rollout effects; the effect outlives the manager), `nvfx_manager_set_cost`, `nvfx_manager_get_cost`, `nvfx_manager_calibrate` |
 | the view | `nvfx_manager_set_camera` (position, forward, up, vertical field of view, viewport in pixels), `nvfx_manager_set_budget` |
 | instances | `nvfx_spawn_desc_init`, `nvfx_manager_spawn` (model, controls, seed, share, time offset, proxies allowed, priority, position and world size or on-screen size), `nvfx_manager_stop`, `nvfx_manager_set_controls` (in place for a simulation of its own; a shared one forks with a copy of the state, no restart), `nvfx_manager_set_position`, `nvfx_manager_set_screen_size`, `nvfx_manager_set_priority`, `nvfx_manager_set_lod_lock` |
@@ -293,8 +306,10 @@ picture stays valid until the next tick; handles of stopped instances are never 
   stretched to the sprite: pictures are 32 to 256 px whatever the sprite's size.
 - **Sizes.** `world_size` is the sprite's extent in world units; with `set_screen_size` the engine gives the on-screen
   size itself (and visibility) instead. `texel_scale` below 1 trades sharpness for CPU at every distance.
-- **Half size** (§2.10). Large effects are drawn at the level below theirs from `half_px` pixels on screen (the default
-  is in §6): set `half_px` (and `half_share`, a fraction of the viewport's height, for a threshold that scales with the
+- **Half size** (§2.10). Large effects are drawn at the level below theirs from `half_px` pixels on screen. The default
+  (`half_px` below 0, §6) is per effect: fires, smoke, steam and explosions at least 256 px on screen are drawn at 128
+  and come to the engine as 128 px pictures with `NVFX_PICTURE_HALF`; other effects are not. For one threshold for every
+  effect set `half_px` (and `half_share`, a fraction of the viewport's height, for a threshold that scales with the
   resolution) before `nvfx_manager_create`; `half_px = 0` and `half_share = 0` turn it off; per effect,
   `nvfx_manager_model_desc.half_px = 0` keeps an effect at full size and a positive value gives it its own threshold; a
   hero effect locked with `nvfx_manager_set_lod_lock` is never drawn at half size. With the default `half_upscale`
@@ -462,14 +477,35 @@ The defaults that follow:
   keyframes (offsets spread over 1.7 s between the copies).
 - **Budget** 4 ms per tick, one thread; **burst** 1.5; **fade** 8 frames; **pause** off screen, **park** after 1 s,
   **cull** after 30 s.
-- **Half size off** (`half_px` 0, `half_share` 0; §2.10). The rule committed before it was measured (REPORT.md §22.2)
-  asked, for each of seven effects, that drawing at half size cost at most 0.5 of drawing at full size at 256 px and stay
-  within the null's margins of it against the simulator. Six cost 0.31 to 0.42 of full size, but magic 0.54 (its
-  full-size frame is cheap, so the coarse step weighs more; REPORT.md §22.4, provisional), so it is not on by default.
-  Set `half_px` (256 is the threshold measured) to have it: with no budget it took a close-up scene's tick from 17.1 to
-  15.2 ms (§7.2), and with a budget the planner runs more simulations of their own instead. On the held-out test it
-  stayed within the null's margins of full size against the simulator for all seven effects, closer on tracking at 1 s
-  (+0.22 to +0.89 dB), and lost the finest filaments against full size (REPORT.md §22.6).
+- **Half size per effect** (`half_px` −1, `half_share` 0; §2.10, REPORT.md §22.11). The rule committed before it was
+  measured (REPORT.md §22.2) asked, for each of seven effects, that drawing at half size cost at most 0.5 of drawing at
+  full size at 256 px and stay within the null's margins of it against the simulator. On the held-out test every one
+  stayed within the margins, closer on tracking at 1 s (+0.22 to +0.89 dB), and lost the finest filaments against full
+  size (REPORT.md §22.6); six cost 0.31 to 0.42 of full size, but magic 0.54 (its full-size frame is cheap, so the coarse
+  step weighs more; REPORT.md §22.4, provisional). So the all-or-nothing default stayed off at NVFX_MANAGER_VERSION 2,
+  and since version 3 the default is read per effect from the same runs: **on from 256 px** (the threshold measured) for
+  **fire, smoke, steam and explosion**, by the model's name; **off for magic** and for every effect not measured. With no
+  budget it took a close-up scene's tick from 17.1 to 15.2 ms (§7.2), and with a budget the planner runs more
+  simulations of their own instead. `half_px` 0 turns it off for every effect (the version 2 pictures); a positive value
+  is one threshold for every effect; `nvfx_manager_model_desc.half_px` opts a model out (0) or in (its own threshold).
+- **Why `dust` is not among them yet.** `half_default_on` (`src/manager/manager.cpp`) names the four effects above and
+  no other. Dust is a rollout effect (study M3's, a one-shot like the explosion; EFFECTS_ATMOSPHERE.md §9), so
+  `nvfx_manager_add_model` takes it, but nothing has measured it at half size: it was not one of REPORT.md §22.2's
+  seven models (the crowd's four and the library's fire, explosion and magic), so there is no H / N cost ratio for it
+  in §22.4 and no quality test in §22.6; and neither of `nvfx_crowd`'s scenes plays it (the crowd and the close scene,
+  so `time_crowd.sh`, `time_halfsize.sh` and `time_half_128.sh`, are fire, smoke, steam and explosions), so there are no
+  crowd or `time_half_128` figures with dust in them either. By §22.11's third condition an effect not measured is
+  off: study P found two of six models the rule had not measured (the wildfire's and the waterfall's motion at 256 px)
+  past their margins, so passing is not presumed from kin (the explosion, the other one-shot, passed at 0.40). The one
+  figure near it does not count: the 14 October quiet re-timing (EFFECTS_ATMOSPHERE.md §5) has dust at 1.05 ms per
+  frame at 128 px and 2.66 at 256 (0.39), but that was round 5's dust, before M3's replaced it, timed as whole instances
+  in separate runs rather than the rule's interleaved H / N of the model that ships. What admits it: the rule's two
+  runs on dust (`nvfx_study_p cost --net none --sizes 256` and `eval --split val --null`, then `margins`, `decide` and
+  `eval --split test --settings 20`, once, with `--effects dust`, a frozen copy of the model and a seed block of their
+  own), H / N at most 0.5 and every test interval within its margin; then its name joins `half_default_on` and §22.11's
+  table. A timing with dust large on screen (a close scene with it, or `time_half_128.sh` with it added) would show the
+  saving but does not decide. Until then an engine opts it in with `nvfx_manager_model_desc.half_px` (256), at its own
+  risk.
 
 ## 7. The crowd benchmark (provisional)
 
@@ -484,7 +520,11 @@ proxies per effect). CPU is the process's CPU time per tick (every thread), wall
 interleaved rounds per configuration with pinned cores (`tools/manager/time_crowd.sh build OUT 3 20`; every run in
 results/manager/crowd_timing_runs_provisional.csv, the summary in crowd_timing_summary_provisional.csv); the median of
 the three rounds, with the least and greatest in brackets. The planner's figures (plan, simulations, proxied) were the same
-in every round: the plan does not depend on timing. Re-time on a quiet machine with the same script.
+in every round: the plan does not depend on timing. Re-time on a quiet machine with the same script. Every run here is
+drawn at full size: the script passes `--half-px 0`, so the baseline stays what it was before the per-effect default
+(NVFX_MANAGER_VERSION 3, §2.10) turned half size on for the crowd's four effects; §7.2 times it on, and
+`tools/manager/time_half_128.sh` is §7.2's quick quiet re-timing (off and on, the no-budget rows, a load check before
+each round).
 
 | configuration | CPU per tick, mean | CPU p99 | wall, median | wall p99 | plan | simulations (paused) | proxied | memory (resident) |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|
@@ -566,7 +606,9 @@ three rounds, least and greatest in brackets:
 camera walking at 0.6 m/s, an explosion every 1.5 s; seed 35,095,001; four 256 px slots per effect, as an engine that
 plays large effects would size that pool). Three arms: **off** (`half_px` 0), **on** (`half_px` 256, `half_upscale` OFF:
 the engine's sampler does the 2x) and **cpu2x** (`half_px` 256, BILINEAR), back to back in each of ten rounds, their
-order rotated; the default costs, so the plans are the same in every round. **Provisional**: run after the round-7 quiet
+order rotated; the default costs, so the plans are the same in every round. (The arms name their thresholds, so the
+per-effect default of NVFX_MANAGER_VERSION 3 does not change them; the crowd's four effects are the four that default
+to on, so **on** is what an engine that sets nothing gets now, and §7's baseline keeps `--half-px 0`.) **Provisional**: run after the round-7 quiet
 session while other agents' jobs ran (load average 6 to 20). Medians over the rounds, each arm against off round by
 round, with 95% bootstrap intervals ([ab_summary.txt](../results/manager/halfsize/ab_summary.txt), every run in
 `ab_runs.csv`):
@@ -593,6 +635,36 @@ costs are float's on AVX2 and the runs play int8 on AVX-512, §7.1.)
   only one 256 px slot by default), so its plans hardly change and the CPU ties within the noise.
 - **The 2x on the CPU** (cpu2x) costs a little more than letting the engine's sampler do it, as expected; it is there
   for engines that want every picture at its level's size.
+- **Re-timed, 24 October** ([results/manager/half_128/ab_summary.txt](../results/manager/half_128/ab_summary.txt),
+  every run in `runs.csv`, the load at each round's start in `load.txt`). `tools/manager/time_half_128.sh build OUT 5 10`
+  is the quick form: the two no-budget rows above (the close scene and the crowd on four threads, where the saving shows
+  directly), off and on only, their order swapped each round, each round started only when the one-minute load average
+  is at most `MAX_LOAD` (default 1.0), `nvfx_crowd --ab` for the medians and intervals; `CORES` names the four cores
+  (the default `0,1,2,3` is the project's machine); `MAX_SIZE=128` times the level not measured, 128 px pictures drawn
+  at 64 (REPORT.md §22.9). It ran on a 64-core Xeon Gold 6242 (`CORES=60,61,62,63`, the four models staged from
+  `models/2d` into a scratch `NEURALVFX_DATA`: v2's fire and explosion from `models/2d/v2`, smoke and steam from
+  `models/2d`) with other agents' tests running elsewhere on the machine: `MAX_LOAD=8`,
+  the load at the five starts 6.1 to 7.7 over 64 cores (about 0.1 per core, below the default's 0.25 on four), so the
+  machine was quieter per core than the default asks but not idle. **Close scene, no budget, four threads:** CPU per
+  tick 21.20 ms off, 18.50 ms on, **0.881 [0.870, 0.919]**, 2.49 ms [1.71, 2.78] less per tick, with 4.7 simulations
+  drawn at half size and the planner's estimate 23.1 → 19.2 ms; the same 34.1 simulations in both arms, none proxied;
+  the median tick 0.894 [0.889, 0.923], the p99 0.881 [0.872, 1.024]. **Crowd, no budget, four threads:** 19.84 ms
+  off, 19.98 ms on, **1.003 [0.986, 1.009]** (median tick 0.999 [0.987, 1.017]), 0.5 simulation drawn at half size
+  (1.6 simulations at 256 px, the only candidates; the provisional run had 1.3 drawn at half size), the planner's
+  estimate 21.1 → 20.6 ms, 69.3 simulations and 67.3 proxied in both arms. The close scene's saving holds (0.881 against
+  the provisional 0.886); the crowd's provisional 0.978 does not reproduce, it ties, with half a simulation drawn at half
+  size. The two no-budget rows are no longer provisional; the budgeted rows remain so (`time_halfsize.sh`). The
+  absolute times are this machine's and are not comparable with the table's (the close scene's off arm 21.2 ms here
+  against 17.1 there); only the ratios carry over. **A second run** five minutes later, same machine, cores, data root
+  and settings ([run2/ab_summary.txt](../results/manager/half_128/run2/ab_summary.txt), `run2/runs.csv`,
+  `run2/load.txt`; load at the starts 3.2 then 6.6 to 7.0): the close scene 20.47 ms off, 17.39 ms on, **0.886 [0.850,
+  0.955]**, 2.17 ms [1.27, 3.08] less (median tick 0.893 [0.858, 0.984], p99 0.881 [0.830, 0.948]); the crowd 19.13 ms
+  off, 18.96 ms on, **0.991 [0.975, 1.278]** (median tick 0.987 [0.968, 1.263]); the plans identical to the first run's
+  (4.70 and 0.52 simulations drawn at half size). The intervals are wider because round 1 was disturbed (both arms of
+  the close scene 27 to 28 ms and the crowd's on arm 26 ms, other agents' jobs starting as the one-minute load rose from
+  3.2 to 6.6; rounds 2 to 5 alone give the close scene 0.850 to 0.896 and the crowd 0.975 to 0.992). The close scene's
+  saving reproduces (0.881, 0.886, and the provisional 0.886); the crowd sits between 0.98 and 1.00 in every run, a tie
+  within the noise of half a simulation drawn at half size.
 
 ## 8. Limits
 
@@ -621,7 +693,9 @@ costs are float's on AVX2 and the runs play int8 on AVX-512, §7.1.)
   (below about 147 px) or a smaller `max_size` it also draws 128 px pictures at 64, which was not measured. A simulation
   drawn at half size loses the finest filaments its detail layer draws at full size (study P); the simulator's frames
   have none of them, so they are checked against nothing. Switching it on or off is a level transfer: the detail layer
-  starts from a resampled field (above).
+  starts from a resampled field (above). The default per effect goes by the model's name alone (§2.10): a model trained
+  under a measured name (`fire`, `smoke`, `steam`, `explosion`) takes the default whether or not it was among the models
+  measured; a model under any other name (dust, §6) is left at full size until it is measured and passes.
 - **Not done:** colour (hue, brightness) per instance, the prior against drift, frame models (grid and conv effects;
   `nvfx_manager_add_model` refuses them), GPU-side interpolation (the API returns composed pictures only).
 
@@ -634,9 +708,10 @@ build/nvfx_alloc_test                               # 0 allocations, the manager
 build/nvfx_lod val --threads 3                      # §5.3: results/manager/lod_val.csv, lod_val_summary.md (12 min, 3 threads)
 build/nvfx_lod test --threads 3                     # §5.4, once
 build/nvfx_lod sheet --effect fire --size 64 --div 4                 # $NEURALVFX_DATA/scale/figures
-tools/manager/time_crowd.sh build /tmp/crowd 3 20   # §7: every configuration, 3 interleaved rounds, pinned cores
+tools/manager/time_crowd.sh build /tmp/crowd 3 20   # §7: every configuration, 3 interleaved rounds, pinned cores, half size off
 build/nvfx_crowd --budget 4 --video $NEURALVFX_DATA/scale/crowd/crowd_b4.mp4 --sheet $NEURALVFX_DATA/scale/crowd
 tools/manager/time_halfsize.sh build /tmp/halfsize 10 20   # §7.2: half size off and on, the crowd and the close scene
+MAX_LOAD=1.0 tools/manager/time_half_128.sh build /tmp/half128 5 10   # §7.2's quick quiet re-timing: the no-budget rows, off and on (MAX_SIZE=128: 128 px drawn at 64)
 ```
 
 Half size's quality and cost (REPORT.md §22; the jobs `$NEURALVFX_DATA/halfsize/jobs`): `nvfx_study_p eval --split val

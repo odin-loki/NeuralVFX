@@ -12,6 +12,11 @@
 // flux form too (Params::velocity 2), which conserves momentum as the scalars' flux form conserves heat and soot. The
 // fire, study N's smoke and smoke_r are unchanged to the bit.
 //
+// Stack (docs/STUDY_R.md §6.1's coupled fire and smoke as a simulation): two boxes of the same width and depth, one
+// above the other, exchanging heat, soot and velocity through the seam between them. Each box is a Fluid whose border
+// row at the seam holds the neighbour's edge row (a Seam) instead of its own open-top or closed-floor condition; a box
+// with no seams is the single box, to the bit.
+//
 // Solver: collocated grid with a one-cell border; semi-Lagrangian advection (trilinear) for the velocity and a clamped
 // MacCormack correction for the scalars (or flux form, Params::scalars); buoyancy from temperature against soot weight; vorticity confinement; a seeded
 // 3D curl-noise force (noise4.hpp, shared with the learned model); combustion expansion (a divergence source where the
@@ -80,7 +85,16 @@ struct Params {
   // the plain force pushes down on the whole, docs/STUDY_R2.md §1.2), 2 off (for the diagnosis).
   int confinement = -1;
   float confinement_sigma = 8.f;
+  // Whether the box has its burner on the floor. Off for a box fed only through a seam (Stack's upper box): what it
+  // carries is what comes in from below.
+  bool source = true;
   std::array<float, 3> controls() const { return {intensity, wind, turbulence}; }
+};
+
+// One row of a box's fields over its (x, z) plane, nx * nz values indexed z * nx + x: what a neighbour box's border
+// row holds at a seam (Stack). The velocity is in cells per second, as the solver's.
+struct Seam {
+  std::vector<float> u, v, w, temp, soot;
 };
 
 // The noise constants of an effect (the flicker's rate differs, as in 2D).
@@ -141,7 +155,18 @@ class Fluid {
   // pressure (velocity times cells) over the step's dt, so its gradient is an acceleration.
   void pressure(std::span<float> out) const;
 
+  // Seams (Stack). A seam given here (not owned; nullptr takes it away) is read at the start of every solver step: its
+  // row becomes the box's border row at that end, where the floor's closed, slipping condition or the top's outflow
+  // would be, so the advection carries the neighbour's heat, soot and velocity in across the seam and the projection
+  // sees the neighbour's velocity through it. The pressure is each box's own (p = 0 beyond a top seam as beyond an open
+  // top, the floor's Neumann condition beyond a floor seam). The seam must hold nx * nz values in every field.
+  void set_floor_seam(const Seam* s);
+  void set_top_seam(const Seam* s);
+  // The box's own row y (0-based, as State's rows) copied into `out`: the other box's seam.
+  void seam_row(int y, Seam& out) const;
+
  private:
+  friend class Stack;
   struct Grid {
     int nx = 0, ny = 0, nz = 0;
     std::size_t stride_z = 0, stride_y = 0;
@@ -167,12 +192,16 @@ class Fluid {
   // face fluxes.
   template <bool Positive>
   void flux_sweeps(Grid& q, const Grid& cu, const Grid& cv, const Grid& cw, float dt, bool reflect_floor, bool audit_faces, int comp);
-  void component_border(Grid& g, bool reflect_floor);
+  // The border of one velocity component (comp 0, 1, 2: u, v, w) as velocity_border() sets it: outflow at the sides and
+  // the top, the floor reflecting it when reflect_floor, a seam's row the neighbour's component.
+  void component_border(Grid& g, bool reflect_floor, int comp);
   double slab_sum(const Grid& g) const;  // the audit's slab: the sum of g over its cells (fixed order)
   int velocity_mode() const;
   int confinement_mode() const;
   void neutral_confinement(float conf);  // Params::confinement 1: the force into fcx_, fcy_, fcz_
   void velocity_border();
+  void scalar_seams();  // the scalars' border rows at the seams (the neighbours' heat and soot)
+  void check_seam(const Seam& s) const;  // throws unless every field has nx * nz values
   template <class F>
   void slabs(F&& fn);  // fn(y) for y = 1..ny on the pool
 
@@ -191,6 +220,36 @@ class Fluid {
   std::unique_ptr<Pool> pool_;
   MomentumAudit* audit_ = nullptr;
   std::vector<std::array<double, 4>> audit_rows_;  // per padded row: the forces' terms (buoyancy, confinement, curl, damping)
+  const Seam* floor_ = nullptr;  // the seams (not owned): the border rows they fill, nullptr for the single box's
+  const Seam* top_ = nullptr;
+};
+
+// Two boxes one above the other, coupled through the seam between them (docs/STUDY_R.md §6.1: the fire below, its smoke
+// above). Every solver step, the lower box's top row is copied into the upper box's floor border and the upper's
+// bottom row into the lower's top border, both from the state before the step, so the two boxes see each other's
+// heat, soot and velocity (two-way: a downflow in the upper box comes back down) and the order of the two steps does
+// not matter. What is exchanged is what the advection carries across the seam's faces; the pressure solve stays each
+// box's own, so the coupling is of the carried quantities, not one solve over both boxes. The lower box's floor, the
+// upper's top and both boxes' sides are the single box's. The upper box has no burner unless its Params say so. Both
+// boxes need the same width, fps and substeps. Deterministic as each box is.
+class Stack {
+ public:
+  Stack(const Params& lower, const Params& upper);
+  void step_frame();  // one output frame of both boxes
+  void set_controls(float intensity, float wind, float turbulence);  // both boxes' controls
+  Fluid& lower() { return lo_; }
+  Fluid& upper() { return hi_; }
+  const Fluid& lower() const { return lo_; }
+  const Fluid& upper() const { return hi_; }
+  int frame_index() const { return lo_.frame_index(); }
+  float time() const { return lo_.time(); }
+  // Both boxes' temperature and soot as one volume of nx * (ny_lower + ny_upper) * nz cells, indexed as a Fluid's
+  // fields are, the lower box's rows first.
+  void fields(std::span<float> temp, std::span<float> soot) const;
+
+ private:
+  Fluid lo_, hi_;
+  Seam lo_top_, hi_floor_;  // the lower box's top row (the upper's floor border) and the upper's bottom row (the lower's top border)
 };
 
 }  // namespace nfx::sim3d

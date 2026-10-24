@@ -2117,7 +2117,7 @@ at round 6's speed (12.4 to 13.9 ms, and medians of 12.6 to 12.7).
   instead of 4; the half-size instance 0.29 to 0.38 of native. The verdict stands.
 - **The 3D steps**: N2's fire 21.0 ms a step on one thread and 9.0 on four (70 and 23 before the detail layer ran on
   vectors), a 256 x 256 picture 56 and 14 ms; study R's smoke 21.4 and 9.2 ms (26.6 and 9.0); study hres's fire 239 and
-  64 ms, its 32 x 48 x 32 coarse step alone 192 ms (STUDY_3D.md §14.12, STUDY_R.md §4, STUDY_3D_HRES.md §8).
+  64 ms, its 32 x 48 x 32 coarse step alone 192 ms (STUDY_3D.md §14.12, STUDY_R.md §4, §15's hres addendum).
 - **Scenes and the FUSE demo**, all far lower (by 30 to 78% for the scenes), as multi-threaded work on the busy machine
   waited for cores: on 2 threads the volcano 14.1 ms a frame on average (20), the crypt 10.2 (19 at float, 28 at int8),
   the forest edge 19.0, the coast 17.3 (51), the weather day 16.4 (76), the lift-off 19.8 (46 to 50); the FUSE demo 600
@@ -3384,6 +3384,48 @@ its own play), snapshot at every stage, and chosen on tracking *and* endless pla
   with the detail layer on vectors (§19; round 7 of the quiet re-timing, §13.11): a step 21.0 ms on one thread and 9.0
   on four, a 256 x 256 picture 56 and 14 ms, a start 0.55 and 0.22 s (STUDY_3D.md §14.12).
 
+**Study hres, an addendum: a finer coarse state** (trained and validated 23 October 2026, its test judged 24 October;
+[STUDY_3D_HRES.md](STUDY_3D_HRES.md); tables in `results/3d/hres/`). Study N2's recipe with the coarse state doubled
+to **32 x 48 x 32** (fine = 2, the same 64 x 96 x 64 detail), a 32-wide stepper and 8 memory channels: 40 runs at 8 s
+and 24 at 18 s with N2's mix of changing controls, seeds 9.60 to 9.87 million inside study N's block, 1750 iterations
+on the CPU (the smoke on the CUDA trainer). The rule, committed before validation, is N2's with the one change the
+lesson above asked for: **the edge bounds are calibrated on four teacher runs per wind** (twice the largest side heat
+over the four plus 4, a side growing if its late mean over 20 to 30 s is above twice the early mean plus 2;
+`fire/edge_calibration.md`; a leave-one-out check raised none of them), never read off one run.
+- **Validation chose C2** (stage 2's snapshot): C2 and C4 pass the edge check and track within 0.5 dB of the best at
+  1 s, and C2 ranks first on every endless statistic (`fire/choose_val.md`); C3 fails (at a wind of 0.75 its upwind
+  side grows to 14.8 against a bound of 4.0).
+- **On the test, run once on the frozen file** (`fire/frozen.csv`; six held-out settings, fresh seeds; paired
+  bootstrap, 95%): against the coarse simulation with the same detail, tracking at 1 s +1.29 dB [+0.98, +1.60] in
+  temperature, +4.84 dB in soot and +1.69 dB [+1.07, +2.32] in pictures; played on, better in the 3D spectrum (0.183
+  against 0.460) and motion (|ln motion ratio| 0.105 against 0.420: a motion ratio of 0.99 where N2's fire sits at
+  0.66), ties in coverage, emission and the mean picture (+1.73 dB [-0.29, +3.87]). Against study N2's C4 on endless
+  play: the mean picture +2.20 dB [+1.28, +3.14], the spectrum and motion better, coverage and emission ties
+  (`fire/compare_test_learned_vs_coarse.md`, `compare_test_learned_vs_N2.md`).
+- **Its test edge check passes at every wind and side, as does N2's** (`fire/edgecheck_test.md`). The test step ran
+  on 22 October, before the bounds existed, and judged against one simulated run per wind (N2's rule) it had marked
+  two winds as runaway: 0.50 at x = 0 (its largest 3.43 over 5 to 30 s where the one run held 0.01) and 0.95 at z = 0
+  (2.36 against 0.17). Against the calibrated bounds those sides sit at 3.43 under 4.95 and 2.36 under 4.73 (0.69 and
+  0.50 of their bounds), no side exceeds its bound and none grows from the early window to the late; the most heat
+  held anywhere, 52.1 at x = 0 for a wind of 0.05, is under a bound of 115.8 where the teacher's own runs hold 47 to
+  56. `tools/study_3d/hres_fire_recheck_test_edges.sh` rebuilt the table from the same `edge_test*.csv` with no model
+  or simulation rerun and kept the single-run table as `edgecheck_test_single.md`. **So the hres fire meets its rule
+  on validation and on its one test.** Shipped as `models/3d/fire_hres.nvfx3` (C1 to C4 in `fire/models/`); videos
+  in [videos/README.md](../videos/README.md) §9.
+- **The tables' way home.** The 22 October validate run was a snapshot copy of the script under the data root (an
+  edit mid-run had corrupted the running copy) and wrote the test tables under `$NEURALVFX_DATA/hres_3d/results/`;
+  they are in `results/3d/hres/fire/` since 24 October. `tools/study_3d/hres_sync_fire_test_results.sh` copies back
+  any the repo lacks (never over the repo's own without `FORCE=1`), and `hres_status.sh` reports them present and
+  whether the edge check is the calibrated one.
+- **Smoke** (study N's smoke preset as the teacher, N2's smoke2 lineage; by its rule an edge check and a demo, no
+  held-out test): **fails** at winds 0.50, 0.75 and 0.95 against single-run bounds, heat building at the x = 0 side
+  over 20 to 30 s where the simulation holds none (1.15, 2.69 and 4.87; the top too at 0.95), as the 16³ smoke2 fails
+  at four winds (`smoke/edgecheck.md`). A labelled demo, `models/3d/smoke_hres.nvfx3`; its failure is the one study
+  R2's edge and spread losses are aimed at (STUDY_3D_HRES.md §8), and the finer smoke is to be tried again on
+  `smoke_r2` once R2 reports.
+- **Cost** (a quiet machine, round 7 of the re-timing, §13.11): a step 239 ms on one thread and 64 on four, the
+  32 x 48 x 32 coarse step alone 192 ms: about eleven times N2's step for eight times the coarse cells.
+
 ## 16. Study O: the most visible flaws of the shipped effects, fixed and measured
 
 **Status: finished** (15 October 2026; paused once by the owner's usage limit and resumed). Fixed and judged by eye,
@@ -4002,8 +4044,20 @@ members by name) and counts flashes with a rule (`nvfx_scene_rule_state`). On a 
 **The day scene** (`examples/scenes/weather_day.nvfxs`, 40 s at 1280 x 720, `videos/scene_weather_day.mp4`): clear,
 clouding over, rain, the gust front and a thunderstorm (six flashes, hail), clearing in reverse and a rainbow. By eye the
 order reads; the weak points are the rain's look at the near scale (long, bright, slanted: what near drops in a strong
-wind do, but heavier-looking than the rate), the cloud masses being puffs in a band rather than a deck, a flat dark storm
-sky, no wet ground and no trees for the Beaufort forces 5 to 9 (WEATHER.md §7).
+wind do, but heavier-looking than the rate), the cloud masses still puffs in a band in front of the deck layer, a flat
+dark storm sky, rain without rings on the puddles, and no trees for the Beaufort forces 5 to 9 (WEATHER.md §7).
+
+**The deck, the wet ground and the trees** (24 October 2026; [WEATHER.md](WEATHER.md) §3.6, §3.12, §3.15;
+[COMPOSE.md](COMPOSE.md) §4.11, §5.4). Members in the state, keys on `frame` where a scene wires them (each 0 by
+default, so no earlier frame moves):
+- `sky.deck` / `frame deck`: how much of the sky is a layer rather than scattered puffs (0 below four oktas, 1 by six).
+  `sky.foot` / `frame foot`: where Koschmieder haze hides the underside, `arcsin(min(1, base / visibility))`. Drawn in
+  `compose.cpp` (§5.4; `deck_drift` not built). `examples/scenes/weather_day.nvfxs` wires all four frame keys to
+  `sky.*`; `ScriptedWeatherDayFrozen` must be refrozen on a machine with the models.
+- `sky.wet` / `frame wet`, `sky.puddle` / `frame puddle`: the depression storage and Penman's drying (§3.12); drawn in
+  the ground rows (§4.11).
+- `sky.trees`: sway by the Beaufort force, a smoothstep from force 4 to 7 (`WeatherRelations.TheBeaufortScale`); still
+  a hook only, no layer bends by it yet (`nvfx_scene_get_input(scene, "sky.trees")` in an engine).
 
 **Cost.** A director step is about 1 microsecond (one core of the shared machine at a load of 17); the layers cost what
 they cost without it; no allocation per frame (`nvfx_alloc_test`: every regime, every layer it drives, scripted and
@@ -4440,10 +4494,13 @@ effect at the level below its level and let the bilinear 2x bring it back (`half
 sampler does the 2x by default, the manager's own on request; the learned 2x never). On the held-out test it stays within
 the null's margins of drawing at full size against the simulator on every measure for all seven effects measured, and
 is closer to the simulator than full size on tracking at 1 s (+0.22 to +0.89 dB); it costs 0.31 to 0.42 of full size
-for six of them but 0.54 for magic, above the 0.5 the rule allowed, so **by its rule it does not ship on by default**:
-`half_px` is 0, and an engine sets it (per model too). With no budget it took a close-up scene's tick from 17.1 to 15.2
-ms; with a budget the planner spends the saving on more simulations of their own (provisional timings: other agents'
-load). This section's design and rule (§22.1 to §22.3)
+for six of them but 0.54 for magic, above the 0.5 the rule allowed, so **by its rule it does not ship on for every
+effect**: the all-or-nothing default stayed off. **Since NVFX_MANAGER_VERSION 3 the default is per effect** (§22.11,
+24 October 2026): `half_px` below 0 (the new default) draws fire, smoke, steam and explosions at half size from 256 px
+on screen, by the model's name, and magic and every effect not measured at full size; an engine still sets it (0 off
+everywhere, above 0 a threshold for every effect, per model too). With no budget it took a close-up scene's tick from
+17.1 to 15.2 ms; with a budget the planner spends the saving on more simulations of their own (provisional timings:
+other agents' load). This section's design and rule (§22.1 to §22.3)
 were committed before any validation, test or timing number (cdc6933); the rule's numbers (the margins) before the
 test (b925b7a), which ran once. Seeds: this work's block, 35,000,000 to 35,099,999. Data under the data root's `halfsize` (the
 frozen models `crowd/models` and `library/models`, the cache, the markers, the logs); tables under
@@ -4629,7 +4686,8 @@ Both are needed, so **the policy ships off by default**: `nvfx_manager_desc_init
 and nothing an engine does today changes (the planner's decisions, the pictures and the memory are main's with it off:
 the 2x pictures and upscalers are made only when a threshold is set, and every manager test that ran before passes
 unchanged). An engine that wants it sets `half_px` (256 is the threshold measured), or `half_share`, and can leave magic,
-or any effect, at full size with `nvfx_manager_model_desc.half_px = 0` (ENGINES.md §10, FUSE.md §5).
+or any effect, at full size with `nvfx_manager_model_desc.half_px = 0` (ENGINES.md §10, FUSE.md §5). That was the
+choice at NVFX_MANAGER_VERSION 2; §22.11 replaces the all-or-nothing default with one per effect from the same numbers.
 
 ### 22.8 The benchmarks (provisional)
 
@@ -4642,22 +4700,51 @@ simulations of their own instead of 13.2 and shows 22.0 instances from proxies i
 of the CPU (within the budget); the crowd's plans hardly change (each effect has one 256 px slot by default, and few of
 its effects are 256 px on screen) and its CPU per tick ties within the noise. One run in 210 (the crowd at 16 ms on four
 threads) hung at its first tick: a race in the manager's worker start (main's code, not this work's), fixed here
-(831bdb5: a worker starts from epoch 0); the run was killed and run again.
+(831bdb5: a worker starts from epoch 0); the run was killed and run again. **Provisional until re-timed on a quiet
+machine**: the quick form is `tools/manager/time_half_128.sh build OUT 5 10` (MANAGER.md §7.2, §9): the two no-budget
+rows, off and on only, their order swapped each round, each round started only when the one-minute load average is at
+most `MAX_LOAD` (default 1.0, logged to `OUT/load.txt`), `nvfx_crowd --ab` for the medians and intervals, about 3.5
+minutes; `MAX_SIZE=128` times the level §22.9 lists as not measured. **Re-timed on 24 October**
+([results/manager/half_128/ab_summary.txt](../results/manager/half_128/ab_summary.txt), `runs.csv`, `load.txt`): five
+rounds of 10 s on four cores of a 64-core Xeon Gold 6242 (`CORES=60,61,62,63`; the four models staged from `models/2d`
+into a scratch data root: v2's fire and explosion from `models/2d/v2`, smoke and steam from `models/2d`), other agents'
+tests running elsewhere on the machine, `MAX_LOAD=8`, the load at the five
+starts 6.1 to 7.7 over 64 cores (about 0.1 per core, below the default's 0.25 on four cores, so quieter per core than
+asked but not idle). The close scene with no budget on four threads: CPU per tick 21.20 ms off, 18.50 ms on, **0.881
+[0.870, 0.919]**, 2.49 ms [1.71, 2.78] less, 4.7 simulations drawn at half size, the planner's estimate 23.1 → 19.2
+ms, the same 34.1 simulations in both arms; the median tick 0.894 [0.889, 0.923]. The crowd with no budget on four
+threads: 19.84 ms off, 19.98 ms on, **1.003 [0.986, 1.009]** (median 0.999 [0.987, 1.017]), 0.5 simulation drawn at
+half size (1.6 at 256 px, the only candidates), 69.3 simulations and 67.3 proxied in both arms. The close scene's
+saving holds (0.886 provisional, 0.881 here); the crowd's provisional 0.978 does not reproduce: it ties, almost nothing
+in the crowd being drawn at half size. Those two rows are no longer provisional; the budgeted rows still need
+`time_halfsize.sh`. The absolute times are this machine's (the close scene's off arm 21.2 ms against the table's 17.1);
+only the ratios carry over. A second run five minutes later, same settings
+([run2/ab_summary.txt](../results/manager/half_128/run2/ab_summary.txt), `run2/runs.csv`, `run2/load.txt`; the load
+at the starts 3.2 then 6.6 to 7.0): the close scene 20.47 ms off, 17.39 ms on, **0.886 [0.850, 0.955]** (median tick
+0.893 [0.858, 0.984]); the crowd 19.13 ms off, 18.96 ms on, **0.991 [0.975, 1.278]** (median 0.987 [0.968, 1.263]);
+the same plans (4.70 and 0.52 simulations drawn at half size). Round 1 was disturbed (both arms of the close scene 27
+to 28 ms, the crowd's on arm 26 ms, other agents' jobs starting as the load rose from 3.2 to 6.6), which widens the
+intervals; rounds 2 to 5 alone give the close scene 0.850 to 0.896 and the crowd 0.975 to 0.992. The close scene's
+saving reproduces (0.881, 0.886, the provisional 0.886); the crowd is between 0.98 and 1.00 in every run, a tie.
 
 ### 22.9 What it means, and what is left
 
 - **For an engine:** large effects at half size are as realistic as at full size against the simulator, cost a third to
   a half, and lose the finest filaments; the manager does it from a threshold on screen, with no CPU for the 2x (the
-  engine's sampler) and no change to how pictures are drawn. It is off by default because one effect of seven, magic,
-  saved less than the rule asked (0.54 of full size: its cheap full-size frame leaves the fixed coarse step a larger
-  share).
+  engine's sampler) and no change to how pictures are drawn. The all-or-nothing default stayed off because one effect
+  of seven, magic, saved less than the rule asked (0.54 of full size: its cheap full-size frame leaves the fixed coarse
+  step a larger share); since NVFX_MANAGER_VERSION 3 the default is per effect (§22.11): on for fire, smoke, steam and
+  explosions, off for magic and for every effect not measured.
 - **Not measured:** 128 px pictures drawn at 64 (a threshold below about 147 px or a smaller `max_size` switches them);
   the 26 other library models (study P measured six more at 256 px: four within its margins, the wildfire's and the
-  waterfall's motion intervals past them); the timings on a quiet machine (every timing here is provisional).
-- **Left (TODO.md, Next):** re-time the rule's cost and the benchmarks on a quiet machine (`jobs/timing.sh`; the rule's
-  verdict stands on its own run); a per-effect default (on for the effects measured that passed both conditions, off for
-  magic) would need its own rule; the 256 px pool (one slot per effect by default) limits what the policy can switch in a
-  crowd.
+  waterfall's motion intervals past them); the timings on a quiet machine (every timing here is provisional except the
+  two no-budget rows re-timed in §22.8).
+- **Left (TODO.md, Next):** re-time the rule's cost and the budgeted benchmarks on a quiet machine (`jobs/timing.sh`; the rule's
+  verdict stands on its own run; the quick form of the A/B, the two no-budget rows off and on with a load check before
+  each round, is `tools/manager/time_half_128.sh`, MANAGER.md §7.2, run on 24 October (§22.8: the close scene 0.881,
+  the crowd 1.003), and `MAX_SIZE=128` makes it time 128 px pictures drawn at 64, not yet run); the per-effect default is done (§22.11: on for the effects measured that passed both
+  conditions, off for magic and for effects not measured); the 256 px pool (one slot per effect by default) limits what
+  the policy can switch in a crowd.
 
 ### 22.10 Checks
 
@@ -4669,6 +4756,52 @@ skipped (main's 547 and the manager's seven new tests: `HalfSizeIsNvfxRenderWith
 test's new sizes); `nvfx_alloc_test` (no allocation per frame, the manager with half size on, with the 2x and without, on
 its threads and the engine's); `nvfx_gallery --check --require-models` (234 effects, 234 played, 0 failed); the Godot
 test (`engines/godot/test.sh`: the fireball and the library stage, 0 failures each). README's test count is 554.
+
+### 22.11 The default per effect (the rule, applied to the runs already made; NVFX_MANAGER_VERSION 3)
+
+§22.9 left a default per effect to its own rule. **The rule** (24 October 2026; committed with this section, before the
+code): the manager's default is decided per effect, by the only identity of a model the manager can see, its name
+(`nvfx_effect_info.name`, `RolloutModel::effect`, set at training from the simulator's effect name), from §22.2's two
+conditions applied to §22.2's runs as they were made and frozen (the cost run of §22.4, which decided; the test of §22.6,
+which ran once). **No new run decides**: a per-effect rule needs no number this section's runs did not already give,
+and running the test again would spend its one shot.
+
+1. **On** (`half_px` 256, the threshold measured, `half_upscale` OFF) for a name if every model measured under that
+   name passed both conditions: the cost condition (H / N at most 0.5 in §22.4) and the quality condition (every (b)
+   measure's interval within the effect's margin in §22.6).
+2. **Off** for a name if any model measured under it failed either condition.
+3. **Off** for every name not measured: study P's finding that two of its six other models at 256 px (the wildfire's and
+   the waterfall's motion) fell past their margins says an unmeasured effect cannot be presumed to pass.
+
+Where one name covers two models (the two fires, v2's and study M's; the two explosions, v2's and study M3's) both must
+pass: the manager cannot tell them apart. **Applied:**
+
+| name | models measured | H / N (§22.4) | quality (§22.6) | default |
+|---|---|---:|---|---|
+| `fire` | v2 (the crowd's), study M (the library's) | 0.313, 0.337 | within every margin, both | **on, 256 px** |
+| `smoke` | v2 | 0.419 | within every margin | **on, 256 px** |
+| `steam` | study D | 0.332 | within every margin | **on, 256 px** |
+| `explosion` | v2, study M3 | 0.403, 0.385 | within every margin, both | **on, 256 px** |
+| `magic` | study L | **0.543** (the quiet cross-check 0.528) | within every margin | **off** (condition 2) |
+| any other name | none | | | **off** (condition 3) |
+
+**The API.** `nvfx_manager_desc.half_px` gains a third state, mirroring `nvfx_manager_model_desc.half_px`'s: below 0
+(**the new default, −1**), each effect's measured default as above; 0, off for every effect; above 0, that threshold for
+every effect, the names aside (so a manager set up with `half_px` 256 or 100 behaves as before). `half_share` is unchanged
+(a threshold that scales with the viewport, either suffices). A model's own `nvfx_manager_model_desc.half_px` still
+decides first: 0 keeps an effect at full size under the default, a positive value gives it its own threshold (an engine
+can opt magic in at its own risk). `NVFX_MANAGER_VERSION` 3; no struct changed, so NVFX_VERSION does not move for it (it
+is 9 since `nvfx_profile`, for other reasons) and the ABI test stays as it is. `tools/manager/time_crowd.sh` passes `--half-px 0`, so MANAGER.md §7's baseline stays drawn at full
+size, as it was timed; `time_halfsize.sh` already names its arms. What changes for an engine that calls
+`nvfx_manager_desc_init` and sets nothing: its fires, smoke, steam and explosions that are at least 256 px on screen are
+drawn at 128 and shown through its sampler (the picture is 128 px, `NVFX_PICTURE_HALF`); everything else is as before.
+The FUSE adapter's `SpriteConfig::half_px` below 0 passes the manager's default through, so its demo's fire, smoke and
+explosions take it and its magic does not.
+
+**Checks**: `Manager.HalfSizePerEffectDefaults` (fire, smoke, steam and explosion drawn at 128 from 300 px on screen
+and at 256 from 200 px, magic and an effect named neither at 256; a model's 0 and 60 under the default; the manager's 0
+and 100 for every name); `Manager.ApiErrors` takes `half_px` −1 (and −7) and refuses NaN and −∞. Every other manager
+test sets its threshold and passes unchanged.
 
 ## 23. Study Q2: study Q's leftovers
 

@@ -94,6 +94,18 @@ C++23, no third-party runtime dependencies, a C API for engines, no Python.
   continues what footage shows (`nvfx_estimate`); validated on simulated renders only.
 - **Viewer:** [docs/VIEWER.md](docs/VIEWER.md).
 
+## Stage 2: the 3D effects on the PC
+
+Stage 2 of [TODO.md](TODO.md) (every effect in 3D at high resolution) is planned in
+[docs/PLAN_PC_GPU.md](docs/PLAN_PC_GPU.md): the PC's GPU simulating, training and playing each effect at a
+64 x 96 x 64 learned state with 256 x 384 x 256 detail, 5 to 9 hours an effect, one command each, after each family's
+teacher has passed its physical checks. [docs/WAVE1_CHECKLIST.md](docs/WAVE1_CHECKLIST.md) is the per-effect ledger
+for its first wave (the tier 1 effects): row by row, what exists in this repository today, what the PC still owes and
+which scripts and numbers cover it. Nothing on the PC has started. The working tree of 24 October 2026 (the manager's
+half-size default per effect, volume jobs, the coupled 3D fire and smoke, the weather director's moist air, wet ground,
+sun and cloud deck, new library entries, the studies' job scripts and these two documents) is not yet committed;
+[COMMIT_PLAN.md](COMMIT_PLAN.md) lays it out commit by commit.
+
 ## Results in brief
 
 From [docs/REPORT.md](docs/REPORT.md), measured on simulated fire, smoke and explosions at 128 x 128 on one AVX2 core:
@@ -139,8 +151,9 @@ From [docs/REPORT.md](docs/REPORT.md), measured on simulated fire, smoke and exp
   §17.4). Both ship as an experimental opt-in (`nvfx_instance_set_upscale`, NVFX_VERSION 7). **The effect manager**
   draws large sprites at half size by their size on screen (`nvfx_manager_desc.half_px`, NVFX_VERSION 8, REPORT §22):
   on 20 held-out settings it stays within the null's margins of full size against the simulator for all seven effects
-  measured at 256 px, but magic saves too little (0.54 of full size against the 0.5 its rule asked), so it is off by
-  default.
+  measured at 256 px, but magic saves too little (0.54 of full size against the 0.5 its rule asked), so the default is
+  per effect (NVFX_MANAGER_VERSION 3, REPORT §22.11): on from 256 px on screen for fire, smoke, steam and explosions,
+  off for magic and for effects not measured.
 - **Memory, against production block compression:** for equal quality, a network per effect clip needs **2.4 to
   4.3 times less memory than a BC7 flipbook** at 8 bits, and 7.5 times less [4.2, 8.3] with features trained for 4
   bits. **Against ASTC** (mobile GPUs; 8x8 to 12x12 blocks hold every frame at full size in 121 to 256 KB) the ratios
@@ -263,7 +276,7 @@ training, evaluation; about three hours), then `d-timing` on an idle machine and
 | `nvfx_viewer` | live viewer with sliders; `--scene FILE` edits a scene script live |
 | `nvfx_fireball` | a scene of composed effects written in C++ (a fireball with smoke, fires and embers) to video, with a profile of every stage |
 | `nvfx_scene_script` | plays a scene script (`examples/scenes/*.nvfxs`) to video, keyframes and a sheet; `--check` and `--print` check and reformat a script; `--verify` compares keyframes with frozen SHA-256 |
-| `nvfx_crowd` | the effect manager's benchmark: a battlefield of fires, smoke, steam, torches and explosions at a budget, timed per tick, with the levels used, memory, a video and contact sheets; `--unmanaged` plays every instance with `nvfx.h` alone; `tools/manager/time_crowd.sh` re-times it ([docs/MANAGER.md](docs/MANAGER.md) §7) |
+| `nvfx_crowd` | the effect manager's benchmark: a battlefield of fires, smoke, steam, torches and explosions at a budget, timed per tick, with the levels used, memory, a video and contact sheets; `--unmanaged` plays every instance with `nvfx.h` alone; `tools/manager/time_crowd.sh` re-times it ([docs/MANAGER.md](docs/MANAGER.md) §7); `--scene close` is the close-up scene, `--ab` the half-size A/B's summary, and `tools/manager/time_half_128.sh` its quick quiet re-timing with a load check before each round (§7.2) |
 | `nvfx_lod` | the quality of the manager's levels of detail against full-rate, full-resolution playback: `val`, `test`, `sheet` ([docs/MANAGER.md](docs/MANAGER.md) §5) |
 | `nvfx_dcm` | context mixing: `selftest` runs a small synthetic mixer search under both objectives (ROC-AUC and Laplace bits); `version FILE` prints the SHA-256 version of a serialised mixer; DCM-fine (G1): `record`, `experts`, `search-fine` (with `--pilot`), `train-fine`, `eval-fine`, `bench-experts`, `fine-summary`; the coarse-state denoiser (G2): `ddpm-train`, `ddpm-sample`, `ddpm-time`, `contexts` |
 | `nvfx_prior` | the runtime's prior against drift (docs/DCM.md G2.13): `parity` (study G's test run through the reference and the runtime, bit by bit), `pass` (one denoiser pass per ISA), `time` (frame cost with and without the prior, and of shards: mean, p99, worst) |
@@ -291,6 +304,13 @@ training, evaluation; about three hours), then `d-timing` on an idle machine and
 | `tests/` | GoogleTest suites, the allocation test, the C host self-test (the viewer's tests are in `viewer/`) |
 | `docs/` | plan, report, composed effects, footage, engines, data, viewer, figures |
 | `results/` | small text results (CSVs and generated summaries); no images, clips or weights |
+
+## Licence
+
+Copyright (C) 2026 odin-loki
+
+NeuralVFX is free software: you can redistribute it and/or modify it under the terms of the
+[GNU Affero General Public License](LICENSE) version 3 or (at your option) any later version.
 
 ## Rules
 

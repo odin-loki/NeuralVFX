@@ -25,7 +25,10 @@
 extern "C" {
 #endif
 
-#define NVFX_MANAGER_VERSION 2 /* 2: drawn at half size where it pays (half_px, half_share, half_upscale; NVFX_VERSION 8) */
+/* 2: drawn at half size where it pays (half_px, half_share, half_upscale; NVFX_VERSION 8); 3: half_px below 0 (the
+   default): each effect's measured default (on at 256 px for fire, smoke, steam and explosion; off for magic and effects
+   not measured; docs/REPORT.md §22.11; no struct changed) */
+#define NVFX_MANAGER_VERSION 3
 
 typedef struct nvfx_manager nvfx_manager;
 typedef uint32_t nvfx_handle; /* an instance; 0 is never a valid handle, and a stopped instance's handle is not reused */
@@ -67,7 +70,12 @@ typedef struct nvfx_manager_desc {
      and the bilinear 2x brings it back (half_upscale). Once on, it stays on until the size falls below the threshold by
      `hysteresis`; turning it off is an upward change (it waits for the budget and min_dwell). Simulations locked to a
      level (nvfx_manager_set_lod_lock) and proxies are never drawn at half size; a model can take its own threshold
-     (nvfx_manager_model_desc.half_px). Both 0: never. Defaults: docs/MANAGER.md §2.10. */
+     (nvfx_manager_model_desc.half_px).
+     half_px below 0 (the default, -1): each effect's measured default, by the model's name (nvfx_effect_info.name;
+     REPORT.md §22.11): fire, smoke, steam and explosion from 256 px on screen (the threshold measured; they passed the
+     rule's quality and cost conditions), magic (it cost 0.54 of full size, above the 0.5 allowed) and every effect not
+     measured never. 0: never, for every effect. Above 0: that threshold, for every effect. half_share 0: not used.
+     Both half_px and half_share 0: never. Defaults: docs/MANAGER.md §2.10. */
   float half_px;
   float half_share;
   nvfx_upscale half_upscale; /* who does the bilinear 2x. NVFX_UPSCALE_OFF (default): the engine's sampler: the picture is
@@ -105,8 +113,10 @@ typedef struct nvfx_manager_model_desc {
                          NVFX_PRECISION_INT8: the stepper's convolutions in 8-bit integers, docs/REPORT.md §13). The
                          planner's default costs are float's: nvfx_manager_calibrate measures the model as it runs */
   float half_px;      /* drawn at half size where it pays (nvfx_manager_desc.half_px): below 0 (default -1), the
-                         manager's thresholds; 0, never for this effect; above 0, this effect's own threshold in pixels on
-                         screen (the manager's half_share is then not used for it) */
+                         manager's thresholds (with the manager's half_px below 0 too, this effect's measured default by
+                         its name: on at 256 px for fire, smoke, steam and explosion, off for the rest); 0, never for
+                         this effect; above 0, this effect's own threshold in pixels on screen (the manager's half_share
+                         is then not used for it) */
 } nvfx_manager_model_desc;
 
 NVFX_API void nvfx_manager_model_desc_init(nvfx_manager_model_desc* desc);

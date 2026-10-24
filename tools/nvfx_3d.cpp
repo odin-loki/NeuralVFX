@@ -2,7 +2,8 @@
 // training, validation and the test (once), demo videos and timing. Every step writes under --root (default
 // $NEURALVFX_DATA/n_3d, else /root/nvfx-data/n_3d) and resumes from what it has written. `--study n2` selects study
 // N2's seeds, held-out settings, data root (n2_3d) and edges (ambient air at the open sides; STUDY_3D.md §14).
-// `--study hres` (alias `n3`) is the finer coarse grid (32 x 48 x 32, fine 2; docs/STUDY_3D_HRES.md).
+// `--study hres` (alias `n3`) is the finer coarse grid (32 x 48 x 32, fine 2; docs/STUDY_3D_HRES.md); with it `--effect`
+// picks the lineage and its seed blocks: fire (9,600,000 + i), smoke (9,610,000 + i) or smoke_r2 (9,630,000 + i, §10).
 //
 //   nvfx_3d pilot  --widths 48,64,80 --seconds 12 --seeds 2       cost per frame, plume rise and puffing at each grid
 //   nvfx_3d look   --width 64 --frames 150 --out DIR               stills of the simulation from the four cameras
@@ -15,7 +16,7 @@
 //   nvfx_3d play   --split S --method NAME [--model F]              endless statistics of a model's plays, or coarse
 //   nvfx_3d compare --split S --a NAME --b NAME                     paired differences with 95% bootstrap intervals
 //   nvfx_3d freeze --model F                                        the model the test runs on (results/3d/frozen.csv)
-//   nvfx_3d video  --kind orbit|wind|real-vs-learned --out F.mp4    demo videos (videos/README.md)
+//   nvfx_3d video  --kind orbit|wind|real-vs-learned|coupled|coupled-sim --out F.mp4    demo videos (videos/README.md)
 //   nvfx_3d timing --threads 1,2,4                                  ms per step and per picture (results/3d/timing.csv)
 //   nvfx_3d edge   --controls I,W,T                                 the heat at the box's sides as the model plays (the runaway)
 //   nvfx_3d edge   --winds 0.05,0.25,0.5,0.75,0.95 --seconds 30 --out F.csv [--sim]   study N2's edge check (§14)
@@ -26,6 +27,7 @@
 #include "label_font.hpp"
 #include "plume3d.hpp"
 
+#include <neuralfx/coupled3d.hpp>
 #include <neuralfx/image_io.hpp>
 #include <neuralfx/metrics.hpp>
 #include <neuralfx/nvfx_volume.h>
@@ -140,18 +142,33 @@ constexpr std::uint64_t kHresSmokeTestTrack = 9'865'000, kHresSmokeTestReal = 9'
 constexpr std::uint64_t kHresSmokeInit = 9'610'100;
 constexpr std::uint64_t kHresSmokeTrainer = 9'610'000;
 constexpr std::uint64_t kHresSmokeLongTrain = 9'621'000;
+// smoke_r2 at hres (STUDY_3D_HRES.md §8 and §10): study R2's teacher (momentum fixed) on the finer coarse grid, trained with
+// the spread and edge losses; its own blocks, unused until now inside study N's range (--effect smoke_r2 with --study hres)
+constexpr std::uint64_t kHresR2Train = 9'630'000, kHresR2LongTrain = 9'631'000;  // the 240-frame runs; the 540-frame runs
+constexpr std::uint64_t kHresR2Init = 9'630'100, kHresR2Trainer = 9'630'000;
+constexpr std::uint64_t kHresR2Cal = 9'633'000;  // the edge bounds' teacher runs: + 100 j + k (j the wind, k the run)
+constexpr std::uint64_t kHresR2ValTrack = 9'660'000, kHresR2ValReal = 9'661'000, kHresR2ValPlay = 9'662'000;
+constexpr std::uint64_t kHresR2TestTrack = 9'870'000, kHresR2TestReal = 9'871'000, kHresR2TestPlay = 9'872'000;
 
-bool hres_smoke(const Args& a) {
+// Study hres's lineages by --effect: fire (the default), smoke (study N's preset, §6) or smoke_r2 (study R2's teacher,
+// §10); each has its own seed blocks above. Study R's smoke_r is not one of them.
+nfx::sim3d::Effect hres_effect(const Args& a) {
   nfx::sim3d::Effect e = nfx::sim3d::Effect::fire;
-  if (!nfx::sim3d::parse_effect(a.str("effect", "fire"), e)) throw std::invalid_argument("--effect fire|smoke");
-  return e == nfx::sim3d::Effect::smoke;
+  if (!nfx::sim3d::parse_effect(a.str("effect", "fire"), e) || e == nfx::sim3d::Effect::smoke_r) throw std::invalid_argument("--effect fire|smoke|smoke_r2 (study hres)");
+  return e;
 }
+bool hres_smoke(const Args& a) {  // the smoke lineages (study N's smoke and smoke_r2): smoke optics, the smoke's seeds
+  const auto e = hres_effect(a);
+  return e == nfx::sim3d::Effect::smoke || e == nfx::sim3d::Effect::smoke_r2;
+}
+bool hres_r2(const Args& a) { return hres_effect(a) == nfx::sim3d::Effect::smoke_r2; }
 
 std::uint64_t hres_train_base(const Args& a) {
   if (a.has("seed-base")) return a.u64("seed-base", 0);
-  const bool smoke = hres_smoke(a);
-  if (a.str("runs-dir", "train") == "long") return smoke ? kHresSmokeLongTrain : kHresLongTrain;
-  return smoke ? kHresSmokeTrain : kHresTrain;
+  const auto e = hres_effect(a);
+  const bool r2 = e == nfx::sim3d::Effect::smoke_r2, smoke = e == nfx::sim3d::Effect::smoke;
+  if (a.str("runs-dir", "train") == "long") return r2 ? kHresR2LongTrain : smoke ? kHresSmokeLongTrain : kHresLongTrain;
+  return r2 ? kHresR2Train : smoke ? kHresSmokeTrain : kHresTrain;
 }
 constexpr std::uint64_t kFloor = 50;  // the floor's real runs: the real base + 50 + 100 s + k
 // study R (docs/STUDY_R.md): its own range, 29,000,000 to 29,999,999
@@ -173,9 +190,10 @@ constexpr std::array<int, 3> kHorizons{8, 30, 60};
 constexpr int kEndlessWarm = 150, kEndlessFrames = 240;
 constexpr int kPic = 128;  // the four cameras' pictures for the measures
 constexpr float kPeakT = 1.5f, kPeakD = 0.2f;
-// study R's smoke: its source's heat is at most 0.45 and its soot 1.2 (STUDY_R.md §2.6)
-float peak_t() { return g_r ? 0.5f : kPeakT; }
-float peak_d() { return g_r ? 1.2f : kPeakD; }
+// study R's smoke: its source's heat is at most 0.45 and its soot 1.2 (STUDY_R.md §2.6); the same source for smoke_r2 at hres
+bool plume_peaks() { return g_r || (g_hres && nfx::sim3d::plume_smoke(g_effect)); }
+float peak_t() { return plume_peaks() ? 0.5f : kPeakT; }
+float peak_d() { return plume_peaks() ? 1.2f : kPeakD; }
 
 r3::Hyper study_hyper() {
   r3::Hyper h;
@@ -334,6 +352,11 @@ std::uint64_t base_of(const std::string& split, const std::string& what, bool sm
     return t ? kRTestPlay : kRValPlay;
   }
   if (g_hres) {
+    if (g_effect == nfx::sim3d::Effect::smoke_r2) {  // smoke_r2 at hres (§10): its own blocks
+      if (what == "track") return t ? kHresR2TestTrack : kHresR2ValTrack;
+      if (what == "real") return t ? kHresR2TestReal : kHresR2ValReal;
+      return t ? kHresR2TestPlay : kHresR2ValPlay;
+    }
     if (what == "track") return t ? (smoke ? kHresSmokeTestTrack : kHresTestTrack) : (smoke ? kHresSmokeValTrack : kHresValTrack);
     if (what == "real") return t ? (smoke ? kHresSmokeTestReal : kHresTestReal) : (smoke ? kHresSmokeValReal : kHresValReal);
     return t ? (smoke ? kHresSmokeTestPlay : kHresTestPlay) : (smoke ? kHresSmokeValPlay : kHresValPlay);
@@ -728,7 +751,7 @@ r3::Model fresh_model(nfx::sim3d::Effect e = nfx::sim3d::Effect::fire) {
   std::uint64_t init_seed = 9'000'777;
   if (g_r2) init_seed = 34'100'777;
   else if (g_r) init_seed = 29'100'777;
-  else if (g_hres) init_seed = e == nfx::sim3d::Effect::smoke ? kHresSmokeInit : kHresFireInit;
+  else if (g_hres) init_seed = e == nfx::sim3d::Effect::smoke_r2 ? kHresR2Init : e == nfx::sim3d::Effect::smoke ? kHresSmokeInit : kHresFireInit;
   else if (g_n2) init_seed = 9'200'777;
   r3::Model m = r3::init_model(study_hyper(), init_seed);
   m.edges = n2_recipe() || g_r ? r3::Edges::ambient : r3::Edges::clamp;  // study N clamped; N2, hres and R bring ambient air in (§14)
@@ -746,7 +769,7 @@ r3::TrainOptions train_options(const Args& a) {
     o.finetune = a.i("finetune", 350);
     o.activity_stage = a.i("activity", 250);
     o.long_stage = a.i("long", 250);
-    o.seed = a.u64("seed", hres_smoke(a) ? kHresSmokeTrainer : kHresFireTrainer);
+    o.seed = a.u64("seed", hres_r2(a) ? kHresR2Trainer : hres_smoke(a) ? kHresSmokeTrainer : kHresFireTrainer);
   } else {
     o.iterations = a.i("iterations", 1500);
     o.finetune = a.i("finetune", 600);
@@ -1527,7 +1550,8 @@ int video(const Args& a) {
   std::array<float, 3> c{cs.at(0), cs.at(1), cs.at(2)};
   const std::uint64_t seed = a.u64("seed", 9'900'000);
   const std::string title = a.str("title", "LEARNED 3D FIRE");  // the orbit's caption
-  const std::string grid_line = a.has("subtitle") ? a.str("subtitle") : volume_grid_caption(model);
+  // (coupled-sim runs the solver alone: no model to caption)
+  const std::string grid_line = a.has("subtitle") ? a.str("subtitle") : kind == "coupled-sim" ? std::string() : volume_grid_caption(model);
   // the volume's shard length in seconds (the runtime's default 8; 0: one continuous rollout), and for --kind wind a
   // wind held instead of the sweep (study N2's figure of the edges)
   const float shard = a.f("shard", 8.f);
@@ -1665,7 +1689,7 @@ int video(const Args& a) {
     std::vector<float> T1(n1), D1(n1), V1(3 * n1), T2(n2), D2(n2), T(n1 + n2), D(n1 + n2);
     rd::Renderer rend(nx, ny1 + ny2, nz, rd::optics_for("fire3d"));
     nfx::Pool pool(threads);
-    double flux_s = 0, flux_ref = 0;
+    nfx::coupled3d::FluxDrive drive;  // the rule, shared with the tests (coupled3d.hpp)
     float smoke_i = a.f("smoke-intensity", 0.6f);
     for (int f = 0; f < frames; ++f) {
       const float t = static_cast<float>(f) / 30.f, u = t / seconds;
@@ -1682,29 +1706,11 @@ int video(const Args& a) {
       // the volume API's textures run z slowest ((z * ny + y) * nx + x, nvfx_volume.h), the renderer's fields y slowest
       // ((y * nz + z) * nx + x, render3d.hpp): the soot's flux is summed over the fire's top four layers in the API's
       // order, and each field is turned into the renderer's order before the two boxes are stacked in y
-      double flux = 0;
-      for (int z = 0; z < nz; ++z) {
-        for (int y = ny1 - 4; y < ny1; ++y) {
-          for (int x = 0; x < nx; ++x) {
-            const std::size_t i = (zu(z) * zu(ny1) + zu(y)) * zu(nx) + zu(x);
-            flux += static_cast<double>(D1[i]) * std::max(0.f, V1[3 * i + 1]);
-          }
-        }
-      }
-      flux_s = f == 0 ? flux : flux_s + (flux - flux_s) / 30.0;  // smoothed over about a second
-      flux_ref += (flux - flux_ref) / static_cast<double>(f + 1);  // the running mean since the start
-      if (t >= 1.f) smoke_i = static_cast<float>(std::clamp(a.f("smoke-intensity", 0.6f) * flux_s / std::max(1e-9, flux_ref), 0.05, 1.0));
-      const auto rows = [&](const std::vector<float>& src, int ny, float* dst) {
-        for (int z = 0; z < nz; ++z) {
-          for (int y = 0; y < ny; ++y) {
-            for (int x = 0; x < nx; ++x) dst[(zu(y) * zu(nz) + zu(z)) * zu(nx) + zu(x)] = src[(zu(z) * zu(ny) + zu(y)) * zu(nx) + zu(x)];
-          }
-        }
-      };
-      rows(T1, ny1, T.data());
-      rows(D1, ny1, D.data());
+      smoke_i = drive.update(nfx::coupled3d::top_soot_flux(D1, V1, nx, ny1, nz, 4), a.f("smoke-intensity", 0.6f), 30.0, t);
+      nfx::coupled3d::rows_to_renderer(T1, nx, ny1, nz, T.data());
+      nfx::coupled3d::rows_to_renderer(D1, nx, ny1, nz, D.data());
       std::fill(T.begin() + static_cast<std::ptrdiff_t>(n1), T.end(), 0.f);
-      rows(D2, ny2, D.data() + n1);
+      nfx::coupled3d::rows_to_renderer(D2, nx, ny2, nz, D.data() + n1);
       rend.prepare(T, D, &pool);
       const float az = 0.35f * std::numbers::pi_v<float> * std::sin(2.f * std::numbers::pi_v<float> * u);
       const View view{{4.9f * std::sin(az), 1.35f, 4.9f * std::cos(az)}, {0.f, 1.42f, 0.f}, {0.f, 1.f, 0.f}, 40.f};
@@ -1718,8 +1724,47 @@ int video(const Args& a) {
       vid.put(cv);
       if (f % 60 == 0) std::println("  frame {} ({:.0f} s)", f, now() - t0);
     }
+  } else if (kind == "coupled-sim") {
+    // The coupled simulation (docs/STUDY_R.md §6.1; sim3d.hpp's Stack), not the learned volumes: the fire's solver in
+    // the lower box and study R's smoke's above it with no burner of its own (--upper names another effect), the two
+    // exchanging heat, soot and velocity through the seam every solver step. Drawn as one 64 x 192 x 64 volume with
+    // the fire's optics, the upper box's heat left out of the picture (warm smoke does not glow). The fire's intensity
+    // sweeps as --kind coupled's does; --warm frames run before the first picture.
+    nfx::sim3d::Params lo = fine_params(c, seed, threads), hi = lo;
+    lo.effect = nfx::sim3d::Effect::fire;
+    if (!nfx::sim3d::parse_effect(a.str("upper", "smoke_r"), hi.effect)) throw std::invalid_argument("--upper: fire | smoke | smoke_r | smoke_r2");
+    hi.source = false;
+    hi.seed = seed + 1;
+    nfx::sim3d::Stack st(lo, hi);
+    const int nx = st.lower().nx(), ny1 = st.lower().ny(), ny2 = st.upper().ny(), nz = st.lower().nz();
+    const std::size_t n1 = zu(nx) * zu(ny1) * zu(nz), n2 = zu(nx) * zu(ny2) * zu(nz);
+    std::vector<float> T(n1 + n2), D(n1 + n2);
+    rd::Renderer rend(nx, ny1 + ny2, nz, rd::optics_for("fire3d"));
+    nfx::Pool pool(threads);
+    for (int f = a.i("warm", 0); f > 0; --f) st.step_frame();
+    for (int f = 0; f < frames; ++f) {
+      const float t = static_cast<float>(f) / 30.f, u = t / seconds;
+      std::array<float, 3> cf = c;
+      cf[0] = c[0] + (0.95f - c[0]) * std::sin(std::numbers::pi_v<float> * std::clamp((u - 0.2f) / 0.6f, 0.f, 1.f));
+      st.set_controls(cf[0], cf[1], cf[2]);
+      st.step_frame();
+      st.fields(T, D);
+      std::fill(T.begin() + static_cast<std::ptrdiff_t>(n1), T.end(), 0.f);
+      rend.prepare(T, D, &pool);
+      const float az = 0.35f * std::numbers::pi_v<float> * std::sin(2.f * std::numbers::pi_v<float> * u);
+      const View view{{4.9f * std::sin(az), 1.35f, 4.9f * std::cos(az)}, {0.f, 1.42f, 0.f}, {0.f, 1.f, 0.f}, 40.f};
+      pic.resize(zu(W) * zu(H) * 4);
+      rend.render(view.camera(fl(W) / fl(H)), W, H, pic.data(), zu(W) * 4, &pool);
+      glow1 = 0.7f * glow1 + 0.3f * picture_glow(pic);
+      composite(cv, 0, 0, W, H, pic, view, glow1);
+      cv.text("3D FIRE AND SMOKE, ONE COUPLED SIMULATION (A DEMO)", 24, 20, 3, {255, 255, 255});
+      cv.text(std::format("TWO SOLVER BOXES ({}X{}X{} EACH) EXCHANGING HEAT, SOOT AND VELOCITY THROUGH THE SEAM BETWEEN THEM. NOT MEASURED.", nx, ny1, nz), 24, 52, 1, {190, 190, 196});
+      cv.text(std::format("FIRE INTENSITY {:.2f}  WIND {:.2f}  TURBULENCE {:.2f}  {:.1f} S", cf[0], c[1], c[2], st.time()), 24, H - 30, 2, {200, 200, 206});
+      vid.put(cv);
+      if (f % 60 == 0) std::println("  frame {} ({:.0f} s)", f, now() - t0);
+    }
   } else {
-    throw std::invalid_argument("--kind orbit | wind | real-vs-learned | coupled");
+    throw std::invalid_argument("--kind orbit | wind | real-vs-learned | coupled | coupled-sim");
   }
   vid.close();
   std::println("wrote {} ({:.0f} s)", out, now() - t0);
@@ -1899,8 +1944,10 @@ int edge(const Args& a) {
   // index; study R: the plays' base + the wind's index, and the teacher's runs (--sim --runs K) 29,300,000 + 100 j + k
   const int runs = sim ? a.i("runs", 1) : 1;
   const bool multi = sim && runs > 1 && (g_r || g_hres);
+  const bool hres_r2_effect = g_hres && g_effect == nfx::sim3d::Effect::smoke_r2;  // smoke_r2 at hres (§10): its own blocks
   const std::uint64_t edge_default = g_r2     ? (sim ? kR2Cal : kR2ValEdge)
                                      : g_r      ? (sim ? kRCal : kRValEdge)
+                                     : hres_r2_effect ? (sim ? (multi ? kHresR2Cal : kHresR2ValReal + kHresEdge) : kHresR2ValPlay + kHresEdge)
                                      : g_hres   ? (sim ? (multi ? kHresCal : kHresValReal + kHresEdge) : kHresValPlay + kHresEdge)
                                      : g_n2     ? (sim ? kN2ValReal : kN2ValPlay) + kN2Edge
                                                 : 9'900'004;

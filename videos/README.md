@@ -228,7 +228,7 @@ above).
 |---|---|---|---|---|---|---|
 | <a href="fuse_demo.mp4"><img src="fuse_demo.jpg" width="200" alt="NeuralVFX in a stand-in FUSE"></a> | **NeuralVFX in FUSE** (a sample integration) | `nvfx_fuse_demo`'s 10 s sequence ([FUSE.md](../docs/FUSE.md) §8), everything from one effect pack through the adapter FUSE would use: six torches sharing one simulation offset in time, two smoke columns, two explosions despawned when they finish and a magic portal as sprites through the effect manager (5 ms budget on FUSE's jobs); the campfire script on a card at the left, driven by its rules and inputs (a gust, the log catching, the game's wind, doused and relit); library entries on a stage at the right (a brazier, a steam vent, an electric arc, a magic burst, a lightning strike); the learned 3D fire in the middle. The HUD names each event and shows the manager's plan | Learned: every sprite, the scene's fires and smoke, the stage's brazier, steam and burst, the 3D fire's motion. Procedural: the scene's and the stage's embers, sparks, arc and lightning; the 3D fire's look is its volume renderer. The sky, the ground grid and the HUD are the stand-in's | The library's fire, smoke, explosion, magic, steam; study N2's 3D fire (C4); int8 (the volume float) | `nvfx_fuse_demo --pack fuse_demo.nvfxp --video fuse_demo.mp4`: 60 Hz, every other frame drawn by the stand-in's software renderer (premultiplied, sRGB textures) at 1280 x 720, 30 fps, 10 s; CRF 24 (`-preset slow`), 1.3 MB | Fair: an engine's view, not a beauty render: flat sprites and cards over a dark grid, the cards' effects small in their scenes; soft sprite edges hide the smoke's and the explosions' domain tops; the explosions are soft orange balls; the 3D fire is small in its box, as in §9 |
 
-## 9. A 3D fire (study N)
+## 9. A 3D fire (studies N, N2 and hres)
 
 Study N's small 3D demo ([STUDY_3D.md](../docs/STUDY_3D.md)): a 3D fire learned as a 16 x 24 x 16 state that drives
 seeded 64 x 96 x 64 detail, from our own 3D simulator (not a validated fire code). `nvfx_3d video --kind KIND` plays the
@@ -245,8 +245,19 @@ rollouts; C4 does not run away at any wind over 30 s, and on N2's held-out test 
 (+1.95 dB in pictures at 1 s) and on every endless statistic but motion (a tie). By N2's rule, written before
 validation, it did not pass: on validation its edge check missed by 3% on one side (a peak of 5.29 against a bound of
 5.12 taken from one simulated run). The owner chose to show it anyway; study N's videos are in the git history.
-Study N's smoke model (the last row) is unchanged; it runs away when played for 30 s without shards, which its 8 s
+Study N's smoke model (the smoke row) is unchanged; it runs away when played for 30 s without shards, which its 8 s
 shards hide.
+
+**The two HRES rows play study hres's fire, which meets its rule** ([STUDY_3D_HRES.md](../docs/STUDY_3D_HRES.md) §7,
+REPORT §15's hres addendum): the same recipe on a 32 x 48 x 32 coarse state (fine = 2, the same detail), C2 chosen on
+validation, tested once on the frozen file (over the coarse simulation with detail +1.69 dB in pictures at 1 s; against
+N2's C4 on endless play the mean picture +2.20 dB, motion 0.99 of the real runs' where C4's is 0.66), and its edge check
+passed on validation and test at every wind and side with bounds calibrated on four teacher runs per wind (N2's lesson:
+judged against one run per wind, as the test step first did, two of its sides had read as runaway;
+`tools/study_3d/hres_fire_recheck_test_edges.sh` re-judged the same runs with the calibrated bounds,
+`results/3d/hres/fire/edgecheck_test.md`). It is the first 3D model here to pass its rule's edge check on both
+validation and test (N2 missed by 3%, study R by 7%, each against one run per wind); the N2 rows above stay as the
+record of what it improves on.
 
 | | Video | What it shows | Learned / procedural | Models, precision | Rendered | How it looks |
 |---|---|---|---|---|---|---|
@@ -254,8 +265,8 @@ shards hide.
 | <a href="3d_real_vs_learned.mp4"><img src="3d_real_vs_learned.jpg" width="200" alt="Real against learned in 3D"></a> | **Real against learned, in 3D** | Left: the 3D simulator (64 x 96 x 64). Right: the learned model from the same state (a held-out run after 100 frames: controls 0.65, 0.45, 0.55, seed 9,950,000) with the same noise seed, one continuous rollout. **Both are chaotic: they part after a second or two**, as the caption says | Left: simulation. Right: learned (C4). Both drawn by the same volume renderer | C4; float | `--kind real-vs-learned`, 10 s, 1.0 MB | They part within two seconds and keep a similar smoke column; the simulation's flame is a tall orange tongue where the learned one is short, whiter and broken into hot spots |
 | <a href="3d_wind.mp4"><img src="3d_wind.jpg" width="200" alt="The 3D fire's wind swept live"></a> | **Wind, swept live** | Side (left) and top (right) at once while the wind control sweeps from none (0.5) to full towards -x (0) by 4.8 s, to full towards +x (1) by 9 s and back to none; intensity 0.7, turbulence 0.5, seed 9,950,002 | As the orbit | C4; float | `--kind wind`, 12 s, 0.6 MB | **One fire throughout: the second fire study N's model grew at the upwind edge is gone.** The plume still follows the control slowly, leaning with the wind a second or two late |
 | <a href="3d_smoke_orbit.mp4"><img src="3d_smoke_orbit.jpg" width="200" alt="3D smoke, walked around"></a> | **3D smoke, walked around** (a demo only) | The camera circles a learned 3D smoke column once; controls 0.7, 0.5, 0.5, seed 9,900,005. Trained after the study's test on the same recipe, **not validated or tested** | As the orbit | `smoke3d.nvfx3` (study N's smoke, 268 KB; `$NEURALVFX_DATA/n_3d/models`); float | `--kind orbit --model .../smoke3d.nvfx3 --title "LEARNED 3D SMOKE"`, 12 s, 1.2 MB | A thick grey column that billows and rises out of the frame from every side; small orange specks glow at its base, which the simulated smoke (too cool to glow) does not have |
-| <a href="hres_fire_orbit_1080p.mp4"><img src="hres_fire_orbit_1080p.jpg" width="200" alt="HRES 3D fire, 1080p"></a> | **HRES 3D fire, walked around (1080p)** | Study hres ([STUDY_3D_HRES.md](../docs/STUDY_3D_HRES.md)): 32 x 48 x 32 coarse state, same 64 x 96 x 64 detail. Camera orbit; controls 0.75, 0.5, 0.55, seed 9,960,001. **Validation not run** | As the orbit | `fire_hres.nvfx3` (`models/3d` or `$NEURALVFX_DATA/hres_3d/fire/models/hres_fire.nvfx3`); float | `--kind orbit`, 1920 x 1080, CRF 18, 12 s, 4.7 MB | Fuller flame with less blocky base than N2's 16³ coarse model at the same detail resolution; grey smoke column as before |
-| <a href="hres_fire_orbit.mp4"><img src="hres_fire_orbit.jpg" width="200" alt="HRES 3D fire, preview"></a> | **HRES 3D fire, preview (640p)** | Same model and seed as the 1080p row, lower output resolution for a quick check | As the 1080p row | `fire_hres.nvfx3`; float | `--kind orbit`, 640 x 360, 8 s, 0.3 MB | Same motion as the 1080p demo; softer when enlarged |
+| <a href="hres_fire_orbit_1080p.mp4"><img src="hres_fire_orbit_1080p.jpg" width="200" alt="HRES 3D fire, 1080p"></a> | **HRES 3D fire, walked around (1080p)** | Study hres ([STUDY_3D_HRES.md](../docs/STUDY_3D_HRES.md)): 32 x 48 x 32 coarse state, same 64 x 96 x 64 detail. Camera orbit; controls 0.75, 0.5, 0.55, seed 9,960,001. **Validated and tested: C2 meets its rule** (edge check passed at every wind on validation and test with bounds calibrated on four teacher runs per wind; `results/3d/hres/fire/edgecheck_test.md`) | As the orbit | `fire_hres.nvfx3` (C2, frozen before its test, `results/3d/hres/fire/frozen.csv`; `models/3d` or `$NEURALVFX_DATA/hres_3d/fire/models/hres_fire.nvfx3`); float | `--kind orbit`, 1920 x 1080, CRF 18, 12 s, 4.7 MB | Fuller flame with less blocky base than N2's 16³ coarse model at the same detail resolution; grey smoke column as before |
+| <a href="hres_fire_orbit.mp4"><img src="hres_fire_orbit.jpg" width="200" alt="HRES 3D fire, preview"></a> | **HRES 3D fire, preview (640p)** | Same model and seed as the 1080p row (controls 0.7, 0.5, 0.6), lower output resolution for a quick check | As the 1080p row | `fire_hres.nvfx3` (C2, as above); float | `--kind orbit`, 640 x 360, 8 s, 0.3 MB | Same motion as the 1080p demo; softer when enlarged |
 
 ## 9b. Drawn at half size and upscaled (study P)
 
@@ -292,7 +303,107 @@ and up; same renderer and encoding as §9, warm smoke's optics (it does not glow
 | <a href="3d_plume_theory.mp4"><img src="3d_plume_theory.jpg" width="200" alt="The teacher against plume theory"></a> | **The teacher against plume theory** | Left: `smoke_r` simulated live in still air (64 x 96 x 64, controls 0.5, 0.5, 0.5, seed 29,900,100) with Morton, Taylor and Turner's top-hat edges, b = 1.2 alpha (z - z0), dashed over it at the fitted alpha and origin. Right: the centreline velocity, the plume's width and the centreline buoyancy against height at three source strengths (pooled time averages, 5 seeds each) against the theory's power laws and the measured band of alpha (Carazzo et al. 2006), and this run's own running average converging onto them | No learned model: the simulation (study R's teacher) and its measurements | the 3D solver (`smoke_r`); the fits of `results/3d/r/plume_fit.md` | `nvfx_3d plumevideo`, 16 s, 0.6 MB | The column widens between the dashed edges; the width follows the theory's line inside the measured band, the velocity and buoyancy fall about as the theory's slopes, the velocity a little faster |
 | <a href="3d_smoke_r_orbit.mp4"><img src="3d_smoke_r_orbit.jpg" width="200" alt="Study R's 3D smoke, walked around"></a> | **Study R's 3D smoke, walked around** (a demo: it failed its test) | The camera circles the learned smoke column once; controls 0.7, 0.5, 0.5, seed 29,900,001 | Learned: the smoke's motion (the 16 x 24 x 16 state); seeded: the 64 x 96 x 64 detail; rendered: the volume renderer. Procedural: the floor and sky | study R's C4 (`models/3d/smoke.nvfx3`; `$NEURALVFX_DATA/r_smoke3d/models/chosen.nvfx3`, frozen before its test); float | `--kind orbit`, 12 s, 1.4 MB | A broad, billowing grey column rising out of the frame, wider and more diffuse than the simulation's, with faint wisps standing near the box's sides |
 | <a href="3d_smoke_r_real_vs_learned.mp4"><img src="3d_smoke_r_real_vs_learned.jpg" width="200" alt="Real against learned, 3D smoke"></a> | **Real against learned, 3D smoke** | Left: the 3D solver's `smoke_r` (64 x 96 x 64). Right: the learned smoke from the same state (a held-out run after 100 frames: controls 0.65, 0.45, 0.55, seed 29,900,002) with the same noise seed, one continuous rollout. **Both are chaotic: they part after a second or two** | Left: simulation. Right: learned (C4). Both drawn by the same volume renderer | C4; float | `--kind real-vs-learned`, 10 s, 1.0 MB | They part within two seconds. The simulation keeps a narrow column of rounded puffs; the learned smoke spreads into a broad cone that by 9 s fills much of its box, with streaky wisps at the sides: the test's worse coverage, light and mean picture, seen |
-| <a href="3d_fire_smoke_coupled.mp4"><img src="3d_fire_smoke_coupled.jpg" width="200" alt="3D fire and smoke, coupled"></a> | **3D fire and smoke, coupled** (a demo, not measured) | Two learned volumes stacked: N2's 3D fire in the lower box, study R's smoke in the box above it. The fire's soot leaving the top of its box (smoothed over a second, against its running mean) sets the smoke's intensity; the fire's intensity sweeps from 0.6 to 0.95 and back; the camera swings a little; seed 29,900,003 (the smoke 29,900,004) | Learned: both volumes' motion. Procedural: the coupling (a flux read off the fire through the volume API), the floor and sky. Drawn as one 64 x 192 x 64 volume with the fire's optics, so the flame lights its smoke | `models/3d/fire.nvfx3` (N2's C4) and C4 of study R; float | `--kind coupled`, 12 s, 0.7 MB | A small flame under a thin column of its own soot that feeds a broader smoke column above; the seam between the two boxes shows as a flat base under the upper smoke |
+| <a href="3d_fire_smoke_coupled.mp4"><img src="3d_fire_smoke_coupled.jpg" width="200" alt="3D fire and smoke, coupled"></a> | **3D fire and smoke, coupled** (a demo, not measured) | Two learned volumes stacked: N2's 3D fire in the lower box, study R's smoke in the box above it. The fire's soot leaving the top of its box (smoothed over a second, against its running mean) sets the smoke's intensity; the fire's intensity sweeps from 0.6 to 0.95 and back; the camera swings a little; seed 29,900,003 (the smoke 29,900,004) | Learned: both volumes' motion. Procedural: the coupling (a flux read off the fire through the volume API), the floor and sky. Drawn as one 64 x 192 x 64 volume with the fire's optics, so the flame lights its smoke | `models/3d/fire.nvfx3` (N2's C4, not §9's tested hres fire: this video predates it and was not re-rendered) and C4 of study R; float | `--kind coupled`, 12 s, 0.7 MB | A small flame under a thin column of its own soot that feeds a broader smoke column above; the seam between the two boxes shows as a flat base under the upper smoke |
+
+**Making the coupled video** (`--kind coupled`; STUDY_R.md §6.1). It takes two model files: `--model` is the fire
+(the lower box) and `--smoke` the smoke (the upper); both are in git under `models/3d`, so the command below runs from
+a checkout with no data root. The two must have the same width and depth (the tool refuses otherwise); their heights
+may differ, and the picture is one volume of the two heights stacked. The fire plays at `--seed`, the smoke at
+`--seed` + 1, both in `--shard` second shards (8 by default, 0 for one continuous rollout); `--controls I,W,T` gives
+the fire's starting intensity, which sweeps to 0.95 and back between 20% and 80% of the video, and the wind and
+turbulence both volumes share; `--smoke-intensity` (0.6) is the smoke's base intensity, which the fire's soot flux
+then scales between 0.05 and 1 (the caption shows both intensities live). `--study r` changes nothing in this kind
+(both models are named): it is kept so the command reads as study R's. The rule that turns the fire's fields into the
+smoke's intensity, and the layout change that stacks the two boxes, are `include/neuralfx/coupled3d.hpp`, tested in
+`neuralfx_3d_tests` (`Coupled3d.*`); `neuralfx.Coupled3dVideoSmoke` renders 15 frames of this very command at 320 x 180
+in CTest where ffmpeg is installed (about 3 s), so the two shipped models loading, stepping and stacking through the
+volume API is checked on every test run. On 3 threads the 12 s video renders in about a minute and a half (92 s on
+24 October 2026, when a fresh render of the command above reproduced the committed `3d_fire_smoke_coupled.mp4` to the
+byte, SHA-256 `f59de54f...2ada27`: the models, the seeds, the volume API and ffmpeg's encode are all deterministic
+here); a 2 s preview at 640 x 360 on 4 threads takes 7 s (the captions are laid out for 1280 wide and run off a
+narrower frame, so previews are for the motion, not the titles). `--kind coupled-sim` is the same scene as one coupled
+simulation (the solver's `Stack`, no learned model; STUDY_R.md §6.1), not among the videos here.
+
+### 9c.1 `nvfx_3d video --kind coupled`: the options
+
+Everything `video` takes applies (`--out`, `--seconds` 12, `--width` 1280, `--height` 720, `--threads` 3, `--crf` 24,
+`--seed`, `--controls I,W,T`, `--shard`); these are the coupled kinds' own, or mean something particular here:
+
+| option | `--kind coupled` (two learned volumes) | `--kind coupled-sim` (one coupled simulation) |
+|---|---|---|
+| `--model F` | the fire, `.nvfx3`: the lower box (default: the study's data root's `models/chosen.nvfx3`, `$NEURALVFX_DATA/n_3d`, or `r_smoke3d` with `--study r`; name it) | not read: the solver runs the fire itself |
+| `--smoke F` | the smoke, `.nvfx3`: the upper box (**required**; same width and depth as the fire, or the tool refuses) | not read |
+| `--upper E` | not read | the upper box's effect: `smoke_r` (default), `smoke_r2`, `smoke`, `fire`; it has no burner either way |
+| `--controls I,W,T` | I the fire's intensity at the start (sweeps to 0.95 and back between 20% and 80% of the video); W, T shared by both volumes | the same sweep, for both boxes |
+| `--smoke-intensity B` | the smoke's base intensity (0.6), which the fire's flux scales within [0.05, 1] | not read (the smoke above is whatever the fire sends up) |
+| `--seed S` | the fire's seed; the smoke takes S + 1 | the lower box's seed; the upper's S + 1 |
+| `--shard s` | both volumes' shard length in seconds (8; 0 for one continuous rollout each) | not read (a simulation has no shards) |
+| `--warm N` | not read | solver frames stepped before the first picture (0): the smoke needs a few seconds to reach the upper box |
+| `--study r` | changes nothing (both models are named); kept so the command reads as study R's | the same |
+| `--title`, `--subtitle` | not read: the captions are fixed (the smoke's live intensity is in the bottom line) | not read |
+
+```sh
+# the committed video (both models in git; no data root needed): 12 s at 1280 x 720, about 90 s on 3 threads
+build/nvfx_3d video --kind coupled --model models/3d/fire.nvfx3 --smoke models/3d/smoke.nvfx3 --out 3d_fire_smoke_coupled.mp4 --seconds 12 --controls 0.6,0.5,0.5 --seed 29900003
+# a 2 s preview at 640 x 360 on 4 threads (7 s; the captions run off a narrow frame)
+build/nvfx_3d video --kind coupled --model models/3d/fire.nvfx3 --smoke models/3d/smoke.nvfx3 --out /tmp/coupled_preview.mp4 --seconds 2 --width 640 --height 360 --threads 4 --seed 29900003
+# one continuous rollout in each box (no shard changes), a thicker smoke base, a quiet fire
+build/nvfx_3d video --kind coupled --model models/3d/fire.nvfx3 --smoke models/3d/smoke.nvfx3 --out /tmp/coupled_continuous.mp4 --shard 0 --smoke-intensity 0.8 --controls 0.45,0.5,0.4 --seed 29900010
+# the hres fire (§9, the one that meets its rule) under study R's smoke: the same 64 x 96 x 64 textures, so the pair is accepted
+build/nvfx_3d video --kind coupled --model models/3d/fire_hres.nvfx3 --smoke models/3d/smoke.nvfx3 --out /tmp/coupled_hres.mp4 --seconds 8 --controls 0.7,0.5,0.55 --seed 29900020
+# the same scene as one coupled simulation (no model): the fire's solver below, smoke_r above it, 2 s warmed first
+build/nvfx_3d video --kind coupled-sim --out /tmp/coupled_sim.mp4 --seconds 12 --warm 60 --controls 0.6,0.5,0.5 --seed 29900003
+# the momentum-conserving smoke (study R2) in the upper box
+build/nvfx_3d video --kind coupled-sim --upper smoke_r2 --out /tmp/coupled_sim_r2.mp4 --seconds 12 --warm 60 --threads 4 --seed 29900003
+```
+
+### 9c.2 The rule: the fire's soot sets the smoke's intensity
+
+What `--kind coupled` does each frame, in the three functions of `include/neuralfx/coupled3d.hpp` (the tool and
+`Coupled3d.*` run the same arithmetic):
+
+1. **`top_soot_flux(soot, velocity, nx, ny, nz, layers)`**: the soot leaving the top of the fire's box, read from the
+   two textures the volume API gives (`nvfx_volume_read`, float; texel (x, y, z) at `(z * ny + y) * nx + x`, the velocity
+   three floats per texel in world units per second). It sums, over the top `layers` rows (y from `ny - layers` to
+   `ny - 1`; the tool uses 4 of the fire's 96), `soot * max(0, v_y)`: gas that sinks counts for nothing. The order of
+   the sum is fixed (z, then y, then x), so the number is the same on any machine.
+2. **`FluxDrive::update(flux, base, fps, time, settle = 1)`**: the smoke's intensity for the next frame. The flux is
+   smoothed over about a second (`smoothed += (flux - smoothed) / fps`; the first frame's flux starts it) and compared
+   with its running mean since the start (`mean += (flux - mean) / (frames + 1)`):
+   `intensity = clamp(base * smoothed / mean, 0.05, 1)`. For the first `settle` seconds the smoke plays at `base`
+   (the mean has nothing to compare with yet). So a fire sending up more soot than it has on average thickens the
+   smoke above it, and one sending up less thins it, a second or so later; the base (`--smoke-intensity`) is what the
+   smoke plays at when the fire is at its average.
+3. **`rows_to_renderer(src, nx, ny, nz, dst)`**: the API's layout (z slowest) into the renderer's (`(y * nz + z) * nx +
+   x`, render3d.hpp). Stacking two boxes in y is writing the lower at `dst` and the upper at `dst + nx * ny1 * nz`; the
+   smoke's temperature is written as zero (warm smoke does not glow), and the stack is drawn with the fire's optics.
+
+The intensity computed from frame f's fields is set on the smoke (`nvfx_volume_set_controls`) before frame f + 1 is
+stepped. Nothing else crosses between the two volumes: no heat, no momentum, no soot; the smoke's own model makes
+its column from its burner at the base of its box, which is why the seam shows as a flat base under it.
+
+### 9c.3 `--kind coupled-sim`: the solver's `Stack` and its seams
+
+`sim3d::Stack` (`include/neuralfx/sim3d.hpp`) is the coupling done inside the simulation, for comparison. Two `Fluid`
+boxes of the same width, depth, frame rate and substeps sit one above the other (64 x 96 x 64 each in the tool, drawn
+as 64 x 192 x 64); the upper has `Params::source` off (no burner: what it carries is what comes in from below) and the
+effect `--upper` names. A **`Seam`** is one row of a box's fields over its (x, z) plane, `nx * nz` values indexed
+`z * nx + x`, in `u`, `v`, `w` (cells per second), `temp` and `soot`. A box given a seam (`set_top_seam`,
+`set_floor_seam`; not owned, nullptr takes it away) uses that row as its border row at that end, where its open-top
+outflow or closed, slipping floor would be, so its advection carries the neighbour's heat, soot and velocity in across
+the seam and its projection sees the neighbour's velocity through it. At the start of every solver step the stack
+copies the lower box's top row into the upper's floor seam and the upper's bottom row into the lower's top seam
+(`seam_row`), both from the state **before** the step, so the exchange is two-way (a downflow in the upper box comes
+back down) and the order of the two boxes' steps does not matter. The pressure solve stays each box's own (p = 0
+beyond a top seam as beyond an open top, the floor's Neumann condition beyond a floor seam): a coupling of the carried
+quantities, not one solve over both boxes. A box with no seams is the single box to the bit; `Stack::fields(temp,
+soot)` gives both boxes as one volume, the lower's rows first, in the renderer's order, which is what the tool draws.
+What the seam conserves and where it differs from one tall box is measured in STUDY_R.md §6.1 (totals to 1%, the share
+above the seam to 0.01). Tests: `Sim3d.CoupledStack*` in `neuralfx_3d_tests`.
+
+So the two kinds differ in what crosses the seam: the API demo passes one number per frame (the flux that sets the
+smoke's intensity) and shows a flat base under the upper smoke; the simulation passes the fields and has no such base.
+Neither is measured.
 
 ## 10. Later
 
@@ -411,6 +522,12 @@ build/nvfx_3d video --study r --kind orbit --model models/3d/smoke.nvfx3 --title
     --out 3d_smoke_r_orbit.mp4 --seconds 12 --controls 0.7,0.5,0.5 --seed 29900001
 build/nvfx_3d video --study r --kind real-vs-learned --model models/3d/smoke.nvfx3 --out 3d_smoke_r_real_vs_learned.mp4 --seconds 10 --controls 0.65,0.45,0.55 --seed 29900002
 build/nvfx_3d video --study r --kind coupled --model models/3d/fire.nvfx3 --smoke models/3d/smoke.nvfx3 --out 3d_fire_smoke_coupled.mp4 --seconds 12 --controls 0.6,0.5,0.5 --seed 29900003
+# (the same, 2 s at 640 x 360 on 4 threads: a 7 s check that the coupled path runs; §9c says what to expect of its captions)
+build/nvfx_3d video --study r --kind coupled --model models/3d/fire.nvfx3 --smoke models/3d/smoke.nvfx3 --out /tmp/coupled_preview.mp4 \
+    --seconds 2 --width 640 --height 360 --threads 4 --controls 0.6,0.5,0.5 --seed 29900003
+# the same scene as one coupled simulation (sim3d's Stack, no model; §9c.3): smoke_r above the fire's solver, or study R2's smoke_r2
+build/nvfx_3d video --kind coupled-sim --out /tmp/coupled_sim.mp4 --seconds 12 --warm 60 --controls 0.6,0.5,0.5 --seed 29900003
+build/nvfx_3d video --kind coupled-sim --upper smoke_r2 --out /tmp/coupled_sim_r2.mp4 --seconds 12 --warm 60 --threads 4 --seed 29900003
 # study hres 3D fire (models/3d/fire_hres.nvfx3 or $NEURALVFX_DATA/hres_3d/fire/models/hres_fire.nvfx3)
 build/nvfx_3d video --kind orbit --model models/3d/fire_hres.nvfx3 --out hres_fire_orbit_1080p.mp4 \
     --width 1920 --height 1080 --crf 18 --seconds 12 --threads 2 --controls 0.75,0.5,0.55 --seed 9960001 --title "HRES 3D FIRE"

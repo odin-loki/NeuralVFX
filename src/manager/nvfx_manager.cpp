@@ -19,7 +19,7 @@ bool valid(const nvfx_manager_desc& d) {
          d.budget_ms >= 0.f && std::isfinite(d.budget_ms) && d.burst >= 1.f && std::isfinite(d.burst) && d.interp >= NVFX_INTERP_DEFAULT &&
          d.interp <= NVFX_INTERP_MOTION && sizes && d.texel_scale > 0.f && std::isfinite(d.texel_scale) && d.rate_px[0] >= d.rate_px[1] &&
          d.rate_px[1] >= d.rate_px[2] && d.rate_px[2] >= 0.f && d.hysteresis >= 0.f && d.hysteresis < 0.9f && d.min_dwell >= 0.f && d.catchup_frames >= 1.f &&
-         d.fade_frames >= 0 && d.park_after >= 0.f && d.cull_after >= 0.f && d.proxy_dwell >= 0.f && d.half_px >= 0.f && std::isfinite(d.half_px) &&
+         d.fade_frames >= 0 && d.park_after >= 0.f && d.cull_after >= 0.f && d.proxy_dwell >= 0.f && std::isfinite(d.half_px) &&
          d.half_share >= 0.f && std::isfinite(d.half_share) && (d.half_upscale == NVFX_UPSCALE_OFF || d.half_upscale == NVFX_UPSCALE_BILINEAR);
 }
 
@@ -49,7 +49,7 @@ void nvfx_manager_desc_init(nvfx_manager_desc* d) {
   d->proxies = 1;
   d->proxy_dwell = 2.f;
   d->seed = 1;
-  d->half_px = nfx::mgr::kDefaultHalfPx;  // docs/MANAGER.md §2.10, docs/REPORT.md §22
+  d->half_px = nfx::mgr::kDefaultHalfPx;  // below 0: each effect's measured default (docs/MANAGER.md §2.10, docs/REPORT.md §22.11)
   d->half_share = 0.f;
   d->half_upscale = NVFX_UPSCALE_OFF;  // the engine's sampler draws the half-size picture larger (docs/MANAGER.md §2.10)
 }

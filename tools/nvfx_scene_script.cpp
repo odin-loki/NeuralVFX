@@ -310,6 +310,7 @@ int main(int argc, char** argv) try {
     if (!in) throw std::runtime_error("cannot read " + A.verify.string());
     std::map<std::string, std::string> want;  // frame_NNN -> sha256
     for (std::string line; std::getline(in, line);) {
+      if (!line.empty() && line.back() == '\r') line.pop_back();  // a CRLF checkout must not fail every hash
       std::vector<std::string> cols;
       std::stringstream ls(line);
       for (std::string c; std::getline(ls, c, ',');) cols.push_back(c);

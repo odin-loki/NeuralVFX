@@ -129,6 +129,11 @@ int level_of_size(int size) {
   return -1;
 }
 
+// The effects whose measured default is drawn at half size (docs/REPORT.md §22.11): by the model's name (what the
+// manager can see of it; the two fires and the two explosions measured share theirs), those that passed both of the
+// rule's conditions in its runs (§22.4, §22.6). Magic (0.543 of full size) and every effect not measured stay off.
+bool half_default_on(std::string_view effect) { return effect == "fire" || effect == "smoke" || effect == "steam" || effect == "explosion"; }
+
 // --- set-up -------------------------------------------------------------------------------------------------------------
 
 Manager::Manager(const nvfx_manager_desc& d) : desc_(d) {
@@ -223,10 +228,12 @@ nvfx_status Manager::add_model(const nvfx_effect* fx, const nvfx_manager_model_d
   M.proxy_max = static_cast<int>(std::min<std::size_t>(ncell, z(d.proxy_sims)));
   M.step_ms = kStepMs;
   M.render_ms = kRenderMs;
-  // drawn at half size: its own threshold, or the manager's; the 2x pictures and upscalers only where the policy can act
+  // drawn at half size: its own threshold, or the manager's (its name's measured default when that is below 0); the 2x
+  // pictures and upscalers only where the policy can act
   M.half_px = d.half_px < 0.f ? -1.f : d.half_px;
+  M.half_default = half_default_on(m.effect);
   M.isa = isa_index(rt::rollout_isa(M.precision));
-  const bool half_on = M.half_px > 0.f || (M.half_px < 0.f && (desc_.half_px > 0.f || desc_.half_share > 0.f));
+  const bool half_on = M.half_px > 0.f || (M.half_px < 0.f && (desc_.half_px > 0.f || (desc_.half_px < 0.f && M.half_default) || desc_.half_share > 0.f));
   M.half_bufs = half_on && desc_.half_upscale == NVFX_UPSCALE_BILINEAR && M.max_level > M.min_level;
   try {
     std::size_t bytes = 0;
@@ -827,7 +834,8 @@ void Manager::want(Model& M, Sim& s) {
 
 float Manager::half_threshold(const Model& M) const {
   if (M.half_px >= 0.f) return M.half_px;  // the model's own (0: never)
-  float t = desc_.half_px > 0.f ? desc_.half_px : std::numeric_limits<float>::infinity();
+  // the manager's: its threshold; below 0, the effect's measured default (kHalfOnPx, or never)
+  float t = desc_.half_px > 0.f ? desc_.half_px : desc_.half_px < 0.f && M.half_default ? kHalfOnPx : std::numeric_limits<float>::infinity();
   if (desc_.half_share > 0.f && camera_) t = std::min(t, desc_.half_share * view_h_);
   return std::isfinite(t) ? t : 0.f;
 }

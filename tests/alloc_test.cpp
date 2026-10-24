@@ -14,7 +14,8 @@
 // with spawns, stops, controls, camera moves, a tight budget, proxies, copies offset in time, pauses and culls; water
 // (docs/EFFECTS_WATER.md) of every kind, scripted and on a stage, with the engine layers; the weather director
 // (docs/WEATHER.md) through every regime with every layer it drives, scripted and driven by an input; and a 3D volume
-// (nvfx_volume.h, study N) stepped, read and drawn on 1 and 3 threads. Exit code 0 = no allocation during rendering.
+// (nvfx_volume.h, study N) stepped, read and drawn on 1 and 3 threads and on an engine's job system. Exit code 0 = no
+// allocation during rendering.
 #include "compose_scene.hpp"
 #include "nvfx_internal.hpp"
 #include "script.hpp"
@@ -1113,6 +1114,14 @@ int run_manager(bool external, float half_px = 0.f, nvfx_upscale half_upscale = 
 
 // Study N (docs/STUDY_3D.md): a 3D volume (nvfx_volume.h) on 1 and 3 threads, in shards with crossfades, stepped, read
 // as float and half textures in every field, drawn for a moving camera, seeded again and stepped back (restarts).
+// `threads` < 0: through its job hook (nvfx_volume_create_with_jobs) on a stand-in engine job system that runs the jobs
+// on the caller, and counts the runs.
+long g_volume_runs = 0;
+void volume_jobs(void* /*context*/, int jobs, nvfx_volume_job_fn job, void* job_context) {
+  ++g_volume_runs;
+  for (int j = 0; j < jobs; ++j) job(job_context, j);
+}
+
 int run_volume(int threads) {
   nfx::rollout3d::Hyper h;
   h.rx = 8;
@@ -1146,7 +1155,7 @@ int run_volume(int threads) {
   nvfx_volume_effect* e = nullptr;
   nvfx_volume* v = nullptr;
   if (nvfx_volume_effect_load_memory(bytes.data(), bytes.size(), &e) != NVFX_OK) return 1;
-  if (nvfx_volume_create(e, threads, &v) != NVFX_OK) return 1;
+  if ((threads < 0 ? nvfx_volume_create_with_jobs(e, &volume_jobs, nullptr, &v) : nvfx_volume_create(e, threads, &v)) != NVFX_OK) return 1;
   const float controls[3] = {0.6f, 0.3f, 0.8f};
   nvfx_volume_set_controls(v, controls, 3);
   nvfx_volume_set_seed(v, 99);
@@ -1171,6 +1180,7 @@ int run_volume(int threads) {
   };
   long bad = frame(0.0, 0);  // warm-up outside the count
   g_allocations = 0;
+  g_volume_runs = 0;
   g_counting = true;
   for (int f = 1; f <= 80; ++f) bad += frame(f / 30.0, f);  // across a shard change and its crossfade
   nvfx_volume_set_seed(v, 7);                                 // a new seed: the timeline starts again
@@ -1180,7 +1190,12 @@ int run_volume(int threads) {
   bad += frame(1.0, 83);
   g_counting = false;
   const long a = g_allocations.load();
-  std::printf("volume (3D, study N) on %d thread%s: %ld allocations in 84 frames%s\n", threads, threads == 1 ? "" : "s", a, bad ? " (calls failed)" : "");
+  if (threads < 0) {
+    bad += g_volume_runs == 0;  // the engine must have been asked
+    std::printf("volume (3D, study N) on an engine's job system: %ld allocations in 84 frames (%ld job runs)%s\n", a, g_volume_runs, bad ? " (calls failed)" : "");
+  } else {
+    std::printf("volume (3D, study N) on %d thread%s: %ld allocations in 84 frames%s\n", threads, threads == 1 ? "" : "s", a, bad ? " (calls failed)" : "");
+  }
   nvfx_volume_free(v);
   nvfx_volume_effect_free(e);
   return a == 0 && bad == 0 ? 0 : 1;
@@ -1240,7 +1255,7 @@ int main() {
   failures += run_multi(128, false, NVFX_PRECISION_FLOAT) + run_multi(64, true, NVFX_PRECISION_FLOAT);  // and float
   failures += run_manager(false) + run_manager(true);                                                    // the effect manager
   failures += run_manager(false, 40.f) + run_manager(true, 40.f) + run_manager(false, 40.f, NVFX_UPSCALE_OFF);  // drawn at half size
-  failures += run_volume(1) + run_volume(3);                                                             // 3D volumes (study N)
+  failures += run_volume(1) + run_volume(3) + run_volume(-1);                                            // 3D volumes (study N), and on an engine's jobs
   std::printf("%s\n", failures ? "FAILED: nvfx_render allocated" : "ok: no allocation per frame");
   return failures ? 1 : 0;
 }

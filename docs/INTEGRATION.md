@@ -100,6 +100,24 @@ for (auto& e : effects) {
 Spawns, stops and setters go before `tick_begin` or after `tick_end`. A frame allocates nothing in any of these
 (`nvfx_alloc_test`; through the wrapper, `Wrapper.AFrameAllocatesNothing`), and errors are returned, never thrown.
 
+**A volume** (`nvfx_volume.h`, ENGINES.md §12) runs on threads of its own (`nvfx_volume_create(fx, threads, &vol)`) or
+on your job system (`nvfx_volume_create_with_jobs(fx, run, context, &vol)`, NVFX_VERSION 10): `run` is a fork-join,
+`run(context, jobs, job, job_context)` calls `job(job_context, j)` for every j in [0, jobs) on your workers and returns
+when all have. Call `nvfx_volume_step_to`, `nvfx_volume_read` and `nvfx_volume_render` from one thread; each asks
+`run` several times (a step's slabs, a field's slices, a picture's rows), from that thread, never from inside one of
+its own jobs. The frames are the same to the bit either way, whoever runs the jobs; nothing allocates on this path. A
+NULL `run` means the caller alone (as `threads = 1`).
+
+```cpp
+static void run_jobs(void* ctx, int jobs, nvfx_volume_job_fn job, void* job_ctx) {
+  static_cast<JobSystem*>(ctx)->parallel_for(jobs, [&](int j) { job(job_ctx, j); });   // and wait
+}
+nvfx_volume_effect* fx = nullptr;
+nvfx_volume_effect_load("fire3d.nvfx3", &fx);
+nvfx_volume* vol = nullptr;
+nvfx_volume_create_with_jobs(fx, &run_jobs, &job_system, &vol);
+```
+
 ## 4. Textures
 
 | source | pixels | size | a new picture |
@@ -236,7 +254,7 @@ measuring. Check the result in play: `get_stats()->jobs_ms` against `planned_ms`
 
 ## 8. Version and ABI
 
-`nvfx_version(&features)` returns the library's `NVFX_VERSION` (9: `nvfx_profile` / `nvfx_set_profile`; 8: manager `half_px`; 7: half-size upscale; 6: 3D volumes, `nvfx_volume.h`, study N; 5: precision in the scene, stage and manager descs, study K; 4: engine layers and trails; 3: packs and `nvfx_version`), which changes whenever
+`nvfx_version(&features)` returns the library's `NVFX_VERSION` (10: `nvfx_volume_create_with_jobs`, a volume on the engine's job system; 9: `nvfx_profile` / `nvfx_set_profile`; 8: manager `half_px`; 7: half-size upscale; 6: 3D volumes, `nvfx_volume.h`, study N; 5: precision in the scene, stage and manager descs, study K; 4: engine layers and trails; 3: packs and `nvfx_version`), which changes whenever
 a call or a public struct changes: an engine that loads `libnvfx.so` / `nvfx.dll` checks it against the header's
 (`nvfx::version().matches_headers()`). `features` says what the build holds (`NVFX_FEATURE_SCENE`, `_LIBRARY`,
 `_MANAGER`, `_PACK`, `_VOLUME`, `_PROFILE`, `_SHARED`) and what this CPU runs (`_AVX2`, `_AVX512`, `_VNNI`). The headers compile as C99 and

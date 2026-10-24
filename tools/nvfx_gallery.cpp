@@ -504,6 +504,7 @@ int gallery(const Args& A, nvfx_library* lib) {
     if (!in) die("cannot read " + A.verify.string());
     std::map<std::string, std::string> want;
     for (std::string line; std::getline(in, line);) {
+      if (!line.empty() && line.back() == '\r') line.pop_back();  // a CRLF checkout must not fail every hash
       const auto c = split(line, ',');
       if (c.size() >= 5 && c[0] == "library_keyframe") want[c[1]] = c[4];
     }

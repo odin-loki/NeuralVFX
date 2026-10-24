@@ -599,7 +599,60 @@ against its running mean) sets the smoke's intensity, so the smoke above follows
 it found a fault in the demo's own code, fixed before the video: the volume API's textures run z slowest, the
 renderer's fields y slowest, and the two boxes were stacked in z and drawn scrambled into stripes (and the flux was
 read off the wrong cells). It is a demo of coupling through the public API, not a coupled simulation: the boxes do not
-exchange heat or momentum, and the seam between them shows as a flat base under the upper smoke.
+exchange heat or momentum, and the seam between them shows as a flat base under the upper smoke. The rule lives in
+`include/neuralfx/coupled3d.hpp` (`top_soot_flux`, `FluxDrive`, `rows_to_renderer`), shared by the tool and the tests:
+`tests/test_coupled3d.cpp` (in `neuralfx_3d_tests`) checks the flux reads the top rows in the API's layout and counts
+only rising gas, the drive's settle, smoothing, mean and clamp, and the layout change the stacking needs.
+
+**Running and checking it** (24 October 2026). The video in `videos/` is made by
+
+```sh
+build/nvfx_3d video --study r --kind coupled --model models/3d/fire.nvfx3 --smoke models/3d/smoke.nvfx3 \
+    --out videos/3d_fire_smoke_coupled.mp4 --seconds 12 --controls 0.6,0.5,0.5 --seed 29900003
+```
+
+`--model` is the fire (the lower box, N2's C4), `--smoke` the smoke (the upper, this study's C4); both are in git, so
+the command needs no data root. The tool asks the two files their sizes through `nvfx_volume_effect_get_info` and
+refuses a pair whose width or depth differ; the heights add (64 x 96 x 64 twice here, drawn as 64 x 192 x 64). Each
+frame it steps both volumes to the frame's time (`nvfx_volume_step_to`), reads the fire's temperature, soot and
+velocity and the smoke's soot (`nvfx_volume_read`, float), takes the flux over the fire's top four layers
+(`top_soot_flux`), updates the smoke's intensity for the next frame (`FluxDrive`, settle 1 s, smoothing 1 s), moves
+each field into the renderer's layout (`rows_to_renderer`) with the smoke's heat set to zero, and draws the stack with
+the fire's optics. The fire takes `--seed`, the smoke `--seed` + 1; `--shard` (8 s) applies to both; `--controls` is
+the fire's starting intensity (it sweeps to 0.95 and back over the middle 60% of the video) and the wind and
+turbulence both volumes share; `--smoke-intensity` (0.6) is the smoke's base. `--study r` changes nothing in this
+kind (both models are named) and is kept so the command reads as this study's. Measured on the study machine (WSL, 64
+threads, the shared load at 7): 2 s at 640 x 360 on 4 threads in 7 s; the full 12 s at 1280 x 720 on the default 3
+threads in 92 s, and that render reproduced the committed `videos/3d_fire_smoke_coupled.mp4` to the byte (SHA-256
+`f59de54f816fe012ff3da79e390ec0dba597668fa7f90fbe1c23094ece2ada27` on both), so the shipped files and the current build
+still make the video in git. The checks: `Coupled3d.*` (seven tests, the rule) and, where ffmpeg is installed at
+configure time, `neuralfx.Coupled3dVideoSmoke`, which runs this command for 15 frames at 320 x 180 into the build tree
+(about 3 s): the two shipped models load, step, read back and stack through the public API on every test run (the
+layout fault above would have thrown or scrambled here, though the test does not look at the picture).
+`neuralfx.Volume3dToolUsage` runs `nvfx_3d` with no command and passes on its usage line (the tool has no `--help`).
+
+**The same coupling as a simulation** (24 October 2026): the solver's `sim3d::Stack` (`include/neuralfx/sim3d.hpp`)
+stacks two boxes of the same width, the fire's below and a box with no burner of its own above (`Params::source` off;
+`--upper` names its effect, `smoke_r` by default), and at the start of every solver step copies the lower's top row
+into the upper's floor border and the upper's bottom row into the lower's top border (a `Seam`), both from the state
+before the step. So heat, soot and velocity cross the seam both ways, a downflow in the upper box comes back down, and
+the order of the two steps does not matter; the pressure solve stays each box's own, so it is a coupling of the carried
+quantities, not one solve over both boxes, and the two boxes keep their heat and soot to within a few per cent
+(`Sim3d.CoupledStackSeamExchangesHeat` allows 8%; each box computes the seam face's flux from its own side). A box with
+no seams is the single box to the bit (checked against the committed solver: the same state hashes after 12 frames for
+all four effects, both velocity and both scalar schemes, 1 and 3 threads, with and without the momentum audit). What
+the seam does, measured on a warm blob set under it in two empty 16 x 24 x 16 boxes, rising at 20 cells per second, 24
+frames, against the one 16 x 48 x 16 box: in flux form (`smoke_r`, `smoke_r2`) the two boxes keep the heat and soot to
+3 x 10^-4 and hold the same share above the seam as the tall box to about 0.01 (0.919 against 0.927 at frame 12); with
+the fire's MacCormack scalars the first version made soot at the seam (a quarter more than the start in a second, where
+the tall box's had decayed to 0.62), because the backward trace from the edge row read the forward field's scratch
+border: that row now takes the neighbour's value at a seam, and the stack's totals are the tall box's to 1% (heat 0.496
+against 0.492 at frame 24, soot 0.628 against 0.619), the share above the seam to 0.01. `nvfx_3d video --kind coupled-sim` draws it as one 64 x 192 x 64 volume with
+the fire's optics, the upper box's heat left out of the picture. The two kinds differ in what crosses the seam: the
+API demo passes one number (the flux that sets the smoke's intensity) and shows a flat base under the upper smoke; the
+simulation passes the fields and has no such base. Both are demos, not measured; a learned model trained on the stacked
+teacher and tested as study R2 is would be the next step (TODO.md, "Next"). Tests: `Sim3d.CoupledStack*`
+(the seam exchanges heat, the fire feeds the smoke above, the same fields on any number of threads).
 
 ### 6.2 Study R and study hres
 

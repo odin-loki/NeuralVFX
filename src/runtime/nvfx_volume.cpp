@@ -1,6 +1,7 @@
 // The volume C API (include/neuralfx/nvfx_volume.h; study N, docs/STUDY_3D.md): 3D rollout effects for engines. A volume
-// runs the reference code of src/core/rollout3d.cpp on buffers made at creation, on its own threads (every loop writes per
-// cell or per slab, so the thread count never changes a value), with the AVX2 convolution where the CPU has it and the
+// runs the reference code of src/core/rollout3d.cpp on buffers made at creation, on its own threads or as jobs of an
+// engine's job system (nvfx_volume_create_with_jobs: the pool's runner; every loop writes per cell or per slab, so the
+// thread count, and who runs the jobs, never changes a value), with the AVX2 convolution where the CPU has it and the
 // detail layer on vectors (rt_detail3.hpp: the reference's fields to the bit, on AVX-512 where the CPU has it, else
 // AVX2); its pictures come from src/render3d. Shards as the 2D runtime's: each a fresh rollout from a start point,
 // crossfaded in.
@@ -141,6 +142,35 @@ void ensure(nvfx_volume& v, int q, long local, int keep_slot, int& slot_out) {
   slot_out = slot;
 }
 
+// A volume on `threads` of its own, or (threads 1 and `run` set) on an engine's job system: every parallel loop of the
+// rollout, the fields and the renderer goes through the pool, so the pool's runner is the whole hook.
+nvfx_status create_volume(const nvfx_volume_effect* effect, int threads, nvfx_volume_run_fn run, void* context, nvfx_volume** out) {
+  if (!effect || !out || threads < 0 || threads > 256) return NVFX_ERROR_ARGUMENT;
+  *out = nullptr;
+  try {
+    auto v = std::make_unique<nvfx_volume>(effect, threads);
+    if (run) v->pool.set_runner(run, context);
+    const r3::Model& m = effect->m;
+    v->profile = nfx::rt::current_profile();
+    if (nfx::rt::resolve_frame_isa(v->profile.isa) != NVFX_ISA_BASELINE) v->ws.conv = nfx::rt::volume_conv3_avx2;
+    v->detail = nfx::rt::make_volume_detail(m, v->ws, nfx::rt::rollout_isa(nfx::rt::Precision::float32, v->profile.isa));
+    v->ws.detail = v->detail.get();
+    for (auto& r : v->run) r.s = r3::make_state(m);
+    v->out_t.assign(m.h.fine_cells(), 0.f);
+    v->out_d.assign(m.h.fine_cells(), 0.f);
+    v->out_flow.assign(zu(m.h.cells()) * 3, 0.f);
+    v->controls.assign(zu(m.h.n_controls), 0.5f);
+    v->shard_frames = std::max(1, static_cast<int>(std::lround(8.0 * m.fps)));
+    v->fade = std::max(1, static_cast<int>(std::lround(0.5 * m.fps)));
+    *out = v.release();
+    return NVFX_OK;
+  } catch (const std::bad_alloc&) {
+    return NVFX_ERROR_MEMORY;
+  } catch (...) {
+    return NVFX_ERROR_ARGUMENT;
+  }
+}
+
 }  // namespace
 
 extern "C" {
@@ -201,30 +231,10 @@ const char* nvfx_volume_effect_control_name(const nvfx_volume_effect* effect, in
   return effect->m.control_names[zu(i)].c_str();
 }
 
-nvfx_status nvfx_volume_create(const nvfx_volume_effect* effect, int threads, nvfx_volume** out) {
-  if (!effect || !out || threads < 0 || threads > 256) return NVFX_ERROR_ARGUMENT;
-  *out = nullptr;
-  try {
-    auto v = std::make_unique<nvfx_volume>(effect, threads);
-    const r3::Model& m = effect->m;
-    v->profile = nfx::rt::current_profile();
-    if (nfx::rt::resolve_frame_isa(v->profile.isa) != NVFX_ISA_BASELINE) v->ws.conv = nfx::rt::volume_conv3_avx2;
-    v->detail = nfx::rt::make_volume_detail(m, v->ws, nfx::rt::rollout_isa(nfx::rt::Precision::float32, v->profile.isa));
-    v->ws.detail = v->detail.get();
-    for (auto& r : v->run) r.s = r3::make_state(m);
-    v->out_t.assign(m.h.fine_cells(), 0.f);
-    v->out_d.assign(m.h.fine_cells(), 0.f);
-    v->out_flow.assign(zu(m.h.cells()) * 3, 0.f);
-    v->controls.assign(zu(m.h.n_controls), 0.5f);
-    v->shard_frames = std::max(1, static_cast<int>(std::lround(8.0 * m.fps)));
-    v->fade = std::max(1, static_cast<int>(std::lround(0.5 * m.fps)));
-    *out = v.release();
-    return NVFX_OK;
-  } catch (const std::bad_alloc&) {
-    return NVFX_ERROR_MEMORY;
-  } catch (...) {
-    return NVFX_ERROR_ARGUMENT;
-  }
+nvfx_status nvfx_volume_create(const nvfx_volume_effect* effect, int threads, nvfx_volume** out) { return create_volume(effect, threads, nullptr, nullptr, out); }
+
+nvfx_status nvfx_volume_create_with_jobs(const nvfx_volume_effect* effect, nvfx_volume_run_fn run, void* context, nvfx_volume** out) {
+  return create_volume(effect, 1, run, context, out);
 }
 
 void nvfx_volume_free(nvfx_volume* volume) { delete volume; }

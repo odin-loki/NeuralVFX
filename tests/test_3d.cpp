@@ -10,6 +10,7 @@
 // simulator's, the runs' format, gradients with them) and the long training stage (resumes to the bit). Study R
 // (docs/STUDY_R.md): the validated smoke's solver (the flux form keeps what it carries; the buoyancy flux is the same up
 // the plume; the same fields on any number of threads), warm smoke's optics, runs that keep their effect.
+#include <neuralfx/coupled3d.hpp>
 #include <neuralfx/dcm/mixer.hpp>
 #include <neuralfx/nvfx_volume.h>
 #include <neuralfx/render3d.hpp>
@@ -24,8 +25,11 @@
 
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <bit>
+#include <chrono>
 #include <cmath>
+#include <cstdio>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
@@ -34,6 +38,7 @@
 #include <sstream>
 #include <stdexcept>
 #include <stdfloat>
+#include <thread>
 #include <vector>
 
 namespace r3 = nfx::rollout3d;
@@ -388,6 +393,136 @@ TEST(Sim3d, SmokeR2GainsTheMomentumItsBuoyancyGives) {
   EXPECT_GT(r2, 0.85);
   EXPECT_LT(r2, 1.15);
   EXPECT_GT(r2 - r, 0.25);
+}
+
+// --- the coupled stack (docs/STUDY_R.md §6.1): two boxes through a seam -------------------------------------------
+
+// Sums of a box's heat and soot, and of v over its bottom row (the momentum that came in through its floor).
+struct BoxSums {
+  double heat = 0, soot = 0, v_floor = 0;
+  bool finite = true;
+};
+BoxSums box_sums(const nfx::sim3d::Fluid& f) {
+  const auto s = f.state();
+  BoxSums o;
+  for (std::size_t i = 0; i < s.temp.size(); ++i) {
+    o.heat += s.temp[i];
+    o.soot += s.soot[i];
+    if (!std::isfinite(s.temp[i]) || !std::isfinite(s.soot[i]) || !std::isfinite(s.u[i]) || !std::isfinite(s.v[i]) || !std::isfinite(s.w[i])) o.finite = false;
+  }
+  for (int i = 0; i < s.nx * s.nz; ++i) o.v_floor += s.v[zu(i)];
+  return o;
+}
+
+// A rising blob of warm smoke set just under the seam of two empty smoke_r boxes (no burner in either) crosses into the
+// upper box: within 12 frames most of its heat and soot are above the seam and its upward momentum has come with them,
+// and the two boxes together keep what they had to within a few per cent (each box computes the seam face's flux from
+// its own side, to first order on the inflow side, so the seam is not exactly conservative). The flow is far from the
+// open sides and the upper box's top for these frames.
+TEST(Sim3d, CoupledStackSeamExchangesHeat) {
+  nfx::sim3d::Params p = small_smoke(2);
+  p.width = 16;
+  p.height = 24;
+  p.source = false;
+  nfx::sim3d::Stack st(p, p);
+  nfx::sim3d::State s = st.lower().state();
+  double h0 = 0, d0 = 0;
+  for (int y = 0; y < s.ny; ++y) {
+    for (int z = 0; z < s.nz; ++z) {
+      for (int x = 0; x < s.nx; ++x) {
+        const std::size_t i = (zu(y) * zu(s.nz) + zu(z)) * zu(s.nx) + zu(x);
+        const float dx = fl(x) - 7.5f, dy = fl(y) - 19.f, dz = fl(z) - 7.5f;  // centred 5 cells under the seam
+        const float g = std::exp(-(dx * dx + dy * dy + dz * dz) / 12.f);
+        s.temp[i] = 0.3f * g;
+        s.soot[i] = 0.5f * g;
+        s.v[i] = 20.f;  // cells per second: 8 cells in 12 frames
+        h0 += s.temp[i];
+        d0 += s.soot[i];
+      }
+    }
+  }
+  st.lower().set_state(s);
+  ASSERT_EQ(box_sums(st.upper()).heat, 0.0);
+  for (int f = 0; f < 12; ++f) st.step_frame();
+  const BoxSums lo = box_sums(st.lower()), hi = box_sums(st.upper());
+  EXPECT_TRUE(lo.finite && hi.finite);
+  EXPECT_GT(hi.heat, 0.5 * h0) << "most of the heat should be above the seam: " << hi.heat << " of " << h0;
+  EXPECT_GT(hi.soot, 0.5 * d0);
+  EXPECT_LT(lo.heat, 0.3 * h0) << "and little left below it: " << lo.heat;
+  EXPECT_NEAR((lo.heat + hi.heat) / h0, 1.0, 0.08) << "the two boxes keep the heat between them";
+  EXPECT_NEAR((lo.soot + hi.soot) / d0, 1.0, 0.08);
+  EXPECT_GT(hi.v_floor, 0.0) << "the upward momentum came through the seam with it";
+  EXPECT_EQ(st.frame_index(), 12);
+  EXPECT_EQ(st.upper().frame_index(), 12);
+  EXPECT_FLOAT_EQ(st.upper().time(), st.lower().time());
+}
+
+// The demo's configuration (docs/STUDY_R.md §6.1): a fire below, study R's smoke above with no burner of its own. The
+// fire's hot gas reaches the seam after about 3.5 s in this 24-cell box and feeds the box above, which then differs from
+// an empty box; and the lower box differs from a fire alone (the coupling is two-way: the border it sees above is the
+// smoke's, not its own outflow).
+TEST(Sim3d, CoupledStackFireFeedsTheSmokeAbove) {
+  nfx::sim3d::Params fire = small_fire(3);
+  fire.width = fire.height = 24;
+  fire.wind = 0.5f;
+  nfx::sim3d::Params smoke = fire;
+  smoke.effect = nfx::sim3d::Effect::smoke_r;
+  smoke.source = false;
+  smoke.seed = fire.seed + 1;
+  nfx::sim3d::Stack st(fire, smoke);
+  nfx::sim3d::Fluid alone(fire);
+  for (int f = 0; f < 150; ++f) {
+    st.step_frame();
+    alone.step_frame();
+  }
+  const BoxSums lo = box_sums(st.lower()), hi = box_sums(st.upper()), al = box_sums(alone);
+  EXPECT_TRUE(lo.finite && hi.finite);
+  EXPECT_GT(hi.heat, 0.5) << "the fire's heat should have reached the box above";
+  EXPECT_GT(hi.soot, 0.1);
+  EXPECT_GT(hi.v_floor, 10.0) << "and be rising through its floor";
+  EXPECT_NE(st.lower().state().temp, alone.state().temp) << "the lower box sees the smoke above it";
+  EXPECT_GT(al.heat, 0.0);
+  const std::size_t n1 = zu(24 * 24 * 24);
+  std::vector<float> T(2 * n1), D(2 * n1), T2(n1), D2(n1);
+  st.fields(T, D);
+  st.upper().fields(T2, D2);
+  EXPECT_TRUE(std::equal(T.begin() + static_cast<std::ptrdiff_t>(n1), T.end(), T2.begin())) << "the stack's fields are the lower box's rows then the upper's";
+  EXPECT_TRUE(std::equal(D.begin() + static_cast<std::ptrdiff_t>(n1), D.end(), D2.begin()));
+}
+
+TEST(Sim3d, CoupledStackSameFieldsOnAnyNumberOfThreads) {
+  const auto run = [](int threads) {
+    nfx::sim3d::Params fire = small_fire(threads);
+    nfx::sim3d::Params smoke = fire;
+    smoke.effect = nfx::sim3d::Effect::smoke_r;
+    smoke.source = false;
+    nfx::sim3d::Stack st(fire, smoke);
+    // a blob under the seam so that the seam carries something from the first frame
+    nfx::sim3d::State s = st.lower().state();
+    for (int y = 18; y < s.ny; ++y) {
+      for (int i = 0; i < s.nx * s.nz; ++i) {
+        s.temp[zu(y * s.nx * s.nz + i)] = 0.4f;
+        s.v[zu(y * s.nx * s.nz + i)] = 12.f;
+      }
+    }
+    st.lower().set_state(s);
+    for (int f = 0; f < 10; ++f) st.step_frame();
+    return std::pair{st.lower().state(), st.upper().state()};
+  };
+  const auto [l1, u1] = run(1);
+  const auto [l3, u3] = run(3);
+  EXPECT_EQ(l1.temp, l3.temp);
+  EXPECT_EQ(l1.v, l3.v);
+  EXPECT_EQ(u1.temp, u3.temp);
+  EXPECT_EQ(u1.soot, u3.soot);
+  EXPECT_EQ(u1.v, u3.v);
+  double heat = 0;
+  for (const float t : u1.temp) heat += t;
+  EXPECT_GT(heat, 0.0);
+  // mismatched boxes are refused
+  nfx::sim3d::Params other = small_fire(1);
+  other.width = 24;
+  EXPECT_THROW(nfx::sim3d::Stack(small_fire(1), other), std::invalid_argument);
 }
 
 TEST(Render3d, WarmSmokeDoesNotGlow) {
@@ -1150,11 +1285,41 @@ std::vector<float> reference_heat(const r3::Model& stored, int index, const std:
   return out;
 }
 
+// An engine's fork-join job system for the volume's job hook (nvfx_volume_create_with_jobs): `workers` threads made per
+// run (the caller one of them) take the jobs from an atomic counter; it counts what it was asked and whether the volume
+// ever asked from inside a job (it must not: an engine's run need not be re-entrant).
+struct TestJobs {
+  int workers = 3;
+  std::atomic<long> runs{0}, jobs{0};
+  std::atomic<int> depth{0}, nested{0}, widest{0};
+  static void run(void* context, int n, nvfx_volume_job_fn job, void* job_context) {
+    auto& self = *static_cast<TestJobs*>(context);
+    if (self.depth.fetch_add(1) != 0) ++self.nested;
+    ++self.runs;
+    self.jobs += n;
+    self.widest = std::max(self.widest.load(), n);
+    std::atomic<int> next{0};
+    const auto work = [&] {
+      for (int i = next.fetch_add(1); i < n; i = next.fetch_add(1)) job(job_context, i);
+    };
+    std::vector<std::jthread> threads;
+    for (int w = 1; w < self.workers; ++w) threads.emplace_back(work);
+    work();
+    threads.clear();  // joins
+    --self.depth;
+  }
+};
+
+// `threads` < 0: on an engine's job system (`jobs`, or the caller alone when it is null) instead of threads of its own.
 std::vector<float> play(const nvfx_volume_effect* e, int threads, nvfx_isa isa, int frames, std::uint64_t seed, int variation, float shard,
-                        std::vector<std::uint8_t>* picture = nullptr) {
+                        std::vector<std::uint8_t>* picture = nullptr, TestJobs* jobs = nullptr) {
   EXPECT_EQ(nvfx_set_isa(isa), NVFX_OK);
   nvfx_volume* v = nullptr;
-  EXPECT_EQ(nvfx_volume_create(e, threads, &v), NVFX_OK);
+  if (threads < 0) {
+    EXPECT_EQ(nvfx_volume_create_with_jobs(e, jobs ? &TestJobs::run : nullptr, jobs, &v), NVFX_OK);
+  } else {
+    EXPECT_EQ(nvfx_volume_create(e, threads, &v), NVFX_OK);
+  }
   nvfx_set_isa(NVFX_ISA_AUTO);
   const float c[3] = {0.6f, 0.4f, 0.7f};
   nvfx_volume_set_controls(v, c, 3);
@@ -1223,6 +1388,32 @@ TEST(VolumeApi, SameFieldsAndPicturesOnAnyNumberOfThreads) {
   for (std::size_t i = 3; i < p1.size(); i += 4) lit += p1[i] > 0;
   EXPECT_GT(lit, 50);
   for (const float v : a) ASSERT_TRUE(std::isfinite(v));
+}
+
+TEST(VolumeApi, SameFieldsAndPicturesOnAnEnginesJobSystem) {
+  const r3::Model m = tiny_model();
+  Loaded l(m);
+  std::vector<std::uint8_t> p_own, p_jobs, p_alone;
+  // the same frame as above: shards of 1.5 s, frame 35 shows two rollouts crossfaded; the volume's own thread against
+  // an engine's job system of three workers, and the hook with no job system (the caller alone)
+  const auto own = play(l.e, 1, NVFX_ISA_AUTO, 35, 7, -1, 1.5f, &p_own);
+  TestJobs jobs;
+  const auto through = play(l.e, -1, NVFX_ISA_AUTO, 35, 7, -1, 1.5f, &p_jobs, &jobs);
+  const auto alone = play(l.e, -1, NVFX_ISA_AUTO, 35, 7, -1, 1.5f, &p_alone, nullptr);
+  EXPECT_EQ(own, through);
+  EXPECT_EQ(p_own, p_jobs);
+  EXPECT_EQ(own, alone);
+  EXPECT_EQ(p_own, p_alone);
+  // the engine ran the work: the starts' warm-ups, the steps, the crossfade, the field and the picture, each a fork-join
+  // of as many jobs as the loop has slabs (or rows), never from inside one of its own jobs
+  EXPECT_GT(jobs.runs.load(), 100L);
+  EXPECT_GT(jobs.jobs.load(), jobs.runs.load());
+  EXPECT_GE(jobs.widest.load(), m.h.fy());
+  EXPECT_EQ(jobs.nested.load(), 0);
+  // errors
+  nvfx_volume* v = nullptr;
+  EXPECT_EQ(nvfx_volume_create_with_jobs(nullptr, &TestJobs::run, &jobs, &v), NVFX_ERROR_ARGUMENT);
+  EXPECT_EQ(nvfx_volume_create_with_jobs(l.e, &TestJobs::run, &jobs, nullptr), NVFX_ERROR_ARGUMENT);
 }
 
 TEST(VolumeApi, StepsAreAFunctionOfTime) {
@@ -1294,6 +1485,112 @@ TEST(VolumeApi, HresFireIsTheFrozenModel) {
   nvfx_volume_effect* e = nullptr;
   ASSERT_EQ(nvfx_volume_effect_load(model.string().c_str(), &e), NVFX_OK);
   nvfx_volume_effect_free(e);
+}
+
+// The coupled demo (docs/STUDY_R.md §6.1; `nvfx_3d video --kind coupled`) on the shipped models: N2's fire
+// (models/3d/fire.nvfx3) and study R's smoke (models/3d/smoke.nvfx3), both through the volume C API, 1.5 s on 3
+// threads with the demo's controls and seeds. The fire's soot does leave the top of its box (the flux that drives the
+// smoke is positive and finite, the same to the bit on one thread), the drive stays within its range, the two fields
+// stack into one volume that the renderer draws lit in both halves. No GPU: about a few seconds on 3 threads.
+TEST(VolumeApi, CoupledDemoFeedsTheSmokeFromTheFiresSoot) {
+  const std::filesystem::path src = NEURALFX_SOURCE_DIR;
+  const std::filesystem::path fire_path = src / "models/3d/fire.nvfx3", smoke_path = src / "models/3d/smoke.nvfx3";
+  if (!std::filesystem::exists(fire_path) || !std::filesystem::exists(smoke_path)) GTEST_SKIP() << "no models/3d/fire.nvfx3 and smoke.nvfx3";
+  struct Vol {
+    nvfx_volume_effect* e = nullptr;
+    nvfx_volume* v = nullptr;
+    nvfx_volume_info info{};
+    Vol(const std::filesystem::path& p, int threads, std::uint64_t seed) {
+      EXPECT_EQ(nvfx_volume_effect_load(p.string().c_str(), &e), NVFX_OK) << p;
+      EXPECT_EQ(nvfx_volume_create(e, threads, &v), NVFX_OK);
+      nvfx_volume_effect_get_info(e, &info);
+      nvfx_volume_set_seed(v, seed);
+      EXPECT_EQ(nvfx_volume_set_shard(v, 0.f), NVFX_OK);  // one continuous rollout: the demo's first shard, without a fade
+    }
+    ~Vol() {
+      nvfx_volume_free(v);
+      nvfx_volume_effect_free(e);
+    }
+    std::size_t cells() const { return zu(info.size[0]) * zu(info.size[1]) * zu(info.size[2]); }
+  };
+  const std::uint64_t seed = 29'900'003;
+  const float base = 0.6f;
+  const std::array<float, 3> cf{0.6f, 0.5f, 0.5f};
+  const auto t0 = std::chrono::steady_clock::now();
+  Vol fire(fire_path, 3, seed), smoke(smoke_path, 3, seed + 1);
+  ASSERT_NE(fire.v, nullptr);
+  ASSERT_NE(smoke.v, nullptr);
+  ASSERT_EQ(fire.info.size[0], smoke.info.size[0]) << "the demo stacks boxes of one width";
+  ASSERT_EQ(fire.info.size[2], smoke.info.size[2]);
+  ASSERT_EQ(fire.info.fps, smoke.info.fps);
+  const int nx = fire.info.size[0], ny1 = fire.info.size[1], ny2 = smoke.info.size[1], nz = fire.info.size[2];
+  const std::size_t n1 = fire.cells(), n2 = smoke.cells();
+  std::vector<float> T1(n1), D1(n1), V1(3 * n1), D2(n2);
+  nfx::coupled3d::FluxDrive drive;
+  float smoke_i = base;
+  const int frames = static_cast<int>(std::lround(1.5 * fire.info.fps)) + 1;
+  std::vector<double> flux(zu(frames));
+  for (int f = 0; f < frames; ++f) {
+    const double t = f / static_cast<double>(fire.info.fps);
+    ASSERT_EQ(nvfx_volume_set_controls(fire.v, cf.data(), 3), NVFX_OK);
+    const std::array<float, 3> cs{smoke_i, cf[1], cf[2]};
+    ASSERT_EQ(nvfx_volume_set_controls(smoke.v, cs.data(), 3), NVFX_OK);
+    ASSERT_EQ(nvfx_volume_step_to(fire.v, t), NVFX_OK);
+    ASSERT_EQ(nvfx_volume_step_to(smoke.v, t), NVFX_OK);
+    ASSERT_EQ(nvfx_volume_read(fire.v, NVFX_VOLUME_SOOT, NVFX_VOLUME_FLOAT, D1.data(), n1 * 4), NVFX_OK);
+    ASSERT_EQ(nvfx_volume_read(fire.v, NVFX_VOLUME_VELOCITY, NVFX_VOLUME_FLOAT, V1.data(), 3 * n1 * 4), NVFX_OK);
+    flux[zu(f)] = nfx::coupled3d::top_soot_flux(D1, V1, nx, ny1, nz, 4);
+    ASSERT_TRUE(std::isfinite(flux[zu(f)]) && flux[zu(f)] >= 0.0) << "frame " << f;
+    smoke_i = drive.update(flux[zu(f)], base, fire.info.fps, t);
+    ASSERT_TRUE(std::isfinite(smoke_i) && smoke_i >= 0.05f && smoke_i <= 1.f) << "frame " << f << ": " << smoke_i;
+  }
+  const double stepped = std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
+  EXPECT_GT(flux.back(), 0.0) << "the fire's soot should be leaving the top of its box at 1.5 s";
+  EXPECT_GT(*std::max_element(flux.begin(), flux.end()), 0.0);
+  EXPECT_EQ(drive.frames, frames);
+  // the same flux on one thread (the API's frames are the same on any number; the sum's order is fixed)
+  {
+    Vol fire1(fire_path, 1, seed);
+    ASSERT_NE(fire1.v, nullptr);
+    ASSERT_EQ(nvfx_volume_set_controls(fire1.v, cf.data(), 3), NVFX_OK);
+    ASSERT_EQ(nvfx_volume_step_to(fire1.v, (frames - 1) / static_cast<double>(fire.info.fps)), NVFX_OK);
+    std::vector<float> d(n1), v(3 * n1);
+    ASSERT_EQ(nvfx_volume_read(fire1.v, NVFX_VOLUME_SOOT, NVFX_VOLUME_FLOAT, d.data(), n1 * 4), NVFX_OK);
+    ASSERT_EQ(nvfx_volume_read(fire1.v, NVFX_VOLUME_VELOCITY, NVFX_VOLUME_FLOAT, v.data(), 3 * n1 * 4), NVFX_OK);
+    EXPECT_EQ(nfx::coupled3d::top_soot_flux(d, v, nx, ny1, nz, 4), flux.back());
+  }
+  // the two boxes as one volume, the fire's optics (the smoke's heat set to zero, as the demo draws it)
+  ASSERT_EQ(nvfx_volume_read(fire.v, NVFX_VOLUME_TEMPERATURE, NVFX_VOLUME_FLOAT, T1.data(), n1 * 4), NVFX_OK);
+  ASSERT_EQ(nvfx_volume_read(smoke.v, NVFX_VOLUME_SOOT, NVFX_VOLUME_FLOAT, D2.data(), n2 * 4), NVFX_OK);
+  std::vector<float> T(n1 + n2, 0.f), D(n1 + n2, 0.f);
+  nfx::coupled3d::rows_to_renderer(T1, nx, ny1, nz, T.data());
+  nfx::coupled3d::rows_to_renderer(D1, nx, ny1, nz, D.data());
+  nfx::coupled3d::rows_to_renderer(D2, nx, ny2, nz, D.data() + n1);
+  double d1 = 0, d2 = 0, dl = 0, du = 0;
+  for (std::size_t i = 0; i < n1; ++i) d1 += D1[i];
+  for (std::size_t i = 0; i < n2; ++i) d2 += D2[i];
+  for (std::size_t i = 0; i < n1; ++i) dl += D[i];
+  for (std::size_t i = n1; i < n1 + n2; ++i) du += D[i];
+  EXPECT_NEAR(dl, d1, 1e-6 * std::max(1.0, d1));
+  EXPECT_NEAR(du, d2, 1e-6 * std::max(1.0, d2));
+  EXPECT_GT(d1, 0.0);
+  EXPECT_GT(d2, 0.0) << "the smoke above has soot to draw";
+  nfx::Pool pool(3);
+  rd::Renderer rend(nx, ny1 + ny2, nz, rd::optics_for("fire3d"));
+  rend.prepare(T, D, &pool);
+  const int W = 48, H = 96;
+  const float ey = fl(ny1 + ny2) / fl(nx);  // the box is one unit across
+  const auto cam = rd::look_at({0.f, 0.5f * ey, 4.9f}, {0.f, 0.5f * ey, 0.f}, {0.f, 1.f, 0.f}, 40.f, fl(W) / fl(H));
+  std::vector<std::uint8_t> pic(zu(W * H * 4));
+  rend.render(cam, W, H, pic.data(), zu(W) * 4, &pool);
+  int lit_top = 0, lit_bottom = 0;
+  for (int y = 0; y < H; ++y) {
+    for (int x = 0; x < W; ++x) (y < H / 2 ? lit_top : lit_bottom) += pic[(zu(y) * zu(W) + zu(x)) * 4 + 3] > 0;
+  }
+  EXPECT_GT(lit_bottom, 0) << "the fire draws in the lower half";
+  EXPECT_GT(lit_top, 0) << "and its smoke in the upper half";
+  std::printf("[ coupled ] %d frames of two %dx%dx%d volumes in %.1f s; flux at 1.5 s %.4g (peak %.4g), smoke intensity %.3f; lit %d below, %d above\n", frames, nx, ny1, nz, stepped,
+              flux.back(), *std::max_element(flux.begin(), flux.end()), smoke_i, lit_bottom, lit_top);
 }
 
 // The volume runtime's detail layer on vectors (src/runtime/rt_detail3.hpp) gives rollout3d::detail_step's fields to the

@@ -86,8 +86,19 @@ NVFX_API const char* nvfx_volume_effect_control_name(const nvfx_volume_effect* e
 
 /* Volumes --------------------------------------------------------------------------------------------------------- */
 /* `threads`: threads the volume's steps and pictures use, the calling thread included (1: only the caller; 0: one per
- * hardware thread). The volume owns its worker threads. The frames are the same on any number. */
+ * hardware thread). The volume owns its worker threads. The frames are the same on any number (and on an engine's job
+ * system, nvfx_volume_create_with_jobs below). */
 NVFX_API nvfx_status nvfx_volume_create(const nvfx_volume_effect* effect, int threads, nvfx_volume** out);
+/* Or on an engine's job system (NVFX_VERSION 10): a volume with no threads of its own, whose parallel loops (a step's
+ * slabs, a picture's rows, a field's slices) run as jobs of the engine. `run(context, jobs, job, job_context)` must
+ * call job(job_context, j) once for every j in [0, jobs), on any threads, in any order, any number at once, and
+ * return when all have returned: a fork-join. It is called on the thread that steps, reads or renders the volume
+ * (from inside an engine job, if that is where the volume runs: the engine's run must then allow that), several
+ * times per call; the jobs of one run write disjoint slabs, so the frames are the same to the bit as on the volume's
+ * own threads, whoever runs them. NULL `run`: the caller alone (as threads = 1). Nothing allocates on this path. */
+typedef void (*nvfx_volume_job_fn)(void* job_context, int job);
+typedef void (*nvfx_volume_run_fn)(void* context, int jobs, nvfx_volume_job_fn job, void* job_context);
+NVFX_API nvfx_status nvfx_volume_create_with_jobs(const nvfx_volume_effect* effect, nvfx_volume_run_fn run, void* context, nvfx_volume** out);
 NVFX_API void nvfx_volume_free(nvfx_volume* volume);
 NVFX_API size_t nvfx_volume_scratch_bytes(const nvfx_volume* volume);
 /* A change of seed, variation, shard length or controls applies from the next step; the seed, variation and shard
