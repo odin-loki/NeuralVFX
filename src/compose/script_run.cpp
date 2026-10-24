@@ -299,7 +299,7 @@ struct InputC {  // `input NAME = value`: a value the game sets while the scene 
   float value = 0.f;  // the script's starting value
 };
 
-// The weather director (weather.hpp, docs/WEATHER.md): `weather NAME, seed S, regime R, over D, direction X [: schedule]`.
+// The weather director (weather.hpp, docs/WEATHER.md): `weather NAME, seed S, regime R, over D, direction X, hour H [: schedule]`.
 // Its members (NAME.rain, ...) are slots from `slot` on, written each frame before the rules.
 struct WeatherC {
   std::string name;
@@ -308,6 +308,7 @@ struct WeatherC {
   float direction = 1.f;
   Code regime;      // where to head (a number: 0 clear ... 6 dust; regime names are values in it), each frame; none: clear
   Code over;        // how long a change takes, evaluated when it starts (default 60 s)
+  Code hour;        // the solar hour (where the sun stands), each frame; none: noon
   struct Line {     // a line of the schedule: from `at` on, head for `regime` over `over` (NaN: the statement's)
     int regime = 0;
     float at = 0.f, over = 0.f;
@@ -324,6 +325,7 @@ struct Program {
   bool has_bus = false;
   int capacity = 4096;
   Code flow, light_gain, exposure, fade, haze, bloom, bloom_threshold, cam_x, cam_y, daylight, overcast, visibility;
+  Code wet, puddle, deck, foot;  // the weather director's ground and ceiling (docs/COMPOSE.md §4.9.1)
   std::array<Code, 3> flash;
   std::vector<float> keyframes;
   std::vector<EffectC> effects;
@@ -581,7 +583,8 @@ void Compiler::emit(const Expr& e, const Ctx& c, Code& code, std::vector<std::st
           for (const std::string_view m : wx::member_names()) all.emplace_back(m);
           const std::string hint = did_you_mean(e.member, all);
           fail(e.pos, hint.empty() ? std::format("a weather has no '{}' (it has cloud, rain, snow, hail, wind, mean, gust, visibility, temp, lightning, dust, fog, "
-                                                 "extinction, u, beaufort, lean, leaves, lift, light, flash, strike, bolt, since, regime and progress)", e.member)
+                                                 "extinction, u, beaufort, lean, leaves, lift, trees, light, flash, strike, bolt, since, regime, progress, humidity, dewpoint, "
+                                                 "base, water, wet, puddle, evaporation, carried, front, hour, elevation, sunx, sun, shaft, deck, foot and trees)", e.member)
                                    : std::format("a weather has no '{}'{}", e.member, hint));
         }
         return slot(w->slot + k, true);
@@ -1427,6 +1430,11 @@ void Compiler::weather(const Statement& s, WeatherC& w) {
     c.what = "'over'";
     w.over = code(p->value.exprs[0], c);
   }
+  if (const Prop* p = s.prop("hour")) {
+    Ctx c;
+    c.what = "'hour'";
+    w.hour = code(p->value.exprs[0], c);
+  }
   float last = -kNever;
   for (const Statement& line : s.body) {
     WeatherC::Line l;
@@ -1650,6 +1658,10 @@ Program Compiler::compile() {
       expr("daylight", prog_.daylight);  // the day (docs/WEATHER.md §4.6)
       expr("overcast", prog_.overcast);
       expr("visibility", prog_.visibility);
+      expr("wet", prog_.wet);  // the wet ground and the cloud deck (docs/COMPOSE.md §4.9.1)
+      expr("puddle", prog_.puddle);
+      expr("deck", prog_.deck);
+      expr("foot", prog_.foot);
     } else if (st.keyword == "camera") {
       expr("x", prog_.cam_x);
       expr("y", prog_.cam_y);
@@ -2374,6 +2386,11 @@ struct Scene::Impl {
     frame->daylight = eval_or(prog.daylight, 0.f);
     frame->overcast = eval_or(prog.overcast, 0.f);
     frame->visibility = std::max(1.f, eval_or(prog.visibility, kNever));  // metres (at least one)
+    // the wet ground and the cloud deck (docs/COMPOSE.md §4.9.1): shares 0 to 1, the foot 0 to 90 degrees
+    frame->wet = std::clamp(eval_or(prog.wet, 0.f), 0.f, 1.f);
+    frame->puddle = std::clamp(eval_or(prog.puddle, 0.f), 0.f, 1.f);
+    frame->deck = std::clamp(eval_or(prog.deck, 0.f), 0.f, 1.f);
+    frame->foot = std::clamp(eval_or(prog.foot, 0.f), 0.f, 90.f);
     bloom = eval_or(prog.bloom, 1.f);
     bloom_threshold = eval_or(prog.bloom_threshold, 1.f);
     light_gain = eval_or(prog.light_gain, 0.14f);
@@ -2404,6 +2421,7 @@ struct Scene::Impl {
     if (f == 0) d = wx::Director(wc.seed, static_cast<wx::Regime>(wc.schedule.empty() ? to : wc.start), wc.direction);
     if (static_cast<int>(d.regime()) != to) d.request(static_cast<wx::Regime>(to), std::isnan(over) ? eval_or(wc.over, 60.f) : over);
     if (f > 0) d.step(1.f / prog.fps);
+    if (wc.hour.present()) d.set_hour(eval(wc.hour));  // the sun's hour, the script's each frame (after the step: the frame's)
     for (int k = 0; k < wx::kMembers; ++k) slots[zs(wc.slot + k)] = d.value(k);
   }
 

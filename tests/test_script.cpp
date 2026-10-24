@@ -1,12 +1,16 @@
 // Scene scripts (src/compose/script.hpp, docs/COMPOSE.md §4) and the field effects of §5: the parser's errors point at
 // the right line and column, scripts survive a round trip through the printer, a scripted scene matches the same scene
-// written in C++ to the bit, rules fire as often as they say, and each field effect does what it promises.
+// written in C++ to the bit, rules fire as often as they say, and each field effect does what it promises. The frame's wet
+// ground and cloud deck (docs/COMPOSE.md §4.11, §5.4) draw what their design says.
 #include "compose_scene.hpp"
 #include "script.hpp"
+#include "weather.hpp"
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <cmath>
+#include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <numeric>
@@ -18,6 +22,7 @@ namespace {
 using namespace nfx;
 using namespace nfx::compose;
 namespace sc = nfx::compose::script;
+namespace wx = nfx::compose::wx;
 using nfx::compose::testing::tiny_effect;
 
 std::size_t z(int v) { return static_cast<std::size_t>(v); }
@@ -931,6 +936,184 @@ at 0: burst at (80, 40), radius 1, embers 20, speed 1
   still.particles().each([&](float, float, float& vx, float&) { vs += vx; });
   windy.particles().each([&](float, float, float& vx, float&) { vw += vx; });
   EXPECT_GT(vw / 20.0, vs / 20.0 + 20.0);  // pixels per second
+}
+
+// --- the wet ground and the cloud deck (docs/COMPOSE.md §4.11, §5.4) -----------------------------------------------------
+
+// The linear picture of a scene's frame 0 (Frame::screen(): the scene's units, before exposure and tone mapping; `bloom 0`
+// leaves it as the background and the modules drew it).
+Image4 picture_of(const std::string& text, int threads = 2) {
+  sc::Options o;
+  o.threads = threads;
+  o.isa = Isa::base;
+  sc::Scene s(sc::parse(text, "f"), tiny_loader(), o);
+  std::vector<std::uint8_t> rgb(z(s.frame().width()) * z(s.frame().height()) * 3);
+  s.render(0, rgb);
+  return s.frame().screen();
+}
+
+const float* px(const Image4& img, int x, int y) { return img.row(y) + z(x) * 4; }
+
+// Fresnel's reflectance of water by Schlick at the depression angle a ground row's distance gives (docs/COMPOSE.md §4.11:
+// dist = 25 / (depth + 0.05) m, the eye 1.6 m up).
+float puddle_reflectance(float wy, float ground) {
+  const float depth = std::clamp((wy - ground) / 160.f, 0.f, 1.f), dist = 25.f / (depth + 0.05f);
+  const float s = 1.6f / std::sqrt(dist * dist + 1.6f * 1.6f), f = 1.f - s;
+  return 0.02f + 0.98f * f * f * f * f * f;
+}
+
+// `frame wet` darkens the ground rows by lerp(1, 0.6, wet), their own colour and the scene's light on them, by day and by
+// night, before the haze; the sky rows and the hills are untouched to the bit.
+TEST(Frame, WetDarkensTheGroundAndNothingElse) {
+  const std::string head = "scene size 160 x 120, fps 30, length 1 s, ground 80\nlight gain 0.14, flash (0.1, 0.1, 0.1)\n";
+  for (const std::string& day : {std::string(""), std::string(", daylight 1"), std::string(", daylight 1, overcast 0.5")}) {
+    const Image4 dry = picture_of(head + "frame bloom 0" + day + "\n"), wet = picture_of(head + "frame bloom 0, wet 1" + day + "\n");
+    const Image4 half = picture_of(head + "frame bloom 0, wet 0.5" + day + "\n");
+    for (int y = 0; y < 80; ++y) EXPECT_EQ(std::memcmp(dry.row(y), wet.row(y), z(160) * 16), 0) << "a sky or hills row changed: " << y << day;
+    for (int y = 80; y < 120; ++y) {
+      for (int x = 0; x < 160; x += 7) {
+        for (int c = 0; c < 3; ++c) {
+          EXPECT_NEAR(px(wet, x, y)[c], 0.6f * px(dry, x, y)[c], 1e-6f) << x << ", " << y << day;
+          EXPECT_NEAR(px(half, x, y)[c], 0.8f * px(dry, x, y)[c], 1e-6f) << x << ", " << y << day;
+        }
+      }
+    }
+  }
+  // the darkening is before the haze: in a haze the wet ground is lighter than 0.6 of the dry (the airlight is not wet)
+  const std::string hazy = head + "frame bloom 0, daylight 1, visibility 400";
+  const Image4 dry = picture_of(hazy + "\n"), wet = picture_of(hazy + ", wet 1\n");
+  for (int y = 80; y < 120; y += 5) {
+    const float* d = px(dry, 80, y);
+    const float* w = px(wet, 80, y);
+    EXPECT_GT(w[1], 0.6f * d[1] + 1e-4f) << y;
+    EXPECT_LT(w[1], d[1]) << y;
+  }
+}
+
+// `frame puddle` lays water in the ground's hollows that mirrors the picture in the ground plane: the row ground + d shows R of
+// the row ground - d (the hills near the horizon, the sky further down the picture) and 1 - R of the ground, R Fresnel's
+// reflectance at the row's depression angle; `puddle 1` fills every hollow, `puddle 0.5` half of them.
+TEST(Frame, PuddlesMirrorTheSkyAndTheHillsByFresnel) {
+  const std::string head = "scene size 400 x 300, fps 30, length 1 s, ground 250\nlight gain 0\nframe bloom 0, daylight 1";
+  const Image4 dry = picture_of(head + "\n"), full = picture_of(head + ", puddle 1\n");
+  for (int y = 0; y < 250; ++y) EXPECT_EQ(std::memcmp(dry.row(y), full.row(y), z(400) * 16), 0) << "a sky or hills row changed: " << y;
+  // every ground pixel of the full puddles is R of the mirrored row plus 1 - R of the dry ground, within 1 %
+  for (int y = 250; y < 300; ++y) {
+    const float wy = fl(y) + 0.5f, R = puddle_reflectance(wy, 250.f);
+    const int ym = 499 - y;  // the row at ground - d, d = wy - ground
+    for (int x = 0; x < 400; x += 3) {
+      for (int c = 0; c < 3; ++c) {
+        const float want = R * px(dry, x, ym)[c] + (1.f - R) * px(dry, x, y)[c];
+        EXPECT_NEAR(px(full, x, y)[c], want, 0.01f * want + 1e-5f) << x << ", " << y << " channel " << c;
+      }
+    }
+  }
+  // the row nearest the horizon mirrors the hills (the row just above it is theirs in every column: dark), the bottom row
+  // the sky 49.5 world pixels up, where no hill stands (the row 200 is the sky's blue in every column)
+  for (int x = 0; x < 400; ++x) {
+    EXPECT_LT(px(dry, x, 249)[2], 0.1f) << x;
+    EXPECT_GT(px(dry, x, 200)[2], 0.4f) << x;
+  }
+  EXPECT_GT(puddle_reflectance(250.5f, 250.f), 0.97f) << "near the horizon the water is nearly a mirror";
+  EXPECT_NEAR(puddle_reflectance(410.f, 250.f), 0.72f, 0.01f) << "at the bottom of a tall picture, 0.72";
+  // half full: a hollow's coverage is where its pixel lies between the dry ground and the full puddle; half the hollows are
+  // at least half covered, within the hash's statistics (hollows 16 world pixels wide in bands of six rows: a wide picture
+  // for about a thousand of them)
+  const std::string wide = "scene size 1600 x 300, fps 30, length 1 s, ground 250\nlight gain 0\nframe bloom 0, daylight 1";
+  const Image4 wdry = picture_of(wide + "\n"), wfull = picture_of(wide + ", puddle 1\n"), whalf = picture_of(wide + ", puddle 0.5\n");
+  int covered = 0, counted = 0;
+  for (int y = 250; y < 300; ++y) {
+    for (int x = 0; x < 1600; ++x) {
+      int c = 0;
+      for (int k = 1; k < 3; ++k)
+        if (std::abs(px(wfull, x, y)[k] - px(wdry, x, y)[k]) > std::abs(px(wfull, x, y)[c] - px(wdry, x, y)[c])) c = k;
+      const float span = px(wfull, x, y)[c] - px(wdry, x, y)[c];
+      if (std::abs(span) < 1e-3f) continue;
+      const float w = (px(whalf, x, y)[c] - px(wdry, x, y)[c]) / span;
+      EXPECT_GE(w, -1e-3f) << x << ", " << y;
+      EXPECT_LE(w, 1.f + 1e-3f) << x << ", " << y;
+      ++counted;
+      covered += w >= 0.5f;
+    }
+  }
+  EXPECT_GT(counted, 60000);
+  EXPECT_NEAR(fl(covered) / fl(counted), 0.5f, 0.06f);
+}
+
+// `frame deck` lays a cloud layer's underside over the day sky's dome: each row covered by `deck` times its contrast against the
+// haze along the slant path (wx::deck_contrast for the foot's ratio), nothing beyond 2 % below the foot's row, cut by the hills,
+// the CIE overcast grey within its cells' amplitude; over the night it hides the stars.
+TEST(Frame, TheDeckCoversTheDomeByItsContrast) {
+  const std::string head = "scene size 400 x 300, fps 30, length 1 s, ground 250\nlight gain 0\nframe bloom 0, daylight 1";
+  const Image4 none = picture_of(head + "\n"), full = picture_of(head + ", deck 1, foot 0\n"), part = picture_of(head + ", deck 0.8, foot 6\n");
+  for (int y = 240; y < 250; ++y) {  // the hills stand in front of it
+    EXPECT_EQ(std::memcmp(none.row(y), full.row(y), z(400) * 16), 0) << y;
+    EXPECT_EQ(std::memcmp(none.row(y), part.row(y), z(400) * 16), 0) << y;
+  }
+  for (int y = 250; y < 300; ++y) EXPECT_EQ(std::memcmp(none.row(y), full.row(y), z(400) * 16), 0) << "the ground: " << y;
+  constexpr float kPi = 3.14159265f;
+  const float foot_row = 250.f - 900.f * std::sin(6.f * kPi / 180.f);  // 156
+  for (int y = 0; y < 200; y += 2) {
+    const float u = (250.f - (fl(y) + 0.5f)) / 900.f;
+    const float want = 0.8f * wx::deck_contrast(std::tan(6.f * kPi / 180.f), 1.f, std::asin(u) * 180.f / kPi);
+    for (int x = 10; x < 400; x += 37) {
+      int c = 2;  // the channel where the clear blue and the deck's grey differ most
+      for (int k = 0; k < 3; ++k)
+        if (std::abs(px(full, x, y)[k] - px(none, x, y)[k]) > std::abs(px(full, x, y)[c] - px(none, x, y)[c])) c = k;
+      const float span = px(full, x, y)[c] - px(none, x, y)[c];
+      ASSERT_GT(std::abs(span), 0.02f) << x << ", " << y;
+      const float cover = (px(part, x, y)[c] - px(none, x, y)[c]) / span;
+      EXPECT_NEAR(cover, want, 2e-3f) << x << ", " << y;
+      if (fl(y) + 0.5f >= foot_row) {
+        EXPECT_LE(cover, 0.8f * 0.02f + 1e-3f) << "below the foot's row: " << y;
+      }
+    }
+  }
+  EXPECT_GT(0.8f * wx::deck_contrast(std::tan(6.f * kPi / 180.f), 1.f, std::asin(249.5f / 900.f) * 180.f / kPi), 0.15f) << "and it shows at the top";
+  // `deck 1, foot 0` against `overcast 1`: the dome it sees now, within the cells' +-0.15
+  const std::string grey = "scene size 400 x 300, fps 30, length 1 s, ground 250\nlight gain 0\nframe bloom 0, daylight 1, overcast 1";
+  const Image4 dome = picture_of(grey + "\n"), layer = picture_of(grey + ", deck 1, foot 0\n");
+  float most = 0.f;
+  for (int y = 0; y < 200; ++y) {
+    for (int x = 0; x < 400; ++x) {
+      for (int c = 0; c < 3; ++c) {
+        const float r = px(layer, x, y)[c] / px(dome, x, y)[c] - 1.f;
+        EXPECT_LE(std::abs(r), 0.151f) << x << ", " << y;
+        most = std::max(most, std::abs(r));
+      }
+    }
+  }
+  EXPECT_GT(most, 0.05f) << "the cells show";
+  // over the night (no daylight, no light): the underside is unlit and the stars are gone
+  const std::string night = "scene size 400 x 300, fps 30, length 1 s, ground 250\nlight gain 0\nframe bloom 0";
+  const Image4 stars = picture_of(night + "\n"), hidden = picture_of(night + ", deck 1, foot 0\n");
+  float brightest = 0.f, under = 0.f;
+  for (int y = 0; y < 200; ++y) {
+    for (int x = 0; x < 400; ++x) {
+      brightest = std::max(brightest, px(stars, x, y)[2]);
+      under = std::max(under, px(hidden, x, y)[2]);
+    }
+  }
+  EXPECT_GT(brightest, 0.1f) << "a star";
+  EXPECT_EQ(under, 0.f);
+  for (int y = 250; y < 300; ++y) EXPECT_EQ(std::memcmp(stars.row(y), hidden.row(y), z(400) * 16), 0) << "the night's ground: " << y;
+}
+
+// The same frames on any number of threads, and with Options::overlap on or off, with every key on.
+TEST(Frame, TheWetGroundAndTheDeckAreTheSameOnAnyNumberOfThreads) {
+  const sc::Script s = sc::parse("scene size 160 x 120, fps 30, length 0.5 s, ground 80\nlight gain 0.14, flash (0.1, 0.1, 0.1)\n"
+                                 "frame daylight 0.8, overcast 0.4, visibility 3000, wet 0.7, puddle 0.6, deck 0.7, foot 4 + t\n",
+                                 "f");
+  sc::Scene one(s, tiny_loader(), {1, Isa::base}), three(s, tiny_loader(), {3, Isa::base}), over(s, tiny_loader(), {2, Isa::base, true});
+  std::vector<std::uint8_t> a(160 * 120 * 3), b(a.size()), c(a.size());
+  for (int f = 0; f < one.frames(); ++f) {
+    one.render(f, a);
+    three.render(f, b);
+    over.render(f, c);
+    ASSERT_EQ(a, b) << "frame " << f;
+    ASSERT_EQ(a, c) << "frame " << f;
+  }
+  EXPECT_GT(std::accumulate(a.begin(), a.end(), 0L), 0L);
 }
 
 }  // namespace

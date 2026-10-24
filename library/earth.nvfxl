@@ -142,8 +142,13 @@ when rand < 0.3 * size * exp(-t / 1.5), repeat:
   burst at (X + (direction - 0.5) * 2 * (-200 + 520 * min(1, t / 2.5)) * scale, Y - 20 * scale), radius 10 * scale,
         embers 0, debris 4, speed 180 * scale, direction ((direction - 0.5) * 2, -0.6), cone 50
 
+# A pyroclastic flow (the catalogue's #110: a hot, ground-hugging cloud of ash and gas; "the large-scale PELE
+# experiments (Lube and colleagues)"). Built from what the library has, not learned: the avalanche model's powder cloud
+# recoloured as dark ash (the look `pyro`), a lamp that runs with its front for the heat glowing under it, and falling
+# ash behind it. A learned flow would carry what this cannot: the hot gas's buoyancy lifting a co-ignimbrite plume off
+# the dense underflow, and the flow's own heat; here the cloud moves exactly as the snow does (TODO.md, #110).
 entry pyroclastic_flow, category earth, size 900 x 520, anchor base, once 5.5, show 2.5,
-      about "A pyroclastic flow: a glowing avalanche of hot ash rolling down a volcano's flank, swelling as it goes, its base lit red (the avalanche model, recoloured dark ash)"
+      about "A pyroclastic flow (the catalogue's #110): a glowing avalanche of hot ash rolling down a volcano's flank, swelling as it goes, its base lit red (the avalanche model, recoloured dark ash; not a learned flow)"
 param size = 0.9, range (0.4, 1), about "how big"
 param direction = 1, range (0, 1), about "which way it runs: 0 to the left, 1 to the right"
 module cloud = avalanche_fx, size 256, width 900 * scale, at (X, Y), sink 0.02, feather 0.12, look pyro, start 7,

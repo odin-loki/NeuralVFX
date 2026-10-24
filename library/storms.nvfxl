@@ -1,4 +1,4 @@
-# Weather and sky (docs/LIBRARY.md §10): drizzle and downpours, hail, sleet, blizzards and flurries, thunderstorms,
+# Weather and sky (docs/LIBRARY.md §10): drizzle and downpours, hail, sleet, blizzards, a whiteout, drifting snow and flurries, thunderstorms,
 # dust and sand storms, a tornado and a waterspout, an aurora, a rainbow, meteors, gusts of wind, heat shimmer and mist.
 # Most are procedural: the compositor's weather, hail, aurora, rainbow and meteors (docs/COMPOSE.md §4.6 and
 # §4.10). The clouds, the fog, the columns of the tornado and the waterspout and the heat are the cloud, fog, vortex,
@@ -70,6 +70,30 @@ emit snow, in (X - 480 * scale, Y - 540 * scale), size 960 * scale x 540 * scale
      radius 1.9 * scale, seed 1214
 field gale = gust, velocity (3 * scale, 0.4 * scale), amount 0.8, scale 220 * scale, rate 0.9, seed 1215, on particles
 
+# Drifting snow (the catalogue's #75: snow streaming over ground and ridges; "PALM with saltation", checked as #54,
+# blowing-snow flux against field measurements). Wind over lying snow lifts nothing until it passes a threshold (a 10 m
+# wind of about 5 to 10 m/s: less over loose fresh snow, more over a crust); past it the grains move in three ways.
+# Most of the mass saltates: grains hop in flat arcs a few centimetres high and splash more grains out where they land,
+# a layer about 10 cm deep that streams along the surface in gusting sheets and ribbons ("snow snakes"), follows the
+# ground and lifts in waves where the wind rises. The finest grains the turbulence carries up into suspension, a haze
+# metres deep that thins quickly with height. The transport grows about as the cube of the wind (Bagnold's law, for
+# snow as for sand), so half as much wind again nearly triples the snow in the air. Spindrift is the same snow blown
+# off a ridge or a cornice into a plume downwind. Nothing falls from the sky here; snow falling through blown snow is
+# `blizzard`. Two bands of the compositor's snow (docs/COMPOSE.md §4.6), unlit, both fed from upwind: a dense, low
+# layer of small grains driven fast and nearly held up against their fall (the wind's upward part), and a sparse, finer
+# haze above it whose amount grows with the cube of the wind; a gust field on both bunches them into streamers. Not yet
+# judged by eye (written where the gallery's video was not watched); its keyframe is frozen with the procedural ones.
+entry drifting_snow, category weather, size 960 x 220, anchor base, loop, show 3,
+      about "Drifting snow (procedural): snow lifted off the ground by a gale and streaming low along it in gusting sheets and ribbons (the saltation layer, ankle deep), a finer haze of it blown up higher and thinning with height; nothing falls from the sky"
+param density = 60, range (10, 80), about "how much snow streams: grains in each 100 x 100 pixels of the low layer at once"
+param wind = 420, range (150, 700), about "how hard it blows (to the right), world pixels a second; the haze grows with its cube"
+let gale = wind / 420
+emit snow, in (X - 480 * scale, Y - 60 * scale), size 960 * scale x 60 * scale, density density, wind (wind * scale, -35 * scale),
+     radius 1.1 * scale, colour (0.9, 0.92, 0.97), seed 1275
+emit snow, in (X - 480 * scale, Y - 220 * scale), size 960 * scale x 160 * scale, density 0.06 * density * pow(gale, 3),
+     wind (0.8 * wind * scale, -25 * scale), radius 0.8 * scale, colour (0.8, 0.83, 0.9), seed 1276
+field streamers = gust, velocity (3.5 * gale * scale, -0.2 * scale), amount 0.9, scale 160 * scale, rate 1.2, seed 1277, on particles
+
 entry snow_flurry, category weather, size 700 x 500, anchor base, loop, show 3,
       about "A snow flurry (procedural): a light fall of big flakes, eddying in a swirl of wind"
 param density = 1.6, range (0.3, 5), about "flakes in each 100 x 100 pixels at once"
@@ -77,6 +101,48 @@ emit snow, in (X - 350 * scale, Y - 500 * scale), size 700 * scale x 500 * scale
      radius 2.6 * scale, seed 1216
 field eddy = vortex, at (X + 60 * scale * sin(0.4 * t), Y - 260 * scale), radius 180 * scale, strength 1.6 * scale, on particles
 field puff = gust, velocity (0.6 * scale, 0), amount 1, scale 150 * scale, rate 0.6, seed 1217, on particles
+
+# A whiteout (the catalogue's #54, blizzard and blowing snow: "falling and blown snow, whiteout"; "blowing-snow flux
+# against field measurements"). A blizzard is snow falling through snow blown off the ground; a whiteout is the same
+# gale with so much snow in the air that the ground and the sky merge in one grey-white and the horizon goes. The
+# blown part needs no snowfall and has a threshold: the wind's friction velocity must pass about 0.25 m/s over fresh,
+# loose snow (a 10 m wind of some 5 m/s; more over old or wind-packed snow) before grains hop along the surface in a
+# layer a few centimetres deep (saltation) and splash more out where they land; the saltation flux grows with the
+# excess of the wind's square over the threshold's (Pomeroy and Gray), and in a stronger wind the turbulence lifts the
+# finest grains into suspension, metres deep, a haze that thickens as the wind rises. Visibility falls about as the
+# inverse of the snow's mass in the air, below the 400 m that defines a blizzard and on down to the few metres of a
+# whiteout. The falling snow is `blizzard`'s; the saltation layer is snow streaming nearly flat in a band at the
+# ground, its amount the flux (nothing under the threshold); the haze is the fog model, white, in two storeys: three
+# releases on the ground and three standing at the height of the suspension, the upper ones thin until the wind is
+# strong; all of it in one gusty gale. Heavy: six fog modules. Below the threshold it is heavy snow in a wind, not a
+# whiteout; `drifting_snow` is the blown layer alone under a clear sky.
+entry whiteout, category weather, size 960 x 400, anchor base, loop, show 4,
+      about "A whiteout: a blizzard at its worst, snow falling into snow torn off the ground by a gale and streaming nearly flat along it (saltation), the finest grains lifted into a haze that fills the air (the fog model, in two storeys) until the ground and the sky merge; the blown snow lifts only past the wind's threshold"
+param density = 9, range (2, 16), about "the snowfall: flakes in each 100 x 100 pixels at once"
+param wind = 420, range (60, 600), about "how hard it blows (to the right), world pixels a second; under about 135 nothing lifts off the ground and it is only heavy snow"
+let u = wind / 300
+let lift = max(0, u * u - 0.2)                                        # the saltation flux: the wind's square over the threshold's
+let aloft = max(0, lift - 0.6)                                        # suspension: only past a stronger wind
+let haze = clamp(0.35 + 0.3 * lift, 0.3, 1)
+let high = clamp(0.3 + 0.35 * aloft, 0.3, 1)
+let drift = 0.55 + 0.4 * clamp(wind / 500, 0, 1)
+module a = fog, size 128, width 400 * scale, at (X - 320 * scale, Y), sink 0.03, feather 0.1, look snow_haze, start 0, seed 1281,
+           controls (0.7, 0.85, 0.5), intensity 0.9 * haze, wind drift
+module b = fog, size 128, width 420 * scale, at (X, Y), sink 0.03, feather 0.1, look snow_haze, start 6, seed 1282,
+           controls (0.7, 0.85, 0.5), intensity haze, wind drift
+module c = fog, size 128, width 400 * scale, at (X + 320 * scale, Y), sink 0.03, feather 0.1, look snow_haze, start 7, seed 1283,
+           controls (0.7, 0.85, 0.5), intensity 0.85 * haze, wind drift
+module d = fog, size 128, width 440 * scale, at (X - 330 * scale, Y - 150 * scale), sink 0.03, feather 0.12, look snow_haze, start 1,
+           seed 1284, controls (0.7, 0.85, 0.5), intensity 0.9 * high, wind drift
+module e = fog, size 128, width 460 * scale, at (X, Y - 150 * scale), sink 0.03, feather 0.12, look snow_haze, start 0, seed 1285,
+           controls (0.7, 0.85, 0.5), intensity high, wind drift
+module f = fog, size 128, width 440 * scale, at (X + 330 * scale, Y - 150 * scale), sink 0.03, feather 0.12, look snow_haze, start 6,
+           seed 1286, controls (0.7, 0.85, 0.5), intensity 0.85 * high, wind drift
+emit snow, in (X - 480 * scale, Y - 400 * scale), size 960 * scale x 400 * scale, density density, wind (wind * scale, 60 * scale),
+     radius 1.9 * scale, seed 1287
+emit snow, in (X - 480 * scale, Y - 60 * scale), size 960 * scale x 60 * scale, density 4 * lift, wind (wind * scale, 30 * scale),
+     radius 1.3 * scale, colour (0.9, 0.92, 0.97), flow 1, seed 1288
+field gale = gust, velocity (0.011 * wind * scale, 0.4 * scale), amount 0.9, scale 220 * scale, rate 1, seed 1289, on particles
 
 # --- storms ------------------------------------------------------------------------------------------------------------
 

@@ -4,6 +4,11 @@
 # burst begins moved to them (the burst's size made the controls', its own fluctuations kept).
 
 look sand   = like dirt, tint (1, 0.86, 0.6), soot_albedo 0.75
+# A brownout's dust (the helicopter downwash below): dry tan soil as the dust model's curtain, and the same as the
+# finer haze the smoke model draws back up through the rotor (no heat: the smoke model's look without its glow).
+look brownout      = like dirt, tint (0.84, 0.7, 0.5), soot_albedo 0.65, soot_density 2
+look brownout_haze = shader, emission 0, soot_density 1.6, soot_albedo 0.65, sky 0.5, shadow 0.3, scene_light 1.2, relief 1.2,
+                     tint (0.84, 0.72, 0.56)
 
 entry dust_impact, category dust, size 480 x 200, anchor base, once 3.5, show 0.8,
       about "A dust impact: dust thrown up where something heavy hits the ground, rolling out low both ways and settling"
@@ -46,3 +51,34 @@ param intensity = 0.65, range (0.5, 1), about "strength and width (below 0.5 the
 param sway = 0.6, range (0, 1), about "how far and fast it wanders"
 module column = whirlwind, size 128, width 420 * scale, at (X, Y), sink 0.02, feather 0.15, look devil_dust, start 0,
                 seed 901, controls (0.65, 0.6, 0.5), intensity intensity, sway sway
+
+# Helicopter downwash (the catalogue's #37: a rotor's wash lifting dust, a brownout; "induced velocity against momentum
+# theory"). Momentum theory gives a hovering rotor's induced velocity, v_i = sqrt(T / (2 rho A)): the thrust is the
+# craft's weight, so the heavier the craft and the smaller its disc, the harder it blows (a utility helicopter's about
+# 15 m/s, a heavy lift's over 25). The wake contracts below the disc, turns on the ground into a wall jet that runs out
+# both ways thinning as it goes, and where its speed passes the threshold of the ground's grains (fine, dry soil lifts
+# first) it lifts dust; the jet's front rolls up into two ground vortices that carry the dust out and up in a curtain,
+# and the fine dust the rotor draws back down through its disc (recirculation) is the brownout: the pilot loses the
+# ground. Composed from what the library has: the dust model's bursts for the wall jet's curtain (a one-shot of 3 s, so
+# two tiles take turns, each started again every 3 s and cross-faded by its age, and the curtain never stops), the
+# smoke model for the fine dust drawn back up (its tile sunk so the model's developed smoke stands in the
+# recirculation, a ceiling at the rotor's height holding it under the disc) and a wind field for the ground wind, or
+# the craft's own drift, that carries the whole cloud downwind. Over water the same wash throws spray, not dust:
+# another pair of looks. Not yet judged by eye: written where the models are not.
+entry helicopter_downwash, category dust, size 900 x 320, anchor base, loop, show 4,
+      about "A helicopter's downwash: a hovering rotor's wash hits dry ground, runs out both ways as a wall jet and lifts a curtain of dust (a brownout) that the rotor draws back up through its disc, the whole cloud carried off downwind (the dust model's bursts taking turns under the smoke model as the fine dust; its anchor is the ground under the rotor)"
+param power = 0.7, range (0.3, 1), about "the rotor's induced velocity: how hard it blows (a light craft 0.3, a heavy lift 1)"
+param wind = 0.5, range (0, 1), about "the ground wind or the craft's drift: 0.5 still air, more carries the dust to the right"
+let w = 900 * scale
+module d1 = dust, size 128, width w, at (X, Y), sink 0.03, feather 0.12, look brownout, start 9, seed 651, waiting,
+            controls (0.7, 0.5, 0.5), intensity power, opacity smooth(d1.age / 0.5) * (1 - smooth((d1.age - 2.2) / 0.8))
+module d2 = dust, size 128, width w, at (X, Y), sink 0.03, feather 0.12, look brownout, start 3, seed 652, waiting,
+            controls (0.7, 0.5, 0.5), intensity power, opacity smooth(d2.age / 0.5) * (1 - smooth((d2.age - 2.2) / 0.8))
+module haze = smoke, size 64, width 420 * scale, at (X, Y), sink 0.4, feather 0.3, look brownout_haze, start 6, seed 653,
+              controls (0.7, 0.5, 0.7), intensity 0.6 * power, wind wind
+field disc = ceiling, level Y - 250 * scale, soft 60 * scale, damping 0.6, on haze
+field drift = wind, velocity (1.5 * (wind - 0.5) * scale, 0), on d1, d2, haze
+when t - 3 * floor(t / 3) < 1 / fps, repeat:
+  start d1 from 9, seed 651 + floor(t / 3)
+when t > 1.5 and (t - 1.5) - 3 * floor((t - 1.5) / 3) < 1 / fps, repeat:
+  start d2 from 3, seed 652 + floor(t / 3)

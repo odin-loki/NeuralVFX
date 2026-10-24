@@ -154,6 +154,187 @@ TEST(Library, TheCatalogueParsesAndEveryEntryChecks) {
   EXPECT_EQ(st.slots.size(), 2 * c.entries.size());
 }
 
+// Steam fog (the catalogue's #61, library/steam.nvfxl): fog smoking off warm water, built from what the library has:
+// the fog and steam models over the composer's seeded pool, a ceiling that keeps the wisps in the mixing layer and a
+// gusty breeze; its inventory says so, its two parameters are the air's cold and the breeze, and alone it is a scene.
+TEST(Library, SteamFogIsFogAndSteamOverAPool) {
+  const lib::Catalogue c = lib::load_dir(kDir);
+  const lib::Entry* e = c.find("steam_fog");
+  ASSERT_NE(e, nullptr);
+  EXPECT_EQ(e->category, "steam");
+  EXPECT_TRUE(e->loop);
+  EXPECT_EQ(e->anchor, lib::Anchor::base);
+  EXPECT_EQ(e->effects, (std::vector<std::string>{"fog", "steam"}));
+  for (const char* want : {"look sea_fog", "look sea_smoke", "water pool", "ceiling", "gust"})
+    EXPECT_NE(std::ranges::find(e->elements, want), e->elements.end()) << want;
+  ASSERT_EQ(e->params.size(), 2u);
+  EXPECT_EQ(e->params[0].name, "intensity");
+  EXPECT_EQ(e->params[1].name, "wind");
+  EXPECT_FLOAT_EQ(e->params[1].lo, 0.f);
+  EXPECT_FLOAT_EQ(e->params[1].hi, 1.f);
+  lib::StageSpec spec;
+  const lib::Stage one = lib::single(c, c.index("steam_fog"), spec);
+  EXPECT_NO_THROW(sc::validate(one.script));
+}
+
+// The coloured smoke grenade (the catalogue's #18, library/smoke.nvfxl): a dense dye aerosol that is nearly unbuoyant
+// and drifts, built from what the library has: the heavy gas model for the cloud (not the smoke model, which always
+// rises), the smoke model for the vent's warm plume under a ceiling, a gusty breeze, the fuze's sparks and the vent's
+// glow; a one-shot, its parameters the amount and the breeze, and alone it is a scene.
+TEST(Library, ColouredSmokeGrenadeIsHeavyGasUnderAPlume) {
+  const lib::Catalogue c = lib::load_dir(kDir);
+  const lib::Entry* e = c.find("coloured_smoke_grenade");
+  ASSERT_NE(e, nullptr);
+  EXPECT_EQ(e->category, "smoke");
+  EXPECT_FALSE(e->loop);
+  EXPECT_FLOAT_EQ(e->duration, 14.f);
+  EXPECT_EQ(e->anchor, lib::Anchor::base);
+  EXPECT_EQ(e->effects, (std::vector<std::string>{"heavygas", "smoke"}));
+  for (const char* want : {"look dye_yellow", "look dye_yellow_plume", "ceiling", "gust", "glow", "sparks"})
+    EXPECT_NE(std::ranges::find(e->elements, want), e->elements.end()) << want;
+  ASSERT_EQ(e->params.size(), 2u);
+  EXPECT_EQ(e->params[0].name, "intensity");
+  EXPECT_EQ(e->params[1].name, "wind");
+  EXPECT_FLOAT_EQ(e->params[1].lo, 0.f);
+  EXPECT_FLOAT_EQ(e->params[1].hi, 1.f);
+  lib::StageSpec spec;
+  const lib::Stage one = lib::single(c, c.index("coloured_smoke_grenade"), spec);
+  EXPECT_NO_THROW(sc::validate(one.script));
+}
+
+// The contrail (the catalogue's #36, library/trails.nvfxl): a jet's condensation trail, built from what the library
+// has: a trail of the explosion model left cold (no heat, so it neither rises nor glows), its source set back behind
+// the anchor along its own velocity (the exhaust mixes with the cold air before it saturates: the Schmidt-Appleman
+// criterion), drawn white by the sky and sheared by a wind field; a moving entry, its parameters the air's humidity
+// and the wind aloft, and alone it is a scene.
+TEST(Library, ContrailIsAColdTrailSetBackBehindTheJet) {
+  const lib::Catalogue c = lib::load_dir(kDir);
+  const lib::Entry* e = c.find("contrail");
+  ASSERT_NE(e, nullptr);
+  EXPECT_EQ(e->category, "trails");
+  EXPECT_TRUE(e->loop);
+  EXPECT_EQ(e->anchor, lib::Anchor::centre);
+  EXPECT_GT(e->move_x, 0.f) << "a jet at cruise: it is meant to move";
+  EXPECT_FLOAT_EQ(e->move_y, 0.f);
+  EXPECT_EQ(e->effects, (std::vector<std::string>{"explosion"}));
+  EXPECT_EQ(e->elements, (std::vector<std::string>{"trail", "look ice_trail", "wind"}));
+  ASSERT_EQ(e->params.size(), 2u);
+  EXPECT_EQ(e->params[0].name, "humidity");
+  EXPECT_FLOAT_EQ(e->params[0].lo, 0.f);
+  EXPECT_FLOAT_EQ(e->params[0].hi, 1.f);
+  EXPECT_EQ(e->params[1].name, "wind");
+  EXPECT_FLOAT_EQ(e->params[1].lo, 0.f);
+  EXPECT_FLOAT_EQ(e->params[1].hi, 1.f);
+  lib::StageSpec spec;
+  const lib::Stage one = lib::single(c, c.index("contrail"), spec);
+  EXPECT_NO_THROW(sc::validate(one.script));
+}
+
+// The helicopter downwash (the catalogue's #37, library/dust.nvfxl): a rotor's wash lifting dust (a brownout), built
+// from what the library has: the dust model's bursts for the wall jet's curtain (a one-shot, so two tiles take turns
+// by rules that start them again), the smoke model for the fine dust drawn back up through the disc under a ceiling at
+// the rotor's height, and a wind field for the ground wind; a loop on the ground, its parameters the rotor's induced
+// velocity and the wind, and alone it is a scene.
+TEST(Library, HelicopterDownwashIsDustTakingTurnsUnderAHazeInTheWind) {
+  const lib::Catalogue c = lib::load_dir(kDir);
+  const lib::Entry* e = c.find("helicopter_downwash");
+  ASSERT_NE(e, nullptr);
+  EXPECT_EQ(e->category, "dust");
+  EXPECT_TRUE(e->loop);
+  EXPECT_EQ(e->anchor, lib::Anchor::base);
+  EXPECT_FLOAT_EQ(e->move_x, 0.f) << "it hovers";
+  EXPECT_EQ(e->effects, (std::vector<std::string>{"dust", "smoke"}));
+  EXPECT_EQ(e->elements, (std::vector<std::string>{"look brownout", "look brownout_haze", "ceiling", "wind"}));
+  ASSERT_EQ(e->params.size(), 2u);
+  EXPECT_EQ(e->params[0].name, "power");
+  EXPECT_FLOAT_EQ(e->params[0].lo, 0.3f);
+  EXPECT_FLOAT_EQ(e->params[0].hi, 1.f);
+  EXPECT_EQ(e->params[1].name, "wind");
+  EXPECT_FLOAT_EQ(e->params[1].lo, 0.f);
+  EXPECT_FLOAT_EQ(e->params[1].hi, 1.f);
+  int restarts = 0;
+  for (const sc::Statement& st : e->body)
+    if (st.keyword == "when")
+      for (const sc::Statement& a : st.body) restarts += a.keyword == "start";
+  EXPECT_EQ(restarts, 2) << "the two dust tiles are each started again by a rule";
+  lib::StageSpec spec;
+  const lib::Stage one = lib::single(c, c.index("helicopter_downwash"), spec);
+  EXPECT_NO_THROW(sc::validate(one.script));
+}
+
+// Blown snow (the catalogue's #54 and #75, library/storms.nvfxl). The blizzard is snow falling through snow blown
+// along the ground (the fog model, white, under the compositor's snow in a gusting gale). Drifting snow is the same
+// gale over lying snow with nothing falling: procedural only, two bands of the compositor's snow (a dense low
+// saltation layer nearly held up against its fall, a sparse haze of the finest grains above it that grows with the
+// cube of the wind) bunched into streamers by a gust field; its parameters the amount and the wind, which is never
+// still (drifting needs a wind past the threshold), and alone it is a scene.
+TEST(Library, BlizzardAndDriftingSnowAreBlownSnow) {
+  const lib::Catalogue c = lib::load_dir(kDir);
+  const lib::Entry* b = c.find("blizzard");
+  ASSERT_NE(b, nullptr);
+  EXPECT_EQ(b->category, "weather");
+  EXPECT_TRUE(b->loop);
+  EXPECT_EQ(b->effects, (std::vector<std::string>{"fog"}));
+  for (const char* want : {"look snow_haze", "snow", "gust"})
+    EXPECT_NE(std::ranges::find(b->elements, want), b->elements.end()) << want;
+  const lib::Entry* e = c.find("drifting_snow");
+  ASSERT_NE(e, nullptr);
+  EXPECT_EQ(e->category, "weather");
+  EXPECT_TRUE(e->loop);
+  EXPECT_EQ(e->anchor, lib::Anchor::base);
+  EXPECT_TRUE(e->effects.empty()) << "procedural only: it plays no learned model";
+  EXPECT_EQ(e->elements, (std::vector<std::string>{"snow", "gust"}));
+  EXPECT_NE(e->about.find("(procedural)"), std::string::npos);
+  EXPECT_EQ(e->width, b->width);
+  EXPECT_LT(e->height, b->height) << "a layer along the ground, not the sky";
+  ASSERT_EQ(e->params.size(), 2u);
+  EXPECT_EQ(e->params[0].name, "density");
+  EXPECT_FLOAT_EQ(e->params[0].value, 60.f);
+  EXPECT_EQ(e->params[1].name, "wind");
+  EXPECT_FLOAT_EQ(e->params[1].value, 420.f);
+  EXPECT_GT(e->params[1].lo, 0.f) << "never still";
+  EXPECT_FLOAT_EQ(e->params[1].hi, 700.f);
+  lib::StageSpec spec;
+  const lib::Stage one = lib::single(c, c.index("drifting_snow"), spec);
+  EXPECT_NO_THROW(sc::validate(one.script));
+  const std::string text = one.text();
+  EXPECT_NE(text.find("emit snow"), std::string::npos) << text;
+  EXPECT_NE(text.find("pow("), std::string::npos) << "the haze grows with the cube of the wind";
+}
+
+// A whiteout (the catalogue's #54, library/storms.nvfxl): the blizzard at its worst, built from what the library has:
+// the blizzard's falling snow, a saltation layer of snow streaming flat along the ground whose amount is the
+// blowing-snow flux (the excess of the wind's square over its threshold's: nothing below it) and the fog model, white,
+// in two storeys for the haze that fills the air; its parameters the snowfall and the wind, whose range reaches under
+// the threshold, and alone it is a scene.
+TEST(Library, WhiteoutIsABlizzardWhoseBlownSnowHasAThreshold) {
+  const lib::Catalogue c = lib::load_dir(kDir);
+  const lib::Entry* e = c.find("whiteout");
+  ASSERT_NE(e, nullptr);
+  EXPECT_EQ(e->category, "weather");
+  EXPECT_TRUE(e->loop);
+  EXPECT_EQ(e->anchor, lib::Anchor::base);
+  EXPECT_EQ(e->effects, (std::vector<std::string>{"fog"}));
+  EXPECT_EQ(e->elements, (std::vector<std::string>{"look snow_haze", "snow", "gust"}));
+  int fog = 0;
+  for (const sc::Statement& st : e->body) fog += st.keyword == "module";
+  EXPECT_EQ(fog, 6) << "two storeys of three releases";
+  ASSERT_EQ(e->params.size(), 2u);
+  EXPECT_EQ(e->params[0].name, "density");
+  EXPECT_EQ(e->params[1].name, "wind");
+  EXPECT_FLOAT_EQ(e->params[1].lo, 60.f) << "under the threshold it is only heavy snow: the range reaches there";
+  EXPECT_FLOAT_EQ(e->params[1].hi, 600.f);
+  const lib::Entry* b = c.find("blizzard");
+  ASSERT_NE(b, nullptr);
+  EXPECT_EQ(e->width, b->width);
+  EXPECT_GT(e->params[1].value, b->params[1].value) << "a harder gale than the blizzard's";
+  lib::StageSpec spec;
+  const lib::Stage one = lib::single(c, c.index("whiteout"), spec);
+  EXPECT_NO_THROW(sc::validate(one.script));
+  const std::string text = one.text();
+  EXPECT_NE(text.find("max(0, u * u - 0.2)"), std::string::npos) << "the flux is the wind's square over the threshold's: " << text;
+}
+
 TEST(Library, ErrorsSayFileLineAndColumn) {
   const std::string head = "effect fire = \"fire.nvfx\"\n";
   const std::string e = "entry torch, category fire, size 90 x 190, loop, about \"x\"\n";

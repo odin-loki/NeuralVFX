@@ -1,6 +1,8 @@
 # Steam and water: the steam model, drawn by the vapour look (white, lit by the scene).
 
 look mist = like vapour, soot_density 0.9, soot_albedo 0.9, relief 0.4, shadow 0.1, sky 1.4
+look sea_smoke = like mist, tint (0.9, 0.94, 1), soot_density 0.8, soot_albedo 0.92, sky 1.5, scene_light 1.1   # steam fog's wisps: cooler, whiter
+look sea_fog   = like frost, tint (0.9, 0.94, 1), soot_density 0.9, soot_albedo 0.9, sky 1.2, scene_light 1.1   # steam fog's low layer (the fog model)
 
 entry steam_vent, category steam, size 280 x 400, anchor base, loop, show 3,
       about "A steam vent: a jet of white vapour from a hole in the ground, hissing unevenly"
@@ -43,3 +45,42 @@ module m4 = steam, size 128, width 320 * scale, at (X + 120 * scale, Y + 20 * sc
 module m5 = steam, size 128, width 320 * scale, at (X + 240 * scale, Y + 20 * scale), sink 0.04, feather 0.35, look mist,
             start 0, seed 255, controls (0.5, 0.5, 0.9), intensity intensity
 field drift = wind, velocity (0.4 * scale, 0), on m1, m2, m3, m4, m5
+
+# Steam fog (the catalogue's #61: fog smoking off warm water into cold air; "saturation by mixing"). The air just over
+# the water is saturated at the water's temperature; it mixes with the cold air above it, and because the saturation
+# curve bends upwards the mixture holds less vapour than its two parts did, so vapour condenses: a low layer of fog over
+# the whole surface, and out of it wisps that rise a short way, ride the breeze and thin as they go on mixing. The
+# mixing layer is shallow, so the wisps stay low (a ceiling damps their rise and spreads them). The colder the air for
+# the water, the thicker it smokes; a breeze tears it into streamers, and a strong wind mixes it away (the thickness
+# falls as the wind leaves still air). Four releases of the fog model lie on the water (the ground fog's kind, white),
+# five of the steam model stand along it (the hot springs' kind, cooler and whiter; the looks at the top), the water is
+# the composer's seeded pool, and a gusty drift field carries the vapour across it.
+entry steam_fog, category steam, size 900 x 240, anchor base, loop, show 6,
+      about "Steam fog: fog smoking off warm water into cold air, a low layer over the whole surface of a pool and wisps rising out of it, torn into streamers by a light breeze and thinning as they mix (the fog and steam models over a seeded pool)"
+param intensity = 0.55, range (0.2, 0.9), about "how thick it smokes: how much colder the air than the water"
+param wind = 0.6, range (0, 1), about "the breeze: 0.5 still air, more blows to the right; a strong wind thins it"
+let gale = 2 * abs(wind - 0.5)
+let thick = intensity * (1 - 0.45 * gale)
+module fa = fog, size 128, width 320 * scale, at (X - 335 * scale, Y - 4 * scale), sink 0.03, feather 0.2, look sea_fog, start 0,
+            seed 268, controls (0.6, 0.55, 0.4), intensity 1.1 * thick, wind wind
+module fb = fog, size 128, width 360 * scale, at (X - 100 * scale, Y - 4 * scale), sink 0.03, feather 0.2, look sea_fog, start 6,
+            seed 269, controls (0.6, 0.55, 0.4), intensity 1.2 * thick, wind wind
+module fc = fog, size 128, width 330 * scale, at (X + 125 * scale, Y - 4 * scale), sink 0.03, feather 0.2, look sea_fog, start 7,
+            seed 270, controls (0.6, 0.55, 0.4), intensity thick, wind wind
+module fd = fog, size 128, width 340 * scale, at (X + 330 * scale, Y - 4 * scale), sink 0.03, feather 0.2, look sea_fog, start 1,
+            seed 271, controls (0.6, 0.55, 0.4), intensity 1.15 * thick, wind wind
+module m1 = steam, size 128, width 300 * scale, at (X - 320 * scale, Y + 16 * scale), sink 0.04, feather 0.35, look sea_smoke,
+            start 0, seed 261, controls (0.45, 0.6, 0.85), intensity 0.7 * thick * (0.85 + 0.25 * noise(0.5 * t, 1 + 7 * variant, 0)), wind wind
+module m2 = steam, size 128, width 300 * scale, at (X - 160 * scale, Y + 16 * scale), sink 0.04, feather 0.35, look sea_smoke,
+            start 7, seed 262, controls (0.45, 0.6, 0.85), intensity 0.7 * thick * (0.85 + 0.25 * noise(0.5 * t, 2 + 7 * variant, 1)), wind wind
+module m3 = steam, size 128, width 300 * scale, at (X, Y + 16 * scale), sink 0.04, feather 0.35, look sea_smoke,
+            start 0, seed 263, controls (0.45, 0.6, 0.85), intensity 0.7 * thick * (0.85 + 0.25 * noise(0.5 * t, 3 + 7 * variant, 2)), wind wind
+module m4 = steam, size 128, width 300 * scale, at (X + 160 * scale, Y + 16 * scale), sink 0.04, feather 0.35, look sea_smoke,
+            start 6, seed 264, controls (0.45, 0.6, 0.85), intensity 0.7 * thick * (0.85 + 0.25 * noise(0.5 * t, 4 + 7 * variant, 3)), wind wind
+module m5 = steam, size 128, width 300 * scale, at (X + 320 * scale, Y + 16 * scale), sink 0.04, feather 0.35, look sea_smoke,
+            start 0, seed 265, controls (0.45, 0.6, 0.85), intensity 0.7 * thick * (0.85 + 0.25 * noise(0.5 * t, 5 + 7 * variant, 4)), wind wind
+water pool = pool, along (X - 445 * scale, Y - 4 * scale) to (X + 445 * scale, Y - 4 * scale), depth 30 * scale,
+             surface 16 * scale, cells 160, churn 0.4, seed 266
+field low = ceiling, level Y - 150 * scale, soft 110 * scale, damping 0.3, on m1, m2, m3, m4, m5
+field breeze = gust, velocity (1.2 * (wind - 0.5) * scale, 0), amount 0.6, scale 120 * scale, rate 0.4, seed 267,
+               on fa, fb, fc, fd, m1, m2, m3, m4, m5

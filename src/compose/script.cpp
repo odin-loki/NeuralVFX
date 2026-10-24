@@ -66,7 +66,9 @@ constexpr Key kBus[] = {{"at", VT::point}, {"size", VT::dims}, {"cell", VT::expr
 constexpr Key kLight[] = {{"gain", VT::expr}, {"flash", VT::tuple}};
 constexpr Key kParticles[] = {{"capacity", VT::expr}, {"flow", VT::expr}};
 constexpr Key kFrame[] = {{"exposure", VT::expr}, {"fade", VT::expr},     {"haze", VT::expr},     {"bloom", VT::expr},
-                          {"bloom_threshold", VT::expr}, {"daylight", VT::expr}, {"overcast", VT::expr}, {"visibility", VT::expr}};
+                          {"bloom_threshold", VT::expr}, {"daylight", VT::expr}, {"overcast", VT::expr}, {"visibility", VT::expr},
+                          // the weather director's ground and ceiling (docs/COMPOSE.md §4.9.1, §4.11, §5.4): all 0 by default
+                          {"wet", VT::expr}, {"puddle", VT::expr}, {"deck", VT::expr}, {"foot", VT::expr}};
 constexpr Key kCamera[] = {{"x", VT::expr}, {"y", VT::expr}};
 constexpr Key kEffect[] = {{"swirl", VT::expr}, {"swirl_scale", VT::expr}, {"swirl_rate", VT::expr}, {"swirl_ramp", VT::expr},
                            {"contrast", VT::expr}, {"grow", VT::expr}, {"passes", VT::expr}, {"soften", VT::expr},
@@ -147,7 +149,7 @@ constexpr Key kEntry[] = {{"category", VT::name}, {"size", VT::dims}, {"anchor",
                           {"once", VT::time},     {"show", VT::time}, {"about", VT::text},  {"moving", VT::point}};
 constexpr Key kParam[] = {{"range", VT::tuple}, {"about", VT::text}};
 // The weather director (weather.hpp, docs/WEATHER.md): its settings, and the lines of its schedule (`storm at 19, over 4`).
-constexpr Key kWeather[] = {{"seed", VT::expr}, {"regime", VT::expr}, {"over", VT::time}, {"direction", VT::expr}};
+constexpr Key kWeather[] = {{"seed", VT::expr}, {"regime", VT::expr}, {"over", VT::time}, {"direction", VT::expr}, {"hour", VT::expr}};
 constexpr Key kSchedule[] = {{"at", VT::time}, {"over", VT::time}};
 
 struct Schema {

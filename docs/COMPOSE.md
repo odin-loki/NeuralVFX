@@ -159,10 +159,10 @@ points, hand-overs between tiles of the same size).
 | `emit KIND` | particles every frame (§4.6; hail, aurora, rainbow, meteors, beams, shields and glints: §4.10) | |
 | `light` | light from the bus's heat | `gain` (0.14), `flash (r, g, b)` (0) |
 | `particles` | the particle pool | `capacity` (4096), `flow` (0.9: how much particles follow the bus's flow) |
-| `frame` | the picture | `exposure` (1), `fade` (1), `haze` (1: heat haze), `bloom` (1: strength), `bloom_threshold` (1); the day ([WEATHER.md](WEATHER.md) §4.6): `daylight` (0: the night sky of every scene before), `overcast` (0 to 1: the CIE overcast sky), `visibility` (infinity: metres, Koschmieder's haze over the hills, the ground and the sky) |
+| `frame` | the picture | `exposure` (1), `fade` (1), `haze` (1: heat haze), `bloom` (1: strength), `bloom_threshold` (1); the day ([WEATHER.md](WEATHER.md) §4.6): `daylight` (0: the night sky of every scene before), `overcast` (0 to 1: the CIE overcast sky), `visibility` (infinity: metres, Koschmieder's haze over the hills, the ground and the sky); the director's ground and ceiling, indexed in §4.9.1: `wet`, `puddle` (0: the wet ground's darkening and its puddles, §4.11; WEATHER.md §3.12) and `deck`, `foot` (0: the cloud deck over the day sky and the elevation where the haze hides it, §5.4; WEATHER.md §3.15). Designed, not built: `deck_drift` (§5.4) |
 | `camera` | the screen's top-left corner in the world | `x`, `y` (0) |
 | `keyframes T, T, ...` | frames the tool writes as PNG (`--keyframes`) and to the sheet | |
-| `weather NAME` | the weather director ([WEATHER.md](WEATHER.md)): a small weather state moving between regimes in the order real weather keeps; its members are values (`NAME.rain`, ...); lines under it (`storm at 19, over 4`) are its schedule | `seed` (1), `regime` (clear: where it heads, an expression whose regime names are values; with a schedule, where it starts), `over` (60 s), `direction` (1) |
+| `weather NAME` | the weather director ([WEATHER.md](WEATHER.md)): a small weather state moving between regimes in the order real weather keeps; its members are values (`NAME.rain`, ...); lines under it (`storm at 19, over 4`) are its schedule | `seed` (1), `regime` (clear: where it heads, an expression whose regime names are values; with a schedule, where it starts), `over` (60 s), `direction` (1), `hour` (12: the solar hour the sun stands at, an expression re-evaluated each frame; WEATHER.md §3.14) |
 | `entry`, `param` | an effect of the library's catalogue and its parameters ([LIBRARY.md](LIBRARY.md)); a scene rejects them | |
 | `at T:` / `when ...:` | a rule (§4.5) | |
 | `every frame:` | couplings applied every frame (§4.5) | |
@@ -212,7 +212,7 @@ Arithmetic in single-precision float, one operation at a time, as C++ computes i
 | an `input` | its value, as the game last set it (never a constant: it cannot size, tile or place tiles) |
 | a rule's name | when it last fired (infinity before: so `smooth((t - boom) / 1)` is 0 until `boom`) |
 | `M.x`, `M.y`, `M.started`, `M.age`, `M.active` | a module (§4.3); a trail's `T.vx`, `T.vy` too |
-| `W.rain`, `W.cloud`, `W.wind`, `W.visibility`, ... | a weather's state ([WEATHER.md](WEATHER.md) §1: cloud, rain, snow, hail, wind, mean, gust, visibility, temp, lightning, dust, fog, extinction, u, beaufort, lean, leaves, lift, light, flash, strike, bolt, since, regime, progress) |
+| `W.rain`, `W.cloud`, `W.wind`, `W.visibility`, ... | a weather's state ([WEATHER.md](WEATHER.md) §1: cloud, rain, snow, hail, wind, mean, gust, visibility, temp, lightning, dust, fog, extinction, u, beaufort, lean, leaves, lift, trees, light, flash, strike, bolt, since, regime, progress, humidity, dewpoint, base, water, wet, puddle, evaporation, carried, front, hour, elevation, sunx, sun, shaft, deck, foot) |
 | `x`, `temp` | in a rule `when ember lands`: where the ember landed and how hot it was |
 | `rand` | a random number in [0, 1), from the particles' generator (deterministic: the same script gives the same frames) |
 | `smooth(v)` | 0 below 0, 1 above 1, smooth in between (`3v² - 2v³`) |
@@ -357,8 +357,37 @@ Getting every float the same forced a few things, all visible in the script:
 - The game drives a scene through inputs, rule triggers and module moves and controls (the C API, [ENGINES.md](ENGINES.md)
   §7); it cannot add modules, couplings or fields while the scene plays: those are the script's.
 - Weather particles are drawn unlit, in their own colours: the scene's light (fires, lamps) does not light snow or rain.
-  Rain makes no splashes and leaves nothing on the ground; nothing settles (snow does not lie). The day's sky
-  ([WEATHER.md](WEATHER.md) §4.6) has no sun, so nothing casts a shadow or has a lit side.
+  Rain makes no splashes; the ground it falls on darkens and puddles only through `frame wet` and `frame puddle`
+  (§4.11), which the script wires to the director's `sky.wet` and `sky.puddle` (or to anything), and the puddles make
+  no rings; nothing settles (snow does not lie). The day's sky ([WEATHER.md](WEATHER.md) §4.6) has no sun, so nothing
+  casts a shadow or has a lit side; its cloud is puffs over a greyed dome, with a layer's underside over the dome where
+  the script sets `frame deck` and `frame foot` (§5.4): a deck with cells and a foot, but no edge, no gaps and no top.
+
+#### 4.9.1 The director's keys of `frame`: `wet`, `puddle`, `deck`, `foot`
+
+The weather director ([WEATHER.md](WEATHER.md)) computes the ground's wetness and its puddles (§3.12) and the cloud
+deck's cover and the angle where haze hides its underside (§3.15). Each drives a key of `frame`, an expression
+re-evaluated every frame as `daylight`, `overcast` and `visibility` are (`kFrameKeys` in `src/compose/script.cpp`,
+`Frame::wet` and its three siblings in `compose.hpp`, `eval_or(prog.wet, 0.f)` in `script_run.cpp`, the rows of
+`Frame::background_row` in `compose.cpp`), and each key is **0 by default**: at 0 no row reads it and every scene before
+is drawn as it was, to the bit (`WeatherDay.TheFrameCarriesTheWetGroundAndTheCloudDeck`). The day scene
+(`examples/scenes/weather_day.nvfxs`) wires the four to `sky.*`, so its frozen keyframes (`ScriptedWeatherDayFrozen`,
+`results/experiments/weather_frozen.csv`) move once and must be refrozen on a machine with the models. This table is
+the index; the full designs (what each draws, what it leaves out, the tests) are where the last column says.
+
+| key | the director's member | what it draws | default | design |
+|---|---|---|---|---|
+| `wet` | `sky.wet` (0 to 1: the film over the ground's roughness; [WEATHER.md](WEATHER.md) §3.12) | darkens the ground rows, their own colour and the scene's light on them, by `lerp(1, 0.6, wet)`: Lekner and Dorf's wet surface, no colour of its own, before the haze; by night too | 0: dry | §4.11 (built) |
+| `puddle` | `sky.puddle` (0 to 1: the share of the 1.5 mm depression storage filled; §3.12) | puddles in the ground texture's hollows, deepest first, mirroring the sky and the hills with Fresnel's reflectance by depression angle; the rain's rings on them are the open question | 0: none | §4.11 (built) |
+| `deck` | `sky.deck` (0 to 1: how much of the sky is a layer rather than puffs, `wx::deck_cover`; §3.15) | a cloud underside over the day sky's dome, the CIE overcast grey with foreshortening cells, lit from within by the flash, hiding the stars | 0: no layer | §5.4, "The cloud deck as a layer" (built, without `deck_drift`) |
+| `foot` | `sky.foot` (degrees above the horizon where Koschmieder haze hides the underside, `wx::deck_foot_deg`; §3.15) | where the deck is lost in the haze: its contrast is `wx::deck_contrast` along the slant path, 0 at the horizon, about 2 % at the foot | 0: a layer down to the horizon, fog's | §5.4 (built) |
+
+The deck's design adds a fifth key, `deck_drift`, for the texture's scroll with the air the wind has carried past
+(`sky.carried`, [WEATHER.md](WEATHER.md) §3.13); it is described with the deck and is **not built**: the deck stands
+still. An engine that draws its own ground or sky does not need the keys: it reads the same members
+(`nvfx_scene_get_input(scene, "sky.wet", &w)`, [ENGINES.md](ENGINES.md) §7) and places its own water and ceiling by
+them. What the director itself leaves out, and so the keys do too (one impervious ground for every scene, snow that
+does not lie, a deck with no gaps for §3.14's shafts), is in [WEATHER.md](WEATHER.md) §9.
 
 ### 4.10 Procedural elements for the sky, combat and magic
 
@@ -419,6 +448,83 @@ Notes from building them:
   wide and wobbling much, it shows a string of beads, so the holy beams wobble by 0.07, a laser by 0.3.
 - **Stills and timing.** Glints and meteors are lit for a moment; a sheet or a keyframe catches them only if its moment
   falls in one, so a coin's glint is `rate 0` with its brightness driven by the entry.
+
+### 4.11 The wet ground: `frame wet` and `frame puddle`
+
+Status: **implemented** (24 October 2026; designed the same day, built in the ground rows of `Frame::background_row`,
+`src/compose/compose.cpp`). The weather director says how wet the ground is ([WEATHER.md](WEATHER.md) §3.12:
+`sky.water`, the mm standing in one surface's depression storage; `sky.wet`, its darkening, 0 to 1; `sky.puddle`, the
+share of the storage filled, 0 to 1; `sky.evaporation`, the drying now), and this is the layer that draws it, as two
+keys of `frame`. The design was written before the code so that the wiring, the defaults and the tests were agreed
+first; the code follows it, with the one choice noted under `puddle` (the hollows' depths run 0 to 0.9, so `puddle 1`
+fills every hollow).
+
+**The keys.** Two keys of `frame`, expressions re-evaluated each frame as `daylight`, `overcast` and `visibility`
+are (`kFrameKeys` in `src/compose/script.cpp`; `Frame::wet`, `Frame::puddle` in `compose.hpp`, carried into
+`Frame::Params`; `eval_or(prog.wet, 0.f)` in `script_run.cpp`), both **0 by default**: at 0 neither runs and every
+scene before stays as it was, to the bit.
+
+| key | range | what it does |
+|---|---|---|
+| `wet` | 0 dry to 1 | darkens the ground: the ground's own reflectance (the earth and its tint, the day's grass) and the scene's light on it are multiplied by `lerp(1, 0.6, wet)`. Lekner and Dorf (1988): a rough surface wetted returns to itself the light it would have scattered out, so its reflectance falls by a factor of about 0.5 to 0.8; 0.6 is a choice for grass and soil, one factor for the three channels (their factor depends a little on the dry albedo, darker surfaces darkening less, which deepens a colour: left out). The darkening has no colour of its own, and it is applied before the haze (Koschmieder veils whatever the ground is). It works by night too: a night rain darkens the earth under the fire's light |
+| `puddle` | 0 none to 1 | lays puddles on the ground that mirror the sky and the hills. Which ground is wet: hollows, patches 16 world pixels wide (`Column::pud`, a hash key per column as the texture's `Column::tex` is; a run of eight of the texture's 2-pixel columns, so a hollow's edges are the texture's) and a band of 6 world pixels tall (flattened by the perspective, as puddles are: the design said a run of the texture's columns, which at 2 pixels drew stalks, not puddles), each with a depth from its hash, spread uniformly over 0 to 0.9 (a choice); a hollow holds water where its depth is under `puddle` (the deepest hollows fill first, so the share of the ground covered is about `puddle`: at `puddle 0.5` half the hollows are at least half full), its edge soft over 0.1 of the range (`smooth01((puddle - depth) / 0.1)`: `puddle 1` fills every hollow to the brim, `puddle 0` none). What a puddle shows: the picture mirrored in the ground plane, so the row `ground + d` shows the sky's row `ground - d` (the sky's own colour there: `day_sky` at `u = d / 900` plus the night sky, without its stars or the scene's glow on it) or the hills where that row is below the hills' outline (`Column::hill`, per column): near the horizon the puddles merge into one mirrored band of the sky's horizon colour and the hills, as §3.12 says. How much it shows: Fresnel's reflectance of water (n = 1.33) at the depression angle the ground's distance gives, `dist = 25 / (depth + 0.05)` metres with the eye 1.6 m up (0.2 degrees at the horizon to 3.8 at the bottom of the picture); by Schlick, R = 0.02 + 0.98 (1 - sin theta)^5: 0.98 at the horizon, 0.72 at the bottom. The puddle's colour is `R` times the mirrored colour plus `(1 - R)` times the darkened ground under it (the water is clear; the bottom shows through what the mirror does not take), then the haze as for the rest of the ground |
+
+The ground's rows are drawn in the background pass (§4.7 step 10, `compose.cpp`: the rows below `ground`), per row and
+per run of columns as before; both keys live there, in the day's ground loop and the night's alike. The cost is a
+mirrored `day_sky` row (once per row) and one more hash per run of columns, and only while `puddle` is above 0: nothing
+against a module. The engine layers ([ENGINES.md](ENGINES.md) §11) carry the modules and the particles, not the
+background, so they do not change.
+
+**The wiring.** The day scene (`examples/scenes/weather_day.nvfxs`) carries the two keys on its `frame` line (with the
+deck's two, §5.4):
+
+```text
+frame  daylight sky.light * (1 - 0.55 * dark), overcast sky.cloud, visibility sky.visibility,
+       wet sky.wet, puddle sky.puddle, deck sky.deck, foot sky.foot, exposure 1.05 / sqrt(sky.light), bloom 0.7, ...
+```
+
+`sky.wet` is the director's smoothstep over the first 0.1 mm of water (half dark 30 s into moderate rain, 4.5 s into a
+storm's; dry again 21 minutes after a clear day's drying starts), and `sky.puddle` the share of the 1.5 mm storage
+filled (full after 15 minutes of moderate rain; the 40 s day scene's storm would darken its ground within about ten
+seconds of its downpour and never puddle: 1.5 mm at 40 mm/h is 135 s). A script may wire them to anything (`wet
+smooth(t / 10)` for a rain the director does not run; an `input` for a game whose ground is its own), and an engine
+that draws its own ground reads the state instead (`nvfx_scene_get_input(scene, "sky.wet", &w)`, [ENGINES.md](ENGINES.md)
+§7): the keys are for the scene's ground only. Wiring the day scene moves its frozen keyframes (`ScriptedWeatherDayFrozen`,
+`results/experiments/weather_frozen.csv`: to be re-frozen once, on a machine with the models, with the ground darkening
+in the rain and the deck over the storm); that is the day scene's change, not this layer's.
+
+**What it leaves out, and the open questions.**
+- **The rain's rings.** §3.12 asks for the mirror broken by the rain's rings while it rains. The puddle mirror is a
+  per-row, per-run colour; rings are the water system's (`water ... = pool`, §5.5, [EFFECTS_WATER.md](EFFECTS_WATER.md)),
+  drawn after the background, so they cannot roughen the mirror in place. Two ways, undecided: a third key, `ripple`
+  (0 to 1, default 0, wired to `smooth(sky.rain / 5)`), that smears the mirrored row over a few rows and lowers `R`
+  by up to half, which is cheap and reads as rain on a puddle at the scene's scale; or a `water` pool laid on the
+  puddled rows by the script, which rings where the rain's drops land but costs a pool and does not follow the puddles'
+  patches. The first is this design's preference; the second is the library's `rain_on_puddles` today.
+- **The puddles mirror the sky and the hills, not the modules or the particles**: they are drawn after the background
+  (§4.7). A fire's reflection would be its light on the ground (`light_at_x`, already in the ground's colour and
+  darkened by `wet`), not its flames. Mirroring the modules is a second pass over the ground after the modules are
+  drawn, and is not in this design. Nor is the deck (§5.4) mirrored: the puddle shows the dome under it.
+- **The night sky's stars are not mirrored** (a star's reflection is a pixel the rings would break; a choice), nor
+  the scene's glow on the sky (the 0.08 of the light the sky rows take): the mirror is the sky's own colour.
+- **One ground for every scene**, as the director's water is: grass puddles as pavement does, and the puddles' pattern
+  is a hash of the ground's world position (hollows 16 by 6 world pixels), not a surface the script describes. Scorch
+  marks are drawn over the ground as today, over the darkened and puddled ground: their own darkening and glow are
+  not wetted or mirrored.
+- **Snow does not lie and does not wet**, ice does not form and dew does not fall: the director's limits (§3.12), so
+  the keys' too.
+
+**The tests** (`WeatherDay.TheFrameCarriesTheWetGroundAndTheCloudDeck` in `tests/test_weather_director.cpp`, and the
+`Frame.*` suite of `tests/test_script.cpp`: `WetDarkensTheGroundAndNothingElse`, `PuddlesMirrorTheSkyAndTheHillsByFresnel`,
+`TheWetGroundAndTheDeckAreTheSameOnAnyNumberOfThreads`): both keys at 0 give every frame of every scene before to the
+bit (the frozen keyframes); `wet 1` darkens the ground rows by the factor (`wet 0.5` by 0.8) and leaves the sky rows and
+the hills unchanged to the bit, by day and by night, and in a haze the wet ground is lighter than 0.6 of the dry (the
+airlight is not wetted); `puddle 1` makes every ground pixel `R` of the row it mirrors plus `(1 - R)` of the ground
+within 1 %, the row nearest the horizon mirroring the hills (the row just above the horizon is theirs) and the bottom
+row the sky where no hill stands; `puddle 0.5` covers about half the hollows (half of the pixels at least halfway from
+the dry ground to the full puddle, within 0.06 over a 1600-pixel-wide ground); the same frames on 1 and 3 threads and
+with `Options::overlap` on or off; the checker's messages (`'wett' is not a property of frame (did you mean 'wet'?)`;
+`'deck' is given twice`) and the canonical form (`--print`) round-tripping the keys.
 
 ## 5. Field effects
 
@@ -607,6 +713,80 @@ without `wash`), snow melting where the bus is hot, a wind field carrying leaves
 keeps, and the scene wires it to these emitters (`emit rain, rate sky.rain, ...`, which then take their physics), to
 the cloud and fog models, the lightning, the wind and the day's sky. `examples/scenes/weather_day.nvfxs` (40 s: clear,
 clouding over, rain, a thunderstorm, clearing) is the reference wiring.
+
+**The cloud deck as a layer (built, 24 October 2026; `deck_drift` not).** The director says how much of the sky is a
+layer rather than puffs (`sky.deck`, 0 to 1) and where the haze hides that layer's underside (`sky.foot`, degrees above
+the horizon; [WEATHER.md](WEATHER.md) §3.15). Before this layer nothing drew either: the day scene's clouds were five
+puffs of the cloud model in a band, and its "overcast" the greyed dome behind them (WEATHER.md §4.3, §7). On the pattern
+of the wet ground's `frame wet` and `frame puddle` (§4.11; WEATHER.md §3.12): keys of `frame`, all off by default, so
+that every scene before stays as it is, to the bit. Two of the three are built (the day scene writes `deck sky.deck,
+foot sky.foot`); `deck_drift` is designed below and not built, so the deck's cells stand still in the world.
+
+| key | meaning | default | status |
+|---|---|---|---|
+| `deck` | how much of the sky is a layer: the underside's opacity over the dome, 0 to 1 (the day scene writes `deck sky.deck`) | 0: no layer, the sky of every scene before | built |
+| `foot` | degrees above the horizon where the underside is lost in the haze. It carries the base over the visibility, tan(foot) = base / V (`wx::deck_foot_deg`), so the frame needs neither (`foot sky.foot`) | 0: a layer down to the horizon, fog's | built |
+| `deck_drift` | texture cells the wind has carried past, the texture's scroll along +x (`deck_drift sky.carried / max(sky.base, 1)`: Taylor's coordinate of WEATHER.md §3.13 in cells one base high) | 0: a still deck | designed, not built |
+
+What it draws, in the sky rows of `Frame::background_row` (`src/compose/compose.cpp`: the day branch of §4.6 of
+WEATHER.md, between the dome and the hills; a `deck` above 0 takes a night sky through that branch too, so a deck hides
+the stars of a scene with no `daylight`). Everything but the texture is a function of the row:
+
+- **Where in the picture.** The day sky reads a row's height above the horizon, u = (ground - y) / 900, as sin(elevation)
+  (its CIE gradient (1 + 2u) / 3 is Moon and Spencer's (1 + 2 sin e) / 3), so the deck keeps the convention: a row
+  stands at e = asin(u), and the foot at sin(foot) x 900 pixels above the horizon. By the regimes' bases and
+  visibilities (WEATHER.md §2.1): 13 pixels under the overcast regime's 560 m base in 40 km of air (0.8 degrees), 56
+  under steady rain's 200 m in 3.2 km (3.6 degrees), 270 under a storm's 315 m in 1 km and 273 under snow's (17.5
+  degrees: the lower third of the sky is haze with no cloud in it), 0 in fog (the base at the ground: the whole sky is
+  underside). The hills' outline cuts it, as it cuts the dome now: the deck is at the far end of the picture, and a 2D
+  picture has no hill heights for a low base to pass behind (a choice).
+- **How much of it shows.** Koschmieder along the slant path base / sin(e): the underside's contrast against the haze is
+  exp(-3.912 tan(foot) / sin(e)) (`wx::deck_contrast`, in the code already, called with the ratio: base tan(foot),
+  visibility 1), 0 at the horizon, about 2 % at the foot, rising with the elevation. A row's opacity is `deck` times
+  that; what the deck does not cover is the dome as §4.6 paints it, whose airlight is the haze the underside fades into.
+  At the top of the day scene's picture (600 pixels above the ground at 1280 x 720: 42 degrees) the overcast regime's
+  deck shows at 0.92, steady rain's at 0.69, a storm's at 0.16: under an overcast the whole sky but a strip at the
+  horizon is cloud; in a storm only the upper sky, dimly, over a wall of rain haze.
+- **Its colour.** The CIE overcast sky's at that elevation, daylight x grey x (1 + 2 sin e) / 3, the grey §4.6's
+  (WEATHER.md §3.8): the overcast dome is already the luminance of a deck's underside, so the layer adds structure,
+  foreshortening and the foot, not a new grey, and a scene with `deck 1, foot 0` over `overcast 1` sees the dome it sees
+  now, within the texture. The texture is smooth value noise on the plane (two octaves of `noise`, cells one base high,
+  +-0.15 of the grey: a stratocumulus's cells are darker at their centres than at their thin edges, the amplitude a
+  choice), in the plane's coordinates: cot(e) along the view, cot(e) x (X - X_centre) / 900 across (a pinhole of 900
+  pixels' focal length, the sky band's height, for the across direction; a choice, since §4.6's vertical mapping is not
+  a pinhole), plus `deck_drift` along +x (designed, not built: as built, the across coordinate carries the camera's x
+  over 900 instead, so a pan moves the cells and a still camera sees a still deck; cot(e) is capped at 256 bases just
+  above the horizon, where the cells are thinner than a row). The cells foreshorten toward the foot as a real
+  underside's do. Value noise of the plane's coordinates, no generator: the scene's random numbers are kept, as the
+  weather's layers keep them (`Weather.ItKeepsTheScenesRandomNumbers`).
+- **The light.** The frame's flash (`light flash`) adds to sky pixels at 0.08 now; the deck takes it whole (and the
+  scene's light at the dome's 0.08), so a storm's lightning lights the base from within (what the day scene's `inside`
+  lamp does for the puffs). The stars hide under it by 1 - `deck` x contrast.
+- **The puffs below it.** Modules are drawn over the background, so the cloud model's masses stand in front of the deck
+  without a change; the day scene would thin them as the layer forms (`opacity smooth((sky.cloud - share) / 0.25) *
+  (1 - 0.6 * sky.deck)`, keeping the rest as the ragged fragments under a rain deck) and give them the deck's grey. The
+  learned rain shaft, hung by hand at the front (WEATHER.md §3.13), would have its top at the foot's row,
+  `ground - 900 * sin(sky.foot * 3.1416 / 180)`, where the deck is lost in its own rain.
+
+Where it runs and what it costs: per sky row an asin, a sin, an exp and the CIE grey; per sky pixel two `noise` taps and
+a blend, comparable with the day sky's cost now (the day scene's frame is nearly all the modules and the 1280 x 720
+picture, WEATHER.md §6); no allocation, since everything is a function of the row and the column. In an engine nothing
+is new: one that draws its own sky reads `sky.deck` and `sky.foot` (`nvfx_scene_get_input`, [ENGINES.md](ENGINES.md)
+§7) and places its own ceiling by them; the keys are the script's picture only. Tests, written before the code
+(`WeatherDay.TheFrameCarriesTheWetGroundAndTheCloudDeck`; `Frame.TheDeckCoversTheDomeByItsContrast` and
+`Frame.TheWetGroundAndTheDeckAreTheSameOnAnyNumberOfThreads` in `tests/test_script.cpp`): `deck 0` leaves the night and
+the day scene to the bit (`ScriptedWeatherDayFrozen` moves once with the day scene's wiring and is refrozen on a
+machine with the models); each row's opacity is `deck` times `wx::deck_contrast` for the foot's ratio (within 0.002,
+read off the blend between the dome and a `deck 1, foot 0` picture); nothing of the deck shows below the foot's row
+beyond 2 %; the hills and the ground are untouched to the bit; `deck 1, foot 0` against `overcast 1` within the
+texture's amplitude (0.15), and the cells show; over a night with no light the stars are gone; the same frames on 1
+and 3 threads and overlapped; the weather tests' reference scene carries the four keys, so `WeatherAllocation.NoneAFrame`
+counts 0 allocations with them and `WeatherScript.TheSameFramesOnAnyNumberOfThreads` holds; the checker's messages
+for the keys. What it leaves out: `deck_drift` (above); the deck's edge and gaps (`deck` is a share, not a map: the
+texture darkens but never opens, so §3.14's shafts have no gap to fall through), the sun's side (the underside lit
+toward `sky.sunx`, the colour of the hour), the deck's top (an anvil, the towers above it: the puffs stand in for them),
+the hills' heights, and mammatus, virga and the shafts hanging from it, which are their own layers (`frame shaft`,
+WEATHER.md §3.14).
 
 ### 5.5 Water
 

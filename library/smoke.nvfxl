@@ -1,8 +1,11 @@
 # Smoke: the smoke model (v2), drawn by field-shader looks lit by the scene (its colour is the look's: a recolour,
-# not new dynamics). Also the fog model as a heavy gas that stays low (the smoke model always rises) and the cloud model
-# as a smoke screen that lingers.
+# not new dynamics). Also the fog model as a heavy gas that stays low (the smoke model always rises), the cloud model
+# as a smoke screen that lingers, and the heavy gas model as a smoke grenade's dense dye cloud (the catalogue's #18).
 
 look smoke_white = like smoke, tint (0.97, 0.97, 1), soot_albedo 0.85, soot_density 4.5, sky 1.1, relief 1.5
+look dye_yellow  = shader, emission 0, soot_density 2.4, soot_albedo 0.85, sky 0.6, shadow 0.3, scene_light 1.3, relief 1.4,
+                   tint (1, 0.85, 0.2)                      # a smoke grenade's dye aerosol (the heavy gas model: no heat to draw)
+look dye_yellow_plume = like smoke_white, tint (1, 0.85, 0.2), soot_albedo 0.8   # the same dye in the vent's warm plume (the smoke model)
 look sooty       = like smoke, tint (0.5, 0.47, 0.45), soot_albedo 0.35, soot_density 5, sky 0.9, relief 1.6
 look oil         = like smoke, tint (0.3, 0.28, 0.27), soot_albedo 0.18, soot_density 12, sky 0.6, scene_light 1.6, relief 2
 look signal      = like smoke, tint (1, 0.32, 0.25), soot_albedo 0.8, soot_density 4, sky 0.95
@@ -32,6 +35,34 @@ module cloud = smoke, size 128, width 420 * scale, at (X, Y), sink 0.05, feather
                seed 131, controls (0.9, 0.5, 0.7), intensity intensity * (1 - smooth((t - 7) / 3)),
                opacity 1 - smooth((t - 10.5) / 1.5)
 field low = ceiling, level Y - 170 * scale, soft 80 * scale, damping 0.5, on cloud
+emit sparks, along (X, Y - 4 * scale) to (X, Y - 4 * scale), from 0, until 1.2, count 6
+
+# Coloured smoke grenade (the catalogue's #18: a dense dye aerosol, nearly unbuoyant, drifting; "by eye against
+# footage"). A pyrotechnic mix (a chlorate, a sugar and a dye) smoulders inside the can at a low temperature; the dye
+# sublimes, leaves through the vents and condenses again in the cool air as fine droplets about a micron across, so the
+# smoke is a dense coloured mist, not soot, and gives no light. The gas leaves warm, so the plume lifts a short way off
+# the can and no more (a low ceiling holds it); the aerosol is heavy and cools within a second, so the cloud sinks back,
+# spreads along the ground with rolling fronts and goes where the breeze takes it, pooling round the can in still air.
+# A canister burns for a minute or more; this one vents for eight seconds, as the library's white grenade does. The
+# cloud is one tile of the heavy gas model (the dry-ice fog's kind, its `flow` the breeze, its mound's top on the
+# ground), the vent's plume a small tile of the smoke model under a ceiling, both drawn by the looks at the top; the
+# fuze's sparks and the vent's glow are the compositor's. Another colour is another pair of looks. By eye (the gallery
+# with the models, at 3, 5 and 9 s): the smoke model's start points are all developed plumes (5 s in), and standing on
+# the ground that smoke hung as a ragged patch high over the layer, which the ceiling could flatten but not bring down;
+# so the plume's tile is sunk half its width, which puts the model's smoke at the layer's top as the vent's warm core,
+# and a lower ceiling keeps it there.
+entry coloured_smoke_grenade, category smoke, size 640 x 260, anchor base, once 14, show 5,
+      about "A coloured smoke grenade: a fuze's sparks, then the can vents dense yellow dye smoke for eight seconds; it lifts a little, sinks back, spreads along the ground with rolling fronts and drifts off downwind, thinning (the heavy gas model for the cloud, the smoke model for the vent's warm plume)"
+param intensity = 0.9, range (0.3, 1), about "how much smoke"
+param wind = 0.65, range (0, 1), about "the breeze: 0.5 still air (it spreads both ways), more drifts it to the right"
+let vent = smooth((t - 0.9) / 0.5) * (1 - smooth((t - 9) / 2.5))
+module cloud = heavygas, size 128, width 640 * scale, at (X, Y), sink 0.09, feather 0.12, look dye_yellow, start 0, seed 183,
+               controls (0.9, 0.65, 0.4), intensity intensity * vent, flow wind, opacity 1 - smooth((t - 12) / 2)
+module plume = smoke, size 64, width 200 * scale, at (X, Y), sink 0.5, feather 0.3, look dye_yellow_plume, start 6, seed 184,
+               controls (0.9, 0.65, 0.7), intensity 0.6 * intensity * vent, wind wind, opacity 1 - smooth((t - 10.5) / 1.5)
+field low = ceiling, level Y - 80 * scale, soft 40 * scale, damping 0.7, on plume
+field breeze = gust, velocity (1.2 * (wind - 0.5) * scale, 0), amount 0.5, scale 120 * scale, rate 0.4, seed 185, on cloud, plume
+emit glow, at (X, Y - 4 * scale), radius 5 * scale, colour (1, 0.78, 0.4), brightness 1.2 * vent
 emit sparks, along (X, Y - 4 * scale) to (X, Y - 4 * scale), from 0, until 1.2, count 6
 
 entry black_oil_smoke, category smoke, size 520 x 620, anchor base, loop, show 5,

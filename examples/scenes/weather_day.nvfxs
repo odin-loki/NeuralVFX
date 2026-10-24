@@ -45,9 +45,12 @@ let bx    = 640 + 520 * sky.bolt       # where the last flash struck
 
 # The sky's light: Kasten and Czeplak's daylight under the cloud, darkened further in the storm (a choice, docs/WEATHER.md
 # §4.6), the CIE overcast sky with the cloud, and Koschmieder's haze at the visibility the rain leaves. The camera's
-# exposure follows the daylight halfway (in stops), as a camera or an eye adapts.
-frame  daylight sky.light * (1 - 0.55 * dark), overcast sky.cloud, visibility sky.visibility, exposure 1.05 / sqrt(sky.light), bloom 0.7,
-       fade smooth(t / 0.5) * smooth((length - t) / 0.6)
+# exposure follows the daylight halfway (in stops), as a camera or an eye adapts. The ground and the ceiling are the
+# director's too (docs/COMPOSE.md §4.9): the rain's film darkens the ground (sky.wet) and fills its hollows (sky.puddle),
+# and the cover is a layer with its underside lost in the haze (sky.deck, sky.foot).
+frame  daylight sky.light * (1 - 0.55 * dark), overcast sky.cloud, visibility sky.visibility,
+       wet sky.wet, puddle sky.puddle, deck sky.deck, foot sky.foot,
+       exposure 1.05 / sqrt(sky.light), bloom 0.7, fade smooth(t / 0.5) * smooth((length - t) / 0.6)
 light  gain 0.14, flash (0.16 * sky.flash, 0.18 * sky.flash, 0.24 * sky.flash)
 
 # Clouds: five masses of the cloud model; each shows once the cover passes its share of the sky, so the cover is what

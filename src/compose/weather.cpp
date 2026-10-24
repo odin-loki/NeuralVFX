@@ -15,7 +15,9 @@ namespace {
 constexpr std::string_view kRegimeNames[] = {"clear", "overcast", "rain", "storm", "snow", "fog", "dust"};
 constexpr std::string_view kMemberNames[] = {"cloud", "rain",     "snow",  "hail",     "wind",    "mean",  "gust",   "visibility", "temp",
                                              "lightning", "dust", "fog",   "extinction", "u",     "beaufort", "lean", "leaves", "lift",
-                                             "light", "flash",    "strike", "bolt",     "since",   "regime", "progress"};
+                                             "trees", "light", "flash",    "strike", "bolt",     "since",   "regime", "progress",
+                                             "humidity", "dewpoint", "base",   "water",    "wet",     "puddle", "evaporation",
+                                             "carried", "front", "hour", "elevation", "sunx", "sun", "shaft", "deck", "foot"};
 static_assert(std::size(kMemberNames) == static_cast<std::size_t>(kMembers));
 
 constexpr float kInf = std::numeric_limits<float>::infinity();
@@ -26,16 +28,18 @@ float smooth01(float v) {
   return v * v * (3.f - 2.f * v);
 }
 
-// The regimes' targets (docs/WEATHER.md §2): each a choice inside what is observed for such weather, not a fit.
-//                                cloud precip hail mean gust  temp lightning fog    dust  cell_time spread
+// The regimes' targets (docs/WEATHER.md §2): each a choice inside what is observed for such weather, not a fit. The
+// humidity sets the dew point and so the cloud deck's base (§3.11): clear 1200 m, overcast 560 m, rain and snow about
+// 200 m, a storm 330 m, fog 0 (saturated: cloud at the ground), a dust storm's dry air 3.8 km.
+//                                cloud precip hail mean gust  temp lightning fog    dust  cell_time spread humidity
 constexpr Target kTargets[] = {
-    {0.10f, 0.f, 0.f, 3.f, 0.20f, 22.f, 0.f, 0.f, 0.f, 300.f, 0.f},            // clear: a few clouds, a light breeze (force 2)
-    {0.95f, 0.f, 0.f, 5.f, 0.18f, 17.f, 0.f, 0.f, 0.f, 300.f, 0.f},            // overcast: a gentle breeze (force 3)
-    {1.00f, 6.f, 0.f, 7.f, 0.22f, 13.f, 0.f, 0.f, 0.f, 300.f, 0.35f},          // rain: moderate (2.5 to 7.6 mm/h)
-    {1.00f, 40.f, 0.6f, 11.f, 0.40f, 16.f, 20.f, 0.f, 0.f, 90.f, 0.5f},        // storm: heavy rain, force 6 gusting to 8, lightning
-    {1.00f, 1.5f, 0.f, 4.f, 0.20f, -4.f, 0.f, 0.f, 0.f, 400.f, 0.3f},          // snow: moderate
-    {1.00f, 0.f, 0.f, 1.f, 0.10f, 8.f, 0.f, 3.912f / 0.15f - kClearAir, 0.f, 300.f, 0.f},  // fog: 150 m, light air
-    {0.30f, 0.f, 0.f, 15.f, 0.30f, 34.f, 0.f, 0.f, 0.6f, 300.f, 0.f},          // dust storm: about 330 m
+    {0.10f, 0.f, 0.f, 3.f, 0.20f, 22.f, 0.f, 0.f, 0.f, 300.f, 0.f, 0.55f},            // clear: a few clouds, a light breeze (force 2)
+    {0.95f, 0.f, 0.f, 5.f, 0.18f, 17.f, 0.f, 0.f, 0.f, 300.f, 0.f, 0.75f},            // overcast: a gentle breeze (force 3)
+    {1.00f, 6.f, 0.f, 7.f, 0.22f, 13.f, 0.f, 0.f, 0.f, 300.f, 0.35f, 0.90f},          // rain: moderate (2.5 to 7.6 mm/h)
+    {1.00f, 40.f, 0.6f, 11.f, 0.40f, 16.f, 20.f, 0.f, 0.f, 90.f, 0.5f, 0.85f},        // storm: heavy rain, force 6 gusting to 8, lightning
+    {1.00f, 1.5f, 0.f, 4.f, 0.20f, -4.f, 0.f, 0.f, 0.f, 400.f, 0.3f, 0.90f},          // snow: moderate
+    {1.00f, 0.f, 0.f, 1.f, 0.10f, 8.f, 0.f, 3.912f / 0.15f - kClearAir, 0.f, 300.f, 0.f, 1.f},  // fog: 150 m, light air, saturated
+    {0.30f, 0.f, 0.f, 15.f, 0.30f, 34.f, 0.f, 0.f, 0.6f, 300.f, 0.f, 0.15f},          // dust storm: about 330 m, dry
 };
 static_assert(std::size(kTargets) == static_cast<std::size_t>(kRegimes));
 
@@ -173,10 +177,73 @@ std::string_view beaufort_on_land(int B) {
 float lean(float w, float dir) { return 0.5f + 0.5f * dir * std::min(1.f, std::max(w, 0.f) / beaufort_speed(8.f)); }
 float leaves(float w) { return smooth01((beaufort(w) - 2.f) / 2.f); }
 float lift(float w) { return smooth01((beaufort(w) - 3.5f) / 1.5f); }
+float trees(float w) { return smooth01((beaufort(w) - 4.f) / 3.f); }
 
 float daylight(float cloud) { return 1.f - 0.75f * std::pow(std::clamp(cloud, 0.f, 1.f), 3.4f); }
 float gust_time(float U) { return std::clamp(kGustLength / std::max(U, 0.5f), 1.f, 30.f); }
 float snow_share(float T) { return std::clamp((2.f - T) / 2.f, 0.f, 1.f); }
+
+// Magnus with Alduchov and Eskridge's coefficients; the dew point by its inverse: g = ln(h) + a T / (b + T), Td = b g / (a - g).
+float saturation_vapour_hpa(float T) { return 6.1094f * std::exp(17.625f * T / (T + 243.04f)); }
+float dew_point(float T, float h) {
+  if (h >= 1.f) return T;  // saturated, to the bit
+  h = std::max(h, 1e-4f);
+  const float g = std::log(h) + 17.625f * T / (T + 243.04f);
+  return std::min(T, 243.04f * g / (17.625f - g));
+}
+float cloud_base_m(float T, float Td) { return std::max(0.f, 125.f * (T - Td)); }
+
+// The deck (docs/WEATHER.md §3.15): a layer from broken cover (a ceiling, ICAO: more than half the sky), its underside seen
+// out to the visibility, where it stands atan(base / V) above the horizon, and fading into the haze below by Koschmieder
+// along the slant path base / sin(elevation).
+float deck_cover(float cloud) { return smooth01((std::clamp(cloud, 0.f, 1.f) - kDeckScattered) / (kDeckBroken - kDeckScattered)); }
+float deck_foot_deg(float base_m, float visibility_m) {
+  if (!(base_m > 0.f)) return 0.f;
+  if (!(visibility_m > 0.f)) return 90.f;
+  return std::atan(base_m / visibility_m) * (180.f / kPi);  // smooth where the base passes the visibility (asin would pin at 90)
+}
+float deck_contrast(float base_m, float visibility_m, float elevation_deg) {
+  if (!(elevation_deg > 0.f)) return 0.f;
+  if (!(base_m > 0.f)) return 1.f;
+  if (!(visibility_m > 0.f)) return 0.f;
+  return std::exp(-kKoschmieder * base_m / (visibility_m * std::sin(std::min(elevation_deg, 90.f) * (kPi / 180.f))));
+}
+
+// Penman's drying power of the air, E_a = 0.2625 (1 + 0.537 U_2) (e_s - e) mm/day (e in hPa), in mm/h.
+float evaporation_mm_h(float T, float h, float u2) {
+  const float deficit = saturation_vapour_hpa(T) * (1.f - std::clamp(h, 0.f, 1.f));
+  return 0.2625f / 24.f * (1.f + 0.537f * std::max(u2, 0.f)) * deficit;
+}
+float wind_2m(float u10) { return kWind2m * u10; }
+
+float taylor_length_m(float U, float t) { return std::max(U, 0.f) * std::max(t, 0.f); }
+
+// The sun: the hour angle H = 15 (hour - 12) degrees; on the equinox at latitude phi, sin(elevation) = cos(phi) cos(H)
+// and the sun's east-west component is -sin(H), so across a picture facing south it stands at sin(H).
+namespace {
+float hour_angle_rad(float hour) {
+  const float h = hour - 24.f * std::floor(hour / 24.f);  // wraps
+  return (h - 12.f) * (15.f * kPi / 180.f);
+}
+}  // namespace
+float sun_elevation_deg(float hour) {
+  const float s = std::cos(kLatitude * kPi / 180.f) * std::cos(hour_angle_rad(hour));
+  return std::asin(std::clamp(s, -1.f, 1.f)) * (180.f / kPi);
+}
+float sun_across(float hour) { return std::sin(hour_angle_rad(hour)); }
+float sun_share(float cloud) {
+  const float c = std::clamp(cloud, 0.f, 1.f);
+  return 0.7f * (1.f - c * c);  // 1 - D/G, Kasten and Czeplak (1980): D/G = 0.3 + 0.7 (N/8)^2
+}
+float beam_transmittance(float sigma, float elevation_deg) {
+  if (!(elevation_deg > 0.f)) return 0.f;
+  return std::exp(-std::max(sigma, 0.f) * kWeatherLayer / std::sin(elevation_deg * (kPi / 180.f)));
+}
+float shaft_visibility(float cloud, float sigma, float elevation_deg) {
+  const float c = std::clamp(cloud, 0.f, 1.f);
+  const float lit = 1.f - std::exp(-std::max(sigma, 0.f) * kShaftDepth);  // what the lit air scatters toward the eye
+  return std::clamp(4.f * c * (1.f - c) * beam_transmittance(sigma, elevation_deg) * lit, 0.f, 1.f);
+}
 
 // --- the director --------------------------------------------------------------------------------------------------------
 
@@ -229,6 +296,7 @@ Target Director::variant(Regime r, int k) const {
   t.lightning *= std::exp(0.3f * g(6));
   t.fog *= std::exp(0.25f * g(7));
   t.dust *= std::exp(0.2f * g(8));
+  t.humidity = std::clamp(t.humidity + 0.08f * (1.f - t.humidity) * g(9), 0.f, 1.f);  // saturated air (fog) stays saturated
   return t;
 }
 
@@ -252,6 +320,7 @@ void Director::request(Regime to, float seconds) {
   over_ = std::max(1.f, seconds);
   t0_ = time_;
   p_ = 0.f;
+  front0_ = carried_;  // the new weather's front is at the camera; the wind takes it downwind from here
 }
 
 void Director::blend() {
@@ -265,6 +334,7 @@ void Director::blend() {
   base_.lightning = along(from_.lightning, to_.lightning, p, kLightning);
   base_.fog = along(from_.fog, to_.fog, p, kFog);
   base_.dust = along(from_.dust, to_.dust, p, kDust);
+  base_.humidity = along(from_.humidity, to_.humidity, p, kCloud);  // the air moistens as the clouds build, dries as they break
   // the rain cells change with the rain
   const Window& w = kPrecip;
   const bool up = to_.precip > from_.precip;
@@ -283,6 +353,8 @@ void Director::step(float dt) {
     if (p_ < 1.f) blend();
     else base_ = to_;  // there, to the bit
   }
+  // Taylor's hypothesis: the mean wind of the moment carries the weather along x (docs/WEATHER.md §3.13)
+  carried_ += dir_ * base_.mean * dt;
   // the noise: each an Ornstein-Uhlenbeck process stepped exactly (x' = a x + sqrt(1 - a^2) n, a = exp(-dt / tau)), then
   // its smoothing (y' = b y + (1 - b) x, b = exp(-dt / s))
   for (int i = 0; i < static_cast<int>(noise_.size()); ++i) {
@@ -354,15 +426,56 @@ void Director::derive() {
   v_[m_lean] = lean(wind, dir_);
   v_[m_leaves] = leaves(wind);
   v_[m_lift] = lift(wind);
+  v_[m_trees] = trees(wind);
   v_[m_light] = daylight(cloud);
   v_[m_regime] = static_cast<float>(static_cast<int>(to_regime_));
   v_[m_progress] = p_;
+  // moist air: the humidity is the blend's (no noise of its own); the dew point follows the temperature's noise at that
+  // humidity, so the cloud base, 125 m a degree of the spread, hardly moves with it
+  v_[m_humidity] = B.humidity;
+  v_[m_dewpoint] = dew_point(temp, B.humidity);
+  v_[m_base] = cloud_base_m(temp, v_[m_dewpoint]);
+  // the deck (§3.15): the cover as a layer at that base (the cloud's noise carries through), its underside seen out to
+  // the visibility, where it meets the haze
+  v_[m_deck] = deck_cover(cloud);
+  v_[m_foot] = deck_foot_deg(v_[m_base], v_[m_visibility]);
+  // wet ground: the rain fills the film up to the depression storage (the excess runs off), the air dries it by Penman's
+  // wind function (nothing in saturated air: fog keeps it wet). Snow does not wet it (nothing lies yet). It starts as
+  // long such weather leaves it: full where the rain beats the drying, dry elsewhere.
+  const float evap = evaporation_mm_h(temp, B.humidity, wind_2m(wind));
+  if (steps_ == 0) water_ = v_[m_rain] > evap ? kDepressionStorage : 0.f;
+  else water_ = std::clamp(water_ + (v_[m_rain] - evap) * dt_ / 3600.f, 0.f, kDepressionStorage);
+  v_[m_water] = water_;
+  v_[m_wet] = smooth01(water_ / kWetFilm);
+  v_[m_puddle] = water_ / kDepressionStorage;
+  v_[m_evaporation] = evap;
+  // the storm across the scene: where the wind has carried the air, and the front of the weather it heads for with it
+  v_[m_carried] = carried_;
+  v_[m_front] = carried_ - front0_;
+  sun();
   if (steps_ == 0) {  // before the first step: no flash yet
     v_[m_flash] = 0.f;
     v_[m_strike] = 0.f;
     v_[m_bolt] = 0.f;
     v_[m_since] = kInf;
   }
+}
+
+// The sun and its shafts (docs/WEATHER.md §3.14): where it stands from the hour; the direct beam's share of the daylight
+// by Kasten and Czeplak's diffuse fraction, through the weather along its slant path; the shafts where the broken deck's
+// beams light hazy air. Nothing here has noise of its own: the cloud's and the extinction's carry through.
+void Director::sun() {
+  const float elevation = sun_elevation_deg(hour_), sigma = v_[m_extinction], cloud = v_[m_cloud];
+  v_[m_hour] = hour_;
+  v_[m_elevation] = elevation;
+  v_[m_sunx] = sun_across(hour_);
+  v_[m_sun] = sun_share(cloud) * daylight(cloud) * beam_transmittance(sigma, elevation);
+  v_[m_shaft] = shaft_visibility(cloud, sigma, elevation);
+}
+
+void Director::set_hour(float hour) {
+  hour_ = std::isfinite(hour) ? hour : 12.f;
+  sun();
 }
 
 }  // namespace nfx::compose::wx

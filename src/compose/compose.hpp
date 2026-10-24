@@ -683,6 +683,13 @@ class Frame {
   // to 1 the CIE overcast sky; `visibility` (world: metres): Koschmieder's haze over the hills (2 km away), the ground and
   // the sky.
   float daylight = 0.f, overcast = 0.f, visibility = std::numeric_limits<float>::infinity();
+  // The weather director's ground and ceiling (docs/COMPOSE.md §4.9.1; the script's `frame wet, puddle, deck, foot`, wired to
+  // `sky.wet`, `sky.puddle`, `sky.deck`, `sky.foot`): `wet`, the film over the ground's roughness, 0 dry to 1; `puddle`,
+  // the share of the depression storage filled, 0 to 1; `deck`, how much of the sky is a layer rather than puffs, 0 to 1;
+  // `foot`, degrees above the horizon where the haze hides the deck's underside. All 0 by default, and at 0 every scene
+  // before them is drawn to the bit. The background's rows draw them (background_row(): §4.11 the ground rows, §5.4 the
+  // sky rows); an engine that draws its own ground or sky reads them instead.
+  float wet = 0.f, puddle = 0.f, deck = 0.f, foot = 0.f;
 
   void background(const Light& light, std::span<const std::array<float, 4>> scorch, Pool& pool);  // scorch: x, y, radius, glow
   // Draw modules (each group once, by ownership weights; single modules as they are) over the screen.
@@ -735,9 +742,9 @@ class Frame {
 
  private:
   struct Params {  // the settings above, as a stage reads them
-    float cam_x, cam_y, ground_y, exposure, haze, fade, time, daylight, overcast, visibility;
+    float cam_x, cam_y, ground_y, exposure, haze, fade, time, daylight, overcast, visibility, wet, puddle, deck, foot;
   };
-  Params params() const { return {cam_x, cam_y, ground_y, exposure, haze, fade, time, daylight, overcast, visibility}; }
+  Params params() const { return {cam_x, cam_y, ground_y, exposure, haze, fade, time, daylight, overcast, visibility, wet, puddle, deck, foot}; }
   struct LightView {  // the light field with a fourth channel (0), a cell to a vector, and where it lies
     const float* L4 = nullptr;
     int nx = 0, ny = 0;
@@ -771,6 +778,7 @@ class Frame {
     std::array<float, 4> hill_colour{};
     Tap light;                    // background: the light field's columns
     std::uint32_t star = 0, tex = 0;  // hash keys of the stars and the ground
+    std::uint32_t pud = 0;            // and of the ground's hollows the puddles fill (docs/COMPOSE.md §4.11)
     Tap bus;                      // distort: the bus's columns
     bool on_bus = false;
     float wobble = 0, phase = 0;  // distort: the haze's terms that depend on x alone

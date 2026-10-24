@@ -1,6 +1,7 @@
 // Composed effects (compose.hpp, docs/COMPOSE.md).
 #include "compose.hpp"
 #include "water.hpp"
+#include "weather.hpp"  // wx::deck_contrast: the cloud deck's underside against the haze (docs/COMPOSE.md §5.4)
 
 #include <neuralfx/noise.hpp>
 #include <neuralfx/nvfx.h>
@@ -1999,6 +2000,7 @@ void Frame::background_columns(const Params& P, const LightView& L) {
     k.hill_colour = {0.006f + 0.05f * l[0], 0.007f + 0.05f * l[1], 0.012f + 0.05f * l[2], 1.f};
     k.star = hx(ifloor(k.wx / 3.f));
     k.tex = hx(ifloor(k.wx / 2.f));
+    k.pud = hx(ifloor(k.wx / 16.f));  // a hollow is 16 world pixels wide (a run of 8 of the texture's)
   }
   // runs of columns with the same star key (about 3 columns each): a row's stars are found once per run
   star_runs_.clear();
@@ -2091,7 +2093,7 @@ void Frame::background_row(int y, const Params& P, const LightView& L, std::span
   const float* lx1 = light_x_.data() + zs(ly.i1) * zs(w_) * 4;
   const auto light_at_x = [&](int x) { return ly.w0 * load4(lx0 + zs(x) * 4) + ly.w1 * load4(lx1 + zs(x) * 4) + flash4; };
   const bool day = P.daylight > 0.f || P.overcast > 0.f || P.visibility < std::numeric_limits<float>::infinity();
-  if (wy < ground && day) {  // the day's sky and hills (docs/WEATHER.md §4.6)
+  if (wy < ground && (day || P.deck > 0.f)) {  // the day's sky and hills (docs/WEATHER.md §4.6); a deck over the night too
     const float u = std::clamp((ground - wy) / 900.f, 0.f, 1.f);
     const DaySky S = day_sky(P.daylight, P.overcast, P.visibility, u);
     const float night = 1.f - std::min(1.f, P.daylight);
@@ -2099,6 +2101,26 @@ void Frame::background_row(int y, const Params& P, const LightView& L, std::span
                   (0.030f + 0.035f * (1.f - u)) * night + S.dome[2], 1.f};
     const float stars = night * (1.f - P.overcast) * S.clear;  // the stars a clear enough night shows
     const std::uint32_t star_y = hy(ifloor(wy / 3.f));
+    // The cloud deck (docs/COMPOSE.md §5.4): a layer's underside over the dome. The day sky reads u as sin(elevation), so
+    // the row stands at e = asin(u); its contrast against the haze along the slant path is Koschmieder's
+    // exp(-3.912 tan(foot) / sin(e)) (wx::deck_contrast with the foot's ratio: 0 at the horizon, 2 % at the foot), and the
+    // row's cover is `deck` times that. Its colour is the CIE overcast sky's at that elevation (daylight x grey x
+    // (1 + 2 sin e) / 3, §4.6's grey: under `overcast 1` the dome already has a deck's luminance, so the layer adds its
+    // cells and its foot, not a new grey), with two octaves of value noise on the plane of the base (cells one base
+    // high: cot(e) along the view, cot(e) (X - X_centre) / 900 across, a pinhole of the sky band's height; +-0.15 of the
+    // grey, a stratocumulus's cells darker at their centres than at their thin edges), lit whole by the flash (the dome
+    // takes 0.08 of it) and as the dome by the scene's light. The stars hide under it by 1 - cover; the hills cut it.
+    float cover = 0.f, along = 0.f, across = 0.f;
+    px4 deck_grey{};
+    if (P.deck > 0.f && u > 0.f) {
+      constexpr float kDeg = 180.f / std::numbers::pi_v<float>;
+      const float e = std::asin(u);
+      cover = P.deck * wx::deck_contrast(std::tan(P.foot / kDeg), 1.f, e * kDeg);
+      deck_grey = std::max(0.f, P.daylight) * ((1.f + 2.f * u) / 3.f) * px4{0.62f, 0.64f, 0.68f, 0.f};
+      along = std::min(std::sqrt(1.f - u * u) / u, 256.f);  // cot(e): the plane's distance along the view, in bases
+      across = along / 900.f;                                // per world pixel from the picture's centre
+    }
+    const float xc = P.cam_x + 0.5f * fl(w_);
     for (int x = 0; x < w_; ++x) {
       const Column& k = cols_[zs(x)];
       float* p = row + zs(x) * 4;
@@ -2109,7 +2131,8 @@ void Frame::background_row(int y, const Params& P, const LightView& L, std::span
         store4(p, v);
         continue;
       }
-      px4 v = sky + 0.08f * light_at_x(x);
+      const px4 l = light_at_x(x);
+      px4 v = sky + 0.08f * l;
       if (stars > 0.f) {
         const float hs = unit(k.star ^ star_y ^ hz(7));
         if (hs > 0.9965f) {
@@ -2117,6 +2140,12 @@ void Frame::background_row(int y, const Params& P, const LightView& L, std::span
           const float st = stars * (hs - 0.9965f) / 0.0035f * 0.35f * tw * u;
           v += px4{st, st, 1.1f * st, 0.f};
         }
+      }
+      if (cover > 0.f) {
+        const float px = across * (k.wx - xc) + P.cam_x * (1.f / 900.f);  // the plane's coordinate across; a pan moves the cells
+        const float n = value_noise(px, along, 0.f, 0x4445434bU) + 0.5f * value_noise(2.f * px, 2.f * along, 0.f, 0x4445434cU);
+        const px4 d = deck_grey * (1.f + 0.1f * n) + 0.08f * l + 0.92f * flash4;
+        v = (1.f - cover) * v + cover * d;
       }
       v[3] = 1.f;
       store4(p, v);
@@ -2164,18 +2193,62 @@ void Frame::background_row(int y, const Params& P, const LightView& L, std::span
   const float tex_amp = 0.5f + 0.5f * depth, shade = 1.f - 0.55f * depth;
   const std::uint32_t tex_y = hy(ifloor(wy / 2.f)) ^ hz(3);
   const px4 earth{0.012f, 0.011f, 0.010f, 0.f}, tint{0.9f, 0.75f, 0.6f, 0.f};
+  const float dist = 25.f / (depth + 0.05f);  // metres: 500 at the horizon, 24 at the bottom of the picture
+  // The wet ground (docs/COMPOSE.md §4.11). `wet` darkens the ground, its own colour and the scene's light on it, by
+  // lerp(1, 0.6, wet) before the haze (Lekner and Dorf 1988: a rough surface wetted keeps the light it would have
+  // scattered out; one factor for the three channels, no colour of its own; by night too). `puddle` lays water in the
+  // ground's hollows: patches 16 world pixels wide (Column::pud, a run of eight of the texture's columns) and a band of
+  // 6 tall (flattened by the perspective, as puddles are), each with a depth from its hash (0 to 0.9, so that `puddle 1`
+  // fills them all); a hollow holds water where its depth is under `puddle` (the deepest first: at `puddle` 0.5 half
+  // the hollows are at least half full), its edge soft over 0.1 (one more hash per run of columns). A puddle
+  // mirrors the picture in the ground plane: the row ground + d shows the row ground - d, the sky's colour there (no
+  // stars, no light: day_sky at u = d / 900) or the hills' where that row is below their outline; it shows R of the
+  // mirror and 1 - R of the darkened ground under it (the water is clear), R Fresnel's reflectance of water by Schlick,
+  // 0.02 + 0.98 (1 - sin theta)^5, at the depression angle theta the row's distance gives with the eye 1.6 m up (0.98 at
+  // the horizon, 0.72 at the bottom of the picture); then the haze as for the rest of the ground. Scorch marks are drawn
+  // over it as before. At 0 neither runs: every scene before, to the bit.
+  const float wetf = 1.f - 0.4f * P.wet;
+  const bool puddles = P.puddle > 0.f;
+  float R = 0.f, pw = 0.f;
+  px4 mirror_sky{}, hill_add{};
+  float hill_mul = 1.f;
+  std::uint32_t pud_y = 0;
+  const float wym = ground - (wy - ground);  // the mirrored row
+  if (puddles) {
+    const float sin_t = 1.6f / std::sqrt(dist * dist + 1.6f * 1.6f), f = 1.f - sin_t;
+    R = 0.02f + 0.98f * f * f * f * f * f;
+    const float um = std::clamp((wy - ground) / 900.f, 0.f, 1.f), night = 1.f - std::min(1.f, P.daylight);
+    mirror_sky = px4{(0.010f + 0.020f * (1.f - um)) * night, (0.013f + 0.024f * (1.f - um)) * night, (0.030f + 0.035f * (1.f - um)) * night, 0.f};
+    if (day) {
+      const DaySky Sm = day_sky(P.daylight, P.overcast, P.visibility, um);
+      mirror_sky += Sm.dome;
+      hill_mul = Sm.hills;  // the hills as the sky rows draw them (independent of the row)
+      hill_add = (1.f - Sm.hills) * Sm.air;
+    }
+    pud_y = hy(ifloor(wy / 6.f)) ^ hz(11);
+  }
+  const px4 hill_day = P.daylight * px4{0.030f, 0.045f, 0.034f, 0.f};
+  const auto puddled = [&](const Column& k, px4 v) {  // the ground v under a puddle of coverage pw at column k
+    px4 m = mirror_sky;
+    if (wym >= k.hill) m = (load4(k.hill_colour.data()) + hill_day) * hill_mul + hill_add;
+    const px4 p = R * m + (1.f - R) * v;
+    return v + pw * (p - v);
+  };
   float tex = 0.f;
   if (day) {  // the ground by day: grass lit by the daylight, veiled by the haze between it and the viewer
     const DaySky S = day_sky(P.daylight, P.overcast, P.visibility, 0.f);
-    const float dist = 25.f / (depth + 0.05f);  // metres: 500 at the horizon, 24 at the bottom of the picture
     const float seen = std::exp(-kKoschmiederLn * dist / P.visibility);
     const px4 grass = P.daylight * px4{0.045f, 0.06f, 0.028f, 0.f};
     for (int x = 0; x < w_; ++x) {
       const Column& k = cols_[zs(x)];
-      if (x == 0 || k.tex != cols_[zs(x - 1)].tex) tex = 0.75f + 0.5f * unit(k.tex ^ tex_y) * tex_amp;  // per run of columns
-      const float lit = shade * tex;
+      if (x == 0 || k.tex != cols_[zs(x - 1)].tex) {  // per run of columns
+        tex = 0.75f + 0.5f * unit(k.tex ^ tex_y) * tex_amp;
+        if (puddles) pw = smooth01((P.puddle - 0.9f * unit(k.pud ^ pud_y)) * 10.f);  // (a hollow's edge is one of the texture's)
+      }
+      const float lit = shade * tex * wetf;
       const px4 l = light_at_x(x);
       px4 v = ((earth + 0.35f * l / (1.f + 0.6f * l)) * tint + grass) * lit;
+      if (pw > 0.f) v = puddled(k, v);
       v = v * seen + (1.f - seen) * S.air;
       v[3] = 1.f;
       store4(row + zs(x) * 4, v);
@@ -2183,10 +2256,14 @@ void Frame::background_row(int y, const Params& P, const LightView& L, std::span
   } else {
     for (int x = 0; x < w_; ++x) {
       const Column& k = cols_[zs(x)];
-      if (x == 0 || k.tex != cols_[zs(x - 1)].tex) tex = 0.75f + 0.5f * unit(k.tex ^ tex_y) * tex_amp;  // per run of columns
-      const float lit = shade * tex;
+      if (x == 0 || k.tex != cols_[zs(x - 1)].tex) {  // per run of columns
+        tex = 0.75f + 0.5f * unit(k.tex ^ tex_y) * tex_amp;
+        if (puddles) pw = smooth01((P.puddle - 0.9f * unit(k.pud ^ pud_y)) * 10.f);  // (a hollow's edge is one of the texture's)
+      }
+      const float lit = shade * tex * wetf;
       const px4 l = light_at_x(x);
       px4 v = (earth + 0.35f * l / (1.f + 0.6f * l)) * lit * tint;
+      if (pw > 0.f) v = puddled(k, v);
       v[3] = 1.f;
       store4(row + zs(x) * 4, v);
     }
