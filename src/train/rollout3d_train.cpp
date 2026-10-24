@@ -655,6 +655,84 @@ std::vector<double> row_spread(const Hyper& h, std::span<const float> state, int
   return out;
 }
 
+void r2_extras_step(const Model& m, int unroll, std::span<const float> S, std::span<const float> t, const ExtraLosses& extra, double& loss,
+                    std::span<float> gs) {
+  if (extra.spread <= 0.f && extra.edge <= 0.f) return;
+  const Hyper& h = m.h;
+  const Grid g{h.rx, h.ry, h.rz};
+  const int C = h.channels();
+  std::array<float, kPhys> wch{};
+  for (int k = 0; k < kPhys; ++k) wch[zu(k)] = 1.f / (m.scale[zu(k)] * m.scale[zu(k)]);
+  if (extra.spread > 0.f) {
+    const float sw = extra.spread / (2.f * fl(unroll));
+    for (int k = 3; k < kPhys; ++k) {
+      std::vector<double> mt(zu(g.ry), 0.0), wt(zu(g.ry), 0.0);
+      double tmax = 0, ttot = 0;
+      for (int y = 0; y < g.ry; ++y) {
+        double mm = 0, sx = 0, sz = 0, sxx = 0;
+        for (int z = 0; z < g.rz; ++z) {
+          for (int x = 0; x < g.rx; ++x) {
+            const double q = std::max(0.f, t[g.at(x, y, z) * kPhys + zu(k)]);
+            mm += q;
+            sx += q * x;
+            sz += q * z;
+            sxx += q * (static_cast<double>(x) * x + static_cast<double>(z) * z);
+          }
+        }
+        mt[zu(y)] = mm;
+        if (mm > 0) wt[zu(y)] = sxx / mm - (sx / mm) * (sx / mm) - (sz / mm) * (sz / mm);
+        tmax = std::max(tmax, mm);
+        ttot += mm;
+      }
+      if (!(ttot > 0)) continue;
+      for (int y = 0; y < g.ry; ++y) {
+        if (!(mt[zu(y)] > 1e-3 * tmax)) continue;
+        double mm = 0, sx = 0, sz = 0, sxx = 0;
+        for (int z = 0; z < g.rz; ++z) {
+          for (int x = 0; x < g.rx; ++x) {
+            const double q = std::max(0.f, S[g.at(x, y, z) * zu(C) + zu(k)]);
+            mm += q;
+            sx += q * x;
+            sz += q * z;
+            sxx += q * (static_cast<double>(x) * x + static_cast<double>(z) * z);
+          }
+        }
+        if (!(mm > 1e-6 * tmax)) continue;
+        const double cx = sx / mm, cz = sz / mm, wm = sxx / mm - cx * cx - cz * cz;
+        const double om = mt[zu(y)] / ttot, den = wt[zu(y)] + 1.0, rel = (wm - wt[zu(y)]) / den;
+        loss += static_cast<double>(sw) * om * rel * rel;
+        const double dw = static_cast<double>(sw) * om * 2.0 * rel / den;
+        for (int z = 0; z < g.rz; ++z) {
+          for (int x = 0; x < g.rx; ++x) {
+            const std::size_t j = g.at(x, y, z);
+            if (!(S[j * zu(C) + zu(k)] > 0.f)) continue;
+            const double d2 = (x - cx) * (x - cx) + (z - cz) * (z - cz);
+            gs[j * zu(C) + zu(k)] += static_cast<float>(dw * (d2 - wm) / mm);
+          }
+        }
+      }
+    }
+  }
+  if (extra.edge > 0.f) {
+    const int ne = g.rx * g.ry * g.rz - (g.rx - 2) * g.ry * (g.rz - 2);
+    const float ew = extra.edge / (fl(ne) * 2.f * fl(unroll));
+    for (int y = 0; y < g.ry; ++y) {
+      for (int z = 0; z < g.rz; ++z) {
+        for (int x = 0; x < g.rx; ++x) {
+          if (!(x == 0 || z == 0 || x == g.rx - 1 || z == g.rz - 1)) continue;
+          const std::size_t j = g.at(x, y, z);
+          for (int k = 3; k < kPhys; ++k) {
+            const float e = S[j * zu(C) + zu(k)] - t[j * kPhys + zu(k)];
+            if (!(e > 0.f)) continue;
+            loss += static_cast<double>(ew * wch[zu(k)] * e * e);
+            gs[j * zu(C) + zu(k)] += 2.f * ew * wch[zu(k)] * e;
+          }
+        }
+      }
+    }
+  }
+}
+
 double window_loss(const Model& m, const Run& r, int first, int unroll, int burn, float sigma, float profile, std::uint64_t noise_seed,
                    std::vector<float>* grad, float activity, const ExtraLosses& extra, bool r2_extras_only) {
   const Hyper& h = m.h;
@@ -769,74 +847,7 @@ double window_loss(const Model& m, const Run& r, int first, int unroll, int burn
         }
       }
     }
-    if (extra.spread > 0.f) {  // study R2: each row's spread about its own centroid, heat and soot, against the truth's
-      const float sw = extra.spread / (2.f * fl(unroll));
-      for (int k = 3; k < kPhys; ++k) {
-        std::vector<double> mt(zu(g.ry), 0.0), wt(zu(g.ry), 0.0);
-        double tmax = 0, ttot = 0;
-        for (int y = 0; y < g.ry; ++y) {  // the truth's mass and spread per row
-          double mm = 0, sx = 0, sz = 0, sxx = 0;
-          for (int z = 0; z < g.rz; ++z) {
-            for (int x = 0; x < g.rx; ++x) {
-              const double q = std::max(0.f, t[g.at(x, y, z) * kPhys + zu(k)]);
-              mm += q;
-              sx += q * x;
-              sz += q * z;
-              sxx += q * (static_cast<double>(x) * x + static_cast<double>(z) * z);
-            }
-          }
-          mt[zu(y)] = mm;
-          if (mm > 0) wt[zu(y)] = sxx / mm - (sx / mm) * (sx / mm) - (sz / mm) * (sz / mm);
-          tmax = std::max(tmax, mm);
-          ttot += mm;
-        }
-        if (!(ttot > 0)) continue;
-        for (int y = 0; y < g.ry; ++y) {
-          if (!(mt[zu(y)] > 1e-3 * tmax)) continue;
-          double mm = 0, sx = 0, sz = 0, sxx = 0;
-          for (int z = 0; z < g.rz; ++z) {
-            for (int x = 0; x < g.rx; ++x) {
-              const double q = std::max(0.f, S[g.at(x, y, z) * zu(C) + zu(k)]);
-              mm += q;
-              sx += q * x;
-              sz += q * z;
-              sxx += q * (static_cast<double>(x) * x + static_cast<double>(z) * z);
-            }
-          }
-          if (!(mm > 1e-6 * tmax)) continue;
-          const double cx = sx / mm, cz = sz / mm, wm = sxx / mm - cx * cx - cz * cz;
-          const double om = mt[zu(y)] / ttot, den = wt[zu(y)] + 1.0, rel = (wm - wt[zu(y)]) / den;
-          loss += static_cast<double>(sw) * om * rel * rel;
-          const double dw = static_cast<double>(sw) * om * 2.0 * rel / den;  // d loss / d spread
-          for (int z = 0; z < g.rz; ++z) {
-            for (int x = 0; x < g.rx; ++x) {
-              const std::size_t j = g.at(x, y, z);
-              if (!(S[j * zu(C) + zu(k)] > 0.f)) continue;  // max(0, q): no gradient below zero
-              const double d2 = (x - cx) * (x - cx) + (z - cz) * (z - cz);
-              gs[j * zu(C) + zu(k)] += static_cast<float>(dw * (d2 - wm) / mm);
-            }
-          }
-        }
-      }
-    }
-    if (extra.edge > 0.f) {  // study R2: heat and soot at the open sides beyond the truth's (the plume leaves by the top)
-      const int ne = g.rx * g.ry * g.rz - (g.rx - 2) * g.ry * (g.rz - 2);
-      const float ew = extra.edge / (fl(ne) * 2.f * fl(unroll));
-      for (int y = 0; y < g.ry; ++y) {
-        for (int z = 0; z < g.rz; ++z) {
-          for (int x = 0; x < g.rx; ++x) {
-            if (!(x == 0 || z == 0 || x == g.rx - 1 || z == g.rz - 1)) continue;
-            const std::size_t j = g.at(x, y, z);
-            for (int k = 3; k < kPhys; ++k) {
-              const float e = S[j * zu(C) + zu(k)] - t[j * kPhys + zu(k)];
-              if (!(e > 0.f)) continue;
-              loss += static_cast<double>(ew * wch[zu(k)] * e * e);
-              gs[j * zu(C) + zu(k)] += 2.f * ew * wch[zu(k)] * e;
-            }
-          }
-        }
-      }
-    }
+    r2_extras_step(m, unroll, S, t, extra, loss, gs);
   }
   if (grad) {
     Vec gS(zu(N) * zu(C), 0.f), gp(zu(N), 0.f), gS_in, gp_in;

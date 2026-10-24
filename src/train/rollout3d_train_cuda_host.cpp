@@ -288,7 +288,7 @@ void state_of_host(const Model& m, const Run& r, int i, std::vector<float>& S, s
 }
 
 double window_loss_cuda_impl(CudaTrainer& tr, const Model& m, const Run& r, int first, int unroll, int burn, float sigma, float profile, std::uint64_t noise_seed,
-                             std::vector<float>* grad, float activity) {
+                             std::vector<float>* grad, float activity, const ExtraLosses& extra) {
   const Hyper& h = m.h;
   const int N = h.cells(), C = h.channels();
   const std::size_t per = static_cast<std::size_t>(N) * kPhys;
@@ -391,6 +391,7 @@ double window_loss_cuda_impl(CudaTrainer& tr, const Model& m, const Run& r, int 
         }
       }
     }
+    r2_extras_step(m, unroll, S, t, extra, loss, gs);
   }
   if (grad) {
     grad->assign(step_layout(h).size, 0.f);
@@ -416,10 +417,10 @@ bool cuda_train_available() {
 }
 
 double window_loss_cuda(const Model& m, const Run& r, int first, int unroll, int burn, float sigma, float profile, std::uint64_t noise_seed,
-                        std::vector<float>* grad, float activity, int shards) {
+                        std::vector<float>* grad, float activity, const ExtraLosses& extra, int shards) {
   CudaTrainer tr(m, shards);
   tr.sync_weights(m);
-  return window_loss_cuda_impl(tr, m, r, first, unroll, burn, sigma, profile, noise_seed, grad, activity);
+  return window_loss_cuda_impl(tr, m, r, first, unroll, burn, sigma, profile, noise_seed, grad, activity, extra);
 }
 
 void cuda_train_stepper(Model& m, std::span<const Run> runs, const TrainOptions& o, TrainState& s,
@@ -476,12 +477,8 @@ void cuda_train_stepper(Model& m, std::span<const Run> runs, const TrainOptions&
       const int span = r.frames - unroll - burn - 1;
       const int first = static_cast<int>(rng() % static_cast<std::uint64_t>(std::max(1, span)));
       std::vector<float> grad(L.size, 0.f);
-      loss += window_loss_cuda_impl(tr, m, r, first, unroll, burn, o.sigma, fine ? o.profile : 0.f, rng(), &grad, act ? o.activity : 0.f);
-      const float spread_w = fine ? o.spread : 0.f, edge_w = fine ? o.edge : 0.f;
-      if (spread_w > 0.f || edge_w > 0.f) {
-        const ExtraLosses ex{spread_w, edge_w};
-        loss += window_loss(m, r, first, unroll, burn, 0.f, 0.f, rng(), &grad, 0.f, ex, true);
-      }
+      const ExtraLosses ex{fine ? o.spread : 0.f, fine ? o.edge : 0.f};
+      loss += window_loss_cuda_impl(tr, m, r, first, unroll, burn, o.sigma, fine ? o.profile : 0.f, rng(), &grad, act ? o.activity : 0.f, ex);
       for (std::size_t j = 0; j < L.size; ++j) gsum[j] += grad[j];
     }
     loss /= o.batch;

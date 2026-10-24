@@ -16,6 +16,6 @@ void cuda_train_stepper(Model& m, std::span<const Run> runs, const TrainOptions&
 
 // Same contract as window_loss; gradients must match the CPU path within float tolerance (tests).
 double window_loss_cuda(const Model& m, const Run& r, int first, int unroll, int burn, float sigma, float profile, std::uint64_t noise_seed,
-                        std::vector<float>* grad, float activity = 0.f, int shards = 4);
+                        std::vector<float>* grad, float activity = 0.f, const ExtraLosses& extra = {}, int shards = 4);
 
 }  // namespace nfx::rollout3d

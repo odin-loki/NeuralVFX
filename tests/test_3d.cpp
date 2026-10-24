@@ -1680,10 +1680,10 @@ TEST(Rollout3d, CudaWindowLossMatchesCpu) {
   const auto r = tiny_run(m.h, 6, 0.25f);
   std::vector<float> grad_cpu(m.step_w.size()), grad_cuda(m.step_w.size());
   const double loss_cpu = r3::window_loss(m, r, 2, 1, 0, 0.f, 0.f, 1, nullptr);
-  const double loss_cuda = r3::window_loss_cuda(m, r, 2, 1, 0, 0.f, 0.f, 1, nullptr, 0.f, 1);
+  const double loss_cuda = r3::window_loss_cuda(m, r, 2, 1, 0, 0.f, 0.f, 1, nullptr, 0.f, {}, 1);
   EXPECT_NEAR(loss_cpu, loss_cuda, 1e-3 * loss_cpu + 1e-6);
   const double loss_cpu2 = r3::window_loss(m, r, 2, 1, 0, 0.f, 0.f, 1, &grad_cpu);
-  const double loss_cuda2 = r3::window_loss_cuda(m, r, 2, 1, 0, 0.f, 0.f, 1, &grad_cuda, 0.f, 1);
+  const double loss_cuda2 = r3::window_loss_cuda(m, r, 2, 1, 0, 0.f, 0.f, 1, &grad_cuda, 0.f, {}, 1);
   EXPECT_NEAR(loss_cpu2, loss_cuda2, 1e-3 * loss_cpu2 + 1e-6);
   for (std::size_t j = 0; j < grad_cpu.size(); ++j) {
     const float ref = grad_cpu[j];
@@ -1691,11 +1691,20 @@ TEST(Rollout3d, CudaWindowLossMatchesCpu) {
   }
   std::vector<float> grad_cpu_u2(m.step_w.size()), grad_cuda_u2(m.step_w.size());
   const double loss_cpu_u2 = r3::window_loss(m, r, 1, 2, 0, 0.f, 0.f, 5, &grad_cpu_u2);
-  const double loss_cuda_u2 = r3::window_loss_cuda(m, r, 1, 2, 0, 0.f, 0.f, 5, &grad_cuda_u2, 0.f, 1);
+  const double loss_cuda_u2 = r3::window_loss_cuda(m, r, 1, 2, 0, 0.f, 0.f, 5, &grad_cuda_u2, 0.f, {}, 1);
   EXPECT_NEAR(loss_cpu_u2, loss_cuda_u2, 2e-3 * loss_cpu_u2 + 1e-6);
   for (std::size_t j = 0; j < grad_cpu_u2.size(); ++j) {
     const float ref = grad_cpu_u2[j];
     EXPECT_NEAR(grad_cuda_u2[j], ref, 3e-2f * std::max(1.f, std::abs(ref)) + 5e-4f) << "unroll2 weight " << j;
+  }
+  const r3::ExtraLosses r2{4.f, 20.f};
+  std::vector<float> grad_cpu_r2(m.step_w.size()), grad_cuda_r2(m.step_w.size());
+  const double loss_cpu_r2 = r3::window_loss(m, r, 1, 3, 0, 0.f, 1.f, 5, &grad_cpu_r2, 0.f, r2);
+  const double loss_cuda_r2 = r3::window_loss_cuda(m, r, 1, 3, 0, 0.f, 1.f, 5, &grad_cuda_r2, 0.f, r2, 1);
+  EXPECT_NEAR(loss_cpu_r2, loss_cuda_r2, 2e-3 * loss_cpu_r2 + 1e-6);
+  for (std::size_t j = 0; j < grad_cpu_r2.size(); ++j) {
+    const float ref = grad_cpu_r2[j];
+    EXPECT_NEAR(grad_cuda_r2[j], ref, 4e-2f * std::max(1.f, std::abs(ref)) + 5e-4f) << "r2 weight " << j;
   }
 }
 
