@@ -121,7 +121,7 @@ void LibraryUi::select_effect(int index) {
   }
   time_ = 0.0;
   refresh_missing_models();
-  rebuild_stage();
+  stage_dirty_ = true;
 }
 
 void LibraryUi::rebuild_stage() {
@@ -172,6 +172,10 @@ void LibraryUi::rebuild_stage() {
 }
 
 void LibraryUi::advance(double dt) {
+  if (stage_dirty_) {
+    rebuild_stage();
+    stage_dirty_ = false;
+  }
   if (!stage_ || !scene_ || paused_) return;
   const auto t0 = std::chrono::steady_clock::now();
   nvfx_library_effect e{};
@@ -204,9 +208,7 @@ bool LibraryUi::preview_luma(headless::LumaStats& out) const {
   return true;
 }
 
-void LibraryUi::frame(float x, float y, float w, float h, double dt) {
-  advance(dt);
-
+void LibraryUi::frame(float x, float y, float w, float h, double /*dt*/) {
   ImGui::SetNextWindowPos({x, y}, ImGuiCond_Always);
   ImGui::SetNextWindowSize({w, h}, ImGuiCond_Always);
   ImGui::Begin("Library", nullptr, ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoCollapse);

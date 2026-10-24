@@ -6,6 +6,7 @@
 // Every buffer a frame needs is made at creation; stepping, drawing, the field reads and the settings allocate nothing.
 #include <neuralfx/nvfx_scene.h>
 
+#include "cpu_x86.hpp"
 #include "nvfx_internal.hpp"
 #include "script.hpp"
 
@@ -107,12 +108,11 @@ __attribute__((target("f16c"))) void halves_f16c(const float* v, std::size_t n, 
     std::memcpy(out + i * 2, &h, 2);
   }
 }
-const bool kF16C = __builtin_cpu_supports("f16c");
 #endif
 
 void halves(const float* v, std::size_t n, std::uint8_t* out) {
 #ifdef NVFX_HAVE_F16C
-  if (kF16C) {
+  if (nfx::rt::cpu_x86_has_f16c()) {
     halves_f16c(v, n, out);
     return;
   }

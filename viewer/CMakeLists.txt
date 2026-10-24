@@ -1,9 +1,25 @@
 # nvfx_viewer: play neural effects live with sliders, and edit scene scripts live (Dear ImGui on GLFW + OpenGL 3).
 # Optional (NEURALFX_BUILD_VIEWER).
 include(FetchContent)
-find_package(glfw3 3.3 REQUIRED)
-find_package(OpenGL REQUIRED)
 find_package(Threads REQUIRED)
+if(CMAKE_SYSTEM_NAME STREQUAL "Windows")
+  set(GLFW_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+  set(GLFW_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+  set(GLFW_BUILD_DOCS OFF CACHE BOOL "" FORCE)
+  set(GLFW_INSTALL OFF CACHE BOOL "" FORCE)
+  set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
+  FetchContent_Declare(glfw
+    GIT_REPOSITORY https://github.com/glfw/glfw.git
+    GIT_TAG 3.3.10
+    GIT_SHALLOW TRUE)
+  FetchContent_MakeAvailable(glfw)
+  add_library(neuralfx_glfw ALIAS glfw)
+  add_library(OpenGL::GL INTERFACE IMPORTED)
+  target_link_libraries(OpenGL::GL INTERFACE opengl32)
+else()
+  find_package(glfw3 3.3 REQUIRED)
+  find_package(OpenGL REQUIRED)
+endif()
 
 # Dear ImGui is fetched with git at a pinned tag (no CMake of its own: its sources are compiled here).
 FetchContent_Declare(imgui
@@ -31,9 +47,11 @@ target_include_directories(nvfx_viewer_headless PUBLIC "${CMAKE_CURRENT_SOURCE_D
 target_link_libraries(nvfx_viewer_headless PUBLIC nvfx_library_api nvfx)
 neuralfx_defaults(nvfx_viewer_headless)
 
-add_executable(nvfx_viewer main.cpp scene_ui.cpp library_ui.cpp volume_ui.cpp)
+add_executable(nvfx_viewer main.cpp scene_ui.cpp library_ui.cpp volume_ui.cpp bundle_paths.cpp)
 target_link_libraries(nvfx_viewer PRIVATE nvfx_viewer_scene nvfx_viewer_headless nvfx nvfx_library_api neuralfx_io neuralfx_imgui)
-target_compile_definitions(nvfx_viewer PRIVATE NEURALFX_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
+if(NOT NEURALFX_WIN_CROSS)
+  target_compile_definitions(nvfx_viewer PRIVATE NEURALFX_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
+endif()
 neuralfx_defaults(nvfx_viewer)
 
 if(NEURALFX_BUILD_TESTS)

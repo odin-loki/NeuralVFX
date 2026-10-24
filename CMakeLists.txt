@@ -32,9 +32,15 @@ option(NEURALFX_CUDA "Build the CUDA 3D rollout training backend (nvfx_3d train 
 
 function(neuralfx_defaults target)
   if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
-    target_compile_options(${target} PRIVATE $<$<COMPILE_LANGUAGE:CXX>:-Wall -Wextra -Wpedantic -Wshadow -Wconversion>
-                                             $<$<COMPILE_LANGUAGE:C>:-Wall -Wextra -Wpedantic>
-                                             $<$<BOOL:${NEURALFX_WERROR}>:-Werror>)
+    if(NEURALFX_WIN_CROSS)
+      target_compile_options(${target} PRIVATE $<$<COMPILE_LANGUAGE:CXX>:-Wall -Wextra -Wpedantic -Wshadow -Wno-unused-private-field>
+                                               $<$<COMPILE_LANGUAGE:C>:-Wall -Wextra -Wpedantic>
+                                               $<$<BOOL:${NEURALFX_WERROR}>:-Werror>)
+    else()
+      target_compile_options(${target} PRIVATE $<$<COMPILE_LANGUAGE:CXX>:-Wall -Wextra -Wpedantic -Wshadow -Wconversion>
+                                               $<$<COMPILE_LANGUAGE:C>:-Wall -Wextra -Wpedantic>
+                                               $<$<BOOL:${NEURALFX_WERROR}>:-Werror>)
+    endif()
   endif()
 endfunction()
 
@@ -68,7 +74,7 @@ neuralfx_defaults(neuralfx_model)
 target_sources(neuralfx_model PRIVATE src/core/upscale.cpp)  # study P's upscaler: its format and float reference (docs/STUDY_P.md)
 
 # The runtime (what ships in a game): C API, per-ISA renderers, no allocation per frame.
-set(NVFX_RUNTIME_SOURCES src/runtime/nvfx.cpp src/runtime/rt_base.cpp src/runtime/rt_avx2.cpp src/runtime/rt_avx512.cpp
+set(NVFX_RUNTIME_SOURCES src/runtime/cpu_x86.cpp src/runtime/nvfx.cpp src/runtime/rt_base.cpp src/runtime/rt_avx2.cpp src/runtime/rt_avx512.cpp
                          src/runtime/rt_prior.cpp src/runtime/rt_prior_base.cpp src/runtime/rt_prior_avx2.cpp src/runtime/rt_prior_avx512.cpp
                          src/runtime/rt_handoff.cpp
                          src/runtime/nvfx_volume.cpp src/runtime/rt_volume_avx2.cpp  # 3D volumes (nvfx_volume.h, docs/STUDY_3D.md)
@@ -85,6 +91,18 @@ target_link_libraries(nvfx PUBLIC neuralfx_model Threads::Threads)
 set_target_properties(nvfx PROPERTIES POSITION_INDEPENDENT_CODE ON)
 neuralfx_defaults(nvfx)
 neuralfx_simd(nvfx)
+if(NEURALFX_WIN_CROSS)
+  set(_win_isa_v3
+      src/runtime/rt_avx2.cpp src/runtime/rt_detail3_avx2.cpp src/runtime/rt_prior_avx2.cpp
+      src/runtime/rt_upscale_avx2.cpp src/runtime/rt_volume_avx2.cpp src/proto/kernels_avx2.cpp)
+  set(_win_isa_v4
+      src/runtime/rt_avx512.cpp src/runtime/rt_detail3_avx512.cpp src/runtime/rt_prior_avx512.cpp
+      src/runtime/rt_upscale_avx512.cpp src/proto/kernels_avx512.cpp)
+  set_source_files_properties(${_win_isa_v3} TARGET_DIRECTORY nvfx PROPERTIES COMPILE_OPTIONS "-march=x86-64-v3")
+  set_source_files_properties(${_win_isa_v4} TARGET_DIRECTORY nvfx PROPERTIES COMPILE_OPTIONS "-march=x86-64-v4")
+  set_source_files_properties(${_win_isa_v3} TARGET_DIRECTORY neuralfx_proto PROPERTIES COMPILE_OPTIONS "-march=x86-64-v3")
+  set_source_files_properties(${_win_isa_v4} TARGET_DIRECTORY neuralfx_proto PROPERTIES COMPILE_OPTIONS "-march=x86-64-v4")
+endif()
 if(NEURALFX_BUILD_SHARED)
   add_library(nvfx_shared SHARED ${NVFX_RUNTIME_SOURCES})
   target_link_libraries(nvfx_shared PRIVATE neuralfx_model)
@@ -135,7 +153,20 @@ else()
 endif()
 
 # Images and videos (PNG via zlib, mp4 via an ffmpeg pipe) for previews, figures and comparisons.
-find_package(ZLIB REQUIRED)
+if(CMAKE_SYSTEM_NAME STREQUAL "Windows")
+  include(FetchContent)
+  FetchContent_Declare(zlib_ext
+    GIT_REPOSITORY https://github.com/madler/zlib.git
+    GIT_TAG v1.3.1
+    GIT_SHALLOW TRUE)
+  set(SKIP_INSTALL_ALL ON CACHE BOOL "" FORCE)
+  FetchContent_MakeAvailable(zlib_ext)
+  if(NOT TARGET ZLIB::ZLIB)
+    add_library(ZLIB::ZLIB ALIAS zlibstatic)
+  endif()
+elseif(NOT ZLIB_FOUND)
+  find_package(ZLIB REQUIRED)
+endif()
 add_library(neuralfx_io STATIC src/core/image_io.cpp src/core/ingest.cpp)
 target_link_libraries(neuralfx_io PUBLIC neuralfx_core PRIVATE ZLIB::ZLIB)
 neuralfx_defaults(neuralfx_io)

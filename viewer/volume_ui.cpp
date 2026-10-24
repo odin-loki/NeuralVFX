@@ -1,3 +1,4 @@
+#include "bundle_paths.hpp"
 #include "volume_ui.hpp"
 
 #include <neuralfx/nvfx_volume.h>
@@ -19,21 +20,6 @@ namespace {
 
 double ms_since(std::chrono::steady_clock::time_point t0) {
   return std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
-}
-
-std::filesystem::path source_root() {
-#ifdef NEURALFX_SOURCE_DIR
-  return NEURALFX_SOURCE_DIR;
-#else
-  return std::filesystem::current_path();
-#endif
-}
-
-std::filesystem::path data_root() {
-  if (const char* d = std::getenv("NEURALVFX_DATA"); d && *d) return d;
-  if (const char* h = std::getenv("HOME"); h && *h) return std::filesystem::path(h) / "nvfx-data";
-  if (const char* u = std::getenv("USERPROFILE"); u && *u) return std::filesystem::path(u) / "nvfx-data";
-  return {};
 }
 
 void add_if_exists(std::vector<VolumeUi::ModelPath>& out, const std::string& label, const std::filesystem::path& p) {
@@ -64,13 +50,12 @@ VolumeUi::~VolumeUi() {
 }
 
 void VolumeUi::discover_models() {
-  const auto root = source_root();
-  add_if_exists(models_, "fire (N2)", root / "models/3d/fire.nvfx3");
-  add_if_exists(models_, "fire hres (C2)", root / "models/3d/fire_hres.nvfx3");
-  add_if_exists(models_, "smoke", root / "models/3d/smoke.nvfx3");
-  add_if_exists(models_, "smoke hres", root / "models/3d/smoke_hres.nvfx3");
-  const auto data = data_root();
-  if (!data.empty()) {
+  const auto shipped = shipped_models_dir();
+  add_if_exists(models_, "fire (N2)", shipped / "fire.nvfx3");
+  add_if_exists(models_, "fire hres (C2)", shipped / "fire_hres.nvfx3");
+  add_if_exists(models_, "smoke", shipped / "smoke.nvfx3");
+  add_if_exists(models_, "smoke hres", shipped / "smoke_hres.nvfx3");
+  for (const auto& data : data_roots()) {
     add_if_exists(models_, "hres fire (data)", data / "hres_3d/fire/models/hres_fire.nvfx3");
     add_if_exists(models_, "hres smoke (data)", data / "hres_3d/smoke/models/smoke_hres.nvfx3");
   }

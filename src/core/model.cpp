@@ -176,7 +176,7 @@ TimeLerp time_lerp(const Hyper& h, float t) {
   return {i0, i0 + 1, u - static_cast<float>(i0)};
 }
 
-std::vector<float> apply(const Dense& d, std::span<const float> x) {
+std::vector<float> dense_apply(const Dense& d, std::span<const float> x) {
   std::vector<float> y(d.b);
   for (int o = 0; o < d.out; ++o) {
     for (int i = 0; i < d.in; ++i) y[static_cast<std::size_t>(o)] += d.w[static_cast<std::size_t>(o) * d.in + i] * x[static_cast<std::size_t>(i)];
@@ -187,7 +187,7 @@ std::vector<float> apply(const Dense& d, std::span<const float> x) {
 // The blended, time-sliced feature planes [C][side][side] for (t, c).
 std::vector<float> slice(const Model& m, float t, std::span<const float> c) {
   const Hyper& h = m.h;
-  const auto w = apply(m.basis, c);
+  const auto w = dense_apply(m.basis, c);
   const std::size_t plane = static_cast<std::size_t>(h.feature_channels()) * h.feature_side() * h.feature_side();
   const auto [i0, i1, ft] = time_lerp(h, t);
   std::vector<float> s(plane, 0.f);
@@ -205,8 +205,8 @@ std::vector<float> slice(const Model& m, float t, std::span<const float> c) {
 void multi_render(const Model& m, float t, std::span<const float> c, int size, std::span<float> rgba) {
   const Hyper& h = m.h;
   const auto vols = volumes(h);
-  const auto w = apply(m.basis, c);
-  const auto film = apply(m.films[0], c);
+  const auto w = dense_apply(m.basis, c);
+  const auto film = dense_apply(m.films[0], c);
   std::vector<std::vector<float>> sl;
   for (const Volume& v : vols) {
     int i0, i1;
@@ -246,13 +246,13 @@ void multi_render(const Model& m, float t, std::span<const float> c, int size, s
                         f.data() + at);
       at += static_cast<std::size_t>(4 * h.pe_xy);
       std::ranges::copy(tf, f.begin() + static_cast<std::ptrdiff_t>(at));
-      auto x = apply(m.layers[0], f);
+      auto x = dense_apply(m.layers[0], f);
       for (int o = 0; o < H; ++o) {
         const auto i = static_cast<std::size_t>(o);
         x[i] = std::max(0.f, (1.f + film[i]) * x[i] + film[static_cast<std::size_t>(H) + i]);
       }
       for (std::size_t l = 1; l < m.layers.size(); ++l) {
-        x = apply(m.layers[l], x);
+        x = dense_apply(m.layers[l], x);
         if (l + 1 < m.layers.size()) std::ranges::for_each(x, [](float& v) { v = std::max(0.f, v); });
       }
       std::ranges::copy(x, rgba.begin() + static_cast<std::ptrdiff_t>((static_cast<std::size_t>(py) * size + px) * 4));
@@ -328,7 +328,7 @@ void reference_render(const Model& m, float t, std::span<const float> c, int siz
   }
   const auto s = slice(m, t, c);
   if (h.arch == Arch::grid) {
-    const auto film = apply(m.films[0], c);
+    const auto film = dense_apply(m.films[0], c);
     const int G = h.grid, C = h.channels, H = h.hidden;
     std::vector<float> f(static_cast<std::size_t>(C));
     for (int py = 0; py < size; ++py) {
@@ -344,13 +344,13 @@ void reference_render(const Model& m, float t, std::span<const float> c, int siz
           const float b = at(x0, y0 + 1) + fx * (at(x0 + 1, y0 + 1) - at(x0, y0 + 1));
           f[static_cast<std::size_t>(ch)] = a + fy * (b - a);
         }
-        auto x = apply(m.layers[0], f);
+        auto x = dense_apply(m.layers[0], f);
         for (int o = 0; o < H; ++o) {
           const auto i = static_cast<std::size_t>(o);
           x[i] = std::max(0.f, (1.f + film[i]) * x[i] + film[static_cast<std::size_t>(H) + i]);
         }
         for (std::size_t l = 1; l < m.layers.size(); ++l) {
-          x = apply(m.layers[l], x);
+          x = dense_apply(m.layers[l], x);
           if (l + 1 < m.layers.size()) std::ranges::for_each(x, [](float& v) { v = std::max(0.f, v); });
         }
         std::ranges::copy(x, rgba.begin() + static_cast<std::ptrdiff_t>((static_cast<std::size_t>(py) * size + px) * 4));
@@ -366,7 +366,7 @@ void reference_render(const Model& m, float t, std::span<const float> c, int siz
     const int n = 2 * side;
     const Dense& L = m.layers[static_cast<std::size_t>(k)];
     std::vector<float> film;
-    if (k < 2) film = apply(m.films[static_cast<std::size_t>(k)], c);
+    if (k < 2) film = dense_apply(m.films[static_cast<std::size_t>(k)], c);
     std::vector<float> next(static_cast<std::size_t>(ch[k + 1]) * n * n);
     for (int o = 0; o < ch[k + 1]; ++o) {
       for (int y = 0; y < n; ++y) {

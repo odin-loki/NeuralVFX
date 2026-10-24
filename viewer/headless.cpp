@@ -1,5 +1,6 @@
 #include "headless.hpp"
 
+#include <neuralfx/nvfx.h>
 #include <neuralfx/nvfx_library.h>
 #include <neuralfx/nvfx_volume.h>
 
@@ -60,6 +61,10 @@ bool picture_ok(const LumaStats& s, double min_mean, double min_spread) { return
 bool library_play(const std::string& catalogue_dir, const std::string& models_dir, const char* entry_name, int frames,
                   std::vector<std::uint8_t>& rgba, int& width, int& height, int threads, std::string* error) {
   if (error) error->clear();
+#ifdef _WIN32
+  nvfx_profile prof{};
+  if (nvfx_profile_init(&prof, NVFX_PROFILE_LOCKSTEP_AVX2) == NVFX_OK) nvfx_set_profile(&prof);
+#endif
   nvfx_library_desc ld;
   nvfx_library_desc_init(&ld);
   ld.catalogue_dir = catalogue_dir.c_str();

@@ -23,6 +23,7 @@
 // edit leaves an error at line N with the first scene still playing; --input and --trigger set inputs and fire rules
 // once the scene is built, as the sliders and buttons do; --pin pins the field probe.
 #include "../tools/args.hpp"
+#include "bundle_paths.hpp"
 #include "headless.hpp"
 #include "library_ui.hpp"
 #include "scene_ui.hpp"
@@ -46,6 +47,7 @@
 #include <cmath>
 #include <cstdlib>
 #include <deque>
+#include <fstream>
 #include <filesystem>
 #include <memory>
 #include <numeric>
@@ -55,6 +57,10 @@
 #include <string>
 #include <thread>
 #include <vector>
+
+#ifdef _WIN32
+#include <windows.h>
+#endif
 
 using namespace nfx;
 using viewer::Texture;
@@ -113,49 +119,12 @@ nvfx_effect* demo_effect() {
   return e;
 }
 
-// The scene mode's effects folder by default: $NEURALVFX_DATA (else ~/nvfx-data) /v2/models, else /experiments/models/d.
-std::string default_effects_dir() {
-  std::vector<std::filesystem::path> roots;
-  if (const char* d = std::getenv("NEURALVFX_DATA"); d && *d) roots.emplace_back(d);
-  if (const char* h = std::getenv("HOME"); h && *h) roots.emplace_back(std::filesystem::path(h) / "nvfx-data");
-  for (const auto& root : roots) {
-    for (const char* sub : {"v2/models", "experiments/models/d"}) {
-      std::error_code ec;
-      if (std::filesystem::is_directory(root / sub, ec)) return (root / sub).string();
-    }
-  }
-  return roots.empty() ? std::string("models") : (roots.front() / "v2/models").string();
-}
-
 enum class Mode { effects, scene, library, volume };
 
-std::string default_library_dir() {
-#ifdef NEURALFX_SOURCE_DIR
-  return std::string(NEURALFX_SOURCE_DIR) + "/library";
-#else
-  return "library";
-#endif
-}
-
-std::string default_library_models() {
-  const auto has_models = [](const std::filesystem::path& p) {
-    std::error_code ec;
-    if (!std::filesystem::is_directory(p, ec)) return false;
-    return std::filesystem::exists(p / "fire.nvfx", ec) || std::filesystem::exists(p / "smoke.nvfx", ec);
-  };
-  std::vector<std::filesystem::path> roots;
-  if (const char* d = std::getenv("NEURALVFX_DATA"); d && *d) roots.emplace_back(d);
-  if (const char* h = std::getenv("HOME"); h && *h) roots.emplace_back(std::filesystem::path(h) / "nvfx-data");
-  if (const char* u = std::getenv("USERPROFILE"); u && *u) roots.emplace_back(std::filesystem::path(u) / "nvfx-data");
-#ifdef NEURALFX_SOURCE_DIR
-  roots.emplace_back(std::filesystem::path(NEURALFX_SOURCE_DIR) / "models");
-#endif
-  for (const auto& root : roots) {
-    const auto lib = root / "library/models";
-    if (has_models(lib)) return lib.string();
-  }
-  return {};
-}
+using viewer::default_effects_dir;
+using viewer::default_library_dir;
+using viewer::default_library_models;
+using viewer::default_volume_model;
 
 // The mean and spread of the luma inside a rectangle of an RGBA image: a flat (empty) picture has no spread.
 std::pair<double, double> luma_stats(const Image& img, int x0, int y0, int x1, int y1) {
@@ -179,14 +148,51 @@ std::pair<double, double> luma_stats(const Image& img, int x0, int y0, int x1, i
 }  // namespace
 
 int main(int argc, char** argv) try {
-  const tools::Args a(argc, argv, {"demo", "help", "stand-ins", "paused", "check-picture", "library", "volume"});
+#ifdef _WIN32
+  // Prefer AVX2 on Windows (stable on llvm-mingw; avoids bad AVX-512 dispatch).
+  nvfx_profile win_prof{};
+  if (nvfx_profile_init(&win_prof, NVFX_PROFILE_LOCKSTEP_AVX2) == NVFX_OK) nvfx_set_profile(&win_prof);
+#endif
+  const tools::Args a(argc, argv, {"demo", "help", "stand-ins", "paused", "check-picture", "library", "volume", "headless"});
   if (a.flag("help")) {
     std::println("nvfx_viewer effect.nvfx [...] [--clip ref.nfxclip] [--size 128] [--scale 3] [--screenshot out.png --frames 30] [--demo]");
     std::println("nvfx_viewer --scene script.nvfxs [--effects DIR] [--stand-ins] [--threads 2] [--at SECONDS] [--paused]");
     std::println("nvfx_viewer --library [--catalogue DIR] [--models DIR] [--entry NAME]");
+    std::println("nvfx_viewer --headless --library|--volume ...  (no window; for CI and gdb)");
     std::println("nvfx_viewer --volume [--model F.nvfx3] [--threads 4]");
     std::println("            [--screenshot out.png --frames 30 [--check-picture]] [--edit-replace FROM --with TO [--expect-error-line N]]");
     std::println("            [--input NAME=V,...] [--trigger RULE,...] [--pin X,Y (the field probe, picture pixels)] [--overlay heat|soot] [--window WxH]");
+    return 0;
+  }
+  Mode mode = Mode::effects;
+  if (a.has("scene")) mode = Mode::scene;
+  else if (a.flag("library")) mode = Mode::library;
+  else if (a.flag("volume")) mode = Mode::volume;
+  if (a.flag("headless")) {
+    if (mode != Mode::library && mode != Mode::volume) throw std::runtime_error("--headless requires --library or --volume");
+    const int frames = a.i("frames", 90);
+    const int threads = a.i("threads", mode == Mode::volume ? 4 : 2);
+    std::vector<std::uint8_t> rgba;
+    int w = 0, h = 0;
+    std::string err;
+    const bool ok = mode == Mode::library
+                        ? viewer::headless::library_play(a.str("catalogue", default_library_dir()), a.str("models", default_library_models()),
+                                                         a.str("entry", "sparks").c_str(), frames, rgba, w, h, threads, &err)
+                        : viewer::headless::volume_play(a.str("model", default_volume_model()), frames, rgba, w, h, threads, &err);
+    if (!ok) throw std::runtime_error(err.empty() ? "headless playback failed" : err);
+    const auto ls = viewer::headless::luma_stats(rgba, w, h, 0, 0, w, h);
+    std::println("headless ok {}x{} mean {:.1f} spread {:.1f}", w, h, ls.mean, ls.spread);
+    if (const std::string shot = a.str("screenshot"); !shot.empty()) {
+      std::ofstream out(shot, std::ios::binary);
+      if (!out) throw std::runtime_error("cannot write " + shot);
+      out << "P6\n" << w << ' ' << h << "\n255\n";
+      for (std::size_t i = 0; i + 3 < rgba.size(); i += 4) {
+        out.put(static_cast<char>(rgba[i]));
+        out.put(static_cast<char>(rgba[i + 1]));
+        out.put(static_cast<char>(rgba[i + 2]));
+      }
+    }
+    if (a.flag("check-picture") && !viewer::headless::picture_ok(ls)) return 3;
     return 0;
   }
   std::vector<Effect> effects;
@@ -199,7 +205,7 @@ int main(int argc, char** argv) try {
     nvfx_effect_get_info(e.fx, &e.info);
     effects.push_back(e);
   }
-  if (a.flag("demo") || effects.empty()) {
+  if (mode == Mode::effects && (a.flag("demo") || effects.empty())) {
     Effect e{"demo"};
     e.fx = demo_effect();
     nvfx_effect_get_info(e.fx, &e.info);
@@ -214,10 +220,6 @@ int main(int argc, char** argv) try {
   const int scale = a.i("scale", 3);
   const std::string screenshot = a.str("screenshot");
   const int shot_frames = a.i("frames", 30);
-  Mode mode = Mode::effects;
-  if (a.has("scene")) mode = Mode::scene;
-  else if (a.flag("library")) mode = Mode::library;
-  else if (a.flag("volume")) mode = Mode::volume;
   viewer::SceneUi::Options scene_opt;
   scene_opt.script_path = a.str("scene");
   scene_opt.settings.effects_dir = a.str("effects", default_effects_dir());
@@ -266,7 +268,10 @@ int main(int argc, char** argv) try {
   ImGui_ImplOpenGL3_Init("#version 130");
 
   // State
-  int current = 0, size = a.i("size", effects[0].info.arch == 2 ? effects[0].info.native_size : 128);
+  int current = 0;
+  const int default_size =
+      effects.empty() ? 128 : (effects[0].info.arch == 2 ? effects[0].info.native_size : 128);
+  int size = a.i("size", default_size);
   nvfx_instance* inst = nullptr;
   float controls[8] = {0.5f, 0.5f, 0.5f, 0.5f, 0.5f, 0.5f, 0.5f, 0.5f};
   int seed = 1, variation = -1, bg_index = 0;
@@ -318,7 +323,7 @@ int main(int argc, char** argv) try {
       fb_clip = flipbook::play(flipbook::build(*ref, {kept, ref->size, flipbook::Codec::bc3, 0}));
     }
   };
-  rebuild();
+  if (mode == Mode::effects) rebuild();
   const Background bgs[] = {Background::black, Background::grey, Background::checker};
   const char* bg_names[] = {"black", "grey", "checker"};
 
@@ -335,6 +340,7 @@ int main(int argc, char** argv) try {
     const double real_dt = std::min(0.1, std::chrono::duration<double>(tick - last_tick).count());
     last_tick = tick;
     const double dt = 1.0 / 60.0;
+    if (mode == Mode::library && library_ui) library_ui->advance(real_dt);
     ImGui_ImplOpenGL3_NewFrame();
     ImGui_ImplGlfw_NewFrame();
     ImGui::NewFrame();
@@ -646,5 +652,8 @@ int main(int argc, char** argv) try {
   return 0;
 } catch (const std::exception& e) {
   std::println(stderr, "nvfx_viewer: {}", e.what());
+#ifdef _WIN32
+  MessageBoxA(nullptr, e.what(), "NeuralVFX viewer", MB_OK | MB_ICONERROR);
+#endif
   return 2;
 }

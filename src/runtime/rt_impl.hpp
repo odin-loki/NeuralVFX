@@ -9,6 +9,7 @@
 #error "define NFX_NS, NFX_TILE and NFX_VW before including rt_impl.hpp"
 #endif
 
+#include "cpu_x86.hpp"
 #include "rt_aligned.hpp"
 #include "rt_common.hpp"
 
@@ -30,11 +31,8 @@
 #include <time.h>  // clock_gettime (rt_rollout.hpp: study K's profile)
 #endif
 
-#if defined(NFX_ARCH) && defined(__GNUC__) && !defined(__clang__)
-#pragma GCC push_options
-#define NFX_PRAGMA(x) _Pragma(#x)
-#define NFX_TARGET(a) NFX_PRAGMA(GCC target(a))
-NFX_TARGET(NFX_ARCH)
+#include "rt_target_pragma.hpp"
+#if defined(NFX_ISA_TARGET_PUSHED)
 #define NFX_PUSHED 1
 #endif
 
@@ -288,7 +286,7 @@ class GridRenderer final : public Renderer {
   double macs_per_pixel() const override { return m_.macs_per_pixel(S_); }
 
  private:
-  const Effect& e_;
+  [[maybe_unused]] const Effect& e_;
   const Model& m_;
   int S_;
   std::vector<float> w_, film_, slice_, rowg_, rowf_, fx_, buf_a_, buf_b_;
@@ -377,7 +375,7 @@ class ConvRenderer final : public Renderer {
     }
   }
 
-  const Effect& e_;
+  [[maybe_unused]] const Effect& e_;
   const Model& m_;
   int S_;
   std::vector<float> w_, film0_, film1_, slice_, pad0_, act0_, pad1_, act1_, pad2_, out_, small_;
@@ -600,4 +598,5 @@ std::unique_ptr<RolloutRunner> make_rollout(const RolloutEffect& e, int size, bo
 #if defined(NFX_PUSHED)
 #pragma GCC pop_options
 #undef NFX_PUSHED
+#undef NFX_ISA_TARGET_PUSHED
 #endif

@@ -263,8 +263,7 @@ class GridRendererQ final : public Renderer {
     const Hyper& h = m_.h;
     const int G = h.grid, C = h.channels, H = h.hidden;
     if constexpr (kVnniBuild) {
-      __builtin_cpu_init();
-      vnni_ = __builtin_cpu_supports("avx512vnni");
+      vnni_ = nfx::rt::cpu_x86_has_avx512_vnni();
     }
     pack_ = vnni_ ? Pack::quads255 : kW == 8 ? Pack::quads127 : Pack::pairs255;
     for (std::size_t l = 1; l + 1 < m_.layers.size(); ++l) ql_.push_back(quantise_layer(m_.layers[l], pack_ != Pack::pairs255));
@@ -485,8 +484,7 @@ class MultiRendererQ final : public Renderer {
     const Hyper& h = m_.h;
     const int H = h.hidden;
     if constexpr (kVnniBuild) {
-      __builtin_cpu_init();
-      vnni_ = __builtin_cpu_supports("avx512vnni");
+      vnni_ = nfx::rt::cpu_x86_has_avx512_vnni();
     }
     pack_ = vnni_ ? Pack::quads255 : kW == 8 ? Pack::quads127 : Pack::pairs255;
     for (std::size_t l = 1; l + 1 < m_.layers.size(); ++l) ql_.push_back(quantise_layer(m_.layers[l], pack_ != Pack::pairs255));

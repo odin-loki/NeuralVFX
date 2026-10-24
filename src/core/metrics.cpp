@@ -15,7 +15,11 @@ namespace {
 
 constexpr double kInv255 = 1.0 / 255.0;
 
-std::vector<int> all_frames(int n) { return std::views::iota(0, n) | std::ranges::to<std::vector>(); }
+std::vector<int> all_frames(int n) {
+  std::vector<int> v(static_cast<std::size_t>(n));
+  for (int i = 0; i < n; ++i) v[static_cast<std::size_t>(i)] = i;
+  return v;
+}
 
 // Separable Gaussian blur of a size x size plane (clamped edges).
 void blur(std::span<const double> in, std::span<double> out, std::span<double> tmp, int size, std::span<const double> k) {
@@ -260,8 +264,8 @@ Interval bootstrap_mean(std::span<const double> x, int resamples, std::uint64_t 
 
 Interval paired_bootstrap(std::span<const double> a, std::span<const double> b, int resamples, std::uint64_t seed) {
   if (a.size() != b.size()) throw std::invalid_argument("paired bootstrap: sizes differ");
-  const auto d = std::views::zip(a, b) | std::views::transform([](auto p) { return std::get<0>(p) - std::get<1>(p); }) |
-                 std::ranges::to<std::vector>();
+  std::vector<double> d(a.size());
+  for (std::size_t i = 0; i < a.size(); ++i) d[i] = a[i] - b[i];
   return bootstrap_mean(d, resamples, seed);
 }
 

@@ -17,7 +17,12 @@ struct CacheAligned {
   template <class U>
   CacheAligned(const CacheAligned<U>&) noexcept {}
   T* allocate(std::size_t n) { return static_cast<T*>(::operator new(n * sizeof(T), kAlign)); }
-  void deallocate(T* p, std::size_t n) noexcept { ::operator delete(p, n * sizeof(T), kAlign); }
+  void deallocate(T* p, std::size_t n) noexcept {
+    (void)n;
+    // Must match allocate(): over-aligned new. Plain delete() is free() and corrupts the
+    // Windows heap (libc++ uses _aligned_malloc). Linux free() accepts posix_memalign, so this only showed up there.
+    if (p) ::operator delete(p, kAlign);
+  }
   friend bool operator==(const CacheAligned&, const CacheAligned&) noexcept { return true; }
 };
 using AlignedFloats = std::vector<float, CacheAligned<float>>;

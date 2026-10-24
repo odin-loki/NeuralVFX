@@ -5,6 +5,7 @@
 
 #include "nvfx_internal.hpp"
 #include "rt_common.hpp"
+#include "cpu_x86.hpp"
 #include "rt_handoff.hpp"
 #include "rt_prior.hpp"
 #include "rt_upscale.hpp"
@@ -90,18 +91,16 @@ std::uint64_t pack_profile(const nfx::rt::Profile& p) { return (static_cast<std:
 constexpr std::uint32_t kProfileFlags = 0;
 
 bool cpu_has(nvfx_isa isa) {
-#if defined(__GNUC__) && defined(__x86_64__)
-  __builtin_cpu_init();
-  if (isa == NVFX_ISA_AVX512) return __builtin_cpu_supports("x86-64-v4");
-  if (isa == NVFX_ISA_AVX2) return __builtin_cpu_supports("x86-64-v3");
+#if defined(__x86_64__) || defined(_M_X64)
+  if (isa == NVFX_ISA_AVX512) return nfx::rt::cpu_x86_has_avx512f();
+  if (isa == NVFX_ISA_AVX2) return nfx::rt::cpu_x86_has_avx2();
 #endif
   return isa == NVFX_ISA_BASELINE;
 }
 
 bool cpu_has_vnni() {
-#if defined(__GNUC__) && defined(__x86_64__)
-  __builtin_cpu_init();
-  return __builtin_cpu_supports("avx512vnni");
+#if defined(__x86_64__) || defined(_M_X64)
+  return nfx::rt::cpu_x86_has_avx512_vnni();
 #else
   return false;
 #endif

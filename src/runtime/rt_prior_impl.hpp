@@ -24,11 +24,8 @@
 #include <span>
 #include <vector>
 
-#if defined(NFX_ARCH) && defined(__GNUC__) && !defined(__clang__)
-#pragma GCC push_options
-#define NFX_PRAGMA(x) _Pragma(#x)
-#define NFX_TARGET(a) NFX_PRAGMA(GCC target(a))
-NFX_TARGET(NFX_ARCH)
+#include "rt_target_pragma.hpp"
+#if defined(NFX_ISA_TARGET_PUSHED)
 #define NFX_PUSHED 1
 #endif
 
@@ -388,4 +385,5 @@ std::unique_ptr<Prior> make_prior(const PriorNet& net) { return std::make_unique
 #if defined(NFX_PUSHED)
 #pragma GCC pop_options
 #undef NFX_PUSHED
+#undef NFX_ISA_TARGET_PUSHED
 #endif

@@ -24,6 +24,7 @@ class LibraryUi {
   ~LibraryUi();
 
   void frame(float x, float y, float w, float h, double dt);
+  void advance(double dt);
 
   bool preview_luma(headless::LumaStats& out) const;
   int stage_width() const { return stage_w_; }
@@ -34,8 +35,8 @@ class LibraryUi {
   void open_library();
   void select_effect(int index);
   void rebuild_stage();
-  void advance(double dt);
   void refresh_missing_models();
+  bool stage_dirty_ = false;
 
   Options opt_;
   nvfx_library* lib_ = nullptr;

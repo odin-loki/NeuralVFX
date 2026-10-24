@@ -3,7 +3,17 @@
 
 #include <imgui.h>
 
+#define GLFW_INCLUDE_NONE
 #include <GLFW/glfw3.h>
+#if defined(_WIN32)
+#include <windows.h>
+#include <GL/gl.h>
+#ifndef GL_CLAMP_TO_EDGE
+#define GL_CLAMP_TO_EDGE 0x812F
+#endif
+#else
+#include <GL/gl.h>
+#endif
 
 #include <cstdint>
 #include <span>
@@ -12,11 +22,14 @@ namespace nfx::viewer {
 
 class Texture {
  public:
-  explicit Texture(bool linear = false) : linear_(linear) { glGenTextures(1, &id_); }
-  ~Texture() { glDeleteTextures(1, &id_); }
+  explicit Texture(bool linear = false) : linear_(linear) {}
+  ~Texture() {
+    if (id_) glDeleteTextures(1, &id_);
+  }
   Texture(const Texture&) = delete;
   Texture& operator=(const Texture&) = delete;
   void upload(std::span<const std::uint8_t> rgba, int width, int height) {
+    if (!id_) glGenTextures(1, &id_);
     glBindTexture(GL_TEXTURE_2D, id_);
     glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
     if (width == w_ && height == h_) {

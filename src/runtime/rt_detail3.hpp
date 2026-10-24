@@ -46,11 +46,8 @@
 #include <utility>
 #include <vector>
 
-#if defined(NFX_ARCH) && defined(__GNUC__) && !defined(__clang__)
-#pragma GCC push_options
-#define NFX_D3_PRAGMA(x) _Pragma(#x)
-#define NFX_D3_TARGET(a) NFX_D3_PRAGMA(GCC target(a))
-NFX_D3_TARGET(NFX_ARCH)
+#include "rt_target_pragma.hpp"
+#if defined(NFX_ISA_TARGET_PUSHED)
 #define NFX_D3_PUSHED 1
 #endif
 
@@ -904,4 +901,5 @@ std::unique_ptr<rollout3d::DetailKernel> make_detail3(const rollout3d::Model& m,
 #if defined(NFX_D3_PUSHED)
 #pragma GCC pop_options
 #undef NFX_D3_PUSHED
+#undef NFX_ISA_TARGET_PUSHED
 #endif

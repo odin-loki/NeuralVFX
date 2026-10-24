@@ -557,8 +557,7 @@ class Rollout final : public RolloutRunner {
     if (int8_ && (H_ > 64 || I_ > 64)) throw std::invalid_argument("rollout: int8 takes at most 64 channels");
     if (int8_) {  // study K: the second convolution's inputs as 7-bit words, planar with a zero border
       if constexpr (kVnniBuild) {
-        __builtin_cpu_init();
-        vnni_ = __builtin_cpu_supports("avx512vnni");
+        vnni_ = nfx::rt::cpu_x86_has_avx512_vnni();
       }
       const bool quads = vnni_ || kW == 8;  // vpdpbusd and pmaddubsw: four values per word; pmaddwd: two
       const int per = quads ? 4 : 2;

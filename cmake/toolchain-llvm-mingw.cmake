@@ -1,0 +1,13 @@
+# llvm-mingw (clang + libc++) for a portable Windows nvfx_viewer. Set PATH to llvm-mingw/bin before configuring.
+set(CMAKE_SYSTEM_NAME Windows)
+set(CMAKE_SYSTEM_PROCESSOR x86_64)
+set(CMAKE_C_COMPILER x86_64-w64-mingw32-clang)
+set(CMAKE_CXX_COMPILER x86_64-w64-mingw32-clang++)
+set(CMAKE_RC_COMPILER llvm-rc)
+set(CMAKE_CXX_STANDARD 23)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+get_filename_component(_nvfx_root "${CMAKE_CURRENT_LIST_DIR}/.." ABSOLUTE)
+set(NEURALFX_WIN_CROSS ON CACHE BOOL "Windows exe cross-build (llvm-mingw)" FORCE)
+add_compile_definitions(NEURALFX_WIN_CROSS=1)
+set(CMAKE_CXX_FLAGS_INIT "-I${_nvfx_root}/cmake/win-include -I${_nvfx_root}/include -include neuralfx/cxx_compat.hpp -Wno-nontrivial-memcall -Wno-sign-conversion -Wno-conversion -Wno-unused-private-field -mavx2 -mfma")
+set(CMAKE_C_FLAGS_INIT "-Wno-sign-conversion -mavx2 -mfma")
