@@ -1,6 +1,6 @@
 # NeuralVFX effects viewer — comprehensive plan
 
-Status: **draft** (25 October 2026). Audience: dev, artists, engine integrators.
+Status: **current** (25 October 2026). Audience: dev, artists, engine integrators.
 
 This document extends [VIEWER.md](VIEWER.md). It defines what “a comprehensive effects viewer” means for NeuralVFX, how it maps to existing runtimes, and the phased delivery. Pre-rendered demo MP4s under `videos/` are **not** the viewer; they are regression artefacts (`nvfx_scene_script`, `nvfx_3d video`, `nvfx_gallery`).
 
@@ -128,16 +128,16 @@ Menu bar switches modes at runtime (window resize hints for Scene/Library/Volume
 
 | Test | What |
 |------|------|
-| Existing `neuralfx.Viewer*` | Effects demo, scene stand-ins, broken edit |
-| **Library screenshot** (later) | Open catalogue, select `campfire`, non-flat picture |
-| **Volume screenshot** (later) | Load `fire.nvfx3`, orbit 30 frames, non-flat |
+| `neuralfx.ViewerHeadless.*` | Windowless library/volume play, luma gates (`viewer/headless_test.cpp`) |
+| `neuralfx.Viewer*` (Xvfb) | Effects demo, scene stand-ins, broken edit, library `sparks`, volume `fire_hres`, optional campfire/smoke with data |
+| `tools/viewer_test.sh` | Restores library models when needed; runs the full regex above |
 | **Allocation** | Optional extension of `nvfx_alloc_test` per mode |
 
 ## 8. Phased delivery
 
 | Phase | Deliverable | Status |
 |-------|-------------|--------|
-| **1** | Plan (this doc) + Library + Volume modes in `nvfx_viewer` | In progress |
+| **1** | Plan (this doc) + Library + Volume modes in `nvfx_viewer` | **Done** (152587b) |
 | **2** | Pack open; volume wind/side-by-side; library category thumbnails cache |
 | **3** | Manager stress; coupled volume; Windows installer note |
 | **4** | Polish: file dialogs, recent lists, persist settings JSON |
