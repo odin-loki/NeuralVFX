@@ -26,8 +26,14 @@ target_include_directories(nvfx_viewer_scene PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}
 target_link_libraries(nvfx_viewer_scene PUBLIC nvfx_scene_api Threads::Threads)
 neuralfx_defaults(nvfx_viewer_scene)
 
-add_executable(nvfx_viewer main.cpp scene_ui.cpp)
-target_link_libraries(nvfx_viewer PRIVATE nvfx_viewer_scene nvfx neuralfx_io neuralfx_imgui)
+add_library(nvfx_viewer_headless STATIC headless.cpp)
+target_include_directories(nvfx_viewer_headless PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}")
+target_link_libraries(nvfx_viewer_headless PUBLIC nvfx_library_api nvfx)
+neuralfx_defaults(nvfx_viewer_headless)
+
+add_executable(nvfx_viewer main.cpp scene_ui.cpp library_ui.cpp volume_ui.cpp)
+target_link_libraries(nvfx_viewer PRIVATE nvfx_viewer_scene nvfx_viewer_headless nvfx nvfx_library_api neuralfx_io neuralfx_imgui)
+target_compile_definitions(nvfx_viewer PRIVATE NEURALFX_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
 neuralfx_defaults(nvfx_viewer)
 
 if(NEURALFX_BUILD_TESTS)
@@ -36,8 +42,8 @@ if(NEURALFX_BUILD_TESTS)
   # needed).
   find_package(GTest CONFIG REQUIRED)
   include(GoogleTest)
-  add_executable(nvfx_viewer_tests scene_session_test.cpp)
-  target_link_libraries(nvfx_viewer_tests PRIVATE nvfx_viewer_scene GTest::gtest_main)
+  add_executable(nvfx_viewer_tests scene_session_test.cpp headless_test.cpp)
+  target_link_libraries(nvfx_viewer_tests PRIVATE nvfx_viewer_scene nvfx_viewer_headless GTest::gtest_main)
   neuralfx_defaults(nvfx_viewer_tests)
   if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
     target_compile_options(nvfx_viewer_tests PRIVATE -Wno-mismatched-new-delete)  # counts allocations (replaces operator new)
@@ -68,10 +74,28 @@ if(NEURALFX_BUILD_TESTS AND XVFB_RUN AND NEURALFX_BUILD_TOOLS)
                    --screenshot ${CMAKE_CURRENT_BINARY_DIR}/viewer_scene_error_test.png --frames 20 --check-picture)
   set_tests_properties(neuralfx.ViewerScreenshot neuralfx.ViewerSceneScreenshot neuralfx.ViewerSceneBrokenEdit
                        PROPERTIES LABELS "neuralfx;gui" TIMEOUT 600)
+  add_test(NAME neuralfx.ViewerLibraryScreenshot
+           COMMAND ${_xvfb} $<TARGET_FILE:nvfx_viewer> --library --entry sparks --threads 2
+                   --screenshot ${CMAKE_CURRENT_BINARY_DIR}/viewer_library_sparks.png --frames 90 --check-picture)
+  add_test(NAME neuralfx.ViewerVolumeScreenshot
+           COMMAND ${_xvfb} $<TARGET_FILE:nvfx_viewer> --volume --model ${PROJECT_SOURCE_DIR}/models/3d/fire_hres.nvfx3 --threads 2
+                   --screenshot ${CMAKE_CURRENT_BINARY_DIR}/viewer_volume_fire.png --frames 45 --check-picture)
+  set_tests_properties(neuralfx.ViewerLibraryScreenshot neuralfx.ViewerVolumeScreenshot
+                       PROPERTIES LABELS "neuralfx;gui" TIMEOUT 900)
   if(DEFINED ENV{NEURALVFX_DATA})
     set(_viewer_data "$ENV{NEURALVFX_DATA}")
   else()
     set(_viewer_data "$ENV{HOME}/nvfx-data")
+  endif()
+  if(EXISTS "${_viewer_data}/library/models/fire.nvfx")
+    add_test(NAME neuralfx.ViewerLibraryCampfireScreenshot
+             COMMAND ${_xvfb} $<TARGET_FILE:nvfx_viewer> --library --entry campfire --models ${_viewer_data}/library/models --threads 2
+                     --screenshot ${CMAKE_CURRENT_BINARY_DIR}/viewer_library_campfire.png --frames 120 --check-picture)
+    add_test(NAME neuralfx.ViewerLibrarySmokeScreenshot
+             COMMAND ${_xvfb} $<TARGET_FILE:nvfx_viewer> --library --entry smoke_column --models ${_viewer_data}/library/models --threads 2
+                     --screenshot ${CMAKE_CURRENT_BINARY_DIR}/viewer_library_smoke.png --frames 150 --check-picture)
+    set_tests_properties(neuralfx.ViewerLibraryCampfireScreenshot neuralfx.ViewerLibrarySmokeScreenshot
+                         PROPERTIES LABELS "neuralfx;gui;data" TIMEOUT 1200)
   endif()
   if(EXISTS "${_viewer_data}/experiments/models/d/explosion.nvfx")
     add_test(NAME neuralfx.ViewerSceneScreenshotModels

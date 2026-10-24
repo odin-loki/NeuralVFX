@@ -2,14 +2,18 @@
 
 Status: **current**. Audience: dev, artists.
 
-`nvfx_viewer` has two modes, switched in its menu bar:
+`nvfx_viewer` has four modes, switched in its menu bar (roadmap and architecture: [VIEWER_PLAN.md](VIEWER_PLAN.md)):
 - **Effects** plays trained effects live with a slider for every control, and shows them next to the reference clip,
   a flipbook of that clip at the effect's memory, and the fluid simulation running at the same controls, each with its
   cost per frame.
 - **Scene** edits a scene script ([COMPOSE.md](COMPOSE.md) §4) next to the scene it plays. The scene is rebuilt as you
   type; a broken edit leaves the last good scene playing and shows the error at its line and column.
+- **Library** lists the effect catalogue (`library/*.nvfxl`) and plays the selected entry on a fitted stage (the same
+  C API as `nvfx_gallery`). Needs `$NEURALVFX_DATA/library/models` for learned entries.
+- **Volume** plays learned 3D effects (`.nvfx3`) live through `nvfx_volume.h` — orbit camera, controls, shard — not a
+  pre-rendered MP4.
 
-Both render through the same runtime a game uses: the effects C API (`nvfx.h`) and the scene C API (`nvfx_scene.h`,
+All render through the same runtimes a game uses: the effects C API (`nvfx.h`) and the scene C API (`nvfx_scene.h`,
 [ENGINES.md](ENGINES.md) §7).
 
 ![The viewer: the 1 MB fire control model (one model for every setting) next to the reference clip of one setting and a 1 MB BC3 flipbook of that one setting](figures/viewer.png)
@@ -27,6 +31,8 @@ build/viewer/nvfx_viewer --demo                 # an untrained demo effect, no f
 build/viewer/nvfx_viewer --scene examples/scenes/fireball.nvfxs              # the effects from the default folder
 build/viewer/nvfx_viewer --scene examples/scenes/campfire.nvfxs --effects DIR
 build/viewer/nvfx_viewer --scene examples/scenes/fireball.nvfxs --stand-ins  # untrained stand-ins, no files needed
+build/viewer/nvfx_viewer --library
+build/viewer/nvfx_viewer --volume models/3d/fire_hres.nvfx3 --threads 4
 ```
 
 The scene mode reads the effects a script names from a folder chosen in the UI (`--effects`). By default it is
@@ -134,6 +140,8 @@ xvfb-run -a -s "-screen 0 1920x1080x24" build/viewer/nvfx_viewer --scene example
     --screenshot docs/figures/viewer_scene_campfire.png --frames 90 --check-picture
 ```
 
+**Automated tests:** `bash tools/viewer_test.sh` (runs `ctest -R 'neuralfx.ViewerHeadless|neuralfx.Viewer'`; links library models via `models/restore.sh` when needed). Quality feedback and smoke realism notes: [VIEWER_QUALITY.md](VIEWER_QUALITY.md).
+
 `ctest -R Viewer` runs:
 - `neuralfx.ViewerScene.*` (`viewer/scene_session_test.cpp`, no display): the wait before a check fires once when
   edits pause; a typo (found by the check) and a size that is not a multiple of the grid and a missing effect file
@@ -141,7 +149,10 @@ xvfb-run -a -s "-screen 0 1920x1080x24" build/viewer/nvfx_viewer --scene example
   scene at the time of the edit; inputs carry over a rebuild unless the script changes them; rule triggers, the probe,
   seeks forward and back, a seek that supersedes another, and restarts; stand-ins for missing effects, and the fireball
   played on stand-ins; a newer edit superseding a build in progress.
+- `neuralfx.ViewerHeadless.*` (`viewer/headless_test.cpp`, no display): procedural `sparks`, optional `campfire` / `smoke_column` with data, shipped `fire_hres.nvfx3`, non-square stage buffer size.
 - `neuralfx.ViewerScreenshot`: the effects mode with the demo effect.
+- `neuralfx.ViewerLibraryScreenshot` / `ViewerVolumeScreenshot`: Library and Volume modes under Xvfb with `--check-picture`.
+- `neuralfx.ViewerLibraryCampfireScreenshot` / `ViewerLibrarySmokeScreenshot` (label `data`, when library models are present).
 - `neuralfx.ViewerSceneScreenshot`: the scene mode playing `examples/scenes/fireball.nvfxs` on stand-ins from 1.5 s,
   with `--check-picture`.
 - `neuralfx.ViewerSceneBrokenEdit`: the same, then the edit that breaks line 86: the error at line 86 and the first

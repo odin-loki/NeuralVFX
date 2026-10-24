@@ -23,8 +23,11 @@
 // edit leaves an error at line N with the first scene still playing; --input and --trigger set inputs and fire rules
 // once the scene is built, as the sliders and buttons do; --pin pins the field probe.
 #include "../tools/args.hpp"
+#include "headless.hpp"
+#include "library_ui.hpp"
 #include "scene_ui.hpp"
 #include "texture.hpp"
+#include "volume_ui.hpp"
 
 #include <neuralfx/flipbook.hpp>
 #include <neuralfx/image_io.hpp>
@@ -124,7 +127,35 @@ std::string default_effects_dir() {
   return roots.empty() ? std::string("models") : (roots.front() / "v2/models").string();
 }
 
-enum class Mode { effects, scene };
+enum class Mode { effects, scene, library, volume };
+
+std::string default_library_dir() {
+#ifdef NEURALFX_SOURCE_DIR
+  return std::string(NEURALFX_SOURCE_DIR) + "/library";
+#else
+  return "library";
+#endif
+}
+
+std::string default_library_models() {
+  const auto has_models = [](const std::filesystem::path& p) {
+    std::error_code ec;
+    if (!std::filesystem::is_directory(p, ec)) return false;
+    return std::filesystem::exists(p / "fire.nvfx", ec) || std::filesystem::exists(p / "smoke.nvfx", ec);
+  };
+  std::vector<std::filesystem::path> roots;
+  if (const char* d = std::getenv("NEURALVFX_DATA"); d && *d) roots.emplace_back(d);
+  if (const char* h = std::getenv("HOME"); h && *h) roots.emplace_back(std::filesystem::path(h) / "nvfx-data");
+  if (const char* u = std::getenv("USERPROFILE"); u && *u) roots.emplace_back(std::filesystem::path(u) / "nvfx-data");
+#ifdef NEURALFX_SOURCE_DIR
+  roots.emplace_back(std::filesystem::path(NEURALFX_SOURCE_DIR) / "models");
+#endif
+  for (const auto& root : roots) {
+    const auto lib = root / "library/models";
+    if (has_models(lib)) return lib.string();
+  }
+  return {};
+}
 
 // The mean and spread of the luma inside a rectangle of an RGBA image: a flat (empty) picture has no spread.
 std::pair<double, double> luma_stats(const Image& img, int x0, int y0, int x1, int y1) {
@@ -148,10 +179,12 @@ std::pair<double, double> luma_stats(const Image& img, int x0, int y0, int x1, i
 }  // namespace
 
 int main(int argc, char** argv) try {
-  const tools::Args a(argc, argv, {"demo", "help", "stand-ins", "paused", "check-picture"});
+  const tools::Args a(argc, argv, {"demo", "help", "stand-ins", "paused", "check-picture", "library", "volume"});
   if (a.flag("help")) {
     std::println("nvfx_viewer effect.nvfx [...] [--clip ref.nfxclip] [--size 128] [--scale 3] [--screenshot out.png --frames 30] [--demo]");
     std::println("nvfx_viewer --scene script.nvfxs [--effects DIR] [--stand-ins] [--threads 2] [--at SECONDS] [--paused]");
+    std::println("nvfx_viewer --library [--catalogue DIR] [--models DIR] [--entry NAME]");
+    std::println("nvfx_viewer --volume [--model F.nvfx3] [--threads 4]");
     std::println("            [--screenshot out.png --frames 30 [--check-picture]] [--edit-replace FROM --with TO [--expect-error-line N]]");
     std::println("            [--input NAME=V,...] [--trigger RULE,...] [--pin X,Y (the field probe, picture pixels)] [--overlay heat|soot] [--window WxH]");
     return 0;
@@ -181,7 +214,10 @@ int main(int argc, char** argv) try {
   const int scale = a.i("scale", 3);
   const std::string screenshot = a.str("screenshot");
   const int shot_frames = a.i("frames", 30);
-  Mode mode = a.has("scene") ? Mode::scene : Mode::effects;
+  Mode mode = Mode::effects;
+  if (a.has("scene")) mode = Mode::scene;
+  else if (a.flag("library")) mode = Mode::library;
+  else if (a.flag("volume")) mode = Mode::volume;
   viewer::SceneUi::Options scene_opt;
   scene_opt.script_path = a.str("scene");
   scene_opt.settings.effects_dir = a.str("effects", default_effects_dir());
@@ -244,7 +280,23 @@ int main(int argc, char** argv) try {
   std::unique_ptr<sim::Fluid> fluid;
   std::vector<std::uint8_t> sim_frame;
   float sim_controls[3] = {-1, -1, -1};
-  std::unique_ptr<viewer::SceneUi> scene_ui;  // made when the scene mode is first shown (it starts a worker thread)
+  std::unique_ptr<viewer::SceneUi> scene_ui;
+  std::unique_ptr<viewer::LibraryUi> library_ui;
+  std::unique_ptr<viewer::VolumeUi> volume_ui;
+  viewer::LibraryUi::Options library_opt;
+  library_opt.catalogue_dir = a.str("catalogue", default_library_dir());
+  library_opt.models_dir = a.str("models", default_library_models());
+  library_opt.threads = a.i("threads", 2);
+  viewer::VolumeUi::Options volume_opt;
+  volume_opt.initial_model = a.str("model");
+  volume_opt.threads = a.i("threads", 4);
+  const std::string library_entry = a.str("entry");
+  if (mode == Mode::library) {
+    library_ui = std::make_unique<viewer::LibraryUi>(library_opt);
+    if (!library_entry.empty() && !library_ui->select_entry(library_entry.c_str()))
+      throw std::runtime_error("--entry: no catalogue entry '" + library_entry + "'");
+  }
+  if (mode == Mode::volume) volume_ui = std::make_unique<viewer::VolumeUi>(volume_opt);
   if (mode == Mode::scene) {
     scene_ui = std::make_unique<viewer::SceneUi>(scene_opt);
     if (pin.size() == 2) scene_ui->pin(pin[0], pin[1]);
@@ -298,7 +350,19 @@ int main(int argc, char** argv) try {
         mode = Mode::scene;
         if (!scene_ui) scene_ui = std::make_unique<viewer::SceneUi>(scene_opt);
       }
-      ImGui::TextDisabled("  %s", mode == Mode::effects ? "effects: one effect, its controls and its cost" : "scene: a script edited live");
+      if (ImGui::MenuItem("Library", nullptr, mode == Mode::library)) {
+        mode = Mode::library;
+        if (!library_ui) library_ui = std::make_unique<viewer::LibraryUi>(library_opt);
+      }
+      if (ImGui::MenuItem("Volume", nullptr, mode == Mode::volume)) {
+        mode = Mode::volume;
+        if (!volume_ui) volume_ui = std::make_unique<viewer::VolumeUi>(volume_opt);
+      }
+      const char* hint = "effects: one .nvfx and its controls";
+      if (mode == Mode::scene) hint = "scene: a script edited live";
+      else if (mode == Mode::library) hint = "library: catalogue entries on a stage";
+      else if (mode == Mode::volume) hint = "volume: learned 3D .nvfx3 (live, not a video)";
+      ImGui::TextDisabled("  %s", hint);
       top = ImGui::GetWindowSize().y;
       ImGui::EndMainMenuBar();
     }
@@ -307,7 +371,16 @@ int main(int argc, char** argv) try {
       const ImVec2 ds = ImGui::GetIO().DisplaySize;
       // the test's steps (Shot) play at a fixed 60 Hz; otherwise in real time
       const bool shooting = !screenshot.empty();
+      if (!scene_ui) scene_ui = std::make_unique<viewer::SceneUi>(scene_opt);
       scene_ui->frame(6.f, top + 6.f, ds.x - 12.f, ds.y - top - 12.f, shooting ? (shot == Shot::count ? dt : 0.0) : real_dt);
+    } else if (mode == Mode::library) {
+      const ImVec2 ds = ImGui::GetIO().DisplaySize;
+      if (!library_ui) library_ui = std::make_unique<viewer::LibraryUi>(library_opt);
+      library_ui->frame(6.f, top + 6.f, ds.x - 12.f, ds.y - top - 12.f, real_dt);
+    } else if (mode == Mode::volume) {
+      const ImVec2 ds = ImGui::GetIO().DisplaySize;
+      if (!volume_ui) volume_ui = std::make_unique<viewer::VolumeUi>(volume_opt);
+      volume_ui->frame(6.f, top + 6.f, ds.x - 12.f, ds.y - top - 12.f, real_dt, ImGui::GetIO().WantCaptureMouse);
     } else {
       if (!paused) time += dt * speed;
       const auto& info = effects[static_cast<std::size_t>(current)].info;
@@ -497,6 +570,24 @@ int main(int argc, char** argv) try {
         std::copy_n(raw.begin() + static_cast<std::ptrdiff_t>(y) * w * 4, w * 4, img.rgba.begin() + static_cast<std::ptrdiff_t>(h - 1 - y) * w * 4);
       }
       if (auto r = write_png(screenshot, img); !r) throw std::runtime_error(r.error());
+      if (mode == Mode::library && check_picture && library_ui) {
+        viewer::headless::LumaStats ls;
+        if (!library_ui->preview_luma(ls) || !viewer::headless::picture_ok(ls)) {
+          std::println(stderr, "nvfx_viewer: library preview is empty or flat");
+          return 3;
+        }
+        std::println("screenshot {} ({}x{}) library entry preview mean {:.1f} spread {:.1f}", screenshot, w, h, ls.mean, ls.spread);
+        break;
+      }
+      if (mode == Mode::volume && check_picture) {
+        const auto [mean, spread] = luma_stats(img, 0, 0, w, h);
+        if (spread < 3.0 || mean < 2.0) {
+          std::println(stderr, "nvfx_viewer: volume picture is empty or flat");
+          return 3;
+        }
+        std::println("screenshot {} ({}x{}) volume mean {:.1f} spread {:.1f}", screenshot, w, h, mean, spread);
+        break;
+      }
       if (mode != Mode::scene) {
         std::println("screenshot {} ({}x{}) after {} frames; neural {:.3f} ms per frame", screenshot, w, h, frame_no + 1, effect_ms.mean());
         break;
