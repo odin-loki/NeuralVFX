@@ -1,0 +1,12 @@
+close_unlimited_t4:
+  off  cpu_mean 20.47 [19.02, 28.31] cpu_p99 34.82 [32.85, 50.33] plan_mean 23.09 [23.09, 23.09] sims 34.12 [34.12, 34.12] proxied 0.00 [0.00, 0.00] half_sims 0.00 [0.00, 0.00]
+  on   cpu_mean 17.39 [16.85, 27.04] cpu_p99 29.43 [28.46, 47.70] plan_mean 19.24 [19.24, 19.24] sims 34.12 [34.12, 34.12] proxied 0.00 [0.00, 0.00] half_sims 4.70 [4.70, 4.70]
+  on / off, cpu_mean: ratio 0.886 [0.850, 0.955], difference -2.171 ms [-3.075, -1.273] (5 rounds)
+  on / off, cpu_median: ratio 0.893 [0.858, 0.984], difference -1.936 ms [-2.785, -0.433] (5 rounds)
+  on / off, cpu_p99: ratio 0.881 [0.830, 0.948], difference -4.140 ms [-5.813, -2.628] (5 rounds)
+unlimited_t4:
+  off  cpu_mean 19.13 [18.62, 20.39] cpu_p99 31.22 [30.88, 34.08] plan_mean 21.09 [21.09, 21.09] sims 69.29 [69.29, 69.29] proxied 67.31 [67.31, 67.31] half_sims 0.00 [0.00, 0.00]
+  on   cpu_mean 18.96 [18.18, 26.05] cpu_p99 32.26 [30.82, 48.17] plan_mean 20.64 [20.64, 20.64] sims 69.29 [69.29, 69.29] proxied 67.31 [67.31, 67.31] half_sims 0.52 [0.52, 0.52]
+  on / off, cpu_mean: ratio 0.991 [0.975, 1.278], difference -0.166 ms [-0.474, +5.663] (5 rounds)
+  on / off, cpu_median: ratio 0.987 [0.968, 1.263], difference -0.251 ms [-0.616, +5.267] (5 rounds)
+  on / off, cpu_p99: ratio 0.999 [0.981, 1.433], difference -0.022 ms [-0.634, +14.552] (5 rounds)

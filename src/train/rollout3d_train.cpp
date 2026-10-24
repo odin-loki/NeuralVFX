@@ -656,7 +656,7 @@ std::vector<double> row_spread(const Hyper& h, std::span<const float> state, int
 }
 
 double window_loss(const Model& m, const Run& r, int first, int unroll, int burn, float sigma, float profile, std::uint64_t noise_seed,
-                   std::vector<float>* grad, float activity, const ExtraLosses& extra) {
+                   std::vector<float>* grad, float activity, const ExtraLosses& extra, bool r2_extras_only) {
   const Hyper& h = m.h;
   const StepLayout L = step_layout(h);
   const Grid g{h.rx, h.ry, h.rz};
@@ -709,14 +709,16 @@ double window_loss(const Model& m, const Run& r, int first, int unroll, int burn
     r.state(i0 + s + 1, per, t);
     Vec& gs = gout[zu(s)];
     gs.assign(zu(N) * zu(C), 0.f);
-    for (int j = 0; j < N; ++j) {
-      for (int k = 0; k < kPhys; ++k) {
-        const float e = S[zu(j) * zu(C) + zu(k)] - t[zu(j) * kPhys + zu(k)];
-        loss += static_cast<double>(wch[zu(k)] * e * e * inv);
-        gs[zu(j) * zu(C) + zu(k)] = 2.f * wch[zu(k)] * e * inv;
+    if (!r2_extras_only) {
+      for (int j = 0; j < N; ++j) {
+        for (int k = 0; k < kPhys; ++k) {
+          const float e = S[zu(j) * zu(C) + zu(k)] - t[zu(j) * kPhys + zu(k)];
+          loss += static_cast<double>(wch[zu(k)] * e * e * inv);
+          gs[zu(j) * zu(C) + zu(k)] = 2.f * wch[zu(k)] * e * inv;
+        }
       }
     }
-    if (profile > 0.f) {  // where the heat and soot are: their means over slices along each axis
+    if (!r2_extras_only && profile > 0.f) {  // where the heat and soot are: their means over slices along each axis
       const float pinv = profile / fl(2 * (g.rx + g.ry + g.rz) * unroll);
       for (int k = 3; k < kPhys; ++k) {
         for (int axis = 0; axis < 3; ++axis) {
@@ -743,7 +745,7 @@ double window_loss(const Model& m, const Run& r, int first, int unroll, int burn
         }
       }
     }
-    if (activity > 0.f && s > 0) {  // how much each channel changes per frame: mean squared change, model against truth
+    if (!r2_extras_only && activity > 0.f && s > 0) {  // how much each channel changes per frame: mean squared change, model against truth
       r.state(i0 + s, per, tp);
       const Vec& prev = outs[zu(s - 1)];
       for (int k = 0; k < kPhys; ++k) {

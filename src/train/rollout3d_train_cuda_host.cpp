@@ -477,6 +477,11 @@ void cuda_train_stepper(Model& m, std::span<const Run> runs, const TrainOptions&
       const int first = static_cast<int>(rng() % static_cast<std::uint64_t>(std::max(1, span)));
       std::vector<float> grad(L.size, 0.f);
       loss += window_loss_cuda_impl(tr, m, r, first, unroll, burn, o.sigma, fine ? o.profile : 0.f, rng(), &grad, act ? o.activity : 0.f);
+      const float spread_w = fine ? o.spread : 0.f, edge_w = fine ? o.edge : 0.f;
+      if (spread_w > 0.f || edge_w > 0.f) {
+        const ExtraLosses ex{spread_w, edge_w};
+        loss += window_loss(m, r, first, unroll, burn, 0.f, 0.f, rng(), &grad, 0.f, ex, true);
+      }
       for (std::size_t j = 0; j < L.size; ++j) gsum[j] += grad[j];
     }
     loss /= o.batch;

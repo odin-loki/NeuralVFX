@@ -2,6 +2,9 @@
 build/
 build-*/
 out/
+# CTest's artifacts (Testing/Temporary: LastTest.log, CTestCostData.txt), from a ctest run in the source tree or in build/
+/Testing/
+build/Testing/
 *.o
 *.a
 *.so

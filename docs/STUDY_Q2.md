@@ -21,6 +21,19 @@ in the trainer (`Rollout.RendererFineTuneKeepsItsScalesAndStartsFromItsWeights`)
 
 ## 0. Where the study stands (handoff)
 
+**One line to start:** `bash tools/study_q2/bootstrap.sh` (then `resume.sh`; details just below).
+
+**Quick start (portable scripts, `tools/study_q2/`; `NEURALVFX_DATA` is the data root, default `/root/nvfx-data`):**
+`NEURALVFX_DATA=$HOME/nvfx-data bash tools/study_q2/bootstrap.sh` once (the folders, the tool, the shipped files; makes
+no numbers); then `NEURALVFX_DATA=$HOME/nvfx-data bash tools/study_q2/resume.sh` after any restart (the cleaning, then
+every validation not done); and, by hand after one effect's validation, `bash tools/study_q2/after_val.sh <effect>` (the
+freeze and the one test). Without the container's `q2_fix` (the owner's PC), first the copy: one rsync from
+`CONTAINER:/root/nvfx-data/q2_fix` to `$NEURALVFX_DATA/q2_fix` (`cand/` and `vt/` only; `CONTAINER` the container's
+ssh address), or `RSYNC_SRC=CONTAINER:/root/nvfx-data/q2_fix APPLY=1 bash tools/study_q2/restore_from.sh`, as
+[STUDY_Q2_RESTORE.md §0](STUDY_Q2_RESTORE.md#0-the-whole-restore-in-four-lines-fill-in-container) gives it; then
+`bootstrap.sh` until it ends `ready: yes; everything reads ok`, exit 0 (its success criteria, verified on the PC on 24
+October: [§3a](STUDY_Q2_RESTORE.md#3a-bootstrapsh-the-success-criteria-verified)).
+
 Under way (22 October 2026, 03:00 UTC). The plan and the rule's form (§4) were committed before any number (c6e56e9,
 21 October 18:00 UTC); heavy work waited for the quiet machine's marker (`quiet7/QUIET_DONE`, 21:18 UTC; the
 coordinator dropped the three-hour fallback at 19:05 so that round 7's quiet timing saw no foreign load). Every effect's
@@ -77,7 +90,23 @@ played on the probe; the rule's numbers (`q2_rule.csv`) committed and pushed bef
 (`pipeline.sh`; they end at validation and commit their tables). No freeze or test is started without the agent:
 `after_val.sh` is no longer started by `resume.sh`.
 
-**To resume** (`Q` the data root's `q2_fix`): after a restart, `$Q/jobs/resume.sh` (it restarts the validations). When
+**Checked from another machine (24 October 2026).** The tables in git hold no validation row for the geyser, heavy gas
+or the mushroom (`q2_val_choice.csv` has the haboob's, the ring's and the avalanche's choices only; `q2_frozen.csv` and
+`q2_test_decision.csv` their three rows): the three validations had not finished, or their tables were not committed,
+when the container stopped. The job scripts are now in git as **`tools/study_q2/`** (`common.sh`, `bootstrap.sh`,
+`resume.sh`, `val.sh`, `after_val.sh`): the container's `q2_fix/jobs` steps written against environment variables
+(`NEURALVFX_DATA`, the data root; `Q2_REPO`, `Q2_BIN`, `Q2_THREADS`, `Q2_NO_PUSH`; each script's head says what it does
+and what it needs), so that a fresh container or another machine runs them without edits. They make no number by
+themselves: the candidates (§4.1) exist only under the container's `q2_fix/cand/<effect>/` (the fine-tunes need the
+training runs; `fitmean` and `starts` too), so a machine without that folder can only build the tool and check the
+shipped files (`bootstrap.sh` says what is missing; git's `models/2d/geyser.nvfx`, `heavygas.nvfx` and `mushroom.nvfx`
+are the shipped files to the byte, §4.1's hashes, and stand in for the data root's). `resume.sh` does the cleaning of
+§0 and starts the validations that are not done; `after_val.sh` is by hand, as before; a binary other than §4.6's is
+allowed and said out loud (the numbers depend only on the seeds and the files, §6; the frozen row records which binary
+tested the file). To run the three validations on a machine without the container's `q2_fix` (the owner's PC): [STUDY_Q2_RESTORE.md](STUDY_Q2_RESTORE.md) (copy `cand/`, optionally `vt/`; `NEURALVFX_DATA`; `bootstrap.sh`, `resume.sh`, `after_val.sh`; the binary's hash).
+
+**To resume** (`Q` the data root's `q2_fix`; the same scripts from git: `tools/study_q2/bootstrap.sh` once, then
+`resume.sh`, `after_val.sh <effect>`): after a restart, `$Q/jobs/resume.sh` (it restarts the validations). When
 `$Q/jobs/val_<effect>.done` appears: `$Q/jobs/after_val.sh <effect> 2` (the rule's choice frozen, then its one test). If
 `$Q/test_<effect>.done` says "met": `$Q/jobs/links.sh <effect> <dir>` (the old targets logged in
 `$Q/logs/links_before.txt`), the file into `models/2d` and `models/SHA256SUMS` regenerated, `models/restore.sh` (0

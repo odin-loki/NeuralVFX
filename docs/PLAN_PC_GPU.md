@@ -1,10 +1,18 @@
 # Plan: high-resolution 3D effects, each made in hours on the PC's GPU from the best simulators
 
-**Status:** a plan, written 21 October 2026, revised the same day: the high-resolution 3D effects, each in hours.
-Nothing in it has started. It refines stage 2 of [TODO.md](../TODO.md) (the catalogue, the measuring rules and the
-seeds stay as they are there). Its accelerated version, every effect as a small seeded generator (a code of a few
-hundred numbers fitted against a shared family network, coarser and fewer teachers, pruning and compression to the
-noise floor), is [GENERATOR.md](GENERATOR.md): if its bets hold, an effect takes about 1 to 2 hours.
+**Status:** the owner's target for stage 2 (24 October 2026): **every catalogue effect that has a GPU teacher in this
+plan**, through [PLAN_PC_GPU.md](PLAN_PC_GPU.md) §8 (P0 to P7) and `nvfx_pc effect <name>`, not a one-off hres demo.
+Nothing in §8 has started on the PC yet (`nvfx_pc`, `nvfx_gpu_sim`, `nvfx_gpu_train`, `nvfx_gpu_play` are not built).
+Study hres on this PC is the **laboratory before P0**: fire and smoke at 32 x 48 x 32 are done; **smoke_r2 at hres** (R2's
+teacher, spread and edge losses, calibrated bounds) is **running** (`tools/study_3d/hres_smoke_r2.sh` on
+`$NEURALVFX_DATA/hres_3d/smoke_r2`) and must finish before we treat hres as having answered the smoke question for
+§6.3 and §8 P3. Then **P0** (PC set-up, §2) and the GPU stack, then **P3's gate** (fire and smoke at 64 x 96 x 64 in
+hours), then **P4–P7** for the rest of the gas catalogue, liquids, grains and weather rows ([WAVE1_CHECKLIST.md](WAVE1_CHECKLIST.md)).
+
+Written 21 October 2026; revised the same day for the hours target. It refines stage 2 of [TODO.md](../TODO.md) (the
+catalogue, the measuring rules and the seeds stay as they are there). The accelerated variant
+([GENERATOR.md](GENERATOR.md): a small seeded generator per effect) stays a bet to test in parallel, not a substitute
+for this plan unless its pilots beat §6.4 on the first effects.
 
 **What "high resolution" means here.** TODO's stage 2 sizes:
 - a **64 x 96 x 64 learned state** (64³ for effects that aren't tall): twice study hres's 32 x 48 x 32 in each
@@ -18,8 +26,10 @@ All 33 of today's effects take about **4 to 6 weeks** of the PC (§7.4).
 
 Four things make that possible:
 1. **The GPU simulates.** Our own solvers, ported to the GPU and batched, make 100 high-resolution runs in about an
-   hour. Houdini, the film industry's standard, teaches wherever it is that fast too, and is the look every solver is
-   matched against (§3).
+   hour. No paid VFX package is in the loop: teachers are **`nvfx_gpu_sim` / `nvfx_gpu_flip` / `nvfx_gpu_mpm`**
+   (from today's `sim3d` and new GPU ports). Each effect is checked against **one** scientific reference (§3.3.1).
+   Shipped models run in **FUSE** on the Desktop repo ([FUSE.md](FUSE.md)); that is integration and timing, not a
+   second reference.
 2. **The GPU trains.** One model per family is trained once. Each new effect is a fine-tune of it, coarse to fine
    (§6).
 3. **One command per effect.** It simulates, trains, measures by the house rules and ships, unattended, and logs every
@@ -62,14 +72,14 @@ Audience: the owner, and whoever runs it on the PC.
   - train the family model on its first three effects: 2 to 3 days.
 - **Teachers:**
   - **For gases, our 3D solver on the GPU** (`nvfx_gpu_sim`: today's `sim3d`, whose `smoke_r` passes the plume
-    checks). Houdini 21's GPU sparse pyro teaches instead wherever P2 measures it at 0.25 s a frame or less at this
-    resolution.
-  - **For liquids and grains, GPU solvers of our own** (FLIP and MPM), because Houdini's run on the CPU and take days
-    at this resolution.
-  - **Houdini's runs are the look** every solver of ours is matched against. Research codes validated against
-    experiments (FDS, Basilisk, PeleLMeX) referee each family on a few cases.
+    checks; R2's momentum fix for smoke-like presets).
+  - **For liquids and grains, GPU solvers of our own** (FLIP and MPM), because film-scale CPU solvers take days at
+    this resolution and are not in the budget.
+  - **One reference per effect** (§3.3.1): the best single anchor for that row—usually a correlation, intercomparison
+    dataset, or one research-code case—not several stacked.
+  - **FUSE** plays and budgets shipped effects (owner source: `Desktop/FUSE`, git); the repo adapter is `engines/fuse/`.
 - **Every teacher must pass its family's physical checks before any training data is made:** flame height, puffing
-  frequency, plume spread, front speed, angle of repose (§3.4).
+  frequency, plume spread, front speed, angle of repose (§3.4)—the measurable side of **range and spread** (§1.3).
 - **Model:** one network per family (gas 25 effects, free surface 7, granular), conditioned on effect and controls,
   with the stage 1 design at high resolution. Each effect's fine-tune is the shipped `.nvfx3`, played on the GPU, with
   a small CPU version (16 x 24 x 16, study N2's size) for lower levels of detail.
@@ -84,15 +94,54 @@ Audience: the owner, and whoever runs it on the PC.
 
 ## 1. Why change the plan
 
-What this container's 3D studies found:
+### 1.1 What study hres's two shipped effects teach (this PC, October 2026)
+
+These are the **two worked examples** the owner wants carried into PLAN_PC_GPU before the full catalogue roll-out.
+They are not the destination (64 x 96 x 64 learned state, GPU sim, train, play, §0); they are the proof of what must be
+in every effect's recipe and gate.
+
+| | **hres fire** (`fire_hres.nvfx3`) | **hres smoke** (`smoke_hres.nvfx3`, study N teacher) |
+|---|---|---|
+| **Outcome** | Shipped: passes validation, the one test, and the **edge check with calibrated bounds** ([STUDY_3D_HRES.md](STUDY_3D_HRES.md) §7; `results/3d/hres/fire/edgecheck_test.md`) | Shipped as a **labelled demo**: fails the edge check (heat builds at **x = 0** from wind ≥ 0.50; §8) |
+| **Teacher** | Study N fire preset on the finer grid | Study N smoke preset (weak buoyancy; not R2's `smoke_r2`) |
+| **Training** | N2's four stages on the **CUDA** trainer (spread/edge losses not in that build) | Same recipe, CUDA; **no `--spread` / `--edge`** |
+| **Lesson for PLAN_PC_GPU** | Finer state + N2 recipe + **four-run edge calibration** (`edge_bounds.csv`) can pass where N2 only almost did | Finer state **without** R2's losses repeats N/R's **upwind wall** failure; **calibrated bounds** matter (single-run teacher at 0.50 looked like 0.01) |
+| **In flight** | Done | **`smoke_r2` at hres** (CPU train with `--spread 2 --edge 10`, R2 teacher, same bounds recipe): answers whether the smoke gate is fixable **before** P3 spends GPU weeks |
+
+**Carry into §6.3 and `nvfx_pc`:** ambient edges and long rollouts (N2); **spread and edge losses** on smoke-like effects;
+**edge bounds from four teacher runs per wind** before any candidate is judged; stage 4 burn 48–360 frames; rule committed
+before validation (study Q2's shape). **Carry into P1:** extend the CUDA trainer with spread/edge (today it **refuses**
+`--device cuda` with them) so hres-scale experiments are not CPU-weeks on the PC. **Carry into P3:** fire and smoke must
+beat N2 C4, hres demos, and R's C4 on §6.4 with **no 60 s runaway**—the hres smoke failure is exactly what P3 must not
+ship.
+
+### 1.2 Earlier studies (container)
 
 | study | state, detail | what it found | what fixes it |
 |---|---|---|---|
 | N (fire) | 16 x 24 x 16, 64 x 96 x 64 | tracks a held-out fire better than the coarse simulation; heat builds at the upwind edge and grows a second fire | ambient edges, long rollouts (N2) |
 | N2 (fire) | the same | no runaway over 30 s, but too calm (motion 0.68 of the real runs'); an edge bound 3% too tight | bigger model, longer windows with gradient, bounds from the teacher's spread |
-| hres (fire) | 32 x 48 x 32, 64 x 96 x 64 | finer flames; not yet tested; a step 239 ms on one CPU thread, 64 ms on four (192 ms of it the stepper) | the GPU, for training and for playing |
-| R (smoke) | 16 x 24 x 16, 64 x 96 x 64 | a teacher that is a plume by MTT's measures; the learned smoke runs away at an edge and spreads too far (mean picture -2.52 dB) | more data, longer windows with gradient, more capacity |
-| R2 (smoke) | the same | under way: the teacher's momentum fixed (confinement made momentum-neutral) | — |
+| hres (fire) | 32 x 48 x 32, 64 x 96 x 64 | **passes** hres rule and test edge check; ~64 ms a step on four CPU threads (GPU required at 64³) | GPU for train and play (this plan) |
+| R (smoke) | 16 x 24 x 16, 64 x 96 x 64 | a teacher that is a plume by MTT's measures; the learned smoke runs away at an edge and spreads too far (mean picture -2.52 dB) | spread/edge losses, R2 teacher (R2 + hres smoke_r2) |
+| R2 (smoke) | the same | teacher momentum fixed; 16³ retrain under way on the container | hres smoke_r2 on the PC tests the same losses at 32³ |
+
+### 1.3 Dynamism: the real range and spread of an effect
+
+The goal is not to match one clip. It is an effect that **feels like the real phenomenon** because it has the same
+**dynamism**: variability over seeds and controls, lateral spread, puffing, entrainment, edge behaviour, and the
+long-tail statistics of play (60 s, many winds). That is a **distribution**, not a frame.
+
+Real footage works against that:
+- it is **hard to get** and rarely licensed for training;
+- one take is **one sample** from a huge space—it **narrows** what the pipeline optimizes to (lighting, camera, luck);
+- it hides the **interior state** you need to judge spread and runaway (study R's wide cone looked fine at 1 s in
+  pictures but failed on spread and edges).
+
+Sim teachers do the opposite: **~100 runs** per effect, held-out settings and seeds, bounds from **several** teacher
+runs' spread (N2, R2), spread and edge losses where plumes lie, endless statistics in the test rule. The one
+`reference.md` anchor (FDS, MTT, Basilisk, …) checks physics; **§6.4 and the edge check** check that the **learned**
+player reproduces the teacher ensemble's range—not a video plate. FUSE is where that ensemble is **played** in the game
+with the same seeded variability (principle 4).
 
 The limits are the same each time:
 - small models: 16 to 32 channels, 14,000 to 60,000 weights;
@@ -120,36 +169,51 @@ the GPU.
 |---|---|---|---|
 | 1 | GPU model and its memory (VRAM) | the hours in §7 assume a 24 to 32 GB card of the current generation; a smaller card means fewer runs at once and longer fine-tunes | an NVIDIA card with 24 to 32 GB |
 | 2 | CPU cores, RAM, disk | ingest, referees and CPU checks run beside the GPU; storage is 2 to 3 TB in all (§7.2) | 16+ cores, 64 to 128 GB RAM, 4 TB NVMe |
-| 3 | Operating system | Houdini and LibTorch run on Windows and Linux; ROCm and some research codes are Linux-first | Linux, or Windows with WSL2 for the research codes |
-| 4 | Houdini licence: Indie, Core/FX, or none yet | Indie allows commercial use under US$100K revenue and US$1M funding, and its files can't share a pipeline with commercial Houdini; Apprentice and Education can't be used | Houdini Indie |
+| 3 | Operating system | LibTorch and the GPU stack run on Windows and Linux; ROCm and some research codes are Linux-first | Linux, or Windows with WSL2 for the research codes |
+| 4 | FUSE engine path | Adapter links against owner FUSE on the Desktop (or stand-in demo here for CI) | **`Desktop/FUSE`** (git); NeuralVFX `engines/fuse/` |
 | 5 | Is a GPU dependency acceptable: LibTorch and CUDA for training, and a GPU step in FUSE for playing? | the repository has been CPU-only; high resolution can't play on a CPU (§9) | yes: training optional and off by default; the GPU step a FUSE path beside the CPU one |
 | 6 | What GPU time can one high-resolution effect take in a frame of your game? | sets the shipped stepper's width (§9) | 1 to 3 ms for a hero effect on a current card |
-| 7 | Do you have real footage of any effect? | the only check on looks where nothing can be measured (study J) | none, and say so per effect |
+| 7 | Real footage as a reference? | study J compared pictures to video; sims give fields and full state, not one camera | **no** — sim, theory and literature only (§3.3.1) |
+
+### 2.1 Recorded answers (this PC, 24 October 2026)
+
+P0 uses this block; change a row here when hardware or licences change.
+
+| # | answer | notes |
+|---|---|---|
+| 1 | **NVIDIA GeForce RTX 3090, 24 GB VRAM** (driver 610.88) | Within §7's 24–32 GB assumption; CUDA 12.0 (`nvcc` in WSL). `build-cuda/` and `NEURALFX_CUDA` already build `rollout3d_train` and hres smoke trained on GPU; spread/edge losses still CPU-only until P1. |
+| 2 | **64 threads** (1× Xeon Gold 6242 @ 2.80 GHz), **48 GiB RAM**; **~5.4 TiB free on `D:`** (HDD, 24 October 2026); **~730 GiB free** on the 1 TiB WSL root (`/`, ext4) | Cores and RAM match the plan. **Storage:** §7.2 needs **~2.5 TB** for all 33 effects' clips—the **D:** volume clears that with room for raw output in flight (plan's 4 TB NVMe target is met on capacity; HDD is slower than NVMe for batched GPU sim ingest, acceptable for archive and large sequential writes). **Recommended `NEURALVFX_DATA` for PLAN_PC_GPU:** `D:\nvfx-data` in Windows, **`/mnt/d/nvfx-data`** in WSL (`mkdir` once; point `NEURALVFX_DATA` there before P1's big sim batches). **Today:** hres and studies still use `/home/odin/nvfx-data` (~1 TiB ext4); migrate or symlink when moving smoke_r2 checkpoints and starting P1, or keep hres on ext4 and put only 64³ clip trees on `D:`. Repo stays on OneDrive under `C:`; build in WSL. |
+| 3 | **Windows host + WSL2** (`Linux … microsoft-standard-WSL2`, x86_64) | LibTorch/CUDA and `nvfx_3d` run in WSL today. Research-code referees stay Linux-first. FUSE budget timing on **Windows** (`Desktop/FUSE`) or the stand-in demo in WSL. |
+| 4 | **No paid VFX simulators** (owner, 24 October 2026) | Teachers are **our GPU solvers only** (§3.2). **FUSE** on Desktop for play/budget ([FUSE.md](FUSE.md)). |
+| 5 | **Yes** — GPU dependency accepted for stage 2 | Owner target is full PLAN_PC_GPU (§8). Training: optional CMake flag, off in CI. Playing: GPU step in FUSE for 64³ effects (§9); CPU runtime unchanged for today's levels of detail. |
+| 6 | **1–3 ms per hero high-res effect per frame** (plan default) | Sets stepper width in §9 until measured in FUSE during P3. Revisit if the game's budget is tighter or looser. |
+| 7 | **No real footage** (owner, 24 October 2026) | Footage is costly and **collapses the statistical range** of an effect to one sample; we want **dynamism**—spread, variability, and interior fields—from sim ensembles (§1.3). No study J, no `reference.md` video. One sim/theory anchor per effect plus §6.4 on held-out **sim** runs. |
+
+**P0 gate with this table:** CPU build + ctest on the PC (done on the working tree: 602 tests, 0 failed, 32 skipped);
+§3.5 licence register covers research codes only (no commercial sim outputs).
 
 ## 3. The teachers
 
 ### 3.1 What "best" means here
 
-There are two kinds of best simulator, and the plan uses both:
-- **Best for the look:** the production simulators film VFX uses. Houdini is the standard: one tool for gases (Pyro,
-  with a GPU sparse solver in Houdini 21), liquids (FLIP), snow, mud and soil (MPM, production-ready in Houdini 21),
-  particles and cloth. EmberGen (JangaFX) is a real-time GPU gas simulator, but it has no documented batch or
-  command-line mode, so it can't run unattended.
-- **Best for the physics:** research codes validated against experiments. FDS (NIST) for fire and smoke, PeleLMeX for
-  flames and blasts (C++, runs on GPUs through AMReX), Basilisk for splashes, jets and drops, PALM or MicroHH for
-  clouds, fog and boundary layers, and CM1 for storms. These are the simulators already in TODO's stage 2. They are
-  far too slow to make each effect's data in hours, so they referee: a few runs per family, once.
+- **Teacher:** our GPU solver for that family (§3.2)—fast enough for hundreds of runs.
+- **Reference (one per effect):** the single most scientific anchor for that catalogue row—correlations and
+  intercomparison data where they exist, otherwise **one** matched case from a research code (FDS, Basilisk, PALM, …).
+  Slow codes never make training data; they only score the teacher and the shipped model on the case named in
+  `reference.md`. **Not real footage** (§1.3): one clip cannot represent the effect's range; teachers supply an
+  ensemble and field diagnostics (MTT audit, edge bounds from spread, R2's spread loss).
 
-Production simulators are tuned by artists, not validated. So no teacher, Houdini included, makes training data until
-its setup passes the checks a research code would (§3.4). Weather (clouds, storms, regional systems) stays with the
-research codes, as TODO plans, outside the hours target: Houdini has no cloud microphysics.
+No paid DCC sim. **FUSE** ([FUSE.md](FUSE.md), `Desktop/FUSE`) is where effects ship; it does not count as the
+scientific reference unless the row is designed-only (consistency).
+
+Our teachers are tuned for the catalogue, not validated as research codes. No teacher makes training data until §3.4
+passes on the family setup. Weather stays outside the hours target, as in TODO.
 
 ### 3.2 Speed: GPU teachers, batched
 
 At 256 x 384 x 256 (25 million cells) a teacher has to make a frame in a fraction of a second for 100 runs to take
-an hour or two. Houdini's FLIP and MPM run mostly on the CPU and take many seconds a frame at this size, so 100 runs
-would take days. The hours therefore need GPU solvers, and the plan builds three of its own, each checked against
-measurements and matched to Houdini's look:
+an hour or two. The hours therefore need **our** GPU solvers; the plan builds three, each checked against §3.4 and the
+family's default reference case before any effect in that family trains:
 
 | solver | for | from | estimated frame at 256 x 384 x 256 | 100 runs of 300 frames |
 |---|---|---|---|---|
@@ -162,10 +226,6 @@ measurements and matched to Houdini's look:
 - Each has a parity test against its CPU reference on a small case. `nvfx_gpu_sim`'s reference is `sim3d`; the new
   ones each get a small CPU version for this.
 - The frame times above are estimates; P1, P5 and P6 measure them.
-
-**Houdini teaches directly** wherever P2 measures its GPU sparse pyro at **0.25 s a frame or less** at this
-resolution (100 runs of 300 frames in about 2 hours). Otherwise Houdini makes about 10 runs per family as the look
-reference: our solvers' settings are matched to those runs' statistics before the physical checks.
 
 **`smoke_r` already passes the MTT plume checks.** The fire does not yet: it puffs at 0.5 to 0.65 Hz where a fire its
 size puffs near 2.7 Hz (STUDY_3D.md §13). Its check at high resolution is part of P2, and a finer grid is the first
@@ -185,23 +245,35 @@ Today's 33 2D effects, by family:
 - **free surface (7):** fountain, geyser, lava, rain shaft, sea spray, splash, waterfall;
 - **granular (1, and the grains in 3 more):** avalanche, plus the grains in dust, eruption and haboob.
 
-| family | effects | teacher | look reference | referee (a few cases, once) |
-|---|---|---|---|---|
-| gas: fire and combustion | fire, candle, wildfire, crown fire, window fire, coals, dust explosion | `nvfx_gpu_sim` with combustion, or Houdini sparse pyro (§3.2) | Houdini Pyro | FDS (fire), PeleLMeX (jet and small flames) |
-| gas: smoke, plumes, puffs | smoke, smoke ring, puffs, steam, jet, launch, ink | `nvfx_gpu_sim` (`smoke_r`), or Houdini | Houdini Pyro | FDS; MTT plume theory |
-| gas: blasts | explosion, mushroom, eruption (plume) | `nvfx_gpu_sim`, or Houdini | Houdini Pyro | PeleC (compressible, early shock) |
-| gas: dense and laden | heavy gas, haboob, dust | `nvfx_gpu_sim` with density, or Houdini | Houdini Pyro | FDS; gravity-current theory |
-| gas: designed | magic, orb, vortex | `nvfx_gpu_sim` with designed forces, or Houdini | Houdini Pyro | none: consistency only |
-| gas: weather | cloud, fog | PALM or MicroHH (outside the hours target) | — | measured cloud statistics |
-| free surface | waterfall, fountain, splash, geyser, rain shaft, sea spray | `nvfx_gpu_flip` | Houdini FLIP | Basilisk |
-| viscous and hot | lava | `nvfx_gpu_flip` with temperature-dependent viscosity | Houdini FLIP or MPM | measured lava flow rates |
-| granular | avalanche; the grains in dust, eruption and haboob | `nvfx_gpu_mpm` | Houdini MPM | angle of repose, runout, front speed |
+| family | effects | teacher | default reference (one per effect; §3.3.1) |
+|---|---|---|---|
+| gas: fire and combustion | fire, candle, wildfire, crown fire, window fire, coals, dust explosion | `nvfx_gpu_sim` with combustion (§3.2) | **FDS** (NIST; pool/jet fire case matched to the effect's scale) |
+| gas: smoke, plumes, puffs | smoke, smoke ring, puffs, steam, jet, launch, ink | `nvfx_gpu_sim` (`smoke_r`) | **MTT plume theory** (§3.4; study R's audit). Jet/launch: same unless `reference.md` names one FDS plume case |
+| gas: blasts | explosion, mushroom, eruption (plume) | `nvfx_gpu_sim` | **Mass-scaling and scaled-distance correlations** (§3.4). Eruption plume column: MTT |
+| gas: dense and laden | heavy gas, haboob, dust | `nvfx_gpu_sim` with density | **FDS** heavy-gas release, or gravity-current theory where no case is run |
+| gas: designed | magic, orb, vortex | `nvfx_gpu_sim` with designed forces | **Temporal consistency** (no external sim) |
+| gas: weather | cloud, fog | PALM or MicroHH (outside the hours target) | **BOMEX or DYCOMS-II** intercomparison statistics |
+| free surface | waterfall, fountain, splash, geyser, rain shaft, sea spray | `nvfx_gpu_flip` | **Basilisk** (one matched case per effect: sheet, jet, or drop impact) |
+| viscous and hot | lava | `nvfx_gpu_flip` with temperature-dependent viscosity | **Published lava flow-rate measurements** |
+| granular | avalanche; the grains in dust, eruption and haboob | `nvfx_gpu_mpm` | **Chute and avalanche runout measurements** (§3.4) |
+
+### 3.3.1 One reference per effect
+
+Before validation, `results/3d/<effect>/reference.md` commits **one** line: what the anchor is and which case (for
+example `FDS McCaffrey plume B`, `Basilisk drop Re=2000`, `MTT buoyant plume α=0.14`). The pipeline compares teacher
+and shipped model to that anchor only—not FDS plus Basilisk plus keyframes plus a FUSE capture for the same gate.
+
+**Pick order:** (1) published correlations or intercomparison statistics already in §3.4; (2) otherwise one research-code
+run at matched nondimensional numbers; (3) designed rows: consistency only. Override the family default only when the
+effect's mechanism requires it, and say why in `reference.md`.
+
+`nvfx_pc effect <name>` creates or checks `reference.md` from the table above if the file is missing.
 
 Spray, foam, droplets, sparks, embers and grains stay seeded random (principle 1): the teachers' particles give their
 statistics, not training targets frame by frame.
 
-**Not used in any teacher:** Houdini's ML-based smoke upres, or any learned node. The project trains no model on
-another model's output, and uses no pretrained networks.
+**Not used in any teacher:** another product's ML upres, or any learned node. The project trains no model on another
+model's output, and uses no pretrained networks.
 
 ### 3.4 The checks every teacher passes first (once per family)
 
@@ -220,10 +292,8 @@ converge by 256, then pass within the measurements' scatter:
 - **granular:** angle of repose, runout against chute and avalanche measurements, front speed;
 - **designed effects:** none (say so); consistency only.
 
-**Matching Houdini's look.** Where Houdini is the reference, not the teacher, our solver's runs are also compared with
-Houdini's on the same setups: the 3D spectrum, coverage, motion and the mean picture from four cameras. Its free
-settings (detail, confinement within the momentum-neutral form) are tuned to close the gap, never against a physical
-check.
+**FUSE (ship check, not a reference).** P3 measures GPU step time and manager budget in the owner's FUSE build
+(`Desktop/FUSE` with this repo's adapter). That is separate from the one scientific reference in `reference.md`.
 
 Bounds that later tests use (the edge check, endless statistics) come from several teacher runs' spread, never one
 (study N2's lesson). Each effect's setup is a variation of its family's checked setup, within physical parameters
@@ -234,12 +304,7 @@ first.
 
 Confirm before the first production run, and record in the licence register (`docs/DATA.md`; extend `licences.tsv` to
 simulator outputs, with `--licence commercial --licence-note` naming the agreement):
-- **SideFX (Houdini):** the licence agreement's web page (revision 13 October 2021) says nothing on machine learning or
-  on who owns outputs. Indie is for entities under US$100K revenue and US$1M funding, and Indie files can't share a
-  pipeline with commercial Houdini. Apprentice is non-commercial. Ask SideFX in writing whether training on Indie
-  outputs, or matching a solver to them, is allowed, and keep the answer.
-- **JangaFX (EmberGen):** the licence agreement (19 July 2025) says nothing on machine learning or outputs. Not in the
-  plan, as it can't run unattended.
+- **Paid DCC simulators:** not used; no SideFX or similar outputs in training data.
 - **Research codes:** FDS is public domain; PeleLMeX is open source; Basilisk, PALM and MicroHH are GPL. Their outputs
   are ours to use. GPL applies to their code, which stays outside this repository; we keep only case files and
   readers.
@@ -277,9 +342,8 @@ the time. While an effect trains, the CPU ingests the next effect's runs, runs t
   - the trainer's gradients agree with our hand-written ones on small cases (the finite-difference checks);
   - each GPU solver agrees with its CPU reference on a small case;
   - the GPU renderer agrees with `render3d`.
-- **Teacher drivers, as text case files** under `sim3d/<solver>/<row>/`. Houdini runs headless through `hbatch` with
-  HScript, so there is no Python: one file builds the network, sets the row's settings and seed, and writes OpenVDB
-  files. Research codes take their own input files.
+- **Teacher drivers, as text case files** under `sim3d/<solver>/<row>/` for our solvers; research codes take their own
+  input files. GPU teachers write the clip format directly (§5, `nvfx_ingest3d` for referee output only).
 - **`nvfx_ingest3d`, new:** reads OpenVDB (open-source library), AMReX plotfiles, FDS output and NetCDF into the clip
   format as each run is written. Our GPU solvers write the clip format directly. It keeps the 64 x 96 x 64 coarse
   grid and 256 x 384 x 256 crops at 16 bits, then deletes the raw output.
@@ -359,7 +423,7 @@ step's real time to `results/3d/<effect>/time.csv`, and the pilots replace these
 
 | step | where | estimate | how |
 |---|---|---|---|
-| simulate 100 runs at 256 x 384 x 256 | GPU | 0.5 to 2 h | our GPU solver, batched (§3.2); or Houdini sparse pyro at 0.25 s a frame or less |
+| simulate 100 runs at 256 x 384 x 256 | GPU | 0.5 to 2 h | our GPU solver, batched (§3.2) |
 | ingest | CPU | overlapped | as each run is written |
 | fine-tune at 32 x 48 x 32 (the warm start) | GPU | 0.3 to 1 h | 10,000 windows at 0.1 to 0.4 s, by width |
 | fine-tune at 64 x 96 x 64 (the high-resolution version) | GPU | 2.5 to 4 h | 6,000 windows of 32 frames and 1,500 of 64, about 1 to 1.7 s and 2 to 3.4 s each (§7.3) |
@@ -374,7 +438,7 @@ Once per family:
 | step | estimate |
 |---|---|
 | build and check the family's GPU solver (gases: port `sim3d`; liquids and grains: new) | engineering, before the PC's hours: about a week each for FLIP and MPM, less for the gas port |
-| the teacher's checks (§3.4) at three resolutions, the look match with Houdini, the referee's few runs | 1 to 2 days |
+| the teacher's checks (§3.4) at three resolutions and the family's default reference case (once) | 1 to 2 days |
 | the family model: its first three effects' data, stages 1 to 4, mostly at 32 x 48 x 32 and finished at 64 x 96 x 64 | 2 to 3 days of GPU |
 
 ### 7.2 Data and storage
@@ -424,11 +488,11 @@ slow step is found and fixed.
 |---|---|---|---|
 | **P0** | Set up the PC, measure it, confirm the licences (§3.5) | a day | the CPU build and ctest pass on the PC; licences recorded |
 | **P1** | `nvfx_gpu_train`, `nvfx_gpu_sim`, `nvfx_gpu_play` and their parity tests; retrain N2's fire, hres's fire and R's smoke on the GPU from their own data | 2 to 3 days | parity within tolerance; the GPU-trained models tie or beat the CPU-trained ones on their own held-out tests; `nvfx_gpu_sim` makes a 256 x 384 x 256 frame in 0.15 s or less |
-| **P2** | The gas teacher at three resolutions: `nvfx_gpu_sim`'s fire and smoke, Houdini sparse pyro timed and as the look; FDS and `smoke_r`'s MTT checks as referees | 1 to 2 days | §3.4's checks pass by 256; the look match closes; the choice of teacher per sub-family, by measured time and the checks |
+| **P2** | The gas teacher at three resolutions: `nvfx_gpu_sim`'s fire and smoke; family references (FDS for fire, MTT for plumes) on one case each | 1 to 2 days | §3.4 passes by 256; default `reference.md` templates for fire and smoke rows; teacher settings frozen |
 | **P3** | The gas family model on fire, smoke and one more; then fire and smoke through `nvfx_pc effect`; their GPU step put into FUSE and timed | 3 to 4 days | §6.4 for fire and smoke: better than the coarse simulation, their CPU versions, N2's C4, hres and R's C4; no runaway over 60 s; playing on as well as tracking; each effect's chain in 9 hours or less; the step within the GPU budget in FUSE. This is where N2 and R failed. |
 | **P4** | The other 20 gas effects, one a night (cloud and fog wait for P7) | about 3 weeks | per effect, §6.4; ship only what passes |
-| **P5** | `nvfx_gpu_flip`, checked against Basilisk and measurements and matched to Houdini FLIP; then the 7 liquids | a week to build and check, then 1.5 weeks | as P4 |
-| **P6** | `nvfx_gpu_mpm`, checked and matched to Houdini MPM; the avalanche, then the grains of dust, eruption and haboob | a week to build and check, then a week | as P4 |
+| **P5** | `nvfx_gpu_flip`, one Basilisk case per liquid family; then the 7 liquids (each with `reference.md`) | a week to build and check, then 1.5 weeks | as P4 |
+| **P6** | `nvfx_gpu_mpm`, runout measurements as reference; avalanche and grain rows | a week to build and check, then a week | as P4 |
 | **P7** | The rest of TODO's catalogue and the weather system (TODO's waves 1 to 3) | row by row | as P4, per row |
 
 P5 and P6 build their solvers while P4 runs on the PC.
@@ -477,9 +541,9 @@ GPU training need not be bit-reproducible: every shipped file is frozen by its S
 
 | risk | what happens then |
 |---|---|
-| Our GPU solvers fail the physical checks (the fire's puffing is the known one) | fix the solver first, as R2 fixes R's momentum; Houdini teaches that sub-family meanwhile if it is fast enough, else it waits |
-| Houdini's sparse pyro is slower than 0.25 s a frame here | it stays the look reference; our solver teaches |
-| A licence forbids training on, or matching to, Houdini's outputs | our solvers, checked against measurements and the research codes alone; the look match is dropped and the plan says so |
+| Our GPU solvers fail the physical checks (the fire's puffing is the known one) | fix the solver first, as R2 fixes R's momentum; delay that sub-family's `nvfx_pc` roll-out until checks pass |
+| FUSE step over budget but §6.4 passes | narrow stepper width (§9) or ship CPU LOD until GPU path fits |
+| An effect has no published check | `reference.md` names **consistency** or the nearest sim case; extend §3.4 before inventing a video check |
 | The GPU FLIP or MPM takes longer to build than a week | the gases go on meanwhile; the liquids and grains move later |
 | 256 is not converged for an effect | that effect's teacher moves up (320 or 384 across) and its hours are measured again |
 | 100 runs lack power for the test | the null probe says so before validation; the pipeline adds runs, and the extra hours are logged |
@@ -509,4 +573,9 @@ The family models, a few MB each, may go in `models/3d/families/` if the owner w
 test seeds come from its row, and the tests use held-out settings and fresh seeds from the same row. The family
 models' seeds come from their first effect's row.
 
-Nothing here is queued. P0 starts when the owner gives the PC's details (§2) and says go.
+**Queue (24 October 2026).** The owner has said go on **this plan for all effects** (not hres alone). Order: (1) finish
+**hres smoke_r2** and write up pass/fail in [STUDY_3D_HRES.md](STUDY_3D_HRES.md) §10; (2) **P0** once §2's PC details
+and licences are recorded; (3) **P1–P3** until fire and smoke pass §6.4 at 64 x 96 x 64 in ≤9 h each; (4) **P4–P7**
+row by row in [WAVE1_CHECKLIST.md](WAVE1_CHECKLIST.md). P0 is not blocked on smoke_r2 finishing, but **P3 must not
+repeat smoke_hres's mistake** (no spread/edge, wrong teacher). Wave 1 ship (`COMMIT_PLAN.md`) is separate: it lands the
+hres scripts and checklist; it does not replace building `nvfx_pc`.

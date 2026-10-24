@@ -1,12 +1,29 @@
 # To do: every effect in 3D — a small demo here first, then big on a PC
 
-**Status:** stage 1 is done (study N, `docs/STUDY_3D.md`, and its follow-up N2, §14); stage 2 is planned, not started.
+**Status:** stage 1 is done (study N, `docs/STUDY_3D.md`, and its follow-up N2, §14). **Stage 2 is the owner's active
+goal:** [docs/PLAN_PC_GPU.md](docs/PLAN_PC_GPU.md) for **all effects** with a GPU teacher in that plan (§8 P0–P7,
+`nvfx_pc effect <name>`, [docs/WAVE1_CHECKLIST.md](docs/WAVE1_CHECKLIST.md) row by row)—not optional, not "much later."
+**Now on the PC:** study hres's **smoke_r2** run (`tools/study_3d/hres_smoke_r2.sh`) to learn from hres **fire** (pass)
+and **smoke** (fail) before the GPU stack; hres fire/smoke N are already shipped. **PLAN_PC_GPU code (P0+) is not
+started** until P0's §2 answers are on the record and P1's `nvfx_gpu_*` exists.
 Since 15 October 2026, here: round 9, studies O and P, float on AVX-512, the faster detail layer, the 2D weather
 director, the FUSE sample, round 10's fire and elements and study Q (the weak spots of rounds 9 and 10) are done and
 merged, and so is study R (a validated 3D smoke): its teacher is a plume by MTT's measures, its learned smoke failed its
 test and ships as a labelled demo ("Here, until the PC"). Round 7 of the quiet re-timing measured all of their costs on
-a quiet machine (REPORT §13.11). The effect manager can draw large effects at half size (REPORT §22): off by default
-by its rule (magic saved too little), available to set.
+a quiet machine (REPORT §13.11). The effect manager can draw large effects at half size (REPORT §22): on by default
+per effect for fire, smoke, steam and explosions from 256 px on screen, off for magic (it saved too little) and effects
+not measured (§22.11, NVFX_MANAGER_VERSION 3). Study hres, the first finer coarse 3D state (32 x 48 x 32), is
+trained, validated and shipped (23 October 2026): its fire (C2) as `models/3d/fire_hres.nvfx3`, which meets its rule on
+validation and on its one test (the test edge check judged with the calibrated bounds 24 October; REPORT §15's hres
+addendum), its smoke as a labelled demo that fails the edge check (`models/3d/smoke_hres.nvfx3`). Since 24 October ("Done since 24 October 2026" below):
+the half-size default per effect, the coupled fire and smoke as one simulation in the 3D solver (`sim3d::Stack`, a
+demo), the weather director's humidity, dew point and cloud base, its wet ground, its sun and shafts, and its cloud deck
+and trees as hooks (`sky.deck`, `sky.foot`, `sky.trees`), the frame's `wet`, `puddle`, `deck` and `foot` keys wired to
+them in the day scene and drawn (the ground darkened and puddled, the deck over the dome), the steam fog, contrail, helicopter downwash, whiteout
+and drifting snow library entries (the pyroclastic flow labelled as built, not learned), studies Q2's and R2's job
+scripts and the smoke-at-hres driver moved into git so that they run from any machine, the wave 1 checklist
+(`docs/WAVE1_CHECKLIST.md`), the commit plan for all of it (`COMMIT_PLAN.md`) and the scripts that carry it out
+(`tools/ship_wave1.sh`, `tools/preflight_wave1.sh`, `.gitattributes`).
 
 - **Stage 1, here and now (study N): done.** A small 3D demo in this container ([docs/STUDY_3D.md](docs/STUDY_3D.md),
   REPORT §15). What it built:
@@ -49,15 +66,15 @@ by its rule (magic saved too little), available to set.
   - use a finer state (32³) or a smoother lock against blocky flames;
   - start from a validated teacher (FDS);
   - snapshot every training stage.
-- **Stage 2, on a PC, much later:** everything below. Accurate 3D simulations of every effect, however long they take,
-  checked against measured physics. How the PC's GPU simulates, trains and plays the high-resolution effects (a
-  64 x 96 x 64 state, 256 x 384 x 256 detail), each made in 5 to 9 hours, and which simulators teach them (our GPU
-  solvers and Houdini, checked against measurements), is planned in [docs/PLAN_PC_GPU.md](docs/PLAN_PC_GPU.md), and
-  its accelerated version (each effect a small seeded generator: a code fitted against a shared network, pruned and
-  compressed to the noise floor; its first bets testable in 2D here) in [docs/GENERATOR.md](docs/GENERATOR.md).
-  Large 3D models trained on them, as fine as the PC allows. Then 3D scenes, a 3D library and a full weather system.
+- **Stage 2, on this PC (PLAN_PC_GPU, all effects):** accurate 3D at **64 x 96 x 64** learned state and **256 x 384 x 256**
+  detail, each effect **5 to 9 hours** unattended (`nvfx_pc`), GPU sim + train + play, teachers checked (§3.4), gates §6.4.
+  The plan is [docs/PLAN_PC_GPU.md](docs/PLAN_PC_GPU.md); the per-effect ledger is [docs/WAVE1_CHECKLIST.md](docs/WAVE1_CHECKLIST.md).
+  **Prerequisite on the PC today:** finish hres **smoke_r2** and document what hres fire (pass) and smoke_hres (fail) imply
+  for spread/edge, calibrated bounds and teacher choice (PLAN_PC_GPU §1.1); then P0–P3 (GPU stack + first gas gate), then
+  P4–P7 for the catalogue. [docs/GENERATOR.md](docs/GENERATOR.md) remains a parallel bet, not a substitute unless pilots
+  beat §6.4. Then 3D scenes, a 3D library and the full weather system (P7).
 
-First we demo, then we go big.
+Wave 1 here finishes the 2D director, library and study scripts; stage 2 on the PC is the main line after smoke_r2.
 
 ## Here, until the PC
 
@@ -87,7 +104,8 @@ and the Godot test; details in its doc and REPORT section):
   semi-Lagrangian option (0.75) changes every frame and was not shipped.
 - **The 2D weather director** (docs/WEATHER.md, REPORT §18): seven regimes, ordered transitions, seeded gusts, rain cells
   and lightning, rain and snow by Marshall-Palmer, Atlas and Koschmieder, a 40 s day scene and its video; engines drive
-  it through the scene inputs. Weak: no sun or wet ground, clouds as puffs rather than a deck, one place in 2D.
+  it through the scene inputs. Weak: no sun, the wet ground and the cloud base as numbers in the state that nothing
+  draws, clouds as puffs rather than a deck, one place in 2D.
 - **For FUSE** (docs/FUSE.md, `engines/fuse`): the interface FUSE implements, an adapter (pack, effect manager on FUSE's
   jobs, a scripted scene, library entries, the 3D fire), a headless demo with its test and a video.
 - **CI:** the g++ job's one failure since the packs came in (the pack verify test without the models) fixed.
@@ -123,7 +141,7 @@ and the Godot test; details in its doc and REPORT section):
   learned 2x. Hysteresis, never for locks or proxies, per model (`nvfx_manager_model_desc.half_px`: 0 never, > 0 its
   own), no allocation per frame, the same pictures on any number of threads; NVFX_VERSION 8; exposed in the C++ wrapper
   and the FUSE adapter (the library's stages and scenes draw at the sizes their scripts name, so they have nothing to
-  switch). **By its rule, committed first, it is off by default:** on 20 held-out settings at 256 px it stays within the
+  switch). **By its rule, committed first, the all-or-nothing default stayed off:** on 20 held-out settings at 256 px it stays within the
   null's margins of full size against the simulator on every measure for all seven effects measured (the crowd's fire,
   smoke, steam and explosion, the library's fire, explosion and magic), closer than full size on tracking at 1 s
   (+0.22 to +0.89 dB) and the detail spectrum, and costs 0.31 to 0.42 of full size for six of them, but **0.54 for
@@ -131,13 +149,29 @@ and the Godot test; details in its doc and REPORT section):
   loses the finest filaments (24 to 37 dB active PSNR). With no budget a close-up scene's tick went from 17.1 to 15.2
   ms (0.886 [0.869, 0.901]); with a budget the planner runs more simulations of their own (13.2 to 17.4 at 8 ms) and
   fewer proxies; the crowd hardly changes (provisional timings: other agents' load ran throughout). Also fixed: a race
-  in the manager's worker start that could hang a tick on several threads (main's code).
+  in the manager's worker start that could hang a tick on several threads (main's code). Its default per effect is
+  24 October's (below).
 
-**Under way:**
-- **Study Q2, study Q's leftovers** (branch `study-q2`, docs/STUDY_Q2.md, REPORT §23; seeds 33.5 to 34.0 million):
-  three models replaced by their one test: the haboob's and the smoke ring's renderers trained on from their own
-  weights (the first frame +3.04 dB [2.86, 3.21] and +2.94 dB [2.72, 3.16]) and the avalanche's 48 start points (the
-  mean picture +1.41 dB [0.36, 2.50]); the geyser, heavy gas and the mushroom at validation (resumable).
+- **Study hres, a finer coarse 3D state: done** (23 October 2026; [docs/STUDY_3D_HRES.md](docs/STUDY_3D_HRES.md),
+  `results/3d/hres/`; seeds 9.60 to 9.87 million inside study N's block; the smoke trained on the CUDA trainer, the
+  fire on the CPU). A **32 x 48 x 32** coarse state with fine = 2 (study N's 64 x 96 x 64 detail), a 32-wide stepper
+  and 8 memory channels, study N2's recipe. **Fire:** C2 chosen on validation (edge check passed at every wind with
+  bounds calibrated on four teacher runs per wind, `fire/edge_calibration.md`; mean rank 1.00 over the endless
+  statistics; `fire/choose_val.md`); tested once, frozen (`fire/frozen.csv`): over the coarse simulation with detail,
+  tracking at 1 s +1.69 dB [+1.07, +2.32] in pictures and +1.29 dB [+0.98, +1.60] in temperature; against study N2's C4
+  on endless play, the mean picture +2.20 dB [+1.28, +3.14], the spectrum and motion better, coverage and emission
+  ties; motion 0.99 of the real runs' (N2's 0.66). **Its test edge check passes** with the bounds calibrated on four
+  teacher runs per wind (`fire/edgecheck_test.md`, judged 24 October by `hres_fire_recheck_test_edges.sh`): the two
+  winds the single-run bounds had marked as runaway (0.50 at x = 0, largest 3.43; 0.95 at z = 0, largest 2.36;
+  `fire/edgecheck_test_single.md`) sit under the calibrated 4.95 and 4.73, and no side grows. Shipped as `models/3d/fire_hres.nvfx3`; C1 to C4 and the final `finish` in `fire/models/`. **Smoke**
+  (study N2's smoke2 lineage, study N's smoke preset as the teacher, no held-out test by its rule): **fails the edge
+  check** at winds 0.50, 0.75 and 0.95 (heat building at the x = 0 side over 20 to 30 s where the simulation holds
+  none: 1.15, 2.69 and 4.87; the top too at 0.95), as the 16³ smoke2 baseline fails at four winds (`smoke/edgecheck.md`);
+  shipped as a labelled demo, `models/3d/smoke_hres.nvfx3`. Its failure is the one study R2's edge and spread losses
+  are aimed at (STUDY_3D_HRES.md §8). The fire's test tables (`edgecheck_test.md`, `compare_test_*`, `edge_test*.csv`;
+  the 22 October snapshot run wrote them under the data root) are in `results/3d/hres/fire/` since 24 October
+  (`hres_status.sh` reports them present and whether the edge check is the calibrated one;
+  `hres_sync_fire_test_results.sh` copies them back if a run strays them again, without overwriting the repo's).
 - **Round 10, fire** (`effects-fire2`, docs/EFFECTS_FIRE2.md, REPORT §6.18; seeds 26.0 to 26.9 million): a forest crown
   fire (#6), fire venting from a window (#8) and a dust explosion (#31). **Finished and merged into main** (21 October
   2026): each tested once, all three work by the rule (tracking at 1 s over the coarse
@@ -166,35 +200,237 @@ and the Godot test; details in its doc and REPORT section):
   faster, not 5.7 to 6.5; study P's learned 2x under 0.55 of native for 3 of 6 effects, not 4. This host's AVX-512 build
   ran 7 to 11% slower than round 6's and its speed drifted by about ±7%: absolute milliseconds belong to their session.
 
-- **Study R2, the 3D smoke again** (`study-smoke3d-r2`, docs/STUDY_R2.md, REPORT §24; seeds 34.0 to 34.9 million):
-  the teacher's momentum deficit found (vorticity confinement pushing the plume down, and the semi-Lagrangian
-  velocity step's non-conservation) and fixed (`smoke_r2`: dM/dz over B 1.088, from `smoke_r`'s 0.80); the learned
-  smoke retrained with a spread loss and an edge loss under a rule with margins from the teacher's own spread, then
-  tested once. Under way, resumable: training in stage 4 and the rule's teacher runs left running; resume with
-  `/root/nvfx-data/r2_smoke3d/jobs/resume.sh` (STUDY_R2.md §0: the hand steps left). Next after it: a coupled 3D fire
-  and smoke tested as R2 is (not started).
+**Done since 24 October 2026** (on the working tree, to be committed as `COMMIT_PLAN.md`'s three commits; each item's
+tests are named in its doc):
+- **Half size, the default per effect** (REPORT §22.11, MANAGER.md §2.10 and §6; NVFX_MANAGER_VERSION 3): the rule's two
+  conditions read per effect from the runs already made, no new run. `nvfx_manager_desc.half_px` below 0 (the new
+  default, −1) draws fire, smoke, steam and explosions at half size from 256 px on screen by the model's name, magic and
+  every effect not measured never; 0 is off for every effect, above 0 one threshold for every effect; a model's own
+  `half_px` still comes first. The FUSE adapter passes the default through; `time_crowd.sh` keeps §7's baseline at full
+  size (`--half-px 0`); ENGINES.md, FUSE.md and the README say so. Tests: `Manager.HalfSizePerEffectDefaults`, `ApiErrors`.
+  Run 24 October 2026: `tools/manager/time_half_128.sh` (MANAGER.md §7.2), the quick quiet re-timing of the saving;
+  results in `results/manager/half_128/` (`ab_summary.txt`, `runs.csv`, `load.txt`; a second run the same day in
+  `half_128/run2/` confirms the close-scene ratio and the crowd tie):
+  the two no-budget rows (the close scene and the crowd on four threads), off and on back to back with their order
+  swapped each round, each round waiting for a load of at most `MAX_LOAD`, `nvfx_crowd --ab` for the medians and
+  intervals; about 3.5 minutes at its defaults; `MAX_SIZE=128` times 128 px pictures drawn at 64, the level not measured.
+- **3D fire and smoke as one coupled simulation** (STUDY_R.md §6.1; `include/neuralfx/sim3d.hpp`, `src/sim3d/sim3d.cpp`):
+  `sim3d::Stack`, two boxes of the same width one above the other; at the start of every solver step the lower's top
+  row and the upper's bottom row become each other's border row (a `Seam`), so heat, soot and velocity cross the seam
+  both ways; the pressure solve stays each box's own, the upper box has no burner (`Params::source`), a box with no
+  seams is the single box to the bit, and the two together keep their heat and soot to within a few per cent (the test
+  allows 8%). `nvfx_3d video --kind coupled-sim` draws it (the fire below, `--upper smoke_r` above): a demo, not
+  measured. The volume-API demo's rule (`--kind coupled`: the fire's top soot flux drives the smoke's intensity, no
+  exchange) moved into `include/neuralfx/coupled3d.hpp`, shared by the tool and `tests/test_coupled3d.cpp`. Tests:
+  `Sim3d.CoupledStack*` (the seam exchanges heat, the fire feeds the smoke above, the same fields on any number of
+  threads), `VolumeApi.CoupledDemoFeedsTheSmokeFromTheFiresSoot`. Not done: a learned model trained on the stacked teacher.
+- **The weather director's moist air** (WEATHER.md §3.11; `wx::saturation_vapour_hpa`, `dew_point`, `cloud_base_m`): the
+  state carries the relative humidity (a target per regime, blended with the cloud), and from it the dew point by the
+  Magnus formula (Alduchov and Eskridge's coefficients, checked against Sonntag's table) and the cloud deck's base by
+  Espy's rule (125 m a degree, within about 15% of Lawrence's fit): fair-weather cumulus about 1200 m, an overcast
+  deck 560 m, rain and snow about 200 m, fog at the ground, a dust storm's 3.8 km. Read as `sky.humidity`,
+  `sky.dewpoint` and `sky.base` (COMPOSE.md, ENGINES.md); the deck itself is the frame-keys item below; the library
+  entry is unchanged. Tests: `tests/test_weather_director.cpp` (`WeatherRelations.DewPointAndCloudBase`).
+- **The weather director's wet ground** (WEATHER.md §3.12; `wx::evaporation_mm_h`, `wind_2m`, `kDepressionStorage`): the
+  state carries the water standing on the ground, filled by the rain up to an impervious surface's depression storage
+  (1.5 mm; ASCE 1.3 to 2.5) and dried by Penman's drying power of the air (his 1948 aerodynamic term, 0.2625 (1 +
+  0.537 U_2) times the vapour pressure deficit, mm/day; zero in saturated air, so fog keeps the ground wet). From it the
+  ground's darkening over the first 0.1 mm, its puddles (the share of the storage) and the drying now: `sky.water`,
+  `sky.wet`, `sky.puddle`, `sky.evaporation`. Moderate rain darkens the ground in a minute and puddles it in 15; a clear
+  day dries the puddles in 5 hours, a dust storm in 27 minutes. Drawn through `frame wet` and `frame puddle`, which
+  the day scene wires (the frame-keys item below; COMPOSE.md §4.11); the library entry is unchanged. Tests:
+  `test_weather_director.cpp`
+  (`WeatherRelations.PenmansDryingPowerOfTheAir`, `WeatherDirector.TheGroundWetsInTheRainAndDriesByPenman`).
+- **The weather director's sun and its shafts** (WEATHER.md §3.14; `wx::sun_elevation_deg`, `sun_across`, `sun_share`,
+  `beam_transmittance`, `shaft_visibility`; the `weather` statement's `hour`): the state carries the solar hour (a
+  script expression re-evaluated each frame, or an input the game sets; noon without it), and from it the sun's
+  elevation and its place across the picture at 45 N on the equinox (up at 6 on the left, 45 degrees at noon, down at
+  18 on the right), the direct sunlight on the ground by Kasten and Czeplak's diffuse fraction (0.7 (1 - cloud^2) of
+  the daylight) through Beer-Lambert's slant path in the weather (clear air passes 0.96 at noon, fog and a haboob's
+  load hide it), and the shafts' visibility where a broken deck's beams light hazy air (4 c (1 - c) times the beam
+  times what the air scatters: under 0.05 in clear air, 0.27 in a 2 km haze at half cover, peaking in the clear-to-fog
+  and clear-to-dust transitions). Read as `sky.hour`, `sky.elevation`, `sky.sunx`, `sky.sun`, `sky.shaft` (COMPOSE.md,
+  ENGINES.md). Nothing draws it yet (what a scene would wire is in §3.14: a lamp at the sun, the rainbow opposite it, a
+  `frame shaft` key); the daylight does not follow the hour, so the day scene and the library entry are unchanged.
+  Tests: `test_weather_director.cpp` (`WeatherRelations.TheSunAndItsShafts`,
+  `WeatherDirector.TheSunStandsByTheHourAndShowsThroughBrokenCloud`; the sun in the jump, target and engine tests).
+- **The weather director's cloud deck and trees, as hooks** (WEATHER.md §3.15 and §3.6; `wx::deck_cover`,
+  `deck_foot_deg`): `sky.base` stays Espy's condensation level; `sky.deck` is how much of the sky that base organises
+  into a layer rather than puffs (0 below four oktas, 1 by six), and `sky.foot` the elevation above the horizon where
+  Koschmieder's haze hides the layer's underside (`arcsin(base / visibility)`: 0 in fog, just above the horizon under a
+  1.2 km base in clear air, near 90° in a dust storm). `sky.trees` is the trees' sway by the Beaufort force, a
+  smoothstep from force 4 (small branches move) to 7 (whole trees in motion), carried with the gusts, the direction
+  `sky.u`'s. The deck is drawn through the frame's `deck` and `foot` keys (below); no layer bends by `sky.trees` yet:
+  a scene gates its cloud masses with `sky.deck`, places their underside with `sky.foot`, and shears a sprite or an
+  engine's own trees by `sky.trees` (`nvfx_scene_get_input`). Tests: `WeatherRelations.TheCloudDeck`,
+  `TheDeckFootHidesInDust`, `TheBeaufortScale`.
+- **The frame's `wet`, `puddle`, `deck` and `foot`, wired** (COMPOSE.md §4.9.1; `src/compose/compose.hpp`, `script.cpp`,
+  `script_run.cpp`): four keys of `frame`, expressions re-evaluated every frame as `daylight` is, each 0 by default so
+  every scene before stays as it was, to the bit; `examples/scenes/weather_day.nvfxs` wires them to `sky.wet`,
+  `sky.puddle`, `sky.deck` and `sky.foot`. `src/compose/compose.cpp` draws all four in the background pass. The wet
+  ground (COMPOSE.md §4.11): `wet` darkens the ground rows, their own colour and the scene's light on them, by
+  lerp(1, 0.6, wet) before the haze (Lekner and Dorf's wetted rough surface; by night too, so a night rain darkens
+  the earth under the fire's light); `puddle` fills the ground texture's hollows deepest first, each mirroring the
+  sky and the hills with Fresnel's reflectance at the depression angle its row's distance gives (Schlick: 0.98 at
+  the horizon, 0.72 at the bottom of the picture), the darkened ground showing through the rest. The deck (§5.4):
+  over the day sky's dome, and over the night, a layer's underside whose cover on each row is `deck` times
+  Koschmieder's contrast along the slant path (`wx::deck_contrast`: 0 at the horizon, about 2% at the foot), the CIE
+  overcast grey at that elevation with two octaves of value noise for its cells, lit whole by the flash, hiding the
+  stars. Tests: `tests/test_script.cpp` (`Frame.WetDarkensTheGroundAndNothingElse`,
+  `PuddlesMirrorTheSkyAndTheHillsByFresnel`, `TheDeckCoversTheDomeByItsContrast`,
+  `TheWetGroundAndTheDeckAreTheSameOnAnyNumberOfThreads`); `tests/test_weather_director.cpp` (39 in all:
+  `WeatherDay.TheFrameCarriesTheWetGroundAndTheCloudDeck`, `WeatherDay.TheHillsFadeIntoTheHazeAsKoschmiederSays`,
+  `WeatherRelations.TheDeckUndersideFadesIntoTheHazeByKoschmieder`,
+  `WeatherDirector.TheDeckFormsBeforeTheRainAndItsFootFollowsTheHaze`). Not drawn: the rain's rings on the puddles
+  and the modules' reflections (§4.11's open questions). The day scene's frozen keyframes move with the wet ground
+  and the deck (`ScriptedWeatherDayFrozen` skips on this PC, which has no library models): check and refreeze them
+  once where the models are.
+- **Steam fog in the library** (`library/steam.nvfxl`, `steam_fog`, the catalogue's #61; LIBRARY.md §1, Steam and water):
+  fog smoking off warm water, built from what the library has (four releases of the fog model and five of the steam
+  model over a seeded pool, a ceiling that keeps the wisps in the mixing layer, a gusty breeze); 235 entries, 169 of
+  them learned. Its keyframe is frozen (`results/library/frozen.csv`) and in `LibraryKeyframesFrozen`; test
+  `Library.SteamFogIsFogAndSteamOverAPool`; `nvfx_gallery --verify` reads a CRLF `frozen.csv`. Fair by eye: the fog's
+  four releases show as humps and the flattened top is a straight lid in a still.
+- **A contrail in the library** (`library/trails.nvfxl`, `contrail`, the catalogue's #36; LIBRARY.md §1, Trails): a jet's
+  condensation trail built from what the library has: a trail of the explosion model started empty late in its life
+  and left cold (no heat, so it neither rises nor glows), drawn white by the sky, its source set back along its own
+  velocity (the exhaust mixes with the cold air before its mixing line crosses saturation: the Schmidt-Appleman
+  criterion), the wake's sink a small downward deposit velocity, the air's humidity how much it leaves (thin material
+  the model sheds within a second: a dry sky's short trail), the wind aloft a wind field on its tiles; 237 entries, 171
+  of them learned. Test `Library.ContrailIsAColdTrailSetBackBehindTheJet`; the catalogue check passes. Not yet judged
+  by eye or frozen: written on a machine without the library's models.
+- **A helicopter's downwash in the library** (`library/dust.nvfxl`, `helicopter_downwash`, the catalogue's #37, a
+  rotor's wash lifting dust; LIBRARY.md §1, Dust): a brownout built from what the library has: the rotor's induced
+  velocity by momentum theory (the thrust is the craft's weight: a heavier craft or a smaller disc blows harder), its
+  wall jet lifting a curtain of dust where it passes the grains' threshold, the curtain the dust model's bursts (a
+  one-shot of 3 s, so two tiles take turns, each started again by a rule and cross-faded by its age), the fine dust
+  drawn back up through the disc a tile of the smoke model sunk under a ceiling at the rotor's height, the ground wind
+  or the craft's drift a wind field on all three; the looks `brownout` and `brownout_haze`; 238 entries, 172 of them
+  learned. Test `Library.HelicopterDownwashIsDustTakingTurnsUnderAHazeInTheWind`; the catalogue check passes. Not yet
+  judged by eye or frozen: written on a machine without the library's models (`hover_downwash`, the launch model's
+  flow, stays beside it).
+- **The pyroclastic flow labelled** (`library/earth.nvfxl`, `pyroclastic_flow`, the catalogue's #110; LIBRARY.md §1,
+  Earth): its comment and `about` now say what it is, the avalanche model recoloured dark ash with a lamp at its base,
+  built from what the library has as `steam_fog` and `contrail` are, not a learned flow (no co-ignimbrite plume, no heat
+  of its own); the effect is unchanged, and a learned one stays under "More 2D effects" below.
+- **A whiteout in the library** (`library/storms.nvfxl`, `whiteout`, the catalogue's #54, blizzard and blowing snow:
+  "falling and blown snow, whiteout"; LIBRARY.md §1, Weather and sky): the blizzard at its worst, built from what the
+  library has: the blizzard's falling snow, a saltation layer of snow streaming nearly flat along the ground whose
+  amount is the blowing-snow flux (the excess of the wind's square over its threshold's, Pomeroy and Gray: nothing
+  lifts under a wind of about 135, and the range reaches there), and the fog model, white, in two storeys for the haze
+  that fills the air until the ground and the sky merge (three releases on the ground, three at the suspension's
+  height, thin until the wind is strong); 239 entries, 173 of them learned. Test
+  `Library.WhiteoutIsABlizzardWhoseBlownSnowHasAThreshold`; the catalogue check passes. Not yet judged by eye or
+  frozen: written on a machine without the library's models. Heavy: six fog modules.
+- **Drifting snow in the library** (`library/storms.nvfxl`, `drifting_snow`, the catalogue's #75, drifting snow and
+  spindrift, and the blown half of #54; LIBRARY.md §1, Weather and sky): the smallest slice, procedural only: two
+  bands of the compositor's snow fed from upwind, a dense low saltation layer of small grains driven fast and nearly
+  held up against their fall, and a sparse haze of the finest above it whose amount grows with the cube of the wind
+  (Bagnold's law, for snow as for sand), a gust field bunching both into streamers; nothing falls from the sky (that
+  is `blizzard`); 240 entries, 173 of them learned. Test `Library.BlizzardAndDriftingSnowAreBlownSnow`; the catalogue
+  check plays it with 0 allocations at both ends of its ranges; its keyframe is frozen in `frozen_round3.csv` and in
+  `LibraryProceduralKeyframesFrozen` (no models needed). Fair by eye: a low band of grains bunched by the gusts; in a
+  still at night the grains look like stars, as `snow`'s do. Left: spindrift off a ridge (a plume from a crest, the
+  anchor the crest), the saltation layer following a sloping ground, and a learned one (PALM with saltation).
+- **Study Q2's jobs in git** (`tools/study_q2/`: `common.sh`, `bootstrap.sh`, `resume.sh`, `val.sh`, `after_val.sh`,
+  `restore_from.sh`; docs/STUDY_Q2_RESTORE.md; STUDY_Q2.md §0): the container's `q2_fix/jobs` steps written against
+  `NEURALVFX_DATA` (and `Q2_REPO`, `Q2_BIN`, `Q2_THREADS`, `Q2_NO_PUSH`), so another machine runs them without edits.
+  Checked from this PC: the committed tables hold no validation row for the geyser, heavy gas or the mushroom, and
+  their candidates exist only under the container's `q2_fix/cand` (`restore_from.sh` copies them; a dry run unless
+  `APPLY=1`).
+- **Study R2's jobs in git** (`tools/study_3d/r2_{env,bootstrap,resume,train,validate,test,status}.sh`; STUDY_R2.md §0
+  and §7): the data root `$NEURALVFX_DATA/r2_smoke3d` (the default `$HOME/nvfx-data`), the tool pinned by its git hash
+  on first use, each long stage detached from a snapshot copy, markers for the hand steps; without the container's data
+  the same commands record the 48 training runs and train on the CPU. The trainer refuses `--device cuda` with
+  `--spread` or `--edge` above 0 rather than drop study R2's losses without a word (`rollout3d_train.cpp`).
+- **Study hres, polish** (STUDY_3D_HRES.md §7 and §8): the fire's test tables copied from the data root into
+  `results/3d/hres/fire/` (`hres_sync_fire_test_results.sh` does it again if a run strays them); `hres_fire_validate.sh`
+  keeps its body in `main()` and `run_fire_validate.sh` runs a snapshot copy with `NVFX_REPO` set (an edit mid-run had
+  corrupted two logs and sent the tables under the data root); `hres_status.sh` reports missing test tables, the
+  smoke's validate state and the published models; `restart_hres_watchers.sh` is idempotent (never starts a train;
+  `FORCE=1` redoes the smoke's finish); §8 reads the smoke's edge failure beside study R2's edge and spread losses, with
+  the smoke-at-hres plan. **The fire's test edge check judged with the calibrated bounds** (§7;
+  `hres_fire_recheck_test_edges.sh` rebuilds `fire/edgecheck_test.md` from the same `edge_test*.csv`, the single-run
+  table kept as `edgecheck_test_single.md`): the learned fire and N2 pass at every wind and side; the two sides the
+  single-run bounds had marked sit at 0.69 and 0.50 of their bounds. Written up: REPORT §15's hres addendum and
+  `videos/README.md` §9 (the HRES rows no longer say "validation not run").
+- **Smoke at hres on study R2's teacher, scripted** (STUDY_3D_HRES.md §10, committed before any run;
+  `tools/study_3d/hres_smoke_r2.sh`; `nvfx_3d --study hres --effect smoke_r2`, its own seed blocks at 9,630,000): one
+  resumable driver for the plan of §8: record `smoke_r2` at 64 x 96 x 64 block-averaged to 32 x 48 x 32 (40 short
+  runs and 24 long), train on the CPU with study N2's four stages, stage 4's long burn and study R2's two losses
+  (`--spread 2 --edge 10`; the CUDA trainer has neither, and the tool refuses it), finish C2 to C4, calibrate the
+  edge bounds on four teacher runs per wind, judge the candidates' 30 s edge check against them. Without `FORCE=1` it
+  prints the plan and what is there and starts nothing; `STAGE=record,train,...` picks stages; one trainer per data
+  root (a lock and a `pgrep`); its body in `main()`, as `hres_fire_validate.sh`'s lesson asks.
+  `hres_smoke_r2_train.sh` is its first three stages under the name the first commands used; `hres_status.sh` reports
+  its runs, training, models, bounds and edge check. Not run: study R2's own result says first whether the losses fix
+  the failure ("Next" below).
+- **The wave 1 checklist and the commit plan** ([docs/WAVE1_CHECKLIST.md](docs/WAVE1_CHECKLIST.md), `COMMIT_PLAN.md`):
+  the checklist is the per-effect ledger of "Order of work" step 1, row by row (what this container has as the far
+  level of detail or a 3D study, which of PLAN_PC_GPU.md's phases makes the 3D effect and the check it must pass first,
+  the scripts and the numbers), the wave's infrastructure, the first gate (P3's fire and smoke) and the PC's first
+  steps (the data root, the CUDA build, the hres fire retrained from its own data). The commit plan partitions this
+  working tree into three commits (runtime and API; the weather director and the library; the studies' bookkeeping and
+  this file),   with the pre-push checklist and its result on this PC (570 passed, 0 failed, 32 skipped without the models, of 602;
+  `COMMIT_PLAN.md`'s Verified, 24 October 2026); the owner makes the commits. `tools/ship_wave1.sh` carries the plan out (its three
+  `git add`s, the modes, the line-endings check per commit and the checklist; `DRY_RUN=1` by default prints and
+  changes nothing, and checks that its file lists and messages read as the plan's and that every changed path of
+  `git status -uall` is in one of them), `tools/preflight_wave1.sh` is the fast pre-push check (`bash -n` over the
+  scripts, the weather and library tests, `nvfx_alloc_test`, the catalogue check; no git state touched), and
+  `.gitattributes` pins `*.sh` and `*.awk` to LF so that bash reads the scripts on a Windows checkout.
+
+**Under way:**
+- **Study R2, the 3D smoke again** (`study-smoke3d-r2`, docs/STUDY_R2.md, REPORT §24; seeds 34.0 to 34.9 million): the
+  teacher's momentum deficit found and fixed (`smoke_r2`: dM/dz over B 1.088, from `smoke_r`'s 0.80); the learned smoke
+  retrained with a spread loss and an edge loss under a rule with margins from the teacher's own spread, to be tested
+  once. Resumable: training in stage 4 and the rule's teacher runs were left running on the container; from any machine
+  `bash tools/study_3d/r2_resume.sh` (STUDY_R2.md §0: the hand steps). On this PC, with no `r2_smoke3d` under
+  `~/nvfx-data`, the same command starts from the 48 training runs and trains on the CPU.
 
 **Next:**
-- **Study Q2's last three** (STUDY_Q2.md §0, resumable: the data root's `q2_fix/jobs/resume.sh`, then `after_val.sh`):
-  the geyser's, heavy gas's and the mushroom's validations, freezes and tests; the mushroom's cap still ragged by eye.
+- **Study Q2's last three** (STUDY_Q2.md §0, STUDY_Q2_RESTORE.md): copy `cand/` from the container
+  (`tools/study_q2/restore_from.sh`), then `bootstrap.sh`, `resume.sh` and `after_val.sh <effect>` for the geyser's,
+  heavy gas's and the mushroom's validations, freezes and one test each; the mushroom's cap still ragged by eye.
+- **Smoke at hres again,** once study R2 says its losses fix the failure: record `smoke_r2` at 64 x 96 x 64
+  block-averaged to 32 x 48 x 32, train with `--edge 10 --spread 2` and stage 4's long burn, judge on bounds calibrated
+  on four teacher runs per wind, its own seed block and rule committed first (STUDY_3D_HRES.md §8 and §10). The driver
+  is written: `FORCE=1 bash tools/study_3d/hres_smoke_r2.sh` runs every stage not done, hours to days on a CPU.
+- **3D fire and smoke coupled, learned:** a model trained on the stacked teacher (`sim3d::Stack`) and tested as R2 is;
+  until then both couplings are demos (`--kind coupled` through the volume API, `--kind coupled-sim` in the solver).
 - **Half size, next** (REPORT §22.9): re-time its cost and the manager's A/B on a quiet machine (the jobs under the data
-  root's `halfsize/jobs`; the rule's verdict stands on its own run); a default per effect (on for the effects that passed
-  both conditions, off for magic) needs its own rule; measure 128 px pictures drawn at 64 and more of the library's
-  models at 256 px; the 256 px pool (one slot per effect by default) limits what it switches in a crowd.
-- **More 2D effects**, from the catalogue rows the 2D solver can carry: coloured smoke grenades (#18), contrails (#36),
-  helicopter downwash (#37), blizzard and drifting snow (#54, #75), steam fog (#61), a learned pyroclastic flow (#110;
-  the library's entry today is built from existing models).
-- **The weather director, next:** a cloud deck rather than puffs, the sun and its shafts, wet ground and puddles, a storm
-  that moves across the scene, trees bending by the Beaufort force.
-- **Small 3D:**
-  - **finer coarse 3D (study hres):** fire (N2 C4 lineage) and smoke (N2 smoke2 lineage); [docs/STUDY_3D_HRES.md](docs/STUDY_3D_HRES.md), `tools/study_3d/hres_fire.sh` and `hres_smoke.sh`; `nvfx_3d --study hres` (32 x 48 x 32, fine 2);
-  - a second 3D effect, smoke: **the teacher done** (study R: `smoke_r`, measured against plume theory); the learned
-    smoke failed its test by spreading too wide (STUDY_R.md §6.3). Next: a loss on the plume's spread, more teacher
-    time, hres's finer state trained on `smoke_r` (its own seed block and rule), and the solver's momentum deficit
-    (0.78; a stable less dissipative velocity step);
-  - 3D fire and smoke coupled: a demo through the volume API (study R, `nvfx_3d video --kind coupled`); a coupled
-    simulation (the boxes exchanging heat and momentum) is not done;
-  - a job hook in the volume API, so an engine's job system can run a volume's step (FUSE.md §9).
+  root's `halfsize/jobs`; the quick form `tools/manager/time_half_128.sh`, MANAGER.md §7.2, waits for a load at most
+  `MAX_LOAD` before each round and needs the 2D models under `$NEURALVFX_DATA`, which the 64-core machine lacks; the
+  rule's verdict stands on its own run); measure 128 px pictures drawn at 64 (`MAX_SIZE=128` there) and more of the
+  library's models at 256 px (a model measured and passing both conditions joins `half_default_on`); the 256 px pool
+  (one slot per effect by default) limits what it switches in a crowd.
+- **More 2D effects**, from the catalogue rows the 2D solver can carry: a learned coloured smoke grenade (#18; the
+  library's `coloured_smoke_grenade` is the heavy gas model for the dense dye cloud under the smoke model's vent plume,
+  LIBRARY.md §1 Smoke, not yet judged by eye: written where the models are not; the combat recolours still ride the
+  smoke model and rise), a learned contrail (#36; the library's `contrail` is a trail of the explosion model left cold,
+  its source set back behind the jet for the Schmidt-Appleman mixing, LIBRARY.md §1 Trails, not yet judged by eye:
+  written where the models are not; a learned one would carry the ice's growth and sublimation, which today are only
+  how much the trail leaves), helicopter downwash (#37; the library's `helicopter_downwash` is the dust model's bursts
+  taking turns under a sunk tile of the smoke model, LIBRARY.md §1 Dust, not yet judged by eye: written where the
+  models are not; a learned one would carry the wall jet and the recirculation through the disc), learned blown snow (#54, #75; the library's `blizzard`,
+  `whiteout` and `drifting_snow` are the compositor's snow and the fog model: the saltation layer's hops, splash and
+  threshold are only how many grains there are and how fast; spindrift off a ridge is not there at all), a learned steam fog
+  (#61; the library's `steam_fog` is the fog and steam models over a seeded pool), a learned pyroclastic flow (#110; the
+  library's entry today is built from existing models).
+- **The weather director, next:** what the cloud deck and the wet ground leave out now that `frame deck`, `foot`,
+  `wet` and `puddle` draw them (COMPOSE.md §4.11, §5.4; "Done since 24 October"): the deck's cells drifting with the
+  air the wind has carried past (`deck_drift`, `sky.carried`), the puffs and the pannus below it, the rain's rings
+  breaking the puddles' mirror and the modules reflected in them; the day scene's keyframes refrozen where the
+  models are; the sun drawn (where it stands, how much comes through and whether its shafts show are in the state,
+  `sky.sunx`, `sky.elevation`, `sky.sun`, `sky.shaft`, WEATHER.md §3.14; left: a lamp at the sun, the rainbow
+  opposite it, a `frame shaft` key, the daylight following the hour), a storm that moves across the scene, trees
+  bending by the Beaufort force (how far they sway is in the state, `sky.trees`, WEATHER.md §3.6; left: a layer that
+  bends by it).
+- **A job hook in the volume API**, so an engine's job system can run a volume's step (FUSE.md §9): **shipped** (24
+  October 2026: `nvfx_volume_create_with_jobs(fx, run, context, &vol)`, NVFX_VERSION 10, ENGINES.md §12, INTEGRATION.md
+  §3; every parallel loop of a step, a read or a picture is one fork-join on the engine, the same frames to the bit, no
+  allocation; `VolumeApi.SameFieldsAndPicturesOnAnEnginesJobSystem`, `nvfx_alloc_test`). Left: the FUSE adapter still
+  runs the volume on threads of its own inside one job (its `JobSystem::run` is game thread only, so the hook would
+  nest: FUSE.md §4, §9); a start spread over frames (a step is one call).
 
 ## Contents
 
@@ -252,8 +488,10 @@ real thing. Cost is chosen at the end from measured numbers, so the effects stay
 
 Every row has a number (#), which gives it its seeds (see [Seeds](#seeds)).
 - **Tier 1** is the first wave on the PC, **Tier 2** the second, **Tier 3** later or hard.
-- **"By eye against footage"** means no measured quantity exists that a picture could be checked against: those are
-  compared with real footage by study J's statistics, if footage is supplied.
+- **"By eye against footage"** in the table below is the legacy label for rows with no single published scalar check.
+  For **stage 2 / [PLAN_PC_GPU.md](docs/PLAN_PC_GPU.md)** the owner uses **sim ensembles only** (§1.3, §2.1 #7): capture
+  the effect's **statistical range and spread**, not one footage sample; one `reference.md` per effect plus §6.4. Tier
+  2+ rows keep the label until each gets a sim or correlation anchor.
 - **"Consistency only"** means there is no real counterpart.
 
 Today's 2D effects map onto these rows:
@@ -725,6 +963,7 @@ What the later studies here taught the rules:
 0. **Stage 1, here (done):** study N's fire and smoke, and N2's fix. They established the 3D code, the model, the
    renderer, the volume API and the videos.
 1. **Wave 1 (PC, tier 1)** proves every model family once:
+   - the checklist, row by row (what the container has, the PC phase, what waits on R2, Q2 or hres, the scripts): [docs/WAVE1_CHECKLIST.md](docs/WAVE1_CHECKLIST.md);
    - pool fire (#0), campfire (#1), grass fire (#5), smoke column (#16) and ground-burst explosion (#23);
    - fair-weather cumulus (#41), overcast (#44), rain (#51), snow (#53), radiation fog (#58) and haze (#62);
    - wind (#73), ocean (#78), waterfall (#82), fountain (#83), splash (#85), rain on water (#86) and bubbles (#91);

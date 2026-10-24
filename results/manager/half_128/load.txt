@@ -1,0 +1,5 @@
+round 1 load 6.12
+round 2 load 6.96
+round 3 load 7.72
+round 4 load 7.66
+round 5 load 7.53

@@ -115,7 +115,7 @@ struct ExtraLosses {
 // The loss of one window (windows start at state `first`, after `burn` frames of the stepper's own rollout without a
 // gradient) and its gradient, added to grad (step_layout size). Exposed for the tests.
 double window_loss(const Model& m, const Run& run, int first, int unroll, int burn, float sigma, float profile, std::uint64_t noise_seed,
-                   std::vector<float>* grad, float activity = 0.f, const ExtraLosses& extra = {});
+                   std::vector<float>* grad, float activity = 0.f, const ExtraLosses& extra = {}, bool r2_extras_only = false);
 
 // Study R2: the mass-weighted horizontal spread of channel `ch` about each row's own centroid, per row of the coarse
 // grid (cells^2; 0 where the row holds nothing), of a state laid out [cell][channels].

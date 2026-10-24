@@ -9,9 +9,19 @@ committed before validation and tested once (§2 onwards).
 
 ## 0. Where the study stands (a handoff, kept current)
 
+**One line to start:** `bash tools/study_3d/r2_bootstrap.sh` (then `r2_resume.sh`; details just below). On a PC without
+the container's `r2_smoke3d` tree, copy it first ([STUDY_R2_RESTORE.md](STUDY_R2_RESTORE.md)).
+
+**Quick start (portable scripts, `tools/study_3d/r2_*.sh`, from the repo root; `NEURALVFX_DATA` is the data root,
+default `$HOME/nvfx-data`):** `bash tools/study_3d/r2_bootstrap.sh` once (pins `build/nvfx_3d`, says what is there,
+starts nothing); then `bash tools/study_3d/r2_resume.sh` after any restart (starts every stage not done, detached, and
+leaves running jobs alone); `bash tools/study_3d/r2_status.sh` at any time. `r2_train.sh`, `r2_validate.sh` and
+`r2_test.sh` are the stages `r2_resume.sh` runs; `r2_env.sh` is what they share (sourced, not run).
+
 As of 22 October 2026, 03:25 UTC: **under way, resumable; the session ended here** (the owner's usage), with the jobs
-left running unattended. **Resume after any restart with `/root/nvfx-data/r2_smoke3d/jobs/resume.sh`** (it restarts only
-what is not done and leaves running jobs alone).
+left running unattended. **Resume after any restart with `bash tools/study_3d/r2_resume.sh`** from the repo root (it
+restarts only what is not done and leaves running jobs alone; on the container, `/root/nvfx-data/r2_smoke3d/jobs/resume.sh`
+was the same thing before the scripts moved into git: see *Where the files are* below).
 - **Done**: the teacher fixed and chosen (§1.2 to §1.4: `smoke_r2`, dM/dz over B 1.088 [1.080, 1.095], from `smoke_r`'s
   0.80); the old effects byte for byte (§1.5); the 48 training runs (`runs/`, 1.1 GB); the edge bounds' 20 teacher runs
   (`results/edge_teacher_w*.csv`).
@@ -22,17 +32,71 @@ what is not done and leaves running jobs alone).
   at once, units, profiles and checkpoints through a temporary file renamed), so nothing partial is used; training
   resumed from its checkpoints and reproduced its logged losses exactly (iterations 1500 and 1510: 9.439541, 1.363902).
   It now checkpoints every 10 iterations.
-- **Left, in order** (`resume.sh` runs each stage when the one before is done, the hand steps marked): (1) the rule's
-  numbers: **done and committed before validation** (§2.10; `markers/rule_committed` made after the push, so
-  `resume.sh` starts validation once training has written the candidates; rerun `resume.sh` after training ends);
-  (2) validation, `jobs/val.sh` (by `resume.sh`); by hand, `nvfx_3d choose --study r2`
-  (results/3d/r2/choice_val.md), `cp models/<chosen>.nvfx3 models/chosen.nvfx3`, `echo <chosen> > models/chosen.txt`,
-  `nvfx_3d freeze --model ... --frozen results/3d/r2/frozen.csv`, committed and pushed; (3) the test once,
-  `jobs/test.sh` (by `resume.sh`), its verdict in `results/3d/r2/verdict_test.md`; ship only if it passes (§2.9);
-  (4) §1.6's fits (`plumefit`, §7), the videos and the write-up.
-- Data root `$NEURALVFX_DATA/r2_smoke3d` (default `/root/nvfx-data/r2_smoke3d`): job scripts in `jobs/`, logs in
-  `logs/`, binaries in `bin/` (training and the teacher's runs on cb31ccb, validation and the test on a5637ed: the same
-  solver and trainer), markers in `markers/`. Each job checks the disk first (`jobs/disk.sh`: R2 stays under 2.5 GB).
+- **Left, in order** (`r2_resume.sh` runs each stage when the one before is done, the hand steps marked): (1) the
+  rule's numbers: **done and committed before validation** (§2.10; `markers/rule_committed`, made by
+  `r2_bootstrap.sh` or `r2_resume.sh` once git holds `margins.csv` and `edge_bounds.csv` unchanged, so validation
+  starts once training has written the candidates; rerun `r2_resume.sh` after training ends); (2) validation,
+  `r2_validate.sh` (by `r2_resume.sh`): the runs, `nvfx_3d choose --study r2` (results/3d/r2/choice_val.md), then the
+  choice copied to `models/chosen.nvfx3` (+ `chosen.txt`) and frozen (`nvfx_3d freeze`, results/3d/r2/frozen.csv;
+  `markers/val_done`, `frozen`); **by hand**: commit and push validation's files, `touch markers/frozen_committed`,
+  run `r2_resume.sh` again; (3) the test once, `r2_test.sh` (by `r2_resume.sh`; `markers/test_done`), its verdict in
+  `results/3d/r2/verdict_test.md`; ship only if it passes (§2.9); (4) §1.6's fits (`plumefit`, §7: `r2_resume.sh`
+  finishes the 18 plume runs and writes `results/3d/r2/plume_fit.md`, `markers/plume_done`), the videos and the
+  write-up.
+- **Where the files are (portable)**: `$NEURALVFX_DATA/r2_smoke3d` (the tool's default `NEURALVFX_DATA` is
+  `$HOME/nvfx-data`; the container's was `/root/nvfx-data`): `runs/` (the 48 training runs), `ckpt/`, `models/`,
+  `eval/`, `plume/`, `results/` (the raw edge tables), `logs/` (`train_r2.log` by the trainer; `job_*.log` by the
+  jobs; `*.lock` by `flock`, one job of a kind at a time), `bin/` (one copy of `build/nvfx_3d` pinned on first use,
+  named by its git hash, so a rebuild mid-study does not change the solver or the trainer under a running job; the
+  container used cb31ccb for training and the teacher's runs, a5637ed for validation and the test: the same solver
+  and trainer), `markers/` (`candidates_done`, `plume_done`, `rule_committed`, `val_done`, `frozen`,
+  `frozen_committed`, `test_done`). The scripts are `tools/study_3d/r2_{bootstrap,resume,train,validate,test,status}.sh`
+  with `r2_env.sh` (what they share); each checks the disk first (the container's `jobs/disk.sh` rule: free space, and
+  the 2.5 GB budget when `R2_BUDGET_MB` is set), skips what is written, and `r2_resume.sh` starts the long ones detached
+  (`setsid nohup`) from a snapshot copy under `logs/`, so an edit to the repo file cannot touch a running job. **On
+  another machine**: build `nvfx_3d`, copy the container's `r2_smoke3d/` (all but `bin/`) under `$NEURALVFX_DATA`
+  ([STUDY_R2_RESTORE.md](STUDY_R2_RESTORE.md): what to copy, the one-line rsync, the checks, and when not to run the
+  same stage on both machines), then `bash tools/study_3d/r2_bootstrap.sh` (pins the tool, says what is there, starts
+  nothing), `r2_resume.sh`, and `r2_status.sh` at any time. **Without the container's data** (the PC on 24 October 2026: `~/nvfx-data` holds
+  `hres_3d` and `n2_3d` only, no `r2_smoke3d`), the same commands start from nothing: `r2_train.sh` records the 48
+  training runs (`J` at a time; the same seeds, so the same runs), trains on the CPU and writes the candidates, the
+  plume runs go beside it, and the rule's numbers come from the repository (§2.10). **`r2_bootstrap.sh` says which
+  case it finds** ([`tools/study_3d/r2_bootstrap.sh`](../tools/study_3d/r2_bootstrap.sh), the first lines of its
+  output; run on the PC, 24 October 2026): `data: NONE of the container's r2_smoke3d is here` (with the `rsync` line
+  that copies it, every folder but `bin/`, and what starting from nothing costs: the 48 runs about 8 CPU-hours at 10
+  CPU-minutes each, then training), `data: PART of the container's r2_smoke3d is here` (listing what is and is not
+  there: `runs/`, `ckpt/`, `logs/train_r2.log`, `models/`, `results/edge_teacher_w*.csv`, `plume/`, `eval/`, so a copy
+  still under way is not mistaken for a fresh start), or `data: the container's r2_smoke3d is here`. Both data states
+  exit 0 (starting from nothing is legitimate); only a **data root whose folder does not exist** stops it (exit 2,
+  `the data root's folder ... does not exist; nothing made`), so a mistyped `NEURALVFX_DATA` or `R2_ROOT` cannot
+  quietly grow a second, empty `r2_smoke3d` while the real one sits unseen: set it right, or `mkdir -p` the root, or
+  `MKDATA=1` on the command when a new root is meant. A missing rule file (`results/3d/r2/margins.csv` and the rest)
+  is named as the repository's, not the data's. Training is CPU-only: the CUDA
+  trainer computes the mean squared, profile and activity losses and none of study R2's, so the tool refuses
+  `--device cuda` with `--spread` or `--edge` above 0 rather than drop them. The tables (`results/3d/r2`) are written
+  in the repository, as before. In commands,
+  from the repo root (`$HOME/nvfx-data/r2_smoke3d` is where everything lands unless `NEURALVFX_DATA` or `R2_ROOT` says
+  otherwise):
+
+  ```sh
+  export NEURALVFX_DATA=$HOME/nvfx-data                      # the default; once per shell
+  bash tools/study_3d/r2_bootstrap.sh                        # folders, the tool pinned, the rule's marker; starts nothing; says if the data is NONE / PART / here
+                                                             # (exit 2 if the data root's folder is missing: mkdir -p it, or MKDATA=1)
+  bash tools/study_3d/r2_status.sh                           # one screen: runs, training (ETA from the log), plume, rule, validation, test
+  bash tools/study_3d/r2_resume.sh                           # starts the stage that is due, detached; again after any restart
+  tail -f $NEURALVFX_DATA/r2_smoke3d/logs/job_train.log      # or job_plume.log, job_val.log, job_test.log
+  # after validation (r2_validate.sh prints this): commit and push results/3d/r2/{choice_val.md,frozen.csv,edge_val.csv,
+  # edgecheck_val.md,compare_val_*}, then
+  touch $NEURALVFX_DATA/r2_smoke3d/markers/frozen_committed && bash tools/study_3d/r2_resume.sh   # the test, once
+  bash tools/study_3d/r2_test.sh                             # the same test by hand; waits without frozen_committed (or AUTO_TEST=1)
+  bash -n tools/study_3d/r2_*.sh                             # after any edit: the syntax of every script
+  ```
+
+  Env for every script (`r2_env.sh`): `T` (training threads, 8), `J` (processes at a time, 8), `NICE_LEVEL` (10),
+  `BUILD`, `NVFX_3D`, `REPIN=1`, `R2_ROOT`, `R2_BUDGET_MB`; `MKDATA=1` on `r2_bootstrap.sh` makes a data root whose
+  folder is not there (otherwise it stops); `FORCE=1` on `r2_train.sh` writes the candidates again
+  (never a second trainer), on `r2_validate.sh` runs the analysis again (runs already written are always skipped);
+  `CHOSEN=C?` overrides the parsed choice.
 - **Nothing shipped changed**: `models/` and every frozen hash are main's; study R's demo stays `models/3d/smoke.nvfx3`.
 
 ## 1. The teacher's momentum
@@ -370,8 +434,12 @@ From the teacher's runs alone (22 October, 03:30 to 04:40 UTC), committed before
 
 ## 7. Reproduce
 
-Data under `NEURALVFX_DATA/r2_smoke3d` (default `/root/nvfx-data/r2_smoke3d`); every step resumes from what it has
-written; the job scripts used are in its `jobs/` (each takes the tool as `B=...`). Build as the main README says, then:
+Data under `NEURALVFX_DATA/r2_smoke3d` (default `$HOME/nvfx-data/r2_smoke3d`; the container's was
+`/root/nvfx-data/r2_smoke3d`; copying it to another machine: [STUDY_R2_RESTORE.md](STUDY_R2_RESTORE.md)); every step
+resumes from what it has written; the job scripts the container used are in
+`tools/study_r2/` (each takes the tool as `B=...`), their portable form `tools/study_3d/r2_*.sh` (§0). Training runs
+on the CPU: the CUDA trainer has no spread or edge loss, and the tool refuses `--device cuda` with them. Build as the
+main README says, then:
 
 ```sh
 B=build/nvfx_3d; R=results/3d/r2; D=$NEURALVFX_DATA/r2_smoke3d; W="--winds 0.05,0.25,0.5,0.75,0.95 --seconds 30"

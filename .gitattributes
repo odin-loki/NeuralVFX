@@ -1,0 +1,5 @@
+# Shell and awk scripts are read by bash and awk on WSL and in the container: keep them LF in the
+# working tree whatever core.autocrlf says (a CRLF checkout makes bash read `do\r` as a command, so
+# `bash -n` fails). After adding or changing this file: git add --renormalize -- '*.sh' '*.awk'
+*.sh  text eol=lf
+*.awk text eol=lf

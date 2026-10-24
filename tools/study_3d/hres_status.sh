@@ -31,7 +31,27 @@ fi
 if [ -d "$R" ]; then
   n=$(find "$R" -maxdepth 1 -type f 2>/dev/null | wc -l)
   echo "fire: $R files: $n"
+  # The test-phase tables (edgecheck_test.md, compare_test_*) belong beside the val ones. A snapshot run of
+  # hres_fire_validate.sh before NVFX_REPO existed wrote them under the data root instead; present since 24 October.
+  if [ -f "$R/edgecheck_test.md" ] && [ -f "$R/compare_test_learned_vs_coarse.md" ] && [ -f "$R/compare_test_learned_vs_N2.md" ]; then
+    verdict=$(grep -E '^learned:' "$R/edgecheck_test.md" | tail -1 || true)
+    if grep -q 'calibrated bound' "$R/edgecheck_test.md"; then
+      echo "fire: test tables present (${verdict:-edgecheck_test.md has no learned verdict line}; calibrated bounds, edge_bounds.csv)"
+    elif [ -f "$R/edge_bounds.csv" ]; then
+      echo "fire: test tables present (${verdict:-edgecheck_test.md has no learned verdict line}; single-run bounds: judge with the calibrated ones: bash tools/study_3d/hres_fire_recheck_test_edges.sh)"
+    else
+      echo "fire: test tables present (${verdict:-edgecheck_test.md has no learned verdict line}; single-run bounds, no edge_bounds.csv yet: bash tools/study_3d/hres_fire_edge_bounds.sh)"
+    fi
+  else
+    STRAY="$DATA/hres_3d/results/3d/hres/fire"
+    if [ -f "$STRAY/edgecheck_test.md" ]; then
+      echo "fire: test tables missing from $R; found under $STRAY (copy: bash tools/study_3d/hres_sync_fire_test_results.sh)"
+    else
+      echo "fire: test tables (edgecheck_test.md, compare_test_*) missing from $R (rerun the test step: bash tools/study_3d/start_fire_validate.sh)"
+    fi
+  fi
 fi
+if [ -f "models/3d/fire_hres.nvfx3" ]; then echo "fire: published models/3d/fire_hres.nvfx3"; fi
 if [ -f "$FIRE/logs/after_validate.pid" ] && kill -0 "$(cat "$FIRE/logs/after_validate.pid")" 2>/dev/null; then
   echo "fire: publish watcher pid=$(cat "$FIRE/logs/after_validate.pid")"
 elif pgrep -f 'hres_fire_validate(\.sh|\.snapshot\.sh)|run_fire_validate\.sh' >/dev/null 2>&1; then
@@ -75,9 +95,50 @@ elif [ -L "$B" ]; then
   echo "nvfx_3d link BROKEN ($(readlink "$B" 2>/dev/null || echo '?')) — run: BUILD=build/nvfx_3d bash tools/study_3d/nvfx_bin_link.sh"
 fi
 pgrep -af 'nvfx_3d train' 2>/dev/null || echo "no nvfx_3d train process"
+RS=results/3d/hres/smoke
+SMOKE_VAL_DONE=0
+if [ -f "$RS/edgecheck.md" ] && [ -f "$RS/edge.csv" ] && grep -q 'edge check' "$RS/edgecheck.md"; then
+  SMOKE_VAL_DONE=1
+fi
 if [ -f "$SMOKE/logs/after_train.pid" ] && kill -0 "$(cat "$SMOKE/logs/after_train.pid")" 2>/dev/null; then
   echo "smoke: finish watcher pid=$(cat "$SMOKE/logs/after_train.pid")"
+elif [ "$SMOKE_VAL_DONE" = 1 ]; then
+  verdict=$(grep -E '^smoke_hres:' "$RS/edgecheck.md" | tail -1 || true)
+  echo "smoke: validate DONE ($RS/edgecheck.md: ${verdict:-no smoke_hres verdict line}; after_train.done $([ -f "$SMOKE/logs/after_train.done" ] && echo present || echo missing))"
+elif [ -f "$SMOKE/logs/after_train.done" ]; then
+  echo "smoke: watcher finished (after_train.done) but $RS/edgecheck.md missing (rerun: bash tools/study_3d/hres_smoke_validate.sh)"
 else
   echo "smoke: finish watcher not running (start: bash tools/study_3d/start_smoke_watcher.sh)"
 fi
 if [ -f "$SMOKE/models/smoke_hres.nvfx3" ]; then echo "smoke: model smoke_hres.nvfx3 OK"; fi
+if [ -f "models/3d/smoke_hres.nvfx3" ]; then echo "smoke: published models/3d/smoke_hres.nvfx3"; fi
+# smoke on study R2's teacher: the workflow is docs/STUDY_3D_HRES.md §8 (why), §10 (the plan, the rule, the driver's
+# stages and files); the driver is tools/study_3d/hres_smoke_r2.sh (hres_smoke_r2_train.sh = its record,train,finish).
+# Reports: runs, training, the driver or trainer running, candidates, bounds, edge-check verdicts. Same root as the driver.
+R2="${HRES_R2_ROOT:-${HRES_SMOKE_R2_ROOT:-$DATA/hres_3d/smoke_r2}}"
+RR2=results/3d/hres/smoke_r2
+R2_DOC="docs/STUDY_3D_HRES.md §10"
+if [ -d "$R2" ] || [ -d "$RR2" ]; then
+  ns=$(ls -- "$R2/runs/train/"*.n3run 2>/dev/null | wc -l || true); nl=$(ls -- "$R2/runs/long/"*.n3run 2>/dev/null | wc -l || true)
+  echo "smoke_r2: runs ${ns:-0}/40 short, ${nl:-0}/24 long ($R2; $R2_DOC)"
+  if drv=$(pgrep -af 'hres_smoke_r2(_train)?\.sh' 2>/dev/null | head -1) && [ -n "$drv" ]; then
+    echo "smoke_r2: driver running ($drv)"
+  fi
+  if grep -q 'done at iteration 1750' "$R2/logs/train_smoke_r2.log" 2>/dev/null; then
+    echo "smoke_r2: train DONE"
+  else
+    last=$(grep '^it ' "$R2/logs/train_smoke_r2.log" 2>/dev/null | awk '!seen[$0]++' | tail -1 || true)
+    echo "smoke_r2: train ${last:-not started}"
+    if pgrep -f "nvfx_3d[^ ]* train --study hres --root $R2" >/dev/null 2>&1; then echo "smoke_r2: trainer running (CPU; spread and edge losses)"; fi
+  fi
+  for c in C2 C3 C4 smoke_r2_hres; do [ -f "$R2/models/$c.nvfx3" ] && echo "smoke_r2: model $c.nvfx3 OK"; done
+  if [ -f "$RR2/edge_bounds.csv" ]; then echo "smoke_r2: bounds $RR2/edge_bounds.csv (calibrated on the teacher's runs)"; fi
+  if [ -f "$RR2/edgecheck.md" ]; then
+    echo "smoke_r2: edge check $RR2/edgecheck.md: $(grep -E '^C[234]:' "$RR2/edgecheck.md" | tr '\n' ' ' || true)"
+  elif [ -f "$RR2/edge_bounds.csv" ] && [ -f "$R2/models/C4.nvfx3" ]; then
+    echo "smoke_r2: bounds and candidates ready, edge check pending (FORCE=1 STAGE=edge bash tools/study_3d/hres_smoke_r2.sh)"
+  fi
+  echo "smoke_r2: resume or next stage: FORCE=1 bash tools/study_3d/hres_smoke_r2.sh (the plan without FORCE=1; $R2_DOC)"
+elif [ -f "$SMOKE/models/smoke_hres.nvfx3" ]; then
+  echo "smoke_r2: not started (plan: bash tools/study_3d/hres_smoke_r2.sh; FORCE=1 to run; $R2_DOC, the reason in §8)"
+fi
