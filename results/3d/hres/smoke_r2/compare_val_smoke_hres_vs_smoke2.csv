@@ -1,0 +1,7 @@
+part,measure,horizon,mean_a,mean_b,diff,lo,hi
+endless,3D spectrum distance,,0.47697,0.48823,-0.01126,-0.07769,0.05503
+endless,\|ln motion ratio\|,,0.40838,0.79799,-0.38961,-0.48934,-0.26762
+endless,motion ratio,,0.66926,0.45144,0.21782,0.14579,0.27075
+endless,coverage distance,,0.02856,0.02487,0.00369,-0.00269,0.01004
+endless,emission distance,,0.00962,0.00562,0.00400,0.00319,0.00460
+endless,mean picture PSNR (dB),,21.84902,21.04856,0.80045,-0.10714,1.87988

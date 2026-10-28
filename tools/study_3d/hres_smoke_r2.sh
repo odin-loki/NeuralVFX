@@ -28,13 +28,16 @@ set -euo pipefail
 
 main() {
   # STAGE, T and J come from the environment and are not declared local (a `local` would shadow them with empty values)
-  local REPO DATA ROOT R B H W NICE RUNS TOTAL_IT nshort nlong k last
+  local REPO DATA ROOT R B H W RUNS HARGS WARGS RUNSARGS TOTAL_IT nshort nlong k last
   REPO=${NVFX_REPO:-$(cd "$(dirname "$0")/../.." && pwd)}
   [ -f "$REPO/tools/study_3d/nvfx_bin_link.sh" ] || { echo "error: repo not found at $REPO (running a copy? set NVFX_REPO)" >&2; return 1; }
   cd "$REPO"
   DATA=${NEURALVFX_DATA:-$HOME/nvfx-data}
   ROOT=${HRES_R2_ROOT:-${HRES_SMOKE_R2_ROOT:-$DATA/hres_3d/smoke_r2}}
   R=results/3d/hres/smoke_r2
+  HARGS=(--study hres --root "$ROOT" --effect smoke_r2)
+  WARGS=(--winds 0.05,0.25,0.5,0.75,0.95 --seconds 30)
+  RUNSARGS=(--runs-dir train --also "$ROOT/runs/long")
   H="--study hres --root $ROOT --effect smoke_r2"
   W="--winds 0.05,0.25,0.5,0.75,0.95 --seconds 30"
   RUNS="--runs-dir train --also $ROOT/runs/long"
@@ -91,7 +94,7 @@ EOF
       {
         for k in $(seq 0 39); do echo "record --runs-dir train --from $k --runs $((k + 1)) --frames 240"; done
         for k in $(seq 0 23); do echo "record --runs-dir long --from $k --runs $((k + 1)) --frames 540"; done
-      } | xargs -P "$J" -I{} sh -c "nice -n $NICE $B {} $H --threads 1"
+      } | xargs -P "$J" -I{} sh -c 'nice -n "$1" "$2" {} --study hres --root "$3" --effect smoke_r2 --threads 1' _ "$NICE" "$B" "$ROOT"
       nshort=$(count_runs "$ROOT/runs/train"); nlong=$(count_runs "$ROOT/runs/long")
       [ "$nshort" -ge 40 ] && [ "$nlong" -ge 24 ] || { echo "error: recording left $nshort short, $nlong long runs" >&2; return 1; }
       echo "RECORDS_DONE $(date -Iseconds) ($nshort short, $nlong long)"
@@ -109,8 +112,7 @@ EOF
       # shellcheck disable=SC2086
       TRAIN_EXTRA=(--device cpu --threads "$T")
       if [ "$TRAIN_DEVICE" = cuda ]; then TRAIN_EXTRA=(--device cuda --shards "$TRAIN_SHARDS" --threads 1); fi
-      # shellcheck disable=SC2086
-      nice -n "$NICE" "$B" train $H --name smoke_r2 $RUNS --iterations 900 --finetune 350 --activity 250 --long 250 --batch 8 --unroll 12 --burn 24 \
+      nice -n "$NICE" "$B" train "${HARGS[@]}" --name smoke_r2 "${RUNSARGS[@]}" --iterations 900 --finetune 350 --activity 250 --long 250 --batch 8 --unroll 12 --burn 24 \
         --burn-long-min 48 --burn-long-max 360 --spread "${SPREAD:-2}" --edge "${EDGE:-10}" "${TRAIN_EXTRA[@]}" --checkpoint-every 10
       unset NVFX_TRAIN_QUIET_STDOUT
       train_done "$ROOT" "$TOTAL_IT" || { echo "error: training ended without 'done at iteration $TOTAL_IT' (see $ROOT/logs/train_smoke_r2.log)" >&2; return 1; }
@@ -123,13 +125,11 @@ EOF
     for k in 2 3 4; do
       if [ -f "$ROOT/models/C$k.nvfx3" ]; then continue; fi
       [ -f "$ROOT/ckpt/smoke_r2_stage$k.ckpt" ] || { echo "error: missing $ROOT/ckpt/smoke_r2_stage$k.ckpt" >&2; return 1; }
-      # shellcheck disable=SC2086
-      nice -n "$NICE" "$B" finish $H --ckpt "smoke_r2_stage$k" --out "C$k" $RUNS
+      nice -n "$NICE" "$B" finish "${HARGS[@]}" --ckpt "smoke_r2_stage$k" --out "C$k" "${RUNSARGS[@]}"
     done
     if [ ! -f "$ROOT/models/smoke_r2_hres.nvfx3" ]; then
       [ -f "$ROOT/ckpt/smoke_r2.ckpt" ] || { echo "error: missing $ROOT/ckpt/smoke_r2.ckpt" >&2; return 1; }
-      # shellcheck disable=SC2086
-      nice -n "$NICE" "$B" finish $H --ckpt smoke_r2 --out smoke_r2_hres $RUNS
+      nice -n "$NICE" "$B" finish "${HARGS[@]}" --ckpt smoke_r2 --out smoke_r2_hres "${RUNSARGS[@]}"
     fi
     echo "FINISH_DONE $(date -Iseconds): $ROOT/models/C2.nvfx3 C3 C4 smoke_r2_hres"
   fi
@@ -141,10 +141,8 @@ EOF
       echo "--- bounds present: $R/edge_bounds.csv (delete it and edge_teacher.csv to calibrate again) ---"
     else
       echo "--- teacher edge runs (${EDGE_RUNS:-4} per wind) -> $R/edge_teacher.csv ---"
-      # shellcheck disable=SC2086
-      nice -n "$NICE" "$B" edge $H --sim --runs "${EDGE_RUNS:-4}" $W --threads "$T" --out "$R/edge_teacher.csv"
-      # shellcheck disable=SC2086
-      "$B" edgecal $H --csv "$R/edge_teacher.csv" --a 2 --b "${EDGE_B:-4}" --c "${EDGE_C:-2}" --out "$R/edge_bounds.csv" | tee "$R/edge_calibration.md"
+      nice -n "$NICE" "$B" edge "${HARGS[@]}" --sim --runs "${EDGE_RUNS:-4}" "${WARGS[@]}" --threads "$T" --out "$R/edge_teacher.csv"
+      "$B" edgecal "${HARGS[@]}" --csv "$R/edge_teacher.csv" --a 2 --b "${EDGE_B:-4}" --c "${EDGE_C:-2}" --out "$R/edge_bounds.csv" | tee "$R/edge_calibration.md"
       echo "BOUNDS_DONE $(date -Iseconds): $R/edge_bounds.csv"
     fi
   fi
@@ -155,11 +153,10 @@ EOF
     for k in C2 C3 C4; do
       [ -f "$ROOT/models/$k.nvfx3" ] || { echo "error: missing $ROOT/models/$k.nvfx3 (STAGE=finish first)" >&2; return 1; }
       rm -f "$R/edge_$k.csv"
-      # shellcheck disable=SC2086
-      nice -n "$NICE" "$B" edge $H --model "$ROOT/models/$k.nvfx3" --label "$k" $W --threads "$T" --out "$R/edge_$k.csv"
+      nice -n "$NICE" "$B" edge "${HARGS[@]}" --model "$ROOT/models/$k.nvfx3" --label "$k" "${WARGS[@]}" --threads "$T" --out "$R/edge_$k.csv"
     done
     combine_edge "$R/edge.csv" "$R/edge_teacher.csv" "$R/edge_C2.csv" "$R/edge_C3.csv" "$R/edge_C4.csv"
-    "$B" edgecheck $H --csv "$R/edge.csv" --bounds "$R/edge_bounds.csv" | tee "$R/edgecheck.md"
+    "$B" edgecheck "${HARGS[@]}" --csv "$R/edge.csv" --bounds "$R/edge_bounds.csv" | tee "$R/edgecheck.md"
     echo "EDGE_DONE $(date -Iseconds): $R/edgecheck.md"
   fi
   echo "next (STUDY_3D_HRES.md §10): if a candidate passes, the held-out validation and test with --study hres --effect smoke_r2 (seeds 9,660,000 and 9,870,000 blocks)"

@@ -138,6 +138,17 @@ if [ -d "$R2" ] || [ -d "$RR2" ]; then
   elif [ -f "$RR2/edge_bounds.csv" ] && [ -f "$R2/models/C4.nvfx3" ]; then
     echo "smoke_r2: bounds and candidates ready, edge check pending (FORCE=1 STAGE=edge bash tools/study_3d/hres_smoke_r2.sh)"
   fi
+  if pgrep -f 'hres_smoke_r2_validate_pipeline\.sh|hres_smoke_r2_validate(\.sh|\.snapshot\.sh)|run_smoke_r2_validate\.sh' >/dev/null 2>&1 || \
+     pgrep -af nvfx_3d 2>/dev/null | grep -q 'hres_3d/smoke_r2'; then
+    echo "smoke_r2: validate RUNNING (log $R2/logs/validate.log)"
+  elif bash "$REPO/tools/study_3d/hres_validate_done.sh" "$R2/logs/validate.log" 2>/dev/null; then
+    echo "smoke_r2: validate DONE (chosen under $R2/models/; publish: bash tools/study_3d/hres_smoke_r2_publish.sh)"
+    [ -f "$REPO/models/3d/smoke_r2_hres.nvfx3" ] && echo "smoke_r2: published models/3d/smoke_r2_hres.nvfx3"
+  elif [ -f "$R2/logs/validate.log" ]; then
+    echo "smoke_r2: validate not complete (start: bash tools/study_3d/start_smoke_r2_validate_pipeline.sh)"
+  elif grep -qE '^C[23]: passes' "$RR2/edgecheck.md" 2>/dev/null; then
+    echo "smoke_r2: validation not started (start: bash tools/study_3d/start_smoke_r2_validate_pipeline.sh)"
+  fi
   echo "smoke_r2: resume or next stage: FORCE=1 bash tools/study_3d/hres_smoke_r2.sh (the plan without FORCE=1; $R2_DOC)"
 elif [ -f "$SMOKE/models/smoke_hres.nvfx3" ]; then
   echo "smoke_r2: not started (plan: bash tools/study_3d/hres_smoke_r2.sh; FORCE=1 to run; $R2_DOC, the reason in §8)"

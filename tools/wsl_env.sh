@@ -1,0 +1,5 @@
+# Source from ~/.bashrc:  [ -f "/mnt/d/Neural VFX/tools/wsl_env.sh" ] && . "/mnt/d/Neural VFX/tools/wsl_env.sh"
+export NVFX_REPO="/mnt/d/Neural VFX"
+export NEURALVFX_DATA="${NEURALVFX_DATA:-$NVFX_REPO/nvfx-data}"
+export BUILD_DIR="$NVFX_REPO/build-cuda"
+export NVFX_3D="$BUILD_DIR/nvfx_3d"
