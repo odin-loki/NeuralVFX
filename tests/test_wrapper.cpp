@@ -13,6 +13,7 @@
 #include <algorithm>
 #include <atomic>
 #include <cmath>
+#include <cstring>
 #include <cstdlib>
 #include <filesystem>
 #include <format>
@@ -145,12 +146,23 @@ TEST(Wrapper, VersionAndTheCpu) {
   EXPECT_STREQ(nvfx::status_string(NVFX_ERROR_IO), nvfx_status_string(NVFX_ERROR_IO));
 }
 
+namespace {
+// 99 is outside nvfx_profile_preset's value range; a static_cast is unspecified under -Wconversion.
+nvfx_profile_preset invalid_profile_preset() {
+  nvfx_profile_preset preset{};
+  const int raw = 99;
+  static_assert(sizeof(preset) <= sizeof(raw));
+  std::memcpy(&preset, &raw, sizeof(preset));
+  return preset;
+}
+}  // namespace
+
 TEST(Wrapper, ProfileRoundTrip) {
   nvfx_profile p{};
   EXPECT_EQ(nvfx_profile_init(&p, NVFX_PROFILE_DEFAULT), NVFX_OK);
   EXPECT_EQ(p.isa, NVFX_ISA_AUTO);
   EXPECT_EQ(nvfx_profile_init(nullptr, NVFX_PROFILE_DEFAULT), NVFX_ERROR_ARGUMENT);
-  EXPECT_EQ(nvfx_profile_init(&p, static_cast<nvfx_profile_preset>(99)), NVFX_ERROR_ARGUMENT);
+  EXPECT_EQ(nvfx_profile_init(&p, invalid_profile_preset()), NVFX_ERROR_ARGUMENT);
   EXPECT_EQ(nvfx_profile_init(&p, NVFX_PROFILE_LOCKSTEP_AVX2), NVFX_OK);
   if (nvfx_set_profile(&p) == NVFX_OK) {
     nvfx_profile q{};
@@ -164,7 +176,7 @@ TEST(Wrapper, ProfileRoundTrip) {
   auto wp = nvfx::init_profile(NVFX_PROFILE_LOCKSTEP_AVX2);
   ASSERT_TRUE(wp);
   EXPECT_EQ(wp->isa, NVFX_ISA_AVX2);
-  same(nvfx::init_profile(static_cast<nvfx_profile_preset>(99)), NVFX_ERROR_ARGUMENT, "init_profile");
+  same(nvfx::init_profile(invalid_profile_preset()), NVFX_ERROR_ARGUMENT, "init_profile");
   if (nvfx_set_profile(&*wp) == NVFX_OK) {
     EXPECT_TRUE(nvfx::set_profile(*wp));
     auto got = nvfx::get_profile();
